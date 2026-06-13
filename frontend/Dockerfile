@@ -1,26 +1,23 @@
 # ========================================
-# Backend Dockerfile - NestJS Development
+# Frontend Dockerfile - Vue3 + Vite Development
 # ========================================
 
 FROM node:22-alpine
 
 WORKDIR /app
 
-# Instalar pnpm (opcional, pero recomendado)
+# Instalar pnpm (opcional)
 RUN npm install -g pnpm
 
 # Copiar package files
 COPY package*.json ./
 
 # Instalar dependencias
-RUN npm ci
+RUN npm install
 
 # Copiar código fuente
 COPY . .
 
-# Build (si es necesario en dev)
-# RUN npm run build
+EXPOSE 5173
 
-EXPOSE 3000
-
-CMD ["npm", "run", "start:dev"]
+CMD ["npm", "run", "dev", "--", "--host"]
