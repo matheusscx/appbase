@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(echo $CLAUDE_TOOL_INPUT | grep -o '\"file_path\":\"[^\"]*\"' | grep 'backend/src/.*\\.ts' | head -1); [ -n \"$file\" ] && cd /Users/m2pro/Documents/claudecode/practica/backend && npm run lint -- --quiet 2>&1 | tail -5 || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"$CLAUDE_TOOL_INPUT\" | grep -q '\\.env\"' && echo 'ERROR: Blocked edit to .env — modify .env.example instead, never .env directly.' && exit 2 || exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}

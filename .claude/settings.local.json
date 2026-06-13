@@ -14,7 +14,12 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
       "Read(//Users/m2pro/.claude/**)",
       "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/commands)",
-      "Bash(mv /Users/m2pro/Documents/claudecode/practica/SKILL_FULLSTACK.md /Users/m2pro/Documents/claudecode/practica/.claude/commands/fullstack-setup.md)"
+      "Bash(mv /Users/m2pro/Documents/claudecode/practica/SKILL_FULLSTACK.md /Users/m2pro/Documents/claudecode/practica/.claude/commands/fullstack-setup.md)",
+      "Bash(claude plugin *)",
+      "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/skills/new-module)",
+      "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/skills/docker-reset)",
+      "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/agents)",
+      "Bash(claude mcp *)"
     ]
   }
 }
