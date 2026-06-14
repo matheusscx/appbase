@@ -10,14 +10,7 @@ const store = useAuthStore()
 <template>
   <UDashboardPanel>
     <template #header>
-      <UDashboardNavbar title="Inicio">
-        <template #leading>
-          <UDashboardSidebarCollapse />
-        </template>
-        <template #right>
-          <span class="text-sm text-muted">{{ store.user?.email }}</span>
-        </template>
-      </UDashboardNavbar>
+      <AppNavbar title="Inicio" />
     </template>
 
     <template #body>
