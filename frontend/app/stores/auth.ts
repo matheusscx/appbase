@@ -9,6 +9,10 @@ interface User {
 
 export const useAuthStore = defineStore('auth', () => {
   const config = useRuntimeConfig()
+  // On the server, use the internal Docker URL so SSR can reach the backend container.
+  // On the client, use the public URL (browser-accessible).
+  const serverApiUrl = (config as Record<string, unknown>).apiUrl as string | undefined
+  const resolvedApiUrl = import.meta.server ? (serverApiUrl ?? config.public.apiUrl) : config.public.apiUrl
 
   const token = useCookie<string | null>('access_token', {
     maxAge: 60 * 15,
@@ -71,7 +75,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchMe(): Promise<void> {
     if (!token.value) return
     try {
-      user.value = await $fetch<User>(`${config.public.apiUrl}/auth/me`, {
+      user.value = await $fetch<User>(`${resolvedApiUrl}/auth/me`, {
         headers: { Authorization: `Bearer ${token.value}` },
       })
     } catch {

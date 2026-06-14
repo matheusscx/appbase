@@ -87,7 +87,7 @@ export class AuthService {
   ): Promise<{ access_token: string; refresh_token: string }> {
     const existing = await this.refreshRepo.findOne({
       where: { token: refreshToken },
-      relations: ['user'],
+      relations: { user: true },
     });
     if (!existing) throw new UnauthorizedException('Refresh token inválido');
     if (existing.expiresAt < new Date()) {

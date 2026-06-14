@@ -66,6 +66,7 @@ services:
       - /app/node_modules
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api}
+      API_INTERNAL_URL: http://tecnica_backend:3000/api
       VITE_APP_NAME: ${VITE_APP_NAME:-Prueba Técnica}
     command: npm run dev -- --host
     depends_on:
