@@ -36,7 +36,14 @@
       "Bash(docker-compose restart *)",
       "Bash(railway status *)",
       "Bash(railway add *)",
-      "Bash(railway service *)"
+      "Bash(railway service *)",
+      "Bash(vercel --version)",
+      "Bash(vercel login *)",
+      "Bash(curl -s -X POST https://backboard.railway.com/graphql/v2 -H 'Content-Type: application/json' -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -d '{\"query\":\"mutation { serviceInstanceUpdate\\(serviceId: \\\\\"b76ace5d-8b96-435f-be71-234dfb344a60\\\\\", environmentId: \\\\\"565a57e9-cd18-4296-a817-77330c96b89f\\\\\", input: { buildCommand: \\\\\"npm ci && npm run build\\\\\", startCommand: \\\\\"node .output/server/index.mjs\\\\\" }\\) }\"}')",
+      "Bash(curl -s -X POST https://backboard.railway.com/graphql/v2 -H 'Content-Type: application/json' -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -d '{\"query\":\"mutation { serviceInstanceRedeploy\\(serviceId: \\\\\"b76ace5d-8b96-435f-be71-234dfb344a60\\\\\", environmentId: \\\\\"565a57e9-cd18-4296-a817-77330c96b89f\\\\\"\\) }\"}')",
+      "Bash(curl -s -X POST https://backboard.railway.com/graphql/v2 -H 'Content-Type: application/json' -H 'Authorization: Bearer __CMDSUB_OUTPUT__' -d '{\"query\":\"{ deployments\\(input: { projectId: \\\\\"fb065a1d-5fb5-4653-bb76-dca143310b05\\\\\", serviceId: \\\\\"b76ace5d-8b96-435f-be71-234dfb344a60\\\\\" }\\) { edges { node { id status createdAt } } } }\"}')",
+      "Bash(railway logs *)",
+      "Bash(railway up *)"
     ]
   },
   "enabledMcpjsonServers": [
