@@ -19,7 +19,9 @@
       "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/skills/new-module)",
       "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/skills/docker-reset)",
       "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/agents)",
-      "Bash(claude mcp *)"
+      "Bash(claude mcp *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
