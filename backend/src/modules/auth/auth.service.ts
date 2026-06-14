@@ -78,7 +78,7 @@ export class AuthService {
     return { access_token, refresh_token };
   }
 
-  generateAccessToken(user: User): string {
+  private generateAccessToken(user: User): string {
     return this.jwtService.sign({ sub: user.id, email: user.email });
   }
 
