@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { User } from './modules/users/user.entity';
+import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { User } from './modules/users/user.entity';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.get<string>('DATABASE_URL'),
-        entities: [User],
+        entities: [User, RefreshToken],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
     }),
