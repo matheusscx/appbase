@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "file=$(echo $CLAUDE_TOOL_INPUT | grep -o '\"file_path\":\"[^\"]*\"' | grep 'backend/src/.*\\.ts' | head -1); [ -n \"$file\" ] && cd /Users/m2pro/Documents/claudecode/practica/backend && npm run lint -- --quiet 2>&1 | tail -5 || true"
+          },
+          {
+            "type": "command",
+            "command": "echo \"$CLAUDE_TOOL_INPUT\" | jq -e '.tool_input.file_path | contains(\"docs/features/\")' >/dev/null 2>&1 && echo '{\"systemMessage\":\"✅ Feature doc created!\\n\\n📋 Feature Completion Checklist:\\n  [ ] Backend endpoints implemented\\n  [ ] DTOs with validation\\n  [ ] Tests (unit + E2E)\\n  [ ] Frontend pages/components\\n  [ ] Pinia store\\n  [ ] API integration tested\\n  [ ] Documentation (docs/features/[name].md)\\n  [ ] ADR created (if decision needed)\\n  [ ] Code review\\n  [ ] Ready to merge!\\n\\nSee docs/features/TEMPLATE.md for the template.\"}' || true"
           }
         ]
       }
