@@ -20,8 +20,26 @@
       "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/skills/docker-reset)",
       "Bash(mkdir -p /Users/m2pro/Documents/claudecode/practica/.claude/agents)",
       "Bash(claude mcp *)",
+      "Bash(docker-compose exec *)",
+      "Skill(update-config)",
+      "Bash(pip install *)",
+      "Bash(markitdown --version)",
+      "Bash(python3 -m pip install --upgrade git+https://github.com/microsoft/markitdown.git)",
+      "Bash(brew install *)",
+      "Bash(python3 -m pip install pdfplumber python-docx openpyxl pillow --user -q)",
+      "Bash(python3)",
+      "Bash(cp /tmp/process_doc.py /Users/m2pro/cmatheus/claudecode/practica/.claude/process_doc.py)",
+      "Bash(chmod +x /Users/m2pro/cmatheus/claudecode/practica/.claude/process_doc.py)",
+      "Bash(python3 *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(docker-compose restart *)",
+      "Bash(railway status *)",
+      "Bash(railway add *)",
+      "Bash(railway service *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "postgres"
+  ]
 }
