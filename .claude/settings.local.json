@@ -45,7 +45,11 @@
       "Bash(railway logs *)",
       "Bash(railway up *)",
       "Bash(git branch *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(mkdir -p /Users/m2pro/cmatheus/startup-app/.claude/docs)",
+      "Bash(mv /Users/m2pro/cmatheus/startup-app/PRODUCTO.md /Users/m2pro/cmatheus/startup-app/.claude/docs/)",
+      "Bash(mv /Users/m2pro/cmatheus/startup-app/MIGRACION-FUNCIONALIDADES.md /Users/m2pro/cmatheus/startup-app/.claude/docs/)",
+      "Bash(mv /Users/m2pro/cmatheus/startup-app/DOCUMENTATION.md /Users/m2pro/cmatheus/startup-app/.claude/docs/)"
     ]
   },
   "enabledMcpjsonServers": [
