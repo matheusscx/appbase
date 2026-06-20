@@ -182,6 +182,23 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 
 ---
 
+## Documentación viva (mantener sincronizada)
+
+Al desarrollar, actualiza SIEMPRE el/los archivo(s) que correspondan en el
+mismo cambio que toca el código. No dejar la doc para después: si un cambio de
+código afecta lo que describe un doc, el commit/PR incluye la actualización.
+
+| Tipo de cambio | Archivo(s) a actualizar |
+|---|---|
+| Nueva feature implementada | Crear `docs/features/<feature>.md` (desde `docs/features/TEMPLATE.md`) + agregar link en `docs/README.md` |
+| Cambia el estado de una funcionalidad | `docs/MIGRACION-FUNCIONALIDADES.md` + tabla "Estado actual" de este `CLAUDE.md` |
+| Cambio arquitectónico / estructural | `docs/ARCHITECTURE.md` |
+| Decisión técnica importante | Nuevo ADR en `docs/adr/` + índice `docs/adr/README.md` |
+| Cambio en reglas de negocio | `docs/PRODUCTO.md` |
+| Nueva convención de código/doc | `docs/CONVENTIONS.md` |
+
+---
+
 ## Archivos de referencia
 
 | Archivo | Contenido |

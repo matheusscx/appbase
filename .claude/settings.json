@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "file=$(echo $CLAUDE_TOOL_INPUT | grep -o '\"file_path\":\"[^\"]*\"' | grep 'backend/src/.*\\.ts' | head -1); [ -n \"$file\" ] && cd /Users/m2pro/Documents/claudecode/practica/backend && npm run lint -- --quiet 2>&1 | tail -5 || true"
+            "command": "file=$(echo $CLAUDE_TOOL_INPUT | grep -o '\"file_path\":\"[^\"]*\"' | grep 'backend/src/.*\\.ts' | head -1); [ -n \"$file\" ] && cd \"$CLAUDE_PROJECT_DIR/backend\" && npm run lint -- --quiet 2>&1 | tail -5 || true"
           },
           {
             "type": "command",
@@ -22,6 +22,16 @@
           {
             "type": "command",
             "command": "echo \"$CLAUDE_TOOL_INPUT\" | grep -q '\\.env\"' && echo 'ERROR: Blocked edit to .env — modify .env.example instead, never .env directly.' && exit 2 || exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "code=$(git status --porcelain -- backend frontend 2>/dev/null); docs=$(git status --porcelain -- docs CLAUDE.md 2>/dev/null); if [ -n \"$code\" ] && [ -z \"$docs\" ]; then printf '%s' '{\"systemMessage\":\"📝 Tocaste backend/ o frontend/ pero no actualizaste docs/. Revisa si corresponde actualizar la documentación (ver CLAUDE.md › Documentación viva).\"}'; fi"
           }
         ]
       }
