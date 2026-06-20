@@ -49,7 +49,11 @@
       "Bash(mkdir -p /Users/m2pro/cmatheus/startup-app/.claude/docs)",
       "Bash(mv /Users/m2pro/cmatheus/startup-app/PRODUCTO.md /Users/m2pro/cmatheus/startup-app/.claude/docs/)",
       "Bash(mv /Users/m2pro/cmatheus/startup-app/MIGRACION-FUNCIONALIDADES.md /Users/m2pro/cmatheus/startup-app/.claude/docs/)",
-      "Bash(mv /Users/m2pro/cmatheus/startup-app/DOCUMENTATION.md /Users/m2pro/cmatheus/startup-app/.claude/docs/)"
+      "Bash(mv /Users/m2pro/cmatheus/startup-app/DOCUMENTATION.md /Users/m2pro/cmatheus/startup-app/.claude/docs/)",
+      "Bash(mv /Users/m2pro/cmatheus/startup-app/.claude/docs/PRODUCTO.md /Users/m2pro/cmatheus/startup-app/docs/PRODUCTO.md)",
+      "Bash(mv /Users/m2pro/cmatheus/startup-app/.claude/docs/MIGRACION-FUNCIONALIDADES.md /Users/m2pro/cmatheus/startup-app/docs/MIGRACION-FUNCIONALIDADES.md)",
+      "Bash(mv /Users/m2pro/cmatheus/startup-app/.claude/docs/DOCUMENTATION.md /Users/m2pro/cmatheus/startup-app/DOCUMENTATION.md)",
+      "Bash(rm -r /Users/m2pro/cmatheus/startup-app/.claude/docs)"
     ]
   },
   "enabledMcpjsonServers": [

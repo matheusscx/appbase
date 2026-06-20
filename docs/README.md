@@ -9,12 +9,17 @@ Welcome to the technical documentation for the `practica` project.
 2. Read the [ADR index](./adr/) — understand key technical decisions and their rationale
 3. Review relevant [feature docs](./features/) for the area you're working on
 
+### For Product & Business Rules
+- Read [`PRODUCTO.md`](./PRODUCTO.md) — full functional spec and business rules (Spanish)
+- Track progress in [`MIGRACION-FUNCIONALIDADES.md`](./MIGRACION-FUNCIONALIDADES.md) — feature migration plan (Spanish)
+
 ### For Feature Development
-- Use [`docs/features/TEMPLATE.md`](./features/TEMPLATE.md) as a template when documenting a new feature
-- Check existing feature docs in [`docs/features/`](./features/) for examples
+- Read [`QUICK-START.md`](./QUICK-START.md) — how to document a feature in ~10 minutes
+- Use [`features/TEMPLATE.md`](./features/TEMPLATE.md) as a template when documenting a new feature
+- Check existing feature docs in [`features/`](./features/) for examples
 
 ### For Architecture Decisions
-- Browse all decisions in [`docs/adr/`](./adr/)
+- Browse all decisions in [`adr/`](./adr/)
 - Read [ADR-001](./adr/001-jwt-auth.md) and [ADR-002](./adr/002-google-oauth.md) to understand the auth system
 
 ---
@@ -23,6 +28,11 @@ Welcome to the technical documentation for the `practica` project.
 
 ### Architecture
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — System overview, stack, module structure, conventions
+- **[CONVENTIONS.md](./CONVENTIONS.md)** — Coding, naming and documentation standards
+
+### Product
+- **[PRODUCTO.md](./PRODUCTO.md)** — Complete functional spec with business rules (Spanish)
+- **[MIGRACION-FUNCIONALIDADES.md](./MIGRACION-FUNCIONALIDADES.md)** — Feature migration plan and tracking (Spanish)
 
 ### Architecture Decision Records
 - **[adr/README.md](./adr/)** — Index of all architectural decisions
@@ -30,8 +40,13 @@ Welcome to the technical documentation for the `practica` project.
   - [ADR-002: Google OAuth 2.0](./adr/002-google-oauth.md)
 
 ### Features
+- **[QUICK-START.md](./QUICK-START.md)** — How to document a feature
 - **[features/TEMPLATE.md](./features/TEMPLATE.md)** — Template for documenting new features
 - **[features/auth.md](./features/auth.md)** — Authentication feature (JWT + Google OAuth)
+
+### Engineering Notes (superpowers)
+- **[superpowers/plans/](./superpowers/plans/)** — Implementation plans
+- **[superpowers/specs/](./superpowers/specs/)** — Design specs
 
 ---
 
@@ -73,15 +88,22 @@ Use feature docs to explain **how** a feature works end-to-end.
 
 ```
 docs/
-├── README.md              # This file
-├── ARCHITECTURE.md        # System architecture and conventions
-├── adr/                   # Architecture Decision Records
-│   ├── README.md          # ADR index and guidelines
+├── README.md                      # This file — documentation index
+├── ARCHITECTURE.md                # System architecture and conventions
+├── CONVENTIONS.md                 # Coding, naming and documentation standards
+├── QUICK-START.md                 # How to document a feature
+├── PRODUCTO.md                    # Functional spec & business rules (ES)
+├── MIGRACION-FUNCIONALIDADES.md   # Feature migration plan & tracking (ES)
+├── adr/                           # Architecture Decision Records
+│   ├── README.md                  # ADR index and guidelines
 │   ├── 001-jwt-auth.md
 │   └── 002-google-oauth.md
-└── features/              # Feature documentation
-    ├── TEMPLATE.md        # Template for new features
-    └── auth.md            # Authentication feature
+├── features/                      # Feature documentation
+│   ├── TEMPLATE.md                # Template for new features
+│   └── auth.md                    # Authentication feature
+└── superpowers/                   # Engineering plans & design specs
+    ├── plans/
+    └── specs/
 ```
 
 ---

@@ -186,7 +186,7 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 
 | Archivo | Contenido |
 |---|---|
-| `.claude/docs/PRODUCTO.md` | Especificación completa de todas las funcionalidades con reglas de negocio |
-| `.claude/docs/MIGRACION-FUNCIONALIDADES.md` | Plan/seguimiento de migración de funcionalidades |
+| `docs/PRODUCTO.md` | Especificación completa de todas las funcionalidades con reglas de negocio |
+| `docs/MIGRACION-FUNCIONALIDADES.md` | Plan/seguimiento de migración de funcionalidades |
 | `startup-pos.sql` | Esquema de BD completo con nombres actualizados |
 | `seed.sql` | Datos semilla globales (países, monedas, módulos, permisos) y datos de desarrollo |
