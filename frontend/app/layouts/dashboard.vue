@@ -1,15 +1,26 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 
-const store = useAuthStore()
+const authStore = useAuthStore()
+const tenantStore = useTenantStore()
 
-const items = computed<NavigationMenuItem[]>(() => [
-  {
-    label: 'Inicio',
-    icon: 'i-heroicons-home',
-    to: '/',
-  },
-])
+const items = computed<NavigationMenuItem[]>(() => {
+  const base: NavigationMenuItem[] = [
+    {
+      label: 'Inicio',
+      icon: 'i-heroicons-home',
+      to: '/',
+    },
+  ]
+  if (authStore.isSuperadmin) {
+    base.push({
+      label: 'Administración',
+      icon: 'i-heroicons-cog-6-tooth',
+      to: '/admin',
+    })
+  }
+  return base
+})
 </script>
 
 <template>
@@ -20,7 +31,9 @@ const items = computed<NavigationMenuItem[]>(() => [
           <div class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
             <UIcon name="i-heroicons-bolt" class="text-white w-4 h-4" />
           </div>
-          <span v-if="!collapsed" class="font-semibold text-sm truncate">Prueba Técnica</span>
+          <span v-if="!collapsed" class="font-semibold text-sm truncate">
+            {{ tenantStore.activeTenant?.nombre ?? 'Prueba Técnica' }}
+          </span>
         </div>
       </template>
 
@@ -34,8 +47,13 @@ const items = computed<NavigationMenuItem[]>(() => [
 
       <template #footer="{ collapsed }">
         <div class="flex flex-col gap-2">
+          <!-- Tenant activo (cuando sidebar expandido) -->
+          <div v-if="!collapsed && tenantStore.activeTenant" class="px-2 text-xs text-muted truncate flex items-center gap-1">
+            <UIcon name="i-heroicons-building-office" class="w-3 h-3 shrink-0" />
+            {{ tenantStore.activeTenant.nombre }}
+          </div>
           <div v-if="!collapsed" class="px-2 text-xs text-muted truncate">
-            {{ store.user?.email }}
+            {{ authStore.user?.nombre }}
           </div>
           <UButton
             :icon="collapsed ? 'i-heroicons-arrow-right-on-rectangle' : undefined"
@@ -43,7 +61,7 @@ const items = computed<NavigationMenuItem[]>(() => [
             color="neutral"
             variant="ghost"
             block
-            @click="store.logout()"
+            @click="authStore.logout()"
           />
         </div>
       </template>

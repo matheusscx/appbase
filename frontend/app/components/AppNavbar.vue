@@ -3,7 +3,8 @@ defineProps<{
   title: string
 }>()
 
-const store = useAuthStore()
+const authStore = useAuthStore()
+const tenantStore = useTenantStore()
 </script>
 
 <template>
@@ -13,7 +14,9 @@ const store = useAuthStore()
     </template>
     <template #right>
       <slot name="right">
-        <span class="text-sm text-muted">{{ store.user?.email }}</span>
+        <span class="text-sm text-muted">
+          {{ tenantStore.activeTenant?.nombre ?? authStore.user?.nombre }}
+        </span>
       </slot>
     </template>
   </UDashboardNavbar>
