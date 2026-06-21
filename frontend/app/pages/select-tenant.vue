@@ -6,7 +6,7 @@ const authStore = useAuthStore()
 const switching = ref<string | null>(null)
 
 if (authStore.activeTenantId) {
-  navigateTo('/')
+  await navigateTo('/')
 }
 
 onMounted(async () => {

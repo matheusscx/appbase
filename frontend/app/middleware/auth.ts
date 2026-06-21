@@ -16,8 +16,11 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // Rutas exentas del check de tenant
   if (TENANT_EXEMPT.some(p => to.path.startsWith(p))) return
 
-  // Rutas admin: guard propio (futuro). Por ahora solo verificar token.
-  if (to.path.startsWith('/admin')) return
+  // Rutas admin: guard propio. Verificar isSuperadmin.
+  if (to.path.startsWith('/admin')) {
+    if (!store.isSuperadmin.value) return navigateTo('/')
+    return
+  }
 
   // Necesita tenant activo
   if (!store.activeTenantId.value) {
