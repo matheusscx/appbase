@@ -14,6 +14,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 |---|-------|--------|------|
 | [001](./001-jwt-auth.md) | Use JWT for stateless authentication | Accepted | 2026-06-13 |
 | [002](./002-google-oauth.md) | Support Google OAuth 2.0 for social login | Accepted | 2026-06-13 |
+| [003](./003-jwt-decode-client.md) | Decodificar JWT en cliente sin librería + patrón híbrido JWT/store | Accepted | 2026-06-20 |
 
 ## Creating a New ADR
 

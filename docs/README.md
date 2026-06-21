@@ -38,11 +38,13 @@ Welcome to the technical documentation for the `practica` project.
 - **[adr/README.md](./adr/)** — Index of all architectural decisions
   - [ADR-001: JWT Authentication](./adr/001-jwt-auth.md)
   - [ADR-002: Google OAuth 2.0](./adr/002-google-oauth.md)
+  - [ADR-003: JWT decode en cliente + patrón híbrido JWT/store](./adr/003-jwt-decode-client.md)
 
 ### Features
 - **[QUICK-START.md](./QUICK-START.md)** — How to document a feature
 - **[features/TEMPLATE.md](./features/TEMPLATE.md)** — Template for documenting new features
 - **[features/auth.md](./features/auth.md)** — Authentication feature (JWT + Google OAuth)
+- **[features/frontend-multitenant.md](./features/frontend-multitenant.md)** — Flujo multi-tenant en frontend (selección de tenant)
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans

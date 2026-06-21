@@ -12,7 +12,7 @@ Monorepo full-stack, **Docker-first** — todo el stack corre con `docker-compos
 No requiere Node.js/PostgreSQL local.
 
 - **backend/** — NestJS (TypeScript), API REST en el puerto 3000
-- **frontend/** — Nuxt3 (Vue3), SPA/SSR en el puerto 5173
+- **frontend/** — Nuxt 4 (Vue 3), SPA/SSR en el puerto 5173
 - **PostgreSQL 15** — gestionado por Docker, puerto 5432
 - **Aritmética financiera:** Decimal.js (nunca `number` nativo para dinero o porcentajes)
 
@@ -50,7 +50,7 @@ practica/
 │       ├── main.ts           # Bootstrap: CORS, ValidationPipe, Swagger
 │       ├── app.module.ts     # Módulo raíz
 │       └── modules/          # Módulos de feature
-├── frontend/          # Nuxt3 app
+├── frontend/          # Nuxt 4 app
 │   ├── app/app.vue           # Componente raíz
 │   ├── pages/                # Routing basado en archivos
 │   ├── components/           # Componentes auto-importados
@@ -81,7 +81,8 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Funcionalidad | Estado |
 |---|---|
 | Login (JWT access + refresh) | ✅ Implementado |
-| Perfil multi-tenant | 🔲 Por construir |
+| Flujo multi-tenant en frontend (selección de tenant) | ✅ Implementado |
+| Perfil multi-tenant (pantallas de gestión) | 🔲 Por construir |
 | RBAC (roles, módulos, permisos) | 🔲 Por construir |
 | Gestión de tenants y razones sociales | 🔲 Por construir |
 | Terceros (proveedores, empresas) | 🔲 Por construir |

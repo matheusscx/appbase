@@ -3,7 +3,7 @@
 ## Stack
 
 - **Backend**: NestJS (TypeScript) REST API, port 3000
-- **Frontend**: Nuxt 3 (Vue 3) SPA/SSR, port 5173
+- **Frontend**: Nuxt 4 (Vue 3) SPA/SSR, port 5173
 - **Database**: PostgreSQL 15 with TypeORM, port 5432 (internal)
 - **Orchestration**: Docker Compose
 
@@ -115,35 +115,47 @@ modules/auth/
 
 Nuxt auto-creates routes from `pages/` structure:
 
-| File | Route |
-|------|-------|
-| `pages/index.vue` | `/` |
-| `pages/login.vue` | `/login` |
-| `pages/register.vue` | `/register` |
-| `pages/auth/callback.vue` | `/auth/callback` |
+| File | Route | Notes |
+|------|-------|-------|
+| `pages/index.vue` | `/` | Dashboard (requires auth + tenant) |
+| `pages/login.vue` | `/login` | |
+| `pages/register.vue` | `/register` | |
+| `pages/select-tenant.vue` | `/select-tenant` | Selector de tenant (requires auth) |
+| `pages/no-tenant.vue` | `/no-tenant` | Aviso si el usuario no pertenece a ningún tenant |
+| `pages/auth/callback.vue` | `/auth/callback` | Google OAuth callback |
 
 ### State Management (Pinia)
 
-Single store: `useAuthStore`
+Dos stores:
 
-**State:**
-- `user` — Current user object (id, name, email)
-- `token` — JWT token (persisted to localStorage)
-- `loading`, `error` — Request state
+**`useAuthStore`**
+- `user` — Perfil del usuario (`{ id, nombre, apellido, correo, esSuperadmin, ... }`)
+- `token` — JWT access token (cookie)
+- `activeTenantId` *(computed)* — `tenant_id` del JWT payload; fuente de autoridad
+- `isSuperadmin` *(computed)* — `es_superadmin` del JWT payload
+- `login(email, password)` / `register(nombre, correo, contrasena)` / `logout()`
+- `handlePostLogin()` — Lógica post-login: fetchMyTenants → routing según tenants (0/1/>1)
+- `fetchMe()` / `setToken(token)` / `clearAuth()`
 
-**Actions:**
-- `login(email, password)` → POST `/api/auth/login`
-- `register(name, email, password)` → POST `/api/auth/register`
-- `fetchMe()` → GET `/api/auth/me` (rehydrate on page load)
-- `logout()` → Clear state, redirect to `/login`
-- `loginWithGoogle()` → Redirect to `/api/auth/google`
+**`useTenantStore`** *(presentación)*
+- `tenants` — Lista de `{ tenantId, nombre }` del usuario
+- `activeTenant` *(computed)* — cruza `activeTenantId` contra la lista
+- `fetchMyTenants()` → GET `/api/auth/my-tenants`
+- `switchTenant(id)` → POST `/api/auth/switch-tenant` → `setToken(newToken)`
+
+Ver [ADR-003](./adr/003-jwt-decode-client.md) para el patrón JWT-authority + store de presentación.
 
 ### Middleware
 
-**`auth.ts`** — Applied to index page (`/`):
-1. If no token → redirect to `/login`
-2. If token but no user → fetch from `/api/auth/me`
-3. If still not authenticated → redirect to `/login`
+**`auth.ts`** — Aplicado globalmente (en `pages/index.vue` y futuras rutas de dashboard):
+
+1. Sin token → `/login`
+2. Con token pero sin `user` → `fetchMe()` primero
+3. Si fetchMe invalidó el token → `/login`
+4. Rutas exentas (`/select-tenant`, `/no-tenant`, `/login`, `/register`) → pasar
+5. Rutas `/admin/**` → verificar `isSuperadmin`; si false → `/`
+6. Sin `activeTenantId` → `handlePostLogin()` (resuelve tenant o redirige)
+7. Con `activeTenantId` → pasar
 
 ## Database
 

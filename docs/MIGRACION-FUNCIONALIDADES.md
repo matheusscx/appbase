@@ -437,5 +437,27 @@ cajas, ventas, cobros, facturación, roles, etc.).
   `API_BASE_URL` en el frontend.
 - TypeORM corre con `synchronize: true` fuera de producción (el esquema se autogenera desde entidades).
   Para la migración a producción, definir migraciones reales en lugar de confiar en synchronize.
+
+---
+
+## Estado de Implementación (2026-06-20)
+
+| Funcionalidad | Backend | Frontend | Notas |
+|---|---|---|---|
+| 1. Autenticación (login / refresh / logout) | ✅ | ✅ | JWT access + refresh con cookies httpOnly |
+| 2. Perfil multi-tenant — **flujo de selección** | ✅ | ✅ | POST /auth/switch-tenant + selector `/select-tenant` |
+| 2. Perfil multi-tenant — **pantallas de gestión** | 🔲 | 🔲 | CRUD de tenants, invitación de usuarios |
+| 3. RBAC (roles, módulos, permisos) | ✅ | 🔲 | Backend completo; frontend: guard `/admin` mínimo |
+| 4. Gestión de tenants y razones sociales | 🔲 | 🔲 | |
+| 5. Catálogos base (país, provincia, moneda) | 🔲 | 🔲 | Seeders existentes en `seed.sql` |
+| 6. Configuración de monedas por tenant | 🔲 | 🔲 | |
+| 7–9. Catálogos financieros + items | 🔲 | 🔲 | |
+| 10. Motor de cálculo de precios | 🔲 | 🔲 | |
+| 11. Procesamiento de ventas | 🔲 | 🔲 | |
+| 12. Gestión de cajas | 🔲 | 🔲 | |
+| 13. Registro de pagos | 🔲 | 🔲 | |
+| 14. SPA frontend (navegación por permisos) | — | 🔲 parcial | Flujo auth + tenant completo; menú RBAC pendiente |
+
+**Leyenda:** ✅ Implementado · 🔲 Por construir · 🔲 parcial Parcialmente implementado
 - CORS está abierto a cualquier origen; endurecer al migrar.
 - Prefijo global de API: `/api`.
