@@ -2,6 +2,12 @@
 
 Guía para Claude Code (claude.ai/code) al trabajar en este repositorio.
 
+> ## ⚠️ Flujo de trabajo — Etapa de desarrollo
+>
+> El proyecto está en **etapa de desarrollo activo**. **No crear ramas nuevas**:
+> trabajar **directamente sobre `main`** y commitear ahí. No abrir PRs para integrar;
+> los cambios van directo a `main`.
+
 ## Visión del proyecto — SaaS POS Multi-tenant
 
 Sistema SaaS de punto de venta y facturación **multi-tenant**. Cada tenant (empresa)
