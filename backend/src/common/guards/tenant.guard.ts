@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { UsuarioTenant } from '../../modules/tenants/entities/usuario-tenant.entity';
+import { Tenant } from '../../modules/tenants/entities/tenant.entity';
 import { JwtUser } from '../interfaces/jwt-user.interface';
 
 @Injectable()
@@ -14,6 +15,8 @@ export class TenantGuard implements CanActivate {
   constructor(
     @InjectRepository(UsuarioTenant)
     private readonly usuarioTenantRepo: Repository<UsuarioTenant>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -30,6 +33,14 @@ export class TenantGuard implements CanActivate {
     });
     if (!membership)
       throw new ForbiddenException('No perteneces a este tenant');
+
+    // Verify the tenant exists and is not soft-deleted
+    const tenant = await this.tenantRepo.findOne({
+      where: { id: user.tenantId },
+    });
+    if (!tenant)
+      throw new ForbiddenException('El tenant no existe o fue eliminado');
+
     return true;
   }
 }

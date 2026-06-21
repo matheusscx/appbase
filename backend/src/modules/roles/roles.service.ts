@@ -4,10 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Rol } from './entities/rol.entity';
 import { RolUsuario } from './entities/rol-usuario.entity';
 import { RolPermisoModulo } from './entities/rol-permiso-modulo.entity';
+import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
 
@@ -20,6 +22,10 @@ export class RolesService {
     private readonly rolUsuarioRepo: Repository<RolUsuario>,
     @InjectRepository(RolPermisoModulo)
     private readonly rolPermisoModuloRepo: Repository<RolPermisoModulo>,
+    @InjectRepository(TenantModulo)
+    private readonly tenantModuloRepo: Repository<TenantModulo>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   async findAll(tenantId: string): Promise<Rol[]> {
@@ -58,6 +64,16 @@ export class RolesService {
     tenantId: string,
     usuarioId: string,
   ): Promise<RolUsuario> {
+    // Verify the target user belongs to this tenant
+    const esMiembro = await this.dataSource.query<unknown[]>(
+      `SELECT 1 FROM usuarios_tenants
+       WHERE usuario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [usuarioId, tenantId],
+    );
+    if (esMiembro.length === 0) {
+      throw new BadRequestException('El usuario no pertenece a este tenant');
+    }
+
     const existing = await this.rolUsuarioRepo.findOne({
       where: { rolId, tenantId, usuarioId },
       withDeleted: true,
@@ -106,6 +122,13 @@ export class RolesService {
     // Verify the rol belongs to this tenant
     const rol = await this.rolRepo.findOne({ where: { id: rolId, tenantId } });
     if (!rol) throw new NotFoundException(`Rol ${rolId} no encontrado`);
+
+    // Verify that moduloTenantId belongs to this tenant
+    const tenantModulo = await this.tenantModuloRepo.findOne({
+      where: { moduloTenantId, tenantId },
+    });
+    if (!tenantModulo)
+      throw new BadRequestException('El módulo no pertenece a este tenant');
 
     // Delete all existing permissions for (rolId, moduloTenantId)
     await this.rolPermisoModuloRepo.delete({ rolId, moduloTenantId });

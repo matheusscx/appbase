@@ -18,6 +18,8 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantsService } from './tenants.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { AddMemberDto } from './dto/add-member.dto';
+import { AddModuleDto } from './dto/add-module.dto';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin routes — /admin/tenants
@@ -55,8 +57,8 @@ export class AdminTenantsController {
   }
 
   @Post(':id/modules')
-  addModule(@Param('id') id: string, @Body() body: { moduloAppId: string }) {
-    return this.tenantsService.addModule(id, body.moduloAppId);
+  addModule(@Param('id') id: string, @Body() dto: AddModuleDto) {
+    return this.tenantsService.addModule(id, dto.moduloAppId);
   }
 }
 
@@ -81,9 +83,9 @@ export class TenantsController {
   }
 
   @Post('members')
-  addMember(@Req() req: Request, @Body() body: { usuarioId: string }) {
+  addMember(@Req() req: Request, @Body() dto: AddMemberDto) {
     const user = req.user as { tenantId: string };
-    return this.tenantsService.addMember(user.tenantId, body.usuarioId);
+    return this.tenantsService.addMember(user.tenantId, dto.usuarioId);
   }
 
   @Delete('members/:userId')

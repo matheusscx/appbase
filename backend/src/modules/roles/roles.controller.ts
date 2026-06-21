@@ -18,6 +18,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { RolesService } from './roles.service';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
+import { AssignUserDto } from './dto/assign-user.dto';
 import { JwtUser } from '../../common/interfaces/jwt-user.interface';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
@@ -58,10 +59,10 @@ export class RolesController {
   assignUser(
     @Param('id') id: string,
     @Req() req: Request,
-    @Body() body: { usuarioId: string },
+    @Body() dto: AssignUserDto,
   ) {
     const user = req.user as JwtUser;
-    return this.rolesService.assignUser(id, user.tenantId!, body.usuarioId);
+    return this.rolesService.assignUser(id, user.tenantId!, dto.usuarioId);
   }
 
   @Delete(':id/users/:userId')
