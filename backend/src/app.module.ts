@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { TenantsModule } from './modules/tenants/tenants.module';
 import { Usuario } from './modules/users/usuario.entity';
 import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
 import { Pais } from './modules/catalog/entities/pais.entity';
@@ -15,6 +16,10 @@ import { ModuloApp } from './modules/catalog/entities/modulo-app.entity';
 import { Permiso } from './modules/catalog/entities/permiso.entity';
 import { ModuloAppPermiso } from './modules/catalog/entities/modulo-app-permiso.entity';
 import { Tenant } from './modules/tenants/entities/tenant.entity';
+import { UsuarioTenant } from './modules/tenants/entities/usuario-tenant.entity';
+import { TenantModulo } from './modules/tenants/entities/tenant-modulo.entity';
+import { TenantFormulaPrecio } from './modules/tenants/entities/tenant-formula-precio.entity';
+import { Caja } from './modules/tenants/entities/caja.entity';
 import { SeederModule } from './modules/seeder/seeder.module';
 
 @Module({
@@ -36,6 +41,10 @@ import { SeederModule } from './modules/seeder/seeder.module';
           Permiso,
           ModuloAppPermiso,
           Tenant,
+          UsuarioTenant,
+          TenantModulo,
+          TenantFormulaPrecio,
+          Caja,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -44,6 +53,7 @@ import { SeederModule } from './modules/seeder/seeder.module';
     CatalogModule,
     UsersModule,
     AuthModule,
+    TenantsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

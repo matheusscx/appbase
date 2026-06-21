@@ -10,9 +10,9 @@ import {
 @Entity('tenants')
 export class Tenant {
   @PrimaryGeneratedColumn('uuid', { name: 'tenant_id' })
-  tenantId: string;
+  id: string;
 
-  @Column({ name: 'provincia_id', type: 'uuid' })
+  @Column({ name: 'provincia_id' })
   provinciaId: string;
 
   @Column()
@@ -21,10 +21,10 @@ export class Tenant {
   @Column({ unique: true })
   correo: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ nullable: true })
   telefono: string | null;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ nullable: true })
   direccion: string | null;
 
   @Column({ name: 'calculo_descuentos', default: 'base' })
@@ -37,5 +37,5 @@ export class Tenant {
   actualizadoEl: Date;
 
   @DeleteDateColumn({ name: 'eliminado_el' })
-  eliminadoEl: Date;
+  eliminadoEl: Date | null;
 }

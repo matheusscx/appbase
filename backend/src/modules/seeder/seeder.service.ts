@@ -1,6 +1,6 @@
 import { Injectable, OnApplicationBootstrap, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Moneda } from '../catalog/entities/moneda.entity';
 import { Pais } from '../catalog/entities/pais.entity';
 import { Provincia } from '../catalog/entities/provincia.entity';
@@ -8,6 +8,8 @@ import { ModuloApp } from '../catalog/entities/modulo-app.entity';
 import { Permiso } from '../catalog/entities/permiso.entity';
 import { ModuloAppPermiso } from '../catalog/entities/modulo-app-permiso.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
+import { TenantFormulaPrecio } from '../tenants/entities/tenant-formula-precio.entity';
 import { Usuario } from '../users/usuario.entity';
 
 @Injectable()
@@ -29,8 +31,14 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly moduloAppPermisoRepo: Repository<ModuloAppPermiso>,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
+    @InjectRepository(TenantModulo)
+    private readonly tenantModuloRepo: Repository<TenantModulo>,
+    @InjectRepository(TenantFormulaPrecio)
+    private readonly tenantFormulaPrecioRepo: Repository<TenantFormulaPrecio>,
     @InjectRepository(Usuario)
     private readonly usuarioRepo: Repository<Usuario>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -48,9 +56,10 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedModuloAppPermisos();
     await this.seedTenants();
     await this.seedUsuarioAdmin();
-
-    // TODO Fase 3: seed tenant_modulos + tenant_formula_precio
-    // TODO Fase 3: seed usuarios_tenants + roles_usuarios
+    await this.seedTenantModulo();
+    await this.seedTenantFormulaPrecio();
+    await this.seedUsuariosTenants();
+    await this.seedRolesUsuarios();
 
     this.logger.log('Seed complete.');
   }
@@ -277,13 +286,13 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedTenants(): Promise<void> {
-    const tenantId = '550e8400-e29b-41d4-a716-446655440007';
-    const exists = await this.tenantRepo.findOne({ where: { tenantId } });
+    const id = '550e8400-e29b-41d4-a716-446655440007';
+    const exists = await this.tenantRepo.findOne({ where: { id } });
 
     if (!exists) {
       await this.tenantRepo.save(
         this.tenantRepo.create({
-          tenantId,
+          id,
           provinciaId: '550e8400-e29b-41d4-a716-446655440001',
           nombre: 'Paris',
           correo: 'contacto@paris.cl',
@@ -291,6 +300,83 @@ export class SeederService implements OnApplicationBootstrap {
           direccion: 'Av. Presidente Kennedy 9001, Las Condes, Santiago',
           calculoDescuentos: 'base',
         }),
+      );
+    }
+  }
+
+  private async seedTenantModulo(): Promise<void> {
+    const moduloTenantId = '550e8400-e29b-41d4-a716-446655440023';
+    const exists = await this.tenantModuloRepo.findOne({
+      where: { moduloTenantId },
+    });
+
+    if (!exists) {
+      await this.tenantModuloRepo.save(
+        this.tenantModuloRepo.create({
+          moduloTenantId,
+          tenantId: '550e8400-e29b-41d4-a716-446655440007',
+          moduloAppId: '550e8400-e29b-41d4-a716-446655440011',
+          estado: 'activo',
+          expiraEn: new Date('2026-12-31T23:59:59Z'),
+        }),
+      );
+    }
+  }
+
+  private async seedTenantFormulaPrecio(): Promise<void> {
+    const tenantId = '550e8400-e29b-41d4-a716-446655440007';
+    const formula = [
+      { tenantId, paso: 1, tipo: 'descuentos' },
+      { tenantId, paso: 2, tipo: 'recargos' },
+      { tenantId, paso: 3, tipo: 'impuestos' },
+    ];
+
+    for (const row of formula) {
+      const exists = await this.tenantFormulaPrecioRepo.findOne({
+        where: { tenantId: row.tenantId, paso: row.paso },
+      });
+      if (!exists) {
+        await this.tenantFormulaPrecioRepo.save(
+          this.tenantFormulaPrecioRepo.create(row),
+        );
+      }
+    }
+  }
+
+  private async seedUsuariosTenants(): Promise<void> {
+    await this.dataSource.query(
+      `INSERT INTO usuarios_tenants (usuario_id, tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [
+        '550e8400-e29b-41d4-a716-446655440019',
+        '550e8400-e29b-41d4-a716-446655440007',
+      ],
+    );
+  }
+
+  private async seedRolesUsuarios(): Promise<void> {
+    const existingRol: { rol_id: string }[] = await this.dataSource.query(
+      `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Administrador' AND eliminado_el IS NULL`,
+      ['550e8400-e29b-41d4-a716-446655440007'],
+    );
+
+    if (existingRol.length === 0) {
+      await this.dataSource.query(
+        `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+         VALUES ($1, $2, 'Administrador', 'Acceso completo', true, NOW(), NOW())`,
+        [
+          '550e8400-e29b-41d4-a716-446655440018',
+          '550e8400-e29b-41d4-a716-446655440007',
+        ],
+      );
+      await this.dataSource.query(
+        `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+         VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+        [
+          '550e8400-e29b-41d4-a716-446655440019',
+          '550e8400-e29b-41d4-a716-446655440007',
+          '550e8400-e29b-41d4-a716-446655440018',
+        ],
       );
     }
   }
