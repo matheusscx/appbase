@@ -286,49 +286,88 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedTenants(): Promise<void> {
-    const id = '550e8400-e29b-41d4-a716-446655440007';
-    const exists = await this.tenantRepo.findOne({ where: { id } });
+    const tenants: Array<{
+      id: string;
+      provinciaId: string;
+      nombre: string;
+      correo: string;
+      telefono: string;
+      direccion: string;
+    }> = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440007',
+        provinciaId: '550e8400-e29b-41d4-a716-446655440001',
+        nombre: 'Paris',
+        correo: 'contacto@paris.cl',
+        telefono: '+56226005000',
+        direccion: 'Av. Presidente Kennedy 9001, Las Condes, Santiago',
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440040',
+        provinciaId: '550e8400-e29b-41d4-a716-446655440001',
+        nombre: 'Falabella',
+        correo: 'contacto@falabella.cl',
+        telefono: '+56226007000',
+        direccion: 'Av. Presidente Kennedy 6400, Las Condes, Santiago',
+      },
+    ];
 
-    if (!exists) {
-      await this.tenantRepo.save(
-        this.tenantRepo.create({
-          id,
-          provinciaId: '550e8400-e29b-41d4-a716-446655440001',
-          nombre: 'Paris',
-          correo: 'contacto@paris.cl',
-          telefono: '+56226005000',
-          direccion: 'Av. Presidente Kennedy 9001, Las Condes, Santiago',
-          calculoDescuentos: 'base',
-        }),
-      );
+    for (const data of tenants) {
+      const exists = await this.tenantRepo.findOne({ where: { id: data.id } });
+      if (!exists) {
+        await this.tenantRepo.save(
+          this.tenantRepo.create({ ...data, calculoDescuentos: 'base' }),
+        );
+      }
     }
   }
 
   private async seedTenantModulo(): Promise<void> {
-    const moduloTenantId = '550e8400-e29b-41d4-a716-446655440023';
-    const exists = await this.tenantModuloRepo.findOne({
-      where: { moduloTenantId },
-    });
+    const entries: Partial<TenantModulo>[] = [
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440023',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440011', // Paris → Caja
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440042',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440010', // Falabella → Facturación
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440043',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440011', // Falabella → Caja
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+    ];
 
-    if (!exists) {
-      await this.tenantModuloRepo.save(
-        this.tenantModuloRepo.create({
-          moduloTenantId,
-          tenantId: '550e8400-e29b-41d4-a716-446655440007',
-          moduloAppId: '550e8400-e29b-41d4-a716-446655440011',
-          estado: 'activo',
-          expiraEn: new Date('2026-12-31T23:59:59Z'),
-        }),
-      );
+    for (const data of entries) {
+      const exists = await this.tenantModuloRepo.findOne({
+        where: { moduloTenantId: data.moduloTenantId },
+      });
+      if (!exists) {
+        await this.tenantModuloRepo.save(this.tenantModuloRepo.create(data));
+      }
     }
   }
 
   private async seedTenantFormulaPrecio(): Promise<void> {
-    const tenantId = '550e8400-e29b-41d4-a716-446655440007';
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+
     const formula = [
-      { tenantId, paso: 1, tipo: 'descuentos' },
-      { tenantId, paso: 2, tipo: 'recargos' },
-      { tenantId, paso: 3, tipo: 'impuestos' },
+      { tenantId: PARIS, paso: 1, tipo: 'descuentos' },
+      { tenantId: PARIS, paso: 2, tipo: 'recargos' },
+      { tenantId: PARIS, paso: 3, tipo: 'impuestos' },
+      { tenantId: FALABELLA, paso: 1, tipo: 'descuentos' },
+      { tenantId: FALABELLA, paso: 2, tipo: 'recargos' },
+      { tenantId: FALABELLA, paso: 3, tipo: 'impuestos' },
     ];
 
     for (const row of formula) {
@@ -344,39 +383,53 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedUsuariosTenants(): Promise<void> {
-    await this.dataSource.query(
-      `INSERT INTO usuarios_tenants (usuario_id, tenant_id, creado_el, actualizado_el)
-       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
-      [
-        '550e8400-e29b-41d4-a716-446655440019',
-        '550e8400-e29b-41d4-a716-446655440007',
-      ],
-    );
+    const ADMIN = '550e8400-e29b-41d4-a716-446655440019';
+    const pairs = [
+      [ADMIN, '550e8400-e29b-41d4-a716-446655440007'], // admin → Paris
+      [ADMIN, '550e8400-e29b-41d4-a716-446655440040'], // admin → Falabella
+    ];
+
+    for (const [usuarioId, tenantId] of pairs) {
+      await this.dataSource.query(
+        `INSERT INTO usuarios_tenants (usuario_id, tenant_id, creado_el, actualizado_el)
+         VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+        [usuarioId, tenantId],
+      );
+    }
   }
 
   private async seedRolesUsuarios(): Promise<void> {
-    const existingRol: { rol_id: string }[] = await this.dataSource.query(
-      `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Administrador' AND eliminado_el IS NULL`,
-      ['550e8400-e29b-41d4-a716-446655440007'],
-    );
+    const ADMIN_USUARIO = '550e8400-e29b-41d4-a716-446655440019';
 
-    if (existingRol.length === 0) {
-      await this.dataSource.query(
-        `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
-         VALUES ($1, $2, 'Administrador', 'Acceso completo', true, NOW(), NOW())`,
-        [
-          '550e8400-e29b-41d4-a716-446655440018',
-          '550e8400-e29b-41d4-a716-446655440007',
-        ],
+    const tenantRoles = [
+      {
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        rolId: '550e8400-e29b-41d4-a716-446655440018',
+      },
+      {
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        rolId: '550e8400-e29b-41d4-a716-446655440041',
+      },
+    ];
+
+    for (const { tenantId, rolId } of tenantRoles) {
+      const existingRol: { rol_id: string }[] = await this.dataSource.query(
+        `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Administrador' AND eliminado_el IS NULL`,
+        [tenantId],
       );
+
+      if (existingRol.length === 0) {
+        await this.dataSource.query(
+          `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+           VALUES ($1, $2, 'Administrador', 'Acceso completo', true, NOW(), NOW())`,
+          [rolId, tenantId],
+        );
+      }
+
       await this.dataSource.query(
         `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
          VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
-        [
-          '550e8400-e29b-41d4-a716-446655440019',
-          '550e8400-e29b-41d4-a716-446655440007',
-          '550e8400-e29b-41d4-a716-446655440018',
-        ],
+        [ADMIN_USUARIO, tenantId, existingRol[0]?.rol_id ?? rolId],
       );
     }
   }
