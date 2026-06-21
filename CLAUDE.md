@@ -176,6 +176,16 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 ### Backend
 - Cada feature vive en `src/modules/<nombre>/` con su propio controller, service, entity y DTOs. Registrar en `app.module.ts`.
 - **Validación:** ValidationPipe es global en `main.ts`; usar decoradores de `class-validator` en todos los DTOs.
+- **Columnas UUID en entidades TypeORM (crítico):** Toda columna que sea PK o FK de UUID **debe** declarar `type: 'uuid'` explícitamente. Sin ese tipo, TypeORM infiere `varchar` y las columnas quedan como `character varying` en la BD, rompiendo los JOINs en SQL raw. Aplica a `@PrimaryColumn`, `@Column` y columnas de relación sin `@ManyToOne`. Ver [ADR-004](docs/adr/004-uuid-column-types.md).
+  ```typescript
+  // ✅ Correcto
+  @PrimaryColumn({ name: 'tenant_id', type: 'uuid' })
+  @Column({ name: 'usuario_id', type: 'uuid', nullable: true })
+
+  // ❌ Incorrecto — TypeORM infiere varchar, BD queda character varying
+  @PrimaryColumn({ name: 'tenant_id' })
+  @Column({ name: 'usuario_id', type: 'varchar', nullable: true })
+  ```
 
 ### Frontend
 - Routing basado en archivos vía `pages/`. Usar `$fetch` para llamadas a la API (no axios).

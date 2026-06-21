@@ -264,6 +264,32 @@ async login(@Body() loginDto: LoginDto) {
 }
 ```
 
+#### UUID columns in TypeORM entities
+
+> **All PK and FK columns that hold UUIDs must declare `type: 'uuid'` explicitly.**
+
+TypeORM defaults untyped `string` properties to `character varying`. If a PK is `uuid` (via `@PrimaryGeneratedColumn('uuid')`) but a FK column on another table omits the type, PostgreSQL creates a `uuid = character varying` join that fails at runtime.
+
+```typescript
+// ✅ Correct — produces uuid column in DB
+@PrimaryColumn({ name: 'tenant_id', type: 'uuid' })
+tenantId: string;
+
+@Column({ name: 'usuario_id', type: 'uuid', nullable: true })
+usuarioId: string | null;
+
+// ❌ Wrong — TypeORM infers varchar; raw SQL JOINs against a uuid PK will fail
+@PrimaryColumn({ name: 'tenant_id' })
+tenantId: string;
+
+@Column({ name: 'usuario_id', type: 'varchar', nullable: true })
+usuarioId: string | null;
+```
+
+Only `google_id` (Google OAuth external identifier) is legitimately `varchar`.
+
+See [ADR-004](./adr/004-uuid-column-types.md) for full context.
+
 ### Frontend
 
 - **Pages**: Placed in `pages/` — routes auto-created
