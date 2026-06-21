@@ -5,7 +5,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const store = useAuthStore()
   const { token, user, activeTenantId, isSuperadmin } = storeToRefs(store)
 
-  // Sin token → login
+  // Sin access token (p. ej. expiró tras 15 min) → intentar restaurar la
+  // sesión con el refresh token antes de mandar al usuario a login.
+  if (!token.value) await store.tryRefresh()
   if (!token.value) return navigateTo('/login')
 
   // Cargar usuario si no está cargado

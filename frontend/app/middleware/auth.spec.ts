@@ -47,15 +47,20 @@ let mockTenants: { tenantId: string, nombre: string }[] = []
 const mockFetchMe = vi.fn()
 const mockHandlePostLogin = vi.fn()
 const mockFetchMyTenants = vi.fn()
+const mockTryRefresh = vi.fn()
 
 vi.mock('../stores/auth', () => ({
   useAuthStore: () => ({
-    token: { value: mockToken },
+    token: {
+      get value() { return mockToken },
+      set value(v: string | null) { mockToken = v },
+    },
     user: { value: mockUser },
-    activeTenantId: { value: mockActiveTenantId },
+    activeTenantId: { get value() { return mockActiveTenantId } },
     isSuperadmin: { value: false },
     fetchMe: mockFetchMe,
     handlePostLogin: mockHandlePostLogin,
+    tryRefresh: mockTryRefresh,
   }),
 }))
 
@@ -87,13 +92,31 @@ describe('middleware/auth', () => {
     mockHandlePostLogin.mockResolvedValue(undefined)
     mockFetchMyTenants.mockClear()
     mockFetchMyTenants.mockResolvedValue(undefined)
+    mockTryRefresh.mockClear()
+    mockTryRefresh.mockResolvedValue(false)
     mockNavigateTo.mockClear()
   })
 
-  it('sin token → redirige a /login', async () => {
+  it('sin token y sin refresh válido → redirige a /login', async () => {
     mockToken = null
+    mockTryRefresh.mockResolvedValue(false)
     await authMiddleware(makeContext('/'))
+    expect(mockTryRefresh).toHaveBeenCalled()
     expect(mockNavigateTo).toHaveBeenCalledWith('/login')
+  })
+
+  it('sin token pero con refresh válido → restaura sesión sin ir a login', async () => {
+    mockToken = null
+    mockUser = { id: '1', nombre: 'Test' }
+    mockActiveTenantId = 'tenant-uuid'
+    mockTenants = [{ tenantId: 'tenant-uuid', nombre: 'Empresa A' }]
+    mockTryRefresh.mockImplementation(async () => {
+      mockToken = 'restored.token'
+      return true
+    })
+    await authMiddleware(makeContext('/'))
+    expect(mockTryRefresh).toHaveBeenCalled()
+    expect(mockNavigateTo).not.toHaveBeenCalledWith('/login')
   })
 
   it('con token y sin tenant activo → llama handlePostLogin', async () => {

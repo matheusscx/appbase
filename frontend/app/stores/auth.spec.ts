@@ -75,3 +75,52 @@ describe('useAuthStore — computed claims', () => {
     expect(store.activeTenantId).toBeNull()
   })
 })
+
+describe('useAuthStore — restauración de sesión', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.mocked($fetch).mockReset()
+  })
+
+  it('tryRefresh exitoso guarda el nuevo token y devuelve true', async () => {
+    const store = useAuthStore()
+    const fresh = makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 'abc-123', es_superadmin: false, iat: 0, exp: 9999 })
+    vi.mocked($fetch).mockResolvedValueOnce({ access_token: fresh })
+    const ok = await store.tryRefresh()
+    expect(ok).toBe(true)
+    expect(store.token).toBe(fresh)
+    expect(store.activeTenantId).toBe('abc-123')
+  })
+
+  it('tryRefresh fallido devuelve false y no setea token', async () => {
+    const store = useAuthStore()
+    vi.mocked($fetch).mockRejectedValueOnce(new Error('401'))
+    const ok = await store.tryRefresh()
+    expect(ok).toBe(false)
+    expect(store.token).toBeNull()
+  })
+
+  it('fetchMe con token vencido refresca y reintenta una vez', async () => {
+    const store = useAuthStore()
+    store.setToken(makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 }))
+    const fresh = makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 })
+    vi.mocked($fetch)
+      .mockRejectedValueOnce(new Error('401')) // /auth/me con token vencido
+      .mockResolvedValueOnce({ access_token: fresh }) // /auth/refresh
+      .mockResolvedValueOnce({ id: 'u1', nombre: 'Ana' }) // /auth/me reintento
+    await store.fetchMe()
+    expect(store.user).toEqual({ id: 'u1', nombre: 'Ana' })
+    expect(store.token).toBe(fresh)
+  })
+
+  it('fetchMe limpia la sesión si el refresh también falla', async () => {
+    const store = useAuthStore()
+    store.setToken(makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 }))
+    vi.mocked($fetch)
+      .mockRejectedValueOnce(new Error('401')) // /auth/me
+      .mockRejectedValueOnce(new Error('401')) // /auth/refresh
+    await store.fetchMe()
+    expect(store.token).toBeNull()
+    expect(store.user).toBeNull()
+  })
+})
