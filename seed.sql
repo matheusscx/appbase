@@ -137,3 +137,40 @@ INSERT INTO "tenant_metodo_pago" ("tenant_id", "metodo_pago_id", "permite_vuelto
   ('550e8400-e29b-41d4-a716-446655440007', '81fb39b9-fe82-48da-9f37-79f3c4fcd29b', false, true),   -- Tarjeta de Crédito
   ('550e8400-e29b-41d4-a716-446655440007', '0ac14322-3f7a-479d-94d7-a0a9c51355e6', false, true),   -- Tarjeta de Débito
   ('550e8400-e29b-41d4-a716-446655440007', '11f7a34b-3456-40bc-9529-49dba452d1d0', false, true);   -- Transferencia
+
+-- =============================================================
+-- [DESARROLLO] Segundo tenant de prueba — Falabella
+-- =============================================================
+
+INSERT INTO "tenants" ("tenant_id", "provincia_id", "nombre", "correo", "telefono", "direccion") VALUES
+  ('550e8400-e29b-41d4-a716-446655440040', '550e8400-e29b-41d4-a716-446655440001', 'Falabella', 'contacto@falabella.cl', '+56226007000', 'Av. Presidente Kennedy 6400, Las Condes, Santiago');
+
+INSERT INTO "usuarios_tenants" ("usuario_id", "tenant_id") VALUES
+  ('550e8400-e29b-41d4-a716-446655440019', '550e8400-e29b-41d4-a716-446655440040');
+
+INSERT INTO "roles" ("rol_id", "tenant_id", "nombre", "descripcion", "es_fijo") VALUES
+  ('550e8400-e29b-41d4-a716-446655440041', '550e8400-e29b-41d4-a716-446655440040', 'Administrador', 'Acceso completo a todos los módulos', true);
+
+INSERT INTO "roles_usuarios" ("usuario_id", "tenant_id", "rol_id") VALUES
+  ('550e8400-e29b-41d4-a716-446655440019', '550e8400-e29b-41d4-a716-446655440040', '550e8400-e29b-41d4-a716-446655440041');
+
+-- Módulos contratados por Falabella (Facturación y Caja)
+INSERT INTO "tenant_modulos" ("modulo_tenant_id", "tenant_id", "modulo_app_id", "estado", "expira_en") VALUES
+  ('550e8400-e29b-41d4-a716-446655440042', '550e8400-e29b-41d4-a716-446655440040', '550e8400-e29b-41d4-a716-446655440010', 'activo', '2026-12-31 23:59:59'),
+  ('550e8400-e29b-41d4-a716-446655440043', '550e8400-e29b-41d4-a716-446655440040', '550e8400-e29b-41d4-a716-446655440011', 'activo', '2026-12-31 23:59:59');
+
+INSERT INTO "tenant_formula_precio" ("tenant_id", "paso", "tipo") VALUES
+  ('550e8400-e29b-41d4-a716-446655440040', 1, 'descuentos'),
+  ('550e8400-e29b-41d4-a716-446655440040', 2, 'recargos'),
+  ('550e8400-e29b-41d4-a716-446655440040', 3, 'impuestos');
+
+INSERT INTO "tenant_moneda" ("tenant_id", "moneda_id", "es_default", "habilitada", "valor_del_dia") VALUES
+  ('550e8400-e29b-41d4-a716-446655440040', '550e8400-e29b-41d4-a716-446655440003', true,  true,  1.0000),
+  ('550e8400-e29b-41d4-a716-446655440040', '550e8400-e29b-41d4-a716-446655440004', false, true,  39360.3200),
+  ('550e8400-e29b-41d4-a716-446655440040', '550e8400-e29b-41d4-a716-446655440005', false, false, 966.5000);
+
+INSERT INTO "tenant_metodo_pago" ("tenant_id", "metodo_pago_id", "permite_vuelto", "habilitada") VALUES
+  ('550e8400-e29b-41d4-a716-446655440040', '30ef8cd8-8e17-48fd-8093-76a170202cda', true,  true),
+  ('550e8400-e29b-41d4-a716-446655440040', '81fb39b9-fe82-48da-9f37-79f3c4fcd29b', false, true),
+  ('550e8400-e29b-41d4-a716-446655440040', '0ac14322-3f7a-479d-94d7-a0a9c51355e6', false, true),
+  ('550e8400-e29b-41d4-a716-446655440040', '11f7a34b-3456-40bc-9529-49dba452d1d0', false, true);
