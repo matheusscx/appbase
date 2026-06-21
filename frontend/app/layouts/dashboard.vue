@@ -11,6 +11,11 @@ const items = computed<NavigationMenuItem[]>(() => {
       icon: 'i-heroicons-home',
       to: '/',
     },
+    {
+      label: 'Test',
+      icon: 'i-heroicons-beaker',
+      to: '/test',
+    },
   ]
   if (authStore.isSuperadmin) {
     base.push({
