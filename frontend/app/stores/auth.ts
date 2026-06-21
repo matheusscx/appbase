@@ -96,7 +96,6 @@ export const useAuthStore = defineStore('auth', () => {
   // 1 tenant  → switch-tenant automático → /
   // >1 tenants → /select-tenant
   async function handlePostLogin(): Promise<void> {
-    // @ts-expect-error — store creado en Task 3
     const tenantStore = useTenantStore()
     await tenantStore.fetchMyTenants()
     const list = tenantStore.tenants
