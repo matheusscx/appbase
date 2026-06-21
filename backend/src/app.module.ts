@@ -5,7 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { User } from './modules/users/user.entity';
+import { Usuario } from './modules/users/usuario.entity';
 import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
 import { Pais } from './modules/catalog/entities/pais.entity';
 import { Provincia } from './modules/catalog/entities/provincia.entity';
@@ -26,7 +26,7 @@ import { SeederModule } from './modules/seeder/seeder.module';
         url: config.get<string>('DATABASE_URL'),
         // dev: schema managed by TypeORM synchronize; prod: use migrations
         entities: [
-          User,
+          Usuario,
           RefreshToken,
           Pais,
           Provincia,

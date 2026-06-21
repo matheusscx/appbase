@@ -18,6 +18,15 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
+import { Usuario } from '../users/usuario.entity';
+
+interface AuthenticatedRequest extends Request {
+  user: Usuario;
+}
+
+interface JwtRequest extends Request {
+  user: { id: string };
+}
 
 const REFRESH_COOKIE = 'refresh_token';
 
@@ -52,7 +61,10 @@ export class AuthController {
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  async login(@Req() req: any, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const { refresh_token, ...response } = await this.authService.login(
       req.user,
     );
@@ -68,7 +80,7 @@ export class AuthController {
 
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
-  async googleCallback(@Req() req: any, @Res() res: Response) {
+  async googleCallback(@Req() req: AuthenticatedRequest, @Res() res: Response) {
     const { access_token, refresh_token } =
       await this.authService.generateTokens(req.user);
     res.cookie(REFRESH_COOKIE, refresh_token, refreshCookieOptions());
@@ -102,7 +114,7 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  getMe(@Req() req: any) {
+  getMe(@Req() req: JwtRequest) {
     return this.authService.getMe(req.user.id);
   }
 }

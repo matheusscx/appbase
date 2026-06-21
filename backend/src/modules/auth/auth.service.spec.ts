@@ -6,16 +6,21 @@ import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { RefreshToken } from './entities/refresh-token.entity';
-import { User } from '../users/user.entity';
+import { Usuario } from '../users/usuario.entity';
 
-const mockUser: User = {
+const mockUser: Usuario = {
   id: 'user-uuid',
-  name: 'Test User',
-  email: 'test@example.com',
-  password: null,
+  nombre: 'Test',
+  apellido: 'User',
+  correo: 'test@example.com',
+  contrasena: null,
+  nombreUsuario: null,
+  telefono: null,
   googleId: null,
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  esSuperadmin: false,
+  creadoEl: new Date(),
+  actualizadoEl: new Date(),
+  eliminadoEl: null,
 };
 
 describe('AuthService', () => {

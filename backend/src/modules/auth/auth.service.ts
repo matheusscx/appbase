@@ -11,7 +11,7 @@ import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
-import { User } from '../users/user.entity';
+import { Usuario } from '../users/usuario.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 
 @Injectable()
@@ -24,27 +24,27 @@ export class AuthService {
     private readonly refreshRepo: Repository<RefreshToken>,
   ) {}
 
-  async validateUser(email: string, password: string): Promise<User | null> {
+  async validateUser(email: string, password: string): Promise<Usuario | null> {
     const user = await this.usersService.findByEmail(email);
-    if (!user || !user.password) return null;
-    const valid = await bcrypt.compare(password, user.password);
+    if (!user || !user.contrasena) return null;
+    const valid = await bcrypt.compare(password, user.contrasena);
     return valid ? user : null;
   }
 
   async register(
     dto: RegisterDto,
-  ): Promise<{ access_token: string; refresh_token: string; user: User }> {
-    const existing = await this.usersService.findByEmail(dto.email);
-    if (existing) throw new ConflictException('El email ya está registrado');
-    const hashed = await bcrypt.hash(dto.password, 10);
-    const user = await this.usersService.create({ ...dto, password: hashed });
+  ): Promise<{ access_token: string; refresh_token: string; user: Usuario }> {
+    const existing = await this.usersService.findByEmail(dto.correo);
+    if (existing) throw new ConflictException('El correo ya esta registrado');
+    const hashed = await bcrypt.hash(dto.contrasena, 10);
+    const user = await this.usersService.create({ ...dto, contrasena: hashed });
     const { access_token, refresh_token } = await this.generateTokens(user);
     return { access_token, refresh_token, user };
   }
 
   async login(
-    user: User,
-  ): Promise<{ access_token: string; refresh_token: string; user: User }> {
+    user: Usuario,
+  ): Promise<{ access_token: string; refresh_token: string; user: Usuario }> {
     const { access_token, refresh_token } = await this.generateTokens(user);
     return { access_token, refresh_token, user };
   }
@@ -53,7 +53,7 @@ export class AuthService {
     googleId: string;
     name: string;
     email: string;
-  }): Promise<User> {
+  }): Promise<Usuario> {
     let user = await this.usersService.findByGoogleId(profile.googleId);
     if (!user) {
       user = await this.usersService.findByEmail(profile.email);
@@ -62,8 +62,12 @@ export class AuthService {
       } else {
         user = await this.usersService.create({
           googleId: profile.googleId,
-          name: profile.name,
-          email: profile.email,
+          nombre: profile.name.split(' ')[0] || profile.name,
+          apellido: profile.name.split(' ').slice(1).join(' ') || null,
+          correo: profile.email,
+          contrasena: null,
+          nombreUsuario: profile.email.split('@')[0],
+          telefono: null,
         });
       }
     }
@@ -71,15 +75,20 @@ export class AuthService {
   }
 
   async generateTokens(
-    user: User,
+    user: Usuario,
   ): Promise<{ access_token: string; refresh_token: string }> {
     const access_token = this.generateAccessToken(user);
     const refresh_token = await this.createRefreshToken(user.id);
     return { access_token, refresh_token };
   }
 
-  private generateAccessToken(user: User): string {
-    return this.jwtService.sign({ sub: user.id, email: user.email });
+  private generateAccessToken(user: Usuario): string {
+    return this.jwtService.sign({
+      sub: user.id,
+      email: user.correo,
+      tenant_id: null,
+      es_superadmin: user.esSuperadmin,
+    });
   }
 
   async refresh(
@@ -104,7 +113,7 @@ export class AuthService {
     await this.refreshRepo.delete({ token: refreshToken });
   }
 
-  async getMe(userId: string): Promise<User> {
+  async getMe(userId: string): Promise<Usuario> {
     const user = await this.usersService.findById(userId);
     if (!user) throw new UnauthorizedException();
     return user;

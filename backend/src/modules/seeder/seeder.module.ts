@@ -8,6 +8,7 @@ import { ModuloApp } from '../catalog/entities/modulo-app.entity';
 import { Permiso } from '../catalog/entities/permiso.entity';
 import { ModuloAppPermiso } from '../catalog/entities/modulo-app-permiso.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import { Usuario } from '../users/usuario.entity';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { Tenant } from '../tenants/entities/tenant.entity';
       Permiso,
       ModuloAppPermiso,
       Tenant,
+      Usuario,
     ]),
   ],
   providers: [SeederService],

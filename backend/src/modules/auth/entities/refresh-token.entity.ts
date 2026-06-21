@@ -6,7 +6,7 @@ import {
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
-import { User } from '../../users/user.entity';
+import { Usuario } from '../../users/usuario.entity';
 
 @Entity('refresh_tokens')
 export class RefreshToken {
@@ -19,9 +19,9 @@ export class RefreshToken {
   @Column({ name: 'user_id' })
   userId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Usuario, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
-  user: User;
+  user: Usuario;
 
   @Column({ name: 'expires_at' })
   expiresAt: Date;

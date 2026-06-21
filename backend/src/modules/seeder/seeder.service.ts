@@ -8,6 +8,7 @@ import { ModuloApp } from '../catalog/entities/modulo-app.entity';
 import { Permiso } from '../catalog/entities/permiso.entity';
 import { ModuloAppPermiso } from '../catalog/entities/modulo-app-permiso.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import { Usuario } from '../users/usuario.entity';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -28,6 +29,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly moduloAppPermisoRepo: Repository<ModuloAppPermiso>,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
+    @InjectRepository(Usuario)
+    private readonly usuarioRepo: Repository<Usuario>,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -44,9 +47,10 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedPermisos();
     await this.seedModuloAppPermisos();
     await this.seedTenants();
+    await this.seedUsuarioAdmin();
 
-    // TODO Fase 1: seed usuario admin + usuarios_tenants + roles_usuarios
     // TODO Fase 3: seed tenant_modulos + tenant_formula_precio
+    // TODO Fase 3: seed usuarios_tenants + roles_usuarios
 
     this.logger.log('Seed complete.');
   }
@@ -249,6 +253,26 @@ export class SeederService implements OnApplicationBootstrap {
           this.moduloAppPermisoRepo.create(data),
         );
       }
+    }
+  }
+
+  private async seedUsuarioAdmin(): Promise<void> {
+    const correo = 'admin@sistema.com';
+    const exists = await this.usuarioRepo.findOne({ where: { correo } });
+    if (!exists) {
+      await this.usuarioRepo.save(
+        this.usuarioRepo.create({
+          id: '550e8400-e29b-41d4-a716-446655440019',
+          nombreUsuario: 'admin',
+          contrasena:
+            '$2b$10$3G96idl/t9r9MspBYfSG0emDgoeSpmBRiW0yHlrUwkImlhXmuI1qW',
+          nombre: 'Admin',
+          apellido: 'Sistema',
+          telefono: '123456789',
+          correo,
+          esSuperadmin: true,
+        }),
+      );
     }
   }
 
