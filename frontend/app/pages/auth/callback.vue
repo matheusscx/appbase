@@ -9,8 +9,8 @@ onMounted(async () => {
   if (!token) return navigateTo('/login')
   store.setToken(token)
   await store.fetchMe()
-  if (store.isAuthenticated) navigateTo('/')
-  else navigateTo('/login')
+  if (!store.isAuthenticated) return navigateTo('/login')
+  await store.handlePostLogin()
 })
 </script>
 

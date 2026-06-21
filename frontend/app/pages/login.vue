@@ -2,7 +2,6 @@
 definePageMeta({ layout: false })
 
 const store = useAuthStore()
-const router = useRouter()
 
 const email = ref('')
 const password = ref('')
@@ -13,7 +12,7 @@ const toast = useToast()
 
 async function onLogin() {
   const ok = await store.login(email.value, password.value)
-  if (ok) router.push('/')
+  if (ok) await store.handlePostLogin()
 }
 
 async function onGoogle() {

@@ -2,16 +2,15 @@
 definePageMeta({ layout: false })
 
 const store = useAuthStore()
-const router = useRouter()
 
-const name = ref('')
-const email = ref('')
+const nombre = ref('')
+const correo = ref('')
 const password = ref('')
 const showPassword = ref(false)
 
 async function onRegister() {
-  const ok = await store.register(name.value, email.value, password.value)
-  if (ok) router.push('/')
+  const ok = await store.register(nombre.value, correo.value, password.value)
+  if (ok) await store.handlePostLogin()
 }
 
 async function onGoogle() {
@@ -41,7 +40,7 @@ async function onGoogle() {
           v-if="store.error"
           color="error"
           variant="subtle"
-          :description="Array.isArray(store.error) ? store.error.join(', ') : store.error"
+          :description="store.error"
           icon="i-heroicons-exclamation-circle"
         />
 
@@ -73,20 +72,20 @@ async function onGoogle() {
 
         <!-- Form -->
         <form class="space-y-4" @submit.prevent="onRegister">
-          <UFormField label="Nombre completo" name="name">
+          <UFormField label="Nombre" name="nombre">
             <UInput
-              v-model="name"
+              v-model="nombre"
               type="text"
               placeholder="Tu nombre"
-              autocomplete="name"
+              autocomplete="given-name"
               :disabled="store.loading"
               class="w-full"
             />
           </UFormField>
 
-          <UFormField label="Email" name="email">
+          <UFormField label="Email" name="correo">
             <UInput
-              v-model="email"
+              v-model="correo"
               type="email"
               placeholder="tu@email.com"
               autocomplete="email"
@@ -121,7 +120,7 @@ async function onGoogle() {
             type="submit"
             block
             :loading="store.loading"
-            :disabled="store.loading || !name || !email || !password"
+            :disabled="store.loading || !nombre || !correo || !password"
           >
             Crear cuenta
           </UButton>

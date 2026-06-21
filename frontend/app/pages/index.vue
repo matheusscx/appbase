@@ -5,6 +5,7 @@ definePageMeta({
 })
 
 const store = useAuthStore()
+const tenantStore = useTenantStore()
 </script>
 
 <template>
@@ -19,10 +20,10 @@ const store = useAuthStore()
           <UIcon name="i-heroicons-check-circle" class="w-8 h-8 text-primary-600" />
         </div>
         <h2 class="text-2xl font-semibold text-default mb-2">
-          Bienvenido, {{ store.user?.name }}
+          Bienvenido, {{ store.user?.nombre }}
         </h2>
         <p class="text-muted text-sm">
-          Has iniciado sesión correctamente.
+          Trabajando en <strong>{{ tenantStore.activeTenant?.nombre ?? '—' }}</strong>
         </p>
       </div>
     </template>
