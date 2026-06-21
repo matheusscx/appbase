@@ -201,6 +201,16 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 - Routing basado en archivos vía `pages/`. Usar `$fetch` para llamadas a la API (no axios).
 - Prefijar las vars de runtime config públicas con `VITE_` en el env y acceder vía `useRuntimeConfig().public`.
 
+### Planes de implementación
+Todo plan de implementación se **persiste dentro del repo** (no solo en el archivo efímero del modo plan):
+
+- **Ubicación:** `docs/superpowers/plans/`
+- **Nombre estándar:** `YYYY-MM-DD-<kebab-slug>.md` (fecha de creación + tema). Ej: `2026-06-21-modulo-test-permisos.md`.
+- **Estado:** se rastrea con el campo de metadata `Status` (Draft / Approved / In Progress / Done), nunca por el nombre del archivo.
+- **Estructura:** encabezado `# Plan: <título>`; metadata `Status` / `Date` (YYYY-MM-DD) / `Owner`; secciones **Context**, **Scope / Out of scope**, **Backend**, **Frontend**, **Verification**, **Decisions / Open questions**. Las tareas usan checkboxes `- [ ]` para seguimiento.
+- **Flujo de trabajo:** el agente redacta y guarda el plan en `docs/superpowers/plans/` → el usuario lo edita en su editor de código → el usuario pasa la **ruta del plan** al agente → el agente lee ese archivo como fuente de verdad y lo ejecuta tarea por tarea, marcando los `- [ ]` a medida que avanza.
+- Diferencia con `docs/superpowers/specs/`: los `specs/` son diseño/contexto; los `plans/` son pasos ejecutables.
+
 ---
 
 ## Documentación viva (mantener sincronizada)
