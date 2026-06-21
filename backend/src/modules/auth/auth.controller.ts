@@ -16,6 +16,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
+import { SwitchTenantDto } from './dto/switch-tenant.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { Usuario } from '../users/usuario.entity';
@@ -116,5 +117,29 @@ export class AuthController {
   @Get('me')
   getMe(@Req() req: JwtRequest) {
     return this.authService.getMe(req.user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get('my-tenants')
+  async getMyTenants(@Req() req: JwtRequest) {
+    return this.authService.getMyTenants(req.user.id);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post('switch-tenant')
+  @HttpCode(HttpStatus.OK)
+  async switchTenant(
+    @Req() req: JwtRequest,
+    @Body() dto: SwitchTenantDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { access_token, refresh_token } = await this.authService.switchTenant(
+      req.user.id,
+      dto.tenantId,
+    );
+    res.cookie(REFRESH_COOKIE, refresh_token, refreshCookieOptions());
+    return { access_token };
   }
 }

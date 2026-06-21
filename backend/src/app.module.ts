@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { CommonModule } from './common/common.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -50,6 +51,7 @@ import { SeederModule } from './modules/seeder/seeder.module';
       }),
     }),
     SeederModule,
+    CommonModule,
     CatalogModule,
     UsersModule,
     AuthModule,

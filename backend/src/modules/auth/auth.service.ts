@@ -1,12 +1,14 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
@@ -22,6 +24,8 @@ export class AuthService {
     private readonly config: ConfigService,
     @InjectRepository(RefreshToken)
     private readonly refreshRepo: Repository<RefreshToken>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   async validateUser(email: string, password: string): Promise<Usuario | null> {
@@ -78,15 +82,15 @@ export class AuthService {
     user: Usuario,
   ): Promise<{ access_token: string; refresh_token: string }> {
     const access_token = this.generateAccessToken(user);
-    const refresh_token = await this.createRefreshToken(user.id);
+    const refresh_token = await this.createRefreshToken(user.id, null);
     return { access_token, refresh_token };
   }
 
-  private generateAccessToken(user: Usuario): string {
+  generateAccessToken(user: Usuario, tenantId: string | null = null): string {
     return this.jwtService.sign({
       sub: user.id,
       email: user.correo,
-      tenant_id: null,
+      tenant_id: tenantId,
       es_superadmin: user.esSuperadmin,
     });
   }
@@ -104,8 +108,14 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token expirado');
     }
     await this.refreshRepo.delete({ id: existing.id });
-    const access_token = this.generateAccessToken(existing.user);
-    const new_refresh_token = await this.createRefreshToken(existing.userId);
+    const access_token = this.generateAccessToken(
+      existing.user,
+      existing.activeTenantId,
+    );
+    const new_refresh_token = await this.createRefreshToken(
+      existing.userId,
+      existing.activeTenantId,
+    );
     return { access_token, refresh_token: new_refresh_token };
   }
 
@@ -119,7 +129,42 @@ export class AuthService {
     return user;
   }
 
-  private async createRefreshToken(userId: string): Promise<string> {
+  async getMyTenants(
+    userId: string,
+  ): Promise<{ tenantId: string; nombre: string }[]> {
+    return this.dataSource.query<{ tenantId: string; nombre: string }[]>(
+      `SELECT t.tenant_id as "tenantId", t.nombre
+       FROM usuarios_tenants ut
+       JOIN tenants t ON t.tenant_id = ut.tenant_id
+       WHERE ut.usuario_id = $1
+         AND ut.eliminado_el IS NULL
+         AND t.eliminado_el IS NULL`,
+      [userId],
+    );
+  }
+
+  async switchTenant(
+    userId: string,
+    tenantId: string,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    const rows = await this.dataSource.query<unknown[]>(
+      `SELECT 1 FROM usuarios_tenants
+       WHERE usuario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [userId, tenantId],
+    );
+    if (rows.length === 0)
+      throw new ForbiddenException('No perteneces a este tenant');
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new UnauthorizedException();
+    const access_token = this.generateAccessToken(user, tenantId);
+    const refresh_token = await this.createRefreshToken(userId, tenantId);
+    return { access_token, refresh_token };
+  }
+
+  private async createRefreshToken(
+    userId: string,
+    activeTenantId: string | null = null,
+  ): Promise<string> {
     const token = randomUUID();
     const expiresAt = new Date(
       Date.now() +
@@ -127,7 +172,7 @@ export class AuthService {
           this.config.get<string>('JWT_REFRESH_EXPIRATION') ?? '1h',
         ),
     );
-    await this.refreshRepo.save({ token, userId, expiresAt });
+    await this.refreshRepo.save({ token, userId, expiresAt, activeTenantId });
     return token;
   }
 

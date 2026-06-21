@@ -23,6 +23,9 @@ export class RefreshToken {
   @JoinColumn({ name: 'user_id' })
   user: Usuario;
 
+  @Column({ name: 'active_tenant_id', type: 'varchar', nullable: true })
+  activeTenantId: string | null;
+
   @Column({ name: 'expires_at' })
   expiresAt: Date;
 
