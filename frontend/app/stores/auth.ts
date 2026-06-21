@@ -1,16 +1,18 @@
 import { defineStore } from 'pinia'
+import { decodeJwt } from '~/composables/useJwt'
 
-interface User {
+export interface User {
   id: string
-  name: string
-  email: string
-  createdAt: string
+  nombre: string
+  apellido: string | null
+  correo: string
+  esSuperadmin: boolean
+  nombreUsuario: string | null
+  creadoEl: string
 }
 
 export const useAuthStore = defineStore('auth', () => {
   const config = useRuntimeConfig()
-  // On the server, use the internal Docker URL so SSR can reach the backend container.
-  // On the client, use the public URL (browser-accessible).
   const serverApiUrl = (config as Record<string, unknown>).apiUrl as string | undefined
   const resolvedApiUrl = import.meta.server ? (serverApiUrl ?? config.public.apiUrl) : config.public.apiUrl
 
@@ -22,6 +24,11 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  // Fuente de verdad: claims del JWT
+  const claims = computed(() => token.value ? decodeJwt(token.value) : null)
+  const activeTenantId = computed(() => claims.value?.tenant_id ?? null)
+  const isSuperadmin = computed(() => claims.value?.es_superadmin ?? false)
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
 
@@ -45,27 +52,28 @@ export const useAuthStore = defineStore('auth', () => {
       setToken(data.access_token)
       user.value = data.user
       return true
-    } catch (e: any) {
-      error.value = e?.data?.message ?? 'Error al iniciar sesión'
+    } catch (e: unknown) {
+      error.value = (e as { data?: { message?: string } })?.data?.message ?? 'Error al iniciar sesión'
       return false
     } finally {
       loading.value = false
     }
   }
 
-  async function register(name: string, email: string, password: string): Promise<boolean> {
+  async function register(nombre: string, correo: string, contrasena: string): Promise<boolean> {
     loading.value = true
     error.value = null
     try {
       const data = await $fetch<{ access_token: string; user: User }>(
         `${config.public.apiUrl}/auth/register`,
-        { method: 'POST', body: { name, email, password }, credentials: 'include' },
+        { method: 'POST', body: { nombre, correo, contrasena }, credentials: 'include' },
       )
       setToken(data.access_token)
       user.value = data.user
       return true
-    } catch (e: any) {
-      error.value = e?.data?.message ?? 'Error al registrarse'
+    } catch (e: unknown) {
+      const msg = (e as { data?: { message?: string | string[] } })?.data?.message
+      error.value = Array.isArray(msg) ? msg.join(', ') : (msg ?? 'Error al registrarse')
       return false
     } finally {
       loading.value = false
@@ -83,6 +91,24 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // Lógica post-login: llama my-tenants y redirige según cantidad
+  // 0 tenants → /no-tenant
+  // 1 tenant  → switch-tenant automático → /
+  // >1 tenants → /select-tenant
+  async function handlePostLogin(): Promise<void> {
+    // @ts-expect-error — store creado en Task 3
+    const tenantStore = useTenantStore()
+    await tenantStore.fetchMyTenants()
+    const list = tenantStore.tenants
+    if (list.length === 0) {
+      await navigateTo('/no-tenant')
+    } else if (list.length === 1) {
+      await tenantStore.switchTenant(list[0].tenantId)
+    } else {
+      await navigateTo('/select-tenant')
+    }
+  }
+
   function loginWithGoogle() {
     const apiBase = config.public.apiUrl.replace('/api', '')
     window.location.href = `${apiBase}/api/auth/google`
@@ -94,7 +120,7 @@ export const useAuthStore = defineStore('auth', () => {
         method: 'POST',
         credentials: 'include',
       })
-    } catch { /* ignore network errors on logout */ }
+    } catch { /* ignore */ }
     clearAuth()
     navigateTo('/login')
   }
@@ -104,12 +130,16 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     loading,
     error,
+    claims,
+    activeTenantId,
+    isSuperadmin,
     isAuthenticated,
     setToken,
     clearAuth,
     login,
     register,
     fetchMe,
+    handlePostLogin,
     loginWithGoogle,
     logout,
   }
