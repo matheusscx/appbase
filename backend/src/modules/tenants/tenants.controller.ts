@@ -11,7 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { Request } from 'express';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SuperadminGuard } from '../../common/guards/superadmin.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
