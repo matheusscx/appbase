@@ -16,14 +16,14 @@ export class RefreshToken {
   @Column({ unique: true })
   token: string;
 
-  @Column({ name: 'user_id' })
+  @Column({ name: 'user_id', type: 'uuid' })
   userId: string;
 
   @ManyToOne(() => Usuario, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: Usuario;
 
-  @Column({ name: 'active_tenant_id', type: 'varchar', nullable: true })
+  @Column({ name: 'active_tenant_id', type: 'uuid', nullable: true })
   activeTenantId: string | null;
 
   @Column({ name: 'expires_at' })

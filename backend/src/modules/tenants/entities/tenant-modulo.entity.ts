@@ -12,10 +12,10 @@ export class TenantModulo {
   @PrimaryGeneratedColumn('uuid', { name: 'modulo_tenant_id' })
   moduloTenantId: string;
 
-  @Column({ name: 'tenant_id' })
+  @Column({ name: 'tenant_id', type: 'uuid' })
   tenantId: string;
 
-  @Column({ name: 'modulo_app_id' })
+  @Column({ name: 'modulo_app_id', type: 'uuid' })
   moduloAppId: string;
 
   @Column({ default: 'activo' })

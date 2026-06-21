@@ -8,10 +8,10 @@ import {
 
 @Entity('usuarios_tenants')
 export class UsuarioTenant {
-  @PrimaryColumn({ name: 'usuario_id' })
+  @PrimaryColumn({ name: 'usuario_id', type: 'uuid' })
   usuarioId: string;
 
-  @PrimaryColumn({ name: 'tenant_id' })
+  @PrimaryColumn({ name: 'tenant_id', type: 'uuid' })
   tenantId: string;
 
   @CreateDateColumn({ name: 'creado_el' })

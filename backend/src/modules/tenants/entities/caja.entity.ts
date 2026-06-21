@@ -12,13 +12,13 @@ export class Caja {
   @PrimaryGeneratedColumn('uuid', { name: 'caja_id' })
   id: string;
 
-  @Column({ name: 'tenant_id' })
+  @Column({ name: 'tenant_id', type: 'uuid' })
   tenantId: string;
 
-  @Column({ name: 'usuario_id', type: 'varchar', nullable: true })
+  @Column({ name: 'usuario_id', type: 'uuid', nullable: true })
   usuarioId: string | null;
 
-  @Column({ name: 'moneda_id', type: 'varchar', nullable: true })
+  @Column({ name: 'moneda_id', type: 'uuid', nullable: true })
   monedaId: string | null;
 
   @Column({ default: 'virtual' })

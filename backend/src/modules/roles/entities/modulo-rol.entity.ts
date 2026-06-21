@@ -8,10 +8,10 @@ import {
 
 @Entity('modulos_roles')
 export class ModuloRol {
-  @PrimaryColumn({ name: 'rol_id' })
+  @PrimaryColumn({ name: 'rol_id', type: 'uuid' })
   rolId: string;
 
-  @PrimaryColumn({ name: 'modulo_tenant_id' })
+  @PrimaryColumn({ name: 'modulo_tenant_id', type: 'uuid' })
   moduloTenantId: string;
 
   @CreateDateColumn({ name: 'creado_el' })

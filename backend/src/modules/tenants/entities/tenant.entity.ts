@@ -12,7 +12,7 @@ export class Tenant {
   @PrimaryGeneratedColumn('uuid', { name: 'tenant_id' })
   id: string;
 
-  @Column({ name: 'provincia_id' })
+  @Column({ name: 'provincia_id', type: 'uuid' })
   provinciaId: string;
 
   @Column()

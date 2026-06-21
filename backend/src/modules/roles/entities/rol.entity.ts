@@ -12,7 +12,7 @@ export class Rol {
   @PrimaryGeneratedColumn('uuid', { name: 'rol_id' })
   id: string;
 
-  @Column({ name: 'tenant_id', type: 'varchar', nullable: true })
+  @Column({ name: 'tenant_id', type: 'uuid', nullable: true })
   tenantId: string | null;
 
   @Column()

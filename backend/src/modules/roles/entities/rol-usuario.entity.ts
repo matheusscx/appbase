@@ -8,13 +8,13 @@ import {
 
 @Entity('roles_usuarios')
 export class RolUsuario {
-  @PrimaryColumn({ name: 'usuario_id' })
+  @PrimaryColumn({ name: 'usuario_id', type: 'uuid' })
   usuarioId: string;
 
-  @PrimaryColumn({ name: 'tenant_id' })
+  @PrimaryColumn({ name: 'tenant_id', type: 'uuid' })
   tenantId: string;
 
-  @PrimaryColumn({ name: 'rol_id' })
+  @PrimaryColumn({ name: 'rol_id', type: 'uuid' })
   rolId: string;
 
   @CreateDateColumn({ name: 'creado_el' })
