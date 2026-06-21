@@ -156,6 +156,8 @@ export class AuthService {
       throw new ForbiddenException('No perteneces a este tenant');
     const user = await this.usersService.findById(userId);
     if (!user) throw new UnauthorizedException();
+    // Revocar todos los refresh tokens anteriores del usuario
+    await this.refreshRepo.delete({ userId });
     const access_token = this.generateAccessToken(user, tenantId);
     const refresh_token = await this.createRefreshToken(userId, tenantId);
     return { access_token, refresh_token };

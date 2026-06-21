@@ -5,7 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { UsuarioTenant } from '../../modules/tenants/entities/usuario-tenant.entity';
 import { JwtUser } from '../interfaces/jwt-user.interface';
 
@@ -22,7 +22,11 @@ export class TenantGuard implements CanActivate {
     if (!user?.tenantId)
       throw new ForbiddenException('No hay tenant activo en el token');
     const membership = await this.usuarioTenantRepo.findOne({
-      where: { usuarioId: user.id, tenantId: user.tenantId },
+      where: {
+        usuarioId: user.id,
+        tenantId: user.tenantId,
+        eliminadoEl: IsNull(),
+      },
     });
     if (!membership)
       throw new ForbiddenException('No perteneces a este tenant');
