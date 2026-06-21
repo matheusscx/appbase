@@ -23,13 +23,14 @@ El sistema no tenía forma de que los usuarios actualizaran sus propios datos ni
   - `PATCH /me/contrasena` — cambiar contraseña (valida actual, hashea nueva con bcrypt)
   - Página `/configuracion` con dos formularios: información personal + cambio de contraseña
   - Ítem "Configuración" fijo en el footer del sidebar, visible para todos los usuarios autenticados
+  - El navbar muestra nombre completo (nombre + apellido), avatar con iniciales (`UAvatar` size xl) y etiqueta de rol ("Administrador" / "Super Administrador") cuando aplica
   - El navbar se actualiza automáticamente tras guardar cambios de nombre
 
 - **NO incluido (fases futuras):**
   - Gestión de usuarios del tenant
   - Configuración de datos de la empresa/tenant
   - Configuración de monedas, catálogos financieros
-  - Avatar/foto de perfil
+  - Avatar/foto de perfil (hoy se muestran las iniciales)
   - Preferencias de UI (idioma, tema)
 
 ---
@@ -121,9 +122,18 @@ No requiere store dedicado. Usa `$fetch` vía `useApiFetch` directamente en los 
 
 Tras un `PATCH /me/perfil` exitoso, llama `authStore.updateUser({ nombre, apellido, telefono })` para que el sidebar refleje el nombre actualizado en tiempo real.
 
+### Navbar (`AppNavbar.vue`)
+
+El header del dashboard muestra en su zona derecha:
+- **Avatar** (`UAvatar` size xl) generado a partir del nombre completo del usuario (iniciales).
+- **Nombre completo** (`nombre + apellido`) obtenido de `authStore.user`.
+- **Etiqueta de rol** (debajo del nombre, texto en muted): "Super Administrador" si `authStore.isSuperadmin`, "Administrador" si `permissionsStore.esAdmin`, o nada para usuarios regulares.
+
+Tras editar el perfil (`PATCH /me/perfil`), `authStore.updateUser()` actualiza el nombre en el navbar en tiempo real.
+
 ### Sidebar
 
-En `layouts/dashboard.vue`, ítem "Configuración" agregado como `settingsItems` en el footer del `UDashboardSidebar`, usando `UNavigationMenu`. Siempre visible para usuarios autenticados.
+En `layouts/dashboard.vue`, ítem "Configuración" agregado como `settingsItems` en el footer del `UDashboardSidebar`, usando `UNavigationMenu`. Siempre visible para usuarios autenticados. El footer no muestra nombre ni empresa del usuario (esa información vive en el navbar).
 
 ---
 
@@ -142,7 +152,7 @@ En `layouts/dashboard.vue`, ítem "Configuración" agregado como `settingsItems`
   ↓
 [authStore.updateUser({ nombre, apellido, telefono })]
   ↓
-[Sidebar muestra nuevo nombre inmediatamente]
+[Navbar actualiza nombre + iniciales del avatar inmediatamente]
 ```
 
 ---
