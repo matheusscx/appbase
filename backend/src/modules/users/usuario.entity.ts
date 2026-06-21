@@ -13,20 +13,20 @@ export class Usuario {
   @PrimaryGeneratedColumn('uuid', { name: 'usuario_id' })
   id: string;
 
-  @Column({ name: 'nombre_usuario', unique: true, nullable: true })
+  @Column({ name: 'nombre_usuario', type: 'varchar', unique: true, nullable: true })
   nombreUsuario: string | null;
 
-  @Column({ name: 'contrasena', nullable: true })
+  @Column({ name: 'contrasena', type: 'varchar', nullable: true })
   @Exclude()
   contrasena: string | null;
 
   @Column()
   nombre: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   apellido: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   telefono: string | null;
 
   @Column({ unique: true })

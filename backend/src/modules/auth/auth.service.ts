@@ -67,11 +67,11 @@ export class AuthService {
         user = await this.usersService.create({
           googleId: profile.googleId,
           nombre: profile.name.split(' ')[0] || profile.name,
-          apellido: profile.name.split(' ').slice(1).join(' ') || null,
+          apellido: profile.name.split(' ').slice(1).join(' ') || undefined,
           correo: profile.email,
-          contrasena: null,
+          contrasena: undefined,
           nombreUsuario: profile.email.split('@')[0],
-          telefono: null,
+          telefono: undefined,
         });
       }
     }

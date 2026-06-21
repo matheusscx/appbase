@@ -10,6 +10,6 @@ import { PermisosGuard } from './guards/permisos.guard';
 @Module({
   imports: [TypeOrmModule.forFeature([UsuarioTenant, Tenant])],
   providers: [TenantGuard, SuperadminGuard, PermisosGuard],
-  exports: [TenantGuard, SuperadminGuard, PermisosGuard],
+  exports: [TenantGuard, SuperadminGuard, PermisosGuard, TypeOrmModule],
 })
 export class CommonModule {}

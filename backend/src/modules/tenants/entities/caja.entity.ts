@@ -15,10 +15,10 @@ export class Caja {
   @Column({ name: 'tenant_id' })
   tenantId: string;
 
-  @Column({ name: 'usuario_id', nullable: true })
+  @Column({ name: 'usuario_id', type: 'varchar', nullable: true })
   usuarioId: string | null;
 
-  @Column({ name: 'moneda_id', nullable: true })
+  @Column({ name: 'moneda_id', type: 'varchar', nullable: true })
   monedaId: string | null;
 
   @Column({ default: 'virtual' })
@@ -67,7 +67,7 @@ export class Caja {
   @Column({ default: 'abierta' })
   estado: string; // 'abierta' | 'cerrada'
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   comentario: string | null;
 
   @CreateDateColumn({ name: 'creado_el' })

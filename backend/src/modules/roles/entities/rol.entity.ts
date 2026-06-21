@@ -12,13 +12,13 @@ export class Rol {
   @PrimaryGeneratedColumn('uuid', { name: 'rol_id' })
   id: string;
 
-  @Column({ name: 'tenant_id', nullable: true })
+  @Column({ name: 'tenant_id', type: 'varchar', nullable: true })
   tenantId: string | null;
 
   @Column()
   nombre: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   descripcion: string | null;
 
   @Column({ name: 'es_fijo', default: false })

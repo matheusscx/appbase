@@ -21,10 +21,10 @@ export class Tenant {
   @Column({ unique: true })
   correo: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   telefono: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   direccion: string | null;
 
   @Column({ name: 'calculo_descuentos', default: 'base' })
