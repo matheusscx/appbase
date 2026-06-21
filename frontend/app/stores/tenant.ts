@@ -39,6 +39,7 @@ export const useTenantStore = defineStore('tenant', () => {
     loading.value = true
     error.value = null
     try {
+      usePermissionsStore().reset()
       const auth = useAuthStore()
       const data = await useApiFetch<{ access_token: string }>(
         `${config.public.apiUrl}/auth/switch-tenant`,
