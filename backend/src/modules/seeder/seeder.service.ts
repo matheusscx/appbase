@@ -56,6 +56,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedModuloAppPermisos();
     await this.seedTenants();
     await this.seedUsuarioAdmin();
+    await this.seedUsuariosAdicionales();
     await this.seedTenantModulo();
     await this.seedTenantFormulaPrecio();
     await this.seedUsuariosTenants();
@@ -285,6 +286,43 @@ export class SeederService implements OnApplicationBootstrap {
     }
   }
 
+  private async seedUsuariosAdicionales(): Promise<void> {
+    // Dev seed password: 'admin' (mismo que admin@sistema.com)
+    const HASH = '$2b$10$3G96idl/t9r9MspBYfSG0emDgoeSpmBRiW0yHlrUwkImlhXmuI1qW';
+
+    const usuarios = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440044',
+        nombreUsuario: 'admin.paris',
+        contrasena: HASH,
+        nombre: 'Admin',
+        apellido: 'Paris',
+        telefono: '987654321',
+        correo: 'admin.paris@paris.cl',
+        esSuperadmin: false,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440045',
+        nombreUsuario: 'vendedor.paris',
+        contrasena: HASH,
+        nombre: 'Vendedor',
+        apellido: 'Paris',
+        telefono: '987654322',
+        correo: 'vendedor@paris.cl',
+        esSuperadmin: false,
+      },
+    ];
+
+    for (const data of usuarios) {
+      const exists = await this.usuarioRepo.findOne({
+        where: { correo: data.correo },
+      });
+      if (!exists) {
+        await this.usuarioRepo.save(this.usuarioRepo.create(data));
+      }
+    }
+  }
+
   private async seedTenants(): Promise<void> {
     const tenants: Array<{
       id: string;
@@ -384,9 +422,15 @@ export class SeederService implements OnApplicationBootstrap {
 
   private async seedUsuariosTenants(): Promise<void> {
     const ADMIN = '550e8400-e29b-41d4-a716-446655440019';
+    const ADMIN_PARIS = '550e8400-e29b-41d4-a716-446655440044';
+    const VENDEDOR_PARIS = '550e8400-e29b-41d4-a716-446655440045';
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
     const pairs = [
-      [ADMIN, '550e8400-e29b-41d4-a716-446655440007'], // admin → Paris
-      [ADMIN, '550e8400-e29b-41d4-a716-446655440040'], // admin → Falabella
+      [ADMIN, PARIS],         // superadmin → Paris
+      [ADMIN, FALABELLA],     // superadmin → Falabella
+      [ADMIN_PARIS, PARIS],   // admin tenant → Paris
+      [VENDEDOR_PARIS, PARIS], // vendedor → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -399,20 +443,19 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedRolesUsuarios(): Promise<void> {
-    const ADMIN_USUARIO = '550e8400-e29b-41d4-a716-446655440019';
+    const SUPERADMIN = '550e8400-e29b-41d4-a716-446655440019';
+    const ADMIN_PARIS = '550e8400-e29b-41d4-a716-446655440044';
+    const VENDEDOR_PARIS = '550e8400-e29b-41d4-a716-446655440045';
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
 
-    const tenantRoles = [
-      {
-        tenantId: '550e8400-e29b-41d4-a716-446655440007',
-        rolId: '550e8400-e29b-41d4-a716-446655440018',
-      },
-      {
-        tenantId: '550e8400-e29b-41d4-a716-446655440040',
-        rolId: '550e8400-e29b-41d4-a716-446655440041',
-      },
+    // Crear rol Administrador en cada tenant y asignar superadmin + admin.paris en Paris
+    const adminRoles = [
+      { tenantId: PARIS, rolId: '550e8400-e29b-41d4-a716-446655440018' },
+      { tenantId: FALABELLA, rolId: '550e8400-e29b-41d4-a716-446655440041' },
     ];
 
-    for (const { tenantId, rolId } of tenantRoles) {
+    for (const { tenantId, rolId } of adminRoles) {
       const existingRol: { rol_id: string }[] = await this.dataSource.query(
         `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Administrador' AND eliminado_el IS NULL`,
         [tenantId],
@@ -426,11 +469,44 @@ export class SeederService implements OnApplicationBootstrap {
         );
       }
 
+      const resolvedRolId = existingRol[0]?.rol_id ?? rolId;
+
       await this.dataSource.query(
         `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
          VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
-        [ADMIN_USUARIO, tenantId, existingRol[0]?.rol_id ?? rolId],
+        [SUPERADMIN, tenantId, resolvedRolId],
+      );
+
+      // admin.paris también tiene rol Administrador en Paris
+      if (tenantId === PARIS) {
+        await this.dataSource.query(
+          `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+           VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+          [ADMIN_PARIS, PARIS, resolvedRolId],
+        );
+      }
+    }
+
+    // Crear rol Vendedor en Paris (no fijo) y asignar a vendedor@paris.cl
+    const vendedorRolId = '550e8400-e29b-41d4-a716-446655440046';
+    const existingVendedor: { rol_id: string }[] = await this.dataSource.query(
+      `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Vendedor' AND eliminado_el IS NULL`,
+      [PARIS],
+    );
+
+    if (existingVendedor.length === 0) {
+      await this.dataSource.query(
+        `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+         VALUES ($1, $2, 'Vendedor', 'Acceso a ventas y caja', false, NOW(), NOW())`,
+        [vendedorRolId, PARIS],
       );
     }
+
+    const resolvedVendedorRolId = existingVendedor[0]?.rol_id ?? vendedorRolId;
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [VENDEDOR_PARIS, PARIS, resolvedVendedorRolId],
+    );
   }
 }

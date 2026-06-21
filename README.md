@@ -21,6 +21,16 @@ docker-compose up
 | API       | http://localhost:3000/api    |
 | API Docs  | http://localhost:3000/api/docs |
 
+## Dev seed users
+
+All users share the password **`admin`**.
+
+| Role | Email | Tenant | Notes |
+|------|-------|--------|-------|
+| Superadmin | `admin@sistema.com` | Paris, Falabella | `es_superadmin = true`, acceso a rutas `/admin/*` |
+| Admin tenant | `admin.paris@paris.cl` | Paris | Rol Administrador (fijo) |
+| Usuario regular | `vendedor@paris.cl` | Paris | Rol Vendedor |
+
 ## Common commands
 
 ```bash
