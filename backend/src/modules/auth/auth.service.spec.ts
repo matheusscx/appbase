@@ -1,4 +1,4 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test, type TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
@@ -6,7 +6,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { RefreshToken } from './entities/refresh-token.entity';
-import { Usuario } from '../users/usuario.entity';
+import { type Usuario } from '../users/usuario.entity';
 
 const mockUser: Usuario = {
   id: 'user-uuid',

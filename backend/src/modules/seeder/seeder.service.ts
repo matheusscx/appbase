@@ -577,8 +577,8 @@ export class SeederService implements OnApplicationBootstrap {
     // 3. Asignar solo Leer y Crear al Vendedor en el módulo Test
     for (const moduloAppPermisoId of [PERMISO_TEST_LEER, PERMISO_TEST_CREAR]) {
       await this.dataSource.query(
-        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id, creado_el, actualizado_el)
-         VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
         [rolId, MODULO_TENANT_TEST, moduloAppPermisoId],
       );
     }

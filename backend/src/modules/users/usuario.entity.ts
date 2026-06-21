@@ -13,7 +13,12 @@ export class Usuario {
   @PrimaryGeneratedColumn('uuid', { name: 'usuario_id' })
   id: string;
 
-  @Column({ name: 'nombre_usuario', type: 'varchar', unique: true, nullable: true })
+  @Column({
+    name: 'nombre_usuario',
+    type: 'varchar',
+    unique: true,
+    nullable: true,
+  })
   nombreUsuario: string | null;
 
   @Column({ name: 'contrasena', type: 'varchar', nullable: true })
