@@ -448,7 +448,7 @@ cajas, ventas, cobros, facturación, roles, etc.).
 | 1b. Configuración — perfil de usuario | ✅ | ✅ | PATCH /me/perfil + PATCH /me/contrasena; página `/configuracion` |
 | 2. Perfil multi-tenant — **flujo de selección** | ✅ | ✅ | POST /auth/switch-tenant + selector `/select-tenant` |
 | 2. Perfil multi-tenant — **pantallas de gestión** | 🔲 | 🔲 | CRUD de tenants, invitación de usuarios |
-| 3. RBAC (roles, módulos, permisos) | ✅ | 🔲 | Backend completo; frontend: guard `/admin` mínimo |
+| 3. RBAC (roles, módulos, permisos) | ✅ | ✅ | Config → Roles y permisos (matriz) + Usuarios (asignación multi-rol). Multi-rol por usuario. Mutaciones gated a admin del tenant (`TenantAdminGuard`) |
 | 4. Gestión de tenants y razones sociales | 🔲 | 🔲 | |
 | 5. Catálogos base (país, provincia, moneda) | 🔲 | 🔲 | Seeders existentes en `seed.sql` |
 | 6. Configuración de monedas por tenant | 🔲 | 🔲 | |

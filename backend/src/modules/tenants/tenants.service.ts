@@ -11,6 +11,14 @@ import { Caja } from './entities/caja.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 
+export interface TenantMember {
+  usuarioId: string;
+  nombre: string;
+  apellido: string;
+  correo: string;
+  roles: { rolId: string; nombre: string }[];
+}
+
 @Injectable()
 export class TenantsService {
   constructor(
@@ -136,8 +144,51 @@ export class TenantsService {
     return this.findOne(tenantId);
   }
 
-  async findMembers(tenantId: string): Promise<UsuarioTenant[]> {
-    return this.usuarioTenantRepo.find({ where: { tenantId } });
+  async findMembers(tenantId: string): Promise<TenantMember[]> {
+    const rows: {
+      usuario_id: string;
+      nombre: string;
+      apellido: string;
+      correo: string;
+      rol_id: string | null;
+      rol_nombre: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT u.usuario_id,
+              u.nombre,
+              u.apellido,
+              u.correo,
+              r.rol_id,
+              r.nombre AS rol_nombre
+       FROM usuarios_tenants ut
+       JOIN usuarios u ON u.usuario_id = ut.usuario_id AND u.eliminado_el IS NULL
+       LEFT JOIN roles_usuarios ru ON ru.usuario_id = ut.usuario_id
+            AND ru.tenant_id = ut.tenant_id AND ru.eliminado_el IS NULL
+       LEFT JOIN roles r ON r.rol_id = ru.rol_id AND r.eliminado_el IS NULL
+       WHERE ut.tenant_id = $1
+         AND ut.eliminado_el IS NULL
+       ORDER BY u.nombre, u.apellido`,
+      [tenantId],
+    );
+
+    const porUsuario = new Map<string, TenantMember>();
+    for (const row of rows) {
+      let member = porUsuario.get(row.usuario_id);
+      if (!member) {
+        member = {
+          usuarioId: row.usuario_id,
+          nombre: row.nombre,
+          apellido: row.apellido,
+          correo: row.correo,
+          roles: [],
+        };
+        porUsuario.set(row.usuario_id, member);
+      }
+      if (row.rol_id && row.rol_nombre) {
+        member.roles.push({ rolId: row.rol_id, nombre: row.rol_nombre });
+      }
+    }
+
+    return [...porUsuario.values()];
   }
 
   async addMember(tenantId: string, usuarioId: string): Promise<UsuarioTenant> {

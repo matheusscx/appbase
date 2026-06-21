@@ -50,6 +50,22 @@ export class RbacService {
     return result.length > 0;
   }
 
+  async userIsTenantAdmin(userId: string, tenantId: string): Promise<boolean> {
+    const rows: unknown[] = await this.dataSource.query(
+      `SELECT 1
+       FROM roles_usuarios ru
+       JOIN roles r ON r.rol_id = ru.rol_id
+       WHERE ru.usuario_id = $1
+         AND ru.tenant_id = $2
+         AND r.es_fijo = true
+         AND ru.eliminado_el IS NULL
+         AND r.eliminado_el IS NULL
+       LIMIT 1`,
+      [userId, tenantId],
+    );
+    return rows.length > 0;
+  }
+
   async getMisPermisos(userId: string, tenantId: string): Promise<string[]> {
     // Caso 1: usuario tiene rol es_fijo = true → devolver TODOS los permisos del tenant
     const hasFixedRole: unknown[] = await this.dataSource.query(

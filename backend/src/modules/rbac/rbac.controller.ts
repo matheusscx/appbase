@@ -16,4 +16,15 @@ export class RbacController {
   getMisPermisos(@Request() req: { user: JwtUser }): Promise<string[]> {
     return this.rbacService.getMisPermisos(req.user.id, req.user.tenantId!);
   }
+
+  @Get('es-admin')
+  async esAdmin(
+    @Request() req: { user: JwtUser },
+  ): Promise<{ esAdmin: boolean }> {
+    const esAdmin = await this.rbacService.userIsTenantAdmin(
+      req.user.id,
+      req.user.tenantId!,
+    );
+    return { esAdmin };
+  }
 }

@@ -3,13 +3,39 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-const navItems: NavigationMenuItem[] = [
-  {
-    label: 'Perfil',
-    icon: 'i-heroicons-user-circle',
-    to: '/configuracion/perfil',
-  },
-]
+const permissionsStore = usePermissionsStore()
+
+onMounted(() => {
+  if (!permissionsStore.permisos.length && !permissionsStore.loading)
+    permissionsStore.fetchPermisos()
+})
+
+const navItems = computed<NavigationMenuItem[]>(() => {
+  const items: NavigationMenuItem[] = [
+    {
+      label: 'Perfil',
+      icon: 'i-heroicons-user-circle',
+      to: '/configuracion/perfil',
+    },
+  ]
+
+  if (permissionsStore.esAdmin) {
+    items.push(
+      {
+        label: 'Roles y permisos',
+        icon: 'i-heroicons-shield-check',
+        to: '/configuracion/roles',
+      },
+      {
+        label: 'Usuarios',
+        icon: 'i-heroicons-users',
+        to: '/configuracion/usuarios',
+      },
+    )
+  }
+
+  return items
+})
 </script>
 
 <template>

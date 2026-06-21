@@ -75,6 +75,12 @@ Modelo: `rol → módulo contratado → permisos`
 - `admin` — rol fijo del sistema, acceso completo dentro del tenant. Se crea automáticamente al dar de alta un tenant.
 - Roles personalizados — creados por el admin del tenant. Ejemplo: "cajero" con módulo Caja y permisos para crear ventas pero no eliminarlas.
 
+**Multi-rol por usuario:** un usuario puede tener **varios roles** dentro de un mismo
+tenant; sus permisos son la **unión** de todos sus roles. Esto permite roles granulares
+y componibles (ej. "Caja" + "Reportes") en vez de obligar a crear un rol a medida por
+usuario. La administración de roles y la asignación a usuarios se hace desde
+**Configuración → Roles y permisos / Usuarios** (solo el admin del tenant).
+
 **Superadmin:** contexto completamente separado. Flag `es_superadmin` en la tabla `usuarios`. Rutas `/admin/*` protegidas por un guard propio, independiente del RBAC de tenants. El superadmin no opera dentro de ningún tenant.
 
 **Enforcement:** real en el backend (decisión B). Cada ruta valida rol + módulo contratado + permiso del usuario sobre el tenant activo.

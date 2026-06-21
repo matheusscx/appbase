@@ -15,6 +15,7 @@ import {
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
+import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { RolesService } from './roles.service';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
@@ -32,13 +33,21 @@ export class RolesController {
     return this.rolesService.findAll(user.tenantId!);
   }
 
+  @Get('modulos-disponibles')
+  findModulosDisponibles(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.rolesService.findModulosDisponibles(user.tenantId!);
+  }
+
   @Post()
+  @UseGuards(TenantAdminGuard)
   create(@Req() req: Request, @Body() dto: CreateRolDto) {
     const user = req.user as JwtUser;
     return this.rolesService.create(user.tenantId!, dto);
   }
 
   @Patch(':id')
+  @UseGuards(TenantAdminGuard)
   update(
     @Param('id') id: string,
     @Req() req: Request,
@@ -49,6 +58,7 @@ export class RolesController {
   }
 
   @Delete(':id')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtUser;
@@ -56,6 +66,7 @@ export class RolesController {
   }
 
   @Post(':id/users')
+  @UseGuards(TenantAdminGuard)
   assignUser(
     @Param('id') id: string,
     @Req() req: Request,
@@ -66,6 +77,7 @@ export class RolesController {
   }
 
   @Delete(':id/users/:userId')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   removeUser(
     @Param('id') id: string,
@@ -83,6 +95,7 @@ export class RolesController {
   }
 
   @Put(':id/modules/:moduloTenantId/permissions')
+  @UseGuards(TenantAdminGuard)
   setPermissions(
     @Param('id') id: string,
     @Param('moduloTenantId') moduloTenantId: string,

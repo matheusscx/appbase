@@ -4,6 +4,7 @@ import { useApiFetch } from '~/composables/useApiFetch'
 export const usePermissionsStore = defineStore('permissions', () => {
   const config = useRuntimeConfig()
   const permisos = ref<string[]>([])
+  const esAdmin = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -12,7 +13,12 @@ export const usePermissionsStore = defineStore('permissions', () => {
     error.value = null
     try {
       const apiUrl = config.public.apiUrl
-      permisos.value = await useApiFetch<string[]>(`${apiUrl}/rbac/mis-permisos`)
+      const [perms, admin] = await Promise.all([
+        useApiFetch<string[]>(`${apiUrl}/rbac/mis-permisos`),
+        useApiFetch<{ esAdmin: boolean }>(`${apiUrl}/rbac/es-admin`),
+      ])
+      permisos.value = perms
+      esAdmin.value = admin.esAdmin
     }
     catch (e: unknown) {
       const msg = (e as { data?: { message?: string } })?.data?.message
@@ -31,8 +37,9 @@ export const usePermissionsStore = defineStore('permissions', () => {
 
   function reset(): void {
     permisos.value = []
+    esAdmin.value = false
     error.value = null
   }
 
-  return { permisos, loading, error, fetchPermisos, can, reset }
+  return { permisos, esAdmin, loading, error, fetchPermisos, can, reset }
 })

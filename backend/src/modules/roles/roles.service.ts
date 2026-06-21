@@ -8,10 +8,19 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Rol } from './entities/rol.entity';
 import { RolUsuario } from './entities/rol-usuario.entity';
+import { ModuloRol } from './entities/modulo-rol.entity';
 import { RolPermisoModulo } from './entities/rol-permiso-modulo.entity';
 import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
 import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
+
+export interface ModuloDisponible {
+  moduloTenantId: string;
+  moduloAppId: string;
+  nombre: string;
+  icono: string | null;
+  permisos: { moduloAppPermisoId: string; permisoNombre: string }[];
+}
 
 @Injectable()
 export class RolesService {
@@ -20,6 +29,8 @@ export class RolesService {
     private readonly rolRepo: Repository<Rol>,
     @InjectRepository(RolUsuario)
     private readonly rolUsuarioRepo: Repository<RolUsuario>,
+    @InjectRepository(ModuloRol)
+    private readonly moduloRolRepo: Repository<ModuloRol>,
     @InjectRepository(RolPermisoModulo)
     private readonly rolPermisoModuloRepo: Repository<RolPermisoModulo>,
     @InjectRepository(TenantModulo)
@@ -133,8 +144,12 @@ export class RolesService {
     // Delete all existing permissions for (rolId, moduloTenantId)
     await this.rolPermisoModuloRepo.delete({ rolId, moduloTenantId });
 
-    // Insert new permissions
     if (moduloAppPermisoIds.length > 0) {
+      // El chequeo de permisos (RbacService) hace JOIN por modulos_roles, así que
+      // el rol debe estar vinculado al módulo del tenant para que los permisos
+      // surtan efecto. Asegurar la fila (crear o restaurar si está soft-deleted).
+      await this.ensureModuloRol(rolId, moduloTenantId);
+
       const entries = moduloAppPermisoIds.map((moduloAppPermisoId) =>
         this.rolPermisoModuloRepo.create({
           rolId,
@@ -143,6 +158,79 @@ export class RolesService {
         }),
       );
       await this.rolPermisoModuloRepo.save(entries);
+    } else {
+      // Sin permisos en este módulo → quitar el vínculo rol↔módulo.
+      await this.moduloRolRepo.softDelete({ rolId, moduloTenantId });
     }
+  }
+
+  private async ensureModuloRol(
+    rolId: string,
+    moduloTenantId: string,
+  ): Promise<void> {
+    const existing = await this.moduloRolRepo.findOne({
+      where: { rolId, moduloTenantId },
+      withDeleted: true,
+    });
+
+    if (existing) {
+      if (existing.eliminadoEl) {
+        existing.eliminadoEl = null;
+        await this.moduloRolRepo.save(existing);
+      }
+      return;
+    }
+
+    await this.moduloRolRepo.save(
+      this.moduloRolRepo.create({ rolId, moduloTenantId }),
+    );
+  }
+
+  async findModulosDisponibles(tenantId: string): Promise<ModuloDisponible[]> {
+    const rows: {
+      modulo_tenant_id: string;
+      modulo_app_id: string;
+      nombre: string;
+      icono: string | null;
+      modulo_app_permiso_id: string;
+      permiso_nombre: string;
+    }[] = await this.dataSource.query(
+      `SELECT tm.modulo_tenant_id,
+              ma.modulo_app_id,
+              ma.nombre,
+              ma.icono,
+              map.modulo_app_permiso_id,
+              p.nombre AS permiso_nombre
+       FROM tenant_modulos tm
+       JOIN modulos_app ma ON ma.modulo_app_id = tm.modulo_app_id AND ma.eliminado_el IS NULL
+       JOIN modulo_app_permisos map ON map.modulo_app_id = ma.modulo_app_id AND map.eliminado_el IS NULL
+       JOIN permisos p ON p.permiso_id = map.permiso_id AND p.eliminado_el IS NULL
+       WHERE tm.tenant_id = $1
+         AND tm.estado = 'activo'
+         AND tm.eliminado_el IS NULL
+       ORDER BY ma.nombre, p.nombre`,
+      [tenantId],
+    );
+
+    const porModulo = new Map<string, ModuloDisponible>();
+    for (const row of rows) {
+      let modulo = porModulo.get(row.modulo_tenant_id);
+      if (!modulo) {
+        modulo = {
+          moduloTenantId: row.modulo_tenant_id,
+          moduloAppId: row.modulo_app_id,
+          nombre: row.nombre,
+          icono: row.icono,
+          permisos: [],
+        };
+        porModulo.set(row.modulo_tenant_id, modulo);
+      }
+      modulo.permisos.push({
+        moduloAppPermisoId: row.modulo_app_permiso_id,
+        permisoNombre: row.permiso_nombre,
+      });
+    }
+
+    return [...porModulo.values()];
   }
 }
