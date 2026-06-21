@@ -28,4 +28,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
     await store.handlePostLogin()
     return
   }
+
+  // Hay tenant activo (claim del JWT) pero, tras un refresh/reapertura del
+  // navegador, la lista de tenants en memoria se reinicia. Rehidratarla para
+  // que `activeTenant` pueda resolver el tenant seleccionado.
+  const tenantStore = useTenantStore()
+  if (tenantStore.tenants.length === 0) {
+    await tenantStore.fetchMyTenants()
+  }
 })

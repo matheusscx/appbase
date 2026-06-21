@@ -21,6 +21,13 @@ vi.mock('#app/composables/cookie', () => ({
   refreshCookie: vi.fn(),
 }))
 
+// storeToRefs real (pinia) filtra objetos planos a {}; en estos tests el mock
+// de store ya expone refs, así que devolvemos el store tal cual.
+vi.mock('pinia', async (orig) => {
+  const actual = await orig<typeof import('pinia')>()
+  return { ...actual, storeToRefs: (store: Record<string, unknown>) => store }
+})
+
 const mockNavigateTo = vi.fn()
 
 vi.mock('#app/composables/router', () => ({
@@ -36,16 +43,26 @@ vi.mock('#app/composables/router', () => ({
 let mockToken: string | null = null
 let mockActiveTenantId: string | null = null
 let mockUser: object | null = null
+let mockTenants: { tenantId: string, nombre: string }[] = []
 const mockFetchMe = vi.fn()
 const mockHandlePostLogin = vi.fn()
+const mockFetchMyTenants = vi.fn()
 
 vi.mock('../stores/auth', () => ({
   useAuthStore: () => ({
     token: { value: mockToken },
     user: { value: mockUser },
     activeTenantId: { value: mockActiveTenantId },
+    isSuperadmin: { value: false },
     fetchMe: mockFetchMe,
     handlePostLogin: mockHandlePostLogin,
+  }),
+}))
+
+vi.mock('../stores/tenant', () => ({
+  useTenantStore: () => ({
+    get tenants() { return mockTenants },
+    fetchMyTenants: mockFetchMyTenants,
   }),
 }))
 
@@ -63,10 +80,13 @@ describe('middleware/auth', () => {
     mockToken = null
     mockActiveTenantId = null
     mockUser = null
+    mockTenants = []
     mockFetchMe.mockClear()
     mockFetchMe.mockResolvedValue(undefined)
     mockHandlePostLogin.mockClear()
     mockHandlePostLogin.mockResolvedValue(undefined)
+    mockFetchMyTenants.mockClear()
+    mockFetchMyTenants.mockResolvedValue(undefined)
     mockNavigateTo.mockClear()
   })
 
@@ -88,8 +108,28 @@ describe('middleware/auth', () => {
     mockToken = 'some.token.here'
     mockUser = { id: '1', nombre: 'Test' }
     mockActiveTenantId = 'tenant-uuid'
+    mockTenants = [{ tenantId: 'tenant-uuid', nombre: 'Empresa A' }]
     await authMiddleware(makeContext('/'))
     expect(mockNavigateTo).not.toHaveBeenCalled()
+  })
+
+  it('tras refresh: tenant activo pero lista vacía → rehidrata fetchMyTenants', async () => {
+    mockToken = 'some.token.here'
+    mockUser = { id: '1', nombre: 'Test' }
+    mockActiveTenantId = 'tenant-uuid'
+    mockTenants = []
+    await authMiddleware(makeContext('/'))
+    expect(mockFetchMyTenants).toHaveBeenCalled()
+    expect(mockNavigateTo).not.toHaveBeenCalled()
+  })
+
+  it('tenant activo y lista ya cargada → no vuelve a fetchMyTenants', async () => {
+    mockToken = 'some.token.here'
+    mockUser = { id: '1', nombre: 'Test' }
+    mockActiveTenantId = 'tenant-uuid'
+    mockTenants = [{ tenantId: 'tenant-uuid', nombre: 'Empresa A' }]
+    await authMiddleware(makeContext('/'))
+    expect(mockFetchMyTenants).not.toHaveBeenCalled()
   })
 
   it('rutas exentas no requieren tenant activo (/select-tenant)', async () => {
