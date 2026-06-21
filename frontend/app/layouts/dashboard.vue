@@ -65,14 +65,6 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
             :items="settingsItems"
             orientation="vertical"
           />
-          <!-- Tenant activo (cuando sidebar expandido) -->
-          <div v-if="!collapsed && tenantStore.activeTenant" class="px-2 text-xs text-muted truncate flex items-center gap-1">
-            <UIcon name="i-heroicons-building-office" class="w-3 h-3 shrink-0" />
-            {{ tenantStore.activeTenant.nombre }}
-          </div>
-          <div v-if="!collapsed" class="px-2 text-xs text-muted truncate">
-            {{ authStore.user?.nombre }}
-          </div>
           <UButton
             :icon="collapsed ? 'i-heroicons-arrow-right-on-rectangle' : undefined"
             :label="collapsed ? undefined : 'Cerrar sesión'"

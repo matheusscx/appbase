@@ -4,7 +4,13 @@ defineProps<{
 }>()
 
 const authStore = useAuthStore()
-const tenantStore = useTenantStore()
+const permissionsStore = usePermissionsStore()
+
+const rolLabel = computed(() => {
+  if (authStore.isSuperadmin) return 'Super Administrador'
+  if (permissionsStore.esAdmin) return 'Administrador'
+  return null
+})
 </script>
 
 <template>
@@ -14,9 +20,20 @@ const tenantStore = useTenantStore()
     </template>
     <template #right>
       <slot name="right">
-        <span class="text-sm text-muted">
-          {{ tenantStore.activeTenant?.nombre ?? authStore.user?.nombre }}
-        </span>
+        <div class="flex items-center gap-2">
+          <UAvatar
+            :alt="[authStore.user?.nombre, authStore.user?.apellido].filter(Boolean).join(' ')"
+            size="xl"
+          />
+          <div class="flex flex-col leading-tight">
+            <span class="text-sm text-muted">
+              {{ [authStore.user?.nombre, authStore.user?.apellido].filter(Boolean).join(' ') }}
+            </span>
+            <span v-if="rolLabel" class="text-xs text-muted opacity-60">
+              {{ rolLabel }}
+            </span>
+          </div>
+        </div>
       </slot>
     </template>
   </UDashboardNavbar>
