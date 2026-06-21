@@ -445,6 +445,7 @@ cajas, ventas, cobros, facturación, roles, etc.).
 | Funcionalidad | Backend | Frontend | Notas |
 |---|---|---|---|
 | 1. Autenticación (login / refresh / logout) | ✅ | ✅ | JWT access + refresh con cookies httpOnly |
+| 1b. Configuración — perfil de usuario | ✅ | ✅ | PATCH /me/perfil + PATCH /me/contrasena; página `/configuracion` |
 | 2. Perfil multi-tenant — **flujo de selección** | ✅ | ✅ | POST /auth/switch-tenant + selector `/select-tenant` |
 | 2. Perfil multi-tenant — **pantallas de gestión** | 🔲 | 🔲 | CRUD de tenants, invitación de usuarios |
 | 3. RBAC (roles, módulos, permisos) | ✅ | 🔲 | Backend completo; frontend: guard `/admin` mínimo |

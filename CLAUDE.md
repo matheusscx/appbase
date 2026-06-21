@@ -82,6 +82,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 |---|---|
 | Login (JWT access + refresh) | ✅ Implementado |
 | Flujo multi-tenant en frontend (selección de tenant) | ✅ Implementado |
+| Configuración — perfil de usuario (nombre, teléfono, contraseña) | ✅ Implementado |
 | Perfil multi-tenant (pantallas de gestión) | 🔲 Por construir |
 | RBAC (roles, módulos, permisos) | 🔲 Por construir |
 | Gestión de tenants y razones sociales | 🔲 Por construir |

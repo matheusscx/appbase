@@ -46,6 +46,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/auth.md](./features/auth.md)** — Authentication feature (JWT + Google OAuth)
 - **[features/frontend-multitenant.md](./features/frontend-multitenant.md)** — Flujo multi-tenant en frontend (selección de tenant)
 - **[features/test-permisos.md](./features/test-permisos.md)** — Módulo Test para validación RBAC end-to-end
+- **[features/modulo-configuracion.md](./features/modulo-configuracion.md)** — Módulo Configuración (perfil de usuario + cambio de contraseña)
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans
@@ -105,7 +106,8 @@ docs/
 │   ├── TEMPLATE.md                # Template for new features
 │   ├── auth.md                    # Authentication feature
 │   ├── frontend-multitenant.md    # Frontend multi-tenant flow
-│   └── test-permisos.md           # RBAC test module
+│   ├── test-permisos.md           # RBAC test module
+│   └── modulo-configuracion.md    # Configuración — perfil de usuario
 └── superpowers/                   # Engineering plans & design specs
     ├── plans/
     └── specs/

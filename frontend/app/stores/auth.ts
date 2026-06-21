@@ -5,6 +5,7 @@ export interface User {
   id: string
   nombre: string
   apellido: string | null
+  telefono: string | null
   correo: string
   esSuperadmin: boolean
   nombreUsuario: string | null
@@ -34,6 +35,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setToken(newToken: string) {
     token.value = newToken
+  }
+
+  function updateUser(partial: Partial<User>) {
+    if (user.value) Object.assign(user.value, partial)
   }
 
   function clearAuth() {
@@ -178,6 +183,7 @@ export const useAuthStore = defineStore('auth', () => {
     isSuperadmin,
     isAuthenticated,
     setToken,
+    updateUser,
     clearAuth,
     login,
     register,

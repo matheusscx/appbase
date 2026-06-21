@@ -11,6 +11,7 @@ import { TenantsModule } from './modules/tenants/tenants.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { TestModule } from './modules/test/test.module';
+import { MeModule } from './modules/me/me.module';
 import { Usuario } from './modules/users/usuario.entity';
 import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
 import { Pais } from './modules/catalog/entities/pais.entity';
@@ -70,6 +71,7 @@ import { SeederModule } from './modules/seeder/seeder.module';
     RbacModule,
     RolesModule,
     TestModule,
+    MeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

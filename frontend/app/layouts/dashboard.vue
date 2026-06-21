@@ -20,12 +20,20 @@ const items = computed<NavigationMenuItem[]>(() => {
   if (authStore.isSuperadmin) {
     base.push({
       label: 'Administración',
-      icon: 'i-heroicons-cog-6-tooth',
+      icon: 'i-heroicons-shield-check',
       to: '/admin',
     })
   }
   return base
 })
+
+const settingsItems = computed<NavigationMenuItem[]>(() => [
+  {
+    label: 'Configuración',
+    icon: 'i-heroicons-cog-6-tooth',
+    to: '/configuracion',
+  },
+])
 </script>
 
 <template>
@@ -52,6 +60,11 @@ const items = computed<NavigationMenuItem[]>(() => {
 
       <template #footer="{ collapsed }">
         <div class="flex flex-col gap-2">
+          <UNavigationMenu
+            :collapsed="collapsed"
+            :items="settingsItems"
+            orientation="vertical"
+          />
           <!-- Tenant activo (cuando sidebar expandido) -->
           <div v-if="!collapsed && tenantStore.activeTenant" class="px-2 text-xs text-muted truncate flex items-center gap-1">
             <UIcon name="i-heroicons-building-office" class="w-3 h-3 shrink-0" />
