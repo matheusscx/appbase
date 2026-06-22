@@ -25,7 +25,7 @@ const emptyForm = () => ({
   rut: '',
   direccion: '',
   telefono: '',
-  habilitado: false,
+  habilitado: true,
 })
 const form = ref(emptyForm())
 
