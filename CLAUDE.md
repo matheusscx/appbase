@@ -92,7 +92,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Perfil multi-tenant (pantallas de gestión) | 🔲 Por construir |
 | Configuración — Roles y Permisos (RBAC: roles, matriz de permisos, asignación a usuarios) | ✅ Implementado |
 | RBAC — gestión de módulos contratados (superadmin) | 🔲 Por construir |
-| Gestión de tenants y razones sociales | 🔲 Por construir |
+| Gestión de tenants y razones sociales | ✅ Implementado |
 | Terceros (proveedores, empresas) | 🔲 Por construir |
 | Catálogos base (país, provincia, moneda) | 🔲 Por construir |
 | Configuración de monedas por tenant | 🔲 Por construir |

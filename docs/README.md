@@ -48,6 +48,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/test-permisos.md](./features/test-permisos.md)** — Módulo Test para validación RBAC end-to-end
 - **[features/modulo-configuracion.md](./features/modulo-configuracion.md)** — Módulo Configuración (perfil de usuario + cambio de contraseña)
 - **[features/roles-permisos.md](./features/roles-permisos.md)** — Configuración de Roles y Permisos (RBAC: roles, matriz de permisos, asignación a usuarios)
+- **[features/tenants-razones-sociales.md](./features/tenants-razones-sociales.md)** — Gestión de tenants y razones sociales
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans
@@ -109,7 +110,8 @@ docs/
 │   ├── frontend-multitenant.md    # Frontend multi-tenant flow
 │   ├── test-permisos.md           # RBAC test module
 │   ├── modulo-configuracion.md    # Configuración — perfil de usuario
-│   └── roles-permisos.md          # Configuración — roles y permisos (RBAC)
+│   ├── roles-permisos.md          # Configuración — roles y permisos (RBAC)
+│   └── tenants-razones-sociales.md # Gestión de tenants y razones sociales
 └── superpowers/                   # Engineering plans & design specs
     ├── plans/
     └── specs/
