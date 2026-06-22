@@ -1,6 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { TenantsService } from './tenants.service';
 import { Tenant } from './entities/tenant.entity';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
@@ -209,7 +209,7 @@ describe('TenantsService', () => {
   describe('setPreferida', () => {
     it('limpia la preferida anterior y marca la nueva', async () => {
       const mockManager = {
-        findOne: jest.fn().mockResolvedValue({ ...mockRazonSocial }),
+        findOne: jest.fn().mockResolvedValue({ ...mockRazonSocial, habilitado: true }),
         query: jest.fn().mockResolvedValue(undefined),
       };
       dataSource.transaction.mockImplementation((cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager));
@@ -238,6 +238,36 @@ describe('TenantsService', () => {
         NotFoundException,
       );
       expect(mockManager.query).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequestException si la razón social está deshabilitada', async () => {
+      const mockManager = {
+        findOne: jest.fn().mockResolvedValue({ ...mockRazonSocial, habilitado: false }),
+        query: jest.fn(),
+      };
+      dataSource.transaction.mockImplementation((cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager));
+
+      await expect(service.setPreferida('tenant-uuid', 'rs-uuid')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockManager.query).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateRazonSocial — guard preferida', () => {
+    it('lanza BadRequestException al intentar deshabilitar la razón social preferida', async () => {
+      razonSocialRepo.findOne.mockResolvedValue({ ...mockRazonSocial, habilitado: true, preferida: true });
+      await expect(
+        service.updateRazonSocial('tenant-uuid', 'rs-uuid', { habilitado: false }),
+      ).rejects.toThrow(BadRequestException);
+      expect(razonSocialRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('permite deshabilitar una razón social no preferida', async () => {
+      razonSocialRepo.findOne.mockResolvedValue({ ...mockRazonSocial, habilitado: true, preferida: false });
+      razonSocialRepo.save.mockResolvedValue({ ...mockRazonSocial, habilitado: false, preferida: false });
+      const result = await service.updateRazonSocial('tenant-uuid', 'rs-uuid', { habilitado: false });
+      expect(result.habilitado).toBe(false);
     });
   });
 });

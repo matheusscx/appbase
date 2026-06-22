@@ -101,6 +101,10 @@ async function guardar() {
 
 async function toggleHabilitado(rs: RazonSocial) {
   if (toggling.has(rs.id)) return
+  if (rs.preferida && rs.habilitado) {
+    toast.add({ title: 'No se puede deshabilitar la razón social preferida', color: 'warning' })
+    return
+  }
   toggling.add(rs.id)
   const prev = rs.habilitado
   rs.habilitado = !prev
@@ -123,6 +127,10 @@ async function toggleHabilitado(rs: RazonSocial) {
 
 async function togglePreferida(rs: RazonSocial) {
   if (rs.preferida || toggling.has(rs.id)) return
+  if (!rs.habilitado) {
+    toast.add({ title: 'Debes habilitar la razón social antes de marcarla como preferida', color: 'warning' })
+    return
+  }
   const prev = razones.value.find(r => r.preferida)
   if (prev) prev.preferida = false
   rs.preferida = true

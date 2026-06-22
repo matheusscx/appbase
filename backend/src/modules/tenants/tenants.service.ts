@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -272,6 +273,11 @@ export class TenantsService {
       where: { id, tenantId },
     });
     if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
+    if (dto.habilitado === false && rs.preferida) {
+      throw new BadRequestException(
+        'No se puede deshabilitar la razón social preferida',
+      );
+    }
     Object.assign(rs, dto);
     return this.razonSocialRepo.save(rs);
   }
@@ -290,6 +296,11 @@ export class TenantsService {
         where: { id, tenantId },
       });
       if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
+      if (!rs.habilitado) {
+        throw new BadRequestException(
+          'No se puede marcar como preferida una razón social deshabilitada',
+        );
+      }
 
       await manager.query(
         `UPDATE razones_sociales SET preferida = false WHERE tenant_id = $1 AND eliminado_el IS NULL`,
