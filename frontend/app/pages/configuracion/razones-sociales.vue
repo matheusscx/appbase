@@ -6,6 +6,7 @@ interface RazonSocial {
   direccion: string | null
   telefono: string | null
   habilitado: boolean
+  preferida: boolean
 }
 
 const config = useRuntimeConfig()
@@ -120,6 +121,29 @@ async function toggleHabilitado(rs: RazonSocial) {
   }
 }
 
+async function togglePreferida(rs: RazonSocial) {
+  if (rs.preferida || toggling.has(rs.id)) return
+  const prev = razones.value.find(r => r.preferida)
+  if (prev) prev.preferida = false
+  rs.preferida = true
+  toggling.add(rs.id)
+  try {
+    await useApiFetch(`${apiUrl}/tenants/razones-sociales/${rs.id}/preferida`, {
+      method: 'PATCH',
+    })
+    toast.add({ title: 'Razón social preferida actualizada', color: 'success' })
+  }
+  catch (e: unknown) {
+    rs.preferida = false
+    if (prev) prev.preferida = true
+    const msg = (e as { data?: { message?: string } })?.data?.message
+    toast.add({ title: msg ?? 'Error al actualizar preferida', color: 'error' })
+  }
+  finally {
+    toggling.delete(rs.id)
+  }
+}
+
 async function eliminar(id: string) {
   try {
     await useApiFetch(`${apiUrl}/tenants/razones-sociales/${id}`, {
@@ -194,6 +218,18 @@ onMounted(cargar)
             </p>
           </div>
           <div class="flex items-center gap-4 shrink-0 ml-4">
+            <button
+              type="button"
+              class="p-1 rounded transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              :disabled="toggling.has(rs.id)"
+              @click="togglePreferida(rs)"
+            >
+              <UIcon
+                :name="rs.preferida ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
+                class="w-5 h-5"
+                :class="rs.preferida ? 'text-yellow-400' : 'text-gray-400'"
+              />
+            </button>
             <USwitch
               :model-value="rs.habilitado"
               :disabled="toggling.has(rs.id)"
