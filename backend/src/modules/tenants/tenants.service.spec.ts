@@ -116,4 +116,81 @@ describe('TenantsService', () => {
       );
     });
   });
+
+  const mockRazonSocial: RazonSocial = {
+    id: 'rs-uuid',
+    tenantId: 'tenant-uuid',
+    nombre: 'Paris SPA',
+    rut: '76.123.456-7',
+    direccion: 'Av. Kennedy 9001',
+    telefono: null,
+    habilitado: false,
+    creadoEl: new Date(),
+    actualizadoEl: new Date(),
+    eliminadoEl: null,
+  };
+
+  describe('findRazonesSociales', () => {
+    it('retorna las razones sociales del tenant', async () => {
+      razonSocialRepo.find.mockResolvedValue([mockRazonSocial]);
+      const result = await service.findRazonesSociales('tenant-uuid');
+      expect(result).toEqual([mockRazonSocial]);
+      expect(razonSocialRepo.find).toHaveBeenCalledWith({
+        where: { tenantId: 'tenant-uuid' },
+        order: { nombre: 'ASC' },
+      });
+    });
+  });
+
+  describe('createRazonSocial', () => {
+    it('crea y retorna la razon social', async () => {
+      razonSocialRepo.create.mockReturnValue(mockRazonSocial);
+      razonSocialRepo.save.mockResolvedValue(mockRazonSocial);
+      const dto = { nombre: 'Paris SPA', rut: '76.123.456-7' };
+      const result = await service.createRazonSocial('tenant-uuid', dto);
+      expect(result).toEqual(mockRazonSocial);
+      expect(razonSocialRepo.create).toHaveBeenCalledWith({
+        tenantId: 'tenant-uuid',
+        nombre: 'Paris SPA',
+        rut: '76.123.456-7',
+      });
+    });
+  });
+
+  describe('updateRazonSocial', () => {
+    it('actualiza la razon social', async () => {
+      razonSocialRepo.findOne.mockResolvedValue({ ...mockRazonSocial });
+      razonSocialRepo.save.mockResolvedValue({
+        ...mockRazonSocial,
+        nombre: 'Paris SA',
+      });
+      const result = await service.updateRazonSocial('tenant-uuid', 'rs-uuid', {
+        nombre: 'Paris SA',
+      });
+      expect(result.nombre).toBe('Paris SA');
+    });
+
+    it('lanza NotFoundException si no pertenece al tenant', async () => {
+      razonSocialRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.updateRazonSocial('tenant-uuid', 'otro-id', { nombre: 'X' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('removeRazonSocial', () => {
+    it('hace soft delete de la razon social', async () => {
+      razonSocialRepo.findOne.mockResolvedValue(mockRazonSocial);
+      razonSocialRepo.softDelete.mockResolvedValue({ affected: 1 });
+      await service.removeRazonSocial('tenant-uuid', 'rs-uuid');
+      expect(razonSocialRepo.softDelete).toHaveBeenCalledWith('rs-uuid');
+    });
+
+    it('lanza NotFoundException si no pertenece al tenant', async () => {
+      razonSocialRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.removeRazonSocial('tenant-uuid', 'no-existe'),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
 });

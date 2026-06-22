@@ -8,9 +8,12 @@ import { UsuarioTenant } from './entities/usuario-tenant.entity';
 import { TenantModulo } from './entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from './entities/tenant-formula-precio.entity';
 import { Caja } from './entities/caja.entity';
+import { RazonSocial } from './entities/razon-social.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
+import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
+import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
 
 export interface TenantMember {
   usuarioId: string;
@@ -33,6 +36,8 @@ export class TenantsService {
     private readonly tenantFormulaPrecioRepo: Repository<TenantFormulaPrecio>,
     @InjectRepository(Caja)
     private readonly cajaRepo: Repository<Caja>,
+    @InjectRepository(RazonSocial)
+    private readonly razonSocialRepo: Repository<RazonSocial>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -225,5 +230,45 @@ export class TenantsService {
       throw new NotFoundException(`Tenant ${tenantId} no encontrado`);
     Object.assign(tenant, dto);
     return this.tenantRepo.save(tenant);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Razones sociales
+  // ─────────────────────────────────────────────────────────────────────────
+
+  findRazonesSociales(tenantId: string): Promise<RazonSocial[]> {
+    return this.razonSocialRepo.find({
+      where: { tenantId },
+      order: { nombre: 'ASC' },
+    });
+  }
+
+  createRazonSocial(
+    tenantId: string,
+    dto: CreateRazonSocialDto,
+  ): Promise<RazonSocial> {
+    const rs = this.razonSocialRepo.create({ tenantId, ...dto });
+    return this.razonSocialRepo.save(rs);
+  }
+
+  async updateRazonSocial(
+    tenantId: string,
+    id: string,
+    dto: UpdateRazonSocialDto,
+  ): Promise<RazonSocial> {
+    const rs = await this.razonSocialRepo.findOne({
+      where: { id, tenantId },
+    });
+    if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
+    Object.assign(rs, dto);
+    return this.razonSocialRepo.save(rs);
+  }
+
+  async removeRazonSocial(tenantId: string, id: string): Promise<void> {
+    const rs = await this.razonSocialRepo.findOne({
+      where: { id, tenantId },
+    });
+    if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
+    await this.razonSocialRepo.softDelete(id);
   }
 }

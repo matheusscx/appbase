@@ -15,17 +15,20 @@ export class RazonSocial {
   @Column({ name: 'tenant_id', type: 'uuid' })
   tenantId: string;
 
-  @Column({ name: 'razon_social' })
-  razonSocial: string;
+  @Column({ length: 100 })
+  nombre: string;
 
-  @Column({ type: 'varchar', nullable: true })
-  rut: string | null;
+  @Column({ length: 50 })
+  rut: string;
 
-  @Column({ type: 'varchar', nullable: true })
-  representante: string | null;
+  @Column({ length: 255, nullable: true, type: 'varchar' })
+  direccion: string | null;
 
-  @Column({ type: 'boolean', default: false })
-  principal: boolean;
+  @Column({ length: 50, nullable: true, type: 'varchar' })
+  telefono: string | null;
+
+  @Column({ default: false })
+  habilitado: boolean;
 
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;

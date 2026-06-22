@@ -22,6 +22,8 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { AddModuleDto } from './dto/add-module.dto';
+import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
+import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin routes — /admin/tenants
@@ -108,5 +110,37 @@ export class TenantsController {
   findModules(@Req() req: Request) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.findModules(user.tenantId);
+  }
+
+  @Get('razones-sociales')
+  findRazonesSociales(@Req() req: Request) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.findRazonesSociales(user.tenantId);
+  }
+
+  @UseGuards(JwtAuthGuard, TenantGuard, TenantAdminGuard)
+  @Post('razones-sociales')
+  createRazonSocial(@Req() req: Request, @Body() dto: CreateRazonSocialDto) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.createRazonSocial(user.tenantId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, TenantGuard, TenantAdminGuard)
+  @Patch('razones-sociales/:id')
+  updateRazonSocial(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: UpdateRazonSocialDto,
+  ) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.updateRazonSocial(user.tenantId, id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, TenantGuard, TenantAdminGuard)
+  @Delete('razones-sociales/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeRazonSocial(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.removeRazonSocial(user.tenantId, id);
   }
 }
