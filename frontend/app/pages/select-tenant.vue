@@ -5,10 +5,6 @@ const tenantStore = useTenantStore()
 const authStore = useAuthStore()
 const switching = ref<string | null>(null)
 
-if (authStore.activeTenantId) {
-  await navigateTo('/')
-}
-
 onMounted(async () => {
   if (tenantStore.tenants.length === 0) {
     await tenantStore.fetchMyTenants()
