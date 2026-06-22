@@ -296,7 +296,7 @@ export class TenantsService {
         [tenantId],
       );
       await manager.query(
-        `UPDATE razones_sociales SET preferida = true WHERE razon_social_id = $1`,
+        `UPDATE razones_sociales SET preferida = true WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
         [id],
       );
 
