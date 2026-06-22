@@ -143,4 +143,11 @@ export class TenantsController {
     const user = req.user as { tenantId: string };
     return this.tenantsService.removeRazonSocial(user.tenantId, id);
   }
+
+  @UseGuards(JwtAuthGuard, TenantGuard, TenantAdminGuard)
+  @Patch('razones-sociales/:id/preferida')
+  setPreferida(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.setPreferida(user.tenantId, id);
+  }
 }

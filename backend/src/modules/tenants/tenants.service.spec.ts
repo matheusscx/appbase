@@ -133,6 +133,7 @@ describe('TenantsService', () => {
     direccion: 'Av. Kennedy 9001',
     telefono: null,
     habilitado: false,
+    preferida: false,
     creadoEl: new Date(),
     actualizadoEl: new Date(),
     eliminadoEl: null,
@@ -202,6 +203,41 @@ describe('TenantsService', () => {
       await expect(
         service.removeRazonSocial('tenant-uuid', 'no-existe'),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('setPreferida', () => {
+    it('limpia la preferida anterior y marca la nueva', async () => {
+      const mockManager = {
+        findOne: jest.fn().mockResolvedValue({ ...mockRazonSocial }),
+        query: jest.fn().mockResolvedValue(undefined),
+      };
+      dataSource.transaction.mockImplementation((cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager));
+
+      const result = await service.setPreferida('tenant-uuid', 'rs-uuid');
+
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('SET preferida = false'),
+        ['tenant-uuid'],
+      );
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('SET preferida = true'),
+        ['rs-uuid'],
+      );
+      expect(result.preferida).toBe(true);
+    });
+
+    it('lanza NotFoundException si la razón social no existe en el tenant', async () => {
+      const mockManager = {
+        findOne: jest.fn().mockResolvedValue(null),
+        query: jest.fn(),
+      };
+      dataSource.transaction.mockImplementation((cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager));
+
+      await expect(service.setPreferida('tenant-uuid', 'no-existe')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockManager.query).not.toHaveBeenCalled();
     });
   });
 });

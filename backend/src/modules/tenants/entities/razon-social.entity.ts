@@ -30,6 +30,9 @@ export class RazonSocial {
   @Column({ default: false })
   habilitado: boolean;
 
+  @Column({ default: false })
+  preferida: boolean;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

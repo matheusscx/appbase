@@ -283,4 +283,25 @@ export class TenantsService {
     if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
     await this.razonSocialRepo.softDelete({ id, tenantId });
   }
+
+  async setPreferida(tenantId: string, id: string): Promise<RazonSocial> {
+    return this.dataSource.transaction(async (manager) => {
+      const rs = await manager.findOne(RazonSocial, {
+        where: { id, tenantId },
+      });
+      if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
+
+      await manager.query(
+        `UPDATE razones_sociales SET preferida = false WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+        [tenantId],
+      );
+      await manager.query(
+        `UPDATE razones_sociales SET preferida = true WHERE razon_social_id = $1`,
+        [id],
+      );
+
+      rs.preferida = true;
+      return rs;
+    });
+  }
 }
