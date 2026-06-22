@@ -15,9 +15,11 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SuperadminGuard } from '../../common/guards/superadmin.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
+import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { TenantsService } from './tenants.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { AddModuleDto } from './dto/add-module.dto';
 
@@ -74,6 +76,13 @@ export class TenantsController {
   findMine(@Req() req: Request) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.findMine(user.tenantId);
+  }
+
+  @UseGuards(TenantAdminGuard)
+  @Patch('me')
+  updateMine(@Req() req: Request, @Body() dto: UpdateMyTenantDto) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.updateMine(user.tenantId, dto);
   }
 
   @Get('members')

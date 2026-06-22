@@ -10,6 +10,7 @@ import { TenantFormulaPrecio } from './entities/tenant-formula-precio.entity';
 import { Caja } from './entities/caja.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 
 export interface TenantMember {
   usuarioId: string;
@@ -216,5 +217,13 @@ export class TenantsService {
 
   async findModules(tenantId: string): Promise<TenantModulo[]> {
     return this.tenantModuloRepo.find({ where: { tenantId } });
+  }
+
+  async updateMine(tenantId: string, dto: UpdateMyTenantDto): Promise<Tenant> {
+    const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
+    if (!tenant)
+      throw new NotFoundException(`Tenant ${tenantId} no encontrado`);
+    Object.assign(tenant, dto);
+    return this.tenantRepo.save(tenant);
   }
 }
