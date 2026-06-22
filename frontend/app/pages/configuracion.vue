@@ -31,6 +31,16 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         icon: 'i-heroicons-users',
         to: '/configuracion/usuarios',
       },
+      {
+        label: 'Empresa',
+        icon: 'i-heroicons-building-office-2',
+        to: '/configuracion/empresa',
+      },
+      {
+        label: 'Razones sociales',
+        icon: 'i-heroicons-document-text',
+        to: '/configuracion/razones-sociales',
+      },
     )
   }
 
