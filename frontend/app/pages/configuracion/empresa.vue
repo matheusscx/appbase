@@ -87,15 +87,18 @@ async function onPaisChange(paisId: string) {
 async function guardar() {
   saving.value = true
   try {
+    const body: Record<string, unknown> = {
+      nombre: form.value.nombre,
+      correo: form.value.correo,
+      telefono: form.value.telefono || null,
+      direccion: form.value.direccion || null,
+    }
+    if (form.value.provinciaId) {
+      body.provinciaId = form.value.provinciaId
+    }
     await useApiFetch(`${apiUrl}/tenants/me`, {
       method: 'PATCH',
-      body: {
-        nombre: form.value.nombre,
-        correo: form.value.correo,
-        telefono: form.value.telefono || null,
-        direccion: form.value.direccion || null,
-        provinciaId: form.value.provinciaId,
-      },
+      body,
     })
     toast.add({ title: 'Datos de empresa actualizados', color: 'success' })
   }

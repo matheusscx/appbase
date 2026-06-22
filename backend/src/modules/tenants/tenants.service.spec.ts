@@ -1,6 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { TenantsService } from './tenants.service';
 import { Tenant } from './entities/tenant.entity';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
@@ -114,6 +114,14 @@ describe('TenantsService', () => {
       await expect(service.updateMine('no-existe', {})).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('lanza ConflictException si el correo ya está en uso', async () => {
+      tenantRepo.findOne.mockResolvedValue({ ...mockTenant });
+      tenantRepo.save.mockRejectedValue({ code: '23505' });
+      await expect(
+        service.updateMine('tenant-uuid', { correo: 'otro@tenant.cl' }),
+      ).rejects.toThrow(ConflictException);
     });
   });
 

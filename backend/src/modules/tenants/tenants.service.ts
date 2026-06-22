@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -229,7 +233,15 @@ export class TenantsService {
     if (!tenant)
       throw new NotFoundException(`Tenant ${tenantId} no encontrado`);
     Object.assign(tenant, dto);
-    return this.tenantRepo.save(tenant);
+    try {
+      return await this.tenantRepo.save(tenant);
+    } catch (err: unknown) {
+      const pg = err as { code?: string };
+      if (pg.code === '23505') {
+        throw new ConflictException('El correo ya está en uso por otro tenant');
+      }
+      throw err;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
