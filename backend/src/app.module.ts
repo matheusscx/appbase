@@ -25,6 +25,7 @@ import { UsuarioTenant } from './modules/tenants/entities/usuario-tenant.entity'
 import { TenantModulo } from './modules/tenants/entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from './modules/tenants/entities/tenant-formula-precio.entity';
 import { Caja } from './modules/tenants/entities/caja.entity';
+import { RazonSocial } from './modules/tenants/entities/razon-social.entity';
 import { Rol } from './modules/roles/entities/rol.entity';
 import { RolUsuario } from './modules/roles/entities/rol-usuario.entity';
 import { ModuloRol } from './modules/roles/entities/modulo-rol.entity';
@@ -54,6 +55,7 @@ import { SeederModule } from './modules/seeder/seeder.module';
           TenantModulo,
           TenantFormulaPrecio,
           Caja,
+          RazonSocial,
           Rol,
           RolUsuario,
           ModuloRol,

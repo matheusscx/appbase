@@ -11,6 +11,7 @@ import { Tenant } from '../tenants/entities/tenant.entity';
 import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from '../tenants/entities/tenant-formula-precio.entity';
 import { Usuario } from '../users/usuario.entity';
+import { RazonSocial } from '../tenants/entities/razon-social.entity';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -37,6 +38,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly tenantFormulaPrecioRepo: Repository<TenantFormulaPrecio>,
     @InjectRepository(Usuario)
     private readonly usuarioRepo: Repository<Usuario>,
+    @InjectRepository(RazonSocial)
+    private readonly razonSocialRepo: Repository<RazonSocial>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -55,6 +58,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedPermisos();
     await this.seedModuloAppPermisos();
     await this.seedTenants();
+    await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
     await this.seedUsuariosAdicionales();
     await this.seedTenantModulo();
@@ -581,6 +585,38 @@ export class SeederService implements OnApplicationBootstrap {
          VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
         [rolId, MODULO_TENANT_TEST, moduloAppPermisoId],
       );
+    }
+  }
+
+  private async seedRazonesSociales(): Promise<void> {
+    const razones: Partial<RazonSocial>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440056',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        nombre: 'Paris S.A.',
+        rut: '76.123.456-7',
+        direccion: 'Av. Presidente Kennedy 9001, Las Condes',
+        telefono: '+56226005000',
+        habilitado: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440057',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        nombre: 'Falabella Retail S.A.',
+        rut: '96.654.390-9',
+        direccion: 'Av. Presidente Kennedy 6400, Las Condes',
+        telefono: '+56226007000',
+        habilitado: true,
+      },
+    ];
+
+    for (const data of razones) {
+      const exists = await this.razonSocialRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.razonSocialRepo.save(this.razonSocialRepo.create(data));
+      }
     }
   }
 }

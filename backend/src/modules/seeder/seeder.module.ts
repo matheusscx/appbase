@@ -11,6 +11,7 @@ import { Tenant } from '../tenants/entities/tenant.entity';
 import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from '../tenants/entities/tenant-formula-precio.entity';
 import { Usuario } from '../users/usuario.entity';
+import { RazonSocial } from '../tenants/entities/razon-social.entity';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { Usuario } from '../users/usuario.entity';
       TenantModulo,
       TenantFormulaPrecio,
       Usuario,
+      RazonSocial,
     ]),
   ],
   providers: [SeederService],
