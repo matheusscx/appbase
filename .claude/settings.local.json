@@ -53,7 +53,12 @@
       "Bash(mv /Users/m2pro/cmatheus/startup-app/.claude/docs/PRODUCTO.md /Users/m2pro/cmatheus/startup-app/docs/PRODUCTO.md)",
       "Bash(mv /Users/m2pro/cmatheus/startup-app/.claude/docs/MIGRACION-FUNCIONALIDADES.md /Users/m2pro/cmatheus/startup-app/docs/MIGRACION-FUNCIONALIDADES.md)",
       "Bash(mv /Users/m2pro/cmatheus/startup-app/.claude/docs/DOCUMENTATION.md /Users/m2pro/cmatheus/startup-app/DOCUMENTATION.md)",
-      "Bash(rm -r /Users/m2pro/cmatheus/startup-app/.claude/docs)"
+      "Bash(rm -r /Users/m2pro/cmatheus/startup-app/.claude/docs)",
+      "Bash(docker exec *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://frontend-production-c0db.up.railway.app/login)",
+      "Bash(curl -s https://frontend-production-c0db.up.railway.app/)",
+      "Bash(curl -s \"https://frontend-production-c0db.up.railway.app/_nuxt/builds/latest.json\")",
+      "Bash(curl -s https://frontend-production-c0db.up.railway.app/login)"
     ]
   },
   "enabledMcpjsonServers": [
