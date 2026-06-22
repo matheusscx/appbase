@@ -269,6 +269,6 @@ export class TenantsService {
       where: { id, tenantId },
     });
     if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
-    await this.razonSocialRepo.softDelete(id);
+    await this.razonSocialRepo.softDelete({ id, tenantId });
   }
 }

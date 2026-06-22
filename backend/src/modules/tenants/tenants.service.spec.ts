@@ -183,7 +183,10 @@ describe('TenantsService', () => {
       razonSocialRepo.findOne.mockResolvedValue(mockRazonSocial);
       razonSocialRepo.softDelete.mockResolvedValue({ affected: 1 });
       await service.removeRazonSocial('tenant-uuid', 'rs-uuid');
-      expect(razonSocialRepo.softDelete).toHaveBeenCalledWith('rs-uuid');
+      expect(razonSocialRepo.softDelete).toHaveBeenCalledWith({
+        id: 'rs-uuid',
+        tenantId: 'tenant-uuid',
+      });
     });
 
     it('lanza NotFoundException si no pertenece al tenant', async () => {
