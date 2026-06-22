@@ -154,6 +154,7 @@ CREATE TABLE "razones_sociales" (
   "direccion"       VARCHAR(255),
   "telefono"        VARCHAR(50),
   "habilitado"      BOOLEAN     DEFAULT false,
+  "preferida"       BOOLEAN     NOT NULL DEFAULT false,
   "creado_el"       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"  TIMESTAMPTZ,
   "eliminado_el"    TIMESTAMPTZ
