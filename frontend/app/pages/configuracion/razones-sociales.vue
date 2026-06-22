@@ -19,6 +19,7 @@ const modalOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
+const toggling = reactive(new Set<string>())
 
 const emptyForm = () => ({
   nombre: '',
@@ -97,6 +98,28 @@ async function guardar() {
   }
 }
 
+async function toggleHabilitado(rs: RazonSocial) {
+  if (toggling.has(rs.id)) return
+  toggling.add(rs.id)
+  const prev = rs.habilitado
+  rs.habilitado = !prev
+  try {
+    await useApiFetch(`${apiUrl}/tenants/razones-sociales/${rs.id}`, {
+      method: 'PATCH',
+      body: { habilitado: rs.habilitado },
+    })
+    toast.add({ title: rs.habilitado ? 'Razón social habilitada' : 'Razón social deshabilitada', color: 'success' })
+  }
+  catch (e: unknown) {
+    rs.habilitado = prev
+    const msg = (e as { data?: { message?: string } })?.data?.message
+    toast.add({ title: msg ?? 'Error al actualizar', color: 'error' })
+  }
+  finally {
+    toggling.delete(rs.id)
+  }
+}
+
 async function eliminar(id: string) {
   try {
     await useApiFetch(`${apiUrl}/tenants/razones-sociales/${id}`, {
@@ -169,28 +192,27 @@ onMounted(cargar)
             >
               {{ rs.direccion }}
             </p>
-            <UBadge
-              :color="rs.habilitado ? 'success' : 'neutral'"
-              variant="subtle"
-              size="xs"
-              class="mt-1"
-            >
-              {{ rs.habilitado ? 'Habilitada' : 'Deshabilitada' }}
-            </UBadge>
           </div>
-          <div class="flex gap-2 shrink-0 ml-4">
-            <UButton
-              icon="i-heroicons-pencil-square"
-              color="neutral"
-              variant="ghost"
-              @click="abrirEditar(rs)"
+          <div class="flex items-center gap-4 shrink-0 ml-4">
+            <USwitch
+              :model-value="rs.habilitado"
+              :disabled="toggling.has(rs.id)"
+              @update:model-value="toggleHabilitado(rs)"
             />
-            <UButton
-              icon="i-heroicons-trash"
-              color="error"
-              variant="ghost"
-              @click="() => { confirmDeleteId = rs.id; confirmModalOpen = true }"
-            />
+            <div class="flex gap-2">
+              <UButton
+                icon="i-heroicons-pencil-square"
+                color="neutral"
+                variant="ghost"
+                @click="abrirEditar(rs)"
+              />
+              <UButton
+                icon="i-heroicons-trash"
+                color="error"
+                variant="ghost"
+                @click="() => { confirmDeleteId = rs.id; confirmModalOpen = true }"
+              />
+            </div>
           </div>
         </li>
       </ul>
@@ -216,7 +238,7 @@ onMounted(cargar)
             <UInput v-model="form.telefono" placeholder="+56 9 1234 5678" />
           </UFormField>
           <UFormField label="Habilitada">
-            <UToggle v-model="form.habilitado" />
+            <USwitch v-model="form.habilitado" />
           </UFormField>
         </div>
       </template>
