@@ -283,7 +283,7 @@ async function guardar() {
     }
 
     if (form.value.tipo === 'producto') {
-      payload.stock = form.value.stock
+      payload.stock = form.value.stock || '0'
       payload.unidadMedida = form.value.unidadMedida
       if (form.value.fechaElaboracion) payload.fechaElaboracion = form.value.fechaElaboracion
       if (form.value.fechaVencimiento) payload.fechaVencimiento = form.value.fechaVencimiento
@@ -504,7 +504,7 @@ async function ejecutarAjusteStock() {
             </UFormField>
 
             <UFormField label="Precio base" required>
-              <UInput v-model="form.precioBase" type="number" placeholder="0" class="w-full" />
+              <UInput v-model="form.precioBase" inputmode="decimal" placeholder="0" class="w-full" />
             </UFormField>
 
             <UFormField label="Moneda" required>
@@ -551,7 +551,7 @@ async function ejecutarAjusteStock() {
               <p class="text-sm font-medium text-muted mb-3">Datos de producto</p>
               <div class="grid grid-cols-2 gap-4">
                 <UFormField label="Stock inicial">
-                  <UInput v-model="form.stock" type="number" placeholder="0" class="w-full" />
+                  <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
                 </UFormField>
                 <UFormField label="Unidad de medida">
                   <USelectMenu
@@ -658,7 +658,7 @@ async function ejecutarAjusteStock() {
       <template #body>
         <div class="space-y-4">
           <UFormField label="Cantidad" required>
-            <UInput v-model="ajusteForm.cantidad" type="number" placeholder="0" class="w-full" />
+            <UInput v-model="ajusteForm.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
           </UFormField>
           <UFormField label="Tipo de movimiento" required>
             <USelectMenu

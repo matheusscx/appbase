@@ -107,7 +107,7 @@ async function guardarTasa(m: Moneda) {
   try {
     await useApiFetch(`${apiUrl}/monedas/${m.monedaId}`, {
       method: 'PATCH',
-      body: { valorDelDia: String(m.valorDelDia) },
+      body: { valorDelDia: m.valorDelDia },
     })
     toast.add({ title: 'Tasa de cambio actualizada', color: 'success' })
   }
@@ -177,8 +177,7 @@ onMounted(cargar)
             <div class="w-32">
               <UInput
                 :model-value="m.esOficial ? '1' : (m.valorDelDia ?? '')"
-                type="number"
-                step="any"
+                inputmode="decimal"
                 size="sm"
                 :disabled="m.esOficial || toggling.has(m.monedaId)"
                 placeholder="Tasa"

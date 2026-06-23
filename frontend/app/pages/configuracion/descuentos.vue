@@ -299,6 +299,7 @@ onMounted(() => {
           <UFormField label="Valor" required>
             <UInput
               v-model="form.valor"
+              inputmode="decimal"
               placeholder="0.10 (= 10%) o monto fijo"
             />
           </UFormField>

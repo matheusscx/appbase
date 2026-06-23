@@ -61,7 +61,7 @@ async function guardar() {
   try {
     const body = {
       nombre: form.value.nombre,
-      porcentaje: String(form.value.porcentaje),
+      porcentaje: form.value.porcentaje,
       activo: form.value.activo,
     }
     if (editingId.value) {
@@ -217,8 +217,7 @@ onMounted(cargar)
           <UFormField label="Porcentaje (decimal)" required>
             <UInput
               v-model="form.porcentaje"
-              type="number"
-              step="0.0001"
+              inputmode="decimal"
               placeholder="0.19"
             />
           </UFormField>

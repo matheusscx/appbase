@@ -98,6 +98,11 @@ export class UpdateTenantMonedaDto {
 }
 ```
 
+> **Contrato con el frontend:** `@IsNumberString` exige un **string** (`"10.50"`), no un
+> `number`. El cliente lo maneja como string de punta a punta con `UInput`
+> `inputmode="decimal"` (nunca `type="number"`) — ver [frontend.md §7](./frontend.md).
+> Mandar un `number` (típico de `UInput type="number"`) produce `400 "X must be a number string"`.
+
 ---
 
 ## 4. Controller — guards y `tenantId` del token

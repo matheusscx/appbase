@@ -1,7 +1,7 @@
 # Frontend Patterns — Playbook
 
 **Status**: Living
-**Last Updated**: 2026-06-22
+**Last Updated**: 2026-06-23
 
 Patrón de referencia para una pantalla de configuración en el frontend (Nuxt 4 +
 Vue 3 + `@nuxt/ui` v4). Extraído del código real más reciente
@@ -16,6 +16,8 @@ update optimista con revert y la navegación.
 > - **Update optimista con revert** para toggles/estrellas (no re-fetch).
 > - Mensajes de error del backend vía `e.data.message`, mostrados en un `useToast`.
 > - URL base: `useRuntimeConfig().public.apiUrl`.
+> - **Campos decimales/monetarios → string de punta a punta** (ver §7): `UInput`
+>   `inputmode="decimal"`, nunca `type="number"` (emite `number` y rompe `@IsNumberString`).
 
 ---
 
@@ -162,7 +164,49 @@ texto centrado gris antes de la lista.
 
 ---
 
-## 7. Verificación manual
+## 7. Campos decimales / monetarios → string de punta a punta
+
+**Regla (estilo único):** todo campo que el backend valide con `@IsNumberString`
+(precios, montos, porcentajes, stock, cantidades — ver [backend.md §3](./backend.md))
+se maneja como **string en todo el flujo**: el `ref` del form es string, el input lo
+mantiene string, y viaja string en el body **sin conversiones**. Convención del
+proyecto: el dinero y los `numeric` son string con Decimal.js, nunca `number` nativo.
+
+**Cómo:** `UInput` **de texto** con `inputmode="decimal"` (abre teclado numérico en
+móvil). **Prohibido `type="number"`** en estos campos: hace que `v-model` escriba un
+**`number`** en el form, que rompe la convención y produce `400`:
+
+```json
+{ "message": ["precioBase must be a number string", "stock must be a number string"] }
+```
+
+```vue
+<!-- ✅ Estándar: string end-to-end, sin String() en el payload -->
+<UInput v-model="form.precioBase" inputmode="decimal" placeholder="0" />
+
+<!-- ❌ type="number" → v-model pasa a number → 400 "must be a number string" -->
+<UInput v-model="form.precioBase" type="number" />
+```
+
+Como el valor ya es string, el payload va directo (de `configuracion/items.vue`):
+
+```typescript
+const payload: Record<string, unknown> = {
+  // ...
+  precioBase: form.value.precioBase,        // ya es string, sin String(...)
+}
+if (form.value.tipo === 'producto') {
+  payload.stock = form.value.stock || '0'   // default solo para no mandar ''
+}
+```
+
+> **Excepción — enteros reales** (`@IsInt`, p. ej. `duracionEstimada`): el backend
+> espera `number`, así que ahí **sí** se usa `type="number"`. La regla `inputmode`
+> aplica solo a los `@IsNumberString` (decimales/monetarios).
+
+---
+
+## 8. Verificación manual
 
 Login como admin → `/configuracion/<feature>`: ver datos, probar toggle (con su
 revert ante error simulado), mover la estrella, crear/editar/eliminar. Confirmar
