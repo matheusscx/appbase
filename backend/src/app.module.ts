@@ -55,6 +55,7 @@ import { ItemImpuesto } from './modules/items/entities/item-impuesto.entity';
 import { ItemRecargo } from './modules/items/entities/item-recargo.entity';
 import { ItemDescuento } from './modules/items/entities/item-descuento.entity';
 import { ItemsModule } from './modules/items/items.module';
+import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
 
 @Module({
   imports: [
@@ -100,6 +101,7 @@ import { ItemsModule } from './modules/items/items.module';
           ItemImpuesto,
           ItemRecargo,
           ItemDescuento,
+          MovimientoInventario,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
