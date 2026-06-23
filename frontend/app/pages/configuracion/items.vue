@@ -33,6 +33,19 @@ interface Item {
 
 interface Opt { label: string; value: string }
 
+interface Movimiento {
+  id: string
+  itemNombre: string
+  tipo: string
+  motivo: string
+  cantidad: string
+  stockAnterior: string
+  stockResultante: string
+  usuarioNombre: string | null
+  comentario: string | null
+  creadoEl: string
+}
+
 // ── Estado ─────────────────────────────────────────────────────────────────
 
 const items = ref<Item[]>([])
@@ -103,7 +116,7 @@ function emptyForm() {
 const form = ref(emptyForm())
 
 function emptyAjusteForm() {
-  return { cantidad: '', tipo: 'entrada' }
+  return { cantidad: '', tipo: 'entrada', motivo: 'ajuste_manual', comentario: '' }
 }
 const ajusteForm = ref(emptyAjusteForm())
 
@@ -111,6 +124,36 @@ const ajusteTipoOpts = [
   { label: 'Entrada (sumar)', value: 'entrada' },
   { label: 'Salida (restar)', value: 'salida' },
 ]
+
+const motivoOpts = [
+  { label: 'Compra', value: 'compra' },
+  { label: 'Devolución', value: 'devolucion' },
+  { label: 'Merma', value: 'merma' },
+  { label: 'Ajuste manual', value: 'ajuste_manual' },
+]
+
+// Historial (kardex)
+const historialOpen = ref(false)
+const historialLoading = ref(false)
+const movimientos = ref<Movimiento[]>([])
+const historialItemNombre = ref('')
+
+async function abrirHistorial(item: Item) {
+  historialItemNombre.value = item.nombre
+  historialOpen.value = true
+  historialLoading.value = true
+  movimientos.value = []
+  try {
+    movimientos.value = await useApiFetch<Movimiento[]>(
+      `${apiUrl}/inventario/movimientos?itemId=${item.id}`,
+    )
+  } catch (e) {
+    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al cargar historial'
+    toast.add({ title: msg, color: 'error' })
+  } finally {
+    historialLoading.value = false
+  }
+}
 
 // ── Lista filtrada ──────────────────────────────────────────────────────────
 
@@ -419,6 +462,15 @@ async function ejecutarAjusteStock() {
               @click="abrirAjusteStock(item.id)"
             />
             <UButton
+              v-if="item.tipo === 'producto'"
+              icon="i-heroicons-clipboard-document-list"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              title="Historial de inventario"
+              @click="abrirHistorial(item)"
+            />
+            <UButton
               icon="i-heroicons-pencil-square"
               color="neutral"
               variant="ghost"
@@ -616,6 +668,17 @@ async function ejecutarAjusteStock() {
               class="w-full"
             />
           </UFormField>
+          <UFormField label="Motivo" required>
+            <USelectMenu
+              v-model="ajusteForm.motivo"
+              :items="motivoOpts"
+              value-key="value"
+              class="w-full"
+            />
+          </UFormField>
+          <UFormField label="Comentario">
+            <UInput v-model="ajusteForm.comentario" placeholder="Opcional" class="w-full" />
+          </UFormField>
         </div>
       </template>
       <template #footer>
@@ -626,6 +689,53 @@ async function ejecutarAjusteStock() {
           <UButton :loading="ajustando" @click="ejecutarAjusteStock">
             Aplicar ajuste
           </UButton>
+        </div>
+      </template>
+    </UModal>
+    <!-- Modal historial de inventario -->
+    <UModal
+      v-model:open="historialOpen"
+      :title="`Historial — ${historialItemNombre}`"
+      :ui="{ content: 'max-w-3xl' }"
+    >
+      <template #body>
+        <div v-if="historialLoading" class="py-8 text-center text-muted">Cargando…</div>
+        <div v-else-if="!movimientos.length" class="py-8 text-center text-muted">
+          Sin movimientos registrados.
+        </div>
+        <table v-else class="w-full text-sm">
+          <thead class="text-muted text-left">
+            <tr class="border-b border-default">
+              <th class="py-2">Fecha</th>
+              <th>Tipo</th>
+              <th>Motivo</th>
+              <th class="text-right">Cantidad</th>
+              <th class="text-right">Resultante</th>
+              <th>Usuario</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in movimientos" :key="m.id" class="border-b border-default">
+              <td class="py-2">{{ new Date(m.creadoEl).toLocaleString() }}</td>
+              <td>
+                <UBadge
+                  :label="m.tipo === 'entrada' ? 'Entrada' : 'Salida'"
+                  :color="m.tipo === 'entrada' ? 'success' : 'warning'"
+                  variant="subtle"
+                  size="sm"
+                />
+              </td>
+              <td>{{ m.motivo }}</td>
+              <td class="text-right">{{ m.cantidad }}</td>
+              <td class="text-right font-medium">{{ m.stockResultante }}</td>
+              <td>{{ m.usuarioNombre ?? '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+      <template #footer>
+        <div class="flex justify-end">
+          <UButton color="neutral" variant="ghost" @click="historialOpen = false">Cerrar</UButton>
         </div>
       </template>
     </UModal>
