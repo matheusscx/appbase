@@ -59,7 +59,8 @@
       "Bash(curl -s https://frontend-production-c0db.up.railway.app/)",
       "Bash(curl -s \"https://frontend-production-c0db.up.railway.app/_nuxt/builds/latest.json\")",
       "Bash(curl -s https://frontend-production-c0db.up.railway.app/login)",
-      "Bash(grep -rln 'useApi\\\\|apiFetch\\\\|$fetch' frontend/app/composables frontend/app/pages/configuracion/usuarios)"
+      "Bash(grep -rln 'useApi\\\\|apiFetch\\\\|$fetch' frontend/app/composables frontend/app/pages/configuracion/usuarios)",
+      "Bash(echo \"exit: $?\")"
     ]
   },
   "enabledMcpjsonServers": [

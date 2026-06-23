@@ -177,13 +177,11 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 
 ### Seed de datos de desarrollo
 
-**Cuando se pida "agregar algo al seed", siempre editar el módulo NestJS**, no el archivo SQL:
+**Cuando se pida "agregar algo al seed", editar el seeder NestJS:**
 
-- **Fuente de verdad del seed:** `backend/src/modules/seeder/seeder.service.ts`
-- El archivo `seed.sql` en la raíz existe como referencia/documentación SQL, pero **no se ejecuta en el flujo normal** — el seeder TypeScript corre automáticamente al arrancar el backend.
+- **Fuente de verdad del seed:** `backend/src/modules/seeder/seeder.service.ts`. El seeder TypeScript corre automáticamente al arrancar el backend.
 - Cada entidad tiene su propio método privado (`seedTenants`, `seedUsuariosTenants`, etc.). Al agregar datos nuevos, modificar el método correspondiente.
 - Los IDs fijos siguen el patrón `550e8400-e29b-41d4-a716-446655440XXX`. Usar el siguiente número libre al agregar registros nuevos.
-- Si el `seed.sql` también se actualiza, hacerlo en el mismo commit para mantenerlos sincronizados.
 
 ### Generales
 - Soft delete en todo — nunca borrar filas, marcar `eliminado_el`
@@ -248,4 +246,4 @@ código afecta lo que describe un doc, el commit/PR incluye la actualización.
 | `docs/PRODUCTO.md` | Especificación completa de todas las funcionalidades con reglas de negocio |
 | `docs/MIGRACION-FUNCIONALIDADES.md` | Plan/seguimiento de migración de funcionalidades |
 | `startup-pos.sql` | Esquema de BD completo con nombres actualizados |
-| `seed.sql` | Datos semilla globales (países, monedas, módulos, permisos) y datos de desarrollo |
+| `backend/src/modules/seeder/seeder.service.ts` | Fuente de verdad del seed (datos globales y de desarrollo); corre al arrancar el backend |

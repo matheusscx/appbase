@@ -235,7 +235,7 @@ Dos lugares, ambos en el **mismo commit**:
    todo tenant nuevo necesita (p. ej. su moneda oficial habilitada + default).
 
 2. **Seeder de desarrollo** (`modules/seeder/seeder.service.ts` — **fuente de
-   verdad**, NO el `seed.sql`): un método privado `seed<Entidad>()` idempotente,
+   verdad**): un método privado `seed<Entidad>()` idempotente,
    llamado en `onApplicationBootstrap` en el orden correcto (después de sus
    dependencias). IDs fijos con patrón `550e8400-e29b-41d4-a716-446655440XXX`
    (siguiente número libre); las tablas de PK compuesta no necesitan ID fijo.
