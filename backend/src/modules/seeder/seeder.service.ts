@@ -970,13 +970,31 @@ export class SeederService implements OnApplicationBootstrap {
           'producto',
         ],
       );
+      // item_producto arranca en 0; el saldo se materializa con el movimiento inicial
       await this.dataSource.query(
         `INSERT INTO item_producto (item_id, stock, unidad_medida) VALUES ($1,$2,$3)`,
-        [ITEM_SMARTPHONE, '25', 'unidad'],
+        [ITEM_SMARTPHONE, '0', 'unidad'],
       );
       await this.dataSource.query(
         `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
         [ITEM_SMARTPHONE, IVA_19],
+      );
+
+      // Movimiento inventario_inicial (idempotente por el guard existsSmartphone)
+      await this.dataSource.query(
+        `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
+        ['25', ITEM_SMARTPHONE],
+      );
+      await this.dataSource.query(
+        `INSERT INTO movimientos_inventario
+           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
+            stock_anterior, stock_resultante, comentario)
+         VALUES ($1,$2,$3,'entrada','inventario_inicial','25','0','25','Stock inicial (seed)')`,
+        [
+          '550e8400-e29b-41d4-a716-446655440120', // ID fijo libre (rango items 110-117)
+          PARIS,
+          ITEM_SMARTPHONE,
+        ],
       );
     }
 

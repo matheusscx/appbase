@@ -22,6 +22,7 @@ import { Categoria } from '../categorias/entities/categoria.entity';
 import { Impuesto } from '../impuestos/entities/impuesto.entity';
 import { Descuento } from '../descuentos/entities/descuento.entity';
 import { Recargo } from '../recargos/entities/recargo.entity';
+import { MovimientoInventario } from '../inventario/entities/movimiento-inventario.entity';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { Recargo } from '../recargos/entities/recargo.entity';
       Impuesto,
       Descuento,
       Recargo,
+      MovimientoInventario,
     ]),
   ],
   providers: [SeederService],
