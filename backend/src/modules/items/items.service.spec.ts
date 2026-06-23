@@ -317,5 +317,17 @@ describe('ItemsService', () => {
         }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('lanza NotFoundException cuando el item no existe', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // SELECT tipo → vacío
+
+      await expect(
+        service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+          cantidad: 5,
+          tipo: 'entrada',
+          motivo: 'compra',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 });
