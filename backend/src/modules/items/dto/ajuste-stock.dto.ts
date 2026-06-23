@@ -1,8 +1,11 @@
-import { IsIn, IsNumberString } from 'class-validator';
+import { IsIn, IsNumber, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class AjusteStockDto {
-  @IsNumberString()
-  cantidad: string;
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  cantidad: number;
 
   @IsIn(['entrada', 'salida'])
   tipo: string;

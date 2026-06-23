@@ -278,7 +278,7 @@ describe('ItemsService', () => {
       managerMock.query.mockResolvedValue([]);
       await expect(
         service.ajustarStock(TENANT, ITEM_ID, {
-          cantidad: '5',
+          cantidad: 5,
           tipo: 'entrada',
         }),
       ).rejects.toThrow(NotFoundException);
@@ -288,7 +288,7 @@ describe('ItemsService', () => {
       managerMock.query.mockResolvedValue([{ tipo: 'servicio' }]);
       await expect(
         service.ajustarStock(TENANT, ITEM_ID, {
-          cantidad: '5',
+          cantidad: 5,
           tipo: 'entrada',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -300,7 +300,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ stock: '3' }]);
       await expect(
         service.ajustarStock(TENANT, ITEM_ID, {
-          cantidad: '5',
+          cantidad: 5,
           tipo: 'salida',
         }),
       ).rejects.toThrow(BadRequestException);
@@ -313,7 +313,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]);
 
       const result = await service.ajustarStock(TENANT, ITEM_ID, {
-        cantidad: '5',
+        cantidad: 5,
         tipo: 'entrada',
       });
 
@@ -327,7 +327,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]);
 
       const result = await service.ajustarStock(TENANT, ITEM_ID, {
-        cantidad: '3',
+        cantidad: 3,
         tipo: 'salida',
       });
 
