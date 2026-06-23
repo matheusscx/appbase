@@ -51,6 +51,9 @@ import { MetodosPagoModule } from './modules/metodos-pago/metodos-pago.module';
 import { Item } from './modules/items/entities/item.entity';
 import { ItemProducto } from './modules/items/entities/item-producto.entity';
 import { ItemServicio } from './modules/items/entities/item-servicio.entity';
+import { ItemImpuesto } from './modules/items/entities/item-impuesto.entity';
+import { ItemRecargo } from './modules/items/entities/item-recargo.entity';
+import { ItemDescuento } from './modules/items/entities/item-descuento.entity';
 import { ItemsModule } from './modules/items/items.module';
 
 @Module({
@@ -94,6 +97,9 @@ import { ItemsModule } from './modules/items/items.module';
           Item,
           ItemProducto,
           ItemServicio,
+          ItemImpuesto,
+          ItemRecargo,
+          ItemDescuento,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
