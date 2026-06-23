@@ -389,6 +389,52 @@ cajas, ventas, cobros, facturación, roles, etc.).
 
 ---
 
+### 15. Gestión de inventario (kardex de movimientos de stock)
+
+**Qué hace:** Registra y audita todo cambio de stock de los items de tipo **producto** mediante un
+kardex de movimientos. Hoy el stock vive como un único número en `item_producto.stock` y se muta sin
+dejar rastro (`ajustarStock` con `entrada`/`salida`); esta funcionalidad agrega trazabilidad: cada
+movimiento queda registrado con su tipo, motivo, cantidad y el saldo resultante.
+
+**Entradas:**
+- Ajuste manual: `{ item_id, tipo (entrada|salida|ajuste), cantidad, comentario? }` + identidad del
+  usuario (del token).
+- Movimiento automático por venta: generado por el procesamiento de ventas (func. 10), no por el
+  usuario directamente.
+
+**Salidas:**
+- Registro en `movimientos_inventario` + actualización del saldo en `item_producto.stock`.
+- Consultas: historial de movimientos por item (kardex), saldo actual, y reutilización de las alertas
+  ya existentes de **stock bajo** y **vencimiento próximo** (func. 8).
+
+**Integraciones externas:** Ninguna.
+
+**Persistencia:**
+- `movimientos_inventario` (espejo conceptual de `movimientos_caja`):
+  `{ movimiento_id, tenant_id, item_id, tipo (entrada|salida|ajuste),
+  motivo (compra|venta|devolucion|merma|ajuste_manual|inventario_inicial), cantidad,
+  stock_anterior, stock_resultante, venta_id?, usuario_id?, comentario? }` + soft delete y timestamps.
+- `item_producto.stock` **se conserva** como saldo materializado (cacheado) para lectura rápida y
+  alertas; cada movimiento lo actualiza atómicamente en la misma transacción. El kardex es la fuente
+  de verdad auditable.
+
+**Requisitos o dependencias — REGLAS DE NEGOCIO:**
+- Solo aplica a items con `tipo = 'producto'` (los servicios no tienen stock).
+- `cantidad` siempre positiva; el `tipo` define el signo del efecto sobre el saldo. La `salida` valida
+  stock suficiente (no se permite saldo negativo), igual que el `ajustarStock` actual.
+- **El kardex y el saldo se actualizan en una sola transacción**; cualquier fallo hace rollback.
+- **Integración con ventas (func. 10):** al procesar una venta, cada línea genera automáticamente un
+  movimiento `salida` con `motivo = 'venta'` y la referencia `venta_id`, dentro de la misma transacción
+  de la venta. Esto materializa con rastro la regla ya descrita ("el stock se descuenta automáticamente
+  al procesar una venta"). Las notas de crédito / devoluciones generan `entrada` con `motivo = 'devolucion'`.
+- `tenant_id` y `usuario_id` provienen del token, nunca del body.
+
+**Fuera de alcance (fases futuras):** bodegas / almacenes y stock por bodega, traspasos entre bodegas,
+costeo y valoración de inventario (costo promedio / FIFO), y conteos físicos masivos. Se documentan como
+extensiones posibles, no como parte de esta funcionalidad.
+
+---
+
 ## Notas de Migración
 
 ### Lógica de negocio no obvia / reglas implícitas
@@ -413,6 +459,9 @@ cajas, ventas, cobros, facturación, roles, etc.).
   ni invalidación.
 - **Selección de items en la venta**: hoy se cargan todos los items del tenant (TODO explícito);
   optimizar para resolver solo los items del carrito.
+- **Trazabilidad de inventario (kardex)**: hoy el stock (`item_producto.stock`) se muta sin historial
+  (`ajustarStock` con `entrada`/`salida`). Falta la tabla `movimientos_inventario` y la integración
+  automática con ventas/devoluciones descrita en la func. 15.
 
 ### Integraciones con comportamiento específico a respetar
 - **Tasa de cambio (`valor_del_dia`)** por moneda de tenant: hoy es un dato interno. Si se externaliza a
@@ -458,6 +507,7 @@ cajas, ventas, cobros, facturación, roles, etc.).
 | 12. Gestión de cajas | 🔲 | 🔲 | |
 | 13. Registro de pagos | 🔲 | 🔲 | |
 | 14. SPA frontend (navegación por permisos) | — | 🔲 parcial | Flujo auth + tenant completo; menú RBAC pendiente |
+| 15. Gestión de inventario (kardex de movimientos) | 🔲 | 🔲 | Stock hoy es un saldo en `item_producto.stock` sin historial; falta `movimientos_inventario` + integración con ventas |
 
 **Leyenda:** ✅ Implementado · 🔲 Por construir · 🔲 parcial Parcialmente implementado
 - CORS está abierto a cualquier origen; endurecer al migrar.

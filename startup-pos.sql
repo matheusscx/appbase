@@ -464,6 +464,25 @@ CREATE TABLE "item_descuentos" (
   PRIMARY KEY ("item_id", "descuento_id")
 );
 
+-- Kardex de movimientos de stock (solo items tipo 'producto')
+-- item_producto.stock es el saldo materializado; esta tabla es la fuente de verdad auditable.
+CREATE TABLE "movimientos_inventario" (
+  "movimiento_id"    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"        UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "item_id"          UUID          NOT NULL REFERENCES "items" ("item_id"),
+  "tipo"             TEXT          NOT NULL,   -- 'entrada' | 'salida' | 'ajuste'
+  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial'
+  "cantidad"         NUMERIC(18,4) NOT NULL,   -- siempre positiva; el tipo define el signo
+  "stock_anterior"   NUMERIC(18,4) NOT NULL,
+  "stock_resultante" NUMERIC(18,4) NOT NULL,
+  "venta_id"         UUID,         -- FK definida después de crear ventas (motivo 'venta'/'devolucion')
+  "usuario_id"       UUID          REFERENCES "usuarios" ("usuario_id"),
+  "comentario"       TEXT,
+  "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"   TIMESTAMPTZ,
+  "eliminado_el"     TIMESTAMPTZ
+);
+
 -- =============================================================
 -- 8. CAJAS
 -- =============================================================
@@ -622,3 +641,6 @@ CREATE TABLE "pagos" (
 -- FKs diferidas de movimientos_caja (dependen de ventas y pagos)
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("venta_id") REFERENCES "ventas" ("venta_id");
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("pago_id")  REFERENCES "pagos" ("pago_id");
+
+-- FK diferida de movimientos_inventario (depende de ventas)
+ALTER TABLE "movimientos_inventario" ADD FOREIGN KEY ("venta_id") REFERENCES "ventas" ("venta_id");

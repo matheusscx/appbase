@@ -172,11 +172,28 @@ Extensiones actuales:
 
 Cada item:
 - Puede tener N impuestos, N descuentos, N recargos asociados
-- El stock se descuenta **automáticamente** al procesar una venta
+- El stock se descuenta **automáticamente** al procesar una venta, generando un movimiento de inventario (ver 8b)
 
 Extensiones futuras contempladas: combos/paquetes, items digitales, suscripciones, modificadores.
 
 **Alertas útiles:** stock bajo, productos próximos a vencer.
+
+---
+
+### 8b. Inventario (kardex de movimientos de stock)
+
+Trazabilidad de stock para items tipo **producto**. Todo cambio de stock queda registrado como un movimiento auditable; el campo `item_producto.stock` es el **saldo materializado** para lectura rápida y alertas, y la tabla de movimientos es la **fuente de verdad**.
+
+**`movimientos_inventario`:** tenant, item, `tipo` (`entrada` | `salida` | `ajuste`), `motivo` (`compra` | `venta` | `devolucion` | `merma` | `ajuste_manual` | `inventario_inicial`), cantidad (siempre positiva; el tipo define el signo), `stock_anterior`, `stock_resultante`, `venta_id` opcional, `usuario_id` (quién lo registró), comentario.
+
+**Reglas:**
+- Solo aplica a items `tipo = 'producto'` (los servicios no tienen stock).
+- El movimiento y la actualización del saldo ocurren en **una sola transacción**; la `salida` valida stock suficiente (no se permite saldo negativo).
+- **Ventas:** cada línea de una venta genera un movimiento `salida` / `motivo = 'venta'` con su `venta_id`, dentro de la transacción de la venta. Las notas de crédito / devoluciones generan `entrada` / `motivo = 'devolucion'`.
+- **Ajustes manuales:** entrada/salida/ajuste con `motivo = 'ajuste_manual'` y comentario.
+- `tenant_id` y `usuario_id` vienen del token, nunca del body.
+
+**Fuera de alcance (fases futuras):** bodegas/almacenes y stock por bodega, traspasos, costeo y valoración de inventario, conteos físicos masivos.
 
 ---
 

@@ -2,319 +2,249 @@
 
 ## Stack
 
-- **Backend**: NestJS (TypeScript) REST API, port 3000
-- **Frontend**: Nuxt 4 (Vue 3) SPA/SSR, port 5173
-- **Database**: PostgreSQL 15 with TypeORM, port 5432 (internal)
+- **Backend**: NestJS (TypeScript) REST API, puerto 3000
+- **Frontend**: Nuxt 4 (Vue 3) SPA/SSR, puerto 5173
+- **Database**: PostgreSQL 15 con TypeORM, puerto 5432 (interno)
 - **Orchestration**: Docker Compose
 
-All services run containerized — no local Node.js or PostgreSQL required.
+Todo el stack corre en contenedores — no se requiere Node.js ni PostgreSQL local.
 
-## Service Ports
+## Puertos
 
-| Service | Port | URL |
-|---------|------|-----|
-| Frontend (Nuxt) | 5173 | http://localhost:5173 |
-| Backend (NestJS) | 3000 | http://localhost:3000 |
-| API | 3000/api | http://localhost:3000/api |
-| API Docs (Swagger) | 3000/api/docs | http://localhost:3000/api/docs |
-| Database | 5432 | Internal (postgres service) |
+| Servicio     | Puerto host   |
+|--------------|---------------|
+| Frontend     | 5173          |
+| Backend      | 3000          |
+| API          | 3000/api      |
+| Swagger      | 3000/api/docs |
+| PostgreSQL   | 5432 (interno)|
 
-## Monorepo Structure
+## Monorepo
 
 ```
-practica/
+startup-app/
 ├── backend/
 │   ├── src/
 │   │   ├── main.ts               # Bootstrap: CORS, ValidationPipe, Swagger
-│   │   ├── app.module.ts         # Root module, imports config + feature modules
-│   │   └── modules/              # Feature modules
-│   │       ├── auth/             # Authentication (JWT + Google OAuth)
-│   │       └── users/            # User entity and service
-│   ├── test/                     # E2E tests
+│   │   ├── app.module.ts         # Módulo raíz, importa todos los feature modules
+│   │   └── modules/
+│   │       ├── auth/             # JWT (access + refresh), Google OAuth, switch-tenant
+│   │       ├── me/               # Perfil del usuario autenticado (PATCH /me/*)
+│   │       ├── users/            # Entidad usuario
+│   │       ├── tenants/          # Gestión de tenants y razones sociales
+│   │       ├── rbac/             # Roles, permisos, módulos, asignación a usuarios
+│   │       ├── roles/            # CRUD de roles por tenant
+│   │       ├── monedas/          # Configuración de monedas por tenant
+│   │       ├── catalog/          # Catálogo agregado (uso interno)
+│   │       ├── categorias/       # Categorías de items por tenant
+│   │       ├── impuestos/        # Catálogo de impuestos por tenant
+│   │       ├── descuentos/       # Catálogo de descuentos por tenant
+│   │       ├── recargos/         # Catálogo de recargos por tenant
+│   │       ├── metodos-pago/     # Métodos de pago (global + habilitación por tenant)
+│   │       ├── tipos-regla/      # Tipos de regla de precio
+│   │       ├── items/            # Catálogo de items (productos y servicios) + ajuste de stock
+│   │       ├── seeder/           # Seed de datos de desarrollo (corre al arrancar)
+│   │       └── test/             # Módulo de prueba para validación RBAC end-to-end
+│   ├── test/                     # Tests e2e
 │   └── package.json
 ├── frontend/
 │   ├── app/
-│   │   ├── app.vue              # Root component (NuxtApp + Pinia setup)
-│   │   ├── pages/               # File-based routing (auto)
-│   │   │   ├── index.vue        # Dashboard (protected)
-│   │   │   ├── login.vue        # Login form
-│   │   │   ├── register.vue     # Registration form
-│   │   │   └── auth/
-│   │   │       └── callback.vue # Google OAuth callback handler
-│   │   ├── middleware/          # Route middleware
-│   │   │   └── auth.ts          # Auth guard (redirect to /login if not authed)
-│   │   ├── stores/              # Pinia global state
-│   │   │   └── auth.ts          # Auth store (user, token, login/logout actions)
-│   │   └── assets/
-│   ├── nuxt.config.ts           # Config: @nuxt/ui, @pinia/nuxt, runtime config
+│   │   ├── app.vue               # Componente raíz
+│   │   ├── pages/                # Routing basado en archivos (auto)
+│   │   ├── components/           # Componentes auto-importados
+│   │   ├── composables/          # Composables auto-importados
+│   │   ├── middleware/           # Route middleware
+│   │   └── stores/               # Stores Pinia
+│   ├── nuxt.config.ts
 │   └── package.json
 ├── docker-compose.yml
 ├── backend.Dockerfile
 ├── frontend.Dockerfile
-├── .env                         # Runtime env (copy from .env.example)
+├── .env                          # Copiar de .env.example
 ├── .env.example
-└── docs/                        # Technical documentation
-    ├── ARCHITECTURE.md          # This file
-    ├── adr/                     # Architecture Decision Records
-    └── features/                # Feature documentation
+└── startup-pos.sql               # Esquema de BD completo (fuente de verdad del schema)
 ```
 
-## Backend Architecture
+## Backend
 
-### Module System
-
-Each feature lives in `src/modules/<feature>/`:
-
-```
-modules/auth/
-├── auth.module.ts              # Module definition, imports, exports
-├── auth.controller.ts          # Route handlers
-├── auth.service.ts             # Business logic
-├── strategies/                 # Passport strategies
-│   ├── local.strategy.ts       # Email + password validation
-│   ├── jwt.strategy.ts         # JWT token validation
-│   └── google.strategy.ts      # Google OAuth flow
-├── guards/                     # Route guards
-│   ├── jwt-auth.guard.ts       # Require valid JWT
-│   └── local-auth.guard.ts     # Require email + password
-└── dto/                        # Request/response schemas
-    ├── register.dto.ts
-    └── login.dto.ts
-```
-
-### Bootstrap (main.ts)
-
-1. **ConfigModule**: Global env var loading
-2. **CORS**: Allows `FRONTEND_URL` (default `http://localhost:5173`)
-3. **ValidationPipe**: Global validation via `class-validator` decorators on all DTOs
-4. **ClassSerializerInterceptor**: Auto-excludes fields marked `@Exclude()` (e.g., passwords)
-5. **Swagger**: Auto-generated API docs at `/api/docs` with Bearer auth support
-6. **API Prefix**: All routes get `/api` prefix globally
-
-### Request Flow
+### Flujo de una request
 
 ```
 [HTTP Request]
     ↓
-[NestJS Middleware & Guards]
-    ↓ (ValidationPipe validates request body)
-[Controller Method]
+[Guards — JwtAuthGuard / TenantAdminGuard / SuperadminGuard]
     ↓
-[Service (business logic)]
-    ↓ (TypeORM query)
+[ValidationPipe — class-validator sobre DTOs]
+    ↓
+[Controller]
+    ↓
+[Service — lógica de negocio, SQL raw o TypeORM]
+    ↓
 [PostgreSQL]
     ↓
-[ClassSerializerInterceptor excludes sensitive fields]
+[ClassSerializerInterceptor — excluye campos @Exclude()]
     ↓
-[HTTP Response (JSON)]
+[HTTP Response JSON]
 ```
 
-## Frontend Architecture
+### Bootstrap (`main.ts`)
 
-### File-Based Routing
+1. **CORS** — origen `FRONTEND_URL` (dev: `http://localhost:5173`)
+2. **ValidationPipe** — global, valida todos los DTOs con `class-validator`
+3. **ClassSerializerInterceptor** — excluye campos anotados con `@Exclude()`
+4. **Swagger** — docs en `/api/docs` con soporte Bearer
+5. **Prefijo global** `/api`
 
-Nuxt auto-creates routes from `pages/` structure:
+### Estructura de un módulo feature
 
-| File | Route | Notes |
-|------|-------|-------|
-| `pages/index.vue` | `/` | Dashboard (requires auth + tenant) |
-| `pages/login.vue` | `/login` | |
-| `pages/register.vue` | `/register` | |
-| `pages/select-tenant.vue` | `/select-tenant` | Selector de tenant (requires auth) |
-| `pages/no-tenant.vue` | `/no-tenant` | Aviso si el usuario no pertenece a ningún tenant |
-| `pages/auth/callback.vue` | `/auth/callback` | Google OAuth callback |
+```
+modules/<feature>/
+├── <feature>.module.ts
+├── <feature>.controller.ts
+├── <feature>.service.ts
+├── entities/
+│   └── <feature>.entity.ts
+└── dto/
+    ├── create-<feature>.dto.ts
+    └── update-<feature>.dto.ts
+```
 
-### State Management (Pinia)
+### Guards disponibles
 
-Dos stores:
+| Guard | Decorator | Protege |
+|---|---|---|
+| `JwtAuthGuard` | `@UseGuards(JwtAuthGuard)` | Toda ruta autenticada |
+| `TenantAdminGuard` | `@UseGuards(TenantAdminGuard)` | Mutaciones de configuración del tenant (rol admin) |
+| `SuperadminGuard` | `@UseGuards(SuperadminGuard)` | Rutas `/admin/*` (flag `es_superadmin`) |
+
+### UUID en entidades TypeORM (crítico)
+
+Toda columna PK o FK de tipo UUID **debe** declarar `type: 'uuid'` explícitamente. Sin eso TypeORM infiere `character varying` y los JOINs fallan en runtime. Ver [ADR-004](./adr/004-uuid-column-types.md).
+
+```typescript
+// ✅ Correcto
+@PrimaryColumn({ name: 'tenant_id', type: 'uuid' })
+@Column({ name: 'usuario_id', type: 'uuid', nullable: true })
+
+// ❌ Incorrecto — TypeORM infiere varchar
+@PrimaryColumn({ name: 'tenant_id' })
+@Column({ name: 'usuario_id', type: 'varchar', nullable: true })
+```
+
+## Frontend
+
+### Páginas (`pages/`)
+
+| Ruta | Archivo | Notas |
+|------|---------|-------|
+| `/login` | `login.vue` | Pública |
+| `/register` | `register.vue` | Pública |
+| `/forgot-password` | `forgot-password.vue` | Pública |
+| `/auth/callback` | `auth/callback.vue` | Callback Google OAuth |
+| `/select-tenant` | `select-tenant.vue` | Requiere auth, exenta de tenant activo |
+| `/no-tenant` | `no-tenant.vue` | Requiere auth, exenta de tenant activo |
+| `/` | `index.vue` | Dashboard (requiere auth + tenant) |
+| `/admin` | `admin.vue` | Solo superadmin |
+| `/test` | `test.vue` | Módulo de prueba RBAC |
+| `/configuracion` | `configuracion/index.vue` | Hub de configuración |
+| `/configuracion/perfil` | `configuracion/perfil.vue` | Perfil de usuario |
+| `/configuracion/empresa` | `configuracion/empresa.vue` | Datos del tenant |
+| `/configuracion/razones-sociales` | `configuracion/razones-sociales.vue` | |
+| `/configuracion/monedas` | `configuracion/monedas.vue` | |
+| `/configuracion/categorias` | `configuracion/categorias.vue` | |
+| `/configuracion/impuestos` | `configuracion/impuestos.vue` | |
+| `/configuracion/descuentos` | `configuracion/descuentos.vue` | |
+| `/configuracion/recargos` | `configuracion/recargos.vue` | |
+| `/configuracion/metodos-pago` | `configuracion/metodos-pago.vue` | |
+| `/configuracion/items` | `configuracion/items.vue` | |
+| `/configuracion/roles` | `configuracion/roles/index.vue` | Lista de roles |
+| `/configuracion/roles/:id` | `configuracion/roles/[id].vue` | Matriz de permisos del rol |
+| `/configuracion/usuarios` | `configuracion/usuarios/index.vue` | Asignación de roles a usuarios |
+
+### Stores Pinia
 
 **`useAuthStore`**
-- `user` — Perfil del usuario (`{ id, nombre, apellido, correo, esSuperadmin, ... }`)
-- `token` — JWT access token (cookie)
-- `activeTenantId` *(computed)* — `tenant_id` del JWT payload; fuente de autoridad
+- `user` — perfil del usuario (`{ id, nombre, apellido, correo, esSuperadmin, ... }`)
+- `token` — JWT access token (cookie httpOnly)
+- `activeTenantId` *(computed)* — `tenant_id` del payload del JWT; fuente de autoridad
 - `isSuperadmin` *(computed)* — `es_superadmin` del JWT payload
-- `login(email, password)` / `register(nombre, correo, contrasena)` / `logout()`
-- `handlePostLogin()` — Lógica post-login: fetchMyTenants → routing según tenants (0/1/>1)
-- `fetchMe()` / `setToken(token)` / `clearAuth()`
+- `login()` / `logout()` / `tryRefresh()` / `fetchMe()` / `handlePostLogin()`
 
 **`useTenantStore`** *(presentación)*
-- `tenants` — Lista de `{ tenantId, nombre }` del usuario
+- `tenants` — lista de `{ tenantId, nombre }` del usuario
 - `activeTenant` *(computed)* — cruza `activeTenantId` contra la lista
-- `fetchMyTenants()` → GET `/api/auth/my-tenants`
-- `switchTenant(id)` → POST `/api/auth/switch-tenant` → `setToken(newToken)`
+- `fetchMyTenants()` → `GET /api/auth/my-tenants`
+- `switchTenant(id)` → `POST /api/auth/switch-tenant` → actualiza el token
+
+**`usePermissionsStore`**
+- `permisos` — array de strings `"modulo:accion"` para el tenant activo
+- `esAdmin` — si el usuario es admin del tenant activo
+- `fetchPermisos()` — carga permisos desde `GET /api/rbac/mis-permisos` + `/api/rbac/es-admin`
+- `can(modulo, permiso)` — devuelve `true` si el usuario tiene el permiso (o es superadmin)
 
 Ver [ADR-003](./adr/003-jwt-decode-client.md) para el patrón JWT-authority + store de presentación.
 
-### Middleware
+### Middleware (`middleware/auth.ts`)
 
-**`auth.ts`** — Aplicado globalmente (en `pages/index.vue` y futuras rutas de dashboard):
+Aplicado globalmente. Lógica en orden:
 
-1. Sin token → `/login`
-2. Con token pero sin `user` → `fetchMe()` primero
-3. Si fetchMe invalidó el token → `/login`
-4. Rutas exentas (`/select-tenant`, `/no-tenant`, `/login`, `/register`) → pasar
+1. Sin access token → `tryRefresh()`; si sigue sin token → `/login`
+2. Sin `user` cargado → `fetchMe()`
+3. Si `fetchMe` falló (token inválido) → `/login`
+4. Rutas exentas de tenant (`/select-tenant`, `/no-tenant`, `/login`, `/register`) → pasar
 5. Rutas `/admin/**` → verificar `isSuperadmin`; si false → `/`
 6. Sin `activeTenantId` → `handlePostLogin()` (resuelve tenant o redirige)
-7. Con `activeTenantId` → pasar
+7. Con `activeTenantId` pero lista de tenants vacía → `fetchMyTenants()` (rehidratación tras refresh)
 
-## Database
+### Llamadas a la API
 
-### TypeORM Configuration
-
-- Entity synchronization enabled in development (`synchronize: true`)
-- Connection string via `DATABASE_URL` env var
-- Schema auto-syncs from entity decorators
-
-### Current Schema
-
-**Table: `users`**
-
-| Column | Type | Constraints | Notes |
-|--------|------|-------------|-------|
-| `id` | UUID | PK | Auto-generated |
-| `name` | varchar | NOT NULL | Full name |
-| `email` | varchar | UNIQUE, NOT NULL | Login identifier |
-| `password` | varchar | nullable | Bcrypt hash (excluded from API responses) |
-| `google_id` | varchar | nullable | Google OAuth ID |
-| `created_at` | timestamp | DEFAULT now() | |
-| `updated_at` | timestamp | DEFAULT now() | |
-
-## Environment Variables
-
-### Backend (read from `.env`)
-
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `NODE_ENV` | Node environment | `development` |
-| `PORT` | Listen port | `3000` |
-| `API_PREFIX` | Route prefix | `/api` |
-| `DATABASE_URL` | PostgreSQL connection | `postgresql://dev_user:dev_password@postgres:5432/tecnica_db` |
-| `JWT_SECRET` | JWT signing key | `your-secret-key` |
-| `JWT_EXPIRATION` | Token lifetime | `7d` |
-| `FRONTEND_URL` | CORS origin | `http://localhost:5173` |
-| `GOOGLE_CLIENT_ID` | Google OAuth app ID | (from Google Cloud Console) |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth secret | (from Google Cloud Console) |
-| `GOOGLE_CALLBACK_URL` | OAuth redirect URL | `http://localhost:3000/api/auth/google/callback` |
-
-### Frontend (runtime config, via `VITE_` prefix)
-
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `VITE_API_URL` | Backend API base | `http://localhost:3000/api` |
-| `VITE_APP_NAME` | App title | `practica` |
-
-## Data Flow
-
-### Login (Email + Password)
-
-```
-[Login Page]
-  ↓ email + password
-[useAuthStore.login()]
-  ↓ POST /api/auth/login
-[AuthController.login()]
-  ↓ LocalAuthGuard validates (bcrypt compare)
-[AuthService.validateUser()]
-  ↓ Query users table by email
-[Database]
-  ↓ User object
-[AuthService.login()]
-  ↓ Sign JWT with (sub: user.id, email: user.email)
-[Return { access_token, user }]
-  ↓ Store token + user in localStorage + Pinia state
-[Redirect to Dashboard]
-```
-
-### Google OAuth
-
-```
-[Login Page: Click "Sign in with Google"]
-  ↓ Redirect to /api/auth/google
-[AuthController.google()]
-  ↓ AuthGuard('google') redirects to Google consent screen
-[User grants permission]
-  ↓ Google redirects to /api/auth/google/callback with code
-[GoogleStrategy validates code]
-  ↓ Exchange code for Google profile
-[AuthService.googleLogin()]
-  ↓ Find or create user by google_id or email
-  ↓ Sign JWT
-[Redirect to /auth/callback?token=JWT]
-  ↓ Frontend reads token from query string
-[useAuthStore.setToken()]
-  ↓ Store token in localStorage
-[Redirect to Dashboard]
-```
-
-## Key Conventions
-
-### Backend
-
-- **DTOs**: All request bodies validated via `class-validator` decorators (email, length, etc.)
-- **Entities**: Decorated with `@Entity()`, fields auto-map to DB columns
-- **Services**: Contain all business logic; injected into controllers
-- **Guards**: Applied per-route with `@UseGuards(GuardName)`
-
-Example:
-```typescript
-@Post('login')
-@UseGuards(LocalAuthGuard)  // Validates email + password
-async login(@Body() loginDto: LoginDto) {
-  return this.authService.login(/* ... */);
-}
-```
-
-#### UUID columns in TypeORM entities
-
-> **All PK and FK columns that hold UUIDs must declare `type: 'uuid'` explicitly.**
-
-TypeORM defaults untyped `string` properties to `character varying`. If a PK is `uuid` (via `@PrimaryGeneratedColumn('uuid')`) but a FK column on another table omits the type, PostgreSQL creates a `uuid = character varying` join that fails at runtime.
+Usar `$fetch` (Nuxt built-in) vía el composable `useApiFetch` — nunca axios.
 
 ```typescript
-// ✅ Correct — produces uuid column in DB
-@PrimaryColumn({ name: 'tenant_id', type: 'uuid' })
-tenantId: string;
-
-@Column({ name: 'usuario_id', type: 'uuid', nullable: true })
-usuarioId: string | null;
-
-// ❌ Wrong — TypeORM infers varchar; raw SQL JOINs against a uuid PK will fail
-@PrimaryColumn({ name: 'tenant_id' })
-tenantId: string;
-
-@Column({ name: 'usuario_id', type: 'varchar', nullable: true })
-usuarioId: string | null;
+const data = await useApiFetch<ResponseType>(`${apiUrl}/endpoint`)
 ```
 
-Only `google_id` (Google OAuth external identifier) is legitimately `varchar`.
+## Base de datos
 
-See [ADR-004](./adr/004-uuid-column-types.md) for full context.
+- TypeORM con `synchronize: true` en desarrollo (el esquema se autosinc desde entidades)
+- Soft delete en todas las tablas: `eliminado_el TIMESTAMPTZ`; toda lectura filtra `eliminado_el IS NULL`
+- PKs UUID en todas las tablas
+- **Esquema completo:** ver `startup-pos.sql` (fuente de verdad del schema)
 
-### Frontend
+## Variables de entorno
 
-- **Pages**: Placed in `pages/` — routes auto-created
-- **Components**: Reusable UI elements, auto-imported if placed in `components/`
-- **Stores**: Pinia stores for global state
-- **API calls**: Use `$fetch()` (Nuxt built-in) with Bearer token from store
+### Backend (`.env`)
 
-Example:
-```typescript
-const user = await $fetch('/api/users/me', {
-  headers: { Authorization: `Bearer ${auth.token}` }
-});
-```
+| Variable | Propósito |
+|---|---|
+| `DATABASE_URL` | Conexión PostgreSQL |
+| `PORT` | Puerto de escucha (default 3000) |
+| `API_PREFIX` | Prefijo de rutas (`/api`) |
+| `JWT_SECRET` | Firma del access token |
+| `JWT_EXPIRATION` | Vida del access token (ej. `15m`) |
+| `JWT_REFRESH_SECRET` | Firma del refresh token |
+| `JWT_REFRESH_EXPIRATION` | Vida del refresh token (ej. `1h`) |
+| `FRONTEND_URL` | Origen CORS permitido |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL` | Google OAuth |
 
-## Deployment Considerations
+### Frontend (runtime config, prefijo `VITE_`)
 
-- Docker Compose network: All services on `tecnica_network` bridge
-- Postgres data: Persisted in named volume `postgres_data`
-- Env vars: Set in `.env` at repo root, shared across all services
-- Database migrations: TypeORM synchronizes on app startup (dev only; use migrations in production)
+| Variable | Propósito |
+|---|---|
+| `VITE_API_URL` | Base URL del backend (`http://localhost:3000/api`) |
+| `VITE_APP_NAME` | Título de la app |
 
-## Documentation
+## Deployment
 
-- **Architecture Decision Records**: `docs/adr/`
-- **Feature Documentation**: `docs/features/`
-- **This file**: High-level overview of the system
+- Docker Compose: todos los servicios en red `tecnica_network` (bridge)
+- Datos de PostgreSQL: volumen nombrado `postgres_data`
+- Variables de entorno: archivo `.env` en la raíz del repo, compartido entre servicios
+- En producción: reemplazar `synchronize: true` por migraciones TypeORM; endurecer CORS
 
-See `docs/adr/README.md` for decision rationale.
+## Documentación
+
+- **ADRs** (`docs/adr/`) — decisiones arquitectónicas con contexto y consecuencias
+- **Features** (`docs/features/`) — doc operativa de cada feature implementada
+- **Patrones** (`docs/patterns/`) — playbook backend/frontend; leer antes de planificar
+- **Producto** (`docs/PRODUCTO.md`) — reglas de negocio completas
+- **Schema** (`startup-pos.sql`) — esquema SQL completo y actualizado

@@ -98,6 +98,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Configuración de monedas por tenant | ✅ Implementado |
 | Catálogos financieros (categorías, impuestos, descuentos, recargos, métodos de pago, tipos de regla) | ✅ Implementado |
 | Catálogo de items (productos y servicios) | ✅ Implementado |
+| Gestión de inventario (kardex de movimientos de stock) | 🔲 Por construir |
 | Motor de cálculo de precios | 🔲 Por construir |
 | Procesamiento de ventas | 🔲 Por construir |
 | Gestión de cajas | 🔲 Por construir |
@@ -153,6 +154,14 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 - Una sola caja física abierta por tenant+usuario en simultáneo
 - Al cerrar: usuario ingresa `monto_contado`, sistema calcula `diferencia`
 
+### Inventario (kardex de stock)
+- Trazabilidad de stock solo para items `tipo = 'producto'` (los servicios no tienen stock)
+- `movimientos_inventario` es la fuente de verdad auditable; `item_producto.stock` es el saldo materializado para lectura rápida y alertas
+- Movimiento + actualización de saldo en una sola transacción; la `salida` valida stock suficiente (no negativo)
+- Cada línea de venta genera un movimiento `salida`/`motivo='venta'` (devoluciones → `entrada`/`motivo='devolucion'`) dentro de la transacción de la venta
+- `tenant_id` y `usuario_id` siempre del token
+- Fuera de alcance (fases futuras): bodegas, traspasos, costeo/valoración
+
 ### Pagos
 - Una venta puede tener múltiples pagos con distintos métodos
 - Sistema calcula `vuelto` cuando suma de pagos > total (solo si `permite_vuelto = true`)
@@ -170,6 +179,7 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 - Integración con proveedor externo de tasas de cambio
 - Sub-tenants (jerarquía entre tenants)
 - Integración con pasarela de pagos online
+- Inventario avanzado: bodegas/almacenes, traspasos, costeo y valoración de stock
 
 ---
 
