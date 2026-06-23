@@ -3,6 +3,11 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   css: ['~/assets/css/main.css'],
   modules: ['@nuxt/ui', '@pinia/nuxt', ...(process.env.NODE_ENV !== 'production' ? ['@nuxt/test-utils/module'] : [])],
+  vite: {
+    optimizeDeps: {
+      include: ['@vue/devtools-core', '@vue/devtools-kit'],
+    },
+  },
   runtimeConfig: {
     apiUrl: process.env.API_INTERNAL_URL ?? process.env.VITE_API_URL ?? 'http://localhost:3000/api',
     public: {
