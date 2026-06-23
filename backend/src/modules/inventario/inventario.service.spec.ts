@@ -109,4 +109,40 @@ describe('InventarioService', () => {
       ).rejects.toThrow(BadRequestException);
     });
   });
+
+  describe('findMovimientos', () => {
+    it('mapea filas snake_case a camelCase y filtra por item', async () => {
+      dataSource.query.mockResolvedValue([
+        {
+          movimiento_id: 'mov-1',
+          item_id: ITEM_ID,
+          item_nombre: 'Smartphone',
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5.0000',
+          stock_anterior: '10.0000',
+          stock_resultante: '15.0000',
+          usuario_id: USER_ID,
+          usuario_nombre: 'Admin',
+          comentario: null,
+          creado_el: new Date('2026-06-23T10:00:00Z'),
+        },
+      ]);
+
+      const res = await service.findMovimientos(TENANT, { itemId: ITEM_ID });
+
+      expect(res).toHaveLength(1);
+      expect(res[0]).toMatchObject({
+        id: 'mov-1',
+        itemId: ITEM_ID,
+        itemNombre: 'Smartphone',
+        tipo: 'entrada',
+        motivo: 'compra',
+        stockResultante: '15.0000',
+        usuarioNombre: 'Admin',
+      });
+      // tenantId siempre es el primer parámetro
+      expect(dataSource.query.mock.calls[0][1][0]).toBe(TENANT);
+    });
+  });
 });
