@@ -247,6 +247,24 @@ describe('ItemsService', () => {
         }),
       );
     });
+
+    it('producto con stock = 0 NO registra movimiento inventario_inicial', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ ok: 1 }])               // validarMoneda
+        .mockResolvedValueOnce([{ item_id: 'nuevo-item' }]) // INSERT items RETURNING
+        .mockResolvedValueOnce(undefined);                  // INSERT item_producto
+
+      await service.create(TENANT, 'user-uuid', {
+        nombre: 'Producto sin stock',
+        precioBase: '100',
+        monedaId: MONEDA_ID,
+        tipo: 'producto',
+        stock: '0',
+        unidadMedida: 'unidad',
+      } as any);
+
+      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+    });
   });
 
   // ── update ─────────────────────────────────────────────────────────────────
