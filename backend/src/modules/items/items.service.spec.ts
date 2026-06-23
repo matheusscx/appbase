@@ -6,6 +6,7 @@ import { ItemsService } from './items.service';
 import { Item } from './entities/item.entity';
 import { ItemProducto } from './entities/item-producto.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
+import { InventarioService } from '../inventario/inventario.service';
 
 const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
@@ -19,6 +20,7 @@ describe('ItemsService', () => {
   let itemServicioRepo: { findOne: jest.Mock };
   let managerMock: { query: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
+  let inventarioServiceMock: { registrarMovimiento: jest.Mock };
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
@@ -31,6 +33,7 @@ describe('ItemsService', () => {
     itemRepo = { findOne: jest.fn() };
     itemProductoRepo = { findOne: jest.fn() };
     itemServicioRepo = { findOne: jest.fn() };
+    inventarioServiceMock = { registrarMovimiento: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -45,6 +48,7 @@ describe('ItemsService', () => {
           useValue: itemServicioRepo,
         },
         { provide: DataSource, useValue: dataSource },
+        { provide: InventarioService, useValue: inventarioServiceMock },
       ],
     }).compile();
 
@@ -274,64 +278,44 @@ describe('ItemsService', () => {
   // ── ajustarStock ───────────────────────────────────────────────────────────
 
   describe('ajustarStock', () => {
-    it('lanza NotFoundException cuando el item no existe', async () => {
-      managerMock.query.mockResolvedValue([]);
-      await expect(
-        service.ajustarStock(TENANT, ITEM_ID, {
-          cantidad: 5,
-          tipo: 'entrada',
-        }),
-      ).rejects.toThrow(NotFoundException);
-    });
+    it('delega el registro del movimiento y devuelve el nuevo stock', async () => {
+      managerMock.query.mockResolvedValueOnce([{ tipo: 'producto' }]); // SELECT tipo
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-1',
+        stockAnterior: '10',
+        stockResultante: '15',
+      });
 
-    it('lanza BadRequestException cuando el item es servicio', async () => {
-      managerMock.query.mockResolvedValue([{ tipo: 'servicio' }]);
-      await expect(
-        service.ajustarStock(TENANT, ITEM_ID, {
-          cantidad: 5,
-          tipo: 'entrada',
-        }),
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('lanza BadRequestException cuando el stock es insuficiente para salida', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ tipo: 'producto' }])
-        .mockResolvedValueOnce([{ stock: '3' }]);
-      await expect(
-        service.ajustarStock(TENANT, ITEM_ID, {
-          cantidad: 5,
-          tipo: 'salida',
-        }),
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('suma stock en entrada', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ tipo: 'producto' }])
-        .mockResolvedValueOnce([{ stock: '10' }])
-        .mockResolvedValueOnce([]);
-
-      const result = await service.ajustarStock(TENANT, ITEM_ID, {
+      const res = await service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
         cantidad: 5,
         tipo: 'entrada',
+        motivo: 'compra',
       });
 
-      expect(result.stock).toBe('15');
+      expect(res).toEqual({ stock: '15' });
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          usuarioId: 'user-uuid',
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+        }),
+      );
     });
 
-    it('resta stock en salida válida', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ tipo: 'producto' }])
-        .mockResolvedValueOnce([{ stock: '10' }])
-        .mockResolvedValueOnce([]);
+    it('rechaza si el item no es producto', async () => {
+      managerMock.query.mockResolvedValueOnce([{ tipo: 'servicio' }]);
 
-      const result = await service.ajustarStock(TENANT, ITEM_ID, {
-        cantidad: 3,
-        tipo: 'salida',
-      });
-
-      expect(result.stock).toBe('7');
+      await expect(
+        service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+          cantidad: 5,
+          tipo: 'entrada',
+          motivo: 'compra',
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

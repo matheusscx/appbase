@@ -1,5 +1,13 @@
-import { IsIn, IsNumber, Min } from 'class-validator';
+import { IsIn, IsNumber, Min, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
+
+const MOTIVOS = [
+  'compra',
+  'devolucion',
+  'merma',
+  'ajuste_manual',
+  'inventario_inicial',
+];
 
 export class AjusteStockDto {
   @IsNumber()
@@ -8,5 +16,12 @@ export class AjusteStockDto {
   cantidad: number;
 
   @IsIn(['entrada', 'salida'])
-  tipo: string;
+  tipo: 'entrada' | 'salida';
+
+  @IsIn(MOTIVOS)
+  motivo: string;
+
+  @IsOptional()
+  @IsString()
+  comentario?: string;
 }

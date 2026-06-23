@@ -72,7 +72,10 @@ export class ItemsController {
     @Param('id') id: string,
     @Body() dto: AjusteStockDto,
   ) {
-    const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.ajustarStock(tenantId, id, dto);
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.itemsService.ajustarStock(tenantId, usuarioId, id, dto);
   }
 }

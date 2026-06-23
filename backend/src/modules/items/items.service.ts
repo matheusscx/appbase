@@ -12,6 +12,7 @@ import { ItemServicio } from './entities/item-servicio.entity';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
+import { InventarioService } from '../inventario/inventario.service';
 
 interface ItemRow {
   item_id: string;
@@ -46,6 +47,7 @@ export class ItemsService {
     private readonly itemServicioRepo: Repository<ItemServicio>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly inventarioService: InventarioService,
   ) {}
 
   private readonly BASE_QUERY = `
@@ -412,7 +414,12 @@ export class ItemsService {
     );
   }
 
-  async ajustarStock(tenantId: string, itemId: string, dto: AjusteStockDto) {
+  async ajustarStock(
+    tenantId: string,
+    usuarioId: string,
+    itemId: string,
+    dto: AjusteStockDto,
+  ) {
     return this.dataSource.transaction(async (manager) => {
       const itemRows: { tipo: string }[] = await manager.query(
         `SELECT tipo FROM items
@@ -424,29 +431,18 @@ export class ItemsService {
         throw new BadRequestException('El item no es un producto');
       }
 
-      const productoRows: { stock: string }[] = await manager.query(
-        `SELECT stock FROM item_producto WHERE item_id = $1`,
-        [itemId],
-      );
-      const stockActual = new Decimal(productoRows[0]?.stock ?? '0');
-      const cantidad = new Decimal(dto.cantidad);
+      const { stockResultante } =
+        await this.inventarioService.registrarMovimiento(manager, {
+          tenantId,
+          itemId,
+          usuarioId,
+          tipo: dto.tipo,
+          motivo: dto.motivo,
+          cantidad: new Decimal(dto.cantidad).toString(),
+          comentario: dto.comentario ?? null,
+        });
 
-      let nuevoStock: Decimal;
-      if (dto.tipo === 'entrada') {
-        nuevoStock = stockActual.plus(cantidad);
-      } else {
-        nuevoStock = stockActual.minus(cantidad);
-        if (nuevoStock.lessThan(0)) {
-          throw new BadRequestException('Stock insuficiente para la salida');
-        }
-      }
-
-      await manager.query(
-        `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
-        [nuevoStock.toString(), itemId],
-      );
-
-      return { stock: nuevoStock.toString() };
+      return { stock: stockResultante };
     });
   }
 
