@@ -60,6 +60,13 @@ const tiposOpts: Opt[] = [
   { label: 'Servicio', value: 'servicio' },
 ]
 
+const unidadesMedidaOpts: Opt[] = [
+  { label: 'Unidad', value: 'unidad' },
+  { label: 'Kilogramo (kg)', value: 'kg' },
+  { label: 'Litro (l)', value: 'l' },
+  { label: 'Metro (m)', value: 'm' },
+]
+
 const filtrosTipoOpts = [
   { label: 'Todos', value: '' },
   { label: 'Productos', value: 'producto' },
@@ -495,7 +502,12 @@ async function ejecutarAjusteStock() {
                   <UInput v-model="form.stock" type="number" placeholder="0" class="w-full" />
                 </UFormField>
                 <UFormField label="Unidad de medida">
-                  <UInput v-model="form.unidadMedida" placeholder="unidad" class="w-full" />
+                  <USelectMenu
+                    v-model="form.unidadMedida"
+                    :items="unidadesMedidaOpts"
+                    value-key="value"
+                    class="w-full"
+                  />
                 </UFormField>
                 <UFormField label="Fecha elaboración">
                   <UInput v-model="form.fechaElaboracion" type="date" class="w-full" />
