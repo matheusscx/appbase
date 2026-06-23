@@ -148,7 +148,7 @@ async function abrirHistorial(item: Item) {
       `${apiUrl}/inventario/movimientos?itemId=${item.id}`,
     )
   } catch (e) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al cargar historial'
+    const msg = apiErrorMsg(e, 'Error al cargar historial')
     toast.add({ title: msg, color: 'error' })
   } finally {
     historialLoading.value = false
@@ -309,7 +309,7 @@ async function guardar() {
     modalOpen.value = false
     await cargar()
   } catch (e) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al guardar'
+    const msg = apiErrorMsg(e, 'Error al guardar')
     toast.add({ title: msg, color: 'error' })
   } finally {
     saving.value = false
@@ -331,7 +331,7 @@ async function eliminar() {
     confirmModalOpen.value = false
     await cargar()
   } catch (e) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al eliminar'
+    const msg = apiErrorMsg(e, 'Error al eliminar')
     toast.add({ title: msg, color: 'error' })
   }
 }
@@ -377,7 +377,7 @@ async function ejecutarAjusteStock() {
     toast.add({ title: `Stock actualizado: ${result.stock}`, color: 'success' })
     stockModalOpen.value = false
   } catch (e) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al ajustar stock'
+    const msg = apiErrorMsg(e, 'Error al ajustar stock')
     toast.add({ title: msg, color: 'error' })
   } finally {
     ajustando.value = false

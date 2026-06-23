@@ -28,8 +28,8 @@ async function cargar() {
     monedas.value = await useApiFetch<Moneda[]>(`${apiUrl}/monedas`)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar monedas', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar monedas')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -54,8 +54,8 @@ async function toggleHabilitada(m: Moneda) {
   }
   catch (e: unknown) {
     m.habilitada = prev
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al actualizar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al actualizar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     toggling.delete(m.monedaId)
@@ -81,8 +81,8 @@ async function setDefault(m: Moneda) {
   catch (e: unknown) {
     m.esDefault = false
     if (prev) prev.esDefault = true
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al actualizar predeterminada', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al actualizar predeterminada')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     toggling.delete(m.monedaId)
@@ -113,8 +113,8 @@ async function guardarTasa(m: Moneda) {
   }
   catch (e: unknown) {
     m.valorDelDia = prev
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al actualizar la tasa', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al actualizar la tasa')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     toggling.delete(m.monedaId)

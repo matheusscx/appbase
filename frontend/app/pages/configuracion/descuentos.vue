@@ -67,8 +67,8 @@ async function cargar() {
     descuentos.value = await useApiFetch<Descuento[]>(`${apiUrl}/descuentos`)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar descuentos', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar descuentos')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -81,8 +81,8 @@ async function cargarTipos() {
     tipos.value = data.map(t => ({ label: t.nombre, value: t.tipo_regla_id }))
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar tipos de descuento', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar tipos de descuento')
+    toast.add({ title: msg, color: 'error' })
   }
 }
 
@@ -140,8 +140,8 @@ async function guardar() {
     await cargar()
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al guardar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al guardar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     saving.value = false
@@ -162,8 +162,8 @@ async function toggleActivo(d: Descuento) {
   }
   catch (e: unknown) {
     d.activo = prev
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al actualizar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al actualizar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     toggling.delete(d.id)
@@ -179,8 +179,8 @@ async function eliminar(id: string) {
     await cargar()
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al eliminar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al eliminar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     confirmDeleteId.value = null

@@ -23,8 +23,8 @@ async function cargar() {
     roles.value = await useApiFetch<Rol[]>(`${apiUrl}/roles`)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar roles', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar roles')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -45,8 +45,8 @@ async function crear() {
     navigateTo(`/configuracion/roles/${rol.id}`)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al crear rol', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al crear rol')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     creating.value = false
@@ -62,8 +62,8 @@ async function eliminar(rol: Rol) {
     await cargar()
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al eliminar rol', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al eliminar rol')
+    toast.add({ title: msg, color: 'error' })
   }
 }
 

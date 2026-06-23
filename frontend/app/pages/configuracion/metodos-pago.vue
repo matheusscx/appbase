@@ -23,8 +23,8 @@ async function cargar() {
     metodos.value = await useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar métodos de pago', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar métodos de pago')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -45,8 +45,8 @@ async function toggleHabilitada(m: MetodoPago) {
   }
   catch (e: unknown) {
     m.habilitada = prev
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al actualizar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al actualizar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     toggling.delete(m.metodoPagoId)
@@ -67,8 +67,8 @@ async function togglePermiteVuelto(m: MetodoPago) {
   }
   catch (e: unknown) {
     m.permiteVuelto = prev
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al actualizar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al actualizar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     toggling.delete(m.metodoPagoId)

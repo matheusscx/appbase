@@ -67,8 +67,8 @@ async function cargar() {
     recargos.value = await useApiFetch<Recargo[]>(`${apiUrl}/recargos`)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar recargos', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar recargos')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -81,8 +81,8 @@ async function cargarTipos() {
     tipos.value = data.map(t => ({ label: t.nombre, value: t.tipo_regla_id }))
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar tipos de recargo', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar tipos de recargo')
+    toast.add({ title: msg, color: 'error' })
   }
 }
 
@@ -140,8 +140,8 @@ async function guardar() {
     await cargar()
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al guardar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al guardar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     saving.value = false
@@ -162,8 +162,8 @@ async function toggleActivo(r: Recargo) {
   }
   catch (e: unknown) {
     r.activo = prev
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al actualizar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al actualizar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     toggling.delete(r.id)
@@ -179,8 +179,8 @@ async function eliminar(id: string) {
     await cargar()
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al eliminar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al eliminar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     confirmDeleteId.value = null

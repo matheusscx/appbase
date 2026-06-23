@@ -40,8 +40,8 @@ async function cargar() {
     roles.value = rls
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar usuarios', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar usuarios')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -80,8 +80,8 @@ async function guardar() {
     await cargar()
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al guardar roles', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al guardar roles')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     saving.value = false

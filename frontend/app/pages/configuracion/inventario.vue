@@ -59,7 +59,7 @@ async function cargar() {
       `${apiUrl}/inventario/movimientos${qs ? `?${qs}` : ''}`,
     )
   } catch (e) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al cargar movimientos'
+    const msg = apiErrorMsg(e, 'Error al cargar movimientos')
     toast.add({ title: msg, color: 'error' })
   } finally {
     loading.value = false

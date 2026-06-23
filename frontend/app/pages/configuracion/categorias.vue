@@ -42,8 +42,8 @@ async function cargar() {
     categorias.value = await useApiFetch<Categoria[]>(`${apiUrl}/categorias`)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar categorías', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar categorías')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -92,8 +92,8 @@ async function guardar() {
     await cargar()
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al guardar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al guardar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     saving.value = false
@@ -114,8 +114,8 @@ async function toggleActivo(cat: Categoria) {
   }
   catch (e: unknown) {
     cat.activo = prev
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al actualizar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al actualizar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     toggling.delete(cat.id)
@@ -131,8 +131,8 @@ async function eliminar(id: string) {
     await cargar()
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al eliminar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al eliminar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     confirmDeleteId.value = null

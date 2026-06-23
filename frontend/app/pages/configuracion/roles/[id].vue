@@ -52,8 +52,8 @@ async function cargar() {
     seleccionados.value = new Set(perms.map(p => p.moduloAppPermisoId))
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar el rol', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar el rol')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -78,8 +78,8 @@ async function guardarInfo() {
     toast.add({ title: 'Rol actualizado', color: 'success' })
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al guardar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al guardar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     savingInfo.value = false
@@ -101,8 +101,8 @@ async function guardarPermisos() {
     toast.add({ title: 'Permisos guardados', color: 'success' })
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al guardar permisos', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al guardar permisos')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     savingPerms.value = false

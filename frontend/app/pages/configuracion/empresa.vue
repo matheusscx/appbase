@@ -62,8 +62,8 @@ async function cargar() {
     }
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar datos de la empresa', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar datos de la empresa')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loading.value = false
@@ -103,8 +103,8 @@ async function guardar() {
     toast.add({ title: 'Datos de empresa actualizados', color: 'success' })
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al guardar', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al guardar')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     saving.value = false
