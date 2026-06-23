@@ -507,7 +507,7 @@ extensiones posibles, no como parte de esta funcionalidad.
 | 12. Gestión de cajas | 🔲 | 🔲 | |
 | 13. Registro de pagos | 🔲 | 🔲 | |
 | 14. SPA frontend (navegación por permisos) | — | 🔲 parcial | Flujo auth + tenant completo; menú RBAC pendiente |
-| 15. Gestión de inventario (kardex de movimientos) | 🔲 | 🔲 | Stock hoy es un saldo en `item_producto.stock` sin historial; falta `movimientos_inventario` + integración con ventas |
+| 15. Gestión de inventario (kardex de movimientos) | ✅ | ✅ | Kardex auditable con `movimientos_inventario`; endpoint GET /inventario/movimientos; PATCH /items/:id/stock con motivo/comentario; integración automática con ventas |
 
 **Leyenda:** ✅ Implementado · 🔲 Por construir · 🔲 parcial Parcialmente implementado
 - CORS está abierto a cualquier origen; endurecer al migrar.

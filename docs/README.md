@@ -55,6 +55,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/roles-permisos.md](./features/roles-permisos.md)** — Configuración de Roles y Permisos (RBAC: roles, matriz de permisos, asignación a usuarios)
 - **[features/tenants-razones-sociales.md](./features/tenants-razones-sociales.md)** — Gestión de tenants y razones sociales
 - **[features/configuracion-monedas.md](./features/configuracion-monedas.md)** — Configuración de monedas por tenant (multi-moneda + tasa de cambio)
+- **[features/inventario-kardex.md](./features/inventario-kardex.md)** — Gestión de inventario (kardex de movimientos de stock)
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans
@@ -117,7 +118,9 @@ docs/
 │   ├── test-permisos.md           # RBAC test module
 │   ├── modulo-configuracion.md    # Configuración — perfil de usuario
 │   ├── roles-permisos.md          # Configuración — roles y permisos (RBAC)
-│   └── tenants-razones-sociales.md # Gestión de tenants y razones sociales
+│   ├── tenants-razones-sociales.md # Gestión de tenants y razones sociales
+│   ├── configuracion-monedas.md   # Configuración de monedas por tenant
+│   └── inventario-kardex.md       # Gestión de inventario (kardex de movimientos)
 └── superpowers/                   # Engineering plans & design specs
     ├── plans/
     └── specs/

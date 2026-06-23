@@ -98,7 +98,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Configuración de monedas por tenant | ✅ Implementado |
 | Catálogos financieros (categorías, impuestos, descuentos, recargos, métodos de pago, tipos de regla) | ✅ Implementado |
 | Catálogo de items (productos y servicios) | ✅ Implementado |
-| Gestión de inventario (kardex de movimientos de stock) | 🔲 Por construir |
+| Gestión de inventario (kardex de movimientos de stock) | ✅ Implementado |
 | Motor de cálculo de precios | 🔲 Por construir |
 | Procesamiento de ventas | 🔲 Por construir |
 | Gestión de cajas | 🔲 Por construir |
