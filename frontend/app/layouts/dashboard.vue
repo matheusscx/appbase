@@ -44,9 +44,11 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
           <div class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
             <UIcon name="i-heroicons-bolt" class="text-white w-4 h-4" />
           </div>
-          <span v-if="!collapsed" class="font-semibold text-sm truncate">
-            {{ tenantStore.activeTenant?.nombre ?? 'Prueba Técnica' }}
-          </span>
+          <ClientOnly>
+            <span v-if="!collapsed" class="font-semibold text-sm truncate">
+              {{ tenantStore.activeTenant?.nombre ?? 'Prueba Técnica' }}
+            </span>
+          </ClientOnly>
         </div>
       </template>
 

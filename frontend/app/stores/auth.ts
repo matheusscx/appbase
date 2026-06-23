@@ -14,7 +14,7 @@ export interface User {
 
 export const useAuthStore = defineStore('auth', () => {
   const config = useRuntimeConfig()
-  const serverApiUrl = (config as Record<string, unknown>).apiUrl as string | undefined
+  const serverApiUrl = import.meta.server ? (config as Record<string, unknown>).apiUrl as string | undefined : undefined
   const resolvedApiUrl = import.meta.server ? (serverApiUrl ?? config.public.apiUrl) : config.public.apiUrl
 
   const token = useCookie<string | null>('access_token', {
