@@ -43,8 +43,11 @@ export class ItemsController {
   @UseGuards(TenantAdminGuard)
   @Post()
   create(@Req() req: Request, @Body() dto: CreateItemDto) {
-    const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.create(tenantId, dto);
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.itemsService.create(tenantId, usuarioId, dto);
   }
 
   @UseGuards(TenantAdminGuard)

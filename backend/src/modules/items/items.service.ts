@@ -142,7 +142,7 @@ export class ItemsService {
     };
   }
 
-  async create(tenantId: string, dto: CreateItemDto) {
+  async create(tenantId: string, usuarioId: string, dto: CreateItemDto) {
     return this.dataSource.transaction(async (manager) => {
       await this.validarMoneda(manager, tenantId, dto.monedaId);
       if (dto.categoriaId) {
@@ -202,12 +202,25 @@ export class ItemsService {
            VALUES ($1,$2,$3,$4,$5)`,
           [
             itemId,
-            dto.stock ?? '0',
+            '0', // el saldo se materializa vía el movimiento inventario_inicial
             dto.unidadMedida ?? 'unidad',
             dto.fechaElaboracion ?? null,
             dto.fechaVencimiento ?? null,
           ],
         );
+
+        const stockInicial = new Decimal(dto.stock ?? '0');
+        if (stockInicial.greaterThan(0)) {
+          await this.inventarioService.registrarMovimiento(manager, {
+            tenantId,
+            itemId,
+            usuarioId,
+            tipo: 'entrada',
+            motivo: 'inventario_inicial',
+            cantidad: stockInicial.toString(),
+            comentario: 'Stock inicial',
+          });
+        }
       } else {
         await manager.query(
           `INSERT INTO item_servicio (item_id, duracion_estimada, requiere_cita)

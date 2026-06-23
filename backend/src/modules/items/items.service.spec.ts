@@ -157,9 +157,9 @@ describe('ItemsService', () => {
 
     it('lanza BadRequestException cuando la moneda no pertenece al tenant', async () => {
       managerMock.query.mockResolvedValue([]); // moneda no encontrada
-      await expect(service.create(TENANT, baseDtoProducto)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.create(TENANT, 'user-uuid', baseDtoProducto as any),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('lanza BadRequestException cuando la categoría no pertenece al tenant', async () => {
@@ -167,10 +167,10 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
         .mockResolvedValueOnce([]); // categoria no encontrada
       await expect(
-        service.create(TENANT, {
+        service.create(TENANT, 'user-uuid', {
           ...baseDtoProducto,
           categoriaId: CATEGORIA_ID,
-        }),
+        } as any),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -179,8 +179,17 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
         .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
         .mockResolvedValueOnce([]); // INSERT item_producto
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-0',
+        stockAnterior: '0',
+        stockResultante: '5',
+      });
 
-      const result = await service.create(TENANT, baseDtoProducto);
+      const result = await service.create(
+        TENANT,
+        'user-uuid',
+        baseDtoProducto as any,
+      );
 
       expect(dataSource.transaction).toHaveBeenCalled();
       expect(result).toEqual({ id: ITEM_ID });
@@ -200,9 +209,43 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
         .mockResolvedValueOnce([]); // INSERT item_servicio
 
-      const result = await service.create(TENANT, dtoServicio);
+      const result = await service.create(TENANT, 'user-uuid', dtoServicio as any);
 
       expect(result).toEqual({ id: ITEM_ID });
+    });
+
+    it('producto con stock inicial > 0 registra movimiento inventario_inicial', async () => {
+      // moneda válida, sin categoría/reglas
+      managerMock.query
+        .mockResolvedValueOnce([{ ok: 1 }])                // validarMoneda
+        .mockResolvedValueOnce([{ item_id: 'nuevo-item' }]) // INSERT items RETURNING
+        .mockResolvedValueOnce(undefined);                   // INSERT item_producto
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-1',
+        stockAnterior: '0',
+        stockResultante: '25',
+      });
+
+      const res = await service.create(TENANT, 'user-uuid', {
+        nombre: 'Smartphone',
+        precioBase: '899000',
+        monedaId: MONEDA_ID,
+        tipo: 'producto',
+        stock: '25',
+        unidadMedida: 'unidad',
+      } as any);
+
+      expect(res).toEqual({ id: 'nuevo-item' });
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          itemId: 'nuevo-item',
+          tipo: 'entrada',
+          motivo: 'inventario_inicial',
+          cantidad: '25',
+          usuarioId: 'user-uuid',
+        }),
+      );
     });
   });
 
