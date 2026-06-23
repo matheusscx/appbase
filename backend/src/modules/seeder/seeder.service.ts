@@ -14,6 +14,15 @@ import { Usuario } from '../users/usuario.entity';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
 import { PaisMoneda } from '../monedas/entities/pais-moneda.entity';
 import { TenantMoneda } from '../monedas/entities/tenant-moneda.entity';
+import { MetodoPago } from '../metodos-pago/entities/metodo-pago.entity';
+import { MetodoPagoPais } from '../metodos-pago/entities/metodo-pago-pais.entity';
+import { TenantMetodoPago } from '../metodos-pago/entities/tenant-metodo-pago.entity';
+import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
+import { Categoria } from '../categorias/entities/categoria.entity';
+import { Impuesto } from '../impuestos/entities/impuesto.entity';
+import { Descuento } from '../descuentos/entities/descuento.entity';
+import { Recargo } from '../recargos/entities/recargo.entity';
+import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -46,6 +55,22 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly paisMonedaRepo: Repository<PaisMoneda>,
     @InjectRepository(TenantMoneda)
     private readonly tenantMonedaRepo: Repository<TenantMoneda>,
+    @InjectRepository(MetodoPago)
+    private readonly metodoPagoRepo: Repository<MetodoPago>,
+    @InjectRepository(MetodoPagoPais)
+    private readonly metodoPagoPaisRepo: Repository<MetodoPagoPais>,
+    @InjectRepository(TenantMetodoPago)
+    private readonly tenantMetodoPagoRepo: Repository<TenantMetodoPago>,
+    @InjectRepository(TipoRegla)
+    private readonly tipoReglaRepo: Repository<TipoRegla>,
+    @InjectRepository(Categoria)
+    private readonly categoriaRepo: Repository<Categoria>,
+    @InjectRepository(Impuesto)
+    private readonly impuestoRepo: Repository<Impuesto>,
+    @InjectRepository(Descuento)
+    private readonly descuentoRepo: Repository<Descuento>,
+    @InjectRepository(Recargo)
+    private readonly recargoRepo: Repository<Recargo>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -58,14 +83,22 @@ export class SeederService implements OnApplicationBootstrap {
     this.logger.log('Running dev seed...');
 
     await this.seedMonedas();
+    await this.seedMetodosPago();
+    await this.seedTiposRegla();
     await this.seedPais();
     await this.seedPaisMonedas();
+    await this.seedMetodoPagoPais();
     await this.seedProvincias();
     await this.seedModulosApp();
     await this.seedPermisos();
     await this.seedModuloAppPermisos();
     await this.seedTenants();
     await this.seedTenantMonedas();
+    await this.seedTenantMetodosPago();
+    await this.seedCategorias();
+    await this.seedImpuestos();
+    await this.seedDescuentos();
+    await this.seedRecargos();
     await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
     await this.seedUsuariosAdicionales();
@@ -649,6 +682,260 @@ export class SeederService implements OnApplicationBootstrap {
          VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
         [rolId, MODULO_TENANT_TEST, moduloAppPermisoId],
       );
+    }
+  }
+
+  private async seedMetodosPago(): Promise<void> {
+    const metodos: Partial<MetodoPago>[] = [
+      {
+        metodoPagoId: '550e8400-e29b-41d4-a716-446655440105',
+        nombre: 'Efectivo',
+        abreviatura: 'EFE',
+        activo: true,
+      },
+      {
+        metodoPagoId: '550e8400-e29b-41d4-a716-446655440106',
+        nombre: 'Tarjeta de débito',
+        abreviatura: 'TDB',
+        activo: true,
+      },
+      {
+        metodoPagoId: '550e8400-e29b-41d4-a716-446655440107',
+        nombre: 'Tarjeta de crédito',
+        abreviatura: 'TDC',
+        activo: true,
+      },
+      {
+        metodoPagoId: '550e8400-e29b-41d4-a716-446655440108',
+        nombre: 'Transferencia bancaria',
+        abreviatura: 'TRF',
+        activo: true,
+      },
+    ];
+
+    for (const data of metodos) {
+      const exists = await this.metodoPagoRepo.findOne({
+        where: { metodoPagoId: data.metodoPagoId },
+      });
+      if (!exists) {
+        await this.metodoPagoRepo.save(this.metodoPagoRepo.create(data));
+      }
+    }
+  }
+
+  private async seedTiposRegla(): Promise<void> {
+    const tipos: Partial<TipoRegla>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440100',
+        clase: 'descuento',
+        codigo: 'pronto_pago',
+        nombre: 'Pronto pago',
+        descripcion: 'Descuento por pago anticipado o al contado',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440101',
+        clase: 'descuento',
+        codigo: 'por_mayor',
+        nombre: 'Al por mayor',
+        descripcion: 'Descuento por compra de grandes volúmenes',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440102',
+        clase: 'descuento',
+        codigo: 'rango_fechas',
+        nombre: 'Rango de fechas',
+        descripcion: 'Descuento vigente entre fechas específicas',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440103',
+        clase: 'recargo',
+        codigo: 'interes_simple',
+        nombre: 'Interés simple',
+        descripcion: 'Recargo por cuotas con interés simple',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440104',
+        clase: 'recargo',
+        codigo: 'interes_compuesto',
+        nombre: 'Interés compuesto',
+        descripcion: 'Recargo por cuotas con interés compuesto',
+        activo: true,
+      },
+    ];
+
+    for (const data of tipos) {
+      const exists = await this.tipoReglaRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.tipoReglaRepo.save(this.tipoReglaRepo.create(data));
+      }
+    }
+  }
+
+  private async seedMetodoPagoPais(): Promise<void> {
+    const CHILE = '550e8400-e29b-41d4-a716-446655440000';
+    const metodoPagoIds = [
+      '550e8400-e29b-41d4-a716-446655440105', // Efectivo
+      '550e8400-e29b-41d4-a716-446655440106', // Tarjeta débito
+      '550e8400-e29b-41d4-a716-446655440107', // Tarjeta crédito
+      '550e8400-e29b-41d4-a716-446655440108', // Transferencia
+    ];
+
+    for (const metodoPagoId of metodoPagoIds) {
+      const exists = await this.metodoPagoPaisRepo.findOne({
+        where: { paisId: CHILE, metodoPagoId },
+      });
+      if (!exists) {
+        await this.metodoPagoPaisRepo.save(
+          this.metodoPagoPaisRepo.create({ paisId: CHILE, metodoPagoId }),
+        );
+      }
+    }
+  }
+
+  private async seedTenantMetodosPago(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const metodoPagoIds = [
+      '550e8400-e29b-41d4-a716-446655440105',
+      '550e8400-e29b-41d4-a716-446655440106',
+      '550e8400-e29b-41d4-a716-446655440107',
+      '550e8400-e29b-41d4-a716-446655440108',
+    ];
+
+    for (const tenantId of [PARIS, FALABELLA]) {
+      for (const metodoPagoId of metodoPagoIds) {
+        const exists = await this.tenantMetodoPagoRepo.findOne({
+          where: { tenantId, metodoPagoId },
+        });
+        if (!exists) {
+          await this.tenantMetodoPagoRepo.save(
+            this.tenantMetodoPagoRepo.create({
+              tenantId,
+              metodoPagoId,
+              habilitada: true,
+              permiteVuelto:
+                metodoPagoId === '550e8400-e29b-41d4-a716-446655440105', // solo efectivo
+            }),
+          );
+        }
+      }
+    }
+  }
+
+  private async seedCategorias(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const categorias: Partial<Categoria>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440110',
+        tenantId: PARIS,
+        nombre: 'Electrónica',
+        aplicaA: 'productos',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440111',
+        tenantId: PARIS,
+        nombre: 'Ropa y accesorios',
+        aplicaA: 'ambos',
+        activo: true,
+      },
+    ];
+
+    for (const data of categorias) {
+      const exists = await this.categoriaRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.categoriaRepo.save(this.categoriaRepo.create(data));
+      }
+    }
+  }
+
+  private async seedImpuestos(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const impuestos: Partial<Impuesto>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440112',
+        tenantId: PARIS,
+        nombre: 'IVA 19%',
+        porcentaje: '0.19',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440113',
+        tenantId: FALABELLA,
+        nombre: 'IVA 19%',
+        porcentaje: '0.19',
+        activo: true,
+      },
+    ];
+
+    for (const data of impuestos) {
+      const exists = await this.impuestoRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.impuestoRepo.save(this.impuestoRepo.create(data));
+      }
+    }
+  }
+
+  private async seedDescuentos(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const TIPO_PRONTO_PAGO = '550e8400-e29b-41d4-a716-446655440100';
+    const descuentos: Partial<Descuento>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440114',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_PRONTO_PAGO,
+        nombre: 'Descuento pronto pago 10%',
+        modo: ModoRegla.PORCENTAJE,
+        valor: '0.10',
+        condicionTipo: CondicionTipo.NINGUNA,
+        activo: true,
+      },
+    ];
+
+    for (const data of descuentos) {
+      const exists = await this.descuentoRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.descuentoRepo.save(this.descuentoRepo.create(data));
+      }
+    }
+  }
+
+  private async seedRecargos(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const TIPO_INTERES_SIMPLE = '550e8400-e29b-41d4-a716-446655440103';
+    const recargos: Partial<Recargo>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440115',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_INTERES_SIMPLE,
+        nombre: 'Interés cuotas 5%',
+        modo: ModoRegla.PORCENTAJE,
+        valor: '0.05',
+        condicionTipo: CondicionTipo.NINGUNA,
+        activo: true,
+      },
+    ];
+
+    for (const data of recargos) {
+      const exists = await this.recargoRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.recargoRepo.save(this.recargoRepo.create(data));
+      }
     }
   }
 

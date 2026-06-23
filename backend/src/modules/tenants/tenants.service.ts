@@ -128,6 +128,26 @@ export class TenantsService {
         );
       }
 
+      // 8. Habilitar los métodos de pago disponibles en el país del tenant
+      const paisRows: { pais_id: string }[] = await manager.query(
+        `SELECT prov.pais_id
+         FROM provincia prov
+         WHERE prov.provincia_id = $1 AND prov.eliminado_el IS NULL`,
+        [savedTenant.provinciaId],
+      );
+      const paisId = paisRows[0]?.pais_id;
+      if (paisId) {
+        await manager.query(
+          `INSERT INTO tenant_metodo_pago
+             (tenant_id, metodo_pago_id, habilitada, permite_vuelto, creado_el, actualizado_el)
+           SELECT $1, mpp.metodo_pago_id, true, false, NOW(), NOW()
+           FROM metodo_pago_pais mpp
+           WHERE mpp.pais_id = $2 AND mpp.eliminado_el IS NULL
+           ON CONFLICT (tenant_id, metodo_pago_id) DO NOTHING`,
+          [savedTenant.id, paisId],
+        );
+      }
+
       return savedTenant;
     });
   }

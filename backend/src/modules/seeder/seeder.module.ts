@@ -14,6 +14,14 @@ import { Usuario } from '../users/usuario.entity';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
 import { PaisMoneda } from '../monedas/entities/pais-moneda.entity';
 import { TenantMoneda } from '../monedas/entities/tenant-moneda.entity';
+import { MetodoPago } from '../metodos-pago/entities/metodo-pago.entity';
+import { MetodoPagoPais } from '../metodos-pago/entities/metodo-pago-pais.entity';
+import { TenantMetodoPago } from '../metodos-pago/entities/tenant-metodo-pago.entity';
+import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
+import { Categoria } from '../categorias/entities/categoria.entity';
+import { Impuesto } from '../impuestos/entities/impuesto.entity';
+import { Descuento } from '../descuentos/entities/descuento.entity';
+import { Recargo } from '../recargos/entities/recargo.entity';
 
 @Module({
   imports: [
@@ -31,6 +39,14 @@ import { TenantMoneda } from '../monedas/entities/tenant-moneda.entity';
       RazonSocial,
       PaisMoneda,
       TenantMoneda,
+      MetodoPago,
+      MetodoPagoPais,
+      TenantMetodoPago,
+      TipoRegla,
+      Categoria,
+      Impuesto,
+      Descuento,
+      Recargo,
     ]),
   ],
   providers: [SeederService],

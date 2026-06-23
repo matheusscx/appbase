@@ -46,6 +46,31 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         icon: 'i-heroicons-currency-dollar',
         to: '/configuracion/monedas',
       },
+      {
+        label: 'Categorías',
+        icon: 'i-heroicons-tag',
+        to: '/configuracion/categorias',
+      },
+      {
+        label: 'Impuestos',
+        icon: 'i-heroicons-receipt-percent',
+        to: '/configuracion/impuestos',
+      },
+      {
+        label: 'Descuentos',
+        icon: 'i-heroicons-arrow-trending-down',
+        to: '/configuracion/descuentos',
+      },
+      {
+        label: 'Recargos',
+        icon: 'i-heroicons-arrow-trending-up',
+        to: '/configuracion/recargos',
+      },
+      {
+        label: 'Métodos de pago',
+        icon: 'i-heroicons-credit-card',
+        to: '/configuracion/metodos-pago',
+      },
     )
   }
 

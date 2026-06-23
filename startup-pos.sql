@@ -110,6 +110,17 @@ CREATE TABLE "metodos_pago" (
   "eliminado_el"   TIMESTAMPTZ
 );
 
+-- Disponibilidad de métodos de pago por país (espejo de pais_moneda).
+-- El tenant solo puede habilitar los métodos disponibles en su país.
+CREATE TABLE "metodo_pago_pais" (
+  "pais_id"        UUID        NOT NULL REFERENCES "pais" ("pais_id"),
+  "metodo_pago_id" UUID        NOT NULL REFERENCES "metodos_pago" ("metodo_pago_id"),
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ,
+  PRIMARY KEY ("pais_id", "metodo_pago_id")
+);
+
 CREATE TABLE "modulos_app" (
   "modulo_app_id"       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   "nombre"              VARCHAR(100) NOT NULL,
@@ -348,12 +359,28 @@ CREATE TABLE "impuestos" (
   "eliminado_el"   TIMESTAMPTZ
 );
 
+-- Catálogo GLOBAL de tipos de regla (sembrado por el sistema). Una sola tabla con
+-- columna discriminadora `clase`. El `codigo` es estable para que el motor de precios
+-- (fase 9) ramifique su cálculo. Descuentos/recargos referencian su tipo (FK NOT NULL).
+CREATE TABLE "tipos_regla" (
+  "tipo_regla_id"  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "clase"          TEXT        NOT NULL,   -- 'descuento' | 'recargo'
+  "codigo"         TEXT        NOT NULL UNIQUE,
+  "nombre"         TEXT        NOT NULL,
+  "descripcion"    TEXT,
+  "activo"         BOOLEAN     NOT NULL DEFAULT true,
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ
+);
+
 CREATE TABLE "descuentos" (
   "descuento_id"    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"          TEXT          NOT NULL,
   "modo"            modo_regla    NOT NULL,
   "valor"           NUMERIC(18,4) NOT NULL,   -- decimal si modo=porcentaje: 0.10 = 10%
+  "tipo_regla_id"   UUID          NOT NULL REFERENCES "tipos_regla" ("tipo_regla_id"),
   "condicion_tipo"  condicion_tipo NOT NULL DEFAULT 'ninguna',
   "condicion_valor" TEXT,
   "fecha_inicio"    DATE,
@@ -370,6 +397,7 @@ CREATE TABLE "recargos" (
   "nombre"          TEXT          NOT NULL,
   "modo"            modo_regla    NOT NULL,
   "valor"           NUMERIC(18,4) NOT NULL,   -- decimal si modo=porcentaje: 0.10 = 10%
+  "tipo_regla_id"   UUID          NOT NULL REFERENCES "tipos_regla" ("tipo_regla_id"),
   "condicion_tipo"  condicion_tipo NOT NULL DEFAULT 'ninguna',
   "condicion_valor" TEXT,
   "fecha_inicio"    DATE,

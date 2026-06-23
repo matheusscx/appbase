@@ -34,6 +34,20 @@ import { TenantMoneda } from './modules/monedas/entities/tenant-moneda.entity';
 import { PaisMoneda } from './modules/monedas/entities/pais-moneda.entity';
 import { MonedasModule } from './modules/monedas/monedas.module';
 import { SeederModule } from './modules/seeder/seeder.module';
+import { Categoria } from './modules/categorias/entities/categoria.entity';
+import { CategoriasModule } from './modules/categorias/categorias.module';
+import { Impuesto } from './modules/impuestos/entities/impuesto.entity';
+import { ImpuestosModule } from './modules/impuestos/impuestos.module';
+import { TipoRegla } from './modules/tipos-regla/entities/tipo-regla.entity';
+import { TiposReglaModule } from './modules/tipos-regla/tipos-regla.module';
+import { Descuento } from './modules/descuentos/entities/descuento.entity';
+import { DescuentosModule } from './modules/descuentos/descuentos.module';
+import { Recargo } from './modules/recargos/entities/recargo.entity';
+import { RecargosModule } from './modules/recargos/recargos.module';
+import { MetodoPago } from './modules/metodos-pago/entities/metodo-pago.entity';
+import { MetodoPagoPais } from './modules/metodos-pago/entities/metodo-pago-pais.entity';
+import { TenantMetodoPago } from './modules/metodos-pago/entities/tenant-metodo-pago.entity';
+import { MetodosPagoModule } from './modules/metodos-pago/metodos-pago.module';
 
 @Module({
   imports: [
@@ -65,6 +79,14 @@ import { SeederModule } from './modules/seeder/seeder.module';
           RolPermisoModulo,
           TenantMoneda,
           PaisMoneda,
+          Categoria,
+          Impuesto,
+          TipoRegla,
+          Descuento,
+          Recargo,
+          MetodoPago,
+          MetodoPagoPais,
+          TenantMetodoPago,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -80,6 +102,12 @@ import { SeederModule } from './modules/seeder/seeder.module';
     TestModule,
     MeModule,
     MonedasModule,
+    CategoriasModule,
+    ImpuestosModule,
+    TiposReglaModule,
+    DescuentosModule,
+    RecargosModule,
+    MetodosPagoModule,
   ],
   controllers: [AppController],
   providers: [AppService],
