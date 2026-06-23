@@ -76,6 +76,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         icon: 'i-heroicons-archive-box',
         to: '/configuracion/items',
       },
+      {
+        label: 'Inventario',
+        icon: 'i-heroicons-clipboard-document-list',
+        to: '/configuracion/inventario',
+      },
     )
   }
 
