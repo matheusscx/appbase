@@ -95,7 +95,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Gestión de tenants y razones sociales | ✅ Implementado |
 | Terceros (proveedores, empresas) | 🔲 Por construir |
 | Catálogos base (país, provincia, moneda) | 🔲 Por construir |
-| Configuración de monedas por tenant | 🔲 Por construir |
+| Configuración de monedas por tenant | ✅ Implementado |
 | Catálogos financieros (impuestos, descuentos, recargos) | 🔲 Por construir |
 | Catálogo de items (productos y servicios) | 🔲 Por construir |
 | Motor de cálculo de precios | 🔲 Por construir |

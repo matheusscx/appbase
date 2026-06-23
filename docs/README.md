@@ -49,6 +49,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/modulo-configuracion.md](./features/modulo-configuracion.md)** — Módulo Configuración (perfil de usuario + cambio de contraseña)
 - **[features/roles-permisos.md](./features/roles-permisos.md)** — Configuración de Roles y Permisos (RBAC: roles, matriz de permisos, asignación a usuarios)
 - **[features/tenants-razones-sociales.md](./features/tenants-razones-sociales.md)** — Gestión de tenants y razones sociales
+- **[features/configuracion-monedas.md](./features/configuracion-monedas.md)** — Configuración de monedas por tenant (multi-moneda + tasa de cambio)
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans

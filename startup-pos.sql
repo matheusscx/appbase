@@ -75,6 +75,17 @@ CREATE TABLE "moneda" (
 
 ALTER TABLE "pais" ADD FOREIGN KEY ("moneda_oficial_id") REFERENCES "moneda" ("moneda_id");
 
+-- Monedas disponibles por país (puente). Define el subconjunto del catálogo
+-- global que un tenant de ese país puede habilitar (la oficial sale de pais.moneda_oficial_id).
+CREATE TABLE "pais_moneda" (
+  "pais_id"        UUID        NOT NULL REFERENCES "pais" ("pais_id"),
+  "moneda_id"      UUID        NOT NULL REFERENCES "moneda" ("moneda_id"),
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ,
+  PRIMARY KEY ("pais_id", "moneda_id")
+);
+
 -- Documentos tributarios válidos por país (boleta, factura, nota de crédito, etc.)
 -- Cada país define sus propios tipos; no es un enum fijo.
 CREATE TABLE "tipos_documento_tributario" (

@@ -30,6 +30,9 @@ import { Rol } from './modules/roles/entities/rol.entity';
 import { RolUsuario } from './modules/roles/entities/rol-usuario.entity';
 import { ModuloRol } from './modules/roles/entities/modulo-rol.entity';
 import { RolPermisoModulo } from './modules/roles/entities/rol-permiso-modulo.entity';
+import { TenantMoneda } from './modules/monedas/entities/tenant-moneda.entity';
+import { PaisMoneda } from './modules/monedas/entities/pais-moneda.entity';
+import { MonedasModule } from './modules/monedas/monedas.module';
 import { SeederModule } from './modules/seeder/seeder.module';
 
 @Module({
@@ -60,6 +63,8 @@ import { SeederModule } from './modules/seeder/seeder.module';
           RolUsuario,
           ModuloRol,
           RolPermisoModulo,
+          TenantMoneda,
+          PaisMoneda,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -74,6 +79,7 @@ import { SeederModule } from './modules/seeder/seeder.module';
     RolesModule,
     TestModule,
     MeModule,
+    MonedasModule,
   ],
   controllers: [AppController],
   providers: [AppService],

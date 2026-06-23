@@ -12,6 +12,8 @@ import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from '../tenants/entities/tenant-formula-precio.entity';
 import { Usuario } from '../users/usuario.entity';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
+import { PaisMoneda } from '../monedas/entities/pais-moneda.entity';
+import { TenantMoneda } from '../monedas/entities/tenant-moneda.entity';
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { RazonSocial } from '../tenants/entities/razon-social.entity';
       TenantFormulaPrecio,
       Usuario,
       RazonSocial,
+      PaisMoneda,
+      TenantMoneda,
     ]),
   ],
   providers: [SeederService],

@@ -108,6 +108,26 @@ export class TenantsService {
       });
       await manager.save(Caja, caja);
 
+      // 7. Habilitar la moneda oficial del país del tenant (default, tasa = 1)
+      const oficialRows: { moneda_oficial_id: string | null }[] =
+        await manager.query(
+          `SELECT p.moneda_oficial_id
+           FROM provincia prov
+           JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+           WHERE prov.provincia_id = $1 AND prov.eliminado_el IS NULL`,
+          [savedTenant.provinciaId],
+        );
+      const monedaOficialId = oficialRows[0]?.moneda_oficial_id;
+      if (monedaOficialId) {
+        await manager.query(
+          `INSERT INTO tenant_moneda
+             (tenant_id, moneda_id, es_default, habilitada, valor_del_dia, creado_el, actualizado_el)
+           VALUES ($1, $2, true, true, 1, NOW(), NOW())
+           ON CONFLICT (tenant_id, moneda_id) DO NOTHING`,
+          [savedTenant.id, monedaOficialId],
+        );
+      }
+
       return savedTenant;
     });
   }

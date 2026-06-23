@@ -41,6 +41,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         icon: 'i-heroicons-document-text',
         to: '/configuracion/razones-sociales',
       },
+      {
+        label: 'Monedas',
+        icon: 'i-heroicons-currency-dollar',
+        to: '/configuracion/monedas',
+      },
     )
   }
 

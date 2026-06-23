@@ -12,6 +12,8 @@ import { TenantModulo } from '../tenants/entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from '../tenants/entities/tenant-formula-precio.entity';
 import { Usuario } from '../users/usuario.entity';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
+import { PaisMoneda } from '../monedas/entities/pais-moneda.entity';
+import { TenantMoneda } from '../monedas/entities/tenant-moneda.entity';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -40,6 +42,10 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly usuarioRepo: Repository<Usuario>,
     @InjectRepository(RazonSocial)
     private readonly razonSocialRepo: Repository<RazonSocial>,
+    @InjectRepository(PaisMoneda)
+    private readonly paisMonedaRepo: Repository<PaisMoneda>,
+    @InjectRepository(TenantMoneda)
+    private readonly tenantMonedaRepo: Repository<TenantMoneda>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -53,11 +59,13 @@ export class SeederService implements OnApplicationBootstrap {
 
     await this.seedMonedas();
     await this.seedPais();
+    await this.seedPaisMonedas();
     await this.seedProvincias();
     await this.seedModulosApp();
     await this.seedPermisos();
     await this.seedModuloAppPermisos();
     await this.seedTenants();
+    await this.seedTenantMonedas();
     await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
     await this.seedUsuariosAdicionales();
@@ -128,6 +136,62 @@ export class SeederService implements OnApplicationBootstrap {
       { paisId },
       { monedaOficialId: '550e8400-e29b-41d4-a716-446655440003' },
     );
+  }
+
+  private async seedPaisMonedas(): Promise<void> {
+    const CHILE = '550e8400-e29b-41d4-a716-446655440000';
+    const monedaIds = [
+      '550e8400-e29b-41d4-a716-446655440003', // CLP
+      '550e8400-e29b-41d4-a716-446655440004', // UF
+      '550e8400-e29b-41d4-a716-446655440005', // USD
+    ];
+
+    for (const monedaId of monedaIds) {
+      const exists = await this.paisMonedaRepo.findOne({
+        where: { paisId: CHILE, monedaId },
+      });
+      if (!exists) {
+        await this.paisMonedaRepo.save(
+          this.paisMonedaRepo.create({ paisId: CHILE, monedaId }),
+        );
+      }
+    }
+  }
+
+  private async seedTenantMonedas(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const USD = '550e8400-e29b-41d4-a716-446655440005';
+
+    const entries: Partial<TenantMoneda>[] = [];
+    for (const tenantId of [PARIS, FALABELLA]) {
+      entries.push(
+        {
+          tenantId,
+          monedaId: CLP,
+          esDefault: true,
+          habilitada: true,
+          valorDelDia: '1',
+        },
+        {
+          tenantId,
+          monedaId: USD,
+          esDefault: false,
+          habilitada: true,
+          valorDelDia: '950',
+        },
+      );
+    }
+
+    for (const data of entries) {
+      const exists = await this.tenantMonedaRepo.findOne({
+        where: { tenantId: data.tenantId, monedaId: data.monedaId },
+      });
+      if (!exists) {
+        await this.tenantMonedaRepo.save(this.tenantMonedaRepo.create(data));
+      }
+    }
   }
 
   private async seedProvincias(): Promise<void> {
