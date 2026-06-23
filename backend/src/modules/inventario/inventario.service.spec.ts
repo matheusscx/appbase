@@ -1,7 +1,7 @@
 // backend/src/modules/inventario/inventario.service.spec.ts
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
 import { BadRequestException } from '@nestjs/common';
 import { InventarioService } from './inventario.service';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';

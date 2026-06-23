@@ -30,7 +30,12 @@ export class MovimientoInventario {
   @Column({ name: 'stock_anterior', type: 'numeric', precision: 18, scale: 4 })
   stockAnterior: string;
 
-  @Column({ name: 'stock_resultante', type: 'numeric', precision: 18, scale: 4 })
+  @Column({
+    name: 'stock_resultante',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+  })
   stockResultante: string;
 
   @Column({ name: 'venta_id', type: 'uuid', nullable: true })
