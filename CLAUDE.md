@@ -212,6 +212,7 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 ### Planes de implementación
 Todo plan de implementación se **persiste dentro del repo** (no solo en el archivo efímero del modo plan):
 
+- **Antes de planificar:** leer `docs/patterns/backend.md` y `docs/patterns/frontend.md` para reusar los patrones de-facto del proyecto en vez de re-escanear el repo.
 - **Ubicación:** `docs/superpowers/plans/`
 - **Nombre estándar:** `YYYY-MM-DD-<kebab-slug>.md` (fecha de creación + tema). Ej: `2026-06-21-modulo-test-permisos.md`.
 - **Estado:** se rastrea con el campo de metadata `Status` (Draft / Approved / In Progress / Done), nunca por el nombre del archivo.
@@ -235,6 +236,7 @@ código afecta lo que describe un doc, el commit/PR incluye la actualización.
 | Decisión técnica importante | Nuevo ADR en `docs/adr/` + índice `docs/adr/README.md` |
 | Cambio en reglas de negocio | `docs/PRODUCTO.md` |
 | Nueva convención de código/doc | `docs/CONVENTIONS.md` |
+| Patrón backend/frontend nuevo o cambiado | `docs/patterns/backend.md` o `docs/patterns/frontend.md` |
 
 ---
 
@@ -242,6 +244,7 @@ código afecta lo que describe un doc, el commit/PR incluye la actualización.
 
 | Archivo | Contenido |
 |---|---|
+| `docs/patterns/` | **Playbook de patrones backend/frontend — leer ANTES de planificar una feature** (esqueleto de módulo, guards, entities, SQL raw, seeding, páginas con update optimista). Evita re-escanear el repo. |
 | `docs/PRODUCTO.md` | Especificación completa de todas las funcionalidades con reglas de negocio |
 | `docs/MIGRACION-FUNCIONALIDADES.md` | Plan/seguimiento de migración de funcionalidades |
 | `startup-pos.sql` | Esquema de BD completo con nombres actualizados |

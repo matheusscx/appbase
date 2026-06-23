@@ -30,6 +30,11 @@ Welcome to the technical documentation for the `practica` project.
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — System overview, stack, module structure, conventions
 - **[CONVENTIONS.md](./CONVENTIONS.md)** — Coding, naming and documentation standards
 
+### Patterns Playbook (read first when planning a feature)
+- **[patterns/README.md](./patterns/)** — Índice de patrones de-facto del proyecto
+  - [patterns/backend.md](./patterns/backend.md) — Módulo NestJS de punta a punta (entity, DTO, guards, service, tests, seeding)
+  - [patterns/frontend.md](./patterns/frontend.md) — Pantalla Nuxt (useApiFetch, update optimista, modales, @nuxt/ui)
+
 ### Product
 - **[PRODUCTO.md](./PRODUCTO.md)** — Complete functional spec with business rules (Spanish)
 - **[MIGRACION-FUNCIONALIDADES.md](./MIGRACION-FUNCIONALIDADES.md)** — Feature migration plan and tracking (Spanish)
