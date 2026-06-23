@@ -56,6 +56,7 @@ import { ItemRecargo } from './modules/items/entities/item-recargo.entity';
 import { ItemDescuento } from './modules/items/entities/item-descuento.entity';
 import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
+import { InventarioModule } from './modules/inventario/inventario.module';
 
 @Module({
   imports: [
@@ -124,6 +125,7 @@ import { MovimientoInventario } from './modules/inventario/entities/movimiento-i
     RecargosModule,
     MetodosPagoModule,
     ItemsModule,
+    InventarioModule,
   ],
   controllers: [AppController],
   providers: [AppService],
