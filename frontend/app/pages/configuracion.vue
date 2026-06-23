@@ -71,6 +71,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         icon: 'i-heroicons-credit-card',
         to: '/configuracion/metodos-pago',
       },
+      {
+        label: 'Items',
+        icon: 'i-heroicons-archive-box',
+        to: '/configuracion/items',
+      },
     )
   }
 

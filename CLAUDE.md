@@ -97,7 +97,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Catálogos base (país, provincia, moneda) | 🔲 Por construir |
 | Configuración de monedas por tenant | ✅ Implementado |
 | Catálogos financieros (categorías, impuestos, descuentos, recargos, métodos de pago, tipos de regla) | ✅ Implementado |
-| Catálogo de items (productos y servicios) | 🔲 Por construir |
+| Catálogo de items (productos y servicios) | ✅ Implementado |
 | Motor de cálculo de precios | 🔲 Por construir |
 | Procesamiento de ventas | 🔲 Por construir |
 | Gestión de cajas | 🔲 Por construir |

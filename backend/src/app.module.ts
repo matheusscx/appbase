@@ -48,6 +48,10 @@ import { MetodoPago } from './modules/metodos-pago/entities/metodo-pago.entity';
 import { MetodoPagoPais } from './modules/metodos-pago/entities/metodo-pago-pais.entity';
 import { TenantMetodoPago } from './modules/metodos-pago/entities/tenant-metodo-pago.entity';
 import { MetodosPagoModule } from './modules/metodos-pago/metodos-pago.module';
+import { Item } from './modules/items/entities/item.entity';
+import { ItemProducto } from './modules/items/entities/item-producto.entity';
+import { ItemServicio } from './modules/items/entities/item-servicio.entity';
+import { ItemsModule } from './modules/items/items.module';
 
 @Module({
   imports: [
@@ -87,6 +91,9 @@ import { MetodosPagoModule } from './modules/metodos-pago/metodos-pago.module';
           MetodoPago,
           MetodoPagoPais,
           TenantMetodoPago,
+          Item,
+          ItemProducto,
+          ItemServicio,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -108,6 +115,7 @@ import { MetodosPagoModule } from './modules/metodos-pago/metodos-pago.module';
     DescuentosModule,
     RecargosModule,
     MetodosPagoModule,
+    ItemsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

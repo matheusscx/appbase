@@ -99,6 +99,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedImpuestos();
     await this.seedDescuentos();
     await this.seedRecargos();
+    await this.seedItems();
     await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
     await this.seedUsuariosAdicionales();
@@ -936,6 +937,74 @@ export class SeederService implements OnApplicationBootstrap {
       if (!exists) {
         await this.recargoRepo.save(this.recargoRepo.create(data));
       }
+    }
+  }
+
+  private async seedItems(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
+    const IVA_19 = '550e8400-e29b-41d4-a716-446655440113';
+    const ITEM_SMARTPHONE = '550e8400-e29b-41d4-a716-446655440116';
+    const ITEM_SOPORTE = '550e8400-e29b-41d4-a716-446655440117';
+
+    const existsSmartphone: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [ITEM_SMARTPHONE],
+    );
+    if (!existsSmartphone.length) {
+      await this.dataSource.query(
+        `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
+                            precio_base, precio_incluye_impuesto, activo, tipo)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          ITEM_SMARTPHONE,
+          PARIS,
+          CLP,
+          ELECTRONICA,
+          'Smartphone Samsung Galaxy S24',
+          'Teléfono inteligente de alta gama con pantalla AMOLED 6.2"',
+          '899000',
+          false,
+          true,
+          'producto',
+        ],
+      );
+      await this.dataSource.query(
+        `INSERT INTO item_producto (item_id, stock, unidad_medida) VALUES ($1,$2,$3)`,
+        [ITEM_SMARTPHONE, '25', 'unidad'],
+      );
+      await this.dataSource.query(
+        `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+        [ITEM_SMARTPHONE, IVA_19],
+      );
+    }
+
+    const existsSoporte: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [ITEM_SOPORTE],
+    );
+    if (!existsSoporte.length) {
+      await this.dataSource.query(
+        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion,
+                            precio_base, precio_incluye_impuesto, activo, tipo)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          ITEM_SOPORTE,
+          PARIS,
+          CLP,
+          'Soporte técnico premium',
+          'Soporte técnico en sitio para equipos tecnológicos',
+          '45000',
+          false,
+          true,
+          'servicio',
+        ],
+      );
+      await this.dataSource.query(
+        `INSERT INTO item_servicio (item_id, duracion_estimada, requiere_cita) VALUES ($1,$2,$3)`,
+        [ITEM_SOPORTE, 60, true],
+      );
     }
   }
 
