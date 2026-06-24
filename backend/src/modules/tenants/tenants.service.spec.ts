@@ -44,6 +44,7 @@ describe('TenantsService', () => {
     save: jest.Mock;
     softDelete: jest.Mock;
   };
+  let tenantFormulaPrecioRepo: { find: jest.Mock; create: jest.Mock; save: jest.Mock };
   let dataSource: { transaction: jest.Mock; query: jest.Mock };
 
   beforeEach(async () => {
@@ -60,6 +61,11 @@ describe('TenantsService', () => {
       create: jest.fn(),
       save: jest.fn(),
       softDelete: jest.fn(),
+    };
+    tenantFormulaPrecioRepo = {
+      find: jest.fn(),
+      create: jest.fn(),
+      save: jest.fn(),
     };
     dataSource = {
       transaction: jest.fn(),
@@ -83,10 +89,7 @@ describe('TenantsService', () => {
           provide: getRepositoryToken(TenantModulo),
           useValue: { find: jest.fn(), create: jest.fn(), save: jest.fn() },
         },
-        {
-          provide: getRepositoryToken(TenantFormulaPrecio),
-          useValue: { find: jest.fn(), create: jest.fn(), save: jest.fn() },
-        },
+        { provide: getRepositoryToken(TenantFormulaPrecio), useValue: tenantFormulaPrecioRepo },
         {
           provide: getRepositoryToken(Caja),
           useValue: { create: jest.fn(), save: jest.fn() },
@@ -299,6 +302,89 @@ describe('TenantsService', () => {
         habilitado: false,
       });
       expect(result.habilitado).toBe(false);
+    });
+  });
+
+  describe('getPreferenciasFinancieras', () => {
+    it('retorna modos y fórmula ordenada', async () => {
+      tenantRepo.findOne.mockResolvedValue({ ...mockTenant });
+      tenantFormulaPrecioRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-uuid', paso: 1, tipo: 'descuentos' },
+        { tenantId: 'tenant-uuid', paso: 2, tipo: 'recargos' },
+        { tenantId: 'tenant-uuid', paso: 3, tipo: 'impuestos' },
+      ]);
+
+      const result = await service.getPreferenciasFinancieras('tenant-uuid');
+
+      expect(result.calculoDescuentos).toBe('base');
+      expect(result.calculoRecargos).toBe('base');
+      expect(result.formula).toEqual(['descuentos', 'recargos', 'impuestos']);
+    });
+
+    it('lanza NotFoundException si el tenant no existe', async () => {
+      tenantRepo.findOne.mockResolvedValue(null);
+      await expect(service.getPreferenciasFinancieras('no-existe')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('updatePreferenciasFinancieras', () => {
+    it('persiste modos y reescribe la fórmula con pasos correctos', async () => {
+      const mockManager = { query: jest.fn().mockResolvedValue(undefined) };
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof mockManager) => Promise<unknown>) => cb(mockManager),
+      );
+      tenantFormulaPrecioRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-uuid', paso: 1, tipo: 'recargos' },
+        { tenantId: 'tenant-uuid', paso: 2, tipo: 'descuentos' },
+        { tenantId: 'tenant-uuid', paso: 3, tipo: 'impuestos' },
+      ]);
+
+      const dto = {
+        calculoDescuentos: 'compuesto',
+        calculoRecargos: 'base',
+        formula: ['recargos', 'descuentos', 'impuestos'],
+      };
+
+      const result = await service.updatePreferenciasFinancieras('tenant-uuid', dto);
+
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE tenants SET'),
+        ['compuesto', 'base', 'tenant-uuid'],
+      );
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM tenant_formula_precio'),
+        ['tenant-uuid'],
+      );
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO tenant_formula_precio'),
+        ['tenant-uuid', 1, 'recargos'],
+      );
+      expect(result.formula).toEqual(['recargos', 'descuentos', 'impuestos']);
+      expect(result.calculoDescuentos).toBe('compuesto');
+    });
+
+    it('lanza BadRequestException si la fórmula tiene tipos duplicados', async () => {
+      const dto = {
+        calculoDescuentos: 'base',
+        calculoRecargos: 'base',
+        formula: ['descuentos', 'descuentos', 'impuestos'],
+      };
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', dto),
+      ).rejects.toThrow(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequestException si la fórmula tiene solo 2 tipos distintos', async () => {
+      const dto = {
+        calculoDescuentos: 'base',
+        calculoRecargos: 'base',
+        formula: ['descuentos', 'recargos', 'descuentos'],
+      };
+      await expect(
+        service.updatePreferenciasFinancieras('tenant-uuid', dto),
+      ).rejects.toThrow(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
     });
   });
 });

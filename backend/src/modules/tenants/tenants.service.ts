@@ -17,6 +17,7 @@ import { RazonSocial } from './entities/razon-social.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
+import { UpdatePreferenciasFinancierasDto } from './dto/update-preferencias-financieras.dto';
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
 
@@ -355,5 +356,68 @@ export class TenantsService {
       rs.preferida = true;
       return rs;
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Preferencias financieras
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getPreferenciasFinancieras(tenantId: string): Promise<{
+    calculoDescuentos: string;
+    calculoRecargos: string;
+    formula: string[];
+  }> {
+    const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundException(`Tenant ${tenantId} no encontrado`);
+    const filas = await this.tenantFormulaPrecioRepo.find({
+      where: { tenantId },
+      order: { paso: 'ASC' },
+    });
+    return {
+      calculoDescuentos: tenant.calculoDescuentos,
+      calculoRecargos: tenant.calculoRecargos,
+      formula: filas.map(f => f.tipo),
+    };
+  }
+
+  async updatePreferenciasFinancieras(
+    tenantId: string,
+    dto: UpdatePreferenciasFinancierasDto,
+  ): Promise<{ calculoDescuentos: string; calculoRecargos: string; formula: string[] }> {
+    // Validate no duplicates (DTO only validates each element is valid, not uniqueness)
+    const unique = new Set(dto.formula);
+    if (unique.size !== 3) {
+      throw new BadRequestException(
+        'La fórmula debe contener exactamente los tres tipos sin repetir: descuentos, recargos, impuestos',
+      );
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        `UPDATE tenants SET calculo_descuentos = $1, calculo_recargos = $2 WHERE tenant_id = $3`,
+        [dto.calculoDescuentos, dto.calculoRecargos, tenantId],
+      );
+      await manager.query(
+        `DELETE FROM tenant_formula_precio WHERE tenant_id = $1`,
+        [tenantId],
+      );
+      for (let i = 0; i < dto.formula.length; i++) {
+        await manager.query(
+          `INSERT INTO tenant_formula_precio (tenant_id, paso, tipo) VALUES ($1, $2, $3)`,
+          [tenantId, i + 1, dto.formula[i]],
+        );
+      }
+    });
+
+    // Re-fetch to return current state
+    const filas = await this.tenantFormulaPrecioRepo.find({
+      where: { tenantId },
+      order: { paso: 'ASC' },
+    });
+    return {
+      calculoDescuentos: dto.calculoDescuentos,
+      calculoRecargos: dto.calculoRecargos,
+      formula: filas.map(f => f.tipo),
+    };
   }
 }
