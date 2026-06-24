@@ -485,7 +485,7 @@ export class SeederService implements OnApplicationBootstrap {
       const exists = await this.tenantRepo.findOne({ where: { id: data.id } });
       if (!exists) {
         await this.tenantRepo.save(
-          this.tenantRepo.create({ ...data, calculoDescuentos: 'base' }),
+          this.tenantRepo.create({ ...data, calculoDescuentos: 'base', calculoRecargos: 'base' }),
         );
       }
     }

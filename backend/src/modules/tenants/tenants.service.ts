@@ -61,6 +61,7 @@ export class TenantsService {
         telefono: dto.telefono ?? null,
         direccion: dto.direccion ?? null,
         calculoDescuentos: 'base',
+        calculoRecargos: 'base',
       });
       const savedTenant = await manager.save(Tenant, tenant);
 

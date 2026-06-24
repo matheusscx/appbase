@@ -22,6 +22,7 @@ const mockTenant: Tenant = {
   telefono: '+56226005000',
   direccion: 'Av. Kennedy 9001',
   calculoDescuentos: 'base',
+  calculoRecargos: 'base',
   creadoEl: new Date(),
   actualizadoEl: new Date(),
   eliminadoEl: null,

@@ -30,6 +30,9 @@ export class Tenant {
   @Column({ name: 'calculo_descuentos', default: 'base' })
   calculoDescuentos: string;
 
+  @Column({ name: 'calculo_recargos', default: 'base' })
+  calculoRecargos: string;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 
