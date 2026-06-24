@@ -67,6 +67,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         to: '/configuracion/recargos',
       },
       {
+        label: 'Preferencias financieras',
+        icon: 'i-heroicons-adjustments-horizontal',
+        to: '/configuracion/preferencias-financieras',
+      },
+      {
         label: 'Métodos de pago',
         icon: 'i-heroicons-credit-card',
         to: '/configuracion/metodos-pago',
