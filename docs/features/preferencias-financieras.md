@@ -156,8 +156,8 @@ Validación con `class-validator`:
 - `updatePreferenciasFinancieras(tenantId: string, dto: UpdatePreferenciasFinancierasDto): Promise<PreferenciasFinancierasDto>` — Actualiza ambas tablas en una transacción
 
 **Controller**:
-- `GET /api/tenants/preferencias-financieras` — Endpoint público (requireAuth guard)
-- `PUT /api/tenants/preferencias-financieras` — Endpoint admin (requireAuth + AdminGuard)
+- `GET /api/tenants/preferencias-financieras` — Endpoint admin-only (TenantAdminGuard)
+- `PUT /api/tenants/preferencias-financieras` — Endpoint admin-only (TenantAdminGuard)
 
 ---
 

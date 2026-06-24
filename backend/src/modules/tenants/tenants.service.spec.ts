@@ -316,6 +316,10 @@ describe('TenantsService', () => {
 
       const result = await service.getPreferenciasFinancieras('tenant-uuid');
 
+      expect(tenantFormulaPrecioRepo.find).toHaveBeenCalledWith({
+        where: { tenantId: 'tenant-uuid' },
+        order: { paso: 'ASC' },
+      });
       expect(result.calculoDescuentos).toBe('base');
       expect(result.calculoRecargos).toBe('base');
       expect(result.formula).toEqual(['descuentos', 'recargos', 'impuestos']);
@@ -358,6 +362,14 @@ describe('TenantsService', () => {
       expect(mockManager.query).toHaveBeenCalledWith(
         expect.stringContaining('INSERT INTO tenant_formula_precio'),
         ['tenant-uuid', 1, 'recargos'],
+      );
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO tenant_formula_precio'),
+        ['tenant-uuid', 2, 'descuentos'],
+      );
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO tenant_formula_precio'),
+        ['tenant-uuid', 3, 'impuestos'],
       );
       expect(result.formula).toEqual(['recargos', 'descuentos', 'impuestos']);
       expect(result.calculoDescuentos).toBe('compuesto');
