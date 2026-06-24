@@ -453,21 +453,21 @@ async function ejecutarAjusteStock() {
               @update:model-value="toggleActivo(item)"
             />
             <UButton
-              v-if="item.tipo === 'producto'"
               icon="i-heroicons-arrows-up-down"
               color="neutral"
               variant="ghost"
               size="sm"
               title="Ajustar stock"
+              :disabled="item.tipo !== 'producto'"
               @click="abrirAjusteStock(item.id)"
             />
             <UButton
-              v-if="item.tipo === 'producto'"
               icon="i-heroicons-clipboard-document-list"
               color="neutral"
               variant="ghost"
               size="sm"
               title="Historial de inventario"
+              :disabled="item.tipo !== 'producto'"
               @click="abrirHistorial(item)"
             />
             <UButton
@@ -706,18 +706,18 @@ async function ejecutarAjusteStock() {
         <table v-else class="w-full text-sm">
           <thead class="text-muted text-left">
             <tr class="border-b border-default">
-              <th class="py-2">Fecha</th>
-              <th>Tipo</th>
-              <th>Motivo</th>
-              <th class="text-right">Cantidad</th>
-              <th class="text-right">Resultante</th>
-              <th>Usuario</th>
+              <th class="py-2 pr-4">Fecha</th>
+              <th class="py-2 pr-4">Tipo</th>
+              <th class="py-2 pr-4">Motivo</th>
+              <th class="py-2 pr-4 text-right">Cantidad</th>
+              <th class="py-2 pr-4 text-right">Resultante</th>
+              <th class="py-2">Usuario</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="m in movimientos" :key="m.id" class="border-b border-default">
-              <td class="py-2">{{ new Date(m.creadoEl).toLocaleString() }}</td>
-              <td>
+              <td class="py-2 pr-4">{{ new Date(m.creadoEl).toLocaleString() }}</td>
+              <td class="py-2 pr-4">
                 <UBadge
                   :label="m.tipo === 'entrada' ? 'Entrada' : 'Salida'"
                   :color="m.tipo === 'entrada' ? 'success' : 'warning'"
@@ -725,10 +725,10 @@ async function ejecutarAjusteStock() {
                   size="sm"
                 />
               </td>
-              <td>{{ m.motivo }}</td>
-              <td class="text-right">{{ m.cantidad }}</td>
-              <td class="text-right font-medium">{{ m.stockResultante }}</td>
-              <td>{{ m.usuarioNombre ?? '—' }}</td>
+              <td class="py-2 pr-4">{{ m.motivo }}</td>
+              <td class="py-2 pr-4 text-right">{{ m.cantidad }}</td>
+              <td class="py-2 pr-4 text-right font-medium">{{ m.stockResultante }}</td>
+              <td class="py-2">{{ m.usuarioNombre ?? '—' }}</td>
             </tr>
           </tbody>
         </table>

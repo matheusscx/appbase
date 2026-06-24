@@ -1,3 +1,5 @@
 <script setup lang="ts">
-await navigateTo('/configuracion/perfil', { replace: true })
+definePageMeta({
+  middleware: () => navigateTo('/configuracion/perfil', { replace: true }),
+})
 </script>
