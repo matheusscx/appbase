@@ -163,6 +163,7 @@ CREATE TABLE "tenants" (
   "telefono"           VARCHAR(20),
   "direccion"          TEXT,
   "calculo_descuentos" TEXT        NOT NULL DEFAULT 'base',  -- 'base' | 'compuesto'
+  "calculo_recargos"   TEXT        NOT NULL DEFAULT 'base',  -- 'base' | 'compuesto'
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
   "eliminado_el"       TIMESTAMPTZ

@@ -240,6 +240,33 @@ requiere cita). A cada item se le asocian impuestos, descuentos y recargos.
 
 ---
 
+### 8.5. Preferencias financieras (Configuración de fórmula de precios)
+
+**Qué hace:** Permite al administrador del tenant configurar cómo se calculan los precios finales:
+modo de cálculo para descuentos (`base` | `compuesto`), modo para recargos (`base` | `compuesto`),
+y el orden de aplicación de los tres pasos (descuentos, recargos, impuestos).
+
+**Entradas:** `{ cliente_id, calculo_descuentos, calculo_recargos, formula: [paso1, paso2, paso3] }`
+donde cada paso es una de las tres cadenas: 'descuentos', 'recargos', 'impuestos'.
+
+**Salidas:** Configuración persistida consultable por el motor de cálculo (func. 9).
+
+**Integraciones externas:** Ninguna.
+
+**Persistencia:**
+- `tenants`: columnas `calculo_descuentos`, `calculo_recargos` (TEXT, default 'base').
+- `tenant_formula_precio`: tabla nueva con `(tenant_id, paso, tipo)` — mapea orden de pasos.
+
+**Requisitos o dependencias:**
+- Validación: la fórmula debe contener exactamente los tres pasos sin duplicados.
+- Default al crear tenant: `['descuentos', 'recargos', 'impuestos']` con modo `'base'` para ambos.
+- Soporte de acceso: solo admin del tenant puede leer/escribir (RBAC guard).
+- Esta es **configuración pura** — el motor de precios (func. 9) la consume pero no está acoplado.
+
+**Estado de migración:** ✅ Implementado (2026-06-24). Ver [docs/features/preferencias-financieras.md](../docs/features/preferencias-financieras.md).
+
+---
+
 ### 9. Motor de cálculo de precios de venta (CalculadoraVentas)
 
 **Qué hace:** Dado un item y la moneda oficial del tenant, calcula su totalización: precio base,
