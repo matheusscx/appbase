@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Delete,
   Body,
@@ -24,6 +25,7 @@ import { AddMemberDto } from './dto/add-member.dto';
 import { AddModuleDto } from './dto/add-module.dto';
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
+import { UpdatePreferenciasFinancierasDto } from './dto/update-preferencias-financieras.dto';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin routes — /admin/tenants
@@ -149,5 +151,22 @@ export class TenantsController {
   setPreferida(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.setPreferida(user.tenantId, id);
+  }
+
+  @UseGuards(TenantAdminGuard)
+  @Get('preferencias-financieras')
+  getPreferenciasFinancieras(@Req() req: Request) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.getPreferenciasFinancieras(user.tenantId);
+  }
+
+  @UseGuards(TenantAdminGuard)
+  @Put('preferencias-financieras')
+  updatePreferenciasFinancieras(
+    @Req() req: Request,
+    @Body() dto: UpdatePreferenciasFinancierasDto,
+  ) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.updatePreferenciasFinancieras(user.tenantId, dto);
   }
 }
