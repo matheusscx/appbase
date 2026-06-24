@@ -21,11 +21,11 @@ interface Opt { label: string; value: string }
 const movimientos = ref<Movimiento[]>([])
 const loading = ref(false)
 const productosOpts = ref<Opt[]>([])
-const filtroItem = ref('')
-const filtroMotivo = ref('')
+const filtroItem = ref('todos')
+const filtroMotivo = ref('todos')
 
 const motivoOpts: Opt[] = [
-  { label: 'Todos los motivos', value: '' },
+  { label: 'Todos los motivos', value: 'todos' },
   { label: 'Compra', value: 'compra' },
   { label: 'Venta', value: 'venta' },
   { label: 'Devolución', value: 'devolucion' },
@@ -40,7 +40,7 @@ async function cargarProductos() {
       `${apiUrl}/items?tipo=producto`,
     )
     productosOpts.value = [
-      { label: 'Todos los productos', value: '' },
+      { label: 'Todos los productos', value: 'todos' },
       ...items.map((i) => ({ label: i.nombre, value: i.id })),
     ]
   } catch {
@@ -52,8 +52,8 @@ async function cargar() {
   loading.value = true
   try {
     const params = new URLSearchParams()
-    if (filtroItem.value) params.set('itemId', filtroItem.value)
-    if (filtroMotivo.value) params.set('motivo', filtroMotivo.value)
+    if (filtroItem.value !== 'todos') params.set('itemId', filtroItem.value)
+    if (filtroMotivo.value !== 'todos') params.set('motivo', filtroMotivo.value)
     const qs = params.toString()
     movimientos.value = await useApiFetch<Movimiento[]>(
       `${apiUrl}/inventario/movimientos${qs ? `?${qs}` : ''}`,

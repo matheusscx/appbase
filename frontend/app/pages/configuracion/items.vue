@@ -59,7 +59,7 @@ const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const stockItemId = ref<string | null>(null)
 const toggling = reactive(new Set<string>())
-const filtroTipo = ref('')
+const filtroTipo = ref('todos')
 
 // Catálogos
 const monedasOpts = ref<Opt[]>([])
@@ -81,7 +81,7 @@ const unidadesMedidaOpts: Opt[] = [
 ]
 
 const filtrosTipoOpts = [
-  { label: 'Todos', value: '' },
+  { label: 'Todos', value: 'todos' },
   { label: 'Productos', value: 'producto' },
   { label: 'Servicios', value: 'servicio' },
 ]
@@ -158,7 +158,7 @@ async function abrirHistorial(item: Item) {
 // ── Lista filtrada ──────────────────────────────────────────────────────────
 
 const itemsFiltrados = computed(() => {
-  if (!filtroTipo.value) return items.value
+  if (filtroTipo.value === 'todos') return items.value
   return items.value.filter((i) => i.tipo === filtroTipo.value)
 })
 
