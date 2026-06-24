@@ -61,7 +61,8 @@
       "Bash(curl -s https://frontend-production-c0db.up.railway.app/login)",
       "Bash(grep -rln 'useApi\\\\|apiFetch\\\\|$fetch' frontend/app/composables frontend/app/pages/configuracion/usuarios)",
       "Bash(echo \"exit: $?\")",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(psql --version)"
     ]
   },
   "enabledMcpjsonServers": [

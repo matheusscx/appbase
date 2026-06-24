@@ -1,6 +1,6 @@
 <script setup lang="ts">
 interface TipoRegla {
-  tipo_regla_id: string
+  id: string
   nombre: string
 }
 
@@ -78,7 +78,7 @@ async function cargar() {
 async function cargarTipos() {
   try {
     const data = await useApiFetch<TipoRegla[]>(`${apiUrl}/tipos-regla?clase=recargo`)
-    tipos.value = data.map(t => ({ label: t.nombre, value: t.tipo_regla_id }))
+    tipos.value = data.map(t => ({ label: t.nombre, value: t.id }))
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cargar tipos de recargo')
@@ -285,6 +285,7 @@ onMounted(() => {
             <USelectMenu
               v-model="form.tipoReglaId"
               :items="tipos"
+              label-key="label"
               value-key="value"
               placeholder="Selecciona un tipo"
             />
