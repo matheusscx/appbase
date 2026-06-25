@@ -84,13 +84,13 @@ async function guardar() {
 function moverArriba(index: number) {
   if (index === 0) return
   const arr = [...formula.value]
-  ;[arr[index - 1], arr[index]] = [arr[index], arr[index - 1]]
+  ;[arr[index - 1], arr[index]] = [arr[index]!, arr[index - 1]!]
   formula.value = arr
 }
 function moverAbajo(index: number) {
   if (index === formula.value.length - 1) return
   const arr = [...formula.value]
-  ;[arr[index], arr[index + 1]] = [arr[index + 1], arr[index]]
+  ;[arr[index], arr[index + 1]] = [arr[index + 1]!, arr[index]!]
   formula.value = arr
 }
 </script>

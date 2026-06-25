@@ -62,7 +62,8 @@
       "Bash(grep -rln 'useApi\\\\|apiFetch\\\\|$fetch' frontend/app/composables frontend/app/pages/configuracion/usuarios)",
       "Bash(echo \"exit: $?\")",
       "Bash(docker compose *)",
-      "Bash(psql --version)"
+      "Bash(psql --version)",
+      "mcp__ide__getDiagnostics"
     ]
   },
   "enabledMcpjsonServers": [
