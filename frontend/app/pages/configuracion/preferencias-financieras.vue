@@ -18,10 +18,10 @@ const calculoOptions = [
 ]
 
 const modoRedondeoOptions = [
-  { value: 'HALF_UP', label: 'HALF_UP', description: 'Redondea al más cercano; en empate, hacia arriba (más común)' },
-  { value: 'HALF_EVEN', label: 'HALF_EVEN', description: 'Redondea al más cercano; en empate, al par (bancario)' },
-  { value: 'FLOOR', label: 'FLOOR', description: 'Siempre redondea hacia abajo' },
-  { value: 'CEIL', label: 'CEIL', description: 'Siempre redondea hacia arriba' },
+  { value: 'HALF_UP', label: 'HALF_UP', description: 'Redondea al más cercano; en empate, hacia arriba (más común)', example: '2.345 → 2.35' },
+  { value: 'HALF_EVEN', label: 'HALF_EVEN', description: 'Redondea al más cercano; en empate, al par (bancario)', example: '2.345 → 2.34 · 2.355 → 2.36' },
+  { value: 'FLOOR', label: 'FLOOR', description: 'Siempre redondea hacia abajo', example: '2.349 → 2.34' },
+  { value: 'CEIL', label: 'CEIL', description: 'Siempre redondea hacia arriba', example: '2.341 → 2.35' },
 ]
 
 const pasoLabels: Record<string, string> = {
@@ -174,7 +174,12 @@ function moverAbajo(index: number) {
                 v-model="modoRedondeo"
                 :items="modoRedondeoOptions"
                 value-key="value"
-              />
+              >
+                <template #description="{ item }">
+                  {{ item.description }}
+                  <span class="block font-mono text-xs mt-0.5 opacity-60">Ej: {{ item.example }}</span>
+                </template>
+              </URadioGroup>
             </UFormField>
 
             <UFormField label="Tolerancia de conciliación" hint="Diferencia máxima permitida antes de rechazar una conciliación">
