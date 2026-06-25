@@ -63,6 +63,9 @@ export class TenantsService {
         direccion: dto.direccion ?? null,
         calculoDescuentos: 'base',
         calculoRecargos: 'base',
+        escalaCalculo: 6,
+        modoRedondeo: 'HALF_UP',
+        montoTolerancia: '0',
       });
       const savedTenant = await manager.save(Tenant, tenant);
 
@@ -366,9 +369,13 @@ export class TenantsService {
     calculoDescuentos: string;
     calculoRecargos: string;
     formula: string[];
+    escalaCalculo: number;
+    modoRedondeo: string;
+    montoTolerancia: string;
   }> {
     const tenant = await this.tenantRepo.findOne({ where: { id: tenantId } });
-    if (!tenant) throw new NotFoundException(`Tenant ${tenantId} no encontrado`);
+    if (!tenant)
+      throw new NotFoundException(`Tenant ${tenantId} no encontrado`);
     const filas = await this.tenantFormulaPrecioRepo.find({
       where: { tenantId },
       order: { paso: 'ASC' },
@@ -376,14 +383,24 @@ export class TenantsService {
     return {
       calculoDescuentos: tenant.calculoDescuentos,
       calculoRecargos: tenant.calculoRecargos,
-      formula: filas.map(f => f.tipo),
+      formula: filas.map((f) => f.tipo),
+      escalaCalculo: tenant.escalaCalculo,
+      modoRedondeo: tenant.modoRedondeo,
+      montoTolerancia: tenant.montoTolerancia,
     };
   }
 
   async updatePreferenciasFinancieras(
     tenantId: string,
     dto: UpdatePreferenciasFinancierasDto,
-  ): Promise<{ calculoDescuentos: string; calculoRecargos: string; formula: string[] }> {
+  ): Promise<{
+    calculoDescuentos: string;
+    calculoRecargos: string;
+    formula: string[];
+    escalaCalculo: number;
+    modoRedondeo: string;
+    montoTolerancia: string;
+  }> {
     // Validate no duplicates (DTO only validates each element is valid, not uniqueness)
     const unique = new Set(dto.formula);
     if (unique.size !== 3) {
@@ -394,8 +411,18 @@ export class TenantsService {
 
     await this.dataSource.transaction(async (manager) => {
       await manager.query(
-        `UPDATE tenants SET calculo_descuentos = $1, calculo_recargos = $2 WHERE tenant_id = $3`,
-        [dto.calculoDescuentos, dto.calculoRecargos, tenantId],
+        `UPDATE tenants
+         SET calculo_descuentos = $1, calculo_recargos = $2,
+             escala_calculo = $3, modo_redondeo = $4, monto_tolerancia = $5
+         WHERE tenant_id = $6`,
+        [
+          dto.calculoDescuentos,
+          dto.calculoRecargos,
+          dto.escalaCalculo,
+          dto.modoRedondeo,
+          dto.montoTolerancia,
+          tenantId,
+        ],
       );
       await manager.query(
         `DELETE FROM tenant_formula_precio WHERE tenant_id = $1`,
@@ -417,7 +444,10 @@ export class TenantsService {
     return {
       calculoDescuentos: dto.calculoDescuentos,
       calculoRecargos: dto.calculoRecargos,
-      formula: filas.map(f => f.tipo),
+      formula: filas.map((f) => f.tipo),
+      escalaCalculo: dto.escalaCalculo,
+      modoRedondeo: dto.modoRedondeo,
+      montoTolerancia: dto.montoTolerancia,
     };
   }
 }

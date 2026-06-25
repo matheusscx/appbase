@@ -257,6 +257,16 @@ donde cada paso es una de las tres cadenas: 'descuentos', 'recargos', 'impuestos
 - `tenants`: columnas `calculo_descuentos`, `calculo_recargos` (TEXT, default 'base').
 - `tenant_formula_precio`: tabla nueva con `(tenant_id, paso, tipo)` — mapea orden de pasos.
 
+**Precisión y redondeo financiero:**
+
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `calculationScale` | integer | 6 | Decimales usados durante los cálculos intermedios (antes de redondear). Evita pérdida de precisión por redondeos tempranos. Ejemplo: `100 × 12.345678% = 12.345678` (no 12.35). |
+| `roundingMode` | enum | `HALF_UP` | Modo de redondeo al presentar o persistir resultados. Valores: `HALF_UP`, `HALF_EVEN`, `FLOOR`, `CEIL`. |
+| `toleranceAmount` | decimal | 0.00 | Diferencia máxima permitida en validaciones y conciliaciones para evitar rechazos por desfases de redondeo entre sistemas. Ejemplo: calculado `10.000`, recibido `9.999`, diferencia `1.000` ≤ tolerancia → válido. |
+
+Los decimales de **presentación** siguen siendo responsabilidad de la moneda (`currency.decimalPlaces`), no de estas preferencias.
+
 **Requisitos o dependencias:**
 - Validación: la fórmula debe contener exactamente los tres pasos sin duplicados.
 - Default al crear tenant: `['descuentos', 'recargos', 'impuestos']` con modo `'base'` para ambos.

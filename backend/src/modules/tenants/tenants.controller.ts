@@ -167,6 +167,9 @@ export class TenantsController {
     @Body() dto: UpdatePreferenciasFinancierasDto,
   ) {
     const user = req.user as { tenantId: string };
-    return this.tenantsService.updatePreferenciasFinancieras(user.tenantId, dto);
+    return this.tenantsService.updatePreferenciasFinancieras(
+      user.tenantId,
+      dto,
+    );
   }
 }

@@ -33,6 +33,21 @@ export class Tenant {
   @Column({ name: 'calculo_recargos', default: 'base' })
   calculoRecargos: string;
 
+  @Column({ name: 'escala_calculo', type: 'smallint', default: 6 })
+  escalaCalculo: number;
+
+  @Column({ name: 'modo_redondeo', default: 'HALF_UP' })
+  modoRedondeo: string;
+
+  @Column({
+    name: 'monto_tolerancia',
+    type: 'numeric',
+    precision: 18,
+    scale: 6,
+    default: 0,
+  })
+  montoTolerancia: string;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

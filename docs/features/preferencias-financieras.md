@@ -52,7 +52,10 @@ Response (200):
 {
   "calculoDescuentos": "base",
   "calculoRecargos": "compuesto",
-  "formula": ["descuentos", "recargos", "impuestos"]
+  "formula": ["descuentos", "recargos", "impuestos"],
+  "escalaCalculo": 6,
+  "modoRedondeo": "HALF_UP",
+  "montoTolerancia": "0"
 }
 ```
 
@@ -71,14 +74,20 @@ Request:
 {
   "calculoDescuentos": "compuesto",
   "calculoRecargos": "base",
-  "formula": ["recargos", "descuentos", "impuestos"]
+  "formula": ["recargos", "descuentos", "impuestos"],
+  "escalaCalculo": 4,
+  "modoRedondeo": "HALF_EVEN",
+  "montoTolerancia": "1.5"
 }
 
 Response (200):
 {
   "calculoDescuentos": "compuesto",
   "calculoRecargos": "base",
-  "formula": ["recargos", "descuentos", "impuestos"]
+  "formula": ["recargos", "descuentos", "impuestos"],
+  "escalaCalculo": 4,
+  "modoRedondeo": "HALF_EVEN",
+  "montoTolerancia": "1.5"
 }
 
 Response (400):
@@ -111,6 +120,9 @@ Se integra en el módulo de tenants existente (no es un módulo nuevo).
 | `id` | UUID | PK | Ya existe |
 | `calculo_descuentos` | TEXT | NOT NULL, default 'base' | Valores: 'base', 'compuesto' |
 | `calculo_recargos` | TEXT | NOT NULL, default 'base' | Valores: 'base', 'compuesto' |
+| `escala_calculo` | SMALLINT | NOT NULL, default 6 | Decimales para cálculos intermedios (0–12) |
+| `modo_redondeo` | TEXT | NOT NULL, default 'HALF_UP' | Valores: 'HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL' |
+| `monto_tolerancia` | NUMERIC(18,6) | NOT NULL, default 0 | Tolerancia máxima en conciliaciones |
 
 2. **`tenant_formula_precio`** (tabla nueva)
 
@@ -134,6 +146,9 @@ export class PreferenciasFinancierasDto {
   calculoDescuentos: 'base' | 'compuesto';
   calculoRecargos: 'base' | 'compuesto';
   formula: ('descuentos' | 'recargos' | 'impuestos')[];
+  escalaCalculo: number;        // entero 0-12
+  modoRedondeo: string;         // 'HALF_UP' | 'HALF_EVEN' | 'FLOOR' | 'CEIL'
+  montoTolerancia: string;      // numeric como string (Decimal.js)
 }
 
 // PUT request
@@ -141,6 +156,9 @@ export class UpdatePreferenciasFinancierasDto {
   calculoDescuentos: 'base' | 'compuesto';
   calculoRecargos: 'base' | 'compuesto';
   formula: ('descuentos' | 'recargos' | 'impuestos')[];
+  escalaCalculo: number;        // @IsInt @Min(0) @Max(12)
+  modoRedondeo: string;         // @IsIn(['HALF_UP','HALF_EVEN','FLOOR','CEIL'])
+  montoTolerancia: string;      // @IsNumberString — string end-to-end
 }
 ```
 
@@ -148,6 +166,9 @@ Validación con `class-validator`:
 - `formula` debe ser un array con exactamente 3 elementos
 - Cada elemento debe ser uno de: 'descuentos', 'recargos', 'impuestos'
 - No hay duplicados
+- `escalaCalculo`: entero entre 0 y 12
+- `modoRedondeo`: uno de 'HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL'
+- `montoTolerancia`: number string (p.ej. `"1.5"`) — string de punta a punta
 
 ### Key Methods
 
@@ -169,25 +190,25 @@ Validación con `class-validator`:
 
 ### Components
 
-- `components/PreferenciasFinancierasForm.vue` — Formulario con:
-  - Dos select dropdowns (cálculo descuentos, cálculo recargos)
-  - Área de reordenamiento de fórmula (lista ordenada con botones arriba/abajo o drag-drop futuro)
-  - Botón guardar
+La página usa estado local (`ref`) — sin Pinia store. Secciones del formulario:
+- `URadioGroup` para `calculoDescuentos` y `calculoRecargos`
+- Lista reordenable (botones arriba/abajo) para `formula`
+- Sección "Precisión y redondeo":
+  - `UInput type="number"` para `escalaCalculo` (entero real → excepción del patrón, @IsInt)
+  - `URadioGroup` con 4 opciones para `modoRedondeo`
+  - `UInput inputmode="decimal"` para `montoTolerancia` (string end-to-end, @IsNumberString)
+- Botón guardar
 
-### Pinia Store
+### State
 
-**File**: `stores/preferenciasFinancieras.ts`
-
-**State**:
 ```typescript
 {
-  preferencias: {
-    calculoDescuentos: 'base' | 'compuesto' | null,
-    calculoRecargos: 'base' | 'compuesto' | null,
-    formula: string[] | null
-  },
-  loading: boolean,
-  error: string | null
+  calculoDescuentos: 'base' | 'compuesto' — ref
+  calculoRecargos: 'base' | 'compuesto'   — ref
+  formula: string[]                        — ref
+  escalaCalculo: number                    — ref (default 6)
+  modoRedondeo: string                     — ref (default 'HALF_UP')
+  montoTolerancia: string                  — ref (default '0', string end-to-end)
 }
 ```
 

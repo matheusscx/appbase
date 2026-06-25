@@ -8,10 +8,20 @@ const saving = ref(false)
 const calculoDescuentos = ref<'base' | 'compuesto'>('base')
 const calculoRecargos = ref<'base' | 'compuesto'>('base')
 const formula = ref<string[]>(['descuentos', 'recargos', 'impuestos'])
+const escalaCalculo = ref<number>(6)
+const modoRedondeo = ref<string>('HALF_UP')
+const montoTolerancia = ref<string>('0')
 
 const calculoOptions = [
   { value: 'base', label: 'Sobre monto base', description: 'Todos se calculan sobre el precio neto' },
   { value: 'compuesto', label: 'En cascada (compuesto)', description: 'Cada uno se aplica sobre el resultado del anterior' },
+]
+
+const modoRedondeoOptions = [
+  { value: 'HALF_UP', label: 'HALF_UP', description: 'Redondea al más cercano; en empate, hacia arriba (más común)' },
+  { value: 'HALF_EVEN', label: 'HALF_EVEN', description: 'Redondea al más cercano; en empate, al par (bancario)' },
+  { value: 'FLOOR', label: 'FLOOR', description: 'Siempre redondea hacia abajo' },
+  { value: 'CEIL', label: 'CEIL', description: 'Siempre redondea hacia arriba' },
 ]
 
 const pasoLabels: Record<string, string> = {
@@ -27,10 +37,16 @@ async function cargar() {
       calculoDescuentos: string
       calculoRecargos: string
       formula: string[]
+      escalaCalculo: number
+      modoRedondeo: string
+      montoTolerancia: string
     }>(`${apiUrl}/tenants/preferencias-financieras`)
     calculoDescuentos.value = data.calculoDescuentos as 'base' | 'compuesto'
     calculoRecargos.value = data.calculoRecargos as 'base' | 'compuesto'
     formula.value = data.formula
+    escalaCalculo.value = data.escalaCalculo
+    modoRedondeo.value = data.modoRedondeo
+    montoTolerancia.value = data.montoTolerancia
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar preferencias'), color: 'error' })
@@ -50,6 +66,9 @@ async function guardar() {
         calculoDescuentos: calculoDescuentos.value,
         calculoRecargos: calculoRecargos.value,
         formula: formula.value,
+        escalaCalculo: escalaCalculo.value,
+        modoRedondeo: modoRedondeo.value,
+        montoTolerancia: montoTolerancia.value,
       },
     })
     toast.add({ title: 'Preferencias actualizadas', color: 'success' })
@@ -127,6 +146,45 @@ function moverAbajo(index: number) {
               :items="calculoOptions"
               value-key="value"
             />
+          </div>
+
+          <UDivider />
+
+          <!-- Precisión y redondeo -->
+          <div class="space-y-4">
+            <p class="font-medium">
+              Precisión y redondeo
+            </p>
+            <p class="text-sm text-gray-500">
+              Controla la precisión de los cálculos intermedios y cómo se redondean los resultados.
+            </p>
+
+            <UFormField label="Escala de cálculo" hint="Decimales usados en cálculos internos (0–12)">
+              <UInput
+                v-model.number="escalaCalculo"
+                type="number"
+                :min="0"
+                :max="12"
+                class="w-32"
+              />
+            </UFormField>
+
+            <UFormField label="Modo de redondeo">
+              <URadioGroup
+                v-model="modoRedondeo"
+                :items="modoRedondeoOptions"
+                value-key="value"
+              />
+            </UFormField>
+
+            <UFormField label="Tolerancia de conciliación" hint="Diferencia máxima permitida antes de rechazar una conciliación">
+              <UInput
+                v-model="montoTolerancia"
+                inputmode="decimal"
+                placeholder="0"
+                class="w-40"
+              />
+            </UFormField>
           </div>
 
           <UDivider />

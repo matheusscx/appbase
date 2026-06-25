@@ -1,4 +1,13 @@
-import { IsArray, IsIn, ArrayMinSize, ArrayMaxSize } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  ArrayMinSize,
+  ArrayMaxSize,
+  IsInt,
+  Min,
+  Max,
+  IsNumberString,
+} from 'class-validator';
 
 export class UpdatePreferenciasFinancierasDto {
   @IsIn(['base', 'compuesto'])
@@ -12,4 +21,15 @@ export class UpdatePreferenciasFinancierasDto {
   @ArrayMaxSize(3)
   @IsIn(['descuentos', 'recargos', 'impuestos'], { each: true })
   formula: string[];
+
+  @IsInt()
+  @Min(0)
+  @Max(12)
+  escalaCalculo: number;
+
+  @IsIn(['HALF_UP', 'HALF_EVEN', 'FLOOR', 'CEIL'])
+  modoRedondeo: string;
+
+  @IsNumberString()
+  montoTolerancia: string;
 }

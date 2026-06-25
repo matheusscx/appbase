@@ -23,6 +23,9 @@ const mockTenant: Tenant = {
   direccion: 'Av. Kennedy 9001',
   calculoDescuentos: 'base',
   calculoRecargos: 'base',
+  escalaCalculo: 6,
+  modoRedondeo: 'HALF_UP',
+  montoTolerancia: '0',
   creadoEl: new Date(),
   actualizadoEl: new Date(),
   eliminadoEl: null,
@@ -44,7 +47,11 @@ describe('TenantsService', () => {
     save: jest.Mock;
     softDelete: jest.Mock;
   };
-  let tenantFormulaPrecioRepo: { find: jest.Mock; create: jest.Mock; save: jest.Mock };
+  let tenantFormulaPrecioRepo: {
+    find: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
   let dataSource: { transaction: jest.Mock; query: jest.Mock };
 
   beforeEach(async () => {
@@ -89,7 +96,10 @@ describe('TenantsService', () => {
           provide: getRepositoryToken(TenantModulo),
           useValue: { find: jest.fn(), create: jest.fn(), save: jest.fn() },
         },
-        { provide: getRepositoryToken(TenantFormulaPrecio), useValue: tenantFormulaPrecioRepo },
+        {
+          provide: getRepositoryToken(TenantFormulaPrecio),
+          useValue: tenantFormulaPrecioRepo,
+        },
         {
           provide: getRepositoryToken(Caja),
           useValue: { create: jest.fn(), save: jest.fn() },
@@ -323,11 +333,16 @@ describe('TenantsService', () => {
       expect(result.calculoDescuentos).toBe('base');
       expect(result.calculoRecargos).toBe('base');
       expect(result.formula).toEqual(['descuentos', 'recargos', 'impuestos']);
+      expect(result.escalaCalculo).toBe(6);
+      expect(result.modoRedondeo).toBe('HALF_UP');
+      expect(result.montoTolerancia).toBe('0');
     });
 
     it('lanza NotFoundException si el tenant no existe', async () => {
       tenantRepo.findOne.mockResolvedValue(null);
-      await expect(service.getPreferenciasFinancieras('no-existe')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.getPreferenciasFinancieras('no-existe'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -347,13 +362,19 @@ describe('TenantsService', () => {
         calculoDescuentos: 'compuesto',
         calculoRecargos: 'base',
         formula: ['recargos', 'descuentos', 'impuestos'],
+        escalaCalculo: 4,
+        modoRedondeo: 'HALF_EVEN',
+        montoTolerancia: '1.5',
       };
 
-      const result = await service.updatePreferenciasFinancieras('tenant-uuid', dto);
+      const result = await service.updatePreferenciasFinancieras(
+        'tenant-uuid',
+        dto,
+      );
 
       expect(mockManager.query).toHaveBeenCalledWith(
-        expect.stringContaining('UPDATE tenants SET'),
-        ['compuesto', 'base', 'tenant-uuid'],
+        expect.stringContaining('UPDATE tenants'),
+        ['compuesto', 'base', 4, 'HALF_EVEN', '1.5', 'tenant-uuid'],
       );
       expect(mockManager.query).toHaveBeenCalledWith(
         expect.stringContaining('DELETE FROM tenant_formula_precio'),
@@ -373,6 +394,9 @@ describe('TenantsService', () => {
       );
       expect(result.formula).toEqual(['recargos', 'descuentos', 'impuestos']);
       expect(result.calculoDescuentos).toBe('compuesto');
+      expect(result.escalaCalculo).toBe(4);
+      expect(result.modoRedondeo).toBe('HALF_EVEN');
+      expect(result.montoTolerancia).toBe('1.5');
     });
 
     it('lanza BadRequestException si la fórmula tiene tipos duplicados', async () => {
@@ -380,6 +404,9 @@ describe('TenantsService', () => {
         calculoDescuentos: 'base',
         calculoRecargos: 'base',
         formula: ['descuentos', 'descuentos', 'impuestos'],
+        escalaCalculo: 6,
+        modoRedondeo: 'HALF_UP',
+        montoTolerancia: '0',
       };
       await expect(
         service.updatePreferenciasFinancieras('tenant-uuid', dto),
@@ -392,6 +419,9 @@ describe('TenantsService', () => {
         calculoDescuentos: 'base',
         calculoRecargos: 'base',
         formula: ['descuentos', 'recargos', 'descuentos'],
+        escalaCalculo: 6,
+        modoRedondeo: 'HALF_UP',
+        montoTolerancia: '0',
       };
       await expect(
         service.updatePreferenciasFinancieras('tenant-uuid', dto),
