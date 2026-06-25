@@ -131,7 +131,7 @@ function moverAbajo(index: number) {
             />
           </div>
 
-          <UDivider />
+          <USeparator />
 
           <!-- Cálculo de recargos -->
           <div class="space-y-2">
@@ -148,7 +148,7 @@ function moverAbajo(index: number) {
             />
           </div>
 
-          <UDivider />
+          <USeparator />
 
           <!-- Precisión y redondeo -->
           <div class="space-y-4">
@@ -192,7 +192,7 @@ function moverAbajo(index: number) {
             </UFormField>
           </div>
 
-          <UDivider />
+          <USeparator />
 
           <!-- Orden de la fórmula -->
           <div class="space-y-3">
