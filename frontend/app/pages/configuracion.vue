@@ -67,7 +67,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         to: '/configuracion/recargos',
       },
       {
-        label: 'Preferencias financieras',
+        label: 'Preferencias',
         icon: 'i-heroicons-adjustments-horizontal',
         to: '/configuracion/preferencias-financieras',
       },
