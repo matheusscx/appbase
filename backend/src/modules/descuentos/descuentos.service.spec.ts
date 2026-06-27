@@ -166,6 +166,18 @@ describe('DescuentosService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('rejects pronto_pago with diasVencimiento = 0', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('pronto_pago'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'PP',
+          tipoReglaId: 'tipo-pronto_pago',
+          diasVencimiento: 0,
+          valor: '0.10',
+        }),
+      ).rejects.toThrow('mayor a 0');
+    });
+
     it('creates por_mayor with tramos', async () => {
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
       await service.create(TENANT, {

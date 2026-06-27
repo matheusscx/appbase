@@ -149,10 +149,13 @@ export class RecargosService {
 
     return this.dataSource.transaction(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
+      const tiposConDias = ['pronto_pago', 'mora'];
       const condicionValor =
         dto.diasVencimiento != null
           ? String(dto.diasVencimiento)
-          : recargo.condicionValor;
+          : tiposConDias.includes(tipoRegla.codigo) && recargo.condicionValor
+            ? recargo.condicionValor
+            : null;
       const modo = [
         'pronto_pago',
         'interes_simple',

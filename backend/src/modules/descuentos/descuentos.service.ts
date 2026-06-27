@@ -152,10 +152,13 @@ export class DescuentosService {
 
     return this.dataSource.transaction(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
+      const tiposConDias = ['pronto_pago', 'mora'];
       const condicionValor =
         dto.diasVencimiento != null
           ? String(dto.diasVencimiento)
-          : descuento.condicionValor;
+          : tiposConDias.includes(tipoRegla.codigo) && descuento.condicionValor
+            ? descuento.condicionValor
+            : null;
       const modo = [
         'pronto_pago',
         'interes_simple',
@@ -307,6 +310,15 @@ export class DescuentosService {
       if (dto.diasVencimiento == null)
         throw new BadRequestException('Días de vencimiento requerido');
     }
+
+    if (
+      codigo === 'pronto_pago' &&
+      dto.diasVencimiento !== undefined &&
+      dto.diasVencimiento <= 0
+    )
+      throw new BadRequestException(
+        'Días de vencimiento debe ser mayor a 0 para pronto pago',
+      );
 
     if (codigo === 'mora') {
       if (dto.diasVencimiento! < 0 || dto.diasVencimiento! > 365)
