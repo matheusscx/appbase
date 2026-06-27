@@ -750,14 +750,6 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
       },
       {
-        id: '550e8400-e29b-41d4-a716-446655440102',
-        clase: 'descuento',
-        codigo: 'rango_fechas',
-        nombre: 'Rango de fechas',
-        descripcion: 'Descuento vigente entre fechas específicas',
-        activo: true,
-      },
-      {
         id: '550e8400-e29b-41d4-a716-446655440103',
         clase: 'recargo',
         codigo: 'interes_simple',
@@ -773,11 +765,59 @@ export class SeederService implements OnApplicationBootstrap {
         descripcion: 'Recargo por cuotas con interés compuesto',
         activo: true,
       },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440118',
+        clase: 'descuento',
+        codigo: 'metodo_pago',
+        nombre: 'Descuento por método de pago',
+        descripcion: null,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440119',
+        clase: 'descuento',
+        codigo: 'por_monto_venta',
+        nombre: 'Por monto de venta',
+        descripcion: null,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440121',
+        clase: 'descuento',
+        codigo: 'promocional',
+        nombre: 'Promocional',
+        descripcion: null,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440122',
+        clase: 'recargo',
+        codigo: 'general',
+        nombre: 'Recargo general',
+        descripcion: null,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440123',
+        clase: 'recargo',
+        codigo: 'mora',
+        nombre: 'Mora por atraso',
+        descripcion: null,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440124',
+        clase: 'recargo',
+        codigo: 'recargo_metodo_pago',
+        nombre: 'Recargo por método de pago',
+        descripcion: null,
+        activo: true,
+      },
     ];
 
     for (const data of tipos) {
       const exists = await this.tipoReglaRepo.findOne({
-        where: { id: data.id },
+        where: { codigo: data.codigo },
       });
       if (!exists) {
         await this.tipoReglaRepo.save(this.tipoReglaRepo.create(data));

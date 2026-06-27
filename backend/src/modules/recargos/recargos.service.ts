@@ -79,7 +79,8 @@ export class RecargosService {
       );
   }
 
-  private validarValor(modo: ModoRegla, valor: string): void {
+  private validarValor(modo: ModoRegla, valor: string | null): void {
+    if (valor === null) return; // null es válido cuando el tipo usa tramos
     const numero = Number(valor);
     if (!Number.isFinite(numero) || numero <= 0) {
       throw new BadRequestException('El valor debe ser un número mayor a 0');

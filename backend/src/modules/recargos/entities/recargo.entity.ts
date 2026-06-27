@@ -22,8 +22,8 @@ export class Recargo {
   @Column({ type: 'enum', enum: ModoRegla, enumName: 'modo_regla' })
   modo: ModoRegla;
 
-  @Column({ type: 'numeric', precision: 18, scale: 4 })
-  valor: string; // numeric ↦ string en JS
+  @Column({ type: 'numeric', precision: 18, scale: 4, nullable: true })
+  valor: string | null; // numeric ↦ string en JS; null cuando usa tramos
 
   @Column({ name: 'tipo_regla_id', type: 'uuid' })
   tipoReglaId: string;

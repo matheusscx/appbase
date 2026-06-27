@@ -41,8 +41,12 @@ import { ImpuestosModule } from './modules/impuestos/impuestos.module';
 import { TipoRegla } from './modules/tipos-regla/entities/tipo-regla.entity';
 import { TiposReglaModule } from './modules/tipos-regla/tipos-regla.module';
 import { Descuento } from './modules/descuentos/entities/descuento.entity';
+import { DescuentoTramo } from './modules/descuentos/entities/descuento-tramo.entity';
+import { DescuentoMetodoPago } from './modules/descuentos/entities/descuento-metodo-pago.entity';
 import { DescuentosModule } from './modules/descuentos/descuentos.module';
 import { Recargo } from './modules/recargos/entities/recargo.entity';
+import { RecargoTramo } from './modules/recargos/entities/recargo-tramo.entity';
+import { RecargoMetodoPago } from './modules/recargos/entities/recargo-metodo-pago.entity';
 import { RecargosModule } from './modules/recargos/recargos.module';
 import { MetodoPago } from './modules/metodos-pago/entities/metodo-pago.entity';
 import { MetodoPagoPais } from './modules/metodos-pago/entities/metodo-pago-pais.entity';
@@ -92,7 +96,11 @@ import { InventarioModule } from './modules/inventario/inventario.module';
           Impuesto,
           TipoRegla,
           Descuento,
+          DescuentoTramo,
+          DescuentoMetodoPago,
           Recargo,
+          RecargoTramo,
+          RecargoMetodoPago,
           MetodoPago,
           MetodoPagoPais,
           TenantMetodoPago,

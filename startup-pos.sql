@@ -383,7 +383,7 @@ CREATE TABLE "descuentos" (
   "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"          TEXT          NOT NULL,
   "modo"            modo_regla    NOT NULL,
-  "valor"           NUMERIC(18,4) NOT NULL,   -- decimal si modo=porcentaje: 0.10 = 10%
+  "valor"           NUMERIC(18,4),            -- null cuando el tipo usa tramos; decimal si modo=porcentaje: 0.10 = 10%
   "tipo_regla_id"   UUID          NOT NULL REFERENCES "tipos_regla" ("tipo_regla_id"),
   "condicion_tipo"  condicion_tipo NOT NULL DEFAULT 'ninguna',
   "condicion_valor" TEXT,
@@ -400,7 +400,7 @@ CREATE TABLE "recargos" (
   "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"          TEXT          NOT NULL,
   "modo"            modo_regla    NOT NULL,
-  "valor"           NUMERIC(18,4) NOT NULL,   -- decimal si modo=porcentaje: 0.10 = 10%
+  "valor"           NUMERIC(18,4),            -- null cuando el tipo usa tramos; decimal si modo=porcentaje: 0.10 = 10%
   "tipo_regla_id"   UUID          NOT NULL REFERENCES "tipos_regla" ("tipo_regla_id"),
   "condicion_tipo"  condicion_tipo NOT NULL DEFAULT 'ninguna',
   "condicion_valor" TEXT,
@@ -410,6 +410,50 @@ CREATE TABLE "recargos" (
   "creado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"  TIMESTAMPTZ,
   "eliminado_el"    TIMESTAMPTZ
+);
+
+-- Tramos de descuento (para tipos que usan escalonado por cantidad o monto)
+CREATE TABLE "descuento_tramos" (
+  "descuento_tramo_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "descuento_id"       UUID          NOT NULL REFERENCES "descuentos" ("descuento_id") ON DELETE CASCADE,
+  "minimo"             NUMERIC(18,4) NOT NULL,
+  "valor"              NUMERIC(18,4) NOT NULL,
+  "orden"              INTEGER       NOT NULL DEFAULT 0,
+  "creado_el"          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"     TIMESTAMPTZ,
+  "eliminado_el"       TIMESTAMPTZ
+);
+
+-- Tramos de recargo (para tipos que usan escalonado por cantidad o monto)
+CREATE TABLE "recargo_tramos" (
+  "recargo_tramo_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "recargo_id"       UUID          NOT NULL REFERENCES "recargos" ("recargo_id") ON DELETE CASCADE,
+  "minimo"           NUMERIC(18,4) NOT NULL,
+  "valor"            NUMERIC(18,4) NOT NULL,
+  "orden"            INTEGER       NOT NULL DEFAULT 0,
+  "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"   TIMESTAMPTZ,
+  "eliminado_el"     TIMESTAMPTZ
+);
+
+-- Métodos de pago asociados a descuentos (para tipo metodo_pago)
+CREATE TABLE "descuento_metodo_pago" (
+  "descuento_id"   UUID        NOT NULL REFERENCES "descuentos" ("descuento_id") ON DELETE CASCADE,
+  "metodo_pago_id" UUID        NOT NULL REFERENCES "metodos_pago" ("metodo_pago_id") ON DELETE CASCADE,
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ,
+  PRIMARY KEY ("descuento_id", "metodo_pago_id")
+);
+
+-- Métodos de pago asociados a recargos (para tipo recargo_metodo_pago)
+CREATE TABLE "recargo_metodo_pago" (
+  "recargo_id"     UUID        NOT NULL REFERENCES "recargos" ("recargo_id") ON DELETE CASCADE,
+  "metodo_pago_id" UUID        NOT NULL REFERENCES "metodos_pago" ("metodo_pago_id") ON DELETE CASCADE,
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ,
+  PRIMARY KEY ("recargo_id", "metodo_pago_id")
 );
 
 -- =============================================================
