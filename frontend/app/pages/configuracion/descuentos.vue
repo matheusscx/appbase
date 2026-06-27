@@ -1,28 +1,30 @@
 <script setup lang="ts">
-interface TipoRegla {
-  id: string
-  nombre: string
-}
+import { DESCUENTO_CONFIG, type TipoConfig } from '~/utils/reglas-form-config'
 
-interface Descuento {
+interface TipoRegla { id: string; nombre: string; codigo: string }
+
+interface Regla {
   id: string
   nombre: string
   tipoReglaId: string
-  modo: string
-  valor: string
-  condicionTipo: string
-  condicionValor: string | null
+  tipoRegla?: { id: string; codigo: string; nombre: string }
+  modo: string | null
+  valor: string | null
+  metodoPagoIds: string[]
+  tramos: { minimo: string; valor: string }[]
+  diasVencimiento: number | null
   fechaInicio: string | null
   fechaFin: string | null
   activo: boolean
 }
 
-const config = useRuntimeConfig()
+const runtimeConfig = useRuntimeConfig()
 const toast = useToast()
-const apiUrl = config.public.apiUrl
+const apiUrl = runtimeConfig.public.apiUrl
 
-const descuentos = ref<Descuento[]>([])
-const tipos = ref<{ label: string, value: string }[]>([])
+const descuentos = ref<Regla[]>([])
+const tipos = ref<{ label: string; value: string; codigo: string }[]>([])
+const metodos = ref<{ label: string; value: string }[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const modalOpen = ref(false)
@@ -30,41 +32,47 @@ const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
 const toggling = reactive(new Set<string>())
+const nombreError = ref<string | null>(null)
 
 const modoOptions = [
   { label: 'Porcentaje', value: 'porcentaje' },
   { label: 'Monto fijo', value: 'monto_fijo' },
 ]
 
-const condicionOptions = [
-  { label: 'Ninguna', value: 'ninguna' },
-  { label: 'Cliente', value: 'customer' },
-  { label: 'Producto', value: 'producto' },
-  { label: 'Categoría', value: 'categoria' },
-  { label: 'Fecha', value: 'fecha' },
-  { label: 'Método de pago', value: 'metodo_pago' },
-  { label: 'Vencimiento', value: 'vencimiento' },
-  { label: 'Monto mínimo', value: 'monto_minimo' },
-  { label: 'Cantidad mínima', value: 'cantidad_minima' },
-]
+const CONFIG_MAP = DESCUENTO_CONFIG
 
 const emptyForm = () => ({
   nombre: '',
   tipoReglaId: '',
-  modo: 'porcentaje',
-  valor: '',
-  condicionTipo: 'ninguna',
-  condicionValor: '',
-  fechaInicio: '',
-  fechaFin: '',
+  modo: 'porcentaje' as string | null,
+  valor: '' as string | null,
+  metodoPagoIds: [] as string[],
+  tramos: [] as { minimo: string; valor: string }[],
+  diasVencimiento: null as number | null,
+  fechaInicio: null as string | null,
+  fechaFin: null as string | null,
   activo: true,
 })
 const form = ref(emptyForm())
 
+const tipoSeleccionado = computed(() =>
+  tipos.value.find(t => t.value === form.value.tipoReglaId),
+)
+const config = computed<TipoConfig | null>(() =>
+  tipoSeleccionado.value ? CONFIG_MAP[tipoSeleccionado.value.codigo] ?? null : null,
+)
+
+watch(() => form.value.tipoReglaId, () => {
+  form.value.metodoPagoIds = []
+  form.value.tramos = []
+  form.value.diasVencimiento = null
+  form.value.modo = config.value?.modo === 'porcentaje' ? 'porcentaje' : 'porcentaje'
+})
+
 async function cargar() {
   loading.value = true
   try {
-    descuentos.value = await useApiFetch<Descuento[]>(`${apiUrl}/descuentos`)
+    descuentos.value = await useApiFetch<Regla[]>(`${apiUrl}/descuentos`)
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cargar descuentos')
@@ -78,7 +86,7 @@ async function cargar() {
 async function cargarTipos() {
   try {
     const data = await useApiFetch<TipoRegla[]>(`${apiUrl}/tipos-regla?clase=descuento`)
-    tipos.value = data.map(t => ({ label: t.nombre, value: t.id }))
+    tipos.value = data.map(t => ({ label: t.nombre, value: t.id, codigo: t.codigo }))
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cargar tipos de descuento')
@@ -86,69 +94,104 @@ async function cargarTipos() {
   }
 }
 
+async function cargarMetodos() {
+  try {
+    const data = await useApiFetch<{ metodoPagoId: string; nombre: string; habilitada: boolean }[]>(
+      `${apiUrl}/metodos-pago`,
+    )
+    metodos.value = data
+      .filter(m => m.habilitada)
+      .map(m => ({ label: m.nombre, value: m.metodoPagoId }))
+  }
+  catch (e: unknown) {
+    const msg = apiErrorMsg(e, 'Error al cargar métodos de pago')
+    toast.add({ title: msg, color: 'error' })
+  }
+}
+
 function abrirCrear() {
   editingId.value = null
   form.value = emptyForm()
+  nombreError.value = null
   modalOpen.value = true
 }
 
-function abrirEditar(d: Descuento) {
+function abrirEditar(d: Regla) {
   editingId.value = d.id
   form.value = {
     nombre: d.nombre,
     tipoReglaId: d.tipoReglaId,
     modo: d.modo,
     valor: d.valor,
-    condicionTipo: d.condicionTipo,
-    condicionValor: d.condicionValor ?? '',
-    fechaInicio: d.fechaInicio ?? '',
-    fechaFin: d.fechaFin ?? '',
+    metodoPagoIds: d.metodoPagoIds ?? [],
+    tramos: d.tramos?.map(t => ({ minimo: t.minimo ?? '', valor: t.valor ?? '' })) ?? [],
+    diasVencimiento: d.diasVencimiento ?? null,
+    fechaInicio: d.fechaInicio ?? null,
+    fechaFin: d.fechaFin ?? null,
     activo: d.activo,
   }
+  nombreError.value = null
   modalOpen.value = true
 }
 
+async function checkNombre() {
+  if (!form.value.nombre) { nombreError.value = null; return }
+  try {
+    const params = new URLSearchParams({ nombre: form.value.nombre })
+    if (editingId.value) params.append('excludeId', editingId.value)
+    const res = await useApiFetch<{ disponible: boolean }>(
+      `${apiUrl}/descuentos/nombre-disponible?${params}`,
+    )
+    nombreError.value = res.disponible ? null : 'Ya existe un descuento con este nombre'
+  }
+  catch {
+    // don't block the form on a check failure
+  }
+}
+
 async function guardar() {
+  await checkNombre()
+  if (nombreError.value) return
+
   saving.value = true
   try {
-    const body = {
+    const cfg = config.value
+    const body: Record<string, unknown> = {
       nombre: form.value.nombre,
       tipoReglaId: form.value.tipoReglaId,
-      modo: form.value.modo,
-      valor: form.value.valor,
-      condicionTipo: form.value.condicionTipo,
-      condicionValor: form.value.condicionValor || null,
-      fechaInicio: form.value.fechaInicio || null,
-      fechaFin: form.value.fechaFin || null,
       activo: form.value.activo,
     }
+
+    if (cfg) {
+      if (cfg.modo === 'libre') body.modo = form.value.modo
+      if (cfg.campoValor) body.valor = form.value.valor
+      if (cfg.campoMetodos) body.metodoPagoIds = form.value.metodoPagoIds
+      if (cfg.campoTramos) body.tramos = form.value.tramos
+      if (cfg.campoDias) body.diasVencimiento = form.value.diasVencimiento
+      if (cfg.campoFechaInicio) body.fechaInicio = form.value.fechaInicio || null
+      if (cfg.campoFechaFin) body.fechaFin = form.value.fechaFin || null
+    }
+
     if (editingId.value) {
-      await useApiFetch(`${apiUrl}/descuentos/${editingId.value}`, {
-        method: 'PATCH',
-        body,
-      })
+      await useApiFetch(`${apiUrl}/descuentos/${editingId.value}`, { method: 'PATCH', body })
       toast.add({ title: 'Descuento actualizado', color: 'success' })
     }
     else {
-      await useApiFetch(`${apiUrl}/descuentos`, {
-        method: 'POST',
-        body,
-      })
+      await useApiFetch(`${apiUrl}/descuentos`, { method: 'POST', body })
       toast.add({ title: 'Descuento creado', color: 'success' })
     }
     modalOpen.value = false
     await cargar()
   }
   catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al guardar')
-    toast.add({ title: msg, color: 'error' })
+    toast.add({ title: apiErrorMsg(e, 'Error al guardar'), color: 'error' })
   }
   finally {
     saving.value = false
   }
 }
 
-async function toggleActivo(d: Descuento) {
+async function toggleActivo(d: Regla) {
   if (toggling.has(d.id)) return
   toggling.add(d.id)
   const prev = d.activo
@@ -188,9 +231,18 @@ async function eliminar(id: string) {
   }
 }
 
+function agregarTramo() {
+  form.value.tramos = [...form.value.tramos, { minimo: '', valor: '' }]
+}
+
+function eliminarTramo(i: number) {
+  form.value.tramos = form.value.tramos.filter((_, idx) => idx !== i)
+}
+
 onMounted(() => {
   cargar()
   cargarTipos()
+  cargarMetodos()
 })
 </script>
 
@@ -237,13 +289,19 @@ onMounted(() => {
               {{ d.nombre }}
             </p>
             <p class="text-sm text-gray-500">
-              {{ d.modo === 'porcentaje' ? `${d.valor} (porcentaje)` : `${d.valor} (monto fijo)` }}
+              <template v-if="d.tramos?.length">
+                {{ d.tramos.length }} tramo{{ d.tramos.length !== 1 ? 's' : '' }}
+              </template>
+              <template v-else-if="d.valor">
+                {{ d.modo === 'porcentaje' ? `${(Number(d.valor) * 100).toFixed(0)}%` : d.valor }}
+                ({{ d.modo === 'porcentaje' ? 'porcentaje' : 'monto fijo' }})
+              </template>
+              <template v-else>
+                {{ d.metodoPagoIds?.length ? `${d.metodoPagoIds.length} método(s) de pago` : '—' }}
+              </template>
             </p>
-            <p
-              v-if="d.condicionTipo !== 'ninguna'"
-              class="text-sm text-gray-400 truncate"
-            >
-              Condición: {{ d.condicionTipo }}
+            <p class="text-xs text-gray-400">
+              {{ tipos.find(t => t.value === d.tipoReglaId)?.label ?? '' }}
             </p>
           </div>
           <div class="flex items-center gap-4 shrink-0 ml-4">
@@ -278,10 +336,13 @@ onMounted(() => {
     >
       <template #body>
         <div class="space-y-4">
-          <UFormField label="Nombre" required>
-            <UInput v-model="form.nombre" placeholder="Pronto pago" />
+          <!-- Nombre (always visible) -->
+          <UFormField label="Nombre" required :error="nombreError">
+            <UInput v-model="form.nombre" placeholder="Mi descuento" @blur="checkNombre" />
           </UFormField>
-          <UFormField label="Tipo de descuento" required>
+
+          <!-- Tipo (always visible) -->
+          <UFormField label="Tipo" required>
             <USelectMenu
               v-model="form.tipoReglaId"
               :items="tipos"
@@ -290,36 +351,100 @@ onMounted(() => {
               placeholder="Selecciona un tipo"
             />
           </UFormField>
-          <UFormField label="Modo" required>
-            <USelectMenu
-              v-model="form.modo"
-              :items="modoOptions"
-              value-key="value"
-            />
-          </UFormField>
-          <UFormField label="Valor" required>
-            <UInput
-              v-model="form.valor"
-              inputmode="decimal"
-              placeholder="0.10 (= 10%) o monto fijo"
-            />
-          </UFormField>
-          <UFormField label="Condición">
-            <USelectMenu
-              v-model="form.condicionTipo"
-              :items="condicionOptions"
-              value-key="value"
-            />
-          </UFormField>
-          <UFormField label="Valor de la condición">
-            <UInput v-model="form.condicionValor" placeholder="Opcional" />
-          </UFormField>
-          <UFormField label="Fecha de inicio">
-            <UInput v-model="form.fechaInicio" type="date" />
-          </UFormField>
-          <UFormField label="Fecha de fin">
-            <UInput v-model="form.fechaFin" type="date" />
-          </UFormField>
+
+          <!-- Only show the rest if a tipo is selected and config is resolved -->
+          <template v-if="config">
+            <!-- Modo — only when libre -->
+            <UFormField v-if="config.modo === 'libre'" label="Modo" required>
+              <USelectMenu v-model="form.modo" :items="modoOptions" value-key="value" label-key="label" />
+            </UFormField>
+
+            <!-- Valor — when campoValor -->
+            <UFormField v-if="config.campoValor" :label="config.labelValor ?? 'Valor'" required>
+              <UInput
+                v-model="form.valor"
+                inputmode="decimal"
+                :placeholder="form.modo === 'porcentaje' ? '0.10 (= 10%)' : 'monto fijo'"
+              />
+              <template v-if="form.modo === 'porcentaje'" #hint>
+                Expresar en decimal: 0.10 = 10%
+              </template>
+            </UFormField>
+
+            <!-- Métodos de pago — when campoMetodos -->
+            <UFormField v-if="config.campoMetodos" label="Métodos de pago" required>
+              <USelectMenu
+                v-model="form.metodoPagoIds"
+                :items="metodos"
+                label-key="label"
+                value-key="value"
+                multiple
+                placeholder="Selecciona uno o más métodos"
+              />
+            </UFormField>
+
+            <!-- Días de vencimiento — when campoDias -->
+            <UFormField v-if="config.campoDias" label="Días de vencimiento" required>
+              <UInput
+                v-model.number="form.diasVencimiento"
+                type="number"
+                :min="config.diasMin"
+                :max="config.diasMax"
+                placeholder="30"
+              />
+            </UFormField>
+
+            <!-- Tramos table — when campoTramos -->
+            <div v-if="config.campoTramos" class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium">Tramos</label>
+                <UButton size="xs" icon="i-heroicons-plus" variant="ghost" @click="agregarTramo">
+                  Agregar tramo
+                </UButton>
+              </div>
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="text-left text-gray-500">
+                    <th class="pb-1">{{ config.labelTramos ?? 'Mínimo' }}</th>
+                    <th class="pb-1">{{ form.modo === 'porcentaje' ? 'Porcentaje' : 'Monto' }}</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(tramo, i) in form.tramos" :key="i" class="border-t border-gray-100 dark:border-gray-800">
+                    <td class="py-1 pr-2">
+                      <UInput v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
+                    </td>
+                    <td class="py-1 pr-2">
+                      <UInput v-model="tramo.valor" inputmode="decimal" placeholder="0" class="w-full" />
+                    </td>
+                    <td class="py-1">
+                      <UButton
+                        icon="i-heroicons-trash"
+                        color="error"
+                        variant="ghost"
+                        size="xs"
+                        @click="eliminarTramo(i)"
+                      />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="!form.tramos.length" class="text-xs text-gray-400">
+                Sin tramos. Agrega al menos uno.
+              </p>
+            </div>
+
+            <!-- Fechas -->
+            <UFormField v-if="config.campoFechaInicio" label="Fecha inicio" :required="config.fechasRequeridas">
+              <UInput v-model="form.fechaInicio" type="date" />
+            </UFormField>
+            <UFormField v-if="config.campoFechaFin" label="Fecha fin" :required="config.fechasRequeridas">
+              <UInput v-model="form.fechaFin" type="date" />
+            </UFormField>
+          </template>
+
+          <!-- Activo -->
           <UFormField label="Activo">
             <USwitch v-model="form.activo" />
           </UFormField>
