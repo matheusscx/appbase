@@ -213,3 +213,32 @@ revert ante error simulado), mover la estrella, crear/editar/eliminar. Confirmar
 que los `message` de reglas de negocio del backend aparecen en los toasts.
 
 Ver [backend.md](./backend.md) para la API que consume esta capa.
+
+---
+
+## 9. Tabla editable con add/remove de filas (tramos)
+
+Para tablas inline donde el usuario agrega y elimina filas (p.ej. tramos de descuento):
+
+```typescript
+// array inmutable — nunca mutar directamente
+function agregarTramo() {
+  form.value.tramos = [...form.value.tramos, { minimo: '', valor: '' }]
+}
+function eliminarTramo(i: number) {
+  form.value.tramos = form.value.tramos.filter((_, idx) => idx !== i)
+}
+```
+
+```vue
+<tbody>
+  <tr v-for="(tramo, i) in form.tramos" :key="i">
+    <td><UInput v-model="tramo.minimo" inputmode="decimal" /></td>
+    <td><UInput v-model="tramo.valor"  inputmode="decimal" /></td>
+    <td><UButton icon="i-heroicons-trash" color="error" variant="ghost" size="xs" @click="eliminarTramo(i)" /></td>
+  </tr>
+</tbody>
+```
+
+Usar `inputmode="decimal"` (no `type="number"`) para campos `@IsNumberString` del backend.
+Ver §7 para la explicación completa de la regla de campos decimales.

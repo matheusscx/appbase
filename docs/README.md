@@ -44,6 +44,7 @@ Welcome to the technical documentation for the `practica` project.
   - [ADR-001: JWT Authentication](./adr/001-jwt-auth.md)
   - [ADR-002: Google OAuth 2.0](./adr/002-google-oauth.md)
   - [ADR-003: JWT decode en cliente + patrón híbrido JWT/store](./adr/003-jwt-decode-client.md)
+  - [ADR-006: Modelado relacional de tramos y métodos de pago](./adr/006-relational-tramos-and-metodos-pago.md)
 
 ### Features
 - **[QUICK-START.md](./QUICK-START.md)** — How to document a feature
@@ -57,6 +58,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/configuracion-monedas.md](./features/configuracion-monedas.md)** — Configuración de monedas por tenant (multi-moneda + tasa de cambio)
 - **[features/preferencias-financieras.md](./features/preferencias-financieras.md)** — Configuración de preferencias financieras (cálculo de descuentos, recargos, fórmula de precios)
 - **[features/inventario-kardex.md](./features/inventario-kardex.md)** — Gestión de inventario (kardex de movimientos de stock)
+- **[features/descuentos-recargos.md](./features/descuentos-recargos.md)** — Descuentos y Recargos — Formularios dinámicos por tipo de regla (tramos, métodos de pago, días)
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans
@@ -122,7 +124,8 @@ docs/
 │   ├── tenants-razones-sociales.md # Gestión de tenants y razones sociales
 │   ├── configuracion-monedas.md   # Configuración de monedas por tenant
 │   ├── preferencias-financieras.md # Configuración de preferencias financieras
-│   └── inventario-kardex.md       # Gestión de inventario (kardex de movimientos)
+│   ├── inventario-kardex.md       # Gestión de inventario (kardex de movimientos)
+│   └── descuentos-recargos.md     # Formularios dinámicos de descuentos y recargos
 └── superpowers/                   # Engineering plans & design specs
     ├── plans/
     └── specs/

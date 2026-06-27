@@ -538,7 +538,9 @@ extensiones posibles, no como parte de esta funcionalidad.
 | 4. Gestión de tenants y razones sociales | ✅ | ✅ | PATCH /tenants/me + CRUD /razones-sociales; páginas /configuracion/empresa y /configuracion/razones-sociales |
 | 5. Catálogos base (país, provincia, moneda) | 🔲 | 🔲 | Datos sembrados por `seeder.service.ts` |
 | 6. Configuración de monedas por tenant | ✅ | ✅ | GET/PATCH /monedas; tabla `pais_moneda` + `tenant_moneda`; página /configuracion/monedas. Oficial derivada de `pais.moneda_oficial_id` |
-| 7–9. Catálogos financieros + items | 🔲 | 🔲 | |
+| 7. Catálogos financieros (categorías, impuestos, descuentos, recargos, métodos de pago, tipos de regla) | ✅ | ✅ | Formularios dinámicos por tipo de regla implementados (2026-06-27). 4 tablas de tramos/bridges. Ver [descuentos-recargos.md](../docs/features/descuentos-recargos.md) |
+| 8. Catálogo de items | ✅ | ✅ | |
+| 9. Motor de cálculo de precios | 🔲 | 🔲 | |
 | 10. Motor de cálculo de precios | 🔲 | 🔲 | |
 | 11. Procesamiento de ventas | 🔲 | 🔲 | |
 | 12. Gestión de cajas | 🔲 | 🔲 | |

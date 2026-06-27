@@ -98,6 +98,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Configuración de monedas por tenant | ✅ Implementado |
 | Configuración — Preferencias financieras (cálculo de descuentos/recargos, fórmula de precios) | ✅ Implementado |
 | Catálogos financieros (categorías, impuestos, descuentos, recargos, métodos de pago, tipos de regla) | ✅ Implementado |
+| Descuentos y recargos — formularios dinámicos por tipo de regla (tramos, métodos de pago, días) | ✅ Implementado (2026-06-27) |
 | Catálogo de items (productos y servicios) | ✅ Implementado |
 | Gestión de inventario (kardex de movimientos de stock) | ✅ Implementado |
 | Motor de cálculo de precios | 🔲 Por construir |
