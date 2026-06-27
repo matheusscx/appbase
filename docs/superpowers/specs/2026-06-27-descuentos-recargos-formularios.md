@@ -8,6 +8,14 @@ Cada tipo define qué campos aparecen y si el modo (porcentaje / monto fijo) es 
 
 ---
 
+> **⚠️ Refactorización pendiente**
+> Las vistas y funcionalidades de descuentos y recargos ya están implementadas en el frontend,
+> pero no están alineadas con esta especificación. Antes de implementar nuevos tipos,
+> se debe refactorizar la UI existente para que el formulario sea dinámico por tipo
+> según lo definido en este documento.
+
+---
+
 ## Campo global (ambas clases)
 
 | Campo | Requerido | Notas |
