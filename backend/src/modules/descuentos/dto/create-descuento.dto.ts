@@ -1,14 +1,25 @@
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
-  IsEnum,
+  IsInt,
   IsNotEmpty,
   IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
+  Min,
+  ValidateNested,
 } from 'class-validator';
-import { ModoRegla, CondicionTipo } from '../../../common/enums/reglas.enums';
+
+export class TramoDto {
+  @IsNumberString()
+  minimo: string;
+
+  @IsNumberString()
+  valor: string;
+}
 
 export class CreateDescuentoDto {
   @IsString()
@@ -18,19 +29,30 @@ export class CreateDescuentoDto {
   @IsUUID()
   tipoReglaId: string;
 
-  @IsEnum(ModoRegla)
-  modo: ModoRegla;
-
-  @IsNumberString()
-  valor: string;
-
+  // valor is optional at DTO level; service validates by tipo
   @IsOptional()
-  @IsEnum(CondicionTipo)
-  condicionTipo?: CondicionTipo;
+  @IsNumberString()
+  valor?: string | null;
 
+  // modo is optional at DTO level; service validates by tipo
   @IsOptional()
   @IsString()
-  condicionValor?: string | null;
+  modo?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  metodoPagoIds?: string[];
+
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => TramoDto)
+  tramos?: TramoDto[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  diasVencimiento?: number;
 
   @IsOptional()
   @IsDateString()

@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -26,6 +27,21 @@ export class DescuentosController {
   findAll(@Req() req: Request) {
     const user = req.user as { tenantId: string };
     return this.descuentosService.findAll(user.tenantId);
+  }
+
+  // Must be registered BEFORE :id to avoid NestJS resolving 'nombre-disponible' as an id param
+  @Get('nombre-disponible')
+  nombreDisponible(
+    @Req() req: Request,
+    @Query('nombre') nombre: string,
+    @Query('excludeId') excludeId?: string,
+  ) {
+    const user = req.user as { tenantId: string };
+    return this.descuentosService.nombreDisponible(
+      user.tenantId,
+      nombre,
+      excludeId,
+    );
   }
 
   @UseGuards(TenantAdminGuard)
