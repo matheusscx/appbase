@@ -63,7 +63,8 @@
       "Bash(echo \"exit: $?\")",
       "Bash(docker compose *)",
       "Bash(psql --version)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(git *)"
     ]
   },
   "enabledMcpjsonServers": [
