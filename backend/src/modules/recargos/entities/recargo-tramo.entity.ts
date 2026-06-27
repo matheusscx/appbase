@@ -16,10 +16,10 @@ export class RecargoTramo {
   recargoId: string;
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
-  minimo: string; // cantidad o monto mínimo para este tramo
+  minimo: string | null; // cantidad o monto mínimo para este tramo
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
-  valor: string; // valor del recargo en este tramo
+  valor: string | null; // valor del recargo en este tramo
 
   @Column({ type: 'int', default: 0 })
   orden: number;
