@@ -674,11 +674,12 @@ async function ejecutarAjusteStock() {
               />
             </UFormField>
 
-            <UFormField v-if="!editingId" label="Tipo" required>
+            <UFormField label="Tipo" required>
               <USelectMenu
                 v-model="form.tipo"
                 :items="tiposOpts"
                 value-key="value"
+                :disabled="!!editingId"
                 class="w-full"
               />
             </UFormField>
