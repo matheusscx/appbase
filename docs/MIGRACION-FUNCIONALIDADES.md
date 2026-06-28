@@ -541,12 +541,11 @@ extensiones posibles, no como parte de esta funcionalidad.
 | 7. Catálogos financieros (categorías, impuestos, descuentos, recargos, métodos de pago, tipos de regla) | ✅ | ✅ | Formularios dinámicos por tipo de regla implementados (2026-06-27). 4 tablas de tramos/bridges. Ver [descuentos-recargos.md](../docs/features/descuentos-recargos.md) |
 | 8. Catálogo de items | ✅ | ✅ | |
 | 9. Motor de cálculo de precios | 🔲 | 🔲 | |
-| 10. Motor de cálculo de precios | 🔲 | 🔲 | |
-| 11. Procesamiento de ventas | 🔲 | 🔲 | |
-| 12. Gestión de cajas | 🔲 | 🔲 | |
-| 13. Registro de pagos | 🔲 | 🔲 | |
-| 14. SPA frontend (navegación por permisos) | — | 🔲 parcial | Flujo auth + tenant completo; menú RBAC pendiente |
-| 15. Gestión de inventario (kardex de movimientos) | ✅ | ✅ | Kardex auditable con `movimientos_inventario`; endpoint GET /inventario/movimientos; PATCH /items/:id/stock con motivo/comentario; integración automática con ventas |
+| 10. Procesamiento de ventas | 🔲 | 🔲 | |
+| 11. Gestión de cajas | 🔲 | 🔲 | |
+| 12. Registro de pagos | 🔲 | 🔲 | |
+| 13. SPA frontend (navegación por permisos) | — | 🔲 parcial | Flujo auth + tenant completo; menú RBAC pendiente |
+| 14. Gestión de inventario (kardex de movimientos) | ✅ | ✅ | Kardex auditable con `movimientos_inventario`; endpoint GET /inventario/movimientos; PATCH /items/:id/stock con motivo/comentario; integración automática con ventas |
 
 **Leyenda:** ✅ Implementado · 🔲 Por construir · 🔲 parcial Parcialmente implementado
 - CORS está abierto a cualquier origen; endurecer al migrar.
