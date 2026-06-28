@@ -165,7 +165,7 @@ onMounted(cargar)
             value-key="value"
             label-key="label"
             placeholder="Selecciona un país"
-            @update:model-value="onPaisChange"
+            disabled
           />
         </UFormField>
 
