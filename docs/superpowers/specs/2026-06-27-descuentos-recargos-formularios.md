@@ -106,7 +106,7 @@ Descuento simple para campañas con período definido. Las fechas son obligatori
 |--------|--------|------|
 | `GENERAL`             | Recargo general            | Libre |
 | `MORA`                | Mora por atraso            | Libre |
-| `RECARGO_METODO_PAGO` | Recargo por método de pago | Libre |
+| `RECARGO_METODO_PAGO` | Por método de pago | Libre |
 | `INTERES_SIMPLE`      | Interés simple             | Fijo: porcentaje |
 | `INTERES_COMPUESTO`   | Interés compuesto          | Fijo: porcentaje |
 
@@ -135,7 +135,7 @@ Recargo plano que se activa cuando la factura supera el plazo de vencimiento por
 
 ---
 
-### RECARGO_METODO_PAGO — Recargo por método de pago
+### RECARGO_METODO_PAGO — Por método de pago
 
 Recargo que aplica cuando el cliente paga con uno o más métodos de pago seleccionados. Típico en pagos con tarjeta de crédito o en cuotas.
 

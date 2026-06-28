@@ -809,7 +809,7 @@ export class SeederService implements OnApplicationBootstrap {
         id: '550e8400-e29b-41d4-a716-446655440124',
         clase: 'recargo',
         codigo: 'recargo_metodo_pago',
-        nombre: 'Recargo por método de pago',
+        nombre: 'Por método de pago',
         descripcion: null,
         activo: true,
       },
