@@ -21,7 +21,9 @@ import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
 import { Categoria } from '../categorias/entities/categoria.entity';
 import { Impuesto } from '../impuestos/entities/impuesto.entity';
 import { Descuento } from '../descuentos/entities/descuento.entity';
+import { DescuentoTramo } from '../descuentos/entities/descuento-tramo.entity';
 import { Recargo } from '../recargos/entities/recargo.entity';
+import { RecargoTramo } from '../recargos/entities/recargo-tramo.entity';
 import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 
 @Injectable()
@@ -69,8 +71,12 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly impuestoRepo: Repository<Impuesto>,
     @InjectRepository(Descuento)
     private readonly descuentoRepo: Repository<Descuento>,
+    @InjectRepository(DescuentoTramo)
+    private readonly descuentoTramoRepo: Repository<DescuentoTramo>,
     @InjectRepository(Recargo)
     private readonly recargoRepo: Repository<Recargo>,
+    @InjectRepository(RecargoTramo)
+    private readonly recargoTramoRepo: Repository<RecargoTramo>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -98,6 +104,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedCategorias();
     await this.seedImpuestos();
     await this.seedDescuentos();
+    await this.seedDescuentoTramos();
     await this.seedRecargos();
     await this.seedItems();
     await this.seedRazonesSociales();
@@ -953,6 +960,11 @@ export class SeederService implements OnApplicationBootstrap {
   private async seedDescuentos(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const TIPO_PRONTO_PAGO = '550e8400-e29b-41d4-a716-446655440100';
+    const TIPO_POR_MAYOR = '550e8400-e29b-41d4-a716-446655440101';
+    const TIPO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440118';
+    const TIPO_POR_MONTO_VENTA = '550e8400-e29b-41d4-a716-446655440119';
+    const TIPO_PROMOCIONAL = '550e8400-e29b-41d4-a716-446655440121';
+    const EFECTIVO = '550e8400-e29b-41d4-a716-446655440105';
     const descuentos: Partial<Descuento>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440114',
@@ -961,7 +973,51 @@ export class SeederService implements OnApplicationBootstrap {
         nombre: 'Descuento pronto pago 10%',
         modo: ModoRegla.PORCENTAJE,
         valor: '0.10',
-        condicionTipo: CondicionTipo.NINGUNA,
+        condicionTipo: CondicionTipo.VENCIMIENTO,
+        condicionValor: '30',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440125',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_METODO_PAGO,
+        nombre: 'Descuento pago en efectivo 3%',
+        modo: ModoRegla.PORCENTAJE,
+        valor: '0.03',
+        condicionTipo: CondicionTipo.METODO_PAGO,
+        condicionValor: JSON.stringify([EFECTIVO]),
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440126',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_POR_MAYOR,
+        nombre: 'Descuento mayorista por volumen',
+        modo: ModoRegla.PORCENTAJE,
+        valor: null,
+        condicionTipo: CondicionTipo.CANTIDAD_MINIMA,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440127',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_POR_MONTO_VENTA,
+        nombre: 'Descuento compra grande',
+        modo: ModoRegla.PORCENTAJE,
+        valor: null,
+        condicionTipo: CondicionTipo.MONTO_MINIMO,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440128',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_PROMOCIONAL,
+        nombre: 'Promo verano 2026-27',
+        modo: ModoRegla.PORCENTAJE,
+        valor: '0.15',
+        condicionTipo: CondicionTipo.FECHA,
+        fechaInicio: '2026-12-01',
+        fechaFin: '2027-01-31',
         activo: true,
       },
     ];
@@ -976,9 +1032,63 @@ export class SeederService implements OnApplicationBootstrap {
     }
   }
 
+  private async seedDescuentoTramos(): Promise<void> {
+    const POR_MAYOR = '550e8400-e29b-41d4-a716-446655440126';
+    const POR_MONTO_VENTA = '550e8400-e29b-41d4-a716-446655440127';
+
+    const tramos: Partial<DescuentoTramo>[] = [
+      // por_mayor: 10+ unidades 5%, 50+ unidades 12%
+      {
+        id: '550e8400-e29b-41d4-a716-446655440133',
+        descuentoId: POR_MAYOR,
+        minimo: '10',
+        valor: '0.05',
+        orden: 1,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440134',
+        descuentoId: POR_MAYOR,
+        minimo: '50',
+        valor: '0.12',
+        orden: 2,
+      },
+      // por_monto_venta: $100.000+ 3%, $500.000+ 7%
+      {
+        id: '550e8400-e29b-41d4-a716-446655440135',
+        descuentoId: POR_MONTO_VENTA,
+        minimo: '100000',
+        valor: '0.03',
+        orden: 1,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440136',
+        descuentoId: POR_MONTO_VENTA,
+        minimo: '500000',
+        valor: '0.07',
+        orden: 2,
+      },
+    ];
+
+    for (const data of tramos) {
+      const exists = await this.descuentoTramoRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.descuentoTramoRepo.save(
+          this.descuentoTramoRepo.create(data),
+        );
+      }
+    }
+  }
+
   private async seedRecargos(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const TIPO_INTERES_SIMPLE = '550e8400-e29b-41d4-a716-446655440103';
+    const TIPO_INTERES_COMPUESTO = '550e8400-e29b-41d4-a716-446655440104';
+    const TIPO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
+    const TIPO_MORA = '550e8400-e29b-41d4-a716-446655440123';
+    const TIPO_RECARGO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440124';
+    const TARJETA_CREDITO = '550e8400-e29b-41d4-a716-446655440107';
     const recargos: Partial<Recargo>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440115',
@@ -987,6 +1097,48 @@ export class SeederService implements OnApplicationBootstrap {
         nombre: 'Interés cuotas 5%',
         modo: ModoRegla.PORCENTAJE,
         valor: '0.05',
+        condicionTipo: CondicionTipo.NINGUNA,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440129',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_GENERAL,
+        nombre: 'Recargo administrativo 2%',
+        modo: ModoRegla.PORCENTAJE,
+        valor: '0.02',
+        condicionTipo: CondicionTipo.NINGUNA,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440130',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_MORA,
+        nombre: 'Mora por atraso 15 días',
+        modo: ModoRegla.PORCENTAJE,
+        valor: '0.01',
+        condicionTipo: CondicionTipo.VENCIMIENTO,
+        condicionValor: '15',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440131',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_RECARGO_METODO_PAGO,
+        nombre: 'Recargo tarjeta de crédito 3%',
+        modo: ModoRegla.PORCENTAJE,
+        valor: '0.03',
+        condicionTipo: CondicionTipo.METODO_PAGO,
+        condicionValor: JSON.stringify([TARJETA_CREDITO]),
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440132',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_INTERES_COMPUESTO,
+        nombre: 'Interés compuesto cuotas 4%',
+        modo: ModoRegla.PORCENTAJE,
+        valor: '0.04',
         condicionTipo: CondicionTipo.NINGUNA,
         activo: true,
       },

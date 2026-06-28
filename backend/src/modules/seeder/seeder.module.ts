@@ -21,7 +21,9 @@ import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
 import { Categoria } from '../categorias/entities/categoria.entity';
 import { Impuesto } from '../impuestos/entities/impuesto.entity';
 import { Descuento } from '../descuentos/entities/descuento.entity';
+import { DescuentoTramo } from '../descuentos/entities/descuento-tramo.entity';
 import { Recargo } from '../recargos/entities/recargo.entity';
+import { RecargoTramo } from '../recargos/entities/recargo-tramo.entity';
 import { MovimientoInventario } from '../inventario/entities/movimiento-inventario.entity';
 
 @Module({
@@ -47,7 +49,9 @@ import { MovimientoInventario } from '../inventario/entities/movimiento-inventar
       Categoria,
       Impuesto,
       Descuento,
+      DescuentoTramo,
       Recargo,
+      RecargoTramo,
       MovimientoInventario,
     ]),
   ],
