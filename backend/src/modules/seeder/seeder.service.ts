@@ -769,7 +769,7 @@ export class SeederService implements OnApplicationBootstrap {
         id: '550e8400-e29b-41d4-a716-446655440118',
         clase: 'descuento',
         codigo: 'metodo_pago',
-        nombre: 'Descuento por método de pago',
+        nombre: 'Por método de pago',
         descripcion: null,
         activo: true,
       },

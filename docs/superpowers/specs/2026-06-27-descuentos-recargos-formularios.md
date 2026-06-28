@@ -30,7 +30,7 @@ Cada tipo define qué campos aparecen y si el modo (porcentaje / monto fijo) es 
 
 | Código | Nombre | Modo |
 |--------|--------|------|
-| `METODO_PAGO`    | Descuento por método de pago | Libre |
+| `METODO_PAGO`    | Por método de pago | Libre |
 | `PRONTO_PAGO`    | Pronto pago                  | Fijo: porcentaje |
 | `POR_MAYOR`      | Por mayor                    | Libre |
 | `POR_MONTO_VENTA`| Por monto de venta           | Libre |
@@ -38,7 +38,7 @@ Cada tipo define qué campos aparecen y si el modo (porcentaje / monto fijo) es 
 
 ---
 
-### METODO_PAGO — Descuento por método de pago
+### METODO_PAGO — Por método de pago
 
 Aplica cuando el cliente paga con uno o más métodos de pago seleccionados (efectivo, débito, transferencia, etc.).
 
