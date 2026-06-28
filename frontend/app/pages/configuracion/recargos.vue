@@ -66,7 +66,7 @@ watch(() => form.value.tipoReglaId, () => {
   form.value.metodoPagoIds = []
   form.value.tramos = []
   form.value.diasVencimiento = null
-  form.value.modo = config.value?.modo === 'porcentaje' ? 'porcentaje' : 'porcentaje'
+  form.value.modo = config.value?.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'
 })
 
 async function cargar() {

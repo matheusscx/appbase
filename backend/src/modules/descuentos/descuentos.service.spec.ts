@@ -17,7 +17,7 @@ function makeTipo(codigo: string, clase: string = 'descuento') {
 describe('DescuentosService', () => {
   let service: DescuentosService;
   let qbMock: { where: jest.Mock; andWhere: jest.Mock; getCount: jest.Mock };
-  let managerMock: { create: jest.Mock; save: jest.Mock; delete: jest.Mock };
+  let managerMock: { create: jest.Mock; save: jest.Mock; delete: jest.Mock; softDelete: jest.Mock; update: jest.Mock };
   let dataSourceMock: { transaction: jest.Mock };
   let descuentoRepoMock: {
     find: jest.Mock;
@@ -42,6 +42,8 @@ describe('DescuentosService', () => {
       create: jest.fn((_, data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((e: unknown) => Promise.resolve(e)),
       delete: jest.fn().mockResolvedValue(undefined),
+      softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
 
     dataSourceMock = {
@@ -270,7 +272,7 @@ describe('DescuentosService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('replaces tramos on update', async () => {
+    it('replaces tramos on update via softDelete', async () => {
       const existing = {
         id: 'd-1',
         tenantId: TENANT,
@@ -288,15 +290,12 @@ describe('DescuentosService', () => {
         modo: 'porcentaje',
       });
 
-      expect(managerMock.delete).toHaveBeenCalledWith(DescuentoTramo, {
-        descuentoId: 'd-1',
-      });
-      expect(managerMock.delete).toHaveBeenCalledWith(DescuentoMetodoPago, {
+      expect(managerMock.softDelete).toHaveBeenCalledWith(DescuentoTramo, {
         descuentoId: 'd-1',
       });
     });
 
-    it('replaces metodoPagoIds on update', async () => {
+    it('replaces metodoPagoIds on update via soft-stamp', async () => {
       const existing = {
         id: 'd-2',
         tenantId: TENANT,
@@ -315,12 +314,32 @@ describe('DescuentosService', () => {
         modo: 'porcentaje',
       });
 
-      expect(managerMock.delete).toHaveBeenCalledWith(DescuentoMetodoPago, {
-        descuentoId: 'd-2',
-      });
+      expect(managerMock.update).toHaveBeenCalledWith(
+        DescuentoMetodoPago,
+        { descuentoId: 'd-2' },
+        expect.objectContaining({ eliminadoEl: expect.any(Date) }),
+      );
       const typedCalls = managerMock.save.mock.calls as Array<[unknown[]]>;
       const lastCallArgs = typedCalls[typedCalls.length - 1];
       expect(lastCallArgs[0]).toHaveLength(1);
+    });
+
+    it('does not touch children when not in dto (partial update)', async () => {
+      const existing = {
+        id: 'd-3',
+        tenantId: TENANT,
+        nombre: 'Desc',
+        tipoReglaId: 'tipo-metodo_pago',
+        condicionValor: null,
+        modo: 'porcentaje',
+      };
+      descuentoRepoMock.findOne.mockResolvedValue(existing);
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
+
+      await service.update(TENANT, 'd-3', { activo: false });
+
+      expect(managerMock.softDelete).not.toHaveBeenCalled();
+      expect(managerMock.update).not.toHaveBeenCalled();
     });
   });
 

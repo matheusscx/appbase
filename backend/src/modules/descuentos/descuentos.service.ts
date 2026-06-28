@@ -72,7 +72,7 @@ export class DescuentosService {
   async create(tenantId: string, dto: CreateDescuentoDto) {
     const tipoRegla = await this.validarTipoRegla(dto.tipoReglaId);
     await this.validarNombreUnico(tenantId, dto.nombre);
-    this.validarSegunTipo(tipoRegla.codigo, dto);
+    this.validarSegunTipoCreate(tipoRegla.codigo, dto);
 
     return this.dataSource.transaction(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
@@ -148,7 +148,7 @@ export class DescuentosService {
     }
 
     await this.validarNombreUnico(tenantId, dto.nombre ?? descuento.nombre, id);
-    this.validarSegunTipo(tipoRegla.codigo, dto);
+    this.validarSegunTipoUpdate(tipoRegla.codigo, dto);
 
     return this.dataSource.transaction(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
@@ -175,30 +175,37 @@ export class DescuentosService {
       });
       await manager.save(descuento);
 
-      // Replace all children
-      await manager.delete(DescuentoTramo, { descuentoId: id });
-      await manager.delete(DescuentoMetodoPago, { descuentoId: id });
-
-      if (dto.tramos?.length) {
-        const tramos = dto.tramos.map((t, i) =>
-          manager.create(DescuentoTramo, {
-            descuentoId: id,
-            minimo: t.minimo,
-            valor: t.valor,
-            orden: i,
-          }),
-        );
-        await manager.save(tramos);
+      // Replace children only when explicitly sent in the DTO
+      if (dto.tramos !== undefined) {
+        await manager.softDelete(DescuentoTramo, { descuentoId: id });
+        if (dto.tramos.length) {
+          const tramos = dto.tramos.map((t, i) =>
+            manager.create(DescuentoTramo, {
+              descuentoId: id,
+              minimo: t.minimo,
+              valor: t.valor,
+              orden: i,
+            }),
+          );
+          await manager.save(tramos);
+        }
       }
 
-      if (dto.metodoPagoIds?.length) {
-        const metodos = dto.metodoPagoIds.map((mid) =>
-          manager.create(DescuentoMetodoPago, {
-            descuentoId: id,
-            metodoPagoId: mid,
-          }),
+      if (dto.metodoPagoIds !== undefined) {
+        await manager.update(
+          DescuentoMetodoPago,
+          { descuentoId: id },
+          { eliminadoEl: new Date() },
         );
-        await manager.save(metodos);
+        if (dto.metodoPagoIds.length) {
+          const metodos = dto.metodoPagoIds.map((mid) =>
+            manager.create(DescuentoMetodoPago, {
+              descuentoId: id,
+              metodoPagoId: mid,
+            }),
+          );
+          await manager.save(metodos);
+        }
       }
 
       return descuento;
@@ -260,79 +267,52 @@ export class DescuentosService {
       );
   }
 
-  private validarSegunTipo(
-    codigo: string,
-    dto: CreateDescuentoDto | UpdateDescuentoDto,
-  ): void {
+  // Called from create() — all required fields must be present
+  private validarSegunTipoCreate(codigo: string, dto: CreateDescuentoDto): void {
     const tiposConTramos = ['por_mayor', 'por_monto_venta'];
-    const tiposConMetodos = ['metodo_pago', 'recargo_metodo_pago'];
-    const tiposFijoPorcentaje = [
-      'pronto_pago',
-      'interes_simple',
-      'interes_compuesto',
-    ];
-    const tiposConValorUnico = [
-      'metodo_pago',
-      'pronto_pago',
-      'promocional',
-      'general',
-      'mora',
-      'recargo_metodo_pago',
-      'interes_simple',
-      'interes_compuesto',
-    ];
+    const tiposConMetodos = ['metodo_pago'];
+    const tiposFijoPorcentaje = ['pronto_pago', 'interes_simple', 'interes_compuesto'];
+    const tiposConValorUnico = ['metodo_pago', 'pronto_pago', 'promocional'];
 
-    if (tiposConTramos.includes(codigo)) {
-      if (!dto.tramos?.length)
-        throw new BadRequestException('Este tipo requiere al menos un tramo');
-    }
-
-    if (tiposConMetodos.includes(codigo)) {
-      if (!dto.metodoPagoIds?.length)
-        throw new BadRequestException('Selecciona al menos un método de pago');
-    }
-
-    if (
-      tiposFijoPorcentaje.includes(codigo) &&
-      dto.modo &&
-      dto.modo !== 'porcentaje'
-    ) {
+    if (tiposConTramos.includes(codigo) && !dto.tramos?.length)
+      throw new BadRequestException('Este tipo requiere al menos un tramo');
+    if (tiposConMetodos.includes(codigo) && !dto.metodoPagoIds?.length)
+      throw new BadRequestException('Selecciona al menos un método de pago');
+    if (tiposFijoPorcentaje.includes(codigo) && dto.modo && dto.modo !== 'porcentaje')
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
-    }
-
     if (tiposConValorUnico.includes(codigo)) {
       if (!dto.valor)
         throw new BadRequestException('El valor es requerido para este tipo');
       this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
     }
+    if ((codigo === 'pronto_pago' || codigo === 'mora') && dto.diasVencimiento == null)
+      throw new BadRequestException('Días de vencimiento requerido');
+    if (codigo === 'pronto_pago' && dto.diasVencimiento != null && dto.diasVencimiento <= 0)
+      throw new BadRequestException('Días de vencimiento debe ser mayor a 0 para pronto pago');
+    if (codigo === 'mora' && dto.diasVencimiento != null && (dto.diasVencimiento < 0 || dto.diasVencimiento > 365))
+      throw new BadRequestException('Días de vencimiento debe estar entre 0 y 365');
+    if (codigo === 'promocional' && (!dto.fechaInicio || !dto.fechaFin))
+      throw new BadRequestException('Fechas de inicio y fin requeridas para descuento promocional');
+  }
 
-    if (codigo === 'pronto_pago' || codigo === 'mora') {
-      if (dto.diasVencimiento == null)
-        throw new BadRequestException('Días de vencimiento requerido');
-    }
+  // Called from update() — only validate fields explicitly present in the DTO
+  private validarSegunTipoUpdate(codigo: string, dto: UpdateDescuentoDto): void {
+    const tiposFijoPorcentaje = ['pronto_pago', 'interes_simple', 'interes_compuesto'];
 
-    if (
-      codigo === 'pronto_pago' &&
-      dto.diasVencimiento !== undefined &&
-      dto.diasVencimiento <= 0
-    )
-      throw new BadRequestException(
-        'Días de vencimiento debe ser mayor a 0 para pronto pago',
-      );
-
-    if (codigo === 'mora') {
-      if (dto.diasVencimiento! < 0 || dto.diasVencimiento! > 365)
-        throw new BadRequestException(
-          'Días de vencimiento debe estar entre 0 y 365',
-        );
-    }
-
-    if (codigo === 'promocional') {
-      if (!dto.fechaInicio || !dto.fechaFin)
-        throw new BadRequestException(
-          'Fechas de inicio y fin requeridas para descuento promocional',
-        );
-    }
+    if (dto.tramos !== undefined && !dto.tramos.length)
+      throw new BadRequestException('Este tipo requiere al menos un tramo');
+    if (dto.metodoPagoIds !== undefined && !dto.metodoPagoIds.length)
+      throw new BadRequestException('Selecciona al menos un método de pago');
+    if (dto.modo !== undefined && tiposFijoPorcentaje.includes(codigo) && dto.modo !== 'porcentaje')
+      throw new BadRequestException('Este tipo solo admite modo porcentaje');
+    if (dto.valor !== undefined && dto.valor)
+      this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
+    if (dto.diasVencimiento !== undefined && codigo === 'pronto_pago' && dto.diasVencimiento <= 0)
+      throw new BadRequestException('Días de vencimiento debe ser mayor a 0 para pronto pago');
+    if (dto.diasVencimiento !== undefined && codigo === 'mora' && (dto.diasVencimiento < 0 || dto.diasVencimiento > 365))
+      throw new BadRequestException('Días de vencimiento debe estar entre 0 y 365');
+    if ((dto.fechaInicio !== undefined || dto.fechaFin !== undefined) && codigo === 'promocional' && (!dto.fechaInicio || !dto.fechaFin))
+      throw new BadRequestException('Fechas de inicio y fin requeridas para descuento promocional');
   }
 
   private derivarCondicionTipo(codigo: string): CondicionTipo {

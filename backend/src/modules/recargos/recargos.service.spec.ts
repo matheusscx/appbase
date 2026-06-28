@@ -17,7 +17,7 @@ function makeTipo(codigo: string, clase: string = 'recargo') {
 describe('RecargosService', () => {
   let service: RecargosService;
   let qbMock: { where: jest.Mock; andWhere: jest.Mock; getCount: jest.Mock };
-  let managerMock: { create: jest.Mock; save: jest.Mock; delete: jest.Mock };
+  let managerMock: { create: jest.Mock; save: jest.Mock; delete: jest.Mock; softDelete: jest.Mock; update: jest.Mock };
   let dataSourceMock: { transaction: jest.Mock };
   let recargoRepoMock: {
     find: jest.Mock;
@@ -42,6 +42,8 @@ describe('RecargosService', () => {
       create: jest.fn((_, data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((e: unknown) => Promise.resolve(e)),
       delete: jest.fn().mockResolvedValue(undefined),
+      softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
 
     dataSourceMock = {
@@ -267,7 +269,7 @@ describe('RecargosService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('replaces metodoPagoIds on update', async () => {
+    it('replaces metodoPagoIds on update via soft-stamp', async () => {
       const existing = {
         id: 'r-1',
         tenantId: TENANT,
@@ -288,12 +290,32 @@ describe('RecargosService', () => {
         modo: 'porcentaje',
       });
 
-      expect(managerMock.delete).toHaveBeenCalledWith(RecargoMetodoPago, {
-        recargoId: 'r-1',
-      });
+      expect(managerMock.update).toHaveBeenCalledWith(
+        RecargoMetodoPago,
+        { recargoId: 'r-1' },
+        expect.objectContaining({ eliminadoEl: expect.any(Date) }),
+      );
       const typedCalls = managerMock.save.mock.calls as Array<[unknown[]]>;
       const lastCallArgs = typedCalls[typedCalls.length - 1];
       expect(lastCallArgs[0]).toHaveLength(1);
+    });
+
+    it('does not touch children when not in dto (partial update)', async () => {
+      const existing = {
+        id: 'r-2',
+        tenantId: TENANT,
+        nombre: 'Rec',
+        tipoReglaId: 'tipo-general',
+        condicionValor: null,
+        modo: 'porcentaje',
+      };
+      recargoRepoMock.findOne.mockResolvedValue(existing);
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      await service.update(TENANT, 'r-2', { activo: false });
+
+      expect(managerMock.softDelete).not.toHaveBeenCalled();
+      expect(managerMock.update).not.toHaveBeenCalled();
     });
   });
 
