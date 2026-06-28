@@ -62,14 +62,15 @@ const config = computed<TipoConfig | null>(() =>
   tipoSeleccionado.value ? CONFIG_MAP[tipoSeleccionado.value.codigo] ?? null : null,
 )
 
-let _suppressWatch = false
-watch(() => form.value.tipoReglaId, () => {
-  if (_suppressWatch) return
+// Reset dependent fields only on a real user change of tipo (not on programmatic
+// form population in abrirEditar). Bound to the select's change event below.
+function onTipoChange(value: string) {
+  form.value.tipoReglaId = value
   form.value.metodoPagoIds = []
   form.value.tramos = []
   form.value.diasVencimiento = null
   form.value.modo = config.value?.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'
-})
+}
 
 async function cargar() {
   loading.value = true
@@ -120,7 +121,6 @@ function abrirCrear() {
 
 function abrirEditar(d: Regla) {
   editingId.value = d.id
-  _suppressWatch = true
   form.value = {
     nombre: d.nombre,
     tipoReglaId: d.tipoReglaId,
@@ -135,7 +135,6 @@ function abrirEditar(d: Regla) {
   }
   nombreError.value = null
   modalOpen.value = true
-  nextTick(() => { _suppressWatch = false })
 }
 
 async function checkNombre() {
@@ -348,11 +347,12 @@ onMounted(() => {
           <!-- Tipo (always visible) -->
           <UFormField label="Tipo" required>
             <USelectMenu
-              v-model="form.tipoReglaId"
+              :model-value="form.tipoReglaId"
               :items="tipos"
               label-key="label"
               value-key="value"
               placeholder="Selecciona un tipo"
+              @update:model-value="onTipoChange"
             />
           </UFormField>
 
