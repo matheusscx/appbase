@@ -22,8 +22,10 @@ import { Categoria } from '../categorias/entities/categoria.entity';
 import { Impuesto } from '../impuestos/entities/impuesto.entity';
 import { Descuento } from '../descuentos/entities/descuento.entity';
 import { DescuentoTramo } from '../descuentos/entities/descuento-tramo.entity';
+import { DescuentoMetodoPago } from '../descuentos/entities/descuento-metodo-pago.entity';
 import { Recargo } from '../recargos/entities/recargo.entity';
 import { RecargoTramo } from '../recargos/entities/recargo-tramo.entity';
+import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.entity';
 import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 
 @Injectable()
@@ -77,6 +79,10 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly recargoRepo: Repository<Recargo>,
     @InjectRepository(RecargoTramo)
     private readonly recargoTramoRepo: Repository<RecargoTramo>,
+    @InjectRepository(DescuentoMetodoPago)
+    private readonly descuentoMetodoPagoRepo: Repository<DescuentoMetodoPago>,
+    @InjectRepository(RecargoMetodoPago)
+    private readonly recargoMetodoPagoRepo: Repository<RecargoMetodoPago>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -105,7 +111,9 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedImpuestos();
     await this.seedDescuentos();
     await this.seedDescuentoTramos();
+    await this.seedDescuentoMetodosPago();
     await this.seedRecargos();
+    await this.seedRecargoMetodosPago();
     await this.seedItems();
     await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
@@ -964,7 +972,6 @@ export class SeederService implements OnApplicationBootstrap {
     const TIPO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440118';
     const TIPO_POR_MONTO_VENTA = '550e8400-e29b-41d4-a716-446655440119';
     const TIPO_PROMOCIONAL = '550e8400-e29b-41d4-a716-446655440121';
-    const EFECTIVO = '550e8400-e29b-41d4-a716-446655440105';
     const descuentos: Partial<Descuento>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440114',
@@ -985,7 +992,7 @@ export class SeederService implements OnApplicationBootstrap {
         modo: ModoRegla.PORCENTAJE,
         valor: '0.03',
         condicionTipo: CondicionTipo.METODO_PAGO,
-        condicionValor: JSON.stringify([EFECTIVO]),
+        condicionValor: null,
         activo: true,
       },
       {
@@ -1081,6 +1088,26 @@ export class SeederService implements OnApplicationBootstrap {
     }
   }
 
+  private async seedDescuentoMetodosPago(): Promise<void> {
+    const DESCUENTO_EFECTIVO = '550e8400-e29b-41d4-a716-446655440125';
+    const EFECTIVO = '550e8400-e29b-41d4-a716-446655440105';
+
+    const entries: Partial<DescuentoMetodoPago>[] = [
+      { descuentoId: DESCUENTO_EFECTIVO, metodoPagoId: EFECTIVO },
+    ];
+
+    for (const data of entries) {
+      const exists = await this.descuentoMetodoPagoRepo.findOne({
+        where: { descuentoId: data.descuentoId, metodoPagoId: data.metodoPagoId },
+      });
+      if (!exists) {
+        await this.descuentoMetodoPagoRepo.save(
+          this.descuentoMetodoPagoRepo.create(data),
+        );
+      }
+    }
+  }
+
   private async seedRecargos(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const TIPO_INTERES_SIMPLE = '550e8400-e29b-41d4-a716-446655440103';
@@ -1088,7 +1115,6 @@ export class SeederService implements OnApplicationBootstrap {
     const TIPO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
     const TIPO_MORA = '550e8400-e29b-41d4-a716-446655440123';
     const TIPO_RECARGO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440124';
-    const TARJETA_CREDITO = '550e8400-e29b-41d4-a716-446655440107';
     const recargos: Partial<Recargo>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440115',
@@ -1129,7 +1155,7 @@ export class SeederService implements OnApplicationBootstrap {
         modo: ModoRegla.PORCENTAJE,
         valor: '0.03',
         condicionTipo: CondicionTipo.METODO_PAGO,
-        condicionValor: JSON.stringify([TARJETA_CREDITO]),
+        condicionValor: null,
         activo: true,
       },
       {
@@ -1150,6 +1176,26 @@ export class SeederService implements OnApplicationBootstrap {
       });
       if (!exists) {
         await this.recargoRepo.save(this.recargoRepo.create(data));
+      }
+    }
+  }
+
+  private async seedRecargoMetodosPago(): Promise<void> {
+    const RECARGO_TARJETA_CREDITO = '550e8400-e29b-41d4-a716-446655440131';
+    const TARJETA_CREDITO = '550e8400-e29b-41d4-a716-446655440107';
+
+    const entries: Partial<RecargoMetodoPago>[] = [
+      { recargoId: RECARGO_TARJETA_CREDITO, metodoPagoId: TARJETA_CREDITO },
+    ];
+
+    for (const data of entries) {
+      const exists = await this.recargoMetodoPagoRepo.findOne({
+        where: { recargoId: data.recargoId, metodoPagoId: data.metodoPagoId },
+      });
+      if (!exists) {
+        await this.recargoMetodoPagoRepo.save(
+          this.recargoMetodoPagoRepo.create(data),
+        );
       }
     }
   }
