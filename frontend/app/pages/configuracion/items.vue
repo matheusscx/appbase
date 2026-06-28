@@ -705,7 +705,7 @@ async function ejecutarAjusteStock() {
                     class="w-full"
                   />
                 </UFormField>
-                <UFormField v-if="!editingId" label="Modo inventario">
+                <UFormField label="Modo inventario">
                   <USelectMenu
                     v-model="form.modoInventario"
                     :items="[
@@ -714,6 +714,7 @@ async function ejecutarAjusteStock() {
                       { label: 'Lote (por fecha de vencimiento)', value: 'lote' },
                     ]"
                     value-key="value"
+                    :disabled="!!editingId"
                     class="w-full"
                   />
                 </UFormField>
