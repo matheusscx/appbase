@@ -60,6 +60,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/inventario-kardex.md](./features/inventario-kardex.md)** — Gestión de inventario (kardex de movimientos de stock)
 - **[features/inventario-serializado.md](./features/inventario-serializado.md)** — Inventario serializado y por lote (modo_inventario: cantidad/serie/lote)
 - **[features/descuentos-recargos.md](./features/descuentos-recargos.md)** — Descuentos y Recargos — Formularios dinámicos por tipo de regla (tramos, métodos de pago, días)
+- **[features/motor-calculo-precios.md](./features/motor-calculo-precios.md)** — Motor de cálculo de precios (desglose neto → descuentos → recargos → impuestos → total)
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans

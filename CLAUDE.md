@@ -102,7 +102,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Catálogo de items (productos y servicios) | ✅ Implementado |
 | Gestión de inventario (kardex de movimientos de stock) | ✅ Implementado |
 | Inventario serializado (modo `serie`) y por lote (modo `lote`) | ✅ Implementado (2026-06-28) |
-| Motor de cálculo de precios | 🔲 Por construir |
+| Motor de cálculo de precios | ✅ Implementado (2026-06-28) |
 | Procesamiento de ventas | 🔲 Por construir |
 | Gestión de cajas | 🔲 Por construir |
 | Registro de pagos | 🔲 Por construir |

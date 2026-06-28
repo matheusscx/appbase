@@ -540,7 +540,7 @@ extensiones posibles, no como parte de esta funcionalidad.
 | 6. Configuración de monedas por tenant | ✅ | ✅ | GET/PATCH /monedas; tabla `pais_moneda` + `tenant_moneda`; página /configuracion/monedas. Oficial derivada de `pais.moneda_oficial_id` |
 | 7. Catálogos financieros (categorías, impuestos, descuentos, recargos, métodos de pago, tipos de regla) | ✅ | ✅ | Formularios dinámicos por tipo de regla implementados (2026-06-27). 4 tablas de tramos/bridges. Ver [descuentos-recargos.md](../docs/features/descuentos-recargos.md) |
 | 8. Catálogo de items | ✅ | ✅ | |
-| 9. Motor de cálculo de precios | 🔲 | 🔲 | |
+| 9. Motor de cálculo de precios | ✅ | ✅ | Servicio puro stateless `POST /calculo-precios/calcular`. Reglas planas/tramos/método de pago; base vs compuesto; orden de fórmula; redondeo. Reglas fecha/vencimiento diferidas. Ver [motor-calculo-precios.md](../docs/features/motor-calculo-precios.md) |
 | 10. Procesamiento de ventas | 🔲 | 🔲 | |
 | 11. Gestión de cajas | 🔲 | 🔲 | |
 | 12. Registro de pagos | 🔲 | 🔲 | |

@@ -64,6 +64,7 @@ import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
 import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
 import { InventarioModule } from './modules/inventario/inventario.module';
+import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.module';
 
 @Module({
   imports: [
@@ -140,6 +141,7 @@ import { InventarioModule } from './modules/inventario/inventario.module';
     MetodosPagoModule,
     ItemsModule,
     InventarioModule,
+    CalculoPreciosModule,
   ],
   controllers: [AppController],
   providers: [AppService],
