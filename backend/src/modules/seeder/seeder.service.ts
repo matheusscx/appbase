@@ -478,23 +478,23 @@ export class SeederService implements OnApplicationBootstrap {
       telefono: string;
       direccion: string;
     }> = [
-      {
-        id: '550e8400-e29b-41d4-a716-446655440007',
-        provinciaId: '550e8400-e29b-41d4-a716-446655440001',
-        nombre: 'Paris',
-        correo: 'contacto@paris.cl',
-        telefono: '+56226005000',
-        direccion: 'Av. Presidente Kennedy 9001, Las Condes, Santiago',
-      },
-      {
-        id: '550e8400-e29b-41d4-a716-446655440040',
-        provinciaId: '550e8400-e29b-41d4-a716-446655440001',
-        nombre: 'Falabella',
-        correo: 'contacto@falabella.cl',
-        telefono: '+56226007000',
-        direccion: 'Av. Presidente Kennedy 6400, Las Condes, Santiago',
-      },
-    ];
+        {
+          id: '550e8400-e29b-41d4-a716-446655440007',
+          provinciaId: '550e8400-e29b-41d4-a716-446655440001',
+          nombre: 'Paris',
+          correo: 'contacto@paris.cl',
+          telefono: '+56226005000',
+          direccion: 'Av. Presidente Kennedy 9001, Las Condes, Santiago',
+        },
+        {
+          id: '550e8400-e29b-41d4-a716-446655440040',
+          provinciaId: '550e8400-e29b-41d4-a716-446655440001',
+          nombre: 'Falabella',
+          correo: 'contacto@falabella.cl',
+          telefono: '+56226007000',
+          direccion: 'Av. Presidente Kennedy 6400, Las Condes, Santiago',
+        },
+      ];
 
     for (const data of tenants) {
       const exists = await this.tenantRepo.findOne({ where: { id: data.id } });
@@ -1388,7 +1388,7 @@ export class SeederService implements OnApplicationBootstrap {
       );
       await this.dataSource.query(
         `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
-         VALUES ($1,'100','comprimido','lote')`,
+         VALUES ($1,'100','unidad','lote')`,
         [ITEM_PARACETAMOL],
       );
 
