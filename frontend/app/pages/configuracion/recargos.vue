@@ -62,7 +62,9 @@ const config = computed<TipoConfig | null>(() =>
   tipoSeleccionado.value ? CONFIG_MAP[tipoSeleccionado.value.codigo] ?? null : null,
 )
 
+let _suppressWatch = false
 watch(() => form.value.tipoReglaId, () => {
+  if (_suppressWatch) return
   form.value.metodoPagoIds = []
   form.value.tramos = []
   form.value.diasVencimiento = null
@@ -118,6 +120,7 @@ function abrirCrear() {
 
 function abrirEditar(r: Regla) {
   editingId.value = r.id
+  _suppressWatch = true
   form.value = {
     nombre: r.nombre,
     tipoReglaId: r.tipoReglaId,
@@ -132,6 +135,7 @@ function abrirEditar(r: Regla) {
   }
   nombreError.value = null
   modalOpen.value = true
+  nextTick(() => { _suppressWatch = false })
 }
 
 async function checkNombre() {
@@ -416,7 +420,7 @@ onMounted(() => {
                       <UInput v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
                     </td>
                     <td class="py-1 pr-2">
-                      <UInput v-model="tramo.valor" inputmode="decimal" placeholder="0" class="w-full" />
+                      <UInput v-model="tramo.valor" inputmode="decimal" :placeholder="form.modo === 'porcentaje' ? '0.10 (= 10%)' : '0'" class="w-full" />
                     </td>
                     <td class="py-1">
                       <UButton
