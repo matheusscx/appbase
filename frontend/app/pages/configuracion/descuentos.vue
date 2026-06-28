@@ -345,19 +345,7 @@ onMounted(() => {
           </UFormField>
 
           <!-- Tipo (always visible) -->
-          <UFormField required>
-            <template #label>
-              <span class="flex items-center gap-1">
-                Tipo
-                <UTooltip
-                  v-if="tipoSeleccionado?.descripcion"
-                  :text="tipoSeleccionado.descripcion"
-                  :ui="{ content: 'max-w-xs text-wrap' }"
-                >
-                  <UIcon name="i-heroicons-question-mark-circle" class="size-4 text-gray-400 cursor-help" />
-                </UTooltip>
-              </span>
-            </template>
+          <UFormField label="Tipo" required>
             <USelectMenu
               :model-value="form.tipoReglaId"
               :items="tipos"
@@ -366,6 +354,12 @@ onMounted(() => {
               placeholder="Selecciona un tipo"
               @update:model-value="onTipoChange"
             />
+            <p
+              v-if="tipoSeleccionado?.descripcion"
+              class="mt-1.5 text-xs text-gray-500 dark:text-gray-400 leading-snug"
+            >
+              {{ tipoSeleccionado.descripcion }}
+            </p>
           </UFormField>
 
           <!-- Only show the rest if a tipo is selected and config is resolved -->
