@@ -196,6 +196,44 @@ const historialLoading = ref(false)
 const movimientos = ref<Movimiento[]>([])
 const historialItemNombre = ref('')
 
+function menuAcciones(item: Item) {
+  const grupos: any[][] = []
+
+  if (item.tipo === 'producto') {
+    const inventario: any[] = [
+      {
+        label: 'Ajustar stock',
+        icon: 'i-heroicons-arrows-up-down',
+        onSelect: () => abrirAjusteStock(item),
+      },
+    ]
+    if (item.modoInventario === 'serie' || item.modoInventario === 'lote') {
+      inventario.push({
+        label: item.modoInventario === 'serie' ? 'Ver unidades' : 'Ver lotes',
+        icon: 'i-heroicons-squares-2x2',
+        onSelect: () => abrirVerUnidades(item),
+      })
+    }
+    inventario.push({
+      label: 'Historial de movimientos',
+      icon: 'i-heroicons-clipboard-document-list',
+      onSelect: () => abrirHistorial(item),
+    })
+    grupos.push(inventario)
+  }
+
+  grupos.push([
+    {
+      label: 'Eliminar',
+      icon: 'i-heroicons-trash',
+      color: 'error',
+      onSelect: () => confirmarEliminar(item.id),
+    },
+  ])
+
+  return grupos
+}
+
 async function abrirVerUnidades(item: Item) {
   verUnidadesItem.value = item
   unidades.value = []
@@ -583,7 +621,7 @@ async function ejecutarAjusteStock() {
           </div>
 
           <!-- Controles -->
-          <div class="shrink-0 flex items-center gap-2">
+          <div class="shrink-0 flex items-center gap-1">
             <USwitch
               :model-value="item.activo"
               :disabled="toggling.has(item.id)"
@@ -591,46 +629,22 @@ async function ejecutarAjusteStock() {
               @update:model-value="toggleActivo(item)"
             />
             <UButton
-              icon="i-heroicons-arrows-up-down"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              title="Ajustar stock"
-              :disabled="item.tipo !== 'producto'"
-              @click="abrirAjusteStock(item)"
-            />
-            <UButton
-              v-if="item.tipo === 'producto' && (item.modoInventario === 'serie' || item.modoInventario === 'lote')"
-              icon="i-heroicons-squares-2x2"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              :title="item.modoInventario === 'serie' ? 'Ver unidades' : 'Ver lotes'"
-              @click="abrirVerUnidades(item)"
-            />
-            <UButton
-              icon="i-heroicons-clipboard-document-list"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              title="Historial de inventario"
-              :disabled="item.tipo !== 'producto'"
-              @click="abrirHistorial(item)"
-            />
-            <UButton
               icon="i-heroicons-pencil-square"
               color="neutral"
               variant="ghost"
               size="sm"
+              title="Editar"
               @click="abrirEditar(item)"
             />
-            <UButton
-              icon="i-heroicons-trash"
-              color="error"
-              variant="ghost"
-              size="sm"
-              @click="confirmarEliminar(item.id)"
-            />
+            <UDropdownMenu :items="menuAcciones(item)">
+              <UButton
+                icon="i-heroicons-ellipsis-vertical"
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                title="Más acciones"
+              />
+            </UDropdownMenu>
           </div>
         </li>
       </ul>
