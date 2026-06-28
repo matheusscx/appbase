@@ -483,7 +483,11 @@ CREATE TABLE "item_producto" (
   "stock"             NUMERIC(18,4) NOT NULL DEFAULT 0,
   "unidad_medida"     TEXT          NOT NULL DEFAULT 'unidad',
   "fecha_elaboracion" TIMESTAMPTZ,
-  "fecha_vencimiento" TIMESTAMPTZ
+  "fecha_vencimiento" TIMESTAMPTZ,
+  "modo_inventario"   TEXT          NOT NULL DEFAULT 'cantidad'
+  -- 'cantidad' (fungible, saldo numérico)
+  -- 'lote'     (stock = SUM cantidad_disponible de item_lote)
+  -- 'serie'    (stock = COUNT unidades disponibles en item_unidad)
 );
 
 -- Extensión 1:1 para tipo 'servicio'
@@ -529,6 +533,55 @@ CREATE TABLE "movimientos_inventario" (
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ
+);
+
+-- Lotes (fuente de verdad de stock en modo 'lote'; metadato en modo 'serie')
+-- En modo 'lote': cantidad_disponible es la cantidad real en stock.
+-- En modo 'serie': cantidad_inicial y cantidad_disponible son 0 (el lote es solo metadato).
+CREATE TABLE "item_lote" (
+  "lote_id"              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"            UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "item_id"              UUID          NOT NULL REFERENCES "items" ("item_id"),
+  "codigo_lote"          TEXT          NOT NULL,
+  "fecha_elaboracion"    TIMESTAMPTZ,
+  "fecha_vencimiento"    TIMESTAMPTZ,
+  "cantidad_inicial"     NUMERIC(18,4) NOT NULL DEFAULT 0,
+  "cantidad_disponible"  NUMERIC(18,4) NOT NULL DEFAULT 0,
+  "creado_el"            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"       TIMESTAMPTZ,
+  "eliminado_el"         TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_lote_item_codigo"
+  ON "item_lote" ("item_id", "codigo_lote") WHERE "eliminado_el" IS NULL;
+
+-- Unidades serializadas (modo 'serie')
+CREATE TABLE "item_unidad" (
+  "unidad_id"      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"      UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "item_id"        UUID        NOT NULL REFERENCES "items" ("item_id"),
+  "lote_id"        UUID        REFERENCES "item_lote" ("lote_id"),
+  "serie"          TEXT        NOT NULL,
+  "estado"         TEXT        NOT NULL DEFAULT 'disponible',
+  -- 'disponible' | 'reservado' | 'vendido' | 'baja'
+  "condicion"      TEXT        NOT NULL DEFAULT 'nuevo',
+  -- 'nuevo' | 'usado' | 'reacondicionado'
+  "garantia_hasta" TIMESTAMPTZ,
+  "venta_id"       UUID,       -- FK diferida (se define cuando exista tabla ventas)
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_unidad_tenant_serie"
+  ON "item_unidad" ("tenant_id", "serie") WHERE "eliminado_el" IS NULL;
+
+-- Detalle del movimiento de inventario → qué unidades/lotes entraron o salieron
+CREATE TABLE "movimiento_inventario_detalle" (
+  "detalle_id"    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "movimiento_id" UUID          NOT NULL REFERENCES "movimientos_inventario" ("movimiento_id"),
+  "unidad_id"     UUID          REFERENCES "item_unidad" ("unidad_id"),
+  "lote_id"       UUID          REFERENCES "item_lote" ("lote_id"),
+  "cantidad"      NUMERIC(18,4) NOT NULL,
+  "creado_el"     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
 -- =============================================================

@@ -24,11 +24,35 @@ interface Item {
   unidadMedida: string | null
   fechaElaboracion: string | null
   fechaVencimiento: string | null
+  modoInventario: string | null  // 'cantidad' | 'lote' | 'serie'
   duracionEstimada: number | null
   requiereCita: boolean | null
   impuestosIds?: string[]
   recargosIds?: string[]
   descuentosIds?: string[]
+}
+
+interface SerieRow { serie: string; condicion: string; garantiaHasta: string }
+
+interface Unidad {
+  id: string
+  serie: string
+  estado: string
+  condicion: string
+  garantiaHasta: string | null
+  loteId: string | null
+  codigoLote: string | null
+  creadoEl: string
+}
+
+interface Lote {
+  id: string
+  codigoLote: string
+  fechaElaboracion: string | null
+  fechaVencimiento: string | null
+  cantidadInicial: string
+  cantidadDisponible: string
+  creadoEl: string
 }
 
 interface Opt { label: string; value: string }
@@ -57,9 +81,19 @@ const confirmModalOpen = ref(false)
 const stockModalOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
-const stockItemId = ref<string | null>(null)
+const stockItem = ref<Item | null>(null)
 const toggling = reactive(new Set<string>())
 const filtroTipo = ref('todos')
+
+// Ver unidades / lotes
+const verUnidadesOpen = ref(false)
+const verUnidadesLoading = ref(false)
+const verUnidadesItem = ref<Item | null>(null)
+const unidades = ref<Unidad[]>([])
+const lotes = ref<Lote[]>([])
+
+// Unidades disponibles para selección en salida serie
+const unidadesDisponibles = ref<Unidad[]>([])
 
 // Catálogos
 const monedasOpts = ref<Opt[]>([])
@@ -101,8 +135,13 @@ function emptyForm() {
     // producto
     stock: '0',
     unidadMedida: 'unidad',
+    modoInventario: 'cantidad',
     fechaElaboracion: '',
     fechaVencimiento: '',
+    // series iniciales (modo serie)
+    series: [] as SerieRow[],
+    // lote inicial (modo lote)
+    loteInicial: { codigoLote: '', fechaElaboracion: '', fechaVencimiento: '' },
     // servicio
     duracionEstimada: 0,
     requiereCita: false,
@@ -116,8 +155,27 @@ function emptyForm() {
 const form = ref(emptyForm())
 
 function emptyAjusteForm() {
-  return { cantidad: '', tipo: 'entrada', motivo: 'ajuste_manual', comentario: '' }
+  return {
+    cantidad: '',
+    tipo: 'entrada',
+    motivo: 'ajuste_manual',
+    comentario: '',
+    // modo serie — entrada: nueva series; salida: IDs seleccionados
+    series: [] as SerieRow[],
+    unidadIds: [] as string[],
+    // modo lote — entrada: datos del lote; salida: loteId + cantidad
+    loteId: '',
+    loteCodigo: '',
+    loteFechaElab: '',
+    loteFechaVenc: '',
+  }
 }
+
+const condicionOpts = [
+  { label: 'Nuevo', value: 'nuevo' },
+  { label: 'Usado', value: 'usado' },
+  { label: 'Reacondicionado', value: 'reacondicionado' },
+]
 const ajusteForm = ref(emptyAjusteForm())
 
 const ajusteTipoOpts = [
@@ -137,6 +195,26 @@ const historialOpen = ref(false)
 const historialLoading = ref(false)
 const movimientos = ref<Movimiento[]>([])
 const historialItemNombre = ref('')
+
+async function abrirVerUnidades(item: Item) {
+  verUnidadesItem.value = item
+  unidades.value = []
+  lotes.value = []
+  verUnidadesOpen.value = true
+  verUnidadesLoading.value = true
+  try {
+    if (item.modoInventario === 'serie') {
+      unidades.value = await useApiFetch<Unidad[]>(`${apiUrl}/items/${item.id}/unidades`)
+    } else {
+      lotes.value = await useApiFetch<Lote[]>(`${apiUrl}/items/${item.id}/lotes`)
+    }
+  } catch (e) {
+    const msg = apiErrorMsg(e, 'Error al cargar')
+    toast.add({ title: msg, color: 'error' })
+  } finally {
+    verUnidadesLoading.value = false
+  }
+}
 
 async function abrirHistorial(item: Item) {
   historialItemNombre.value = item.nombre
@@ -244,12 +322,15 @@ async function abrirEditar(item: Item) {
       activo: detalle.activo,
       stock: detalle.stock ?? '0',
       unidadMedida: detalle.unidadMedida ?? 'unidad',
+      modoInventario: detalle.modoInventario ?? 'cantidad',
       fechaElaboracion: detalle.fechaElaboracion
         ? detalle.fechaElaboracion.slice(0, 10)
         : '',
       fechaVencimiento: detalle.fechaVencimiento
         ? detalle.fechaVencimiento.slice(0, 10)
         : '',
+      series: [] as SerieRow[],
+      loteInicial: { codigoLote: '', fechaElaboracion: '', fechaVencimiento: '' },
       duracionEstimada: detalle.duracionEstimada ?? 0,
       requiereCita: detalle.requiereCita ?? false,
       impuestosIds: detalle.impuestosIds ?? [],
@@ -283,10 +364,24 @@ async function guardar() {
     }
 
     if (form.value.tipo === 'producto') {
-      payload.stock = form.value.stock || '0'
       payload.unidadMedida = form.value.unidadMedida
       if (form.value.fechaElaboracion) payload.fechaElaboracion = form.value.fechaElaboracion
       if (form.value.fechaVencimiento) payload.fechaVencimiento = form.value.fechaVencimiento
+      if (!editingId.value) {
+        payload.modoInventario = form.value.modoInventario
+        if (form.value.modoInventario === 'cantidad') {
+          payload.stock = form.value.stock || '0'
+        } else if (form.value.modoInventario === 'serie') {
+          payload.stock = String(form.value.series.length)
+          if (form.value.series.length) payload.series = form.value.series
+        } else if (form.value.modoInventario === 'lote') {
+          payload.stock = form.value.stock || '0'
+          if (form.value.loteInicial.codigoLote) payload.lote = form.value.loteInicial
+        }
+      } else {
+        // En edición sólo mandamos modoInventario (el backend bloquea cambio si hay movimientos)
+        payload.modoInventario = form.value.modoInventario
+      }
     } else {
       payload.duracionEstimada = form.value.duracionEstimada || undefined
       payload.requiereCita = form.value.requiereCita
@@ -358,21 +453,54 @@ async function toggleActivo(item: Item) {
 
 // ── Ajuste de stock ────────────────────────────────────────────────────────
 
-function abrirAjusteStock(id: string) {
-  stockItemId.value = id
+async function abrirAjusteStock(item: Item) {
+  stockItem.value = item
   ajusteForm.value = emptyAjusteForm()
+  unidadesDisponibles.value = []
   stockModalOpen.value = true
+  if (item.modoInventario === 'serie') {
+    try {
+      unidadesDisponibles.value = await useApiFetch<Unidad[]>(
+        `${apiUrl}/items/${item.id}/unidades?estado=disponible`,
+      )
+    } catch { /* continúa sin lista */ }
+  }
 }
 
 async function ejecutarAjusteStock() {
-  if (!stockItemId.value) return
+  if (!stockItem.value) return
   ajustando.value = true
   try {
+    const f = ajusteForm.value
+    const modo = stockItem.value.modoInventario ?? 'cantidad'
+    const body: Record<string, unknown> = {
+      tipo: f.tipo,
+      motivo: f.motivo,
+      comentario: f.comentario || undefined,
+    }
+    if (modo === 'cantidad') {
+      body.cantidad = f.cantidad
+    } else if (modo === 'serie') {
+      if (f.tipo === 'entrada') {
+        body.cantidad = String(f.series.length)
+        body.series = f.series
+      } else {
+        body.cantidad = String(f.unidadIds.length)
+        body.unidadIds = f.unidadIds
+      }
+    } else if (modo === 'lote') {
+      body.cantidad = f.cantidad
+      if (f.tipo === 'entrada') {
+        body.lote = { codigoLote: f.loteCodigo, fechaElaboracion: f.loteFechaElab || undefined, fechaVencimiento: f.loteFechaVenc || undefined }
+      } else {
+        body.loteId = f.loteId
+      }
+    }
     const result = await useApiFetch<{ stock: string }>(
-      `${apiUrl}/items/${stockItemId.value}/stock`,
-      { method: 'PATCH', body: ajusteForm.value },
+      `${apiUrl}/items/${stockItem.value.id}/stock`,
+      { method: 'PATCH', body },
     )
-    const item = items.value.find((i) => i.id === stockItemId.value)
+    const item = items.value.find((i) => i.id === stockItem.value?.id)
     if (item) item.stock = result.stock
     toast.add({ title: `Stock actualizado: ${result.stock}`, color: 'success' })
     stockModalOpen.value = false
@@ -436,8 +564,18 @@ async function ejecutarAjusteStock() {
               <span>{{ item.monedaSimbolo ?? item.monedaCodigo }} {{ item.precioBase }}</span>
               <span v-if="item.categoriaNombre">· {{ item.categoriaNombre }}</span>
               <span v-if="item.tipo === 'producto' && item.stock !== null">
-                · Stock: {{ item.stock }} {{ item.unidadMedida }}
+                · Stock: {{ item.stock }}
+                <span v-if="item.modoInventario === 'serie'">(unidades)</span>
+                <span v-else-if="item.modoInventario === 'lote'">(lotes)</span>
+                <span v-else>{{ item.unidadMedida }}</span>
               </span>
+              <UBadge
+                v-if="item.tipo === 'producto' && item.modoInventario && item.modoInventario !== 'cantidad'"
+                :label="item.modoInventario"
+                color="secondary"
+                variant="soft"
+                size="xs"
+              />
               <span v-if="item.tipo === 'servicio' && item.duracionEstimada">
                 · {{ item.duracionEstimada }} min
               </span>
@@ -459,7 +597,16 @@ async function ejecutarAjusteStock() {
               size="sm"
               title="Ajustar stock"
               :disabled="item.tipo !== 'producto'"
-              @click="abrirAjusteStock(item.id)"
+              @click="abrirAjusteStock(item)"
+            />
+            <UButton
+              v-if="item.tipo === 'producto' && (item.modoInventario === 'serie' || item.modoInventario === 'lote')"
+              icon="i-heroicons-squares-2x2"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              :title="item.modoInventario === 'serie' ? 'Ver unidades' : 'Ver lotes'"
+              @click="abrirVerUnidades(item)"
             />
             <UButton
               icon="i-heroicons-clipboard-document-list"
@@ -547,12 +694,9 @@ async function ejecutarAjusteStock() {
 
           <!-- Extensión producto -->
           <template v-if="form.tipo === 'producto'">
-            <div class="border-t pt-4">
-              <p class="text-sm font-medium text-muted mb-3">Datos de producto</p>
+            <div class="border-t pt-4 space-y-4">
+              <p class="text-sm font-medium text-muted">Datos de producto</p>
               <div class="grid grid-cols-2 gap-4">
-                <UFormField label="Stock inicial">
-                  <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
-                </UFormField>
                 <UFormField label="Unidad de medida">
                   <USelectMenu
                     v-model="form.unidadMedida"
@@ -561,13 +705,100 @@ async function ejecutarAjusteStock() {
                     class="w-full"
                   />
                 </UFormField>
-                <UFormField label="Fecha elaboración">
-                  <UInput v-model="form.fechaElaboracion" type="date" class="w-full" />
-                </UFormField>
-                <UFormField label="Fecha vencimiento">
-                  <UInput v-model="form.fechaVencimiento" type="date" class="w-full" />
+                <UFormField v-if="!editingId" label="Modo inventario">
+                  <USelectMenu
+                    v-model="form.modoInventario"
+                    :items="[
+                      { label: 'Cantidad (fungible)', value: 'cantidad' },
+                      { label: 'Nro Serie (un ID por unidad)', value: 'serie' },
+                      { label: 'Lote (por fecha de vencimiento)', value: 'lote' },
+                    ]"
+                    value-key="value"
+                    class="w-full"
+                  />
                 </UFormField>
               </div>
+
+              <!-- Modo cantidad: stock inicial + fechas genéricas -->
+              <template v-if="form.modoInventario === 'cantidad'">
+                <div class="grid grid-cols-2 gap-4">
+                  <UFormField label="Stock inicial">
+                    <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
+                  </UFormField>
+                  <UFormField label="Fecha elaboración">
+                    <UInput v-model="form.fechaElaboracion" type="date" class="w-full" />
+                  </UFormField>
+                  <UFormField label="Fecha vencimiento">
+                    <UInput v-model="form.fechaVencimiento" type="date" class="w-full" />
+                  </UFormField>
+                </div>
+              </template>
+
+              <!-- Modo serie: lista de unidades iniciales -->
+              <template v-if="form.modoInventario === 'serie' && !editingId">
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <p class="text-sm text-muted">Unidades iniciales ({{ form.series.length }})</p>
+                    <UButton
+                      size="xs"
+                      variant="ghost"
+                      icon="i-heroicons-plus"
+                      @click="form.series = [...form.series, { serie: '', condicion: 'nuevo', garantiaHasta: '' }]"
+                    >Agregar</UButton>
+                  </div>
+                  <div
+                    v-for="(s, idx) in form.series"
+                    :key="idx"
+                    class="grid grid-cols-3 gap-2 items-end"
+                  >
+                    <UFormField label="Nro Serie">
+                      <UInput v-model="form.series[idx].serie" placeholder="IMEI o código" class="w-full" />
+                    </UFormField>
+                    <UFormField label="Condición">
+                      <USelectMenu
+                        v-model="form.series[idx].condicion"
+                        :items="condicionOpts"
+                        value-key="value"
+                        class="w-full"
+                      />
+                    </UFormField>
+                    <div class="flex gap-2">
+                      <UFormField label="Garantía hasta" class="flex-1">
+                        <UInput v-model="form.series[idx].garantiaHasta" type="date" class="w-full" />
+                      </UFormField>
+                      <UButton
+                        color="error"
+                        variant="ghost"
+                        icon="i-heroicons-trash"
+                        size="sm"
+                        class="self-end"
+                        @click="form.series = form.series.filter((_, i) => i !== idx)"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Modo lote: primer lote inicial -->
+              <template v-if="form.modoInventario === 'lote' && !editingId">
+                <div class="space-y-2">
+                  <p class="text-sm text-muted">Lote inicial (opcional — puedes agregar luego via ajuste)</p>
+                  <div class="grid grid-cols-2 gap-4">
+                    <UFormField label="Código de lote">
+                      <UInput v-model="form.loteInicial.codigoLote" placeholder="LOT-001" class="w-full" />
+                    </UFormField>
+                    <UFormField label="Cantidad">
+                      <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
+                    </UFormField>
+                    <UFormField label="Fecha elaboración">
+                      <UInput v-model="form.loteInicial.fechaElaboracion" type="date" class="w-full" />
+                    </UFormField>
+                    <UFormField label="Fecha vencimiento">
+                      <UInput v-model="form.loteInicial.fechaVencimiento" type="date" class="w-full" />
+                    </UFormField>
+                  </div>
+                </div>
+              </template>
             </div>
           </template>
 
@@ -654,31 +885,154 @@ async function ejecutarAjusteStock() {
     </UModal>
 
     <!-- Modal ajuste de stock -->
-    <UModal v-model:open="stockModalOpen" title="Ajustar stock">
+    <UModal v-model:open="stockModalOpen" title="Ajustar stock" :ui="{ content: 'max-w-2xl' }">
       <template #body>
         <div class="space-y-4">
-          <UFormField label="Cantidad" required>
-            <UInput v-model="ajusteForm.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
-          </UFormField>
-          <UFormField label="Tipo de movimiento" required>
-            <USelectMenu
-              v-model="ajusteForm.tipo"
-              :items="ajusteTipoOpts"
-              value-key="value"
-              class="w-full"
-            />
-          </UFormField>
-          <UFormField label="Motivo" required>
-            <USelectMenu
-              v-model="ajusteForm.motivo"
-              :items="motivoOpts"
-              value-key="value"
-              class="w-full"
-            />
-          </UFormField>
+          <!-- Tipo + motivo + comentario (común a todos los modos) -->
+          <div class="grid grid-cols-2 gap-4">
+            <UFormField label="Tipo de movimiento" required>
+              <USelectMenu
+                v-model="ajusteForm.tipo"
+                :items="ajusteTipoOpts"
+                value-key="value"
+                class="w-full"
+              />
+            </UFormField>
+            <UFormField label="Motivo" required>
+              <USelectMenu
+                v-model="ajusteForm.motivo"
+                :items="motivoOpts"
+                value-key="value"
+                class="w-full"
+              />
+            </UFormField>
+          </div>
           <UFormField label="Comentario">
             <UInput v-model="ajusteForm.comentario" placeholder="Opcional" class="w-full" />
           </UFormField>
+
+          <!-- Modo cantidad: solo cantidad -->
+          <template v-if="stockItem?.modoInventario === 'cantidad' || !stockItem?.modoInventario">
+            <UFormField label="Cantidad" required>
+              <UInput v-model="ajusteForm.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
+            </UFormField>
+          </template>
+
+          <!-- Modo serie -->
+          <template v-if="stockItem?.modoInventario === 'serie'">
+            <!-- Entrada serie: capturar nuevas series -->
+            <template v-if="ajusteForm.tipo === 'entrada'">
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <p class="text-sm text-muted">Series a ingresar ({{ ajusteForm.series.length }})</p>
+                  <UButton
+                    size="xs"
+                    variant="ghost"
+                    icon="i-heroicons-plus"
+                    @click="ajusteForm.series = [...ajusteForm.series, { serie: '', condicion: 'nuevo', garantiaHasta: '' }]"
+                  >Agregar</UButton>
+                </div>
+                <div
+                  v-for="(s, idx) in ajusteForm.series"
+                  :key="idx"
+                  class="grid grid-cols-3 gap-2 items-end"
+                >
+                  <UFormField label="Nro Serie">
+                    <UInput v-model="ajusteForm.series[idx].serie" placeholder="IMEI o código" class="w-full" />
+                  </UFormField>
+                  <UFormField label="Condición">
+                    <USelectMenu
+                      v-model="ajusteForm.series[idx].condicion"
+                      :items="condicionOpts"
+                      value-key="value"
+                      class="w-full"
+                    />
+                  </UFormField>
+                  <div class="flex gap-2">
+                    <UFormField label="Garantía hasta" class="flex-1">
+                      <UInput v-model="ajusteForm.series[idx].garantiaHasta" type="date" class="w-full" />
+                    </UFormField>
+                    <UButton
+                      color="error"
+                      variant="ghost"
+                      icon="i-heroicons-trash"
+                      size="sm"
+                      class="self-end"
+                      @click="ajusteForm.series = ajusteForm.series.filter((_, i) => i !== idx)"
+                    />
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Salida serie: seleccionar unidades disponibles -->
+            <template v-if="ajusteForm.tipo === 'salida'">
+              <div class="space-y-2">
+                <p class="text-sm text-muted">
+                  Selecciona unidades a dar de baja ({{ ajusteForm.unidadIds.length }} seleccionadas)
+                </p>
+                <div v-if="!unidadesDisponibles.length" class="text-sm text-muted py-2">
+                  Sin unidades disponibles.
+                </div>
+                <div
+                  v-for="u in unidadesDisponibles"
+                  :key="u.id"
+                  class="flex items-center gap-3 py-1.5 border-b border-default"
+                >
+                  <input
+                    type="checkbox"
+                    :value="u.id"
+                    :checked="ajusteForm.unidadIds.includes(u.id)"
+                    class="w-4 h-4"
+                    @change="ajusteForm.unidadIds = ajusteForm.unidadIds.includes(u.id)
+                      ? ajusteForm.unidadIds.filter(id => id !== u.id)
+                      : [...ajusteForm.unidadIds, u.id]"
+                  />
+                  <span class="font-mono text-sm flex-1">{{ u.serie }}</span>
+                  <UBadge :label="u.condicion" variant="subtle" size="sm" />
+                  <span v-if="u.garantiaHasta" class="text-xs text-muted">
+                    garantía {{ new Date(u.garantiaHasta).toLocaleDateString() }}
+                  </span>
+                </div>
+              </div>
+            </template>
+          </template>
+
+          <!-- Modo lote -->
+          <template v-if="stockItem?.modoInventario === 'lote'">
+            <!-- Entrada lote: nuevo o existente + cantidad -->
+            <template v-if="ajusteForm.tipo === 'entrada'">
+              <div class="grid grid-cols-2 gap-4">
+                <UFormField label="Código de lote" required>
+                  <UInput v-model="ajusteForm.loteCodigo" placeholder="LOT-001" class="w-full" />
+                </UFormField>
+                <UFormField label="Cantidad" required>
+                  <UInput v-model="ajusteForm.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
+                </UFormField>
+                <UFormField label="Fecha elaboración">
+                  <UInput v-model="ajusteForm.loteFechaElab" type="date" class="w-full" />
+                </UFormField>
+                <UFormField label="Fecha vencimiento">
+                  <UInput v-model="ajusteForm.loteFechaVenc" type="date" class="w-full" />
+                </UFormField>
+              </div>
+            </template>
+
+            <!-- Salida lote: elegir lote + cantidad -->
+            <template v-if="ajusteForm.tipo === 'salida'">
+              <div class="grid grid-cols-2 gap-4">
+                <UFormField label="Lote ID" required>
+                  <UInput v-model="ajusteForm.loteId" placeholder="UUID del lote" class="w-full" />
+                </UFormField>
+                <UFormField label="Cantidad a retirar" required>
+                  <UInput v-model="ajusteForm.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
+                </UFormField>
+              </div>
+              <p class="text-xs text-muted">
+                Usa el botón "Ver lotes" en la lista para copiar el ID del lote.
+              </p>
+            </template>
+          </template>
         </div>
       </template>
       <template #footer>
@@ -692,6 +1046,92 @@ async function ejecutarAjusteStock() {
         </div>
       </template>
     </UModal>
+    <!-- Modal ver unidades / lotes -->
+    <UModal
+      v-model:open="verUnidadesOpen"
+      :title="verUnidadesItem?.modoInventario === 'serie' ? `Unidades — ${verUnidadesItem?.nombre}` : `Lotes — ${verUnidadesItem?.nombre}`"
+      :ui="{ content: 'max-w-3xl' }"
+    >
+      <template #body>
+        <div v-if="verUnidadesLoading" class="py-8 text-center text-muted">Cargando…</div>
+
+        <!-- Tabla unidades (modo serie) -->
+        <template v-else-if="verUnidadesItem?.modoInventario === 'serie'">
+          <div v-if="!unidades.length" class="py-8 text-center text-muted">Sin unidades registradas.</div>
+          <table v-else class="w-full text-sm">
+            <thead class="text-muted text-left">
+              <tr class="border-b border-default">
+                <th class="py-2 pr-4">Nro Serie</th>
+                <th class="py-2 pr-4">Estado</th>
+                <th class="py-2 pr-4">Condición</th>
+                <th class="py-2 pr-4">Garantía hasta</th>
+                <th class="py-2">Lote</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="u in unidades" :key="u.id" class="border-b border-default">
+                <td class="py-2 pr-4 font-mono">{{ u.serie }}</td>
+                <td class="py-2 pr-4">
+                  <UBadge
+                    :label="u.estado"
+                    :color="u.estado === 'disponible' ? 'success' : u.estado === 'vendido' ? 'neutral' : 'warning'"
+                    variant="subtle"
+                    size="sm"
+                  />
+                </td>
+                <td class="py-2 pr-4">{{ u.condicion }}</td>
+                <td class="py-2 pr-4">
+                  {{ u.garantiaHasta ? new Date(u.garantiaHasta).toLocaleDateString() : '—' }}
+                </td>
+                <td class="py-2 text-xs text-muted">{{ u.codigoLote ?? '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+
+        <!-- Tabla lotes (modo lote) -->
+        <template v-else>
+          <div v-if="!lotes.length" class="py-8 text-center text-muted">Sin lotes registrados.</div>
+          <table v-else class="w-full text-sm">
+            <thead class="text-muted text-left">
+              <tr class="border-b border-default">
+                <th class="py-2 pr-4">Código</th>
+                <th class="py-2 pr-4 text-right">Inicial</th>
+                <th class="py-2 pr-4 text-right">Disponible</th>
+                <th class="py-2 pr-4">Elaboración</th>
+                <th class="py-2 pr-4">Vencimiento</th>
+                <th class="py-2 font-mono text-xs">ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="l in lotes"
+                :key="l.id"
+                class="border-b border-default"
+                :class="{ 'opacity-50': l.cantidadDisponible === '0' || l.cantidadDisponible === '0.0000' }"
+              >
+                <td class="py-2 pr-4 font-medium">{{ l.codigoLote }}</td>
+                <td class="py-2 pr-4 text-right">{{ l.cantidadInicial }}</td>
+                <td class="py-2 pr-4 text-right font-medium">{{ l.cantidadDisponible }}</td>
+                <td class="py-2 pr-4">
+                  {{ l.fechaElaboracion ? new Date(l.fechaElaboracion).toLocaleDateString() : '—' }}
+                </td>
+                <td class="py-2 pr-4">
+                  {{ l.fechaVencimiento ? new Date(l.fechaVencimiento).toLocaleDateString() : '—' }}
+                </td>
+                <td class="py-2 font-mono text-xs text-muted select-all">{{ l.id }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+      </template>
+      <template #footer>
+        <div class="flex justify-end">
+          <UButton color="neutral" variant="ghost" @click="verUnidadesOpen = false">Cerrar</UButton>
+        </div>
+      </template>
+    </UModal>
+
     <!-- Modal historial de inventario -->
     <UModal
       v-model:open="historialOpen"

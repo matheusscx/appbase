@@ -17,7 +17,13 @@ function makeTipo(codigo: string, clase: string = 'descuento') {
 describe('DescuentosService', () => {
   let service: DescuentosService;
   let qbMock: { where: jest.Mock; andWhere: jest.Mock; getCount: jest.Mock };
-  let managerMock: { create: jest.Mock; save: jest.Mock; delete: jest.Mock; softDelete: jest.Mock; update: jest.Mock };
+  let managerMock: {
+    create: jest.Mock;
+    save: jest.Mock;
+    delete: jest.Mock;
+    softDelete: jest.Mock;
+    update: jest.Mock;
+  };
   let dataSourceMock: { transaction: jest.Mock };
   let descuentoRepoMock: {
     find: jest.Mock;

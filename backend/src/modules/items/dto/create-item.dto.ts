@@ -10,7 +10,41 @@ import {
   IsInt,
   Min,
   IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class SerieInputDto {
+  @IsString()
+  @IsNotEmpty()
+  serie: string;
+
+  @IsIn(['nuevo', 'usado', 'reacondicionado'])
+  @IsOptional()
+  condicion?: string;
+
+  @IsDateString()
+  @IsOptional()
+  garantiaHasta?: string;
+
+  @IsUUID()
+  @IsOptional()
+  loteId?: string;
+}
+
+export class LoteInputDto {
+  @IsString()
+  @IsNotEmpty()
+  codigoLote: string;
+
+  @IsDateString()
+  @IsOptional()
+  fechaElaboracion?: string;
+
+  @IsDateString()
+  @IsOptional()
+  fechaVencimiento?: string;
+}
 
 export class CreateItemDto {
   @IsString()
@@ -43,6 +77,10 @@ export class CreateItemDto {
   activo?: boolean;
 
   // Extensión producto
+  @IsIn(['cantidad', 'lote', 'serie'])
+  @IsOptional()
+  modoInventario?: string;
+
   @IsNumberString()
   @IsOptional()
   stock?: string;
@@ -58,6 +96,19 @@ export class CreateItemDto {
   @IsDateString()
   @IsOptional()
   fechaVencimiento?: string;
+
+  // Carga inicial modo 'serie'
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SerieInputDto)
+  @IsOptional()
+  series?: SerieInputDto[];
+
+  // Carga inicial modo 'lote'
+  @ValidateNested()
+  @Type(() => LoteInputDto)
+  @IsOptional()
+  lote?: LoteInputDto;
 
   // Extensión servicio
   @IsInt()

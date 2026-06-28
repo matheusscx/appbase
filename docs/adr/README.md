@@ -18,6 +18,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [004](./004-uuid-column-types.md) | Declarar `type: 'uuid'` explícito en todas las columnas PK y FK de UUID en entidades TypeORM | Accepted | 2026-06-21 |
 | [005](./005-pais-moneda-y-moneda-oficial.md) | Tabla `pais_moneda` y moneda oficial derivada del país | Accepted | 2026-06-22 |
 | [006](./006-relational-tramos-and-metodos-pago.md) | Modelado relacional de tramos y métodos de pago en reglas de descuento/recargo | Accepted | 2026-06-27 |
+| [007](./007-inventario-serie-lote.md) | Modelo de inventario serializado y por lote — eje `modo_inventario` | Accepted | 2026-06-28 |
 
 ## Creating a New ADR
 

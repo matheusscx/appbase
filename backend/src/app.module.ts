@@ -58,8 +58,11 @@ import { ItemServicio } from './modules/items/entities/item-servicio.entity';
 import { ItemImpuesto } from './modules/items/entities/item-impuesto.entity';
 import { ItemRecargo } from './modules/items/entities/item-recargo.entity';
 import { ItemDescuento } from './modules/items/entities/item-descuento.entity';
+import { ItemLote } from './modules/items/entities/item-lote.entity';
+import { ItemUnidad } from './modules/items/entities/item-unidad.entity';
 import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
+import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
 import { InventarioModule } from './modules/inventario/inventario.module';
 
 @Module({
@@ -110,7 +113,10 @@ import { InventarioModule } from './modules/inventario/inventario.module';
           ItemImpuesto,
           ItemRecargo,
           ItemDescuento,
+          ItemLote,
+          ItemUnidad,
           MovimientoInventario,
+          MovimientoInventarioDetalle,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),

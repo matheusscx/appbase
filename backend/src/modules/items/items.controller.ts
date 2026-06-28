@@ -81,4 +81,20 @@ export class ItemsController {
     };
     return this.itemsService.ajustarStock(tenantId, usuarioId, id, dto);
   }
+
+  @Get(':id/unidades')
+  findUnidades(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Query('estado') estado?: string,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.itemsService.findUnidades(tenantId, id, estado);
+  }
+
+  @Get(':id/lotes')
+  findLotes(@Req() req: Request, @Param('id') id: string) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.itemsService.findLotes(tenantId, id);
+  }
 }

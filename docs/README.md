@@ -58,6 +58,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/configuracion-monedas.md](./features/configuracion-monedas.md)** — Configuración de monedas por tenant (multi-moneda + tasa de cambio)
 - **[features/preferencias-financieras.md](./features/preferencias-financieras.md)** — Configuración de preferencias financieras (cálculo de descuentos, recargos, fórmula de precios)
 - **[features/inventario-kardex.md](./features/inventario-kardex.md)** — Gestión de inventario (kardex de movimientos de stock)
+- **[features/inventario-serializado.md](./features/inventario-serializado.md)** — Inventario serializado y por lote (modo_inventario: cantidad/serie/lote)
 - **[features/descuentos-recargos.md](./features/descuentos-recargos.md)** — Descuentos y Recargos — Formularios dinámicos por tipo de regla (tramos, métodos de pago, días)
 
 ### Engineering Notes (superpowers)

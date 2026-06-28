@@ -261,6 +261,71 @@ describe('ItemsService', () => {
 
       expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
     });
+
+    it('modo serie: registra movimiento con series[]', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ ok: 1 }]) // validarMoneda
+        .mockResolvedValueOnce([{ item_id: 'item-s' }]) // INSERT items RETURNING
+        .mockResolvedValueOnce(undefined); // INSERT item_producto
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-s',
+        stockAnterior: '0',
+        stockResultante: '2',
+      });
+
+      const res = await service.create(TENANT, 'user-uuid', {
+        nombre: 'iPhone 15',
+        precioBase: '999000',
+        monedaId: MONEDA_ID,
+        tipo: 'producto',
+        modoInventario: 'serie',
+        series: [{ serie: 'IMEI-001' }, { serie: 'IMEI-002' }],
+      });
+
+      expect(res).toEqual({ id: 'item-s' });
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          tipo: 'entrada',
+          motivo: 'inventario_inicial',
+          cantidad: '2',
+          series: [{ serie: 'IMEI-001' }, { serie: 'IMEI-002' }],
+        }),
+      );
+    });
+
+    it('modo lote: registra movimiento con lote', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ ok: 1 }]) // validarMoneda
+        .mockResolvedValueOnce([{ item_id: 'item-l' }]) // INSERT items RETURNING
+        .mockResolvedValueOnce(undefined); // INSERT item_producto
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-l',
+        stockAnterior: '0',
+        stockResultante: '100',
+      });
+
+      const res = await service.create(TENANT, 'user-uuid', {
+        nombre: 'Paracetamol 500mg',
+        precioBase: '1500',
+        monedaId: MONEDA_ID,
+        tipo: 'producto',
+        modoInventario: 'lote',
+        stock: '100',
+        lote: { codigoLote: 'LOTE-001', fechaVencimiento: '2027-01-01' },
+      });
+
+      expect(res).toEqual({ id: 'item-l' });
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          tipo: 'entrada',
+          motivo: 'inventario_inicial',
+          cantidad: '100',
+          lote: { codigoLote: 'LOTE-001', fechaVencimiento: '2027-01-01' },
+        }),
+      );
+    });
   });
 
   // ── update ─────────────────────────────────────────────────────────────────
@@ -306,6 +371,30 @@ describe('ItemsService', () => {
       expect(
         calls.some((sql) => sql.includes('DELETE FROM item_impuestos')),
       ).toBe(false);
+    });
+
+    it('bloquea cambio de modoInventario si existen movimientos', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([{ cnt: '3' }]); // COUNT movimientos > 0
+
+      await expect(
+        service.update(TENANT, ITEM_ID, { modoInventario: 'lote' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('permite cambio de modoInventario si NO existen movimientos', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([{ cnt: '0' }]) // COUNT movimientos = 0
+        .mockResolvedValueOnce(undefined); // UPDATE item_producto
+
+      await service.update(TENANT, ITEM_ID, { modoInventario: 'lote' });
+
+      const calls = managerMock.query.mock.calls.map(
+        (c: unknown[]) => c[0] as string,
+      );
+      expect(calls.some((sql) => sql.includes('modo_inventario'))).toBe(true);
     });
   });
 

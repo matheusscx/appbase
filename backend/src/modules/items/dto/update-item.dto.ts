@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsDateString,
   IsInt,
+  IsIn,
   Min,
   IsArray,
 } from 'class-validator';
@@ -42,6 +43,10 @@ export class UpdateItemDto {
   activo?: boolean;
 
   // Extensión producto
+  @IsIn(['cantidad', 'lote', 'serie'])
+  @IsOptional()
+  modoInventario?: string;
+
   @IsNumberString()
   @IsOptional()
   stock?: string;

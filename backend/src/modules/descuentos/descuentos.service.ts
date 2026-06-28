@@ -268,17 +268,28 @@ export class DescuentosService {
   }
 
   // Called from create() — all required fields must be present
-  private validarSegunTipoCreate(codigo: string, dto: CreateDescuentoDto): void {
+  private validarSegunTipoCreate(
+    codigo: string,
+    dto: CreateDescuentoDto,
+  ): void {
     const tiposConTramos = ['por_mayor', 'por_monto_venta'];
     const tiposConMetodos = ['metodo_pago'];
-    const tiposFijoPorcentaje = ['pronto_pago', 'interes_simple', 'interes_compuesto'];
+    const tiposFijoPorcentaje = [
+      'pronto_pago',
+      'interes_simple',
+      'interes_compuesto',
+    ];
     const tiposConValorUnico = ['metodo_pago', 'pronto_pago', 'promocional'];
 
     if (tiposConTramos.includes(codigo) && !dto.tramos?.length)
       throw new BadRequestException('Este tipo requiere al menos un tramo');
     if (tiposConMetodos.includes(codigo) && !dto.metodoPagoIds?.length)
       throw new BadRequestException('Selecciona al menos un método de pago');
-    if (tiposFijoPorcentaje.includes(codigo) && dto.modo && dto.modo !== 'porcentaje')
+    if (
+      tiposFijoPorcentaje.includes(codigo) &&
+      dto.modo &&
+      dto.modo !== 'porcentaje'
+    )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
     if (tiposConValorUnico.includes(codigo)) {
       if (!dto.valor)
@@ -289,32 +300,75 @@ export class DescuentosService {
       throw new BadRequestException('Días antes del vencimiento requerido');
     if (codigo === 'mora' && dto.diasVencimiento == null)
       throw new BadRequestException('Días de vencimiento requerido');
-    if (codigo === 'pronto_pago' && dto.diasVencimiento != null && dto.diasVencimiento <= 0)
-      throw new BadRequestException('Días antes del vencimiento debe ser mayor a 0');
-    if (codigo === 'mora' && dto.diasVencimiento != null && (dto.diasVencimiento < 0 || dto.diasVencimiento > 365))
-      throw new BadRequestException('Días de vencimiento debe estar entre 0 y 365');
+    if (
+      codigo === 'pronto_pago' &&
+      dto.diasVencimiento != null &&
+      dto.diasVencimiento <= 0
+    )
+      throw new BadRequestException(
+        'Días antes del vencimiento debe ser mayor a 0',
+      );
+    if (
+      codigo === 'mora' &&
+      dto.diasVencimiento != null &&
+      (dto.diasVencimiento < 0 || dto.diasVencimiento > 365)
+    )
+      throw new BadRequestException(
+        'Días de vencimiento debe estar entre 0 y 365',
+      );
     if (codigo === 'promocional' && (!dto.fechaInicio || !dto.fechaFin))
-      throw new BadRequestException('Fechas de inicio y fin requeridas para descuento promocional');
+      throw new BadRequestException(
+        'Fechas de inicio y fin requeridas para descuento promocional',
+      );
   }
 
   // Called from update() — only validate fields explicitly present in the DTO
-  private validarSegunTipoUpdate(codigo: string, dto: UpdateDescuentoDto): void {
-    const tiposFijoPorcentaje = ['pronto_pago', 'interes_simple', 'interes_compuesto'];
+  private validarSegunTipoUpdate(
+    codigo: string,
+    dto: UpdateDescuentoDto,
+  ): void {
+    const tiposFijoPorcentaje = [
+      'pronto_pago',
+      'interes_simple',
+      'interes_compuesto',
+    ];
 
     if (dto.tramos !== undefined && !dto.tramos.length)
       throw new BadRequestException('Este tipo requiere al menos un tramo');
     if (dto.metodoPagoIds !== undefined && !dto.metodoPagoIds.length)
       throw new BadRequestException('Selecciona al menos un método de pago');
-    if (dto.modo !== undefined && tiposFijoPorcentaje.includes(codigo) && dto.modo !== 'porcentaje')
+    if (
+      dto.modo !== undefined &&
+      tiposFijoPorcentaje.includes(codigo) &&
+      dto.modo !== 'porcentaje'
+    )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
     if (dto.valor !== undefined && dto.valor)
       this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
-    if (dto.diasVencimiento !== undefined && codigo === 'pronto_pago' && dto.diasVencimiento <= 0)
-      throw new BadRequestException('Días antes del vencimiento debe ser mayor a 0');
-    if (dto.diasVencimiento !== undefined && codigo === 'mora' && (dto.diasVencimiento < 0 || dto.diasVencimiento > 365))
-      throw new BadRequestException('Días de vencimiento debe estar entre 0 y 365');
-    if ((dto.fechaInicio !== undefined || dto.fechaFin !== undefined) && codigo === 'promocional' && (!dto.fechaInicio || !dto.fechaFin))
-      throw new BadRequestException('Fechas de inicio y fin requeridas para descuento promocional');
+    if (
+      dto.diasVencimiento !== undefined &&
+      codigo === 'pronto_pago' &&
+      dto.diasVencimiento <= 0
+    )
+      throw new BadRequestException(
+        'Días antes del vencimiento debe ser mayor a 0',
+      );
+    if (
+      dto.diasVencimiento !== undefined &&
+      codigo === 'mora' &&
+      (dto.diasVencimiento < 0 || dto.diasVencimiento > 365)
+    )
+      throw new BadRequestException(
+        'Días de vencimiento debe estar entre 0 y 365',
+      );
+    if (
+      (dto.fechaInicio !== undefined || dto.fechaFin !== undefined) &&
+      codigo === 'promocional' &&
+      (!dto.fechaInicio || !dto.fechaFin)
+    )
+      throw new BadRequestException(
+        'Fechas de inicio y fin requeridas para descuento promocional',
+      );
   }
 
   private derivarCondicionTipo(codigo: string): CondicionTipo {

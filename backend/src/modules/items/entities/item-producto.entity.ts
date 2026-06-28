@@ -16,4 +16,7 @@ export class ItemProducto {
 
   @Column({ name: 'fecha_vencimiento', type: 'timestamptz', nullable: true })
   fechaVencimiento: Date | null;
+
+  @Column({ name: 'modo_inventario', type: 'text', default: 'cantidad' })
+  modoInventario: string; // 'cantidad' | 'lote' | 'serie'
 }

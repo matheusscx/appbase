@@ -101,6 +101,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Descuentos y recargos — formularios dinámicos por tipo de regla (tramos, métodos de pago, días) | ✅ Implementado (2026-06-27) |
 | Catálogo de items (productos y servicios) | ✅ Implementado |
 | Gestión de inventario (kardex de movimientos de stock) | ✅ Implementado |
+| Inventario serializado (modo `serie`) y por lote (modo `lote`) | ✅ Implementado (2026-06-28) |
 | Motor de cálculo de precios | 🔲 Por construir |
 | Procesamiento de ventas | 🔲 Por construir |
 | Gestión de cajas | 🔲 Por construir |
@@ -162,7 +163,13 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 - Movimiento + actualización de saldo en una sola transacción; la `salida` valida stock suficiente (no negativo)
 - Cada línea de venta genera un movimiento `salida`/`motivo='venta'` (devoluciones → `entrada`/`motivo='devolucion'`) dentro de la transacción de la venta
 - `tenant_id` y `usuario_id` siempre del token
-- Fuera de alcance (fases futuras): bodegas, traspasos, costeo/valoración
+- **Eje `modo_inventario`** en `item_producto` (inmutable una vez hay movimientos):
+  - `cantidad` (default): stock fungible, comportamiento original
+  - `serie`: cada unidad tiene identidad propia (`item_unidad`); `stock = COUNT(estado='disponible')`
+  - `lote`: unidades agrupadas por lote con vencimiento (`item_lote`); `stock = SUM(cantidad_disponible)`
+  - En modo `serie`, `item_unidad.lote_id` es metadato (sin cantidad); el conteo de stock viene del estado de la unidad (anti-doble-conteo)
+  - `movimiento_inventario_detalle` liga cada movimiento con las unidades/lotes afectados
+- Fuera de alcance (fases futuras): bodegas, traspasos, costeo/valoración, FEFO automático en lotes
 
 ### Pagos
 - Una venta puede tener múltiples pagos con distintos métodos

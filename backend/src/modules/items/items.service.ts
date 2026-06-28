@@ -32,6 +32,7 @@ interface ItemRow {
   unidad_medida: string | null;
   fecha_elaboracion: Date | null;
   fecha_vencimiento: Date | null;
+  modo_inventario: string | null;
   duracion_estimada: number | null;
   requiere_cita: boolean | null;
 }
@@ -58,6 +59,7 @@ export class ItemsService {
       m.codigo_iso AS moneda_codigo, m.simbolo AS moneda_simbolo,
       c.nombre AS categoria_nombre,
       ip.stock, ip.unidad_medida, ip.fecha_elaboracion, ip.fecha_vencimiento,
+      ip.modo_inventario,
       isr.duracion_estimada, isr.requiere_cita
     FROM items i
     LEFT JOIN moneda m ON m.moneda_id = i.moneda_id AND m.eliminado_el IS NULL
@@ -85,6 +87,7 @@ export class ItemsService {
       unidadMedida: r.unidad_medida,
       fechaElaboracion: r.fecha_elaboracion,
       fechaVencimiento: r.fecha_vencimiento,
+      modoInventario: r.modo_inventario,
       duracionEstimada: r.duracion_estimada,
       requiereCita: r.requiere_cita,
     };
@@ -197,29 +200,59 @@ export class ItemsService {
       const itemId = itemRows[0].item_id;
 
       if (dto.tipo === 'producto') {
+        const modo = dto.modoInventario ?? 'cantidad';
         await manager.query(
-          `INSERT INTO item_producto (item_id, stock, unidad_medida, fecha_elaboracion, fecha_vencimiento)
-           VALUES ($1,$2,$3,$4,$5)`,
+          `INSERT INTO item_producto
+             (item_id, stock, unidad_medida, fecha_elaboracion, fecha_vencimiento, modo_inventario)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
           [
             itemId,
-            '0', // el saldo se materializa vía el movimiento inventario_inicial
+            '0',
             dto.unidadMedida ?? 'unidad',
             dto.fechaElaboracion ?? null,
             dto.fechaVencimiento ?? null,
+            modo,
           ],
         );
 
-        const stockInicial = new Decimal(dto.stock ?? '0');
-        if (stockInicial.greaterThan(0)) {
+        if (modo === 'cantidad') {
+          const stockInicial = new Decimal(dto.stock ?? '0');
+          if (stockInicial.greaterThan(0)) {
+            await this.inventarioService.registrarMovimiento(manager, {
+              tenantId,
+              itemId,
+              usuarioId,
+              tipo: 'entrada',
+              motivo: 'inventario_inicial',
+              cantidad: stockInicial.toString(),
+              comentario: 'Stock inicial',
+            });
+          }
+        } else if (modo === 'serie' && dto.series?.length) {
           await this.inventarioService.registrarMovimiento(manager, {
             tenantId,
             itemId,
             usuarioId,
             tipo: 'entrada',
             motivo: 'inventario_inicial',
-            cantidad: stockInicial.toString(),
-            comentario: 'Stock inicial',
+            cantidad: dto.series.length.toString(),
+            comentario: 'Stock inicial (series)',
+            series: dto.series,
           });
+        } else if (modo === 'lote' && dto.lote && dto.stock) {
+          const stockInicial = new Decimal(dto.stock);
+          if (stockInicial.greaterThan(0)) {
+            await this.inventarioService.registrarMovimiento(manager, {
+              tenantId,
+              itemId,
+              usuarioId,
+              tipo: 'entrada',
+              motivo: 'inventario_inicial',
+              cantidad: stockInicial.toString(),
+              comentario: 'Stock inicial (lote)',
+              lote: dto.lote,
+            });
+          }
         }
       } else {
         await manager.query(
@@ -330,9 +363,27 @@ export class ItemsService {
       }
 
       if (tipo === 'producto') {
+        // Bloquear cambio de modoInventario si ya existen movimientos
+        if (dto.modoInventario !== undefined) {
+          const movRows: { cnt: string }[] = await manager.query(
+            `SELECT COUNT(*) AS cnt FROM movimientos_inventario
+             WHERE item_id = $1 AND eliminado_el IS NULL`,
+            [itemId],
+          );
+          if (parseInt(movRows[0].cnt) > 0) {
+            throw new BadRequestException(
+              'No se puede cambiar el modo de inventario de un producto con movimientos registrados',
+            );
+          }
+        }
+
         const prodClauses: string[] = [];
         const prodParams: unknown[] = [];
         let pidx = 1;
+        if (dto.modoInventario !== undefined) {
+          prodClauses.push(`modo_inventario = $${pidx++}`);
+          prodParams.push(dto.modoInventario);
+        }
         if (dto.stock !== undefined) {
           prodClauses.push(`stock = $${pidx++}`);
           prodParams.push(dto.stock);
@@ -453,10 +504,80 @@ export class ItemsService {
           motivo: dto.motivo,
           cantidad: new Decimal(dto.cantidad).toString(),
           comentario: dto.comentario ?? null,
+          series: dto.series,
+          unidadIds: dto.unidadIds,
+          lote: dto.lote,
+          loteId: dto.loteId,
         });
 
       return { stock: stockResultante };
     });
+  }
+
+  async findUnidades(tenantId: string, itemId: string, estado?: string) {
+    const rows: {
+      unidad_id: string;
+      serie: string;
+      estado: string;
+      condicion: string;
+      garantia_hasta: Date | null;
+      lote_id: string | null;
+      codigo_lote: string | null;
+      venta_id: string | null;
+      creado_el: Date;
+    }[] = await this.dataSource.query(
+      `SELECT
+         u.unidad_id, u.serie, u.estado, u.condicion, u.garantia_hasta,
+         u.lote_id, l.codigo_lote, u.venta_id, u.creado_el
+       FROM item_unidad u
+       LEFT JOIN item_lote l ON l.lote_id = u.lote_id AND l.eliminado_el IS NULL
+       WHERE u.item_id = $1 AND u.tenant_id = $2 AND u.eliminado_el IS NULL
+         ${estado ? 'AND u.estado = $3' : ''}
+       ORDER BY u.creado_el DESC`,
+      estado ? [itemId, tenantId, estado] : [itemId, tenantId],
+    );
+
+    return rows.map((r) => ({
+      id: r.unidad_id,
+      serie: r.serie,
+      estado: r.estado,
+      condicion: r.condicion,
+      garantiaHasta: r.garantia_hasta,
+      loteId: r.lote_id,
+      codigoLote: r.codigo_lote,
+      ventaId: r.venta_id,
+      creadoEl: r.creado_el,
+    }));
+  }
+
+  async findLotes(tenantId: string, itemId: string) {
+    const rows: {
+      lote_id: string;
+      codigo_lote: string;
+      fecha_elaboracion: Date | null;
+      fecha_vencimiento: Date | null;
+      cantidad_inicial: string;
+      cantidad_disponible: string;
+      creado_el: Date;
+    }[] = await this.dataSource.query(
+      `SELECT
+         lote_id, codigo_lote, fecha_elaboracion, fecha_vencimiento,
+         cantidad_inicial, cantidad_disponible, creado_el
+       FROM item_lote
+       WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+       ORDER BY creado_el DESC`,
+      [itemId, tenantId],
+    );
+
+    return rows.map((r) => ({
+      id: r.lote_id,
+      codigoLote: r.codigo_lote,
+      fechaElaboracion: r.fecha_elaboracion,
+      fechaVencimiento: r.fecha_vencimiento,
+      cantidadInicial: r.cantidad_inicial,
+      cantidadDisponible: r.cantidad_disponible,
+      creadoEl: r.creado_el,
+    }));
   }
 
   // ── private helpers ────────────────────────────────────────────────────────

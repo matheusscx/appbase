@@ -9,6 +9,9 @@ import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
 const USER_ID = 'user-uuid';
+const UNIDAD_1 = 'unidad-uuid-1';
+const UNIDAD_2 = 'unidad-uuid-2';
+const LOTE_ID = 'lote-uuid-1';
 
 describe('InventarioService', () => {
   let service: InventarioService;
@@ -30,12 +33,15 @@ describe('InventarioService', () => {
     service = module.get<InventarioService>(InventarioService);
   });
 
-  describe('registrarMovimiento', () => {
+  // ---------------------------------------------------------------------------
+  // Modo 'cantidad' (comportamiento original)
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — modo cantidad', () => {
     it('entrada: suma al stock y registra el movimiento', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '10' }]) // SELECT ... FOR UPDATE
+        .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce(undefined) // UPDATE item_producto
-        .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]); // INSERT
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]); // INSERT movimiento
 
       const res = await service.registrarMovimiento(
         managerMock as unknown as EntityManager,
@@ -54,13 +60,17 @@ describe('InventarioService', () => {
         stockAnterior: '10',
         stockResultante: '15',
       });
-      // UPDATE recibe el nuevo stock
-      expect(managerMock.query.mock.calls[1][1]).toEqual(['15', ITEM_ID]);
+      // La 2ª llamada es UPDATE item_producto con el nuevo saldo
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('UPDATE item_producto'),
+        ['15', ITEM_ID],
+      );
     });
 
     it('salida: resta del stock', async () => {
       managerMock.query
-        .mockResolvedValueOnce([{ stock: '10' }])
+        .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce([{ movimiento_id: 'mov-2' }]);
 
@@ -80,7 +90,9 @@ describe('InventarioService', () => {
     });
 
     it('salida con stock insuficiente lanza BadRequest', async () => {
-      managerMock.query.mockResolvedValueOnce([{ stock: '3' }]);
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '3', modo_inventario: 'cantidad' },
+      ]);
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -110,6 +122,190 @@ describe('InventarioService', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Modo 'serie'
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — modo serie', () => {
+    it('entrada serie: inserta unidades, recalcula stock y registra movimiento', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '0', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // INSERT unidad 1
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }]) // INSERT unidad 2
+        .mockResolvedValueOnce([{ cnt: '2' }]) // COUNT disponibles
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-s1' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined) // INSERT detalle 1
+        .mockResolvedValueOnce(undefined); // INSERT detalle 2
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'inventario_inicial',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          series: [
+            { serie: 'IMEI-001', condicion: 'nuevo' },
+            { serie: 'IMEI-002', condicion: 'nuevo' },
+          ],
+        },
+      );
+
+      expect(res.stockResultante).toBe('2');
+      expect(res.movimientoId).toBe('mov-s1');
+    });
+
+    it('entrada serie: lanza BadRequest si cantidad != series.length', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '0', modo_inventario: 'serie' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '3',
+          usuarioId: USER_ID,
+          series: [{ serie: 'IMEI-001' }, { serie: 'IMEI-002' }], // solo 2, pero cantidad=3
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('salida serie: cambia estado de unidades y recalcula stock', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '2', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([
+          { estado: 'disponible', item_id: ITEM_ID, tenant_id: TENANT },
+        ]) // SELECT unidad
+        .mockResolvedValueOnce(undefined) // UPDATE unidad
+        .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-s2' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          unidadIds: [UNIDAD_1],
+        },
+      );
+
+      expect(res.stockResultante).toBe('1');
+    });
+
+    it('salida serie: lanza BadRequest si unidad no está disponible', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '1', modo_inventario: 'serie' }])
+        .mockResolvedValueOnce([
+          { estado: 'vendido', item_id: ITEM_ID, tenant_id: TENANT },
+        ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '1',
+          usuarioId: USER_ID,
+          unidadIds: [UNIDAD_1],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Modo 'lote'
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — modo lote', () => {
+    it('entrada lote: crea lote nuevo y recalcula stock', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '0', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([]) // SELECT lote existente (no existe)
+        .mockResolvedValueOnce([{ lote_id: LOTE_ID }]) // INSERT lote
+        .mockResolvedValueOnce([{ total: '50' }]) // SUM cantidad_disponible
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-l1' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '50',
+          usuarioId: USER_ID,
+          lote: { codigoLote: 'LOTE-001', fechaVencimiento: '2027-01-01' },
+        },
+      );
+
+      expect(res.stockResultante).toBe('50');
+    });
+
+    it('salida lote: descuenta del lote y recalcula stock', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '50', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([
+          { cantidad_disponible: '50', tenant_id: TENANT },
+        ]) // SELECT lote FOR UPDATE
+        .mockResolvedValueOnce(undefined) // UPDATE lote
+        .mockResolvedValueOnce([{ total: '40' }]) // SUM
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-l2' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '10',
+          usuarioId: USER_ID,
+          loteId: LOTE_ID,
+        },
+      );
+
+      expect(res.stockResultante).toBe('40');
+    });
+
+    it('salida lote: lanza BadRequest si lote insuficiente', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '5', modo_inventario: 'lote' }])
+        .mockResolvedValueOnce([
+          { cantidad_disponible: '5', tenant_id: TENANT },
+        ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '10',
+          usuarioId: USER_ID,
+          loteId: LOTE_ID,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // findMovimientos
+  // ---------------------------------------------------------------------------
   describe('findMovimientos', () => {
     it('mapea filas snake_case a camelCase y filtra por item', async () => {
       dataSource.query.mockResolvedValue([
@@ -141,8 +337,11 @@ describe('InventarioService', () => {
         stockResultante: '15.0000',
         usuarioNombre: 'Admin',
       });
-      // tenantId siempre es el primer parámetro
-      expect(dataSource.query.mock.calls[0][1][0]).toBe(TENANT);
+      // tenantId siempre es el primer parámetro de la query
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('FROM movimientos_inventario'),
+        expect.arrayContaining([TENANT]),
+      );
     });
   });
 });

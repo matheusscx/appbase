@@ -1098,7 +1098,10 @@ export class SeederService implements OnApplicationBootstrap {
 
     for (const data of entries) {
       const exists = await this.descuentoMetodoPagoRepo.findOne({
-        where: { descuentoId: data.descuentoId, metodoPagoId: data.metodoPagoId },
+        where: {
+          descuentoId: data.descuentoId,
+          metodoPagoId: data.metodoPagoId,
+        },
       });
       if (!exists) {
         await this.descuentoMetodoPagoRepo.save(
@@ -1204,7 +1207,7 @@ export class SeederService implements OnApplicationBootstrap {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const CLP = '550e8400-e29b-41d4-a716-446655440003';
     const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
-    const IVA_19 = '550e8400-e29b-41d4-a716-446655440113';
+    const IVA_19 = '550e8400-e29b-41d4-a716-446655440112';
     const ITEM_SMARTPHONE = '550e8400-e29b-41d4-a716-446655440116';
     const ITEM_SOPORTE = '550e8400-e29b-41d4-a716-446655440117';
 
@@ -1282,6 +1285,136 @@ export class SeederService implements OnApplicationBootstrap {
       await this.dataSource.query(
         `INSERT INTO item_servicio (item_id, duracion_estimada, requiere_cita) VALUES ($1,$2,$3)`,
         [ITEM_SOPORTE, 60, true],
+      );
+    }
+
+    // Producto serializado (modo='serie'): iPhone 15 con 3 unidades por IMEI
+    const ITEM_IPHONE = '550e8400-e29b-41d4-a716-446655440137';
+    const MOV_IPHONE = '550e8400-e29b-41d4-a716-446655440138';
+    const UNIDAD_1 = '550e8400-e29b-41d4-a716-446655440139';
+    const UNIDAD_2 = '550e8400-e29b-41d4-a716-446655440140';
+    const UNIDAD_3 = '550e8400-e29b-41d4-a716-446655440141';
+
+    const existsIphone: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [ITEM_IPHONE],
+    );
+    if (!existsIphone.length) {
+      await this.dataSource.query(
+        `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
+                            precio_base, precio_incluye_impuesto, activo, tipo)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          ITEM_IPHONE,
+          PARIS,
+          CLP,
+          ELECTRONICA,
+          'iPhone 15 128GB Negro',
+          'Smartphone Apple iPhone 15 con 128GB de almacenamiento, color negro',
+          '999000',
+          false,
+          true,
+          'producto',
+        ],
+      );
+      await this.dataSource.query(
+        `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
+         VALUES ($1,'3','unidad','serie')`,
+        [ITEM_IPHONE],
+      );
+      await this.dataSource.query(
+        `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+        [ITEM_IPHONE, IVA_19],
+      );
+
+      // Insertar 3 unidades con IMEI distintos
+      const imeis = [
+        { id: UNIDAD_1, serie: '352099001761481' },
+        { id: UNIDAD_2, serie: '352099001761482' },
+        { id: UNIDAD_3, serie: '352099001761483' },
+      ];
+      for (const u of imeis) {
+        await this.dataSource.query(
+          `INSERT INTO item_unidad
+             (unidad_id, tenant_id, item_id, serie, estado, condicion)
+           VALUES ($1,$2,$3,$4,'disponible','nuevo')`,
+          [u.id, PARIS, ITEM_IPHONE, u.serie],
+        );
+      }
+
+      // Movimiento kardex + detalle
+      await this.dataSource.query(
+        `INSERT INTO movimientos_inventario
+           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
+            stock_anterior, stock_resultante, comentario)
+         VALUES ($1,$2,$3,'entrada','inventario_inicial','3','0','3','Stock inicial (seed serie)')`,
+        [MOV_IPHONE, PARIS, ITEM_IPHONE],
+      );
+      for (const u of imeis) {
+        await this.dataSource.query(
+          `INSERT INTO movimiento_inventario_detalle
+             (movimiento_id, unidad_id, cantidad)
+           VALUES ($1,$2,'1')`,
+          [MOV_IPHONE, u.id],
+        );
+      }
+    }
+
+    // Producto por lote (modo='lote'): Paracetamol 500mg
+    const ITEM_PARACETAMOL = '550e8400-e29b-41d4-a716-446655440142';
+    const LOTE_1 = '550e8400-e29b-41d4-a716-446655440143';
+    const MOV_PARACETAMOL = '550e8400-e29b-41d4-a716-446655440144';
+
+    const existsParacetamol: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [ITEM_PARACETAMOL],
+    );
+    if (!existsParacetamol.length) {
+      await this.dataSource.query(
+        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion,
+                            precio_base, precio_incluye_impuesto, activo, tipo)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          ITEM_PARACETAMOL,
+          PARIS,
+          CLP,
+          'Paracetamol 500mg',
+          'Analgésico y antipirético, comprimidos de 500mg',
+          '1500',
+          false,
+          true,
+          'producto',
+        ],
+      );
+      await this.dataSource.query(
+        `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
+         VALUES ($1,'100','comprimido','lote')`,
+        [ITEM_PARACETAMOL],
+      );
+
+      // Crear lote con vencimiento
+      await this.dataSource.query(
+        `INSERT INTO item_lote
+           (lote_id, tenant_id, item_id, codigo_lote,
+            fecha_elaboracion, fecha_vencimiento,
+            cantidad_inicial, cantidad_disponible)
+         VALUES ($1,$2,$3,'LOTE-2025-001','2025-01-01','2027-01-01','100','100')`,
+        [LOTE_1, PARIS, ITEM_PARACETAMOL],
+      );
+
+      // Movimiento kardex + detalle
+      await this.dataSource.query(
+        `INSERT INTO movimientos_inventario
+           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
+            stock_anterior, stock_resultante, comentario)
+         VALUES ($1,$2,$3,'entrada','inventario_inicial','100','0','100','Stock inicial (seed lote)')`,
+        [MOV_PARACETAMOL, PARIS, ITEM_PARACETAMOL],
+      );
+      await this.dataSource.query(
+        `INSERT INTO movimiento_inventario_detalle
+           (movimiento_id, lote_id, cantidad)
+         VALUES ($1,$2,'100')`,
+        [MOV_PARACETAMOL, LOTE_1],
       );
     }
   }

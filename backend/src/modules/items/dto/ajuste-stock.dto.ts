@@ -1,4 +1,15 @@
-import { IsIn, IsNumber, Min, IsOptional, IsString } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  Min,
+  IsOptional,
+  IsString,
+  IsArray,
+  IsUUID,
+  ValidateNested,
+  IsDateString,
+  IsNotEmpty,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 const MOTIVOS = [
@@ -8,6 +19,38 @@ const MOTIVOS = [
   'ajuste_manual',
   'inventario_inicial',
 ];
+
+export class SerieAjusteInputDto {
+  @IsString()
+  @IsNotEmpty()
+  serie: string;
+
+  @IsIn(['nuevo', 'usado', 'reacondicionado'])
+  @IsOptional()
+  condicion?: string;
+
+  @IsDateString()
+  @IsOptional()
+  garantiaHasta?: string;
+
+  @IsUUID()
+  @IsOptional()
+  loteId?: string;
+}
+
+export class LoteAjusteInputDto {
+  @IsString()
+  @IsNotEmpty()
+  codigoLote: string;
+
+  @IsDateString()
+  @IsOptional()
+  fechaElaboracion?: string;
+
+  @IsDateString()
+  @IsOptional()
+  fechaVencimiento?: string;
+}
 
 export class AjusteStockDto {
   @IsNumber()
@@ -24,4 +67,28 @@ export class AjusteStockDto {
   @IsOptional()
   @IsString()
   comentario?: string;
+
+  // Modo 'serie' — entrada: series a registrar
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SerieAjusteInputDto)
+  @IsOptional()
+  series?: SerieAjusteInputDto[];
+
+  // Modo 'serie' — salida: IDs de unidades a consumir
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @IsOptional()
+  unidadIds?: string[];
+
+  // Modo 'lote' — entrada: datos del lote a crear/agregar
+  @ValidateNested()
+  @Type(() => LoteAjusteInputDto)
+  @IsOptional()
+  lote?: LoteAjusteInputDto;
+
+  // Modo 'lote' — salida: lote a descontar
+  @IsUUID()
+  @IsOptional()
+  loteId?: string;
 }

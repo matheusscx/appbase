@@ -266,13 +266,23 @@ export class RecargosService {
     const tiposConTramos = ['por_mayor', 'por_monto_venta'];
     const tiposConMetodos = ['recargo_metodo_pago'];
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
-    const tiposConValorUnico = ['general', 'mora', 'recargo_metodo_pago', 'interes_simple', 'interes_compuesto'];
+    const tiposConValorUnico = [
+      'general',
+      'mora',
+      'recargo_metodo_pago',
+      'interes_simple',
+      'interes_compuesto',
+    ];
 
     if (tiposConTramos.includes(codigo) && !dto.tramos?.length)
       throw new BadRequestException('Este tipo requiere al menos un tramo');
     if (tiposConMetodos.includes(codigo) && !dto.metodoPagoIds?.length)
       throw new BadRequestException('Selecciona al menos un método de pago');
-    if (tiposFijoPorcentaje.includes(codigo) && dto.modo && dto.modo !== 'porcentaje')
+    if (
+      tiposFijoPorcentaje.includes(codigo) &&
+      dto.modo &&
+      dto.modo !== 'porcentaje'
+    )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
     if (tiposConValorUnico.includes(codigo)) {
       if (!dto.valor)
@@ -281,8 +291,14 @@ export class RecargosService {
     }
     if (codigo === 'mora' && dto.diasVencimiento == null)
       throw new BadRequestException('Días de vencimiento requerido');
-    if (codigo === 'mora' && dto.diasVencimiento != null && (dto.diasVencimiento < 0 || dto.diasVencimiento > 365))
-      throw new BadRequestException('Días de vencimiento debe estar entre 0 y 365');
+    if (
+      codigo === 'mora' &&
+      dto.diasVencimiento != null &&
+      (dto.diasVencimiento < 0 || dto.diasVencimiento > 365)
+    )
+      throw new BadRequestException(
+        'Días de vencimiento debe estar entre 0 y 365',
+      );
   }
 
   // Called from update() — only validate fields explicitly present in the DTO
@@ -293,12 +309,22 @@ export class RecargosService {
       throw new BadRequestException('Este tipo requiere al menos un tramo');
     if (dto.metodoPagoIds !== undefined && !dto.metodoPagoIds.length)
       throw new BadRequestException('Selecciona al menos un método de pago');
-    if (dto.modo !== undefined && tiposFijoPorcentaje.includes(codigo) && dto.modo !== 'porcentaje')
+    if (
+      dto.modo !== undefined &&
+      tiposFijoPorcentaje.includes(codigo) &&
+      dto.modo !== 'porcentaje'
+    )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
     if (dto.valor !== undefined && dto.valor)
       this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
-    if (dto.diasVencimiento !== undefined && codigo === 'mora' && (dto.diasVencimiento < 0 || dto.diasVencimiento > 365))
-      throw new BadRequestException('Días de vencimiento debe estar entre 0 y 365');
+    if (
+      dto.diasVencimiento !== undefined &&
+      codigo === 'mora' &&
+      (dto.diasVencimiento < 0 || dto.diasVencimiento > 365)
+    )
+      throw new BadRequestException(
+        'Días de vencimiento debe estar entre 0 y 365',
+      );
   }
 
   private derivarCondicionTipo(codigo: string): CondicionTipo {
