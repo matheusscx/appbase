@@ -8,6 +8,7 @@ export interface TipoConfig {
   campoTramos: boolean
   labelTramos?: string
   campoDias: boolean
+  labelDias?: string
   diasMin: number
   diasMax: number
   campoFechaInicio: boolean
@@ -17,7 +18,7 @@ export interface TipoConfig {
 
 export const DESCUENTO_CONFIG: Record<string, TipoConfig> = {
   metodo_pago:     { modo: 'libre',      campoValor: true,  campoMetodos: true,  campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
-  pronto_pago:     { modo: 'porcentaje', campoValor: true,  campoMetodos: false, campoTramos: false, campoDias: true,  diasMin: 1, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
+  pronto_pago:     { modo: 'porcentaje', campoValor: true,  campoMetodos: false, campoTramos: false, campoDias: true,  labelDias: 'Días antes del vencimiento', diasMin: 1, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
   por_mayor:       { modo: 'libre',      campoValor: false, campoMetodos: false, campoTramos: true,  labelTramos: 'Cantidad mínima', campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: false, campoFechaFin: false, fechasRequeridas: false },
   por_monto_venta: { modo: 'libre',      campoValor: false, campoMetodos: false, campoTramos: true,  labelTramos: 'Monto mínimo',    campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: true,  campoFechaFin: true,  fechasRequeridas: false },
   promocional:     { modo: 'libre',      campoValor: true,  campoMetodos: false, campoTramos: false, campoDias: false, diasMin: 0, diasMax: 9999, campoFechaInicio: true,  campoFechaFin: true,  fechasRequeridas: true  },

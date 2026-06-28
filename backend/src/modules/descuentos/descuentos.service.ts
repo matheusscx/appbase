@@ -285,10 +285,12 @@ export class DescuentosService {
         throw new BadRequestException('El valor es requerido para este tipo');
       this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
     }
-    if ((codigo === 'pronto_pago' || codigo === 'mora') && dto.diasVencimiento == null)
+    if (codigo === 'pronto_pago' && dto.diasVencimiento == null)
+      throw new BadRequestException('Días antes del vencimiento requerido');
+    if (codigo === 'mora' && dto.diasVencimiento == null)
       throw new BadRequestException('Días de vencimiento requerido');
     if (codigo === 'pronto_pago' && dto.diasVencimiento != null && dto.diasVencimiento <= 0)
-      throw new BadRequestException('Días de vencimiento debe ser mayor a 0 para pronto pago');
+      throw new BadRequestException('Días antes del vencimiento debe ser mayor a 0');
     if (codigo === 'mora' && dto.diasVencimiento != null && (dto.diasVencimiento < 0 || dto.diasVencimiento > 365))
       throw new BadRequestException('Días de vencimiento debe estar entre 0 y 365');
     if (codigo === 'promocional' && (!dto.fechaInicio || !dto.fechaFin))
@@ -308,7 +310,7 @@ export class DescuentosService {
     if (dto.valor !== undefined && dto.valor)
       this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
     if (dto.diasVencimiento !== undefined && codigo === 'pronto_pago' && dto.diasVencimiento <= 0)
-      throw new BadRequestException('Días de vencimiento debe ser mayor a 0 para pronto pago');
+      throw new BadRequestException('Días antes del vencimiento debe ser mayor a 0');
     if (dto.diasVencimiento !== undefined && codigo === 'mora' && (dto.diasVencimiento < 0 || dto.diasVencimiento > 365))
       throw new BadRequestException('Días de vencimiento debe estar entre 0 y 365');
     if ((dto.fechaInicio !== undefined || dto.fechaFin !== undefined) && codigo === 'promocional' && (!dto.fechaInicio || !dto.fechaFin))

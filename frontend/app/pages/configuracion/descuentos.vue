@@ -366,7 +366,7 @@ onMounted(() => {
           <template v-if="config">
             <!-- Modo — only when libre -->
             <UFormField v-if="config.modo === 'libre'" label="Modo" required>
-              <USelectMenu v-model="form.modo" :items="modoOptions" value-key="value" label-key="label" />
+              <URadioGroup v-model="form.modo" :items="modoOptions" orientation="horizontal" />
             </UFormField>
 
             <!-- Valor — when campoValor -->
@@ -394,7 +394,7 @@ onMounted(() => {
             </UFormField>
 
             <!-- Días de vencimiento — when campoDias -->
-            <UFormField v-if="config.campoDias" label="Días de vencimiento" required>
+            <UFormField v-if="config.campoDias" :label="config.labelDias ?? 'Días de vencimiento'" required>
               <UInput
                 v-model.number="form.diasVencimiento"
                 type="number"
@@ -446,12 +446,14 @@ onMounted(() => {
             </div>
 
             <!-- Fechas -->
-            <UFormField v-if="config.campoFechaInicio" label="Fecha inicio" :required="config.fechasRequeridas">
-              <UInput v-model="form.fechaInicio" type="date" />
-            </UFormField>
-            <UFormField v-if="config.campoFechaFin" label="Fecha fin" :required="config.fechasRequeridas">
-              <UInput v-model="form.fechaFin" type="date" />
-            </UFormField>
+            <div v-if="config.campoFechaInicio || config.campoFechaFin" class="grid grid-cols-2 gap-4">
+              <UFormField v-if="config.campoFechaInicio" label="Fecha inicio" :required="config.fechasRequeridas">
+                <UInput :model-value="form.fechaInicio ?? undefined" type="date" class="w-full" @update:model-value="form.fechaInicio = $event || null" />
+              </UFormField>
+              <UFormField v-if="config.campoFechaFin" label="Fecha fin" :required="config.fechasRequeridas">
+                <UInput :model-value="form.fechaFin ?? undefined" type="date" class="w-full" @update:model-value="form.fechaFin = $event || null" />
+              </UFormField>
+            </div>
           </template>
 
           <!-- Activo -->
