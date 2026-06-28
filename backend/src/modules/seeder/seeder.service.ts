@@ -738,7 +738,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'descuento',
         codigo: 'pronto_pago',
         nombre: 'Pronto pago',
-        descripcion: 'Descuento por pago anticipado o al contado',
+        descripcion:
+          'Descuento por pago anticipado. Se aplica como porcentaje sobre el precio neto cuando el cliente paga al contado o dentro de los días de vencimiento configurados.',
         activo: true,
       },
       {
@@ -746,7 +747,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'descuento',
         codigo: 'por_mayor',
         nombre: 'Al por mayor',
-        descripcion: 'Descuento por compra de grandes volúmenes',
+        descripcion:
+          'Descuento por volumen. Se define por tramos de cantidad mínima: a mayor cantidad de unidades, mayor descuento según el tramo alcanzado.',
         activo: true,
       },
       {
@@ -754,7 +756,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'recargo',
         codigo: 'interes_simple',
         nombre: 'Interés simple',
-        descripcion: 'Recargo por cuotas con interés simple',
+        descripcion:
+          'Recargo por financiamiento sin capitalización. Aplica una tasa mensual fija sobre el monto original; el interés no se acumula sobre intereses previos.',
         activo: true,
       },
       {
@@ -762,7 +765,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'recargo',
         codigo: 'interes_compuesto',
         nombre: 'Interés compuesto',
-        descripcion: 'Recargo por cuotas con interés compuesto',
+        descripcion:
+          'Recargo por financiamiento con capitalización. La tasa mensual se aplica sobre el saldo acumulado, generando intereses sobre intereses.',
         activo: true,
       },
       {
@@ -770,7 +774,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'descuento',
         codigo: 'metodo_pago',
         nombre: 'Por método de pago',
-        descripcion: null,
+        descripcion:
+          'Descuento condicionado al medio de pago. Se aplica solo cuando el cliente paga con alguno de los métodos seleccionados (ej. efectivo o transferencia).',
         activo: true,
       },
       {
@@ -778,7 +783,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'descuento',
         codigo: 'por_monto_venta',
         nombre: 'Por monto de venta',
-        descripcion: null,
+        descripcion:
+          'Descuento por monto de la venta. Se define por tramos de monto mínimo: al superar cierto total se aplica el descuento del tramo. Puede limitarse a un rango de fechas.',
         activo: true,
       },
       {
@@ -786,7 +792,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'descuento',
         codigo: 'promocional',
         nombre: 'Promocional',
-        descripcion: null,
+        descripcion:
+          'Descuento de campaña con vigencia obligatoria. Se aplica únicamente entre la fecha de inicio y fin definidas.',
         activo: true,
       },
       {
@@ -794,7 +801,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'recargo',
         codigo: 'general',
         nombre: 'Recargo general',
-        descripcion: null,
+        descripcion:
+          'Recargo de propósito general. Suma un porcentaje o monto fijo al total, sin condiciones especiales.',
         activo: true,
       },
       {
@@ -802,7 +810,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'recargo',
         codigo: 'mora',
         nombre: 'Mora por atraso',
-        descripcion: null,
+        descripcion:
+          'Recargo por pago atrasado. Se aplica cuando el pago se realiza después de los días de vencimiento configurados.',
         activo: true,
       },
       {
@@ -810,7 +819,8 @@ export class SeederService implements OnApplicationBootstrap {
         clase: 'recargo',
         codigo: 'recargo_metodo_pago',
         nombre: 'Por método de pago',
-        descripcion: null,
+        descripcion:
+          'Recargo condicionado al medio de pago. Se suma solo cuando el cliente paga con alguno de los métodos seleccionados (ej. tarjeta de crédito).',
         activo: true,
       },
     ];
@@ -819,7 +829,12 @@ export class SeederService implements OnApplicationBootstrap {
       const exists = await this.tipoReglaRepo.findOne({
         where: { codigo: data.codigo },
       });
-      if (!exists) {
+      if (exists) {
+        await this.tipoReglaRepo.update(exists.id, {
+          nombre: data.nombre,
+          descripcion: data.descripcion,
+        });
+      } else {
         await this.tipoReglaRepo.save(this.tipoReglaRepo.create(data));
       }
     }

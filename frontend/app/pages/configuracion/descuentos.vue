@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DESCUENTO_CONFIG, type TipoConfig } from '~/utils/reglas-form-config'
 
-interface TipoRegla { id: string; nombre: string; codigo: string }
+interface TipoRegla { id: string; nombre: string; codigo: string; descripcion: string | null }
 
 interface Regla {
   id: string
@@ -23,7 +23,7 @@ const toast = useToast()
 const apiUrl = runtimeConfig.public.apiUrl
 
 const descuentos = ref<Regla[]>([])
-const tipos = ref<{ label: string; value: string; codigo: string }[]>([])
+const tipos = ref<{ label: string; value: string; codigo: string; descripcion: string | null }[]>([])
 const metodos = ref<{ label: string; value: string }[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -89,7 +89,7 @@ async function cargar() {
 async function cargarTipos() {
   try {
     const data = await useApiFetch<TipoRegla[]>(`${apiUrl}/tipos-regla?clase=descuento`)
-    tipos.value = data.map(t => ({ label: t.nombre, value: t.id, codigo: t.codigo }))
+    tipos.value = data.map(t => ({ label: t.nombre, value: t.id, codigo: t.codigo, descripcion: t.descripcion ?? null }))
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cargar tipos de descuento')
@@ -345,7 +345,19 @@ onMounted(() => {
           </UFormField>
 
           <!-- Tipo (always visible) -->
-          <UFormField label="Tipo" required>
+          <UFormField required>
+            <template #label>
+              <span class="flex items-center gap-1">
+                Tipo
+                <UTooltip
+                  v-if="tipoSeleccionado?.descripcion"
+                  :text="tipoSeleccionado.descripcion"
+                  :ui="{ content: 'max-w-xs text-wrap' }"
+                >
+                  <UIcon name="i-heroicons-question-mark-circle" class="size-4 text-gray-400 cursor-help" />
+                </UTooltip>
+              </span>
+            </template>
             <USelectMenu
               :model-value="form.tipoReglaId"
               :items="tipos"
