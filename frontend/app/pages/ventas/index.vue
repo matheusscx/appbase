@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useVenta, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
+import Decimal from 'decimal.js'
+import type { DropdownMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -29,9 +31,56 @@ const customer = ref<CustomerForm>({ nombre: '', rut: '', direccion: '', telefon
 
 const cobroOpen = ref(false)
 const submitting = ref(false)
+const movimientoModalOpen = ref(false)
+const cierreModalOpen = ref(false)
+
+function abrirMovimientoModal() { movimientoModalOpen.value = true }
+function abrirCierreModal() { cierreModalOpen.value = true }
 
 const tieneCaja = computed(() => cajaStore.activa !== null)
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
+
+const saldoEsperado = computed(() => {
+  if (!cajaStore.activa) return new Decimal(0)
+  const entradas = cajaStore.movimientos
+    .filter(m => m.tipo === 'entrada')
+    .reduce((acc, m) => acc.plus(new Decimal(m.monto)), new Decimal(0))
+  const salidas = cajaStore.movimientos
+    .filter(m => m.tipo === 'salida')
+    .reduce((acc, m) => acc.plus(new Decimal(m.monto)), new Decimal(0))
+  return new Decimal(cajaStore.activa.saldoInicial).plus(entradas).minus(salidas)
+})
+
+const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [
+  [
+    {
+      label: 'Registrar movimiento',
+      icon: 'i-heroicons-plus-circle',
+      onSelect: abrirMovimientoModal,
+    },
+    {
+      label: 'Cerrar caja',
+      icon: 'i-heroicons-lock-closed',
+      color: 'error' as const,
+      onSelect: abrirCierreModal,
+    },
+  ],
+])
+
+watch(
+  () => cajaStore.activa,
+  async (activa) => {
+    if (activa) {
+      try {
+        await cajaStore.cargarMovimientos(activa.id)
+      }
+      catch {
+        // no crítico — saldoEsperado quedará en saldoInicial si falla
+      }
+    }
+  },
+  { immediate: true },
+)
 
 async function cargar() {
   loadingCatalogo.value = true
@@ -96,15 +145,23 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Punto de venta" />
+      <AppNavbar title="Punto de venta">
+        <template #right>
+          <div v-if="tieneCaja" class="flex items-center gap-2 mr-2">
+            <UDropdownMenu :items="cajaMenuItems">
+              <UButton variant="soft" color="success" size="sm" icon="i-heroicons-banknotes">
+                Caja abierta
+              </UButton>
+            </UDropdownMenu>
+          </div>
+          <UserMenu />
+        </template>
+      </AppNavbar>
     </template>
 
     <template #body>
-      <div v-if="!cajaStore.loadingActiva && !tieneCaja" class="max-w-md mx-auto text-center py-16">
-        <UIcon name="i-heroicons-lock-closed" class="w-12 h-12 text-muted mx-auto mb-4" />
-        <h2 class="text-lg font-semibold text-default mb-1">Necesitás una caja abierta</h2>
-        <p class="text-sm text-muted mb-4">Abrí una caja para registrar ventas del canal físico.</p>
-        <UButton label="Ir a caja" icon="i-heroicons-banknotes" to="/caja" />
+      <div v-if="!cajaStore.loadingActiva && !tieneCaja" class="max-w-md mx-auto py-12">
+        <CajaAperturaForm />
       </div>
 
       <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full p-4">
@@ -133,6 +190,17 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         :metodos="metodos"
         :submitting="submitting"
         @confirmar="confirmarCobro"
+      />
+      <CajaMovimientoModal
+        v-if="cajaStore.activa"
+        v-model:open="movimientoModalOpen"
+        :caja-id="cajaStore.activa.id"
+      />
+      <CajaCierreModal
+        v-if="cajaStore.activa"
+        v-model:open="cierreModalOpen"
+        :caja-id="cajaStore.activa.id"
+        :saldo-esperado="saldoEsperado"
       />
     </template>
   </UDashboardPanel>
