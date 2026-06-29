@@ -64,7 +64,8 @@
       "Bash(docker compose *)",
       "Bash(psql --version)",
       "mcp__ide__getDiagnostics",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(grep -nA30 \"userHasPermiso\" backend/src/modules/rbac/rbac.service.ts)"
     ]
   },
   "enabledMcpjsonServers": [
