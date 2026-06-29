@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -166,6 +167,43 @@ export class CajaService {
 
       return manager.save(MovimientoCaja, movimiento);
     });
+  }
+
+  async historial(
+    tenantId: string,
+    usuarioId: string,
+    todas: boolean,
+  ): Promise<Caja[]> {
+    const where: Record<string, unknown> = {
+      tenantId,
+      tipo: 'fisica',
+      eliminadoEl: IsNull(),
+    };
+    if (!todas) {
+      where.usuarioId = usuarioId;
+    }
+    return this.cajaRepo.find({
+      where,
+      order: { fechaApertura: 'DESC' },
+    });
+  }
+
+  async findOne(
+    tenantId: string,
+    usuarioId: string,
+    cajaId: string,
+    tieneVerTodas: boolean,
+  ): Promise<Caja> {
+    const caja = await this.cajaRepo.findOne({
+      where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
+    });
+    if (!caja) {
+      throw new NotFoundException('Caja no encontrada');
+    }
+    if (caja.usuarioId !== usuarioId && !tieneVerTodas) {
+      throw new ForbiddenException('No tienes acceso a esta caja');
+    }
+    return caja;
   }
 
   async listarMovimientos(

@@ -4,16 +4,18 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
+import { RbacService } from '../rbac/rbac.service';
 import { CajaService } from './caja.service';
 import { AbrirCajaDto } from './dto/abrir-caja.dto';
 import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
@@ -24,13 +26,46 @@ import { CerrarCajaDto } from './dto/cerrar-caja.dto';
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('caja')
 export class CajaController {
-  constructor(private readonly cajaService: CajaService) {}
+  constructor(
+    private readonly cajaService: CajaService,
+    private readonly rbacService: RbacService,
+  ) {}
+
+  @Get()
+  @RequiresPermiso('Caja', 'Leer')
+  @ApiQuery({ name: 'todas', required: false, type: String })
+  async historial(@Req() req: Request, @Query('todas') todas?: string) {
+    const u = req.user as JwtUser;
+    let tieneVerTodas = false;
+    if (todas === 'true') {
+      tieneVerTodas = await this.rbacService.userHasPermiso(
+        u.id,
+        u.tenantId!,
+        'Caja',
+        'Ver todas',
+      );
+    }
+    return this.cajaService.historial(u.tenantId!, u.id, tieneVerTodas);
+  }
 
   @Get('activa')
   @RequiresPermiso('Caja', 'Leer')
   activa(@Req() req: Request) {
     const u = req.user as JwtUser;
     return this.cajaService.findActiva(u.tenantId!, u.id);
+  }
+
+  @Get(':id')
+  @RequiresPermiso('Caja', 'Leer')
+  async detalle(@Req() req: Request, @Param('id') cajaId: string) {
+    const u = req.user as JwtUser;
+    const tieneVerTodas = await this.rbacService.userHasPermiso(
+      u.id,
+      u.tenantId!,
+      'Caja',
+      'Ver todas',
+    );
+    return this.cajaService.findOne(u.tenantId!, u.id, cajaId, tieneVerTodas);
   }
 
   @Post('abrir')

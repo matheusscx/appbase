@@ -3,6 +3,7 @@ import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import {
   ConflictException,
   ForbiddenException,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { IsNull } from 'typeorm';
@@ -32,6 +33,7 @@ describe('CajaService', () => {
   let service: CajaService;
   let cajaRepo: {
     findOne: jest.Mock;
+    find: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
   };
@@ -49,6 +51,7 @@ describe('CajaService', () => {
   beforeEach(async () => {
     cajaRepo = {
       findOne: jest.fn(),
+      find: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
     };
@@ -340,6 +343,93 @@ describe('CajaService', () => {
       await expect(
         service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('historial', () => {
+    it('(a) todas=false: retorna solo cajas del usuario con tipo fisica', async () => {
+      const cajas = [mockCajaAbierta];
+      cajaRepo.find.mockResolvedValue(cajas);
+
+      const result = await service.historial(TENANT_ID, USUARIO_ID, false);
+
+      expect(cajaRepo.find).toHaveBeenCalledWith({
+        where: {
+          tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
+          tipo: 'fisica',
+          eliminadoEl: IsNull(),
+        },
+        order: { fechaApertura: 'DESC' },
+      });
+      expect(result).toEqual(cajas);
+    });
+
+    it('(b) todas=true: retorna todas las cajas del tenant con tipo fisica', async () => {
+      const cajaOtro = { ...mockCajaAbierta, usuarioId: OTRO_USUARIO };
+      const cajas = [mockCajaAbierta, cajaOtro];
+      cajaRepo.find.mockResolvedValue(cajas);
+
+      const result = await service.historial(TENANT_ID, USUARIO_ID, true);
+
+      expect(cajaRepo.find).toHaveBeenCalledWith({
+        where: {
+          tenantId: TENANT_ID,
+          tipo: 'fisica',
+          eliminadoEl: IsNull(),
+        },
+        order: { fechaApertura: 'DESC' },
+      });
+      expect(result).toEqual(cajas);
+    });
+  });
+
+  describe('findOne', () => {
+    it('(c) retorna la caja cuando es del usuario', async () => {
+      cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
+
+      const result = await service.findOne(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+      );
+
+      expect(cajaRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CAJA_ID, tenantId: TENANT_ID, eliminadoEl: IsNull() },
+      });
+      expect(result).toEqual(mockCajaAbierta);
+    });
+
+    it('(d) retorna la caja cuando tieneVerTodas=true aunque sea de otro usuario', async () => {
+      const cajaOtro = { ...mockCajaAbierta, usuarioId: OTRO_USUARIO };
+      cajaRepo.findOne.mockResolvedValue(cajaOtro);
+
+      const result = await service.findOne(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        true,
+      );
+
+      expect(result).toEqual(cajaOtro);
+    });
+
+    it('(e) lanza ForbiddenException cuando no es del usuario y tieneVerTodas=false', async () => {
+      const cajaOtro = { ...mockCajaAbierta, usuarioId: OTRO_USUARIO };
+      cajaRepo.findOne.mockResolvedValue(cajaOtro);
+
+      await expect(
+        service.findOne(TENANT_ID, USUARIO_ID, CAJA_ID, false),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('(f) lanza NotFoundException si no existe la caja', async () => {
+      cajaRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.findOne(TENANT_ID, USUARIO_ID, CAJA_ID, false),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
