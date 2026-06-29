@@ -29,7 +29,7 @@ const filtrados = computed(() => {
       No hay ítems para mostrar.
     </div>
 
-    <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto">
+    <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto p-1">
       <UCard
         v-for="item in filtrados"
         :key="item.id"
