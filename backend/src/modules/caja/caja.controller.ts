@@ -17,6 +17,7 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { CajaService } from './caja.service';
 import { AbrirCajaDto } from './dto/abrir-caja.dto';
 import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
+import { CerrarCajaDto } from './dto/cerrar-caja.dto';
 
 @ApiTags('caja')
 @ApiBearerAuth()
@@ -48,6 +49,17 @@ export class CajaController {
   ) {
     const u = req.user as JwtUser;
     return this.cajaService.registrarMovimiento(u.tenantId!, u.id, cajaId, dto);
+  }
+
+  @Post(':id/cerrar')
+  @RequiresPermiso('Caja', 'Actualizar')
+  cerrar(
+    @Req() req: Request,
+    @Param('id') cajaId: string,
+    @Body() dto: CerrarCajaDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.cajaService.cerrar(u.tenantId!, u.id, cajaId, dto);
   }
 
   @Get(':id/movimientos')

@@ -11,6 +11,7 @@ import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
+import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 
 @Injectable()
 export class CajaService {
@@ -82,6 +83,44 @@ export class CajaService {
     const entradas = new Decimal(row?.total_entradas ?? '0');
     const salidas = new Decimal(row?.total_salidas ?? '0');
     return saldoInicial.plus(entradas).minus(salidas).toFixed(4);
+  }
+
+  async cerrar(
+    tenantId: string,
+    usuarioId: string,
+    cajaId: string,
+    dto: CerrarCajaDto,
+  ): Promise<Caja> {
+    return this.dataSource.transaction(async (manager) => {
+      const caja = await manager.findOne(Caja, {
+        where: {
+          id: cajaId,
+          tenantId,
+          estado: 'abierta',
+          eliminadoEl: IsNull(),
+        },
+      });
+
+      if (!caja) {
+        throw new ForbiddenException('Caja no encontrada o no está abierta');
+      }
+
+      if (caja.usuarioId !== usuarioId) {
+        throw new ForbiddenException('No tienes acceso a esta caja');
+      }
+
+      const saldoEsperado = await this.calcularSaldoEsperado(cajaId, manager);
+      const diferencia = new Decimal(dto.montoContado).minus(saldoEsperado);
+
+      caja.saldoFinal = saldoEsperado;
+      caja.montoContado = dto.montoContado;
+      caja.diferencia = diferencia.toFixed(4);
+      caja.fechaCierre = new Date();
+      caja.estado = 'cerrada';
+      caja.comentario = dto.comentario ?? null;
+
+      return manager.save(Caja, caja);
+    });
   }
 
   async registrarMovimiento(

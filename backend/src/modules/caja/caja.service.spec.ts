@@ -11,6 +11,7 @@ import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
+import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 
 const TENANT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
 const USUARIO_ID = 'bbbbbbbb-0000-0000-0000-000000000002';
@@ -239,6 +240,105 @@ describe('CajaService', () => {
 
       await expect(
         service.registrarMovimiento(TENANT_ID, USUARIO_ID, CAJA_ID, dtoEntrada),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('cerrar', () => {
+    const dto: CerrarCajaDto = {
+      montoContado: '1200',
+      comentario: 'Cierre diario',
+    };
+
+    beforeEach(() => {
+      // Mock calcularSaldoEsperado so cerrar tests don't depend on query internals
+      jest
+        .spyOn(service, 'calcularSaldoEsperado')
+        .mockResolvedValue('1000.0000');
+    });
+
+    it('(a) cuadre exacto: diferencia = "0.0000"', async () => {
+      managerMock.findOne.mockResolvedValue({ ...mockCajaAbierta });
+      jest
+        .spyOn(service, 'calcularSaldoEsperado')
+        .mockResolvedValue('1200.0000');
+      managerMock.save.mockImplementation((_entity: unknown, data: unknown) =>
+        Promise.resolve(data),
+      );
+
+      const dtoExacto: CerrarCajaDto = { montoContado: '1200.0000' };
+      const result = await service.cerrar(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoExacto,
+      );
+
+      expect(result.diferencia).toBe('0.0000');
+      expect(result.estado).toBe('cerrada');
+      expect(result.saldoFinal).toBe('1200.0000');
+      expect(result.fechaCierre).toBeInstanceOf(Date);
+    });
+
+    it('(b) sobrante: monto contado > saldo esperado → diferencia positiva', async () => {
+      managerMock.findOne.mockResolvedValue({ ...mockCajaAbierta });
+      jest
+        .spyOn(service, 'calcularSaldoEsperado')
+        .mockResolvedValue('1000.0000');
+      managerMock.save.mockImplementation((_entity: unknown, data: unknown) =>
+        Promise.resolve(data),
+      );
+
+      const dtoSobrante: CerrarCajaDto = { montoContado: '1200' };
+      const result = await service.cerrar(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoSobrante,
+      );
+
+      expect(result.diferencia).toBe('200.0000');
+      expect(result.estado).toBe('cerrada');
+    });
+
+    it('(c) faltante: monto contado < saldo esperado → diferencia negativa', async () => {
+      managerMock.findOne.mockResolvedValue({ ...mockCajaAbierta });
+      jest
+        .spyOn(service, 'calcularSaldoEsperado')
+        .mockResolvedValue('1000.0000');
+      managerMock.save.mockImplementation((_entity: unknown, data: unknown) =>
+        Promise.resolve(data),
+      );
+
+      const dtoFaltante: CerrarCajaDto = { montoContado: '800' };
+      const result = await service.cerrar(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoFaltante,
+      );
+
+      expect(result.diferencia).toBe('-200.0000');
+      expect(result.estado).toBe('cerrada');
+    });
+
+    it('(d) caja ya cerrada o no encontrada → ForbiddenException', async () => {
+      managerMock.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('(e) caja ajena → ForbiddenException', async () => {
+      const cajaOtroUsuario: Partial<Caja> = {
+        ...mockCajaAbierta,
+        usuarioId: OTRO_USUARIO,
+      };
+      managerMock.findOne.mockResolvedValue(cajaOtroUsuario);
+
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
       ).rejects.toThrow(ForbiddenException);
     });
   });
