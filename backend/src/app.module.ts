@@ -24,7 +24,8 @@ import { Tenant } from './modules/tenants/entities/tenant.entity';
 import { UsuarioTenant } from './modules/tenants/entities/usuario-tenant.entity';
 import { TenantModulo } from './modules/tenants/entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from './modules/tenants/entities/tenant-formula-precio.entity';
-import { Caja } from './modules/tenants/entities/caja.entity';
+import { Caja } from './modules/caja/entities/caja.entity';
+import { MovimientoCaja } from './modules/caja/entities/movimiento-caja.entity';
 import { RazonSocial } from './modules/tenants/entities/razon-social.entity';
 import { Rol } from './modules/roles/entities/rol.entity';
 import { RolUsuario } from './modules/roles/entities/rol-usuario.entity';
@@ -65,6 +66,7 @@ import { MovimientoInventario } from './modules/inventario/entities/movimiento-i
 import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
 import { InventarioModule } from './modules/inventario/inventario.module';
 import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.module';
+import { CajaModule } from './modules/caja/caja.module';
 
 @Module({
   imports: [
@@ -118,6 +120,7 @@ import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.
           ItemUnidad,
           MovimientoInventario,
           MovimientoInventarioDetalle,
+          MovimientoCaja,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -142,6 +145,7 @@ import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.
     ItemsModule,
     InventarioModule,
     CalculoPreciosModule,
+    CajaModule,
   ],
   controllers: [AppController],
   providers: [AppService],
