@@ -25,6 +25,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/caja',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear')) {
+    base.push({
+      label: 'Punto de venta',
+      icon: 'i-heroicons-shopping-cart',
+      to: '/ventas',
+    })
+  }
   if (authStore.isSuperadmin) {
     base.push({
       label: 'Administración',
