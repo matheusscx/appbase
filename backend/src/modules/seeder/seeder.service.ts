@@ -127,6 +127,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedUsuariosTenants();
     await this.seedRolesUsuarios();
     await this.seedVendedorPermisosTest();
+    await this.seedVendedorPermisosCaja();
 
     this.logger.log('Seed complete.');
   }
@@ -296,6 +297,13 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-test-tube',
         tieneConfiguracion: false,
       },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440058',
+        nombre: 'Ventas',
+        url: '/ventas',
+        icono: 'mdi-shopping',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -411,6 +419,16 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440054',
         moduloAppId: TEST,
         permisoId: ELIMINAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440059',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440058', // Ventas
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440060',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440058', // Ventas
+        permisoId: CREAR,
       },
     ];
 
@@ -540,6 +558,13 @@ export class SeederService implements OnApplicationBootstrap {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440055',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440050', // Paris → Test
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440061',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440058', // Paris → Ventas
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
@@ -1497,6 +1522,67 @@ export class SeederService implements OnApplicationBootstrap {
       if (!exists) {
         await this.razonSocialRepo.save(this.razonSocialRepo.create(data));
       }
+    }
+  }
+
+  private async seedVendedorPermisosCaja(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    // moduloTenantId para Paris → Caja (definido en seedTenantModulo)
+    const MODULO_TENANT_CAJA = '550e8400-e29b-41d4-a716-446655440023';
+    // moduloTenantId para Paris → Ventas (recién agregado en Paso 3)
+    const MODULO_TENANT_VENTAS = '550e8400-e29b-41d4-a716-446655440061';
+    // moduloAppPermiso IDs de Caja (definidos en seedModuloAppPermisos)
+    const CAJA_LEER = '550e8400-e29b-41d4-a716-446655440034';
+    const CAJA_CREAR = '550e8400-e29b-41d4-a716-446655440035';
+    const CAJA_ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440036';
+    // moduloAppPermiso IDs de Ventas (recién agregados en Paso 2)
+    const VENTAS_LEER = '550e8400-e29b-41d4-a716-446655440059';
+    const VENTAS_CREAR = '550e8400-e29b-41d4-a716-446655440060';
+
+    const vendedorRows: { rol_id: string }[] = await this.dataSource.query(
+      `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Vendedor' AND eliminado_el IS NULL`,
+      [PARIS],
+    );
+
+    if (vendedorRows.length === 0) {
+      this.logger.warn(
+        'seedVendedorPermisosCaja: rol Vendedor not found in Paris, skipping.',
+      );
+      return;
+    }
+
+    const rolId = vendedorRows[0].rol_id;
+
+    // Asociar Vendedor al módulo Caja del tenant Paris
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [rolId, MODULO_TENANT_CAJA],
+    );
+
+    // Asociar Vendedor al módulo Ventas del tenant Paris
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [rolId, MODULO_TENANT_VENTAS],
+    );
+
+    // Asignar Caja: Leer, Crear, Actualizar (sin VerTodas — ese es el diferenciador admin/supervisor)
+    for (const moduloAppPermisoId of [CAJA_LEER, CAJA_CREAR, CAJA_ACTUALIZAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [rolId, MODULO_TENANT_CAJA, moduloAppPermisoId],
+      );
+    }
+
+    // Asignar Ventas: Leer, Crear
+    for (const moduloAppPermisoId of [VENTAS_LEER, VENTAS_CREAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [rolId, MODULO_TENANT_VENTAS, moduloAppPermisoId],
+      );
     }
   }
 }
