@@ -106,6 +106,8 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Procesamiento de ventas (canal físico, pagos inline, vuelto) | ✅ Implementado (2026-06-29) |
 | Gestión de cajas | ✅ Implementado |
 | Registro de pagos | ✅ Implementado (inline con ventas, 2026-06-29) |
+| Frontend POS (crear venta: catálogo, carrito, cobro multipago, fricción por documento) | ✅ Implementado (2026-06-29) |
+| Frontend — historial/consulta de ventas | 🔲 Por construir |
 
 ---
 

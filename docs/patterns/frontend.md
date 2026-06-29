@@ -242,3 +242,28 @@ function eliminarTramo(i: number) {
 
 Usar `inputmode="decimal"` (no `type="number"`) para campos `@IsNumberString` del backend.
 Ver §7 para la explicación completa de la regla de campos decimales.
+
+---
+
+## 10. Pantalla POS (dos paneles + carrito con recálculo)
+
+Para pantallas complejas con múltiples paneles orquestados (p. ej. catálogo + carrito en paralelo):
+
+Ver `app/pages/ventas/index.vue` como referencia completa. Patrón clave: **helpers puros testeables en `composables/useVenta.ts`** (funciones sin Nuxt/Vue, 100% Vitest) + composable reactivo que los envuelve.
+
+Ventaja: separa lógica de negocio (`puedeCobrar`, `resumenCobro`, `sumaPagos`) de la capa reactiva de Vue, permitiendo tests unitarios reales sin mocks de Nuxt.
+
+```typescript
+// ✅ Función pura — testeable directo con Vitest, sin mocks
+function puedeCobrar(tipoDoc: TipoDoc, customer: CustomerForm | null): boolean {
+  if (tipoDoc.requiereCustomer) return !!(customer?.nombre?.trim())
+  return true
+}
+
+// ✅ Composable reactivo que la envuelve
+const puedeCobrarReactivo = computed(() => 
+  puedeCobrar(tipoDocSeleccionado.value, customerData.value)
+)
+```
+
+Componentes pequeños (`CarritoPanel`, `CobroModal`, `ClienteForm`) que no contienen lógica sino que la consumen de arriba + composable.

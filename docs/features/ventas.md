@@ -25,6 +25,33 @@ Es el corazón del POS: sin él no hay ventas registradas. Concentra en una sola
 
 ## API Endpoints
 
+### GET /api/tipos-documento
+
+Lista tipos de documento tributarios del país del tenant.
+
+```
+GET /api/tipos-documento
+Authorization: Bearer <token-con-tenant_id>
+
+Response (200):
+[
+  {
+    "id": "uuid",
+    "nombre": "Boleta",
+    "codigo": "39",
+    "requiereCustomer": false
+  },
+  {
+    "id": "uuid",
+    "nombre": "Factura",
+    "codigo": "33",
+    "requiereCustomer": true
+  }
+]
+```
+
+Usada en el frontend para renderizar el selector de documento y aplicar fricción (cliente obligatorio en Factura, opcional en Boleta).
+
 ### POST /api/ventas
 
 Crea una venta completa.
@@ -126,6 +153,49 @@ Todas con soft delete (`eliminado_el`) y triada de auditoría. PKs UUID con `typ
 
 ---
 
+## Frontend (POS)
+
+Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobro final.
+
+### Ruta y Componente Principal
+
+- **Ruta**: `/ventas` (`app/pages/ventas/index.vue`)
+- **Layout**: Dos paneles — catálogo + buscador a la izquierda, carrito + desglose + cobro a la derecha
+- **Gate**: Panel bloqueante si no hay caja abierta (verifica estado en el store de cajas)
+
+### Componentes
+
+| Componente | Ubicación | Responsabilidad |
+|---|---|---|
+| `CatalogoGrid` | `app/components/ventas/CatalogoGrid.vue` | Buscador de items + grilla de productos; emite `add` al carrito |
+| `ClienteForm` | `app/components/ventas/ClienteForm.vue` | Datos del cliente (nombre, RUT, dirección, teléfono, email); exporta tipo `CustomerForm` |
+| `CarritoPanel` | `app/components/ventas/CarritoPanel.vue` | Líneas del carrito (solo cantidad editable), selector de tipo de documento, desglose (neto, descuentos, recargos, impuestos, total), botón Cobrar |
+| `CobroModal` | `app/components/ventas/CobroModal.vue` | Modal de pagos múltiples con distintos métodos, cálculo de vuelto, confirmación y emisión de POST /api/ventas |
+
+### Composable & Lógica Pura
+
+- **`useVenta.ts`** (`app/composables/useVenta.ts`): Helpers puros sin Nuxt ni Vue (100% testeables con Vitest)
+  - `puedeCobrar(tipoDoc, customer)` — valida si se puede proceder a cobro (Boleta sin cliente OK; Factura requiere nombre)
+  - `resumenCobro(carrito, detalles)` — resume montos por tipo de descuento/recargo/impuesto
+  - `sumaPagos(pagos)` — suma total de pagos para calcular vuelto
+  - `toCalculoInput(carrito, metodoPago, descuentosVenta, recargosVenta)` — estructura payload para `/calculo-precios/calcular`
+
+- **Estado reactivo**: `ref` del carrito con recalculación debounced (100ms) cada vez que cambia cantidad o se agregan reglas.
+
+### Fricción por Documento
+
+- **Boleta**: cliente opcional — se puede cobrar sin datos del comprador.
+- **Factura**: cliente obligatorio — campo de nombre debe estar completado para habilitar botón "Cobrar".
+- **Validación en cliente** vía `puedeCobrar()` y cambio de estado del botón Cobrar.
+
+### Testing
+
+```bash
+cd frontend && npm test -- app/composables/useVenta.spec.ts    # 15/15 Vitest
+```
+
+---
+
 ## Testing
 
 ```bash
@@ -135,6 +205,16 @@ cd backend && npm test -- --testPathPatterns=ventas
 # E2E tests (9 casos contra Docker PostgreSQL)
 cd backend && npm run test:e2e -- --testPathPatterns=ventas --forceExit
 ```
+
+---
+
+## Pendiente (fase futura)
+
+- **Historial/listado de ventas** — Búsqueda y filtrado de ventas por rango de fechas, estado, tipo de documento
+- **Comprobante imprimible** — Generación y descarga de PDF del comprobante de venta
+- **Descuentos/recargos manuales** — Aplicación inline de descuentos o recargos por línea o a nivel de venta
+- **Canal online** — Soporte de ventas en canal `online` con caja virtual automática
+- **Notas de crédito** — Creación de notas de crédito referenciando ventas originales
 
 ---
 

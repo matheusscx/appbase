@@ -311,9 +311,13 @@ descuentos` (cada uno con su monto), totales por tipo, `total`, y `conversionMon
 reglas aplicadas + customer + pagos + movimientos de inventario + movimientos de caja.
 Solo canal `fisico`. Auto-determina estado `pagada`/`pendiente` y calcula vuelto.
 
-**Implementación:** `POST /api/ventas` · `GET /api/ventas` · `GET /api/ventas/:id`  
-Módulo: `backend/src/modules/ventas/`  
+**Implementación:** `POST /api/ventas` · `GET /api/ventas` · `GET /api/ventas/:id` · `GET /api/tipos-documento`  
+Módulo backend: `backend/src/modules/ventas/`  
+UI frontend: `app/pages/ventas/index.vue` + componentes en `app/components/ventas/`  
+Composable: `app/composables/useVenta.ts` (helpers puros, testeables con Vitest)  
 Docs: `docs/features/ventas.md`
+
+**Frontend** — creación de venta desde POS: catálogo buscable + grilla → carrito con cantidad editable + desglose de cálculo → múltiples pagos con vuelto → fricción por documento (Boleta sin cliente, Factura con cliente obligatorio). Gate de caja abierta. Estado: ✅ Completo (2026-06-29).
 
 **Entradas:** `{ tipoDocumentoId, lineas[{itemId, cantidad, precioUnitario?, descuentoIds?, recargoIds?, impuestoIds?, unidadIds?, loteId?}], pagos[{metodoPagoId, monto, referencia?}], customer?, comentario? }`. Identidad del usuario (del token).
 
