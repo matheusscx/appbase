@@ -1,7 +1,6 @@
 import { ref, watch } from 'vue'
 import Decimal from 'decimal.js'
-import { useCalculoPrecios, type ResultadoVenta } from './useCalculoPrecios'
-import type { CalcularVentaInput } from './useCalculoPrecios'
+import { useCalculoPrecios, type ResultadoVenta, type CalcularVentaInput } from './useCalculoPrecios'
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
