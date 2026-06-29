@@ -27,6 +27,16 @@ function onAfterLeave() {
   comentario.value = ''
 }
 
+const montoContadoFormateado = computed(() => {
+  if (!montoContado.value) return '—'
+  try {
+    return formatMonto(montoContado.value)
+  }
+  catch {
+    return montoContado.value
+  }
+})
+
 const diferencia = computed(() => {
   if (!montoContado.value) return null
   try {
@@ -84,7 +94,7 @@ async function cerrarCaja() {
           <div class="flex justify-between text-sm">
             <span class="text-gray-500">Monto contado</span>
             <span class="font-medium">
-              {{ montoContado ? formatMonto(montoContado) : '—' }}
+              {{ montoContadoFormateado }}
             </span>
           </div>
           <div class="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between text-sm font-semibold">
