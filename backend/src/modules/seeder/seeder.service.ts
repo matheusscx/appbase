@@ -316,6 +316,10 @@ export class SeederService implements OnApplicationBootstrap {
         permisoId: '550e8400-e29b-41d4-a716-446655440015',
         nombre: 'Eliminar',
       },
+      {
+        permisoId: '550e8400-e29b-41d4-a716-446655440016',
+        nombre: 'Ver todas',
+      },
     ];
 
     for (const data of permisos) {
@@ -336,6 +340,7 @@ export class SeederService implements OnApplicationBootstrap {
     const CREAR = '550e8400-e29b-41d4-a716-446655440013';
     const ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440014';
     const ELIMINAR = '550e8400-e29b-41d4-a716-446655440015';
+    const VER_TODAS = '550e8400-e29b-41d4-a716-446655440016';
 
     const entries: Partial<ModuloAppPermiso>[] = [
       {
@@ -377,6 +382,11 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440037',
         moduloAppId: CAJA,
         permisoId: ELIMINAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440038',
+        moduloAppId: CAJA,
+        permisoId: VER_TODAS,
       },
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440051',
@@ -478,23 +488,23 @@ export class SeederService implements OnApplicationBootstrap {
       telefono: string;
       direccion: string;
     }> = [
-        {
-          id: '550e8400-e29b-41d4-a716-446655440007',
-          provinciaId: '550e8400-e29b-41d4-a716-446655440001',
-          nombre: 'Paris',
-          correo: 'contacto@paris.cl',
-          telefono: '+56226005000',
-          direccion: 'Av. Presidente Kennedy 9001, Las Condes, Santiago',
-        },
-        {
-          id: '550e8400-e29b-41d4-a716-446655440040',
-          provinciaId: '550e8400-e29b-41d4-a716-446655440001',
-          nombre: 'Falabella',
-          correo: 'contacto@falabella.cl',
-          telefono: '+56226007000',
-          direccion: 'Av. Presidente Kennedy 6400, Las Condes, Santiago',
-        },
-      ];
+      {
+        id: '550e8400-e29b-41d4-a716-446655440007',
+        provinciaId: '550e8400-e29b-41d4-a716-446655440001',
+        nombre: 'Paris',
+        correo: 'contacto@paris.cl',
+        telefono: '+56226005000',
+        direccion: 'Av. Presidente Kennedy 9001, Las Condes, Santiago',
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440040',
+        provinciaId: '550e8400-e29b-41d4-a716-446655440001',
+        nombre: 'Falabella',
+        correo: 'contacto@falabella.cl',
+        telefono: '+56226007000',
+        direccion: 'Av. Presidente Kennedy 6400, Las Condes, Santiago',
+      },
+    ];
 
     for (const data of tenants) {
       const exists = await this.tenantRepo.findOne({ where: { id: data.id } });
