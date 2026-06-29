@@ -7,6 +7,9 @@ const loading = ref(false)
 
 onMounted(async () => {
   const perms = usePermissionsStore()
+  if (!perms.loading && perms.permisos.length === 0) {
+    await perms.fetchPermisos()
+  }
   if (!perms.esAdmin && !perms.can('Caja', 'VerTodas')) {
     toast.add({ title: 'No tenés acceso al módulo Caja', color: 'warning' })
     await navigateTo('/ventas')
