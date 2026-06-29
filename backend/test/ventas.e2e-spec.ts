@@ -208,6 +208,38 @@ describe('Ventas (e2e)', () => {
     });
   });
 
+  describe('GET /tipos-documento', () => {
+    interface TipoDocResponse {
+      id: string;
+      nombre: string;
+      codigo: string | null;
+      requiereCustomer: boolean;
+    }
+
+    it('lista los tipos de documento del país del tenant con el flag requiereCustomer', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/tipos-documento')
+        .set('Authorization', `Bearer ${token}`);
+
+      const tipos = res.body as TipoDocResponse[];
+      expect(res.status).toBe(200);
+      expect(Array.isArray(tipos)).toBe(true);
+      expect(tipos.length).toBeGreaterThan(0);
+
+      const boleta = tipos.find((t) => t.codigo === '39');
+      const factura = tipos.find((t) => t.codigo === '33');
+      expect(boleta?.requiereCustomer).toBe(false);
+      expect(factura?.requiereCustomer).toBe(true);
+    });
+
+    it('retorna 401 sin token', async () => {
+      const res = await request(app.getHttpServer()).get(
+        '/api/tipos-documento',
+      );
+      expect(res.status).toBe(401);
+    });
+  });
+
   describe('GET /ventas y GET /ventas/:id', () => {
     let ventaId: string;
 

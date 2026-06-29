@@ -5,7 +5,10 @@ import { CajaModule } from '../caja/caja.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { ItemsModule } from '../items/items.module';
 import { VentasService } from './ventas.service';
-import { VentasController } from './ventas.controller';
+import {
+  VentasController,
+  TiposDocumentoController,
+} from './ventas.controller';
 import { Venta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
 import { VentaDescuento } from './entities/venta-descuento.entity';
@@ -32,7 +35,7 @@ import { TipoDocumentoTributario } from './entities/tipo-documento-tributario.en
     InventarioModule,
     ItemsModule,
   ],
-  controllers: [VentasController],
+  controllers: [VentasController, TiposDocumentoController],
   providers: [VentasService],
   exports: [VentasService],
 })

@@ -1457,11 +1457,13 @@ export class SeederService implements OnApplicationBootstrap {
     ];
 
     for (const data of tipos) {
-      const exists = await this.tipoDocumentoRepo.findOne({
+      const existing = await this.tipoDocumentoRepo.findOne({
         where: { id: data.id },
       });
-      if (!exists) {
+      if (!existing) {
         await this.tipoDocumentoRepo.save(this.tipoDocumentoRepo.create(data));
+      } else {
+        await this.tipoDocumentoRepo.save({ ...existing, ...data });
       }
     }
   }

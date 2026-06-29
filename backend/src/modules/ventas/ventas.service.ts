@@ -19,6 +19,13 @@ import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
 import { Pago } from './entities/pago.entity';
 
+export interface TipoDocumentoResponse {
+  id: string;
+  nombre: string;
+  codigo: string | null;
+  requiereCustomer: boolean;
+}
+
 @Injectable()
 export class VentasService {
   constructor(
@@ -341,6 +348,36 @@ export class VentasService {
 
       return { ...venta, detalles };
     });
+  }
+
+  async findTiposDocumento(tenantId: string): Promise<TipoDocumentoResponse[]> {
+    const rows: {
+      tipo_documento_id: string;
+      nombre: string;
+      codigo: string | null;
+      requiere_customer: boolean;
+    }[] = await this.dataSource.query(
+      `SELECT td.tipo_documento_id,
+              td.nombre,
+              td.codigo,
+              td.requiere_customer
+       FROM tenants t
+       JOIN provincia prov ON prov.provincia_id = t.provincia_id
+            AND prov.eliminado_el IS NULL
+       JOIN pais p ON p.pais_id = prov.pais_id AND p.eliminado_el IS NULL
+       JOIN tipos_documento_tributario td ON td.pais_id = p.pais_id
+            AND td.eliminado_el IS NULL AND td.activo = true
+       WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL
+       ORDER BY td.nombre ASC`,
+      [tenantId],
+    );
+
+    return rows.map((r) => ({
+      id: r.tipo_documento_id,
+      nombre: r.nombre,
+      codigo: r.codigo,
+      requiereCustomer: r.requiere_customer === true,
+    }));
   }
 
   async listar(tenantId: string) {

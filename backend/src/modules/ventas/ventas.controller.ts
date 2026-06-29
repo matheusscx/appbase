@@ -41,3 +41,17 @@ export class VentasController {
     return this.ventasService.findOne(u.tenantId ?? '', id);
   }
 }
+
+@ApiTags('ventas')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, TenantGuard)
+@Controller('tipos-documento')
+export class TiposDocumentoController {
+  constructor(private readonly ventasService: VentasService) {}
+
+  @Get()
+  async listar(@Req() req: Request) {
+    const u = req.user as JwtUser;
+    return this.ventasService.findTiposDocumento(u.tenantId ?? '');
+  }
+}
