@@ -1,4 +1,6 @@
+import { ref, watch } from 'vue'
 import Decimal from 'decimal.js'
+import { useCalculoPrecios, type ResultadoVenta } from './useCalculoPrecios'
 import type { CalcularVentaInput } from './useCalculoPrecios'
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
@@ -111,4 +113,55 @@ export function puedeCobrar(args: {
   if (args.lineas.length === 0) return false
   if (args.requiereCustomer && args.customerNombre.trim() === '') return false
   return true
+}
+
+// ── Composable reactivo con estado y recálculo ──────────────────────────────
+
+export function useVenta() {
+  const { calcular } = useCalculoPrecios()
+  const lineas = ref<CarritoLinea[]>([])
+  const resultado = ref<ResultadoVenta | null>(null)
+  const loadingCalculo = ref(false)
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+  async function recalcular() {
+    if (lineas.value.length === 0) {
+      resultado.value = null
+      return
+    }
+    loadingCalculo.value = true
+    try {
+      resultado.value = await calcular(toCalcularInput(lineas.value))
+    } finally {
+      loadingCalculo.value = false
+    }
+  }
+
+  watch(
+    lineas,
+    () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        void recalcular()
+      }, 300)
+    },
+    { deep: true },
+  )
+
+  function add(item: ItemCatalogo) {
+    lineas.value = agregarLinea(lineas.value, item)
+  }
+  function quitar(itemId: string) {
+    lineas.value = quitarLinea(lineas.value, itemId)
+  }
+  function cambiarCantidad(itemId: string, cantidad: string) {
+    lineas.value = setCantidad(lineas.value, itemId, cantidad)
+  }
+  function limpiar() {
+    lineas.value = []
+    resultado.value = null
+  }
+
+  return { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidad, limpiar }
 }
