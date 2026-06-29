@@ -44,5 +44,10 @@ onMounted(async () => {
       v-else
       :caja="cajaStore.activa"
     />
+
+    <UDivider class="my-2" />
+
+    <!-- Historial de cajas cerradas -->
+    <CajaHistorial />
   </div>
 </template>

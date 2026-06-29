@@ -3,6 +3,7 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 
 const authStore = useAuthStore()
 const tenantStore = useTenantStore()
+const permissionsStore = usePermissionsStore()
 
 const items = computed<NavigationMenuItem[]>(() => {
   const base: NavigationMenuItem[] = [
@@ -17,6 +18,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/test',
     },
   ]
+  if (permissionsStore.esAdmin || permissionsStore.can('Caja', 'Leer')) {
+    base.push({
+      label: 'Caja',
+      icon: 'i-heroicons-banknotes',
+      to: '/caja',
+    })
+  }
   if (authStore.isSuperadmin) {
     base.push({
       label: 'Administración',
