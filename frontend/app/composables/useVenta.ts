@@ -107,9 +107,11 @@ export function puedeCobrar(args: {
   lineas: CarritoLinea[]
   requiereCustomer: boolean
   customerNombre: string
+  tipoDocumentoId: string | undefined
 }): boolean {
   if (!args.tieneCaja) return false
   if (args.lineas.length === 0) return false
+  if (!args.tipoDocumentoId) return false
   if (args.requiereCustomer && args.customerNombre.trim() === '') return false
   return true
 }

@@ -84,24 +84,29 @@ describe('pagos helpers', () => {
 
 describe('puedeCobrar (gate)', () => {
   const lineas: CarritoLinea[] = [{ item: item('a'), cantidad: '1' }]
+  const docId = 'tipo-doc-1'
 
   it('false sin caja', () => {
-    expect(puedeCobrar({ tieneCaja: false, lineas, requiereCustomer: false, customerNombre: '' })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: false, lineas, requiereCustomer: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
   })
 
   it('false con carrito vacío', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas: [], requiereCustomer: false, customerNombre: '' })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: true, lineas: [], requiereCustomer: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+  })
+
+  it('false si tipoDocumentoId es undefined', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: false, customerNombre: '', tipoDocumentoId: undefined })).toBe(false)
   })
 
   it('false si requiereCustomer y falta nombre', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: true, customerNombre: '  ' })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: true, customerNombre: '  ', tipoDocumentoId: docId })).toBe(false)
   })
 
   it('true con caja, líneas y (sin factura) sin cliente', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: false, customerNombre: '' })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
   })
 
   it('true con factura y nombre de cliente', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: true, customerNombre: 'Juan' })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: true, customerNombre: 'Juan', tipoDocumentoId: docId })).toBe(true)
   })
 })

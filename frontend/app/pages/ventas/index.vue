@@ -109,10 +109,10 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
 
       <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full p-4">
         <div class="lg:col-span-3 min-h-0">
-          <CatalogoGrid :items="items" :loading="loadingCatalogo" @add="add" />
+          <VentasCatalogoGrid :items="items" :loading="loadingCatalogo" @add="add" />
         </div>
         <div class="lg:col-span-2 min-h-0">
-          <CarritoPanel
+          <VentasCarritoPanel
             v-model:tipo-documento-id="tipoDocumentoId"
             v-model:customer="customer"
             :lineas="lineas"
@@ -127,7 +127,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         </div>
       </div>
 
-      <CobroModal
+      <VentasCobroModal
         v-model:open="cobroOpen"
         :total="totalFinal"
         :metodos="metodos"

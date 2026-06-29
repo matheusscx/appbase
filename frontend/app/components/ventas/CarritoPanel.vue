@@ -33,6 +33,7 @@ const habilitarCobro = computed(() =>
     lineas: props.lineas,
     requiereCustomer: requiereCustomer.value,
     customerNombre: customer.value.nombre,
+    tipoDocumentoId: tipoDocumentoId.value,
   }),
 )
 
@@ -85,7 +86,7 @@ const docItems = computed(() =>
         </li>
       </ul>
 
-      <ClienteForm v-if="requiereCustomer" v-model="customer" class="mt-3" />
+      <VentasClienteForm v-if="requiereCustomer" v-model="customer" class="mt-3" />
     </div>
 
     <template #footer>
