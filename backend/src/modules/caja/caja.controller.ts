@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -8,6 +16,7 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { CajaService } from './caja.service';
 import { AbrirCajaDto } from './dto/abrir-caja.dto';
+import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 
 @ApiTags('caja')
 @ApiBearerAuth()
@@ -28,5 +37,23 @@ export class CajaController {
   abrir(@Req() req: Request, @Body() dto: AbrirCajaDto) {
     const u = req.user as JwtUser;
     return this.cajaService.abrir(u.tenantId!, u.id, dto);
+  }
+
+  @Post(':id/movimientos')
+  @RequiresPermiso('Caja', 'Crear')
+  registrarMovimiento(
+    @Req() req: Request,
+    @Param('id') cajaId: string,
+    @Body() dto: CrearMovimientoDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.cajaService.registrarMovimiento(u.tenantId!, u.id, cajaId, dto);
+  }
+
+  @Get(':id/movimientos')
+  @RequiresPermiso('Caja', 'Leer')
+  listarMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
+    const u = req.user as JwtUser;
+    return this.cajaService.listarMovimientos(u.tenantId!, u.id, cajaId);
   }
 }
