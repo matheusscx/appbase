@@ -18,7 +18,7 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/test',
     },
   ]
-  if (permissionsStore.esAdmin || permissionsStore.can('Caja', 'Leer')) {
+  if (permissionsStore.esAdmin || permissionsStore.can('Caja', 'VerTodas')) {
     base.push({
       label: 'Caja',
       icon: 'i-heroicons-banknotes',
