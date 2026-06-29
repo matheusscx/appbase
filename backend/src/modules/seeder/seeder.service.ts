@@ -27,6 +27,7 @@ import { Recargo } from '../recargos/entities/recargo.entity';
 import { RecargoTramo } from '../recargos/entities/recargo-tramo.entity';
 import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.entity';
 import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
+import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -83,6 +84,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly descuentoMetodoPagoRepo: Repository<DescuentoMetodoPago>,
     @InjectRepository(RecargoMetodoPago)
     private readonly recargoMetodoPagoRepo: Repository<RecargoMetodoPago>,
+    @InjectRepository(TipoDocumentoTributario)
+    private readonly tipoDocumentoRepo: Repository<TipoDocumentoTributario>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -115,6 +118,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedRecargos();
     await this.seedRecargoMetodosPago();
     await this.seedItems();
+    await this.seedTiposDocumentoTributario();
     await this.seedRazonesSociales();
     await this.seedUsuarioAdmin();
     await this.seedUsuariosAdicionales();
@@ -1426,6 +1430,37 @@ export class SeederService implements OnApplicationBootstrap {
          VALUES ($1,$2,'100')`,
         [MOV_PARACETAMOL, LOTE_1],
       );
+    }
+  }
+
+  private async seedTiposDocumentoTributario(): Promise<void> {
+    const CHILE = '550e8400-e29b-41d4-a716-446655440000';
+    const tipos: Partial<TipoDocumentoTributario>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440145',
+        paisId: CHILE,
+        nombre: 'Boleta de Venta',
+        codigo: '39',
+        descripcion: 'Boleta electrónica de venta al consumidor final',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440146',
+        paisId: CHILE,
+        nombre: 'Factura Electrónica',
+        codigo: '33',
+        descripcion: 'Factura electrónica afecta a IVA',
+        activo: true,
+      },
+    ];
+
+    for (const data of tipos) {
+      const exists = await this.tipoDocumentoRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.tipoDocumentoRepo.save(this.tipoDocumentoRepo.create(data));
+      }
     }
   }
 

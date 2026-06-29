@@ -124,6 +124,30 @@ export class CajaService {
     });
   }
 
+  async registrarMovimientoEnTransaccion(
+    manager: EntityManager,
+    params: {
+      cajaId: string;
+      tipo: string;
+      concepto: string;
+      monto: string;
+      referencia?: string | null;
+      ventaId?: string | null;
+      pagoId?: string | null;
+    },
+  ): Promise<MovimientoCaja> {
+    const movimiento = manager.create(MovimientoCaja, {
+      cajaId: params.cajaId,
+      tipo: params.tipo,
+      concepto: params.concepto,
+      monto: params.monto,
+      referencia: params.referencia ?? null,
+      ventaId: params.ventaId ?? null,
+      pagoId: params.pagoId ?? null,
+    });
+    return manager.save(MovimientoCaja, movimiento);
+  }
+
   async registrarMovimiento(
     tenantId: string,
     usuarioId: string,
@@ -157,15 +181,13 @@ export class CajaService {
         throw new UnprocessableEntityException('Saldo insuficiente en caja');
       }
 
-      const movimiento = manager.create(MovimientoCaja, {
+      return this.registrarMovimientoEnTransaccion(manager, {
         cajaId,
         tipo: dto.tipo,
         concepto: dto.concepto,
         monto: dto.monto,
         referencia: dto.referencia,
       });
-
-      return manager.save(MovimientoCaja, movimiento);
     });
   }
 

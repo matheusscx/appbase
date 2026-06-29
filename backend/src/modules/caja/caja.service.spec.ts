@@ -204,7 +204,9 @@ describe('CajaService', () => {
         tipo: 'entrada',
         concepto: 'Fondo de caja',
         monto: '200',
-        referencia: undefined,
+        referencia: null,
+        ventaId: null,
+        pagoId: null,
       });
       expect(result).toEqual(movCreado);
     });

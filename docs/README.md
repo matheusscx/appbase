@@ -62,6 +62,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/descuentos-recargos.md](./features/descuentos-recargos.md)** — Descuentos y Recargos — Formularios dinámicos por tipo de regla (tramos, métodos de pago, días)
 - **[features/motor-calculo-precios.md](./features/motor-calculo-precios.md)** — Motor de cálculo de precios (desglose neto → descuentos → recargos → impuestos → total)
 - **[features/gestion-cajas.md](./features/gestion-cajas.md)** — Gestión de cajas (apertura, movimientos manuales, cuadre y cierre de caja física)
+- **[features/ventas.md](./features/ventas.md)** — Procesamiento de ventas transaccional (canal físico, pagos inline, vuelto, stock atómico)
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans

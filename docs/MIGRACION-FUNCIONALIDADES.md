@@ -305,19 +305,19 @@ descuentos` (cada uno con su monto), totales por tipo, `total`, y `conversionMon
 
 ---
 
-### 10. Procesamiento de ventas (transaccional)
+### 10. Procesamiento de ventas (transaccional) ✅ Implementado (2026-06-29)
 
-**Qué hace:** Registra una venta completa en una sola transacción: cabecera, detalle por línea,
-impuestos/recargos/descuentos por línea y globales, datos del customer y pagos. Calcula y
-persiste todos los totales convertidos a moneda oficial.
+**Qué hace:** Registra una venta completa en una sola transacción atómica: cabecera + líneas +
+reglas aplicadas + customer + pagos + movimientos de inventario + movimientos de caja.
+Solo canal `fisico`. Auto-determina estado `pagada`/`pendiente` y calcula vuelto.
 
-**Entradas:** `{ clienteId, monedaId, estado, tipoDocumento, detalles[], descuentosPorCaja[],
-recargosPorCaja[], clienteFinal, pagos[] }`. Cada `detalle`: `{ itemId, monedaId, cantidad,
-impuestosIds[], recargosIds[], descuentosIds[] }`. Identidad del usuario (del token).
+**Implementación:** `POST /api/ventas` · `GET /api/ventas` · `GET /api/ventas/:id`  
+Módulo: `backend/src/modules/ventas/`  
+Docs: `docs/features/ventas.md`
 
-**Salidas:** `{ venta_id, total_final, estado, procesado_por, cliente_id }`. Efecto: filas en
-`ventas`, `venta_detalle`, `venta_impuesto`, `venta_recargo`, `venta_descuento`,
-`venta_cliente_final`, `pagos`.
+**Entradas:** `{ tipoDocumentoId, lineas[{itemId, cantidad, precioUnitario?, descuentoIds?, recargoIds?, impuestoIds?, unidadIds?, loteId?}], pagos[{metodoPagoId, monto, referencia?}], customer?, comentario? }`. Identidad del usuario (del token).
+
+**Salidas:** Cabecera de venta con `id`, `estado`, `totalFinal`. `GET /:id` expande detalles, reglas, customer y pagos.
 
 **Integraciones externas:** Ninguna (pago se registra, no se cobra contra pasarela).
 

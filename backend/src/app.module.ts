@@ -67,6 +67,15 @@ import { MovimientoInventarioDetalle } from './modules/inventario/entities/movim
 import { InventarioModule } from './modules/inventario/inventario.module';
 import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.module';
 import { CajaModule } from './modules/caja/caja.module';
+import { VentasModule } from './modules/ventas/ventas.module';
+import { Venta } from './modules/ventas/entities/venta.entity';
+import { VentaDetalle } from './modules/ventas/entities/venta-detalle.entity';
+import { VentaDescuento } from './modules/ventas/entities/venta-descuento.entity';
+import { VentaRecargo } from './modules/ventas/entities/venta-recargo.entity';
+import { VentaImpuesto } from './modules/ventas/entities/venta-impuesto.entity';
+import { VentaCustomer } from './modules/ventas/entities/venta-customer.entity';
+import { Pago } from './modules/ventas/entities/pago.entity';
+import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
 
 @Module({
   imports: [
@@ -121,6 +130,14 @@ import { CajaModule } from './modules/caja/caja.module';
           MovimientoInventario,
           MovimientoInventarioDetalle,
           MovimientoCaja,
+          Venta,
+          VentaDetalle,
+          VentaDescuento,
+          VentaRecargo,
+          VentaImpuesto,
+          VentaCustomer,
+          Pago,
+          TipoDocumentoTributario,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -146,6 +163,7 @@ import { CajaModule } from './modules/caja/caja.module';
     InventarioModule,
     CalculoPreciosModule,
     CajaModule,
+    VentasModule,
   ],
   controllers: [AppController],
   providers: [AppService],

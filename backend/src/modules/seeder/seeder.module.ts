@@ -27,6 +27,7 @@ import { Recargo } from '../recargos/entities/recargo.entity';
 import { RecargoTramo } from '../recargos/entities/recargo-tramo.entity';
 import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.entity';
 import { MovimientoInventario } from '../inventario/entities/movimiento-inventario.entity';
+import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { MovimientoInventario } from '../inventario/entities/movimiento-inventar
       RecargoTramo,
       RecargoMetodoPago,
       MovimientoInventario,
+      TipoDocumentoTributario,
     ]),
   ],
   providers: [SeederService],
