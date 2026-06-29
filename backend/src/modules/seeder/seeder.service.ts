@@ -1443,6 +1443,7 @@ export class SeederService implements OnApplicationBootstrap {
         codigo: '39',
         descripcion: 'Boleta electrónica de venta al consumidor final',
         activo: true,
+        requiereCustomer: false,
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440146',
@@ -1451,6 +1452,7 @@ export class SeederService implements OnApplicationBootstrap {
         codigo: '33',
         descripcion: 'Factura electrónica afecta a IVA',
         activo: true,
+        requiereCustomer: true,
       },
     ];
 

@@ -95,6 +95,7 @@ CREATE TABLE "tipos_documento_tributario" (
   "codigo"            VARCHAR(20),   -- código tributario local (ej. '33' = Factura en Chile)
   "descripcion"       TEXT,
   "activo"            BOOLEAN     NOT NULL DEFAULT true,
+  "requiere_customer" BOOLEAN     NOT NULL DEFAULT false,
   "creado_el"         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"    TIMESTAMPTZ,
   "eliminado_el"      TIMESTAMPTZ
