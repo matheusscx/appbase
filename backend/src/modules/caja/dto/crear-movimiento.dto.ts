@@ -1,13 +1,20 @@
-import { IsIn, IsNumberString, IsOptional, IsString } from 'class-validator';
+import {
+  IsIn,
+  IsNotEmpty,
+  IsNumberString,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export class CrearMovimientoDto {
   @IsIn(['entrada', 'salida'])
   tipo: string;
 
+  @IsNotEmpty()
   @IsString()
   concepto: string;
 
-  @IsNumberString()
+  @IsNumberString({ no_symbols: true })
   monto: string;
 
   @IsOptional()

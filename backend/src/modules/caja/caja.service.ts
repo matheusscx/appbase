@@ -72,6 +72,7 @@ export class CajaService {
        FROM cajas c
        LEFT JOIN movimientos_caja m ON m.caja_id = c.caja_id
        WHERE c.caja_id = $1
+         AND c.eliminado_el IS NULL
        GROUP BY c.saldo_inicial`,
       [cajaId],
     );
