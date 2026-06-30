@@ -26,12 +26,24 @@ export interface MovimientoCaja {
   fecha: string
 }
 
+export interface CajaAbierta {
+  id: string
+  usuarioId: string | null
+  usuarioNombre: string
+  saldoInicial: string
+  saldoEsperado: string
+  fechaApertura: string
+  esPropia: boolean
+}
+
 export const useCajaStore = defineStore('caja', () => {
   const config = useRuntimeConfig()
 
   const activa = ref<Caja | null>(null)
   const movimientos = ref<MovimientoCaja[]>([])
   const historial = ref<Caja[]>([])
+  const abiertas = ref<CajaAbierta[]>([])
+  const detalle = ref<Caja | null>(null)
   const loadingActiva = ref(false)
   const loadingMovimientos = ref(false)
 
@@ -98,10 +110,25 @@ export const useCajaStore = defineStore('caja', () => {
     )
   }
 
+  async function cargarAbiertas(): Promise<void> {
+    abiertas.value = await useApiFetch<CajaAbierta[]>(
+      `${config.public.apiUrl}/caja/abiertas`,
+    )
+  }
+
+  async function cargarDetalle(cajaId: string): Promise<void> {
+    const data = await useApiFetch<Caja | null>(
+      `${config.public.apiUrl}/caja/${cajaId}`,
+    )
+    detalle.value = data && typeof data === 'object' ? data : null
+  }
+
   return {
     activa,
     movimientos,
     historial,
+    abiertas,
+    detalle,
     loadingActiva,
     loadingMovimientos,
     cargarActiva,
@@ -110,5 +137,7 @@ export const useCajaStore = defineStore('caja', () => {
     registrarMovimiento,
     cerrar,
     cargarHistorial,
+    cargarAbiertas,
+    cargarDetalle,
   }
 })

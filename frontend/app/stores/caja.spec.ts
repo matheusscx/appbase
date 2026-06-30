@@ -93,3 +93,46 @@ describe('useCajaStore — cargarActiva', () => {
     expect(store.loadingActiva).toBe(false)
   })
 })
+
+describe('useCajaStore — cargarAbiertas / cargarDetalle', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockApiFetch.mockReset()
+  })
+
+  it('cargarAbiertas popula abiertas con la lista del API', async () => {
+    const store = useCajaStore()
+    const lista = [{
+      id: 'c1',
+      usuarioId: 'u1',
+      usuarioNombre: 'Ana Pérez',
+      saldoInicial: '1000.0000',
+      saldoEsperado: '1150.0000',
+      fechaApertura: '2026-06-29T10:00:00Z',
+      esPropia: true,
+    }]
+    mockApiFetch.mockResolvedValue(lista)
+
+    await store.cargarAbiertas()
+
+    expect(store.abiertas).toEqual(lista)
+  })
+
+  it('cargarDetalle popula detalle con la caja del API', async () => {
+    const store = useCajaStore()
+    mockApiFetch.mockResolvedValue(CAJA)
+
+    await store.cargarDetalle('caja-1')
+
+    expect(store.detalle).toEqual(CAJA)
+  })
+
+  it('cargarDetalle normaliza body vacío ("") a null', async () => {
+    const store = useCajaStore()
+    mockApiFetch.mockResolvedValue('')
+
+    await store.cargarDetalle('caja-1')
+
+    expect(store.detalle).toBeNull()
+  })
+})
