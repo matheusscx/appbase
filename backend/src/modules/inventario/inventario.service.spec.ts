@@ -203,6 +203,57 @@ describe('InventarioService', () => {
       expect(res.stockResultante).toBe('1');
     });
 
+    it('salida serie sin unidadIds: auto-selecciona FIFO las unidades disponibles', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '2', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // SELECT FIFO unidades
+        .mockResolvedValueOnce([
+          { estado: 'disponible', item_id: ITEM_ID, tenant_id: TENANT },
+        ]) // SELECT unidad (validación)
+        .mockResolvedValueOnce(undefined) // UPDATE unidad
+        .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-s3' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '1',
+          usuarioId: USER_ID,
+        },
+      );
+
+      expect(res.stockResultante).toBe('1');
+      // La 2ª query es el SELECT FIFO con ORDER BY creado_el ASC
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('ORDER BY u.creado_el ASC'),
+        expect.arrayContaining([ITEM_ID, TENANT]),
+      );
+    });
+
+    it('salida serie sin unidadIds: lanza BadRequest si no hay suficientes disponibles', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '0', modo_inventario: 'serie' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([]); // SELECT FIFO unidades (0 disponibles)
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '1',
+          usuarioId: USER_ID,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('salida serie: lanza BadRequest si unidad no está disponible', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ stock: '1', modo_inventario: 'serie' }])
@@ -280,6 +331,57 @@ describe('InventarioService', () => {
       );
 
       expect(res.stockResultante).toBe('40');
+    });
+
+    it('salida lote sin loteId: auto-selecciona FIFO el lote más antiguo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '50', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([
+          { lote_id: LOTE_ID, cantidad_disponible: '50' },
+        ]) // SELECT lotes FIFO FOR UPDATE
+        .mockResolvedValueOnce(undefined) // UPDATE lote
+        .mockResolvedValueOnce([{ total: '40' }]) // SUM
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-l3' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // INSERT detalle
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '10',
+          usuarioId: USER_ID,
+        },
+      );
+
+      expect(res.stockResultante).toBe('40');
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('ORDER BY creado_el ASC'),
+        expect.arrayContaining([ITEM_ID, TENANT]),
+      );
+    });
+
+    it('salida lote sin loteId: lanza BadRequest si el stock total es insuficiente', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '5', modo_inventario: 'lote' }]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([
+          { lote_id: LOTE_ID, cantidad_disponible: '5' },
+        ]); // SELECT lotes FIFO (total 5 < 10)
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '10',
+          usuarioId: USER_ID,
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('salida lote: lanza BadRequest si lote insuficiente', async () => {

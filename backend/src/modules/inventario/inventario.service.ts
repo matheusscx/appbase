@@ -39,6 +39,7 @@ interface MoverResult {
   stockResultante: Decimal;
   unidadIds?: string[];
   loteId?: string;
+  loteConsumos?: { loteId: string; cantidad: string }[];
 }
 
 @Injectable()
@@ -204,13 +205,25 @@ export class InventarioService {
       return { stockResultante, unidadIds };
     } else {
       // salida serie
-      const unidadIds = params.unidadIds ?? [];
+      let unidadIds = params.unidadIds ?? [];
       if (unidadIds.length === 0) {
-        throw new BadRequestException(
-          'Para salida serie debe proveer los IDs de unidades',
+        // Auto-selección FIFO: las unidades disponibles más antiguas
+        const disponibles: { unidad_id: string }[] = await manager.query(
+          `SELECT u.unidad_id FROM item_unidad u
+           WHERE u.item_id = $1 AND u.tenant_id = $2
+             AND u.estado = 'disponible' AND u.eliminado_el IS NULL
+           ORDER BY u.creado_el ASC
+           LIMIT $3
+           FOR UPDATE`,
+          [params.itemId, params.tenantId, cantidad.toString()],
         );
-      }
-      if (!new Decimal(unidadIds.length).equals(cantidad)) {
+        if (!new Decimal(disponibles.length).equals(cantidad)) {
+          throw new BadRequestException(
+            `Stock insuficiente: se requieren ${cantidad.toString()} unidades disponibles, hay ${disponibles.length}`,
+          );
+        }
+        unidadIds = disponibles.map((u) => u.unidad_id);
+      } else if (!new Decimal(unidadIds.length).equals(cantidad)) {
         throw new BadRequestException(
           `La cantidad (${cantidad.toString()}) no coincide con el número de unidades (${unidadIds.length})`,
         );
@@ -319,9 +332,50 @@ export class InventarioService {
       // salida lote
       const loteId = params.loteId;
       if (!loteId) {
-        throw new BadRequestException(
-          'Para salida lote debe proveer el loteId',
+        // Auto-selección FIFO: descuenta de los lotes más antiguos
+        const lotes: { lote_id: string; cantidad_disponible: string }[] =
+          await manager.query(
+            `SELECT lote_id, cantidad_disponible FROM item_lote
+             WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+               AND cantidad_disponible > 0
+             ORDER BY creado_el ASC
+             FOR UPDATE`,
+            [params.itemId, params.tenantId],
+          );
+
+        const totalDisponible = lotes.reduce(
+          (acc, l) => acc.plus(l.cantidad_disponible),
+          new Decimal(0),
         );
+        if (totalDisponible.lessThan(cantidad)) {
+          throw new BadRequestException(
+            `Stock insuficiente en lotes (disponible: ${totalDisponible.toString()}, requerido: ${cantidad.toString()})`,
+          );
+        }
+
+        let restante = cantidad;
+        const loteConsumos: { loteId: string; cantidad: string }[] = [];
+        for (const l of lotes) {
+          if (restante.lessThanOrEqualTo(0)) break;
+          const disp = new Decimal(l.cantidad_disponible);
+          const tomar = Decimal.min(disp, restante);
+          await manager.query(
+            `UPDATE item_lote SET cantidad_disponible = $1 WHERE lote_id = $2`,
+            [disp.minus(tomar).toString(), l.lote_id],
+          );
+          loteConsumos.push({
+            loteId: l.lote_id,
+            cantidad: tomar.toString(),
+          });
+          restante = restante.minus(tomar);
+        }
+
+        const stockResultante = await this.recalcularStockLote(
+          manager,
+          params.itemId,
+        );
+
+        return { stockResultante, loteConsumos };
       }
 
       const rows: { cantidad_disponible: string; tenant_id: string }[] =
@@ -418,6 +472,15 @@ export class InventarioService {
              (movimiento_id, unidad_id, cantidad)
            VALUES ($1, $2, '1')`,
           [movimientoId, uid],
+        );
+      }
+    } else if (result.loteConsumos?.length) {
+      for (const c of result.loteConsumos) {
+        await manager.query(
+          `INSERT INTO movimiento_inventario_detalle
+             (movimiento_id, lote_id, cantidad)
+           VALUES ($1, $2, $3)`,
+          [movimientoId, c.loteId, c.cantidad],
         );
       }
     } else if (result.loteId) {

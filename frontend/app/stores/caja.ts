@@ -38,9 +38,13 @@ export const useCajaStore = defineStore('caja', () => {
   async function cargarActiva(): Promise<void> {
     loadingActiva.value = true
     try {
-      activa.value = await useApiFetch<Caja | null>(
+      // El backend retorna `null` cuando no hay caja abierta, pero NestJS lo
+      // envía como body vacío y ofetch lo deserializa como '' (string vacío).
+      // Normalizamos a null para que `activa !== null` no dé un falso positivo.
+      const data = await useApiFetch<Caja | null>(
         `${config.public.apiUrl}/caja/activa`,
       )
+      activa.value = data && typeof data === 'object' ? data : null
     }
     finally {
       loadingActiva.value = false

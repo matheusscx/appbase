@@ -160,7 +160,11 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
     </template>
 
     <template #body>
-      <div v-if="!cajaStore.loadingActiva && !tieneCaja" class="max-w-md mx-auto py-12">
+      <div v-if="cajaStore.loadingActiva" class="flex items-center justify-center h-full">
+        <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 text-muted animate-spin" />
+      </div>
+
+      <div v-else-if="!tieneCaja" class="max-w-md mx-auto py-12">
         <CajaAperturaForm />
       </div>
 

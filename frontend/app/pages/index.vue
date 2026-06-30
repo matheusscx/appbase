@@ -22,9 +22,11 @@ const tenantStore = useTenantStore()
         <h2 class="text-2xl font-semibold text-default mb-2">
           Bienvenido, {{ store.user?.nombre }}
         </h2>
-        <p class="text-muted text-sm">
-          Trabajando en <strong>{{ tenantStore.activeTenant?.nombre ?? '—' }}</strong>
-        </p>
+        <ClientOnly>
+          <p class="text-muted text-sm">
+            Trabajando en <strong>{{ tenantStore.activeTenant?.nombre ?? '—' }}</strong>
+          </p>
+        </ClientOnly>
       </div>
     </template>
   </UDashboardPanel>
