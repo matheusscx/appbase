@@ -7,6 +7,7 @@ import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService } from '../pagos/pagos.service';
+import { EstadoVenta } from './entities/venta.entity';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const USUARIO_ID = '550e8400-e29b-41d4-a716-446655440056';
@@ -172,11 +173,15 @@ describe('VentasService', () => {
     });
 
     it('crea venta en estado pagada cuando monto cubre el total', async () => {
+      pagosServiceMock.registrar.mockResolvedValueOnce([
+        { id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' },
+      ]);
       const result = await service.crear(TENANT_ID, USUARIO_ID, baseDto);
       expect(result).toBeDefined();
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(calculoPreciosService.calcular).toHaveBeenCalled();
       expect(dataSourceMock.transaction).toHaveBeenCalled();
+      expect(result.estado).toBe(EstadoVenta.PAGADA);
     });
 
     it('llama registrarMovimiento del inventario para items tipo producto', async () => {
@@ -211,11 +216,12 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce([
         { id: 'pago-uuid-001', monto: '150.0000', vuelto: '50.0000' },
       ]);
-      await service.crear(TENANT_ID, USUARIO_ID, dtoConExcedente);
+      const result = await service.crear(TENANT_ID, USUARIO_ID, dtoConExcedente);
       expect(pagosServiceMock.registrar).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ target: '100.0000' }),
       );
+      expect(result.estado).toBe(EstadoVenta.PAGADA);
     });
 
     it('lanza BadRequestException cuando excedente > 0 y ningún método permite vuelto', async () => {

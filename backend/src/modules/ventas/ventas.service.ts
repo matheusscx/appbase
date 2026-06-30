@@ -348,7 +348,7 @@ export class VentasService {
       totalFinal: r.total_final,
       fecha: r.fecha,
       creadoEl: r.creado_el,
-      montoPagado: r.monto_pagado,
+      montoPagado: new Decimal(r.monto_pagado).toFixed(4),
       saldo: new Decimal(r.total_final)
         .minus(new Decimal(r.monto_pagado))
         .toFixed(4),
