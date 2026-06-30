@@ -15,10 +15,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+  <div class="min-h-screen flex items-center justify-center bg-elevated">
     <div class="text-center space-y-3">
       <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 text-primary-600 animate-spin mx-auto" />
-      <p class="text-sm text-gray-500 dark:text-gray-400">Iniciando sesión…</p>
+      <p class="text-sm text-muted">Iniciando sesión…</p>
     </div>
   </div>
 </template>
