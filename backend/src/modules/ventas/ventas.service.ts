@@ -17,7 +17,7 @@ import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
-import { Pago } from './entities/pago.entity';
+import { Pago } from '../pagos/entities/pago.entity';
 
 export interface TipoDocumentoResponse {
   id: string;

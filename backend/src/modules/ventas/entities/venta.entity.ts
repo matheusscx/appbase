@@ -10,6 +10,7 @@ import {
 export enum EstadoVenta {
   BORRADOR = 'borrador',
   PENDIENTE = 'pendiente',
+  PAGADA_PARCIAL = 'pagada_parcial',
   PAGADA = 'pagada',
   CANCELADA = 'cancelada',
 }

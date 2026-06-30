@@ -74,7 +74,7 @@ import { VentaDescuento } from './modules/ventas/entities/venta-descuento.entity
 import { VentaRecargo } from './modules/ventas/entities/venta-recargo.entity';
 import { VentaImpuesto } from './modules/ventas/entities/venta-impuesto.entity';
 import { VentaCustomer } from './modules/ventas/entities/venta-customer.entity';
-import { Pago } from './modules/ventas/entities/pago.entity';
+import { Pago } from './modules/pagos/entities/pago.entity';
 import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
 
 @Module({

@@ -27,6 +27,7 @@ CREATE TYPE "modo_regla" AS ENUM (
 CREATE TYPE "estado_venta" AS ENUM (
   'borrador',
   'pendiente',
+  'pagada_parcial',
   'pagada',         -- era 'aprobada'
   'cancelada'
 );
