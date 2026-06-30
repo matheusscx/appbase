@@ -101,14 +101,14 @@ function moverAbajo(index: number) {
       <h2 class="text-lg font-semibold">
         Preferencias financieras
       </h2>
-      <p class="text-sm text-gray-500">
+      <p class="text-sm text-muted">
         Configura cómo se calculan descuentos, recargos e impuestos en el motor de precios.
       </p>
     </div>
 
     <div
       v-if="loading"
-      class="py-8 text-center text-sm text-gray-500"
+      class="py-8 text-center text-sm text-muted"
     >
       Cargando...
     </div>
@@ -121,7 +121,7 @@ function moverAbajo(index: number) {
             <p class="font-medium">
               Cálculo de descuentos
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-muted">
               Define cómo se aplican múltiples descuentos simultáneos.
             </p>
             <URadioGroup
@@ -138,7 +138,7 @@ function moverAbajo(index: number) {
             <p class="font-medium">
               Cálculo de recargos
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-muted">
               Define cómo se aplican múltiples recargos simultáneos.
             </p>
             <URadioGroup
@@ -155,7 +155,7 @@ function moverAbajo(index: number) {
             <p class="font-medium">
               Precisión y redondeo
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-muted">
               Controla la precisión de los cálculos intermedios y cómo se redondean los resultados.
             </p>
 
@@ -199,17 +199,17 @@ function moverAbajo(index: number) {
             <p class="font-medium">
               Orden de la fórmula de precios
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-muted">
               Define el orden en que se aplican los pasos al calcular el precio final.
             </p>
 
             <div class="space-y-1">
               <!-- Precio neto (fijo) -->
-              <div class="flex items-center gap-3 px-3 py-2 rounded-md bg-gray-50 dark:bg-gray-800 opacity-50">
-                <span class="flex-1 text-sm font-medium text-gray-500">
+              <div class="flex items-center gap-3 px-3 py-2 rounded-md bg-elevated opacity-50">
+                <span class="flex-1 text-sm font-medium text-muted">
                   Precio neto
                 </span>
-                <span class="text-xs text-gray-400">
+                <span class="text-xs text-muted">
                   (fijo — siempre primero)
                 </span>
               </div>
@@ -218,7 +218,7 @@ function moverAbajo(index: number) {
               <div
                 v-for="(paso, i) in formula"
                 :key="paso"
-                class="flex items-center gap-3 px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700"
+                class="flex items-center gap-3 px-3 py-2 rounded-md border border-border-default"
               >
                 <span class="flex-1 text-sm font-medium">
                   {{ pasoLabels[paso] ?? paso }}
@@ -244,11 +244,11 @@ function moverAbajo(index: number) {
               </div>
 
               <!-- Total final (fijo) -->
-              <div class="flex items-center gap-3 px-3 py-2 rounded-md bg-gray-50 dark:bg-gray-800 opacity-50">
-                <span class="flex-1 text-sm font-medium text-gray-500">
+              <div class="flex items-center gap-3 px-3 py-2 rounded-md bg-elevated opacity-50">
+                <span class="flex-1 text-sm font-medium text-muted">
                   Total final
                 </span>
-                <span class="text-xs text-gray-400">
+                <span class="text-xs text-muted">
                   (fijo — siempre último)
                 </span>
               </div>

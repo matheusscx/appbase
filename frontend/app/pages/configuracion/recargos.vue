@@ -256,7 +256,7 @@ onMounted(() => {
         <h2 class="text-lg font-semibold">
           Recargos
         </h2>
-        <p class="text-sm text-gray-500">
+        <p class="text-sm text-muted">
           Reglas de recargo aplicables en el cálculo de precios.
         </p>
       </div>
@@ -271,17 +271,17 @@ onMounted(() => {
     <UCard>
       <div
         v-if="loading"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         Cargando…
       </div>
       <div
         v-else-if="!recargos.length"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         No hay recargos registrados.
       </div>
-      <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+      <ul v-else class="divide-y divide-border-default">
         <li
           v-for="r in recargos"
           :key="r.id"
@@ -291,7 +291,7 @@ onMounted(() => {
             <p class="font-medium truncate">
               {{ r.nombre }}
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-muted">
               <template v-if="r.tramos?.length">
                 {{ r.tramos.length }} tramo{{ r.tramos.length !== 1 ? 's' : '' }}
               </template>
@@ -303,7 +303,7 @@ onMounted(() => {
                 {{ r.metodoPagoIds?.length ? `${r.metodoPagoIds.length} método(s) de pago` : '—' }}
               </template>
             </p>
-            <p class="text-xs text-gray-400">
+            <p class="text-xs text-muted">
               {{ tipos.find(t => t.value === r.tipoReglaId)?.label ?? '' }}
             </p>
           </div>
@@ -356,7 +356,7 @@ onMounted(() => {
             />
             <p
               v-if="tipoSeleccionado?.descripcion"
-              class="mt-1.5 text-xs text-gray-500 dark:text-gray-400 leading-snug"
+              class="mt-1.5 text-xs text-muted leading-snug"
             >
               {{ tipoSeleccionado.descripcion }}
             </p>
@@ -414,14 +414,14 @@ onMounted(() => {
               </div>
               <table class="w-full text-sm">
                 <thead>
-                  <tr class="text-left text-gray-500">
+                  <tr class="text-left text-muted">
                     <th class="pb-1">{{ config.labelTramos ?? 'Mínimo' }}</th>
                     <th class="pb-1">{{ form.modo === 'porcentaje' ? 'Porcentaje' : 'Monto' }}</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(tramo, i) in form.tramos" :key="i" class="border-t border-gray-100 dark:border-gray-800">
+                  <tr v-for="(tramo, i) in form.tramos" :key="i" class="border-t border-border-default">
                     <td class="py-1 pr-2">
                       <UInput v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
                     </td>
@@ -440,7 +440,7 @@ onMounted(() => {
                   </tr>
                 </tbody>
               </table>
-              <p v-if="!form.tramos.length" class="text-xs text-gray-400">
+              <p v-if="!form.tramos.length" class="text-xs text-muted">
                 Sin tramos. Agrega al menos uno.
               </p>
             </div>
