@@ -75,6 +75,7 @@ import { VentaRecargo } from './modules/ventas/entities/venta-recargo.entity';
 import { VentaImpuesto } from './modules/ventas/entities/venta-impuesto.entity';
 import { VentaCustomer } from './modules/ventas/entities/venta-customer.entity';
 import { Pago } from './modules/pagos/entities/pago.entity';
+import { PagosModule } from './modules/pagos/pagos.module';
 import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
 
 @Module({
@@ -164,6 +165,7 @@ import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-document
     CalculoPreciosModule,
     CajaModule,
     VentasModule,
+    PagosModule,
   ],
   controllers: [AppController],
   providers: [AppService],
