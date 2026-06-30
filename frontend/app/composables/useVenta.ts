@@ -105,14 +105,15 @@ export function resumenCobro(
 export function puedeCobrar(args: {
   tieneCaja: boolean
   lineas: CarritoLinea[]
-  requiereCustomer: boolean
+  customerRequerido: boolean
+  customerExpandido: boolean
   customerNombre: string
   tipoDocumentoId: string | undefined
 }): boolean {
   if (!args.tieneCaja) return false
   if (args.lineas.length === 0) return false
   if (!args.tipoDocumentoId) return false
-  if (args.requiereCustomer && args.customerNombre.trim() === '') return false
+  if ((args.customerRequerido || args.customerExpandido) && args.customerNombre.trim() === '') return false
   return true
 }
 

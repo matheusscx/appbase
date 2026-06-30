@@ -87,26 +87,26 @@ describe('puedeCobrar (gate)', () => {
   const docId = 'tipo-doc-1'
 
   it('false sin caja', () => {
-    expect(puedeCobrar({ tieneCaja: false, lineas, requiereCustomer: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: false, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
   })
 
   it('false con carrito vacío', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas: [], requiereCustomer: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: true, lineas: [], customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
   })
 
   it('false si tipoDocumentoId es undefined', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: false, customerNombre: '', tipoDocumentoId: undefined })).toBe(false)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: undefined })).toBe(false)
   })
 
-  it('false si requiereCustomer y falta nombre', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: true, customerNombre: '  ', tipoDocumentoId: docId })).toBe(false)
+  it('false si customerRequerido y falta nombre', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customerNombre: '  ', tipoDocumentoId: docId })).toBe(false)
   })
 
   it('true con caja, líneas y (sin factura) sin cliente', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
   })
 
   it('true con factura y nombre de cliente', () => {
-    expect(puedeCobrar({ tieneCaja: true, lineas, requiereCustomer: true, customerNombre: 'Juan', tipoDocumentoId: docId })).toBe(true)
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customerNombre: 'Juan', tipoDocumentoId: docId })).toBe(true)
   })
 })
