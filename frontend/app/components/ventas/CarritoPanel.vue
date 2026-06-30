@@ -97,9 +97,7 @@ function quitarCustomer() {
         </li>
       </ul>
 
-      <template v-if="customerRequerido">
-        <VentasClienteForm v-model="customer" class="mt-3" />
-      </template>
+      <VentasClienteForm v-if="customerRequerido" v-model="customer" class="mt-3" />
       <template v-else>
         <div class="mt-3">
           <UButton

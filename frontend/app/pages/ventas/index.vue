@@ -117,6 +117,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
   const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
 
   if (incluirCustomer && !customer.value.nombre.trim()) {
+    cobroOpen.value = false
     toast.add({ title: 'El nombre del cliente es requerido', color: 'error' })
     return
   }
