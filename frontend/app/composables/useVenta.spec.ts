@@ -109,4 +109,16 @@ describe('puedeCobrar (gate)', () => {
   it('true con factura y nombre de cliente', () => {
     expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: true, customerExpandido: false, customerNombre: 'Juan', tipoDocumentoId: docId })).toBe(true)
   })
+
+  it('false con customerExpandido sin nombre', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: true, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+  })
+
+  it('true con customerExpandido y nombre', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: true, customerNombre: 'Juan', tipoDocumentoId: docId })).toBe(true)
+  })
+
+  it('true con customerExpandido: false sin nombre (form cerrado)', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+  })
 })
