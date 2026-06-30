@@ -36,16 +36,16 @@ const gridClass = computed(() =>
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950 px-4 py-12">
+  <div class="min-h-screen flex items-center justify-center bg-elevated px-4 py-12">
     <div class="w-full max-w-lg">
       <div class="mb-8 text-center">
         <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-4">
           <UIcon name="i-heroicons-bolt" class="text-white w-5 h-5" />
         </div>
-        <h1 class="text-xl font-semibold text-gray-900 dark:text-white">
+        <h1 class="text-xl font-semibold text-default">
           ¿En qué empresa vas a trabajar?
         </h1>
-        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        <p class="mt-1 text-sm text-muted">
           Selecciona el espacio de trabajo para esta sesión.
         </p>
       </div>
@@ -71,7 +71,7 @@ const gridClass = computed(() =>
           v-for="tenant in tenantStore.tenants"
           :key="tenant.tenantId"
           :disabled="!!switching"
-          class="group relative flex items-center gap-4 rounded-xl bg-white dark:bg-gray-900 ring-1 ring-gray-200 dark:ring-gray-800 px-5 py-4 text-left transition-all hover:ring-primary-500 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-60"
+          class="group relative flex items-center gap-4 rounded-xl bg-default ring-1 ring-border-default px-5 py-4 text-left transition-all hover:ring-primary-500 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-60"
           @click="select(tenant.tenantId)"
         >
           <div
@@ -84,7 +84,7 @@ const gridClass = computed(() =>
             />
             <span v-else>{{ avatarInitial(tenant.nombre) }}</span>
           </div>
-          <span class="font-medium text-gray-900 dark:text-white text-sm flex-1 truncate">
+          <span class="font-medium text-default text-sm flex-1 truncate">
             {{ tenant.nombre }}
           </span>
           <UIcon

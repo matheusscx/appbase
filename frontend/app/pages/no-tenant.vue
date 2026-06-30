@@ -4,15 +4,15 @@ const authStore = useAuthStore()
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950 px-4">
+  <div class="min-h-screen flex items-center justify-center bg-elevated px-4">
     <div class="w-full max-w-sm text-center">
-      <div class="w-14 h-14 rounded-xl bg-amber-100 dark:bg-amber-950 flex items-center justify-center mx-auto mb-5">
-        <UIcon name="i-heroicons-building-office-2" class="w-7 h-7 text-amber-500" />
+      <div class="w-14 h-14 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center mx-auto mb-5">
+        <UIcon name="i-heroicons-building-office-2" class="w-7 h-7 text-primary-600 dark:text-primary-400" />
       </div>
-      <h1 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+      <h1 class="text-lg font-semibold text-default mb-2">
         Sin acceso a empresas
       </h1>
-      <p class="text-sm text-gray-500 dark:text-gray-400 mb-8 leading-relaxed">
+      <p class="text-sm text-muted mb-8 leading-relaxed">
         Tu cuenta no pertenece a ninguna empresa todavía.<br>
         Contacta al administrador para que te agregue.
       </p>
