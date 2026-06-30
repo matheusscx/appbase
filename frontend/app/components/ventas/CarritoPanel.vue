@@ -43,6 +43,16 @@ const docItems = computed(() =>
   props.tiposDocumento.map((t) => ({ label: t.nombre, value: t.id })),
 )
 
+// El input de cantidad arranca readonly para que el autocompletado de direcciones
+// de Chrome (que ignora autocomplete="off") no lo rellene. Se vuelve editable al
+// enfocarlo y se re-protege al salir.
+function quitarReadonly(e: Event) {
+  ;(e.target as HTMLInputElement).removeAttribute('readonly')
+}
+function ponerReadonly(e: Event) {
+  ;(e.target as HTMLInputElement).setAttribute('readonly', 'readonly')
+}
+
 function mostrarCustomer() {
   customerExpandido.value = true
 }
@@ -82,9 +92,14 @@ function quitarCustomer() {
           </div>
           <UInput
             :model-value="linea.cantidad"
+            name="cantidad"
             inputmode="decimal"
+            autocomplete="off"
+            readonly
             size="sm"
             class="w-20"
+            @focusin="quitarReadonly"
+            @focusout="ponerReadonly"
             @update:model-value="(v: string | number) => emit('cambiar-cantidad', linea.item.id, String(v))"
           />
           <UButton
