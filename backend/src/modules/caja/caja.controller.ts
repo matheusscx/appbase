@@ -55,6 +55,19 @@ export class CajaController {
     return this.cajaService.findActiva(u.tenantId!, u.id);
   }
 
+  @Get('abiertas')
+  @RequiresPermiso('Caja', 'Leer')
+  async abiertas(@Req() req: Request) {
+    const u = req.user as JwtUser;
+    const tieneVerTodas = await this.rbacService.userHasPermiso(
+      u.id,
+      u.tenantId!,
+      'Caja',
+      'Ver todas',
+    );
+    return this.cajaService.abiertas(u.tenantId!, u.id, tieneVerTodas);
+  }
+
   @Get(':id')
   @RequiresPermiso('Caja', 'Leer')
   async detalle(@Req() req: Request, @Param('id') cajaId: string) {

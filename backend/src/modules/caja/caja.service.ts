@@ -14,6 +14,16 @@ import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 
+export interface CajaAbierta {
+  id: string;
+  usuarioId: string | null;
+  usuarioNombre: string;
+  saldoInicial: string;
+  saldoEsperado: string;
+  fechaApertura: Date;
+  esPropia: boolean;
+}
+
 @Injectable()
 export class CajaService {
   constructor(
@@ -207,6 +217,63 @@ export class CajaService {
     return this.cajaRepo.find({
       where,
       order: { fechaApertura: 'DESC' },
+    });
+  }
+
+  async abiertas(
+    tenantId: string,
+    usuarioId: string,
+    tieneVerTodas: boolean,
+  ): Promise<CajaAbierta[]> {
+    const rows: {
+      caja_id: string;
+      usuario_id: string | null;
+      usuario_nombre: string | null;
+      usuario_apellido: string | null;
+      saldo_inicial: string;
+      fecha_apertura: Date;
+      total_entradas: string | null;
+      total_salidas: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT c.caja_id,
+              c.usuario_id,
+              u.nombre   AS usuario_nombre,
+              u.apellido AS usuario_apellido,
+              c.saldo_inicial,
+              c.fecha_apertura,
+              SUM(m.monto) FILTER (WHERE m.tipo = 'entrada' AND m.eliminado_el IS NULL) AS total_entradas,
+              SUM(m.monto) FILTER (WHERE m.tipo = 'salida'  AND m.eliminado_el IS NULL) AS total_salidas
+       FROM cajas c
+       LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id AND u.eliminado_el IS NULL
+       LEFT JOIN movimientos_caja m ON m.caja_id = c.caja_id
+       WHERE c.tenant_id = $1
+         AND c.tipo = 'fisica'
+         AND c.estado = 'abierta'
+         AND c.eliminado_el IS NULL
+         AND ($2::boolean OR c.usuario_id = $3)
+       GROUP BY c.caja_id, u.nombre, u.apellido
+       ORDER BY c.fecha_apertura DESC`,
+      [tenantId, tieneVerTodas, usuarioId],
+    );
+
+    return rows.map((r) => {
+      const saldoEsperado = new Decimal(r.saldo_inicial)
+        .plus(r.total_entradas ?? '0')
+        .minus(r.total_salidas ?? '0')
+        .toFixed(4);
+      const nombre = [r.usuario_nombre, r.usuario_apellido]
+        .filter((p): p is string => Boolean(p))
+        .join(' ')
+        .trim();
+      return {
+        id: r.caja_id,
+        usuarioId: r.usuario_id,
+        usuarioNombre: nombre || 'Sin usuario',
+        saldoInicial: new Decimal(r.saldo_inicial).toFixed(4),
+        saldoEsperado,
+        fechaApertura: r.fecha_apertura,
+        esPropia: r.usuario_id === usuarioId,
+      };
     });
   }
 

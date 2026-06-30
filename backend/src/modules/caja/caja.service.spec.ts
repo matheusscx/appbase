@@ -46,6 +46,7 @@ describe('CajaService', () => {
   };
   let dataSource: {
     transaction: jest.Mock;
+    query: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -68,6 +69,7 @@ describe('CajaService', () => {
       transaction: jest.fn((cb: (m: typeof managerMock) => Promise<unknown>) =>
         cb(managerMock),
       ),
+      query: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -513,6 +515,69 @@ describe('CajaService', () => {
       await expect(
         svc.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('abiertas', () => {
+    it('mapea filas a CajaAbierta con nombre completo y saldo esperado', async () => {
+      dataSource.query.mockResolvedValue([
+        {
+          caja_id: CAJA_ID,
+          usuario_id: USUARIO_ID,
+          usuario_nombre: 'Ana',
+          usuario_apellido: 'Pérez',
+          saldo_inicial: '1000',
+          fecha_apertura: new Date('2026-06-29T10:00:00Z'),
+          total_entradas: '200',
+          total_salidas: '50',
+        },
+      ]);
+
+      const result = await service.abiertas(TENANT_ID, USUARIO_ID, true);
+
+      expect(result).toEqual([
+        {
+          id: CAJA_ID,
+          usuarioId: USUARIO_ID,
+          usuarioNombre: 'Ana Pérez',
+          saldoInicial: '1000.0000',
+          saldoEsperado: '1150.0000',
+          fechaApertura: new Date('2026-06-29T10:00:00Z'),
+          esPropia: true,
+        },
+      ]);
+    });
+
+    it('trata entradas/salidas nulas como 0 y marca esPropia=false para otro usuario', async () => {
+      dataSource.query.mockResolvedValue([
+        {
+          caja_id: CAJA_ID,
+          usuario_id: OTRO_USUARIO,
+          usuario_nombre: 'Beto',
+          usuario_apellido: null,
+          saldo_inicial: '500',
+          fecha_apertura: new Date('2026-06-29T09:00:00Z'),
+          total_entradas: null,
+          total_salidas: null,
+        },
+      ]);
+
+      const result = await service.abiertas(TENANT_ID, USUARIO_ID, true);
+
+      expect(result[0]).toMatchObject({
+        usuarioNombre: 'Beto',
+        saldoEsperado: '500.0000',
+        esPropia: false,
+      });
+    });
+
+    it('pasa tenantId, el flag tieneVerTodas y usuarioId como parámetros de la query', async () => {
+      dataSource.query.mockResolvedValue([]);
+
+      await service.abiertas(TENANT_ID, USUARIO_ID, false);
+
+      const [, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
+      expect(params).toEqual([TENANT_ID, false, USUARIO_ID]);
     });
   });
 });
