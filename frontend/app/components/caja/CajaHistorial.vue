@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 
+const props = defineProps<{ usuarioId?: string }>()
+
 const cajaStore = useCajaStore()
 const permissionsStore = usePermissionsStore()
 const toast = useToast()
+const { formatMonto, formatFecha } = useFormatters()
 
 const todasActivo = ref(false)
 
@@ -11,21 +14,12 @@ const puedeVerTodas = computed(
   () => permissionsStore.esAdmin || permissionsStore.can('Caja', 'Ver todas'),
 )
 
-function formatFecha(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('es-ES', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function formatMonto(val: string | null): string {
-  if (val === null || val === undefined) return '—'
-  return new Decimal(val).toFixed(2)
-}
+const historial = computed(() => {
+  if (props.usuarioId) {
+    return cajaStore.historial.filter(c => c.usuarioId === props.usuarioId)
+  }
+  return cajaStore.historial
+})
 
 function diferenciaPositiva(val: string | null): boolean {
   if (val === null || val === undefined) return true
@@ -47,7 +41,9 @@ async function toggleTodas(): Promise<void> {
   await cargar(todasActivo.value)
 }
 
-onMounted(() => cargar(false))
+onMounted(() => cargar(!!props.usuarioId))
+
+watch(() => props.usuarioId, (id) => cargar(!!id))
 </script>
 
 <template>
@@ -58,7 +54,7 @@ onMounted(() => cargar(false))
           Historial de cajas
         </h2>
         <UButton
-          v-if="puedeVerTodas"
+          v-if="puedeVerTodas && !usuarioId"
           size="sm"
           :color="todasActivo ? 'primary' : 'neutral'"
           :variant="todasActivo ? 'solid' : 'outline'"
@@ -71,7 +67,7 @@ onMounted(() => cargar(false))
 
     <!-- Estado vacío -->
     <div
-      v-if="cajaStore.historial.length === 0"
+      v-if="historial.length === 0"
       class="py-10 text-center text-sm text-gray-500"
     >
       <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
@@ -93,7 +89,7 @@ onMounted(() => cargar(false))
         </thead>
         <tbody>
           <tr
-            v-for="caja in cajaStore.historial"
+            v-for="caja in historial"
             :key="caja.id"
             class="border-b border-gray-100 dark:border-gray-800 last:border-0"
           >

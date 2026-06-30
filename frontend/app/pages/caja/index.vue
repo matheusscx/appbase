@@ -5,16 +5,10 @@ const cajaStore = useCajaStore()
 const perms = usePermissionsStore()
 const toast = useToast()
 const loading = ref(false)
-const tab = ref<'mi-caja' | 'todas'>('mi-caja')
 
 const puedeVerTodas = computed(
   () => perms.esAdmin || perms.can('Caja', 'Ver todas'),
 )
-
-const tabItems = [
-  { label: 'Mi caja', slot: 'mi-caja' as const },
-  { label: 'Todas las cajas', slot: 'todas' as const },
-]
 
 onMounted(async () => {
   if (!perms.loading && perms.permisos.length === 0) {
@@ -25,6 +19,7 @@ onMounted(async () => {
     await navigateTo('/ventas')
     return
   }
+
   loading.value = true
   try {
     await cajaStore.cargarActiva()
@@ -35,7 +30,18 @@ onMounted(async () => {
   finally {
     loading.value = false
   }
+
+  // Sin permiso de ver todas: despachar a la caja propia si está abierta
+  if (!puedeVerTodas.value && cajaStore.activa) {
+    await navigateTo(`/caja/${cajaStore.activa.id}`, { replace: true })
+  }
 })
+
+async function onOpened(): Promise<void> {
+  if (cajaStore.activa) {
+    await navigateTo(`/caja/${cajaStore.activa.id}`)
+  }
+}
 </script>
 
 <template>
@@ -49,41 +55,31 @@ onMounted(async () => {
       </p>
     </div>
 
-    <UTabs
-      v-if="puedeVerTodas"
-      v-model="tab"
-      :items="tabItems"
-      :unmount-on-hide="false"
-    >
-      <template #mi-caja>
-        <div class="space-y-6 pt-4">
-          <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
-            <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
-            Cargando…
-          </div>
-          <CajaAperturaForm v-else-if="!cajaStore.activa" />
-          <CajaActivaDashboard v-else :caja="cajaStore.activa" />
-          <UDivider class="my-2" />
-          <CajaHistorial />
-        </div>
-      </template>
-
-      <template #todas>
-        <div class="pt-4">
-          <CajasAbiertasGrid @operar-propia="tab = 'mi-caja'" />
-        </div>
-      </template>
-    </UTabs>
-
-    <div v-else class="space-y-6">
-      <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
-        <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
-        Cargando…
-      </div>
-      <CajaAperturaForm v-else-if="!cajaStore.activa" />
-      <CajaActivaDashboard v-else :caja="cajaStore.activa" />
-      <UDivider class="my-2" />
-      <CajaHistorial />
+    <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
+      <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+      Cargando…
     </div>
+
+    <!-- Con permiso Ver todas: listado de cajas (con card de apertura si no hay propia) -->
+    <template v-else-if="puedeVerTodas">
+      <CajaAbiertasGrid />
+    </template>
+
+    <!-- Sin permiso Ver todas y sin caja abierta: mostrar formulario de apertura + historial -->
+    <template v-else-if="!cajaStore.activa">
+      <div class="space-y-6">
+        <CajaAperturaForm @opened="onOpened" />
+        <USeparator class="my-2" />
+        <CajaHistorial />
+      </div>
+    </template>
+
+    <!-- Sin permiso Ver todas con caja abierta: redirigiendo (no debería verse) -->
+    <template v-else>
+      <div class="py-12 text-center text-sm text-gray-500">
+        <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+        Redirigiendo…
+      </div>
+    </template>
   </div>
 </template>

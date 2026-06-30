@@ -4,6 +4,7 @@ import type { Caja } from '~/stores/caja'
 
 const props = defineProps<{
   caja: Caja
+  readonly?: boolean
 }>()
 
 const cajaStore = useCajaStore()
@@ -39,17 +40,7 @@ const saldoEsperado = computed(() => {
     .minus(totalSalidas.value)
 })
 
-function formatMonto(value: string | Decimal): string {
-  const d = value instanceof Decimal ? value : new Decimal(value)
-  return new Intl.NumberFormat('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(d.toNumber())
-}
-
-function formatFecha(iso: string): string {
-  return new Intl.DateTimeFormat('es-CL', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(iso))
-}
+const { formatMonto, formatFecha } = useFormatters()
 </script>
 
 <template>
@@ -63,15 +54,15 @@ function formatFecha(iso: string): string {
               <h2 class="text-base font-semibold">
                 Caja
               </h2>
-              <UBadge color="success" variant="soft">
-                ABIERTA
+              <UBadge :color="caja.estado === 'abierta' ? 'success' : 'neutral'" variant="soft">
+                {{ caja.estado.toUpperCase() }}
               </UBadge>
             </div>
             <p class="text-sm text-gray-500 mt-0.5">
               Apertura: {{ formatFecha(caja.fechaApertura) }}
             </p>
           </div>
-          <div class="flex gap-2">
+          <div v-if="!readonly" class="flex gap-2">
             <UButton
               icon="i-heroicons-plus-circle"
               color="neutral"
@@ -191,14 +182,16 @@ function formatFecha(iso: string): string {
     </UCard>
 
     <!-- Modals -->
-    <CajaMovimientoModal
-      v-model:open="movimientoModalOpen"
-      :caja-id="caja.id"
-    />
-    <CajaCierreModal
-      v-model:open="cierreModalOpen"
-      :caja-id="caja.id"
-      :saldo-esperado="saldoEsperado"
-    />
+    <template v-if="!readonly">
+      <CajaMovimientoModal
+        v-model:open="movimientoModalOpen"
+        :caja-id="caja.id"
+      />
+      <CajaCierreModal
+        v-model:open="cierreModalOpen"
+        :caja-id="caja.id"
+        :saldo-esperado="saldoEsperado"
+      />
+    </template>
   </div>
 </template>

@@ -47,10 +47,7 @@ const diferencia = computed(() => {
   }
 })
 
-function formatMonto(value: Decimal | string): string {
-  const d = value instanceof Decimal ? value : new Decimal(value)
-  return new Intl.NumberFormat('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(d.toNumber())
-}
+const { formatMonto } = useFormatters()
 
 async function cerrarCaja() {
   if (!montoContado.value) {

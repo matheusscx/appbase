@@ -227,6 +227,7 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 ### Frontend
 - Routing basado en archivos vía `pages/`. Usar `$fetch` para llamadas a la API (no axios).
 - Prefijar las vars de runtime config públicas con `VITE_` en el env y acceder vía `useRuntimeConfig().public`.
+- **Funciones de formato centralizadas:** `formatMonto` y `formatFecha` (y cualquier utilidad de presentación reutilizable) deben vivir en composables de `app/composables/`, nunca definirse localmente dentro de un componente. Hoy están en `useFormatters`. Antes de escribir una función de formato en un `.vue`, verificar si ya existe en un composable.
 
 ### Planes de implementación
 Todo plan de implementación se **persiste dentro del repo** (no solo en el archivo efímero del modo plan):
