@@ -140,7 +140,7 @@ onMounted(cargar)
         <h2 class="text-lg font-semibold">
           Impuestos
         </h2>
-        <p class="text-sm text-gray-500">
+        <p class="text-sm text-muted">
           Tasas impositivas del tenant (en decimal: 0.19 = 19%).
         </p>
       </div>
@@ -155,17 +155,17 @@ onMounted(cargar)
     <UCard>
       <div
         v-if="loading"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         Cargando…
       </div>
       <div
         v-else-if="!impuestos.length"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         No hay impuestos registrados.
       </div>
-      <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+      <ul v-else class="divide-y divide-border-default">
         <li
           v-for="imp in impuestos"
           :key="imp.id"
@@ -175,7 +175,7 @@ onMounted(cargar)
             <p class="font-medium truncate">
               {{ imp.nombre }}
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-muted">
               Porcentaje: {{ imp.porcentaje }}
             </p>
           </div>

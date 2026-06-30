@@ -130,7 +130,7 @@ onMounted(cargar)
       <h2 class="text-lg font-semibold">
         Monedas
       </h2>
-      <p class="text-sm text-gray-500">
+      <p class="text-sm text-muted">
         Habilita las monedas disponibles para tu país y define la tasa de cambio del día.
         La moneda oficial siempre está habilitada con tasa 1.
       </p>
@@ -139,17 +139,17 @@ onMounted(cargar)
     <UCard>
       <div
         v-if="loading"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         Cargando…
       </div>
       <div
         v-else-if="!monedas.length"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         No hay monedas disponibles para el país del tenant.
       </div>
-      <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+      <ul v-else class="divide-y divide-border-default">
         <li
           v-for="m in monedas"
           :key="m.monedaId"
@@ -167,7 +167,7 @@ onMounted(cargar)
                 Oficial
               </UBadge>
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-muted">
               {{ m.codigoIso }}<span v-if="m.simbolo"> · {{ m.simbolo }}</span>
             </p>
           </div>

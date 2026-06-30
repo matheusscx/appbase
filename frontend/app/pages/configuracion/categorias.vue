@@ -150,7 +150,7 @@ onMounted(cargar)
         <h2 class="text-lg font-semibold">
           Categorías
         </h2>
-        <p class="text-sm text-gray-500">
+        <p class="text-sm text-muted">
           Clasifica productos y servicios del catálogo.
         </p>
       </div>
@@ -165,17 +165,17 @@ onMounted(cargar)
     <UCard>
       <div
         v-if="loading"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         Cargando…
       </div>
       <div
         v-else-if="!categorias.length"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         No hay categorías registradas.
       </div>
-      <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+      <ul v-else class="divide-y divide-border-default">
         <li
           v-for="cat in categorias"
           :key="cat.id"
@@ -185,7 +185,7 @@ onMounted(cargar)
             <p class="font-medium truncate">
               {{ cat.nombre }}
             </p>
-            <p class="text-sm text-gray-500">
+            <p class="text-sm text-muted">
               Aplica a: {{ aplicaALabel(cat.aplicaA) }}
             </p>
           </div>

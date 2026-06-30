@@ -84,7 +84,7 @@ onMounted(cargar)
       <h2 class="text-lg font-semibold">
         Métodos de pago
       </h2>
-      <p class="text-sm text-gray-500">
+      <p class="text-sm text-muted">
         Habilita los métodos de pago disponibles para tu país e indica cuáles permiten dar vuelto.
       </p>
     </div>
@@ -92,17 +92,17 @@ onMounted(cargar)
     <UCard>
       <div
         v-if="loading"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         Cargando…
       </div>
       <div
         v-else-if="!metodos.length"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         No hay métodos de pago disponibles para el país del tenant.
       </div>
-      <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+      <ul v-else class="divide-y divide-border-default">
         <li
           v-for="m in metodos"
           :key="m.metodoPagoId"
@@ -112,7 +112,7 @@ onMounted(cargar)
             <p class="font-medium truncate">
               {{ m.nombre }}
             </p>
-            <p v-if="m.abreviatura" class="text-sm text-gray-500">
+            <p v-if="m.abreviatura" class="text-sm text-muted">
               {{ m.abreviatura }}
             </p>
           </div>
@@ -120,7 +120,7 @@ onMounted(cargar)
           <div class="flex items-center gap-6 shrink-0">
             <!-- Permite vuelto -->
             <div class="flex items-center gap-2">
-              <span class="text-sm text-gray-500">Permite vuelto</span>
+              <span class="text-sm text-muted">Permite vuelto</span>
               <USwitch
                 :model-value="m.permiteVuelto"
                 :disabled="toggling.has(m.metodoPagoId)"
@@ -130,7 +130,7 @@ onMounted(cargar)
 
             <!-- Habilitada -->
             <div class="flex items-center gap-2">
-              <span class="text-sm text-gray-500">Habilitado</span>
+              <span class="text-sm text-muted">Habilitado</span>
               <USwitch
                 :model-value="m.habilitada"
                 :disabled="toggling.has(m.metodoPagoId)"
