@@ -108,7 +108,29 @@ export class VentasService {
     );
     const totalFinal = new Decimal(resultado.totales.totalFinal);
 
-    // 6. Resolver vuelto y estado
+    // 6. Resolver info de métodos de pago (nombre + permite_vuelto)
+    const metodoPagoRows: {
+      metodo_pago_id: string;
+      nombre: string;
+      permite_vuelto: boolean;
+    }[] = await this.dataSource.query(
+      `SELECT tmp.metodo_pago_id, mp.nombre, tmp.permite_vuelto
+       FROM tenant_metodo_pago tmp
+       JOIN metodos_pago mp ON mp.metodo_pago_id = tmp.metodo_pago_id
+                            AND mp.eliminado_el IS NULL
+       WHERE tmp.tenant_id = $1
+         AND tmp.metodo_pago_id = ANY($2::uuid[])
+         AND tmp.eliminado_el IS NULL`,
+      [tenantId, dto.pagos.map((p) => p.metodoPagoId)],
+    );
+    const metodoPagoMap = new Map(
+      metodoPagoRows.map((r) => [
+        r.metodo_pago_id,
+        { nombre: r.nombre, permiteVuelto: r.permite_vuelto },
+      ]),
+    );
+
+    // 7. Resolver vuelto y estado
     const sumaPagos = dto.pagos.reduce(
       (acc, p) => acc.plus(p.monto),
       new Decimal(0),
@@ -117,21 +139,8 @@ export class VentasService {
 
     let pagoConVueltoIdx = -1;
     if (excedente.gt(0)) {
-      // Buscar el primer método con permite_vuelto
-      const permisoRows: { metodo_pago_id: string; permite_vuelto: boolean }[] =
-        await this.dataSource.query(
-          `SELECT metodo_pago_id, permite_vuelto
-           FROM tenant_metodo_pago
-           WHERE tenant_id = $1
-             AND metodo_pago_id = ANY($2::uuid[])
-             AND eliminado_el IS NULL`,
-          [tenantId, dto.pagos.map((p) => p.metodoPagoId)],
-        );
-      const permisoMap = new Map(
-        permisoRows.map((r) => [r.metodo_pago_id, r.permite_vuelto]),
-      );
       pagoConVueltoIdx = dto.pagos.findIndex(
-        (p) => permisoMap.get(p.metodoPagoId) === true,
+        (p) => metodoPagoMap.get(p.metodoPagoId)?.permiteVuelto === true,
       );
       if (pagoConVueltoIdx === -1) {
         throw new BadRequestException(
@@ -145,9 +154,9 @@ export class VentasService {
       ? EstadoVenta.PAGADA
       : EstadoVenta.PENDIENTE;
 
-    // 7. Transacción atómica
+    // 8. Transacción atómica
     return this.dataSource.transaction(async (manager) => {
-      // 7a. Cabecera de venta
+      // 8a. Cabecera de venta
       const venta = await manager.save(
         Venta,
         manager.create(Venta, {
@@ -321,10 +330,11 @@ export class VentasService {
         await this.cajaService.registrarMovimientoEnTransaccion(manager, {
           cajaId: caja.id,
           tipo: 'entrada',
-          concepto: 'Venta',
+          concepto: `Venta · ${metodoPagoMap.get(p.metodoPagoId)?.nombre ?? 'Pago'}`,
           monto: montoNeto,
           ventaId: venta.id,
           pagoId: pagosGuardados[i].id,
+          metodoPagoId: p.metodoPagoId,
         });
       }
 

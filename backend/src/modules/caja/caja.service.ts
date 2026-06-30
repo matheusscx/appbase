@@ -144,6 +144,7 @@ export class CajaService {
       referencia?: string | null;
       ventaId?: string | null;
       pagoId?: string | null;
+      metodoPagoId?: string | null;
     },
   ): Promise<MovimientoCaja> {
     const movimiento = manager.create(MovimientoCaja, {
@@ -154,6 +155,7 @@ export class CajaService {
       referencia: params.referencia ?? null,
       ventaId: params.ventaId ?? null,
       pagoId: params.pagoId ?? null,
+      metodoPagoId: params.metodoPagoId ?? null,
     });
     return manager.save(MovimientoCaja, movimiento);
   }

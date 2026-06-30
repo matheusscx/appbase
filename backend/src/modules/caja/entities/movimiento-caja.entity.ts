@@ -31,10 +31,13 @@ export class MovimientoCaja {
   fecha: Date;
 
   @Column({ name: 'venta_id', type: 'uuid', nullable: true })
-  ventaId: string | null; // hook futuro (ventas) — sin uso ahora
+  ventaId: string | null;
 
   @Column({ name: 'pago_id', type: 'uuid', nullable: true })
-  pagoId: string | null; // hook futuro (pagos) — sin uso ahora
+  pagoId: string | null;
+
+  @Column({ name: 'metodo_pago_id', type: 'uuid', nullable: true })
+  metodoPagoId: string | null;
 
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
