@@ -89,7 +89,7 @@ const gridClass = computed(() =>
           </span>
           <UIcon
             name="i-heroicons-chevron-right"
-            class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-hover:translate-x-0.5"
+            class="w-4 h-4 text-muted shrink-0 transition-transform group-hover:translate-x-0.5"
           />
         </button>
       </div>
