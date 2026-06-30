@@ -128,14 +128,14 @@ onMounted(cargar)
       <h2 class="text-lg font-semibold">
         Empresa
       </h2>
-      <p class="text-sm text-gray-500">
+      <p class="text-sm text-muted">
         Datos de tu organización.
       </p>
     </div>
 
     <div
       v-if="loading"
-      class="py-8 text-center text-sm text-gray-500"
+      class="py-8 text-center text-sm text-muted"
     >
       Cargando…
     </div>

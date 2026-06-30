@@ -123,7 +123,7 @@ onMounted(cargar)
       Volver a roles
     </UButton>
 
-    <div v-if="loading" class="py-8 text-center text-sm text-gray-500">
+    <div v-if="loading" class="py-8 text-center text-sm text-muted">
       Cargando…
     </div>
 
@@ -167,7 +167,7 @@ onMounted(cargar)
 
         <div
           v-if="rol.esFijo"
-          class="py-4 text-sm text-gray-500"
+          class="py-4 text-sm text-muted"
         >
           El rol Administrador tiene acceso completo a todos los módulos
           contratados; sus permisos no se editan.
@@ -175,7 +175,7 @@ onMounted(cargar)
 
         <div
           v-else-if="!modulos.length"
-          class="py-4 text-sm text-gray-500"
+          class="py-4 text-sm text-muted"
         >
           El tenant no tiene módulos contratados.
         </div>
@@ -208,7 +208,7 @@ onMounted(cargar)
       </UCard>
     </template>
 
-    <div v-else class="py-8 text-center text-sm text-gray-500">
+    <div v-else class="py-8 text-center text-sm text-muted">
       Rol no encontrado.
     </div>
   </div>

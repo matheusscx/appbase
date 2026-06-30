@@ -97,7 +97,7 @@ onMounted(cargar)
       <h2 class="text-lg font-semibold">
         Usuarios
       </h2>
-      <p class="text-sm text-gray-500">
+      <p class="text-sm text-muted">
         Asigna roles a los usuarios del tenant.
       </p>
     </div>
@@ -105,17 +105,17 @@ onMounted(cargar)
     <UCard>
       <div
         v-if="loading"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         Cargando…
       </div>
       <div
         v-else-if="!members.length"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         No hay usuarios en este tenant.
       </div>
-      <ul v-else class="divide-y divide-gray-100 dark:divide-gray-800">
+      <ul v-else class="divide-y divide-border-default">
         <li
           v-for="member in members"
           :key="member.usuarioId"
@@ -125,7 +125,7 @@ onMounted(cargar)
             <p class="font-medium truncate">
               {{ member.nombre }} {{ member.apellido }}
             </p>
-            <p class="text-sm text-gray-500 truncate">
+            <p class="text-sm text-muted truncate">
               {{ member.correo }}
             </p>
             <div class="flex flex-wrap gap-1 mt-1">
@@ -140,7 +140,7 @@ onMounted(cargar)
               </UBadge>
               <span
                 v-if="!member.roles.length"
-                class="text-xs text-gray-400"
+                class="text-xs text-muted"
               >
                 Sin roles
               </span>
