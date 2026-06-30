@@ -4,7 +4,7 @@ import { puedeCobrar } from '~/composables/useVenta'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import type { CustomerForm } from './ClienteForm.vue'
 
-interface TipoDoc { id: string; nombre: string; requiereCustomer: boolean }
+interface TipoDoc { id: string; nombre: string; customerRequerido: boolean }
 
 const props = defineProps<{
   lineas: CarritoLinea[]
@@ -21,17 +21,19 @@ const emit = defineEmits<{
 
 const tipoDocumentoId = defineModel<string | undefined>('tipoDocumentoId')
 const customer = defineModel<CustomerForm>('customer', { required: true })
+const customerExpandido = defineModel<boolean>('customerExpandido', { default: false })
 
 const docSeleccionado = computed(() =>
   props.tiposDocumento.find((t) => t.id === tipoDocumentoId.value),
 )
-const requiereCustomer = computed(() => docSeleccionado.value?.requiereCustomer ?? false)
+const customerRequerido = computed(() => docSeleccionado.value?.customerRequerido ?? false)
 
 const habilitarCobro = computed(() =>
   puedeCobrar({
     tieneCaja: props.tieneCaja,
     lineas: props.lineas,
-    requiereCustomer: requiereCustomer.value,
+    customerRequerido: customerRequerido.value,
+    customerExpandido: customerExpandido.value,
     customerNombre: customer.value.nombre,
     tipoDocumentoId: tipoDocumentoId.value,
   }),
@@ -40,6 +42,15 @@ const habilitarCobro = computed(() =>
 const docItems = computed(() =>
   props.tiposDocumento.map((t) => ({ label: t.nombre, value: t.id })),
 )
+
+function mostrarCustomer() {
+  customerExpandido.value = true
+}
+
+function quitarCustomer() {
+  customerExpandido.value = false
+  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
+}
 </script>
 
 <template>
@@ -86,7 +97,35 @@ const docItems = computed(() =>
         </li>
       </ul>
 
-      <VentasClienteForm v-if="requiereCustomer" v-model="customer" class="mt-3" />
+      <template v-if="customerRequerido">
+        <VentasClienteForm v-model="customer" class="mt-3" />
+      </template>
+      <template v-else>
+        <div class="mt-3">
+          <UButton
+            v-if="!customerExpandido"
+            label="Agregar datos del cliente"
+            icon="i-heroicons-user-plus"
+            variant="soft"
+            color="neutral"
+            size="sm"
+            block
+            @click="mostrarCustomer"
+          />
+          <template v-else>
+            <VentasClienteForm v-model="customer" />
+            <UButton
+              label="Quitar datos del cliente"
+              icon="i-heroicons-x-mark"
+              variant="ghost"
+              color="error"
+              size="xs"
+              class="mt-2"
+              @click="quitarCustomer"
+            />
+          </template>
+        </div>
+      </template>
     </div>
 
     <template #footer>
