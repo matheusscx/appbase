@@ -100,6 +100,40 @@ export function resumenCobro(
   }
 }
 
+/**
+ * Recorta el monto de los pagos cuyo método no permite vuelto para que el total
+ * cobrado no supere `total`: un método sin vuelto no puede sobrepagar (no hay
+ * cómo devolver el excedente). Solo reduce, nunca aumenta. Los métodos que
+ * permiten vuelto (efectivo) no se tocan: pueden sobrepagar y generar vuelto.
+ * Idempotente; devuelve la misma referencia si no hubo cambios.
+ */
+export function clampNoVuelto(
+  total: string,
+  pagos: PagoInput[],
+  metodos: { metodoPagoId: string; permiteVuelto: boolean }[],
+): PagoInput[] {
+  const totalD = new Decimal(total || '0')
+  let cambio = false
+  const clamped = pagos.map((p, i) => {
+    const permiteVuelto = metodos.find(
+      (m) => m.metodoPagoId === p.metodoPagoId,
+    )?.permiteVuelto
+    if (permiteVuelto !== false) return p
+
+    const otros = pagos.reduce(
+      (acc, q, j) => (j === i ? acc : acc.plus(new Decimal(q.monto || '0'))),
+      new Decimal(0),
+    )
+    const disponible = Decimal.max(0, totalD.minus(otros))
+    const monto = new Decimal(p.monto || '0')
+    if (monto.lte(disponible)) return p
+
+    cambio = true
+    return { ...p, monto: disponible.toString() }
+  })
+  return cambio ? clamped : pagos
+}
+
 // ── Gate ────────────────────────────────────────────────────────────────────
 
 export function puedeCobrar(args: {

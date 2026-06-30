@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { resumenCobro, sumaPagos, type PagoInput } from '~/composables/useVenta'
+import { clampNoVuelto, resumenCobro, sumaPagos, type PagoInput } from '~/composables/useVenta'
 
 interface MetodoPago {
   metodoPagoId: string
@@ -27,6 +27,20 @@ watch(open, (v) => {
       : []
   }
 })
+
+// Un método sin vuelto (tarjeta, transferencia) no puede sobrepagar: recortamos
+// su monto al total/restante en cuanto el cajero escribe o cambia de método.
+const metodosVuelto = computed(() =>
+  props.metodos.map((m) => ({ metodoPagoId: m.metodoPagoId, permiteVuelto: m.permiteVuelto })),
+)
+watch(
+  pagos,
+  (val) => {
+    const clamped = clampNoVuelto(props.total, val, metodosVuelto.value)
+    if (clamped !== val) pagos.value = clamped
+  },
+  { deep: true },
+)
 
 function agregarPago() {
   const def = metodosHabilitados.value[0]

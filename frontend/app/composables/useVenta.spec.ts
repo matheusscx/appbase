@@ -6,6 +6,7 @@ import {
   toCalcularInput,
   sumaPagos,
   resumenCobro,
+  clampNoVuelto,
   puedeCobrar,
   type CarritoLinea,
   type ItemCatalogo,
@@ -79,6 +80,63 @@ describe('pagos helpers', () => {
     const r = resumenCobro('100', [{ metodoPagoId: 'm1', monto: '150' }], [{ metodoPagoId: 'm1', permiteVuelto: false }])
     expect(r.vuelto).toBe('0')
     expect(r.excedenteSinVuelto).toBe(true)
+  })
+})
+
+describe('clampNoVuelto', () => {
+  const metodos = [
+    { metodoPagoId: 'efe', permiteVuelto: true },
+    { metodoPagoId: 'tdc', permiteVuelto: false },
+  ]
+
+  it('recorta el monto de un método sin vuelto al total', () => {
+    const r = clampNoVuelto('1500.0000', [{ metodoPagoId: 'tdc', monto: '2000' }], metodos)
+    expect(r[0]!.monto).toBe('1500')
+  })
+
+  it('no toca un método sin vuelto cuyo monto no supera el total', () => {
+    const r = clampNoVuelto('1500.0000', [{ metodoPagoId: 'tdc', monto: '1500.0000' }], metodos)
+    expect(r[0]!.monto).toBe('1500.0000')
+  })
+
+  it('nunca aumenta el monto, solo lo recorta', () => {
+    const r = clampNoVuelto('1500', [{ metodoPagoId: 'tdc', monto: '500' }], metodos)
+    expect(r[0]!.monto).toBe('500')
+  })
+
+  it('permite sobrepago en métodos con vuelto (no recorta efectivo)', () => {
+    const r = clampNoVuelto('1500', [{ metodoPagoId: 'efe', monto: '2000' }], metodos)
+    expect(r[0]!.monto).toBe('2000')
+  })
+
+  it('en pagos divididos, recorta el método sin vuelto al restante tras los otros pagos', () => {
+    const r = clampNoVuelto(
+      '1500',
+      [{ metodoPagoId: 'efe', monto: '1000' }, { metodoPagoId: 'tdc', monto: '900' }],
+      metodos,
+    )
+    expect(r[0]!.monto).toBe('1000')
+    expect(r[1]!.monto).toBe('500')
+  })
+
+  it('recorta a 0 cuando los otros pagos ya cubren el total', () => {
+    const r = clampNoVuelto(
+      '1500',
+      [{ metodoPagoId: 'efe', monto: '1500' }, { metodoPagoId: 'tdc', monto: '300' }],
+      metodos,
+    )
+    expect(r[1]!.monto).toBe('0')
+  })
+
+  it('es idempotente', () => {
+    const once = clampNoVuelto('1500', [{ metodoPagoId: 'tdc', monto: '2000' }], metodos)
+    const twice = clampNoVuelto('1500', once, metodos)
+    expect(twice).toEqual(once)
+  })
+
+  it('devuelve la misma referencia de array cuando no hay cambios', () => {
+    const pagos = [{ metodoPagoId: 'tdc', monto: '1500' }]
+    expect(clampNoVuelto('1500', pagos, metodos)).toBe(pagos)
   })
 })
 
