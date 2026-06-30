@@ -209,6 +209,7 @@ describe('CajaService', () => {
         referencia: null,
         ventaId: null,
         pagoId: null,
+        metodoPagoId: null,
       });
       expect(result).toEqual(movCreado);
     });
