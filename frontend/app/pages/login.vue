@@ -21,20 +21,20 @@ async function onGoogle() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+  <div class="min-h-screen flex items-center justify-center bg-elevated px-4">
     <div class="w-full max-w-sm">
       <!-- Logo -->
       <div class="mb-8 text-center">
         <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-4">
           <UIcon name="i-heroicons-bolt" class="text-white w-5 h-5" />
         </div>
-        <h1 class="text-xl font-semibold text-gray-900 dark:text-white">
+        <h1 class="text-xl font-semibold text-default">
           Prueba Técnica
         </h1>
       </div>
 
       <!-- Card -->
-      <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-sm ring-1 ring-gray-200 dark:ring-gray-800 p-8 space-y-5">
+      <div class="bg-default rounded-2xl shadow-sm ring-1 ring-border-default p-8 space-y-5">
 
         <!-- Error -->
         <UAlert
@@ -66,9 +66,9 @@ async function onGoogle() {
 
         <!-- Divider -->
         <div class="flex items-center gap-3">
-          <div class="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
-          <span class="text-xs text-gray-400 dark:text-gray-500">o</span>
-          <div class="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
+          <div class="flex-1 h-px bg-border-default" />
+          <span class="text-xs text-muted">o</span>
+          <div class="flex-1 h-px bg-border-default" />
         </div>
 
         <!-- Form -->
@@ -129,7 +129,7 @@ async function onGoogle() {
       </div>
 
       <!-- Register link -->
-      <p class="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
+      <p class="mt-6 text-center text-sm text-muted">
         ¿No tienes cuenta?
         <NuxtLink
           to="/register"
