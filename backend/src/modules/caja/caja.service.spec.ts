@@ -436,18 +436,11 @@ describe('CajaService', () => {
   });
 
   describe('listarMovimientos', () => {
-    it('returns movimientos ordered by fecha ASC for the given caja', async () => {
-      cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
-      const movimientos = [
-        { id: 'mov-001', cajaId: CAJA_ID, tipo: 'entrada', monto: '200' },
-        { id: 'mov-002', cajaId: CAJA_ID, tipo: 'salida', monto: '100' },
-      ];
+    function buildSvc(movimientos: unknown[]) {
       const movimientoCajaRepo = {
         find: jest.fn().mockResolvedValue(movimientos),
       };
-
-      // Re-create module injecting movimientoCajaRepo mock
-      const module: TestingModule = await Test.createTestingModule({
+      return Test.createTestingModule({
         providers: [
           CajaService,
           { provide: getRepositoryToken(Caja), useValue: cajaRepo },
@@ -457,9 +450,21 @@ describe('CajaService', () => {
           },
           { provide: getDataSourceToken(), useValue: dataSource },
         ],
-      }).compile();
+      })
+        .compile()
+        .then((m) => ({
+          svc: m.get<CajaService>(CajaService),
+          movimientoCajaRepo,
+        }));
+    }
 
-      const svc = module.get<CajaService>(CajaService);
+    it('el dueño lista los movimientos de su caja (orden fecha ASC)', async () => {
+      cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
+      const movimientos = [
+        { id: 'mov-001', cajaId: CAJA_ID, tipo: 'entrada', monto: '200' },
+        { id: 'mov-002', cajaId: CAJA_ID, tipo: 'salida', monto: '100' },
+      ];
+      const { svc, movimientoCajaRepo } = await buildSvc(movimientos);
 
       const result = await svc.listarMovimientos(
         TENANT_ID,
@@ -468,13 +473,7 @@ describe('CajaService', () => {
       );
 
       expect(cajaRepo.findOne).toHaveBeenCalledWith({
-        where: {
-          id: CAJA_ID,
-          tenantId: TENANT_ID,
-          usuarioId: USUARIO_ID,
-          estado: 'abierta',
-          eliminadoEl: IsNull(),
-        },
+        where: { id: CAJA_ID, tenantId: TENANT_ID, eliminadoEl: IsNull() },
       });
       expect(movimientoCajaRepo.find).toHaveBeenCalledWith({
         where: { cajaId: CAJA_ID, eliminadoEl: IsNull() },
@@ -483,12 +482,37 @@ describe('CajaService', () => {
       expect(result).toEqual(movimientos);
     });
 
-    it('throws ForbiddenException when caja not found or belongs to another user', async () => {
-      cajaRepo.findOne.mockResolvedValue(null);
+    it('con tieneVerTodas=true permite leer movimientos de una caja ajena', async () => {
+      cajaRepo.findOne.mockResolvedValue({
+        ...mockCajaAbierta,
+        usuarioId: OTRO_USUARIO,
+      });
+      const { svc } = await buildSvc([]);
 
       await expect(
-        service.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID),
+        svc.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, true),
+      ).resolves.toEqual([]);
+    });
+
+    it('sobre caja ajena sin tieneVerTodas lanza ForbiddenException', async () => {
+      cajaRepo.findOne.mockResolvedValue({
+        ...mockCajaAbierta,
+        usuarioId: OTRO_USUARIO,
+      });
+      const { svc } = await buildSvc([]);
+
+      await expect(
+        svc.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, false),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('lanza NotFoundException si la caja no existe', async () => {
+      cajaRepo.findOne.mockResolvedValue(null);
+      const { svc } = await buildSvc([]);
+
+      await expect(
+        svc.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

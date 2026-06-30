@@ -232,19 +232,18 @@ export class CajaService {
     tenantId: string,
     usuarioId: string,
     cajaId: string,
+    tieneVerTodas = false,
   ): Promise<MovimientoCaja[]> {
     const caja = await this.cajaRepo.findOne({
-      where: {
-        id: cajaId,
-        tenantId,
-        usuarioId,
-        estado: 'abierta',
-        eliminadoEl: IsNull(),
-      },
+      where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
     });
 
     if (!caja) {
-      throw new ForbiddenException('Caja no encontrada o no tienes acceso');
+      throw new NotFoundException('Caja no encontrada');
+    }
+
+    if (caja.usuarioId !== usuarioId && !tieneVerTodas) {
+      throw new ForbiddenException('No tienes acceso a esta caja');
     }
 
     return this.movimientoCajaRepo.find({

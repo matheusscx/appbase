@@ -99,8 +99,19 @@ export class CajaController {
 
   @Get(':id/movimientos')
   @RequiresPermiso('Caja', 'Leer')
-  listarMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
+  async listarMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;
-    return this.cajaService.listarMovimientos(u.tenantId!, u.id, cajaId);
+    const tieneVerTodas = await this.rbacService.userHasPermiso(
+      u.id,
+      u.tenantId!,
+      'Caja',
+      'Ver todas',
+    );
+    return this.cajaService.listarMovimientos(
+      u.tenantId!,
+      u.id,
+      cajaId,
+      tieneVerTodas,
+    );
   }
 }
