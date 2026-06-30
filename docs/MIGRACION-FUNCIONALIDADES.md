@@ -555,8 +555,9 @@ extensiones posibles, no como parte de esta funcionalidad.
 | 9. Motor de cálculo de precios | ✅ | ✅ | Servicio puro stateless `POST /calculo-precios/calcular`. Reglas planas/tramos/método de pago; base vs compuesto; orden de fórmula; redondeo. Reglas fecha/vencimiento diferidas. Ver [motor-calculo-precios.md](../docs/features/motor-calculo-precios.md) |
 | 10. Procesamiento de ventas | 🔲 | 🔲 | |
 | 11. Gestión de cajas | ✅ | ✅ | Apertura/cierre con cuadre; movimientos manuales; caja virtual por tenant; permisos granulares `@RequiresPermiso`. Ver [gestion-cajas.md](../docs/features/gestion-cajas.md) |
-| 12. Registro de pagos | 🔲 | 🔲 | |
+| 12. Registro de pagos | ✅ | ✅ | POST /pagos (abono a ventas pendientes), GET /pagos (ledger); AbonoModal + página /pagos. Estado `pagada_parcial`. (2026-06-30) |
 | 13. SPA frontend (navegación por permisos) | — | 🔲 parcial | Flujo auth + tenant completo; menú RBAC pendiente |
+| 11b. Historial/consulta de ventas (frontend) | — | ✅ | /ventas/historial (lista) + /ventas/[id] (detalle con abono). (2026-06-30) |
 | 14. Gestión de inventario (kardex de movimientos) | ✅ | ✅ | Kardex auditable con `movimientos_inventario`; endpoint GET /inventario/movimientos; PATCH /items/:id/stock con motivo/comentario; integración automática con ventas |
 
 **Leyenda:** ✅ Implementado · 🔲 Por construir · 🔲 parcial Parcialmente implementado

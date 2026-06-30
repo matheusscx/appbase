@@ -107,7 +107,8 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Gestión de cajas | ✅ Implementado |
 | Registro de pagos | ✅ Implementado (inline con ventas, 2026-06-29) |
 | Frontend POS (crear venta: catálogo, carrito, cobro multipago, fricción por documento) | ✅ Implementado (2026-06-29) |
-| Frontend — historial/consulta de ventas | 🔲 Por construir |
+| Frontend — historial/consulta de ventas | ✅ Implementado (2026-06-30) |
+| Módulo de Pagos (GET /pagos, POST /pagos, abono a ventas pendientes, ledger) | ✅ Implementado (2026-06-30) |
 
 ---
 
@@ -152,6 +153,9 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 - Estados: `borrador` → `pendiente` → `pagada` | `cancelada`
 - Ventas online llegan directamente a `pagada`
 - Nota de crédito referencia la venta original con `venta_referencia_id`
+- Ventas sin pago: al crear sin array `pagos`, la venta queda en estado `pendiente` (cuenta por cobrar)
+- Estado `pagada_parcial`: nuevo estado derivado cuando saldo > 0 pero < total_final
+- Saldo = total_final − Σ(pago.monto − pago.vuelto); se actualiza en cada abono via `PagosService`
 
 ### Cajas
 - `'fisica'`: abierta manualmente, el usuario ingresa saldo inicial

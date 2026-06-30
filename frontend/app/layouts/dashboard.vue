@@ -25,6 +25,20 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/caja',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Leer')) {
+    base.push({
+      label: 'Ventas',
+      icon: 'i-heroicons-document-text',
+      to: '/ventas/historial',
+    })
+  }
+  if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Leer')) {
+    base.push({
+      label: 'Pagos',
+      icon: 'i-heroicons-credit-card',
+      to: '/pagos',
+    })
+  }
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear')) {
     base.push({
       label: 'Punto de venta',

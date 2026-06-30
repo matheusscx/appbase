@@ -63,6 +63,7 @@ Welcome to the technical documentation for the `practica` project.
 - **[features/motor-calculo-precios.md](./features/motor-calculo-precios.md)** — Motor de cálculo de precios (desglose neto → descuentos → recargos → impuestos → total)
 - **[features/gestion-cajas.md](./features/gestion-cajas.md)** — Gestión de cajas (apertura, movimientos manuales, cuadre y cierre de caja física)
 - **[features/ventas.md](./features/ventas.md)** — Procesamiento de ventas transaccional + frontend POS (catálogo, carrito, cobro multipago, fricción por documento)
+- **[features/pagos.md](./features/pagos.md)** — Módulo de abonos y ledger de pagos
 
 ### Engineering Notes (superpowers)
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans

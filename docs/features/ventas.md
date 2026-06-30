@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-06-29
+**Last Updated**: 2026-06-30
 
 ---
 
@@ -102,11 +102,11 @@ Response (201):
 
 ### GET /api/ventas
 
-Lista las ventas del tenant autenticado.
+Lista las ventas del tenant autenticado. La respuesta incluye campos enriquecidos: `montoPagado` (suma de pagos menos vuelto) y `saldo` (total_final − montoPagado).
 
 ### GET /api/ventas/:id
 
-Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`.
+Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recargos`, `impuestos`, `customer`, `pagos`. Incluye `montoPagado` y `saldo`.
 
 ---
 
@@ -150,6 +150,20 @@ Todas con soft delete (`eliminado_el`) y triada de auditoría. PKs UUID con `typ
 | `InventarioService.registrarMovimiento(manager, ...)` | Ya manager-aware, entra en la misma TX |
 | `CajaService.findActiva` | Busca caja física abierta |
 | `CajaService.registrarMovimientoEnTransaccion(manager, ...)` | Nuevo método extraído para entrar en la TX |
+
+---
+
+## Nuevos estados de venta
+
+| Estado | Cuándo se asigna |
+|--------|-----------------|
+| `pendiente` | La venta se crea sin pagos, o el total pagado es 0 |
+| `pagada_parcial` | Al registrar un abono parcial: saldo > 0 pero < total_final |
+| `pagada` | El saldo llega a 0 (suma de pagos − vuelto ≥ total_final) |
+| `cancelada` | Anulación explícita |
+| `borrador` | Estado transitorio previo a confirmar |
+
+El saldo se recalcula en cada abono: `saldo = total_final − Σ(pago.monto − pago.vuelto)`.
 
 ---
 
@@ -208,9 +222,29 @@ cd backend && npm run test:e2e -- --testPathPatterns=ventas --forceExit
 
 ---
 
+## Frontend — historial y detalle de ventas
+
+Implementado en 2026-06-30.
+
+### Páginas
+
+| Página | Ruta | Descripción |
+|--------|------|-------------|
+| Historial de ventas | `/ventas/historial` | Tabla de ventas con estado, total, cliente; link a detalle |
+| Detalle de venta | `/ventas/[id]` | Cabecera, líneas, totales, pagos recibidos, saldo pendiente; botón "Registrar pago" para ventas `pendiente`/`pagada_parcial` |
+
+### AbonoModal
+
+`app/components/pagos/AbonoModal.vue` — modal para registrar abonos a ventas pendientes:
+- Props: `ventaId`, `saldo` (monto pendiente), `metodos` (métodos de pago del tenant)
+- Reutiliza helpers de `useVenta.ts`: `resumenCobro`, `clampNoVuelto`, `sumaPagos`, `PagoInput`
+- Al confirmar: `POST /pagos` con `{ ventaId, pagos: [...] }`; emite `success` para que la página recargue
+
+---
+
 ## Pendiente (fase futura)
 
-- **Historial/listado de ventas** — Búsqueda y filtrado de ventas por rango de fechas, estado, tipo de documento
+- **Historial/listado de ventas** — Búsqueda y filtrado avanzado por rango de fechas, estado, tipo de documento
 - **Comprobante imprimible** — Generación y descarga de PDF del comprobante de venta
 - **Descuentos/recargos manuales** — Aplicación inline de descuentos o recargos por línea o a nivel de venta
 - **Canal online** — Soporte de ventas en canal `online` con caja virtual automática

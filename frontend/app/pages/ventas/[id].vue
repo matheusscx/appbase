@@ -42,7 +42,10 @@ const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
 const apiUrl = config.public.apiUrl
 
+interface MetodoPago { metodoPagoId: string; nombre: string; permiteVuelto: boolean; habilitada: boolean }
+
 const venta = ref<VentaDetalle | null>(null)
+const metodos = ref<MetodoPago[]>([])
 const loading = ref(false)
 const abonoOpen = ref(false)
 
@@ -65,7 +68,12 @@ const puedeAbonar = computed(() =>
 async function cargar() {
   loading.value = true
   try {
-    venta.value = await useApiFetch<VentaDetalle>(`${apiUrl}/ventas/${route.params.id}`)
+    const [ventaData, metodosData] = await Promise.all([
+      useApiFetch<VentaDetalle>(`${apiUrl}/ventas/${route.params.id}`),
+      useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
+    ])
+    venta.value = ventaData
+    metodos.value = metodosData
   }
   catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message
@@ -261,8 +269,13 @@ function estadoLabel(estado: string): string {
           </div>
 
           <div v-if="puedeAbonar" class="mt-4">
-            <!-- AbonoModal — implemented in Task E -->
-            <!-- <PagosAbonoModal v-model:open="abonoOpen" :venta-id="venta.id" :saldo="saldo" @success="onAbonoSuccess" /> -->
+            <PagosAbonoModal
+              v-model:open="abonoOpen"
+              :venta-id="venta?.id ?? ''"
+              :saldo="saldo"
+              :metodos="metodos"
+              @success="onAbonoSuccess"
+            />
             <UButton
               label="Registrar pago"
               icon="i-heroicons-plus"
