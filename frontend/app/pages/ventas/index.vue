@@ -6,7 +6,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-interface TipoDoc { id: string; nombre: string; requiereCustomer: boolean }
+interface TipoDoc { id: string; nombre: string; customerRequerido: boolean }
 interface MetodoPago {
   metodoPagoId: string
   nombre: string
@@ -28,6 +28,7 @@ const loadingCatalogo = ref(false)
 
 const tipoDocumentoId = ref<string | undefined>(undefined)
 const customer = ref<CustomerForm>({ nombre: '', rut: '', direccion: '', telefono: '', email: '' })
+const customerExpandido = ref(false)
 
 const cobroOpen = ref(false)
 const submitting = ref(false)
@@ -82,6 +83,11 @@ watch(
   { immediate: true },
 )
 
+watch(tipoDocumentoId, () => {
+  customerExpandido.value = false
+  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
+})
+
 async function cargar() {
   loadingCatalogo.value = true
   try {
@@ -107,15 +113,22 @@ onMounted(async () => {
 })
 
 async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
+  const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
+  const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
+
+  if (incluirCustomer && !customer.value.nombre.trim()) {
+    toast.add({ title: 'El nombre del cliente es requerido', color: 'error' })
+    return
+  }
+
   submitting.value = true
   try {
-    const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
     const body: Record<string, unknown> = {
       lineas: lineas.value.map((l) => ({ itemId: l.item.id, cantidad: l.cantidad })),
       pagos,
       tipoDocumentoId: tipoDocumentoId.value,
     }
-    if (docSel?.requiereCustomer) {
+    if (incluirCustomer) {
       body.customer = {
         nombre: customer.value.nombre,
         rut: customer.value.rut || undefined,
@@ -131,6 +144,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
     toast.add({ title: `Venta ${venta.estado}`, color: 'success' })
     cobroOpen.value = false
     limpiar()
+    customerExpandido.value = false
     customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
     await cajaStore.cargarActiva()
   } catch (e: unknown) {
@@ -176,6 +190,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
           <VentasCarritoPanel
             v-model:tipo-documento-id="tipoDocumentoId"
             v-model:customer="customer"
+            v-model:customer-expandido="customerExpandido"
             :lineas="lineas"
             :resultado="resultado"
             :loading-calculo="loadingCalculo"
