@@ -50,12 +50,12 @@ async function onOpened(): Promise<void> {
       <h1 class="text-2xl font-bold">
         Caja
       </h1>
-      <p class="text-sm text-gray-500 mt-1">
+      <p class="text-sm text-muted mt-1">
         Gestión de caja física del turno actual.
       </p>
     </div>
 
-    <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
+    <div v-if="loading" class="py-12 text-center text-sm text-muted">
       <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
       Cargando…
     </div>
@@ -76,7 +76,7 @@ async function onOpened(): Promise<void> {
 
     <!-- Sin permiso Ver todas con caja abierta: redirigiendo (no debería verse) -->
     <template v-else>
-      <div class="py-12 text-center text-sm text-gray-500">
+      <div class="py-12 text-center text-sm text-muted">
         <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
         Redirigiendo…
       </div>
