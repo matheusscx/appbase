@@ -10,6 +10,7 @@ import { CalculoPreciosService } from '../calculo-precios/calculo-precios.servic
 import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
+import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
 import type { CreateVentaDto } from './dto/create-venta.dto';
 import { Venta, EstadoVenta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
@@ -17,7 +18,6 @@ import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
-import { Pago } from '../pagos/entities/pago.entity';
 
 export interface TipoDocumentoResponse {
   id: string;
@@ -34,6 +34,7 @@ export class VentasService {
     private readonly cajaService: CajaService,
     private readonly inventarioService: InventarioService,
     private readonly itemsService: ItemsService,
+    private readonly pagosService: PagosService,
   ) {}
 
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
@@ -106,57 +107,13 @@ export class VentasService {
       tenantId,
       calcularDto,
     );
-    const totalFinal = new Decimal(resultado.totales.totalFinal);
 
-    // 6. Resolver info de métodos de pago (nombre + permite_vuelto)
-    const metodoPagoRows: {
-      metodo_pago_id: string;
-      nombre: string;
-      permite_vuelto: boolean;
-    }[] = await this.dataSource.query(
-      `SELECT tmp.metodo_pago_id, mp.nombre, tmp.permite_vuelto
-       FROM tenant_metodo_pago tmp
-       JOIN metodos_pago mp ON mp.metodo_pago_id = tmp.metodo_pago_id
-                            AND mp.eliminado_el IS NULL
-       WHERE tmp.tenant_id = $1
-         AND tmp.metodo_pago_id = ANY($2::uuid[])
-         AND tmp.eliminado_el IS NULL`,
-      [tenantId, dto.pagos.map((p) => p.metodoPagoId)],
-    );
-    const metodoPagoMap = new Map(
-      metodoPagoRows.map((r) => [
-        r.metodo_pago_id,
-        { nombre: r.nombre, permiteVuelto: r.permite_vuelto },
-      ]),
-    );
+    // 6. Preparar pagos (puede ser vacío → cuenta por cobrar)
+    const pagosDto = dto.pagos ?? [];
 
-    // 7. Resolver vuelto y estado
-    const sumaPagos = dto.pagos.reduce(
-      (acc, p) => acc.plus(p.monto),
-      new Decimal(0),
-    );
-    const excedente = Decimal.max(0, sumaPagos.minus(totalFinal));
-
-    let pagoConVueltoIdx = -1;
-    if (excedente.gt(0)) {
-      pagoConVueltoIdx = dto.pagos.findIndex(
-        (p) => metodoPagoMap.get(p.metodoPagoId)?.permiteVuelto === true,
-      );
-      if (pagoConVueltoIdx === -1) {
-        throw new BadRequestException(
-          'El pago supera el total pero ningún método de pago permite vuelto',
-        );
-      }
-    }
-
-    const montoAplicado = sumaPagos.minus(excedente);
-    const estado = montoAplicado.gte(totalFinal)
-      ? EstadoVenta.PAGADA
-      : EstadoVenta.PENDIENTE;
-
-    // 8. Transacción atómica
+    // 7. Transacción atómica
     return this.dataSource.transaction(async (manager) => {
-      // 8a. Cabecera de venta
+      // 7a. Cabecera de venta (estado inicial PENDIENTE; se actualiza tras registrar pagos)
       const venta = await manager.save(
         Venta,
         manager.create(Venta, {
@@ -165,7 +122,7 @@ export class VentasService {
           monedaId: monedaOficialId,
           tipoDocumentoId: dto.tipoDocumentoId ?? null,
           canal: 'fisico',
-          estado,
+          estado: EstadoVenta.PENDIENTE,
           totalBruto: resultado.totales.subtotalNeto,
           totalDescuentos: resultado.totales.totalDescuentos,
           totalRecargos: resultado.totales.totalRecargos,
@@ -301,41 +258,32 @@ export class VentasService {
         });
       }
 
-      // 7g. Pagos + movimientos de caja para métodos con vuelto (efectivo)
-      const pagosGuardados: Pago[] = [];
-      for (let i = 0; i < dto.pagos.length; i++) {
-        const p = dto.pagos[i];
-        const vuelto = i === pagoConVueltoIdx ? excedente.toFixed(4) : '0.0000';
-        const pago = await manager.save(
-          Pago,
-          manager.create(Pago, {
-            tenantId,
-            ventaId: venta.id,
-            metodoPagoId: p.metodoPagoId,
-            monedaOficialId,
-            cajaId: caja.id,
-            monto: p.monto,
-            vuelto,
-            referencia: p.referencia ?? null,
-          }),
-        );
-        pagosGuardados.push(pago);
-      }
+      // 7g. Pagos — delegado a PagosService (incluye vuelto + movimientos de caja)
+      const savedPagos = await this.pagosService.registrar(manager, {
+        tenantId,
+        ventaId: venta.id,
+        pagos: pagosDto,
+        cajaId: caja.id,
+        monedaOficialId,
+        target: resultado.totales.totalFinal,
+      });
 
-      // Movimiento de caja: una entrada por cada pago (todos los métodos)
-      for (let i = 0; i < dto.pagos.length; i++) {
-        const p = dto.pagos[i];
-        const vuelto = new Decimal(pagosGuardados[i].vuelto ?? '0');
-        const montoNeto = new Decimal(p.monto).minus(vuelto).toFixed(4);
-        await this.cajaService.registrarMovimientoEnTransaccion(manager, {
-          cajaId: caja.id,
-          tipo: 'entrada',
-          concepto: `Venta · ${metodoPagoMap.get(p.metodoPagoId)?.nombre ?? 'Pago'}`,
-          monto: montoNeto,
-          ventaId: venta.id,
-          pagoId: pagosGuardados[i].id,
-          metodoPagoId: p.metodoPagoId,
-        });
+      // 7h. Actualizar estado de la venta según montos netos de los pagos registrados
+      if (savedPagos.length > 0) {
+        const montoAplicado = savedPagos.reduce(
+          (acc, p) =>
+            acc.plus(new Decimal(p.monto)).minus(new Decimal(p.vuelto ?? '0')),
+          new Decimal(0),
+        );
+        const estadoFinal = calcularEstadoVenta(
+          resultado.totales.totalFinal,
+          montoAplicado.toFixed(4),
+        );
+        await manager.query(
+          `UPDATE ventas SET estado=$1, actualizado_el=NOW() WHERE venta_id=$2`,
+          [estadoFinal, venta.id],
+        );
+        venta.estado = estadoFinal;
       }
 
       return { ...venta, detalles };
@@ -380,11 +328,17 @@ export class VentasService {
       total_final: string;
       fecha: Date;
       creado_el: Date;
+      monto_pagado: string;
     }[] = await this.dataSource.query(
-      `SELECT venta_id, canal, estado, total_final, fecha, creado_el
-       FROM ventas
-       WHERE tenant_id = $1 AND eliminado_el IS NULL
-       ORDER BY creado_el DESC`,
+      `SELECT v.venta_id, v.canal, v.estado, v.total_final, v.fecha, v.creado_el,
+              COALESCE((
+                SELECT SUM(p.monto - p.vuelto)
+                FROM pagos p
+                WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
+              ), 0) AS monto_pagado
+       FROM ventas v
+       WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
+       ORDER BY v.creado_el DESC`,
       [tenantId],
     );
     return rows.map((r) => ({
@@ -394,6 +348,10 @@ export class VentasService {
       totalFinal: r.total_final,
       fecha: r.fecha,
       creadoEl: r.creado_el,
+      montoPagado: r.monto_pagado,
+      saldo: new Decimal(r.total_final)
+        .minus(new Decimal(r.monto_pagado))
+        .toFixed(4),
     }));
   }
 

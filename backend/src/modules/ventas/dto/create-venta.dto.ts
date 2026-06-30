@@ -1,4 +1,5 @@
 import {
+  ArrayMinSize,
   IsArray,
   IsIn,
   IsNumberString,
@@ -7,7 +8,6 @@ import {
   IsUUID,
   MinLength,
   ValidateNested,
-  ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -88,11 +88,11 @@ export class CreateVentaDto {
   @Type(() => LineaVentaDto)
   lineas: LineaVentaDto[];
 
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PagoVentaDto)
-  pagos: PagoVentaDto[];
+  pagos?: PagoVentaDto[];
 
   @IsOptional()
   @IsUUID()

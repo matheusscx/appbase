@@ -6,6 +6,7 @@ import { CalculoPreciosService } from '../calculo-precios/calculo-precios.servic
 import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
+import { PagosService } from '../pagos/pagos.service';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const USUARIO_ID = '550e8400-e29b-41d4-a716-446655440056';
@@ -61,14 +62,10 @@ const mockResultadoVenta = {
 const MONEDA_ROWS = [
   { moneda_id: MONEDA_OFICIAL_ID, valor_del_dia: '1.000000', es_default: true },
 ];
-const PERMISO_ROWS_EFECTIVO = [
-  { metodo_pago_id: EFECTIVO_ID, permite_vuelto: true },
-];
 
 function buildManagerMock() {
   const venta = { id: 'venta-uuid-001' };
   const detalle = { id: 'detalle-uuid-001' };
-  const pago = { id: 'pago-uuid-001', vuelto: '0.0000' };
   return {
     create: jest
       .fn()
@@ -83,17 +80,10 @@ function buildManagerMock() {
             return Promise.resolve({ ...venta, ...data });
           if (data['ventaId'] !== undefined && data['cantidad'] !== undefined)
             return Promise.resolve({ ...detalle, ...data });
-          if (data['monto'] !== undefined)
-            return Promise.resolve({
-              ...pago,
-              ...data,
-              vuelto: (data['vuelto'] as string | undefined) ?? '0.0000',
-            });
           return Promise.resolve({ ...data });
         },
       ),
-    // manager.query: used for permite_vuelto inside transaction
-    query: jest.fn().mockResolvedValue(PERMISO_ROWS_EFECTIVO),
+    query: jest.fn().mockResolvedValue([]),
   };
 }
 
@@ -103,17 +93,19 @@ describe('VentasService', () => {
   let calculoPreciosService: jest.Mocked<CalculoPreciosService>;
   let inventarioService: jest.Mocked<InventarioService>;
   let itemsService: jest.Mocked<ItemsService>;
+  let pagosServiceMock: { registrar: jest.Mock };
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
 
   beforeEach(async () => {
     const manager = buildManagerMock();
+    pagosServiceMock = { registrar: jest.fn().mockResolvedValue([]) };
     dataSourceMock = {
       transaction: jest
         .fn()
         .mockImplementation((cb: (m: typeof manager) => unknown) =>
           cb(manager),
         ),
-      // dataSource.query used OUTSIDE transaction for moneda and permite_vuelto pre-checks
+      // dataSource.query used OUTSIDE transaction for moneda rows only
       query: jest.fn().mockResolvedValue(MONEDA_ROWS),
     };
 
@@ -146,6 +138,10 @@ describe('VentasService', () => {
         {
           provide: ItemsService,
           useValue: { findOne: jest.fn().mockResolvedValue(mockItem) },
+        },
+        {
+          provide: PagosService,
+          useValue: pagosServiceMock,
         },
         {
           provide: getDataSourceToken(),
@@ -206,30 +202,20 @@ describe('VentasService', () => {
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
-    it('asigna vuelto al pago con permite_vuelto cuando suma supera el total', async () => {
-      // pago de 150 cuando total es 100 → vuelto 50
+    it('llama a pagosService.registrar con los params correctos cuando hay pagos', async () => {
+      // pago de 150 cuando total es 100 → PagosService calcula el vuelto internamente
       const dtoConExcedente = {
         ...baseDto,
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '150.0000' }],
       };
-      // 1ª llamada: moneda rows; 2ª llamada: permite_vuelto (efectivo permite vuelto)
-      dataSourceMock.query
-        .mockResolvedValueOnce(MONEDA_ROWS)
-        .mockResolvedValueOnce([
-          { metodo_pago_id: EFECTIVO_ID, permite_vuelto: true },
-        ]);
-      const manager = buildManagerMock();
-      dataSourceMock.transaction.mockImplementationOnce(
-        (cb: (m: typeof manager) => unknown) => cb(manager),
-      );
+      pagosServiceMock.registrar.mockResolvedValueOnce([
+        { id: 'pago-uuid-001', monto: '150.0000', vuelto: '50.0000' },
+      ]);
       await service.crear(TENANT_ID, USUARIO_ID, dtoConExcedente);
-      // El manager.save fue llamado con vuelto = '50.0000' en el pago
-      const saveCalls = manager.save.mock.calls;
-      const pagoCalls = saveCalls.filter((c: unknown[]) => {
-        const d = c[1] as Record<string, unknown>;
-        return d && d['vuelto'] !== undefined;
-      });
-      expect(pagoCalls.length).toBeGreaterThan(0);
+      expect(pagosServiceMock.registrar).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ target: '100.0000' }),
+      );
     });
 
     it('lanza BadRequestException cuando excedente > 0 y ningún método permite vuelto', async () => {
@@ -237,12 +223,12 @@ describe('VentasService', () => {
         ...baseDto,
         pagos: [{ metodoPagoId: 'tarjeta-id', monto: '150.0000' }],
       };
-      // 1ª llamada: moneda rows; 2ª llamada: permite_vuelto (tarjeta no permite)
-      dataSourceMock.query
-        .mockResolvedValueOnce(MONEDA_ROWS)
-        .mockResolvedValueOnce([
-          { metodo_pago_id: 'tarjeta-id', permite_vuelto: false },
-        ]);
+      // PagosService.registrar lanza BadRequestException cuando no hay método con vuelto
+      pagosServiceMock.registrar.mockRejectedValueOnce(
+        new BadRequestException(
+          'El pago supera el total pero ningún método de pago permite vuelto',
+        ),
+      );
       await expect(
         service.crear(TENANT_ID, USUARIO_ID, dtoConExcedente as any),
       ).rejects.toThrow(BadRequestException);

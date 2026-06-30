@@ -4,6 +4,7 @@ import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module'
 import { CajaModule } from '../caja/caja.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { ItemsModule } from '../items/items.module';
+import { PagosModule } from '../pagos/pagos.module';
 import { VentasService } from './ventas.service';
 import {
   VentasController,
@@ -15,7 +16,6 @@ import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
-import { Pago } from '../pagos/entities/pago.entity';
 import { TipoDocumentoTributario } from './entities/tipo-documento-tributario.entity';
 
 @Module({
@@ -27,13 +27,13 @@ import { TipoDocumentoTributario } from './entities/tipo-documento-tributario.en
       VentaRecargo,
       VentaImpuesto,
       VentaCustomer,
-      Pago,
       TipoDocumentoTributario,
     ]),
     CalculoPreciosModule,
     CajaModule,
     InventarioModule,
     ItemsModule,
+    PagosModule,
   ],
   controllers: [VentasController, TiposDocumentoController],
   providers: [VentasService],
