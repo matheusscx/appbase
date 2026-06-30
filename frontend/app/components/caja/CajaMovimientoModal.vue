@@ -76,7 +76,7 @@ async function guardar() {
               class="flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors"
               :class="form.tipo === 'entrada'
                 ? 'bg-green-50 border-green-400 text-green-700 dark:bg-green-900/30 dark:border-green-500 dark:text-green-300'
-                : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'"
+                : 'border-border-default text-muted hover:bg-muted dark:hover:bg-muted'"
               @click="form.tipo = 'entrada'"
             >
               <UIcon name="i-heroicons-arrow-down-circle" class="w-4 h-4 inline mr-1" />
@@ -87,7 +87,7 @@ async function guardar() {
               class="flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors"
               :class="form.tipo === 'salida'
                 ? 'bg-red-50 border-red-400 text-red-700 dark:bg-red-900/30 dark:border-red-500 dark:text-red-300'
-                : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'"
+                : 'border-border-default text-muted hover:bg-muted dark:hover:bg-muted'"
               @click="form.tipo = 'salida'"
             >
               <UIcon name="i-heroicons-arrow-up-circle" class="w-4 h-4 inline mr-1" />

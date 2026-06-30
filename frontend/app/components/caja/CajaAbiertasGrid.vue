@@ -38,7 +38,7 @@ function onOpened(): void {
 
 <template>
   <div>
-    <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
+    <div v-if="loading" class="py-12 text-center text-sm text-muted">
       <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
       Cargando cajas…
     </div>
@@ -56,7 +56,7 @@ function onOpened(): void {
             <span class="font-semibold text-primary-600 dark:text-primary-400">Abrir mi caja</span>
           </div>
         </template>
-        <p class="text-sm text-gray-500">
+        <p class="text-sm text-muted">
           No tenés una caja abierta. Hacé click para iniciar tu turno.
         </p>
       </UCard>
@@ -79,18 +79,18 @@ function onOpened(): void {
 
         <dl class="space-y-1 text-sm">
           <div class="flex justify-between">
-            <dt class="text-gray-500">
+            <dt class="text-muted">
               Saldo inicial
             </dt>
             <dd>{{ formatMonto(caja.saldoInicial) }}</dd>
           </div>
           <div class="flex justify-between font-medium">
-            <dt class="text-gray-500">
+            <dt class="text-muted">
               Saldo esperado
             </dt>
             <dd>{{ formatMonto(caja.saldoEsperado) }}</dd>
           </div>
-          <div class="flex justify-between text-xs text-gray-400 pt-1">
+          <div class="flex justify-between text-xs text-muted pt-1">
             <dt>Apertura</dt>
             <dd>{{ formatFecha(caja.fechaApertura) }}</dd>
           </div>
@@ -100,7 +100,7 @@ function onOpened(): void {
       <!-- Estado vacío: el usuario tiene caja propia pero no hay otras -->
       <div
         v-if="tieneCajaPropia && cajasOrdenadas.length === 0"
-        class="col-span-full py-12 text-center text-sm text-gray-500"
+        class="col-span-full py-12 text-center text-sm text-muted"
       >
         No hay otras cajas abiertas en este momento.
       </div>

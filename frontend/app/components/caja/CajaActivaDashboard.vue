@@ -58,7 +58,7 @@ const { formatMonto, formatFecha } = useFormatters()
                 {{ caja.estado.toUpperCase() }}
               </UBadge>
             </div>
-            <p class="text-sm text-gray-500 mt-0.5">
+            <p class="text-sm text-muted mt-0.5">
               Apertura: {{ formatFecha(caja.fechaApertura) }}
             </p>
           </div>
@@ -85,8 +85,8 @@ const { formatMonto, formatFecha } = useFormatters()
 
       <!-- Resumen financiero -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div class="rounded-lg bg-gray-50 dark:bg-gray-800 p-3">
-          <p class="text-xs text-gray-500 uppercase tracking-wide">
+        <div class="rounded-lg bg-muted dark:bg-muted p-3">
+          <p class="text-xs text-muted uppercase tracking-wide">
             Saldo inicial
           </p>
           <p class="text-lg font-semibold mt-1">
@@ -130,20 +130,20 @@ const { formatMonto, formatFecha } = useFormatters()
 
       <div
         v-if="cajaStore.loadingMovimientos"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         <UIcon name="i-heroicons-arrow-path" class="w-5 h-5 animate-spin mx-auto mb-1" />
         Cargando movimientos…
       </div>
       <div
         v-else-if="!cajaStore.movimientos.length"
-        class="py-8 text-center text-sm text-gray-500"
+        class="py-8 text-center text-sm text-muted"
       >
         Sin movimientos registrados en este turno.
       </div>
       <ul
         v-else
-        class="divide-y divide-gray-100 dark:divide-gray-800"
+        class="divide-y divide-border-default"
       >
         <li
           v-for="mov in cajaStore.movimientos"
@@ -162,11 +162,11 @@ const { formatMonto, formatFecha } = useFormatters()
               </p>
               <p
                 v-if="mov.referencia"
-                class="text-xs text-gray-400 truncate"
+                class="text-xs text-muted truncate"
               >
                 Ref: {{ mov.referencia }}
               </p>
-              <p class="text-xs text-gray-400">
+              <p class="text-xs text-muted">
                 {{ formatFecha(mov.fecha) }}
               </p>
             </div>

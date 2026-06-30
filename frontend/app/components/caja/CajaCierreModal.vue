@@ -83,18 +83,18 @@ async function cerrarCaja() {
     <template #body>
       <div class="space-y-5">
         <!-- Cuadre previsto -->
-        <div class="rounded-lg bg-gray-50 dark:bg-gray-800 p-4 space-y-2">
+        <div class="rounded-lg bg-muted dark:bg-muted p-4 space-y-2">
           <div class="flex justify-between text-sm">
-            <span class="text-gray-500">Saldo esperado</span>
+            <span class="text-muted">Saldo esperado</span>
             <span class="font-medium">{{ formatMonto(saldoEsperado) }}</span>
           </div>
           <div class="flex justify-between text-sm">
-            <span class="text-gray-500">Monto contado</span>
+            <span class="text-muted">Monto contado</span>
             <span class="font-medium">
               {{ montoContadoFormateado }}
             </span>
           </div>
-          <div class="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between text-sm font-semibold">
+          <div class="border-t border-border-default pt-2 flex justify-between text-sm font-semibold">
             <span>Diferencia</span>
             <span
               v-if="diferencia !== null"
@@ -102,7 +102,7 @@ async function cerrarCaja() {
             >
               {{ diferencia.gte(0) ? '+' : '' }}{{ formatMonto(diferencia) }}
             </span>
-            <span v-else class="text-gray-400">—</span>
+            <span v-else class="text-muted">—</span>
           </div>
         </div>
 

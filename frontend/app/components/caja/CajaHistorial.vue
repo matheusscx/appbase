@@ -68,7 +68,7 @@ watch(() => props.usuarioId, (id) => cargar(!!id))
     <!-- Estado vacío -->
     <div
       v-if="historial.length === 0"
-      class="py-10 text-center text-sm text-gray-500"
+      class="py-10 text-center text-sm text-muted"
     >
       <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
       No hay cajas en el historial.
@@ -78,7 +78,7 @@ watch(() => props.usuarioId, (id) => cargar(!!id))
     <div v-else class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-gray-200 dark:border-gray-700 text-left text-xs text-gray-500 uppercase tracking-wider">
+          <tr class="border-b border-border-default text-left text-xs text-muted uppercase tracking-wider">
             <th class="pb-2 pr-4 font-medium">Apertura</th>
             <th class="pb-2 pr-4 font-medium">Cierre</th>
             <th class="pb-2 pr-4 font-medium">Estado</th>
@@ -91,7 +91,7 @@ watch(() => props.usuarioId, (id) => cargar(!!id))
           <tr
             v-for="caja in historial"
             :key="caja.id"
-            class="border-b border-gray-100 dark:border-gray-800 last:border-0"
+            class="border-b border-border-default last:border-0"
           >
             <td class="py-2 pr-4 text-gray-700 dark:text-gray-300 whitespace-nowrap">
               {{ formatFecha(caja.fechaApertura) }}
@@ -123,7 +123,7 @@ watch(() => props.usuarioId, (id) => cargar(!!id))
               >
                 {{ diferenciaPositiva(caja.diferencia) ? '+' : '' }}{{ formatMonto(caja.diferencia) }}
               </span>
-              <span v-else class="text-gray-400">—</span>
+              <span v-else class="text-muted">—</span>
             </td>
           </tr>
         </tbody>

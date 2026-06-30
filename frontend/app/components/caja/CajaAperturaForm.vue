@@ -42,7 +42,7 @@ async function abrir() {
         <h2 class="text-base font-semibold">
           Abrir caja
         </h2>
-        <p class="text-sm text-gray-500 mt-0.5">
+        <p class="text-sm text-muted mt-0.5">
           No hay caja abierta. Ingresa el saldo inicial para comenzar el turno.
         </p>
       </div>
