@@ -18,5 +18,25 @@ export default defineAppConfig({
       muted: { light: 'bg-gray-100', dark: 'dark:bg-gray-800' },
     },
     divider: { light: 'divide-gray-100', dark: 'dark:divide-gray-800' },
+    // Component-specific overrides
+    card: {
+      base: 'bg-default divide-y divide-border-default',
+      header: {
+        base: 'px-6 py-5 border-b border-border-default',
+      },
+    },
+    modal: {
+      base: 'relative text-default',
+      body: {
+        base: 'p-6 space-y-4',
+      },
+      footer: {
+        base: 'px-6 py-4 border-t border-border-default flex justify-end gap-2',
+      },
+    },
+    formField: {
+      label: { base: 'font-medium text-default' },
+      description: { base: 'text-sm text-muted' },
+    },
   },
 })
