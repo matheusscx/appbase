@@ -42,7 +42,45 @@ cajero cuenta (`monto_contado`), generando el reporte de cuadre de caja.
 
 ---
 
+## Modelo de acceso por permiso
+
+El módulo Caja distingue dos niveles de acceso según los permisos del usuario:
+
+| Permiso | Qué puede hacer |
+|---------|----------------|
+| `Caja:Leer` (sin `Ver todas`) | Accede a `/caja` y opera su propia caja (abrir, movimientos, cierre). Solo ve su historial. |
+| `Caja:Ver todas` | Además de lo anterior, ve la pestaña "Todas las cajas" en `/caja` con el grid de todas las cajas físicas abiertas del tenant. Puede navegar a `/caja/[id]` de cualquier caja en modo read-only (sin botones de operar). |
+
+La visibilidad del link "Caja" en el sidebar requiere solo `Caja:Leer`.
+
+---
+
 ## API Endpoints
+
+### GET /caja/abiertas — Cajas físicas abiertas del tenant
+
+```
+GET /caja/abiertas
+Authorization: Bearer <token>
+
+Permiso requerido: Caja / Leer
+Nota: devuelve todas las cajas del tenant si el usuario tiene "Ver todas";
+      solo la propia si no.
+
+Response (200):
+[
+  {
+    "id": "uuid",
+    "usuarioId": "uuid",
+    "usuarioNombre": "Juan Pérez",
+    "saldoInicial": "500.00",
+    "saldoEsperado": "750.00",
+    "fechaApertura": "2026-06-29T08:00:00Z",
+    "esPropia": true
+  },
+  ...
+]
+```
 
 ### GET /caja/activa — Caja física abierta del usuario
 
@@ -134,6 +172,8 @@ GET /caja/:id/movimientos
 Authorization: Bearer <token>
 
 Permiso requerido: Caja / Leer
+Nota: usuarios con "Ver todas" pueden listar movimientos de cajas ajenas (read-only).
+      Solo el dueño puede registrar movimientos (POST) o cerrar (POST /cerrar).
 
 Response (200):
 [
@@ -273,10 +313,11 @@ Error (403) si la caja pertenece a otro usuario y no tiene permiso "Ver todas".
 ### Key Methods
 
 - `cajaService.getCajaActiva(tenantId, usuarioId)` — caja física `estado='abierta'` del usuario
+- `cajaService.getCajasAbiertas(tenantId, usuarioId, verTodas)` — cajas físicas abiertas del tenant; si `verTodas=false`, filtra por `usuarioId`; cada elemento incluye `esPropia`
 - `cajaService.abrirCaja(tenantId, usuarioId, dto)` — crea caja; lanza 409 si ya hay una abierta
-- `cajaService.registrarMovimiento(cajaId, tenantId, usuarioId, dto)` — valida propiedad, valida saldo para `salida`, actualiza `saldo_esperado`
-- `cajaService.listarMovimientos(cajaId, tenantId, usuarioId)` — lista `movimientos_caja` de la caja
-- `cajaService.cerrarCaja(cajaId, tenantId, usuarioId, dto)` — calcula `diferencia`, marca `estado='cerrada'`
+- `cajaService.registrarMovimiento(cajaId, tenantId, usuarioId, dto)` — valida propiedad (owner-only), valida saldo para `salida`, actualiza `saldo_esperado`
+- `cajaService.listarMovimientos(cajaId, tenantId, usuarioId, verTodas)` — lista `movimientos_caja`; acepta caja ajena si `verTodas=true`
+- `cajaService.cerrarCaja(cajaId, tenantId, usuarioId, dto)` — owner-only; calcula `diferencia`, marca `estado='cerrada'`
 - `cajaService.findAll(tenantId, usuarioId, todas)` — historial; `todas=true` retorna todas las cajas del tenant
 - `cajaService.findOne(cajaId, tenantId, usuarioId)` — detalle con movimientos
 
@@ -311,7 +352,10 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 
 ### Pages
 
-- `pages/caja/index.vue` — Pantalla principal con máquina de estados (sin caja → caja abierta → cierre)
+- `pages/caja/index.vue` — Pantalla principal con dos modos según permisos:
+  - **Sin `Ver todas`**: máquina de estados directa (sin caja → caja abierta → cierre)
+  - **Con `Ver todas`**: dos pestañas — "Mi caja" (operar caja propia) y "Todas las cajas" (grid de cajas abiertas del tenant)
+- `pages/caja/[id].vue` — Detalle read-only de una caja ajena: estado, fechaApertura, saldoInicial, saldoEsperado y lista de movimientos (concepto, fecha, monto coloreado por tipo). Sin botones de operar. 403/404 → redirect a `/caja`.
 
 ### Components
 
@@ -320,6 +364,7 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 - `components/caja/MovimientosTable.vue` — Tabla de movimientos manuales con tipo y monto
 - `components/caja/CerrarCajaForm.vue` — Formulario de cierre con cuadre visual (esperado vs. contado → diferencia)
 - `components/caja/HistorialCajas.vue` — Listado de sesiones pasadas con filtro de fecha
+- `components/caja/CajasAbiertasGrid.vue` — Grid de cards para usuarios con `Ver todas`: muestra todas las cajas físicas abiertas del tenant. Cada card: nombre del cajero, saldo inicial, saldo esperado, hora de apertura, badge "Mía" para la propia. Click en caja propia → activa pestaña "Mi caja". Click en caja ajena → navega a `/caja/[id]`.
 
 ### Pinia Store
 
@@ -329,6 +374,8 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 - `cajaActiva: Caja | null` — caja abierta del usuario actual
 - `historial: Caja[]` — lista de sesiones pasadas
 - `movimientos: MovimientoCaja[]` — movimientos de la caja activa
+- `abiertas: CajaAbierta[]` — cajas físicas abiertas del tenant (para usuarios con `Ver todas`)
+- `detalle: CajaDetalle | null` — detalle de una caja ajena (página read-only)
 - `loading: boolean`
 - `error: string | null`
 
@@ -339,6 +386,8 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 - `fetchMovimientos(cajaId)` — GET /caja/:id/movimientos
 - `cerrarCaja(cajaId, dto)` — POST /caja/:id/cerrar
 - `fetchHistorial(todas?)` — GET /caja?todas=true
+- `cargarAbiertas()` — GET /caja/abiertas → puebla `abiertas`
+- `cargarDetalle(id)` — GET /caja/:id + GET /caja/:id/movimientos → puebla `detalle`
 
 ---
 
@@ -433,10 +482,13 @@ manualmente, y no acepta movimientos manuales.
 
 ### Permiso "Ver todas"
 
-El permiso `Caja / Ver todas` permite a supervisores o administradores consultar
-las cajas de todos los usuarios del tenant (no solo las propias) mediante el
-parámetro `?todas=true` en `GET /caja` y acceder al detalle de cualquier caja
-via `GET /caja/:id`.
+El permiso `Caja / Ver todas` permite a supervisores o administradores:
+
+- Consultar todas las cajas del tenant (historial completo vía `GET /caja?todas=true`).
+- Ver el grid de cajas físicas actualmente abiertas (`GET /caja/abiertas` retorna todas).
+- Acceder en read-only al detalle de cualquier caja (`GET /caja/:id` y `GET /caja/:id/movimientos`).
+
+**Owner-only (independientemente de `Ver todas`):** `POST /caja/:id/movimientos` y `POST /caja/:id/cerrar` solo los puede ejecutar el dueño de la caja.
 
 ---
 
@@ -489,6 +541,12 @@ npm run test:e2e -- caja.e2e.spec.ts
 - [x] Cierre calcula `diferencia = montoContado − saldoEsperado` con Decimal.js
 - [x] Caja virtual excluida de todos los flujos manuales
 - [x] Permiso "Ver todas" permite supervisores ver cajas de todo el tenant
+- [x] `GET /caja/abiertas` retorna todas las cajas abiertas del tenant (o solo la propia sin `Ver todas`)
+- [x] `GET /caja/:id/movimientos` permite lectura de caja ajena con `Ver todas`; registrar y cerrar siguen owner-only
+- [x] Frontend `/caja` muestra pestañas "Mi caja" / "Todas las cajas" para usuarios con `Ver todas`
+- [x] `CajasAbiertasGrid` muestra cards de cajas abiertas con badge "Mía" y navegación a detalle
+- [x] Página `/caja/[id]` read-only con movimientos; 403/404 redirige a `/caja`
+- [x] Store `useCajaStore` con `abiertas`, `detalle`, `cargarAbiertas()` y `cargarDetalle(id)`
 - [x] Todos los guards usan `@RequiresPermiso` + `PermisosGuard` (no `TenantAdminGuard`)
 - [x] Frontend página `/caja` con máquina de estados y store `useCajaStore`
 - [x] Soft delete en cajas y movimientos

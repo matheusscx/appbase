@@ -387,6 +387,14 @@ opcionalmente `movimiento_caja` (entidad presente para movimientos de caja).
 - Regla implícita: **una sola caja "abierta" por tenant+usuario** (la "activa" es la primera con
   estado abierta). El flujo de ventas depende de esto.
 
+**Actualización 2026-06-29 — visibilidad por permiso y vista read-only:**
+- `Caja:Leer` (sin `Ver todas`): el usuario accede a `/caja` y opera únicamente su propia caja.
+  El link "Caja" en el sidebar es visible para cualquier usuario con `Caja:Leer`.
+- `Caja:Ver todas`: además, `/caja` muestra la pestaña "Todas las cajas" con el grid de cajas
+  físicas abiertas del tenant (`GET /caja/abiertas`). Click en caja ajena → `/caja/[id]` read-only
+  (movimientos y saldos, sin botones de operar). Click en la propia → vuelve a pestaña "Mi caja".
+- `POST /caja/:id/movimientos` y `POST /caja/:id/cerrar` siguen siendo owner-only.
+
 ---
 
 ### 13. Registro de pagos de venta
