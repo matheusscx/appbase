@@ -27,8 +27,8 @@ export class TipoDocumentoTributario {
   @Column({ default: true })
   activo: boolean;
 
-  @Column({ name: 'requiere_customer', default: false })
-  requiereCustomer: boolean;
+  @Column({ name: 'customer_requerido', default: false })
+  customerRequerido: boolean;
 
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;

@@ -213,10 +213,10 @@ describe('Ventas (e2e)', () => {
       id: string;
       nombre: string;
       codigo: string | null;
-      requiereCustomer: boolean;
+      customerRequerido: boolean;
     }
 
-    it('lista los tipos de documento del país del tenant con el flag requiereCustomer', async () => {
+    it('lista los tipos de documento del país del tenant con el flag customerRequerido', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/tipos-documento')
         .set('Authorization', `Bearer ${token}`);
@@ -228,8 +228,8 @@ describe('Ventas (e2e)', () => {
 
       const boleta = tipos.find((t) => t.codigo === '39');
       const factura = tipos.find((t) => t.codigo === '33');
-      expect(boleta?.requiereCustomer).toBe(false);
-      expect(factura?.requiereCustomer).toBe(true);
+      expect(boleta?.customerRequerido).toBe(false);
+      expect(factura?.customerRequerido).toBe(true);
     });
 
     it('retorna 401 sin token', async () => {

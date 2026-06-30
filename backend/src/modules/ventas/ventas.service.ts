@@ -23,7 +23,7 @@ export interface TipoDocumentoResponse {
   id: string;
   nombre: string;
   codigo: string | null;
-  requiereCustomer: boolean;
+  customerRequerido: boolean;
 }
 
 @Injectable()
@@ -355,12 +355,12 @@ export class VentasService {
       tipo_documento_id: string;
       nombre: string;
       codigo: string | null;
-      requiere_customer: boolean;
+      customer_requerido: boolean;
     }[] = await this.dataSource.query(
       `SELECT td.tipo_documento_id,
               td.nombre,
               td.codigo,
-              td.requiere_customer
+              td.customer_requerido
        FROM tenants t
        JOIN provincia prov ON prov.provincia_id = t.provincia_id
             AND prov.eliminado_el IS NULL
@@ -376,7 +376,7 @@ export class VentasService {
       id: r.tipo_documento_id,
       nombre: r.nombre,
       codigo: r.codigo,
-      requiereCustomer: r.requiere_customer === true,
+      customerRequerido: r.customer_requerido === true,
     }));
   }
 
