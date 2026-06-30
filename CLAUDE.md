@@ -233,6 +233,13 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 - Prefijar las vars de runtime config públicas con `VITE_` en el env y acceder vía `useRuntimeConfig().public`.
 - **Funciones de formato centralizadas:** `formatMonto` y `formatFecha` (y cualquier utilidad de presentación reutilizable) deben vivir en composables de `app/composables/`, nunca definirse localmente dentro de un componente. Hoy están en `useFormatters`. Antes de escribir una función de formato en un `.vue`, verificar si ya existe en un composable.
 
+### Design System (Nuxt UI Semantic Tokens)
+- **Siempre usar tokens semánticos, nunca Tailwind hardcoded.** Permite consistencia en tema claro/oscuro.
+- ❌ Prohibido: `text-gray-500`, `divide-gray-100 dark:divide-gray-800`, `bg-white dark:bg-gray-900`
+- ✅ Usar: `text-muted`, `divide-border-default`, `bg-default`
+- Referencia: `docs/DESIGN-SYSTEM.md` y `app/app.config.ts`
+- **Excepción:** colores financieros (verde/rojo/azul) en módulo Caja son intencionales.
+
 ### Planes de implementación
 Todo plan de implementación se **persiste dentro del repo** (no solo en el archivo efímero del modo plan):
 
