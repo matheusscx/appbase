@@ -313,37 +313,19 @@ export class VentasService {
         pagosGuardados.push(pago);
       }
 
-      // Movimiento de caja: una entrada por cada pago en efectivo (permite_vuelto)
-      if (pagoConVueltoIdx >= 0 || dto.pagos.length > 0) {
-        const permisoRows: {
-          metodo_pago_id: string;
-          permite_vuelto: boolean;
-        }[] = await manager.query(
-          `SELECT metodo_pago_id, permite_vuelto
-             FROM tenant_metodo_pago
-             WHERE tenant_id = $1
-               AND metodo_pago_id = ANY($2::uuid[])
-               AND eliminado_el IS NULL`,
-          [tenantId, dto.pagos.map((p) => p.metodoPagoId)],
-        );
-        const permisoMap = new Map(
-          permisoRows.map((r) => [r.metodo_pago_id, r.permite_vuelto]),
-        );
-
-        for (let i = 0; i < dto.pagos.length; i++) {
-          const p = dto.pagos[i];
-          if (!permisoMap.get(p.metodoPagoId)) continue;
-          const vuelto = new Decimal(pagosGuardados[i].vuelto ?? '0');
-          const efectivoNeto = new Decimal(p.monto).minus(vuelto).toFixed(4);
-          await this.cajaService.registrarMovimientoEnTransaccion(manager, {
-            cajaId: caja.id,
-            tipo: 'entrada',
-            concepto: 'Venta',
-            monto: efectivoNeto,
-            ventaId: venta.id,
-            pagoId: pagosGuardados[i].id,
-          });
-        }
+      // Movimiento de caja: una entrada por cada pago (todos los métodos)
+      for (let i = 0; i < dto.pagos.length; i++) {
+        const p = dto.pagos[i];
+        const vuelto = new Decimal(pagosGuardados[i].vuelto ?? '0');
+        const montoNeto = new Decimal(p.monto).minus(vuelto).toFixed(4);
+        await this.cajaService.registrarMovimientoEnTransaccion(manager, {
+          cajaId: caja.id,
+          tipo: 'entrada',
+          concepto: 'Venta',
+          monto: montoNeto,
+          ventaId: venta.id,
+          pagoId: pagosGuardados[i].id,
+        });
       }
 
       return { ...venta, detalles };
