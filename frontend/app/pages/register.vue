@@ -35,7 +35,7 @@ async function onGoogle() {
       </div>
 
       <!-- Card -->
-      <div class="bg-default rounded-2xl shadow-sm ring-1 ring-border-default p-8 space-y-5">
+      <div class="bg-default rounded-2xl shadow-sm border border-default p-8 space-y-5">
 
         <!-- Error -->
         <UAlert

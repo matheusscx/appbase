@@ -28,7 +28,7 @@ const tipos = ref<{ label: string; value: string; codigo: string; descripcion: s
 const metodos = ref<{ label: string; value: string }[]>([])
 const loading = ref(false)
 const saving = ref(false)
-const modalOpen = ref(false)
+const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
@@ -55,6 +55,24 @@ const emptyForm = () => ({
   activo: true,
 })
 const form = ref(emptyForm())
+
+const drawerTitle = computed(() =>
+  editingId.value ? 'Editar descuento' : 'Nuevo descuento',
+)
+
+const submitLabel = computed(() =>
+  editingId.value ? 'Guardar' : 'Crear',
+)
+
+function resetDrawer() {
+  editingId.value = null
+  form.value = emptyForm()
+  nombreError.value = null
+}
+
+watch(drawerOpen, (open) => {
+  if (!open) resetDrawer()
+})
 
 const tipoSeleccionado = computed(() =>
   tipos.value.find(t => t.value === form.value.tipoReglaId),
@@ -114,13 +132,12 @@ async function cargarMetodos() {
 }
 
 function abrirCrear() {
-  editingId.value = null
-  form.value = emptyForm()
-  nombreError.value = null
-  modalOpen.value = true
+  resetDrawer()
+  drawerOpen.value = true
 }
 
 function abrirEditar(d: Regla) {
+  resetDrawer()
   editingId.value = d.id
   form.value = {
     nombre: d.nombre,
@@ -134,8 +151,7 @@ function abrirEditar(d: Regla) {
     fechaFin: d.fechaFin ?? null,
     activo: d.activo,
   }
-  nombreError.value = null
-  modalOpen.value = true
+  drawerOpen.value = true
 }
 
 async function checkNombre() {
@@ -184,7 +200,7 @@ async function guardar() {
       await useApiFetch(`${apiUrl}/descuentos`, { method: 'POST', body })
       toast.add({ title: 'Descuento creado', color: 'success' })
     }
-    modalOpen.value = false
+    drawerOpen.value = false
     await cargar()
   }
   catch (e: unknown) {
@@ -335,16 +351,26 @@ const columns: TableColumn<Regla>[] = [
       </UTable>
     </UCard>
 
-    <!-- Modal crear/editar -->
-    <UModal
-      v-model:open="modalOpen"
-      :title="editingId ? 'Editar descuento' : 'Nuevo descuento'"
-    >
+    <AppDrawer v-model:open="drawerOpen" width="50%">
+      <template #header>
+        <span class="font-semibold text-default">{{ drawerTitle }}</span>
+      </template>
+
       <template #body>
-        <div class="space-y-4">
+        <UForm
+          id="descuento-form"
+          :state="form"
+          class="space-y-4"
+          @submit="guardar"
+        >
           <!-- Nombre (always visible) -->
           <UFormField label="Nombre" required :error="nombreError">
-            <UInput v-model="form.nombre" placeholder="Mi descuento" @blur="checkNombre" />
+            <UInput
+              v-model="form.nombre"
+              placeholder="Mi descuento"
+              autofocus
+              @blur="checkNombre"
+            />
           </UFormField>
 
           <!-- Tipo (always visible) -->
@@ -463,19 +489,26 @@ const columns: TableColumn<Regla>[] = [
           <UFormField label="Activo">
             <USwitch v-model="form.activo" />
           </UFormField>
-        </div>
+        </UForm>
       </template>
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="modalOpen = false">
-            Cancelar
-          </UButton>
-          <UButton :loading="saving" @click="guardar">
-            Guardar
-          </UButton>
-        </div>
+
+      <template #actions>
+        <UButton
+          color="neutral"
+          variant="ghost"
+          @click="drawerOpen = false"
+        >
+          Cancelar
+        </UButton>
+        <UButton
+          type="submit"
+          form="descuento-form"
+          :loading="saving"
+        >
+          {{ submitLabel }}
+        </UButton>
       </template>
-    </UModal>
+    </AppDrawer>
 
     <!-- Modal confirmación eliminar -->
     <UModal

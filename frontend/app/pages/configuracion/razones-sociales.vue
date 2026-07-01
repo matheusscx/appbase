@@ -18,7 +18,7 @@ const apiUrl = config.public.apiUrl
 const razones = ref<RazonSocial[]>([])
 const loading = ref(false)
 const saving = ref(false)
-const modalOpen = ref(false)
+const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
@@ -32,6 +32,23 @@ const emptyForm = () => ({
   habilitado: true,
 })
 const form = ref(emptyForm())
+
+const drawerTitle = computed(() =>
+  editingId.value ? 'Editar razón social' : 'Nueva razón social',
+)
+
+const submitLabel = computed(() =>
+  editingId.value ? 'Guardar' : 'Crear',
+)
+
+function resetDrawer() {
+  editingId.value = null
+  form.value = emptyForm()
+}
+
+watch(drawerOpen, (open) => {
+  if (!open) resetDrawer()
+})
 
 async function cargar() {
   loading.value = true
@@ -48,12 +65,12 @@ async function cargar() {
 }
 
 function abrirCrear() {
-  editingId.value = null
-  form.value = emptyForm()
-  modalOpen.value = true
+  resetDrawer()
+  drawerOpen.value = true
 }
 
 function abrirEditar(rs: RazonSocial) {
+  resetDrawer()
   editingId.value = rs.id
   form.value = {
     nombre: rs.nombre,
@@ -62,7 +79,7 @@ function abrirEditar(rs: RazonSocial) {
     telefono: rs.telefono ?? '',
     habilitado: rs.habilitado,
   }
-  modalOpen.value = true
+  drawerOpen.value = true
 }
 
 async function guardar() {
@@ -89,7 +106,7 @@ async function guardar() {
       })
       toast.add({ title: 'Razón social creada', color: 'success' })
     }
-    modalOpen.value = false
+    drawerOpen.value = false
     await cargar()
   }
   catch (e: unknown) {
@@ -272,15 +289,24 @@ const columns: TableColumn<RazonSocial>[] = [
       </UTable>
     </UCard>
 
-    <!-- Modal crear/editar -->
-    <UModal
-      v-model:open="modalOpen"
-      :title="editingId ? 'Editar razón social' : 'Nueva razón social'"
-    >
+    <AppDrawer v-model:open="drawerOpen" width="50%">
+      <template #header>
+        <span class="font-semibold text-default">{{ drawerTitle }}</span>
+      </template>
+
       <template #body>
-        <div class="space-y-4">
+        <UForm
+          id="razon-social-form"
+          :state="form"
+          class="space-y-4"
+          @submit="guardar"
+        >
           <UFormField label="Nombre legal" required>
-            <UInput v-model="form.nombre" placeholder="Empresa S.A." />
+            <UInput
+              v-model="form.nombre"
+              placeholder="Empresa S.A."
+              autofocus
+            />
           </UFormField>
           <UFormField label="RUT" required>
             <UInput v-model="form.rut" placeholder="76.123.456-7" />
@@ -294,19 +320,26 @@ const columns: TableColumn<RazonSocial>[] = [
           <UFormField label="Habilitada">
             <USwitch v-model="form.habilitado" />
           </UFormField>
-        </div>
+        </UForm>
       </template>
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="modalOpen = false">
-            Cancelar
-          </UButton>
-          <UButton :loading="saving" @click="guardar">
-            Guardar
-          </UButton>
-        </div>
+
+      <template #actions>
+        <UButton
+          color="neutral"
+          variant="ghost"
+          @click="drawerOpen = false"
+        >
+          Cancelar
+        </UButton>
+        <UButton
+          type="submit"
+          form="razon-social-form"
+          :loading="saving"
+        >
+          {{ submitLabel }}
+        </UButton>
       </template>
-    </UModal>
+    </AppDrawer>
 
     <!-- Modal confirmación eliminar -->
     <UModal

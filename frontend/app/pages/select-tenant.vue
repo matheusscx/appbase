@@ -36,7 +36,7 @@ const gridClass = computed(() =>
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-elevated px-4 py-12">
+  <div class="min-h-screen flex items-center justify-center bg-default px-4 py-12">
     <div class="w-full max-w-lg">
       <div class="mb-8 text-center">
         <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-4">
@@ -71,7 +71,7 @@ const gridClass = computed(() =>
           v-for="tenant in tenantStore.tenants"
           :key="tenant.tenantId"
           :disabled="!!switching"
-          class="group relative flex items-center gap-4 rounded-xl bg-default ring-1 ring-border-default px-5 py-4 text-left transition-all hover:ring-primary-500 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-60"
+          class="group relative flex items-center gap-4 rounded-xl bg-default border border-default px-5 py-4 text-left transition-all hover:border-primary-500 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-60"
           @click="select(tenant.tenantId)"
         >
           <div

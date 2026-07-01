@@ -20,9 +20,9 @@ export default defineAppConfig({
     divider: { light: 'divide-gray-100', dark: 'dark:divide-gray-800' },
     // Component-specific overrides
     card: {
-      base: 'bg-default divide-y divide-border-default',
+      base: 'bg-default divide-y divide-default',
       header: {
-        base: 'px-6 py-5 border-b border-border-default',
+        base: 'px-6 py-5 border-b border-default',
       },
     },
     modal: {
@@ -31,7 +31,7 @@ export default defineAppConfig({
         base: 'p-6 space-y-4',
       },
       footer: {
-        base: 'px-6 py-4 border-t border-border-default flex justify-end gap-2',
+        base: 'px-6 py-4 border-t border-default flex justify-end gap-2',
       },
     },
     formField: {

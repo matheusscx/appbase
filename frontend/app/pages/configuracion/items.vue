@@ -80,7 +80,7 @@ const items = ref<Item[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const ajustando = ref(false)
-const modalOpen = ref(false)
+const drawerOpen = ref(false)
 const confirmModalOpen = ref(false)
 const stockModalOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -157,6 +157,24 @@ function emptyForm() {
 }
 
 const form = ref(emptyForm())
+
+const drawerTitle = computed(() =>
+  editingId.value ? 'Editar item' : 'Nuevo item',
+)
+
+const submitLabel = computed(() =>
+  editingId.value ? 'Guardar cambios' : 'Crear item',
+)
+
+function resetDrawer() {
+  editingId.value = null
+  form.value = emptyForm()
+  form.value.monedaId = monedasOpts.value[0]?.value ?? ''
+}
+
+watch(drawerOpen, (open) => {
+  if (!open) resetDrawer()
+})
 
 function emptyAjusteForm() {
   return {
@@ -342,17 +360,15 @@ onMounted(async () => {
 // ── CRUD modal ─────────────────────────────────────────────────────────────
 
 function abrirCrear() {
-  editingId.value = null
-  form.value = emptyForm()
-  const defaultMoneda = monedasOpts.value[0]?.value ?? ''
-  form.value.monedaId = defaultMoneda
-  modalOpen.value = true
+  resetDrawer()
+  drawerOpen.value = true
 }
 
 async function abrirEditar(item: Item) {
-  editingId.value = item.id
+  resetDrawer()
   try {
     const detalle = await useApiFetch<Item>(`${apiUrl}/items/${item.id}`)
+    editingId.value = item.id
     form.value = {
       nombre: detalle.nombre,
       descripcion: detalle.descripcion ?? '',
@@ -379,7 +395,7 @@ async function abrirEditar(item: Item) {
       recargosIds: detalle.recargosIds ?? [],
       descuentosIds: detalle.descuentosIds ?? [],
     }
-    modalOpen.value = true
+    drawerOpen.value = true
   } catch {
     toast.add({ title: 'Error al cargar detalle del item', color: 'error' })
   }
@@ -443,7 +459,7 @@ async function guardar() {
       toast.add({ title: 'Item creado', color: 'success' })
     }
 
-    modalOpen.value = false
+    drawerOpen.value = false
     await cargar()
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al guardar')
@@ -700,14 +716,27 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       </UTable>
     </UCard>
 
-    <!-- Modal crear/editar -->
-    <UModal v-model:open="modalOpen" :title="editingId ? 'Editar item' : 'Nuevo item'" :ui="{ content: 'max-w-2xl' }">
+    <AppDrawer v-model:open="drawerOpen" width="50%">
+      <template #header>
+        <span class="font-semibold text-default">{{ drawerTitle }}</span>
+      </template>
+
       <template #body>
-        <div class="space-y-4">
+        <UForm
+          id="item-form"
+          :state="form"
+          class="space-y-4"
+          @submit="guardar"
+        >
           <!-- Campos base -->
           <div class="grid grid-cols-2 gap-4">
             <UFormField label="Nombre" class="col-span-2" required>
-              <UInput v-model="form.nombre" placeholder="Nombre del item" class="w-full" />
+              <UInput
+                v-model="form.nombre"
+                placeholder="Nombre del item"
+                class="w-full"
+                autofocus
+              />
             </UFormField>
 
             <UFormField label="Descripción" class="col-span-2">
@@ -923,20 +952,26 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               />
             </UFormField>
           </div>
-        </div>
+        </UForm>
       </template>
 
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="modalOpen = false">
-            Cancelar
-          </UButton>
-          <UButton :loading="saving" @click="guardar">
-            {{ editingId ? 'Guardar cambios' : 'Crear item' }}
-          </UButton>
-        </div>
+      <template #actions>
+        <UButton
+          color="neutral"
+          variant="ghost"
+          @click="drawerOpen = false"
+        >
+          Cancelar
+        </UButton>
+        <UButton
+          type="submit"
+          form="item-form"
+          :loading="saving"
+        >
+          {{ submitLabel }}
+        </UButton>
       </template>
-    </UModal>
+    </AppDrawer>
 
     <!-- Modal confirmar eliminar -->
     <UModal v-model:open="confirmModalOpen" title="Eliminar item">

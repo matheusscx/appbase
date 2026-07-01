@@ -15,7 +15,7 @@ const apiUrl = config.public.apiUrl
 const categorias = ref<Categoria[]>([])
 const loading = ref(false)
 const saving = ref(false)
-const modalOpen = ref(false)
+const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
@@ -33,6 +33,23 @@ const emptyForm = () => ({
   activo: true,
 })
 const form = ref(emptyForm())
+
+const drawerTitle = computed(() =>
+  editingId.value ? 'Editar categoría' : 'Nueva categoría',
+)
+
+const submitLabel = computed(() =>
+  editingId.value ? 'Guardar' : 'Crear',
+)
+
+function resetDrawer() {
+  editingId.value = null
+  form.value = emptyForm()
+}
+
+watch(drawerOpen, (open) => {
+  if (!open) resetDrawer()
+})
 
 function aplicaALabel(value: string) {
   return aplicaAOptions.find(o => o.value === value)?.label ?? value
@@ -53,19 +70,19 @@ async function cargar() {
 }
 
 function abrirCrear() {
-  editingId.value = null
-  form.value = emptyForm()
-  modalOpen.value = true
+  resetDrawer()
+  drawerOpen.value = true
 }
 
 function abrirEditar(cat: Categoria) {
+  resetDrawer()
   editingId.value = cat.id
   form.value = {
     nombre: cat.nombre,
     aplicaA: cat.aplicaA,
     activo: cat.activo,
   }
-  modalOpen.value = true
+  drawerOpen.value = true
 }
 
 async function guardar() {
@@ -90,7 +107,7 @@ async function guardar() {
       })
       toast.add({ title: 'Categoría creada', color: 'success' })
     }
-    modalOpen.value = false
+    drawerOpen.value = false
     await cargar()
   }
   catch (e: unknown) {
@@ -218,15 +235,24 @@ const columns: TableColumn<Categoria>[] = [
       </UTable>
     </UCard>
 
-    <!-- Modal crear/editar -->
-    <UModal
-      v-model:open="modalOpen"
-      :title="editingId ? 'Editar categoría' : 'Nueva categoría'"
-    >
+    <AppDrawer v-model:open="drawerOpen" width="50%">
+      <template #header>
+        <span class="font-semibold text-default">{{ drawerTitle }}</span>
+      </template>
+
       <template #body>
-        <div class="space-y-4">
+        <UForm
+          id="categoria-form"
+          :state="form"
+          class="space-y-4"
+          @submit="guardar"
+        >
           <UFormField label="Nombre" required>
-            <UInput v-model="form.nombre" placeholder="Bebidas" />
+            <UInput
+              v-model="form.nombre"
+              placeholder="Bebidas"
+              autofocus
+            />
           </UFormField>
           <UFormField label="Aplica a">
             <USelectMenu
@@ -238,19 +264,26 @@ const columns: TableColumn<Categoria>[] = [
           <UFormField label="Activa">
             <USwitch v-model="form.activo" />
           </UFormField>
-        </div>
+        </UForm>
       </template>
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="modalOpen = false">
-            Cancelar
-          </UButton>
-          <UButton :loading="saving" @click="guardar">
-            Guardar
-          </UButton>
-        </div>
+
+      <template #actions>
+        <UButton
+          color="neutral"
+          variant="ghost"
+          @click="drawerOpen = false"
+        >
+          Cancelar
+        </UButton>
+        <UButton
+          type="submit"
+          form="categoria-form"
+          :loading="saving"
+        >
+          {{ submitLabel }}
+        </UButton>
       </template>
-    </UModal>
+    </AppDrawer>
 
     <!-- Modal confirmación eliminar -->
     <UModal
