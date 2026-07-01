@@ -4,10 +4,24 @@ import type {
   UsuarioPreferencias,
 } from '~/types/usuario-preferencias'
 import {
+  COLOR_MODE_OPTIONS,
   mergePreferencias,
+  PAGE_SIZE_OPTIONS,
   resolveColorMode,
   resolvePageSize,
 } from '~/types/usuario-preferencias'
+
+function successMessageForPatch(patch: UsuarioPreferencias): string {
+  if (patch.ui?.colorMode) {
+    const label = COLOR_MODE_OPTIONS.find(o => o.value === patch.ui!.colorMode)?.label
+    return `Tema actualizado: ${label ?? patch.ui.colorMode}`
+  }
+  if (patch.ui?.pageSize) {
+    const label = PAGE_SIZE_OPTIONS.find(o => o.value === patch.ui!.pageSize)?.label
+    return `Filas por página: ${label ?? patch.ui.pageSize}`
+  }
+  return 'Preferencias actualizadas'
+}
 
 export function useUserPreferences() {
   const authStore = useAuthStore()
@@ -28,6 +42,11 @@ export function useUserPreferences() {
         { method: 'PATCH', body: patch },
       )
       authStore.updateUser({ preferencias: updated })
+      toast.add({
+        title: successMessageForPatch(patch),
+        color: 'success',
+        icon: 'i-lucide-check',
+      })
     }
     catch (e: unknown) {
       const msg = (e as { data?: { message?: string } })?.data?.message
@@ -64,10 +83,12 @@ export function useUserPreferences() {
   }
 
   function setPageSize(size: PageSizePreference) {
+    if (size === pageSize.value) return
     updatePreferences({ ui: { pageSize: size } })
   }
 
   function setColorMode(mode: ColorModePreference) {
+    if (mode === colorModePreference.value) return
     updatePreferences({ ui: { colorMode: mode } })
   }
 
