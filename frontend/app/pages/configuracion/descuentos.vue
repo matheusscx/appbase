@@ -407,7 +407,7 @@ onMounted(() => {
             <!-- Tramos table — when campoTramos -->
             <div v-if="config.campoTramos" class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-sm font-medium">Tramos</label>
+                <span class="text-sm font-medium">Tramos</span>
                 <UButton size="xs" icon="i-heroicons-plus" variant="ghost" @click="agregarTramo">
                   Agregar tramo
                 </UButton>
