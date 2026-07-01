@@ -42,7 +42,7 @@ async function guardar() {
       </div>
     </template>
 
-    <form class="space-y-4" @submit.prevent="guardar">
+    <UForm :state="form" class="space-y-4" @submit="guardar">
       <UFormField label="Contraseña actual" required>
         <UInput v-model="form.contrasenaActual" type="password" placeholder="Tu contraseña actual" />
       </UFormField>
@@ -58,6 +58,6 @@ async function guardar() {
       <UButton type="submit" :loading="loading">
         Actualizar contraseña
       </UButton>
-    </form>
+    </UForm>
   </UCard>
 </template>

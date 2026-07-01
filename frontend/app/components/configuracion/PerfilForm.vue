@@ -37,7 +37,7 @@ async function guardar() {
       </div>
     </template>
 
-    <form class="space-y-4" @submit.prevent="guardar">
+    <UForm :state="form" class="space-y-4" @submit="guardar">
       <UFormField label="Correo electrónico">
         <UInput :value="authStore.user?.correo" disabled />
       </UFormField>
@@ -57,6 +57,6 @@ async function guardar() {
       <UButton type="submit" :loading="loading">
         Guardar cambios
       </UButton>
-    </form>
+    </UForm>
   </UCard>
 </template>
