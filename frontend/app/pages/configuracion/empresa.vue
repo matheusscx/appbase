@@ -124,14 +124,10 @@ onMounted(cargar)
 
 <template>
   <div class="space-y-6 max-w-lg">
-    <div>
-      <h2 class="text-lg font-semibold text-default">
-        Empresa
-      </h2>
-      <p class="text-sm text-muted">
-        Datos de tu organización.
-      </p>
-    </div>
+    <CrudPageHeader
+      title="Empresa"
+      description="Datos de tu organización."
+    />
 
     <div
       v-if="loading"

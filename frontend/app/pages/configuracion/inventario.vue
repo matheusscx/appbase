@@ -91,10 +91,11 @@ const columns: TableColumn<Movimiento>[] = [
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h1 class="text-2xl font-semibold text-default">Inventario</h1>
-      <p class="text-sm text-muted">Kardex de movimientos de stock</p>
-    </div>
+    <CrudPageHeader
+      large
+      title="Inventario"
+      description="Kardex de movimientos de stock"
+    />
 
     <div class="flex flex-wrap gap-2">
       <USelectMenu
@@ -113,8 +114,7 @@ const columns: TableColumn<Movimiento>[] = [
       />
     </div>
 
-    <UCard>
-      <UTable :data="movimientos" :columns="columns" :loading="loading">
+    <CrudTable :data="movimientos" :columns="columns" :loading="loading">
         <template #creadoEl-cell="{ row }">
           <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
         </template>
@@ -148,13 +148,12 @@ const columns: TableColumn<Movimiento>[] = [
         <template #usuarioNombre-cell="{ row }">
           {{ row.original.usuarioNombre ?? '—' }}
         </template>
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-            No hay movimientos registrados.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+          No hay movimientos registrados.
+        </div>
+      </template>
+    </CrudTable>
   </div>
 </template>

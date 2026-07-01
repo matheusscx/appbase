@@ -135,18 +135,12 @@ const columns: TableColumn<Moneda>[] = [
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h2 class="text-lg font-semibold text-default">
-        Monedas
-      </h2>
-      <p class="text-sm text-muted">
-        Habilita las monedas disponibles para tu país y define la tasa de cambio del día.
-        La moneda oficial siempre está habilitada con tasa 1.
-      </p>
-    </div>
+    <CrudPageHeader
+      title="Monedas"
+      description="Habilita las monedas disponibles para tu país y define la tasa de cambio del día. La moneda oficial siempre está habilitada con tasa 1."
+    />
 
-    <UCard>
-      <UTable :data="monedas" :columns="columns" :loading="loading">
+    <CrudTable :data="monedas" :columns="columns" :loading="loading">
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate flex items-center gap-2">
@@ -209,12 +203,11 @@ const columns: TableColumn<Moneda>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            No hay monedas disponibles para el país del tenant.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          No hay monedas disponibles para el país del tenant.
+        </div>
+      </template>
+    </CrudTable>
   </div>
 </template>

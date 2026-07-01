@@ -201,25 +201,21 @@ const columns: TableColumn<RazonSocial>[] = [
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-semibold text-default">
-          Razones sociales
-        </h2>
-        <p class="text-sm text-muted">
-          Datos legales para facturación del tenant.
-        </p>
-      </div>
-      <UButton
-        icon="i-lucide-plus"
-        @click="abrirCrear"
-      >
-        Nueva razón social
-      </UButton>
-    </div>
+    <CrudPageHeader
+      title="Razones sociales"
+      description="Datos legales para facturación del tenant."
+    >
+      <template #actions>
+        <UButton
+          icon="i-lucide-plus"
+          @click="abrirCrear"
+        >
+          Nueva razón social
+        </UButton>
+      </template>
+    </CrudPageHeader>
 
-    <UCard>
-      <UTable :data="razones" :columns="columns" :loading="loading">
+    <CrudTable :data="razones" :columns="columns" :loading="loading">
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate">
@@ -281,13 +277,12 @@ const columns: TableColumn<RazonSocial>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            No hay razones sociales registradas.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          No hay razones sociales registradas.
+        </div>
+      </template>
+    </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">
       <template #header>
@@ -341,29 +336,12 @@ const columns: TableColumn<RazonSocial>[] = [
       </template>
     </AppDrawer>
 
-    <!-- Modal confirmación eliminar -->
-    <UModal
+    <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar razón social"
-    >
-      <template #body>
-        <p class="text-sm">
-          ¿Estás seguro de que quieres eliminar esta razón social? Esta acción no se puede deshacer.
-        </p>
-      </template>
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="confirmModalOpen = false; confirmDeleteId = null">
-            Cancelar
-          </UButton>
-          <UButton
-            color="error"
-            @click="confirmDeleteId && eliminar(confirmDeleteId)"
-          >
-            Eliminar
-          </UButton>
-        </div>
-      </template>
-    </UModal>
+      message="¿Estás seguro de que quieres eliminar esta razón social? Esta acción no se puede deshacer."
+      @cancel="confirmDeleteId = null"
+      @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
+    />
   </div>
 </template>

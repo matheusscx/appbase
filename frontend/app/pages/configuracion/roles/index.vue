@@ -203,22 +203,18 @@ const columns: TableColumn<Rol>[] = [
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-semibold text-default">
-          Roles y permisos
-        </h2>
-        <p class="text-sm text-muted">
-          Define roles y los permisos que tienen sobre cada módulo.
-        </p>
-      </div>
-      <UButton icon="i-lucide-plus" @click="abrirCrear">
-        Nuevo rol
-      </UButton>
-    </div>
+    <CrudPageHeader
+      title="Roles y permisos"
+      description="Define roles y los permisos que tienen sobre cada módulo."
+    >
+      <template #actions>
+        <UButton icon="i-lucide-plus" @click="abrirCrear">
+          Nuevo rol
+        </UButton>
+      </template>
+    </CrudPageHeader>
 
-    <UCard>
-      <UTable :data="roles" :columns="columns" :loading="loading">
+    <CrudTable :data="roles" :columns="columns" :loading="loading">
         <template #nombre-cell="{ row }">
           <div class="flex items-center gap-2">
             <span class="font-medium">{{ row.original.nombre }}</span>
@@ -255,13 +251,12 @@ const columns: TableColumn<Rol>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            No hay roles todavía.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          No hay roles todavía.
+        </div>
+      </template>
+    </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">
       <template #header>

@@ -11,15 +11,9 @@ onMounted(async () => {
   }
 })
 
-const AVATAR_COLORS = [
-  'bg-blue-500', 'bg-violet-500', 'bg-emerald-500',
-  'bg-amber-500', 'bg-rose-500', 'bg-cyan-500',
-]
-function avatarColor(name: string): string {
-  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]
-}
-function avatarInitial(name: string): string {
-  return name.trim().charAt(0).toUpperCase()
+const AVATAR_COLORS = ['primary', 'secondary', 'success', 'warning', 'error', 'info'] as const
+function avatarColor(name: string): typeof AVATAR_COLORS[number] {
+  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]!
 }
 
 async function select(tenantId: string) {
@@ -74,15 +68,18 @@ const gridClass = computed(() =>
           class="group relative flex items-center gap-4 rounded-xl bg-default border border-default px-5 py-4 text-left transition-all hover:border-primary-500 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-60"
           @click="select(tenant.tenantId)"
         >
-          <div
-            :class="[avatarColor(tenant.nombre), 'w-10 h-10 rounded-lg flex items-center justify-center shrink-0 text-white font-bold text-base']"
-          >
+          <div class="relative shrink-0">
+            <UAvatar
+              :alt="tenant.nombre"
+              :color="avatarColor(tenant.nombre)"
+              size="md"
+              :class="switching === tenant.tenantId ? 'opacity-50' : ''"
+            />
             <UIcon
               v-if="switching === tenant.tenantId"
               name="i-lucide-loader"
-              class="w-5 h-5 animate-spin"
+              class="absolute inset-0 m-auto w-5 h-5 animate-spin text-highlighted"
             />
-            <span v-else>{{ avatarInitial(tenant.nombre) }}</span>
           </div>
           <span class="font-medium text-default text-sm flex-1 truncate">
             {{ tenant.nombre }}

@@ -53,7 +53,7 @@ Usar tokens semánticos en UI de producto; estas excepciones son **marca fija**,
 | `bg-primary-600` + `text-white` en logo/avatar | `login`, `register`, `forgot-password`, `select-tenant`, `layouts/dashboard.vue` | Icono de producto sobre fondo de marca |
 | `bg-primary-50 dark:bg-primary-950` | `index.vue`, `no-tenant.vue` | Superficie de acento decorativa en pantallas de bienvenida |
 | `text-white` sobre `bg-primary-*` | Iconos dentro del logo | Contraste sobre marca |
-| Avatares de tenant con colores Tailwind (`bg-blue-500`, etc.) | `select-tenant.vue` | Diferenciación visual entre tenants (evaluar `UIAvatar` en futuro) |
+| Avatares de tenant | `select-tenant.vue` | `UAvatar` con colores semánticos Nuxt UI (`primary`, `secondary`, …) |
 
 Links y acentos interactivos usan **`text-highlighted`**, no `text-primary-600`.
 
@@ -193,7 +193,7 @@ Patrón extraído de `configuracion/categorias.vue`. Ubicación: `app/components
 
 | Componente | Uso |
 |------------|-----|
-| `CrudPageHeader` | Título `h2` + subtítulo + slot `#actions` (botón crear) |
+| `CrudPageHeader` | Título (`h2` o `h1` con `large`) + subtítulo + slot `#actions` |
 | `CrudTable` | `UCard` + `UTable` con empty state por defecto |
 | `CrudListItem` | Celda nombre: título + subtítulo muted |
 | `CrudModal` | Confirmación de eliminación (cancel + confirm) |

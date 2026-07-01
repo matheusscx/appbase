@@ -160,35 +160,27 @@ const columns: TableColumn<Impuesto>[] = [
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-semibold text-default">
-          Impuestos
-        </h2>
-        <p class="text-sm text-muted">
-          Tasas impositivas del tenant (en decimal: 0.19 = 19%).
-        </p>
-      </div>
-      <UButton
-        icon="i-lucide-plus"
-        @click="abrirCrear"
-      >
-        Nuevo impuesto
-      </UButton>
-    </div>
+    <CrudPageHeader
+      title="Impuestos"
+      description="Tasas impositivas del tenant (en decimal: 0.19 = 19%)."
+    >
+      <template #actions>
+        <UButton
+          icon="i-lucide-plus"
+          @click="abrirCrear"
+        >
+          Nuevo impuesto
+        </UButton>
+      </template>
+    </CrudPageHeader>
 
-    <UCard>
-      <UTable :data="impuestos" :columns="columns" :loading="loading">
-        <template #nombre-cell="{ row }">
-          <div class="min-w-0">
-            <p class="font-medium truncate">
-              {{ row.original.nombre }}
-            </p>
-            <p class="text-sm text-muted">
-              Porcentaje: {{ row.original.porcentaje }}
-            </p>
-          </div>
-        </template>
+    <CrudTable :data="impuestos" :columns="columns" :loading="loading">
+      <template #nombre-cell="{ row }">
+        <CrudListItem
+          :title="row.original.nombre"
+          :subtitle="`Porcentaje: ${row.original.porcentaje}`"
+        />
+      </template>
 
         <template #activo-cell="{ row }">
           <div class="flex justify-end">
@@ -217,13 +209,12 @@ const columns: TableColumn<Impuesto>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            No hay impuestos registrados.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          No hay impuestos registrados.
+        </div>
+      </template>
+    </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">
       <template #header>
@@ -275,29 +266,12 @@ const columns: TableColumn<Impuesto>[] = [
       </template>
     </AppDrawer>
 
-    <!-- Modal confirmación eliminar -->
-    <UModal
+    <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar impuesto"
-    >
-      <template #body>
-        <p class="text-sm">
-          ¿Estás seguro de que quieres eliminar este impuesto? Esta acción no se puede deshacer.
-        </p>
-      </template>
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="confirmModalOpen = false; confirmDeleteId = null">
-            Cancelar
-          </UButton>
-          <UButton
-            color="error"
-            @click="confirmDeleteId && eliminar(confirmDeleteId)"
-          >
-            Eliminar
-          </UButton>
-        </div>
-      </template>
-    </UModal>
+      message="¿Estás seguro de que quieres eliminar este impuesto? Esta acción no se puede deshacer."
+      @cancel="confirmDeleteId = null"
+      @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
+    />
   </div>
 </template>

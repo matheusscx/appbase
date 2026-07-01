@@ -106,14 +106,10 @@ function moverAbajo(index: number) {
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h2 class="text-lg font-semibold text-default">
-        Preferencias financieras
-      </h2>
-      <p class="text-sm text-muted">
-        Configura cómo se calculan descuentos, recargos e impuestos en el motor de precios.
-      </p>
-    </div>
+    <CrudPageHeader
+      title="Preferencias financieras"
+      description="Configura cómo se calculan descuentos, recargos e impuestos en el motor de precios."
+    />
 
     <div
       v-if="loading"

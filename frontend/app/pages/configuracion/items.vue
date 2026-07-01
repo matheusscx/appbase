@@ -616,13 +616,15 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 <template>
   <div class="space-y-6">
     <!-- Cabecera -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-semibold text-default">Items</h1>
-        <p class="text-sm text-muted">Productos y servicios del catálogo</p>
-      </div>
-      <UButton icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
-    </div>
+    <CrudPageHeader
+      large
+      title="Items"
+      description="Productos y servicios del catálogo"
+    >
+      <template #actions>
+        <UButton icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
+      </template>
+    </CrudPageHeader>
 
     <!-- Filtro por tipo -->
     <div class="flex gap-2">
@@ -636,14 +638,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
     </div>
 
     <!-- Lista -->
-    <UCard>
-      <UTable
-        :data="itemsFiltrados"
-        :columns="columnsItems"
-        :loading="loading"
-        :ui="{ tr: 'cursor-pointer' }"
-        @select="onSelectItem"
-      >
+    <CrudTable
+      :data="itemsFiltrados"
+      :columns="columnsItems"
+      :loading="loading"
+      :ui="{ tr: 'cursor-pointer' }"
+      @select="onSelectItem"
+    >
         <template #tipo-cell="{ row }">
           <UBadge
             :label="row.original.tipo === 'producto' ? 'Producto' : 'Servicio'"
@@ -707,14 +708,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-            No hay items. Crea el primero con el botón de arriba.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+          No hay items. Crea el primero con el botón de arriba.
+        </div>
+      </template>
+    </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">
       <template #header>
@@ -973,20 +973,12 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       </template>
     </AppDrawer>
 
-    <!-- Modal confirmar eliminar -->
-    <UModal v-model:open="confirmModalOpen" title="Eliminar item">
-      <template #body>
-        <p>¿Estás seguro de que deseas eliminar este item? Esta acción no se puede deshacer.</p>
-      </template>
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="confirmModalOpen = false">
-            Cancelar
-          </UButton>
-          <UButton color="error" @click="eliminar">Eliminar</UButton>
-        </div>
-      </template>
-    </UModal>
+    <CrudModal
+      v-model:open="confirmModalOpen"
+      title="Eliminar item"
+      message="¿Estás seguro de que deseas eliminar este item? Esta acción no se puede deshacer."
+      @confirm="eliminar"
+    />
 
     <!-- Modal ajuste de stock -->
     <UModal v-model:open="stockModalOpen" title="Ajustar stock" :ui="{ content: 'max-w-2xl' }">

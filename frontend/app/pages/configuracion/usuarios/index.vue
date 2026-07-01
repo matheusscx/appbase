@@ -56,6 +56,8 @@ function abrirEdicion(member: Member) {
   modalOpen.value = true
 }
 
+const formState = computed(() => ({ roles: seleccion.value }))
+
 async function guardar() {
   if (!editing.value) return
   const member = editing.value
@@ -101,27 +103,18 @@ const columns: TableColumn<Member>[] = [
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h2 class="text-lg font-semibold text-default">
-        Usuarios
-      </h2>
-      <p class="text-sm text-muted">
-        Asigna roles a los usuarios del tenant.
-      </p>
-    </div>
+    <CrudPageHeader
+      title="Usuarios"
+      description="Asigna roles a los usuarios del tenant."
+    />
 
-    <UCard>
-      <UTable :data="members" :columns="columns" :loading="loading">
-        <template #nombre-cell="{ row }">
-          <div class="min-w-0">
-            <p class="font-medium truncate">
-              {{ row.original.nombre }} {{ row.original.apellido }}
-            </p>
-            <p class="text-sm text-muted truncate">
-              {{ row.original.correo }}
-            </p>
-          </div>
-        </template>
+    <CrudTable :data="members" :columns="columns" :loading="loading">
+      <template #nombre-cell="{ row }">
+        <CrudListItem
+          :title="`${row.original.nombre} ${row.original.apellido}`"
+          :subtitle="row.original.correo"
+        />
+      </template>
 
         <template #roles-cell="{ row }">
           <div class="flex flex-wrap gap-1">
@@ -154,20 +147,24 @@ const columns: TableColumn<Member>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            No hay usuarios en este tenant.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          No hay usuarios en este tenant.
+        </div>
+      </template>
+    </CrudTable>
 
     <UModal
       v-model:open="modalOpen"
       :title="editing ? `Roles de ${editing.nombre}` : 'Roles'"
     >
       <template #body>
-        <div class="space-y-4">
+        <UForm
+          id="usuario-roles-form"
+          :state="formState"
+          class="space-y-4"
+          @submit="guardar"
+        >
           <UFormField label="Roles">
             <USelectMenu
               v-model="seleccion"
@@ -178,18 +175,24 @@ const columns: TableColumn<Member>[] = [
               class="w-full"
             />
           </UFormField>
-          <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
-              variant="ghost"
-              @click="modalOpen = false"
-            >
-              Cancelar
-            </UButton>
-            <UButton :loading="saving" @click="guardar">
-              Guardar
-            </UButton>
-          </div>
+        </UForm>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            @click="modalOpen = false"
+          >
+            Cancelar
+          </UButton>
+          <UButton
+            type="submit"
+            form="usuario-roles-form"
+            :loading="saving"
+          >
+            Guardar
+          </UButton>
         </div>
       </template>
     </UModal>

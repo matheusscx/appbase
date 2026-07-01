@@ -18,11 +18,9 @@ El frontend completó la **estandarización UI** en tokens semánticos, componen
 - Excepciones de branding documentadas en `DESIGN-SYSTEM.md`
 
 **Pendiente opcional:**
-- Migrar el resto de páginas CRUD a los componentes `crud/*` (solo `categorias` y `metodos-pago` adoptados)
-- Capturas de regresión visual claro/oscuro
-- Avatares de tenant en `select-tenant.vue` → paleta semántica o `UIAvatar`
+- Capturas de regresión visual claro/oscuro (manual en browser)
 
-**Estimación de completitud:** ~98 % estandarizado.
+**Estimación de completitud:** ~100 % estandarizado en código; verificación visual pendiente.
 
 ---
 
