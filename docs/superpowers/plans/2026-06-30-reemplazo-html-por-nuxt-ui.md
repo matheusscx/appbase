@@ -20,8 +20,8 @@ Auditoría inicial (`grep` sobre `app/**/*.vue`):
 
 | Elemento crudo | Ocurrencias | Archivos |
 |---|---|---|
-| `<table>` (bloques) | 8 | pagos, ventas/historial, ventas/[id], inventario, items, CajaHistorial, descuentos*, recargos* |
-| `<form>` | 6 | login, register, roles/index, roles/[id], PerfilForm, ContrasenaForm |
+| `<table>` (bloques) | 8 | pagos, ventas/index (+ drawer), inventario, items, CajaHistorial, descuentos*, recargos* |
+| `<form>` | 6 | login, register, roles/index (modal + drawer), PerfilForm, ContrasenaForm |
 | `<ul>/<li>` (listados) | 13 | páginas de configuración + CarritoPanel, CajaActivaDashboard |
 | `<label>` sueltos | 2 | dentro de formularios crudos |
 | headings/`<span>` | varios | audit de bajo impacto |
@@ -71,9 +71,9 @@ Mantener `formatMonto`/`formatFecha` desde `useFormatters` (no redefinir).
 
 - [x] `app/pages/pagos/index.vue` — tabla de pagos (badges de estado, celda
   link "Ver venta", paginación ya existente → conectar `UPagination` al table API).
-- [x] `app/pages/ventas/historial.vue` — historial de ventas (filas clickeables a
-  detalle, badges de canal/estado, saldo con color de warning).
-- [x] `app/pages/ventas/[id].vue` — tabla de líneas de venta (descripción,
+- [x] `app/pages/ventas/index.vue` — historial de ventas (filas clickeables a
+  detalle vía `?venta=`, badges de canal/estado, saldo con color de warning).
+- [x] `app/components/ventas/VentaDetalleDrawer.vue` — tabla de líneas de venta (descripción,
   cantidad, precio unit., total línea; solo lectura).
 - [x] `app/pages/configuracion/inventario.vue` — kardex de movimientos (badges de
   tipo/motivo, cantidades con color).
@@ -98,8 +98,7 @@ de error. Conservar estados `:loading`/`:disabled` actuales.
 
 - [x] `app/pages/login.vue` — `<form @submit.prevent="onLogin">` → `UForm`.
 - [x] `app/pages/register.vue` — `<form @submit.prevent="onRegister">` → `UForm`.
-- [x] `app/pages/configuracion/roles/index.vue` — form de creación en modal.
-- [x] `app/pages/configuracion/roles/[id].vue` — form de edición.
+- [x] `app/pages/configuracion/roles/index.vue` — forms de creación (modal) y edición (drawer lateral).
 - [x] `app/components/configuracion/PerfilForm.vue` — datos de perfil.
 - [x] `app/components/configuracion/ContrasenaForm.vue` — cambio de contraseña.
 
@@ -119,7 +118,7 @@ tabulares con columnas**; conservar las de diseño de producto.
   `monedas`, `razones-sociales`, `usuarios/index`, `descuentos`, `recargos`,
   `items` (listado). Documentar en cada uno: convertir vs conservar (con motivo).
 - [x] **Conservar** (marcar como decididos, sin cambios): `CarritoPanel.vue`,
-  `CajaActivaDashboard.vue`, `ventas/[id].vue` (lista de pagos si aplica).
+  `CajaActivaDashboard.vue`, `VentaDetalleDrawer.vue` (lista de pagos si aplica).
 
 ### Fase 5 — Audit de bajo impacto (headings / spans)
 

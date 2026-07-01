@@ -128,8 +128,8 @@ DELETE /tenants/razones-sociales/:id       + TenantAdminGuard (204 No Content)
 **Archivo:** `frontend/app/pages/configuracion.vue`  
 Agregar dos ítems al bloque `if (permissionsStore.esAdmin)`:
 ```
-{ label: 'Empresa', icon: 'i-heroicons-building-office-2', to: '/configuracion/empresa' }
-{ label: 'Razones sociales', icon: 'i-heroicons-document-text', to: '/configuracion/razones-sociales' }
+{ label: 'Empresa', icon: 'i-lucide-building-2', to: '/configuracion/empresa' }
+{ label: 'Razones sociales', icon: 'i-lucide-file-text', to: '/configuracion/razones-sociales' }
 ```
 
 ---

@@ -685,7 +685,7 @@ onMounted(async () => {
     <div class="w-full max-w-md">
       <div class="mb-8 text-center">
         <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-4">
-          <UIcon name="i-heroicons-building-office-2" class="text-white w-5 h-5" />
+          <UIcon name="i-lucide-building-2" class="text-white w-5 h-5" />
         </div>
         <h1 class="text-xl font-semibold text-gray-900 dark:text-white">
           Selecciona tu empresa
@@ -702,7 +702,7 @@ onMounted(async () => {
             color="error"
             variant="subtle"
             :description="tenantStore.error"
-            icon="i-heroicons-exclamation-circle"
+            icon="i-lucide-circle-alert"
           />
           <UButton
             class="mt-3"
@@ -716,7 +716,7 @@ onMounted(async () => {
 
         <!-- Loading -->
         <div v-else-if="tenantStore.loading" class="p-8 text-center">
-          <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 text-primary-600 animate-spin mx-auto" />
+          <UIcon name="i-lucide-loader" class="w-6 h-6 text-primary-600 animate-spin mx-auto" />
         </div>
 
         <!-- Lista de tenants -->
@@ -729,12 +729,12 @@ onMounted(async () => {
             @click="tenantStore.switchTenant(tenant.tenantId)"
           >
             <div class="w-9 h-9 rounded-lg bg-primary-100 dark:bg-primary-950 flex items-center justify-center shrink-0">
-              <UIcon name="i-heroicons-building-office" class="w-5 h-5 text-primary-600" />
+              <UIcon name="i-lucide-building" class="w-5 h-5 text-primary-600" />
             </div>
             <span class="font-medium text-sm text-gray-900 dark:text-white truncate">
               {{ tenant.nombre }}
             </span>
-            <UIcon name="i-heroicons-chevron-right" class="w-4 h-4 text-gray-400 ml-auto shrink-0" />
+            <UIcon name="i-lucide-chevron-right" class="w-4 h-4 text-gray-400 ml-auto shrink-0" />
           </button>
         </div>
       </div>
@@ -756,7 +756,7 @@ const authStore = useAuthStore()
   <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
     <div class="w-full max-w-sm text-center">
       <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-950 mb-6">
-        <UIcon name="i-heroicons-building-office-2" class="w-8 h-8 text-amber-500" />
+        <UIcon name="i-lucide-building-2" class="w-8 h-8 text-amber-500" />
       </div>
 
       <h1 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">
@@ -771,7 +771,7 @@ const authStore = useAuthStore()
           v-if="authStore.isSuperadmin"
           to="/admin"
           block
-          icon="i-heroicons-cog-6-tooth"
+          icon="i-lucide-settings"
         >
           Ir a administración
         </UButton>
@@ -835,14 +835,14 @@ const items = computed<NavigationMenuItem[]>(() => {
   const base: NavigationMenuItem[] = [
     {
       label: 'Inicio',
-      icon: 'i-heroicons-home',
+      icon: 'i-lucide-house',
       to: '/',
     },
   ]
   if (authStore.isSuperadmin) {
     base.push({
       label: 'Administración',
-      icon: 'i-heroicons-cog-6-tooth',
+      icon: 'i-lucide-settings',
       to: '/admin',
     })
   }
@@ -856,7 +856,7 @@ const items = computed<NavigationMenuItem[]>(() => {
       <template #header="{ collapsed }">
         <div class="flex items-center gap-2 px-1">
           <div class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
-            <UIcon name="i-heroicons-bolt" class="text-white w-4 h-4" />
+            <UIcon name="i-lucide-zap" class="text-white w-4 h-4" />
           </div>
           <span v-if="!collapsed" class="font-semibold text-sm truncate">
             {{ tenantStore.activeTenant?.nombre ?? 'Prueba Técnica' }}
@@ -876,14 +876,14 @@ const items = computed<NavigationMenuItem[]>(() => {
         <div class="flex flex-col gap-2">
           <!-- Tenant activo (cuando sidebar expandido) -->
           <div v-if="!collapsed && tenantStore.activeTenant" class="px-2 text-xs text-muted truncate flex items-center gap-1">
-            <UIcon name="i-heroicons-building-office" class="w-3 h-3 shrink-0" />
+            <UIcon name="i-lucide-building" class="w-3 h-3 shrink-0" />
             {{ tenantStore.activeTenant.nombre }}
           </div>
           <div v-if="!collapsed" class="px-2 text-xs text-muted truncate">
             {{ authStore.user?.nombre }}
           </div>
           <UButton
-            :icon="collapsed ? 'i-heroicons-arrow-right-on-rectangle' : undefined"
+            :icon="collapsed ? 'i-lucide-log-out' : undefined"
             :label="collapsed ? undefined : 'Cerrar sesión'"
             color="neutral"
             variant="ghost"
@@ -1139,7 +1139,7 @@ async function onGoogle() {
       <!-- Logo -->
       <div class="mb-8 text-center">
         <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-4">
-          <UIcon name="i-heroicons-bolt" class="text-white w-5 h-5" />
+          <UIcon name="i-lucide-zap" class="text-white w-5 h-5" />
         </div>
         <h1 class="text-xl font-semibold text-gray-900 dark:text-white">
           Prueba Técnica
@@ -1156,7 +1156,7 @@ async function onGoogle() {
           color="error"
           variant="subtle"
           :description="store.error"
-          icon="i-heroicons-exclamation-circle"
+          icon="i-lucide-circle-alert"
         />
 
         <!-- Google -->
@@ -1225,7 +1225,7 @@ async function onGoogle() {
                   class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                   @click="showPassword = !showPassword"
                 >
-                  <UIcon :name="showPassword ? 'i-heroicons-eye-slash' : 'i-heroicons-eye'" class="w-4 h-4" />
+                  <UIcon :name="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="w-4 h-4" />
                 </button>
               </template>
             </UInput>
@@ -1247,7 +1247,7 @@ async function onGoogle() {
         ¿Ya tienes cuenta?
         <NuxtLink
           to="/login"
-          class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 font-medium transition-colors"
+          class="text-highlighted hover:opacity-80 font-medium transition-colors"
         >
           Iniciar sesión
         </NuxtLink>
@@ -1279,7 +1279,7 @@ onMounted(async () => {
 <template>
   <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
     <div class="text-center space-y-3">
-      <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 text-primary-600 animate-spin mx-auto" />
+      <UIcon name="i-lucide-loader" class="w-8 h-8 text-primary-600 animate-spin mx-auto" />
       <p class="text-sm text-gray-500 dark:text-gray-400">Iniciando sesión…</p>
     </div>
   </div>
@@ -1310,7 +1310,7 @@ const tenantStore = useTenantStore()
     <template #body>
       <div class="max-w-2xl mx-auto px-6 py-16 text-center">
         <div class="w-16 h-16 rounded-2xl bg-primary-50 dark:bg-primary-950 flex items-center justify-center mx-auto mb-6">
-          <UIcon name="i-heroicons-check-circle" class="w-8 h-8 text-primary-600" />
+          <UIcon name="i-lucide-circle-check" class="w-8 h-8 text-primary-600" />
         </div>
         <h2 class="text-2xl font-semibold text-default mb-2">
           Bienvenido, {{ store.user?.nombre }}

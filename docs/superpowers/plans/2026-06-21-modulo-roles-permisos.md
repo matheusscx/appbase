@@ -95,7 +95,7 @@ Reutilizar `useApiFetch` (`composables/useApiFetch.ts`), `useToast`, `usePermiss
   badge "Fijo"). Botón "Nuevo rol" abre `UModal` (nombre + descripción → `POST /roles`)
   y al crear navega al editor. Acciones editar (→ `[id]`) y eliminar
   (`DELETE /roles/:id`, deshabilitado/oculto si `esFijo`). Toast en éxito/error.
-- [x] **`pages/configuracion/roles/[id].vue`** — editor de rol:
+- [x] **`pages/configuracion/roles/index.vue`** — editor de rol en drawer lateral:
   - Form nombre/descripción → `PATCH /roles/:id` (bloqueado si `esFijo`).
   - **Matriz de permisos:** cargar `GET /roles/modulos-disponibles` (módulos+permisos)
     y `GET /roles/:id/permissions` (marcados actuales). Por cada módulo, checkboxes de

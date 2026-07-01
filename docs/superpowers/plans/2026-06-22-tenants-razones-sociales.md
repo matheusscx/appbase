@@ -1047,12 +1047,12 @@ En el bloque `if (permissionsStore.esAdmin)`, agregar después de los items exis
 ```typescript
 {
   label: 'Empresa',
-  icon: 'i-heroicons-building-office-2',
+  icon: 'i-lucide-building-2',
   to: '/configuracion/empresa',
 },
 {
   label: 'Razones sociales',
-  icon: 'i-heroicons-document-text',
+  icon: 'i-lucide-file-text',
   to: '/configuracion/razones-sociales',
 },
 ```
@@ -1420,7 +1420,7 @@ onMounted(cargar)
         </p>
       </div>
       <UButton
-        icon="i-heroicons-plus"
+        icon="i-lucide-plus"
         @click="abrirCrear"
       >
         Nueva razón social
@@ -1470,13 +1470,13 @@ onMounted(cargar)
           </div>
           <div class="flex gap-2 shrink-0 ml-4">
             <UButton
-              icon="i-heroicons-pencil-square"
+              icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               @click="abrirEditar(rs)"
             />
             <UButton
-              icon="i-heroicons-trash"
+              icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               @click="() => { confirmDeleteId = rs.id; confirmModalOpen = true }"

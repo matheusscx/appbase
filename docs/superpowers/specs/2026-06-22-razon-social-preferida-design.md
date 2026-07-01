@@ -72,8 +72,8 @@ interface RazonSocial {
 
 ### UI — estrella en el row
 - Antes del `USwitch`, separado del grupo de botones
-- `i-heroicons-star` solid + color amarillo (`text-yellow-400`) cuando `preferida === true`
-- `i-heroicons-star` outline + color neutro cuando `preferida === false`
+- `i-lucide-star` solid + color amarillo (`text-yellow-400`) cuando `preferida === true`
+- `i-lucide-star` outline + color neutro cuando `preferida === false`
 - `cursor-pointer` y hover sutil
 - Deshabilitado mientras se procesa (`toggling.has(rs.id)`)
 

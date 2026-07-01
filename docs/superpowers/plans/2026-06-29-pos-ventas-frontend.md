@@ -669,7 +669,7 @@ const filtrados = computed(() => {
   <div class="flex flex-col gap-4 h-full">
     <UInput
       v-model="busqueda"
-      icon="i-heroicons-magnifying-glass"
+      icon="i-lucide-search"
       placeholder="Buscar ítem..."
       size="lg"
     />
@@ -872,7 +872,7 @@ const docItems = computed(() =>
             @update:model-value="(v: string | number) => emit('cambiar-cantidad', linea.item.id, String(v))"
           />
           <UButton
-            icon="i-heroicons-trash"
+            icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
             size="xs"
@@ -905,7 +905,7 @@ const docItems = computed(() =>
         </div>
         <UButton
           label="Cobrar"
-          icon="i-heroicons-banknotes"
+          icon="i-lucide-banknote"
           color="primary"
           block
           size="lg"
@@ -1017,7 +1017,7 @@ function confirmar() {
             <USelect v-model="pago.metodoPagoId" :items="metodoItems" class="flex-1" />
             <UInput v-model="pago.monto" inputmode="decimal" placeholder="0" class="w-32" />
             <UButton
-              icon="i-heroicons-trash"
+              icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               size="xs"
@@ -1027,7 +1027,7 @@ function confirmar() {
           </div>
           <UButton
             label="Agregar pago"
-            icon="i-heroicons-plus"
+            icon="i-lucide-plus"
             variant="ghost"
             size="sm"
             @click="agregarPago"
@@ -1094,7 +1094,7 @@ En `dashboard.vue`, dentro del computed `items`, después del bloque de Caja (l�
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear')) {
     base.push({
       label: 'Punto de venta',
-      icon: 'i-heroicons-shopping-cart',
+      icon: 'i-lucide-shopping-cart',
       to: '/ventas',
     })
   }
@@ -1206,10 +1206,10 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
 
     <template #body>
       <div v-if="!cajaStore.loadingActiva && !tieneCaja" class="max-w-md mx-auto text-center py-16">
-        <UIcon name="i-heroicons-lock-closed" class="w-12 h-12 text-muted mx-auto mb-4" />
+        <UIcon name="i-lucide-lock" class="w-12 h-12 text-muted mx-auto mb-4" />
         <h2 class="text-lg font-semibold text-default mb-1">Necesitás una caja abierta</h2>
         <p class="text-sm text-muted mb-4">Abrí una caja para registrar ventas del canal físico.</p>
-        <UButton label="Ir a caja" icon="i-heroicons-banknotes" to="/caja" />
+        <UButton label="Ir a caja" icon="i-lucide-banknote" to="/caja" />
       </div>
 
       <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full p-4">
@@ -1292,7 +1292,7 @@ En la tabla "Estado actual", agregar una fila:
 
 ```markdown
 | Frontend POS (crear venta: catálogo, carrito, cobro multipago, fricción por documento) | ✅ Implementado (2026-06-29) |
-| Frontend — historial/consulta de ventas | 🔲 Por construir |
+| Frontend — historial/consulta de ventas | ✅ Implementado (2026-06-30; rutas unificadas `/ventas` 2026-07-01) |
 ```
 
 - [ ] **Step 3: Actualizar `docs/MIGRACION-FUNCIONALIDADES.md`**
@@ -1331,6 +1331,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - ✅ Dinero string end-to-end + `inputmode="decimal"` → Tasks 3,7,8.
 - ✅ Tests unit de la lógica pura → Task 3; e2e del endpoint → Task 2.
 - ✅ Documentación viva → Task 10.
-- ✅ Out of scope (historial/detalle/impresión/online/notas de crédito) documentado como pendiente → Task 10.
+- ✅ Out of scope en fase POS (impresión/online/notas de crédito) documentado como pendiente → Task 10.
+- ✅ Historial/detalle de ventas implementado después en plan `2026-06-30-ventas-pagos-cuentas-por-cobrar.md` (ruta canónica `/ventas`).
 
 Type consistency verificada: `ItemCatalogo`, `CarritoLinea`, `PagoInput`, `CustomerForm`, `TipoDoc`, `MetodoPago` se usan con los mismos nombres/campos entre tasks; `puedeCobrar`/`resumenCobro`/`sumaPagos`/`toCalcularInput` con las firmas definidas en Task 3.

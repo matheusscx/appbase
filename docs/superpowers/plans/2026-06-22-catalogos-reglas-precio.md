@@ -211,9 +211,9 @@ Patrón base: `docs/patterns/frontend.md`. Páginas en
 revert, errores vía `e.data.message` en `useToast`, `useRuntimeConfig().public.apiUrl`.
 
 - [ ] **`configuracion.vue`**: agregar 5 items al computed `navItems` dentro del bloque
-  `permissionsStore.esAdmin` (iconos heroicons: `i-heroicons-tag` categorías,
-  `i-heroicons-receipt-percent` impuestos, `i-heroicons-arrow-trending-down` descuentos,
-  `i-heroicons-arrow-trending-up` recargos, `i-heroicons-credit-card` métodos de pago).
+  `permissionsStore.esAdmin` (iconos heroicons: `i-lucide-tag` categorías,
+  `i-lucide-receipt-percent` impuestos, `i-lucide-trending-down` descuentos,
+  `i-lucide-trending-up` recargos, `i-lucide-credit-card` métodos de pago).
 
 - [ ] **`categorias.vue`, `impuestos.vue`, `descuentos.vue`, `recargos.vue`** — patrón CRUD de
   `razones-sociales.vue`: lista en `UCard`, modal crear/editar (`UModal` +

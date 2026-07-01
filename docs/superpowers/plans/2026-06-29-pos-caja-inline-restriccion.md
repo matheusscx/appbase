@@ -321,12 +321,12 @@ const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [
   [
     {
       label: 'Registrar movimiento',
-      icon: 'i-heroicons-plus-circle',
+      icon: 'i-lucide-circle-plus',
       onSelect: abrirMovimientoModal,
     },
     {
       label: 'Cerrar caja',
-      icon: 'i-heroicons-lock-closed',
+      icon: 'i-lucide-lock',
       color: 'error' as const,
       onSelect: abrirCierreModal,
     },
@@ -355,10 +355,10 @@ En el template, localizar el bloque:
 
 ```html
 <div v-if="!cajaStore.loadingActiva && !tieneCaja" class="max-w-md mx-auto text-center py-16">
-  <UIcon name="i-heroicons-lock-closed" class="w-12 h-12 text-muted mx-auto mb-4" />
+  <UIcon name="i-lucide-lock" class="w-12 h-12 text-muted mx-auto mb-4" />
   <h2 class="text-lg font-semibold text-default mb-1">Necesitás una caja abierta</h2>
   <p class="text-sm text-muted mb-4">Abrí una caja para registrar ventas del canal físico.</p>
-  <UButton label="Ir a caja" icon="i-heroicons-banknotes" to="/caja" />
+  <UButton label="Ir a caja" icon="i-lucide-banknote" to="/caja" />
 </div>
 ```
 
@@ -385,7 +385,7 @@ Reemplazar por:
   <template #right>
     <div v-if="tieneCaja" class="flex items-center gap-2 mr-2">
       <UDropdownMenu :items="cajaMenuItems">
-        <UButton variant="soft" color="success" size="sm" icon="i-heroicons-banknotes">
+        <UButton variant="soft" color="success" size="sm" icon="i-lucide-banknote">
           Caja abierta
         </UButton>
       </UDropdownMenu>

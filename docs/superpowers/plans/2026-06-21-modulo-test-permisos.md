@@ -94,7 +94,7 @@ Cargar tras seleccionar tenant (en `onMounted` de la página Test basta para el 
   mensaje del backend. Demuestra el enforcement server-side aunque el front no restrinja.
 
 ### 6. Navegación — `frontend/app/layouts/dashboard.vue`
-Agregar item `{ label: 'Test', icon: 'i-heroicons-beaker', to: '/test' }` al array `base` del computed
+Agregar item `{ label: 'Test', icon: 'i-lucide-flask-conical', to: '/test' }` al array `base` del computed
 `items` (visible para cualquier usuario autenticado).
 
 ---

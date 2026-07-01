@@ -69,6 +69,10 @@ Welcome to the technical documentation for the `practica` project.
 - **[superpowers/plans/](./superpowers/plans/)** — Implementation plans
 - **[superpowers/specs/](./superpowers/specs/)** — Design specs
 
+### Frontend UI
+- **[frontend/docs/DESIGN-SYSTEM.md](../frontend/docs/DESIGN-SYSTEM.md)** — Tokens semánticos, espaciado, componentes CRUD, baselines
+- **[frontend/docs/AUDIT-STANDARDIZACION-UI.md](../frontend/docs/AUDIT-STANDARDIZACION-UI.md)** — Auditoría de cierre de estandarización UI (2026-07-01)
+
 ---
 
 ## Documentation Standards

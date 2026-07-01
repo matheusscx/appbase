@@ -91,7 +91,7 @@ las pestañas.
 - [x] Quitar el emit `operar-propia`. `abrir(caja)` ahora **siempre**
       `navigateTo('/caja/' + caja.id)` (también para la propia).
 - [x] Cuando `!tieneCajaPropia`: renderizar como **primera** card una tarjeta
-      sintética "Abrir mi caja" (icono `i-heroicons-plus-circle`) que abre un
+      sintética "Abrir mi caja" (icono `i-lucide-circle-plus`) que abre un
       `UModal` con `CajaAperturaForm`.
 - [x] `UModal` de apertura: al recibir `@opened` del form, cerrar el modal y
       `navigateTo('/caja/' + cajaStore.activa.id)`.

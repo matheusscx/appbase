@@ -301,7 +301,7 @@ Localizar el bloque de acciones del row (el `<div class="flex items-center gap-4
     @click="togglePreferida(rs)"
   >
     <UIcon
-      :name="rs.preferida ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
+      :name="rs.preferida ? 'i-lucide-star' : 'i-lucide-star'"
       class="w-5 h-5"
       :class="rs.preferida ? 'text-yellow-400' : 'text-gray-400'"
     />
@@ -313,13 +313,13 @@ Localizar el bloque de acciones del row (el `<div class="flex items-center gap-4
   />
   <div class="flex gap-2">
     <UButton
-      icon="i-heroicons-pencil-square"
+      icon="i-lucide-square-pen"
       color="neutral"
       variant="ghost"
       @click="abrirEditar(rs)"
     />
     <UButton
-      icon="i-heroicons-trash"
+      icon="i-lucide-trash-2"
       color="error"
       variant="ghost"
       @click="() => { confirmDeleteId = rs.id; confirmModalOpen = true }"

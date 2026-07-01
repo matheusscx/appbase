@@ -52,7 +52,7 @@ CRUD de extensiones por separado; historial de movimientos de stock.
 - **`/configuracion/items`** — lista con badge tipo (Producto/Servicio en UBadge), precio,
   categoría, stock/duración; toggle activo optimista; modal crear/editar con campos condicionales
   por tipo; modal confirmar eliminar; modal ajuste de stock.
-- **Nav**: "Items" con `i-heroicons-archive-box` en `configuracion.vue`.
+- **Nav**: "Items" con `i-lucide-archive` en `configuracion.vue`.
 
 ## Verificación
 

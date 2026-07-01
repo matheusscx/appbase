@@ -294,7 +294,7 @@ Por:
           <UButton
             v-if="!customerExpandido"
             label="Agregar datos del cliente"
-            icon="i-heroicons-user-plus"
+            icon="i-lucide-user-plus"
             variant="soft"
             color="neutral"
             size="sm"
@@ -305,7 +305,7 @@ Por:
             <VentasClienteForm v-model="customer" />
             <UButton
               label="Quitar datos del cliente"
-              icon="i-heroicons-x-mark"
+              icon="i-lucide-x"
               variant="ghost"
               color="error"
               size="xs"

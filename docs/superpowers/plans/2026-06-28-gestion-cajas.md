@@ -286,7 +286,7 @@ export class CrearMovimientoDto {
 
 **Files:** Modify `frontend/app/layouts/dashboard.vue`; Create `frontend/app/components/caja/CajaHistorial.vue` (sección/tab en `pages/caja/index.vue`).
 
-- [ ] **Step 1:** Agregar item "Caja" al computed `items` de `dashboard.vue`: `{ label: 'Caja', icon: 'i-heroicons-banknotes', to: '/caja' }` (gatear con `permissionsStore.can('Caja','Leer') || permissionsStore.esAdmin` si se quiere ocultar a roles sin acceso).
+- [ ] **Step 1:** Agregar item "Caja" al computed `items` de `dashboard.vue`: `{ label: 'Caja', icon: 'i-lucide-banknote', to: '/caja' }` (gatear con `permissionsStore.can('Caja','Leer') || permissionsStore.esAdmin` si se quiere ocultar a roles sin acceso).
 - [ ] **Step 2:** `CajaHistorial`: tabla de cajas cerradas (fecha, saldo inicial, saldo final, diferencia con color según signo). Toggle "Ver todas" visible solo si `permissionsStore.esAdmin || permissionsStore.can('Caja','Ver todas')`; al activarlo → `cajaStore.cargarHistorial(true)`.
 - [ ] **Step 3:** Integrar `CajaHistorial` como tab/sección en `pages/caja/index.vue`.
 - [ ] **Step 4:** Verificación manual: como admin ver "Ver todas"; como cajero sin permiso, el toggle no aparece y solo ve sus cajas.

@@ -1,5 +1,9 @@
 # Frontend Design Standardization Implementation Plan
 
+**Status:** Done  
+**Date:** 2026-06-30 (cierre UI: 2026-07-01)  
+**Owner:** Cesar Matheus
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Standardize all 32 Vue pages + components to use Nuxt UI semantic design tokens consistently, eliminating hardcoded Tailwind colors and establishing a coherent visual system across Dashboard, Auth, Configuration, Caja, Ventas, and Pagos modules.
@@ -142,7 +146,7 @@ Replace:
 - Line 44: Keep as is (UAlert is semantic)
 - Line 69: `bg-gray-200 dark:bg-gray-800` → `bg-gray-200 dark:bg-gray-700` (border divider — update for consistency)
 - Line 100: `text-gray-400 hover:text-gray-600 dark:hover:text-gray-300` → Add class `text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300`
-- Line 114: `text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300` → Keep as is (already semantic primary)
+- Line 114: `text-highlighted hover:opacity-80` → Keep as is (already semantic primary)
 - Line 132: `text-gray-500 dark:text-gray-400` → `text-muted`
 - Line 136: Keep as is (semantic primary)
 
@@ -153,7 +157,7 @@ Replace:
       <!-- Logo -->
       <div class="mb-8 text-center">
         <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-4">
-          <UIcon name="i-heroicons-bolt" class="text-white w-5 h-5" />
+          <UIcon name="i-lucide-zap" class="text-white w-5 h-5" />
         </div>
         <h1 class="text-xl font-semibold text-default">
           Prueba Técnica
@@ -168,7 +172,7 @@ Replace:
           color="error"
           variant="subtle"
           :description="store.error"
-          icon="i-heroicons-exclamation-circle"
+          icon="i-lucide-circle-alert"
         />
 
         <!-- Google button, form, etc. with text-muted for secondary text -->
@@ -184,7 +188,7 @@ Replace:
         ¿No tienes cuenta?
         <NuxtLink
           to="/register"
-          class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 font-medium transition-colors"
+          class="text-highlighted hover:opacity-80 font-medium transition-colors"
         >
           Crear cuenta
         </NuxtLink>
@@ -270,7 +274,7 @@ Replace:
 - Line 24: `bg-neutral-50 dark:bg-neutral-950` → `bg-elevated` (switch to primary color scheme)
 - Line 31: `bg-amber-100 dark:bg-amber-950` → `bg-primary-50 dark:bg-primary-900/20` (update to primary accent)
 - Line 32: `bg-amber-100 dark:bg-amber-950` → `bg-primary-50 dark:bg-primary-900/20`
-- Line 32: `text-amber-500` → `text-primary-600 dark:text-primary-400`
+- Line 32: `text-amber-500` → `text-highlighted`
 - Line 34: `text-gray-900 dark:text-white` → `text-default`
 - Line 36: `text-gray-500 dark:text-gray-400` → `text-muted`
 
@@ -481,7 +485,7 @@ git commit -m "refactor(config): migrate complex config pages to semantic tokens
 - Modify: `frontend/app/pages/configuracion/inventario.vue`
 - Modify: `frontend/app/pages/configuracion/empresa.vue`
 - Modify: `frontend/app/pages/configuracion/roles/index.vue`
-- Modify: `frontend/app/pages/configuracion/roles/[id].vue`
+- Modify: `frontend/app/pages/configuracion/roles/index.vue` (editor en drawer)
 - Modify: `frontend/app/pages/configuracion/usuarios/index.vue`
 
 **Pattern:** items.vue already uses semantic tokens (text-muted, divide-default) — serves as model. Others need standardization.
@@ -544,7 +548,7 @@ Expected: All pages use consistent semantic tokens. No visible hardcoded grays.
 
 ```bash
 cd frontend
-git add app/pages/configuracion/empresa.vue app/pages/configuracion/roles/index.vue app/pages/configuracion/roles/[id].vue app/pages/configuracion/usuarios/index.vue
+git add app/pages/configuracion/empresa.vue app/pages/configuracion/roles/index.vue app/pages/configuracion/usuarios/index.vue
 git commit -m "refactor(config): migrate enterprise config pages to semantic tokens"
 ```
 
@@ -724,8 +728,8 @@ git commit -m "refactor(caja): migrate caja components to semantic tokens while 
 
 **Files:**
 - Read: `frontend/app/pages/ventas/index.vue`
-- Read: `frontend/app/pages/ventas/historial.vue`
-- Read: `frontend/app/pages/ventas/[id].vue`
+- Read: `frontend/app/pages/ventas/index.vue`
+- Read: `frontend/app/components/ventas/VentaDetalleDrawer.vue`
 - Read: `frontend/app/pages/pagos/index.vue`
 
 **Pattern:** Ventas and Pagos modules already use semantic tokens extensively (text-muted, text-default, border-default, hover:bg-elevated). These pages are the baseline — verify no hardcoded colors exist.
@@ -736,12 +740,12 @@ git commit -m "refactor(caja): migrate caja components to semantic tokens while 
 
 Scan: No hardcoded `text-gray-*`, `divide-gray-*`, `bg-gray-*` in main page logic ✓
 
-- [ ] **Step 2: Verify ventas/historial.vue**
+- [ ] **Step 2: Verify ventas/index.vue**
 
 Scan: Uses `text-muted`, `border-default`, `hover:bg-elevated` ✓
 Minor check: Line ~50: `text-gray-500` if present → `text-muted`
 
-- [ ] **Step 3: Verify ventas/[id].vue**
+- [x] **Step 3: Verify `ventas/index.vue` + `VentaDetalleDrawer.vue`**
 
 Scan: Uses semantic tokens ✓
 Check: Lines ~215 (totals card): `text-green-600 dark:text-green-400` — this is intentional (profit/discount color) — keep as is ✓
@@ -900,7 +904,7 @@ When adding a new page or updating an existing one:
 These components exemplify correct design system usage:
 - **Dashboard pages**: `frontend/app/pages/index.vue` (UDashboardPanel, semantic tokens)
 - **Auth pages**: `frontend/app/pages/login.vue` (form styling, bg-default, text-default)
-- **Ventas module**: `frontend/app/pages/ventas/historial.vue` (lists, UTable, semantic tokens)
+- **Ventas module**: `frontend/app/pages/ventas/index.vue` + `VentaDetalleDrawer.vue` (lists, UTable, semantic tokens)
 - **Items page**: `frontend/app/pages/configuracion/items.vue` (complex modals, semantic tokens)
 
 When in doubt, reference these files.
@@ -1036,7 +1040,7 @@ Expected: Caja pages maintain financial color coding while using semantic tokens
 
 - [ ] **Step 7: Test Ventas Pages (Light & Dark, 1024px)**
 
-- Navigate to `/ventas`, `/ventas/historial`, `/ventas/[id]`
+- Navigate to `/ventas`, `/ventas/pos`, `/ventas?venta={uuid}`
 
 Expected: Ventas pages (already using semantic tokens) render correctly without visual changes.
 

@@ -1,6 +1,6 @@
 # Plan: Ventas como documentos + módulo de Pagos (cuentas por cobrar)
 
-**Status**: Draft
+**Status**: Done
 **Date**: 2026-06-30
 **Owner**: Cesar Matheus
 
@@ -24,7 +24,7 @@ Decisiones confirmadas con el usuario:
 - Dos módulos backend (`ventas` + `pagos` nuevo), con **`PagosService.registrar()` como
   fuente única** de la lógica pago+vuelto+movimiento de caja (la reutiliza tanto la
   venta nueva como el abono posterior).
-- Alcance fase 1: **ambas pantallas** (`/ventas/historial` + `/pagos`) + abono.
+- Alcance fase 1: **ambas pantallas** (`/ventas` + `/pagos`) + abono.
 - El abono a venta física **requiere caja abierta** y genera su movimiento de caja
   (consistente con el modelo actual).
 
@@ -36,7 +36,7 @@ Decisiones confirmadas con el usuario:
 - `PagosService.registrar(manager, …)` compartido; refactor de `ventas.crear` para usarlo.
 - `POST /pagos` (abonar a venta existente) y `GET /pagos` (ledger filtrable).
 - `GET /ventas` enriquecido con `montoPagado` y `saldo`.
-- Frontend: `/ventas/historial` (lista), `/ventas/[id]` (detalle + "Registrar pago"),
+- Frontend: `/ventas` (lista), `/ventas?venta={uuid}` (detalle + "Registrar pago"),
   `/pagos` (ledger read-only), entradas de sidebar.
 
 **Out of scope (fase 2)**
@@ -131,16 +131,16 @@ Patrones: `docs/patterns/frontend.md`. Tabla read-only → `components/caja/Caja
 Formato → `useFormatters` (`formatMonto`, `formatFecha`). API → `useApiFetch`. Helpers de pago
 puros ya existen en `composables/useVenta.ts` (`resumenCobro`, `clampNoVuelto`, `sumaPagos`).
 
-### 7. Historial de ventas — `app/pages/ventas/historial.vue`
-- [ ] `definePageMeta({ middleware: 'auth', layout: 'dashboard' })`.
-- [ ] `GET /ventas` → tabla (patrón `CajaHistorial`): fecha, doc/customer, total, pagado,
+### 7. Historial de ventas — `app/pages/ventas/index.vue`
+- [x] `definePageMeta({ middleware: 'auth', layout: 'dashboard' })`.
+- [x] `GET /ventas` → tabla (patrón `CajaHistorial`): fecha, doc/customer, total, pagado,
       **saldo**, badge de estado (`pendiente`/`pagada_parcial`/`pagada`/`cancelada`),
-      fila clickeable → `/ventas/[id]`.
+      fila clickeable → `/ventas?venta={uuid}`.
 
-### 8. Detalle de venta — `app/pages/ventas/[id].vue`
-- [ ] `GET /ventas/:id` (ya devuelve detalles + pagos + totales, `ventas.service.ts:400-538`).
-- [ ] Mostrar líneas, totales, lista de pagos, saldo y badge de estado.
-- [ ] Si estado `pendiente`|`pagada_parcial`: botón **"Registrar pago"** → abre modal de abono.
+### 8. Detalle de venta — drawer en `ventas/index.vue` (`VentaDetalleDrawer`)
+- [x] `GET /ventas/:id` (ya devuelve detalles + pagos + totales, `ventas.service.ts:400-538`).
+- [x] Mostrar líneas, totales, lista de pagos, saldo y badge de estado.
+- [x] Si estado `pendiente`|`pagada_parcial`: botón **"Registrar pago"** → abre modal de abono.
 
 ### 9. Modal de abono — `app/components/pagos/AbonoModal.vue`
 - [ ] Componente delgado que **reutiliza** `resumenCobro`/`clampNoVuelto`/`sumaPagos` con
@@ -154,9 +154,9 @@ puros ya existen en `composables/useVenta.ts` (`resumenCobro`, `clampNoVuelto`, 
       caja, customer, link a su venta. Filtro simple por método (toggle/`USelect`).
 
 ### 11. Navegación — `app/layouts/dashboard.vue:8-43`
-- [ ] Agregar `{ label: 'Ventas', icon: 'i-heroicons-document-text', to: '/ventas/historial' }`
+- [ ] Agregar `{ label: 'Ventas', icon: 'i-lucide-file-text', to: '/ventas' }`
       gated `permissionsStore.esAdmin || can('Ventas','Leer')`.
-- [ ] Agregar `{ label: 'Pagos', icon: 'i-heroicons-banknotes', to: '/pagos' }` con el mismo gating.
+- [ ] Agregar `{ label: 'Pagos', icon: 'i-lucide-banknote', to: '/pagos' }` con el mismo gating.
 - [ ] El POS sigue en `/ventas` (label "Punto de venta", sin cambios).
 
 ---

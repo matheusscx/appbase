@@ -685,7 +685,7 @@ function abrir(caja: { id: string, esPropia: boolean }): void {
 <template>
   <div>
     <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
-      <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+      <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
       Cargando cajas…
     </div>
 
@@ -825,7 +825,7 @@ onMounted(async () => {
       <template #mi-caja>
         <div class="space-y-6 pt-4">
           <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
-            <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+            <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
             Cargando…
           </div>
           <CajaAperturaForm v-else-if="!cajaStore.activa" />
@@ -844,7 +844,7 @@ onMounted(async () => {
 
     <div v-else class="space-y-6">
       <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
-        <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+        <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
         Cargando…
       </div>
       <CajaAperturaForm v-else-if="!cajaStore.activa" />
@@ -951,12 +951,12 @@ onMounted(async () => {
 <template>
   <div class="max-w-3xl mx-auto space-y-6 py-6">
     <ULink to="/caja" class="text-sm text-primary-600 inline-flex items-center gap-1">
-      <UIcon name="i-heroicons-arrow-left" class="w-4 h-4" />
+      <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
       Volver a Caja
     </ULink>
 
     <div v-if="loading" class="py-12 text-center text-sm text-gray-500">
-      <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+      <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
       Cargando…
     </div>
 

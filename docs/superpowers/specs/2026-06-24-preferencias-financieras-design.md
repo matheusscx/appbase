@@ -123,7 +123,7 @@ Agregar un item nuevo en el bloque admin, después de "Recargos" y antes de "Mé
 ```typescript
 {
   label: 'Preferencias financieras',
-  icon: 'i-heroicons-adjustments-horizontal',
+  icon: 'i-lucide-sliders-horizontal',
   to: '/configuracion/preferencias-financieras',
 },
 ```

@@ -32,7 +32,7 @@ El POS actual muestra un "gate" cuando no hay caja abierta: un mensaje con un bo
 
 **Gate sin caja (estado actual):**
 ```
-<UIcon name="i-heroicons-lock-closed" />
+<UIcon name="i-lucide-lock" />
 <h2>Necesitás una caja abierta</h2>
 <UButton label="Ir a caja" to="/caja" />
 ```

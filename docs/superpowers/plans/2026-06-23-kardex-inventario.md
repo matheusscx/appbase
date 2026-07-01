@@ -1130,7 +1130,7 @@ En el bloque de controles del `<li>` (junto al botón de ajustar stock, ~línea 
 ```vue
             <UButton
               v-if="item.tipo === 'producto'"
-              icon="i-heroicons-clipboard-document-list"
+              icon="i-lucide-clipboard-list"
               color="neutral"
               variant="ghost"
               size="sm"
@@ -1237,7 +1237,7 @@ En `configuracion.vue`, dentro del bloque `if (permissionsStore.esAdmin)`, junto
 ```typescript
       {
         label: 'Inventario',
-        icon: 'i-heroicons-clipboard-document-list',
+        icon: 'i-lucide-clipboard-list',
         to: '/configuracion/inventario',
       },
 ```

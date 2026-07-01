@@ -27,6 +27,7 @@ Al editar archivos en `frontend/`, usa estas fuentes en este orden de prioridad:
 - Select con búsqueda / muchas opciones → `USelectMenu`, no `USelect`.
 - Panel lateral → **`AppDrawer`**: `#body` contenido, **`#actions`** botones abajo; prop `width` (`md`, `lg`, `"50%"`).
 - Tablas de datos → `UTable` con patrones de `docs/patterns/frontend.md`.
+- Listados CRUD de configuración → componentes `app/components/crud/*` (`CrudPageHeader`, `CrudTable`, `CrudListItem`, `CrudModal`); baseline: `pages/configuracion/categorias.vue`.
 - Feedback transitorio → `useToast`; aviso persistente en página → `UAlert`.
 
 ## Antes de implementar UI nueva

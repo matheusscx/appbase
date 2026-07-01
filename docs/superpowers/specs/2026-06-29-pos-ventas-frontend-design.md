@@ -70,7 +70,7 @@ Una factura sí requiere datos del cliente.
 ### Ruta y navegación
 - Página `app/pages/ventas/index.vue` con
   `definePageMeta({ middleware: 'auth', layout: 'dashboard' })`.
-- Ítem de nav "Punto de venta" (`i-heroicons-shopping-cart`) en `dashboard.vue`,
+- Ítem de nav "Punto de venta" (`i-lucide-shopping-cart`) en `dashboard.vue`,
   visible si `permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear')`.
   (El backend aún no aplica permiso granular en `POST /ventas` — TODO RBAC documentado.)
 
@@ -133,13 +133,11 @@ deshabilitado mientras no haya caja activa.
   caja. Probar el bloqueo sin caja abierta.
 
 ## Documentación viva (mismo cambio)
-- `docs/features/ventas.md`: agregar sección Frontend (POS) y endpoint `GET /tipos-documento`.
-- `docs/README.md` / `CLAUDE.md`: nota de que el POS (crear venta) tiene UI; historial pendiente.
-- `docs/patterns/frontend.md`: si aporta, patrón de pantalla POS dos paneles + carrito con
-  recálculo debounced.
+- `docs/features/ventas.md`: sección Frontend (POS) + historial/detalle (`/ventas`, drawer `?venta=`).
+- `docs/README.md` / `CLAUDE.md`: POS e historial implementados.
+- `docs/patterns/frontend.md`: patrón POS dos paneles + componentes CRUD en configuración.
 
 ## Pendiente para fases futuras (documentado)
-- Listado / historial de ventas + detalle expandido (punto 11).
 - Comprobante / recibo imprimible.
 - Descuentos/recargos manuales por línea y a nivel de venta.
 - Canal online, notas de crédito.
