@@ -1,11 +1,18 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import type { ModuloDisponible } from '~/components/RolPermisosPorModulo.vue'
 
 interface Rol {
   id: string
   nombre: string
   descripcion: string | null
   esFijo: boolean
+}
+
+interface RolPermisoModulo {
+  rolId: string
+  moduloTenantId: string
+  moduloAppPermisoId: string
 }
 
 const config = useRuntimeConfig()
@@ -16,8 +23,105 @@ const loading = ref(false)
 const apiUrl = config.public.apiUrl
 
 const drawerOpen = ref(false)
-const creating = ref(false)
-const nuevo = reactive({ nombre: '', descripcion: '' })
+const drawerMode = ref<'create' | 'edit'>('create')
+const editandoRol = ref<Rol | null>(null)
+const saving = ref(false)
+const loadingDrawer = ref(false)
+const modulos = ref<ModuloDisponible[]>([])
+const seleccionados = ref<Set<string>>(new Set())
+const form = reactive({ nombre: '', descripcion: '' })
+
+const drawerTitle = computed(() =>
+  drawerMode.value === 'create' ? 'Nuevo rol' : 'Editar rol',
+)
+
+const esFijo = computed(() => editandoRol.value?.esFijo ?? false)
+
+const submitLabel = computed(() =>
+  drawerMode.value === 'create' ? 'Crear' : 'Guardar',
+)
+
+function resetDrawer() {
+  drawerMode.value = 'create'
+  editandoRol.value = null
+  form.nombre = ''
+  form.descripcion = ''
+  seleccionados.value = new Set()
+}
+
+function togglePermiso(id: string, value: boolean | 'indeterminate') {
+  const next = new Set(seleccionados.value)
+  if (value === true) next.add(id)
+  else next.delete(id)
+  seleccionados.value = next
+}
+
+async function cargarModulos() {
+  if (modulos.value.length) return
+  try {
+    modulos.value = await useApiFetch<ModuloDisponible[]>(`${apiUrl}/roles/modulos-disponibles`)
+  }
+  catch (e: unknown) {
+    const msg = apiErrorMsg(e, 'Error al cargar módulos')
+    toast.add({ title: msg, color: 'error' })
+  }
+}
+
+async function cargarPermisosRol(rolId: string) {
+  const perms = await useApiFetch<RolPermisoModulo[]>(`${apiUrl}/roles/${rolId}/permissions`)
+  seleccionados.value = new Set(perms.map(p => p.moduloAppPermisoId))
+}
+
+async function abrirCrear() {
+  resetDrawer()
+  drawerOpen.value = true
+  loadingDrawer.value = true
+  try {
+    await cargarModulos()
+  }
+  finally {
+    loadingDrawer.value = false
+  }
+}
+
+async function abrirEditar(rol: Rol) {
+  resetDrawer()
+  drawerMode.value = 'edit'
+  editandoRol.value = rol
+  form.nombre = rol.nombre
+  form.descripcion = rol.descripcion ?? ''
+  drawerOpen.value = true
+  loadingDrawer.value = true
+  try {
+    await cargarModulos()
+    await cargarPermisosRol(rol.id)
+  }
+  catch (e: unknown) {
+    const msg = apiErrorMsg(e, 'Error al cargar el rol')
+    toast.add({ title: msg, color: 'error' })
+    drawerOpen.value = false
+    resetDrawer()
+  }
+  finally {
+    loadingDrawer.value = false
+  }
+}
+
+watch(drawerOpen, (open) => {
+  if (!open) resetDrawer()
+})
+
+async function guardarPermisos(rolId: string) {
+  for (const modulo of modulos.value) {
+    const ids = modulo.permisos
+      .map(p => p.moduloAppPermisoId)
+      .filter(id => seleccionados.value.has(id))
+    await useApiFetch(
+      `${apiUrl}/roles/${rolId}/modules/${modulo.moduloTenantId}/permissions`,
+      { method: 'PUT', body: { moduloAppPermisoIds: ids } },
+    )
+  }
+}
 
 async function cargar() {
   loading.value = true
@@ -33,25 +137,44 @@ async function cargar() {
   }
 }
 
-async function crear() {
-  if (!nuevo.nombre.trim()) return
-  creating.value = true
+async function guardar() {
+  if (!form.nombre.trim()) return
+  saving.value = true
   try {
-    const rol = await useApiFetch<Rol>(`${apiUrl}/roles`, {
-      method: 'POST',
-      body: { nombre: nuevo.nombre.trim(), descripcion: nuevo.descripcion.trim() || null },
-    })
+    if (drawerMode.value === 'create') {
+      const rol = await useApiFetch<Rol>(`${apiUrl}/roles`, {
+        method: 'POST',
+        body: { nombre: form.nombre.trim(), descripcion: form.descripcion.trim() || null },
+      })
+      if (modulos.value.length) {
+        await guardarPermisos(rol.id)
+      }
+      toast.add({ title: 'Rol creado', color: 'success' })
+    }
+    else if (editandoRol.value) {
+      if (!editandoRol.value.esFijo) {
+        await useApiFetch(`${apiUrl}/roles/${editandoRol.value.id}`, {
+          method: 'PATCH',
+          body: { nombre: form.nombre.trim(), descripcion: form.descripcion.trim() || null },
+        })
+        if (modulos.value.length) {
+          await guardarPermisos(editandoRol.value.id)
+        }
+      }
+      toast.add({ title: 'Rol actualizado', color: 'success' })
+    }
     drawerOpen.value = false
-    nuevo.nombre = ''
-    nuevo.descripcion = ''
-    navigateTo(`/configuracion/roles/${rol.id}`)
+    await cargar()
   }
   catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al crear rol')
+    const msg = apiErrorMsg(
+      e,
+      drawerMode.value === 'create' ? 'Error al crear rol' : 'Error al guardar rol',
+    )
     toast.add({ title: msg, color: 'error' })
   }
   finally {
-    creating.value = false
+    saving.value = false
   }
 }
 
@@ -89,7 +212,7 @@ const columns: TableColumn<Rol>[] = [
           Define roles y los permisos que tienen sobre cada módulo.
         </p>
       </div>
-      <UButton icon="i-heroicons-plus" @click="drawerOpen = true">
+      <UButton icon="i-heroicons-plus" @click="abrirCrear">
         Nuevo rol
       </UButton>
     </div>
@@ -120,7 +243,7 @@ const columns: TableColumn<Rol>[] = [
               icon="i-heroicons-pencil-square"
               color="neutral"
               variant="ghost"
-              :to="`/configuracion/roles/${row.original.id}`"
+              @click="abrirEditar(row.original)"
             />
             <UButton
               icon="i-heroicons-trash"
@@ -140,17 +263,69 @@ const columns: TableColumn<Rol>[] = [
       </UTable>
     </UCard>
 
-    <AppDrawer v-model:open="drawerOpen" title="Nuevo rol" width="50%">
+    <AppDrawer v-model:open="drawerOpen" width="50%">
+      <template #header>
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-default">{{ drawerTitle }}</span>
+          <UBadge
+            v-if="esFijo"
+            color="neutral"
+            variant="subtle"
+            size="xs"
+          >
+            Fijo
+          </UBadge>
+        </div>
+      </template>
+
       <template #body>
-        <UForm id="nuevo-rol-form" :state="nuevo" class="space-y-4" @submit="crear">
-          <UFormField label="Nombre" required>
-            <UInput v-model="nuevo.nombre" placeholder="Ej: Cajero" autofocus />
-          </UFormField>
-          <UFormField label="Descripción">
-            <UInput v-model="nuevo.descripcion" placeholder="Opcional" />
-          </UFormField>
+        <div
+          v-if="loadingDrawer"
+          class="py-8 text-center text-sm text-muted"
+        >
+          Cargando…
+        </div>
+
+        <UForm
+          v-else
+          id="rol-form"
+          :state="form"
+          class="space-y-6"
+          @submit="guardar"
+        >
+          <div class="space-y-4">
+            <UFormField label="Nombre" required>
+              <UInput
+                v-model="form.nombre"
+                placeholder="Ej: Cajero"
+                :disabled="esFijo"
+                :autofocus="!esFijo"
+              />
+            </UFormField>
+            <UFormField label="Descripción">
+              <UInput
+                v-model="form.descripcion"
+                placeholder="Opcional"
+                :disabled="esFijo"
+              />
+            </UFormField>
+          </div>
+
+          <div class="space-y-4">
+            <p class="text-sm font-semibold text-default">
+              Permisos por módulo
+            </p>
+            <RolPermisosPorModulo
+              :modulos="modulos"
+              :seleccionados="seleccionados"
+              :disabled="esFijo"
+              disabled-message="El rol Administrador tiene acceso completo a todos los módulos contratados; sus permisos no se editan."
+              @toggle="togglePermiso"
+            />
+          </div>
         </UForm>
       </template>
+
       <template #actions>
         <UButton
           color="neutral"
@@ -160,11 +335,13 @@ const columns: TableColumn<Rol>[] = [
           Cancelar
         </UButton>
         <UButton
+          v-if="!esFijo"
           type="submit"
-          form="nuevo-rol-form"
-          :loading="creating"
+          form="rol-form"
+          :loading="saving"
+          :disabled="loadingDrawer"
         >
-          Crear y configurar
+          {{ submitLabel }}
         </UButton>
       </template>
     </AppDrawer>
