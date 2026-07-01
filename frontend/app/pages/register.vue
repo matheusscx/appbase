@@ -3,13 +3,15 @@ definePageMeta({ layout: false })
 
 const store = useAuthStore()
 
-const nombre = ref('')
-const correo = ref('')
-const password = ref('')
+const state = reactive({
+  nombre: '',
+  correo: '',
+  password: '',
+})
 const showPassword = ref(false)
 
 async function onRegister() {
-  const ok = await store.register(nombre.value, correo.value, password.value)
+  const ok = await store.register(state.nombre, state.correo, state.password)
   if (ok) await store.handlePostLogin()
 }
 
@@ -71,10 +73,10 @@ async function onGoogle() {
         </div>
 
         <!-- Form -->
-        <form class="space-y-4" @submit.prevent="onRegister">
+        <UForm :state="state" class="space-y-4" @submit="onRegister">
           <UFormField label="Nombre" name="nombre">
             <UInput
-              v-model="nombre"
+              v-model="state.nombre"
               type="text"
               placeholder="Tu nombre"
               autocomplete="given-name"
@@ -85,7 +87,7 @@ async function onGoogle() {
 
           <UFormField label="Email" name="correo">
             <UInput
-              v-model="correo"
+              v-model="state.correo"
               type="email"
               placeholder="tu@email.com"
               autocomplete="email"
@@ -96,7 +98,7 @@ async function onGoogle() {
 
           <UFormField label="Contraseña" name="password">
             <UInput
-              v-model="password"
+              v-model="state.password"
               :type="showPassword ? 'text' : 'password'"
               placeholder="Mínimo 6 caracteres"
               autocomplete="new-password"
@@ -120,11 +122,11 @@ async function onGoogle() {
             type="submit"
             block
             :loading="store.loading"
-            :disabled="store.loading || !nombre || !correo || !password"
+            :disabled="store.loading || !state.nombre || !state.correo || !state.password"
           >
             Crear cuenta
           </UButton>
-        </form>
+        </UForm>
       </div>
 
       <!-- Login link -->

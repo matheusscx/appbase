@@ -3,15 +3,17 @@ definePageMeta({ layout: false })
 
 const store = useAuthStore()
 
-const email = ref('')
-const password = ref('')
+const state = reactive({
+  email: '',
+  password: '',
+  keepSession: false,
+})
 const showPassword = ref(false)
-const keepSession = ref(false)
 
 const toast = useToast()
 
 async function onLogin() {
-  const ok = await store.login(email.value, password.value)
+  const ok = await store.login(state.email, state.password)
   if (ok) await store.handlePostLogin()
 }
 
@@ -72,10 +74,10 @@ async function onGoogle() {
         </div>
 
         <!-- Form -->
-        <form class="space-y-4" @submit.prevent="onLogin">
+        <UForm :state="state" class="space-y-4" @submit="onLogin">
           <UFormField label="Email" name="email">
             <UInput
-              v-model="email"
+              v-model="state.email"
               type="email"
               placeholder="tu@email.com"
               autocomplete="email"
@@ -86,7 +88,7 @@ async function onGoogle() {
 
           <UFormField label="Contraseña" name="password">
             <UInput
-              v-model="password"
+              v-model="state.password"
               :type="showPassword ? 'text' : 'password'"
               placeholder="••••••••"
               autocomplete="current-password"
@@ -108,7 +110,7 @@ async function onGoogle() {
 
           <!-- Keep session + Forgot -->
           <div class="flex items-center justify-between">
-            <UCheckbox v-model="keepSession" label="Mantener sesión iniciada" :disabled="store.loading" />
+            <UCheckbox v-model="state.keepSession" label="Mantener sesión iniciada" :disabled="store.loading" />
             <NuxtLink
               to="/forgot-password"
               class="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 transition-colors"
@@ -121,11 +123,11 @@ async function onGoogle() {
             type="submit"
             block
             :loading="store.loading"
-            :disabled="store.loading || !email || !password"
+            :disabled="store.loading || !state.email || !state.password"
           >
             Iniciar sesión
           </UButton>
-        </form>
+        </UForm>
       </div>
 
       <!-- Register link -->
