@@ -6,7 +6,7 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
-const { formatFecha } = useFormatters()
+const { formatFecha, formatMonto } = useFormatters()
 
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -614,7 +614,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="space-y-6">
     <!-- Cabecera -->
     <div class="flex items-center justify-between">
       <div>
@@ -657,7 +657,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           <div class="min-w-0">
             <span class="font-medium truncate block">{{ row.original.nombre }}</span>
             <div class="text-sm text-muted mt-0.5 flex flex-wrap items-center gap-3">
-              <span>{{ row.original.monedaSimbolo ?? row.original.monedaCodigo }} {{ row.original.precioBase }}</span>
+              <span>{{ row.original.monedaSimbolo ?? row.original.monedaCodigo }} {{ formatMonto(row.original.precioBase) }}</span>
               <span v-if="row.original.categoriaNombre">· {{ row.original.categoriaNombre }}</span>
               <span v-if="row.original.tipo === 'producto' && row.original.stock !== null">
                 · Stock: {{ row.original.stock }}

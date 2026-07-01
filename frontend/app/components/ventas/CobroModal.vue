@@ -79,7 +79,13 @@ function confirmar() {
 
         <div class="flex flex-col gap-2">
           <div v-for="(pago, i) in pagos" :key="i" class="flex items-center gap-2">
-            <USelect v-model="pago.metodoPagoId" :items="metodoItems" class="flex-1" />
+            <USelectMenu
+              v-model="pago.metodoPagoId"
+              :items="metodoItems"
+              value-key="value"
+              label-key="label"
+              class="flex-1"
+            />
             <UInput v-model="pago.monto" inputmode="decimal" placeholder="0" class="w-32" />
             <UButton
               icon="i-lucide-trash-2"

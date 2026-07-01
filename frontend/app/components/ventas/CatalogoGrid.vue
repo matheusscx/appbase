@@ -4,6 +4,7 @@ import type { ItemCatalogo } from '~/composables/useVenta'
 const props = defineProps<{ items: ItemCatalogo[]; loading?: boolean }>()
 const emit = defineEmits<{ add: [item: ItemCatalogo] }>()
 
+const { formatMonto } = useFormatters()
 const busqueda = ref('')
 
 const filtrados = computed(() => {
@@ -39,7 +40,7 @@ const filtrados = computed(() => {
         <div class="flex flex-col gap-1">
           <span class="font-medium text-sm text-default truncate">{{ item.nombre }}</span>
           <span class="text-highlighted font-semibold text-sm">
-            {{ item.monedaSimbolo ?? '' }}{{ item.precioBase }}
+            {{ item.monedaSimbolo ?? '' }}{{ formatMonto(item.precioBase) }}
           </span>
           <span v-if="item.tipo === 'producto'" class="text-xs text-muted">
             Stock: {{ item.stock ?? '0' }}

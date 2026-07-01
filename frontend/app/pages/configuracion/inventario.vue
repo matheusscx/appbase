@@ -90,7 +90,7 @@ const columns: TableColumn<Movimiento>[] = [
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="space-y-6">
     <div>
       <h1 class="text-2xl font-semibold text-default">Inventario</h1>
       <p class="text-sm text-muted">Kardex de movimientos de stock</p>
