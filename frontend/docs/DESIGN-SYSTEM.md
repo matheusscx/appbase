@@ -193,7 +193,7 @@ When adding a new page or updating an existing one:
 These components exemplify correct design system usage:
 - **Dashboard pages**: `frontend/app/pages/index.vue` (UDashboardPanel, semantic tokens)
 - **Auth pages**: `frontend/app/pages/login.vue` (form styling, bg-default, text-default)
-- **Ventas module**: `frontend/app/pages/ventas/historial.vue` (lists, UTable, semantic tokens)
+- **Ventas module**: `frontend/app/pages/ventas/index.vue` (historial, UTable, semantic tokens); POS en `ventas/pos.vue`
 - **Items page**: `frontend/app/pages/configuracion/items.vue` (complex modals, semantic tokens)
 
 When in doubt, reference these files.

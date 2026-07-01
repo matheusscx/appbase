@@ -29,7 +29,7 @@ const items = computed<NavigationMenuItem[]>(() => {
     base.push({
       label: 'Ventas',
       icon: 'i-heroicons-document-text',
-      to: '/ventas/historial',
+      to: '/ventas',
     })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Leer')) {
@@ -43,7 +43,7 @@ const items = computed<NavigationMenuItem[]>(() => {
     base.push({
       label: 'Punto de venta',
       icon: 'i-heroicons-shopping-cart',
-      to: '/ventas',
+      to: '/ventas/pos',
     })
   }
   if (authStore.isSuperadmin) {

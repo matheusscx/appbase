@@ -215,7 +215,7 @@ onMounted(cargar)
             </template>
             <template #venta-cell="{ row }">
               <NuxtLink
-                :to="`/ventas/${row.original.ventaId}`"
+                :to="{ path: '/ventas', query: { venta: row.original.ventaId } }"
                 class="text-primary underline-offset-2 hover:underline"
               >
                 Ver

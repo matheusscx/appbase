@@ -1,227 +1,294 @@
 <script setup lang="ts">
-import { useVenta, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
-import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import Decimal from 'decimal.js'
-import type { DropdownMenuItem } from '@nuxt/ui'
+import type { Row } from '@tanstack/vue-table'
+import type { TableColumn } from '@nuxt/ui'
+import { getPaginationRowModel } from '@tanstack/vue-table'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-interface TipoDoc { id: string; nombre: string; customerRequerido: boolean }
-interface MetodoPago {
-  metodoPagoId: string
-  nombre: string
-  permiteVuelto: boolean
-  habilitada: boolean
+interface VentaResumen {
+  id: string
+  canal: string
+  estado: string
+  totalFinal: string
+  montoPagado: string
+  saldo: string
+  fecha: string
+  creadoEl: string
 }
 
 const config = useRuntimeConfig()
-const apiUrl = config.public.apiUrl
 const toast = useToast()
-const cajaStore = useCajaStore()
+const { formatMonto, formatFecha } = useFormatters()
+const apiUrl = config.public.apiUrl
 
-const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidad, limpiar } = useVenta()
+const route = useRoute()
+const router = useRouter()
 
-const items = ref<ItemCatalogo[]>([])
-const metodos = ref<MetodoPago[]>([])
-const tiposDocumento = ref<TipoDoc[]>([])
-const loadingCatalogo = ref(false)
+const ventas = ref<VentaResumen[]>([])
+const loading = ref(false)
+const filtroEstado = ref('')
+const filtroCanal = ref('')
+const pageSize = 15
+const table = useTemplateRef('table')
+const pagination = ref({ pageIndex: 0, pageSize })
 
-const tipoDocumentoId = ref<string | undefined>(undefined)
-const customer = ref<CustomerForm>({ nombre: '', rut: '', direccion: '', telefono: '', email: '' })
-const customerExpandido = ref(false)
+const drawerOpen = ref(false)
+const ventaSeleccionadaId = ref<string | null>(null)
 
-const cobroOpen = ref(false)
-const submitting = ref(false)
-const movimientoModalOpen = ref(false)
-const cierreModalOpen = ref(false)
+function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
+  const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
+    pendiente: 'warning',
+    pagada_parcial: 'info',
+    pagada: 'success',
+    cancelada: 'error',
+    borrador: 'neutral',
+  }
+  return map[estado] ?? 'neutral'
+}
 
-function abrirMovimientoModal() { movimientoModalOpen.value = true }
-function abrirCierreModal() { cierreModalOpen.value = true }
+function estadoLabel(estado: string): string {
+  const map: Record<string, string> = {
+    pendiente: 'Pendiente',
+    pagada_parcial: 'Parcial',
+    pagada: 'Pagada',
+    cancelada: 'Cancelada',
+    borrador: 'Borrador',
+  }
+  return map[estado] ?? estado
+}
 
-const tieneCaja = computed(() => cajaStore.activa !== null)
-const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
+function canalColor(canal: string): 'primary' | 'neutral' {
+  return canal === 'online' ? 'primary' : 'neutral'
+}
 
-const saldoEsperado = computed(() => {
-  if (!cajaStore.activa) return new Decimal(0)
-  const entradas = cajaStore.movimientos
-    .filter(m => m.tipo === 'entrada')
-    .reduce((acc, m) => acc.plus(new Decimal(m.monto)), new Decimal(0))
-  const salidas = cajaStore.movimientos
-    .filter(m => m.tipo === 'salida')
-    .reduce((acc, m) => acc.plus(new Decimal(m.monto)), new Decimal(0))
-  return new Decimal(cajaStore.activa.saldoInicial).plus(entradas).minus(salidas)
+function canalLabel(canal: string): string {
+  const map: Record<string, string> = {
+    fisico: 'Físico',
+    online: 'Online',
+  }
+  return map[canal] ?? canal
+}
+
+const estadoOptions = [
+  { label: estadoLabel('pendiente'), value: 'pendiente' },
+  { label: estadoLabel('pagada_parcial'), value: 'pagada_parcial' },
+  { label: estadoLabel('pagada'), value: 'pagada' },
+  { label: estadoLabel('cancelada'), value: 'cancelada' },
+  { label: estadoLabel('borrador'), value: 'borrador' },
+]
+
+const canalOptions = [
+  { label: 'Físico', value: 'fisico' },
+  { label: 'Online', value: 'online' },
+]
+
+const hayFiltrosActivos = computed(() => !!filtroEstado.value || !!filtroCanal.value)
+
+function limpiarFiltros() {
+  filtroEstado.value = ''
+  filtroCanal.value = ''
+}
+
+const ventasFiltradas = computed(() => {
+  let result = ventas.value
+  if (filtroEstado.value) result = result.filter(v => v.estado === filtroEstado.value)
+  if (filtroCanal.value) result = result.filter(v => v.canal === filtroCanal.value)
+  return result
 })
 
-const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [
-  [
-    {
-      label: 'Registrar movimiento',
-      icon: 'i-heroicons-plus-circle',
-      onSelect: abrirMovimientoModal,
-    },
-    {
-      label: 'Cerrar caja',
-      icon: 'i-heroicons-lock-closed',
-      color: 'error' as const,
-      onSelect: abrirCierreModal,
-    },
-  ],
-])
+watch([filtroEstado, filtroCanal], () => { pagination.value.pageIndex = 0 })
 
-watch(
-  () => cajaStore.activa,
-  async (activa) => {
-    if (activa) {
-      try {
-        await cajaStore.cargarMovimientos(activa.id)
-      }
-      catch {
-        // no crítico — saldoEsperado quedará en saldoInicial si falla
-      }
-    }
-  },
-  { immediate: true },
+const totalFacturado = computed(() =>
+  ventas.value.reduce((acc, v) => acc.plus(new Decimal(v.totalFinal)), new Decimal(0)),
 )
 
-watch(tipoDocumentoId, () => {
-  customerExpandido.value = false
-  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
-})
+const saldoPendiente = computed(() =>
+  ventas.value.reduce((acc, v) => acc.plus(new Decimal(v.saldo)), new Decimal(0)),
+)
 
 async function cargar() {
-  loadingCatalogo.value = true
+  loading.value = true
   try {
-    const [itemsRes, metodosRes, tiposRes] = await Promise.all([
-      useApiFetch<ItemCatalogo[]>(`${apiUrl}/items?tipo=producto`),
-      useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
-      useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
-    ])
-    items.value = itemsRes
-    metodos.value = metodosRes
-    tiposDocumento.value = tiposRes
-    tipoDocumentoId.value = tiposRes[0]?.id
-  } catch (e: unknown) {
+    ventas.value = await useApiFetch<VentaResumen[]>(`${apiUrl}/ventas`)
+  }
+  catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar el POS', color: 'error' })
-  } finally {
-    loadingCatalogo.value = false
+    toast.add({ title: msg ?? 'Error al cargar ventas', color: 'error' })
+  }
+  finally {
+    loading.value = false
   }
 }
 
-onMounted(async () => {
-  await Promise.all([cajaStore.cargarActiva(), cargar()])
+function abrirDetalle(ventaId: string) {
+  ventaSeleccionadaId.value = ventaId
+  drawerOpen.value = true
+}
+
+function onSelectVenta(_e: Event, row: Row<VentaResumen>) {
+  abrirDetalle(row.original.id)
+}
+
+function onDetalleUpdated() {
+  cargar()
+}
+
+watch(drawerOpen, (isOpen) => {
+  if (!isOpen) {
+    ventaSeleccionadaId.value = null
+    if (route.query.venta) {
+      router.replace({ query: { ...route.query, venta: undefined } })
+    }
+  }
 })
 
-async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
-  const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
-  const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
-
-  if (incluirCustomer && !customer.value.nombre.trim()) {
-    cobroOpen.value = false
-    toast.add({ title: 'El nombre del cliente es requerido', color: 'error' })
-    return
-  }
-
-  submitting.value = true
-  try {
-    const body: Record<string, unknown> = {
-      lineas: lineas.value.map((l) => ({ itemId: l.item.id, cantidad: l.cantidad })),
-      pagos,
-      tipoDocumentoId: tipoDocumentoId.value,
-    }
-    if (incluirCustomer) {
-      body.customer = {
-        nombre: customer.value.nombre,
-        rut: customer.value.rut || undefined,
-        direccion: customer.value.direccion || undefined,
-        telefono: customer.value.telefono || undefined,
-        email: customer.value.email || undefined,
-      }
-    }
-    const venta = await useApiFetch<{ estado: string }>(`${apiUrl}/ventas`, {
-      method: 'POST',
-      body,
-    })
-    toast.add({ title: `Venta ${venta.estado}`, color: 'success' })
-    cobroOpen.value = false
-    limpiar()
-    customerExpandido.value = false
-    customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
-    await cajaStore.cargarActiva()
-  } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al registrar la venta', color: 'error' })
-  } finally {
-    submitting.value = false
-  }
+function abrirDesdeQuery() {
+  const id = route.query.venta
+  if (typeof id === 'string' && id) abrirDetalle(id)
 }
+
+onMounted(() => {
+  cargar()
+  abrirDesdeQuery()
+})
+
+watch(() => route.query.venta, (id) => {
+  if (typeof id === 'string' && id) abrirDetalle(id)
+})
+
+const columns: TableColumn<VentaResumen>[] = [
+  { accessorKey: 'fecha', header: 'Fecha' },
+  { accessorKey: 'canal', header: 'Canal' },
+  { accessorKey: 'estado', header: 'Estado' },
+  { accessorKey: 'totalFinal', header: 'Total', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'montoPagado', header: 'Pagado', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'saldo', header: 'Saldo', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
+
 </script>
 
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Punto de venta">
-        <template #right>
-          <div v-if="tieneCaja" class="flex items-center gap-2 mr-2">
-            <UDropdownMenu :items="cajaMenuItems">
-              <UButton variant="soft" color="success" size="sm" icon="i-heroicons-banknotes">
-                Caja abierta
-              </UButton>
-            </UDropdownMenu>
-          </div>
-          <UserMenu />
-        </template>
-      </AppNavbar>
+      <AppNavbar title="Ventas" />
     </template>
 
     <template #body>
-      <div v-if="cajaStore.loadingActiva" class="flex items-center justify-center h-full">
-        <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 text-muted animate-spin" />
-      </div>
-
-      <div v-else-if="!tieneCaja" class="max-w-md mx-auto py-12">
-        <CajaAperturaForm />
-      </div>
-
-      <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full p-4">
-        <div class="lg:col-span-3 min-h-0">
-          <VentasCatalogoGrid :items="items" :loading="loadingCatalogo" @add="add" />
+      <div class="max-w-5xl mx-auto space-y-4 py-6">
+        <!-- Resumen -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div class="rounded-lg bg-muted p-3">
+            <p class="text-xs text-muted uppercase tracking-wide">
+              Ventas registradas
+            </p>
+            <p class="text-lg font-semibold mt-1">
+              {{ ventas.length }}
+            </p>
+          </div>
+          <div class="rounded-lg bg-success/10 p-3">
+            <p class="text-xs text-success uppercase tracking-wide">
+              Total facturado
+            </p>
+            <p class="text-lg font-semibold text-success mt-1">
+              {{ formatMonto(totalFacturado) }}
+            </p>
+          </div>
+          <div class="rounded-lg bg-warning/10 p-3">
+            <p class="text-xs text-warning uppercase tracking-wide">
+              Saldo pendiente
+            </p>
+            <p class="text-lg font-semibold text-warning mt-1">
+              {{ formatMonto(saldoPendiente) }}
+            </p>
+          </div>
         </div>
-        <div class="lg:col-span-2 min-h-0">
-          <VentasCarritoPanel
-            v-model:tipo-documento-id="tipoDocumentoId"
-            v-model:customer="customer"
-            v-model:customer-expandido="customerExpandido"
-            :lineas="lineas"
-            :resultado="resultado"
-            :loading-calculo="loadingCalculo"
-            :tipos-documento="tiposDocumento"
-            :tiene-caja="tieneCaja"
-            @cambiar-cantidad="cambiarCantidad"
-            @quitar="quitar"
-            @cobrar="cobroOpen = true"
+
+        <!-- Filtros -->
+        <div class="flex flex-wrap items-center gap-3">
+          <USelect
+            v-model="filtroEstado"
+            :items="estadoOptions"
+            placeholder="Estado"
+            class="w-48"
+          />
+          <USelect
+            v-model="filtroCanal"
+            :items="canalOptions"
+            placeholder="Canal"
+            class="w-44"
+          />
+          <UButton
+            v-if="hayFiltrosActivos"
+            label="Limpiar filtros"
+            icon="i-heroicons-x-mark"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            @click="limpiarFiltros"
           />
         </div>
-      </div>
 
-      <VentasCobroModal
-        v-model:open="cobroOpen"
-        :total="totalFinal"
-        :metodos="metodos"
-        :submitting="submitting"
-        @confirmar="confirmarCobro"
-      />
-      <CajaMovimientoModal
-        v-if="cajaStore.activa"
-        v-model:open="movimientoModalOpen"
-        :caja-id="cajaStore.activa.id"
-      />
-      <CajaCierreModal
-        v-if="cajaStore.activa"
-        v-model:open="cierreModalOpen"
-        :caja-id="cajaStore.activa.id"
-        :saldo-esperado="saldoEsperado"
-      />
+        <!-- Loading -->
+        <div v-if="loading" class="text-center text-muted py-12">
+          <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+          Cargando ventas…
+        </div>
+
+        <UCard v-else>
+          <UTable
+            ref="table"
+            v-model:pagination="pagination"
+            :data="ventasFiltradas"
+            :columns="columns"
+            :pagination-options="{ getPaginationRowModel: getPaginationRowModel() }"
+            :ui="{ tr: 'cursor-pointer' }"
+            @select="onSelectVenta"
+          >
+            <template #fecha-cell="{ row }">
+              <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
+            </template>
+            <template #canal-cell="{ row }">
+              <UBadge :color="canalColor(row.original.canal)" :label="canalLabel(row.original.canal)" variant="subtle" size="sm" />
+            </template>
+            <template #estado-cell="{ row }">
+              <UBadge :color="estadoColor(row.original.estado)" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
+            </template>
+            <template #totalFinal-cell="{ row }">
+              <span class="font-mono">{{ formatMonto(row.original.totalFinal) }}</span>
+            </template>
+            <template #montoPagado-cell="{ row }">
+              <span class="font-mono">{{ formatMonto(row.original.montoPagado) }}</span>
+            </template>
+            <template #saldo-cell="{ row }">
+              <span class="font-mono" :class="new Decimal(row.original.saldo).gt(0) ? 'text-warning' : ''">
+                {{ formatMonto(row.original.saldo) }}
+              </span>
+            </template>
+            <template #empty>
+              <div class="py-10 text-center text-sm text-muted">
+                <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+                {{ hayFiltrosActivos ? 'Ninguna venta coincide con los filtros.' : 'No hay ventas registradas.' }}
+              </div>
+            </template>
+          </UTable>
+
+          <div v-if="ventasFiltradas.length > pageSize" class="flex justify-end pt-4">
+            <UPagination
+              :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
+              :items-per-page="table?.tableApi?.getState().pagination.pageSize"
+              :total="ventasFiltradas.length"
+              @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
+            />
+          </div>
+        </UCard>
+
+        <VentasVentaDetalleDrawer
+          v-model:open="drawerOpen"
+          :venta-id="ventaSeleccionadaId"
+          @updated="onDetalleUpdated"
+        />
+      </div>
     </template>
   </UDashboardPanel>
 </template>
