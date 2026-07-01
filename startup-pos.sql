@@ -229,6 +229,7 @@ CREATE TABLE "usuarios" (
   "telefono"       VARCHAR(100) NOT NULL,
   "correo"         VARCHAR(100) UNIQUE NOT NULL,
   "es_superadmin"  BOOLEAN     NOT NULL DEFAULT false,
+  "preferencias"   JSONB       NOT NULL DEFAULT '{}',
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ

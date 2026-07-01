@@ -352,7 +352,28 @@ Referencia: `app/pages/pagos/index.vue`.
 
 ---
 
-## 13. Coordinar skill `frontend-design` con `nuxt-ui` / tokens semánticos
+## 13. Preferencias de usuario
+
+Composable `useUserPreferences()` — lee/escribe `authStore.user.preferencias`.
+
+| Pref | Default | Persistencia |
+|------|---------|--------------|
+| `pageSize` | 15 | Solo servidor (`PATCH /me/preferencias`) |
+| `colorMode` | system | Cookie `@nuxtjs/color-mode` + mirror servidor |
+
+```typescript
+const { pageSize, setPageSize, setColorMode } = useUserPreferences()
+
+usePaginatedList({ path: '/pagos', pageSize, filters })
+```
+
+- UI en `/configuracion/perfil` → `UserPreferencesForm` (sección Apariencia).
+- Plugin `plugins/color-mode-sync.client.ts`: tras `fetchMe`, aplica tema del servidor.
+- `UColorModeSelect` en formulario; cambios se sincronizan con debounce 300 ms.
+
+---
+
+## 14. Coordinar skill `frontend-design` con `nuxt-ui` / tokens semánticos
 
 Ambas skills conviven en este repo pero operan en fases distintas: `frontend-design`
 decide dirección estética (paleta, tipografía, layout, "elemento firma");

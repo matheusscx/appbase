@@ -33,15 +33,17 @@ const apiUrl = config.public.apiUrl
 const filtroMetodo = ref<string | undefined>()
 const filtroEstado = ref<string | undefined>()
 
+const { pageSize } = useUserPreferences()
+
 const listFilters = computed(() => ({
   metodoPagoId: filtroMetodo.value,
   ventaEstado: filtroEstado.value,
 }))
 
-const { items: pagos, meta, page, pageSize, loading } =
+const { items: pagos, meta, page, loading } =
   usePaginatedList<PagoLedger>({
     path: '/pagos',
-    pageSize: 15,
+    pageSize,
     filters: listFilters,
   })
 

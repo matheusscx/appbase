@@ -9,6 +9,9 @@ import * as bcrypt from 'bcryptjs';
 import { Usuario } from '../users/usuario.entity';
 import { UpdatePerfilDto } from './dto/update-perfil.dto';
 import { UpdateContrasenaDto } from './dto/update-contrasena.dto';
+import { UpdatePreferenciasDto } from './dto/update-preferencias.dto';
+import type { UsuarioPreferencias } from '../../common/types/usuario-preferencias.interface';
+import { mergeUsuarioPreferencias } from '../../common/utils/usuario-preferencias.util';
 
 @Injectable()
 export class MeService {
@@ -40,5 +43,15 @@ export class MeService {
     const hashed = await bcrypt.hash(dto.contrasenaNueva, 10);
     await this.repo.update(userId, { contrasena: hashed });
     return { message: 'Contraseña actualizada' };
+  }
+
+  async updatePreferencias(
+    userId: string,
+    dto: UpdatePreferenciasDto,
+  ): Promise<UsuarioPreferencias> {
+    const user = await this.repo.findOneOrFail({ where: { id: userId } });
+    const merged = mergeUsuarioPreferencias(user.preferencias, dto);
+    await this.repo.update(userId, { preferencias: merged });
+    return merged;
   }
 }

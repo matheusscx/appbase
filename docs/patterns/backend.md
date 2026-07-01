@@ -293,16 +293,52 @@ interface PaginatedResponse<T> {
 3. `SELECT … ORDER BY … LIMIT $n OFFSET $m` → `data`.
 4. Lecturas vía `this.dataSource.query` (réplica cuando exista).
 
+### Controller
+
+Registrar rutas estáticas (`/resumen`, `/preferencias`) **antes** de rutas con params.
+
 KPIs/agregados globales **no** van en `data[]`: endpoint separado
 (p. ej. `GET /pagos/resumen`).
 
-### Controller
+---
 
-Registrar rutas estáticas (`/resumen`) **antes** de rutas con params.
+## 11. Preferencias de usuario
+
+Preferencias **personales** (UX), distintas de las preferencias financieras del
+tenant (`tenants.*`).
+
+### Almacenamiento
+
+Columna `usuarios.preferencias JSONB NOT NULL DEFAULT '{}'`.
+
+Shape inicial:
+
+```typescript
+interface UsuarioPreferencias {
+  ui?: {
+    colorMode?: 'system' | 'light' | 'dark';
+    pageSize?: 10 | 15 | 25 | 50;
+  };
+}
+```
+
+Utilidades en `common/utils/usuario-preferencias.util.ts`:
+`normalizeUsuarioPreferencias`, `mergeUsuarioPreferencias`.
+
+### API
+
+- `GET /auth/me` — incluye `preferencias` en el usuario.
+- `PATCH /me/preferencias` — merge parcial; respuesta normalizada.
+
+### Reglas
+
+- Alcance **usuario**, no tenant.
+- Defaults en código: `colorMode: 'system'`, `pageSize: 15`.
+- Validar con DTO anidado (`UpdatePreferenciasDto`).
 
 ---
 
-## 11. Docs vivas a tocar en el mismo commit
+## 12. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.
 - `docs/features/<feature>.md` (desde `docs/features/TEMPLATE.md`) + link en `docs/README.md`.

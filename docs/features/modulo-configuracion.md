@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-06-21
+**Last Updated**: 2026-07-01
 
 ---
 
@@ -21,17 +21,19 @@ El sistema no tenía forma de que los usuarios actualizaran sus propios datos ni
 - **Incluido:**
   - `PATCH /me/perfil` — actualizar nombre, apellido, teléfono
   - `PATCH /me/contrasena` — cambiar contraseña (valida actual, hashea nueva con bcrypt)
-  - Página `/configuracion` con dos formularios: información personal + cambio de contraseña
+  - Página `/configuracion/perfil` con formularios: información personal, apariencia (preferencias UI) y cambio de contraseña
   - Ítem "Configuración" fijo en el footer del sidebar, visible para todos los usuarios autenticados
   - El navbar muestra nombre completo (nombre + apellido), avatar con iniciales (`UAvatar` size xl) y etiqueta de rol ("Administrador" / "Super Administrador") cuando aplica
   - El navbar se actualiza automáticamente tras guardar cambios de nombre
+  - `PATCH /me/preferencias` — merge parcial de preferencias UI (`colorMode`, `pageSize`)
+  - Preferencias de UI: tema (claro/oscuro/sistema) y filas por página en tablas paginadas
 
 - **NO incluido (fases futuras):**
   - Gestión de usuarios del tenant
   - Configuración de datos de la empresa/tenant
   - Configuración de monedas, catálogos financieros
   - Avatar/foto de perfil (hoy se muestran las iniciales)
-  - Preferencias de UI (idioma, tema)
+  - Preferencias de idioma/locale
 
 ---
 
@@ -78,6 +80,29 @@ Errors:
 - 400: Las contraseñas no coinciden
 - 400: Usuario sin contraseña (OAuth)
 ```
+
+### PATCH /me/preferencias
+
+```
+PATCH /api/me/preferencias
+
+Authorization: Bearer <token>
+
+Request (merge parcial):
+{
+  "ui": { "pageSize": 25 }
+}
+
+Response (200):
+{
+  "ui": {
+    "colorMode": "system",
+    "pageSize": 25
+  }
+}
+```
+
+`GET /auth/me` incluye el campo `preferencias` en el usuario.
 
 ---
 

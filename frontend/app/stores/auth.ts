@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { decodeJwt } from '~/composables/useJwt'
+import type { UsuarioPreferencias } from '~/types/usuario-preferencias'
 
 export interface User {
   id: string
@@ -10,6 +11,7 @@ export interface User {
   esSuperadmin: boolean
   nombreUsuario: string | null
   creadoEl: string
+  preferencias?: UsuarioPreferencias
 }
 
 export const useAuthStore = defineStore('auth', () => {

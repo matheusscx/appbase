@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
+import type { UsuarioPreferencias } from '../../common/types/usuario-preferencias.interface';
 
 @Entity('usuarios')
 export class Usuario {
@@ -39,6 +40,9 @@ export class Usuario {
 
   @Column({ name: 'es_superadmin', default: false })
   esSuperadmin: boolean;
+
+  @Column({ type: 'jsonb', default: () => "'{}'" })
+  preferencias: UsuarioPreferencias;
 
   @Column({ type: 'varchar', nullable: true, name: 'google_id' })
   googleId: string | null;
