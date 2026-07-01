@@ -57,6 +57,15 @@ async function cargar() {
 }
 onMounted(cargar)
 
+const formState = computed(() => ({
+  calculoDescuentos: calculoDescuentos.value,
+  calculoRecargos: calculoRecargos.value,
+  formula: formula.value,
+  escalaCalculo: escalaCalculo.value,
+  modoRedondeo: modoRedondeo.value,
+  montoTolerancia: montoTolerancia.value,
+}))
+
 async function guardar() {
   saving.value = true
   try {
@@ -98,7 +107,7 @@ function moverAbajo(index: number) {
 <template>
   <div class="space-y-6">
     <div>
-      <h2 class="text-lg font-semibold">
+      <h2 class="text-lg font-semibold text-default">
         Preferencias financieras
       </h2>
       <p class="text-sm text-muted">
@@ -113,12 +122,12 @@ function moverAbajo(index: number) {
       Cargando...
     </div>
 
-    <template v-else>
+    <UForm v-else :state="formState" class="space-y-6" @submit="guardar">
       <UCard>
         <div class="space-y-6">
           <!-- Cálculo de descuentos -->
           <div class="space-y-2">
-            <p class="font-medium">
+            <p class="font-medium text-default">
               Cálculo de descuentos
             </p>
             <p class="text-sm text-muted">
@@ -135,7 +144,7 @@ function moverAbajo(index: number) {
 
           <!-- Cálculo de recargos -->
           <div class="space-y-2">
-            <p class="font-medium">
+            <p class="font-medium text-default">
               Cálculo de recargos
             </p>
             <p class="text-sm text-muted">
@@ -152,7 +161,7 @@ function moverAbajo(index: number) {
 
           <!-- Precisión y redondeo -->
           <div class="space-y-4">
-            <p class="font-medium">
+            <p class="font-medium text-default">
               Precisión y redondeo
             </p>
             <p class="text-sm text-muted">
@@ -196,7 +205,7 @@ function moverAbajo(index: number) {
 
           <!-- Orden de la fórmula -->
           <div class="space-y-3">
-            <p class="font-medium">
+            <p class="font-medium text-default">
               Orden de la fórmula de precios
             </p>
             <p class="text-sm text-muted">
@@ -259,12 +268,12 @@ function moverAbajo(index: number) {
 
       <div class="flex justify-end">
         <UButton
+          type="submit"
           :loading="saving"
-          @click="guardar"
         >
           Guardar
         </UButton>
       </div>
-    </template>
+    </UForm>
   </div>
 </template>

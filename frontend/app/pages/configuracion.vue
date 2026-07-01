@@ -101,7 +101,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
 
     <template #body>
       <div class="flex h-full">
-        <div class="w-52 border-r shrink-0 py-3">
+        <div class="w-52 border-r border-default shrink-0 py-3">
           <UNavigationMenu
             :items="navItems"
             orientation="vertical"

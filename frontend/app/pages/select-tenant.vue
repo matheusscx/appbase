@@ -63,7 +63,7 @@ const gridClass = computed(() =>
       </div>
 
       <div v-else-if="tenantStore.loading && tenantStore.tenants.length === 0" class="py-12 text-center">
-        <UIcon name="i-lucide-loader" class="w-6 h-6 text-primary-600 animate-spin mx-auto" />
+        <UIcon name="i-lucide-loader" class="w-6 h-6 text-highlighted animate-spin mx-auto" />
       </div>
 
       <div v-else :class="gridClass">

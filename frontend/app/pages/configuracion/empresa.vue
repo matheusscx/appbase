@@ -125,7 +125,7 @@ onMounted(cargar)
 <template>
   <div class="space-y-6 max-w-lg">
     <div>
-      <h2 class="text-lg font-semibold">
+      <h2 class="text-lg font-semibold text-default">
         Empresa
       </h2>
       <p class="text-sm text-muted">
@@ -141,7 +141,7 @@ onMounted(cargar)
     </div>
 
     <UCard v-else>
-      <div class="space-y-4">
+      <UForm :state="form" class="space-y-4" @submit="guardar">
         <UFormField label="Nombre">
           <UInput v-model="form.nombre" placeholder="Nombre de la empresa" />
         </UFormField>
@@ -182,14 +182,14 @@ onMounted(cargar)
 
         <div class="flex justify-end pt-2">
           <UButton
+            type="submit"
             :loading="saving"
             :disabled="saving"
-            @click="guardar"
           >
             Guardar cambios
           </UButton>
         </div>
-      </div>
+      </UForm>
     </UCard>
   </div>
 </template>

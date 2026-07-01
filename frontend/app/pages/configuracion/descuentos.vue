@@ -276,7 +276,7 @@ const columns: TableColumn<Regla>[] = [
   <div class="space-y-6">
     <div class="flex items-center justify-between">
       <div>
-        <h2 class="text-lg font-semibold">
+        <h2 class="text-lg font-semibold text-default">
           Descuentos
         </h2>
         <p class="text-sm text-muted">

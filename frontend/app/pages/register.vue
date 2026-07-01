@@ -130,7 +130,7 @@ async function onGoogle() {
         ¿Ya tienes cuenta?
         <NuxtLink
           to="/login"
-          class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 font-medium transition-colors"
+          class="text-highlighted hover:opacity-80 font-medium transition-opacity"
         >
           Iniciar sesión
         </NuxtLink>

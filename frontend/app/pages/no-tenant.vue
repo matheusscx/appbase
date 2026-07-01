@@ -7,7 +7,7 @@ const authStore = useAuthStore()
   <div class="min-h-screen flex items-center justify-center bg-elevated px-4">
     <div class="w-full max-w-sm text-center">
       <div class="w-14 h-14 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center mx-auto mb-5">
-        <UIcon name="i-lucide-building-2" class="w-7 h-7 text-primary-600 dark:text-primary-400" />
+        <UIcon name="i-lucide-building-2" class="w-7 h-7 text-highlighted" />
       </div>
       <h1 class="text-lg font-semibold text-default mb-2">
         Sin acceso a empresas

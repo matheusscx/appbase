@@ -85,7 +85,7 @@ async function onGoogle() {
             <UCheckbox v-model="state.keepSession" label="Mantener sesión iniciada" :disabled="store.loading" />
             <NuxtLink
               to="/forgot-password"
-              class="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 transition-colors"
+              class="text-xs text-highlighted hover:opacity-80 transition-opacity"
             >
               ¿Olvidaste tu contraseña?
             </NuxtLink>
@@ -129,7 +129,7 @@ async function onGoogle() {
         ¿No tienes cuenta?
         <NuxtLink
           to="/register"
-          class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 font-medium transition-colors"
+          class="text-highlighted hover:opacity-80 font-medium transition-opacity"
         >
           Crear cuenta
         </NuxtLink>

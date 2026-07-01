@@ -618,7 +618,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
     <!-- Cabecera -->
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-2xl font-semibold">Items</h1>
+        <h1 class="text-2xl font-semibold text-default">Items</h1>
         <p class="text-sm text-muted">Productos y servicios del catálogo</p>
       </div>
       <UButton icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>

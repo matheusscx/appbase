@@ -33,12 +33,12 @@ const filtrados = computed(() => {
       <UCard
         v-for="item in filtrados"
         :key="item.id"
-        class="cursor-pointer hover:ring-2 hover:ring-primary-500 transition"
+        class="cursor-pointer hover:ring-2 hover:ring-primary transition"
         @click="emit('add', item)"
       >
         <div class="flex flex-col gap-1">
           <span class="font-medium text-sm text-default truncate">{{ item.nombre }}</span>
-          <span class="text-primary-600 font-semibold text-sm">
+          <span class="text-highlighted font-semibold text-sm">
             {{ item.monedaSimbolo ?? '' }}{{ item.precioBase }}
           </span>
           <span v-if="item.tipo === 'producto'" class="text-xs text-muted">

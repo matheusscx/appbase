@@ -17,7 +17,7 @@ onMounted(async () => {
 <template>
   <div class="min-h-screen flex items-center justify-center bg-elevated">
     <div class="text-center space-y-3">
-      <UIcon name="i-lucide-loader" class="w-8 h-8 text-primary-600 animate-spin mx-auto" />
+      <UIcon name="i-lucide-loader" class="w-8 h-8 text-highlighted animate-spin mx-auto" />
       <p class="text-sm text-muted">Iniciando sesión…</p>
     </div>
   </div>

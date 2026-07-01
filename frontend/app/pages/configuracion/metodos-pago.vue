@@ -89,7 +89,7 @@ const columns: TableColumn<MetodoPago>[] = [
 <template>
   <div class="space-y-6">
     <div>
-      <h2 class="text-lg font-semibold">
+      <h2 class="text-lg font-semibold text-default">
         Métodos de pago
       </h2>
       <p class="text-sm text-muted">

@@ -136,7 +136,7 @@ const columns: TableColumn<Moneda>[] = [
 <template>
   <div class="space-y-6">
     <div>
-      <h2 class="text-lg font-semibold">
+      <h2 class="text-lg font-semibold text-default">
         Monedas
       </h2>
       <p class="text-sm text-muted">
