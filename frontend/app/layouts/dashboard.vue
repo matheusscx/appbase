@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 
+const route = useRoute()
 const authStore = useAuthStore()
 const tenantStore = useTenantStore()
 const permissionsStore = usePermissionsStore()
@@ -61,6 +62,7 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
     label: 'Configuración',
     icon: 'i-lucide-settings',
     to: '/configuracion/perfil',
+    active: route.path.startsWith('/configuracion'),
   },
 ])
 </script>
