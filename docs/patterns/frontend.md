@@ -34,6 +34,8 @@ bloque `permissionsStore.esAdmin` si la pantalla es solo admin):
 { label: 'Monedas', icon: 'i-lucide-dollar-sign', to: '/configuracion/monedas' }
 ```
 
+Pantallas CRUD simples pueden usar los componentes en `app/components/crud/` (`CrudPageHeader`, `CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD y `configuracion/categorias.vue`.
+
 ---
 
 ## 2. Página — estructura `<script setup>`

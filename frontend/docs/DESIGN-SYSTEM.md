@@ -44,6 +44,19 @@ These are intentionally retained in the Caja module for clarity:
 - **Red** (expense, negative): `text-red-600 dark:text-red-400`, `bg-red-50 dark:bg-red-900/20`
 - **Blue** (balance, neutral): `text-blue-600 dark:text-blue-400`, `bg-blue-50 dark:bg-blue-900/20`
 
+### Branding Exceptions (intentional `primary` palette)
+
+Usar tokens semánticos en UI de producto; estas excepciones son **marca fija**, no deuda pendiente:
+
+| Patrón | Archivos | Motivo |
+|--------|----------|--------|
+| `bg-primary-600` + `text-white` en logo/avatar | `login`, `register`, `forgot-password`, `select-tenant`, `layouts/dashboard.vue` | Icono de producto sobre fondo de marca |
+| `bg-primary-50 dark:bg-primary-950` | `index.vue`, `no-tenant.vue` | Superficie de acento decorativa en pantallas de bienvenida |
+| `text-white` sobre `bg-primary-*` | Iconos dentro del logo | Contraste sobre marca |
+| Avatares de tenant con colores Tailwind (`bg-blue-500`, etc.) | `select-tenant.vue` | Diferenciación visual entre tenants (evaluar `UIAvatar` en futuro) |
+
+Links y acentos interactivos usan **`text-highlighted`**, no `text-primary-600`.
+
 ## Espaciado (padding, margin, gap)
 
 Escala estándar del proyecto. Usar estas clases de Tailwind de forma consistente; evitar valores arbitrarios (`px-[13px]`) salvo casos excepcionales.
@@ -174,6 +187,41 @@ Separación header/body/footer con `divide-y divide-accented` (mismo tono gris q
 
 **Permisos por módulo** — usar `RolPermisosPorModulo`: acordeón (`UAccordion`, `type="multiple"`) por módulo con contador `N/M` en el header, buscador por nombre, checkboxes en columna (permisos con nombres largos). Padding del acordeón: `px-4` en trigger/body (ver [Espaciado](#espaciado-padding-margin-gap)).
 
+## Componentes CRUD reutilizables
+
+Patrón extraído de `configuracion/categorias.vue`. Ubicación: `app/components/crud/`.
+
+| Componente | Uso |
+|------------|-----|
+| `CrudPageHeader` | Título `h2` + subtítulo + slot `#actions` (botón crear) |
+| `CrudTable` | `UCard` + `UTable` con empty state por defecto |
+| `CrudListItem` | Celda nombre: título + subtítulo muted |
+| `CrudModal` | Confirmación de eliminación (cancel + confirm) |
+
+```vue
+<CrudPageHeader title="Categorías" description="…">
+  <template #actions>
+    <UButton icon="i-lucide-plus" @click="abrirCrear">Nueva categoría</UButton>
+  </template>
+</CrudPageHeader>
+
+<CrudTable :data="items" :columns="columns" :loading="loading">
+  <template #nombre-cell="{ row }">
+    <CrudListItem :title="row.original.nombre" subtitle="…" />
+  </template>
+</CrudTable>
+
+<CrudModal
+  v-model:open="confirmModalOpen"
+  title="Eliminar categoría"
+  message="¿Estás seguro…?"
+  @cancel="confirmDeleteId = null"
+  @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
+/>
+```
+
+Formularios de edición siguen en `AppDrawer` + `UForm`. Referencia completa: `pages/configuracion/categorias.vue`.
+
 ## Iconos (Lucide)
 
 Colección oficial del proyecto: **Lucide** vía Iconify — alineada con la recomendación de Nuxt UI v4.
@@ -222,7 +270,7 @@ These components exemplify correct design system usage:
 - **Dashboard pages**: `frontend/app/pages/index.vue` (UDashboardPanel, semantic tokens)
 - **Auth pages**: `frontend/app/pages/login.vue` (form styling, bg-default, text-default)
 - **Ventas module**: `frontend/app/pages/ventas/index.vue` (historial, UTable, semantic tokens); POS en `ventas/pos.vue`
-- **Items page**: `frontend/app/pages/configuracion/items.vue` (complex modals, semantic tokens)
+- **Config CRUD**: `frontend/app/pages/configuracion/categorias.vue` — `CrudPageHeader`, `CrudTable`, `CrudModal`, `AppDrawer`, `UForm`
 
 When in doubt, reference these files.
 

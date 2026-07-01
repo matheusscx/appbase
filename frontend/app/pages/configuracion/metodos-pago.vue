@@ -88,27 +88,18 @@ const columns: TableColumn<MetodoPago>[] = [
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h2 class="text-lg font-semibold text-default">
-        Métodos de pago
-      </h2>
-      <p class="text-sm text-muted">
-        Habilita los métodos de pago disponibles para tu país e indica cuáles permiten dar vuelto.
-      </p>
-    </div>
+    <CrudPageHeader
+      title="Métodos de pago"
+      description="Habilita los métodos de pago disponibles para tu país e indica cuáles permiten dar vuelto."
+    />
 
-    <UCard>
-      <UTable :data="metodos" :columns="columns" :loading="loading">
-        <template #nombre-cell="{ row }">
-          <div class="min-w-0">
-            <p class="font-medium truncate">
-              {{ row.original.nombre }}
-            </p>
-            <p v-if="row.original.abreviatura" class="text-sm text-muted">
-              {{ row.original.abreviatura }}
-            </p>
-          </div>
-        </template>
+    <CrudTable :data="metodos" :columns="columns" :loading="loading">
+      <template #nombre-cell="{ row }">
+        <CrudListItem
+          :title="row.original.nombre"
+          :subtitle="row.original.abreviatura || undefined"
+        />
+      </template>
 
         <template #permiteVuelto-cell="{ row }">
           <div class="flex items-center justify-end gap-2">
@@ -132,12 +123,11 @@ const columns: TableColumn<MetodoPago>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            No hay métodos de pago disponibles para el país del tenant.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          No hay métodos de pago disponibles para el país del tenant.
+        </div>
+      </template>
+    </CrudTable>
   </div>
 </template>

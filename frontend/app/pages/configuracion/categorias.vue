@@ -170,35 +170,27 @@ const columns: TableColumn<Categoria>[] = [
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-semibold text-default">
-          Categorías
-        </h2>
-        <p class="text-sm text-muted">
-          Clasifica productos y servicios del catálogo.
-        </p>
-      </div>
-      <UButton
-        icon="i-lucide-plus"
-        @click="abrirCrear"
-      >
-        Nueva categoría
-      </UButton>
-    </div>
+    <CrudPageHeader
+      title="Categorías"
+      description="Clasifica productos y servicios del catálogo."
+    >
+      <template #actions>
+        <UButton
+          icon="i-lucide-plus"
+          @click="abrirCrear"
+        >
+          Nueva categoría
+        </UButton>
+      </template>
+    </CrudPageHeader>
 
-    <UCard>
-      <UTable :data="categorias" :columns="columns" :loading="loading">
-        <template #nombre-cell="{ row }">
-          <div class="min-w-0">
-            <p class="font-medium truncate">
-              {{ row.original.nombre }}
-            </p>
-            <p class="text-sm text-muted">
-              Aplica a: {{ aplicaALabel(row.original.aplicaA) }}
-            </p>
-          </div>
-        </template>
+    <CrudTable :data="categorias" :columns="columns" :loading="loading">
+      <template #nombre-cell="{ row }">
+        <CrudListItem
+          :title="row.original.nombre"
+          :subtitle="`Aplica a: ${aplicaALabel(row.original.aplicaA)}`"
+        />
+      </template>
 
         <template #activo-cell="{ row }">
           <div class="flex justify-end">
@@ -227,13 +219,12 @@ const columns: TableColumn<Categoria>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            No hay categorías registradas.
-          </div>
-        </template>
-      </UTable>
-    </UCard>
+      <template #empty>
+        <div class="py-8 text-center text-sm text-muted">
+          No hay categorías registradas.
+        </div>
+      </template>
+    </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">
       <template #header>
@@ -285,29 +276,12 @@ const columns: TableColumn<Categoria>[] = [
       </template>
     </AppDrawer>
 
-    <!-- Modal confirmación eliminar -->
-    <UModal
+    <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar categoría"
-    >
-      <template #body>
-        <p class="text-sm">
-          ¿Estás seguro de que quieres eliminar esta categoría? Esta acción no se puede deshacer.
-        </p>
-      </template>
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="confirmModalOpen = false; confirmDeleteId = null">
-            Cancelar
-          </UButton>
-          <UButton
-            color="error"
-            @click="confirmDeleteId && eliminar(confirmDeleteId)"
-          >
-            Eliminar
-          </UButton>
-        </div>
-      </template>
-    </UModal>
+      message="¿Estás seguro de que quieres eliminar esta categoría? Esta acción no se puede deshacer."
+      @cancel="confirmDeleteId = null"
+      @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
+    />
   </div>
 </template>

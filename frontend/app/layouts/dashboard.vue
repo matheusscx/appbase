@@ -60,7 +60,7 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
   {
     label: 'Configuración',
     icon: 'i-lucide-settings',
-    to: '/configuracion',
+    to: '/configuracion/perfil',
   },
 ])
 </script>

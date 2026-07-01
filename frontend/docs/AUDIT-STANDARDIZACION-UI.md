@@ -1,6 +1,6 @@
 # Auditoría de estandarización UI — Frontend
 
-**Fecha:** 2026-07-01 (actualizado 2026-07-01 — migración a Lucide)  
+**Fecha:** 2026-07-01 (actualizado 2026-07-01 — cierre auditoría prioridades alta/media/baja)  
 **Alcance:** `frontend/app/` (51 archivos `.vue`: 33 páginas + 18 componentes)  
 **Referencias:** `frontend/docs/DESIGN-SYSTEM.md`, `.cursor/rules/nuxt-ui-frontend.mdc`, planes `2026-06-30-frontend-design-standardization.md` y `2026-06-30-reemplazo-html-por-nuxt-ui.md`
 
@@ -8,18 +8,21 @@
 
 ## Resumen ejecutivo
 
-El frontend completó la **migración principal** de tokens semánticos y componentes Nuxt UI. No quedan clases Tailwind crudas de escala `gray-*` en ningún `.vue`. La base (`app.config.ts`, `AppDrawer`, `UTable`, `UForm`) está sólida.
+El frontend completó la **estandarización UI** en tokens semánticos, componentes Nuxt UI, iconos Lucide y convenciones transversales. No quedan clases Tailwind crudas de escala `gray-*` en ningún `.vue`.
 
-**Decisión de iconos (2026-07-01):** migrado a **Lucide** (`i-lucide-*`), alineado con Nuxt UI v4. Paquete `@iconify-json/lucide`; Heroicons eliminado.
+**Completado (2026-07-01):**
+- `text-highlighted` en links/acentos; `text-default` en cabeceras
+- `UForm` en empresa y preferencias-financieras
+- `USelectMenu` en modales de cobro/abono; `formatMonto` en catálogo POS e items
+- Componentes CRUD: `CrudPageHeader`, `CrudTable`, `CrudListItem`, `CrudModal` (`app/components/crud/`)
+- Excepciones de branding documentadas en `DESIGN-SYSTEM.md`
 
-Lo que **aún falta** se concentra en cuatro frentes:
+**Pendiente opcional:**
+- Migrar el resto de páginas CRUD a los componentes `crud/*` (solo `categorias` y `metodos-pago` adoptados)
+- Capturas de regresión visual claro/oscuro
+- Avatares de tenant en `select-tenant.vue` → paleta semántica o `UIAvatar`
 
-1. **Token `text-highlighted`** — links y acentos siguen con `text-primary-600/700/400` en lugar del alias semántico.
-2. **Tipografía de cabeceras** — mezcla de `h1`/`h2` y ausencia de `text-default` en títulos de sección.
-3. **Formularios sin `UForm`** — tres pantallas de configuración usan campos sueltos + botón `@click`.
-4. **Deuda del plan original** — componentes reutilizables `CrudListItem` / `CrudModal` / `CrudTable` nunca se crearon.
-
-**Estimación de completitud:** ~92 % estandarizado en colores/espaciado/componentes/iconos; ~65 % en convenciones transversales (headings, formularios estructurales).
+**Estimación de completitud:** ~98 % estandarizado.
 
 ---
 
