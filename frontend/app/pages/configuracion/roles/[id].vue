@@ -143,7 +143,7 @@ onMounted(cargar)
           </div>
         </template>
 
-        <form class="space-y-4" @submit.prevent="guardarInfo">
+        <UForm :state="info" class="space-y-4" @submit="guardarInfo">
           <UFormField label="Nombre" required>
             <UInput v-model="info.nombre" :disabled="rol.esFijo" />
           </UFormField>
@@ -157,7 +157,7 @@ onMounted(cargar)
           >
             Guardar datos
           </UButton>
-        </form>
+        </UForm>
       </UCard>
 
       <UCard>
