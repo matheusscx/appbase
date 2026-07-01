@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
+import type { TableColumn } from '@nuxt/ui'
+import { getPaginationRowModel } from '@tanstack/vue-table'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -26,8 +28,9 @@ const pagos = ref<PagoLedger[]>([])
 const loading = ref(false)
 const filtroMetodo = ref('')
 const filtroEstado = ref('')
-const page = ref(1)
 const pageSize = 15
+const table = useTemplateRef('table')
+const pagination = ref({ pageIndex: 0, pageSize })
 
 function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
   const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
@@ -77,12 +80,7 @@ const pagosFiltrados = computed(() => {
   return result
 })
 
-watch([filtroMetodo, filtroEstado], () => { page.value = 1 })
-
-const pagosPagina = computed(() => {
-  const start = (page.value - 1) * pageSize
-  return pagosFiltrados.value.slice(start, start + pageSize)
-})
+watch([filtroMetodo, filtroEstado], () => { pagination.value.pageIndex = 0 })
 
 const montoCobrado = computed(() =>
   pagos.value.reduce((acc, p) => {
@@ -112,6 +110,16 @@ async function cargar() {
     loading.value = false
   }
 }
+
+const columns: TableColumn<PagoLedger>[] = [
+  { accessorKey: 'fecha', header: 'Fecha' },
+  { accessorKey: 'metodoNombre', header: 'Método' },
+  { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'vuelto', header: 'Vuelto', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'customerNombre', header: 'Cliente' },
+  { id: 'venta', header: 'Venta' },
+  { accessorKey: 'ventaEstado', header: 'Estado venta' },
+]
 
 onMounted(cargar)
 </script>
@@ -184,64 +192,57 @@ onMounted(cargar)
         </div>
 
         <UCard v-else>
-          <!-- Estado vacío -->
-          <div v-if="pagosFiltrados.length === 0" class="py-10 text-center text-sm text-muted">
-            <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-            {{ hayFiltrosActivos ? 'Ningún pago coincide con los filtros.' : 'Sin pagos registrados.' }}
-          </div>
-
-          <div v-else class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-default text-left text-xs text-muted uppercase tracking-wider">
-                  <th class="py-2 pr-4 font-medium">Fecha</th>
-                  <th class="py-2 pr-4 font-medium">Método</th>
-                  <th class="py-2 pr-4 font-medium text-right">Monto</th>
-                  <th class="py-2 pr-4 font-medium text-right">Vuelto</th>
-                  <th class="py-2 pr-4 font-medium">Cliente</th>
-                  <th class="py-2 pr-4 font-medium">Venta</th>
-                  <th class="py-2 font-medium">Estado venta</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="p in pagosPagina"
-                  :key="p.id"
-                  class="border-b border-default last:border-0"
-                >
-                  <td class="py-2 pr-4 whitespace-nowrap">{{ formatFecha(p.fecha) }}</td>
-                  <td class="py-2 pr-4">{{ p.metodoNombre }}</td>
-                  <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(p.monto) }}</td>
-                  <td class="py-2 pr-4 text-right font-mono text-muted">
-                    {{ p.vuelto && new Decimal(p.vuelto).gt(0) ? formatMonto(p.vuelto) : '—' }}
-                  </td>
-                  <td class="py-2 pr-4 text-muted">{{ p.customerNombre ?? '—' }}</td>
-                  <td class="py-2 pr-4">
-                    <NuxtLink
-                      :to="`/ventas/${p.ventaId}`"
-                      class="text-primary underline-offset-2 hover:underline"
-                    >
-                      Ver
-                    </NuxtLink>
-                  </td>
-                  <td class="py-2">
-                    <UBadge
-                      :color="estadoColor(p.ventaEstado)"
-                      :label="estadoLabel(p.ventaEstado)"
-                      variant="subtle"
-                      size="sm"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <UTable
+            ref="table"
+            v-model:pagination="pagination"
+            :data="pagosFiltrados"
+            :columns="columns"
+            :pagination-options="{ getPaginationRowModel: getPaginationRowModel() }"
+          >
+            <template #fecha-cell="{ row }">
+              <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
+            </template>
+            <template #monto-cell="{ row }">
+              <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
+            </template>
+            <template #vuelto-cell="{ row }">
+              <span class="font-mono text-muted">
+                {{ row.original.vuelto && new Decimal(row.original.vuelto).gt(0) ? formatMonto(row.original.vuelto) : '—' }}
+              </span>
+            </template>
+            <template #customerNombre-cell="{ row }">
+              <span class="text-muted">{{ row.original.customerNombre ?? '—' }}</span>
+            </template>
+            <template #venta-cell="{ row }">
+              <NuxtLink
+                :to="`/ventas/${row.original.ventaId}`"
+                class="text-primary underline-offset-2 hover:underline"
+              >
+                Ver
+              </NuxtLink>
+            </template>
+            <template #ventaEstado-cell="{ row }">
+              <UBadge
+                :color="estadoColor(row.original.ventaEstado)"
+                :label="estadoLabel(row.original.ventaEstado)"
+                variant="subtle"
+                size="sm"
+              />
+            </template>
+            <template #empty>
+              <div class="py-10 text-center text-sm text-muted">
+                <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+                {{ hayFiltrosActivos ? 'Ningún pago coincide con los filtros.' : 'Sin pagos registrados.' }}
+              </div>
+            </template>
+          </UTable>
 
           <div v-if="pagosFiltrados.length > pageSize" class="flex justify-end pt-4">
             <UPagination
-              v-model:page="page"
-              :items-per-page="pageSize"
+              :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
+              :items-per-page="table?.tableApi?.getState().pagination.pageSize"
               :total="pagosFiltrados.length"
+              @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
             />
           </div>
         </UCard>
