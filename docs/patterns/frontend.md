@@ -18,6 +18,8 @@ update optimista con revert y la navegación.
 > - URL base: `useRuntimeConfig().public.apiUrl`.
 > - **Campos decimales/monetarios → string de punta a punta** (ver §7): `UInput`
 >   `inputmode="decimal"`, nunca `type="number"` (emite `number` y rompe `@IsNumberString`).
+> - **Toda página suelta con `layout: 'dashboard'` lleva header** (ver §2): `UDashboardPanel`
+>   con `#header` → `<AppNavbar title="…">` y `#body` → el contenido.
 
 ---
 
@@ -65,8 +67,33 @@ onMounted(cargar)
 ```
 
 > Nota: las páginas de `configuracion/` heredan `middleware`/`layout` del padre
-> `configuracion.vue`. Para una página suelta usar
-> `definePageMeta({ middleware: 'auth', layout: 'dashboard' })`.
+> `configuracion.vue` (que ya provee el header vía `AppNavbar`), así que su
+> `<template>` va directo al contenido sin `UDashboardPanel`.
+>
+> Para una página suelta (no anidada bajo `configuracion.vue`) usar
+> `definePageMeta({ middleware: 'auth', layout: 'dashboard' })` **y** envolver el
+> `<template>` en `UDashboardPanel` para que tenga header — el layout `dashboard.vue`
+> solo aporta el sidebar, cada página es responsable de su propio header:
+>
+> ```vue
+> <template>
+>   <UDashboardPanel>
+>     <template #header>
+>       <AppNavbar title="Historial de ventas" />
+>     </template>
+>     <template #body>
+>       <div class="max-w-5xl mx-auto py-6">
+>         <!-- contenido -->
+>       </div>
+>     </template>
+>   </UDashboardPanel>
+> </template>
+> ```
+>
+> `AppNavbar` (`app/components/AppNavbar.vue`) ya incluye el collapse del sidebar y
+> el `UserMenu` en `#right` — no usar `UDashboardNavbar` directo ni duplicar el
+> `UserMenu` a mano. Todas las páginas bajo `layout: 'dashboard'` deben seguir este
+> esqueleto (ver `pages/index.vue`, `pages/ventas/index.vue`, `pages/caja/index.vue`).
 
 ---
 

@@ -52,25 +52,33 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
 </script>
 
 <template>
-  <div class="max-w-5xl mx-auto space-y-6 py-6">
-    <ULink
-      v-if="puedeVerTodas"
-      to="/caja"
-      class="text-sm text-primary-600 inline-flex items-center gap-1"
-    >
-      <UIcon name="i-heroicons-arrow-left" class="w-4 h-4" />
-      Volver al listado
-    </ULink>
+  <UDashboardPanel>
+    <template #header>
+      <AppNavbar title="Detalle de caja" />
+    </template>
 
-    <div v-if="loading" class="py-12 text-center text-sm text-muted">
-      <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
-      Cargando…
-    </div>
+    <template #body>
+      <div class="max-w-5xl mx-auto space-y-6 py-6">
+        <ULink
+          v-if="puedeVerTodas"
+          to="/caja"
+          class="text-sm text-primary-600 inline-flex items-center gap-1"
+        >
+          <UIcon name="i-heroicons-arrow-left" class="w-4 h-4" />
+          Volver al listado
+        </ULink>
 
-    <div v-else-if="cajaStore.detalle" class="space-y-6">
-      <CajaActivaDashboard :caja="cajaStore.detalle" :readonly="readonly" />
-      <USeparator class="my-2" />
-      <CajaHistorial :usuario-id="cajaStore.detalle.usuarioId ?? undefined" />
-    </div>
-  </div>
+        <div v-if="loading" class="py-12 text-center text-sm text-muted">
+          <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+          Cargando…
+        </div>
+
+        <div v-else-if="cajaStore.detalle" class="space-y-6">
+          <CajaActivaDashboard :caja="cajaStore.detalle" :readonly="readonly" />
+          <USeparator class="my-2" />
+          <CajaHistorial :usuario-id="cajaStore.detalle.usuarioId ?? undefined" />
+        </div>
+      </div>
+    </template>
+  </UDashboardPanel>
 </template>

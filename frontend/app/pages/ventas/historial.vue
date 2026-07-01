@@ -60,49 +60,53 @@ function estadoLabel(estado: string): string {
 </script>
 
 <template>
-  <UCard>
+  <UDashboardPanel>
     <template #header>
-      <h2 class="text-lg font-semibold">
-        Historial de ventas
-      </h2>
+      <AppNavbar title="Historial de ventas" />
     </template>
 
-    <div v-if="loading" class="text-center text-muted py-8">
-      Cargando...
-    </div>
-    <div v-else-if="!ventas.length" class="text-center text-muted py-8">
-      No hay ventas registradas
-    </div>
-    <div v-else class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-default text-left text-muted">
-            <th class="py-2 pr-4">Fecha</th>
-            <th class="py-2 pr-4">Canal</th>
-            <th class="py-2 pr-4">Estado</th>
-            <th class="py-2 pr-4 text-right">Total</th>
-            <th class="py-2 pr-4 text-right">Pagado</th>
-            <th class="py-2 text-right">Saldo</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="v in ventas"
-            :key="v.id"
-            class="border-b border-default hover:bg-elevated cursor-pointer"
-            @click="navigateTo(`/ventas/${v.id}`)"
-          >
-            <td class="py-2 pr-4">{{ formatFecha(v.fecha) }}</td>
-            <td class="py-2 pr-4 capitalize">{{ v.canal }}</td>
-            <td class="py-2 pr-4">
-              <UBadge :color="estadoColor(v.estado)" :label="estadoLabel(v.estado)" variant="subtle" />
-            </td>
-            <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(v.totalFinal) }}</td>
-            <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(v.montoPagado) }}</td>
-            <td class="py-2 text-right font-mono">{{ formatMonto(v.saldo) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </UCard>
+    <template #body>
+      <div class="max-w-5xl mx-auto py-6">
+        <UCard>
+          <div v-if="loading" class="text-center text-muted py-8">
+            Cargando...
+          </div>
+          <div v-else-if="!ventas.length" class="text-center text-muted py-8">
+            No hay ventas registradas
+          </div>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-default text-left text-muted">
+                  <th class="py-2 pr-4">Fecha</th>
+                  <th class="py-2 pr-4">Canal</th>
+                  <th class="py-2 pr-4">Estado</th>
+                  <th class="py-2 pr-4 text-right">Total</th>
+                  <th class="py-2 pr-4 text-right">Pagado</th>
+                  <th class="py-2 text-right">Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="v in ventas"
+                  :key="v.id"
+                  class="border-b border-default hover:bg-elevated cursor-pointer"
+                  @click="navigateTo(`/ventas/${v.id}`)"
+                >
+                  <td class="py-2 pr-4">{{ formatFecha(v.fecha) }}</td>
+                  <td class="py-2 pr-4 capitalize">{{ v.canal }}</td>
+                  <td class="py-2 pr-4">
+                    <UBadge :color="estadoColor(v.estado)" :label="estadoLabel(v.estado)" variant="subtle" />
+                  </td>
+                  <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(v.totalFinal) }}</td>
+                  <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(v.montoPagado) }}</td>
+                  <td class="py-2 text-right font-mono">{{ formatMonto(v.saldo) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </UCard>
+      </div>
+    </template>
+  </UDashboardPanel>
 </template>

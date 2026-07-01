@@ -115,180 +115,186 @@ function estadoLabel(estado: string): string {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <!-- Header row: back + title + estado -->
-    <div class="flex items-center gap-3">
-      <UButton
-        icon="i-heroicons-arrow-left"
-        color="neutral"
-        variant="ghost"
-        label="Volver"
-        @click="navigateTo('/ventas/historial')"
-      />
-      <h1 class="text-lg font-semibold flex-1">
-        Detalle de venta
-      </h1>
-      <UBadge
-        v-if="venta"
-        :color="estadoColor(venta.estado)"
-        :label="estadoLabel(venta.estado)"
-        variant="subtle"
-        size="md"
-      />
-    </div>
-
-    <!-- Loading -->
-    <div v-if="loading" class="text-center text-muted py-12">
-      Cargando...
-    </div>
-
-    <template v-else-if="venta">
-      <!-- Metadata -->
-      <UCard>
-        <template #header>
-          <h2 class="text-base font-semibold">Información general</h2>
-        </template>
-        <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
-          <div>
-            <dt class="text-muted">Fecha</dt>
-            <dd class="font-medium">{{ formatFecha(venta.fecha) }}</dd>
-          </div>
-          <div>
-            <dt class="text-muted">Canal</dt>
-            <dd class="font-medium capitalize">{{ venta.canal }}</dd>
-          </div>
-          <div v-if="venta.customer">
-            <dt class="text-muted">Cliente</dt>
-            <dd class="font-medium">
-              {{ venta.customer.nombre }}
-              <span v-if="venta.customer.rut" class="text-muted ml-1">({{ venta.customer.rut }})</span>
-            </dd>
-          </div>
-        </dl>
-      </UCard>
-
-      <!-- Detalles table -->
-      <UCard>
-        <template #header>
-          <h2 class="text-base font-semibold">Líneas de venta</h2>
-        </template>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="border-b border-default text-left text-muted">
-                <th class="py-2 pr-4">Descripción</th>
-                <th class="py-2 pr-4 text-right">Cantidad</th>
-                <th class="py-2 pr-4 text-right">Precio unit.</th>
-                <th class="py-2 text-right">Total línea</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="d in venta.detalles"
-                :key="d.id"
-                class="border-b border-default last:border-0"
-              >
-                <td class="py-2 pr-4">{{ d.descripcion }}</td>
-                <td class="py-2 pr-4 text-right font-mono">{{ d.cantidad }}</td>
-                <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(d.precioUnitario) }}</td>
-                <td class="py-2 text-right font-mono">{{ formatMonto(d.totalLinea) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </UCard>
-
-      <!-- Totals + Pagos + Saldo -->
-      <div class="grid gap-4 md:grid-cols-2">
-        <!-- Totals -->
-        <UCard>
-          <template #header>
-            <h2 class="text-base font-semibold">Totales</h2>
-          </template>
-          <dl class="space-y-2 text-sm">
-            <div class="flex justify-between">
-              <dt class="text-muted">Subtotal bruto</dt>
-              <dd class="font-mono">{{ formatMonto(venta.totalBruto) }}</dd>
-            </div>
-            <div class="flex justify-between">
-              <dt class="text-muted">Descuentos</dt>
-              <dd class="font-mono text-green-600 dark:text-green-400">
-                -{{ formatMonto(venta.totalDescuentos) }}
-              </dd>
-            </div>
-            <div class="flex justify-between">
-              <dt class="text-muted">Recargos</dt>
-              <dd class="font-mono">{{ formatMonto(venta.totalRecargos) }}</dd>
-            </div>
-            <div class="flex justify-between">
-              <dt class="text-muted">Impuestos</dt>
-              <dd class="font-mono">{{ formatMonto(venta.totalImpuestos) }}</dd>
-            </div>
-            <div class="flex justify-between border-t border-default pt-2 font-semibold">
-              <dt>Total final</dt>
-              <dd class="font-mono">{{ formatMonto(venta.totalFinal) }}</dd>
-            </div>
-          </dl>
-        </UCard>
-
-        <!-- Pagos + Saldo -->
-        <UCard>
-          <template #header>
-            <h2 class="text-base font-semibold">Pagos</h2>
-          </template>
-
-          <div v-if="!venta.pagos.length" class="text-sm text-muted py-2">
-            Sin pagos registrados
-          </div>
-          <ul v-else class="divide-y divide-default text-sm mb-4">
-            <li
-              v-for="(p, i) in venta.pagos"
-              :key="p.id"
-              class="py-2 flex justify-between gap-2"
-            >
-              <span class="text-muted">Pago {{ i + 1 }}</span>
-              <span class="font-mono">{{ formatMonto(p.monto) }}</span>
-              <span v-if="p.vuelto && new Decimal(p.vuelto).gt(0)" class="text-muted text-xs">
-                (vuelto: {{ formatMonto(p.vuelto) }})
-              </span>
-              <span class="text-muted text-xs">{{ formatFecha(p.fecha) }}</span>
-            </li>
-          </ul>
-
-          <div class="border-t border-default pt-3 space-y-1 text-sm">
-            <div class="flex justify-between">
-              <span class="text-muted">Monto pagado</span>
-              <span class="font-mono font-medium">{{ formatMonto(montoPagado) }}</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-muted">Saldo pendiente</span>
-              <span class="font-mono font-medium" :class="new Decimal(saldo).gt(0) ? 'text-warning' : ''">
-                {{ formatMonto(saldo) }}
-              </span>
-            </div>
-          </div>
-
-          <div v-if="puedeAbonar" class="mt-4">
-            <PagosAbonoModal
-              v-model:open="abonoOpen"
-              :venta-id="venta?.id ?? ''"
-              :saldo="saldo"
-              :metodos="metodos"
-              @success="onAbonoSuccess"
-            />
-            <UButton
-              label="Registrar pago"
-              icon="i-heroicons-plus"
-              class="w-full"
-              @click="abonoOpen = true"
-            />
-          </div>
-        </UCard>
-      </div>
+  <UDashboardPanel>
+    <template #header>
+      <AppNavbar title="Detalle de venta" />
     </template>
 
-    <div v-else class="text-center text-muted py-12">
-      No se encontró la venta.
-    </div>
-  </div>
+    <template #body>
+      <div class="max-w-5xl mx-auto space-y-4 py-6">
+        <!-- Header row: back + estado -->
+        <div class="flex items-center gap-3">
+          <UButton
+            icon="i-heroicons-arrow-left"
+            color="neutral"
+            variant="ghost"
+            label="Volver"
+            @click="navigateTo('/ventas/historial')"
+          />
+          <div class="flex-1" />
+          <UBadge
+            v-if="venta"
+            :color="estadoColor(venta.estado)"
+            :label="estadoLabel(venta.estado)"
+            variant="subtle"
+            size="md"
+          />
+        </div>
+
+        <!-- Loading -->
+        <div v-if="loading" class="text-center text-muted py-12">
+          Cargando...
+        </div>
+
+        <template v-else-if="venta">
+          <!-- Metadata -->
+          <UCard>
+            <template #header>
+              <h2 class="text-base font-semibold">Información general</h2>
+            </template>
+            <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+              <div>
+                <dt class="text-muted">Fecha</dt>
+                <dd class="font-medium">{{ formatFecha(venta.fecha) }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">Canal</dt>
+                <dd class="font-medium capitalize">{{ venta.canal }}</dd>
+              </div>
+              <div v-if="venta.customer">
+                <dt class="text-muted">Cliente</dt>
+                <dd class="font-medium">
+                  {{ venta.customer.nombre }}
+                  <span v-if="venta.customer.rut" class="text-muted ml-1">({{ venta.customer.rut }})</span>
+                </dd>
+              </div>
+            </dl>
+          </UCard>
+
+          <!-- Detalles table -->
+          <UCard>
+            <template #header>
+              <h2 class="text-base font-semibold">Líneas de venta</h2>
+            </template>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-default text-left text-muted">
+                    <th class="py-2 pr-4">Descripción</th>
+                    <th class="py-2 pr-4 text-right">Cantidad</th>
+                    <th class="py-2 pr-4 text-right">Precio unit.</th>
+                    <th class="py-2 text-right">Total línea</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="d in venta.detalles"
+                    :key="d.id"
+                    class="border-b border-default last:border-0"
+                  >
+                    <td class="py-2 pr-4">{{ d.descripcion }}</td>
+                    <td class="py-2 pr-4 text-right font-mono">{{ d.cantidad }}</td>
+                    <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(d.precioUnitario) }}</td>
+                    <td class="py-2 text-right font-mono">{{ formatMonto(d.totalLinea) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </UCard>
+
+          <!-- Totals + Pagos + Saldo -->
+          <div class="grid gap-4 md:grid-cols-2">
+            <!-- Totals -->
+            <UCard>
+              <template #header>
+                <h2 class="text-base font-semibold">Totales</h2>
+              </template>
+              <dl class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                  <dt class="text-muted">Subtotal bruto</dt>
+                  <dd class="font-mono">{{ formatMonto(venta.totalBruto) }}</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-muted">Descuentos</dt>
+                  <dd class="font-mono text-green-600 dark:text-green-400">
+                    -{{ formatMonto(venta.totalDescuentos) }}
+                  </dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-muted">Recargos</dt>
+                  <dd class="font-mono">{{ formatMonto(venta.totalRecargos) }}</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-muted">Impuestos</dt>
+                  <dd class="font-mono">{{ formatMonto(venta.totalImpuestos) }}</dd>
+                </div>
+                <div class="flex justify-between border-t border-default pt-2 font-semibold">
+                  <dt>Total final</dt>
+                  <dd class="font-mono">{{ formatMonto(venta.totalFinal) }}</dd>
+                </div>
+              </dl>
+            </UCard>
+
+            <!-- Pagos + Saldo -->
+            <UCard>
+              <template #header>
+                <h2 class="text-base font-semibold">Pagos</h2>
+              </template>
+
+              <div v-if="!venta.pagos.length" class="text-sm text-muted py-2">
+                Sin pagos registrados
+              </div>
+              <ul v-else class="divide-y divide-default text-sm mb-4">
+                <li
+                  v-for="(p, i) in venta.pagos"
+                  :key="p.id"
+                  class="py-2 flex justify-between gap-2"
+                >
+                  <span class="text-muted">Pago {{ i + 1 }}</span>
+                  <span class="font-mono">{{ formatMonto(p.monto) }}</span>
+                  <span v-if="p.vuelto && new Decimal(p.vuelto).gt(0)" class="text-muted text-xs">
+                    (vuelto: {{ formatMonto(p.vuelto) }})
+                  </span>
+                  <span class="text-muted text-xs">{{ formatFecha(p.fecha) }}</span>
+                </li>
+              </ul>
+
+              <div class="border-t border-default pt-3 space-y-1 text-sm">
+                <div class="flex justify-between">
+                  <span class="text-muted">Monto pagado</span>
+                  <span class="font-mono font-medium">{{ formatMonto(montoPagado) }}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-muted">Saldo pendiente</span>
+                  <span class="font-mono font-medium" :class="new Decimal(saldo).gt(0) ? 'text-warning' : ''">
+                    {{ formatMonto(saldo) }}
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="puedeAbonar" class="mt-4">
+                <PagosAbonoModal
+                  v-model:open="abonoOpen"
+                  :venta-id="venta?.id ?? ''"
+                  :saldo="saldo"
+                  :metodos="metodos"
+                  @success="onAbonoSuccess"
+                />
+                <UButton
+                  label="Registrar pago"
+                  icon="i-heroicons-plus"
+                  class="w-full"
+                  @click="abonoOpen = true"
+                />
+              </div>
+            </UCard>
+          </div>
+        </template>
+
+        <div v-else class="text-center text-muted py-12">
+          No se encontró la venta.
+        </div>
+      </div>
+    </template>
+  </UDashboardPanel>
 </template>
