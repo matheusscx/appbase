@@ -117,6 +117,8 @@ Separación header/body/footer con `divide-y divide-accented` (mismo tono gris q
 
 **Acciones siempre en `#actions`** — footer fijo al fondo; el body scrollea. Cancelar primero (izquierda), acción primaria después (derecha). Enlazar submit con `form="id-del-form"` en el botón.
 
+**Permisos por módulo** — usar `RolPermisosPorModulo`: acordeón (`UAccordion`, `type="multiple"`) por módulo con contador `N/M` en el header, buscador por nombre, checkboxes en columna (permisos con nombres largos).
+
 ## Migration Checklist
 
 When adding a new page or updating an existing one:

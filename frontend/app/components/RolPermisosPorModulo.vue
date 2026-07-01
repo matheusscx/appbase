@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AccordionItem } from '@nuxt/ui'
+
 export interface ModuloDisponible {
   moduloTenantId: string
   moduloAppId: string
@@ -7,7 +9,7 @@ export interface ModuloDisponible {
   permisos: { moduloAppPermisoId: string, permisoNombre: string }[]
 }
 
-defineProps<{
+const props = defineProps<{
   modulos: ModuloDisponible[]
   seleccionados: Set<string>
   disabled?: boolean
@@ -18,6 +20,46 @@ defineProps<{
 const emit = defineEmits<{
   toggle: [id: string, value: boolean | 'indeterminate']
 }>()
+
+const busqueda = ref('')
+
+const modulosFiltrados = computed(() => {
+  const q = busqueda.value.trim().toLowerCase()
+  if (!q) return props.modulos
+  return props.modulos.filter(m => m.nombre.toLowerCase().includes(q))
+})
+
+function conteoModulo(modulo: ModuloDisponible) {
+  const total = modulo.permisos.length
+  const sel = modulo.permisos.filter(p => props.seleccionados.has(p.moduloAppPermisoId)).length
+  return { sel, total }
+}
+
+function moduloPorId(id: string) {
+  return props.modulos.find(m => m.moduloTenantId === id)
+}
+
+function conteoPorId(id: string) {
+  const modulo = moduloPorId(id)
+  return modulo ? conteoModulo(modulo) : null
+}
+
+function conteoLabel(id: string) {
+  const c = conteoPorId(id)
+  return c ? `${c.sel}/${c.total}` : ''
+}
+
+const accordionItems = computed<AccordionItem[]>(() =>
+  modulosFiltrados.value.map(modulo => ({
+    label: modulo.nombre,
+    icon: modulo.icono ?? undefined,
+    value: modulo.moduloTenantId,
+  })),
+)
+
+watch(() => props.modulos, () => {
+  busqueda.value = ''
+})
 </script>
 
 <template>
@@ -37,29 +79,58 @@ const emit = defineEmits<{
 
   <div
     v-else
-    class="space-y-6"
+    class="space-y-4"
   >
-    <div
-      v-for="modulo in modulos"
-      :key="modulo.moduloTenantId"
+    <UInput
+      v-model="busqueda"
+      icon="i-heroicons-magnifying-glass"
+      placeholder="Buscar módulo…"
+      color="neutral"
+      variant="outline"
+      :ui="{ root: 'w-full' }"
+    />
+
+    <p
+      v-if="!accordionItems.length"
+      class="py-2 text-sm text-muted"
     >
-      <div class="mb-2 flex items-center gap-2">
-        <UIcon
-          v-if="modulo.icono"
-          :name="modulo.icono"
-          class="h-4 w-4"
-        />
-        <span class="font-medium text-default">{{ modulo.nombre }}</span>
-      </div>
-      <div class="flex flex-wrap gap-4 pl-1">
-        <UCheckbox
-          v-for="permiso in modulo.permisos"
-          :key="permiso.moduloAppPermisoId"
-          :label="permiso.permisoNombre"
-          :model-value="seleccionados.has(permiso.moduloAppPermisoId)"
-          @update:model-value="(v: boolean | 'indeterminate') => emit('toggle', permiso.moduloAppPermisoId, v)"
-        />
-      </div>
-    </div>
+      Ningún módulo coincide con «{{ busqueda.trim() }}».
+    </p>
+
+    <UAccordion
+      v-else
+      type="multiple"
+      :items="accordionItems"
+      :unmount-on-hide="false"
+      :ui="{
+        root: 'divide-y divide-accented rounded-md border border-accented',
+        trigger: 'px-4 gap-2',
+        body: 'px-4 pb-4',
+      }"
+    >
+      <template #trailing="{ item }">
+        <span
+          v-if="conteoLabel(String(item.value))"
+          class="text-xs tabular-nums text-muted"
+        >
+          {{ conteoLabel(String(item.value)) }}
+        </span>
+      </template>
+
+      <template #body="{ item }">
+        <div
+          v-if="moduloPorId(String(item.value))"
+          class="flex flex-col gap-3"
+        >
+          <UCheckbox
+            v-for="permiso in moduloPorId(String(item.value))!.permisos"
+            :key="permiso.moduloAppPermisoId"
+            :label="permiso.permisoNombre"
+            :model-value="seleccionados.has(permiso.moduloAppPermisoId)"
+            @update:model-value="(v: boolean | 'indeterminate') => emit('toggle', permiso.moduloAppPermisoId, v)"
+          />
+        </div>
+      </template>
+    </UAccordion>
   </div>
 </template>
