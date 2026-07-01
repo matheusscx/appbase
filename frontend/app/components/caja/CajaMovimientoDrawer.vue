@@ -72,7 +72,7 @@ async function guardar() {
               block
               class="flex-1"
               :variant="form.tipo === 'entrada' ? 'soft' : 'outline'"
-              :color="form.tipo === 'entrada' ? 'success' : 'neutral'"
+              color="success"
               icon="i-lucide-circle-arrow-down"
               label="Entrada"
               @click="form.tipo = 'entrada'"
@@ -82,7 +82,7 @@ async function guardar() {
               block
               class="flex-1"
               :variant="form.tipo === 'salida' ? 'soft' : 'outline'"
-              :color="form.tipo === 'salida' ? 'error' : 'neutral'"
+              color="error"
               icon="i-lucide-circle-arrow-up"
               label="Salida"
               @click="form.tipo = 'salida'"

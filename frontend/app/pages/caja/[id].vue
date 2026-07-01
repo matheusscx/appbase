@@ -59,16 +59,20 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
 
     <template #body>
       <div class="max-w-5xl mx-auto space-y-6 py-6">
-        <div v-if="puedeVerTodas" class="flex flex-wrap items-center gap-4">
+        <div
+          v-if="!loading && cajaStore.detalle"
+          class="flex flex-wrap items-center gap-4"
+        >
           <ULink
+            v-if="puedeVerTodas || readonly"
             to="/caja"
             class="text-sm text-highlighted inline-flex items-center gap-1"
           >
             <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
-            Volver al listado
+            {{ puedeVerTodas ? 'Volver al listado' : 'Volver a caja' }}
           </ULink>
           <ULink
-            v-if="cajaStore.detalle?.usuarioId"
+            v-if="puedeVerTodas && cajaStore.detalle.usuarioId"
             :to="{
               path: '/caja/historial',
               query: { usuarioId: cajaStore.detalle.usuarioId },
@@ -77,6 +81,14 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
           >
             <UIcon name="i-lucide-history" class="w-4 h-4" />
             Ver historial del cajero
+          </ULink>
+          <ULink
+            v-else
+            to="/caja/historial"
+            class="text-sm text-highlighted inline-flex items-center gap-1"
+          >
+            <UIcon name="i-lucide-history" class="w-4 h-4" />
+            Ver historial
           </ULink>
         </div>
 

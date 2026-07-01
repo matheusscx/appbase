@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const emit = defineEmits<{ opened: [] }>()
+const emit = defineEmits<{ opened: [cajaId: string] }>()
 
 const cajaStore = useCajaStore()
 const toast = useToast()
@@ -17,13 +17,13 @@ async function abrir() {
   }
   saving.value = true
   try {
-    await cajaStore.abrir({
+    const caja = await cajaStore.abrir({
       saldoInicial: form.value.saldoInicial,
       comentario: form.value.comentario || undefined,
     })
     toast.add({ title: 'Caja abierta correctamente', color: 'success' })
     form.value = { saldoInicial: '', comentario: '' }
-    emit('opened')
+    emit('opened', caja.id)
   }
   catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al abrir la caja'

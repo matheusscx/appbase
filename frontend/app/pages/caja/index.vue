@@ -32,15 +32,24 @@ onMounted(async () => {
   }
 
   // Sin permiso de ver todas: despachar a la caja propia si está abierta
-  if (!puedeVerTodas.value && cajaStore.activa) {
+  if (!puedeVerTodas.value && cajaStore.activa?.id) {
     await navigateTo(`/caja/${cajaStore.activa.id}`, { replace: true })
   }
 })
 
-async function onOpened(): Promise<void> {
-  if (cajaStore.activa) {
-    await navigateTo(`/caja/${cajaStore.activa.id}`)
-  }
+// Red de seguridad: tras abrir, activa se setea antes de que onOpened navegue;
+// si la navegación falla, evita quedar en "Redirigiendo…" sin salida.
+watch(
+  () => cajaStore.activa?.id,
+  (cajaId) => {
+    if (!puedeVerTodas.value && cajaId) {
+      navigateTo(`/caja/${cajaId}`, { replace: true })
+    }
+  },
+)
+
+async function onOpened(cajaId: string): Promise<void> {
+  await navigateTo(`/caja/${cajaId}`, { replace: true })
 }
 </script>
 
@@ -63,15 +72,31 @@ async function onOpened(): Promise<void> {
 
         <!-- Con permiso Ver todas: listado de cajas (con card de apertura si no hay propia) -->
         <template v-else-if="puedeVerTodas">
+          <div class="flex justify-end">
+            <UButton
+              to="/caja/historial"
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-history"
+              label="Ver historial"
+            />
+          </div>
           <CajaAbiertasGrid />
         </template>
 
-        <!-- Sin permiso Ver todas y sin caja abierta: mostrar formulario de apertura + historial -->
+        <!-- Sin permiso Ver todas y sin caja abierta: apertura + link al historial -->
         <template v-else-if="!cajaStore.activa">
           <div class="space-y-6">
+            <div class="flex justify-end">
+              <UButton
+                to="/caja/historial"
+                variant="outline"
+                color="neutral"
+                icon="i-lucide-history"
+                label="Ver historial"
+              />
+            </div>
             <CajaAperturaForm @opened="onOpened" />
-            <USeparator class="my-2" />
-            <CajaHistorial />
           </div>
         </template>
 

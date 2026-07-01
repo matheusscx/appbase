@@ -28,11 +28,12 @@ const cajasOrdenadas = computed(() =>
 
 const { formatMonto, formatFecha } = useFormatters()
 
-function onOpened(): void {
+async function onOpened(cajaId: string): Promise<void> {
   aperturaModalOpen.value = false
-  if (cajaStore.activa) {
-    navigateTo(`/caja/${cajaStore.activa.id}`)
-  }
+  await Promise.all([
+    cajaStore.cargarAbiertas(),
+    navigateTo(`/caja/${cajaId}`),
+  ])
 }
 </script>
 

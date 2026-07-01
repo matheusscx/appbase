@@ -381,8 +381,8 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 ### Pages
 
 - `pages/caja/index.vue` — Pantalla principal con dos modos según permisos:
-  - **Sin `Ver todas`**: sin caja abierta → formulario de apertura + historial embebido; con caja abierta → redirect a `/caja/[id]`
-  - **Con `Ver todas`**: grid de cajas abiertas (`CajaAbiertasGrid`)
+  - **Sin `Ver todas`**: sin caja abierta → formulario de apertura + botón "Ver historial" → `/caja/historial`; con caja abierta → redirect a `/caja/[id]`
+  - **Con `Ver todas`**: botón "Ver historial" → `/caja/historial` + grid de cajas abiertas (`CajaAbiertasGrid`)
 - `pages/caja/historial.vue` — Historial paginado de sesiones de caja (`CajaHistorial`). Soporta `?usuarioId=` para filtrar por cajero (desde detalle admin). Toggle "Ver todas" para supervisores.
 - `pages/caja/[id].vue` — Detalle de un turno: KPIs + tabla de movimientos (`CajaActivaDashboard`). Modo read-only si la caja no es la propia activa. Admin: links "Volver al listado" y "Ver historial del cajero". Sin historial embebido (evita tablas duplicadas). 403/404 → redirect a `/caja`.
 
@@ -561,7 +561,7 @@ npm run test:e2e -- caja.e2e.spec.ts
 5. Agregar movimientos entrada/salida → verificar saldo esperado actualizado
 6. Intentar salida mayor al saldo → verificar error
 7. Cerrar caja → verificar cuadre (diferencia)
-8. `/caja` muestra formulario de apertura y historial (cajero sin caja)
+8. `/caja` (cajero sin caja): formulario de apertura + botón "Ver historial" → `/caja/historial`
 9. Admin en `/caja`: grid de abiertas
 10. `/caja/historial`: toggle "Ver todas"; click en fila → `/caja/[id]`
 11. `/caja/[id]` (admin): una sola tabla de movimientos; link "Ver historial del cajero" con `?usuarioId=`

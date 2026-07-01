@@ -79,6 +79,21 @@ describe('useCajaStore — cargarActiva', () => {
     expect(store.activa).toBeNull()
   })
 
+  it('abrir setea activa con la respuesta del POST sin depender de GET /activa', async () => {
+    const store = useCajaStore()
+    mockApiFetch.mockResolvedValueOnce(CAJA)
+
+    const result = await store.abrir({ saldoInicial: '1000.0000' })
+
+    expect(result).toEqual(CAJA)
+    expect(store.activa).toEqual(CAJA)
+    expect(mockApiFetch).toHaveBeenCalledTimes(1)
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/caja/abrir',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
   it('loadingActiva es true durante la llamada y false al terminar', async () => {
     const store = useCajaStore()
     let loadingDuringCall = false

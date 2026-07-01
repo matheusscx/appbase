@@ -71,12 +71,14 @@ export const useCajaStore = defineStore('caja', () => {
     }
   }
 
-  async function abrir(payload: { saldoInicial: string, comentario?: string }): Promise<void> {
-    await useApiFetch<Caja>(
+  async function abrir(payload: { saldoInicial: string, comentario?: string }): Promise<Caja> {
+    const caja = await useApiFetch<Caja>(
       `${config.public.apiUrl}/caja/abrir`,
       { method: 'POST', body: payload },
     )
-    await cargarActiva()
+    // Usar la respuesta del POST: evita depender de GET /activa justo después del write.
+    activa.value = caja && typeof caja === 'object' ? caja : null
+    return caja
   }
 
   async function cargarResumenTurno(cajaId: string): Promise<void> {
