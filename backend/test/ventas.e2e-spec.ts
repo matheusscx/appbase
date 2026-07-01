@@ -255,15 +255,32 @@ describe('Ventas (e2e)', () => {
       ventaId = (res.body as VentaResponse).id;
     });
 
-    it('lista las ventas del tenant', async () => {
+    it('lista las ventas del tenant con paginación', async () => {
       const res = await request(app.getHttpServer())
-        .get('/api/ventas')
+        .get('/api/ventas?page=1&pageSize=15')
         .set('Authorization', `Bearer ${token}`);
 
-      const lista = res.body as unknown[];
+      const body = res.body as { data: unknown[]; meta: { total: number } };
       expect(res.status).toBe(200);
-      expect(Array.isArray(lista)).toBe(true);
-      expect(lista.length).toBeGreaterThan(0);
+      expect(Array.isArray(body.data)).toBe(true);
+      expect(body.data.length).toBeGreaterThan(0);
+      expect(body.meta.total).toBeGreaterThan(0);
+    });
+
+    it('GET /ventas/resumen retorna KPIs del tenant', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/ventas/resumen')
+        .set('Authorization', `Bearer ${token}`);
+
+      const body = res.body as {
+        totalVentas: number;
+        totalFacturado: string;
+        saldoPendiente: string;
+      };
+      expect(res.status).toBe(200);
+      expect(body.totalVentas).toBeGreaterThan(0);
+      expect(body.totalFacturado).toBeDefined();
+      expect(body.saldoPendiente).toBeDefined();
     });
 
     it('expande todos los campos en GET /ventas/:id', async () => {

@@ -2,7 +2,6 @@
 import Decimal from 'decimal.js'
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
-import { getPaginationRowModel } from '@tanstack/vue-table'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -17,6 +16,12 @@ interface VentaResumen {
   creadoEl: string
 }
 
+interface VentasResumenKpi {
+  totalVentas: number
+  totalFacturado: string
+  saldoPendiente: string
+}
+
 const config = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
@@ -25,13 +30,25 @@ const apiUrl = config.public.apiUrl
 const route = useRoute()
 const router = useRouter()
 
-const ventas = ref<VentaResumen[]>([])
-const loading = ref(false)
-const filtroEstado = ref('')
-const filtroCanal = ref('')
-const pageSize = 15
-const table = useTemplateRef('table')
-const pagination = ref({ pageIndex: 0, pageSize })
+const { pageSize } = useUserPreferences()
+
+const filtroEstado = ref<string | undefined>()
+const filtroCanal = ref<string | undefined>()
+
+const listFilters = computed(() => ({
+  estado: filtroEstado.value,
+  canal: filtroCanal.value,
+}))
+
+const { items: ventas, meta, page, loading, fetch: recargarLista } =
+  usePaginatedList<VentaResumen>({
+    path: '/ventas',
+    pageSize,
+    filters: listFilters,
+  })
+
+const resumen = ref<VentasResumenKpi | null>(null)
+const loadingResumen = ref(false)
 
 const drawerOpen = ref(false)
 const ventaSeleccionadaId = ref<string | null>(null)
@@ -86,39 +103,26 @@ const canalOptions = [
 const hayFiltrosActivos = computed(() => !!filtroEstado.value || !!filtroCanal.value)
 
 function limpiarFiltros() {
-  filtroEstado.value = ''
-  filtroCanal.value = ''
+  filtroEstado.value = undefined
+  filtroCanal.value = undefined
 }
 
-const ventasFiltradas = computed(() => {
-  let result = ventas.value
-  if (filtroEstado.value) result = result.filter(v => v.estado === filtroEstado.value)
-  if (filtroCanal.value) result = result.filter(v => v.canal === filtroCanal.value)
-  return result
-})
-
-watch([filtroEstado, filtroCanal], () => { pagination.value.pageIndex = 0 })
-
-const totalFacturado = computed(() =>
-  ventas.value.reduce((acc, v) => acc.plus(new Decimal(v.totalFinal)), new Decimal(0)),
-)
-
-const saldoPendiente = computed(() =>
-  ventas.value.reduce((acc, v) => acc.plus(new Decimal(v.saldo)), new Decimal(0)),
-)
-
-async function cargar() {
-  loading.value = true
+async function cargarResumen() {
+  loadingResumen.value = true
   try {
-    ventas.value = await useApiFetch<VentaResumen[]>(`${apiUrl}/ventas`)
+    resumen.value = await useApiFetch<VentasResumenKpi>(`${apiUrl}/ventas/resumen`)
   }
   catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar ventas', color: 'error' })
+    toast.add({ title: msg ?? 'Error al cargar resumen', color: 'error' })
   }
   finally {
-    loading.value = false
+    loadingResumen.value = false
   }
+}
+
+async function cargar() {
+  await Promise.all([recargarLista(), cargarResumen()])
 }
 
 function abrirDetalle(ventaId: string) {
@@ -149,7 +153,7 @@ function abrirDesdeQuery() {
 }
 
 onMounted(() => {
-  cargar()
+  cargarResumen()
   abrirDesdeQuery()
 })
 
@@ -183,7 +187,12 @@ const columns: TableColumn<VentaResumen>[] = [
               Ventas registradas
             </p>
             <p class="text-lg font-semibold mt-1">
-              {{ ventas.length }}
+              <template v-if="loadingResumen">
+                —
+              </template>
+              <template v-else>
+                {{ resumen?.totalVentas ?? 0 }}
+              </template>
             </p>
           </div>
           <div class="rounded-lg bg-success/10 p-3">
@@ -191,7 +200,12 @@ const columns: TableColumn<VentaResumen>[] = [
               Total facturado
             </p>
             <p class="text-lg font-semibold text-success mt-1">
-              {{ formatMonto(totalFacturado) }}
+              <template v-if="loadingResumen">
+                —
+              </template>
+              <template v-else>
+                {{ formatMonto(resumen?.totalFacturado ?? '0') }}
+              </template>
             </p>
           </div>
           <div class="rounded-lg bg-warning/10 p-3">
@@ -199,7 +213,12 @@ const columns: TableColumn<VentaResumen>[] = [
               Saldo pendiente
             </p>
             <p class="text-lg font-semibold text-warning mt-1">
-              {{ formatMonto(saldoPendiente) }}
+              <template v-if="loadingResumen">
+                —
+              </template>
+              <template v-else>
+                {{ formatMonto(resumen?.saldoPendiente ?? '0') }}
+              </template>
             </p>
           </div>
         </div>
@@ -237,11 +256,8 @@ const columns: TableColumn<VentaResumen>[] = [
 
         <UCard v-else>
           <UTable
-            ref="table"
-            v-model:pagination="pagination"
-            :data="ventasFiltradas"
+            :data="ventas"
             :columns="columns"
-            :pagination-options="{ getPaginationRowModel: getPaginationRowModel() }"
             :ui="{ tr: 'cursor-pointer' }"
             @select="onSelectVenta"
           >
@@ -273,12 +289,11 @@ const columns: TableColumn<VentaResumen>[] = [
             </template>
           </UTable>
 
-          <div v-if="ventasFiltradas.length > pageSize" class="flex justify-end pt-4">
+          <div v-if="meta.total > pageSize" class="flex justify-end pt-4">
             <UPagination
-              :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-              :items-per-page="table?.tableApi?.getState().pagination.pageSize"
-              :total="ventasFiltradas.length"
-              @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
+              v-model:page="page"
+              :items-per-page="pageSize"
+              :total="meta.total"
             />
           </div>
         </UCard>

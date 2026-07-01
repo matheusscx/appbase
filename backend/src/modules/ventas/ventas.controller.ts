@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -14,6 +15,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { VentasService } from './ventas.service';
 import { CreateVentaDto } from './dto/create-venta.dto';
+import { QueryVentasDto } from './dto/query-ventas.dto';
 
 @ApiTags('ventas')
 @ApiBearerAuth()
@@ -29,10 +31,16 @@ export class VentasController {
     return this.ventasService.crear(u.tenantId ?? '', u.id, dto);
   }
 
-  @Get()
-  async listar(@Req() req: Request) {
+  @Get('resumen')
+  resumen(@Req() req: Request) {
     const u = req.user as JwtUser;
-    return this.ventasService.listar(u.tenantId ?? '');
+    return this.ventasService.resumen(u.tenantId ?? '');
+  }
+
+  @Get()
+  async listar(@Req() req: Request, @Query() query: QueryVentasDto) {
+    const u = req.user as JwtUser;
+    return this.ventasService.listar(u.tenantId ?? '', query);
   }
 
   @Get(':id')

@@ -100,9 +100,46 @@ Response (201):
 - `400` — excedente de pago sin método con `permite_vuelto = true`
 - `400` — stock insuficiente (rollback completo)
 
+### GET /api/ventas/resumen
+
+KPIs globales del tenant (no dependen de la página actual del listado).
+
+```
+GET /api/ventas/resumen
+Authorization: Bearer <token-con-tenant_id>
+
+Response (200):
+{
+  "totalVentas": 42,
+  "totalFacturado": "1250000.0000",
+  "saldoPendiente": "85000.0000"
+}
+```
+
 ### GET /api/ventas
 
-Lista las ventas del tenant autenticado. La respuesta incluye campos enriquecidos: `montoPagado` (suma de pagos menos vuelto) y `saldo` (total_final − montoPagado).
+Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`. La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto) y `saldo` (total_final − montoPagado).
+
+```
+GET /api/ventas?page=1&pageSize=15&estado=pendiente&canal=fisico
+
+Response (200):
+{
+  "data": [
+    {
+      "id": "uuid",
+      "canal": "fisico",
+      "estado": "pagada",
+      "totalFinal": "1069810.0000",
+      "montoPagado": "1069810.0000",
+      "saldo": "0.0000",
+      "fecha": "2026-06-29T...",
+      "creadoEl": "2026-06-29T..."
+    }
+  ],
+  "meta": { "page": 1, "pageSize": 15, "total": 42, "totalPages": 3 }
+}
+```
 
 ### GET /api/ventas/:id
 

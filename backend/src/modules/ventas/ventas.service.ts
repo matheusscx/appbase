@@ -12,12 +12,35 @@ import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
 import type { CreateVentaDto } from './dto/create-venta.dto';
+import type { QueryVentasDto } from './dto/query-ventas.dto';
 import { Venta, EstadoVenta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
 import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
+import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
+import {
+  buildPaginationMeta,
+  resolvePagination,
+} from '../../common/utils/pagination.util';
+
+export interface VentaListItem {
+  id: string;
+  canal: string;
+  estado: string;
+  totalFinal: string;
+  fecha: Date;
+  creadoEl: Date;
+  montoPagado: string;
+  saldo: string;
+}
+
+export interface VentasResumen {
+  totalVentas: number;
+  totalFacturado: string;
+  saldoPendiente: string;
+}
 
 export interface TipoDocumentoResponse {
   id: string;
@@ -320,7 +343,55 @@ export class VentasService {
     }));
   }
 
-  async listar(tenantId: string) {
+  async resumen(tenantId: string): Promise<VentasResumen> {
+    const rows: {
+      total_ventas: number;
+      total_facturado: string;
+      saldo_pendiente: string;
+    }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total_ventas,
+              COALESCE(SUM(v.total_final), 0)::text AS total_facturado,
+              COALESCE(SUM(
+                v.total_final - COALESCE((
+                  SELECT SUM(p.monto - p.vuelto)
+                  FROM pagos p
+                  WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
+                ), 0)
+              ), 0)::text AS saldo_pendiente
+       FROM ventas v
+       WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL`,
+      [tenantId],
+    );
+
+    const row = rows[0];
+    return {
+      totalVentas: row?.total_ventas ?? 0,
+      totalFacturado: row?.total_facturado ?? '0',
+      saldoPendiente: row?.saldo_pendiente ?? '0',
+    };
+  }
+
+  async listar(
+    tenantId: string,
+    query: QueryVentasDto,
+  ): Promise<PaginatedResponse<VentaListItem>> {
+    const { page, pageSize, offset } = resolvePagination(query);
+    const { filters, params } = this.buildListarFilters(tenantId, query);
+
+    const countRows: { total: number }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total
+       FROM ventas v
+       WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
+       ${filters}`,
+      params,
+    );
+
+    const total = countRows[0]?.total ?? 0;
+
+    const listParams = [...params, pageSize, offset];
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+
     const rows: {
       venta_id: string;
       canal: string;
@@ -338,10 +409,48 @@ export class VentasService {
               ), 0) AS monto_pagado
        FROM ventas v
        WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
-       ORDER BY v.creado_el DESC`,
-      [tenantId],
+       ${filters}
+       ORDER BY v.creado_el DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
     );
-    return rows.map((r) => ({
+
+    return {
+      data: rows.map((r) => this.mapVentaListRow(r)),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  private buildListarFilters(
+    tenantId: string,
+    query: QueryVentasDto,
+  ): { filters: string; params: unknown[] } {
+    const params: unknown[] = [tenantId];
+    let paramIdx = 2;
+    let filters = '';
+
+    if (query.estado) {
+      filters += ` AND v.estado = $${paramIdx++}`;
+      params.push(query.estado);
+    }
+    if (query.canal) {
+      filters += ` AND v.canal = $${paramIdx++}`;
+      params.push(query.canal);
+    }
+
+    return { filters, params };
+  }
+
+  private mapVentaListRow(r: {
+    venta_id: string;
+    canal: string;
+    estado: string;
+    total_final: string;
+    fecha: Date;
+    creado_el: Date;
+    monto_pagado: string;
+  }): VentaListItem {
+    return {
       id: r.venta_id,
       canal: r.canal,
       estado: r.estado,
@@ -352,7 +461,7 @@ export class VentasService {
       saldo: new Decimal(r.total_final)
         .minus(new Decimal(r.monto_pagado))
         .toFixed(4),
-    }));
+    };
   }
 
   async findOne(tenantId: string, ventaId: string) {
