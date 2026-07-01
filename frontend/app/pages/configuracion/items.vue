@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+import type { Row } from '@tanstack/vue-table'
+
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
+const { formatFecha } = useFormatters()
 
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -549,6 +553,48 @@ async function ejecutarAjusteStock() {
     ajustando.value = false
   }
 }
+
+// ── Tablas (UTable) ────────────────────────────────────────────────────────
+
+function onSelectItem(_e: Event, row: Row<Item>) {
+  abrirEditar(row.original)
+}
+
+const columnsItems: TableColumn<Item>[] = [
+  { accessorKey: 'tipo', header: 'Tipo' },
+  { accessorKey: 'nombre', header: 'Item' },
+  { id: 'controles', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
+
+const columnsUnidades: TableColumn<Unidad>[] = [
+  { accessorKey: 'serie', header: 'Nro Serie' },
+  { accessorKey: 'estado', header: 'Estado' },
+  { accessorKey: 'condicion', header: 'Condición' },
+  { accessorKey: 'garantiaHasta', header: 'Garantía hasta' },
+  { accessorKey: 'codigoLote', header: 'Lote' },
+]
+
+const columnsLotes: TableColumn<Lote>[] = [
+  { accessorKey: 'codigoLote', header: 'Código' },
+  { accessorKey: 'cantidadInicial', header: 'Inicial', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'cantidadDisponible', header: 'Disponible', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'fechaElaboracion', header: 'Elaboración' },
+  { accessorKey: 'fechaVencimiento', header: 'Vencimiento' },
+  { accessorKey: 'id', header: 'ID' },
+]
+
+function loteSinDisponibilidad(l: Lote): boolean {
+  return l.cantidadDisponible === '0' || l.cantidadDisponible === '0.0000'
+}
+
+const columnsHistorial: TableColumn<Movimiento>[] = [
+  { accessorKey: 'creadoEl', header: 'Fecha' },
+  { accessorKey: 'tipo', header: 'Tipo' },
+  { accessorKey: 'motivo', header: 'Motivo' },
+  { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'stockResultante', header: 'Resultante', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'usuarioNombre', header: 'Usuario' },
+]
 </script>
 
 <template>
@@ -575,58 +621,55 @@ async function ejecutarAjusteStock() {
 
     <!-- Lista -->
     <UCard>
-      <div v-if="loading" class="py-8 text-center text-muted">Cargando…</div>
+      <UTable
+        :data="itemsFiltrados"
+        :columns="columnsItems"
+        :loading="loading"
+        :ui="{ tr: 'cursor-pointer' }"
+        @select="onSelectItem"
+      >
+        <template #tipo-cell="{ row }">
+          <UBadge
+            :label="row.original.tipo === 'producto' ? 'Producto' : 'Servicio'"
+            :color="row.original.tipo === 'producto' ? 'primary' : 'secondary'"
+            variant="subtle"
+            size="sm"
+          />
+        </template>
 
-      <div v-else-if="!itemsFiltrados.length" class="py-8 text-center text-muted">
-        No hay items. Crea el primero con el botón de arriba.
-      </div>
-
-      <ul v-else class="divide-y divide-default">
-        <li
-          v-for="item in itemsFiltrados"
-          :key="item.id"
-          class="flex items-center justify-between py-3 gap-3"
-        >
-          <!-- Info -->
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <UBadge
-                :label="item.tipo === 'producto' ? 'Producto' : 'Servicio'"
-                :color="item.tipo === 'producto' ? 'primary' : 'secondary'"
-                variant="subtle"
-                size="sm"
-              />
-              <span class="font-medium truncate">{{ item.nombre }}</span>
-            </div>
-            <div class="text-sm text-muted mt-0.5 flex gap-3">
-              <span>{{ item.monedaSimbolo ?? item.monedaCodigo }} {{ item.precioBase }}</span>
-              <span v-if="item.categoriaNombre">· {{ item.categoriaNombre }}</span>
-              <span v-if="item.tipo === 'producto' && item.stock !== null">
-                · Stock: {{ item.stock }}
-                <span v-if="item.modoInventario === 'serie'">(unidades)</span>
-                <span v-else-if="item.modoInventario === 'lote'">(lotes)</span>
-                <span v-else>{{ item.unidadMedida }}</span>
+        <template #nombre-cell="{ row }">
+          <div class="min-w-0">
+            <span class="font-medium truncate block">{{ row.original.nombre }}</span>
+            <div class="text-sm text-muted mt-0.5 flex flex-wrap items-center gap-3">
+              <span>{{ row.original.monedaSimbolo ?? row.original.monedaCodigo }} {{ row.original.precioBase }}</span>
+              <span v-if="row.original.categoriaNombre">· {{ row.original.categoriaNombre }}</span>
+              <span v-if="row.original.tipo === 'producto' && row.original.stock !== null">
+                · Stock: {{ row.original.stock }}
+                <span v-if="row.original.modoInventario === 'serie'">(unidades)</span>
+                <span v-else-if="row.original.modoInventario === 'lote'">(lotes)</span>
+                <span v-else>{{ row.original.unidadMedida }}</span>
               </span>
               <UBadge
-                v-if="item.tipo === 'producto' && item.modoInventario && item.modoInventario !== 'cantidad'"
-                :label="item.modoInventario"
+                v-if="row.original.tipo === 'producto' && row.original.modoInventario && row.original.modoInventario !== 'cantidad'"
+                :label="row.original.modoInventario"
                 color="secondary"
                 variant="soft"
                 size="xs"
               />
-              <span v-if="item.tipo === 'servicio' && item.duracionEstimada">
-                · {{ item.duracionEstimada }} min
+              <span v-if="row.original.tipo === 'servicio' && row.original.duracionEstimada">
+                · {{ row.original.duracionEstimada }} min
               </span>
             </div>
           </div>
+        </template>
 
-          <!-- Controles -->
-          <div class="shrink-0 flex items-center gap-1">
+        <template #controles-cell="{ row }">
+          <div class="flex items-center justify-end gap-1">
             <USwitch
-              :model-value="item.activo"
-              :disabled="toggling.has(item.id)"
+              :model-value="row.original.activo"
+              :disabled="toggling.has(row.original.id)"
               size="sm"
-              @update:model-value="toggleActivo(item)"
+              @update:model-value="toggleActivo(row.original)"
             />
             <UButton
               icon="i-heroicons-pencil-square"
@@ -634,9 +677,9 @@ async function ejecutarAjusteStock() {
               variant="ghost"
               size="sm"
               title="Editar"
-              @click="abrirEditar(item)"
+              @click="abrirEditar(row.original)"
             />
-            <UDropdownMenu :items="menuAcciones(item)">
+            <UDropdownMenu :items="menuAcciones(row.original)">
               <UButton
                 icon="i-heroicons-ellipsis-vertical"
                 color="neutral"
@@ -646,8 +689,15 @@ async function ejecutarAjusteStock() {
               />
             </UDropdownMenu>
           </div>
-        </li>
-      </ul>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+            No hay items. Crea el primero con el botón de arriba.
+          </div>
+        </template>
+      </UTable>
     </UCard>
 
     <!-- Modal crear/editar -->
@@ -1069,77 +1119,62 @@ async function ejecutarAjusteStock() {
       :ui="{ content: 'max-w-3xl' }"
     >
       <template #body>
-        <div v-if="verUnidadesLoading" class="py-8 text-center text-muted">Cargando…</div>
-
         <!-- Tabla unidades (modo serie) -->
-        <template v-else-if="verUnidadesItem?.modoInventario === 'serie'">
-          <div v-if="!unidades.length" class="py-8 text-center text-muted">Sin unidades registradas.</div>
-          <table v-else class="w-full text-sm">
-            <thead class="text-muted text-left">
-              <tr class="border-b border-default">
-                <th class="py-2 pr-4">Nro Serie</th>
-                <th class="py-2 pr-4">Estado</th>
-                <th class="py-2 pr-4">Condición</th>
-                <th class="py-2 pr-4">Garantía hasta</th>
-                <th class="py-2">Lote</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="u in unidades" :key="u.id" class="border-b border-default">
-                <td class="py-2 pr-4 font-mono">{{ u.serie }}</td>
-                <td class="py-2 pr-4">
-                  <UBadge
-                    :label="u.estado"
-                    :color="u.estado === 'disponible' ? 'success' : u.estado === 'vendido' ? 'neutral' : 'warning'"
-                    variant="subtle"
-                    size="sm"
-                  />
-                </td>
-                <td class="py-2 pr-4">{{ u.condicion }}</td>
-                <td class="py-2 pr-4">
-                  {{ u.garantiaHasta ? new Date(u.garantiaHasta).toLocaleDateString() : '—' }}
-                </td>
-                <td class="py-2 text-xs text-muted">{{ u.codigoLote ?? '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </template>
+        <UTable
+          v-if="verUnidadesItem?.modoInventario === 'serie'"
+          :data="unidades"
+          :columns="columnsUnidades"
+          :loading="verUnidadesLoading"
+        >
+          <template #serie-cell="{ row }">
+            <span class="font-mono">{{ row.original.serie }}</span>
+          </template>
+          <template #estado-cell="{ row }">
+            <UBadge
+              :label="row.original.estado"
+              :color="row.original.estado === 'disponible' ? 'success' : row.original.estado === 'vendido' ? 'neutral' : 'warning'"
+              variant="subtle"
+              size="sm"
+            />
+          </template>
+          <template #garantiaHasta-cell="{ row }">
+            {{ row.original.garantiaHasta ? new Date(row.original.garantiaHasta).toLocaleDateString() : '—' }}
+          </template>
+          <template #codigoLote-cell="{ row }">
+            <span class="text-xs text-muted">{{ row.original.codigoLote ?? '—' }}</span>
+          </template>
+          <template #empty>
+            <div class="py-8 text-center text-sm text-muted">Sin unidades registradas.</div>
+          </template>
+        </UTable>
 
         <!-- Tabla lotes (modo lote) -->
-        <template v-else>
-          <div v-if="!lotes.length" class="py-8 text-center text-muted">Sin lotes registrados.</div>
-          <table v-else class="w-full text-sm">
-            <thead class="text-muted text-left">
-              <tr class="border-b border-default">
-                <th class="py-2 pr-4">Código</th>
-                <th class="py-2 pr-4 text-right">Inicial</th>
-                <th class="py-2 pr-4 text-right">Disponible</th>
-                <th class="py-2 pr-4">Elaboración</th>
-                <th class="py-2 pr-4">Vencimiento</th>
-                <th class="py-2 font-mono text-xs">ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="l in lotes"
-                :key="l.id"
-                class="border-b border-default"
-                :class="{ 'opacity-50': l.cantidadDisponible === '0' || l.cantidadDisponible === '0.0000' }"
-              >
-                <td class="py-2 pr-4 font-medium">{{ l.codigoLote }}</td>
-                <td class="py-2 pr-4 text-right">{{ l.cantidadInicial }}</td>
-                <td class="py-2 pr-4 text-right font-medium">{{ l.cantidadDisponible }}</td>
-                <td class="py-2 pr-4">
-                  {{ l.fechaElaboracion ? new Date(l.fechaElaboracion).toLocaleDateString() : '—' }}
-                </td>
-                <td class="py-2 pr-4">
-                  {{ l.fechaVencimiento ? new Date(l.fechaVencimiento).toLocaleDateString() : '—' }}
-                </td>
-                <td class="py-2 font-mono text-xs text-muted select-all">{{ l.id }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </template>
+        <UTable
+          v-else
+          :data="lotes"
+          :columns="columnsLotes"
+          :loading="verUnidadesLoading"
+          :meta="{ class: { tr: (row: Row<Lote>) => loteSinDisponibilidad(row.original) ? 'opacity-50' : '' } }"
+        >
+          <template #codigoLote-cell="{ row }">
+            <span class="font-medium">{{ row.original.codigoLote }}</span>
+          </template>
+          <template #cantidadDisponible-cell="{ row }">
+            <span class="font-medium">{{ row.original.cantidadDisponible }}</span>
+          </template>
+          <template #fechaElaboracion-cell="{ row }">
+            {{ row.original.fechaElaboracion ? new Date(row.original.fechaElaboracion).toLocaleDateString() : '—' }}
+          </template>
+          <template #fechaVencimiento-cell="{ row }">
+            {{ row.original.fechaVencimiento ? new Date(row.original.fechaVencimiento).toLocaleDateString() : '—' }}
+          </template>
+          <template #id-cell="{ row }">
+            <span class="font-mono text-xs text-muted select-all">{{ row.original.id }}</span>
+          </template>
+          <template #empty>
+            <div class="py-8 text-center text-sm text-muted">Sin lotes registrados.</div>
+          </template>
+        </UTable>
       </template>
       <template #footer>
         <div class="flex justify-end">
@@ -1155,39 +1190,28 @@ async function ejecutarAjusteStock() {
       :ui="{ content: 'max-w-3xl' }"
     >
       <template #body>
-        <div v-if="historialLoading" class="py-8 text-center text-muted">Cargando…</div>
-        <div v-else-if="!movimientos.length" class="py-8 text-center text-muted">
-          Sin movimientos registrados.
-        </div>
-        <table v-else class="w-full text-sm">
-          <thead class="text-muted text-left">
-            <tr class="border-b border-default">
-              <th class="py-2 pr-4">Fecha</th>
-              <th class="py-2 pr-4">Tipo</th>
-              <th class="py-2 pr-4">Motivo</th>
-              <th class="py-2 pr-4 text-right">Cantidad</th>
-              <th class="py-2 pr-4 text-right">Resultante</th>
-              <th class="py-2">Usuario</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="m in movimientos" :key="m.id" class="border-b border-default">
-              <td class="py-2 pr-4">{{ new Date(m.creadoEl).toLocaleString() }}</td>
-              <td class="py-2 pr-4">
-                <UBadge
-                  :label="m.tipo === 'entrada' ? 'Entrada' : 'Salida'"
-                  :color="m.tipo === 'entrada' ? 'success' : 'warning'"
-                  variant="subtle"
-                  size="sm"
-                />
-              </td>
-              <td class="py-2 pr-4">{{ m.motivo }}</td>
-              <td class="py-2 pr-4 text-right">{{ m.cantidad }}</td>
-              <td class="py-2 pr-4 text-right font-medium">{{ m.stockResultante }}</td>
-              <td class="py-2">{{ m.usuarioNombre ?? '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <UTable :data="movimientos" :columns="columnsHistorial" :loading="historialLoading">
+          <template #creadoEl-cell="{ row }">
+            <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
+          </template>
+          <template #tipo-cell="{ row }">
+            <UBadge
+              :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
+              :color="row.original.tipo === 'entrada' ? 'success' : 'warning'"
+              variant="subtle"
+              size="sm"
+            />
+          </template>
+          <template #stockResultante-cell="{ row }">
+            <span class="font-medium">{{ row.original.stockResultante }}</span>
+          </template>
+          <template #usuarioNombre-cell="{ row }">
+            {{ row.original.usuarioNombre ?? '—' }}
+          </template>
+          <template #empty>
+            <div class="py-8 text-center text-sm text-muted">Sin movimientos registrados.</div>
+          </template>
+        </UTable>
       </template>
       <template #footer>
         <div class="flex justify-end">
