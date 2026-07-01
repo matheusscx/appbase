@@ -14,6 +14,7 @@ import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import type { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
+import type { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
   buildPaginationMeta,
@@ -47,6 +48,21 @@ export interface CajaTurnoResumen {
   totalSalidas: string;
   saldoEsperado: string;
   totalMovimientos: number;
+}
+
+export interface CajaHistorialItem {
+  id: string;
+  tenantId: string;
+  usuarioId: string | null;
+  tipo: string;
+  estado: string;
+  saldoInicial: string;
+  saldoFinal: string | null;
+  montoContado: string | null;
+  diferencia: string | null;
+  fechaApertura: Date;
+  fechaCierre: Date | null;
+  comentario: string | null;
 }
 
 @Injectable()
@@ -231,20 +247,136 @@ export class CajaService {
   async historial(
     tenantId: string,
     usuarioId: string,
-    todas: boolean,
-  ): Promise<Caja[]> {
-    const where: Record<string, unknown> = {
-      tenantId,
-      tipo: 'fisica',
-      eliminadoEl: IsNull(),
-    };
-    if (!todas) {
-      where.usuarioId = usuarioId;
+    query: QueryHistorialCajaDto,
+    tieneVerTodas: boolean,
+  ): Promise<PaginatedResponse<CajaHistorialItem>> {
+    if (
+      query.usuarioId &&
+      query.usuarioId !== usuarioId &&
+      !tieneVerTodas
+    ) {
+      throw new ForbiddenException(
+        'No tienes acceso al historial de este usuario',
+      );
     }
-    return this.cajaRepo.find({
-      where,
-      order: { fechaApertura: 'DESC' },
-    });
+
+    const { page, pageSize, offset } = resolvePagination(query);
+    const { filters, params } = this.buildHistorialFilters(
+      tenantId,
+      usuarioId,
+      query,
+      tieneVerTodas,
+    );
+
+    const countRows: { total: number }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total
+       FROM cajas c
+       WHERE c.tenant_id = $1
+         ${filters}`,
+      params,
+    );
+
+    const total = countRows[0]?.total ?? 0;
+
+    const listParams = [...params, pageSize, offset];
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+
+    const rows: {
+      caja_id: string;
+      tenant_id: string;
+      usuario_id: string | null;
+      tipo: string;
+      estado: string;
+      saldo_inicial: string;
+      saldo_final: string | null;
+      monto_contado: string | null;
+      diferencia: string | null;
+      fecha_apertura: Date;
+      fecha_cierre: Date | null;
+      comentario: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT c.caja_id,
+              c.tenant_id,
+              c.usuario_id,
+              c.tipo,
+              c.estado,
+              c.saldo_inicial,
+              c.saldo_final,
+              c.monto_contado,
+              c.diferencia,
+              c.fecha_apertura,
+              c.fecha_cierre,
+              c.comentario
+       FROM cajas c
+       WHERE c.tenant_id = $1
+         ${filters}
+       ORDER BY c.fecha_apertura DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
+    );
+
+    return {
+      data: rows.map((r) => this.mapCajaHistorialRow(r)),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  private buildHistorialFilters(
+    tenantId: string,
+    currentUserId: string,
+    query: QueryHistorialCajaDto,
+    tieneVerTodas: boolean,
+  ): { filters: string; params: unknown[] } {
+    const params: unknown[] = [tenantId];
+    let paramIdx = 2;
+    let filters = ` AND c.tipo = 'fisica' AND c.eliminado_el IS NULL`;
+
+    if (query.usuarioId) {
+      filters += ` AND c.usuario_id = $${paramIdx++}`;
+      params.push(query.usuarioId);
+    } else if (!query.todas || !tieneVerTodas) {
+      filters += ` AND c.usuario_id = $${paramIdx++}`;
+      params.push(currentUserId);
+    }
+
+    return { filters, params };
+  }
+
+  private mapCajaHistorialRow(r: {
+    caja_id: string;
+    tenant_id: string;
+    usuario_id: string | null;
+    tipo: string;
+    estado: string;
+    saldo_inicial: string;
+    saldo_final: string | null;
+    monto_contado: string | null;
+    diferencia: string | null;
+    fecha_apertura: Date;
+    fecha_cierre: Date | null;
+    comentario: string | null;
+  }): CajaHistorialItem {
+    return {
+      id: r.caja_id,
+      tenantId: r.tenant_id,
+      usuarioId: r.usuario_id,
+      tipo: r.tipo,
+      estado: r.estado,
+      saldoInicial: new Decimal(r.saldo_inicial).toFixed(4),
+      saldoFinal: r.saldo_final
+        ? new Decimal(r.saldo_final).toFixed(4)
+        : null,
+      montoContado: r.monto_contado
+        ? new Decimal(r.monto_contado).toFixed(4)
+        : null,
+      diferencia: r.diferencia
+        ? new Decimal(r.diferencia).toFixed(4)
+        : null,
+      fechaApertura: r.fecha_apertura,
+      fechaCierre: r.fecha_cierre,
+      comentario: r.comentario,
+    };
   }
 
   async abiertas(

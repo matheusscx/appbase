@@ -8,7 +8,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
@@ -21,6 +21,7 @@ import { AbrirCajaDto } from './dto/abrir-caja.dto';
 import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
+import { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
 
 @ApiTags('caja')
 @ApiBearerAuth()
@@ -34,19 +35,18 @@ export class CajaController {
 
   @Get()
   @RequiresPermiso('Caja', 'Leer')
-  @ApiQuery({ name: 'todas', required: false, type: String })
-  async historial(@Req() req: Request, @Query('todas') todas?: string) {
+  async historial(@Req() req: Request, @Query() query: QueryHistorialCajaDto) {
     const u = req.user as JwtUser;
-    let tieneVerTodas = false;
-    if (todas === 'true') {
-      tieneVerTodas = await this.rbacService.userHasPermiso(
+    let verTodas = false;
+    if (query.todas) {
+      verTodas = await this.rbacService.userHasPermiso(
         u.id,
         u.tenantId!,
         'Caja',
         'Ver todas',
       );
     }
-    return this.cajaService.historial(u.tenantId!, u.id, tieneVerTodas);
+    return this.cajaService.historial(u.tenantId!, u.id, query, verTodas);
   }
 
   @Get('activa')

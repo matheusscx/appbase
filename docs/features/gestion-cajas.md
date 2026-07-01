@@ -240,30 +240,36 @@ Response (200):
 Error (409) si la caja ya está cerrada.
 ```
 
-### GET /caja — Historial de cajas del usuario (y todas con permiso)
+### GET /caja — Historial de cajas (paginado)
 
 ```
-GET /caja
-GET /caja?todas=true      // requiere permiso "Ver todas"
+GET /caja?page=1&pageSize=15
+GET /caja?todas=true&page=1&pageSize=15   // requiere permiso "Ver todas"
+GET /caja?usuarioId=uuid&page=1&pageSize=15   // historial de un cajero (detalle /caja/:id)
 Authorization: Bearer <token>
 
-Permiso requerido: Caja / Leer (+ "Ver todas" para el parámetro todas=true)
+Permiso requerido: Caja / Leer (+ "Ver todas" para todas=true o usuarioId ajeno)
 
 Response (200):
-[
-  {
-    "cajaId": "uuid",
-    "tipo": "fisica",
-    "estado": "cerrada",
-    "saldoInicial": "500.00",
-    "saldoEsperado": "750.00",
-    "montoContado": "748.50",
-    "diferencia": "-1.50",
-    "abiertaEl": "2026-06-29T08:00:00Z",
-    "cerradaEl": "2026-06-29T18:00:00Z"
-  },
-  ...
-]
+{
+  "data": [
+    {
+      "id": "uuid",
+      "tenantId": "uuid",
+      "usuarioId": "uuid",
+      "tipo": "fisica",
+      "estado": "cerrada",
+      "saldoInicial": "500.0000",
+      "saldoFinal": "750.0000",
+      "montoContado": "748.5000",
+      "diferencia": "-1.5000",
+      "fechaApertura": "2026-06-29T08:00:00Z",
+      "fechaCierre": "2026-06-29T18:00:00Z",
+      "comentario": null
+    }
+  ],
+  "meta": { "page": 1, "pageSize": 15, "total": 42, "totalPages": 3 }
+}
 ```
 
 ### GET /caja/:id — Detalle de una caja

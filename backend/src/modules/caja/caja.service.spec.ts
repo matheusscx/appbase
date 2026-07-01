@@ -352,40 +352,78 @@ describe('CajaService', () => {
   });
 
   describe('historial', () => {
-    it('(a) todas=false: retorna solo cajas del usuario con tipo fisica', async () => {
-      const cajas = [mockCajaAbierta];
-      cajaRepo.find.mockResolvedValue(cajas);
+    const mockRow = {
+      caja_id: CAJA_ID,
+      tenant_id: TENANT_ID,
+      usuario_id: USUARIO_ID,
+      tipo: 'fisica',
+      estado: 'cerrada',
+      saldo_inicial: '1000.0000',
+      saldo_final: '950.0000',
+      monto_contado: '948.0000',
+      diferencia: '-2.0000',
+      fecha_apertura: new Date('2026-06-29T08:00:00Z'),
+      fecha_cierre: new Date('2026-06-29T18:00:00Z'),
+      comentario: null,
+    };
 
-      const result = await service.historial(TENANT_ID, USUARIO_ID, false);
+    it('(a) por defecto retorna solo cajas del usuario con tipo fisica', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([mockRow]);
 
-      expect(cajaRepo.find).toHaveBeenCalledWith({
-        where: {
-          tenantId: TENANT_ID,
-          usuarioId: USUARIO_ID,
-          tipo: 'fisica',
-          eliminadoEl: IsNull(),
-        },
-        order: { fechaApertura: 'DESC' },
-      });
-      expect(result).toEqual(cajas);
+      const result = await service.historial(
+        TENANT_ID,
+        USUARIO_ID,
+        {},
+        false,
+      );
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].id).toBe(CAJA_ID);
+      expect(result.meta.total).toBe(1);
     });
 
-    it('(b) todas=true: retorna todas las cajas del tenant con tipo fisica', async () => {
-      const cajaOtro = { ...mockCajaAbierta, usuarioId: OTRO_USUARIO };
-      const cajas = [mockCajaAbierta, cajaOtro];
-      cajaRepo.find.mockResolvedValue(cajas);
+    it('(b) todas=true con permiso retorna cajas de todo el tenant', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 2 }])
+        .mockResolvedValueOnce([mockRow, { ...mockRow, caja_id: 'other' }]);
 
-      const result = await service.historial(TENANT_ID, USUARIO_ID, true);
+      const result = await service.historial(
+        TENANT_ID,
+        USUARIO_ID,
+        { todas: true },
+        true,
+      );
 
-      expect(cajaRepo.find).toHaveBeenCalledWith({
-        where: {
-          tenantId: TENANT_ID,
-          tipo: 'fisica',
-          eliminadoEl: IsNull(),
-        },
-        order: { fechaApertura: 'DESC' },
-      });
-      expect(result).toEqual(cajas);
+      expect(result.data).toHaveLength(2);
+      expect(result.meta.total).toBe(2);
+    });
+
+    it('(c) filtra por usuarioId cuando se indica en query', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([mockRow]);
+
+      const result = await service.historial(
+        TENANT_ID,
+        USUARIO_ID,
+        { usuarioId: USUARIO_ID },
+        false,
+      );
+
+      expect(result.data).toHaveLength(1);
+    });
+
+    it('(d) lanza ForbiddenException si usuarioId ajeno sin Ver todas', async () => {
+      await expect(
+        service.historial(
+          TENANT_ID,
+          USUARIO_ID,
+          { usuarioId: OTRO_USUARIO },
+          false,
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 

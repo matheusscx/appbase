@@ -50,7 +50,6 @@ export const useCajaStore = defineStore('caja', () => {
 
   const activa = ref<Caja | null>(null)
   const resumenTurno = ref<CajaTurnoResumen | null>(null)
-  const historial = ref<Caja[]>([])
   const abiertas = ref<CajaAbierta[]>([])
   const detalle = ref<Caja | null>(null)
   const loadingActiva = ref(false)
@@ -112,13 +111,6 @@ export const useCajaStore = defineStore('caja', () => {
     await cargarActiva()
   }
 
-  async function cargarHistorial(todas: boolean): Promise<void> {
-    historial.value = await useApiFetch<Caja[]>(
-      `${config.public.apiUrl}/caja`,
-      { query: { todas: todas ? 'true' : 'false' } },
-    )
-  }
-
   async function cargarAbiertas(): Promise<void> {
     abiertas.value = await useApiFetch<CajaAbierta[]>(
       `${config.public.apiUrl}/caja/abiertas`,
@@ -135,7 +127,6 @@ export const useCajaStore = defineStore('caja', () => {
   return {
     activa,
     resumenTurno,
-    historial,
     abiertas,
     detalle,
     loadingActiva,
@@ -145,7 +136,6 @@ export const useCajaStore = defineStore('caja', () => {
     cargarResumenTurno,
     registrarMovimiento,
     cerrar,
-    cargarHistorial,
     cargarAbiertas,
     cargarDetalle,
   }
