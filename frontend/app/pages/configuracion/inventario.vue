@@ -1,7 +1,10 @@
 <!-- frontend/app/pages/configuracion/inventario.vue -->
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
+const { formatFecha } = useFormatters()
 
 interface Movimiento {
   id: string
@@ -70,6 +73,20 @@ watch([filtroItem, filtroMotivo], cargar)
 onMounted(async () => {
   await Promise.all([cargarProductos(), cargar()])
 })
+
+function motivoLabel(motivo: string): string {
+  return motivoOpts.find((o) => o.value === motivo)?.label ?? motivo
+}
+
+const columns: TableColumn<Movimiento>[] = [
+  { accessorKey: 'creadoEl', header: 'Fecha' },
+  { accessorKey: 'itemNombre', header: 'Producto' },
+  { accessorKey: 'tipo', header: 'Tipo' },
+  { accessorKey: 'motivo', header: 'Motivo' },
+  { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'stockResultante', header: 'Resultante', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'usuarioNombre', header: 'Usuario' },
+]
 </script>
 
 <template>
@@ -97,41 +114,47 @@ onMounted(async () => {
     </div>
 
     <UCard>
-      <div v-if="loading" class="py-8 text-center text-muted">Cargando…</div>
-      <div v-else-if="!movimientos.length" class="py-8 text-center text-muted">
-        No hay movimientos registrados.
-      </div>
-      <table v-else class="w-full text-sm">
-        <thead class="text-muted text-left">
-          <tr class="border-b border-default">
-            <th class="py-2 pr-4">Fecha</th>
-            <th class="py-2 pr-4">Producto</th>
-            <th class="py-2 pr-4">Tipo</th>
-            <th class="py-2 pr-4">Motivo</th>
-            <th class="py-2 pr-4 text-right">Cantidad</th>
-            <th class="py-2 pr-4 text-right">Resultante</th>
-            <th class="py-2">Usuario</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="m in movimientos" :key="m.id" class="border-b border-default">
-            <td class="py-2 pr-4">{{ new Date(m.creadoEl).toLocaleString() }}</td>
-            <td class="py-2 pr-4 font-medium">{{ m.itemNombre }}</td>
-            <td class="py-2 pr-4">
-              <UBadge
-                :label="m.tipo === 'entrada' ? 'Entrada' : 'Salida'"
-                :color="m.tipo === 'entrada' ? 'success' : 'warning'"
-                variant="subtle"
-                size="sm"
-              />
-            </td>
-            <td class="py-2 pr-4">{{ m.motivo }}</td>
-            <td class="py-2 pr-4 text-right">{{ m.cantidad }}</td>
-            <td class="py-2 pr-4 text-right font-medium">{{ m.stockResultante }}</td>
-            <td class="py-2">{{ m.usuarioNombre ?? '—' }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <UTable :data="movimientos" :columns="columns" :loading="loading">
+        <template #creadoEl-cell="{ row }">
+          <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
+        </template>
+        <template #itemNombre-cell="{ row }">
+          <span class="font-medium">{{ row.original.itemNombre }}</span>
+        </template>
+        <template #tipo-cell="{ row }">
+          <UBadge
+            :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
+            :color="row.original.tipo === 'entrada' ? 'success' : 'warning'"
+            variant="subtle"
+            size="sm"
+          />
+        </template>
+        <template #motivo-cell="{ row }">
+          <UBadge
+            :label="motivoLabel(row.original.motivo)"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+          />
+        </template>
+        <template #cantidad-cell="{ row }">
+          <span :class="row.original.tipo === 'entrada' ? 'text-success' : 'text-warning'">
+            {{ row.original.cantidad }}
+          </span>
+        </template>
+        <template #stockResultante-cell="{ row }">
+          <span class="font-medium">{{ row.original.stockResultante }}</span>
+        </template>
+        <template #usuarioNombre-cell="{ row }">
+          {{ row.original.usuarioNombre ?? '—' }}
+        </template>
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+            No hay movimientos registrados.
+          </div>
+        </template>
+      </UTable>
     </UCard>
   </div>
 </template>
