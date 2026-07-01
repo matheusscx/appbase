@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 interface Categoria {
   id: string
   nombre: string
@@ -141,6 +143,12 @@ async function eliminar(id: string) {
 }
 
 onMounted(cargar)
+
+const columns: TableColumn<Categoria>[] = [
+  { accessorKey: 'nombre', header: 'Nombre' },
+  { id: 'activo', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -163,55 +171,51 @@ onMounted(cargar)
     </div>
 
     <UCard>
-      <div
-        v-if="loading"
-        class="py-8 text-center text-sm text-muted"
-      >
-        Cargando…
-      </div>
-      <div
-        v-else-if="!categorias.length"
-        class="py-8 text-center text-sm text-muted"
-      >
-        No hay categorías registradas.
-      </div>
-      <ul v-else class="divide-y divide-border-default">
-        <li
-          v-for="cat in categorias"
-          :key="cat.id"
-          class="flex items-center justify-between py-3"
-        >
+      <UTable :data="categorias" :columns="columns" :loading="loading">
+        <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate">
-              {{ cat.nombre }}
+              {{ row.original.nombre }}
             </p>
             <p class="text-sm text-muted">
-              Aplica a: {{ aplicaALabel(cat.aplicaA) }}
+              Aplica a: {{ aplicaALabel(row.original.aplicaA) }}
             </p>
           </div>
-          <div class="flex items-center gap-4 shrink-0 ml-4">
+        </template>
+
+        <template #activo-cell="{ row }">
+          <div class="flex justify-end">
             <USwitch
-              :model-value="cat.activo"
-              :disabled="toggling.has(cat.id)"
-              @update:model-value="toggleActivo(cat)"
+              :model-value="row.original.activo"
+              :disabled="toggling.has(row.original.id)"
+              @update:model-value="toggleActivo(row.original)"
             />
-            <div class="flex gap-2">
-              <UButton
-                icon="i-heroicons-pencil-square"
-                color="neutral"
-                variant="ghost"
-                @click="abrirEditar(cat)"
-              />
-              <UButton
-                icon="i-heroicons-trash"
-                color="error"
-                variant="ghost"
-                @click="() => { confirmDeleteId = cat.id; confirmModalOpen = true }"
-              />
-            </div>
           </div>
-        </li>
-      </ul>
+        </template>
+
+        <template #acciones-cell="{ row }">
+          <div class="flex justify-end gap-2">
+            <UButton
+              icon="i-heroicons-pencil-square"
+              color="neutral"
+              variant="ghost"
+              @click="abrirEditar(row.original)"
+            />
+            <UButton
+              icon="i-heroicons-trash"
+              color="error"
+              variant="ghost"
+              @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+            />
+          </div>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            No hay categorías registradas.
+          </div>
+        </template>
+      </UTable>
     </UCard>
 
     <!-- Modal crear/editar -->

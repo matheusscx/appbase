@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 interface RazonSocial {
   id: string
   nombre: string
@@ -171,6 +173,13 @@ async function eliminar(id: string) {
 }
 
 onMounted(cargar)
+
+const columns: TableColumn<RazonSocial>[] = [
+  { accessorKey: 'nombre', header: 'Nombre' },
+  { id: 'preferida', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'habilitado', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -193,73 +202,74 @@ onMounted(cargar)
     </div>
 
     <UCard>
-      <div
-        v-if="loading"
-        class="py-8 text-center text-sm text-muted"
-      >
-        Cargando…
-      </div>
-      <div
-        v-else-if="!razones.length"
-        class="py-8 text-center text-sm text-muted"
-      >
-        No hay razones sociales registradas.
-      </div>
-      <ul v-else class="divide-y divide-border-default">
-        <li
-          v-for="rs in razones"
-          :key="rs.id"
-          class="flex items-center justify-between py-3"
-        >
+      <UTable :data="razones" :columns="columns" :loading="loading">
+        <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate">
-              {{ rs.nombre }}
+              {{ row.original.nombre }}
             </p>
             <p class="text-sm text-muted">
-              RUT: {{ rs.rut }}
+              RUT: {{ row.original.rut }}
             </p>
             <p
-              v-if="rs.direccion"
+              v-if="row.original.direccion"
               class="text-sm text-gray-400 truncate"
             >
-              {{ rs.direccion }}
+              {{ row.original.direccion }}
             </p>
           </div>
-          <div class="flex items-center gap-4 shrink-0 ml-4">
+        </template>
+
+        <template #preferida-cell="{ row }">
+          <div class="flex justify-end">
             <button
               type="button"
               class="p-1 rounded transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-              :disabled="toggling.has(rs.id)"
-              @click="togglePreferida(rs)"
+              :disabled="toggling.has(row.original.id)"
+              @click="togglePreferida(row.original)"
             >
               <UIcon
-                :name="rs.preferida ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
+                :name="row.original.preferida ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
                 class="w-5 h-5"
-                :class="rs.preferida ? 'text-yellow-400' : 'text-gray-400'"
+                :class="row.original.preferida ? 'text-yellow-400' : 'text-gray-400'"
               />
             </button>
-            <USwitch
-              :model-value="rs.habilitado"
-              :disabled="toggling.has(rs.id)"
-              @update:model-value="toggleHabilitado(rs)"
-            />
-            <div class="flex gap-2">
-              <UButton
-                icon="i-heroicons-pencil-square"
-                color="neutral"
-                variant="ghost"
-                @click="abrirEditar(rs)"
-              />
-              <UButton
-                icon="i-heroicons-trash"
-                color="error"
-                variant="ghost"
-                @click="() => { confirmDeleteId = rs.id; confirmModalOpen = true }"
-              />
-            </div>
           </div>
-        </li>
-      </ul>
+        </template>
+
+        <template #habilitado-cell="{ row }">
+          <div class="flex justify-end">
+            <USwitch
+              :model-value="row.original.habilitado"
+              :disabled="toggling.has(row.original.id)"
+              @update:model-value="toggleHabilitado(row.original)"
+            />
+          </div>
+        </template>
+
+        <template #acciones-cell="{ row }">
+          <div class="flex justify-end gap-2">
+            <UButton
+              icon="i-heroicons-pencil-square"
+              color="neutral"
+              variant="ghost"
+              @click="abrirEditar(row.original)"
+            />
+            <UButton
+              icon="i-heroicons-trash"
+              color="error"
+              variant="ghost"
+              @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+            />
+          </div>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            No hay razones sociales registradas.
+          </div>
+        </template>
+      </UTable>
     </UCard>
 
     <!-- Modal crear/editar -->

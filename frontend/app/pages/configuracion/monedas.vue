@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 interface Moneda {
   monedaId: string
   nombre: string
@@ -122,6 +124,13 @@ async function guardarTasa(m: Moneda) {
 }
 
 onMounted(cargar)
+
+const columns: TableColumn<Moneda>[] = [
+  { accessorKey: 'nombre', header: 'Moneda' },
+  { id: 'tasa', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'predeterminada', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'habilitada', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -137,29 +146,13 @@ onMounted(cargar)
     </div>
 
     <UCard>
-      <div
-        v-if="loading"
-        class="py-8 text-center text-sm text-muted"
-      >
-        Cargando…
-      </div>
-      <div
-        v-else-if="!monedas.length"
-        class="py-8 text-center text-sm text-muted"
-      >
-        No hay monedas disponibles para el país del tenant.
-      </div>
-      <ul v-else class="divide-y divide-border-default">
-        <li
-          v-for="m in monedas"
-          :key="m.monedaId"
-          class="flex items-center justify-between py-3 gap-4"
-        >
+      <UTable :data="monedas" :columns="columns" :loading="loading">
+        <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate flex items-center gap-2">
-              {{ m.nombre }}
+              {{ row.original.nombre }}
               <UBadge
-                v-if="m.esOficial"
+                v-if="row.original.esOficial"
                 color="primary"
                 variant="subtle"
                 size="sm"
@@ -168,49 +161,60 @@ onMounted(cargar)
               </UBadge>
             </p>
             <p class="text-sm text-muted">
-              {{ m.codigoIso }}<span v-if="m.simbolo"> · {{ m.simbolo }}</span>
+              {{ row.original.codigoIso }}<span v-if="row.original.simbolo"> · {{ row.original.simbolo }}</span>
             </p>
           </div>
+        </template>
 
-          <div class="flex items-center gap-4 shrink-0">
-            <!-- Tasa de cambio -->
-            <div class="w-32">
-              <UInput
-                :model-value="m.esOficial ? '1' : (m.valorDelDia ?? '')"
-                inputmode="decimal"
-                size="sm"
-                :disabled="m.esOficial || toggling.has(m.monedaId)"
-                placeholder="Tasa"
-                @focus="onTasaFocus(m)"
-                @update:model-value="(v: string | number) => { m.valorDelDia = v === '' ? null : String(v) }"
-                @blur="guardarTasa(m)"
-              />
-            </div>
+        <template #tasa-cell="{ row }">
+          <div class="w-32 ml-auto">
+            <UInput
+              :model-value="row.original.esOficial ? '1' : (row.original.valorDelDia ?? '')"
+              inputmode="decimal"
+              size="sm"
+              :disabled="row.original.esOficial || toggling.has(row.original.monedaId)"
+              placeholder="Tasa"
+              @focus="onTasaFocus(row.original)"
+              @update:model-value="(v: string | number) => { row.original.valorDelDia = v === '' ? null : String(v) }"
+              @blur="guardarTasa(row.original)"
+            />
+          </div>
+        </template>
 
-            <!-- Estrella predeterminada -->
+        <template #predeterminada-cell="{ row }">
+          <div class="flex justify-end">
             <button
               type="button"
               class="p-1 rounded transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
-              :disabled="toggling.has(m.monedaId)"
-              :title="m.esDefault ? 'Moneda predeterminada' : 'Marcar como predeterminada'"
-              @click="setDefault(m)"
+              :disabled="toggling.has(row.original.monedaId)"
+              :title="row.original.esDefault ? 'Moneda predeterminada' : 'Marcar como predeterminada'"
+              @click="setDefault(row.original)"
             >
               <UIcon
-                :name="m.esDefault ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
+                :name="row.original.esDefault ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
                 class="w-5 h-5"
-                :class="m.esDefault ? 'text-yellow-400' : 'text-gray-400'"
+                :class="row.original.esDefault ? 'text-yellow-400' : 'text-gray-400'"
               />
             </button>
+          </div>
+        </template>
 
-            <!-- Habilitada -->
+        <template #habilitada-cell="{ row }">
+          <div class="flex justify-end">
             <USwitch
-              :model-value="m.habilitada"
-              :disabled="m.esOficial || toggling.has(m.monedaId)"
-              @update:model-value="toggleHabilitada(m)"
+              :model-value="row.original.habilitada"
+              :disabled="row.original.esOficial || toggling.has(row.original.monedaId)"
+              @update:model-value="toggleHabilitada(row.original)"
             />
           </div>
-        </li>
-      </ul>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            No hay monedas disponibles para el país del tenant.
+          </div>
+        </template>
+      </UTable>
     </UCard>
   </div>
 </template>

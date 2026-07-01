@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 interface MetodoPago {
   metodoPagoId: string
   nombre: string
@@ -76,6 +78,12 @@ async function togglePermiteVuelto(m: MetodoPago) {
 }
 
 onMounted(cargar)
+
+const columns: TableColumn<MetodoPago>[] = [
+  { accessorKey: 'nombre', header: 'Nombre' },
+  { id: 'permiteVuelto', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'habilitada', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -90,56 +98,46 @@ onMounted(cargar)
     </div>
 
     <UCard>
-      <div
-        v-if="loading"
-        class="py-8 text-center text-sm text-muted"
-      >
-        Cargando…
-      </div>
-      <div
-        v-else-if="!metodos.length"
-        class="py-8 text-center text-sm text-muted"
-      >
-        No hay métodos de pago disponibles para el país del tenant.
-      </div>
-      <ul v-else class="divide-y divide-border-default">
-        <li
-          v-for="m in metodos"
-          :key="m.metodoPagoId"
-          class="flex items-center justify-between py-3 gap-4"
-        >
+      <UTable :data="metodos" :columns="columns" :loading="loading">
+        <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate">
-              {{ m.nombre }}
+              {{ row.original.nombre }}
             </p>
-            <p v-if="m.abreviatura" class="text-sm text-muted">
-              {{ m.abreviatura }}
+            <p v-if="row.original.abreviatura" class="text-sm text-muted">
+              {{ row.original.abreviatura }}
             </p>
           </div>
+        </template>
 
-          <div class="flex items-center gap-6 shrink-0">
-            <!-- Permite vuelto -->
-            <div class="flex items-center gap-2">
-              <span class="text-sm text-muted">Permite vuelto</span>
-              <USwitch
-                :model-value="m.permiteVuelto"
-                :disabled="toggling.has(m.metodoPagoId)"
-                @update:model-value="togglePermiteVuelto(m)"
-              />
-            </div>
-
-            <!-- Habilitada -->
-            <div class="flex items-center gap-2">
-              <span class="text-sm text-muted">Habilitado</span>
-              <USwitch
-                :model-value="m.habilitada"
-                :disabled="toggling.has(m.metodoPagoId)"
-                @update:model-value="toggleHabilitada(m)"
-              />
-            </div>
+        <template #permiteVuelto-cell="{ row }">
+          <div class="flex items-center justify-end gap-2">
+            <span class="text-sm text-muted">Permite vuelto</span>
+            <USwitch
+              :model-value="row.original.permiteVuelto"
+              :disabled="toggling.has(row.original.metodoPagoId)"
+              @update:model-value="togglePermiteVuelto(row.original)"
+            />
           </div>
-        </li>
-      </ul>
+        </template>
+
+        <template #habilitada-cell="{ row }">
+          <div class="flex items-center justify-end gap-2">
+            <span class="text-sm text-muted">Habilitado</span>
+            <USwitch
+              :model-value="row.original.habilitada"
+              :disabled="toggling.has(row.original.metodoPagoId)"
+              @update:model-value="toggleHabilitada(row.original)"
+            />
+          </div>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            No hay métodos de pago disponibles para el país del tenant.
+          </div>
+        </template>
+      </UTable>
     </UCard>
   </div>
 </template>
