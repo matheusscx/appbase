@@ -105,7 +105,7 @@ async function confirmar() {
             <USelect v-model="pago.metodoPagoId" :items="metodoItems" class="flex-1" />
             <UInput v-model="pago.monto" inputmode="decimal" placeholder="0" class="w-32" />
             <UButton
-              icon="i-heroicons-trash"
+              icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               size="xs"
@@ -115,7 +115,7 @@ async function confirmar() {
           </div>
           <UButton
             label="Agregar pago"
-            icon="i-heroicons-plus"
+            icon="i-lucide-plus"
             variant="ghost"
             size="sm"
             @click="agregarPago"

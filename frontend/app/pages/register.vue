@@ -26,7 +26,7 @@ async function onGoogle() {
       <!-- Logo -->
       <div class="mb-8 text-center">
         <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-4">
-          <UIcon name="i-heroicons-bolt" class="text-white w-5 h-5" />
+          <UIcon name="i-lucide-zap" class="text-white w-5 h-5" />
         </div>
         <h1 class="text-xl font-semibold text-default">
           Prueba Técnica
@@ -43,7 +43,7 @@ async function onGoogle() {
           color="error"
           variant="subtle"
           :description="store.error"
-          icon="i-heroicons-exclamation-circle"
+          icon="i-lucide-circle-alert"
         />
 
         <!-- Google -->
@@ -108,7 +108,7 @@ async function onGoogle() {
                   class="text-muted hover:text-default transition-colors"
                   @click="showPassword = !showPassword"
                 >
-                  <UIcon :name="showPassword ? 'i-heroicons-eye-slash' : 'i-heroicons-eye'" class="w-4 h-4" />
+                  <UIcon :name="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="w-4 h-4" />
                 </button>
               </template>
             </UInput>

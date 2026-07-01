@@ -56,12 +56,12 @@ const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [
   [
     {
       label: 'Registrar movimiento',
-      icon: 'i-heroicons-plus-circle',
+      icon: 'i-lucide-circle-plus',
       onSelect: abrirMovimientoModal,
     },
     {
       label: 'Cerrar caja',
-      icon: 'i-heroicons-lock-closed',
+      icon: 'i-lucide-lock',
       color: 'error' as const,
       onSelect: abrirCierreModal,
     },
@@ -164,7 +164,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         <template #right>
           <div v-if="tieneCaja" class="flex items-center gap-2 mr-2">
             <UDropdownMenu :items="cajaMenuItems">
-              <UButton variant="soft" color="success" size="sm" icon="i-heroicons-banknotes">
+              <UButton variant="soft" color="success" size="sm" icon="i-lucide-banknote">
                 Caja abierta
               </UButton>
             </UDropdownMenu>
@@ -176,7 +176,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
 
     <template #body>
       <div v-if="cajaStore.loadingActiva" class="flex items-center justify-center h-full">
-        <UIcon name="i-heroicons-arrow-path" class="w-8 h-8 text-muted animate-spin" />
+        <UIcon name="i-lucide-loader" class="w-8 h-8 text-muted animate-spin" />
       </div>
 
       <div v-else-if="!tieneCaja" class="max-w-md mx-auto py-12">

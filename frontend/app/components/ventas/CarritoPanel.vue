@@ -103,7 +103,7 @@ function quitarCustomer() {
             @update:model-value="(v: string | number) => emit('cambiar-cantidad', linea.item.id, String(v))"
           />
           <UButton
-            icon="i-heroicons-trash"
+            icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
             size="xs"
@@ -118,7 +118,7 @@ function quitarCustomer() {
           <UButton
             v-if="!customerExpandido"
             label="Agregar datos del cliente"
-            icon="i-heroicons-user-plus"
+            icon="i-lucide-user-plus"
             variant="soft"
             color="neutral"
             size="sm"
@@ -129,7 +129,7 @@ function quitarCustomer() {
             <VentasClienteForm v-model="customer" />
             <UButton
               label="Quitar datos del cliente"
-              icon="i-heroicons-x-mark"
+              icon="i-lucide-x"
               variant="ghost"
               color="error"
               size="xs"
@@ -162,7 +162,7 @@ function quitarCustomer() {
         </div>
         <UButton
           label="Cobrar"
-          icon="i-heroicons-banknotes"
+          icon="i-lucide-banknote"
           color="primary"
           block
           size="lg"

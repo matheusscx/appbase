@@ -212,7 +212,7 @@ const columns: TableColumn<Rol>[] = [
           Define roles y los permisos que tienen sobre cada módulo.
         </p>
       </div>
-      <UButton icon="i-heroicons-plus" @click="abrirCrear">
+      <UButton icon="i-lucide-plus" @click="abrirCrear">
         Nuevo rol
       </UButton>
     </div>
@@ -240,13 +240,13 @@ const columns: TableColumn<Rol>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex items-center justify-end gap-1">
             <UButton
-              icon="i-heroicons-pencil-square"
+              icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               @click="abrirEditar(row.original)"
             />
             <UButton
-              icon="i-heroicons-trash"
+              icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               :disabled="row.original.esFijo"

@@ -211,7 +211,7 @@ const columns: TableColumn<RazonSocial>[] = [
         </p>
       </div>
       <UButton
-        icon="i-heroicons-plus"
+        icon="i-lucide-plus"
         @click="abrirCrear"
       >
         Nueva razón social
@@ -246,9 +246,9 @@ const columns: TableColumn<RazonSocial>[] = [
               @click="togglePreferida(row.original)"
             >
               <UIcon
-                :name="row.original.preferida ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
+                name="i-lucide-star"
                 class="w-5 h-5"
-                :class="row.original.preferida ? 'text-warning' : 'text-muted'"
+                :class="row.original.preferida ? 'text-warning fill-current' : 'text-muted'"
               />
             </button>
           </div>
@@ -267,13 +267,13 @@ const columns: TableColumn<RazonSocial>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-2">
             <UButton
-              icon="i-heroicons-pencil-square"
+              icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               @click="abrirEditar(row.original)"
             />
             <UButton
-              icon="i-heroicons-trash"
+              icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"

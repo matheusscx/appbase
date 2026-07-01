@@ -40,7 +40,7 @@ const gridClass = computed(() =>
     <div class="w-full max-w-lg">
       <div class="mb-8 text-center">
         <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-4">
-          <UIcon name="i-heroicons-bolt" class="text-white w-5 h-5" />
+          <UIcon name="i-lucide-zap" class="text-white w-5 h-5" />
         </div>
         <h1 class="text-xl font-semibold text-default">
           ¿En qué empresa vas a trabajar?
@@ -55,7 +55,7 @@ const gridClass = computed(() =>
           color="error"
           variant="subtle"
           :description="tenantStore.error"
-          icon="i-heroicons-exclamation-circle"
+          icon="i-lucide-circle-alert"
         />
         <UButton class="mt-3" size="sm" variant="ghost" @click="tenantStore.fetchMyTenants()">
           Reintentar
@@ -63,7 +63,7 @@ const gridClass = computed(() =>
       </div>
 
       <div v-else-if="tenantStore.loading && tenantStore.tenants.length === 0" class="py-12 text-center">
-        <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 text-primary-600 animate-spin mx-auto" />
+        <UIcon name="i-lucide-loader" class="w-6 h-6 text-primary-600 animate-spin mx-auto" />
       </div>
 
       <div v-else :class="gridClass">
@@ -79,7 +79,7 @@ const gridClass = computed(() =>
           >
             <UIcon
               v-if="switching === tenant.tenantId"
-              name="i-heroicons-arrow-path"
+              name="i-lucide-loader"
               class="w-5 h-5 animate-spin"
             />
             <span v-else>{{ avatarInitial(tenant.nombre) }}</span>
@@ -88,7 +88,7 @@ const gridClass = computed(() =>
             {{ tenant.nombre }}
           </span>
           <UIcon
-            name="i-heroicons-chevron-right"
+            name="i-lucide-chevron-right"
             class="w-4 h-4 text-muted shrink-0 transition-transform group-hover:translate-x-0.5"
           />
         </button>

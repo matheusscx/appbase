@@ -174,6 +174,33 @@ Separación header/body/footer con `divide-y divide-accented` (mismo tono gris q
 
 **Permisos por módulo** — usar `RolPermisosPorModulo`: acordeón (`UAccordion`, `type="multiple"`) por módulo con contador `N/M` en el header, buscador por nombre, checkboxes en columna (permisos con nombres largos). Padding del acordeón: `px-4` en trigger/body (ver [Espaciado](#espaciado-padding-margin-gap)).
 
+## Iconos (Lucide)
+
+Colección oficial del proyecto: **Lucide** vía Iconify — alineada con la recomendación de Nuxt UI v4.
+
+- **Formato:** `i-lucide-{name}` en props `icon` de `UButton`, `UIcon`, nav items, etc.
+- **Paquete:** `@iconify-json/lucide` (en `frontend/package.json`).
+- **Buscar iconos:** [icones.js.org/collection/lucide](https://icones.js.org/collection/lucide), MCP `search_icons` de Nuxt UI, o copiar de `layouts/dashboard.vue` / `pages/configuracion.vue`.
+- **No mezclar colecciones** (Heroicons, Material, etc.) en código nuevo.
+
+### Ejemplos frecuentes
+
+| Uso | Icono |
+|-----|-------|
+| Crear / agregar | `i-lucide-plus` |
+| Editar | `i-lucide-square-pen` |
+| Eliminar | `i-lucide-trash-2` |
+| Cargando | `i-lucide-loader` (+ `animate-spin`) |
+| Vacío | `i-lucide-inbox` |
+| Caja / pagos | `i-lucide-banknote` |
+| Configuración | `i-lucide-settings` |
+| Favorito / default | `i-lucide-star` (+ `fill-current` cuando activo) |
+
+```vue
+<UButton icon="i-lucide-plus">Nuevo</UButton>
+<UIcon name="i-lucide-inbox" class="w-8 h-8 opacity-40" />
+```
+
 ## Migration Checklist
 
 When adding a new page or updating an existing one:
@@ -184,6 +211,7 @@ When adding a new page or updating an existing one:
 - [ ] Replace `divide-gray-100 dark:divide-gray-800` with `divide-default`
 - [ ] Replace `border-gray-200 dark:border-gray-700` with `border-default`
 - [ ] Page sections: `space-y-6`; form fields: `space-y-4`; drawer/card shell: `px-6 py-4`; nested bordered UI: `px-4`
+- [ ] Iconos Lucide (`i-lucide-*`); no mezclar otras colecciones
 - [ ] Use UCard, UModal, UFormField for structure
 - [ ] Test in both light and dark modes
 - [ ] Verify text contrast meets WCAG AA standards

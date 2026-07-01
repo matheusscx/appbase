@@ -83,7 +83,7 @@ watch(() => props.modulos, () => {
   >
     <UInput
       v-model="busqueda"
-      icon="i-heroicons-magnifying-glass"
+      icon="i-lucide-search"
       placeholder="Buscar módulo…"
       color="neutral"
       variant="outline"

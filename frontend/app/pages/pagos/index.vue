@@ -165,7 +165,7 @@ onMounted(cargar)
           <UInput
             v-model="filtroMetodo"
             placeholder="Filtrar por método de pago..."
-            icon="i-heroicons-magnifying-glass"
+            icon="i-lucide-search"
             class="w-64"
           />
           <USelect
@@ -177,7 +177,7 @@ onMounted(cargar)
           <UButton
             v-if="hayFiltrosActivos"
             label="Limpiar filtros"
-            icon="i-heroicons-x-mark"
+            icon="i-lucide-x"
             variant="ghost"
             color="neutral"
             size="sm"
@@ -187,7 +187,7 @@ onMounted(cargar)
 
         <!-- Loading -->
         <div v-if="loading" class="text-center text-muted py-12">
-          <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+          <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
           Cargando pagos…
         </div>
 
@@ -231,7 +231,7 @@ onMounted(cargar)
             </template>
             <template #empty>
               <div class="py-10 text-center text-sm text-muted">
-                <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+                <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
                 {{ hayFiltrosActivos ? 'Ningún pago coincide con los filtros.' : 'Sin pagos registrados.' }}
               </div>
             </template>

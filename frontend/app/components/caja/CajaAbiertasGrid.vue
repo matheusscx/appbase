@@ -39,7 +39,7 @@ function onOpened(): void {
 <template>
   <div>
     <div v-if="loading" class="py-12 text-center text-sm text-muted">
-      <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+      <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
       Cargando cajas…
     </div>
 
@@ -52,7 +52,7 @@ function onOpened(): void {
       >
         <template #header>
           <div class="flex items-center gap-2">
-            <UIcon name="i-heroicons-plus-circle" class="w-5 h-5 text-primary-500" />
+            <UIcon name="i-lucide-circle-plus" class="w-5 h-5 text-primary-500" />
             <span class="font-semibold text-highlighted">Abrir mi caja</span>
           </div>
         </template>

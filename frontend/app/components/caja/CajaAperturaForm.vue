@@ -72,7 +72,7 @@ async function abrir() {
         <UButton
           type="submit"
           form="caja-apertura-form"
-          icon="i-heroicons-lock-open"
+          icon="i-lucide-lock-open"
           :loading="saving"
         >
           Abrir caja

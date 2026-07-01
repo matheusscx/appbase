@@ -64,7 +64,7 @@ const { formatMonto, formatFecha } = useFormatters()
           </div>
           <div v-if="!readonly" class="flex gap-2">
             <UButton
-              icon="i-heroicons-plus-circle"
+              icon="i-lucide-circle-plus"
               color="neutral"
               variant="outline"
               @click="movimientoModalOpen = true"
@@ -72,7 +72,7 @@ const { formatMonto, formatFecha } = useFormatters()
               + Movimiento
             </UButton>
             <UButton
-              icon="i-heroicons-lock-closed"
+              icon="i-lucide-lock"
               color="error"
               variant="soft"
               @click="cierreModalOpen = true"
@@ -132,7 +132,7 @@ const { formatMonto, formatFecha } = useFormatters()
         v-if="cajaStore.loadingMovimientos"
         class="py-8 text-center text-sm text-muted"
       >
-        <UIcon name="i-heroicons-arrow-path" class="w-5 h-5 animate-spin mx-auto mb-1" />
+        <UIcon name="i-lucide-loader" class="w-5 h-5 animate-spin mx-auto mb-1" />
         Cargando movimientos…
       </div>
       <div
@@ -152,7 +152,7 @@ const { formatMonto, formatFecha } = useFormatters()
         >
           <div class="flex items-center gap-3 min-w-0">
             <UIcon
-              :name="mov.tipo === 'entrada' ? 'i-heroicons-arrow-down-circle' : 'i-heroicons-arrow-up-circle'"
+              :name="mov.tipo === 'entrada' ? 'i-lucide-circle-arrow-down' : 'i-lucide-circle-arrow-up'"
               class="w-5 h-5 shrink-0"
               :class="mov.tipo === 'entrada' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
             />

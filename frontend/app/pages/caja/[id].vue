@@ -64,12 +64,12 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
           to="/caja"
           class="text-sm text-highlighted inline-flex items-center gap-1"
         >
-          <UIcon name="i-heroicons-arrow-left" class="w-4 h-4" />
+          <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
           Volver al listado
         </ULink>
 
         <div v-if="loading" class="py-12 text-center text-sm text-muted">
-          <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+          <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
           Cargando…
         </div>
 

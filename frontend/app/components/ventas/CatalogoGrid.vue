@@ -17,7 +17,7 @@ const filtrados = computed(() => {
   <div class="flex flex-col gap-4 h-full">
     <UInput
       v-model="busqueda"
-      icon="i-heroicons-magnifying-glass"
+      icon="i-lucide-search"
       placeholder="Buscar ítem..."
       size="lg"
     />

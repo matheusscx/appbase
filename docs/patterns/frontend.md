@@ -10,6 +10,8 @@ feature** para no re-escanear: aquí está la página completa, el fetch con aut
 update optimista con revert y la navegación.
 
 > Convenciones transversales:
+> - **Iconos: Lucide** — formato `i-lucide-{name}` (p. ej. `i-lucide-plus`). Colección
+>   oficial del proyecto (Nuxt UI v4); ver `frontend/docs/DESIGN-SYSTEM.md` § Iconos.
 > - **Llamadas API: `useApiFetch`** (`composables/useApiFetch.ts`), NO `$fetch`
 >   directo ni axios. Inyecta el Bearer token y reintenta tras refresh en 401.
 > - **Sin store** para las pantallas CRUD de config: estado local con `ref`/`reactive`.
@@ -29,7 +31,7 @@ Agregar el item al computed `navItems` de `app/pages/configuracion.vue` (dentro 
 bloque `permissionsStore.esAdmin` si la pantalla es solo admin):
 
 ```typescript
-{ label: 'Monedas', icon: 'i-heroicons-currency-dollar', to: '/configuracion/monedas' }
+{ label: 'Monedas', icon: 'i-lucide-dollar-sign', to: '/configuracion/monedas' }
 ```
 
 ---
@@ -180,7 +182,7 @@ Componentes usados como estándar:
 | Contenedor | `UCard` |
 | Lista | `<ul class="divide-y …">` con `<li v-for>` |
 | Toggle habilitar | `USwitch` con `:model-value` + `@update:model-value` y `:disabled` |
-| Estrella default | `<button>` + `UIcon` (`i-heroicons-star-solid` / `i-heroicons-star`) |
+| Estrella default | `<button>` + `UIcon` (`i-lucide-star` + `fill-current` cuando activo) |
 | Distintivo (p. ej. "Oficial") | `UBadge` |
 | Acciones | `UButton` con `icon`, `variant="ghost"`, `color` |
 | Modal | `UModal` con `v-model:open` y slots `#body` / `#footer` |
@@ -262,7 +264,7 @@ function eliminarTramo(i: number) {
   <tr v-for="(tramo, i) in form.tramos" :key="i">
     <td><UInput v-model="tramo.minimo" inputmode="decimal" /></td>
     <td><UInput v-model="tramo.valor"  inputmode="decimal" /></td>
-    <td><UButton icon="i-heroicons-trash" color="error" variant="ghost" size="xs" @click="eliminarTramo(i)" /></td>
+    <td><UButton icon="i-lucide-trash-2" color="error" variant="ghost" size="xs" @click="eliminarTramo(i)" /></td>
   </tr>
 </tbody>
 ```

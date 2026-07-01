@@ -160,7 +160,7 @@ async function onAbonoSuccess() {
 
     <template #body>
       <div v-if="loading" class="py-12 text-center text-muted">
-        <UIcon name="i-heroicons-arrow-path" class="mx-auto mb-2 h-6 w-6 animate-spin" />
+        <UIcon name="i-lucide-loader" class="mx-auto mb-2 h-6 w-6 animate-spin" />
         Cargando venta…
       </div>
 
@@ -218,7 +218,7 @@ async function onAbonoSuccess() {
             </template>
             <template #empty>
               <div class="py-10 text-center text-sm text-muted">
-                <UIcon name="i-heroicons-inbox" class="mx-auto mb-2 h-8 w-8 opacity-40" />
+                <UIcon name="i-lucide-inbox" class="mx-auto mb-2 h-8 w-8 opacity-40" />
                 Sin líneas de venta.
               </div>
             </template>
@@ -316,7 +316,7 @@ async function onAbonoSuccess() {
       </div>
 
       <div v-else class="py-12 text-center text-muted">
-        <UIcon name="i-heroicons-exclamation-triangle" class="mx-auto mb-2 h-8 w-8 opacity-40" />
+        <UIcon name="i-lucide-triangle-alert" class="mx-auto mb-2 h-8 w-8 opacity-40" />
         No se encontró la venta.
       </div>
     </template>
@@ -332,7 +332,7 @@ async function onAbonoSuccess() {
       <UButton
         v-if="puedeAbonar"
         label="Registrar pago"
-        icon="i-heroicons-plus"
+        icon="i-lucide-plus"
         @click="abonoOpen = true"
       />
     </template>

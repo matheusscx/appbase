@@ -17,7 +17,7 @@ Al editar archivos en `frontend/`, usa estas fuentes en este orden de prioridad:
 - App envuelta en `UApp` (ya en `app/app.vue`).
 - **Colores semánticos** — `text-default`, `text-muted`, `bg-elevated`, `border-default`. Prohibido Tailwind crudo (`text-gray-500`, `bg-white dark:bg-gray-900`).
 - **Espaciado** — página `space-y-6`; formularios `space-y-4`; shell drawer/card `px-6 py-4`; UI anidada con borde `px-4`. Ver `DESIGN-SYSTEM.md` § Espaciado.
-- **Iconos** — formato `i-{collection}-{name}` (p. ej. `i-lucide-plus`).
+- **Iconos** — colección **Lucide** (`i-lucide-{name}`), p. ej. `i-lucide-plus`. Alineado con Nuxt UI v4. Paquete: `@iconify-json/lucide`. Buscar en [icones.js.org/collection/lucide](https://icones.js.org/collection/lucide) o MCP `search_icons`.
 - **Formato** — `formatMonto` / `formatFecha` desde `useFormatters`; no definir formatters locales en `.vue`.
 - **API** — `useApiFetch`, no `$fetch` directo.
 - **Overrides** — prioridad: prop `ui` / `class` → `app.config.ts` → defaults del tema.

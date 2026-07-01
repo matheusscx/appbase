@@ -135,7 +135,7 @@ async function cerrarCaja() {
           type="submit"
           form="caja-cierre-form"
           color="error"
-          icon="i-heroicons-lock-closed"
+          icon="i-lucide-lock"
           :loading="saving"
         >
           Confirmar cierre

@@ -225,7 +225,7 @@ function moverAbajo(index: number) {
                 </span>
                 <div class="flex gap-1">
                   <UButton
-                    icon="i-heroicons-chevron-up"
+                    icon="i-lucide-chevron-up"
                     variant="ghost"
                     color="neutral"
                     size="xs"
@@ -233,7 +233,7 @@ function moverAbajo(index: number) {
                     @click="moverArriba(i)"
                   />
                   <UButton
-                    icon="i-heroicons-chevron-down"
+                    icon="i-lucide-chevron-down"
                     variant="ghost"
                     color="neutral"
                     size="xs"

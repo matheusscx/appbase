@@ -9,47 +9,47 @@ const items = computed<NavigationMenuItem[]>(() => {
   const base: NavigationMenuItem[] = [
     {
       label: 'Inicio',
-      icon: 'i-heroicons-home',
+      icon: 'i-lucide-house',
       to: '/',
     },
     {
       label: 'Test',
-      icon: 'i-heroicons-beaker',
+      icon: 'i-lucide-flask-conical',
       to: '/test',
     },
   ]
   if (permissionsStore.esAdmin || permissionsStore.can('Caja', 'Leer')) {
     base.push({
       label: 'Caja',
-      icon: 'i-heroicons-banknotes',
+      icon: 'i-lucide-banknote',
       to: '/caja',
     })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Leer')) {
     base.push({
       label: 'Ventas',
-      icon: 'i-heroicons-document-text',
+      icon: 'i-lucide-file-text',
       to: '/ventas',
     })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Leer')) {
     base.push({
       label: 'Pagos',
-      icon: 'i-heroicons-credit-card',
+      icon: 'i-lucide-credit-card',
       to: '/pagos',
     })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear')) {
     base.push({
       label: 'Punto de venta',
-      icon: 'i-heroicons-shopping-cart',
+      icon: 'i-lucide-shopping-cart',
       to: '/ventas/pos',
     })
   }
   if (authStore.isSuperadmin) {
     base.push({
       label: 'Administración',
-      icon: 'i-heroicons-shield-check',
+      icon: 'i-lucide-shield-check',
       to: '/admin',
     })
   }
@@ -59,7 +59,7 @@ const items = computed<NavigationMenuItem[]>(() => {
 const settingsItems = computed<NavigationMenuItem[]>(() => [
   {
     label: 'Configuración',
-    icon: 'i-heroicons-cog-6-tooth',
+    icon: 'i-lucide-settings',
     to: '/configuracion',
   },
 ])
@@ -71,7 +71,7 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
       <template #header="{ collapsed }">
         <div class="flex items-center gap-2 px-1">
           <div class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
-            <UIcon name="i-heroicons-bolt" class="text-white w-4 h-4" />
+            <UIcon name="i-lucide-zap" class="text-white w-4 h-4" />
           </div>
           <ClientOnly>
             <span v-if="!collapsed" class="font-semibold text-sm truncate">
@@ -97,7 +97,7 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
             orientation="vertical"
           />
           <UButton
-            :icon="collapsed ? 'i-heroicons-arrow-right-on-rectangle' : undefined"
+            :icon="collapsed ? 'i-lucide-log-out' : undefined"
             :label="collapsed ? undefined : 'Cerrar sesión'"
             color="neutral"
             variant="ghost"

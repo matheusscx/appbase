@@ -19,7 +19,7 @@ const items = computed<DropdownMenuItem[][]>(() => {
   const main: DropdownMenuItem[] = [
     {
       label: 'Mi Cuenta',
-      icon: 'i-heroicons-user-circle',
+      icon: 'i-lucide-circle-user',
       onSelect: () => navigateTo('/configuracion/perfil'),
     },
   ]
@@ -27,7 +27,7 @@ const items = computed<DropdownMenuItem[][]>(() => {
   if (tenantStore.tenants.length > 1) {
     main.push({
       label: 'Cambiar Institución',
-      icon: 'i-heroicons-building-office-2',
+      icon: 'i-lucide-building-2',
       onSelect: () => navigateTo('/select-tenant'),
     })
   }
@@ -36,7 +36,7 @@ const items = computed<DropdownMenuItem[][]>(() => {
     main,
     [{
       label: 'Cerrar Sesión',
-      icon: 'i-heroicons-arrow-right-on-rectangle',
+      icon: 'i-lucide-log-out',
       color: 'error',
       onSelect: () => authStore.logout(),
     }],

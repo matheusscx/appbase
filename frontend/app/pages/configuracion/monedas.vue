@@ -191,9 +191,9 @@ const columns: TableColumn<Moneda>[] = [
               @click="setDefault(row.original)"
             >
               <UIcon
-                :name="row.original.esDefault ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
+                :name="'i-lucide-star'"
                 class="w-5 h-5"
-                :class="row.original.esDefault ? 'text-warning' : 'text-muted'"
+                :class="row.original.esDefault ? 'text-warning fill-current' : 'text-muted'"
               />
             </button>
           </div>

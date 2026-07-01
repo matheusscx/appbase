@@ -57,7 +57,7 @@ async function onOpened(): Promise<void> {
         </p>
 
         <div v-if="loading" class="py-12 text-center text-sm text-muted">
-          <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+          <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
           Cargando…
         </div>
 
@@ -78,7 +78,7 @@ async function onOpened(): Promise<void> {
         <!-- Sin permiso Ver todas con caja abierta: redirigiendo (no debería verse) -->
         <template v-else>
           <div class="py-12 text-center text-sm text-muted">
-            <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+            <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
             Redirigiendo…
           </div>
         </template>

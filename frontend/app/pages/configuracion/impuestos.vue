@@ -170,7 +170,7 @@ const columns: TableColumn<Impuesto>[] = [
         </p>
       </div>
       <UButton
-        icon="i-heroicons-plus"
+        icon="i-lucide-plus"
         @click="abrirCrear"
       >
         Nuevo impuesto
@@ -203,13 +203,13 @@ const columns: TableColumn<Impuesto>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-2">
             <UButton
-              icon="i-heroicons-pencil-square"
+              icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               @click="abrirEditar(row.original)"
             />
             <UButton
-              icon="i-heroicons-trash"
+              icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"

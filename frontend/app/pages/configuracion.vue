@@ -14,7 +14,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
   const items: NavigationMenuItem[] = [
     {
       label: 'Perfil',
-      icon: 'i-heroicons-user-circle',
+      icon: 'i-lucide-circle-user',
       to: '/configuracion/perfil',
     },
   ]
@@ -23,67 +23,67 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     items.push(
       {
         label: 'Roles y permisos',
-        icon: 'i-heroicons-shield-check',
+        icon: 'i-lucide-shield-check',
         to: '/configuracion/roles',
       },
       {
         label: 'Usuarios',
-        icon: 'i-heroicons-users',
+        icon: 'i-lucide-users',
         to: '/configuracion/usuarios',
       },
       {
         label: 'Empresa',
-        icon: 'i-heroicons-building-office-2',
+        icon: 'i-lucide-building-2',
         to: '/configuracion/empresa',
       },
       {
         label: 'Razones sociales',
-        icon: 'i-heroicons-document-text',
+        icon: 'i-lucide-file-text',
         to: '/configuracion/razones-sociales',
       },
       {
         label: 'Monedas',
-        icon: 'i-heroicons-currency-dollar',
+        icon: 'i-lucide-dollar-sign',
         to: '/configuracion/monedas',
       },
       {
         label: 'Categorías',
-        icon: 'i-heroicons-tag',
+        icon: 'i-lucide-tag',
         to: '/configuracion/categorias',
       },
       {
         label: 'Impuestos',
-        icon: 'i-heroicons-receipt-percent',
+        icon: 'i-lucide-receipt-percent',
         to: '/configuracion/impuestos',
       },
       {
         label: 'Descuentos',
-        icon: 'i-heroicons-arrow-trending-down',
+        icon: 'i-lucide-trending-down',
         to: '/configuracion/descuentos',
       },
       {
         label: 'Recargos',
-        icon: 'i-heroicons-arrow-trending-up',
+        icon: 'i-lucide-trending-up',
         to: '/configuracion/recargos',
       },
       {
         label: 'Preferencias',
-        icon: 'i-heroicons-adjustments-horizontal',
+        icon: 'i-lucide-sliders-horizontal',
         to: '/configuracion/preferencias-financieras',
       },
       {
         label: 'Métodos de pago',
-        icon: 'i-heroicons-credit-card',
+        icon: 'i-lucide-credit-card',
         to: '/configuracion/metodos-pago',
       },
       {
         label: 'Items',
-        icon: 'i-heroicons-archive-box',
+        icon: 'i-lucide-archive',
         to: '/configuracion/items',
       },
       {
         label: 'Inventario',
-        icon: 'i-heroicons-clipboard-document-list',
+        icon: 'i-lucide-clipboard-list',
         to: '/configuracion/inventario',
       },
     )

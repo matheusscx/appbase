@@ -146,7 +146,7 @@ const columns: TableColumn<Member>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex items-center justify-end">
             <UButton
-              icon="i-heroicons-pencil-square"
+              icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               @click="abrirEdicion(row.original)"

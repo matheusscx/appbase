@@ -21,6 +21,7 @@
 - No breaking changes to API or data flow
 - Maintain 100% backward compatibility with existing components
 - All changes use semantic tokens from Nuxt UI (text-muted, text-default, border-default, bg-default, etc.)
+- **Icons:** Lucide only — `i-lucide-{name}` via `@iconify-json/lucide`. Aligned with Nuxt UI v4 defaults. Reference: `layouts/dashboard.vue`, `configuracion.vue` nav.
 - Dark mode support required for all changes
 - Frequent commits — one per file/component group modified
 - Pages tested in browser at 1024px and 375px viewport widths

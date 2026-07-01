@@ -225,20 +225,20 @@ function menuAcciones(item: Item) {
     const inventario: any[] = [
       {
         label: 'Ajustar stock',
-        icon: 'i-heroicons-arrows-up-down',
+        icon: 'i-lucide-arrow-up-down',
         onSelect: () => abrirAjusteStock(item),
       },
     ]
     if (item.modoInventario === 'serie' || item.modoInventario === 'lote') {
       inventario.push({
         label: item.modoInventario === 'serie' ? 'Ver unidades' : 'Ver lotes',
-        icon: 'i-heroicons-squares-2x2',
+        icon: 'i-lucide-layout-grid',
         onSelect: () => abrirVerUnidades(item),
       })
     }
     inventario.push({
       label: 'Historial de movimientos',
-      icon: 'i-heroicons-clipboard-document-list',
+      icon: 'i-lucide-clipboard-list',
       onSelect: () => abrirHistorial(item),
     })
     grupos.push(inventario)
@@ -247,7 +247,7 @@ function menuAcciones(item: Item) {
   grupos.push([
     {
       label: 'Eliminar',
-      icon: 'i-heroicons-trash',
+      icon: 'i-lucide-trash-2',
       color: 'error',
       onSelect: () => confirmarEliminar(item.id),
     },
@@ -621,7 +621,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         <h1 class="text-2xl font-semibold">Items</h1>
         <p class="text-sm text-muted">Productos y servicios del catálogo</p>
       </div>
-      <UButton icon="i-heroicons-plus" @click="abrirCrear">Nuevo item</UButton>
+      <UButton icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
     </div>
 
     <!-- Filtro por tipo -->
@@ -688,7 +688,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               @update:model-value="toggleActivo(row.original)"
             />
             <UButton
-              icon="i-heroicons-pencil-square"
+              icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               size="sm"
@@ -697,7 +697,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             />
             <UDropdownMenu :items="menuAcciones(row.original)">
               <UButton
-                icon="i-heroicons-ellipsis-vertical"
+                icon="i-lucide-ellipsis-vertical"
                 color="neutral"
                 variant="ghost"
                 size="sm"
@@ -709,7 +709,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
         <template #empty>
           <div class="py-8 text-center text-sm text-muted">
-            <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+            <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
             No hay items. Crea el primero con el botón de arriba.
           </div>
         </template>
@@ -838,7 +838,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     <UButton
                       size="xs"
                       variant="ghost"
-                      icon="i-heroicons-plus"
+                      icon="i-lucide-plus"
                       @click="form.series = [...form.series, { serie: '', condicion: 'nuevo', garantiaHasta: '' }]"
                     >Agregar</UButton>
                   </div>
@@ -865,7 +865,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       <UButton
                         color="error"
                         variant="ghost"
-                        icon="i-heroicons-trash"
+                        icon="i-lucide-trash-2"
                         size="sm"
                         class="self-end"
                         @click="form.series = form.series.filter((_, i) => i !== idx)"
@@ -1032,7 +1032,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   <UButton
                     size="xs"
                     variant="ghost"
-                    icon="i-heroicons-plus"
+                    icon="i-lucide-plus"
                     @click="ajusteForm.series = [...ajusteForm.series, { serie: '', condicion: 'nuevo', garantiaHasta: '' }]"
                   >Agregar</UButton>
                 </div>
@@ -1059,7 +1059,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     <UButton
                       color="error"
                       variant="ghost"
-                      icon="i-heroicons-trash"
+                      icon="i-lucide-trash-2"
                       size="sm"
                       class="self-end"
                       @click="ajusteForm.series = ajusteForm.series.filter((_, i) => i !== idx)"

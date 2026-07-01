@@ -150,7 +150,7 @@ const columns: TableColumn<Movimiento>[] = [
         </template>
         <template #empty>
           <div class="py-8 text-center text-sm text-muted">
-            <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+            <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
             No hay movimientos registrados.
           </div>
         </template>
