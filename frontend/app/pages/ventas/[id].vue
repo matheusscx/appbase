@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
+import type { TableColumn } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -112,6 +113,13 @@ function estadoLabel(estado: string): string {
   }
   return map[estado] ?? estado
 }
+
+const detalleColumns: TableColumn<Detalle>[] = [
+  { accessorKey: 'descripcion', header: 'Descripción' },
+  { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'precioUnitario', header: 'Precio unit.', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'totalLinea', header: 'Total línea', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -177,30 +185,23 @@ function estadoLabel(estado: string): string {
             <template #header>
               <h2 class="text-base font-semibold">Líneas de venta</h2>
             </template>
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-default text-left text-muted">
-                    <th class="py-2 pr-4">Descripción</th>
-                    <th class="py-2 pr-4 text-right">Cantidad</th>
-                    <th class="py-2 pr-4 text-right">Precio unit.</th>
-                    <th class="py-2 text-right">Total línea</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="d in venta.detalles"
-                    :key="d.id"
-                    class="border-b border-default last:border-0"
-                  >
-                    <td class="py-2 pr-4">{{ d.descripcion }}</td>
-                    <td class="py-2 pr-4 text-right font-mono">{{ d.cantidad }}</td>
-                    <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(d.precioUnitario) }}</td>
-                    <td class="py-2 text-right font-mono">{{ formatMonto(d.totalLinea) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            <UTable :data="venta.detalles" :columns="detalleColumns">
+              <template #cantidad-cell="{ row }">
+                <span class="font-mono">{{ row.original.cantidad }}</span>
+              </template>
+              <template #precioUnitario-cell="{ row }">
+                <span class="font-mono">{{ formatMonto(row.original.precioUnitario) }}</span>
+              </template>
+              <template #totalLinea-cell="{ row }">
+                <span class="font-mono">{{ formatMonto(row.original.totalLinea) }}</span>
+              </template>
+              <template #empty>
+                <div class="py-10 text-center text-sm text-muted">
+                  <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  Sin líneas de venta.
+                </div>
+              </template>
+            </UTable>
           </UCard>
 
           <!-- Totals + Pagos + Saldo -->
