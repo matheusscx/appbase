@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 interface Rol {
   id: string
   nombre: string
@@ -68,6 +70,12 @@ async function eliminar(rol: Rol) {
 }
 
 onMounted(cargar)
+
+const columns: TableColumn<Rol>[] = [
+  { accessorKey: 'nombre', header: 'Nombre' },
+  { accessorKey: 'descripcion', header: 'Descripción' },
+  { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -87,62 +95,54 @@ onMounted(cargar)
     </div>
 
     <UCard>
-      <div
-        v-if="loading"
-        class="py-8 text-center text-sm text-muted"
-      >
-        Cargando…
-      </div>
-      <div
-        v-else-if="!roles.length"
-        class="py-8 text-center text-sm text-muted"
-      >
-        No hay roles todavía.
-      </div>
-      <ul v-else class="divide-y divide-border-default">
-        <li
-          v-for="rol in roles"
-          :key="rol.id"
-          class="flex items-center justify-between py-3"
-        >
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="font-medium">{{ rol.nombre }}</span>
-              <UBadge
-                v-if="rol.esFijo"
-                color="neutral"
-                variant="subtle"
-                size="xs"
-              >
-                Fijo
-              </UBadge>
-            </div>
-            <p class="text-sm text-muted">
-              {{ rol.descripcion || 'Sin descripción' }}
-            </p>
+      <UTable :data="roles" :columns="columns" :loading="loading">
+        <template #nombre-cell="{ row }">
+          <div class="flex items-center gap-2">
+            <span class="font-medium">{{ row.original.nombre }}</span>
+            <UBadge
+              v-if="row.original.esFijo"
+              color="neutral"
+              variant="subtle"
+              size="xs"
+            >
+              Fijo
+            </UBadge>
           </div>
-          <div class="flex items-center gap-1">
+        </template>
+
+        <template #descripcion-cell="{ row }">
+          <span class="text-sm text-muted">{{ row.original.descripcion || 'Sin descripción' }}</span>
+        </template>
+
+        <template #acciones-cell="{ row }">
+          <div class="flex items-center justify-end gap-1">
             <UButton
               icon="i-heroicons-pencil-square"
               color="neutral"
               variant="ghost"
-              :to="`/configuracion/roles/${rol.id}`"
+              :to="`/configuracion/roles/${row.original.id}`"
             />
             <UButton
               icon="i-heroicons-trash"
               color="error"
               variant="ghost"
-              :disabled="rol.esFijo"
-              @click="eliminar(rol)"
+              :disabled="row.original.esFijo"
+              @click="eliminar(row.original)"
             />
           </div>
-        </li>
-      </ul>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            No hay roles todavía.
+          </div>
+        </template>
+      </UTable>
     </UCard>
 
     <UModal v-model:open="modalOpen" title="Nuevo rol">
       <template #body>
-        <form class="space-y-4" @submit.prevent="crear">
+        <UForm :state="nuevo" class="space-y-4" @submit="crear">
           <UFormField label="Nombre" required>
             <UInput v-model="nuevo.nombre" placeholder="Ej: Cajero" autofocus />
           </UFormField>
@@ -161,7 +161,7 @@ onMounted(cargar)
               Crear y configurar
             </UButton>
           </div>
-        </form>
+        </UForm>
       </template>
     </UModal>
   </div>
