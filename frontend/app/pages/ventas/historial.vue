@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
+import type { Row } from '@tanstack/vue-table'
+import type { TableColumn } from '@nuxt/ui'
+import { getPaginationRowModel } from '@tanstack/vue-table'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -23,8 +26,9 @@ const ventas = ref<VentaResumen[]>([])
 const loading = ref(false)
 const filtroEstado = ref('')
 const filtroCanal = ref('')
-const page = ref(1)
 const pageSize = 15
+const table = useTemplateRef('table')
+const pagination = ref({ pageIndex: 0, pageSize })
 
 function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
   const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
@@ -46,6 +50,18 @@ function estadoLabel(estado: string): string {
     borrador: 'Borrador',
   }
   return map[estado] ?? estado
+}
+
+function canalColor(canal: string): 'primary' | 'neutral' {
+  return canal === 'online' ? 'primary' : 'neutral'
+}
+
+function canalLabel(canal: string): string {
+  const map: Record<string, string> = {
+    fisico: 'Físico',
+    online: 'Online',
+  }
+  return map[canal] ?? canal
 }
 
 const estadoOptions = [
@@ -75,12 +91,7 @@ const ventasFiltradas = computed(() => {
   return result
 })
 
-watch([filtroEstado, filtroCanal], () => { page.value = 1 })
-
-const ventasPagina = computed(() => {
-  const start = (page.value - 1) * pageSize
-  return ventasFiltradas.value.slice(start, start + pageSize)
-})
+watch([filtroEstado, filtroCanal], () => { pagination.value.pageIndex = 0 })
 
 const totalFacturado = computed(() =>
   ventas.value.reduce((acc, v) => acc.plus(new Decimal(v.totalFinal)), new Decimal(0)),
@@ -103,6 +114,19 @@ async function cargar() {
     loading.value = false
   }
 }
+
+function onSelectVenta(_e: Event, row: Row<VentaResumen>) {
+  navigateTo(`/ventas/${row.original.id}`)
+}
+
+const columns: TableColumn<VentaResumen>[] = [
+  { accessorKey: 'fecha', header: 'Fecha' },
+  { accessorKey: 'canal', header: 'Canal' },
+  { accessorKey: 'estado', header: 'Estado' },
+  { accessorKey: 'totalFinal', header: 'Total', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'montoPagado', header: 'Pagado', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'saldo', header: 'Saldo', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 
 onMounted(cargar)
 </script>
@@ -175,51 +199,49 @@ onMounted(cargar)
         </div>
 
         <UCard v-else>
-          <!-- Estado vacío -->
-          <div v-if="ventasFiltradas.length === 0" class="py-10 text-center text-sm text-muted">
-            <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-            {{ hayFiltrosActivos ? 'Ninguna venta coincide con los filtros.' : 'No hay ventas registradas.' }}
-          </div>
-
-          <div v-else class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-default text-left text-xs text-muted uppercase tracking-wider">
-                  <th class="py-2 pr-4 font-medium">Fecha</th>
-                  <th class="py-2 pr-4 font-medium">Canal</th>
-                  <th class="py-2 pr-4 font-medium">Estado</th>
-                  <th class="py-2 pr-4 font-medium text-right">Total</th>
-                  <th class="py-2 pr-4 font-medium text-right">Pagado</th>
-                  <th class="py-2 font-medium text-right">Saldo</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="v in ventasPagina"
-                  :key="v.id"
-                  class="border-b border-default last:border-0 hover:bg-elevated cursor-pointer"
-                  @click="navigateTo(`/ventas/${v.id}`)"
-                >
-                  <td class="py-2 pr-4">{{ formatFecha(v.fecha) }}</td>
-                  <td class="py-2 pr-4 capitalize">{{ v.canal }}</td>
-                  <td class="py-2 pr-4">
-                    <UBadge :color="estadoColor(v.estado)" :label="estadoLabel(v.estado)" variant="subtle" size="sm" />
-                  </td>
-                  <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(v.totalFinal) }}</td>
-                  <td class="py-2 pr-4 text-right font-mono">{{ formatMonto(v.montoPagado) }}</td>
-                  <td class="py-2 text-right font-mono" :class="new Decimal(v.saldo).gt(0) ? 'text-warning' : ''">
-                    {{ formatMonto(v.saldo) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <UTable
+            ref="table"
+            v-model:pagination="pagination"
+            :data="ventasFiltradas"
+            :columns="columns"
+            :pagination-options="{ getPaginationRowModel: getPaginationRowModel() }"
+            :ui="{ tr: 'cursor-pointer' }"
+            @select="onSelectVenta"
+          >
+            <template #fecha-cell="{ row }">
+              <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
+            </template>
+            <template #canal-cell="{ row }">
+              <UBadge :color="canalColor(row.original.canal)" :label="canalLabel(row.original.canal)" variant="subtle" size="sm" />
+            </template>
+            <template #estado-cell="{ row }">
+              <UBadge :color="estadoColor(row.original.estado)" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
+            </template>
+            <template #totalFinal-cell="{ row }">
+              <span class="font-mono">{{ formatMonto(row.original.totalFinal) }}</span>
+            </template>
+            <template #montoPagado-cell="{ row }">
+              <span class="font-mono">{{ formatMonto(row.original.montoPagado) }}</span>
+            </template>
+            <template #saldo-cell="{ row }">
+              <span class="font-mono" :class="new Decimal(row.original.saldo).gt(0) ? 'text-warning' : ''">
+                {{ formatMonto(row.original.saldo) }}
+              </span>
+            </template>
+            <template #empty>
+              <div class="py-10 text-center text-sm text-muted">
+                <UIcon name="i-heroicons-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+                {{ hayFiltrosActivos ? 'Ninguna venta coincide con los filtros.' : 'No hay ventas registradas.' }}
+              </div>
+            </template>
+          </UTable>
 
           <div v-if="ventasFiltradas.length > pageSize" class="flex justify-end pt-4">
             <UPagination
-              v-model:page="page"
-              :items-per-page="pageSize"
+              :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
+              :items-per-page="table?.tableApi?.getState().pagination.pageSize"
               :total="ventasFiltradas.length"
+              @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
             />
           </div>
         </UCard>
