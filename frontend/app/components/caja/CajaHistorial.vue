@@ -6,19 +6,27 @@ import type { Caja } from '~/stores/caja'
 
 const props = defineProps<{ usuarioId?: string }>()
 
+const route = useRoute()
+
 const permissionsStore = usePermissionsStore()
 const { formatMonto, formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
 
 const todasActivo = ref(false)
 
+const usuarioIdEfectivo = computed(() => {
+  if (props.usuarioId) return props.usuarioId
+  const id = route.query.usuarioId
+  return typeof id === 'string' && id ? id : undefined
+})
+
 const puedeVerTodas = computed(
   () => permissionsStore.esAdmin || permissionsStore.can('Caja', 'Ver todas'),
 )
 
 const listFilters = computed(() => ({
-  usuarioId: props.usuarioId,
-  todas: !props.usuarioId && todasActivo.value ? 'true' : undefined,
+  usuarioId: usuarioIdEfectivo.value,
+  todas: !usuarioIdEfectivo.value && todasActivo.value ? 'true' : undefined,
 }))
 
 const { items: historial, meta, page, loading } = usePaginatedList<Caja>({
@@ -61,7 +69,7 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
           </span>
         </h2>
         <UButton
-          v-if="puedeVerTodas && !usuarioId"
+          v-if="puedeVerTodas && !usuarioIdEfectivo"
           size="sm"
           :color="todasActivo ? 'primary' : 'neutral'"
           :variant="todasActivo ? 'solid' : 'outline'"

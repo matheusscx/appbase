@@ -59,24 +59,34 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
 
     <template #body>
       <div class="max-w-5xl mx-auto space-y-6 py-6">
-        <ULink
-          v-if="puedeVerTodas"
-          to="/caja"
-          class="text-sm text-highlighted inline-flex items-center gap-1"
-        >
-          <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
-          Volver al listado
-        </ULink>
+        <div v-if="puedeVerTodas" class="flex flex-wrap items-center gap-4">
+          <ULink
+            to="/caja"
+            class="text-sm text-highlighted inline-flex items-center gap-1"
+          >
+            <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
+            Volver al listado
+          </ULink>
+          <ULink
+            v-if="cajaStore.detalle?.usuarioId"
+            :to="{
+              path: '/caja/historial',
+              query: { usuarioId: cajaStore.detalle.usuarioId },
+            }"
+            class="text-sm text-highlighted inline-flex items-center gap-1"
+          >
+            <UIcon name="i-lucide-history" class="w-4 h-4" />
+            Ver historial del cajero
+          </ULink>
+        </div>
 
         <div v-if="loading" class="py-12 text-center text-sm text-muted">
           <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
           Cargando…
         </div>
 
-        <div v-else-if="cajaStore.detalle" class="space-y-6">
+        <div v-else-if="cajaStore.detalle">
           <CajaActivaDashboard :caja="cajaStore.detalle" :readonly="readonly" />
-          <USeparator class="my-2" />
-          <CajaHistorial :usuario-id="cajaStore.detalle.usuarioId ?? undefined" />
         </div>
       </div>
     </template>

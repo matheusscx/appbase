@@ -37,8 +37,10 @@ export class CajaController {
   @RequiresPermiso('Caja', 'Leer')
   async historial(@Req() req: Request, @Query() query: QueryHistorialCajaDto) {
     const u = req.user as JwtUser;
+    const consultaOtroUsuario =
+      query.usuarioId != null && query.usuarioId !== u.id;
     let verTodas = false;
-    if (query.todas) {
+    if (query.todas || consultaOtroUsuario) {
       verTodas = await this.rbacService.userHasPermiso(
         u.id,
         u.tenantId!,

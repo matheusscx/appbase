@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: —
-**Last Updated**: 2026-06-29
+**Last Updated**: 2026-07-01
 
 ---
 
@@ -381,18 +381,22 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 ### Pages
 
 - `pages/caja/index.vue` — Pantalla principal con dos modos según permisos:
-  - **Sin `Ver todas`**: máquina de estados directa (sin caja → caja abierta → cierre)
-  - **Con `Ver todas`**: dos pestañas — "Mi caja" (operar caja propia) y "Todas las cajas" (grid de cajas abiertas del tenant)
-- `pages/caja/[id].vue` — Detalle read-only de una caja ajena: estado, fechaApertura, saldoInicial, saldoEsperado y lista de movimientos (concepto, fecha, monto coloreado por tipo). Sin botones de operar. 403/404 → redirect a `/caja`.
+  - **Sin `Ver todas`**: sin caja abierta → formulario de apertura + historial embebido; con caja abierta → redirect a `/caja/[id]`
+  - **Con `Ver todas`**: grid de cajas abiertas (`CajaAbiertasGrid`) + botón "Ver historial" → `/caja/historial`
+- `pages/caja/historial.vue` — Historial paginado de sesiones de caja (`CajaHistorial`). Soporta `?usuarioId=` para filtrar por cajero (desde detalle admin). Toggle "Ver todas" para supervisores.
+- `pages/caja/[id].vue` — Detalle de un turno: KPIs + tabla de movimientos (`CajaActivaDashboard`). Modo read-only si la caja no es la propia activa. Admin: links "Volver al listado" y "Ver historial del cajero". Sin historial embebido (evita tablas duplicadas). 403/404 → redirect a `/caja`.
 
 ### Components
 
-- `components/caja/CajaAbierta.vue` — Panel de caja activa: saldo esperado, lista de movimientos del día, botón de cierre
-- `components/caja/AbrirCajaForm.vue` — Formulario de apertura (saldo inicial + comentario)
-- `components/caja/MovimientosTable.vue` — Tabla de movimientos manuales con tipo y monto
-- `components/caja/CerrarCajaForm.vue` — Formulario de cierre con cuadre visual (esperado vs. contado → diferencia)
-- `components/caja/HistorialCajas.vue` — Listado de sesiones pasadas con filtro de fecha
-- `components/caja/CajasAbiertasGrid.vue` — Grid de cards para usuarios con `Ver todas`: muestra todas las cajas físicas abiertas del tenant. Cada card: nombre del cajero, saldo inicial, saldo esperado, hora de apertura, badge "Mía" para la propia. Click en caja propia → activa pestaña "Mi caja". Click en caja ajena → navega a `/caja/[id]`.
+- `components/caja/CajaActivaDashboard.vue` — Orquestador del turno: compone header, resumen KPIs y tabla de movimientos; modales de movimiento y cierre
+- `components/caja/CajaTurnoHeader.vue` — Título, badge de estado, fecha de apertura, botones +Movimiento / Cerrar caja
+- `components/caja/CajaTurnoResumen.vue` — Grid de 4 KPIs (saldo inicial, entradas, salidas, saldo esperado)
+- `components/caja/CajaMovimientosTable.vue` — Tabla paginada de movimientos con filtro por tipo, scroll interno y thead sticky
+- `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); prop `usuarioId` o query `?usuarioId=`
+- `components/caja/CajaAperturaForm.vue` — Formulario de apertura (saldo inicial + comentario)
+- `components/caja/CajaMovimientoModal.vue` — Modal entrada/salida manual
+- `components/caja/CajaCierreModal.vue` — Modal de cierre con cuadre (esperado vs. contado → diferencia)
+- `components/caja/CajaAbiertasGrid.vue` — Grid de cards para usuarios con `Ver todas`: cajas físicas abiertas del tenant. Click → `/caja/[id]`
 
 ### Pinia Store
 
@@ -553,11 +557,15 @@ npm run test:e2e -- caja.e2e.spec.ts
 1. `docker-compose up`
 2. Login + selección de tenant
 3. Navegar a `/caja`
-4. Abrir caja → verificar panel de caja activa
+4. Abrir caja → verificar panel de caja activa en `/caja/[id]`
 5. Agregar movimientos entrada/salida → verificar saldo esperado actualizado
 6. Intentar salida mayor al saldo → verificar error
 7. Cerrar caja → verificar cuadre (diferencia)
-8. `/caja` muestra "Sin caja activa" y el historial actualizado
+8. `/caja` muestra formulario de apertura y historial (cajero sin caja)
+9. Admin en `/caja`: botón "Ver historial" + grid de abiertas
+10. `/caja/historial`: toggle "Ver todas"; click en fila → `/caja/[id]`
+11. `/caja/[id]` (admin): una sola tabla de movimientos; link "Ver historial del cajero" con `?usuarioId=`
+12. KPIs visibles al hacer scroll en movimientos (thead sticky)
 
 ---
 
@@ -571,9 +579,10 @@ npm run test:e2e -- caja.e2e.spec.ts
 - [x] Permiso "Ver todas" permite supervisores ver cajas de todo el tenant
 - [x] `GET /caja/abiertas` retorna todas las cajas abiertas del tenant (o solo la propia sin `Ver todas`)
 - [x] `GET /caja/:id/movimientos` permite lectura de caja ajena con `Ver todas`; registrar y cerrar siguen owner-only
-- [x] Frontend `/caja` muestra pestañas "Mi caja" / "Todas las cajas" para usuarios con `Ver todas`
-- [x] `CajasAbiertasGrid` muestra cards de cajas abiertas con badge "Mía" y navegación a detalle
-- [x] Página `/caja/[id]` read-only con movimientos; 403/404 redirige a `/caja`
+- [x] Frontend `/caja` muestra grid de abiertas + link historial para usuarios con `Ver todas`
+- [x] `CajaAbiertasGrid` muestra cards de cajas abiertas con badge "Mía" y navegación a detalle
+- [x] Página `/caja/historial` con historial paginado y filtro `?usuarioId=`
+- [x] Página `/caja/[id]` con KPIs + movimientos (sin historial embebido); 403/404 redirige a `/caja`
 - [x] Store `useCajaStore` con `abiertas`, `detalle`, `cargarAbiertas()` y `cargarDetalle(id)`
 - [x] Todos los guards usan `@RequiresPermiso` + `PermisosGuard` (no `TenantAdminGuard`)
 - [x] Frontend página `/caja` con máquina de estados y store `useCajaStore`

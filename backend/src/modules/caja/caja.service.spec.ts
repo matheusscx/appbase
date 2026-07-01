@@ -425,6 +425,22 @@ describe('CajaService', () => {
         ),
       ).rejects.toThrow(ForbiddenException);
     });
+
+    it('(e) permite usuarioId ajeno cuando tiene Ver todas', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([{ ...mockRow, usuario_id: OTRO_USUARIO }]);
+
+      const result = await service.historial(
+        TENANT_ID,
+        USUARIO_ID,
+        { usuarioId: OTRO_USUARIO },
+        true,
+      );
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].usuarioId).toBe(OTRO_USUARIO);
+    });
   });
 
   describe('findOne', () => {

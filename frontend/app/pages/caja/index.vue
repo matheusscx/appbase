@@ -63,6 +63,15 @@ async function onOpened(): Promise<void> {
 
         <!-- Con permiso Ver todas: listado de cajas (con card de apertura si no hay propia) -->
         <template v-else-if="puedeVerTodas">
+          <div class="flex justify-end">
+            <UButton
+              to="/caja/historial"
+              variant="outline"
+              color="neutral"
+              icon="i-lucide-history"
+              label="Ver historial"
+            />
+          </div>
           <CajaAbiertasGrid />
         </template>
 
