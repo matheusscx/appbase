@@ -66,11 +66,7 @@ async function onGoogle() {
         </UButton>
 
         <!-- Divider -->
-        <div class="flex items-center gap-3">
-          <div class="flex-1 h-px bg-border-default" />
-          <span class="text-xs text-muted">o</span>
-          <div class="flex-1 h-px bg-border-default" />
-        </div>
+        <USeparator label="o" :ui="{ label: 'text-xs text-muted' }" />
 
         <!-- Form -->
         <UForm :state="state" class="space-y-4" @submit="onRegister">
@@ -109,7 +105,7 @@ async function onGoogle() {
                 <button
                   type="button"
                   tabindex="-1"
-                  class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  class="text-muted hover:text-default transition-colors"
                   @click="showPassword = !showPassword"
                 >
                   <UIcon :name="showPassword ? 'i-heroicons-eye-slash' : 'i-heroicons-eye'" class="w-4 h-4" />

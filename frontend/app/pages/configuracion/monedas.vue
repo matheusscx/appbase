@@ -185,7 +185,7 @@ const columns: TableColumn<Moneda>[] = [
           <div class="flex justify-end">
             <button
               type="button"
-              class="p-1 rounded transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              class="p-1 rounded transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
               :disabled="toggling.has(row.original.monedaId)"
               :title="row.original.esDefault ? 'Moneda predeterminada' : 'Marcar como predeterminada'"
               @click="setDefault(row.original)"
@@ -193,7 +193,7 @@ const columns: TableColumn<Moneda>[] = [
               <UIcon
                 :name="row.original.esDefault ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
                 class="w-5 h-5"
-                :class="row.original.esDefault ? 'text-yellow-400' : 'text-gray-400'"
+                :class="row.original.esDefault ? 'text-warning' : 'text-muted'"
               />
             </button>
           </div>

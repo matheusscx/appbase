@@ -759,7 +759,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
           <!-- Extensión producto -->
           <template v-if="form.tipo === 'producto'">
-            <div class="border-t pt-4 space-y-4">
+            <USeparator />
+            <div class="space-y-4">
               <p class="text-sm font-medium text-muted">Datos de producto</p>
               <div class="grid grid-cols-2 gap-4">
                 <UFormField label="Unidad de medida">
@@ -870,7 +871,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
           <!-- Extensión servicio -->
           <template v-if="form.tipo === 'servicio'">
-            <div class="border-t pt-4">
+            <USeparator />
+            <div>
               <p class="text-sm font-medium text-muted mb-3">Datos de servicio</p>
               <div class="grid grid-cols-2 gap-4">
                 <UFormField label="Duración estimada (min)">
@@ -884,7 +886,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           </template>
 
           <!-- Reglas asociadas -->
-          <div class="border-t pt-4 space-y-3">
+          <USeparator />
+          <div class="space-y-3">
             <p class="text-sm font-medium text-muted">Reglas asociadas</p>
 
             <UFormField label="Impuestos">

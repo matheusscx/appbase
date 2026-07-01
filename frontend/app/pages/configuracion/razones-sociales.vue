@@ -213,7 +213,7 @@ const columns: TableColumn<RazonSocial>[] = [
             </p>
             <p
               v-if="row.original.direccion"
-              class="text-sm text-gray-400 truncate"
+              class="text-sm text-muted truncate"
             >
               {{ row.original.direccion }}
             </p>
@@ -224,14 +224,14 @@ const columns: TableColumn<RazonSocial>[] = [
           <div class="flex justify-end">
             <button
               type="button"
-              class="p-1 rounded transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+              class="p-1 rounded transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
               :disabled="toggling.has(row.original.id)"
               @click="togglePreferida(row.original)"
             >
               <UIcon
                 :name="row.original.preferida ? 'i-heroicons-star-solid' : 'i-heroicons-star'"
                 class="w-5 h-5"
-                :class="row.original.preferida ? 'text-yellow-400' : 'text-gray-400'"
+                :class="row.original.preferida ? 'text-warning' : 'text-muted'"
               />
             </button>
           </div>
