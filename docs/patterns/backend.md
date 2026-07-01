@@ -316,7 +316,7 @@ Shape inicial:
 ```typescript
 interface UsuarioPreferencias {
   ui?: {
-    colorMode?: 'system' | 'light' | 'dark';
+    colorMode?: 'light' | 'dark';
     pageSize?: 10 | 15 | 25 | 50;
   };
 }
@@ -333,7 +333,7 @@ Utilidades en `common/utils/usuario-preferencias.util.ts`:
 ### Reglas
 
 - Alcance **usuario**, no tenant.
-- Defaults en código: `colorMode: 'system'`, `pageSize: 15`.
+- Defaults en código: `colorMode: 'light'`, `pageSize: 15`.
 - Validar con DTO anidado (`UpdatePreferenciasDto`).
 
 ---

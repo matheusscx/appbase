@@ -10,14 +10,14 @@ export default defineAppConfig({
       highlighted: { light: 'text-primary-600', dark: 'dark:text-primary-400' },
     },
     border: {
-      default: { light: 'border-gray-200', dark: 'dark:border-gray-700' },
+      default: { light: 'border-gray-200', dark: 'dark:border-gray-800' },
     },
     bg: {
-      default: { light: 'bg-white', dark: 'dark:bg-gray-900' },
-      elevated: { light: 'bg-gray-50', dark: 'dark:bg-gray-800' },
-      muted: { light: 'bg-gray-100', dark: 'dark:bg-gray-800' },
+      default: { light: 'bg-white', dark: 'dark:bg-gray-950' },
+      elevated: { light: 'bg-gray-50', dark: 'dark:bg-gray-900' },
+      muted: { light: 'bg-gray-100', dark: 'dark:bg-gray-900/80' },
     },
-    divider: { light: 'divide-gray-100', dark: 'dark:divide-gray-800' },
+    divider: { light: 'divide-gray-100', dark: 'dark:divide-gray-900' },
     // Component-specific overrides
     card: {
       base: 'bg-default divide-y divide-default',

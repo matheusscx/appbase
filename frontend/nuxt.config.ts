@@ -3,6 +3,10 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   css: ['~/assets/css/main.css'],
   modules: ['@nuxt/ui', '@pinia/nuxt', ...(process.env.NODE_ENV !== 'production' ? ['@nuxt/test-utils/module'] : [])],
+  colorMode: {
+    preference: 'light',
+    fallback: 'light',
+  },
   vite: {
     optimizeDeps: {
       include: ['@vue/devtools-core', '@vue/devtools-kit'],

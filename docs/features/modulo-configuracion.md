@@ -96,7 +96,7 @@ Request (merge parcial):
 Response (200):
 {
   "ui": {
-    "colorMode": "system",
+    "colorMode": "light",
     "pageSize": 25
   }
 }

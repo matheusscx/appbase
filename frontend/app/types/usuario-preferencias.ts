@@ -1,4 +1,4 @@
-export type ColorModePreference = 'system' | 'light' | 'dark'
+export type ColorModePreference = 'light' | 'dark'
 
 export type PageSizePreference = 10 | 15 | 25 | 50
 
@@ -12,7 +12,12 @@ export interface UsuarioPreferencias {
 }
 
 export const DEFAULT_PAGE_SIZE: PageSizePreference = 15
-export const DEFAULT_COLOR_MODE: ColorModePreference = 'system'
+export const DEFAULT_COLOR_MODE: ColorModePreference = 'light'
+
+export const COLOR_MODE_OPTIONS: { label: string, value: ColorModePreference }[] = [
+  { label: 'Claro', value: 'light' },
+  { label: 'Oscuro', value: 'dark' },
+]
 
 export const PAGE_SIZE_OPTIONS: { label: string, value: PageSizePreference }[] = [
   { label: '10 filas', value: 10 },
@@ -28,8 +33,9 @@ export function resolvePageSize(prefs?: UsuarioPreferencias | null): PageSizePre
 }
 
 export function resolveColorMode(prefs?: UsuarioPreferencias | null): ColorModePreference {
-  const value = prefs?.ui?.colorMode
-  if (value === 'system' || value === 'light' || value === 'dark') return value
+  const value = prefs?.ui?.colorMode as string | undefined
+  if (value === 'light' || value === 'dark') return value
+  if (value === 'system') return 'dark'
   return DEFAULT_COLOR_MODE
 }
 

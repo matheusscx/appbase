@@ -1,4 +1,4 @@
-export type ColorModePreference = 'system' | 'light' | 'dark';
+export type ColorModePreference = 'light' | 'dark';
 
 export type PageSizePreference = 10 | 15 | 25 | 50;
 
@@ -13,7 +13,7 @@ export interface UsuarioPreferencias {
 
 export const DEFAULT_USUARIO_PREFERENCIAS: UsuarioPreferencias = {
   ui: {
-    colorMode: 'system',
+    colorMode: 'light',
     pageSize: 15,
   },
 };

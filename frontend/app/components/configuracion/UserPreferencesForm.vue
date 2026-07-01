@@ -1,25 +1,18 @@
 <script setup lang="ts">
 import type { ColorModePreference, PageSizePreference } from '~/types/usuario-preferencias'
-import { PAGE_SIZE_OPTIONS } from '~/types/usuario-preferencias'
+import { COLOR_MODE_OPTIONS, PAGE_SIZE_OPTIONS } from '~/types/usuario-preferencias'
 
-const authStore = useAuthStore()
 const { pageSize, colorModePreference, setPageSize, setColorMode } = useUserPreferences()
-const colorMode = useColorMode()
 
 const pageSizeModel = computed({
   get: () => pageSize.value,
   set: (value: PageSizePreference) => setPageSize(value),
 })
 
-watch(
-  () => colorMode.preference,
-  (pref) => {
-    if (!authStore.user) return
-    if (pref !== 'system' && pref !== 'light' && pref !== 'dark') return
-    if (pref === colorModePreference.value) return
-    setColorMode(pref as ColorModePreference)
-  },
-)
+const colorModeModel = computed({
+  get: () => colorModePreference.value,
+  set: (value: ColorModePreference) => setColorMode(value),
+})
 </script>
 
 <template>
@@ -33,12 +26,12 @@ watch(
 
     <div class="space-y-4">
       <UFormField label="Tema">
-        <ClientOnly>
-          <UColorModeSelect class="w-48" />
-          <template #fallback>
-            <USkeleton class="h-10 w-48" />
-          </template>
-        </ClientOnly>
+        <USelect
+          v-model="colorModeModel"
+          :items="COLOR_MODE_OPTIONS"
+          value-key="value"
+          class="w-48"
+        />
       </UFormField>
 
       <UFormField

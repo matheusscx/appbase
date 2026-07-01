@@ -7,7 +7,7 @@ import {
 
 class UiPreferenciasDto {
   @IsOptional()
-  @IsIn(['system', 'light', 'dark'])
+  @IsIn(['light', 'dark'])
   colorMode?: ColorModePreference;
 
   @IsOptional()

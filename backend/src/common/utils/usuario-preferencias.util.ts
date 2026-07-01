@@ -6,13 +6,21 @@ import {
   type UsuarioPreferencias,
 } from '../types/usuario-preferencias.interface';
 
-const ALLOWED_COLOR_MODES: ColorModePreference[] = ['system', 'light', 'dark'];
+const ALLOWED_COLOR_MODES: ColorModePreference[] = ['light', 'dark'];
 
 export function normalizeUsuarioPreferencias(
   raw: UsuarioPreferencias | null | undefined,
 ): UsuarioPreferencias {
-  const colorMode = raw?.ui?.colorMode;
+  const rawMode = raw?.ui?.colorMode;
   const pageSize = raw?.ui?.pageSize;
+
+  let colorMode: ColorModePreference | undefined;
+  if (rawMode === 'light' || rawMode === 'dark') {
+    colorMode = rawMode;
+  } else if (rawMode === 'system') {
+    // Legacy: system se veía igual que dark en la mayoría de equipos
+    colorMode = 'dark';
+  }
 
   return {
     ui: {

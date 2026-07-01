@@ -7,7 +7,17 @@ describe('usuario-preferencias.util', () => {
   describe('normalizeUsuarioPreferencias', () => {
     it('aplica defaults cuando faltan claves', () => {
       expect(normalizeUsuarioPreferencias({})).toEqual({
-        ui: { colorMode: 'system', pageSize: 15 },
+        ui: { colorMode: 'light', pageSize: 15 },
+      });
+    });
+
+    it('migra system legacy a dark', () => {
+      expect(
+        normalizeUsuarioPreferencias({
+          ui: { colorMode: 'system' as never, pageSize: 15 },
+        }),
+      ).toEqual({
+        ui: { colorMode: 'dark', pageSize: 15 },
       });
     });
 
@@ -17,7 +27,7 @@ describe('usuario-preferencias.util', () => {
           ui: { colorMode: 'neon' as never, pageSize: 99 as never },
         }),
       ).toEqual({
-        ui: { colorMode: 'system', pageSize: 15 },
+        ui: { colorMode: 'light', pageSize: 15 },
       });
     });
   });

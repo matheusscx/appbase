@@ -359,7 +359,7 @@ Composable `useUserPreferences()` — lee/escribe `authStore.user.preferencias`.
 | Pref | Default | Persistencia |
 |------|---------|--------------|
 | `pageSize` | 15 | Solo servidor (`PATCH /me/preferencias`) |
-| `colorMode` | system | Cookie `@nuxtjs/color-mode` + mirror servidor |
+| `colorMode` | light | Cookie `@nuxtjs/color-mode` + mirror servidor (`light` / `dark`) |
 
 ```typescript
 const { pageSize, setPageSize, setColorMode } = useUserPreferences()
@@ -369,7 +369,7 @@ usePaginatedList({ path: '/pagos', pageSize, filters })
 
 - UI en `/configuracion/perfil` → `UserPreferencesForm` (sección Apariencia).
 - Plugin `plugins/color-mode-sync.client.ts`: tras `fetchMe`, aplica tema del servidor.
-- `UColorModeSelect` en formulario; cambios se sincronizan con debounce 300 ms.
+- `USelect` Claro/Oscuro en formulario; cambios se sincronizan con debounce 300 ms.
 
 ---
 
