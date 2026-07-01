@@ -83,6 +83,40 @@ These are intentionally retained in the Caja module for clarity:
 </UCard>
 ```
 
+### Drawer lateral (`AppDrawer`)
+
+Usar **`AppDrawer`** (wrapper de `UDrawer`) para formularios y paneles laterales. Ancho estándar vía prop `width`:
+
+| Valor | Ancho |
+|-------|-------|
+| `xs` | 25% |
+| `sm` | 33% |
+| `md` | 50% (default) |
+| `lg` | 75% |
+| `xl` | 90% |
+| `full` | casi pantalla completa |
+| `"50%"`, `"75%"`, `"28rem"` | valor CSS libre |
+
+```vue
+<AppDrawer v-model:open="drawerOpen" title="Nuevo rol" width="50%">
+  <template #body>
+    <UForm id="mi-form" :state="form" class="space-y-4" @submit="guardar">
+      <!-- campos -->
+    </UForm>
+  </template>
+  <template #actions>
+    <UButton variant="ghost" color="neutral" @click="drawerOpen = false">Cancelar</UButton>
+    <UButton type="submit" form="mi-form" :loading="saving">Guardar</UButton>
+  </template>
+</AppDrawer>
+```
+
+Defaults: `direction="right"`, `handle={false}`. Presets en `app/utils/drawer-width.ts`.
+
+Separación header/body/footer con `divide-y divide-accented` (mismo tono gris que el borde de `UInput`: `ring-accented`).
+
+**Acciones siempre en `#actions`** — footer fijo al fondo; el body scrollea. Cancelar primero (izquierda), acción primaria después (derecha). Enlazar submit con `form="id-del-form"` en el botón.
+
 ## Migration Checklist
 
 When adding a new page or updating an existing one:

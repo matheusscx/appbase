@@ -15,7 +15,7 @@ const roles = ref<Rol[]>([])
 const loading = ref(false)
 const apiUrl = config.public.apiUrl
 
-const modalOpen = ref(false)
+const drawerOpen = ref(false)
 const creating = ref(false)
 const nuevo = reactive({ nombre: '', descripcion: '' })
 
@@ -41,7 +41,7 @@ async function crear() {
       method: 'POST',
       body: { nombre: nuevo.nombre.trim(), descripcion: nuevo.descripcion.trim() || null },
     })
-    modalOpen.value = false
+    drawerOpen.value = false
     nuevo.nombre = ''
     nuevo.descripcion = ''
     navigateTo(`/configuracion/roles/${rol.id}`)
@@ -89,7 +89,7 @@ const columns: TableColumn<Rol>[] = [
           Define roles y los permisos que tienen sobre cada módulo.
         </p>
       </div>
-      <UButton icon="i-heroicons-plus" @click="modalOpen = true">
+      <UButton icon="i-heroicons-plus" @click="drawerOpen = true">
         Nuevo rol
       </UButton>
     </div>
@@ -140,29 +140,33 @@ const columns: TableColumn<Rol>[] = [
       </UTable>
     </UCard>
 
-    <UModal v-model:open="modalOpen" title="Nuevo rol">
+    <AppDrawer v-model:open="drawerOpen" title="Nuevo rol" width="50%">
       <template #body>
-        <UForm :state="nuevo" class="space-y-4" @submit="crear">
+        <UForm id="nuevo-rol-form" :state="nuevo" class="space-y-4" @submit="crear">
           <UFormField label="Nombre" required>
             <UInput v-model="nuevo.nombre" placeholder="Ej: Cajero" autofocus />
           </UFormField>
           <UFormField label="Descripción">
             <UInput v-model="nuevo.descripcion" placeholder="Opcional" />
           </UFormField>
-          <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
-              variant="ghost"
-              @click="modalOpen = false"
-            >
-              Cancelar
-            </UButton>
-            <UButton type="submit" :loading="creating">
-              Crear y configurar
-            </UButton>
-          </div>
         </UForm>
       </template>
-    </UModal>
+      <template #actions>
+        <UButton
+          color="neutral"
+          variant="ghost"
+          @click="drawerOpen = false"
+        >
+          Cancelar
+        </UButton>
+        <UButton
+          type="submit"
+          form="nuevo-rol-form"
+          :loading="creating"
+        >
+          Crear y configurar
+        </UButton>
+      </template>
+    </AppDrawer>
   </div>
 </template>

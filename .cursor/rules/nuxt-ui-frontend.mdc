@@ -24,7 +24,7 @@ Al editar archivos en `frontend/`, usa estas fuentes en este orden de prioridad:
 ## Elegir componente
 
 - Select con búsqueda / muchas opciones → `USelectMenu`, no `USelect`.
-- Panel lateral → `USlideover` o `UDrawer`; diálogo centrado → `UModal`.
+- Panel lateral → **`AppDrawer`**: `#body` contenido, **`#actions`** botones abajo; prop `width` (`md`, `lg`, `"50%"`).
 - Tablas de datos → `UTable` con patrones de `docs/patterns/frontend.md`.
 - Feedback transitorio → `useToast`; aviso persistente en página → `UAlert`.
 
