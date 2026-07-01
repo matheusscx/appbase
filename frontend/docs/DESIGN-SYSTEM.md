@@ -44,6 +44,61 @@ These are intentionally retained in the Caja module for clarity:
 - **Red** (expense, negative): `text-red-600 dark:text-red-400`, `bg-red-50 dark:bg-red-900/20`
 - **Blue** (balance, neutral): `text-blue-600 dark:text-blue-400`, `bg-blue-50 dark:bg-blue-900/20`
 
+## Espaciado (padding, margin, gap)
+
+Escala estándar del proyecto. Usar estas clases de Tailwind de forma consistente; evitar valores arbitrarios (`px-[13px]`) salvo casos excepcionales.
+
+### Escala de referencia
+
+| Token | Clase | px | Uso |
+|-------|-------|-----|-----|
+| **Tight** | `2` | 8px | Gap entre botones en footer de drawer/modal (`gap-2`) |
+| **Inset** | `4` | 16px | Contenido **dentro** de un contenedor con borde (acordeón, panel anidado) |
+| **Panel** | `6` | 24px | Shell de página: drawer, card header/body, modal (`px-6`) |
+| **Section** | `6` | 24px | Separación vertical entre bloques de página (`space-y-6`) |
+| **Form block** | `4` | 16px | Campos de formulario, subsecciones (`space-y-4`, `gap-4`) |
+
+### Reglas
+
+1. **Página de configuración** — contenedor raíz con `space-y-6` entre header, card(s) y drawer.
+2. **Formularios** — `space-y-4` entre campos; bloques temáticos (ej. datos + permisos) con `space-y-6`.
+3. **Shell con borde** (`AppDrawer`, `UCard`, `UModal`) — padding horizontal **`px-6`**, vertical **`py-4`** en header/body/footer. Ya aplicado en `AppDrawer` y `app.config.ts` (card/modal).
+4. **Componente anidado con borde propio** — un nivel menos: **`px-4`** en trigger/body para que iconos y texto no queden pegados al borde. Ejemplo: `UAccordion` dentro del drawer vía prop `ui`:
+   ```vue
+   :ui="{ trigger: 'px-4 gap-2', body: 'px-4 pb-4' }"
+   ```
+5. **Grids de filtros o cards** — `gap-4` (`grid`, `flex`).
+6. **Listas densas** (checkboxes, ítems apilados) — `gap-3` o `flex flex-col gap-3`.
+7. **No duplicar padding** — si el padre ya tiene `px-6`, el hijo con borde propio usa `px-4`; no sumar `px-6` en ambos.
+
+### Jerarquía visual (drawer + acordeón)
+
+```
+AppDrawer body          px-6 py-4     ← shell
+  UForm                 space-y-6
+    campos              space-y-4
+    UAccordion          border
+      trigger           px-4          ← inset (icono no pegado al borde)
+      body (checkboxes) px-4
+AppDrawer footer        px-6 py-4, gap-2 entre botones
+```
+
+### Ejemplos rápidos
+
+```vue
+<!-- Página config -->
+<div class="space-y-6">…</div>
+
+<!-- Formulario en drawer -->
+<UForm class="space-y-6">
+  <div class="space-y-4">…campos…</div>
+  <div class="space-y-4">…otra sección…</div>
+</UForm>
+
+<!-- Footer de acciones -->
+<div class="flex justify-between gap-2">…</div>
+```
+
 ## Usage Examples
 
 ### Page Header
@@ -117,7 +172,7 @@ Separación header/body/footer con `divide-y divide-accented` (mismo tono gris q
 
 **Acciones siempre en `#actions`** — footer fijo al fondo; el body scrollea. Cancelar primero (izquierda), acción primaria después (derecha). Enlazar submit con `form="id-del-form"` en el botón.
 
-**Permisos por módulo** — usar `RolPermisosPorModulo`: acordeón (`UAccordion`, `type="multiple"`) por módulo con contador `N/M` en el header, buscador por nombre, checkboxes en columna (permisos con nombres largos).
+**Permisos por módulo** — usar `RolPermisosPorModulo`: acordeón (`UAccordion`, `type="multiple"`) por módulo con contador `N/M` en el header, buscador por nombre, checkboxes en columna (permisos con nombres largos). Padding del acordeón: `px-4` en trigger/body (ver [Espaciado](#espaciado-padding-margin-gap)).
 
 ## Migration Checklist
 
@@ -128,6 +183,7 @@ When adding a new page or updating an existing one:
 - [ ] Replace `bg-gray-50 dark:bg-gray-950` with `bg-elevated`
 - [ ] Replace `divide-gray-100 dark:divide-gray-800` with `divide-border-default`
 - [ ] Replace `border-gray-200 dark:border-gray-700` with `border-border-default`
+- [ ] Page sections: `space-y-6`; form fields: `space-y-4`; drawer/card shell: `px-6 py-4`; nested bordered UI: `px-4`
 - [ ] Use UCard, UModal, UFormField for structure
 - [ ] Test in both light and dark modes
 - [ ] Verify text contrast meets WCAG AA standards
