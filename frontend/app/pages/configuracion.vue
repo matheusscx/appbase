@@ -53,7 +53,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       },
       {
         label: 'Impuestos',
-        icon: 'i-lucide-receipt-percent',
+        icon: 'i-lucide-badge-percent',
         to: '/configuracion/impuestos',
       },
       {
