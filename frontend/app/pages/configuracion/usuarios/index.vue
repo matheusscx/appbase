@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 interface Rol {
   id: string
   nombre: string
@@ -89,6 +91,12 @@ async function guardar() {
 }
 
 onMounted(cargar)
+
+const columns: TableColumn<Member>[] = [
+  { accessorKey: 'nombre', header: 'Nombre' },
+  { accessorKey: 'roles', header: 'Roles' },
+  { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -103,57 +111,55 @@ onMounted(cargar)
     </div>
 
     <UCard>
-      <div
-        v-if="loading"
-        class="py-8 text-center text-sm text-muted"
-      >
-        Cargando…
-      </div>
-      <div
-        v-else-if="!members.length"
-        class="py-8 text-center text-sm text-muted"
-      >
-        No hay usuarios en este tenant.
-      </div>
-      <ul v-else class="divide-y divide-border-default">
-        <li
-          v-for="member in members"
-          :key="member.usuarioId"
-          class="flex items-center justify-between py-3"
-        >
+      <UTable :data="members" :columns="columns" :loading="loading">
+        <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate">
-              {{ member.nombre }} {{ member.apellido }}
+              {{ row.original.nombre }} {{ row.original.apellido }}
             </p>
             <p class="text-sm text-muted truncate">
-              {{ member.correo }}
+              {{ row.original.correo }}
             </p>
-            <div class="flex flex-wrap gap-1 mt-1">
-              <UBadge
-                v-for="rol in member.roles"
-                :key="rol.rolId"
-                color="primary"
-                variant="subtle"
-                size="xs"
-              >
-                {{ rol.nombre }}
-              </UBadge>
-              <span
-                v-if="!member.roles.length"
-                class="text-xs text-muted"
-              >
-                Sin roles
-              </span>
-            </div>
           </div>
-          <UButton
-            icon="i-heroicons-pencil-square"
-            color="neutral"
-            variant="ghost"
-            @click="abrirEdicion(member)"
-          />
-        </li>
-      </ul>
+        </template>
+
+        <template #roles-cell="{ row }">
+          <div class="flex flex-wrap gap-1">
+            <UBadge
+              v-for="rol in row.original.roles"
+              :key="rol.rolId"
+              color="primary"
+              variant="subtle"
+              size="xs"
+            >
+              {{ rol.nombre }}
+            </UBadge>
+            <span
+              v-if="!row.original.roles.length"
+              class="text-xs text-muted"
+            >
+              Sin roles
+            </span>
+          </div>
+        </template>
+
+        <template #acciones-cell="{ row }">
+          <div class="flex items-center justify-end">
+            <UButton
+              icon="i-heroicons-pencil-square"
+              color="neutral"
+              variant="ghost"
+              @click="abrirEdicion(row.original)"
+            />
+          </div>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            No hay usuarios en este tenant.
+          </div>
+        </template>
+      </UTable>
     </UCard>
 
     <UModal
