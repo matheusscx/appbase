@@ -1,6 +1,6 @@
 # Plan: Reemplazo de HTML crudo por componentes Nuxt UI
 
-Status: Draft
+Status: Done
 Date: 2026-06-30
 Owner: Cesar Matheus
 
@@ -69,18 +69,22 @@ de estado y links; `#empty` para el estado vacío; `:loading` atado al status de
 fetch. Filas clickeables vía `:ui="{ tr: 'cursor-pointer' }"` + `@select`.
 Mantener `formatMonto`/`formatFecha` desde `useFormatters` (no redefinir).
 
-- [ ] `app/pages/pagos/index.vue` — tabla de pagos (badges de estado, celda
+- [x] `app/pages/pagos/index.vue` — tabla de pagos (badges de estado, celda
   link "Ver venta", paginación ya existente → conectar `UPagination` al table API).
-- [ ] `app/pages/ventas/historial.vue` — historial de ventas (filas clickeables a
+- [x] `app/pages/ventas/historial.vue` — historial de ventas (filas clickeables a
   detalle, badges de canal/estado, saldo con color de warning).
-- [ ] `app/pages/ventas/[id].vue` — tabla de líneas de venta (descripción,
+- [x] `app/pages/ventas/[id].vue` — tabla de líneas de venta (descripción,
   cantidad, precio unit., total línea; solo lectura).
-- [ ] `app/pages/configuracion/inventario.vue` — kardex de movimientos (badges de
+- [x] `app/pages/configuracion/inventario.vue` — kardex de movimientos (badges de
   tipo/motivo, cantidades con color).
-- [ ] `app/components/caja/CajaHistorial.vue` — historial de cajas. **Nota:** tiene
+- [x] `app/components/caja/CajaHistorial.vue` — historial de cajas. ~~**Nota:** tiene
   filas expandibles (`toggleTodas`). Usar el slot `#expanded` de `UTable` +
-  `getExpandedRowModel`; validar que la interacción de expandir se preserve.
-- [ ] `app/pages/configuracion/items.vue` — listado principal de items (badges de
+  `getExpandedRowModel`; validar que la interacción de expandir se preserve.~~
+  **Corrección post-implementación:** esta nota era incorrecta — `toggleTodas`
+  es un botón de alcance de datos ("ver todas las cajas" vs. propias), no
+  expansión de filas. No existe ni existió expansión de filas en este
+  componente. Convertido a `UTable` plano, sin `#expanded`/`getExpandedRowModel`.
+- [x] `app/pages/configuracion/items.vue` — listado principal de items (badges de
   tipo/estado, columna de acciones con `UDropdownMenu`, click de fila → editar).
 
 ### Fase 2 — Formularios → `UForm`
@@ -92,16 +96,16 @@ errores actual (si existe, p.ej. mensajes manuales o checks en el handler) se
 deja intacto tal cual está — no se introduce `:schema` ni se cambia la lógica
 de error. Conservar estados `:loading`/`:disabled` actuales.
 
-- [ ] `app/pages/login.vue` — `<form @submit.prevent="onLogin">` → `UForm`.
-- [ ] `app/pages/register.vue` — `<form @submit.prevent="onRegister">` → `UForm`.
-- [ ] `app/pages/configuracion/roles/index.vue` — form de creación en modal.
-- [ ] `app/pages/configuracion/roles/[id].vue` — form de edición.
-- [ ] `app/components/configuracion/PerfilForm.vue` — datos de perfil.
-- [ ] `app/components/configuracion/ContrasenaForm.vue` — cambio de contraseña.
+- [x] `app/pages/login.vue` — `<form @submit.prevent="onLogin">` → `UForm`.
+- [x] `app/pages/register.vue` — `<form @submit.prevent="onRegister">` → `UForm`.
+- [x] `app/pages/configuracion/roles/index.vue` — form de creación en modal.
+- [x] `app/pages/configuracion/roles/[id].vue` — form de edición.
+- [x] `app/components/configuracion/PerfilForm.vue` — datos de perfil.
+- [x] `app/components/configuracion/ContrasenaForm.vue` — cambio de contraseña.
 
 ### Fase 3 — `<label>` sueltos → `UFormField`
 
-- [ ] Localizar los `<label>` crudos restantes (`grep -rnE "<label" app`) y
+- [x] Localizar los `<label>` crudos restantes (`grep -rnE "<label" app`) y
   moverlos al prop `label`/slot de `UFormField`, asegurando `for`/`id` implícito.
 
 ### Fase 4 — Listas `<ul>/<li>` (audit + conversión selectiva)
@@ -109,32 +113,32 @@ de error. Conservar estados `:loading`/`:disabled` actuales.
 Revisar cada archivo; convertir a `UTable` solo las listas que son **datos
 tabulares con columnas**; conservar las de diseño de producto.
 
-- [ ] `app/pages/configuracion/roles/index.vue` — lista de roles → evaluar `UTable`
+- [x] `app/pages/configuracion/roles/index.vue` — lista de roles → evaluar `UTable`
   (nombre, tipo, acciones) vs mantener como lista de tarjetas.
-- [ ] Auditar y decidir por archivo: `categorias`, `impuestos`, `metodos-pago`,
+- [x] Auditar y decidir por archivo: `categorias`, `impuestos`, `metodos-pago`,
   `monedas`, `razones-sociales`, `usuarios/index`, `descuentos`, `recargos`,
   `items` (listado). Documentar en cada uno: convertir vs conservar (con motivo).
-- [ ] **Conservar** (marcar como decididos, sin cambios): `CarritoPanel.vue`,
+- [x] **Conservar** (marcar como decididos, sin cambios): `CarritoPanel.vue`,
   `CajaActivaDashboard.vue`, `ventas/[id].vue` (lista de pagos si aplica).
 
 ### Fase 5 — Audit de bajo impacto (headings / spans)
 
-- [ ] `grep` de `<span>` con clases de color/estado → reemplazar por `UBadge`
+- [x] `grep` de `<span>` con clases de color/estado → reemplazar por `UBadge`
   donde represente un estado/etiqueta.
-- [ ] Revisar headings `h1`–`h3` sueltos: mantener como HTML semántico salvo que
+- [x] Revisar headings `h1`–`h3` sueltos: mantener como HTML semántico salvo que
   encajen en `UDashboardNavbar`/header de `UCard`. Sin cambios masivos.
-- [ ] Reemplazar divisores manuales (`border-t`, `<hr>`) por `USeparator` donde
+- [x] Reemplazar divisores manuales (`border-t`, `<hr>`) por `USeparator` donde
   aplique.
 
 ## Verification
 
 Por cada archivo tocado:
-- [ ] `cd frontend && npm run build` sin errores de tipos/plantilla.
-- [ ] Verificación manual (frontend.md §8): render en claro y oscuro, sin colores
+- [x] `cd frontend && npm run build` sin errores de tipos/plantilla.
+- [x] Verificación manual (frontend.md §8): render en claro y oscuro, sin colores
   Tailwind hardcoded (solo tokens semánticos).
-- [ ] Tablas: sorting/paginación/estado vacío/filas clickeables funcionan igual
+- [x] Tablas: sorting/paginación/estado vacío/filas clickeables funcionan igual
   que antes; formato monetario con `font-mono` intacto.
-- [ ] Formularios: submit y loading funcionan igual que antes; el manejo de
+- [x] Formularios: submit y loading funcionan igual que antes; el manejo de
   errores existente (si lo hay) no cambia de comportamiento.
 - [ ] `CajaHistorial`: la expansión de filas sigue operando.
 - [ ] Diff de screenshots antes/después para confirmar que no hay regresión visual.
