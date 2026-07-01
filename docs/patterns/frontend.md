@@ -301,7 +301,58 @@ Componentes pequeños (`CarritoPanel`, `CobroModal`, `ClienteForm`) que no conti
 
 ---
 
-## 11. Coordinar skill `frontend-design` con `nuxt-ui` / tokens semánticos
+## 12. Listados paginados (server-side)
+
+Para tablas con dataset grande: paginar en backend, no en cliente.
+
+### Composable `usePaginatedList`
+
+```typescript
+const filtroEstado = ref<string | undefined>()
+const listFilters = computed(() => ({ ventaEstado: filtroEstado.value }))
+
+const { items, meta, page, pageSize, loading } = usePaginatedList<Item>({
+  path: '/pagos',
+  pageSize: 15,
+  filters: listFilters,
+})
+```
+
+- `page` es 1-based (alineado con `UPagination`).
+- Al cambiar filtros → reset a página 1 y refetch automático.
+- Errores vía `useToast`.
+
+### UI
+
+**Sin** TanStack `getPaginationRowModel` — la tabla muestra solo la página actual:
+
+```vue
+<UTable :data="items" :columns="columns" />
+
+<div v-if="meta.total > pageSize" class="flex justify-end pt-4">
+  <UPagination
+    v-model:page="page"
+    :items-per-page="pageSize"
+    :total="meta.total"
+  />
+</div>
+```
+
+### KPIs / resumen
+
+Cards superiores con totales globales: endpoint dedicado (`GET /pagos/resumen`),
+cargado una vez en `onMounted`, independiente de filtros/página.
+
+### Filtros
+
+Preferir `USelectMenu` con IDs del backend (`metodoPagoId`) en lugar de búsqueda
+texto en cliente.
+
+Referencia: `app/pages/pagos/index.vue`.
+
+---
+
+## 13. Coordinar skill `frontend-design` con `nuxt-ui` / tokens semánticos
 
 Ambas skills conviven en este repo pero operan en fases distintas: `frontend-design`
 decide dirección estética (paleta, tipografía, layout, "elemento firma");

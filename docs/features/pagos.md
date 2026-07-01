@@ -19,8 +19,8 @@ Este módulo permite cobrar esas ventas en uno o varios abonos posteriores a la 
 
 ### Scope
 
-- **In scope**: `POST /pagos` (registrar abono), `GET /pagos` (ledger del tenant), `AbonoModal` en el frontend, página `/pagos` (ledger), detalle de venta en `/ventas?venta={uuid}` (drawer) con botón de abono.
-- **Out of scope**: integración con pasarela de cobro, conciliación automática, reversión de pagos, filtros avanzados por fecha/estado.
+- **In scope**: `POST /pagos` (registrar abono), `GET /pagos` (ledger paginado), `GET /pagos/resumen` (KPIs), `AbonoModal`, página `/pagos`, detalle de venta con abono.
+- **Out of scope**: integración con pasarela de cobro, conciliación automática, reversión de pagos.
 
 ---
 
@@ -54,28 +54,54 @@ Response (201):
 
 ### GET /api/pagos
 
-Lista todos los pagos del tenant autenticado, ordenados por fecha descendente.
+Lista paginada de pagos del tenant, ordenados por `creado_el` descendente.
 
 ```
-GET /api/pagos
+GET /api/pagos?page=1&pageSize=15&metodoPagoId=uuid&ventaEstado=pagada
 Authorization: Bearer <token-con-tenant_id>
 
 Response (200):
-[
-  {
-    "id": "uuid",
-    "ventaId": "uuid",
-    "monto": "5000",
-    "vuelto": "0",
-    "fecha": "2026-06-30T...",
-    "cajaId": "uuid",
-    "referencia": null,
-    "metodoNombre": "Efectivo",
-    "ventaEstado": "pagada",
-    "totalFinal": "5000",
-    "customerNombre": "Juan Pérez"
+{
+  "data": [
+    {
+      "id": "uuid",
+      "ventaId": "uuid",
+      "monto": "5000",
+      "vuelto": "0",
+      "fecha": "2026-06-30T...",
+      "cajaId": "uuid",
+      "referencia": null,
+      "metodoNombre": "Efectivo",
+      "ventaEstado": "pagada",
+      "totalFinal": "5000",
+      "customerNombre": "Juan Pérez"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "pageSize": 15,
+    "total": 42,
+    "totalPages": 3
   }
-]
+}
+```
+
+Query params opcionales: `page`, `pageSize`, `fechaDesde`, `fechaHasta`, `metodoPagoId`, `cajaId`, `ventaId`, `ventaEstado`.
+
+### GET /api/pagos/resumen
+
+KPIs globales del tenant (independientes de filtros/página).
+
+```
+GET /api/pagos/resumen
+
+Response (200):
+{
+  "totalPagos": 42,
+  "montoCobrado": "150000.0000",
+  "pagosHoy": 3,
+  "montoHoy": "25000.0000"
+}
 ```
 
 ---
@@ -112,7 +138,7 @@ Response (200):
 
 | Página | Ruta | Descripción |
 |--------|------|-------------|
-| Ledger de pagos | `/pagos` | Tabla de todos los pagos del tenant: fecha, método, monto, vuelto, cliente, link a venta, estado de la venta |
+| Ledger de pagos | `/pagos` | Tabla paginada server-side; filtros por método (`USelectMenu`) y estado de venta; KPIs vía `/pagos/resumen` |
 
 ### Componentes
 
@@ -132,12 +158,10 @@ Comportamiento:
 - Emite `success` al registrar el pago con éxito (la página recarga la venta)
 - Reutiliza helpers puros de `useVenta.ts`: `resumenCobro`, `clampNoVuelto`, `sumaPagos`
 
-### Composables reutilizados
+### Composables
 
-Todos los helpers de pago viven en `app/composables/useVenta.ts`:
-- `resumenCobro(total, pagos, metodos)` — calcula restante, vuelto, excedenteSinVuelto
-- `clampNoVuelto(total, pagos, metodos)` — recorta montos de métodos sin vuelto
-- `sumaPagos(pagos)` — suma total de pagos
+- `usePaginatedList` — listados paginados server-side (`app/composables/usePaginatedList.ts`)
+- Helpers de cobro en `useVenta.ts`: `resumenCobro`, `clampNoVuelto`, `sumaPagos`
 
 ---
 
@@ -180,9 +204,9 @@ cd frontend && npm run build
 ## Acceptance Criteria
 
 - [x] POST /pagos registra abono y actualiza estado de venta
-- [x] GET /pagos lista pagos del tenant con datos enriquecidos
-- [x] AbonoModal disponible desde el drawer de detalle en `/ventas` para ventas pendientes/parciales
-- [x] Página /pagos muestra ledger con filtro por método
+- [x] GET /pagos devuelve respuesta paginada con filtros
+- [x] GET /pagos/resumen expone KPIs globales
+- [x] Página /pagos usa paginación server-side y USelectMenu para método
 - [x] Sidebar incluye entradas "Ventas" y "Pagos"
 - [x] Estado `pagada_parcial` visible en UI (badge info)
 

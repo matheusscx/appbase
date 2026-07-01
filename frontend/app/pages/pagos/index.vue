@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
-import { getPaginationRowModel } from '@tanstack/vue-table'
+import type { PagosResumen } from '~/composables/usePaginatedList'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -19,18 +19,34 @@ interface PagoLedger {
   customerNombre: string | null
 }
 
+interface MetodoPago {
+  metodoPagoId: string
+  nombre: string
+  habilitada: boolean
+}
+
 const config = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
 const apiUrl = config.public.apiUrl
 
-const pagos = ref<PagoLedger[]>([])
-const loading = ref(false)
-const filtroMetodo = ref('')
-const filtroEstado = ref('')
-const pageSize = 15
-const table = useTemplateRef('table')
-const pagination = ref({ pageIndex: 0, pageSize })
+const filtroMetodo = ref<string | undefined>()
+const filtroEstado = ref<string | undefined>()
+
+const listFilters = computed(() => ({
+  metodoPagoId: filtroMetodo.value,
+  ventaEstado: filtroEstado.value,
+}))
+
+const { items: pagos, meta, page, pageSize, loading } =
+  usePaginatedList<PagoLedger>({
+    path: '/pagos',
+    pageSize: 15,
+    filters: listFilters,
+  })
+
+const resumen = ref<PagosResumen | null>(null)
+const loadingResumen = ref(false)
 
 function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
   const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
@@ -62,53 +78,45 @@ const estadoOptions = [
   { label: estadoLabel('borrador'), value: 'borrador' },
 ]
 
+const metodosPago = ref<MetodoPago[]>([])
+const metodoOptions = computed(() =>
+  metodosPago.value
+    .filter(m => m.habilitada)
+    .map(m => ({ label: m.nombre, value: m.metodoPagoId })),
+)
+
 const hayFiltrosActivos = computed(() => !!filtroMetodo.value || !!filtroEstado.value)
 
 function limpiarFiltros() {
-  filtroMetodo.value = ''
-  filtroEstado.value = ''
+  filtroMetodo.value = undefined
+  filtroEstado.value = undefined
 }
 
-const pagosFiltrados = computed(() => {
-  let result = pagos.value
-  if (filtroMetodo.value) {
-    result = result.filter(p => p.metodoNombre.toLowerCase().includes(filtroMetodo.value.toLowerCase()))
+async function cargarResumen() {
+  loadingResumen.value = true
+  try {
+    resumen.value = await useApiFetch<PagosResumen>(`${apiUrl}/pagos/resumen`)
   }
-  if (filtroEstado.value) {
-    result = result.filter(p => p.ventaEstado === filtroEstado.value)
+  catch (e: unknown) {
+    const msg = (e as { data?: { message?: string } })?.data?.message
+    toast.add({ title: msg ?? 'Error al cargar resumen', color: 'error' })
   }
-  return result
-})
+  finally {
+    loadingResumen.value = false
+  }
+}
 
-watch([filtroMetodo, filtroEstado], () => { pagination.value.pageIndex = 0 })
-
-const montoCobrado = computed(() =>
-  pagos.value.reduce((acc, p) => {
-    return acc.plus(new Decimal(p.monto)).minus(new Decimal(p.vuelto ?? '0'))
-  }, new Decimal(0)),
-)
-
-const pagosHoy = computed(() => {
-  const hoy = new Date().toDateString()
-  return pagos.value.filter(p => new Date(p.fecha).toDateString() === hoy)
-})
-
-const montoHoy = computed(() =>
-  pagosHoy.value.reduce((acc, p) => {
-    return acc.plus(new Decimal(p.monto)).minus(new Decimal(p.vuelto ?? '0'))
-  }, new Decimal(0)),
-)
+async function cargarMetodos() {
+  try {
+    metodosPago.value = await useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`)
+  }
+  catch {
+    // El listado sigue funcionando sin filtro de método
+  }
+}
 
 async function cargar() {
-  loading.value = true
-  try {
-    pagos.value = await useApiFetch<PagoLedger[]>(`${apiUrl}/pagos`)
-  } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar pagos', color: 'error' })
-  } finally {
-    loading.value = false
-  }
+  await Promise.all([cargarResumen(), cargarMetodos()])
 }
 
 const columns: TableColumn<PagoLedger>[] = [
@@ -139,7 +147,7 @@ onMounted(cargar)
               Pagos registrados
             </p>
             <p class="text-lg font-semibold mt-1">
-              {{ pagos.length }}
+              {{ loadingResumen ? '…' : (resumen?.totalPagos ?? 0) }}
             </p>
           </div>
           <div class="rounded-lg bg-success/10 p-3">
@@ -147,7 +155,7 @@ onMounted(cargar)
               Total cobrado
             </p>
             <p class="text-lg font-semibold text-success mt-1">
-              {{ formatMonto(montoCobrado) }}
+              {{ loadingResumen ? '…' : formatMonto(resumen?.montoCobrado ?? '0') }}
             </p>
           </div>
           <div class="rounded-lg bg-primary/10 p-3">
@@ -155,17 +163,20 @@ onMounted(cargar)
               Cobrado hoy
             </p>
             <p class="text-lg font-semibold text-primary mt-1">
-              {{ formatMonto(montoHoy) }} <span class="text-xs font-normal">({{ pagosHoy.length }})</span>
+              {{ loadingResumen ? '…' : formatMonto(resumen?.montoHoy ?? '0') }}
+              <span class="text-xs font-normal">({{ resumen?.pagosHoy ?? 0 }})</span>
             </p>
           </div>
         </div>
 
         <!-- Filtros -->
         <div class="flex flex-wrap items-center gap-3">
-          <UInput
+          <USelectMenu
             v-model="filtroMetodo"
-            placeholder="Filtrar por método de pago..."
-            icon="i-lucide-search"
+            :items="metodoOptions"
+            value-key="value"
+            placeholder="Método de pago"
+            searchable
             class="w-64"
           />
           <USelect
@@ -193,11 +204,8 @@ onMounted(cargar)
 
         <UCard v-else>
           <UTable
-            ref="table"
-            v-model:pagination="pagination"
-            :data="pagosFiltrados"
+            :data="pagos"
             :columns="columns"
-            :pagination-options="{ getPaginationRowModel: getPaginationRowModel() }"
           >
             <template #fecha-cell="{ row }">
               <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
@@ -237,12 +245,11 @@ onMounted(cargar)
             </template>
           </UTable>
 
-          <div v-if="pagosFiltrados.length > pageSize" class="flex justify-end pt-4">
+          <div v-if="meta.total > pageSize" class="flex justify-end pt-4">
             <UPagination
-              :page="(table?.tableApi?.getState().pagination.pageIndex || 0) + 1"
-              :items-per-page="table?.tableApi?.getState().pagination.pageSize"
-              :total="pagosFiltrados.length"
-              @update:page="(p: number) => table?.tableApi?.setPageIndex(p - 1)"
+              v-model:page="page"
+              :items-per-page="pageSize"
+              :total="meta.total"
             />
           </div>
         </UCard>

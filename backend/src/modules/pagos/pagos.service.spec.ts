@@ -336,4 +336,76 @@ describe('PagosService', () => {
       expect(result.venta.saldo).toBe('0.0000');
     });
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  //  listar() / resumen()
+  // ────────────────────────────────────────────────────────────────────
+
+  describe('resumen()', () => {
+    it('retorna KPIs globales del tenant', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([
+        {
+          total_pagos: 10,
+          monto_cobrado: '1500.0000',
+          pagos_hoy: 2,
+          monto_hoy: '300.0000',
+        },
+      ]);
+
+      const result = await service.resumen(TENANT_ID);
+
+      expect(result).toEqual({
+        totalPagos: 10,
+        montoCobrado: '1500.0000',
+        pagosHoy: 2,
+        montoHoy: '300.0000',
+      });
+    });
+  });
+
+  describe('listar()', () => {
+    const PAGO_ROW = {
+      pago_id: 'pago-uuid-001',
+      venta_id: VENTA_ID,
+      monto: '100.0000',
+      vuelto: '0.0000',
+      fecha: new Date('2026-06-30'),
+      caja_id: CAJA_ID,
+      referencia: null,
+      metodo_nombre: 'Efectivo',
+      venta_estado: 'pagada',
+      total_final: '100.0000',
+      customer_nombre: 'Cliente Test',
+    };
+
+    it('retorna respuesta paginada con meta', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 25 }])
+        .mockResolvedValueOnce([PAGO_ROW]);
+
+      const result = await service.listar(TENANT_ID, { page: 2, pageSize: 15 });
+
+      expect(result.meta).toEqual({
+        page: 2,
+        pageSize: 15,
+        total: 25,
+        totalPages: 2,
+      });
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].id).toBe('pago-uuid-001');
+      expect(result.data[0].metodoNombre).toBe('Efectivo');
+    });
+
+    it('aplica filtro ventaEstado en count y listado', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([PAGO_ROW]);
+
+      await service.listar(TENANT_ID, { ventaEstado: EstadoVenta.PAGADA });
+
+      const countSql = dataSourceMock.query.mock.calls[0][0] as string;
+      expect(countSql).toContain('v.estado');
+      expect(dataSourceMock.query.mock.calls[0][1]).toContain(EstadoVenta.PAGADA);
+    });
+  });
 });

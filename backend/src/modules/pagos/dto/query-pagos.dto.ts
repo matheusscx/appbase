@@ -1,6 +1,8 @@
-import { IsDateString, IsOptional, IsUUID } from 'class-validator';
+import { IsDateString, IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+import { EstadoVenta } from '../../ventas/entities/venta.entity';
 
-export class QueryPagosDto {
+export class QueryPagosDto extends PaginationQueryDto {
   @IsOptional()
   @IsDateString()
   fechaDesde?: string;
@@ -20,4 +22,8 @@ export class QueryPagosDto {
   @IsOptional()
   @IsUUID()
   ventaId?: string;
+
+  @IsOptional()
+  @IsEnum(EstadoVenta)
+  ventaEstado?: EstadoVenta;
 }

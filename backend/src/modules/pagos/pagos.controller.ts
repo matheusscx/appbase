@@ -23,6 +23,12 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 export class PagosController {
   constructor(private readonly pagosService: PagosService) {}
 
+  @Get('resumen')
+  resumen(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.pagosService.resumen(user.tenantId!);
+  }
+
   @Get()
   listar(@Req() req: Request, @Query() query: QueryPagosDto) {
     const user = req.user as JwtUser;

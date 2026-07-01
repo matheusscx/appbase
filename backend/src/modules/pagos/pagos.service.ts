@@ -10,6 +10,11 @@ import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
 import { Pago } from './entities/pago.entity';
 import type { CreatePagoDto, PagoItemDto } from './dto/create-pago.dto';
+import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
+import {
+  buildPaginationMeta,
+  resolvePagination,
+} from '../../common/utils/pagination.util';
 import type { QueryPagosDto } from './dto/query-pagos.dto';
 
 // ─── helper puro (exportado para tests) ──────────────────────────────────────
@@ -39,6 +44,27 @@ export interface PagoListItem {
   ventaEstado: string;
   totalFinal: string;
   customerNombre: string | null;
+}
+
+export interface PagosResumen {
+  totalPagos: number;
+  montoCobrado: string;
+  pagosHoy: number;
+  montoHoy: string;
+}
+
+interface PagoListRow {
+  pago_id: string;
+  venta_id: string;
+  monto: string;
+  vuelto: string;
+  fecha: Date;
+  caja_id: string | null;
+  referencia: string | null;
+  metodo_nombre: string;
+  venta_estado: string;
+  total_final: string;
+  customer_nombre: string | null;
 }
 
 // ─── service ─────────────────────────────────────────────────────────────────
@@ -256,50 +282,66 @@ export class PagosService {
   }
 
   /**
-   * Listado de pagos con filtros opcionales.
+   * KPIs globales del tenant (independientes de filtros/página).
+   */
+  async resumen(tenantId: string): Promise<PagosResumen> {
+    const rows: {
+      total_pagos: number;
+      monto_cobrado: string;
+      pagos_hoy: number;
+      monto_hoy: string;
+    }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total_pagos,
+              COALESCE(SUM(p.monto - p.vuelto), 0)::text AS monto_cobrado,
+              COUNT(*) FILTER (WHERE p.fecha::date = CURRENT_DATE)::int AS pagos_hoy,
+              COALESCE(
+                SUM(p.monto - p.vuelto) FILTER (WHERE p.fecha::date = CURRENT_DATE),
+                0
+              )::text AS monto_hoy
+       FROM pagos p
+       WHERE p.tenant_id = $1
+         AND p.eliminado_el IS NULL`,
+      [tenantId],
+    );
+
+    const row = rows[0];
+    return {
+      totalPagos: row?.total_pagos ?? 0,
+      montoCobrado: row?.monto_cobrado ?? '0',
+      pagosHoy: row?.pagos_hoy ?? 0,
+      montoHoy: row?.monto_hoy ?? '0',
+    };
+  }
+
+  /**
+   * Listado paginado de pagos con filtros opcionales.
    */
   async listar(
     tenantId: string,
     query: QueryPagosDto,
-  ): Promise<PagoListItem[]> {
-    const params: unknown[] = [tenantId];
-    let paramIdx = 2;
-    let filters = '';
+  ): Promise<PaginatedResponse<PagoListItem>> {
+    const { page, pageSize, offset } = resolvePagination(query);
+    const { filters, params } = this.buildListarFilters(tenantId, query);
 
-    if (query.fechaDesde) {
-      filters += ` AND p.fecha >= $${paramIdx++}`;
-      params.push(query.fechaDesde);
-    }
-    if (query.fechaHasta) {
-      filters += ` AND p.fecha <= $${paramIdx++}`;
-      params.push(query.fechaHasta);
-    }
-    if (query.metodoPagoId) {
-      filters += ` AND p.metodo_pago_id = $${paramIdx++}`;
-      params.push(query.metodoPagoId);
-    }
-    if (query.cajaId) {
-      filters += ` AND p.caja_id = $${paramIdx++}`;
-      params.push(query.cajaId);
-    }
-    if (query.ventaId) {
-      filters += ` AND p.venta_id = $${paramIdx++}`;
-      params.push(query.ventaId);
-    }
+    const countRows: { total: number }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total
+       FROM pagos p
+       JOIN ventas v
+         ON v.venta_id = p.venta_id
+        AND v.eliminado_el IS NULL
+       WHERE p.tenant_id = $1
+         AND p.eliminado_el IS NULL
+         ${filters}`,
+      params,
+    );
 
-    const rows: {
-      pago_id: string;
-      venta_id: string;
-      monto: string;
-      vuelto: string;
-      fecha: Date;
-      caja_id: string | null;
-      referencia: string | null;
-      metodo_nombre: string;
-      venta_estado: string;
-      total_final: string;
-      customer_nombre: string | null;
-    }[] = await this.dataSource.query(
+    const total = countRows[0]?.total ?? 0;
+
+    const listParams = [...params, pageSize, offset];
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+
+    const rows: PagoListRow[] = await this.dataSource.query(
       `SELECT p.pago_id,
               p.venta_id,
               p.monto,
@@ -328,11 +370,55 @@ export class PagosService {
        WHERE p.tenant_id = $1
          AND p.eliminado_el IS NULL
          ${filters}
-       ORDER BY p.creado_el DESC`,
-      params,
+       ORDER BY p.creado_el DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
     );
 
-    return rows.map((r) => ({
+    return {
+      data: rows.map((r) => this.mapPagoListRow(r)),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  private buildListarFilters(
+    tenantId: string,
+    query: QueryPagosDto,
+  ): { filters: string; params: unknown[] } {
+    const params: unknown[] = [tenantId];
+    let paramIdx = 2;
+    let filters = '';
+
+    if (query.fechaDesde) {
+      filters += ` AND p.fecha >= $${paramIdx++}`;
+      params.push(query.fechaDesde);
+    }
+    if (query.fechaHasta) {
+      filters += ` AND p.fecha <= $${paramIdx++}`;
+      params.push(query.fechaHasta);
+    }
+    if (query.metodoPagoId) {
+      filters += ` AND p.metodo_pago_id = $${paramIdx++}`;
+      params.push(query.metodoPagoId);
+    }
+    if (query.cajaId) {
+      filters += ` AND p.caja_id = $${paramIdx++}`;
+      params.push(query.cajaId);
+    }
+    if (query.ventaId) {
+      filters += ` AND p.venta_id = $${paramIdx++}`;
+      params.push(query.ventaId);
+    }
+    if (query.ventaEstado) {
+      filters += ` AND v.estado = $${paramIdx++}`;
+      params.push(query.ventaEstado);
+    }
+
+    return { filters, params };
+  }
+
+  private mapPagoListRow(r: PagoListRow): PagoListItem {
+    return {
       id: r.pago_id,
       ventaId: r.venta_id,
       monto: r.monto,
@@ -344,6 +430,6 @@ export class PagosService {
       ventaEstado: r.venta_estado,
       totalFinal: r.total_final,
       customerNombre: r.customer_nombre,
-    }));
+    };
   }
 }

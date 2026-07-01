@@ -250,7 +250,59 @@ El seeder TS corre automáticamente al arrancar el backend en dev.
 
 ---
 
-## 9. Docs vivas a tocar en el mismo commit
+## 10. Paginación server-side
+
+Patrón estándar para listados con muchos registros (pagos, ventas, kardex, etc.).
+
+### DTO compartido
+
+`common/dto/pagination-query.dto.ts` — query params `page` (1-based, default 1) y
+`pageSize` (default 15, max 100). Extender en el DTO del recurso:
+
+```typescript
+export class QueryPagosDto extends PaginationQueryDto {
+  @IsOptional()
+  @IsEnum(EstadoVenta)
+  ventaEstado?: EstadoVenta;
+  // …filtros específicos
+}
+```
+
+### Utilidades
+
+`common/utils/pagination.util.ts`:
+
+- `resolvePagination(query)` → `{ page, pageSize, offset }`
+- `buildPaginationMeta(page, pageSize, total)` → `{ page, pageSize, total, totalPages }`
+
+### Respuesta API
+
+`common/interfaces/paginated-response.interface.ts`:
+
+```typescript
+interface PaginatedResponse<T> {
+  data: T[];
+  meta: { page; pageSize; total; totalPages };
+}
+```
+
+### Service (SQL raw)
+
+1. Armar `WHERE` compartido (tenant + soft delete + filtros).
+2. `SELECT COUNT(*) …` con el mismo `WHERE` → `total`.
+3. `SELECT … ORDER BY … LIMIT $n OFFSET $m` → `data`.
+4. Lecturas vía `this.dataSource.query` (réplica cuando exista).
+
+KPIs/agregados globales **no** van en `data[]`: endpoint separado
+(p. ej. `GET /pagos/resumen`).
+
+### Controller
+
+Registrar rutas estáticas (`/resumen`) **antes** de rutas con params.
+
+---
+
+## 11. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.
 - `docs/features/<feature>.md` (desde `docs/features/TEMPLATE.md`) + link en `docs/README.md`.
