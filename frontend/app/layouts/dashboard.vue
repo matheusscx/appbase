@@ -64,6 +64,11 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
     to: '/configuracion/perfil',
     active: route.path.startsWith('/configuracion'),
   },
+  {
+    label: 'Cerrar sesión',
+    icon: 'i-lucide-log-out',
+    onSelect: () => authStore.logout(),
+  },
 ])
 </script>
 
@@ -84,27 +89,17 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
       </template>
 
       <template #default="{ collapsed }">
-        <UNavigationMenu
-          :collapsed="collapsed"
-          :items="items"
-          orientation="vertical"
-        />
-      </template>
-
-      <template #footer="{ collapsed }">
-        <div class="flex flex-col gap-2">
+        <div class="flex flex-1 flex-col min-h-full gap-4">
           <UNavigationMenu
+            :collapsed="collapsed"
+            :items="items"
+            orientation="vertical"
+          />
+          <UNavigationMenu
+            class="mt-auto"
             :collapsed="collapsed"
             :items="settingsItems"
             orientation="vertical"
-          />
-          <UButton
-            :icon="collapsed ? 'i-lucide-log-out' : undefined"
-            :label="collapsed ? undefined : 'Cerrar sesión'"
-            color="neutral"
-            variant="ghost"
-            block
-            @click="authStore.logout()"
           />
         </div>
       </template>
