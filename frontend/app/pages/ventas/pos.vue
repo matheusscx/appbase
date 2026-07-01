@@ -32,11 +32,11 @@ const customerExpandido = ref(false)
 
 const cobroOpen = ref(false)
 const submitting = ref(false)
-const movimientoModalOpen = ref(false)
-const cierreModalOpen = ref(false)
+const movimientoDrawerOpen = ref(false)
+const cierreDrawerOpen = ref(false)
 
-function abrirMovimientoModal() { movimientoModalOpen.value = true }
-function abrirCierreModal() { cierreModalOpen.value = true }
+function abrirMovimientoDrawer() { movimientoDrawerOpen.value = true }
+function abrirCierreDrawer() { cierreDrawerOpen.value = true }
 
 const tieneCaja = computed(() => cajaStore.activa !== null)
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
@@ -54,13 +54,13 @@ const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [
     {
       label: 'Registrar movimiento',
       icon: 'i-lucide-circle-plus',
-      onSelect: abrirMovimientoModal,
+      onSelect: abrirMovimientoDrawer,
     },
     {
       label: 'Cerrar caja',
       icon: 'i-lucide-lock',
       color: 'error' as const,
-      onSelect: abrirCierreModal,
+      onSelect: abrirCierreDrawer,
     },
   ],
 ])
@@ -208,15 +208,15 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         :submitting="submitting"
         @confirmar="confirmarCobro"
       />
-      <CajaMovimientoModal
+      <CajaMovimientoDrawer
         v-if="cajaStore.activa"
-        v-model:open="movimientoModalOpen"
+        v-model:open="movimientoDrawerOpen"
         :caja-id="cajaStore.activa.id"
         @saved="cajaStore.cargarResumenTurno(cajaStore.activa!.id)"
       />
-      <CajaCierreModal
+      <CajaCierreDrawer
         v-if="cajaStore.activa"
-        v-model:open="cierreModalOpen"
+        v-model:open="cierreDrawerOpen"
         :caja-id="cajaStore.activa.id"
         :saldo-esperado="saldoEsperado"
       />

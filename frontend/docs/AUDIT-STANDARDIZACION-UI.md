@@ -84,7 +84,7 @@ Detalle: `docs/ARCHITECTURE.md`, `docs/features/ventas.md`.
 | Dashboard | ✅ | — | — | — | ✅ | — |
 | Config | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Ventas | ✅ | ✅ | parcial POS | ✅ detalle | ✅ | — |
-| Caja | ✅ (+ fin.) | ✅ | ✅ | — | ✅ | — |
+| Caja | ✅ (+ fin.) | ✅ | ✅ | ✅ movimiento | ✅ | — |
 | Pagos | ✅ | ✅ | ✅ modal | — | ✅ | — |
 
 ---

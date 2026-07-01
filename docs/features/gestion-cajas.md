@@ -394,8 +394,8 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 - `components/caja/CajaMovimientosTable.vue` — Tabla paginada de movimientos con filtro por tipo, scroll interno y thead sticky
 - `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); prop `usuarioId` o query `?usuarioId=`
 - `components/caja/CajaAperturaForm.vue` — Formulario de apertura (saldo inicial + comentario)
-- `components/caja/CajaMovimientoModal.vue` — Modal entrada/salida manual
-- `components/caja/CajaCierreModal.vue` — Modal de cierre con cuadre (esperado vs. contado → diferencia)
+- `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
+- `components/caja/CajaCierreDrawer.vue` — Drawer de cierre con cuadre (esperado vs. contado → diferencia)
 - `components/caja/CajaAbiertasGrid.vue` — Grid de cards para usuarios con `Ver todas`: cajas físicas abiertas del tenant. Click → `/caja/[id]`
 
 ### Pinia Store

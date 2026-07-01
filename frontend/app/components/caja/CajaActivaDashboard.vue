@@ -14,8 +14,8 @@ const props = defineProps<{
 const cajaStore = useCajaStore()
 const toast = useToast()
 
-const movimientoModalOpen = ref(false)
-const cierreModalOpen = ref(false)
+const movimientoDrawerOpen = ref(false)
+const cierreDrawerOpen = ref(false)
 const movimientosTableRef = useTemplateRef('movimientosTable')
 
 const loadingResumen = computed(() => cajaStore.loadingResumenTurno)
@@ -60,8 +60,8 @@ watch(() => props.caja.id, () => {
         <CajaTurnoHeader
           :caja="caja"
           :readonly="readonly"
-          @movimiento="movimientoModalOpen = true"
-          @cerrar="cierreModalOpen = true"
+          @movimiento="movimientoDrawerOpen = true"
+          @cerrar="cierreDrawerOpen = true"
         />
       </template>
 
@@ -77,13 +77,13 @@ watch(() => props.caja.id, () => {
     <CajaMovimientosTable ref="movimientosTable" :caja-id="caja.id" />
 
     <template v-if="!readonly">
-      <CajaMovimientoModal
-        v-model:open="movimientoModalOpen"
+      <CajaMovimientoDrawer
+        v-model:open="movimientoDrawerOpen"
         :caja-id="caja.id"
         @saved="recargar"
       />
-      <CajaCierreModal
-        v-model:open="cierreModalOpen"
+      <CajaCierreDrawer
+        v-model:open="cierreDrawerOpen"
         :caja-id="caja.id"
         :saldo-esperado="saldoEsperado"
       />

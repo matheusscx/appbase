@@ -1,13 +1,13 @@
 <script setup lang="ts">
 const props = defineProps<{
-  open: boolean
   cajaId: string
 }>()
 
 const emit = defineEmits<{
-  'update:open': [value: boolean]
   saved: []
 }>()
+
+const open = defineModel<boolean>('open', { required: true })
 
 const cajaStore = useCajaStore()
 const toast = useToast()
@@ -22,13 +22,9 @@ const emptyForm = () => ({
 
 const form = ref(emptyForm())
 
-function cerrar() {
-  emit('update:open', false)
-}
-
-function onAfterLeave() {
-  form.value = emptyForm()
-}
+watch(open, (isOpen) => {
+  if (!isOpen) form.value = emptyForm()
+})
 
 async function guardar() {
   if (!form.value.concepto) {
@@ -49,7 +45,7 @@ async function guardar() {
     })
     toast.add({ title: 'Movimiento registrado', color: 'success' })
     emit('saved')
-    cerrar()
+    open.value = false
   }
   catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al registrar movimiento'
@@ -62,15 +58,13 @@ async function guardar() {
 </script>
 
 <template>
-  <UModal
-    :open="open"
-    title="Registrar movimiento"
-    @update:open="emit('update:open', $event)"
-    @after-leave="onAfterLeave"
-  >
+  <AppDrawer v-model:open="open" width="md">
+    <template #header>
+      <span class="font-semibold text-default">Registrar movimiento</span>
+    </template>
+
     <template #body>
       <UForm id="caja-movimiento-form" :state="form" class="space-y-4" @submit="guardar">
-        <!-- Tipo selector -->
         <UFormField label="Tipo">
           <div class="flex gap-2">
             <UButton
@@ -101,6 +95,7 @@ async function guardar() {
             v-model="form.concepto"
             placeholder="Descripción del movimiento"
             class="w-full"
+            autofocus
           />
         </UFormField>
 
@@ -123,20 +118,18 @@ async function guardar() {
       </UForm>
     </template>
 
-    <template #footer>
-      <div class="flex justify-end gap-2">
-        <UButton color="neutral" variant="ghost" @click="cerrar">
-          Cancelar
-        </UButton>
-        <UButton
-          type="submit"
-          form="caja-movimiento-form"
-          :loading="saving"
-          :color="form.tipo === 'entrada' ? 'success' : 'error'"
-        >
-          Registrar {{ form.tipo }}
-        </UButton>
-      </div>
+    <template #actions>
+      <UButton color="neutral" variant="ghost" @click="open = false">
+        Cancelar
+      </UButton>
+      <UButton
+        type="submit"
+        form="caja-movimiento-form"
+        :loading="saving"
+        :color="form.tipo === 'entrada' ? 'success' : 'error'"
+      >
+        Registrar {{ form.tipo }}
+      </UButton>
     </template>
-  </UModal>
+  </AppDrawer>
 </template>

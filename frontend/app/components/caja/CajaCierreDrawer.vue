@@ -2,14 +2,11 @@
 import Decimal from 'decimal.js'
 
 const props = defineProps<{
-  open: boolean
   cajaId: string
   saldoEsperado: Decimal
 }>()
 
-const emit = defineEmits<{
-  'update:open': [value: boolean]
-}>()
+const open = defineModel<boolean>('open', { required: true })
 
 const cajaStore = useCajaStore()
 const toast = useToast()
@@ -18,14 +15,12 @@ const saving = ref(false)
 const montoContado = ref('')
 const comentario = ref('')
 
-function cerrar() {
-  emit('update:open', false)
-}
-
-function onAfterLeave() {
-  montoContado.value = ''
-  comentario.value = ''
-}
+watch(open, (isOpen) => {
+  if (!isOpen) {
+    montoContado.value = ''
+    comentario.value = ''
+  }
+})
 
 const montoContadoFormateado = computed(() => {
   if (!montoContado.value) return '—'
@@ -61,7 +56,7 @@ async function cerrarCaja() {
       comentario: comentario.value || undefined,
     })
     toast.add({ title: 'Caja cerrada correctamente', color: 'success' })
-    cerrar()
+    open.value = false
   }
   catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al cerrar la caja'
@@ -74,15 +69,13 @@ async function cerrarCaja() {
 </script>
 
 <template>
-  <UModal
-    :open="open"
-    title="Cerrar caja"
-    @update:open="emit('update:open', $event)"
-    @after-leave="onAfterLeave"
-  >
+  <AppDrawer v-model:open="open" width="md">
+    <template #header>
+      <span class="font-semibold text-default">Cerrar caja</span>
+    </template>
+
     <template #body>
       <UForm id="caja-cierre-form" :state="{ montoContado, comentario }" class="space-y-5" @submit="cerrarCaja">
-        <!-- Cuadre previsto -->
         <div class="rounded-lg bg-muted p-4 space-y-2">
           <div class="flex justify-between text-sm">
             <span class="text-muted">Saldo esperado</span>
@@ -106,13 +99,13 @@ async function cerrarCaja() {
           </div>
         </div>
 
-        <!-- Inputs -->
         <UFormField label="Monto contado en caja" required>
           <UInput
             v-model="montoContado"
             inputmode="decimal"
             placeholder="0.00"
             class="w-full"
+            autofocus
           />
         </UFormField>
 
@@ -126,21 +119,19 @@ async function cerrarCaja() {
       </UForm>
     </template>
 
-    <template #footer>
-      <div class="flex justify-end gap-2">
-        <UButton color="neutral" variant="ghost" @click="cerrar">
-          Cancelar
-        </UButton>
-        <UButton
-          type="submit"
-          form="caja-cierre-form"
-          color="error"
-          icon="i-lucide-lock"
-          :loading="saving"
-        >
-          Confirmar cierre
-        </UButton>
-      </div>
+    <template #actions>
+      <UButton color="neutral" variant="ghost" @click="open = false">
+        Cancelar
+      </UButton>
+      <UButton
+        type="submit"
+        form="caja-cierre-form"
+        color="error"
+        icon="i-lucide-lock"
+        :loading="saving"
+      >
+        Confirmar cierre
+      </UButton>
     </template>
-  </UModal>
+  </AppDrawer>
 </template>
