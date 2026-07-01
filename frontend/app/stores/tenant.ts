@@ -46,6 +46,7 @@ export const useTenantStore = defineStore('tenant', () => {
         { method: 'POST', body: { tenantId } },
       )
       auth.setToken(data.access_token)
+      await usePermissionsStore().fetchPermisos()
       await navigateTo('/')
     }
     catch (e: unknown) {

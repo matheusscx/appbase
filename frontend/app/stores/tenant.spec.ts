@@ -44,12 +44,22 @@ vi.mock('~/composables/useApiFetch', () => ({
 const activeTenantIdRef = ref<string | null>(null)
 const mockSetToken = vi.fn()
 
+const mockFetchPermisos = vi.fn().mockResolvedValue(undefined)
+const mockResetPermisos = vi.fn()
+
 vi.mock('./auth', () => ({
   useAuthStore: () => ({
     get activeTenantId() { return activeTenantIdRef.value },
     setToken: mockSetToken,
     token: ref<string | null>(null),
     clearAuth: vi.fn(),
+  }),
+}))
+
+vi.mock('./permissions', () => ({
+  usePermissionsStore: () => ({
+    reset: mockResetPermisos,
+    fetchPermisos: mockFetchPermisos,
   }),
 }))
 
@@ -204,6 +214,8 @@ describe('useTenantStore — switchTenant', () => {
     mockApiFetch.mockReset()
     mockSetToken.mockReset()
     mockNavigateTo.mockReset()
+    mockFetchPermisos.mockClear()
+    mockResetPermisos.mockClear()
   })
 
   it('llama al endpoint con el tenantId correcto', async () => {
@@ -234,6 +246,18 @@ describe('useTenantStore — switchTenant', () => {
     await store.switchTenant('tenant-aaa')
 
     expect(mockNavigateTo).toHaveBeenCalledWith('/')
+  })
+
+  it('resetea permisos y los recarga tras el switch exitoso', async () => {
+    const store = useTenantStore()
+    mockApiFetch.mockResolvedValue({ access_token: 'tok' })
+
+    await store.switchTenant('tenant-aaa')
+
+    expect(mockResetPermisos).toHaveBeenCalled()
+    expect(mockFetchPermisos).toHaveBeenCalled()
+    expect(mockSetToken).toHaveBeenCalledBefore(mockFetchPermisos)
+    expect(mockFetchPermisos).toHaveBeenCalledBefore(mockNavigateTo)
   })
 
   it('en caso de error 403 setea error.value y NO navega', async () => {

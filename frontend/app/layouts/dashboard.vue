@@ -6,6 +6,14 @@ const authStore = useAuthStore()
 const tenantStore = useTenantStore()
 const permissionsStore = usePermissionsStore()
 
+// Tras F5 o reapertura del navegador, Pinia pierde permisos en memoria.
+// Cargarlos al montar el layout (solo cliente) para poblar el menú lateral.
+onMounted(async () => {
+  if (!permissionsStore.permisos.length && !permissionsStore.loading) {
+    await permissionsStore.fetchPermisos()
+  }
+})
+
 const items = computed<NavigationMenuItem[]>(() => {
   const base: NavigationMenuItem[] = [
     {
