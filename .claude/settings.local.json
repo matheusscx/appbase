@@ -65,7 +65,25 @@
       "Bash(psql --version)",
       "mcp__ide__getDiagnostics",
       "Bash(git *)",
-      "Bash(grep -nA30 \"userHasPermiso\" backend/src/modules/rbac/rbac.service.ts)"
+      "Bash(grep -nA30 \"userHasPermiso\" backend/src/modules/rbac/rbac.service.ts)",
+      "Bash(grep -E '\\\\.\\(ts|css\\)$')",
+      "Bash(npm run *)",
+      "Bash(pkill -f \"node.*nuxt dev\")",
+      "Bash(curl -s http://localhost:5173/login)",
+      "Bash(curl -s http://localhost:5173/forgot-password)",
+      "Bash(curl -s http://localhost:5173/)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_screenshot",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page",
+      "Skill(run)",
+      "Bash(curl -s http://localhost:5173)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__evaluate_script",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages",
+      "Bash(netstat -tan)",
+      "Bash(node /private/tmp/claude-501/-Users-m2pro-cmatheus-startup-app/734cbc3a-d752-4f7b-96bb-451dd74ad911/scratchpad/verify-caja.js)",
+      "Bash(pkill -f \"npm run dev\")",
+      "Bash(npm test *)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__emulate"
     ]
   },
   "enabledMcpjsonServers": [

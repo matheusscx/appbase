@@ -1,7 +1,7 @@
 # Frontend Patterns — Playbook
 
 **Status**: Living
-**Last Updated**: 2026-06-23
+**Last Updated**: 2026-06-30
 
 Patrón de referencia para una pantalla de configuración en el frontend (Nuxt 4 +
 Vue 3 + `@nuxt/ui` v4). Extraído del código real más reciente
@@ -267,3 +267,44 @@ const puedeCobrarReactivo = computed(() =>
 ```
 
 Componentes pequeños (`CarritoPanel`, `CobroModal`, `ClienteForm`) que no contienen lógica sino que la consumen de arriba + composable.
+
+---
+
+## 11. Coordinar skill `frontend-design` con `nuxt-ui` / tokens semánticos
+
+Ambas skills conviven en este repo pero operan en fases distintas: `frontend-design`
+decide dirección estética (paleta, tipografía, layout, "elemento firma");
+`nuxt-ui` implementa con componentes usando **tokens semánticos** (regla de
+`CLAUDE.md` §Design System: nunca Tailwind hardcoded). Sin coordinación chocan en
+3 puntos:
+
+**Orden de trabajo (siempre en este orden):**
+1. `frontend-design` — brainstorm + plan: paleta (4-6 hex nombrados), tipografía,
+   layout, elemento firma.
+2. Traducir ese plan a `frontend/app.config.ts` **antes** de escribir ningún
+   componente (ver bloque `ui.colors` / `text` / `border` / `bg` / `divider` ya
+   existente ahí).
+3. `nuxt-ui` — construir la pantalla con componentes reales, consumiendo esos
+   tokens ya definidos.
+
+**Punto de choque 1 — hex sueltos vs. tokens semánticos:**
+La paleta que entrega `frontend-design` nunca se escribe literal en un `.vue`
+(nada de `bg-[#F4F1EA]`). Se mapea en `app.config.ts`:
+- Color de marca/acento reutilizable → escala `primary`/`secondary`/`neutral`.
+- Alias semántico nuevo de un solo uso (p. ej. el hero de una pantalla) → se
+  agrega como alias con nombre siguiendo el patrón de `text.highlighted` ya
+  presente (`bg.accent`, `text.accent`, etc.), no como clase inline.
+
+**Punto de choque 2 — CSS bespoke/animaciones vs. slots de Nuxt UI:**
+Preferir el prop `ui`/`class` del componente (mismo patrón que los overrides de
+`card`/`modal`/`formField` en `app.config.ts`) antes que CSS global. Si el
+"elemento firma" necesita markup verdaderamente custom (hero, animación de
+scroll), aislarlo en su propio componente con `<style scoped>` — nunca
+selectores globales tipo `.section`/`.cta` que puedan chocar con las clases
+generadas en `.nuxt/ui/<component>.ts`. Revisar ese archivo generado antes de
+escribir CSS custom para no duplicar especificidad.
+
+**Punto de choque 3 — orden de invocación no definido entre skills:**
+Resuelto por el flujo de 3 pasos de arriba: primero decisión estética
+(`frontend-design`), tokens declarados en `app.config.ts`, recién después
+implementación con componentes (`nuxt-ui`).
