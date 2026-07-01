@@ -34,7 +34,7 @@ All pages and components use Nuxt UI v4 semantic design tokens for colors, spaci
 - **border-default**: Dividers, list separators, borders
   - Light: `border-gray-200`
   - Dark: `dark:border-gray-700`
-- **divide-border-default**: For `divide-y` lists
+- **divide-default**: For `divide-y` lists (same tone as card/modal dividers)
   - Light: `divide-gray-100`
   - Dark: `dark:divide-gray-800`
 
@@ -111,7 +111,7 @@ AppDrawer footer        px-6 py-4, gap-2 entre botones
 
 ### List Item
 ```vue
-<ul class="divide-y divide-border-default">
+<ul class="divide-y divide-default">
   <li class="flex items-center justify-between py-3">
     <div>
       <p class="font-medium text-default">{{ item.name }}</p>
@@ -181,8 +181,8 @@ When adding a new page or updating an existing one:
 - [ ] Replace `text-gray-400` with `text-muted`
 - [ ] Replace `text-gray-900 dark:text-white` with `text-default`
 - [ ] Replace `bg-gray-50 dark:bg-gray-950` with `bg-elevated`
-- [ ] Replace `divide-gray-100 dark:divide-gray-800` with `divide-border-default`
-- [ ] Replace `border-gray-200 dark:border-gray-700` with `border-border-default`
+- [ ] Replace `divide-gray-100 dark:divide-gray-800` with `divide-default`
+- [ ] Replace `border-gray-200 dark:border-gray-700` with `border-default`
 - [ ] Page sections: `space-y-6`; form fields: `space-y-4`; drawer/card shell: `px-6 py-4`; nested bordered UI: `px-4`
 - [ ] Use UCard, UModal, UFormField for structure
 - [ ] Test in both light and dark modes

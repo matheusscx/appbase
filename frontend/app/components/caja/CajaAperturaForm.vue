@@ -39,7 +39,7 @@ async function abrir() {
   <UCard>
     <template #header>
       <div>
-        <h2 class="text-base font-semibold">
+        <h2 class="text-base font-semibold text-default">
           Abrir caja
         </h2>
         <p class="text-sm text-muted mt-0.5">
@@ -48,7 +48,7 @@ async function abrir() {
       </div>
     </template>
 
-    <div class="space-y-4">
+    <UForm id="caja-apertura-form" :state="form" class="space-y-4" @submit="abrir">
       <UFormField label="Saldo inicial" required>
         <UInput
           v-model="form.saldoInicial"
@@ -65,14 +65,15 @@ async function abrir() {
           class="w-full"
         />
       </UFormField>
-    </div>
+    </UForm>
 
     <template #footer>
       <div class="flex justify-end">
         <UButton
+          type="submit"
+          form="caja-apertura-form"
           icon="i-heroicons-lock-open"
           :loading="saving"
-          @click="abrir"
         >
           Abrir caja
         </UButton>

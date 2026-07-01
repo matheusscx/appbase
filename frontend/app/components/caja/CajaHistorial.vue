@@ -61,7 +61,7 @@ watch(() => props.usuarioId, (id) => cargar(!!id))
   <UCard>
     <template #header>
       <div class="flex items-center justify-between">
-        <h2 class="text-base font-semibold">
+        <h2 class="text-base font-semibold text-default">
           Historial de cajas
         </h2>
         <UButton

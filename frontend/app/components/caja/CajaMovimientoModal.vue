@@ -67,32 +67,30 @@ async function guardar() {
     @after-leave="onAfterLeave"
   >
     <template #body>
-      <div class="space-y-4">
+      <UForm id="caja-movimiento-form" :state="form" class="space-y-4" @submit="guardar">
         <!-- Tipo selector -->
         <UFormField label="Tipo">
           <div class="flex gap-2">
-            <button
+            <UButton
               type="button"
-              class="flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors"
-              :class="form.tipo === 'entrada'
-                ? 'bg-green-50 border-green-400 text-green-700 dark:bg-green-900/30 dark:border-green-500 dark:text-green-300'
-                : 'border-border-default text-muted hover:bg-muted dark:hover:bg-muted'"
+              block
+              class="flex-1"
+              :variant="form.tipo === 'entrada' ? 'soft' : 'outline'"
+              :color="form.tipo === 'entrada' ? 'success' : 'neutral'"
+              icon="i-heroicons-arrow-down-circle"
+              label="Entrada"
               @click="form.tipo = 'entrada'"
-            >
-              <UIcon name="i-heroicons-arrow-down-circle" class="w-4 h-4 inline mr-1" />
-              Entrada
-            </button>
-            <button
+            />
+            <UButton
               type="button"
-              class="flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors"
-              :class="form.tipo === 'salida'
-                ? 'bg-red-50 border-red-400 text-red-700 dark:bg-red-900/30 dark:border-red-500 dark:text-red-300'
-                : 'border-border-default text-muted hover:bg-muted dark:hover:bg-muted'"
+              block
+              class="flex-1"
+              :variant="form.tipo === 'salida' ? 'soft' : 'outline'"
+              :color="form.tipo === 'salida' ? 'error' : 'neutral'"
+              icon="i-heroicons-arrow-up-circle"
+              label="Salida"
               @click="form.tipo = 'salida'"
-            >
-              <UIcon name="i-heroicons-arrow-up-circle" class="w-4 h-4 inline mr-1" />
-              Salida
-            </button>
+            />
           </div>
         </UFormField>
 
@@ -120,7 +118,7 @@ async function guardar() {
             class="w-full"
           />
         </UFormField>
-      </div>
+      </UForm>
     </template>
 
     <template #footer>
@@ -129,9 +127,10 @@ async function guardar() {
           Cancelar
         </UButton>
         <UButton
+          type="submit"
+          form="caja-movimiento-form"
           :loading="saving"
           :color="form.tipo === 'entrada' ? 'success' : 'error'"
-          @click="guardar"
         >
           Registrar {{ form.tipo }}
         </UButton>

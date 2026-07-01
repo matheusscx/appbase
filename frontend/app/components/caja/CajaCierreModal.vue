@@ -81,24 +81,24 @@ async function cerrarCaja() {
     @after-leave="onAfterLeave"
   >
     <template #body>
-      <div class="space-y-5">
+      <UForm id="caja-cierre-form" :state="{ montoContado, comentario }" class="space-y-5" @submit="cerrarCaja">
         <!-- Cuadre previsto -->
-        <div class="rounded-lg bg-muted dark:bg-muted p-4 space-y-2">
+        <div class="rounded-lg bg-muted p-4 space-y-2">
           <div class="flex justify-between text-sm">
             <span class="text-muted">Saldo esperado</span>
-            <span class="font-medium">{{ formatMonto(saldoEsperado) }}</span>
+            <span class="font-medium text-default">{{ formatMonto(saldoEsperado) }}</span>
           </div>
           <div class="flex justify-between text-sm">
             <span class="text-muted">Monto contado</span>
-            <span class="font-medium">
+            <span class="font-medium text-default">
               {{ montoContadoFormateado }}
             </span>
           </div>
-          <div class="border-t border-border-default pt-2 flex justify-between text-sm font-semibold">
-            <span>Diferencia</span>
+          <div class="border-t border-default pt-2 flex justify-between text-sm font-semibold">
+            <span class="text-default">Diferencia</span>
             <span
               v-if="diferencia !== null"
-              :class="diferencia.gte(0) ? 'text-green-600' : 'text-red-600'"
+              :class="diferencia.gte(0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
             >
               {{ diferencia.gte(0) ? '+' : '' }}{{ formatMonto(diferencia) }}
             </span>
@@ -123,7 +123,7 @@ async function cerrarCaja() {
             class="w-full"
           />
         </UFormField>
-      </div>
+      </UForm>
     </template>
 
     <template #footer>
@@ -132,10 +132,11 @@ async function cerrarCaja() {
           Cancelar
         </UButton>
         <UButton
+          type="submit"
+          form="caja-cierre-form"
           color="error"
           icon="i-heroicons-lock-closed"
           :loading="saving"
-          @click="cerrarCaja"
         >
           Confirmar cierre
         </UButton>

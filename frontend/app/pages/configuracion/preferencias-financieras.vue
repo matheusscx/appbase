@@ -218,7 +218,7 @@ function moverAbajo(index: number) {
               <div
                 v-for="(paso, i) in formula"
                 :key="paso"
-                class="flex items-center gap-3 px-3 py-2 rounded-md border border-border-default"
+                class="flex items-center gap-3 px-3 py-2 rounded-md border border-default"
               >
                 <span class="flex-1 text-sm font-medium">
                   {{ pasoLabels[paso] ?? paso }}

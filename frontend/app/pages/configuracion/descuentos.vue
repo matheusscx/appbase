@@ -450,7 +450,7 @@ const columns: TableColumn<Regla>[] = [
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(tramo, i) in form.tramos" :key="i" class="border-t border-border-default">
+                  <tr v-for="(tramo, i) in form.tramos" :key="i" class="border-t border-default">
                     <td class="py-1 pr-2">
                       <UInput v-model="tramo.minimo" inputmode="decimal" placeholder="0" class="w-full" />
                     </td>

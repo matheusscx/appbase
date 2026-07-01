@@ -51,7 +51,7 @@ const { formatMonto, formatFecha } = useFormatters()
         <div class="flex items-center justify-between flex-wrap gap-3">
           <div>
             <div class="flex items-center gap-2">
-              <h2 class="text-base font-semibold">
+              <h2 class="text-base font-semibold text-default">
                 Caja
               </h2>
               <UBadge :color="caja.estado === 'abierta' ? 'success' : 'neutral'" variant="soft">
@@ -85,11 +85,11 @@ const { formatMonto, formatFecha } = useFormatters()
 
       <!-- Resumen financiero -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div class="rounded-lg bg-muted dark:bg-muted p-3">
+        <div class="rounded-lg bg-muted p-3">
           <p class="text-xs text-muted uppercase tracking-wide">
             Saldo inicial
           </p>
-          <p class="text-lg font-semibold mt-1">
+          <p class="text-lg font-semibold text-default mt-1">
             {{ formatMonto(caja.saldoInicial) }}
           </p>
         </div>
@@ -123,7 +123,7 @@ const { formatMonto, formatFecha } = useFormatters()
     <!-- Movimientos -->
     <UCard>
       <template #header>
-        <h3 class="text-sm font-semibold">
+        <h3 class="text-sm font-semibold text-default">
           Movimientos del turno
         </h3>
       </template>
@@ -143,7 +143,7 @@ const { formatMonto, formatFecha } = useFormatters()
       </div>
       <ul
         v-else
-        class="divide-y divide-border-default"
+        class="divide-y divide-default"
       >
         <li
           v-for="mov in cajaStore.movimientos"
@@ -154,10 +154,10 @@ const { formatMonto, formatFecha } = useFormatters()
             <UIcon
               :name="mov.tipo === 'entrada' ? 'i-heroicons-arrow-down-circle' : 'i-heroicons-arrow-up-circle'"
               class="w-5 h-5 shrink-0"
-              :class="mov.tipo === 'entrada' ? 'text-green-500' : 'text-red-500'"
+              :class="mov.tipo === 'entrada' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
             />
             <div class="min-w-0">
-              <p class="text-sm font-medium truncate">
+              <p class="text-sm font-medium text-default truncate">
                 {{ mov.concepto }}
               </p>
               <p
@@ -173,7 +173,7 @@ const { formatMonto, formatFecha } = useFormatters()
           </div>
           <span
             class="text-sm font-semibold shrink-0"
-            :class="mov.tipo === 'entrada' ? 'text-green-600' : 'text-red-600'"
+            :class="mov.tipo === 'entrada' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
           >
             {{ mov.tipo === 'entrada' ? '+' : '-' }} {{ formatMonto(mov.monto) }}
           </span>

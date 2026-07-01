@@ -42,7 +42,7 @@ async function accionBackend(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: 
         <!-- Sección A: Validación Frontend -->
         <div>
           <h2 class="text-lg font-semibold mb-1">Sección A — Validación Frontend</h2>
-          <p class="text-sm text-gray-500 mb-4">
+          <p class="text-sm text-muted mb-4">
             Los botones se deshabilitan según los permisos del store. No llaman al backend.
           </p>
           <div class="flex flex-wrap gap-3">
@@ -76,7 +76,7 @@ async function accionBackend(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: 
         <!-- Sección B: Validación Backend -->
         <div>
           <h2 class="text-lg font-semibold mb-1">Sección B — Validación Backend</h2>
-          <p class="text-sm text-gray-500 mb-4">
+          <p class="text-sm text-muted mb-4">
             Los botones siempre están habilitados. El backend acepta o rechaza con 403.
           </p>
           <div class="flex flex-wrap gap-3">

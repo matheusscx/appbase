@@ -236,7 +236,7 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 ### Design System (Nuxt UI Semantic Tokens)
 - **Siempre usar tokens semánticos, nunca Tailwind hardcoded.** Permite consistencia en tema claro/oscuro.
 - ❌ Prohibido: `text-gray-500`, `divide-gray-100 dark:divide-gray-800`, `bg-white dark:bg-gray-900`
-- ✅ Usar: `text-muted`, `divide-border-default`, `bg-default`
+- ✅ Usar: `text-muted`, `divide-default`, `bg-default`
 - Referencia: `docs/DESIGN-SYSTEM.md` y `app/app.config.ts`
 - **Excepción:** colores financieros (verde/rojo/azul) en módulo Caja son intencionales.
 

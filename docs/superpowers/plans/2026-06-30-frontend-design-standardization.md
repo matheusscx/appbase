@@ -323,9 +323,9 @@ export default defineAppConfig({
       primary: 'primary',
     },
     card: {
-      base: 'bg-default divide-y divide-border-default',
+      base: 'bg-default divide-y divide-default',
       header: {
-        base: 'px-6 py-5 border-b border-border-default',
+        base: 'px-6 py-5 border-b border-default',
       },
     },
     modal: {
@@ -334,7 +334,7 @@ export default defineAppConfig({
         base: 'p-6 space-y-4',
       },
       footer: {
-        base: 'px-6 py-4 border-t border-border-default flex justify-end gap-2',
+        base: 'px-6 py-4 border-t border-default flex justify-end gap-2',
       },
     },
     formField: {
@@ -391,7 +391,7 @@ Example (metodos-pago.vue line ~10):
 
 Find: `<ul class="divide-y divide-gray-100 dark:divide-gray-800">`
 
-Replace with: `<ul class="divide-y divide-border-default">`
+Replace with: `<ul class="divide-y divide-default">`
 
 - [ ] **Step 3: Update all 5 pages - Secondary Text in List Items**
 
@@ -435,7 +435,7 @@ git commit -m "refactor(config): migrate simple CRUD pages to semantic tokens"
 - [ ] **Step 1: Update descuentos.vue headers and lists (identical to Task 7)**
 
 - Line ~10: `text-gray-500` → `text-muted`
-- List dividers: `divide-gray-100 dark:divide-gray-800` → `divide-border-default`
+- List dividers: `divide-gray-100 dark:divide-gray-800` → `divide-default`
 - Empty states: `text-gray-500` → `text-muted`
 
 Additional for descuentos.vue (complex modal):
@@ -518,21 +518,21 @@ Find:
 Find:
 - Line ~10: `text-gray-500` → `text-muted`
 - Line ~30: List items: `text-gray-500` → `text-muted` (secondary text)
-- List dividers: `divide-gray-100 dark:divide-gray-800` → `divide-border-default`
+- List dividers: `divide-gray-100 dark:divide-gray-800` → `divide-default`
 
 - [ ] **Step 5: Update roles/[id].vue**
 
 Find:
 - Line ~10: `text-gray-500` → `text-muted`
 - Line ~40: Section headers: `text-gray-500` → `text-muted` (descriptions)
-- Replace any `divide-gray-100 dark:divide-gray-800` → `divide-border-default`
+- Replace any `divide-gray-100 dark:divide-gray-800` → `divide-default`
 
 - [ ] **Step 6: Update usuarios/index.vue**
 
 Find:
 - Line ~10: `text-gray-500` → `text-muted`
 - Line ~30: List items: `text-gray-500` → `text-muted`
-- List dividers: `divide-gray-100 dark:divide-gray-800` → `divide-border-default`
+- List dividers: `divide-gray-100 dark:divide-gray-800` → `divide-default`
 
 - [ ] **Step 7: Test all 5 pages in browser (items already passes)**
 
@@ -561,7 +561,7 @@ git commit -m "refactor(config): migrate enterprise config pages to semantic tok
 
 Find:
 - Any `text-gray-500` → `text-muted`
-- Any `divide-gray-100 dark:divide-gray-800` → `divide-border-default`
+- Any `divide-gray-100 dark:divide-gray-800` → `divide-default`
 - Field descriptions: `text-gray-500` → `text-muted`
 
 - [ ] **Step 2: Update ContrasenaForm.vue**
@@ -640,7 +640,7 @@ git commit -m "refactor(caja): migrate caja pages to semantic tokens"
 Find neutral text/borders:
 - `text-gray-500` → `text-muted`
 - `text-gray-400 pt-1` → `text-muted`
-- `divide-gray-100` → `divide-border-default`
+- `divide-gray-100` → `divide-default`
 - Keep: `border-primary-300 dark:border-primary-700` (intentional primary accent for "add new" card)
 - Keep: `hover:border-primary-500` (hover state)
 
@@ -657,7 +657,7 @@ Specific replacements:
 - Line ~20: `text-gray-500` → `text-muted`
 - Line ~88: `bg-gray-50 dark:bg-gray-800` → Keep as is (intentional neutral background for summary)
 - Line ~100: `text-gray-600 dark:text-gray-400` → `text-muted` (replace with token, not primary-colored)
-- List dividers: `divide-gray-100 dark:divide-gray-800` → `divide-border-default`
+- List dividers: `divide-gray-100 dark:divide-gray-800` → `divide-default`
 - Keep: All green-600, red-600, blue-600 (financial semantic colors) and their dark variants
 
 Example block to keep (income section):
@@ -672,7 +672,7 @@ Example block to keep (income section):
 
 Find:
 - Neutral text: `text-gray-500` → `text-muted`
-- Neutral borders: `border-gray-200 dark:border-gray-700` → `border-border-default`
+- Neutral borders: `border-gray-200 dark:border-gray-700` → `border-default`
 - Neutral background: `bg-gray-50 dark:bg-gray-800` → Keep as is (info box background)
 - Keep: `text-green-600 dark:text-green-400`, `text-red-600 dark:text-red-400` (financial indicators)
 
@@ -680,8 +680,8 @@ Find:
 
 Find:
 - Line ~20: `text-gray-500` → `text-muted`
-- Line ~30: `text-gray-200 dark:text-gray-700` → `border-border-default` (table borders)
-- Table: `border-gray-100 dark:border-gray-800` → `border-border-default`
+- Line ~30: `text-gray-200 dark:text-gray-700` → `border-default` (table borders)
+- Table: `border-gray-100 dark:border-gray-800` → `border-default`
 - Keep: `text-green-600 dark:text-green-400`, `text-red-600 dark:text-red-400` (income/expense colors)
 
 - [ ] **Step 5: Update CajaMovimientoModal.vue**
@@ -696,7 +696,7 @@ No changes needed for button styling — they're semantically correct (green = i
 
 Find:
 - Any `text-gray-500` → `text-muted`
-- Any `divide-gray-100` → `divide-border-default`
+- Any `divide-gray-100` → `divide-default`
 
 - [ ] **Step 7: Test all caja components in browser**
 
@@ -832,7 +832,7 @@ All pages and components use Nuxt UI v4 semantic design tokens for colors, spaci
 - **border-default**: Dividers, list separators, borders
   - Light: `border-gray-200`
   - Dark: `dark:border-gray-700`
-- **divide-border-default**: For `divide-y` lists
+- **divide-default**: For `divide-y` lists
   - Light: `divide-gray-100`
   - Dark: `dark:divide-gray-800`
 
@@ -854,7 +854,7 @@ These are intentionally retained in the Caja module for clarity:
 
 ### List Item
 ```vue
-<ul class="divide-y divide-border-default">
+<ul class="divide-y divide-default">
   <li class="flex items-center justify-between py-3">
     <div>
       <p class="font-medium text-default">{{ item.name }}</p>
@@ -888,8 +888,8 @@ When adding a new page or updating an existing one:
 - [ ] Replace `text-gray-400` with `text-muted`
 - [ ] Replace `text-gray-900 dark:text-white` with `text-default`
 - [ ] Replace `bg-gray-50 dark:bg-gray-950` with `bg-elevated`
-- [ ] Replace `divide-gray-100 dark:divide-gray-800` with `divide-border-default`
-- [ ] Replace `border-gray-200 dark:border-gray-700` with `border-border-default`
+- [ ] Replace `divide-gray-100 dark:divide-gray-800` with `divide-default`
+- [ ] Replace `border-gray-200 dark:border-gray-700` with `border-default`
 - [ ] Use UCard, UModal, UFormField for structure
 - [ ] Test in both light and dark modes
 - [ ] Verify text contrast meets WCAG AA standards
@@ -955,7 +955,7 @@ bg-white dark:bg-gray-900  /* ✗ Hardcoded card background */
 **Always use:**
 ```css
 text-muted             /* ✓ Semantic secondary text */
-divide-border-default  /* ✓ Semantic divider */
+divide-default  /* ✓ Semantic divider */
 bg-default             /* ✓ Semantic card background */
 ```
 

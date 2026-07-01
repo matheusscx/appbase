@@ -53,7 +53,7 @@ function onOpened(): void {
         <template #header>
           <div class="flex items-center gap-2">
             <UIcon name="i-heroicons-plus-circle" class="w-5 h-5 text-primary-500" />
-            <span class="font-semibold text-primary-600 dark:text-primary-400">Abrir mi caja</span>
+            <span class="font-semibold text-highlighted">Abrir mi caja</span>
           </div>
         </template>
         <p class="text-sm text-muted">
@@ -70,7 +70,7 @@ function onOpened(): void {
       >
         <template #header>
           <div class="flex items-center justify-between gap-2">
-            <span class="font-semibold truncate">{{ caja.usuarioNombre }}</span>
+            <span class="font-semibold text-default truncate">{{ caja.usuarioNombre }}</span>
             <UBadge v-if="caja.esPropia" color="primary" variant="subtle" size="xs">
               Mía
             </UBadge>
@@ -82,13 +82,13 @@ function onOpened(): void {
             <dt class="text-muted">
               Saldo inicial
             </dt>
-            <dd>{{ formatMonto(caja.saldoInicial) }}</dd>
+            <dd class="text-default">{{ formatMonto(caja.saldoInicial) }}</dd>
           </div>
           <div class="flex justify-between font-medium">
             <dt class="text-muted">
               Saldo esperado
             </dt>
-            <dd>{{ formatMonto(caja.saldoEsperado) }}</dd>
+            <dd class="text-default">{{ formatMonto(caja.saldoEsperado) }}</dd>
           </div>
           <div class="flex justify-between text-xs text-muted pt-1">
             <dt>Apertura</dt>
