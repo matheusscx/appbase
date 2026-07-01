@@ -43,13 +43,10 @@ const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
 
 const saldoEsperado = computed(() => {
   if (!cajaStore.activa) return new Decimal(0)
-  const entradas = cajaStore.movimientos
-    .filter(m => m.tipo === 'entrada')
-    .reduce((acc, m) => acc.plus(new Decimal(m.monto)), new Decimal(0))
-  const salidas = cajaStore.movimientos
-    .filter(m => m.tipo === 'salida')
-    .reduce((acc, m) => acc.plus(new Decimal(m.monto)), new Decimal(0))
-  return new Decimal(cajaStore.activa.saldoInicial).plus(entradas).minus(salidas)
+  if (cajaStore.resumenTurno) {
+    return new Decimal(cajaStore.resumenTurno.saldoEsperado)
+  }
+  return new Decimal(cajaStore.activa.saldoInicial)
 })
 
 const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [
@@ -73,7 +70,7 @@ watch(
   async (activa) => {
     if (activa) {
       try {
-        await cajaStore.cargarMovimientos(activa.id)
+        await cajaStore.cargarResumenTurno(activa.id)
       }
       catch {
         // no crítico — saldoEsperado quedará en saldoInicial si falla
@@ -215,6 +212,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         v-if="cajaStore.activa"
         v-model:open="movimientoModalOpen"
         :caja-id="cajaStore.activa.id"
+        @saved="cajaStore.cargarResumenTurno(cajaStore.activa!.id)"
       />
       <CajaCierreModal
         v-if="cajaStore.activa"

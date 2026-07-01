@@ -6,6 +6,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
+  saved: []
 }>()
 
 const cajaStore = useCajaStore()
@@ -47,6 +48,7 @@ async function guardar() {
       referencia: form.value.referencia || undefined,
     })
     toast.add({ title: 'Movimiento registrado', color: 'success' })
+    emit('saved')
     cerrar()
   }
   catch (e: unknown) {

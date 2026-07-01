@@ -439,50 +439,46 @@ describe('CajaService', () => {
   });
 
   describe('listarMovimientos', () => {
-    function buildSvc(movimientos: unknown[]) {
-      const movimientoCajaRepo = {
-        find: jest.fn().mockResolvedValue(movimientos),
-      };
-      return Test.createTestingModule({
-        providers: [
-          CajaService,
-          { provide: getRepositoryToken(Caja), useValue: cajaRepo },
-          {
-            provide: getRepositoryToken(MovimientoCaja),
-            useValue: movimientoCajaRepo,
-          },
-          { provide: getDataSourceToken(), useValue: dataSource },
-        ],
-      })
-        .compile()
-        .then((m) => ({
-          svc: m.get<CajaService>(CajaService),
-          movimientoCajaRepo,
-        }));
-    }
+    const mockRow = {
+      movimiento_id: 'mov-001',
+      caja_id: CAJA_ID,
+      tipo: 'entrada',
+      concepto: 'Apertura extra',
+      monto: '200.0000',
+      referencia: null,
+      fecha: new Date('2026-06-29T12:00:00Z'),
+      venta_id: null,
+    };
 
-    it('el dueño lista los movimientos de su caja (orden fecha ASC)', async () => {
+    it('el dueño lista movimientos paginados (orden fecha ASC)', async () => {
       cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
-      const movimientos = [
-        { id: 'mov-001', cajaId: CAJA_ID, tipo: 'entrada', monto: '200' },
-        { id: 'mov-002', cajaId: CAJA_ID, tipo: 'salida', monto: '100' },
-      ];
-      const { svc, movimientoCajaRepo } = await buildSvc(movimientos);
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([mockRow]);
 
-      const result = await svc.listarMovimientos(
+      const result = await service.listarMovimientos(
         TENANT_ID,
         USUARIO_ID,
         CAJA_ID,
+        {},
       );
 
       expect(cajaRepo.findOne).toHaveBeenCalledWith({
         where: { id: CAJA_ID, tenantId: TENANT_ID, eliminadoEl: IsNull() },
       });
-      expect(movimientoCajaRepo.find).toHaveBeenCalledWith({
-        where: { cajaId: CAJA_ID, eliminadoEl: IsNull() },
-        order: { fecha: 'ASC' },
-      });
-      expect(result).toEqual(movimientos);
+      expect(result.data).toEqual([
+        {
+          id: 'mov-001',
+          cajaId: CAJA_ID,
+          tipo: 'entrada',
+          concepto: 'Apertura extra',
+          monto: '200.0000',
+          referencia: null,
+          fecha: mockRow.fecha,
+          ventaId: null,
+        },
+      ]);
+      expect(result.meta.total).toBe(1);
     });
 
     it('con tieneVerTodas=true permite leer movimientos de una caja ajena', async () => {
@@ -490,11 +486,16 @@ describe('CajaService', () => {
         ...mockCajaAbierta,
         usuarioId: OTRO_USUARIO,
       });
-      const { svc } = await buildSvc([]);
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
 
       await expect(
-        svc.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, true),
-      ).resolves.toEqual([]);
+        service.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, {}, true),
+      ).resolves.toEqual({
+        data: [],
+        meta: expect.objectContaining({ total: 0 }),
+      });
     });
 
     it('sobre caja ajena sin tieneVerTodas lanza ForbiddenException', async () => {
@@ -502,20 +503,46 @@ describe('CajaService', () => {
         ...mockCajaAbierta,
         usuarioId: OTRO_USUARIO,
       });
-      const { svc } = await buildSvc([]);
 
       await expect(
-        svc.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, false),
+        service.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, {}, false),
       ).rejects.toThrow(ForbiddenException);
     });
 
     it('lanza NotFoundException si la caja no existe', async () => {
       cajaRepo.findOne.mockResolvedValue(null);
-      const { svc } = await buildSvc([]);
 
       await expect(
-        svc.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID),
+        service.listarMovimientos(TENANT_ID, USUARIO_ID, CAJA_ID, {}),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('resumenMovimientos', () => {
+    it('calcula totales del turno', async () => {
+      cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
+      dataSource.query.mockResolvedValue([
+        {
+          saldo_inicial: '1000.0000',
+          total_entradas: '500.0000',
+          total_salidas: '200.0000',
+          total_movimientos: 3,
+        },
+      ]);
+
+      const result = await service.resumenMovimientos(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+      );
+
+      expect(result).toEqual({
+        saldoInicial: '1000.0000',
+        totalEntradas: '500.0000',
+        totalSalidas: '200.0000',
+        saldoEsperado: '1300.0000',
+        totalMovimientos: 3,
+      });
     });
   });
 

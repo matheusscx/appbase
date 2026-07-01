@@ -165,10 +165,28 @@ Error (422) si tipo es "salida" y monto > saldo_esperado actual.
 Error (403) si la caja no pertenece al usuario (salvo permiso "Ver todas").
 ```
 
-### GET /caja/:id/movimientos — Listar movimientos de la caja
+### GET /caja/:id/movimientos/resumen — KPIs del turno
 
 ```
-GET /caja/:id/movimientos
+GET /caja/:id/movimientos/resumen
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "saldoInicial": "1000.0000",
+  "totalEntradas": "500.0000",
+  "totalSalidas": "200.0000",
+  "saldoEsperado": "1300.0000",
+  "totalMovimientos": 5
+}
+```
+
+Totales globales del turno (independientes de la página del listado).
+
+### GET /caja/:id/movimientos — Listar movimientos de la caja (paginado)
+
+```
+GET /caja/:id/movimientos?page=1&pageSize=15&tipo=entrada
 Authorization: Bearer <token>
 
 Permiso requerido: Caja / Leer
@@ -176,17 +194,21 @@ Nota: usuarios con "Ver todas" pueden listar movimientos de cajas ajenas (read-o
       Solo el dueño puede registrar movimientos (POST) o cerrar (POST /cerrar).
 
 Response (200):
-[
-  {
-    "movimientoId": "uuid",
-    "tipo": "entrada",
-    "concepto": "Fondo adicional",
-    "monto": "200.00",
-    "referencia": "Ref-001",
-    "creadoEl": "2026-06-29T10:00:00Z"
-  },
-  ...
-]
+{
+  "data": [
+    {
+      "id": "uuid",
+      "cajaId": "uuid",
+      "tipo": "entrada",
+      "concepto": "Fondo adicional",
+      "monto": "200.0000",
+      "referencia": "Ref-001",
+      "fecha": "2026-06-29T10:00:00Z",
+      "ventaId": null
+    }
+  ],
+  "meta": { "page": 1, "pageSize": 15, "total": 5, "totalPages": 1 }
+}
 ```
 
 ### POST /caja/:id/cerrar — Cerrar caja con cuadre

@@ -1,46 +1,93 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import type { Caja } from '~/stores/caja'
+import type { TableColumn } from '@nuxt/ui'
 
 const props = defineProps<{
-  caja: Caja
+  caja: {
+    id: string
+    estado: string
+    saldoInicial: string
+    fechaApertura: string
+  }
   readonly?: boolean
 }>()
 
 const cajaStore = useCajaStore()
 const toast = useToast()
+const { formatMonto, formatFecha } = useFormatters()
+const { pageSize } = useUserPreferences()
 
 const movimientoModalOpen = ref(false)
 const cierreModalOpen = ref(false)
+const filtroTipo = ref<string | undefined>()
 
-onMounted(async () => {
+const listPath = computed(() => `/caja/${props.caja.id}/movimientos`)
+const listFilters = computed(() => ({ tipo: filtroTipo.value }))
+
+const { items: movimientos, meta, page, loading, fetch: recargarMovimientos } =
+  usePaginatedList<{
+    id: string
+    tipo: string
+    concepto: string
+    monto: string
+    referencia: string | null
+    fecha: string
+    ventaId: string | null
+  }>({
+    path: listPath,
+    pageSize,
+    filters: listFilters,
+  })
+
+const loadingResumen = computed(() => cajaStore.loadingResumenTurno)
+
+const totalEntradas = computed(() =>
+  new Decimal(cajaStore.resumenTurno?.totalEntradas ?? '0'),
+)
+const totalSalidas = computed(() =>
+  new Decimal(cajaStore.resumenTurno?.totalSalidas ?? '0'),
+)
+const saldoEsperado = computed(() =>
+  new Decimal(cajaStore.resumenTurno?.saldoEsperado ?? props.caja.saldoInicial),
+)
+
+const hayFiltrosActivos = computed(() => !!filtroTipo.value)
+
+const tipoOptions = [
+  { label: 'Entrada', value: 'entrada' },
+  { label: 'Salida', value: 'salida' },
+]
+
+function limpiarFiltros() {
+  filtroTipo.value = undefined
+}
+
+async function cargarResumen() {
   try {
-    await cajaStore.cargarMovimientos(props.caja.id)
+    await cajaStore.cargarResumenTurno(props.caja.id)
   }
   catch {
-    toast.add({ title: 'Error al cargar movimientos', color: 'error' })
+    toast.add({ title: 'Error al cargar resumen del turno', color: 'error' })
   }
+}
+
+async function recargar() {
+  await Promise.all([recargarMovimientos(), cargarResumen()])
+}
+
+onMounted(cargarResumen)
+
+watch(() => props.caja.id, () => {
+  cargarResumen()
 })
 
-const totalEntradas = computed(() => {
-  return cajaStore.movimientos
-    .filter(m => m.tipo === 'entrada')
-    .reduce((acc, m) => acc.plus(new Decimal(m.monto)), new Decimal(0))
-})
-
-const totalSalidas = computed(() => {
-  return cajaStore.movimientos
-    .filter(m => m.tipo === 'salida')
-    .reduce((acc, m) => acc.plus(new Decimal(m.monto)), new Decimal(0))
-})
-
-const saldoEsperado = computed(() => {
-  return new Decimal(props.caja.saldoInicial)
-    .plus(totalEntradas.value)
-    .minus(totalSalidas.value)
-})
-
-const { formatMonto, formatFecha } = useFormatters()
+const columns: TableColumn<typeof movimientos.value[number]>[] = [
+  { accessorKey: 'fecha', header: 'Fecha' },
+  { accessorKey: 'tipo', header: 'Tipo' },
+  { accessorKey: 'concepto', header: 'Concepto' },
+  { accessorKey: 'referencia', header: 'Referencia' },
+  { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -98,7 +145,12 @@ const { formatMonto, formatFecha } = useFormatters()
             Entradas
           </p>
           <p class="text-lg font-semibold text-green-700 dark:text-green-300 mt-1">
-            + {{ formatMonto(totalEntradas) }}
+            <template v-if="loadingResumen">
+              —
+            </template>
+            <template v-else>
+              + {{ formatMonto(totalEntradas) }}
+            </template>
           </p>
         </div>
         <div class="rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
@@ -106,7 +158,12 @@ const { formatMonto, formatFecha } = useFormatters()
             Salidas
           </p>
           <p class="text-lg font-semibold text-red-700 dark:text-red-300 mt-1">
-            - {{ formatMonto(totalSalidas) }}
+            <template v-if="loadingResumen">
+              —
+            </template>
+            <template v-else>
+              - {{ formatMonto(totalSalidas) }}
+            </template>
           </p>
         </div>
         <div class="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
@@ -114,7 +171,12 @@ const { formatMonto, formatFecha } = useFormatters()
             Saldo esperado
           </p>
           <p class="text-lg font-semibold text-blue-700 dark:text-blue-300 mt-1">
-            {{ formatMonto(saldoEsperado) }}
+            <template v-if="loadingResumen">
+              —
+            </template>
+            <template v-else>
+              {{ formatMonto(saldoEsperado) }}
+            </template>
           </p>
         </div>
       </div>
@@ -123,62 +185,95 @@ const { formatMonto, formatFecha } = useFormatters()
     <!-- Movimientos -->
     <UCard>
       <template #header>
-        <h3 class="text-sm font-semibold text-default">
-          Movimientos del turno
-        </h3>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h3 class="text-sm font-semibold text-default">
+            Movimientos del turno
+            <span v-if="cajaStore.resumenTurno" class="text-muted font-normal">
+              ({{ cajaStore.resumenTurno.totalMovimientos }})
+            </span>
+          </h3>
+          <div class="flex items-center gap-2">
+            <USelect
+              v-model="filtroTipo"
+              :items="tipoOptions"
+              placeholder="Tipo"
+              class="w-36"
+            />
+            <UButton
+              v-if="hayFiltrosActivos"
+              label="Limpiar"
+              icon="i-lucide-x"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+              @click="limpiarFiltros"
+            />
+          </div>
+        </div>
       </template>
 
-      <div
-        v-if="cajaStore.loadingMovimientos"
-        class="py-8 text-center text-sm text-muted"
-      >
+      <div v-if="loading" class="py-8 text-center text-sm text-muted">
         <UIcon name="i-lucide-loader" class="w-5 h-5 animate-spin mx-auto mb-1" />
         Cargando movimientos…
       </div>
-      <div
-        v-else-if="!cajaStore.movimientos.length"
-        class="py-8 text-center text-sm text-muted"
-      >
-        Sin movimientos registrados en este turno.
-      </div>
-      <ul
-        v-else
-        class="divide-y divide-default"
-      >
-        <li
-          v-for="mov in cajaStore.movimientos"
-          :key="mov.id"
-          class="flex items-center justify-between py-3 gap-3"
-        >
-          <div class="flex items-center gap-3 min-w-0">
-            <UIcon
-              :name="mov.tipo === 'entrada' ? 'i-lucide-circle-arrow-down' : 'i-lucide-circle-arrow-up'"
-              class="w-5 h-5 shrink-0"
-              :class="mov.tipo === 'entrada' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+
+      <template v-else>
+        <UTable :data="movimientos" :columns="columns">
+          <template #fecha-cell="{ row }">
+            <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
+          </template>
+          <template #tipo-cell="{ row }">
+            <UBadge
+              :color="row.original.tipo === 'entrada' ? 'success' : 'error'"
+              variant="subtle"
+              size="sm"
+              :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
             />
+          </template>
+          <template #concepto-cell="{ row }">
             <div class="min-w-0">
-              <p class="text-sm font-medium text-default truncate">
-                {{ mov.concepto }}
-              </p>
-              <p
-                v-if="mov.referencia"
-                class="text-xs text-muted truncate"
+              <p class="truncate">{{ row.original.concepto }}</p>
+              <NuxtLink
+                v-if="row.original.ventaId"
+                :to="{ path: '/ventas', query: { venta: row.original.ventaId } }"
+                class="text-xs text-highlighted hover:underline"
               >
-                Ref: {{ mov.referencia }}
-              </p>
-              <p class="text-xs text-muted">
-                {{ formatFecha(mov.fecha) }}
-              </p>
+                Ver venta
+              </NuxtLink>
             </div>
-          </div>
-          <span
-            class="text-sm font-semibold shrink-0"
-            :class="mov.tipo === 'entrada' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
-          >
-            {{ mov.tipo === 'entrada' ? '+' : '-' }} {{ formatMonto(mov.monto) }}
-          </span>
-        </li>
-      </ul>
+          </template>
+          <template #referencia-cell="{ row }">
+            <span class="text-muted">{{ row.original.referencia ?? '—' }}</span>
+          </template>
+          <template #monto-cell="{ row }">
+            <span
+              class="font-mono font-semibold"
+              :class="row.original.tipo === 'entrada'
+                ? 'text-green-600 dark:text-green-400'
+                : 'text-red-600 dark:text-red-400'"
+            >
+              {{ row.original.tipo === 'entrada' ? '+' : '-' }}
+              {{ formatMonto(row.original.monto) }}
+            </span>
+          </template>
+          <template #empty>
+            <div class="py-10 text-center text-sm text-muted">
+              <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+              {{ hayFiltrosActivos
+                ? 'Ningún movimiento coincide con los filtros.'
+                : 'Sin movimientos registrados en este turno.' }}
+            </div>
+          </template>
+        </UTable>
+
+        <div v-if="meta.total > pageSize" class="flex justify-end pt-4">
+          <UPagination
+            v-model:page="page"
+            :items-per-page="pageSize"
+            :total="meta.total"
+          />
+        </div>
+      </template>
     </UCard>
 
     <!-- Modals -->
@@ -186,6 +281,7 @@ const { formatMonto, formatFecha } = useFormatters()
       <CajaMovimientoModal
         v-model:open="movimientoModalOpen"
         :caja-id="caja.id"
+        @saved="recargar"
       />
       <CajaCierreModal
         v-model:open="cierreModalOpen"

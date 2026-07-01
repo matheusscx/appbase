@@ -13,6 +13,12 @@ import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
+import type { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
+import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
+import {
+  buildPaginationMeta,
+  resolvePagination,
+} from '../../common/utils/pagination.util';
 
 export interface CajaAbierta {
   id: string;
@@ -22,6 +28,25 @@ export interface CajaAbierta {
   saldoEsperado: string;
   fechaApertura: Date;
   esPropia: boolean;
+}
+
+export interface MovimientoCajaListItem {
+  id: string;
+  cajaId: string;
+  tipo: string;
+  concepto: string;
+  monto: string;
+  referencia: string | null;
+  fecha: Date;
+  ventaId: string | null;
+}
+
+export interface CajaTurnoResumen {
+  saldoInicial: string;
+  totalEntradas: string;
+  totalSalidas: string;
+  saldoEsperado: string;
+  totalMovimientos: number;
 }
 
 @Injectable()
@@ -297,12 +322,131 @@ export class CajaService {
     return caja;
   }
 
-  async listarMovimientos(
+  async resumenMovimientos(
     tenantId: string,
     usuarioId: string,
     cajaId: string,
     tieneVerTodas = false,
-  ): Promise<MovimientoCaja[]> {
+  ): Promise<CajaTurnoResumen> {
+    await this.verificarAccesoCaja(tenantId, usuarioId, cajaId, tieneVerTodas);
+
+    const rows: {
+      saldo_inicial: string;
+      total_entradas: string;
+      total_salidas: string;
+      total_movimientos: number;
+    }[] = await this.dataSource.query(
+      `SELECT c.saldo_inicial,
+              COALESCE(SUM(m.monto) FILTER (
+                WHERE m.tipo = 'entrada' AND m.eliminado_el IS NULL
+              ), 0)::text AS total_entradas,
+              COALESCE(SUM(m.monto) FILTER (
+                WHERE m.tipo = 'salida' AND m.eliminado_el IS NULL
+              ), 0)::text AS total_salidas,
+              COUNT(m.movimiento_id) FILTER (
+                WHERE m.eliminado_el IS NULL
+              )::int AS total_movimientos
+       FROM cajas c
+       LEFT JOIN movimientos_caja m ON m.caja_id = c.caja_id
+       WHERE c.caja_id = $1
+         AND c.tenant_id = $2
+         AND c.eliminado_el IS NULL
+       GROUP BY c.saldo_inicial`,
+      [cajaId, tenantId],
+    );
+
+    const row = rows[0];
+    const saldoInicial = new Decimal(row?.saldo_inicial ?? '0');
+    const totalEntradas = new Decimal(row?.total_entradas ?? '0');
+    const totalSalidas = new Decimal(row?.total_salidas ?? '0');
+
+    return {
+      saldoInicial: saldoInicial.toFixed(4),
+      totalEntradas: totalEntradas.toFixed(4),
+      totalSalidas: totalSalidas.toFixed(4),
+      saldoEsperado: saldoInicial
+        .plus(totalEntradas)
+        .minus(totalSalidas)
+        .toFixed(4),
+      totalMovimientos: row?.total_movimientos ?? 0,
+    };
+  }
+
+  async listarMovimientos(
+    tenantId: string,
+    usuarioId: string,
+    cajaId: string,
+    query: QueryMovimientosCajaDto,
+    tieneVerTodas = false,
+  ): Promise<PaginatedResponse<MovimientoCajaListItem>> {
+    await this.verificarAccesoCaja(tenantId, usuarioId, cajaId, tieneVerTodas);
+
+    const { page, pageSize, offset } = resolvePagination(query);
+    const { filters, params } = this.buildMovimientosFilters(cajaId, query);
+
+    const countRows: { total: number }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total
+       FROM movimientos_caja m
+       WHERE m.caja_id = $1
+         AND m.eliminado_el IS NULL
+         ${filters}`,
+      params,
+    );
+
+    const total = countRows[0]?.total ?? 0;
+
+    const listParams = [...params, pageSize, offset];
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+
+    const rows: {
+      movimiento_id: string;
+      caja_id: string;
+      tipo: string;
+      concepto: string;
+      monto: string;
+      referencia: string | null;
+      fecha: Date;
+      venta_id: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT m.movimiento_id,
+              m.caja_id,
+              m.tipo,
+              m.concepto,
+              m.monto,
+              m.referencia,
+              m.fecha,
+              m.venta_id
+       FROM movimientos_caja m
+       WHERE m.caja_id = $1
+         AND m.eliminado_el IS NULL
+         ${filters}
+       ORDER BY m.fecha ASC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
+    );
+
+    return {
+      data: rows.map((r) => ({
+        id: r.movimiento_id,
+        cajaId: r.caja_id,
+        tipo: r.tipo,
+        concepto: r.concepto,
+        monto: new Decimal(r.monto).toFixed(4),
+        referencia: r.referencia,
+        fecha: r.fecha,
+        ventaId: r.venta_id,
+      })),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  private async verificarAccesoCaja(
+    tenantId: string,
+    usuarioId: string,
+    cajaId: string,
+    tieneVerTodas: boolean,
+  ): Promise<Caja> {
     const caja = await this.cajaRepo.findOne({
       where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
     });
@@ -315,9 +459,22 @@ export class CajaService {
       throw new ForbiddenException('No tienes acceso a esta caja');
     }
 
-    return this.movimientoCajaRepo.find({
-      where: { cajaId, eliminadoEl: IsNull() },
-      order: { fecha: 'ASC' },
-    });
+    return caja;
+  }
+
+  private buildMovimientosFilters(
+    cajaId: string,
+    query: QueryMovimientosCajaDto,
+  ): { filters: string; params: unknown[] } {
+    const params: unknown[] = [cajaId];
+    let paramIdx = 2;
+    let filters = '';
+
+    if (query.tipo) {
+      filters += ` AND m.tipo = $${paramIdx++}`;
+      params.push(query.tipo);
+    }
+
+    return { filters, params };
   }
 }

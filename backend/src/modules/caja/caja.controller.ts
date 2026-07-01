@@ -20,6 +20,7 @@ import { CajaService } from './caja.service';
 import { AbrirCajaDto } from './dto/abrir-caja.dto';
 import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import { CerrarCajaDto } from './dto/cerrar-caja.dto';
+import { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 
 @ApiTags('caja')
 @ApiBearerAuth()
@@ -110,9 +111,31 @@ export class CajaController {
     return this.cajaService.cerrar(u.tenantId!, u.id, cajaId, dto);
   }
 
+  @Get(':id/movimientos/resumen')
+  @RequiresPermiso('Caja', 'Leer')
+  async resumenMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
+    const u = req.user as JwtUser;
+    const tieneVerTodas = await this.rbacService.userHasPermiso(
+      u.id,
+      u.tenantId!,
+      'Caja',
+      'Ver todas',
+    );
+    return this.cajaService.resumenMovimientos(
+      u.tenantId!,
+      u.id,
+      cajaId,
+      tieneVerTodas,
+    );
+  }
+
   @Get(':id/movimientos')
   @RequiresPermiso('Caja', 'Leer')
-  async listarMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
+  async listarMovimientos(
+    @Req() req: Request,
+    @Param('id') cajaId: string,
+    @Query() query: QueryMovimientosCajaDto,
+  ) {
     const u = req.user as JwtUser;
     const tieneVerTodas = await this.rbacService.userHasPermiso(
       u.id,
@@ -124,6 +147,7 @@ export class CajaController {
       u.tenantId!,
       u.id,
       cajaId,
+      query,
       tieneVerTodas,
     );
   }

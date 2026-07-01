@@ -24,6 +24,15 @@ export interface MovimientoCaja {
   monto: string
   referencia: string | null
   fecha: string
+  ventaId: string | null
+}
+
+export interface CajaTurnoResumen {
+  saldoInicial: string
+  totalEntradas: string
+  totalSalidas: string
+  saldoEsperado: string
+  totalMovimientos: number
 }
 
 export interface CajaAbierta {
@@ -40,12 +49,12 @@ export const useCajaStore = defineStore('caja', () => {
   const config = useRuntimeConfig()
 
   const activa = ref<Caja | null>(null)
-  const movimientos = ref<MovimientoCaja[]>([])
+  const resumenTurno = ref<CajaTurnoResumen | null>(null)
   const historial = ref<Caja[]>([])
   const abiertas = ref<CajaAbierta[]>([])
   const detalle = ref<Caja | null>(null)
   const loadingActiva = ref(false)
-  const loadingMovimientos = ref(false)
+  const loadingResumenTurno = ref(false)
 
   async function cargarActiva(): Promise<void> {
     loadingActiva.value = true
@@ -71,15 +80,15 @@ export const useCajaStore = defineStore('caja', () => {
     await cargarActiva()
   }
 
-  async function cargarMovimientos(cajaId: string): Promise<void> {
-    loadingMovimientos.value = true
+  async function cargarResumenTurno(cajaId: string): Promise<void> {
+    loadingResumenTurno.value = true
     try {
-      movimientos.value = await useApiFetch<MovimientoCaja[]>(
-        `${config.public.apiUrl}/caja/${cajaId}/movimientos`,
+      resumenTurno.value = await useApiFetch<CajaTurnoResumen>(
+        `${config.public.apiUrl}/caja/${cajaId}/movimientos/resumen`,
       )
     }
     finally {
-      loadingMovimientos.value = false
+      loadingResumenTurno.value = false
     }
   }
 
@@ -91,7 +100,7 @@ export const useCajaStore = defineStore('caja', () => {
       `${config.public.apiUrl}/caja/${cajaId}/movimientos`,
       { method: 'POST', body: payload },
     )
-    await cargarMovimientos(cajaId)
+    await cargarResumenTurno(cajaId)
   }
 
   async function cerrar(cajaId: string, payload: { montoContado: string, comentario?: string }): Promise<void> {
@@ -99,7 +108,7 @@ export const useCajaStore = defineStore('caja', () => {
       `${config.public.apiUrl}/caja/${cajaId}/cerrar`,
       { method: 'POST', body: payload },
     )
-    movimientos.value = []
+    resumenTurno.value = null
     await cargarActiva()
   }
 
@@ -125,15 +134,15 @@ export const useCajaStore = defineStore('caja', () => {
 
   return {
     activa,
-    movimientos,
+    resumenTurno,
     historial,
     abiertas,
     detalle,
     loadingActiva,
-    loadingMovimientos,
+    loadingResumenTurno,
     cargarActiva,
     abrir,
-    cargarMovimientos,
+    cargarResumenTurno,
     registrarMovimiento,
     cerrar,
     cargarHistorial,

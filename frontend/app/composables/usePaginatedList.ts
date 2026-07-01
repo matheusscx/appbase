@@ -18,7 +18,7 @@ export interface PagosResumen {
 }
 
 interface UsePaginatedListOptions {
-  path: string
+  path: MaybeRefOrGetter<string>
   pageSize?: MaybeRefOrGetter<number>
   filters?: MaybeRefOrGetter<Record<string, string | undefined | null>>
 }
@@ -28,6 +28,7 @@ export function usePaginatedList<T>(options: UsePaginatedListOptions) {
   const toast = useToast()
   const apiUrl = config.public.apiUrl
 
+  const resolvedPath = computed(() => toValue(options.path))
   const resolvedPageSize = computed(() => toValue(options.pageSize ?? 15))
 
   const page = ref(1)
@@ -56,7 +57,7 @@ export function usePaginatedList<T>(options: UsePaginatedListOptions) {
       }
 
       const res = await useApiFetch<PaginatedResponse<T>>(
-        `${apiUrl}${options.path}?${params.toString()}`,
+        `${apiUrl}${resolvedPath.value}?${params.toString()}`,
       )
       items.value = res.data
       meta.value = res.meta
@@ -86,6 +87,15 @@ export function usePaginatedList<T>(options: UsePaginatedListOptions) {
   }
 
   watch(resolvedPageSize, () => {
+    if (page.value !== 1) {
+      page.value = 1
+    }
+    else {
+      fetch()
+    }
+  })
+
+  watch(resolvedPath, () => {
     if (page.value !== 1) {
       page.value = 1
     }
