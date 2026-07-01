@@ -146,9 +146,10 @@ Toda columna PK o FK de tipo UUID **debe** declarar `type: 'uuid'` explícitamen
 | `/` | `index.vue` | Dashboard (requiere auth + tenant) |
 | `/admin` | `admin.vue` | Solo superadmin |
 | `/test` | `test.vue` | Módulo de prueba RBAC |
-| `/configuracion` | `configuracion/index.vue` | Hub de configuración |
-| `/configuracion/perfil` | `configuracion/perfil.vue` | Perfil de usuario |
+| `/configuracion` | `configuracion/index.vue` | Redirect → `/configuracion/perfil` (compat. bookmarks) |
+| `/configuracion/perfil` | `configuracion/perfil.vue` | Perfil de usuario (**ruta canónica** del hub config) |
 | `/configuracion/empresa` | `configuracion/empresa.vue` | Datos del tenant |
+| `/configuracion/preferencias-financieras` | `configuracion/preferencias-financieras.vue` | Motor de precios |
 | `/configuracion/razones-sociales` | `configuracion/razones-sociales.vue` | |
 | `/configuracion/monedas` | `configuracion/monedas.vue` | |
 | `/configuracion/categorias` | `configuracion/categorias.vue` | |
@@ -157,9 +158,17 @@ Toda columna PK o FK de tipo UUID **debe** declarar `type: 'uuid'` explícitamen
 | `/configuracion/recargos` | `configuracion/recargos.vue` | |
 | `/configuracion/metodos-pago` | `configuracion/metodos-pago.vue` | |
 | `/configuracion/items` | `configuracion/items.vue` | |
-| `/configuracion/roles` | `configuracion/roles/index.vue` | Lista de roles |
-| `/configuracion/roles/:id` | `configuracion/roles/[id].vue` | Matriz de permisos del rol |
+| `/configuracion/inventario` | `configuracion/inventario.vue` | Kardex de movimientos |
+| `/configuracion/roles` | `configuracion/roles/index.vue` | Lista + editor de rol en drawer |
+| `/configuracion/roles/:id` | `configuracion/roles/[id].vue` | Redirect → `/configuracion/roles` (compat.) |
 | `/configuracion/usuarios` | `configuracion/usuarios/index.vue` | Asignación de roles a usuarios |
+| `/ventas` | `ventas/index.vue` | Historial + detalle en drawer (`?venta=uuid`) |
+| `/ventas/pos` | `ventas/pos.vue` | Punto de venta (crear venta) |
+| `/ventas/historial` | `ventas/historial.vue` | Redirect → `/ventas` (compat.) |
+| `/ventas/:id` | `ventas/[id].vue` | Redirect → `/ventas?venta=:id` (compat.) |
+| `/pagos` | `pagos/index.vue` | Ledger de pagos del tenant |
+| `/caja` | `caja/index.vue` | Gestión de cajas |
+| `/caja/:id` | `caja/[id].vue` | Detalle de caja abierta |
 
 ### Stores Pinia
 

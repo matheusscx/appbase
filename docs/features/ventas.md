@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-06-30
+**Last Updated**: 2026-07-01
 
 ---
 
@@ -18,8 +18,8 @@ Es el corazón del POS: sin él no hay ventas registradas. Concentra en una sola
 
 ### Scope
 
-- **In scope**: canal `fisico`, pagos inline con auto-estado (`pagada`/`pendiente`), cálculo de vuelto, movimientos de inventario y caja dentro de la transacción.
-- **Out of scope**: canal `online`/caja virtual, notas de crédito, estado `borrador`, pantalla POS Nuxt.
+- **In scope**: canal `fisico`, pagos inline con auto-estado (`pagada`/`pendiente`), cálculo de vuelto, movimientos de inventario y caja dentro de la transacción, historial en `/ventas`, POS en `/ventas/pos`.
+- **Out of scope**: canal `online`/caja virtual, notas de crédito, estado `borrador`.
 
 ---
 
@@ -173,7 +173,7 @@ Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobr
 
 ### Ruta y Componente Principal
 
-- **Ruta**: `/ventas` (`app/pages/ventas/index.vue`)
+- **Ruta**: `/ventas/pos` (`app/pages/ventas/pos.vue`)
 - **Layout**: Dos paneles — catálogo + buscador a la izquierda, carrito + desglose + cobro a la derecha
 - **Gate**: Panel bloqueante si no hay caja abierta (verifica estado en el store de cajas)
 
@@ -224,14 +224,29 @@ cd backend && npm run test:e2e -- --testPathPatterns=ventas --forceExit
 
 ## Frontend — historial y detalle de ventas
 
-Implementado en 2026-06-30.
+Implementado en 2026-06-30; rutas unificadas en 2026-07-01.
 
-### Páginas
+### Páginas (rutas canónicas)
 
 | Página | Ruta | Descripción |
 |--------|------|-------------|
-| Historial de ventas | `/ventas/historial` | Tabla de ventas con estado, total, cliente; link a detalle |
-| Detalle de venta | `/ventas/[id]` | Cabecera, líneas, totales, pagos recibidos, saldo pendiente; botón "Registrar pago" para ventas `pendiente`/`pagada_parcial` |
+| Historial de ventas | `/ventas` | Tabla con filtros, KPIs; fila clickeable abre detalle |
+| Detalle de venta | `/ventas?venta={uuid}` | Drawer lateral (`VentaDetalleDrawer`): líneas, totales, pagos, saldo; botón "Registrar pago" para `pendiente`/`pagada_parcial` |
+| Punto de venta | `/ventas/pos` | Crear venta (ver sección POS arriba) |
+
+### Redirects de compatibilidad
+
+| Ruta legacy | Destino |
+|-------------|---------|
+| `/ventas/historial` | `/ventas` (conserva query string) |
+| `/ventas/:id` | `/ventas?venta=:id` |
+
+### Componentes
+
+| Componente | Ubicación | Responsabilidad |
+|---|---|---|
+| `VentaDetalleDrawer` | `app/components/ventas/VentaDetalleDrawer.vue` | Detalle expandible, pagos, abono |
+| `AbonoModal` | `app/components/pagos/AbonoModal.vue` | Abono a venta pendiente/parcial |
 
 ### AbonoModal
 
@@ -244,7 +259,7 @@ Implementado en 2026-06-30.
 
 ## Pendiente (fase futura)
 
-- **Historial/listado de ventas** — Búsqueda y filtrado avanzado por rango de fechas, estado, tipo de documento
+- **Filtrado avanzado en historial** — Rango de fechas, búsqueda por cliente, exportación
 - **Comprobante imprimible** — Generación y descarga de PDF del comprobante de venta
 - **Descuentos/recargos manuales** — Aplicación inline de descuentos o recargos por línea o a nivel de venta
 - **Canal online** — Soporte de ventas en canal `online` con caja virtual automática

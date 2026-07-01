@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-06-30
+**Last Updated**: 2026-07-01
 
 ---
 
@@ -19,7 +19,7 @@ Este módulo permite cobrar esas ventas en uno o varios abonos posteriores a la 
 
 ### Scope
 
-- **In scope**: `POST /pagos` (registrar abono), `GET /pagos` (ledger del tenant), `AbonoModal` en el frontend, página `/pagos` (ledger), página `/ventas/[id]` con estado y botón de abono.
+- **In scope**: `POST /pagos` (registrar abono), `GET /pagos` (ledger del tenant), `AbonoModal` en el frontend, página `/pagos` (ledger), detalle de venta en `/ventas?venta={uuid}` (drawer) con botón de abono.
 - **Out of scope**: integración con pasarela de cobro, conciliación automática, reversión de pagos, filtros avanzados por fecha/estado.
 
 ---
@@ -146,7 +146,7 @@ Todos los helpers de pago viven en `app/composables/useVenta.ts`:
 ### Registrar abono
 
 ```
-[Usuario abre AbonoModal en /ventas/[id]]
+[Usuario abre AbonoModal en /ventas?venta={uuid}]
   ↓
 [Selecciona métodos de pago y montos]
   ↓ useApiFetch POST /pagos { ventaId, pagos }
@@ -158,7 +158,7 @@ Todos los helpers de pago viven en `app/composables/useVenta.ts`:
   ↓
 [AbonoModal emite 'success']
   ↓
-[Página /ventas/[id] recarga venta (GET /ventas/:id)]
+[VentaDetalleDrawer recarga venta (GET /ventas/:id)]
   ↓
 [UI muestra nuevo estado y saldo actualizado]
 ```
@@ -181,7 +181,7 @@ cd frontend && npm run build
 
 - [x] POST /pagos registra abono y actualiza estado de venta
 - [x] GET /pagos lista pagos del tenant con datos enriquecidos
-- [x] AbonoModal disponible desde /ventas/[id] para ventas pendientes/parciales
+- [x] AbonoModal disponible desde el drawer de detalle en `/ventas` para ventas pendientes/parciales
 - [x] Página /pagos muestra ledger con filtro por método
 - [x] Sidebar incluye entradas "Ventas" y "Pagos"
 - [x] Estado `pagada_parcial` visible en UI (badge info)

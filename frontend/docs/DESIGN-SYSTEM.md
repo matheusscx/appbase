@@ -269,7 +269,7 @@ When adding a new page or updating an existing one:
 These components exemplify correct design system usage:
 - **Dashboard pages**: `frontend/app/pages/index.vue` (UDashboardPanel, semantic tokens)
 - **Auth pages**: `frontend/app/pages/login.vue` (form styling, bg-default, text-default)
-- **Ventas module**: `frontend/app/pages/ventas/index.vue` (historial, UTable, semantic tokens); POS en `ventas/pos.vue`
+- **Ventas module**: `frontend/app/pages/ventas/index.vue` (historial en `/ventas`, drawer con `?venta=`); POS en `ventas/pos.vue`
 - **Config CRUD**: `frontend/app/pages/configuracion/categorias.vue` — `CrudPageHeader`, `CrudTable`, `CrudModal`, `AppDrawer`, `UForm`
 
 When in doubt, reference these files.

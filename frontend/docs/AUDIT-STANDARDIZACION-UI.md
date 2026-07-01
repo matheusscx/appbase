@@ -147,13 +147,15 @@ El plan `2026-06-30-frontend-design-standardization.md` proponía extraer:
 
 ### 9. Layout y rutas legacy
 
-| Archivo | Rol | Acción sugerida |
-|---------|-----|-----------------|
-| `ventas/historial.vue` | Redirect a `/ventas` | Mantener por compatibilidad de bookmarks o eliminar cuando no haya links externos |
-| `ventas/[id].vue` | Redirect a `/ventas?venta=id` | Ídem |
-| `configuracion/index.vue` | Redirect a perfil | Ídem |
-| `configuracion/roles/[id].vue` | Redirect a lista roles | Ídem |
-| `pages/test.vue` | Sandbox de permisos | OK para dev; headings sin `text-default` |
+Redirects de compatibilidad — **mantener**; rutas canónicas documentadas en `docs/ARCHITECTURE.md` y `docs/features/ventas.md`.
+
+| Archivo | Redirect | Ruta canónica |
+|---------|----------|---------------|
+| `ventas/historial.vue` | → `/ventas` | `/ventas` |
+| `ventas/[id].vue` | → `/ventas?venta=:id` | query `venta` en `/ventas` |
+| `configuracion/index.vue` | → `/configuracion/perfil` | `/configuracion/perfil` |
+| `configuracion/roles/[id].vue` | → `/configuracion/roles` | drawer en lista roles |
+| `pages/test.vue` | — | Sandbox dev |
 
 ---
 

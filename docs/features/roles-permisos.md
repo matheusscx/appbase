@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-06-21
+**Last Updated**: 2026-07-01
 
 ---
 
@@ -93,10 +93,9 @@ body: { moduloAppPermisoIds: string[] }
 
 - **Nav**: `pages/configuracion.vue` — items "Roles y permisos" y "Usuarios" visibles
   solo si `permissionsStore.esAdmin`.
-- **Roles lista**: `pages/configuracion/roles/index.vue` — tabla, modal "Nuevo rol"
-  (crea y navega al editor), eliminar (bloqueado en `esFijo`).
-- **Editor de rol**: `pages/configuracion/roles/[id].vue` — datos del rol + matriz de
-  checkboxes por módulo; guarda permisos con un PUT por módulo.
+- **Roles lista + editor**: `pages/configuracion/roles/index.vue` — tabla, drawer crear/editar rol
+  con matriz de permisos (`RolPermisosPorModulo`); eliminar (bloqueado en `esFijo`).
+- **Redirect legacy**: `/configuracion/roles/:id` → `/configuracion/roles` (editor unificado en drawer).
 - **Usuarios**: `pages/configuracion/usuarios/index.vue` — miembros con chips de roles;
   edición vía `USelectMenu` múltiple, aplicando diffs (POST/DELETE por rol).
 - **Store**: `stores/permissions.ts` — agrega `esAdmin` (cargado junto a `mis-permisos`,
