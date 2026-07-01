@@ -1,0 +1,35 @@
+---
+description: Nuxt UI v4 — referencias, MCP y convenciones del frontend
+globs: frontend/**/*
+alwaysApply: false
+---
+
+# Frontend con Nuxt UI
+
+Al editar archivos en `frontend/`, usa estas fuentes en este orden de prioridad:
+
+1. **Proyecto** — `frontend/docs/DESIGN-SYSTEM.md`, `docs/patterns/frontend.md`, `frontend/app.config.ts`
+2. **Índice Nuxt UI** — `docs/reference/nuxt-ui-llms.txt` (catálogo de componentes y enlaces a docs)
+3. **API concreta** — MCP `nuxt-ui` (`get_component`, `get_component_metadata`, `search_components`)
+
+## Reglas obligatorias
+
+- App envuelta en `UApp` (ya en `app/app.vue`).
+- **Colores semánticos** — `text-default`, `text-muted`, `bg-elevated`, `border-default`. Prohibido Tailwind crudo (`text-gray-500`, `bg-white dark:bg-gray-900`).
+- **Iconos** — formato `i-{collection}-{name}` (p. ej. `i-lucide-plus`).
+- **Formato** — `formatMonto` / `formatFecha` desde `useFormatters`; no definir formatters locales en `.vue`.
+- **API** — `useApiFetch`, no `$fetch` directo.
+- **Overrides** — prioridad: prop `ui` / `class` → `app.config.ts` → defaults del tema.
+
+## Elegir componente
+
+- Select con búsqueda / muchas opciones → `USelectMenu`, no `USelect`.
+- Panel lateral → `USlideover` o `UDrawer`; diálogo centrado → `UModal`.
+- Tablas de datos → `UTable` con patrones de `docs/patterns/frontend.md`.
+- Feedback transitorio → `useToast`; aviso persistente en página → `UAlert`.
+
+## Antes de implementar UI nueva
+
+1. Leer `docs/reference/nuxt-ui-llms.txt` para ubicar el componente correcto.
+2. Consultar MCP para props, slots y eventos del componente elegido.
+3. Alinear con un ejemplo existente en `frontend/app/pages/` o `frontend/app/components/`.
