@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
 import { clampNoVuelto, resumenCobro, sumaPagos, type PagoInput } from '~/composables/useVenta'
 
 interface MetodoPago {
@@ -18,6 +19,7 @@ const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const { formatMonto } = useFormatters()
 const apiUrl = config.public.apiUrl
 
 const pagos = ref<PagoInput[]>([])
@@ -95,7 +97,7 @@ async function confirmar() {
     <template #body>
       <div class="flex flex-col gap-4">
         <div class="flex justify-between text-base font-semibold">
-          <span>Saldo pendiente</span><span>{{ saldo }}</span>
+          <span>Saldo pendiente</span><span class="font-mono">{{ formatMonto(saldo) }}</span>
         </div>
 
         <div class="flex flex-col gap-2">
@@ -121,9 +123,18 @@ async function confirmar() {
         </div>
 
         <div class="text-sm space-y-1 border-t border-default pt-2">
-          <div class="flex justify-between text-muted"><span>Pagado</span><span>{{ suma }}</span></div>
-          <div class="flex justify-between text-muted"><span>Restante</span><span>{{ resumen.restante }}</span></div>
-          <div class="flex justify-between font-medium text-default"><span>Vuelto</span><span>{{ resumen.vuelto }}</span></div>
+          <div class="flex justify-between text-muted">
+            <span>Pagado</span><span class="font-mono">{{ formatMonto(suma) }}</span>
+          </div>
+          <div class="flex justify-between text-muted">
+            <span>Restante</span><span class="font-mono">{{ formatMonto(resumen.restante) }}</span>
+          </div>
+          <div
+            class="flex justify-between font-medium"
+            :class="new Decimal(resumen.vuelto).gt(0) ? 'text-success' : 'text-default'"
+          >
+            <span>Vuelto</span><span class="font-mono">{{ formatMonto(resumen.vuelto) }}</span>
+          </div>
           <p v-if="resumen.excedenteSinVuelto" class="text-error text-xs">
             El pago excede el saldo pero ningún método permite vuelto.
           </p>

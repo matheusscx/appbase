@@ -143,7 +143,8 @@ function estadoLabel(estado: string): string {
 
         <!-- Loading -->
         <div v-if="loading" class="text-center text-muted py-12">
-          Cargando...
+          <UIcon name="i-heroicons-arrow-path" class="w-6 h-6 animate-spin mx-auto mb-2" />
+          Cargando venta…
         </div>
 
         <template v-else-if="venta">
@@ -216,7 +217,7 @@ function estadoLabel(estado: string): string {
                 </div>
                 <div class="flex justify-between">
                   <dt class="text-muted">Descuentos</dt>
-                  <dd class="font-mono text-green-600 dark:text-green-400">
+                  <dd class="font-mono text-success">
                     -{{ formatMonto(venta.totalDescuentos) }}
                   </dd>
                 </div>
@@ -292,6 +293,7 @@ function estadoLabel(estado: string): string {
         </template>
 
         <div v-else class="text-center text-muted py-12">
+          <UIcon name="i-heroicons-exclamation-triangle" class="w-8 h-8 mx-auto mb-2 opacity-40" />
           No se encontró la venta.
         </div>
       </div>
