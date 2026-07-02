@@ -4,6 +4,7 @@ import { ImpuestosModule } from '../impuestos/impuestos.module';
 import { DescuentosModule } from '../descuentos/descuentos.module';
 import { RecargosModule } from '../recargos/recargos.module';
 import { TenantsModule } from '../tenants/tenants.module';
+import { MonedasModule } from '../monedas/monedas.module';
 import { CalculoPreciosService } from './calculo-precios.service';
 import { CalculoPreciosController } from './calculo-precios.controller';
 
@@ -14,6 +15,7 @@ import { CalculoPreciosController } from './calculo-precios.controller';
     DescuentosModule,
     RecargosModule,
     TenantsModule,
+    MonedasModule,
   ],
   controllers: [CalculoPreciosController],
   providers: [CalculoPreciosService],

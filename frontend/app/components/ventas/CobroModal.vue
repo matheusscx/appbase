@@ -60,6 +60,8 @@ const resumen = computed(() =>
 )
 const suma = computed(() => sumaPagos(pagos.value))
 
+const { formatMonto } = useFormatters()
+
 const puedeConfirmar = computed(
   () => pagos.value.length > 0 && !resumen.value.excedenteSinVuelto,
 )
@@ -74,7 +76,7 @@ function confirmar() {
     <template #body>
       <div class="flex flex-col gap-4">
         <div class="flex justify-between text-base font-semibold">
-          <span>Total a pagar</span><span>{{ total }}</span>
+          <span>Total a pagar</span><span>{{ formatMonto(total) }}</span>
         </div>
 
         <div class="flex flex-col gap-2">
@@ -106,9 +108,9 @@ function confirmar() {
         </div>
 
         <div class="text-sm space-y-1 border-t border-default pt-2">
-          <div class="flex justify-between text-muted"><span>Pagado</span><span>{{ suma }}</span></div>
-          <div class="flex justify-between text-muted"><span>Restante</span><span>{{ resumen.restante }}</span></div>
-          <div class="flex justify-between font-medium text-default"><span>Vuelto</span><span>{{ resumen.vuelto }}</span></div>
+          <div class="flex justify-between text-muted"><span>Pagado</span><span>{{ formatMonto(suma) }}</span></div>
+          <div class="flex justify-between text-muted"><span>Restante</span><span>{{ formatMonto(resumen.restante) }}</span></div>
+          <div class="flex justify-between font-medium text-default"><span>Vuelto</span><span>{{ formatMonto(resumen.vuelto) }}</span></div>
           <p v-if="resumen.excedenteSinVuelto" class="text-error text-xs">
             El pago excede el total pero ningún método permite vuelto.
           </p>

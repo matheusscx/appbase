@@ -147,19 +147,19 @@ function quitarCustomer() {
       <div class="flex flex-col gap-2">
         <div v-if="resultado" class="text-sm space-y-1">
           <div class="flex justify-between text-muted">
-            <span>Neto</span><span>{{ resultado.totales.subtotalNeto }}</span>
+            <span>Neto</span><span>{{ formatMonto(resultado.totales.subtotalNeto) }}</span>
           </div>
           <div class="flex justify-between text-muted">
-            <span>Descuentos</span><span>-{{ resultado.totales.totalDescuentos }}</span>
+            <span>Descuentos</span><span>-{{ formatMonto(resultado.totales.totalDescuentos) }}</span>
           </div>
           <div class="flex justify-between text-muted">
-            <span>Recargos</span><span>+{{ resultado.totales.totalRecargos }}</span>
+            <span>Recargos</span><span>+{{ formatMonto(resultado.totales.totalRecargos) }}</span>
           </div>
           <div class="flex justify-between text-muted">
-            <span>Impuestos</span><span>+{{ resultado.totales.totalImpuestos }}</span>
+            <span>Impuestos</span><span>+{{ formatMonto(resultado.totales.totalImpuestos) }}</span>
           </div>
           <div class="flex justify-between font-semibold text-default text-base pt-1 border-t border-default">
-            <span>Total</span><span>{{ resultado.totales.totalFinal }}</span>
+            <span>Total</span><span>{{ formatMonto(resultado.totales.totalFinal) }}</span>
           </div>
         </div>
         <UButton

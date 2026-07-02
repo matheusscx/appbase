@@ -5,6 +5,7 @@ import { ImpuestosService } from '../impuestos/impuestos.service';
 import { DescuentosService } from '../descuentos/descuentos.service';
 import { RecargosService } from '../recargos/recargos.service';
 import { TenantsService } from '../tenants/tenants.service';
+import { MonedasService } from '../monedas/monedas.service';
 import { CalcularVentaDto, LineaDto } from './dto/calcular.dto';
 import {
   calcularVenta,
@@ -28,6 +29,7 @@ export class CalculoPreciosService {
     private readonly descuentosService: DescuentosService,
     private readonly recargosService: RecargosService,
     private readonly tenantsService: TenantsService,
+    private readonly monedasService: MonedasService,
   ) {}
 
   async calcular(
@@ -59,6 +61,13 @@ export class CalculoPreciosService {
     const descuentoMap = this.indexarReglas(descuentos);
     const recargoMap = this.indexarReglas(recargos);
 
+    const tasaMap = new Map(
+      (await this.monedasService.findMonedas(tenantId)).map((m) => [
+        m.monedaId,
+        m.valorDelDia ?? '1',
+      ]),
+    );
+
     const lineas: LineaResuelta[] = [];
     for (const linea of dto.lineas) {
       lineas.push(
@@ -68,6 +77,7 @@ export class CalculoPreciosService {
           impuestoMap,
           descuentoMap,
           recargoMap,
+          tasaMap,
         ),
       );
     }
@@ -125,6 +135,7 @@ export class CalculoPreciosService {
     impuestoMap: Map<string, ImpuestoResuelto>,
     descuentoMap: Map<string, ReglaResuelta>,
     recargoMap: Map<string, ReglaResuelta>,
+    tasaMap: Map<string, string>,
   ): Promise<LineaResuelta> {
     if (new Decimal(linea.cantidad).lessThanOrEqualTo(0)) {
       throw new BadRequestException('La cantidad debe ser mayor a 0');
@@ -136,10 +147,19 @@ export class CalculoPreciosService {
     const descuentoIds = linea.descuentoIds ?? item.descuentosIds;
     const recargoIds = linea.recargoIds ?? item.recargosIds;
 
+    const precioUnitario =
+      linea.precioUnitario !== undefined
+        ? linea.precioUnitario
+        : this.convertirAMonedaOficial(
+            item.precioBase,
+            item.monedaId,
+            tasaMap,
+          );
+
     return {
       itemId: item.id,
       cantidad: linea.cantidad,
-      precioUnitario: linea.precioUnitario ?? item.precioBase,
+      precioUnitario,
       precioIncluyeImpuesto: item.precioIncluyeImpuesto,
       impuestos: impuestoIds.map((id) =>
         this.requerir(impuestoMap, id, 'impuesto'),
@@ -155,6 +175,16 @@ export class CalculoPreciosService {
     label: string,
   ): ReglaResuelta[] {
     return ids.map((id) => this.requerir(mapa, id, label));
+  }
+
+  /** Convierte precio de la moneda del ítem a moneda oficial (valor_del_dia). */
+  private convertirAMonedaOficial(
+    precio: string,
+    monedaId: string,
+    tasaMap: Map<string, string>,
+  ): string {
+    const tasa = new Decimal(tasaMap.get(monedaId) ?? '1');
+    return new Decimal(precio).times(tasa).toFixed(4);
   }
 
   private requerir<T>(mapa: Map<string, T>, id: string, label: string): T {

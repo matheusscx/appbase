@@ -6,6 +6,7 @@ import { ImpuestosService } from '../impuestos/impuestos.service';
 import { DescuentosService } from '../descuentos/descuentos.service';
 import { RecargosService } from '../recargos/recargos.service';
 import { TenantsService } from '../tenants/tenants.service';
+import { MonedasService } from '../monedas/monedas.service';
 
 const TENANT = 't-1';
 
@@ -28,6 +29,7 @@ describe('CalculoPreciosService', () => {
   const item = (over: Record<string, unknown> = {}) => ({
     id: 'item-1',
     precioBase: '100',
+    monedaId: 'moneda-clp',
     precioIncluyeImpuesto: false,
     impuestosIds: ['imp-1'],
     descuentosIds: ['desc-1'],
@@ -70,6 +72,20 @@ describe('CalculoPreciosService', () => {
     const tenantsService = {
       getPreferenciasFinancieras: jest.fn().mockResolvedValue(prefs),
     };
+    const monedasService = {
+      findMonedas: jest.fn().mockResolvedValue([
+        {
+          monedaId: 'moneda-clp',
+          valorDelDia: '1',
+          esDefault: true,
+        },
+        {
+          monedaId: 'moneda-usd',
+          valorDelDia: '950',
+          esDefault: false,
+        },
+      ]),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -79,6 +95,7 @@ describe('CalculoPreciosService', () => {
         { provide: DescuentosService, useValue: descuentosService },
         { provide: RecargosService, useValue: recargosService },
         { provide: TenantsService, useValue: tenantsService },
+        { provide: MonedasService, useValue: monedasService },
       ],
     }).compile();
 
@@ -107,6 +124,19 @@ describe('CalculoPreciosService', () => {
       lineas: [{ itemId: 'item-1', cantidad: '1', precioUnitario: '200' }],
     });
     expect(r.lineas[0].subtotalNeto).toBe('200.000000');
+  });
+
+  it('convierte el precio del ítem a moneda oficial cuando no hay override', async () => {
+    itemsService.findOne.mockResolvedValue(
+      item({ precioBase: '10', monedaId: 'moneda-usd' }),
+    );
+    const r = await service.calcular(TENANT, {
+      lineas: [{ itemId: 'item-usd', cantidad: '1', descuentoIds: [] }],
+    });
+    expect(r.lineas[0].subtotalNeto).toBe('9500.000000');
+    expect(r.lineas[0].impuestoAplicado).toBe('1805.000000');
+    expect(r.lineas[0].totalLinea).toBe('11305.000000');
+    expect(r.totales.totalFinal).toBe('11305.000000');
   });
 
   it('lanza BadRequest si una regla pedida no existe', async () => {
