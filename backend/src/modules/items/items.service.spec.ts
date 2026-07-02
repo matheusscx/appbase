@@ -58,43 +58,50 @@ describe('ItemsService', () => {
   // ── findAll ────────────────────────────────────────────────────────────────
 
   describe('findAll', () => {
-    it('devuelve lista mapeada al formato camelCase', async () => {
-      dataSource.query.mockResolvedValue([
-        {
-          item_id: ITEM_ID,
-          nombre: 'Smartphone',
-          descripcion: null,
-          tipo: 'producto',
-          activo: true,
-          precio_base: '100000',
-          precio_incluye_impuesto: false,
-          moneda_id: MONEDA_ID,
-          moneda_codigo: 'CLP',
-          moneda_simbolo: '$',
-          categoria_id: null,
-          categoria_nombre: null,
-          creado_el: new Date(),
-          stock: '10',
-          unidad_medida: 'unidad',
-          fecha_elaboracion: null,
-          fecha_vencimiento: null,
-          duracion_estimada: null,
-          requiere_cita: null,
-        },
-      ]);
+    it('devuelve lista paginada mapeada al formato camelCase', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_ID,
+            nombre: 'Smartphone',
+            descripcion: null,
+            tipo: 'producto',
+            activo: true,
+            precio_base: '100000',
+            precio_incluye_impuesto: false,
+            moneda_id: MONEDA_ID,
+            moneda_codigo: 'CLP',
+            moneda_simbolo: '$',
+            categoria_id: null,
+            categoria_nombre: null,
+            creado_el: new Date(),
+            stock: '10',
+            unidad_medida: 'unidad',
+            fecha_elaboracion: null,
+            fecha_vencimiento: null,
+            duracion_estimada: null,
+            requiere_cita: null,
+          },
+        ]);
 
-      const result = await service.findAll(TENANT);
+      const result = await service.findAll(TENANT, {});
 
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe(ITEM_ID);
-      expect(result[0].tipo).toBe('producto');
-      expect(result[0].stock).toBe('10');
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].id).toBe(ITEM_ID);
+      expect(result.data[0].tipo).toBe('producto');
+      expect(result.data[0].stock).toBe('10');
+      expect(result.meta.total).toBe(1);
+      expect(result.meta.page).toBe(1);
     });
 
     it('devuelve lista vacía cuando no hay items', async () => {
-      dataSource.query.mockResolvedValue([]);
-      const result = await service.findAll(TENANT);
-      expect(result).toHaveLength(0);
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+      const result = await service.findAll(TENANT, {});
+      expect(result.data).toHaveLength(0);
+      expect(result.meta.total).toBe(0);
     });
   });
 

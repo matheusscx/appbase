@@ -12,7 +12,13 @@ import { ItemServicio } from './entities/item-servicio.entity';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
+import { QueryItemsDto } from './dto/query-items.dto';
 import { InventarioService } from '../inventario/inventario.service';
+import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
+import {
+  buildPaginationMeta,
+  resolvePagination,
+} from '../../common/utils/pagination.util';
 
 interface ItemRow {
   item_id: string;
@@ -93,25 +99,54 @@ export class ItemsService {
     };
   }
 
-  async findAll(tenantId: string, tipo?: string, categoriaId?: string) {
-    let query =
-      this.BASE_QUERY + ` WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL`;
+  private buildFindAllFilters(
+    tenantId: string,
+    query: QueryItemsDto,
+  ): { where: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let idx = 2;
+    let where = ` WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL`;
 
-    if (tipo) {
-      query += ` AND i.tipo = $${idx++}`;
-      params.push(tipo);
+    if (query.tipo) {
+      where += ` AND i.tipo = $${idx++}`;
+      params.push(query.tipo);
     }
-    if (categoriaId) {
-      query += ` AND i.categoria_id = $${idx++}`;
-      params.push(categoriaId);
+    if (query.categoriaId) {
+      where += ` AND i.categoria_id = $${idx++}`;
+      params.push(query.categoriaId);
     }
 
-    query += ' ORDER BY i.nombre ASC';
+    return { where, params };
+  }
 
-    const rows: ItemRow[] = await this.dataSource.query(query, params);
-    return rows.map((r) => this.mapRow(r));
+  async findAll(
+    tenantId: string,
+    query: QueryItemsDto,
+  ): Promise<PaginatedResponse<ReturnType<typeof this.mapRow>>> {
+    const { page, pageSize, offset } = resolvePagination(query);
+    const { where, params } = this.buildFindAllFilters(tenantId, query);
+
+    const countRows: { total: number }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total FROM items i${where}`,
+      params,
+    );
+    const total = countRows[0]?.total ?? 0;
+
+    const listParams = [...params, pageSize, offset];
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+
+    const rows: ItemRow[] = await this.dataSource.query(
+      this.BASE_QUERY +
+        where +
+        ` ORDER BY i.nombre ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
+    );
+
+    return {
+      data: rows.map((r) => this.mapRow(r)),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
   }
 
   async findOne(tenantId: string, itemId: string) {

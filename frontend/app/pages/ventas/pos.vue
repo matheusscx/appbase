@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useVenta, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import Decimal from 'decimal.js'
 import type { DropdownMenuItem } from '@nuxt/ui'
@@ -89,11 +90,13 @@ async function cargar() {
   loadingCatalogo.value = true
   try {
     const [itemsRes, metodosRes, tiposRes] = await Promise.all([
-      useApiFetch<ItemCatalogo[]>(`${apiUrl}/items?tipo=producto`),
+      useApiFetch<PaginatedResponse<ItemCatalogo>>(
+        `${apiUrl}/items?tipo=producto&pageSize=100`,
+      ),
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
     ])
-    items.value = itemsRes
+    items.value = itemsRes.data
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes
     tipoDocumentoId.value = tiposRes[0]?.id

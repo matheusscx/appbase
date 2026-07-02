@@ -491,7 +491,7 @@ cargado una vez en `onMounted`, independiente de filtros/página.
 Preferir `USelectMenu` con IDs del backend (`metodoPagoId`) en lugar de búsqueda
 texto en cliente.
 
-Referencia: `app/pages/pagos/index.vue`.
+Referencia: `app/pages/pagos/index.vue`, `app/pages/configuracion/items.vue`.
 
 ---
 

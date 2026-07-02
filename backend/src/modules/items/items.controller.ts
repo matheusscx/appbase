@@ -18,6 +18,7 @@ import { ItemsService } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
+import { QueryItemsDto } from './dto/query-items.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
 @Controller('items')
@@ -25,13 +26,9 @@ export class ItemsController {
   constructor(private readonly itemsService: ItemsService) {}
 
   @Get()
-  findAll(
-    @Req() req: Request,
-    @Query('tipo') tipo?: string,
-    @Query('categoriaId') categoriaId?: string,
-  ) {
+  findAll(@Req() req: Request, @Query() query: QueryItemsDto) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.findAll(tenantId, tipo, categoriaId);
+    return this.itemsService.findAll(tenantId, query);
   }
 
   @Get(':id')

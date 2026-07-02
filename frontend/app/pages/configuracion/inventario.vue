@@ -1,6 +1,7 @@
 <!-- frontend/app/pages/configuracion/inventario.vue -->
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import type { PaginatedResponse } from '~/composables/usePaginatedList'
 
 const toast = useToast()
 const { formatFecha } = useFormatters()
@@ -49,12 +50,12 @@ const motivoOpts: Opt[] = [
 
 async function cargarProductos() {
   try {
-    const items = await useApiFetch<{ id: string; nombre: string }[]>(
-      `${apiUrl}/items?tipo=producto`,
+    const res = await useApiFetch<PaginatedResponse<{ id: string; nombre: string }>>(
+      `${apiUrl}/items?tipo=producto&pageSize=100`,
     )
     productosOpts.value = [
       { label: 'Todos los productos', value: 'todos' },
-      ...items.map((i) => ({ label: i.nombre, value: i.id })),
+      ...res.data.map((i) => ({ label: i.nombre, value: i.id })),
     ]
   } catch {
     toast.add({ title: 'Error al cargar productos', color: 'error' })

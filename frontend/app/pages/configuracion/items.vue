@@ -77,8 +77,6 @@ interface Movimiento {
 
 // ── Estado ─────────────────────────────────────────────────────────────────
 
-const items = ref<Item[]>([])
-const loading = ref(false)
 const saving = ref(false)
 const ajustando = ref(false)
 const drawerOpen = ref(false)
@@ -89,6 +87,17 @@ const confirmDeleteId = ref<string | null>(null)
 const stockItem = ref<Item | null>(null)
 const toggling = reactive(new Set<string>())
 const filtroTipo = ref('todos')
+
+const listFilters = computed(() => ({
+  tipo: filtroTipo.value === 'todos' ? undefined : filtroTipo.value,
+}))
+
+const { items, meta, page, loading, fetch: fetchItems } =
+  usePaginatedList<Item>({
+    path: '/items',
+    pageSize,
+    filters: listFilters,
+  })
 
 // Ver unidades / lotes
 const verUnidadesOpen = ref(false)
@@ -317,25 +326,7 @@ async function abrirHistorial(item: Item) {
   }
 }
 
-// ── Lista filtrada ──────────────────────────────────────────────────────────
-
-const itemsFiltrados = computed(() => {
-  if (filtroTipo.value === 'todos') return items.value
-  return items.value.filter((i) => i.tipo === filtroTipo.value)
-})
-
 // ── Carga inicial ──────────────────────────────────────────────────────────
-
-async function cargar() {
-  loading.value = true
-  try {
-    items.value = await useApiFetch<Item[]>(`${apiUrl}/items`)
-  } catch {
-    toast.add({ title: 'Error al cargar items', color: 'error' })
-  } finally {
-    loading.value = false
-  }
-}
 
 async function cargarCatalogos() {
   const monedasStore = useMonedasStore()
@@ -377,9 +368,7 @@ async function cargarCatalogos() {
   }
 }
 
-onMounted(async () => {
-  await Promise.all([cargar(), cargarCatalogos()])
-})
+onMounted(cargarCatalogos)
 
 // ── CRUD modal ─────────────────────────────────────────────────────────────
 
@@ -484,7 +473,7 @@ async function guardar() {
     }
 
     drawerOpen.value = false
-    await cargar()
+    await fetchItems()
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al guardar')
     toast.add({ title: msg, color: 'error' })
@@ -506,7 +495,7 @@ async function eliminar() {
     })
     toast.add({ title: 'Item eliminado', color: 'success' })
     confirmModalOpen.value = false
-    await cargar()
+    await fetchItems()
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al eliminar')
     toast.add({ title: msg, color: 'error' })
@@ -663,7 +652,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
     <!-- Lista -->
     <CrudTable
-      :data="itemsFiltrados"
+      :data="items"
       :columns="columnsItems"
       :loading="loading"
       :ui="{ tr: 'cursor-pointer' }"
@@ -739,6 +728,14 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         </div>
       </template>
     </CrudTable>
+
+    <div v-if="meta.total > pageSize" class="flex justify-end">
+      <UPagination
+        v-model:page="page"
+        :items-per-page="pageSize"
+        :total="meta.total"
+      />
+    </div>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">
       <template #header>
