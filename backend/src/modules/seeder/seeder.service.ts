@@ -234,6 +234,7 @@ export class SeederService implements OnApplicationBootstrap {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
     const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const UF = '550e8400-e29b-41d4-a716-446655440004';
     const USD = '550e8400-e29b-41d4-a716-446655440005';
 
     const entries: Partial<TenantMoneda>[] = [];
@@ -245,6 +246,13 @@ export class SeederService implements OnApplicationBootstrap {
           esDefault: true,
           habilitada: true,
           valorDelDia: '1',
+        },
+        {
+          tenantId,
+          monedaId: UF,
+          esDefault: false,
+          habilitada: true,
+          valorDelDia: '38000',
         },
         {
           tenantId,
@@ -1261,62 +1269,14 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedItems(): Promise<void> {
+    await this.seedItemSoporte();
+    await this.seedItemsMonedaUnidadMatrix();
+  }
+
+  private async seedItemSoporte(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const CLP = '550e8400-e29b-41d4-a716-446655440003';
-    const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
-    const IVA_19 = '550e8400-e29b-41d4-a716-446655440112';
-    const ITEM_SMARTPHONE = '550e8400-e29b-41d4-a716-446655440116';
     const ITEM_SOPORTE = '550e8400-e29b-41d4-a716-446655440117';
-
-    const existsSmartphone: unknown[] = await this.dataSource.query(
-      `SELECT 1 FROM items WHERE item_id = $1`,
-      [ITEM_SMARTPHONE],
-    );
-    if (!existsSmartphone.length) {
-      await this.dataSource.query(
-        `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
-                            precio_base, precio_incluye_impuesto, activo, tipo)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [
-          ITEM_SMARTPHONE,
-          PARIS,
-          CLP,
-          ELECTRONICA,
-          'Smartphone Samsung Galaxy S24',
-          'Teléfono inteligente de alta gama con pantalla AMOLED 6.2"',
-          '899000',
-          false,
-          true,
-          'producto',
-        ],
-      );
-      // item_producto arranca en 0; el saldo se materializa con el movimiento inicial
-      await this.dataSource.query(
-        `INSERT INTO item_producto (item_id, stock, unidad_medida) VALUES ($1,$2,$3)`,
-        [ITEM_SMARTPHONE, '0', 'unidad'],
-      );
-      await this.dataSource.query(
-        `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-        [ITEM_SMARTPHONE, IVA_19],
-      );
-
-      // Movimiento inventario_inicial (idempotente por el guard existsSmartphone)
-      await this.dataSource.query(
-        `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
-        ['25', ITEM_SMARTPHONE],
-      );
-      await this.dataSource.query(
-        `INSERT INTO movimientos_inventario
-           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
-            stock_anterior, stock_resultante, comentario)
-         VALUES ($1,$2,$3,'entrada','inventario_inicial','25','0','25','Stock inicial (seed)')`,
-        [
-          '550e8400-e29b-41d4-a716-446655440120', // ID fijo libre (rango items 110-117)
-          PARIS,
-          ITEM_SMARTPHONE,
-        ],
-      );
-    }
 
     const existsSoporte: unknown[] = await this.dataSource.query(
       `SELECT 1 FROM items WHERE item_id = $1`,
@@ -1344,135 +1304,106 @@ export class SeederService implements OnApplicationBootstrap {
         [ITEM_SOPORTE, 60, true],
       );
     }
+  }
 
-    // Producto serializado (modo='serie'): iPhone 15 con 3 unidades por IMEI
-    const ITEM_IPHONE = '550e8400-e29b-41d4-a716-446655440137';
-    const MOV_IPHONE = '550e8400-e29b-41d4-a716-446655440138';
-    const UNIDAD_1 = '550e8400-e29b-41d4-a716-446655440139';
-    const UNIDAD_2 = '550e8400-e29b-41d4-a716-446655440140';
-    const UNIDAD_3 = '550e8400-e29b-41d4-a716-446655440141';
+  /**
+   * Un producto por cada par (unidad_medida × moneda), sin duplicados.
+   * IDs 116/120 reservados para unidad·CLP (compat. tests E2E de ventas).
+   */
+  private async seedItemsMonedaUnidadMatrix(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const UF = '550e8400-e29b-41d4-a716-446655440004';
+    const USD = '550e8400-e29b-41d4-a716-446655440005';
+    const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
+    const IVA_19 = '550e8400-e29b-41d4-a716-446655440112';
 
-    const existsIphone: unknown[] = await this.dataSource.query(
-      `SELECT 1 FROM items WHERE item_id = $1`,
-      [ITEM_IPHONE],
-    );
-    if (!existsIphone.length) {
-      await this.dataSource.query(
-        `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
-                            precio_base, precio_incluye_impuesto, activo, tipo)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [
-          ITEM_IPHONE,
-          PARIS,
-          CLP,
-          ELECTRONICA,
-          'iPhone 15 128GB Negro',
-          'Smartphone Apple iPhone 15 con 128GB de almacenamiento, color negro',
-          '999000',
-          false,
-          true,
-          'producto',
-        ],
-      );
-      await this.dataSource.query(
-        `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
-         VALUES ($1,'3','unidad','serie')`,
-        [ITEM_IPHONE],
-      );
-      await this.dataSource.query(
-        `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-        [ITEM_IPHONE, IVA_19],
-      );
+    const monedas = [
+      { id: CLP, codigo: 'CLP', precioBase: '5000' },
+      { id: UF, codigo: 'UF', precioBase: '2.5' },
+      { id: USD, codigo: 'USD', precioBase: '10' },
+    ];
 
-      // Insertar 3 unidades con IMEI distintos
-      const imeis = [
-        { id: UNIDAD_1, serie: '352099001761481' },
-        { id: UNIDAD_2, serie: '352099001761482' },
-        { id: UNIDAD_3, serie: '352099001761483' },
-      ];
-      for (const u of imeis) {
+    const unidades = [
+      { valor: 'unidad', label: 'Unidad', stock: '50' },
+      { valor: 'kg', label: 'Kilogramo', stock: '100' },
+      { valor: 'l', label: 'Litro', stock: '75' },
+      { valor: 'm', label: 'Metro', stock: '200' },
+    ];
+
+    const uuid = (suffix: number): string =>
+      `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
+
+    // 12 pares únicos; 116/120 = unidad·CLP (tests E2E de ventas)
+    const itemIds = [116, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157];
+    const movIds = [120, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169];
+
+    let comboIndex = 0;
+    for (const unidad of unidades) {
+      for (const moneda of monedas) {
+        const itemId = uuid(itemIds[comboIndex]);
+        const movimientoId = uuid(movIds[comboIndex]);
+        comboIndex++;
+
+        const exists: unknown[] = await this.dataSource.query(
+          `SELECT 1 FROM items WHERE item_id = $1`,
+          [itemId],
+        );
+        if (exists.length) {
+          continue;
+        }
+
+        const nombre = `Producto demo (${unidad.valor} · ${moneda.codigo})`;
+        const descripcion = `Item de desarrollo: ${unidad.label}, precio en ${moneda.codigo}`;
+
         await this.dataSource.query(
-          `INSERT INTO item_unidad
-             (unidad_id, tenant_id, item_id, serie, estado, condicion)
-           VALUES ($1,$2,$3,$4,'disponible','nuevo')`,
-          [u.id, PARIS, ITEM_IPHONE, u.serie],
+          `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
+                              precio_base, precio_incluye_impuesto, activo, tipo)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            itemId,
+            PARIS,
+            moneda.id,
+            ELECTRONICA,
+            nombre,
+            descripcion,
+            moneda.precioBase,
+            false,
+            true,
+            'producto',
+          ],
+        );
+
+        await this.dataSource.query(
+          `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
+           VALUES ($1,'0',$2,'cantidad')`,
+          [itemId, unidad.valor],
+        );
+
+        await this.dataSource.query(
+          `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+          [itemId, IVA_19],
+        );
+
+        await this.dataSource.query(
+          `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
+          [unidad.stock, itemId],
+        );
+
+        await this.dataSource.query(
+          `INSERT INTO movimientos_inventario
+             (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
+              stock_anterior, stock_resultante, comentario)
+           VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5)`,
+          [
+            movimientoId,
+            PARIS,
+            itemId,
+            unidad.stock,
+            `Stock inicial (seed ${unidad.valor}/${moneda.codigo})`,
+          ],
         );
       }
-
-      // Movimiento kardex + detalle
-      await this.dataSource.query(
-        `INSERT INTO movimientos_inventario
-           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
-            stock_anterior, stock_resultante, comentario)
-         VALUES ($1,$2,$3,'entrada','inventario_inicial','3','0','3','Stock inicial (seed serie)')`,
-        [MOV_IPHONE, PARIS, ITEM_IPHONE],
-      );
-      for (const u of imeis) {
-        await this.dataSource.query(
-          `INSERT INTO movimiento_inventario_detalle
-             (movimiento_id, unidad_id, cantidad)
-           VALUES ($1,$2,'1')`,
-          [MOV_IPHONE, u.id],
-        );
-      }
-    }
-
-    // Producto por lote (modo='lote'): Paracetamol 500mg
-    const ITEM_PARACETAMOL = '550e8400-e29b-41d4-a716-446655440142';
-    const LOTE_1 = '550e8400-e29b-41d4-a716-446655440143';
-    const MOV_PARACETAMOL = '550e8400-e29b-41d4-a716-446655440144';
-
-    const existsParacetamol: unknown[] = await this.dataSource.query(
-      `SELECT 1 FROM items WHERE item_id = $1`,
-      [ITEM_PARACETAMOL],
-    );
-    if (!existsParacetamol.length) {
-      await this.dataSource.query(
-        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion,
-                            precio_base, precio_incluye_impuesto, activo, tipo)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [
-          ITEM_PARACETAMOL,
-          PARIS,
-          CLP,
-          'Paracetamol 500mg',
-          'Analgésico y antipirético, comprimidos de 500mg',
-          '1500',
-          false,
-          true,
-          'producto',
-        ],
-      );
-      await this.dataSource.query(
-        `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
-         VALUES ($1,'100','unidad','lote')`,
-        [ITEM_PARACETAMOL],
-      );
-
-      // Crear lote con vencimiento
-      await this.dataSource.query(
-        `INSERT INTO item_lote
-           (lote_id, tenant_id, item_id, codigo_lote,
-            fecha_elaboracion, fecha_vencimiento,
-            cantidad_inicial, cantidad_disponible)
-         VALUES ($1,$2,$3,'LOTE-2025-001','2025-01-01','2027-01-01','100','100')`,
-        [LOTE_1, PARIS, ITEM_PARACETAMOL],
-      );
-
-      // Movimiento kardex + detalle
-      await this.dataSource.query(
-        `INSERT INTO movimientos_inventario
-           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
-            stock_anterior, stock_resultante, comentario)
-         VALUES ($1,$2,$3,'entrada','inventario_inicial','100','0','100','Stock inicial (seed lote)')`,
-        [MOV_PARACETAMOL, PARIS, ITEM_PARACETAMOL],
-      );
-      await this.dataSource.query(
-        `INSERT INTO movimiento_inventario_detalle
-           (movimiento_id, lote_id, cantidad)
-         VALUES ($1,$2,'100')`,
-        [MOV_PARACETAMOL, LOTE_1],
-      );
     }
   }
 
