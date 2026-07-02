@@ -61,6 +61,80 @@ Cada registro del catálogo `moneda` define cómo presentar montos en el UI:
 
 Ejemplos: Chile `$ 1.000,50` — México `$ 1,000.50`. Son datos de catálogo (no los edita el tenant); el frontend los consume vía `useMonedasStore` y `useFormatters().formatMonto`.
 
+## Formato de precios en UI
+
+El catálogo `moneda` define **cómo se muestran y editan** los montos. El tenant no
+configura separadores ni locale; solo habilita monedas y define tasas de cambio.
+
+### Arquitectura frontend
+
+```
+GET /monedas
+    ↓
+useMonedasStore (monedasById[uuid])
+    ↓
+┌─────────────────────────┬──────────────────────────┐
+│  Solo lectura (listas)  │  Edición (formularios)   │
+│  formatMonto()          │  <MoneyInput>            │
+│  Intl.NumberFormat      │  maska + parse           │
+└─────────────────────────┴──────────────────────────┘
+         ↑ misma MonedaDisplayConfig ↑
+```
+
+Carga del store: una vez al entrar al layout `dashboard` (`ensureLoaded`). Se
+invalida al cambiar de tenant o cerrar sesión.
+
+### Mostrar precios (listas, tablas, cards)
+
+Usar **`useFormatters().formatMonto(value, monedaId?)`** — nunca definir
+formateo local en un `.vue`.
+
+| Contexto | Llamada | Moneda usada |
+|----------|---------|--------------|
+| Precio de ítem en catálogo / items | `formatMonto(precio, item.monedaId)` | Moneda del ítem |
+| Total venta, saldo caja, pago | `formatMonto(total)` | Moneda **oficial** del tenant |
+| Línea de carrito POS | `formatMonto(precio, item.monedaId)` | Moneda del ítem |
+
+**Motor de formateo** (`app/utils/currency-format.ts`):
+
+- Monedas ISO 4217 (CLP, USD, …) → `Intl.NumberFormat(locale, { style: 'currency', … })`.
+- Códigos no ISO (UF) → formato manual con `prefix` + separadores de BD.
+
+### Editar precios / montos (inputs)
+
+Usar **`<MoneyInput v-model="..." />`** — dependencia [maska](https://github.com/beholdr/maska).
+
+| Pantalla | Campo | Prop de moneda |
+|----------|-------|----------------|
+| Configuración → Items | `precioBase` | `:moneda-id="form.monedaId"` |
+| Caja → Apertura | `saldoInicial` | `oficial` |
+| Caja → Cierre | `montoContado` | `oficial` |
+| Caja → Movimiento | `monto` | `oficial` |
+| POS → Cobro | `pago.monto` | `oficial` |
+| Pagos → Abono | `pago.monto` | `oficial` |
+
+**Contrato `v-model`:** siempre `string` limpio (`"1500000"`, `"99.5"`), compatible
+con `@IsNumberString` del backend. El usuario ve el monto formateado; maska parsea
+al valor numérico string en cada keystroke.
+
+**No usar `MoneyInput` para:** `valorDelDia` (tasa de cambio), stock, cantidades,
+porcentajes de impuestos/descuentos — ahí va `UInput inputmode="decimal"` sin máscara
+de moneda.
+
+### Agregar una moneda nueva al catálogo
+
+En el seeder (`seeder.service.ts` → `seedMonedas`), definir en un solo lugar:
+
+- `codigoIso`, `simbolo`, `decimales`
+- `separadorDecimal`, `separadorMiles`
+- `locale` (BCP 47, ej. `es-CL`, `en-US`, `de-DE`)
+
+El store y el formateo la tomarán automáticamente en el próximo `ensureLoaded()`.
+
+### Documentación técnica detallada
+
+Patrones de implementación, archivos y tests: [frontend.md §8](../patterns/frontend.md).
+
 ## Páginas frontend
 
 - `/configuracion/monedas` — Lista con switch de habilitada, input de tasa,

@@ -203,17 +203,25 @@ se maneja como **string en todo el flujo**: el `ref` del form es string, el inpu
 mantiene string, y viaja string en el body **sin conversiones**. Convención del
 proyecto: el dinero y los `numeric` son string con Decimal.js, nunca `number` nativo.
 
-**Cómo:** `UInput` **de texto** con `inputmode="decimal"` (abre teclado numérico en
-móvil). **Prohibido `type="number"`** en estos campos: hace que `v-model` escriba un
-**`number`** en el form, que rompe la convención y produce `400`:
+**Cómo (campos monetarios con moneda):** usar [`MoneyInput`](../../frontend/app/components/MoneyInput.vue)
+con `v-model` string — formatea en vivo con maska según la moneda del store. Ver §8.
+
+**Cómo (otros decimales sin moneda — stock, porcentajes, tasas):** `UInput` de texto con
+`inputmode="decimal"` (abre teclado numérico en móvil). **Prohibido `type="number"`**
+en campos `@IsNumberString`: hace que `v-model` escriba un **`number`** en el form y
+produce `400`:
 
 ```json
 { "message": ["precioBase must be a number string", "stock must be a number string"] }
 ```
 
 ```vue
-<!-- ✅ Estándar: string end-to-end, sin String() en el payload -->
-<UInput v-model="form.precioBase" inputmode="decimal" placeholder="0" />
+<!-- ✅ Precio / monto con moneda → MoneyInput (string limpio al API) -->
+<MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" />
+<MoneyInput v-model="form.saldoInicial" oficial />
+
+<!-- ✅ Stock, porcentaje, tasa de cambio → UInput decimal sin maska de moneda -->
+<UInput v-model="form.stock" inputmode="decimal" placeholder="0" />
 
 <!-- ❌ type="number" → v-model pasa a number → 400 "must be a number string" -->
 <UInput v-model="form.precioBase" type="number" />
@@ -237,43 +245,146 @@ if (form.value.tipo === 'producto') {
 
 ---
 
-## 8. Monedas — store, formato e inputs
+## 8. Monedas — store, formato de precios (Intl) e inputs (maska)
 
-**Fuente de verdad:** `GET /monedas` → [`useMonedasStore`](../../frontend/app/stores/monedas.ts)
-(diccionario `monedasById[uuid]`). Carga única en [`dashboard.vue`](../../frontend/app/layouts/dashboard.vue)
-(`ensureLoaded`). Invalidar con `reset()` en logout y `switchTenant`.
+### Resumen rápido
 
-Cada moneda expone `MonedaDisplayConfig`: `locale`, `prefix`, `thousands`, `decimal`,
-`decimals` (desde BD, incl. columna `locale` en tabla `moneda`).
+| Necesidad | Solución | Librería |
+|-----------|----------|----------|
+| Mostrar precio en lista / solo lectura | `formatMonto(value, monedaId?)` | `Intl.NumberFormat` (nativo) |
+| Input con formato en tiempo real | `<MoneyInput>` | [maska](https://github.com/beholdr/maska) |
+| Lookup O(1) por moneda | `monedasStore.getById(uuid)` | Pinia |
+| Valor al API | **string** (`"1500000"`, `"1500.5"`) | — |
 
-| Uso | API | Notas |
-|-----|-----|-------|
-| Lista / solo lectura | `useFormatters().formatMonto(value, monedaId?)` | Sin `monedaId` → moneda oficial (`Intl.NumberFormat`) |
-| Input monetario en vivo | `<MoneyInput v-model="..." :moneda-id="id" />` o `oficial` | maska + string limpio al API |
-| Parse manual | `useCurrency().parse(value, monedaId)` | Misma config que display |
+### Fuente de verdad y ciclo de vida
+
+1. **BD** — tabla `moneda`: `locale`, `simbolo`, `decimales`, `separador_decimal`,
+   `separador_miles` (catálogo global; el tenant no los edita).
+2. **`GET /monedas`** — monedas del país del tenant + flags `habilitada` / `esDefault` /
+   `esOficial` / `valorDelDia`.
+3. **`useMonedasStore`** — un fetch por sesión/tenant; diccionarios `monedasById` y
+   `monedasByCodigo`. Cada entrada es `MonedaDisplayConfig`:
+
+   | Campo store | Origen BD | Uso |
+   |-------------|-----------|-----|
+   | `locale` | `moneda.locale` | `Intl.NumberFormat` y maska `number.locale` |
+   | `prefix` | `simbolo` + `\u00a0` | Prefijo visual (`$ `, `€ `) |
+   | `thousands` / `decimal` | separadores | Máscara y fallback manual |
+   | `decimals` | `decimales` | Decimales fijos por moneda |
+
+4. **Bootstrap** — `dashboard.vue` → `monedasStore.ensureLoaded()` (paralelo a permisos).
+5. **Invalidación** — `reset()` en `auth.clearAuth()` y `tenant.switchTenant()`.
+   Tras PATCH en `/configuracion/monedas` → `patchMoneda()` local (sin refetch).
+
+**No** duplicar `GET /monedas` en páginas. **No** concatenar `monedaSimbolo + monto`.
+
+### Formato en listas (solo lectura)
+
+Implementación en [`currency-format.ts`](../../frontend/app/utils/currency-format.ts).
+API pública vía [`useFormatters`](../../frontend/app/composables/useFormatters.ts) /
+[`useCurrency`](../../frontend/app/composables/useCurrency.ts):
+
+```typescript
+// Ítem con moneda propia (catálogo, configuración de items)
+formatMonto(item.precioBase, item.monedaId)
+
+// Totales en moneda oficial del tenant (ventas, caja, pagos)
+formatMonto(venta.totalFinal)   // sin monedaId → monedaOficial del store
+```
+
+**Flujo interno:**
+
+```
+valor string/Decimal
+  → monedasStore.getById(monedaId)
+  → ¿codigoIso válido ISO 4217? (CLP, USD, …)
+      sí → Intl.NumberFormat(cfg.locale, { style: 'currency', currency, min/maxFractionDigits: cfg.decimals })
+      no → formatMontoManual (UF y códigos custom)
+```
+
+Ejemplos con seed Chile:
+
+| Moneda | locale | Resultado ejemplo |
+|--------|--------|-------------------|
+| CLP | `es-CL` | `$1.500.000` (0 decimales) |
+| USD | `en-US` | `$1,500.50` |
+| UF | `es-CL` | `$ 1.234,5678` (manual, 4 decimales) |
+
+Vacío / `null` → `'—'`.
+
+### Inputs monetarios — `MoneyInput` + maska
+
+Componente: [`MoneyInput.vue`](../../frontend/app/components/MoneyInput.vue).
 
 ```vue
-<!-- Precio de ítem (moneda del ítem) -->
-<span>{{ formatMonto(item.precioBase, item.monedaId) }}</span>
+<!-- Precio de ítem: moneda del formulario -->
 <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" />
 
-<!-- Totales venta/caja (moneda oficial del tenant) -->
-<span>{{ formatMonto(venta.totalFinal) }}</span>
+<!-- Montos en moneda oficial (caja, cobro POS, abono) -->
 <MoneyInput v-model="form.saldoInicial" oficial />
 ```
 
-**No** duplicar `GET /monedas` en páginas: usar el store. **No** concatenar
-`monedaSimbolo + formatMonto(...)` — el formateo incluye símbolo vía Intl o config.
+**Props:**
 
-Códigos no ISO (ej. `UF`): fallback manual con separadores de BD (`currency-format.ts`).
+| Prop | Tipo | Descripción |
+|------|------|-------------|
+| `modelValue` | `string` | Valor limpio para el API (`"1500000"`) |
+| `moneda-id` | `string` | UUID de moneda (desde store) |
+| `oficial` | `boolean` | Usa `monedasStore.monedaOficial` |
+
+**Flujo interno:**
+
+```
+modelValue (string limpio)
+  → displayValue = formatMontoDisplay(modelValue, cfg)   // lo que ve el usuario
+  → v-maska con mask derivada de cfg (prefix, separadores, decimales)
+  → @maska → parseMontoInput(detail.masked, cfg) → emit update:modelValue (string)
+```
+
+La máscara se construye así:
+
+- `decimals === 0` → `{prefix}#` (enteros, ej. CLP)
+- `decimals > 0` → `{prefix}0{thousands}0{decimal}{frac...}` (ej. USD, UF)
+
+`number.locale` de maska = `cfg.locale` (desde BD, no heurística).
+
+**Pantallas que usan `MoneyInput` hoy:** `configuracion/items` (precio base), caja
+(apertura, cierre, movimiento), `CobroModal`, `AbonoModal`.
+
+**Fuera de alcance de `MoneyInput`:** stock, cantidades, porcentajes de impuestos/
+descuentos, `valorDelDia` en monedas (mantener `UInput inputmode="decimal"`).
+
+### Archivos de referencia
+
+| Archivo | Rol |
+|---------|-----|
+| `app/stores/monedas.ts` | Cache Pinia, `ensureLoaded`, `patchMoneda` |
+| `app/types/moneda.ts` | `MonedaDisplayConfig`, `toDisplayConfig()` |
+| `app/utils/currency-format.ts` | `formatMontoDisplay`, `parseMontoInput`, `formatMontoManual` |
+| `app/composables/useCurrency.ts` | `format`, `formatOficial`, `parse` |
+| `app/composables/useFormatters.ts` | `formatMonto` delega a `useCurrency`; `formatFecha` sin cambios |
+| `app/components/MoneyInput.vue` | Input con maska |
+| `app/utils/currency-format.spec.ts` | Tests CLP/USD/UF y round-trip parse |
+
+### Tests
+
+```bash
+cd frontend && npm test -- --run app/utils/currency-format.spec.ts app/stores/monedas.spec.ts
+```
+
+Ver también [configuracion-monedas.md](../features/configuracion-monedas.md) § Formato de precios en UI.
 
 ---
 
-## 8. Verificación manual
+## 8.1 Verificación manual (pantallas de configuración)
 
 Login como admin → `/configuracion/<feature>`: ver datos, probar toggle (con su
 revert ante error simulado), mover la estrella, crear/editar/eliminar. Confirmar
 que los `message` de reglas de negocio del backend aparecen en los toasts.
+
+**Monedas / precios:** tras login, una sola llamada `GET /monedas` en Network;
+catálogo POS muestra CLP sin decimales y USD con separador US; `MoneyInput` en
+precio de ítem formatea mientras se escribe; totales de venta/caja usan moneda oficial.
 
 Ver [backend.md](./backend.md) para la API que consume esta capa.
 
