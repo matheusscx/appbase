@@ -64,6 +64,8 @@ describe('MonedasService', () => {
           codigo_iso: 'CLP',
           simbolo: '$',
           decimales: 0,
+          separador_decimal: ',',
+          separador_miles: '.',
           es_oficial: true,
           es_default: true,
           habilitada: false,
@@ -75,6 +77,8 @@ describe('MonedasService', () => {
           codigo_iso: 'USD',
           simbolo: '$',
           decimales: 2,
+          separador_decimal: '.',
+          separador_miles: ',',
           es_oficial: false,
           es_default: false,
           habilitada: true,
@@ -89,12 +93,16 @@ describe('MonedasService', () => {
         esOficial: true,
         habilitada: true,
         valorDelDia: '1',
+        separadorDecimal: ',',
+        separadorMiles: '.',
       });
       expect(result[1]).toMatchObject({
         monedaId: USD,
         esOficial: false,
         habilitada: true,
         valorDelDia: '950.000000',
+        separadorDecimal: '.',
+        separadorMiles: ',',
       });
     });
   });

@@ -39,12 +39,25 @@ Respuesta de `GET /api/monedas` (por item):
   "codigoIso": "USD",
   "simbolo": "$",
   "decimales": 2,
+  "separadorDecimal": ".",
+  "separadorMiles": ",",
   "habilitada": true,
   "esDefault": false,
   "esOficial": false,
   "valorDelDia": "950.000000"
 }
 ```
+
+### Formato numérico por moneda
+
+Cada registro del catálogo `moneda` define cómo presentar montos en el UI:
+
+| Campo | Descripción | Ejemplo Chile (CLP) | Ejemplo México (MXN) |
+|---|---|---|---|
+| `separadorDecimal` | Carácter entre parte entera y decimal | `,` | `.` |
+| `separadorMiles` | Carácter entre grupos de miles | `.` | `,` |
+
+Ejemplos: Chile `$ 1.000,50` — México `$ 1,000.50`. Son datos de catálogo (no los edita el tenant); el frontend los usa al formatear montos según la moneda activa.
 
 ## Páginas frontend
 
@@ -65,7 +78,8 @@ Respuesta de `GET /api/monedas` (por item):
 
 - `pais_moneda` (nueva) — puente país ↔ monedas disponibles, soft delete.
 - `tenant_moneda` — flags `es_default`/`habilitada` + `valor_del_dia`, soft delete.
-- `moneda`, `pais` — solo lectura (catálogos).
+- `moneda`, `pais` — solo lectura (catálogos). En `moneda`: `separador_decimal` y
+  `separador_miles` (configuración interna de presentación numérica).
 
 ## Decisiones de diseño
 

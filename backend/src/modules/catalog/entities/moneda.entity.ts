@@ -27,6 +27,14 @@ export class Moneda {
   @Column({ type: 'smallint', default: 0 })
   decimales: number;
 
+  /** Separador decimal para presentación (ej. ',' en Chile, '.' en México). */
+  @Column({ name: 'separador_decimal', type: 'char', length: 1, default: ',' })
+  separadorDecimal: string;
+
+  /** Separador de miles para presentación (ej. '.' en Chile, ',' en México). */
+  @Column({ name: 'separador_miles', type: 'char', length: 1, default: '.' })
+  separadorMiles: string;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

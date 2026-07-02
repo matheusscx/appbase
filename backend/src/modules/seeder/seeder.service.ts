@@ -141,6 +141,8 @@ export class SeederService implements OnApplicationBootstrap {
         codigoNumero: '152',
         simbolo: '$',
         decimales: 0,
+        separadorDecimal: ',',
+        separadorMiles: '.',
       },
       {
         monedaId: '550e8400-e29b-41d4-a716-446655440004',
@@ -149,6 +151,8 @@ export class SeederService implements OnApplicationBootstrap {
         codigoNumero: '990',
         simbolo: '$',
         decimales: 4,
+        separadorDecimal: ',',
+        separadorMiles: '.',
       },
       {
         monedaId: '550e8400-e29b-41d4-a716-446655440005',
@@ -157,6 +161,8 @@ export class SeederService implements OnApplicationBootstrap {
         codigoNumero: '840',
         simbolo: '$',
         decimales: 2,
+        separadorDecimal: '.',
+        separadorMiles: ',',
       },
     ];
 
@@ -166,6 +172,14 @@ export class SeederService implements OnApplicationBootstrap {
       });
       if (!exists) {
         await this.monedaRepo.save(this.monedaRepo.create(data));
+      } else {
+        await this.monedaRepo.update(
+          { monedaId: data.monedaId },
+          {
+            separadorDecimal: data.separadorDecimal,
+            separadorMiles: data.separadorMiles,
+          },
+        );
       }
     }
   }

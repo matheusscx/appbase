@@ -67,9 +67,11 @@ CREATE TABLE "moneda" (
   "nombre"         VARCHAR(50) NOT NULL,
   "codigo_iso"     CHAR(3)     UNIQUE NOT NULL,
   "codigo_numero"  CHAR(3)     UNIQUE NOT NULL,
-  "simbolo"        VARCHAR(5),
-  "decimales"      SMALLINT    DEFAULT 0,
-  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "simbolo"            VARCHAR(5),
+  "decimales"          SMALLINT    DEFAULT 0,
+  "separador_decimal"  CHAR(1)     NOT NULL DEFAULT ',',  -- Chile: ',' | México: '.'
+  "separador_miles"    CHAR(1)     NOT NULL DEFAULT '.',  -- Chile: '.' | México: ','
+  "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
 );

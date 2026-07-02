@@ -116,7 +116,7 @@ Tablas sembradas por seeder, no editables por el usuario final:
 
 - `pais` (nombre, ISO-2, zona horaria)
 - `provincia` (FK país, zona horaria)
-- `moneda` (nombre, ISO-3, símbolo, decimales)
+- `moneda` (nombre, ISO-3, símbolo, decimales, separador decimal, separador de miles)
 - `modulos_app` (módulos disponibles en el SaaS)
 - `permisos` (permisos disponibles por módulo)
 - `metodos_pago` (catálogo global de métodos)
@@ -129,6 +129,7 @@ Tablas sembradas por seeder, no editables por el usuario final:
 - El tenant puede **habilitar monedas adicionales** (USD, UF, etc.) para cobrar en ellas
 - Puede marcar una moneda habilitada como **default** (preseleccionada en el UI)
 - Registra la **tasa de cambio del día** (`valor_del_dia`) por moneda adicional, actualizable en cualquier momento
+- El catálogo `moneda` define **separadores de presentación** (`separador_decimal`, `separador_miles`): Chile usa `,` y `.` (ej. `$ 1.000,50`); México usa `.` y `,` (ej. `$ 1,000.50`)
 - Al procesar una venta en moneda no oficial → se convierte a la moneda oficial usando `valor_del_dia` vigente en ese instante
 - Las facturas siempre se emiten en la moneda oficial del país
 

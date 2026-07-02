@@ -7,6 +7,8 @@ interface Moneda {
   codigoIso: string
   simbolo: string | null
   decimales: number
+  separadorDecimal: string
+  separadorMiles: string
   habilitada: boolean
   esDefault: boolean
   esOficial: boolean

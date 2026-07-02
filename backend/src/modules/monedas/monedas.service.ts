@@ -14,6 +14,8 @@ export interface MonedaTenant {
   codigoIso: string;
   simbolo: string | null;
   decimales: number;
+  separadorDecimal: string;
+  separadorMiles: string;
   habilitada: boolean;
   esDefault: boolean;
   esOficial: boolean;
@@ -45,6 +47,8 @@ export class MonedasService {
       codigo_iso: string;
       simbolo: string | null;
       decimales: number | string;
+      separador_decimal: string;
+      separador_miles: string;
       es_oficial: boolean;
       es_default: boolean;
       habilitada: boolean;
@@ -55,6 +59,8 @@ export class MonedasService {
               m.codigo_iso,
               m.simbolo,
               m.decimales,
+              m.separador_decimal,
+              m.separador_miles,
               (m.moneda_id = p.moneda_oficial_id) AS es_oficial,
               COALESCE(tm.es_default, false) AS es_default,
               COALESCE(tm.habilitada, false) AS habilitada,
@@ -80,6 +86,8 @@ export class MonedasService {
         codigoIso: r.codigo_iso?.trim(),
         simbolo: r.simbolo,
         decimales: Number(r.decimales),
+        separadorDecimal: r.separador_decimal?.trim() ?? ',',
+        separadorMiles: r.separador_miles?.trim() ?? '.',
         esOficial,
         // La oficial está siempre habilitada y su tasa es fija en 1
         habilitada: esOficial ? true : r.habilitada === true,
