@@ -409,28 +409,34 @@ describe('InventarioService', () => {
   // findMovimientos
   // ---------------------------------------------------------------------------
   describe('findMovimientos', () => {
-    it('mapea filas snake_case a camelCase y filtra por item', async () => {
-      dataSource.query.mockResolvedValue([
-        {
-          movimiento_id: 'mov-1',
-          item_id: ITEM_ID,
-          item_nombre: 'Smartphone',
-          tipo: 'entrada',
-          motivo: 'compra',
-          cantidad: '5.0000',
-          stock_anterior: '10.0000',
-          stock_resultante: '15.0000',
-          usuario_id: USER_ID,
-          usuario_nombre: 'Admin',
-          comentario: null,
-          creado_el: new Date('2026-06-23T10:00:00Z'),
-        },
-      ]);
+    it('mapea filas snake_case a camelCase y filtra por item con paginación', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'mov-1',
+            item_id: ITEM_ID,
+            item_nombre: 'Smartphone',
+            tipo: 'entrada',
+            motivo: 'compra',
+            cantidad: '5.0000',
+            stock_anterior: '10.0000',
+            stock_resultante: '15.0000',
+            usuario_id: USER_ID,
+            usuario_nombre: 'Admin',
+            comentario: null,
+            creado_el: new Date('2026-06-23T10:00:00Z'),
+          },
+        ]);
 
-      const res = await service.findMovimientos(TENANT, { itemId: ITEM_ID });
+      const res = await service.findMovimientos(TENANT, {
+        itemId: ITEM_ID,
+        page: 1,
+        pageSize: 15,
+      });
 
-      expect(res).toHaveLength(1);
-      expect(res[0]).toMatchObject({
+      expect(res.data).toHaveLength(1);
+      expect(res.data[0]).toMatchObject({
         id: 'mov-1',
         itemId: ITEM_ID,
         itemNombre: 'Smartphone',
@@ -439,10 +445,19 @@ describe('InventarioService', () => {
         stockResultante: '15.0000',
         usuarioNombre: 'Admin',
       });
-      // tenantId siempre es el primer parámetro de la query
+      expect(res.meta).toMatchObject({
+        page: 1,
+        pageSize: 15,
+        total: 1,
+        totalPages: 1,
+      });
       expect(dataSource.query).toHaveBeenCalledWith(
-        expect.stringContaining('FROM movimientos_inventario'),
-        expect.arrayContaining([TENANT]),
+        expect.stringContaining('COUNT(*)'),
+        expect.arrayContaining([TENANT, ITEM_ID]),
+      );
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('LIMIT $3 OFFSET $4'),
+        expect.arrayContaining([TENANT, ITEM_ID, 15, 0]),
       );
     });
   });

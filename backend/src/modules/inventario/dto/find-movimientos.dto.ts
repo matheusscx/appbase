@@ -1,4 +1,5 @@
 import { IsOptional, IsUUID, IsIn, IsDateString } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 const MOTIVOS = [
   'compra',
@@ -9,7 +10,7 @@ const MOTIVOS = [
   'inventario_inicial',
 ];
 
-export class FindMovimientosDto {
+export class FindMovimientosDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   itemId?: string;

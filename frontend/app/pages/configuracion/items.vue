@@ -7,6 +7,7 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha, formatMonto } = useFormatters()
+const { pageSize } = useUserPreferences()
 
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -217,6 +218,33 @@ const historialOpen = ref(false)
 const historialLoading = ref(false)
 const movimientos = ref<Movimiento[]>([])
 const historialItemNombre = ref('')
+const historialItemId = ref<string | null>(null)
+const historialPage = ref(1)
+const historialMeta = ref({ total: 0 })
+
+async function cargarHistorial() {
+  if (!historialItemId.value) return
+  historialLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      itemId: historialItemId.value,
+      page: String(historialPage.value),
+      pageSize: String(pageSize.value),
+    })
+    const res = await useApiFetch<{ data: Movimiento[]; meta: { total: number } }>(
+      `${apiUrl}/inventario/movimientos?${params.toString()}`,
+    )
+    movimientos.value = res.data
+    historialMeta.value = res.meta
+  } catch (e) {
+    const msg = apiErrorMsg(e, 'Error al cargar historial')
+    toast.add({ title: msg, color: 'error' })
+  } finally {
+    historialLoading.value = false
+  }
+}
+
+watch(historialPage, cargarHistorial)
 
 function menuAcciones(item: Item) {
   const grupos: any[][] = []
@@ -278,18 +306,14 @@ async function abrirVerUnidades(item: Item) {
 
 async function abrirHistorial(item: Item) {
   historialItemNombre.value = item.nombre
-  historialOpen.value = true
-  historialLoading.value = true
+  historialItemId.value = item.id
   movimientos.value = []
-  try {
-    movimientos.value = await useApiFetch<Movimiento[]>(
-      `${apiUrl}/inventario/movimientos?itemId=${item.id}`,
-    )
-  } catch (e) {
-    const msg = apiErrorMsg(e, 'Error al cargar historial')
-    toast.add({ title: msg, color: 'error' })
-  } finally {
-    historialLoading.value = false
+  historialMeta.value = { total: 0 }
+  historialOpen.value = true
+  if (historialPage.value !== 1) {
+    historialPage.value = 1
+  } else {
+    await cargarHistorial()
   }
 }
 
@@ -1242,6 +1266,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <div class="py-8 text-center text-sm text-muted">Sin movimientos registrados.</div>
           </template>
         </UTable>
+        <div v-if="historialMeta.total > pageSize" class="flex justify-end pt-4">
+          <UPagination
+            v-model:page="historialPage"
+            :items-per-page="pageSize"
+            :total="historialMeta.total"
+          />
+        </div>
       </template>
       <template #footer>
         <div class="flex justify-end">

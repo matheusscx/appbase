@@ -36,7 +36,7 @@ defineProps<{
 
       <template #footer>
         <AppModalFooter>
-          <UButton color="neutral" variant="outline" @click="open = false">
+          <UButton color="primary" @click="open = false">
             Entendido
           </UButton>
         </AppModalFooter>

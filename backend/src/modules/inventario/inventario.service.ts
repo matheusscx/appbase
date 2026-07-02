@@ -3,7 +3,13 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
+import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
+import {
+  buildPaginationMeta,
+  resolvePagination,
+} from '../../common/utils/pagination.util';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
+import type { FindMovimientosDto } from './dto/find-movimientos.dto';
 
 export interface SerieInput {
   serie: string;
@@ -499,63 +505,78 @@ export class InventarioService {
 
   async findMovimientos(
     tenantId: string,
-    filtros: {
-      itemId?: string;
-      motivo?: string;
-      desde?: string;
-      hasta?: string;
-    },
-  ) {
-    let query = `
-      SELECT
-        mv.movimiento_id, mv.item_id, i.nombre AS item_nombre,
-        mv.tipo, mv.motivo, mv.cantidad,
-        mv.stock_anterior, mv.stock_resultante,
-        mv.usuario_id, u.nombre AS usuario_nombre,
-        mv.comentario, mv.creado_el
-      FROM movimientos_inventario mv
-      JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
-      LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
-      WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
-    `;
-    const queryParams: unknown[] = [tenantId];
-    let idx = 2;
+    query: FindMovimientosDto,
+  ): Promise<PaginatedResponse<MovimientoListItem>> {
+    const { page, pageSize, offset } = resolvePagination(query);
+    const { filters, params } = this.buildMovimientosFilters(tenantId, query);
 
-    if (filtros.itemId) {
-      query += ` AND mv.item_id = $${idx++}`;
-      queryParams.push(filtros.itemId);
+    const countRows: { total: number }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total
+       FROM movimientos_inventario mv
+       JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
+       WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
+         ${filters}`,
+      params,
+    );
+
+    const total = countRows[0]?.total ?? 0;
+    const listParams = [...params, pageSize, offset];
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+
+    const rows: MovimientoRow[] = await this.dataSource.query(
+      `SELECT
+         mv.movimiento_id, mv.item_id, i.nombre AS item_nombre,
+         mv.tipo, mv.motivo, mv.cantidad,
+         mv.stock_anterior, mv.stock_resultante,
+         mv.usuario_id, u.nombre AS usuario_nombre,
+         mv.comentario, mv.creado_el
+       FROM movimientos_inventario mv
+       JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
+       WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
+         ${filters}
+       ORDER BY mv.creado_el DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
+    );
+
+    return {
+      data: rows.map((r) => this.mapMovimientoRow(r)),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  private buildMovimientosFilters(
+    tenantId: string,
+    query: FindMovimientosDto,
+  ): { filters: string; params: unknown[] } {
+    const params: unknown[] = [tenantId];
+    let paramIdx = 2;
+    let filters = '';
+
+    if (query.itemId) {
+      filters += ` AND mv.item_id = $${paramIdx++}`;
+      params.push(query.itemId);
     }
-    if (filtros.motivo) {
-      query += ` AND mv.motivo = $${idx++}`;
-      queryParams.push(filtros.motivo);
+    if (query.motivo) {
+      filters += ` AND mv.motivo = $${paramIdx++}`;
+      params.push(query.motivo);
     }
-    if (filtros.desde) {
-      query += ` AND mv.creado_el >= $${idx++}`;
-      queryParams.push(filtros.desde);
+    if (query.desde) {
+      filters += ` AND mv.creado_el >= $${paramIdx++}`;
+      params.push(query.desde);
     }
-    if (filtros.hasta) {
-      query += ` AND mv.creado_el <= $${idx++}`;
-      queryParams.push(filtros.hasta);
+    if (query.hasta) {
+      filters += ` AND mv.creado_el <= $${paramIdx++}`;
+      params.push(query.hasta);
     }
 
-    query += ` ORDER BY mv.creado_el DESC`;
+    return { filters, params };
+  }
 
-    const rows: {
-      movimiento_id: string;
-      item_id: string;
-      item_nombre: string;
-      tipo: string;
-      motivo: string;
-      cantidad: string;
-      stock_anterior: string;
-      stock_resultante: string;
-      usuario_id: string | null;
-      usuario_nombre: string | null;
-      comentario: string | null;
-      creado_el: Date;
-    }[] = await this.dataSource.query(query, queryParams);
-
-    return rows.map((r) => ({
+  private mapMovimientoRow(r: MovimientoRow): MovimientoListItem {
+    return {
       id: r.movimiento_id,
       itemId: r.item_id,
       itemNombre: r.item_nombre,
@@ -568,6 +589,36 @@ export class InventarioService {
       usuarioNombre: r.usuario_nombre,
       comentario: r.comentario,
       creadoEl: r.creado_el,
-    }));
+    };
   }
+}
+
+export interface MovimientoListItem {
+  id: string;
+  itemId: string;
+  itemNombre: string;
+  tipo: string;
+  motivo: string;
+  cantidad: string;
+  stockAnterior: string;
+  stockResultante: string;
+  usuarioId: string | null;
+  usuarioNombre: string | null;
+  comentario: string | null;
+  creadoEl: Date;
+}
+
+interface MovimientoRow {
+  movimiento_id: string;
+  item_id: string;
+  item_nombre: string;
+  tipo: string;
+  motivo: string;
+  cantidad: string;
+  stock_anterior: string;
+  stock_resultante: string;
+  usuario_id: string | null;
+  usuario_nombre: string | null;
+  comentario: string | null;
+  creado_el: Date;
 }

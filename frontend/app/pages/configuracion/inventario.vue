@@ -2,9 +2,9 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha } = useFormatters()
+const { pageSize } = useUserPreferences()
 
 interface Movimiento {
   id: string
@@ -21,11 +21,21 @@ interface Movimiento {
 }
 interface Opt { label: string; value: string }
 
-const movimientos = ref<Movimiento[]>([])
-const loading = ref(false)
+const { public: { apiUrl } } = useRuntimeConfig()
 const productosOpts = ref<Opt[]>([])
 const filtroItem = ref('todos')
 const filtroMotivo = ref('todos')
+
+const listFilters = computed(() => ({
+  itemId: filtroItem.value !== 'todos' ? filtroItem.value : undefined,
+  motivo: filtroMotivo.value !== 'todos' ? filtroMotivo.value : undefined,
+}))
+
+const { items: movimientos, meta, page, loading } = usePaginatedList<Movimiento>({
+  path: '/inventario/movimientos',
+  pageSize,
+  filters: listFilters,
+})
 
 const motivoOpts: Opt[] = [
   { label: 'Todos los motivos', value: 'todos' },
@@ -51,28 +61,7 @@ async function cargarProductos() {
   }
 }
 
-async function cargar() {
-  loading.value = true
-  try {
-    const params = new URLSearchParams()
-    if (filtroItem.value !== 'todos') params.set('itemId', filtroItem.value)
-    if (filtroMotivo.value !== 'todos') params.set('motivo', filtroMotivo.value)
-    const qs = params.toString()
-    movimientos.value = await useApiFetch<Movimiento[]>(
-      `${apiUrl}/inventario/movimientos${qs ? `?${qs}` : ''}`,
-    )
-  } catch (e) {
-    const msg = apiErrorMsg(e, 'Error al cargar movimientos')
-    toast.add({ title: msg, color: 'error' })
-  } finally {
-    loading.value = false
-  }
-}
-
-watch([filtroItem, filtroMotivo], cargar)
-onMounted(async () => {
-  await Promise.all([cargarProductos(), cargar()])
-})
+onMounted(cargarProductos)
 
 function motivoLabel(motivo: string): string {
   return motivoOpts.find((o) => o.value === motivo)?.label ?? motivo
@@ -115,39 +104,39 @@ const columns: TableColumn<Movimiento>[] = [
     </div>
 
     <CrudTable :data="movimientos" :columns="columns" :loading="loading">
-        <template #creadoEl-cell="{ row }">
-          <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
-        </template>
-        <template #itemNombre-cell="{ row }">
-          <span class="font-medium">{{ row.original.itemNombre }}</span>
-        </template>
-        <template #tipo-cell="{ row }">
-          <UBadge
-            :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
-            :color="row.original.tipo === 'entrada' ? 'success' : 'warning'"
-            variant="subtle"
-            size="sm"
-          />
-        </template>
-        <template #motivo-cell="{ row }">
-          <UBadge
-            :label="motivoLabel(row.original.motivo)"
-            color="neutral"
-            variant="subtle"
-            size="sm"
-          />
-        </template>
-        <template #cantidad-cell="{ row }">
-          <span :class="row.original.tipo === 'entrada' ? 'text-success' : 'text-warning'">
-            {{ row.original.cantidad }}
-          </span>
-        </template>
-        <template #stockResultante-cell="{ row }">
-          <span class="font-medium">{{ row.original.stockResultante }}</span>
-        </template>
-        <template #usuarioNombre-cell="{ row }">
-          {{ row.original.usuarioNombre ?? '—' }}
-        </template>
+      <template #creadoEl-cell="{ row }">
+        <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
+      </template>
+      <template #itemNombre-cell="{ row }">
+        <span class="font-medium">{{ row.original.itemNombre }}</span>
+      </template>
+      <template #tipo-cell="{ row }">
+        <UBadge
+          :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
+          :color="row.original.tipo === 'entrada' ? 'success' : 'warning'"
+          variant="subtle"
+          size="sm"
+        />
+      </template>
+      <template #motivo-cell="{ row }">
+        <UBadge
+          :label="motivoLabel(row.original.motivo)"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+        />
+      </template>
+      <template #cantidad-cell="{ row }">
+        <span :class="row.original.tipo === 'entrada' ? 'text-success' : 'text-warning'">
+          {{ row.original.cantidad }}
+        </span>
+      </template>
+      <template #stockResultante-cell="{ row }">
+        <span class="font-medium">{{ row.original.stockResultante }}</span>
+      </template>
+      <template #usuarioNombre-cell="{ row }">
+        {{ row.original.usuarioNombre ?? '—' }}
+      </template>
       <template #empty>
         <div class="py-8 text-center text-sm text-muted">
           <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
@@ -155,5 +144,13 @@ const columns: TableColumn<Movimiento>[] = [
         </div>
       </template>
     </CrudTable>
+
+    <div v-if="meta.total > pageSize" class="flex justify-end">
+      <UPagination
+        v-model:page="page"
+        :items-per-page="pageSize"
+        :total="meta.total"
+      />
+    </div>
   </div>
 </template>
