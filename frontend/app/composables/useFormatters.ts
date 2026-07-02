@@ -1,20 +1,19 @@
 import Decimal from 'decimal.js'
 
-const numberFmt = new Intl.NumberFormat('es-CL', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
 const dateFmt = new Intl.DateTimeFormat('es-CL', {
   dateStyle: 'medium',
   timeStyle: 'short',
 })
 
 export function useFormatters() {
-  function formatMonto(value: string | Decimal | null | undefined): string {
-    if (value === null || value === undefined || value === '') return '—'
-    const d = value instanceof Decimal ? value : new Decimal(value)
-    return numberFmt.format(d.toNumber())
+  const { format: formatCurrency, formatOficial } = useCurrency()
+
+  function formatMonto(
+    value: string | Decimal | null | undefined,
+    monedaId?: string,
+  ): string {
+    if (monedaId) return formatCurrency(value, monedaId)
+    return formatOficial(value)
   }
 
   function formatFecha(iso: string | null | undefined): string {

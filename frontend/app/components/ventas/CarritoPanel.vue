@@ -43,6 +43,8 @@ const docItems = computed(() =>
   props.tiposDocumento.map((t) => ({ label: t.nombre, value: t.id })),
 )
 
+const { formatMonto } = useFormatters()
+
 // El input de cantidad arranca readonly para que el autocompletado de direcciones
 // de Chrome (que ignora autocomplete="off") no lo rellene. Se vuelve editable al
 // enfocarlo y se re-protege al salir.
@@ -86,8 +88,8 @@ function quitarCustomer() {
         <li v-for="linea in lineas" :key="linea.item.id" class="py-2 flex items-center gap-2">
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium text-default truncate">{{ linea.item.nombre }}</p>
-            <p class="text-xs text-muted">
-              {{ linea.item.monedaSimbolo ?? '' }}{{ linea.item.precioBase }} c/u
+            <p class="text-xs text-muted font-mono">
+              {{ formatMonto(linea.item.precioBase, linea.item.monedaId) }} c/u
             </p>
           </div>
           <UInput

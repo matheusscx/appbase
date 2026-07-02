@@ -237,6 +237,38 @@ if (form.value.tipo === 'producto') {
 
 ---
 
+## 8. Monedas — store, formato e inputs
+
+**Fuente de verdad:** `GET /monedas` → [`useMonedasStore`](../../frontend/app/stores/monedas.ts)
+(diccionario `monedasById[uuid]`). Carga única en [`dashboard.vue`](../../frontend/app/layouts/dashboard.vue)
+(`ensureLoaded`). Invalidar con `reset()` en logout y `switchTenant`.
+
+Cada moneda expone `MonedaDisplayConfig`: `locale`, `prefix`, `thousands`, `decimal`,
+`decimals` (desde BD, incl. columna `locale` en tabla `moneda`).
+
+| Uso | API | Notas |
+|-----|-----|-------|
+| Lista / solo lectura | `useFormatters().formatMonto(value, monedaId?)` | Sin `monedaId` → moneda oficial (`Intl.NumberFormat`) |
+| Input monetario en vivo | `<MoneyInput v-model="..." :moneda-id="id" />` o `oficial` | maska + string limpio al API |
+| Parse manual | `useCurrency().parse(value, monedaId)` | Misma config que display |
+
+```vue
+<!-- Precio de ítem (moneda del ítem) -->
+<span>{{ formatMonto(item.precioBase, item.monedaId) }}</span>
+<MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" />
+
+<!-- Totales venta/caja (moneda oficial del tenant) -->
+<span>{{ formatMonto(venta.totalFinal) }}</span>
+<MoneyInput v-model="form.saldoInicial" oficial />
+```
+
+**No** duplicar `GET /monedas` en páginas: usar el store. **No** concatenar
+`monedaSimbolo + formatMonto(...)` — el formateo incluye símbolo vía Intl o config.
+
+Códigos no ISO (ej. `UF`): fallback manual con separadores de BD (`currency-format.ts`).
+
+---
+
 ## 8. Verificación manual
 
 Login como admin → `/configuracion/<feature>`: ver datos, probar toggle (con su

@@ -338,21 +338,21 @@ async function cargar() {
 }
 
 async function cargarCatalogos() {
+  const monedasStore = useMonedasStore()
   try {
-    const [monedas, categorias, impuestos, descuentos, recargos] =
+    await monedasStore.ensureLoaded()
+    const [categorias, impuestos, descuentos, recargos] =
       await Promise.all([
-        useApiFetch<any[]>(`${apiUrl}/monedas`),
         useApiFetch<any[]>(`${apiUrl}/categorias`),
         useApiFetch<any[]>(`${apiUrl}/impuestos`),
         useApiFetch<any[]>(`${apiUrl}/descuentos`),
         useApiFetch<any[]>(`${apiUrl}/recargos`),
       ])
 
-    monedasOpts.value = monedas
-      .filter((m) => m.habilitada)
-      .map((m) => ({ label: `${m.nombre} (${m.codigoIso})`, value: m.monedaId }))
+    monedasOpts.value = monedasStore.monedasHabilitadas
+      .map(m => ({ label: `${m.nombre} (${m.codigoIso})`, value: m.monedaId }))
 
-    const defaultMoneda = monedas.find((m) => m.esDefault || m.esOficial)
+    const defaultMoneda = monedasStore.monedaDefault
     if (defaultMoneda && !form.value.monedaId) {
       form.value.monedaId = defaultMoneda.monedaId
     }
@@ -682,7 +682,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           <div class="min-w-0">
             <span class="font-medium truncate block">{{ row.original.nombre }}</span>
             <div class="text-sm text-muted mt-0.5 flex flex-wrap items-center gap-3">
-              <span>{{ row.original.monedaSimbolo ?? row.original.monedaCodigo }} {{ formatMonto(row.original.precioBase) }}</span>
+              <span class="font-mono">{{ formatMonto(row.original.precioBase, row.original.monedaId) }}</span>
               <span v-if="row.original.categoriaNombre">· {{ row.original.categoriaNombre }}</span>
               <span v-if="row.original.tipo === 'producto' && row.original.stock !== null">
                 · Stock: {{ row.original.stock }}
@@ -768,7 +768,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             </UFormField>
 
             <UFormField label="Precio base" required>
-              <UInput v-model="form.precioBase" inputmode="decimal" placeholder="0" class="w-full" />
+              <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" class="w-full" />
             </UFormField>
 
             <UFormField label="Moneda" required>

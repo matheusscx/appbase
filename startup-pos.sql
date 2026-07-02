@@ -71,6 +71,7 @@ CREATE TABLE "moneda" (
   "decimales"          SMALLINT    DEFAULT 0,
   "separador_decimal"  CHAR(1)     NOT NULL DEFAULT ',',  -- Chile: ',' | México: '.'
   "separador_miles"    CHAR(1)     NOT NULL DEFAULT '.',  -- Chile: '.' | México: ','
+  "locale"             VARCHAR(10) NOT NULL DEFAULT 'es-CL',  -- BCP 47 para Intl/maska
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ

@@ -66,6 +66,7 @@ describe('MonedasService', () => {
           decimales: 0,
           separador_decimal: ',',
           separador_miles: '.',
+          locale: 'es-CL',
           es_oficial: true,
           es_default: true,
           habilitada: false,
@@ -79,6 +80,7 @@ describe('MonedasService', () => {
           decimales: 2,
           separador_decimal: '.',
           separador_miles: ',',
+          locale: 'en-US',
           es_oficial: false,
           es_default: false,
           habilitada: true,
@@ -95,6 +97,7 @@ describe('MonedasService', () => {
         valorDelDia: '1',
         separadorDecimal: ',',
         separadorMiles: '.',
+        locale: 'es-CL',
       });
       expect(result[1]).toMatchObject({
         monedaId: USD,
@@ -103,6 +106,7 @@ describe('MonedasService', () => {
         valorDelDia: '950.000000',
         separadorDecimal: '.',
         separadorMiles: ',',
+        locale: 'en-US',
       });
     });
   });

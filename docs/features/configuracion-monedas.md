@@ -41,6 +41,7 @@ Respuesta de `GET /api/monedas` (por item):
   "decimales": 2,
   "separadorDecimal": ".",
   "separadorMiles": ",",
+  "locale": "en-US",
   "habilitada": true,
   "esDefault": false,
   "esOficial": false,
@@ -54,10 +55,11 @@ Cada registro del catálogo `moneda` define cómo presentar montos en el UI:
 
 | Campo | Descripción | Ejemplo Chile (CLP) | Ejemplo México (MXN) |
 |---|---|---|---|
+| `locale` | BCP 47 para `Intl.NumberFormat` y maska | `es-CL` | `es-MX` |
 | `separadorDecimal` | Carácter entre parte entera y decimal | `,` | `.` |
 | `separadorMiles` | Carácter entre grupos de miles | `.` | `,` |
 
-Ejemplos: Chile `$ 1.000,50` — México `$ 1,000.50`. Son datos de catálogo (no los edita el tenant); el frontend los usa al formatear montos según la moneda activa.
+Ejemplos: Chile `$ 1.000,50` — México `$ 1,000.50`. Son datos de catálogo (no los edita el tenant); el frontend los consume vía `useMonedasStore` y `useFormatters().formatMonto`.
 
 ## Páginas frontend
 
@@ -78,8 +80,8 @@ Ejemplos: Chile `$ 1.000,50` — México `$ 1,000.50`. Son datos de catálogo (n
 
 - `pais_moneda` (nueva) — puente país ↔ monedas disponibles, soft delete.
 - `tenant_moneda` — flags `es_default`/`habilitada` + `valor_del_dia`, soft delete.
-- `moneda`, `pais` — solo lectura (catálogos). En `moneda`: `separador_decimal` y
-  `separador_miles` (configuración interna de presentación numérica).
+- `moneda`, `pais` — solo lectura (catálogos). En `moneda`: `locale`, `separador_decimal` y
+  `separador_miles` (configuración de presentación numérica).
 
 ## Decisiones de diseño
 

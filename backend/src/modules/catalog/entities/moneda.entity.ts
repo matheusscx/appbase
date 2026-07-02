@@ -35,6 +35,10 @@ export class Moneda {
   @Column({ name: 'separador_miles', type: 'char', length: 1, default: '.' })
   separadorMiles: string;
 
+  /** Locale BCP 47 para Intl.NumberFormat y maska (ej. es-CL, en-US). */
+  @Column({ type: 'varchar', length: 10, default: 'es-CL' })
+  locale: string;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

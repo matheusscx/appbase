@@ -143,6 +143,7 @@ export class SeederService implements OnApplicationBootstrap {
         decimales: 0,
         separadorDecimal: ',',
         separadorMiles: '.',
+        locale: 'es-CL',
       },
       {
         monedaId: '550e8400-e29b-41d4-a716-446655440004',
@@ -153,6 +154,7 @@ export class SeederService implements OnApplicationBootstrap {
         decimales: 4,
         separadorDecimal: ',',
         separadorMiles: '.',
+        locale: 'es-CL',
       },
       {
         monedaId: '550e8400-e29b-41d4-a716-446655440005',
@@ -163,6 +165,7 @@ export class SeederService implements OnApplicationBootstrap {
         decimales: 2,
         separadorDecimal: '.',
         separadorMiles: ',',
+        locale: 'en-US',
       },
     ];
 
@@ -178,6 +181,7 @@ export class SeederService implements OnApplicationBootstrap {
           {
             separadorDecimal: data.separadorDecimal,
             separadorMiles: data.separadorMiles,
+            locale: data.locale,
           },
         );
       }

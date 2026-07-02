@@ -50,12 +50,7 @@ async function abrir() {
 
     <UForm id="caja-apertura-form" :state="form" class="space-y-4" @submit="abrir">
       <UFormField label="Saldo inicial" required>
-        <UInput
-          v-model="form.saldoInicial"
-          inputmode="decimal"
-          placeholder="0.00"
-          class="w-full"
-        />
+        <MoneyInput v-model="form.saldoInicial" oficial class="w-full" />
       </UFormField>
 
       <UFormField label="Comentario">

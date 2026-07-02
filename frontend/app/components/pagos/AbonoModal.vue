@@ -109,7 +109,7 @@ async function confirmar() {
               label-key="label"
               class="flex-1"
             />
-            <UInput v-model="pago.monto" inputmode="decimal" placeholder="0" class="w-32" />
+            <MoneyInput v-model="pago.monto" oficial class="w-32" size="sm" />
             <UButton
               icon="i-lucide-trash-2"
               color="error"

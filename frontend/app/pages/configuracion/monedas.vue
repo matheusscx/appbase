@@ -1,27 +1,15 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-
-interface Moneda {
-  monedaId: string
-  nombre: string
-  codigoIso: string
-  simbolo: string | null
-  decimales: number
-  separadorDecimal: string
-  separadorMiles: string
-  habilitada: boolean
-  esDefault: boolean
-  esOficial: boolean
-  valorDelDia: string | null
-}
+import type { MonedaDisplayConfig } from '~/types/moneda'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const config = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = config.public.apiUrl
+const monedasStore = useMonedasStore()
 
-const monedas = ref<Moneda[]>([])
+const monedas = ref<MonedaDisplayConfig[]>([])
 const loading = ref(false)
 const toggling = reactive(new Set<string>())
 const tasaOriginal = reactive(new Map<string, string | null>())
@@ -29,7 +17,8 @@ const tasaOriginal = reactive(new Map<string, string | null>())
 async function cargar() {
   loading.value = true
   try {
-    monedas.value = await useApiFetch<Moneda[]>(`${apiUrl}/monedas`)
+    await monedasStore.ensureLoaded()
+    monedas.value = monedasStore.monedasList.map(m => ({ ...m }))
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cargar monedas')
@@ -40,7 +29,7 @@ async function cargar() {
   }
 }
 
-async function toggleHabilitada(m: Moneda) {
+async function toggleHabilitada(m: MonedaDisplayConfig) {
   if (m.esOficial || toggling.has(m.monedaId)) return
   if (m.esDefault && m.habilitada) {
     toast.add({ title: 'No se puede deshabilitar la moneda predeterminada', color: 'warning' })
@@ -54,6 +43,7 @@ async function toggleHabilitada(m: Moneda) {
       method: 'PATCH',
       body: { habilitada: m.habilitada },
     })
+    monedasStore.patchMoneda(m.monedaId, { habilitada: m.habilitada })
     toast.add({ title: m.habilitada ? 'Moneda habilitada' : 'Moneda deshabilitada', color: 'success' })
   }
   catch (e: unknown) {
@@ -66,7 +56,7 @@ async function toggleHabilitada(m: Moneda) {
   }
 }
 
-async function setDefault(m: Moneda) {
+async function setDefault(m: MonedaDisplayConfig) {
   if (m.esDefault || toggling.has(m.monedaId)) return
   if (!m.habilitada) {
     toast.add({ title: 'Debes habilitar la moneda antes de marcarla como predeterminada', color: 'warning' })
@@ -80,6 +70,7 @@ async function setDefault(m: Moneda) {
     await useApiFetch(`${apiUrl}/monedas/${m.monedaId}/default`, {
       method: 'PATCH',
     })
+    monedasStore.setDefaultMoneda(m.monedaId)
     toast.add({ title: 'Moneda predeterminada actualizada', color: 'success' })
   }
   catch (e: unknown) {
@@ -93,11 +84,11 @@ async function setDefault(m: Moneda) {
   }
 }
 
-function onTasaFocus(m: Moneda) {
+function onTasaFocus(m: MonedaDisplayConfig) {
   tasaOriginal.set(m.monedaId, m.valorDelDia)
 }
 
-async function guardarTasa(m: Moneda) {
+async function guardarTasa(m: MonedaDisplayConfig) {
   if (m.esOficial || toggling.has(m.monedaId)) return
   const prev = tasaOriginal.get(m.monedaId) ?? null
   if (m.valorDelDia === prev) return
@@ -113,6 +104,7 @@ async function guardarTasa(m: Moneda) {
       method: 'PATCH',
       body: { valorDelDia: m.valorDelDia },
     })
+    monedasStore.patchMoneda(m.monedaId, { valorDelDia: m.valorDelDia })
     toast.add({ title: 'Tasa de cambio actualizada', color: 'success' })
   }
   catch (e: unknown) {
@@ -127,7 +119,7 @@ async function guardarTasa(m: Moneda) {
 
 onMounted(cargar)
 
-const columns: TableColumn<Moneda>[] = [
+const columns: TableColumn<MonedaDisplayConfig>[] = [
   { accessorKey: 'nombre', header: 'Moneda' },
   { id: 'tasa', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'predeterminada', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
@@ -157,7 +149,8 @@ const columns: TableColumn<Moneda>[] = [
               </UBadge>
             </p>
             <p class="text-sm text-muted">
-              {{ row.original.codigoIso }}<span v-if="row.original.simbolo"> · {{ row.original.simbolo }}</span>
+              {{ row.original.codigoIso }}<span v-if="row.original.prefix"> · {{ row.original.prefix.trim() }}</span>
+              · {{ row.original.locale }}
             </p>
           </div>
         </template>

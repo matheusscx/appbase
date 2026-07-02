@@ -45,6 +45,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function clearAuth() {
     usePermissionsStore().reset()
+    useMonedasStore().reset()
     token.value = null
     user.value = null
   }

@@ -39,8 +39,8 @@ const filtrados = computed(() => {
       >
         <div class="flex flex-col gap-1">
           <span class="font-medium text-sm text-default truncate">{{ item.nombre }}</span>
-          <span class="text-highlighted font-semibold text-sm">
-            {{ item.monedaSimbolo ?? '' }}{{ formatMonto(item.precioBase) }}
+          <span class="text-highlighted font-semibold text-sm font-mono">
+            {{ formatMonto(item.precioBase, item.monedaId) }}
           </span>
           <span v-if="item.tipo === 'producto'" class="text-xs text-muted">
             Stock: {{ item.stock ?? '0' }}

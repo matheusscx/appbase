@@ -46,6 +46,7 @@ const mockSetToken = vi.fn()
 
 const mockFetchPermisos = vi.fn().mockResolvedValue(undefined)
 const mockResetPermisos = vi.fn()
+const mockResetMonedas = vi.fn()
 
 vi.mock('./auth', () => ({
   useAuthStore: () => ({
@@ -60,6 +61,12 @@ vi.mock('./permissions', () => ({
   usePermissionsStore: () => ({
     reset: mockResetPermisos,
     fetchPermisos: mockFetchPermisos,
+  }),
+}))
+
+vi.mock('./monedas', () => ({
+  useMonedasStore: () => ({
+    reset: mockResetMonedas,
   }),
 }))
 

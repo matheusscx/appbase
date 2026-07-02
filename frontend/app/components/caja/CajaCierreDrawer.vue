@@ -23,13 +23,8 @@ watch(open, (isOpen) => {
 })
 
 const montoContadoFormateado = computed(() => {
-  if (!montoContado.value) return '—'
-  try {
-    return formatMonto(montoContado.value)
-  }
-  catch {
-    return montoContado.value
-  }
+  if (!montoContado.value || montoContado.value === '0') return '—'
+  return formatMonto(montoContado.value)
 })
 
 const diferencia = computed(() => {
@@ -100,13 +95,7 @@ async function cerrarCaja() {
         </div>
 
         <UFormField label="Monto contado en caja" required>
-          <UInput
-            v-model="montoContado"
-            inputmode="decimal"
-            placeholder="0.00"
-            class="w-full"
-            autofocus
-          />
+          <MoneyInput v-model="montoContado" oficial class="w-full" />
         </UFormField>
 
         <UFormField label="Comentario de cierre">

@@ -100,12 +100,7 @@ async function guardar() {
         </UFormField>
 
         <UFormField label="Monto" required>
-          <UInput
-            v-model="form.monto"
-            inputmode="decimal"
-            placeholder="0.00"
-            class="w-full"
-          />
+          <MoneyInput v-model="form.monto" oficial class="w-full" />
         </UFormField>
 
         <UFormField label="Referencia">

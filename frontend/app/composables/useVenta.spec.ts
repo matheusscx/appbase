@@ -17,6 +17,7 @@ const item = (id: string, precio = '100'): ItemCatalogo => ({
   nombre: `Item ${id}`,
   descripcion: null,
   precioBase: precio,
+  monedaId: 'moneda-clp',
   monedaSimbolo: '$',
   stock: '10',
   tipo: 'producto',

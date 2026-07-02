@@ -9,6 +9,7 @@ export interface ItemCatalogo {
   nombre: string
   descripcion: string | null
   precioBase: string
+  monedaId: string
   monedaSimbolo: string | null
   stock: string | null
   tipo: string
