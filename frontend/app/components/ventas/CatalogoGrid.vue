@@ -15,7 +15,7 @@ const filtrados = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 h-full">
+  <div class="flex flex-col gap-4 h-full min-h-0">
     <UInput
       v-model="busqueda"
       icon="i-lucide-search"
@@ -30,7 +30,7 @@ const filtrados = computed(() => {
       No hay ítems para mostrar.
     </div>
 
-    <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto p-1">
+    <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 flex-1 min-h-0 overflow-y-auto p-1">
       <UCard
         v-for="item in filtrados"
         :key="item.id"

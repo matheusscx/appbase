@@ -66,21 +66,57 @@ function quitarCustomer() {
 </script>
 
 <template>
-  <UCard class="h-full flex flex-col">
+  <UCard
+    class="h-full"
+    :ui="{
+      root: 'h-full min-h-0 flex flex-col overflow-hidden',
+      header: 'shrink-0 p-4 sm:px-6',
+      body: 'flex-1 min-h-0 overflow-hidden flex flex-col p-0',
+      footer: 'shrink-0 p-4 sm:px-6',
+    }"
+  >
     <template #header>
-      <div class="flex items-center justify-between">
-        <span class="font-semibold">Venta</span>
-        <USelect
-          v-model="tipoDocumentoId"
-          :items="docItems"
-          placeholder="Documento"
-          size="sm"
-          class="w-44"
-        />
+      <div class="flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+          <span class="font-semibold">Venta</span>
+          <USelect
+            v-model="tipoDocumentoId"
+            :items="docItems"
+            placeholder="Documento"
+            size="sm"
+            class="w-44"
+          />
+        </div>
+
+        <VentasClienteForm v-if="customerRequerido" v-model="customer" />
+        <template v-else>
+          <UButton
+            v-if="!customerExpandido"
+            label="Agregar datos del cliente"
+            icon="i-lucide-user-plus"
+            variant="soft"
+            color="neutral"
+            size="sm"
+            block
+            @click="mostrarCustomer"
+          />
+          <template v-else>
+            <VentasClienteForm v-model="customer" />
+            <UButton
+              label="Quitar datos del cliente"
+              icon="i-lucide-x"
+              variant="ghost"
+              color="error"
+              size="xs"
+              block
+              @click="quitarCustomer"
+            />
+          </template>
+        </template>
       </div>
     </template>
 
-    <div class="flex-1 overflow-y-auto">
+    <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6">
       <div v-if="!lineas.length" class="text-center text-muted py-10 text-sm">
         Agregá ítems desde el catálogo.
       </div>
@@ -113,34 +149,6 @@ function quitarCustomer() {
           />
         </li>
       </ul>
-
-      <VentasClienteForm v-if="customerRequerido" v-model="customer" class="mt-3" />
-      <template v-else>
-        <div class="mt-3">
-          <UButton
-            v-if="!customerExpandido"
-            label="Agregar datos del cliente"
-            icon="i-lucide-user-plus"
-            variant="soft"
-            color="neutral"
-            size="sm"
-            block
-            @click="mostrarCustomer"
-          />
-          <template v-else>
-            <VentasClienteForm v-model="customer" />
-            <UButton
-              label="Quitar datos del cliente"
-              icon="i-lucide-x"
-              variant="ghost"
-              color="error"
-              size="xs"
-              class="mt-2"
-              @click="quitarCustomer"
-            />
-          </template>
-        </div>
-      </template>
     </div>
 
     <template #footer>

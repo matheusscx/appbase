@@ -183,11 +183,11 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         <CajaAperturaForm />
       </div>
 
-      <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full p-4">
-        <div class="lg:col-span-3 min-h-0">
+      <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full min-h-0 p-4">
+        <div class="lg:col-span-3 min-h-0 flex flex-col">
           <VentasCatalogoGrid :items="items" :loading="loadingCatalogo" @add="add" />
         </div>
-        <div class="lg:col-span-2 min-h-0">
+        <div class="lg:col-span-2 min-h-0 flex flex-col">
           <VentasCarritoPanel
             v-model:tipo-documento-id="tipoDocumentoId"
             v-model:customer="customer"
