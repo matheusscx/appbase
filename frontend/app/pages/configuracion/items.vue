@@ -87,10 +87,31 @@ const confirmDeleteId = ref<string | null>(null)
 const stockItem = ref<Item | null>(null)
 const toggling = reactive(new Set<string>())
 const filtroTipo = ref('todos')
+const busqueda = ref('')
+const busquedaActiva = ref('')
+
+let busquedaTimer: ReturnType<typeof setTimeout> | null = null
+watch(busqueda, (value) => {
+  if (busquedaTimer) clearTimeout(busquedaTimer)
+  busquedaTimer = setTimeout(() => {
+    busquedaActiva.value = value.trim()
+  }, 300)
+})
 
 const listFilters = computed(() => ({
   tipo: filtroTipo.value === 'todos' ? undefined : filtroTipo.value,
+  search: busquedaActiva.value || undefined,
 }))
+
+const hayFiltrosActivos = computed(
+  () => filtroTipo.value !== 'todos' || !!busquedaActiva.value,
+)
+
+function limpiarFiltros() {
+  filtroTipo.value = 'todos'
+  busqueda.value = ''
+  busquedaActiva.value = ''
+}
 
 const { items, meta, page, loading, fetch: fetchItems } =
   usePaginatedList<Item>({
@@ -639,14 +660,29 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       </template>
     </CrudPageHeader>
 
-    <!-- Filtro por tipo -->
-    <div class="flex gap-2">
+    <!-- Filtros -->
+    <div class="flex flex-wrap items-center gap-3">
+      <UInput
+        v-model="busqueda"
+        icon="i-lucide-search"
+        placeholder="Buscar por nombre o descripción..."
+        class="min-w-48 flex-1 max-w-md"
+      />
       <USelectMenu
         v-model="filtroTipo"
         :items="filtrosTipoOpts"
         value-key="value"
         class="w-44"
         placeholder="Filtrar por tipo"
+      />
+      <UButton
+        v-if="hayFiltrosActivos"
+        label="Limpiar filtros"
+        icon="i-lucide-x"
+        variant="ghost"
+        color="neutral"
+        size="sm"
+        @click="limpiarFiltros"
       />
     </div>
 
@@ -724,7 +760,11 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       <template #empty>
         <div class="py-8 text-center text-sm text-muted">
           <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-          No hay items. Crea el primero con el botón de arriba.
+          {{
+            hayFiltrosActivos
+              ? 'Ningún item coincide con los filtros.'
+              : 'No hay items. Crea el primero con el botón de arriba.'
+          }}
         </div>
       </template>
     </CrudTable>

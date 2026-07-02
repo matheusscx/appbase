@@ -103,6 +103,20 @@ describe('ItemsService', () => {
       expect(result.data).toHaveLength(0);
       expect(result.meta.total).toBe(0);
     });
+
+    it('filtra por búsqueda en nombre o descripción', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, { search: 'smart' });
+
+      expect(dataSource.query.mock.calls[0][0]).toContain('ILIKE');
+      expect(dataSource.query.mock.calls[0][1]).toEqual([
+        TENANT,
+        '%smart%',
+      ]);
+    });
   });
 
   // ── findOne ────────────────────────────────────────────────────────────────

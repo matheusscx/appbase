@@ -115,6 +115,11 @@ export class ItemsService {
       where += ` AND i.categoria_id = $${idx++}`;
       params.push(query.categoriaId);
     }
+    if (query.search) {
+      where += ` AND (i.nombre ILIKE $${idx} OR i.descripcion ILIKE $${idx})`;
+      params.push(`%${query.search}%`);
+      idx++;
+    }
 
     return { where, params };
   }

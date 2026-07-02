@@ -1,4 +1,5 @@
-import { IsIn, IsOptional, IsUUID } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class QueryItemsDto extends PaginationQueryDto {
@@ -9,4 +10,12 @@ export class QueryItemsDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   categoriaId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  search?: string;
 }
