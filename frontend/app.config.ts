@@ -20,18 +20,24 @@ export default defineAppConfig({
     divider: { light: 'divide-gray-100', dark: 'dark:divide-gray-900' },
     // Component-specific overrides
     card: {
-      base: 'bg-default divide-y divide-default',
-      header: {
-        base: 'px-6 py-5 border-b border-default',
+      slots: {
+        root: 'rounded-lg overflow-hidden bg-default ring ring-default divide-y divide-default',
+        header: 'px-6 py-4',
+        title: 'text-base font-semibold text-default',
+        description: 'text-sm text-muted',
+        body: 'px-6 py-4',
+        footer: 'px-6 py-4',
       },
     },
     modal: {
-      base: 'relative text-default',
-      body: {
-        base: 'p-6 space-y-4',
-      },
-      footer: {
-        base: 'px-6 py-4 border-t border-default flex justify-end gap-2',
+      slots: {
+        content: 'bg-default flex flex-col focus:outline-none text-default divide-none',
+        header: 'relative flex flex-col items-start gap-1 px-6 py-4 min-h-(--ui-header-height)',
+        body: 'flex-1 px-6 py-4 space-y-4',
+        footer: 'px-6 py-4',
+        title: 'text-base font-semibold text-default',
+        description: 'text-sm text-muted',
+        close: 'absolute top-4 end-4',
       },
     },
     formField: {

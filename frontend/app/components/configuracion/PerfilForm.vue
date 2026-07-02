@@ -29,7 +29,7 @@ async function guardar() {
 </script>
 
 <template>
-  <UCard>
+  <AppCard>
     <template #header>
       <div class="flex items-center gap-2">
         <UIcon name="i-lucide-circle-user" class="w-5 h-5" />
@@ -38,25 +38,29 @@ async function guardar() {
     </template>
 
     <UForm :state="form" class="space-y-4" @submit="guardar">
-      <UFormField label="Correo electrónico">
-        <UInput :value="authStore.user?.correo" disabled />
-      </UFormField>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <UFormField label="Nombre" required>
+          <UInput v-model="form.nombre" placeholder="Tu nombre" />
+        </UFormField>
 
-      <UFormField label="Nombre" required>
-        <UInput v-model="form.nombre" placeholder="Tu nombre" />
-      </UFormField>
+        <UFormField label="Apellido">
+          <UInput v-model="form.apellido" placeholder="Tu apellido" />
+        </UFormField>
+      </div>
 
-      <UFormField label="Apellido">
-        <UInput v-model="form.apellido" placeholder="Tu apellido" />
-      </UFormField>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <UFormField label="Teléfono">
+          <UInput v-model="form.telefono" placeholder="+56 9 1234 5678" />
+        </UFormField>
 
-      <UFormField label="Teléfono">
-        <UInput v-model="form.telefono" placeholder="+56 9 1234 5678" />
-      </UFormField>
+        <UFormField label="Correo electrónico">
+          <UInput :model-value="authStore.user?.correo" disabled />
+        </UFormField>
+      </div>
 
       <UButton type="submit" :loading="loading">
         Guardar cambios
       </UButton>
     </UForm>
-  </UCard>
+  </AppCard>
 </template>

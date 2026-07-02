@@ -34,7 +34,7 @@ async function guardar() {
 </script>
 
 <template>
-  <UCard>
+  <AppCard>
     <template #header>
       <div class="flex items-center gap-2">
         <UIcon name="i-lucide-lock" class="w-5 h-5" />
@@ -59,5 +59,5 @@ async function guardar() {
         Actualizar contraseña
       </UButton>
     </UForm>
-  </UCard>
+  </AppCard>
 </template>

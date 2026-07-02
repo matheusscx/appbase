@@ -93,7 +93,7 @@ async function confirmar() {
 </script>
 
 <template>
-  <UModal v-model:open="open" title="Registrar pago">
+  <UModal v-model:open="open" title="Registrar pago" :ui="shellUi.modal">
     <template #body>
       <div class="flex flex-col gap-4">
         <div class="flex justify-between text-base font-semibold">
@@ -149,7 +149,7 @@ async function confirmar() {
     </template>
 
     <template #footer>
-      <div class="flex justify-end gap-2 w-full">
+      <AppModalFooter>
         <UButton label="Cancelar" color="neutral" variant="ghost" @click="open = false" />
         <UButton
           label="Confirmar pago"
@@ -158,7 +158,7 @@ async function confirmar() {
           :disabled="!puedeConfirmar"
           @click="confirmar"
         />
-      </div>
+      </AppModalFooter>
     </template>
   </UModal>
 </template>

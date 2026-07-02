@@ -28,14 +28,14 @@ function cancelar() {
 </script>
 
 <template>
-  <UModal v-model:open="open" :title="title">
+  <UModal v-model:open="open" :title="title" :ui="shellUi.modal">
     <template #body>
       <p class="text-sm">
         {{ message }}
       </p>
     </template>
     <template #footer>
-      <div class="flex justify-end gap-2">
+      <AppModalFooter>
         <UButton color="neutral" variant="ghost" @click="cancelar">
           Cancelar
         </UButton>
@@ -46,7 +46,7 @@ function cancelar() {
         >
           {{ confirmLabel }}
         </UButton>
-      </div>
+      </AppModalFooter>
     </template>
   </UModal>
 </template>

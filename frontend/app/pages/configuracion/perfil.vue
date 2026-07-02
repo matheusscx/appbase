@@ -1,5 +1,5 @@
 <template>
-  <div class="max-w-xl space-y-6">
+  <div class="max-w-2xl space-y-6">
     <ConfiguracionPerfilForm />
     <ConfiguracionUserPreferencesForm />
     <ConfiguracionContrasenaForm />

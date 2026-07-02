@@ -70,7 +70,7 @@ function confirmar() {
 </script>
 
 <template>
-  <UModal v-model:open="open" title="Cobrar venta">
+  <UModal v-model:open="open" title="Cobrar venta" :ui="shellUi.modal">
     <template #body>
       <div class="flex flex-col gap-4">
         <div class="flex justify-between text-base font-semibold">
@@ -117,7 +117,7 @@ function confirmar() {
     </template>
 
     <template #footer>
-      <div class="flex justify-end gap-2 w-full">
+      <AppModalFooter>
         <UButton label="Cancelar" color="neutral" variant="ghost" @click="open = false" />
         <UButton
           label="Confirmar venta"
@@ -126,7 +126,7 @@ function confirmar() {
           :disabled="!puedeConfirmar"
           @click="confirmar"
         />
-      </div>
+      </AppModalFooter>
     </template>
   </UModal>
 </template>

@@ -16,7 +16,7 @@ const colorModeModel = computed({
 </script>
 
 <template>
-  <UCard>
+  <AppCard>
     <template #header>
       <div class="flex items-center gap-2">
         <UIcon name="i-lucide-palette" class="w-5 h-5" />
@@ -24,27 +24,35 @@ const colorModeModel = computed({
       </div>
     </template>
 
-    <div class="space-y-4">
-      <UFormField label="Tema">
-        <USelect
-          v-model="colorModeModel"
-          :items="COLOR_MODE_OPTIONS"
-          value-key="value"
-          class="w-48"
-        />
-      </UFormField>
+    <div class="space-y-2">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <UFormField label="Tema">
+          <USelect
+            v-model="colorModeModel"
+            :items="COLOR_MODE_OPTIONS"
+            value-key="value"
+            class="w-full"
+          />
+        </UFormField>
 
-      <UFormField
-        label="Filas por página"
-        description="Aplica en tablas con paginación (Pagos, Ventas, etc.)"
-      >
-        <USelect
-          v-model="pageSizeModel"
-          :items="PAGE_SIZE_OPTIONS"
-          value-key="value"
-          class="w-48"
-        />
-      </UFormField>
+        <UFormField label="Filas por página">
+          <template #label>
+            <span class="inline-flex items-center gap-1">
+              Filas por página
+              <AppInfoButton
+                title="Filas por página"
+                text="Cantidad de registros visibles por página en tablas con paginación, como Pagos y Ventas."
+              />
+            </span>
+          </template>
+          <USelect
+            v-model="pageSizeModel"
+            :items="PAGE_SIZE_OPTIONS"
+            value-key="value"
+            class="w-full"
+          />
+        </UFormField>
+      </div>
     </div>
-  </UCard>
+  </AppCard>
 </template>
