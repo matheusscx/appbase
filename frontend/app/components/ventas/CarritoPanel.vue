@@ -105,9 +105,9 @@ function quitarCustomer() {
             <UButton
               label="Quitar datos del cliente"
               icon="i-lucide-x"
-              variant="ghost"
+              variant="soft"
               color="error"
-              size="xs"
+              size="sm"
               block
               @click="quitarCustomer"
             />
