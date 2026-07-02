@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { vMaska, type MaskaDetail } from 'maska/vue'
-import { formatMontoDisplay, parseMontoInput } from '~/utils/currency-format'
+import { formatMontoDisplay } from '~/utils/currency-format'
 
 const props = withDefaults(
   defineProps<{
@@ -35,6 +35,14 @@ function buildMask(c: NonNullable<typeof cfg.value>): string {
   return `${c.prefix}0${c.thousands}0${c.decimal}${frac}`
 }
 
+/** Texto enmascarado mostrado en el input. */
+const display = ref('')
+
+function syncFromMaska(detail: MaskaDetail) {
+  display.value = detail.masked
+  emit('update:modelValue', detail.unmasked || '')
+}
+
 const maskaOptions = computed(() => {
   const c = cfg.value
   if (!c) return undefined
@@ -45,37 +53,37 @@ const maskaOptions = computed(() => {
       fraction: c.decimals,
       unsigned: true,
     },
+    onMaska: syncFromMaska,
   }
 })
 
-const displayValue = computed(() => {
-  const c = cfg.value
-  if (!c || props.modelValue === '' || props.modelValue === undefined) return ''
-  return formatMontoDisplay(props.modelValue, c)
-})
-
-function onMaska(detail: MaskaDetail) {
-  const c = cfg.value
-  if (!c) return
-  if (!detail.masked || detail.masked === c.prefix.trim()) {
-    emit('update:modelValue', '0')
-    return
-  }
-  const parsed = parseMontoInput(detail.masked, c)
-  emit('update:modelValue', parsed.toString())
-}
+watch(
+  [() => props.modelValue, cfg],
+  () => {
+    const c = cfg.value
+    if (!c) {
+      display.value = ''
+      return
+    }
+    if (props.modelValue === '' || props.modelValue === undefined) {
+      display.value = ''
+      return
+    }
+    display.value = formatMontoDisplay(props.modelValue, c)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
   <UInput
     v-maska="maskaOptions"
-    :model-value="displayValue"
+    :model-value="display"
     :placeholder="placeholder"
     :disabled="disabled || !cfg"
     :size="size"
     :class="props.class"
     inputmode="decimal"
     autocomplete="off"
-    @maska="onMaska"
   />
 </template>
