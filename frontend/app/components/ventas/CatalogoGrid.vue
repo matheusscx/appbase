@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
 import type { ItemCatalogo } from '~/composables/useVenta'
 
 const props = defineProps<{ items: ItemCatalogo[]; loading?: boolean }>()
@@ -8,10 +9,29 @@ const { esMonedaExtranjera, convertirAMonedaOficial, monedaOficial } = useMoneda
 const { formatStock } = useFormatters()
 const busqueda = ref('')
 
+function tieneStock(item: ItemCatalogo): boolean {
+  if (item.stock === null || item.stock === '') return false
+  try {
+    return new Decimal(item.stock).greaterThan(0)
+  }
+  catch {
+    return false
+  }
+}
+
+function compararCatalogo(a: ItemCatalogo, b: ItemCatalogo): number {
+  const aConStock = tieneStock(a) ? 0 : 1
+  const bConStock = tieneStock(b) ? 0 : 1
+  if (aConStock !== bConStock) return aConStock - bConStock
+  return a.nombre.localeCompare(b.nombre, 'es')
+}
+
 const filtrados = computed(() => {
   const q = busqueda.value.trim().toLowerCase()
-  if (!q) return props.items
-  return props.items.filter((i) => i.nombre.toLowerCase().includes(q))
+  const list = q
+    ? props.items.filter((i) => i.nombre.toLowerCase().includes(q))
+    : props.items
+  return [...list].sort(compararCatalogo)
 })
 </script>
 
