@@ -33,6 +33,11 @@ const filtrados = computed(() => {
     : props.items
   return [...list].sort(compararCatalogo)
 })
+
+function onAgregar(item: ItemCatalogo) {
+  if (!tieneStock(item)) return
+  emit('add', item)
+}
 </script>
 
 <template>
@@ -57,9 +62,13 @@ const filtrados = computed(() => {
         <UCard
           v-for="item in filtrados"
           :key="item.id"
-          class="cursor-pointer hover:ring-2 hover:ring-primary transition h-full"
+          class="h-full transition"
+          :class="tieneStock(item)
+            ? 'cursor-pointer hover:ring-2 hover:ring-primary'
+            : 'opacity-50 cursor-not-allowed'"
           :ui="{ body: 'h-full p-3 sm:p-4' }"
-          @click="emit('add', item)"
+          :aria-disabled="!tieneStock(item)"
+          @click="onAgregar(item)"
         >
           <div class="flex flex-col h-full gap-1">
             <span class="font-medium text-sm text-default truncate shrink-0">{{ item.nombre }}</span>
