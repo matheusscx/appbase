@@ -15,6 +15,11 @@ export function isIso4217Currency(codigoIso: string): boolean {
   }
 }
 
+/** Símbolo pegado al monto (sin espacio intermedio). */
+function symbolPrefix(cfg: MonedaDisplayConfig): string {
+  return cfg.prefix.trim()
+}
+
 export function formatMontoManual(d: Decimal, cfg: MonedaDisplayConfig): string {
   const negative = d.isNegative()
   const abs = d.abs()
@@ -25,7 +30,7 @@ export function formatMontoManual(d: Decimal, cfg: MonedaDisplayConfig): string 
   const numero = cfg.decimals > 0 && frac !== undefined
     ? `${enteroFmt}${cfg.decimal}${frac}`
     : enteroFmt
-  const formatted = `${cfg.prefix}${numero}`
+  const formatted = `${symbolPrefix(cfg)}${numero}`
   return negative ? `-${formatted}` : formatted
 }
 
@@ -36,18 +41,7 @@ export function formatMontoDisplay(
   if (value === null || value === undefined || value === '') return '—'
 
   const d = value instanceof Decimal ? value : new Decimal(value)
-
-  if (!isIso4217Currency(cfg.codigoIso)) {
-    return formatMontoManual(d, cfg)
-  }
-
-  const n = d.toNumber()
-  return new Intl.NumberFormat(cfg.locale, {
-    style: 'currency',
-    currency: cfg.codigoIso,
-    minimumFractionDigits: cfg.decimals,
-    maximumFractionDigits: cfg.decimals,
-  }).format(n)
+  return formatMontoManual(d, cfg)
 }
 
 export function parseMontoInput(raw: string, cfg: MonedaDisplayConfig): Decimal {

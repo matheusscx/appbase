@@ -158,7 +158,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
 </script>
 
 <template>
-  <UDashboardPanel>
+  <UDashboardPanel :ui="{ body: 'flex flex-col flex-1 min-h-0 overflow-hidden p-0' }">
     <template #header>
       <AppNavbar title="Punto de venta">
         <template #right>
@@ -183,11 +183,11 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         <CajaAperturaForm />
       </div>
 
-      <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full min-h-0 p-4">
-        <div class="lg:col-span-3 min-h-0 flex flex-col">
+      <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full min-h-0 flex-1 overflow-hidden p-4">
+        <div class="lg:col-span-3 min-h-0 flex flex-col overflow-hidden">
           <VentasCatalogoGrid :items="items" :loading="loadingCatalogo" @add="add" />
         </div>
-        <div class="lg:col-span-2 min-h-0 flex flex-col">
+        <div class="lg:col-span-2 min-h-0 flex flex-col overflow-hidden">
           <VentasCarritoPanel
             v-model:tipo-documento-id="tipoDocumentoId"
             v-model:customer="customer"

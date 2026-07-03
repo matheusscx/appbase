@@ -36,7 +36,7 @@ export function toDisplayConfig(m: MonedaTenantApi): MonedaDisplayConfig {
     codigoIso: m.codigoIso.trim(),
     nombre: m.nombre,
     locale: m.locale?.trim() || 'es-CL',
-    prefix: m.simbolo ? `${m.simbolo}\u00a0` : '',
+    prefix: m.simbolo?.trim() ?? '',
     thousands: m.separadorMiles,
     decimal: m.separadorDecimal,
     decimals: m.decimales,

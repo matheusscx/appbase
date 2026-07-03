@@ -13,7 +13,7 @@ const clp: MonedaDisplayConfig = {
   codigoIso: 'CLP',
   nombre: 'Peso Chileno',
   locale: 'es-CL',
-  prefix: '$\u00a0',
+  prefix: '$',
   thousands: '.',
   decimal: ',',
   decimals: 0,
@@ -43,7 +43,7 @@ const uf: MonedaDisplayConfig = {
   codigoIso: 'UF',
   nombre: 'UF',
   locale: 'es-CL',
-  prefix: '$\u00a0',
+  prefix: '$',
   thousands: '.',
   decimal: ',',
   decimals: 4,
@@ -65,21 +65,17 @@ describe('isIso4217Currency', () => {
 })
 
 describe('formatMontoDisplay', () => {
-  it('formatea CLP con Intl sin decimales', () => {
-    const result = formatMontoDisplay('1500000', clp)
-    expect(result).toContain('1')
-    expect(result).toContain('500')
-    expect(result).not.toMatch(/,\d{2}$/)
+  it('formatea CLP con símbolo pegado al monto', () => {
+    expect(formatMontoDisplay('1500000', clp)).toBe('$1.500.000')
   })
 
-  it('formatea USD con Intl', () => {
-    const result = formatMontoDisplay('1500.5', usd)
-    expect(result).toContain('1,500.50')
+  it('formatea USD con símbolo pegado al monto', () => {
+    expect(formatMontoDisplay('1500.5', usd)).toBe('$1,500.50')
   })
 
   it('UF usa fallback manual con 4 decimales', () => {
     const result = formatMontoDisplay('1234.5678', uf)
-    expect(result).toBe('$\u00a01.234,5678')
+    expect(result).toBe('$1.234,5678')
   })
 
   it('vacío devuelve em dash', () => {
@@ -90,7 +86,7 @@ describe('formatMontoDisplay', () => {
 
 describe('parseMontoInput', () => {
   it('parsea CLP con separadores chilenos', () => {
-    expect(parseMontoInput('$ 1.500.000', clp).toString()).toBe('1500000')
+    expect(parseMontoInput('$1.500.000', clp).toString()).toBe('1500000')
   })
 
   it('parsea USD', () => {

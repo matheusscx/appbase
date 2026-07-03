@@ -4,7 +4,7 @@ import type { ItemCatalogo } from '~/composables/useVenta'
 const props = defineProps<{ items: ItemCatalogo[]; loading?: boolean }>()
 const emit = defineEmits<{ add: [item: ItemCatalogo] }>()
 
-const { formatMonto } = useFormatters()
+const { esMonedaExtranjera, convertirAMonedaOficial, monedaOficial } = useMonedaConversion()
 const busqueda = ref('')
 
 const filtrados = computed(() => {
@@ -15,12 +15,13 @@ const filtrados = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 h-full min-h-0">
+  <div class="flex flex-col gap-4 h-full min-h-0 overflow-hidden">
     <UInput
       v-model="busqueda"
       icon="i-lucide-search"
       placeholder="Buscar ítem..."
       size="lg"
+      class="shrink-0"
     />
 
     <div v-if="loading" class="text-center text-muted py-10 text-sm">
@@ -30,23 +31,43 @@ const filtrados = computed(() => {
       No hay ítems para mostrar.
     </div>
 
-    <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 flex-1 min-h-0 overflow-y-auto p-1">
-      <UCard
-        v-for="item in filtrados"
-        :key="item.id"
-        class="cursor-pointer hover:ring-2 hover:ring-primary transition"
-        @click="emit('add', item)"
-      >
-        <div class="flex flex-col gap-1">
-          <span class="font-medium text-sm text-default truncate">{{ item.nombre }}</span>
-          <span class="text-highlighted font-semibold text-sm font-mono">
-            {{ formatMonto(item.precioBase, item.monedaId) }}
-          </span>
-          <span v-if="item.tipo === 'producto'" class="text-xs text-muted">
-            Stock: {{ item.stock ?? '0' }}
-          </span>
-        </div>
-      </UCard>
+    <div v-else class="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-3 items-stretch p-1 pb-2">
+        <UCard
+          v-for="item in filtrados"
+          :key="item.id"
+          class="cursor-pointer hover:ring-2 hover:ring-primary transition h-full"
+          :ui="{ body: 'h-full p-3 sm:p-4' }"
+          @click="emit('add', item)"
+        >
+          <div class="flex flex-col h-full gap-1">
+            <span class="font-medium text-sm text-default truncate shrink-0">{{ item.nombre }}</span>
+            <VentasPrecioItem
+              :monto="item.precioBase"
+              :moneda-id="item.monedaId"
+              highlight
+            />
+            <div
+              v-if="esMonedaExtranjera(item.monedaId) && monedaOficial"
+              class="min-h-5 flex items-center shrink-0"
+            >
+              <VentasPrecioItem
+                :monto="convertirAMonedaOficial(item.precioBase, item.monedaId)"
+                :moneda-id="monedaOficial.monedaId"
+                muted
+              />
+            </div>
+            <span v-if="item.tipo === 'producto'" class="text-xs text-muted shrink-0">
+              Stock: {{ item.stock ?? '0' }}
+            </span>
+            <div
+              v-if="!esMonedaExtranjera(item.monedaId)"
+              class="min-h-5 shrink-0"
+              aria-hidden="true"
+            />
+          </div>
+        </UCard>
+      </div>
     </div>
   </div>
 </template>

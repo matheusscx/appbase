@@ -44,6 +44,9 @@ const docItems = computed(() =>
 )
 
 const { formatMonto } = useFormatters()
+const { convertirAMonedaOficial } = useMonedaConversion()
+
+const monedaIdsEnCarrito = computed(() => props.lineas.map((l) => l.item.monedaId))
 
 // El input de cantidad arranca readonly para que el autocompletado de direcciones
 // de Chrome (que ignora autocomplete="off") no lo rellene. Se vuelve editable al
@@ -76,47 +79,47 @@ function quitarCustomer() {
     }"
   >
     <template #header>
-      <div class="flex flex-col gap-3">
-        <div class="flex items-center justify-between">
-          <span class="font-semibold">Venta</span>
-          <USelect
-            v-model="tipoDocumentoId"
-            :items="docItems"
-            placeholder="Documento"
-            size="sm"
-            class="w-44"
-          />
-        </div>
-
-        <VentasClienteForm v-if="customerRequerido" v-model="customer" />
-        <template v-else>
-          <UButton
-            v-if="!customerExpandido"
-            label="Agregar datos del cliente"
-            icon="i-lucide-user-plus"
-            variant="soft"
-            color="neutral"
-            size="sm"
-            block
-            @click="mostrarCustomer"
-          />
-          <template v-else>
-            <VentasClienteForm v-model="customer" />
-            <UButton
-              label="Quitar datos del cliente"
-              icon="i-lucide-x"
-              variant="soft"
-              color="error"
-              size="sm"
-              block
-              @click="quitarCustomer"
-            />
-          </template>
-        </template>
+      <div class="flex items-center justify-between gap-3">
+        <span class="font-semibold">Venta</span>
+        <USelect
+          v-model="tipoDocumentoId"
+          :items="docItems"
+          placeholder="Documento"
+          size="sm"
+          class="min-w-0 flex-1 max-w-52"
+        />
       </div>
     </template>
 
     <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6">
+      <div
+        v-if="customerRequerido || customerExpandido"
+        class="pb-4 mb-4 border-b border-default"
+      >
+        <VentasClienteForm v-model="customer" />
+        <UButton
+          v-if="!customerRequerido"
+          label="Quitar datos del cliente"
+          icon="i-lucide-x"
+          variant="soft"
+          color="error"
+          size="sm"
+          block
+          class="mt-4"
+          @click="quitarCustomer"
+        />
+      </div>
+      <UButton
+        v-else
+        label="Agregar datos del cliente"
+        icon="i-lucide-user-plus"
+        variant="soft"
+        color="neutral"
+        size="sm"
+        block
+        class="mb-4"
+        @click="mostrarCustomer"
+      />
       <div v-if="!lineas.length" class="text-center text-muted py-10 text-sm">
         Agregá ítems desde el catálogo.
       </div>
@@ -125,7 +128,7 @@ function quitarCustomer() {
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium text-default truncate">{{ linea.item.nombre }}</p>
             <p class="text-xs text-muted font-mono">
-              {{ formatMonto(linea.item.precioBase, linea.item.monedaId) }} c/u
+              {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u
             </p>
           </div>
           <UInput
@@ -166,8 +169,12 @@ function quitarCustomer() {
           <div class="flex justify-between text-muted">
             <span>Impuestos</span><span>+{{ formatMonto(resultado.totales.totalImpuestos) }}</span>
           </div>
-          <div class="flex justify-between font-semibold text-default text-base pt-1 border-t border-default">
-            <span>Total</span><span>{{ formatMonto(resultado.totales.totalFinal) }}</span>
+          <div class="flex justify-between items-center font-semibold text-default text-base pt-1 border-t border-default">
+            <span class="flex items-center gap-1">
+              Total
+              <VentasMonedaTasasInfo :moneda-ids="monedaIdsEnCarrito" />
+            </span>
+            <span>{{ formatMonto(resultado.totales.totalFinal) }}</span>
           </div>
         </div>
         <UButton
