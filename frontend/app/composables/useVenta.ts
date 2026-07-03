@@ -67,6 +67,31 @@ export function toCalcularInput(lineas: CarritoLinea[]): CalcularVentaInput {
   }
 }
 
+/** Descuenta del catálogo las cantidades vendidas (sin recargar desde API). */
+export function descontarStockCatalogo(
+  items: ItemCatalogo[],
+  lineas: CarritoLinea[],
+): ItemCatalogo[] {
+  if (lineas.length === 0) return items
+
+  const vendidoPorItem = new Map<string, Decimal>()
+  for (const linea of lineas) {
+    const prev = vendidoPorItem.get(linea.item.id) ?? new Decimal(0)
+    vendidoPorItem.set(linea.item.id, prev.plus(linea.cantidad || '0'))
+  }
+
+  return items.map((item) => {
+    const vendido = vendidoPorItem.get(item.id)
+    if (!vendido || item.stock === null || item.stock === '') return item
+    try {
+      const nuevo = Decimal.max(0, new Decimal(item.stock).minus(vendido))
+      return { ...item, stock: nuevo.toString() }
+    } catch {
+      return item
+    }
+  })
+}
+
 // ── Helpers de pagos (puros) ────────────────────────────────────────────────
 
 export function sumaPagos(pagos: PagoInput[]): string {

@@ -4,6 +4,7 @@ import {
   quitarLinea,
   setCantidad,
   toCalcularInput,
+  descontarStockCatalogo,
   sumaPagos,
   resumenCobro,
   clampNoVuelto,
@@ -56,6 +57,37 @@ describe('carrito helpers', () => {
   it('toCalcularInput mapea a { lineas: [{ itemId, cantidad }] }', () => {
     const r = toCalcularInput([{ item: item('a'), cantidad: '3' }])
     expect(r).toEqual({ lineas: [{ itemId: 'a', cantidad: '3' }] })
+  })
+
+  it('descontarStockCatalogo resta las cantidades vendidas', () => {
+    const catalogo = [item('a'), item('b', '50')]
+    const r = descontarStockCatalogo(catalogo, [
+      { item: item('a'), cantidad: '3' },
+      { item: item('b'), cantidad: '2' },
+    ])
+    expect(r.find((i) => i.id === 'a')!.stock).toBe('7')
+    expect(r.find((i) => i.id === 'b')!.stock).toBe('8')
+  })
+
+  it('descontarStockCatalogo acumula varias líneas del mismo ítem', () => {
+    const catalogo = [item('a')]
+    const r = descontarStockCatalogo(catalogo, [
+      { item: item('a'), cantidad: '2' },
+      { item: item('a'), cantidad: '4' },
+    ])
+    expect(r[0]!.stock).toBe('4')
+  })
+
+  it('descontarStockCatalogo no baja de cero', () => {
+    const catalogo = [item('a')]
+    const r = descontarStockCatalogo(catalogo, [{ item: item('a'), cantidad: '15' }])
+    expect(r[0]!.stock).toBe('0')
+  })
+
+  it('descontarStockCatalogo no muta el catálogo original', () => {
+    const catalogo = [item('a')]
+    descontarStockCatalogo(catalogo, [{ item: item('a'), cantidad: '1' }])
+    expect(catalogo[0]!.stock).toBe('10')
   })
 })
 

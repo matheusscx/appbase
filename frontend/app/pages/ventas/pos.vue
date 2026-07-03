@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useVenta, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { useVenta, descontarStockCatalogo, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import Decimal from 'decimal.js'
@@ -144,6 +144,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
     })
     toast.add({ title: `Venta ${venta.estado}`, color: 'success' })
     cobroOpen.value = false
+    items.value = descontarStockCatalogo(items.value, lineas.value)
     limpiar()
     customerExpandido.value = false
     customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
