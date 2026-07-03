@@ -12,6 +12,7 @@ export interface ItemCatalogo {
   monedaId: string
   monedaSimbolo: string | null
   stock: string | null
+  unidadMedida: string | null
   tipo: string
 }
 

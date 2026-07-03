@@ -5,6 +5,7 @@ const props = defineProps<{ items: ItemCatalogo[]; loading?: boolean }>()
 const emit = defineEmits<{ add: [item: ItemCatalogo] }>()
 
 const { esMonedaExtranjera, convertirAMonedaOficial, monedaOficial } = useMonedaConversion()
+const { formatStock } = useFormatters()
 const busqueda = ref('')
 
 const filtrados = computed(() => {
@@ -58,7 +59,7 @@ const filtrados = computed(() => {
               />
             </div>
             <span v-if="item.tipo === 'producto'" class="text-xs text-muted shrink-0">
-              Stock: {{ item.stock ?? '0' }}
+              Stock: {{ formatStock(item.stock, item.unidadMedida) }}
             </span>
             <div
               v-if="!esMonedaExtranjera(item.monedaId)"

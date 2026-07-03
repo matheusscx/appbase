@@ -20,6 +20,7 @@ const item = (id: string, precio = '100'): ItemCatalogo => ({
   monedaId: 'moneda-clp',
   monedaSimbolo: '$',
   stock: '10',
+  unidadMedida: 'unidad',
   tipo: 'producto',
 })
 

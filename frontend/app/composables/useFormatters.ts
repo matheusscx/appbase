@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js'
+import { formatStock as formatStockDisplay } from '~/utils/stock-format'
 
 const dateFmt = new Intl.DateTimeFormat('es-CL', {
   dateStyle: 'medium',
@@ -21,5 +22,12 @@ export function useFormatters() {
     return dateFmt.format(new Date(iso))
   }
 
-  return { formatMonto, formatFecha }
+  function formatStock(
+    value: string | Decimal | null | undefined,
+    unidadMedida?: string | null,
+  ): string {
+    return formatStockDisplay(value, unidadMedida)
+  }
+
+  return { formatMonto, formatFecha, formatStock }
 }
