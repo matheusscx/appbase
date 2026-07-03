@@ -1,11 +1,6 @@
 {
   "mcpServers": {
-    "nuxt-ui": {
-      "type": "http",
-      "url": "https://ui.nuxt.com/mcp"
-    },
     "postgres": {
-      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
