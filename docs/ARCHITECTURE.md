@@ -43,6 +43,11 @@ startup-app/
 │   │       ├── metodos-pago/     # Métodos de pago (global + habilitación por tenant)
 │   │       ├── tipos-regla/      # Tipos de regla de precio
 │   │       ├── items/            # Catálogo de items (productos y servicios) + ajuste de stock
+│   │       ├── inventario/       # Kardex de movimientos de stock (serie/lote/cantidad)
+│   │       ├── calculo-precios/  # Motor de cálculo de precios (servicio puro stateless)
+│   │       ├── ventas/           # Procesamiento de ventas transaccional + tipos de documento
+│   │       ├── pagos/            # Abonos a ventas pendientes y ledger de pagos
+│   │       ├── caja/             # Gestión de cajas (física/virtual, movimientos, cierre)
 │   │       ├── seeder/           # Seed de datos de desarrollo (corre al arrancar)
 │   │       └── test/             # Módulo de prueba para validación RBAC end-to-end
 │   ├── test/                     # Tests e2e

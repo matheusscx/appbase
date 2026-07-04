@@ -342,7 +342,7 @@ Utilidades en `common/utils/usuario-preferencias.util.ts`:
 
 - `startup-pos.sql` — agregar las tablas nuevas.
 - `docs/features/<feature>.md` (desde `docs/features/TEMPLATE.md`) + link en `docs/README.md`.
-- `docs/MIGRACION-FUNCIONALIDADES.md` y tabla "Estado actual" de `CLAUDE.md` — marcar ✅.
+- Tabla "Estado actual" de `CLAUDE.md` — marcar ✅.
 - ADR nuevo en `docs/adr/` (+ índice) si hubo una decisión arquitectónica.
 
 Ver [frontend.md](./frontend.md) para la capa de UI.

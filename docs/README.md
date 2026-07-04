@@ -1,172 +1,53 @@
-# Documentation
+# Documentación — SaaS POS Multi-tenant
 
-Welcome to the technical documentation for the `practica` project.
+Índice de la documentación técnica. Para setup y comandos ver el [README raíz](../README.md); para convenciones de código y estado del proyecto ver [`CLAUDE.md`](../CLAUDE.md).
 
-## Quick Navigation
+## Por dónde empezar
 
-### For New Team Members
-1. Start with [`ARCHITECTURE.md`](./ARCHITECTURE.md) — understand the stack and overall structure
-2. Read the [ADR index](./adr/) — understand key technical decisions and their rationale
-3. Review relevant [feature docs](./features/) for the area you're working on
+1. [`ARCHITECTURE.md`](./ARCHITECTURE.md) — stack, estructura del monorepo, flujo de requests, rutas del frontend
+2. [`PRODUCTO.md`](./PRODUCTO.md) — especificación funcional y reglas de negocio
+3. [`patterns/`](./patterns/) — **leer antes de planificar una feature**: patrones de-facto backend/frontend
+4. [`CONVENTIONS.md`](./CONVENTIONS.md) — cómo escribir y mantener esta documentación
 
-### For Product & Business Rules
-- Read [`PRODUCTO.md`](./PRODUCTO.md) — full functional spec and business rules (Spanish)
-- Track progress in [`MIGRACION-FUNCIONALIDADES.md`](./MIGRACION-FUNCIONALIDADES.md) — feature migration plan (Spanish)
+## Architecture Decision Records
 
-### For Feature Development
-- Read [`QUICK-START.md`](./QUICK-START.md) — how to document a feature in ~10 minutes
-- Use [`features/TEMPLATE.md`](./features/TEMPLATE.md) as a template when documenting a new feature
-- Check existing feature docs in [`features/`](./features/) for examples
+Índice completo con template en [`adr/README.md`](./adr/README.md).
 
-### For Architecture Decisions
-- Browse all decisions in [`adr/`](./adr/)
-- Read [ADR-001](./adr/001-jwt-auth.md) and [ADR-002](./adr/002-google-oauth.md) to understand the auth system
+| ADR | Decisión |
+|---|---|
+| [001](./adr/001-jwt-auth.md) | JWT stateless (access + refresh) |
+| [002](./adr/002-google-oauth.md) | Google OAuth 2.0 |
+| [003](./adr/003-jwt-decode-client.md) | JWT decode en cliente + patrón híbrido JWT/store |
+| [004](./adr/004-uuid-column-types.md) | `type: 'uuid'` explícito en columnas PK/FK de TypeORM |
+| [005](./adr/005-pais-moneda-y-moneda-oficial.md) | Tabla `pais_moneda` y moneda oficial derivada del país |
+| [006](./adr/006-relational-tramos-and-metodos-pago.md) | Modelado relacional de tramos y métodos de pago |
+| [007](./adr/007-inventario-serie-lote.md) | Inventario serializado y por lote — eje `modo_inventario` |
 
----
+## Features
 
-## Documentation Index
+Cada feature implementada tiene su doc operativa en [`features/`](./features/) (template: [`features/TEMPLATE.md`](./features/TEMPLATE.md)).
 
-### Architecture
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** — System overview, stack, module structure, conventions
-- **[CONVENTIONS.md](./CONVENTIONS.md)** — Coding, naming and documentation standards
+| Doc | Contenido |
+|---|---|
+| [auth.md](./features/auth.md) | Autenticación (JWT + Google OAuth) |
+| [frontend-multitenant.md](./features/frontend-multitenant.md) | Flujo multi-tenant en frontend (selección de tenant) |
+| [modulo-configuracion.md](./features/modulo-configuracion.md) | Configuración — perfil de usuario y contraseña |
+| [roles-permisos.md](./features/roles-permisos.md) | RBAC: roles, matriz de permisos, asignación a usuarios |
+| [test-permisos.md](./features/test-permisos.md) | Módulo Test para validación RBAC end-to-end |
+| [tenants-razones-sociales.md](./features/tenants-razones-sociales.md) | Gestión de tenants y razones sociales |
+| [configuracion-monedas.md](./features/configuracion-monedas.md) | Monedas por tenant (multi-moneda + tasa de cambio) |
+| [preferencias-financieras.md](./features/preferencias-financieras.md) | Preferencias financieras (modos de cálculo, fórmula de precios) |
+| [descuentos-recargos.md](./features/descuentos-recargos.md) | Descuentos/recargos — formularios dinámicos por tipo de regla |
+| [motor-calculo-precios.md](./features/motor-calculo-precios.md) | Motor de cálculo de precios (neto → pasos → total) |
+| [inventario-kardex.md](./features/inventario-kardex.md) | Kardex de movimientos de stock |
+| [inventario-serializado.md](./features/inventario-serializado.md) | Inventario por serie y por lote (`modo_inventario`) |
+| [gestion-cajas.md](./features/gestion-cajas.md) | Cajas: apertura, movimientos, cuadre y cierre |
+| [ventas.md](./features/ventas.md) | Procesamiento de ventas + frontend POS |
+| [pagos.md](./features/pagos.md) | Abonos a ventas pendientes y ledger de pagos |
 
-### Patterns Playbook (read first when planning a feature)
-- **[patterns/README.md](./patterns/)** — Índice de patrones de-facto del proyecto
-  - [patterns/backend.md](./patterns/backend.md) — Módulo NestJS de punta a punta (entity, DTO, guards, service, tests, seeding)
-  - [patterns/frontend.md](./patterns/frontend.md) — Pantalla Nuxt (useApiFetch, update optimista, modales, @nuxt/ui)
+## Otros
 
-### Product
-- **[PRODUCTO.md](./PRODUCTO.md)** — Complete functional spec with business rules (Spanish)
-- **[MIGRACION-FUNCIONALIDADES.md](./MIGRACION-FUNCIONALIDADES.md)** — Feature migration plan and tracking (Spanish)
-
-### Architecture Decision Records
-- **[adr/README.md](./adr/)** — Index of all architectural decisions
-  - [ADR-001: JWT Authentication](./adr/001-jwt-auth.md)
-  - [ADR-002: Google OAuth 2.0](./adr/002-google-oauth.md)
-  - [ADR-003: JWT decode en cliente + patrón híbrido JWT/store](./adr/003-jwt-decode-client.md)
-  - [ADR-006: Modelado relacional de tramos y métodos de pago](./adr/006-relational-tramos-and-metodos-pago.md)
-
-### Features
-- **[QUICK-START.md](./QUICK-START.md)** — How to document a feature
-- **[features/TEMPLATE.md](./features/TEMPLATE.md)** — Template for documenting new features
-- **[features/auth.md](./features/auth.md)** — Authentication feature (JWT + Google OAuth)
-- **[features/frontend-multitenant.md](./features/frontend-multitenant.md)** — Flujo multi-tenant en frontend (selección de tenant)
-- **[features/test-permisos.md](./features/test-permisos.md)** — Módulo Test para validación RBAC end-to-end
-- **[features/modulo-configuracion.md](./features/modulo-configuracion.md)** — Módulo Configuración (perfil de usuario + cambio de contraseña)
-- **[features/roles-permisos.md](./features/roles-permisos.md)** — Configuración de Roles y Permisos (RBAC: roles, matriz de permisos, asignación a usuarios)
-- **[features/tenants-razones-sociales.md](./features/tenants-razones-sociales.md)** — Gestión de tenants y razones sociales
-- **[features/configuracion-monedas.md](./features/configuracion-monedas.md)** — Configuración de monedas por tenant (multi-moneda + tasa de cambio)
-- **[features/preferencias-financieras.md](./features/preferencias-financieras.md)** — Configuración de preferencias financieras (cálculo de descuentos, recargos, fórmula de precios)
-- **[features/inventario-kardex.md](./features/inventario-kardex.md)** — Gestión de inventario (kardex de movimientos de stock)
-- **[features/inventario-serializado.md](./features/inventario-serializado.md)** — Inventario serializado y por lote (modo_inventario: cantidad/serie/lote)
-- **[features/descuentos-recargos.md](./features/descuentos-recargos.md)** — Descuentos y Recargos — Formularios dinámicos por tipo de regla (tramos, métodos de pago, días)
-- **[features/motor-calculo-precios.md](./features/motor-calculo-precios.md)** — Motor de cálculo de precios (desglose neto → descuentos → recargos → impuestos → total)
-- **[features/gestion-cajas.md](./features/gestion-cajas.md)** — Gestión de cajas (apertura, movimientos manuales, cuadre y cierre de caja física)
-- **[features/ventas.md](./features/ventas.md)** — Procesamiento de ventas transaccional + frontend POS (catálogo, carrito, cobro multipago, fricción por documento)
-- **[features/pagos.md](./features/pagos.md)** — Módulo de abonos y ledger de pagos
-
-### Engineering Notes (superpowers)
-- **[superpowers/plans/](./superpowers/plans/)** — Implementation plans
-- **[superpowers/specs/](./superpowers/specs/)** — Design specs
-
-### Frontend UI
-- **[frontend/docs/DESIGN-SYSTEM.md](../frontend/docs/DESIGN-SYSTEM.md)** — Tokens semánticos, espaciado, componentes CRUD, baselines
-- **[frontend/docs/AUDIT-STANDARDIZACION-UI.md](../frontend/docs/AUDIT-STANDARDIZACION-UI.md)** — Auditoría de cierre de estandarización UI (2026-07-01)
-
----
-
-## Documentation Standards
-
-### Architecture Decision Records (ADRs)
-
-Use ADRs to document **why** we made important technical choices, not just **what** we chose.
-
-**Format**: [Michael Nygard's ADR template](https://github.com/joelparkerhenderson/architecture_decision_record)
-- **Status**: Accepted / Proposed / Deprecated / Superseded
-- **Context**: What problem are we solving?
-- **Decision**: What did we choose?
-- **Consequences**: What are the trade-offs?
-
-**When to create**: Framework choices, database schema decisions, auth approaches, performance trade-offs
-**When NOT to create**: Bug fixes, refactoring, implementation details
-
-See [`adr/README.md`](./adr/) for detailed guidelines.
-
-### Feature Documentation
-
-Use feature docs to explain **how** a feature works end-to-end.
-
-**Format**: See [`features/TEMPLATE.md`](./features/TEMPLATE.md)
-- **Overview**: What is it and why does it exist?
-- **API Endpoints**: List all REST endpoints
-- **Backend**: Modules, entities, services, DTOs
-- **Frontend**: Pages, components, stores
-- **Data Flow**: Diagrams and examples
-- **Testing**: How to test this feature
-- **Known Issues**: TODOs and limitations
-
-**When to create**: Any user-facing feature (auth, user management, etc.)
-
----
-
-## Project Structure
-
-```
-docs/
-├── README.md                      # This file — documentation index
-├── ARCHITECTURE.md                # System architecture and conventions
-├── CONVENTIONS.md                 # Coding, naming and documentation standards
-├── QUICK-START.md                 # How to document a feature
-├── PRODUCTO.md                    # Functional spec & business rules (ES)
-├── MIGRACION-FUNCIONALIDADES.md   # Feature migration plan & tracking (ES)
-├── adr/                           # Architecture Decision Records
-│   ├── README.md                  # ADR index and guidelines
-│   ├── 001-jwt-auth.md
-│   └── 002-google-oauth.md
-├── features/                      # Feature documentation
-│   ├── TEMPLATE.md                # Template for new features
-│   ├── auth.md                    # Authentication feature
-│   ├── frontend-multitenant.md    # Frontend multi-tenant flow
-│   ├── test-permisos.md           # RBAC test module
-│   ├── modulo-configuracion.md    # Configuración — perfil de usuario
-│   ├── roles-permisos.md          # Configuración — roles y permisos (RBAC)
-│   ├── tenants-razones-sociales.md # Gestión de tenants y razones sociales
-│   ├── configuracion-monedas.md   # Configuración de monedas por tenant
-│   ├── preferencias-financieras.md # Configuración de preferencias financieras
-│   ├── inventario-kardex.md       # Gestión de inventario (kardex de movimientos)
-│   └── descuentos-recargos.md     # Formularios dinámicos de descuentos y recargos
-└── superpowers/                   # Engineering plans & design specs
-    ├── plans/
-    └── specs/
-```
-
----
-
-## Writing & Maintenance
-
-### Before writing documentation
-1. Check if docs already exist for this area
-2. Update existing docs if they're incomplete; only create new files if necessary
-3. Link related docs using relative markdown links
-
-### When updating
-- Keep docs in sync with code changes
-- Mark incomplete sections with `TODO:` or `WIP:`
-- Link to ADRs when explaining design decisions
-- Include examples: code snippets, curl commands, data flow diagrams
-
-### Outdated docs
-If you find docs that are wrong or outdated:
-1. Fix them immediately (or create an issue)
-2. Update the "Last Updated" date field
-3. Add a note about what changed
-
----
-
-## Related Resources
-
-- **Code**: `/backend/src/` and `/frontend/app/`
-- **Configuration**: `.env.example`, `docker-compose.yml`
-- **API Docs**: http://localhost:3000/api/docs (Swagger, auto-generated)
-- **Main README**: [`../README.md`](../README.md) — Getting started, commands, quick reference
-- **CLAUDE.md**: [`../CLAUDE.md`](../CLAUDE.md) — Claude Code integration guide
+- [`superpowers/`](./superpowers/) — planes y specs de implementación en curso (los completados se eliminan; ver su README)
+- [`../frontend/docs/DESIGN-SYSTEM.md`](../frontend/docs/DESIGN-SYSTEM.md) — tokens semánticos Nuxt UI, espaciado, componentes CRUD
+- [`../startup-pos.sql`](../startup-pos.sql) — esquema completo de BD (fuente de verdad del schema)
+- Swagger: http://localhost:3000/api/docs

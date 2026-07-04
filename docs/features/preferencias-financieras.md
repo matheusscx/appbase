@@ -305,7 +305,7 @@ npm test -- modules/tenants/tenants.controller.spec.ts
 - [x] Transacción atomic en actualización
 - [x] Página frontend (form de edición)
 - [x] Pinia store con fetch + update
-- [x] Documentación actualizada (este archivo, CLAUDE.md, MIGRACION-FUNCIONALIDADES.md)
+- [x] Documentación actualizada (este archivo, CLAUDE.md)
 
 ---
 

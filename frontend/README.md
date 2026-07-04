@@ -1,75 +1,17 @@
-# Nuxt Minimal Starter
+# Frontend — Nuxt 4
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+SPA/SSR del SaaS POS multi-tenant. Corre normalmente vía Docker Compose desde la raíz del repo (ver [README raíz](../README.md)).
 
-## Setup
-
-Make sure to install dependencies:
+## Dev local
 
 ```bash
-# npm
 npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
+npm run dev       # servidor de desarrollo (puerto 5173 vía Docker; 3000 standalone)
+npm run build     # build de producción
 ```
 
-## Development Server
+Config vía `VITE_API_URL` y `VITE_APP_NAME` en el `.env` de la raíz.
 
-Start the development server on `http://localhost:3000`:
-
-```bash
-# npm
-npm run dev
-
-# pnpm
-pnpm dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
-```
-
-## Production
-
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+- Arquitectura y rutas: [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md)
+- Patrones de páginas/componentes: [`docs/patterns/frontend.md`](../docs/patterns/frontend.md)
+- Design system (tokens semánticos Nuxt UI): [`docs/DESIGN-SYSTEM.md`](./docs/DESIGN-SYSTEM.md)

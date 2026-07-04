@@ -189,4 +189,3 @@ npm test -- --testPathPattern=recargos
 
 - [ADR-006: Modelado relacional de tramos y métodos de pago](../adr/006-relational-tramos-and-metodos-pago.md)
 - [Preferencias financieras](./preferencias-financieras.md) — fórmula de precios que consume estas reglas
-- [Plan de implementación](../superpowers/plans/2026-06-27-descuentos-recargos-formularios-dinamicos.md)

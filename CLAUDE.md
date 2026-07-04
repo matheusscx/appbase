@@ -237,7 +237,7 @@ Default: `descuentos → recargos → impuestos`. Cada paso aplica sobre el acum
 - **Siempre usar tokens semánticos, nunca Tailwind hardcoded.** Permite consistencia en tema claro/oscuro.
 - ❌ Prohibido: `text-gray-500`, `divide-gray-100 dark:divide-gray-800`, `bg-white dark:bg-gray-900`
 - ✅ Usar: `text-muted`, `divide-default`, `bg-default`
-- Referencia: `docs/DESIGN-SYSTEM.md` y `app/app.config.ts`
+- Referencia: `frontend/docs/DESIGN-SYSTEM.md` y `app/app.config.ts`
 - **Excepción:** colores financieros (verde/rojo/azul) en módulo Caja son intencionales.
 
 ### Planes de implementación
@@ -262,7 +262,7 @@ código afecta lo que describe un doc, el commit/PR incluye la actualización.
 | Tipo de cambio | Archivo(s) a actualizar |
 |---|---|
 | Nueva feature implementada | Crear `docs/features/<feature>.md` (desde `docs/features/TEMPLATE.md`) + agregar link en `docs/README.md` |
-| Cambia el estado de una funcionalidad | `docs/MIGRACION-FUNCIONALIDADES.md` + tabla "Estado actual" de este `CLAUDE.md` |
+| Cambia el estado de una funcionalidad | Tabla "Estado actual" de este `CLAUDE.md` |
 | Cambio arquitectónico / estructural | `docs/ARCHITECTURE.md` |
 | Decisión técnica importante | Nuevo ADR en `docs/adr/` + índice `docs/adr/README.md` |
 | Cambio en reglas de negocio | `docs/PRODUCTO.md` |
@@ -277,6 +277,5 @@ código afecta lo que describe un doc, el commit/PR incluye la actualización.
 |---|---|
 | `docs/patterns/` | **Playbook de patrones backend/frontend — leer ANTES de planificar una feature** (esqueleto de módulo, guards, entities, SQL raw, seeding, páginas con update optimista). Evita re-escanear el repo. |
 | `docs/PRODUCTO.md` | Especificación completa de todas las funcionalidades con reglas de negocio |
-| `docs/MIGRACION-FUNCIONALIDADES.md` | Plan/seguimiento de migración de funcionalidades |
 | `startup-pos.sql` | Esquema de BD completo con nombres actualizados |
 | `backend/src/modules/seeder/seeder.service.ts` | Fuente de verdad del seed (datos globales y de desarrollo); corre al arrancar el backend |

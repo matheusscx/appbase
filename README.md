@@ -1,11 +1,11 @@
-# practica
+# startup-app — SaaS POS Multi-tenant
 
-Full-stack app built with NestJS, Nuxt 3, and PostgreSQL. Everything runs via Docker Compose — no local Node.js or PostgreSQL required.
+Sistema SaaS de punto de venta y facturación multi-tenant. Full-stack con NestJS, Nuxt 4 y PostgreSQL. Todo corre vía Docker Compose — no requiere Node.js ni PostgreSQL local.
 
 ## Stack
 
 - **Backend** — NestJS (TypeScript), REST API on port 3000
-- **Frontend** — Nuxt 3 (Vue 3), on port 5173
+- **Frontend** — Nuxt 4 (Vue 3), on port 5173
 - **Database** — PostgreSQL 15
 
 ## Getting started
@@ -44,3 +44,8 @@ docker-compose down -v && docker-compose up
 docker-compose exec backend sh
 docker-compose exec postgres psql -U dev_user -d tecnica_db
 ```
+
+## Documentación
+
+- [`docs/README.md`](./docs/README.md) — índice de documentación técnica (arquitectura, ADRs, features)
+- [`CLAUDE.md`](./CLAUDE.md) — convenciones de código y estado del proyecto
