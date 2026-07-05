@@ -28,7 +28,7 @@ const tiposDocumento = ref<TipoDoc[]>([])
 const loadingCatalogo = ref(false)
 
 const tipoDocumentoId = ref<string | undefined>(undefined)
-const customer = ref<CustomerForm>({ nombre: '', rut: '', direccion: '', telefono: '', email: '' })
+const customer = ref<CustomerForm>({ nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null })
 const customerExpandido = ref(false)
 
 const cobroOpen = ref(false)
@@ -83,7 +83,7 @@ watch(
 
 watch(tipoDocumentoId, () => {
   customerExpandido.value = false
-  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
+  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
 })
 
 async function cargar() {
@@ -136,6 +136,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         direccion: customer.value.direccion || undefined,
         telefono: customer.value.telefono || undefined,
         email: customer.value.email || undefined,
+        terceroId: customer.value.terceroId || undefined,
       }
     }
     const venta = await useApiFetch<{ estado: string }>(`${apiUrl}/ventas`, {
@@ -147,7 +148,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
     items.value = descontarStockCatalogo(items.value, lineas.value)
     limpiar()
     customerExpandido.value = false
-    customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
+    customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
     await cajaStore.cargarActiva()
   } catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message

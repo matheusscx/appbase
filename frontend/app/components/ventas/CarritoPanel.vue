@@ -64,7 +64,7 @@ function mostrarCustomer() {
 
 function quitarCustomer() {
   customerExpandido.value = false
-  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '' }
+  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
 }
 </script>
 

@@ -93,7 +93,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Configuración — Roles y Permisos (RBAC: roles, matriz de permisos, asignación a usuarios) | ✅ Implementado |
 | RBAC — gestión de módulos contratados (superadmin) | 🔲 Por construir |
 | Gestión de tenants y razones sociales | ✅ Implementado |
-| Terceros (proveedores, empresas) | 🔲 Por construir |
+| Terceros (proveedores, empresas) + selector en el POS | ✅ Implementado (2026-07-04) |
 | Catálogos base (país, provincia, moneda) | 🔲 Por construir |
 | Configuración de monedas por tenant | ✅ Implementado |
 | Configuración — Preferencias financieras (cálculo de descuentos/recargos, fórmula de precios) | ✅ Implementado |

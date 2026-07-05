@@ -61,6 +61,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/ventas/pos',
     })
   }
+  if (permissionsStore.esAdmin) {
+    base.push({
+      label: 'Terceros',
+      icon: 'i-lucide-contact',
+      to: '/terceros',
+    })
+  }
   if (authStore.isSuperadmin) {
     base.push({
       label: 'Administración',

@@ -77,6 +77,8 @@ import { VentaCustomer } from './modules/ventas/entities/venta-customer.entity';
 import { Pago } from './modules/pagos/entities/pago.entity';
 import { PagosModule } from './modules/pagos/pagos.module';
 import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
+import { Tercero } from './modules/terceros/entities/tercero.entity';
+import { TercerosModule } from './modules/terceros/terceros.module';
 
 @Module({
   imports: [
@@ -139,6 +141,7 @@ import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-document
           VentaCustomer,
           Pago,
           TipoDocumentoTributario,
+          Tercero,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -166,6 +169,7 @@ import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-document
     CajaModule,
     VentasModule,
     PagosModule,
+    TercerosModule,
   ],
   controllers: [AppController],
   providers: [AppService],

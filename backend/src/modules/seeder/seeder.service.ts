@@ -28,6 +28,7 @@ import { RecargoTramo } from '../recargos/entities/recargo-tramo.entity';
 import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.entity';
 import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
+import { Tercero } from '../terceros/entities/tercero.entity';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -86,6 +87,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly recargoMetodoPagoRepo: Repository<RecargoMetodoPago>,
     @InjectRepository(TipoDocumentoTributario)
     private readonly tipoDocumentoRepo: Repository<TipoDocumentoTributario>,
+    @InjectRepository(Tercero)
+    private readonly terceroRepo: Repository<Tercero>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -108,6 +111,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedPermisos();
     await this.seedModuloAppPermisos();
     await this.seedTenants();
+    await this.seedTerceros();
     await this.seedTenantMonedas();
     await this.seedTenantMetodosPago();
     await this.seedCategorias();
@@ -967,6 +971,60 @@ export class SeederService implements OnApplicationBootstrap {
             }),
           );
         }
+      }
+    }
+  }
+
+  private async seedTerceros(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const terceros: Partial<Tercero>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440147',
+        tenantId: PARIS,
+        tipo: 'proveedor',
+        nombre: 'Distribuidora Andina',
+        rut: '76.123.456-7',
+        nombreLegal: 'Distribuidora Andina SpA',
+        rutFiscal: '76.123.456-7',
+        correo: 'contacto@andina.cl',
+        telefono: '+56 2 2345 6789',
+        direccion: 'Av. Providencia 1234, Santiago',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440148',
+        tenantId: PARIS,
+        tipo: 'empresa',
+        nombre: 'Constructora del Sur',
+        rut: '77.987.654-3',
+        nombreLegal: 'Constructora del Sur Ltda.',
+        rutFiscal: '77.987.654-3',
+        correo: 'facturacion@delsur.cl',
+        telefono: '+56 9 8765 4321',
+        direccion: 'Camino Real 500, Concepción',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440149',
+        tenantId: PARIS,
+        tipo: 'persona_natural',
+        nombre: 'Juan Pérez',
+        rut: '12.345.678-9',
+        nombreLegal: null,
+        rutFiscal: null,
+        correo: 'juan.perez@gmail.com',
+        telefono: '+56 9 1234 5678',
+        direccion: 'Los Álamos 45, Santiago',
+        activo: true,
+      },
+    ];
+
+    for (const data of terceros) {
+      const exists = await this.terceroRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.terceroRepo.save(this.terceroRepo.create(data));
       }
     }
   }
