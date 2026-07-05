@@ -56,6 +56,7 @@ import { MetodosPagoModule } from './modules/metodos-pago/metodos-pago.module';
 import { Item } from './modules/items/entities/item.entity';
 import { ItemProducto } from './modules/items/entities/item-producto.entity';
 import { ItemServicio } from './modules/items/entities/item-servicio.entity';
+import { ItemSuscripcion } from './modules/items/entities/item-suscripcion.entity';
 import { ItemImpuesto } from './modules/items/entities/item-impuesto.entity';
 import { ItemRecargo } from './modules/items/entities/item-recargo.entity';
 import { ItemDescuento } from './modules/items/entities/item-descuento.entity';
@@ -126,6 +127,7 @@ import { OnlineModule } from './modules/online/online.module';
           Item,
           ItemProducto,
           ItemServicio,
+          ItemSuscripcion,
           ItemImpuesto,
           ItemRecargo,
           ItemDescuento,

@@ -41,6 +41,7 @@ interface ItemRow {
   modo_inventario: string | null;
   duracion_estimada: number | null;
   requiere_cita: boolean | null;
+  frecuencia: string | null;
 }
 
 @Injectable()
@@ -66,12 +67,14 @@ export class ItemsService {
       c.nombre AS categoria_nombre,
       ip.stock, ip.unidad_medida, ip.fecha_elaboracion, ip.fecha_vencimiento,
       ip.modo_inventario,
-      isr.duracion_estimada, isr.requiere_cita
+      isr.duracion_estimada, isr.requiere_cita,
+      isu.frecuencia
     FROM items i
     LEFT JOIN moneda m ON m.moneda_id = i.moneda_id AND m.eliminado_el IS NULL
     LEFT JOIN categorias c ON c.categoria_id = i.categoria_id AND c.eliminado_el IS NULL
     LEFT JOIN item_producto ip ON ip.item_id = i.item_id
     LEFT JOIN item_servicio isr ON isr.item_id = i.item_id
+    LEFT JOIN item_suscripcion isu ON isu.item_id = i.item_id
   `;
 
   private mapRow(r: ItemRow) {
@@ -96,6 +99,7 @@ export class ItemsService {
       modoInventario: r.modo_inventario,
       duracionEstimada: r.duracion_estimada,
       requiereCita: r.requiere_cita,
+      frecuencia: r.frecuencia,
     };
   }
 
@@ -186,6 +190,16 @@ export class ItemsService {
   }
 
   async create(tenantId: string, usuarioId: string, dto: CreateItemDto) {
+    if (dto.tipo === 'suscripcion' && !dto.frecuencia) {
+      throw new BadRequestException(
+        'Los items de suscripción requieren frecuencia',
+      );
+    }
+    if (dto.tipo !== 'suscripcion' && dto.frecuencia) {
+      throw new BadRequestException(
+        'La frecuencia solo aplica a items de suscripción',
+      );
+    }
     return this.dataSource.transaction(async (manager) => {
       await this.validarMoneda(manager, tenantId, dto.monedaId);
       if (dto.categoriaId) {
@@ -294,11 +308,16 @@ export class ItemsService {
             });
           }
         }
-      } else {
+      } else if (dto.tipo === 'servicio') {
         await manager.query(
           `INSERT INTO item_servicio (item_id, duracion_estimada, requiere_cita)
            VALUES ($1,$2,$3)`,
           [itemId, dto.duracionEstimada ?? null, dto.requiereCita ?? false],
+        );
+      } else {
+        await manager.query(
+          `INSERT INTO item_suscripcion (item_id, frecuencia) VALUES ($1,$2)`,
+          [itemId, dto.frecuencia],
         );
       }
 
@@ -447,7 +466,7 @@ export class ItemsService {
             prodParams,
           );
         }
-      } else {
+      } else if (tipo === 'servicio') {
         const srvClauses: string[] = [];
         const srvParams: unknown[] = [];
         let sidx = 1;
@@ -464,6 +483,13 @@ export class ItemsService {
           await manager.query(
             `UPDATE item_servicio SET ${srvClauses.join(', ')} WHERE item_id = $${sidx++}`,
             srvParams,
+          );
+        }
+      } else if (tipo === 'suscripcion') {
+        if (dto.frecuencia !== undefined) {
+          await manager.query(
+            `UPDATE item_suscripcion SET frecuencia = $1 WHERE item_id = $2`,
+            [dto.frecuencia, itemId],
           );
         }
       }

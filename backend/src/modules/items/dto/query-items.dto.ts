@@ -4,8 +4,8 @@ import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
 export class QueryItemsDto extends PaginationQueryDto {
   @IsOptional()
-  @IsIn(['producto', 'servicio'])
-  tipo?: 'producto' | 'servicio';
+  @IsIn(['producto', 'servicio', 'suscripcion'])
+  tipo?: 'producto' | 'servicio' | 'suscripcion';
 
   @IsOptional()
   @IsUUID()

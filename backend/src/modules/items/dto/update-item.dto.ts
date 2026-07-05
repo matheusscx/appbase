@@ -73,6 +73,11 @@ export class UpdateItemDto {
   @IsOptional()
   requiereCita?: boolean;
 
+  // Extensión suscripción
+  @IsIn(['semanal', 'quincenal', 'mensual'])
+  @IsOptional()
+  frecuencia?: string;
+
   // Reglas N:M (undefined = no tocar; [] = limpiar todas)
   @IsArray()
   @IsUUID('4', { each: true })

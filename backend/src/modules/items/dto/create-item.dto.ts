@@ -65,7 +65,7 @@ export class CreateItemDto {
   @IsOptional()
   categoriaId?: string;
 
-  @IsIn(['producto', 'servicio'])
+  @IsIn(['producto', 'servicio', 'suscripcion'])
   tipo: string;
 
   @IsBoolean()
@@ -119,6 +119,11 @@ export class CreateItemDto {
   @IsBoolean()
   @IsOptional()
   requiereCita?: boolean;
+
+  // Extensión suscripción
+  @IsIn(['semanal', 'quincenal', 'mensual'])
+  @IsOptional()
+  frecuencia?: string;
 
   // Reglas N:M
   @IsArray()

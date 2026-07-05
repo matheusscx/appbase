@@ -312,6 +312,49 @@ describe('ItemsService', () => {
       );
     });
 
+    it('happy path: crea suscripción con extensión', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+        .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
+        .mockResolvedValueOnce([]); // INSERT item_suscripcion
+
+      const result = await service.create(TENANT, 'user-uuid', {
+        nombre: 'Plan mensual',
+        precioBase: '15000',
+        monedaId: MONEDA_ID,
+        tipo: 'suscripcion',
+        frecuencia: 'mensual',
+      });
+
+      expect(result).toEqual({ id: ITEM_ID });
+      const calls = managerMock.query.mock.calls as [string, unknown[]][];
+      const insertCall = calls.find(([sql]) =>
+        sql.includes('INSERT INTO item_suscripcion'),
+      );
+      expect(insertCall).toBeDefined();
+      expect(insertCall?.[1]).toEqual([ITEM_ID, 'mensual']);
+    });
+
+    it('lanza BadRequestException cuando tipo suscripcion no trae frecuencia', async () => {
+      await expect(
+        service.create(TENANT, 'user-uuid', {
+          nombre: 'Plan sin frecuencia',
+          precioBase: '15000',
+          monedaId: MONEDA_ID,
+          tipo: 'suscripcion',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('lanza BadRequestException cuando frecuencia se envía con tipo producto', async () => {
+      await expect(
+        service.create(TENANT, 'user-uuid', {
+          ...baseDtoProducto,
+          frecuencia: 'mensual',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('modo lote: registra movimiento con lote', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ ok: 1 }]) // validarMoneda
