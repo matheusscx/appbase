@@ -61,10 +61,19 @@ export class VentasService {
   ) {}
 
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
-    // 1. Verificar caja abierta
-    const caja = await this.cajaService.findActiva(tenantId, usuarioId);
+    const canal = dto.canal ?? 'fisico';
+
+    // 1. Verificar caja abierta (física para canal presencial, virtual para online)
+    const caja =
+      canal === 'online'
+        ? await this.cajaService.findVirtual(tenantId)
+        : await this.cajaService.findActiva(tenantId, usuarioId);
     if (!caja) {
-      throw new BadRequestException('No tienes una caja abierta');
+      throw new BadRequestException(
+        canal === 'online'
+          ? 'El tenant no tiene una caja virtual configurada'
+          : 'No tienes una caja abierta',
+      );
     }
 
     // 2. Cargar todos los items para obtener monedaId, tipo, nombre
@@ -131,8 +140,19 @@ export class VentasService {
       calcularDto,
     );
 
-    // 6. Preparar pagos (puede ser vacío → cuenta por cobrar)
+    // 6. Preparar pagos (puede ser vacío → cuenta por cobrar; online no admite cuenta por cobrar)
     const pagosDto = dto.pagos ?? [];
+    if (canal === 'online') {
+      const montoPagado = pagosDto.reduce(
+        (acc, p) => acc.plus(new Decimal(p.monto)),
+        new Decimal(0),
+      );
+      if (montoPagado.lt(resultado.totales.totalFinal)) {
+        throw new BadRequestException(
+          'Las ventas online requieren el pago completo',
+        );
+      }
+    }
 
     // 7. Transacción atómica
     return this.dataSource.transaction(async (manager) => {
@@ -144,7 +164,7 @@ export class VentasService {
           cajaId: caja.id,
           monedaId: monedaOficialId,
           tipoDocumentoId: dto.tipoDocumentoId ?? null,
-          canal: 'fisico',
+          canal,
           estado: EstadoVenta.PENDIENTE,
           totalBruto: resultado.totales.subtotalNeto,
           totalDescuentos: resultado.totales.totalDescuentos,

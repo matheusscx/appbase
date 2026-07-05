@@ -23,6 +23,14 @@ const mockCajaActiva = {
   estado: 'abierta',
 };
 
+const CAJA_VIRTUAL_ID = 'caja-uuid-virtual-001';
+const mockCajaVirtual = {
+  id: CAJA_VIRTUAL_ID,
+  tenantId: TENANT_ID,
+  tipo: 'virtual',
+  estado: 'abierta',
+};
+
 const mockItem = {
   id: ITEM_ID,
   nombre: 'Smartphone',
@@ -123,6 +131,7 @@ describe('VentasService', () => {
           provide: CajaService,
           useValue: {
             findActiva: jest.fn().mockResolvedValue(mockCajaActiva),
+            findVirtual: jest.fn().mockResolvedValue(mockCajaVirtual),
             registrarMovimientoEnTransaccion: jest.fn().mockResolvedValue({}),
           },
         },
@@ -216,7 +225,11 @@ describe('VentasService', () => {
       pagosServiceMock.registrar.mockResolvedValueOnce([
         { id: 'pago-uuid-001', monto: '150.0000', vuelto: '50.0000' },
       ]);
-      const result = await service.crear(TENANT_ID, USUARIO_ID, dtoConExcedente);
+      const result = await service.crear(
+        TENANT_ID,
+        USUARIO_ID,
+        dtoConExcedente,
+      );
       expect(pagosServiceMock.registrar).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ target: '100.0000' }),
@@ -238,6 +251,58 @@ describe('VentasService', () => {
       await expect(
         service.crear(TENANT_ID, USUARIO_ID, dtoConExcedente as any),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('crear() — canal online', () => {
+    const dtoOnline = {
+      ...baseDto,
+      canal: 'online' as const,
+    };
+
+    it('usa la caja virtual del tenant en vez de la caja física del usuario', async () => {
+      pagosServiceMock.registrar.mockResolvedValueOnce([
+        { id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' },
+      ]);
+      const result = await service.crear(TENANT_ID, USUARIO_ID, dtoOnline);
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(cajaService.findVirtual).toHaveBeenCalledWith(TENANT_ID);
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(cajaService.findActiva).not.toHaveBeenCalled();
+      expect(result.cajaId).toBe(CAJA_VIRTUAL_ID);
+      expect(result.canal).toBe('online');
+    });
+
+    it('lanza BadRequestException si el tenant no tiene caja virtual', async () => {
+      cajaService.findVirtual.mockResolvedValueOnce(null);
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoOnline),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'El tenant no tiene una caja virtual configurada',
+        ),
+      );
+    });
+
+    it('lanza BadRequestException si el pago no cubre el total', async () => {
+      const dtoIncompleto = {
+        ...dtoOnline,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+      };
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoIncompleto as any),
+      ).rejects.toThrow(
+        new BadRequestException('Las ventas online requieren el pago completo'),
+      );
+    });
+
+    it('lanza BadRequestException si no hay pagos', async () => {
+      const dtoSinPago = { ...dtoOnline, pagos: undefined };
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoSinPago as any),
+      ).rejects.toThrow(
+        new BadRequestException('Las ventas online requieren el pago completo'),
+      );
     });
   });
 });

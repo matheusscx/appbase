@@ -24,7 +24,12 @@ export class Tercero {
   @Column({ type: 'varchar', length: 50, nullable: true })
   rut: string | null;
 
-  @Column({ name: 'nombre_legal', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'nombre_legal',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   nombreLegal: string | null;
 
   @Column({ name: 'rut_fiscal', type: 'varchar', length: 50, nullable: true })

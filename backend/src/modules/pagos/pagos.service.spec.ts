@@ -405,7 +405,9 @@ describe('PagosService', () => {
 
       const countSql = dataSourceMock.query.mock.calls[0][0] as string;
       expect(countSql).toContain('v.estado');
-      expect(dataSourceMock.query.mock.calls[0][1]).toContain(EstadoVenta.PAGADA);
+      expect(dataSourceMock.query.mock.calls[0][1]).toContain(
+        EstadoVenta.PAGADA,
+      );
     });
   });
 });

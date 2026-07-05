@@ -29,6 +29,7 @@ import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.enti
 import { MovimientoInventario } from '../inventario/entities/movimiento-inventario.entity';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
+import { Caja } from '../caja/entities/caja.entity';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { Tercero } from '../terceros/entities/tercero.entity';
       MovimientoInventario,
       TipoDocumentoTributario,
       Tercero,
+      Caja,
     ]),
   ],
   providers: [SeederService],

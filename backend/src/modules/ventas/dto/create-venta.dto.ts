@@ -120,6 +120,6 @@ export class CreateVentaDto {
   comentario?: string;
 
   @IsOptional()
-  @IsIn(['fisico'])
-  canal?: 'fisico';
+  @IsIn(['fisico', 'online'])
+  canal?: 'fisico' | 'online';
 }

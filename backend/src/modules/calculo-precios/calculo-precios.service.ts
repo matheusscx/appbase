@@ -150,11 +150,7 @@ export class CalculoPreciosService {
     const precioUnitario =
       linea.precioUnitario !== undefined
         ? linea.precioUnitario
-        : this.convertirAMonedaOficial(
-            item.precioBase,
-            item.monedaId,
-            tasaMap,
-          );
+        : this.convertirAMonedaOficial(item.precioBase, item.monedaId, tasaMap);
 
     return {
       itemId: item.id,

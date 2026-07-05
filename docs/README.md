@@ -45,6 +45,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [ventas.md](./features/ventas.md) | Procesamiento de ventas + frontend POS |
 | [pagos.md](./features/pagos.md) | Abonos a ventas pendientes y ledger de pagos |
 | [terceros.md](./features/terceros.md) | Directorio de terceros (proveedores/empresas) + selector en el POS |
+| [tienda-online.md](./features/tienda-online.md) | Tienda online: catálogo, carrito, checkout dummy, suscripciones y medios de pago mock |
 
 ## Otros
 

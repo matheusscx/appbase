@@ -112,10 +112,7 @@ describe('ItemsService', () => {
       await service.findAll(TENANT, { search: 'smart' });
 
       expect(dataSource.query.mock.calls[0][0]).toContain('ILIKE');
-      expect(dataSource.query.mock.calls[0][1]).toEqual([
-        TENANT,
-        '%smart%',
-      ]);
+      expect(dataSource.query.mock.calls[0][1]).toEqual([TENANT, '%smart%']);
     });
   });
 

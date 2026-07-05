@@ -29,6 +29,7 @@ import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.enti
 import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
+import { Caja } from '../caja/entities/caja.entity';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -89,6 +90,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly tipoDocumentoRepo: Repository<TipoDocumentoTributario>,
     @InjectRepository(Tercero)
     private readonly terceroRepo: Repository<Tercero>,
+    @InjectRepository(Caja)
+    private readonly cajaRepo: Repository<Caja>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -111,6 +114,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedPermisos();
     await this.seedModuloAppPermisos();
     await this.seedTenants();
+    await this.seedCajasVirtuales();
     await this.seedTerceros();
     await this.seedTenantMonedas();
     await this.seedTenantMetodosPago();
@@ -334,6 +338,13 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-shopping',
         tieneConfiguracion: false,
       },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440152',
+        nombre: 'Tienda Online',
+        url: '/tienda',
+        icono: 'mdi-storefront-outline',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -460,6 +471,16 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppId: '550e8400-e29b-41d4-a716-446655440058', // Ventas
         permisoId: CREAR,
       },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440153',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440152', // Tienda Online
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440154',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440152', // Tienda Online
+        permisoId: CREAR,
+      },
     ];
 
     for (const data of entries) {
@@ -575,6 +596,34 @@ export class SeederService implements OnApplicationBootstrap {
     }
   }
 
+  private async seedCajasVirtuales(): Promise<void> {
+    const cajas: Array<{ id: string; tenantId: string }> = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440150',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007', // Paris
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440151',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040', // Falabella
+      },
+    ];
+
+    for (const data of cajas) {
+      const exists = await this.cajaRepo.findOne({ where: { id: data.id } });
+      if (!exists) {
+        await this.cajaRepo.save(
+          this.cajaRepo.create({
+            id: data.id,
+            tenantId: data.tenantId,
+            tipo: 'virtual',
+            estado: 'abierta',
+            saldoInicial: '0',
+          }),
+        );
+      }
+    }
+  }
+
   private async seedTenantModulo(): Promise<void> {
     const entries: Partial<TenantModulo>[] = [
       {
@@ -595,6 +644,20 @@ export class SeederService implements OnApplicationBootstrap {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440061',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440058', // Paris → Ventas
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440155',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440152', // Paris → Tienda Online
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440156',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440152', // Falabella → Tienda Online
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
@@ -1393,7 +1456,9 @@ export class SeederService implements OnApplicationBootstrap {
       `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
 
     // 12 pares únicos; 116/120 = unidad·CLP (tests E2E de ventas)
-    const itemIds = [116, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157];
+    const itemIds = [
+      116, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157,
+    ];
     const movIds = [120, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169];
 
     let comboIndex = 0;

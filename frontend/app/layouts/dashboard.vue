@@ -61,6 +61,23 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/ventas/pos',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Tienda Online', 'Leer')) {
+    base.push({
+      label: 'Tienda Online',
+      icon: 'i-lucide-store',
+      to: '/tienda',
+    })
+    base.push({
+      label: 'Suscripciones',
+      icon: 'i-lucide-repeat',
+      to: '/tienda/suscripciones',
+    })
+    base.push({
+      label: 'Medios de pago',
+      icon: 'i-lucide-wallet',
+      to: '/tienda/medios-pago',
+    })
+  }
   if (permissionsStore.esAdmin) {
     base.push({
       label: 'Terceros',

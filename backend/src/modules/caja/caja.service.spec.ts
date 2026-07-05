@@ -372,12 +372,7 @@ describe('CajaService', () => {
         .mockResolvedValueOnce([{ total: 1 }])
         .mockResolvedValueOnce([mockRow]);
 
-      const result = await service.historial(
-        TENANT_ID,
-        USUARIO_ID,
-        {},
-        false,
-      );
+      const result = await service.historial(TENANT_ID, USUARIO_ID, {}, false);
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe(CAJA_ID);

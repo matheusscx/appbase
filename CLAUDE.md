@@ -109,6 +109,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Frontend POS (crear venta: catálogo, carrito, cobro multipago, fricción por documento) | ✅ Implementado (2026-06-29) |
 | Frontend — historial/consulta de ventas | ✅ Implementado (2026-06-30) |
 | Módulo de Pagos (GET /pagos, POST /pagos, abono a ventas pendientes, ledger) | ✅ Implementado (2026-06-30) |
+| Tienda Online (canal online, checkout dummy, catálogo/carrito, suscripciones y medios de pago mock) | ✅ Implementado (2026-07-05) |
 
 ---
 

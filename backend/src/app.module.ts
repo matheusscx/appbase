@@ -79,6 +79,7 @@ import { PagosModule } from './modules/pagos/pagos.module';
 import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from './modules/terceros/entities/tercero.entity';
 import { TercerosModule } from './modules/terceros/terceros.module';
+import { OnlineModule } from './modules/online/online.module';
 
 @Module({
   imports: [
@@ -170,6 +171,7 @@ import { TercerosModule } from './modules/terceros/terceros.module';
     VentasModule,
     PagosModule,
     TercerosModule,
+    OnlineModule,
   ],
   controllers: [AppController],
   providers: [AppService],

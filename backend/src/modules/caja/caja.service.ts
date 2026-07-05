@@ -88,6 +88,17 @@ export class CajaService {
     });
   }
 
+  async findVirtual(tenantId: string): Promise<Caja | null> {
+    return this.cajaRepo.findOne({
+      where: {
+        tenantId,
+        tipo: 'virtual',
+        estado: 'abierta',
+        eliminadoEl: IsNull(),
+      },
+    });
+  }
+
   async abrir(
     tenantId: string,
     usuarioId: string,
@@ -250,11 +261,7 @@ export class CajaService {
     query: QueryHistorialCajaDto,
     tieneVerTodas: boolean,
   ): Promise<PaginatedResponse<CajaHistorialItem>> {
-    if (
-      query.usuarioId &&
-      query.usuarioId !== usuarioId &&
-      !tieneVerTodas
-    ) {
+    if (query.usuarioId && query.usuarioId !== usuarioId && !tieneVerTodas) {
       throw new ForbiddenException(
         'No tienes acceso al historial de este usuario',
       );
@@ -364,15 +371,11 @@ export class CajaService {
       tipo: r.tipo,
       estado: r.estado,
       saldoInicial: new Decimal(r.saldo_inicial).toFixed(4),
-      saldoFinal: r.saldo_final
-        ? new Decimal(r.saldo_final).toFixed(4)
-        : null,
+      saldoFinal: r.saldo_final ? new Decimal(r.saldo_final).toFixed(4) : null,
       montoContado: r.monto_contado
         ? new Decimal(r.monto_contado).toFixed(4)
         : null,
-      diferencia: r.diferencia
-        ? new Decimal(r.diferencia).toFixed(4)
-        : null,
+      diferencia: r.diferencia ? new Decimal(r.diferencia).toFixed(4) : null,
       fechaApertura: r.fecha_apertura,
       fechaCierre: r.fecha_cierre,
       comentario: r.comentario,
