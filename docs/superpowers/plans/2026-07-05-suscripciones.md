@@ -38,7 +38,7 @@ prorrateo, historial de cobros, RBAC nuevo (se reutiliza "Tienda Online").
 
 ## Backend
 
-### 1. Tipo de item `suscripcion` (módulo `items`)
+### Task 1: Tipo de item `suscripcion` (módulo `items`)
 
 **Files:**
 - Create: `backend/src/modules/items/entities/item-suscripcion.entity.ts`
@@ -152,7 +152,7 @@ líneas ~127-128).
   `ajustarStock` (ya rechaza no-productos). Commit:
   `feat(items): add suscripcion item type with frecuencia extension`.
 
-### 2. Util puro `calcularProximoCobro` (TDD)
+### Task 2: Util puro `calcularProximoCobro` (TDD)
 
 **Files:**
 - Create: `backend/src/modules/suscripciones/utils/proximo-cobro.util.ts`
@@ -256,7 +256,7 @@ export function calcularProximoCobro(
 - [ ] **2.3** `npm test -- proximo-cobro` en verde. Commit:
   `feat(suscripciones): add proximo-cobro date util`.
 
-### 3. Refactor `VentasService` — `crearEnTransaccion` reutilizable
+### Task 3: Refactor `VentasService` — `crearEnTransaccion` reutilizable
 
 **Files:**
 - Modify: `backend/src/modules/ventas/ventas.service.ts:63,157-158`
@@ -287,7 +287,7 @@ export function calcularProximoCobro(
   `(cb) => cb(managerMock)` sigue funcionando). Commit:
   `refactor(ventas): extract crearEnTransaccion for cross-module transactions`.
 
-### 4. Módulo `suscripciones` (nuevo)
+### Task 4: Módulo `suscripciones` (nuevo)
 
 **Files:**
 - Create: `backend/src/modules/suscripciones/entities/suscripcion.entity.ts`
@@ -739,7 +739,7 @@ export class SuscripcionesModule {}
   completo + `npm run lint` (solo archivos tocados). Commit:
   `feat(suscripciones): add suscripciones module with first-charge signup`.
 
-### 5. Seeder — items suscripción de ejemplo
+### Task 5: Seeder — items suscripción de ejemplo
 
 **Files:**
 - Modify: `backend/src/modules/seeder/seeder.service.ts` (método nuevo llamado desde `seedItems()`, línea ~1392)
@@ -767,7 +767,7 @@ export class SuscripcionesModule {}
 
 ## Frontend
 
-### 6. Configuración → Items: tipo "Suscripción"
+### Task 6: Configuración → Items: tipo "Suscripción"
 
 **Files:**
 - Modify: `frontend/app/pages/configuracion/items.vue`
@@ -836,7 +836,7 @@ const tipoColors: Record<string, 'primary' | 'secondary' | 'info'> = {
   (frecuencia editable, tipo bloqueado), filtrar por tipo. Commit:
   `feat(configuracion): add suscripcion item type to items form`.
 
-### 7. `useSuscripciones` pasa de mock a API + lista
+### Task 7: `useSuscripciones` pasa de mock a API + lista
 
 **Files:**
 - Rewrite: `frontend/app/composables/useSuscripciones.ts`
@@ -948,7 +948,7 @@ function detalleDia(s: Suscripcion): string {
     respetar la moneda del item.
   - Estado de carga antes de la tabla (`v-if="loading"`, patrón estándar).
 
-### 8. Drawer "Nueva suscripción" (formulario interactivo)
+### Task 8: Drawer "Nueva suscripción" (formulario interactivo)
 
 **Files:**
 - Modify: `frontend/app/pages/tienda/suscripciones.vue`
@@ -1109,7 +1109,7 @@ async function confirmar() {
   5. Acciones: Cancelar / `Continuar al pago` (`:loading="confirmando"`,
      `:disabled="!itemSeleccionado"`, `@click="confirmar"`).
 
-### 9. Pasarela dummy — modo suscripción
+### Task 9: Pasarela dummy — modo suscripción
 
 **Files:**
 - Modify: `frontend/app/pages/tienda/pasarela.vue`
