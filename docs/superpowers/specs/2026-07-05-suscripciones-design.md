@@ -25,12 +25,15 @@ pausar/reanudar/cancelar). Esta fase la convierte en funcionalidad real:
 2. **Todo backend**: tanto el tipo de item como la tabla `suscripciones`
    con endpoints CRUD. Sin scheduler de cobro recurrente (fase futura):
    `proximo_cobro` queda registrado pero nadie lo ejecuta todavía.
-3. **La frecuencia la define el admin en el item** (una sola: `semanal` o
-   `mensual`). Si un tenant quiere ofrecer plan semanal y mensual del mismo
-   servicio, crea dos items, cada uno con su precio por período. El precio
-   del item ES el precio del período.
-4. **El día lo elige el cliente al suscribirse**: día del mes (1–28) si el
-   item es mensual; UN día de la semana si es semanal (sin multiselección).
+3. **La frecuencia la define el admin en el item** (una sola: `semanal`,
+   `quincenal` o `mensual`). Si un tenant quiere ofrecer varios planes del
+   mismo servicio, crea un item por frecuencia, cada uno con su precio por
+   período. El precio del item ES el precio del período.
+4. **El día lo elige el cliente al suscribirse**:
+   - Mensual: día del mes (1–28).
+   - Quincenal: día del mes (1–13); se cobra ese día y 15 días después,
+     ambos dentro del mismo mes (ej. elige 5 → cobros el 5 y el 20).
+   - Semanal: UN día de la semana (sin multiselección).
 5. **Primer cobro al suscribirse**: el alta pasa por la pasarela dummy y,
    al aprobar, se crea la venta online `pagada` del primer período y la
    suscripción `activa` en una sola transacción. Al rechazar no se crea
@@ -46,7 +49,7 @@ pausar/reanudar/cancelar). Esta fase la convierte en funcionalidad real:
 | Columna | Tipo | Notas |
 |---|---|---|
 | `item_id` | UUID PK/FK → `items` | `type: 'uuid'` explícito (ADR-004) |
-| `frecuencia` | text | `'semanal' \| 'mensual'` |
+| `frecuencia` | text | `'semanal' \| 'quincenal' \| 'mensual'` |
 | `creado_el` / `actualizado_el` / `eliminado_el` | timestamptz | estándar del repo |
 
 - Sin stock (como servicios): las ventas de items `suscripcion` **no**
@@ -63,7 +66,7 @@ pausar/reanudar/cancelar). Esta fase la convierte en funcionalidad real:
 | `usuario_id` | UUID FK | quién se suscribió, del token |
 | `item_id` | UUID FK → `items` | debe ser tipo `suscripcion` del tenant |
 | `frecuencia` | text | snapshot del item al suscribirse |
-| `dia_mes` | smallint nullable | 1–28, solo si `frecuencia = 'mensual'` |
+| `dia_mes` | smallint nullable | mensual: 1–28; quincenal: 1–13 (cobra día X y X+15) |
 | `dia_semana` | smallint nullable | 0–6 (domingo–sábado), solo si `'semanal'` |
 | `estado` | text | `'activa' \| 'pausada' \| 'cancelada'` |
 | `proximo_cobro` | date | calculado al crear; informativo hasta que exista el scheduler |
@@ -77,6 +80,9 @@ El primer período queda pagado al alta, así que `proximo_cobro` es la
 primera ocurrencia del día elegido en el período siguiente:
 
 - **Mensual**: el `dia_mes` del mes siguiente al alta.
+- **Quincenal**: la primera ocurrencia de `dia_mes` o `dia_mes + 15`
+  posterior al alta (ej. alta el 5 de julio con día 5 → próximo cobro el
+  20 de julio).
 - **Semanal**: el `dia_semana` de la semana siguiente al alta.
 
 Aritmética con fechas simples (`date`), sin zona horaria compleja; 1–28
@@ -87,12 +93,13 @@ evita el problema de meses cortos.
 ### Módulo `items` (cambios)
 
 - Enum/validación de `tipo` acepta `'suscripcion'`; DTO de creación exige
-  `frecuencia` cuando `tipo = 'suscripcion'` (y la rechaza en otros tipos).
+  `frecuencia` (`semanal | quincenal | mensual`) cuando
+  `tipo = 'suscripcion'` (y la rechaza en otros tipos).
 - Entity `ItemSuscripcion` + join en las lecturas del catálogo (igual que
   producto/servicio).
 - Seeder: 2–3 items suscripción de ejemplo (ej. "Mensualidad Gimnasio"
-  mensual, "Clase semanal de yoga" semanal) con UUIDs fijos siguientes
-  libres.
+  mensual, "Clase semanal de yoga" semanal, "Plan quincenal de limpieza"
+  quincenal) con UUIDs fijos siguientes libres.
 
 ### Módulo `ventas` (cambios)
 
@@ -130,7 +137,8 @@ suscripciones, `Crear` para suscribirse. No se crea módulo RBAC nuevo.
 ### Configuración → Items
 
 - El formulario de items suma el tipo "Suscripción"; al elegirlo aparece el
-  select de frecuencia (Semanal/Mensual) y se ocultan los campos de stock.
+  select de frecuencia (Semanal/Quincenal/Mensual) y se ocultan los campos
+  de stock.
 
 ### Tienda → Suscripciones (`pages/tienda/suscripciones.vue`)
 
@@ -141,8 +149,9 @@ suscripciones, `Crear` para suscribirse. No se crea módulo RBAC nuevo.
   abre un `AppDrawer` interactivo:
   1. Select de item suscribible (`GET /items?tipo=suscripcion`), mostrando
      precio y frecuencia.
-  2. Según la frecuencia del item elegido: select de **día del mes** (1–28)
-     o select de **día de la semana** (lunes–domingo).
+  2. Según la frecuencia del item elegido: select de **día del mes**
+     (mensual: 1–28; quincenal: 1–13, indicando que se cobra ese día y 15
+     días después) o select de **día de la semana** (lunes–domingo).
   3. Tarjeta a usar (la preferida del mock por defecto; si no hay tarjetas,
      aviso con link a Medios de pago).
   4. Resumen: precio del período + próximo cobro estimado.
