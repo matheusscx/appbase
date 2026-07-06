@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { CajaService } from '../caja/caja.service';
@@ -61,6 +61,17 @@ export class VentasService {
   ) {}
 
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
+    return this.dataSource.transaction((manager) =>
+      this.crearEnTransaccion(manager, tenantId, usuarioId, dto),
+    );
+  }
+
+  async crearEnTransaccion(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    dto: CreateVentaDto,
+  ) {
     const canal = dto.canal ?? 'fisico';
 
     // 1. Verificar caja abierta (física para canal presencial, virtual para online)
@@ -154,96 +165,56 @@ export class VentasService {
       }
     }
 
-    // 7. Transacción atómica
-    return this.dataSource.transaction(async (manager) => {
-      // 7a. Cabecera de venta (estado inicial PENDIENTE; se actualiza tras registrar pagos)
-      const venta = await manager.save(
-        Venta,
-        manager.create(Venta, {
-          tenantId,
-          cajaId: caja.id,
-          monedaId: monedaOficialId,
-          tipoDocumentoId: dto.tipoDocumentoId ?? null,
-          canal,
-          estado: EstadoVenta.PENDIENTE,
-          totalBruto: resultado.totales.subtotalNeto,
-          totalDescuentos: resultado.totales.totalDescuentos,
-          totalRecargos: resultado.totales.totalRecargos,
-          totalImpuestos: resultado.totales.totalImpuestos,
-          totalFinal: resultado.totales.totalFinal,
-          comentario: dto.comentario ?? null,
-        }),
-      );
+    // 7. Transacción atómica (manager recibido por parámetro)
+    // 7a. Cabecera de venta (estado inicial PENDIENTE; se actualiza tras registrar pagos)
+    const venta = await manager.save(
+      Venta,
+      manager.create(Venta, {
+        tenantId,
+        cajaId: caja.id,
+        monedaId: monedaOficialId,
+        tipoDocumentoId: dto.tipoDocumentoId ?? null,
+        canal,
+        estado: EstadoVenta.PENDIENTE,
+        totalBruto: resultado.totales.subtotalNeto,
+        totalDescuentos: resultado.totales.totalDescuentos,
+        totalRecargos: resultado.totales.totalRecargos,
+        totalImpuestos: resultado.totales.totalImpuestos,
+        totalFinal: resultado.totales.totalFinal,
+        comentario: dto.comentario ?? null,
+      }),
+    );
 
-      // 7b. Líneas / detalles
-      const detalles = await Promise.all(
-        resultado.lineas.map((rLinea, i) => {
-          const { item, precioOrigen, tasa, precioConvertido } =
-            lineasConversion[i];
-          return manager.save(
-            VentaDetalle,
-            manager.create(VentaDetalle, {
-              ventaId: venta.id,
-              itemId: rLinea.itemId,
-              monedaIdOrigen: item.monedaId,
-              precioUnitarioOrigen: precioOrigen,
-              tasaCambio: tasa,
-              precioUnitario: precioConvertido,
-              descripcion: item.nombre,
-              cantidad: rLinea.cantidad,
-              subtotal: rLinea.subtotalNeto,
-              descuentoAplicado: rLinea.descuentoAplicado,
-              recargoAplicado: rLinea.recargoAplicado,
-              impuestoAplicado: rLinea.impuestoAplicado,
-              totalLinea: rLinea.totalLinea,
-            }),
-          );
-        }),
-      );
+    // 7b. Líneas / detalles
+    const detalles = await Promise.all(
+      resultado.lineas.map((rLinea, i) => {
+        const { item, precioOrigen, tasa, precioConvertido } =
+          lineasConversion[i];
+        return manager.save(
+          VentaDetalle,
+          manager.create(VentaDetalle, {
+            ventaId: venta.id,
+            itemId: rLinea.itemId,
+            monedaIdOrigen: item.monedaId,
+            precioUnitarioOrigen: precioOrigen,
+            tasaCambio: tasa,
+            precioUnitario: precioConvertido,
+            descripcion: item.nombre,
+            cantidad: rLinea.cantidad,
+            subtotal: rLinea.subtotalNeto,
+            descuentoAplicado: rLinea.descuentoAplicado,
+            recargoAplicado: rLinea.recargoAplicado,
+            impuestoAplicado: rLinea.impuestoAplicado,
+            totalLinea: rLinea.totalLinea,
+          }),
+        );
+      }),
+    );
 
-      // 7c. Reglas aplicadas — descuentos por línea
-      for (let i = 0; i < resultado.lineas.length; i++) {
-        const rLinea = resultado.lineas[i];
-        for (const traza of rLinea.trazas.descuentos) {
-          await manager.save(
-            VentaDescuento,
-            manager.create(VentaDescuento, {
-              ventaId: venta.id,
-              descuentoId: traza.id,
-              valorAplicado: traza.monto,
-              porcentajeAplicado: null,
-              aplicadoEn: 'detalle',
-            }),
-          );
-        }
-        for (const traza of rLinea.trazas.recargos) {
-          await manager.save(
-            VentaRecargo,
-            manager.create(VentaRecargo, {
-              ventaId: venta.id,
-              recargoId: traza.id,
-              valorAplicado: traza.monto,
-              porcentajeAplicado: null,
-              aplicadoEn: 'detalle',
-            }),
-          );
-        }
-        for (const traza of rLinea.trazas.impuestos) {
-          await manager.save(
-            VentaImpuesto,
-            manager.create(VentaImpuesto, {
-              ventaId: venta.id,
-              impuestoId: traza.id,
-              valorAplicado: traza.monto,
-              porcentajeAplicado: traza.tasa,
-              aplicadoEn: 'detalle',
-            }),
-          );
-        }
-      }
-
-      // 7d. Reglas a nivel venta
-      for (const traza of resultado.trazasVenta.descuentos) {
+    // 7c. Reglas aplicadas — descuentos por línea
+    for (let i = 0; i < resultado.lineas.length; i++) {
+      const rLinea = resultado.lineas[i];
+      for (const traza of rLinea.trazas.descuentos) {
         await manager.save(
           VentaDescuento,
           manager.create(VentaDescuento, {
@@ -251,11 +222,11 @@ export class VentasService {
             descuentoId: traza.id,
             valorAplicado: traza.monto,
             porcentajeAplicado: null,
-            aplicadoEn: 'venta',
+            aplicadoEn: 'detalle',
           }),
         );
       }
-      for (const traza of resultado.trazasVenta.recargos) {
+      for (const traza of rLinea.trazas.recargos) {
         await manager.save(
           VentaRecargo,
           manager.create(VentaRecargo, {
@@ -263,74 +234,112 @@ export class VentasService {
             recargoId: traza.id,
             valorAplicado: traza.monto,
             porcentajeAplicado: null,
-            aplicadoEn: 'venta',
+            aplicadoEn: 'detalle',
           }),
         );
       }
-
-      // 7e. Customer (opcional)
-      if (dto.customer) {
+      for (const traza of rLinea.trazas.impuestos) {
         await manager.save(
-          VentaCustomer,
-          manager.create(VentaCustomer, {
+          VentaImpuesto,
+          manager.create(VentaImpuesto, {
             ventaId: venta.id,
-            terceroId: dto.customer.terceroId ?? null,
-            nombre: dto.customer.nombre,
-            rut: dto.customer.rut ?? null,
-            direccion: dto.customer.direccion ?? null,
-            telefono: dto.customer.telefono ?? null,
-            email: dto.customer.email ?? null,
+            impuestoId: traza.id,
+            valorAplicado: traza.monto,
+            porcentajeAplicado: traza.tasa,
+            aplicadoEn: 'detalle',
           }),
         );
       }
+    }
 
-      // 7f. Movimientos de inventario (solo productos)
-      for (let i = 0; i < lineasConversion.length; i++) {
-        const { item, linea } = lineasConversion[i];
-        if (item.tipo !== 'producto') continue;
-        await this.inventarioService.registrarMovimiento(manager, {
-          tenantId,
-          itemId: item.id,
-          tipo: 'salida',
-          motivo: 'venta',
-          cantidad: linea.cantidad,
-          usuarioId,
+    // 7d. Reglas a nivel venta
+    for (const traza of resultado.trazasVenta.descuentos) {
+      await manager.save(
+        VentaDescuento,
+        manager.create(VentaDescuento, {
           ventaId: venta.id,
-          unidadIds: linea.unidadIds,
-          loteId: linea.loteId,
-        });
-      }
+          descuentoId: traza.id,
+          valorAplicado: traza.monto,
+          porcentajeAplicado: null,
+          aplicadoEn: 'venta',
+        }),
+      );
+    }
+    for (const traza of resultado.trazasVenta.recargos) {
+      await manager.save(
+        VentaRecargo,
+        manager.create(VentaRecargo, {
+          ventaId: venta.id,
+          recargoId: traza.id,
+          valorAplicado: traza.monto,
+          porcentajeAplicado: null,
+          aplicadoEn: 'venta',
+        }),
+      );
+    }
 
-      // 7g. Pagos — delegado a PagosService (incluye vuelto + movimientos de caja)
-      const savedPagos = await this.pagosService.registrar(manager, {
+    // 7e. Customer (opcional)
+    if (dto.customer) {
+      await manager.save(
+        VentaCustomer,
+        manager.create(VentaCustomer, {
+          ventaId: venta.id,
+          terceroId: dto.customer.terceroId ?? null,
+          nombre: dto.customer.nombre,
+          rut: dto.customer.rut ?? null,
+          direccion: dto.customer.direccion ?? null,
+          telefono: dto.customer.telefono ?? null,
+          email: dto.customer.email ?? null,
+        }),
+      );
+    }
+
+    // 7f. Movimientos de inventario (solo productos)
+    for (let i = 0; i < lineasConversion.length; i++) {
+      const { item, linea } = lineasConversion[i];
+      if (item.tipo !== 'producto') continue;
+      await this.inventarioService.registrarMovimiento(manager, {
         tenantId,
+        itemId: item.id,
+        tipo: 'salida',
+        motivo: 'venta',
+        cantidad: linea.cantidad,
+        usuarioId,
         ventaId: venta.id,
-        pagos: pagosDto,
-        cajaId: caja.id,
-        monedaOficialId,
-        target: resultado.totales.totalFinal,
+        unidadIds: linea.unidadIds,
+        loteId: linea.loteId,
       });
+    }
 
-      // 7h. Actualizar estado de la venta según montos netos de los pagos registrados
-      if (savedPagos.length > 0) {
-        const montoAplicado = savedPagos.reduce(
-          (acc, p) =>
-            acc.plus(new Decimal(p.monto)).minus(new Decimal(p.vuelto ?? '0')),
-          new Decimal(0),
-        );
-        const estadoFinal = calcularEstadoVenta(
-          resultado.totales.totalFinal,
-          montoAplicado.toFixed(4),
-        );
-        await manager.query(
-          `UPDATE ventas SET estado=$1, actualizado_el=NOW() WHERE venta_id=$2`,
-          [estadoFinal, venta.id],
-        );
-        venta.estado = estadoFinal;
-      }
-
-      return { ...venta, detalles };
+    // 7g. Pagos — delegado a PagosService (incluye vuelto + movimientos de caja)
+    const savedPagos = await this.pagosService.registrar(manager, {
+      tenantId,
+      ventaId: venta.id,
+      pagos: pagosDto,
+      cajaId: caja.id,
+      monedaOficialId,
+      target: resultado.totales.totalFinal,
     });
+
+    // 7h. Actualizar estado de la venta según montos netos de los pagos registrados
+    if (savedPagos.length > 0) {
+      const montoAplicado = savedPagos.reduce(
+        (acc, p) =>
+          acc.plus(new Decimal(p.monto)).minus(new Decimal(p.vuelto ?? '0')),
+        new Decimal(0),
+      );
+      const estadoFinal = calcularEstadoVenta(
+        resultado.totales.totalFinal,
+        montoAplicado.toFixed(4),
+      );
+      await manager.query(
+        `UPDATE ventas SET estado=$1, actualizado_el=NOW() WHERE venta_id=$2`,
+        [estadoFinal, venta.id],
+      );
+      venta.estado = estadoFinal;
+    }
+
+    return { ...venta, detalles };
   }
 
   async findTiposDocumento(tenantId: string): Promise<TipoDocumentoResponse[]> {
