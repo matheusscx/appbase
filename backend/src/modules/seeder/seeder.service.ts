@@ -1434,7 +1434,7 @@ export class SeederService implements OnApplicationBootstrap {
 
     const suscripciones = [
       {
-        itemId: '550e8400-e29b-41d4-a716-446655440157',
+        itemId: '550e8400-e29b-41d4-a716-446655440170',
         nombre: 'Mensualidad Gimnasio',
         descripcion: 'Acceso mensual al gimnasio',
         precioBase: '30000',
