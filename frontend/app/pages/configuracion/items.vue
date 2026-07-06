@@ -32,6 +32,7 @@ interface Item {
   modoInventario: string | null  // 'cantidad' | 'lote' | 'serie'
   duracionEstimada: number | null
   requiereCita: boolean | null
+  frecuencia?: string | null
   impuestosIds?: string[]
   recargosIds?: string[]
   descuentosIds?: string[]
@@ -140,6 +141,7 @@ const recargosOpts = ref<Opt[]>([])
 const tiposOpts: Opt[] = [
   { label: 'Producto', value: 'producto' },
   { label: 'Servicio', value: 'servicio' },
+  { label: 'Suscripción', value: 'suscripcion' },
 ]
 
 const unidadesMedidaOpts: Opt[] = [
@@ -153,6 +155,7 @@ const filtrosTipoOpts = [
   { label: 'Todos', value: 'todos' },
   { label: 'Productos', value: 'producto' },
   { label: 'Servicios', value: 'servicio' },
+  { label: 'Suscripciones', value: 'suscripcion' },
 ]
 
 // ── Formulario ─────────────────────────────────────────────────────────────
@@ -180,6 +183,8 @@ function emptyForm() {
     // servicio
     duracionEstimada: 0,
     requiereCita: false,
+    // suscripción
+    frecuencia: 'mensual',
     // reglas
     impuestosIds: [] as string[],
     recargosIds: [] as string[],
@@ -425,6 +430,7 @@ async function abrirEditar(item: Item) {
       loteInicial: { codigoLote: '', fechaElaboracion: '', fechaVencimiento: '' },
       duracionEstimada: detalle.duracionEstimada ?? 0,
       requiereCita: detalle.requiereCita ?? false,
+      frecuencia: detalle.frecuencia ?? 'mensual',
       impuestosIds: detalle.impuestosIds ?? [],
       recargosIds: detalle.recargosIds ?? [],
       descuentosIds: detalle.descuentosIds ?? [],
@@ -474,9 +480,11 @@ async function guardar() {
         // En edición sólo mandamos modoInventario (el backend bloquea cambio si hay movimientos)
         payload.modoInventario = form.value.modoInventario
       }
-    } else {
+    } else if (form.value.tipo === 'servicio') {
       payload.duracionEstimada = form.value.duracionEstimada || undefined
       payload.requiereCita = form.value.requiereCita
+    } else {
+      payload.frecuencia = form.value.frecuencia
     }
 
     if (editingId.value) {
@@ -637,6 +645,17 @@ function loteSinDisponibilidad(l: Lote): boolean {
   return l.cantidadDisponible === '0' || l.cantidadDisponible === '0.0000'
 }
 
+const tipoLabels: Record<string, string> = {
+  producto: 'Producto',
+  servicio: 'Servicio',
+  suscripcion: 'Suscripción',
+}
+const tipoColors: Record<string, 'primary' | 'secondary' | 'info'> = {
+  producto: 'primary',
+  servicio: 'secondary',
+  suscripcion: 'info',
+}
+
 const columnsHistorial: TableColumn<Movimiento>[] = [
   { accessorKey: 'creadoEl', header: 'Fecha' },
   { accessorKey: 'tipo', header: 'Tipo' },
@@ -653,7 +672,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
     <CrudPageHeader
       large
       title="Items"
-      description="Productos y servicios del catálogo"
+      description="Productos, servicios y suscripciones del catálogo"
     >
       <template #actions>
         <UButton icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
@@ -696,8 +715,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
     >
         <template #tipo-cell="{ row }">
           <UBadge
-            :label="row.original.tipo === 'producto' ? 'Producto' : 'Servicio'"
-            :color="row.original.tipo === 'producto' ? 'primary' : 'secondary'"
+            :label="tipoLabels[row.original.tipo] ?? row.original.tipo"
+            :color="tipoColors[row.original.tipo] ?? 'neutral'"
             variant="subtle"
             size="sm"
           />
@@ -724,6 +743,9 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               />
               <span v-if="row.original.tipo === 'servicio' && row.original.duracionEstimada">
                 · {{ row.original.duracionEstimada }} min
+              </span>
+              <span v-if="row.original.tipo === 'suscripcion' && row.original.frecuencia">
+                · Cobro {{ row.original.frecuencia }}
               </span>
             </div>
           </div>
@@ -972,6 +994,29 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   <USwitch v-model="form.requiereCita" />
                 </UFormField>
               </div>
+            </div>
+          </template>
+
+          <!-- Extensión suscripción -->
+          <template v-if="form.tipo === 'suscripcion'">
+            <USeparator />
+            <div>
+              <p class="text-sm font-medium text-muted mb-3">Datos de suscripción</p>
+              <UFormField label="Frecuencia de cobro" required>
+                <USelectMenu
+                  v-model="form.frecuencia"
+                  :items="[
+                    { label: 'Semanal', value: 'semanal' },
+                    { label: 'Quincenal', value: 'quincenal' },
+                    { label: 'Mensual', value: 'mensual' },
+                  ]"
+                  value-key="value"
+                  class="w-full"
+                />
+              </UFormField>
+              <p class="text-xs text-muted mt-2">
+                El precio del item es el precio por período. El cliente elige su día de cobro al suscribirse.
+              </p>
             </div>
           </template>
 
