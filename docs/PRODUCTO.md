@@ -170,12 +170,13 @@ Modelo: **tabla base + extensiones por tipo** — escala limpiamente cuando se a
 Extensiones actuales:
 - **`item_producto`** — stock, unidad de medida, fecha elaboración, fecha vencimiento
 - **`item_servicio`** — duración estimada, `requiere_cita` (flag informativo, sin agenda por ahora)
+- **`item_suscripcion`** — `frecuencia` (`'semanal'` | `'quincenal'` | `'mensual'`). Representa un ítem de cobro recurrente (ver 10b); no fija día de cobro ni tarjeta — eso lo elige el customer al suscribirse.
 
 Cada item:
 - Puede tener N impuestos, N descuentos, N recargos asociados
-- El stock se descuenta **automáticamente** al procesar una venta, generando un movimiento de inventario (ver 8b)
+- El stock se descuenta **automáticamente** al procesar una venta, generando un movimiento de inventario (ver 8b) — **solo aplica a `producto`**; `servicio` y `suscripcion` no participan del tracking de inventario.
 
-Extensiones futuras contempladas: combos/paquetes, items digitales, suscripciones, modificadores.
+Extensiones futuras contempladas: combos/paquetes, items digitales, modificadores.
 
 **Alertas útiles:** stock bajo, productos próximos a vencer.
 
@@ -257,6 +258,33 @@ Registra una venta completa en una sola transacción atómica:
 5. Pagos (`pagos`): método, monto en moneda oficial, caja
 
 **Regla:** total por línea = valores unitarios × cantidad. Los descuentos/recargos/impuestos se calculan por unidad y se multiplican.
+
+---
+
+### 10b. Suscripciones (cobro recurrente)
+
+Alta de compras recurrentes sobre items de tipo `suscripcion`, con **primer cobro inmediato** — no hay período de gracia ni facturación diferida.
+
+**Flujo de negocio:**
+1. El **admin** del tenant da de alta un item catálogo tipo `suscripcion` en Configuración → Items (nombre, precio por período, `frecuencia`). En este paso **no se cobra nada** — el item solo queda disponible para que un customer se suscriba.
+2. El **customer** (usuario logueado, vía Tienda Online) elige un item suscribible, su **día de cobro** y su tarjeta guardada preferida, y confirma.
+3. El **primer período se cobra de inmediato**, en el mismo momento del alta, a través de la pasarela dummy — igual que una compra online normal.
+4. La venta del primer cobro y la fila de suscripción se crean en **una sola transacción atómica**: si el pago es rechazado, no queda ni venta ni suscripción huérfana (mismo patrón todo-o-nada del checkout online).
+
+**Día de cobro (elegido por el customer, no por el admin):**
+- `mensual`: día del mes, **1 a 28** (evita meses cortos).
+- `quincenal`: día del mes, **1 a 13** — se cobra ese día **y** ese día + 15 dentro del mismo mes (dos cobros por mes).
+- `semanal`: día de la semana, **0 a 6** (0 = domingo) — un solo cobro por semana.
+
+**Snapshot al suscribirse:** la suscripción copia `frecuencia` del item al momento del alta. Si el admin cambia la `frecuencia` del item catálogo después, **no afecta** a las suscripciones ya activas — cada una conserva su propio snapshot.
+
+**Estados y transiciones:**
+- `activa` → `pausada` (acción `pausar`)
+- `pausada` → `activa` (acción `reanudar`)
+- `activa` | `pausada` → `cancelada` (acción `cancelar`, sin retorno)
+- Cualquier otra transición (ej. reanudar una `cancelada`) es inválida y se rechaza.
+
+**Fuera de alcance (fase futura):** cobro automático de los períodos siguientes al primero — hoy se persiste `proximo_cobro` pero no existe un job/cron que lo ejecute.
 
 ---
 

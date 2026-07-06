@@ -12,8 +12,9 @@
 
 Módulo interno (usuario del tenant logueado) que permite navegar el catálogo de
 productos, armar un carrito y "pagar" a través de una pasarela de pago
-simulada (dummy). Incluye además dos secciones sin backend: suscripciones
-(compras recurrentes de items) y medios de pago (tarjetas guardadas).
+simulada (dummy). Incluye además suscripciones (alta de compras recurrentes,
+con backend real y primer cobro inmediato) y medios de pago (tarjetas
+guardadas, mock).
 
 ### Why does it exist?
 
@@ -28,12 +29,19 @@ el mismo carrito/catálogo.
     no persiste nada hasta que el usuario aprueba en la pasarela.
   - Canal `'online'` en ventas: usa la caja virtual del tenant, exige pago
     completo (no admite cuenta por cobrar), nace directamente `pagada`.
-  - Suscripciones y medios de pago: solo frontend, mock en `localStorage`.
+  - Suscripciones: backend real (`item_suscripcion` + tabla `suscripciones`,
+    endpoints `POST/GET/PATCH /suscripciones`). El admin da de alta un item
+    suscribible en Configuración → Items (sin cobro en ese momento); el
+    customer se suscribe eligiendo día de cobro y tarjeta, y el primer
+    período se cobra de inmediato vía la pasarela dummy, en la misma
+    transacción que crea la venta.
+  - Medios de pago: solo frontend, mock en `localStorage`.
   - Módulo RBAC "Tienda Online" (permisos Leer/Crear).
 - NOT included (future):
   - Storefront público / auth de customer final.
   - Integración con pasarela real.
-  - Backend de suscripciones (cobro recurrente real).
+  - Cobro recurrente automático (job/cron) de los períodos siguientes al
+    primero — hoy solo se persiste `proximo_cobro`, sin ejecutor.
   - Guard granular `@RequiresPermiso` por endpoint (sigue el estándar actual:
     `JwtAuthGuard` + `TenantGuard`).
 
@@ -77,6 +85,51 @@ Request:
 Response (201): venta en estado "pagada" (canal online exige pago completo).
 ```
 
+### Suscripciones
+
+```
+POST /suscripciones
+
+Authorization: Bearer <token>
+
+Request:
+{
+  "itemId": "uuid",           // item tipo 'suscripcion'
+  "diaMes": 15,                // mensual: 1-28 · quincenal: 1-13 (cobra también en diaMes+15)
+  "diaSemana": 3,              // semanal: 0-6 (0 = domingo)
+  "metodoPagoId": "uuid",
+  "tarjeta": { "marca": "Visa", "last4": "4242" }   // opcional, snapshot informativo
+}
+
+Response (201):
+{ "id": "uuid", "ventaInicialId": "uuid", "proximoCobro": "2026-08-15", "estado": "activa" }
+```
+
+```
+GET /suscripciones
+
+Response (200): suscripciones del usuario autenticado (join con items para
+nombre/precio/moneda).
+```
+
+```
+PATCH /suscripciones/:id
+
+Request:
+{ "accion": "pausar" | "reanudar" | "cancelar" }
+
+Response (200): { "id": "uuid", "estado": "pausada" }
+```
+
+`POST /suscripciones` valida que el item sea `tipo = 'suscripcion'` y esté
+activo, calcula el total del primer período con el mismo motor de precios que
+usa una venta normal, y crea la venta inicial (canal `online`, pago completo)
+y la fila de `suscripciones` en **una sola transacción** — si el pago es
+rechazado por la pasarela, no se crea ni venta ni suscripción (mismo patrón
+todo-o-nada que el checkout normal). `frecuencia` se copia al momento del
+alta como snapshot: si el admin cambia la frecuencia del item catálogo
+después, las suscripciones ya activas no se ven afectadas.
+
 ---
 
 ## Backend
@@ -88,6 +141,38 @@ Response (201): venta en estado "pagada" (canal online exige pago completo).
 - **Service**: `backend/src/modules/online/online.service.ts` — delega en
   `CalculoPreciosService.calcular()` (sin persistir) y genera un
   `checkoutRef` + `checkoutUrl` dummy.
+
+### Suscripciones
+
+- **Module**: `backend/src/modules/suscripciones/suscripciones.module.ts`
+- **Controller**: `backend/src/modules/suscripciones/suscripciones.controller.ts`
+  — `POST /`, `GET /`, `PATCH /:id`, con `JwtAuthGuard` + `TenantGuard` (mismo
+  estándar que `/online/checkout`, sin guard granular por permiso).
+- **Service**: `backend/src/modules/suscripciones/suscripciones.service.ts`:
+  - `crear()`: valida item + reglas cruzadas de día según `frecuencia`
+    (`mensual` requiere `diaMes` 1-28, `quincenal` requiere `diaMes` 1-13,
+    `semanal` requiere `diaSemana`), calcula el total del primer período con
+    `CalculoPreciosService`, y en una `dataSource.transaction()` llama a
+    `VentasService.crearEnTransaccion()` (reutiliza la lógica de venta
+    normal, canal `online`) seguido de `manager.save(Suscripcion, ...)`.
+  - `findMias()`: `GET` con SQL raw, filtra por `tenant_id` + `usuario_id` del
+    token, join con `items` para nombre/precio/moneda.
+  - `cambiarEstado()`: aplica la máquina de estados (`pausar`/`reanudar`/
+    `cancelar`) validando la transición contra el estado actual.
+- **Entity**: `backend/src/modules/suscripciones/entities/suscripcion.entity.ts`
+  — tabla `suscripciones`, guarda `frecuencia`, `diaMes`/`diaSemana`,
+  `estado`, `proximoCobro`, snapshot de tarjeta (`tarjetaMarca`/
+  `tarjetaLast4`, solo marca + últimos 4) y `ventaInicialId`.
+- **Util**: `backend/src/modules/suscripciones/utils/proximo-cobro.util.ts`
+  — `calcularProximoCobro()`, función pura que calcula la próxima fecha de
+  cobro según frecuencia y ancla (día de mes o de semana).
+
+### Cambios en items
+
+- Nuevo tipo `'suscripcion'` en `items.tipo`, con extensión 1:1
+  `item_suscripcion` (`frecuencia: 'semanal' | 'quincenal' | 'mensual'`) —
+  mismo patrón que `item_producto`/`item_servicio`. No participa del
+  tracking de stock/inventario (solo `producto` lo hace).
 
 ### Cambios en ventas
 
@@ -110,6 +195,16 @@ Response (201): venta en estado "pagada" (canal online exige pago completo).
 - Nuevo `ModuloApp` "Tienda Online" (`url: '/tienda'`) con permisos Leer y
   Crear, contratado (`TenantModulo`) por los tenants Paris y Falabella.
   Sembrado en `seeder.service.ts`.
+- Suscripciones **reutiliza este mismo módulo** (no se creó un módulo RBAC
+  nuevo): los endpoints `/suscripciones` solo llevan `JwtAuthGuard` +
+  `TenantGuard`, mismo precedente que `/online/checkout`.
+
+### Seed
+
+- `seeder.service.ts` → `seedItemsSuscripcion()`: siembra 3 items suscribibles
+  de ejemplo para el tenant Paris — "Mensualidad Gimnasio" (mensual, 30000
+  CLP), "Clase semanal de yoga" (semanal, 8000 CLP), "Plan quincenal de
+  limpieza" (quincenal, 15000 CLP).
 
 ---
 
@@ -123,12 +218,17 @@ intermedio). Cada una aparece como entrada directa en el sidebar principal,
 detrás del mismo permiso `Tienda Online:Leer`:
 
 - `pages/tienda/index.vue` — catálogo + carrito (`/tienda`).
-- `pages/tienda/suscripciones.vue` — lista mock de compras recurrentes
+- `pages/tienda/suscripciones.vue` — lista de suscripciones del usuario
+  (API-backed), drawer "Nueva suscripción" para elegir item suscribible, día
+  de cobro y tarjeta preferida, y acciones pausar/reanudar/cancelar
   (`/tienda/suscripciones`).
 - `pages/tienda/medios-pago.vue` — tarjetas mock, agregar/eliminar/preferida
   (`/tienda/medios-pago`).
-- `pages/tienda/pasarela.vue` — pasarela dummy (resumen, aprobar/rechazar);
-  no tiene entrada propia en el sidebar, solo se llega desde el checkout.
+- `pages/tienda/pasarela.vue` — pasarela dummy (resumen, aprobar/rechazar).
+  No tiene entrada propia en el sidebar, solo se llega desde el checkout de
+  compra normal o desde el drawer de alta de suscripción
+  (`?ref=...&modo=suscripcion`). En modo suscripción, "Aprobar" llama a
+  `POST /suscripciones` en vez de `POST /ventas` directamente.
 
 ### Components
 
@@ -144,8 +244,18 @@ detrás del mismo permiso `Tienda Online:Leer`:
   (`agregarLinea`, `quitarLinea`, `setCantidad`, `toCalcularInput`).
 - `composables/useTarjetas.ts` — tarjetas en `localStorage`, scoped por
   tenant. Nunca guarda el número completo ni el CVV, solo marca + últimos 4.
-- `composables/useSuscripciones.ts` — suscripciones en `localStorage`, scoped
-  por tenant, con seed de ejemplos si está vacío.
+- `composables/useSuscripciones.ts` — **API-backed** (`GET`/`PATCH
+  /suscripciones`), reemplaza el mock anterior en `localStorage`. Expone
+  `suscripciones`, `loading`, `cargar()` y `pausar()`/`reanudar()`/
+  `cancelar()` con update optimista (revierte el estado local si el `PATCH`
+  falla).
+- `composables/useSuscripcionCheckout.ts` — intención de alta de suscripción
+  en tránsito. Mismo patrón `useState` que `useTiendaCarrito` (no un `ref`
+  local): sobrevive la navegación de `/tienda/suscripciones` a
+  `/tienda/pasarela` (páginas distintas, no la misma instancia de
+  componente). Guarda el `checkout` calculado, el item, la frecuencia, el día
+  elegido y la tarjeta; la pasarela lo consume para completar el `POST
+  /suscripciones` tras "Aprobar".
 
 ---
 
@@ -172,6 +282,33 @@ detrás del mismo permiso `Tienda Online:Leer`:
 Si el usuario **rechaza** o abandona antes de aprobar, no se crea ningún
 registro — evita ventas huérfanas por intentos incompletos.
 
+### Alta de suscripción
+
+```
+[Admin crea item tipo 'suscripcion' en Configuración → Items]
+  ↓ sin cobro en este paso — solo queda disponible en el catálogo
+[Customer entra a /tienda/suscripciones → "Nueva suscripción"]
+  ↓ elige item, día de cobro (dia_mes o dia_semana según frecuencia) y tarjeta
+  ↓ useSuscripcionCheckout().value = { checkout, itemId, frecuencia, dia..., tarjeta }
+[navigateTo('/tienda/pasarela?ref=...&modo=suscripcion')]
+  ↓
+[Usuario "Aprueba" en la pasarela dummy]
+  ↓ POST /suscripciones { itemId, diaMes|diaSemana, metodoPagoId, tarjeta }
+[SuscripcionesService.crear(): valida item + reglas de día, calcula el
+ primer período con CalculoPreciosService, y en UNA transacción crea la
+ venta inicial (canal online, pago completo) + la fila de suscripciones]
+  ↓
+[Suscripción nace en estado 'activa', con proximo_cobro calculado]
+  ↓
+[useSuscripcionCheckout se limpia; redirect a /tienda/suscripciones]
+```
+
+Si el pago es **rechazado** en la pasarela, no se llama a `POST
+/suscripciones` — no se crea ni venta ni suscripción (mismo patrón
+todo-o-nada). Cobros de períodos siguientes al primero no están
+automatizados en esta fase (no hay job/cron); solo se persiste la fecha en
+`proximo_cobro`.
+
 ---
 
 ## Testing
@@ -182,6 +319,7 @@ registro — evita ventas huérfanas por intentos incompletos.
 npm test -- modules/online/online.service.spec.ts
 npm test -- modules/ventas/ventas.service.spec.ts
 npm test -- modules/caja/caja.service.spec.ts
+npm test -- modules/suscripciones/suscripciones.service.spec.ts
 ```
 
 ### Manual Testing (Frontend)
@@ -194,7 +332,12 @@ npm test -- modules/caja/caja.service.spec.ts
    `pagada`.
 6. Medios de pago: agregar/eliminar/marcar preferida, verificar que persiste
    tras recargar y que el número completo nunca queda en `localStorage`.
-7. Suscripciones: ver seed de ejemplo, pausar/reanudar/cancelar.
+7. Suscripciones: ver los 3 items de ejemplo sembrados, dar de alta una
+   nueva (elegir día + tarjeta), "Rechazar" en la pasarela → no se crea
+   suscripción ni venta; "Aprobar" → suscripción `activa` con
+   `proximo_cobro` calculado y venta inicial visible en `/ventas`. Probar
+   pausar/reanudar/cancelar y verificar que las transiciones inválidas
+   fallan.
 
 ---
 
@@ -204,6 +347,9 @@ npm test -- modules/caja/caja.service.spec.ts
 - [x] Canal `'online'` en ventas (caja virtual, pago completo obligatorio).
 - [x] Frontend: catálogo, carrito, pasarela, suscripciones, medios de pago.
 - [x] RBAC: módulo "Tienda Online" sembrado y filtrado en el sidebar.
+- [x] Suscripciones: tipo de item `item_suscripcion`, endpoints
+  `POST/GET/PATCH /suscripciones`, alta atómica con primer cobro, máquina de
+  estados `activa`/`pausada`/`cancelada`.
 - [x] Unit tests backend en verde.
 - [x] Verificación manual end-to-end en navegador.
 
@@ -220,5 +366,14 @@ npm test -- modules/caja/caja.service.spec.ts
 
 ## Notes
 
-Suscripciones y medios de pago son mocks (`localStorage`, scoped por
-tenant) — no hay persistencia en backend en esta fase.
+Medios de pago sigue siendo mock (`localStorage`, scoped por tenant) — no
+hay persistencia en backend en esta fase.
+
+Suscripciones **sí tiene backend real** desde 2026-07-05 (ver secciones
+arriba). El mock anterior en `localStorage` (clave
+`tienda:suscripciones:<tenantId>`) queda huérfano — solo contenía datos de
+ejemplo, no requiere migración.
+
+El cobro recurrente de los períodos siguientes al primero no está
+automatizado: no hay job/cron que ejecute `proximo_cobro`. Queda fuera de
+alcance para una fase futura.

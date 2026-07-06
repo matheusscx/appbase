@@ -503,6 +503,12 @@ CREATE TABLE "item_servicio" (
   "requiere_cita"     BOOLEAN NOT NULL DEFAULT false
 );
 
+-- Extensión 1:1 para tipo 'suscripcion' (no participa de stock/inventario)
+CREATE TABLE "item_suscripcion" (
+  "item_id"    UUID PRIMARY KEY REFERENCES "items" ("item_id"),
+  "frecuencia" TEXT NOT NULL  -- 'semanal' | 'quincenal' | 'mensual'
+);
+
 -- Reglas de precio asociadas a cada item (N:M)
 CREATE TABLE "item_impuestos" (
   "item_id"     UUID NOT NULL REFERENCES "items" ("item_id") ON DELETE CASCADE,
@@ -751,3 +757,28 @@ ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("pago_id")  REFERENCES "pagos" (
 
 -- FK diferida de movimientos_inventario (depende de ventas)
 ALTER TABLE "movimientos_inventario" ADD FOREIGN KEY ("venta_id") REFERENCES "ventas" ("venta_id");
+
+-- =============================================================
+-- 11. SUSCRIPCIONES
+-- Alta de cobro recurrente sobre items tipo 'suscripcion'. El primer
+-- período se cobra al alta (venta_inicial_id); períodos siguientes no
+-- tienen job/cron en esta fase — solo se persiste proximo_cobro.
+-- =============================================================
+
+CREATE TABLE "suscripciones" (
+  "suscripcion_id"   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"        UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "usuario_id"       UUID        NOT NULL REFERENCES "usuarios" ("usuario_id"),
+  "item_id"          UUID        NOT NULL REFERENCES "items" ("item_id"),
+  "frecuencia"       TEXT        NOT NULL,  -- snapshot del item al suscribirse: 'semanal' | 'quincenal' | 'mensual'
+  "dia_mes"          SMALLINT,              -- mensual: 1-28 · quincenal: 1-13 (cobra también dia_mes+15)
+  "dia_semana"       SMALLINT,              -- semanal: 0-6 (0 = domingo)
+  "estado"           TEXT        NOT NULL DEFAULT 'activa',  -- 'activa' | 'pausada' | 'cancelada'
+  "proximo_cobro"    DATE        NOT NULL,
+  "tarjeta_marca"    TEXT,
+  "tarjeta_last4"    TEXT,
+  "venta_inicial_id" UUID        REFERENCES "ventas" ("venta_id"),
+  "creado_el"        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"   TIMESTAMPTZ,
+  "eliminado_el"     TIMESTAMPTZ
+);
