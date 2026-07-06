@@ -115,9 +115,9 @@ body: { moduloAppPermisoIds: string[] }
 **Pasos:**
 1. `docker-compose up --build`
 2. Login como admin de Paris → Configuración → "Roles y permisos" y "Usuarios" visibles.
-3. Editar rol Vendedor → activar "Actualizar" en módulo Test → Guardar.
-4. Re-login como `vendedor@paris.cl` → `/test`: Actualizar (Sección A) habilitado y
-   Sección B responde 200 → confirma que `modulos_roles` se pobló (fix).
+3. Editar rol Vendedor → activar "Eliminar" en módulo Caja → Guardar.
+4. Re-login como `vendedor@paris.cl` → verificar en `/caja` que la acción de eliminar
+   queda habilitada → confirma que `modulos_roles` se pobló (fix).
 5. Login como vendedor: el menú Roles/Usuarios no aparece; `PATCH /roles/:id` directo → 403.
 
 ---
@@ -134,5 +134,4 @@ body: { moduloAppPermisoIds: string[] }
 
 ## Related Features
 
-- [Test de Permisos RBAC](./test-permisos.md) — sandbox para verificar el enforcement.
 - [Módulo Configuración](./modulo-configuracion.md) — mismo módulo de Configuración.

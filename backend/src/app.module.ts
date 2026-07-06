@@ -10,7 +10,6 @@ import { CatalogModule } from './modules/catalog/catalog.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RolesModule } from './modules/roles/roles.module';
-import { TestModule } from './modules/test/test.module';
 import { MeModule } from './modules/me/me.module';
 import { Usuario } from './modules/users/usuario.entity';
 import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
@@ -160,7 +159,6 @@ import { SuscripcionesModule } from './modules/suscripciones/suscripciones.modul
     TenantsModule,
     RbacModule,
     RolesModule,
-    TestModule,
     MeModule,
     MonedasModule,
     CategoriasModule,

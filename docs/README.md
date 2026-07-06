@@ -33,7 +33,6 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [frontend-multitenant.md](./features/frontend-multitenant.md) | Flujo multi-tenant en frontend (selección de tenant) |
 | [modulo-configuracion.md](./features/modulo-configuracion.md) | Configuración — perfil de usuario y contraseña |
 | [roles-permisos.md](./features/roles-permisos.md) | RBAC: roles, matriz de permisos, asignación a usuarios |
-| [test-permisos.md](./features/test-permisos.md) | Módulo Test para validación RBAC end-to-end |
 | [tenants-razones-sociales.md](./features/tenants-razones-sociales.md) | Gestión de tenants y razones sociales |
 | [configuracion-monedas.md](./features/configuracion-monedas.md) | Monedas por tenant (multi-moneda + tasa de cambio) |
 | [preferencias-financieras.md](./features/preferencias-financieras.md) | Preferencias financieras (modos de cálculo, fórmula de precios) |

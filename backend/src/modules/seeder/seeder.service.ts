@@ -134,7 +134,6 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedTenantFormulaPrecio();
     await this.seedUsuariosTenants();
     await this.seedRolesUsuarios();
-    await this.seedVendedorPermisosTest();
     await this.seedVendedorPermisosCaja();
 
     this.logger.log('Seed complete.');
@@ -325,13 +324,6 @@ export class SeederService implements OnApplicationBootstrap {
         tieneConfiguracion: false,
       },
       {
-        moduloAppId: '550e8400-e29b-41d4-a716-446655440050',
-        nombre: 'Test',
-        url: '/test',
-        icono: 'mdi-test-tube',
-        tieneConfiguracion: false,
-      },
-      {
         moduloAppId: '550e8400-e29b-41d4-a716-446655440058',
         nombre: 'Ventas',
         url: '/ventas',
@@ -395,7 +387,6 @@ export class SeederService implements OnApplicationBootstrap {
   private async seedModuloAppPermisos(): Promise<void> {
     const FACTURACION = '550e8400-e29b-41d4-a716-446655440010';
     const CAJA = '550e8400-e29b-41d4-a716-446655440011';
-    const TEST = '550e8400-e29b-41d4-a716-446655440050';
     const LEER = '550e8400-e29b-41d4-a716-446655440012';
     const CREAR = '550e8400-e29b-41d4-a716-446655440013';
     const ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440014';
@@ -447,26 +438,6 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440038',
         moduloAppId: CAJA,
         permisoId: VER_TODAS,
-      },
-      {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440051',
-        moduloAppId: TEST,
-        permisoId: LEER,
-      },
-      {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440052',
-        moduloAppId: TEST,
-        permisoId: CREAR,
-      },
-      {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440053',
-        moduloAppId: TEST,
-        permisoId: ACTUALIZAR,
-      },
-      {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440054',
-        moduloAppId: TEST,
-        permisoId: ELIMINAR,
       },
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440059',
@@ -656,13 +627,6 @@ export class SeederService implements OnApplicationBootstrap {
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
       {
-        moduloTenantId: '550e8400-e29b-41d4-a716-446655440055',
-        tenantId: '550e8400-e29b-41d4-a716-446655440007',
-        moduloAppId: '550e8400-e29b-41d4-a716-446655440050', // Paris → Test
-        estado: 'activo',
-        expiraEn: new Date('2026-12-31T23:59:59Z'),
-      },
-      {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440061',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440058', // Paris → Ventas
@@ -836,44 +800,6 @@ export class SeederService implements OnApplicationBootstrap {
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
       [VENDEDOR_PARIS, PARIS, resolvedVendedorRolId],
     );
-  }
-
-  private async seedVendedorPermisosTest(): Promise<void> {
-    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
-    const MODULO_TENANT_TEST = '550e8400-e29b-41d4-a716-446655440055';
-    const PERMISO_TEST_LEER = '550e8400-e29b-41d4-a716-446655440051';
-    const PERMISO_TEST_CREAR = '550e8400-e29b-41d4-a716-446655440052';
-
-    // 1. Resolver el rol_id del rol Vendedor en Paris
-    const vendedorRolRows: { rol_id: string }[] = await this.dataSource.query(
-      `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Vendedor' AND eliminado_el IS NULL`,
-      [PARIS],
-    );
-
-    if (vendedorRolRows.length === 0) {
-      this.logger.warn(
-        'seedVendedorPermisosTest: rol Vendedor not found in Paris, skipping.',
-      );
-      return;
-    }
-
-    const rolId = vendedorRolRows[0].rol_id;
-
-    // 2. Asociar Vendedor al tenant_modulo Test
-    await this.dataSource.query(
-      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
-       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
-      [rolId, MODULO_TENANT_TEST],
-    );
-
-    // 3. Asignar solo Leer y Crear al Vendedor en el módulo Test
-    for (const moduloAppPermisoId of [PERMISO_TEST_LEER, PERMISO_TEST_CREAR]) {
-      await this.dataSource.query(
-        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
-         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-        [rolId, MODULO_TENANT_TEST, moduloAppPermisoId],
-      );
-    }
   }
 
   private async seedMetodosPago(): Promise<void> {

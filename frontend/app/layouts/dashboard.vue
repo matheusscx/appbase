@@ -27,11 +27,6 @@ const items = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-house',
       to: '/',
     },
-    {
-      label: 'Test',
-      icon: 'i-lucide-flask-conical',
-      to: '/test',
-    },
   ]
   if (permissionsStore.esAdmin || permissionsStore.can('Caja', 'Leer')) {
     base.push({
