@@ -22,7 +22,7 @@ function subtitulo(s: Suscripcion): string {
   const frecuencia = dia ? `${frecuenciaLabel[s.frecuencia]} ${dia}` : frecuenciaLabel[s.frecuencia]
   const base = `${formatMonto(s.precio, s.monedaId ?? undefined)} · ${frecuencia}`
   if (s.estado === 'cancelada' && s.activaHasta)
-    return `${base} · activa hasta el ${formatFecha(diaAnterior(s.activaHasta))} — se cancela el ${formatFecha(s.activaHasta)} a primera hora`
+    return `${base} · activa hasta el ${formatFecha(diaAnterior(s.activaHasta))}`
   if (s.estado === 'cancelada') return base
   return `${base} · próximo cobro ${formatFecha(s.proximoCobro)}`
 }

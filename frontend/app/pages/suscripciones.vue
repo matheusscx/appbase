@@ -45,7 +45,7 @@ function subtituloPlan(s: SuscripcionAdmin): string {
 
 function vigencia(s: SuscripcionAdmin): string {
   if (s.estado === 'cancelada' && s.activaHasta)
-    return `Activa hasta el ${formatFecha(diaAnterior(s.activaHasta))} — se cancela el ${formatFecha(s.activaHasta)} a primera hora`
+    return `Activa hasta el ${formatFecha(diaAnterior(s.activaHasta))}`
   if (s.estado === 'cancelada') return ''
   return `Próximo cobro ${formatFecha(s.proximoCobro)}`
 }
