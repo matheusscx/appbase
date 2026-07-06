@@ -229,6 +229,8 @@ Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobr
   - `puedeCobrar(tipoDoc, customer)` — valida si se puede proceder a cobro (Boleta sin cliente OK; Factura requiere nombre)
   - `resumenCobro(carrito, detalles)` — resume montos por tipo de descuento/recargo/impuesto
   - `sumaPagos(pagos)` — suma total de pagos para calcular vuelto
+  - `setMontoPago(total, pagos, indice, monto)` — fija el monto de un pago y los demás absorben el excedente (reducen desde el primero, con piso 0; nunca aumentan solos). El pago nuevo se prellena con el restante y los pagos en $0 se omiten al confirmar
+  - `resumenCobro` marca `excedenteSinVuelto` cuando los pagos con métodos sin vuelto superan el total (ese excedente no se puede devolver); el vuelto solo se acredita si proviene de métodos con vuelto
   - `toCalculoInput(carrito, metodoPago, descuentosVenta, recargosVenta)` — estructura payload para `/calculo-precios/calcular`
 
 - **Estado reactivo**: `ref` del carrito con recalculación debounced (100ms) cada vez que cambia cantidad o se agregan reglas.
@@ -289,7 +291,7 @@ Implementado en 2026-06-30; rutas unificadas en 2026-07-01.
 
 `app/components/pagos/AbonoModal.vue` — modal para registrar abonos a ventas pendientes:
 - Props: `ventaId`, `saldo` (monto pendiente), `metodos` (métodos de pago del tenant)
-- Reutiliza helpers de `useVenta.ts`: `resumenCobro`, `clampNoVuelto`, `sumaPagos`, `PagoInput`
+- Reutiliza helpers de `useVenta.ts`: `resumenCobro`, `setMontoPago`, `sumaPagos`, `PagoInput`
 - Al confirmar: `POST /pagos` con `{ ventaId, pagos: [...] }`; emite `success` para que la página recargue
 
 ---

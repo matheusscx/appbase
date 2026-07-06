@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import { clampNoVuelto, resumenCobro, sumaPagos, type PagoInput } from '~/composables/useVenta'
+import { resumenCobro, setMontoPago, sumaPagos, type PagoInput } from '~/composables/useVenta'
 
 interface MetodoPago {
   metodoPagoId: string
@@ -39,22 +39,17 @@ watch(open, (v) => {
   }
 })
 
-const metodosVuelto = computed(() =>
-  props.metodos.map((m) => ({ metodoPagoId: m.metodoPagoId, permiteVuelto: m.permiteVuelto })),
-)
-watch(
-  pagos,
-  (val) => {
-    const clamped = clampNoVuelto(props.saldo, val, metodosVuelto.value)
-    if (clamped !== val) pagos.value = clamped
-  },
-  { deep: true },
-)
-
+// El cajero no saca cuentas ("500 en efectivo y el resto en tarjeta"): al
+// escribir un monto, los demás pagos absorben el excedente vía setMontoPago,
+// y el pago nuevo se prellena con el restante. La regla de sobrepago sin
+// vuelto se valida al confirmar.
+function setMonto(i: number, monto: string) {
+  pagos.value = setMontoPago(props.saldo, pagos.value, i, monto)
+}
 function agregarPago() {
   const def = metodosHabilitados.value[0]
   if (!def) return
-  pagos.value = [...pagos.value, { metodoPagoId: def.metodoPagoId, monto: '0' }]
+  pagos.value = [...pagos.value, { metodoPagoId: def.metodoPagoId, monto: resumen.value.restante }]
 }
 function quitarPago(i: number) {
   pagos.value = pagos.value.filter((_, idx) => idx !== i)
@@ -69,8 +64,13 @@ const resumen = computed(() =>
 )
 const suma = computed(() => sumaPagos(pagos.value))
 
+// Los pagos absorbidos a $0 por setMontoPago no se registran en el ledger.
+const pagosValidos = computed(() =>
+  pagos.value.filter((p) => new Decimal(p.monto || '0').gt(0)),
+)
+
 const puedeConfirmar = computed(
-  () => pagos.value.length > 0 && !resumen.value.excedenteSinVuelto,
+  () => pagosValidos.value.length > 0 && !resumen.value.excedenteSinVuelto,
 )
 
 async function confirmar() {
@@ -78,7 +78,7 @@ async function confirmar() {
   try {
     await useApiFetch(`${apiUrl}/pagos`, {
       method: 'POST',
-      body: { ventaId: props.ventaId, pagos: pagos.value },
+      body: { ventaId: props.ventaId, pagos: pagosValidos.value },
     })
     toast.add({ title: 'Pago registrado', color: 'success' })
     open.value = false
@@ -109,7 +109,13 @@ async function confirmar() {
               label-key="label"
               class="flex-1"
             />
-            <MoneyInput v-model="pago.monto" oficial class="w-32" size="sm" />
+            <MoneyInput
+              :model-value="pago.monto"
+              oficial
+              class="w-32"
+              size="sm"
+              @update:model-value="setMonto(i, $event)"
+            />
             <UButton
               icon="i-lucide-trash-2"
               color="error"
@@ -142,7 +148,7 @@ async function confirmar() {
             <span>Vuelto</span><span class="font-mono">{{ formatMonto(resumen.vuelto) }}</span>
           </div>
           <p v-if="resumen.excedenteSinVuelto" class="text-error text-xs">
-            El pago excede el saldo pero ningún método permite vuelto.
+            Los pagos con métodos sin vuelto superan el saldo: ese excedente no se puede devolver.
           </p>
         </div>
       </div>

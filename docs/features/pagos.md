@@ -156,12 +156,15 @@ Props:
 Comportamiento:
 - Usa `v-model:open` para controlar visibilidad
 - Emite `success` al registrar el pago con éxito (la página recarga la venta)
-- Reutiliza helpers puros de `useVenta.ts`: `resumenCobro`, `clampNoVuelto`, `sumaPagos`
+- Reutiliza helpers puros de `useVenta.ts`: `resumenCobro`, `sumaPagos`
+- "Agregar pago" prellena el pago nuevo con el restante; al escribir un monto, los demás pagos absorben el excedente (`setMontoPago`: reducen empezando por el primero, nunca aumentan solos)
+- Si los métodos sin vuelto superan el saldo, se deshabilita el confirmar con mensaje (validación al confirmar, no mientras se escribe)
+- Los pagos que quedan en $0 se omiten al registrar (no ensucian el ledger)
 
 ### Composables
 
 - `usePaginatedList` — listados paginados server-side (`app/composables/usePaginatedList.ts`)
-- Helpers de cobro en `useVenta.ts`: `resumenCobro`, `clampNoVuelto`, `sumaPagos`
+- Helpers de cobro en `useVenta.ts`: `resumenCobro`, `setMontoPago`, `sumaPagos`
 
 ---
 

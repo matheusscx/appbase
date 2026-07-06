@@ -7,7 +7,7 @@ import {
   descontarStockCatalogo,
   sumaPagos,
   resumenCobro,
-  clampNoVuelto,
+  setMontoPago,
   puedeCobrar,
   type CarritoLinea,
   type ItemCatalogo,
@@ -115,62 +115,103 @@ describe('pagos helpers', () => {
     expect(r.vuelto).toBe('0')
     expect(r.excedenteSinVuelto).toBe(true)
   })
-})
 
-describe('clampNoVuelto', () => {
-  const metodos = [
+  const metodosMixtos = [
     { metodoPagoId: 'efe', permiteVuelto: true },
     { metodoPagoId: 'tdc', permiteVuelto: false },
   ]
 
-  it('recorta el monto de un método sin vuelto al total', () => {
-    const r = clampNoVuelto('1500.0000', [{ metodoPagoId: 'tdc', monto: '2000' }], metodos)
-    expect(r[0]!.monto).toBe('1500')
-  })
-
-  it('no toca un método sin vuelto cuyo monto no supera el total', () => {
-    const r = clampNoVuelto('1500.0000', [{ metodoPagoId: 'tdc', monto: '1500.0000' }], metodos)
-    expect(r[0]!.monto).toBe('1500.0000')
-  })
-
-  it('nunca aumenta el monto, solo lo recorta', () => {
-    const r = clampNoVuelto('1500', [{ metodoPagoId: 'tdc', monto: '500' }], metodos)
-    expect(r[0]!.monto).toBe('500')
-  })
-
-  it('permite sobrepago en métodos con vuelto (no recorta efectivo)', () => {
-    const r = clampNoVuelto('1500', [{ metodoPagoId: 'efe', monto: '2000' }], metodos)
-    expect(r[0]!.monto).toBe('2000')
-  })
-
-  it('en pagos divididos, recorta el método sin vuelto al restante tras los otros pagos', () => {
-    const r = clampNoVuelto(
-      '1500',
-      [{ metodoPagoId: 'efe', monto: '1000' }, { metodoPagoId: 'tdc', monto: '900' }],
-      metodos,
+  it('resumenCobro: excedenteSinVuelto cuando los métodos sin vuelto superan el total, aunque haya efectivo', () => {
+    const r = resumenCobro(
+      '1000',
+      [{ metodoPagoId: 'efe', monto: '100' }, { metodoPagoId: 'tdc', monto: '1100' }],
+      metodosMixtos,
     )
-    expect(r[0]!.monto).toBe('1000')
+    expect(r.vuelto).toBe('0')
+    expect(r.excedenteSinVuelto).toBe(true)
+  })
+
+  it('resumenCobro: vuelto cuando el excedente proviene del efectivo y los métodos sin vuelto no superan el total', () => {
+    const r = resumenCobro(
+      '1000',
+      [{ metodoPagoId: 'tdc', monto: '800' }, { metodoPagoId: 'efe', monto: '500' }],
+      metodosMixtos,
+    )
+    expect(r.vuelto).toBe('300')
+    expect(r.excedenteSinVuelto).toBe(false)
+  })
+
+  it('resumenCobro: varios métodos sin vuelto que en conjunto superan el total marcan excedenteSinVuelto', () => {
+    const r = resumenCobro(
+      '1000',
+      [{ metodoPagoId: 'tdc', monto: '700' }, { metodoPagoId: 'tdc', monto: '400' }],
+      metodosMixtos,
+    )
+    expect(r.vuelto).toBe('0')
+    expect(r.excedenteSinVuelto).toBe(true)
+  })
+})
+
+describe('setMontoPago', () => {
+  it('editar el segundo pago le resta el excedente al primero', () => {
+    const r = setMontoPago('5950', [
+      { metodoPagoId: 'efe', monto: '5950' },
+      { metodoPagoId: 'tdc', monto: '0' },
+    ], 1, '500')
+    expect(r[0]!.monto).toBe('5450')
     expect(r[1]!.monto).toBe('500')
   })
 
-  it('recorta a 0 cuando los otros pagos ya cubren el total', () => {
-    const r = clampNoVuelto(
-      '1500',
-      [{ metodoPagoId: 'efe', monto: '1500' }, { metodoPagoId: 'tdc', monto: '300' }],
-      metodos,
-    )
-    expect(r[1]!.monto).toBe('0')
+  it('no toca los demás pagos cuando la suma no supera el total', () => {
+    const r = setMontoPago('5950', [
+      { metodoPagoId: 'efe', monto: '3000' },
+      { metodoPagoId: 'tdc', monto: '0' },
+    ], 1, '500')
+    expect(r[0]!.monto).toBe('3000')
+    expect(r[1]!.monto).toBe('500')
   })
 
-  it('es idempotente', () => {
-    const once = clampNoVuelto('1500', [{ metodoPagoId: 'tdc', monto: '2000' }], metodos)
-    const twice = clampNoVuelto('1500', once, metodos)
-    expect(twice).toEqual(once)
+  it('el pago editado conserva lo escrito aunque él solo supere el total (los demás bajan a 0)', () => {
+    const r = setMontoPago('5950', [
+      { metodoPagoId: 'efe', monto: '5950' },
+      { metodoPagoId: 'tdc', monto: '0' },
+    ], 1, '7000')
+    expect(r[0]!.monto).toBe('0')
+    expect(r[1]!.monto).toBe('7000')
   })
 
-  it('devuelve la misma referencia de array cuando no hay cambios', () => {
-    const pagos = [{ metodoPagoId: 'tdc', monto: '1500' }]
-    expect(clampNoVuelto('1500', pagos, metodos)).toBe(pagos)
+  it('el excedente cascadea entre varios pagos empezando por el primero', () => {
+    const r = setMontoPago('1000', [
+      { metodoPagoId: 'efe', monto: '300' },
+      { metodoPagoId: 'tdc', monto: '700' },
+      { metodoPagoId: 'trf', monto: '0' },
+    ], 2, '500')
+    expect(r[0]!.monto).toBe('0')
+    expect(r[1]!.monto).toBe('500')
+    expect(r[2]!.monto).toBe('500')
+  })
+
+  it('un solo pago puede sobrepagar (no hay otros para ajustar; el vuelto se resuelve al confirmar)', () => {
+    const r = setMontoPago('5950', [{ metodoPagoId: 'efe', monto: '5950' }], 0, '10000')
+    expect(r[0]!.monto).toBe('10000')
+  })
+
+  it('editar el primer pago ajusta a los siguientes', () => {
+    const r = setMontoPago('1000', [
+      { metodoPagoId: 'efe', monto: '400' },
+      { metodoPagoId: 'tdc', monto: '600' },
+    ], 0, '700')
+    expect(r[0]!.monto).toBe('700')
+    expect(r[1]!.monto).toBe('300')
+  })
+
+  it('reducir un pago no aumenta los demás automáticamente', () => {
+    const r = setMontoPago('1000', [
+      { metodoPagoId: 'efe', monto: '500' },
+      { metodoPagoId: 'tdc', monto: '500' },
+    ], 1, '200')
+    expect(r[0]!.monto).toBe('500')
+    expect(r[1]!.monto).toBe('200')
   })
 })
 

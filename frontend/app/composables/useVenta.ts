@@ -117,48 +117,48 @@ export function resumenCobro(
     }
   }
 
-  const algunPermiteVuelto = pagos.some((p) =>
-    metodos.find((m) => m.metodoPagoId === p.metodoPagoId)?.permiteVuelto,
-  )
+  // El vuelto se devuelve en efectivo: el excedente solo es válido si los
+  // métodos sin vuelto (tarjeta, transferencia) no superan el total entre
+  // todos — lo cobrado de más por esos métodos no se puede devolver.
+  const sumaNoVuelto = pagos.reduce((acc, p) => {
+    const permiteVuelto = metodos.find(
+      (m) => m.metodoPagoId === p.metodoPagoId,
+    )?.permiteVuelto
+    return permiteVuelto === false ? acc.plus(new Decimal(p.monto || '0')) : acc
+  }, new Decimal(0))
+  const excedenteSinVuelto = sumaNoVuelto.gt(totalD)
   return {
     restante: '0',
-    vuelto: algunPermiteVuelto ? excedente.toString() : '0',
-    excedenteSinVuelto: !algunPermiteVuelto,
+    vuelto: excedenteSinVuelto ? '0' : excedente.toString(),
+    excedenteSinVuelto,
   }
 }
 
 /**
- * Recorta el monto de los pagos cuyo método no permite vuelto para que el total
- * cobrado no supere `total`: un método sin vuelto no puede sobrepagar (no hay
- * cómo devolver el excedente). Solo reduce, nunca aumenta. Los métodos que
- * permiten vuelto (efectivo) no se tocan: pueden sobrepagar y generar vuelto.
- * Idempotente; devuelve la misma referencia si no hubo cambios.
+ * Fija el monto del pago `indice` y hace las cuentas por el cajero: si la suma
+ * supera el total, los demás pagos absorben el excedente (se reducen empezando
+ * por el primero, con piso 0). Nunca aumenta un monto que el cajero no editó,
+ * y lo escrito en el pago editado se respeta siempre — si él solo supera el
+ * total, el excedente restante se resuelve como vuelto/validación al confirmar.
  */
-export function clampNoVuelto(
+export function setMontoPago(
   total: string,
   pagos: PagoInput[],
-  metodos: { metodoPagoId: string; permiteVuelto: boolean }[],
+  indice: number,
+  monto: string,
 ): PagoInput[] {
-  const totalD = new Decimal(total || '0')
-  let cambio = false
-  const clamped = pagos.map((p, i) => {
-    const permiteVuelto = metodos.find(
-      (m) => m.metodoPagoId === p.metodoPagoId,
-    )?.permiteVuelto
-    if (permiteVuelto !== false) return p
+  const nuevos = pagos.map((p, i) => (i === indice ? { ...p, monto } : p))
+  let exceso = new Decimal(sumaPagos(nuevos)).minus(new Decimal(total || '0'))
+  if (exceso.lte(0)) return nuevos
 
-    const otros = pagos.reduce(
-      (acc, q, j) => (j === i ? acc : acc.plus(new Decimal(q.monto || '0'))),
-      new Decimal(0),
-    )
-    const disponible = Decimal.max(0, totalD.minus(otros))
-    const monto = new Decimal(p.monto || '0')
-    if (monto.lte(disponible)) return p
-
-    cambio = true
-    return { ...p, monto: disponible.toString() }
+  return nuevos.map((p, i) => {
+    if (i === indice || exceso.lte(0)) return p
+    const actual = new Decimal(p.monto || '0')
+    const rebaja = Decimal.min(actual, exceso)
+    if (rebaja.lte(0)) return p
+    exceso = exceso.minus(rebaja)
+    return { ...p, monto: actual.minus(rebaja).toString() }
   })
-  return cambio ? clamped : pagos
 }
 
 // ── Gate ────────────────────────────────────────────────────────────────────
