@@ -345,6 +345,13 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-storefront-outline',
         tieneConfiguracion: false,
       },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440172',
+        nombre: 'Suscripciones',
+        url: '/suscripciones',
+        icono: 'mdi-autorenew',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -480,6 +487,21 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440154',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440152', // Tienda Online
         permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440173',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440172', // Suscripciones
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440174',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440172', // Suscripciones
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440175',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440172', // Suscripciones
+        permisoId: ELIMINAR,
       },
     ];
 
@@ -658,6 +680,20 @@ export class SeederService implements OnApplicationBootstrap {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440156',
         tenantId: '550e8400-e29b-41d4-a716-446655440040',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440152', // Falabella → Tienda Online
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440176',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440172', // Paris → Suscripciones
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440177',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440172', // Falabella → Suscripciones
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },

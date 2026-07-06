@@ -134,6 +134,7 @@ export class SuscripcionesService {
       dia_semana: number | null;
       estado: string;
       proximo_cobro: string;
+      activa_hasta: string | null;
       tarjeta_marca: string | null;
       tarjeta_last4: string | null;
       venta_inicial_id: string | null;
@@ -142,7 +143,8 @@ export class SuscripcionesService {
       `SELECT s.suscripcion_id, s.item_id, i.nombre AS item_nombre,
               i.precio_base, i.moneda_id,
               s.frecuencia, s.dia_mes, s.dia_semana, s.estado, s.proximo_cobro,
-              s.tarjeta_marca, s.tarjeta_last4, s.venta_inicial_id, s.creado_el
+              s.activa_hasta, s.tarjeta_marca, s.tarjeta_last4,
+              s.venta_inicial_id, s.creado_el
        FROM suscripciones s
        JOIN items i ON i.item_id = s.item_id AND i.eliminado_el IS NULL
        WHERE s.tenant_id = $1 AND s.usuario_id = $2 AND s.eliminado_el IS NULL
@@ -161,6 +163,7 @@ export class SuscripcionesService {
       diaSemana: r.dia_semana,
       estado: r.estado,
       proximoCobro: r.proximo_cobro,
+      activaHasta: r.activa_hasta,
       tarjetaMarca: r.tarjeta_marca,
       tarjetaLast4: r.tarjeta_last4,
       ventaInicialId: r.venta_inicial_id,
@@ -168,14 +171,75 @@ export class SuscripcionesService {
     }));
   }
 
+  async findTodas(tenantId: string) {
+    const rows: {
+      suscripcion_id: string;
+      item_id: string;
+      item_nombre: string;
+      precio_base: string;
+      moneda_id: string;
+      usuario_id: string;
+      usuario_nombre: string;
+      usuario_email: string;
+      frecuencia: string;
+      dia_mes: number | null;
+      dia_semana: number | null;
+      estado: string;
+      proximo_cobro: string;
+      activa_hasta: string | null;
+      tarjeta_marca: string | null;
+      tarjeta_last4: string | null;
+      venta_inicial_id: string | null;
+      creado_el: Date;
+    }[] = await this.dataSource.query(
+      `SELECT s.suscripcion_id, s.item_id, i.nombre AS item_nombre,
+              i.precio_base, i.moneda_id,
+              s.usuario_id, u.nombre AS usuario_nombre, u.correo AS usuario_email,
+              s.frecuencia, s.dia_mes, s.dia_semana, s.estado, s.proximo_cobro,
+              s.activa_hasta, s.tarjeta_marca, s.tarjeta_last4,
+              s.venta_inicial_id, s.creado_el
+       FROM suscripciones s
+       JOIN items i ON i.item_id = s.item_id AND i.eliminado_el IS NULL
+       JOIN usuarios u ON u.usuario_id = s.usuario_id AND u.eliminado_el IS NULL
+       WHERE s.tenant_id = $1 AND s.eliminado_el IS NULL
+       ORDER BY s.creado_el DESC`,
+      [tenantId],
+    );
+
+    return rows.map((r) => ({
+      id: r.suscripcion_id,
+      itemId: r.item_id,
+      itemNombre: r.item_nombre,
+      precio: r.precio_base,
+      monedaId: r.moneda_id,
+      usuarioId: r.usuario_id,
+      usuarioNombre: r.usuario_nombre,
+      usuarioEmail: r.usuario_email,
+      frecuencia: r.frecuencia,
+      diaMes: r.dia_mes,
+      diaSemana: r.dia_semana,
+      estado: r.estado,
+      proximoCobro: r.proximo_cobro,
+      activaHasta: r.activa_hasta,
+      tarjetaMarca: r.tarjeta_marca,
+      tarjetaLast4: r.tarjeta_last4,
+      ventaInicialId: r.venta_inicial_id,
+      creadoEl: r.creado_el,
+    }));
+  }
+
+  // usuarioId = null ⇒ scope admin: opera sobre cualquier suscripción del tenant.
   async cambiarEstado(
     tenantId: string,
-    usuarioId: string,
+    usuarioId: string | null,
     suscripcionId: string,
     dto: UpdateSuscripcionDto,
   ) {
     const suscripcion = await this.suscripcionRepo.findOne({
-      where: { id: suscripcionId, tenantId, usuarioId },
+      where:
+        usuarioId === null
+          ? { id: suscripcionId, tenantId }
+          : { id: suscripcionId, tenantId, usuarioId },
     });
     if (!suscripcion) {
       throw new NotFoundException('Suscripción no encontrada');
@@ -189,7 +253,32 @@ export class SuscripcionesService {
     }
 
     suscripcion.estado = transicion.hacia;
+    if (dto.accion === 'cancelar') {
+      // El período ya cobrado sigue vigente: usable hasta el día anterior a
+      // activa_hasta, "se cancela ese día a primera hora".
+      suscripcion.activaHasta = suscripcion.proximoCobro;
+    }
     await this.suscripcionRepo.save(suscripcion);
-    return { id: suscripcion.id, estado: suscripcion.estado };
+    return {
+      id: suscripcion.id,
+      estado: suscripcion.estado,
+      activaHasta: suscripcion.activaHasta,
+    };
+  }
+
+  async eliminar(tenantId: string, suscripcionId: string) {
+    const suscripcion = await this.suscripcionRepo.findOne({
+      where: { id: suscripcionId, tenantId },
+    });
+    if (!suscripcion) {
+      throw new NotFoundException('Suscripción no encontrada');
+    }
+    if (suscripcion.estado !== 'cancelada') {
+      throw new BadRequestException(
+        'Solo se pueden eliminar suscripciones canceladas',
+      );
+    }
+    await this.suscripcionRepo.softRemove(suscripcion);
+    return { id: suscripcion.id };
   }
 }

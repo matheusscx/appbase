@@ -36,6 +36,11 @@ export class Suscripcion {
   @Column({ name: 'proximo_cobro', type: 'date' })
   proximoCobro: string;
 
+  // Al cancelar: fin del período ya pagado (= proximo_cobro vigente en ese momento).
+  // La suscripción queda usable hasta el día anterior; "se cancela ese día a primera hora".
+  @Column({ name: 'activa_hasta', type: 'date', nullable: true })
+  activaHasta: string | null;
+
   @Column({ name: 'tarjeta_marca', type: 'text', nullable: true })
   tarjetaMarca: string | null;
 
