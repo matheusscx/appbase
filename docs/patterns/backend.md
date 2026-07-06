@@ -144,10 +144,40 @@ export class MonedasController {
 | `JwtAuthGuard` | token válido | `../auth/guards/jwt-auth.guard` |
 | `TenantGuard` | membresía en el tenant del token | `../../common/guards/tenant.guard` |
 | `TenantAdminGuard` | rol admin (fijo) en el tenant | `../../common/guards/tenant-admin.guard` |
+| `PermisosGuard` | permiso RBAC granular (`rol → módulo contratado → permiso`) | `../../common/guards/permisos.guard` |
 
-> Si en el futuro hay un permiso RBAC granular para la feature, migrar de
-> `TenantAdminGuard` a un guard `@RequiresPermiso(...)`. Por ahora el estándar de
-> las pantallas de configuración es `TenantAdminGuard`.
+**Dos estándares según el tipo de pantalla:**
+
+- **Catálogos de configuración financiera** (monedas, impuestos, descuentos, recargos,
+  categorías, métodos-pago, tipos-regla, roles): siguen usando `TenantAdminGuard`
+  por-handler en las mutaciones. Son admin-only por decisión de producto, no se
+  modelan como módulos RBAC.
+- **Módulos de negocio** (Caja, Ventas, Pagos, Inventario, Items, Terceros, Tienda
+  Online, Suscripciones): usan `PermisosGuard` a nivel de controller +
+  `@RequiresPermiso('<Modulo>', '<Permiso>')` por handler, para poder conceder el
+  módulo a roles no-admin sin dar acceso total al tenant. Un rol `es_fijo` (admin)
+  sigue teniendo acceso total vía short-circuit en `RbacService.userHasPermiso`,
+  sin necesidad de permisos explícitos. Ejemplo (`caja.controller.ts`):
+
+```typescript
+@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
+@Controller('caja')
+export class CajaController {
+  @Get()
+  @RequiresPermiso('Caja', 'Leer')
+  historial(@Req() req: Request) { /* ... */ }
+
+  @Post('abrir')
+  @RequiresPermiso('Caja', 'Crear')
+  abrir(@Req() req: Request, @Body() dto: AbrirCajaDto) { /* ... */ }
+}
+```
+
+> Al agregar un módulo de negocio nuevo: registrar el `modulo_app` y sus
+> `modulo_app_permisos` (CRUD estándar Leer/Crear/Actualizar/Eliminar/Ver todas)
+> en `seeder.service.ts`, luego aplicar `PermisosGuard` + `@RequiresPermiso(...)`.
+> Ocultar el link en el sidebar del frontend (`can(modulo, permiso)`) es
+> complementario, no un sustituto del enforcement en el backend.
 
 ---
 

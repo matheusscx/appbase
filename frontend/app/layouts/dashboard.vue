@@ -42,7 +42,7 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/ventas',
     })
   }
-  if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Leer')) {
+  if (permissionsStore.esAdmin || permissionsStore.can('Pagos', 'Leer')) {
     base.push({
       label: 'Pagos',
       icon: 'i-lucide-credit-card',
@@ -80,7 +80,7 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/suscripciones',
     })
   }
-  if (permissionsStore.esAdmin) {
+  if (permissionsStore.esAdmin || permissionsStore.can('Terceros', 'Leer')) {
     base.push({
       label: 'Terceros',
       icon: 'i-lucide-contact',

@@ -27,10 +27,11 @@ venta y sirve como referencia para proveedores en compras/documentos futuros.
 ### Scope
 
 - Included: CRUD de terceros (tenant-scoped, soft delete); selector de tercero en el
-  POS que autocompleta los datos de facturación de la venta (`venta_customer.tercero_id`).
-- NOT included (future): módulo de compras a proveedores; permiso RBAC granular
-  "Terceros" (se usa `TenantAdminGuard`, como el resto de CRUD de configuración);
-  búsqueda remota paginada en el picker (hoy precarga los terceros activos).
+  POS que autocompleta los datos de facturación de la venta (`venta_customer.tercero_id`);
+  módulo RBAC propio "Terceros" (`Leer`/`Crear`/`Actualizar`/`Eliminar`), asignable a
+  roles no-admin.
+- NOT included (future): módulo de compras a proveedores; búsqueda remota paginada
+  en el picker (hoy precarga los terceros activos).
 
 ---
 
@@ -38,13 +39,14 @@ venta y sirve como referencia para proveedores en compras/documentos futuros.
 
 ### `GET /terceros`
 
-Lista los terceros del tenant (ordenados por nombre). Requiere sesión (`JwtAuthGuard`
-+ `TenantGuard`); cualquier usuario del tenant puede leer (necesario para el picker
-del POS).
+Lista los terceros del tenant (ordenados por nombre). Requiere `Terceros:Leer`
+(`PermisosGuard` + `@RequiresPermiso`). El picker del POS es "atajo opcional": si el
+usuario no tiene el permiso, el fetch falla en silencio y el formulario de cliente se
+completa a mano.
 
 ### `POST /terceros`
 
-Requiere `TenantAdminGuard`.
+Requiere `Terceros:Crear`.
 
 ```
 Request:
@@ -65,11 +67,11 @@ Response (201): el tercero creado (incluye tercero_id, creado_el, etc.)
 
 ### `PATCH /terceros/:id`
 
-Requiere `TenantAdminGuard`. Mismos campos, todos opcionales.
+Requiere `Terceros:Actualizar`. Mismos campos, todos opcionales.
 
 ### `DELETE /terceros/:id`
 
-Requiere `TenantAdminGuard`. Soft delete (`eliminado_el`).
+Requiere `Terceros:Eliminar`. Soft delete (`eliminado_el`).
 
 ---
 

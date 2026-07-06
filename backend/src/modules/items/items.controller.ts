@@ -13,32 +13,35 @@ import {
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
-import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
+import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { ItemsService } from './items.service';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 
-@UseGuards(JwtAuthGuard, TenantGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('items')
 export class ItemsController {
   constructor(private readonly itemsService: ItemsService) {}
 
   @Get()
+  @RequiresPermiso('Items', 'Leer')
   findAll(@Req() req: Request, @Query() query: QueryItemsDto) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.findAll(tenantId, query);
   }
 
   @Get(':id')
+  @RequiresPermiso('Items', 'Leer')
   findOne(@Req() req: Request, @Param('id') id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.findOne(tenantId, id);
   }
 
-  @UseGuards(TenantAdminGuard)
   @Post()
+  @RequiresPermiso('Items', 'Crear')
   create(@Req() req: Request, @Body() dto: CreateItemDto) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;
@@ -47,8 +50,8 @@ export class ItemsController {
     return this.itemsService.create(tenantId, usuarioId, dto);
   }
 
-  @UseGuards(TenantAdminGuard)
   @Patch(':id')
+  @RequiresPermiso('Items', 'Actualizar')
   update(
     @Req() req: Request,
     @Param('id') id: string,
@@ -58,15 +61,15 @@ export class ItemsController {
     return this.itemsService.update(tenantId, id, dto);
   }
 
-  @UseGuards(TenantAdminGuard)
   @Delete(':id')
+  @RequiresPermiso('Items', 'Eliminar')
   remove(@Req() req: Request, @Param('id') id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.remove(tenantId, id);
   }
 
-  @UseGuards(TenantAdminGuard)
   @Patch(':id/stock')
+  @RequiresPermiso('Items', 'Actualizar')
   ajustarStock(
     @Req() req: Request,
     @Param('id') id: string,
@@ -80,6 +83,7 @@ export class ItemsController {
   }
 
   @Get(':id/unidades')
+  @RequiresPermiso('Items', 'Leer')
   findUnidades(
     @Req() req: Request,
     @Param('id') id: string,
@@ -90,6 +94,7 @@ export class ItemsController {
   }
 
   @Get(':id/lotes')
+  @RequiresPermiso('Items', 'Leer')
   findLotes(@Req() req: Request, @Param('id') id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.itemsService.findLotes(tenantId, id);

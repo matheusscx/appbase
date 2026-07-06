@@ -36,14 +36,14 @@ el mismo carrito/catálogo.
     período se cobra de inmediato vía la pasarela dummy, en la misma
     transacción que crea la venta.
   - Medios de pago: solo frontend, mock en `localStorage`.
-  - Módulo RBAC "Tienda Online" (permisos Leer/Crear).
+  - Módulo RBAC "Tienda Online" (permisos Leer/Crear), enforcement real con
+    `PermisosGuard` + `@RequiresPermiso('Tienda Online', 'Crear')` en el checkout
+    (2026-07-06).
 - NOT included (future):
   - Storefront público / auth de customer final.
   - Integración con pasarela real.
   - Cobro recurrente automático (job/cron) de los períodos siguientes al
     primero — hoy solo se persiste `proximo_cobro`, sin ejecutor.
-  - Guard granular `@RequiresPermiso` por endpoint (sigue el estándar actual:
-    `JwtAuthGuard` + `TenantGuard`).
 
 ---
 

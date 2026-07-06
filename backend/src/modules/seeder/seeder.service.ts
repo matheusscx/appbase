@@ -310,13 +310,6 @@ export class SeederService implements OnApplicationBootstrap {
   private async seedModulosApp(): Promise<void> {
     const modulos: Partial<ModuloApp>[] = [
       {
-        moduloAppId: '550e8400-e29b-41d4-a716-446655440010',
-        nombre: 'Facturación',
-        url: '/facturacion',
-        icono: 'mdi-file-document-multiple-outline',
-        tieneConfiguracion: false,
-      },
-      {
         moduloAppId: '550e8400-e29b-41d4-a716-446655440011',
         nombre: 'Caja',
         url: '/caja',
@@ -342,6 +335,34 @@ export class SeederService implements OnApplicationBootstrap {
         nombre: 'Suscripciones',
         url: '/suscripciones',
         icono: 'mdi-autorenew',
+        tieneConfiguracion: false,
+      },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440180',
+        nombre: 'Pagos',
+        url: '/pagos',
+        icono: 'mdi-cash-multiple',
+        tieneConfiguracion: false,
+      },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440181',
+        nombre: 'Inventario',
+        url: '/configuracion/inventario',
+        icono: 'mdi-warehouse',
+        tieneConfiguracion: false,
+      },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440182',
+        nombre: 'Items',
+        url: '/configuracion/items',
+        icono: 'mdi-package-variant',
+        tieneConfiguracion: false,
+      },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440183',
+        nombre: 'Terceros',
+        url: '/terceros',
+        icono: 'mdi-account-multiple-outline',
         tieneConfiguracion: false,
       },
     ];
@@ -385,35 +406,19 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedModuloAppPermisos(): Promise<void> {
-    const FACTURACION = '550e8400-e29b-41d4-a716-446655440010';
     const CAJA = '550e8400-e29b-41d4-a716-446655440011';
     const LEER = '550e8400-e29b-41d4-a716-446655440012';
     const CREAR = '550e8400-e29b-41d4-a716-446655440013';
     const ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440014';
     const ELIMINAR = '550e8400-e29b-41d4-a716-446655440015';
     const VER_TODAS = '550e8400-e29b-41d4-a716-446655440016';
+    const VENTAS = '550e8400-e29b-41d4-a716-446655440058';
+    const PAGOS = '550e8400-e29b-41d4-a716-446655440180';
+    const INVENTARIO = '550e8400-e29b-41d4-a716-446655440181';
+    const ITEMS = '550e8400-e29b-41d4-a716-446655440182';
+    const TERCEROS = '550e8400-e29b-41d4-a716-446655440183';
 
     const entries: Partial<ModuloAppPermiso>[] = [
-      {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440030',
-        moduloAppId: FACTURACION,
-        permisoId: LEER,
-      },
-      {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440031',
-        moduloAppId: FACTURACION,
-        permisoId: CREAR,
-      },
-      {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440032',
-        moduloAppId: FACTURACION,
-        permisoId: ACTUALIZAR,
-      },
-      {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440033',
-        moduloAppId: FACTURACION,
-        permisoId: ELIMINAR,
-      },
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440034',
         moduloAppId: CAJA,
@@ -472,6 +477,91 @@ export class SeederService implements OnApplicationBootstrap {
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440175',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440172', // Suscripciones
+        permisoId: ELIMINAR,
+      },
+      // Ventas: completar el set (Leer/Crear ya sembrados arriba)
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440184',
+        moduloAppId: VENTAS,
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440185',
+        moduloAppId: VENTAS,
+        permisoId: ELIMINAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440186',
+        moduloAppId: VENTAS,
+        permisoId: VER_TODAS,
+      },
+      // Pagos
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440187',
+        moduloAppId: PAGOS,
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440188',
+        moduloAppId: PAGOS,
+        permisoId: CREAR,
+      },
+      // Inventario
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440189',
+        moduloAppId: INVENTARIO,
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440190',
+        moduloAppId: INVENTARIO,
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440191',
+        moduloAppId: INVENTARIO,
+        permisoId: VER_TODAS,
+      },
+      // Items (Catálogo)
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440192',
+        moduloAppId: ITEMS,
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440193',
+        moduloAppId: ITEMS,
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440194',
+        moduloAppId: ITEMS,
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440195',
+        moduloAppId: ITEMS,
+        permisoId: ELIMINAR,
+      },
+      // Terceros
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440196',
+        moduloAppId: TERCEROS,
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440197',
+        moduloAppId: TERCEROS,
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440198',
+        moduloAppId: TERCEROS,
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440199',
+        moduloAppId: TERCEROS,
         permisoId: ELIMINAR,
       },
     ];
@@ -662,16 +752,65 @@ export class SeederService implements OnApplicationBootstrap {
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
       {
-        moduloTenantId: '550e8400-e29b-41d4-a716-446655440042',
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440043',
         tenantId: '550e8400-e29b-41d4-a716-446655440040',
-        moduloAppId: '550e8400-e29b-41d4-a716-446655440010', // Falabella → Facturación
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440011', // Falabella → Caja
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
       {
-        moduloTenantId: '550e8400-e29b-41d4-a716-446655440043',
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440200',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440180', // Paris → Pagos
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440201',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440181', // Paris → Inventario
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440202',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440182', // Paris → Items
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440203',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440183', // Paris → Terceros
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440204',
         tenantId: '550e8400-e29b-41d4-a716-446655440040',
-        moduloAppId: '550e8400-e29b-41d4-a716-446655440011', // Falabella → Caja
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440180', // Falabella → Pagos
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440205',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440181', // Falabella → Inventario
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440206',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440182', // Falabella → Items
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440207',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440183', // Falabella → Terceros
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
@@ -1624,6 +1763,10 @@ export class SeederService implements OnApplicationBootstrap {
     const MODULO_TENANT_CAJA = '550e8400-e29b-41d4-a716-446655440023';
     // moduloTenantId para Paris → Ventas (recién agregado en Paso 3)
     const MODULO_TENANT_VENTAS = '550e8400-e29b-41d4-a716-446655440061';
+    // moduloTenantId para Paris → Pagos
+    const MODULO_TENANT_PAGOS = '550e8400-e29b-41d4-a716-446655440200';
+    // moduloTenantId para Paris → Items (POS necesita leer el catálogo)
+    const MODULO_TENANT_ITEMS = '550e8400-e29b-41d4-a716-446655440202';
     // moduloAppPermiso IDs de Caja (definidos en seedModuloAppPermisos)
     const CAJA_LEER = '550e8400-e29b-41d4-a716-446655440034';
     const CAJA_CREAR = '550e8400-e29b-41d4-a716-446655440035';
@@ -1631,6 +1774,11 @@ export class SeederService implements OnApplicationBootstrap {
     // moduloAppPermiso IDs de Ventas (recién agregados en Paso 2)
     const VENTAS_LEER = '550e8400-e29b-41d4-a716-446655440059';
     const VENTAS_CREAR = '550e8400-e29b-41d4-a716-446655440060';
+    // moduloAppPermiso IDs de Pagos
+    const PAGOS_LEER = '550e8400-e29b-41d4-a716-446655440187';
+    const PAGOS_CREAR = '550e8400-e29b-41d4-a716-446655440188';
+    // moduloAppPermiso ID de Items (leer catálogo, necesario para POS)
+    const ITEMS_LEER = '550e8400-e29b-41d4-a716-446655440192';
 
     const vendedorRows: { rol_id: string }[] = await this.dataSource.query(
       `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Vendedor' AND eliminado_el IS NULL`,
@@ -1660,6 +1808,20 @@ export class SeederService implements OnApplicationBootstrap {
       [rolId, MODULO_TENANT_VENTAS],
     );
 
+    // Asociar Vendedor al módulo Pagos del tenant Paris
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [rolId, MODULO_TENANT_PAGOS],
+    );
+
+    // Asociar Vendedor al módulo Items del tenant Paris (POS necesita leer el catálogo)
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [rolId, MODULO_TENANT_ITEMS],
+    );
+
     // Asignar Caja: Leer, Crear, Actualizar (sin VerTodas — ese es el diferenciador admin/supervisor)
     for (const moduloAppPermisoId of [CAJA_LEER, CAJA_CREAR, CAJA_ACTUALIZAR]) {
       await this.dataSource.query(
@@ -1677,5 +1839,21 @@ export class SeederService implements OnApplicationBootstrap {
         [rolId, MODULO_TENANT_VENTAS, moduloAppPermisoId],
       );
     }
+
+    // Asignar Pagos: Leer, Crear
+    for (const moduloAppPermisoId of [PAGOS_LEER, PAGOS_CREAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [rolId, MODULO_TENANT_PAGOS, moduloAppPermisoId],
+      );
+    }
+
+    // Asignar Items: Leer (POS necesita listar el catálogo)
+    await this.dataSource.query(
+      `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [rolId, MODULO_TENANT_ITEMS, ITEMS_LEER],
+    );
   }
 }

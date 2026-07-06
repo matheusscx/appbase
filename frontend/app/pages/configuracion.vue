@@ -76,17 +76,23 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         icon: 'i-lucide-credit-card',
         to: '/configuracion/metodos-pago',
       },
-      {
-        label: 'Items',
-        icon: 'i-lucide-archive',
-        to: '/configuracion/items',
-      },
-      {
-        label: 'Inventario',
-        icon: 'i-lucide-clipboard-list',
-        to: '/configuracion/inventario',
-      },
     )
+  }
+
+  if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
+    items.push({
+      label: 'Items',
+      icon: 'i-lucide-archive',
+      to: '/configuracion/items',
+    })
+  }
+
+  if (permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Leer')) {
+    items.push({
+      label: 'Inventario',
+      icon: 'i-lucide-clipboard-list',
+      to: '/configuracion/inventario',
+    })
   }
 
   return items
