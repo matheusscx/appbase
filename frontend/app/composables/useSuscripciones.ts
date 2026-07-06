@@ -1,89 +1,83 @@
+import { useApiFetch } from './useApiFetch'
+
 export interface Suscripcion {
   id: string
+  itemId: string
   itemNombre: string
   precio: string
-  frecuencia: 'semanal' | 'mensual' | 'anual'
-  proximoCobro: string
+  monedaId: string | null
+  frecuencia: 'semanal' | 'quincenal' | 'mensual'
+  diaMes: number | null
+  diaSemana: number | null
   estado: 'activa' | 'pausada' | 'cancelada'
+  proximoCobro: string
+  tarjetaMarca: string | null
+  tarjetaLast4: string | null
+  ventaInicialId: string | null
 }
 
-function proximaFecha(diasDesdeHoy: number): string {
-  const fecha = new Date()
-  fecha.setDate(fecha.getDate() + diasDesdeHoy)
-  return fecha.toISOString()
-}
+const ESTADO_TRAS_ACCION = {
+  pausar: 'pausada',
+  reanudar: 'activa',
+  cancelar: 'cancelada',
+} as const
 
-function seedEjemplos(): Suscripcion[] {
-  return [
-    {
-      id: crypto.randomUUID(),
-      itemNombre: 'Plan Mantenimiento Mensual',
-      precio: '15000',
-      frecuencia: 'mensual',
-      proximoCobro: proximaFecha(30),
-      estado: 'activa',
-    },
-    {
-      id: crypto.randomUUID(),
-      itemNombre: 'Soporte Premium',
-      precio: '9990',
-      frecuencia: 'mensual',
-      proximoCobro: proximaFecha(15),
-      estado: 'pausada',
-    },
-  ]
-}
+const TOAST_ACCION = {
+  pausar: 'Suscripción pausada',
+  reanudar: 'Suscripción reanudada',
+  cancelar: 'Suscripción cancelada',
+} as const
 
 /**
- * Suscripciones mock: solo frontend, persistidas en localStorage por tenant.
- * Sin backend — representan compras recurrentes de items del catálogo.
+ * Suscripciones del usuario autenticado — GET/PATCH /suscripciones.
+ * Reemplaza el mock anterior (localStorage): ahora es 100% API-backed.
  */
 export function useSuscripciones() {
-  const tenantStore = useTenantStore()
-  const storageKey = computed(
-    () => `tienda:suscripciones:${tenantStore.activeTenant?.tenantId ?? 'sin-tenant'}`,
-  )
+  const config = useRuntimeConfig()
+  const toast = useToast()
+  const apiUrl = config.public.apiUrl
+
   const suscripciones = ref<Suscripcion[]>([])
+  const loading = ref(false)
+  const mutando = reactive(new Set<string>())
 
-  function persistir() {
-    if (import.meta.server) return
-    localStorage.setItem(storageKey.value, JSON.stringify(suscripciones.value))
-  }
-
-  function cargar() {
-    if (import.meta.server) return
+  async function cargar() {
+    loading.value = true
     try {
-      const raw = localStorage.getItem(storageKey.value)
-      if (raw) {
-        suscripciones.value = JSON.parse(raw) as Suscripcion[]
-        return
-      }
-    } catch {
-      // localStorage corrupto o inaccesible: se re-siembra abajo
+      suscripciones.value = await useApiFetch<Suscripcion[]>(`${apiUrl}/suscripciones`)
+    } catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar suscripciones'), color: 'error' })
+    } finally {
+      loading.value = false
     }
-    suscripciones.value = seedEjemplos()
-    persistir()
   }
 
-  function cambiarEstado(id: string, estado: Suscripcion['estado']) {
-    suscripciones.value = suscripciones.value.map((s) =>
-      s.id === id ? { ...s, estado } : s,
-    )
-    persistir()
+  async function accion(id: string, tipo: keyof typeof ESTADO_TRAS_ACCION) {
+    if (mutando.has(id)) return
+    const susc = suscripciones.value.find((s) => s.id === id)
+    if (!susc) return
+    mutando.add(id)
+    const prev = susc.estado
+    susc.estado = ESTADO_TRAS_ACCION[tipo] // optimista
+    try {
+      await useApiFetch(`${apiUrl}/suscripciones/${id}`, {
+        method: 'PATCH',
+        body: { accion: tipo },
+      })
+      toast.add({ title: TOAST_ACCION[tipo], color: 'success' })
+    } catch (e: unknown) {
+      susc.estado = prev // revert
+      toast.add({ title: apiErrorMsg(e, 'Error al actualizar'), color: 'error' })
+    } finally {
+      mutando.delete(id)
+    }
   }
 
-  function pausar(id: string) {
-    cambiarEstado(id, 'pausada')
-  }
-  function reanudar(id: string) {
-    cambiarEstado(id, 'activa')
-  }
-  function cancelar(id: string) {
-    cambiarEstado(id, 'cancelada')
-  }
+  const pausar = (id: string) => accion(id, 'pausar')
+  const reanudar = (id: string) => accion(id, 'reanudar')
+  const cancelar = (id: string) => accion(id, 'cancelar')
 
   onMounted(cargar)
-  watch(storageKey, cargar)
 
-  return { suscripciones, pausar, reanudar, cancelar }
+  return { suscripciones, loading, cargar, pausar, reanudar, cancelar }
 }

@@ -4,13 +4,30 @@ import type { Suscripcion } from '~/composables/useSuscripciones'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-const { suscripciones, pausar, reanudar, cancelar } = useSuscripciones()
+const { suscripciones, loading, pausar, reanudar, cancelar } = useSuscripciones()
 const { formatMonto, formatFecha } = useFormatters()
 
 const frecuenciaLabel: Record<Suscripcion['frecuencia'], string> = {
   semanal: 'Semanal',
+  quincenal: 'Quincenal',
   mensual: 'Mensual',
-  anual: 'Anual',
+}
+
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
+
+function detalleDia(s: Suscripcion): string {
+  if (s.frecuencia === 'semanal' && s.diaSemana !== null)
+    return `los ${DIAS_SEMANA[s.diaSemana]}`
+  if (s.frecuencia === 'quincenal' && s.diaMes !== null)
+    return `los días ${s.diaMes} y ${s.diaMes + 15}`
+  if (s.diaMes !== null) return `el día ${s.diaMes}`
+  return ''
+}
+
+function subtitulo(s: Suscripcion): string {
+  const dia = detalleDia(s)
+  const frecuencia = dia ? `${frecuenciaLabel[s.frecuencia]} ${dia}` : frecuenciaLabel[s.frecuencia]
+  return `${formatMonto(s.precio, s.monedaId ?? undefined)} · ${frecuencia} · próximo cobro ${formatFecha(s.proximoCobro)}`
 }
 
 const estadoColor: Record<Suscripcion['estado'], 'success' | 'warning' | 'neutral'> = {
@@ -49,11 +66,11 @@ const columns: TableColumn<Suscripcion>[] = [
           description="Compras recurrentes de items del catálogo — pausá, reanudá o cancelá cuando quieras."
         />
 
-        <CrudTable :data="suscripciones" :columns="columns">
+        <CrudTable :data="suscripciones" :columns="columns" :loading="loading">
           <template #itemNombre-cell="{ row }">
             <CrudListItem
               :title="row.original.itemNombre"
-              :subtitle="`${formatMonto(row.original.precio)} · ${frecuenciaLabel[row.original.frecuencia]} · próximo cobro ${formatFecha(row.original.proximoCobro)}`"
+              :subtitle="subtitulo(row.original)"
             />
           </template>
 
