@@ -1392,6 +1392,7 @@ export class SeederService implements OnApplicationBootstrap {
   private async seedItems(): Promise<void> {
     await this.seedItemSoporte();
     await this.seedItemsMonedaUnidadMatrix();
+    await this.seedItemsSuscripcion();
   }
 
   private async seedItemSoporte(): Promise<void> {
@@ -1424,6 +1425,64 @@ export class SeederService implements OnApplicationBootstrap {
         `INSERT INTO item_servicio (item_id, duracion_estimada, requiere_cita) VALUES ($1,$2,$3)`,
         [ITEM_SOPORTE, 60, true],
       );
+    }
+  }
+
+  private async seedItemsSuscripcion(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+
+    const suscripciones = [
+      {
+        itemId: '550e8400-e29b-41d4-a716-446655440157',
+        nombre: 'Mensualidad Gimnasio',
+        descripcion: 'Acceso mensual al gimnasio',
+        precioBase: '30000',
+        frecuencia: 'mensual',
+      },
+      {
+        itemId: '550e8400-e29b-41d4-a716-446655440158',
+        nombre: 'Clase semanal de yoga',
+        descripcion: 'Clase de yoga semanal',
+        precioBase: '8000',
+        frecuencia: 'semanal',
+      },
+      {
+        itemId: '550e8400-e29b-41d4-a716-446655440159',
+        nombre: 'Plan quincenal de limpieza',
+        descripcion: 'Plan de limpieza cada 15 días',
+        precioBase: '15000',
+        frecuencia: 'quincenal',
+      },
+    ];
+
+    for (const s of suscripciones) {
+      const existsSuscripcion: unknown[] = await this.dataSource.query(
+        `SELECT 1 FROM items WHERE item_id = $1`,
+        [s.itemId],
+      );
+      if (!existsSuscripcion.length) {
+        await this.dataSource.query(
+          `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion,
+                              precio_base, precio_incluye_impuesto, activo, tipo)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            s.itemId,
+            PARIS,
+            CLP,
+            s.nombre,
+            s.descripcion,
+            s.precioBase,
+            false,
+            true,
+            'suscripcion',
+          ],
+        );
+        await this.dataSource.query(
+          `INSERT INTO item_suscripcion (item_id, frecuencia) VALUES ($1,$2)`,
+          [s.itemId, s.frecuencia],
+        );
+      }
     }
   }
 
