@@ -6,6 +6,8 @@ const dateFmt = new Intl.DateTimeFormat('es-CL', {
   timeStyle: 'short',
 })
 
+const dateOnlyFmt = new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium' })
+
 export function useFormatters() {
   const { format: formatCurrency, formatOficial } = useCurrency()
 
@@ -19,6 +21,13 @@ export function useFormatters() {
 
   function formatFecha(iso: string | null | undefined): string {
     if (!iso) return '—'
+    // Fecha sin hora (columna DATE): interpretarla en hora local, no UTC —
+    // new Date('YYYY-MM-DD') la corre un día hacia atrás en TZ negativas.
+    const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+    if (dateOnly) {
+      const [, y, m, d] = dateOnly
+      return dateOnlyFmt.format(new Date(Number(y), Number(m) - 1, Number(d)))
+    }
     return dateFmt.format(new Date(iso))
   }
 

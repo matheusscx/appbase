@@ -142,8 +142,10 @@ export class SuscripcionesService {
     }[] = await this.dataSource.query(
       `SELECT s.suscripcion_id, s.item_id, i.nombre AS item_nombre,
               i.precio_base, i.moneda_id,
-              s.frecuencia, s.dia_mes, s.dia_semana, s.estado, s.proximo_cobro,
-              s.activa_hasta, s.tarjeta_marca, s.tarjeta_last4,
+              s.frecuencia, s.dia_mes, s.dia_semana, s.estado,
+              s.proximo_cobro::text AS proximo_cobro,
+              s.activa_hasta::text AS activa_hasta,
+              s.tarjeta_marca, s.tarjeta_last4,
               s.venta_inicial_id, s.creado_el
        FROM suscripciones s
        JOIN items i ON i.item_id = s.item_id AND i.eliminado_el IS NULL
@@ -195,8 +197,10 @@ export class SuscripcionesService {
       `SELECT s.suscripcion_id, s.item_id, i.nombre AS item_nombre,
               i.precio_base, i.moneda_id,
               s.usuario_id, u.nombre AS usuario_nombre, u.correo AS usuario_email,
-              s.frecuencia, s.dia_mes, s.dia_semana, s.estado, s.proximo_cobro,
-              s.activa_hasta, s.tarjeta_marca, s.tarjeta_last4,
+              s.frecuencia, s.dia_mes, s.dia_semana, s.estado,
+              s.proximo_cobro::text AS proximo_cobro,
+              s.activa_hasta::text AS activa_hasta,
+              s.tarjeta_marca, s.tarjeta_last4,
               s.venta_inicial_id, s.creado_el
        FROM suscripciones s
        JOIN items i ON i.item_id = s.item_id AND i.eliminado_el IS NULL
