@@ -1448,7 +1448,7 @@ export class SeederService implements OnApplicationBootstrap {
         frecuencia: 'semanal',
       },
       {
-        itemId: '550e8400-e29b-41d4-a716-446655440159',
+        itemId: '550e8400-e29b-41d4-a716-446655440171',
         nombre: 'Plan quincenal de limpieza',
         descripcion: 'Plan de limpieza cada 15 días',
         precioBase: '15000',
