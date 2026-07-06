@@ -81,6 +81,8 @@ import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-document
 import { Tercero } from './modules/terceros/entities/tercero.entity';
 import { TercerosModule } from './modules/terceros/terceros.module';
 import { OnlineModule } from './modules/online/online.module';
+import { Suscripcion } from './modules/suscripciones/entities/suscripcion.entity';
+import { SuscripcionesModule } from './modules/suscripciones/suscripciones.module';
 
 @Module({
   imports: [
@@ -145,6 +147,7 @@ import { OnlineModule } from './modules/online/online.module';
           Pago,
           TipoDocumentoTributario,
           Tercero,
+          Suscripcion,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -174,6 +177,7 @@ import { OnlineModule } from './modules/online/online.module';
     PagosModule,
     TercerosModule,
     OnlineModule,
+    SuscripcionesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
