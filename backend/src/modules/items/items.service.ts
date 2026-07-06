@@ -345,6 +345,12 @@ export class ItemsService {
         throw new NotFoundException('Item no encontrado');
       const tipo = existingRows[0].tipo;
 
+      if (dto.frecuencia !== undefined && tipo !== 'suscripcion') {
+        throw new BadRequestException(
+          'La frecuencia solo aplica a items de suscripción',
+        );
+      }
+
       if (dto.monedaId)
         await this.validarMoneda(manager, tenantId, dto.monedaId);
       if (dto.categoriaId) {

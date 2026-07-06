@@ -457,6 +457,34 @@ describe('ItemsService', () => {
       );
       expect(calls.some((sql) => sql.includes('modo_inventario'))).toBe(true);
     });
+
+    it('actualiza frecuencia de un item suscripción existente', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'suscripcion' }]) // SELECT existing
+        .mockResolvedValueOnce([]); // UPDATE item_suscripcion
+
+      const result = await service.update(TENANT, ITEM_ID, {
+        frecuencia: 'quincenal',
+      });
+
+      expect(result).toEqual({ id: ITEM_ID });
+      const calls = managerMock.query.mock.calls as [string, unknown[]][];
+      const updateCall = calls.find(([sql]) =>
+        sql.includes('UPDATE item_suscripcion'),
+      );
+      expect(updateCall).toBeDefined();
+      expect(updateCall?.[1]).toEqual(['quincenal', ITEM_ID]);
+    });
+
+    it('lanza BadRequestException al enviar frecuencia en un item que no es suscripción', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { item_id: ITEM_ID, tipo: 'producto' },
+      ]); // SELECT existing
+
+      await expect(
+        service.update(TENANT, ITEM_ID, { frecuencia: 'mensual' } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 
   // ── remove ─────────────────────────────────────────────────────────────────
