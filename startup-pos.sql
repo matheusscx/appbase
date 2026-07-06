@@ -775,6 +775,8 @@ CREATE TABLE "suscripciones" (
   "dia_semana"       SMALLINT,              -- semanal: 0-6 (0 = domingo)
   "estado"           TEXT        NOT NULL DEFAULT 'activa',  -- 'activa' | 'pausada' | 'cancelada'
   "proximo_cobro"    DATE        NOT NULL,
+  "activa_hasta"     DATE,                  -- al cancelar: fin del período pagado (= proximo_cobro vigente); usable hasta el día anterior
+
   "tarjeta_marca"    TEXT,
   "tarjeta_last4"    TEXT,
   "venta_inicial_id" UUID        REFERENCES "ventas" ("venta_id"),

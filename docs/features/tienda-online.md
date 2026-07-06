@@ -118,8 +118,27 @@ PATCH /suscripciones/:id
 Request:
 { "accion": "pausar" | "reanudar" | "cancelar" }
 
-Response (200): { "id": "uuid", "estado": "pausada" }
+Response (200): { "id": "uuid", "estado": "pausada", "activaHasta": null }
 ```
+
+### Administración (módulo RBAC "Suscripciones")
+
+Endpoints para el admin del tenant, protegidos con `PermisosGuard` +
+`@RequiresPermiso('Suscripciones', ...)` — el rol admin fijo pasa por el
+short-circuit `es_fijo`:
+
+```
+GET    /suscripciones/admin        → Leer       — todas las suscripciones del
+                                     tenant (join usuarios: nombre + correo)
+PATCH  /suscripciones/admin/:id    → Actualizar — pausar/reanudar/cancelar
+                                     cualquier suscripción del tenant
+DELETE /suscripciones/admin/:id    → Eliminar   — soft delete, SOLO canceladas
+```
+
+**Vigencia tras cancelar:** al `cancelar` (cliente o admin) se fija
+`activa_hasta = proximo_cobro` vigente — el período ya cobrado queda usable
+hasta el día anterior y "se cancela ese día a primera hora". El PATCH devuelve
+`activaHasta` para que el frontend actualice la fila sin recargar.
 
 `POST /suscripciones` valida que el item sea `tipo = 'suscripcion'` y esté
 activo, calcula el total del primer período con el mismo motor de precios que
@@ -146,8 +165,10 @@ después, las suscripciones ya activas no se ven afectadas.
 
 - **Module**: `backend/src/modules/suscripciones/suscripciones.module.ts`
 - **Controller**: `backend/src/modules/suscripciones/suscripciones.controller.ts`
-  — `POST /`, `GET /`, `PATCH /:id`, con `JwtAuthGuard` + `TenantGuard` (mismo
-  estándar que `/online/checkout`, sin guard granular por permiso).
+  — rutas cliente `POST /`, `GET /`, `PATCH /:id` con `JwtAuthGuard` +
+  `TenantGuard` (mismo estándar que `/online/checkout`), y rutas admin
+  `GET/PATCH/DELETE /admin[...]` con `@RequiresPermiso('Suscripciones', ...)`
+  (el `PermisosGuard` de clase solo actúa donde hay decorador).
 - **Service**: `backend/src/modules/suscripciones/suscripciones.service.ts`:
   - `crear()`: valida item + reglas cruzadas de día según `frecuencia`
     (`mensual` requiere `diaMes` 1-28, `quincenal` requiere `diaMes` 1-13,
@@ -156,13 +177,23 @@ después, las suscripciones ya activas no se ven afectadas.
     `VentasService.crearEnTransaccion()` (reutiliza la lógica de venta
     normal, canal `online`) seguido de `manager.save(Suscripcion, ...)`.
   - `findMias()`: `GET` con SQL raw, filtra por `tenant_id` + `usuario_id` del
-    token, join con `items` para nombre/precio/moneda.
-  - `cambiarEstado()`: aplica la máquina de estados (`pausar`/`reanudar`/
-    `cancelar`) validando la transición contra el estado actual.
+    token, join con `items` para nombre/precio/moneda. Las columnas `DATE` se
+    castean a `::text` para que la API devuelva `YYYY-MM-DD` plano (el driver
+    pg las serializa como timestamps UTC y corre la fecha un día en TZ
+    negativas).
+  - `findTodas()`: variante admin sin filtro de usuario, con join adicional a
+    `usuarios` (nombre + correo del cliente).
+  - `cambiarEstado(tenantId, usuarioId | null, ...)`: aplica la máquina de
+    estados validando la transición; `usuarioId = null` es el scope admin
+    (opera sobre cualquier suscripción del tenant). Al `cancelar` fija
+    `activaHasta = proximoCobro`.
+  - `eliminar()`: soft delete (`softRemove`), rechaza suscripciones no
+    canceladas.
 - **Entity**: `backend/src/modules/suscripciones/entities/suscripcion.entity.ts`
   — tabla `suscripciones`, guarda `frecuencia`, `diaMes`/`diaSemana`,
-  `estado`, `proximoCobro`, snapshot de tarjeta (`tarjetaMarca`/
-  `tarjetaLast4`, solo marca + últimos 4) y `ventaInicialId`.
+  `estado`, `proximoCobro`, `activaHasta` (fin del período pagado al
+  cancelar), snapshot de tarjeta (`tarjetaMarca`/`tarjetaLast4`, solo marca +
+  últimos 4) y `ventaInicialId`.
 - **Util**: `backend/src/modules/suscripciones/utils/proximo-cobro.util.ts`
   — `calcularProximoCobro()`, función pura que calcula la próxima fecha de
   cobro según frecuencia y ancla (día de mes o de semana).
@@ -195,9 +226,13 @@ después, las suscripciones ya activas no se ven afectadas.
 - Nuevo `ModuloApp` "Tienda Online" (`url: '/tienda'`) con permisos Leer y
   Crear, contratado (`TenantModulo`) por los tenants Paris y Falabella.
   Sembrado en `seeder.service.ts`.
-- Suscripciones **reutiliza este mismo módulo** (no se creó un módulo RBAC
-  nuevo): los endpoints `/suscripciones` solo llevan `JwtAuthGuard` +
-  `TenantGuard`, mismo precedente que `/online/checkout`.
+- Las rutas cliente de `/suscripciones` reutilizan este mismo nivel de acceso
+  (`JwtAuthGuard` + `TenantGuard`, precedente de `/online/checkout`).
+- **Módulo RBAC "Suscripciones"** (2026-07-06): `ModuloApp` propio
+  (`url: '/suscripciones'`) con permisos **Leer / Actualizar / Eliminar**,
+  contratado por Paris y Falabella. Protege los endpoints admin con
+  enforcement real (`@RequiresPermiso`); es el primer módulo de negocio que
+  estrena el guard granular fuera de Caja/Test.
 
 ### Seed
 
@@ -218,10 +253,19 @@ intermedio). Cada una aparece como entrada directa en el sidebar principal,
 detrás del mismo permiso `Tienda Online:Leer`:
 
 - `pages/tienda/index.vue` — catálogo + carrito (`/tienda`).
-- `pages/tienda/suscripciones.vue` — lista de suscripciones del usuario
-  (API-backed), drawer "Nueva suscripción" para elegir item suscribible, día
-  de cobro y tarjeta preferida, y acciones pausar/reanudar/cancelar
-  (`/tienda/suscripciones`).
+- `pages/tienda/suscripciones.vue` — **"Mis suscripciones"**: lista de
+  suscripciones del usuario (API-backed), drawer "Nueva suscripción" para
+  elegir item suscribible, día de cobro y tarjeta preferida, y acciones
+  pausar/reanudar/cancelar. Cancelar abre un **modal informativo** con la
+  vigencia (activa hasta el día anterior a `proximo_cobro`, se cancela ese
+  día a primera hora) antes de confirmar (`/tienda/suscripciones`).
+- `pages/suscripciones.vue` — **administración (admin)**: todas las
+  suscripciones del tenant con cliente (nombre + email), estado, vigencia y
+  filtro por estado; acciones pausar/reanudar/cancelar (mismo modal, en
+  tercera persona) y eliminar (solo canceladas, con confirmación). Entrada
+  propia "Suscripciones" en el sidebar, gated
+  `esAdmin || can('Suscripciones', 'Leer')`; los botones se gatean por
+  `Actualizar`/`Eliminar` (`/suscripciones`).
 - `pages/tienda/medios-pago.vue` — tarjetas mock, agregar/eliminar/preferida
   (`/tienda/medios-pago`).
 - `pages/tienda/pasarela.vue` — pasarela dummy (resumen, aprobar/rechazar).
@@ -248,7 +292,13 @@ detrás del mismo permiso `Tienda Online:Leer`:
   /suscripciones`), reemplaza el mock anterior en `localStorage`. Expone
   `suscripciones`, `loading`, `cargar()` y `pausar()`/`reanudar()`/
   `cancelar()` con update optimista (revierte el estado local si el `PATCH`
-  falla).
+  falla). Exporta además los helpers compartidos `frecuenciaLabel`,
+  `detalleDia()` y `diaAnterior()` (usados por ambas páginas de
+  suscripciones).
+- `composables/useSuscripcionesAdmin.ts` — mismo patrón optimista pero contra
+  `GET/PATCH/DELETE /suscripciones/admin[...]`; agrega `usuarioNombre`/
+  `usuarioEmail` a la interface y `eliminar()` con remoción optimista de la
+  fila.
 - `composables/useSuscripcionCheckout.ts` — intención de alta de suscripción
   en tránsito. Mismo patrón `useState` que `useTiendaCarrito` (no un `ref`
   local): sobrevive la navegación de `/tienda/suscripciones` a
@@ -350,6 +400,10 @@ npm test -- modules/suscripciones/suscripciones.service.spec.ts
 - [x] Suscripciones: tipo de item `item_suscripcion`, endpoints
   `POST/GET/PATCH /suscripciones`, alta atómica con primer cobro, máquina de
   estados `activa`/`pausada`/`cancelada`.
+- [x] Administración de suscripciones: módulo RBAC "Suscripciones" propio,
+  endpoints admin (`GET/PATCH/DELETE /suscripciones/admin`), página
+  `/suscripciones`, vigencia `activa_hasta` al cancelar y modales de
+  confirmación informativos (cliente y admin).
 - [x] Unit tests backend en verde.
 - [x] Verificación manual end-to-end en navegador.
 

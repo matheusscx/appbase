@@ -284,7 +284,27 @@ Alta de compras recurrentes sobre items de tipo `suscripcion`, con **primer cobr
 - `activa` | `pausada` → `cancelada` (acción `cancelar`, sin retorno)
 - Cualquier otra transición (ej. reanudar una `cancelada`) es inválida y se rechaza.
 
-**Fuera de alcance (fase futura):** cobro automático de los períodos siguientes al primero — hoy se persiste `proximo_cobro` pero no existe un job/cron que lo ejecute.
+**Vigencia tras cancelar (`activa_hasta`):** el período ya cobrado no se pierde.
+Al cancelar se fija `activa_hasta = proximo_cobro` vigente en ese momento: la
+suscripción queda usable hasta el **día anterior** a esa fecha y "se cancela ese
+día a primera hora". Ej.: suscripción semanal de lunes cobrada un lunes y
+cancelada ese mismo día → sigue válida martes a domingo y se cancela el lunes
+siguiente a primera hora. Antes de confirmar la cancelación (cliente o admin) se
+muestra un **modal informativo** con ambas fechas.
+
+**Administración (admin del tenant) — módulo RBAC "Suscripciones":**
+- Módulo contratable propio con permisos **Leer / Actualizar / Eliminar**,
+  enforcement real en backend (`@RequiresPermiso`); el rol admin fijo del tenant
+  tiene acceso total.
+- Página "Suscripciones" (sidebar): lista **todas** las suscripciones del tenant
+  con datos del cliente (nombre, email), estado, vigencia y filtro por estado.
+- Acciones del admin sobre cualquier suscripción: pausar, reanudar, cancelar
+  (mismo modal de vigencia) y **eliminar** (soft delete, **solo canceladas** —
+  evita borrar contratos vigentes por accidente).
+- La vista del customer pasa a llamarse **"Mis suscripciones"** y solo opera
+  sobre las suscripciones propias.
+
+**Fuera de alcance (fase futura):** cobro automático de los períodos siguientes al primero — hoy se persiste `proximo_cobro` pero no existe un job/cron que lo ejecute (la cancelación efectiva en `activa_hasta` también es informativa).
 
 ---
 

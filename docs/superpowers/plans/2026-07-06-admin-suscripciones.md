@@ -1,6 +1,6 @@
 # Plan: Administración de suscripciones (admin del tenant)
 
-- **Status:** Approved
+- **Status:** Done
 - **Date:** 2026-07-06
 - **Owner:** Cesar Matheus
 
@@ -57,23 +57,23 @@ existente en runtime).
 ## Backend
 
 ### 1. Entity + regla de cancelación
-- [ ] `suscripcion.entity.ts`: agregar
+- [x] `suscripcion.entity.ts`: agregar
   `@Column({ name: 'activa_hasta', type: 'date', nullable: true }) activaHasta: string | null;`
   (dev usa `synchronize: true` — la columna se crea sola).
-- [ ] `suscripciones.service.ts` `cambiarEstado()`: refactor de firma a
+- [x] `suscripciones.service.ts` `cambiarEstado()`: refactor de firma a
   `cambiarEstado(tenantId, usuarioId: string | null, suscripcionId, dto)` —
   `usuarioId = null` ⇒ scope admin (busca solo por `tenantId`). Al `cancelar`:
   `suscripcion.activaHasta = suscripcion.proximoCobro`. Devolver
   `{ id, estado, activaHasta }`.
-- [ ] `findMias()`: agregar `s.activa_hasta` al SELECT y `activaHasta` al mapeo.
+- [x] `findMias()`: agregar `s.activa_hasta` al SELECT y `activaHasta` al mapeo.
 
 ### 2. Endpoints admin
-- [ ] `findTodas(tenantId)`: mismo estilo SQL raw que `findMias` pero sin filtro
+- [x] `findTodas(tenantId)`: mismo estilo SQL raw que `findMias` pero sin filtro
   de usuario y con `JOIN usuarios u ON u.usuario_id = s.usuario_id AND u.eliminado_el IS NULL`
   → agrega `usuarioNombre` (`u.nombre`) y `usuarioEmail` (`u.correo`) a la respuesta.
-- [ ] `eliminar(tenantId, suscripcionId)`: soft delete (`softRemove`), **solo si
+- [x] `eliminar(tenantId, suscripcionId)`: soft delete (`softRemove`), **solo si
   `estado === 'cancelada'`** (si no, `BadRequestException`).
-- [ ] `suscripciones.controller.ts`: agregar `PermisosGuard` a los guards de clase
+- [x] `suscripciones.controller.ts`: agregar `PermisosGuard` a los guards de clase
   (`@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)` — no afecta las rutas
   cliente, que no llevan `@RequiresPermiso`); tres rutas nuevas:
   - `GET /suscripciones/admin` → `@RequiresPermiso('Suscripciones', 'Leer')` → `findTodas`
@@ -81,7 +81,7 @@ existente en runtime).
   - `PATCH /suscripciones/admin/:id` → `@RequiresPermiso('Suscripciones', 'Actualizar')`
     → `cambiarEstado(tenantId, null, id, dto)` (mismo `UpdateSuscripcionDto`)
   - `DELETE /suscripciones/admin/:id` → `@RequiresPermiso('Suscripciones', 'Eliminar')` → `eliminar`
-- [ ] Tests en `suscripciones.service.spec.ts`: cancelar setea `activa_hasta` =
+- [x] Tests en `suscripciones.service.spec.ts`: cancelar setea `activa_hasta` =
   `proximo_cobro` previo (cliente y admin); scope admin transiciona suscripción de
   otro usuario / scope cliente NO puede (NotFound); `findTodas` mapea usuario;
   `eliminar` rechaza no-canceladas y soft-deletea canceladas.
@@ -90,66 +90,66 @@ existente en runtime).
 UUIDs libres a partir de `...440172` (fijos ≤171 usados; el generador dinámico de
 `seedItemsMonedaUnidadMatrix()` reserva itemIds ≤157 y movIds 120/159–169 —
 verificado, NO alcanza 172+):
-- [ ] `seedModulosApp()`: `ModuloApp` "Suscripciones"
+- [x] `seedModulosApp()`: `ModuloApp` "Suscripciones"
   (`moduloAppId: ...440172`, `url: '/suscripciones'`, `icono: 'mdi-autorenew'`).
-- [ ] `seedModuloAppPermisos()`: pares módulo×permiso con el catálogo existente —
+- [x] `seedModuloAppPermisos()`: pares módulo×permiso con el catálogo existente —
   Leer (`...440173`), Actualizar (`...440174`), Eliminar (`...440175`).
-- [ ] `seedTenantModulo()`: contratación activa para Paris (`...440176`) y
+- [x] `seedTenantModulo()`: contratación activa para Paris (`...440176`) y
   Falabella (`...440177`).
 
 ## Frontend
 
 ### 4. Navegación (`layouts/dashboard.vue`)
-- [ ] Renombrar la entrada `Suscripciones → /tienda/suscripciones` a
+- [x] Renombrar la entrada `Suscripciones → /tienda/suscripciones` a
   **"Mis suscripciones"** (mantiene gating `Tienda Online:Leer` e icono `i-lucide-repeat`).
-- [ ] Nueva entrada **"Suscripciones"** (`icon: 'i-lucide-repeat-2'`,
+- [x] Nueva entrada **"Suscripciones"** (`icon: 'i-lucide-repeat-2'`,
   `to: '/suscripciones'`) gated `esAdmin || can('Suscripciones', 'Leer')`.
 
 ### 5. Composable admin (`app/composables/useSuscripcionesAdmin.ts`, nuevo)
-- [ ] Interface `SuscripcionAdmin` = `Suscripcion` (de `useSuscripciones`) +
+- [x] Interface `SuscripcionAdmin` = `Suscripcion` (de `useSuscripciones`) +
   `usuarioNombre: string`, `usuarioEmail: string`.
-- [ ] Mismo patrón optimista-con-revert de `useSuscripciones` pero contra
+- [x] Mismo patrón optimista-con-revert de `useSuscripciones` pero contra
   `GET/PATCH/DELETE /suscripciones/admin[...]`; al cancelar, aplicar el
   `activaHasta` que devuelve el PATCH sobre la fila. `eliminar(id)` quita la fila
   (optimista, revert si falla). Guard `mutando` contra doble click.
 
 ### 6. Página admin (`app/pages/suscripciones.vue`, nueva)
-- [ ] `definePageMeta({ middleware: 'auth', layout: 'dashboard' })`; si
+- [x] `definePageMeta({ middleware: 'auth', layout: 'dashboard' })`; si
   `!(esAdmin || can('Suscripciones', 'Leer'))` → redirect a `/`.
-- [ ] `CrudPageHeader` + `CrudTable` (patrón de `tienda/suscripciones.vue`):
+- [x] `CrudPageHeader` + `CrudTable` (patrón de `tienda/suscripciones.vue`):
   columnas Suscripción (item + subtítulo precio/frecuencia/día — reusar los
   helpers `detalleDia`/`frecuenciaLabel`), **Cliente** (nombre + email),
   Estado (badge; si `cancelada` con `activaHasta`, texto secundario
   "activa hasta el `<activaHasta − 1 día>` — se cancela el `<activaHasta>` a
   primera hora"), Próximo cobro (solo activas/pausadas), Acciones.
-- [ ] Filtro por estado (`USelectMenu`: Todas / Activas / Pausadas / Canceladas).
-- [ ] Acciones por fila (Pausar/Reanudar gated `can('Suscripciones','Actualizar')`,
+- [x] Filtro por estado (`USelectMenu`: Todas / Activas / Pausadas / Canceladas).
+- [x] Acciones por fila (Pausar/Reanudar gated `can('Suscripciones','Actualizar')`,
   Eliminar gated `can('Suscripciones','Eliminar')`, siempre con bypass `esAdmin`):
   Pausar / Reanudar / **Cancelar** (abre `UModal` de confirmación con la vigencia,
   en tercera persona) / **Eliminar** solo en canceladas (`UModal` de confirmación).
-- [ ] `formatMonto`/`formatFecha` desde `useFormatters` (nunca locales).
+- [x] `formatMonto`/`formatFecha` desde `useFormatters` (nunca locales).
 
 ### 7. Vista cliente (`app/pages/tienda/suscripciones.vue` + `useSuscripciones.ts`)
-- [ ] Título del navbar y `CrudPageHeader` → **"Mis suscripciones"**.
-- [ ] `useSuscripciones`: agregar `activaHasta: string | null` a la interface;
+- [x] Título del navbar y `CrudPageHeader` → **"Mis suscripciones"**.
+- [x] `useSuscripciones`: agregar `activaHasta: string | null` a la interface;
   en `accion()`, si la respuesta del PATCH trae `activaHasta`, aplicarla a la fila.
-- [ ] Botón **Cancelar** ya no muta directo: abre `UModal` de confirmación
+- [x] Botón **Cancelar** ya no muta directo: abre `UModal` de confirmación
   informativo — "Tu suscripción seguirá activa hasta el `<proximoCobro − 1 día>`
   y se cancelará el `<proximoCobro>` a primera hora. ¿Confirmás la cancelación?"
   (fechas con `formatFecha`). Confirmar → `cancelar(id)`; cerrar → nada.
-- [ ] Fila cancelada con `activaHasta`: subtítulo muestra "activa hasta el X"
+- [x] Fila cancelada con `activaHasta`: subtítulo muestra "activa hasta el X"
   en lugar de "próximo cobro X".
 
 ## Docs vivas (mismo cambio final)
 
-- [ ] `CLAUDE.md` tabla Estado actual: fila nueva
+- [x] `CLAUDE.md` tabla Estado actual: fila nueva
   `| Suscripciones — administración (módulo RBAC propio, admin del tenant) | ✅ Implementado (2026-07-06) |`.
-- [ ] `docs/features/tienda-online.md`: sección admin (endpoints `/suscripciones/admin`,
+- [x] `docs/features/tienda-online.md`: sección admin (endpoints `/suscripciones/admin`,
   página `/suscripciones`, módulo RBAC, semántica `activa_hasta`), renombre
   "Mis suscripciones".
-- [ ] `docs/PRODUCTO.md`: regla de vigencia tras cancelar + acciones del admin
+- [x] `docs/PRODUCTO.md`: regla de vigencia tras cancelar + acciones del admin
   (incl. eliminar solo canceladas).
-- [ ] `startup-pos.sql`: columna `activa_hasta DATE` en `CREATE TABLE suscripciones`.
+- [x] `startup-pos.sql`: columna `activa_hasta DATE` en `CREATE TABLE suscripciones`.
 
 ## Verification
 

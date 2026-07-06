@@ -111,6 +111,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Módulo de Pagos (GET /pagos, POST /pagos, abono a ventas pendientes, ledger) | ✅ Implementado (2026-06-30) |
 | Tienda Online (canal online, checkout dummy, catálogo/carrito, medios de pago mock) | ✅ Implementado (2026-07-05) |
 | Suscripciones (tipo de item suscripcion, alta con primer cobro, gestión) | ✅ Implementado (2026-07-05) |
+| Suscripciones — administración (módulo RBAC propio, vigencia `activa_hasta`, "Mis suscripciones") | ✅ Implementado (2026-07-06) |
 
 ---
 
