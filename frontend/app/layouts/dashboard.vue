@@ -68,7 +68,7 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/tienda',
     })
     base.push({
-      label: 'Suscripciones',
+      label: 'Mis suscripciones',
       icon: 'i-lucide-repeat',
       to: '/tienda/suscripciones',
     })
@@ -76,6 +76,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       label: 'Medios de pago',
       icon: 'i-lucide-wallet',
       to: '/tienda/medios-pago',
+    })
+  }
+  if (permissionsStore.esAdmin || permissionsStore.can('Suscripciones', 'Leer')) {
+    base.push({
+      label: 'Suscripciones',
+      icon: 'i-lucide-repeat-2',
+      to: '/suscripciones',
     })
   }
   if (permissionsStore.esAdmin) {

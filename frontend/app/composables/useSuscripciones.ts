@@ -11,9 +11,36 @@ export interface Suscripcion {
   diaSemana: number | null
   estado: 'activa' | 'pausada' | 'cancelada'
   proximoCobro: string
+  activaHasta: string | null
   tarjetaMarca: string | null
   tarjetaLast4: string | null
   ventaInicialId: string | null
+}
+
+export const frecuenciaLabel: Record<Suscripcion['frecuencia'], string> = {
+  semanal: 'Semanal',
+  quincenal: 'Quincenal',
+  mensual: 'Mensual',
+}
+
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
+
+export function detalleDia(s: Pick<Suscripcion, 'frecuencia' | 'diaMes' | 'diaSemana'>): string {
+  if (s.frecuencia === 'semanal' && s.diaSemana !== null)
+    return `los ${DIAS_SEMANA[s.diaSemana]}`
+  if (s.frecuencia === 'quincenal' && s.diaMes !== null)
+    return `los días ${s.diaMes} y ${s.diaMes + 15}`
+  if (s.diaMes !== null) return `el día ${s.diaMes}`
+  return ''
+}
+
+/** Día anterior a una fecha ISO (YYYY-MM-DD), en hora local — último día usable de una suscripción cancelada. */
+export function diaAnterior(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const prev = new Date(y!, m! - 1, d! - 1)
+  const mm = String(prev.getMonth() + 1).padStart(2, '0')
+  const dd = String(prev.getDate()).padStart(2, '0')
+  return `${prev.getFullYear()}-${mm}-${dd}`
 }
 
 const ESTADO_TRAS_ACCION = {
@@ -60,10 +87,11 @@ export function useSuscripciones() {
     const prev = susc.estado
     susc.estado = ESTADO_TRAS_ACCION[tipo] // optimista
     try {
-      await useApiFetch(`${apiUrl}/suscripciones/${id}`, {
-        method: 'PATCH',
-        body: { accion: tipo },
-      })
+      const res = await useApiFetch<{ id: string, estado: Suscripcion['estado'], activaHasta: string | null }>(
+        `${apiUrl}/suscripciones/${id}`,
+        { method: 'PATCH', body: { accion: tipo } },
+      )
+      susc.activaHasta = res.activaHasta
       toast.add({ title: TOAST_ACCION[tipo], color: 'success' })
     } catch (e: unknown) {
       susc.estado = prev // revert

@@ -17,27 +17,36 @@ const puedeCrear = computed(
   () => permissionsStore.esAdmin || permissionsStore.can('Tienda Online', 'Crear'),
 )
 
-const frecuenciaLabel: Record<Suscripcion['frecuencia'], string> = {
-  semanal: 'Semanal',
-  quincenal: 'Quincenal',
-  mensual: 'Mensual',
-}
-
-const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
-
-function detalleDia(s: Suscripcion): string {
-  if (s.frecuencia === 'semanal' && s.diaSemana !== null)
-    return `los ${DIAS_SEMANA[s.diaSemana]}`
-  if (s.frecuencia === 'quincenal' && s.diaMes !== null)
-    return `los días ${s.diaMes} y ${s.diaMes + 15}`
-  if (s.diaMes !== null) return `el día ${s.diaMes}`
-  return ''
-}
-
 function subtitulo(s: Suscripcion): string {
   const dia = detalleDia(s)
   const frecuencia = dia ? `${frecuenciaLabel[s.frecuencia]} ${dia}` : frecuenciaLabel[s.frecuencia]
-  return `${formatMonto(s.precio, s.monedaId ?? undefined)} · ${frecuencia} · próximo cobro ${formatFecha(s.proximoCobro)}`
+  const base = `${formatMonto(s.precio, s.monedaId ?? undefined)} · ${frecuencia}`
+  if (s.estado === 'cancelada' && s.activaHasta)
+    return `${base} · activa hasta el ${formatFecha(diaAnterior(s.activaHasta))} — se cancela el ${formatFecha(s.activaHasta)} a primera hora`
+  if (s.estado === 'cancelada') return base
+  return `${base} · próximo cobro ${formatFecha(s.proximoCobro)}`
+}
+
+// ── Modal de confirmación de cancelación ────────────────────────────────────
+
+const cancelando = ref<Suscripcion | null>(null)
+const cancelModalOpen = ref(false)
+
+const cancelMensaje = computed(() => {
+  const s = cancelando.value
+  if (!s) return ''
+  return `Tu suscripción seguirá activa hasta el ${formatFecha(diaAnterior(s.proximoCobro))} y se cancelará el ${formatFecha(s.proximoCobro)} a primera hora. ¿Confirmás la cancelación?`
+})
+
+function abrirCancelar(s: Suscripcion) {
+  cancelando.value = s
+  cancelModalOpen.value = true
+}
+
+function confirmarCancelar() {
+  if (cancelando.value) cancelar(cancelando.value.id)
+  cancelando.value = null
+  cancelModalOpen.value = false
 }
 
 const estadoColor: Record<Suscripcion['estado'], 'success' | 'warning' | 'neutral'> = {
@@ -168,7 +177,7 @@ async function confirmar() {
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Suscripciones">
+      <AppNavbar title="Mis suscripciones">
         <template #right>
           <UserMenu />
         </template>
@@ -178,7 +187,7 @@ async function confirmar() {
     <template #body>
       <div class="max-w-5xl mx-auto space-y-6 py-6">
         <CrudPageHeader
-          title="Suscripciones"
+          title="Mis suscripciones"
           description="Compras recurrentes de items del catálogo — pausá, reanudá o cancelá cuando quieras."
         >
           <template #actions>
@@ -229,7 +238,7 @@ async function confirmar() {
                 color="error"
                 variant="soft"
                 size="sm"
-                @click="cancelar(row.original.id)"
+                @click="abrirCancelar(row.original)"
               />
             </div>
           </template>
@@ -240,6 +249,15 @@ async function confirmar() {
             </div>
           </template>
         </CrudTable>
+
+        <CrudModal
+          v-model:open="cancelModalOpen"
+          title="Cancelar suscripción"
+          :message="cancelMensaje"
+          confirm-label="Cancelar suscripción"
+          @cancel="cancelando = null"
+          @confirm="confirmarCancelar"
+        />
 
         <AppDrawer v-model:open="drawerOpen" width="50%">
           <template #header>
