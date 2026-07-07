@@ -114,7 +114,19 @@ watch(clienteDrawerOpen, (open) => {
   >
     <template #header>
       <div class="flex items-center justify-between gap-3">
-        <span class="font-semibold">Venta</span>
+        <div class="flex items-center gap-1">
+          <span class="font-semibold">Venta</span>
+          <UTooltip text="Vaciar todo">
+            <UButton
+              icon="i-lucide-eraser"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+              :disabled="!hayAlgoQueLimpiar"
+              @click="vaciarModalOpen = true"
+            />
+          </UTooltip>
+        </div>
         <USelect
           v-model="tipoDocumentoId"
           :items="docItems"
@@ -122,16 +134,6 @@ watch(clienteDrawerOpen, (open) => {
           size="sm"
           class="min-w-0 flex-1 max-w-52"
         />
-        <UTooltip text="Vaciar todo">
-          <UButton
-            icon="i-lucide-eraser"
-            variant="ghost"
-            color="neutral"
-            size="sm"
-            :disabled="!hayAlgoQueLimpiar"
-            @click="vaciarModalOpen = true"
-          />
-        </UTooltip>
       </div>
     </template>
 
