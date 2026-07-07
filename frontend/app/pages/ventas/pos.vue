@@ -112,6 +112,12 @@ onMounted(async () => {
   await Promise.all([cajaStore.cargarActiva(), cargar()])
 })
 
+const estadoToastTitle: Record<string, string> = {
+  pagada: 'Venta pagada',
+  pagada_parcial: 'Venta con pago parcial',
+  pendiente: 'Venta registrada — pendiente de pago',
+}
+
 async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
   const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
   const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
@@ -143,7 +149,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
       method: 'POST',
       body,
     })
-    toast.add({ title: `Venta ${venta.estado}`, color: 'success' })
+    toast.add({ title: estadoToastTitle[venta.estado] ?? 'Venta registrada', color: 'success' })
     cobroOpen.value = false
     items.value = descontarStockCatalogo(items.value, lineas.value)
     limpiar()
