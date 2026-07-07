@@ -9,8 +9,10 @@ import {
   resumenCobro,
   setMontoPago,
   puedeCobrar,
+  tieneCustomerData,
   type CarritoLinea,
   type ItemCatalogo,
+  type CustomerForm,
 } from './useVenta'
 
 const item = (id: string, precio = '100'): ItemCatalogo => ({
@@ -253,5 +255,25 @@ describe('puedeCobrar (gate)', () => {
 
   it('true con customerExpandido: false sin nombre (form cerrado)', () => {
     expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+  })
+})
+
+describe('tieneCustomerData', () => {
+  const vacio: CustomerForm = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
+
+  it('false cuando no hay nombre ni terceroId', () => {
+    expect(tieneCustomerData(vacio)).toBe(false)
+  })
+
+  it('false cuando el nombre es solo espacios', () => {
+    expect(tieneCustomerData({ ...vacio, nombre: '   ' })).toBe(false)
+  })
+
+  it('true cuando hay nombre', () => {
+    expect(tieneCustomerData({ ...vacio, nombre: 'Juan' })).toBe(true)
+  })
+
+  it('true cuando hay terceroId aunque el nombre esté vacío', () => {
+    expect(tieneCustomerData({ ...vacio, terceroId: 'tercero-1' })).toBe(true)
   })
 })

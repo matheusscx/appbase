@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue'
 import Decimal from 'decimal.js'
 import { useCalculoPrecios, type ResultadoVenta, type CalcularVentaInput } from './useCalculoPrecios'
+import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -162,6 +163,12 @@ export function setMontoPago(
 }
 
 // ── Gate ────────────────────────────────────────────────────────────────────
+
+export type { CustomerForm }
+
+export function tieneCustomerData(customer: CustomerForm): boolean {
+  return Boolean(customer.nombre.trim() || customer.terceroId)
+}
 
 export function puedeCobrar(args: {
   tieneCaja: boolean
