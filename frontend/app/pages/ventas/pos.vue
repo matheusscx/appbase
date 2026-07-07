@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useVenta, descontarStockCatalogo, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { useVenta, descontarStockCatalogo, tieneCustomerData, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import Decimal from 'decimal.js'
@@ -82,6 +82,7 @@ watch(
 )
 
 watch(tipoDocumentoId, () => {
+  if (tieneCustomerData(customer.value)) return
   customerExpandido.value = false
   customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
 })
