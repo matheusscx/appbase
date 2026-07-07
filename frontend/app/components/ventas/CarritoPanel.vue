@@ -78,6 +78,10 @@ watch(customerRequerido, (requerido) => {
     clienteDrawerOpen.value = true
   }
 })
+
+watch(clienteDrawerOpen, (open) => {
+  if (!open && !hasCustomerData.value) customerExpandido.value = false
+})
 </script>
 
 <template>
