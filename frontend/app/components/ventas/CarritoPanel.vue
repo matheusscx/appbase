@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CarritoLinea } from '~/composables/useVenta'
-import { puedeCobrar } from '~/composables/useVenta'
+import { puedeCobrar, tieneCustomerData } from '~/composables/useVenta'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import type { CustomerForm } from './ClienteForm.vue'
 
@@ -23,10 +23,13 @@ const tipoDocumentoId = defineModel<string | undefined>('tipoDocumentoId')
 const customer = defineModel<CustomerForm>('customer', { required: true })
 const customerExpandido = defineModel<boolean>('customerExpandido', { default: false })
 
+const clienteDrawerOpen = ref(false)
+
 const docSeleccionado = computed(() =>
   props.tiposDocumento.find((t) => t.id === tipoDocumentoId.value),
 )
 const customerRequerido = computed(() => docSeleccionado.value?.customerRequerido ?? false)
+const hasCustomerData = computed(() => tieneCustomerData(customer.value))
 
 const habilitarCobro = computed(() =>
   puedeCobrar({
@@ -58,14 +61,23 @@ function ponerReadonly(e: Event) {
   ;(e.target as HTMLInputElement).setAttribute('readonly', 'readonly')
 }
 
-function mostrarCustomer() {
+function abrirClienteDrawer() {
   customerExpandido.value = true
+  clienteDrawerOpen.value = true
 }
 
 function quitarCustomer() {
   customerExpandido.value = false
+  clienteDrawerOpen.value = false
   customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
 }
+
+watch(customerRequerido, (requerido) => {
+  if (requerido && !hasCustomerData.value) {
+    customerExpandido.value = true
+    clienteDrawerOpen.value = true
+  }
+})
 </script>
 
 <template>
@@ -93,21 +105,30 @@ function quitarCustomer() {
 
     <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6">
       <div
-        v-if="customerRequerido || customerExpandido"
-        class="pb-4 mb-4 border-b border-default"
+        v-if="hasCustomerData"
+        class="pb-4 mb-4 border-b border-default flex items-center justify-between gap-2"
       >
-        <VentasClienteForm v-model="customer" />
-        <UButton
-          v-if="!customerRequerido"
-          label="Quitar datos del cliente"
-          icon="i-lucide-x"
-          variant="soft"
-          color="error"
-          size="sm"
-          block
-          class="mt-4"
-          @click="quitarCustomer"
-        />
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-default truncate">{{ customer.nombre }}</p>
+          <p v-if="customer.rut" class="text-xs text-muted font-mono truncate">{{ customer.rut }}</p>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          <UButton
+            icon="i-lucide-pencil"
+            variant="ghost"
+            color="neutral"
+            size="xs"
+            @click="clienteDrawerOpen = true"
+          />
+          <UButton
+            v-if="!customerRequerido"
+            icon="i-lucide-x"
+            variant="ghost"
+            color="error"
+            size="xs"
+            @click="quitarCustomer"
+          />
+        </div>
       </div>
       <UButton
         v-else
@@ -118,7 +139,7 @@ function quitarCustomer() {
         size="sm"
         block
         class="mb-4"
-        @click="mostrarCustomer"
+        @click="abrirClienteDrawer"
       />
       <div v-if="!lineas.length" class="text-center text-muted py-10 text-sm">
         Agregá ítems desde el catálogo.
@@ -190,4 +211,5 @@ function quitarCustomer() {
       </div>
     </template>
   </UCard>
+  <VentasClienteDrawer v-model:open="clienteDrawerOpen" v-model:customer="customer" />
 </template>
