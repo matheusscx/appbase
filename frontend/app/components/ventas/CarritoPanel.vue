@@ -17,6 +17,7 @@ const emit = defineEmits<{
   'cambiar-cantidad': [itemId: string, cantidad: string]
   quitar: [itemId: string]
   cobrar: []
+  'limpiar-todo': []
 }>()
 
 const tipoDocumentoId = defineModel<string | undefined>('tipoDocumentoId')
@@ -72,6 +73,23 @@ function quitarCustomer() {
   customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
 }
 
+const vaciarModalOpen = ref(false)
+
+const hayAlgoQueLimpiar = computed(() =>
+  props.lineas.length > 0
+  || hasCustomerData.value
+  || tipoDocumentoId.value !== props.tiposDocumento[0]?.id,
+)
+
+function confirmarVaciarTodo() {
+  customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
+  customerExpandido.value = false
+  clienteDrawerOpen.value = false
+  tipoDocumentoId.value = props.tiposDocumento[0]?.id
+  vaciarModalOpen.value = false
+  emit('limpiar-todo')
+}
+
 watch(customerRequerido, (requerido) => {
   if (requerido && !hasCustomerData.value) {
     customerExpandido.value = true
@@ -104,6 +122,16 @@ watch(clienteDrawerOpen, (open) => {
           size="sm"
           class="min-w-0 flex-1 max-w-52"
         />
+        <UTooltip text="Vaciar todo">
+          <UButton
+            icon="i-lucide-eraser"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            :disabled="!hayAlgoQueLimpiar"
+            @click="vaciarModalOpen = true"
+          />
+        </UTooltip>
       </div>
     </template>
 
@@ -216,4 +244,12 @@ watch(clienteDrawerOpen, (open) => {
     </template>
   </UCard>
   <VentasClienteDrawer v-model:open="clienteDrawerOpen" v-model:customer="customer" />
+  <CrudModal
+    v-model:open="vaciarModalOpen"
+    title="Vaciar venta actual"
+    message="¿Estás seguro de que quieres vaciar el carrito, los datos del cliente y el tipo de documento? Esta acción no se puede deshacer."
+    confirm-label="Vaciar todo"
+    confirm-color="error"
+    @confirm="confirmarVaciarTodo"
+  />
 </template>

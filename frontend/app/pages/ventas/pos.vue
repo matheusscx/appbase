@@ -209,6 +209,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
             @cambiar-cantidad="cambiarCantidad"
             @quitar="quitar"
             @cobrar="cobroOpen = true"
+            @limpiar-todo="limpiar"
           />
         </div>
       </div>
