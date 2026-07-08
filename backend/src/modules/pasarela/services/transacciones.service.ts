@@ -39,9 +39,12 @@ export class TransaccionesService {
   }
 
   registrar(datos: Partial<PasarelaTransaccion>): Promise<PasarelaTransaccion> {
+    // Historial inmutable: jamás aceptar un transaccionId externo — save() con
+    // PK existente haría UPDATE y rompería la garantía de solo-INSERT.
+    const { transaccionId: _ignorado, ...resto } = datos;
     return this.repo.save(
       this.repo.create({
-        ...datos,
+        ...resto,
         request: this.redactar(datos.request ?? {}),
         response: this.redactar(datos.response ?? {}),
         fechaTransaccion: datos.fechaTransaccion ?? new Date(),
