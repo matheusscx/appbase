@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { CobrosService } from './cobros.service';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
@@ -26,6 +26,19 @@ describe('CobrosService', () => {
     ),
     findOne: jest.fn(),
     findAndCount: jest.fn().mockResolvedValue([[], 0]),
+  };
+  // reembolsar() corre dentro de dataSource.transaction; el manager delega en
+  // los mismos mocks de ordenRepo para que los tests de reembolso no cambien.
+  const manager = {
+    findOne: jest.fn((_entity: unknown, opts: unknown) =>
+      ordenRepo.findOne(opts),
+    ),
+    save: jest.fn((x: Partial<PasarelaOrden>) => ordenRepo.save(x)),
+  };
+  const dataSource = {
+    transaction: jest.fn((cb: (m: typeof manager) => Promise<unknown>) =>
+      cb(manager),
+    ),
   };
   const provider = {
     autorizarCobro: jest.fn(),
@@ -57,6 +70,7 @@ describe('CobrosService', () => {
       providers: [
         CobrosService,
         { provide: getRepositoryToken(PasarelaOrden), useValue: ordenRepo },
+        { provide: getDataSourceToken(), useValue: dataSource },
         { provide: InscripcionesService, useValue: deps.inscripciones },
         { provide: TenantPasarelaService, useValue: deps.tenantPasarela },
         { provide: TransaccionesService, useValue: deps.transacciones },
@@ -181,7 +195,47 @@ describe('CobrosService', () => {
         tipo: 'REFUND',
         transaccionPadreId: 'tx-auth',
       }),
+      manager,
     );
+  });
+
+  it('reembolso corre bajo lock: el segundo ve el REFUND del primero y es rechazado', async () => {
+    // Simula el segundo reembolso que, tras adquirir el lock, ya ve un REFUND
+    // aprobado previo que agota el saldo → excede lo disponible.
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'pagada',
+      monto: '5000',
+      moneda: 'CLP',
+      codigoOrden: 'O-1',
+    });
+    deps.transacciones.listarPorOrden.mockResolvedValue([
+      {
+        transaccionId: 'tx-auth',
+        tipo: 'AUTHORIZATION',
+        estado: 'aprobada',
+        tenantPasarelaId: 'tp-1',
+        inscripcionId: 'insc-1',
+        monto: '5000',
+      },
+      {
+        transaccionId: 'tx-r1',
+        tipo: 'REFUND',
+        estado: 'aprobada',
+        monto: '5000',
+      },
+    ]);
+    await expect(
+      service.reembolsar('t-1', 'orden-1', { monto: '5000' }),
+    ).rejects.toThrow('excede');
+    // corrió dentro de una transacción y con lock pesimista de la orden
+    expect(dataSource.transaction).toHaveBeenCalled();
+    expect(manager.findOne).toHaveBeenCalledWith(
+      PasarelaOrden,
+      expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
+    );
+    expect(provider.reembolsar).not.toHaveBeenCalled();
   });
 
   it('reembolso mayor al saldo disponible es rechazado', async () => {
@@ -246,8 +300,14 @@ describe('CobrosService', () => {
     await expect(
       service.reembolsar('t-1', 'orden-1', { monto: '5000' }),
     ).rejects.toThrow('verifique el estado');
+    // la auditoría del intento se registra SIN el manager: la transacción hace
+    // rollback al lanzar, así que el rastro debe ir por conexión propia.
     expect(deps.transacciones.registrar).toHaveBeenCalledWith(
       expect.objectContaining({ tipo: 'REFUND', estado: 'error' }),
+    );
+    expect(deps.transacciones.registrar).not.toHaveBeenCalledWith(
+      expect.objectContaining({ tipo: 'REFUND', estado: 'error' }),
+      manager,
     );
     // la orden nunca pasó a 'reembolsada'
     const estadosGuardados = ordenRepo.save.mock.calls.map((c) => c[0].estado);
@@ -302,5 +362,22 @@ describe('CobrosService', () => {
     });
     const res = await service.obtenerOrden('t-1', 'orden-1');
     expect(res.estado).toBe('expirada');
+  });
+
+  it('obtenerOrden NO expira una orden con intento de auth (timeout reconciliable)', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'en_proceso',
+      fechaExpiracion: new Date(Date.now() - 60_000),
+      metadata: {},
+    });
+    deps.transacciones.listarPorOrden.mockResolvedValue([
+      { transaccionId: 'tx-1', tipo: 'AUTHORIZATION', estado: 'error' },
+    ]);
+    const res = await service.obtenerOrden('t-1', 'orden-1');
+    // se mantiene en_proceso: solo /verificar puede cerrarla (pudo pagarse)
+    expect(res.estado).toBe('en_proceso');
+    expect(ordenRepo.save).not.toHaveBeenCalled();
   });
 });

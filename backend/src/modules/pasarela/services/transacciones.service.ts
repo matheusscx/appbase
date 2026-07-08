@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { PasarelaTransaccion } from '../entities/pasarela-transaccion.entity';
 
 const CLAVES_SENSIBLES = new Set([
@@ -38,12 +38,21 @@ export class TransaccionesService {
     return limpiar(obj) as Record<string, unknown>;
   }
 
-  registrar(datos: Partial<PasarelaTransaccion>): Promise<PasarelaTransaccion> {
+  // `manager` opcional: cuando se pasa, la operación corre dentro de esa
+  // transacción (necesario para que el lock pesimista del reembolso proteja
+  // también la escritura de la transacción REFUND). Sin él, usa el repo normal.
+  registrar(
+    datos: Partial<PasarelaTransaccion>,
+    manager?: EntityManager,
+  ): Promise<PasarelaTransaccion> {
+    const repo = manager
+      ? manager.getRepository(PasarelaTransaccion)
+      : this.repo;
     // Historial inmutable: jamás aceptar un transaccionId externo — save() con
     // PK existente haría UPDATE y rompería la garantía de solo-INSERT.
     const { transaccionId: _ignorado, ...resto } = datos;
-    return this.repo.save(
-      this.repo.create({
+    return repo.save(
+      repo.create({
         ...resto,
         request: this.redactar(datos.request ?? {}),
         response: this.redactar(datos.response ?? {}),
@@ -55,8 +64,12 @@ export class TransaccionesService {
   listarPorOrden(
     tenantId: string,
     ordenId: string,
+    manager?: EntityManager,
   ): Promise<PasarelaTransaccion[]> {
-    return this.repo.find({
+    const repo = manager
+      ? manager.getRepository(PasarelaTransaccion)
+      : this.repo;
+    return repo.find({
       where: { tenantId, ordenId },
       order: { fechaTransaccion: 'ASC' },
     });

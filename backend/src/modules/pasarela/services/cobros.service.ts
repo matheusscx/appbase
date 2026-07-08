@@ -4,8 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
 import { randomBytes } from 'crypto';
 import { PasarelaOrden } from '../entities/pasarela-orden.entity';
@@ -29,6 +29,7 @@ export class CobrosService {
   constructor(
     @InjectRepository(PasarelaOrden)
     private readonly ordenRepo: Repository<PasarelaOrden>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly inscripciones: InscripcionesService,
     private readonly tenantPasarelaService: TenantPasarelaService,
     private readonly transacciones: TransaccionesService,
@@ -166,98 +167,116 @@ export class CobrosService {
     if (new Decimal(dto.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
 
-    const orden = await this.ordenRepo.findOne({
-      where: { ordenId, tenantId },
-    });
-    if (!orden) throw new NotFoundException('Orden no encontrada');
-    if (orden.estado !== 'pagada' && orden.estado !== 'reembolsada')
-      throw new BadRequestException(
-        `No se puede reembolsar una orden ${orden.estado}`,
-      );
+    // Todo el read (disponible) → proveedor → write corre bajo un lock pesimista
+    // de la fila de la orden (SELECT ... FOR UPDATE): dos reembolsos concurrentes
+    // sobre la misma orden se serializan y no pueden exceder el total juntos.
+    // Trade-off consciente: el lock se sostiene durante la llamada HTTP al
+    // proveedor; aceptable porque los reembolsos son de baja frecuencia.
+    return this.dataSource.transaction(async (manager) => {
+      const orden = await manager.findOne(PasarelaOrden, {
+        where: { ordenId, tenantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!orden) throw new NotFoundException('Orden no encontrada');
+      if (orden.estado !== 'pagada' && orden.estado !== 'reembolsada')
+        throw new BadRequestException(
+          `No se puede reembolsar una orden ${orden.estado}`,
+        );
 
-    const historial = await this.transacciones.listarPorOrden(
-      tenantId,
-      ordenId,
-    );
-    const autorizacion = historial.find(
-      (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'aprobada',
-    );
-    if (!autorizacion)
-      throw new BadRequestException(
-        'La orden no tiene una autorización aprobada',
-      );
-
-    const yaReembolsado = historial
-      .filter((t) => t.tipo === 'REFUND' && t.estado === 'aprobada')
-      .reduce((acc, t) => acc.plus(t.monto ?? '0'), new Decimal(0));
-    const disponible = new Decimal(orden.monto).minus(yaReembolsado);
-    if (new Decimal(dto.monto).gt(disponible))
-      throw new BadRequestException(
-        `El monto excede lo disponible para reembolso (${disponible.toString()})`,
-      );
-
-    const { pasarela, cred } =
-      await this.tenantPasarelaService.resolverConfiguracionActiva(
+      // Leído tras adquirir el lock: ve los REFUND ya commiteados por un
+      // reembolso concurrente previo (READ COMMITTED).
+      const historial = await this.transacciones.listarPorOrden(
         tenantId,
-        PASARELA_V1,
+        ordenId,
+        manager,
       );
+      const autorizacion = historial.find(
+        (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'aprobada',
+      );
+      if (!autorizacion)
+        throw new BadRequestException(
+          'La orden no tiene una autorización aprobada',
+        );
 
-    // NOTA (limitación conocida): read (disponible) → proveedor → write no está
-    // serializado. Dos reembolsos concurrentes sobre la misma orden podrían
-    // exceder el total. Cerrarlo requiere lock a nivel BD (SELECT ... FOR UPDATE)
-    // — pendiente de endurecimiento antes de producción. Ver plan/ledger.
-    let resultado: ResultadoCobro;
-    try {
-      resultado = await this.providerFactory
-        .get(pasarela.codigo)
-        .reembolsar(cred, { codigoOrden: orden.codigoOrden, monto: dto.monto });
-    } catch (e) {
-      if (e instanceof ProviderComunicacionError) {
-        // Mismo invariante que cobrar(): un timeout no es un rechazo. Dejar
-        // rastro de auditoría del intento y responder consistente (BadGateway).
-        await this.transacciones.registrar({
+      const yaReembolsado = historial
+        .filter((t) => t.tipo === 'REFUND' && t.estado === 'aprobada')
+        .reduce((acc, t) => acc.plus(t.monto ?? '0'), new Decimal(0));
+      const disponible = new Decimal(orden.monto).minus(yaReembolsado);
+      if (new Decimal(dto.monto).gt(disponible))
+        throw new BadRequestException(
+          `El monto excede lo disponible para reembolso (${disponible.toString()})`,
+        );
+
+      const { pasarela, cred } =
+        await this.tenantPasarelaService.resolverConfiguracionActiva(
+          tenantId,
+          PASARELA_V1,
+        );
+
+      let resultado: ResultadoCobro;
+      try {
+        resultado = await this.providerFactory
+          .get(pasarela.codigo)
+          .reembolsar(cred, {
+            codigoOrden: orden.codigoOrden,
+            monto: dto.monto,
+          });
+      } catch (e) {
+        if (e instanceof ProviderComunicacionError) {
+          // Mismo invariante que cobrar(): un timeout no es un rechazo. Dejar
+          // rastro de auditoría del intento y responder consistente (BadGateway).
+          // OJO: se registra SIN el manager (conexión propia) porque en seguida
+          // lanzamos y la transacción hace rollback; el rastro debe sobrevivir.
+          await this.transacciones.registrar({
+            tenantId,
+            ordenId,
+            tenantPasarelaId: autorizacion.tenantPasarelaId,
+            inscripcionId: autorizacion.inscripcionId,
+            transaccionPadreId: autorizacion.transaccionId,
+            tipo: 'REFUND',
+            estado: 'error',
+            monto: dto.monto,
+            moneda: orden.moneda,
+            codigoOrden: orden.codigoOrden,
+            request: e.request,
+            response: e.response,
+          });
+          throw new BadGatewayException(
+            `No se pudo confirmar el reembolso (orden ${ordenId}); verifique el estado con POST /pasarela/api/ordenes/${ordenId}/verificar`,
+          );
+        }
+        throw e;
+      }
+
+      await this.transacciones.registrar(
+        {
           tenantId,
           ordenId,
           tenantPasarelaId: autorizacion.tenantPasarelaId,
           inscripcionId: autorizacion.inscripcionId,
           transaccionPadreId: autorizacion.transaccionId,
           tipo: 'REFUND',
-          estado: 'error',
+          estado: resultado.aprobada ? 'aprobada' : 'rechazada',
           monto: dto.monto,
           moneda: orden.moneda,
           codigoOrden: orden.codigoOrden,
-          request: e.request,
-          response: e.response,
-        });
-        throw new BadGatewayException(
-          `No se pudo confirmar el reembolso (orden ${ordenId}); verifique el estado con POST /pasarela/api/ordenes/${ordenId}/verificar`,
-        );
+          codigoRespuesta: resultado.codigoRespuesta,
+          tipoPago: resultado.tipoPago,
+          request: resultado.request,
+          response: resultado.response,
+        },
+        manager,
+      );
+
+      if (
+        resultado.aprobada &&
+        yaReembolsado.plus(dto.monto).gte(orden.monto)
+      ) {
+        orden.estado = 'reembolsada';
+        await manager.save(orden);
       }
-      throw e;
-    }
-
-    await this.transacciones.registrar({
-      tenantId,
-      ordenId,
-      tenantPasarelaId: autorizacion.tenantPasarelaId,
-      inscripcionId: autorizacion.inscripcionId,
-      transaccionPadreId: autorizacion.transaccionId,
-      tipo: 'REFUND',
-      estado: resultado.aprobada ? 'aprobada' : 'rechazada',
-      monto: dto.monto,
-      moneda: orden.moneda,
-      codigoOrden: orden.codigoOrden,
-      codigoRespuesta: resultado.codigoRespuesta,
-      tipoPago: resultado.tipoPago,
-      request: resultado.request,
-      response: resultado.response,
+      return this.toPublico(orden, { reembolsoAprobado: resultado.aprobada });
     });
-
-    if (resultado.aprobada && yaReembolsado.plus(dto.monto).gte(orden.monto)) {
-      orden.estado = 'reembolsada';
-      await this.ordenRepo.save(orden);
-    }
-    return this.toPublico(orden, { reembolsoAprobado: resultado.aprobada });
   }
 
   /**
@@ -303,19 +322,25 @@ export class CobrosService {
       where: { ordenId, tenantId },
     });
     if (!orden) throw new NotFoundException('Orden no encontrada');
-    // Expiración perezosa: sin job en v1
+    const transacciones = await this.transacciones.listarPorOrden(
+      tenantId,
+      ordenId,
+    );
+    // Expiración perezosa (sin job en v1), PERO nunca sobre una orden que sí
+    // intentó autorizar (AUTHORIZATION 'error' por timeout): pudo haberse
+    // pagado en el proveedor. Esas se cierran solo vía /verificar, no por reloj.
+    const tuvoIntentoAuth = transacciones.some(
+      (t) => t.tipo === 'AUTHORIZATION' && t.estado === 'error',
+    );
     if (
       orden.estado === 'en_proceso' &&
+      !tuvoIntentoAuth &&
       orden.fechaExpiracion &&
       orden.fechaExpiracion < new Date()
     ) {
       orden.estado = 'expirada';
       await this.ordenRepo.save(orden);
     }
-    const transacciones = await this.transacciones.listarPorOrden(
-      tenantId,
-      ordenId,
-    );
     return this.toPublico(orden, {
       transacciones: transacciones.map((t) => ({
         transaccionId: t.transaccionId,

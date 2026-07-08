@@ -39,9 +39,8 @@ sin cambios estructurales.
   administración del tenant (config, API keys, órdenes).
 - **NO incluido (fases futuras)**: reconectar suscripciones/tienda a la
   pasarela real, job de cobro recurrente automático, Webpay Plus / Stripe /
-  MercadoPago, webhooks entrantes, failover por `prioridad`, rotación de la
-  clave de cifrado, y locking a nivel BD para reembolsos concurrentes (ver
-  Risks).
+  MercadoPago, webhooks entrantes, failover por `prioridad`, y rotación de la
+  clave de cifrado.
 
 ---
 
@@ -239,7 +238,8 @@ Con el stack arriba (`docker-compose up -d`):
 |---|---|---|
 | Timeout del proveedor malinterpretado como rechazo | Cobro perdido / doble cobro | Orden queda `en_proceso`; endpoint `.../verificar` reconcilia contra el proveedor |
 | Doble retorno de Webpay (reintento) | Inscripción/medio duplicado | Claim atómico `pendiente→procesando`; compensación a `pendiente` si el provider falla |
-| Reembolsos concurrentes exceden el total | Sobre-reembolso | **Pendiente**: hoy validación por lectura previa; falta lock a nivel BD (`SELECT … FOR UPDATE`) — endurecer antes de exponer reembolsos de alto volumen |
+| Reembolsos concurrentes exceden el total | Sobre-reembolso | `reembolsar()` corre dentro de una transacción con lock pesimista (`SELECT … FOR UPDATE`) de la fila de la orden: dos reembolsos sobre la misma orden se serializan; el segundo ve el REFUND del primero y no puede exceder el saldo |
+| Orden con timeout marcada `expirada` por reloj (deja de ser reconciliable) | Cobro real dado por perdido | `obtenerOrden()` no expira perezosamente órdenes con una transacción `AUTHORIZATION 'error'` (hubo intento); `verificar()` además acepta órdenes `expirada`. Solo la reconciliación con el proveedor las cierra |
 | Credenciales expuestas | Fraude | Cifrado AES-256-GCM en reposo, API keys hasheadas, redacción de logs |
 
 ---

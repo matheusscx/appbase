@@ -1,6 +1,6 @@
 # Plan: Endurecimiento pre-producción de la pasarela de pagos
 
-- **Status:** Draft
+- **Status:** In Progress (ítems 1 y 2 hechos; ítem 3 = verificación manual pendiente)
 - **Date:** 2026-07-08
 - **Owner:** Cesar Matheus
 
@@ -36,14 +36,15 @@ como rechazo de negocio (`aprobada:false`) y se registra `'rechazada'`. La
 carrera arriesga una llamada redundante al proveedor, **no una sobre-devolución
 real de dinero**.
 
-**Fix propuesto:** envolver el read-compute-write de `reembolsar()` en una
-transacción con `SELECT … FOR UPDATE` sobre la fila de la orden (o un lock
-optimista por versión). Requiere reestructurar el service para usar
-`dataSource.transaction` y ajustar los tests (que hoy mockean el repo directo).
+**Decisión:** lock **pesimista** `SELECT … FOR UPDATE` (más simple de razonar
+para dinero). **Implementado.**
 
-- [ ] Envolver `reembolsar()` en transacción con lock de la orden
-- [ ] Test de dos reembolsos concurrentes que en conjunto exceden el total
-- [ ] Actualizar `docs/features/pasarela-pagos.md` (tabla de riesgos)
+- [x] Envolver `reembolsar()` en transacción con lock de la orden
+  (`dataSource.transaction` + `lock: pessimistic_write`; `TransaccionesService`
+  ahora acepta un `EntityManager` opcional para escribir dentro de la misma tx)
+- [x] Test de dos reembolsos concurrentes que en conjunto exceden el total
+  (el segundo ve el REFUND del primero tras el lock → rechazado)
+- [x] Actualizar `docs/features/pasarela-pagos.md` (tabla de riesgos)
 
 ### 2. Expiración perezosa con verificación de proveedor (Important, parcialmente mitigado)
 
@@ -56,15 +57,12 @@ reloj (2h), sin consultar al proveedor. Como las únicas órdenes que quedan en
 `en_proceso` son las de timeout, marcarlas `expirada` asume "no pagó" en la UI
 hasta que alguien llame `/verificar`.
 
-**Fix propuesto (elegir uno):**
-- (a) No expirar perezosamente órdenes que tienen una transacción
-  `AUTHORIZATION` con estado `'error'` (hubo intento real) — dejarlas
-  `en_proceso` hasta reconciliación explícita.
-- (b) Un job/cron que verifique contra el proveedor las órdenes `en_proceso`
-  vencidas y las cierre según el estado real (en vez de por reloj).
+**Decisión:** política (a) — no expirar perezosamente órdenes con intento de
+auth (`AUTHORIZATION 'error'`). **Implementado.** La opción (b) job/cron queda
+como mejora futura si se quiere cierre proactivo sin GET.
 
-- [ ] Decidir política (a) vs (b) — **decisión de producto/pagos**
-- [ ] Implementar + test
+- [x] Política (a): `obtenerOrden()` no expira si hay `AUTHORIZATION 'error'`
+- [x] Test: orden con intento de auth se mantiene `en_proceso` (reconciliable)
 
 ### 3. Verificación manual de punta a punta completa (pendiente de T12)
 
