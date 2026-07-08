@@ -63,7 +63,10 @@ export class ApiKeysService {
     const encontrada = await this.repo.findOne({ where: { keyHash } });
     if (!encontrada || encontrada.revocadaEl) return null;
     // fire-and-forget: no bloquear la request por el tracking de uso
-    void this.repo.update(encontrada.apiKeyId, { ultimoUsoEl: new Date() });
+    // (con catch: un fallo transitorio de BD no debe tumbar el proceso)
+    void Promise.resolve(
+      this.repo.update(encontrada.apiKeyId, { ultimoUsoEl: new Date() }),
+    ).catch(() => undefined);
     return { tenantId: encontrada.tenantId, apiKeyId: encontrada.apiKeyId };
   }
 }
