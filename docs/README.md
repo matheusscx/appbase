@@ -45,6 +45,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [pagos.md](./features/pagos.md) | Abonos a ventas pendientes y ledger de pagos |
 | [terceros.md](./features/terceros.md) | Directorio de terceros (proveedores/empresas) + selector en el POS |
 | [tienda-online.md](./features/tienda-online.md) | Tienda online: catálogo, carrito, checkout dummy, suscripciones y medios de pago mock |
+| [pasarela-pagos.md](./features/pasarela-pagos.md) | Pasarela de pagos multi-proveedor (Oneclick real, API keys m2m, admin UI) |
 
 ## Otros
 
