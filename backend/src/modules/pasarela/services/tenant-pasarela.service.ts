@@ -113,9 +113,13 @@ export class TenantPasarelaService {
       tp.modoIntegracion = dto.modoIntegracion;
     if (dto.activo !== undefined) tp.activo = dto.activo;
     if (dto.prioridad !== undefined) tp.prioridad = dto.prioridad;
-    // Write-only: solo re-cifrar si mandaron credenciales nuevas
-    if (dto.configuracion !== undefined)
+    // Write-only: solo re-cifrar si mandaron credenciales nuevas.
+    // null explícito = limpiar credenciales (nunca cifrar "null").
+    if (dto.configuracion === null) {
+      tp.configuracion = null;
+    } else if (dto.configuracion !== undefined) {
       tp.configuracion = this.credenciales.cifrarJson(dto.configuracion);
+    }
     await this.tpRepo.save(tp);
     return { tenantPasarelaId };
   }
