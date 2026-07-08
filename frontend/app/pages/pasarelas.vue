@@ -126,12 +126,24 @@ async function guardarConfig() {
     prioridad: Number(form.value.prioridad),
   }
   if (!editingId.value) payload.pasarelaId = form.value.pasarelaId
-  // Write-only: la configuración solo viaja si el usuario la tipeó
+  // Write-only: la configuración solo viaja si el usuario la tipeó. El backend
+  // reemplaza el JSON completo (no mergea), así que en modo individual exigimos
+  // las 3 credenciales juntas para no borrar las no reingresadas.
   if (tocoCredenciales.value) {
-    payload.configuracion
-      = form.value.modoIntegracion === 'mall'
-        ? { commerceCodeHijo: form.value.commerceCodeHijo }
-        : { ...form.value.credencialesIndividual }
+    if (form.value.modoIntegracion === 'mall') {
+      payload.configuracion = { commerceCodeHijo: form.value.commerceCodeHijo }
+    }
+    else {
+      const cred = form.value.credencialesIndividual
+      if (!cred.mallCommerceCode || !cred.apiKeySecret || !cred.commerceCodeHijo) {
+        toast.add({
+          title: 'En modo individual debes reingresar las 3 credenciales juntas',
+          color: 'warning',
+        })
+        return
+      }
+      payload.configuracion = { ...cred }
+    }
   }
   savingConfig.value = true
   try {
@@ -320,10 +332,12 @@ onMounted(() => {
                   {{ c.activo ? 'Activa' : 'Inactiva' }}
                 </UBadge>
                 <UButton
+                  v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Actualizar')"
                   icon="i-lucide-pencil" color="neutral" variant="ghost" size="xs"
                   @click="abrirEditar(c)"
                 />
                 <UButton
+                  v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Eliminar')"
                   icon="i-lucide-trash-2" color="error" variant="ghost" size="xs"
                   @click="eliminandoConfig = c; eliminarConfigOpen = true"
                 />
@@ -364,7 +378,7 @@ onMounted(() => {
                   {{ k.revocadaEl ? 'Revocada' : 'Activa' }}
                 </UBadge>
                 <UButton
-                  v-if="!k.revocadaEl"
+                  v-if="!k.revocadaEl && (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Eliminar'))"
                   icon="i-lucide-ban" color="error" variant="ghost" size="xs"
                   @click="revocando = k; revocarOpen = true"
                 />
