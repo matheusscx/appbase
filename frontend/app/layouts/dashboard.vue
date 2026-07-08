@@ -87,6 +87,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/terceros',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Leer')) {
+    base.push({
+      label: 'Pasarelas',
+      icon: 'i-lucide-plug-zap',
+      to: '/pasarelas',
+    })
+  }
   if (authStore.isSuperadmin) {
     base.push({
       label: 'Administración',
