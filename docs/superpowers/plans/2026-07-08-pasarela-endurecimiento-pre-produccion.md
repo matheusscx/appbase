@@ -46,6 +46,25 @@ para dinero). **Implementado.**
   (el segundo ve el REFUND del primero tras el lock → rechazado)
 - [x] Actualizar `docs/features/pasarela-pagos.md` (tabla de riesgos)
 
+**Corrección post-revisión (review de concurrencia, Opus):** la primera versión
+registraba la auditoría del timeout con una conexión propia **dentro** de la
+transacción que sostiene `FOR UPDATE`. Como `pasarela_transacciones.orden_id`
+tiene FK a `pasarela_ordenes`, ese INSERT toma `FOR KEY SHARE` sobre la misma
+fila → conflicto con el `FOR UPDATE` propio → auto-bloqueo que el detector de
+deadlock de PG no ve (la tx espera en Node, no en la BD). No explotaba en dev
+solo porque TypeORM `synchronize` no crea la FK (la entidad usa `@Column`
+plano), pero el esquema canónico `startup-pos.sql` sí la tiene. **Fix:** el
+`ProviderComunicacionError` se propaga fuera de `dataSource.transaction` (la tx
+hace rollback y libera el lock) y recién ahí se registra el rastro por conexión
+normal. El path de éxito sigue escribiendo dentro de la tx con el `manager`.
+
+- [x] Mover la auditoría del timeout fuera de la transacción (tras liberar el lock)
+- **Minor aceptado:** el lock se sostiene durante la llamada HTTP al proveedor
+  (riesgo de pileup del pool bajo alta concurrencia de reembolsos). Aceptable
+  para la frecuencia esperada; acotar `lock_timeout` queda como mejora futura.
+  La serialización real (y el conflicto FK) solo se prueba con BD real → cubierto
+  por el e2e manual del ítem 3.
+
 ### 2. Expiración perezosa con verificación de proveedor (Important, parcialmente mitigado)
 
 **Estado:** en el commit `a0d325e` ya se mitigó el peor efecto — `verificar()`

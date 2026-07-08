@@ -30,8 +30,9 @@ describe('CobrosService', () => {
   // reembolsar() corre dentro de dataSource.transaction; el manager delega en
   // los mismos mocks de ordenRepo para que los tests de reembolso no cambien.
   const manager = {
-    findOne: jest.fn((_entity: unknown, opts: unknown) =>
-      ordenRepo.findOne(opts),
+    findOne: jest.fn(
+      (_entity: unknown, opts: unknown) =>
+        ordenRepo.findOne(opts) as Promise<Partial<PasarelaOrden> | null>,
     ),
     save: jest.fn((x: Partial<PasarelaOrden>) => ordenRepo.save(x)),
   };
@@ -199,9 +200,12 @@ describe('CobrosService', () => {
     );
   });
 
-  it('reembolso corre bajo lock: el segundo ve el REFUND del primero y es rechazado', async () => {
-    // Simula el segundo reembolso que, tras adquirir el lock, ya ve un REFUND
-    // aprobado previo que agota el saldo → excede lo disponible.
+  it('reembolso toma FOR UPDATE y recomputa el saldo bajo el lock: si el REFUND previo lo agota, es rechazado', async () => {
+    // Unit test: verifica el contrato (findOne con lock pesimista + recálculo del
+    // saldo tras leer el historial). La serialización real de dos reembolsos
+    // concurrentes solo se puede comprobar con BD real (ver e2e en el plan de
+    // endurecimiento, ítem 3). Aquí se simula que, tras adquirir el lock, ya se
+    // ve un REFUND aprobado previo que agota el saldo → excede lo disponible.
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-1',
       tenantId: 't-1',
@@ -300,8 +304,11 @@ describe('CobrosService', () => {
     await expect(
       service.reembolsar('t-1', 'orden-1', { monto: '5000' }),
     ).rejects.toThrow('verifique el estado');
-    // la auditoría del intento se registra SIN el manager: la transacción hace
-    // rollback al lanzar, así que el rastro debe ir por conexión propia.
+    // La auditoría del intento se registra FUERA de la transacción (sin el
+    // manager): el ProviderComunicacionError se propaga, la tx hace rollback y
+    // libera el FOR UPDATE, y recién ahí se escribe el rastro por conexión
+    // normal. Registrarlo dentro (con el manager sobre una conexión propia)
+    // auto-bloquearía por el conflicto FK FOR KEY SHARE ↔ FOR UPDATE.
     expect(deps.transacciones.registrar).toHaveBeenCalledWith(
       expect.objectContaining({ tipo: 'REFUND', estado: 'error' }),
     );
