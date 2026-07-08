@@ -30,6 +30,9 @@ import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Caja } from '../caja/entities/caja.entity';
+import { Pasarela } from '../pasarela/entities/pasarela.entity';
+import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
+import { CredencialesService } from '../pasarela/services/credenciales.service';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -92,6 +95,11 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly terceroRepo: Repository<Tercero>,
     @InjectRepository(Caja)
     private readonly cajaRepo: Repository<Caja>,
+    @InjectRepository(Pasarela)
+    private readonly pasarelaRepo: Repository<Pasarela>,
+    @InjectRepository(TenantPasarela)
+    private readonly tenantPasarelaRepo: Repository<TenantPasarela>,
+    private readonly credencialesService: CredencialesService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -131,6 +139,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedUsuarioAdmin();
     await this.seedUsuariosAdicionales();
     await this.seedTenantModulo();
+    await this.seedPasarelas();
     await this.seedTenantFormulaPrecio();
     await this.seedUsuariosTenants();
     await this.seedRolesUsuarios();
@@ -365,6 +374,13 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-account-multiple-outline',
         tieneConfiguracion: false,
       },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440208',
+        nombre: 'Pasarelas',
+        url: '/pasarelas',
+        icono: 'mdi-credit-card-settings-outline',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -562,6 +578,27 @@ export class SeederService implements OnApplicationBootstrap {
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440199',
         moduloAppId: TERCEROS,
+        permisoId: ELIMINAR,
+      },
+      // Pasarelas
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440209',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440208', // Pasarelas
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440210',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440208', // Pasarelas
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440211',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440208', // Pasarelas
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440212',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440208', // Pasarelas
         permisoId: ELIMINAR,
       },
     ];
@@ -814,6 +851,13 @@ export class SeederService implements OnApplicationBootstrap {
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440213',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440208', // Paris → Pasarelas
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
     ];
 
     for (const data of entries) {
@@ -823,6 +867,58 @@ export class SeederService implements OnApplicationBootstrap {
       if (!exists) {
         await this.tenantModuloRepo.save(this.tenantModuloRepo.create(data));
       }
+    }
+  }
+
+  private async seedPasarelas(): Promise<void> {
+    const ONECLICK_ID = '550e8400-e29b-41d4-a716-446655440214';
+    const existsPasarela = await this.pasarelaRepo.findOne({
+      where: { pasarelaId: ONECLICK_ID },
+    });
+    if (!existsPasarela) {
+      await this.pasarelaRepo.save(
+        this.pasarelaRepo.create({
+          pasarelaId: ONECLICK_ID,
+          codigo: 'oneclick',
+          nombre: 'Transbank Oneclick',
+          soportaTokenizacion: true,
+          soportaCobroRecurrente: true,
+          soportaMall: true,
+          urlProduccion: 'https://webpay3g.transbank.cl',
+          urlPruebas: 'https://webpay3gint.transbank.cl',
+          // Credenciales PÚBLICAS del ambiente de integración de Transbank (no son secretas)
+          configuracionPruebas: this.credencialesService.cifrarJson({
+            mallCommerceCode: '597055555541',
+            apiKeySecret:
+              '579B532A7440BB0C9079DED94D31EA1615BACEB56610332264630D42D0A36B1C',
+          }),
+          configuracionProduccion: null,
+          activo: true,
+        }),
+      );
+    }
+
+    // Paris → Oneclick modo MALL, ambiente pruebas (comercio hijo de integración)
+    const TP_PARIS_ID = '550e8400-e29b-41d4-a716-446655440215';
+    const existsTp = await this.tenantPasarelaRepo.findOne({
+      where: { tenantPasarelaId: TP_PARIS_ID },
+      withDeleted: true,
+    });
+    if (!existsTp) {
+      await this.tenantPasarelaRepo.save(
+        this.tenantPasarelaRepo.create({
+          tenantPasarelaId: TP_PARIS_ID,
+          tenantId: '550e8400-e29b-41d4-a716-446655440007',
+          pasarelaId: ONECLICK_ID,
+          ambiente: 'pruebas',
+          modoIntegracion: 'mall',
+          configuracion: this.credencialesService.cifrarJson({
+            commerceCodeHijo: '597055555542',
+          }),
+          activo: true,
+          prioridad: 1,
+        }),
+      );
     }
   }
 

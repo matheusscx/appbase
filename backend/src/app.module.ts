@@ -82,6 +82,7 @@ import { TercerosModule } from './modules/terceros/terceros.module';
 import { OnlineModule } from './modules/online/online.module';
 import { Suscripcion } from './modules/suscripciones/entities/suscripcion.entity';
 import { SuscripcionesModule } from './modules/suscripciones/suscripciones.module';
+import { PasarelaModule } from './modules/pasarela/pasarela.module';
 import { Pasarela } from './modules/pasarela/entities/pasarela.entity';
 import { TenantPasarela } from './modules/pasarela/entities/tenant-pasarela.entity';
 import { PasarelaApiKey } from './modules/pasarela/entities/pasarela-api-key.entity';
@@ -190,6 +191,7 @@ import { PasarelaTransaccion } from './modules/pasarela/entities/pasarela-transa
     TercerosModule,
     OnlineModule,
     SuscripcionesModule,
+    PasarelaModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -30,9 +30,13 @@ import { MovimientoInventario } from '../inventario/entities/movimiento-inventar
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Caja } from '../caja/entities/caja.entity';
+import { Pasarela } from '../pasarela/entities/pasarela.entity';
+import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
+import { PasarelaModule } from '../pasarela/pasarela.module';
 
 @Module({
   imports: [
+    PasarelaModule,
     TypeOrmModule.forFeature([
       Moneda,
       Pais,
@@ -63,6 +67,8 @@ import { Caja } from '../caja/entities/caja.entity';
       TipoDocumentoTributario,
       Tercero,
       Caja,
+      Pasarela,
+      TenantPasarela,
     ]),
   ],
   providers: [SeederService],
