@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -19,6 +20,8 @@ const PASARELA_V1 = 'oneclick'; // v1: única pasarela con tokenización
 
 @Injectable()
 export class InscripcionesService {
+  private readonly logger = new Logger(InscripcionesService.name);
+
   constructor(
     @InjectRepository(PasarelaInscripcion)
     private readonly inscripcionRepo: Repository<PasarelaInscripcion>,
@@ -155,7 +158,13 @@ export class InscripcionesService {
           { inscripcionId: inscripcion.inscripcionId, estado: 'procesando' },
           { estado: 'pendiente' },
         )
-        .catch(() => undefined);
+        .catch((err) =>
+          // Si hasta la compensación falla, la fila queda trabada en 'procesando':
+          // dejar rastro para reconciliación manual.
+          this.logger.warn(
+            `No se pudo revertir la inscripción ${inscripcion.inscripcionId} a 'pendiente': ${String(err)}`,
+          ),
+        );
       throw e;
     }
 
