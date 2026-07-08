@@ -13,6 +13,7 @@ import { TenantPasarelaService } from './services/tenant-pasarela.service';
 import { TransaccionesService } from './services/transacciones.service';
 import { InscripcionesService } from './services/inscripciones.service';
 import { CobrosService } from './services/cobros.service';
+import { PagosRedirectService } from './services/pagos-redirect.service';
 import { OneclickProvider } from './providers/oneclick/oneclick.provider';
 import { WebpayPlusProvider } from './providers/webpay-plus/webpay-plus.provider';
 import { ProviderFactory } from './providers/provider.factory';
@@ -51,11 +52,17 @@ import { PasarelaRetornoController } from './controllers/pasarela-retorno.contro
     TransaccionesService,
     InscripcionesService,
     CobrosService,
+    PagosRedirectService,
     OneclickProvider,
     WebpayPlusProvider,
     ProviderFactory,
     ApiKeyGuard,
   ],
-  exports: [CredencialesService, InscripcionesService, CobrosService],
+  exports: [
+    CredencialesService,
+    InscripcionesService,
+    CobrosService,
+    PagosRedirectService,
+  ],
 })
 export class PasarelaModule {}

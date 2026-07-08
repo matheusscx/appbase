@@ -113,6 +113,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Suscripciones (tipo de item suscripcion, alta con primer cobro, gestión) | ✅ Implementado (2026-07-05) |
 | Suscripciones — administración (módulo RBAC propio, vigencia `activa_hasta`, "Mis suscripciones") | ✅ Implementado (2026-07-06) |
 | Pasarela de pagos (Oneclick real, API keys m2m, cifrado de credenciales, admin UI) | ✅ Implementado (2026-07-08) |
+| Pasarela — Webpay Plus Mall (pago único con redirect: crear→confirmar; reembolso pendiente) | ✅ Implementado (2026-07-08) |
 
 ---
 

@@ -22,8 +22,9 @@ de forma agnóstica y expone dos superficies de consumo:
   inscriben medios de pago, cobran, reembolsan y consultan estado — sin pasar
   por el login de usuarios. Un tenant puede contratar **solo** la pasarela.
 
-v1 integra **Transbank Oneclick** (tokenización de tarjeta + cobro recurrente)
-contra su ambiente de integración real.
+Integra dos proveedores de Transbank contra su ambiente de integración real:
+**Oneclick** (tokenización de tarjeta + cobro recurrente) y **Webpay Plus Mall**
+(pago único con redirect: crear → redirigir → confirmar, sin tokenización).
 
 ### Why does it exist?
 
@@ -34,13 +35,15 @@ sin cambios estructurales.
 
 ### Scope
 
-- **Incluido (v1)**: módulo `gateway` con Oneclick real, API keys por tenant,
-  cifrado de credenciales, historial inmutable de transacciones, pantalla de
-  administración del tenant (config, API keys, órdenes).
+- **Incluido**: módulo `gateway` con Oneclick real y **Webpay Plus Mall**
+  (pago único con redirect), API keys por tenant, cifrado de credenciales,
+  historial inmutable de transacciones, pantalla de administración del tenant
+  (config, API keys, órdenes).
 - **NO incluido (fases futuras)**: reconectar suscripciones/tienda a la
-  pasarela real, job de cobro recurrente automático, Webpay Plus / Stripe /
-  MercadoPago, webhooks entrantes, failover por `prioridad`, y rotación de la
-  clave de cifrado.
+  pasarela real, job de cobro recurrente automático, **reembolso de Webpay Plus**
+  (el mall refund necesita token + buy_order hijo + commerce_code juntos, más de
+  lo que transporta la firma compartida `reembolsar`), Stripe / MercadoPago,
+  webhooks entrantes, failover por `prioridad`, y rotación de la clave de cifrado.
 
 ---
 
@@ -70,16 +73,18 @@ POST   /api/pasarela/api/inscripciones             # inicia tokenización → {i
 GET    /api/pasarela/api/inscripciones?pagadorRef= # inscripciones del pagador
 GET    /api/pasarela/api/inscripciones/:id         # detalle (nunca expone tbkUser)
 DELETE /api/pasarela/api/inscripciones/:id         # elimina en proveedor + soft delete
-POST   /api/pasarela/api/cobros                     # cobra con tarjeta guardada
+POST   /api/pasarela/api/cobros                     # (Oneclick) cobra con tarjeta guardada
 POST   /api/pasarela/api/cobros/:ordenId/reembolsos # reembolso parcial/total
+POST   /api/pasarela/api/pagos                      # (Webpay Plus) pago único → {ordenId, urlWebpay, token}
 POST   /api/pasarela/api/ordenes/:id/verificar      # reconcilia una orden en_proceso
 GET    /api/pasarela/api/ordenes/:id                # detalle de orden
 ```
 
-### Retorno de Webpay (público — la credencial es el TBK_TOKEN de un solo uso)
+### Retornos de Webpay (públicos — la credencial es el token de un solo uso)
 
 ```
-GET|POST /api/pasarela/retorno/inscripcion         # confirma y redirige 302 a la app
+GET|POST /api/pasarela/retorno/inscripcion         # Oneclick: confirma inscripción y redirige 302
+GET|POST /api/pasarela/retorno/pago                # Webpay Plus: confirma pago (token_ws) y redirige 302
 ```
 
 ### Ejemplo — cobro
@@ -122,9 +127,12 @@ e inyectan sus services públicos.
 - **Services**: `credenciales` (AES-256-GCM + resolución MALL/INDIVIDUAL),
   `api-keys` (SHA-256), `tenant-pasarela` (config write-only),
   `transacciones` (historial inmutable + redacción), `inscripciones`
-  (tokenización), `cobros` (orden→authorize→estados, reembolso, verificar).
-- **Providers**: interfaz `PaymentProvider` + `ProviderFactory` +
-  `OneclickProvider` (HTTP con `fetch` nativo).
+  (tokenización), `cobros` (orden→authorize→estados, reembolso, verificar),
+  `pagos-redirect` (Webpay Plus: iniciar pago + confirmar retorno).
+- **Providers**: interfaces por capacidad `ProviderReembolsable` (común) +
+  `ProviderTokenizado` (Oneclick) + `ProviderPagoRedirect` (Webpay Plus),
+  resueltas por `ProviderFactory.getTokenizado()` / `getPagoRedirect()`.
+  `OneclickProvider` y `WebpayPlusProvider` (HTTP con `fetch` nativo).
 - **Guard**: `ApiKeyGuard` (resuelve `tenantId` desde la key).
 
 ### Tablas (7)
@@ -145,6 +153,8 @@ Convenciones del repo: UUID PK/FK `type:'uuid'`, soft delete `eliminado_el`,
 ### Máquinas de estado
 
 - **Orden**: `creada → en_proceso → pagada | fallida | expirada` (+ `reembolsada`).
+  En pago redirect, el retorno reclama `en_proceso → procesando` (claim atómico
+  anti-doble-retorno) antes de confirmar; compensa a `en_proceso` si el commit falla.
 - **Transacción**: `iniciada → aprobada | rechazada | error`.
 - **Inscripción**: `pendiente → procesando → activa | fallida | eliminada`
   (`procesando` es el claim atómico transitorio del retorno de Webpay).

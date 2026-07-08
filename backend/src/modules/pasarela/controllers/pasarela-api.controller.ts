@@ -14,9 +14,11 @@ import type { Request } from 'express';
 import { ApiKeyGuard, PasarelaAuth } from '../guards/api-key.guard';
 import { InscripcionesService } from '../services/inscripciones.service';
 import { CobrosService } from '../services/cobros.service';
+import { PagosRedirectService } from '../services/pagos-redirect.service';
 import { CreateInscripcionDto } from '../dto/create-inscripcion.dto';
 import { CreateCobroDto } from '../dto/create-cobro.dto';
 import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
+import { CreatePagoDto } from '../dto/create-pago.dto';
 
 type ApiRequest = Request & { pasarelaAuth: PasarelaAuth };
 
@@ -28,6 +30,7 @@ export class PasarelaApiController {
   constructor(
     private readonly inscripciones: InscripcionesService,
     private readonly cobros: CobrosService,
+    private readonly pagosRedirect: PagosRedirectService,
   ) {}
 
   @Post('inscripciones')
@@ -57,6 +60,11 @@ export class PasarelaApiController {
   @Delete('inscripciones/:id')
   eliminarInscripcion(@Req() req: ApiRequest, @Param('id') id: string) {
     return this.inscripciones.eliminar(req.pasarelaAuth.tenantId, id);
+  }
+
+  @Post('pagos')
+  iniciarPago(@Req() req: ApiRequest, @Body() dto: CreatePagoDto) {
+    return this.pagosRedirect.iniciar(req.pasarelaAuth.tenantId, dto);
   }
 
   @Post('cobros')

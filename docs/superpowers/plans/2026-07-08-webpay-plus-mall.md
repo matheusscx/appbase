@@ -6,6 +6,13 @@
 
 **Architecture:** proveedor de flujo *crear → redirigir → confirmar* detrás de la interfaz `ProviderPagoRedirect`; un `PagosRedirectService` orquesta la orden y el retorno público confirma el pago. Reutiliza el patrón del retorno de inscripción de Oneclick.
 
+- **Status:** Done (flujo de pago) — Tasks 1, 2, 4, 5, 6, 7 implementados; Task 3
+  parcial (`consultarEstado` hecho; `reembolsar` **diferido**: el refund mall
+  necesita token + buy_order hijo + commerce_code, más de lo que transporta la
+  firma compartida `reembolsar` — enriquecer el seam en un follow-up). Falta solo
+  la **verificación manual e2e** con tarjeta de prueba (formulario hosted no
+  automatizable). 328/328 tests, tsc y lint limpios.
+
 **Tech Stack:** NestJS + TypeORM, `fetch` nativo, Decimal.js. REST Webpay Plus Mall `/rswebpaytransaction/api/webpay/v1.2`.
 
 ## Global Constraints
@@ -120,7 +127,25 @@ async iniciarPago(cred, p) {
 - `npx tsc --noEmit` sin errores; `npx eslint` limpio en los archivos tocados.
 - **E2E manual:** contratar `webpay_plus` para Paris (UI o seed tenant_pasarela), `POST /api/pasarela/api/pagos`, abrir `urlWebpay`, pagar con tarjeta de prueba, confirmar retorno → orden `pagada`, reembolsar, verificar cifrado/redacción en BD.
 
+## Credenciales de integración (confirmadas 2026-07-08, transbankdevelopers.cl)
+
+- **Webpay Plus Mall** — comercio padre `597055555535`, tiendas hijas
+  `597055555536` / `597055555537`, `apiKeySecret`
+  `579B532A7440BB0C9079DED94D31EA1615BACEB56610332264630D42D0A36B1C`.
+- Base integración `https://webpay3gint.transbank.cl`, producción `https://webpay3g.transbank.cl`.
+- Endpoints v1.2: create `POST /transactions`, commit `PUT /transactions/{token}`,
+  estado `GET /transactions/{token}`, refund `POST /transactions/{token}/refunds`.
+- Create mall body: `{ buy_order, session_id, return_url, details:[{ amount, commerce_code, buy_order }] }` → `{ token, url }`.
+- Commit response mall: campos + `details[]` (por tienda: `amount, status, authorization_code, payment_type_code, response_code, installments_number`).
+- Refund body: `{ commerce_code, buy_order, amount }` → `{ type: NULLIFIED|REVERSED, ... }`.
+- Tarjeta de prueba: VISA `4051 8856 0044 6623`, CVV `123`, exp. futura; RUT `11.111.111-1`, clave `123`.
+- El seed sembró `mallCommerceCode: '597055555535'` + apiKeySecret ✓. El
+  `commerceCodeHijo` (`597055555536`) va en el `tenant_pasarela` del tenant que
+  contrate (sembrar Paris → webpay_plus o crearlo por UI para el e2e).
+
 ## Decisions / Open questions
 
 - **Persistencia del token de Webpay:** en `orden.metadata.tokenWebpay` (evita migración) vs. columna dedicada. Recomendado: `metadata` para v1.
-- **Confirmar los códigos de comercio mall de integración** contra la doc vigente de Transbank antes del e2e (ver el seed).
+- **Identificador para refund/estado:** Webpay identifica por **token**, no por
+  `codigoOrden`. El provider interpreta el argumento `codigoOrden` de
+  `reembolsar`/`consultarEstado` como el token; el service pasa `metadata.tokenWebpay`.

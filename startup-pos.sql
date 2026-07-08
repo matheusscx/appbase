@@ -875,8 +875,9 @@ CREATE TABLE pasarela_ordenes (
     descripcion VARCHAR NOT NULL,
     monto NUMERIC(18,6) NOT NULL,
     moneda VARCHAR(3) NOT NULL,
-    estado VARCHAR NOT NULL DEFAULT 'creada', -- creada|en_proceso|pagada|fallida|expirada|reembolsada
+    estado VARCHAR NOT NULL DEFAULT 'creada', -- creada|en_proceso|procesando|pagada|fallida|expirada|reembolsada
     fecha_expiracion TIMESTAMPTZ,
+    token_proveedor VARCHAR, -- token del proveedor en flujos redirect (Webpay Plus); claim transitorio 'procesando'
     origen VARCHAR NOT NULL, -- 'interno' | 'api'
     api_key_id UUID REFERENCES pasarela_api_keys(api_key_id),
     metadata JSONB NOT NULL DEFAULT '{}',

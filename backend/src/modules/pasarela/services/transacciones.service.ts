@@ -50,7 +50,8 @@ export class TransaccionesService {
       : this.repo;
     // Historial inmutable: jamás aceptar un transaccionId externo — save() con
     // PK existente haría UPDATE y rompería la garantía de solo-INSERT.
-    const { transaccionId: _ignorado, ...resto } = datos;
+    const resto = { ...datos };
+    delete resto.transaccionId;
     return repo.save(
       repo.create({
         ...resto,

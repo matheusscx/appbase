@@ -898,9 +898,7 @@ export class SeederService implements OnApplicationBootstrap {
       );
     }
 
-    // Webpay Plus Mall — catálogo sembrado como SEAM (activo:false). El provider
-    // es un esqueleto hasta que el flujo real aterrice (ver plan Webpay Plus Mall);
-    // se activa en ese momento para ofrecerlo como contratable en la UI.
+    // Webpay Plus Mall — pago único con redirect (segundo proveedor).
     const WEBPAY_PLUS_ID = '550e8400-e29b-41d4-a716-446655440216';
     const existsWebpay = await this.pasarelaRepo.findOne({
       where: { pasarelaId: WEBPAY_PLUS_ID },
@@ -918,14 +916,37 @@ export class SeederService implements OnApplicationBootstrap {
           urlProduccion: 'https://webpay3g.transbank.cl',
           urlPruebas: 'https://webpay3gint.transbank.cl',
           // Credenciales PÚBLICAS de integración Webpay Plus Mall de Transbank
-          // (no secretas). Verificar contra la doc vigente antes del e2e.
+          // (comercio padre 597055555535, no secretas).
           configuracionPruebas: this.credencialesService.cifrarJson({
             mallCommerceCode: '597055555535',
             apiKeySecret:
               '579B532A7440BB0C9079DED94D31EA1615BACEB56610332264630D42D0A36B1C',
           }),
           configuracionProduccion: null,
-          activo: false,
+          activo: true,
+        }),
+      );
+    }
+
+    // Paris → Webpay Plus modo MALL, ambiente pruebas (tienda hija de integración)
+    const TP_PARIS_WEBPAY_ID = '550e8400-e29b-41d4-a716-446655440217';
+    const existsTpWebpay = await this.tenantPasarelaRepo.findOne({
+      where: { tenantPasarelaId: TP_PARIS_WEBPAY_ID },
+      withDeleted: true,
+    });
+    if (!existsTpWebpay) {
+      await this.tenantPasarelaRepo.save(
+        this.tenantPasarelaRepo.create({
+          tenantPasarelaId: TP_PARIS_WEBPAY_ID,
+          tenantId: '550e8400-e29b-41d4-a716-446655440007',
+          pasarelaId: WEBPAY_PLUS_ID,
+          ambiente: 'pruebas',
+          modoIntegracion: 'mall',
+          configuracion: this.credencialesService.cifrarJson({
+            commerceCodeHijo: '597055555536',
+          }),
+          activo: true,
+          prioridad: 2,
         }),
       );
     }

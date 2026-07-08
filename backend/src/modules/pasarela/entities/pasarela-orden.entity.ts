@@ -36,10 +36,17 @@ export class PasarelaOrden {
   moneda: string; // 'CLP' en v1
 
   @Column({ default: 'creada' })
-  estado: string; // 'creada' | 'en_proceso' | 'pagada' | 'fallida' | 'expirada' | 'reembolsada'
+  estado: string; // 'creada' | 'en_proceso' | 'procesando' | 'pagada' | 'fallida' | 'expirada' | 'reembolsada'
+  // 'procesando': claim transitorio del retorno de pago redirect (Webpay Plus)
 
   @Column({ name: 'fecha_expiracion', type: 'timestamptz', nullable: true })
   fechaExpiracion: Date | null;
+
+  // Token del proveedor para flujos redirect (Webpay Plus): identifica la
+  // transacción en commit/estado. De un solo uso; se limpia al confirmar.
+  @Index()
+  @Column({ name: 'token_proveedor', type: 'varchar', nullable: true })
+  tokenProveedor: string | null;
 
   @Column()
   origen: string; // 'interno' | 'api'

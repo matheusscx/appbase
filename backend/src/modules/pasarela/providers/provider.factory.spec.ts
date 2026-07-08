@@ -28,16 +28,11 @@ describe('ProviderFactory (seam de proveedores)', () => {
     );
   });
 
-  it('el esqueleto de Webpay Plus lanza NotImplemented (aún no integrado)', async () => {
+  it('el reembolso de Webpay Plus aún no está implementado (follow-up)', async () => {
     await expect(
-      webpayPlus.iniciarPago(
+      webpayPlus.reembolsar(
         { baseUrl: 'x' },
-        {
-          codigoOrden: 'O-1',
-          monto: '1000',
-          moneda: 'CLP',
-          returnUrl: 'https://app/retorno',
-        },
+        { codigoOrden: 'tok', monto: '1' },
       ),
     ).rejects.toThrow(NotImplementedException);
   });
