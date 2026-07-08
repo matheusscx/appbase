@@ -20,8 +20,10 @@ const inscripcionActiva = {
 describe('CobrosService', () => {
   let service: CobrosService;
   const ordenRepo = {
-    create: jest.fn((x) => x),
-    save: jest.fn((x) => Promise.resolve({ ordenId: 'orden-1', ...x })),
+    create: jest.fn((x: Partial<PasarelaOrden>) => x),
+    save: jest.fn((x: Partial<PasarelaOrden>) =>
+      Promise.resolve({ ordenId: 'orden-1', ...x }),
+    ),
     findOne: jest.fn(),
     findAndCount: jest.fn().mockResolvedValue([[], 0]),
   };

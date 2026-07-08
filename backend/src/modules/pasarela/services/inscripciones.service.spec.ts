@@ -89,10 +89,12 @@ describe('InscripcionesService', () => {
       urlRetorno: 'https://app/vuelta',
     });
     expect(res.urlWebpay).toBe('https://webpay/init');
-    const llamada = provider.iniciarInscripcion.mock.calls[0][1] as {
-      username: string;
-      responseUrl: string;
-    };
+    const llamada = (
+      provider.iniciarInscripcion.mock.calls[0] as [
+        unknown,
+        { username: string; responseUrl: string },
+      ]
+    )[1];
     expect(llamada.username).toMatch(/^insc-[a-f0-9]{32}$/);
     expect(llamada.username).not.toContain('rut-123');
     expect(llamada.responseUrl).toBe(
@@ -184,7 +186,9 @@ describe('InscripcionesService', () => {
       urlRetornoApp: 'https://app/vuelta',
       tokenProveedor: 'tok-1',
     });
-    provider.confirmarInscripcion.mockRejectedValue(new Error('timeout Transbank'));
+    provider.confirmarInscripcion.mockRejectedValue(
+      new Error('timeout Transbank'),
+    );
     await expect(service.confirmarRetorno('tok-1')).rejects.toThrow('timeout');
     // compensación: update de 'procesando' → 'pendiente' (además del claim inicial)
     expect(inscripcionRepo.update).toHaveBeenLastCalledWith(
