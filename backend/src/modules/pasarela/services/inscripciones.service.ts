@@ -89,8 +89,18 @@ export class InscripcionesService {
   async confirmarRetorno(
     tbkToken: string,
   ): Promise<{ urlRedireccion: string }> {
+    // Claim atómico: solo una request pasa 'pendiente' → 'procesando'. Cierra la
+    // ventana de doble retorno de Webpay (reintento/doble POST) que, sin esto,
+    // duplicaría medio de pago y transacción para la misma inscripción.
+    const claim = await this.inscripcionRepo.update(
+      { tokenProveedor: tbkToken, estado: 'pendiente' },
+      { estado: 'procesando' },
+    );
+    if (!claim.affected)
+      throw new NotFoundException('Inscripción no encontrada para el token');
+
     const inscripcion = await this.inscripcionRepo.findOne({
-      where: { tokenProveedor: tbkToken, estado: 'pendiente' },
+      where: { tokenProveedor: tbkToken },
     });
     if (!inscripcion)
       throw new NotFoundException('Inscripción no encontrada para el token');
@@ -191,8 +201,8 @@ export class InscripcionesService {
       username: inscripcion.identificadorUsuarioExterno,
     });
 
+    // Un solo write: softRemove persiste estado 'eliminada' + eliminado_el juntos.
     inscripcion.estado = 'eliminada';
-    await this.inscripcionRepo.save(inscripcion);
     await this.medioRepo.update({ inscripcionId }, { estado: 'eliminado' });
     await this.inscripcionRepo.softRemove(inscripcion);
     return { inscripcionId };

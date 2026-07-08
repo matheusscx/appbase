@@ -18,6 +18,9 @@ describe('InscripcionesService', () => {
     ),
     findOne: jest.fn(),
     find: jest.fn().mockResolvedValue([]),
+    // Claim atómico del retorno: por defecto la request gana (affected 1)
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
+    softRemove: jest.fn(),
   };
   const medioRepo = {
     create: jest.fn((x: Partial<PasarelaMedioPago>) => x),
@@ -154,10 +157,21 @@ describe('InscripcionesService', () => {
   });
 
   it('confirmarRetorno con token desconocido lanza NotFound', async () => {
-    inscripcionRepo.findOne.mockResolvedValue(null);
+    inscripcionRepo.update.mockResolvedValue({ affected: 0 });
     await expect(service.confirmarRetorno('tok-x')).rejects.toThrow(
       'Inscripción no encontrada',
     );
+  });
+
+  it('confirmarRetorno: segundo retorno concurrente (claim ya tomado) no reprocesa', async () => {
+    // El claim atómico ya lo ganó otra request → affected 0, no llama al proveedor
+    inscripcionRepo.update.mockResolvedValue({ affected: 0 });
+    await expect(service.confirmarRetorno('tok-1')).rejects.toThrow(
+      'Inscripción no encontrada',
+    );
+    expect(provider.confirmarInscripcion).not.toHaveBeenCalled();
+    expect(medioRepo.save).not.toHaveBeenCalled();
+    expect(transacciones.registrar).not.toHaveBeenCalled();
   });
 
   it('resolverParaCobro exige inscripción activa', async () => {
