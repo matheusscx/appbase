@@ -91,7 +91,8 @@ describe('CobrosService', () => {
     expect(res.estado).toBe('pagada');
     // la orden se guardó con codigoOrden ≤ 26 chars (límite Oneclick)
     const ordenCreada = ordenRepo.save.mock.calls[0][0];
-    expect(ordenCreada.codigoOrden.length).toBeLessThanOrEqual(26);
+    expect(ordenCreada.codigoOrden?.length ?? 0).toBeLessThanOrEqual(26);
+    expect(ordenCreada.codigoOrden?.length ?? 0).toBeGreaterThan(0);
     expect(deps.transacciones.registrar).toHaveBeenCalledWith(
       expect.objectContaining({ tipo: 'AUTHORIZATION', estado: 'aprobada' }),
     );
@@ -210,6 +211,46 @@ describe('CobrosService', () => {
     await expect(
       service.reembolsar('t-1', 'orden-1', { monto: '2000' }),
     ).rejects.toThrow('excede');
+  });
+
+  it('reembolso con monto <= 0 es rechazado antes de tocar la orden', async () => {
+    await expect(
+      service.reembolsar('t-1', 'orden-1', { monto: '-1000' }),
+    ).rejects.toThrow('mayor a cero');
+    expect(ordenRepo.findOne).not.toHaveBeenCalled();
+  });
+
+  it('timeout en reembolso: transacción error + BadGateway, orden no cambia', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'pagada',
+      monto: '5000',
+      moneda: 'CLP',
+      codigoOrden: 'O-1',
+    });
+    deps.transacciones.listarPorOrden.mockResolvedValue([
+      {
+        transaccionId: 'tx-auth',
+        tipo: 'AUTHORIZATION',
+        estado: 'aprobada',
+        tenantPasarelaId: 'tp-1',
+        inscripcionId: 'insc-1',
+        monto: '5000',
+      },
+    ]);
+    provider.reembolsar.mockRejectedValue(
+      new ProviderComunicacionError('timeout', {}),
+    );
+    await expect(
+      service.reembolsar('t-1', 'orden-1', { monto: '5000' }),
+    ).rejects.toThrow('verifique el estado');
+    expect(deps.transacciones.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ tipo: 'REFUND', estado: 'error' }),
+    );
+    // la orden nunca pasó a 'reembolsada'
+    const estadosGuardados = ordenRepo.save.mock.calls.map((c) => c[0].estado);
+    expect(estadosGuardados).not.toContain('reembolsada');
   });
 
   it('verificar cierra una orden en_proceso según el proveedor', async () => {

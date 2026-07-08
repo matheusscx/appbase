@@ -163,6 +163,9 @@ export class CobrosService {
   }
 
   async reembolsar(tenantId: string, ordenId: string, dto: CreateReembolsoDto) {
+    if (new Decimal(dto.monto).lte(0))
+      throw new BadRequestException('El monto debe ser mayor a cero');
+
     const orden = await this.ordenRepo.findOne({
       where: { ordenId, tenantId },
     });
@@ -198,9 +201,40 @@ export class CobrosService {
         tenantId,
         PASARELA_V1,
       );
-    const resultado = await this.providerFactory
-      .get(pasarela.codigo)
-      .reembolsar(cred, { codigoOrden: orden.codigoOrden, monto: dto.monto });
+
+    // NOTA (limitación conocida): read (disponible) → proveedor → write no está
+    // serializado. Dos reembolsos concurrentes sobre la misma orden podrían
+    // exceder el total. Cerrarlo requiere lock a nivel BD (SELECT ... FOR UPDATE)
+    // — pendiente de endurecimiento antes de producción. Ver plan/ledger.
+    let resultado: ResultadoCobro;
+    try {
+      resultado = await this.providerFactory
+        .get(pasarela.codigo)
+        .reembolsar(cred, { codigoOrden: orden.codigoOrden, monto: dto.monto });
+    } catch (e) {
+      if (e instanceof ProviderComunicacionError) {
+        // Mismo invariante que cobrar(): un timeout no es un rechazo. Dejar
+        // rastro de auditoría del intento y responder consistente (BadGateway).
+        await this.transacciones.registrar({
+          tenantId,
+          ordenId,
+          tenantPasarelaId: autorizacion.tenantPasarelaId,
+          inscripcionId: autorizacion.inscripcionId,
+          transaccionPadreId: autorizacion.transaccionId,
+          tipo: 'REFUND',
+          estado: 'error',
+          monto: dto.monto,
+          moneda: orden.moneda,
+          codigoOrden: orden.codigoOrden,
+          request: e.request,
+          response: e.response,
+        });
+        throw new BadGatewayException(
+          `No se pudo confirmar el reembolso (orden ${ordenId}); verifique el estado con POST /pasarela/api/ordenes/${ordenId}/verificar`,
+        );
+      }
+      throw e;
+    }
 
     await this.transacciones.registrar({
       tenantId,
