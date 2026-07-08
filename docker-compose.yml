@@ -38,6 +38,8 @@ services:
       JWT_EXPIRATION: ${JWT_EXPIRATION:-7d}
       PORT: 3000
       API_PREFIX: ${API_PREFIX:-/api}
+      PASARELA_ENCRYPTION_KEY: ${PASARELA_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3000}
     ports:
       - "3000:3000"
     depends_on:
