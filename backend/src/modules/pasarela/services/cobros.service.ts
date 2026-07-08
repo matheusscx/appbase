@@ -260,13 +260,18 @@ export class CobrosService {
     return this.toPublico(orden, { reembolsoAprobado: resultado.aprobada });
   }
 
-  /** Cierra una orden en_proceso consultando el estado real al proveedor. */
+  /**
+   * Reconcilia una orden no resuelta consultando el estado real al proveedor.
+   * Acepta 'en_proceso' y 'expirada': la expiración perezosa es solo por reloj,
+   * así que una orden que hizo timeout (y pudo haberse pagado en el proveedor)
+   * debe seguir siendo verificable aunque el reloj ya la haya marcado expirada.
+   */
   async verificar(tenantId: string, ordenId: string) {
     const orden = await this.ordenRepo.findOne({
       where: { ordenId, tenantId },
     });
     if (!orden) throw new NotFoundException('Orden no encontrada');
-    if (orden.estado !== 'en_proceso')
+    if (orden.estado !== 'en_proceso' && orden.estado !== 'expirada')
       throw new BadRequestException(
         `La orden ya está resuelta (${orden.estado})`,
       );
@@ -282,7 +287,12 @@ export class CobrosService {
 
     if (consulta.estado !== 'desconocido') {
       orden.estado = consulta.estado;
-      orden.metadata = { ...orden.metadata, verificacion: consulta.response };
+      // Redactar la respuesta del proveedor antes de persistir (mismo invariante
+      // que el historial de transacciones).
+      orden.metadata = {
+        ...orden.metadata,
+        verificacion: this.transacciones.redactar(consulta.response),
+      };
       await this.ordenRepo.save(orden);
     }
     return this.toPublico(orden);

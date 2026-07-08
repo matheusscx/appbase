@@ -46,6 +46,7 @@ describe('CobrosService', () => {
     transacciones: {
       registrar: jest.fn().mockResolvedValue({ transaccionId: 'tx-1' }),
       listarPorOrden: jest.fn().mockResolvedValue([]),
+      redactar: jest.fn((o: Record<string, unknown>) => o),
     },
     credenciales: { descifrarTexto: jest.fn().mockReturnValue('tbk-u-1') },
   };
@@ -268,6 +269,27 @@ describe('CobrosService', () => {
     });
     const res = await service.verificar('t-1', 'orden-1');
     expect(res.estado).toBe('pagada');
+  });
+
+  it('verificar reconcilia también una orden expirada (no cierra la puerta al timeout)', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'expirada',
+      codigoOrden: 'O-1',
+      metadata: {},
+      fechaExpiracion: new Date(Date.now() - 60_000),
+    });
+    provider.consultarEstado.mockResolvedValue({
+      estado: 'pagada',
+      response: { tbk_user: 'secreto' },
+    });
+    const res = await service.verificar('t-1', 'orden-1');
+    expect(res.estado).toBe('pagada');
+    // la respuesta del proveedor se redacta antes de persistir en metadata
+    expect(deps.transacciones.redactar).toHaveBeenCalledWith({
+      tbk_user: 'secreto',
+    });
   });
 
   it('obtenerOrden aplica expiración perezosa', async () => {
