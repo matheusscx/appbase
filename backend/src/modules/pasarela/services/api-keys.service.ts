@@ -33,14 +33,14 @@ export class ApiKeysService {
   listar(tenantId: string) {
     return this.repo.find({
       where: { tenantId },
-      select: [
-        'apiKeyId',
-        'nombre',
-        'prefijo',
-        'ultimoUsoEl',
-        'revocadaEl',
-        'creadoEl',
-      ],
+      select: {
+        apiKeyId: true,
+        nombre: true,
+        prefijo: true,
+        ultimoUsoEl: true,
+        revocadaEl: true,
+        creadoEl: true,
+      },
       order: { creadoEl: 'DESC' },
     });
   }
