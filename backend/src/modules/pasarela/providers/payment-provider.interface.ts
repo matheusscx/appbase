@@ -37,7 +37,23 @@ export class ProviderComunicacionError extends Error {
   }
 }
 
-export interface PaymentProvider {
+/** Operaciones comunes a todo proveedor, independientes del flujo de cobro. */
+export interface ProviderReembolsable {
+  reembolsar(
+    cred: CredencialesResueltas,
+    p: { codigoOrden: string; monto: string },
+  ): Promise<ResultadoCobro>;
+  consultarEstado(
+    cred: CredencialesResueltas,
+    codigoOrden: string,
+  ): Promise<ResultadoEstado>;
+}
+
+/**
+ * Flujo tokenizado: se inscribe (tokeniza) la tarjeta una vez y luego se cobra
+ * con el token guardado, sin redirect por cobro (ej. Transbank Oneclick).
+ */
+export interface ProviderTokenizado extends ProviderReembolsable {
   iniciarInscripcion(
     cred: CredencialesResueltas,
     p: { username: string; email: string; responseUrl: string },
@@ -63,12 +79,27 @@ export interface PaymentProvider {
       cuotas: number;
     },
   ): Promise<ResultadoCobro>;
-  reembolsar(
+}
+
+/**
+ * Flujo de pago único con redirect: se crea la transacción, el comprador paga en
+ * el formulario hosted del proveedor y al volver se confirma (ej. Webpay Plus).
+ * No tokeniza tarjeta.
+ */
+export interface ProviderPagoRedirect extends ProviderReembolsable {
+  iniciarPago(
     cred: CredencialesResueltas,
-    p: { codigoOrden: string; monto: string },
+    p: {
+      codigoOrden: string;
+      monto: string;
+      moneda: string;
+      returnUrl: string;
+    },
+  ): Promise<
+    { tokenExterno: string; urlRedireccion: string } & ResultadoProvider
+  >;
+  confirmarPago(
+    cred: CredencialesResueltas,
+    token: string,
   ): Promise<ResultadoCobro>;
-  consultarEstado(
-    cred: CredencialesResueltas,
-    codigoOrden: string,
-  ): Promise<ResultadoEstado>;
 }

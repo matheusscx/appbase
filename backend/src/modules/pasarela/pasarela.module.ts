@@ -14,6 +14,7 @@ import { TransaccionesService } from './services/transacciones.service';
 import { InscripcionesService } from './services/inscripciones.service';
 import { CobrosService } from './services/cobros.service';
 import { OneclickProvider } from './providers/oneclick/oneclick.provider';
+import { WebpayPlusProvider } from './providers/webpay-plus/webpay-plus.provider';
 import { ProviderFactory } from './providers/provider.factory';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { PasarelaAdminController } from './controllers/pasarela-admin.controller';
@@ -51,6 +52,7 @@ import { PasarelaRetornoController } from './controllers/pasarela-retorno.contro
     InscripcionesService,
     CobrosService,
     OneclickProvider,
+    WebpayPlusProvider,
     ProviderFactory,
     ApiKeyGuard,
   ],

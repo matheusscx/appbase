@@ -2,8 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import {
   CredencialesResueltas,
-  PaymentProvider,
   ProviderComunicacionError,
+  ProviderTokenizado,
   ResultadoCobro,
   ResultadoEstado,
   ResultadoInscripcion,
@@ -18,7 +18,7 @@ function toStr(v: unknown): string {
 }
 
 @Injectable()
-export class OneclickProvider implements PaymentProvider {
+export class OneclickProvider implements ProviderTokenizado {
   private async request(
     cred: CredencialesResueltas,
     method: string,

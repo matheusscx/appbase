@@ -62,7 +62,7 @@ export class InscripcionesService {
     const username = `insc-${randomUUID().replace(/-/g, '')}`;
     const responseUrl = `${this.config.get<string>('API_PUBLIC_URL') ?? 'http://localhost:3000'}/api/pasarela/retorno/inscripcion`;
 
-    const provider = this.providerFactory.get(pasarela.codigo);
+    const provider = this.providerFactory.getTokenizado(pasarela.codigo);
     const inicio = await provider.iniciarInscripcion(cred, {
       username,
       email: dto.email,
@@ -114,7 +114,7 @@ export class InscripcionesService {
         inscripcion.tenantId,
         PASARELA_V1,
       );
-      const provider = this.providerFactory.get(tp.pasarela.codigo);
+      const provider = this.providerFactory.getTokenizado(tp.pasarela.codigo);
       const resultado = await provider.confirmarInscripcion(tp.cred, tbkToken);
 
       inscripcion.estado = resultado.aprobada ? 'activa' : 'fallida';
@@ -215,7 +215,7 @@ export class InscripcionesService {
       tenantId,
       PASARELA_V1,
     );
-    const provider = this.providerFactory.get(tp.pasarela.codigo);
+    const provider = this.providerFactory.getTokenizado(tp.pasarela.codigo);
     await provider.eliminarInscripcion(tp.cred, {
       identificadorExterno: this.credenciales.descifrarTexto(
         inscripcion.identificadorExterno,

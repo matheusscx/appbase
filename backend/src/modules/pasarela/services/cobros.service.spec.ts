@@ -76,7 +76,10 @@ describe('CobrosService', () => {
         { provide: TenantPasarelaService, useValue: deps.tenantPasarela },
         { provide: TransaccionesService, useValue: deps.transacciones },
         { provide: CredencialesService, useValue: deps.credenciales },
-        { provide: ProviderFactory, useValue: { get: () => provider } },
+        {
+          provide: ProviderFactory,
+          useValue: { getTokenizado: () => provider },
+        },
       ],
     }).compile();
     service = module.get(CobrosService);

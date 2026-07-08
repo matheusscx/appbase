@@ -71,7 +71,7 @@ describe('InscripcionesService', () => {
         { provide: CredencialesService, useValue: credenciales },
         {
           provide: ProviderFactory,
-          useValue: { get: jest.fn().mockReturnValue(provider) },
+          useValue: { getTokenizado: jest.fn().mockReturnValue(provider) },
         },
         {
           provide: ConfigService,

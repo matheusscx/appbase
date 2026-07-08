@@ -898,6 +898,38 @@ export class SeederService implements OnApplicationBootstrap {
       );
     }
 
+    // Webpay Plus Mall — catálogo sembrado como SEAM (activo:false). El provider
+    // es un esqueleto hasta que el flujo real aterrice (ver plan Webpay Plus Mall);
+    // se activa en ese momento para ofrecerlo como contratable en la UI.
+    const WEBPAY_PLUS_ID = '550e8400-e29b-41d4-a716-446655440216';
+    const existsWebpay = await this.pasarelaRepo.findOne({
+      where: { pasarelaId: WEBPAY_PLUS_ID },
+      withDeleted: true,
+    });
+    if (!existsWebpay) {
+      await this.pasarelaRepo.save(
+        this.pasarelaRepo.create({
+          pasarelaId: WEBPAY_PLUS_ID,
+          codigo: 'webpay_plus',
+          nombre: 'Transbank Webpay Plus',
+          soportaTokenizacion: false,
+          soportaCobroRecurrente: false,
+          soportaMall: true,
+          urlProduccion: 'https://webpay3g.transbank.cl',
+          urlPruebas: 'https://webpay3gint.transbank.cl',
+          // Credenciales PÚBLICAS de integración Webpay Plus Mall de Transbank
+          // (no secretas). Verificar contra la doc vigente antes del e2e.
+          configuracionPruebas: this.credencialesService.cifrarJson({
+            mallCommerceCode: '597055555535',
+            apiKeySecret:
+              '579B532A7440BB0C9079DED94D31EA1615BACEB56610332264630D42D0A36B1C',
+          }),
+          configuracionProduccion: null,
+          activo: false,
+        }),
+      );
+    }
+
     // Paris → Oneclick modo MALL, ambiente pruebas (comercio hijo de integración)
     const TP_PARIS_ID = '550e8400-e29b-41d4-a716-446655440215';
     const existsTp = await this.tenantPasarelaRepo.findOne({

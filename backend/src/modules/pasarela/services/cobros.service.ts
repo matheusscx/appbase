@@ -88,7 +88,7 @@ export class CobrosService {
         tenantId,
         PASARELA_V1,
       );
-    const provider = this.providerFactory.get(pasarela.codigo);
+    const provider = this.providerFactory.getTokenizado(pasarela.codigo);
 
     const orden = await this.ordenRepo.save(
       this.ordenRepo.create({
@@ -247,7 +247,7 @@ export class CobrosService {
         // no lo ve porque esperamos en Node). El rollback libera el lock primero;
         // el rastro se escribe recién entonces, en una conexión normal.
         const resultado = await this.providerFactory
-          .get(pasarela.codigo)
+          .getTokenizado(pasarela.codigo)
           .reembolsar(cred, {
             codigoOrden: orden.codigoOrden,
             monto: dto.monto,
@@ -333,7 +333,7 @@ export class CobrosService {
         PASARELA_V1,
       );
     const consulta = await this.providerFactory
-      .get(pasarela.codigo)
+      .getTokenizado(pasarela.codigo)
       .consultarEstado(cred, orden.codigoOrden);
 
     if (consulta.estado !== 'desconocido') {
