@@ -51,10 +51,27 @@ export class OneclickProvider implements PaymentProvider {
         requestInfo,
       );
     }
-    const json = (await res.json().catch(() => ({}))) as Record<
-      string,
-      unknown
-    >;
+    // Body vacío (p. ej. DELETE 204) es válido; un body no-JSON con status <500
+    // es comunicación rota, NUNCA un rechazo de negocio (no asumir rechazo).
+    const text = await res.text().catch(() => null);
+    if (text === null) {
+      throw new ProviderComunicacionError(
+        'No se pudo leer la respuesta de Transbank',
+        requestInfo,
+      );
+    }
+    let json: Record<string, unknown> = {};
+    if (text.trim() !== '') {
+      try {
+        json = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        throw new ProviderComunicacionError(
+          'Respuesta de Transbank no es JSON válido',
+          requestInfo,
+          { bodyPreview: text.slice(0, 200) },
+        );
+      }
+    }
     if (res.status >= 500) {
       throw new ProviderComunicacionError(
         `Transbank respondió ${res.status}`,

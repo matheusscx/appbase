@@ -12,7 +12,15 @@ function mockFetch(status: number, body: unknown) {
   global.fetch = jest.fn().mockResolvedValue({
     ok: status < 400,
     status,
-    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
+  });
+}
+
+function mockFetchRawBody(status: number, rawBody: string) {
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: status < 400,
+    status,
+    text: () => Promise.resolve(rawBody),
   });
 }
 
@@ -107,5 +115,29 @@ describe('OneclickProvider', () => {
         cuotas: 0,
       }),
     ).rejects.toThrow(ProviderComunicacionError);
+  });
+
+  it('body no-JSON con status <500 lanza ProviderComunicacionError, no rechazo', async () => {
+    mockFetchRawBody(200, '<html>proxy error</html>');
+    await expect(
+      provider.autorizarCobro(cred, {
+        username: 'u',
+        identificadorExterno: 't',
+        codigoOrden: 'O-4',
+        monto: '5000',
+        moneda: 'CLP',
+        cuotas: 0,
+      }),
+    ).rejects.toThrow(ProviderComunicacionError);
+  });
+
+  it('body vacío (DELETE 204) no lanza', async () => {
+    mockFetchRawBody(204, '');
+    await expect(
+      provider.eliminarInscripcion(cred, {
+        identificadorExterno: 'tbk-u-1',
+        username: 'insc-abc',
+      }),
+    ).resolves.toBeUndefined();
   });
 });
