@@ -105,46 +105,59 @@ export class InscripcionesService {
     if (!inscripcion)
       throw new NotFoundException('Inscripción no encontrada para el token');
 
-    const tp = await this.tenantPasarelaService.resolverConfiguracionActiva(
-      inscripcion.tenantId,
-      PASARELA_V1,
-    );
-    const provider = this.providerFactory.get(tp.pasarela.codigo);
-    const resultado = await provider.confirmarInscripcion(tp.cred, tbkToken);
-
-    inscripcion.estado = resultado.aprobada ? 'activa' : 'fallida';
-    inscripcion.identificadorExterno = resultado.identificadorExterno
-      ? this.credenciales.cifrarTexto(resultado.identificadorExterno)
-      : null;
-    inscripcion.tokenProveedor = null; // token de un solo uso
-    await this.inscripcionRepo.save(inscripcion);
-
     let medioPagoId: string | null = null;
-    if (resultado.aprobada && resultado.tarjeta) {
-      const medio = await this.medioRepo.save(
-        this.medioRepo.create({
-          inscripcionId: inscripcion.inscripcionId,
-          tipo: resultado.tarjeta.tipo,
-          marca: resultado.tarjeta.marca,
-          ultimos4: resultado.tarjeta.ultimos4,
-          estado: 'activo',
-        }),
+    try {
+      const tp = await this.tenantPasarelaService.resolverConfiguracionActiva(
+        inscripcion.tenantId,
+        PASARELA_V1,
       );
-      medioPagoId = medio.medioPagoId;
-    }
+      const provider = this.providerFactory.get(tp.pasarela.codigo);
+      const resultado = await provider.confirmarInscripcion(tp.cred, tbkToken);
 
-    await this.transacciones.registrar({
-      tenantId: inscripcion.tenantId,
-      tenantPasarelaId: inscripcion.tenantPasarelaId,
-      inscripcionId: inscripcion.inscripcionId,
-      medioPagoId,
-      tipo: 'INSCRIPTION',
-      estado: resultado.aprobada ? 'aprobada' : 'rechazada',
-      codigoRespuesta: resultado.codigoRespuesta,
-      codigoAutorizacion: resultado.codigoAutorizacion,
-      request: resultado.request,
-      response: resultado.response,
-    });
+      inscripcion.estado = resultado.aprobada ? 'activa' : 'fallida';
+      inscripcion.identificadorExterno = resultado.identificadorExterno
+        ? this.credenciales.cifrarTexto(resultado.identificadorExterno)
+        : null;
+      inscripcion.tokenProveedor = null; // token de un solo uso
+      await this.inscripcionRepo.save(inscripcion);
+
+      if (resultado.aprobada && resultado.tarjeta) {
+        const medio = await this.medioRepo.save(
+          this.medioRepo.create({
+            inscripcionId: inscripcion.inscripcionId,
+            tipo: resultado.tarjeta.tipo,
+            marca: resultado.tarjeta.marca,
+            ultimos4: resultado.tarjeta.ultimos4,
+            estado: 'activo',
+          }),
+        );
+        medioPagoId = medio.medioPagoId;
+      }
+
+      await this.transacciones.registrar({
+        tenantId: inscripcion.tenantId,
+        tenantPasarelaId: inscripcion.tenantPasarelaId,
+        inscripcionId: inscripcion.inscripcionId,
+        medioPagoId,
+        tipo: 'INSCRIPTION',
+        estado: resultado.aprobada ? 'aprobada' : 'rechazada',
+        codigoRespuesta: resultado.codigoRespuesta,
+        codigoAutorizacion: resultado.codigoAutorizacion,
+        request: resultado.request,
+        response: resultado.response,
+      });
+    } catch (e) {
+      // Compensación: si algo falla tras el claim, devolver la inscripción a
+      // 'pendiente' para no dejarla trabada en 'procesando' — un reintento
+      // legítimo de Webpay podrá reprocesarla. Best-effort, no enmascara el error.
+      await this.inscripcionRepo
+        .update(
+          { inscripcionId: inscripcion.inscripcionId, estado: 'procesando' },
+          { estado: 'pendiente' },
+        )
+        .catch(() => undefined);
+      throw e;
+    }
 
     const sep = inscripcion.urlRetornoApp.includes('?') ? '&' : '?';
     return {
@@ -201,8 +214,9 @@ export class InscripcionesService {
       username: inscripcion.identificadorUsuarioExterno,
     });
 
-    // Un solo write: softRemove persiste estado 'eliminada' + eliminado_el juntos.
+    // softRemove solo escribe eliminado_el; el save() persiste estado='eliminada'.
     inscripcion.estado = 'eliminada';
+    await this.inscripcionRepo.save(inscripcion);
     await this.medioRepo.update({ inscripcionId }, { estado: 'eliminado' });
     await this.inscripcionRepo.softRemove(inscripcion);
     return { inscripcionId };

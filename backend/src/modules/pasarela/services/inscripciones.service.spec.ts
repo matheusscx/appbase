@@ -174,6 +174,44 @@ describe('InscripcionesService', () => {
     expect(transacciones.registrar).not.toHaveBeenCalled();
   });
 
+  it('confirmarRetorno: si el proveedor falla tras el claim, revierte a pendiente', async () => {
+    inscripcionRepo.update.mockResolvedValue({ affected: 1 });
+    inscripcionRepo.findOne.mockResolvedValue({
+      inscripcionId: 'insc-uuid-1',
+      tenantId: 't-1',
+      tenantPasarelaId: 'tp-1',
+      estado: 'procesando',
+      urlRetornoApp: 'https://app/vuelta',
+      tokenProveedor: 'tok-1',
+    });
+    provider.confirmarInscripcion.mockRejectedValue(new Error('timeout Transbank'));
+    await expect(service.confirmarRetorno('tok-1')).rejects.toThrow('timeout');
+    // compensación: update de 'procesando' → 'pendiente' (además del claim inicial)
+    expect(inscripcionRepo.update).toHaveBeenLastCalledWith(
+      { inscripcionId: 'insc-uuid-1', estado: 'procesando' },
+      { estado: 'pendiente' },
+    );
+    expect(medioRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('eliminar: persiste estado eliminada con save antes del softRemove', async () => {
+    inscripcionRepo.findOne.mockResolvedValue({
+      inscripcionId: 'insc-uuid-1',
+      tenantId: 't-1',
+      estado: 'activa',
+      identificadorExterno: 'v1:cifrado(tbk-u-1)',
+      identificadorUsuarioExterno: 'insc-abc',
+    });
+    await service.eliminar('t-1', 'insc-uuid-1');
+    const guardado = inscripcionRepo.save.mock.calls[0][0];
+    expect(guardado.estado).toBe('eliminada');
+    expect(inscripcionRepo.softRemove).toHaveBeenCalled();
+    expect(medioRepo.update).toHaveBeenCalledWith(
+      { inscripcionId: 'insc-uuid-1' },
+      { estado: 'eliminado' },
+    );
+  });
+
   it('resolverParaCobro exige inscripción activa', async () => {
     inscripcionRepo.findOne.mockResolvedValue(null);
     await expect(

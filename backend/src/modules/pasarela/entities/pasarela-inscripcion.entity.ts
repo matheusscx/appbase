@@ -32,7 +32,7 @@ export class PasarelaInscripcion {
   identificadorUsuarioExterno: string;
 
   @Column({ default: 'pendiente' })
-  estado: string; // 'pendiente' | 'activa' | 'fallida' | 'eliminada'
+  estado: string; // 'pendiente' | 'procesando' | 'activa' | 'fallida' | 'eliminada'
 
   // token temporal del start (correlación del retorno de Webpay)
   @Index()
