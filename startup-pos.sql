@@ -784,3 +784,135 @@ CREATE TABLE "suscripciones" (
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ
 );
+
+-- ============================================================
+-- Pasarela de pagos (módulo pasarela)
+-- ============================================================
+
+CREATE TABLE pasarelas (
+    pasarela_id UUID PRIMARY KEY,
+    codigo VARCHAR NOT NULL UNIQUE,
+    nombre VARCHAR NOT NULL,
+    soporta_tokenizacion BOOLEAN NOT NULL DEFAULT FALSE,
+    soporta_cobro_recurrente BOOLEAN NOT NULL DEFAULT FALSE,
+    soporta_mall BOOLEAN NOT NULL DEFAULT FALSE,
+    url_produccion VARCHAR NOT NULL,
+    url_pruebas VARCHAR NOT NULL,
+    configuracion_produccion TEXT, -- blob cifrado AES-256-GCM 'v1:iv:tag:data'
+    configuracion_pruebas TEXT,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+
+CREATE TABLE tenant_pasarela (
+    tenant_pasarela_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    pasarela_id UUID NOT NULL REFERENCES pasarelas(pasarela_id),
+    ambiente VARCHAR NOT NULL, -- 'pruebas' | 'produccion'
+    modo_integracion VARCHAR NOT NULL, -- 'mall' | 'individual'
+    configuracion TEXT, -- blob cifrado
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    prioridad INTEGER NOT NULL DEFAULT 1,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+
+CREATE TABLE pasarela_api_keys (
+    api_key_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    nombre VARCHAR NOT NULL,
+    prefijo VARCHAR NOT NULL,
+    key_hash VARCHAR NOT NULL UNIQUE, -- SHA-256 hex; la key nunca se persiste
+    ultimo_uso_el TIMESTAMPTZ,
+    revocada_el TIMESTAMPTZ,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+
+CREATE TABLE pasarela_inscripciones (
+    inscripcion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    tenant_pasarela_id UUID NOT NULL REFERENCES tenant_pasarela(tenant_pasarela_id),
+    pagador_ref VARCHAR(100) NOT NULL, -- opaco, lo aporta la app consumidora
+    identificador_externo TEXT, -- tbkUser cifrado
+    identificador_usuario_externo VARCHAR NOT NULL, -- username generado ('insc-…')
+    estado VARCHAR NOT NULL DEFAULT 'pendiente', -- pendiente|activa|fallida|eliminada
+    token_proveedor VARCHAR, -- token temporal del start (un solo uso)
+    url_retorno_app VARCHAR NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_pasarela_inscripciones_pagador ON pasarela_inscripciones (tenant_id, pagador_ref);
+CREATE INDEX idx_pasarela_inscripciones_token ON pasarela_inscripciones (token_proveedor);
+
+CREATE TABLE pasarela_medios_pago (
+    medio_pago_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    inscripcion_id UUID NOT NULL REFERENCES pasarela_inscripciones(inscripcion_id),
+    tipo VARCHAR NOT NULL, -- TARJETA_CREDITO | TARJETA_DEBITO | TARJETA | ...
+    marca VARCHAR,
+    ultimos_4 VARCHAR(4) NOT NULL,
+    fecha_expiracion VARCHAR,
+    token_externo TEXT, -- cifrado (proveedores con token por tarjeta)
+    estado VARCHAR NOT NULL DEFAULT 'activo', -- activo | eliminado
+    metadata JSONB NOT NULL DEFAULT '{}',
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+
+CREATE TABLE pasarela_ordenes (
+    orden_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    pagador_ref VARCHAR(100),
+    referencia_externa VARCHAR, -- correlación de la app (venta_id, folio externo…)
+    codigo_orden VARCHAR NOT NULL UNIQUE, -- buyOrder generado, ≤26 chars
+    descripcion VARCHAR NOT NULL,
+    monto NUMERIC(18,6) NOT NULL,
+    moneda VARCHAR(3) NOT NULL,
+    estado VARCHAR NOT NULL DEFAULT 'creada', -- creada|en_proceso|pagada|fallida|expirada|reembolsada
+    fecha_expiracion TIMESTAMPTZ,
+    origen VARCHAR NOT NULL, -- 'interno' | 'api'
+    api_key_id UUID REFERENCES pasarela_api_keys(api_key_id),
+    metadata JSONB NOT NULL DEFAULT '{}',
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+
+CREATE TABLE pasarela_transacciones (
+    transaccion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    orden_id UUID REFERENCES pasarela_ordenes(orden_id), -- NULL para INSCRIPTION
+    tenant_pasarela_id UUID NOT NULL REFERENCES tenant_pasarela(tenant_pasarela_id),
+    inscripcion_id UUID REFERENCES pasarela_inscripciones(inscripcion_id),
+    medio_pago_id UUID REFERENCES pasarela_medios_pago(medio_pago_id),
+    transaccion_padre_id UUID REFERENCES pasarela_transacciones(transaccion_id),
+    tipo VARCHAR NOT NULL, -- INSCRIPTION|AUTHORIZATION|CAPTURE|REVERSAL|REFUND|RECURRENT_PAYMENT
+    estado VARCHAR NOT NULL, -- iniciada|aprobada|rechazada|error (inmutable una vez terminal)
+    monto NUMERIC(18,6),
+    moneda VARCHAR(3),
+    codigo_orden VARCHAR,
+    codigo_autorizacion VARCHAR,
+    identificador_transaccion_externo VARCHAR,
+    codigo_respuesta VARCHAR,
+    tipo_pago VARCHAR,
+    numero_cuotas INTEGER,
+    monto_cuota NUMERIC(18,6),
+    request JSONB NOT NULL DEFAULT '{}', -- redactado: nunca credenciales/tokens en claro
+    response JSONB NOT NULL DEFAULT '{}',
+    metadata JSONB NOT NULL DEFAULT '{}',
+    fecha_transaccion TIMESTAMPTZ NOT NULL,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+-- Idempotencia: una transacción externa no puede registrarse dos veces
+CREATE UNIQUE INDEX idx_pasarela_tx_externo
+    ON pasarela_transacciones (tenant_pasarela_id, identificador_transaccion_externo)
+    WHERE identificador_transaccion_externo IS NOT NULL;

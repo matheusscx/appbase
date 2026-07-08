@@ -82,6 +82,13 @@ import { TercerosModule } from './modules/terceros/terceros.module';
 import { OnlineModule } from './modules/online/online.module';
 import { Suscripcion } from './modules/suscripciones/entities/suscripcion.entity';
 import { SuscripcionesModule } from './modules/suscripciones/suscripciones.module';
+import { Pasarela } from './modules/pasarela/entities/pasarela.entity';
+import { TenantPasarela } from './modules/pasarela/entities/tenant-pasarela.entity';
+import { PasarelaApiKey } from './modules/pasarela/entities/pasarela-api-key.entity';
+import { PasarelaInscripcion } from './modules/pasarela/entities/pasarela-inscripcion.entity';
+import { PasarelaMedioPago } from './modules/pasarela/entities/pasarela-medio-pago.entity';
+import { PasarelaOrden } from './modules/pasarela/entities/pasarela-orden.entity';
+import { PasarelaTransaccion } from './modules/pasarela/entities/pasarela-transaccion.entity';
 
 @Module({
   imports: [
@@ -147,6 +154,13 @@ import { SuscripcionesModule } from './modules/suscripciones/suscripciones.modul
           TipoDocumentoTributario,
           Tercero,
           Suscripcion,
+          Pasarela,
+          TenantPasarela,
+          PasarelaApiKey,
+          PasarelaInscripcion,
+          PasarelaMedioPago,
+          PasarelaOrden,
+          PasarelaTransaccion,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
