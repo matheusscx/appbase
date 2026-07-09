@@ -56,6 +56,11 @@ describe('CobrosService', () => {
         pasarela: { codigo: 'oneclick' },
         cred: {},
       }),
+      resolverPorId: jest.fn().mockResolvedValue({
+        tenantPasarela: { tenantPasarelaId: 'tp-1' },
+        pasarela: { codigo: 'oneclick' },
+        cred: {},
+      }),
     },
     transacciones: {
       registrar: jest.fn().mockResolvedValue({ transaccionId: 'tx-1' }),
@@ -78,7 +83,10 @@ describe('CobrosService', () => {
         { provide: CredencialesService, useValue: deps.credenciales },
         {
           provide: ProviderFactory,
-          useValue: { getTokenizado: () => provider },
+          useValue: {
+            getTokenizado: () => provider,
+            getReembolsable: () => provider,
+          },
         },
       ],
     }).compile();
@@ -330,7 +338,8 @@ describe('CobrosService', () => {
       tenantId: 't-1',
       estado: 'en_proceso',
       codigoOrden: 'O-1',
-      metadata: {},
+      tokenProveedor: null,
+      metadata: { tenantPasarelaId: 'tp-1' },
       fechaExpiracion: null,
     });
     provider.consultarEstado.mockResolvedValue({
@@ -347,7 +356,8 @@ describe('CobrosService', () => {
       tenantId: 't-1',
       estado: 'expirada',
       codigoOrden: 'O-1',
-      metadata: {},
+      tokenProveedor: null,
+      metadata: { tenantPasarelaId: 'tp-1' },
       fechaExpiracion: new Date(Date.now() - 60_000),
     });
     provider.consultarEstado.mockResolvedValue({

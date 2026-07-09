@@ -40,9 +40,7 @@ sin cambios estructurales.
   historial inmutable de transacciones, pantalla de administración del tenant
   (config, API keys, órdenes).
 - **NO incluido (fases futuras)**: reconectar suscripciones/tienda a la
-  pasarela real, job de cobro recurrente automático, **reembolso de Webpay Plus**
-  (el mall refund necesita token + buy_order hijo + commerce_code juntos, más de
-  lo que transporta la firma compartida `reembolsar`), Stripe / MercadoPago,
+  pasarela real, job de cobro recurrente automático, Stripe / MercadoPago,
   webhooks entrantes, failover por `prioridad`, y rotación de la clave de cifrado.
 
 ---
@@ -129,10 +127,14 @@ e inyectan sus services públicos.
   `transacciones` (historial inmutable + redacción), `inscripciones`
   (tokenización), `cobros` (orden→authorize→estados, reembolso, verificar),
   `pagos-redirect` (Webpay Plus: iniciar pago + confirmar retorno).
-- **Providers**: interfaces por capacidad `ProviderReembolsable` (común) +
-  `ProviderTokenizado` (Oneclick) + `ProviderPagoRedirect` (Webpay Plus),
-  resueltas por `ProviderFactory.getTokenizado()` / `getPagoRedirect()`.
+- **Providers**: interfaces por capacidad `ProviderReembolsable` (común:
+  `reembolsar` + `consultarEstado`) + `ProviderTokenizado` (Oneclick) +
+  `ProviderPagoRedirect` (Webpay Plus), resueltas por `ProviderFactory`
+  (`getTokenizado()` / `getPagoRedirect()` / `getReembolsable()`).
   `OneclickProvider` y `WebpayPlusProvider` (HTTP con `fetch` nativo).
+  **Reembolso y verificación son agnósticos del flujo**: resuelven el proveedor
+  de la orden por la config con que se cobró (`resolverPorId`, vía la
+  `AUTHORIZATION` original o `metadata`), no por la activa del tenant.
 - **Guard**: `ApiKeyGuard` (resuelve `tenantId` desde la key).
 
 ### Tablas (7)

@@ -1,4 +1,4 @@
-import { BadRequestException, NotImplementedException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { ProviderFactory } from './provider.factory';
 import { OneclickProvider } from './oneclick/oneclick.provider';
 import { WebpayPlusProvider } from './webpay-plus/webpay-plus.provider';
@@ -28,12 +28,9 @@ describe('ProviderFactory (seam de proveedores)', () => {
     );
   });
 
-  it('el reembolso de Webpay Plus aún no está implementado (follow-up)', async () => {
-    await expect(
-      webpayPlus.reembolsar(
-        { baseUrl: 'x' },
-        { codigoOrden: 'tok', monto: '1' },
-      ),
-    ).rejects.toThrow(NotImplementedException);
+  it('getReembolsable resuelve ambos flujos (interfaz común)', () => {
+    expect(factory.getReembolsable('oneclick')).toBe(oneclick);
+    expect(factory.getReembolsable('webpay_plus')).toBe(webpayPlus);
+    expect(() => factory.getReembolsable('otro')).toThrow(BadRequestException);
   });
 });

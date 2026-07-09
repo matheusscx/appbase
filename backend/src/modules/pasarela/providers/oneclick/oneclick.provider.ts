@@ -226,8 +226,9 @@ export class OneclickProvider implements ProviderTokenizado {
 
   async reembolsar(
     cred: CredencialesResueltas,
-    p: { codigoOrden: string; monto: string },
+    p: { codigoOrden: string; monto: string; tokenProveedor: string | null },
   ): Promise<ResultadoCobro> {
+    // Oneclick identifica por buyOrder (codigoOrden); tokenProveedor no aplica.
     const body = {
       commerce_code: cred.commerceCodeHijo,
       detail_buy_order: `${p.codigoOrden}-1`,
@@ -263,12 +264,13 @@ export class OneclickProvider implements ProviderTokenizado {
 
   async consultarEstado(
     cred: CredencialesResueltas,
-    codigoOrden: string,
+    referencia: { codigoOrden: string; tokenProveedor: string | null },
   ): Promise<ResultadoEstado> {
+    // Oneclick consulta por buyOrder (codigoOrden).
     const { status, json } = await this.request(
       cred,
       'GET',
-      `/transactions/${encodeURIComponent(codigoOrden)}`,
+      `/transactions/${encodeURIComponent(referencia.codigoOrden)}`,
     );
     if (status === 404) return { estado: 'fallida', response: json };
     const detalle = (

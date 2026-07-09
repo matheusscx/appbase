@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   ProviderPagoRedirect,
+  ProviderReembolsable,
   ProviderTokenizado,
 } from './payment-provider.interface';
 import { OneclickProvider } from './oneclick/oneclick.provider';
@@ -34,6 +35,22 @@ export class ProviderFactory {
         throw new BadRequestException(
           `Pasarela de pago redirect no soportada: ${codigo}`,
         );
+    }
+  }
+
+  /**
+   * Operaciones comunes (reembolso, consulta de estado) sin importar el flujo:
+   * resuelve el proveedor de una orden existente por su código, para reembolsar
+   * o reconciliar independientemente de cómo se cobró.
+   */
+  getReembolsable(codigo: string): ProviderReembolsable {
+    switch (codigo) {
+      case 'oneclick':
+        return this.oneclick;
+      case 'webpay_plus':
+        return this.webpayPlus;
+      default:
+        throw new BadRequestException(`Pasarela no soportada: ${codigo}`);
     }
   }
 }

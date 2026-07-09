@@ -95,14 +95,55 @@ describe('WebpayPlusProvider', () => {
     );
   });
 
-  it('consultarEstado: AUTHORIZED → pagada; 404 → fallida', async () => {
+  it('consultarEstado: AUTHORIZED → pagada; 404 → fallida (por token)', async () => {
+    const ref = { codigoOrden: 'W-1', tokenProveedor: 'tok-1' };
     mockFetch(200, { details: [{ status: 'AUTHORIZED' }] });
-    expect((await provider.consultarEstado(cred, 'tok-1')).estado).toBe(
-      'pagada',
-    );
+    expect((await provider.consultarEstado(cred, ref)).estado).toBe('pagada');
     mockFetch(404, {});
-    expect((await provider.consultarEstado(cred, 'tok-1')).estado).toBe(
-      'fallida',
-    );
+    expect((await provider.consultarEstado(cred, ref)).estado).toBe('fallida');
+  });
+
+  it('consultarEstado: sin token → desconocido (no golpea al proveedor)', async () => {
+    global.fetch = jest.fn();
+    const r = await provider.consultarEstado(cred, {
+      codigoOrden: 'W-1',
+      tokenProveedor: null,
+    });
+    expect(r.estado).toBe('desconocido');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('reembolsar: usa el token en la URL y el detalle hijo (buy_order + commerce_code) en el body', async () => {
+    mockFetch(200, { type: 'REVERSED', response_code: 0 });
+    const r = await provider.reembolsar(cred, {
+      codigoOrden: 'W-1',
+      monto: '5990',
+      tokenProveedor: 'tok-1',
+    });
+    expect(r.aprobada).toBe(true);
+    expect(r.tipoPago).toBe('REVERSED');
+    const call = (global.fetch as jest.Mock).mock.calls[0] as [
+      string,
+      { body: string },
+    ];
+    expect(call[0]).toContain('/transactions/tok-1/refunds');
+    const sent = JSON.parse(call[1].body) as {
+      commerce_code: string;
+      buy_order: string;
+      amount: number;
+    };
+    expect(sent.commerce_code).toBe('597055555536');
+    expect(sent.buy_order).toBe('W-1-1');
+    expect(sent.amount).toBe(5990);
+  });
+
+  it('reembolsar: sin token es rechazado', async () => {
+    await expect(
+      provider.reembolsar(cred, {
+        codigoOrden: 'W-1',
+        monto: '100',
+        tokenProveedor: null,
+      }),
+    ).rejects.toThrow('token');
   });
 });

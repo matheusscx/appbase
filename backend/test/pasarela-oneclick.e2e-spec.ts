@@ -25,10 +25,10 @@ correr('OneclickProvider e2e (integración Transbank real)', () => {
   }, 15000);
 
   it('consultar una orden inexistente responde fallida/desconocido (no explota)', async () => {
-    const res = await provider.consultarEstado(
-      cred,
-      `ONOEXISTE${Date.now().toString(36)}`.toUpperCase(),
-    );
+    const res = await provider.consultarEstado(cred, {
+      codigoOrden: `ONOEXISTE${Date.now().toString(36)}`.toUpperCase(),
+      tokenProveedor: null,
+    });
     expect(['fallida', 'desconocido']).toContain(res.estado);
   }, 15000);
 });

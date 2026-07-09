@@ -6,12 +6,15 @@
 
 **Architecture:** proveedor de flujo *crear → redirigir → confirmar* detrás de la interfaz `ProviderPagoRedirect`; un `PagosRedirectService` orquesta la orden y el retorno público confirma el pago. Reutiliza el patrón del retorno de inscripción de Oneclick.
 
-- **Status:** Done (flujo de pago) — Tasks 1, 2, 4, 5, 6, 7 implementados; Task 3
-  parcial (`consultarEstado` hecho; `reembolsar` **diferido**: el refund mall
-  necesita token + buy_order hijo + commerce_code, más de lo que transporta la
-  firma compartida `reembolsar` — enriquecer el seam en un follow-up). Falta solo
-  la **verificación manual e2e** con tarjeta de prueba (formulario hosted no
-  automatizable). 328/328 tests, tsc y lint limpios.
+- **Status:** Done — Tasks 1-7 completos. Task 3 (`reembolsar` + `consultarEstado`)
+  ahora **implementado**: se enriqueció la interfaz común con `ReferenciaTransaccion`
+  (`{ codigoOrden, tokenProveedor }`) y el factory con `getReembolsable()`;
+  `CobrosService.reembolsar`/`verificar` resuelven el proveedor de la orden con
+  `resolverPorId` (agnóstico del flujo, sirve para Oneclick y Webpay Plus). El
+  refund mall de Webpay usa token (URL) + buy_order hijo + commerce_code. Falta
+  solo la **verificación manual e2e** con tarjeta (formulario hosted no automatizable).
+  331/331 tests, tsc y lint limpios. El create/commit ya se probó en vivo contra
+  Transbank integración real.
 
 **Tech Stack:** NestJS + TypeORM, `fetch` nativo, Decimal.js. REST Webpay Plus Mall `/rswebpaytransaction/api/webpay/v1.2`.
 

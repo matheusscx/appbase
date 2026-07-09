@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotImplementedException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import {
   CredencialesResueltas,
@@ -179,33 +175,62 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
   }
 
   /**
-   * NO IMPLEMENTADO (follow-up): el refund mall necesita token (URL) + buy_order
-   * del detalle hijo + commerce_code juntos, y la firma compartida
-   * `reembolsar(cred, { codigoOrden, monto })` solo transporta un identificador.
-   * Enriquecer el seam antes de cablearlo. El flujo de pago no lo requiere.
+   * Refund mall: la URL usa el `tokenProveedor`; el body identifica el detalle
+   * hijo por su `buy_order` (`${codigoOrden}-1`, igual que en iniciarPago) y su
+   * `commerce_code`. Por eso necesita ambos identificadores de la referencia.
    */
-  reembolsar(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- follow-up
-    _cred: CredencialesResueltas,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- follow-up
-    _p: { codigoOrden: string; monto: string },
+  async reembolsar(
+    cred: CredencialesResueltas,
+    p: { codigoOrden: string; monto: string; tokenProveedor: string | null },
   ): Promise<ResultadoCobro> {
-    return Promise.reject(
-      new NotImplementedException(
-        'Reembolso de Webpay Plus aún no implementado (ver plan Webpay Plus Mall)',
-      ),
+    if (!p.tokenProveedor)
+      throw new BadRequestException(
+        'Falta el token de la transacción Webpay para reembolsar',
+      );
+    const body = {
+      commerce_code: cred.commerceCodeHijo,
+      buy_order: `${p.codigoOrden}-1`,
+      amount: this.montoEntero(p.monto, 'CLP'),
+    };
+    const { json, requestInfo } = await this.request(
+      cred,
+      'POST',
+      `/transactions/${encodeURIComponent(p.tokenProveedor)}/refunds`,
+      body,
     );
+    // Refund OK trae 'type' (REVERSED | NULLIFIED); response_code != 0 es rechazo.
+    const aprobada = !!json.type;
+    return {
+      aprobada,
+      codigoRespuesta:
+        json.response_code != null
+          ? toStr(json.response_code)
+          : aprobada
+            ? '0'
+            : null,
+      codigoAutorizacion: json.authorization_code
+        ? toStr(json.authorization_code)
+        : null,
+      identificadorTransaccionExterno: p.tokenProveedor,
+      tipoPago: json.type ? toStr(json.type) : null,
+      numeroCuotas: null,
+      montoCuota: null,
+      request: requestInfo,
+      response: json,
+    };
   }
 
-  /** El identificador para Webpay es el `token` (se pasa como `codigoOrden`). */
+  /** El identificador para Webpay es el `tokenProveedor`. */
   async consultarEstado(
     cred: CredencialesResueltas,
-    token: string,
+    referencia: { codigoOrden: string; tokenProveedor: string | null },
   ): Promise<ResultadoEstado> {
+    if (!referencia.tokenProveedor)
+      return { estado: 'desconocido', response: {} };
     const { status, json } = await this.request(
       cred,
       'GET',
-      `/transactions/${encodeURIComponent(token)}`,
+      `/transactions/${encodeURIComponent(referencia.tokenProveedor)}`,
     );
     if (status === 404) return { estado: 'fallida', response: json };
     const detalle = (

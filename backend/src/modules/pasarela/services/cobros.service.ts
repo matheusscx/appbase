@@ -224,10 +224,13 @@ export class CobrosService {
             `El monto excede lo disponible para reembolso (${disponible.toString()})`,
           );
 
+        // Resolver el proveedor de la orden por la configuración con que se cobró
+        // (la AUTHORIZATION original), no por la activa del tenant: reembolsa bajo
+        // la misma pasarela aunque el tenant haya cambiado de activa. Sirve para
+        // cualquier flujo (Oneclick o Webpay Plus) vía la interfaz común.
         const { pasarela, cred } =
-          await this.tenantPasarelaService.resolverConfiguracionActiva(
-            tenantId,
-            PASARELA_V1,
+          await this.tenantPasarelaService.resolverPorId(
+            autorizacion.tenantPasarelaId,
           );
 
         // Guardar el contexto de auditoría ANTES de llamar al proveedor, por si
@@ -247,10 +250,11 @@ export class CobrosService {
         // no lo ve porque esperamos en Node). El rollback libera el lock primero;
         // el rastro se escribe recién entonces, en una conexión normal.
         const resultado = await this.providerFactory
-          .getTokenizado(pasarela.codigo)
+          .getReembolsable(pasarela.codigo)
           .reembolsar(cred, {
             codigoOrden: orden.codigoOrden,
             monto: dto.monto,
+            tokenProveedor: orden.tokenProveedor,
           });
 
         await this.transacciones.registrar(
@@ -327,14 +331,30 @@ export class CobrosService {
         `La orden ya está resuelta (${orden.estado})`,
       );
 
-    const { pasarela, cred } =
-      await this.tenantPasarelaService.resolverConfiguracionActiva(
-        tenantId,
-        PASARELA_V1,
+    // Resolver el proveedor de la orden (no la activa del tenant): por la
+    // configuración con que se cobró, tomada de sus transacciones o metadata.
+    const historial = await this.transacciones.listarPorOrden(
+      tenantId,
+      ordenId,
+    );
+    const tenantPasarelaId =
+      historial.find((t) => t.tenantPasarelaId)?.tenantPasarelaId ??
+      (typeof orden.metadata?.tenantPasarelaId === 'string'
+        ? orden.metadata.tenantPasarelaId
+        : null);
+    if (!tenantPasarelaId)
+      throw new BadRequestException(
+        'No se puede determinar la pasarela de la orden para verificar',
       );
+
+    const { pasarela, cred } =
+      await this.tenantPasarelaService.resolverPorId(tenantPasarelaId);
     const consulta = await this.providerFactory
-      .getTokenizado(pasarela.codigo)
-      .consultarEstado(cred, orden.codigoOrden);
+      .getReembolsable(pasarela.codigo)
+      .consultarEstado(cred, {
+        codigoOrden: orden.codigoOrden,
+        tokenProveedor: orden.tokenProveedor,
+      });
 
     if (consulta.estado !== 'desconocido') {
       orden.estado = consulta.estado;

@@ -161,4 +161,26 @@ export class TenantPasarelaService {
     const cred = this.credenciales.resolver(tenantPasarela, pasarela);
     return { tenantPasarela, pasarela, cred };
   }
+
+  /**
+   * Resuelve la config + credenciales de una configuración concreta por su id
+   * (no por la activa del tenant): para reembolsar/reconciliar una orden bajo
+   * la MISMA pasarela con que se cobró, aunque el tenant haya cambiado de activa.
+   * Incluye configuraciones soft-deleted: una orden vieja sigue siendo operable.
+   */
+  async resolverPorId(tenantPasarelaId: string) {
+    const tenantPasarela = await this.tpRepo.findOne({
+      where: { tenantPasarelaId },
+      withDeleted: true,
+    });
+    if (!tenantPasarela)
+      throw new NotFoundException('Configuración de pasarela no encontrada');
+    const pasarela = await this.pasarelaRepo.findOne({
+      where: { pasarelaId: tenantPasarela.pasarelaId },
+      withDeleted: true,
+    });
+    if (!pasarela) throw new NotFoundException('Pasarela no encontrada');
+    const cred = this.credenciales.resolver(tenantPasarela, pasarela);
+    return { tenantPasarela, pasarela, cred };
+  }
 }

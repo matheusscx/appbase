@@ -37,15 +37,25 @@ export class ProviderComunicacionError extends Error {
   }
 }
 
+/**
+ * Referencia de una transacción existente. Cada proveedor usa el identificador
+ * que le corresponde: Oneclick por `codigoOrden` (buyOrder), Webpay Plus por
+ * `tokenProveedor`. Ambos se pasan siempre; el proveedor elige.
+ */
+export interface ReferenciaTransaccion {
+  codigoOrden: string;
+  tokenProveedor: string | null;
+}
+
 /** Operaciones comunes a todo proveedor, independientes del flujo de cobro. */
 export interface ProviderReembolsable {
   reembolsar(
     cred: CredencialesResueltas,
-    p: { codigoOrden: string; monto: string },
+    p: ReferenciaTransaccion & { monto: string },
   ): Promise<ResultadoCobro>;
   consultarEstado(
     cred: CredencialesResueltas,
-    codigoOrden: string,
+    referencia: ReferenciaTransaccion,
   ): Promise<ResultadoEstado>;
 }
 
