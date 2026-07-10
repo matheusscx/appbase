@@ -34,6 +34,9 @@ const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
 const apiUrl = config.public.apiUrl
 
+const route = useRoute()
+const router = useRouter()
+
 const pagoSeleccionado = ref<PagoLedger | null>(null)
 const detalleOpen = ref(false)
 
@@ -44,12 +47,16 @@ function onSelectPago(_e: Event, row: Row<PagoLedger>) {
 
 const filtroMetodo = ref<string | undefined>()
 const filtroEstado = ref<string | undefined>()
+const filtroVentaId = ref<string | undefined>(
+  typeof route.query.ventaId === 'string' ? route.query.ventaId : undefined,
+)
 
 const { pageSize } = useUserPreferences()
 
 const listFilters = computed(() => ({
   metodoPagoId: filtroMetodo.value,
   ventaEstado: filtroEstado.value,
+  ventaId: filtroVentaId.value,
 }))
 
 const { items: pagos, meta, page, loading } =
@@ -99,11 +106,21 @@ const metodoOptions = computed(() =>
     .map(m => ({ label: m.nombre, value: m.metodoPagoId })),
 )
 
-const hayFiltrosActivos = computed(() => !!filtroMetodo.value || !!filtroEstado.value)
+const hayFiltrosActivos = computed(() =>
+  !!filtroMetodo.value || !!filtroEstado.value || !!filtroVentaId.value,
+)
 
 function limpiarFiltros() {
   filtroMetodo.value = undefined
   filtroEstado.value = undefined
+  quitarFiltroVenta()
+}
+
+function quitarFiltroVenta() {
+  filtroVentaId.value = undefined
+  if (route.query.ventaId) {
+    router.replace({ query: { ...route.query, ventaId: undefined } })
+  }
 }
 
 async function cargarResumen() {
@@ -132,6 +149,10 @@ async function cargarMetodos() {
 async function cargar() {
   await Promise.all([cargarResumen(), cargarMetodos()])
 }
+
+watch(() => route.query.ventaId, (id) => {
+  filtroVentaId.value = typeof id === 'string' && id ? id : undefined
+})
 
 const columns: TableColumn<PagoLedger>[] = [
   { accessorKey: 'fecha', header: 'Fecha' },
@@ -198,6 +219,22 @@ onMounted(cargar)
             placeholder="Estado de la venta"
             class="w-48"
           />
+          <UBadge
+            v-if="filtroVentaId"
+            color="primary"
+            variant="subtle"
+            class="gap-1"
+          >
+            Filtrado por venta
+            <UButton
+              icon="i-lucide-x"
+              variant="link"
+              color="primary"
+              size="xs"
+              class="p-0"
+              @click="quitarFiltroVenta"
+            />
+          </UBadge>
           <UButton
             v-if="hayFiltrosActivos"
             label="Limpiar filtros"

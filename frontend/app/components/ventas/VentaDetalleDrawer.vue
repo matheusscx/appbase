@@ -276,9 +276,19 @@ async function onAbonoSuccess() {
 
           <UCard>
             <template #header>
-              <h2 class="text-base font-semibold">
-                Pagos
-              </h2>
+              <div class="flex items-center justify-between">
+                <h2 class="text-base font-semibold">
+                  Pagos
+                </h2>
+                <NuxtLink
+                  v-if="venta.pagos.length"
+                  :to="{ path: '/pagos', query: { ventaId: venta.id } }"
+                  class="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+                >
+                  Ver en Pagos
+                  <UIcon name="i-lucide-arrow-right" class="h-3 w-3" />
+                </NuxtLink>
+              </div>
             </template>
 
             <div v-if="!venta.pagos.length" class="py-2 text-sm text-muted">
