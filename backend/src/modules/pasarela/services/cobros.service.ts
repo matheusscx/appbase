@@ -11,6 +11,7 @@ import { randomBytes } from 'crypto';
 import { PasarelaOrden } from '../entities/pasarela-orden.entity';
 import { CreateCobroDto } from '../dto/create-cobro.dto';
 import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
+import type { QueryOrdenesDto } from '../dto/query-ordenes.dto';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
@@ -20,6 +21,24 @@ import {
   ProviderComunicacionError,
   ResultadoCobro,
 } from '../providers/payment-provider.interface';
+import type { PaginatedResponse } from '../../../common/interfaces/paginated-response.interface';
+import {
+  buildPaginationMeta,
+  resolvePagination,
+} from '../../../common/utils/pagination.util';
+
+interface OrdenListRow {
+  orden_id: string;
+  codigo_orden: string;
+  pagador_ref: string | null;
+  referencia_externa: string | null;
+  descripcion: string;
+  monto: string;
+  moneda: string;
+  estado: string;
+  origen: string;
+  creado_el: Date;
+}
 
 const PASARELA_V1 = 'oneclick';
 const EXPIRACION_ORDEN_MS = 2 * 60 * 60 * 1000; // 2 horas
@@ -406,16 +425,88 @@ export class CobrosService {
     });
   }
 
-  async listarOrdenes(tenantId: string, page = 1, pageSize = 15) {
-    const [data, total] = await this.ordenRepo.findAndCount({
-      where: { tenantId },
-      order: { creadoEl: 'DESC' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    });
+  async listarOrdenes(
+    tenantId: string,
+    query: QueryOrdenesDto,
+  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+    const { page, pageSize, offset } = resolvePagination(query);
+    const { filters, params } = this.buildListarOrdenesFilters(tenantId, query);
+
+    const countRows: { total: number }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS total
+       FROM pasarela_ordenes o
+       WHERE o.tenant_id = $1 AND o.eliminado_el IS NULL
+       ${filters}`,
+      params,
+    );
+    const total = countRows[0]?.total ?? 0;
+
+    const listParams = [...params, pageSize, offset];
+    const limitIdx = params.length + 1;
+    const offsetIdx = params.length + 2;
+
+    const rows: OrdenListRow[] = await this.dataSource.query(
+      `SELECT o.orden_id, o.codigo_orden, o.pagador_ref, o.referencia_externa,
+              o.descripcion, o.monto, o.moneda, o.estado, o.origen, o.creado_el
+       FROM pasarela_ordenes o
+       WHERE o.tenant_id = $1 AND o.eliminado_el IS NULL
+       ${filters}
+       ORDER BY o.creado_el DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
+    );
+
     return {
-      data: data.map((o) => this.toPublico(o, { origen: o.origen })),
-      meta: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      data: rows.map((r) => this.mapOrdenListRow(r)),
+      meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  private buildListarOrdenesFilters(
+    tenantId: string,
+    query: QueryOrdenesDto,
+  ): { filters: string; params: unknown[] } {
+    const params: unknown[] = [tenantId];
+    let idx = 2;
+    let filters = '';
+
+    if (query.estado) {
+      filters += ` AND o.estado = $${idx++}`;
+      params.push(query.estado);
+    }
+    if (query.origen) {
+      filters += ` AND o.origen = $${idx++}`;
+      params.push(query.origen);
+    }
+    if (query.fechaDesde) {
+      filters += ` AND o.creado_el >= $${idx++}`;
+      params.push(query.fechaDesde);
+    }
+    if (query.fechaHasta) {
+      filters += ` AND o.creado_el <= $${idx++}`;
+      params.push(query.fechaHasta);
+    }
+    if (query.search) {
+      filters += ` AND (o.codigo_orden ILIKE $${idx} OR o.descripcion ILIKE $${idx} OR o.referencia_externa ILIKE $${idx} OR o.pagador_ref ILIKE $${idx})`;
+      params.push(`%${query.search}%`);
+      idx++;
+    }
+
+    return { filters, params };
+  }
+
+  private mapOrdenListRow(r: OrdenListRow): Record<string, unknown> {
+    return {
+      ordenId: r.orden_id,
+      codigoOrden: r.codigo_orden,
+      pagadorRef: r.pagador_ref,
+      referenciaExterna: r.referencia_externa,
+      descripcion: r.descripcion,
+      monto: r.monto,
+      moneda: r.moneda,
+      estado: r.estado,
+      origen: r.origen,
+      creadoEl: r.creado_el,
     };
   }
 }

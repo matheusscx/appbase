@@ -115,7 +115,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Pasarela de pagos (Oneclick real, API keys m2m, cifrado de credenciales, admin UI) | ✅ Implementado (2026-07-08) |
 | Pasarela — Webpay Plus Mall (pago único con redirect: crear→confirmar, reembolso y verificación) | ✅ Implementado (2026-07-08) |
 | Tienda Online — checkout por Webpay Plus real (orden con snapshot, venta creada por callback in-process, fallback a página simulada) | ✅ Implementado (2026-07-09) |
-| Pasarela — reorganización UI: config (Mis pasarelas + API Keys) en `/configuracion/pasarelas`; Órdenes como módulo propio del nav en `/ordenes` | ✅ Implementado (2026-07-10) |
+| Pasarela — reorganización UI: config (Mis pasarelas + API Keys) en `/configuracion/pasarelas`; Órdenes como módulo propio del nav en `/ordenes`, con filtros (estado, origen, rango de fechas), buscador y drawer de detalle con historial de transacciones | ✅ Implementado (2026-07-10) |
 
 ---
 

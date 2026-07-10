@@ -23,6 +23,7 @@ import { CobrosService } from '../services/cobros.service';
 import { CreateTenantPasarelaDto } from '../dto/create-tenant-pasarela.dto';
 import { UpdateTenantPasarelaDto } from '../dto/update-tenant-pasarela.dto';
 import { CreateApiKeyDto } from '../dto/create-api-key.dto';
+import { QueryOrdenesDto } from '../dto/query-ordenes.dto';
 
 @ApiTags('pasarela')
 @ApiBearerAuth()
@@ -93,16 +94,8 @@ export class PasarelaAdminController {
 
   @Get('ordenes')
   @RequiresPermiso('Pasarelas', 'Leer')
-  listarOrdenes(
-    @Req() req: Request,
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
-  ) {
-    return this.cobrosService.listarOrdenes(
-      this.tenantId(req),
-      Number(page ?? 1),
-      Number(pageSize ?? 15),
-    );
+  listarOrdenes(@Req() req: Request, @Query() query: QueryOrdenesDto) {
+    return this.cobrosService.listarOrdenes(this.tenantId(req), query);
   }
 
   @Get('ordenes/:id')
