@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import Decimal from 'decimal.js'
 
 interface TransaccionOrden {
   transaccionId: string
@@ -35,10 +36,27 @@ const open = defineModel<boolean>('open', { required: true })
 const config = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
+const permissionsStore = usePermissionsStore()
 const apiUrl = config.public.apiUrl
 
 const orden = ref<OrdenDetalle | null>(null)
 const loading = ref(false)
+const reembolsoOpen = ref(false)
+
+const disponibleReembolso = computed(() => {
+  if (!orden.value) return '0'
+  const reembolsado = orden.value.transacciones
+    .filter((t) => t.tipo === 'REFUND' && t.estado === 'aprobada')
+    .reduce((acc, t) => acc.plus(new Decimal(t.monto ?? '0')), new Decimal(0))
+  return Decimal.max(0, new Decimal(orden.value.monto).minus(reembolsado)).toString()
+})
+
+const puedeReembolsar = computed(() =>
+  !!orden.value
+  && ['pagada', 'conciliada', 'reembolsada'].includes(orden.value.estado)
+  && new Decimal(disponibleReembolso.value).gt(0)
+  && permissionsStore.can('Pasarelas', 'Reembolsar'),
+)
 
 const estadoColor: Record<string, 'success' | 'error' | 'warning' | 'neutral' | 'info'> = {
   creada: 'neutral',
@@ -104,9 +122,17 @@ watch(
   () => [open.value, props.ordenId] as const,
   ([isOpen, id]) => {
     if (isOpen && id) cargar(id)
-    else if (!isOpen) orden.value = null
+    else if (!isOpen) {
+      orden.value = null
+      reembolsoOpen.value = false
+    }
   },
 )
+
+async function onReembolsoSuccess() {
+  reembolsoOpen.value = false
+  if (props.ordenId) await cargar(props.ordenId)
+}
 </script>
 
 <template>
@@ -292,6 +318,22 @@ watch(
       >
         Cerrar
       </UButton>
+      <UButton
+        v-if="puedeReembolsar"
+        label="Reembolsar"
+        icon="i-lucide-undo-2"
+        color="error"
+        variant="subtle"
+        @click="reembolsoOpen = true"
+      />
     </template>
   </AppDrawer>
+
+  <OrdenesReembolsoModal
+    v-if="orden"
+    v-model:open="reembolsoOpen"
+    :orden-id="orden.ordenId"
+    :disponible="disponibleReembolso"
+    @success="onReembolsoSuccess"
+  />
 </template>

@@ -216,7 +216,8 @@ export class CobrosService {
           lock: { mode: 'pessimistic_write' },
         });
         if (!orden) throw new NotFoundException('Orden no encontrada');
-        if (orden.estado !== 'pagada' && orden.estado !== 'reembolsada')
+        // 'conciliada' = pagada + venta materializada (checkout online): también reembolsable
+        if (!['pagada', 'conciliada', 'reembolsada'].includes(orden.estado))
           throw new BadRequestException(
             `No se puede reembolsar una orden ${orden.estado}`,
           );

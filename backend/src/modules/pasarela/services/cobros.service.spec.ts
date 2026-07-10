@@ -214,6 +214,42 @@ describe('CobrosService', () => {
     );
   });
 
+  it('reembolso de una orden conciliada (checkout online) es aceptado', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'conciliada',
+      monto: '5000',
+      moneda: 'CLP',
+      codigoOrden: 'O-1',
+    });
+    deps.transacciones.listarPorOrden.mockResolvedValue([
+      {
+        transaccionId: 'tx-auth',
+        tipo: 'AUTHORIZATION',
+        estado: 'aprobada',
+        tenantPasarelaId: 'tp-1',
+        inscripcionId: 'insc-1',
+        monto: '5000',
+      },
+    ]);
+    provider.reembolsar.mockResolvedValue({
+      aprobada: true,
+      codigoRespuesta: '0',
+      codigoAutorizacion: null,
+      identificadorTransaccionExterno: null,
+      tipoPago: 'REVERSED',
+      numeroCuotas: null,
+      montoCuota: null,
+      tarjetaUltimos4: null,
+      request: {},
+      response: {},
+    });
+    const res = await service.reembolsar('t-1', 'orden-1', { monto: '5000' });
+    expect(res.estado).toBe('reembolsada');
+    expect(provider.reembolsar).toHaveBeenCalled();
+  });
+
   it('reembolso toma FOR UPDATE y recomputa el saldo bajo el lock: si el REFUND previo lo agota, es rechazado', async () => {
     // Unit test: verifica el contrato (findOne con lock pesimista + recálculo del
     // saldo tras leer el historial). La serialización real de dos reembolsos

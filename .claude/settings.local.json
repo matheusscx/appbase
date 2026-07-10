@@ -83,7 +83,8 @@
       "Bash(node /private/tmp/claude-501/-Users-m2pro-cmatheus-startup-app/734cbc3a-d752-4f7b-96bb-451dd74ad911/scratchpad/verify-caja.js)",
       "Bash(pkill -f \"npm run dev\")",
       "Bash(npm test *)",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__emulate"
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__emulate",
+      "Bash(codegraph sync *)"
     ]
   },
   "enabledMcpjsonServers": [

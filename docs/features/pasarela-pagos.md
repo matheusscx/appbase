@@ -2,7 +2,7 @@
 
 **Status**: Complete (v1)
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-08
+**Last Updated**: 2026-07-10
 
 ---
 
@@ -17,7 +17,9 @@ de forma agnóstica y expone dos superficies de consumo:
 - **Administración del tenant** (`/pasarela/admin/*`, JWT + RBAC): el admin
   configura qué pasarelas usa (Oneclick, y a futuro Webpay/Stripe…), en modo
   **MALL** (bajo el comercio de la plataforma) o **INDIVIDUAL** (con sus
-  propias credenciales), y genera/revoca **API keys** para sus apps externas.
+  propias credenciales), genera/revoca **API keys** para sus apps externas, y
+  puede reembolsar (total o parcial) órdenes `pagada` o `conciliada` desde el módulo Órdenes
+  (`/ordenes`), gateado por el permiso dedicado `Pasarelas:Reembolsar`.
 - **API máquina-a-máquina** (`/pasarela/api/*`, API key): las apps del tenant
   inscriben medios de pago, cobran, reembolsan y consultan estado — sin pasar
   por el login de usuarios. Un tenant puede contratar **solo** la pasarela.
@@ -62,6 +64,7 @@ POST   /api/pasarela/admin/api-keys                # crear — key visible UNA v
 DELETE /api/pasarela/admin/api-keys/:id            # revocar (Eliminar)
 GET    /api/pasarela/admin/ordenes                 # listado paginado (Leer)
 GET    /api/pasarela/admin/ordenes/:id             # detalle + transacciones (Leer)
+POST   /api/pasarela/admin/ordenes/:id/reembolsos  # reembolso parcial/total (Reembolsar)
 ```
 
 ### API m2m (ApiKeyGuard — `Authorization: Bearer pk_...`)

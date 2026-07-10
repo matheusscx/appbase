@@ -24,6 +24,7 @@ import { CreateTenantPasarelaDto } from '../dto/create-tenant-pasarela.dto';
 import { UpdateTenantPasarelaDto } from '../dto/update-tenant-pasarela.dto';
 import { CreateApiKeyDto } from '../dto/create-api-key.dto';
 import { QueryOrdenesDto } from '../dto/query-ordenes.dto';
+import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
 
 @ApiTags('pasarela')
 @ApiBearerAuth()
@@ -102,5 +103,15 @@ export class PasarelaAdminController {
   @RequiresPermiso('Pasarelas', 'Leer')
   obtenerOrden(@Req() req: Request, @Param('id') id: string) {
     return this.cobrosService.obtenerOrden(this.tenantId(req), id);
+  }
+
+  @Post('ordenes/:id/reembolsos')
+  @RequiresPermiso('Pasarelas', 'Reembolsar')
+  reembolsar(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: CreateReembolsoDto,
+  ) {
+    return this.cobrosService.reembolsar(this.tenantId(req), id, dto);
   }
 }
