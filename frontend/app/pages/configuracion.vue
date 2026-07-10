@@ -95,6 +95,14 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     })
   }
 
+  if (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Leer')) {
+    items.push({
+      label: 'Pasarelas',
+      icon: 'i-lucide-plug-zap',
+      to: '/configuracion/pasarelas',
+    })
+  }
+
   return items
 })
 </script>
