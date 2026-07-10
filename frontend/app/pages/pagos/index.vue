@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
+import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
 import type { PagosResumen } from '~/composables/usePaginatedList'
 
@@ -30,8 +31,16 @@ interface MetodoPago {
 
 const config = useRuntimeConfig()
 const toast = useToast()
-const { formatMonto, formatFecha, formatTipoPago } = useFormatters()
+const { formatMonto, formatFecha } = useFormatters()
 const apiUrl = config.public.apiUrl
+
+const pagoSeleccionado = ref<PagoLedger | null>(null)
+const detalleOpen = ref(false)
+
+function onSelectPago(_e: Event, row: Row<PagoLedger>) {
+  pagoSeleccionado.value = row.original
+  detalleOpen.value = true
+}
 
 const filtroMetodo = ref<string | undefined>()
 const filtroEstado = ref<string | undefined>()
@@ -127,11 +136,9 @@ async function cargar() {
 const columns: TableColumn<PagoLedger>[] = [
   { accessorKey: 'fecha', header: 'Fecha' },
   { accessorKey: 'metodoNombre', header: 'Método' },
-  { id: 'tarjeta', header: 'Tarjeta' },
   { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'vuelto', header: 'Vuelto', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'customerNombre', header: 'Cliente' },
-  { id: 'venta', header: 'Venta' },
   { accessorKey: 'ventaEstado', header: 'Estado venta' },
 ]
 
@@ -212,21 +219,11 @@ onMounted(cargar)
           <UTable
             :data="pagos"
             :columns="columns"
+            :ui="{ tr: 'cursor-pointer' }"
+            @select="onSelectPago"
           >
             <template #fecha-cell="{ row }">
               <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
-            </template>
-            <template #tarjeta-cell="{ row }">
-              <div v-if="row.original.tipoPago" class="flex flex-col gap-0.5 text-sm">
-                <span>
-                  {{ formatTipoPago(row.original.tipoPago) }}
-                  <span v-if="row.original.tarjetaUltimos4" class="text-muted font-mono">····{{ row.original.tarjetaUltimos4 }}</span>
-                </span>
-                <span v-if="row.original.numeroCuotas && row.original.numeroCuotas > 1" class="text-xs text-muted">
-                  {{ row.original.numeroCuotas }} cuotas
-                </span>
-              </div>
-              <span v-else class="text-muted">—</span>
             </template>
             <template #monto-cell="{ row }">
               <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
@@ -238,14 +235,6 @@ onMounted(cargar)
             </template>
             <template #customerNombre-cell="{ row }">
               <span class="text-muted">{{ row.original.customerNombre ?? '—' }}</span>
-            </template>
-            <template #venta-cell="{ row }">
-              <NuxtLink
-                :to="{ path: '/ventas', query: { venta: row.original.ventaId } }"
-                class="text-primary underline-offset-2 hover:underline"
-              >
-                Ver
-              </NuxtLink>
             </template>
             <template #ventaEstado-cell="{ row }">
               <UBadge
@@ -274,4 +263,9 @@ onMounted(cargar)
       </div>
     </template>
   </UDashboardPanel>
+
+  <PagosPagoDetalleDrawer
+    v-model:open="detalleOpen"
+    :pago="pagoSeleccionado"
+  />
 </template>
