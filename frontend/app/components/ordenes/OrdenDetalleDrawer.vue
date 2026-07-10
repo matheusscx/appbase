@@ -174,12 +174,19 @@ watch(
               <dt class="text-muted">
                 Venta generada
               </dt>
-              <dd>
+              <dd class="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <NuxtLink
                   :to="{ path: '/ventas', query: { venta: orden.ventaId } }"
                   class="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
                 >
                   Ver venta
+                  <UIcon name="i-lucide-arrow-right" class="h-3 w-3" />
+                </NuxtLink>
+                <NuxtLink
+                  :to="{ path: '/pagos', query: { ventaId: orden.ventaId } }"
+                  class="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Ver en Pagos
                   <UIcon name="i-lucide-arrow-right" class="h-3 w-3" />
                 </NuxtLink>
               </dd>
