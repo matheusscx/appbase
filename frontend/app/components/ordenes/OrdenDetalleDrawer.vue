@@ -162,7 +162,7 @@ watch(
                 {{ orden.codigoOrden }}
               </dd>
             </div>
-            <div v-if="orden.referenciaExterna">
+            <div v-if="orden.origen === 'api' && orden.referenciaExterna">
               <dt class="text-muted">
                 Referencia externa
               </dt>
