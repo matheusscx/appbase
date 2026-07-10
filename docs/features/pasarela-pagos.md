@@ -207,6 +207,24 @@ Un error del callback nunca rompe el retorno: la orden queda `pagada` sin
 conciliar y es reconciliable después. Las 4 URLs y el `callbackModo`
 (`interno`/`http`) viven en `orden.metadata`.
 
+### Detalle real del pago (Webpay)
+
+El commit (`confirmarPago`) devuelve el detalle real de la transacción, que
+`PagosRedirectService.confirmarRetorno` escribe en `orden.metadata.resultadoPago`
+(`tipoPago`, `numeroCuotas`, `tarjetaUltimos4`, `codigoRespuesta`,
+`codigoAutorizacion`) para que el callback y la app consumidora lo usen:
+
+- **Tipo de pago** — `payment_type_code`: `VD`=débito RedCompra · `VN`=crédito
+  1 cuota · `VC`=cuotas · `SI`/`S2`/`NC`=cuotas sin interés · `VP`=prepago. El
+  consumidor elige el método real (Tienda Online: `VD` → "Tarjeta de débito",
+  resto → "Tarjeta de crédito").
+- **Cuotas** — `installments_number`.
+- **Últimos 4 dígitos** — `card_detail.card_number` (solo los 4 finales, no el PAN).
+- **Rechazo nivel 2** — `codigoRespuesta` se traduce a un motivo legible con
+  `utils/codigos-respuesta.ts` (`descripcionCodigoRespuesta`, ej. `-7` → "Tarjeta
+  bloqueada"). `obtenerResultado` lo expone como `motivoRechazo` cuando la orden
+  quedó `fallida`.
+
 ---
 
 ## Frontend

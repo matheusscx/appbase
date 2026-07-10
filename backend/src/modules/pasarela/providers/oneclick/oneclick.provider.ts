@@ -198,6 +198,8 @@ export class OneclickProvider implements ProviderTokenizado {
     );
     const detalle =
       (json.details as Record<string, unknown>[] | undefined)?.[0] ?? {};
+    const cardDetail =
+      (json.card_detail as Record<string, unknown> | undefined) ?? {};
     const aprobada =
       detalle.response_code === 0 && detalle.status === 'AUTHORIZED';
     return {
@@ -219,6 +221,9 @@ export class OneclickProvider implements ProviderTokenizado {
         detalle.installments_amount != null
           ? toStr(detalle.installments_amount)
           : null,
+      tarjetaUltimos4: cardDetail.card_number
+        ? toStr(cardDetail.card_number)
+        : null,
       request: requestInfo,
       response: json,
     };
@@ -257,6 +262,7 @@ export class OneclickProvider implements ProviderTokenizado {
       tipoPago: json.type ? toStr(json.type) : null,
       numeroCuotas: null,
       montoCuota: null,
+      tarjetaUltimos4: null,
       request: requestInfo,
       response: json,
     };

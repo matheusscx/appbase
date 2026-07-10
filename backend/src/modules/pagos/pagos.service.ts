@@ -44,6 +44,9 @@ export interface PagoListItem {
   ventaEstado: string;
   totalFinal: string;
   customerNombre: string | null;
+  numeroCuotas: number | null;
+  tipoPago: string | null;
+  tarjetaUltimos4: string | null;
 }
 
 export interface PagosResumen {
@@ -65,6 +68,9 @@ interface PagoListRow {
   venta_estado: string;
   total_final: string;
   customer_nombre: string | null;
+  numero_cuotas: number | null;
+  tipo_pago: string | null;
+  tarjeta_ultimos4: string | null;
 }
 
 // ─── service ─────────────────────────────────────────────────────────────────
@@ -157,6 +163,9 @@ export class PagosService {
           monto: p.monto,
           vuelto,
           referencia: p.referencia ?? null,
+          numeroCuotas: p.numeroCuotas ?? null,
+          tipoPago: p.tipoPago ?? null,
+          tarjetaUltimos4: p.tarjetaUltimos4 ?? null,
         }),
       );
       pagosGuardados.push(pago);
@@ -349,6 +358,9 @@ export class PagosService {
               p.fecha,
               p.caja_id,
               p.referencia,
+              p.numero_cuotas,
+              p.tipo_pago,
+              p.tarjeta_ultimos4,
               mp.nombre      AS metodo_nombre,
               v.estado       AS venta_estado,
               v.total_final,
@@ -430,6 +442,9 @@ export class PagosService {
       ventaEstado: r.venta_estado,
       totalFinal: r.total_final,
       customerNombre: r.customer_nombre,
+      numeroCuotas: r.numero_cuotas,
+      tipoPago: r.tipo_pago,
+      tarjetaUltimos4: r.tarjeta_ultimos4,
     };
   }
 }

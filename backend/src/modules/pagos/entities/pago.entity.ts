@@ -39,6 +39,21 @@ export class Pago {
   @Column({ type: 'text', nullable: true })
   referencia: string | null;
 
+  // Detalle de tarjeta devuelto por la pasarela (Webpay). Null en pagos manuales/POS.
+  @Column({ name: 'numero_cuotas', type: 'int', nullable: true })
+  numeroCuotas: number | null;
+
+  @Column({ name: 'tipo_pago', type: 'varchar', nullable: true })
+  tipoPago: string | null; // payment_type_code Transbank: VD/VN/VC/SI/S2/NC/VP
+
+  @Column({
+    name: 'tarjeta_ultimos4',
+    type: 'varchar',
+    length: 4,
+    nullable: true,
+  })
+  tarjetaUltimos4: string | null;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

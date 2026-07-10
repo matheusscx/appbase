@@ -6,12 +6,26 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 
 const { limpiar } = useTiendaCarrito()
+const { formatTipoPago } = useFormatters()
 
 const ordenId = computed(() => String(route.query.ordenId ?? ''))
 
 type Vista = 'cargando' | 'aprobada' | 'rechazada' | 'pendiente' | 'error'
 const vista = ref<Vista>('cargando')
 const ventaId = ref<string | null>(null)
+const tipoPago = ref<string | null>(null)
+const numeroCuotas = ref<number | null>(null)
+const tarjetaUltimos4 = ref<string | null>(null)
+const motivoRechazo = ref<string | null>(null)
+
+interface OrdenResultado {
+  estado: string
+  ventaId: string | null
+  tipoPago: string | null
+  numeroCuotas: number | null
+  tarjetaUltimos4: string | null
+  motivoRechazo: string | null
+}
 
 onMounted(async () => {
   if (!ordenId.value) {
@@ -21,10 +35,14 @@ onMounted(async () => {
   try {
     // La venta ya fue creada por el callback in-process antes del redirect;
     // esta lectura resuelve el resultado real de la orden (no confía en el query).
-    const res = await useApiFetch<{ estado: string, ventaId: string | null }>(
+    const res = await useApiFetch<OrdenResultado>(
       `${apiUrl}/online/orden/${ordenId.value}`,
     )
     ventaId.value = res.ventaId
+    tipoPago.value = res.tipoPago
+    numeroCuotas.value = res.numeroCuotas
+    tarjetaUltimos4.value = res.tarjetaUltimos4
+    motivoRechazo.value = res.motivoRechazo
     if (res.estado === 'pagada' || res.estado === 'conciliada') {
       vista.value = 'aprobada'
       limpiar()
@@ -71,6 +89,11 @@ onMounted(async () => {
             <UIcon name="i-lucide-circle-check-big" class="text-success size-12 mx-auto" />
             <p class="font-medium">Pago aprobado</p>
             <p class="text-sm text-muted">Tu compra fue registrada correctamente.</p>
+            <div v-if="tipoPago" class="text-sm text-muted">
+              <span>{{ formatTipoPago(tipoPago) }}</span>
+              <span v-if="tarjetaUltimos4" class="font-mono"> ····{{ tarjetaUltimos4 }}</span>
+              <span v-if="numeroCuotas && numeroCuotas > 1"> · {{ numeroCuotas }} cuotas</span>
+            </div>
             <UButton
               v-if="ventaId"
               :to="`/ventas/${ventaId}`"
@@ -98,7 +121,7 @@ onMounted(async () => {
             <p class="text-sm text-muted">
               {{ vista === 'error'
                 ? 'Ocurrió un problema al consultar el resultado. Revisa tus compras o reintenta.'
-                : 'El pago no se completó. Tu carrito sigue disponible para reintentar.' }}
+                : (motivoRechazo ?? 'El pago no se completó. Tu carrito sigue disponible para reintentar.') }}
             </p>
             <UButton to="/tienda" label="Volver a la tienda" variant="soft" block />
           </div>

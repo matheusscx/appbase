@@ -746,6 +746,10 @@ CREATE TABLE "pagos" (
   "vuelto"            NUMERIC(18,4) NOT NULL DEFAULT 0,
   "fecha"             TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "referencia"        TEXT,
+  -- Detalle de tarjeta devuelto por la pasarela (Webpay). NULL en pagos manuales/POS.
+  "numero_cuotas"     INT,
+  "tipo_pago"         VARCHAR,       -- payment_type_code Transbank: VD/VN/VC/SI/S2/NC/VP
+  "tarjeta_ultimos4"  VARCHAR(4),
   "creado_el"         TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"    TIMESTAMPTZ,
   "eliminado_el"      TIMESTAMPTZ

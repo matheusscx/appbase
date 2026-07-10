@@ -62,14 +62,19 @@ describe('WebpayPlusProvider', () => {
           response_code: 0,
           authorization_code: '1213',
           payment_type_code: 'VN',
+          installments_number: 3,
           amount: 10000,
         },
       ],
+      // card_detail va en el top-level (compartido por los detalles del Mall).
+      card_detail: { card_number: '6623' },
     });
     const r = await provider.confirmarPago(cred, 'tok-1');
     expect(r.aprobada).toBe(true);
     expect(r.codigoAutorizacion).toBe('1213');
     expect(r.tipoPago).toBe('VN');
+    expect(r.numeroCuotas).toBe(3);
+    expect(r.tarjetaUltimos4).toBe('6623');
     expect(r.identificadorTransaccionExterno).toBe('tok-1');
   });
 

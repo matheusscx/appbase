@@ -23,7 +23,10 @@ export interface CheckoutSnapshot {
     // (doble conversión en ítems no-oficiales). El monto cobrado se preserva en
     // totalFinal y se registra como el pago.
     lineas: { itemId: string; cantidad: string }[];
-    metodoPagoId: string;
+    // Ambos métodos se resuelven server-side; el callback elige según el
+    // payment_type_code real de Transbank (VD → débito, resto → crédito).
+    metodoCreditoId: string;
+    metodoDebitoId: string | null;
     totalFinal: string;
     usuarioId: string;
     customerNombre: string;
@@ -81,7 +84,8 @@ export class OnlineService {
 
     const resultado = await this.calculoPreciosService.calcular(tenantId, dto);
     const totalFinal = resultado.totales.totalFinal;
-    const metodoPagoId = await this.resolverMetodoTarjeta(tenantId);
+    const { metodoCreditoId, metodoDebitoId } =
+      await this.resolverMetodosTarjeta(tenantId);
 
     const snapshot: CheckoutSnapshot = {
       origenApp: 'tienda-online',
@@ -90,7 +94,8 @@ export class OnlineService {
           itemId: l.itemId,
           cantidad: l.cantidad,
         })),
-        metodoPagoId,
+        metodoCreditoId,
+        metodoDebitoId,
         totalFinal,
         usuarioId,
         customerNombre: usuarioNombre || 'Cliente online',
@@ -118,7 +123,14 @@ export class OnlineService {
 
   async resultadoOrden(tenantId: string, ordenId: string) {
     const r = await this.pagosRedirect.obtenerResultado(tenantId, ordenId);
-    return { estado: r.estado, ventaId: r.referenciaExterna };
+    return {
+      estado: r.estado,
+      ventaId: r.referenciaExterna,
+      tipoPago: r.tipoPago,
+      numeroCuotas: r.numeroCuotas,
+      tarjetaUltimos4: r.tarjetaUltimos4,
+      motivoRechazo: r.motivoRechazo,
+    };
   }
 
   private async webpayActivo(tenantId: string): Promise<boolean> {
@@ -133,18 +145,32 @@ export class OnlineService {
     }
   }
 
-  /** Primer método habilitado tipo crédito/tarjeta del tenant (server-side). */
-  private async resolverMetodoTarjeta(tenantId: string): Promise<string> {
+  /**
+   * Resuelve server-side los métodos de tarjeta habilitados del tenant. El de
+   * crédito es obligatorio (fallback: primer habilitado); el de débito es opcional
+   * y solo se usa si Transbank confirma un pago RedCompra (payment_type_code VD).
+   */
+  private async resolverMetodosTarjeta(
+    tenantId: string,
+  ): Promise<{ metodoCreditoId: string; metodoDebitoId: string | null }> {
     const metodos = await this.metodosPagoService.findMetodosPago(tenantId);
     const habilitados = metodos.filter((m) => m.habilitada);
-    const elegido =
-      habilitados.find((m) => m.nombre.toLowerCase().includes('crédito')) ??
-      habilitados.find((m) => m.nombre.toLowerCase().includes('credito')) ??
+    const incluye = (m: { nombre: string }, ...terms: string[]) =>
+      terms.some((t) => m.nombre.toLowerCase().includes(t));
+
+    const credito =
+      habilitados.find((m) => incluye(m, 'crédito', 'credito')) ??
       habilitados[0];
-    if (!elegido)
+    if (!credito)
       throw new BadRequestException(
         'No hay métodos de pago habilitados para la tienda online',
       );
-    return elegido.metodoPagoId;
+    const debito =
+      habilitados.find((m) => incluye(m, 'débito', 'debito')) ?? null;
+
+    return {
+      metodoCreditoId: credito.metodoPagoId,
+      metodoDebitoId: debito?.metodoPagoId ?? null,
+    };
   }
 }

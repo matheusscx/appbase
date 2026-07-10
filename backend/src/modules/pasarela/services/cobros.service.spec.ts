@@ -102,6 +102,7 @@ describe('CobrosService', () => {
       tipoPago: 'VN',
       numeroCuotas: 0,
       montoCuota: null,
+      tarjetaUltimos4: '6623',
       request: {},
       response: {},
     });
@@ -134,6 +135,7 @@ describe('CobrosService', () => {
       tipoPago: 'VN',
       numeroCuotas: 0,
       montoCuota: null,
+      tarjetaUltimos4: null,
       request: {},
       response: {},
     });
@@ -197,6 +199,7 @@ describe('CobrosService', () => {
       tipoPago: 'REVERSED',
       numeroCuotas: null,
       montoCuota: null,
+      tarjetaUltimos4: null,
       request: {},
       response: {},
     });

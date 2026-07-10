@@ -2,10 +2,12 @@ import {
   ArrayMinSize,
   IsArray,
   IsIn,
+  IsInt,
   IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
+  Length,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -53,6 +55,20 @@ export class PagoVentaDto {
   @IsOptional()
   @IsString()
   referencia?: string;
+
+  // Detalle de tarjeta desde la pasarela (Webpay). No lo envía el POS manual.
+  @IsOptional()
+  @IsInt()
+  numeroCuotas?: number;
+
+  @IsOptional()
+  @IsString()
+  tipoPago?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(4, 4)
+  tarjetaUltimos4?: string;
 }
 
 export class CustomerVentaDto {

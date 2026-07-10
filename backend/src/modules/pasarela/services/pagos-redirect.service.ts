@@ -16,6 +16,16 @@ import { TransaccionesService } from './transacciones.service';
 import { CallbackDispatcherService } from './callback-dispatcher.service';
 import { ProviderFactory } from '../providers/provider.factory';
 import { ProviderComunicacionError } from '../providers/payment-provider.interface';
+import { descripcionCodigoRespuesta } from '../utils/codigos-respuesta';
+
+/** Detalle del pago que el commit devuelve y el callback / la app consumen. */
+interface ResultadoPagoMeta {
+  tipoPago: string | null;
+  numeroCuotas: number | null;
+  tarjetaUltimos4: string | null;
+  codigoRespuesta: string | null;
+  codigoAutorizacion: string | null;
+}
 
 const PASARELA_REDIRECT = 'webpay_plus'; // v1 redirect: única pasarela redirect
 const EXPIRACION_ORDEN_MS = 2 * 60 * 60 * 1000; // 2 horas
@@ -180,6 +190,17 @@ export class PagosRedirectService {
         response: resultado.response,
       });
 
+      // Propaga el detalle del commit a la orden: el callback lo usa para elegir
+      // el método real (débito/crédito) y persistir cuotas / últimos4; en rechazo,
+      // el codigoRespuesta permite traducir el motivo nivel 2 en la página de retorno.
+      const resultadoPago: ResultadoPagoMeta = {
+        tipoPago: resultado.tipoPago,
+        numeroCuotas: resultado.numeroCuotas,
+        tarjetaUltimos4: resultado.tarjetaUltimos4,
+        codigoRespuesta: resultado.codigoRespuesta,
+        codigoAutorizacion: resultado.codigoAutorizacion,
+      };
+      orden.metadata = { ...orden.metadata, resultadoPago };
       orden.estado = resultado.aprobada ? 'pagada' : 'fallida';
       await this.ordenRepo.save(orden);
     } catch (e) {
@@ -259,10 +280,20 @@ export class PagosRedirectService {
       where: { ordenId, tenantId },
     });
     if (!orden) throw new NotFoundException('Orden no encontrada');
+    const rp = (orden.metadata?.resultadoPago ??
+      {}) as Partial<ResultadoPagoMeta>;
     return {
       ordenId: orden.ordenId,
       estado: orden.estado,
       referenciaExterna: orden.referenciaExterna,
+      // Comprobante (éxito) y motivo de rechazo (nivel 2) para la página de retorno.
+      tipoPago: rp.tipoPago ?? null,
+      numeroCuotas: rp.numeroCuotas ?? null,
+      tarjetaUltimos4: rp.tarjetaUltimos4 ?? null,
+      motivoRechazo:
+        orden.estado === 'fallida'
+          ? descripcionCodigoRespuesta(rp.codigoRespuesta)
+          : null,
     };
   }
 }

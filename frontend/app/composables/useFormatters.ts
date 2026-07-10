@@ -38,5 +38,20 @@ export function useFormatters() {
     return formatStockDisplay(value, unidadMedida)
   }
 
-  return { formatMonto, formatFecha, formatStock }
+  // Traduce el payment_type_code de Transbank (Webpay) a una etiqueta legible.
+  function formatTipoPago(code: string | null | undefined): string | null {
+    if (!code) return null
+    const map: Record<string, string> = {
+      VD: 'Débito',
+      VN: 'Crédito',
+      VC: 'Crédito en cuotas',
+      SI: 'Crédito 3 cuotas s/interés',
+      S2: 'Crédito 2 cuotas s/interés',
+      NC: 'Crédito cuotas s/interés',
+      VP: 'Prepago',
+    }
+    return map[code] ?? code
+  }
+
+  return { formatMonto, formatFecha, formatStock, formatTipoPago }
 }

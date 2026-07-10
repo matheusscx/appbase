@@ -19,6 +19,7 @@ export interface ResultadoCobro extends ResultadoProvider {
   tipoPago: string | null;
   numeroCuotas: number | null;
   montoCuota: string | null;
+  tarjetaUltimos4: string | null; // card_detail.card_number (solo 4 finales, no sensible)
 }
 
 export interface ResultadoEstado {

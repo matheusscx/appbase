@@ -84,6 +84,11 @@ describe('OnlineService', () => {
         nombre: 'Tarjeta de Crédito',
         habilitada: true,
       },
+      {
+        metodoPagoId: 'mp-debito',
+        nombre: 'Tarjeta de Débito',
+        habilitada: true,
+      },
     ]);
     pagosRedirect.iniciar.mockResolvedValue({
       ordenId: 'orden-1',
@@ -105,7 +110,8 @@ describe('OnlineService', () => {
         metadataExtra: {
           origenApp: string;
           checkout: {
-            metodoPagoId: string;
+            metodoCreditoId: string;
+            metodoDebitoId: string | null;
             totalFinal: string;
             usuarioId: string;
             lineas: { itemId: string; cantidad: string }[];
@@ -117,9 +123,10 @@ describe('OnlineService', () => {
     expect(pagoDto.monto).toBe('100.0000');
     expect(pagoDto.urlExito).toBe('http://localhost:5173/tienda/retorno');
     expect(opts.origen).toBe('interno');
-    // snapshot con precio fijado + método crédito resuelto server-side
+    // snapshot con ambos métodos resueltos server-side (el callback elige por tipoPago)
     expect(opts.metadataExtra.origenApp).toBe('tienda-online');
-    expect(opts.metadataExtra.checkout.metodoPagoId).toBe('mp-credito');
+    expect(opts.metadataExtra.checkout.metodoCreditoId).toBe('mp-credito');
+    expect(opts.metadataExtra.checkout.metodoDebitoId).toBe('mp-debito');
     expect(opts.metadataExtra.checkout.totalFinal).toBe('100.0000');
     expect(opts.metadataExtra.checkout.usuarioId).toBe('u-1');
     expect(opts.metadataExtra.checkout.lineas).toEqual([
@@ -137,13 +144,24 @@ describe('OnlineService', () => {
     ).rejects.toThrow('métodos de pago');
   });
 
-  it('resultadoOrden: mapea a { estado, ventaId }', async () => {
+  it('resultadoOrden: mapea a { estado, ventaId, detalle del pago }', async () => {
     pagosRedirect.obtenerResultado.mockResolvedValue({
       ordenId: 'orden-1',
       estado: 'conciliada',
       referenciaExterna: 'venta-9',
+      tipoPago: 'VD',
+      numeroCuotas: 0,
+      tarjetaUltimos4: '6623',
+      motivoRechazo: null,
     });
     const res = await service.resultadoOrden(TENANT_ID, 'orden-1');
-    expect(res).toEqual({ estado: 'conciliada', ventaId: 'venta-9' });
+    expect(res).toEqual({
+      estado: 'conciliada',
+      ventaId: 'venta-9',
+      tipoPago: 'VD',
+      numeroCuotas: 0,
+      tarjetaUltimos4: '6623',
+      motivoRechazo: null,
+    });
   });
 });

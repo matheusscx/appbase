@@ -156,7 +156,9 @@ describe('PagosRedirectService', () => {
       codigoRespuesta: '0',
       codigoAutorizacion: '1213',
       identificadorTransaccionExterno: 'tok-1',
-      tipoPago: 'VN',
+      tipoPago: 'VD',
+      numeroCuotas: 0,
+      tarjetaUltimos4: '6623',
       request: {},
       response: {},
     });
@@ -170,6 +172,16 @@ describe('PagosRedirectService', () => {
     expect(deps.transacciones.registrar).toHaveBeenCalledWith(
       expect.objectContaining({ tipo: 'AUTHORIZATION', estado: 'aprobada' }),
     );
+    // El detalle del commit queda en metadata.resultadoPago para el callback.
+    const guardada = ordenRepo.save.mock.calls[0][0] as {
+      metadata: {
+        resultadoPago: { tipoPago: string; tarjetaUltimos4: string };
+      };
+    };
+    expect(guardada.metadata.resultadoPago).toMatchObject({
+      tipoPago: 'VD',
+      tarjetaUltimos4: '6623',
+    });
   });
 
   it('confirmarRetorno rechazado: orden fallida, redirige a urls.fracaso', async () => {
@@ -277,20 +289,43 @@ describe('PagosRedirectService', () => {
     await expect(service.abortarRetorno({})).rejects.toThrow('identificador');
   });
 
-  it('obtenerResultado: devuelve estado y referenciaExterna scoped al tenant', async () => {
+  it('obtenerResultado: devuelve estado, referenciaExterna y detalle del pago scoped al tenant', async () => {
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-1',
       estado: 'conciliada',
       referenciaExterna: 'venta-9',
+      metadata: {
+        resultadoPago: {
+          tipoPago: 'VD',
+          numeroCuotas: 0,
+          tarjetaUltimos4: '6623',
+          codigoRespuesta: '0',
+        },
+      },
     });
     const res = await service.obtenerResultado('t-1', 'orden-1');
     expect(res).toEqual({
       ordenId: 'orden-1',
       estado: 'conciliada',
       referenciaExterna: 'venta-9',
+      tipoPago: 'VD',
+      numeroCuotas: 0,
+      tarjetaUltimos4: '6623',
+      motivoRechazo: null,
     });
     expect(ordenRepo.findOne).toHaveBeenCalledWith({
       where: { ordenId: 'orden-1', tenantId: 't-1' },
     });
+  });
+
+  it('obtenerResultado: en fallida traduce el codigoRespuesta a motivo nivel 2', async () => {
+    ordenRepo.findOne.mockResolvedValue({
+      ordenId: 'orden-2',
+      estado: 'fallida',
+      referenciaExterna: null,
+      metadata: { resultadoPago: { codigoRespuesta: '-7' } },
+    });
+    const res = await service.obtenerResultado('t-1', 'orden-2');
+    expect(res.motivoRechazo).toBe('Tarjeta bloqueada');
   });
 });

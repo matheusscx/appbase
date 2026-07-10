@@ -440,3 +440,19 @@ ejemplo, no requiere migración.
 El cobro recurrente de los períodos siguientes al primero no está
 automatizado: no hay job/cron que ejecute `proximo_cobro`. Queda fuera de
 alcance para una fase futura.
+
+### Detalle real del pago Webpay (2026-07-10)
+
+Cuando el checkout cobra por **Webpay Plus real**, la venta refleja el detalle
+que devuelve Transbank (no un método fijo):
+
+- El callback (`OnlineCallbackHandler`) elige el método según el
+  `payment_type_code`: `VD` → **"Tarjeta de débito"** (si el tenant lo tiene
+  habilitado), cualquier otro → **"Tarjeta de crédito"** (fallback seguro).
+- El pago guarda `numero_cuotas`, `tipo_pago` y `tarjeta_ultimos4` (solo los 4
+  finales). Se muestran en el **listado de Pagos** (`/pagos`) y en la **página de
+  retorno** (`/tienda/retorno`).
+- En **rechazo**, `/tienda/retorno` muestra el motivo nivel 2 traducido desde el
+  `response_code` (ver `pasarela/utils/codigos-respuesta.ts`).
+
+Detalle del mecanismo en [pasarela-pagos.md](pasarela-pagos.md).

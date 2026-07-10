@@ -45,6 +45,21 @@ export class OnlineCallbackHandler
       return;
     }
 
+    // Detalle real del pago (lo escribió PagosRedirectService al confirmar).
+    const resultadoPago = (orden.metadata?.resultadoPago ?? {}) as {
+      tipoPago?: string | null;
+      numeroCuotas?: number | null;
+      tarjetaUltimos4?: string | null;
+    };
+
+    // Débito RedCompra (payment_type_code VD) → método débito si el tenant lo
+    // tiene habilitado; cualquier otro tipo (o sin débito configurado) → crédito.
+    const esDebito =
+      resultadoPago.tipoPago === 'VD' && checkout.metodoDebitoId != null;
+    const metodoPagoId = esDebito
+      ? (checkout.metodoDebitoId as string)
+      : checkout.metodoCreditoId;
+
     const dto: CreateVentaDto = {
       canal: 'online',
       lineas: checkout.lineas.map((l) => ({
@@ -52,7 +67,13 @@ export class OnlineCallbackHandler
         cantidad: l.cantidad,
       })),
       pagos: [
-        { metodoPagoId: checkout.metodoPagoId, monto: checkout.totalFinal },
+        {
+          metodoPagoId,
+          monto: checkout.totalFinal,
+          numeroCuotas: resultadoPago.numeroCuotas ?? undefined,
+          tipoPago: resultadoPago.tipoPago ?? undefined,
+          tarjetaUltimos4: resultadoPago.tarjetaUltimos4 ?? undefined,
+        },
       ],
       customer: { nombre: checkout.customerNombre },
     };

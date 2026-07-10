@@ -17,6 +17,9 @@ interface PagoLedger {
   ventaEstado: string
   totalFinal: string
   customerNombre: string | null
+  numeroCuotas: number | null
+  tipoPago: string | null
+  tarjetaUltimos4: string | null
 }
 
 interface MetodoPago {
@@ -27,7 +30,7 @@ interface MetodoPago {
 
 const config = useRuntimeConfig()
 const toast = useToast()
-const { formatMonto, formatFecha } = useFormatters()
+const { formatMonto, formatFecha, formatTipoPago } = useFormatters()
 const apiUrl = config.public.apiUrl
 
 const filtroMetodo = ref<string | undefined>()
@@ -124,6 +127,7 @@ async function cargar() {
 const columns: TableColumn<PagoLedger>[] = [
   { accessorKey: 'fecha', header: 'Fecha' },
   { accessorKey: 'metodoNombre', header: 'Método' },
+  { id: 'tarjeta', header: 'Tarjeta' },
   { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'vuelto', header: 'Vuelto', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'customerNombre', header: 'Cliente' },
@@ -211,6 +215,18 @@ onMounted(cargar)
           >
             <template #fecha-cell="{ row }">
               <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
+            </template>
+            <template #tarjeta-cell="{ row }">
+              <div v-if="row.original.tipoPago" class="flex flex-col gap-0.5 text-sm">
+                <span>
+                  {{ formatTipoPago(row.original.tipoPago) }}
+                  <span v-if="row.original.tarjetaUltimos4" class="text-muted font-mono">····{{ row.original.tarjetaUltimos4 }}</span>
+                </span>
+                <span v-if="row.original.numeroCuotas && row.original.numeroCuotas > 1" class="text-xs text-muted">
+                  {{ row.original.numeroCuotas }} cuotas
+                </span>
+              </div>
+              <span v-else class="text-muted">—</span>
             </template>
             <template #monto-cell="{ row }">
               <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>

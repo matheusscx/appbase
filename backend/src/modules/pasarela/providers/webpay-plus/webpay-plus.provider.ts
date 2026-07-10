@@ -153,9 +153,12 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
       'PUT',
       `/transactions/${encodeURIComponent(token)}`,
     );
-    // Mall: la respuesta trae details[] con el resultado por tienda.
+    // Mall: la respuesta trae details[] con el resultado por tienda. card_detail
+    // (últimos 4 dígitos) va en el top-level, compartido por todos los detalles.
     const detalle =
       (json.details as Record<string, unknown>[] | undefined)?.[0] ?? {};
+    const cardDetail =
+      (json.card_detail as Record<string, unknown> | undefined) ?? {};
     const aprobada =
       detalle.response_code === 0 && detalle.status === 'AUTHORIZED';
     return {
@@ -174,6 +177,9 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
           ? detalle.installments_number
           : null,
       montoCuota: null,
+      tarjetaUltimos4: cardDetail.card_number
+        ? toStr(cardDetail.card_number)
+        : null,
       request: requestInfo,
       response: json,
     };
@@ -220,6 +226,7 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
       tipoPago: json.type ? toStr(json.type) : null,
       numeroCuotas: null,
       montoCuota: null,
+      tarjetaUltimos4: null,
       request: requestInfo,
       response: json,
     };
