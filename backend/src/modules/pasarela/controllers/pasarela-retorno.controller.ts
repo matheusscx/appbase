@@ -31,12 +31,35 @@ export class PasarelaRetornoController {
     res.redirect(302, urlRedireccion);
   }
 
-  private async procesarPago(token: string | undefined, res: Response) {
-    // Webpay Plus vuelve con token_ws en el flujo normal (POST). Sin él, es un
-    // abort/timeout del usuario: no confirmamos nada.
-    if (!token) throw new BadRequestException('token_ws requerido');
-    const { urlRedireccion } = await this.pagosRedirect.confirmarRetorno(token);
-    res.redirect(302, urlRedireccion);
+  private async procesarPago(
+    p: { tokenWs?: string; tbkToken?: string; ordenCompra?: string },
+    res: Response,
+  ) {
+    // Webpay vuelve de distintas formas según el desenlace:
+    // - TBK_TOKEN presente → anulación del usuario o timeout post-autorización:
+    //   NO se confirma (aunque venga token_ws), se marca fallida.
+    // - token_ws (sin TBK_TOKEN) → flujo normal: se confirma el pago.
+    // - solo TBK_ORDEN_COMPRA → timeout en el formulario: se marca fallida.
+    if (p.tbkToken) {
+      const { urlRedireccion } = await this.pagosRedirect.abortarRetorno({
+        tbkToken: p.tbkToken,
+        ordenCompra: p.ordenCompra,
+      });
+      return res.redirect(302, urlRedireccion);
+    }
+    if (p.tokenWs) {
+      const { urlRedireccion } = await this.pagosRedirect.confirmarRetorno(
+        p.tokenWs,
+      );
+      return res.redirect(302, urlRedireccion);
+    }
+    if (p.ordenCompra) {
+      const { urlRedireccion } = await this.pagosRedirect.abortarRetorno({
+        ordenCompra: p.ordenCompra,
+      });
+      return res.redirect(302, urlRedireccion);
+    }
+    throw new BadRequestException('Retorno de pago sin token');
   }
 
   @Get('inscripcion')
@@ -57,17 +80,21 @@ export class PasarelaRetornoController {
 
   @Get('pago')
   retornoPagoGet(
-    @Query('token_ws') token: string | undefined,
+    @Query('token_ws') tokenWs: string | undefined,
+    @Query('TBK_TOKEN') tbkToken: string | undefined,
+    @Query('TBK_ORDEN_COMPRA') ordenCompra: string | undefined,
     @Res() res: Response,
   ) {
-    return this.procesarPago(token, res);
+    return this.procesarPago({ tokenWs, tbkToken, ordenCompra }, res);
   }
 
   @Post('pago')
   retornoPagoPost(
-    @Body('token_ws') token: string | undefined,
+    @Body('token_ws') tokenWs: string | undefined,
+    @Body('TBK_TOKEN') tbkToken: string | undefined,
+    @Body('TBK_ORDEN_COMPRA') ordenCompra: string | undefined,
     @Res() res: Response,
   ) {
-    return this.procesarPago(token, res);
+    return this.procesarPago({ tokenWs, tbkToken, ordenCompra }, res);
   }
 }

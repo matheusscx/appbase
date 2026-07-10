@@ -36,8 +36,10 @@ export class PasarelaOrden {
   moneda: string; // 'CLP' en v1
 
   @Column({ default: 'creada' })
-  estado: string; // 'creada' | 'en_proceso' | 'procesando' | 'pagada' | 'fallida' | 'expirada' | 'reembolsada'
+  estado: string; // 'creada' | 'en_proceso' | 'procesando' | 'pagada' | 'pendiente' | 'conciliada' | 'fallida' | 'expirada' | 'reembolsada'
   // 'procesando': claim transitorio del retorno de pago redirect (Webpay Plus)
+  // 'pendiente': pago aceptado con conciliación demorada (modelado; Webpay Plus resuelve inmediato en v1)
+  // 'conciliada': pagada + la app consumidora ya materializó su lado (venta creada) vía callback
 
   @Column({ name: 'fecha_expiracion', type: 'timestamptz', nullable: true })
   fechaExpiracion: Date | null;

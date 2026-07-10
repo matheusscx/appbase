@@ -11,10 +11,11 @@
 ### What is it?
 
 Módulo interno (usuario del tenant logueado) que permite navegar el catálogo de
-productos, armar un carrito y "pagar" a través de una pasarela de pago
-simulada (dummy). Incluye además suscripciones (alta de compras recurrentes,
-con backend real y primer cobro inmediato) y medios de pago (tarjetas
-guardadas, mock).
+productos, armar un carrito y pagar. La compra del carrito cobra por **Webpay
+Plus real** (redirect) cuando el tenant lo tiene activo, cayendo a la pasarela
+simulada (dummy) como fallback si no. Incluye además suscripciones (alta de
+compras recurrentes, con backend real y primer cobro inmediato) y medios de
+pago (tarjetas guardadas, mock).
 
 ### Why does it exist?
 
@@ -25,8 +26,16 @@ el mismo carrito/catálogo.
 ### Scope
 
 - Included in this version:
-  - Checkout que solo calcula (motor de precios) y devuelve una URL dummy —
-    no persiste nada hasta que el usuario aprueba en la pasarela.
+  - **Pago del carrito por Webpay Plus real** (`POST /online/pagar`): calcula el
+    total y abre una **orden de pasarela** con el snapshot del carrito en
+    `metadata`; el front hace redirect real al formulario de Transbank. La venta
+    se crea recién al volver aprobada, vía **callback in-process** que la
+    materializa `canal:'online'` y deja `referencia_externa = venta.id` (la orden
+    queda `conciliada`). Idempotente. Ver [ADR-009](../adr/009-callback-pasarela-venta-por-callback.md)
+    y `docs/features/pasarela-pagos.md`.
+  - **Fallback simulado**: si el tenant no tiene `webpay_plus` activo, `pagar`
+    devuelve `modo:'simulado'` y se mantiene la página `/tienda/pasarela` (dummy),
+    que solo calcula y no persiste nada hasta que el usuario aprueba.
   - Canal `'online'` en ventas: usa la caja virtual del tenant, exige pago
     completo (no admite cuenta por cobrar), nace directamente `pagada`.
   - Suscripciones: backend real (`item_suscripcion` + tabla `suscripciones`,

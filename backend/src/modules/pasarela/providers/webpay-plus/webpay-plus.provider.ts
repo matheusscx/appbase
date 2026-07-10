@@ -129,9 +129,14 @@ export class WebpayPlusProvider implements ProviderPagoRedirect {
         requestInfo,
         json,
       );
+    // Webpay espera que el navegador llegue con el token: `url?token_ws=<token>`.
+    // Sin él, el formulario hosted carga en blanco. (Alternativa equivalente:
+    // POST de un form con campo oculto token_ws; usamos GET para el redirect.)
+    const baseUrl = toStr(json.url);
+    const sep = baseUrl.includes('?') ? '&' : '?';
     return {
       tokenExterno: toStr(json.token),
-      urlRedireccion: toStr(json.url),
+      urlRedireccion: `${baseUrl}${sep}token_ws=${toStr(json.token)}`,
       aprobada: true,
       codigoRespuesta: null,
       request: requestInfo,

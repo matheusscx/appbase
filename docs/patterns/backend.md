@@ -368,6 +368,51 @@ Utilidades en `common/utils/usuario-preferencias.util.ts`:
 
 ---
 
+## 13. Callback desacoplado entre módulos (registry + `onModuleInit`)
+
+Cuando un módulo "core" debe notificar a un módulo de negocio **sin importarlo**
+(mantener la frontera: p. ej. `pasarela` NO importa `online`/`ventas`), y
+`@nestjs/event-emitter` no está instalado, usar un **registry singleton** con una
+interfaz de handler. Patrón visto en `modules/pasarela` (callback de resolución
+de orden → crear la venta):
+
+```typescript
+// En el módulo core: la interfaz + el registro (singleton, sin lógica de negocio).
+export interface PagoCallbackHandler {
+  onOrdenResuelta(orden: PasarelaOrden): Promise<void>;
+}
+
+@Injectable()
+export class PagoCallbackRegistry {
+  private handler: PagoCallbackHandler | null = null;
+  register(h: PagoCallbackHandler) { this.handler = h; }
+  get(): PagoCallbackHandler | null { return this.handler; }
+}
+```
+
+```typescript
+// En el módulo de negocio: implementa el handler y se registra al arrancar.
+@Injectable()
+export class OnlineCallbackHandler implements PagoCallbackHandler, OnModuleInit {
+  constructor(
+    private readonly registry: PagoCallbackRegistry,
+    private readonly ventasService: VentasService,
+  ) {}
+  onModuleInit() { this.registry.register(this); }
+  async onOrdenResuelta(orden: PasarelaOrden) { /* idempotente: crear la venta */ }
+}
+```
+
+Claves:
+- El módulo core **exporta** `PagoCallbackRegistry`; el de negocio **importa** el
+  módulo core y declara su handler como provider. El borde se cruza en una sola
+  dirección (negocio → core), nunca al revés.
+- El dispatcher del core hace `registry.get()?.onOrdenResuelta(orden)`. Para el
+  monolito conviene `await` (garantiza el efecto antes de responder/redirigir);
+  para destinos externos, `POST` HTTP fire-and-forget.
+- El handler debe ser **idempotente** (un mismo evento puede llegar dos veces).
+- Un fallo del callback no debe romper el flujo del core: `try/catch` + log.
+
 ## 12. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.

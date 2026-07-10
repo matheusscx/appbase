@@ -64,7 +64,10 @@ export class PasarelaApiController {
 
   @Post('pagos')
   iniciarPago(@Req() req: ApiRequest, @Body() dto: CreatePagoDto) {
-    return this.pagosRedirect.iniciar(req.pasarelaAuth.tenantId, dto);
+    return this.pagosRedirect.iniciar(req.pasarelaAuth.tenantId, dto, {
+      origen: 'api',
+      apiKeyId: req.pasarelaAuth.apiKeyId,
+    });
   }
 
   @Post('cobros')

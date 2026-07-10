@@ -15,9 +15,27 @@ export class CreatePagoDto {
   @Length(1, 255)
   descripcion: string;
 
-  // La app vuelve aquí tras el pago; se le agregan ?ordenId=&estado=.
+  // La pasarela solicita 4 URLs al iniciar. A las de retorno del navegador
+  // (exito/fracaso/pendiente, GET) se les agregan ?ordenId=&estado=. urlCallback
+  // (POST) es server-to-server para apps externas; el monolito usa callback in-process.
+
+  /** Retorno del navegador cuando la orden queda pagada/conciliada. */
   @IsUrl({ require_tld: false }) // permite http://localhost en dev
-  urlRetorno: string;
+  urlExito: string;
+
+  /** Retorno del navegador cuando la orden queda fallida. */
+  @IsUrl({ require_tld: false })
+  urlFracaso: string;
+
+  /** Retorno del navegador para pagos con conciliación demorada. Default: urlExito. */
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  urlPendiente?: string;
+
+  /** Callback server-to-server (POST {ordenId}) para apps externas. */
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  urlCallback?: string;
 
   @IsOptional()
   @IsString()

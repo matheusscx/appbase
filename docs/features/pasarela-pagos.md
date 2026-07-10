@@ -78,12 +78,25 @@ POST   /api/pasarela/api/ordenes/:id/verificar      # reconcilia una orden en_pr
 GET    /api/pasarela/api/ordenes/:id                # detalle de orden
 ```
 
+**`POST /pagos` solicita 4 URLs** (generaliza el flujo redirect): `urlExito`
+(req), `urlFracaso` (req), `urlPendiente` (opt, default = éxito) — retornos GET
+del navegador — y `urlCallback` (opt, POST server-to-server). Al resolver la
+orden la pasarela llama al callback con `{ordenId}`; la app externa consulta
+`GET /ordenes/:id`, materializa su lado y al responder 2xx la orden queda
+`conciliada`. Ver "Callback de resolución".
+
 ### Retornos de Webpay (públicos — la credencial es el token de un solo uso)
 
 ```
 GET|POST /api/pasarela/retorno/inscripcion         # Oneclick: confirma inscripción y redirige 302
 GET|POST /api/pasarela/retorno/pago                # Webpay Plus: confirma pago (token_ws) y redirige 302
 ```
+
+El retorno de pago distingue el desenlace por los parámetros que envía Webpay:
+`token_ws` → confirma (flujo normal); `TBK_TOKEN` (anulación del usuario o
+timeout post-autorización, aunque venga `token_ws`) → **no confirma**, marca la
+orden `fallida`; solo `TBK_ORDEN_COMPRA` (timeout en el formulario) → `fallida`.
+En los tres casos redirige 302 a la URL de éxito/fracaso de la app.
 
 ### Ejemplo — cobro
 
@@ -126,7 +139,9 @@ e inyectan sus services públicos.
   `api-keys` (SHA-256), `tenant-pasarela` (config write-only),
   `transacciones` (historial inmutable + redacción), `inscripciones`
   (tokenización), `cobros` (orden→authorize→estados, reembolso, verificar),
-  `pagos-redirect` (Webpay Plus: iniciar pago + confirmar retorno).
+  `pagos-redirect` (Webpay Plus: iniciar pago + confirmar retorno),
+  `callback-dispatcher` + `pago-callback.registry` (notifica a la app
+  consumidora al resolver la orden y la marca `conciliada`; ver más abajo).
 - **Providers**: interfaces por capacidad `ProviderReembolsable` (común:
   `reembolsar` + `consultarEstado`) + `ProviderTokenizado` (Oneclick) +
   `ProviderPagoRedirect` (Webpay Plus), resueltas por `ProviderFactory`
@@ -157,6 +172,9 @@ Convenciones del repo: UUID PK/FK `type:'uuid'`, soft delete `eliminado_el`,
 - **Orden**: `creada → en_proceso → pagada | fallida | expirada` (+ `reembolsada`).
   En pago redirect, el retorno reclama `en_proceso → procesando` (claim atómico
   anti-doble-retorno) antes de confirmar; compensa a `en_proceso` si el commit falla.
+  Tras `pagada`, el callback marca `conciliada` cuando la app materializó su lado.
+  `pendiente` está modelado (pago con conciliación demorada) aunque Webpay Plus
+  resuelve inmediato en v1.
 - **Transacción**: `iniciada → aprobada | rechazada | error`.
 - **Inscripción**: `pendiente → procesando → activa | fallida | eliminada`
   (`procesando` es el claim atómico transitorio del retorno de Webpay).
@@ -167,6 +185,27 @@ Un **timeout / error de red** contra el proveedor NUNCA se interpreta como
 rechazo: la transacción queda `error`, la orden **permanece `en_proceso`**, y
 se responde `502` indicando verificar el estado con `.../verificar`. Solo un
 `response_code != 0` explícito del proveedor marca `fallida`.
+
+### Callback de resolución (la venta la crea la orden, no el navegador)
+
+La transacción de pago (`pasarela_ordenes`) y la venta son **entidades
+distintas**: la orden lleva en `metadata` el snapshot de lo que se paga y la
+venta se materializa **cuando la orden vuelve aprobada**, disparada por un
+callback — no por el retorno del navegador (robusto aunque el usuario cierre la
+pestaña). `CallbackDispatcherService.dispatch(orden)` corre al resolver:
+
+- **`interno`** (monolito, p. ej. Tienda Online): llama in-process al
+  `PagoCallbackHandler` registrado en `PagoCallbackRegistry` y **espera**
+  (`await`). Al volver OK la venta ya existe → orden `conciliada` antes del
+  redirect. Evita acoplar `pasarela → online` sin depender de un event bus
+  (`@nestjs/event-emitter` no está instalado); el consumidor se registra en su
+  `onModuleInit`. Ver [ADR-009](../adr/009-callback-pasarela-venta-por-callback.md).
+- **`http`** (apps externas): `POST urlCallback {ordenId}` **fire-and-forget**
+  (no bloquea el redirect); al recibir 2xx marca `conciliada`.
+
+Un error del callback nunca rompe el retorno: la orden queda `pagada` sin
+conciliar y es reconciliable después. Las 4 URLs y el `callbackModo`
+(`interno`/`http`) viven en `orden.metadata`.
 
 ---
 

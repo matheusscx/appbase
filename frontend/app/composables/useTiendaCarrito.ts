@@ -16,6 +16,15 @@ export interface CheckoutResponse {
 }
 
 /**
+ * Respuesta de `POST /online/pagar`: pago real por Webpay (redirect) cuando el
+ * tenant lo tiene activo, o el flujo simulado (misma forma que CheckoutResponse)
+ * como fallback.
+ */
+export type PagarResponse =
+  | ({ modo: 'simulado' } & CheckoutResponse)
+  | { modo: 'webpay', urlWebpay: string, ordenId: string }
+
+/**
  * Carrito de la tienda online. Usa useState (no un ref local) para que el
  * estado sobreviva la navegación de /tienda a /tienda/pasarela y de vuelta —
  * son páginas distintas, no la misma instancia de componente.
@@ -70,12 +79,17 @@ export function useTiendaCarrito() {
     checkout.value = null
   }
 
-  async function pagar(): Promise<CheckoutResponse> {
-    const response = await useApiFetch<CheckoutResponse>(
-      `${config.public.apiUrl}/online/checkout`,
+  async function pagar(): Promise<PagarResponse> {
+    const response = await useApiFetch<PagarResponse>(
+      `${config.public.apiUrl}/online/pagar`,
       { method: 'POST', body: toCalcularInput(lineas.value) },
     )
-    checkout.value = response
+    // El flujo simulado (fallback) reutiliza la página /tienda/pasarela, que lee
+    // el carrito desde este useState; el flujo Webpay sale de la SPA por redirect.
+    if (response.modo === 'simulado') {
+      const { resultado, checkoutRef, checkoutUrl } = response
+      checkout.value = { resultado, checkoutRef, checkoutUrl }
+    }
     return response
   }
 

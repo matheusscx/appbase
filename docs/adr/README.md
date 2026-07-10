@@ -20,6 +20,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [006](./006-relational-tramos-and-metodos-pago.md) | Modelado relacional de tramos y métodos de pago en reglas de descuento/recargo | Accepted | 2026-06-27 |
 | [007](./007-inventario-serie-lote.md) | Modelo de inventario serializado y por lote — eje `modo_inventario` | Accepted | 2026-06-28 |
 | [008](./008-cifrado-credenciales-pasarela.md) | Cifrado de credenciales de la pasarela de pagos (AES-256-GCM app-level) | Accepted | 2026-07-08 |
+| [009](./009-callback-pasarela-venta-por-callback.md) | Callback de pasarela — venta creada por callback (registry in-process vs HTTP), no por el navegador | Accepted | 2026-07-08 |
 
 ## Creating a New ADR
 

@@ -1,4 +1,12 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -21,5 +29,19 @@ export class OnlineController {
   async checkout(@Req() req: Request, @Body() dto: CalcularVentaDto) {
     const u = req.user as JwtUser;
     return this.onlineService.checkout(u.tenantId ?? '', dto);
+  }
+
+  @Post('pagar')
+  @RequiresPermiso('Tienda Online', 'Crear')
+  async pagar(@Req() req: Request, @Body() dto: CalcularVentaDto) {
+    const u = req.user as JwtUser;
+    return this.onlineService.pagar(u.tenantId ?? '', u.id, u.email, dto);
+  }
+
+  @Get('orden/:ordenId')
+  @RequiresPermiso('Tienda Online', 'Leer')
+  async orden(@Req() req: Request, @Param('ordenId') ordenId: string) {
+    const u = req.user as JwtUser;
+    return this.onlineService.resultadoOrden(u.tenantId ?? '', ordenId);
   }
 }

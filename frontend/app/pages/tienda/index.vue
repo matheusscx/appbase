@@ -34,12 +34,16 @@ onMounted(cargar)
 async function irAPagar() {
   pagando.value = true
   try {
-    const { checkoutUrl } = await pagar()
-    await navigateTo(checkoutUrl)
+    const res = await pagar()
+    if (res.modo === 'webpay') {
+      // Redirect real fuera de la SPA al formulario hosted de Webpay.
+      window.location.href = res.urlWebpay
+      return
+    }
+    await navigateTo(res.checkoutUrl)
   } catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message
     toast.add({ title: msg ?? 'Error al iniciar el pago', color: 'error' })
-  } finally {
     pagando.value = false
   }
 }

@@ -28,7 +28,8 @@ describe('WebpayPlusProvider', () => {
       returnUrl: 'https://app/retorno',
     });
     expect(r.tokenExterno).toBe('tok-1');
-    expect(r.urlRedireccion).toBe('https://webpay/redirect');
+    // urlRedireccion lista para redirect por GET: incluye el token_ws.
+    expect(r.urlRedireccion).toBe('https://webpay/redirect?token_ws=tok-1');
     expect(r.aprobada).toBe(true);
     const call = (global.fetch as jest.Mock).mock.calls[0] as [
       string,
