@@ -170,27 +170,6 @@ watch(
                 {{ orden.referenciaExterna }}
               </dd>
             </div>
-            <div v-if="orden.ventaId">
-              <dt class="text-muted">
-                Venta generada
-              </dt>
-              <dd class="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <NuxtLink
-                  :to="{ path: '/ventas', query: { venta: orden.ventaId } }"
-                  class="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
-                >
-                  Ver venta
-                  <UIcon name="i-lucide-arrow-right" class="h-3 w-3" />
-                </NuxtLink>
-                <NuxtLink
-                  :to="{ path: '/pagos', query: { ventaId: orden.ventaId } }"
-                  class="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
-                >
-                  Ver en Pagos
-                  <UIcon name="i-lucide-arrow-right" class="h-3 w-3" />
-                </NuxtLink>
-              </dd>
-            </div>
             <div v-if="orden.pagadorRef">
               <dt class="text-muted">
                 Pagador
@@ -208,6 +187,49 @@ watch(
               </dd>
             </div>
           </dl>
+        </UCard>
+
+        <UCard v-if="orden.ventaId">
+          <template #header>
+            <h2 class="text-base font-semibold">
+              Registros relacionados
+            </h2>
+          </template>
+          <div class="flex flex-col gap-2">
+            <NuxtLink
+              :to="{ path: '/ventas', query: { venta: orden.ventaId } }"
+              class="group flex items-center gap-3 rounded-lg border border-default p-3 transition-colors hover:bg-elevated"
+            >
+              <span class="flex size-9 shrink-0 items-center justify-center rounded-md bg-elevated text-highlighted transition-colors group-hover:bg-default">
+                <UIcon name="i-lucide-file-text" class="size-5" />
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block text-sm font-medium text-default">Venta generada</span>
+                <span class="block text-xs text-muted">Ver el detalle de la venta</span>
+              </span>
+              <UIcon
+                name="i-lucide-chevron-right"
+                class="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-highlighted"
+              />
+            </NuxtLink>
+
+            <NuxtLink
+              :to="{ path: '/pagos', query: { ventaId: orden.ventaId } }"
+              class="group flex items-center gap-3 rounded-lg border border-default p-3 transition-colors hover:bg-elevated"
+            >
+              <span class="flex size-9 shrink-0 items-center justify-center rounded-md bg-elevated text-highlighted transition-colors group-hover:bg-default">
+                <UIcon name="i-lucide-credit-card" class="size-5" />
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block text-sm font-medium text-default">Pagos de la venta</span>
+                <span class="block text-xs text-muted">Ver los pagos registrados</span>
+              </span>
+              <UIcon
+                name="i-lucide-chevron-right"
+                class="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-highlighted"
+              />
+            </NuxtLink>
+          </div>
         </UCard>
 
         <UCard>
