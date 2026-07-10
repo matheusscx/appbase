@@ -289,11 +289,11 @@ describe('PagosRedirectService', () => {
     await expect(service.abortarRetorno({})).rejects.toThrow('identificador');
   });
 
-  it('obtenerResultado: devuelve estado, referenciaExterna y detalle del pago scoped al tenant', async () => {
+  it('obtenerResultado: devuelve estado, ventaId y detalle del pago scoped al tenant', async () => {
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-1',
       estado: 'conciliada',
-      referenciaExterna: 'venta-9',
+      ventaId: 'venta-9',
       metadata: {
         resultadoPago: {
           tipoPago: 'VD',
@@ -307,7 +307,7 @@ describe('PagosRedirectService', () => {
     expect(res).toEqual({
       ordenId: 'orden-1',
       estado: 'conciliada',
-      referenciaExterna: 'venta-9',
+      ventaId: 'venta-9',
       tipoPago: 'VD',
       numeroCuotas: 0,
       tarjetaUltimos4: '6623',
@@ -322,7 +322,7 @@ describe('PagosRedirectService', () => {
     ordenRepo.findOne.mockResolvedValue({
       ordenId: 'orden-2',
       estado: 'fallida',
-      referenciaExterna: null,
+      ventaId: null,
       metadata: { resultadoPago: { codigoRespuesta: '-7' } },
     });
     const res = await service.obtenerResultado('t-1', 'orden-2');

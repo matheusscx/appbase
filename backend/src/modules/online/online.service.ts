@@ -125,7 +125,7 @@ export class OnlineService {
     const r = await this.pagosRedirect.obtenerResultado(tenantId, ordenId);
     return {
       estado: r.estado,
-      ventaId: r.referenciaExterna,
+      ventaId: r.ventaId,
       tipoPago: r.tipoPago,
       numeroCuotas: r.numeroCuotas,
       tarjetaUltimos4: r.tarjetaUltimos4,

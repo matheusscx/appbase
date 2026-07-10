@@ -148,7 +148,7 @@ describe('OnlineService', () => {
     pagosRedirect.obtenerResultado.mockResolvedValue({
       ordenId: 'orden-1',
       estado: 'conciliada',
-      referenciaExterna: 'venta-9',
+      ventaId: 'venta-9',
       tipoPago: 'VD',
       numeroCuotas: 0,
       tarjetaUltimos4: '6623',

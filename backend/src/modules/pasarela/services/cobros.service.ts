@@ -32,6 +32,7 @@ interface OrdenListRow {
   codigo_orden: string;
   pagador_ref: string | null;
   referencia_externa: string | null;
+  venta_id: string | null;
   descripcion: string;
   monto: string;
   moneda: string;
@@ -79,6 +80,7 @@ export class CobrosService {
       codigoOrden: orden.codigoOrden,
       pagadorRef: orden.pagadorRef,
       referenciaExterna: orden.referenciaExterna,
+      ventaId: orden.ventaId,
       descripcion: orden.descripcion,
       monto: orden.monto,
       moneda: orden.moneda,
@@ -446,7 +448,7 @@ export class CobrosService {
     const offsetIdx = params.length + 2;
 
     const rows: OrdenListRow[] = await this.dataSource.query(
-      `SELECT o.orden_id, o.codigo_orden, o.pagador_ref, o.referencia_externa,
+      `SELECT o.orden_id, o.codigo_orden, o.pagador_ref, o.referencia_externa, o.venta_id,
               o.descripcion, o.monto, o.moneda, o.estado, o.origen, o.creado_el
        FROM pasarela_ordenes o
        WHERE o.tenant_id = $1 AND o.eliminado_el IS NULL
@@ -501,6 +503,7 @@ export class CobrosService {
       codigoOrden: r.codigo_orden,
       pagadorRef: r.pagador_ref,
       referenciaExterna: r.referencia_externa,
+      ventaId: r.venta_id,
       descripcion: r.descripcion,
       monto: r.monto,
       moneda: r.moneda,

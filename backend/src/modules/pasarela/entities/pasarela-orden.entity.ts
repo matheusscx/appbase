@@ -20,7 +20,13 @@ export class PasarelaOrden {
   pagadorRef: string | null;
 
   @Column({ name: 'referencia_externa', type: 'varchar', nullable: true })
-  referenciaExterna: string | null; // correlación de la app: venta_id interno, folio externo...
+  referenciaExterna: string | null; // correlación libre de apps EXTERNAS (vía API key), nunca del monolito
+
+  // Vínculo interno tipado a la venta que materializó un callback in-process
+  // (ej. Tienda Online). No es una FK física (el proyecto no declara FKs en
+  // este dominio), pero es un campo propio — no reutiliza referenciaExterna.
+  @Column({ name: 'venta_id', type: 'uuid', nullable: true })
+  ventaId: string | null;
 
   @Index({ unique: true })
   @Column({ name: 'codigo_orden' })

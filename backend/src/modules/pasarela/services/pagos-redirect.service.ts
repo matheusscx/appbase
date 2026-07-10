@@ -285,7 +285,7 @@ export class PagosRedirectService {
     return {
       ordenId: orden.ordenId,
       estado: orden.estado,
-      referenciaExterna: orden.referenciaExterna,
+      ventaId: orden.ventaId,
       // Comprobante (éxito) y motivo de rechazo (nivel 2) para la página de retorno.
       tipoPago: rp.tipoPago ?? null,
       numeroCuotas: rp.numeroCuotas ?? null,

@@ -51,7 +51,7 @@ export class CallbackDispatcherService {
       return;
     }
     try {
-      await handler.onOrdenResuelta(orden); // el handler setea orden.referenciaExterna
+      await handler.onOrdenResuelta(orden); // el handler setea orden.ventaId
       orden.estado = 'conciliada';
       await this.ordenRepo.save(orden);
     } catch (e) {

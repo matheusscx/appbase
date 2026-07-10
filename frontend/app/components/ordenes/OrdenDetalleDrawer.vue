@@ -16,6 +16,7 @@ interface OrdenDetalle {
   codigoOrden: string
   pagadorRef: string | null
   referenciaExterna: string | null
+  ventaId: string | null
   descripcion: string
   monto: string
   moneda: string
@@ -167,6 +168,20 @@ watch(
               </dt>
               <dd class="font-medium">
                 {{ orden.referenciaExterna }}
+              </dd>
+            </div>
+            <div v-if="orden.ventaId">
+              <dt class="text-muted">
+                Venta generada
+              </dt>
+              <dd>
+                <NuxtLink
+                  :to="{ path: '/ventas', query: { venta: orden.ventaId } }"
+                  class="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Ver venta
+                  <UIcon name="i-lucide-arrow-right" class="h-3 w-3" />
+                </NuxtLink>
               </dd>
             </div>
             <div v-if="orden.pagadorRef">

@@ -35,7 +35,7 @@ describe('OnlineCallbackHandler', () => {
       ordenId: 'orden-1',
       tenantId: 't-1',
       estado: 'pagada',
-      referenciaExterna: null,
+      ventaId: null,
       metadata: {
         origenApp: 'tienda-online',
         checkout: {
@@ -57,7 +57,7 @@ describe('OnlineCallbackHandler', () => {
     expect(registry.register).toHaveBeenCalledWith(handler);
   });
 
-  it('crea la venta canal online (crédito VN) con detalle de tarjeta y referenciaExterna = venta.id', async () => {
+  it('crea la venta canal online (crédito VN) con detalle de tarjeta y ventaId = venta.id', async () => {
     ventas.crear.mockResolvedValue({ id: 'venta-9' });
     const o = orden();
     await handler.onOrdenResuelta(o);
@@ -80,7 +80,7 @@ describe('OnlineCallbackHandler', () => {
         customer: { nombre: 'user@x.cl' },
       }),
     );
-    expect(o.referenciaExterna).toBe('venta-9');
+    expect(o.ventaId).toBe('venta-9');
   });
 
   it('débito RedCompra (VD) → usa el método débito del tenant', async () => {
@@ -119,8 +119,8 @@ describe('OnlineCallbackHandler', () => {
     expect(dto.pagos[0].metodoPagoId).toBe('mp-credito');
   });
 
-  it('idempotente: si ya hay referenciaExterna, no crea venta', async () => {
-    const o = orden({ referenciaExterna: 'venta-previa' });
+  it('idempotente: si ya hay ventaId, no crea venta', async () => {
+    const o = orden({ ventaId: 'venta-previa' });
     await handler.onOrdenResuelta(o);
     expect(ventas.crear).not.toHaveBeenCalled();
   });
