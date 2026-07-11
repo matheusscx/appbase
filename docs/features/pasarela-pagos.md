@@ -67,6 +67,14 @@ GET    /api/pasarela/admin/ordenes/:id             # detalle + transacciones (Le
 POST   /api/pasarela/admin/ordenes/:id/reembolsos  # reembolso parcial/total (Reembolsar)
 ```
 
+El reembolso admin acepta además `generarNotaCredito?: boolean` y
+`devoluciones?: [{itemId, cantidad}]` (opcionales, requieren orden con
+`venta_id`): tras el commit del REFUND, un hook post-commit (registry
+`ReembolsoCallbackRegistry` → handler del módulo ventas) crea la NC interna y/o
+las devoluciones de stock. La respuesta puede traer `notaCreditoId` o `warning`
+(la NC falló, el reembolso NO se revierte). Ver
+[reembolsos-nota-credito.md](./reembolsos-nota-credito.md).
+
 ### API m2m (ApiKeyGuard — `Authorization: Bearer pk_...`)
 
 ```

@@ -874,7 +874,8 @@ CREATE TABLE pasarela_ordenes (
     orden_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
     pagador_ref VARCHAR(100),
-    referencia_externa VARCHAR, -- correlación de la app (venta_id, folio externo…)
+    referencia_externa VARCHAR, -- correlación libre de apps externas (vía API key)
+    venta_id UUID, -- venta materializada por callback in-process (vínculo interno, sin FK física)
     codigo_orden VARCHAR NOT NULL UNIQUE, -- buyOrder generado, ≤26 chars
     descripcion VARCHAR NOT NULL,
     monto NUMERIC(18,6) NOT NULL,
@@ -921,3 +922,6 @@ CREATE TABLE pasarela_transacciones (
 CREATE UNIQUE INDEX idx_pasarela_tx_externo
     ON pasarela_transacciones (tenant_pasarela_id, identificador_transaccion_externo)
     WHERE identificador_transaccion_externo IS NOT NULL;
+-- Visibilidad de reembolsos en ventas: agregados de REFUND por venta vinculada
+CREATE INDEX idx_pasarela_ordenes_venta ON pasarela_ordenes (venta_id);
+CREATE INDEX idx_pasarela_tx_orden ON pasarela_transacciones (orden_id);

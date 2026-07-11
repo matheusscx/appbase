@@ -8,6 +8,7 @@ import { CredencialesService } from './credenciales.service';
 import { ProviderFactory } from '../providers/provider.factory';
 import { PasarelaOrden } from '../entities/pasarela-orden.entity';
 import { ProviderComunicacionError } from '../providers/payment-provider.interface';
+import { ReembolsoCallbackRegistry } from './reembolso-callback.registry';
 
 const inscripcionActiva = {
   inscripcionId: 'insc-1',
@@ -69,6 +70,13 @@ describe('CobrosService', () => {
     },
     credenciales: { descifrarTexto: jest.fn().mockReturnValue('tbk-u-1') },
   };
+  const reembolsoHandler = {
+    onReembolsoAprobado: jest.fn(),
+  };
+  const reembolsoRegistry = {
+    register: jest.fn(),
+    get: jest.fn(() => reembolsoHandler),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -81,6 +89,7 @@ describe('CobrosService', () => {
         { provide: TenantPasarelaService, useValue: deps.tenantPasarela },
         { provide: TransaccionesService, useValue: deps.transacciones },
         { provide: CredencialesService, useValue: deps.credenciales },
+        { provide: ReembolsoCallbackRegistry, useValue: reembolsoRegistry },
         {
           provide: ProviderFactory,
           useValue: {
@@ -248,6 +257,133 @@ describe('CobrosService', () => {
     const res = await service.reembolsar('t-1', 'orden-1', { monto: '5000' });
     expect(res.estado).toBe('reembolsada');
     expect(provider.reembolsar).toHaveBeenCalled();
+  });
+
+  describe('reembolso — hook post-commit de NC/devoluciones', () => {
+    const ordenConVenta = {
+      ordenId: 'orden-1',
+      tenantId: 't-1',
+      estado: 'conciliada',
+      monto: '5000',
+      moneda: 'CLP',
+      codigoOrden: 'O-1',
+      ventaId: 'venta-1',
+    };
+    const authAprobada = [
+      {
+        transaccionId: 'tx-auth',
+        tipo: 'AUTHORIZATION',
+        estado: 'aprobada',
+        tenantPasarelaId: 'tp-1',
+        inscripcionId: 'insc-1',
+        monto: '5000',
+      },
+    ];
+    const refundAprobado = {
+      aprobada: true,
+      codigoRespuesta: '0',
+      codigoAutorizacion: null,
+      identificadorTransaccionExterno: null,
+      tipoPago: 'REVERSED',
+      numeroCuotas: null,
+      montoCuota: null,
+      tarjetaUltimos4: null,
+      request: {},
+      response: {},
+    };
+
+    beforeEach(() => {
+      ordenRepo.findOne.mockResolvedValue({ ...ordenConVenta });
+      deps.transacciones.listarPorOrden.mockResolvedValue(authAprobada);
+      provider.reembolsar.mockResolvedValue(refundAprobado);
+      reembolsoHandler.onReembolsoAprobado.mockResolvedValue({
+        notaCreditoId: 'nc-1',
+      });
+    });
+
+    it('reembolso aprobado con generarNotaCredito invoca el handler con el evento completo y responde notaCreditoId', async () => {
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        {
+          monto: '1100',
+          generarNotaCredito: true,
+          devoluciones: [{ itemId: 'item-1', cantidad: '2' }],
+        },
+        'user-1',
+      );
+      expect(reembolsoHandler.onReembolsoAprobado).toHaveBeenCalledWith({
+        tenantId: 't-1',
+        ordenId: 'orden-1',
+        codigoOrden: 'O-1',
+        ventaId: 'venta-1',
+        monto: '1100',
+        generarNotaCredito: true,
+        devoluciones: [{ itemId: 'item-1', cantidad: '2' }],
+        usuarioId: 'user-1',
+      });
+      expect(res.notaCreditoId).toBe('nc-1');
+      expect(res.warning).toBeUndefined();
+    });
+
+    it('si el handler falla, el reembolso NO se revierte: responde con warning y el REFUND queda registrado', async () => {
+      reembolsoHandler.onReembolsoAprobado.mockRejectedValueOnce(
+        new Error('NC falló'),
+      );
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100', generarNotaCredito: true },
+        'user-1',
+      );
+      expect(res.warning).toContain('reembolso fue procesado');
+      expect(deps.transacciones.registrar).toHaveBeenCalledWith(
+        expect.objectContaining({ tipo: 'REFUND', estado: 'aprobada' }),
+        manager,
+      );
+    });
+
+    it('reembolso rechazado por el proveedor NO invoca el handler', async () => {
+      provider.reembolsar.mockResolvedValueOnce({
+        ...refundAprobado,
+        aprobada: false,
+        codigoRespuesta: '-1',
+      });
+      await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100', generarNotaCredito: true },
+        'user-1',
+      );
+      expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+    });
+
+    it('flags sin venta vinculada: NO invoca el handler y responde warning informativo', async () => {
+      ordenRepo.findOne.mockResolvedValue({
+        ...ordenConVenta,
+        ventaId: null,
+      });
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100', generarNotaCredito: true },
+        'user-1',
+      );
+      expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      expect(res.warning).toContain('venta vinculada');
+    });
+
+    it('regresión: reembolso sin flags no invoca el handler ni agrega warning', async () => {
+      const res = await service.reembolsar(
+        't-1',
+        'orden-1',
+        { monto: '1100' },
+        'user-1',
+      );
+      expect(reembolsoHandler.onReembolsoAprobado).not.toHaveBeenCalled();
+      expect(res.warning).toBeUndefined();
+      expect(res.notaCreditoId).toBeUndefined();
+    });
   });
 
   it('reembolso toma FOR UPDATE y recomputa el saldo bajo el lock: si el REFUND previo lo agota, es rechazado', async () => {

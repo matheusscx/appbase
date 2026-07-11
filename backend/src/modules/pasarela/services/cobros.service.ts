@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
@@ -17,6 +18,7 @@ import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
 import { CredencialesService } from './credenciales.service';
 import { ProviderFactory } from '../providers/provider.factory';
+import { ReembolsoCallbackRegistry } from './reembolso-callback.registry';
 import {
   ProviderComunicacionError,
   ResultadoCobro,
@@ -55,6 +57,8 @@ interface CtxAuditoriaReembolso {
 
 @Injectable()
 export class CobrosService {
+  private readonly logger = new Logger(CobrosService.name);
+
   constructor(
     @InjectRepository(PasarelaOrden)
     private readonly ordenRepo: Repository<PasarelaOrden>,
@@ -64,6 +68,7 @@ export class CobrosService {
     private readonly transacciones: TransaccionesService,
     private readonly credenciales: CredencialesService,
     private readonly providerFactory: ProviderFactory,
+    private readonly reembolsoRegistry: ReembolsoCallbackRegistry,
   ) {}
 
   /** buyOrder ≤26 chars alfanumérico (límite Oneclick): 'O' + timestamp36 + 8 random. */
@@ -193,7 +198,12 @@ export class CobrosService {
     });
   }
 
-  async reembolsar(tenantId: string, ordenId: string, dto: CreateReembolsoDto) {
+  async reembolsar(
+    tenantId: string,
+    ordenId: string,
+    dto: CreateReembolsoDto,
+    usuarioId?: string,
+  ) {
     if (new Decimal(dto.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
 
@@ -208,9 +218,14 @@ export class CobrosService {
     // Sin inicializador: TS conserva el tipo declarado para vars asignadas en
     // un closure (con `= null` lo estrecharía a `null` en el catch).
     let ctxTimeout: CtxAuditoriaReembolso | undefined;
+    // Orden y aprobación capturadas para el hook post-commit de NC/devoluciones:
+    // el hook corre DESPUÉS del commit (correrlo dentro alargaría el FOR UPDATE
+    // durante la transacción de ventas y, si la NC fallara, revertiría un
+    // reembolso que el proveedor ya ejecutó).
+    let ctxHook: { orden: PasarelaOrden; aprobada: boolean } | undefined;
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const publico = await this.dataSource.transaction(async (manager) => {
         const orden = await manager.findOne(PasarelaOrden, {
           where: { ordenId, tenantId },
           lock: { mode: 'pessimistic_write' },
@@ -306,10 +321,12 @@ export class CobrosService {
           orden.estado = 'reembolsada';
           await manager.save(orden);
         }
+        ctxHook = { orden, aprobada: resultado.aprobada };
         return this.toPublico(orden, {
           reembolsoAprobado: resultado.aprobada,
         });
       });
+      return await this.aplicarPostReembolso(publico, dto, ctxHook, usuarioId);
     } catch (e) {
       if (e instanceof ProviderComunicacionError && ctxTimeout) {
         // La tx ya hizo rollback y liberó el FOR UPDATE: ahora sí registramos el
@@ -334,6 +351,67 @@ export class CobrosService {
         );
       }
       throw e;
+    }
+  }
+
+  /**
+   * Hook post-commit del reembolso: notifica al handler registrado (ventas)
+   * para generar la NC y/o devoluciones de stock pedidas en el DTO. El REFUND
+   * ya está commiteado y la plata ya volvió al cliente, así que un fallo aquí
+   * NUNCA revierte el reembolso: se degrada a `warning` en la respuesta + log.
+   */
+  private async aplicarPostReembolso(
+    publico: Record<string, unknown>,
+    dto: CreateReembolsoDto,
+    ctx: { orden: PasarelaOrden; aprobada: boolean } | undefined,
+    usuarioId?: string,
+  ): Promise<Record<string, unknown>> {
+    const solicitado =
+      dto.generarNotaCredito === true || (dto.devoluciones?.length ?? 0) > 0;
+    if (!solicitado || !ctx?.aprobada) return publico;
+
+    if (!ctx.orden.ventaId)
+      return {
+        ...publico,
+        warning:
+          'El reembolso fue procesado, pero la orden no tiene una venta vinculada: no se generó nota de crédito ni devoluciones',
+      };
+
+    const handler = this.reembolsoRegistry.get();
+    if (!handler) {
+      this.logger.error(
+        `Reembolso con NC/devoluciones solicitadas pero sin handler registrado (orden ${ctx.orden.ordenId})`,
+      );
+      return {
+        ...publico,
+        warning:
+          'El reembolso fue procesado, pero no hay un módulo de ventas registrado para generar la nota de crédito/devoluciones',
+      };
+    }
+
+    try {
+      const resultado = await handler.onReembolsoAprobado({
+        tenantId: ctx.orden.tenantId,
+        ordenId: ctx.orden.ordenId,
+        codigoOrden: ctx.orden.codigoOrden,
+        ventaId: ctx.orden.ventaId,
+        monto: dto.monto,
+        generarNotaCredito: dto.generarNotaCredito === true,
+        devoluciones: dto.devoluciones ?? [],
+        usuarioId: usuarioId ?? '',
+      });
+      return resultado?.notaCreditoId
+        ? { ...publico, notaCreditoId: resultado.notaCreditoId }
+        : publico;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.error(
+        `NC/devolución falló tras reembolso aprobado (orden ${ctx.orden.ordenId}): ${msg}`,
+      );
+      return {
+        ...publico,
+        warning: `El reembolso fue procesado, pero la nota de crédito/devolución falló: ${msg}`,
+      };
     }
   }
 

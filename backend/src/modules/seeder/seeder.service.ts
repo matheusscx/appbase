@@ -1870,6 +1870,17 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
         customerRequerido: true,
       },
+      {
+        // activo:false — no aparece en el selector del POS; solo lo usa el
+        // flujo de reembolso vía TIPO_DOCUMENTO_NC_ID.
+        id: '550e8400-e29b-41d4-a716-446655440218',
+        paisId: CHILE,
+        nombre: 'Nota de Crédito',
+        codigo: '61',
+        descripcion: 'Nota de crédito interna por reembolso (sin emisión SII)',
+        activo: false,
+        customerRequerido: false,
+      },
     ];
 
     for (const data of tipos) {

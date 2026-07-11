@@ -112,6 +112,11 @@ export class PasarelaAdminController {
     @Param('id') id: string,
     @Body() dto: CreateReembolsoDto,
   ) {
-    return this.cobrosService.reembolsar(this.tenantId(req), id, dto);
+    return this.cobrosService.reembolsar(
+      this.tenantId(req),
+      id,
+      dto,
+      (req.user as JwtUser).id,
+    );
   }
 }

@@ -17,6 +17,8 @@ import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
 import { TipoDocumentoTributario } from './entities/tipo-documento-tributario.entity';
+import { PasarelaModule } from '../pasarela/pasarela.module';
+import { VentasReembolsoHandler } from './reembolso-callback.handler';
 
 @Module({
   imports: [
@@ -34,9 +36,12 @@ import { TipoDocumentoTributario } from './entities/tipo-documento-tributario.en
     InventarioModule,
     ItemsModule,
     PagosModule,
+    // Solo para registrar VentasReembolsoHandler en el ReembolsoCallbackRegistry
+    // (pasarela nunca importa ventas; el borde se cruza en esta dirección).
+    PasarelaModule,
   ],
   controllers: [VentasController, TiposDocumentoController],
-  providers: [VentasService],
+  providers: [VentasService, VentasReembolsoHandler],
   exports: [VentasService],
 })
 export class VentasModule {}

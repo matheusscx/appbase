@@ -19,6 +19,22 @@ interface Detalle {
   totalLinea: string
 }
 
+interface Reembolso {
+  id: string
+  monto: string
+  estado: string
+  fecha: string
+  ordenId: string
+  codigoOrden: string
+}
+
+interface NotaCredito {
+  id: string
+  totalFinal: string
+  fecha: string
+  comentario: string | null
+}
+
 interface VentaDetalle {
   id: string
   canal: string
@@ -30,6 +46,10 @@ interface VentaDetalle {
   totalRecargos: string
   totalImpuestos: string
   totalFinal: string
+  ventaReferenciaId: string | null
+  tipoDocumento: { id: string, codigo: string | null, nombre: string | null } | null
+  reembolsos: Reembolso[]
+  notasCredito: NotaCredito[]
   detalles: Detalle[]
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
@@ -74,6 +94,32 @@ const saldo = computed(() => {
 const puedeAbonar = computed(() =>
   !!venta.value && ['pendiente', 'pagada_parcial'].includes(venta.value.estado),
 )
+
+const esNotaCredito = computed(() => venta.value?.tipoDocumento?.codigo === '61')
+
+const totalReembolsado = computed(() => {
+  if (!venta.value) return '0'
+  return venta.value.reembolsos
+    .filter(r => r.estado === 'aprobada')
+    .reduce((acc, r) => new Decimal(acc).plus(r.monto).toString(), '0')
+})
+
+// Derivado de las transacciones de pasarela: NO es un estado de la venta en BD
+const leyendaReembolso = computed(() => {
+  if (!venta.value) return null
+  const total = new Decimal(totalReembolsado.value)
+  if (total.lte(0)) return null
+  return total.gte(venta.value.totalFinal) ? 'Reembolsada totalmente' : 'Reembolsada parcialmente'
+})
+
+function reembolsoColor(estado: string): 'success' | 'error' | 'warning' | 'neutral' {
+  const map: Record<string, 'success' | 'error' | 'warning'> = {
+    aprobada: 'success',
+    rechazada: 'error',
+    error: 'warning',
+  }
+  return map[estado] ?? 'neutral'
+}
 
 function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
   const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
@@ -152,6 +198,20 @@ async function onAbonoSuccess() {
           v-if="venta"
           :color="estadoColor(venta.estado)"
           :label="estadoLabel(venta.estado)"
+          variant="subtle"
+          size="xs"
+        />
+        <UBadge
+          v-if="esNotaCredito"
+          color="info"
+          label="Nota de Crédito"
+          variant="subtle"
+          size="xs"
+        />
+        <UBadge
+          v-if="leyendaReembolso"
+          color="warning"
+          :label="leyendaReembolso"
           variant="subtle"
           size="xs"
         />
@@ -323,6 +383,64 @@ async function onAbonoSuccess() {
             </div>
           </UCard>
         </div>
+
+        <UCard v-if="venta.reembolsos.length">
+          <template #header>
+            <h2 class="text-base font-semibold">
+              Reembolsos
+            </h2>
+          </template>
+          <ul class="divide-y divide-default text-sm">
+            <li
+              v-for="r in venta.reembolsos"
+              :key="r.id"
+              class="flex items-center justify-between gap-2 py-2"
+            >
+              <span class="text-muted">{{ formatFecha(r.fecha) }}</span>
+              <span class="font-mono">{{ formatMonto(r.monto) }}</span>
+              <UBadge :color="reembolsoColor(r.estado)" :label="r.estado" variant="subtle" size="xs" />
+              <span class="font-mono text-xs text-muted">{{ r.codigoOrden }}</span>
+            </li>
+          </ul>
+          <div class="mt-3 flex justify-between border-t border-default pt-3 text-sm font-medium">
+            <span class="text-muted">Total reembolsado (aprobado)</span>
+            <span class="font-mono">{{ formatMonto(totalReembolsado) }}</span>
+          </div>
+        </UCard>
+
+        <UCard v-if="venta.notasCredito.length || venta.ventaReferenciaId">
+          <template #header>
+            <h2 class="text-base font-semibold">
+              Documentos relacionados
+            </h2>
+          </template>
+          <ul class="divide-y divide-default text-sm">
+            <li v-if="venta.ventaReferenciaId" class="py-2">
+              <NuxtLink
+                :to="{ path: '/ventas', query: { venta: venta.ventaReferenciaId } }"
+                class="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+              >
+                <UIcon name="i-lucide-arrow-left" class="h-3 w-3" />
+                Venta original
+              </NuxtLink>
+            </li>
+            <li
+              v-for="nc in venta.notasCredito"
+              :key="nc.id"
+              class="flex items-center justify-between gap-2 py-2"
+            >
+              <NuxtLink
+                :to="{ path: '/ventas', query: { venta: nc.id } }"
+                class="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+              >
+                Nota de crédito
+                <UIcon name="i-lucide-arrow-right" class="h-3 w-3" />
+              </NuxtLink>
+              <span class="font-mono">{{ formatMonto(nc.totalFinal) }}</span>
+              <span class="text-xs text-muted">{{ formatFecha(nc.fecha) }}</span>
+            </li>
+          </ul>
+        </UCard>
       </div>
 
       <div v-else class="py-12 text-center text-muted">

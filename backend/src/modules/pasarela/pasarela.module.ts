@@ -16,6 +16,7 @@ import { CobrosService } from './services/cobros.service';
 import { PagosRedirectService } from './services/pagos-redirect.service';
 import { CallbackDispatcherService } from './services/callback-dispatcher.service';
 import { PagoCallbackRegistry } from './services/pago-callback.registry';
+import { ReembolsoCallbackRegistry } from './services/reembolso-callback.registry';
 import { OneclickProvider } from './providers/oneclick/oneclick.provider';
 import { WebpayPlusProvider } from './providers/webpay-plus/webpay-plus.provider';
 import { ProviderFactory } from './providers/provider.factory';
@@ -57,6 +58,7 @@ import { PasarelaRetornoController } from './controllers/pasarela-retorno.contro
     PagosRedirectService,
     CallbackDispatcherService,
     PagoCallbackRegistry,
+    ReembolsoCallbackRegistry,
     OneclickProvider,
     WebpayPlusProvider,
     ProviderFactory,
@@ -69,6 +71,7 @@ import { PasarelaRetornoController } from './controllers/pasarela-retorno.contro
     PagosRedirectService,
     TenantPasarelaService,
     PagoCallbackRegistry,
+    ReembolsoCallbackRegistry,
   ],
 })
 export class PasarelaModule {}

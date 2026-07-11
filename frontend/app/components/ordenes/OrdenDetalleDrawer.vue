@@ -334,6 +334,7 @@ async function onReembolsoSuccess() {
     v-model:open="reembolsoOpen"
     :orden-id="orden.ordenId"
     :disponible="disponibleReembolso"
+    :venta-id="orden.ventaId"
     @success="onReembolsoSuccess"
   />
 </template>

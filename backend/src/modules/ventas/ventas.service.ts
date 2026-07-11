@@ -19,11 +19,18 @@ import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
 import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { VentaCustomer } from './entities/venta-customer.entity';
+import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
+
+/** Ítem/cantidad a devolver a stock en un reembolso (solo modo 'cantidad'). */
+export interface DevolucionReembolso {
+  itemId: string;
+  cantidad: string;
+}
 
 export interface VentaListItem {
   id: string;
@@ -34,6 +41,9 @@ export interface VentaListItem {
   creadoEl: Date;
   montoPagado: string;
   saldo: string;
+  /** Σ REFUND aprobados de las órdenes de pasarela vinculadas (badge derivado). */
+  totalReembolsado: string;
+  esNotaCredito: boolean;
 }
 
 export interface VentasResumen {
@@ -342,6 +352,278 @@ export class VentasService {
     return { ...venta, detalles };
   }
 
+  /**
+   * Crea una nota de crédito interna (sin SII) por un reembolso de pasarela.
+   * Los totales se COPIAN del monto reembolsado — nunca pasan por el motor de
+   * precios — y la venta original no se modifica (queda `pagada`; la NC
+   * documenta la devolución). Las líneas son opcionales e informativas: solo
+   * los ítems elegidos para devolver a stock, sin validar cruce con el monto.
+   */
+  async crearNotaCredito(params: {
+    tenantId: string;
+    usuarioId: string;
+    ventaOriginalId: string;
+    monto: string;
+    devoluciones?: DevolucionReembolso[];
+    comentario?: string;
+  }): Promise<{ id: string; totalFinal: string }> {
+    if (new Decimal(params.monto).lte(0))
+      throw new BadRequestException('El monto debe ser mayor a cero');
+
+    return this.dataSource.transaction(async (manager) => {
+      const original = await this.lockVentaOriginal(
+        manager,
+        params.tenantId,
+        params.ventaOriginalId,
+      );
+
+      // Σ NCs previas bajo el lock: dos NCs concurrentes sobre la misma venta
+      // se serializan y no pueden exceder el total juntas.
+      const previasRows: { total: string }[] = await manager.query(
+        `SELECT COALESCE(SUM(total_final), 0) AS total
+         FROM ventas
+         WHERE venta_referencia_id = $1 AND tipo_documento_id = $2
+           AND eliminado_el IS NULL`,
+        [params.ventaOriginalId, TIPO_DOCUMENTO_NC_ID],
+      );
+      const previas = new Decimal(previasRows[0]?.total ?? '0');
+      const disponible = new Decimal(original.total_final).minus(previas);
+      if (new Decimal(params.monto).gt(disponible))
+        throw new BadRequestException(
+          `El monto excede lo disponible para nota de crédito (${disponible.toString()})`,
+        );
+
+      const lineas = await this.validarDevolucionesReembolso(
+        manager,
+        params.ventaOriginalId,
+        params.devoluciones ?? [],
+      );
+
+      const nc = await manager.save(
+        Venta,
+        manager.create(Venta, {
+          tenantId: params.tenantId,
+          cajaId: original.caja_id,
+          monedaId: original.moneda_id,
+          canal: original.canal,
+          tipoDocumentoId: TIPO_DOCUMENTO_NC_ID,
+          ventaReferenciaId: params.ventaOriginalId,
+          estado: EstadoVenta.PAGADA,
+          totalBruto: params.monto,
+          totalDescuentos: '0',
+          totalRecargos: '0',
+          totalImpuestos: '0',
+          totalFinal: params.monto,
+          comentario: params.comentario ?? null,
+        }),
+      );
+
+      for (const linea of lineas) {
+        const totalLinea = new Decimal(linea.precioUnitario)
+          .times(linea.cantidad)
+          .toFixed(4);
+        await manager.save(
+          VentaDetalle,
+          manager.create(VentaDetalle, {
+            ventaId: nc.id,
+            itemId: linea.itemId,
+            monedaIdOrigen: linea.monedaIdOrigen,
+            precioUnitarioOrigen: linea.precioUnitarioOrigen,
+            tasaCambio: linea.tasaCambio,
+            precioUnitario: linea.precioUnitario,
+            descripcion: linea.descripcion,
+            cantidad: linea.cantidad,
+            subtotal: totalLinea,
+            totalLinea,
+          }),
+        );
+        await this.inventarioService.registrarMovimiento(manager, {
+          tenantId: params.tenantId,
+          itemId: linea.itemId,
+          tipo: 'entrada',
+          motivo: 'devolucion',
+          cantidad: linea.cantidad,
+          usuarioId: params.usuarioId,
+          ventaId: nc.id,
+          comentario: params.comentario,
+        });
+      }
+
+      return { id: nc.id, totalFinal: nc.totalFinal };
+    });
+  }
+
+  /**
+   * Devoluciones de stock por reembolso SIN nota de crédito: mismos
+   * candados y validaciones, pero los movimientos quedan ligados a la venta
+   * original y no se crea documento.
+   */
+  async registrarDevolucionesPorReembolso(params: {
+    tenantId: string;
+    usuarioId: string;
+    ventaOriginalId: string;
+    devoluciones: DevolucionReembolso[];
+    comentario?: string;
+  }): Promise<void> {
+    if (!params.devoluciones.length) return;
+
+    await this.dataSource.transaction(async (manager) => {
+      await this.lockVentaOriginal(
+        manager,
+        params.tenantId,
+        params.ventaOriginalId,
+      );
+      const lineas = await this.validarDevolucionesReembolso(
+        manager,
+        params.ventaOriginalId,
+        params.devoluciones,
+      );
+      for (const linea of lineas) {
+        await this.inventarioService.registrarMovimiento(manager, {
+          tenantId: params.tenantId,
+          itemId: linea.itemId,
+          tipo: 'entrada',
+          motivo: 'devolucion',
+          cantidad: linea.cantidad,
+          usuarioId: params.usuarioId,
+          ventaId: params.ventaOriginalId,
+          comentario: params.comentario,
+        });
+      }
+    });
+  }
+
+  /** Lock pesimista de la venta original: serializa NCs/devoluciones concurrentes. */
+  private async lockVentaOriginal(
+    manager: EntityManager,
+    tenantId: string,
+    ventaOriginalId: string,
+  ): Promise<{
+    venta_id: string;
+    caja_id: string | null;
+    moneda_id: string;
+    canal: string;
+    total_final: string;
+    estado: string;
+  }> {
+    const rows: {
+      venta_id: string;
+      caja_id: string | null;
+      moneda_id: string;
+      canal: string;
+      total_final: string;
+      estado: string;
+    }[] = await manager.query(
+      `SELECT venta_id, caja_id, moneda_id, canal, total_final, estado
+       FROM ventas
+       WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+       FOR UPDATE`,
+      [ventaOriginalId, tenantId],
+    );
+    if (!rows.length) throw new NotFoundException('Venta no encontrada');
+    return rows[0];
+  }
+
+  /**
+   * Valida las devoluciones contra el detalle de la venta original y devuelve
+   * las líneas listas para persistir/mover stock. Solo ítems con
+   * `modo_inventario = 'cantidad'`: serie/lote requieren elegir unidades/lote
+   * (fase posterior) y los servicios no tienen stock. Se valida TODO antes de
+   * tocar inventario para fallar con un mensaje de negocio claro.
+   */
+  private async validarDevolucionesReembolso(
+    manager: EntityManager,
+    ventaOriginalId: string,
+    devoluciones: DevolucionReembolso[],
+  ): Promise<
+    {
+      itemId: string;
+      cantidad: string;
+      precioUnitario: string;
+      precioUnitarioOrigen: string | null;
+      tasaCambio: string | null;
+      monedaIdOrigen: string;
+      descripcion: string | null;
+    }[]
+  > {
+    if (!devoluciones.length) return [];
+
+    const detalles: {
+      item_id: string;
+      cantidad: string;
+      precio_unitario: string;
+      precio_unitario_origen: string | null;
+      tasa_cambio: string | null;
+      moneda_id_origen: string;
+      descripcion: string | null;
+      modo_inventario: string | null;
+    }[] = await manager.query(
+      `SELECT d.item_id, d.cantidad, d.precio_unitario, d.precio_unitario_origen,
+              d.tasa_cambio, d.moneda_id_origen, d.descripcion, ip.modo_inventario
+       FROM venta_detalles d
+       LEFT JOIN item_producto ip ON ip.item_id = d.item_id
+       WHERE d.venta_id = $1 AND d.eliminado_el IS NULL`,
+      [ventaOriginalId],
+    );
+    // Ya devuelto por ítem: movimientos 'devolucion' ligados a la venta
+    // original (devoluciones sin NC) o a sus NCs hijas (devoluciones con NC).
+    const devueltos: { item_id: string; devuelto: string }[] =
+      await manager.query(
+        `SELECT m.item_id, COALESCE(SUM(m.cantidad), 0) AS devuelto
+         FROM movimientos_inventario m
+         WHERE m.motivo = 'devolucion' AND m.eliminado_el IS NULL
+           AND (m.venta_id = $1 OR m.venta_id IN (
+             SELECT venta_id FROM ventas
+             WHERE venta_referencia_id = $1 AND eliminado_el IS NULL))
+         GROUP BY m.item_id`,
+        [ventaOriginalId],
+      );
+    const devueltoPorItem = new Map(
+      devueltos.map((d) => [d.item_id, new Decimal(d.devuelto)]),
+    );
+
+    return devoluciones.map((dev) => {
+      const filas = detalles.filter((d) => d.item_id === dev.itemId);
+      if (!filas.length)
+        throw new BadRequestException(
+          'El ítem no pertenece a la venta original',
+        );
+      const detalle = filas[0];
+      if (new Decimal(dev.cantidad).lte(0))
+        throw new BadRequestException(
+          'La cantidad a devolver debe ser mayor a cero',
+        );
+      if (detalle.modo_inventario === null)
+        throw new BadRequestException(
+          `"${detalle.descripcion ?? dev.itemId}" no maneja stock (servicio): no admite devolución a inventario`,
+        );
+      if (detalle.modo_inventario !== 'cantidad')
+        throw new BadRequestException(
+          `"${detalle.descripcion ?? dev.itemId}" usa inventario por ${detalle.modo_inventario}: la devolución debe registrarse manualmente desde Inventario`,
+        );
+      const vendida = filas.reduce(
+        (acc, f) => acc.plus(f.cantidad),
+        new Decimal(0),
+      );
+      const disponible = vendida.minus(
+        devueltoPorItem.get(dev.itemId) ?? new Decimal(0),
+      );
+      if (new Decimal(dev.cantidad).gt(disponible))
+        throw new BadRequestException(
+          `La cantidad a devolver de "${detalle.descripcion ?? dev.itemId}" excede lo disponible (${disponible.toString()})`,
+        );
+      return {
+        itemId: dev.itemId,
+        cantidad: dev.cantidad,
+        precioUnitario: detalle.precio_unitario,
+        precioUnitarioOrigen: detalle.precio_unitario_origen,
+        tasaCambio: detalle.tasa_cambio,
+        monedaIdOrigen: detalle.moneda_id_origen,
+        descripcion: detalle.descripcion,
+      };
+    });
+  }
+
   async findTiposDocumento(tenantId: string): Promise<TipoDocumentoResponse[]> {
     const rows: {
       tipo_documento_id: string;
@@ -388,8 +670,9 @@ export class VentasService {
                 ), 0)
               ), 0)::text AS saldo_pendiente
        FROM ventas v
-       WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL`,
-      [tenantId],
+       WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
+         AND v.tipo_documento_id IS DISTINCT FROM $2`,
+      [tenantId, TIPO_DOCUMENTO_NC_ID],
     );
 
     const row = rows[0];
@@ -429,13 +712,24 @@ export class VentasService {
       fecha: Date;
       creado_el: Date;
       monto_pagado: string;
+      total_reembolsado: string;
+      tipo_documento_id: string | null;
     }[] = await this.dataSource.query(
       `SELECT v.venta_id, v.canal, v.estado, v.total_final, v.fecha, v.creado_el,
+              v.tipo_documento_id,
               COALESCE((
                 SELECT SUM(p.monto - p.vuelto)
                 FROM pagos p
                 WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
-              ), 0) AS monto_pagado
+              ), 0) AS monto_pagado,
+              COALESCE((
+                SELECT SUM(t.monto)
+                FROM pasarela_ordenes o
+                JOIN pasarela_transacciones t ON t.orden_id = o.orden_id
+                     AND t.tipo = 'REFUND' AND t.estado = 'aprobada'
+                     AND t.eliminado_el IS NULL
+                WHERE o.venta_id = v.venta_id AND o.eliminado_el IS NULL
+              ), 0) AS total_reembolsado
        FROM ventas v
        WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
        ${filters}
@@ -478,6 +772,8 @@ export class VentasService {
     fecha: Date;
     creado_el: Date;
     monto_pagado: string;
+    total_reembolsado: string;
+    tipo_documento_id: string | null;
   }): VentaListItem {
     return {
       id: r.venta_id,
@@ -490,6 +786,8 @@ export class VentasService {
       saldo: new Decimal(r.total_final)
         .minus(new Decimal(r.monto_pagado))
         .toFixed(4),
+      totalReembolsado: new Decimal(r.total_reembolsado).toFixed(4),
+      esNotaCredito: r.tipo_documento_id === TIPO_DOCUMENTO_NC_ID,
     };
   }
 
@@ -509,12 +807,18 @@ export class VentasService {
       comentario: string | null;
       fecha: Date;
       creado_el: Date;
+      venta_referencia_id: string | null;
+      tipo_documento_codigo: string | null;
+      tipo_documento_nombre: string | null;
     }[] = await this.dataSource.query(
-      `SELECT venta_id, caja_id, moneda_id, tipo_documento_id, canal, estado,
-              total_bruto, total_descuentos, total_recargos, total_impuestos, total_final,
-              comentario, fecha, creado_el
-       FROM ventas
-       WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      `SELECT v.venta_id, v.caja_id, v.moneda_id, v.tipo_documento_id, v.canal, v.estado,
+              v.total_bruto, v.total_descuentos, v.total_recargos, v.total_impuestos, v.total_final,
+              v.comentario, v.fecha, v.creado_el, v.venta_referencia_id,
+              td.codigo AS tipo_documento_codigo, td.nombre AS tipo_documento_nombre
+       FROM ventas v
+       LEFT JOIN tipos_documento_tributario td
+            ON td.tipo_documento_id = v.tipo_documento_id AND td.eliminado_el IS NULL
+       WHERE v.venta_id = $1 AND v.tenant_id = $2 AND v.eliminado_el IS NULL`,
       [ventaId, tenantId],
     );
 
@@ -523,12 +827,49 @@ export class VentasService {
 
     type Row = Record<string, unknown>;
     const detalles: Row[] = await this.dataSource.query(
-      `SELECT detalle_id, item_id, descripcion, cantidad, precio_unitario,
-              precio_unitario_origen, tasa_cambio, moneda_id_origen,
-              subtotal, descuento_aplicado, recargo_aplicado, impuesto_aplicado, total_linea
-       FROM venta_detalles
-       WHERE venta_id = $1 AND eliminado_el IS NULL ORDER BY creado_el ASC`,
+      `SELECT d.detalle_id, d.item_id, d.descripcion, d.cantidad, d.precio_unitario,
+              d.precio_unitario_origen, d.tasa_cambio, d.moneda_id_origen,
+              d.subtotal, d.descuento_aplicado, d.recargo_aplicado, d.impuesto_aplicado,
+              d.total_linea, ip.modo_inventario
+       FROM venta_detalles d
+       LEFT JOIN item_producto ip ON ip.item_id = d.item_id
+       WHERE d.venta_id = $1 AND d.eliminado_el IS NULL ORDER BY d.creado_el ASC`,
       [ventaId],
+    );
+    // Ya devuelto por ítem (movimientos 'devolucion' de esta venta o de sus NCs
+    // hijas): el modal de reembolso lo usa para capear las cantidades.
+    const devueltos: { item_id: string; devuelto: string }[] =
+      await this.dataSource.query(
+        `SELECT m.item_id, COALESCE(SUM(m.cantidad), 0) AS devuelto
+         FROM movimientos_inventario m
+         WHERE m.motivo = 'devolucion' AND m.eliminado_el IS NULL
+           AND (m.venta_id = $1 OR m.venta_id IN (
+             SELECT venta_id FROM ventas
+             WHERE venta_referencia_id = $1 AND eliminado_el IS NULL))
+         GROUP BY m.item_id`,
+        [ventaId],
+      );
+    const devueltoPorItem = new Map(
+      devueltos.map((d) => [d.item_id, d.devuelto]),
+    );
+    // Reembolsos de la(s) orden(es) de pasarela vinculadas a esta venta.
+    const reembolsos: Row[] = await this.dataSource.query(
+      `SELECT t.transaccion_id, t.monto, t.estado, t.fecha_transaccion,
+              o.orden_id, o.codigo_orden
+       FROM pasarela_ordenes o
+       JOIN pasarela_transacciones t ON t.orden_id = o.orden_id
+            AND t.tipo = 'REFUND' AND t.eliminado_el IS NULL
+       WHERE o.venta_id = $1 AND o.tenant_id = $2 AND o.eliminado_el IS NULL
+       ORDER BY t.fecha_transaccion ASC`,
+      [ventaId, tenantId],
+    );
+    // Notas de crédito hijas (documentos que referencian esta venta).
+    const notasCredito: Row[] = await this.dataSource.query(
+      `SELECT venta_id, total_final, fecha, comentario
+       FROM ventas
+       WHERE venta_referencia_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+       ORDER BY creado_el ASC`,
+      [ventaId, tenantId],
     );
     const descuentos: Row[] = await this.dataSource.query(
       `SELECT venta_descuento_id, descuento_id, valor_aplicado, porcentaje_aplicado, aplicado_en
@@ -563,6 +904,14 @@ export class VentasService {
       cajaId: v.caja_id,
       monedaId: v.moneda_id,
       tipoDocumentoId: v.tipo_documento_id,
+      tipoDocumento: v.tipo_documento_id
+        ? {
+            id: v.tipo_documento_id,
+            codigo: v.tipo_documento_codigo,
+            nombre: v.tipo_documento_nombre,
+          }
+        : null,
+      ventaReferenciaId: v.venta_referencia_id,
       canal: v.canal,
       estado: v.estado,
       totalBruto: v.total_bruto,
@@ -587,6 +936,24 @@ export class VentasService {
         recargoAplicado: d['recargo_aplicado'],
         impuestoAplicado: d['impuesto_aplicado'],
         totalLinea: d['total_linea'],
+        // null = servicio (sin fila en item_producto); el modal de reembolso
+        // solo habilita devolución para modo 'cantidad'.
+        modoInventario: d['modo_inventario'] ?? null,
+        cantidadDevuelta: devueltoPorItem.get(d['item_id'] as string) ?? '0',
+      })),
+      reembolsos: reembolsos.map((r) => ({
+        id: r['transaccion_id'],
+        monto: r['monto'],
+        estado: r['estado'],
+        fecha: r['fecha_transaccion'],
+        ordenId: r['orden_id'],
+        codigoOrden: r['codigo_orden'],
+      })),
+      notasCredito: notasCredito.map((n) => ({
+        id: n['venta_id'],
+        totalFinal: n['total_final'],
+        fecha: n['fecha'],
+        comentario: n['comentario'],
       })),
       descuentos: descuentos.map((d) => ({
         id: d['venta_descuento_id'],

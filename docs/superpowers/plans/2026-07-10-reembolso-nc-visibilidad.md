@@ -1,6 +1,6 @@
 # Plan: Reembolsos — visibilidad en ventas + Nota de Crédito interna elegible
 
-- **Status:** Approved
+- **Status:** Done
 - **Date:** 2026-07-10
 - **Owner:** Cesar Matheus
 
@@ -19,15 +19,15 @@ Resumen: visibilidad de reembolsos en el detalle/listado de ventas (badge deriva
 ## Backend
 
 ### T1 — Seed tipo documento NC + constante
-- [ ] `seeder.service.ts` (`seedTiposDocumentoTributario` :1852): agregar `{ id: '550e8400-e29b-41d4-a716-446655440218', paisId: CHILE, nombre: 'Nota de Crédito', codigo: '61', descripcion: 'Nota de crédito interna por reembolso (sin emisión SII)', activo: false, customerRequerido: false }` (upsert por id ya existe; …440218 es el siguiente ID libre verificado).
-- [ ] `ventas/entities/tipo-documento-tributario.entity.ts`: exportar `TIPO_DOCUMENTO_NC_ID = '550e8400-e29b-41d4-a716-446655440218'`.
-- [ ] Reflejar en `startup-pos.sql`.
+- [x] `seeder.service.ts` (`seedTiposDocumentoTributario` :1852): agregar `{ id: '550e8400-e29b-41d4-a716-446655440218', paisId: CHILE, nombre: 'Nota de Crédito', codigo: '61', descripcion: 'Nota de crédito interna por reembolso (sin emisión SII)', activo: false, customerRequerido: false }` (upsert por id ya existe; …440218 es el siguiente ID libre verificado).
+- [x] `ventas/entities/tipo-documento-tributario.entity.ts`: exportar `TIPO_DOCUMENTO_NC_ID = '550e8400-e29b-41d4-a716-446655440218'`.
+- [x] Reflejar en `startup-pos.sql`.
 
 ### T2 — `ReembolsoCallbackRegistry` (pasarela)
-- [ ] Nuevo `pasarela/services/reembolso-callback.registry.ts`, calcado de `pago-callback.registry.ts` (singleton un handler, `register`/`get`):
+- [x] Nuevo `pasarela/services/reembolso-callback.registry.ts`, calcado de `pago-callback.registry.ts` (singleton un handler, `register`/`get`):
   - `ReembolsoAprobadoEvento { tenantId, ordenId, codigoOrden, ventaId, monto, generarNotaCredito, devoluciones: {itemId, cantidad}[], usuarioId }`
   - `ReembolsoCallbackHandler { onReembolsoAprobado(e): Promise<{ notaCreditoId?: string }> }`
-- [ ] Provider + export en `pasarela.module.ts`.
+- [x] Provider + export en `pasarela.module.ts`.
 
 ### T3 — `VentasService.crearNotaCredito` (TDD primero)
 Firma: `crearNotaCredito(params: { tenantId; usuarioId; ventaOriginalId; monto: string; devoluciones?: {itemId, cantidad}[]; comentario?: string }): Promise<{ id, totalFinal }>`. Transacción propia:
@@ -39,53 +39,53 @@ Firma: `crearNotaCredito(params: { tenantId; usuarioId; ventaOriginalId; monto: 
 6. Por ítem: `inventarioService.registrarMovimiento(manager, { tipo:'entrada', motivo:'devolucion', ventaId: nc.id, usuarioId, ... })`.
 7. Sin pagos ni caja; la original no se toca.
 
-- [ ] Specs primero en `ventas.service.spec.ts`: NC feliz sin líneas (totales copiados, estado pagada, referencia, 0 detalles/movimientos); NC con devoluciones (líneas + movimiento entrada/devolucion con ventaId de la NC); Σ excede total → 400; cantidad > disponible → 400; ítem ajeno → 400; serie/lote → 400; servicio → 400; otro tenant → 404; la original no cambia de estado; devoluciones sin NC ligan a la original.
-- [ ] Implementar `crearNotaCredito`.
-- [ ] Método hermano `registrarDevolucionesPorReembolso(...)`: pasos 1/3/6 con `ventaId` = original, sin cabecera; validación del paso 3 como helper privado compartido.
+- [x] Specs primero en `ventas.service.spec.ts`: NC feliz sin líneas (totales copiados, estado pagada, referencia, 0 detalles/movimientos); NC con devoluciones (líneas + movimiento entrada/devolucion con ventaId de la NC); Σ excede total → 400; cantidad > disponible → 400; ítem ajeno → 400; serie/lote → 400; servicio → 400; otro tenant → 404; la original no cambia de estado; devoluciones sin NC ligan a la original.
+- [x] Implementar `crearNotaCredito`.
+- [x] Método hermano `registrarDevolucionesPorReembolso(...)`: pasos 1/3/6 con `ventaId` = original, sin cabecera; validación del paso 3 como helper privado compartido.
 
 ### T4 — Handler de ventas registrado en el registry
-- [ ] Nuevo `ventas/reembolso-callback.handler.ts` + spec: `implements ReembolsoCallbackHandler, OnModuleInit`; `onModuleInit → registry.register(this)`; con `generarNotaCredito` → `crearNotaCredito(..., comentario: "NC por reembolso orden <codigoOrden>")` → `{ notaCreditoId }`; sin NC con devoluciones → método hermano. Errores se propagan (los captura pasarela).
-- [ ] `ventas.module.ts`: importar `PasarelaModule` (verificado sin ciclo: pasarela no importa módulos de negocio), declarar handler.
+- [x] Nuevo `ventas/reembolso-callback.handler.ts` + spec: `implements ReembolsoCallbackHandler, OnModuleInit`; `onModuleInit → registry.register(this)`; con `generarNotaCredito` → `crearNotaCredito(..., comentario: "NC por reembolso orden <codigoOrden>")` → `{ notaCreditoId }`; sin NC con devoluciones → método hermano. Errores se propagan (los captura pasarela).
+- [x] `ventas.module.ts`: importar `PasarelaModule` (verificado sin ciclo: pasarela no importa módulos de negocio), declarar handler.
 
 ### T5 — DTO extendido + disparo post-commit (TDD)
-- [ ] `create-reembolso.dto.ts`: `generarNotaCredito?: boolean` (`@IsOptional @IsBoolean`), `devoluciones?: DevolucionLineaDto[]` (`@ValidateNested({each}) @Type`; `itemId @IsUUID`, `cantidad @IsNumberString`).
-- [ ] `pasarela-admin.controller.ts:108`: pasar `(req.user as JwtUser).id` → `reembolsar(tenantId, id, dto, usuarioId)` (usuarioId del token, nunca del body).
-- [ ] `cobros.service.ts reembolsar`: capturar en vars de closure (patrón `ctxTimeout` :210) la orden commiteada y si fue aprobado; **DESPUÉS del await de la tx** (lock liberado): si aprobado ∧ `orden.ventaId` ∧ (flag NC ∨ devoluciones) → `try { handler.onReembolsoAprobado(evento) → respuesta + notaCreditoId } catch { Logger.error + respuesta + warning }`. Flags sin `ventaId` → warning informativo. Rechazado → no dispara. CRÍTICO: nunca dentro de la tx (auto-bloqueo FOR UPDATE vs FOR KEY SHARE) y nunca revertir el reembolso.
-- [ ] Tests (extender `cobros.service.spec.ts`): handler invocado con evento correcto y respuesta con `notaCreditoId`; handler lanza → warning sin excepción y REFUND intacto; rechazado → no invoca; sin ventaId + flag → warning sin invocar; DTO sin flags → regresión intacta. Spec chico de DTO con `validate()` (anidados inválidos).
+- [x] `create-reembolso.dto.ts`: `generarNotaCredito?: boolean` (`@IsOptional @IsBoolean`), `devoluciones?: DevolucionLineaDto[]` (`@ValidateNested({each}) @Type`; `itemId @IsUUID`, `cantidad @IsNumberString`).
+- [x] `pasarela-admin.controller.ts:108`: pasar `(req.user as JwtUser).id` → `reembolsar(tenantId, id, dto, usuarioId)` (usuarioId del token, nunca del body).
+- [x] `cobros.service.ts reembolsar`: capturar en vars de closure (patrón `ctxTimeout` :210) la orden commiteada y si fue aprobado; **DESPUÉS del await de la tx** (lock liberado): si aprobado ∧ `orden.ventaId` ∧ (flag NC ∨ devoluciones) → `try { handler.onReembolsoAprobado(evento) → respuesta + notaCreditoId } catch { Logger.error + respuesta + warning }`. Flags sin `ventaId` → warning informativo. Rechazado → no dispara. CRÍTICO: nunca dentro de la tx (auto-bloqueo FOR UPDATE vs FOR KEY SHARE) y nunca revertir el reembolso.
+- [x] Tests (extender `cobros.service.spec.ts`): handler invocado con evento correcto y respuesta con `notaCreditoId`; handler lanza → warning sin excepción y REFUND intacto; rechazado → no invoca; sin ventaId + flag → warning sin invocar; DTO sin flags → regresión intacta. Spec chico de DTO con `validate()` (anidados inválidos).
 
 ### T6 — Visibilidad en `findOne` / `listar` / `resumen`
-- [ ] `findOne` (:496-634): agregar `venta_referencia_id` a la cabecera + LEFT JOIN tipo documento → `ventaReferenciaId`, `tipoDocumento {id,codigo,nombre}`. Detalles: mapear `item_id` (ya está en el SELECT :525) + LEFT JOIN `item_producto` → `modoInventario` (null = servicio) + `cantidadDevuelta` por ítem (SUM movimientos `devolucion` de original ∪ NCs hijas). Nuevas queries: `reembolsos[]` (REFUNDs de órdenes con `venta_id=$1`, con estado y codigo_orden) y `notasCredito[]` (ventas hijas por `venta_referencia_id`).
-- [ ] `listar`: subquery agregada `total_reembolsado` (SUM REFUND aprobadas de órdenes vinculadas) + `tipo_documento_id` → `totalReembolsado`, `esNotaCredito`. Índices: `@Index` en `PasarelaOrden.ventaId` + verificar índice `pasarela_transacciones(orden_id)`; reflejar en `startup-pos.sql`.
-- [ ] `resumen()`: excluir NCs (`tipo_documento_id IS DISTINCT FROM NC_ID`).
-- [ ] Tests de findOne/listar/resumen.
+- [x] `findOne` (:496-634): agregar `venta_referencia_id` a la cabecera + LEFT JOIN tipo documento → `ventaReferenciaId`, `tipoDocumento {id,codigo,nombre}`. Detalles: mapear `item_id` (ya está en el SELECT :525) + LEFT JOIN `item_producto` → `modoInventario` (null = servicio) + `cantidadDevuelta` por ítem (SUM movimientos `devolucion` de original ∪ NCs hijas). Nuevas queries: `reembolsos[]` (REFUNDs de órdenes con `venta_id=$1`, con estado y codigo_orden) y `notasCredito[]` (ventas hijas por `venta_referencia_id`).
+- [x] `listar`: subquery agregada `total_reembolsado` (SUM REFUND aprobadas de órdenes vinculadas) + `tipo_documento_id` → `totalReembolsado`, `esNotaCredito`. Índices: `@Index` en `PasarelaOrden.ventaId` + verificar índice `pasarela_transacciones(orden_id)`; reflejar en `startup-pos.sql`.
+- [x] `resumen()`: excluir NCs (`tipo_documento_id IS DISTINCT FROM NC_ID`).
+- [x] Tests de findOne/listar/resumen.
 
 ## Frontend
 
 (Patrones: `useApiFetch` siempre; decimales string end-to-end con `UInput inputmode="decimal"`; arrays inmutables §9; re-fetch tras mutación; `useFormatters`; referencia de modal con filas: `pagos/AbonoModal.vue`.)
 
 ### T7 — `ReembolsoModal.vue` + `OrdenDetalleDrawer.vue`
-- [ ] Prop nueva `ventaId?: string | null`; el drawer pasa `:venta-id="orden.ventaId"`.
-- [ ] Al abrir con ventaId: fetch `GET /ventas/:id` → detalles con `itemId`, `modoInventario`, `cantidad`, `cantidadDevuelta`. Sin ventaId: secciones ocultas (comportamiento actual).
-- [ ] Checkbox "Generar nota de crédito" (off, hint "Documento interno, sin emisión SII").
-- [ ] Tabla "Devolver a inventario": input cantidad string decimal por fila; fila deshabilitada + nota si `modoInventario !== 'cantidad'` (serie/lote) o null (servicio); máx = `cantidad − cantidadDevuelta` (Decimal.js en `puedeConfirmar`).
-- [ ] Payload: `{ monto, generarNotaCredito?, devoluciones? }` — omitir campos vacíos; devoluciones solo filas > 0.
-- [ ] Respuesta: `warning` → toast warning; `notaCreditoId` → toast success con mención NC; siempre `emit('success')`.
+- [x] Prop nueva `ventaId?: string | null`; el drawer pasa `:venta-id="orden.ventaId"`.
+- [x] Al abrir con ventaId: fetch `GET /ventas/:id` → detalles con `itemId`, `modoInventario`, `cantidad`, `cantidadDevuelta`. Sin ventaId: secciones ocultas (comportamiento actual).
+- [x] Checkbox "Generar nota de crédito" (off, hint "Documento interno, sin emisión SII").
+- [x] Tabla "Devolver a inventario": input cantidad string decimal por fila; fila deshabilitada + nota si `modoInventario !== 'cantidad'` (serie/lote) o null (servicio); máx = `cantidad − cantidadDevuelta` (Decimal.js en `puedeConfirmar`).
+- [x] Payload: `{ monto, generarNotaCredito?, devoluciones? }` — omitir campos vacíos; devoluciones solo filas > 0.
+- [x] Respuesta: `warning` → toast warning; `notaCreditoId` → toast success con mención NC; siempre `emit('success')`.
 
 ### T8 — `VentaDetalleDrawer.vue` + `pages/ventas/index.vue`
-- [ ] Drawer: extender interfaz `VentaDetalle`; badge "NC" en header si `tipoDocumento?.codigo === '61'`; UCard "Reembolsos" tras "Pagos" (fecha/monto/estado + total aprobado + leyenda parcial/total); card "Documentos relacionados" con links a NCs hijas y a la venta original (navegan a `/ventas?venta=<id>`, la página ya observa esa query).
-- [ ] Listado: `VentaResumen` + `totalReembolsado`/`esNotaCredito`; en `#estado-cell` badge derivado (Decimal.js): `0 < reemb < total` → "Reemb. parcial" (warning), `≥ total` → "Reembolsada" (info); badge "NC" si es nota de crédito.
+- [x] Drawer: extender interfaz `VentaDetalle`; badge "NC" en header si `tipoDocumento?.codigo === '61'`; UCard "Reembolsos" tras "Pagos" (fecha/monto/estado + total aprobado + leyenda parcial/total); card "Documentos relacionados" con links a NCs hijas y a la venta original (navegan a `/ventas?venta=<id>`, la página ya observa esa query).
+- [x] Listado: `VentaResumen` + `totalReembolsado`/`esNotaCredito`; en `#estado-cell` badge derivado (Decimal.js): `0 < reemb < total` → "Reemb. parcial" (warning), `≥ total` → "Reembolsada" (info); badge "NC" si es nota de crédito.
 
 ## Docs vivas (mismo cambio)
 
-- [ ] `docs/features/reembolsos-nota-credito.md` desde TEMPLATE + link en `docs/README.md`
-- [ ] Tabla "Estado actual" de `CLAUDE.md`
-- [ ] `startup-pos.sql`: seed tipo 61 + índices nuevos
-- [ ] `docs/features/pasarela-pagos.md`: respuesta del endpoint de reembolso con `notaCreditoId`/`warning`
+- [x] `docs/features/reembolsos-nota-credito.md` desde TEMPLATE + link en `docs/README.md`
+- [x] Tabla "Estado actual" de `CLAUDE.md`
+- [x] `startup-pos.sql`: seed tipo 61 + índices nuevos
+- [x] `docs/features/pasarela-pagos.md`: respuesta del endpoint de reembolso con `notaCreditoId`/`warning`
 
 ## Verification
 
-- [ ] `cd backend && npx jest src/modules/ventas src/modules/pasarela` + eslint sobre archivos tocados.
-- [ ] E2E manual (stack Docker con hot reload):
+- [x] `cd backend && npx jest src/modules/ventas src/modules/pasarela` + eslint sobre archivos tocados.
+- [x] E2E manual (stack Docker con hot reload):
   - Checkout online → orden `conciliada` con venta.
   - Reembolso parcial CON NC + devolución de un ítem modo cantidad: verificar en BD la venta NC (tipo 61, `venta_referencia_id`, estado pagada, total = monto), movimiento `entrada/devolucion` ligado a la NC y stock incrementado.
   - Drawer de venta: sección Reembolsos + link NC; listado con badges "Reemb. parcial" y "NC".

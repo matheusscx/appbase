@@ -7,6 +7,13 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+/**
+ * Tipo de documento "Nota de Crédito" (código 61 Chile), sembrado con
+ * `activo: false` para que no aparezca en el selector del POS. Las NC se
+ * crean solo desde el flujo de reembolso usando este ID directamente.
+ */
+export const TIPO_DOCUMENTO_NC_ID = '550e8400-e29b-41d4-a716-446655440218';
+
 @Entity('tipos_documento_tributario')
 export class TipoDocumentoTributario {
   @PrimaryGeneratedColumn('uuid', { name: 'tipo_documento_id' })

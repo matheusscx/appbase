@@ -25,6 +25,8 @@ export class PasarelaOrden {
   // Vínculo interno tipado a la venta que materializó un callback in-process
   // (ej. Tienda Online). No es una FK física (el proyecto no declara FKs en
   // este dominio), pero es un campo propio — no reutiliza referenciaExterna.
+  // Índice: el listado de ventas agrega los REFUND por venta vinculada.
+  @Index()
   @Column({ name: 'venta_id', type: 'uuid', nullable: true })
   ventaId: string | null;
 

@@ -20,6 +20,8 @@ export class PasarelaTransaccion {
   @Column({ name: 'tenant_id', type: 'uuid' })
   tenantId: string;
 
+  // Índice: historial por orden y agregado de REFUNDs del listado de ventas.
+  @Index()
   @Column({ name: 'orden_id', type: 'uuid', nullable: true })
   ordenId: string | null; // null para INSCRIPTION
 

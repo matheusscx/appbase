@@ -14,6 +14,8 @@ interface VentaResumen {
   saldo: string
   fecha: string
   creadoEl: string
+  totalReembolsado: string
+  esNotaCredito: boolean
 }
 
 interface VentasResumenKpi {
@@ -77,6 +79,15 @@ function estadoLabel(estado: string): string {
 
 function canalColor(canal: string): 'primary' | 'neutral' {
   return canal === 'online' ? 'primary' : 'neutral'
+}
+
+// Derivado de los REFUND aprobados en pasarela: NO es un estado de la venta en BD
+function badgeReembolso(v: VentaResumen): { label: string, color: 'warning' | 'info' } | null {
+  const reemb = new Decimal(v.totalReembolsado || '0')
+  if (reemb.lte(0)) return null
+  return reemb.gte(v.totalFinal)
+    ? { label: 'Reembolsada', color: 'info' }
+    : { label: 'Reemb. parcial', color: 'warning' }
 }
 
 function canalLabel(canal: string): string {
@@ -268,7 +279,23 @@ const columns: TableColumn<VentaResumen>[] = [
               <UBadge :color="canalColor(row.original.canal)" :label="canalLabel(row.original.canal)" variant="subtle" size="sm" />
             </template>
             <template #estado-cell="{ row }">
-              <UBadge :color="estadoColor(row.original.estado)" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
+              <div class="flex flex-wrap items-center gap-1">
+                <UBadge :color="estadoColor(row.original.estado)" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
+                <UBadge
+                  v-if="row.original.esNotaCredito"
+                  color="info"
+                  label="NC"
+                  variant="subtle"
+                  size="sm"
+                />
+                <UBadge
+                  v-else-if="badgeReembolso(row.original)"
+                  :color="badgeReembolso(row.original)!.color"
+                  :label="badgeReembolso(row.original)!.label"
+                  variant="subtle"
+                  size="sm"
+                />
+              </div>
             </template>
             <template #totalFinal-cell="{ row }">
               <span class="font-mono">{{ formatMonto(row.original.totalFinal) }}</span>
