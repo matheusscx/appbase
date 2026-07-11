@@ -77,4 +77,18 @@ describe('CronRunnerService', () => {
     await service.ejecutar('demo', async () => 'b');
     expect(repoMock.create).toHaveBeenCalledTimes(2);
   });
+
+  it('no propaga si falla el save de cierre aunque el job haya tenido éxito, y conserva estado ok + detalle', async () => {
+    saveMock
+      .mockImplementationOnce(async (e: CronEjecucion) => e) // insert inicial
+      .mockRejectedValueOnce(new Error('db caída al cerrar')); // save de cierre
+
+    await expect(
+      service.ejecutar('demo', async () => 'detalle real del job exitoso'),
+    ).resolves.toBeUndefined();
+
+    const intentoCierre = saveMock.mock.calls.at(-1)![0] as CronEjecucion;
+    expect(intentoCierre.estado).toBe('ok');
+    expect(intentoCierre.detalle).toBe('detalle real del job exitoso');
+  });
 });

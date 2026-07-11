@@ -33,24 +33,19 @@ export class CronRunnerService {
           estado: 'en_curso',
         }),
       );
+      let resultado: Pick<CronEjecucion, 'estado' | 'detalle' | 'error'>;
       try {
-        const detalle = await fn();
-        await this.ejecucionRepo.save({
-          ...ejecucion,
-          detalle,
-          estado: 'ok',
-          finalizadoEl: new Date(),
-        });
+        resultado = { estado: 'ok', detalle: await fn(), error: null };
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e);
         this.logger.error(`Job "${job}" falló: ${error}`);
-        await this.ejecucionRepo.save({
-          ...ejecucion,
-          estado: 'error',
-          error,
-          finalizadoEl: new Date(),
-        });
+        resultado = { estado: 'error', detalle: null, error };
       }
+      await this.ejecucionRepo.save({
+        ...ejecucion,
+        ...resultado,
+        finalizadoEl: new Date(),
+      });
     } catch (e) {
       // Fallo de persistencia del registro: log y seguir; el próximo tick reintenta.
       this.logger.error(
