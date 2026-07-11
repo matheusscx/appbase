@@ -18,6 +18,7 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { VentasService } from './ventas.service';
 import { CreateVentaDto } from './dto/create-venta.dto';
 import { QueryVentasDto } from './dto/query-ventas.dto';
+import { CreateNotaCreditoDto } from './dto/create-nota-credito.dto';
 
 @ApiTags('ventas')
 @ApiBearerAuth()
@@ -31,6 +32,25 @@ export class VentasController {
   async crear(@Req() req: Request, @Body() dto: CreateVentaDto) {
     const u = req.user as JwtUser;
     return this.ventasService.crear(u.tenantId ?? '', u.id, dto);
+  }
+
+  @Post(':id/notas-credito')
+  @RequiresPermiso('Ventas', 'Nota de crédito')
+  async crearNotaCredito(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: CreateNotaCreditoDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.ventasService.crearNotaCreditoDesdeVenta({
+      tenantId: u.tenantId ?? '',
+      usuarioId: u.id,
+      ventaOriginalId: id,
+      monto: dto.monto,
+      comentario: dto.comentario,
+      devoluciones: dto.devoluciones,
+      devolverDinero: dto.devolverDinero === true,
+    });
   }
 
   @Get('resumen')
