@@ -13,10 +13,13 @@ interface Pago {
 
 interface Detalle {
   id: string
+  itemId: string
   descripcion: string
   cantidad: string
   precioUnitario: string
   totalLinea: string
+  modoInventario: string | null
+  cantidadDevuelta: string
 }
 
 interface Reembolso {
@@ -78,6 +81,8 @@ const venta = ref<VentaDetalle | null>(null)
 const metodos = ref<MetodoPago[]>([])
 const loading = ref(false)
 const abonoOpen = ref(false)
+const ncOpen = ref(false)
+const permissionsStore = usePermissionsStore()
 
 const montoPagado = computed(() => {
   if (!venta.value) return '0'
@@ -96,6 +101,24 @@ const puedeAbonar = computed(() =>
 )
 
 const esNotaCredito = computed(() => venta.value?.tipoDocumento?.codigo === '61')
+
+// Máximo emitible: total de la venta menos las NCs ya emitidas (validado también en backend)
+const disponibleNC = computed(() => {
+  if (!venta.value) return '0'
+  const previas = venta.value.notasCredito.reduce(
+    (acc, nc) => new Decimal(acc).plus(nc.totalFinal).toString(),
+    '0',
+  )
+  return Decimal.max(0, new Decimal(venta.value.totalFinal).minus(previas)).toString()
+})
+
+const puedeCrearNC = computed(() =>
+  !!venta.value
+  && ['pagada', 'pagada_parcial'].includes(venta.value.estado)
+  && !esNotaCredito.value
+  && new Decimal(disponibleNC.value).gt(0)
+  && permissionsStore.can('Ventas', 'Nota de crédito'),
+)
 
 const totalReembolsado = computed(() => {
   if (!venta.value) return '0'
@@ -178,12 +201,19 @@ watch(
     else if (!isOpen) {
       venta.value = null
       abonoOpen.value = false
+      ncOpen.value = false
     }
   },
 )
 
 async function onAbonoSuccess() {
   abonoOpen.value = false
+  if (props.ventaId) await cargar(props.ventaId)
+  emit('updated')
+}
+
+async function onNcSuccess() {
+  ncOpen.value = false
   if (props.ventaId) await cargar(props.ventaId)
   emit('updated')
 }
@@ -458,6 +488,14 @@ async function onAbonoSuccess() {
         Cerrar
       </UButton>
       <UButton
+        v-if="puedeCrearNC"
+        label="Nota de crédito"
+        icon="i-lucide-file-minus"
+        color="neutral"
+        variant="outline"
+        @click="ncOpen = true"
+      />
+      <UButton
         v-if="puedeAbonar"
         label="Registrar pago"
         icon="i-lucide-plus"
@@ -473,5 +511,14 @@ async function onAbonoSuccess() {
     :saldo="saldo"
     :metodos="metodos"
     @success="onAbonoSuccess"
+  />
+
+  <VentasNotaCreditoModal
+    v-if="venta"
+    v-model:open="ncOpen"
+    :venta-id="venta.id"
+    :disponible="disponibleNC"
+    :detalles="venta.detalles"
+    @success="onNcSuccess"
   />
 </template>
