@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
@@ -366,7 +367,15 @@ export class VentasService {
     monto: string;
     devoluciones?: DevolucionReembolso[];
     comentario?: string;
-  }): Promise<{ id: string; totalFinal: string }> {
+    /** Egreso de caja: movimiento 'salida' en la caja física abierta del usuario. */
+    devolverDinero?: boolean;
+    /** Solo el endpoint manual: exige venta pagada/pagada_parcial y no-NC. */
+    validarVentaElegible?: boolean;
+  }): Promise<{
+    id: string;
+    totalFinal: string;
+    movimientoCajaId: string | null;
+  }> {
     if (new Decimal(params.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
 
@@ -376,6 +385,17 @@ export class VentasService {
         params.tenantId,
         params.ventaOriginalId,
       );
+
+      if (params.validarVentaElegible) {
+        if (original.tipo_documento_id === TIPO_DOCUMENTO_NC_ID)
+          throw new BadRequestException(
+            'No se puede emitir una nota de crédito sobre otra nota de crédito',
+          );
+        if (!['pagada', 'pagada_parcial'].includes(original.estado))
+          throw new BadRequestException(
+            'Solo se puede emitir nota de crédito de ventas pagadas o pagadas parcialmente',
+          );
+      }
 
       // Σ NCs previas bajo el lock: dos NCs concurrentes sobre la misma venta
       // se serializan y no pueden exceder el total juntas.
@@ -449,8 +469,57 @@ export class VentasService {
         });
       }
 
-      return { id: nc.id, totalFinal: nc.totalFinal };
+      let movimientoCajaId: string | null = null;
+      if (params.devolverDinero) {
+        const caja = await this.cajaService.findActiva(
+          params.tenantId,
+          params.usuarioId,
+        );
+        if (!caja)
+          throw new UnprocessableEntityException(
+            'No tienes una caja física abierta para registrar la devolución de dinero',
+          );
+        const saldo = await this.cajaService.calcularSaldoEsperado(
+          caja.id,
+          manager,
+        );
+        if (new Decimal(saldo).minus(params.monto).lt(0))
+          throw new UnprocessableEntityException('Saldo insuficiente en caja');
+        const movimiento =
+          await this.cajaService.registrarMovimientoEnTransaccion(manager, {
+            cajaId: caja.id,
+            tipo: 'salida',
+            concepto: 'Devolución · Nota de crédito',
+            monto: params.monto,
+            ventaId: nc.id,
+          });
+        movimientoCajaId = movimiento.id;
+      }
+
+      return { id: nc.id, totalFinal: nc.totalFinal, movimientoCajaId };
     });
+  }
+
+  /**
+   * NC creada manualmente desde el detalle de una venta (POS): exige venta
+   * pagada/pagada_parcial que no sea otra NC, y permite el egreso de caja
+   * elegible. El flujo de reembolsos de pasarela usa `crearNotaCredito`
+   * directo y NO pasa por estas reglas.
+   */
+  async crearNotaCreditoDesdeVenta(params: {
+    tenantId: string;
+    usuarioId: string;
+    ventaOriginalId: string;
+    monto: string;
+    devoluciones?: DevolucionReembolso[];
+    comentario?: string;
+    devolverDinero?: boolean;
+  }): Promise<{
+    id: string;
+    totalFinal: string;
+    movimientoCajaId: string | null;
+  }> {
+    return this.crearNotaCredito({ ...params, validarVentaElegible: true });
   }
 
   /**
@@ -505,6 +574,7 @@ export class VentasService {
     canal: string;
     total_final: string;
     estado: string;
+    tipo_documento_id: string | null;
   }> {
     const rows: {
       venta_id: string;
@@ -513,8 +583,9 @@ export class VentasService {
       canal: string;
       total_final: string;
       estado: string;
+      tipo_documento_id: string | null;
     }[] = await manager.query(
-      `SELECT venta_id, caja_id, moneda_id, canal, total_final, estado
+      `SELECT venta_id, caja_id, moneda_id, canal, total_final, estado, tipo_documento_id
        FROM ventas
        WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
        FOR UPDATE`,

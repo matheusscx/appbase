@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { VentasService } from './ventas.service';
@@ -133,7 +137,10 @@ describe('VentasService', () => {
           useValue: {
             findActiva: jest.fn().mockResolvedValue(mockCajaActiva),
             findVirtual: jest.fn().mockResolvedValue(mockCajaVirtual),
-            registrarMovimientoEnTransaccion: jest.fn().mockResolvedValue({}),
+            calcularSaldoEsperado: jest.fn().mockResolvedValue('50000.0000'),
+            registrarMovimientoEnTransaccion: jest
+              .fn()
+              .mockResolvedValue({ id: 'mov-caja-nc-1' }),
           },
         },
         {
@@ -319,6 +326,7 @@ describe('VentasService', () => {
       canal: 'online',
       total_final: '11305.0000',
       estado: 'pagada',
+      tipo_documento_id: 'tipo-doc-boleta-uuid',
     };
     const detallesRows = [
       {
@@ -697,6 +705,97 @@ describe('VentasService', () => {
           ventaId: VENTA_ORIG_ID,
         }),
       );
+    });
+
+    describe('crearNotaCreditoDesdeVenta()', () => {
+      it('feliz sin dinero: delega en crearNotaCredito y devuelve movimientoCajaId null', async () => {
+        const res = await service.crearNotaCreditoDesdeVenta(baseParams);
+        expect(res.totalFinal).toBe('1100.0000');
+        expect(res.movimientoCajaId).toBeNull();
+        // prettier-ignore
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        expect(cajaService.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+      });
+
+      it.each(['pendiente', 'borrador', 'cancelada'])(
+        'rechaza ventas en estado %s',
+        async (estado) => {
+          ventaRows = [{ ...ventaOriginalRow, estado }];
+          await expect(
+            service.crearNotaCreditoDesdeVenta(baseParams),
+          ).rejects.toThrow(
+            'Solo se puede emitir nota de crédito de ventas pagadas o pagadas parcialmente',
+          );
+        },
+      );
+
+      it('rechaza NC sobre otra NC', async () => {
+        ventaRows = [
+          { ...ventaOriginalRow, tipo_documento_id: TIPO_DOCUMENTO_NC_ID },
+        ];
+        await expect(
+          service.crearNotaCreditoDesdeVenta(baseParams),
+        ).rejects.toThrow(
+          'No se puede emitir una nota de crédito sobre otra nota de crédito',
+        );
+      });
+
+      it('devolverDinero: registra salida en la caja activa ligada a la NC', async () => {
+        const res = await service.crearNotaCreditoDesdeVenta({
+          ...baseParams,
+          devolverDinero: true,
+        });
+        expect(res.movimientoCajaId).toBe('mov-caja-nc-1');
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        expect(cajaService.findActiva).toHaveBeenCalledWith(
+          TENANT_ID,
+          USUARIO_ID,
+        );
+        // prettier-ignore
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        expect(cajaService.registrarMovimientoEnTransaccion).toHaveBeenCalledWith(
+          ncManager,
+          expect.objectContaining({
+            cajaId: CAJA_ID,
+            tipo: 'salida',
+            concepto: 'Devolución · Nota de crédito',
+            monto: '1100.0000',
+            ventaId: res.id,
+          }),
+        );
+      });
+
+      it('devolverDinero sin caja física abierta → 422', async () => {
+        cajaService.findActiva.mockResolvedValueOnce(null);
+        await expect(
+          service.crearNotaCreditoDesdeVenta({
+            ...baseParams,
+            devolverDinero: true,
+          }),
+        ).rejects.toThrow(UnprocessableEntityException);
+      });
+
+      it('devolverDinero con saldo insuficiente → 422 y no registra movimiento', async () => {
+        cajaService.calcularSaldoEsperado.mockResolvedValueOnce('1000.0000');
+        await expect(
+          service.crearNotaCreditoDesdeVenta({
+            ...baseParams,
+            devolverDinero: true,
+          }),
+        ).rejects.toThrow('Saldo insuficiente en caja');
+        // prettier-ignore
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        expect(cajaService.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+      });
+
+      it('regresión: crearNotaCredito directo (flujo pasarela) no valida estado ni toca caja', async () => {
+        ventaRows = [{ ...ventaOriginalRow, estado: 'pendiente' }];
+        const res = await service.crearNotaCredito(baseParams);
+        expect(res.movimientoCajaId).toBeNull();
+        // prettier-ignore
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        expect(cajaService.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+      });
     });
   });
 });
