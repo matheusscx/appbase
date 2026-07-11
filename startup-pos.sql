@@ -936,8 +936,8 @@ CREATE TABLE cron_ejecuciones (
     estado VARCHAR NOT NULL DEFAULT 'en_curso', -- 'en_curso' | 'ok' | 'error'
     detalle TEXT,                               -- resumen del resultado
     error TEXT,                                 -- mensaje si falló
-    creado_el TIMESTAMPTZ NOT NULL DEFAULT now(),
-    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT now(),
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     eliminado_el TIMESTAMPTZ
 );
 CREATE INDEX idx_cron_ejecuciones_job ON cron_ejecuciones (job);
