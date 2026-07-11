@@ -413,6 +413,10 @@ export class SeederService implements OnApplicationBootstrap {
         permisoId: '550e8400-e29b-41d4-a716-446655440017',
         nombre: 'Reembolsar',
       },
+      {
+        permisoId: '550e8400-e29b-41d4-a716-446655440219',
+        nombre: 'Nota de crédito',
+      },
     ];
 
     for (const data of permisos) {
@@ -433,6 +437,7 @@ export class SeederService implements OnApplicationBootstrap {
     const ELIMINAR = '550e8400-e29b-41d4-a716-446655440015';
     const VER_TODAS = '550e8400-e29b-41d4-a716-446655440016';
     const REEMBOLSAR = '550e8400-e29b-41d4-a716-446655440017';
+    const NOTA_CREDITO = '550e8400-e29b-41d4-a716-446655440219';
     const VENTAS = '550e8400-e29b-41d4-a716-446655440058';
     const PAGOS = '550e8400-e29b-41d4-a716-446655440180';
     const INVENTARIO = '550e8400-e29b-41d4-a716-446655440181';
@@ -610,6 +615,11 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440213',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440208', // Pasarelas
         permisoId: REEMBOLSAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440220',
+        moduloAppId: VENTAS,
+        permisoId: NOTA_CREDITO,
       },
     ];
 
