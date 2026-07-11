@@ -90,6 +90,7 @@ import { PasarelaInscripcion } from './modules/pasarela/entities/pasarela-inscri
 import { PasarelaMedioPago } from './modules/pasarela/entities/pasarela-medio-pago.entity';
 import { PasarelaOrden } from './modules/pasarela/entities/pasarela-orden.entity';
 import { PasarelaTransaccion } from './modules/pasarela/entities/pasarela-transaccion.entity';
+import { CronEjecucion } from './modules/cron/entities/cron-ejecucion.entity';
 
 @Module({
   imports: [
@@ -162,6 +163,7 @@ import { PasarelaTransaccion } from './modules/pasarela/entities/pasarela-transa
           PasarelaMedioPago,
           PasarelaOrden,
           PasarelaTransaccion,
+          CronEjecucion,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),

@@ -925,3 +925,19 @@ CREATE UNIQUE INDEX idx_pasarela_tx_externo
 -- Visibilidad de reembolsos en ventas: agregados de REFUND por venta vinculada
 CREATE INDEX idx_pasarela_ordenes_venta ON pasarela_ordenes (venta_id);
 CREATE INDEX idx_pasarela_tx_orden ON pasarela_transacciones (orden_id);
+
+-- Módulo de cron: registro de ejecuciones de jobs internos del sistema.
+-- Sin tenant_id: los jobs recorren todos los tenants.
+CREATE TABLE cron_ejecuciones (
+    ejecucion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job VARCHAR NOT NULL,                       -- nombre estable, ej. 'expirar-ordenes'
+    iniciado_el TIMESTAMPTZ NOT NULL,
+    finalizado_el TIMESTAMPTZ,                  -- null mientras corre
+    estado VARCHAR NOT NULL DEFAULT 'en_curso', -- 'en_curso' | 'ok' | 'error'
+    detalle TEXT,                               -- resumen del resultado
+    error TEXT,                                 -- mensaje si falló
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT now(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT now(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_cron_ejecuciones_job ON cron_ejecuciones (job);
