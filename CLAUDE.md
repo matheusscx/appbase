@@ -118,6 +118,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Pasarela — reorganización UI: config (Mis pasarelas + API Keys) en `/configuracion/pasarelas`; Órdenes como módulo propio del nav en `/ordenes`, con filtros (estado, origen, rango de fechas), buscador y drawer de detalle con historial de transacciones | ✅ Implementado (2026-07-10) |
 | Pasarela — reembolso (total/parcial) de órdenes `pagada`/`conciliada` desde el drawer de Órdenes, endpoint interno JWT + permiso RBAC dedicado `Pasarelas:Reembolsar` | ✅ Implementado (2026-07-10) |
 | Reembolsos — nota de crédito interna elegible (doc tipo 61 sin SII, `venta_referencia_id`) + devolución de stock elegible (modo `cantidad`) + visibilidad de reembolsos en detalle/listado de ventas (badges derivados) | ✅ Implementado (2026-07-10) |
+| Nota de crédito manual desde el detalle de venta (permiso dedicado `Ventas:Nota de crédito`, egreso de caja elegible en la misma transacción, devolución de stock elegible) | ✅ Implementado (2026-07-11) |
 
 ---
 

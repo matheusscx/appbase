@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status**: Approved
+**Status**: Done
 **Date**: 2026-07-11
 **Owner**: Cesar Matheus
 
@@ -35,7 +35,7 @@
 **Interfaces:**
 - Produces: permiso `550e8400-e29b-41d4-a716-446655440219` ("Nota de crédito") vinculado al módulo Ventas vía `modulo_app_permisos` `…440220`. El guard `@RequiresPermiso('Ventas', 'Nota de crédito')` (Task 4) y `permissionsStore.can('Ventas', 'Nota de crédito')` (Task 6) dependen de estos nombres EXACTOS. El rol admin fijo no necesita asignación (bypass `es_fijo` en `RbacService.userHasPermiso`); la matriz de roles muestra el permiso automáticamente porque lee `modulo_app_permisos`.
 
-- [ ] **Step 1: Agregar el permiso al catálogo**
+- [x] **Step 1: Agregar el permiso al catálogo**
 
 En `seedPermisos`, agregar al final del array `permisos` (después de la entrada `Reembolsar` `…440017`):
 
@@ -46,7 +46,7 @@ En `seedPermisos`, agregar al final del array `permisos` (después de la entrada
       },
 ```
 
-- [ ] **Step 2: Vincular el permiso al módulo Ventas**
+- [x] **Step 2: Vincular el permiso al módulo Ventas**
 
 En `seedModuloAppPermisos`, junto a las constantes existentes (`REEMBOLSAR`, `VENTAS`, …) agregar:
 
@@ -64,7 +64,7 @@ y al final del array `entries` (después de la entrada Pasarelas+REEMBOLSAR `…
       },
 ```
 
-- [ ] **Step 3: Verificar que el seeder corre y persiste**
+- [x] **Step 3: Verificar que el seeder corre y persiste**
 
 El backend en Docker tiene hot reload: al guardar, Nest reinicia y el seeder corre en el arranque. Verificar:
 
@@ -79,7 +79,7 @@ docker exec tecnica_postgres psql -U dev_user -d tecnica_db -c \
 
 Esperado: 1 fila `Ventas | Nota de crédito`. (Si el contenedor no recargó, `docker restart tecnica_backend` y esperar ~15s.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/modules/seeder/seeder.service.ts
@@ -99,7 +99,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `CreateNotaCreditoDto { monto: string; comentario?: string; devolverDinero?: boolean; devoluciones?: DevolucionNotaCreditoDto[] }` y `DevolucionNotaCreditoDto { itemId: string; cantidad: string }`. El controller (Task 4) y el modal (Task 5) usan exactamente estos nombres de campo.
 
-- [ ] **Step 1: Escribir el spec que falla**
+- [x] **Step 1: Escribir el spec que falla**
 
 Crear `backend/src/modules/ventas/dto/create-nota-credito.dto.spec.ts` (el `import 'reflect-metadata'` en la primera línea es OBLIGATORIO — sin él `@Type` revienta en jest):
 
@@ -153,7 +153,7 @@ describe('CreateNotaCreditoDto', () => {
 });
 ```
 
-- [ ] **Step 2: Verificar que falla**
+- [x] **Step 2: Verificar que falla**
 
 ```bash
 npx jest src/modules/ventas/dto/create-nota-credito.dto.spec.ts
@@ -161,7 +161,7 @@ npx jest src/modules/ventas/dto/create-nota-credito.dto.spec.ts
 
 Esperado: FAIL — `Cannot find module './create-nota-credito.dto'`.
 
-- [ ] **Step 3: Implementar el DTO**
+- [x] **Step 3: Implementar el DTO**
 
 Crear `backend/src/modules/ventas/dto/create-nota-credito.dto.ts`:
 
@@ -207,7 +207,7 @@ export class CreateNotaCreditoDto {
 }
 ```
 
-- [ ] **Step 4: Verificar que pasa**
+- [x] **Step 4: Verificar que pasa**
 
 ```bash
 npx jest src/modules/ventas/dto/create-nota-credito.dto.spec.ts
@@ -215,7 +215,7 @@ npx jest src/modules/ventas/dto/create-nota-credito.dto.spec.ts
 
 Esperado: PASS (5 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/modules/ventas/dto/create-nota-credito.dto.ts src/modules/ventas/dto/create-nota-credito.dto.spec.ts
@@ -236,7 +236,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: `CajaService.findActiva(tenantId, usuarioId): Promise<Caja | null>`, `CajaService.calcularSaldoEsperado(cajaId, manager): Promise<string>`, `CajaService.registrarMovimientoEnTransaccion(manager, { cajaId, tipo, concepto, monto, ventaId }): Promise<MovimientoCaja>` — ya inyectado como `this.cajaService`.
 - Produces: `crearNotaCreditoDesdeVenta(params: { tenantId: string; usuarioId: string; ventaOriginalId: string; monto: string; devoluciones?: DevolucionReembolso[]; comentario?: string; devolverDinero?: boolean }): Promise<{ id: string; totalFinal: string; movimientoCajaId: string | null }>` — lo consume el controller (Task 4). `crearNotaCredito` pasa a devolver también `movimientoCajaId: string | null` (siempre `null` en el flujo de pasarela; el handler de reembolsos solo lee `.id`, no se toca).
 
-- [ ] **Step 1: Ajustar mocks del spec (setup, aún sin tests nuevos)**
+- [x] **Step 1: Ajustar mocks del spec (setup, aún sin tests nuevos)**
 
 En `ventas.service.spec.ts`:
 
@@ -261,7 +261,7 @@ c) En `ventaOriginalRow` (:315), agregar el campo que ahora devuelve `lockVentaO
       tipo_documento_id: 'tipo-doc-boleta-uuid',
 ```
 
-- [ ] **Step 2: Escribir los tests que fallan**
+- [x] **Step 2: Escribir los tests que fallan**
 
 Dentro del describe existente `'crearNotaCredito() / registrarDevolucionesPorReembolso()'` (:310, para reusar `ncManager`/`ventaRows`/`baseParams` de su `beforeEach`), agregar al final:
 
@@ -360,7 +360,7 @@ Dentro del describe existente `'crearNotaCredito() / registrarDevolucionesPorRee
     });
 ```
 
-- [ ] **Step 3: Verificar que fallan**
+- [x] **Step 3: Verificar que fallan**
 
 ```bash
 npx jest src/modules/ventas/ventas.service.spec.ts
@@ -368,7 +368,7 @@ npx jest src/modules/ventas/ventas.service.spec.ts
 
 Esperado: FAIL — los tests nuevos con `service.crearNotaCreditoDesdeVenta is not a function` y el de regresión por `movimientoCajaId` undefined ≠ null. Los tests preexistentes deben seguir en verde.
 
-- [ ] **Step 4: Implementar en `ventas.service.ts`**
+- [x] **Step 4: Implementar en `ventas.service.ts`**
 
 a) Import (línea 1-5): agregar `UnprocessableEntityException` a `@nestjs/common`.
 
@@ -495,7 +495,7 @@ d) Después del cierre de `crearNotaCredito` (:454), agregar el wrapper:
   }
 ```
 
-- [ ] **Step 5: Verificar que pasan (ventas + regresión pasarela)**
+- [x] **Step 5: Verificar que pasan (ventas + regresión pasarela)**
 
 ```bash
 npx jest src/modules/ventas src/modules/pasarela
@@ -503,7 +503,7 @@ npx jest src/modules/ventas src/modules/pasarela
 
 Esperado: PASS todo (los specs de `reembolso-callback.handler` y `cobros.service` no cambian: el handler solo lee `.id` del resultado).
 
-- [ ] **Step 6: Lint y commit**
+- [x] **Step 6: Lint y commit**
 
 ```bash
 npx eslint src/modules/ventas/ventas.service.ts src/modules/ventas/ventas.service.spec.ts --fix
@@ -524,7 +524,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: `crearNotaCreditoDesdeVenta` (Task 3), `CreateNotaCreditoDto` (Task 2), permiso `Ventas`/`Nota de crédito` (Task 1).
 - Produces: `POST /api/ventas/:id/notas-credito` → `201 { id, totalFinal, movimientoCajaId }`. Lo consume el modal (Task 5).
 
-- [ ] **Step 1: Agregar la ruta**
+- [x] **Step 1: Agregar la ruta**
 
 En `ventas.controller.ts`, agregar el import del DTO junto a los existentes (:19-20):
 
@@ -555,7 +555,7 @@ y el handler dentro de `VentasController`, después de `crear()` (:34) y ANTES d
   }
 ```
 
-- [ ] **Step 2: Verificar compilación, tests y lint**
+- [x] **Step 2: Verificar compilación, tests y lint**
 
 ```bash
 npx tsc --noEmit -p tsconfig.json && npx jest src/modules/ventas && npx eslint src/modules/ventas/ventas.controller.ts
@@ -563,7 +563,7 @@ npx tsc --noEmit -p tsconfig.json && npx jest src/modules/ventas && npx eslint s
 
 Esperado: sin errores, tests PASS.
 
-- [ ] **Step 3: Smoke test HTTP contra el stack Docker**
+- [x] **Step 3: Smoke test HTTP contra el stack Docker**
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login -H 'Content-Type: application/json' \
@@ -578,7 +578,7 @@ curl -s -X POST http://localhost:3000/api/ventas/550e8400-e29b-41d4-a716-4466554
 
 Esperado: `{"message":"Venta no encontrada","statusCode":404,...}` (NO 403: el admin fijo bypasea el permiso).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/modules/ventas/ventas.controller.ts
@@ -599,7 +599,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: `POST /api/ventas/:id/notas-credito` (Task 4); `useCajaStore().cargarActiva()` / `.activa` (existente — `GET /caja/activa` devuelve la caja física abierta del usuario o null); `permissionsStore.can('Ventas', 'Nota de crédito')`; `venta.detalles[]` del `GET /ventas/:id` que ya trae `itemId`/`modoInventario`/`cantidadDevuelta` (el drawer debe declararlos en su interfaz).
 - Produces: componente auto-importado `VentasNotaCreditoModal` con props `{ ventaId: string; disponible: string; detalles: DetalleVenta[] }` y evento `success`.
 
-- [ ] **Step 1: Crear `frontend/app/components/ventas/NotaCreditoModal.vue`**
+- [x] **Step 1: Crear `frontend/app/components/ventas/NotaCreditoModal.vue`**
 
 ```vue
 <script setup lang="ts">
@@ -828,7 +828,7 @@ async function confirmar() {
 </template>
 ```
 
-- [ ] **Step 2: Integrar en `VentaDetalleDrawer.vue`**
+- [x] **Step 2: Integrar en `VentaDetalleDrawer.vue`**
 
 a) Extender la interfaz `Detalle` (:14-20) con los campos que el backend ya devuelve:
 
@@ -912,7 +912,7 @@ g) Al final del template, junto a `PagosAbonoModal` (:469-476):
   />
 ```
 
-- [ ] **Step 3: Verificación manual en el navegador**
+- [x] **Step 3: Verificación manual en el navegador**
 
 Con el stack Docker corriendo (`http://localhost:5173`), login `admin.paris@paris.cl` / `admin` → tenant Paris:
 
@@ -924,7 +924,7 @@ Con el stack Docker corriendo (`http://localhost:5173`), login `admin.paris@pari
 6. Cerrar la caja desde el módulo Caja: el cuadre refleja el egreso (`salida` "Devolución · Nota de crédito").
 7. Abrir el drawer de una venta `pendiente` → el botón NO aparece.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/m2pro/cmatheus/startup-app
@@ -943,7 +943,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Modify: `CLAUDE.md` (tabla "Estado actual", fila nueva)
 - Modify: `docs/superpowers/plans/2026-07-11-nota-credito-pos.md` (Status → Done al terminar)
 
-- [ ] **Step 1: Actualizar `docs/features/reembolsos-nota-credito.md`**
+- [x] **Step 1: Actualizar `docs/features/reembolsos-nota-credito.md`**
 
 a) En "### Scope", mover "endpoint independiente de NC sin reembolso" de "NO incluido" a "Incluido" reescribiéndolo, y actualizar Last Updated a 2026-07-11:
 
@@ -987,7 +987,7 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 - Spec: `docs/superpowers/specs/2026-07-11-nota-credito-pos-design.md`.
 ```
 
-- [ ] **Step 2: Actualizar `CLAUDE.md`**
+- [x] **Step 2: Actualizar `CLAUDE.md`**
 
 Agregar fila al final de la tabla "Estado actual":
 
@@ -995,7 +995,7 @@ Agregar fila al final de la tabla "Estado actual":
 | Nota de crédito manual desde el detalle de venta (permiso dedicado `Ventas:Nota de crédito`, egreso de caja elegible en la misma transacción, devolución de stock elegible) | ✅ Implementado (2026-07-11) |
 ```
 
-- [ ] **Step 3: Suite completa + lint**
+- [x] **Step 3: Suite completa + lint**
 
 ```bash
 cd /Users/m2pro/cmatheus/startup-app/backend && npx jest && npx eslint src/modules/ventas src/modules/seeder --ext .ts
@@ -1003,7 +1003,7 @@ cd /Users/m2pro/cmatheus/startup-app/backend && npx jest && npx eslint src/modul
 
 Esperado: todos los tests PASS (383 previos + ~13 nuevos); sin errores nuevos de lint (el error preexistente de `query-ordenes.dto.ts:43` no cuenta).
 
-- [ ] **Step 4: E2E por API + BD (complementa el paso manual del Task 5)**
+- [x] **Step 4: E2E por API + BD (complementa el paso manual del Task 5)**
 
 ```bash
 # (con TOKEN del tenant Paris como en Task 4)
@@ -1029,7 +1029,7 @@ docker exec tecnica_postgres psql -U dev_user -d tecnica_db -c \
 
 Esperado: NC tipo 61 estado `pagada` referenciando la venta; movimiento caja `salida` ligado a la NC; movimiento inventario `entrada/devolucion`. Casos negativos: repetir la NC excediendo el total → 400; `devolverDinero` con saldo insuficiente → 422 y SIN NC creada (verificar que no apareció fila nueva tipo 61).
 
-- [ ] **Step 5: Marcar plan Done + commit docs**
+- [x] **Step 5: Marcar plan Done + commit docs**
 
 ```bash
 cd /Users/m2pro/cmatheus/startup-app

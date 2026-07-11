@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-10
+**Last Updated**: 2026-07-11
 
 ---
 
@@ -33,11 +33,12 @@ lista para el día en que se integre facturación electrónica.
 
 - Incluido: NC interna elegible en el reembolso; devolución de stock elegible
   (modo `cantidad`); visibilidad de reembolsos en detalle/listado de ventas;
-  badges derivados (no son estados nuevos en BD).
+  badges derivados (no son estados nuevos en BD); **NC manual desde el detalle
+  de venta con egreso de caja elegible (2026-07-11)**.
 - NO incluido (futuro): emisión tributaria real (SII/folios); devolución para
   modos `serie`/`lote` (requiere elegir unidades/lote — se hace manual desde
-  Inventario); endpoint independiente de NC sin reembolso; egreso en el ledger
-  de `pagos`.
+  Inventario); egreso en el ledger de `pagos`; devolución de dinero por el
+  método de pago original (el egreso es efectivo de caja).
 
 ---
 
@@ -123,6 +124,31 @@ Response (200): orden pública + extras
   "Documentos relacionados" (links venta original ↔ NCs vía `/ventas?venta=<id>`).
 - `pages/ventas/index.vue`: badges "NC" / "Reemb. parcial" / "Reembolsada" junto
   al estado.
+
+## NC manual desde el detalle de venta (2026-07-11)
+
+```
+POST /api/ventas/:id/notas-credito
+Authorization: Bearer <JWT>   (permiso dedicado Ventas:Nota de crédito)
+
+Request:  { "monto": "5000", "comentario": "...", "devolverDinero": true,
+            "devoluciones": [{ "itemId": "uuid", "cantidad": "1" }] }
+Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
+                "movimientoCajaId": "<uuid>" | null }
+```
+
+- Elegibilidad: venta `pagada`/`pagada_parcial` de cualquier canal, nunca sobre
+  otra NC. La venta original no cambia de estado.
+- `devolverDinero`: movimiento `salida` ("Devolución · Nota de crédito") en la
+  caja física abierta del usuario, en la **misma transacción** que la NC
+  (todo-o-nada; valida saldo suficiente). Sin caja o sin saldo → 422.
+- Backend: `VentasService.crearNotaCreditoDesdeVenta` → `crearNotaCredito` con
+  flags `validarVentaElegible`/`devolverDinero`; el flujo de reembolsos de
+  pasarela llama sin flags y no cambia.
+- Frontend: botón "Nota de crédito" en `VentaDetalleDrawer` +
+  `ventas/NotaCreditoModal.vue` (checkbox de dinero deshabilitado sin caja
+  abierta — `GET /caja/activa`; devolución de stock igual al `ReembolsoModal`).
+- Spec: `docs/superpowers/specs/2026-07-11-nota-credito-pos-design.md`.
 
 ## Testing
 
