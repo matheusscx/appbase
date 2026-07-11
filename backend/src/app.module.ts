@@ -91,6 +91,8 @@ import { PasarelaMedioPago } from './modules/pasarela/entities/pasarela-medio-pa
 import { PasarelaOrden } from './modules/pasarela/entities/pasarela-orden.entity';
 import { PasarelaTransaccion } from './modules/pasarela/entities/pasarela-transaccion.entity';
 import { CronEjecucion } from './modules/cron/entities/cron-ejecucion.entity';
+import { ScheduleModule } from '@nestjs/schedule';
+import { CronModule } from './modules/cron/cron.module';
 
 @Module({
   imports: [
@@ -194,6 +196,8 @@ import { CronEjecucion } from './modules/cron/entities/cron-ejecucion.entity';
     OnlineModule,
     SuscripcionesModule,
     PasarelaModule,
+    ScheduleModule.forRoot(),
+    CronModule,
   ],
   controllers: [AppController],
   providers: [AppService],
