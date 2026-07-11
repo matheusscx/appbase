@@ -1,27 +1,12 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-
-interface DetalleVenta {
-  itemId: string
-  descripcion: string | null
-  cantidad: string
-  modoInventario: string | null
-  cantidadDevuelta: string
-}
-
-interface FilaDevolucion {
-  itemId: string
-  descripcion: string
-  disponible: string
-  modoInventario: string | null
-  cantidad: string
-}
+import type { DetalleVentaDevolucion } from '~/composables/useDevolucionInventario'
 
 const props = defineProps<{
   ventaId: string
   /** total_final − Σ NCs previas (lo calcula el drawer) */
   disponible: string
-  detalles: DetalleVenta[]
+  detalles: DetalleVentaDevolucion[]
 }>()
 const emit = defineEmits<{ success: [] }>()
 const open = defineModel<boolean>('open', { required: true })
@@ -35,36 +20,16 @@ const apiUrl = config.public.apiUrl
 const monto = ref('')
 const comentario = ref('')
 const devolverDinero = ref(false)
-const filas = ref<FilaDevolucion[]>([])
 const submitting = ref(false)
-
-function esDecimalValido(v: string) {
-  return /^\d+(\.\d+)?$/.test(v)
-}
+const { filas, cargarDesdeDetalles, setCantidad, filasValidas, devoluciones }
+  = useDevolucionInventario()
 
 watch(open, (v) => {
   if (!v) return
   monto.value = props.disponible
   comentario.value = ''
   devolverDinero.value = false
-  // Una fila por ítem (el disponible a devolver es por ítem, no por línea)
-  const porItem = new Map<string, FilaDevolucion>()
-  for (const d of props.detalles) {
-    const previa = porItem.get(d.itemId)
-    if (previa) {
-      previa.disponible = new Decimal(previa.disponible).plus(d.cantidad).toString()
-    }
-    else {
-      porItem.set(d.itemId, {
-        itemId: d.itemId,
-        descripcion: d.descripcion ?? d.itemId,
-        disponible: new Decimal(d.cantidad).minus(d.cantidadDevuelta).toString(),
-        modoInventario: d.modoInventario,
-        cantidad: '',
-      })
-    }
-  }
-  filas.value = [...porItem.values()]
+  cargarDesdeDetalles(props.detalles)
   // Habilita/deshabilita el checkbox de devolución de dinero
   cajaStore.cargarActiva()
 })
@@ -76,44 +41,15 @@ const montoValido = computed(() => {
   return m.gt(0) && m.lte(new Decimal(props.disponible))
 })
 
-const filasValidas = computed(() =>
-  filas.value.every((f) => {
-    if (!f.cantidad) return true
-    if (!esDecimalValido(f.cantidad)) return false
-    return new Decimal(f.cantidad).lte(f.disponible)
-  }),
-)
-
 const puedeConfirmar = computed(() => montoValido.value && filasValidas.value)
-
-function notaDevolucion(fila: FilaDevolucion) {
-  if (fila.modoInventario === null) return 'Servicio: sin stock'
-  if (fila.modoInventario !== 'cantidad')
-    return `Modo ${fila.modoInventario}: devolución manual desde Inventario`
-  return null
-}
-
-function filaDevolvible(fila: FilaDevolucion) {
-  return fila.modoInventario === 'cantidad' && new Decimal(fila.disponible).gt(0)
-}
-
-function setCantidad(itemId: string, valor: string) {
-  filas.value = filas.value.map(f =>
-    f.itemId === itemId ? { ...f, cantidad: valor } : f,
-  )
-}
 
 async function confirmar() {
   submitting.value = true
   try {
-    const devoluciones = filas.value
-      .filter(f => f.cantidad && esDecimalValido(f.cantidad) && new Decimal(f.cantidad).gt(0))
-      .map(f => ({ itemId: f.itemId, cantidad: f.cantidad }))
-
     const body: Record<string, unknown> = { monto: monto.value }
     if (comentario.value.trim()) body.comentario = comentario.value.trim()
     if (devolverDinero.value) body.devolverDinero = true
-    if (devoluciones.length) body.devoluciones = devoluciones
+    if (devoluciones.value.length) body.devoluciones = devoluciones.value
 
     const res = await useApiFetch<{ id: string, movimientoCajaId: string | null }>(
       `${apiUrl}/ventas/${props.ventaId}/notas-credito`,
@@ -174,38 +110,11 @@ async function confirmar() {
             : 'Necesitas una caja física abierta para devolver dinero.'"
         />
 
-        <div class="flex flex-col gap-2">
-          <span class="text-sm text-muted">Devolver a inventario (opcional)</span>
-          <div v-if="!filas.length" class="text-sm text-muted">
-            La venta no tiene líneas para devolver.
-          </div>
-          <div v-else class="flex flex-col divide-y divide-default">
-            <div
-              v-for="fila in filas"
-              :key="fila.itemId"
-              class="flex items-center justify-between gap-3 py-2"
-            >
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm">{{ fila.descripcion }}</p>
-                <p class="text-xs text-muted">
-                  <template v-if="notaDevolucion(fila)">{{ notaDevolucion(fila) }}</template>
-                  <template v-else>Disponible: {{ fila.disponible }}</template>
-                </p>
-              </div>
-              <UInput
-                :model-value="fila.cantidad"
-                inputmode="decimal"
-                placeholder="0"
-                class="w-24"
-                :disabled="!filaDevolvible(fila)"
-                @update:model-value="setCantidad(fila.itemId, String($event ?? ''))"
-              />
-            </div>
-          </div>
-          <p v-if="!filasValidas" class="text-xs text-error">
-            Las cantidades deben ser numéricas y no superar lo disponible por ítem.
-          </p>
-        </div>
+        <DevolucionInventarioLista
+          :filas="filas"
+          :valida="filasValidas"
+          @set-cantidad="setCantidad"
+        />
       </div>
     </template>
 

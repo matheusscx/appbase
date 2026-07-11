@@ -148,6 +148,10 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 - Frontend: botón "Nota de crédito" en `VentaDetalleDrawer` +
   `ventas/NotaCreditoModal.vue` (checkbox de dinero deshabilitado sin caja
   abierta — `GET /caja/activa`; devolución de stock igual al `ReembolsoModal`).
+- La lógica de devolución a inventario compartida entre `NotaCreditoModal` y
+  `ReembolsoModal` vive en `composables/useDevolucionInventario.ts` (helpers
+  puros con spec Vitest: agrupación por ítem, validación, payload) + el
+  componente presentacional `components/DevolucionInventarioLista.vue`.
 - Spec: `docs/superpowers/specs/2026-07-11-nota-credito-pos-design.md`.
 
 ## Testing
