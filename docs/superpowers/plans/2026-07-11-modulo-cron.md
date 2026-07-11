@@ -36,7 +36,7 @@
 - Consumes: nada.
 - Produces: entidad `CronEjecucion` (propiedades: `ejecucionId: string`, `job: string`, `iniciadoEl: Date`, `finalizadoEl: Date | null`, `estado: string`, `detalle: string | null`, `error: string | null`, timestamps de convención). Tasks 2 y 3 dependen de ella.
 
-- [ ] **Step 1: Instalar `@nestjs/schedule`**
+- [x] **Step 1: Instalar `@nestjs/schedule`**
 
 ```bash
 cd backend && npm install @nestjs/schedule
@@ -44,7 +44,7 @@ cd backend && npm install @nestjs/schedule
 
 Expected: agrega `"@nestjs/schedule"` a `dependencies` en `backend/package.json`.
 
-- [ ] **Step 2: Crear la entidad**
+- [x] **Step 2: Crear la entidad**
 
 `backend/src/modules/cron/entities/cron-ejecucion.entity.ts`:
 
@@ -97,7 +97,7 @@ export class CronEjecucion {
 
 Nota: no lleva `tenant_id` — los jobs son del sistema (spec §Entidad).
 
-- [ ] **Step 3: Registrar la entidad en `app.module.ts`**
+- [x] **Step 3: Registrar la entidad en `app.module.ts`**
 
 Agregar el import junto a los demás (después de la línea `import { PasarelaTransaccion } ...`):
 
@@ -107,7 +107,7 @@ import { CronEjecucion } from './modules/cron/entities/cron-ejecucion.entity';
 
 y `CronEjecucion` al final del array `entities` del `TypeOrmModule.forRootAsync` (después de `PasarelaTransaccion`).
 
-- [ ] **Step 4: Agregar el DDL a `startup-pos.sql`**
+- [x] **Step 4: Agregar el DDL a `startup-pos.sql`**
 
 Al final del archivo, siguiendo el estilo de las tablas existentes:
 
@@ -131,7 +131,7 @@ CREATE INDEX idx_cron_ejecuciones_job ON cron_ejecuciones (job);
 
 (Antes de escribir, mirar el final de `startup-pos.sql` y adaptar comillas/estilo si difiere.)
 
-- [ ] **Step 5: Verificar compilación**
+- [x] **Step 5: Verificar compilación**
 
 ```bash
 cd backend && npx tsc --noEmit
@@ -139,7 +139,7 @@ cd backend && npx tsc --noEmit
 
 Expected: sin errores.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/package.json backend/package-lock.json backend/src/modules/cron backend/src/app.module.ts startup-pos.sql
@@ -158,7 +158,7 @@ git commit -m "feat(cron): entidad CronEjecucion y dependencia @nestjs/schedule"
 - Consumes: entidad `CronEjecucion` (Task 1).
 - Produces: `CronRunnerService.ejecutar(job: string, fn: () => Promise<string>): Promise<void>` — Task 3 lo invoca. El string que devuelve `fn` se persiste como `detalle`. Nunca lanza.
 
-- [ ] **Step 1: Escribir los tests (fallan)**
+- [x] **Step 1: Escribir los tests (fallan)**
 
 `backend/src/modules/cron/cron-runner.service.spec.ts`:
 
@@ -245,7 +245,7 @@ describe('CronRunnerService', () => {
 });
 ```
 
-- [ ] **Step 2: Correr los tests — deben fallar**
+- [x] **Step 2: Correr los tests — deben fallar**
 
 ```bash
 cd backend && npm test -- cron-runner.service.spec
@@ -253,7 +253,7 @@ cd backend && npm test -- cron-runner.service.spec
 
 Expected: FAIL (`Cannot find module './cron-runner.service'`).
 
-- [ ] **Step 3: Implementar el service**
+- [x] **Step 3: Implementar el service**
 
 `backend/src/modules/cron/cron-runner.service.ts`:
 
@@ -317,7 +317,7 @@ export class CronRunnerService {
 }
 ```
 
-- [ ] **Step 4: Correr los tests — deben pasar**
+- [x] **Step 4: Correr los tests — deben pasar**
 
 ```bash
 cd backend && npm test -- cron-runner.service.spec
@@ -325,7 +325,7 @@ cd backend && npm test -- cron-runner.service.spec
 
 Expected: PASS (5 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/modules/cron/cron-runner.service.ts backend/src/modules/cron/cron-runner.service.spec.ts
@@ -346,7 +346,7 @@ git commit -m "feat(cron): CronRunnerService con registro de ejecuciones y anti-
 - Consumes: `CronRunnerService.ejecutar(job, fn)` (Task 2).
 - Produces: `ExpirarOrdenesJob` con `tick(): Promise<void>` (decorado `@Cron`, y llamado en `onApplicationBootstrap`) y `expirarOrdenesVencidas(): Promise<string>` (público para test). Constante exportada `JOB_EXPIRAR_ORDENES = 'expirar-ordenes'`.
 
-- [ ] **Step 1: Escribir los tests (fallan)**
+- [x] **Step 1: Escribir los tests (fallan)**
 
 `backend/src/modules/cron/jobs/expirar-ordenes.job.spec.ts`:
 
@@ -413,7 +413,7 @@ describe('ExpirarOrdenesJob', () => {
 });
 ```
 
-- [ ] **Step 2: Correr los tests — deben fallar**
+- [x] **Step 2: Correr los tests — deben fallar**
 
 ```bash
 cd backend && npm test -- expirar-ordenes.job.spec
@@ -421,7 +421,7 @@ cd backend && npm test -- expirar-ordenes.job.spec
 
 Expected: FAIL (`Cannot find module './expirar-ordenes.job'`).
 
-- [ ] **Step 3: Implementar el job**
+- [x] **Step 3: Implementar el job**
 
 `backend/src/modules/cron/jobs/expirar-ordenes.job.ts`:
 
@@ -484,7 +484,7 @@ export class ExpirarOrdenesJob implements OnApplicationBootstrap {
 }
 ```
 
-- [ ] **Step 4: Crear el módulo**
+- [x] **Step 4: Crear el módulo**
 
 `backend/src/modules/cron/cron.module.ts`:
 
@@ -503,7 +503,7 @@ import { ExpirarOrdenesJob } from './jobs/expirar-ordenes.job';
 export class CronModule {}
 ```
 
-- [ ] **Step 5: Registrar en `app.module.ts`**
+- [x] **Step 5: Registrar en `app.module.ts`**
 
 Agregar los imports (junto a los demás imports de módulos):
 
@@ -519,7 +519,7 @@ y en el array `imports` del `@Module`, después de `PasarelaModule`:
     CronModule,
 ```
 
-- [ ] **Step 6: Correr los tests — deben pasar**
+- [x] **Step 6: Correr los tests — deben pasar**
 
 ```bash
 cd backend && npm test -- expirar-ordenes.job.spec
@@ -527,7 +527,7 @@ cd backend && npm test -- expirar-ordenes.job.spec
 
 Expected: PASS (4 tests).
 
-- [ ] **Step 7: Suite completa + tsc**
+- [x] **Step 7: Suite completa + tsc**
 
 ```bash
 cd backend && npm test && npx tsc --noEmit
@@ -535,7 +535,7 @@ cd backend && npm test && npx tsc --noEmit
 
 Expected: toda la suite PASS, tsc sin errores.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/src/modules/cron backend/src/app.module.ts
@@ -556,7 +556,7 @@ git commit -m "feat(cron): ExpirarOrdenesJob cada 10 min con tick inicial al arr
 - Consumes: todo lo anterior funcionando.
 - Produces: documentación sincronizada (convención "Documentación viva").
 
-- [ ] **Step 1: Verificación manual end-to-end**
+- [x] **Step 1: Verificación manual end-to-end**
 
 Con el stack corriendo (`docker-compose up`):
 
@@ -582,7 +582,7 @@ Expected: la orden quedó `expirada`; hay una fila en `cron_ejecuciones` con `jo
 
 (Si el usuario/BD difieren, tomar los valores reales de `.env` / `docker-compose.yml`.)
 
-- [ ] **Step 2: Escribir `docs/features/cron.md`**
+- [x] **Step 2: Escribir `docs/features/cron.md`**
 
 Desde `docs/features/TEMPLATE.md`, adaptado (sin endpoints ni frontend):
 
@@ -679,7 +679,7 @@ el backend (tick inicial) y verificar `estado = 'expirada'` + fila `ok` en
   + 2 h vía `EXPIRACION_ORDEN_MS`); el job no define umbral propio.
 ```
 
-- [ ] **Step 3: Actualizar `docs/README.md`, `CLAUDE.md` y el spec**
+- [x] **Step 3: Actualizar `docs/README.md`, `CLAUDE.md` y el spec**
 
 - `docs/README.md`: agregar en la tabla de features (después de la fila de `reembolsos-nota-credito.md`):
 
@@ -699,7 +699,7 @@ el backend (tick inicial) y verificar `estado = 'expirada'` + fila `ok` en
   (limpia el backlog tras un reinicio; decisión tomada al escribir el plan).
 ```
 
-- [ ] **Step 4: Lint + suite final**
+- [x] **Step 4: Lint + suite final**
 
 ```bash
 cd backend && npm run lint && npm test
@@ -707,7 +707,7 @@ cd backend && npm run lint && npm test
 
 Expected: sin errores.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/features/cron.md docs/README.md CLAUDE.md docs/superpowers/specs/2026-07-11-modulo-cron-design.md
