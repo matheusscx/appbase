@@ -5,7 +5,7 @@ import { ExpirarOrdenesJob, JOB_EXPIRAR_ORDENES } from './expirar-ordenes.job';
 
 describe('ExpirarOrdenesJob', () => {
   let job: ExpirarOrdenesJob;
-  const queryMock = jest.fn();
+  const queryMock = jest.fn<Promise<[unknown[], number]>, [string]>();
   const runnerMock = {
     ejecutar: jest.fn((_job: string, fn: () => Promise<string>) => fn()),
   };
@@ -41,7 +41,7 @@ describe('ExpirarOrdenesJob', () => {
 
   it('la consulta aplica las reglas de elegibilidad', async () => {
     await job.expirarOrdenesVencidas();
-    const sql = (queryMock.mock.calls[0][0] as string).replace(/\s+/g, ' ');
+    const sql = queryMock.mock.calls[0][0].replace(/\s+/g, ' ');
     expect(sql).toContain("estado IN ('creada', 'en_proceso')");
     expect(sql).toContain('fecha_expiracion < now()');
     expect(sql).toContain('NOT EXISTS');

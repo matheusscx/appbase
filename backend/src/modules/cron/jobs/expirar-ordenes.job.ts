@@ -35,7 +35,7 @@ export class ExpirarOrdenesJob implements OnApplicationBootstrap {
 
   async expirarOrdenesVencidas(): Promise<string> {
     // pg: UPDATE vía dataSource.query devuelve [rows, rowCount]
-    const resultado = (await this.dataSource.query(
+    const resultado = await this.dataSource.query<[unknown[], number]>(
       `UPDATE pasarela_ordenes o
        SET estado = 'expirada', actualizado_el = now()
        WHERE o.estado IN ('creada', 'en_proceso')
@@ -49,7 +49,7 @@ export class ExpirarOrdenesJob implements OnApplicationBootstrap {
              AND t.estado = 'error'
              AND t.eliminado_el IS NULL
          )`,
-    )) as [unknown[], number];
+    );
     const cantidad = resultado[1];
     return `${cantidad} órdenes expiradas`;
   }

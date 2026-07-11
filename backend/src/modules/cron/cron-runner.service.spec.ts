@@ -5,7 +5,7 @@ import { CronRunnerService } from './cron-runner.service';
 
 describe('CronRunnerService', () => {
   let service: CronRunnerService;
-  const saveMock = jest.fn();
+  const saveMock = jest.fn((e: CronEjecucion) => Promise.resolve(e));
   const repoMock = {
     create: jest.fn((x: Partial<CronEjecucion>) => x as CronEjecucion),
     save: saveMock,
@@ -13,7 +13,7 @@ describe('CronRunnerService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    saveMock.mockImplementation(async (e: CronEjecucion) => e);
+    saveMock.mockImplementation((e: CronEjecucion) => Promise.resolve(e));
     const module = await Test.createTestingModule({
       providers: [
         CronRunnerService,
@@ -24,12 +24,14 @@ describe('CronRunnerService', () => {
   });
 
   it('registra la ejecución exitosa con detalle', async () => {
-    await service.ejecutar('demo', async () => '3 órdenes expiradas');
+    await service.ejecutar('demo', () =>
+      Promise.resolve('3 órdenes expiradas'),
+    );
 
     expect(repoMock.create).toHaveBeenCalledWith(
       expect.objectContaining({ job: 'demo', estado: 'en_curso' }),
     );
-    const final = saveMock.mock.calls.at(-1)![0] as CronEjecucion;
+    const final = saveMock.mock.calls.at(-1)![0];
     expect(final.estado).toBe('ok');
     expect(final.detalle).toBe('3 órdenes expiradas');
     expect(final.finalizadoEl).toBeInstanceOf(Date);
@@ -37,12 +39,12 @@ describe('CronRunnerService', () => {
 
   it('registra el error sin propagar la excepción', async () => {
     await expect(
-      service.ejecutar('demo', async () => {
+      service.ejecutar('demo', () => {
         throw new Error('boom');
       }),
     ).resolves.toBeUndefined();
 
-    const final = saveMock.mock.calls.at(-1)![0] as CronEjecucion;
+    const final = saveMock.mock.calls.at(-1)![0];
     expect(final.estado).toBe('error');
     expect(final.error).toBe('boom');
     expect(final.finalizadoEl).toBeInstanceOf(Date);
@@ -55,7 +57,7 @@ describe('CronRunnerService', () => {
     });
 
     const primera = service.ejecutar('demo', () => bloqueado);
-    await service.ejecutar('demo', async () => 'segunda'); // debe omitirse
+    await service.ejecutar('demo', () => Promise.resolve('segunda')); // debe omitirse
 
     expect(saveMock).toHaveBeenCalledTimes(1); // solo el insert de la primera
 
@@ -65,29 +67,33 @@ describe('CronRunnerService', () => {
   });
 
   it('libera el lock al terminar y permite una nueva ejecución', async () => {
-    await service.ejecutar('demo', async () => 'a');
-    await service.ejecutar('demo', async () => 'b');
+    await service.ejecutar('demo', () => Promise.resolve('a'));
+    await service.ejecutar('demo', () => Promise.resolve('b'));
     expect(saveMock).toHaveBeenCalledTimes(4); // 2 ejecuciones × (insert + cierre)
   });
 
   it('no propaga si falla la persistencia del registro', async () => {
     saveMock.mockRejectedValueOnce(new Error('db caída'));
-    await expect(service.ejecutar('demo', async () => 'a')).resolves.toBeUndefined();
+    await expect(
+      service.ejecutar('demo', () => Promise.resolve('a')),
+    ).resolves.toBeUndefined();
     // el lock quedó liberado: una nueva ejecución vuelve a intentar
-    await service.ejecutar('demo', async () => 'b');
+    await service.ejecutar('demo', () => Promise.resolve('b'));
     expect(repoMock.create).toHaveBeenCalledTimes(2);
   });
 
   it('no propaga si falla el save de cierre aunque el job haya tenido éxito, y conserva estado ok + detalle', async () => {
     saveMock
-      .mockImplementationOnce(async (e: CronEjecucion) => e) // insert inicial
+      .mockImplementationOnce((e: CronEjecucion) => Promise.resolve(e)) // insert inicial
       .mockRejectedValueOnce(new Error('db caída al cerrar')); // save de cierre
 
     await expect(
-      service.ejecutar('demo', async () => 'detalle real del job exitoso'),
+      service.ejecutar('demo', () =>
+        Promise.resolve('detalle real del job exitoso'),
+      ),
     ).resolves.toBeUndefined();
 
-    const intentoCierre = saveMock.mock.calls.at(-1)![0] as CronEjecucion;
+    const intentoCierre = saveMock.mock.calls.at(-1)![0];
     expect(intentoCierre.estado).toBe('ok');
     expect(intentoCierre.detalle).toBe('detalle real del job exitoso');
   });

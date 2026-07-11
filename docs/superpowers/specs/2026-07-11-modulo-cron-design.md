@@ -94,6 +94,8 @@ uuid con `type: 'uuid'` explícito (ADR-004).
 - Devuelve `"N órdenes expiradas"`.
 - La expiración perezosa existente **se mantiene** (cubre la ventana entre ticks
   y es idempotente con el job).
+- Además del intervalo, corre un tick inicial en `onApplicationBootstrap`
+  (limpia el backlog tras un reinicio; decisión tomada al escribir el plan).
 
 ### Registro en `app.module.ts`
 

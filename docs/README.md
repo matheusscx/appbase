@@ -47,6 +47,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [tienda-online.md](./features/tienda-online.md) | Tienda online: catálogo, carrito, checkout dummy, suscripciones y medios de pago mock |
 | [pasarela-pagos.md](./features/pasarela-pagos.md) | Pasarela de pagos multi-proveedor (Oneclick real, API keys m2m, admin UI) |
 | [reembolsos-nota-credito.md](./features/reembolsos-nota-credito.md) | Reembolsos con NC interna elegible + devolución de stock + visibilidad en ventas |
+| [cron.md](./features/cron.md) | Jobs internos programados: registro de ejecuciones + expiración de órdenes de pasarela |
 
 ## Otros
 
