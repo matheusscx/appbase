@@ -6,6 +6,8 @@ import { VentasModule } from '../ventas/ventas.module';
 import { OnlineController } from './online.controller';
 import { OnlineService } from './online.service';
 import { OnlineCallbackHandler } from './online-callback.handler';
+import { MediosPagoOnlineController } from './medios-pago-online.controller';
+import { MediosPagoOnlineService } from './medios-pago-online.service';
 
 @Module({
   imports: [
@@ -14,7 +16,7 @@ import { OnlineCallbackHandler } from './online-callback.handler';
     PasarelaModule,
     VentasModule,
   ],
-  controllers: [OnlineController],
-  providers: [OnlineService, OnlineCallbackHandler],
+  controllers: [OnlineController, MediosPagoOnlineController],
+  providers: [OnlineService, OnlineCallbackHandler, MediosPagoOnlineService],
 })
 export class OnlineModule {}
