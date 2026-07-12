@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status**: Approved
+**Status**: Done
 **Date**: 2026-07-11
 **Owner**: Cesar Matheus
 **Spec**: `docs/superpowers/specs/2026-07-11-medios-pago-oneclick-design.md`
@@ -44,7 +44,7 @@
   - `InscripcionesService.marcarPreferida(tenantId: string, inscripcionId: string, pagadorRef?: string): Promise<objeto público de inscripción>`
   - `toPublico` (y por lo tanto `listarPorPagador`/`obtener`) incluye `preferida: boolean`.
 
-- [ ] **Step 1: Escribir los tests que fallan**
+- [x] **Step 1: Escribir los tests que fallan**
 
 En `backend/src/modules/pasarela/services/inscripciones.service.spec.ts`:
 
@@ -151,12 +151,12 @@ En el array `providers` del `Test.createTestingModule`, agregar:
   });
 ```
 
-- [ ] **Step 2: Correr los tests y verificar que fallan**
+- [x] **Step 2: Correr los tests y verificar que fallan**
 
 Run: `cd backend && npm test -- inscripciones.service.spec`
 Expected: FAIL — `service.marcarPreferida is not a function`, y los asserts de `where`/`order` de eliminar/resolverParaCobro sin los campos nuevos.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 1. `backend/src/modules/pasarela/entities/pasarela-inscripcion.entity.ts` — agregar debajo de la columna `estado`:
 
@@ -257,7 +257,7 @@ En `resolverParaCobro`, cambiar el `order`:
     preferida BOOLEAN NOT NULL DEFAULT false, -- solo una por tenant+pagador
 ```
 
-- [ ] **Step 4: Correr los tests y verificar que pasan**
+- [x] **Step 4: Correr los tests y verificar que pasan**
 
 Run: `cd backend && npm test -- inscripciones.service.spec`
 Expected: PASS (los 8 previos + 4 nuevos). Luego suite completa + lint:
@@ -265,7 +265,7 @@ Expected: PASS (los 8 previos + 4 nuevos). Luego suite completa + lint:
 Run: `cd backend && npm test && npm run lint`
 Expected: todo verde, lint sin errores nuevos.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/modules/pasarela/entities/pasarela-inscripcion.entity.ts \
@@ -295,7 +295,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   - `DELETE /online/medios-pago/:id` → `{ inscripcionId }`
   - `PATCH /online/medios-pago/:id/preferida` → objeto público de la inscripción
 
-- [ ] **Step 1: Escribir el spec que falla**
+- [x] **Step 1: Escribir el spec que falla**
 
 Create `backend/src/modules/online/medios-pago-online.service.spec.ts`:
 
@@ -403,12 +403,12 @@ describe('MediosPagoOnlineService', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el spec y verificar que falla**
+- [x] **Step 2: Correr el spec y verificar que falla**
 
 Run: `cd backend && npm test -- medios-pago-online.service.spec`
 Expected: FAIL — `Cannot find module './medios-pago-online.service'`.
 
-- [ ] **Step 3: Implementar service, controller y registro en el módulo**
+- [x] **Step 3: Implementar service, controller y registro en el módulo**
 
 Create `backend/src/modules/online/medios-pago-online.service.ts`:
 
@@ -572,7 +572,7 @@ import { MediosPagoOnlineService } from './medios-pago-online.service';
 export class OnlineModule {}
 ```
 
-- [ ] **Step 4: Correr los tests y verificar que pasan**
+- [x] **Step 4: Correr los tests y verificar que pasan**
 
 Run: `cd backend && npm test -- medios-pago-online.service.spec`
 Expected: PASS (4 tests). Luego suite completa + lint:
@@ -580,7 +580,7 @@ Expected: PASS (4 tests). Luego suite completa + lint:
 Run: `cd backend && npm test && npm run lint`
 Expected: todo verde.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/modules/online/medios-pago-online.service.ts \
@@ -605,7 +605,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Produces: `useTarjetas()` devuelve `{ tarjetas, preferida, oneclickDisponible, loading, cargar, agregar, eliminar, marcarPreferida }`.
   **Compatibilidad crítica:** `tienda/pasarela.vue:22` y `tienda/suscripciones.vue:80` ya consumen `useTarjetas().preferida` y leen `preferida.marca` y `preferida.last4` — la interfaz `Tarjeta` nueva DEBE conservar los campos `marca` y `last4` con esos nombres. No tocar esas dos páginas.
 
-- [ ] **Step 1: Reescribir el composable**
+- [x] **Step 1: Reescribir el composable**
 
 Reemplazar el contenido completo de `frontend/app/composables/useTarjetas.ts`:
 
@@ -703,7 +703,7 @@ Notas:
 - Las mutaciones (`agregar`/`eliminar`/`marcarPreferida`) **relanzan** el error — el toast lo pone la página que conoce el contexto. `cargar` sí resuelve su propio toast porque corre en `onMounted` compartido por 3 páginas.
 - `onMounted(cargar)` mantiene la semántica del composable viejo: los consumidores (`pasarela.vue`, `suscripciones.vue`) obtienen las tarjetas sin llamar nada.
 
-- [ ] **Step 2: Reescribir la página**
+- [x] **Step 2: Reescribir la página**
 
 Reemplazar el contenido completo de `frontend/app/pages/tienda/medios-pago.vue`:
 
@@ -886,7 +886,7 @@ const columns: TableColumn<Tarjeta>[] = [
 </template>
 ```
 
-- [ ] **Step 3: Verificar que el frontend compila y los consumidores siguen sanos**
+- [x] **Step 3: Verificar que el frontend compila y los consumidores siguen sanos**
 
 Run: `cd frontend && npm run build`
 Expected: build exitoso, sin errores de tipos.
@@ -897,7 +897,7 @@ Expected: sin resultados (el mock murió por completo).
 Run: `grep -rn "\.last4\|\.marca" frontend/app/pages/tienda/pasarela.vue frontend/app/pages/tienda/suscripciones.vue`
 Expected: los usos existentes siguen refiriéndose a campos que la nueva interfaz `Tarjeta` provee (`marca`, `last4`).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/app/composables/useTarjetas.ts frontend/app/pages/tienda/medios-pago.vue
@@ -919,7 +919,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: el comportamiento implementado en Tasks 1-3.
 - Produces: documentación sincronizada con el código, requisito de cierre del proyecto.
 
-- [ ] **Step 1: Actualizar `docs/features/tienda-online.md`**
+- [x] **Step 1: Actualizar `docs/features/tienda-online.md`**
 
 Agregar una sección (ubicarla junto a las secciones de funcionalidad existentes, leyendo el archivo para respetar su estructura):
 
@@ -945,7 +945,7 @@ Transbank vía Oneclick (sin mock: el localStorage anterior murió).
   Transbank.
 ```
 
-- [ ] **Step 2: Actualizar `docs/features/pasarela-pagos.md`**
+- [x] **Step 2: Actualizar `docs/features/pasarela-pagos.md`**
 
 En la parte de inscripciones (leer el archivo para ubicar la sección), documentar:
 
@@ -962,7 +962,7 @@ En la parte de inscripciones (leer el archivo para ubicar la sección), document
   siempre con el `usuarioId` del token.
 ```
 
-- [ ] **Step 3: Actualizar la tabla "Estado actual" de `CLAUDE.md`**
+- [x] **Step 3: Actualizar la tabla "Estado actual" de `CLAUDE.md`**
 
 Agregar al final de la tabla (después de la fila del módulo de cron):
 
@@ -970,7 +970,7 @@ Agregar al final de la tabla (después de la fila del módulo de cron):
 | Tienda Online — Mis medios de pago (inscripción Oneclick real: tarjetas tokenizadas por usuario, preferida en BD, eliminación en Transbank) | ✅ Implementado (2026-07-11) |
 ```
 
-- [ ] **Step 4: Verificación final completa**
+- [x] **Step 4: Verificación final completa**
 
 Run: `cd backend && npm test && npm run lint && npx tsc --noEmit`
 Expected: suite completa verde; lint y tsc sin errores **nuevos** (hay 2 errores tsc preexistentes conocidos en `auth.service.spec.ts` / `ventas.service.spec.ts` y ~30 problemas de lint de línea base — no deben crecer).
@@ -981,7 +981,9 @@ Verificación manual (requiere stack docker y credenciales de integración Trans
 3. Con Oneclick (integración): "Agregar tarjeta" → Webpay → tarjeta de prueba `4051 8856 0044 6623` → volver con toast de éxito y la tarjeta listada (Visa •••• 6623).
 4. Marcar preferida (estrella persiste tras recargar), eliminar (desaparece y Transbank confirma).
 
-- [ ] **Step 5: Commit**
+> Constancia (2026-07-12): verificación manual pendiente — requiere stack docker + credenciales de integración Transbank. Riesgo señalado en revisión final: el redirect GET con ?TBK_TOKEN= a la inscripción Oneclick no está verificado contra el ambiente real (Transbank documenta POST form); si Webpay lo rechaza, el fix es un form POST auto-submit desde el frontend.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/features/tienda-online.md docs/features/pasarela-pagos.md CLAUDE.md

@@ -160,8 +160,11 @@ async function confirmar() {
       frecuencia: item.frecuencia,
       diaMes: item.frecuencia === 'semanal' ? null : form.value.diaMes,
       diaSemana: item.frecuencia === 'semanal' ? form.value.diaSemana : null,
-      tarjeta: tarjetaPreferida.value
-        ? { marca: tarjetaPreferida.value.marca, last4: tarjetaPreferida.value.last4 }
+      tarjeta: tarjetaPreferida.value?.last4
+        ? {
+            marca: tarjetaPreferida.value.marca ?? 'Tarjeta',
+            last4: tarjetaPreferida.value.last4,
+          }
         : null,
     }
     drawerOpen.value = false

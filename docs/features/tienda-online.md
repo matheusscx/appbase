@@ -15,7 +15,8 @@ productos, armar un carrito y pagar. La compra del carrito cobra por **Webpay
 Plus real** (redirect) cuando el tenant lo tiene activo, cayendo a la pasarela
 simulada (dummy) como fallback si no. Incluye además suscripciones (alta de
 compras recurrentes, con backend real y primer cobro inmediato) y medios de
-pago (tarjetas guardadas, mock).
+pago (tarjetas inscritas vía Oneclick, ver sección "Mis medios de pago
+(inscripción Oneclick)").
 
 ### Why does it exist?
 
@@ -44,7 +45,9 @@ el mismo carrito/catálogo.
     customer se suscribe eligiendo día de cobro y tarjeta, y el primer
     período se cobra de inmediato vía la pasarela dummy, en la misma
     transacción que crea la venta.
-  - Medios de pago: solo frontend, mock en `localStorage`.
+  - Medios de pago: inscripción real vía Oneclick (Transbank), fachada JWT
+    `/online/medios-pago` (ver sección "Mis medios de pago (inscripción
+    Oneclick)").
   - Módulo RBAC "Tienda Online" (permisos Leer/Crear), enforcement real con
     `PermisosGuard` + `@RequiresPermiso('Tienda Online', 'Crear')` en el checkout
     (2026-07-06).
@@ -275,8 +278,9 @@ detrás del mismo permiso `Tienda Online:Leer`:
   propia "Suscripciones" en el sidebar, gated
   `esAdmin || can('Suscripciones', 'Leer')`; los botones se gatean por
   `Actualizar`/`Eliminar` (`/suscripciones`).
-- `pages/tienda/medios-pago.vue` — tarjetas mock, agregar/eliminar/preferida
-  (`/tienda/medios-pago`).
+- `pages/tienda/medios-pago.vue` — tarjetas inscritas vía Oneclick,
+  agregar/eliminar/preferida (ver sección "Mis medios de pago (inscripción
+  Oneclick)") (`/tienda/medios-pago`).
 - `pages/tienda/pasarela.vue` — pasarela dummy (resumen, aprobar/rechazar).
   No tiene entrada propia en el sidebar, solo se llega desde el checkout de
   compra normal o desde el drawer de alta de suscripción
@@ -295,8 +299,10 @@ detrás del mismo permiso `Tienda Online:Leer`:
   (no un `ref` local) para sobrevivir la navegación `/tienda` →
   `/tienda/pasarela`. Reutiliza los helpers puros de `useVenta.ts`
   (`agregarLinea`, `quitarLinea`, `setCantidad`, `toCalcularInput`).
-- `composables/useTarjetas.ts` — tarjetas en `localStorage`, scoped por
-  tenant. Nunca guarda el número completo ni el CVV, solo marca + últimos 4.
+- `composables/useTarjetas.ts` — **API-backed** (`GET/POST /online/medios-pago`,
+  `DELETE /online/medios-pago/:id`, `PATCH /online/medios-pago/:id/preferida`),
+  reemplaza el mock anterior en `localStorage`. Nunca viaja el número completo
+  ni el CVV, solo marca + últimos 4 que devuelve Transbank.
 - `composables/useSuscripciones.ts` — **API-backed** (`GET`/`PATCH
   /suscripciones`), reemplaza el mock anterior en `localStorage`. Expone
   `suscripciones`, `loading`, `cargar()` y `pausar()`/`reanudar()`/
@@ -390,6 +396,10 @@ Transbank vía Oneclick (sin mock: el localStorage anterior murió).
 - Nunca viaja un PAN/CVV por nuestra app: solo marca + últimos 4 que devuelve
   Transbank.
 
+> Pendiente: verificación manual contra integración Transbank (tarjeta de
+> prueba 4051 8856 0044 6623); el redirect usa GET con TBK_TOKEN — si el
+> ambiente real lo rechaza, cambiar a form POST.
+
 ---
 
 ## Testing
@@ -401,6 +411,7 @@ npm test -- modules/online/online.service.spec.ts
 npm test -- modules/ventas/ventas.service.spec.ts
 npm test -- modules/caja/caja.service.spec.ts
 npm test -- modules/suscripciones/suscripciones.service.spec.ts
+npm test -- modules/online/medios-pago-online.service.spec.ts
 ```
 
 ### Manual Testing (Frontend)
@@ -411,8 +422,9 @@ npm test -- modules/suscripciones/suscripciones.service.spec.ts
 4. "Rechazar" → no se crea venta, el carrito sigue intacto.
 5. "Aprobar" → venta visible en `/ventas` con canal `online` y estado
    `pagada`.
-6. Medios de pago: agregar/eliminar/marcar preferida, verificar que persiste
-   tras recargar y que el número completo nunca queda en `localStorage`.
+6. Medios de pago: agregar tarjeta desde `/tienda/medios-pago` → redirect a
+   Webpay (integración) → volver con toast y tarjeta listada. Verificar
+   también eliminar/marcar preferida y que persiste tras recargar.
 7. Suscripciones: ver los 3 items de ejemplo sembrados, dar de alta una
    nueva (elegir día + tarjeta), "Rechazar" en la pasarela → no se crea
    suscripción ni venta; "Aprobar" → suscripción `activa` con
@@ -451,8 +463,9 @@ npm test -- modules/suscripciones/suscripciones.service.spec.ts
 
 ## Notes
 
-Medios de pago sigue siendo mock (`localStorage`, scoped por tenant) — no
-hay persistencia en backend en esta fase.
+Medios de pago pasó de mock (`localStorage`, scoped por tenant) a inscripción
+real vía Oneclick desde 2026-07-08 (ver sección "Mis medios de pago
+(inscripción Oneclick)") — ya no hay tarjetas simuladas.
 
 Suscripciones **sí tiene backend real** desde 2026-07-05 (ver secciones
 arriba). El mock anterior en `localStorage` (clave
