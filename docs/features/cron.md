@@ -88,3 +88,27 @@ el backend (tick inicial) y verificar `estado = 'expirada'` + fila `ok` en
 - Spec: `docs/superpowers/specs/2026-07-11-modulo-cron-design.md`
 - El umbral de expiración vive en la orden (`fecha_expiracion`, hoy creación
   + 2 h vía `EXPIRACION_ORDEN_MS`); el job no define umbral propio.
+
+## Follow-ups
+
+- **Locking distribuido (BLOQUEANTE antes de escalar a múltiples réplicas del
+  backend o de implementar el job de cobro de suscripciones).** El scheduler es
+  in-process y el anti-solapamiento es un `Set` en memoria: con N instancias,
+  cada job corre N veces por tick. `expirar-ordenes` lo tolera (UPDATE
+  idempotente; solo genera filas `"0 órdenes expiradas"` extra en
+  `cron_ejecuciones`), pero un job de cobro duplicaría cobros. Enfoque
+  decidido (2026-07-11): advisory lock de Postgres en
+  `CronRunnerService.ejecutar` — `SELECT pg_try_advisory_lock(hashtext(job))`
+  antes de correr, skip si otra instancia lo tiene, release al terminar. Un
+  solo cambio en el runner cubre todos los jobs; sin infraestructura nueva.
+- Ventana de ms en la compensación del retorno de pago
+  (`'procesando'→'en_proceso'` antes de insertar la transacción de error):
+  cerrable agregando `AND o.actualizado_el < now() - interval '5 minutes'` al
+  WHERE del job cuando se vuelva a tocar. No reordenar los statements de la
+  compensación (dejaría órdenes trabadas en `'procesando'`).
+- Backlog pasarela (preexistente): `/verificar` no despacha el callback al
+  rescatar una orden a `'pagada'` — una orden rescatada no materializa su
+  venta.
+- Gotcha dev: tras agregar dependencias al backend, recrear el contenedor
+  (`docker-compose up --build` o `--force-recreate`) — el volumen de
+  `node_modules` no se refresca solo.

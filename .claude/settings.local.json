@@ -84,7 +84,9 @@
       "Bash(pkill -f \"npm run dev\")",
       "Bash(npm test *)",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__emulate",
-      "Bash(codegraph sync *)"
+      "Bash(codegraph sync *)",
+      "Bash(codegraph explore *)",
+      "Bash(codegraph node *)"
     ]
   },
   "enabledMcpjsonServers": [
