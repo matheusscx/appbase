@@ -16,8 +16,18 @@ const {
 
 const agregando = ref(false)
 const working = reactive(new Set<string>())
-const confirmDeleteId = ref<string | null>(null)
+const confirmDelete = ref<Tarjeta | null>(null)
 const confirmModalOpen = ref(false)
+
+const eliminarMensaje = computed(() => {
+  const n = confirmDelete.value?.suscripcionesActivas ?? 0
+  const base = 'La tarjeta se eliminará también en Transbank y no podrá usarse para cobros.'
+  if (n > 0) {
+    const plural = n === 1 ? 'suscripción activa' : 'suscripciones activas'
+    return `Esta tarjeta tiene ${n} ${plural}: al eliminarla, ${n === 1 ? 'se cancelará' : 'se cancelarán'}. ${base}`
+  }
+  return `¿Estás seguro? ${base}`
+})
 
 function apiErrorMsg(e: unknown, fallback: string): string {
   return (e as { data?: { message?: string } })?.data?.message ?? fallback
@@ -47,14 +57,18 @@ async function abrirInscripcion() {
   }
 }
 
-async function confirmarEliminar(id: string) {
+async function confirmarEliminar(t: Tarjeta) {
+  const id = t.inscripcionId
   confirmModalOpen.value = false
-  confirmDeleteId.value = null
+  confirmDelete.value = null
   if (working.has(id)) return
   working.add(id)
   try {
     await eliminar(id)
-    toast.add({ title: 'Tarjeta eliminada', color: 'success' })
+    toast.add({
+      title: t.suscripcionesActivas > 0 ? 'Tarjeta eliminada y suscripciones canceladas' : 'Tarjeta eliminada',
+      color: 'success',
+    })
   } catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'No se pudo eliminar la tarjeta'), color: 'error' })
   } finally {
@@ -152,7 +166,7 @@ const columns: TableColumn<Tarjeta>[] = [
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
-              @click="() => { confirmDeleteId = row.original.inscripcionId; confirmModalOpen = true }"
+              @click="() => { confirmDelete = row.original; confirmModalOpen = true }"
             />
           </template>
 
@@ -166,9 +180,9 @@ const columns: TableColumn<Tarjeta>[] = [
         <CrudModal
           v-model:open="confirmModalOpen"
           title="Eliminar tarjeta"
-          message="¿Estás seguro? La tarjeta se eliminará también en Transbank y no podrá usarse para cobros."
-          @cancel="confirmDeleteId = null"
-          @confirm="confirmDeleteId && confirmarEliminar(confirmDeleteId)"
+          :message="eliminarMensaje"
+          @cancel="confirmDelete = null"
+          @confirm="confirmDelete && confirmarEliminar(confirmDelete)"
         />
       </div>
     </template>

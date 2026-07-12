@@ -30,10 +30,11 @@ Integra dos proveedores de Transbank contra su ambiente de integración real:
 
 ### Why does it exist?
 
-Habilita cobros reales (hoy el checkout de la tienda y las suscripciones usan
-una pasarela dummy) y abre la pasarela como servicio consumible por apps
-externas del tenant, con el modelo de datos preparado para sumar proveedores
-sin cambios estructurales.
+Habilita cobros reales (el checkout de la tienda por Webpay Plus y las
+suscripciones por Oneclick ya usan la pasarela real; ver
+`docs/features/tienda-online.md`) y abre la pasarela como servicio consumible
+por apps externas del tenant, con el modelo de datos preparado para sumar
+proveedores sin cambios estructurales.
 
 ### Scope
 
@@ -41,9 +42,11 @@ sin cambios estructurales.
   (pago único con redirect), API keys por tenant, cifrado de credenciales,
   historial inmutable de transacciones, pantalla de administración del tenant
   (config, API keys, órdenes).
-- **NO incluido (fases futuras)**: reconectar suscripciones/tienda a la
-  pasarela real, job de cobro recurrente automático, Stripe / MercadoPago,
-  webhooks entrantes, failover por `prioridad`, y rotación de la clave de cifrado.
+- **NO incluido (fases futuras)**: job de cobro recurrente automático de los
+  períodos siguientes de una suscripción, Stripe / MercadoPago, webhooks
+  entrantes, failover por `prioridad`, y rotación de la clave de cifrado.
+  (El alta de suscripción por cobro Oneclick real y el checkout Webpay ya están
+  reconectados a la pasarela real — 2026-07-12.)
 
 ---
 
@@ -337,8 +340,9 @@ Con el stack arriba (`docker-compose up -d`):
 
 ## Related Features
 
-- [Suscripciones](./suscripciones.md) — consumidor futuro (cobro recurrente).
-- Tienda Online — checkout, consumidor futuro.
+- [Tienda Online](./tienda-online.md) — consumidor real: alta de suscripción por
+  cobro Oneclick (`CobrosService.cobrar`) y checkout por Webpay Plus. El cobro
+  recurrente de períodos siguientes sigue siendo futuro.
 - [ADR-008](../adr/008-cifrado-credenciales-pasarela.md) — cifrado de credenciales.
 
 ---

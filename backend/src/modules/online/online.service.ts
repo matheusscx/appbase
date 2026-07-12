@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
@@ -153,23 +153,18 @@ export class OnlineService {
   private async resolverMetodosTarjeta(
     tenantId: string,
   ): Promise<{ metodoCreditoId: string; metodoDebitoId: string | null }> {
-    const metodos = await this.metodosPagoService.findMetodosPago(tenantId);
-    const habilitados = metodos.filter((m) => m.habilitada);
-    const incluye = (m: { nombre: string }, ...terms: string[]) =>
-      terms.some((t) => m.nombre.toLowerCase().includes(t));
-
-    const credito =
-      habilitados.find((m) => incluye(m, 'crédito', 'credito')) ??
-      habilitados[0];
-    if (!credito)
-      throw new BadRequestException(
-        'No hay métodos de pago habilitados para la tienda online',
-      );
+    const metodoCreditoId =
+      await this.metodosPagoService.resolverMetodoCredito(tenantId);
+    const habilitados = (
+      await this.metodosPagoService.findMetodosPago(tenantId)
+    ).filter((m) => m.habilitada);
     const debito =
-      habilitados.find((m) => incluye(m, 'débito', 'debito')) ?? null;
+      habilitados.find((m) =>
+        ['débito', 'debito'].some((t) => m.nombre.toLowerCase().includes(t)),
+      ) ?? null;
 
     return {
-      metodoCreditoId: credito.metodoPagoId,
+      metodoCreditoId,
       metodoDebitoId: debito?.metodoPagoId ?? null,
     };
   }

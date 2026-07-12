@@ -19,6 +19,7 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { SuscripcionesService } from './suscripciones.service';
 import { CreateSuscripcionDto } from './dto/create-suscripcion.dto';
 import { UpdateSuscripcionDto } from './dto/update-suscripcion.dto';
+import { CambiarTarjetaDto } from './dto/cambiar-tarjeta.dto';
 
 @ApiTags('suscripciones')
 @ApiBearerAuth()
@@ -85,6 +86,21 @@ export class SuscripcionesController {
       u.id,
       id,
       dto,
+    );
+  }
+
+  @Patch(':id/tarjeta')
+  cambiarTarjeta(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: CambiarTarjetaDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.suscripcionesService.cambiarTarjeta(
+      u.tenantId ?? '',
+      u.id,
+      id,
+      dto.inscripcionId,
     );
   }
 }

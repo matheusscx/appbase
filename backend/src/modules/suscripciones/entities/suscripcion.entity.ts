@@ -41,6 +41,11 @@ export class Suscripcion {
   @Column({ name: 'activa_hasta', type: 'date', nullable: true })
   activaHasta: string | null;
 
+  // Inscripción Oneclick (tarjeta tokenizada) a la que queda amarrada la
+  // suscripción. Nullable por filas legacy previas al cobro real.
+  @Column({ name: 'inscripcion_id', type: 'uuid', nullable: true })
+  inscripcionId: string | null;
+
   @Column({ name: 'tarjeta_marca', type: 'text', nullable: true })
   tarjetaMarca: string | null;
 

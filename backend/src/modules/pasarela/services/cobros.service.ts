@@ -198,6 +198,26 @@ export class CobrosService {
     });
   }
 
+  /**
+   * Vincula una orden ya pagada con la venta que materializó (flujo interno:
+   * suscripciones/checkout cobran con `cobrar` y crean la venta después). Deja
+   * la orden en 'conciliada', espejo de lo que hace el dispatcher de Webpay.
+   */
+  async vincularVenta(tenantId: string, ordenId: string, ventaId: string) {
+    const orden = await this.ordenRepo.findOne({
+      where: { ordenId, tenantId },
+    });
+    if (!orden) throw new NotFoundException('Orden no encontrada');
+    if (orden.estado !== 'pagada')
+      throw new BadRequestException(
+        `Solo se puede vincular una venta a una orden pagada (estado ${orden.estado})`,
+      );
+    orden.ventaId = ventaId;
+    orden.estado = 'conciliada';
+    await this.ordenRepo.save(orden);
+    return this.toPublico(orden);
+  }
+
   async reembolsar(
     tenantId: string,
     ordenId: string,

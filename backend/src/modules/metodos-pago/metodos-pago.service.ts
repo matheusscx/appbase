@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
 import { TenantMetodoPago } from './entities/tenant-metodo-pago.entity';
@@ -61,6 +65,27 @@ export class MetodosPagoService {
       habilitada: r.habilitada === true,
       permiteVuelto: r.permite_vuelto === true,
     }));
+  }
+
+  /**
+   * Resuelve server-side el método de pago contable de crédito habilitado del
+   * tenant (el que se registra en el pago de una venta pagada con tarjeta). Es
+   * el método habilitado cuyo nombre incluye "crédito"; si no hay, cae al primer
+   * habilitado. Compartido por el checkout online y las suscripciones Oneclick.
+   */
+  async resolverMetodoCredito(tenantId: string): Promise<string> {
+    const habilitados = (await this.findMetodosPago(tenantId)).filter(
+      (m) => m.habilitada,
+    );
+    const credito =
+      habilitados.find((m) =>
+        ['crédito', 'credito'].some((t) => m.nombre.toLowerCase().includes(t)),
+      ) ?? habilitados[0];
+    if (!credito)
+      throw new BadRequestException(
+        'No hay métodos de pago habilitados para la tienda online',
+      );
+    return credito.metodoPagoId;
   }
 
   // ───────────────────────────────────────────────────────────────────────────

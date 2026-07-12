@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -16,6 +17,7 @@ import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { MediosPagoOnlineService } from './medios-pago-online.service';
+import { IniciarMedioPagoDto } from './dto/iniciar-medio-pago.dto';
 
 @ApiTags('online')
 @ApiBearerAuth()
@@ -33,9 +35,14 @@ export class MediosPagoOnlineController {
 
   @Post()
   @RequiresPermiso('Tienda Online', 'Crear')
-  iniciar(@Req() req: Request) {
+  iniciar(@Req() req: Request, @Body() dto: IniciarMedioPagoDto) {
     const u = req.user as JwtUser;
-    return this.mediosPago.iniciar(u.tenantId ?? '', u.id, u.email);
+    return this.mediosPago.iniciar(
+      u.tenantId ?? '',
+      u.id,
+      u.email,
+      dto.retornoPath,
+    );
   }
 
   @Delete(':id')

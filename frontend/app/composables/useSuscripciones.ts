@@ -12,6 +12,7 @@ export interface Suscripcion {
   estado: 'activa' | 'pausada' | 'cancelada'
   proximoCobro: string
   activaHasta: string | null
+  inscripcionId: string | null
   tarjetaMarca: string | null
   tarjetaLast4: string | null
   ventaInicialId: string | null
@@ -105,7 +106,27 @@ export function useSuscripciones() {
   const reanudar = (id: string) => accion(id, 'reanudar')
   const cancelar = (id: string) => accion(id, 'cancelar')
 
+  /** Reasigna la tarjeta (inscripción Oneclick) de una suscripción y refresca el snapshot. */
+  async function cambiarTarjeta(id: string, inscripcionId: string) {
+    const res = await useApiFetch<{
+      id: string
+      inscripcionId: string
+      tarjetaMarca: string | null
+      tarjetaLast4: string | null
+    }>(`${apiUrl}/suscripciones/${id}/tarjeta`, {
+      method: 'PATCH',
+      body: { inscripcionId },
+    })
+    const susc = suscripciones.value.find((s) => s.id === id)
+    if (susc) {
+      susc.inscripcionId = res.inscripcionId
+      susc.tarjetaMarca = res.tarjetaMarca
+      susc.tarjetaLast4 = res.tarjetaLast4
+    }
+    toast.add({ title: 'Tarjeta actualizada', color: 'success' })
+  }
+
   onMounted(cargar)
 
-  return { suscripciones, loading, cargar, pausar, reanudar, cancelar }
+  return { suscripciones, loading, cargar, pausar, reanudar, cancelar, cambiarTarjeta }
 }

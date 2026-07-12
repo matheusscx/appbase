@@ -42,9 +42,10 @@ el mismo carrito/catálogo.
   - Suscripciones: backend real (`item_suscripcion` + tabla `suscripciones`,
     endpoints `POST/GET/PATCH /suscripciones`). El admin da de alta un item
     suscribible en Configuración → Items (sin cobro en ese momento); el
-    customer se suscribe eligiendo día de cobro y tarjeta, y el primer
-    período se cobra de inmediato vía la pasarela dummy, en la misma
-    transacción que crea la venta.
+    customer se suscribe eligiendo día de cobro y una tarjeta Oneclick, y el
+    primer período se **cobra de verdad contra Transbank** (Oneclick) antes de
+    crear la venta. La suscripción queda amarrada a la inscripción y puede
+    reasignarse a otra tarjeta (2026-07-12).
   - Medios de pago: inscripción real vía Oneclick (Transbank), fachada JWT
     `/online/medios-pago` (ver sección "Mis medios de pago (inscripción
     Oneclick)").
@@ -53,7 +54,6 @@ el mismo carrito/catálogo.
     (2026-07-06).
 - NOT included (future):
   - Storefront público / auth de customer final.
-  - Integración con pasarela real.
   - Cobro recurrente automático (job/cron) de los períodos siguientes al
     primero — hoy solo se persiste `proximo_cobro`, sin ejecutor.
 
@@ -109,19 +109,25 @@ Request:
   "itemId": "uuid",           // item tipo 'suscripcion'
   "diaMes": 15,                // mensual: 1-28 · quincenal: 1-13 (cobra también en diaMes+15)
   "diaSemana": 3,              // semanal: 0-6 (0 = domingo)
-  "metodoPagoId": "uuid",
-  "tarjeta": { "marca": "Visa", "last4": "4242" }   // opcional, snapshot informativo
+  "inscripcionId": "uuid"      // tarjeta Oneclick del usuario a la que se cobra y amarra
 }
 
 Response (201):
 { "id": "uuid", "ventaInicialId": "uuid", "proximoCobro": "2026-08-15", "estado": "activa" }
 ```
 
+El primer período se cobra de verdad contra Transbank vía Oneclick
+(`CobrosService.cobrar`, origen `interno`) con la tarjeta tokenizada de
+`inscripcionId`. El `metodoPagoId` contable de la venta y el snapshot de tarjeta
+(`tarjeta_marca`/`tarjeta_last4`) se resuelven **server-side** desde la
+inscripción — el cliente ya no los envía. Requiere Oneclick activo en el tenant
+(si no, `400`).
+
 ```
 GET /suscripciones
 
 Response (200): suscripciones del usuario autenticado (join con items para
-nombre/precio/moneda).
+nombre/precio/moneda). Incluye `inscripcionId` + snapshot de tarjeta.
 ```
 
 ```
@@ -132,6 +138,17 @@ Request:
 
 Response (200): { "id": "uuid", "estado": "pausada", "activaHasta": null }
 ```
+
+```
+PATCH /suscripciones/:id/tarjeta
+
+Request:
+{ "inscripcionId": "uuid" }   // otra tarjeta del usuario
+
+Response (200): { "id": "uuid", "inscripcionId": "uuid", "tarjetaMarca": "Visa", "tarjetaLast4": "4242" }
+```
+Reasigna la tarjeta amarrada (solo suscripciones `activa`/`pausada`); valida
+ownership de la suscripción y de la inscripción.
 
 ### Administración (módulo RBAC "Suscripciones")
 
@@ -152,14 +169,30 @@ DELETE /suscripciones/admin/:id    → Eliminar   — soft delete, SOLO cancelad
 hasta el día anterior y "se cancela ese día a primera hora". El PATCH devuelve
 `activaHasta` para que el frontend actualice la fila sin recargar.
 
-`POST /suscripciones` valida que el item sea `tipo = 'suscripcion'` y esté
-activo, calcula el total del primer período con el mismo motor de precios que
-usa una venta normal, y crea la venta inicial (canal `online`, pago completo)
-y la fila de `suscripciones` en **una sola transacción** — si el pago es
-rechazado por la pasarela, no se crea ni venta ni suscripción (mismo patrón
-todo-o-nada que el checkout normal). `frecuencia` se copia al momento del
-alta como snapshot: si el admin cambia la frecuencia del item catálogo
-después, las suscripciones ya activas no se ven afectadas.
+`POST /suscripciones` valida item (`tipo = 'suscripcion'`, activo) y Oneclick
+activo, resuelve la tarjeta del usuario (ownership) y calcula el total del
+primer período con el mismo motor de precios que una venta normal. **El cobro
+Oneclick corre FUERA de toda transacción DB** (es una llamada HTTP): crea su
+propia `pasarela_ordenes` y autoriza contra Transbank. Si el cobro es rechazado
+(o timeout `502`) no se crea ni venta ni suscripción. Recién con el cobro
+aprobado se crean la venta inicial (canal `online`) y la fila `suscripciones`
+en una transacción, y luego se concilia la orden (`venta_id` + `conciliada`).
+Si esa transacción fallara con el cobro ya hecho, la orden queda `pagada` sin
+venta (reconciliable, mismo invariante que el checkout Webpay). `frecuencia` se
+copia como snapshot al alta.
+
+**Reanudar el alta tras inscribir una tarjeta:** si el usuario no tiene tarjetas,
+el drawer guarda la intención de alta en `localStorage` y redirige a Transbank
+(`POST /online/medios-pago { retornoPath: 'suscripciones' }`). Al volver a
+`/tienda/suscripciones?inscripcionId=...&estado=activa`, la página dispara el
+`POST /suscripciones` automáticamente con esa inscripción (cobro del primer
+período sin clic extra).
+
+**Cascada al eliminar una tarjeta:** `DELETE /online/medios-pago/:id` cancela
+primero las suscripciones vigentes amarradas a esa inscripción
+(`activa_hasta = proximo_cobro`) y luego elimina la tarjeta en Transbank. El
+listado de medios de pago expone `suscripcionesActivas` por tarjeta para que el
+modal de borrado avise el N.
 
 ---
 

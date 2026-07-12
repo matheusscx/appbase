@@ -1,24 +1,4 @@
-import {
-  IsUUID,
-  IsInt,
-  Min,
-  Max,
-  IsOptional,
-  IsString,
-  IsNotEmpty,
-  ValidateNested,
-} from 'class-validator';
-import { Type } from 'class-transformer';
-
-export class TarjetaSnapshotDto {
-  @IsString()
-  @IsNotEmpty()
-  marca: string;
-
-  @IsString()
-  @IsNotEmpty()
-  last4: string;
-}
+import { IsUUID, IsInt, Min, Max, IsOptional } from 'class-validator';
 
 export class CreateSuscripcionDto {
   @IsUUID()
@@ -36,11 +16,9 @@ export class CreateSuscripcionDto {
   @IsOptional()
   diaSemana?: number;
 
+  // Tarjeta Oneclick del usuario a la que se cobra el primer período y queda
+  // amarrada la suscripción. El método de pago contable y el snapshot de tarjeta
+  // se resuelven server-side desde la inscripción.
   @IsUUID()
-  metodoPagoId: string;
-
-  @ValidateNested()
-  @Type(() => TarjetaSnapshotDto)
-  @IsOptional()
-  tarjeta?: TarjetaSnapshotDto;
+  inscripcionId: string;
 }

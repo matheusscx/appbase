@@ -284,9 +284,17 @@ export class InscripcionesService {
   ) {
     if (!inscripcionId && !pagadorRef)
       throw new BadRequestException('Debe indicar inscripcionId o pagadorRef');
+    // Con inscripcionId y pagadorRef juntos se enforce ownership (el flujo
+    // interno de suscripciones pasa ambos): un usuario no puede cobrar la
+    // inscripción de otro del mismo tenant. La API m2m pasa solo uno.
     const inscripcion = await this.inscripcionRepo.findOne({
       where: inscripcionId
-        ? { inscripcionId, tenantId, estado: 'activa' }
+        ? {
+            inscripcionId,
+            tenantId,
+            estado: 'activa',
+            ...(pagadorRef ? { pagadorRef } : {}),
+          }
         : { tenantId, pagadorRef, estado: 'activa' },
       order: { preferida: 'DESC', creadoEl: 'DESC' },
     });
@@ -295,5 +303,35 @@ export class InscripcionesService {
         'El pagador no tiene una inscripción activa',
       );
     return inscripcion;
+  }
+
+  /**
+   * Inscripción activa de un pagador con el snapshot de su tarjeta (marca,
+   * últimos4). Valida ownership (tenantId + pagadorRef) — pensado para los
+   * flujos internos de la tienda (suscripciones) donde el inscripcionId lo
+   * elige el usuario final.
+   */
+  async resolverMedioDeUsuario(
+    tenantId: string,
+    inscripcionId: string,
+    pagadorRef: string,
+  ): Promise<{
+    inscripcion: PasarelaInscripcion;
+    marca: string | null;
+    ultimos4: string | null;
+  }> {
+    const inscripcion = await this.inscripcionRepo.findOne({
+      where: { inscripcionId, tenantId, pagadorRef, estado: 'activa' },
+    });
+    if (!inscripcion)
+      throw new NotFoundException('Inscripción activa no encontrada');
+    const medio = await this.medioRepo.findOne({
+      where: { inscripcionId, estado: 'activo' },
+    });
+    return {
+      inscripcion,
+      marca: medio?.marca ?? null,
+      ultimos4: medio?.ultimos4 ?? null,
+    };
   }
 }

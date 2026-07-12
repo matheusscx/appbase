@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { MediosPagoOnlineService } from './medios-pago-online.service';
 import { InscripcionesService } from '../pasarela/services/inscripciones.service';
 import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.service';
+import { SuscripcionesService } from '../suscripciones/suscripciones.service';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const USUARIO_ID = '550e8400-e29b-41d4-a716-446655440001';
@@ -16,23 +17,31 @@ describe('MediosPagoOnlineService', () => {
     marcarPreferida: jest.fn(),
   };
   const tenantPasarela = { resolverConfiguracionActiva: jest.fn() };
+  const suscripciones = {
+    contarPorInscripcion: jest.fn(),
+    cancelarPorInscripcion: jest.fn(),
+  };
   const config = { get: jest.fn().mockReturnValue('http://localhost:5173') };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    suscripciones.contarPorInscripcion.mockResolvedValue({});
+    suscripciones.cancelarPorInscripcion.mockResolvedValue({ canceladas: 0 });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MediosPagoOnlineService,
         { provide: InscripcionesService, useValue: inscripciones },
         { provide: TenantPasarelaService, useValue: tenantPasarela },
+        { provide: SuscripcionesService, useValue: suscripciones },
         { provide: ConfigService, useValue: config },
       ],
     }).compile();
     service = module.get(MediosPagoOnlineService);
   });
 
-  it('listar: filtra solo inscripciones activas y reporta disponibilidad', async () => {
+  it('listar: filtra solo activas, reporta disponibilidad y anexa suscripcionesActivas', async () => {
     tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    suscripciones.contarPorInscripcion.mockResolvedValue({ 'i-1': 2 });
     inscripciones.listarPorPagador.mockResolvedValue([
       {
         inscripcionId: 'i-1',
@@ -64,6 +73,7 @@ describe('MediosPagoOnlineService', () => {
     );
     expect(res.oneclickDisponible).toBe(true);
     expect(res.medios.map((m) => m.inscripcionId)).toEqual(['i-1']);
+    expect(res.medios[0].suscripcionesActivas).toBe(2);
   });
 
   it('listar: oneclickDisponible=false cuando el tenant no tiene la pasarela', async () => {
@@ -94,19 +104,66 @@ describe('MediosPagoOnlineService', () => {
     });
   });
 
-  it('eliminar y marcarPreferida delegan con ownership del usuario', async () => {
-    inscripciones.eliminar.mockResolvedValue({ inscripcionId: 'i-1' });
-    inscripciones.marcarPreferida.mockResolvedValue({
+  it('iniciar: retornoPath="suscripciones" vuelve a /tienda/suscripciones', async () => {
+    inscripciones.iniciar.mockResolvedValue({
       inscripcionId: 'i-1',
-      preferida: true,
+      urlWebpay: 'https://webpay/init',
+      token: 'tok-99',
     });
-    await service.eliminar(TENANT_ID, USUARIO_ID, 'i-1');
-    await service.marcarPreferida(TENANT_ID, USUARIO_ID, 'i-1');
+    await service.iniciar(TENANT_ID, USUARIO_ID, 'user@x.cl', 'suscripciones');
+    expect(inscripciones.iniciar).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({
+        urlRetorno: 'http://localhost:5173/tienda/suscripciones',
+      }),
+    );
+  });
+
+  it('iniciar: un retornoPath no whitelisteado cae al default medios-pago', async () => {
+    inscripciones.iniciar.mockResolvedValue({
+      inscripcionId: 'i-1',
+      urlWebpay: 'https://webpay/init',
+      token: 'tok-99',
+    });
+    await service.iniciar(
+      TENANT_ID,
+      USUARIO_ID,
+      'user@x.cl',
+      'https://evil.com',
+    );
+    expect(inscripciones.iniciar).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({
+        urlRetorno: 'http://localhost:5173/tienda/medios-pago',
+      }),
+    );
+  });
+
+  it('eliminar: cancela las suscripciones amarradas y luego elimina la tarjeta', async () => {
+    suscripciones.cancelarPorInscripcion.mockResolvedValue({ canceladas: 2 });
+    inscripciones.eliminar.mockResolvedValue({ inscripcionId: 'i-1' });
+
+    const res = await service.eliminar(TENANT_ID, USUARIO_ID, 'i-1');
+
+    expect(suscripciones.cancelarPorInscripcion).toHaveBeenCalledWith(
+      TENANT_ID,
+      USUARIO_ID,
+      'i-1',
+    );
     expect(inscripciones.eliminar).toHaveBeenCalledWith(
       TENANT_ID,
       'i-1',
       USUARIO_ID,
     );
+    expect(res).toEqual({ inscripcionId: 'i-1', suscripcionesCanceladas: 2 });
+  });
+
+  it('marcarPreferida delega con ownership del usuario', async () => {
+    inscripciones.marcarPreferida.mockResolvedValue({
+      inscripcionId: 'i-1',
+      preferida: true,
+    });
+    await service.marcarPreferida(TENANT_ID, USUARIO_ID, 'i-1');
     expect(inscripciones.marcarPreferida).toHaveBeenCalledWith(
       TENANT_ID,
       'i-1',

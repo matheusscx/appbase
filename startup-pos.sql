@@ -781,6 +781,7 @@ CREATE TABLE "suscripciones" (
   "proximo_cobro"    DATE        NOT NULL,
   "activa_hasta"     DATE,                  -- al cancelar: fin del período pagado (= proximo_cobro vigente); usable hasta el día anterior
 
+  "inscripcion_id"   UUID,                  -- tarjeta Oneclick amarrada (pasarela_inscripciones); NULL en filas legacy
   "tarjeta_marca"    TEXT,
   "tarjeta_last4"    TEXT,
   "venta_inicial_id" UUID        REFERENCES "ventas" ("venta_id"),

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { OnlineService } from './online.service';
@@ -36,7 +37,10 @@ const mockResultado = {
 describe('OnlineService', () => {
   let service: OnlineService;
   const calculo = { calcular: jest.fn().mockResolvedValue(mockResultado) };
-  const metodos = { findMetodosPago: jest.fn() };
+  const metodos = {
+    findMetodosPago: jest.fn(),
+    resolverMetodoCredito: jest.fn(),
+  };
   const tenantPasarela = { resolverConfiguracionActiva: jest.fn() };
   const pagosRedirect = { iniciar: jest.fn(), obtenerResultado: jest.fn() };
   const config = { get: jest.fn().mockReturnValue('http://localhost:5173') };
@@ -77,6 +81,7 @@ describe('OnlineService', () => {
 
   it('pagar con Webpay activo: inicia orden interno con snapshot y devuelve webpay', async () => {
     tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
     metodos.findMetodosPago.mockResolvedValue([
       { metodoPagoId: 'mp-efectivo', nombre: 'Efectivo', habilitada: true },
       {
@@ -136,9 +141,11 @@ describe('OnlineService', () => {
 
   it('pagar con Webpay pero sin métodos habilitados: rechaza', async () => {
     tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
-    metodos.findMetodosPago.mockResolvedValue([
-      { metodoPagoId: 'mp-x', nombre: 'Efectivo', habilitada: false },
-    ]);
+    metodos.resolverMetodoCredito.mockRejectedValue(
+      new BadRequestException(
+        'No hay métodos de pago habilitados para la tienda online',
+      ),
+    );
     await expect(
       service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto),
     ).rejects.toThrow('métodos de pago');

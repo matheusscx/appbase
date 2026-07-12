@@ -121,6 +121,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Nota de crédito manual desde el detalle de venta (permiso dedicado `Ventas:Nota de crédito`, egreso de caja elegible en la misma transacción, devolución de stock elegible) | ✅ Implementado (2026-07-11) |
 | Módulo de cron (jobs internos: registro de ejecuciones + expiración de órdenes de pasarela) | ✅ Implementado (2026-07-11) |
 | Tienda Online — Mis medios de pago (inscripción Oneclick real: tarjetas tokenizadas por usuario, preferida en BD, eliminación en Transbank) | ✅ Implementado (2026-07-11) |
+| Suscripciones — cobro Oneclick real en el alta (cobro del primer período con tarjeta tokenizada, suscripción amarrada a inscripción, alta reanudable tras inscribir tarjeta, cambio de tarjeta, cascada de cancelación al eliminar la tarjeta) | ✅ Implementado (2026-07-12) |
 
 ---
 

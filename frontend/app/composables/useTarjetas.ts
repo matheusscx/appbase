@@ -7,6 +7,8 @@ export interface Tarjeta {
   tipo: string | null
   preferida: boolean
   creadoEl: string
+  // Suscripciones vigentes amarradas: se cancelarían al eliminar la tarjeta.
+  suscripcionesActivas: number
 }
 
 interface MedioApi {
@@ -14,6 +16,7 @@ interface MedioApi {
   estado: string
   preferida: boolean
   creadoEl: string
+  suscripcionesActivas: number
   mediosPago: { tipo: string, marca: string | null, ultimos4: string, estado: string }[]
 }
 
@@ -48,6 +51,7 @@ export function useTarjetas() {
         tipo: m.mediosPago[0]?.tipo ?? null,
         preferida: m.preferida,
         creadoEl: m.creadoEl,
+        suscripcionesActivas: m.suscripcionesActivas ?? 0,
       }))
     } catch (e: unknown) {
       const msg = (e as { data?: { message?: string } })?.data?.message
@@ -57,11 +61,15 @@ export function useTarjetas() {
     }
   }
 
-  /** Inicia la inscripción: si funciona, el navegador sale de la SPA hacia Webpay. */
-  async function agregar() {
+  /**
+   * Inicia la inscripción: si funciona, el navegador sale de la SPA hacia Webpay.
+   * `retornoPath` decide a qué página de la tienda vuelve Transbank (whitelisteada
+   * server-side): 'medios-pago' (default) o 'suscripciones' (para reanudar un alta).
+   */
+  async function agregar(retornoPath?: 'medios-pago' | 'suscripciones') {
     const res = await useApiFetch<{ inscripcionId: string, urlWebpay: string }>(
       `${apiUrl}/online/medios-pago`,
-      { method: 'POST' },
+      { method: 'POST', body: retornoPath ? { retornoPath } : {} },
     )
     window.location.href = res.urlWebpay
   }
