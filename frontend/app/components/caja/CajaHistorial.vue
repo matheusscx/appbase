@@ -59,7 +59,7 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
 </script>
 
 <template>
-  <UCard>
+  <UCard class="w-full">
     <template #header>
       <div class="flex items-center justify-between">
         <h2 class="text-base font-semibold text-default">

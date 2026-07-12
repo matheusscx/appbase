@@ -93,7 +93,7 @@ const columns: TableColumn<Tarjeta>[] = [
     </template>
 
     <template #body>
-      <div class="max-w-5xl mx-auto space-y-6 py-6">
+      <div class="w-full space-y-6">
         <CrudPageHeader
           title="Medios de pago"
           description="Tarjetas inscritas en Webpay Oneclick para pagar en la tienda online. Nunca guardamos el número: solo la marca y los últimos 4 dígitos."

@@ -202,7 +202,7 @@ const columns: TableColumn<Tercero>[] = [
     </template>
 
     <template #body>
-      <div class="space-y-6">
+      <div class="w-full space-y-6">
         <CrudPageHeader
           title="Terceros"
           description="Directorio de proveedores, empresas y personas naturales recurrentes."

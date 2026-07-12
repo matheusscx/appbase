@@ -116,7 +116,7 @@ function confirmarEliminar() {
     </template>
 
     <template #body>
-      <div class="max-w-5xl mx-auto space-y-6 py-6">
+      <div class="w-full space-y-6">
         <CrudPageHeader
           title="Suscripciones"
           description="Administración de las suscripciones de los clientes del tenant."

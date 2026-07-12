@@ -58,7 +58,7 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
     </template>
 
     <template #body>
-      <div class="max-w-5xl mx-auto space-y-6 py-6">
+      <div class="w-full space-y-6">
         <div
           v-if="!loading && cajaStore.detalle"
           class="flex flex-wrap items-center gap-4"

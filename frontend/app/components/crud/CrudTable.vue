@@ -6,10 +6,15 @@ defineProps<{
   columns: TableColumn<T>[]
   loading?: boolean
 }>()
+
+const tableSlots = computed(() => {
+  const slots = useSlots()
+  return Object.keys(slots).filter(name => name !== 'footer')
+})
 </script>
 
 <template>
-  <UCard>
+  <UCard class="w-full">
     <UTable
       :data="data"
       :columns="columns"
@@ -17,7 +22,7 @@ defineProps<{
       v-bind="$attrs"
     >
       <template
-        v-for="(_, slotName) in $slots"
+        v-for="slotName in tableSlots"
         #[slotName]="slotProps"
       >
         <slot
@@ -31,5 +36,12 @@ defineProps<{
         </div>
       </template>
     </UTable>
+
+    <div
+      v-if="$slots.footer"
+      class="flex justify-end border-t border-default pt-4"
+    >
+      <slot name="footer" />
+    </div>
   </UCard>
 </template>

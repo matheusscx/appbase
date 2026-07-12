@@ -36,7 +36,7 @@ async function abrir() {
 </script>
 
 <template>
-  <UCard>
+  <UCard class="w-full">
     <template #header>
       <div>
         <h2 class="text-base font-semibold text-default">

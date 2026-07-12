@@ -190,7 +190,7 @@ const columns: TableColumn<VentaResumen>[] = [
     </template>
 
     <template #body>
-      <div class="max-w-5xl mx-auto space-y-4 py-6">
+      <div class="w-full space-y-6">
         <!-- Resumen -->
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div class="rounded-lg bg-muted p-3">
@@ -259,71 +259,63 @@ const columns: TableColumn<VentaResumen>[] = [
           />
         </div>
 
-        <!-- Loading -->
-        <div v-if="loading" class="text-center text-muted py-12">
-          <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
-          Cargando ventas…
-        </div>
-
-        <UCard v-else>
-          <UTable
-            :data="ventas"
-            :columns="columns"
-            :ui="{ tr: 'cursor-pointer' }"
-            @select="onSelectVenta"
-          >
-            <template #fecha-cell="{ row }">
-              <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
-            </template>
-            <template #canal-cell="{ row }">
-              <UBadge :color="canalColor(row.original.canal)" :label="canalLabel(row.original.canal)" variant="subtle" size="sm" />
-            </template>
-            <template #estado-cell="{ row }">
-              <div class="flex flex-wrap items-center gap-1">
-                <UBadge :color="estadoColor(row.original.estado)" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
-                <UBadge
-                  v-if="row.original.esNotaCredito"
-                  color="info"
-                  label="NC"
-                  variant="subtle"
-                  size="sm"
-                />
-                <UBadge
-                  v-else-if="badgeReembolso(row.original)"
-                  :color="badgeReembolso(row.original)!.color"
-                  :label="badgeReembolso(row.original)!.label"
-                  variant="subtle"
-                  size="sm"
-                />
-              </div>
-            </template>
-            <template #totalFinal-cell="{ row }">
-              <span class="font-mono">{{ formatMonto(row.original.totalFinal) }}</span>
-            </template>
-            <template #montoPagado-cell="{ row }">
-              <span class="font-mono">{{ formatMonto(row.original.montoPagado) }}</span>
-            </template>
-            <template #saldo-cell="{ row }">
-              <span class="font-mono" :class="new Decimal(row.original.saldo).gt(0) ? 'text-warning' : ''">
-                {{ formatMonto(row.original.saldo) }}
-              </span>
-            </template>
-            <template #empty>
-              <div class="py-10 text-center text-sm text-muted">
-                <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-                {{ hayFiltrosActivos ? 'Ninguna venta coincide con los filtros.' : 'No hay ventas registradas.' }}
-              </div>
-            </template>
-          </UTable>
-
-          <div v-if="meta.total > pageSize" class="flex justify-end pt-4">
+        <CrudTable
+          :data="ventas"
+          :columns="columns"
+          :loading="loading"
+          :ui="{ tr: 'cursor-pointer' }"
+          @select="onSelectVenta"
+        >
+          <template #fecha-cell="{ row }">
+            <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
+          </template>
+          <template #canal-cell="{ row }">
+            <UBadge :color="canalColor(row.original.canal)" :label="canalLabel(row.original.canal)" variant="subtle" size="sm" />
+          </template>
+          <template #estado-cell="{ row }">
+            <div class="flex flex-wrap items-center gap-1">
+              <UBadge :color="estadoColor(row.original.estado)" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
+              <UBadge
+                v-if="row.original.esNotaCredito"
+                color="info"
+                label="NC"
+                variant="subtle"
+                size="sm"
+              />
+              <UBadge
+                v-else-if="badgeReembolso(row.original)"
+                :color="badgeReembolso(row.original)!.color"
+                :label="badgeReembolso(row.original)!.label"
+                variant="subtle"
+                size="sm"
+              />
+            </div>
+          </template>
+          <template #totalFinal-cell="{ row }">
+            <span class="font-mono">{{ formatMonto(row.original.totalFinal) }}</span>
+          </template>
+          <template #montoPagado-cell="{ row }">
+            <span class="font-mono">{{ formatMonto(row.original.montoPagado) }}</span>
+          </template>
+          <template #saldo-cell="{ row }">
+            <span class="font-mono" :class="new Decimal(row.original.saldo).gt(0) ? 'text-warning' : ''">
+              {{ formatMonto(row.original.saldo) }}
+            </span>
+          </template>
+          <template #empty>
+            <div class="py-10 text-center text-sm text-muted">
+              <UIcon name="i-lucide-inbox" class="mx-auto mb-2 h-8 w-8 opacity-40" />
+              {{ hayFiltrosActivos ? 'Ninguna venta coincide con los filtros.' : 'No hay ventas registradas.' }}
+            </div>
+          </template>
+          <template v-if="meta.total > pageSize" #footer>
             <UPagination
               v-model:page="page"
               :items-per-page="pageSize"
               :total="meta.total"
             />
-          </div>
-        </UCard>
+          </template>
+        </CrudTable>
 
         <VentasVentaDetalleDrawer
           v-model:open="drawerOpen"

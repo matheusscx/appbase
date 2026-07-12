@@ -38,7 +38,7 @@ async function onOpened(cajaId: string): Promise<void> {
 </script>
 
 <template>
-  <div>
+  <div class="w-full">
     <div v-if="loading" class="py-12 text-center text-sm text-muted">
       <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
       Cargando cajas…

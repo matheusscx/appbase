@@ -28,7 +28,7 @@ onMounted(async () => {
     </template>
 
     <template #body>
-      <div class="max-w-5xl mx-auto space-y-6 py-6">
+      <div class="w-full space-y-6">
         <ULink
           to="/caja"
           class="text-sm text-highlighted inline-flex items-center gap-1"

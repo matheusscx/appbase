@@ -194,7 +194,7 @@ Patrón extraído de `configuracion/categorias.vue`. Ubicación: `app/components
 | Componente | Uso |
 |------------|-----|
 | `CrudPageHeader` | Título (`h2` o `h1` con `large`) + subtítulo + slot `#actions` |
-| `CrudTable` | `UCard` + `UTable` con empty state por defecto |
+| `CrudTable` | `UCard` + `UTable` con empty state por defecto y ancho completo (`w-full`) |
 | `CrudListItem` | Celda nombre: título + subtítulo muted |
 | `CrudModal` | Confirmación de eliminación (cancel + confirm) |
 

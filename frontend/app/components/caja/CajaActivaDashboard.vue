@@ -54,8 +54,8 @@ watch(() => props.caja.id, () => {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <UCard>
+  <div class="w-full space-y-6">
+    <UCard class="w-full">
       <template #header>
         <CajaTurnoHeader
           :caja="caja"

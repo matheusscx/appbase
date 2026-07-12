@@ -185,7 +185,7 @@ async function confirmar() {
     </template>
 
     <template #body>
-      <div class="max-w-5xl mx-auto space-y-6 py-6">
+      <div class="w-full space-y-6">
         <CrudPageHeader
           title="Mis suscripciones"
           description="Compras recurrentes de items del catálogo — pausá, reanudá o cancelá cuando quieras."

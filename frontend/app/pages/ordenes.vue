@@ -132,7 +132,7 @@ const columns: TableColumn<OrdenRow>[] = [
     </template>
 
     <template #body>
-      <div class="max-w-5xl mx-auto space-y-4 py-6">
+      <div class="w-full space-y-6">
         <CrudPageHeader
           title="Órdenes de cobro"
           description="Historial de órdenes de cobro generadas a través de tus pasarelas de pago."
@@ -183,62 +183,54 @@ const columns: TableColumn<OrdenRow>[] = [
           />
         </div>
 
-        <!-- Loading -->
-        <div v-if="loading" class="text-center text-muted py-12">
-          <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
-          Cargando órdenes…
-        </div>
-
-        <UCard v-else>
-          <UTable
-            :data="ordenes"
-            :columns="columns"
-            :ui="{ tr: 'cursor-pointer' }"
-            @select="onSelectOrden"
-          >
-            <template #creadoEl-cell="{ row }">
-              <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
-            </template>
-            <template #descripcion-cell="{ row }">
-              <div>
-                <p class="font-medium text-default">
-                  {{ row.original.descripcion }}
-                </p>
-                <p v-if="row.original.referenciaExterna || row.original.pagadorRef" class="text-xs text-muted">
-                  <span v-if="row.original.referenciaExterna">ref {{ row.original.referenciaExterna }}</span>
-                  <span v-if="row.original.referenciaExterna && row.original.pagadorRef"> · </span>
-                  <span v-if="row.original.pagadorRef">{{ row.original.pagadorRef }}</span>
-                </p>
-              </div>
-            </template>
-            <template #codigoOrden-cell="{ row }">
-              <span class="font-mono text-xs text-muted">{{ row.original.codigoOrden }}</span>
-            </template>
-            <template #monto-cell="{ row }">
-              <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
-            </template>
-            <template #estado-cell="{ row }">
-              <UBadge :color="estadoColor[row.original.estado] ?? 'neutral'" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
-            </template>
-            <template #origen-cell="{ row }">
-              <span class="text-muted capitalize">{{ row.original.origen === 'api' ? 'API' : 'Interno' }}</span>
-            </template>
-            <template #empty>
-              <div class="py-10 text-center text-sm text-muted">
-                <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-                {{ hayFiltrosActivos ? 'Ninguna orden coincide con los filtros.' : 'Sin órdenes de cobro todavía.' }}
-              </div>
-            </template>
-          </UTable>
-
-          <div v-if="meta.total > pageSize" class="flex justify-end pt-4">
+        <CrudTable
+          :data="ordenes"
+          :columns="columns"
+          :loading="loading"
+          :ui="{ tr: 'cursor-pointer' }"
+          @select="onSelectOrden"
+        >
+          <template #creadoEl-cell="{ row }">
+            <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
+          </template>
+          <template #descripcion-cell="{ row }">
+            <div>
+              <p class="font-medium text-default">
+                {{ row.original.descripcion }}
+              </p>
+              <p v-if="row.original.referenciaExterna || row.original.pagadorRef" class="text-xs text-muted">
+                <span v-if="row.original.referenciaExterna">ref {{ row.original.referenciaExterna }}</span>
+                <span v-if="row.original.referenciaExterna && row.original.pagadorRef"> · </span>
+                <span v-if="row.original.pagadorRef">{{ row.original.pagadorRef }}</span>
+              </p>
+            </div>
+          </template>
+          <template #codigoOrden-cell="{ row }">
+            <span class="font-mono text-xs text-muted">{{ row.original.codigoOrden }}</span>
+          </template>
+          <template #monto-cell="{ row }">
+            <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
+          </template>
+          <template #estado-cell="{ row }">
+            <UBadge :color="estadoColor[row.original.estado] ?? 'neutral'" :label="estadoLabel(row.original.estado)" variant="subtle" size="sm" />
+          </template>
+          <template #origen-cell="{ row }">
+            <span class="text-muted capitalize">{{ row.original.origen === 'api' ? 'API' : 'Interno' }}</span>
+          </template>
+          <template #empty>
+            <div class="py-10 text-center text-sm text-muted">
+              <UIcon name="i-lucide-inbox" class="mx-auto mb-2 h-8 w-8 opacity-40" />
+              {{ hayFiltrosActivos ? 'Ninguna orden coincide con los filtros.' : 'Sin órdenes de cobro todavía.' }}
+            </div>
+          </template>
+          <template v-if="meta.total > pageSize" #footer>
             <UPagination
               v-model:page="page"
               :items-per-page="pageSize"
               :total="meta.total"
             />
-          </div>
-        </UCard>
+          </template>
+        </CrudTable>
 
         <OrdenesOrdenDetalleDrawer
           v-model:open="drawerOpen"

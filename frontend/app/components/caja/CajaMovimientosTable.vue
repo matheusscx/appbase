@@ -58,7 +58,7 @@ const columns: TableColumn<typeof movimientos.value[number]>[] = [
 </script>
 
 <template>
-  <UCard>
+  <UCard class="w-full">
     <template #header>
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h3 class="text-sm font-semibold text-default">

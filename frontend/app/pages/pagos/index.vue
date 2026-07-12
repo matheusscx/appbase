@@ -173,7 +173,7 @@ onMounted(cargar)
     </template>
 
     <template #body>
-      <div class="max-w-5xl mx-auto space-y-4 py-6">
+      <div class="w-full space-y-6">
         <!-- Resumen -->
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div class="rounded-lg bg-muted p-3">
@@ -246,57 +246,49 @@ onMounted(cargar)
           />
         </div>
 
-        <!-- Loading -->
-        <div v-if="loading" class="text-center text-muted py-12">
-          <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
-          Cargando pagos…
-        </div>
-
-        <UCard v-else>
-          <UTable
-            :data="pagos"
-            :columns="columns"
-            :ui="{ tr: 'cursor-pointer' }"
-            @select="onSelectPago"
-          >
-            <template #fecha-cell="{ row }">
-              <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
-            </template>
-            <template #monto-cell="{ row }">
-              <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
-            </template>
-            <template #vuelto-cell="{ row }">
-              <span class="font-mono text-muted">
-                {{ row.original.vuelto && new Decimal(row.original.vuelto).gt(0) ? formatMonto(row.original.vuelto) : '—' }}
-              </span>
-            </template>
-            <template #customerNombre-cell="{ row }">
-              <span class="text-muted">{{ row.original.customerNombre ?? '—' }}</span>
-            </template>
-            <template #ventaEstado-cell="{ row }">
-              <UBadge
-                :color="estadoColor(row.original.ventaEstado)"
-                :label="estadoLabel(row.original.ventaEstado)"
-                variant="subtle"
-                size="sm"
-              />
-            </template>
-            <template #empty>
-              <div class="py-10 text-center text-sm text-muted">
-                <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-                {{ hayFiltrosActivos ? 'Ningún pago coincide con los filtros.' : 'Sin pagos registrados.' }}
-              </div>
-            </template>
-          </UTable>
-
-          <div v-if="meta.total > pageSize" class="flex justify-end pt-4">
+        <CrudTable
+          :data="pagos"
+          :columns="columns"
+          :loading="loading"
+          :ui="{ tr: 'cursor-pointer' }"
+          @select="onSelectPago"
+        >
+          <template #fecha-cell="{ row }">
+            <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
+          </template>
+          <template #monto-cell="{ row }">
+            <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
+          </template>
+          <template #vuelto-cell="{ row }">
+            <span class="font-mono text-muted">
+              {{ row.original.vuelto && new Decimal(row.original.vuelto).gt(0) ? formatMonto(row.original.vuelto) : '—' }}
+            </span>
+          </template>
+          <template #customerNombre-cell="{ row }">
+            <span class="text-muted">{{ row.original.customerNombre ?? '—' }}</span>
+          </template>
+          <template #ventaEstado-cell="{ row }">
+            <UBadge
+              :color="estadoColor(row.original.ventaEstado)"
+              :label="estadoLabel(row.original.ventaEstado)"
+              variant="subtle"
+              size="sm"
+            />
+          </template>
+          <template #empty>
+            <div class="py-10 text-center text-sm text-muted">
+              <UIcon name="i-lucide-inbox" class="mx-auto mb-2 h-8 w-8 opacity-40" />
+              {{ hayFiltrosActivos ? 'Ningún pago coincide con los filtros.' : 'Sin pagos registrados.' }}
+            </div>
+          </template>
+          <template v-if="meta.total > pageSize" #footer>
             <UPagination
               v-model:page="page"
               :items-per-page="pageSize"
               :total="meta.total"
             />
-          </div>
-        </UCard>
+          </template>
+        </CrudTable>
       </div>
     </template>
   </UDashboardPanel>
