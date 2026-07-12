@@ -4,33 +4,79 @@ import type { Tarjeta } from '~/composables/useTarjetas'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-const { tarjetas, agregar, eliminar, marcarPreferida } = useTarjetas()
+const route = useRoute()
+const router = useRouter()
+const toast = useToast()
+const { formatFecha } = useFormatters()
 
-const drawerOpen = ref(false)
+const {
+  tarjetas, oneclickDisponible, loading,
+  agregar, eliminar, marcarPreferida,
+} = useTarjetas()
+
+const agregando = ref(false)
+const working = reactive(new Set<string>())
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
 
-const emptyForm = () => ({ numero: '', titular: '', vencimiento: '' })
-const form = ref(emptyForm())
-
-function abrirCrear() {
-  form.value = emptyForm()
-  drawerOpen.value = true
+function apiErrorMsg(e: unknown, fallback: string): string {
+  return (e as { data?: { message?: string } })?.data?.message ?? fallback
 }
 
-function guardar() {
-  agregar(form.value)
-  drawerOpen.value = false
+onMounted(async () => {
+  // Retorno de Webpay: /tienda/medios-pago?inscripcionId=...&estado=activa|fallida
+  const estado = route.query.estado
+  if (typeof estado === 'string' && route.query.inscripcionId) {
+    if (estado === 'activa') {
+      toast.add({ title: 'Tarjeta inscrita correctamente', color: 'success' })
+    } else {
+      toast.add({ title: 'La inscripción de la tarjeta fue rechazada', color: 'error' })
+    }
+    await router.replace({ query: {} })
+  }
+})
+
+async function abrirInscripcion() {
+  if (agregando.value) return
+  agregando.value = true
+  try {
+    await agregar() // si funciona, el navegador sale hacia Webpay: no reseteamos el loading
+  } catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo iniciar la inscripción'), color: 'error' })
+    agregando.value = false
+  }
 }
 
-function confirmarEliminar(id: string) {
-  eliminar(id)
-  confirmDeleteId.value = null
+async function confirmarEliminar(id: string) {
   confirmModalOpen.value = false
+  confirmDeleteId.value = null
+  if (working.has(id)) return
+  working.add(id)
+  try {
+    await eliminar(id)
+    toast.add({ title: 'Tarjeta eliminada', color: 'success' })
+  } catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo eliminar la tarjeta'), color: 'error' })
+  } finally {
+    working.delete(id)
+  }
+}
+
+async function preferir(t: Tarjeta) {
+  if (t.preferida || working.has(t.inscripcionId)) return
+  working.add(t.inscripcionId)
+  try {
+    await marcarPreferida(t.inscripcionId)
+    toast.add({ title: 'Tarjeta preferida actualizada', color: 'success' })
+  } catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo marcar la preferida'), color: 'error' })
+  } finally {
+    working.delete(t.inscripcionId)
+  }
 }
 
 const columns: TableColumn<Tarjeta>[] = [
-  { accessorKey: 'titular', header: 'Tarjeta' },
+  { accessorKey: 'marca', header: 'Tarjeta' },
   { id: 'preferida', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
@@ -50,20 +96,38 @@ const columns: TableColumn<Tarjeta>[] = [
       <div class="max-w-5xl mx-auto space-y-6 py-6">
         <CrudPageHeader
           title="Medios de pago"
-          description="Tarjetas guardadas para pagar en la tienda online. Solo se guardan la marca y los últimos 4 dígitos."
+          description="Tarjetas inscritas en Webpay Oneclick para pagar en la tienda online. Nunca guardamos el número: solo la marca y los últimos 4 dígitos."
         >
           <template #actions>
-            <UButton icon="i-lucide-plus" @click="abrirCrear">
+            <UButton
+              icon="i-lucide-plus"
+              :disabled="!oneclickDisponible"
+              :loading="agregando"
+              @click="abrirInscripcion"
+            >
               Agregar tarjeta
             </UButton>
           </template>
         </CrudPageHeader>
 
-        <CrudTable :data="tarjetas" :columns="columns">
-          <template #titular-cell="{ row }">
+        <UAlert
+          v-if="!loading && !oneclickDisponible"
+          icon="i-lucide-triangle-alert"
+          color="warning"
+          variant="soft"
+          title="Inscripción no disponible"
+          description="El tenant no tiene una pasarela con tokenización (Oneclick) configurada y activa."
+        />
+
+        <div v-if="loading" class="py-8 text-center text-sm text-muted">
+          Cargando…
+        </div>
+
+        <CrudTable v-else :data="tarjetas" :columns="columns">
+          <template #marca-cell="{ row }">
             <CrudListItem
-              :title="`${row.original.marca} •••• ${row.original.last4}`"
-              :subtitle="`${row.original.titular} · vence ${row.original.vencimiento}`"
+              :title="`${row.original.marca ?? 'Tarjeta'} •••• ${row.original.last4 ?? '????'}`"
+              :subtitle="`Inscrita el ${formatFecha(row.original.creadoEl)}`"
             />
           </template>
 
@@ -72,7 +136,7 @@ const columns: TableColumn<Tarjeta>[] = [
               <button
                 type="button"
                 class="p-1 rounded transition-colors hover:bg-muted"
-                @click="marcarPreferida(row.original.id)"
+                @click="preferir(row.original)"
               >
                 <UIcon
                   name="i-lucide-star"
@@ -88,50 +152,21 @@ const columns: TableColumn<Tarjeta>[] = [
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
-              @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+              @click="() => { confirmDeleteId = row.original.inscripcionId; confirmModalOpen = true }"
             />
           </template>
 
           <template #empty>
             <div class="py-8 text-center text-sm text-muted">
-              No tenés tarjetas registradas.
+              No tenés tarjetas inscritas.
             </div>
           </template>
         </CrudTable>
 
-        <AppDrawer v-model:open="drawerOpen" width="50%">
-          <template #header>
-            <span class="font-semibold text-default">Nueva tarjeta</span>
-          </template>
-
-          <template #body>
-            <UForm id="tarjeta-form" :state="form" class="space-y-4" @submit="guardar">
-              <UFormField label="Número de tarjeta" required>
-                <UInput v-model="form.numero" placeholder="4111 1111 1111 1111" autofocus />
-              </UFormField>
-              <UFormField label="Titular" required>
-                <UInput v-model="form.titular" placeholder="Nombre como aparece en la tarjeta" />
-              </UFormField>
-              <UFormField label="Vencimiento" required>
-                <UInput v-model="form.vencimiento" placeholder="MM/AA" />
-              </UFormField>
-            </UForm>
-          </template>
-
-          <template #actions>
-            <UButton color="neutral" variant="ghost" @click="drawerOpen = false">
-              Cancelar
-            </UButton>
-            <UButton type="submit" form="tarjeta-form">
-              Guardar
-            </UButton>
-          </template>
-        </AppDrawer>
-
         <CrudModal
           v-model:open="confirmModalOpen"
           title="Eliminar tarjeta"
-          message="¿Estás seguro de que quieres eliminar esta tarjeta?"
+          message="¿Estás seguro? La tarjeta se eliminará también en Transbank y no podrá usarse para cobros."
           @cancel="confirmDeleteId = null"
           @confirm="confirmDeleteId && confirmarEliminar(confirmDeleteId)"
         />

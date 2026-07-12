@@ -1,79 +1,87 @@
+import { useApiFetch } from './useApiFetch'
+
 export interface Tarjeta {
-  id: string
-  titular: string
-  marca: string
-  last4: string
-  vencimiento: string
+  inscripcionId: string
+  marca: string | null
+  last4: string | null
+  tipo: string | null
   preferida: boolean
+  creadoEl: string
 }
 
-function detectarMarca(numero: string): string {
-  switch (numero.trim()[0]) {
-    case '4': return 'Visa'
-    case '5': return 'Mastercard'
-    case '3': return 'American Express'
-    case '6': return 'Discover'
-    default: return 'Tarjeta'
-  }
+interface MedioApi {
+  inscripcionId: string
+  estado: string
+  preferida: boolean
+  creadoEl: string
+  mediosPago: { tipo: string, marca: string | null, ultimos4: string, estado: string }[]
+}
+
+interface ListarResponse {
+  oneclickDisponible: boolean
+  medios: MedioApi[]
 }
 
 /**
- * Medios de pago mock: solo frontend, persistido en localStorage por tenant.
- * Nunca se guarda el número completo ni el CVV — solo marca + últimos 4 dígitos.
+ * Medios de pago reales del usuario: tarjetas inscritas en Webpay Oneclick
+ * (tokenizadas en Transbank). Acá nunca viaja un número de tarjeta — solo la
+ * marca y los últimos 4 dígitos que devuelve el proveedor.
  */
 export function useTarjetas() {
-  const tenantStore = useTenantStore()
-  const storageKey = computed(
-    () => `tienda:tarjetas:${tenantStore.activeTenant?.tenantId ?? 'sin-tenant'}`,
-  )
+  const config = useRuntimeConfig()
+  const toast = useToast()
+  const apiUrl = config.public.apiUrl
+
   const tarjetas = ref<Tarjeta[]>([])
+  const oneclickDisponible = ref(false)
+  const loading = ref(false)
 
-  function cargar() {
-    if (import.meta.server) return
+  async function cargar() {
+    loading.value = true
     try {
-      const raw = localStorage.getItem(storageKey.value)
-      tarjetas.value = raw ? (JSON.parse(raw) as Tarjeta[]) : []
-    } catch {
-      tarjetas.value = []
+      const res = await useApiFetch<ListarResponse>(`${apiUrl}/online/medios-pago`)
+      oneclickDisponible.value = res.oneclickDisponible
+      tarjetas.value = res.medios.map((m) => ({
+        inscripcionId: m.inscripcionId,
+        marca: m.mediosPago[0]?.marca ?? null,
+        last4: m.mediosPago[0]?.ultimos4 ?? null,
+        tipo: m.mediosPago[0]?.tipo ?? null,
+        preferida: m.preferida,
+        creadoEl: m.creadoEl,
+      }))
+    } catch (e: unknown) {
+      const msg = (e as { data?: { message?: string } })?.data?.message
+      toast.add({ title: msg ?? 'Error al cargar los medios de pago', color: 'error' })
+    } finally {
+      loading.value = false
     }
   }
 
-  function persistir() {
-    if (import.meta.server) return
-    localStorage.setItem(storageKey.value, JSON.stringify(tarjetas.value))
+  /** Inicia la inscripción: si funciona, el navegador sale de la SPA hacia Webpay. */
+  async function agregar() {
+    const res = await useApiFetch<{ inscripcionId: string, urlWebpay: string }>(
+      `${apiUrl}/online/medios-pago`,
+      { method: 'POST' },
+    )
+    window.location.href = res.urlWebpay
   }
 
-  function agregar(datos: { numero: string, titular: string, vencimiento: string }) {
-    const nueva: Tarjeta = {
-      id: crypto.randomUUID(),
-      titular: datos.titular,
-      marca: detectarMarca(datos.numero),
-      last4: datos.numero.replace(/\D/g, '').slice(-4),
-      vencimiento: datos.vencimiento,
-      preferida: tarjetas.value.length === 0,
-    }
-    tarjetas.value = [...tarjetas.value, nueva]
-    persistir()
+  async function eliminar(inscripcionId: string) {
+    await useApiFetch(`${apiUrl}/online/medios-pago/${inscripcionId}`, { method: 'DELETE' })
+    await cargar()
   }
 
-  function eliminar(id: string) {
-    const eraPreferida = tarjetas.value.find((t) => t.id === id)?.preferida ?? false
-    tarjetas.value = tarjetas.value.filter((t) => t.id !== id)
-    if (eraPreferida && tarjetas.value.length > 0) {
-      tarjetas.value = tarjetas.value.map((t, i) => ({ ...t, preferida: i === 0 }))
-    }
-    persistir()
+  async function marcarPreferida(inscripcionId: string) {
+    await useApiFetch(`${apiUrl}/online/medios-pago/${inscripcionId}/preferida`, { method: 'PATCH' })
+    await cargar()
   }
 
-  function marcarPreferida(id: string) {
-    tarjetas.value = tarjetas.value.map((t) => ({ ...t, preferida: t.id === id }))
-    persistir()
-  }
+  // Preferida efectiva para checkout/suscripciones: la marcada o la más reciente.
+  const preferida = computed(() =>
+    tarjetas.value.find((t) => t.preferida) ?? tarjetas.value[0] ?? null,
+  )
 
-  const preferida = computed(() => tarjetas.value.find((t) => t.preferida) ?? null)
+  onMounted(() => { void cargar() })
 
-  onMounted(cargar)
-  watch(storageKey, cargar)
-
-  return { tarjetas, preferida, agregar, eliminar, marcarPreferida }
+  return { tarjetas, preferida, oneclickDisponible, loading, cargar, agregar, eliminar, marcarPreferida }
 }
