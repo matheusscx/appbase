@@ -5,8 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { PasarelaInscripcion } from '../entities/pasarela-inscripcion.entity';
 import { PasarelaMedioPago } from '../entities/pasarela-medio-pago.entity';
@@ -32,6 +32,7 @@ export class InscripcionesService {
     private readonly credenciales: CredencialesService,
     private readonly providerFactory: ProviderFactory,
     private readonly config: ConfigService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   private toPublico(i: PasarelaInscripcion, medios: PasarelaMedioPago[] = []) {
@@ -40,6 +41,7 @@ export class InscripcionesService {
       inscripcionId: i.inscripcionId,
       pagadorRef: i.pagadorRef,
       estado: i.estado,
+      preferida: i.preferida,
       creadoEl: i.creadoEl,
       mediosPago: medios.map((m) => ({
         medioPagoId: m.medioPagoId,
@@ -200,9 +202,14 @@ export class InscripcionesService {
     );
   }
 
-  async eliminar(tenantId: string, inscripcionId: string) {
+  async eliminar(tenantId: string, inscripcionId: string, pagadorRef?: string) {
     const inscripcion = await this.inscripcionRepo.findOne({
-      where: { inscripcionId, tenantId, estado: 'activa' },
+      where: {
+        inscripcionId,
+        tenantId,
+        estado: 'activa',
+        ...(pagadorRef ? { pagadorRef } : {}),
+      },
     });
     if (!inscripcion)
       throw new NotFoundException('Inscripción activa no encontrada');
@@ -231,6 +238,44 @@ export class InscripcionesService {
     return { inscripcionId };
   }
 
+  /** Marca la inscripción como preferida del pagador (desmarca las demás). */
+  async marcarPreferida(
+    tenantId: string,
+    inscripcionId: string,
+    pagadorRef?: string,
+  ) {
+    const inscripcion = await this.inscripcionRepo.findOne({
+      where: {
+        inscripcionId,
+        tenantId,
+        estado: 'activa',
+        ...(pagadorRef ? { pagadorRef } : {}),
+      },
+    });
+    if (!inscripcion)
+      throw new NotFoundException('Inscripción activa no encontrada');
+
+    // Regla "solo una": limpiar el flag del pagador y marcar la nueva, atómico.
+    await this.dataSource.transaction(async (manager) => {
+      await manager.update(
+        PasarelaInscripcion,
+        { tenantId, pagadorRef: inscripcion.pagadorRef, preferida: true },
+        { preferida: false },
+      );
+      await manager.update(
+        PasarelaInscripcion,
+        { inscripcionId: inscripcion.inscripcionId },
+        { preferida: true },
+      );
+    });
+
+    inscripcion.preferida = true;
+    const medios = await this.medioRepo.find({
+      where: { inscripcionId: inscripcion.inscripcionId },
+    });
+    return this.toPublico(inscripcion, medios);
+  }
+
   /** Inscripción activa para cobrar: por id explícito o la más reciente del pagador. */
   async resolverParaCobro(
     tenantId: string,
@@ -243,7 +288,7 @@ export class InscripcionesService {
       where: inscripcionId
         ? { inscripcionId, tenantId, estado: 'activa' }
         : { tenantId, pagadorRef, estado: 'activa' },
-      order: { creadoEl: 'DESC' },
+      order: { preferida: 'DESC', creadoEl: 'DESC' },
     });
     if (!inscripcion)
       throw new BadRequestException(

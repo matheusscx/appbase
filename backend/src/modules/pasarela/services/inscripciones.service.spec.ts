@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
@@ -26,6 +26,7 @@ describe('InscripcionesService', () => {
     create: jest.fn((x: Partial<PasarelaMedioPago>) => x),
     save: jest.fn((x: Partial<PasarelaMedioPago>) => Promise.resolve(x)),
     update: jest.fn(),
+    find: jest.fn().mockResolvedValue([]),
   };
   const provider = {
     iniciarInscripcion: jest.fn().mockResolvedValue({
@@ -55,6 +56,12 @@ describe('InscripcionesService', () => {
       b.replace(/^v1:cifrado\((.*)\)$/, '$1'),
     ),
   };
+  const managerMock = { update: jest.fn() };
+  const dataSource = {
+    transaction: jest.fn((cb: (m: typeof managerMock) => Promise<unknown>) =>
+      cb(managerMock),
+    ),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -77,6 +84,7 @@ describe('InscripcionesService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('http://localhost:3000') },
         },
+        { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
     service = module.get(InscripcionesService);
@@ -221,5 +229,73 @@ describe('InscripcionesService', () => {
     await expect(
       service.resolverParaCobro('t-1', undefined, 'rut-123'),
     ).rejects.toThrow('inscripción activa');
+  });
+
+  it('marcarPreferida: desmarca las demás del pagador y marca la pedida', async () => {
+    inscripcionRepo.findOne.mockResolvedValue({
+      inscripcionId: 'insc-uuid-1',
+      tenantId: 't-1',
+      pagadorRef: 'user-1',
+      estado: 'activa',
+      preferida: false,
+    });
+    const res = await service.marcarPreferida('t-1', 'insc-uuid-1', 'user-1');
+    expect(managerMock.update).toHaveBeenNthCalledWith(
+      1,
+      PasarelaInscripcion,
+      { tenantId: 't-1', pagadorRef: 'user-1', preferida: true },
+      { preferida: false },
+    );
+    expect(managerMock.update).toHaveBeenNthCalledWith(
+      2,
+      PasarelaInscripcion,
+      { inscripcionId: 'insc-uuid-1' },
+      { preferida: true },
+    );
+    expect(res.preferida).toBe(true);
+  });
+
+  it('marcarPreferida: exige activa y ownership del pagador cuando viene', async () => {
+    inscripcionRepo.findOne.mockResolvedValue(null);
+    await expect(
+      service.marcarPreferida('t-1', 'insc-uuid-1', 'user-ajeno'),
+    ).rejects.toThrow('Inscripción activa no encontrada');
+    expect(inscripcionRepo.findOne).toHaveBeenCalledWith({
+      where: {
+        inscripcionId: 'insc-uuid-1',
+        tenantId: 't-1',
+        estado: 'activa',
+        pagadorRef: 'user-ajeno',
+      },
+    });
+    expect(managerMock.update).not.toHaveBeenCalled();
+  });
+
+  it('eliminar: con pagadorRef ajeno no encuentra y NO llama al proveedor', async () => {
+    inscripcionRepo.findOne.mockResolvedValue(null);
+    await expect(
+      service.eliminar('t-1', 'insc-uuid-1', 'user-ajeno'),
+    ).rejects.toThrow('Inscripción activa no encontrada');
+    expect(inscripcionRepo.findOne).toHaveBeenCalledWith({
+      where: {
+        inscripcionId: 'insc-uuid-1',
+        tenantId: 't-1',
+        estado: 'activa',
+        pagadorRef: 'user-ajeno',
+      },
+    });
+    expect(provider.eliminarInscripcion).not.toHaveBeenCalled();
+  });
+
+  it('resolverParaCobro sin id: prioriza la preferida sobre la más reciente', async () => {
+    inscripcionRepo.findOne.mockResolvedValue({
+      inscripcionId: 'insc-pref',
+      estado: 'activa',
+    });
+    await service.resolverParaCobro('t-1', undefined, 'user-1');
+    expect(inscripcionRepo.findOne).toHaveBeenCalledWith({
+      where: { tenantId: 't-1', pagadorRef: 'user-1', estado: 'activa' },
+      order: { preferida: 'DESC', creadoEl: 'DESC' },
+    });
   });
 });

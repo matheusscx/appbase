@@ -845,6 +845,7 @@ CREATE TABLE pasarela_inscripciones (
     identificador_externo TEXT, -- tbkUser cifrado
     identificador_usuario_externo VARCHAR NOT NULL, -- username generado ('insc-…')
     estado VARCHAR NOT NULL DEFAULT 'pendiente', -- pendiente|activa|fallida|eliminada
+    preferida BOOLEAN NOT NULL DEFAULT false, -- solo una por tenant+pagador
     token_proveedor VARCHAR, -- token temporal del start (un solo uso)
     url_retorno_app VARCHAR NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}',

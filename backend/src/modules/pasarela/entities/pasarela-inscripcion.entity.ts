@@ -34,6 +34,10 @@ export class PasarelaInscripcion {
   @Column({ default: 'pendiente' })
   estado: string; // 'pendiente' | 'procesando' | 'activa' | 'fallida' | 'eliminada'
 
+  // Preferida del pagador para cobros sin inscripción explícita (solo una por tenant+pagador)
+  @Column({ default: false })
+  preferida: boolean;
+
   // token temporal del start (correlación del retorno de Webpay)
   @Index()
   @Column({ name: 'token_proveedor', type: 'varchar', nullable: true })
