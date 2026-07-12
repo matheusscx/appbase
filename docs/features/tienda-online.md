@@ -464,7 +464,7 @@ npm test -- modules/online/medios-pago-online.service.spec.ts
 ## Notes
 
 Medios de pago pasó de mock (`localStorage`, scoped por tenant) a inscripción
-real vía Oneclick desde 2026-07-08 (ver sección "Mis medios de pago
+real vía Oneclick desde 2026-07-11 (ver sección "Mis medios de pago
 (inscripción Oneclick)") — ya no hay tarjetas simuladas.
 
 Suscripciones **sí tiene backend real** desde 2026-07-05 (ver secciones
