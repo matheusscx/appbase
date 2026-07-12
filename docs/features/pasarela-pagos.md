@@ -190,6 +190,17 @@ Convenciones del repo: UUID PK/FK `type:'uuid'`, soft delete `eliminado_el`,
 - **Inscripción**: `pendiente → procesando → activa | fallida | eliminada`
   (`procesando` es el claim atómico transitorio del retorno de Webpay).
 
+### Preferida y ownership por pagador (2026-07-11)
+
+- `pasarela_inscripciones.preferida` (boolean, default false): solo una por
+  tenant+pagador; `marcarPreferida` desmarca las demás en transacción.
+- `resolverParaCobro` sin `inscripcionId` explícito ordena por
+  `preferida DESC, creadoEl DESC`.
+- `eliminar` y `marcarPreferida` aceptan un `pagadorRef` opcional que se suma al
+  `WHERE` (ownership). La API m2m sigue llamando sin él; la fachada interna de la
+  tienda (`/online/medios-pago`, ver `docs/features/tienda-online.md`) lo pasa
+  siempre con el `usuarioId` del token.
+
 ### Invariante crítico
 
 Un **timeout / error de red** contra el proveedor NUNCA se interpreta como

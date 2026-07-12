@@ -120,6 +120,7 @@ Toda la config vía `.env` en la raíz (copiar `.env.example`). El backend lee
 | Reembolsos — nota de crédito interna elegible (doc tipo 61 sin SII, `venta_referencia_id`) + devolución de stock elegible (modo `cantidad`) + visibilidad de reembolsos en detalle/listado de ventas (badges derivados) | ✅ Implementado (2026-07-10) |
 | Nota de crédito manual desde el detalle de venta (permiso dedicado `Ventas:Nota de crédito`, egreso de caja elegible en la misma transacción, devolución de stock elegible) | ✅ Implementado (2026-07-11) |
 | Módulo de cron (jobs internos: registro de ejecuciones + expiración de órdenes de pasarela) | ✅ Implementado (2026-07-11) |
+| Tienda Online — Mis medios de pago (inscripción Oneclick real: tarjetas tokenizadas por usuario, preferida en BD, eliminación en Transbank) | ✅ Implementado (2026-07-11) |
 
 ---
 

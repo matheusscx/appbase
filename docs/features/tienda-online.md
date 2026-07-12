@@ -370,6 +370,28 @@ automatizados en esta fase (no hay job/cron); solo se persiste la fecha en
 
 ---
 
+## Mis medios de pago (inscripción Oneclick)
+
+`/tienda/medios-pago` gestiona las tarjetas reales del usuario, tokenizadas en
+Transbank vía Oneclick (sin mock: el localStorage anterior murió).
+
+- **Fachada JWT**: `GET/POST /online/medios-pago`, `DELETE /online/medios-pago/:id`,
+  `PATCH /online/medios-pago/:id/preferida` (permisos `Tienda Online`). El
+  `pagadorRef` de la inscripción es el `usuarioId` del token: cada usuario ve y
+  gestiona solo sus tarjetas dentro del tenant.
+- **Alta**: `POST` inicia la inscripción y el navegador sale a Webpay
+  (`urlWebpay` con `TBK_TOKEN` embebido). El retorno cae en
+  `/pasarela/retorno/inscripcion` y redirige a la página con
+  `?inscripcionId=…&estado=activa|fallida` (toast + refetch).
+- **Sin Oneclick activo**: la página muestra un aviso y deshabilita el alta
+  (`oneclickDisponible` en el GET).
+- **Preferida**: persistida en `pasarela_inscripciones.preferida`; al cobrar sin
+  inscripción explícita gana la preferida y luego la más reciente.
+- Nunca viaja un PAN/CVV por nuestra app: solo marca + últimos 4 que devuelve
+  Transbank.
+
+---
+
 ## Testing
 
 ### Unit Tests (Backend)
