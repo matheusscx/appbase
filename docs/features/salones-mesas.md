@@ -53,7 +53,7 @@ del garzón usa el permiso dedicado **`Operar`**.
 | DELETE | `/mesas/:id` | Eliminar | Eliminar mesa |
 | GET | `/salones/operacion` | Operar | Salones + mesas con flag `ocupada` |
 | GET | `/mesas/:id/cuentas` | Operar | Cuentas abiertas de la mesa (con líneas) |
-| POST | `/mesas/:id/cuentas` | Operar | Abrir cuenta (asigna `numero` correlativo) |
+| POST | `/mesas/:id/cuentas` | Operar | Abrir cuenta (asigna `numero` correlativo por mesa) |
 | POST | `/cuentas/:id/lineas` | Operar | Agregar producto (merge por ítem) |
 | PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad |
 | DELETE | `/cuentas/:id/lineas/:lineaId` | Operar | Quitar producto |
@@ -92,8 +92,10 @@ Requiere caja física abierta (lo valida `crearEnTransaccion`).
 **derivado** (cuentas abiertas), no se almacena.
 
 **`cuentas`**: `cuenta_id` PK, `tenant_id`, `mesa_id`, `numero int` (correlativo por
-tenant → "Cuenta 85"), `estado` (`abierta|cerrada|cancelada`), `venta_id` (set al
-cerrar), `abierta_el`, `cerrada_el`.
+**mesa**, calculado solo entre las cuentas actualmente `abierta` de esa mesa → se
+reinicia en 1 cuando la mesa queda completamente libre, no es un correlativo
+histórico), `estado` (`abierta|cerrada|cancelada`), `venta_id` (set al cerrar),
+`abierta_el`, `cerrada_el`.
 
 **`cuenta_lineas`**: `cuenta_linea_id` PK, `tenant_id`, `cuenta_id`, `item_id`,
 `cantidad numeric(18,4)`. El precio se resuelve al cerrar (igual que ventas).

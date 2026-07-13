@@ -276,10 +276,13 @@ export class SalonesService {
   ): Promise<CuentaDetalle> {
     await this.getMesaOrThrow(tenantId, mesaId);
     const cuenta = await this.dataSource.transaction(async (manager) => {
+      // Numeración por mesa, basada solo en las cuentas actualmente abiertas:
+      // se reinicia en 1 cada vez que la mesa queda completamente libre (todas
+      // sus cuentas cerradas/canceladas), en vez de ser un correlativo histórico.
       const row: { next: string }[] = await manager.query(
         `SELECT COALESCE(MAX(numero), 0) + 1 AS next
-           FROM cuentas WHERE tenant_id = $1`,
-        [tenantId],
+           FROM cuentas WHERE tenant_id = $1 AND mesa_id = $2 AND estado = $3`,
+        [tenantId, mesaId, EstadoCuenta.ABIERTA],
       );
       const numero = Number(row[0].next);
       return manager.save(

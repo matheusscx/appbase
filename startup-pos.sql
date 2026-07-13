@@ -977,8 +977,10 @@ CREATE TABLE mesas (
 CREATE INDEX idx_mesas_salon ON mesas (salon_id);
 
 -- Cuenta: consumo de una mesa. Una mesa puede tener varias cuentas abiertas.
--- numero es correlativo por tenant ("Cuenta 85"). Al cerrar genera una venta
--- (venta_id) reusando el motor de ventas; cancelar la anula sin venta.
+-- numero es correlativo por mesa, calculado solo entre las cuentas 'abierta' de
+-- esa mesa ("Cuenta 1", "Cuenta 2"...): se reinicia en 1 cuando la mesa queda
+-- completamente libre, no es un correlativo histórico. Al cerrar genera una
+-- venta (venta_id) reusando el motor de ventas; cancelar la anula sin venta.
 CREATE TABLE cuentas (
     cuenta_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),

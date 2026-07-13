@@ -96,17 +96,30 @@ describe('SalonesService', () => {
   });
 
   describe('abrirCuenta', () => {
-    it('asigna el número correlativo por tenant', async () => {
+    it('asigna el número correlativo entre las cuentas abiertas de la mesa', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
-      manager.query.mockResolvedValue([{ next: '85' }]);
+      manager.query.mockResolvedValue([{ next: '3' }]);
 
       const result = await service.abrirCuenta(TENANT, MESA, {});
 
-      expect(result.numero).toBe(85);
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('mesa_id = $2 AND estado = $3'),
+        [TENANT, MESA, EstadoCuenta.ABIERTA],
+      );
+      expect(result.numero).toBe(3);
       expect(manager.create).toHaveBeenCalledWith(
         Cuenta,
-        expect.objectContaining({ numero: 85, mesaId: MESA, tenantId: TENANT }),
+        expect.objectContaining({ numero: 3, mesaId: MESA, tenantId: TENANT }),
       );
+    });
+
+    it('reinicia en 1 cuando la mesa no tiene cuentas abiertas (quedó libre)', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.query.mockResolvedValue([{ next: '1' }]);
+
+      const result = await service.abrirCuenta(TENANT, MESA, {});
+
+      expect(result.numero).toBe(1);
     });
 
     it('lanza NotFound si la mesa no pertenece al tenant', async () => {
