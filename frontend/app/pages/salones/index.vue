@@ -62,6 +62,14 @@ const salonItems = computed(() =>
 const tieneCaja = computed(() => cajaStore.activa !== null)
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
 
+// En el detalle de cuenta cada columna scrollea internamente (catálogo / líneas),
+// así que el body del drawer no debe scrollear como unidad (evita el doble scroll).
+const drawerBodyUi = computed(() => ({
+  body: activeCuenta.value
+    ? 'flex-1 min-h-0 overflow-hidden px-6 py-4'
+    : 'flex-1 min-h-0 overflow-y-auto px-6 py-4',
+}))
+
 async function cargarSalones() {
   loading.value = true
   try {
@@ -337,7 +345,7 @@ async function confirmarCobro(pagos: PagoInput[]) {
       </div>
 
       <!-- Drawer de la mesa: lista de cuentas o detalle de una cuenta -->
-      <AppDrawer v-model:open="mesaDrawerOpen" width="90%">
+      <AppDrawer v-model:open="mesaDrawerOpen" width="90%" :ui="drawerBodyUi">
         <template #header>
           <div class="flex items-center gap-2">
             <UButton
@@ -427,8 +435,8 @@ async function confirmarCobro(pagos: PagoInput[]) {
           </div>
 
           <!-- Detalle de una cuenta: catálogo + productos -->
-          <div v-else class="grid grid-cols-1 gap-4 lg:grid-cols-5">
-            <div class="lg:col-span-3">
+          <div v-else class="grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-5">
+            <div class="flex min-h-0 flex-col overflow-hidden lg:col-span-3">
               <VentasCatalogoGrid
                 :items="items"
                 :loading="loadingCatalogo"
@@ -436,40 +444,42 @@ async function confirmarCobro(pagos: PagoInput[]) {
               />
             </div>
 
-            <div class="lg:col-span-2 flex flex-col gap-3">
-              <p class="text-sm font-medium text-default">Productos de la cuenta</p>
+            <div class="flex min-h-0 flex-col gap-3 overflow-hidden lg:col-span-2">
+              <p class="shrink-0 text-sm font-medium text-default">Productos de la cuenta</p>
 
-              <div v-if="activeCuenta.lineas.length === 0" class="py-6 text-center text-sm text-muted">
-                Agrega productos desde el catálogo.
-              </div>
-              <div v-else class="divide-y divide-default">
-                <div
-                  v-for="linea in activeCuenta.lineas"
-                  :key="linea.id"
-                  class="flex items-center gap-2 py-2"
-                >
-                  <div class="min-w-0 flex-1">
-                    <p class="truncate text-sm font-medium text-default">{{ linea.nombre }}</p>
-                    <p class="text-xs text-muted">{{ formatMonto(lineaSubtotal(linea), linea.monedaId) }}</p>
+              <div class="min-h-0 flex-1 overflow-y-auto">
+                <div v-if="activeCuenta.lineas.length === 0" class="py-6 text-center text-sm text-muted">
+                  Agrega productos desde el catálogo.
+                </div>
+                <div v-else class="divide-y divide-default">
+                  <div
+                    v-for="linea in activeCuenta.lineas"
+                    :key="linea.id"
+                    class="flex items-center gap-2 py-2"
+                  >
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-sm font-medium text-default">{{ linea.nombre }}</p>
+                      <p class="text-xs text-muted">{{ formatMonto(lineaSubtotal(linea), linea.monedaId) }}</p>
+                    </div>
+                    <UInput
+                      :model-value="linea.cantidad"
+                      inputmode="decimal"
+                      size="sm"
+                      class="w-20"
+                      @change="cambiarCantidad(linea, ($event.target as HTMLInputElement).value)"
+                    />
+                    <UButton
+                      icon="i-lucide-trash-2"
+                      color="error"
+                      variant="ghost"
+                      size="xs"
+                      @click="quitarLinea(linea)"
+                    />
                   </div>
-                  <UInput
-                    :model-value="linea.cantidad"
-                    inputmode="decimal"
-                    size="sm"
-                    class="w-20"
-                    @change="cambiarCantidad(linea, ($event.target as HTMLInputElement).value)"
-                  />
-                  <UButton
-                    icon="i-lucide-trash-2"
-                    color="error"
-                    variant="ghost"
-                    size="xs"
-                    @click="quitarLinea(linea)"
-                  />
                 </div>
               </div>
 
-              <div class="mt-auto border-t border-default pt-3">
+              <div class="shrink-0 border-t border-default pt-3">
                 <div class="mb-3 flex justify-between text-base font-semibold text-default">
                   <span>Total</span>
                   <span>{{ formatMonto(totalFinal) }}</span>
