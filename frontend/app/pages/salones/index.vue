@@ -53,6 +53,26 @@ const cobroOpen = ref(false)
 const submitting = ref(false)
 const cancelOpen = ref(false)
 
+// ── Identificación de garzón por PIN ───────────────────────────────────────
+const pinModalOpen = ref(false)
+const pinModalTitle = ref('Identifícate con tu PIN')
+let pinAction: ((pin: string, nombre: string) => void) | null = null
+
+function solicitarPin(
+  title: string,
+  action: (pin: string, nombre: string) => void,
+) {
+  pinModalTitle.value = title
+  pinAction = action
+  pinModalOpen.value = true
+}
+
+function onPinConfirmado(pin: string, nombre: string) {
+  const action = pinAction
+  pinAction = null
+  action?.(pin, nombre)
+}
+
 const selectedSalon = computed(() =>
   salones.value.find(s => s.id === selectedSalonId.value) ?? null,
 )
@@ -148,12 +168,20 @@ async function recalcular() {
   }
 }
 
-async function nuevaCuenta() {
+function nuevaCuenta() {
+  if (!selectedMesa.value) return
+  solicitarPin('PIN del garzón para abrir la cuenta', (pin, nombre) => {
+    void abrirCuentaConPin(pin, nombre)
+  })
+}
+
+async function abrirCuentaConPin(pin: string, nombre: string) {
   if (!selectedMesa.value) return
   try {
-    const cuenta = await salonesApi.abrirCuenta(selectedMesa.value.id)
+    const cuenta = await salonesApi.abrirCuenta(selectedMesa.value.id, pin)
     cuentas.value.push(cuenta)
     abrirCuenta(cuenta)
+    toast.add({ title: `Cuenta abierta por ${nombre}`, color: 'success' })
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al abrir la cuenta'), color: 'error' })
@@ -271,22 +299,30 @@ async function confirmarCancelar() {
   }
 }
 
-async function confirmarCobro(pagos: PagoInput[]) {
+function confirmarCobro(pagos: PagoInput[]) {
+  if (!activeCuenta.value) return
+  // El cobro recolecta los pagos; el PIN identifica al garzón que cierra.
+  cobroOpen.value = false
+  solicitarPin('PIN del garzón para cerrar la cuenta', (pin) => {
+    void cerrarCuentaConPin(pagos, pin)
+  })
+}
+
+async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
   if (!activeCuenta.value) return
   submitting.value = true
   try {
     await salonesApi.cerrarCuenta(activeCuenta.value.id, {
+      pin,
       pagos,
       tipoDocumentoId: tiposDocumento.value[0]?.id,
     })
     toast.add({ title: 'Cuenta cerrada — venta generada', color: 'success' })
-    cobroOpen.value = false
     cuentas.value = cuentas.value.filter(c => c.id !== activeCuenta.value?.id)
     volverACuentas()
     await Promise.all([cargarSalones(), cajaStore.cargarActiva()])
   }
   catch (e: unknown) {
-    cobroOpen.value = false
     toast.add({ title: apiErrorMsg(e, 'Error al cerrar la cuenta'), color: 'error' })
   }
   finally {
@@ -360,6 +396,13 @@ async function confirmarCobro(pagos: PagoInput[]) {
               {{ selectedMesa?.nombre }}
               <template v-if="activeCuenta"> — Cuenta {{ activeCuenta.numero }}</template>
             </span>
+            <span
+              v-if="activeCuenta?.garzonAperturaNombre"
+              class="flex items-center gap-1 text-xs text-muted"
+            >
+              <UIcon name="i-lucide-user" class="size-3" />
+              {{ activeCuenta.garzonAperturaNombre }}
+            </span>
           </div>
         </template>
 
@@ -425,6 +468,13 @@ async function confirmarCobro(pagos: PagoInput[]) {
                       <p class="font-semibold text-default">Cuenta {{ cuenta.numero }}</p>
                       <p class="text-sm text-muted">
                         {{ cuenta.lineas.length }} producto(s)
+                      </p>
+                      <p
+                        v-if="cuenta.garzonAperturaNombre"
+                        class="mt-0.5 flex items-center gap-1 text-xs text-muted"
+                      >
+                        <UIcon name="i-lucide-user" class="size-3" />
+                        {{ cuenta.garzonAperturaNombre }}
                       </p>
                     </div>
                   </div>
@@ -531,6 +581,12 @@ async function confirmarCobro(pagos: PagoInput[]) {
         message="Se anulará la cuenta sin generar venta. Esta acción no se puede deshacer."
         confirm-label="Cancelar cuenta"
         @confirm="confirmarCancelar"
+      />
+
+      <SalonesGarzonPinModal
+        v-model:open="pinModalOpen"
+        :title="pinModalTitle"
+        @confirm="onPinConfirmado"
       />
     </template>
   </UDashboardPanel>

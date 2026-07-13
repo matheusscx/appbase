@@ -7,12 +7,15 @@ import { Mesa } from './entities/mesa.entity';
 import { Cuenta, EstadoCuenta } from './entities/cuenta.entity';
 import { CuentaLinea } from './entities/cuenta-linea.entity';
 import { VentasService } from '../ventas/ventas.service';
+import { GarzonesService } from '../garzones/garzones.service';
 
 const TENANT = 'tenant-uuid';
 const USUARIO = 'usuario-uuid';
 const MESA = 'mesa-uuid';
 const CUENTA = 'cuenta-uuid';
 const ITEM = 'item-uuid';
+const GARZON = 'garzon-uuid';
+const PIN = '111111';
 
 type Repo = {
   find: jest.Mock;
@@ -45,6 +48,7 @@ describe('SalonesService', () => {
   let cuentaRepo: Repo;
   let cuentaLineaRepo: Repo;
   let ventas: { crearEnTransaccion: jest.Mock };
+  let garzones: { resolverGarzonPorPin: jest.Mock };
   let manager: {
     query: jest.Mock;
     findOne: jest.Mock;
@@ -65,6 +69,12 @@ describe('SalonesService', () => {
     cuentaRepo = makeRepo();
     cuentaLineaRepo = makeRepo();
     ventas = { crearEnTransaccion: jest.fn() };
+    garzones = {
+      resolverGarzonPorPin: jest.fn().mockResolvedValue({
+        id: GARZON,
+        nombre: 'Ana Torres',
+      }),
+    };
 
     manager = {
       query: jest.fn(),
@@ -91,6 +101,7 @@ describe('SalonesService', () => {
         { provide: getRepositoryToken(CuentaLinea), useValue: cuentaLineaRepo },
         { provide: getDataSourceToken(), useValue: dataSource },
         { provide: VentasService, useValue: ventas },
+        { provide: GarzonesService, useValue: garzones },
       ],
     }).compile();
 
@@ -102,7 +113,7 @@ describe('SalonesService', () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
       manager.query.mockResolvedValue([{ next: '3' }]);
 
-      const result = await service.abrirCuenta(TENANT, MESA, {});
+      const result = await service.abrirCuenta(TENANT, MESA, { pin: PIN });
 
       expect(manager.query).toHaveBeenCalledWith(
         expect.stringContaining('mesa_id = $2 AND estado = $3'),
@@ -111,24 +122,41 @@ describe('SalonesService', () => {
       expect(result.numero).toBe(3);
       expect(manager.create).toHaveBeenCalledWith(
         Cuenta,
-        expect.objectContaining({ numero: 3, mesaId: MESA, tenantId: TENANT }),
+        expect.objectContaining({
+          numero: 3,
+          mesaId: MESA,
+          tenantId: TENANT,
+          garzonAperturaId: GARZON,
+        }),
       );
+    });
+
+    it('rechaza abrir la cuenta si el PIN del garzón es inválido', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      garzones.resolverGarzonPorPin.mockRejectedValue(
+        new BadRequestException('PIN inválido'),
+      );
+
+      await expect(
+        service.abrirCuenta(TENANT, MESA, { pin: '000000' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.create).not.toHaveBeenCalled();
     });
 
     it('reinicia en 1 cuando la mesa no tiene cuentas abiertas (quedó libre)', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
       manager.query.mockResolvedValue([{ next: '1' }]);
 
-      const result = await service.abrirCuenta(TENANT, MESA, {});
+      const result = await service.abrirCuenta(TENANT, MESA, { pin: PIN });
 
       expect(result.numero).toBe(1);
     });
 
     it('lanza NotFound si la mesa no pertenece al tenant', async () => {
       mesaRepo.findOne.mockResolvedValue(null);
-      await expect(service.abrirCuenta(TENANT, MESA, {})).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.abrirCuenta(TENANT, MESA, { pin: PIN }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -313,6 +341,7 @@ describe('SalonesService', () => {
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
       const result = await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        pin: PIN,
         pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
       });
 
@@ -328,6 +357,9 @@ describe('SalonesService', () => {
       expect(result.ventaId).toBe('venta-1');
       expect(cuenta.estado).toBe(EstadoCuenta.CERRADA);
       expect(cuenta.ventaId).toBe('venta-1');
+      expect((cuenta as { garzonCierreId?: string }).garzonCierreId).toBe(
+        GARZON,
+      );
     });
 
     it('rechaza cerrar una cuenta sin productos', async () => {
@@ -339,7 +371,7 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([]);
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {}),
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -352,7 +384,7 @@ describe('SalonesService', () => {
       });
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {}),
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });

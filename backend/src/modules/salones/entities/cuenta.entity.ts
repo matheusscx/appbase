@@ -38,6 +38,14 @@ export class Cuenta {
   @Column({ name: 'venta_id', type: 'uuid', nullable: true })
   ventaId: string | null;
 
+  // Garzón que abrió la cuenta (identificado por PIN). Trazabilidad operativa.
+  @Column({ name: 'garzon_apertura_id', type: 'uuid', nullable: true })
+  garzonAperturaId: string | null;
+
+  // Garzón que cerró la cuenta (identificado por PIN al generar la venta).
+  @Column({ name: 'garzon_cierre_id', type: 'uuid', nullable: true })
+  garzonCierreId: string | null;
+
   @Column({ name: 'abierta_el', type: 'timestamptz', default: () => 'now()' })
   abiertaEl: Date;
 

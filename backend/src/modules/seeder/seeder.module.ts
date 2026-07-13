@@ -35,6 +35,7 @@ import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { PasarelaModule } from '../pasarela/pasarela.module';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa } from '../salones/entities/mesa.entity';
+import { Garzon } from '../garzones/entities/garzon.entity';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { Mesa } from '../salones/entities/mesa.entity';
       TenantPasarela,
       Salon,
       Mesa,
+      Garzon,
     ]),
   ],
   providers: [SeederService],

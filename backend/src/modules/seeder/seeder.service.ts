@@ -29,6 +29,7 @@ import { RecargoMetodoPago } from '../recargos/entities/recargo-metodo-pago.enti
 import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
+import { Garzon } from '../garzones/entities/garzon.entity';
 import { Caja } from '../caja/entities/caja.entity';
 import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
@@ -105,6 +106,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly salonRepo: Repository<Salon>,
     @InjectRepository(Mesa)
     private readonly mesaRepo: Repository<Mesa>,
+    @InjectRepository(Garzon)
+    private readonly garzonRepo: Repository<Garzon>,
     private readonly credencialesService: CredencialesService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -152,6 +155,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedVendedorPermisosCaja();
     await this.seedSalones();
     await this.seedMesas();
+    await this.seedGarzones();
 
     this.logger.log('Seed complete.');
   }
@@ -1036,6 +1040,40 @@ export class SeederService implements OnApplicationBootstrap {
       const exists = await this.mesaRepo.findOne({ where: { id: data.id } });
       if (!exists) {
         await this.mesaRepo.save(this.mesaRepo.create(data));
+      }
+    }
+  }
+
+  private async seedGarzones(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    // pinHash = bcrypt(PIN, 10). PINs de dev: Ana=111111, Bruno=222222, Carla=333333.
+    const garzones: Partial<Garzon>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440238',
+        tenantId: PARIS,
+        nombre: 'Ana Torres',
+        pinHash: '$2b$10$9a9L1ya.PTvsPU9p1lXO5uT1W4VNkLa9SlXokegdgEkfAWFMAXAdS',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440239',
+        tenantId: PARIS,
+        nombre: 'Bruno Díaz',
+        pinHash: '$2b$10$USZItUwsBQ0wxbSH6oa9Z.yKnLmJnSa0Hm2z96hl/B7Za9tMpKpVq',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440240',
+        tenantId: PARIS,
+        nombre: 'Carla Rojas',
+        pinHash: '$2b$10$j8RWk.ZD2t1QNqeareWYwOZLGXo.vX2WnkTpcl8qS1TTIeqTd/QMK',
+        activo: true,
+      },
+    ];
+    for (const data of garzones) {
+      const exists = await this.garzonRepo.findOne({ where: { id: data.id } });
+      if (!exists) {
+        await this.garzonRepo.save(this.garzonRepo.create(data));
       }
     }
   }

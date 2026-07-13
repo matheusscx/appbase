@@ -85,6 +85,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-utensils',
       to: '/configuracion/salones',
     })
+    items.push({
+      label: 'Garzones',
+      icon: 'i-lucide-users',
+      to: '/configuracion/garzones',
+    })
   }
 
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {

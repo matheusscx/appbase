@@ -11,11 +11,13 @@ import { Mesa } from './entities/mesa.entity';
 import { Cuenta } from './entities/cuenta.entity';
 import { CuentaLinea } from './entities/cuenta-linea.entity';
 import { VentasModule } from '../ventas/ventas.module';
+import { GarzonesModule } from '../garzones/garzones.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Salon, Mesa, Cuenta, CuentaLinea]),
     VentasModule,
+    GarzonesModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [SalonesService],

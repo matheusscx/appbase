@@ -50,6 +50,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [reembolsos-nota-credito.md](./features/reembolsos-nota-credito.md) | Reembolsos con NC interna elegible + devolución de stock + visibilidad en ventas |
 | [cron.md](./features/cron.md) | Jobs internos programados: registro de ejecuciones + expiración de órdenes de pasarela |
 | [salones-mesas.md](./features/salones-mesas.md) | Salones y mesas de restaurante: plano drag&drop, cuentas por mesa y cierre que genera venta |
+| [garzones.md](./features/garzones.md) | Garzones con PIN de 6 dígitos: identificación operativa en dispositivos compartidos y trazabilidad de quién abre/cierra cada cuenta |
 
 ## Otros
 

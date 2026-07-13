@@ -981,6 +981,21 @@ CREATE INDEX idx_mesas_salon ON mesas (salon_id);
 -- esa mesa ("Cuenta 1", "Cuenta 2"...): se reinicia en 1 cuando la mesa queda
 -- completamente libre, no es un correlativo histórico. Al cerrar genera una
 -- venta (venta_id) reusando el motor de ventas; cancelar la anula sin venta.
+-- Garzón: identidad operativa liviana del tenant (NO es un usuario del sistema).
+-- Se identifica por un PIN de 6 dígitos hasheado (bcrypt) para registrar quién
+-- abre/cierra cada cuenta en dispositivos compartidos.
+CREATE TABLE garzones (
+    garzon_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    nombre VARCHAR(100) NOT NULL,
+    pin_hash TEXT NOT NULL, -- bcrypt del PIN; nunca se expone por la API
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_garzones_tenant ON garzones (tenant_id);
+
 CREATE TABLE cuentas (
     cuenta_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
@@ -989,6 +1004,8 @@ CREATE TABLE cuentas (
     nombre TEXT,
     estado TEXT NOT NULL DEFAULT 'abierta', -- abierta|cerrada|cancelada
     venta_id UUID REFERENCES ventas(venta_id), -- set al cerrar
+    garzon_apertura_id UUID REFERENCES garzones(garzon_id), -- garzón que abrió
+    garzon_cierre_id UUID REFERENCES garzones(garzon_id),   -- garzón que cerró
     abierta_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     cerrada_el TIMESTAMPTZ,
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),

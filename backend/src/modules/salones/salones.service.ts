@@ -22,6 +22,7 @@ import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { VentasService } from '../ventas/ventas.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
+import { GarzonesService } from '../garzones/garzones.service';
 
 export interface MesaResumen {
   id: string;
@@ -56,6 +57,10 @@ export interface CuentaDetalle {
   estado: EstadoCuenta;
   mesaId: string;
   ventaId: string | null;
+  garzonAperturaId: string | null;
+  garzonAperturaNombre: string | null;
+  garzonCierreId: string | null;
+  garzonCierreNombre: string | null;
   lineas: CuentaLineaDetalle[];
 }
 
@@ -69,6 +74,7 @@ export class SalonesService {
     @InjectRepository(CuentaLinea)
     private readonly cuentaLineaRepo: Repository<CuentaLinea>,
     private readonly ventasService: VentasService,
+    private readonly garzonesService: GarzonesService,
   ) {}
 
   // ── Administración: salones ──────────────────────────────────────────────
@@ -276,6 +282,11 @@ export class SalonesService {
     dto: CreateCuentaDto,
   ): Promise<CuentaDetalle> {
     await this.getMesaOrThrow(tenantId, mesaId);
+    // Identifica al garzón responsable por su PIN (lanza 401 si es inválido).
+    const garzon = await this.garzonesService.resolverGarzonPorPin(
+      tenantId,
+      dto.pin,
+    );
     const cuenta = await this.dataSource.transaction(async (manager) => {
       // Numeración por mesa, basada solo en las cuentas actualmente abiertas:
       // se reinicia en 1 cada vez que la mesa queda completamente libre (todas
@@ -294,6 +305,7 @@ export class SalonesService {
           numero,
           nombre: dto.nombre ?? null,
           estado: EstadoCuenta.ABIERTA,
+          garzonAperturaId: garzon.id,
         }),
       );
     });
@@ -449,6 +461,11 @@ export class SalonesService {
     cuentaId: string,
     dto: CerrarCuentaDto,
   ): Promise<{ cuenta: CuentaDetalle; ventaId: string }> {
+    // Identifica al garzón que cierra la cuenta por su PIN (401 si inválido).
+    const garzon = await this.garzonesService.resolverGarzonPorPin(
+      tenantId,
+      dto.pin,
+    );
     return this.dataSource.transaction(async (manager) => {
       const cuenta = await manager.findOne(Cuenta, {
         where: { id: cuentaId, tenantId },
@@ -482,6 +499,7 @@ export class SalonesService {
       cuenta.estado = EstadoCuenta.CERRADA;
       cuenta.ventaId = venta.id;
       cuenta.cerradaEl = new Date();
+      cuenta.garzonCierreId = garzon.id;
       await manager.save(Cuenta, cuenta);
 
       const detalle = await this.armarDetalle(tenantId, cuenta, manager);
@@ -513,6 +531,11 @@ export class SalonesService {
         ORDER BY cl.creado_el ASC`,
       [cuenta.id, tenantId],
     );
+    const nombresGarzon = await this.nombresGarzon(
+      runner,
+      cuenta.garzonAperturaId,
+      cuenta.garzonCierreId,
+    );
     return {
       id: cuenta.id,
       numero: cuenta.numero,
@@ -520,6 +543,14 @@ export class SalonesService {
       estado: cuenta.estado,
       mesaId: cuenta.mesaId,
       ventaId: cuenta.ventaId,
+      garzonAperturaId: cuenta.garzonAperturaId,
+      garzonAperturaNombre: cuenta.garzonAperturaId
+        ? (nombresGarzon[cuenta.garzonAperturaId] ?? null)
+        : null,
+      garzonCierreId: cuenta.garzonCierreId,
+      garzonCierreNombre: cuenta.garzonCierreId
+        ? (nombresGarzon[cuenta.garzonCierreId] ?? null)
+        : null,
       lineas: lineas.map((l) => ({
         id: l.cuenta_linea_id,
         itemId: l.item_id,
@@ -529,6 +560,21 @@ export class SalonesService {
         cantidad: l.cantidad,
       })),
     };
+  }
+
+  /** Resuelve los nombres de los garzones de apertura/cierre en una query. */
+  private async nombresGarzon(
+    runner: DataSource['manager'],
+    ...ids: (string | null)[]
+  ): Promise<Record<string, string>> {
+    const garzonIds = [...new Set(ids.filter((id): id is string => !!id))];
+    if (garzonIds.length === 0) return {};
+    const rows: { garzon_id: string; nombre: string }[] = await runner.query(
+      `SELECT garzon_id, nombre FROM garzones
+        WHERE garzon_id = ANY($1) AND eliminado_el IS NULL`,
+      [garzonIds],
+    );
+    return Object.fromEntries(rows.map((r) => [r.garzon_id, r.nombre]));
   }
 
   private async getSalonOrThrow(tenantId: string, id: string): Promise<Salon> {

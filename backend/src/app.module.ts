@@ -98,6 +98,8 @@ import { Salon } from './modules/salones/entities/salon.entity';
 import { Mesa } from './modules/salones/entities/mesa.entity';
 import { Cuenta } from './modules/salones/entities/cuenta.entity';
 import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
+import { GarzonesModule } from './modules/garzones/garzones.module';
+import { Garzon } from './modules/garzones/entities/garzon.entity';
 
 @Module({
   imports: [
@@ -175,6 +177,7 @@ import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
           Mesa,
           Cuenta,
           CuentaLinea,
+          Garzon,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -208,6 +211,7 @@ import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
     ScheduleModule.forRoot(),
     CronModule,
     SalonesModule,
+    GarzonesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

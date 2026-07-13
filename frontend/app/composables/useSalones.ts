@@ -54,6 +54,10 @@ export interface CuentaDetalle {
   estado: EstadoCuenta
   mesaId: string
   ventaId: string | null
+  garzonAperturaId: string | null
+  garzonAperturaNombre: string | null
+  garzonCierreId: string | null
+  garzonCierreNombre: string | null
   lineas: CuentaLineaDetalle[]
 }
 
@@ -64,6 +68,7 @@ export interface MesaPosicion {
 }
 
 export interface CerrarCuentaBody {
+  pin: string
   pagos?: { metodoPagoId: string, monto: string, referencia?: string }[]
   tipoDocumentoId?: string
   customer?: Record<string, unknown>
@@ -121,10 +126,10 @@ export function useSalones() {
   const listarCuentas = (mesaId: string) =>
     useApiFetch<CuentaDetalle[]>(`${apiUrl}/mesas/${mesaId}/cuentas`)
 
-  const abrirCuenta = (mesaId: string, nombre?: string) =>
+  const abrirCuenta = (mesaId: string, pin: string, nombre?: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/mesas/${mesaId}/cuentas`, {
       method: 'POST',
-      body: { nombre },
+      body: { pin, nombre },
     })
 
   const fusionarCuentas = (mesaId: string, cuentaIds: string[]) =>

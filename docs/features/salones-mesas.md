@@ -61,9 +61,14 @@ del garzón usa el permiso dedicado **`Operar`**.
 | POST | `/cuentas/:id/cancelar` | Operar | Anular cuenta (sin venta) |
 | POST | `/cuentas/:id/cerrar` | Operar | Cerrar → genera venta |
 
-`POST /cuentas/:id/cerrar` body: `{ pagos?: PagoVentaDto[], tipoDocumentoId?, customer? }`
+`POST /cuentas/:id/cerrar` body: `{ pin, pagos?: PagoVentaDto[], tipoDocumentoId?, customer? }`
 (reusa las clases de `ventas/dto/create-venta.dto.ts`). Respuesta:
 `{ cuenta: CuentaDetalle, ventaId }`.
+
+**Identificación por garzón (PIN):** abrir (`POST /mesas/:id/cuentas`) y cerrar cuenta
+requieren un `pin` de 6 dígitos que identifica al garzón responsable; la cuenta
+persiste `garzon_apertura_id` / `garzon_cierre_id` para trazabilidad. Ver
+[garzones.md](./garzones.md).
 
 `POST /mesas/:id/cuentas/fusionar` body: `{ cuentaIds: string[] }` (mínimo 2, deben
 estar `abierta` y pertenecer a la mesa). Combina, por ejemplo, "1 y 3", "3 y 4" o
