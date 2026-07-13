@@ -93,6 +93,11 @@ import { PasarelaTransaccion } from './modules/pasarela/entities/pasarela-transa
 import { CronEjecucion } from './modules/cron/entities/cron-ejecucion.entity';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CronModule } from './modules/cron/cron.module';
+import { SalonesModule } from './modules/salones/salones.module';
+import { Salon } from './modules/salones/entities/salon.entity';
+import { Mesa } from './modules/salones/entities/mesa.entity';
+import { Cuenta } from './modules/salones/entities/cuenta.entity';
+import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
 
 @Module({
   imports: [
@@ -166,6 +171,10 @@ import { CronModule } from './modules/cron/cron.module';
           PasarelaOrden,
           PasarelaTransaccion,
           CronEjecucion,
+          Salon,
+          Mesa,
+          Cuenta,
+          CuentaLinea,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -198,6 +207,7 @@ import { CronModule } from './modules/cron/cron.module';
     PasarelaModule,
     ScheduleModule.forRoot(),
     CronModule,
+    SalonesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -33,6 +33,8 @@ import { Caja } from '../caja/entities/caja.entity';
 import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { PasarelaModule } from '../pasarela/pasarela.module';
+import { Salon } from '../salones/entities/salon.entity';
+import { Mesa } from '../salones/entities/mesa.entity';
 
 @Module({
   imports: [
@@ -69,6 +71,8 @@ import { PasarelaModule } from '../pasarela/pasarela.module';
       Caja,
       Pasarela,
       TenantPasarela,
+      Salon,
+      Mesa,
     ]),
   ],
   providers: [SeederService],

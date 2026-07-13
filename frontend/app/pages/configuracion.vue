@@ -79,6 +79,14 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     )
   }
 
+  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Crear')) {
+    items.push({
+      label: 'Salones',
+      icon: 'i-lucide-utensils',
+      to: '/configuracion/salones',
+    })
+  }
+
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
     items.push({
       label: 'Items',

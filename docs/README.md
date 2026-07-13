@@ -49,6 +49,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [pasarela-pagos.md](./features/pasarela-pagos.md) | Pasarela de pagos multi-proveedor (Oneclick real, API keys m2m, admin UI) |
 | [reembolsos-nota-credito.md](./features/reembolsos-nota-credito.md) | Reembolsos con NC interna elegible + devolución de stock + visibilidad en ventas |
 | [cron.md](./features/cron.md) | Jobs internos programados: registro de ejecuciones + expiración de órdenes de pasarela |
+| [salones-mesas.md](./features/salones-mesas.md) | Salones y mesas de restaurante: plano drag&drop, cuentas por mesa y cierre que genera venta |
 
 ## Otros
 

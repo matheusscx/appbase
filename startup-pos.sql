@@ -943,3 +943,68 @@ CREATE TABLE cron_ejecuciones (
     eliminado_el TIMESTAMPTZ
 );
 CREATE INDEX idx_cron_ejecuciones_job ON cron_ejecuciones (job);
+
+-- ============================================================================
+-- Módulo Salones y Mesas (restaurante)
+-- ============================================================================
+
+-- Salón: agrupación física de mesas dentro del local del tenant.
+CREATE TABLE salones (
+    salon_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    nombre TEXT NOT NULL,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+
+-- Mesa: posicionada en el plano del salón. pos_x/pos_y son fracción 0..1 del
+-- contenedor (plano responsivo). El estado libre/ocupada es DERIVADO de las
+-- cuentas abiertas, no se almacena.
+CREATE TABLE mesas (
+    mesa_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    salon_id UUID NOT NULL REFERENCES salones(salon_id),
+    nombre TEXT NOT NULL,
+    pos_x NUMERIC(6,5) NOT NULL DEFAULT 0,
+    pos_y NUMERIC(6,5) NOT NULL DEFAULT 0,
+    forma TEXT NOT NULL DEFAULT 'cuadrada', -- redonda | cuadrada | rectangular
+    tamano TEXT NOT NULL DEFAULT 'mediano', -- pequeno | mediano | grande | extra_grande
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_mesas_salon ON mesas (salon_id);
+
+-- Cuenta: consumo de una mesa. Una mesa puede tener varias cuentas abiertas.
+-- numero es correlativo por tenant ("Cuenta 85"). Al cerrar genera una venta
+-- (venta_id) reusando el motor de ventas; cancelar la anula sin venta.
+CREATE TABLE cuentas (
+    cuenta_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    mesa_id UUID NOT NULL REFERENCES mesas(mesa_id),
+    numero INTEGER NOT NULL,
+    nombre TEXT,
+    estado TEXT NOT NULL DEFAULT 'abierta', -- abierta|cerrada|cancelada
+    venta_id UUID REFERENCES ventas(venta_id), -- set al cerrar
+    abierta_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    cerrada_el TIMESTAMPTZ,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_cuentas_mesa ON cuentas (mesa_id);
+
+-- Línea de cuenta: producto acumulado mientras la cuenta está abierta. El
+-- precio se resuelve al cerrar (igual que ventas), no se snapshotea aquí.
+CREATE TABLE cuenta_lineas (
+    cuenta_linea_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    cuenta_id UUID NOT NULL REFERENCES cuentas(cuenta_id),
+    item_id UUID NOT NULL REFERENCES items(item_id),
+    cantidad NUMERIC(18,4) NOT NULL,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_cuenta_lineas_cuenta ON cuenta_lineas (cuenta_id);

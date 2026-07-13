@@ -56,6 +56,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/ventas/pos',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Operar')) {
+    base.push({
+      label: 'Salones',
+      icon: 'i-lucide-utensils',
+      to: '/salones',
+    })
+  }
   if (permissionsStore.esAdmin || permissionsStore.can('Tienda Online', 'Leer')) {
     base.push({
       label: 'Tienda Online',

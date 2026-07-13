@@ -33,6 +33,8 @@ import { Caja } from '../caja/entities/caja.entity';
 import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { CredencialesService } from '../pasarela/services/credenciales.service';
+import { Salon } from '../salones/entities/salon.entity';
+import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -99,6 +101,10 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly pasarelaRepo: Repository<Pasarela>,
     @InjectRepository(TenantPasarela)
     private readonly tenantPasarelaRepo: Repository<TenantPasarela>,
+    @InjectRepository(Salon)
+    private readonly salonRepo: Repository<Salon>,
+    @InjectRepository(Mesa)
+    private readonly mesaRepo: Repository<Mesa>,
     private readonly credencialesService: CredencialesService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -144,6 +150,8 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedUsuariosTenants();
     await this.seedRolesUsuarios();
     await this.seedVendedorPermisosCaja();
+    await this.seedSalones();
+    await this.seedMesas();
 
     this.logger.log('Seed complete.');
   }
@@ -381,6 +389,13 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-credit-card-settings-outline',
         tieneConfiguracion: false,
       },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440222',
+        nombre: 'Salones',
+        url: '/salones',
+        icono: 'mdi-silverware-fork-knife',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -417,6 +432,10 @@ export class SeederService implements OnApplicationBootstrap {
         permisoId: '550e8400-e29b-41d4-a716-446655440219',
         nombre: 'Nota de crédito',
       },
+      {
+        permisoId: '550e8400-e29b-41d4-a716-446655440221',
+        nombre: 'Operar',
+      },
     ];
 
     for (const data of permisos) {
@@ -438,6 +457,8 @@ export class SeederService implements OnApplicationBootstrap {
     const VER_TODAS = '550e8400-e29b-41d4-a716-446655440016';
     const REEMBOLSAR = '550e8400-e29b-41d4-a716-446655440017';
     const NOTA_CREDITO = '550e8400-e29b-41d4-a716-446655440219';
+    const OPERAR = '550e8400-e29b-41d4-a716-446655440221';
+    const SALONES = '550e8400-e29b-41d4-a716-446655440222';
     const VENTAS = '550e8400-e29b-41d4-a716-446655440058';
     const PAGOS = '550e8400-e29b-41d4-a716-446655440180';
     const INVENTARIO = '550e8400-e29b-41d4-a716-446655440181';
@@ -620,6 +641,32 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440220',
         moduloAppId: VENTAS,
         permisoId: NOTA_CREDITO,
+      },
+      // Salones (administración de estructura + operación de garzón)
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440223',
+        moduloAppId: SALONES,
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440224',
+        moduloAppId: SALONES,
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440225',
+        moduloAppId: SALONES,
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440226',
+        moduloAppId: SALONES,
+        permisoId: ELIMINAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440227',
+        moduloAppId: SALONES,
+        permisoId: OPERAR,
       },
     ];
 
@@ -878,6 +925,13 @@ export class SeederService implements OnApplicationBootstrap {
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440228',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440222', // Paris → Salones
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
     ];
 
     for (const data of entries) {
@@ -886,6 +940,102 @@ export class SeederService implements OnApplicationBootstrap {
       });
       if (!exists) {
         await this.tenantModuloRepo.save(this.tenantModuloRepo.create(data));
+      }
+    }
+  }
+
+  private async seedSalones(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const salones: Partial<Salon>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440230',
+        tenantId: PARIS,
+        nombre: 'Salón Principal',
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440231',
+        tenantId: PARIS,
+        nombre: 'Terraza',
+      },
+    ];
+    for (const data of salones) {
+      const exists = await this.salonRepo.findOne({ where: { id: data.id } });
+      if (!exists) {
+        await this.salonRepo.save(this.salonRepo.create(data));
+      }
+    }
+  }
+
+  private async seedMesas(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const PRINCIPAL = '550e8400-e29b-41d4-a716-446655440230';
+    const TERRAZA = '550e8400-e29b-41d4-a716-446655440231';
+    const mesas: Partial<Mesa>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440232',
+        tenantId: PARIS,
+        salonId: PRINCIPAL,
+        nombre: 'Mesa 1',
+        posX: '0.15',
+        posY: '0.20',
+        forma: FormaMesa.REDONDA,
+        tamano: TamanoMesa.PEQUENO,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440233',
+        tenantId: PARIS,
+        salonId: PRINCIPAL,
+        nombre: 'Mesa 2',
+        posX: '0.50',
+        posY: '0.20',
+        forma: FormaMesa.CUADRADA,
+        tamano: TamanoMesa.MEDIANO,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440234',
+        tenantId: PARIS,
+        salonId: PRINCIPAL,
+        nombre: 'Mesa 3',
+        posX: '0.15',
+        posY: '0.60',
+        forma: FormaMesa.CUADRADA,
+        tamano: TamanoMesa.MEDIANO,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440235',
+        tenantId: PARIS,
+        salonId: PRINCIPAL,
+        nombre: 'Mesa 4',
+        posX: '0.50',
+        posY: '0.60',
+        forma: FormaMesa.RECTANGULAR,
+        tamano: TamanoMesa.GRANDE,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440236',
+        tenantId: PARIS,
+        salonId: TERRAZA,
+        nombre: 'Mesa 1',
+        posX: '0.25',
+        posY: '0.35',
+        forma: FormaMesa.REDONDA,
+        tamano: TamanoMesa.MEDIANO,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440237',
+        tenantId: PARIS,
+        salonId: TERRAZA,
+        nombre: 'Mesa 2',
+        posX: '0.65',
+        posY: '0.55',
+        forma: FormaMesa.RECTANGULAR,
+        tamano: TamanoMesa.EXTRA_GRANDE,
+      },
+    ];
+    for (const data of mesas) {
+      const exists = await this.mesaRepo.findOne({ where: { id: data.id } });
+      if (!exists) {
+        await this.mesaRepo.save(this.mesaRepo.create(data));
       }
     }
   }
