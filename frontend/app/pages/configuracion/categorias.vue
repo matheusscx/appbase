@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import type { Impresora } from '~/composables/useImpresoras'
 
 interface Categoria {
   id: string
   nombre: string
   aplicaA: string
   activo: boolean
+  impresoraId: string | null
 }
 
 const config = useRuntimeConfig()
@@ -13,6 +15,13 @@ const toast = useToast()
 const apiUrl = config.public.apiUrl
 
 const categorias = ref<Categoria[]>([])
+const impresorasComanda = ref<Impresora[]>([])
+const impresorasApi = useImpresoras()
+
+const impresoraOptions = computed(() => [
+  { label: 'Sin ruta de comanda', value: null as string | null },
+  ...impresorasComanda.value.map(i => ({ label: i.nombre, value: i.id as string | null })),
+])
 const loading = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
@@ -31,6 +40,7 @@ const emptyForm = () => ({
   nombre: '',
   aplicaA: 'ambos',
   activo: true,
+  impresoraId: null as string | null,
 })
 const form = ref(emptyForm())
 
@@ -81,6 +91,7 @@ function abrirEditar(cat: Categoria) {
     nombre: cat.nombre,
     aplicaA: cat.aplicaA,
     activo: cat.activo,
+    impresoraId: cat.impresoraId,
   }
   drawerOpen.value = true
 }
@@ -92,6 +103,9 @@ async function guardar() {
       nombre: form.value.nombre,
       aplicaA: form.value.aplicaA,
       activo: form.value.activo,
+      // Enviar el valor crudo: `null` (opción "Sin ruta de comanda") desasigna la
+      // impresora; un id la (re)asigna. No usar `?? undefined` — impediría limpiarla.
+      impresoraId: form.value.impresoraId,
     }
     if (editingId.value) {
       await useApiFetch(`${apiUrl}/categorias/${editingId.value}`, {
@@ -159,7 +173,19 @@ async function eliminar(id: string) {
   }
 }
 
-onMounted(cargar)
+async function cargarImpresoras() {
+  try {
+    impresorasComanda.value = await impresorasApi.listar('comanda')
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar impresoras'), color: 'error' })
+  }
+}
+
+onMounted(() => {
+  cargar()
+  cargarImpresoras()
+})
 
 const columns: TableColumn<Categoria>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
@@ -188,7 +214,7 @@ const columns: TableColumn<Categoria>[] = [
       <template #nombre-cell="{ row }">
         <CrudListItem
           :title="row.original.nombre"
-          :subtitle="`Aplica a: ${aplicaALabel(row.original.aplicaA)}`"
+          :subtitle="`Aplica a: ${aplicaALabel(row.original.aplicaA)}${row.original.impresoraId ? ' · ' + (impresorasComanda.find(i => i.id === row.original.impresoraId)?.nombre ?? '') : ''}`"
         />
       </template>
 
@@ -254,6 +280,16 @@ const columns: TableColumn<Categoria>[] = [
           </UFormField>
           <UFormField label="Activa">
             <USwitch v-model="form.activo" />
+          </UFormField>
+          <UFormField
+            label="Impresora de comanda"
+            description="Rutea los ítems de esta categoría a una estación al enviar comanda."
+          >
+            <USelectMenu
+              v-model="form.impresoraId"
+              :items="impresoraOptions"
+              value-key="value"
+            />
           </UFormField>
         </UForm>
       </template>
