@@ -311,9 +311,9 @@ npm test -- modules/tenants/tenants.controller.spec.ts
 
 ## Related Features
 
-- [Motor de cálculo de precios](../../CLAUDE.md#estado-actual) (🔲 Por construir) — consumirá estas preferencias
+- [Motor de cálculo de precios](./motor-calculo-precios.md) — consume estas preferencias
 - [Configuración de monedas por tenant](./configuracion-monedas.md) — otra configuración financiera del tenant
-- [Catálogos financieros](../../CLAUDE.md#estado-actual) — definición de descuentos, recargos, impuestos
+- [Catálogos financieros](../ESTADO.md) — definición de descuentos, recargos, impuestos
 
 ---
 

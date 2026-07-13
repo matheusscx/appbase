@@ -1,13 +1,12 @@
 # Backend Patterns — Playbook
 
 **Status**: Living
-**Last Updated**: 2026-06-22
+**Last Updated**: 2026-07-12
 
-Patrón de referencia para construir un módulo de feature en el backend (NestJS +
-TypeORM). Está extraído del código real más reciente (`modules/monedas/`,
-`modules/tenants/`). **Léelo antes de planificar una feature** para no re-escanear
-el repo: aquí está el esqueleto, los guards, las entities, los DTOs, el SQL raw y
-el seeding, listos para copiar y adaptar.
+Patrón de referencia para construir un módulo de feature (NestJS + TypeORM),
+extraído del código real (`modules/monedas/`, `modules/tenants/`). **Léelo antes de
+planificar una feature**: cada sección condensa el patrón y apunta al archivo real
+para copiar/adaptar.
 
 > Convenciones transversales obligatorias (no repetidas en cada sección):
 > - **Soft delete en todo**: `@DeleteDateColumn({ name: 'eliminado_el' })`; toda
@@ -23,241 +22,114 @@ el seeding, listos para copiar y adaptar.
 
 ```
 backend/src/modules/<feature>/
-├── entities/
-│   └── <feature>.entity.ts
-├── dto/
-│   ├── create-<feature>.dto.ts
-│   └── update-<feature>.dto.ts
-├── <feature>.service.ts
-├── <feature>.service.spec.ts      # tests unitarios junto al service (TDD)
+├── entities/<feature>.entity.ts
+├── dto/{create,update}-<feature>.dto.ts
+├── <feature>.service.ts + <feature>.service.spec.ts   # tests junto al service (TDD)
 ├── <feature>.controller.ts
 └── <feature>.module.ts
 ```
 
-Registrar el módulo y sus entities en `app.module.ts`:
-- agregar la(s) entity(ies) al array `entities` del `TypeOrmModule.forRoot`,
-- agregar `<Feature>Module` al array `imports`.
+Registrar en `app.module.ts`: entities en el array `entities` del
+`TypeOrmModule.forRoot` y `<Feature>Module` en `imports`.
 
 ---
 
 ## 2. Entity
 
-### PK simple (tabla con id propio)
-Mirar `modules/tenants/entities/tenant.entity.ts`: `@PrimaryGeneratedColumn('uuid')`
-+ columnas `@Column`, `@CreateDateColumn({ name: 'creado_el' })`,
-`@UpdateDateColumn({ name: 'actualizado_el' })`, `@DeleteDateColumn({ name: 'eliminado_el' })`.
-
-### PK compuesta (tabla puente / por tenant)
-De `modules/monedas/entities/tenant-moneda.entity.ts`:
-
-```typescript
-@Entity('tenant_moneda')
-export class TenantMoneda {
-  @PrimaryColumn({ name: 'tenant_id', type: 'uuid' })
-  tenantId: string;
-
-  @PrimaryColumn({ name: 'moneda_id', type: 'uuid' })
-  monedaId: string;
-
-  @Column({ name: 'es_default', default: false })
-  esDefault: boolean;
-
-  @Column({ default: false })
-  habilitada: boolean;
-
-  @Column({
-    name: 'valor_del_dia',
-    type: 'numeric', precision: 18, scale: 6, nullable: true,
-  })
-  valorDelDia: string | null; // numeric ↦ string en JS, usar Decimal.js para operar
-
-  @CreateDateColumn({ name: 'creado_el' }) creadoEl: Date;
-  @UpdateDateColumn({ name: 'actualizado_el' }) actualizadoEl: Date;
-  @DeleteDateColumn({ name: 'eliminado_el' }) eliminadoEl: Date | null;
-}
-```
-
-Notas:
+- **PK simple:** ver `modules/tenants/entities/tenant.entity.ts` —
+  `@PrimaryGeneratedColumn('uuid')` + `@CreateDateColumn({ name: 'creado_el' })`,
+  `@UpdateDateColumn({ name: 'actualizado_el' })`, `@DeleteDateColumn({ name: 'eliminado_el' })`.
+- **PK compuesta (tabla puente / por tenant):** ver
+  `modules/monedas/entities/tenant-moneda.entity.ts` — dos `@PrimaryColumn({ type: 'uuid' })`.
 - Nombres de columna DB en `snake_case` vía `name:`; propiedades en `camelCase`.
-- `numeric` se mapea a `string` en JS — no operar con `+`/`*`, usar Decimal.js.
+- `numeric` (`type: 'numeric', precision, scale`) se mapea a **`string`** en JS —
+  no operar con `+`/`*`, usar Decimal.js. Tipar la propiedad `string | null`.
 
 ---
 
 ## 3. DTO
 
 `class-validator` con `ValidationPipe` global (`main.ts`). Campos opcionales en
-update con `@IsOptional()`. De `dto/update-tenant-moneda.dto.ts`:
+update con `@IsOptional()`. Campos `numeric` con `@IsNumberString()`.
 
-```typescript
-export class UpdateTenantMonedaDto {
-  @IsOptional() @IsBoolean()
-  habilitada?: boolean;
-
-  @IsOptional() @IsNumberString()   // numeric llega como string
-  valorDelDia?: string;
-}
-```
-
-> **Contrato con el frontend:** `@IsNumberString` exige un **string** (`"10.50"`), no un
-> `number`. El cliente lo maneja como string de punta a punta con `UInput`
+> **Contrato con el frontend:** `@IsNumberString` exige un **string** (`"10.50"`), no
+> un `number`. El cliente lo maneja string de punta a punta con `UInput`
 > `inputmode="decimal"` (nunca `type="number"`) — ver [frontend.md §7](./frontend.md).
-> Mandar un `number` (típico de `UInput type="number"`) produce `400 "X must be a number string"`.
+> Mandar un `number` produce `400 "X must be a number string"`.
 
 ---
 
 ## 4. Controller — guards y `tenantId` del token
 
-Patrón de tres guards: `JwtAuthGuard` (autenticado) + `TenantGuard` (pertenece al
-tenant activo) en toda la clase; `TenantAdminGuard` (es admin del tenant) solo en
-mutaciones. Los guards `Tenant*` los exporta `CommonModule` (`@Global`), así que
-**no hay que importar nada extra** para usarlos. De `monedas.controller.ts`:
+`tenantId` siempre se extrae con `const user = req.user as { tenantId: string }` y
+se pasa al service. Ejemplo completo: `monedas.controller.ts`.
 
-```typescript
-@UseGuards(JwtAuthGuard, TenantGuard)
-@Controller('monedas')
-export class MonedasController {
-  constructor(private readonly monedasService: MonedasService) {}
+**Guards disponibles** (`src/common/guards/`, exportados por `CommonModule` `@Global`
+— no hay que importar nada extra):
 
-  @Get()
-  findMonedas(@Req() req: Request) {
-    const user = req.user as { tenantId: string };
-    return this.monedasService.findMonedas(user.tenantId);
-  }
-
-  @UseGuards(TenantAdminGuard)         // solo admin
-  @Patch(':monedaId')
-  updateMoneda(
-    @Req() req: Request,
-    @Param('monedaId') monedaId: string,
-    @Body() dto: UpdateTenantMonedaDto,
-  ) {
-    const user = req.user as { tenantId: string };
-    return this.monedasService.updateMoneda(user.tenantId, monedaId, dto);
-  }
-}
-```
-
-**Guards disponibles** (`src/common/guards/`, todos vía `CommonModule` global):
-
-| Guard | Verifica | Imports en `@nestjs` |
-|---|---|---|
-| `JwtAuthGuard` | token válido | `../auth/guards/jwt-auth.guard` |
-| `TenantGuard` | membresía en el tenant del token | `../../common/guards/tenant.guard` |
-| `TenantAdminGuard` | rol admin (fijo) en el tenant | `../../common/guards/tenant-admin.guard` |
-| `PermisosGuard` | permiso RBAC granular (`rol → módulo contratado → permiso`) | `../../common/guards/permisos.guard` |
+| Guard | Verifica |
+|---|---|
+| `JwtAuthGuard` | token válido |
+| `TenantGuard` | membresía en el tenant del token |
+| `TenantAdminGuard` | rol admin (fijo) en el tenant |
+| `PermisosGuard` | permiso RBAC granular (`rol → módulo contratado → permiso`) |
 
 **Dos estándares según el tipo de pantalla:**
 
-- **Catálogos de configuración financiera** (monedas, impuestos, descuentos, recargos,
-  categorías, métodos-pago, tipos-regla, roles): siguen usando `TenantAdminGuard`
-  por-handler en las mutaciones. Son admin-only por decisión de producto, no se
-  modelan como módulos RBAC.
+- **Catálogos de configuración financiera** (monedas, impuestos, descuentos,
+  recargos, categorías, métodos-pago, tipos-regla, roles):
+  `@UseGuards(JwtAuthGuard, TenantGuard)` en la clase + `TenantAdminGuard`
+  por-handler en las mutaciones. Admin-only por producto, no son módulos RBAC.
 - **Módulos de negocio** (Caja, Ventas, Pagos, Inventario, Items, Terceros, Tienda
-  Online, Suscripciones): usan `PermisosGuard` a nivel de controller +
-  `@RequiresPermiso('<Modulo>', '<Permiso>')` por handler, para poder conceder el
-  módulo a roles no-admin sin dar acceso total al tenant. Un rol `es_fijo` (admin)
-  sigue teniendo acceso total vía short-circuit en `RbacService.userHasPermiso`,
-  sin necesidad de permisos explícitos. Ejemplo (`caja.controller.ts`):
-
-```typescript
-@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
-@Controller('caja')
-export class CajaController {
-  @Get()
-  @RequiresPermiso('Caja', 'Leer')
-  historial(@Req() req: Request) { /* ... */ }
-
-  @Post('abrir')
-  @RequiresPermiso('Caja', 'Crear')
-  abrir(@Req() req: Request, @Body() dto: AbrirCajaDto) { /* ... */ }
-}
-```
+  Online, Suscripciones): `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)` a
+  nivel de controller + `@RequiresPermiso('<Modulo>', '<Permiso>')` por handler
+  (ej.: `caja.controller.ts`). Un rol `es_fijo` (admin) tiene acceso total vía
+  short-circuit en `RbacService.userHasPermiso`.
 
 > Al agregar un módulo de negocio nuevo: registrar el `modulo_app` y sus
 > `modulo_app_permisos` (CRUD estándar Leer/Crear/Actualizar/Eliminar/Ver todas)
 > en `seeder.service.ts`, luego aplicar `PermisosGuard` + `@RequiresPermiso(...)`.
-> Ocultar el link en el sidebar del frontend (`can(modulo, permiso)`) es
-> complementario, no un sustituto del enforcement en el backend.
+> Ocultar el link en el sidebar (`can(modulo, permiso)`) es complementario, no un
+> sustituto del enforcement en el backend.
 
 ---
 
 ## 5. Module
 
-```typescript
-@Module({
-  imports: [TypeOrmModule.forFeature([TenantMoneda, PaisMoneda])],
-  controllers: [MonedasController],
-  providers: [MonedasService],
-  exports: [MonedasService],
-})
-export class MonedasModule {}
-```
-
-`forFeature([...])` con las entities que el service inyecta vía repositorio. No se
-importa `RbacModule` ni `CommonModule` (los guards son globales).
+`TypeOrmModule.forFeature([...])` con las entities que el service inyecta;
+`exports: [<Feature>Service]` si otro módulo lo usa. No importar `RbacModule` ni
+`CommonModule` (los guards son globales). Ej.: `monedas.module.ts`.
 
 ---
 
 ## 6. Service
 
-### Lectura con SQL raw (joins multi-tabla)
-Cuando necesitas joins que cruzan país/provincia/tenant, usar `dataSource.query`
-con parámetros posicionales (`$1`), filtrando `eliminado_el IS NULL` en cada join,
-y mapear las filas `snake_case` → objeto `camelCase`. Ver
-`monedas.service.ts → findMonedas`:
-
-```typescript
-const rows: {...}[] = await this.dataSource.query(
-  `SELECT m.moneda_id, ...,
-          (m.moneda_id = p.moneda_oficial_id) AS es_oficial
-   FROM tenants t
-   JOIN provincia prov ON prov.provincia_id = t.provincia_id AND prov.eliminado_el IS NULL
-   JOIN pais p        ON p.pais_id = prov.pais_id          AND p.eliminado_el IS NULL
-   LEFT JOIN tenant_moneda tm ON tm.tenant_id = t.tenant_id
-        AND tm.moneda_id = m.moneda_id AND tm.eliminado_el IS NULL
-   WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL
-   ORDER BY es_oficial DESC, m.nombre ASC`,
-  [tenantId],
-);
-return rows.map((r) => ({ monedaId: r.moneda_id, /* ... */ }));
-```
-
-### Mutación con transacción (regla "solo uno")
-Patrón `setDefault`/`setPreferida`: dentro de `dataSource.transaction`, limpiar el
-flag de todos (`UPDATE ... SET x = false WHERE tenant_id = $1 AND eliminado_el IS NULL`)
-y marcar el nuevo. Validar precondiciones (p. ej. que esté habilitada) antes.
-
-### Upsert con restauración de soft-deleted
-Para "habilitar por primera vez" cuando la fila puede existir borrada:
-
-```typescript
-const existing = await manager.findOne(TenantMoneda, {
-  where: { tenantId, monedaId },
-  withDeleted: true,            // incluye soft-deleted
-});
-if (existing) { existing.eliminadoEl = null; return existing; } // restaurar
-return manager.create(TenantMoneda, { tenantId, monedaId, /* defaults */ });
-```
-
-### Errores de negocio
-`BadRequestException` para reglas de negocio violadas (mensaje en español, se
-muestra tal cual en el frontend), `NotFoundException` cuando el recurso no aplica
-al tenant/país. Esos `message` los lee el frontend desde `e.data.message`.
+- **Lectura con SQL raw (joins multi-tabla):** `this.dataSource.query` con
+  parámetros posicionales (`$1`), filtrando `eliminado_el IS NULL` **en cada join**,
+  y mapeo de filas `snake_case` → objeto `camelCase`. Ver
+  `monedas.service.ts → findMonedas`.
+- **Mutación con transacción (regla "solo uno"):** dentro de
+  `dataSource.transaction`, limpiar el flag de todos
+  (`UPDATE ... SET x = false WHERE tenant_id = $1 AND eliminado_el IS NULL`) y
+  marcar el nuevo. Validar precondiciones antes. Ver `setDefault` en `monedas.service.ts`.
+- **Upsert con restauración de soft-deleted:** buscar con `withDeleted: true`; si
+  existe, `existing.eliminadoEl = null` (restaurar); si no, `manager.create(...)`.
+- **Errores de negocio:** `BadRequestException` con mensaje en español (el frontend
+  lo muestra tal cual desde `e.data.message`); `NotFoundException` cuando el recurso
+  no aplica al tenant/país.
 
 ---
 
 ## 7. Tests (TDD, junto al service)
 
-`<feature>.service.spec.ts` con mocks de repositorio + `DataSource`. Claves vistas
-en `monedas.service.spec.ts`:
+`<feature>.service.spec.ts` con mocks de repositorio + `DataSource`
+(ver `monedas.service.spec.ts`):
 - `getRepositoryToken(Entity)` para el repo, `getDataSourceToken()` para el DataSource.
-- Mockear `dataSource.query` (lecturas directas) **y** `dataSource.manager.query`/
-  `.findOne`/`.create`/`.save` (lo que usan `resolveContexto`/`upsert` dentro del
-  manager). `transaction` se mockea como `(cb) => cb(managerMock)`.
-- Un test por regla de negocio (rechazos incluidos) + el happy path del upsert.
+- Mockear `dataSource.query` **y** `dataSource.manager.*`; `transaction` se mockea
+  como `(cb) => cb(managerMock)`.
+- Un test por regla de negocio (rechazos incluidos) + happy path del upsert.
 
-Correr: `cd backend && npm test`. Antes de cerrar: `npm test`, `tsc` limpio,
-`npm run lint`.
+Correr: `cd backend && npm test`. Antes de cerrar: `npm test`, `tsc` limpio, `npm run lint`.
 
 ---
 
@@ -266,158 +138,66 @@ Correr: `cd backend && npm test`. Antes de cerrar: `npm test`, `tsc` limpio,
 Dos lugares, ambos en el **mismo commit**:
 
 1. **Al crear el tenant** (`tenants.service.ts → create()`, dentro de la transacción
-   que ya siembra rol admin + fórmula de precio + caja virtual): agregar el dato que
-   todo tenant nuevo necesita (p. ej. su moneda oficial habilitada + default).
-
+   que ya siembra rol admin + fórmula de precio + caja virtual): agregar lo que todo
+   tenant nuevo necesita.
 2. **Seeder de desarrollo** (`modules/seeder/seeder.service.ts` — **fuente de
-   verdad**): un método privado `seed<Entidad>()` idempotente,
-   llamado en `onApplicationBootstrap` en el orden correcto (después de sus
-   dependencias). IDs fijos con patrón `550e8400-e29b-41d4-a716-446655440XXX`
-   (siguiente número libre); las tablas de PK compuesta no necesitan ID fijo.
-   Registrar la entity en `seeder.module.ts` (`forFeature`).
-
-El seeder TS corre automáticamente al arrancar el backend en dev.
+   verdad**, corre al arrancar): un método privado `seed<Entidad>()` idempotente,
+   llamado en `onApplicationBootstrap` después de sus dependencias. IDs fijos
+   `550e8400-e29b-41d4-a716-446655440XXX` (siguiente número libre); PKs compuestas
+   no necesitan ID fijo. Registrar la entity en `seeder.module.ts` (`forFeature`).
 
 ---
 
 ## 10. Paginación server-side
 
-Patrón estándar para listados con muchos registros (pagos, ventas, kardex, etc.).
+Para listados grandes (pagos, ventas, kardex):
 
-### DTO compartido
-
-`common/dto/pagination-query.dto.ts` — query params `page` (1-based, default 1) y
-`pageSize` (default 15, max 100). Extender en el DTO del recurso:
-
-```typescript
-export class QueryPagosDto extends PaginationQueryDto {
-  @IsOptional()
-  @IsEnum(EstadoVenta)
-  ventaEstado?: EstadoVenta;
-  // …filtros específicos
-}
-```
-
-### Utilidades
-
-`common/utils/pagination.util.ts`:
-
-- `resolvePagination(query)` → `{ page, pageSize, offset }`
-- `buildPaginationMeta(page, pageSize, total)` → `{ page, pageSize, total, totalPages }`
-
-### Respuesta API
-
-`common/interfaces/paginated-response.interface.ts`:
-
-```typescript
-interface PaginatedResponse<T> {
-  data: T[];
-  meta: { page; pageSize; total; totalPages };
-}
-```
-
-### Service (SQL raw)
-
-1. Armar `WHERE` compartido (tenant + soft delete + filtros).
-2. `SELECT COUNT(*) …` con el mismo `WHERE` → `total`.
-3. `SELECT … ORDER BY … LIMIT $n OFFSET $m` → `data`.
-4. Lecturas vía `this.dataSource.query` (réplica cuando exista).
-
-### Controller
-
-Registrar rutas estáticas (`/resumen`, `/preferencias`) **antes** de rutas con params.
-
-KPIs/agregados globales **no** van en `data[]`: endpoint separado
-(p. ej. `GET /pagos/resumen`).
+- **DTO:** extender `common/dto/pagination-query.dto.ts` (`page` 1-based default 1,
+  `pageSize` default 15 max 100) con los filtros del recurso.
+- **Utils:** `common/utils/pagination.util.ts` — `resolvePagination(query)` →
+  `{ page, pageSize, offset }`; `buildPaginationMeta(page, pageSize, total)`.
+- **Respuesta:** `PaginatedResponse<T>` (`common/interfaces/`) = `{ data, meta }`.
+- **Service (SQL raw):** `WHERE` compartido (tenant + soft delete + filtros) →
+  `COUNT(*)` → `SELECT ... ORDER BY ... LIMIT $n OFFSET $m`.
+- **Controller:** rutas estáticas (`/resumen`, `/preferencias`) **antes** de rutas
+  con params. KPIs/agregados globales van en endpoint separado (`GET /pagos/resumen`),
+  no en `data[]`.
 
 ---
 
 ## 11. Preferencias de usuario
 
-Preferencias **personales** (UX), distintas de las preferencias financieras del
-tenant (`tenants.*`).
-
-### Almacenamiento
-
-Columna `usuarios.preferencias JSONB NOT NULL DEFAULT '{}'`.
-
-Shape inicial:
-
-```typescript
-interface UsuarioPreferencias {
-  ui?: {
-    colorMode?: 'light' | 'dark';
-    pageSize?: 10 | 15 | 25 | 50;
-  };
-}
-```
-
-Utilidades en `common/utils/usuario-preferencias.util.ts`:
-`normalizeUsuarioPreferencias`, `mergeUsuarioPreferencias`.
-
-### API
-
-- `GET /auth/me` — incluye `preferencias` en el usuario.
-- `PATCH /me/preferencias` — merge parcial; respuesta normalizada.
-
-### Reglas
-
-- Alcance **usuario**, no tenant.
-- Defaults en código: `colorMode: 'light'`, `pageSize: 15`.
-- Validar con DTO anidado (`UpdatePreferenciasDto`).
+Preferencias **personales** (UX), distintas de las financieras del tenant.
+Columna `usuarios.preferencias JSONB NOT NULL DEFAULT '{}'`
+(shape `{ ui?: { colorMode?, pageSize? } }`); utils en
+`common/utils/usuario-preferencias.util.ts` (`normalize`/`merge`).
+API: `GET /auth/me` incluye `preferencias`; `PATCH /me/preferencias` hace merge
+parcial validado con DTO anidado. Defaults en código: `colorMode: 'light'`,
+`pageSize: 15`. Alcance **usuario**, no tenant.
 
 ---
 
 ## 13. Callback desacoplado entre módulos (registry + `onModuleInit`)
 
-Cuando un módulo "core" debe notificar a un módulo de negocio **sin importarlo**
-(mantener la frontera: p. ej. `pasarela` NO importa `online`/`ventas`), y
-`@nestjs/event-emitter` no está instalado, usar un **registry singleton** con una
-interfaz de handler. Patrón visto en `modules/pasarela` (callback de resolución
-de orden → crear la venta):
+Cuando un módulo "core" debe notificar a uno de negocio **sin importarlo** (p. ej.
+`pasarela` NO importa `online`/`ventas`): el core define una interfaz de handler y
+un **registry singleton** (`register(h)` / `get()`) que **exporta**; el módulo de
+negocio importa el core y declara un provider que implementa la interfaz y se
+registra en `onModuleInit`. El borde se cruza en una sola dirección (negocio → core).
+Implementación de referencia: `modules/pasarela` (`PagoCallbackRegistry` +
+`OnlineCallbackHandler`).
 
-```typescript
-// En el módulo core: la interfaz + el registro (singleton, sin lógica de negocio).
-export interface PagoCallbackHandler {
-  onOrdenResuelta(orden: PasarelaOrden): Promise<void>;
-}
+Claves: el dispatcher hace `registry.get()?.onOrdenResuelta(orden)` con `await`
+(monolito) o POST fire-and-forget (destinos externos); el handler debe ser
+**idempotente**; un fallo del callback no rompe el flujo del core (`try/catch` + log).
 
-@Injectable()
-export class PagoCallbackRegistry {
-  private handler: PagoCallbackHandler | null = null;
-  register(h: PagoCallbackHandler) { this.handler = h; }
-  get(): PagoCallbackHandler | null { return this.handler; }
-}
-```
-
-```typescript
-// En el módulo de negocio: implementa el handler y se registra al arrancar.
-@Injectable()
-export class OnlineCallbackHandler implements PagoCallbackHandler, OnModuleInit {
-  constructor(
-    private readonly registry: PagoCallbackRegistry,
-    private readonly ventasService: VentasService,
-  ) {}
-  onModuleInit() { this.registry.register(this); }
-  async onOrdenResuelta(orden: PasarelaOrden) { /* idempotente: crear la venta */ }
-}
-```
-
-Claves:
-- El módulo core **exporta** `PagoCallbackRegistry`; el de negocio **importa** el
-  módulo core y declara su handler como provider. El borde se cruza en una sola
-  dirección (negocio → core), nunca al revés.
-- El dispatcher del core hace `registry.get()?.onOrdenResuelta(orden)`. Para el
-  monolito conviene `await` (garantiza el efecto antes de responder/redirigir);
-  para destinos externos, `POST` HTTP fire-and-forget.
-- El handler debe ser **idempotente** (un mismo evento puede llegar dos veces).
-- Un fallo del callback no debe romper el flujo del core: `try/catch` + log.
+---
 
 ## 12. Docs vivas a tocar en el mismo commit
 
 - `startup-pos.sql` — agregar las tablas nuevas.
 - `docs/features/<feature>.md` (desde `docs/features/TEMPLATE.md`) + link en `docs/README.md`.
-- Tabla "Estado actual" de `CLAUDE.md` — marcar ✅.
+- `docs/ESTADO.md` — marcar ✅ / agregar la fila de la funcionalidad.
 - ADR nuevo en `docs/adr/` (+ índice) si hubo una decisión arquitectónica.
 
 Ver [frontend.md](./frontend.md) para la capa de UI.

@@ -15,7 +15,7 @@ Convenciones para mantener `docs/` consistente. Las convenciones de **código** 
 
 1. `cp docs/features/TEMPLATE.md docs/features/mi-feature.md` y completar: overview, endpoints, backend (módulo, entities, DTOs), frontend (páginas, componentes, stores), data flow, testing, pendientes.
 2. Si hubo una decisión técnica significativa → crear ADR (siguiente número libre) y agregarlo al índice `docs/adr/README.md`.
-3. Agregar el link en `docs/README.md` y actualizar la tabla "Estado actual" de `CLAUDE.md`.
+3. Agregar el link en `docs/README.md` y actualizar la tabla de estado en `docs/ESTADO.md`.
 
 ## Formato
 

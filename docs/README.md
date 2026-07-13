@@ -1,13 +1,14 @@
 # Documentación — SaaS POS Multi-tenant
 
-Índice de la documentación técnica. Para setup y comandos ver el [README raíz](../README.md); para convenciones de código y estado del proyecto ver [`CLAUDE.md`](../CLAUDE.md).
+Índice de la documentación técnica. Para setup y comandos ver el [README raíz](../README.md); para convenciones de código ver [`CLAUDE.md`](../CLAUDE.md).
 
 ## Por dónde empezar
 
 1. [`ARCHITECTURE.md`](./ARCHITECTURE.md) — stack, estructura del monorepo, flujo de requests, rutas del frontend
-2. [`PRODUCTO.md`](./PRODUCTO.md) — especificación funcional y reglas de negocio
-3. [`patterns/`](./patterns/) — **leer antes de planificar una feature**: patrones de-facto backend/frontend
-4. [`CONVENTIONS.md`](./CONVENTIONS.md) — cómo escribir y mantener esta documentación
+2. [`ESTADO.md`](./ESTADO.md) — estado de todas las funcionalidades (✅/🔲 con fechas)
+3. [`PRODUCTO.md`](./PRODUCTO.md) — especificación funcional y reglas de negocio
+4. [`patterns/`](./patterns/) — **leer antes de planificar una feature**: patrones de-facto backend/frontend
+5. [`CONVENTIONS.md`](./CONVENTIONS.md) — cómo escribir y mantener esta documentación
 
 ## Architecture Decision Records
 

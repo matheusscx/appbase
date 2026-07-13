@@ -1,40 +1,39 @@
 # Frontend Patterns — Playbook
 
 **Status**: Living
-**Last Updated**: 2026-06-30
+**Last Updated**: 2026-07-12
 
-Patrón de referencia para una pantalla de configuración en el frontend (Nuxt 4 +
-Vue 3 + `@nuxt/ui` v4). Extraído del código real más reciente
-(`app/pages/configuracion/razones-sociales.vue`). **Léelo antes de planificar una
-feature** para no re-escanear: aquí está la página completa, el fetch con auth, el
-update optimista con revert y la navegación.
+Patrón de referencia para pantallas del frontend (Nuxt 4 + Vue 3 + `@nuxt/ui` v4),
+extraído del código real (`app/pages/configuracion/razones-sociales.vue`). **Léelo
+antes de planificar una feature**: cada sección condensa el patrón y apunta al
+archivo real para copiar/adaptar.
 
 > Convenciones transversales:
-> - **Iconos: Lucide** — formato `i-lucide-{name}` (p. ej. `i-lucide-plus`). Colección
->   oficial del proyecto (Nuxt UI v4); ver `frontend/docs/DESIGN-SYSTEM.md` § Iconos.
+> - **Iconos: Lucide** — formato `i-lucide-{name}` (ver `frontend/docs/DESIGN-SYSTEM.md` § Iconos).
 > - **Llamadas API: `useApiFetch`** (`composables/useApiFetch.ts`), NO `$fetch`
 >   directo ni axios. Inyecta el Bearer token y reintenta tras refresh en 401.
-> - **Sin store** para las pantallas CRUD de config: estado local con `ref`/`reactive`.
+> - **Sin store** para pantallas CRUD de config: estado local con `ref`/`reactive`.
 > - **Update optimista con revert** para toggles/estrellas (no re-fetch).
 > - Mensajes de error del backend vía `e.data.message`, mostrados en un `useToast`.
 > - URL base: `useRuntimeConfig().public.apiUrl`.
 > - **Campos decimales/monetarios → string de punta a punta** (ver §7): `UInput`
->   `inputmode="decimal"`, nunca `type="number"` (emite `number` y rompe `@IsNumberString`).
-> - **Toda página suelta con `layout: 'dashboard'` lleva header** (ver §2): `UDashboardPanel`
->   con `#header` → `<AppNavbar title="…">` y `#body` → el contenido.
+>   `inputmode="decimal"`, nunca `type="number"`.
+> - **Toda página suelta con `layout: 'dashboard'` lleva header** (ver §2).
 
 ---
 
 ## 1. Navegación
 
 Agregar el item al computed `navItems` de `app/pages/configuracion.vue` (dentro del
-bloque `permissionsStore.esAdmin` si la pantalla es solo admin):
+bloque `permissionsStore.esAdmin` si es solo admin):
 
 ```typescript
 { label: 'Monedas', icon: 'i-lucide-dollar-sign', to: '/configuracion/monedas' }
 ```
 
-Pantallas CRUD simples pueden usar los componentes en `app/components/crud/` (`CrudPageHeader`, `CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD y `configuracion/categorias.vue`.
+Pantallas CRUD simples pueden usar `app/components/crud/` (`CrudPageHeader`,
+`CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD
+y `configuracion/categorias.vue`.
 
 ---
 
@@ -70,14 +69,14 @@ onMounted(cargar)
 </script>
 ```
 
-> Nota: las páginas de `configuracion/` heredan `middleware`/`layout` del padre
-> `configuracion.vue` (que ya provee el header vía `AppNavbar`), así que su
-> `<template>` va directo al contenido sin `UDashboardPanel`.
+> Las páginas de `configuracion/` heredan `middleware`/`layout` del padre
+> `configuracion.vue` (que ya provee el header vía `AppNavbar`): su `<template>` va
+> directo al contenido sin `UDashboardPanel`.
 >
-> Para una página suelta (no anidada bajo `configuracion.vue`) usar
+> Para una página suelta (no anidada) usar
 > `definePageMeta({ middleware: 'auth', layout: 'dashboard' })` **y** envolver el
-> `<template>` en `UDashboardPanel` para que tenga header — el layout `dashboard.vue`
-> solo aporta el sidebar, cada página es responsable de su propio header:
+> `<template>` en `UDashboardPanel` — el layout `dashboard.vue` solo aporta el
+> sidebar, cada página es responsable de su header:
 >
 > ```vue
 > <template>
@@ -86,9 +85,7 @@ onMounted(cargar)
 >       <AppNavbar title="Historial de ventas" />
 >     </template>
 >     <template #body>
->       <div class="max-w-5xl mx-auto py-6">
->         <!-- contenido -->
->       </div>
+>       <div class="max-w-5xl mx-auto py-6"><!-- contenido --></div>
 >     </template>
 >   </UDashboardPanel>
 > </template>
@@ -96,15 +93,15 @@ onMounted(cargar)
 >
 > `AppNavbar` (`app/components/AppNavbar.vue`) ya incluye el collapse del sidebar y
 > el `UserMenu` en `#right` — no usar `UDashboardNavbar` directo ni duplicar el
-> `UserMenu` a mano. Todas las páginas bajo `layout: 'dashboard'` deben seguir este
-> esqueleto (ver `pages/index.vue`, `pages/ventas/index.vue`, `pages/caja/index.vue`).
+> `UserMenu`. Referencias: `pages/index.vue`, `pages/ventas/index.vue`, `pages/caja/index.vue`.
 
 ---
 
-## 3. Update optimista con revert (toggle)
+## 3. Update optimista con revert (toggle y estrella "solo uno")
 
-Patrón `toggleHabilitado`: guardar en una variable el valor previo, mutar de
-inmediato la UI, llamar la API, y en `catch` revertir. `toggling` evita doble click.
+Patrón único para toggles (`habilitado`) y distintivos únicos (`preferida`/default):
+guardar el valor previo, mutar la UI de inmediato, llamar la API, y en `catch`
+revertir. `toggling` (Set) evita doble click.
 
 ```typescript
 async function toggleHabilitado(it: Item) {
@@ -128,64 +125,35 @@ async function toggleHabilitado(it: Item) {
 }
 ```
 
----
-
-## 4. Distintivo único "estrella" (default / preferida)
-
-Patrón `togglePreferida`: la regla "solo uno" se refleja optimistamente limpiando
-el anterior y marcando el nuevo; revertir ambos en `catch`. Validar precondición
-(p. ej. debe estar habilitado) en cliente con un toast `warning`.
-
-```typescript
-async function togglePreferida(it: Item) {
-  if (it.preferida || toggling.has(it.id)) return
-  if (!it.habilitado) {
-    toast.add({ title: 'Debes habilitar antes de marcarla como preferida', color: 'warning' })
-    return
-  }
-  const prev = items.value.find(x => x.preferida)
-  if (prev) prev.preferida = false
-  it.preferida = true
-  toggling.add(it.id)
-  try {
-    await useApiFetch(`${apiUrl}/<recurso>/${it.id}/preferida`, { method: 'PATCH' })
-    toast.add({ title: 'Preferida actualizada', color: 'success' })
-  } catch (e: unknown) {
-    it.preferida = false
-    if (prev) prev.preferida = true              // revert ambos
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error', color: 'error' })
-  } finally {
-    toggling.delete(it.id)
-  }
-}
-```
+Para el distintivo único (estrella), la regla "solo uno" se refleja optimistamente:
+limpiar el anterior (`prev = items.find(x => x.preferida)`), marcar el nuevo, y en
+`catch` **revertir ambos**. Precondiciones (p. ej. debe estar habilitado) se validan
+en cliente con toast `warning` antes de mutar. Ver `togglePreferida` en
+`razones-sociales.vue` o `configuracion/monedas.vue`.
 
 ---
 
 ## 5. Crear / editar / eliminar
 
-- **Crear/editar**: un `UModal` con `v-model:open`, un `form = ref(emptyForm())`,
+- **Crear/editar**: un `UModal` con `v-model:open`, `form = ref(emptyForm())`,
   `editingId = ref<string | null>(null)`. `guardar()` hace POST o PATCH según
   `editingId`, luego `await cargar()` (re-fetch tras mutación completa, no optimista).
 - **Eliminar**: segundo `UModal` de confirmación con `confirmDeleteId` +
   `confirmModalOpen`; `eliminar(id)` hace DELETE y re-`cargar()`.
 
-Ver el archivo completo en `app/pages/configuracion/razones-sociales.vue`.
+Archivo completo: `app/pages/configuracion/razones-sociales.vue`.
 
 ---
 
 ## 6. Template (`@nuxt/ui` v4)
-
-Componentes usados como estándar:
 
 | Necesidad | Componente |
 |---|---|
 | Contenedor | `UCard` |
 | Lista | `<ul class="divide-y …">` con `<li v-for>` |
 | Toggle habilitar | `USwitch` con `:model-value` + `@update:model-value` y `:disabled` |
-| Estrella default | `<button>` + `UIcon` (`i-lucide-star` + `fill-current` cuando activo) |
-| Distintivo (p. ej. "Oficial") | `UBadge` |
+| Estrella default | `<button>` + `UIcon` (`i-lucide-star` + `fill-current` si activo) |
+| Distintivo | `UBadge` |
 | Acciones | `UButton` con `icon`, `variant="ghost"`, `color` |
 | Modal | `UModal` con `v-model:open` y slots `#body` / `#footer` |
 | Campo de form | `UFormField` + `UInput` / `USwitch` |
@@ -200,20 +168,13 @@ texto centrado gris antes de la lista.
 **Regla (estilo único):** todo campo que el backend valide con `@IsNumberString`
 (precios, montos, porcentajes, stock, cantidades — ver [backend.md §3](./backend.md))
 se maneja como **string en todo el flujo**: el `ref` del form es string, el input lo
-mantiene string, y viaja string en el body **sin conversiones**. Convención del
-proyecto: el dinero y los `numeric` son string con Decimal.js, nunca `number` nativo.
+mantiene string, y viaja string en el body **sin conversiones**.
 
-**Cómo (campos monetarios con moneda):** usar [`MoneyInput`](../../frontend/app/components/MoneyInput.vue)
-con `v-model` string — formatea en vivo con maska según la moneda del store. Ver §8.
-
-**Cómo (otros decimales sin moneda — stock, porcentajes, tasas):** `UInput` de texto con
-`inputmode="decimal"` (abre teclado numérico en móvil). **Prohibido `type="number"`**
-en campos `@IsNumberString`: hace que `v-model` escriba un **`number`** en el form y
-produce `400`:
-
-```json
-{ "message": ["precioBase must be a number string", "stock must be a number string"] }
-```
+- **Campos monetarios con moneda:** usar `MoneyInput` con `v-model` string (ver §8).
+- **Otros decimales (stock, porcentajes, tasas):** `UInput` de texto con
+  `inputmode="decimal"` (teclado numérico en móvil). **Prohibido `type="number"`**
+  en campos `@IsNumberString`: hace que `v-model` escriba un **`number`** y produce
+  `400 "X must be a number string"`.
 
 ```vue
 <!-- ✅ Precio / monto con moneda → MoneyInput (string limpio al API) -->
@@ -227,164 +188,54 @@ produce `400`:
 <UInput v-model="form.precioBase" type="number" />
 ```
 
-Como el valor ya es string, el payload va directo (de `configuracion/items.vue`):
-
-```typescript
-const payload: Record<string, unknown> = {
-  // ...
-  precioBase: form.value.precioBase,        // ya es string, sin String(...)
-}
-if (form.value.tipo === 'producto') {
-  payload.stock = form.value.stock || '0'   // default solo para no mandar ''
-}
-```
+El payload va directo, sin `String(...)` (el valor ya es string); defaults tipo
+`form.value.stock || '0'` solo para no mandar `''`.
 
 > **Excepción — enteros reales** (`@IsInt`, p. ej. `duracionEstimada`): el backend
-> espera `number`, así que ahí **sí** se usa `type="number"`. La regla `inputmode`
-> aplica solo a los `@IsNumberString` (decimales/monetarios).
+> espera `number`, ahí **sí** se usa `type="number"`. La regla `inputmode` aplica
+> solo a los `@IsNumberString`.
 
 ---
 
-## 8. Monedas — store, formato de precios (Intl) e inputs (maska)
+## 8. Monedas — store, formato (Intl) e inputs (maska)
 
-### Resumen rápido
+Detalle funcional completo (arquitectura, tablas de uso por pantalla, alta de
+monedas nuevas): [features/configuracion-monedas.md](../features/configuracion-monedas.md).
 
-| Necesidad | Solución | Librería |
-|-----------|----------|----------|
-| Mostrar precio en lista / solo lectura | `formatMonto(value, monedaId?)` | `Intl.NumberFormat` (nativo) |
-| Input con formato en tiempo real | `<MoneyInput>` | [maska](https://github.com/beholdr/maska) |
-| Lookup O(1) por moneda | `monedasStore.getById(uuid)` | Pinia |
-| Valor al API | **string** (`"1500000"`, `"1500.5"`) | — |
+| Necesidad | Solución |
+|-----------|----------|
+| Mostrar precio en lista / solo lectura | `formatMonto(value, monedaId?)` — sin `monedaId` usa la **oficial** del tenant |
+| Input con formato en tiempo real | `<MoneyInput v-model="..." :moneda-id="..." />` o prop `oficial` (maska) |
+| Lookup O(1) por moneda | `monedasStore.getById(uuid)` (Pinia, un fetch por sesión/tenant) |
+| Valor al API | **string** limpio (`"1500000"`, `"1500.5"`) |
 
-### Fuente de verdad y ciclo de vida
+Reglas:
+- La config de presentación (`locale`, `simbolo`, `decimales`, separadores) viene de
+  la tabla `moneda` vía `GET /monedas` → `useMonedasStore` (`ensureLoaded()` en
+  `dashboard.vue`; `reset()` en logout/switch-tenant). **No** duplicar `GET /monedas`
+  en páginas. **No** concatenar `monedaSimbolo + monto`.
+- Monedas ISO 4217 → `Intl.NumberFormat`; códigos custom (UF) → formato manual.
+  Vacío / `null` → `'—'`.
+- `MoneyInput` NO se usa para stock, cantidades, porcentajes ni `valorDelDia`
+  (ahí va `UInput inputmode="decimal"`, ver §7).
 
-1. **BD** — tabla `moneda`: `locale`, `simbolo`, `decimales`, `separador_decimal`,
-   `separador_miles` (catálogo global; el tenant no los edita).
-2. **`GET /monedas`** — monedas del país del tenant + flags `habilitada` / `esDefault` /
-   `esOficial` / `valorDelDia`.
-3. **`useMonedasStore`** — un fetch por sesión/tenant; diccionarios `monedasById` y
-   `monedasByCodigo`. Cada entrada es `MonedaDisplayConfig`:
+Archivos: `app/stores/monedas.ts`, `app/types/moneda.ts`,
+`app/utils/currency-format.ts` (+ `.spec.ts`), `app/composables/useCurrency.ts`,
+`app/composables/useFormatters.ts`, `app/components/MoneyInput.vue`.
 
-   | Campo store | Origen BD | Uso |
-   |-------------|-----------|-----|
-   | `locale` | `moneda.locale` | `Intl.NumberFormat` y maska `number.locale` |
-   | `prefix` | `simbolo` + `\u00a0` | Prefijo visual (`$ `, `€ `) |
-   | `thousands` / `decimal` | separadores | Máscara y fallback manual |
-   | `decimals` | `decimales` | Decimales fijos por moneda |
-
-4. **Bootstrap** — `dashboard.vue` → `monedasStore.ensureLoaded()` (paralelo a permisos).
-5. **Invalidación** — `reset()` en `auth.clearAuth()` y `tenant.switchTenant()`.
-   Tras PATCH en `/configuracion/monedas` → `patchMoneda()` local (sin refetch).
-
-**No** duplicar `GET /monedas` en páginas. **No** concatenar `monedaSimbolo + monto`.
-
-### Formato en listas (solo lectura)
-
-Implementación en [`currency-format.ts`](../../frontend/app/utils/currency-format.ts).
-API pública vía [`useFormatters`](../../frontend/app/composables/useFormatters.ts) /
-[`useCurrency`](../../frontend/app/composables/useCurrency.ts):
-
-```typescript
-// Ítem con moneda propia (catálogo, configuración de items)
-formatMonto(item.precioBase, item.monedaId)
-
-// Totales en moneda oficial del tenant (ventas, caja, pagos)
-formatMonto(venta.totalFinal)   // sin monedaId → monedaOficial del store
-```
-
-**Flujo interno:**
-
-```
-valor string/Decimal
-  → monedasStore.getById(monedaId)
-  → ¿codigoIso válido ISO 4217? (CLP, USD, …)
-      sí → Intl.NumberFormat(cfg.locale, { style: 'currency', currency, min/maxFractionDigits: cfg.decimals })
-      no → formatMontoManual (UF y códigos custom)
-```
-
-Ejemplos con seed Chile:
-
-| Moneda | locale | Resultado ejemplo |
-|--------|--------|-------------------|
-| CLP | `es-CL` | `$1.500.000` (0 decimales) |
-| USD | `en-US` | `$1,500.50` |
-| UF | `es-CL` | `$ 1.234,5678` (manual, 4 decimales) |
-
-Vacío / `null` → `'—'`.
-
-### Inputs monetarios — `MoneyInput` + maska
-
-Componente: [`MoneyInput.vue`](../../frontend/app/components/MoneyInput.vue).
-
-```vue
-<!-- Precio de ítem: moneda del formulario -->
-<MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" />
-
-<!-- Montos en moneda oficial (caja, cobro POS, abono) -->
-<MoneyInput v-model="form.saldoInicial" oficial />
-```
-
-**Props:**
-
-| Prop | Tipo | Descripción |
-|------|------|-------------|
-| `modelValue` | `string` | Valor limpio para el API (`"1500000"`) |
-| `moneda-id` | `string` | UUID de moneda (desde store) |
-| `oficial` | `boolean` | Usa `monedasStore.monedaOficial` |
-
-**Flujo interno:**
-
-```
-modelValue (string limpio)
-  → displayValue = formatMontoDisplay(modelValue, cfg)   // lo que ve el usuario
-  → v-maska con mask derivada de cfg (prefix, separadores, decimales)
-  → @maska → parseMontoInput(detail.masked, cfg) → emit update:modelValue (string)
-```
-
-La máscara se construye así:
-
-- `decimals === 0` → `{prefix}#` (enteros, ej. CLP)
-- `decimals > 0` → `{prefix}0{thousands}0{decimal}{frac...}` (ej. USD, UF)
-
-`number.locale` de maska = `cfg.locale` (desde BD, no heurística).
-
-**Pantallas que usan `MoneyInput` hoy:** `configuracion/items` (precio base), caja
-(apertura, cierre, movimiento), `CobroModal`, `AbonoModal`.
-
-**Fuera de alcance de `MoneyInput`:** stock, cantidades, porcentajes de impuestos/
-descuentos, `valorDelDia` en monedas (mantener `UInput inputmode="decimal"`).
-
-### Archivos de referencia
-
-| Archivo | Rol |
-|---------|-----|
-| `app/stores/monedas.ts` | Cache Pinia, `ensureLoaded`, `patchMoneda` |
-| `app/types/moneda.ts` | `MonedaDisplayConfig`, `toDisplayConfig()` |
-| `app/utils/currency-format.ts` | `formatMontoDisplay`, `parseMontoInput`, `formatMontoManual` |
-| `app/composables/useCurrency.ts` | `format`, `formatOficial`, `parse` |
-| `app/composables/useFormatters.ts` | `formatMonto` delega a `useCurrency`; `formatFecha` sin cambios |
-| `app/components/MoneyInput.vue` | Input con maska |
-| `app/utils/currency-format.spec.ts` | Tests CLP/USD/UF y round-trip parse |
-
-### Tests
-
-```bash
-cd frontend && npm test -- --run app/utils/currency-format.spec.ts app/stores/monedas.spec.ts
-```
-
-Ver también [configuracion-monedas.md](../features/configuracion-monedas.md) § Formato de precios en UI.
+Tests: `cd frontend && npm test -- --run app/utils/currency-format.spec.ts app/stores/monedas.spec.ts`
 
 ---
 
 ## 8.1 Verificación manual (pantallas de configuración)
 
-Login como admin → `/configuracion/<feature>`: ver datos, probar toggle (con su
-revert ante error simulado), mover la estrella, crear/editar/eliminar. Confirmar
-que los `message` de reglas de negocio del backend aparecen en los toasts.
+Login como admin → `/configuracion/<feature>`: ver datos, probar toggle (con revert
+ante error simulado), mover la estrella, crear/editar/eliminar. Confirmar que los
+`message` del backend aparecen en los toasts.
 
-**Monedas / precios:** tras login, una sola llamada `GET /monedas` en Network;
-catálogo POS muestra CLP sin decimales y USD con separador US; `MoneyInput` en
-precio de ítem formatea mientras se escribe; totales de venta/caja usan moneda oficial.
+**Monedas / precios:** una sola llamada `GET /monedas` en Network tras login;
+catálogo POS muestra CLP sin decimales y USD con separador US; `MoneyInput` formatea
+mientras se escribe; totales de venta/caja usan moneda oficial.
 
 Ver [backend.md](./backend.md) para la API que consume esta capa.
 
@@ -392,10 +243,9 @@ Ver [backend.md](./backend.md) para la API que consume esta capa.
 
 ## 9. Tabla editable con add/remove de filas (tramos)
 
-Para tablas inline donde el usuario agrega y elimina filas (p.ej. tramos de descuento):
+Array inmutable — nunca mutar directamente:
 
 ```typescript
-// array inmutable — nunca mutar directamente
 function agregarTramo() {
   form.value.tramos = [...form.value.tramos, { minimo: '', valor: '' }]
 }
@@ -404,51 +254,24 @@ function eliminarTramo(i: number) {
 }
 ```
 
-```vue
-<tbody>
-  <tr v-for="(tramo, i) in form.tramos" :key="i">
-    <td><UInput v-model="tramo.minimo" inputmode="decimal" /></td>
-    <td><UInput v-model="tramo.valor"  inputmode="decimal" /></td>
-    <td><UButton icon="i-lucide-trash-2" color="error" variant="ghost" size="xs" @click="eliminarTramo(i)" /></td>
-  </tr>
-</tbody>
-```
-
-Usar `inputmode="decimal"` (no `type="number"`) para campos `@IsNumberString` del backend.
-Ver §7 para la explicación completa de la regla de campos decimales.
+En el template, `<tr v-for="(tramo, i) in form.tramos" :key="i">` con `UInput`
+`inputmode="decimal"` por celda y `UButton i-lucide-trash-2` para eliminar (ver §7).
 
 ---
 
 ## 10. Pantalla POS (dos paneles + carrito con recálculo)
 
-Para pantallas complejas con múltiples paneles orquestados (p. ej. catálogo + carrito en paralelo):
-
-Ver `app/pages/ventas/index.vue` como referencia completa. Patrón clave: **helpers puros testeables en `composables/useVenta.ts`** (funciones sin Nuxt/Vue, 100% Vitest) + composable reactivo que los envuelve.
-
-Ventaja: separa lógica de negocio (`puedeCobrar`, `resumenCobro`, `sumaPagos`) de la capa reactiva de Vue, permitiendo tests unitarios reales sin mocks de Nuxt.
-
-```typescript
-// ✅ Función pura — testeable directo con Vitest, sin mocks
-function puedeCobrar(tipoDoc: TipoDoc, customer: CustomerForm | null): boolean {
-  if (tipoDoc.requiereCustomer) return !!(customer?.nombre?.trim())
-  return true
-}
-
-// ✅ Composable reactivo que la envuelve
-const puedeCobrarReactivo = computed(() => 
-  puedeCobrar(tipoDocSeleccionado.value, customerData.value)
-)
-```
-
-Componentes pequeños (`CarritoPanel`, `CobroModal`, `ClienteForm`) que no contienen lógica sino que la consumen de arriba + composable.
+Para pantallas complejas con múltiples paneles orquestados, ver
+`app/pages/ventas/index.vue`. Patrón clave: **helpers puros testeables en
+`composables/useVenta.ts`** (funciones sin Nuxt/Vue, 100% Vitest) + composable
+reactivo que los envuelve con `computed`. Componentes pequeños (`CarritoPanel`,
+`CobroModal`, `ClienteForm`) que no contienen lógica sino que la consumen de arriba.
 
 ---
 
 ## 12. Listados paginados (server-side)
 
 Para tablas con dataset grande: paginar en backend, no en cliente.
-
-### Composable `usePaginatedList`
 
 ```typescript
 const filtroEstado = ref<string | undefined>()
@@ -461,35 +284,14 @@ const { items, meta, page, pageSize, loading } = usePaginatedList<Item>({
 })
 ```
 
-- `page` es 1-based (alineado con `UPagination`).
-- Al cambiar filtros → reset a página 1 y refetch automático.
-- Errores vía `useToast`.
-
-### UI
-
-**Sin** TanStack `getPaginationRowModel` — la tabla muestra solo la página actual:
-
-```vue
-<UTable :data="items" :columns="columns" />
-
-<div v-if="meta.total > pageSize" class="flex justify-end pt-4">
-  <UPagination
-    v-model:page="page"
-    :items-per-page="pageSize"
-    :total="meta.total"
-  />
-</div>
-```
-
-### KPIs / resumen
-
-Cards superiores con totales globales: endpoint dedicado (`GET /pagos/resumen`),
-cargado una vez en `onMounted`, independiente de filtros/página.
-
-### Filtros
-
-Preferir `USelectMenu` con IDs del backend (`metodoPagoId`) en lugar de búsqueda
-texto en cliente.
+- `page` es 1-based (alineado con `UPagination`); al cambiar filtros → reset a
+  página 1 y refetch automático; errores vía `useToast`.
+- UI: `<UTable :data="items" :columns="columns" />` + `UPagination`
+  (`v-model:page`, `:items-per-page`, `:total="meta.total"`). **Sin** TanStack
+  `getPaginationRowModel`.
+- KPIs/resumen: endpoint dedicado (`GET /pagos/resumen`), cargado una vez en
+  `onMounted`, independiente de filtros/página.
+- Filtros: preferir `USelectMenu` con IDs del backend en vez de búsqueda texto.
 
 Referencia: `app/pages/pagos/index.vue`, `app/pages/configuracion/items.vue`.
 
@@ -502,55 +304,27 @@ Composable `useUserPreferences()` — lee/escribe `authStore.user.preferencias`.
 | Pref | Default | Persistencia |
 |------|---------|--------------|
 | `pageSize` | 15 | Solo servidor (`PATCH /me/preferencias`) |
-| `colorMode` | light | Cookie `@nuxtjs/color-mode` + mirror servidor (`light` / `dark`) |
+| `colorMode` | light | Cookie `@nuxtjs/color-mode` + mirror servidor |
 
-```typescript
-const { pageSize, setPageSize, setColorMode } = useUserPreferences()
-
-usePaginatedList({ path: '/pagos', pageSize, filters })
-```
-
-- UI en `/configuracion/perfil` → `UserPreferencesForm` (sección Apariencia).
-- Plugin `plugins/color-mode-sync.client.ts`: tras `fetchMe`, aplica tema del servidor.
-- `USelect` Claro/Oscuro en formulario; cambios se sincronizan con debounce 300 ms.
+UI en `/configuracion/perfil` → `UserPreferencesForm`; plugin
+`plugins/color-mode-sync.client.ts` aplica el tema del servidor tras `fetchMe`;
+cambios sincronizados con debounce 300 ms. Uso:
+`usePaginatedList({ path, pageSize, filters })` con el `pageSize` del composable.
 
 ---
 
 ## 14. Coordinar skill `frontend-design` con `nuxt-ui` / tokens semánticos
 
-Ambas skills conviven en este repo pero operan en fases distintas: `frontend-design`
-decide dirección estética (paleta, tipografía, layout, "elemento firma");
-`nuxt-ui` implementa con componentes usando **tokens semánticos** (regla de
-`CLAUDE.md` §Design System: nunca Tailwind hardcoded). Sin coordinación chocan en
-3 puntos:
+Orden de trabajo (siempre): **1)** `frontend-design` decide dirección estética
+(paleta 4-6 hex nombrados, tipografía, layout, elemento firma) → **2)** traducir ese
+plan a `frontend/app.config.ts` **antes** de escribir componentes → **3)** `nuxt-ui`
+construye con componentes reales consumiendo esos tokens.
 
-**Orden de trabajo (siempre en este orden):**
-1. `frontend-design` — brainstorm + plan: paleta (4-6 hex nombrados), tipografía,
-   layout, elemento firma.
-2. Traducir ese plan a `frontend/app.config.ts` **antes** de escribir ningún
-   componente (ver bloque `ui.colors` / `text` / `border` / `bg` / `divider` ya
-   existente ahí).
-3. `nuxt-ui` — construir la pantalla con componentes reales, consumiendo esos
-   tokens ya definidos.
-
-**Punto de choque 1 — hex sueltos vs. tokens semánticos:**
-La paleta que entrega `frontend-design` nunca se escribe literal en un `.vue`
-(nada de `bg-[#F4F1EA]`). Se mapea en `app.config.ts`:
-- Color de marca/acento reutilizable → escala `primary`/`secondary`/`neutral`.
-- Alias semántico nuevo de un solo uso (p. ej. el hero de una pantalla) → se
-  agrega como alias con nombre siguiendo el patrón de `text.highlighted` ya
-  presente (`bg.accent`, `text.accent`, etc.), no como clase inline.
-
-**Punto de choque 2 — CSS bespoke/animaciones vs. slots de Nuxt UI:**
-Preferir el prop `ui`/`class` del componente (mismo patrón que los overrides de
-`card`/`modal`/`formField` en `app.config.ts`) antes que CSS global. Si el
-"elemento firma" necesita markup verdaderamente custom (hero, animación de
-scroll), aislarlo en su propio componente con `<style scoped>` — nunca
-selectores globales tipo `.section`/`.cta` que puedan chocar con las clases
-generadas en `.nuxt/ui/<component>.ts`. Revisar ese archivo generado antes de
-escribir CSS custom para no duplicar especificidad.
-
-**Punto de choque 3 — orden de invocación no definido entre skills:**
-Resuelto por el flujo de 3 pasos de arriba: primero decisión estética
-(`frontend-design`), tokens declarados en `app.config.ts`, recién después
-implementación con componentes (`nuxt-ui`).
+Puntos de choque (resueltos por ese orden):
+- **Hex sueltos:** la paleta nunca se escribe literal en un `.vue` (nada de
+  `bg-[#F4F1EA]`); se mapea a escalas `primary`/`neutral` o alias semánticos en
+  `app.config.ts` (patrón `text.highlighted`).
+- **CSS bespoke:** preferir prop `ui`/`class` del componente; markup verdaderamente
+  custom va en componente propio con `<style scoped>`, nunca selectores globales
+  (revisar `.nuxt/ui/<component>.ts` antes de escribir CSS custom).
+- **Orden de invocación entre skills:** el flujo de 3 pasos de arriba.
