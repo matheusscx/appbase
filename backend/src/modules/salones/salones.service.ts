@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Salon } from './entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from './entities/mesa.entity';
@@ -19,6 +19,7 @@ import { CreateCuentaDto } from './dto/create-cuenta.dto';
 import { AddLineaDto } from './dto/add-linea.dto';
 import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
+import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { VentasService } from '../ventas/ventas.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 
@@ -375,6 +376,66 @@ export class SalonesService {
     cuenta.estado = EstadoCuenta.CANCELADA;
     await this.cuentaRepo.save(cuenta);
     return this.armarDetalle(tenantId, cuenta);
+  }
+
+  /**
+   * Fusiona varias cuentas abiertas de una misma mesa en una sola (ej: "1 y 3",
+   * o todas). Las líneas de las cuentas de origen se mueven a la de destino
+   * (la de menor `numero`), mergeando por ítem igual que agregarLinea; las
+   * cuentas de origen quedan `cancelada` (sin venta, absorbidas por el destino).
+   */
+  async fusionarCuentas(
+    tenantId: string,
+    mesaId: string,
+    dto: FusionarCuentasDto,
+  ): Promise<CuentaDetalle> {
+    await this.getMesaOrThrow(tenantId, mesaId);
+    const ids = [...new Set(dto.cuentaIds)];
+    if (ids.length < 2) {
+      throw new BadRequestException(
+        'Selecciona al menos dos cuentas para fusionar',
+      );
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const cuentas = await manager.find(Cuenta, {
+        where: { id: In(ids), tenantId, mesaId, estado: EstadoCuenta.ABIERTA },
+      });
+      if (cuentas.length !== ids.length) {
+        throw new BadRequestException(
+          'Todas las cuentas a fusionar deben pertenecer a la mesa y estar abiertas',
+        );
+      }
+      cuentas.sort((a, b) => a.numero - b.numero);
+      const [destino, ...origenes] = cuentas;
+
+      for (const origen of origenes) {
+        const lineas = await manager.find(CuentaLinea, {
+          where: { tenantId, cuentaId: origen.id },
+        });
+        for (const linea of lineas) {
+          const existente = await manager.findOne(CuentaLinea, {
+            where: { tenantId, cuentaId: destino.id, itemId: linea.itemId },
+          });
+          if (existente) {
+            existente.cantidad = new Decimal(existente.cantidad)
+              .plus(linea.cantidad)
+              .toString();
+            await manager.save(CuentaLinea, existente);
+            await manager.softDelete(CuentaLinea, {
+              id: linea.id,
+              tenantId,
+            });
+          } else {
+            linea.cuentaId = destino.id;
+            await manager.save(CuentaLinea, linea);
+          }
+        }
+        origen.estado = EstadoCuenta.CANCELADA;
+        await manager.save(Cuenta, origen);
+      }
+
+      return this.armarDetalle(tenantId, destino, manager);
+    });
   }
 
   /**

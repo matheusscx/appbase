@@ -51,6 +51,7 @@ describe('SalonesService', () => {
     find: jest.Mock;
     save: jest.Mock;
     create: jest.Mock;
+    softDelete: jest.Mock;
   };
   let dataSource: {
     query: jest.Mock;
@@ -73,6 +74,7 @@ describe('SalonesService', () => {
       create: jest.fn((_e: unknown, data: Record<string, unknown>) => ({
         ...data,
       })),
+      softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
     };
     dataSource = {
       query: jest.fn(),
@@ -127,6 +129,108 @@ describe('SalonesService', () => {
       await expect(service.abrirCuenta(TENANT, MESA, {})).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('fusionarCuentas', () => {
+    const CUENTA_A = 'cuenta-a';
+    const CUENTA_B = 'cuenta-b';
+
+    it('mueve las líneas de las cuentas de origen a la de menor número y las cancela', async () => {
+      const cuentaA = {
+        id: CUENTA_A,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 1,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      const cuentaB = {
+        id: CUENTA_B,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 3,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      const lineaExistenteDestino = {
+        id: 'linea-a1',
+        tenantId: TENANT,
+        cuentaId: CUENTA_A,
+        itemId: 'item-1',
+        cantidad: '1',
+      };
+      const lineaOrigenMismoItem = {
+        id: 'linea-b1',
+        tenantId: TENANT,
+        cuentaId: CUENTA_B,
+        itemId: 'item-1',
+        cantidad: '2',
+      };
+      const lineaOrigenOtroItem = {
+        id: 'linea-b2',
+        tenantId: TENANT,
+        cuentaId: CUENTA_B,
+        itemId: 'item-2',
+        cantidad: '1',
+      };
+
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockImplementation((entity: unknown) => {
+        if (entity === Cuenta) return Promise.resolve([cuentaB, cuentaA]);
+        if (entity === CuentaLinea)
+          return Promise.resolve([lineaOrigenMismoItem, lineaOrigenOtroItem]);
+        return Promise.resolve([]);
+      });
+      manager.findOne.mockImplementation(
+        (_entity: unknown, opts: { where: { itemId: string } }) => {
+          if (opts.where.itemId === 'item-1')
+            return Promise.resolve(lineaExistenteDestino);
+          return Promise.resolve(null);
+        },
+      );
+      manager.query.mockResolvedValue([]);
+
+      const result = await service.fusionarCuentas(TENANT, MESA, {
+        cuentaIds: [CUENTA_A, CUENTA_B],
+      });
+
+      expect(lineaExistenteDestino.cantidad).toBe('3');
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        lineaExistenteDestino,
+      );
+      expect(manager.softDelete).toHaveBeenCalledWith(CuentaLinea, {
+        id: 'linea-b1',
+        tenantId: TENANT,
+      });
+      expect(lineaOrigenOtroItem.cuentaId).toBe(CUENTA_A);
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        lineaOrigenOtroItem,
+      );
+      expect(cuentaB.estado).toBe(EstadoCuenta.CANCELADA);
+      expect(manager.save).toHaveBeenCalledWith(Cuenta, cuentaB);
+      expect(result.id).toBe(CUENTA_A);
+    });
+
+    it('lanza BadRequest si alguna cuenta no está abierta o no pertenece a la mesa', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockResolvedValue([{ id: CUENTA_A, numero: 1 }]);
+
+      await expect(
+        service.fusionarCuentas(TENANT, MESA, {
+          cuentaIds: [CUENTA_A, CUENTA_B],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('lanza BadRequest si no hay al menos dos cuentas distintas', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+
+      await expect(
+        service.fusionarCuentas(TENANT, MESA, {
+          cuentaIds: [CUENTA_A, CUENTA_A],
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

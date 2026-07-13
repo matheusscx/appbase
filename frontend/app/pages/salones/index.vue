@@ -45,6 +45,10 @@ const loadingCuentas = ref(false)
 const activeCuenta = ref<CuentaDetalle | null>(null)
 const resultado = ref<ResultadoVenta | null>(null)
 
+const fusionMode = ref(false)
+const seleccionadasFusion = ref<string[]>([])
+const fusionando = ref(false)
+
 const cobroOpen = ref(false)
 const submitting = ref(false)
 const cancelOpen = ref(false)
@@ -103,6 +107,8 @@ async function onSelectMesa(mesa: MesaResumen) {
   selectedMesa.value = mesa
   activeCuenta.value = null
   resultado.value = null
+  fusionMode.value = false
+  seleccionadasFusion.value = []
   mesaDrawerOpen.value = true
   await cargarCuentas(mesa.id)
 }
@@ -147,6 +153,10 @@ async function nuevaCuenta() {
 }
 
 function abrirCuenta(cuenta: CuentaDetalle) {
+  if (fusionMode.value) {
+    toggleSeleccionFusion(cuenta)
+    return
+  }
   activeCuenta.value = cuenta
   void recalcular()
 }
@@ -154,6 +164,40 @@ function abrirCuenta(cuenta: CuentaDetalle) {
 function volverACuentas() {
   activeCuenta.value = null
   resultado.value = null
+}
+
+// ── Fusionar cuentas (ej. "1 y 3", "3 y 4" o todas) ────────────────────────
+function toggleFusionMode() {
+  fusionMode.value = !fusionMode.value
+  seleccionadasFusion.value = []
+}
+
+function toggleSeleccionFusion(cuenta: CuentaDetalle) {
+  const idx = seleccionadasFusion.value.indexOf(cuenta.id)
+  if (idx === -1) seleccionadasFusion.value.push(cuenta.id)
+  else seleccionadasFusion.value.splice(idx, 1)
+}
+
+function seleccionarTodasFusion() {
+  seleccionadasFusion.value = cuentas.value.map(c => c.id)
+}
+
+async function fusionarSeleccionadas() {
+  if (!selectedMesa.value || seleccionadasFusion.value.length < 2) return
+  fusionando.value = true
+  try {
+    const cuenta = await salonesApi.fusionarCuentas(selectedMesa.value.id, seleccionadasFusion.value)
+    toast.add({ title: `Cuentas fusionadas en Cuenta ${cuenta.numero}`, color: 'success' })
+    fusionMode.value = false
+    seleccionadasFusion.value = []
+    await cargarCuentas(selectedMesa.value.id)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al fusionar las cuentas'), color: 'error' })
+  }
+  finally {
+    fusionando.value = false
+  }
 }
 
 function syncCuenta(cuenta: CuentaDetalle) {
@@ -314,10 +358,38 @@ async function confirmarCobro(pagos: PagoInput[]) {
         <template #body>
           <!-- Lista de cuentas de la mesa -->
           <div v-if="!activeCuenta" class="space-y-4">
-            <div class="flex justify-end">
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <UButton
+                v-if="cuentas.length >= 2"
+                icon="i-lucide-merge"
+                color="neutral"
+                :variant="fusionMode ? 'solid' : 'soft'"
+                @click="toggleFusionMode"
+              >
+                {{ fusionMode ? 'Cancelar fusión' : 'Fusionar cuentas' }}
+              </UButton>
               <UButton icon="i-lucide-plus" @click="nuevaCuenta">
                 Nueva cuenta
               </UButton>
+            </div>
+
+            <div v-if="fusionMode" class="flex flex-wrap items-center gap-2 rounded-lg border border-default bg-muted p-3">
+              <p class="text-sm text-muted">
+                Selecciona las cuentas a combinar (ej. 1 y 3, 3 y 4, o todas). Se fusionan en la de menor número.
+              </p>
+              <div class="ml-auto flex items-center gap-2">
+                <UButton size="sm" color="neutral" variant="ghost" @click="seleccionarTodasFusion">
+                  Todas
+                </UButton>
+                <UButton
+                  size="sm"
+                  :disabled="seleccionadasFusion.length < 2"
+                  :loading="fusionando"
+                  @click="fusionarSeleccionadas"
+                >
+                  Fusionar ({{ seleccionadasFusion.length }})
+                </UButton>
+              </div>
             </div>
 
             <div v-if="loadingCuentas" class="flex justify-center py-8">
@@ -331,16 +403,24 @@ async function confirmarCobro(pagos: PagoInput[]) {
                 v-for="cuenta in cuentas"
                 :key="cuenta.id"
                 class="cursor-pointer transition-colors hover:bg-muted"
+                :class="fusionMode && seleccionadasFusion.includes(cuenta.id) ? 'ring-2 ring-primary' : ''"
                 @click="abrirCuenta(cuenta)"
               >
                 <div class="flex items-center justify-between">
-                  <div>
-                    <p class="font-semibold text-default">Cuenta {{ cuenta.numero }}</p>
-                    <p class="text-sm text-muted">
-                      {{ cuenta.lineas.length }} producto(s)
-                    </p>
+                  <div class="flex items-center gap-2">
+                    <UCheckbox
+                      v-if="fusionMode"
+                      :model-value="seleccionadasFusion.includes(cuenta.id)"
+                      @click.stop="toggleSeleccionFusion(cuenta)"
+                    />
+                    <div>
+                      <p class="font-semibold text-default">Cuenta {{ cuenta.numero }}</p>
+                      <p class="text-sm text-muted">
+                        {{ cuenta.lineas.length }} producto(s)
+                      </p>
+                    </div>
                   </div>
-                  <UIcon name="i-lucide-chevron-right" class="h-5 w-5 text-muted" />
+                  <UIcon v-if="!fusionMode" name="i-lucide-chevron-right" class="h-5 w-5 text-muted" />
                 </div>
               </UCard>
             </div>

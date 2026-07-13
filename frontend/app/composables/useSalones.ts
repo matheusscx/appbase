@@ -127,6 +127,12 @@ export function useSalones() {
       body: { nombre },
     })
 
+  const fusionarCuentas = (mesaId: string, cuentaIds: string[]) =>
+    useApiFetch<CuentaDetalle>(`${apiUrl}/mesas/${mesaId}/cuentas/fusionar`, {
+      method: 'POST',
+      body: { cuentaIds },
+    })
+
   const agregarLinea = (cuentaId: string, itemId: string, cantidad: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/lineas`, {
       method: 'POST',
@@ -168,6 +174,7 @@ export function useSalones() {
     listarOperacion,
     listarCuentas,
     abrirCuenta,
+    fusionarCuentas,
     agregarLinea,
     actualizarLinea,
     quitarLinea,

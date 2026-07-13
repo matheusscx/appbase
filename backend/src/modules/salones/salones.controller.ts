@@ -26,6 +26,7 @@ import { CreateCuentaDto } from './dto/create-cuenta.dto';
 import { AddLineaDto } from './dto/add-linea.dto';
 import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
+import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 
 @ApiTags('salones')
 @ApiBearerAuth()
@@ -140,6 +141,17 @@ export class MesasController {
   ) {
     const u = req.user as JwtUser;
     return this.salonesService.abrirCuenta(u.tenantId ?? '', id, dto);
+  }
+
+  @Post(':id/cuentas/fusionar')
+  @RequiresPermiso('Salones', 'Operar')
+  fusionarCuentas(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: FusionarCuentasDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.salonesService.fusionarCuentas(u.tenantId ?? '', id, dto);
   }
 }
 
