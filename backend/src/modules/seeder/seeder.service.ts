@@ -30,6 +30,11 @@ import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Garzon } from '../garzones/entities/garzon.entity';
+import {
+  Impresora,
+  RolImpresora,
+  TipoConexionImpresora,
+} from '../impresoras/entities/impresora.entity';
 import { Caja } from '../caja/entities/caja.entity';
 import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
@@ -108,6 +113,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly mesaRepo: Repository<Mesa>,
     @InjectRepository(Garzon)
     private readonly garzonRepo: Repository<Garzon>,
+    @InjectRepository(Impresora)
+    private readonly impresoraRepo: Repository<Impresora>,
     private readonly credencialesService: CredencialesService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -135,6 +142,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedTerceros();
     await this.seedTenantMonedas();
     await this.seedTenantMetodosPago();
+    await this.seedImpresoras();
     await this.seedCategorias();
     await this.seedImpuestos();
     await this.seedDescuentos();
@@ -400,6 +408,13 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-silverware-fork-knife',
         tieneConfiguracion: false,
       },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440241',
+        nombre: 'Impresoras',
+        url: '/configuracion/impresoras',
+        icono: 'mdi-printer',
+        tieneConfiguracion: false,
+      },
     ];
 
     for (const data of modulos) {
@@ -463,6 +478,7 @@ export class SeederService implements OnApplicationBootstrap {
     const NOTA_CREDITO = '550e8400-e29b-41d4-a716-446655440219';
     const OPERAR = '550e8400-e29b-41d4-a716-446655440221';
     const SALONES = '550e8400-e29b-41d4-a716-446655440222';
+    const IMPRESORAS = '550e8400-e29b-41d4-a716-446655440241';
     const VENTAS = '550e8400-e29b-41d4-a716-446655440058';
     const PAGOS = '550e8400-e29b-41d4-a716-446655440180';
     const INVENTARIO = '550e8400-e29b-41d4-a716-446655440181';
@@ -671,6 +687,27 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440227',
         moduloAppId: SALONES,
         permisoId: OPERAR,
+      },
+      // Impresoras (config de impresión térmica: comandas, precuenta, boleta)
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440242',
+        moduloAppId: IMPRESORAS,
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440243',
+        moduloAppId: IMPRESORAS,
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440244',
+        moduloAppId: IMPRESORAS,
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440245',
+        moduloAppId: IMPRESORAS,
+        permisoId: ELIMINAR,
       },
     ];
 
@@ -936,6 +973,13 @@ export class SeederService implements OnApplicationBootstrap {
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440246',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440241', // Paris → Impresoras
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
     ];
 
     for (const data of entries) {
@@ -1074,6 +1118,50 @@ export class SeederService implements OnApplicationBootstrap {
       const exists = await this.garzonRepo.findOne({ where: { id: data.id } });
       if (!exists) {
         await this.garzonRepo.save(this.garzonRepo.create(data));
+      }
+    }
+  }
+
+  private async seedImpresoras(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const impresoras: Partial<Impresora>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440247',
+        tenantId: PARIS,
+        nombre: 'Cocina',
+        rol: 'comanda' as RolImpresora,
+        tipoConexion: 'red' as TipoConexionImpresora,
+        host: '192.168.1.50',
+        puerto: 9100,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440248',
+        tenantId: PARIS,
+        nombre: 'Barra',
+        rol: 'comanda' as RolImpresora,
+        tipoConexion: 'red' as TipoConexionImpresora,
+        host: '192.168.1.51',
+        puerto: 9100,
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440249',
+        tenantId: PARIS,
+        nombre: 'Caja',
+        rol: 'boleta' as RolImpresora,
+        tipoConexion: 'red' as TipoConexionImpresora,
+        host: '192.168.1.52',
+        puerto: 9100,
+        activo: true,
+      },
+    ];
+    for (const data of impresoras) {
+      const exists = await this.impresoraRepo.findOne({
+        where: { id: data.id },
+      });
+      if (!exists) {
+        await this.impresoraRepo.save(this.impresoraRepo.create(data));
       }
     }
   }
@@ -1566,6 +1654,9 @@ export class SeederService implements OnApplicationBootstrap {
         nombre: 'Ropa y accesorios',
         aplicaA: 'ambos',
         activo: true,
+        // Demo: rutea a "Cocina" para poder probar el flujo de comanda
+        // sin configurar nada manualmente (ver seedImpresoras).
+        impresoraId: '550e8400-e29b-41d4-a716-446655440247',
       },
     ];
 
