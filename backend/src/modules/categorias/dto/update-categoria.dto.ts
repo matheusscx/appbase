@@ -4,6 +4,8 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateCategoriaDto {
@@ -19,4 +21,10 @@ export class UpdateCategoriaDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  // `null` explícito desasigna la ruta; `Object.assign` en el service la limpia.
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsUUID()
+  impresoraId?: string | null;
 }

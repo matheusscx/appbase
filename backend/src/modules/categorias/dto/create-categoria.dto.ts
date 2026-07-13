@@ -4,6 +4,8 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateCategoriaDto {
@@ -18,4 +20,10 @@ export class CreateCategoriaDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  // `null` explícito desasigna la ruta de comanda; un UUID la (re)asigna.
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsUUID()
+  impresoraId?: string | null;
 }

@@ -1,11 +1,12 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CategoriasService } from './categorias.service';
 import { Categoria } from './entities/categoria.entity';
 
 const TENANT = 'tenant-uuid';
 const CAT = 'categoria-uuid';
+const IMPRESORA = 'impresora-uuid';
 
 describe('CategoriasService', () => {
   let service: CategoriasService;
@@ -16,6 +17,7 @@ describe('CategoriasService', () => {
     save: jest.Mock;
     softDelete: jest.Mock;
   };
+  let dataSource: { query: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -25,11 +27,15 @@ describe('CategoriasService', () => {
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
     };
+    dataSource = {
+      query: jest.fn().mockResolvedValue([{ impresora_id: IMPRESORA }]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CategoriasService,
         { provide: getRepositoryToken(Categoria), useValue: repo },
+        { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
 
@@ -60,8 +66,30 @@ describe('CategoriasService', () => {
         nombre: 'Bebidas',
         aplicaA: 'ambos',
         activo: true,
+        impresoraId: null,
       });
       expect(result).toMatchObject({ nombre: 'Bebidas', aplicaA: 'ambos' });
+    });
+
+    it('acepta un impresoraId válido (de rol comanda, activa, del tenant)', async () => {
+      const result = await service.create(TENANT, {
+        nombre: 'Bebidas',
+        impresoraId: IMPRESORA,
+      });
+
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining("rol = 'comanda'"),
+        [IMPRESORA, TENANT],
+      );
+      expect(result).toMatchObject({ impresoraId: IMPRESORA });
+    });
+
+    it('rechaza un impresoraId que no existe o no es de rol comanda', async () => {
+      dataSource.query.mockResolvedValue([]);
+      await expect(
+        service.create(TENANT, { nombre: 'Bebidas', impresoraId: IMPRESORA }),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.create).not.toHaveBeenCalled();
     });
   });
 
@@ -88,6 +116,20 @@ describe('CategoriasService', () => {
 
       expect(result.nombre).toBe('Comidas');
       expect(repo.save).toHaveBeenCalled();
+    });
+
+    it('valida el impresoraId al actualizarlo', async () => {
+      repo.findOne.mockResolvedValue({
+        id: CAT,
+        tenantId: TENANT,
+        nombre: 'Bebidas',
+        impresoraId: null,
+      });
+      dataSource.query.mockResolvedValue([]);
+
+      await expect(
+        service.update(TENANT, CAT, { impresoraId: IMPRESORA }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

@@ -21,6 +21,9 @@ export class Categoria {
   @Column({ name: 'aplica_a', type: 'text', default: 'ambos' })
   aplicaA: string;
 
+  @Column({ name: 'impresora_id', type: 'uuid', nullable: true })
+  impresoraId: string | null;
+
   @Column({ default: true })
   activo: boolean;
 
