@@ -27,6 +27,7 @@ import { AddLineaDto } from './dto/add-linea.dto';
 import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
+import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 
 @ApiTags('salones')
 @ApiBearerAuth()
@@ -171,6 +172,24 @@ export class CuentasController {
   ) {
     const u = req.user as JwtUser;
     return this.salonesService.agregarLinea(u.tenantId ?? '', id, dto);
+  }
+
+  @Get(':id/comanda/pendiente')
+  @RequiresPermiso('Salones', 'Operar')
+  previewComanda(@Req() req: Request, @Param('id') id: string) {
+    const u = req.user as JwtUser;
+    return this.salonesService.previewComanda(u.tenantId ?? '', id);
+  }
+
+  @Post(':id/comanda')
+  @RequiresPermiso('Salones', 'Operar')
+  confirmarComanda(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: ConfirmarComandaDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.salonesService.confirmarComanda(u.tenantId ?? '', id, dto);
   }
 
   @Patch(':id/lineas/:lineaId')

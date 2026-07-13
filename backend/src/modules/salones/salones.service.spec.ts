@@ -56,6 +56,7 @@ describe('SalonesService', () => {
     save: jest.Mock;
     create: jest.Mock;
     softDelete: jest.Mock;
+    update: jest.Mock;
   };
   let dataSource: {
     query: jest.Mock;
@@ -85,6 +86,7 @@ describe('SalonesService', () => {
         ...data,
       })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+      update: jest.fn(() => Promise.resolve({ affected: 1 })),
     };
     dataSource = {
       query: jest.fn(),
@@ -185,6 +187,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_A,
         itemId: 'item-1',
         cantidad: '1',
+        cantidadEnviada: '1',
       };
       const lineaOrigenMismoItem = {
         id: 'linea-b1',
@@ -192,6 +195,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_B,
         itemId: 'item-1',
         cantidad: '2',
+        cantidadEnviada: '2',
       };
       const lineaOrigenOtroItem = {
         id: 'linea-b2',
@@ -199,6 +203,7 @@ describe('SalonesService', () => {
         cuentaId: CUENTA_B,
         itemId: 'item-2',
         cantidad: '1',
+        cantidadEnviada: '0',
       };
 
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
@@ -222,6 +227,8 @@ describe('SalonesService', () => {
       });
 
       expect(lineaExistenteDestino.cantidad).toBe('3');
+      // cantidadEnviada también se suma para no reenviar lo ya impreso
+      expect(lineaExistenteDestino.cantidadEnviada).toBe('3');
       expect(manager.save).toHaveBeenCalledWith(
         CuentaLinea,
         lineaExistenteDestino,
@@ -424,6 +431,110 @@ describe('SalonesService', () => {
         BadRequestException,
       );
       expect(mesaRepo.softDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('previewComanda', () => {
+    it('agrupa por impresora solo los ítems con diferencia pendiente, SIN persistir', async () => {
+      cuentaRepo.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      dataSource.query.mockResolvedValue([
+        {
+          cuenta_linea_id: 'linea-1',
+          cantidad: '3',
+          cantidad_enviada: '1',
+          nombre: 'Lomo a lo pobre',
+          impresora_id: 'impresora-cocina',
+          impresora_nombre: 'Cocina',
+        },
+        {
+          cuenta_linea_id: 'linea-2',
+          cantidad: '2',
+          cantidad_enviada: '2',
+          nombre: 'Agua mineral',
+          impresora_id: 'impresora-barra',
+          impresora_nombre: 'Barra',
+        },
+        {
+          cuenta_linea_id: 'linea-3',
+          cantidad: '1',
+          cantidad_enviada: '0',
+          nombre: 'Postre sin ruta',
+          impresora_id: null,
+          impresora_nombre: null,
+        },
+      ]);
+
+      const result = await service.previewComanda(TENANT, CUENTA);
+
+      expect(result.estaciones).toEqual([
+        {
+          impresoraId: 'impresora-cocina',
+          nombre: 'Cocina',
+          items: [
+            {
+              cuentaLineaId: 'linea-1',
+              nombre: 'Lomo a lo pobre',
+              cantidad: '2', // diff a imprimir
+              cantidadEnviada: '3', // total absoluto a persistir al confirmar
+            },
+          ],
+        },
+      ]);
+      // preview NO persiste nada
+      expect(manager.update).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequest si la cuenta no está abierta', async () => {
+      cuentaRepo.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.CERRADA,
+      });
+      await expect(service.previewComanda(TENANT, CUENTA)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('lanza NotFound si la cuenta no pertenece al tenant', async () => {
+      cuentaRepo.findOne.mockResolvedValue(null);
+      await expect(service.previewComanda(TENANT, CUENTA)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('confirmarComanda', () => {
+    it('marca cantidad_enviada solo para las líneas impresas', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+
+      await service.confirmarComanda(TENANT, CUENTA, {
+        lineas: [{ cuentaLineaId: 'linea-1', cantidadEnviada: '3' }],
+      });
+
+      expect(manager.update).toHaveBeenCalledWith(
+        CuentaLinea,
+        { id: 'linea-1', tenantId: TENANT },
+        { cantidadEnviada: '3' },
+      );
+    });
+
+    it('lanza BadRequest si la cuenta no está abierta', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.CERRADA,
+      });
+      await expect(
+        service.confirmarComanda(TENANT, CUENTA, { lineas: [] }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

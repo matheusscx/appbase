@@ -20,6 +20,7 @@ import { AddLineaDto } from './dto/add-linea.dto';
 import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
+import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import { VentasService } from '../ventas/ventas.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 import { GarzonesService } from '../garzones/garzones.service';
@@ -48,6 +49,17 @@ export interface CuentaLineaDetalle {
   precioBase: string;
   monedaId: string;
   cantidad: string;
+}
+
+export interface ComandaEstacion {
+  impresoraId: string;
+  nombre: string;
+  items: {
+    cuentaLineaId: string;
+    nombre: string;
+    cantidad: string;
+    cantidadEnviada: string;
+  }[];
 }
 
 export interface CuentaDetalle {
@@ -432,6 +444,9 @@ export class SalonesService {
             existente.cantidad = new Decimal(existente.cantidad)
               .plus(linea.cantidad)
               .toString();
+            existente.cantidadEnviada = new Decimal(existente.cantidadEnviada)
+              .plus(linea.cantidadEnviada)
+              .toString();
             await manager.save(CuentaLinea, existente);
             await manager.softDelete(CuentaLinea, {
               id: linea.id,
@@ -504,6 +519,100 @@ export class SalonesService {
 
       const detalle = await this.armarDetalle(tenantId, cuenta, manager);
       return { cuenta: detalle, ventaId: venta.id };
+    });
+  }
+
+  /**
+   * Calcula el diff (cantidad - cantidad_enviada) de cada línea, agrupado por la
+   * impresora de la categoría del ítem. NO persiste: es una vista previa idempotente.
+   * Ítems sin categoría o cuya categoría no tiene impresora se excluyen. Devuelve
+   * estaciones vacías si no hay nada nuevo. El frontend imprime y luego confirma.
+   */
+  async previewComanda(
+    tenantId: string,
+    cuentaId: string,
+  ): Promise<{ estaciones: ComandaEstacion[] }> {
+    const cuenta = await this.cuentaRepo.findOne({
+      where: { id: cuentaId, tenantId },
+    });
+    if (!cuenta) {
+      throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+    }
+    if (cuenta.estado !== EstadoCuenta.ABIERTA) {
+      throw new BadRequestException('La cuenta no está abierta');
+    }
+
+    const rows: {
+      cuenta_linea_id: string;
+      cantidad: string;
+      cantidad_enviada: string;
+      nombre: string;
+      impresora_id: string | null;
+      impresora_nombre: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
+              i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
+         FROM cuenta_lineas cl
+         JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
+         LEFT JOIN categorias c
+           ON c.categoria_id = i.categoria_id AND c.eliminado_el IS NULL
+         LEFT JOIN impresoras imp
+           ON imp.impresora_id = c.impresora_id AND imp.eliminado_el IS NULL
+              AND imp.activo = true
+        WHERE cl.cuenta_id = $1 AND cl.tenant_id = $2 AND cl.eliminado_el IS NULL`,
+      [cuentaId, tenantId],
+    );
+
+    const estacionesMap = new Map<string, ComandaEstacion>();
+    for (const row of rows) {
+      const diff = new Decimal(row.cantidad).minus(row.cantidad_enviada);
+      if (diff.lte(0) || !row.impresora_id) continue;
+
+      const estacion = estacionesMap.get(row.impresora_id) ?? {
+        impresoraId: row.impresora_id,
+        nombre: row.impresora_nombre ?? '',
+        items: [],
+      };
+      estacion.items.push({
+        cuentaLineaId: row.cuenta_linea_id,
+        nombre: row.nombre,
+        cantidad: diff.toString(),
+        cantidadEnviada: row.cantidad, // total absoluto a persistir al confirmar
+      });
+      estacionesMap.set(row.impresora_id, estacion);
+    }
+
+    return { estaciones: [...estacionesMap.values()] };
+  }
+
+  /**
+   * Marca cantidad_enviada = cantidadEnviada para las líneas que el navegador ya
+   * imprimió. Se llama por estación tras un print exitoso; setear el total absoluto
+   * (no sumar) lo hace idempotente ante reintentos y tolera cambios de cantidad
+   * entre el preview y el confirm.
+   */
+  async confirmarComanda(
+    tenantId: string,
+    cuentaId: string,
+    dto: ConfirmarComandaDto,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const cuenta = await manager.findOne(Cuenta, {
+        where: { id: cuentaId, tenantId },
+      });
+      if (!cuenta) {
+        throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+      }
+      if (cuenta.estado !== EstadoCuenta.ABIERTA) {
+        throw new BadRequestException('La cuenta no está abierta');
+      }
+      for (const linea of dto.lineas) {
+        await manager.update(
+          CuentaLinea,
+          { id: linea.cuentaLineaId, tenantId },
+          { cantidadEnviada: linea.cantidadEnviada },
+        );
+      }
     });
   }
 
