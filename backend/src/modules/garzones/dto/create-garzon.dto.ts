@@ -1,19 +1,12 @@
-import {
-  IsBoolean,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  Matches,
-} from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateGarzonDto {
   @IsString()
   @IsNotEmpty()
   nombre: string;
 
-  // PIN operativo: exactamente 6 dígitos numéricos.
-  @Matches(/^\d{6}$/, { message: 'El PIN debe tener exactamente 6 dígitos' })
-  pin: string;
+  // El PIN operativo se genera automáticamente en el backend (no lo elige el
+  // usuario) y se devuelve una sola vez en la respuesta de creación.
 
   @IsOptional()
   @IsBoolean()

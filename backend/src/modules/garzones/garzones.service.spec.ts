@@ -1,9 +1,18 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { GarzonesService } from './garzones.service';
 import { Garzon } from './entities/garzon.entity';
+
+// `crypto.randomInt` es no-configurable (no se puede spyOn), así que se mockea
+// el módulo dejando la implementación real por defecto y sobrescribiéndola solo
+// donde el test necesita forzar el valor generado.
+jest.mock('crypto', () => {
+  const actual = jest.requireActual<typeof crypto>('crypto');
+  return { ...actual, randomInt: jest.fn(actual.randomInt) };
+});
 
 const TENANT = 'tenant-uuid';
 
@@ -56,27 +65,34 @@ describe('GarzonesService', () => {
     service = module.get<GarzonesService>(GarzonesService);
   });
 
-  describe('crear', () => {
-    it('hashea el PIN y nunca expone el hash en la vista pública', async () => {
-      const result = await service.crear(TENANT, {
-        nombre: 'Ana',
-        pin: '123456',
-      });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
+  describe('crear', () => {
+    it('genera un PIN de 6 dígitos, lo hashea y lo devuelve una sola vez', async () => {
+      const result = await service.crear(TENANT, { nombre: 'Ana' });
+
+      expect(result.pin).toMatch(/^\d{6}$/);
       const saved = (repo.save.mock.calls[0] as [Garzon])[0];
-      expect(saved.pinHash).not.toBe('123456');
-      expect(await bcrypt.compare('123456', saved.pinHash)).toBe(true);
+      expect(saved.pinHash).not.toBe(result.pin);
+      expect(await bcrypt.compare(result.pin, saved.pinHash)).toBe(true);
       expect(result).not.toHaveProperty('pinHash');
       expect(result.nombre).toBe('Ana');
     });
 
-    it('rechaza un PIN ya usado por otro garzón del tenant', async () => {
+    it('reintenta si el PIN generado ya está en uso en el tenant', async () => {
+      // Primer intento colisiona (123456 ya existe); el segundo (654321) es libre.
+      (crypto.randomInt as unknown as jest.Mock)
+        .mockReturnValueOnce(123456)
+        .mockReturnValueOnce(654321);
       repo.find.mockResolvedValue([garzon({ id: 'g1', pin: '123456' })]);
 
-      await expect(
-        service.crear(TENANT, { nombre: 'Bruno', pin: '123456' }),
-      ).rejects.toThrow(BadRequestException);
-      expect(repo.save).not.toHaveBeenCalled();
+      const result = await service.crear(TENANT, { nombre: 'Bruno' });
+
+      expect(result.pin).toBe('654321');
+      const saved = (repo.save.mock.calls[0] as [Garzon])[0];
+      expect(await bcrypt.compare('654321', saved.pinHash)).toBe(true);
     });
   });
 
@@ -101,24 +117,25 @@ describe('GarzonesService', () => {
     });
   });
 
-  describe('resetPin', () => {
-    it('re-hashea el PIN del garzón existente', async () => {
+  describe('regenerarPin', () => {
+    it('genera un PIN nuevo, re-hashea y lo devuelve una sola vez', async () => {
       const g = garzon({ id: 'g1', pin: '111111' });
       repo.findOne.mockResolvedValue(g);
       repo.find.mockResolvedValue([g]);
 
-      await service.resetPin(TENANT, 'g1', { pin: '222222' });
+      const result = await service.regenerarPin(TENANT, 'g1');
 
+      expect(result.pin).toMatch(/^\d{6}$/);
       const saved = (repo.save.mock.calls[0] as [Garzon])[0];
-      expect(await bcrypt.compare('222222', saved.pinHash)).toBe(true);
+      expect(await bcrypt.compare(result.pin, saved.pinHash)).toBe(true);
     });
 
     it('lanza NotFound si el garzón no existe en el tenant', async () => {
       repo.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.resetPin(TENANT, 'inexistente', { pin: '222222' }),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.regenerarPin(TENANT, 'inexistente')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

@@ -26,9 +26,8 @@ onMounted(cargar)
 // ── Crear / editar garzón ──────────────────────────────────────────────────
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
-const form = ref<{ nombre: string, pin: string, activo: boolean }>({
+const form = ref<{ nombre: string, activo: boolean }>({
   nombre: '',
-  pin: '',
   activo: true,
 })
 const saving = ref(false)
@@ -39,13 +38,13 @@ const drawerTitle = computed(() =>
 
 function abrirCrear() {
   editingId.value = null
-  form.value = { nombre: '', pin: '', activo: true }
+  form.value = { nombre: '', activo: true }
   drawerOpen.value = true
 }
 
 function abrirEditar(garzon: Garzon) {
   editingId.value = garzon.id
-  form.value = { nombre: garzon.nombre, pin: '', activo: garzon.activo }
+  form.value = { nombre: garzon.nombre, activo: garzon.activo }
   drawerOpen.value = true
 }
 
@@ -58,22 +57,19 @@ async function guardar() {
         activo: form.value.activo,
       })
       toast.add({ title: 'Garzón actualizado', color: 'success' })
+      drawerOpen.value = false
+      await cargar()
     }
     else {
-      if (!/^\d{6}$/.test(form.value.pin)) {
-        toast.add({ title: 'El PIN debe tener 6 dígitos', color: 'error' })
-        saving.value = false
-        return
-      }
-      await garzonesApi.crear({
+      const creado = await garzonesApi.crear({
         nombre: form.value.nombre,
-        pin: form.value.pin,
         activo: form.value.activo,
       })
-      toast.add({ title: 'Garzón creado', color: 'success' })
+      drawerOpen.value = false
+      await cargar()
+      // El PIN se genera en el backend y se muestra una sola vez.
+      revelarPin(creado.nombre, creado.pin)
     }
-    drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar el garzón'), color: 'error' })
@@ -83,36 +79,39 @@ async function guardar() {
   }
 }
 
-// ── Resetear PIN ───────────────────────────────────────────────────────────
-const pinDrawerOpen = ref(false)
-const pinTarget = ref<Garzon | null>(null)
-const pinForm = ref({ pin: '' })
-const savingPin = ref(false)
+// ── Regenerar PIN ──────────────────────────────────────────────────────────
+const regenerarOpen = ref(false)
+const regenerarTarget = ref<Garzon | null>(null)
+const regenerando = ref(false)
 
-function abrirResetPin(garzon: Garzon) {
-  pinTarget.value = garzon
-  pinForm.value = { pin: '' }
-  pinDrawerOpen.value = true
+function abrirRegenerar(garzon: Garzon) {
+  regenerarTarget.value = garzon
+  regenerarOpen.value = true
 }
 
-async function guardarPin() {
-  if (!pinTarget.value) return
-  if (!/^\d{6}$/.test(pinForm.value.pin)) {
-    toast.add({ title: 'El PIN debe tener 6 dígitos', color: 'error' })
-    return
-  }
-  savingPin.value = true
+async function confirmarRegenerar() {
+  if (!regenerarTarget.value) return
+  regenerando.value = true
   try {
-    await garzonesApi.resetPin(pinTarget.value.id, pinForm.value.pin)
-    toast.add({ title: 'PIN actualizado', color: 'success' })
-    pinDrawerOpen.value = false
+    const res = await garzonesApi.regenerarPin(regenerarTarget.value.id)
+    regenerarOpen.value = false
+    revelarPin(res.nombre, res.pin)
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al actualizar el PIN'), color: 'error' })
+    toast.add({ title: apiErrorMsg(e, 'Error al regenerar el PIN'), color: 'error' })
   }
   finally {
-    savingPin.value = false
+    regenerando.value = false
   }
+}
+
+// ── Revelado del PIN (una sola vez) ─────────────────────────────────────────
+const pinReveladoOpen = ref(false)
+const pinRevelado = ref<{ nombre: string, pin: string }>({ nombre: '', pin: '' })
+
+function revelarPin(nombre: string, pin: string) {
+  pinRevelado.value = { nombre, pin }
+  pinReveladoOpen.value = true
 }
 
 // ── Eliminar ───────────────────────────────────────────────────────────────
@@ -181,8 +180,8 @@ const columns: TableColumn<Garzon>[] = [
             icon="i-lucide-key-round"
             color="neutral"
             variant="ghost"
-            aria-label="Resetear PIN"
-            @click="abrirResetPin(row.original)"
+            aria-label="Regenerar PIN"
+            @click="abrirRegenerar(row.original)"
           />
           <UButton
             icon="i-lucide-square-pen"
@@ -218,20 +217,10 @@ const columns: TableColumn<Garzon>[] = [
           <UFormField label="Nombre" required>
             <UInput v-model="form.nombre" placeholder="Ana Torres" autofocus />
           </UFormField>
-          <UFormField
-            v-if="!editingId"
-            label="PIN (6 dígitos)"
-            required
-            help="El garzón usará este PIN para identificarse. Se guarda cifrado."
-          >
-            <UInput
-              v-model="form.pin"
-              type="password"
-              inputmode="numeric"
-              maxlength="6"
-              placeholder="••••••"
-            />
-          </UFormField>
+          <p v-if="!editingId" class="text-sm text-muted">
+            Al crear el garzón se generará automáticamente un PIN de 6 dígitos y
+            se mostrará una sola vez para que se lo entregues.
+          </p>
           <UFormField label="Activo">
             <USwitch v-model="form.activo" />
           </UFormField>
@@ -247,40 +236,42 @@ const columns: TableColumn<Garzon>[] = [
       </template>
     </AppDrawer>
 
-    <!-- Drawer resetear PIN -->
-    <AppDrawer v-model:open="pinDrawerOpen" width="40%">
-      <template #header>
-        <span class="font-semibold text-default">
-          Resetear PIN{{ pinTarget ? ` — ${pinTarget.nombre}` : '' }}
-        </span>
-      </template>
+    <!-- Confirmar regeneración de PIN -->
+    <CrudModal
+      v-model:open="regenerarOpen"
+      title="Regenerar PIN"
+      :message="regenerarTarget
+        ? `Se generará un PIN nuevo para ${regenerarTarget.nombre} y se mostrará una sola vez. El PIN anterior dejará de funcionar de inmediato.`
+        : ''"
+      confirm-label="Generar nuevo PIN"
+      confirm-color="primary"
+      :loading="regenerando"
+      @cancel="regenerarTarget = null"
+      @confirm="confirmarRegenerar"
+    />
+
+    <!-- Revelado del PIN (una sola vez) -->
+    <UModal
+      v-model:open="pinReveladoOpen"
+      :title="`PIN de ${pinRevelado.nombre}`"
+      :ui="shellUi.modal"
+    >
       <template #body>
-        <UForm id="pin-form" :state="pinForm" class="space-y-4" @submit="guardarPin">
-          <UFormField
-            label="Nuevo PIN (6 dígitos)"
-            required
-            help="Reemplaza el PIN anterior. Comunícaselo al garzón."
-          >
-            <UInput
-              v-model="pinForm.pin"
-              type="password"
-              inputmode="numeric"
-              maxlength="6"
-              placeholder="••••••"
-              autofocus
-            />
-          </UFormField>
-        </UForm>
+        <div class="space-y-4">
+          <code class="block text-center text-3xl font-semibold tracking-[0.4em] tabular-nums bg-elevated rounded px-3 py-3">{{ pinRevelado.pin }}</code>
+          <p class="text-sm text-warning">
+            <UIcon name="i-lucide-triangle-alert" class="size-4 align-text-bottom" />
+            Guárdalo ahora — <strong>no se volverá a mostrar</strong>. Si se
+            pierde, genera uno nuevo.
+          </p>
+        </div>
       </template>
-      <template #actions>
-        <UButton color="neutral" variant="ghost" @click="pinDrawerOpen = false">
-          Cancelar
-        </UButton>
-        <UButton type="submit" form="pin-form" :loading="savingPin">
-          Guardar PIN
-        </UButton>
+      <template #footer>
+        <AppModalFooter>
+          <UButton label="Entendido" @click="pinReveladoOpen = false" />
+        </AppModalFooter>
       </template>
-    </AppDrawer>
+    </UModal>
 
     <CrudModal
       v-model:open="deleteOpen"

@@ -1,17 +1,21 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { Garzon } from './entities/garzon.entity';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
-import { ResetPinDto } from './dto/reset-pin.dto';
 
 const BCRYPT_COST = 10;
+// El PIN se genera automáticamente; estos acotan la generación única.
+const MAX_INTENTOS_PIN = 50;
+const PIN_MAX_EXCLUSIVO = 1_000_000; // 000000..999999
 
 /** Vista pública de un garzón — nunca incluye el hash del PIN. */
 export interface GarzonPublico {
@@ -20,6 +24,14 @@ export interface GarzonPublico {
   activo: boolean;
   creadoEl: Date;
   actualizadoEl: Date;
+}
+
+/**
+ * Respuesta de creación / regeneración: incluye el PIN en claro **una sola
+ * vez**. No se persiste en claro ni se puede volver a leer (solo queda el hash).
+ */
+export interface GarzonConPin extends GarzonPublico {
+  pin: string;
 }
 
 @Injectable()
@@ -47,15 +59,16 @@ export class GarzonesService {
     return garzones.map((g) => this.toPublico(g));
   }
 
-  async crear(tenantId: string, dto: CreateGarzonDto): Promise<GarzonPublico> {
-    await this.assertPinDisponible(tenantId, dto.pin);
+  async crear(tenantId: string, dto: CreateGarzonDto): Promise<GarzonConPin> {
+    const pin = await this.generarPinUnico(tenantId);
     const garzon = this.garzonRepo.create({
       tenantId,
       nombre: dto.nombre,
-      pinHash: await bcrypt.hash(dto.pin, BCRYPT_COST),
+      pinHash: await bcrypt.hash(pin, BCRYPT_COST),
       activo: dto.activo ?? true,
     });
-    return this.toPublico(await this.garzonRepo.save(garzon));
+    const guardado = await this.garzonRepo.save(garzon);
+    return { ...this.toPublico(guardado), pin };
   }
 
   async actualizar(
@@ -69,15 +82,16 @@ export class GarzonesService {
     return this.toPublico(await this.garzonRepo.save(garzon));
   }
 
-  async resetPin(
-    tenantId: string,
-    id: string,
-    dto: ResetPinDto,
-  ): Promise<GarzonPublico> {
+  /**
+   * Genera un PIN nuevo para el garzón y lo devuelve **una sola vez**. El PIN
+   * anterior deja de funcionar de inmediato (se reemplaza el hash).
+   */
+  async regenerarPin(tenantId: string, id: string): Promise<GarzonConPin> {
     const garzon = await this.getOrThrow(tenantId, id);
-    await this.assertPinDisponible(tenantId, dto.pin, id);
-    garzon.pinHash = await bcrypt.hash(dto.pin, BCRYPT_COST);
-    return this.toPublico(await this.garzonRepo.save(garzon));
+    const pin = await this.generarPinUnico(tenantId, id);
+    garzon.pinHash = await bcrypt.hash(pin, BCRYPT_COST);
+    const guardado = await this.garzonRepo.save(garzon);
+    return { ...this.toPublico(guardado), pin };
   }
 
   async eliminar(tenantId: string, id: string): Promise<void> {
@@ -116,24 +130,43 @@ export class GarzonesService {
   }
 
   /**
-   * El PIN debe ser único entre los garzones (no eliminados) del tenant, para
-   * que la identificación "solo por PIN" no sea ambigua. Como está hasheado,
-   * se compara contra cada garzón existente. `exceptId` excluye al propio
-   * garzón en un reset.
+   * Genera un PIN aleatorio de 6 dígitos garantizado único entre los garzones
+   * (no eliminados) del tenant, para que la identificación "solo por PIN" no sea
+   * ambigua. Reintenta ante colisión (muy improbable con N pequeño sobre 10^6).
+   * `exceptId` excluye al propio garzón al regenerar su PIN.
    */
-  private async assertPinDisponible(
+  private async generarPinUnico(
+    tenantId: string,
+    exceptId?: string,
+  ): Promise<string> {
+    for (let intento = 0; intento < MAX_INTENTOS_PIN; intento++) {
+      const pin = randomInt(0, PIN_MAX_EXCLUSIVO).toString().padStart(6, '0');
+      if (!(await this.pinYaUsado(tenantId, pin, exceptId))) {
+        return pin;
+      }
+    }
+    throw new ConflictException(
+      'No se pudo generar un PIN único; intenta de nuevo',
+    );
+  }
+
+  /**
+   * Indica si el PIN ya pertenece a algún garzón (no eliminado) del tenant.
+   * Como está hasheado, se compara contra cada garzón existente. `exceptId`
+   * excluye al propio garzón al regenerar su PIN.
+   */
+  private async pinYaUsado(
     tenantId: string,
     pin: string,
     exceptId?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const garzones = await this.garzonRepo.find({ where: { tenantId } });
     for (const garzon of garzones) {
       if (garzon.id === exceptId) continue;
       if (await bcrypt.compare(pin, garzon.pinHash)) {
-        throw new BadRequestException(
-          'Ya existe un garzón con ese PIN en este tenant',
-        );
+        return true;
       }
     }
+    return false;
   }
 }

@@ -17,7 +17,6 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import { GarzonesService } from './garzones.service';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
-import { ResetPinDto } from './dto/reset-pin.dto';
 import { IdentificarDto } from './dto/identificar.dto';
 
 /**
@@ -55,15 +54,12 @@ export class GarzonesController {
     return this.garzonesService.actualizar(user.tenantId, id, dto);
   }
 
+  /** Regenera el PIN del garzón y lo devuelve una sola vez. */
   @Patch(':id/pin')
   @RequiresPermiso('Salones', 'Actualizar')
-  resetPin(
-    @Req() req: Request,
-    @Param('id') id: string,
-    @Body() dto: ResetPinDto,
-  ) {
+  regenerarPin(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as { tenantId: string };
-    return this.garzonesService.resetPin(user.tenantId, id, dto);
+    return this.garzonesService.regenerarPin(user.tenantId, id);
   }
 
   @Delete(':id')

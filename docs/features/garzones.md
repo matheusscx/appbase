@@ -29,8 +29,8 @@ el sistema de tokens.
 
 ### Scope
 
-- **Incluido**: CRUD de garzones, reset de PIN, identificación por PIN, y captura del
-  garzón responsable al **abrir** y **cerrar** una cuenta.
+- **Incluido**: CRUD de garzones, regeneración de PIN, identificación por PIN, y
+  captura del garzón responsable al **abrir** y **cerrar** una cuenta.
 - **NO incluido (futuro)**: transferir cuentas entre mesas con PIN, log por cada
   acción individual (agregar línea, fusionar), turnos/horarios de garzón.
 
@@ -40,8 +40,13 @@ el sistema de tokens.
 
 - **Identificación solo por PIN**: el garzón teclea su PIN y el sistema lo identifica
   (flujo POS clásico). Requiere **PIN único por tenant**.
+- **PIN autogenerado, mostrado una sola vez**: nadie elige el PIN. El backend genera
+  uno aleatorio de 6 dígitos (con `crypto.randomInt`), garantizado único en el tenant
+  (reintenta ante colisión), y lo devuelve **una sola vez** al crear o regenerar.
+  Así se evita que dos garzones "piensen" el mismo PIN y que el admin conozca los PINs.
 - **PIN hasheado** con bcrypt (cost 10, igual que las contraseñas). El admin nunca lo
-  ve; si se olvida, se **resetea**. La API jamás devuelve `pin_hash`.
+  ve; si se pierde, se **regenera** (se muestra el nuevo una vez; el anterior deja de
+  funcionar de inmediato). La API jamás devuelve `pin_hash`.
 - **RBAC**: reutiliza el módulo contratado `Salones` (sin nuevo `tenant_modulos`). El
   CRUD usa `Leer/Crear/Actualizar/Eliminar`; la identificación por PIN usa `Operar`.
 
@@ -54,9 +59,9 @@ Todos bajo `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)`; `tenant_id` d
 | Método | Ruta | Permiso (`Salones`) | Descripción |
 |---|---|---|---|
 | GET | `/garzones` | `Leer` | Lista garzones del tenant (sin `pin_hash`) |
-| POST | `/garzones` | `Crear` | Crea `{ nombre, pin, activo? }` |
+| POST | `/garzones` | `Crear` | Crea `{ nombre, activo? }` → devuelve el garzón + `pin` generado (una vez) |
 | PATCH | `/garzones/:id` | `Actualizar` | Actualiza `{ nombre?, activo? }` |
-| PATCH | `/garzones/:id/pin` | `Actualizar` | Resetea el PIN `{ pin }` |
+| PATCH | `/garzones/:id/pin` | `Actualizar` | Regenera el PIN (sin body) → devuelve el garzón + nuevo `pin` (una vez) |
 | DELETE | `/garzones/:id` | `Eliminar` | Soft delete |
 | POST | `/garzones/identificar` | `Operar` | `{ pin }` → `{ garzonId, nombre }` (o 400) |
 
@@ -89,8 +94,9 @@ resuelve el garzón y persiste `garzon_apertura_id` / `garzon_cierre_id`.
 
 ### Métodos clave del service
 
-- `crear` / `resetPin` — validan **PIN único** por tenant (bcrypt.compare contra los
-  existentes) y hashean.
+- `crear` / `regenerarPin` — generan un PIN **único** por tenant vía `generarPinUnico`
+  (aleatorio con `crypto.randomInt`, comparado con bcrypt contra los existentes y
+  reintentado ante colisión), lo hashean y devuelven el PIN en claro **una sola vez**.
 - `resolverGarzonPorPin(tenantId, pin)` — itera garzones **activos** del tenant y
   compara con bcrypt; devuelve el garzón o lanza `400 PIN inválido`. Es un `400`
   (no `401`) a propósito: un PIN incorrecto es un error operativo, no un fallo de
@@ -102,10 +108,12 @@ resuelve el garzón y persiste `garzon_apertura_id` / `garzon_cierre_id`.
 
 ## Frontend
 
-- **Composable**: `app/composables/useGarzones.ts` (`listar/crear/actualizar/resetPin/
-  eliminar/identificar`).
+- **Composable**: `app/composables/useGarzones.ts` (`listar/crear/actualizar/
+  regenerarPin/eliminar/identificar`).
 - **Página admin**: `pages/configuracion/garzones.vue` — tabla con crear/editar,
-  reset de PIN y eliminar. Entrada de nav bajo Configuración (gated `Salones/Crear`).
+  regenerar PIN y eliminar. Al crear o regenerar, el PIN generado se muestra en un
+  **modal una sola vez** (con aviso de que no se volverá a mostrar).
+  Entrada de nav bajo Configuración (gated `Salones/Crear`).
 - **Componente**: `components/salones/GarzonPinModal.vue` — teclado numérico de 6
   dígitos que auto-verifica vía `identificar` y emite el PIN. Reutilizado al abrir y
   cerrar cuentas en `pages/salones/index.vue`, que muestra el garzón responsable.
@@ -120,16 +128,18 @@ resuelve el garzón y persiste `garzon_apertura_id` / `garzon_cierre_id`.
 cd backend && npx jest garzones salones
 ```
 
-Cubre: hash y unicidad del PIN, `resolverGarzonPorPin` (match / 400), reset de PIN, y
-que abrir/cerrar cuenta persisten `garzon_apertura_id`/`garzon_cierre_id`.
+Cubre: generación y unicidad del PIN (con reintento ante colisión),
+`resolverGarzonPorPin` (match / 400), regeneración de PIN, y que abrir/cerrar cuenta
+persisten `garzon_apertura_id`/`garzon_cierre_id`.
 
 ### Manual (frontend)
 
-1. `docker-compose up` (el seeder crea garzones demo: Ana=111111, Bruno=222222,
-   Carla=333333 en el tenant Paris).
-2. Configuración → Garzones: crear/editar, resetear PIN.
+1. `docker-compose up` (el seeder crea garzones demo con PINs conocidos: Ana=111111,
+   Bruno=222222, Carla=333333 en el tenant Paris; los nuevos garzones creados por la
+   UI reciben un PIN autogenerado).
+2. Configuración → Garzones: crear (el PIN se muestra una vez), regenerar PIN.
 3. Salones → abrir cuenta: PIN correcto abre la cuenta con el responsable visible;
-   PIN incorrecto muestra "PIN inválido".
+   PIN incorrecto muestra "PIN inválido" (sin cerrar sesión).
 4. Cerrar y cobrar: pide el PIN antes de generar la venta.
 
 ---
