@@ -383,12 +383,13 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
       <!-- Drawer de la mesa: lista de cuentas o detalle de una cuenta -->
       <AppDrawer v-model:open="mesaDrawerOpen" width="90%" :ui="drawerBodyUi">
         <template #header>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 sm:gap-3">
             <UButton
               v-if="activeCuenta"
               icon="i-lucide-arrow-left"
+              label="Cuentas"
               color="neutral"
-              variant="ghost"
+              variant="subtle"
               size="sm"
               @click="volverACuentas"
             />
