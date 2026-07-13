@@ -54,6 +54,7 @@ del garzón usa el permiso dedicado **`Operar`**.
 | GET | `/salones/operacion` | Operar | Salones + mesas con flag `ocupada` |
 | GET | `/mesas/:id/cuentas` | Operar | Cuentas abiertas de la mesa (con líneas) |
 | POST | `/mesas/:id/cuentas` | Operar | Abrir cuenta (asigna `numero` correlativo por mesa) |
+| POST | `/mesas/:id/cuentas/fusionar` | Operar | Fusionar 2+ cuentas abiertas de la mesa en una |
 | POST | `/cuentas/:id/lineas` | Operar | Agregar producto (merge por ítem) |
 | PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad |
 | DELETE | `/cuentas/:id/lineas/:lineaId` | Operar | Quitar producto |
@@ -63,6 +64,10 @@ del garzón usa el permiso dedicado **`Operar`**.
 `POST /cuentas/:id/cerrar` body: `{ pagos?: PagoVentaDto[], tipoDocumentoId?, customer? }`
 (reusa las clases de `ventas/dto/create-venta.dto.ts`). Respuesta:
 `{ cuenta: CuentaDetalle, ventaId }`.
+
+`POST /mesas/:id/cuentas/fusionar` body: `{ cuentaIds: string[] }` (mínimo 2, deben
+estar `abierta` y pertenecer a la mesa). Combina, por ejemplo, "1 y 3", "3 y 4" o
+todas las de la mesa; ver detalle en Backend → Fusión de cuentas.
 
 ---
 
@@ -80,6 +85,22 @@ del garzón usa el permiso dedicado **`Operar`**.
 **`VentasService.crearEnTransaccion(manager, tenantId, usuarioId, dto)`** dentro de la
 misma transacción. Así la venta y el cambio de estado de la cuenta commitean juntos.
 Requiere caja física abierta (lo valida `crearEnTransaccion`).
+
+### Fusión de cuentas
+
+`SalonesService.fusionarCuentas(tenantId, mesaId, { cuentaIds })` combina 2+ cuentas
+`abierta` de la misma mesa (ej. "1 y 3", "3 y 4" o todas) en una transacción:
+
+1. Valida que todas las `cuentaIds` existan, pertenezcan a la mesa/tenant y estén
+   `abierta` (si falta alguna, `BadRequestException`).
+2. La cuenta **destino** es la de menor `numero`; las demás son **origen**.
+3. Mueve las `cuenta_lineas` de cada origen al destino, mergeando por `itemId`
+   (misma lógica que `agregarLinea`: si el destino ya tiene el ítem, suma
+   cantidades y hace soft-delete de la línea de origen; si no, reasigna la línea).
+4. Cada cuenta origen queda `cancelada` (sin `ventaId`, absorbida por el destino).
+
+Al quedar solo el destino abierta, la numeración por mesa sigue el mismo criterio
+normal (se reinicia en 1 cuando esa cuenta también se cierre).
 
 ### Tablas
 
@@ -108,7 +129,10 @@ histórico), `estado` (`abierta|cerrada|cancelada`), `venta_id` (set al cerrar),
 
 - `pages/salones/index.vue` — Operación del garzón: selector de salón → plano →
   drawer de la mesa (lista de cuentas / detalle de cuenta con catálogo, líneas, total
-  en vivo, cancelar y cerrar+cobrar).
+  en vivo, cancelar y cerrar+cobrar). Con 2+ cuentas abiertas, "Fusionar cuentas"
+  activa un modo de selección múltiple (checkbox por cuenta + botón "Todas") y
+  fusiona las seleccionadas en la de menor número vía
+  `POST /mesas/:id/cuentas/fusionar`.
 - `pages/configuracion/salones.vue` — Administración (dentro de Configuración): CRUD
   de salones/mesas + editor de plano con drag & drop y "Guardar distribución".
 
