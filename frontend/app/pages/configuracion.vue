@@ -92,6 +92,14 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     })
   }
 
+  if (permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Crear')) {
+    items.push({
+      label: 'Impresoras',
+      icon: 'i-lucide-printer',
+      to: '/configuracion/impresoras',
+    })
+  }
+
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
     items.push({
       label: 'Items',
