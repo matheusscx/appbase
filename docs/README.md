@@ -51,6 +51,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [cron.md](./features/cron.md) | Jobs internos programados: registro de ejecuciones + expiración de órdenes de pasarela |
 | [salones-mesas.md](./features/salones-mesas.md) | Salones y mesas de restaurante: plano drag&drop, cuentas por mesa y cierre que genera venta |
 | [garzones.md](./features/garzones.md) | Garzones con PIN de 6 dígitos: identificación operativa en dispositivos compartidos y trazabilidad de quién abre/cierra cada cuenta |
+| [impresion-termica.md](./features/impresion-termica.md) | Impresión térmica vía QZ Tray: comandas de cocina/barra ruteadas por categoría (envío en dos fases), precuenta y boleta desde Salones y el POS |
 
 ## Otros
 

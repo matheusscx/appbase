@@ -1027,3 +1027,36 @@ CREATE TABLE cuenta_lineas (
     eliminado_el TIMESTAMPTZ
 );
 CREATE INDEX idx_cuenta_lineas_cuenta ON cuenta_lineas (cuenta_id);
+
+-- cuenta_lineas.cantidad_enviada: cuánto de `cantidad` ya se imprimió en comanda.
+-- El diff (cantidad - cantidad_enviada) es lo que se envía en el próximo POST.
+ALTER TABLE cuenta_lineas
+    ADD COLUMN cantidad_enviada NUMERIC(18,4) NOT NULL DEFAULT 0;
+
+
+-- =============================================================
+-- IMPRESORAS TÉRMICAS (comandas, precuenta, boleta)
+-- =============================================================
+
+-- Impresora térmica del tenant. La impresión real ocurre en el navegador vía
+-- QZ Tray; esta tabla solo guarda cómo alcanzarla (red TCP raw o cola del SO).
+CREATE TABLE impresoras (
+    impresora_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id     UUID NOT NULL REFERENCES tenants(tenant_id),
+    nombre        VARCHAR(100) NOT NULL,
+    rol           TEXT NOT NULL,   -- 'comanda' | 'boleta'
+    tipo_conexion TEXT NOT NULL,   -- 'red' | 'sistema'
+    host          VARCHAR(255),
+    puerto        INTEGER,
+    nombre_cola   VARCHAR(100),
+    activo        BOOLEAN NOT NULL DEFAULT true,
+    creado_el     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el  TIMESTAMPTZ
+);
+CREATE INDEX idx_impresoras_tenant ON impresoras (tenant_id);
+
+-- categorias gana impresora_id: rutea los ítems de la categoría a una
+-- impresora de rol 'comanda' al enviar comanda.
+ALTER TABLE "categorias"
+    ADD COLUMN impresora_id UUID REFERENCES impresoras(impresora_id);
