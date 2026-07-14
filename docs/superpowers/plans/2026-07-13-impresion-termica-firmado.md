@@ -33,7 +33,7 @@ Spec de referencia: `docs/superpowers/specs/2026-07-13-impresion-termica-firmado
 **Interfaces:**
 - Produces: `QzFirmaService.getCertificado(): string | null` y `QzFirmaService.firmar(data: string): string` (base64). Rutas `GET /impresoras/qz/certificado` → `{ certificado: string | null }` y `POST /impresoras/qz/firmar` (body `{ data: string }`) → `{ firma: string }`. Consumido por el frontend en Task 2.
 
-- [ ] **Step 1: Escribir el test del service (falla — no existe)**
+- [x] **Step 1: Escribir el test del service (falla — no existe)**
 
 ```typescript
 // backend/src/modules/impresoras/qz-firma.service.spec.ts
@@ -100,12 +100,12 @@ describe('QzFirmaService', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar el test y confirmar que falla**
+- [x] **Step 2: Ejecutar el test y confirmar que falla**
 
 Run: `cd backend && npx jest qz-firma.service`
 Expected: FAIL — no se puede resolver `./qz-firma.service`.
 
-- [ ] **Step 3: Implementar `QzFirmaService`**
+- [x] **Step 3: Implementar `QzFirmaService`**
 
 ```typescript
 // backend/src/modules/impresoras/qz-firma.service.ts
@@ -149,12 +149,12 @@ export class QzFirmaService {
 }
 ```
 
-- [ ] **Step 4: Ejecutar el test y confirmar que pasa**
+- [x] **Step 4: Ejecutar el test y confirmar que pasa**
 
 Run: `cd backend && npx jest qz-firma.service`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: Crear el DTO del body de firma**
+- [x] **Step 5: Crear el DTO del body de firma**
 
 ```typescript
 // backend/src/modules/impresoras/dto/firmar-qz.dto.ts
@@ -166,7 +166,7 @@ export class FirmarQzDto {
 }
 ```
 
-- [ ] **Step 6: Registrar `QzFirmaService` como provider**
+- [x] **Step 6: Registrar `QzFirmaService` como provider**
 
 ```typescript
 // backend/src/modules/impresoras/impresoras.module.ts
@@ -177,7 +177,7 @@ import { QzFirmaService } from './qz-firma.service';
   providers: [ImpresorasService, QzFirmaService],
 ```
 
-- [ ] **Step 7: Agregar los endpoints al controller**
+- [x] **Step 7: Agregar los endpoints al controller**
 
 ```typescript
 // backend/src/modules/impresoras/impresoras.controller.ts
@@ -205,12 +205,12 @@ import { FirmarQzDto } from './dto/firmar-qz.dto';
   }
 ```
 
-- [ ] **Step 8: Compilar y correr toda la suite de backend**
+- [x] **Step 8: Compilar y correr toda la suite de backend**
 
 Run: `cd backend && npm run build && npm test`
 Expected: build limpio; PASS (todos los tests, incluidos los 4 nuevos de `qz-firma`).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/modules/impresoras
@@ -239,7 +239,7 @@ EOF
 - Consumes: `GET /impresoras/qz/certificado` → `{ certificado: string | null }` y `POST /impresoras/qz/firmar` → `{ firma: string }` (Task 1).
 - Produces: efecto secundario — QZ Tray firma sus peticiones; sin cambios en la firma pública de `useImpresoras`.
 
-- [ ] **Step 1: Agregar el helper `asegurarSeguridadQz` y llamarlo en `imprimirEn`**
+- [x] **Step 1: Agregar el helper `asegurarSeguridadQz` y llamarlo en `imprimirEn`**
 
 En `frontend/app/composables/useImpresoras.ts`, reemplazar el bloque del cargador
 perezoso de qz (`let qzPromise ... function getQz()`) y toda la función `imprimirEn`
@@ -323,7 +323,7 @@ async function imprimirEn(
 }
 ```
 
-- [ ] **Step 2: Pasar `apiUrl` en los 3 call sites de `imprimirEn`**
+- [x] **Step 2: Pasar `apiUrl` en los 3 call sites de `imprimirEn`**
 
 Los tres llamados están dentro de `useImpresoras()`, donde `apiUrl` ya existe
 (`const apiUrl = useRuntimeConfig().public.apiUrl`). Actualizar cada uno:
@@ -332,7 +332,7 @@ Los tres llamados están dentro de `useImpresoras()`, donde `apiUrl` ya existe
 - En `imprimirPrecuenta`: `await imprimirEn(impresora, lineas)` → `await imprimirEn(impresora, lineas, apiUrl)`
 - En `imprimirBoleta`: `await imprimirEn(impresora, lineas)` → `await imprimirEn(impresora, lineas, apiUrl)`
 
-- [ ] **Step 3: Actualizar el shim de tipos de qz-tray con la API de seguridad**
+- [x] **Step 3: Actualizar el shim de tipos de qz-tray con la API de seguridad**
 
 En `frontend/app/types/qz-tray.d.ts`, agregar `security` a la interfaz `Qz`:
 
@@ -351,12 +351,12 @@ En `frontend/app/types/qz-tray.d.ts`, agregar `security` a la interfaz `Qz`:
   }
 ```
 
-- [ ] **Step 4: Verificar que el frontend compila (sin errores nuevos en los archivos tocados)**
+- [x] **Step 4: Verificar que el frontend compila (sin errores nuevos en los archivos tocados)**
 
 Run: `cd frontend && ./node_modules/.bin/nuxi typecheck 2>&1 | grep -E "useImpresoras|qz-tray" || echo "sin errores en los archivos tocados"`
 Expected: `sin errores en los archivos tocados` (los errores pre-existentes del baseline no cuentan).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/app/composables/useImpresoras.ts frontend/app/types/qz-tray.d.ts
@@ -385,7 +385,7 @@ EOF
 
 **Interfaces:** ninguna nueva — cablea las env vars que Task 1 consume y documenta el setup.
 
-- [ ] **Step 1: Generar el par llave/certificado de desarrollo**
+- [ ] **Step 1: Generar el par llave/certificado de desarrollo** _(manual — usuario)_
 
 ```bash
 cd /tmp
@@ -397,12 +397,12 @@ echo "QZ_CERTIFICATE=$(base64 -i qz-cert.pem | tr -d '\n')"
 
 Guardar `qz-cert.pem` para el paso de confianza por dispositivo (Step 5).
 
-- [ ] **Step 2: Agregar las env vars reales a `backend/.env`**
+- [ ] **Step 2: Agregar las env vars reales a `backend/.env`** _(manual — usuario)_
 
 Pegar en `backend/.env` (gitignored) las dos líneas `QZ_PRIVATE_KEY=...` y
 `QZ_CERTIFICATE=...` que imprimió el Step 1.
 
-- [ ] **Step 3: Agregar placeholders + instrucciones a `.env.example`**
+- [x] **Step 3: Agregar placeholders + instrucciones a `.env.example`**
 
 ```bash
 # Al final de la sección "Pasarela de pagos" / backend de .env.example, agregar:
@@ -418,7 +418,7 @@ QZ_PRIVATE_KEY=
 QZ_CERTIFICATE=
 ```
 
-- [ ] **Step 4: Pasar las env vars al backend en `docker-compose.yml`**
+- [x] **Step 4: Pasar las env vars al backend en `docker-compose.yml`**
 
 ```yaml
 # En el bloque environment: del servicio backend, después de PASARELA_ENCRYPTION_KEY:
@@ -426,13 +426,13 @@ QZ_CERTIFICATE=
       QZ_CERTIFICATE: ${QZ_CERTIFICATE:-}
 ```
 
-- [ ] **Step 5: Confiar el certificado en QZ Tray (por dispositivo, manual)**
+- [ ] **Step 5: Confiar el certificado en QZ Tray (por dispositivo, manual)** _(manual — usuario)_
 
 Copiar `qz-cert.pem` a la carpeta de QZ Tray y en `qz-tray.properties` setear
 `authcert.override=<ruta>/qz-cert.pem` (o importarlo vía QZ Tray → Advanced → Site
 Manager). Reiniciar QZ Tray.
 
-- [ ] **Step 6: Documentar en el doc de la feature**
+- [x] **Step 6: Documentar en el doc de la feature**
 
 En `docs/features/impresion-termica.md`, reemplazar el párrafo de "Diálogo de
 confianza" (el que dice que en v1 usa modo no-firmado) por:
@@ -450,14 +450,14 @@ y la impresión degrada al modo **no-firmado** (QZ pide confirmación en cada
 impresión) sin romperse.
 ```
 
-- [ ] **Step 7: Verificación manual end-to-end**
+- [ ] **Step 7: Verificación manual end-to-end** _(manual — usuario)_
 
 Con `QZ_PRIVATE_KEY`/`QZ_CERTIFICATE` en `backend/.env`, el cert confiado en QZ Tray,
 y `docker-compose up`: en `/salones`, imprimir una comanda → **NO aparece el diálogo**
 de QZ Tray. Vaciar temporalmente las env vars y reiniciar el backend → el diálogo
 vuelve a aparecer (degradación). Confirmar ambos comportamientos.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add .env.example docker-compose.yml docs/features/impresion-termica.md
