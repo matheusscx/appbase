@@ -28,6 +28,11 @@ const cajaStore = useCajaStore()
 const salonesApi = useSalones()
 const { calcular } = useCalculoPrecios()
 const { formatMonto } = useFormatters()
+const impresorasApi = useImpresoras()
+const tenantStore = useTenantStore()
+
+const enviandoComanda = ref(false)
+const imprimiendoPrecuenta = ref(false)
 
 const salones = ref<SalonConMesas[]>([])
 const loading = ref(false)
@@ -281,6 +286,62 @@ function lineaSubtotal(linea: CuentaLineaDetalle): string {
   return new Decimal(linea.precioBase || '0').times(linea.cantidad || '0').toString()
 }
 
+// ── Comanda / precuenta ─────────────────────────────────────────────────────
+async function enviarComanda() {
+  if (!activeCuenta.value || !selectedMesa.value) return
+  enviandoComanda.value = true
+  try {
+    const estaciones = await impresorasApi.imprimirComanda(activeCuenta.value.id, {
+      mesaNombre: selectedMesa.value.nombre,
+      cuentaNumero: activeCuenta.value.numero,
+      garzonNombre: activeCuenta.value.garzonAperturaNombre,
+    })
+    toast.add({
+      title: estaciones.length === 0
+        ? 'No hay productos nuevos para enviar'
+        : `Comanda enviada a ${estaciones.length} estación(es)`,
+      color: estaciones.length === 0 ? 'neutral' : 'success',
+    })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al enviar la comanda (¿QZ Tray está abierto?)'), color: 'error' })
+  }
+  finally {
+    enviandoComanda.value = false
+  }
+}
+
+// Recibe el resultado explícito (no lee `resultado.value` vivo): al cerrar la cuenta
+// el ref puede recomputarse, así que el llamador pasa el snapshot que capturó.
+function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
+  return res.lineas.map(l => ({
+    nombre: cuenta.lineas.find(cl => cl.itemId === l.itemId)?.nombre ?? '',
+    cantidad: l.cantidad,
+    totalLinea: l.totalLinea,
+  }))
+}
+
+async function imprimirPrecuenta() {
+  if (!activeCuenta.value || !selectedMesa.value || !resultado.value) return
+  imprimiendoPrecuenta.value = true
+  try {
+    await impresorasApi.imprimirPrecuenta({
+      tenantNombre: tenantStore.activeTenant?.nombre ?? '',
+      mesaNombre: selectedMesa.value.nombre,
+      cuentaNumero: activeCuenta.value.numero,
+      items: itemsParaTicket(activeCuenta.value, resultado.value),
+      totales: resultado.value.totales,
+      formatMonto: (v: string) => formatMonto(v),
+    })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al imprimir la precuenta (¿QZ Tray está abierto?)'), color: 'error' })
+  }
+  finally {
+    imprimiendoPrecuenta.value = false
+  }
+}
+
 // ── Cancelar / cerrar cuenta ───────────────────────────────────────────────
 async function confirmarCancelar() {
   if (!activeCuenta.value) return
@@ -311,13 +372,34 @@ function confirmarCobro(pagos: PagoInput[]) {
 async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
   if (!activeCuenta.value) return
   submitting.value = true
+  const cuentaCerrada = activeCuenta.value
+  const resultadoCerrado = resultado.value
   try {
-    await salonesApi.cerrarCuenta(activeCuenta.value.id, {
+    await salonesApi.cerrarCuenta(cuentaCerrada.id, {
       pin,
       pagos,
       tipoDocumentoId: tiposDocumento.value[0]?.id,
     })
     toast.add({ title: 'Cuenta cerrada — venta generada', color: 'success' })
+
+    if (resultadoCerrado) {
+      try {
+        await impresorasApi.imprimirBoleta({
+          tenantNombre: tenantStore.activeTenant?.nombre ?? '',
+          items: itemsParaTicket(cuentaCerrada, resultadoCerrado),
+          totales: resultadoCerrado.totales,
+          pagos: pagos.map(p => ({
+            nombre: metodos.value.find(m => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
+            monto: p.monto,
+          })),
+          formatMonto: (v: string) => formatMonto(v),
+        })
+      }
+      catch (e: unknown) {
+        toast.add({ title: apiErrorMsg(e, 'Venta generada, pero falló la impresión de la boleta'), color: 'warning' })
+      }
+    }
+
     cuentas.value = cuentas.value.filter(c => c.id !== activeCuenta.value?.id)
     volverACuentas()
     await Promise.all([cargarSalones(), cajaStore.cargarActiva()])
@@ -544,6 +626,30 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
                   description="Necesitas una caja física abierta para cobrar."
                   class="mb-3"
                 />
+                <div class="mb-2 flex gap-2">
+                  <UButton
+                    color="neutral"
+                    variant="soft"
+                    class="flex-1 justify-center"
+                    icon="i-lucide-chef-hat"
+                    :loading="enviandoComanda"
+                    :disabled="activeCuenta.lineas.length === 0"
+                    @click="enviarComanda"
+                  >
+                    Enviar a cocina
+                  </UButton>
+                  <UButton
+                    color="neutral"
+                    variant="soft"
+                    class="flex-1 justify-center"
+                    icon="i-lucide-receipt"
+                    :loading="imprimiendoPrecuenta"
+                    :disabled="activeCuenta.lineas.length === 0"
+                    @click="imprimirPrecuenta"
+                  >
+                    Imprimir precuenta
+                  </UButton>
+                </div>
                 <div class="flex gap-2">
                   <UButton
                     color="error"
