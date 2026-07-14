@@ -14,9 +14,16 @@ declare module 'qz-tray' {
     ): unknown
   }
 
+  interface QzSecurity {
+    setCertificatePromise(handler: (resolve: (cert: string) => void, reject: (err: unknown) => void) => void): void
+    setSignaturePromise(factory: (dataToSign: string) => (resolve: (sig: string) => void, reject: (err: unknown) => void) => void): void
+    setSignatureAlgorithm(algorithm: 'SHA1' | 'SHA256' | 'SHA512'): void
+  }
+
   interface Qz {
     websocket: QzWebsocket
     configs: QzConfigs
+    security: QzSecurity
     print(config: unknown, data: unknown[]): Promise<void>
   }
 

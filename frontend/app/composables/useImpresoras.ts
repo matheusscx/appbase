@@ -59,8 +59,44 @@ function getQz() {
   return qzPromise
 }
 
-async function imprimirEn(impresora: Impresora, lineas: string[]): Promise<void> {
+// Configura el firmado de QZ Tray una sola vez: pide el certificado al backend y,
+// si está configurado, setea los promises de seguridad (cert cacheado, firma por
+// llamada vía POST /impresoras/qz/firmar). Si el cert es null (firmado no
+// configurado), no setea nada → QZ opera en modo no-firmado (diálogo por impresión).
+let seguridadLista = false
+async function asegurarSeguridadQz(
+  qz: (typeof import('qz-tray'))['default'],
+  apiUrl: string,
+): Promise<void> {
+  if (seguridadLista) return
+  const { certificado } = await useApiFetch<{ certificado: string | null }>(
+    `${apiUrl}/impresoras/qz/certificado`,
+  )
+  if (!certificado) {
+    seguridadLista = true
+    return
+  }
+  qz.security.setCertificatePromise((resolve: (c: string) => void) => resolve(certificado))
+  qz.security.setSignatureAlgorithm('SHA512')
+  qz.security.setSignaturePromise((dataToSign: string) =>
+    (resolve: (s: string) => void, reject: (e: unknown) => void) => {
+      useApiFetch<{ firma: string }>(`${apiUrl}/impresoras/qz/firmar`, {
+        method: 'POST',
+        body: { data: dataToSign },
+      })
+        .then(({ firma }) => resolve(firma))
+        .catch(reject)
+    })
+  seguridadLista = true
+}
+
+async function imprimirEn(
+  impresora: Impresora,
+  lineas: string[],
+  apiUrl: string,
+): Promise<void> {
   const qz = await getQz()
+  await asegurarSeguridadQz(qz, apiUrl)
   if (!qz.websocket.isActive()) {
     await qz.websocket.connect()
   }
@@ -130,7 +166,7 @@ export function useImpresoras() {
         items: estacion.items, // el builder usa {nombre, cantidad}; ignora los extras
         fecha: new Date(),
       })
-      await imprimirEn(impresora, lineas) // si lanza, esta estación NO se confirma
+      await imprimirEn(impresora, lineas, apiUrl) // si lanza, esta estación NO se confirma
       await useApiFetch(`${apiUrl}/cuentas/${cuentaId}/comanda`, {
         method: 'POST',
         body: {
@@ -163,7 +199,7 @@ export function useImpresoras() {
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()
     const lineas = buildPrecuentaTicket({ ...input, fecha: new Date() })
-    await imprimirEn(impresora, lineas)
+    await imprimirEn(impresora, lineas, apiUrl)
   }
 
   async function imprimirBoleta(input: {
@@ -175,7 +211,7 @@ export function useImpresoras() {
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()
     const lineas = buildBoletaTicket({ ...input, fecha: new Date() })
-    await imprimirEn(impresora, lineas)
+    await imprimirEn(impresora, lineas, apiUrl)
   }
 
   return {
