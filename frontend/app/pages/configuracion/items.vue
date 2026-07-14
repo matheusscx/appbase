@@ -26,6 +26,7 @@ interface Item {
   categoriaNombre: string | null
   creadoEl: string
   stock: string | null
+  costoActual: string | null
   unidadMedida: string | null
   fechaElaboracion: string | null
   fechaVencimiento: string | null
@@ -71,6 +72,7 @@ interface Movimiento {
   cantidad: string
   stockAnterior: string
   stockResultante: string
+  costoUnitario: string | null
   usuarioNombre: string | null
   comentario: string | null
   creadoEl: string
@@ -172,6 +174,7 @@ function emptyForm() {
     activo: true,
     // producto
     stock: '0',
+    costo: '',
     unidadMedida: 'unidad',
     modoInventario: 'cantidad',
     fechaElaboracion: '',
@@ -218,6 +221,7 @@ function emptyAjusteForm() {
     tipo: 'entrada',
     motivo: 'ajuste_manual',
     comentario: '',
+    costoUnitario: '',
     // modo serie — entrada: nueva series; salida: IDs seleccionados
     series: [] as SerieRow[],
     unidadIds: [] as string[],
@@ -254,6 +258,7 @@ const historialLoading = ref(false)
 const movimientos = ref<Movimiento[]>([])
 const historialItemNombre = ref('')
 const historialItemId = ref<string | null>(null)
+const historialItemMonedaId = ref<string | undefined>(undefined)
 const historialPage = ref(1)
 const historialMeta = ref({ total: 0 })
 
@@ -342,6 +347,7 @@ async function abrirVerUnidades(item: Item) {
 async function abrirHistorial(item: Item) {
   historialItemNombre.value = item.nombre
   historialItemId.value = item.id
+  historialItemMonedaId.value = item.monedaId
   movimientos.value = []
   historialMeta.value = { total: 0 }
   historialOpen.value = true
@@ -418,6 +424,7 @@ async function abrirEditar(item: Item) {
       precioIncluyeImpuesto: detalle.precioIncluyeImpuesto,
       activo: detalle.activo,
       stock: detalle.stock ?? '0',
+      costo: detalle.costoActual ?? '',
       unidadMedida: detalle.unidadMedida ?? 'unidad',
       modoInventario: detalle.modoInventario ?? 'cantidad',
       fechaElaboracion: detalle.fechaElaboracion
@@ -463,6 +470,7 @@ async function guardar() {
 
     if (form.value.tipo === 'producto') {
       payload.unidadMedida = form.value.unidadMedida
+      if (form.value.costo) payload.costo = form.value.costo
       if (form.value.fechaElaboracion) payload.fechaElaboracion = form.value.fechaElaboracion
       if (form.value.fechaVencimiento) payload.fechaVencimiento = form.value.fechaVencimiento
       if (!editingId.value) {
@@ -578,6 +586,9 @@ async function ejecutarAjusteStock() {
       motivo: f.motivo,
       comentario: f.comentario || undefined,
     }
+    if (f.tipo === 'entrada' && f.motivo === 'compra' && f.costoUnitario) {
+      body.costoUnitario = f.costoUnitario
+    }
     if (modo === 'cantidad') {
       body.cantidad = f.cantidad
     } else if (modo === 'serie') {
@@ -661,6 +672,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
   { accessorKey: 'tipo', header: 'Tipo' },
   { accessorKey: 'motivo', header: 'Motivo' },
   { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'costoUnitario', header: 'Costo unitario', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'stockResultante', header: 'Resultante', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'usuarioNombre', header: 'Usuario' },
 ]
@@ -733,6 +745,9 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 <span v-if="row.original.modoInventario === 'serie'">(unidades)</span>
                 <span v-else-if="row.original.modoInventario === 'lote'">(lotes)</span>
                 <span v-else>{{ row.original.unidadMedida }}</span>
+              </span>
+              <span v-if="row.original.tipo === 'producto'" class="font-mono">
+                · Costo: {{ row.original.costoActual ? formatMonto(row.original.costoActual, row.original.monedaId) : '—' }}
               </span>
               <UBadge
                 v-if="row.original.tipo === 'producto' && row.original.modoInventario && row.original.modoInventario !== 'cantidad'"
@@ -895,6 +910,9 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     :disabled="!!editingId"
                     class="w-full"
                   />
+                </UFormField>
+                <UFormField label="Costo">
+                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" class="w-full" />
                 </UFormField>
               </div>
 
@@ -1111,6 +1129,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           </div>
           <UFormField label="Comentario">
             <UInput v-model="ajusteForm.comentario" placeholder="Opcional" class="w-full" />
+          </UFormField>
+
+          <UFormField
+            v-if="ajusteForm.tipo === 'entrada' && ajusteForm.motivo === 'compra'"
+            label="Costo unitario"
+          >
+            <MoneyInput v-model="ajusteForm.costoUnitario" :moneda-id="stockItem?.monedaId" class="w-full" />
           </UFormField>
 
           <!-- Modo cantidad: solo cantidad -->
@@ -1337,6 +1362,11 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               variant="subtle"
               size="sm"
             />
+          </template>
+          <template #costoUnitario-cell="{ row }">
+            <span class="font-mono">
+              {{ row.original.costoUnitario ? formatMonto(row.original.costoUnitario, historialItemMonedaId) : '—' }}
+            </span>
           </template>
           <template #stockResultante-cell="{ row }">
             <span class="font-medium">{{ row.original.stockResultante }}</span>
