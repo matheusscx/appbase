@@ -490,10 +490,11 @@ CREATE TABLE "item_producto" (
   "unidad_medida"     TEXT          NOT NULL DEFAULT 'unidad',
   "fecha_elaboracion" TIMESTAMPTZ,
   "fecha_vencimiento" TIMESTAMPTZ,
-  "modo_inventario"   TEXT          NOT NULL DEFAULT 'cantidad'
+  "modo_inventario"   TEXT          NOT NULL DEFAULT 'cantidad',
   -- 'cantidad' (fungible, saldo numérico)
   -- 'lote'     (stock = SUM cantidad_disponible de item_lote)
   -- 'serie'    (stock = COUNT unidades disponibles en item_unidad)
+  "costo_actual"      NUMERIC(18,4)
 );
 
 -- Extensión 1:1 para tipo 'servicio'
@@ -542,6 +543,7 @@ CREATE TABLE "movimientos_inventario" (
   "venta_id"         UUID,         -- FK definida después de crear ventas (motivo 'venta'/'devolucion')
   "usuario_id"       UUID          REFERENCES "usuarios" ("usuario_id"),
   "comentario"       TEXT,
+  "costo_unitario"   NUMERIC(18,4),
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ

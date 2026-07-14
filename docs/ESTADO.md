@@ -22,6 +22,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Catálogo de items (productos y servicios) | ✅ Implementado |
 | Gestión de inventario (kardex de movimientos de stock) | ✅ Implementado |
 | Inventario serializado (modo `serie`) y por lote (modo `lote`) | ✅ Implementado (2026-06-28) |
+| Costo por producto (último costo) + congelado en kardex | ✅ Implementado (2026-07-14) |
 | Motor de cálculo de precios | ✅ Implementado (2026-06-28) |
 | Procesamiento de ventas (canal físico, pagos inline, vuelto) | ✅ Implementado (2026-06-29) |
 | Gestión de cajas | ✅ Implementado |

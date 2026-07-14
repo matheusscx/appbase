@@ -170,9 +170,14 @@ Response (400 — Stock insuficiente):
 | `usuario_id` | UUID | FK `usuarios`, NOT NULL | Quién registró el movimiento |
 | `venta_id` | UUID | FK `ventas`, nullable | Si es `motivo = 'venta'`, referencia a la venta |
 | `comentario` | text | nullable | Observaciones del usuario |
+| `costo_unitario` | NUMERIC(18,4) | nullable | Congela el costo del momento del movimiento |
 | `creado_el` | TIMESTAMPTZ | NOT NULL, default NOW | Marca de tiempo |
 | `actualizado_el` | TIMESTAMPTZ | NOT NULL, default NOW | Marca de tiempo |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete (aunque movimientos raramente se borren) |
+
+**Regla de costo:**
+- **Entrada con costo (compra):** actualiza `item_producto.costo_actual` con el costo unitario del movimiento y congela ese costo en `costo_unitario`.
+- **Cualquier otro movimiento:** congela el `costo_actual` vigente del momento en `costo_unitario` (snapshot del costo).
 
 **Índices (para performance):**
 - `(tenant_id, item_id)` — consultas por producto del tenant
