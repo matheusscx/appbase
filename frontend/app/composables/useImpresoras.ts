@@ -70,7 +70,21 @@ async function imprimirEn(impresora: Impresora, lineas: string[]): Promise<void>
   const config = impresora.tipoConexion === 'sistema'
     ? qz.configs.create(impresora.nombreCola as string)
     : qz.configs.create({ host: impresora.host as string, port: Number(impresora.puerto) })
-  await qz.print(config, [lineas.join('\n') + '\n'])
+  try {
+    // ESC/POS al final del ticket: avanza 4 líneas (ESC d 4) y corta total
+    // (GS V 0). Las impresoras sin cutter ignoran el comando sin efecto.
+    const CORTE = '\x1B\x64\x04\x1D\x56\x00'
+    await qz.print(config, [lineas.join('\n') + '\n', CORTE])
+  }
+  catch (err) {
+    // Log del motivo real del rechazo de QZ Tray (apiErrorMsg lo resume a un
+    // fallback genérico en el toast); útil para diagnosticar la impresora.
+    const destino = impresora.tipoConexion === 'red'
+      ? `${impresora.host}:${impresora.puerto}`
+      : impresora.nombreCola
+    console.error(`[qz] print falló → ${destino}`, err)
+    throw err
+  }
 }
 
 export function useImpresoras() {
