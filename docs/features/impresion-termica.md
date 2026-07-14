@@ -106,7 +106,21 @@ como `string[]` de líneas lógicas y el composable las une con `\n` antes de en
 
 La conexión "de red" (`tipoConexion='red'`) abre un socket raw a `host:puerto`
 (típico ESC/POS TCP 9100), sin necesidad de instalar la impresora como cola del
-sistema operativo.
+sistema operativo. **Ojo:** un `ping` (ICMP) a la impresora no garantiza que el
+puerto 9100 TCP esté abierto — si `qz.print` da `ConnectException: timed out`,
+revisar la IP/puerto reales de la impresora (no la del seed demo).
+
+**Corte de papel:** el `ticket-builder` es texto puro (sin comandos de control); el
+corte se envía en la capa de transporte (`imprimirEn`) como bytes ESC/POS al final:
+`\x1B\x64\x04` (avanza 4 líneas) + `\x1D\x56\x00` (`GS V 0`, corte total). Las
+impresoras sin cutter ignoran el comando. Si el corte queda muy alto/bajo, ajustar el
+avance de líneas o usar corte parcial (`\x1D\x56\x01`).
+
+**Diálogo de confianza:** en modo no-firmado (v1), QZ Tray pide confirmación en cada
+impresión. Mitigación inmediata: marcar "Remember" en el diálogo o whitelistear el
+sitio en QZ Tray → Advanced → Site Manager. Eliminación definitiva: firmar las
+peticiones con certificado (`setCertificatePromise` + `setSignaturePromise`) — queda
+como mejora futura.
 
 ---
 
