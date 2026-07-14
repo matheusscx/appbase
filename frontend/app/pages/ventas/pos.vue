@@ -21,6 +21,9 @@ const toast = useToast()
 const cajaStore = useCajaStore()
 
 const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidad, limpiar } = useVenta()
+const impresorasApi = useImpresoras()
+const tenantStore = useTenantStore()
+const { formatMonto } = useFormatters()
 
 const items = ref<ItemCatalogo[]>([])
 const metodos = ref<MetodoPago[]>([])
@@ -146,12 +149,37 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         terceroId: customer.value.terceroId || undefined,
       }
     }
+    const resultadoVenta = resultado.value
+    const lineasVenta = [...lineas.value]
+
     const venta = await useApiFetch<{ estado: string }>(`${apiUrl}/ventas`, {
       method: 'POST',
       body,
     })
     toast.add({ title: estadoToastTitle[venta.estado] ?? 'Venta registrada', color: 'success' })
     cobroOpen.value = false
+
+    if (resultadoVenta) {
+      try {
+        await impresorasApi.imprimirBoleta({
+          tenantNombre: tenantStore.activeTenant?.nombre ?? '',
+          items: resultadoVenta.lineas.map((l) => ({
+            nombre: lineasVenta.find((ln) => ln.item.id === l.itemId)?.item.nombre ?? '',
+            cantidad: l.cantidad,
+            totalLinea: l.totalLinea,
+          })),
+          totales: resultadoVenta.totales,
+          pagos: pagos.map((p) => ({
+            nombre: metodos.value.find((m) => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
+            monto: p.monto,
+          })),
+          formatMonto: (v: string) => formatMonto(v),
+        })
+      } catch (e: unknown) {
+        toast.add({ title: apiErrorMsg(e, 'Venta registrada, pero falló la impresión de la boleta'), color: 'warning' })
+      }
+    }
+
     items.value = descontarStockCatalogo(items.value, lineas.value)
     limpiar()
     customerExpandido.value = false
