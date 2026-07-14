@@ -21,6 +21,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [007](./007-inventario-serie-lote.md) | Modelo de inventario serializado y por lote — eje `modo_inventario` | Accepted | 2026-06-28 |
 | [008](./008-cifrado-credenciales-pasarela.md) | Cifrado de credenciales de la pasarela de pagos (AES-256-GCM app-level) | Accepted | 2026-07-08 |
 | [009](./009-callback-pasarela-venta-por-callback.md) | Callback de pasarela — venta creada por callback (registry in-process vs HTTP), no por el navegador | Accepted | 2026-07-08 |
+| [010](./010-preparacion-sii-datos-fiscales.md) | Preparación para SII — capturar y congelar el dato fiscal ahora, diferir la integración | Accepted | 2026-07-14 |
 
 ## Creating a New ADR
 

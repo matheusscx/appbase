@@ -69,6 +69,11 @@ o cambia una feature.
   (default: `descuentos → recargos → impuestos`; cada paso aplica sobre el acumulado).
   `items.precio_incluye_impuesto` y `tenants.calculo_descuentos` (`'base'`|`'compuesto'`)
   modulan el cálculo. Detalle: `docs/features/motor-calculo-precios.md`.
+- **Fiscal (SII):** la emisión electrónica al SII llega **a futuro, no ahora**; se diseña
+  todo **compatible con SII sin integrarlo**. Regla: **capturar y congelar el hecho fiscal
+  en el momento de la transacción; diferir lo que solo transmite/formatea** (DTE, folios/CAF,
+  firma). "Exento" es un estado explícito, nunca la ausencia de impuesto. No construir
+  infraestructura DTE especulativa (YAGNI). Detalle y qué-hacer-ahora vs qué-diferir: ADR-010.
 - **Ventas:** canales `'fisico'` (requiere caja abierta) y `'online'` (directo a
   `pagada`, caja virtual). Estados: `borrador → pendiente → pagada | cancelada`, más
   `pagada_parcial` derivado (saldo > 0 y < total). Sin array `pagos` al crear → queda
