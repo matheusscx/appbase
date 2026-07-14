@@ -406,6 +406,71 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Costo (congelación en kardex)
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — costo', () => {
+    it('entrada con costoUnitario: congela el costo y actualiza costo_actual', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+        ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce(undefined) // UPDATE item_producto stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-c1' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // UPDATE costo_actual
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          usuarioId: USER_ID,
+          costoUnitario: '4500',
+        },
+      );
+
+      // El INSERT del movimiento (3ª llamada) incluye costo_unitario = 4500
+      const insertCall = managerMock.query.mock.calls[2];
+      expect(insertCall[0]).toContain('costo_unitario');
+      expect(insertCall[1]).toContain('4500');
+      // La 4ª llamada actualiza costo_actual = 4500
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        4,
+        expect.stringContaining('costo_actual'),
+        ['4500', ITEM_ID],
+      );
+    });
+
+    it('salida sin costoUnitario: congela el costo_actual vigente y no lo modifica', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4200' },
+        ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce(undefined) // UPDATE stock
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-c2' }]); // INSERT movimiento
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '3',
+          usuarioId: USER_ID,
+        },
+      );
+
+      // El INSERT congeló el costo vigente (4200) y no hubo UPDATE de costo_actual
+      const insertCall = managerMock.query.mock.calls[2];
+      expect(insertCall[1]).toContain('4200');
+      expect(managerMock.query).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // findMovimientos
   // ---------------------------------------------------------------------------
   describe('findMovimientos', () => {

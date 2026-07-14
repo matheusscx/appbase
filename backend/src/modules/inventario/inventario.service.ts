@@ -33,6 +33,9 @@ export interface RegistrarMovimientoParams {
   usuarioId: string | null;
   ventaId?: string | null;
   comentario?: string | null;
+  // Costo (último costo): si viene en una entrada, congela y actualiza costo_actual;
+  // si no viene, se congela el costo_actual vigente.
+  costoUnitario?: string | null;
   // Modo 'serie'
   series?: SerieInput[]; // entrada serie: N unidades a crear
   unidadIds?: string[]; // salida serie: IDs de unidades a consumir
@@ -65,11 +68,14 @@ export class InventarioService {
     stockAnterior: string;
     stockResultante: string;
   }> {
-    const productoRows: { stock: string; modo_inventario: string }[] =
-      await manager.query(
-        `SELECT stock, modo_inventario FROM item_producto WHERE item_id = $1 FOR UPDATE`,
-        [params.itemId],
-      );
+    const productoRows: {
+      stock: string;
+      modo_inventario: string;
+      costo_actual: string | null;
+    }[] = await manager.query(
+      `SELECT stock, modo_inventario, costo_actual FROM item_producto WHERE item_id = $1 FOR UPDATE`,
+      [params.itemId],
+    );
     if (!productoRows.length) {
       throw new BadRequestException('El item no tiene control de stock');
     }
@@ -81,6 +87,13 @@ export class InventarioService {
     if (cantidad.lessThanOrEqualTo(0)) {
       throw new BadRequestException('La cantidad debe ser mayor a cero');
     }
+
+    const costoActualPrevio = productoRows[0].costo_actual ?? null;
+    const aplicaCostoNuevo =
+      params.costoUnitario != null && params.tipo === 'entrada';
+    const costoUnitarioCongelado = aplicaCostoNuevo
+      ? params.costoUnitario!
+      : costoActualPrevio;
 
     let result: MoverResult;
 
@@ -106,8 +119,8 @@ export class InventarioService {
     const insertRows: { movimiento_id: string }[] = await manager.query(
       `INSERT INTO movimientos_inventario
          (tenant_id, item_id, tipo, motivo, cantidad,
-          stock_anterior, stock_resultante, venta_id, usuario_id, comentario)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          stock_anterior, stock_resultante, venta_id, usuario_id, comentario, costo_unitario)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -120,6 +133,7 @@ export class InventarioService {
         params.ventaId ?? null,
         params.usuarioId,
         params.comentario ?? null,
+        costoUnitarioCongelado,
       ],
     );
 
@@ -130,6 +144,13 @@ export class InventarioService {
       params.cantidad,
       result,
     );
+
+    if (aplicaCostoNuevo) {
+      await manager.query(
+        `UPDATE item_producto SET costo_actual = $1 WHERE item_id = $2`,
+        [params.costoUnitario, params.itemId],
+      );
+    }
 
     return {
       movimientoId,

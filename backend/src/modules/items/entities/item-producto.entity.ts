@@ -8,6 +8,15 @@ export class ItemProducto {
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   stock: string;
 
+  @Column({
+    name: 'costo_actual',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  costoActual: string | null;
+
   @Column({ name: 'unidad_medida', type: 'text' })
   unidadMedida: string;
 

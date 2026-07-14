@@ -47,6 +47,15 @@ export class MovimientoInventario {
   @Column({ type: 'text', nullable: true })
   comentario: string | null;
 
+  @Column({
+    name: 'costo_unitario',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  costoUnitario: string | null;
+
   @CreateDateColumn({ name: 'creado_el' }) creadoEl: Date;
   @UpdateDateColumn({ name: 'actualizado_el' }) actualizadoEl: Date;
   @DeleteDateColumn({ name: 'eliminado_el' }) eliminadoEl: Date | null;
