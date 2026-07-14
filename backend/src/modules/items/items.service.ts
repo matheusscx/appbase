@@ -587,6 +587,7 @@ export class ItemsService {
           unidadIds: dto.unidadIds,
           lote: dto.lote,
           loteId: dto.loteId,
+          costoUnitario: dto.costoUnitario ?? null,
         });
 
       return { stock: stockResultante };

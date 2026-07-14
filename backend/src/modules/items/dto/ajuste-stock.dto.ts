@@ -9,6 +9,7 @@ import {
   ValidateNested,
   IsDateString,
   IsNotEmpty,
+  IsNumberString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -67,6 +68,11 @@ export class AjusteStockDto {
   @IsOptional()
   @IsString()
   comentario?: string;
+
+  // Costo pagado en la entrada por compra (actualiza costo_actual + congela en el kardex)
+  @IsNumberString()
+  @IsOptional()
+  costoUnitario?: string;
 
   // Modo 'serie' — entrada: series a registrar
   @IsArray()

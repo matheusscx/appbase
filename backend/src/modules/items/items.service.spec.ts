@@ -607,5 +607,27 @@ describe('ItemsService', () => {
         }),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('ajustarStock reenvía costoUnitario a registrarMovimiento', async () => {
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-x',
+        stockAnterior: '0',
+        stockResultante: '5',
+      });
+
+      managerMock.query.mockResolvedValueOnce([{ tipo: 'producto' }]); // SELECT tipo
+
+      await service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+        cantidad: 5,
+        tipo: 'entrada',
+        motivo: 'compra',
+        costoUnitario: '4500',
+      } as never);
+
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ costoUnitario: '4500' }),
+      );
+    });
   });
 });
