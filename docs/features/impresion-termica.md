@@ -116,11 +116,23 @@ corte se envía en la capa de transporte (`imprimirEn`) como bytes ESC/POS al fi
 impresoras sin cutter ignoran el comando. Si el corte queda muy alto/bajo, ajustar el
 avance de líneas o usar corte parcial (`\x1D\x56\x01`).
 
-**Diálogo de confianza:** en modo no-firmado (v1), QZ Tray pide confirmación en cada
-impresión. Mitigación inmediata: marcar "Remember" en el diálogo o whitelistear el
-sitio en QZ Tray → Advanced → Site Manager. Eliminación definitiva: firmar las
-peticiones con certificado (`setCertificatePromise` + `setSignaturePromise`) — queda
-como mejora futura.
+**Firmado (elimina el diálogo):** las peticiones a QZ Tray se firman en el backend
+con RSA-SHA512 usando un certificado autofirmado a nivel app (env vars
+`QZ_PRIVATE_KEY` + `QZ_CERTIFICATE`, PEM base64 — ver `.env.example` para el comando
+`openssl`, que se corre **una sola vez**). El frontend configura los promises de
+seguridad de QZ una sola vez (`GET /impresoras/qz/certificado` para el cert cacheado,
+`POST /impresoras/qz/firmar` por llamada; algoritmo `SHA512`). Implementación:
+`QzFirmaService` (backend) y `asegurarSeguridadQz` en `useImpresoras` (frontend).
+
+**Setup por dispositivo (una vez por equipo):** copiar el `qz-cert.pem` a QZ Tray y
+setear `authcert.override=<ruta>/qz-cert.pem` en `qz-tray.properties` (o importarlo
+vía QZ Tray → Advanced → Site Manager) para que QZ confíe en el certificado. Es el
+**mismo** cert en todos los equipos.
+
+**Degradación:** si `QZ_PRIVATE_KEY`/`QZ_CERTIFICATE` no están configuradas, el cert
+es `null` y la impresión degrada al modo **no-firmado** (QZ pide confirmación en cada
+impresión) sin romperse. Ver diseño en
+`docs/superpowers/specs/2026-07-13-impresion-termica-firmado-design.md`.
 
 ---
 
