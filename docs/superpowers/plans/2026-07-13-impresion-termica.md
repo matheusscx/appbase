@@ -4,7 +4,7 @@
 
 **Goal:** Permitir imprimir comandas de cocina/barra, precuenta y boleta en impresoras térmicas desde el navegador, vía QZ Tray, ruteando comandas por categoría del ítem.
 
-**Architecture:** Módulo backend nuevo `impresoras` (CRUD, RBAC propio) + extensión de `categorias` (ruteo por categoría → impresora) y `cuenta_lineas` (diff de lo ya enviado a cocina) + endpoint `POST /cuentas/:id/comanda` que calcula y persiste el diff. En el frontend, un composable `useImpresoras` envuelve `qz-tray` (impresión directa desde el navegador a impresoras de red/USB) y arma los tickets con funciones puras testeables (`utils/ticket-builder.ts`), consumidas desde `pages/salones/index.vue` (comanda, precuenta, boleta) y `pages/ventas/pos.vue` (boleta).
+**Architecture:** Módulo backend nuevo `impresoras` (CRUD, RBAC propio) + extensión de `categorias` (ruteo por categoría → impresora) y `cuenta_lineas` (diff de lo ya enviado a cocina) + dos endpoints en dos fases: `GET /cuentas/:id/comanda/pendiente` (calcula el diff, **sin** persistir) y `POST /cuentas/:id/comanda` (confirma: persiste `cantidad_enviada` **solo tras** una impresión exitosa en el navegador). En el frontend, un composable `useImpresoras` envuelve `qz-tray` (impresión directa desde el navegador a impresoras de red/USB) y arma los tickets con funciones puras testeables (`utils/ticket-builder.ts`), consumidas desde `pages/salones/index.vue` (comanda, precuenta, boleta) y `pages/ventas/pos.vue` (boleta).
 
 **Tech Stack:** NestJS + TypeORM (backend), Nuxt 4 + Vue 3 + `@nuxt/ui` v4 + Pinia (frontend), `qz-tray` (puente navegador↔impresora), Decimal.js, Vitest + Jest.
 
@@ -18,6 +18,9 @@
 - Dev: schema gestionado por TypeORM `synchronize` (no hay migraciones manuales) — basta con declarar las columnas en las entities.
 - Iconos frontend: Lucide (`i-lucide-{name}`). Llamadas API: `useApiFetch`, nunca `$fetch`/axios directo.
 - Sin notas por ítem, sin reimpresión de comandas, sin impresoras de rol dual — fuera de alcance v1 (ver spec).
+- **Comanda a prueba de fallos (dos fases):** el cálculo del diff NO persiste nada; `cantidad_enviada` se marca **solo después** de que el navegador confirma la impresión (`GET .../comanda/pendiente` → imprimir vía QZ → `POST .../comanda`). Como no hay reimpresión, avanzar el diff antes de imprimir perdería la comanda si QZ Tray falla; con dos fases, un fallo deja todo pendiente y reintentable.
+- **`qz-tray` es solo-navegador:** cargarlo de forma perezosa (`await import('qz-tray')` dentro de la función), nunca en el top-level del módulo — el import a nivel de módulo se evalúa en SSR (habilitado por defecto) y rompe el render del servidor.
+- **Tickets:** los builders devuelven `string[]` de líneas *lógicas* (sin `\n`); el composable las une con `\n` antes de enviarlas a QZ (raw ESC/POS interpreta `0x0A` como avance de línea). No agregar `\n` en el builder — rompería sus tests de membresía de array.
 
 Spec de referencia: `docs/superpowers/specs/2026-07-13-impresion-termica-design.md`.
 
@@ -40,7 +43,7 @@ Spec de referencia: `docs/superpowers/specs/2026-07-13-impresion-termica-design.
 - Produces: `ImpresorasService.listar(tenantId, rol?)`, `.crear(tenantId, dto)`, `.actualizar(tenantId, id, dto)`, `.eliminar(tenantId, id)`.
 - Produces: rutas `GET/POST /impresoras`, `PATCH/DELETE /impresoras/:id`, permiso RBAC `Impresoras` (`Leer/Crear/Actualizar/Eliminar`).
 
-- [ ] **Step 1: Crear la entity `Impresora`**
+- [x] **Step 1: Crear la entity `Impresora`**
 
 ```typescript
 // backend/src/modules/impresoras/entities/impresora.entity.ts
@@ -103,7 +106,7 @@ export class Impresora {
 }
 ```
 
-- [ ] **Step 2: Crear los DTOs**
+- [x] **Step 2: Crear los DTOs**
 
 ```typescript
 // backend/src/modules/impresoras/dto/create-impresora.dto.ts
@@ -189,7 +192,7 @@ export class UpdateImpresoraDto {
 }
 ```
 
-- [ ] **Step 3: Escribir el test del service (falla — el service no existe todavía)**
+- [x] **Step 3: Escribir el test del service (falla — el service no existe todavía)**
 
 ```typescript
 // backend/src/modules/impresoras/impresoras.service.spec.ts
@@ -331,12 +334,12 @@ describe('ImpresorasService', () => {
 });
 ```
 
-- [ ] **Step 4: Ejecutar el test y confirmar que falla**
+- [x] **Step 4: Ejecutar el test y confirmar que falla**
 
 Run: `cd backend && npx jest impresoras.service`
 Expected: FAIL — no se puede resolver `./impresoras.service` (el archivo no existe).
 
-- [ ] **Step 5: Implementar `ImpresorasService`**
+- [x] **Step 5: Implementar `ImpresorasService`**
 
 ```typescript
 // backend/src/modules/impresoras/impresoras.service.ts
@@ -420,12 +423,12 @@ export class ImpresorasService {
 }
 ```
 
-- [ ] **Step 6: Ejecutar el test y confirmar que pasa**
+- [x] **Step 6: Ejecutar el test y confirmar que pasa**
 
 Run: `cd backend && npx jest impresoras.service`
 Expected: PASS (7 tests)
 
-- [ ] **Step 7: Crear el controller**
+- [x] **Step 7: Crear el controller**
 
 ```typescript
 // backend/src/modules/impresoras/impresoras.controller.ts
@@ -490,7 +493,7 @@ export class ImpresorasController {
 }
 ```
 
-- [ ] **Step 8: Crear el module**
+- [x] **Step 8: Crear el module**
 
 ```typescript
 // backend/src/modules/impresoras/impresoras.module.ts
@@ -509,7 +512,7 @@ import { ImpresorasController } from './impresoras.controller';
 export class ImpresorasModule {}
 ```
 
-- [ ] **Step 9: Registrar en `app.module.ts`**
+- [x] **Step 9: Registrar en `app.module.ts`**
 
 Agregar los imports junto a los de `GarzonesModule` (después de la línea `import { Garzon } from './modules/garzones/entities/garzon.entity';`):
 
@@ -533,12 +536,12 @@ Agregar `ImpresorasModule` al array `imports` (después de `GarzonesModule,`):
     ImpresorasModule,
 ```
 
-- [ ] **Step 10: Compilar y correr toda la suite de backend**
+- [x] **Step 10: Compilar y correr toda la suite de backend**
 
 Run: `cd backend && npm test`
 Expected: PASS (todos los tests, incluidos los nuevos de `impresoras`)
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add backend/src/modules/impresoras backend/src/app.module.ts
@@ -549,7 +552,7 @@ Nuevo módulo con RBAC propio (Leer/Crear/Actualizar/Eliminar) para que
 el tenant configure sus impresoras de comanda (cocina/barra) y de
 boleta, por conexión de red (host+puerto) o cola del sistema.
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -567,9 +570,9 @@ EOF
 
 **Interfaces:**
 - Consumes: nada de Task 1 en tiempo de compilación (la validación usa SQL raw contra la tabla `impresoras`, sin importar `ImpresorasModule`, igual que `getItemVendibleOrThrow` en `salones.service.ts`).
-- Produces: `Categoria.impresoraId: string | null`; `CreateCategoriaDto.impresoraId?: string`, `UpdateCategoriaDto.impresoraId?: string`. Consumido por Task 3 (JOIN en `enviarComanda`) y Task 8 (frontend).
+- Produces: `Categoria.impresoraId: string | null`; `CreateCategoriaDto.impresoraId?: string | null`, `UpdateCategoriaDto.impresoraId?: string | null` (acepta `null` para desasignar). Consumido por Task 3 (JOIN en `previewComanda`) y Task 8 (frontend).
 
-- [ ] **Step 1: Escribir el test que falla — crear/actualizar validan la impresora**
+- [x] **Step 1: Escribir el test que falla — crear/actualizar validan la impresora**
 
 Agregar al final de `describe('create', ...)` y `describe('update', ...)` en `backend/src/modules/categorias/categorias.service.spec.ts`. Primero ajustar el `beforeEach` para inyectar `DataSource`:
 
@@ -643,12 +646,12 @@ Agregar estos dos tests dentro de `describe('create', ...)`:
     });
 ```
 
-- [ ] **Step 2: Ejecutar el test y confirmar que falla**
+- [x] **Step 2: Ejecutar el test y confirmar que falla**
 
 Run: `cd backend && npx jest categorias.service`
 Expected: FAIL — `CategoriasService` no acepta `impresoraId` todavía / falta el provider `DataSource`.
 
-- [ ] **Step 3: Extender la entity**
+- [x] **Step 3: Extender la entity**
 
 ```typescript
 // backend/src/modules/categorias/entities/categoria.entity.ts
@@ -657,7 +660,7 @@ Expected: FAIL — `CategoriasService` no acepta `impresoraId` todavía / falta 
   impresoraId: string | null;
 ```
 
-- [ ] **Step 4: Extender los DTOs**
+- [x] **Step 4: Extender los DTOs**
 
 ```typescript
 // backend/src/modules/categorias/dto/create-categoria.dto.ts
@@ -669,6 +672,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateCategoriaDto {
@@ -684,9 +688,11 @@ export class CreateCategoriaDto {
   @IsBoolean()
   activo?: boolean;
 
+  // `null` explícito desasigna la ruta de comanda; un UUID la (re)asigna.
   @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
   @IsUUID()
-  impresoraId?: string;
+  impresoraId?: string | null;
 }
 ```
 
@@ -699,6 +705,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateCategoriaDto {
@@ -715,13 +722,15 @@ export class UpdateCategoriaDto {
   @IsBoolean()
   activo?: boolean;
 
+  // `null` explícito desasigna la ruta; `Object.assign` en el service la limpia.
   @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
   @IsUUID()
-  impresoraId?: string;
+  impresoraId?: string | null;
 }
 ```
 
-- [ ] **Step 5: Implementar la validación en el service**
+- [x] **Step 5: Implementar la validación en el service**
 
 ```typescript
 // backend/src/modules/categorias/categorias.service.ts
@@ -809,12 +818,12 @@ export class CategoriasService {
 }
 ```
 
-- [ ] **Step 6: Ejecutar el test y confirmar que pasa**
+- [x] **Step 6: Ejecutar el test y confirmar que pasa**
 
 Run: `cd backend && npx jest categorias.service`
 Expected: PASS (todos los tests de `categorias.service.spec.ts`, incluidos los 2 nuevos)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/src/modules/categorias
@@ -824,7 +833,7 @@ feat(categorias): agrega impresora_id para rutear comandas por categoría
 Cada categoría puede apuntar a una impresora de rol 'comanda'; se
 valida que exista, sea del tenant, esté activa y tenga ese rol.
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -835,15 +844,19 @@ EOF
 
 **Files:**
 - Modify: `backend/src/modules/salones/entities/cuenta-linea.entity.ts`
+- Create: `backend/src/modules/salones/dto/confirmar-comanda.dto.ts`
 - Modify: `backend/src/modules/salones/salones.service.ts`
 - Modify: `backend/src/modules/salones/salones.service.spec.ts`
 - Modify: `backend/src/modules/salones/salones.controller.ts`
 
 **Interfaces:**
 - Consumes: tabla `impresoras` (Task 1) y `categorias.impresora_id` (Task 2) vía SQL raw.
-- Produces: `SalonesService.enviarComanda(tenantId, cuentaId): Promise<{ estaciones: ComandaEstacion[] }>` donde `ComandaEstacion = { impresoraId: string; nombre: string; items: { nombre: string; cantidad: string }[] }`. Ruta `POST /cuentas/:id/comanda`. Consumido por el frontend en Task 6.
+- Produces (dos fases, para no perder comandas si la impresión del navegador falla):
+  - `SalonesService.previewComanda(tenantId, cuentaId): Promise<{ estaciones: ComandaEstacion[] }>` — calcula el diff pendiente agrupado por impresora, **sin persistir nada**. `ComandaEstacion = { impresoraId: string; nombre: string; items: { cuentaLineaId: string; nombre: string; cantidad: string; cantidadEnviada: string }[] }` donde `cantidad` es el diff a imprimir y `cantidadEnviada` es el total absoluto a persistir al confirmar. Ruta `GET /cuentas/:id/comanda/pendiente`.
+  - `SalonesService.confirmarComanda(tenantId, cuentaId, dto): Promise<void>` — marca `cantidad_enviada` para las líneas ya impresas. `dto = { lineas: { cuentaLineaId: string; cantidadEnviada: string }[] }`. Ruta `POST /cuentas/:id/comanda`.
+  - Ambas consumidas por el frontend en Task 6, que llama preview → imprime por estación → confirma solo lo efectivamente impreso.
 
-- [ ] **Step 1: Agregar la columna a la entity**
+- [x] **Step 1: Agregar la columna a la entity**
 
 ```typescript
 // backend/src/modules/salones/entities/cuenta-linea.entity.ts
@@ -854,19 +867,19 @@ EOF
   cantidadEnviada: string;
 ```
 
-- [ ] **Step 2: Escribir los tests que fallan para `enviarComanda`**
+- [x] **Step 2: Escribir los tests que fallan para `previewComanda` / `confirmarComanda`**
 
-Agregar al final de `backend/src/modules/salones/salones.service.spec.ts`, dentro de `describe('SalonesService', ...)`, antes del cierre del archivo:
+Agregar al final de `backend/src/modules/salones/salones.service.spec.ts`, dentro de `describe('SalonesService', ...)`, antes del cierre del archivo. `previewComanda` es solo-lectura (usa `cuentaRepo.findOne` + `dataSource.query`, sin transacción); `confirmarComanda` persiste dentro de una transacción (`manager.findOne` + `manager.update`):
 
 ```typescript
-  describe('enviarComanda', () => {
-    it('agrupa por impresora solo los ítems con diferencia pendiente y actualiza cantidad_enviada', async () => {
-      manager.findOne.mockResolvedValue({
+  describe('previewComanda', () => {
+    it('agrupa por impresora solo los ítems con diferencia pendiente, SIN persistir', async () => {
+      cuentaRepo.findOne.mockResolvedValue({
         id: CUENTA,
         tenantId: TENANT,
         estado: EstadoCuenta.ABIERTA,
       });
-      manager.query.mockResolvedValue([
+      dataSource.query.mockResolvedValue([
         {
           cuenta_linea_id: 'linea-1',
           cantidad: '3',
@@ -893,24 +906,61 @@ Agregar al final de `backend/src/modules/salones/salones.service.spec.ts`, dentr
         },
       ]);
 
-      const result = await service.enviarComanda(TENANT, CUENTA);
+      const result = await service.previewComanda(TENANT, CUENTA);
 
       expect(result.estaciones).toEqual([
         {
           impresoraId: 'impresora-cocina',
           nombre: 'Cocina',
-          items: [{ nombre: 'Lomo a lo pobre', cantidad: '2' }],
+          items: [
+            {
+              cuentaLineaId: 'linea-1',
+              nombre: 'Lomo a lo pobre',
+              cantidad: '2', // diff a imprimir
+              cantidadEnviada: '3', // total absoluto a persistir al confirmar
+            },
+          ],
         },
       ]);
+      // preview NO persiste nada
+      expect(manager.update).not.toHaveBeenCalled();
+    });
+
+    it('lanza BadRequest si la cuenta no está abierta', async () => {
+      cuentaRepo.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.CERRADA,
+      });
+      await expect(service.previewComanda(TENANT, CUENTA)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('lanza NotFound si la cuenta no pertenece al tenant', async () => {
+      cuentaRepo.findOne.mockResolvedValue(null);
+      await expect(service.previewComanda(TENANT, CUENTA)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('confirmarComanda', () => {
+    it('marca cantidad_enviada solo para las líneas impresas', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+
+      await service.confirmarComanda(TENANT, CUENTA, {
+        lineas: [{ cuentaLineaId: 'linea-1', cantidadEnviada: '3' }],
+      });
+
       expect(manager.update).toHaveBeenCalledWith(
         CuentaLinea,
         { id: 'linea-1', tenantId: TENANT },
         { cantidadEnviada: '3' },
-      );
-      expect(manager.update).not.toHaveBeenCalledWith(
-        CuentaLinea,
-        expect.objectContaining({ id: 'linea-2' }),
-        expect.anything(),
       );
     });
 
@@ -920,59 +970,152 @@ Agregar al final de `backend/src/modules/salones/salones.service.spec.ts`, dentr
         tenantId: TENANT,
         estado: EstadoCuenta.CERRADA,
       });
-
-      await expect(service.enviarComanda(TENANT, CUENTA)).rejects.toThrow(
-        BadRequestException,
-      );
-    });
-
-    it('lanza NotFound si la cuenta no pertenece al tenant', async () => {
-      manager.findOne.mockResolvedValue(null);
-
-      await expect(service.enviarComanda(TENANT, CUENTA)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.confirmarComanda(TENANT, CUENTA, { lineas: [] }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 ```
 
 También agregar `update: jest.fn(() => Promise.resolve({ affected: 1 })),` al objeto `manager` declarado en el `beforeEach` de ese archivo (junto a `softDelete`).
 
-- [ ] **Step 3: Ejecutar los tests y confirmar que fallan**
+- [x] **Step 3: Ejecutar los tests y confirmar que fallan**
 
 Run: `cd backend && npx jest salones.service`
-Expected: FAIL — `service.enviarComanda is not a function`
+Expected: FAIL — `service.previewComanda is not a function`
 
-- [ ] **Step 4: Implementar `enviarComanda` en `SalonesService`**
+- [x] **Step 4: Crear el DTO e implementar `previewComanda` / `confirmarComanda`**
 
-El import de `Decimal` ya existe en el archivo. Primero, agregar esta interfaz a
-nivel de módulo (no dentro de la clase), junto a las demás interfaces exportadas al
-inicio del archivo, cerca de `CuentaDetalle`:
+Primero el DTO del confirm:
+
+```typescript
+// backend/src/modules/salones/dto/confirmar-comanda.dto.ts
+import { IsArray, IsNumberString, IsUUID, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+
+class LineaEnviadaDto {
+  @IsUUID()
+  cuentaLineaId: string;
+
+  // numeric viaja como string (ver Global Constraints)
+  @IsNumberString()
+  cantidadEnviada: string;
+}
+
+export class ConfirmarComandaDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LineaEnviadaDto)
+  lineas: LineaEnviadaDto[];
+}
+```
+
+El import de `Decimal` ya existe en el archivo. Agregar esta interfaz a nivel de
+módulo (no dentro de la clase), junto a las demás interfaces exportadas al inicio del
+archivo, cerca de `CuentaDetalle`. `cantidad` es el diff a imprimir; `cantidadEnviada`
+es el total absoluto que se persistirá al confirmar:
 
 ```typescript
 export interface ComandaEstacion {
   impresoraId: string;
   nombre: string;
-  items: { nombre: string; cantidad: string }[];
+  items: {
+    cuentaLineaId: string;
+    nombre: string;
+    cantidad: string;
+    cantidadEnviada: string;
+  }[];
 }
 ```
 
-Luego agregar el método dentro de la clase `SalonesService`, junto a los demás
-métodos de "Operación: cuentas" (después de `cerrarCuenta`):
+Importar el DTO al inicio del archivo (junto a los demás DTOs de salones):
+
+```typescript
+import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
+```
+
+Luego agregar los dos métodos dentro de la clase `SalonesService`, junto a los demás
+métodos de "Operación: cuentas" (después de `cerrarCuenta`). **`previewComanda` NO
+persiste nada** — solo calcula el diff; `confirmarComanda` marca `cantidad_enviada`
+recién cuando el navegador confirma que imprimió (evita perder la comanda si QZ Tray
+falla, ya que no hay reimpresión):
 
 ```typescript
   /**
-   * Calcula el diff (cantidad - cantidad_enviada) de cada línea de la cuenta,
-   * lo agrupa por la impresora de la categoría del ítem, y persiste
-   * cantidad_enviada = cantidad para lo que se envía. Ítems sin categoría o
-   * cuya categoría no tiene impresora asignada se excluyen (no generan
-   * comanda). Devuelve estaciones vacías si no hay nada nuevo que enviar.
+   * Calcula el diff (cantidad - cantidad_enviada) de cada línea, agrupado por la
+   * impresora de la categoría del ítem. NO persiste: es una vista previa idempotente.
+   * Ítems sin categoría o cuya categoría no tiene impresora se excluyen. Devuelve
+   * estaciones vacías si no hay nada nuevo. El frontend imprime y luego confirma.
    */
-  async enviarComanda(
+  async previewComanda(
     tenantId: string,
     cuentaId: string,
   ): Promise<{ estaciones: ComandaEstacion[] }> {
-    return this.dataSource.transaction(async (manager) => {
+    const cuenta = await this.cuentaRepo.findOne({
+      where: { id: cuentaId, tenantId },
+    });
+    if (!cuenta) {
+      throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+    }
+    if (cuenta.estado !== EstadoCuenta.ABIERTA) {
+      throw new BadRequestException('La cuenta no está abierta');
+    }
+
+    const rows: {
+      cuenta_linea_id: string;
+      cantidad: string;
+      cantidad_enviada: string;
+      nombre: string;
+      impresora_id: string | null;
+      impresora_nombre: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
+              i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
+         FROM cuenta_lineas cl
+         JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
+         LEFT JOIN categorias c
+           ON c.categoria_id = i.categoria_id AND c.eliminado_el IS NULL
+         LEFT JOIN impresoras imp
+           ON imp.impresora_id = c.impresora_id AND imp.eliminado_el IS NULL
+              AND imp.activo = true
+        WHERE cl.cuenta_id = $1 AND cl.tenant_id = $2 AND cl.eliminado_el IS NULL`,
+      [cuentaId, tenantId],
+    );
+
+    const estacionesMap = new Map<string, ComandaEstacion>();
+    for (const row of rows) {
+      const diff = new Decimal(row.cantidad).minus(row.cantidad_enviada);
+      if (diff.lte(0) || !row.impresora_id) continue;
+
+      const estacion = estacionesMap.get(row.impresora_id) ?? {
+        impresoraId: row.impresora_id,
+        nombre: row.impresora_nombre ?? '',
+        items: [],
+      };
+      estacion.items.push({
+        cuentaLineaId: row.cuenta_linea_id,
+        nombre: row.nombre,
+        cantidad: diff.toString(),
+        cantidadEnviada: row.cantidad, // total absoluto a persistir al confirmar
+      });
+      estacionesMap.set(row.impresora_id, estacion);
+    }
+
+    return { estaciones: [...estacionesMap.values()] };
+  }
+
+  /**
+   * Marca cantidad_enviada = cantidadEnviada para las líneas que el navegador ya
+   * imprimió. Se llama por estación tras un print exitoso; setear el total absoluto
+   * (no sumar) lo hace idempotente ante reintentos y tolera cambios de cantidad
+   * entre el preview y el confirm.
+   */
+  async confirmarComanda(
+    tenantId: string,
+    cuentaId: string,
+    dto: ConfirmarComandaDto,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
       const cuenta = await manager.findOne(Cuenta, {
         where: { id: cuentaId, tenantId },
       });
@@ -982,54 +1125,18 @@ métodos de "Operación: cuentas" (después de `cerrarCuenta`):
       if (cuenta.estado !== EstadoCuenta.ABIERTA) {
         throw new BadRequestException('La cuenta no está abierta');
       }
-
-      const rows: {
-        cuenta_linea_id: string;
-        cantidad: string;
-        cantidad_enviada: string;
-        nombre: string;
-        impresora_id: string | null;
-        impresora_nombre: string | null;
-      }[] = await manager.query(
-        `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
-                i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
-           FROM cuenta_lineas cl
-           JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
-           LEFT JOIN categorias c
-             ON c.categoria_id = i.categoria_id AND c.eliminado_el IS NULL
-           LEFT JOIN impresoras imp
-             ON imp.impresora_id = c.impresora_id AND imp.eliminado_el IS NULL
-                AND imp.activo = true
-          WHERE cl.cuenta_id = $1 AND cl.tenant_id = $2 AND cl.eliminado_el IS NULL`,
-        [cuentaId, tenantId],
-      );
-
-      const estacionesMap = new Map<string, ComandaEstacion>();
-      for (const row of rows) {
-        const diff = new Decimal(row.cantidad).minus(row.cantidad_enviada);
-        if (diff.lte(0) || !row.impresora_id) continue;
-
+      for (const linea of dto.lineas) {
         await manager.update(
           CuentaLinea,
-          { id: row.cuenta_linea_id, tenantId },
-          { cantidadEnviada: row.cantidad },
+          { id: linea.cuentaLineaId, tenantId },
+          { cantidadEnviada: linea.cantidadEnviada },
         );
-
-        const estacion = estacionesMap.get(row.impresora_id) ?? {
-          impresoraId: row.impresora_id,
-          nombre: row.impresora_nombre ?? '',
-          items: [],
-        };
-        estacion.items.push({ nombre: row.nombre, cantidad: diff.toString() });
-        estacionesMap.set(row.impresora_id, estacion);
       }
-
-      return { estaciones: [...estacionesMap.values()] };
     });
   }
 ```
 
-- [ ] **Step 5: Sumar `cantidadEnviada` al fusionar cuentas (evita reenvíos duplicados)**
+- [x] **Step 5: Sumar `cantidadEnviada` al fusionar cuentas (evita reenvíos duplicados)**
 
 En `fusionarCuentas`, dentro del bloque `if (existente) { ... }`, junto a la línea que suma `cantidad`:
 
@@ -1044,41 +1151,59 @@ En `fusionarCuentas`, dentro del bloque `if (existente) { ... }`, junto a la lí
             await manager.save(CuentaLinea, existente);
 ```
 
-- [ ] **Step 6: Ejecutar los tests y confirmar que pasan**
+- [x] **Step 6: Ejecutar los tests y confirmar que pasan**
 
 Run: `cd backend && npx jest salones.service`
-Expected: PASS (todos los tests, incluidos los 3 nuevos de `enviarComanda`)
+Expected: PASS (todos los tests, incluidos los 5 nuevos de `previewComanda` / `confirmarComanda`)
 
-- [ ] **Step 7: Agregar la ruta en el controller**
+- [x] **Step 7: Agregar la ruta en el controller**
 
 ```typescript
 // backend/src/modules/salones/salones.controller.ts
+// Importar el DTO junto a los demás:
+import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
+
 // Dentro de CuentasController, después de agregarLinea:
+  @Get(':id/comanda/pendiente')
+  @RequiresPermiso('Salones', 'Operar')
+  previewComanda(@Req() req: Request, @Param('id') id: string) {
+    const u = req.user as JwtUser;
+    return this.salonesService.previewComanda(u.tenantId ?? '', id);
+  }
+
   @Post(':id/comanda')
   @RequiresPermiso('Salones', 'Operar')
-  enviarComanda(@Req() req: Request, @Param('id') id: string) {
+  confirmarComanda(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: ConfirmarComandaDto,
+  ) {
     const u = req.user as JwtUser;
-    return this.salonesService.enviarComanda(u.tenantId ?? '', id);
+    return this.salonesService.confirmarComanda(u.tenantId ?? '', id, dto);
   }
 ```
 
-- [ ] **Step 8: Correr toda la suite de backend**
+Verificar que `Get` y `Body` estén en el `import { ... } from '@nestjs/common'` del controller (agregarlos si falta alguno).
+
+- [x] **Step 8: Correr toda la suite de backend**
 
 Run: `cd backend && npm test`
 Expected: PASS
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/modules/salones
 git commit -m "$(cat <<'EOF'
-feat(salones): agrega POST /cuentas/:id/comanda con diff por estación
+feat(salones): agrega comanda en dos fases (preview + confirmar)
 
-cuenta_lineas.cantidad_enviada trackea cuánto ya se imprimió; el
-endpoint calcula el diff pendiente, lo agrupa por impresora de la
-categoría del ítem, y lo marca como enviado en la misma transacción.
+cuenta_lineas.cantidad_enviada trackea cuánto ya se imprimió. GET
+/comanda/pendiente calcula el diff por estación SIN persistir; POST
+/comanda marca cantidad_enviada solo tras una impresión exitosa en el
+navegador. Así un fallo de QZ Tray no pierde la comanda (no hay
+reimpresión). fusionarCuentas suma cantidadEnviada para no reenviar.
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1095,7 +1220,7 @@ EOF
 - Consumes: `Impresora` entity (Task 1), `Categoria.impresoraId` (Task 2).
 - Produces: `modulo_app` "Impresoras" contratado para el tenant Paris; 3 impresoras demo (Cocina, Barra — rol comanda; Caja — rol boleta); la categoría "Ropa y accesorios" de Paris rutea a "Cocina" (dato de demo para poder probar el flujo de comanda de punta a punta sin configurar nada manualmente).
 
-- [ ] **Step 1: Registrar `Impresora` en `seeder.module.ts`**
+- [x] **Step 1: Registrar `Impresora` en `seeder.module.ts`**
 
 ```typescript
 // backend/src/modules/seeder/seeder.module.ts
@@ -1107,7 +1232,7 @@ import { Impresora } from '../impresoras/entities/impresora.entity';
       Impresora,
 ```
 
-- [ ] **Step 2: Inyectar el repo en `seeder.service.ts`**
+- [x] **Step 2: Inyectar el repo en `seeder.service.ts`**
 
 ```typescript
 // backend/src/modules/seeder/seeder.service.ts
@@ -1119,7 +1244,7 @@ import { Impresora, RolImpresora, TipoConexionImpresora } from '../impresoras/en
     private readonly impresoraRepo: Repository<Impresora>,
 ```
 
-- [ ] **Step 3: Agregar el módulo "Impresoras" a `seedModulosApp`**
+- [x] **Step 3: Agregar el módulo "Impresoras" a `seedModulosApp`**
 
 ```typescript
 // Dentro del array `modulos` de seedModulosApp(), después de la entrada de Salones:
@@ -1132,7 +1257,7 @@ import { Impresora, RolImpresora, TipoConexionImpresora } from '../impresoras/en
       },
 ```
 
-- [ ] **Step 4: Agregar sus permisos a `seedModuloAppPermisos`**
+- [x] **Step 4: Agregar sus permisos a `seedModuloAppPermisos`**
 
 ```typescript
 // Dentro de seedModuloAppPermisos(), declarar la constante junto a SALONES:
@@ -1162,7 +1287,7 @@ import { Impresora, RolImpresora, TipoConexionImpresora } from '../impresoras/en
       },
 ```
 
-- [ ] **Step 5: Contratar el módulo para Paris en `seedTenantModulo`**
+- [x] **Step 5: Contratar el módulo para Paris en `seedTenantModulo`**
 
 ```typescript
 // Dentro del array `entries` de seedTenantModulo(), después de la entrada de Salones:
@@ -1175,7 +1300,7 @@ import { Impresora, RolImpresora, TipoConexionImpresora } from '../impresoras/en
       },
 ```
 
-- [ ] **Step 6: Crear `seedImpresoras()`**
+- [x] **Step 6: Crear `seedImpresoras()`**
 
 ```typescript
 // Nuevo método privado, ubicarlo junto a seedGarzones():
@@ -1222,7 +1347,7 @@ import { Impresora, RolImpresora, TipoConexionImpresora } from '../impresoras/en
   }
 ```
 
-- [ ] **Step 7: Vincular una categoría demo a "Cocina" en `seedCategorias`**
+- [x] **Step 7: Vincular una categoría demo a "Cocina" en `seedCategorias`**
 
 ```typescript
 // Dentro del array `categorias` de seedCategorias(), en la entrada 'Ropa y accesorios':
@@ -1238,7 +1363,7 @@ import { Impresora, RolImpresora, TipoConexionImpresora } from '../impresoras/en
       },
 ```
 
-- [ ] **Step 8: Llamar `seedImpresoras()` antes de `seedCategorias()` en `onApplicationBootstrap`**
+- [x] **Step 8: Llamar `seedImpresoras()` antes de `seedCategorias()` en `onApplicationBootstrap`**
 
 ```typescript
     await this.seedTenantMetodosPago();
@@ -1246,14 +1371,19 @@ import { Impresora, RolImpresora, TipoConexionImpresora } from '../impresoras/en
     await this.seedCategorias();
 ```
 
-- [ ] **Step 9: Correr el backend y verificar el seed**
+- [x] **Step 9: Correr el backend y verificar el seed**
 
 Run: `cd backend && npm test`
 Expected: PASS
 
 Run: `docker-compose up --build` (o `cd backend && npm run start:dev` si ya está levantada la BD) y revisar el log — no debe haber errores de seed.
 
-- [ ] **Step 10: Commit**
+> **Idempotencia:** `seedCategorias`/`seedImpresoras` usan `if (!exists)`, así que en
+> una BD de dev **ya existente** la categoría "Ropa y accesorios" NO recibirá el nuevo
+> `impresoraId` (se salta el update) y el ruteo demo no aplicará. Para probar el flujo
+> de comanda de punta a punta, recrear el volumen primero: `docker-compose down -v && docker-compose up --build`.
+
+- [x] **Step 10: Commit**
 
 ```bash
 git add backend/src/modules/seeder
@@ -1264,7 +1394,7 @@ Cocina y Barra (rol comanda) + Caja (rol boleta); la categoría "Ropa y
 accesorios" rutea a Cocina para poder probar el flujo de comanda sin
 configuración manual previa.
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1280,7 +1410,7 @@ EOF
 **Interfaces:**
 - Produces: `buildComandaTicket(input): string[]`, `buildPrecuentaTicket(input): string[]`, `buildBoletaTicket(input): string[]`, y los tipos `TicketItem`, `TicketTotales`, `TicketPago`. Consumidos por `useImpresoras.ts` en Task 6. Sin dependencias de Nuxt/Vue/QZ — 100% funciones puras.
 
-- [ ] **Step 1: Escribir los tests (fallan — el módulo no existe)**
+- [x] **Step 1: Escribir los tests (fallan — el módulo no existe)**
 
 ```typescript
 // frontend/app/utils/ticket-builder.spec.ts
@@ -1371,12 +1501,12 @@ describe('buildBoletaTicket', () => {
 })
 ```
 
-- [ ] **Step 2: Ejecutar los tests y confirmar que fallan**
+- [x] **Step 2: Ejecutar los tests y confirmar que fallan**
 
 Run: `cd frontend && npm test -- --run app/utils/ticket-builder.spec.ts`
 Expected: FAIL — no se puede resolver `./ticket-builder`
 
-- [ ] **Step 3: Implementar `ticket-builder.ts`**
+- [x] **Step 3: Implementar `ticket-builder.ts`**
 
 ```typescript
 // frontend/app/utils/ticket-builder.ts
@@ -1400,6 +1530,9 @@ export interface TicketPago {
   monto: string
 }
 
+// Todos los builders devuelven un array de líneas LÓGICAS (sin '\n'). El composable
+// (useImpresoras) las une con '\n' antes de mandarlas a QZ Tray. No agregar '\n' aquí:
+// rompería los tests de membresía de array (`expect(lines).toContain('...')`).
 function separador(width = 32): string {
   return '-'.repeat(width)
 }
@@ -1505,12 +1638,12 @@ export function buildBoletaTicket(input: {
 }
 ```
 
-- [ ] **Step 4: Ejecutar los tests y confirmar que pasan**
+- [x] **Step 4: Ejecutar los tests y confirmar que pasan**
 
 Run: `cd frontend && npm test -- --run app/utils/ticket-builder.spec.ts`
 Expected: PASS (5 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/app/utils/ticket-builder.ts frontend/app/utils/ticket-builder.spec.ts
@@ -1521,7 +1654,7 @@ Funciones sin Nuxt/Vue, 100% Vitest, siguiendo el patrón de helpers
 puros de useVenta.ts. useImpresoras (próximo commit) las envuelve con
 la impresión real vía QZ Tray.
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1538,16 +1671,19 @@ EOF
 - Consumes: `buildComandaTicket`, `buildPrecuentaTicket`, `buildBoletaTicket`, `TicketItem`, `TicketTotales`, `TicketPago` de `~/utils/ticket-builder` (Task 5). Endpoints `GET/POST /impresoras`, `PATCH/DELETE /impresoras/:id` (Task 1), `POST /cuentas/:id/comanda` (Task 3).
 - Produces: `useImpresoras()` → `{ listar, crear, actualizar, eliminar, imprimirComanda, imprimirPrecuenta, imprimirBoleta }`. Consumido por Task 7 (admin), Task 9 (salones) y Task 10 (POS).
 
-- [ ] **Step 1: Instalar `qz-tray`**
+- [x] **Step 1: Instalar `qz-tray`**
 
 Run: `cd frontend && npm install qz-tray`
 Expected: agrega `qz-tray` a `dependencies` en `frontend/package.json`.
 
-- [ ] **Step 2: Implementar el composable**
+> Si `qz-tray` no trae tipos y `nuxi typecheck` (Step 3) se queja del `import('qz-tray')`,
+> agregar un shim mínimo en `frontend/app/types/qz-tray.d.ts` (`declare module 'qz-tray'`
+> con `websocket`, `configs`, `print`) en vez de silenciar con `@ts-expect-error`.
+
+- [x] **Step 2: Implementar el composable**
 
 ```typescript
 // frontend/app/composables/useImpresoras.ts
-import qz from 'qz-tray'
 import { useApiFetch } from './useApiFetch'
 import {
   buildComandaTicket,
@@ -1584,36 +1720,43 @@ export interface ImpresoraFormBody {
   activo?: boolean
 }
 
+export interface ComandaEstacionItem {
+  cuentaLineaId: string
+  nombre: string
+  cantidad: string // diff a imprimir
+  cantidadEnviada: string // total absoluto a persistir al confirmar
+}
+
 export interface ComandaEstacion {
   impresoraId: string
   nombre: string
-  items: { nombre: string, cantidad: string }[]
+  items: ComandaEstacionItem[]
 }
 
-interface ComandaResponse {
+interface ComandaPreviewResponse {
   estaciones: ComandaEstacion[]
 }
 
-async function conectar(): Promise<void> {
-  if (!qz.websocket.isActive()) {
-    await qz.websocket.connect()
-  }
-}
-
-// La impresión "de red" no usa una cola del sistema operativo: QZ Tray abre
-// un socket raw a host:puerto (típico ESC/POS TCP 9100) y escribe los bytes
-// directamente, pasando de largo el spool de impresión del SO.
-function resolverConfig(impresora: Impresora) {
-  if (impresora.tipoConexion === 'sistema') {
-    return qz.configs.create(impresora.nombreCola as string)
-  }
-  return qz.configs.create({ host: impresora.host as string, port: Number(impresora.puerto) })
+// qz-tray es solo-navegador (usa WebSocket/window). Cargarlo de forma perezosa
+// evita que se evalúe durante el SSR (habilitado por defecto) y rompa el render.
+let qzPromise: Promise<(typeof import('qz-tray'))['default']> | null = null
+function getQz() {
+  if (!qzPromise) qzPromise = import('qz-tray').then(m => m.default)
+  return qzPromise
 }
 
 async function imprimirEn(impresora: Impresora, lineas: string[]): Promise<void> {
-  await conectar()
-  const config = resolverConfig(impresora)
-  await qz.print(config, lineas)
+  const qz = await getQz()
+  if (!qz.websocket.isActive()) {
+    await qz.websocket.connect()
+  }
+  // "Red": QZ abre un socket raw a host:puerto (ESC/POS TCP 9100) y escribe los
+  // bytes directamente, sin pasar por una cola del SO. Las líneas lógicas se unen
+  // con '\n' (0x0A = avance de línea) para que el printer no las imprima pegadas.
+  const config = impresora.tipoConexion === 'sistema'
+    ? qz.configs.create(impresora.nombreCola as string)
+    : qz.configs.create({ host: impresora.host as string, port: Number(impresora.puerto) })
+  await qz.print(config, [lineas.join('\n') + '\n'])
 }
 
 export function useImpresoras() {
@@ -1631,30 +1774,44 @@ export function useImpresoras() {
   const eliminar = (id: string) =>
     useApiFetch(`${apiUrl}/impresoras/${id}`, { method: 'DELETE' })
 
-  /** Envía la comanda pendiente de la cuenta e imprime un ticket por estación. */
+  /**
+   * Envía la comanda pendiente en dos fases: (1) consulta el diff sin mutar
+   * (`GET .../comanda/pendiente`); (2) imprime un ticket por estación y, SOLO tras
+   * imprimir OK, confirma esa estación (`POST .../comanda` marca cantidad_enviada).
+   * Si QZ Tray falla, la estación no se confirma → queda pendiente y reintentable,
+   * en vez de perderse (no hay reimpresión de comandas).
+   */
   async function imprimirComanda(
     cuentaId: string,
     contexto: { mesaNombre: string, cuentaNumero: number, garzonNombre: string | null },
   ): Promise<ComandaEstacion[]> {
-    const { estaciones } = await useApiFetch<ComandaResponse>(
-      `${apiUrl}/cuentas/${cuentaId}/comanda`,
-      { method: 'POST' },
+    const { estaciones } = await useApiFetch<ComandaPreviewResponse>(
+      `${apiUrl}/cuentas/${cuentaId}/comanda/pendiente`,
     )
-    if (estaciones.length > 0) {
-      const impresoras = await listar('comanda')
-      for (const estacion of estaciones) {
-        const impresora = impresoras.find(i => i.id === estacion.impresoraId)
-        if (!impresora) continue
-        const lineas = buildComandaTicket({
-          estacionNombre: estacion.nombre,
-          mesaNombre: contexto.mesaNombre,
-          cuentaNumero: contexto.cuentaNumero,
-          garzonNombre: contexto.garzonNombre,
-          items: estacion.items,
-          fecha: new Date(),
-        })
-        await imprimirEn(impresora, lineas)
-      }
+    if (estaciones.length === 0) return estaciones
+
+    const impresoras = await listar('comanda')
+    for (const estacion of estaciones) {
+      const impresora = impresoras.find(i => i.id === estacion.impresoraId)
+      if (!impresora) continue
+      const lineas = buildComandaTicket({
+        estacionNombre: estacion.nombre,
+        mesaNombre: contexto.mesaNombre,
+        cuentaNumero: contexto.cuentaNumero,
+        garzonNombre: contexto.garzonNombre,
+        items: estacion.items, // el builder usa {nombre, cantidad}; ignora los extras
+        fecha: new Date(),
+      })
+      await imprimirEn(impresora, lineas) // si lanza, esta estación NO se confirma
+      await useApiFetch(`${apiUrl}/cuentas/${cuentaId}/comanda`, {
+        method: 'POST',
+        body: {
+          lineas: estacion.items.map(it => ({
+            cuentaLineaId: it.cuentaLineaId,
+            cantidadEnviada: it.cantidadEnviada,
+          })),
+        },
+      })
     }
     return estaciones
   }
@@ -1705,12 +1862,12 @@ export function useImpresoras() {
 }
 ```
 
-- [ ] **Step 3: Verificar que el frontend compila**
+- [x] **Step 3: Verificar que el frontend compila**
 
 Run: `cd frontend && npx nuxi typecheck`
 Expected: sin errores nuevos relacionados a `useImpresoras.ts` o `qz-tray`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/package.json frontend/package-lock.json frontend/app/composables/useImpresoras.ts
@@ -1721,7 +1878,7 @@ Conecta con la instancia local de QZ Tray, resuelve la config de red
 (host:puerto raw) o de cola del sistema por impresora, y envía los
 tickets armados por ticket-builder.ts.
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -1737,7 +1894,7 @@ EOF
 **Interfaces:**
 - Consumes: `useImpresoras()` (Task 6): `listar/crear/actualizar/eliminar`; tipos `Impresora`, `RolImpresora`, `TipoConexionImpresora`.
 
-- [ ] **Step 1: Crear la página CRUD**
+- [x] **Step 1: Crear la página CRUD**
 
 ```vue
 <!-- frontend/app/pages/configuracion/impresoras.vue -->
@@ -1984,7 +2141,7 @@ const columns: TableColumn<Impresora>[] = [
 </template>
 ```
 
-- [ ] **Step 2: Agregar la entrada de navegación**
+- [x] **Step 2: Agregar la entrada de navegación**
 
 ```typescript
 // frontend/app/pages/configuracion.vue
@@ -1998,18 +2155,18 @@ const columns: TableColumn<Impresora>[] = [
   }
 ```
 
-- [ ] **Step 3: Verificación manual**
+- [x] **Step 3: Verificación manual**
 
 Levantar `docker-compose up`, loguearse como admin de Paris, ir a Configuración → Impresoras: deben verse las 3 impresoras demo (Cocina, Barra, Caja). Crear una nueva, editarla, eliminarla.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/app/pages/configuracion/impresoras.vue frontend/app/pages/configuracion.vue
 git commit -m "$(cat <<'EOF'
 feat(impresoras): agrega admin CRUD de impresoras en Configuración
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2024,7 +2181,7 @@ EOF
 **Interfaces:**
 - Consumes: `useImpresoras().listar('comanda')` (Task 6).
 
-- [ ] **Step 1: Cargar las impresoras de comanda y extender el form**
+- [x] **Step 1: Cargar las impresoras de comanda y extender el form**
 
 ```typescript
 // frontend/app/pages/configuracion/categorias.vue
@@ -2074,7 +2231,9 @@ function abrirEditar(cat: Categoria) {
       nombre: form.value.nombre,
       aplicaA: form.value.aplicaA,
       activo: form.value.activo,
-      impresoraId: form.value.impresoraId ?? undefined,
+      // Enviar el valor crudo: `null` (opción "Sin ruta de comanda") desasigna la
+      // impresora; un id la (re)asigna. No usar `?? undefined` — impediría limpiarla.
+      impresoraId: form.value.impresoraId,
     }
 
 // Cargar impresoras junto a categorías:
@@ -2095,7 +2254,7 @@ onMounted(() => {
 
 Reemplazar el `onMounted(cargar)` existente por el bloque de arriba.
 
-- [ ] **Step 2: Agregar el campo al formulario y mostrarlo en la lista**
+- [x] **Step 2: Agregar el campo al formulario y mostrarlo en la lista**
 
 ```vue
 <!-- Dentro del <UForm>, después del campo "Activa": -->
@@ -2114,18 +2273,18 @@ Reemplazar el `onMounted(cargar)` existente por el bloque de arriba.
       </template>
 ```
 
-- [ ] **Step 3: Verificación manual**
+- [x] **Step 3: Verificación manual**
 
 En Configuración → Categorías, editar "Ropa y accesorios" (Paris): debe mostrar "Cocina" preseleccionada (dato del seed). Crear una categoría nueva sin impresora y confirmar que queda "Sin ruta de comanda".
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/app/pages/configuracion/categorias.vue
 git commit -m "$(cat <<'EOF'
 feat(categorias): agrega selector de impresora de comanda por categoría
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2140,7 +2299,7 @@ EOF
 **Interfaces:**
 - Consumes: `useImpresoras()` (Task 6), `useTenantStore()` (`~/stores/tenant`), `useFormatters().formatMonto`.
 
-- [ ] **Step 1: Agregar los imports y refs de estado**
+- [x] **Step 1: Agregar los imports y refs de estado**
 
 ```typescript
 // frontend/app/pages/salones/index.vue
@@ -2152,7 +2311,13 @@ const enviandoComanda = ref(false)
 const imprimiendoPrecuenta = ref(false)
 ```
 
-- [ ] **Step 2: Función `enviarComanda`**
+> `tenantStore.activeTenant` es un computed que depende de que `tenants` esté
+> poblado (`fetchMyTenants()`). Si esta página puede montarse sin que el store se
+> haya cargado, la boleta/precuenta imprimiría el nombre de tenant vacío. Verificar
+> en el paso de verificación que `activeTenant?.nombre` no sale vacío; si sale,
+> llamar `tenantStore.fetchMyTenants()` en `onMounted` (idem Task 10 para el POS).
+
+- [x] **Step 2: Función `enviarComanda`**
 
 Agregar después de `quitarLinea` (antes de la sección "Cancelar / cerrar cuenta"):
 
@@ -2182,9 +2347,10 @@ async function enviarComanda() {
   }
 }
 
-function itemsParaTicket(cuenta: CuentaDetalle) {
-  if (!resultado.value) return []
-  return resultado.value.lineas.map(l => ({
+// Recibe el resultado explícito (no lee `resultado.value` vivo): al cerrar la cuenta
+// el ref puede recomputarse, así que el llamador pasa el snapshot que capturó.
+function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
+  return res.lineas.map(l => ({
     nombre: cuenta.lineas.find(cl => cl.itemId === l.itemId)?.nombre ?? '',
     cantidad: l.cantidad,
     totalLinea: l.totalLinea,
@@ -2199,7 +2365,7 @@ async function imprimirPrecuenta() {
       tenantNombre: tenantStore.activeTenant?.nombre ?? '',
       mesaNombre: selectedMesa.value.nombre,
       cuentaNumero: activeCuenta.value.numero,
-      items: itemsParaTicket(activeCuenta.value),
+      items: itemsParaTicket(activeCuenta.value, resultado.value),
       totales: resultado.value.totales,
       formatMonto: (v: string) => formatMonto(v),
     })
@@ -2213,7 +2379,7 @@ async function imprimirPrecuenta() {
 }
 ```
 
-- [ ] **Step 3: Imprimir boleta al cerrar la cuenta**
+- [x] **Step 3: Imprimir boleta al cerrar la cuenta**
 
 Reemplazar `cerrarCuentaConPin` completo:
 
@@ -2235,7 +2401,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
       try {
         await impresorasApi.imprimirBoleta({
           tenantNombre: tenantStore.activeTenant?.nombre ?? '',
-          items: itemsParaTicket(cuentaCerrada),
+          items: itemsParaTicket(cuentaCerrada, resultadoCerrado),
           totales: resultadoCerrado.totales,
           pagos: pagos.map(p => ({
             nombre: metodos.value.find(m => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
@@ -2262,7 +2428,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
 }
 ```
 
-- [ ] **Step 4: Agregar los botones en el template**
+- [x] **Step 4: Agregar los botones en el template**
 
 En el `<template #body>` del detalle de cuenta, justo antes del `<div class="flex gap-2">` que contiene "Cancelar cuenta" / "Cerrar y cobrar" (línea ~547), agregar una fila nueva:
 
@@ -2293,18 +2459,18 @@ En el `<template #body>` del detalle de cuenta, justo antes del `<div class="fle
                 </div>
 ```
 
-- [ ] **Step 5: Verificación manual**
+- [x] **Step 5: Verificación manual**
 
 Con QZ Tray instalado y corriendo, y una impresora real o virtual configurada: en `/salones`, abrir una cuenta, agregar un producto de la categoría "Ropa y accesorios" (rutea a "Cocina" por el seed), click "Enviar a cocina" → debe imprimir. Click de nuevo sin agregar nada nuevo → toast "No hay productos nuevos para enviar". "Imprimir precuenta" → imprime el resumen. Cerrar y cobrar → imprime la boleta tras el toast de éxito.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/app/pages/salones/index.vue
 git commit -m "$(cat <<'EOF'
 feat(salones): agrega botones Enviar a cocina, Imprimir precuenta y boleta al cerrar
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2319,7 +2485,7 @@ EOF
 **Interfaces:**
 - Consumes: `useImpresoras()` (Task 6), `useTenantStore()`, `useFormatters().formatMonto`.
 
-- [ ] **Step 1: Agregar los imports y composables**
+- [x] **Step 1: Agregar los imports y composables**
 
 ```typescript
 // frontend/app/pages/ventas/pos.vue
@@ -2329,7 +2495,7 @@ const tenantStore = useTenantStore()
 const { formatMonto } = useFormatters()
 ```
 
-- [ ] **Step 2: Imprimir boleta tras confirmar el cobro**
+- [x] **Step 2: Imprimir boleta tras confirmar el cobro**
 
 Reemplazar el cuerpo de `confirmarCobro` (desde `const venta = await useApiFetch...` hasta el `finally`):
 
@@ -2379,18 +2545,18 @@ Reemplazar el cuerpo de `confirmarCobro` (desde `const venta = await useApiFetch
 }
 ```
 
-- [ ] **Step 3: Verificación manual**
+- [x] **Step 3: Verificación manual**
 
 Con QZ Tray corriendo y caja abierta: en `/ventas/pos`, agregar un producto de la categoría con impresora asignada al carrito, cobrar → debe imprimir la boleta tras el toast "Venta pagada". Sin impresora `rol='boleta'` configurada, debe mostrar el toast de advertencia sin bloquear la venta ya registrada.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/app/pages/ventas/pos.vue
 git commit -m "$(cat <<'EOF'
 feat(ventas): imprime boleta térmica tras confirmar el cobro en el POS
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -2407,7 +2573,7 @@ EOF
 
 **Interfaces:** ninguna — solo documentación.
 
-- [ ] **Step 1: Agregar las tablas a `startup-pos.sql`**
+- [x] **Step 1: Agregar las tablas a `startup-pos.sql`**
 
 Agregar al final del archivo (o en la sección de restaurante, junto a `cuentas`/`cuenta_lineas` si existe esa sección):
 
@@ -2440,7 +2606,7 @@ ALTER TABLE "cuenta_lineas" ADD COLUMN "cantidad_enviada" NUMERIC(18,4)
   NOT NULL DEFAULT 0;
 ```
 
-- [ ] **Step 2: Crear `docs/features/impresion-termica.md`**
+- [x] **Step 2: Crear `docs/features/impresion-termica.md`**
 
 ```markdown
 # Feature: Impresión Térmica (Comandas, Precuenta, Boleta)
@@ -2493,10 +2659,15 @@ Todos bajo `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)`. Módulo RBAC
 `PATCH /categorias/:id` (endpoint existente) acepta `impresoraId` opcional —
 valida que exista, sea del tenant, esté activa y tenga `rol='comanda'`.
 
-`POST /cuentas/:id/comanda` (permiso `Salones:Operar`, ver
-[salones-mesas.md](./salones-mesas.md)) calcula el diff pendiente por línea, lo
-agrupa por impresora de estación, marca `cantidad_enviada = cantidad`, y devuelve
-`{ estaciones: [{ impresoraId, nombre, items: [{ nombre, cantidad }] }] }`.
+La comanda usa **dos fases** (permiso `Salones:Operar`, ver
+[salones-mesas.md](./salones-mesas.md)) para no perder pedidos si la impresión del
+navegador falla:
+
+- `GET /cuentas/:id/comanda/pendiente` calcula el diff pendiente por línea agrupado
+  por impresora y devuelve `{ estaciones: [{ impresoraId, nombre, items: [{ cuentaLineaId, nombre, cantidad, cantidadEnviada }] }] }` **sin persistir nada**.
+- `POST /cuentas/:id/comanda` recibe `{ lineas: [{ cuentaLineaId, cantidadEnviada }] }`
+  y marca `cantidad_enviada` — lo llama el frontend **por estación, solo tras** imprimir
+  OK. Un fallo de QZ Tray deja las estaciones no confirmadas pendientes y reintentables.
 
 Precuenta y boleta no tienen endpoint propio: el frontend arma el ticket con los
 datos que ya tiene (resultado del motor de precios + pagos) y lo imprime en la
@@ -2511,10 +2682,12 @@ impresora `rol='boleta'` del tenant.
   o `nombreCola` según conexión).
 - **`categorias.impresora_id`**: FK nullable a `impresoras` con `rol='comanda'`,
   validada en `CategoriasService`.
-- **`cuenta_lineas.cantidad_enviada`**: columna materializada; `SalonesService.
-  enviarComanda` calcula `diff = cantidad - cantidad_enviada` por línea dentro de una
-  transacción, y lo persiste al enviar. `fusionarCuentas` suma también
-  `cantidadEnviada` al mergear líneas del mismo ítem, para no reenviar lo ya impreso.
+- **`cuenta_lineas.cantidad_enviada`**: columna materializada. `SalonesService.
+  previewComanda` calcula `diff = cantidad - cantidad_enviada` por línea **sin
+  persistir**; `confirmarComanda` marca `cantidad_enviada` (seteando el total
+  absoluto, idempotente) dentro de una transacción, recién cuando el navegador
+  confirma que imprimió. `fusionarCuentas` suma también `cantidadEnviada` al mergear
+  líneas del mismo ítem, para no reenviar lo ya impreso.
 
 ---
 
@@ -2559,8 +2732,9 @@ cd frontend && npm test -- --run app/utils/ticket-builder.spec.ts
 
 ### Manual
 
-1. `docker-compose up`. El seeder crea el módulo Impresoras y 3 impresoras demo en
-   Paris (Cocina, Barra — comanda; Caja — boleta) y rutea "Ropa y accesorios" a
+1. `docker-compose down -v && docker-compose up --build` (BD fresca — el seeder es
+   idempotente, ver Task 4). El seeder crea el módulo Impresoras y 3 impresoras demo
+   en Paris (Cocina, Barra — comanda; Caja — boleta) y rutea "Ropa y accesorios" a
    Cocina.
 2. Instalar y abrir QZ Tray en el dispositivo de prueba.
 3. En `/salones`, abrir una cuenta, agregar un producto de esa categoría, "Enviar a
@@ -2583,24 +2757,24 @@ enviada` vs. tabla de historial, envío de comanda manual).
 - [ventas.md](./ventas.md)
 ```
 
-- [ ] **Step 3: Enlazar en `docs/README.md`**
+- [x] **Step 3: Enlazar en `docs/README.md`**
 
 Agregar una línea en la tabla/lista de features (junto a las entradas de Salones/Garzones), apuntando a `features/impresion-termica.md`.
 
-- [ ] **Step 4: Agregar la fila en `docs/ESTADO.md`**
+- [x] **Step 4: Agregar la fila en `docs/ESTADO.md`**
 
 ```markdown
 | Impresión Térmica (comandas cocina/barra por categoría, precuenta, boleta vía QZ Tray) | ✅ Implementado (2026-07-13) |
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add startup-pos.sql docs/features/impresion-termica.md docs/README.md docs/ESTADO.md
 git commit -m "$(cat <<'EOF'
 docs(impresion-termica): documenta el módulo — schema, API, frontend y testing
 
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 EOF
 )"
 ```
