@@ -1,6 +1,6 @@
 # Diseño — Costo por producto + congelado en kardex
 
-**Status**: Approved
+**Status**: Done (implementado 2026-07-14)
 **Date**: 2026-07-14
 **Owner**: Cesar Matheus
 **Cluster**: Recetas/costos food-service — **pieza 1 de 5** (ver
