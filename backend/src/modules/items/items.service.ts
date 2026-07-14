@@ -39,6 +39,7 @@ interface ItemRow {
   fecha_elaboracion: Date | null;
   fecha_vencimiento: Date | null;
   modo_inventario: string | null;
+  costo_actual: string | null;
   duracion_estimada: number | null;
   requiere_cita: boolean | null;
   frecuencia: string | null;
@@ -66,7 +67,7 @@ export class ItemsService {
       m.codigo_iso AS moneda_codigo, m.simbolo AS moneda_simbolo,
       c.nombre AS categoria_nombre,
       ip.stock, ip.unidad_medida, ip.fecha_elaboracion, ip.fecha_vencimiento,
-      ip.modo_inventario,
+      ip.modo_inventario, ip.costo_actual,
       isr.duracion_estimada, isr.requiere_cita,
       isu.frecuencia
     FROM items i
@@ -97,6 +98,7 @@ export class ItemsService {
       fechaElaboracion: r.fecha_elaboracion,
       fechaVencimiento: r.fecha_vencimiento,
       modoInventario: r.modo_inventario,
+      costoActual: r.costo_actual,
       duracionEstimada: r.duracion_estimada,
       requiereCita: r.requiere_cita,
       frecuencia: r.frecuencia,
@@ -257,8 +259,8 @@ export class ItemsService {
         const modo = dto.modoInventario ?? 'cantidad';
         await manager.query(
           `INSERT INTO item_producto
-             (item_id, stock, unidad_medida, fecha_elaboracion, fecha_vencimiento, modo_inventario)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
+             (item_id, stock, unidad_medida, fecha_elaboracion, fecha_vencimiento, modo_inventario, costo_actual)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [
             itemId,
             '0',
@@ -266,6 +268,7 @@ export class ItemsService {
             dto.fechaElaboracion ?? null,
             dto.fechaVencimiento ?? null,
             modo,
+            dto.costo ?? null,
           ],
         );
 
@@ -464,6 +467,10 @@ export class ItemsService {
         if (dto.fechaVencimiento !== undefined) {
           prodClauses.push(`fecha_vencimiento = $${pidx++}`);
           prodParams.push(dto.fechaVencimiento);
+        }
+        if (dto.costo !== undefined) {
+          prodClauses.push(`costo_actual = $${pidx++}`);
+          prodParams.push(dto.costo);
         }
         if (prodClauses.length) {
           prodParams.push(itemId);

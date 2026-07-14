@@ -387,6 +387,32 @@ describe('ItemsService', () => {
         }),
       );
     });
+
+    it('create producto persiste costo_actual', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+        .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
+        .mockResolvedValueOnce([]); // INSERT item_producto
+
+      await service.create(
+        TENANT,
+        'user-uuid',
+        {
+          nombre: 'Carne molida',
+          precioBase: '6000',
+          monedaId: 'moneda-uuid',
+          tipo: 'producto',
+          costo: '4000',
+        } as never,
+      );
+
+      const insertProducto = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' && c[0].includes('INSERT INTO item_producto'),
+      );
+      expect(insertProducto?.[0]).toContain('costo_actual');
+      expect(insertProducto?.[1]).toContain('4000');
+    });
   });
 
   // ── update ─────────────────────────────────────────────────────────────────
@@ -484,6 +510,23 @@ describe('ItemsService', () => {
       await expect(
         service.update(TENANT, ITEM_ID, { frecuencia: 'mensual' } as any),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('update producto cambia costo_actual sin crear movimiento', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce(undefined); // UPDATE item_producto
+
+      await service.update(TENANT, ITEM_ID, { costo: '4300' } as never);
+
+      const updateProducto = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          c[0].includes('UPDATE item_producto') &&
+          c[0].includes('costo_actual'),
+      );
+      expect(updateProducto).toBeDefined();
+      expect(updateProducto?.[1]).toContain('4300');
     });
   });
 

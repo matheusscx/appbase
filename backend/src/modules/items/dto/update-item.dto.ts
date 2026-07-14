@@ -63,6 +63,10 @@ export class UpdateItemDto {
   @IsOptional()
   fechaVencimiento?: string;
 
+  @IsNumberString()
+  @IsOptional()
+  costo?: string;
+
   // Extensión servicio
   @IsInt()
   @Min(0)

@@ -97,6 +97,10 @@ export class CreateItemDto {
   @IsOptional()
   fechaVencimiento?: string;
 
+  @IsNumberString()
+  @IsOptional()
+  costo?: string;
+
   // Carga inicial modo 'serie'
   @IsArray()
   @ValidateNested({ each: true })
