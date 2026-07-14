@@ -551,7 +551,7 @@ export class InventarioService {
          mv.tipo, mv.motivo, mv.cantidad,
          mv.stock_anterior, mv.stock_resultante,
          mv.usuario_id, u.nombre AS usuario_nombre,
-         mv.comentario, mv.creado_el
+         mv.comentario, mv.creado_el, mv.costo_unitario
        FROM movimientos_inventario mv
        JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
@@ -610,6 +610,7 @@ export class InventarioService {
       usuarioNombre: r.usuario_nombre,
       comentario: r.comentario,
       creadoEl: r.creado_el,
+      costoUnitario: r.costo_unitario,
     };
   }
 }
@@ -627,6 +628,7 @@ export interface MovimientoListItem {
   usuarioNombre: string | null;
   comentario: string | null;
   creadoEl: Date;
+  costoUnitario: string | null;
 }
 
 interface MovimientoRow {
@@ -642,4 +644,5 @@ interface MovimientoRow {
   usuario_nombre: string | null;
   comentario: string | null;
   creado_el: Date;
+  costo_unitario: string | null;
 }

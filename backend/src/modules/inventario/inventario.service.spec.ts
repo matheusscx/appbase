@@ -525,5 +525,31 @@ describe('InventarioService', () => {
         expect.arrayContaining([TENANT, ITEM_ID, 15, 0]),
       );
     });
+
+    it('findMovimientos expone costoUnitario', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }]) // COUNT
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'mov-1',
+            item_id: ITEM_ID,
+            item_nombre: 'Carne molida',
+            tipo: 'salida',
+            motivo: 'venta',
+            cantidad: '1',
+            stock_anterior: '10',
+            stock_resultante: '9',
+            usuario_id: USER_ID,
+            usuario_nombre: 'Cajero',
+            comentario: null,
+            creado_el: new Date('2026-07-14T00:00:00Z'),
+            costo_unitario: '4200',
+          },
+        ]); // list
+
+      const res = await service.findMovimientos(TENANT, {} as never);
+
+      expect(res.data[0].costoUnitario).toBe('4200');
+    });
   });
 });
