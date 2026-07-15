@@ -140,7 +140,11 @@ export class ItemsService {
   async findAll(
     tenantId: string,
     query: QueryItemsDto,
-  ): Promise<PaginatedResponse<ReturnType<typeof this.mapRow>>> {
+  ): Promise<
+    PaginatedResponse<
+      ReturnType<typeof this.mapRow> & { disponible: number | null }
+    >
+  > {
     const { page, pageSize, offset } = resolvePagination(query);
     const { where, params } = this.buildFindAllFilters(tenantId, query);
 

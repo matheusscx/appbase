@@ -1,6 +1,6 @@
 # Diseño — Recetas + criticidad de ingredientes
 
-**Status**: Approved
+**Status**: Done (implementado 2026-07-15)
 **Date**: 2026-07-15
 **Owner**: Cesar Matheus
 **Cluster**: Recetas/costos food-service — **pieza 3 de 5** (ver

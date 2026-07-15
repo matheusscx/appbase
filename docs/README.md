@@ -42,6 +42,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [inventario-kardex.md](./features/inventario-kardex.md) | Kardex de movimientos de stock |
 | [inventario-serializado.md](./features/inventario-serializado.md) | Inventario por serie y por lote (`modo_inventario`) |
 | [conversion-unidades.md](./features/conversion-unidades.md) | Catálogo global de unidades de medida + conversión en ajuste de stock |
+| [recetas.md](./features/recetas.md) | Recetas (productos compuestos) + criticidad bloqueante/no bloqueante de ingredientes |
 | [gestion-cajas.md](./features/gestion-cajas.md) | Cajas: apertura, movimientos, cuadre y cierre |
 | [ventas.md](./features/ventas.md) | Procesamiento de ventas + frontend POS |
 | [pagos.md](./features/pagos.md) | Abonos a ventas pendientes y ledger de pagos |

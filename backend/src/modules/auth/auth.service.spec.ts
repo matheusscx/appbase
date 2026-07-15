@@ -18,6 +18,7 @@ const mockUser: Usuario = {
   telefono: null,
   googleId: null,
   esSuperadmin: false,
+  preferencias: {},
   creadoEl: new Date(),
   actualizadoEl: new Date(),
   eliminadoEl: null,

@@ -222,7 +222,7 @@ describe('VentasService', () => {
       itemsService.findOne.mockResolvedValueOnce({
         ...mockItem,
         tipo: 'servicio',
-      });
+      } as never);
       await service.crear(TENANT_ID, USUARIO_ID, baseDto);
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
@@ -284,8 +284,8 @@ describe('VentasService', () => {
     };
 
     it('delega en itemsService.venderIngredientesReceta y no llama registrarMovimiento directo', async () => {
-      itemsService.findOne.mockResolvedValueOnce(mockReceta);
-      await service.crear(TENANT_ID, USUARIO_ID, dtoReceta as any);
+      itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
+      await service.crear(TENANT_ID, USUARIO_ID, dtoReceta);
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(itemsService.venderIngredientesReceta).toHaveBeenCalledWith(
@@ -302,12 +302,14 @@ describe('VentasService', () => {
     });
 
     it('agrega advertenciasReceta a la respuesta cuando hay advertencias', async () => {
-      itemsService.findOne.mockResolvedValueOnce(mockReceta);
-      (itemsService.venderIngredientesReceta as jest.Mock).mockResolvedValueOnce([
+      itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
+      (
+        itemsService.venderIngredientesReceta as jest.Mock
+      ).mockResolvedValueOnce([
         'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
       ]);
 
-      const result = await service.crear(TENANT_ID, USUARIO_ID, dtoReceta as any);
+      const result = await service.crear(TENANT_ID, USUARIO_ID, dtoReceta);
 
       expect(result.advertenciasReceta).toEqual([
         'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
