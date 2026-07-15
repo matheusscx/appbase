@@ -1308,6 +1308,130 @@ export class ItemsService {
     return this.construirFilasDesfase(tenantId, ingredienteItemId);
   }
 
+  async aplicarDesfases(
+    tenantId: string,
+    items: {
+      recetaItemId: string;
+      actualizarPrecio?: boolean;
+      precioBase?: string;
+    }[],
+  ): Promise<{ aplicados: number }> {
+    for (const it of items) {
+      if (it.actualizarPrecio) {
+        let p: Decimal;
+        try {
+          p = new Decimal(it.precioBase ?? '');
+        } catch {
+          throw new BadRequestException('precioBase inválido');
+        }
+        if (p.isNaN() || p.lessThanOrEqualTo(0)) {
+          throw new BadRequestException(
+            'precioBase debe ser mayor a 0 cuando actualizarPrecio es true',
+          );
+        }
+      }
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      let aplicados = 0;
+      for (const it of items) {
+        const cab: {
+          receta_item_id: string;
+          tipo: string;
+        }[] = await manager.query(
+          `SELECT i.item_id AS receta_item_id, i.tipo
+           FROM items i
+           JOIN item_receta ir ON ir.item_id = i.item_id
+           WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+          [it.recetaItemId, tenantId],
+        );
+        if (!cab.length || cab[0].tipo !== 'receta') {
+          throw new NotFoundException(
+            `Receta ${it.recetaItemId} no encontrada`,
+          );
+        }
+
+        const ings: {
+          cantidad: string;
+          unidad_codigo: string;
+          unidad_base: string;
+          costo_actual: string | null;
+        }[] = await manager.query(
+          `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
+           FROM receta_ingredientes ri
+           JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+           WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
+          [it.recetaItemId, tenantId],
+        );
+        if (!ings.length) {
+          throw new BadRequestException(
+            `La receta ${it.recetaItemId} no tiene ingredientes`,
+          );
+        }
+
+        const propuesto = await this.calcularCostoPropuestoDesdeFilas(ings);
+        await manager.query(
+          `UPDATE item_receta
+           SET costo_actual = $1, costo_propuesto_omitido = NULL
+           WHERE item_id = $2`,
+          [propuesto, it.recetaItemId],
+        );
+
+        if (it.actualizarPrecio && it.precioBase) {
+          const precio = new Decimal(it.precioBase)
+            .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+            .toFixed(4);
+          await manager.query(
+            `UPDATE items SET precio_base = $1
+             WHERE item_id = $2 AND tenant_id = $3 AND eliminado_el IS NULL`,
+            [precio, it.recetaItemId, tenantId],
+          );
+        }
+        aplicados += 1;
+      }
+      return { aplicados };
+    });
+  }
+
+  async descartarDesfases(
+    tenantId: string,
+    recetaItemIds: string[],
+  ): Promise<{ descartados: number }> {
+    return this.dataSource.transaction(async (manager) => {
+      let descartados = 0;
+      for (const recetaItemId of recetaItemIds) {
+        const cab: { tipo: string }[] = await manager.query(
+          `SELECT i.tipo FROM items i
+           JOIN item_receta ir ON ir.item_id = i.item_id
+           WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+          [recetaItemId, tenantId],
+        );
+        if (!cab.length || cab[0].tipo !== 'receta') {
+          throw new NotFoundException(`Receta ${recetaItemId} no encontrada`);
+        }
+        const ings: {
+          cantidad: string;
+          unidad_codigo: string;
+          unidad_base: string;
+          costo_actual: string | null;
+        }[] = await manager.query(
+          `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
+           FROM receta_ingredientes ri
+           JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+           WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
+          [recetaItemId, tenantId],
+        );
+        const propuesto = await this.calcularCostoPropuestoDesdeFilas(ings);
+        await manager.query(
+          `UPDATE item_receta SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
+          [propuesto, recetaItemId],
+        );
+        descartados += 1;
+      }
+      return { descartados };
+    });
+  }
+
   private async validarMoneda(
     manager: EntityManager,
     tenantId: string,

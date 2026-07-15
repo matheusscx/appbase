@@ -1311,5 +1311,104 @@ describe('ItemsService', () => {
         expect.arrayContaining([TENANT, CARNE_ID]),
       );
     });
+
+    describe('aplicarDesfases / descartarDesfases', () => {
+      it('aplicar recomputa costo, limpia omitido y actualiza precio si checkbox', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([
+            {
+              receta_item_id: RECETA_ID,
+              tipo: 'receta',
+            },
+          ])
+          .mockResolvedValueOnce([
+            {
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([]);
+        catalogServiceMock.convertirUnidad.mockResolvedValue('1');
+
+        const result = await service.aplicarDesfases(TENANT, [
+          {
+            recetaItemId: RECETA_ID,
+            actualizarPrecio: true,
+            precioBase: '600.0000',
+          },
+        ]);
+        expect(result.aplicados).toBe(1);
+        expect(managerMock.query).toHaveBeenCalledWith(
+          expect.stringContaining('UPDATE item_receta'),
+          expect.arrayContaining(['200.0000', RECETA_ID]),
+        );
+        expect(managerMock.query).toHaveBeenCalledWith(
+          expect.stringContaining('UPDATE items SET precio_base'),
+          expect.arrayContaining(['600.0000', RECETA_ID, TENANT]),
+        );
+      });
+
+      it('aplicar sin checkbox no toca precio_base', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ receta_item_id: RECETA_ID, tipo: 'receta' }])
+          .mockResolvedValueOnce([
+            {
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValueOnce([]);
+        catalogServiceMock.convertirUnidad.mockResolvedValue('1');
+
+        await service.aplicarDesfases(TENANT, [
+          { recetaItemId: RECETA_ID, actualizarPrecio: false },
+        ]);
+        const sqls = managerMock.query.mock.calls.map(
+          (c: unknown[]) => c[0] as string,
+        );
+        expect(sqls.some((s) => s.includes('UPDATE items SET precio_base'))).toBe(
+          false,
+        );
+      });
+
+      it('aplicar con actualizarPrecio exige precioBase > 0', async () => {
+        await expect(
+          service.aplicarDesfases(TENANT, [
+            {
+              recetaItemId: RECETA_ID,
+              actualizarPrecio: true,
+              precioBase: '0',
+            },
+          ]),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('descartar setea costo_propuesto_omitido al propuesto actual', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ tipo: 'receta' }])
+          .mockResolvedValueOnce([
+            {
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            },
+          ])
+          .mockResolvedValueOnce([]);
+        catalogServiceMock.convertirUnidad.mockResolvedValue('1');
+
+        const result = await service.descartarDesfases(TENANT, [RECETA_ID]);
+        expect(result.descartados).toBe(1);
+        expect(managerMock.query).toHaveBeenCalledWith(
+          expect.stringContaining('costo_propuesto_omitido'),
+          expect.arrayContaining(['200.0000', RECETA_ID]),
+        );
+      });
+    });
   });
 });
