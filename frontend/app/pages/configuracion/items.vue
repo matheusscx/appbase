@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import type { Row } from '@tanstack/vue-table'
+import Decimal from 'decimal.js'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
-const { formatFecha, formatMonto } = useFormatters()
+const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
 
 // ── Interfaces ─────────────────────────────────────────────────────────────
@@ -218,6 +219,7 @@ function emptyAjusteForm() {
     motivo: 'ajuste_manual',
     comentario: '',
     costoUnitario: '',
+    unidadCodigo: '',
     // modo serie — entrada: nueva series; salida: IDs seleccionados
     series: [] as SerieRow[],
     unidadIds: [] as string[],
@@ -560,9 +562,47 @@ async function toggleActivo(item: Item) {
 
 // ── Ajuste de stock ────────────────────────────────────────────────────────
 
+// Solo unidades de la misma magnitud que la del producto: convertir entre
+// magnitudes exigiría densidad, y el backend lo rechaza.
+const unidadesAjusteOpts = computed(() => {
+  const magnitud = unidadesMedidaStore.magnitudDe(stockItem.value?.unidadMedida)
+  if (!magnitud) return []
+  return unidadesMedidaStore.unidades
+    .filter(u => u.magnitud === magnitud)
+    .map(u => ({ label: `${u.nombre} (${u.codigo})`, value: u.codigo }))
+})
+
+// El selector solo aporta si hay más de una unidad y el stock es fungible.
+const mostrarSelectorUnidad = computed(() =>
+  stockItem.value?.modoInventario === 'cantidad' && unidadesAjusteOpts.value.length > 1,
+)
+
+const conversionPreview = computed(() => {
+  const base = stockItem.value?.unidadMedida
+  const desde = ajusteForm.value.unidadCodigo
+  const cantidad = ajusteForm.value.cantidad
+  if (!base || !desde || !cantidad || desde === base) return null
+
+  const uDesde = unidadesMedidaStore.getByCodigo(desde)
+  const uBase = unidadesMedidaStore.getByCodigo(base)
+  if (!uDesde || !uBase || uDesde.magnitud !== uBase.magnitud) return null
+
+  try {
+    const convertida = new Decimal(cantidad)
+      .mul(uDesde.factorBase)
+      .div(uBase.factorBase)
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+    return `${cantidad} ${desde} → ${formatStock(convertida.toString(), base)}`
+  }
+  catch {
+    return null
+  }
+})
+
 async function abrirAjusteStock(item: Item) {
   stockItem.value = item
   ajusteForm.value = emptyAjusteForm()
+  ajusteForm.value.unidadCodigo = item.unidadMedida ?? ''
   unidadesDisponibles.value = []
   stockModalOpen.value = true
   if (item.modoInventario === 'serie') {
@@ -590,6 +630,9 @@ async function ejecutarAjusteStock() {
     }
     if (modo === 'cantidad') {
       body.cantidad = f.cantidad
+      if (f.unidadCodigo && f.unidadCodigo !== stockItem.value.unidadMedida) {
+        body.unidadCodigo = f.unidadCodigo
+      }
     } else if (modo === 'serie') {
       if (f.tipo === 'entrada') {
         body.cantidad = String(f.series.length)
@@ -1137,11 +1180,22 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <MoneyInput v-model="ajusteForm.costoUnitario" :moneda-id="stockItem?.monedaId" class="w-full" />
           </UFormField>
 
-          <!-- Modo cantidad: solo cantidad -->
+          <!-- Modo cantidad: cantidad + unidad opcional -->
           <template v-if="stockItem?.modoInventario === 'cantidad' || !stockItem?.modoInventario">
             <UFormField label="Cantidad" required>
               <UInput v-model="ajusteForm.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
             </UFormField>
+            <UFormField v-if="mostrarSelectorUnidad" label="Unidad">
+              <USelectMenu
+                v-model="ajusteForm.unidadCodigo"
+                :items="unidadesAjusteOpts"
+                value-key="value"
+                class="w-full"
+              />
+            </UFormField>
+            <p v-if="conversionPreview" class="text-sm text-muted">
+              {{ conversionPreview }}
+            </p>
           </template>
 
           <!-- Modo serie -->
