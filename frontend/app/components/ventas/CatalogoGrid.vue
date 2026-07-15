@@ -19,9 +19,21 @@ function tieneStock(item: ItemCatalogo): boolean {
   }
 }
 
+/** Recetas nunca bloquean el click: la validación real vive en el backend. */
+function puedeAgregar(item: ItemCatalogo): boolean {
+  if (item.tipo === 'receta') return true
+  return tieneStock(item)
+}
+
+/** Solo atenúa visualmente — no bloquea el click en recetas. */
+function sinStockVisual(item: ItemCatalogo): boolean {
+  if (item.tipo === 'receta') return item.disponible === 0
+  return !tieneStock(item)
+}
+
 function compararCatalogo(a: ItemCatalogo, b: ItemCatalogo): number {
-  const aConStock = tieneStock(a) ? 0 : 1
-  const bConStock = tieneStock(b) ? 0 : 1
+  const aConStock = sinStockVisual(a) ? 1 : 0
+  const bConStock = sinStockVisual(b) ? 1 : 0
   if (aConStock !== bConStock) return aConStock - bConStock
   return a.nombre.localeCompare(b.nombre, 'es')
 }
@@ -35,7 +47,7 @@ const filtrados = computed(() => {
 })
 
 function onAgregar(item: ItemCatalogo) {
-  if (!tieneStock(item)) return
+  if (!puedeAgregar(item)) return
   emit('add', item)
 }
 </script>
@@ -63,11 +75,12 @@ function onAgregar(item: ItemCatalogo) {
           v-for="item in filtrados"
           :key="item.id"
           class="h-full transition"
-          :class="tieneStock(item)
-            ? 'cursor-pointer hover:ring-2 hover:ring-primary'
-            : 'opacity-50 cursor-not-allowed'"
+          :class="[
+            puedeAgregar(item) ? 'cursor-pointer hover:ring-2 hover:ring-primary' : 'cursor-not-allowed',
+            sinStockVisual(item) ? 'opacity-50' : '',
+          ]"
           :ui="{ body: 'h-full p-3 sm:p-4' }"
-          :aria-disabled="!tieneStock(item)"
+          :aria-disabled="!puedeAgregar(item)"
           @click="onAgregar(item)"
         >
           <div class="flex flex-col h-full gap-1">
@@ -89,6 +102,9 @@ function onAgregar(item: ItemCatalogo) {
             </div>
             <span v-if="item.tipo === 'producto'" class="text-xs text-muted shrink-0">
               Stock: {{ formatStock(item.stock, item.unidadMedida) }}
+            </span>
+            <span v-else-if="item.tipo === 'receta' && item.disponible !== null && item.disponible !== undefined" class="text-xs text-muted shrink-0">
+              Disponibles: {{ item.disponible }}
             </span>
             <div
               v-if="!esMonedaExtranjera(item.monedaId)"

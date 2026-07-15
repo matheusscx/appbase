@@ -93,14 +93,17 @@ watch(tipoDocumentoId, () => {
 async function cargar() {
   loadingCatalogo.value = true
   try {
-    const [itemsRes, metodosRes, tiposRes] = await Promise.all([
+    const [productosRes, recetasRes, metodosRes, tiposRes] = await Promise.all([
       useApiFetch<PaginatedResponse<ItemCatalogo>>(
         `${apiUrl}/items?tipo=producto&pageSize=100`,
+      ),
+      useApiFetch<PaginatedResponse<ItemCatalogo>>(
+        `${apiUrl}/items?tipo=receta&pageSize=100`,
       ),
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
     ])
-    items.value = itemsRes.data
+    items.value = [...productosRes.data, ...recetasRes.data]
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes
     tipoDocumentoId.value = tiposRes[0]?.id
@@ -152,11 +155,14 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
     const resultadoVenta = resultado.value
     const lineasVenta = [...lineas.value]
 
-    const venta = await useApiFetch<{ estado: string }>(`${apiUrl}/ventas`, {
+    const venta = await useApiFetch<{ estado: string; advertenciasReceta?: string[] }>(`${apiUrl}/ventas`, {
       method: 'POST',
       body,
     })
     toast.add({ title: estadoToastTitle[venta.estado] ?? 'Venta registrada', color: 'success' })
+    for (const advertencia of venta.advertenciasReceta ?? []) {
+      toast.add({ title: advertencia, color: 'warning' })
+    }
     cobroOpen.value = false
 
     if (resultadoVenta) {

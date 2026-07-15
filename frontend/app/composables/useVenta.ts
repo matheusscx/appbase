@@ -15,6 +15,7 @@ export interface ItemCatalogo {
   stock: string | null
   unidadMedida: string | null
   tipo: string
+  disponible?: number | null
 }
 
 export interface CarritoLinea {
