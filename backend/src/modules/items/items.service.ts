@@ -1153,11 +1153,12 @@ export class ItemsService {
     const margen = this.margenPct(precioViejo, costoViejo);
     if (margen === null) return null;
     if (margen.greaterThanOrEqualTo(1)) return null;
-    const denom = precioViejo.minus(costoViejo);
-    if (denom.lessThanOrEqualTo(0)) return null;
+    // Preserva margen %: costoNuevo × precioViejo / costoViejo
+    // (= costoNuevo / (1 − margenViejo)). Null si costoViejo ≤ 0.
+    if (costoViejo.lessThanOrEqualTo(0)) return null;
     return costoNuevo
       .mul(precioViejo)
-      .div(denom)
+      .div(costoViejo)
       .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
   }
 

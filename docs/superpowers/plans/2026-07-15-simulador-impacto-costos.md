@@ -396,11 +396,11 @@ private precioSugerido(
   const margen = this.margenPct(precioViejo, costoViejo);
   if (margen === null) return null;
   if (margen.greaterThanOrEqualTo(1)) return null;
-  const denom = precioViejo.minus(costoViejo);
-  if (denom.lessThanOrEqualTo(0)) return null;
+  // Preserva margen %: costoNuevo × precioViejo / costoViejo
+  if (costoViejo.lessThanOrEqualTo(0)) return null;
   return costoNuevo
     .mul(precioViejo)
-    .div(denom)
+    .div(costoViejo)
     .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
 }
 

@@ -1218,7 +1218,8 @@ describe('ItemsService', () => {
       expect(rows[0].costoPropuesto).toBe('1350.0000');
       expect(rows[0].deltaCosto).toBe('-470.0000');
       expect(rows[0].margenPctActual).toBeTruthy();
-      expect(rows[0].precioSugerido).toBeTruthy();
+      // Preserva margen %: 1350 × 3500 / 1820 = 2596.1538
+      expect(rows[0].precioSugerido).toBe('2596.1538');
     });
 
     it('listarDesfases omite cuando propuesto == costo_propuesto_omitido', async () => {

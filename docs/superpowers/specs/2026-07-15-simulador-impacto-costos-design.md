@@ -63,7 +63,7 @@ Depende de piezas ya implementadas:
 | Costo al aplicar | **Recomputar en el servidor** al POST | No confiar montos del body; evita TOCTOU de simulación stale |
 | Precio al aplicar | **Solo con checkbox por fila** | Evita subir precios por accidente; costo sí siempre |
 | Margen % | `(precioBase − costo) / precioBase` (decimal) | Margen sobre venta; alineado a regla de % en decimal del sistema |
-| Precio sugerido | `costoNuevo × precioViejo / (precioViejo − costoViejo)` | Mantiene el margen % anterior; null si no aplica |
+| Precio sugerido | `costoNuevo × precioViejo / costoViejo` | Mantiene el margen % anterior; null si no aplica |
 | Hook post-cambio de costo | FE llama `GET …/recetas-afectadas` | Mantiene estables los endpoints de compra/`PATCH` |
 | Merma como disparador | **No** | La merma nunca actualiza `costo_actual` |
 
@@ -106,8 +106,8 @@ margenPct(precio, costo) =
   precio > 0 ? (precio − costo) / precio : null
 
 precioSugerido =
-  si margenPctActual es null o ≥ 1 o (precioViejo − costoViejo) ≤ 0 → null
-  si no → costoNuevo × precioViejo / (precioViejo − costoViejo)
+  si margenPctActual es null o ≥ 1 o costoViejo ≤ 0 → null
+  si no → costoNuevo × precioViejo / costoViejo
 ```
 
 Si `precioBase = 0` → márgenes y precio sugerido son `null` (no inventar precio).
