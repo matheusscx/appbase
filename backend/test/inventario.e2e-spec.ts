@@ -17,6 +17,8 @@ interface TokenResponse {
 interface ItemResponse {
   id: string;
   costoActual: string | null;
+  stock: string | null;
+  unidadMedida: string | null;
 }
 interface MovimientoListItem {
   id: string;
@@ -159,5 +161,73 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
     expect((resGet4.body as ItemResponse).costoActual).toBe('4300.0000');
+  });
+
+  it('convierte a la unidad base del producto en entradas y salidas', async () => {
+    // 1. Producto stockeado en kg
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto unidades E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'kg',
+      });
+    expect(resCreate.status).toBe(201);
+    const itemId = (resCreate.body as ItemResponse).id;
+
+    // 2. Entrada de 500 g → 0,5 kg
+    const resCompra = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'entrada', motivo: 'compra', cantidad: 500, unidadCodigo: 'g' });
+    expect(resCompra.status).toBe(200);
+
+    const resGet1 = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect((resGet1.body as ItemResponse).stock).toBe('0.5000');
+
+    // 3. Merma de 250 g → 0,25 kg
+    const resMerma = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'salida', motivo: 'merma', cantidad: 250, unidadCodigo: 'g' });
+    expect(resMerma.status).toBe(200);
+
+    const resGet2 = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect((resGet2.body as ItemResponse).stock).toBe('0.2500');
+
+    // 4. Cross-magnitud: litros sobre un producto en kg → rechazado
+    const resCross = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'entrada', motivo: 'compra', cantidad: 1, unidadCodigo: 'l' });
+    expect(resCross.status).toBe(400);
+
+    // 5. Cambiar la unidad base con movimientos ya registrados → rechazado
+    const resCambio = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ unidadMedida: 'g' });
+    expect(resCambio.status).toBe(400);
+  });
+
+  it('rechaza crear un producto con una unidad fuera del catálogo', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto unidad inválida E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'inventada',
+      });
+    expect(res.status).toBe(400);
   });
 });
