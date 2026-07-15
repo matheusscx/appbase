@@ -1,6 +1,6 @@
 # Simulador de impacto de costos — Implementation Plan
 
-**Status**: Approved  
+**Status**: Done  
 **Date**: 2026-07-15  
 **Owner**: Cesar Matheus
 
