@@ -161,10 +161,64 @@ const impuestosOpts = ref<Opt[]>([])
 const descuentosOpts = ref<Opt[]>([])
 const recargosOpts = ref<Opt[]>([])
 
-const productosIngrediente = ref<{ id: string; nombre: string; unidadMedida: string }[]>([])
-const productosIngredienteOpts = computed(() =>
-  productosIngrediente.value.map(p => ({ label: p.nombre, value: p.id })),
-)
+	const productosIngrediente = ref<{ id: string; nombre: string; unidadMedida: string }[]>([])
+	const productosIngredienteOpts = computed(() =>
+	  productosIngrediente.value.map(p => ({ label: p.nombre, value: p.id })),
+	)
+
+	/** Sin re-fetch: el POST/PATCH devuelve el item y se mergea en estado local. */
+	function itemCoincideFiltros(item: Item): boolean {
+	  const tipo = listFilters.value.tipo
+	  if (tipo && item.tipo !== tipo) return false
+	  const search = listFilters.value.search?.toLowerCase()
+	  if (search && !item.nombre.toLowerCase().includes(search)) return false
+	  return true
+	}
+
+	function upsertItemEnLista(item: Item, isNew: boolean) {
+	  const idx = items.value.findIndex(i => i.id === item.id)
+	  if (!itemCoincideFiltros(item)) {
+	    if (idx >= 0) {
+	      items.value = items.value.filter(i => i.id !== item.id)
+	      meta.value = { ...meta.value, total: Math.max(0, meta.value.total - 1) }
+	    }
+	    return
+	  }
+	  if (idx >= 0) {
+	    items.value[idx] = { ...items.value[idx], ...item }
+	    return
+	  }
+	  if (isNew) {
+	    items.value = [item, ...items.value]
+	    meta.value = { ...meta.value, total: meta.value.total + 1 }
+	  }
+	}
+
+	function syncProductoIngrediente(item: Item) {
+	  if (item.tipo !== 'ingrediente') return
+	  const entry = {
+	    id: item.id,
+	    nombre: item.nombre,
+	    unidadMedida: item.unidadMedida ?? 'unidad',
+	  }
+	  const idx = productosIngrediente.value.findIndex(p => p.id === item.id)
+	  if (idx >= 0) {
+	    productosIngrediente.value[idx] = entry
+	  }
+	  else {
+	    productosIngrediente.value = [...productosIngrediente.value, entry]
+	      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+	  }
+	}
+
+	function removeItemLocal(id: string) {
+	  const idx = items.value.findIndex(i => i.id === id)
+	  if (idx >= 0) {
+	    items.value = items.value.filter(i => i.id !== id)
+	    meta.value = { ...meta.value, total: Math.max(0, meta.value.total - 1) }
+	  }
+	  productosIngrediente.value = productosIngrediente.value.filter(p => p.id !== id)
+	}
 
 const tiposOpts: Opt[] = [
   { label: 'Producto', value: 'producto' },
@@ -515,16 +569,26 @@ async function maybeAbrirDesfases(productoId: string) {
   } catch { /* no bloquear el flujo de guardado */ }
 }
 
-async function onAplicarDesfases(items: AplicarDesfaseItem[]) {
+async function onAplicarDesfases(aplicados: AplicarDesfaseItem[]) {
   desfasesLoading.value = true
   try {
     await useApiFetch(`${apiUrl}/recetas/desfases/aplicar`, {
       method: 'POST',
-      body: { items },
+      body: { items: aplicados },
     })
+    const byId = new Map(aplicados.map(a => [a.recetaItemId, a]))
+    for (const fila of desfasesFilas.value) {
+      const apply = byId.get(fila.recetaItemId)
+      if (!apply) continue
+      const row = items.value.find(i => i.id === fila.recetaItemId)
+      if (!row) continue
+      row.costoActual = fila.costoPropuesto
+      if (apply.actualizarPrecio && apply.precioBase) {
+        row.precioBase = apply.precioBase
+      }
+    }
     toast.add({ title: 'Costos de recetas actualizados', color: 'success' })
     desfasesOpen.value = false
-    await fetchItems()
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al aplicar desfases')
     toast.add({ title: msg, color: 'error' })
@@ -542,7 +606,6 @@ async function onDescartarDesfases(recetaItemIds: string[]) {
     })
     toast.add({ title: 'Avisos descartados', color: 'success' })
     desfasesOpen.value = false
-    await fetchItems()
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al descartar desfases')
     toast.add({ title: msg, color: 'error' })
@@ -611,27 +674,30 @@ async function guardar() {
     }
 
     const productoId = editingId.value
+    const isNew = !editingId.value
     const chequearDesfases =
       !!productoId
       && (form.value.tipo === 'producto' || form.value.tipo === 'ingrediente')
       && costoProductoCambio()
 
-    if (editingId.value) {
-      await useApiFetch(`${apiUrl}/items/${editingId.value}`, {
-        method: 'PATCH',
-        body: payload,
-      })
-      toast.add({ title: 'Item actualizado', color: 'success' })
-    } else {
-      await useApiFetch(`${apiUrl}/items`, {
-        method: 'POST',
-        body: payload,
-      })
-      toast.add({ title: 'Item creado', color: 'success' })
-    }
+    const saved = isNew
+      ? await useApiFetch<Item>(`${apiUrl}/items`, {
+          method: 'POST',
+          body: payload,
+        })
+      : await useApiFetch<Item>(`${apiUrl}/items/${editingId.value}`, {
+          method: 'PATCH',
+          body: payload,
+        })
+
+    upsertItemEnLista(saved, isNew)
+    syncProductoIngrediente(saved)
+    toast.add({
+      title: isNew ? 'Item creado' : 'Item actualizado',
+      color: 'success',
+    })
 
     drawerOpen.value = false
-    await fetchItems()
     if (chequearDesfases && productoId) {
       await maybeAbrirDesfases(productoId)
     }
@@ -650,13 +716,14 @@ function confirmarEliminar(id: string) {
 
 async function eliminar() {
   if (!confirmDeleteId.value) return
+  const id = confirmDeleteId.value
   try {
-    await useApiFetch(`${apiUrl}/items/${confirmDeleteId.value}`, {
+    await useApiFetch(`${apiUrl}/items/${id}`, {
       method: 'DELETE',
     })
+    removeItemLocal(id)
     toast.add({ title: 'Item eliminado', color: 'success' })
     confirmModalOpen.value = false
-    await fetchItems()
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al eliminar')
     toast.add({ title: msg, color: 'error' })
@@ -780,7 +847,10 @@ async function ejecutarAjusteStock() {
       { method: 'PATCH', body },
     )
     const item = items.value.find((i) => i.id === productoId)
-    if (item) item.stock = result.stock
+    if (item) {
+      item.stock = result.stock
+      if (envioCostoCompra) item.costoActual = f.costoUnitario
+    }
     toast.add({ title: `Stock actualizado: ${result.stock}`, color: 'success' })
     stockModalOpen.value = false
     if (envioCostoCompra) {

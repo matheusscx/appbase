@@ -1,7 +1,7 @@
 # Backend Patterns — Playbook
 
 **Status**: Living
-**Last Updated**: 2026-07-12
+**Last Updated**: 2026-07-15
 
 Patrón de referencia para construir un módulo de feature (NestJS + TypeORM),
 extraído del código real (`modules/monedas/`, `modules/tenants/`). **Léelo antes de
@@ -117,6 +117,11 @@ se pasa al service. Ejemplo completo: `monedas.controller.ts`.
 - **Errores de negocio:** `BadRequestException` con mensaje en español (el frontend
   lo muestra tal cual desde `e.data.message`); `NotFoundException` cuando el recurso
   no aplica al tenant/país.
+- **POST/PATCH sin refetch:** armar la respuesta con `RETURNING` + valores ya
+  conocidos en la mutación (p. ej. `costoActual` recién costado). **No** llamar
+  `findOne` después del write. Create → entidad para insertar en lista; update →
+  patch mergeable (`{ id, ...camposTocados }`). El front hace
+  `{ ...prev, ...saved }` sin otro GET.
 
 ---
 

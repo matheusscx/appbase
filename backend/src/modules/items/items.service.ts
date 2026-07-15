@@ -304,11 +304,13 @@ export class ItemsService {
     if (dto.costo != null) {
       this.validarCostoPositivo(dto.costo);
     }
+    // Respuesta armada con RETURNING + valores ya conocidos en la mutación
+    // (sin findOne post-write = sin refetch en el servidor).
     return this.dataSource.transaction(async (manager) => {
-      await this.validarMoneda(manager, tenantId, dto.monedaId);
-      if (dto.categoriaId) {
-        await this.validarCategoria(manager, tenantId, dto.categoriaId);
-      }
+      const moneda = await this.validarMoneda(manager, tenantId, dto.monedaId);
+      const categoriaNombre = dto.categoriaId
+        ? await this.validarCategoria(manager, tenantId, dto.categoriaId)
+        : null;
       if (dto.impuestosIds?.length) {
         await this.validarReglas(
           manager,
@@ -340,12 +342,15 @@ export class ItemsService {
       const precioBasePersistido =
         dto.tipo === 'ingrediente' ? '0' : dto.precioBase;
 
-      const itemRows: { item_id: string }[] = await manager.query(
+      const itemRows: {
+        item_id: string;
+        creado_el: Date;
+      }[] = await manager.query(
         `INSERT INTO items
            (tenant_id, moneda_id, categoria_id, nombre, descripcion,
             precio_base, precio_incluye_impuesto, activo, tipo)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-         RETURNING item_id`,
+         RETURNING item_id, creado_el`,
         [
           tenantId,
           dto.monedaId,
@@ -360,6 +365,23 @@ export class ItemsService {
       );
       const itemId = itemRows[0].item_id;
 
+      let stock: string | null = null;
+      let unidadMedida: string | null = null;
+      let fechaElaboracion: string | null = null;
+      let fechaVencimiento: string | null = null;
+      let modoInventario: string | null = null;
+      let costoActual: string | null = null;
+      let duracionEstimada: number | null = null;
+      let requiereCita: boolean | null = null;
+      let frecuencia: string | null = null;
+      let ingredientes: {
+        ingredienteItemId: string;
+        ingredienteNombre: string;
+        cantidad: string;
+        unidadCodigo: string;
+        bloqueante: boolean;
+      }[] = [];
+
       if (dto.tipo === 'producto' || dto.tipo === 'ingrediente') {
         if (dto.unidadMedida !== undefined) {
           await this.validarUnidadMedida(dto.unidadMedida);
@@ -369,6 +391,19 @@ export class ItemsService {
           dto.tipo === 'ingrediente'
             ? 'cantidad'
             : (dto.modoInventario ?? 'cantidad');
+        unidadMedida = dto.unidadMedida ?? 'unidad';
+        fechaElaboracion =
+          dto.tipo === 'ingrediente'
+            ? null
+            : (dto.fechaElaboracion ?? null);
+        fechaVencimiento =
+          dto.tipo === 'ingrediente'
+            ? null
+            : (dto.fechaVencimiento ?? null);
+        modoInventario = modo;
+        costoActual = dto.costo ?? null;
+        stock = '0';
+
         await manager.query(
           `INSERT INTO item_producto
              (item_id, stock, unidad_medida, fecha_elaboracion, fecha_vencimiento, modo_inventario, costo_actual)
@@ -376,42 +411,50 @@ export class ItemsService {
           [
             itemId,
             '0',
-            dto.unidadMedida ?? 'unidad',
-            dto.tipo === 'ingrediente' ? null : (dto.fechaElaboracion ?? null),
-            dto.tipo === 'ingrediente' ? null : (dto.fechaVencimiento ?? null),
+            unidadMedida,
+            fechaElaboracion,
+            fechaVencimiento,
             modo,
-            dto.costo ?? null,
+            costoActual,
           ],
         );
 
         if (modo === 'cantidad') {
           const stockInicial = new Decimal(dto.stock ?? '0');
           if (stockInicial.greaterThan(0)) {
-            await this.inventarioService.registrarMovimiento(manager, {
-              tenantId,
-              itemId,
-              usuarioId,
-              tipo: 'entrada',
-              motivo: 'inventario_inicial',
-              cantidad: stockInicial.toString(),
-              comentario: 'Stock inicial',
-            });
+            const mov = await this.inventarioService.registrarMovimiento(
+              manager,
+              {
+                tenantId,
+                itemId,
+                usuarioId,
+                tipo: 'entrada',
+                motivo: 'inventario_inicial',
+                cantidad: stockInicial.toString(),
+                comentario: 'Stock inicial',
+              },
+            );
+            stock = mov.stockResultante;
           }
         } else if (
           dto.tipo === 'producto' &&
           modo === 'serie' &&
           dto.series?.length
         ) {
-          await this.inventarioService.registrarMovimiento(manager, {
-            tenantId,
-            itemId,
-            usuarioId,
-            tipo: 'entrada',
-            motivo: 'inventario_inicial',
-            cantidad: dto.series.length.toString(),
-            comentario: 'Stock inicial (series)',
-            series: dto.series,
-          });
+          const mov = await this.inventarioService.registrarMovimiento(
+            manager,
+            {
+              tenantId,
+              itemId,
+              usuarioId,
+              tipo: 'entrada',
+              motivo: 'inventario_inicial',
+              cantidad: dto.series.length.toString(),
+              comentario: 'Stock inicial (series)',
+              series: dto.series,
+            },
+          );
+          stock = mov.stockResultante;
         } else if (
           dto.tipo === 'producto' &&
           modo === 'lote' &&
@@ -420,30 +463,38 @@ export class ItemsService {
         ) {
           const stockInicial = new Decimal(dto.stock);
           if (stockInicial.greaterThan(0)) {
-            await this.inventarioService.registrarMovimiento(manager, {
-              tenantId,
-              itemId,
-              usuarioId,
-              tipo: 'entrada',
-              motivo: 'inventario_inicial',
-              cantidad: stockInicial.toString(),
-              comentario: 'Stock inicial (lote)',
-              lote: dto.lote,
-            });
+            const mov = await this.inventarioService.registrarMovimiento(
+              manager,
+              {
+                tenantId,
+                itemId,
+                usuarioId,
+                tipo: 'entrada',
+                motivo: 'inventario_inicial',
+                cantidad: stockInicial.toString(),
+                comentario: 'Stock inicial (lote)',
+                lote: dto.lote,
+              },
+            );
+            stock = mov.stockResultante;
           }
         }
       } else if (dto.tipo === 'servicio') {
+        duracionEstimada = dto.duracionEstimada ?? null;
+        requiereCita = dto.requiereCita ?? false;
         await manager.query(
           `INSERT INTO item_servicio (item_id, duracion_estimada, requiere_cita)
            VALUES ($1,$2,$3)`,
-          [itemId, dto.duracionEstimada ?? null, dto.requiereCita ?? false],
+          [itemId, duracionEstimada, requiereCita],
         );
       } else if (dto.tipo === 'receta') {
-        const costoActual = await this.validarYCostearIngredientes(
+        const costeo = await this.validarYCostearIngredientes(
           manager,
           tenantId,
           dto.ingredientes!,
         );
+        costoActual = costeo.costoActual;
+        ingredientes = costeo.ingredientes;
         await manager.query(
           `INSERT INTO item_receta (item_id, costo_actual) VALUES ($1,$2)`,
           [itemId, costoActual],
@@ -464,6 +515,7 @@ export class ItemsService {
           );
         }
       } else {
+        frecuencia = dto.frecuencia ?? null;
         await manager.query(
           `INSERT INTO item_suscripcion (item_id, frecuencia) VALUES ($1,$2)`,
           [itemId, dto.frecuencia],
@@ -478,11 +530,40 @@ export class ItemsService {
         dto.descuentosIds ?? [],
       );
 
-      return { id: itemId };
+      return {
+        id: itemId,
+        nombre: dto.nombre,
+        descripcion: dto.descripcion ?? null,
+        tipo: dto.tipo,
+        activo: dto.activo ?? true,
+        precioBase: precioBasePersistido,
+        precioIncluyeImpuesto: dto.precioIncluyeImpuesto ?? false,
+        monedaId: dto.monedaId,
+        monedaCodigo: moneda.codigo,
+        monedaSimbolo: moneda.simbolo,
+        categoriaId: dto.categoriaId ?? null,
+        categoriaNombre,
+        creadoEl: itemRows[0].creado_el,
+        stock,
+        unidadMedida,
+        fechaElaboracion,
+        fechaVencimiento,
+        modoInventario,
+        costoActual,
+        duracionEstimada,
+        requiereCita,
+        frecuencia,
+        impuestosIds: dto.impuestosIds ?? [],
+        recargosIds: dto.recargosIds ?? [],
+        descuentosIds: dto.descuentosIds ?? [],
+        ingredientes,
+      };
     });
   }
 
   async update(tenantId: string, itemId: string, dto: UpdateItemDto) {
+    // Patch mergeable: solo campos tocados + RETURNING de columnas UPDATE.
+    // El front hace `{ ...prev, ...saved }` — sin findOne post-write.
     return this.dataSource.transaction(async (manager) => {
       const existingRows: { item_id: string; tipo: string }[] =
         await manager.query(
@@ -517,10 +598,25 @@ export class ItemsService {
         }
       }
 
-      if (dto.monedaId)
-        await this.validarMoneda(manager, tenantId, dto.monedaId);
+      const patch: Record<string, unknown> = { id: itemId, tipo };
+
+      if (dto.monedaId) {
+        const moneda = await this.validarMoneda(
+          manager,
+          tenantId,
+          dto.monedaId,
+        );
+        patch.monedaId = dto.monedaId;
+        patch.monedaCodigo = moneda.codigo;
+        patch.monedaSimbolo = moneda.simbolo;
+      }
       if (dto.categoriaId) {
-        await this.validarCategoria(manager, tenantId, dto.categoriaId);
+        patch.categoriaId = dto.categoriaId;
+        patch.categoriaNombre = await this.validarCategoria(
+          manager,
+          tenantId,
+          dto.categoriaId,
+        );
       }
       if (dto.impuestosIds?.length) {
         await this.validarReglas(
@@ -557,14 +653,18 @@ export class ItemsService {
       if (dto.nombre !== undefined) {
         setClauses.push(`nombre = $${idx++}`);
         params.push(dto.nombre);
+        patch.nombre = dto.nombre;
       }
       if (dto.descripcion !== undefined) {
         setClauses.push(`descripcion = $${idx++}`);
         params.push(dto.descripcion);
+        patch.descripcion = dto.descripcion;
       }
       if (dto.precioBase !== undefined) {
+        const precioBase = tipo === 'ingrediente' ? '0' : dto.precioBase;
         setClauses.push(`precio_base = $${idx++}`);
-        params.push(tipo === 'ingrediente' ? '0' : dto.precioBase);
+        params.push(precioBase);
+        patch.precioBase = precioBase;
       }
       if (dto.monedaId !== undefined) {
         setClauses.push(`moneda_id = $${idx++}`);
@@ -573,14 +673,17 @@ export class ItemsService {
       if (dto.categoriaId !== undefined) {
         setClauses.push(`categoria_id = $${idx++}`);
         params.push(dto.categoriaId);
+        patch.categoriaId = dto.categoriaId;
       }
       if (dto.precioIncluyeImpuesto !== undefined) {
         setClauses.push(`precio_incluye_impuesto = $${idx++}`);
         params.push(dto.precioIncluyeImpuesto);
+        patch.precioIncluyeImpuesto = dto.precioIncluyeImpuesto;
       }
       if (dto.activo !== undefined) {
         setClauses.push(`activo = $${idx++}`);
         params.push(dto.activo);
+        patch.activo = dto.activo;
       }
 
       if (setClauses.length) {
@@ -588,7 +691,8 @@ export class ItemsService {
         params.push(itemId, tenantId);
         await manager.query(
           `UPDATE items SET ${setClauses.join(', ')}
-           WHERE item_id = $${idx++} AND tenant_id = $${idx++}`,
+           WHERE item_id = $${idx++} AND tenant_id = $${idx++}
+           RETURNING item_id`,
           params,
         );
       }
@@ -643,22 +747,27 @@ export class ItemsService {
         if (dto.modoInventario !== undefined && tipo === 'producto') {
           prodClauses.push(`modo_inventario = $${pidx++}`);
           prodParams.push(dto.modoInventario);
+          patch.modoInventario = dto.modoInventario;
         }
         if (dto.stock !== undefined) {
           prodClauses.push(`stock = $${pidx++}`);
           prodParams.push(dto.stock);
+          patch.stock = dto.stock;
         }
         if (dto.unidadMedida !== undefined) {
           prodClauses.push(`unidad_medida = $${pidx++}`);
           prodParams.push(dto.unidadMedida);
+          patch.unidadMedida = dto.unidadMedida;
         }
         if (dto.fechaElaboracion !== undefined && tipo === 'producto') {
           prodClauses.push(`fecha_elaboracion = $${pidx++}`);
           prodParams.push(dto.fechaElaboracion);
+          patch.fechaElaboracion = dto.fechaElaboracion;
         }
         if (dto.fechaVencimiento !== undefined && tipo === 'producto') {
           prodClauses.push(`fecha_vencimiento = $${pidx++}`);
           prodParams.push(dto.fechaVencimiento);
+          patch.fechaVencimiento = dto.fechaVencimiento;
         }
         if (dto.costo !== undefined) {
           if (dto.costo != null) {
@@ -666,6 +775,7 @@ export class ItemsService {
           }
           prodClauses.push(`costo_actual = $${pidx++}`);
           prodParams.push(dto.costo);
+          patch.costoActual = dto.costo;
         }
         if (prodClauses.length) {
           prodParams.push(itemId);
@@ -681,10 +791,12 @@ export class ItemsService {
         if (dto.duracionEstimada !== undefined) {
           srvClauses.push(`duracion_estimada = $${sidx++}`);
           srvParams.push(dto.duracionEstimada);
+          patch.duracionEstimada = dto.duracionEstimada;
         }
         if (dto.requiereCita !== undefined) {
           srvClauses.push(`requiere_cita = $${sidx++}`);
           srvParams.push(dto.requiereCita);
+          patch.requiereCita = dto.requiereCita;
         }
         if (srvClauses.length) {
           srvParams.push(itemId);
@@ -699,6 +811,7 @@ export class ItemsService {
             `UPDATE item_suscripcion SET frecuencia = $1 WHERE item_id = $2`,
             [dto.frecuencia, itemId],
           );
+          patch.frecuencia = dto.frecuencia;
         }
       } else if (tipo === 'receta') {
         if (dto.ingredientes !== undefined) {
@@ -707,7 +820,7 @@ export class ItemsService {
               'Las recetas requieren al menos un ingrediente',
             );
           }
-          const costoActual = await this.validarYCostearIngredientes(
+          const costeo = await this.validarYCostearIngredientes(
             manager,
             tenantId,
             dto.ingredientes,
@@ -738,8 +851,10 @@ export class ItemsService {
             `UPDATE item_receta
              SET costo_actual = $1, costo_propuesto_omitido = NULL
              WHERE item_id = $2`,
-            [costoActual, itemId],
+            [costeo.costoActual, itemId],
           );
+          patch.costoActual = costeo.costoActual;
+          patch.ingredientes = costeo.ingredientes;
         }
       }
 
@@ -753,6 +868,7 @@ export class ItemsService {
             [itemId, id],
           );
         }
+        patch.impuestosIds = dto.impuestosIds;
       }
       if (dto.recargosIds !== undefined) {
         await manager.query(`DELETE FROM item_recargos WHERE item_id = $1`, [
@@ -764,6 +880,7 @@ export class ItemsService {
             [itemId, id],
           );
         }
+        patch.recargosIds = dto.recargosIds;
       }
       if (dto.descuentosIds !== undefined) {
         await manager.query(`DELETE FROM item_descuentos WHERE item_id = $1`, [
@@ -775,9 +892,10 @@ export class ItemsService {
             [itemId, id],
           );
         }
+        patch.descuentosIds = dto.descuentosIds;
       }
 
-      return { id: itemId };
+      return patch;
     });
   }
 
@@ -1139,8 +1257,24 @@ export class ItemsService {
     manager: EntityManager,
     tenantId: string,
     ingredientes: RecetaIngredienteInputDto[],
-  ): Promise<string> {
+  ): Promise<{
+    costoActual: string;
+    ingredientes: {
+      ingredienteItemId: string;
+      ingredienteNombre: string;
+      cantidad: string;
+      unidadCodigo: string;
+      bloqueante: boolean;
+    }[];
+  }> {
     let costoTotal = new Decimal(0);
+    const detalle: {
+      ingredienteItemId: string;
+      ingredienteNombre: string;
+      cantidad: string;
+      unidadCodigo: string;
+      bloqueante: boolean;
+    }[] = [];
     for (const ing of ingredientes) {
       let cantidad;
       try {
@@ -1157,11 +1291,12 @@ export class ItemsService {
       }
       const rows: {
         tipo: string;
+        nombre: string;
         modo_inventario: string | null;
         unidad_medida: string | null;
         costo_actual: string | null;
       }[] = await manager.query(
-        `SELECT i.tipo, ip.modo_inventario, ip.unidad_medida, ip.costo_actual
+        `SELECT i.tipo, i.nombre, ip.modo_inventario, ip.unidad_medida, ip.costo_actual
          FROM items i
          LEFT JOIN item_producto ip ON ip.item_id = i.item_id
          WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
@@ -1184,8 +1319,20 @@ export class ItemsService {
       );
       const costoUnitario = new Decimal(rows[0].costo_actual ?? '0');
       costoTotal = costoTotal.plus(costoUnitario.mul(cantidadBase));
+      detalle.push({
+        ingredienteItemId: ing.ingredienteItemId,
+        ingredienteNombre: rows[0].nombre,
+        cantidad: ing.cantidad,
+        unidadCodigo: ing.unidadCodigo,
+        bloqueante: ing.bloqueante ?? true,
+      });
     }
-    return costoTotal.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString();
+    return {
+      costoActual: costoTotal
+        .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+        .toString(),
+      ingredientes: detalle,
+    };
   }
 
   private eq4(a: string | Decimal, b: string | Decimal): boolean {
@@ -1500,34 +1647,38 @@ export class ItemsService {
     manager: EntityManager,
     tenantId: string,
     monedaId: string,
-  ): Promise<void> {
-    const rows: unknown[] = await manager.query(
-      `SELECT 1 FROM pais_moneda pm
-       JOIN provincia prov ON prov.pais_id = pm.pais_id AND prov.eliminado_el IS NULL
-       JOIN tenants t ON t.provincia_id = prov.provincia_id AND t.eliminado_el IS NULL
-       WHERE t.tenant_id = $1 AND pm.moneda_id = $2 AND pm.eliminado_el IS NULL`,
-      [tenantId, monedaId],
-    );
+  ): Promise<{ codigo: string; simbolo: string | null }> {
+    const rows: { codigo_iso: string; simbolo: string | null }[] =
+      await manager.query(
+        `SELECT m.codigo_iso, m.simbolo FROM pais_moneda pm
+         JOIN moneda m ON m.moneda_id = pm.moneda_id AND m.eliminado_el IS NULL
+         JOIN provincia prov ON prov.pais_id = pm.pais_id AND prov.eliminado_el IS NULL
+         JOIN tenants t ON t.provincia_id = prov.provincia_id AND t.eliminado_el IS NULL
+         WHERE t.tenant_id = $1 AND pm.moneda_id = $2 AND pm.eliminado_el IS NULL`,
+        [tenantId, monedaId],
+      );
     if (!rows.length) {
       throw new BadRequestException(
         'La moneda no está disponible para este tenant',
       );
     }
+    return { codigo: rows[0].codigo_iso, simbolo: rows[0].simbolo };
   }
 
   private async validarCategoria(
     manager: EntityManager,
     tenantId: string,
     categoriaId: string,
-  ): Promise<void> {
-    const rows: unknown[] = await manager.query(
-      `SELECT 1 FROM categorias
+  ): Promise<string> {
+    const rows: { nombre: string }[] = await manager.query(
+      `SELECT nombre FROM categorias
        WHERE categoria_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
       [categoriaId, tenantId],
     );
     if (!rows.length) {
       throw new BadRequestException('La categoría no pertenece a este tenant');
     }
+    return rows[0].nombre;
   }
 
   private async validarReglas(

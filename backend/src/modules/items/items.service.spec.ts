@@ -308,7 +308,7 @@ describe('ItemsService', () => {
       const result = await service.create(TENANT, 'user-uuid', baseDtoProducto);
 
       expect(dataSource.transaction).toHaveBeenCalled();
-      expect(result).toEqual({ id: ITEM_ID });
+      expect(result).toMatchObject({ id: ITEM_ID });
     });
 
     it('happy path: crea servicio con extensión', async () => {
@@ -327,7 +327,7 @@ describe('ItemsService', () => {
 
       const result = await service.create(TENANT, 'user-uuid', dtoServicio);
 
-      expect(result).toEqual({ id: ITEM_ID });
+      expect(result).toMatchObject({ id: ITEM_ID });
     });
 
     it('producto con stock inicial > 0 registra movimiento inventario_inicial', async () => {
@@ -351,7 +351,7 @@ describe('ItemsService', () => {
         unidadMedida: 'unidad',
       });
 
-      expect(res).toEqual({ id: 'nuevo-item' });
+      expect(res).toMatchObject({ id: 'nuevo-item' });
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
         managerMock,
         expect.objectContaining({
@@ -402,7 +402,7 @@ describe('ItemsService', () => {
         series: [{ serie: 'IMEI-001' }, { serie: 'IMEI-002' }],
       });
 
-      expect(res).toEqual({ id: 'item-s' });
+      expect(res).toMatchObject({ id: 'item-s' });
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
         managerMock,
         expect.objectContaining({
@@ -428,7 +428,7 @@ describe('ItemsService', () => {
         frecuencia: 'mensual',
       });
 
-      expect(result).toEqual({ id: ITEM_ID });
+      expect(result).toMatchObject({ id: ITEM_ID });
       const calls = managerMock.query.mock.calls as [string, unknown[]][];
       const insertCall = calls.find(([sql]) =>
         sql.includes('INSERT INTO item_suscripcion'),
@@ -551,7 +551,7 @@ describe('ItemsService', () => {
 
         const result = await service.create(TENANT, 'user-uuid', dtoReceta);
 
-        expect(result).toEqual({ id: ITEM_ID });
+        expect(result).toMatchObject({ id: ITEM_ID });
         // Orden de llamadas a managerMock.query: 1=moneda, 2=INSERT items,
         // 3=lookup pan, 4=lookup carne, 5=INSERT item_receta, 6/7=INSERT receta_ingredientes.
         // costo = 500*1 + 8000*0.15 = 500 + 1200 = 1700
@@ -576,10 +576,14 @@ describe('ItemsService', () => {
 
       it('persiste precio_base = 0 aunque llegue precioBase distinto', async () => {
         managerMock.query
-          .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda
-          .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
+          .mockResolvedValueOnce([{ codigo_iso: 'CLP', simbolo: '$' }]) // moneda
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }])
           .mockResolvedValueOnce(undefined); // INSERT item_producto
-        // registrarMovimiento mocked via inventarioService
+        inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+          movimientoId: 'mov-ing',
+          stockAnterior: '0',
+          stockResultante: '10',
+        });
 
         await service.create(TENANT, 'user-uuid', dtoIng as any);
 
@@ -650,7 +654,7 @@ describe('ItemsService', () => {
         lote: { codigoLote: 'LOTE-001', fechaVencimiento: '2027-01-01' },
       });
 
-      expect(res).toEqual({ id: 'item-l' });
+      expect(res).toMatchObject({ id: 'item-l' });
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
         managerMock,
         expect.objectContaining({
@@ -794,7 +798,7 @@ describe('ItemsService', () => {
         frecuencia: 'quincenal',
       });
 
-      expect(result).toEqual({ id: ITEM_ID });
+      expect(result).toMatchObject({ id: ITEM_ID });
       const calls = managerMock.query.mock.calls as [string, unknown[]][];
       const updateCall = calls.find(([sql]) =>
         sql.includes('UPDATE item_suscripcion'),
@@ -1099,7 +1103,7 @@ describe('ItemsService', () => {
 
       await expect(
         service.update('tenant-uuid', 'item-uuid', { unidadMedida: 'kg' }),
-      ).resolves.toBeDefined();
+      ).resolves.toMatchObject({ id: 'item-uuid', unidadMedida: 'kg' });
     });
   });
 

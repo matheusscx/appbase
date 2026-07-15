@@ -1,7 +1,7 @@
 # Frontend Patterns — Playbook
 
 **Status**: Living
-**Last Updated**: 2026-07-12
+**Last Updated**: 2026-07-15
 
 Patrón de referencia para pantallas del frontend (Nuxt 4 + Vue 3 + `@nuxt/ui` v4),
 extraído del código real (`app/pages/configuracion/razones-sociales.vue`). **Léelo
@@ -14,6 +14,9 @@ archivo real para copiar/adaptar.
 >   directo ni axios. Inyecta el Bearer token y reintenta tras refresh en 401.
 > - **Sin store** para pantallas CRUD de config: estado local con `ref`/`reactive`.
 > - **Update optimista con revert** para toggles/estrellas (no re-fetch).
+> - **Tras POST/PATCH/DELETE: no re-fetch.** El backend devuelve la entidad
+>   mutada; el front la inserta/reemplaza/elimina en el `ref` local (y en
+>   catálogos derivados, p. ej. selector de ingredientes de receta). Ver §5.
 > - Mensajes de error del backend vía `e.data.message`, mostrados en un `useToast`.
 > - URL base: `useRuntimeConfig().public.apiUrl`.
 > - **Campos decimales/monetarios → string de punta a punta** (ver §7): `UInput`
@@ -135,13 +138,35 @@ en cliente con toast `warning` antes de mutar. Ver `togglePreferida` en
 
 ## 5. Crear / editar / eliminar
 
-- **Crear/editar**: un `UModal` con `v-model:open`, `form = ref(emptyForm())`,
-  `editingId = ref<string | null>(null)`. `guardar()` hace POST o PATCH según
-  `editingId`, luego `await cargar()` (re-fetch tras mutación completa, no optimista).
-- **Eliminar**: segundo `UModal` de confirmación con `confirmDeleteId` +
-  `confirmModalOpen`; `eliminar(id)` hace DELETE y re-`cargar()`.
+- **Crear/editar**: un `UModal`/`AppDrawer` con `v-model:open`,
+  `form = ref(emptyForm())`, `editingId = ref<string | null>(null)`.
+  `guardar()` hace POST o PATCH según `editingId`, **captura la entidad
+  devuelta** y la mergea en el `ref` de la lista (y en cualquier catálogo
+  derivado en memoria). **No** llamar otra vez a `cargar()` / `fetch()`.
+- **Eliminar**: segundo modal de confirmación; tras DELETE exitoso, sacar el
+  id del array local (y de catálogos derivados). Sin re-fetch.
+- **Contrato backend**: POST/PATCH arman la respuesta con `RETURNING` + datos
+  de la mutación (sin `findOne` post-write). Create → fila usable en lista;
+  update → patch mergeable. Así el front actualiza `costoActual`/stock sin GET.
 
-Archivo completo: `app/pages/configuracion/razones-sociales.vue`.
+```typescript
+const saved = editingId.value
+  ? await useApiFetch<Item>(`${apiUrl}/items/${editingId.value}`, {
+      method: 'PATCH',
+      body: payload,
+    })
+  : await useApiFetch<Item>(`${apiUrl}/items`, {
+      method: 'POST',
+      body: payload,
+    })
+
+upsertItemEnLista(saved, !editingId.value) // respeta filtros de la página
+syncCatalogoDerivado(saved)                 // p. ej. productosIngrediente
+```
+
+Referencia: `app/pages/configuracion/items.vue` (`upsertItemEnLista`,
+`syncProductoIngrediente`). Para toggles sigue valiendo §3 (optimista +
+revert). Archivo CRUD clásico con toggle: `razones-sociales.vue`.
 
 ---
 
