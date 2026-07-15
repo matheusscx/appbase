@@ -69,6 +69,13 @@ export class AjusteStockDto {
   @IsString()
   comentario?: string;
 
+  // Unidad en la que viene `cantidad`. Si difiere de la unidad base del producto,
+  // se convierte antes de registrar el movimiento. Distinto de `unidadIds`, que
+  // son IDs de unidades serializadas (item_unidad).
+  @IsString()
+  @IsOptional()
+  unidadCodigo?: string;
+
   // Costo pagado en la entrada por compra (actualiza costo_actual + congela en el kardex)
   @IsNumberString()
   @IsOptional()

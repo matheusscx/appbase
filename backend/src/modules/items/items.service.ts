@@ -607,6 +607,30 @@ export class ItemsService {
         throw new BadRequestException('El item no es un producto');
       }
 
+      // La conversión ocurre acá y no en registrarMovimiento: el kardex siempre
+      // guarda la unidad base del producto, así que no necesita saber de unidades.
+      let cantidad = new Decimal(dto.cantidad).toString();
+      if (dto.unidadCodigo) {
+        const prodRows: { unidad_medida: string; modo_inventario: string }[] =
+          await manager.query(
+            `SELECT unidad_medida, modo_inventario FROM item_producto WHERE item_id = $1`,
+            [itemId],
+          );
+        const unidadBase = prodRows[0]?.unidad_medida;
+        if (dto.unidadCodigo !== unidadBase) {
+          if (prodRows[0]?.modo_inventario !== 'cantidad') {
+            throw new BadRequestException(
+              'Los productos por serie o lote solo admiten su unidad base',
+            );
+          }
+          cantidad = await this.catalogService.convertirUnidad(
+            cantidad,
+            dto.unidadCodigo,
+            unidadBase,
+          );
+        }
+      }
+
       const { stockResultante } =
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId,
@@ -614,7 +638,7 @@ export class ItemsService {
           usuarioId,
           tipo: dto.tipo,
           motivo: dto.motivo,
-          cantidad: new Decimal(dto.cantidad).toString(),
+          cantidad,
           comentario: dto.comentario ?? null,
           series: dto.series,
           unidadIds: dto.unidadIds,

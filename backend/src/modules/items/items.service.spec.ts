@@ -691,4 +691,69 @@ describe('ItemsService', () => {
       ).resolves.toBeDefined();
     });
   });
+
+  describe('ajustarStock — conversión de unidades', () => {
+    it('convierte la cantidad a la unidad base antes de registrar el movimiento', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          { unidad_medida: 'kg', modo_inventario: 'cantidad' },
+        ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('0.5');
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        stockResultante: '0.5000',
+      });
+
+      await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        cantidad: 500,
+        tipo: 'entrada',
+        motivo: 'compra',
+        unidadCodigo: 'g',
+      } as never);
+
+      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith('500', 'g', 'kg');
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ cantidad: '0.5' }),
+      );
+    });
+
+    it('no consulta el catálogo si no se envía unidadCodigo', async () => {
+      managerMock.query.mockResolvedValueOnce([{ tipo: 'producto' }]);
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        stockResultante: '10.0000',
+      });
+
+      await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        cantidad: 10,
+        tipo: 'entrada',
+        motivo: 'compra',
+      } as never);
+
+      expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ cantidad: '10' }),
+      );
+    });
+
+    it('rechaza una unidad distinta a la base en productos por serie', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          { unidad_medida: 'unidad', modo_inventario: 'serie' },
+        ]);
+
+      await expect(
+        service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+          cantidad: 2,
+          tipo: 'entrada',
+          motivo: 'compra',
+          unidadCodigo: 'kg',
+        } as never),
+      ).rejects.toThrow('solo admiten su unidad base');
+
+      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+    });
+  });
 });
