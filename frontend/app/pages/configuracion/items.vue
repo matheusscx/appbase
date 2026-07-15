@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import type { Row } from '@tanstack/vue-table'
+import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import Decimal from 'decimal.js'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -38,6 +39,15 @@ interface Item {
   impuestosIds?: string[]
   recargosIds?: string[]
   descuentosIds?: string[]
+  ingredientes?: { ingredienteItemId: string; ingredienteNombre: string; cantidad: string; unidadCodigo: string; bloqueante: boolean }[]
+  disponible?: number | null
+}
+
+interface IngredienteRow {
+  ingredienteItemId: string
+  cantidad: string
+  unidadCodigo: string
+  bloqueante: boolean
 }
 
 interface SerieRow { serie: string; condicion: string; garantiaHasta: string }
@@ -141,10 +151,16 @@ const impuestosOpts = ref<Opt[]>([])
 const descuentosOpts = ref<Opt[]>([])
 const recargosOpts = ref<Opt[]>([])
 
+const productosIngrediente = ref<{ id: string; nombre: string; unidadMedida: string }[]>([])
+const productosIngredienteOpts = computed(() =>
+  productosIngrediente.value.map(p => ({ label: p.nombre, value: p.id })),
+)
+
 const tiposOpts: Opt[] = [
   { label: 'Producto', value: 'producto' },
   { label: 'Servicio', value: 'servicio' },
   { label: 'Suscripción', value: 'suscripcion' },
+  { label: 'Receta', value: 'receta' },
 ]
 
 const unidadesMedidaStore = useUnidadesMedidaStore()
@@ -185,6 +201,8 @@ function emptyForm() {
     requiereCita: false,
     // suscripción
     frecuencia: 'mensual',
+    // ingredientes (modo receta)
+    ingredientes: [] as IngredienteRow[],
     // reglas
     impuestosIds: [] as string[],
     recargosIds: [] as string[],
@@ -193,6 +211,7 @@ function emptyForm() {
 }
 
 const form = ref(emptyForm())
+const formCostoActual = ref<string | null>(null)
 
 const drawerTitle = computed(() =>
   editingId.value ? 'Editar item' : 'Nuevo item',
@@ -206,6 +225,7 @@ function resetDrawer() {
   editingId.value = null
   form.value = emptyForm()
   form.value.monedaId = monedasOpts.value[0]?.value ?? ''
+  formCostoActual.value = null
 }
 
 watch(drawerOpen, (open) => {
@@ -365,12 +385,13 @@ async function cargarCatalogos() {
       monedasStore.ensureLoaded(),
       unidadesMedidaStore.ensureLoaded(),
     ])
-    const [categorias, impuestos, descuentos, recargos] =
+    const [categorias, impuestos, descuentos, recargos, productos] =
       await Promise.all([
         useApiFetch<any[]>(`${apiUrl}/categorias`),
         useApiFetch<any[]>(`${apiUrl}/impuestos`),
         useApiFetch<any[]>(`${apiUrl}/descuentos`),
         useApiFetch<any[]>(`${apiUrl}/recargos`),
+        useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
       ])
 
     monedasOpts.value = monedasStore.monedasHabilitadas
@@ -396,6 +417,10 @@ async function cargarCatalogos() {
     recargosOpts.value = recargos
       .filter((r) => r.activo)
       .map((r) => ({ label: r.nombre, value: r.id }))
+
+    productosIngrediente.value = productos.data
+      .filter(p => p.modoInventario === 'cantidad')
+      .map(p => ({ id: p.id, nombre: p.nombre, unidadMedida: p.unidadMedida ?? 'unidad' }))
   } catch {
     toast.add({ title: 'Error al cargar catálogos', color: 'error' })
   }
@@ -439,10 +464,17 @@ async function abrirEditar(item: Item) {
       duracionEstimada: detalle.duracionEstimada ?? 0,
       requiereCita: detalle.requiereCita ?? false,
       frecuencia: detalle.frecuencia ?? 'mensual',
+      ingredientes: (detalle.ingredientes ?? []).map(i => ({
+        ingredienteItemId: i.ingredienteItemId,
+        cantidad: i.cantidad,
+        unidadCodigo: i.unidadCodigo,
+        bloqueante: i.bloqueante,
+      })),
       impuestosIds: detalle.impuestosIds ?? [],
       recargosIds: detalle.recargosIds ?? [],
       descuentosIds: detalle.descuentosIds ?? [],
     }
+    formCostoActual.value = detalle.costoActual ?? null
     drawerOpen.value = true
   } catch {
     toast.add({ title: 'Error al cargar detalle del item', color: 'error' })
@@ -492,6 +524,8 @@ async function guardar() {
     } else if (form.value.tipo === 'servicio') {
       payload.duracionEstimada = form.value.duracionEstimada || undefined
       payload.requiereCita = form.value.requiereCita
+    } else if (form.value.tipo === 'receta') {
+      payload.ingredientes = form.value.ingredientes
     } else {
       payload.frecuencia = form.value.frecuencia
     }
@@ -1054,6 +1088,71 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   <USwitch v-model="form.requiereCita" />
                 </UFormField>
               </div>
+            </div>
+          </template>
+
+          <!-- Extensión receta -->
+          <template v-if="form.tipo === 'receta'">
+            <USeparator />
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-medium text-muted">Ingredientes ({{ form.ingredientes.length }})</p>
+                <UButton
+                  size="xs"
+                  variant="ghost"
+                  icon="i-lucide-plus"
+                  @click="form.ingredientes = [...form.ingredientes, { ingredienteItemId: '', cantidad: '', unidadCodigo: '', bloqueante: true }]"
+                >Agregar ingrediente</UButton>
+              </div>
+
+              <div
+                v-for="(ing, idx) in form.ingredientes"
+                :key="idx"
+                class="grid grid-cols-5 gap-2 items-end"
+              >
+                <UFormField label="Producto" class="col-span-2">
+                  <USelectMenu
+                    v-model="form.ingredientes[idx].ingredienteItemId"
+                    :items="productosIngredienteOpts"
+                    value-key="value"
+                    class="w-full"
+                  />
+                </UFormField>
+                <UFormField label="Cantidad">
+                  <UInput v-model="form.ingredientes[idx].cantidad" inputmode="decimal" placeholder="0" class="w-full" />
+                </UFormField>
+                <UFormField label="Unidad">
+                  <USelectMenu
+                    v-model="form.ingredientes[idx].unidadCodigo"
+                    :items="unidadesMedidaStore.unidades
+                      .filter(u => u.magnitud === unidadesMedidaStore.magnitudDe(
+                        productosIngrediente.find(p => p.id === form.ingredientes[idx].ingredienteItemId)?.unidadMedida,
+                      ))
+                      .map(u => ({ label: u.codigo, value: u.codigo }))"
+                    value-key="value"
+                    class="w-full"
+                  />
+                </UFormField>
+                <div class="flex items-end gap-2">
+                  <UFormField label="Bloqueante">
+                    <USwitch v-model="form.ingredientes[idx].bloqueante" />
+                  </UFormField>
+                  <UButton
+                    color="error"
+                    variant="ghost"
+                    icon="i-lucide-trash-2"
+                    size="sm"
+                    @click="form.ingredientes = form.ingredientes.filter((_, i) => i !== idx)"
+                  />
+                </div>
+              </div>
+
+              <p v-if="editingId && formCostoActual" class="text-xs text-muted">
+                Costo actual: {{ formatMonto(formCostoActual, form.monedaId) }}
+              </p>
+              <p v-else-if="!editingId" class="text-xs text-muted">
+                El costo se calcula al guardar, sumando el costo de cada ingrediente.
+              </p>
             </div>
           </template>
 
