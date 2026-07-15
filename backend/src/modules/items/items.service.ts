@@ -72,7 +72,8 @@ export class ItemsService {
       m.codigo_iso AS moneda_codigo, m.simbolo AS moneda_simbolo,
       c.nombre AS categoria_nombre,
       ip.stock, ip.unidad_medida, ip.fecha_elaboracion, ip.fecha_vencimiento,
-      ip.modo_inventario, ip.costo_actual,
+      ip.modo_inventario,
+      COALESCE(ip.costo_actual, ir.costo_actual) AS costo_actual,
       isr.duracion_estimada, isr.requiere_cita,
       isu.frecuencia
     FROM items i
@@ -81,6 +82,7 @@ export class ItemsService {
     LEFT JOIN item_producto ip ON ip.item_id = i.item_id
     LEFT JOIN item_servicio isr ON isr.item_id = i.item_id
     LEFT JOIN item_suscripcion isu ON isu.item_id = i.item_id
+    LEFT JOIN item_receta ir ON ir.item_id = i.item_id
   `;
 
   private mapRow(r: ItemRow) {
@@ -159,8 +161,19 @@ export class ItemsService {
       listParams,
     );
 
+    const data = await Promise.all(
+      rows.map(async (r) => {
+        const base = this.mapRow(r);
+        const disponible =
+          base.tipo === 'receta'
+            ? await this.calcularDisponibleReceta(tenantId, base.id)
+            : null;
+        return { ...base, disponible };
+      }),
+    );
+
     return {
-      data: rows.map((r) => this.mapRow(r)),
+      data,
       meta: buildPaginationMeta(page, pageSize, total),
     };
   }
@@ -188,11 +201,43 @@ export class ItemsService {
         [itemId],
       );
 
+    let ingredientes: {
+      ingredienteItemId: string;
+      ingredienteNombre: string;
+      cantidad: string;
+      unidadCodigo: string;
+      bloqueante: boolean;
+    }[] = [];
+    if (rows[0].tipo === 'receta') {
+      const ingRows: {
+        ingrediente_item_id: string;
+        ingrediente_nombre: string;
+        cantidad: string;
+        unidad_codigo: string;
+        bloqueante: boolean;
+      }[] = await this.dataSource.query(
+        `SELECT ri.ingrediente_item_id, i.nombre AS ingrediente_nombre,
+                ri.cantidad, ri.unidad_codigo, ri.bloqueante
+         FROM receta_ingredientes ri
+         JOIN items i ON i.item_id = ri.ingrediente_item_id AND i.eliminado_el IS NULL
+         WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
+        [itemId, tenantId],
+      );
+      ingredientes = ingRows.map((r) => ({
+        ingredienteItemId: r.ingrediente_item_id,
+        ingredienteNombre: r.ingrediente_nombre,
+        cantidad: r.cantidad,
+        unidadCodigo: r.unidad_codigo,
+        bloqueante: r.bloqueante,
+      }));
+    }
+
     return {
       ...this.mapRow(rows[0]),
       impuestosIds: impuestosRows.map((r) => r.impuesto_id),
       recargosIds: recargosRows.map((r) => r.recargo_id),
       descuentosIds: descuentosRows.map((r) => r.descuento_id),
+      ingredientes,
     };
   }
 
@@ -963,6 +1008,45 @@ export class ItemsService {
         `Unidad de medida no reconocida: ${codigo}. Válidas: ${validas}`,
       );
     }
+  }
+
+  /**
+   * Mínimo, entre los ingredientes BLOQUEANTES de una receta, de
+   * floor(stock del ingrediente convertido a la unidad de la receta /
+   * cantidad por receta). null si la receta no tiene ingredientes
+   * bloqueantes (sin límite aplicable). Se calcula al vuelo: sin columna
+   * cacheada (ver Decisions del diseño).
+   */
+  private async calcularDisponibleReceta(
+    tenantId: string,
+    recetaItemId: string,
+  ): Promise<number | null> {
+    const rows: {
+      cantidad: string;
+      unidad_codigo: string;
+      ingrediente_unidad_medida: string;
+      stock: string;
+    }[] = await this.dataSource.query(
+      `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS ingrediente_unidad_medida, ip.stock
+       FROM receta_ingredientes ri
+       JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+       WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2
+         AND ri.bloqueante = true AND ri.eliminado_el IS NULL`,
+      [recetaItemId, tenantId],
+    );
+    if (!rows.length) return null;
+
+    let minimo: Decimal | null = null;
+    for (const r of rows) {
+      const cantidadBase = await this.catalogService.convertirUnidad(
+        r.cantidad,
+        r.unidad_codigo,
+        r.ingrediente_unidad_medida,
+      );
+      const posibles = new Decimal(r.stock).div(cantidadBase).floor();
+      if (minimo === null || posibles.lessThan(minimo)) minimo = posibles;
+    }
+    return minimo === null ? null : minimo.toNumber();
   }
 
   /**

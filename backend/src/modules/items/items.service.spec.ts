@@ -128,6 +128,83 @@ describe('ItemsService', () => {
       expect(dataSource.query.mock.calls[0][0]).toContain('ILIKE');
       expect(dataSource.query.mock.calls[0][1]).toEqual([TENANT, '%smart%']);
     });
+
+    it('receta: agrega disponible = mínimo entre ingredientes bloqueantes', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            item_id: 'receta-uuid',
+            nombre: 'Hamburguesa',
+            descripcion: null,
+            tipo: 'receta',
+            activo: true,
+            precio_base: '3500',
+            precio_incluye_impuesto: false,
+            moneda_id: MONEDA_ID,
+            moneda_codigo: 'CLP',
+            moneda_simbolo: '$',
+            categoria_id: null,
+            categoria_nombre: null,
+            creado_el: new Date(),
+            stock: null,
+            unidad_medida: null,
+            fecha_elaboracion: null,
+            fecha_vencimiento: null,
+            modo_inventario: null,
+            costo_actual: '1700',
+            duracion_estimada: null,
+            requiere_cita: null,
+            frecuencia: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          { cantidad: '1', unidad_codigo: 'unidad', ingrediente_unidad_medida: 'unidad', stock: '8' }, // pan
+          { cantidad: '150', unidad_codigo: 'g', ingrediente_unidad_medida: 'kg', stock: '1' }, // carne: 1kg = 1000g
+        ]);
+      catalogServiceMock.convertirUnidad
+        .mockResolvedValueOnce('1') // pan
+        .mockResolvedValueOnce('0.15'); // carne 150g → 0.15kg
+
+      const result = await service.findAll(TENANT, { tipo: 'receta' } as any);
+
+      // pan: floor(8/1)=8; carne: floor(1/0.15)=6 → mínimo 6
+      expect(result.data[0].disponible).toBe(6);
+    });
+
+    it('producto: disponible siempre es null', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_ID,
+            nombre: 'Smartphone',
+            descripcion: null,
+            tipo: 'producto',
+            activo: true,
+            precio_base: '100000',
+            precio_incluye_impuesto: false,
+            moneda_id: MONEDA_ID,
+            moneda_codigo: 'CLP',
+            moneda_simbolo: '$',
+            categoria_id: null,
+            categoria_nombre: null,
+            creado_el: new Date(),
+            stock: '10',
+            unidad_medida: 'unidad',
+            fecha_elaboracion: null,
+            fecha_vencimiento: null,
+            modo_inventario: 'cantidad',
+            costo_actual: null,
+            duracion_estimada: null,
+            requiere_cita: null,
+            frecuencia: null,
+          },
+        ]);
+
+      const result = await service.findAll(TENANT, {});
+      expect(result.data[0].disponible).toBeNull();
+    });
   });
 
   // ── findOne ────────────────────────────────────────────────────────────────
