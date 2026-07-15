@@ -10,6 +10,7 @@ import { ItemLote } from './entities/item-lote.entity';
 import { ItemUnidad } from './entities/item-unidad.entity';
 import { ItemsService } from './items.service';
 import { ItemsController } from './items.controller';
+import { RecetasDesfasesController } from './recetas-desfases.controller';
 import { InventarioModule } from '../inventario/inventario.module';
 import { CatalogModule } from '../catalog/catalog.module';
 
@@ -28,7 +29,7 @@ import { CatalogModule } from '../catalog/catalog.module';
     InventarioModule,
     CatalogModule,
   ],
-  controllers: [ItemsController],
+  controllers: [ItemsController, RecetasDesfasesController],
   providers: [ItemsService],
   exports: [ItemsService],
 })

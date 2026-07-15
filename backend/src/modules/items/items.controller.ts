@@ -33,6 +33,13 @@ export class ItemsController {
     return this.itemsService.findAll(tenantId, query);
   }
 
+  @Get(':id/recetas-afectadas')
+  @RequiresPermiso('Items', 'Leer')
+  recetasAfectadas(@Req() req: Request, @Param('id') id: string) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.itemsService.recetasAfectadasPorIngrediente(tenantId, id);
+  }
+
   @Get(':id')
   @RequiresPermiso('Items', 'Leer')
   findOne(@Req() req: Request, @Param('id') id: string) {
