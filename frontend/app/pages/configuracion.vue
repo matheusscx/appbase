@@ -76,6 +76,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         icon: 'i-lucide-credit-card',
         to: '/configuracion/metodos-pago',
       },
+      {
+        label: 'Causas de merma',
+        icon: 'i-lucide-tags',
+        to: '/configuracion/causas-merma',
+      },
     )
   }
 
@@ -113,6 +118,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       label: 'Inventario',
       icon: 'i-lucide-clipboard-list',
       to: '/configuracion/inventario',
+    })
+    items.push({
+      label: 'Mermas',
+      icon: 'i-lucide-trash-2',
+      to: '/configuracion/mermas',
     })
   }
 
