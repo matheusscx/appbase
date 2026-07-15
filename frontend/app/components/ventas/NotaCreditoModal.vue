@@ -8,7 +8,16 @@ const props = defineProps<{
   disponible: string
   detalles: DetalleVentaDevolucion[]
 }>()
-const emit = defineEmits<{ success: [] }>()
+export interface NotaCreditoSuccessPayload {
+  id: string
+  totalFinal: string
+  movimientoCajaId: string | null
+  fecha: string
+  comentario: string | null
+  devoluciones: Array<{ itemId: string, cantidad: string }>
+}
+
+const emit = defineEmits<{ success: [NotaCreditoSuccessPayload] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
@@ -51,19 +60,23 @@ async function confirmar() {
     if (devolverDinero.value) body.devolverDinero = true
     if (devoluciones.value.length) body.devoluciones = devoluciones.value
 
-    const res = await useApiFetch<{ id: string, movimientoCajaId: string | null }>(
+    const res = await useApiFetch<NotaCreditoSuccessPayload>(
       `${apiUrl}/ventas/${props.ventaId}/notas-credito`,
       { method: 'POST', body },
     )
 
+    if (res.movimientoCajaId) {
+      cajaStore.aplicarMovimientoLocal('salida', res.totalFinal)
+    }
+
     toast.add({
-      title: res?.movimientoCajaId
+      title: res.movimientoCajaId
         ? 'Nota de crédito generada con devolución de dinero'
         : 'Nota de crédito generada',
       color: 'success',
     })
     open.value = false
-    emit('success')
+    emit('success', res)
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al generar la nota de crédito'), color: 'error' })

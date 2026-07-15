@@ -31,6 +31,7 @@ const props = defineProps<{
   ordenId: string | null
 }>()
 
+const emit = defineEmits<{ updated: [{ ordenId: string, estado: string }] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
@@ -129,9 +130,18 @@ watch(
   },
 )
 
-async function onReembolsoSuccess() {
+function onReembolsoSuccess(payload: {
+  ordenId: string
+  estado: string
+  reembolso?: TransaccionOrden
+}) {
   reembolsoOpen.value = false
-  if (props.ordenId) await cargar(props.ordenId)
+  if (!orden.value) return
+  orden.value.estado = payload.estado
+  if (payload.reembolso) {
+    orden.value.transacciones = [...orden.value.transacciones, payload.reembolso]
+  }
+  emit('updated', { ordenId: payload.ordenId, estado: payload.estado })
 }
 </script>
 

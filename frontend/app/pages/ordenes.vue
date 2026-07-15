@@ -53,6 +53,11 @@ const { items: ordenes, meta, page, loading } =
     filters: listFilters,
   })
 
+function onDetalleUpdated(patch: { ordenId: string, estado: string }) {
+  const row = ordenes.value.find(o => o.ordenId === patch.ordenId)
+  if (row) row.estado = patch.estado
+}
+
 const estadoColor: Record<string, 'success' | 'error' | 'warning' | 'neutral' | 'info'> = {
   creada: 'neutral',
   en_proceso: 'warning',
@@ -235,6 +240,7 @@ const columns: TableColumn<OrdenRow>[] = [
         <OrdenesOrdenDetalleDrawer
           v-model:open="drawerOpen"
           :orden-id="ordenSeleccionadaId"
+          @updated="onDetalleUpdated"
         />
       </div>
     </template>

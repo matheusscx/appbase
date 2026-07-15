@@ -314,7 +314,7 @@ export class CobrosService {
             tokenProveedor: orden.tokenProveedor,
           });
 
-        await this.transacciones.registrar(
+        const txRefund = await this.transacciones.registrar(
           {
             tenantId,
             ordenId,
@@ -327,6 +327,7 @@ export class CobrosService {
             moneda: orden.moneda,
             codigoOrden: orden.codigoOrden,
             codigoRespuesta: resultado.codigoRespuesta,
+            codigoAutorizacion: resultado.codigoAutorizacion,
             tipoPago: resultado.tipoPago,
             request: resultado.request,
             response: resultado.response,
@@ -344,6 +345,15 @@ export class CobrosService {
         ctxHook = { orden, aprobada: resultado.aprobada };
         return this.toPublico(orden, {
           reembolsoAprobado: resultado.aprobada,
+          reembolso: {
+            transaccionId: txRefund.transaccionId,
+            tipo: txRefund.tipo,
+            estado: txRefund.estado,
+            monto: txRefund.monto,
+            codigoAutorizacion: txRefund.codigoAutorizacion,
+            codigoRespuesta: txRefund.codigoRespuesta,
+            fechaTransaccion: txRefund.fechaTransaccion,
+          },
         });
       });
       return await this.aplicarPostReembolso(publico, dto, ctxHook, usuarioId);

@@ -431,9 +431,17 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
     if (selectedMesa.value) {
       patchMesaOcupacion(selectedMesa.value.id, -1)
     }
+    const pagosConMonto = pagos.filter(p => new Decimal(p.monto || '0').gt(0))
+    const bruto = pagosConMonto.reduce(
+      (acc, p) => acc.plus(p.monto || '0'),
+      new Decimal(0),
+    )
+    // Vuelto no viene en el cierre de cuenta aquí; el neto se aproxima con el total cobrado.
+    const neto = resultadoCerrado
+      ? Decimal.min(bruto, new Decimal(resultadoCerrado.totales.totalFinal)).toFixed(4)
+      : bruto.toFixed(4)
+    cajaStore.aplicarCobroLocal(neto, pagosConMonto.length)
     volverACuentas()
-    // Resumen de caja sí cambia por el cobro (agregado); no re-listamos salones.
-    await cajaStore.cargarActiva()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cerrar la cuenta'), color: 'error' })

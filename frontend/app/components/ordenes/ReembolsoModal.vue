@@ -7,7 +7,24 @@ const props = defineProps<{
   disponible: string
   ventaId?: string | null
 }>()
-const emit = defineEmits<{ success: [] }>()
+export interface ReembolsoSuccessPayload {
+  ordenId: string
+  estado: string
+  reembolsoAprobado?: boolean
+  warning?: string
+  notaCreditoId?: string
+  reembolso?: {
+    transaccionId: string
+    tipo: string
+    estado: string
+    monto: string | null
+    codigoAutorizacion: string | null
+    codigoRespuesta: string | null
+    fechaTransaccion: string
+  }
+}
+
+const emit = defineEmits<{ success: [ReembolsoSuccessPayload] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
@@ -59,22 +76,22 @@ async function confirmar() {
     if (props.ventaId && generarNotaCredito.value) body.generarNotaCredito = true
     if (props.ventaId && devoluciones.value.length) body.devoluciones = devoluciones.value
 
-    const res = await useApiFetch<{ warning?: string, notaCreditoId?: string }>(
+    const res = await useApiFetch<ReembolsoSuccessPayload>(
       `${apiUrl}/pasarela/admin/ordenes/${props.ordenId}/reembolsos`,
       { method: 'POST', body },
     )
 
-    if (res?.warning) {
+    if (res.warning) {
       toast.add({ title: 'Reembolso procesado con advertencia', description: res.warning, color: 'warning' })
     }
-    else if (res?.notaCreditoId) {
+    else if (res.notaCreditoId) {
       toast.add({ title: 'Reembolso procesado y nota de crédito generada', color: 'success' })
     }
     else {
       toast.add({ title: 'Reembolso procesado', color: 'success' })
     }
     open.value = false
-    emit('success')
+    emit('success', res)
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al procesar el reembolso'), color: 'error' })

@@ -39,11 +39,17 @@ async function cargarResumen() {
   }
 }
 
-async function recargar() {
-  await Promise.all([
-    movimientosTableRef.value?.recargar(),
-    cargarResumen(),
-  ])
+function onMovimientoSaved(mov: {
+  id: string
+  tipo: string
+  concepto: string
+  monto: string
+  referencia: string | null
+  fecha: string
+  ventaId: string | null
+}) {
+  // Resumen ya lo actualizó el store; solo prepend en la tabla de página 1.
+  movimientosTableRef.value?.prependLocal(mov)
 }
 
 onMounted(cargarResumen)
@@ -80,7 +86,7 @@ watch(() => props.caja.id, () => {
       <CajaMovimientoDrawer
         v-model:open="movimientoDrawerOpen"
         :caja-id="caja.id"
-        @saved="recargar"
+        @saved="onMovimientoSaved"
       />
       <CajaCierreDrawer
         v-model:open="cierreDrawerOpen"

@@ -14,7 +14,19 @@ const props = defineProps<{
   saldo: string
   metodos: MetodoPago[]
 }>()
-const emit = defineEmits<{ success: [] }>()
+export interface AbonoSuccessPayload {
+  pagos: Array<{
+    id: string
+    metodoPagoId: string
+    monto: string
+    vuelto: string
+    fecha: string
+    referencia: string | null
+  }>
+  venta: { id: string, estado: string, saldo: string }
+}
+
+const emit = defineEmits<{ success: [AbonoSuccessPayload] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
@@ -76,13 +88,13 @@ const puedeConfirmar = computed(
 async function confirmar() {
   submitting.value = true
   try {
-    await useApiFetch(`${apiUrl}/pagos`, {
+    const res = await useApiFetch<AbonoSuccessPayload>(`${apiUrl}/pagos`, {
       method: 'POST',
       body: { ventaId: props.ventaId, pagos: pagosValidos.value },
     })
     toast.add({ title: 'Pago registrado', color: 'success' })
     open.value = false
-    emit('success')
+    emit('success', res)
   } catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message
     toast.add({ title: msg ?? 'Error al registrar pago', color: 'error' })

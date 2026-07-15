@@ -187,10 +187,18 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
     }
 
     items.value = descontarStockCatalogo(items.value, lineas.value)
+    const pagosConMonto = pagos.filter(p => new Decimal(p.monto || '0').gt(0))
+    const bruto = pagosConMonto.reduce(
+      (acc, p) => acc.plus(p.monto || '0'),
+      new Decimal(0),
+    )
+    cajaStore.aplicarCobroLocal(
+      bruto.minus(_vuelto || '0').toFixed(4),
+      pagosConMonto.length,
+    )
     limpiar()
     customerExpandido.value = false
     customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
-    await cajaStore.cargarActiva()
   } catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message
     toast.add({ title: msg ?? 'Error al registrar la venta', color: 'error' })
@@ -259,7 +267,6 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         v-if="cajaStore.activa"
         v-model:open="movimientoDrawerOpen"
         :caja-id="cajaStore.activa.id"
-        @saved="cajaStore.cargarResumenTurno(cajaStore.activa!.id)"
       />
       <CajaCierreDrawer
         v-if="cajaStore.activa"

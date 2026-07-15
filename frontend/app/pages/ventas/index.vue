@@ -42,7 +42,7 @@ const listFilters = computed(() => ({
   canal: filtroCanal.value,
 }))
 
-const { items: ventas, meta, page, loading, fetch: recargarLista } =
+const { items: ventas, meta, page, loading } =
   usePaginatedList<VentaResumen>({
     path: '/ventas',
     pageSize,
@@ -132,10 +132,6 @@ async function cargarResumen() {
   }
 }
 
-async function cargar() {
-  await Promise.all([recargarLista(), cargarResumen()])
-}
-
 function abrirDetalle(ventaId: string) {
   ventaSeleccionadaId.value = ventaId
   drawerOpen.value = true
@@ -145,8 +141,24 @@ function onSelectVenta(_e: Event, row: Row<VentaResumen>) {
   abrirDetalle(row.original.id)
 }
 
-function onDetalleUpdated() {
-  cargar()
+function onDetalleUpdated(patch: {
+  id: string
+  estado: string
+  montoPagado: string
+  saldo: string
+}) {
+  const row = ventas.value.find(v => v.id === patch.id)
+  if (!row) return
+  const saldoAnterior = row.saldo
+  row.estado = patch.estado
+  row.montoPagado = patch.montoPagado
+  row.saldo = patch.saldo
+  if (resumen.value) {
+    resumen.value.saldoPendiente = new Decimal(resumen.value.saldoPendiente)
+      .minus(saldoAnterior)
+      .plus(patch.saldo)
+      .toFixed(4)
+  }
 }
 
 watch(drawerOpen, (isOpen) => {

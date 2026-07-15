@@ -42,7 +42,28 @@ async function recargar() {
   await recargarMovimientos()
 }
 
-defineExpose({ recargar })
+function prependLocal(mov: {
+  id: string
+  tipo: string
+  concepto: string
+  monto: string
+  referencia: string | null
+  fecha: string
+  ventaId: string | null
+}) {
+  const size = pageSize.value
+  if (page.value === 1 && (!filtroTipo.value || filtroTipo.value === mov.tipo)) {
+    movimientos.value = [mov, ...movimientos.value].slice(0, size)
+  }
+  const total = meta.value.total + 1
+  meta.value = {
+    ...meta.value,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / size)),
+  }
+}
+
+defineExpose({ recargar, prependLocal })
 
 watch(() => props.cajaId, () => {
   filtroTipo.value = undefined

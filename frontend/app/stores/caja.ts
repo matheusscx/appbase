@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js'
 import { defineStore } from 'pinia'
 import { useApiFetch } from '~/composables/useApiFetch'
 
@@ -45,6 +46,13 @@ export interface CajaAbierta {
   esPropia: boolean
 }
 
+function recalcularSaldoEsperado(r: CajaTurnoResumen) {
+  r.saldoEsperado = new Decimal(r.saldoInicial)
+    .plus(r.totalEntradas)
+    .minus(r.totalSalidas)
+    .toFixed(4)
+}
+
 export const useCajaStore = defineStore('caja', () => {
   const config = useRuntimeConfig()
 
@@ -78,6 +86,13 @@ export const useCajaStore = defineStore('caja', () => {
     )
     // Usar la respuesta del POST: evita depender de GET /activa justo después del write.
     activa.value = caja && typeof caja === 'object' ? caja : null
+    resumenTurno.value = {
+      saldoInicial: caja.saldoInicial,
+      totalEntradas: '0.0000',
+      totalSalidas: '0.0000',
+      saldoEsperado: caja.saldoInicial,
+      totalMovimientos: 0,
+    }
     return caja
   }
 
@@ -93,24 +108,49 @@ export const useCajaStore = defineStore('caja', () => {
     }
   }
 
+  /** Patch local del resumen tras un movimiento (sin GET). */
+  function aplicarMovimientoLocal(tipo: 'entrada' | 'salida', monto: string, count = 1) {
+    if (!resumenTurno.value) return
+    const r = resumenTurno.value
+    if (tipo === 'entrada') {
+      r.totalEntradas = new Decimal(r.totalEntradas).plus(monto).toFixed(4)
+    }
+    else {
+      r.totalSalidas = new Decimal(r.totalSalidas).plus(monto).toFixed(4)
+    }
+    r.totalMovimientos += count
+    recalcularSaldoEsperado(r)
+  }
+
+  /**
+   * Cobro (venta / cierre de cuenta): un movimiento de entrada por pago neto.
+   * `neto` = Σ(monto − vuelto); `cantidadMovimientos` = pagos con monto > 0.
+   */
+  function aplicarCobroLocal(neto: string, cantidadMovimientos: number) {
+    if (cantidadMovimientos <= 0) return
+    aplicarMovimientoLocal('entrada', neto, cantidadMovimientos)
+  }
+
   async function registrarMovimiento(
     cajaId: string,
     payload: { tipo: 'entrada' | 'salida', concepto: string, monto: string, referencia?: string },
-  ): Promise<void> {
-    await useApiFetch<MovimientoCaja>(
+  ): Promise<MovimientoCaja> {
+    const mov = await useApiFetch<MovimientoCaja>(
       `${config.public.apiUrl}/caja/${cajaId}/movimientos`,
       { method: 'POST', body: payload },
     )
-    await cargarResumenTurno(cajaId)
+    aplicarMovimientoLocal(payload.tipo, mov.monto ?? payload.monto)
+    return mov
   }
 
-  async function cerrar(cajaId: string, payload: { montoContado: string, comentario?: string }): Promise<void> {
-    await useApiFetch<Caja>(
+  async function cerrar(cajaId: string, payload: { montoContado: string, comentario?: string }): Promise<Caja> {
+    const caja = await useApiFetch<Caja>(
       `${config.public.apiUrl}/caja/${cajaId}/cerrar`,
       { method: 'POST', body: payload },
     )
     resumenTurno.value = null
-    await cargarActiva()
+    activa.value = null
+    return caja
   }
 
   async function cargarAbiertas(): Promise<void> {
@@ -136,6 +176,8 @@ export const useCajaStore = defineStore('caja', () => {
     cargarActiva,
     abrir,
     cargarResumenTurno,
+    aplicarMovimientoLocal,
+    aplicarCobroLocal,
     registrarMovimiento,
     cerrar,
     cargarAbiertas,

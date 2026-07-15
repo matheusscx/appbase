@@ -398,6 +398,9 @@ export class VentasService {
     id: string;
     totalFinal: string;
     movimientoCajaId: string | null;
+    fecha: Date;
+    comentario: string | null;
+    devoluciones: DevolucionReembolso[];
   }> {
     if (new Decimal(params.monto).lte(0))
       throw new BadRequestException('El monto debe ser mayor a cero');
@@ -524,7 +527,14 @@ export class VentasService {
         movimientoCajaId = movimiento.id;
       }
 
-      return { id: nc.id, totalFinal: nc.totalFinal, movimientoCajaId };
+      return {
+        id: nc.id,
+        totalFinal: nc.totalFinal,
+        movimientoCajaId,
+        fecha: nc.creadoEl,
+        comentario: nc.comentario,
+        devoluciones: params.devoluciones ?? [],
+      };
     });
   }
 
@@ -546,6 +556,9 @@ export class VentasService {
     id: string;
     totalFinal: string;
     movimientoCajaId: string | null;
+    fecha: Date;
+    comentario: string | null;
+    devoluciones: DevolucionReembolso[];
   }> {
     return this.crearNotaCredito({ ...params, validarVentaElegible: true });
   }

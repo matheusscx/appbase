@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import type { MovimientoCaja } from '~/stores/caja'
+
 const props = defineProps<{
   cajaId: string
 }>()
 
 const emit = defineEmits<{
-  saved: []
+  saved: [MovimientoCaja]
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -37,14 +39,14 @@ async function guardar() {
   }
   saving.value = true
   try {
-    await cajaStore.registrarMovimiento(props.cajaId, {
+    const mov = await cajaStore.registrarMovimiento(props.cajaId, {
       tipo: form.value.tipo,
       concepto: form.value.concepto,
       monto: form.value.monto,
       referencia: form.value.referencia || undefined,
     })
     toast.add({ title: 'Movimiento registrado', color: 'success' })
-    emit('saved')
+    emit('saved', mov)
     open.value = false
   }
   catch (e: unknown) {

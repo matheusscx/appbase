@@ -69,11 +69,19 @@ const props = defineProps<{
   ventaId: string | null
 }>()
 
-const emit = defineEmits<{ updated: [] }>()
+export interface VentaDetallePatch {
+  id: string
+  estado: string
+  montoPagado: string
+  saldo: string
+}
+
+const emit = defineEmits<{ updated: [VentaDetallePatch] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const cajaStore = useCajaStore()
 const { formatMonto, formatFecha } = useFormatters()
 const apiUrl = config.public.apiUrl
 
@@ -206,16 +214,60 @@ watch(
   },
 )
 
-async function onAbonoSuccess() {
-  abonoOpen.value = false
-  if (props.ventaId) await cargar(props.ventaId)
-  emit('updated')
+function emitPatch() {
+  if (!venta.value) return
+  emit('updated', {
+    id: venta.value.id,
+    estado: venta.value.estado,
+    montoPagado: montoPagado.value,
+    saldo: saldo.value,
+  })
 }
 
-async function onNcSuccess() {
+function onAbonoSuccess(payload: {
+  pagos: Pago[]
+  venta: { id: string, estado: string, saldo: string }
+}) {
+  abonoOpen.value = false
+  if (!venta.value) return
+  venta.value.pagos = [...venta.value.pagos, ...payload.pagos]
+  venta.value.estado = payload.venta.estado
+  const neto = payload.pagos.reduce(
+    (acc, p) => acc.plus(p.monto).minus(p.vuelto ?? '0'),
+    new Decimal(0),
+  )
+  cajaStore.aplicarCobroLocal(neto.toFixed(4), payload.pagos.length)
+  emitPatch()
+}
+
+function onNcSuccess(payload: {
+  id: string
+  totalFinal: string
+  fecha: string
+  comentario: string | null
+  devoluciones: Array<{ itemId: string, cantidad: string }>
+}) {
   ncOpen.value = false
-  if (props.ventaId) await cargar(props.ventaId)
-  emit('updated')
+  if (!venta.value) return
+  venta.value.notasCredito = [
+    ...venta.value.notasCredito,
+    {
+      id: payload.id,
+      totalFinal: payload.totalFinal,
+      fecha: payload.fecha,
+      comentario: payload.comentario,
+    },
+  ]
+  for (const d of payload.devoluciones) {
+    for (const det of venta.value.detalles) {
+      if (det.itemId === d.itemId) {
+        det.cantidadDevuelta = new Decimal(det.cantidadDevuelta)
+          .plus(d.cantidad)
+          .toString()
+      }
+    }
+  }
+  emitPatch()
 }
 </script>
 
