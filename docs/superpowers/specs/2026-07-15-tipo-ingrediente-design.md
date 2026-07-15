@@ -1,6 +1,6 @@
 # Diseño — Tipo de item `ingrediente`
 
-**Status**: Draft
+**Status**: Done
 **Date**: 2026-07-15
 **Owner**: Cesar Matheus
 **Context**: food-service — separar insumos no vendibles de productos de catálogo

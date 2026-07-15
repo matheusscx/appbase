@@ -24,6 +24,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Inventario serializado (modo `serie`) y por lote (modo `lote`) | ✅ Implementado (2026-06-28) |
 | Costo por producto (último costo) + congelado en kardex | ✅ Implementado (2026-07-14) |
 | Conversión de unidades de medida (catálogo global + conversión en movimientos) | ✅ Implementado (2026-07-14) |
+| Tipo item ingrediente (insumos no vendibles) | ✅ Implementado (2026-07-15) |
 | Recetas + criticidad de ingredientes (bloqueante/no bloqueante) | ✅ Implementado (2026-07-15) |
 | Mermas tipificadas y valorizadas | ✅ Implementado (2026-07-15) |
 | Simulador de impacto de costos (desfase recetas, aplicar/descartar) | ✅ Implementado (2026-07-15) |

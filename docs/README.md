@@ -44,6 +44,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [conversion-unidades.md](./features/conversion-unidades.md) | Catálogo global de unidades de medida + conversión en ajuste de stock |
 | [mermas-valorizadas.md](./features/mermas-valorizadas.md) | Mermas tipificadas por causa + valorización financiera en kardex |
 | [simulador-impacto-costos.md](./features/simulador-impacto-costos.md) | Simulador de desfase de costo en recetas (aplicar/descartar, modal + bandeja) |
+| [tipo-ingrediente.md](./features/tipo-ingrediente.md) | Tipo item `ingrediente` — insumos no vendibles (stock/costo, recetas, sin POS) |
 | [recetas.md](./features/recetas.md) | Recetas (productos compuestos) + criticidad bloqueante/no bloqueante de ingredientes |
 | [gestion-cajas.md](./features/gestion-cajas.md) | Cajas: apertura, movimientos, cuadre y cierre |
 | [ventas.md](./features/ventas.md) | Procesamiento de ventas + frontend POS |

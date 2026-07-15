@@ -20,7 +20,7 @@ Food-service vende composiciones (hamburguesa = pan + carne + queso). Sin receta
 
 **Included:**
 - `items.tipo = 'receta'` + extensión `item_receta` (`costo_actual` cacheado) + `receta_ingredientes` (N ingredientes, soft delete).
-- Alta/edición con validación (solo productos `modo_inventario='cantidad'`, cantidad > 0, unidad convertible).
+- Alta/edición con validación (solo items `tipo='ingrediente'` con `modo_inventario='cantidad'`, cantidad > 0, unidad convertible).
 - Venta: expansión a un `salida`/`venta` por ingrediente vía `ItemsService.venderIngredientesReceta`; respuesta con `advertenciasReceta`.
 - `disponible` calculado al vuelo en el listado (mínimo entre bloqueantes).
 - Bloqueo de soft-delete de un producto usado como ingrediente vivo.
@@ -50,7 +50,7 @@ Food-service vende composiciones (hamburguesa = pan + carne + queso). Sin receta
 | `receta_ingrediente_id` | UUID PK | |
 | `tenant_id` | UUID | Del token |
 | `receta_item_id` | UUID | Item tipo `receta` |
-| `ingrediente_item_id` | UUID | Siempre `producto` + `modo_inventario='cantidad'` |
+| `ingrediente_item_id` | UUID | Siempre `tipo='ingrediente'` + `modo_inventario='cantidad'` |
 | `cantidad` | NUMERIC(18,4) | Por 1 unidad de receta; debe ser > 0 |
 | `unidad_codigo` | TEXT FK → unidades_medida | Puede diferir de la unidad base del ingrediente |
 | `bloqueante` | BOOLEAN | Default `true` |
@@ -125,7 +125,7 @@ Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad conve
 
 ## Frontend
 
-- `pages/configuracion/items.vue` — tipo Receta + editor de filas (producto, cantidad, unidad por magnitud, bloqueante); costo de solo lectura al editar.
+- `pages/configuracion/items.vue` — tipo Receta + editor de filas (ingrediente, cantidad, unidad por magnitud, bloqueante); selector de insumos vía `GET /items?tipo=ingrediente`; costo de solo lectura al editar.
 - `pages/ventas/pos.vue` — fetch paralelo `tipo=producto` y `tipo=receta`; toasts `warning` por cada `advertenciasReceta`.
 - `components/ventas/CatalogoGrid.vue` — receta nunca bloquea el click; se atenúa si `disponible === 0`; badge "Disponibles: N".
 - `composables/useVenta.ts` — `ItemCatalogo.disponible?: number | null`.
@@ -156,6 +156,7 @@ Seed demo: `550e8400-e29b-41d4-a716-446655440259` (Hamburguesa Clásica) tras ar
 
 ## Related Features
 
+- [tipo-ingrediente.md](./tipo-ingrediente.md) — tipología de insumos no vendibles
 - [conversion-unidades.md](./conversion-unidades.md) — conversión en consumo de ingredientes
 - [inventario-kardex.md](./inventario-kardex.md) — movimientos de salida
 - [ventas.md](./ventas.md) — flujo de cobro POS
