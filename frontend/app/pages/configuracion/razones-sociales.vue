@@ -64,6 +64,23 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: RazonSocial) {
+  const idx = razones.value.findIndex(r => r.id === saved.id)
+  if (idx >= 0) {
+    razones.value[idx] = { ...razones.value[idx], ...saved }
+  }
+  else {
+    razones.value.push({ ...saved, preferida: saved.preferida ?? false })
+  }
+  razones.value = [...razones.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  razones.value = razones.value.filter(r => r.id !== id)
+}
+
 function abrirCrear() {
   resetDrawer()
   drawerOpen.value = true
@@ -92,22 +109,22 @@ async function guardar() {
       telefono: form.value.telefono || null,
       habilitado: form.value.habilitado,
     }
-    if (editingId.value) {
-      await useApiFetch(`${apiUrl}/tenants/razones-sociales/${editingId.value}`, {
-        method: 'PATCH',
-        body,
-      })
-      toast.add({ title: 'Razón social actualizada', color: 'success' })
-    }
-    else {
-      await useApiFetch(`${apiUrl}/tenants/razones-sociales`, {
-        method: 'POST',
-        body,
-      })
-      toast.add({ title: 'Razón social creada', color: 'success' })
-    }
+    const isNew = !editingId.value
+    const saved = isNew
+      ? await useApiFetch<RazonSocial>(`${apiUrl}/tenants/razones-sociales`, {
+          method: 'POST',
+          body,
+        })
+      : await useApiFetch<RazonSocial>(`${apiUrl}/tenants/razones-sociales/${editingId.value}`, {
+          method: 'PATCH',
+          body,
+        })
+    upsertLocal(saved)
+    toast.add({
+      title: isNew ? 'Razón social creada' : 'Razón social actualizada',
+      color: 'success',
+    })
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al guardar')
@@ -176,8 +193,8 @@ async function eliminar(id: string) {
     await useApiFetch(`${apiUrl}/tenants/razones-sociales/${id}`, {
       method: 'DELETE',
     })
+    removeLocal(id)
     toast.add({ title: 'Razón social eliminada', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar')

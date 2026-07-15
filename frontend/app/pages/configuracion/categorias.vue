@@ -79,6 +79,23 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: Categoria) {
+  const idx = categorias.value.findIndex(c => c.id === saved.id)
+  if (idx >= 0) {
+    categorias.value[idx] = { ...categorias.value[idx], ...saved }
+  }
+  else {
+    categorias.value.push(saved)
+  }
+  categorias.value = [...categorias.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  categorias.value = categorias.value.filter(c => c.id !== id)
+}
+
 function abrirCrear() {
   resetDrawer()
   drawerOpen.value = true
@@ -107,22 +124,16 @@ async function guardar() {
       // impresora; un id la (re)asigna. No usar `?? undefined` — impediría limpiarla.
       impresoraId: form.value.impresoraId,
     }
-    if (editingId.value) {
-      await useApiFetch(`${apiUrl}/categorias/${editingId.value}`, {
-        method: 'PATCH',
-        body,
-      })
-      toast.add({ title: 'Categoría actualizada', color: 'success' })
-    }
-    else {
-      await useApiFetch(`${apiUrl}/categorias`, {
-        method: 'POST',
-        body,
-      })
-      toast.add({ title: 'Categoría creada', color: 'success' })
-    }
+    const isNew = !editingId.value
+    const saved = isNew
+      ? await useApiFetch<Categoria>(`${apiUrl}/categorias`, { method: 'POST', body })
+      : await useApiFetch<Categoria>(`${apiUrl}/categorias/${editingId.value}`, {
+          method: 'PATCH',
+          body,
+        })
+    upsertLocal(saved)
+    toast.add({ title: isNew ? 'Categoría creada' : 'Categoría actualizada', color: 'success' })
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al guardar')
@@ -160,8 +171,8 @@ async function eliminar(id: string) {
     await useApiFetch(`${apiUrl}/categorias/${id}`, {
       method: 'DELETE',
     })
+    removeLocal(id)
     toast.add({ title: 'Categoría eliminada', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar')

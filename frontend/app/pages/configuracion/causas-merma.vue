@@ -62,6 +62,24 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: CausaMerma) {
+  const idx = causas.value.findIndex(c => c.id === saved.id)
+  if (idx >= 0) {
+    causas.value[idx] = { ...causas.value[idx], ...saved }
+  }
+  else {
+    causas.value.push(saved)
+  }
+  causas.value = [...causas.value].sort((a, b) => {
+    if (a.esFijo !== b.esFijo) return a.esFijo ? -1 : 1
+    return a.nombre.localeCompare(b.nombre, 'es')
+  })
+}
+
+function removeLocal(id: string) {
+  causas.value = causas.value.filter(c => c.id !== id)
+}
+
 function abrirCrear() {
   resetDrawer()
   drawerOpen.value = true
@@ -85,22 +103,16 @@ async function guardar() {
       nombre: form.value.nombre.trim(),
       activo: form.value.activo,
     }
-    if (editingId.value) {
-      await useApiFetch(`${apiUrl}/causas-merma/${editingId.value}`, {
-        method: 'PATCH',
-        body,
-      })
-      toast.add({ title: 'Causa actualizada', color: 'success' })
-    }
-    else {
-      await useApiFetch(`${apiUrl}/causas-merma`, {
-        method: 'POST',
-        body,
-      })
-      toast.add({ title: 'Causa creada', color: 'success' })
-    }
+    const isNew = !editingId.value
+    const saved = isNew
+      ? await useApiFetch<CausaMerma>(`${apiUrl}/causas-merma`, { method: 'POST', body })
+      : await useApiFetch<CausaMerma>(`${apiUrl}/causas-merma/${editingId.value}`, {
+          method: 'PATCH',
+          body,
+        })
+    upsertLocal(saved)
+    toast.add({ title: isNew ? 'Causa creada' : 'Causa actualizada', color: 'success' })
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar'), color: 'error' })
@@ -137,8 +149,8 @@ async function toggleActivo(causa: CausaMerma) {
 async function eliminar(id: string) {
   try {
     await useApiFetch(`${apiUrl}/causas-merma/${id}`, { method: 'DELETE' })
+    removeLocal(id)
     toast.add({ title: 'Causa eliminada', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al eliminar'), color: 'error' })

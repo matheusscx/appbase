@@ -29,7 +29,14 @@ describe('CausasMermaService', () => {
     it('inserta con es_fijo=false y nombre trim', async () => {
       queryMock
         .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ causa_merma_id: CAUSA }]);
+        .mockResolvedValueOnce([
+          {
+            causa_merma_id: CAUSA,
+            nombre: 'Rotura',
+            activo: true,
+            es_fijo: false,
+          },
+        ]);
 
       const result = await service.create(TENANT, { nombre: '  Rotura  ' });
 
@@ -38,7 +45,12 @@ describe('CausasMermaService', () => {
         expect.stringContaining('es_fijo'),
         [TENANT, 'Rotura', true],
       );
-      expect(result).toEqual({ id: CAUSA });
+      expect(result).toEqual({
+        id: CAUSA,
+        nombre: 'Rotura',
+        activo: true,
+        esFijo: false,
+      });
     });
 
     it('rechaza nombre duplicado (case-insensitive)', async () => {

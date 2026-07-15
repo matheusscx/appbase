@@ -52,22 +52,28 @@ export class CausasMermaService {
   async create(
     tenantId: string,
     dto: CreateCausaMermaDto,
-  ): Promise<{ id: string }> {
+  ): Promise<CausaMermaListItem> {
     const nombre = dto.nombre.trim();
     await this.assertNombreUnico(tenantId, nombre);
-    const rows: { causa_merma_id: string }[] = await this.dataSource.query(
+    const rows: CausaMermaRow[] = await this.dataSource.query(
       `INSERT INTO causas_merma (tenant_id, nombre, activo, es_fijo)
-       VALUES ($1, $2, $3, false) RETURNING causa_merma_id`,
+       VALUES ($1, $2, $3, false)
+       RETURNING causa_merma_id, nombre, activo, es_fijo`,
       [tenantId, nombre, dto.activo ?? true],
     );
-    return { id: rows[0].causa_merma_id };
+    return {
+      id: rows[0].causa_merma_id,
+      nombre: rows[0].nombre,
+      activo: rows[0].activo,
+      esFijo: rows[0].es_fijo,
+    };
   }
 
   async update(
     tenantId: string,
     id: string,
     dto: UpdateCausaMermaDto,
-  ): Promise<{ id: string }> {
+  ): Promise<CausaMermaListItem> {
     const causa = await this.findOneOrFail(tenantId, id);
     if (causa.esFijo) {
       throw new BadRequestException(
@@ -92,12 +98,21 @@ export class CausasMermaService {
     }
 
     params.push(id, tenantId);
-    await this.dataSource.query(
+    const rows: CausaMermaRow[] = await this.dataSource.query(
       `UPDATE causas_merma SET ${sets.join(', ')}
-       WHERE causa_merma_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL`,
+       WHERE causa_merma_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
+       RETURNING causa_merma_id, nombre, activo, es_fijo`,
       params,
     );
-    return { id };
+    if (!rows.length) {
+      throw new NotFoundException(`Causa de merma ${id} no encontrada`);
+    }
+    return {
+      id: rows[0].causa_merma_id,
+      nombre: rows[0].nombre,
+      activo: rows[0].activo,
+      esFijo: rows[0].es_fijo,
+    };
   }
 
   async remove(tenantId: string, id: string): Promise<void> {

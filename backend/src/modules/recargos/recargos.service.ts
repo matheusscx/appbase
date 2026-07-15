@@ -122,7 +122,14 @@ export class RecargosService {
         await manager.save(metodos);
       }
 
-      return recargo;
+      return this.toListItem(recargo, tipoRegla, {
+        tramos: (dto.tramos ?? []).map((t) => ({
+          minimo: t.minimo,
+          valor: t.valor,
+        })),
+        metodoPagoIds: dto.metodoPagoIds ?? [],
+        diasVencimiento: dto.diasVencimiento ?? null,
+      });
     });
   }
 
@@ -205,7 +212,19 @@ export class RecargosService {
         }
       }
 
-      return recargo;
+      return this.toListItem(recargo, tipoRegla, {
+        tramos:
+          dto.tramos !== undefined
+            ? dto.tramos.map((t) => ({ minimo: t.minimo, valor: t.valor }))
+            : undefined,
+        metodoPagoIds: dto.metodoPagoIds,
+        diasVencimiento:
+          dto.diasVencimiento !== undefined
+            ? dto.diasVencimiento
+            : recargo.condicionValor
+              ? parseInt(recargo.condicionValor, 10)
+              : null,
+      });
     });
   }
 
@@ -230,6 +249,35 @@ export class RecargosService {
     }
     const count = await qb.getCount();
     return { disponible: count === 0 };
+  }
+
+  private toListItem(
+    recargo: Recargo,
+    tipoRegla: TipoRegla,
+    opts: {
+      tramos?: { minimo: string; valor: string }[];
+      metodoPagoIds?: string[];
+      diasVencimiento?: number | null;
+    },
+  ) {
+    return {
+      ...recargo,
+      tipoRegla: {
+        id: tipoRegla.id,
+        codigo: tipoRegla.codigo,
+        nombre: tipoRegla.nombre,
+      },
+      ...(opts.tramos !== undefined ? { tramos: opts.tramos } : {}),
+      ...(opts.metodoPagoIds !== undefined
+        ? { metodoPagoIds: opts.metodoPagoIds }
+        : {}),
+      diasVencimiento:
+        opts.diasVencimiento !== undefined
+          ? opts.diasVencimiento
+          : recargo.condicionValor
+            ? parseInt(recargo.condicionValor, 10)
+            : null,
+    };
   }
 
   private async validarTipoRegla(tipoReglaId: string): Promise<TipoRegla> {

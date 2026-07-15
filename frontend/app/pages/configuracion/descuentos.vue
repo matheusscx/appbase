@@ -105,6 +105,31 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: Regla) {
+  const idx = descuentos.value.findIndex(d => d.id === saved.id)
+  const prev = idx >= 0 ? descuentos.value[idx] : null
+  const merged: Regla = {
+    ...(prev ?? { tramos: [], metodoPagoIds: [] }),
+    ...saved,
+    tramos: saved.tramos ?? prev?.tramos ?? [],
+    metodoPagoIds: saved.metodoPagoIds ?? prev?.metodoPagoIds ?? [],
+    tipoRegla: saved.tipoRegla ?? prev?.tipoRegla,
+  }
+  if (idx >= 0) {
+    descuentos.value[idx] = merged
+  }
+  else {
+    descuentos.value.push(merged)
+  }
+  descuentos.value = [...descuentos.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  descuentos.value = descuentos.value.filter(d => d.id !== id)
+}
+
 async function cargarTipos() {
   try {
     const data = await useApiFetch<TipoRegla[]>(`${apiUrl}/tipos-regla?clase=descuento`)
@@ -192,16 +217,16 @@ async function guardar() {
       if (cfg.campoFechaFin) body.fechaFin = form.value.fechaFin || null
     }
 
-    if (editingId.value) {
-      await useApiFetch(`${apiUrl}/descuentos/${editingId.value}`, { method: 'PATCH', body })
-      toast.add({ title: 'Descuento actualizado', color: 'success' })
-    }
-    else {
-      await useApiFetch(`${apiUrl}/descuentos`, { method: 'POST', body })
-      toast.add({ title: 'Descuento creado', color: 'success' })
-    }
+    const isNew = !editingId.value
+    const saved = isNew
+      ? await useApiFetch<Regla>(`${apiUrl}/descuentos`, { method: 'POST', body })
+      : await useApiFetch<Regla>(`${apiUrl}/descuentos/${editingId.value}`, {
+          method: 'PATCH',
+          body,
+        })
+    upsertLocal(saved)
+    toast.add({ title: isNew ? 'Descuento creado' : 'Descuento actualizado', color: 'success' })
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar'), color: 'error' })
@@ -238,8 +263,8 @@ async function eliminar(id: string) {
     await useApiFetch(`${apiUrl}/descuentos/${id}`, {
       method: 'DELETE',
     })
+    removeLocal(id)
     toast.add({ title: 'Descuento eliminado', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar')

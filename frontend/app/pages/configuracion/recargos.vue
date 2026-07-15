@@ -105,6 +105,31 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: Regla) {
+  const idx = recargos.value.findIndex(r => r.id === saved.id)
+  const prev = idx >= 0 ? recargos.value[idx] : null
+  const merged: Regla = {
+    ...(prev ?? { tramos: [], metodoPagoIds: [] }),
+    ...saved,
+    tramos: saved.tramos ?? prev?.tramos ?? [],
+    metodoPagoIds: saved.metodoPagoIds ?? prev?.metodoPagoIds ?? [],
+    tipoRegla: saved.tipoRegla ?? prev?.tipoRegla,
+  }
+  if (idx >= 0) {
+    recargos.value[idx] = merged
+  }
+  else {
+    recargos.value.push(merged)
+  }
+  recargos.value = [...recargos.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  recargos.value = recargos.value.filter(r => r.id !== id)
+}
+
 async function cargarTipos() {
   try {
     const data = await useApiFetch<TipoRegla[]>(`${apiUrl}/tipos-regla?clase=recargo`)
@@ -192,16 +217,16 @@ async function guardar() {
       if (cfg.campoFechaFin) body.fechaFin = form.value.fechaFin || null
     }
 
-    if (editingId.value) {
-      await useApiFetch(`${apiUrl}/recargos/${editingId.value}`, { method: 'PATCH', body })
-      toast.add({ title: 'Recargo actualizado', color: 'success' })
-    }
-    else {
-      await useApiFetch(`${apiUrl}/recargos`, { method: 'POST', body })
-      toast.add({ title: 'Recargo creado', color: 'success' })
-    }
+    const isNew = !editingId.value
+    const saved = isNew
+      ? await useApiFetch<Regla>(`${apiUrl}/recargos`, { method: 'POST', body })
+      : await useApiFetch<Regla>(`${apiUrl}/recargos/${editingId.value}`, {
+          method: 'PATCH',
+          body,
+        })
+    upsertLocal(saved)
+    toast.add({ title: isNew ? 'Recargo creado' : 'Recargo actualizado', color: 'success' })
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar'), color: 'error' })
@@ -238,8 +263,8 @@ async function eliminar(id: string) {
     await useApiFetch(`${apiUrl}/recargos/${id}`, {
       method: 'DELETE',
     })
+    removeLocal(id)
     toast.add({ title: 'Recargo eliminado', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar')

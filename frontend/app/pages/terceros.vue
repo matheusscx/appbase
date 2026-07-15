@@ -83,6 +83,23 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: Tercero) {
+  const idx = terceros.value.findIndex(t => t.id === saved.id)
+  if (idx >= 0) {
+    terceros.value[idx] = { ...terceros.value[idx], ...saved }
+  }
+  else {
+    terceros.value.push(saved)
+  }
+  terceros.value = [...terceros.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  terceros.value = terceros.value.filter(t => t.id !== id)
+}
+
 function abrirCrear() {
   resetDrawer()
   drawerOpen.value = true
@@ -119,22 +136,16 @@ async function guardar() {
       direccion: form.value.direccion || undefined,
       activo: form.value.activo,
     }
-    if (editingId.value) {
-      await useApiFetch(`${apiUrl}/terceros/${editingId.value}`, {
-        method: 'PATCH',
-        body,
-      })
-      toast.add({ title: 'Tercero actualizado', color: 'success' })
-    }
-    else {
-      await useApiFetch(`${apiUrl}/terceros`, {
-        method: 'POST',
-        body,
-      })
-      toast.add({ title: 'Tercero creado', color: 'success' })
-    }
+    const isNew = !editingId.value
+    const saved = isNew
+      ? await useApiFetch<Tercero>(`${apiUrl}/terceros`, { method: 'POST', body })
+      : await useApiFetch<Tercero>(`${apiUrl}/terceros/${editingId.value}`, {
+          method: 'PATCH',
+          body,
+        })
+    upsertLocal(saved)
+    toast.add({ title: isNew ? 'Tercero creado' : 'Tercero actualizado', color: 'success' })
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al guardar')
@@ -172,8 +183,8 @@ async function eliminar(id: string) {
     await useApiFetch(`${apiUrl}/terceros/${id}`, {
       method: 'DELETE',
     })
+    removeLocal(id)
     toast.add({ title: 'Tercero eliminado', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar')

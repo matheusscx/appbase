@@ -59,6 +59,23 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: Impuesto) {
+  const idx = impuestos.value.findIndex(i => i.id === saved.id)
+  if (idx >= 0) {
+    impuestos.value[idx] = { ...impuestos.value[idx], ...saved }
+  }
+  else {
+    impuestos.value.push(saved)
+  }
+  impuestos.value = [...impuestos.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  impuestos.value = impuestos.value.filter(i => i.id !== id)
+}
+
 function abrirCrear() {
   resetDrawer()
   drawerOpen.value = true
@@ -83,22 +100,16 @@ async function guardar() {
       porcentaje: form.value.porcentaje,
       activo: form.value.activo,
     }
-    if (editingId.value) {
-      await useApiFetch(`${apiUrl}/impuestos/${editingId.value}`, {
-        method: 'PATCH',
-        body,
-      })
-      toast.add({ title: 'Impuesto actualizado', color: 'success' })
-    }
-    else {
-      await useApiFetch(`${apiUrl}/impuestos`, {
-        method: 'POST',
-        body,
-      })
-      toast.add({ title: 'Impuesto creado', color: 'success' })
-    }
+    const isNew = !editingId.value
+    const saved = isNew
+      ? await useApiFetch<Impuesto>(`${apiUrl}/impuestos`, { method: 'POST', body })
+      : await useApiFetch<Impuesto>(`${apiUrl}/impuestos/${editingId.value}`, {
+          method: 'PATCH',
+          body,
+        })
+    upsertLocal(saved)
+    toast.add({ title: isNew ? 'Impuesto creado' : 'Impuesto actualizado', color: 'success' })
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al guardar')
@@ -136,8 +147,8 @@ async function eliminar(id: string) {
     await useApiFetch(`${apiUrl}/impuestos/${id}`, {
       method: 'DELETE',
     })
+    removeLocal(id)
     toast.add({ title: 'Impuesto eliminado', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar')
