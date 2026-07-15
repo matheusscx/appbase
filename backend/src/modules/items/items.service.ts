@@ -810,6 +810,135 @@ export class ItemsService {
     }));
   }
 
+  async obtenerIngredientesReceta(
+    manager: EntityManager,
+    tenantId: string,
+    recetaItemId: string,
+  ): Promise<
+    {
+      ingredienteItemId: string;
+      ingredienteNombre: string;
+      ingredienteUnidadMedida: string;
+      cantidad: string;
+      unidadCodigo: string;
+      bloqueante: boolean;
+    }[]
+  > {
+    const rows: {
+      ingrediente_item_id: string;
+      ingrediente_nombre: string;
+      ingrediente_unidad_medida: string;
+      cantidad: string;
+      unidad_codigo: string;
+      bloqueante: boolean;
+    }[] = await manager.query(
+      `SELECT ri.ingrediente_item_id, i.nombre AS ingrediente_nombre,
+              ip.unidad_medida AS ingrediente_unidad_medida,
+              ri.cantidad, ri.unidad_codigo, ri.bloqueante
+       FROM receta_ingredientes ri
+       JOIN items i ON i.item_id = ri.ingrediente_item_id AND i.eliminado_el IS NULL
+       JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+       WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
+      [recetaItemId, tenantId],
+    );
+    return rows.map((r) => ({
+      ingredienteItemId: r.ingrediente_item_id,
+      ingredienteNombre: r.ingrediente_nombre,
+      ingredienteUnidadMedida: r.ingrediente_unidad_medida,
+      cantidad: r.cantidad,
+      unidadCodigo: r.unidad_codigo,
+      bloqueante: r.bloqueante,
+    }));
+  }
+
+  async obtenerStockProducto(
+    manager: EntityManager,
+    itemId: string,
+  ): Promise<string> {
+    const rows: { stock: string }[] = await manager.query(
+      `SELECT stock FROM item_producto WHERE item_id = $1`,
+      [itemId],
+    );
+    return rows[0]?.stock ?? '0';
+  }
+
+  /**
+   * Vende N unidades de una receta: expande a un movimiento de salida por
+   * ingrediente. Un ingrediente bloqueante sin stock deja que
+   * registrarMovimiento lance su validación de "salida no negativa" —
+   * eso aborta toda la transacción de la venta, gratis. Uno no bloqueante
+   * intenta el mismo movimiento; si falla solo por
+   * 'Stock insuficiente para la salida', se omite y se reporta como
+   * advertencia (evita la carrera del pre-chequeo SELECT sin lock).
+   */
+  async venderIngredientesReceta(
+    manager: EntityManager,
+    params: {
+      tenantId: string;
+      usuarioId: string | null;
+      ventaId: string;
+      recetaItemId: string;
+      recetaNombre: string;
+      cantidadVendida: string;
+    },
+  ): Promise<string[]> {
+    const ingredientes = await this.obtenerIngredientesReceta(
+      manager,
+      params.tenantId,
+      params.recetaItemId,
+    );
+    const advertencias: string[] = [];
+
+    for (const ing of ingredientes) {
+      const cantidadPorReceta = new Decimal(ing.cantidad)
+        .mul(params.cantidadVendida)
+        .toString();
+      const cantidadConvertida = await this.catalogService.convertirUnidad(
+        cantidadPorReceta,
+        ing.unidadCodigo,
+        ing.ingredienteUnidadMedida,
+      );
+
+      const movimientoParams = {
+        tenantId: params.tenantId,
+        itemId: ing.ingredienteItemId,
+        tipo: 'salida' as const,
+        motivo: 'venta',
+        cantidad: cantidadConvertida,
+        usuarioId: params.usuarioId,
+        ventaId: params.ventaId,
+      };
+
+      if (ing.bloqueante) {
+        await this.inventarioService.registrarMovimiento(
+          manager,
+          movimientoParams,
+        );
+        continue;
+      }
+
+      try {
+        await this.inventarioService.registrarMovimiento(
+          manager,
+          movimientoParams,
+        );
+      } catch (error) {
+        if (
+          error instanceof BadRequestException &&
+          error.message === 'Stock insuficiente para la salida'
+        ) {
+          advertencias.push(
+            `${params.recetaNombre}: no había stock suficiente de ${ing.ingredienteNombre}, se vendió sin ese insumo`,
+          );
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return advertencias;
+  }
+
   // ── private helpers ────────────────────────────────────────────────────────
 
   /** Rechaza costos presentes que no sean > 0 (NULL = sin costo sigue permitido). */

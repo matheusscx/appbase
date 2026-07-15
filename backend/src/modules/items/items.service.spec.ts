@@ -889,4 +889,127 @@ describe('ItemsService', () => {
       expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
     });
   });
+
+  describe('venderIngredientesReceta', () => {
+    const PARAMS = {
+      tenantId: TENANT,
+      usuarioId: 'user-uuid',
+      ventaId: 'venta-uuid',
+      recetaItemId: 'receta-uuid',
+      recetaNombre: 'Hamburguesa',
+      cantidadVendida: '2',
+    };
+
+    it('genera un movimiento de salida por cada ingrediente con la cantidad convertida', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          ingrediente_item_id: 'pan',
+          ingrediente_nombre: 'Pan',
+          ingrediente_unidad_medida: 'unidad',
+          cantidad: '1',
+          unidad_codigo: 'unidad',
+          bloqueante: true,
+        },
+        {
+          ingrediente_item_id: 'carne',
+          ingrediente_nombre: 'Carne',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '150',
+          unidad_codigo: 'g',
+          bloqueante: true,
+        },
+      ]);
+      catalogServiceMock.convertirUnidad
+        .mockResolvedValueOnce('2') // pan: 1*2 unidad → unidad
+        .mockResolvedValueOnce('0.3'); // carne: 150*2=300 g → 0.3 kg
+
+      const advertencias = await service.venderIngredientesReceta(
+        managerMock as any,
+        PARAMS,
+      );
+
+      expect(advertencias).toEqual([]);
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(2);
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
+        1,
+        managerMock,
+        expect.objectContaining({ itemId: 'pan', cantidad: '2', motivo: 'venta' }),
+      );
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
+        2,
+        managerMock,
+        expect.objectContaining({ itemId: 'carne', cantidad: '0.3', motivo: 'venta' }),
+      );
+    });
+
+    it('propaga el error si un ingrediente bloqueante no tiene stock (aborta la venta)', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          ingrediente_item_id: 'carne',
+          ingrediente_nombre: 'Carne',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '150',
+          unidad_codigo: 'g',
+          bloqueante: true,
+        },
+      ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.3');
+      inventarioServiceMock.registrarMovimiento.mockRejectedValueOnce(
+        new BadRequestException('Stock insuficiente para la salida'),
+      );
+
+      await expect(
+        service.venderIngredientesReceta(managerMock as any, PARAMS),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('omite el movimiento y agrega advertencia si un ingrediente no bloqueante no tiene stock', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          ingrediente_item_id: 'queso',
+          ingrediente_nombre: 'Queso',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '20',
+          unidad_codigo: 'g',
+          bloqueante: false,
+        },
+      ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.04'); // 20*2=40 g → 0.04 kg
+      // Sin pre-chequeo de stock: registrarMovimiento lanza y se convierte en advertencia
+      inventarioServiceMock.registrarMovimiento.mockRejectedValueOnce(
+        new BadRequestException('Stock insuficiente para la salida'),
+      );
+
+      const advertencias = await service.venderIngredientesReceta(
+        managerMock as any,
+        PARAMS,
+      );
+
+      expect(advertencias).toEqual([
+        'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
+      ]);
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(1);
+    });
+
+    it('no engulle errores distintos de stock insuficiente en no-bloqueantes', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          ingrediente_item_id: 'queso',
+          ingrediente_nombre: 'Queso',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '20',
+          unidad_codigo: 'g',
+          bloqueante: false,
+        },
+      ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.04');
+      inventarioServiceMock.registrarMovimiento.mockRejectedValueOnce(
+        new BadRequestException('El item no tiene control de stock'),
+      );
+
+      await expect(
+        service.venderIngredientesReceta(managerMock as any, PARAMS),
+      ).rejects.toThrow('El item no tiene control de stock');
+    });
+  });
 });

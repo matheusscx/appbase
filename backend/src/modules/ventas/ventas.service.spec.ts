@@ -156,7 +156,10 @@ describe('VentasService', () => {
         },
         {
           provide: ItemsService,
-          useValue: { findOne: jest.fn().mockResolvedValue(mockItem) },
+          useValue: {
+            findOne: jest.fn().mockResolvedValue(mockItem),
+            venderIngredientesReceta: jest.fn().mockResolvedValue([]),
+          },
         },
         {
           provide: PagosService,
@@ -260,6 +263,55 @@ describe('VentasService', () => {
       await expect(
         service.crear(TENANT_ID, USUARIO_ID, dtoConExcedente as any),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('crear() — recetas', () => {
+    const mockReceta = {
+      id: 'receta-uuid',
+      nombre: 'Hamburguesa',
+      tipo: 'receta',
+      precioBase: '3500.0000',
+      precioIncluyeImpuesto: false,
+      monedaId: MONEDA_OFICIAL_ID,
+      impuestosIds: [],
+      descuentosIds: [],
+      recargosIds: [],
+    };
+    const dtoReceta = {
+      lineas: [{ itemId: 'receta-uuid', cantidad: '2' }],
+      pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '7000.0000' }],
+    };
+
+    it('delega en itemsService.venderIngredientesReceta y no llama registrarMovimiento directo', async () => {
+      itemsService.findOne.mockResolvedValueOnce(mockReceta);
+      await service.crear(TENANT_ID, USUARIO_ID, dtoReceta as any);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(itemsService.venderIngredientesReceta).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          tenantId: TENANT_ID,
+          recetaItemId: 'receta-uuid',
+          recetaNombre: 'Hamburguesa',
+          cantidadVendida: '2',
+        }),
+      );
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
+    it('agrega advertenciasReceta a la respuesta cuando hay advertencias', async () => {
+      itemsService.findOne.mockResolvedValueOnce(mockReceta);
+      (itemsService.venderIngredientesReceta as jest.Mock).mockResolvedValueOnce([
+        'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
+      ]);
+
+      const result = await service.crear(TENANT_ID, USUARIO_ID, dtoReceta as any);
+
+      expect(result.advertenciasReceta).toEqual([
+        'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
+      ]);
     });
   });
 

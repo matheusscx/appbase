@@ -305,21 +305,36 @@ export class VentasService {
       );
     }
 
-    // 7f. Movimientos de inventario (solo productos)
+    // 7f. Movimientos de inventario (productos y recetas)
+    const advertenciasReceta: string[] = [];
     for (let i = 0; i < lineasConversion.length; i++) {
       const { item, linea } = lineasConversion[i];
-      if (item.tipo !== 'producto') continue;
-      await this.inventarioService.registrarMovimiento(manager, {
-        tenantId,
-        itemId: item.id,
-        tipo: 'salida',
-        motivo: 'venta',
-        cantidad: linea.cantidad,
-        usuarioId,
-        ventaId: venta.id,
-        unidadIds: linea.unidadIds,
-        loteId: linea.loteId,
-      });
+      if (item.tipo === 'producto') {
+        await this.inventarioService.registrarMovimiento(manager, {
+          tenantId,
+          itemId: item.id,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: linea.cantidad,
+          usuarioId,
+          ventaId: venta.id,
+          unidadIds: linea.unidadIds,
+          loteId: linea.loteId,
+        });
+      } else if (item.tipo === 'receta') {
+        const advertencias = await this.itemsService.venderIngredientesReceta(
+          manager,
+          {
+            tenantId,
+            usuarioId,
+            ventaId: venta.id,
+            recetaItemId: item.id,
+            recetaNombre: item.nombre,
+            cantidadVendida: linea.cantidad,
+          },
+        );
+        advertenciasReceta.push(...advertencias);
+      }
     }
 
     // 7g. Pagos — delegado a PagosService (incluye vuelto + movimientos de caja)
@@ -350,7 +365,7 @@ export class VentasService {
       venta.estado = estadoFinal;
     }
 
-    return { ...venta, detalles };
+    return { ...venta, detalles, advertenciasReceta };
   }
 
   /**
