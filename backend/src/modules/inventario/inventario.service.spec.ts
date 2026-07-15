@@ -12,6 +12,7 @@ const USER_ID = 'user-uuid';
 const UNIDAD_1 = 'unidad-uuid-1';
 const UNIDAD_2 = 'unidad-uuid-2';
 const LOTE_ID = 'lote-uuid-1';
+const CAUSA_MERMA_ID = 'causa-merma-uuid';
 
 describe('InventarioService', () => {
   let service: InventarioService;
@@ -83,6 +84,7 @@ describe('InventarioService', () => {
           motivo: 'merma',
           cantidad: '4',
           usuarioId: USER_ID,
+          causaMermaId: CAUSA_MERMA_ID,
         },
       );
 
@@ -102,6 +104,7 @@ describe('InventarioService', () => {
           motivo: 'merma',
           cantidad: '5',
           usuarioId: USER_ID,
+          causaMermaId: CAUSA_MERMA_ID,
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -197,6 +200,7 @@ describe('InventarioService', () => {
           cantidad: '1',
           usuarioId: USER_ID,
           unidadIds: [UNIDAD_1],
+          causaMermaId: CAUSA_MERMA_ID,
         },
       );
 
@@ -270,6 +274,7 @@ describe('InventarioService', () => {
           cantidad: '1',
           usuarioId: USER_ID,
           unidadIds: [UNIDAD_1],
+          causaMermaId: CAUSA_MERMA_ID,
         }),
       ).rejects.toThrow(BadRequestException);
     });
@@ -327,6 +332,7 @@ describe('InventarioService', () => {
           cantidad: '10',
           usuarioId: USER_ID,
           loteId: LOTE_ID,
+          causaMermaId: CAUSA_MERMA_ID,
         },
       );
 
@@ -400,8 +406,79 @@ describe('InventarioService', () => {
           cantidad: '10',
           usuarioId: USER_ID,
           loteId: LOTE_ID,
+          causaMermaId: CAUSA_MERMA_ID,
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Causa de merma
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — causa merma', () => {
+    it('motivo merma sin causaMermaId lanza BadRequest', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '2',
+          usuarioId: USER_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('La merma requiere una causa tipificada'),
+      );
+    });
+
+    it('motivo distinto de merma con causaMermaId lanza BadRequest', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'ajuste_manual',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          causaMermaId: CAUSA_MERMA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('causa_merma_id solo aplica a merma'),
+      );
+    });
+
+    it('motivo merma con causaMermaId incluye causa_merma_id en el INSERT', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-m1' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          causaMermaId: CAUSA_MERMA_ID,
+        },
+      );
+
+      const insertCall = managerMock.query.mock.calls[2];
+      expect(insertCall[0]).toContain('causa_merma_id');
+      expect(insertCall[1]).toContain(CAUSA_MERMA_ID);
     });
   });
 
@@ -594,6 +671,46 @@ describe('InventarioService', () => {
       const res = await service.findMovimientos(TENANT, {} as never);
 
       expect(res.data[0].costoUnitario).toBe('4200');
+    });
+
+    it('findMovimientos expone causa y costoPerdido en merma', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'mov-m1',
+            item_id: ITEM_ID,
+            item_nombre: 'Lechuga',
+            tipo: 'salida',
+            motivo: 'merma',
+            cantidad: '3.5000',
+            stock_anterior: '10.0000',
+            stock_resultante: '6.5000',
+            usuario_id: USER_ID,
+            usuario_nombre: 'Admin',
+            comentario: null,
+            creado_el: new Date('2026-07-15T00:00:00Z'),
+            costo_unitario: '1200.5000',
+            causa_merma_id: CAUSA_MERMA_ID,
+            causa_nombre: 'Vencimiento',
+          },
+        ]);
+
+      const res = await service.findMovimientos(TENANT, {} as never);
+
+      expect(res.data[0]).toMatchObject({
+        causaMermaId: CAUSA_MERMA_ID,
+        causaNombre: 'Vencimiento',
+        costoPerdido: '4201.7500',
+      });
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('causa_merma_id'),
+        expect.any(Array),
+      );
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('causas_merma'),
+        expect.any(Array),
+      );
     });
   });
 });

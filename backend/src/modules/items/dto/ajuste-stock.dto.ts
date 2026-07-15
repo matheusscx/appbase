@@ -16,7 +16,6 @@ import { Type } from 'class-transformer';
 const MOTIVOS = [
   'compra',
   'devolucion',
-  'merma',
   'ajuste_manual',
   'inventario_inicial',
 ];

@@ -42,6 +42,7 @@ export interface RegistrarMovimientoParams {
   // Modo 'lote'
   lote?: LoteInput; // entrada lote: crea o agrega a lote existente
   loteId?: string; // salida lote: lote a descontar
+  causaMermaId?: string | null;
 }
 
 interface MoverResult {
@@ -86,6 +87,13 @@ export class InventarioService {
 
     if (cantidad.lessThanOrEqualTo(0)) {
       throw new BadRequestException('La cantidad debe ser mayor a cero');
+    }
+
+    if (params.motivo === 'merma' && !params.causaMermaId) {
+      throw new BadRequestException('La merma requiere una causa tipificada');
+    }
+    if (params.motivo !== 'merma' && params.causaMermaId) {
+      throw new BadRequestException('causa_merma_id solo aplica a merma');
     }
 
     const costoActualPrevio = productoRows[0].costo_actual ?? null;
@@ -137,8 +145,8 @@ export class InventarioService {
     const insertRows: { movimiento_id: string }[] = await manager.query(
       `INSERT INTO movimientos_inventario
          (tenant_id, item_id, tipo, motivo, cantidad,
-          stock_anterior, stock_resultante, venta_id, usuario_id, comentario, costo_unitario)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+          stock_anterior, stock_resultante, venta_id, usuario_id, comentario, costo_unitario, causa_merma_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -152,6 +160,7 @@ export class InventarioService {
         params.usuarioId,
         params.comentario ?? null,
         costoUnitarioCongelado,
+        params.causaMermaId ?? null,
       ],
     );
 
@@ -569,10 +578,13 @@ export class InventarioService {
          mv.tipo, mv.motivo, mv.cantidad,
          mv.stock_anterior, mv.stock_resultante,
          mv.usuario_id, u.nombre AS usuario_nombre,
-         mv.comentario, mv.creado_el, mv.costo_unitario
+         mv.comentario, mv.creado_el, mv.costo_unitario,
+         mv.causa_merma_id,
+         cm.nombre AS causa_nombre
        FROM movimientos_inventario mv
        JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
+       LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
          ${filters}
        ORDER BY mv.creado_el DESC
@@ -629,6 +641,12 @@ export class InventarioService {
       comentario: r.comentario,
       creadoEl: r.creado_el,
       costoUnitario: r.costo_unitario,
+      causaMermaId: r.causa_merma_id,
+      causaNombre: r.causa_nombre,
+      costoPerdido:
+        r.motivo === 'merma' && r.costo_unitario != null
+          ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(4)
+          : null,
     };
   }
 }
@@ -647,6 +665,9 @@ export interface MovimientoListItem {
   comentario: string | null;
   creadoEl: Date;
   costoUnitario: string | null;
+  causaMermaId: string | null;
+  causaNombre: string | null;
+  costoPerdido: string | null;
 }
 
 interface MovimientoRow {
@@ -663,4 +684,6 @@ interface MovimientoRow {
   comentario: string | null;
   creado_el: Date;
   costo_unitario: string | null;
+  causa_merma_id: string | null;
+  causa_nombre: string | null;
 }
