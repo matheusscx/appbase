@@ -1,6 +1,6 @@
 # Diseño — Mermas tipificadas y valorizadas
 
-**Status**: Approved
+**Status**: Done
 **Date**: 2026-07-15
 **Owner**: Cesar Matheus
 **Cluster**: Recetas/costos food-service — **pieza 4 de 5** (ver
