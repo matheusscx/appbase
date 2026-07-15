@@ -2162,6 +2162,14 @@ export class SeederService implements OnApplicationBootstrap {
       `SELECT 1 FROM items WHERE item_id = $1`,
       [HAMBURGUESA_ID],
     );
+
+    // Migración soft: DBs ya sembradas con tipo=producto
+    await this.dataSource.query(
+      `UPDATE items SET tipo = 'ingrediente', precio_base = '0', actualizado_el = NOW()
+       WHERE item_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
+      [[PAN_ID, CARNE_ID, QUESO_ID]],
+    );
+
     if (exists.length) return;
 
     const ingredientes = [
@@ -2194,8 +2202,8 @@ export class SeederService implements OnApplicationBootstrap {
     for (const ing of ingredientes) {
       await this.dataSource.query(
         `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,'producto')`,
-        [ing.id, PARIS, CLP, ing.nombre, ing.costo, false, true],
+         VALUES ($1,$2,$3,$4,'0',$5,$6,'ingrediente')`,
+        [ing.id, PARIS, CLP, ing.nombre, false, true],
       );
       await this.dataSource.query(
         `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario, costo_actual)

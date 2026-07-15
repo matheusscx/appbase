@@ -490,7 +490,7 @@ CREATE TABLE "items" (
   "precio_base"             NUMERIC(18,4) NOT NULL,
   "precio_incluye_impuesto" BOOLEAN       NOT NULL DEFAULT false,
   "activo"                  BOOLEAN       NOT NULL DEFAULT true,
-  "tipo"                    TEXT          NOT NULL,   -- 'producto' | 'servicio'
+  "tipo"                    TEXT          NOT NULL,   -- 'producto' | 'servicio' | 'suscripcion' | 'receta' | 'ingrediente'
   "creado_el"               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"          TIMESTAMPTZ,
   "eliminado_el"            TIMESTAMPTZ
@@ -540,7 +540,7 @@ CREATE TABLE "receta_ingredientes" (
   "tenant_id"              UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "receta_item_id"         UUID          NOT NULL REFERENCES "items" ("item_id"),
   "ingrediente_item_id"    UUID          NOT NULL REFERENCES "items" ("item_id"),
-  -- ingrediente_item_id SIEMPRE apunta a un item tipo='producto', modo_inventario='cantidad'
+  -- ingrediente_item_id apunta a un item tipo='ingrediente' (extensión item_producto)
   "cantidad"               NUMERIC(18,4) NOT NULL,  -- por 1 unidad de la receta
   "unidad_codigo"          TEXT          NOT NULL REFERENCES "unidades_medida" ("codigo"),
   "bloqueante"             BOOLEAN       NOT NULL DEFAULT true,
