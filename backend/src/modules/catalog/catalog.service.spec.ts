@@ -39,6 +39,10 @@ const mockUnidadMedida: UnidadMedida = {
   eliminadoEl: null as unknown as Date,
 };
 
+const unidadG: UnidadMedida = { ...mockUnidadMedida, unidadMedidaId: 'g-uuid', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1.000000' };
+const unidadKg: UnidadMedida = { ...mockUnidadMedida, unidadMedidaId: 'kg-uuid', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000.000000' };
+const unidadL: UnidadMedida = { ...mockUnidadMedida, unidadMedidaId: 'l-uuid', codigo: 'l', nombre: 'Litro', magnitud: 'volumen', factorBase: '1000.000000' };
+
 describe('CatalogService', () => {
   let service: CatalogService;
   let paisRepo: { find: jest.Mock };
@@ -108,6 +112,49 @@ describe('CatalogService', () => {
       expect(unidadMedidaRepo.find).toHaveBeenCalledWith({
         order: { magnitud: 'ASC', factorBase: 'ASC' },
       });
+    });
+  });
+
+  describe('convertirUnidad', () => {
+    it('convierte de una unidad mayor a una menor (kg → g)', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([unidadG, unidadKg]);
+      expect(await service.convertirUnidad('2', 'kg', 'g')).toBe('2000');
+    });
+
+    it('convierte de una unidad menor a una mayor (g → kg)', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([unidadG, unidadKg]);
+      expect(await service.convertirUnidad('500', 'g', 'kg')).toBe('0.5');
+    });
+
+    it('devuelve la cantidad intacta si la unidad es la misma, sin consultar el catálogo', async () => {
+      expect(await service.convertirUnidad('7.5', 'kg', 'kg')).toBe('7.5');
+      expect(unidadMedidaRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('redondea a 4 decimales (la escala de stock)', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([unidadG, unidadKg]);
+      expect(await service.convertirUnidad('1', 'g', 'kg')).toBe('0.001');
+    });
+
+    it('rechaza una unidad desconocida', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([unidadKg]);
+      await expect(service.convertirUnidad('1', 'inventada', 'kg')).rejects.toThrow(
+        'Unidad de medida no reconocida: inventada',
+      );
+    });
+
+    it('rechaza convertir entre magnitudes distintas', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([unidadKg, unidadL]);
+      await expect(service.convertirUnidad('1', 'l', 'kg')).rejects.toThrow(
+        'No se puede convertir de volumen a masa',
+      );
+    });
+
+    it('rechaza una cantidad que se perdería al redondear a la precisión de stock', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([unidadG, unidadKg]);
+      await expect(service.convertirUnidad('0.00004', 'g', 'kg')).rejects.toThrow(
+        'menor a la precisión de stock',
+      );
     });
   });
 });
