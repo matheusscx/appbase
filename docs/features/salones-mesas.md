@@ -53,13 +53,13 @@ del garzón usa el permiso dedicado **`Operar`**.
 | DELETE | `/mesas/:id` | Eliminar | Eliminar mesa |
 | GET | `/salones/operacion` | Operar | Salones + mesas con flag `ocupada` |
 | GET | `/mesas/:id/cuentas` | Operar | Cuentas abiertas de la mesa (con líneas) |
-| POST | `/mesas/:id/cuentas` | Operar | Abrir cuenta (asigna `numero` correlativo por mesa) |
+| POST | `/mesas/:id/cuentas` | Operar | Abrir cuenta (`FOR UPDATE` mesa + `numero` correlativo) |
 | POST | `/mesas/:id/cuentas/fusionar` | Operar | Fusionar 2+ cuentas abiertas de la mesa en una |
 | POST | `/cuentas/:id/lineas` | Operar | Agregar producto (merge por ítem) |
 | PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad |
 | DELETE | `/cuentas/:id/lineas/:lineaId` | Operar | Quitar producto |
 | POST | `/cuentas/:id/cancelar` | Operar | Anular cuenta (sin venta) |
-| POST | `/cuentas/:id/cerrar` | Operar | Cerrar → genera venta |
+| POST | `/cuentas/:id/cerrar` | Operar | Cerrar → genera venta (`FOR UPDATE` de cuenta) |
 
 `POST /cuentas/:id/cerrar` body: `{ pin, pagos?: PagoVentaDto[], tipoDocumentoId?, customer? }`
 (reusa las clases de `ventas/dto/create-venta.dto.ts`). Respuesta:
@@ -85,7 +85,8 @@ todas las de la mesa; ver detalle en Backend → Fusión de cuentas.
 
 ### Cierre de cuenta → venta (atómico)
 
-`SalonesService.cerrarCuenta` abre una transacción, mapea las `cuenta_lineas` a
+`SalonesService.cerrarCuenta` abre una transacción con `FOR UPDATE` de la cuenta,
+mapea las `cuenta_lineas` a
 `LineaVentaDto[]`, arma un `CreateVentaDto` con `canal: 'fisico'` y llama a
 **`VentasService.crearEnTransaccion(manager, tenantId, usuarioId, dto)`** dentro de la
 misma transacción. Así la venta y el cambio de estado de la cuenta commitean juntos.

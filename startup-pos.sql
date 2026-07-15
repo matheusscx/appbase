@@ -86,7 +86,7 @@ CREATE TABLE "unidades_medida" (
   "codigo"           TEXT          UNIQUE NOT NULL,  -- guardado en item_producto.unidad_medida
   "nombre"           TEXT          NOT NULL,
   "magnitud"         TEXT          NOT NULL,  -- 'masa' | 'volumen' | 'conteo' | 'longitud'
-  "factor_base"      NUMERIC(18,6) NOT NULL,  -- kg → 1000 (base: g)
+  "factor_base"      NUMERIC(18,6) NOT NULL CHECK ("factor_base" > 0),  -- kg → 1000 (base: g); CHECK documentado (enforce también en CatalogService)
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ

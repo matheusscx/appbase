@@ -343,7 +343,8 @@ Error (403) si la caja pertenece a otro usuario y no tiene permiso "Ver todas".
 - `cajaService.getCajaActiva(tenantId, usuarioId)` — caja física `estado='abierta'` del usuario
 - `cajaService.getCajasAbiertas(tenantId, usuarioId, verTodas)` — cajas físicas abiertas del tenant; si `verTodas=false`, filtra por `usuarioId`; cada elemento incluye `esPropia`
 - `cajaService.abrirCaja(tenantId, usuarioId, dto)` — crea caja; lanza 409 si ya hay una abierta
-- `cajaService.registrarMovimiento(cajaId, tenantId, usuarioId, dto)` — valida propiedad (owner-only), valida saldo para `salida`, actualiza `saldo_esperado`
+- `cajaService.registrarMovimiento(cajaId, tenantId, usuarioId, dto)` — `FOR UPDATE` de la caja, valida propiedad (owner-only), valida saldo para `salida`, inserta movimiento
+- `cajaService.bloquearCajaAbierta(manager, cajaId, tenantId)` — lock pesimista reutilizable (p.ej. egreso de NC en la misma tx)
 - `cajaService.listarMovimientos(cajaId, tenantId, usuarioId, verTodas)` — lista `movimientos_caja`; acepta caja ajena si `verTodas=true`
 - `cajaService.cerrarCaja(cajaId, tenantId, usuarioId, dto)` — owner-only; calcula `diferencia`, marca `estado='cerrada'`
 - `cajaService.findAll(tenantId, usuarioId, todas)` — historial; `todas=true` retorna todas las cajas del tenant

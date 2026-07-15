@@ -300,6 +300,18 @@ export class SalonesService {
       dto.pin,
     );
     const cuenta = await this.dataSource.transaction(async (manager) => {
+      // Ancla de serialización por mesa: sin este lock, dos aperturas concurrentes
+      // pueden calcular el mismo MAX(numero)+1.
+      const locked: { mesa_id: string }[] = await manager.query(
+        `SELECT mesa_id FROM mesas
+          WHERE mesa_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [mesaId, tenantId],
+      );
+      if (!locked.length) {
+        throw new NotFoundException(`Mesa ${mesaId} no encontrada`);
+      }
+
       // Numeración por mesa, basada solo en las cuentas actualmente abiertas:
       // se reinicia en 1 cada vez que la mesa queda completamente libre (todas
       // sus cuentas cerradas/canceladas), en vez de ser un correlativo histórico.
@@ -482,8 +494,10 @@ export class SalonesService {
       dto.pin,
     );
     return this.dataSource.transaction(async (manager) => {
+      // Lock pesimista: evita doble cierre / doble venta concurrente.
       const cuenta = await manager.findOne(Cuenta, {
         where: { id: cuentaId, tenantId },
+        lock: { mode: 'pessimistic_write' },
       });
       if (!cuenta)
         throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
@@ -524,9 +538,7 @@ export class SalonesService {
 
   /**
    * Calcula el diff (cantidad - cantidad_enviada) de cada línea, agrupado por la
-   * impresora de la categoría del ítem. NO persiste: es una vista previa idempotente.
-   * Ítems sin categoría o cuya categoría no tiene impresora se excluyen. Devuelve
-   * estaciones vacías si no hay nada nuevo. El frontend imprime y luego confirma.
+   * impresora de la categoría del ítem. NO persiste: vista previa de solo lectura.
    */
   async previewComanda(
     tenantId: string,
@@ -542,15 +554,66 @@ export class SalonesService {
       throw new BadRequestException('La cuenta no está abierta');
     }
 
-    const rows: {
-      cuenta_linea_id: string;
-      cantidad: string;
-      cantidad_enviada: string;
-      nombre: string;
-      impresora_id: string | null;
-      impresora_nombre: string | null;
-    }[] = await this.dataSource.query(
-      `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
+    const rows = await this.dataSource.query(
+      this.sqlLineasComanda(),
+      [cuentaId, tenantId],
+    );
+    return { estaciones: this.agruparEstacionesComanda(rows) };
+  }
+
+  /**
+   * Claim atómico: bajo FOR UPDATE calcula diffs, avanza cantidad_enviada y
+   * devuelve lo a imprimir. Dos reclamaciones concurrentes no duplican cocina:
+   * la segunda ve diffs vacíos. El FE imprime después del claim.
+   */
+  async reclamarComanda(
+    tenantId: string,
+    cuentaId: string,
+  ): Promise<{ estaciones: ComandaEstacion[] }> {
+    return this.dataSource.transaction(async (manager) => {
+      const cuenta = await manager.findOne(Cuenta, {
+        where: { id: cuentaId, tenantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!cuenta) {
+        throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+      }
+      if (cuenta.estado !== EstadoCuenta.ABIERTA) {
+        throw new BadRequestException('La cuenta no está abierta');
+      }
+
+      const rows: {
+        cuenta_linea_id: string;
+        cantidad: string;
+        cantidad_enviada: string;
+        nombre: string;
+        impresora_id: string | null;
+        impresora_nombre: string | null;
+      }[] = await manager.query(
+        `${this.sqlLineasComanda()}
+         FOR UPDATE OF cl`,
+        [cuentaId, tenantId],
+      );
+
+      const estaciones = this.agruparEstacionesComanda(rows);
+
+      for (const estacion of estaciones) {
+        for (const item of estacion.items) {
+          await manager.query(
+            `UPDATE cuenta_lineas
+                SET cantidad_enviada = $1, actualizado_el = NOW()
+              WHERE cuenta_linea_id = $2 AND tenant_id = $3`,
+            [item.cantidadEnviada, item.cuentaLineaId, tenantId],
+          );
+        }
+      }
+
+      return { estaciones };
+    });
+  }
+
+  private sqlLineasComanda(): string {
+    return `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
               i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
          FROM cuenta_lineas cl
          JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
@@ -559,10 +622,19 @@ export class SalonesService {
          LEFT JOIN impresoras imp
            ON imp.impresora_id = c.impresora_id AND imp.eliminado_el IS NULL
               AND imp.activo = true
-        WHERE cl.cuenta_id = $1 AND cl.tenant_id = $2 AND cl.eliminado_el IS NULL`,
-      [cuentaId, tenantId],
-    );
+        WHERE cl.cuenta_id = $1 AND cl.tenant_id = $2 AND cl.eliminado_el IS NULL`;
+  }
 
+  private agruparEstacionesComanda(
+    rows: {
+      cuenta_linea_id: string;
+      cantidad: string;
+      cantidad_enviada: string;
+      nombre: string;
+      impresora_id: string | null;
+      impresora_nombre: string | null;
+    }[],
+  ): ComandaEstacion[] {
     const estacionesMap = new Map<string, ComandaEstacion>();
     for (const row of rows) {
       const diff = new Decimal(row.cantidad).minus(row.cantidad_enviada);
@@ -577,19 +649,16 @@ export class SalonesService {
         cuentaLineaId: row.cuenta_linea_id,
         nombre: row.nombre,
         cantidad: diff.toString(),
-        cantidadEnviada: row.cantidad, // total absoluto a persistir al confirmar
+        cantidadEnviada: row.cantidad,
       });
       estacionesMap.set(row.impresora_id, estacion);
     }
-
-    return { estaciones: [...estacionesMap.values()] };
+    return [...estacionesMap.values()];
   }
 
   /**
-   * Marca cantidad_enviada = cantidadEnviada para las líneas que el navegador ya
-   * imprimió. Se llama por estación tras un print exitoso; setear el total absoluto
-   * (no sumar) lo hace idempotente ante reintentos y tolera cambios de cantidad
-   * entre el preview y el confirm.
+   * Marca cantidad_enviada = cantidadEnviada para las líneas (legado; el flujo
+   * principal usa reclamarComanda). Idempotente ante reintentos.
    */
   async confirmarComanda(
     tenantId: string,

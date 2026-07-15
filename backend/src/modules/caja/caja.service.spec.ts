@@ -171,10 +171,11 @@ describe('CajaService', () => {
 
     it('registers an entrada and returns the saved movimiento', async () => {
       managerMock.findOne.mockResolvedValue(mockCajaAbierta);
-      // saldoEsperado query: saldoInicial=1000, entradas=0, salidas=0 → 1000
-      managerMock.query.mockResolvedValue([
-        { saldo_inicial: '1000', total_entradas: null, total_salidas: null },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([{ caja_id: CAJA_ID }]) // FOR UPDATE
+        .mockResolvedValueOnce([
+          { saldo_inicial: '1000', total_entradas: null, total_salidas: null },
+        ]);
       const movCreado = {
         id: 'mov-001',
         cajaId: CAJA_ID,
@@ -193,6 +194,11 @@ describe('CajaService', () => {
         dtoEntrada,
       );
 
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining('FOR UPDATE'),
+        [CAJA_ID, TENANT_ID],
+      );
       expect(managerMock.findOne).toHaveBeenCalledWith(Caja, {
         where: {
           id: CAJA_ID,
@@ -216,11 +222,11 @@ describe('CajaService', () => {
 
     it('throws UnprocessableEntityException when salida exceeds saldo esperado', async () => {
       managerMock.findOne.mockResolvedValue(mockCajaAbierta);
-      // saldo esperado = 1000 + 0 - 0 = 1000, pero salida pide 500 → debería pasar
-      // Para este test: saldo = 300, salida = 500 → saldo insuficiente
-      managerMock.query.mockResolvedValue([
-        { saldo_inicial: '300', total_entradas: null, total_salidas: null },
-      ]);
+      managerMock.query
+        .mockResolvedValueOnce([{ caja_id: CAJA_ID }])
+        .mockResolvedValueOnce([
+          { saldo_inicial: '300', total_entradas: null, total_salidas: null },
+        ]);
 
       await expect(
         service.registrarMovimiento(TENANT_ID, USUARIO_ID, CAJA_ID, dtoSalida),
@@ -232,7 +238,7 @@ describe('CajaService', () => {
     });
 
     it('throws ForbiddenException when caja is closed or not found', async () => {
-      managerMock.findOne.mockResolvedValue(null);
+      managerMock.query.mockResolvedValueOnce([]); // lock falla
 
       await expect(
         service.registrarMovimiento(TENANT_ID, USUARIO_ID, CAJA_ID, dtoEntrada),
@@ -240,6 +246,7 @@ describe('CajaService', () => {
     });
 
     it('throws ForbiddenException when caja belongs to another user', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]);
       const cajaOtroUsuario: Partial<Caja> = {
         ...mockCajaAbierta,
         usuarioId: OTRO_USUARIO,
@@ -259,6 +266,7 @@ describe('CajaService', () => {
     };
 
     beforeEach(() => {
+      managerMock.query.mockResolvedValue([{ caja_id: CAJA_ID }]); // FOR UPDATE
       // Mock calcularSaldoEsperado so cerrar tests don't depend on query internals
       jest
         .spyOn(service, 'calcularSaldoEsperado')
@@ -331,7 +339,7 @@ describe('CajaService', () => {
     });
 
     it('(d) caja ya cerrada o no encontrada → ForbiddenException', async () => {
-      managerMock.findOne.mockResolvedValue(null);
+      managerMock.query.mockResolvedValueOnce([]); // lock falla (no abierta)
 
       await expect(
         service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
@@ -339,6 +347,7 @@ describe('CajaService', () => {
     });
 
     it('(e) caja ajena → ForbiddenException', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]);
       const cajaOtroUsuario: Partial<Caja> = {
         ...mockCajaAbierta,
         usuarioId: OTRO_USUARIO,

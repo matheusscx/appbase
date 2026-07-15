@@ -156,5 +156,13 @@ describe('CatalogService', () => {
         'menor a la precisión de stock',
       );
     });
+
+    it('rechaza factor_base <= 0', async () => {
+      const unidadRota = { ...unidadKg, factorBase: '0' };
+      unidadMedidaRepo.find.mockResolvedValue([unidadG, unidadRota]);
+      await expect(service.convertirUnidad('1', 'g', 'kg')).rejects.toThrow(
+        'El factor de conversión de la unidad debe ser mayor a 0',
+      );
+    });
   });
 });

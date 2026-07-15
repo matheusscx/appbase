@@ -176,8 +176,10 @@ Response (400 — Stock insuficiente):
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete (aunque movimientos raramente se borren) |
 
 **Regla de costo:**
-- **Entrada con costo (compra):** actualiza `item_producto.costo_actual` con el costo unitario del movimiento y congela ese costo en `costo_unitario`.
-- **Cualquier otro movimiento:** congela el `costo_actual` vigente del momento en `costo_unitario` (snapshot del costo).
+- **Entrada con motivo `compra` y `costoUnitario`:** actualiza `item_producto.costo_actual` y congela ese costo en `costo_unitario` del movimiento. Costos `<= 0` se rechazan.
+- **Otras entradas con `costoUnitario`:** congelan el valor en el kardex **sin** pisar `costo_actual`.
+- **Cualquier otro movimiento (sin costoUnitario):** congela el `costo_actual` vigente del momento en `costo_unitario` (snapshot del costo).
+- En `ajustarStock`, la fila `item_producto` se bloquea con `FOR UPDATE` antes de convertir unidades.
 
 **Índices (para performance):**
 - `(tenant_id, item_id)` — consultas por producto del tenant

@@ -1,7 +1,7 @@
 import {
   IsIn,
   IsNumber,
-  Min,
+  IsPositive,
   IsOptional,
   IsString,
   IsArray,
@@ -55,7 +55,7 @@ export class LoteAjusteInputDto {
 
 export class AjusteStockDto {
   @IsNumber()
-  @Min(0)
+  @IsPositive()
   @Type(() => Number)
   cantidad: number;
 

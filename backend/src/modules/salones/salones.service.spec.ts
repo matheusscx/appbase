@@ -113,11 +113,19 @@ describe('SalonesService', () => {
   describe('abrirCuenta', () => {
     it('asigna el número correlativo entre las cuentas abiertas de la mesa', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
-      manager.query.mockResolvedValue([{ next: '3' }]);
+      manager.query
+        .mockResolvedValueOnce([{ mesa_id: MESA }]) // FOR UPDATE mesa
+        .mockResolvedValueOnce([{ next: '3' }]);
 
       const result = await service.abrirCuenta(TENANT, MESA, { pin: PIN });
 
-      expect(manager.query).toHaveBeenCalledWith(
+      expect(manager.query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining('FOR UPDATE'),
+        [MESA, TENANT],
+      );
+      expect(manager.query).toHaveBeenNthCalledWith(
+        2,
         expect.stringContaining('mesa_id = $2 AND estado = $3'),
         [TENANT, MESA, EstadoCuenta.ABIERTA],
       );
@@ -147,7 +155,9 @@ describe('SalonesService', () => {
 
     it('reinicia en 1 cuando la mesa no tiene cuentas abiertas (quedó libre)', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
-      manager.query.mockResolvedValue([{ next: '1' }]);
+      manager.query
+        .mockResolvedValueOnce([{ mesa_id: MESA }])
+        .mockResolvedValueOnce([{ next: '1' }]);
 
       const result = await service.abrirCuenta(TENANT, MESA, { pin: PIN });
 
@@ -352,6 +362,13 @@ describe('SalonesService', () => {
         pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
       });
 
+      expect(manager.findOne).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({
+          where: { id: CUENTA, tenantId: TENANT },
+          lock: { mode: 'pessimistic_write' },
+        }),
+      );
       expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
         manager,
         TENANT,
@@ -504,6 +521,66 @@ describe('SalonesService', () => {
       await expect(service.previewComanda(TENANT, CUENTA)).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('reclamarComanda', () => {
+    it('avanza cantidad_enviada y devuelve estaciones en un solo claim', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            cuenta_linea_id: 'linea-1',
+            cantidad: '3',
+            cantidad_enviada: '1',
+            nombre: 'Lomo a lo pobre',
+            impresora_id: 'impresora-cocina',
+            impresora_nombre: 'Cocina',
+          },
+        ])
+        .mockResolvedValueOnce(undefined); // UPDATE cantidad_enviada
+
+      const result = await service.reclamarComanda(TENANT, CUENTA);
+
+      expect(result.estaciones).toHaveLength(1);
+      expect(result.estaciones[0].items[0].cantidad).toBe('2');
+      expect(manager.query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining('FOR UPDATE OF cl'),
+        [CUENTA, TENANT],
+      );
+      expect(manager.query).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('SET cantidad_enviada'),
+        ['3', 'linea-1', TENANT],
+      );
+    });
+
+    it('segundo claim sobre la misma cuenta sin pendientes: estaciones vacías', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      manager.query.mockResolvedValueOnce([
+        {
+          cuenta_linea_id: 'linea-1',
+          cantidad: '3',
+          cantidad_enviada: '3',
+          nombre: 'Lomo',
+          impresora_id: 'impresora-cocina',
+          impresora_nombre: 'Cocina',
+        },
+      ]);
+
+      const result = await service.reclamarComanda(TENANT, CUENTA);
+
+      expect(result.estaciones).toEqual([]);
+      expect(manager.query).toHaveBeenCalledTimes(1); // solo SELECT, sin UPDATE
     });
   });
 

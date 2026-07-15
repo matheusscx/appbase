@@ -139,18 +139,19 @@ export function useImpresoras() {
     useApiFetch(`${apiUrl}/impresoras/${id}`, { method: 'DELETE' })
 
   /**
-   * Envía la comanda pendiente en dos fases: (1) consulta el diff sin mutar
-   * (`GET .../comanda/pendiente`); (2) imprime un ticket por estación y, SOLO tras
-   * imprimir OK, confirma esa estación (`POST .../comanda` marca cantidad_enviada).
-   * Si QZ Tray falla, la estación no se confirma → queda pendiente y reintentable,
-   * en vez de perderse (no hay reimpresión de comandas).
+   * Claim atómico + impresión: (1) `POST .../comanda/reclamar` bajo FOR UPDATE
+   * avanza cantidad_enviada y devuelve lo pendiente; (2) imprime cada estación.
+   * Dos clients concurrentes no duplican cocina (el segundo recibe vacío).
+   * Si QZ Tray falla tras el claim, la estación ya quedó marcada como enviada
+   * (prioriza no imprimir doble en cocina frente a reintento automático).
    */
   async function imprimirComanda(
     cuentaId: string,
     contexto: { mesaNombre: string, cuentaNumero: number, garzonNombre: string | null },
   ): Promise<ComandaEstacion[]> {
     const { estaciones } = await useApiFetch<ComandaPreviewResponse>(
-      `${apiUrl}/cuentas/${cuentaId}/comanda/pendiente`,
+      `${apiUrl}/cuentas/${cuentaId}/comanda/reclamar`,
+      { method: 'POST' },
     )
     if (estaciones.length === 0) return estaciones
 
@@ -163,19 +164,10 @@ export function useImpresoras() {
         mesaNombre: contexto.mesaNombre,
         cuentaNumero: contexto.cuentaNumero,
         garzonNombre: contexto.garzonNombre,
-        items: estacion.items, // el builder usa {nombre, cantidad}; ignora los extras
+        items: estacion.items,
         fecha: new Date(),
       })
-      await imprimirEn(impresora, lineas, apiUrl) // si lanza, esta estación NO se confirma
-      await useApiFetch(`${apiUrl}/cuentas/${cuentaId}/comanda`, {
-        method: 'POST',
-        body: {
-          lineas: estacion.items.map(it => ({
-            cuentaLineaId: it.cuentaLineaId,
-            cantidadEnviada: it.cantidadEnviada,
-          })),
-        },
-      })
+      await imprimirEn(impresora, lineas, apiUrl)
     }
     return estaciones
   }

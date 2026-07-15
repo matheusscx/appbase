@@ -121,6 +121,27 @@ export class CajaService {
     return this.cajaRepo.save(caja);
   }
 
+  /**
+   * Lock pesimista de una caja abierta. Debe llamarse dentro de una transacción
+   * abierta antes de leer saldo o egresar (evita TOCTOU entre NC / movimientos).
+   */
+  async bloquearCajaAbierta(
+    manager: EntityManager,
+    cajaId: string,
+    tenantId: string,
+  ): Promise<void> {
+    const rows: { caja_id: string }[] = await manager.query(
+      `SELECT caja_id FROM cajas
+        WHERE caja_id = $1 AND tenant_id = $2
+          AND estado = 'abierta' AND eliminado_el IS NULL
+        FOR UPDATE`,
+      [cajaId, tenantId],
+    );
+    if (!rows.length) {
+      throw new ForbiddenException('Caja no encontrada o no está abierta');
+    }
+  }
+
   async calcularSaldoEsperado(
     cajaId: string,
     manager: EntityManager,
@@ -155,6 +176,8 @@ export class CajaService {
     dto: CerrarCajaDto,
   ): Promise<Caja> {
     return this.dataSource.transaction(async (manager) => {
+      await this.bloquearCajaAbierta(manager, cajaId, tenantId);
+
       const caja = await manager.findOne(Caja, {
         where: {
           id: cajaId,
@@ -219,6 +242,8 @@ export class CajaService {
     dto: CrearMovimientoDto,
   ): Promise<MovimientoCaja> {
     return this.dataSource.transaction(async (manager) => {
+      await this.bloquearCajaAbierta(manager, cajaId, tenantId);
+
       const caja = await manager.findOne(Caja, {
         where: {
           id: cajaId,

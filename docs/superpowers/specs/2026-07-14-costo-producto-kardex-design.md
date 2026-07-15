@@ -62,10 +62,11 @@ capturar y congelar el hecho financiero en el momento de la transacción.
 | `costo_unitario` | `NUMERIC(18,4)` NULL | Costo congelado del momento. Nullable para movimientos históricos previos. |
 
 Regla de congelado por movimiento:
-- **Entrada por compra** → `costo_unitario` = costo ingresado; **además** sobrescribe `item_producto.costo_actual`.
+- **Entrada con motivo `compra` y costo** → `costo_unitario` = costo ingresado; **además** sobrescribe `item_producto.costo_actual`.
+- **Otras entradas con costo** → congelan `costo_unitario` en el kardex **sin** pisar `costo_actual`.
 - **Salida (venta / merma / ajuste)** → `costo_unitario` = `costo_actual` vigente en ese instante (habilita utilidad histórica 2.2 y merma valorizada 4.1).
 - **Entrada/salida por ajuste sin costo** → `costo_unitario` = `costo_actual` vigente (o NULL si no hay costo cargado).
-
+- Costos presentes deben ser `> 0` (`BadRequest` si `<= 0`).
 ### Cambios de API
 
 - `CreateItemDto` + `costo?: string` (`@IsNumberString @IsOptional`) — costo inicial del producto.
@@ -73,8 +74,10 @@ Regla de congelado por movimiento:
   **sin generar movimiento** (es corrección de un valor vigente, no un movimiento de stock).
 - `AjusteStockDto` + `costoUnitario?: string` — costo pagado en la entrada por compra.
 - `InventarioService.registrarMovimiento(manager, params)` + param `costoUnitario?`:
-  - si viene (compra) → congela ese costo en el movimiento y actualiza `item_producto.costo_actual`;
-  - si no viene → congela el `costo_actual` vigente en el movimiento.
+  - si viene y `tipo === 'entrada' && motivo === 'compra'` → congela ese costo en el movimiento y actualiza `item_producto.costo_actual`;
+  - si viene en otra entrada → congela en el movimiento **sin** actualizar `costo_actual`;
+  - si no viene → congela el `costo_actual` vigente en el movimiento;
+  - rechaza `costoUnitario <= 0` cuando está presente.
   - Todo dentro de la transacción existente (misma unidad atómica que stock + movimiento).
 - Response DTOs (`MovimientoInventarioDto`, respuesta de items) exponen `costo_actual` / `costo_unitario`.
 

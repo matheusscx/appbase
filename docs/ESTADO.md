@@ -46,4 +46,5 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Suscripciones — cobro Oneclick real en el alta (cobro del primer período con tarjeta tokenizada, suscripción amarrada a inscripción, alta reanudable tras inscribir tarjeta, cambio de tarjeta, cascada de cancelación al eliminar la tarjeta) | ✅ Implementado (2026-07-12) |
 | Salones y Mesas (restaurante): administración de salones/mesas con plano drag&drop (forma y tamaño de mesa), operación del garzón (cuentas por mesa, múltiples cuentas, cancelar), cierre de cuenta que genera venta real reusando el POS | ✅ Implementado (2026-07-12) |
 | Gestión de Garzones: registro de garzones con PIN de 6 dígitos (hasheado), identificación operativa por PIN en dispositivos compartidos, trazabilidad de quién abre/cierra cada cuenta | ✅ Implementado (2026-07-13) |
-| Impresión Térmica (comandas cocina/barra por categoría en dos fases, precuenta, boleta vía QZ Tray) | ✅ Implementado (2026-07-13) |
+| Impresión Térmica (comandas cocina/barra por categoría via claim atómico + QZ Tray, precuenta, boleta) | ✅ Implementado (2026-07-13; claim atómico 2026-07-15) |
+| Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base/costo > 0) | ✅ Implementado (2026-07-15) |

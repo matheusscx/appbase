@@ -409,7 +409,7 @@ describe('InventarioService', () => {
   // Costo (congelación en kardex)
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — costo', () => {
-    it('entrada con costoUnitario: congela el costo y actualiza costo_actual', async () => {
+    it('entrada con costoUnitario y motivo compra: congela el costo y actualiza costo_actual', async () => {
       managerMock.query
         .mockResolvedValueOnce([
           { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
@@ -441,6 +441,50 @@ describe('InventarioService', () => {
         expect.stringContaining('costo_actual'),
         ['4500', ITEM_ID],
       );
+    });
+
+    it('entrada ajuste_manual con costoUnitario: congela en kardex sin pisar costo_actual', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-c1b' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'ajuste_manual',
+          cantidad: '5',
+          usuarioId: USER_ID,
+          costoUnitario: '4500',
+        },
+      );
+
+      const insertCall = managerMock.query.mock.calls[2];
+      expect(insertCall[1]).toContain('4500');
+      expect(managerMock.query).toHaveBeenCalledTimes(3); // sin UPDATE costo_actual
+    });
+
+    it('rechaza costoUnitario <= 0', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          usuarioId: USER_ID,
+          costoUnitario: '0',
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('salida sin costoUnitario: congela el costo_actual vigente y no lo modifica', async () => {

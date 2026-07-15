@@ -138,6 +138,7 @@ describe('VentasService', () => {
             findActiva: jest.fn().mockResolvedValue(mockCajaActiva),
             findVirtual: jest.fn().mockResolvedValue(mockCajaVirtual),
             calcularSaldoEsperado: jest.fn().mockResolvedValue('50000.0000'),
+            bloquearCajaAbierta: jest.fn().mockResolvedValue(undefined),
             registrarMovimientoEnTransaccion: jest
               .fn()
               .mockResolvedValue({ id: 'mov-caja-nc-1' }),

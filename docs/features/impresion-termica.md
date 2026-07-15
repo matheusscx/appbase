@@ -53,11 +53,15 @@ La comanda usa **dos fases** (permiso `Salones:Operar`, ver
 [salones-mesas.md](./salones-mesas.md)) para no perder pedidos si la impresión del
 navegador falla:
 
-- `GET /cuentas/:id/comanda/pendiente` calcula el diff pendiente por línea agrupado
-  por impresora y devuelve `{ estaciones: [{ impresoraId, nombre, items: [{ cuentaLineaId, nombre, cantidad, cantidadEnviada }] }] }` **sin persistir nada**.
-- `POST /cuentas/:id/comanda` recibe `{ lineas: [{ cuentaLineaId, cantidadEnviada }] }`
-  y marca `cantidad_enviada` — lo llama el frontend **por estación, solo tras** imprimir
-  OK. Un fallo de QZ Tray deja las estaciones no confirmadas pendientes y reintentables.
+La comanda usa **claim atómico** (permiso `Salones:Operar`, ver
+[`salones-mesas.md`](./salones-mesas.md)):
+
+- `POST /cuentas/:id/comanda/reclamar` bajo `FOR UPDATE` calcula el diff pendiente,
+  avanza `cantidad_enviada` y devuelve `{ estaciones: [...] }` a imprimir. Dos
+  clients concurrentes no duplican cocina (el segundo recibe vacío).
+- `GET /cuentas/:id/comanda/pendiente` queda como preview de solo lectura (no muta).
+- `POST /cuentas/:id/comanda` (confirm legado) se mantiene por compatibilidad; el FE
+  principal ya no lo usa tras el claim.
 
 Precuenta y boleta no tienen endpoint propio: el frontend arma el ticket con los
 datos que ya tiene (resultado del motor de precios + pagos) y lo imprime en la

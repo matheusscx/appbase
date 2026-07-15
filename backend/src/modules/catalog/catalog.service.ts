@@ -84,10 +84,23 @@ export class CatalogService {
       );
     }
 
+    const factorDesde = new Decimal(desde.factorBase);
+    const factorHacia = new Decimal(hacia.factorBase);
+    if (
+      factorDesde.lessThanOrEqualTo(0) ||
+      factorHacia.lessThanOrEqualTo(0) ||
+      factorDesde.isNaN() ||
+      factorHacia.isNaN()
+    ) {
+      throw new BadRequestException(
+        'El factor de conversión de la unidad debe ser mayor a 0',
+      );
+    }
+
     const original = new Decimal(cantidad);
     const convertida = original
-      .mul(desde.factorBase)
-      .div(hacia.factorBase)
+      .mul(factorDesde)
+      .div(factorHacia)
       .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
 
     if (convertida.isZero() && original.greaterThan(0)) {

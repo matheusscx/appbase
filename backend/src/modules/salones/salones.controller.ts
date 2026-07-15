@@ -181,6 +181,13 @@ export class CuentasController {
     return this.salonesService.previewComanda(u.tenantId ?? '', id);
   }
 
+  @Post(':id/comanda/reclamar')
+  @RequiresPermiso('Salones', 'Operar')
+  reclamarComanda(@Req() req: Request, @Param('id') id: string) {
+    const u = req.user as JwtUser;
+    return this.salonesService.reclamarComanda(u.tenantId ?? '', id);
+  }
+
   @Post(':id/comanda')
   @RequiresPermiso('Salones', 'Operar')
   confirmarComanda(

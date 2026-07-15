@@ -89,11 +89,29 @@ export class InventarioService {
     }
 
     const costoActualPrevio = productoRows[0].costo_actual ?? null;
+
+    if (params.costoUnitario != null) {
+      let costoIngresado: Decimal;
+      try {
+        costoIngresado = new Decimal(params.costoUnitario);
+      } catch {
+        throw new BadRequestException('El costo unitario debe ser mayor a 0');
+      }
+      if (costoIngresado.isNaN() || costoIngresado.lessThanOrEqualTo(0)) {
+        throw new BadRequestException('El costo unitario debe ser mayor a 0');
+      }
+    }
+
+    // Solo la compra actualiza costo_actual; otras entradas pueden congelar un
+    // costoUnitario en el movimiento sin pisar el vigente del producto.
     const aplicaCostoNuevo =
-      params.costoUnitario != null && params.tipo === 'entrada';
-    const costoUnitarioCongelado = aplicaCostoNuevo
-      ? params.costoUnitario!
-      : costoActualPrevio;
+      params.costoUnitario != null &&
+      params.tipo === 'entrada' &&
+      params.motivo === 'compra';
+    const costoUnitarioCongelado =
+      params.costoUnitario != null
+        ? params.costoUnitario
+        : costoActualPrevio;
 
     let result: MoverResult;
 

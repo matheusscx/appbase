@@ -159,7 +159,7 @@ Response (200):
 | `codigo` | TEXT | UNIQUE, NOT NULL | Código guardado en `item_producto.unidad_medida` (kg, g, l, ml, unidad, m) |
 | `nombre` | TEXT | NOT NULL | Etiqueta legible para UI ("Kilogramo") |
 | `magnitud` | TEXT | NOT NULL | `'masa'` \| `'volumen'` \| `'conteo'` \| `'longitud'` — Solo se convierte dentro de una magnitud |
-| `factor_base` | NUMERIC(18,6) | NOT NULL | Cuántas unidades base (de la magnitud) equivale 1 de esta. Ej: `kg` = 1000 g → `factor_base = 1000` |
+| `factor_base` | NUMERIC(18,6) | NOT NULL, CHECK > 0 | Cuántas unidades base (de la magnitud) equivale 1 de esta. Ej: `kg` = 1000 g → `factor_base = 1000`. Runtime también valida en `convertirUnidad`. |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | — | Convención transversal; lecturas filtran `eliminado_el IS NULL` |
 
 ### Semilla (6 Unidades)
@@ -193,7 +193,8 @@ redondeada a 4 decimales (ROUND_HALF_UP).
 **Validaciones:**
 1. Unidad desconocida → `BadRequest` ("Unidad de medida no reconocida: X")
 2. Magnitudes distintas → `BadRequest` ("No se puede convertir de masa a volumen")
-3. Cantidad convertida que redondea a 0 (cuando original > 0) → `BadRequest` ("La cantidad convertida es menor a la precisión de stock")
+3. `factor_base <= 0` → `BadRequest` ("El factor de conversión de la unidad debe ser mayor a 0")
+4. Cantidad convertida que redondea a 0 (cuando original > 0) → `BadRequest` ("La cantidad convertida es menor a la precisión de stock")
 
 **Precisión — decisión explícita:** La escala de `item_producto.stock` y `movimientos_inventario.cantidad` es NUMERIC(18,4), así que 4 decimales es el límite. Convertir 1 g a kg da 0.0010, exacto. Pero cantidades chicas en magnitudes con salto de 1000 pueden perder resolución (ej: 0.00005 kg → 0.0001). Se acepta: el límite es preexistente, no lo introduce la conversión.
 

@@ -479,6 +479,11 @@ export class VentasService {
           throw new UnprocessableEntityException(
             'No tienes una caja física abierta para registrar la devolución de dinero',
           );
+        await this.cajaService.bloquearCajaAbierta(
+          manager,
+          caja.id,
+          params.tenantId,
+        );
         const saldo = await this.cajaService.calcularSaldoEsperado(
           caja.id,
           manager,

@@ -204,6 +204,9 @@ export class ItemsService {
         'La frecuencia solo aplica a items de suscripción',
       );
     }
+    if (dto.costo != null) {
+      this.validarCostoPositivo(dto.costo);
+    }
     return this.dataSource.transaction(async (manager) => {
       await this.validarMoneda(manager, tenantId, dto.monedaId);
       if (dto.categoriaId) {
@@ -502,6 +505,9 @@ export class ItemsService {
           prodParams.push(dto.fechaVencimiento);
         }
         if (dto.costo !== undefined) {
+          if (dto.costo != null) {
+            this.validarCostoPositivo(dto.costo);
+          }
           prodClauses.push(`costo_actual = $${pidx++}`);
           prodParams.push(dto.costo);
         }
@@ -613,7 +619,7 @@ export class ItemsService {
       if (dto.unidadCodigo) {
         const prodRows: { unidad_medida: string; modo_inventario: string }[] =
           await manager.query(
-            `SELECT unidad_medida, modo_inventario FROM item_producto WHERE item_id = $1`,
+            `SELECT unidad_medida, modo_inventario FROM item_producto WHERE item_id = $1 FOR UPDATE`,
             [itemId],
           );
         const unidadBase = prodRows[0]?.unidad_medida;
@@ -718,6 +724,19 @@ export class ItemsService {
   }
 
   // ── private helpers ────────────────────────────────────────────────────────
+
+  /** Rechaza costos presentes que no sean > 0 (NULL = sin costo sigue permitido). */
+  private validarCostoPositivo(costo: string): void {
+    let value: Decimal;
+    try {
+      value = new Decimal(costo);
+    } catch {
+      throw new BadRequestException('El costo debe ser mayor a 0');
+    }
+    if (value.isNaN() || value.lessThanOrEqualTo(0)) {
+      throw new BadRequestException('El costo debe ser mayor a 0');
+    }
+  }
 
   /** Valida que el código exista en el catálogo global de unidades de medida. */
   private async validarUnidadMedida(codigo: string): Promise<void> {
