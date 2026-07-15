@@ -241,12 +241,12 @@ En `ItemsService.ajustarStock` (líneas 593–652):
 
 El `catalog.service` carga `GET /catalog/unidades-medida` al iniciar y lo almacena en un store (Pinia o estado global). El selector de unidades en:
 
-- Formulario de item: lista todas las unidades cargadas, pre-filtradas según `tipo` (producto requiere unidad; otros tipos no la usan).
+- Formulario de item: lista todas las unidades cargadas del catálogo; el campo solo se muestra cuando `tipo === 'producto'`.
 - Modal de ajuste de stock: lista las unidades de la **misma magnitud** que la base del producto (previene cross-magnitud accidental).
 
 ### Selector de Unidad en Formulario de Item
 
-En `items.vue`, el `<USelectMenu>` de unidad reemplaza la constante `unidadesMedidaOpts` (líneas 149–154) por la lista cargada del catálogo. Deshabilitado (con hint) si el producto ya tiene movimientos, respetando la regla "no cambiar base con movimientos".
+En `items.vue`, el `<USelectMenu>` de unidad reemplaza la constante `unidadesMedidaOpts` (líneas 149–154) por la lista cargada del catálogo. **Decisión explícita:** no se deshabilita el selector en el frontend aunque el producto tenga movimientos — se deja que el backend rechace el cambio (`update`, ver "Rechazo: Cambio de Base con Movimientos") y el error se muestra al usuario. Evita duplicar la regla de negocio en dos capas.
 
 ### Modal de Ajuste de Stock
 
@@ -434,7 +434,7 @@ npm run test:e2e -- inventario.e2e-spec.ts
 |------|--------|-----------|
 | Cross-magnitud accidental (usuario selecciona ml para producto en kg) | Validación backend rechaza; frontend limita a magnitud | Selector frontend pre-filtrado; mensaje de error claro en Swagger |
 | Pérdida de resolución (0.00005 kg → 0.0001 al redondear a 4 decimales) | Cantidad que debería ser registrada se pierde silenciosamente | Se rechaza si redondea a 0 y original > 0; el límite es preexistente (NUMERIC(18,4)) |
-| Cambio de base sin notice (usuario cambia unidad de 'kg' a 'g' sin darse cuenta) | Stock histórico se interpreta mal (100 kg = 100 g) | Rechazar cambio si hay movimientos; frontend desabilita selector si hay movimientos |
+| Cambio de base sin notice (usuario cambia unidad de 'kg' a 'g' sin darse cuenta) | Stock histórico se interpreta mal (100 kg = 100 g) | Backend rechaza el cambio si hay movimientos (400); el frontend no bloquea el selector, solo propaga el error |
 | Inconsistencia entre BD y catálogo en runtime (alguien borra 'kg' de la tabla) | Item no válido, nuevos items con 'kg' fallan | Catálogo global es inmutable tras seed; no hay UI para editar/borrar unidades |
 
 ---
