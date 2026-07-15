@@ -874,6 +874,48 @@ describe('ItemsService', () => {
       expect(updateReceta?.[0]).toContain('costo_propuesto_omitido = NULL');
       expect(updateReceta?.[1]).toEqual(['120', ITEM_ID]);
     });
+
+    it.each([
+      { field: 'impuestosIds', value: ['imp-1'] },
+      { field: 'recargosIds', value: ['rec-1'] },
+      { field: 'descuentosIds', value: ['desc-1'] },
+    ])(
+      'rechaza $field en ingrediente',
+      async ({ field, value }) => {
+        managerMock.query.mockResolvedValueOnce([
+          { item_id: ITEM_ID, tipo: 'ingrediente' },
+        ]);
+
+        await expect(
+          service.update(TENANT, ITEM_ID, { [field]: value } as any),
+        ).rejects.toThrow(BadRequestException);
+      },
+    );
+
+    it('rechaza modoInventario distinto de cantidad en ingrediente', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { item_id: ITEM_ID, tipo: 'ingrediente' },
+      ]);
+
+      await expect(
+        service.update(TENANT, ITEM_ID, { modoInventario: 'lote' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('persiste precio_base = 0 al actualizar ingrediente con precioBase', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'ingrediente' }]) // SELECT existing
+        .mockResolvedValueOnce(undefined); // UPDATE items
+
+      await service.update(TENANT, ITEM_ID, { precioBase: '999' });
+
+      const updateItems = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' && c[0].includes('UPDATE items'),
+      );
+      expect(updateItems).toBeDefined();
+      expect(updateItems?.[1]?.[0]).toBe('0');
+    });
   });
 
   // ── remove ─────────────────────────────────────────────────────────────────
