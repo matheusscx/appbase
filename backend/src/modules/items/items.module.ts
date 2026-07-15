@@ -9,6 +9,7 @@ import { ItemUnidad } from './entities/item-unidad.entity';
 import { ItemsService } from './items.service';
 import { ItemsController } from './items.controller';
 import { InventarioModule } from '../inventario/inventario.module';
+import { CatalogModule } from '../catalog/catalog.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { InventarioModule } from '../inventario/inventario.module';
       ItemUnidad,
     ]),
     InventarioModule,
+    CatalogModule,
   ],
   controllers: [ItemsController],
   providers: [ItemsService],

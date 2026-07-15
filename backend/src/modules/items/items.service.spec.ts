@@ -7,6 +7,7 @@ import { Item } from './entities/item.entity';
 import { ItemProducto } from './entities/item-producto.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
 import { InventarioService } from '../inventario/inventario.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
@@ -21,6 +22,10 @@ describe('ItemsService', () => {
   let managerMock: { query: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let inventarioServiceMock: { registrarMovimiento: jest.Mock };
+  let catalogServiceMock: {
+    findAllUnidadesMedida: jest.Mock;
+    convertirUnidad: jest.Mock;
+  };
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
@@ -34,6 +39,14 @@ describe('ItemsService', () => {
     itemProductoRepo = { findOne: jest.fn() };
     itemServicioRepo = { findOne: jest.fn() };
     inventarioServiceMock = { registrarMovimiento: jest.fn() };
+    catalogServiceMock = {
+      findAllUnidadesMedida: jest.fn().mockResolvedValue([
+        { codigo: 'unidad', magnitud: 'conteo', factorBase: '1' },
+        { codigo: 'g', magnitud: 'masa', factorBase: '1' },
+        { codigo: 'kg', magnitud: 'masa', factorBase: '1000' },
+      ]),
+      convertirUnidad: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -49,6 +62,7 @@ describe('ItemsService', () => {
         },
         { provide: DataSource, useValue: dataSource },
         { provide: InventarioService, useValue: inventarioServiceMock },
+        { provide: CatalogService, useValue: catalogServiceMock },
       ],
     }).compile();
 
@@ -628,6 +642,53 @@ describe('ItemsService', () => {
         managerMock,
         expect.objectContaining({ costoUnitario: '4500' }),
       );
+    });
+  });
+
+  // ── validación de unidad de medida ────────────────────────────────────────
+
+  describe('validación de unidad de medida', () => {
+    it('rechaza crear un producto con una unidad que no está en el catálogo', async () => {
+      // La validación ocurre dentro de create(), después de validarMoneda y del
+      // INSERT en items (mismo orden real de queries que el resto del describe
+      // "create"), antes del INSERT INTO item_producto.
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+        .mockResolvedValueOnce([{ item_id: 'item-x' }]); // INSERT items RETURNING
+
+      await expect(
+        service.create('tenant-uuid', 'usuario-uuid', {
+          nombre: 'Producto raro',
+          precioBase: '1000',
+          monedaId: 'moneda-uuid',
+          tipo: 'producto',
+          unidadMedida: 'inventada',
+        }),
+      ).rejects.toThrow('Unidad de medida no reconocida: inventada');
+    });
+
+    it('rechaza cambiar la unidad de un producto que ya tiene movimientos', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }]) // lectura del item
+        .mockResolvedValueOnce([{ unidad_medida: 'kg' }]) // unidad actual
+        .mockResolvedValueOnce([{ cnt: '3' }]); // movimientos existentes
+
+      await expect(
+        service.update('tenant-uuid', 'item-uuid', { unidadMedida: 'g' }),
+      ).rejects.toThrow(
+        'No se puede cambiar la unidad de medida de un producto con movimientos registrados',
+      );
+    });
+
+    it('permite reenviar la misma unidad en una edición aunque haya movimientos', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([{ unidad_medida: 'kg' }])
+        .mockResolvedValue([]);
+
+      await expect(
+        service.update('tenant-uuid', 'item-uuid', { unidadMedida: 'kg' }),
+      ).resolves.toBeDefined();
     });
   });
 });

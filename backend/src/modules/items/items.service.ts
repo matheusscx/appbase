@@ -14,6 +14,7 @@ import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { InventarioService } from '../inventario/inventario.service';
+import { CatalogService } from '../catalog/catalog.service';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
   buildPaginationMeta,
@@ -57,6 +58,7 @@ export class ItemsService {
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly inventarioService: InventarioService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   private readonly BASE_QUERY = `
@@ -256,6 +258,10 @@ export class ItemsService {
       const itemId = itemRows[0].item_id;
 
       if (dto.tipo === 'producto') {
+        if (dto.unidadMedida !== undefined) {
+          await this.validarUnidadMedida(dto.unidadMedida);
+        }
+
         const modo = dto.modoInventario ?? 'cantidad';
         await manager.query(
           `INSERT INTO item_producto
@@ -442,6 +448,33 @@ export class ItemsService {
             throw new BadRequestException(
               'No se puede cambiar el modo de inventario de un producto con movimientos registrados',
             );
+          }
+        }
+
+        // Cambiar la unidad base con stock ya acumulado lo corrompería en silencio:
+        // 100 kg pasarían a leerse como 100 g. Solo se rechaza si cambia de verdad
+        // (el frontend reenvía la unidad en toda edición).
+        if (dto.unidadMedida !== undefined) {
+          await this.validarUnidadMedida(dto.unidadMedida);
+
+          const prodRows: { unidad_medida: string }[] = await manager.query(
+            `SELECT unidad_medida FROM item_producto WHERE item_id = $1`,
+            [itemId],
+          );
+          if (
+            prodRows.length &&
+            prodRows[0].unidad_medida !== dto.unidadMedida
+          ) {
+            const movRows: { cnt: string }[] = await manager.query(
+              `SELECT COUNT(*) AS cnt FROM movimientos_inventario
+               WHERE item_id = $1 AND eliminado_el IS NULL`,
+              [itemId],
+            );
+            if (parseInt(movRows[0].cnt) > 0) {
+              throw new BadRequestException(
+                'No se puede cambiar la unidad de medida de un producto con movimientos registrados',
+              );
+            }
           }
         }
 
@@ -661,6 +694,17 @@ export class ItemsService {
   }
 
   // ── private helpers ────────────────────────────────────────────────────────
+
+  /** Valida que el código exista en el catálogo global de unidades de medida. */
+  private async validarUnidadMedida(codigo: string): Promise<void> {
+    const unidades = await this.catalogService.findAllUnidadesMedida();
+    if (!unidades.some((u) => u.codigo === codigo)) {
+      const validas = unidades.map((u) => u.codigo).join(', ');
+      throw new BadRequestException(
+        `Unidad de medida no reconocida: ${codigo}. Válidas: ${validas}`,
+      );
+    }
+  }
 
   private async validarMoneda(
     manager: EntityManager,
