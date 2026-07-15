@@ -7,6 +7,11 @@ import {
   type TicketTotales,
   type TicketPago,
 } from '~/utils/ticket-builder'
+import { conTimeout } from '~/utils/con-timeout'
+
+/** Techo de espera de QZ Tray al imprimir (impresora apagada / host inalcanzable). */
+const PRINT_TIMEOUT_MS = 5_000
+const PRINT_TIMEOUT_MSG = 'La impresora no respondió (timeout 5 s)'
 
 // ── Tipos (espejo del contrato del backend impresoras) ──────────────────────
 
@@ -110,7 +115,11 @@ async function imprimirEn(
     // ESC/POS al final del ticket: avanza 4 líneas (ESC d 4) y corta total
     // (GS V 0). Las impresoras sin cutter ignoran el comando sin efecto.
     const CORTE = '\x1B\x64\x04\x1D\x56\x00'
-    await qz.print(config, [lineas.join('\n') + '\n', CORTE])
+    await conTimeout(
+      qz.print(config, [lineas.join('\n') + '\n', CORTE]),
+      PRINT_TIMEOUT_MS,
+      PRINT_TIMEOUT_MSG,
+    )
   }
   catch (err) {
     // Log del motivo real del rechazo de QZ Tray (apiErrorMsg lo resume a un

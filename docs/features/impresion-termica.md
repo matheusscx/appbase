@@ -114,6 +114,12 @@ sistema operativo. **Ojo:** un `ping` (ICMP) a la impresora no garantiza que el
 puerto 9100 TCP esté abierto — si `qz.print` da `ConnectException: timed out`,
 revisar la IP/puerto reales de la impresora (no la del seed demo).
 
+**Timeout de impresión:** `imprimirEn` limita `qz.print` a **5 s** (`conTimeout`).
+Si la impresora está apagada o el host es inalcanzable, QZ/Java puede colgar el
+TCP mucho más; el front corta con `La impresora no respondió (timeout 5 s)` y el
+toast conserva el contexto (boleta/comanda/precuenta). Aplica a comanda, precuenta
+y boleta (mismo camino).
+
 **Corte de papel:** el `ticket-builder` es texto puro (sin comandos de control); el
 corte se envía en la capa de transporte (`imprimirEn`) como bytes ESC/POS al final:
 `\x1B\x64\x04` (avanza 4 líneas) + `\x1D\x56\x00` (`GS V 0`, corte total). Las
