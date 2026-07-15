@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { ItemsService } from './items.service';
 import { Item } from './entities/item.entity';
 import { ItemProducto } from './entities/item-producto.entity';
@@ -1147,6 +1148,167 @@ describe('ItemsService', () => {
       await expect(
         service.venderIngredientesReceta(managerMock as any, PARAMS),
       ).rejects.toThrow('El item no tiene control de stock');
+    });
+  });
+
+  describe('desfases de costo de recetas', () => {
+    const RECETA_ID = 'receta-1';
+    const CARNE_ID = 'carne-1';
+
+    function mockRecetaConIngredientes(opts: {
+      costoCacheado: string;
+      omitido: string | null;
+      precioBase: string;
+      ingredientes: {
+        itemId: string;
+        nombre: string;
+        cantidad: string;
+        unidadCodigo: string;
+        unidadBase: string;
+        costoActual: string | null;
+      }[];
+    }) {
+      dataSource.query.mockResolvedValueOnce([
+        {
+          receta_item_id: RECETA_ID,
+          nombre: 'Hamburguesa',
+          costo_actual: opts.costoCacheado,
+          costo_propuesto_omitido: opts.omitido,
+          precio_base: opts.precioBase,
+        },
+      ]);
+      dataSource.query.mockResolvedValueOnce(
+        opts.ingredientes.map((i) => ({
+          receta_item_id: RECETA_ID,
+          ingrediente_item_id: i.itemId,
+          ingrediente_nombre: i.nombre,
+          cantidad: i.cantidad,
+          unidad_codigo: i.unidadCodigo,
+          unidad_base: i.unidadBase,
+          costo_actual: i.costoActual,
+        })),
+      );
+      for (const i of opts.ingredientes) {
+        catalogServiceMock.convertirUnidad.mockResolvedValueOnce(
+          i.unidadCodigo === i.unidadBase
+            ? new Decimal(i.cantidad).toDecimalPlaces(4).toString()
+            : new Decimal(i.cantidad).div(1000).toDecimalPlaces(4).toString(),
+        );
+      }
+    }
+
+    it('listarDesfases incluye receta cuando propuesto ≠ cacheado', async () => {
+      mockRecetaConIngredientes({
+        costoCacheado: '1820.0000',
+        omitido: null,
+        precioBase: '3500.0000',
+        ingredientes: [
+          {
+            itemId: CARNE_ID,
+            nombre: 'Carne',
+            cantidad: '150',
+            unidadCodigo: 'g',
+            unidadBase: 'kg',
+            costoActual: '9000',
+          },
+        ],
+      });
+      const rows = await service.listarDesfases(TENANT);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].costoPropuesto).toBe('1350.0000');
+      expect(rows[0].deltaCosto).toBe('-470.0000');
+      expect(rows[0].margenPctActual).toBeTruthy();
+      expect(rows[0].precioSugerido).toBeTruthy();
+    });
+
+    it('listarDesfases omite cuando propuesto == costo_propuesto_omitido', async () => {
+      mockRecetaConIngredientes({
+        costoCacheado: '1820.0000',
+        omitido: '1350.0000',
+        precioBase: '3500.0000',
+        ingredientes: [
+          {
+            itemId: CARNE_ID,
+            nombre: 'Carne',
+            cantidad: '150',
+            unidadCodigo: 'g',
+            unidadBase: 'kg',
+            costoActual: '9000',
+          },
+        ],
+      });
+      const rows = await service.listarDesfases(TENANT);
+      expect(rows).toHaveLength(0);
+    });
+
+    it('listarDesfases no incluye cuando propuesto == cacheado', async () => {
+      mockRecetaConIngredientes({
+        costoCacheado: '1350.0000',
+        omitido: null,
+        precioBase: '3500.0000',
+        ingredientes: [
+          {
+            itemId: CARNE_ID,
+            nombre: 'Carne',
+            cantidad: '150',
+            unidadCodigo: 'g',
+            unidadBase: 'kg',
+            costoActual: '9000',
+          },
+        ],
+      });
+      const rows = await service.listarDesfases(TENANT);
+      expect(rows).toHaveLength(0);
+    });
+
+    it('precioSugerido es null si precioBase = 0', async () => {
+      mockRecetaConIngredientes({
+        costoCacheado: '100.0000',
+        omitido: null,
+        precioBase: '0',
+        ingredientes: [
+          {
+            itemId: CARNE_ID,
+            nombre: 'Carne',
+            cantidad: '1',
+            unidadCodigo: 'kg',
+            unidadBase: 'kg',
+            costoActual: '200',
+          },
+        ],
+      });
+      const rows = await service.listarDesfases(TENANT);
+      expect(rows[0].margenPctActual).toBeNull();
+      expect(rows[0].precioSugerido).toBeNull();
+    });
+
+    it('recetasAfectadasPorIngrediente filtra por ingrediente', async () => {
+      dataSource.query.mockResolvedValueOnce([{ '?column?': 1 }]);
+      mockRecetaConIngredientes({
+        costoCacheado: '100.0000',
+        omitido: null,
+        precioBase: '500.0000',
+        ingredientes: [
+          {
+            itemId: CARNE_ID,
+            nombre: 'Carne',
+            cantidad: '1',
+            unidadCodigo: 'kg',
+            unidadBase: 'kg',
+            costoActual: '200',
+          },
+        ],
+      });
+      const rows = await service.recetasAfectadasPorIngrediente(
+        TENANT,
+        CARNE_ID,
+      );
+      expect(rows).toHaveLength(1);
+      // calls[0] = exists check; calls[1] = cabeceras filtradas por ingrediente
+      expect(dataSource.query.mock.calls[1][0]).toContain('ingrediente_item_id');
+      expect(dataSource.query.mock.calls[1][1]).toEqual(
+        expect.arrayContaining([TENANT, CARNE_ID]),
+      );
     });
   });
 });

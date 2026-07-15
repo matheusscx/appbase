@@ -49,6 +49,25 @@ interface ItemRow {
   frecuencia: string | null;
 }
 
+export interface DesfaseIngredienteDto {
+  itemId: string;
+  nombre: string;
+  costoActual: string | null;
+}
+
+export interface DesfaseRecetaDto {
+  recetaItemId: string;
+  nombre: string;
+  costoActual: string;
+  costoPropuesto: string;
+  deltaCosto: string;
+  precioBase: string;
+  margenPctActual: string | null;
+  margenPctPropuesto: string | null;
+  precioSugerido: string | null;
+  ingredientesAfectados: DesfaseIngredienteDto[];
+}
+
 @Injectable()
 export class ItemsService {
   constructor(
@@ -1110,6 +1129,182 @@ export class ItemsService {
       costoTotal = costoTotal.plus(costoUnitario.mul(cantidadBase));
     }
     return costoTotal.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString();
+  }
+
+  private eq4(a: string | Decimal, b: string | Decimal): boolean {
+    return new Decimal(a)
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+      .eq(new Decimal(b).toDecimalPlaces(4, Decimal.ROUND_HALF_UP));
+  }
+
+  private margenPct(precio: Decimal, costo: Decimal): Decimal | null {
+    if (precio.lessThanOrEqualTo(0)) return null;
+    return precio
+      .minus(costo)
+      .div(precio)
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+  }
+
+  private precioSugerido(
+    precioViejo: Decimal,
+    costoViejo: Decimal,
+    costoNuevo: Decimal,
+  ): Decimal | null {
+    const margen = this.margenPct(precioViejo, costoViejo);
+    if (margen === null) return null;
+    if (margen.greaterThanOrEqualTo(1)) return null;
+    const denom = precioViejo.minus(costoViejo);
+    if (denom.lessThanOrEqualTo(0)) return null;
+    return costoNuevo
+      .mul(precioViejo)
+      .div(denom)
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+  }
+
+  /**
+   * Calcula costo propuesto de una receta ya persistida (ingredientes vivos).
+   * Misma aritmética que validarYCostearIngredientes: convierte a unidad base × costo_actual.
+   */
+  private async calcularCostoPropuestoDesdeFilas(
+    ings: {
+      cantidad: string;
+      unidad_codigo: string;
+      unidad_base: string;
+      costo_actual: string | null;
+    }[],
+  ): Promise<string> {
+    let total = new Decimal(0);
+    for (const ing of ings) {
+      const cantidadBase = await this.catalogService.convertirUnidad(
+        ing.cantidad,
+        ing.unidad_codigo,
+        ing.unidad_base,
+      );
+      total = total.plus(
+        new Decimal(ing.costo_actual ?? '0').mul(cantidadBase),
+      );
+    }
+    return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
+  }
+
+  private async construirFilasDesfase(
+    tenantId: string,
+    ingredienteItemId?: string,
+  ): Promise<DesfaseRecetaDto[]> {
+    const cabeceras: {
+      receta_item_id: string;
+      nombre: string;
+      costo_actual: string;
+      costo_propuesto_omitido: string | null;
+      precio_base: string;
+    }[] = await this.dataSource.query(
+      ingredienteItemId
+        ? `SELECT DISTINCT i.item_id AS receta_item_id, i.nombre,
+                ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base
+         FROM items i
+         JOIN item_receta ir ON ir.item_id = i.item_id
+         JOIN receta_ingredientes ri
+           ON ri.receta_item_id = i.item_id AND ri.eliminado_el IS NULL
+         WHERE i.tenant_id = $1 AND i.tipo = 'receta' AND i.eliminado_el IS NULL
+           AND ri.ingrediente_item_id = $2
+         ORDER BY i.nombre`
+        : `SELECT i.item_id AS receta_item_id, i.nombre,
+                ir.costo_actual, ir.costo_propuesto_omitido, i.precio_base
+         FROM items i
+         JOIN item_receta ir ON ir.item_id = i.item_id
+         WHERE i.tenant_id = $1 AND i.tipo = 'receta' AND i.eliminado_el IS NULL
+         ORDER BY i.nombre`,
+      ingredienteItemId ? [tenantId, ingredienteItemId] : [tenantId],
+    );
+    if (!cabeceras.length) return [];
+
+    const ids = cabeceras.map((c) => c.receta_item_id);
+    const ings: {
+      receta_item_id: string;
+      ingrediente_item_id: string;
+      ingrediente_nombre: string;
+      cantidad: string;
+      unidad_codigo: string;
+      unidad_base: string;
+      costo_actual: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT ri.receta_item_id, ri.ingrediente_item_id, ing.nombre AS ingrediente_nombre,
+            ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
+     FROM receta_ingredientes ri
+     JOIN items ing ON ing.item_id = ri.ingrediente_item_id AND ing.eliminado_el IS NULL
+     JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+     WHERE ri.tenant_id = $1 AND ri.eliminado_el IS NULL
+       AND ri.receta_item_id = ANY($2::uuid[])`,
+      [tenantId, ids],
+    );
+
+    const byReceta = new Map<string, typeof ings>();
+    for (const row of ings) {
+      const list = byReceta.get(row.receta_item_id) ?? [];
+      list.push(row);
+      byReceta.set(row.receta_item_id, list);
+    }
+
+    const out: DesfaseRecetaDto[] = [];
+    for (const cab of cabeceras) {
+      const lista = byReceta.get(cab.receta_item_id) ?? [];
+      if (!lista.length) continue;
+      const propuesto = await this.calcularCostoPropuestoDesdeFilas(lista);
+      const cacheado = new Decimal(cab.costo_actual ?? '0').toFixed(4);
+      if (this.eq4(propuesto, cacheado)) continue;
+      if (
+        cab.costo_propuesto_omitido != null &&
+        this.eq4(propuesto, cab.costo_propuesto_omitido)
+      ) {
+        continue;
+      }
+
+      const precio = new Decimal(cab.precio_base);
+      const costoActualD = new Decimal(cacheado);
+      const costoPropD = new Decimal(propuesto);
+      const mAct = this.margenPct(precio, costoActualD);
+      const mProp = this.margenPct(precio, costoPropD);
+      const sug = this.precioSugerido(precio, costoActualD, costoPropD);
+
+      out.push({
+        recetaItemId: cab.receta_item_id,
+        nombre: cab.nombre,
+        costoActual: cacheado,
+        costoPropuesto: propuesto,
+        deltaCosto: costoPropD.minus(costoActualD).toFixed(4),
+        precioBase: precio.toFixed(4),
+        margenPctActual: mAct?.toFixed(4) ?? null,
+        margenPctPropuesto: mProp?.toFixed(4) ?? null,
+        precioSugerido: sug?.toFixed(4) ?? null,
+        ingredientesAfectados: lista.map((i) => ({
+          itemId: i.ingrediente_item_id,
+          nombre: i.ingrediente_nombre,
+          costoActual: i.costo_actual,
+        })),
+      });
+    }
+    return out;
+  }
+
+  async listarDesfases(
+    tenantId: string,
+    ingredienteItemId?: string,
+  ): Promise<DesfaseRecetaDto[]> {
+    return this.construirFilasDesfase(tenantId, ingredienteItemId);
+  }
+
+  async recetasAfectadasPorIngrediente(
+    tenantId: string,
+    ingredienteItemId: string,
+  ): Promise<DesfaseRecetaDto[]> {
+    const exists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items
+     WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+       AND tipo = 'producto'`,
+      [ingredienteItemId, tenantId],
+    );
+    if (!exists.length) throw new NotFoundException('Item no encontrado');
+    return this.construirFilasDesfase(tenantId, ingredienteItemId);
   }
 
   private async validarMoneda(
