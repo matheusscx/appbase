@@ -467,18 +467,36 @@ describe('ItemsService', () => {
         ).rejects.toThrow(BadRequestException);
       });
 
-      it('rechaza un ingrediente que no es producto', async () => {
+      it('rechaza un ingrediente que no es un ingrediente', async () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
           .mockResolvedValueOnce([
             {
-              tipo: 'servicio',
-              modo_inventario: null,
-              unidad_medida: null,
-              costo_actual: null,
+              tipo: 'producto',
+              modo_inventario: 'cantidad',
+              unidad_medida: 'unidad',
+              costo_actual: '500',
             },
-          ]); // lookup pan → no es producto
+          ]); // lookup pan → producto vendible ya no vale como insumo
+
+        await expect(
+          service.create(TENANT, 'user-uuid', dtoReceta as any),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('validarYCostear rechaza insumo tipo producto', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+          .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
+          .mockResolvedValueOnce([
+            {
+              tipo: 'producto',
+              modo_inventario: 'cantidad',
+              unidad_medida: 'unidad',
+              costo_actual: '500',
+            },
+          ]); // lookup pan → no es ingrediente
 
         await expect(
           service.create(TENANT, 'user-uuid', dtoReceta as any),
@@ -491,7 +509,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ item_id: ITEM_ID }])
           .mockResolvedValueOnce([
             {
-              tipo: 'producto',
+              tipo: 'ingrediente',
               modo_inventario: 'serie',
               unidad_medida: 'unidad',
               costo_actual: '500',
@@ -509,7 +527,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
           .mockResolvedValueOnce([
             {
-              tipo: 'producto',
+              tipo: 'ingrediente',
               modo_inventario: 'cantidad',
               unidad_medida: 'unidad',
               costo_actual: '500',
@@ -517,7 +535,7 @@ describe('ItemsService', () => {
           ]) // pan
           .mockResolvedValueOnce([
             {
-              tipo: 'producto',
+              tipo: 'ingrediente',
               modo_inventario: 'cantidad',
               unidad_medida: 'kg',
               costo_actual: '8000',
@@ -817,7 +835,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
         .mockResolvedValueOnce([
           {
-            tipo: 'producto',
+            tipo: 'ingrediente',
             modo_inventario: 'cantidad',
             unidad_medida: 'kg',
             costo_actual: '6000',
@@ -932,7 +950,7 @@ describe('ItemsService', () => {
       );
     });
 
-    it('rechaza si el item no es producto', async () => {
+    it('rechaza si el item no es inventariable', async () => {
       managerMock.query.mockResolvedValueOnce([{ tipo: 'servicio' }]);
 
       await expect(
@@ -941,7 +959,24 @@ describe('ItemsService', () => {
           tipo: 'entrada',
           motivo: 'compra',
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow('El item no es inventariable');
+    });
+
+    it('ajustarStock acepta ingrediente', async () => {
+      managerMock.query.mockResolvedValueOnce([{ tipo: 'ingrediente' }]);
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-1',
+        stockAnterior: '0',
+        stockResultante: '1',
+      });
+
+      await expect(
+        service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
+          tipo: 'entrada',
+          motivo: 'ajuste_manual',
+          cantidad: '1',
+        } as any),
+      ).resolves.toEqual(expect.objectContaining({ stock: expect.anything() }));
     });
 
     it('lanza NotFoundException cuando el item no existe', async () => {
@@ -1385,6 +1420,7 @@ describe('ItemsService', () => {
       );
       expect(rows).toHaveLength(1);
       // calls[0] = exists check; calls[1] = cabeceras filtradas por ingrediente
+      expect(dataSource.query.mock.calls[0][0]).toContain("tipo = 'ingrediente'");
       expect(dataSource.query.mock.calls[1][0]).toContain('ingrediente_item_id');
       expect(dataSource.query.mock.calls[1][1]).toEqual(
         expect.arrayContaining([TENANT, CARNE_ID]),

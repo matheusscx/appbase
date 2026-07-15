@@ -500,6 +500,23 @@ export class ItemsService {
         );
       }
 
+      if (tipo === 'ingrediente') {
+        if (
+          dto.impuestosIds?.length ||
+          dto.recargosIds?.length ||
+          dto.descuentosIds?.length
+        ) {
+          throw new BadRequestException(
+            'Los ingredientes no admiten impuestos, recargos ni descuentos',
+          );
+        }
+        if (dto.modoInventario && dto.modoInventario !== 'cantidad') {
+          throw new BadRequestException(
+            'Los ingredientes solo admiten modo de inventario "cantidad"',
+          );
+        }
+      }
+
       if (dto.monedaId)
         await this.validarMoneda(manager, tenantId, dto.monedaId);
       if (dto.categoriaId) {
@@ -547,7 +564,7 @@ export class ItemsService {
       }
       if (dto.precioBase !== undefined) {
         setClauses.push(`precio_base = $${idx++}`);
-        params.push(dto.precioBase);
+        params.push(tipo === 'ingrediente' ? '0' : dto.precioBase);
       }
       if (dto.monedaId !== undefined) {
         setClauses.push(`moneda_id = $${idx++}`);
@@ -576,7 +593,7 @@ export class ItemsService {
         );
       }
 
-      if (tipo === 'producto') {
+      if (tipo === 'producto' || tipo === 'ingrediente') {
         // El frontend reenvía modoInventario/unidadMedida en toda edición.
         // Solo se rechaza si el valor cambia de verdad y ya hay movimientos.
         if (
@@ -623,7 +640,7 @@ export class ItemsService {
         const prodClauses: string[] = [];
         const prodParams: unknown[] = [];
         let pidx = 1;
-        if (dto.modoInventario !== undefined) {
+        if (dto.modoInventario !== undefined && tipo === 'producto') {
           prodClauses.push(`modo_inventario = $${pidx++}`);
           prodParams.push(dto.modoInventario);
         }
@@ -635,11 +652,11 @@ export class ItemsService {
           prodClauses.push(`unidad_medida = $${pidx++}`);
           prodParams.push(dto.unidadMedida);
         }
-        if (dto.fechaElaboracion !== undefined) {
+        if (dto.fechaElaboracion !== undefined && tipo === 'producto') {
           prodClauses.push(`fecha_elaboracion = $${pidx++}`);
           prodParams.push(dto.fechaElaboracion);
         }
-        if (dto.fechaVencimiento !== undefined) {
+        if (dto.fechaVencimiento !== undefined && tipo === 'producto') {
           prodClauses.push(`fecha_vencimiento = $${pidx++}`);
           prodParams.push(dto.fechaVencimiento);
         }
@@ -804,8 +821,8 @@ export class ItemsService {
         [itemId, tenantId],
       );
       if (!itemRows.length) throw new NotFoundException('Item no encontrado');
-      if (itemRows[0].tipo !== 'producto') {
-        throw new BadRequestException('El item no es un producto');
+      if (itemRows[0].tipo !== 'producto' && itemRows[0].tipo !== 'ingrediente') {
+        throw new BadRequestException('El item no es inventariable');
       }
 
       // La conversión ocurre acá y no en registrarMovimiento: el kardex siempre
@@ -1150,14 +1167,14 @@ export class ItemsService {
          WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
         [ing.ingredienteItemId, tenantId],
       );
-      if (!rows.length || rows[0].tipo !== 'producto') {
+      if (!rows.length || rows[0].tipo !== 'ingrediente') {
         throw new BadRequestException(
-          `El ingrediente ${ing.ingredienteItemId} no es un producto válido`,
+          `El ingrediente ${ing.ingredienteItemId} no es un item de tipo ingrediente válido`,
         );
       }
       if (rows[0].modo_inventario !== 'cantidad') {
         throw new BadRequestException(
-          'Los ingredientes de una receta solo admiten productos con modo de inventario "cantidad"',
+          'Los insumos de receta solo admiten modo de inventario "cantidad"',
         );
       }
       const cantidadBase = await this.catalogService.convertirUnidad(
@@ -1341,7 +1358,7 @@ export class ItemsService {
     const exists: unknown[] = await this.dataSource.query(
       `SELECT 1 FROM items
      WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-       AND tipo = 'producto'`,
+       AND tipo = 'ingrediente'`,
       [ingredienteItemId, tenantId],
     );
     if (!exists.length) throw new NotFoundException('Item no encontrado');
