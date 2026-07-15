@@ -94,6 +94,25 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/terceros',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Leer')) {
+    base.push({
+      label: 'Inventario',
+      icon: 'i-lucide-clipboard-list',
+      to: '/inventario',
+    })
+    base.push({
+      label: 'Mermas',
+      icon: 'i-lucide-trash-2',
+      to: '/mermas',
+    })
+  }
+  if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
+    base.push({
+      label: 'Recetas desfasadas',
+      icon: 'i-lucide-scale',
+      to: '/recetas-desfases',
+    })
+  }
   if (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Leer')) {
     base.push({
       label: 'Órdenes',

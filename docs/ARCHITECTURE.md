@@ -163,7 +163,9 @@ Toda columna PK o FK de tipo UUID **debe** declarar `type: 'uuid'` explícitamen
 | `/configuracion/recargos` | `configuracion/recargos.vue` | |
 | `/configuracion/metodos-pago` | `configuracion/metodos-pago.vue` | |
 | `/configuracion/items` | `configuracion/items.vue` | |
-| `/configuracion/inventario` | `configuracion/inventario.vue` | Kardex de movimientos |
+| `/inventario` | `inventario.vue` | Kardex de movimientos |
+| `/mermas` | `mermas.vue` | Registro y listado de mermas |
+| `/recetas-desfases` | `recetas-desfases.vue` | Bandeja de recetas con costo desfasado |
 | `/configuracion/roles` | `configuracion/roles/index.vue` | Lista + editor de rol en drawer |
 | `/configuracion/roles/:id` | `configuracion/roles/[id].vue` | Redirect → `/configuracion/roles` (compat.) |
 | `/configuracion/usuarios` | `configuracion/usuarios/index.vue` | Asignación de roles a usuarios |

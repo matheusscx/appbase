@@ -116,7 +116,7 @@ Permiso: **Inventario:Leer**. Paginado; filtros `itemId`, `causaMermaId`, `desde
 ## Frontend
 
 - `/configuracion/causas-merma` — CRUD con badge **Fija** en causas `es_fijo`.
-- `/configuracion/mermas` — listado filtrable + drawer registrar; modal informativo (`AppModalFooter`) cuando el producto no tiene `costo_actual`; campo costo unitario requerido en ese caso; prellenado editable si hay `costo_actual`.
+- `/mermas` — listado filtrable + drawer registrar; modal informativo (`AppModalFooter`) cuando el producto no tiene `costo_actual`; campo costo unitario requerido en ese caso; prellenado editable si hay `costo_actual`.
 - Kardex / historial de movimientos: `Merma · {causaNombre}` y costo perdido formateado (`formatMonto`).
 - Modal de ajuste de stock en items: opción Merma eliminada.
 

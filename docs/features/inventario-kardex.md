@@ -24,7 +24,7 @@ El stock de productos es un activo crítico: cambios sin trazabilidad generan me
 - Endpoint `PATCH /items/:id/stock` actualizado para registrar motivo + comentario
 - Creación automática de movimiento `inventario_inicial` al crear un producto con stock > 0
 - Integración con ventas: cada línea vendida genera `salida`/`motivo='venta'` de forma automática (transacción única)
-- Vistas: modal "Historial" en `/configuracion/items` + página global `/configuracion/inventario`
+- Vistas: modal "Historial" en `/configuracion/items` + página global `/inventario`
 - Validación: `salida` rechaza movimientos que resultarían en stock negativo
 
 **NOT included (future):**
@@ -268,7 +268,7 @@ Response (400 — Stock insuficiente):
 
 ### Pages
 
-- `pages/configuracion/inventario.vue` — Vista global del kardex
+- `pages/inventario.vue` — Vista global del kardex
   - Tabla de movimientos con columnas: Item, Tipo, Motivo, Cantidad, Stock Anterior, Stock Resultante, Usuario, Fecha
   - Filtros laterales: por item (select/search), por motivo (select multi), por rango de fechas
   - Paginación
@@ -290,7 +290,7 @@ Response (400 — Stock insuficiente):
   - Props: `itemId`, `itemNombre`, `isOpen`
   - Eventos: `@close`
   - Muestra últimos 20 movimientos + saldo actual del producto
-  - Botón "Ver completo" que abre la página global `/configuracion/inventario` pre-filtrada por item
+  - Botón "Ver completo" que abre la página global `/inventario` pre-filtrada por item
 
 - `components/AjusteStockModal.vue` — Modal para ajustar stock manualmente
   - Props: `itemId`, `itemNombre`, `stockActual`, `isOpen`
@@ -428,7 +428,7 @@ interface InventarioState {
   ↓
 [Frontend: toast "Venta registrada"]
   ↓
-[Usuario navega a `/configuracion/inventario`, filtra por motivo='venta', ve la salida registrada automáticamente]
+[Usuario navega a `/inventario`, filtra por motivo='venta', ve la salida registrada automáticamente]
 ```
 
 ---
@@ -494,7 +494,7 @@ npm run test:e2e -- inventario.e2e.spec.ts
 - [x] Transacción atómica: movimiento + actualización de saldo juntos
 - [x] Integración con ventas: cada línea genera `salida`/`motivo='venta'` automáticamente
 - [x] Frontend: modal "Historial" en `/configuracion/items`
-- [x] Frontend: página `/configuracion/inventario` con filtros
+- [x] Frontend: página `/inventario` con filtros
 - [x] Unit tests: ✅
 - [x] E2E tests: ✅
 - [x] API docs: Swagger decorators

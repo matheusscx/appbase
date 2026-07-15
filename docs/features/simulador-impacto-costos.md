@@ -13,7 +13,7 @@ Cuando cambia el `costo_actual` de un producto usado como ingrediente (compra o 
 
 Dos puntos de entrada:
 - **Modal inmediato** tras guardar un cambio de costo en Items.
-- **Bandeja** `/configuracion/recetas-desfases` para resolver desfases pendientes.
+- **Bandeja** `/recetas-desfases` para resolver desfases pendientes.
 
 ### Why does it exist?
 
@@ -26,7 +26,7 @@ La pieza 3 de recetas dejó el costo cacheado a propósito (sin cascade silencio
 - Detección al vuelo (sin tabla de pendientes).
 - Endpoints de lectura y acción bajo `items` / `recetas`.
 - Modal post-cambio de costo en `configuracion/items.vue`.
-- Bandeja `configuracion/recetas-desfases` con el mismo panel de simulación.
+- Bandeja `recetas-desfases` con el mismo panel de simulación.
 - Unit tests en `items.service.spec.ts` + E2E `simulador-costos.e2e-spec.ts`.
 
 **NOT included (future):**
@@ -165,7 +165,7 @@ Setea `costo_propuesto_omitido` al `costoPropuesto` recomputado; no toca costo n
 ## Frontend
 
 - `configuracion/items.vue` — tras PATCH de costo o compra con `costoUnitario` → `GET /items/:id/recetas-afectadas` → drawer con `RecetasDesfasesPanel` si hay filas.
-- `configuracion/recetas-desfases.vue` — bandeja con `GET /recetas/desfases`; mismas acciones aplicar/descartar.
+- `recetas-desfases.vue` — bandeja con `GET /recetas/desfases`; mismas acciones aplicar/descartar.
 - `components/RecetasDesfasesPanel.vue` — tabla de simulación: costos, márgenes, input precio (prellenado con `precioSugerido`), checkbox “Actualizar precio” off por defecto.
 - Nav en `configuracion.vue` → “Recetas desfasadas”.
 - Merma y ajustes que no cambian `costo_actual` **no** disparan el modal.
@@ -184,7 +184,7 @@ Setea `costo_propuesto_omitido` al `costoPropuesto` recomputado; no toca costo n
   ├─ Descartar → POST /recetas/desfases/descartar
   └─ Después → cierra; siguen en GET /recetas/desfases
 
-[Más tarde, bandeja /configuracion/recetas-desfases]
+[Más tarde, bandeja /recetas-desfases]
   GET /recetas/desfases → mismas acciones
 ```
 

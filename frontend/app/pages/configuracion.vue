@@ -111,24 +111,6 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-archive',
       to: '/configuracion/items',
     })
-    items.push({
-      label: 'Recetas desfasadas',
-      icon: 'i-lucide-scale',
-      to: '/configuracion/recetas-desfases',
-    })
-  }
-
-  if (permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Leer')) {
-    items.push({
-      label: 'Inventario',
-      icon: 'i-lucide-clipboard-list',
-      to: '/configuracion/inventario',
-    })
-    items.push({
-      label: 'Mermas',
-      icon: 'i-lucide-trash-2',
-      to: '/configuracion/mermas',
-    })
   }
 
   if (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Leer')) {
