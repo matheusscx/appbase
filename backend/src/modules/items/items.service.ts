@@ -9,7 +9,10 @@ import Decimal from 'decimal.js';
 import { Item } from './entities/item.entity';
 import { ItemProducto } from './entities/item-producto.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
-import { CreateItemDto } from './dto/create-item.dto';
+import {
+  CreateItemDto,
+  RecetaIngredienteInputDto,
+} from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
@@ -204,6 +207,11 @@ export class ItemsService {
         'La frecuencia solo aplica a items de suscripción',
       );
     }
+    if (dto.tipo === 'receta' && !dto.ingredientes?.length) {
+      throw new BadRequestException(
+        'Las recetas requieren al menos un ingrediente',
+      );
+    }
     if (dto.costo != null) {
       this.validarCostoPositivo(dto.costo);
     }
@@ -326,6 +334,31 @@ export class ItemsService {
            VALUES ($1,$2,$3)`,
           [itemId, dto.duracionEstimada ?? null, dto.requiereCita ?? false],
         );
+      } else if (dto.tipo === 'receta') {
+        const costoActual = await this.validarYCostearIngredientes(
+          manager,
+          tenantId,
+          dto.ingredientes!,
+        );
+        await manager.query(
+          `INSERT INTO item_receta (item_id, costo_actual) VALUES ($1,$2)`,
+          [itemId, costoActual],
+        );
+        for (const ing of dto.ingredientes!) {
+          await manager.query(
+            `INSERT INTO receta_ingredientes
+               (tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, bloqueante)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [
+              tenantId,
+              itemId,
+              ing.ingredienteItemId,
+              ing.cantidad,
+              ing.unidadCodigo,
+              ing.bloqueante ?? true,
+            ],
+          );
+        }
       } else {
         await manager.query(
           `INSERT INTO item_suscripcion (item_id, frecuencia) VALUES ($1,$2)`,
@@ -747,6 +780,65 @@ export class ItemsService {
         `Unidad de medida no reconocida: ${codigo}. Válidas: ${validas}`,
       );
     }
+  }
+
+  /**
+   * Valida cada ingrediente (existe, es producto, modo 'cantidad', unidad
+   * compatible) y devuelve el costo total de la receta convirtiendo cada
+   * cantidad a la unidad base del ingrediente antes de multiplicar por su
+   * costo_actual (costo por unidad base).
+   */
+  private async validarYCostearIngredientes(
+    manager: EntityManager,
+    tenantId: string,
+    ingredientes: RecetaIngredienteInputDto[],
+  ): Promise<string> {
+    let costoTotal = new Decimal(0);
+    for (const ing of ingredientes) {
+      let cantidad;
+      try {
+        cantidad = new Decimal(ing.cantidad);
+      } catch {
+        throw new BadRequestException(
+          'La cantidad del ingrediente debe ser un número mayor a 0',
+        );
+      }
+      if (cantidad.isNaN() || cantidad.lessThanOrEqualTo(0)) {
+        throw new BadRequestException(
+          'La cantidad del ingrediente debe ser mayor a 0',
+        );
+      }
+      const rows: {
+        tipo: string;
+        modo_inventario: string | null;
+        unidad_medida: string | null;
+        costo_actual: string | null;
+      }[] = await manager.query(
+        `SELECT i.tipo, ip.modo_inventario, ip.unidad_medida, ip.costo_actual
+         FROM items i
+         LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+         WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+        [ing.ingredienteItemId, tenantId],
+      );
+      if (!rows.length || rows[0].tipo !== 'producto') {
+        throw new BadRequestException(
+          `El ingrediente ${ing.ingredienteItemId} no es un producto válido`,
+        );
+      }
+      if (rows[0].modo_inventario !== 'cantidad') {
+        throw new BadRequestException(
+          'Los ingredientes de una receta solo admiten productos con modo de inventario "cantidad"',
+        );
+      }
+      const cantidadBase = await this.catalogService.convertirUnidad(
+        ing.cantidad,
+        ing.unidadCodigo,
+        rows[0].unidad_medida!,
+      );
+      const costoUnitario = new Decimal(rows[0].costo_actual ?? '0');
+      costoTotal = costoTotal.plus(costoUnitario.mul(cantidadBase));
+    }
+    return costoTotal.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString();
   }
 
   private async validarMoneda(

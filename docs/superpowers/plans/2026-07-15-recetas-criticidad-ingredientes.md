@@ -79,7 +79,7 @@ Fundación: sin `item_receta`/`receta_ingredientes` no hay nada que vender ni li
   - `ItemsService.validarYCostearIngredientes(manager: EntityManager, tenantId: string, ingredientes: RecetaIngredienteInputDto[]): Promise<string>` — valida cada ingrediente y devuelve el costo total (string, 4 decimales).
   - `POST /items` acepta `{ tipo: 'receta', ingredientes: RecetaIngredienteInputDto[], ... }`.
 
-- [ ] **Step 1: Entidades**
+- [x] **Step 1: Entidades**
 
 Crear `backend/src/modules/items/entities/item-receta.entity.ts`:
 
@@ -150,7 +150,7 @@ export class RecetaIngrediente {
 }
 ```
 
-- [ ] **Step 2: Registrar las entidades**
+- [x] **Step 2: Registrar las entidades**
 
 En `backend/src/app.module.ts`, agregar los imports junto a los de `items` (cerca de la línea 59):
 
@@ -187,7 +187,7 @@ import { RecetaIngrediente } from './entities/receta-ingrediente.entity';
     ]),
 ```
 
-- [ ] **Step 3: DTOs**
+- [x] **Step 3: DTOs**
 
 En `backend/src/modules/items/dto/create-item.dto.ts`, agregar la clase nueva después de `LoteInputDto`:
 
@@ -235,7 +235,7 @@ En `backend/src/modules/items/dto/query-items.dto.ts`, ampliar el filtro:
   tipo?: 'producto' | 'servicio' | 'suscripcion' | 'receta';
 ```
 
-- [ ] **Step 4: Write the failing tests**
+- [x] **Step 4: Write the failing tests**
 
 En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('create', ...)`, agregar (después del test `'happy path: crea suscripción con extensión'`):
 
@@ -321,12 +321,12 @@ En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('creat
     });
 ```
 
-- [ ] **Step 2 (verificación): Run tests to confirm they fail**
+- [x] **Step 2 (verificación): Run tests to confirm they fail**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: FAIL — `dto.tipo` no acepta `'receta'` (o el `create` no tiene rama para ese tipo), `validarYCostearIngredientes` no existe.
 
-- [ ] **Step 5: Implementación mínima**
+- [x] **Step 5: Implementación mínima**
 
 En `backend/src/modules/items/items.service.ts`, agregar el import de `RecetaIngredienteInputDto`:
 
@@ -460,12 +460,12 @@ Agregar el método privado `validarYCostearIngredientes` junto a los demás help
   }
 ```
 
-- [ ] **Step 6: Run tests to confirm they pass**
+- [x] **Step 6: Run tests to confirm they pass**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: PASS
 
-- [ ] **Step 7: `startup-pos.sql`**
+- [x] **Step 7: `startup-pos.sql`**
 
 Agregar después de `item_suscripcion` (antes de `item_impuestos`):
 
@@ -499,7 +499,7 @@ CREATE UNIQUE INDEX "uq_receta_ingrediente_vivo"
   WHERE "eliminado_el" IS NULL;
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/src/modules/items/entities/item-receta.entity.ts \

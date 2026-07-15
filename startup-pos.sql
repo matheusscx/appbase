@@ -523,6 +523,34 @@ CREATE TABLE "item_suscripcion" (
   "frecuencia" TEXT NOT NULL  -- 'semanal' | 'quincenal' | 'mensual'
 );
 
+-- Extensión 1:1 para tipo 'receta' (producto compuesto, sin stock propio)
+CREATE TABLE "item_receta" (
+  "item_id"      UUID          PRIMARY KEY REFERENCES "items" ("item_id"),
+  "costo_actual" NUMERIC(18,4)
+  -- Cacheado al crear/editar; NO se recalcula automáticamente si cambia el
+  -- costo de un ingrediente (ver pieza 5 — simulador de impacto de costos).
+);
+
+-- Ingredientes de una receta (N por receta)
+CREATE TABLE "receta_ingredientes" (
+  "receta_ingrediente_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"              UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "receta_item_id"         UUID          NOT NULL REFERENCES "items" ("item_id"),
+  "ingrediente_item_id"    UUID          NOT NULL REFERENCES "items" ("item_id"),
+  -- ingrediente_item_id SIEMPRE apunta a un item tipo='producto', modo_inventario='cantidad'
+  "cantidad"               NUMERIC(18,4) NOT NULL,  -- por 1 unidad de la receta
+  "unidad_codigo"          TEXT          NOT NULL REFERENCES "unidades_medida" ("codigo"),
+  "bloqueante"             BOOLEAN       NOT NULL DEFAULT true,
+  "creado_el"              TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"         TIMESTAMPTZ,
+  "eliminado_el"           TIMESTAMPTZ
+);
+
+-- Un mismo producto no puede aparecer dos veces en la misma receta activa
+CREATE UNIQUE INDEX "uq_receta_ingrediente_vivo"
+  ON "receta_ingredientes" ("receta_item_id", "ingrediente_item_id")
+  WHERE "eliminado_el" IS NULL;
+
 -- Reglas de precio asociadas a cada item (N:M)
 CREATE TABLE "item_impuestos" (
   "item_id"     UUID NOT NULL REFERENCES "items" ("item_id") ON DELETE CASCADE,

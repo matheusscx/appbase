@@ -46,6 +46,22 @@ export class LoteInputDto {
   fechaVencimiento?: string;
 }
 
+export class RecetaIngredienteInputDto {
+  @IsUUID()
+  ingredienteItemId: string;
+
+  @IsNumberString()
+  cantidad: string;
+
+  @IsString()
+  @IsNotEmpty()
+  unidadCodigo: string;
+
+  @IsBoolean()
+  @IsOptional()
+  bloqueante?: boolean;
+}
+
 export class CreateItemDto {
   @IsString()
   @IsNotEmpty()
@@ -65,7 +81,7 @@ export class CreateItemDto {
   @IsOptional()
   categoriaId?: string;
 
-  @IsIn(['producto', 'servicio', 'suscripcion'])
+  @IsIn(['producto', 'servicio', 'suscripcion', 'receta'])
   tipo: string;
 
   @IsBoolean()
@@ -113,6 +129,13 @@ export class CreateItemDto {
   @Type(() => LoteInputDto)
   @IsOptional()
   lote?: LoteInputDto;
+
+  // Extensión receta
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecetaIngredienteInputDto)
+  @IsOptional()
+  ingredientes?: RecetaIngredienteInputDto[];
 
   // Extensión servicio
   @IsInt()

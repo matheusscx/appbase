@@ -57,6 +57,8 @@ import { Item } from './modules/items/entities/item.entity';
 import { ItemProducto } from './modules/items/entities/item-producto.entity';
 import { ItemServicio } from './modules/items/entities/item-servicio.entity';
 import { ItemSuscripcion } from './modules/items/entities/item-suscripcion.entity';
+import { ItemReceta } from './modules/items/entities/item-receta.entity';
+import { RecetaIngrediente } from './modules/items/entities/receta-ingrediente.entity';
 import { ItemImpuesto } from './modules/items/entities/item-impuesto.entity';
 import { ItemRecargo } from './modules/items/entities/item-recargo.entity';
 import { ItemDescuento } from './modules/items/entities/item-descuento.entity';
@@ -151,6 +153,8 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           ItemProducto,
           ItemServicio,
           ItemSuscripcion,
+          ItemReceta,
+          RecetaIngrediente,
           ItemImpuesto,
           ItemRecargo,
           ItemDescuento,

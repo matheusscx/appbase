@@ -349,6 +349,86 @@ describe('ItemsService', () => {
       expect(insertCall?.[1]).toEqual([ITEM_ID, 'mensual']);
     });
 
+    describe('receta', () => {
+      const ingredientePan = {
+        ingredienteItemId: 'ingrediente-pan',
+        cantidad: '1',
+        unidadCodigo: 'unidad',
+        bloqueante: true,
+      };
+      const ingredienteCarne = {
+        ingredienteItemId: 'ingrediente-carne',
+        cantidad: '150',
+        unidadCodigo: 'g',
+        bloqueante: true,
+      };
+      const dtoReceta = {
+        nombre: 'Hamburguesa test',
+        precioBase: '3500',
+        monedaId: MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [ingredientePan, ingredienteCarne],
+      };
+
+      it('rechaza una receta sin ingredientes', async () => {
+        await expect(
+          service.create(TENANT, 'user-uuid', {
+            ...dtoReceta,
+            ingredientes: [],
+          } as any),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('rechaza un ingrediente que no es producto', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+          .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
+          .mockResolvedValueOnce([{ tipo: 'servicio', modo_inventario: null, unidad_medida: null, costo_actual: null }]); // lookup pan → no es producto
+
+        await expect(
+          service.create(TENANT, 'user-uuid', dtoReceta as any),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('rechaza un ingrediente en modo serie/lote', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ '?column?': 1 }])
+          .mockResolvedValueOnce([{ item_id: ITEM_ID }])
+          .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'serie', unidad_medida: 'unidad', costo_actual: '500' }]);
+
+        await expect(
+          service.create(TENANT, 'user-uuid', dtoReceta as any),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('happy path: calcula costoActual convirtiendo cada ingrediente a su unidad base', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+          .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
+          .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'cantidad', unidad_medida: 'unidad', costo_actual: '500' }]) // pan
+          .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'cantidad', unidad_medida: 'kg', costo_actual: '8000' }]) // carne
+          .mockResolvedValueOnce([]) // INSERT item_receta
+          .mockResolvedValueOnce([]) // INSERT receta_ingredientes pan
+          .mockResolvedValueOnce([]); // INSERT receta_ingredientes carne
+
+        catalogServiceMock.convertirUnidad
+          .mockResolvedValueOnce('1') // pan: unidad → unidad (sin cambio)
+          .mockResolvedValueOnce('0.15'); // carne: 150 g → 0.15 kg
+
+        const result = await service.create(TENANT, 'user-uuid', dtoReceta as any);
+
+        expect(result).toEqual({ id: ITEM_ID });
+        // Orden de llamadas a managerMock.query: 1=moneda, 2=INSERT items,
+        // 3=lookup pan, 4=lookup carne, 5=INSERT item_receta, 6/7=INSERT receta_ingredientes.
+        // costo = 500*1 + 8000*0.15 = 500 + 1200 = 1700
+        expect(managerMock.query).toHaveBeenNthCalledWith(
+          5,
+          expect.stringContaining('INSERT INTO item_receta'),
+          [ITEM_ID, '1700'],
+        );
+      });
+    });
+
     it('lanza BadRequestException cuando tipo suscripcion no trae frecuencia', async () => {
       await expect(
         service.create(TENANT, 'user-uuid', {
