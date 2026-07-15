@@ -29,4 +29,9 @@ export class CatalogController {
   findAllProvincias(@Query('paisId') paisId?: string) {
     return this.catalogService.findAllProvincias(paisId);
   }
+
+  @Get('unidades-medida')
+  findAllUnidadesMedida() {
+    return this.catalogService.findAllUnidadesMedida();
+  }
 }

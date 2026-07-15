@@ -79,6 +79,19 @@ CREATE TABLE "moneda" (
 
 ALTER TABLE "pais" ADD FOREIGN KEY ("moneda_oficial_id") REFERENCES "moneda" ("moneda_id");
 
+-- Catálogo global de unidades de medida (sin tenant_id: son hechos físicos).
+-- Conversión dentro de una magnitud: cantidad × (factor_base_desde / factor_base_hacia)
+CREATE TABLE "unidades_medida" (
+  "unidad_medida_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "codigo"           TEXT          UNIQUE NOT NULL,  -- guardado en item_producto.unidad_medida
+  "nombre"           TEXT          NOT NULL,
+  "magnitud"         TEXT          NOT NULL,  -- 'masa' | 'volumen' | 'conteo' | 'longitud'
+  "factor_base"      NUMERIC(18,6) NOT NULL,  -- kg → 1000 (base: g)
+  "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"   TIMESTAMPTZ,
+  "eliminado_el"     TIMESTAMPTZ
+);
+
 -- Monedas disponibles por país (puente). Define el subconjunto del catálogo
 -- global que un tenant de ese país puede habilitar (la oficial sale de pais.moneda_oficial_id).
 CREATE TABLE "pais_moneda" (

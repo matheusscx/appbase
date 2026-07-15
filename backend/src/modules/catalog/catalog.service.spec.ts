@@ -5,6 +5,7 @@ import { ModuloApp } from './entities/modulo-app.entity';
 import { Permiso } from './entities/permiso.entity';
 import { Pais } from './entities/pais.entity';
 import { Provincia } from './entities/provincia.entity';
+import { UnidadMedida } from './entities/unidad-medida.entity';
 
 const mockPais: Pais = {
   paisId: 'pais-uuid',
@@ -27,14 +28,27 @@ const mockProvincia: Provincia = {
   eliminadoEl: null as unknown as Date,
 };
 
+const mockUnidadMedida: UnidadMedida = {
+  unidadMedidaId: 'unidad-uuid',
+  codigo: 'kg',
+  nombre: 'Kilogramo',
+  magnitud: 'masa',
+  factorBase: '1000.000000',
+  creadoEl: new Date(),
+  actualizadoEl: new Date(),
+  eliminadoEl: null as unknown as Date,
+};
+
 describe('CatalogService', () => {
   let service: CatalogService;
   let paisRepo: { find: jest.Mock };
   let provinciaRepo: { find: jest.Mock };
+  let unidadMedidaRepo: { find: jest.Mock };
 
   beforeEach(async () => {
     paisRepo = { find: jest.fn() };
     provinciaRepo = { find: jest.fn() };
+    unidadMedidaRepo = { find: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -46,6 +60,7 @@ describe('CatalogService', () => {
         { provide: getRepositoryToken(Permiso), useValue: { find: jest.fn() } },
         { provide: getRepositoryToken(Pais), useValue: paisRepo },
         { provide: getRepositoryToken(Provincia), useValue: provinciaRepo },
+        { provide: getRepositoryToken(UnidadMedida), useValue: unidadMedidaRepo },
       ],
     }).compile();
 
@@ -81,6 +96,17 @@ describe('CatalogService', () => {
       expect(provinciaRepo.find).toHaveBeenCalledWith({
         where: { paisId: 'pais-uuid' },
         order: { nombre: 'ASC' },
+      });
+    });
+  });
+
+  describe('findAllUnidadesMedida', () => {
+    it('retorna las unidades ordenadas por magnitud y factor', async () => {
+      unidadMedidaRepo.find.mockResolvedValue([mockUnidadMedida]);
+      const result = await service.findAllUnidadesMedida();
+      expect(result).toEqual([mockUnidadMedida]);
+      expect(unidadMedidaRepo.find).toHaveBeenCalledWith({
+        order: { magnitud: 'ASC', factorBase: 'ASC' },
       });
     });
   });

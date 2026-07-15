@@ -5,6 +5,7 @@ import { ModuloApp } from './entities/modulo-app.entity';
 import { Permiso } from './entities/permiso.entity';
 import { Pais } from './entities/pais.entity';
 import { Provincia } from './entities/provincia.entity';
+import { UnidadMedida } from './entities/unidad-medida.entity';
 
 @Injectable()
 export class CatalogService {
@@ -17,6 +18,8 @@ export class CatalogService {
     private readonly paisRepo: Repository<Pais>,
     @InjectRepository(Provincia)
     private readonly provinciaRepo: Repository<Provincia>,
+    @InjectRepository(UnidadMedida)
+    private readonly unidadMedidaRepo: Repository<UnidadMedida>,
   ) {}
 
   findAllModulos(): Promise<ModuloApp[]> {
@@ -37,6 +40,12 @@ export class CatalogService {
     return this.provinciaRepo.find({
       where: paisId ? { paisId } : {},
       order: { nombre: 'ASC' },
+    });
+  }
+
+  findAllUnidadesMedida(): Promise<UnidadMedida[]> {
+    return this.unidadMedidaRepo.find({
+      order: { magnitud: 'ASC', factorBase: 'ASC' },
     });
   }
 }

@@ -16,6 +16,7 @@ import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
 import { Pais } from './modules/catalog/entities/pais.entity';
 import { Provincia } from './modules/catalog/entities/provincia.entity';
 import { Moneda } from './modules/catalog/entities/moneda.entity';
+import { UnidadMedida } from './modules/catalog/entities/unidad-medida.entity';
 import { ModuloApp } from './modules/catalog/entities/modulo-app.entity';
 import { Permiso } from './modules/catalog/entities/permiso.entity';
 import { ModuloAppPermiso } from './modules/catalog/entities/modulo-app-permiso.entity';
@@ -118,6 +119,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           Pais,
           Provincia,
           Moneda,
+          UnidadMedida,
           ModuloApp,
           Permiso,
           ModuloAppPermiso,

@@ -128,6 +128,7 @@ export class SeederService implements OnApplicationBootstrap {
     this.logger.log('Running dev seed...');
 
     await this.seedMonedas();
+    await this.seedUnidadesMedida();
     await this.seedMetodosPago();
     await this.seedTiposRegla();
     await this.seedPais();
@@ -221,6 +222,32 @@ export class SeederService implements OnApplicationBootstrap {
           },
         );
       }
+    }
+  }
+
+  /**
+   * Catálogo global de unidades de medida. `factor_base` = cuántas unidades
+   * base de la magnitud equivale 1 de esta (kg → 1000 g).
+   * Incluye 'unidad', 'kg', 'l' y 'm' porque ya hay datos sembrados con esos
+   * códigos (ver seedItemsMonedaUnidadMatrix): quitarlos rompería la validación.
+   */
+  private async seedUnidadesMedida(): Promise<void> {
+    const unidades = [
+      { id: '550e8400-e29b-41d4-a716-446655440250', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
+      { id: '550e8400-e29b-41d4-a716-446655440251', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
+      { id: '550e8400-e29b-41d4-a716-446655440252', codigo: 'ml', nombre: 'Mililitro', magnitud: 'volumen', factorBase: '1' },
+      { id: '550e8400-e29b-41d4-a716-446655440253', codigo: 'l', nombre: 'Litro', magnitud: 'volumen', factorBase: '1000' },
+      { id: '550e8400-e29b-41d4-a716-446655440254', codigo: 'unidad', nombre: 'Unidad', magnitud: 'conteo', factorBase: '1' },
+      { id: '550e8400-e29b-41d4-a716-446655440255', codigo: 'm', nombre: 'Metro', magnitud: 'longitud', factorBase: '1' },
+    ];
+
+    for (const u of unidades) {
+      await this.dataSource.query(
+        `INSERT INTO unidades_medida (unidad_medida_id, codigo, nombre, magnitud, factor_base)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT DO NOTHING`,
+        [u.id, u.codigo, u.nombre, u.magnitud, u.factorBase],
+      );
     }
   }
 
