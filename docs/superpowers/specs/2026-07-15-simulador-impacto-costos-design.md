@@ -1,6 +1,6 @@
 # Diseño — Simulador de impacto de costos
 
-**Status**: Draft
+**Status**: Done
 **Date**: 2026-07-15
 **Owner**: Cesar Matheus
 **Cluster**: Recetas/costos food-service — **pieza 5 de 5** (ver
@@ -267,12 +267,12 @@ vuelve a aparecer aunque estuviera omitida (porque
 
 ## Verification (aceptación)
 
-- [ ] Cambiar costo de un insumo abre modal solo si hay recetas desfasadas.
-- [ ] La simulación muestra costos, márgenes y precio sugerido coherentes.
-- [ ] Aplicar actualiza costo siempre; precio solo con checkbox.
-- [ ] Descartar oculta hasta el próximo cambio de costo propuesto.
-- [ ] La bandeja lista lo pendiente (al vuelo) y permite las mismas acciones.
-- [ ] Merma / ajustes que no cambian `costo_actual` no disparan el modal.
+- [x] Cambiar costo de un insumo abre modal solo si hay recetas desfasadas.
+- [x] La simulación muestra costos, márgenes y precio sugerido coherentes.
+- [x] Aplicar actualiza costo siempre; precio solo con checkbox.
+- [x] Descartar oculta hasta el próximo cambio de costo propuesto.
+- [x] La bandeja lista lo pendiente (al vuelo) y permite las mismas acciones.
+- [x] Merma / ajustes que no cambian `costo_actual` no disparan el modal.
 
 ## Related
 

@@ -31,7 +31,7 @@ Leyenda: ✅ ya cubierto · 🟡 parcial · 🔴 nuevo · 💡 idea a evaluar
 | 3.1 | Recetas + criticidad de ingredientes (bloqueante / no bloqueante) | No existe; no hay productos compuestos | 🔴 Nuevo — PRIORIDAD |
 | 3.2 | Motor de conversión de unidades (compra en Kg, receta en g) | No existe; `unidad_medida` es **texto libre sin factor** | 🔴 Nuevo — PRIORIDAD |
 | 4.1 | Mermas tipificadas + impacto financiero | `motivo='merma'` existe como razón de kardex, pero sin módulo dedicado, sin tipificación (vencimiento/deterioro/robo) ni "costo de venta perdido" | 🟡 Base mínima, falta lo relevante |
-| 4.2 | Simulador de impacto de costos (pre-confirmación) | No existe; depende de recetas + costo | 🔴 Nuevo |
+| 4.2 | Simulador de impacto de costos (pre-confirmación) | ✅ Implementado (pieza 5, 2026-07-15) | ✅ Cubierto |
 | 5.1 | Multi-impuestos Chile (IVA/exento/ILA) + desglose en POS | Aritmética cubierta (impuestos parametrizables N:M por item; el motor desglosa neto/IVA). **Falta modelar la naturaleza del impuesto y el monto exento** (ver detalle abajo) | 🟡 Cubierto en aritmética, falta modelar naturaleza + exento |
 | 5.2 | POS offline-first (caché local, cola de sync, folios diferidos) | No existe | 🔴 Nuevo — esfuerzo alto |
 

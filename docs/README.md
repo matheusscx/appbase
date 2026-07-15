@@ -43,6 +43,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [inventario-serializado.md](./features/inventario-serializado.md) | Inventario por serie y por lote (`modo_inventario`) |
 | [conversion-unidades.md](./features/conversion-unidades.md) | Catálogo global de unidades de medida + conversión en ajuste de stock |
 | [mermas-valorizadas.md](./features/mermas-valorizadas.md) | Mermas tipificadas por causa + valorización financiera en kardex |
+| [simulador-impacto-costos.md](./features/simulador-impacto-costos.md) | Simulador de desfase de costo en recetas (aplicar/descartar, modal + bandeja) |
 | [recetas.md](./features/recetas.md) | Recetas (productos compuestos) + criticidad bloqueante/no bloqueante de ingredientes |
 | [gestion-cajas.md](./features/gestion-cajas.md) | Cajas: apertura, movimientos, cuadre y cierre |
 | [ventas.md](./features/ventas.md) | Procesamiento de ventas + frontend POS |

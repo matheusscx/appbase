@@ -31,7 +31,7 @@ Food-service necesita saber *por qué* se perdió stock y cuánto costó, no sol
 **NOT included (future):**
 - Reporte fiscal/DTE de mermas.
 - Multi-bodega / ubicaciones.
-- Merma automática por rendimientos de recetas (pieza 5 — simulador).
+- Merma automática por rendimientos de recetas.
 
 ---
 

@@ -26,6 +26,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Conversión de unidades de medida (catálogo global + conversión en movimientos) | ✅ Implementado (2026-07-14) |
 | Recetas + criticidad de ingredientes (bloqueante/no bloqueante) | ✅ Implementado (2026-07-15) |
 | Mermas tipificadas y valorizadas | ✅ Implementado (2026-07-15) |
+| Simulador de impacto de costos (desfase recetas, aplicar/descartar) | ✅ Implementado (2026-07-15) |
 | Motor de cálculo de precios | ✅ Implementado (2026-06-28) |
 | Procesamiento de ventas (canal físico, pagos inline, vuelto) | ✅ Implementado (2026-06-29) |
 | Gestión de cajas | ✅ Implementado |

@@ -29,7 +29,7 @@ Food-service vende composiciones (hamburguesa = pan + carne + queso). Sin receta
 
 **NOT included (future):**
 - Recetas anidadas; ingredientes serie/lote.
-- Auto-recálculo de costo cuando cambia el costo de un ingrediente (pieza 5 — simulador).
+- Auto-recálculo silencioso de costo (ver [simulador-impacto-costos.md](./simulador-impacto-costos.md)).
 - Condiciones / variantes de receta.
 
 ---
