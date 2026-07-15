@@ -103,6 +103,14 @@ export class VentasService {
       dto.lineas.map((l) => this.itemsService.findOne(tenantId, l.itemId)),
     );
 
+    for (const item of items) {
+      if (item.tipo === 'ingrediente') {
+        throw new BadRequestException(
+          'Los ingredientes no se pueden vender directamente',
+        );
+      }
+    }
+
     // 3. Resolver moneda oficial del tenant (es_default = true)
     const monedaRows: {
       moneda_id: string;

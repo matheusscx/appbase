@@ -228,6 +228,20 @@ describe('VentasService', () => {
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
+    it('rechaza línea con item tipo ingrediente', async () => {
+      itemsService.findOne.mockResolvedValueOnce({
+        ...mockItem,
+        tipo: 'ingrediente',
+      } as never);
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, baseDto as any),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Los ingredientes no se pueden vender directamente',
+        ),
+      );
+    });
+
     it('llama a pagosService.registrar con los params correctos cuando hay pagos', async () => {
       // pago de 150 cuando total es 100 → PagosService calcula el vuelto internamente
       const dtoConExcedente = {

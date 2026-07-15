@@ -197,5 +197,44 @@ describe('MermasService', () => {
       ).rejects.toThrow('Causa de merma no válida o inactiva');
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
+
+    it('acepta item tipo ingrediente con mismo flujo que producto cantidad', async () => {
+      transactionQueryMock.mockResolvedValueOnce([
+        itemRow({ tipo: 'ingrediente', nombre: 'Harina premium' }),
+      ]);
+      causasService.assertCausaActiva.mockResolvedValueOnce({
+        id: CAUSA,
+        nombre: 'Vencimiento',
+      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce({
+        movimientoId: 'mov-ing',
+        stockAnterior: '10',
+        stockResultante: '9',
+      });
+
+      const result = await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        cantidad: '1',
+        causaMermaId: CAUSA,
+      });
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          tenantId: TENANT,
+          itemId: ITEM,
+          tipo: 'salida',
+          motivo: 'merma',
+          cantidad: '1',
+        }),
+      );
+      expect(result).toEqual({
+        movimientoId: 'mov-ing',
+        stockResultante: '9',
+        costoUnitario: '100',
+        costoPerdido: '100.0000',
+        causaNombre: 'Vencimiento',
+      });
+    });
   });
 });

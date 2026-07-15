@@ -85,8 +85,10 @@ export class MermasService {
       if (!itemRows.length) {
         throw new NotFoundException('Item no encontrado');
       }
-      if (itemRows[0].tipo !== 'producto') {
-        throw new BadRequestException('Solo se puede mermar un producto');
+      if (itemRows[0].tipo !== 'producto' && itemRows[0].tipo !== 'ingrediente') {
+        throw new BadRequestException(
+          'Solo se puede mermar un producto o un ingrediente',
+        );
       }
 
       const causa = await this.causasService.assertCausaActiva(
