@@ -55,6 +55,17 @@ de dependencias. Orden natural de construcción:
 Este paquete de 5 piezas encadenadas es el corazón del requerimiento del cliente
 (hamburguesa: pan/carne bloqueantes, queso/salsa no bloqueantes; 150 g → 0.15 Kg).
 
+### Personalización de ingredientes en el pedido (idea capturada, NO en alcance de la pieza 3)
+
+Durante el diseño de recetas (2026-07-15) surgió un caso real de food-service: el cliente
+final puede pedir la receta **sin** un ingrediente aunque sea bloqueante (ej. "sin pan") o
+**con** ingredientes extra no definidos en la receta base. La pieza 3 (recetas + criticidad)
+solo cubre la **receta estándar** — la plantilla de ingredientes y su descuento de stock al
+vender tal cual está definida. La personalización por pedido (agregar/quitar ingredientes al
+tomar la orden, con recálculo de costo/stock de esa venta puntual) es una **capacidad
+separada y de mayor alcance** (toca la captura de la línea de venta en el POS, no solo el
+motor de recetas) — 💡 idea a evaluar como fase posterior, no bloqueante del núcleo.
+
 ## Catálogo Global (1.1) — evaluación de factibilidad
 
 Factibilidad técnica **alta**, pero peso arquitectónico y **sin aporte al caso prioritario**:
