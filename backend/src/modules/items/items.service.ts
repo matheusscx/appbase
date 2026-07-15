@@ -661,6 +661,21 @@ export class ItemsService {
       where: { id: itemId, tenantId },
     });
     if (!item) throw new NotFoundException('Item no encontrado');
+
+    const usoRows: { nombre: string }[] = await this.dataSource.query(
+      `SELECT DISTINCT ri_item.nombre
+       FROM receta_ingredientes ri
+       JOIN items ri_item ON ri_item.item_id = ri.receta_item_id
+         AND ri_item.eliminado_el IS NULL
+       WHERE ri.ingrediente_item_id = $1 AND ri.eliminado_el IS NULL`,
+      [itemId],
+    );
+    if (usoRows.length) {
+      throw new BadRequestException(
+        `No se puede eliminar: es ingrediente de ${usoRows.map((r) => r.nombre).join(', ')}`,
+      );
+    }
+
     await this.dataSource.query(
       `UPDATE items SET activo = false, eliminado_el = NOW(), actualizado_el = NOW()
        WHERE item_id = $1 AND tenant_id = $2`,

@@ -680,6 +680,24 @@ describe('ItemsService', () => {
         [ITEM_ID, TENANT],
       );
     });
+
+    it('bloquea el borrado si el item es ingrediente de una receta activa', async () => {
+      itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
+      dataSource.query.mockResolvedValueOnce([{ nombre: 'Hamburguesa Clásica' }]);
+
+      await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('permite el borrado si el item no es ingrediente de ninguna receta', async () => {
+      itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
+      dataSource.query
+        .mockResolvedValueOnce([]) // sin recetas que lo usen
+        .mockResolvedValueOnce([]); // UPDATE items (soft delete)
+
+      await expect(service.remove(TENANT, ITEM_ID)).resolves.toBeUndefined();
+    });
   });
 
   // ── ajustarStock ───────────────────────────────────────────────────────────
