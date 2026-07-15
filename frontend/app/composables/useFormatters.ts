@@ -58,5 +58,19 @@ export function useFormatters() {
     return map[code] ?? code
   }
 
-  return { formatMonto, formatFecha, formatStock, formatTipoPago }
+  /** Valor decimal (0.19 = 19%) → string localizado con sufijo %. */
+  function formatPorcentaje(
+    value: string | Decimal | null | undefined,
+    decimals = 2,
+  ): string {
+    if (value === null || value === undefined || value === '') return '—'
+    try {
+      const pct = new Decimal(value).mul(100).toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP)
+      return `${pct.toFixed(decimals).replace('.', ',')}%`
+    } catch {
+      return '—'
+    }
+  }
+
+  return { formatMonto, formatFecha, formatStock, formatTipoPago, formatPorcentaje }
 }

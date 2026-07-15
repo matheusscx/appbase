@@ -2,6 +2,10 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { Row } from '@tanstack/vue-table'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
+import type {
+  AplicarDesfaseItem,
+  DesfaseRecetaDto,
+} from '~/components/RecetasDesfasesPanel.vue'
 import Decimal from 'decimal.js'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -98,6 +102,12 @@ const confirmModalOpen = ref(false)
 const stockModalOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
+
+// Simulador de impacto de costos en recetas
+const desfasesOpen = ref(false)
+const desfasesLoading = ref(false)
+const desfasesFilas = ref<DesfaseRecetaDto[]>([])
+const desfasesHighlightId = ref<string | null>(null)
 const stockItem = ref<Item | null>(null)
 const toggling = reactive(new Set<string>())
 const filtroTipo = ref('todos')
@@ -480,6 +490,65 @@ async function abrirEditar(item: Item) {
   }
 }
 
+function costoProductoCambio(): boolean {
+  if (!form.value.costo) return false
+  if (formCostoActual.value == null || formCostoActual.value === '') return true
+  try {
+    return !new Decimal(form.value.costo).eq(new Decimal(formCostoActual.value))
+  } catch {
+    return form.value.costo !== formCostoActual.value
+  }
+}
+
+async function maybeAbrirDesfases(productoId: string) {
+  try {
+    const filas = await useApiFetch<DesfaseRecetaDto[]>(
+      `${apiUrl}/items/${productoId}/recetas-afectadas`,
+    )
+    if (filas.length) {
+      desfasesFilas.value = filas
+      desfasesHighlightId.value = productoId
+      desfasesOpen.value = true
+    }
+  } catch { /* no bloquear el flujo de guardado */ }
+}
+
+async function onAplicarDesfases(items: AplicarDesfaseItem[]) {
+  desfasesLoading.value = true
+  try {
+    await useApiFetch(`${apiUrl}/recetas/desfases/aplicar`, {
+      method: 'POST',
+      body: { items },
+    })
+    toast.add({ title: 'Costos de recetas actualizados', color: 'success' })
+    desfasesOpen.value = false
+    await fetchItems()
+  } catch (e) {
+    const msg = apiErrorMsg(e, 'Error al aplicar desfases')
+    toast.add({ title: msg, color: 'error' })
+  } finally {
+    desfasesLoading.value = false
+  }
+}
+
+async function onDescartarDesfases(recetaItemIds: string[]) {
+  desfasesLoading.value = true
+  try {
+    await useApiFetch(`${apiUrl}/recetas/desfases/descartar`, {
+      method: 'POST',
+      body: { recetaItemIds },
+    })
+    toast.add({ title: 'Avisos descartados', color: 'success' })
+    desfasesOpen.value = false
+    await fetchItems()
+  } catch (e) {
+    const msg = apiErrorMsg(e, 'Error al descartar desfases')
+    toast.add({ title: msg, color: 'error' })
+  } finally {
+    desfasesLoading.value = false
+  }
+}
+
 async function guardar() {
   saving.value = true
   try {
@@ -529,6 +598,12 @@ async function guardar() {
       payload.frecuencia = form.value.frecuencia
     }
 
+    const productoId = editingId.value
+    const chequearDesfases =
+      !!productoId
+      && form.value.tipo === 'producto'
+      && costoProductoCambio()
+
     if (editingId.value) {
       await useApiFetch(`${apiUrl}/items/${editingId.value}`, {
         method: 'PATCH',
@@ -545,6 +620,9 @@ async function guardar() {
 
     drawerOpen.value = false
     await fetchItems()
+    if (chequearDesfases && productoId) {
+      await maybeAbrirDesfases(productoId)
+    }
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al guardar')
     toast.add({ title: msg, color: 'error' })
@@ -652,13 +730,16 @@ async function ejecutarAjusteStock() {
   ajustando.value = true
   try {
     const f = ajusteForm.value
+    const productoId = stockItem.value.id
     const modo = stockItem.value.modoInventario ?? 'cantidad'
     const body: Record<string, unknown> = {
       tipo: f.tipo,
       motivo: f.motivo,
       comentario: f.comentario || undefined,
     }
-    if (f.tipo === 'entrada' && f.motivo === 'compra' && f.costoUnitario) {
+    const envioCostoCompra =
+      f.tipo === 'entrada' && f.motivo === 'compra' && !!f.costoUnitario
+    if (envioCostoCompra) {
       body.costoUnitario = f.costoUnitario
     }
     if (modo === 'cantidad') {
@@ -683,13 +764,16 @@ async function ejecutarAjusteStock() {
       }
     }
     const result = await useApiFetch<{ stock: string }>(
-      `${apiUrl}/items/${stockItem.value.id}/stock`,
+      `${apiUrl}/items/${productoId}/stock`,
       { method: 'PATCH', body },
     )
-    const item = items.value.find((i) => i.id === stockItem.value?.id)
+    const item = items.value.find((i) => i.id === productoId)
     if (item) item.stock = result.stock
     toast.add({ title: `Stock actualizado: ${result.stock}`, color: 'success' })
     stockModalOpen.value = false
+    if (envioCostoCompra) {
+      await maybeAbrirDesfases(productoId)
+    }
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al ajustar stock')
     toast.add({ title: msg, color: 'error' })
@@ -1543,5 +1627,24 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         </div>
       </template>
     </UModal>
+
+    <!-- Impacto de costos en recetas tras cambiar insumo -->
+    <AppDrawer
+      v-model:open="desfasesOpen"
+      width="75%"
+      title="Impacto en recetas"
+      description="El costo del producto cambió; estas recetas quedaron desfasadas."
+    >
+      <template #body>
+        <RecetasDesfasesPanel
+          :filas="desfasesFilas"
+          :highlight-ingrediente-id="desfasesHighlightId"
+          :loading="desfasesLoading"
+          @aplicar="onAplicarDesfases"
+          @descartar="onDescartarDesfases"
+          @cerrar="desfasesOpen = false"
+        />
+      </template>
+    </AppDrawer>
   </div>
 </template>
