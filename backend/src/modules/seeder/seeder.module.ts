@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SeederService } from './seeder.service';
 import { Moneda } from '../catalog/entities/moneda.entity';
 import { Pais } from '../catalog/entities/pais.entity';
+import { UnidadMedida } from '../catalog/entities/unidad-medida.entity';
 import { Provincia } from '../catalog/entities/provincia.entity';
 import { ModuloApp } from '../catalog/entities/modulo-app.entity';
 import { Permiso } from '../catalog/entities/permiso.entity';
@@ -43,6 +44,7 @@ import { Impresora } from '../impresoras/entities/impresora.entity';
     PasarelaModule,
     TypeOrmModule.forFeature([
       Moneda,
+      UnidadMedida,
       Pais,
       Provincia,
       ModuloApp,

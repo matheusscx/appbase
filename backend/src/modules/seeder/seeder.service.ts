@@ -3,6 +3,7 @@ import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Moneda } from '../catalog/entities/moneda.entity';
 import { Pais } from '../catalog/entities/pais.entity';
+import { UnidadMedida } from '../catalog/entities/unidad-medida.entity';
 import { Provincia } from '../catalog/entities/provincia.entity';
 import { ModuloApp } from '../catalog/entities/modulo-app.entity';
 import { Permiso } from '../catalog/entities/permiso.entity';
@@ -49,6 +50,8 @@ export class SeederService implements OnApplicationBootstrap {
   constructor(
     @InjectRepository(Moneda)
     private readonly monedaRepo: Repository<Moneda>,
+    @InjectRepository(UnidadMedida)
+    private readonly unidadMedidaRepo: Repository<UnidadMedida>,
     @InjectRepository(Pais)
     private readonly paisRepo: Repository<Pais>,
     @InjectRepository(Provincia)
@@ -232,22 +235,22 @@ export class SeederService implements OnApplicationBootstrap {
    * códigos (ver seedItemsMonedaUnidadMatrix): quitarlos rompería la validación.
    */
   private async seedUnidadesMedida(): Promise<void> {
-    const unidades = [
-      { id: '550e8400-e29b-41d4-a716-446655440250', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
-      { id: '550e8400-e29b-41d4-a716-446655440251', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
-      { id: '550e8400-e29b-41d4-a716-446655440252', codigo: 'ml', nombre: 'Mililitro', magnitud: 'volumen', factorBase: '1' },
-      { id: '550e8400-e29b-41d4-a716-446655440253', codigo: 'l', nombre: 'Litro', magnitud: 'volumen', factorBase: '1000' },
-      { id: '550e8400-e29b-41d4-a716-446655440254', codigo: 'unidad', nombre: 'Unidad', magnitud: 'conteo', factorBase: '1' },
-      { id: '550e8400-e29b-41d4-a716-446655440255', codigo: 'm', nombre: 'Metro', magnitud: 'longitud', factorBase: '1' },
+    const unidades: Partial<UnidadMedida>[] = [
+      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440250', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
+      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440251', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
+      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440252', codigo: 'ml', nombre: 'Mililitro', magnitud: 'volumen', factorBase: '1' },
+      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440253', codigo: 'l', nombre: 'Litro', magnitud: 'volumen', factorBase: '1000' },
+      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440254', codigo: 'unidad', nombre: 'Unidad', magnitud: 'conteo', factorBase: '1' },
+      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440255', codigo: 'm', nombre: 'Metro', magnitud: 'longitud', factorBase: '1' },
     ];
 
-    for (const u of unidades) {
-      await this.dataSource.query(
-        `INSERT INTO unidades_medida (unidad_medida_id, codigo, nombre, magnitud, factor_base)
-         VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT DO NOTHING`,
-        [u.id, u.codigo, u.nombre, u.magnitud, u.factorBase],
-      );
+    for (const data of unidades) {
+      const exists = await this.unidadMedidaRepo.findOne({
+        where: { codigo: data.codigo },
+      });
+      if (!exists) {
+        await this.unidadMedidaRepo.save(this.unidadMedidaRepo.create(data));
+      }
     }
   }
 
