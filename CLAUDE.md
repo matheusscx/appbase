@@ -120,6 +120,9 @@ o cambia una feature.
   Funciones de formato (`formatMonto`, `formatFecha` y toda utilidad de presentación
   reutilizable) centralizadas en composables de `app/composables/` (hoy
   `useFormatters`), nunca definidas localmente en un `.vue`.
+  **Anti-patrón:** mutar (POST/PUT/PATCH/DELETE) y luego `cargar()`/`fetch` de la
+  lista. El backend devuelve la entidad o un patch mergeable; el front actualiza
+  el `ref` local. Detalle: `docs/patterns/frontend.md`.
 - **Design System:** siempre tokens semánticos de Nuxt UI (`text-muted`,
   `divide-default`, `bg-default`), nunca Tailwind hardcoded (`text-gray-500`,
   `bg-white dark:bg-gray-900`). Excepción: colores financieros (verde/rojo/azul) en
