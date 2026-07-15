@@ -667,7 +667,7 @@ Deliverable: `DELETE /items/:id` sobre un producto referenciado por una receta a
 - Consumes: nada nuevo.
 - Produces: `ItemsService.remove` lanza `BadRequestException` cuando el item está en uso.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('remove', ...)` (buscar el describe existente de `remove`, o crearlo si no existe junto a `update`):
 
@@ -693,12 +693,12 @@ En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('remov
   });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: FAIL — hoy `remove` no consulta `receta_ingredientes`, así que el primer test no lanza.
 
-- [ ] **Step 3: Implementación mínima**
+- [x] **Step 3: Implementación mínima**
 
 En `backend/src/modules/items/items.service.ts`, reemplazar `remove`:
 
@@ -731,12 +731,12 @@ En `backend/src/modules/items/items.service.ts`, reemplazar `remove`:
   }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/modules/items/items.service.ts backend/src/modules/items/items.service.spec.ts
@@ -761,7 +761,7 @@ Deliverable: vender una receta genera un movimiento de salida por ingrediente (c
   - `ItemsService.venderIngredientesReceta(manager: EntityManager, params: { tenantId: string; usuarioId: string | null; ventaId: string; recetaItemId: string; recetaNombre: string; cantidadVendida: string }): Promise<string[]>` — devuelve las advertencias (vacío si no hubo ninguna).
   - `VentasService.crear(...)` la respuesta incluye `advertenciasReceta: string[]`.
 
-- [ ] **Step 1: Write the failing tests — `ItemsService`**
+- [x] **Step 1: Write the failing tests — `ItemsService`**
 
 En `backend/src/modules/items/items.service.spec.ts`, nuevo `describe` al final del archivo:
 
@@ -890,12 +890,12 @@ En `backend/src/modules/items/items.service.spec.ts`, nuevo `describe` al final 
   });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: FAIL — `venderIngredientesReceta` no existe.
 
-- [ ] **Step 3: Implementación mínima — `ItemsService`**
+- [x] **Step 3: Implementación mínima — `ItemsService`**
 
 Agregar en `backend/src/modules/items/items.service.ts`, como métodos públicos (junto a `findLotes`, antes de los helpers privados):
 
@@ -1030,12 +1030,12 @@ Agregar en `backend/src/modules/items/items.service.ts`, como métodos públicos
   }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: PASS
 
-- [ ] **Step 5: Write the failing tests — `VentasService`**
+- [x] **Step 5: Write the failing tests — `VentasService`**
 
 En `backend/src/modules/ventas/ventas.service.spec.ts`, agregar el mock de `venderIngredientesReceta` al provider de `ItemsService` (junto a `findOne`):
 
@@ -1102,12 +1102,12 @@ Y un nuevo `describe` (después de `describe('crear()', ...)` existente, o dentr
   });
 ```
 
-- [ ] **Step 6: Run tests to verify they fail**
+- [x] **Step 6: Run tests to verify they fail**
 
 Run: `cd backend && npm test -- ventas.service.spec.ts`
 Expected: FAIL — el loop actual solo maneja `tipo === 'producto'` y la respuesta no incluye `advertenciasReceta`.
 
-- [ ] **Step 7: Implementación mínima — `VentasService`**
+- [x] **Step 7: Implementación mínima — `VentasService`**
 
 En `backend/src/modules/ventas/ventas.service.ts`, reemplazar el bloque `7f` (líneas 308-323):
 
@@ -1151,12 +1151,12 @@ Y cambiar el `return` final (línea 353):
     return { ...venta, detalles, advertenciasReceta };
 ```
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [x] **Step 8: Run tests to verify they pass**
 
 Run: `cd backend && npm test -- ventas.service.spec.ts items.service.spec.ts`
 Expected: PASS (incluidos los tests preexistentes de items tipo `producto`/`servicio` — no cambian).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/modules/items/items.service.ts \
@@ -1180,7 +1180,7 @@ Deliverable: cada receta en el listado trae `disponible: number | null` (mínimo
 - Consumes: `CatalogService.convertirUnidad`.
 - Produces: `findAll` devuelve items con `disponible: number | null` (siempre presente, `null` si no aplica o el item no es receta). `findOne` de una receta agrega `ingredientes: { ingredienteItemId, ingredienteNombre, cantidad, unidadCodigo, bloqueante }[]`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('findAll', ...)`:
 
@@ -1263,12 +1263,12 @@ En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('findA
     });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: FAIL — `disponible` no existe en la respuesta hoy.
 
-- [ ] **Step 3: Implementación mínima**
+- [x] **Step 3: Implementación mínima**
 
 En `backend/src/modules/items/items.service.ts`, agregar el método privado (junto a `validarYCostearIngredientes`):
 
@@ -1383,12 +1383,12 @@ En `findOne`, agregar la resolución de ingredientes cuando el tipo es `receta` 
     };
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/modules/items/items.service.ts backend/src/modules/items/items.service.spec.ts
@@ -1408,7 +1408,7 @@ Deliverable: al arrancar el backend en dev, existe una receta lista para probar 
 - Consumes: nada (usa `this.dataSource.query` directo, mismo patrón que `seedItemsMonedaUnidadMatrix`).
 - Produces: nada consumido por otro task; es un fixture de datos.
 
-- [ ] **Step 1: Implementación**
+- [x] **Step 1: Implementación**
 
 En `backend/src/modules/seeder/seeder.service.ts`, agregar la llamada dentro de `seedItems()`:
 
@@ -1504,7 +1504,7 @@ Y el método nuevo (después de `seedItemsMonedaUnidadMatrix`):
   }
 ```
 
-- [ ] **Step 2: Verificar manualmente**
+- [x] **Step 2: Verificar manualmente**
 
 Run: `cd backend && npm run start:dev` (o `docker-compose up`), esperar a que el seeder corra, luego:
 
@@ -1515,7 +1515,7 @@ curl -s http://localhost:3000/api/items/550e8400-e29b-41d4-a716-446655440259 \
 
 Expected: `tipo: "receta"`, `costoActual: "1820.0000"`, `ingredientes` con 3 filas (pan/carne/queso).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/src/modules/seeder/seeder.service.ts
@@ -1535,7 +1535,7 @@ Deliverable: `recetas.e2e-spec.ts` cubre creación, venta con y sin stock (bloqu
 - Consumes: `POST/GET/DELETE /api/items`, `POST /api/ventas`, `POST /api/items/:id/stock` (ajuste, ya existente de la pieza 2).
 - Produces: nada (test hoja).
 
-- [ ] **Step 1: Write the E2E test**
+- [x] **Step 1: Write the E2E test**
 
 Crear `backend/test/recetas.e2e-spec.ts`:
 
@@ -1734,12 +1734,12 @@ describe('Recetas — flujo completo (e2e)', () => {
 });
 ```
 
-- [ ] **Step 2: Run the E2E test**
+- [x] **Step 2: Run the E2E test**
 
 Run: `cd backend && npm run test:e2e -- recetas.e2e-spec.ts`
 Expected: PASS (requiere el backend apuntando a una base con el seed corrido — igual que el resto de la suite E2E).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/test/recetas.e2e-spec.ts
@@ -1759,7 +1759,7 @@ Deliverable: crear/editar un item con `tipo=receta` muestra un editor de filas d
 - Consumes: `GET /items?tipo=producto&pageSize=100` (catálogo de ingredientes elegibles), `unidadesMedidaStore` (pieza 2, ya cargado en `cargarCatalogos`).
 - Produces: nada consumido por otro task.
 
-- [ ] **Step 1: Tipos y estado**
+- [x] **Step 1: Tipos y estado**
 
 En `frontend/app/pages/configuracion/items.vue`, agregar la interfaz de fila de ingrediente junto a `SerieRow` (`:43`):
 
@@ -1823,7 +1823,7 @@ function resetDrawer() {
 }
 ```
 
-- [ ] **Step 2: Cargar el catálogo de ingredientes**
+- [x] **Step 2: Cargar el catálogo de ingredientes**
 
 En `cargarCatalogos()` (`:361-402`), agregar el fetch junto a categorías/impuestos:
 
@@ -1846,7 +1846,7 @@ En `cargarCatalogos()` (`:361-402`), agregar el fetch junto a categorías/impues
       .map(p => ({ id: p.id, nombre: p.nombre, unidadMedida: p.unidadMedida ?? 'unidad' }))
 ```
 
-- [ ] **Step 3: Cargar ingredientes al editar**
+- [x] **Step 3: Cargar ingredientes al editar**
 
 En `abrirEditar()` (`:413-450`), agregar al objeto `form.value`:
 
@@ -1865,7 +1865,7 @@ Y justo después, fuera del objeto `form.value`, guardar el costo cacheado para 
     formCostoActual.value = detalle.costoActual ?? null
 ```
 
-- [ ] **Step 4: Payload en `guardar()`**
+- [x] **Step 4: Payload en `guardar()`**
 
 En `guardar()` (`:452-521`), agregar la rama `receta` junto a `producto`/`servicio` (después del bloque `else if (form.value.tipo === 'servicio')`):
 
@@ -1880,7 +1880,7 @@ En `guardar()` (`:452-521`), agregar la rama `receta` junto a `producto`/`servic
     }
 ```
 
-- [ ] **Step 5: Template — editor de ingredientes**
+- [x] **Step 5: Template — editor de ingredientes**
 
 En el template, agregar el bloque después de `<!-- Extensión servicio -->` (`:1044-1058`), como hermano de los `template v-if="form.tipo === ..."`:
 
@@ -1953,11 +1953,11 @@ En el template, agregar el bloque después de `<!-- Extensión servicio -->` (`:
 
 > Nota: el costo (`costoActual`) lo calcula y persiste el backend al guardar — no se recalcula en vivo en el cliente (evita duplicar la lógica de conversión de unidades). Tras guardar, `abrirEditar` vuelve a traer `costoActual` actualizado desde `GET /items/:id`.
 
-- [ ] **Step 6: Verificación manual**
+- [x] **Step 6: Verificación manual**
 
 Run: `docker-compose up` (o `cd frontend && npm run dev` con el backend corriendo), login como admin → Configuración → Items → Nuevo item → tipo Receta → agregar 2-3 ingredientes con distinta unidad → Guardar → reabrir en edición y confirmar que los ingredientes y el costo persisten.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/app/pages/configuracion/items.vue
@@ -1979,7 +1979,7 @@ Deliverable: el POS muestra recetas junto a productos, con badge de disponibilid
 - Consumes: `GET /items?tipo=receta&pageSize=100` (nuevo fetch), `POST /ventas` → `advertenciasReceta` (Task 4).
 - Produces: `ItemCatalogo.disponible: number | null`.
 
-- [ ] **Step 1: `ItemCatalogo` gana `disponible`**
+- [x] **Step 1: `ItemCatalogo` gana `disponible`**
 
 En `frontend/app/composables/useVenta.ts:8-18`:
 
@@ -1998,7 +1998,7 @@ export interface ItemCatalogo {
 }
 ```
 
-- [ ] **Step 2: `CatalogoGrid.vue` distingue receta de producto**
+- [x] **Step 2: `CatalogoGrid.vue` distingue receta de producto**
 
 En `frontend/app/components/ventas/CatalogoGrid.vue`, reemplazar `tieneStock`/`compararCatalogo`/`onAgregar` (`:12-40`):
 
@@ -2093,7 +2093,7 @@ Actualizar el template (`:62-99`): la clase del `UCard` y el badge de stock/disp
         </UCard>
 ```
 
-- [ ] **Step 3: `pos.vue` incluye recetas en el catálogo**
+- [x] **Step 3: `pos.vue` incluye recetas en el catálogo**
 
 En `frontend/app/pages/ventas/pos.vue`, modificar `cargar()` (`:93-113`) — reemplazar el fetch único de items por dos fetches en paralelo:
 
@@ -2113,7 +2113,7 @@ En `frontend/app/pages/ventas/pos.vue`, modificar `cargar()` (`:93-113`) — ree
 
 (el resto de `cargar()` — asignación de `metodos`/`tiposDocumento`/`tipoDocumentoId` — no cambia).
 
-- [ ] **Step 4: Toast muestra `advertenciasReceta`**
+- [x] **Step 4: Toast muestra `advertenciasReceta`**
 
 En `confirmarCobro()` (`:155-159`), ampliar el tipo de la respuesta y agregar los toasts de advertencia justo después del toast de éxito:
 
@@ -2129,11 +2129,11 @@ En `confirmarCobro()` (`:155-159`), ampliar el tipo de la respuesta y agregar lo
     cobroOpen.value = false
 ```
 
-- [ ] **Step 5: Verificación manual**
+- [x] **Step 5: Verificación manual**
 
 Login → POS → confirmar que "Hamburguesa Clásica" (seed de Task 6) aparece en el catálogo con "Disponibles: 6" (o el valor calculado) → venderla dos veces hasta que el queso se agote → confirmar el toast de advertencia → seguir vendiendo hasta agotar carne → confirmar que la venta se rechaza con 400 y el POS muestra el error.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/app/composables/useVenta.ts \
@@ -2158,15 +2158,15 @@ Deliverable: `docs/features/recetas.md` documenta el comportamiento real; `ESTAD
 - Consumes: nada (documentación).
 - Produces: nada.
 
-- [ ] **Step 1: `docs/features/recetas.md`**
+- [x] **Step 1: `docs/features/recetas.md`**
 
 Copiar `docs/features/TEMPLATE.md` a `docs/features/recetas.md` y documentar, contra el código ya mergeado (no contra este plan): el modelo `item_receta`/`receta_ingredientes`, el cálculo de costo cacheado (sin auto-recálculo), el comportamiento de venta (bloqueante aborta, no bloqueante omite + advertencia), la disponibilidad calculada al vuelo, y el link al spec y al análisis de alineamiento (pieza 3 de 5).
 
-- [ ] **Step 2: `docs/README.md`**
+- [x] **Step 2: `docs/README.md`**
 
 Agregar el link a `docs/features/recetas.md` en la tabla/lista de features existente, junto a `conversion-unidades.md`.
 
-- [ ] **Step 3: `docs/ESTADO.md`**
+- [x] **Step 3: `docs/ESTADO.md`**
 
 Agregar la fila (junto a las de costo por producto / conversión de unidades):
 
@@ -2174,7 +2174,7 @@ Agregar la fila (junto a las de costo por producto / conversión de unidades):
 | Recetas + criticidad de ingredientes (bloqueante/no bloqueante) | ✅ Implementado (2026-07-15) |
 ```
 
-- [ ] **Step 4: Spec → Done**
+- [x] **Step 4: Spec → Done**
 
 En `docs/superpowers/specs/2026-07-15-recetas-criticidad-ingredientes-design.md`, cambiar:
 
@@ -2182,7 +2182,7 @@ En `docs/superpowers/specs/2026-07-15-recetas-criticidad-ingredientes-design.md`
 **Status**: Done (implementado 2026-07-15)
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/features/recetas.md docs/README.md docs/ESTADO.md \
@@ -2194,12 +2194,12 @@ git commit -m "docs(recetas): documenta el motor de recetas (pieza 3 cluster foo
 
 ## Verification (whole feature)
 
-- [ ] `cd backend && npm test` — toda la suite unitaria pasa, incluidos los tests preexistentes de `items.service.spec.ts`/`ventas.service.spec.ts` sin cambios de comportamiento para `producto`/`servicio`/`suscripcion`.
-- [ ] `cd backend && npm run test:e2e -- recetas.e2e-spec.ts` — pasa contra una BD con el seed corrido.
-- [ ] `cd backend && npx tsc --noEmit` — sin errores de tipos.
-- [ ] `cd backend && npm run lint` — limpio.
-- [ ] `cd frontend && npm run build` — sin errores.
-- [ ] Manual: `docker-compose up` desde cero (`down -v` si se necesita un volumen limpio — **destructivo, pedir confirmación antes de correrlo**), login, crear una receta nueva en el form, venderla en el POS con y sin stock de un ingrediente no bloqueante, confirmar la advertencia y el `disponible` bajando en el listado.
+- [x] `cd backend && npm test` — toda la suite unitaria pasa, incluidos los tests preexistentes de `items.service.spec.ts`/`ventas.service.spec.ts` sin cambios de comportamiento para `producto`/`servicio`/`suscripcion`.
+- [x] `cd backend && npm run test:e2e -- recetas.e2e-spec.ts` — pasa contra una BD con el seed corrido.
+- [x] `cd backend && npx tsc --noEmit` — sin errores de tipos.
+- [x] `cd backend && npm run lint` — limpio.
+- [x] `cd frontend && npm run build` — sin errores.
+- [x] Manual: `docker-compose up` desde cero (`down -v` si se necesita un volumen limpio — **destructivo, pedir confirmación antes de correrlo**), login, crear una receta nueva en el form, venderla en el POS con y sin stock de un ingrediente no bloqueante, confirmar la advertencia y el `disponible` bajando en el listado.
 
 ## Decisions
 
