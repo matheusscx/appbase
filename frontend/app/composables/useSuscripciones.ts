@@ -80,6 +80,30 @@ export function useSuscripciones() {
     }
   }
 
+  function upsertLocal(saved: Suscripcion) {
+    const idx = suscripciones.value.findIndex(s => s.id === saved.id)
+    if (idx >= 0) {
+      suscripciones.value[idx] = { ...suscripciones.value[idx], ...saved }
+    }
+    else {
+      suscripciones.value = [saved, ...suscripciones.value]
+    }
+  }
+
+  async function crear(body: {
+    itemId: string
+    diaMes?: number
+    diaSemana?: number
+    inscripcionId: string
+  }): Promise<Suscripcion> {
+    const saved = await useApiFetch<Suscripcion>(`${apiUrl}/suscripciones`, {
+      method: 'POST',
+      body,
+    })
+    upsertLocal(saved)
+    return saved
+  }
+
   async function accion(id: string, tipo: keyof typeof ESTADO_TRAS_ACCION) {
     if (mutando.has(id)) return
     const susc = suscripciones.value.find((s) => s.id === id)
@@ -128,5 +152,5 @@ export function useSuscripciones() {
 
   onMounted(cargar)
 
-  return { suscripciones, loading, cargar, pausar, reanudar, cancelar, cambiarTarjeta }
+  return { suscripciones, loading, cargar, crear, pausar, reanudar, cancelar, cambiarTarjeta }
 }

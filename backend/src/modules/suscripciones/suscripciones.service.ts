@@ -126,9 +126,21 @@ export class SuscripcionesService {
     //    el cobro automáticamente.
     let salida: {
       id: string;
-      ventaInicialId: string;
-      proximoCobro: string;
+      itemId: string;
+      itemNombre: string;
+      precio: string;
+      monedaId: string | null;
+      frecuencia: string;
+      diaMes: number | null;
+      diaSemana: number | null;
       estado: string;
+      proximoCobro: string;
+      activaHasta: string | null;
+      inscripcionId: string | null;
+      tarjetaMarca: string | null;
+      tarjetaLast4: string | null;
+      ventaInicialId: string;
+      creadoEl: Date;
     };
     try {
       salida = await this.dataSource.transaction(async (manager) => {
@@ -169,9 +181,21 @@ export class SuscripcionesService {
 
         return {
           id: suscripcion.id,
-          ventaInicialId: venta.id,
-          proximoCobro: suscripcion.proximoCobro,
+          itemId: dto.itemId,
+          itemNombre: item.nombre,
+          precio: item.precioBase,
+          monedaId: item.monedaId ?? null,
+          frecuencia: suscripcion.frecuencia,
+          diaMes: suscripcion.diaMes,
+          diaSemana: suscripcion.diaSemana,
           estado: suscripcion.estado,
+          proximoCobro: suscripcion.proximoCobro,
+          activaHasta: suscripcion.activaHasta ?? null,
+          inscripcionId: suscripcion.inscripcionId,
+          tarjetaMarca: marca,
+          tarjetaLast4: ultimos4,
+          ventaInicialId: venta.id,
+          creadoEl: suscripcion.creadoEl,
         };
       });
     } catch (e) {

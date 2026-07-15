@@ -11,7 +11,7 @@ const router = useRouter()
 const toast = useToast()
 const permissionsStore = usePermissionsStore()
 
-const { suscripciones, loading, pausar, reanudar, cancelar, cambiarTarjeta, cargar } =
+const { suscripciones, loading, pausar, reanudar, cancelar, cambiarTarjeta, crear } =
   useSuscripciones()
 const {
   tarjetas,
@@ -229,18 +229,14 @@ async function confirmar() {
   confirmando.value = true
   try {
     const { diaMes, diaSemana } = diasDePayload(item)
-    await useApiFetch(`${apiUrl}/suscripciones`, {
-      method: 'POST',
-      body: {
-        itemId: item.id,
-        diaMes: diaMes ?? undefined,
-        diaSemana: diaSemana ?? undefined,
-        inscripcionId: selectedInscripcionId.value,
-      },
+    await crear({
+      itemId: item.id,
+      diaMes: diaMes ?? undefined,
+      diaSemana: diaSemana ?? undefined,
+      inscripcionId: selectedInscripcionId.value,
     })
     drawerOpen.value = false
     toast.add({ title: 'Suscripción activada y primer cobro realizado', color: 'success' })
-    await cargar()
   } catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'No se pudo activar la suscripción'), color: 'error' })
   } finally {
@@ -264,17 +260,13 @@ async function reanudarAltaPendiente(inscripcionId: string) {
   }
   procesandoAlta.value = true
   try {
-    await useApiFetch(`${apiUrl}/suscripciones`, {
-      method: 'POST',
-      body: {
-        itemId: intent.itemId,
-        diaMes: intent.diaMes ?? undefined,
-        diaSemana: intent.diaSemana ?? undefined,
-        inscripcionId,
-      },
+    await crear({
+      itemId: intent.itemId,
+      diaMes: intent.diaMes ?? undefined,
+      diaSemana: intent.diaSemana ?? undefined,
+      inscripcionId,
     })
     toast.add({ title: 'Suscripción activada y primer cobro realizado', color: 'success' })
-    await cargar()
   } catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'No se pudo activar la suscripción'), color: 'error' })
   } finally {

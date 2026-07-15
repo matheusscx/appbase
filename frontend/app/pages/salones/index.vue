@@ -111,6 +111,20 @@ async function cargarSalones() {
   }
 }
 
+/** Ajusta el contador de cuentas abiertas/ocupación sin re-fetch de salones. */
+function patchMesaOcupacion(mesaId: string, deltaAbiertas: number) {
+  for (const salon of salones.value) {
+    const mesa = salon.mesas.find(m => m.id === mesaId)
+    if (!mesa) continue
+    mesa.cuentasAbiertas = Math.max(0, mesa.cuentasAbiertas + deltaAbiertas)
+    mesa.ocupada = mesa.cuentasAbiertas > 0
+    if (selectedMesa.value?.id === mesaId) {
+      selectedMesa.value = { ...mesa }
+    }
+    break
+  }
+}
+
 async function cargarCatalogo() {
   loadingCatalogo.value = true
   try {
@@ -183,8 +197,10 @@ function nuevaCuenta() {
 async function abrirCuentaConPin(pin: string, nombre: string) {
   if (!selectedMesa.value) return
   try {
-    const cuenta = await salonesApi.abrirCuenta(selectedMesa.value.id, pin)
+    const mesaId = selectedMesa.value.id
+    const cuenta = await salonesApi.abrirCuenta(mesaId, pin)
     cuentas.value.push(cuenta)
+    patchMesaOcupacion(mesaId, 1)
     abrirCuenta(cuenta)
     toast.add({ title: `Cuenta abierta por ${nombre}`, color: 'success' })
   }
@@ -227,11 +243,21 @@ async function fusionarSeleccionadas() {
   if (!selectedMesa.value || seleccionadasFusion.value.length < 2) return
   fusionando.value = true
   try {
+    const fusedIds = new Set(seleccionadasFusion.value)
     const cuenta = await salonesApi.fusionarCuentas(selectedMesa.value.id, seleccionadasFusion.value)
+    const eliminadas = cuentas.value.filter(c => fusedIds.has(c.id) && c.id !== cuenta.id).length
+    cuentas.value = [
+      cuenta,
+      ...cuentas.value.filter(c => !fusedIds.has(c.id)),
+    ]
+    if (eliminadas > 0) {
+      patchMesaOcupacion(selectedMesa.value.id, -eliminadas)
+    }
     toast.add({ title: `Cuentas fusionadas en Cuenta ${cuenta.numero}`, color: 'success' })
     fusionMode.value = false
     seleccionadasFusion.value = []
-    await cargarCuentas(selectedMesa.value.id)
+    activeCuenta.value = cuenta
+    void recalcular()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al fusionar las cuentas'), color: 'error' })
@@ -344,13 +370,14 @@ async function imprimirPrecuenta() {
 
 // ── Cancelar / cerrar cuenta ───────────────────────────────────────────────
 async function confirmarCancelar() {
-  if (!activeCuenta.value) return
+  if (!activeCuenta.value || !selectedMesa.value) return
   try {
+    const mesaId = selectedMesa.value.id
     await salonesApi.cancelarCuenta(activeCuenta.value.id)
     toast.add({ title: 'Cuenta cancelada', color: 'success' })
     cuentas.value = cuentas.value.filter(c => c.id !== activeCuenta.value?.id)
+    patchMesaOcupacion(mesaId, -1)
     volverACuentas()
-    await cargarSalones()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cancelar la cuenta'), color: 'error' })
@@ -400,9 +427,13 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
       }
     }
 
-    cuentas.value = cuentas.value.filter(c => c.id !== activeCuenta.value?.id)
+    cuentas.value = cuentas.value.filter(c => c.id !== cuentaCerrada.id)
+    if (selectedMesa.value) {
+      patchMesaOcupacion(selectedMesa.value.id, -1)
+    }
     volverACuentas()
-    await Promise.all([cargarSalones(), cajaStore.cargarActiva()])
+    // Resumen de caja sí cambia por el cobro (agregado); no re-listamos salones.
+    await cajaStore.cargarActiva()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cerrar la cuenta'), color: 'error' })
