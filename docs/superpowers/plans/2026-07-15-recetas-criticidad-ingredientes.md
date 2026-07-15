@@ -4,7 +4,7 @@
 
 **Goal:** Un producto compuesto ("Hamburguesa Clásica") se vende como cualquier item, pero al venderse descuenta stock de sus ingredientes en vez de tener stock propio; un ingrediente bloqueante sin stock aborta la venta completa, uno no bloqueante se omite con una advertencia.
 
-**Architecture:** Nuevo `items.tipo = 'receta'` con extensión 1:1 `item_receta` (costo cacheado) y tabla `receta_ingredientes` (N ingredientes por receta, cada uno con cantidad, unidad y flag `bloqueante`). Toda la lógica de recetas vive en `ItemsService` (que ya inyecta `CatalogService` e `InventarioService`); `VentasService` delega en un único método nuevo (`itemsService.venderIngredientesReceta`) para no ganar dependencias nuevas. La conversión de unidades reutiliza `CatalogService.convertirUnidad` (pieza 2) sin cambios. El ingrediente bloqueante sin stock aborta la venta gratis dejando que `InventarioService.registrarMovimiento` lance su validación existente de "salida no negativa" dentro de la misma transacción.
+**Architecture:** Nuevo `items.tipo = 'receta'` con extensión 1:1 `item_receta` (costo cacheado) y tabla `receta_ingredientes` (N ingredientes por receta, cada uno con cantidad, unidad y flag `bloqueante`). Toda la lógica de recetas vive en `ItemsService` (que ya inyecta `CatalogService` e `InventarioService`); `VentasService` delega en un único método nuevo (`itemsService.venderIngredientesReceta`) para no ganar dependencias nuevas. La conversión de unidades reutiliza `CatalogService.convertirUnidad` (pieza 2) sin cambios. El ingrediente bloqueante sin stock aborta la venta gratis dejando que `InventarioService.registrarMovimiento` lance su validación existente de "salida no negativa" dentro de la misma transacción. El no-bloqueante intenta el mismo movimiento y convierte solo el error `'Stock insuficiente para la salida'` en advertencia (sin pre-chequeo racey).
 
 **Tech Stack:** NestJS + TypeORM (`synchronize: true` en dev — no hay migraciones), PostgreSQL 15, Decimal.js, Jest + supertest, Nuxt 4 + Pinia + Nuxt UI, Vitest.
 
@@ -15,13 +15,14 @@
 - **Trabajar y commitear directamente sobre `main`.** No crear ramas ni PRs.
 - **Toda aritmética de dinero, cantidades y factores usa Decimal.js.** Nunca `number` nativo (excepto `disponible`, que es un conteo entero de unidades vendibles, no dinero — se expone como `number | null`).
 - **Toda columna PK/FK de UUID declara `type: 'uuid'` explícito** (ADR-004). Sin él TypeORM infiere `varchar` y rompe los JOINs en SQL raw.
-- **Soft delete en todo:** columna `eliminado_el TIMESTAMPTZ`; toda lectura filtra `IS NULL`.
+- **Soft delete en todo:** columna `eliminado_el TIMESTAMPTZ`; toda lectura filtra `IS NULL`. Al **reemplazar** la lista de ingredientes de una receta, soft-deletear las filas vivas (`UPDATE … SET eliminado_el = NOW()`) e insertar las nuevas — **nunca** `DELETE FROM receta_ingredientes`.
 - **`tenant_id` siempre del token del usuario autenticado, nunca del body.**
 - **Design System:** solo tokens semánticos de Nuxt UI (`text-muted`, `bg-default`, `divide-default`). Nunca Tailwind hardcodeado.
 - **Seed:** un método privado por entidad/escenario en `seeder.service.ts`, idempotente (chequeo `exists` antes de insertar). IDs fijos `550e8400-e29b-41d4-a716-446655440XXX`. Rango libre para esta feature: **0256–0265** (el máximo en uso hoy es 0255).
-- **Escala de stock/cantidades:** `NUMERIC(18,4)`. Toda cantidad convertida se redondea a 4 decimales (ya lo hace `CatalogService.convertirUnidad`).
+- **Escala de stock/cantidades:** `NUMERIC(18,4)`. Toda cantidad convertida se redondea a 4 decimales (ya lo hace `CatalogService.convertirUnidad`). `cantidad` de cada ingrediente debe ser **> 0** (validar en `validarYCostearIngredientes` con Decimal.js).
 - **Ingredientes solo `modo_inventario = 'cantidad'`.** Serie/lote quedan fuera de esta pieza.
 - **Sin recetas anidadas.** Un ingrediente siempre es `tipo='producto'`.
+- **No-bloqueante sin stock (carrera):** no pre-chequear stock y luego llamar a `registrarMovimiento` (race entre el SELECT y el `FOR UPDATE` interno). Intentar el movimiento y, solo si el mensaje es exactamente `'Stock insuficiente para la salida'`, omitirlo y agregar advertencia; cualquier otro error se re-lanza.
 - **`items.service.spec.ts` mockea `manager.query` en secuencia** y afirma con `mockResolvedValueOnce` en orden. Las queries nuevas de este plan son **condicionales** (solo cuando `dto.tipo === 'receta'`), así que los tests de `producto`/`servicio`/`suscripcion` existentes no cambian de orden ni de cantidad de llamadas.
 - **`ventas.service.spec.ts`** usa `buildManagerMock()` con `query: jest.fn().mockResolvedValue([])` por defecto — los tests nuevos de venta de receta sobreescriben ese mock con `mockResolvedValueOnce`/`mockImplementation` según necesiten.
 
@@ -104,7 +105,14 @@ export class ItemReceta {
 Crear `backend/src/modules/items/entities/receta-ingrediente.entity.ts`:
 
 ```typescript
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  DeleteDateColumn,
+} from 'typeorm';
 
 @Entity('receta_ingredientes')
 export class RecetaIngrediente {
@@ -128,6 +136,17 @@ export class RecetaIngrediente {
 
   @Column({ type: 'boolean', default: true })
   bloqueante: boolean;
+
+  // Obligatorios: con synchronize:true TypeORM alinea el schema a la entidad;
+  // sin estas columnas se perderían las del SQL y se rompería el soft delete.
+  @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
+  creadoEl: Date;
+
+  @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz', nullable: true })
+  actualizadoEl: Date | null;
+
+  @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz', nullable: true })
+  eliminadoEl: Date | null;
 }
 ```
 
@@ -394,6 +413,19 @@ Agregar el método privado `validarYCostearIngredientes` junto a los demás help
   ): Promise<string> {
     let costoTotal = new Decimal(0);
     for (const ing of ingredientes) {
+      let cantidad;
+      try {
+        cantidad = new Decimal(ing.cantidad);
+      } catch {
+        throw new BadRequestException(
+          'La cantidad del ingrediente debe ser un número mayor a 0',
+        );
+      }
+      if (cantidad.isNaN() || cantidad.lessThanOrEqualTo(0)) {
+        throw new BadRequestException(
+          'La cantidad del ingrediente debe ser mayor a 0',
+        );
+      }
       const rows: {
         tipo: string;
         modo_inventario: string | null;
@@ -460,6 +492,11 @@ CREATE TABLE "receta_ingredientes" (
   "actualizado_el"         TIMESTAMPTZ,
   "eliminado_el"           TIMESTAMPTZ
 );
+
+-- Un mismo producto no puede aparecer dos veces en la misma receta activa
+CREATE UNIQUE INDEX "uq_receta_ingrediente_vivo"
+  ON "receta_ingredientes" ("receta_item_id", "ingrediente_item_id")
+  WHERE "eliminado_el" IS NULL;
 ```
 
 - [ ] **Step 8: Commit**
@@ -518,7 +555,7 @@ En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('updat
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
         .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'cantidad', unidad_medida: 'kg', costo_actual: '6000' }]) // queso
-        .mockResolvedValueOnce([]) // DELETE receta_ingredientes
+        .mockResolvedValueOnce([]) // soft-delete receta_ingredientes
         .mockResolvedValueOnce([]) // INSERT receta_ingredientes queso
         .mockResolvedValueOnce([]); // UPDATE item_receta costo_actual
 
@@ -535,6 +572,12 @@ En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('updat
         ],
       } as any);
 
+      // soft-delete de la lista anterior (nunca hard DELETE)
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        3,
+        expect.stringContaining('SET eliminado_el = NOW()'),
+        [ITEM_ID],
+      );
       // costo = 6000 * 0.02 = 120
       expect(managerMock.query).toHaveBeenNthCalledWith(
         5,
@@ -566,8 +609,11 @@ En `backend/src/modules/items/items.service.ts`, dentro de `update`, agregar la 
             tenantId,
             dto.ingredientes,
           );
+          // Soft delete de la lista anterior — nunca hard DELETE
           await manager.query(
-            `DELETE FROM receta_ingredientes WHERE receta_item_id = $1`,
+            `UPDATE receta_ingredientes
+             SET eliminado_el = NOW(), actualizado_el = NOW()
+             WHERE receta_item_id = $1 AND eliminado_el IS NULL`,
             [itemId],
           );
           for (const ing of dto.ingredientes) {
@@ -794,19 +840,21 @@ En `backend/src/modules/items/items.service.spec.ts`, nuevo `describe` al final 
     });
 
     it('omite el movimiento y agrega advertencia si un ingrediente no bloqueante no tiene stock', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([
-          {
-            ingrediente_item_id: 'queso',
-            ingrediente_nombre: 'Queso',
-            ingrediente_unidad_medida: 'kg',
-            cantidad: '20',
-            unidad_codigo: 'g',
-            bloqueante: false,
-          },
-        ])
-        .mockResolvedValueOnce([{ stock: '0.01' }]); // stock actual del queso
+      managerMock.query.mockResolvedValueOnce([
+        {
+          ingrediente_item_id: 'queso',
+          ingrediente_nombre: 'Queso',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '20',
+          unidad_codigo: 'g',
+          bloqueante: false,
+        },
+      ]);
       catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.04'); // 20*2=40 g → 0.04 kg
+      // Sin pre-chequeo de stock: registrarMovimiento lanza y se convierte en advertencia
+      inventarioServiceMock.registrarMovimiento.mockRejectedValueOnce(
+        new BadRequestException('Stock insuficiente para la salida'),
+      );
 
       const advertencias = await service.venderIngredientesReceta(
         managerMock as any,
@@ -816,7 +864,28 @@ En `backend/src/modules/items/items.service.spec.ts`, nuevo `describe` al final 
       expect(advertencias).toEqual([
         'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
       ]);
-      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(1);
+    });
+
+    it('no engulle errores distintos de stock insuficiente en no-bloqueantes', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          ingrediente_item_id: 'queso',
+          ingrediente_nombre: 'Queso',
+          ingrediente_unidad_medida: 'kg',
+          cantidad: '20',
+          unidad_codigo: 'g',
+          bloqueante: false,
+        },
+      ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.04');
+      inventarioServiceMock.registrarMovimiento.mockRejectedValueOnce(
+        new BadRequestException('El item no tiene control de stock'),
+      );
+
+      await expect(
+        service.venderIngredientesReceta(managerMock as any, PARAMS),
+      ).rejects.toThrow('El item no tiene control de stock');
     });
   });
 ```
@@ -888,7 +957,9 @@ Agregar en `backend/src/modules/items/items.service.ts`, como métodos públicos
    * ingrediente. Un ingrediente bloqueante sin stock deja que
    * registrarMovimiento lance su validación de "salida no negativa" —
    * eso aborta toda la transacción de la venta, gratis. Uno no bloqueante
-   * sin stock se omite (no va a negativo) y se reporta como advertencia.
+   * intenta el mismo movimiento; si falla solo por
+   * 'Stock insuficiente para la salida', se omite y se reporta como
+   * advertencia (evita la carrera del pre-chequeo SELECT sin lock).
    */
   async venderIngredientesReceta(
     manager: EntityManager,
@@ -918,37 +989,40 @@ Agregar en `backend/src/modules/items/items.service.ts`, como métodos públicos
         ing.ingredienteUnidadMedida,
       );
 
+      const movimientoParams = {
+        tenantId: params.tenantId,
+        itemId: ing.ingredienteItemId,
+        tipo: 'salida' as const,
+        motivo: 'venta',
+        cantidad: cantidadConvertida,
+        usuarioId: params.usuarioId,
+        ventaId: params.ventaId,
+      };
+
       if (ing.bloqueante) {
-        await this.inventarioService.registrarMovimiento(manager, {
-          tenantId: params.tenantId,
-          itemId: ing.ingredienteItemId,
-          tipo: 'salida',
-          motivo: 'venta',
-          cantidad: cantidadConvertida,
-          usuarioId: params.usuarioId,
-          ventaId: params.ventaId,
-        });
+        await this.inventarioService.registrarMovimiento(
+          manager,
+          movimientoParams,
+        );
         continue;
       }
 
-      const stockActual = await this.obtenerStockProducto(
-        manager,
-        ing.ingredienteItemId,
-      );
-      if (new Decimal(stockActual).greaterThanOrEqualTo(cantidadConvertida)) {
-        await this.inventarioService.registrarMovimiento(manager, {
-          tenantId: params.tenantId,
-          itemId: ing.ingredienteItemId,
-          tipo: 'salida',
-          motivo: 'venta',
-          cantidad: cantidadConvertida,
-          usuarioId: params.usuarioId,
-          ventaId: params.ventaId,
-        });
-      } else {
-        advertencias.push(
-          `${params.recetaNombre}: no había stock suficiente de ${ing.ingredienteNombre}, se vendió sin ese insumo`,
+      try {
+        await this.inventarioService.registrarMovimiento(
+          manager,
+          movimientoParams,
         );
+      } catch (error) {
+        if (
+          error instanceof BadRequestException &&
+          error.message === 'Stock insuficiente para la salida'
+        ) {
+          advertencias.push(
+            `${params.recetaNombre}: no había stock suficiente de ${ing.ingredienteNombre}, se vendió sin ese insumo`,
+          );
+        } else {
+          throw error;
+        }
       }
     }
 
@@ -2129,4 +2203,9 @@ git commit -m "docs(recetas): documenta el motor de recetas (pieza 3 cluster foo
 
 ## Decisions
 
-Todas las decisiones de diseño (modelado `items.tipo='receta'`, costo cacheado sin auto-recálculo, bloqueante aborta vs. no bloqueante omite, sin recetas anidadas, ingredientes solo modo `cantidad`, disponibilidad al vuelo, borrado bloqueado) están documentadas y justificadas en la sección **Decisions** del [spec](../specs/2026-07-15-recetas-criticidad-ingredientes-design.md#decisions) — no se repiten acá.
+Todas las decisiones de diseño (modelado `items.tipo='receta'`, costo cacheado sin auto-recálculo, bloqueante aborta vs. no bloqueante omite, sin recetas anidadas, ingredientes solo modo `cantidad`, disponibilidad al vuelo, borrado bloqueado) están documentadas y justificadas en la sección **Decisions** del [spec](../specs/2026-07-15-recetas-criticidad-ingredientes-design.md#decisions).
+
+**Ajustes post-review del plan (2026-07-15):**
+- Soft-delete al reemplazar ingredientes (nunca `DELETE FROM`); entidad `RecetaIngrediente` declara `creado_el`/`actualizado_el`/`eliminado_el` para que `synchronize:true` no los dropee.
+- No-bloqueante: try/catch sobre `registrarMovimiento` (mensaje exacto `'Stock insuficiente para la salida'`) en vez de pre-chequeo de stock — evita carrera entre SELECT y FOR UPDATE.
+- `cantidad > 0` validada en `validarYCostearIngredientes`; índice único parcial `(receta_item_id, ingrediente_item_id) WHERE eliminado_el IS NULL`.

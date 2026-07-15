@@ -1,6 +1,6 @@
 # Diseño — Recetas + criticidad de ingredientes
 
-**Status**: Draft
+**Status**: Approved
 **Date**: 2026-07-15
 **Owner**: Cesar Matheus
 **Cluster**: Recetas/costos food-service — **pieza 3 de 5** (ver
@@ -62,11 +62,12 @@ unidades** (`unidades_medida` + `CatalogService`).
 | Modelado de la receta | **Nuevo `items.tipo = 'receta'`**, no un modo de `item_producto` | Consistente con la regla existente "solo `tipo='producto'` tiene stock" — la receta nunca tiene stock propio, mezclar el concepto en `modo_inventario` (que hoy es un eje de *cómo se cuenta* el stock propio) confundiría dos cosas distintas |
 | Costo de receta | **Cacheado en `item_receta.costo_actual`, sin auto-recálculo** | El cliente no quiere que el costo cambie solo; un cambio de costo en un ingrediente debe pasar por una decisión explícita del usuario (pieza 5), no un cascade silencioso |
 | Ingrediente bloqueante sin stock | **Rechaza la venta completa**, reusando la validación existente de `registrarMovimiento` ("salida no negativa") | Todo corre en la misma transacción de la venta; dejar que la validación existente lance el error aborta la venta gratis, sin código nuevo de validación de stock |
-| Ingrediente no bloqueante sin stock | **Se omite el movimiento** (no va a negativo) + advertencia en la respuesta | Evita un stock negativo "fantasma" de un insumo secundario; la advertencia no persistida es suficiente porque es accionable solo en el momento de la venta (el cajero necesita saberlo ahora, no en un reporte después) |
+| Ingrediente no bloqueante sin stock | **Intenta `registrarMovimiento` y, solo si falla con `'Stock insuficiente para la salida'`, omite + advertencia** | Evita stock negativo y la carrera del pre-chequeo `SELECT stock` sin lock frente a ventas concurrentes; cualquier otro error (item sin stock, cantidad inválida) se re-lanza |
 | Recetas anidadas | **No permitidas** — un ingrediente siempre es `tipo='producto'` | Evita ciclos y costeo/consumo recursivo; el cliente no lo pidió |
 | Ingredientes en modo serie/lote | **Rechazados** — solo `modo_inventario='cantidad'` | Automatizar qué lote (FIFO/vencimiento) o qué unidad serializada consumir es un problema propio, no forma parte de "receta descuenta ingredientes" |
 | Disponibilidad en el listado | **Calculada al vuelo**, sin columna cacheada | Coherente con la filosofía de "costo al vuelo" de la pieza 2 salvo por el costo de receta (que es cacheado por pedido explícito del cliente); evita otra invalidación de caché |
 | Borrado de un ingrediente en uso | **Bloqueado** si está referenciado por una receta activa (`eliminado_el IS NULL`) | Evita recetas rotas silenciosamente; consistente con el resto del sistema, donde el soft delete nunca corrompe referencias vivas |
+| Reemplazo de lista de ingredientes | **Soft-delete de filas vivas + INSERT de las nuevas** | Convención transversal; la entidad TypeORM declara timestamps/`eliminado_el` para que `synchronize:true` no dropee las columnas |
 
 ## Backend
 
@@ -110,9 +111,12 @@ En `ItemsService`, junto a la rama `dto.tipo === 'producto' | 'servicio'` ya exi
 4. Costo de la receta = `Σ (costo_actual del ingrediente convertido a su unidad base ×
    cantidad convertida a esa unidad base)`, calculado con Decimal.js, guardado en
    `item_receta.costo_actual`.
-5. Editar la lista de ingredientes de una receta existente recalcula el costo cacheado en
-   el momento (mismo punto 4) — pero **no** dispara nada sobre otras recetas ni sobre el
-   ingrediente.
+5. Editar la lista de ingredientes de una receta existente soft-deletea las filas
+   vivas (`eliminado_el`) e inserta las nuevas, recalculando el costo cacheado en
+   el momento (mismo punto 4) — pero **no** dispara nada sobre otras recetas ni
+   sobre el ingrediente. `cantidad` de cada línea debe ser `> 0`.
+6. Índice único parcial `(receta_item_id, ingrediente_item_id) WHERE eliminado_el IS NULL`
+   — un producto no puede repetirse en la misma receta activa.
 
 Borrado de un item `tipo='producto'`: se agrega el chequeo de que no exista una fila viva
 en `receta_ingredientes` con `ingrediente_item_id = item.id` antes de permitir el soft
@@ -131,20 +135,19 @@ if (item.tipo === 'receta') {
     const cantidadConvertida = convertirUnidad(
       ing.cantidad.mul(linea.cantidad), ing.unidadCodigo, ing.ingrediente.unidadMedida,
     );
-    if (ing.bloqueante) {
-      // deja que registrarMovimiento valide "salida no negativa" y aborte la venta
+    try {
       await this.inventarioService.registrarMovimiento(manager, {
         tenantId, itemId: ing.ingredienteItemId, tipo: 'salida', motivo: 'venta',
         cantidad: cantidadConvertida, usuarioId, ventaId: venta.id,
       });
-    } else {
-      const stockActual = await obtenerStock(ing.ingredienteItemId); // dentro de la tx
-      if (stockActual.gte(cantidadConvertida)) {
-        await this.inventarioService.registrarMovimiento(manager, { /* igual */ });
-      } else {
+    } catch (error) {
+      // Solo no-bloqueantes absorben "Stock insuficiente para la salida"
+      if (!ing.bloqueante && esStockInsuficiente(error)) {
         advertenciasReceta.push(
           `${item.nombre}: no había stock suficiente de ${ing.ingrediente.nombre}, se vendió sin ese insumo`,
         );
+      } else {
+        throw error; // bloqueante (o error distinto) aborta la venta / tx
       }
     }
   }
@@ -153,13 +156,13 @@ if (item.tipo === 'receta') {
 ```
 
 - El motivo del movimiento sigue siendo `'venta'` (sin cambios en el enum de
-  `movimientos_inventario.motivo`); el `ventaId` ya conecta cada movimiento de ingrediente
-  con la venta que lo originó.
+  `movimientos_inventario.motivo`); el `ventaId` ya conecta cada movimiento de
+  ingrediente con la venta que lo originó.
 - `advertenciasReceta: string[]` se agrega a la respuesta de `POST /ventas` — **no se
   persiste** (ver Decisions).
-- No se pre-valida stock de ingredientes bloqueantes por separado: si
-  `registrarMovimiento` lanza por stock insuficiente, la transacción completa de la venta
-  hace rollback (comportamiento ya existente, gratis).
+- No se pre-valida stock de ingredientes por separado: `registrarMovimiento` con
+  `FOR UPDATE` es la única fuente de verdad; el try/catch del no-bloqueante evita
+  la carrera de un SELECT previo sin lock.
 
 ### Disponibilidad en el listado
 
@@ -210,9 +213,10 @@ un campo calculado `disponible: number | null` por receta:
   tocar otras recetas; borrar un producto usado como ingrediente → `BadRequest`.
 - `ventas.service.spec.ts`: vender una receta genera un movimiento de salida por
   ingrediente con la cantidad convertida; ingrediente bloqueante sin stock aborta toda la
-  venta (rollback, ningún movimiento persiste); ingrediente no bloqueante sin stock omite
-  su movimiento y agrega la advertencia; receta sin ingredientes bloqueantes nunca aborta
-  la venta.
+  venta (rollback, ningún movimiento persiste); ingrediente no bloqueante sin stock
+  convierte el error `'Stock insuficiente para la salida'` en advertencia (sin
+  pre-chequeo racey); otros errores en no-bloqueantes se re-lanzan; receta sin
+  ingredientes bloqueantes nunca aborta la venta por stock.
 
 ### E2E (`recetas.e2e-spec.ts` nuevo)
 1. Crear receta "Hamburguesa" con pan (bloqueante, 1 unidad), carne (bloqueante, 150 g,
