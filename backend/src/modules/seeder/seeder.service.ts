@@ -42,6 +42,7 @@ import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { CredencialesService } from '../pasarela/services/credenciales.service';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
+import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -142,6 +143,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedPermisos();
     await this.seedModuloAppPermisos();
     await this.seedTenants();
+    await this.seedCausasMerma();
     await this.seedCajasVirtuales();
     await this.seedTerceros();
     await this.seedTenantMonedas();
@@ -886,6 +888,38 @@ export class SeederService implements OnApplicationBootstrap {
             montoTolerancia: '0',
           }),
         );
+      }
+    }
+  }
+
+  private async seedCausasMerma(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const uuid = (n: number) =>
+      `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
+    const nombres = [...CAUSAS_MERMA_FIJAS];
+
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_causas_merma_tenant_nombre
+      ON causas_merma (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
+    let id = 266;
+    for (const tenantId of [PARIS, FALABELLA]) {
+      for (const nombre of nombres) {
+        const causaId = uuid(id++);
+        const exists = await this.dataSource.query(
+          `SELECT 1 FROM causas_merma WHERE causa_merma_id = $1`,
+          [causaId],
+        );
+        if (!exists.length) {
+          await this.dataSource.query(
+            `INSERT INTO causas_merma
+               (causa_merma_id, tenant_id, nombre, activo, es_fijo)
+             VALUES ($1,$2,$3,true,true)`,
+            [causaId, tenantId, nombre],
+          );
+        }
       }
     }
   }

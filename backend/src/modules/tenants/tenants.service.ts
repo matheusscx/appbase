@@ -20,6 +20,7 @@ import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { UpdatePreferenciasFinancierasDto } from './dto/update-preferencias-financieras.dto';
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
+import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
 
 export interface TenantMember {
   usuarioId: string;
@@ -113,7 +114,16 @@ export class TenantsService {
       });
       await manager.save(Caja, caja);
 
-      // 7. Habilitar la moneda oficial del país del tenant (default, tasa = 1)
+      // 7. Sembrar causas de merma fijas del sistema
+      for (const nombre of CAUSAS_MERMA_FIJAS) {
+        await manager.query(
+          `INSERT INTO causas_merma (tenant_id, nombre, activo, es_fijo)
+           VALUES ($1, $2, true, true)`,
+          [savedTenant.id, nombre],
+        );
+      }
+
+      // 8. Habilitar la moneda oficial del país del tenant (default, tasa = 1)
       const oficialRows: { moneda_oficial_id: string | null }[] =
         await manager.query(
           `SELECT p.moneda_oficial_id
@@ -133,7 +143,7 @@ export class TenantsService {
         );
       }
 
-      // 8. Habilitar los métodos de pago disponibles en el país del tenant
+      // 9. Habilitar los métodos de pago disponibles en el país del tenant
       const paisRows: { pais_id: string }[] = await manager.query(
         `SELECT prov.pais_id
          FROM provincia prov
