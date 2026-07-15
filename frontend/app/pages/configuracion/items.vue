@@ -161,7 +161,12 @@ const impuestosOpts = ref<Opt[]>([])
 const descuentosOpts = ref<Opt[]>([])
 const recargosOpts = ref<Opt[]>([])
 
-	const productosIngrediente = ref<{ id: string; nombre: string; unidadMedida: string }[]>([])
+	const productosIngrediente = ref<{
+	  id: string
+	  nombre: string
+	  unidadMedida: string
+	  costoActual: string | null
+	}[]>([])
 	const productosIngredienteOpts = computed(() =>
 	  productosIngrediente.value.map(p => ({ label: p.nombre, value: p.id })),
 	)
@@ -200,6 +205,7 @@ const recargosOpts = ref<Opt[]>([])
 	    id: item.id,
 	    nombre: item.nombre,
 	    unidadMedida: item.unidadMedida ?? 'unidad',
+	    costoActual: item.costoActual ?? null,
 	  }
 	  const idx = productosIngrediente.value.findIndex(p => p.id === item.id)
 	  if (idx >= 0) {
@@ -279,6 +285,64 @@ function emptyForm() {
 
 const form = ref(emptyForm())
 const formCostoActual = ref<string | null>(null)
+
+/** Misma aritmética que el backend: cantidad → unidad base del insumo × costo_actual. */
+function convertirCantidadABase(
+  cantidad: string,
+  desdeCodigo: string,
+  haciaCodigo: string,
+): Decimal | null {
+  if (desdeCodigo === haciaCodigo) {
+    try {
+      return new Decimal(cantidad)
+    } catch {
+      return null
+    }
+  }
+  const uDesde = unidadesMedidaStore.getByCodigo(desdeCodigo)
+  const uHacia = unidadesMedidaStore.getByCodigo(haciaCodigo)
+  if (!uDesde || !uHacia || uDesde.magnitud !== uHacia.magnitud) return null
+  try {
+    return new Decimal(cantidad)
+      .mul(uDesde.factorBase)
+      .div(uHacia.factorBase)
+      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
+  } catch {
+    return null
+  }
+}
+
+/** Preview en vivo del costo de receta al agregar/quitar/cambiar ingredientes. */
+const costoRecetaCalculado = computed((): string | null => {
+  if (form.value.tipo !== 'receta') return null
+  const ings = form.value.ingredientes
+  if (!ings.length) return '0'
+
+  let total = new Decimal(0)
+  let algunaCompleta = false
+  for (const ing of ings) {
+    if (!ing.ingredienteItemId || !ing.cantidad || !ing.unidadCodigo) continue
+    const prod = productosIngrediente.value.find(p => p.id === ing.ingredienteItemId)
+    if (!prod) continue
+    let cantidad: Decimal
+    try {
+      cantidad = new Decimal(ing.cantidad)
+    } catch {
+      continue
+    }
+    if (cantidad.isNaN() || cantidad.lessThanOrEqualTo(0)) continue
+    const cantidadBase = convertirCantidadABase(
+      ing.cantidad,
+      ing.unidadCodigo,
+      prod.unidadMedida,
+    )
+    if (!cantidadBase) continue
+    total = total.plus(new Decimal(prod.costoActual ?? '0').mul(cantidadBase))
+    algunaCompleta = true
+  }
+  if (!algunaCompleta) return null
+  return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString()
+})
 
 const drawerTitle = computed(() =>
   editingId.value ? 'Editar item' : 'Nuevo item',
@@ -485,7 +549,12 @@ async function cargarCatalogos() {
       .map((r) => ({ label: r.nombre, value: r.id }))
 
     productosIngrediente.value = productos.data
-      .map(p => ({ id: p.id, nombre: p.nombre, unidadMedida: p.unidadMedida ?? 'unidad' }))
+      .map(p => ({
+        id: p.id,
+        nombre: p.nombre,
+        unidadMedida: p.unidadMedida ?? 'unidad',
+        costoActual: p.costoActual ?? null,
+      }))
   } catch {
     toast.add({ title: 'Error al cargar catálogos', color: 'error' })
   }
@@ -1344,11 +1413,11 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 </div>
               </div>
 
-              <p v-if="editingId && formCostoActual" class="text-xs text-muted">
-                Costo actual: {{ formatMonto(formCostoActual, form.monedaId) }}
+              <p v-if="costoRecetaCalculado != null" class="text-xs text-muted">
+                Costo actual: {{ formatMonto(costoRecetaCalculado, form.monedaId) }}
               </p>
-              <p v-else-if="!editingId" class="text-xs text-muted">
-                El costo se calcula al guardar, sumando el costo de cada ingrediente.
+              <p v-else class="text-xs text-muted">
+                Completá ingredientes (insumo, cantidad y unidad) para calcular el costo.
               </p>
             </div>
           </template>
