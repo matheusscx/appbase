@@ -1972,6 +1972,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedItemSoporte();
     await this.seedItemsMonedaUnidadMatrix();
     await this.seedItemsSuscripcion();
+    await this.seedRecetaDemo();
   }
 
   private async seedItemSoporte(): Promise<void> {
@@ -2063,6 +2064,85 @@ export class SeederService implements OnApplicationBootstrap {
         );
       }
     }
+  }
+
+  /**
+   * Receta demo "Hamburguesa Clásica" — pieza 3 del cluster food-service.
+   * Pan y carne bloqueantes, queso no bloqueante; carne/queso se compran en
+   * kg y la receta los consume en gramos, para ejercitar la conversión.
+   */
+  private async seedRecetaDemo(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const uuid = (suffix: number): string =>
+      `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
+
+    const PAN_ID = uuid(256);
+    const CARNE_ID = uuid(257);
+    const QUESO_ID = uuid(258);
+    const HAMBURGUESA_ID = uuid(259);
+    const RI_PAN_ID = uuid(260);
+    const RI_CARNE_ID = uuid(261);
+    const RI_QUESO_ID = uuid(262);
+    const MOV_PAN_ID = uuid(263);
+    const MOV_CARNE_ID = uuid(264);
+    const MOV_QUESO_ID = uuid(265);
+
+    const exists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [HAMBURGUESA_ID],
+    );
+    if (exists.length) return;
+
+    const ingredientes = [
+      { id: PAN_ID, movId: MOV_PAN_ID, nombre: 'Pan de hamburguesa', unidad: 'unidad', stock: '50', costo: '500' },
+      { id: CARNE_ID, movId: MOV_CARNE_ID, nombre: 'Carne molida', unidad: 'kg', stock: '10', costo: '8000' },
+      { id: QUESO_ID, movId: MOV_QUESO_ID, nombre: 'Queso laminado', unidad: 'kg', stock: '5', costo: '6000' },
+    ];
+
+    for (const ing of ingredientes) {
+      await this.dataSource.query(
+        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'producto')`,
+        [ing.id, PARIS, CLP, ing.nombre, ing.costo, false, true],
+      );
+      await this.dataSource.query(
+        `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario, costo_actual)
+         VALUES ($1,'0',$2,'cantidad',$3)`,
+        [ing.id, ing.unidad, ing.costo],
+      );
+      await this.dataSource.query(
+        `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
+        [ing.stock, ing.id],
+      );
+      await this.dataSource.query(
+        `INSERT INTO movimientos_inventario
+           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
+         VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed receta demo)')`,
+        [ing.movId, PARIS, ing.id, ing.stock, ing.costo],
+      );
+    }
+
+    // Hamburguesa: pan (1 unidad, bloqueante) + carne (150 g, bloqueante) + queso (20 g, no bloqueante)
+    // costo = 500*1 + 8000*0.15 + 6000*0.02 = 500 + 1200 + 120 = 1820
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,'Hamburguesa Clásica','3500',false,true,'receta')`,
+      [HAMBURGUESA_ID, PARIS, CLP],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_receta (item_id, costo_actual) VALUES ($1,'1820.0000')`,
+      [HAMBURGUESA_ID],
+    );
+    await this.dataSource.query(
+      `INSERT INTO receta_ingredientes
+         (receta_ingrediente_id, tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, bloqueante)
+       VALUES
+         ($1,$5,$6,$2,'1','unidad',true),
+         ($3,$5,$6,$7,'150','g',true),
+         ($4,$5,$6,$8,'20','g',false)`,
+      [RI_PAN_ID, PAN_ID, RI_CARNE_ID, RI_QUESO_ID, PARIS, HAMBURGUESA_ID, CARNE_ID, QUESO_ID],
+    );
   }
 
   /**
