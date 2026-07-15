@@ -111,6 +111,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-archive',
       to: '/configuracion/items',
     })
+    items.push({
+      label: 'Recetas desfasadas',
+      icon: 'i-lucide-scale',
+      to: '/configuracion/recetas-desfases',
+    })
   }
 
   if (permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Leer')) {
