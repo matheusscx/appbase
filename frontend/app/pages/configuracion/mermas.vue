@@ -124,11 +124,14 @@ watch(() => form.value.itemId, (itemId) => {
 async function cargarCatalogos() {
   try {
     await unidadesMedidaStore.ensureLoaded()
-    const [prodRes, causasRes] = await Promise.all([
+    const [prodRes, ingRes, causasRes] = await Promise.all([
       useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
+      useApiFetch<PaginatedResponse<ProductoOpt>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
       useApiFetch<CausaOpt[]>(`${apiUrl}/causas-merma?soloActivas=true`),
     ])
-    productos.value = prodRes.data
+    productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
+      a.nombre.localeCompare(b.nombre, 'es'),
+    )
     causas.value = causasRes
   }
   catch (e: unknown) {

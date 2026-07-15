@@ -52,12 +52,20 @@ const motivoOpts: Opt[] = [
 
 async function cargarProductos() {
   try {
-    const res = await useApiFetch<PaginatedResponse<{ id: string; nombre: string }>>(
-      `${apiUrl}/items?tipo=producto&pageSize=100`,
+    const [prodRes, ingRes] = await Promise.all([
+      useApiFetch<PaginatedResponse<{ id: string; nombre: string }>>(
+        `${apiUrl}/items?tipo=producto&pageSize=100`,
+      ),
+      useApiFetch<PaginatedResponse<{ id: string; nombre: string }>>(
+        `${apiUrl}/items?tipo=ingrediente&pageSize=100`,
+      ),
+    ])
+    const merged = [...prodRes.data, ...ingRes.data].sort((a, b) =>
+      a.nombre.localeCompare(b.nombre, 'es'),
     )
     productosOpts.value = [
       { label: 'Todos los productos', value: 'todos' },
-      ...res.data.map(i => ({ label: i.nombre, value: i.id })),
+      ...merged.map(i => ({ label: i.nombre, value: i.id })),
     ]
   }
   catch {
