@@ -137,7 +137,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const movs2 = (resMovs2.body as PaginatedMovimientos).data;
     expect(movs2.length).toBe(cantidadMovimientosAntes);
 
-    // 5. Salida por merma sin costoUnitario → congela el costo vigente (4300)
+    // 5. Merma ya no se registra por ajuste genérico (va por POST /mermas)
     const resMerma = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
@@ -146,17 +146,9 @@ describe('Inventario — flujo de costo (e2e)', () => {
         motivo: 'merma',
         cantidad: 1,
       });
-    expect(resMerma.status).toBe(200);
+    expect(resMerma.status).toBe(400);
 
-    const resMovs3 = await request(app.getHttpServer())
-      .get(`/api/inventario/movimientos?itemId=${itemId}`)
-      .set('Authorization', `Bearer ${token}`);
-    const movs3 = (resMovs3.body as PaginatedMovimientos).data;
-    const movMerma = movs3.find((m) => m.motivo === 'merma');
-    expect(movMerma).toBeDefined();
-    expect(movMerma?.costoUnitario).toBe('4300.0000');
-
-    // El costo actual no cambió por la salida
+    // El costo actual no cambió
     const resGet4 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
@@ -190,12 +182,23 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .set('Authorization', `Bearer ${token}`);
     expect((resGet1.body as ItemResponse).stock).toBe('0.5000');
 
-    // 3. Merma de 250 g → 0,25 kg
-    const resMerma = await request(app.getHttpServer())
+    // 3. Salida manual de 250 g → 0,25 kg (merma va por POST /mermas)
+    const resSalida = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'salida', motivo: 'merma', cantidad: 250, unidadCodigo: 'g' });
-    expect(resMerma.status).toBe(200);
+      .send({
+        tipo: 'salida',
+        motivo: 'ajuste_manual',
+        cantidad: 250,
+        unidadCodigo: 'g',
+      });
+    expect(resSalida.status).toBe(200);
+
+    const resMermaRechazada = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'salida', motivo: 'merma', cantidad: 1 });
+    expect(resMermaRechazada.status).toBe(400);
 
     const resGet2 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
