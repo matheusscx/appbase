@@ -680,7 +680,9 @@ export class ItemsService {
             );
           }
           await manager.query(
-            `UPDATE item_receta SET costo_actual = $1 WHERE item_id = $2`,
+            `UPDATE item_receta
+             SET costo_actual = $1, costo_propuesto_omitido = NULL
+             WHERE item_id = $2`,
             [costoActual, itemId],
           );
         }
@@ -1359,6 +1361,7 @@ export class ItemsService {
         }[] = await manager.query(
           `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
            FROM receta_ingredientes ri
+           JOIN items ing ON ing.item_id = ri.ingrediente_item_id AND ing.eliminado_el IS NULL
            JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
            WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
           [it.recetaItemId, tenantId],
@@ -1417,10 +1420,16 @@ export class ItemsService {
         }[] = await manager.query(
           `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
            FROM receta_ingredientes ri
+           JOIN items ing ON ing.item_id = ri.ingrediente_item_id AND ing.eliminado_el IS NULL
            JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
            WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
           [recetaItemId, tenantId],
         );
+        if (!ings.length) {
+          throw new BadRequestException(
+            `La receta ${recetaItemId} no tiene ingredientes`,
+          );
+        }
         const propuesto = await this.calcularCostoPropuestoDesdeFilas(ings);
         await manager.query(
           `UPDATE item_receta SET costo_propuesto_omitido = $1 WHERE item_id = $2`,

@@ -770,12 +770,15 @@ describe('ItemsService', () => {
         expect.stringContaining('SET eliminado_el = NOW()'),
         [ITEM_ID],
       );
-      // costo = 6000 * 0.02 = 120
-      expect(managerMock.query).toHaveBeenNthCalledWith(
-        5,
-        expect.stringContaining('UPDATE item_receta'),
-        ['120', ITEM_ID],
+      // costo = 6000 * 0.02 = 120; limpia omitido al editar ingredientes
+      const updateReceta = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          (c[0] as string).includes('UPDATE item_receta') &&
+          (c[0] as string).includes('costo_actual'),
       );
+      expect(updateReceta?.[0]).toContain('costo_propuesto_omitido = NULL');
+      expect(updateReceta?.[1]).toEqual(['120', ITEM_ID]);
     });
   });
 
@@ -1408,6 +1411,22 @@ describe('ItemsService', () => {
           expect.stringContaining('costo_propuesto_omitido'),
           expect.arrayContaining(['200.0000', RECETA_ID]),
         );
+      });
+
+      it('descartar sin ingredientes vivos lanza BadRequest', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ tipo: 'receta' }])
+          .mockResolvedValueOnce([]);
+
+        await expect(
+          service.descartarDesfases(TENANT, [RECETA_ID]),
+        ).rejects.toThrow(BadRequestException);
+        const omitSql = managerMock.query.mock.calls.find(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' &&
+            (c[0] as string).includes('SET costo_propuesto_omitido'),
+        );
+        expect(omitSql).toBeUndefined();
       });
     });
   });
