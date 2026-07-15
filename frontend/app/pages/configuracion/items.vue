@@ -266,7 +266,6 @@ const ajusteTipoOpts = [
 const motivoOpts = [
   { label: 'Compra', value: 'compra' },
   { label: 'Devolución', value: 'devolucion' },
-  { label: 'Merma', value: 'merma' },
   { label: 'Ajuste manual', value: 'ajuste_manual' },
 ]
 

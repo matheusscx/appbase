@@ -1,10 +1,9 @@
-<!-- frontend/app/pages/configuracion/inventario.vue -->
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 
 const toast = useToast()
-const { formatFecha } = useFormatters()
+const { formatFecha, formatMonto } = useFormatters()
 const { pageSize } = useUserPreferences()
 
 interface Movimiento {
@@ -19,6 +18,9 @@ interface Movimiento {
   usuarioNombre: string | null
   comentario: string | null
   creadoEl: string
+  causaNombre?: string | null
+  costoUnitario?: string | null
+  costoPerdido?: string | null
 }
 interface Opt { label: string; value: string }
 
@@ -55,17 +57,22 @@ async function cargarProductos() {
     )
     productosOpts.value = [
       { label: 'Todos los productos', value: 'todos' },
-      ...res.data.map((i) => ({ label: i.nombre, value: i.id })),
+      ...res.data.map(i => ({ label: i.nombre, value: i.id })),
     ]
-  } catch {
+  }
+  catch {
     toast.add({ title: 'Error al cargar productos', color: 'error' })
   }
 }
 
 onMounted(cargarProductos)
 
-function motivoLabel(motivo: string): string {
-  return motivoOpts.find((o) => o.value === motivo)?.label ?? motivo
+function motivoLabel(mov: Movimiento): string {
+  const base = motivoOpts.find(o => o.value === mov.motivo)?.label ?? mov.motivo
+  if (mov.motivo === 'merma' && mov.causaNombre) {
+    return `Merma · ${mov.causaNombre}`
+  }
+  return base
 }
 
 const columns: TableColumn<Movimiento>[] = [
@@ -75,6 +82,7 @@ const columns: TableColumn<Movimiento>[] = [
   { accessorKey: 'motivo', header: 'Motivo' },
   { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'stockResultante', header: 'Resultante', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'costoPerdido', header: 'Costo perdido', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'usuarioNombre', header: 'Usuario' },
 ]
 </script>
@@ -104,7 +112,11 @@ const columns: TableColumn<Movimiento>[] = [
       />
     </div>
 
-    <CrudTable :data="movimientos" :columns="columns" :loading="loading">
+    <CrudTable
+      :data="movimientos"
+      :columns="columns"
+      :loading="loading"
+    >
       <template #creadoEl-cell="{ row }">
         <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
       </template>
@@ -121,7 +133,7 @@ const columns: TableColumn<Movimiento>[] = [
       </template>
       <template #motivo-cell="{ row }">
         <UBadge
-          :label="motivoLabel(row.original.motivo)"
+          :label="motivoLabel(row.original)"
           color="neutral"
           variant="subtle"
           size="sm"
@@ -135,18 +147,33 @@ const columns: TableColumn<Movimiento>[] = [
       <template #stockResultante-cell="{ row }">
         <span class="font-medium">{{ row.original.stockResultante }}</span>
       </template>
+      <template #costoPerdido-cell="{ row }">
+        <span
+          v-if="row.original.costoPerdido != null"
+          class="font-medium text-error"
+        >
+          {{ formatMonto(row.original.costoPerdido) }}
+        </span>
+        <span v-else class="text-muted">—</span>
+      </template>
       <template #usuarioNombre-cell="{ row }">
         {{ row.original.usuarioNombre ?? '—' }}
       </template>
       <template #empty>
         <div class="py-8 text-center text-sm text-muted">
-          <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
+          <UIcon
+            name="i-lucide-inbox"
+            class="w-8 h-8 mx-auto mb-2 opacity-40"
+          />
           No hay movimientos registrados.
         </div>
       </template>
     </CrudTable>
 
-    <div v-if="meta.total > pageSize" class="flex justify-end">
+    <div
+      v-if="meta.total > pageSize"
+      class="flex justify-end"
+    >
       <UPagination
         v-model:page="page"
         :items-per-page="pageSize"
