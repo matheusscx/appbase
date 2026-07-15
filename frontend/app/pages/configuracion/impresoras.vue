@@ -10,6 +10,7 @@ const loading = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
+const toggling = reactive(new Set<string>())
 
 const rolOptions: { label: string, value: RolImpresora }[] = [
   { label: 'Comanda (cocina/barra)', value: 'comanda' },
@@ -149,11 +150,34 @@ async function eliminar() {
   }
 }
 
+async function toggleActivo(imp: Impresora) {
+  if (toggling.has(imp.id)) return
+  toggling.add(imp.id)
+  const prev = imp.activo
+  imp.activo = !prev
+  try {
+    const saved = await impresorasApi.actualizar(imp.id, { activo: imp.activo })
+    upsertLocal(saved)
+    toast.add({
+      title: saved.activo ? 'Impresora activada' : 'Impresora desactivada',
+      color: 'success',
+    })
+  }
+  catch (e: unknown) {
+    imp.activo = prev
+    toast.add({ title: apiErrorMsg(e, 'Error al actualizar'), color: 'error' })
+  }
+  finally {
+    toggling.delete(imp.id)
+  }
+}
+
 onMounted(cargar)
 
 const columns: TableColumn<Impresora>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
   { id: 'conexion', header: 'Conexión' },
+  { id: 'activo', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 </script>
@@ -185,6 +209,17 @@ const columns: TableColumn<Impresora>[] = [
             Cola: {{ row.original.nombreCola }}
           </template>
         </span>
+      </template>
+
+      <template #activo-cell="{ row }">
+        <div class="flex justify-end">
+          <USwitch
+            :model-value="row.original.activo"
+            :disabled="toggling.has(row.original.id)"
+            aria-label="Activar o desactivar impresora"
+            @update:model-value="toggleActivo(row.original)"
+          />
+        </div>
       </template>
 
       <template #acciones-cell="{ row }">

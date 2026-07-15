@@ -120,6 +120,11 @@ TCP mucho más; el front corta con `La impresora no respondió (timeout 5 s)` y 
 toast conserva el contexto (boleta/comanda/precuenta). Aplica a comanda, precuenta
 y boleta (mismo camino).
 
+**Impresoras desactivadas:** si no hay ninguna impresora **activa** del rol
+requerido (`activo=false` en todas), el composable **salta** el flujo: boleta y
+precuenta retornan sin QZ; comanda no llama a `reclamar` ni a QZ (`null` al
+caller, sin toast engañoso de “sin productos”).
+
 **Corte de papel:** el `ticket-builder` es texto puro (sin comandos de control); el
 corte se envía en la capa de transporte (`imprimirEn`) como bytes ESC/POS al final:
 `\x1B\x64\x04` (avanza 4 líneas) + `\x1D\x56\x00` (`GS V 0`, corte total). Las

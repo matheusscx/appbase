@@ -322,6 +322,8 @@ async function enviarComanda() {
       cuentaNumero: activeCuenta.value.numero,
       garzonNombre: activeCuenta.value.garzonAperturaNombre,
     })
+    // null = no hay impresoras de comanda activas → se saltó el flujo sin toast.
+    if (estaciones === null) return
     toast.add({
       title: estaciones.length === 0
         ? 'No hay productos nuevos para enviar'

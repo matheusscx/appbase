@@ -153,18 +153,23 @@ export function useImpresoras() {
    * Dos clients concurrentes no duplican cocina (el segundo recibe vacío).
    * Si QZ Tray falla tras el claim, la estación ya quedó marcada como enviada
    * (prioriza no imprimir doble en cocina frente a reintento automático).
+   *
+   * Si no hay impresoras de comanda **activas**, salta el flujo (sin reclamar ni
+   * QZ) y devuelve `null` para que la UI no muestre "sin productos pendientes".
    */
   async function imprimirComanda(
     cuentaId: string,
     contexto: { mesaNombre: string, cuentaNumero: number, garzonNombre: string | null },
-  ): Promise<ComandaEstacion[]> {
+  ): Promise<ComandaEstacion[] | null> {
+    const impresoras = (await listar('comanda')).filter(i => i.activo)
+    if (impresoras.length === 0) return null
+
     const { estaciones } = await useApiFetch<ComandaPreviewResponse>(
       `${apiUrl}/cuentas/${cuentaId}/comanda/reclamar`,
       { method: 'POST' },
     )
     if (estaciones.length === 0) return estaciones
 
-    const impresoras = await listar('comanda')
     for (const estacion of estaciones) {
       const impresora = impresoras.find(i => i.id === estacion.impresoraId)
       if (!impresora) continue
@@ -181,13 +186,10 @@ export function useImpresoras() {
     return estaciones
   }
 
-  async function obtenerImpresoraBoleta(): Promise<Impresora> {
+  /** Primera impresora de boletas activa, o `null` si no hay ninguna (saltear print). */
+  async function obtenerImpresoraBoleta(): Promise<Impresora | null> {
     const impresoras = await listar('boleta')
-    const impresora = impresoras[0]
-    if (!impresora) {
-      throw new Error('No hay una impresora de boletas configurada')
-    }
-    return impresora
+    return impresoras.find(i => i.activo) ?? null
   }
 
   async function imprimirPrecuenta(input: {
@@ -199,6 +201,7 @@ export function useImpresoras() {
     formatMonto: (v: string) => string
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()
+    if (!impresora) return
     const lineas = buildPrecuentaTicket({ ...input, fecha: new Date() })
     await imprimirEn(impresora, lineas, apiUrl)
   }
@@ -211,6 +214,7 @@ export function useImpresoras() {
     formatMonto: (v: string) => string
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()
+    if (!impresora) return
     const lineas = buildBoletaTicket({ ...input, fecha: new Date() })
     await imprimirEn(impresora, lineas, apiUrl)
   }
