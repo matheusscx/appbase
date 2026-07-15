@@ -105,6 +105,7 @@ import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
 import { GarzonesModule } from './modules/garzones/garzones.module';
 import { Garzon } from './modules/garzones/entities/garzon.entity';
 import { ImpresorasModule } from './modules/impresoras/impresoras.module';
+import { MermasModule } from './modules/mermas/mermas.module';
 import { Impresora } from './modules/impresoras/entities/impresora.entity';
 
 @Module({
@@ -224,6 +225,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
     SalonesModule,
     GarzonesModule,
     ImpresorasModule,
+    MermasModule,
   ],
   controllers: [AppController],
   providers: [AppService],
