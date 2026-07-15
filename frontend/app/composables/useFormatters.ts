@@ -35,7 +35,12 @@ export function useFormatters() {
     value: string | Decimal | null | undefined,
     unidadMedida?: string | null,
   ): string {
-    return formatStockDisplay(value, unidadMedida)
+    const unidadesStore = useUnidadesMedidaStore()
+    return formatStockDisplay(
+      value,
+      unidadMedida,
+      unidadesStore.esFraccionaria(unidadMedida),
+    )
   }
 
   // Traduce el payment_type_code de Transbank (Webpay) a una etiqueta legible.

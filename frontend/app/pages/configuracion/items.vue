@@ -146,12 +146,8 @@ const tiposOpts: Opt[] = [
   { label: 'Suscripción', value: 'suscripcion' },
 ]
 
-const unidadesMedidaOpts: Opt[] = [
-  { label: 'Unidad', value: 'unidad' },
-  { label: 'Kilogramo (kg)', value: 'kg' },
-  { label: 'Litro (l)', value: 'l' },
-  { label: 'Metro (m)', value: 'm' },
-]
+const unidadesMedidaStore = useUnidadesMedidaStore()
+const unidadesMedidaOpts = computed(() => unidadesMedidaStore.opts)
 
 const filtrosTipoOpts = [
   { label: 'Todos', value: 'todos' },
@@ -363,7 +359,10 @@ async function abrirHistorial(item: Item) {
 async function cargarCatalogos() {
   const monedasStore = useMonedasStore()
   try {
-    await monedasStore.ensureLoaded()
+    await Promise.all([
+      monedasStore.ensureLoaded(),
+      unidadesMedidaStore.ensureLoaded(),
+    ])
     const [categorias, impuestos, descuentos, recargos] =
       await Promise.all([
         useApiFetch<any[]>(`${apiUrl}/categorias`),
