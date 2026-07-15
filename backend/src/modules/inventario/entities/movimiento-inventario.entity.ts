@@ -56,6 +56,9 @@ export class MovimientoInventario {
   })
   costoUnitario: string | null;
 
+  @Column({ name: 'causa_merma_id', type: 'uuid', nullable: true })
+  causaMermaId: string | null;
+
   @CreateDateColumn({ name: 'creado_el' }) creadoEl: Date;
   @UpdateDateColumn({ name: 'actualizado_el' }) actualizadoEl: Date;
   @DeleteDateColumn({ name: 'eliminado_el' }) eliminadoEl: Date | null;

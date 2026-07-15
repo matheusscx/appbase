@@ -570,6 +570,20 @@ CREATE TABLE "item_descuentos" (
   PRIMARY KEY ("item_id", "descuento_id")
 );
 
+-- Catálogo de causas de merma por tenant (vencimiento, rotura, etc.)
+CREATE TABLE "causas_merma" (
+  "causa_merma_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"      UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"         TEXT NOT NULL,
+  "activo"         BOOLEAN NOT NULL DEFAULT true,
+  "es_fijo"        BOOLEAN NOT NULL DEFAULT false,
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_causas_merma_tenant_nombre"
+  ON "causas_merma" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
+
 -- Kardex de movimientos de stock (solo items tipo 'producto')
 -- item_producto.stock es el saldo materializado; esta tabla es la fuente de verdad auditable.
 CREATE TABLE "movimientos_inventario" (
@@ -585,6 +599,7 @@ CREATE TABLE "movimientos_inventario" (
   "usuario_id"       UUID          REFERENCES "usuarios" ("usuario_id"),
   "comentario"       TEXT,
   "costo_unitario"   NUMERIC(18,4),
+  "causa_merma_id"   UUID REFERENCES "causas_merma" ("causa_merma_id"),
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ

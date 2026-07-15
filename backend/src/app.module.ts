@@ -67,6 +67,7 @@ import { ItemUnidad } from './modules/items/entities/item-unidad.entity';
 import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
 import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
+import { CausaMerma } from './modules/mermas/entities/causa-merma.entity';
 import { InventarioModule } from './modules/inventario/inventario.module';
 import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.module';
 import { CajaModule } from './modules/caja/caja.module';
@@ -160,6 +161,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           ItemDescuento,
           ItemLote,
           ItemUnidad,
+          CausaMerma,
           MovimientoInventario,
           MovimientoInventarioDetalle,
           MovimientoCaja,
