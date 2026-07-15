@@ -525,10 +525,13 @@ CREATE TABLE "item_suscripcion" (
 
 -- Extensión 1:1 para tipo 'receta' (producto compuesto, sin stock propio)
 CREATE TABLE "item_receta" (
-  "item_id"      UUID          PRIMARY KEY REFERENCES "items" ("item_id"),
-  "costo_actual" NUMERIC(18,4)
+  "item_id"                  UUID          PRIMARY KEY REFERENCES "items" ("item_id"),
+  "costo_actual"             NUMERIC(18,4),
   -- Cacheado al crear/editar; NO se recalcula automáticamente si cambia el
   -- costo de un ingrediente (ver pieza 5 — simulador de impacto de costos).
+  "costo_propuesto_omitido"  NUMERIC(18,4)
+  -- Snapshot del costo propuesto descartado por el usuario; NULL = sin omisión.
+  -- La bandeja oculta la receta mientras el propuesto actual == este valor.
 );
 
 -- Ingredientes de una receta (N por receta)

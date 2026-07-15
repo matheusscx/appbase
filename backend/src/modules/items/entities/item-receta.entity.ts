@@ -13,4 +13,13 @@ export class ItemReceta {
     nullable: true,
   })
   costoActual: string | null;
+
+  @Column({
+    name: 'costo_propuesto_omitido',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  costoPropuestoOmitido: string | null;
 }
