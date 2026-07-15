@@ -168,6 +168,7 @@ const productosIngredienteOpts = computed(() =>
 
 const tiposOpts: Opt[] = [
   { label: 'Producto', value: 'producto' },
+  { label: 'Ingrediente', value: 'ingrediente' },
   { label: 'Servicio', value: 'servicio' },
   { label: 'Suscripción', value: 'suscripcion' },
   { label: 'Receta', value: 'receta' },
@@ -179,8 +180,10 @@ const unidadesMedidaOpts = computed(() => unidadesMedidaStore.opts)
 const filtrosTipoOpts = [
   { label: 'Todos', value: 'todos' },
   { label: 'Productos', value: 'producto' },
+  { label: 'Ingredientes', value: 'ingrediente' },
   { label: 'Servicios', value: 'servicio' },
   { label: 'Suscripciones', value: 'suscripcion' },
+  { label: 'Recetas', value: 'receta' },
 ]
 
 // ── Formulario ─────────────────────────────────────────────────────────────
@@ -316,7 +319,7 @@ watch(historialPage, cargarHistorial)
 function menuAcciones(item: Item) {
   const grupos: any[][] = []
 
-  if (item.tipo === 'producto') {
+  if (item.tipo === 'producto' || item.tipo === 'ingrediente') {
     const inventario: any[] = [
       {
         label: 'Ajustar stock',
@@ -324,7 +327,7 @@ function menuAcciones(item: Item) {
         onSelect: () => abrirAjusteStock(item),
       },
     ]
-    if (item.modoInventario === 'serie' || item.modoInventario === 'lote') {
+    if (item.tipo === 'producto' && (item.modoInventario === 'serie' || item.modoInventario === 'lote')) {
       inventario.push({
         label: item.modoInventario === 'serie' ? 'Ver unidades' : 'Ver lotes',
         icon: 'i-lucide-layout-grid',
@@ -400,7 +403,7 @@ async function cargarCatalogos() {
         useApiFetch<any[]>(`${apiUrl}/impuestos`),
         useApiFetch<any[]>(`${apiUrl}/descuentos`),
         useApiFetch<any[]>(`${apiUrl}/recargos`),
-        useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
+        useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
       ])
 
     monedasOpts.value = monedasStore.monedasHabilitadas
@@ -428,7 +431,6 @@ async function cargarCatalogos() {
       .map((r) => ({ label: r.nombre, value: r.id }))
 
     productosIngrediente.value = productos.data
-      .filter(p => p.modoInventario === 'cantidad')
       .map(p => ({ id: p.id, nombre: p.nombre, unidadMedida: p.unidadMedida ?? 'unidad' }))
   } catch {
     toast.add({ title: 'Error al cargar catálogos', color: 'error' })
@@ -555,14 +557,17 @@ async function guardar() {
     const payload: Record<string, unknown> = {
       nombre: form.value.nombre,
       descripcion: form.value.descripcion || undefined,
-      precioBase: form.value.precioBase,
       monedaId: form.value.monedaId,
       categoriaId: form.value.categoriaId || undefined,
-      precioIncluyeImpuesto: form.value.precioIncluyeImpuesto,
       activo: form.value.activo,
-      impuestosIds: form.value.impuestosIds,
-      recargosIds: form.value.recargosIds,
-      descuentosIds: form.value.descuentosIds,
+    }
+
+    if (form.value.tipo !== 'ingrediente') {
+      payload.precioBase = form.value.precioBase
+      payload.precioIncluyeImpuesto = form.value.precioIncluyeImpuesto
+      payload.impuestosIds = form.value.impuestosIds
+      payload.recargosIds = form.value.recargosIds
+      payload.descuentosIds = form.value.descuentosIds
     }
 
     if (!editingId.value) {
@@ -589,6 +594,13 @@ async function guardar() {
         // En edición sólo mandamos modoInventario (el backend bloquea cambio si hay movimientos)
         payload.modoInventario = form.value.modoInventario
       }
+    } else if (form.value.tipo === 'ingrediente') {
+      payload.precioBase = '0'
+      payload.unidadMedida = form.value.unidadMedida
+      if (form.value.costo) payload.costo = form.value.costo
+      if (!editingId.value) {
+        payload.stock = form.value.stock || '0'
+      }
     } else if (form.value.tipo === 'servicio') {
       payload.duracionEstimada = form.value.duracionEstimada || undefined
       payload.requiereCita = form.value.requiereCita
@@ -601,7 +613,7 @@ async function guardar() {
     const productoId = editingId.value
     const chequearDesfases =
       !!productoId
-      && form.value.tipo === 'producto'
+      && (form.value.tipo === 'producto' || form.value.tipo === 'ingrediente')
       && costoProductoCambio()
 
     if (editingId.value) {
@@ -817,13 +829,17 @@ function loteSinDisponibilidad(l: Lote): boolean {
 
 const tipoLabels: Record<string, string> = {
   producto: 'Producto',
+  ingrediente: 'Ingrediente',
   servicio: 'Servicio',
   suscripcion: 'Suscripción',
+  receta: 'Receta',
 }
-const tipoColors: Record<string, 'primary' | 'secondary' | 'info'> = {
+const tipoColors: Record<string, 'primary' | 'secondary' | 'info' | 'warning' | 'neutral'> = {
   producto: 'primary',
+  ingrediente: 'warning',
   servicio: 'secondary',
   suscripcion: 'info',
+  receta: 'neutral',
 }
 
 const columnsHistorial: TableColumn<Movimiento>[] = [
@@ -843,7 +859,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
     <CrudPageHeader
       large
       title="Items"
-      description="Productos, servicios y suscripciones del catálogo"
+      description="Productos, ingredientes, servicios y suscripciones del catálogo"
     >
       <template #actions>
         <UButton icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
@@ -897,15 +913,19 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           <div class="min-w-0">
             <span class="font-medium truncate block">{{ row.original.nombre }}</span>
             <div class="text-sm text-muted mt-0.5 flex flex-wrap items-center gap-3">
-              <span class="font-mono">{{ formatMonto(row.original.precioBase, row.original.monedaId) }}</span>
+              <span class="font-mono">{{
+                row.original.tipo === 'ingrediente'
+                  ? formatMonto('0', row.original.monedaId)
+                  : formatMonto(row.original.precioBase, row.original.monedaId)
+              }}</span>
               <span v-if="row.original.categoriaNombre">· {{ row.original.categoriaNombre }}</span>
-              <span v-if="row.original.tipo === 'producto' && row.original.stock !== null">
+              <span v-if="(row.original.tipo === 'producto' || row.original.tipo === 'ingrediente') && row.original.stock !== null">
                 · Stock: {{ row.original.stock }}
-                <span v-if="row.original.modoInventario === 'serie'">(unidades)</span>
-                <span v-else-if="row.original.modoInventario === 'lote'">(lotes)</span>
+                <span v-if="row.original.tipo === 'producto' && row.original.modoInventario === 'serie'">(unidades)</span>
+                <span v-else-if="row.original.tipo === 'producto' && row.original.modoInventario === 'lote'">(lotes)</span>
                 <span v-else>{{ row.original.unidadMedida }}</span>
               </span>
-              <span v-if="row.original.tipo === 'producto'" class="font-mono">
+              <span v-if="row.original.tipo === 'producto' || row.original.tipo === 'ingrediente'" class="font-mono">
                 · Costo: {{ row.original.costoActual ? formatMonto(row.original.costoActual, row.original.monedaId) : '—' }}
               </span>
               <UBadge
@@ -1000,7 +1020,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               <UInput v-model="form.descripcion" placeholder="Descripción opcional" class="w-full" />
             </UFormField>
 
-            <UFormField label="Precio base" required>
+            <UFormField v-if="form.tipo !== 'ingrediente'" label="Precio base" required>
               <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" class="w-full" />
             </UFormField>
 
@@ -1034,7 +1054,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               />
             </UFormField>
 
-            <UFormField label="Precio incluye impuesto">
+            <UFormField v-if="form.tipo !== 'ingrediente'" label="Precio incluye impuesto">
               <USwitch v-model="form.precioIncluyeImpuesto" />
             </UFormField>
 
@@ -1158,6 +1178,30 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             </div>
           </template>
 
+          <!-- Extensión ingrediente -->
+          <template v-if="form.tipo === 'ingrediente'">
+            <USeparator />
+            <div class="space-y-4">
+              <p class="text-sm font-medium text-muted">Datos de ingrediente</p>
+              <div class="grid grid-cols-2 gap-4">
+                <UFormField label="Unidad de medida">
+                  <USelectMenu
+                    v-model="form.unidadMedida"
+                    :items="unidadesMedidaOpts"
+                    value-key="value"
+                    class="w-full"
+                  />
+                </UFormField>
+                <UFormField label="Costo">
+                  <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" class="w-full" />
+                </UFormField>
+                <UFormField v-if="!editingId" label="Stock inicial">
+                  <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
+                </UFormField>
+              </div>
+            </div>
+          </template>
+
           <!-- Extensión servicio -->
           <template v-if="form.tipo === 'servicio'">
             <USeparator />
@@ -1193,7 +1237,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 :key="idx"
                 class="grid grid-cols-5 gap-2 items-end"
               >
-                <UFormField label="Producto" class="col-span-2">
+                <UFormField label="Ingrediente" class="col-span-2">
                   <USelectMenu
                     v-model="form.ingredientes[idx].ingredienteItemId"
                     :items="productosIngredienteOpts"
@@ -1263,6 +1307,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           </template>
 
           <!-- Reglas asociadas -->
+          <template v-if="form.tipo !== 'ingrediente'">
           <USeparator />
           <div class="space-y-3">
             <p class="text-sm font-medium text-muted">Reglas asociadas</p>
@@ -1300,6 +1345,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               />
             </UFormField>
           </div>
+          </template>
         </UForm>
       </template>
 
