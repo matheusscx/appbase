@@ -108,9 +108,30 @@ describe('Recetas — flujo completo (e2e)', () => {
 
     token = await login(app);
     cajaId = await abrirCaja(app, token);
-    panId = await crearIngrediente(app, token, 'Pan E2E', 'unidad', '10', '500');
-    carneId = await crearIngrediente(app, token, 'Carne E2E', 'kg', '1', '8000');
-    quesoId = await crearIngrediente(app, token, 'Queso E2E', 'kg', '0.01', '6000');
+    panId = await crearIngrediente(
+      app,
+      token,
+      'Pan E2E',
+      'unidad',
+      '10',
+      '500',
+    );
+    carneId = await crearIngrediente(
+      app,
+      token,
+      'Carne E2E',
+      'kg',
+      '1',
+      '8000',
+    );
+    quesoId = await crearIngrediente(
+      app,
+      token,
+      'Queso E2E',
+      'kg',
+      '0.01',
+      '6000',
+    );
   }, 60000);
 
   afterAll(async () => {
@@ -128,9 +149,24 @@ describe('Recetas — flujo completo (e2e)', () => {
         monedaId: CLP_MONEDA_ID,
         tipo: 'receta',
         ingredientes: [
-          { ingredienteItemId: panId, cantidad: '1', unidadCodigo: 'unidad', bloqueante: true },
-          { ingredienteItemId: carneId, cantidad: '150', unidadCodigo: 'g', bloqueante: true },
-          { ingredienteItemId: quesoId, cantidad: '20', unidadCodigo: 'g', bloqueante: false },
+          {
+            ingredienteItemId: panId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: carneId,
+            cantidad: '150',
+            unidadCodigo: 'g',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: quesoId,
+            cantidad: '20',
+            unidadCodigo: 'g',
+            bloqueante: false,
+          },
         ],
       });
 
@@ -145,11 +181,32 @@ describe('Recetas — flujo completo (e2e)', () => {
   });
 
   it('2-3-4-5. vende con stock suficiente, sin queso (no bloqueante), sin carne (bloqueante) y refleja disponible', async () => {
-    const localPan = await crearIngrediente(app, token, 'Pan local', 'unidad', '10', '500');
+    const localPan = await crearIngrediente(
+      app,
+      token,
+      'Pan local',
+      'unidad',
+      '10',
+      '500',
+    );
     // 1 kg = 1000 g; a 150 g/venta alcanzan para 6 ventas exactas (floor(1000/150)=6).
-    const localCarne = await crearIngrediente(app, token, 'Carne local', 'kg', '1', '8000');
+    const localCarne = await crearIngrediente(
+      app,
+      token,
+      'Carne local',
+      'kg',
+      '1',
+      '8000',
+    );
     // 30 g: alcanza para la primera venta (20 g) pero no para la segunda.
-    const localQueso = await crearIngrediente(app, token, 'Queso local', 'kg', '0.03', '6000');
+    const localQueso = await crearIngrediente(
+      app,
+      token,
+      'Queso local',
+      'kg',
+      '0.03',
+      '6000',
+    );
 
     const resReceta = await request(app.getHttpServer())
       .post('/api/items')
@@ -160,9 +217,24 @@ describe('Recetas — flujo completo (e2e)', () => {
         monedaId: CLP_MONEDA_ID,
         tipo: 'receta',
         ingredientes: [
-          { ingredienteItemId: localPan, cantidad: '1', unidadCodigo: 'unidad', bloqueante: true },
-          { ingredienteItemId: localCarne, cantidad: '150', unidadCodigo: 'g', bloqueante: true },
-          { ingredienteItemId: localQueso, cantidad: '20', unidadCodigo: 'g', bloqueante: false },
+          {
+            ingredienteItemId: localPan,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: localCarne,
+            cantidad: '150',
+            unidadCodigo: 'g',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: localQueso,
+            cantidad: '20',
+            unidadCodigo: 'g',
+            bloqueante: false,
+          },
         ],
       });
     const recetaId = (resReceta.body as ItemResponse).id;
@@ -191,13 +263,17 @@ describe('Recetas — flujo completo (e2e)', () => {
     // sin advertencias. Esta es venta #1 de las 6 que la carne permite.
     const resVenta1 = await venderUna();
     expect(resVenta1.status).toBe(201);
-    expect((resVenta1.body as VentaResponse).advertenciasReceta ?? []).toEqual([]);
+    expect((resVenta1.body as VentaResponse).advertenciasReceta ?? []).toEqual(
+      [],
+    );
 
     // 4. Venta #2: queso quedó en 10 g (30-20), no alcanza para los 20 g
     // requeridos → no bloqueante, se omite con advertencia; pan y carne sí se descuentan.
     const resVenta2 = await venderUna();
     expect(resVenta2.status).toBe(201);
-    expect((resVenta2.body as VentaResponse).advertenciasReceta?.length).toBe(1);
+    expect((resVenta2.body as VentaResponse).advertenciasReceta?.length).toBe(
+      1,
+    );
 
     // Ventas #3-#6: la carne todavía alcanza (2 de las 6 ya se usaron).
     for (let i = 0; i < 4; i++) {

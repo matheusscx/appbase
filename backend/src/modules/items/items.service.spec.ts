@@ -159,8 +159,18 @@ describe('ItemsService', () => {
           },
         ])
         .mockResolvedValueOnce([
-          { cantidad: '1', unidad_codigo: 'unidad', ingrediente_unidad_medida: 'unidad', stock: '8' }, // pan
-          { cantidad: '150', unidad_codigo: 'g', ingrediente_unidad_medida: 'kg', stock: '1' }, // carne: 1kg = 1000g
+          {
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            ingrediente_unidad_medida: 'unidad',
+            stock: '8',
+          }, // pan
+          {
+            cantidad: '150',
+            unidad_codigo: 'g',
+            ingrediente_unidad_medida: 'kg',
+            stock: '1',
+          }, // carne: 1kg = 1000g
         ]);
       catalogServiceMock.convertirUnidad
         .mockResolvedValueOnce('1') // pan
@@ -460,7 +470,14 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
-          .mockResolvedValueOnce([{ tipo: 'servicio', modo_inventario: null, unidad_medida: null, costo_actual: null }]); // lookup pan → no es producto
+          .mockResolvedValueOnce([
+            {
+              tipo: 'servicio',
+              modo_inventario: null,
+              unidad_medida: null,
+              costo_actual: null,
+            },
+          ]); // lookup pan → no es producto
 
         await expect(
           service.create(TENANT, 'user-uuid', dtoReceta as any),
@@ -471,7 +488,14 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }])
           .mockResolvedValueOnce([{ item_id: ITEM_ID }])
-          .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'serie', unidad_medida: 'unidad', costo_actual: '500' }]);
+          .mockResolvedValueOnce([
+            {
+              tipo: 'producto',
+              modo_inventario: 'serie',
+              unidad_medida: 'unidad',
+              costo_actual: '500',
+            },
+          ]);
 
         await expect(
           service.create(TENANT, 'user-uuid', dtoReceta as any),
@@ -482,8 +506,22 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
-          .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'cantidad', unidad_medida: 'unidad', costo_actual: '500' }]) // pan
-          .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'cantidad', unidad_medida: 'kg', costo_actual: '8000' }]) // carne
+          .mockResolvedValueOnce([
+            {
+              tipo: 'producto',
+              modo_inventario: 'cantidad',
+              unidad_medida: 'unidad',
+              costo_actual: '500',
+            },
+          ]) // pan
+          .mockResolvedValueOnce([
+            {
+              tipo: 'producto',
+              modo_inventario: 'cantidad',
+              unidad_medida: 'kg',
+              costo_actual: '8000',
+            },
+          ]) // carne
           .mockResolvedValueOnce([]) // INSERT item_receta
           .mockResolvedValueOnce([]) // INSERT receta_ingredientes pan
           .mockResolvedValueOnce([]); // INSERT receta_ingredientes carne
@@ -492,7 +530,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce('1') // pan: unidad → unidad (sin cambio)
           .mockResolvedValueOnce('0.15'); // carne: 150 g → 0.15 kg
 
-        const result = await service.create(TENANT, 'user-uuid', dtoReceta as any);
+        const result = await service.create(TENANT, 'user-uuid', dtoReceta);
 
         expect(result).toEqual({ id: ITEM_ID });
         // Orden de llamadas a managerMock.query: 1=moneda, 2=INSERT items,
@@ -565,21 +603,18 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
         .mockResolvedValueOnce([]); // INSERT item_producto
 
-      await service.create(
-        TENANT,
-        'user-uuid',
-        {
-          nombre: 'Carne molida',
-          precioBase: '6000',
-          monedaId: 'moneda-uuid',
-          tipo: 'producto',
-          costo: '4000',
-        } as never,
-      );
+      await service.create(TENANT, 'user-uuid', {
+        nombre: 'Carne molida',
+        precioBase: '6000',
+        monedaId: 'moneda-uuid',
+        tipo: 'producto',
+        costo: '4000',
+      });
 
       const insertProducto = managerMock.query.mock.calls.find(
         (c: unknown[]) =>
-          typeof c[0] === 'string' && c[0].includes('INSERT INTO item_producto'),
+          typeof c[0] === 'string' &&
+          c[0].includes('INSERT INTO item_producto'),
       );
       expect(insertProducto?.[0]).toContain('costo_actual');
       expect(insertProducto?.[1]).toContain('4000');
@@ -688,7 +723,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
         .mockResolvedValueOnce(undefined); // UPDATE item_producto
 
-      await service.update(TENANT, ITEM_ID, { costo: '4300' } as never);
+      await service.update(TENANT, ITEM_ID, { costo: '4300' });
 
       const updateProducto = managerMock.query.mock.calls.find(
         (c: unknown[]) =>
@@ -703,7 +738,14 @@ describe('ItemsService', () => {
     it('receta: reemplaza los ingredientes y recalcula costoActual', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
-        .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'cantidad', unidad_medida: 'kg', costo_actual: '6000' }]) // queso
+        .mockResolvedValueOnce([
+          {
+            tipo: 'producto',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+            costo_actual: '6000',
+          },
+        ]) // queso
         .mockResolvedValueOnce([]) // soft-delete receta_ingredientes
         .mockResolvedValueOnce([]) // INSERT receta_ingredientes queso
         .mockResolvedValueOnce([]); // UPDATE item_receta costo_actual
@@ -719,7 +761,7 @@ describe('ItemsService', () => {
             bloqueante: false,
           },
         ],
-      } as any);
+      });
 
       // soft-delete de la lista anterior (nunca hard DELETE)
       expect(managerMock.query).toHaveBeenNthCalledWith(
@@ -760,7 +802,9 @@ describe('ItemsService', () => {
 
     it('bloquea el borrado si el item es ingrediente de una receta activa', async () => {
       itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
-      dataSource.query.mockResolvedValueOnce([{ nombre: 'Hamburguesa Clásica' }]);
+      dataSource.query.mockResolvedValueOnce([
+        { nombre: 'Hamburguesa Clásica' },
+      ]);
 
       await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
         BadRequestException,
@@ -921,7 +965,11 @@ describe('ItemsService', () => {
         unidadCodigo: 'g',
       } as never);
 
-      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith('500', 'g', 'kg');
+      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith(
+        '500',
+        'g',
+        'kg',
+      );
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
         managerMock,
         expect.objectContaining({ cantidad: '0.5' }),
@@ -1006,16 +1054,26 @@ describe('ItemsService', () => {
       );
 
       expect(advertencias).toEqual([]);
-      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(2);
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(
+        2,
+      );
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
         1,
         managerMock,
-        expect.objectContaining({ itemId: 'pan', cantidad: '2', motivo: 'venta' }),
+        expect.objectContaining({
+          itemId: 'pan',
+          cantidad: '2',
+          motivo: 'venta',
+        }),
       );
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
         2,
         managerMock,
-        expect.objectContaining({ itemId: 'carne', cantidad: '0.3', motivo: 'venta' }),
+        expect.objectContaining({
+          itemId: 'carne',
+          cantidad: '0.3',
+          motivo: 'venta',
+        }),
       );
     });
 
@@ -1065,7 +1123,9 @@ describe('ItemsService', () => {
       expect(advertencias).toEqual([
         'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
       ]);
-      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(1);
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(
+        1,
+      );
     });
 
     it('no engulle errores distintos de stock insuficiente en no-bloqueantes', async () => {

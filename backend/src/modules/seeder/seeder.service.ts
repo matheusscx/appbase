@@ -236,12 +236,48 @@ export class SeederService implements OnApplicationBootstrap {
    */
   private async seedUnidadesMedida(): Promise<void> {
     const unidades: Partial<UnidadMedida>[] = [
-      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440250', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1' },
-      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440251', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000' },
-      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440252', codigo: 'ml', nombre: 'Mililitro', magnitud: 'volumen', factorBase: '1' },
-      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440253', codigo: 'l', nombre: 'Litro', magnitud: 'volumen', factorBase: '1000' },
-      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440254', codigo: 'unidad', nombre: 'Unidad', magnitud: 'conteo', factorBase: '1' },
-      { unidadMedidaId: '550e8400-e29b-41d4-a716-446655440255', codigo: 'm', nombre: 'Metro', magnitud: 'longitud', factorBase: '1' },
+      {
+        unidadMedidaId: '550e8400-e29b-41d4-a716-446655440250',
+        codigo: 'g',
+        nombre: 'Gramo',
+        magnitud: 'masa',
+        factorBase: '1',
+      },
+      {
+        unidadMedidaId: '550e8400-e29b-41d4-a716-446655440251',
+        codigo: 'kg',
+        nombre: 'Kilogramo',
+        magnitud: 'masa',
+        factorBase: '1000',
+      },
+      {
+        unidadMedidaId: '550e8400-e29b-41d4-a716-446655440252',
+        codigo: 'ml',
+        nombre: 'Mililitro',
+        magnitud: 'volumen',
+        factorBase: '1',
+      },
+      {
+        unidadMedidaId: '550e8400-e29b-41d4-a716-446655440253',
+        codigo: 'l',
+        nombre: 'Litro',
+        magnitud: 'volumen',
+        factorBase: '1000',
+      },
+      {
+        unidadMedidaId: '550e8400-e29b-41d4-a716-446655440254',
+        codigo: 'unidad',
+        nombre: 'Unidad',
+        magnitud: 'conteo',
+        factorBase: '1',
+      },
+      {
+        unidadMedidaId: '550e8400-e29b-41d4-a716-446655440255',
+        codigo: 'm',
+        nombre: 'Metro',
+        magnitud: 'longitud',
+        factorBase: '1',
+      },
     ];
 
     for (const data of unidades) {
@@ -1159,8 +1195,8 @@ export class SeederService implements OnApplicationBootstrap {
         id: '550e8400-e29b-41d4-a716-446655440247',
         tenantId: PARIS,
         nombre: 'Cocina',
-        rol: 'comanda' as RolImpresora,
-        tipoConexion: 'red' as TipoConexionImpresora,
+        rol: 'comanda',
+        tipoConexion: 'red',
         host: '192.168.100.13',
         puerto: 9100,
         activo: true,
@@ -1169,8 +1205,8 @@ export class SeederService implements OnApplicationBootstrap {
         id: '550e8400-e29b-41d4-a716-446655440248',
         tenantId: PARIS,
         nombre: 'Barra',
-        rol: 'comanda' as RolImpresora,
-        tipoConexion: 'red' as TipoConexionImpresora,
+        rol: 'comanda',
+        tipoConexion: 'red',
         host: '192.168.100.13',
         puerto: 9100,
         activo: true,
@@ -1179,8 +1215,8 @@ export class SeederService implements OnApplicationBootstrap {
         id: '550e8400-e29b-41d4-a716-446655440249',
         tenantId: PARIS,
         nombre: 'Caja',
-        rol: 'boleta' as RolImpresora,
-        tipoConexion: 'red' as TipoConexionImpresora,
+        rol: 'boleta',
+        tipoConexion: 'red',
         host: '192.168.100.13',
         puerto: 9100,
         activo: true,
@@ -2095,9 +2131,30 @@ export class SeederService implements OnApplicationBootstrap {
     if (exists.length) return;
 
     const ingredientes = [
-      { id: PAN_ID, movId: MOV_PAN_ID, nombre: 'Pan de hamburguesa', unidad: 'unidad', stock: '50', costo: '500' },
-      { id: CARNE_ID, movId: MOV_CARNE_ID, nombre: 'Carne molida', unidad: 'kg', stock: '10', costo: '8000' },
-      { id: QUESO_ID, movId: MOV_QUESO_ID, nombre: 'Queso laminado', unidad: 'kg', stock: '5', costo: '6000' },
+      {
+        id: PAN_ID,
+        movId: MOV_PAN_ID,
+        nombre: 'Pan de hamburguesa',
+        unidad: 'unidad',
+        stock: '50',
+        costo: '500',
+      },
+      {
+        id: CARNE_ID,
+        movId: MOV_CARNE_ID,
+        nombre: 'Carne molida',
+        unidad: 'kg',
+        stock: '10',
+        costo: '8000',
+      },
+      {
+        id: QUESO_ID,
+        movId: MOV_QUESO_ID,
+        nombre: 'Queso laminado',
+        unidad: 'kg',
+        stock: '5',
+        costo: '6000',
+      },
     ];
 
     for (const ing of ingredientes) {
@@ -2141,7 +2198,16 @@ export class SeederService implements OnApplicationBootstrap {
          ($1,$5,$6,$2,'1','unidad',true),
          ($3,$5,$6,$7,'150','g',true),
          ($4,$5,$6,$8,'20','g',false)`,
-      [RI_PAN_ID, PAN_ID, RI_CARNE_ID, RI_QUESO_ID, PARIS, HAMBURGUESA_ID, CARNE_ID, QUESO_ID],
+      [
+        RI_PAN_ID,
+        PAN_ID,
+        RI_CARNE_ID,
+        RI_QUESO_ID,
+        PARIS,
+        HAMBURGUESA_ID,
+        CARNE_ID,
+        QUESO_ID,
+      ],
     );
   }
 
