@@ -23,6 +23,8 @@ export interface MermaResponse {
   costoUnitario: string;
   costoPerdido: string;
   causaNombre: string;
+  /** Fila lista para upsert en el front (sin re-fetch). */
+  merma: MermaListItem;
 }
 
 export interface MermaListItem {
@@ -161,6 +163,19 @@ export class MermasService {
         costoUnitario: costoCongelado,
         costoPerdido,
         causaNombre: causa.nombre,
+        merma: {
+          id: mov.movimientoId,
+          itemId: dto.itemId,
+          itemNombre: itemRows[0].nombre,
+          cantidad: cantidadStr,
+          costoUnitario: costoCongelado,
+          costoPerdido,
+          causaMermaId: dto.causaMermaId,
+          causaNombre: causa.nombre,
+          comentario: dto.comentario ?? null,
+          creadoEl: new Date(),
+          usuarioNombre: null,
+        },
       };
     });
   }

@@ -39,6 +39,8 @@ describe('TenantPasarelaService', () => {
   it('crear: cifra la configuración y no la devuelve', async () => {
     pasarelaRepo.findOne.mockResolvedValue({
       pasarelaId: 'p-1',
+      codigo: 'webpay',
+      nombre: 'Webpay',
       activo: true,
       soportaMall: true,
     });
@@ -52,6 +54,13 @@ describe('TenantPasarelaService', () => {
       commerceCodeHijo: '5970...',
     });
     expect(JSON.stringify(res)).not.toContain('5970...');
+    expect(res).toMatchObject({
+      tenantPasarelaId: 'tp-1',
+      pasarelaId: 'p-1',
+      codigo: 'webpay',
+      nombre: 'Webpay',
+      tieneCredenciales: true,
+    });
   });
 
   it('crear: rechaza pasarela global inexistente o inactiva', async () => {

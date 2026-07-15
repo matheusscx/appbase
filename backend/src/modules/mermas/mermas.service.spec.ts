@@ -85,12 +85,18 @@ describe('MermasService', () => {
           costoUnitario: undefined,
         }),
       );
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         movimientoId: 'mov-1',
         stockResultante: '9',
         costoUnitario: '100',
         costoPerdido: '100.0000',
         causaNombre: 'Vencimiento',
+        merma: {
+          id: 'mov-1',
+          itemId: ITEM,
+          costoPerdido: '100.0000',
+          causaNombre: 'Vencimiento',
+        },
       });
     });
 
@@ -228,12 +234,13 @@ describe('MermasService', () => {
           cantidad: '1',
         }),
       );
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         movimientoId: 'mov-ing',
         stockResultante: '9',
         costoUnitario: '100',
         costoPerdido: '100.0000',
         causaNombre: 'Vencimiento',
+        merma: { id: 'mov-ing', itemId: ITEM },
       });
     });
   });

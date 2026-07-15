@@ -135,17 +135,24 @@ async function guardarConfig() {
   savingConfig.value = true
   try {
     if (editingId.value) {
-      await useApiFetch(`${apiUrl}/pasarela/admin/config/${editingId.value}`, {
-        method: 'PATCH',
-        body: payload,
-      })
+      const saved = await useApiFetch<Partial<TenantPasarelaRow> & { tenantPasarelaId: string }>(
+        `${apiUrl}/pasarela/admin/config/${editingId.value}`,
+        { method: 'PATCH', body: payload },
+      )
+      const idx = configs.value.findIndex(c => c.tenantPasarelaId === saved.tenantPasarelaId)
+      if (idx >= 0) {
+        configs.value[idx] = { ...configs.value[idx], ...saved }
+      }
     }
     else {
-      await useApiFetch(`${apiUrl}/pasarela/admin/config`, { method: 'POST', body: payload })
+      const saved = await useApiFetch<TenantPasarelaRow>(
+        `${apiUrl}/pasarela/admin/config`,
+        { method: 'POST', body: payload },
+      )
+      configs.value = [...configs.value, saved]
     }
     toast.add({ title: 'Pasarela guardada', color: 'success' })
     drawerOpen.value = false
-    await cargarConfig()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar'), color: 'error' })
@@ -160,12 +167,13 @@ const eliminarConfigOpen = ref(false)
 async function confirmarEliminarConfig() {
   if (!eliminandoConfig.value) return
   try {
+    const id = eliminandoConfig.value.tenantPasarelaId
     await useApiFetch(
-      `${apiUrl}/pasarela/admin/config/${eliminandoConfig.value.tenantPasarelaId}`,
+      `${apiUrl}/pasarela/admin/config/${id}`,
       { method: 'DELETE' },
     )
+    configs.value = configs.value.filter(c => c.tenantPasarelaId !== id)
     toast.add({ title: 'Pasarela eliminada', color: 'success' })
-    await cargarConfig()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al eliminar'), color: 'error' })
@@ -200,15 +208,19 @@ async function cargarKeys() {
 async function crearKey() {
   creandoKey.value = true
   try {
-    const res = await useApiFetch<{ apiKey: string }>(`${apiUrl}/pasarela/admin/api-keys`, {
-      method: 'POST',
-      body: { nombre: nuevaKeyNombre.value },
-    })
+    const res = await useApiFetch<ApiKeyRow & { apiKey: string }>(
+      `${apiUrl}/pasarela/admin/api-keys`,
+      {
+        method: 'POST',
+        body: { nombre: nuevaKeyNombre.value },
+      },
+    )
     keyCreada.value = res.apiKey
+    const { apiKey: _apiKey, ...row } = res
+    keys.value = [row, ...keys.value]
     crearKeyOpen.value = false
     keyCreadaModal.value = true
     nuevaKeyNombre.value = ''
-    await cargarKeys()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al crear la key'), color: 'error' })
@@ -228,11 +240,15 @@ const revocarOpen = ref(false)
 async function confirmarRevocar() {
   if (!revocando.value) return
   try {
-    await useApiFetch(`${apiUrl}/pasarela/admin/api-keys/${revocando.value.apiKeyId}`, {
-      method: 'DELETE',
-    })
+    const res = await useApiFetch<{ apiKeyId: string, revocadaEl: string }>(
+      `${apiUrl}/pasarela/admin/api-keys/${revocando.value.apiKeyId}`,
+      { method: 'DELETE' },
+    )
+    const idx = keys.value.findIndex(k => k.apiKeyId === res.apiKeyId)
+    if (idx >= 0) {
+      keys.value[idx] = { ...keys.value[idx], revocadaEl: res.revocadaEl }
+    }
     toast.add({ title: 'API key revocada', color: 'success' })
-    await cargarKeys()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al revocar'), color: 'error' })

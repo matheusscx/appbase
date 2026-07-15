@@ -184,16 +184,34 @@ async function registrar() {
       body.costoUnitario = form.value.costoUnitario.trim()
     }
 
-    const res = await useApiFetch<{ costoPerdido: string; causaNombre: string }>(
+    const res = await useApiFetch<{
+      costoPerdido: string
+      causaNombre: string
+      merma: MermaListItem
+    }>(
       `${apiUrl}/mermas`,
       { method: 'POST', body },
     )
+    // Inserta en la página actual si los filtros la incluirían; evita refetch.
+    const filtroItem = listFilters.value.itemId
+    const filtroCausa = listFilters.value.causaMermaId
+    const coincide =
+      (!filtroItem || filtroItem === res.merma.itemId)
+      && (!filtroCausa || filtroCausa === res.merma.causaMermaId)
+    if (coincide && page.value === 1) {
+      const size = pageSize.value
+      mermas.value = [res.merma, ...mermas.value].slice(0, size)
+      meta.value = {
+        ...meta.value,
+        total: meta.value.total + 1,
+        totalPages: Math.max(1, Math.ceil((meta.value.total + 1) / size)),
+      }
+    }
     toast.add({
       title: `Merma registrada · costo perdido ${formatMonto(res.costoPerdido)}`,
       color: 'success',
     })
     drawerOpen.value = false
-    await fetchMermas()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al registrar merma'), color: 'error' })

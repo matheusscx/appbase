@@ -95,7 +95,18 @@ export class TenantPasarelaService {
         prioridad: dto.prioridad ?? 1,
       }),
     );
-    return { tenantPasarelaId: guardada.tenantPasarelaId };
+    return {
+      tenantPasarelaId: guardada.tenantPasarelaId,
+      pasarelaId: pasarela.pasarelaId,
+      codigo: pasarela.codigo,
+      nombre: pasarela.nombre,
+      ambiente: guardada.ambiente,
+      modoIntegracion: guardada.modoIntegracion,
+      activo: guardada.activo,
+      prioridad: guardada.prioridad,
+      tieneCredenciales: !!guardada.configuracion,
+      creadoEl: guardada.creadoEl,
+    };
   }
 
   async actualizar(
@@ -121,7 +132,14 @@ export class TenantPasarelaService {
       tp.configuracion = this.credenciales.cifrarJson(dto.configuracion);
     }
     await this.tpRepo.save(tp);
-    return { tenantPasarelaId };
+    return {
+      tenantPasarelaId,
+      ambiente: tp.ambiente,
+      modoIntegracion: tp.modoIntegracion,
+      activo: tp.activo,
+      prioridad: tp.prioridad,
+      tieneCredenciales: !!tp.configuracion,
+    };
   }
 
   async eliminar(tenantId: string, tenantPasarelaId: string) {

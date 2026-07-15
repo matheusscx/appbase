@@ -24,8 +24,11 @@ export class ApiKeysService {
     // La key completa se devuelve SOLO aquí — no vuelve a ser recuperable.
     return {
       apiKeyId: guardada.apiKeyId,
-      nombre,
+      nombre: guardada.nombre,
       prefijo: guardada.prefijo,
+      ultimoUsoEl: guardada.ultimoUsoEl ?? null,
+      revocadaEl: guardada.revocadaEl ?? null,
+      creadoEl: guardada.creadoEl,
       apiKey,
     };
   }
