@@ -52,9 +52,8 @@ GET /api/catalog/unidades-medida
 
 Authorization: Bearer <token>
 
-Response (200):
-{
-  "data": [
+Response (200) — array plano, sin envelope (no hay interceptor de transformación global, solo `ClassSerializerInterceptor`):
+[
     {
       "unidadMedidaId": "550e8400-e29b-41d4-a716-446655440250",
       "codigo": "g",
@@ -97,8 +96,7 @@ Response (200):
       "magnitud": "longitud",
       "factorBase": "1"
     }
-  ]
-}
+]
 ```
 
 **Purpose**: Reemplaza los tres catálogos hardcodeados (seeder, `stock-format.ts`, `items.vue`). El frontend consulta este endpoint al abrir el formulario de item o el modal de ajuste de stock.
@@ -132,7 +130,7 @@ Response (200):
 **Request Body (`AjusteStockDto`):**
 - `tipo` (required): `'entrada'` | `'salida'`
 - `cantidad` (required): Número positivo (el signo lo define `tipo`)
-- `motivo` (required): `'compra'` | `'venta'` | `'devolucion'` | `'merma'` | `'ajuste_manual'` | `'inventario_inicial'`
+- `motivo` (required): `'compra'` | `'devolucion'` | `'merma'` | `'ajuste_manual'` | `'inventario_inicial'`
 - `comentario` (optional): Texto libre
 - **`unidadCodigo` (optional)**: Código de la unidad en la que viene `cantidad`. Si difiere de la unidad base del producto, se convierte antes de registrar. Si no se envía o coincide con la base, se registra tal cual.
 
