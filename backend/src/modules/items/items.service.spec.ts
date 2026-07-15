@@ -545,6 +545,52 @@ describe('ItemsService', () => {
       });
     });
 
+    describe('ingrediente', () => {
+      const dtoIng = {
+        nombre: 'Carne molida',
+        precioBase: '999',
+        monedaId: MONEDA_ID,
+        tipo: 'ingrediente',
+        stock: '10',
+        unidadMedida: 'kg',
+        costo: '8000',
+      };
+
+      it('persiste precio_base = 0 aunque llegue precioBase distinto', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda
+          .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
+          .mockResolvedValueOnce(undefined); // INSERT item_producto
+        // registrarMovimiento mocked via inventarioService
+
+        await service.create(TENANT, 'user-uuid', dtoIng as any);
+
+        const insertItemsCall = managerMock.query.mock.calls.find((c: unknown[]) =>
+          String(c[0]).includes('INSERT INTO items'),
+        );
+        expect(insertItemsCall[1][5]).toBe('0'); // precio_base
+        expect(insertItemsCall[1][8]).toBe('ingrediente'); // tipo
+      });
+
+      it('rechaza modoInventario serie', async () => {
+        await expect(
+          service.create(TENANT, 'user-uuid', {
+            ...dtoIng,
+            modoInventario: 'serie',
+          } as any),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('rechaza impuestosIds', async () => {
+        await expect(
+          service.create(TENANT, 'user-uuid', {
+            ...dtoIng,
+            impuestosIds: ['imp-1'],
+          } as any),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+
     it('lanza BadRequestException cuando tipo suscripcion no trae frecuencia', async () => {
       await expect(
         service.create(TENANT, 'user-uuid', {

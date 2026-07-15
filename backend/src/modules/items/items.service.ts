@@ -280,6 +280,27 @@ export class ItemsService {
         'Las recetas requieren al menos un ingrediente',
       );
     }
+    if (dto.tipo === 'ingrediente') {
+      if (
+        dto.impuestosIds?.length ||
+        dto.recargosIds?.length ||
+        dto.descuentosIds?.length
+      ) {
+        throw new BadRequestException(
+          'Los ingredientes no admiten impuestos, recargos ni descuentos',
+        );
+      }
+      if (dto.series?.length || dto.lote) {
+        throw new BadRequestException(
+          'Los ingredientes solo admiten modo de inventario "cantidad"',
+        );
+      }
+      if (dto.modoInventario && dto.modoInventario !== 'cantidad') {
+        throw new BadRequestException(
+          'Los ingredientes solo admiten modo de inventario "cantidad"',
+        );
+      }
+    }
     if (dto.costo != null) {
       this.validarCostoPositivo(dto.costo);
     }
@@ -316,6 +337,9 @@ export class ItemsService {
         );
       }
 
+      const precioBasePersistido =
+        dto.tipo === 'ingrediente' ? '0' : dto.precioBase;
+
       const itemRows: { item_id: string }[] = await manager.query(
         `INSERT INTO items
            (tenant_id, moneda_id, categoria_id, nombre, descripcion,
@@ -328,7 +352,7 @@ export class ItemsService {
           dto.categoriaId ?? null,
           dto.nombre,
           dto.descripcion ?? null,
-          dto.precioBase,
+          precioBasePersistido,
           dto.precioIncluyeImpuesto ?? false,
           dto.activo ?? true,
           dto.tipo,
@@ -336,12 +360,15 @@ export class ItemsService {
       );
       const itemId = itemRows[0].item_id;
 
-      if (dto.tipo === 'producto') {
+      if (dto.tipo === 'producto' || dto.tipo === 'ingrediente') {
         if (dto.unidadMedida !== undefined) {
           await this.validarUnidadMedida(dto.unidadMedida);
         }
 
-        const modo = dto.modoInventario ?? 'cantidad';
+        const modo =
+          dto.tipo === 'ingrediente'
+            ? 'cantidad'
+            : (dto.modoInventario ?? 'cantidad');
         await manager.query(
           `INSERT INTO item_producto
              (item_id, stock, unidad_medida, fecha_elaboracion, fecha_vencimiento, modo_inventario, costo_actual)
@@ -350,8 +377,8 @@ export class ItemsService {
             itemId,
             '0',
             dto.unidadMedida ?? 'unidad',
-            dto.fechaElaboracion ?? null,
-            dto.fechaVencimiento ?? null,
+            dto.tipo === 'ingrediente' ? null : (dto.fechaElaboracion ?? null),
+            dto.tipo === 'ingrediente' ? null : (dto.fechaVencimiento ?? null),
             modo,
             dto.costo ?? null,
           ],
@@ -370,7 +397,11 @@ export class ItemsService {
               comentario: 'Stock inicial',
             });
           }
-        } else if (modo === 'serie' && dto.series?.length) {
+        } else if (
+          dto.tipo === 'producto' &&
+          modo === 'serie' &&
+          dto.series?.length
+        ) {
           await this.inventarioService.registrarMovimiento(manager, {
             tenantId,
             itemId,
@@ -381,7 +412,12 @@ export class ItemsService {
             comentario: 'Stock inicial (series)',
             series: dto.series,
           });
-        } else if (modo === 'lote' && dto.lote && dto.stock) {
+        } else if (
+          dto.tipo === 'producto' &&
+          modo === 'lote' &&
+          dto.lote &&
+          dto.stock
+        ) {
           const stockInicial = new Decimal(dto.stock);
           if (stockInicial.greaterThan(0)) {
             await this.inventarioService.registrarMovimiento(manager, {

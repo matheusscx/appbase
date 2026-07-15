@@ -81,7 +81,7 @@ export class CreateItemDto {
   @IsOptional()
   categoriaId?: string;
 
-  @IsIn(['producto', 'servicio', 'suscripcion', 'receta'])
+  @IsIn(['producto', 'servicio', 'suscripcion', 'receta', 'ingrediente'])
   tipo: string;
 
   @IsBoolean()
