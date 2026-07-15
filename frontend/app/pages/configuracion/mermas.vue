@@ -434,10 +434,14 @@ const columns: TableColumn<MermaListItem>[] = [
     <UModal
       v-model:open="costoSinActualModalOpen"
       title="Producto sin costo actual"
-      description="Este producto no tiene costo actual. El monto que indiques valoriza solo esta merma y no actualiza el costo del producto."
     >
+      <template #body>
+        <p class="text-sm text-default">
+          Este producto no tiene costo actual. El monto que indiques valoriza solo esta merma y no actualiza el costo del producto.
+        </p>
+      </template>
       <template #footer>
-        <div class="flex w-full justify-end gap-2">
+        <AppModalFooter>
           <UButton
             color="neutral"
             variant="ghost"
@@ -448,7 +452,7 @@ const columns: TableColumn<MermaListItem>[] = [
           <UButton @click="confirmarCostoSinActual">
             Continuar
           </UButton>
-        </div>
+        </AppModalFooter>
       </template>
     </UModal>
   </div>
