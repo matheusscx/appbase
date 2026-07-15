@@ -541,34 +541,34 @@ export class ItemsService {
       }
 
       if (tipo === 'producto') {
-        // Bloquear cambio de modoInventario si ya existen movimientos
-        if (dto.modoInventario !== undefined) {
-          const movRows: { cnt: string }[] = await manager.query(
-            `SELECT COUNT(*) AS cnt FROM movimientos_inventario
-             WHERE item_id = $1 AND eliminado_el IS NULL`,
-            [itemId],
-          );
-          if (parseInt(movRows[0].cnt) > 0) {
-            throw new BadRequestException(
-              'No se puede cambiar el modo de inventario de un producto con movimientos registrados',
-            );
+        // El frontend reenvía modoInventario/unidadMedida en toda edición.
+        // Solo se rechaza si el valor cambia de verdad y ya hay movimientos.
+        if (
+          dto.modoInventario !== undefined ||
+          dto.unidadMedida !== undefined
+        ) {
+          if (dto.unidadMedida !== undefined) {
+            await this.validarUnidadMedida(dto.unidadMedida);
           }
-        }
 
-        // Cambiar la unidad base con stock ya acumulado lo corrompería en silencio:
-        // 100 kg pasarían a leerse como 100 g. Solo se rechaza si cambia de verdad
-        // (el frontend reenvía la unidad en toda edición).
-        if (dto.unidadMedida !== undefined) {
-          await this.validarUnidadMedida(dto.unidadMedida);
-
-          const prodRows: { unidad_medida: string }[] = await manager.query(
-            `SELECT unidad_medida FROM item_producto WHERE item_id = $1`,
+          const prodRows: {
+            modo_inventario: string;
+            unidad_medida: string;
+          }[] = await manager.query(
+            `SELECT modo_inventario, unidad_medida FROM item_producto WHERE item_id = $1`,
             [itemId],
           );
-          if (
-            prodRows.length &&
-            prodRows[0].unidad_medida !== dto.unidadMedida
-          ) {
+
+          const modoCambia =
+            dto.modoInventario !== undefined &&
+            prodRows.length > 0 &&
+            prodRows[0].modo_inventario !== dto.modoInventario;
+          const unidadCambia =
+            dto.unidadMedida !== undefined &&
+            prodRows.length > 0 &&
+            prodRows[0].unidad_medida !== dto.unidadMedida;
+
+          if (modoCambia || unidadCambia) {
             const movRows: { cnt: string }[] = await manager.query(
               `SELECT COUNT(*) AS cnt FROM movimientos_inventario
                WHERE item_id = $1 AND eliminado_el IS NULL`,
@@ -576,7 +576,9 @@ export class ItemsService {
             );
             if (parseInt(movRows[0].cnt) > 0) {
               throw new BadRequestException(
-                'No se puede cambiar la unidad de medida de un producto con movimientos registrados',
+                modoCambia
+                  ? 'No se puede cambiar el modo de inventario de un producto con movimientos registrados'
+                  : 'No se puede cambiar la unidad de medida de un producto con movimientos registrados',
               );
             }
           }

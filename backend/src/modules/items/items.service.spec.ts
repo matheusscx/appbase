@@ -670,6 +670,9 @@ describe('ItemsService', () => {
     it('bloquea cambio de modoInventario si existen movimientos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', unidad_medida: 'kg' },
+        ]) // SELECT actual
         .mockResolvedValueOnce([{ cnt: '3' }]); // COUNT movimientos > 0
 
       await expect(
@@ -677,9 +680,36 @@ describe('ItemsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('permite reenviar el mismo modoInventario con movimientos al actualizar costo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', unidad_medida: 'kg' },
+        ]) // SELECT actual — mismo modo
+        .mockResolvedValueOnce(undefined); // UPDATE item_producto
+
+      await service.update(TENANT, ITEM_ID, {
+        modoInventario: 'cantidad',
+        costo: '9000',
+      });
+
+      const calls = managerMock.query.mock.calls.map(
+        (c: unknown[]) => c[0] as string,
+      );
+      expect(
+        calls.some((sql) => sql.includes('FROM movimientos_inventario')),
+      ).toBe(false);
+      expect(calls.some((sql) => sql.includes('UPDATE item_producto'))).toBe(
+        true,
+      );
+    });
+
     it('permite cambio de modoInventario si NO existen movimientos', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', unidad_medida: 'kg' },
+        ]) // SELECT actual
         .mockResolvedValueOnce([{ cnt: '0' }]) // COUNT movimientos = 0
         .mockResolvedValueOnce(undefined); // UPDATE item_producto
 
