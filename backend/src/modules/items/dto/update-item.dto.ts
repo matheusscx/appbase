@@ -10,7 +10,10 @@ import {
   IsIn,
   Min,
   IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { RecetaIngredienteInputDto } from './create-item.dto';
 
 export class UpdateItemDto {
   @IsString()
@@ -81,6 +84,13 @@ export class UpdateItemDto {
   @IsIn(['semanal', 'quincenal', 'mensual'])
   @IsOptional()
   frecuencia?: string;
+
+  // Extensión receta (reemplazo total de la lista)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecetaIngredienteInputDto)
+  @IsOptional()
+  ingredientes?: RecetaIngredienteInputDto[];
 
   // Reglas N:M (undefined = no tocar; [] = limpiar todas)
   @IsArray()

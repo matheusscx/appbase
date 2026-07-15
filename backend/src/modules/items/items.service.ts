@@ -577,6 +577,45 @@ export class ItemsService {
             [dto.frecuencia, itemId],
           );
         }
+      } else if (tipo === 'receta') {
+        if (dto.ingredientes !== undefined) {
+          if (!dto.ingredientes.length) {
+            throw new BadRequestException(
+              'Las recetas requieren al menos un ingrediente',
+            );
+          }
+          const costoActual = await this.validarYCostearIngredientes(
+            manager,
+            tenantId,
+            dto.ingredientes,
+          );
+          // Soft delete de la lista anterior — nunca hard DELETE
+          await manager.query(
+            `UPDATE receta_ingredientes
+             SET eliminado_el = NOW(), actualizado_el = NOW()
+             WHERE receta_item_id = $1 AND eliminado_el IS NULL`,
+            [itemId],
+          );
+          for (const ing of dto.ingredientes) {
+            await manager.query(
+              `INSERT INTO receta_ingredientes
+                 (tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, bloqueante)
+               VALUES ($1,$2,$3,$4,$5,$6)`,
+              [
+                tenantId,
+                itemId,
+                ing.ingredienteItemId,
+                ing.cantidad,
+                ing.unidadCodigo,
+                ing.bloqueante ?? true,
+              ],
+            );
+          }
+          await manager.query(
+            `UPDATE item_receta SET costo_actual = $1 WHERE item_id = $2`,
+            [costoActual, itemId],
+          );
+        }
       }
 
       if (dto.impuestosIds !== undefined) {

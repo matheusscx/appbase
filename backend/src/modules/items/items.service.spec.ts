@@ -622,6 +622,41 @@ describe('ItemsService', () => {
       expect(updateProducto).toBeDefined();
       expect(updateProducto?.[1]).toContain('4300');
     });
+
+    it('receta: reemplaza los ingredientes y recalcula costoActual', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
+        .mockResolvedValueOnce([{ tipo: 'producto', modo_inventario: 'cantidad', unidad_medida: 'kg', costo_actual: '6000' }]) // queso
+        .mockResolvedValueOnce([]) // soft-delete receta_ingredientes
+        .mockResolvedValueOnce([]) // INSERT receta_ingredientes queso
+        .mockResolvedValueOnce([]); // UPDATE item_receta costo_actual
+
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.02'); // 20 g → 0.02 kg
+
+      await service.update(TENANT, ITEM_ID, {
+        ingredientes: [
+          {
+            ingredienteItemId: 'ingrediente-queso',
+            cantidad: '20',
+            unidadCodigo: 'g',
+            bloqueante: false,
+          },
+        ],
+      } as any);
+
+      // soft-delete de la lista anterior (nunca hard DELETE)
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        3,
+        expect.stringContaining('SET eliminado_el = NOW()'),
+        [ITEM_ID],
+      );
+      // costo = 6000 * 0.02 = 120
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        5,
+        expect.stringContaining('UPDATE item_receta'),
+        ['120', ITEM_ID],
+      );
+    });
   });
 
   // ── remove ─────────────────────────────────────────────────────────────────

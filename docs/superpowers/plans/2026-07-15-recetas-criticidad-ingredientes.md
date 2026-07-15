@@ -529,7 +529,7 @@ Deliverable: `PATCH /items/:id` con `ingredientes` recalcula `costoActual` reemp
 - Consumes: `ItemsService.validarYCostearIngredientes` (Task 1).
 - Produces: `PATCH /items/:id` acepta `{ ingredientes: RecetaIngredienteInputDto[] }` cuando el item existente es `tipo='receta'`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 En `backend/src/modules/items/dto/update-item.dto.ts`, agregar el import y el campo:
 
@@ -587,12 +587,12 @@ En `backend/src/modules/items/items.service.spec.ts`, dentro de `describe('updat
     });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: FAIL — `update` no tiene rama para `tipo === 'receta'`.
 
-- [ ] **Step 3: Implementación mínima**
+- [x] **Step 3: Implementación mínima**
 
 En `backend/src/modules/items/items.service.ts`, dentro de `update`, agregar la rama después de `} else if (tipo === 'suscripcion') { ... }`:
 
@@ -639,12 +639,12 @@ En `backend/src/modules/items/items.service.ts`, dentro de `update`, agregar la 
       }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd backend && npm test -- items.service.spec.ts`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/modules/items/dto/update-item.dto.ts \
