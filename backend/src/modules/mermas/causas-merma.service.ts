@@ -22,10 +22,6 @@ interface CausaMermaRow {
   es_fijo: boolean;
 }
 
-type QueryRunner = {
-  query: (sql: string, params?: unknown[]) => Promise<unknown[]>;
-};
-
 @Injectable()
 export class CausasMermaService {
   constructor(
@@ -129,17 +125,16 @@ export class CausasMermaService {
   }
 
   async assertCausaActiva(
-    runner: QueryRunner,
+    runner: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
     tenantId: string,
     causaMermaId: string,
   ): Promise<{ id: string; nombre: string }> {
-    const rows: { causa_merma_id: string; nombre: string }[] =
-      await runner.query(
-        `SELECT causa_merma_id, nombre FROM causas_merma
-         WHERE causa_merma_id = $1 AND tenant_id = $2
-           AND activo = true AND eliminado_el IS NULL`,
-        [causaMermaId, tenantId],
-      );
+    const rows = (await runner.query(
+      `SELECT causa_merma_id, nombre FROM causas_merma
+       WHERE causa_merma_id = $1 AND tenant_id = $2
+         AND activo = true AND eliminado_el IS NULL`,
+      [causaMermaId, tenantId],
+    )) as { causa_merma_id: string; nombre: string }[];
     if (!rows.length) {
       throw new BadRequestException('Causa de merma no válida o inactiva');
     }
