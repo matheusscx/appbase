@@ -137,6 +137,23 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: Rol) {
+  const idx = roles.value.findIndex(r => r.id === saved.id)
+  if (idx >= 0) {
+    roles.value[idx] = { ...roles.value[idx], ...saved }
+  }
+  else {
+    roles.value.push(saved)
+  }
+  roles.value = [...roles.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  roles.value = roles.value.filter(r => r.id !== id)
+}
+
 async function guardar() {
   if (!form.nombre.trim()) return
   saving.value = true
@@ -149,22 +166,23 @@ async function guardar() {
       if (modulos.value.length) {
         await guardarPermisos(rol.id)
       }
+      upsertLocal(rol)
       toast.add({ title: 'Rol creado', color: 'success' })
     }
     else if (editandoRol.value) {
       if (!editandoRol.value.esFijo) {
-        await useApiFetch(`${apiUrl}/roles/${editandoRol.value.id}`, {
+        const saved = await useApiFetch<Rol>(`${apiUrl}/roles/${editandoRol.value.id}`, {
           method: 'PATCH',
           body: { nombre: form.nombre.trim(), descripcion: form.descripcion.trim() || null },
         })
         if (modulos.value.length) {
           await guardarPermisos(editandoRol.value.id)
         }
+        upsertLocal(saved)
       }
       toast.add({ title: 'Rol actualizado', color: 'success' })
     }
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(
@@ -183,8 +201,8 @@ async function eliminar(rol: Rol) {
   if (!confirm(`¿Eliminar el rol "${rol.nombre}"?`)) return
   try {
     await useApiFetch(`${apiUrl}/roles/${rol.id}`, { method: 'DELETE' })
+    removeLocal(rol.id)
     toast.add({ title: 'Rol eliminado', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar rol')

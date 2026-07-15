@@ -25,6 +25,13 @@ function syncLocalMesas() {
   localMesas.value = (selectedSalon.value?.mesas ?? []).map(m => ({ ...m }))
 }
 
+function patchSalonMesas(salonId: string, mesas: MesaResumen[]) {
+  const salon = salones.value.find(s => s.id === salonId)
+  if (!salon) return
+  salon.mesas = mesas.map(m => ({ ...m }))
+  if (selectedSalonId.value === salonId) syncLocalMesas()
+}
+
 async function cargar() {
   loading.value = true
   try {
@@ -66,7 +73,8 @@ async function guardarDistribucion() {
         posY: Number(m.posY),
       })),
     )
-    await cargar()
+    patchSalonMesas(selectedSalonId.value, localMesas.value)
+    toast.add({ title: 'Distribución guardada', color: 'success' })
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar la distribución'), color: 'error' })
@@ -104,16 +112,25 @@ async function guardarSalon() {
   savingSalon.value = true
   try {
     if (salonEditingId.value) {
-      await salonesApi.actualizarSalon(salonEditingId.value, salonForm.value.nombre)
+      const saved = await salonesApi.actualizarSalon(
+        salonEditingId.value,
+        salonForm.value.nombre,
+      )
+      const salon = salones.value.find(s => s.id === saved.id)
+      if (salon) salon.nombre = saved.nombre
+      salones.value = [...salones.value].sort((a, b) =>
+        a.nombre.localeCompare(b.nombre, 'es'),
+      )
       toast.add({ title: 'Salón actualizado', color: 'success' })
     }
     else {
-      await salonesApi.crearSalon(salonForm.value.nombre)
+      const saved = await salonesApi.crearSalon(salonForm.value.nombre)
+      salones.value = [...salones.value, { id: saved.id, nombre: saved.nombre, mesas: [] }]
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+      selectedSalonId.value = saved.id
       toast.add({ title: 'Salón creado', color: 'success' })
-      selectedSalonId.value = undefined
     }
     salonDrawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar el salón'), color: 'error' })
@@ -126,10 +143,12 @@ async function guardarSalon() {
 async function eliminarSalon() {
   if (!selectedSalonId.value) return
   try {
-    await salonesApi.eliminarSalon(selectedSalonId.value)
+    const id = selectedSalonId.value
+    await salonesApi.eliminarSalon(id)
+    salones.value = salones.value.filter(s => s.id !== id)
+    selectedSalonId.value = salones.value[0]?.id
+    syncLocalMesas()
     toast.add({ title: 'Salón eliminado', color: 'success' })
-    selectedSalonId.value = undefined
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al eliminar el salón'), color: 'error' })
@@ -177,26 +196,52 @@ async function guardarMesa() {
   if (!selectedSalonId.value) return
   savingMesa.value = true
   try {
+    const salonId = selectedSalonId.value
+    const salon = salones.value.find(s => s.id === salonId)
+    if (!salon) return
+
     if (mesaEditingId.value) {
-      await salonesApi.actualizarMesa(mesaEditingId.value, {
+      const saved = await salonesApi.actualizarMesa(mesaEditingId.value, {
         nombre: mesaForm.value.nombre,
         forma: mesaForm.value.forma,
         tamano: mesaForm.value.tamano,
       })
+      const idx = salon.mesas.findIndex(m => m.id === saved.id)
+      if (idx >= 0) {
+        salon.mesas[idx] = {
+          ...salon.mesas[idx],
+          nombre: saved.nombre,
+          posX: saved.posX,
+          posY: saved.posY,
+          forma: saved.forma,
+          tamano: saved.tamano,
+        }
+      }
+      syncLocalMesas()
       toast.add({ title: 'Mesa actualizada', color: 'success' })
     }
     else {
-      await salonesApi.crearMesa(selectedSalonId.value, {
+      const saved = await salonesApi.crearMesa(salonId, {
         nombre: mesaForm.value.nombre,
         posX: 0.5,
         posY: 0.5,
         forma: mesaForm.value.forma,
         tamano: mesaForm.value.tamano,
       })
+      salon.mesas.push({
+        id: saved.id,
+        nombre: saved.nombre,
+        posX: saved.posX,
+        posY: saved.posY,
+        forma: saved.forma,
+        tamano: saved.tamano,
+        cuentasAbiertas: 0,
+        ocupada: false,
+      })
+      syncLocalMesas()
       toast.add({ title: 'Mesa creada', color: 'success' })
     }
     mesaDrawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar la mesa'), color: 'error' })
@@ -207,11 +252,16 @@ async function guardarMesa() {
 }
 
 async function eliminarMesa() {
-  if (!mesaToDelete.value) return
+  if (!mesaToDelete.value || !selectedSalonId.value) return
   try {
-    await salonesApi.eliminarMesa(mesaToDelete.value.id)
+    const mesaId = mesaToDelete.value.id
+    await salonesApi.eliminarMesa(mesaId)
+    const salon = salones.value.find(s => s.id === selectedSalonId.value)
+    if (salon) {
+      salon.mesas = salon.mesas.filter(m => m.id !== mesaId)
+      syncLocalMesas()
+    }
     toast.add({ title: 'Mesa eliminada', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al eliminar la mesa'), color: 'error' })

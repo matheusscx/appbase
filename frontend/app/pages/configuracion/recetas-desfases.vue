@@ -35,8 +35,9 @@ async function onAplicar(items: AplicarDesfaseItem[]) {
       method: 'POST',
       body: { items },
     })
+    const aplicados = new Set(items.map(i => i.recetaItemId))
+    filas.value = filas.value.filter(f => !aplicados.has(f.recetaItemId))
     toast.add({ title: 'Costos de recetas actualizados', color: 'success' })
-    await cargar()
   }
   catch (e) {
     toast.add({ title: apiErrorMsg(e, 'Error al aplicar desfases'), color: 'error' })
@@ -53,8 +54,9 @@ async function onDescartar(recetaItemIds: string[]) {
       method: 'POST',
       body: { recetaItemIds },
     })
+    const ids = new Set(recetaItemIds)
+    filas.value = filas.value.filter(f => !ids.has(f.recetaItemId))
     toast.add({ title: 'Avisos descartados', color: 'success' })
-    await cargar()
   }
   catch (e) {
     toast.add({ title: apiErrorMsg(e, 'Error al descartar desfases'), color: 'error' })

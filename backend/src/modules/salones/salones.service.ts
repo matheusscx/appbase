@@ -256,7 +256,7 @@ export class SalonesService {
     tenantId: string,
     salonId: string,
     dto: UpdateLayoutDto,
-  ): Promise<SalonConMesas[]> {
+  ): Promise<void> {
     await this.getSalonOrThrow(tenantId, salonId);
     await this.dataSource.transaction(async (manager) => {
       for (const m of dto.mesas) {
@@ -270,7 +270,6 @@ export class SalonesService {
         }
       }
     });
-    return this.listarSalones(tenantId);
   }
 
   // ── Operación: cuentas ───────────────────────────────────────────────────

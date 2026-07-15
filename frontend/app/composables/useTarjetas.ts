@@ -76,12 +76,17 @@ export function useTarjetas() {
 
   async function eliminar(inscripcionId: string) {
     await useApiFetch(`${apiUrl}/online/medios-pago/${inscripcionId}`, { method: 'DELETE' })
-    await cargar()
+    tarjetas.value = tarjetas.value.filter(t => t.inscripcionId !== inscripcionId)
   }
 
   async function marcarPreferida(inscripcionId: string) {
-    await useApiFetch(`${apiUrl}/online/medios-pago/${inscripcionId}/preferida`, { method: 'PATCH' })
-    await cargar()
+    await useApiFetch(`${apiUrl}/online/medios-pago/${inscripcionId}/preferida`, {
+      method: 'PATCH',
+    })
+    tarjetas.value = tarjetas.value.map(t => ({
+      ...t,
+      preferida: t.inscripcionId === inscripcionId,
+    }))
   }
 
   // Preferida efectiva para checkout/suscripciones: la marcada o la más reciente.

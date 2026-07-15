@@ -79,9 +79,13 @@ async function guardar() {
         method: 'DELETE',
       })
     }
+    const byId = new Map(roles.value.map(r => [r.id, r.nombre]))
+    member.roles = seleccion.value.map(rolId => ({
+      rolId,
+      nombre: byId.get(rolId) ?? rolId,
+    }))
     toast.add({ title: 'Roles actualizados', color: 'success' })
     modalOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al guardar roles')

@@ -21,6 +21,23 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: Garzon) {
+  const idx = garzones.value.findIndex(g => g.id === saved.id)
+  if (idx >= 0) {
+    garzones.value[idx] = { ...garzones.value[idx], ...saved }
+  }
+  else {
+    garzones.value.push(saved)
+  }
+  garzones.value = [...garzones.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  garzones.value = garzones.value.filter(g => g.id !== id)
+}
+
 onMounted(cargar)
 
 // ── Crear / editar garzón ──────────────────────────────────────────────────
@@ -52,23 +69,24 @@ async function guardar() {
   saving.value = true
   try {
     if (editingId.value) {
-      await garzonesApi.actualizar(editingId.value, {
+      const saved = await garzonesApi.actualizar(editingId.value, {
         nombre: form.value.nombre,
         activo: form.value.activo,
       })
+      upsertLocal(saved)
       toast.add({ title: 'Garzón actualizado', color: 'success' })
       drawerOpen.value = false
-      await cargar()
     }
     else {
       const creado = await garzonesApi.crear({
         nombre: form.value.nombre,
         activo: form.value.activo,
       })
+      const { pin, ...garzon } = creado
+      upsertLocal(garzon)
       drawerOpen.value = false
-      await cargar()
       // El PIN se genera en el backend y se muestra una sola vez.
-      revelarPin(creado.nombre, creado.pin)
+      revelarPin(creado.nombre, pin)
     }
   }
   catch (e: unknown) {
@@ -126,9 +144,10 @@ function confirmarEliminar(garzon: Garzon) {
 async function eliminar() {
   if (!toDelete.value) return
   try {
-    await garzonesApi.eliminar(toDelete.value.id)
+    const id = toDelete.value.id
+    await garzonesApi.eliminar(id)
+    removeLocal(id)
     toast.add({ title: 'Garzón eliminado', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al eliminar el garzón'), color: 'error' })

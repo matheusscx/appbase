@@ -89,10 +89,16 @@ export function useSalones() {
     useApiFetch<SalonConMesas[]>(`${apiUrl}/salones`)
 
   const crearSalon = (nombre: string) =>
-    useApiFetch(`${apiUrl}/salones`, { method: 'POST', body: { nombre } })
+    useApiFetch<{ id: string, nombre: string }>(`${apiUrl}/salones`, {
+      method: 'POST',
+      body: { nombre },
+    })
 
   const actualizarSalon = (id: string, nombre: string) =>
-    useApiFetch(`${apiUrl}/salones/${id}`, { method: 'PATCH', body: { nombre } })
+    useApiFetch<{ id: string, nombre: string }>(`${apiUrl}/salones/${id}`, {
+      method: 'PATCH',
+      body: { nombre },
+    })
 
   const eliminarSalon = (id: string) =>
     useApiFetch(`${apiUrl}/salones/${id}`, { method: 'DELETE' })
@@ -102,19 +108,33 @@ export function useSalones() {
     salonId: string,
     body: { nombre: string, posX?: number, posY?: number, forma?: FormaMesa, tamano?: TamanoMesa },
   ) =>
-    useApiFetch(`${apiUrl}/salones/${salonId}/mesas`, { method: 'POST', body })
+    useApiFetch<{
+      id: string
+      nombre: string
+      posX: string
+      posY: string
+      forma: FormaMesa
+      tamano: TamanoMesa
+    }>(`${apiUrl}/salones/${salonId}/mesas`, { method: 'POST', body })
 
   const actualizarMesa = (
     id: string,
     body: { nombre?: string, posX?: number, posY?: number, forma?: FormaMesa, tamano?: TamanoMesa },
   ) =>
-    useApiFetch(`${apiUrl}/mesas/${id}`, { method: 'PATCH', body })
+    useApiFetch<{
+      id: string
+      nombre: string
+      posX: string
+      posY: string
+      forma: FormaMesa
+      tamano: TamanoMesa
+    }>(`${apiUrl}/mesas/${id}`, { method: 'PATCH', body })
 
   const eliminarMesa = (id: string) =>
     useApiFetch(`${apiUrl}/mesas/${id}`, { method: 'DELETE' })
 
   const guardarLayout = (salonId: string, mesas: MesaPosicion[]) =>
-    useApiFetch<SalonConMesas[]>(`${apiUrl}/salones/${salonId}/layout`, {
+    useApiFetch(`${apiUrl}/salones/${salonId}/layout`, {
       method: 'PATCH',
       body: { mesas },
     })

@@ -58,6 +58,23 @@ async function cargar() {
   }
 }
 
+function upsertLocal(saved: Impresora) {
+  const idx = impresoras.value.findIndex(i => i.id === saved.id)
+  if (idx >= 0) {
+    impresoras.value[idx] = { ...impresoras.value[idx], ...saved }
+  }
+  else {
+    impresoras.value.push(saved)
+  }
+  impresoras.value = [...impresoras.value].sort((a, b) =>
+    a.nombre.localeCompare(b.nombre, 'es'),
+  )
+}
+
+function removeLocal(id: string) {
+  impresoras.value = impresoras.value.filter(i => i.id !== id)
+}
+
 function abrirCrear() {
   resetDrawer()
   drawerOpen.value = true
@@ -90,16 +107,13 @@ async function guardar() {
       nombreCola: form.value.tipoConexion === 'sistema' ? form.value.nombreCola : undefined,
       activo: form.value.activo,
     }
-    if (editingId.value) {
-      await impresorasApi.actualizar(editingId.value, body)
-      toast.add({ title: 'Impresora actualizada', color: 'success' })
-    }
-    else {
-      await impresorasApi.crear(body)
-      toast.add({ title: 'Impresora creada', color: 'success' })
-    }
+    const isNew = !editingId.value
+    const saved = isNew
+      ? await impresorasApi.crear(body)
+      : await impresorasApi.actualizar(editingId.value!, body)
+    upsertLocal(saved)
+    toast.add({ title: isNew ? 'Impresora creada' : 'Impresora actualizada', color: 'success' })
     drawerOpen.value = false
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar la impresora'), color: 'error' })
@@ -121,9 +135,10 @@ function confirmarEliminar(imp: Impresora) {
 async function eliminar() {
   if (!toDelete.value) return
   try {
-    await impresorasApi.eliminar(toDelete.value.id)
+    const id = toDelete.value.id
+    await impresorasApi.eliminar(id)
+    removeLocal(id)
     toast.add({ title: 'Impresora eliminada', color: 'success' })
-    await cargar()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al eliminar'), color: 'error' })
