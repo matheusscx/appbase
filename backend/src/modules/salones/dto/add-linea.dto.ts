@@ -1,4 +1,10 @@
-import { IsNumberString, IsOptional, IsUUID, ValidateNested } from 'class-validator';
+import {
+  IsNumberString,
+  IsOptional,
+  IsString,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 
@@ -8,6 +14,14 @@ export class AddLineaDto {
 
   @IsNumberString()
   cantidad: string;
+
+  @IsOptional()
+  @IsNumberString()
+  cantidadPresentacion?: string;
+
+  @IsOptional()
+  @IsString()
+  unidadCodigoPresentacion?: string;
 
   @IsOptional()
   @ValidateNested()

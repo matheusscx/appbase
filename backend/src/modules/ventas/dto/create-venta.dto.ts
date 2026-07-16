@@ -23,6 +23,14 @@ export class LineaVentaDto {
 
   @IsOptional()
   @IsNumberString()
+  cantidadPresentacion?: string;
+
+  @IsOptional()
+  @IsString()
+  unidadCodigoPresentacion?: string;
+
+  @IsOptional()
+  @IsNumberString()
   precioUnitario?: string;
 
   @IsOptional()

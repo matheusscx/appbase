@@ -575,6 +575,13 @@ ALTER TABLE "cuenta_lineas"
 ALTER TABLE "venta_detalles"
   ADD COLUMN IF NOT EXISTS "personalizacion" JSONB;
 
+ALTER TABLE "cuenta_lineas"
+  ADD COLUMN IF NOT EXISTS "cantidad_presentacion" NUMERIC(18,4),
+  ADD COLUMN IF NOT EXISTS "unidad_codigo_presentacion" TEXT REFERENCES "unidades_medida" ("codigo");
+ALTER TABLE "venta_detalles"
+  ADD COLUMN IF NOT EXISTS "cantidad_presentacion" NUMERIC(18,4),
+  ADD COLUMN IF NOT EXISTS "unidad_codigo_presentacion" TEXT REFERENCES "unidades_medida" ("codigo");
+
 -- Reglas de precio asociadas a cada item (N:M)
 CREATE TABLE "item_impuestos" (
   "item_id"     UUID NOT NULL REFERENCES "items" ("item_id") ON DELETE CASCADE,

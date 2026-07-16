@@ -25,6 +25,18 @@ export class CuentaLinea {
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;
 
+  @Column({
+    name: 'cantidad_presentacion',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  cantidadPresentacion: string | null;
+
+  @Column({ name: 'unidad_codigo_presentacion', type: 'text', nullable: true })
+  unidadCodigoPresentacion: string | null;
+
   // Cuánto de `cantidad` ya se envió a cocina/barra (POST /cuentas/:id/comanda).
   // El diff (cantidad - cantidad_enviada) es lo que se imprime en el próximo envío.
   @Column({

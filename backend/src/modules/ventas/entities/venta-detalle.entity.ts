@@ -49,6 +49,18 @@ export class VentaDetalle {
   @Column({ type: 'decimal', precision: 18, scale: 4 })
   cantidad: string;
 
+  @Column({
+    name: 'cantidad_presentacion',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  cantidadPresentacion: string | null;
+
+  @Column({ name: 'unidad_codigo_presentacion', type: 'text', nullable: true })
+  unidadCodigoPresentacion: string | null;
+
   @Column({ type: 'decimal', precision: 18, scale: 4, default: '0' })
   subtotal: string;
 
