@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CarritoLinea } from '~/composables/useVenta'
 import { puedeCobrar, tieneCustomerData } from '~/composables/useVenta'
+import { unidadBaseItem } from '~/utils/cantidad-presentacion'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import type { CustomerForm } from './ClienteForm.vue'
 
@@ -14,7 +15,10 @@ const props = defineProps<{
   tieneCaja: boolean
 }>()
 const emit = defineEmits<{
-  'cambiar-cantidad': [index: number, cantidad: string]
+  'cambiar-cantidad': [
+    index: number,
+    payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
+  ]
   quitar: [index: number]
   cobrar: []
   'limpiar-todo': []
@@ -55,11 +59,12 @@ const monedaIdsEnCarrito = computed(() => props.lineas.map((l) => l.item.monedaI
 // El input de cantidad arranca readonly para que el autocompletado de direcciones
 // de Chrome (que ignora autocomplete="off") no lo rellene. Se vuelve editable al
 // enfocarlo y se re-protege al salir.
-function quitarReadonly(e: Event) {
-  ;(e.target as HTMLInputElement).removeAttribute('readonly')
+function unidadPresLinea(linea: CarritoLinea): string {
+  return linea.unidadCodigoPresentacion ?? unidadBaseItem(linea.item)
 }
-function ponerReadonly(e: Event) {
-  ;(e.target as HTMLInputElement).setAttribute('readonly', 'readonly')
+
+function presentacionLinea(linea: CarritoLinea): string {
+  return linea.cantidadPresentacion ?? linea.cantidad
 }
 
 function abrirClienteDrawer() {
@@ -186,20 +191,14 @@ watch(clienteDrawerOpen, (open) => {
               {{ linea.personalizacionResumen }}
             </p>
             <p class="text-xs text-muted font-mono">
-              {{ formatMonto(convertirAMonedaOficial(linea.precioUnitarioOverride ?? linea.item.precioBase, linea.item.monedaId)) }} c/u
+              {{ formatMonto(convertirAMonedaOficial(linea.precioUnitarioOverride ?? linea.item.precioBase, linea.item.monedaId)) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
           </div>
-          <UInput
-            :model-value="linea.cantidad"
-            name="cantidad"
-            inputmode="decimal"
-            autocomplete="off"
-            readonly
-            size="sm"
-            class="w-20"
-            @focusin="quitarReadonly"
-            @focusout="ponerReadonly"
-            @update:model-value="(v: string | number) => emit('cambiar-cantidad', index, String(v))"
+          <AppCantidadInput
+            :model-value="presentacionLinea(linea)"
+            :unidad-codigo="unidadPresLinea(linea)"
+            :unidad-base-codigo="unidadBaseItem(linea.item)"
+            @change="emit('cambiar-cantidad', index, $event)"
           />
           <UButton
             icon="i-lucide-trash-2"

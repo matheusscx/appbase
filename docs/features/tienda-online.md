@@ -322,8 +322,8 @@ detrás del mismo permiso `Tienda Online:Leer`:
 
 ### Components
 
-- `components/tienda/CarritoOnline.vue` — versión simplificada de
-  `VentasCarritoPanel` (sin caja, tipo de documento ni customer).
+- `components/tienda/CarritoOnline.vue` — carrito con `AppCantidadInput` (± y
+  selector de unidad de la misma magnitud).
 - Reutiliza `VentasCatalogoGrid` sin cambios.
 
 ### Composables (sin store Pinia — mismo enfoque que `useVenta`)
@@ -331,7 +331,9 @@ detrás del mismo permiso `Tienda Online:Leer`:
 - `composables/useTiendaCarrito.ts` — carrito de la tienda. Usa `useState`
   (no un `ref` local) para sobrevivir la navegación `/tienda` →
   `/tienda/pasarela`. Reutiliza los helpers puros de `useVenta.ts`
-  (`agregarLinea`, `quitarLinea`, `setCantidad`, `toCalcularInput`).
+  (`agregarLinea`, `quitarLinea`, `setCantidadPresentacion`, `toCalcularInput`).
+  `POST /online/pagar` envía `cantidadPresentacion` / `unidadCodigoPresentacion`
+  cuando el comprador eligió otra unidad (ej. gramos sobre ítem en kg).
 - `composables/useTarjetas.ts` — **API-backed** (`GET/POST /online/medios-pago`,
   `DELETE /online/medios-pago/:id`, `PATCH /online/medios-pago/:id/preferida`),
   reemplaza el mock anterior en `localStorage`. Nunca viaja el número completo

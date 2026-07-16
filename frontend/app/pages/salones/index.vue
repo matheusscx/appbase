@@ -12,6 +12,7 @@ import {
   type CuentaLineaDetalle,
 } from '~/composables/useSalones'
 import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
+import { formatCantidadTicket, unidadBaseItem } from '~/utils/cantidad-presentacion'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -28,6 +29,7 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const cajaStore = useCajaStore()
 const salonesApi = useSalones()
+const unidadesStore = useUnidadesMedidaStore()
 const { calcular } = useCalculoPrecios()
 const { formatMonto } = useFormatters()
 const impresorasApi = useImpresoras()
@@ -160,7 +162,7 @@ async function cargarCatalogo() {
 }
 
 onMounted(async () => {
-  await Promise.all([cajaStore.cargarActiva(), cargarSalones(), cargarCatalogo()])
+  await Promise.all([cajaStore.cargarActiva(), cargarSalones(), cargarCatalogo(), unidadesStore.ensureLoaded()])
 })
 
 // ── Selección de mesa ──────────────────────────────────────────────────────
@@ -293,6 +295,111 @@ function personalizacionVacia(p: PersonalizacionPayload): boolean {
   return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
 }
 
+const pendingByLinea = new Map<string, ReturnType<typeof setTimeout>>()
+const inflight = ref(new Set<string>())
+
+function unidadBaseLinea(linea: CuentaLineaDetalle): string {
+  const catalogItem = items.value.find(i => i.id === linea.itemId)
+  return catalogItem ? unidadBaseItem(catalogItem) : 'unidad'
+}
+
+function presentacionLinea(linea: CuentaLineaDetalle): string {
+  return linea.cantidadPresentacion ?? linea.cantidad
+}
+
+function unidadPresLinea(linea: CuentaLineaDetalle): string {
+  return linea.unidadCodigoPresentacion ?? unidadBaseLinea(linea)
+}
+
+function patchLineaOptimista(
+  lineaId: string,
+  payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
+) {
+  if (!activeCuenta.value) return
+  const cuentaId = activeCuenta.value.id
+  const patched: CuentaDetalle = {
+    ...activeCuenta.value,
+    lineas: activeCuenta.value.lineas.map(l =>
+      l.id === lineaId
+        ? {
+            ...l,
+            cantidad: payload.cantidadCanonica,
+            cantidadPresentacion: payload.presentacion,
+            unidadCodigoPresentacion: payload.unidadCodigo,
+          }
+        : l,
+    ),
+  }
+  activeCuenta.value = patched
+  const idx = cuentas.value.findIndex(c => c.id === cuentaId)
+  if (idx !== -1) cuentas.value[idx] = patched
+  void recalcular()
+}
+
+async function patchLineaCantidad(
+  lineaId: string,
+  payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
+) {
+  if (!activeCuenta.value) return
+  const cuentaId = activeCuenta.value.id
+  const snapshot = structuredClone(activeCuenta.value)
+
+  inflight.value.add(lineaId)
+  try {
+    const cuenta = await salonesApi.actualizarLinea(cuentaId, lineaId, {
+      cantidad: payload.cantidadCanonica,
+      cantidadPresentacion: payload.presentacion,
+      unidadCodigoPresentacion: payload.unidadCodigo,
+    })
+    syncCuenta(cuenta)
+  }
+  catch (e: unknown) {
+    syncCuenta(snapshot)
+    toast.add({ title: apiErrorMsg(e, 'Error al actualizar la cantidad'), color: 'error' })
+  }
+  finally {
+    inflight.value.delete(lineaId)
+  }
+}
+
+function onCantidadChange(
+  linea: CuentaLineaDetalle,
+  payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
+) {
+  if (!activeCuenta.value || new Decimal(payload.cantidadCanonica || '0').lte(0)) return
+
+  patchLineaOptimista(linea.id, payload)
+
+  const prev = pendingByLinea.get(linea.id)
+  if (prev) clearTimeout(prev)
+
+  pendingByLinea.set(
+    linea.id,
+    setTimeout(() => {
+      pendingByLinea.delete(linea.id)
+      void patchLineaCantidad(linea.id, payload)
+    }, 300),
+  )
+}
+
+async function flushPendientes() {
+  const pendientes = [...pendingByLinea.entries()]
+  for (const [lineaId, timer] of pendientes) {
+    clearTimeout(timer)
+    pendingByLinea.delete(lineaId)
+    const linea = activeCuenta.value?.lineas.find(l => l.id === lineaId)
+    if (!linea) continue
+    await patchLineaCantidad(lineaId, {
+      presentacion: linea.cantidadPresentacion ?? linea.cantidad,
+      unidadCodigo: linea.unidadCodigoPresentacion ?? unidadBaseLinea(linea),
+      cantidadCanonica: linea.cantidad,
+    })
+  }
+  while (inflight.value.size > 0) {
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+}
+
 async function addProducto(item: ItemCatalogo) {
   if (!activeCuenta.value) return
   if (item.tipo === 'receta') {
@@ -330,16 +437,6 @@ async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string
   }
 }
 
-async function cambiarCantidad(linea: CuentaLineaDetalle, cantidad: string) {
-  if (!activeCuenta.value || !cantidad || new Decimal(cantidad || '0').lte(0)) return
-  try {
-    const cuenta = await salonesApi.actualizarLinea(activeCuenta.value.id, linea.id, cantidad)
-    syncCuenta(cuenta)
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al actualizar la cantidad'), color: 'error' })
-  }
-}
 
 async function quitarLinea(linea: CuentaLineaDetalle) {
   if (!activeCuenta.value) return
@@ -361,6 +458,7 @@ async function enviarComanda() {
   if (!activeCuenta.value || !selectedMesa.value) return
   enviandoComanda.value = true
   try {
+    await flushPendientes()
     const estaciones = await impresorasApi.imprimirComanda(activeCuenta.value.id, {
       mesaNombre: selectedMesa.value.nombre,
       cuentaNumero: activeCuenta.value.numero,
@@ -390,9 +488,12 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
   // si hay dos líneas del mismo ítem con distinta personalización.
   return res.lineas.map((l, i) => {
     const cl = cuenta.lineas[i]
+    const cantidadTicket = cl?.cantidadPresentacion && cl?.unidadCodigoPresentacion
+      ? formatCantidadTicket(cl.cantidadPresentacion, cl.unidadCodigoPresentacion)
+      : l.cantidad
     return {
       nombre: cl?.nombre ?? '',
-      cantidad: l.cantidad,
+      cantidad: cantidadTicket,
       totalLinea: l.totalLinea,
       ...(cl?.personalizacionTexto ? { nota: cl.personalizacionTexto } : {}),
     }
@@ -444,7 +545,10 @@ function confirmarCobro(pagos: PagoInput[]) {
   // El cobro recolecta los pagos; el PIN identifica al garzón que cierra.
   cobroOpen.value = false
   solicitarPin('PIN del garzón para cerrar la cuenta', (pin) => {
-    void cerrarCuentaConPin(pagos, pin)
+    void (async () => {
+      await flushPendientes()
+      await cerrarCuentaConPin(pagos, pin)
+    })()
   })
 }
 
@@ -688,12 +792,11 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
                       </p>
                       <p class="text-xs text-muted">{{ formatMonto(lineaSubtotal(linea), linea.monedaId) }}</p>
                     </div>
-                    <UInput
-                      :model-value="linea.cantidad"
-                      inputmode="decimal"
-                      size="sm"
-                      class="w-20"
-                      @change="cambiarCantidad(linea, ($event.target as HTMLInputElement).value)"
+                    <AppCantidadInput
+                      :model-value="presentacionLinea(linea)"
+                      :unidad-codigo="unidadPresLinea(linea)"
+                      :unidad-base-codigo="unidadBaseLinea(linea)"
+                      @change="onCantidadChange(linea, $event)"
                     />
                     <UButton
                       icon="i-lucide-trash-2"

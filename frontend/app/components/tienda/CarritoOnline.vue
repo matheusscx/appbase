@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CarritoLinea } from '~/composables/useVenta'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
+import { unidadBaseItem } from '~/utils/cantidad-presentacion'
 
 const props = defineProps<{
   lineas: CarritoLinea[]
@@ -9,7 +10,10 @@ const props = defineProps<{
   pagando?: boolean
 }>()
 const emit = defineEmits<{
-  'cambiar-cantidad': [index: number, cantidad: string]
+  'cambiar-cantidad': [
+    index: number,
+    payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
+  ]
   quitar: [index: number]
   pagar: []
 }>()
@@ -20,11 +24,12 @@ const { convertirAMonedaOficial } = useMonedaConversion()
 const monedaIdsEnCarrito = computed(() => props.lineas.map((l) => l.item.monedaId))
 const habilitarPago = computed(() => props.lineas.length > 0 && !props.loadingCalculo)
 
-function quitarReadonly(e: Event) {
-  ;(e.target as HTMLInputElement).removeAttribute('readonly')
+function unidadPresLinea(linea: CarritoLinea): string {
+  return linea.unidadCodigoPresentacion ?? unidadBaseItem(linea.item)
 }
-function ponerReadonly(e: Event) {
-  ;(e.target as HTMLInputElement).setAttribute('readonly', 'readonly')
+
+function presentacionLinea(linea: CarritoLinea): string {
+  return linea.cantidadPresentacion ?? linea.cantidad
 }
 </script>
 
@@ -51,20 +56,14 @@ function ponerReadonly(e: Event) {
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium text-default truncate">{{ linea.item.nombre }}</p>
             <p class="text-xs text-muted font-mono">
-              {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u
+              {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
           </div>
-          <UInput
-            :model-value="linea.cantidad"
-            name="cantidad"
-            inputmode="decimal"
-            autocomplete="off"
-            readonly
-            size="sm"
-            class="w-20"
-            @focusin="quitarReadonly"
-            @focusout="ponerReadonly"
-            @update:model-value="(v: string | number) => emit('cambiar-cantidad', index, String(v))"
+          <AppCantidadInput
+            :model-value="presentacionLinea(linea)"
+            :unidad-codigo="unidadPresLinea(linea)"
+            :unidad-base-codigo="unidadBaseItem(linea.item)"
+            @change="emit('cambiar-cantidad', index, $event)"
           />
           <UButton
             icon="i-lucide-trash-2"

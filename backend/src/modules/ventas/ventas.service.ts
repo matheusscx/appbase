@@ -1028,7 +1028,8 @@ export class VentasService {
       `SELECT d.detalle_id, d.item_id, d.descripcion, d.cantidad, d.precio_unitario,
               d.precio_unitario_origen, d.tasa_cambio, d.moneda_id_origen,
               d.subtotal, d.descuento_aplicado, d.recargo_aplicado, d.impuesto_aplicado,
-              d.total_linea, ip.modo_inventario
+              d.total_linea, d.cantidad_presentacion, d.unidad_codigo_presentacion,
+              ip.modo_inventario
        FROM venta_detalles d
        LEFT JOIN item_producto ip ON ip.item_id = d.item_id
        WHERE d.venta_id = $1 AND d.eliminado_el IS NULL ORDER BY d.creado_el ASC`,
@@ -1125,6 +1126,8 @@ export class VentasService {
         itemId: d['item_id'],
         descripcion: d['descripcion'],
         cantidad: d['cantidad'],
+        cantidadPresentacion: d['cantidad_presentacion'] ?? null,
+        unidadCodigoPresentacion: d['unidad_codigo_presentacion'] ?? null,
         precioUnitario: d['precio_unitario'],
         precioUnitarioOrigen: d['precio_unitario_origen'],
         tasaCambio: d['tasa_cambio'],

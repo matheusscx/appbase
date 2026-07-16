@@ -3,6 +3,12 @@ import Decimal from 'decimal.js'
 import { useCalculoPrecios, type ResultadoVenta, type CalcularVentaInput } from './useCalculoPrecios'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
+import {
+  aCantidadCanonica,
+  desdeCantidadCanonica,
+  unidadBaseItem,
+  type UnidadCat,
+} from '~/utils/cantidad-presentacion'
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -21,7 +27,10 @@ export interface ItemCatalogo {
 
 export interface CarritoLinea {
   item: ItemCatalogo
+  /** Cantidad canónica (unidad base del ítem) — precio y stock. */
   cantidad: string
+  cantidadPresentacion?: string
+  unidadCodigoPresentacion?: string
   personalizacion?: PersonalizacionPayload
   /** texto UI precomputado al confirmar drawer */
   personalizacionResumen?: string
@@ -60,6 +69,7 @@ export function mismaPersonalizacion(
 export function agregarLinea(
   lineas: CarritoLinea[],
   item: ItemCatalogo,
+  catalogo: UnidadCat[],
   personalizacion?: PersonalizacionPayload,
   personalizacionResumen?: string,
   precioUnitarioOverride?: string,
@@ -67,19 +77,43 @@ export function agregarLinea(
   const pers = personalizacionVacia(personalizacion) ? undefined : personalizacion
   const resumen = pers ? personalizacionResumen : undefined
   const precioOverride = pers ? precioUnitarioOverride : undefined
+  const unidadBase = unidadBaseItem(item)
 
   const idx = lineas.findIndex(
     (l) => l.item.id === item.id && mismaPersonalizacion(l.personalizacion, pers),
   )
   if (idx >= 0) {
+    const linea = lineas[idx]!
+    const unidadPres = linea.unidadCodigoPresentacion ?? unidadBase
+    const canonNueva = new Decimal(linea.cantidad || '0').plus(1).toString()
+    const presNueva = desdeCantidadCanonica(canonNueva, unidadBase, unidadPres, catalogo)
     return lineas.map((l, i) =>
       i === idx
-        ? { ...l, cantidad: new Decimal(l.cantidad || '0').plus(1).toString() }
+        ? {
+            ...l,
+            cantidad: canonNueva,
+            cantidadPresentacion: presNueva,
+            unidadCodigoPresentacion: unidadPres,
+          }
         : l,
     )
   }
 
-  const nueva: CarritoLinea = { item, cantidad: '1' }
+  const cantidadPresentacion = '1'
+  const unidadCodigoPresentacion = unidadBase
+  const cantidad = aCantidadCanonica(
+    cantidadPresentacion,
+    unidadCodigoPresentacion,
+    unidadBase,
+    catalogo,
+  )
+
+  const nueva: CarritoLinea = {
+    item,
+    cantidad,
+    cantidadPresentacion,
+    unidadCodigoPresentacion,
+  }
   if (pers) {
     nueva.personalizacion = pers
     if (resumen) nueva.personalizacionResumen = resumen
@@ -95,6 +129,25 @@ export function quitarLinea(
   return lineas.filter((_, i) => i !== index)
 }
 
+export function setCantidadPresentacion(
+  lineas: CarritoLinea[],
+  index: number,
+  presentacion: string,
+  unidadCodigo: string,
+  cantidadCanonica: string,
+): CarritoLinea[] {
+  return lineas.map((l, i) =>
+    i === index
+      ? {
+          ...l,
+          cantidad: cantidadCanonica,
+          cantidadPresentacion: presentacion,
+          unidadCodigoPresentacion: unidadCodigo,
+        }
+      : l,
+  )
+}
+
 export function setCantidad(
   lineas: CarritoLinea[],
   index: number,
@@ -108,11 +161,44 @@ export function toCalcularInput(lineas: CarritoLinea[]): CalcularVentaInput {
     lineas: lineas.map((l) => ({
       itemId: l.item.id,
       cantidad: l.cantidad,
+      ...(l.cantidadPresentacion && l.unidadCodigoPresentacion
+        ? {
+            cantidadPresentacion: l.cantidadPresentacion,
+            unidadCodigoPresentacion: l.unidadCodigoPresentacion,
+          }
+        : {}),
       ...(l.precioUnitarioOverride
         ? { precioUnitario: l.precioUnitarioOverride }
         : {}),
     })),
   }
+}
+
+export function toVentaLineasBody(lineas: CarritoLinea[]) {
+  return lineas.map((l) => ({
+    itemId: l.item.id,
+    cantidad: l.cantidad,
+    ...(l.cantidadPresentacion && l.unidadCodigoPresentacion
+      ? {
+          cantidadPresentacion: l.cantidadPresentacion,
+          unidadCodigoPresentacion: l.unidadCodigoPresentacion,
+        }
+      : {}),
+    ...(l.personalizacion
+      ? {
+          personalizacion: {
+            omitidos: l.personalizacion.omitidos,
+            extras: l.personalizacion.extras.map((e) => ({
+              ingredienteItemId: e.ingredienteItemId,
+              unidades: e.unidades,
+            })),
+            ...(l.personalizacion.comentario
+              ? { comentario: l.personalizacion.comentario }
+              : {}),
+          },
+        }
+      : {}),
+  }))
 }
 
 /**
@@ -257,6 +343,7 @@ export function puedeCobrar(args: {
 
 export function useVenta() {
   const { calcular } = useCalculoPrecios()
+  const unidadesStore = useUnidadesMedidaStore()
   const lineas = ref<CarritoLinea[]>([])
   const resultado = ref<ResultadoVenta | null>(null)
   const loadingCalculo = ref(false)
@@ -287,6 +374,14 @@ export function useVenta() {
     { deep: true },
   )
 
+  function catalogo(): UnidadCat[] {
+    return unidadesStore.unidades.map(u => ({
+      codigo: u.codigo,
+      magnitud: u.magnitud,
+      factorBase: u.factorBase,
+    }))
+  }
+
   function add(
     item: ItemCatalogo,
     personalizacion?: PersonalizacionPayload,
@@ -296,6 +391,7 @@ export function useVenta() {
     lineas.value = agregarLinea(
       lineas.value,
       item,
+      catalogo(),
       personalizacion,
       personalizacionResumen,
       precioUnitarioOverride,
@@ -303,6 +399,20 @@ export function useVenta() {
   }
   function quitar(index: number) {
     lineas.value = quitarLinea(lineas.value, index)
+  }
+  function cambiarCantidadPresentacion(
+    index: number,
+    presentacion: string,
+    unidadCodigo: string,
+    cantidadCanonica: string,
+  ) {
+    lineas.value = setCantidadPresentacion(
+      lineas.value,
+      index,
+      presentacion,
+      unidadCodigo,
+      cantidadCanonica,
+    )
   }
   function cambiarCantidad(index: number, cantidad: string) {
     lineas.value = setCantidad(lineas.value, index, cantidad)
@@ -312,5 +422,14 @@ export function useVenta() {
     resultado.value = null
   }
 
-  return { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidad, limpiar }
+  return {
+    lineas,
+    resultado,
+    loadingCalculo,
+    add,
+    quitar,
+    cambiarCantidad,
+    cambiarCantidadPresentacion,
+    limpiar,
+  }
 }

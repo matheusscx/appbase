@@ -56,7 +56,7 @@ del garzón usa el permiso dedicado **`Operar`**.
 | POST | `/mesas/:id/cuentas` | Operar | Abrir cuenta (`FOR UPDATE` mesa + `numero` correlativo) |
 | POST | `/mesas/:id/cuentas/fusionar` | Operar | Fusionar 2+ cuentas abiertas de la mesa en una |
 | POST | `/cuentas/:id/lineas` | Operar | Agregar producto (merge por ítem) |
-| PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad |
+| PATCH | `/cuentas/:id/lineas/:lineaId` | Operar | Cambiar cantidad (canónica + opcional `cantidadPresentacion` / `unidadCodigoPresentacion`) |
 | DELETE | `/cuentas/:id/lineas/:lineaId` | Operar | Quitar producto |
 | POST | `/cuentas/:id/cancelar` | Operar | Anular cuenta (sin venta) |
 | POST | `/cuentas/:id/cerrar` | Operar | Cerrar → genera venta (`FOR UPDATE` de cuenta) |

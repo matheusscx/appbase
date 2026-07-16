@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
+import { formatCantidadTicket } from '~/utils/cantidad-presentacion'
 
 interface Pago {
   id: string
@@ -16,6 +17,8 @@ interface Detalle {
   itemId: string
   descripcion: string
   cantidad: string
+  cantidadPresentacion?: string | null
+  unidadCodigoPresentacion?: string | null
   precioUnitario: string
   totalLinea: string
   modoInventario: string | null
@@ -163,7 +166,12 @@ function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral
   return map[estado] ?? 'neutral'
 }
 
-function estadoLabel(estado: string): string {
+function cantidadDetalleLabel(det: Detalle): string {
+  if (det.cantidadPresentacion && det.unidadCodigoPresentacion) {
+    return formatCantidadTicket(det.cantidadPresentacion, det.unidadCodigoPresentacion)
+  }
+  return det.cantidad
+}
   const map: Record<string, string> = {
     pendiente: 'Pendiente',
     pagada_parcial: 'Parcial',
@@ -350,7 +358,7 @@ function onNcSuccess(payload: {
           </template>
           <UTable :data="venta.detalles" :columns="detalleColumns">
             <template #cantidad-cell="{ row }">
-              <span class="font-mono">{{ row.original.cantidad }}</span>
+              <span class="font-mono">{{ cantidadDetalleLabel(row.original) }}</span>
             </template>
             <template #precioUnitario-cell="{ row }">
               <span class="font-mono">{{ formatMonto(row.original.precioUnitario) }}</span>

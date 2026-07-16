@@ -5,6 +5,8 @@ import { useApiFetch } from './useApiFetch'
 export interface CalcularLineaInput {
   itemId: string
   cantidad: string
+  cantidadPresentacion?: string
+  unidadCodigoPresentacion?: string
   /** Override opcional del precio_base del ítem. */
   precioUnitario?: string
   /** Si se pasa, reemplaza las reglas asociadas al ítem. */

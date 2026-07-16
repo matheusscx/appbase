@@ -2,6 +2,7 @@ import {
   agregarLinea,
   quitarLinea,
   setCantidad,
+  setCantidadPresentacion,
   toCalcularInput,
   type CarritoLinea,
   type ItemCatalogo,
@@ -36,6 +37,7 @@ export function useTiendaCarrito() {
   const checkout = useState<CheckoutResponse | null>('tienda-checkout', () => null)
 
   const { calcular } = useCalculoPrecios()
+  const unidadesStore = useUnidadesMedidaStore()
   const config = useRuntimeConfig()
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -64,11 +66,33 @@ export function useTiendaCarrito() {
     { deep: true },
   )
 
+  function catalogo() {
+    return unidadesStore.unidades.map(u => ({
+      codigo: u.codigo,
+      magnitud: u.magnitud,
+      factorBase: u.factorBase,
+    }))
+  }
+
   function add(item: ItemCatalogo) {
-    lineas.value = agregarLinea(lineas.value, item)
+    lineas.value = agregarLinea(lineas.value, item, catalogo())
   }
   function quitar(index: number) {
     lineas.value = quitarLinea(lineas.value, index)
+  }
+  function cambiarCantidadPresentacion(
+    index: number,
+    presentacion: string,
+    unidadCodigo: string,
+    cantidadCanonica: string,
+  ) {
+    lineas.value = setCantidadPresentacion(
+      lineas.value,
+      index,
+      presentacion,
+      unidadCodigo,
+      cantidadCanonica,
+    )
   }
   function cambiarCantidad(index: number, cantidad: string) {
     lineas.value = setCantidad(lineas.value, index, cantidad)
@@ -101,6 +125,7 @@ export function useTiendaCarrito() {
     add,
     quitar,
     cambiarCantidad,
+    cambiarCantidadPresentacion,
     limpiar,
     pagar,
   }

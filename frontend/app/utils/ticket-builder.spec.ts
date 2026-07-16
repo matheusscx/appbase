@@ -137,6 +137,25 @@ describe('buildBoletaTicket', () => {
     expect(lines).toContain('TOTAL: $20420')
   })
 
+  it('imprime cantidad con unidad de presentación preformateada', () => {
+    const lines = buildBoletaTicket({
+      tenantNombre: 'Restaurante Paris',
+      items: [{ nombre: 'Harina', cantidad: '500 g', totalLinea: '2500' }],
+      totales: {
+        subtotalNeto: '2500',
+        totalDescuentos: '0',
+        totalRecargos: '0',
+        totalImpuestos: '0',
+        totalFinal: '2500',
+      },
+      pagos: [{ nombre: 'Efectivo', monto: '2500' }],
+      fecha: FECHA,
+      formatMonto,
+    })
+
+    expect(lines).toContain('500 g x Harina')
+  })
+
   it('incluye personalización como lista bajo el ítem', () => {
     const lines = buildBoletaTicket({
       tenantNombre: 'Restaurante Paris',

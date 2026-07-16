@@ -220,8 +220,16 @@ Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobr
 |---|---|---|
 | `CatalogoGrid` | `app/components/ventas/CatalogoGrid.vue` | Buscador de items + grilla de productos; emite `add` al carrito |
 | `ClienteForm` | `app/components/ventas/ClienteForm.vue` | Datos del cliente (nombre, RUT, dirección, teléfono, email); exporta tipo `CustomerForm` |
-| `CarritoPanel` | `app/components/ventas/CarritoPanel.vue` | Líneas del carrito (solo cantidad editable), selector de tipo de documento, desglose (neto, descuentos, recargos, impuestos, total), botón Cobrar |
+| `CarritoPanel` | `app/components/ventas/CarritoPanel.vue` | Líneas del carrito con `AppCantidadInput` (±, selector de unidad de la misma magnitud), selector de tipo de documento, desglose, botón Cobrar |
 | `CobroModal` | `app/components/ventas/CobroModal.vue` | Modal de pagos múltiples con distintos métodos, cálculo de vuelto, confirmación y emisión de POST /api/ventas |
+
+| `AppCantidadInput` | `app/components/AppCantidadInput.vue` | Stepper + selector de unidad (misma magnitud); emite cantidad canónica y presentación |
+
+### Cantidad con unidad de presentación
+
+- Cada línea guarda **cantidad canónica** (`cantidad`, unidad base del ítem) para precio/stock y **presentación** (`cantidadPresentacion` + `unidadCodigoPresentacion`) para UI/tickets.
+- Helpers en `app/utils/cantidad-presentacion.ts`; catálogo de unidades vía `useUnidadesMedidaStore().ensureLoaded()`.
+- POST `/ventas` envía ambos campos cuando el operador eligió una unidad distinta a la base (ej. `500 g` → canónica `0.5` kg).
 
 ### Composable & Lógica Pura
 

@@ -3,7 +3,7 @@ import { useVenta, descontarStockCatalogo, tieneCustomerData, type ItemCatalogo,
 import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
-import Decimal from 'decimal.js'
+import { formatCantidadTicket } from '~/utils/cantidad-presentacion'
 import type { DropdownMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -21,7 +21,8 @@ const apiUrl = config.public.apiUrl
 const toast = useToast()
 const cajaStore = useCajaStore()
 
-const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidad, limpiar } = useVenta()
+const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidadPresentacion, limpiar } = useVenta()
+const unidadesStore = useUnidadesMedidaStore()
 const impresorasApi = useImpresoras()
 const tenantStore = useTenantStore()
 const { formatMonto } = useFormatters()
@@ -148,8 +149,20 @@ async function cargar() {
 }
 
 onMounted(async () => {
-  await Promise.all([cajaStore.cargarActiva(), cargar()])
+  await Promise.all([cajaStore.cargarActiva(), cargar(), unidadesStore.ensureLoaded()])
 })
+
+function onCambiarCantidadPresentacion(
+  index: number,
+  payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
+) {
+  cambiarCantidadPresentacion(
+    index,
+    payload.presentacion,
+    payload.unidadCodigo,
+    payload.cantidadCanonica,
+  )
+}
 
 const estadoToastTitle: Record<string, string> = {
   pagada: 'Venta pagada',
@@ -173,6 +186,12 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
       lineas: lineas.value.map((l) => ({
         itemId: l.item.id,
         cantidad: l.cantidad,
+        ...(l.cantidadPresentacion && l.unidadCodigoPresentacion
+          ? {
+              cantidadPresentacion: l.cantidadPresentacion,
+              unidadCodigoPresentacion: l.unidadCodigoPresentacion,
+            }
+          : {}),
         ...(l.personalizacion
           ? {
               personalizacion: {
@@ -222,7 +241,9 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
             const ln = lineasVenta[i]
             return {
               nombre: ln?.item.nombre ?? '',
-              cantidad: l.cantidad,
+              cantidad: ln?.cantidadPresentacion && ln?.unidadCodigoPresentacion
+                ? formatCantidadTicket(ln.cantidadPresentacion, ln.unidadCodigoPresentacion)
+                : l.cantidad,
               totalLinea: l.totalLinea,
               ...(ln?.personalizacionResumen ? { nota: ln.personalizacionResumen } : {}),
             }
@@ -302,7 +323,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
             :loading-calculo="loadingCalculo"
             :tipos-documento="tiposDocumento"
             :tiene-caja="tieneCaja"
-            @cambiar-cantidad="cambiarCantidad"
+            @cambiar-cantidad="onCambiarCantidadPresentacion"
             @quitar="quitar"
             @cobrar="cobroOpen = true"
             @limpiar-todo="limpiar"

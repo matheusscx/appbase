@@ -47,6 +47,8 @@ export interface CuentaLineaDetalle {
   precioBase: string
   monedaId: string
   cantidad: string
+  cantidadPresentacion?: string | null
+  unidadCodigoPresentacion?: string | null
   personalizacion?: {
     omitidos: string[]
     extras: { ingredienteItemId: string, cantidad: string, unidadCodigo: string, precioExtra: string, unidades: string }[]
@@ -201,10 +203,18 @@ export function useSalones() {
       },
     })
 
-  const actualizarLinea = (cuentaId: string, lineaId: string, cantidad: string) =>
+  const actualizarLinea = (
+    cuentaId: string,
+    lineaId: string,
+    body: {
+      cantidad: string
+      cantidadPresentacion?: string
+      unidadCodigoPresentacion?: string
+    },
+  ) =>
     useApiFetch<CuentaDetalle>(
       `${apiUrl}/cuentas/${cuentaId}/lineas/${lineaId}`,
-      { method: 'PATCH', body: { cantidad } },
+      { method: 'PATCH', body },
     )
 
   const quitarLinea = (cuentaId: string, lineaId: string) =>

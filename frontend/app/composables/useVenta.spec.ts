@@ -3,6 +3,7 @@ import {
   agregarLinea,
   quitarLinea,
   setCantidad,
+  setCantidadPresentacion,
   toCalcularInput,
   descontarStockCatalogo,
   sumaPagos,
@@ -15,6 +16,13 @@ import {
   type CustomerForm,
 } from './useVenta'
 import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
+import type { UnidadCat } from '~/utils/cantidad-presentacion'
+
+const CAT: UnidadCat[] = [
+  { codigo: 'g', magnitud: 'masa', factorBase: '1' },
+  { codigo: 'kg', magnitud: 'masa', factorBase: '1000' },
+  { codigo: 'unidad', magnitud: 'conteo', factorBase: '1' },
+]
 
 const item = (id: string, precio = '100'): ItemCatalogo => ({
   id,
@@ -29,16 +37,29 @@ const item = (id: string, precio = '100'): ItemCatalogo => ({
 })
 
 describe('carrito helpers', () => {
-  it('agregarLinea agrega una línea nueva con cantidad "1"', () => {
-    const r = agregarLinea([], item('a'))
+  it('agregarLinea agrega una línea nueva con cantidad "1" y presentación en unidad base', () => {
+    const r = agregarLinea([], item('a'), CAT)
     expect(r).toHaveLength(1)
     expect(r[0]!.cantidad).toBe('1')
+    expect(r[0]!.cantidadPresentacion).toBe('1')
+    expect(r[0]!.unidadCodigoPresentacion).toBe('unidad')
   })
 
   it('agregarLinea incrementa la cantidad si el item ya está', () => {
-    const r = agregarLinea([{ item: item('a'), cantidad: '1' }], item('a'))
+    const r = agregarLinea([{ item: item('a'), cantidad: '1' }], item('a'), CAT)
     expect(r).toHaveLength(1)
     expect(r[0]!.cantidad).toBe('2')
+  })
+
+  it('re-agregar suma 1 unidad base y reescribe presentación (500 g + 1 kg → 1500 g)', () => {
+    const prod: ItemCatalogo = { ...item('a'), unidadMedida: 'kg' }
+    let lineas = agregarLinea([], prod, CAT)
+    lineas = setCantidadPresentacion(lineas, 0, '500', 'g', '0.5')
+    lineas = agregarLinea(lineas, prod, CAT)
+    expect(lineas).toHaveLength(1)
+    expect(lineas[0]!.cantidad).toBe('1.5')
+    expect(lineas[0]!.cantidadPresentacion).toBe('1500')
+    expect(lineas[0]!.unidadCodigoPresentacion).toBe('g')
   })
 
   it('agregarLinea incrementa cantidad si mismo item y misma personalización', () => {
@@ -48,7 +69,7 @@ describe('carrito helpers', () => {
       extras: [{ ingredienteItemId: 'extra-1', unidades: 1 }],
     }
     const linea: CarritoLinea = { item: receta, cantidad: '1', personalizacion: pers }
-    const r = agregarLinea([linea], receta, pers)
+    const r = agregarLinea([linea], receta, CAT, pers)
     expect(r).toHaveLength(1)
     expect(r[0]!.cantidad).toBe('2')
   })
@@ -66,6 +87,7 @@ describe('carrito helpers', () => {
     const r = agregarLinea(
       [{ item: receta, cantidad: '1', personalizacion: persA }],
       receta,
+      CAT,
       persB,
     )
     expect(r).toHaveLength(2)
@@ -78,6 +100,7 @@ describe('carrito helpers', () => {
     const r = agregarLinea(
       [{ item: receta, cantidad: '1', personalizacion: persA }],
       receta,
+      CAT,
       persB,
     )
     expect(r).toHaveLength(2)
@@ -93,6 +116,7 @@ describe('carrito helpers', () => {
     const r = agregarLinea(
       [{ item: receta, cantidad: '1', personalizacion: pers }],
       receta,
+      CAT,
     )
     expect(r).toHaveLength(2)
     expect(r[0]!.cantidad).toBe('1')
@@ -101,7 +125,7 @@ describe('carrito helpers', () => {
 
   it('agregarLinea no muta el array original', () => {
     const original: CarritoLinea[] = []
-    agregarLinea(original, item('a'))
+    agregarLinea(original, item('a'), CAT)
     expect(original).toHaveLength(0)
   })
 
@@ -149,7 +173,7 @@ describe('carrito helpers', () => {
       personalizacion: pers,
       precioUnitarioOverride: '1500',
     }
-    const r = agregarLinea([linea], receta, pers, undefined, '1500')
+    const r = agregarLinea([linea], receta, CAT, pers, undefined, '1500')
     expect(r).toHaveLength(1)
     expect(r[0]!.cantidad).toBe('2')
     expect(r[0]!.precioUnitarioOverride).toBe('1500')

@@ -7,8 +7,9 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const toast = useToast()
+const unidadesStore = useUnidadesMedidaStore()
 
-const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidad, pagar } = useTiendaCarrito()
+const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidadPresentacion, pagar } = useTiendaCarrito()
 
 const items = ref<ItemCatalogo[]>([])
 const loadingCatalogo = ref(false)
@@ -32,7 +33,21 @@ async function cargar() {
   }
 }
 
-onMounted(cargar)
+onMounted(async () => {
+  await Promise.all([cargar(), unidadesStore.ensureLoaded()])
+})
+
+function onCambiarCantidadPresentacion(
+  index: number,
+  payload: { presentacion: string, unidadCodigo: string, cantidadCanonica: string },
+) {
+  cambiarCantidadPresentacion(
+    index,
+    payload.presentacion,
+    payload.unidadCodigo,
+    payload.cantidadCanonica,
+  )
+}
 
 async function irAPagar() {
   pagando.value = true
@@ -73,7 +88,7 @@ async function irAPagar() {
             :resultado="resultado"
             :loading-calculo="loadingCalculo"
             :pagando="pagando"
-            @cambiar-cantidad="cambiarCantidad"
+            @cambiar-cantidad="onCambiarCantidadPresentacion"
             @quitar="quitar"
             @pagar="irAPagar"
           />
