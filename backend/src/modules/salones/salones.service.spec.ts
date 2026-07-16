@@ -8,14 +8,23 @@ import { Cuenta, EstadoCuenta } from './entities/cuenta.entity';
 import { CuentaLinea } from './entities/cuenta-linea.entity';
 import { VentasService } from '../ventas/ventas.service';
 import { GarzonesService } from '../garzones/garzones.service';
+import { ItemsService } from '../items/items.service';
 
 const TENANT = 'tenant-uuid';
 const USUARIO = 'usuario-uuid';
 const MESA = 'mesa-uuid';
 const CUENTA = 'cuenta-uuid';
 const ITEM = 'item-uuid';
+const RECETA = 'receta-uuid';
+const ING = 'ing-uuid';
 const GARZON = 'garzon-uuid';
 const PIN = '111111';
+
+const SNAPSHOT = {
+  omitidos: [ING],
+  extras: [],
+  comentario: 'sin cebolla',
+};
 
 type Repo = {
   find: jest.Mock;
@@ -49,6 +58,7 @@ describe('SalonesService', () => {
   let cuentaLineaRepo: Repo;
   let ventas: { crearEnTransaccion: jest.Mock };
   let garzones: { resolverGarzonPorPin: jest.Mock };
+  let items: { resolverPersonalizacionReceta: jest.Mock };
   let manager: {
     query: jest.Mock;
     findOne: jest.Mock;
@@ -74,6 +84,12 @@ describe('SalonesService', () => {
       resolverGarzonPorPin: jest.fn().mockResolvedValue({
         id: GARZON,
         nombre: 'Ana Torres',
+      }),
+    };
+    items = {
+      resolverPersonalizacionReceta: jest.fn().mockResolvedValue({
+        snapshot: SNAPSHOT,
+        precioExtraTotal: '0.0000',
       }),
     };
 
@@ -104,6 +120,7 @@ describe('SalonesService', () => {
         { provide: getDataSourceToken(), useValue: dataSource },
         { provide: VentasService, useValue: ventas },
         { provide: GarzonesService, useValue: garzones },
+        { provide: ItemsService, useValue: items },
       ],
     }).compile();
 
@@ -217,17 +234,30 @@ describe('SalonesService', () => {
       };
 
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
-      manager.find.mockImplementation((entity: unknown) => {
-        if (entity === Cuenta) return Promise.resolve([cuentaB, cuentaA]);
-        if (entity === CuentaLinea)
-          return Promise.resolve([lineaOrigenMismoItem, lineaOrigenOtroItem]);
-        return Promise.resolve([]);
-      });
       manager.findOne.mockImplementation(
-        (_entity: unknown, opts: { where: { itemId: string } }) => {
-          if (opts.where.itemId === 'item-1')
+        (
+          _entity: unknown,
+          opts: { where: { itemId?: string; cuentaId?: string } },
+        ) => {
+          if (opts.where.itemId === 'item-1' && opts.where.cuentaId === CUENTA_A)
             return Promise.resolve(lineaExistenteDestino);
           return Promise.resolve(null);
+        },
+      );
+      manager.find.mockImplementation(
+        (entity: unknown, opts?: { where?: { cuentaId?: string; itemId?: string } }) => {
+          if (entity === Cuenta) return Promise.resolve([cuentaB, cuentaA]);
+          if (entity === CuentaLinea) {
+            if (opts?.where?.cuentaId === CUENTA_B)
+              return Promise.resolve([lineaOrigenMismoItem, lineaOrigenOtroItem]);
+            if (
+              opts?.where?.cuentaId === CUENTA_A &&
+              opts?.where?.itemId === 'item-1'
+            )
+              return Promise.resolve([lineaExistenteDestino]);
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([]);
         },
       );
       manager.query.mockResolvedValue([]);
@@ -286,11 +316,16 @@ describe('SalonesService', () => {
         tenantId: TENANT,
         estado: EstadoCuenta.ABIERTA,
       });
-      dataSource.query.mockResolvedValue([{ item_id: ITEM }]);
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT item_id, tipo'))
+          return Promise.resolve([{ item_id: ITEM, tipo: 'producto' }]);
+        return Promise.resolve([]);
+      });
+      dataSource.manager.query.mockResolvedValue([]);
     });
 
     it('crea una línea nueva cuando el ítem no está en la cuenta', async () => {
-      cuentaLineaRepo.findOne.mockResolvedValue(null);
+      cuentaLineaRepo.find.mockResolvedValue([]);
 
       await service.agregarLinea(TENANT, CUENTA, {
         itemId: ITEM,
@@ -307,11 +342,10 @@ describe('SalonesService', () => {
       expect(cuentaLineaRepo.save).toHaveBeenCalled();
     });
 
-    it('suma la cantidad si el ítem ya está en la cuenta', async () => {
-      cuentaLineaRepo.findOne.mockResolvedValue({
-        id: 'linea-1',
-        cantidad: '2',
-      });
+    it('suma la cantidad si el ítem ya está en la cuenta sin personalización', async () => {
+      cuentaLineaRepo.find.mockResolvedValue([
+        { id: 'linea-1', cantidad: '2', personalizacion: null },
+      ]);
 
       await service.agregarLinea(TENANT, CUENTA, {
         itemId: ITEM,
@@ -323,8 +357,82 @@ describe('SalonesService', () => {
       );
     });
 
+    it('guarda personalización JSONB en recetas', async () => {
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT item_id, tipo'))
+          return Promise.resolve([{ item_id: RECETA, tipo: 'receta' }]);
+        return Promise.resolve([]);
+      });
+      cuentaLineaRepo.find.mockResolvedValue([]);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: RECETA,
+        cantidad: '1',
+        personalizacion: { omitidos: [ING], comentario: 'sin cebolla' },
+      });
+
+      expect(items.resolverPersonalizacionReceta).toHaveBeenCalled();
+      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ personalizacion: SNAPSHOT }),
+      );
+    });
+
+    it('suma cantidad si misma personalización; crea línea nueva si difiere', async () => {
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT item_id, tipo'))
+          return Promise.resolve([{ item_id: RECETA, tipo: 'receta' }]);
+        return Promise.resolve([]);
+      });
+      const lineaMisma = {
+        id: 'linea-1',
+        cantidad: '1',
+        personalizacion: SNAPSHOT,
+      };
+      cuentaLineaRepo.find.mockResolvedValue([lineaMisma]);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: RECETA,
+        cantidad: '2',
+        personalizacion: { omitidos: [ING], comentario: 'sin cebolla' },
+      });
+
+      expect(cuentaLineaRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ cantidad: '3' }),
+      );
+      expect(cuentaLineaRepo.create).not.toHaveBeenCalled();
+
+      cuentaLineaRepo.find.mockResolvedValue([
+        {
+          id: 'linea-1',
+          cantidad: '1',
+          personalizacion: { omitidos: ['otro-ing'], extras: [] },
+        },
+      ]);
+      cuentaLineaRepo.create.mockClear();
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: RECETA,
+        cantidad: '1',
+        personalizacion: { omitidos: [ING], comentario: 'sin cebolla' },
+      });
+
+      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ personalizacion: SNAPSHOT }),
+      );
+    });
+
+    it('rechaza personalización en ítems que no son receta', async () => {
+      await expect(
+        service.agregarLinea(TENANT, CUENTA, {
+          itemId: ITEM,
+          cantidad: '1',
+          personalizacion: { omitidos: [ING] },
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('rechaza cantidad menor o igual a cero', async () => {
-      cuentaLineaRepo.findOne.mockResolvedValue(null);
+      cuentaLineaRepo.find.mockResolvedValue([]);
       await expect(
         service.agregarLinea(TENANT, CUENTA, { itemId: ITEM, cantidad: '0' }),
       ).rejects.toThrow(BadRequestException);
@@ -353,7 +461,9 @@ describe('SalonesService', () => {
         ventaId: null,
       };
       manager.findOne.mockResolvedValue(cuenta);
-      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '2' }]);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '2', personalizacion: SNAPSHOT },
+      ]);
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
@@ -375,7 +485,17 @@ describe('SalonesService', () => {
         USUARIO,
         expect.objectContaining({
           canal: 'fisico',
-          lineas: [{ itemId: ITEM, cantidad: '2' }],
+          lineas: [
+            {
+              itemId: ITEM,
+              cantidad: '2',
+              personalizacion: {
+                omitidos: [ING],
+                extras: [],
+                comentario: 'sin cebolla',
+              },
+            },
+          ],
         }),
       );
       expect(result.ventaId).toBe('venta-1');
@@ -458,32 +578,39 @@ describe('SalonesService', () => {
         tenantId: TENANT,
         estado: EstadoCuenta.ABIERTA,
       });
-      dataSource.query.mockResolvedValue([
-        {
-          cuenta_linea_id: 'linea-1',
-          cantidad: '3',
-          cantidad_enviada: '1',
-          nombre: 'Lomo a lo pobre',
-          impresora_id: 'impresora-cocina',
-          impresora_nombre: 'Cocina',
-        },
-        {
-          cuenta_linea_id: 'linea-2',
-          cantidad: '2',
-          cantidad_enviada: '2',
-          nombre: 'Agua mineral',
-          impresora_id: 'impresora-barra',
-          impresora_nombre: 'Barra',
-        },
-        {
-          cuenta_linea_id: 'linea-3',
-          cantidad: '1',
-          cantidad_enviada: '0',
-          nombre: 'Postre sin ruta',
-          impresora_id: null,
-          impresora_nombre: null,
-        },
-      ]);
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT item_id, nombre FROM items'))
+          return Promise.resolve([{ item_id: ING, nombre: 'Cebolla' }]);
+        return Promise.resolve([
+          {
+            cuenta_linea_id: 'linea-1',
+            cantidad: '3',
+            cantidad_enviada: '1',
+            nombre: 'Lomo a lo pobre',
+            impresora_id: 'impresora-cocina',
+            impresora_nombre: 'Cocina',
+            personalizacion: SNAPSHOT,
+          },
+          {
+            cuenta_linea_id: 'linea-2',
+            cantidad: '2',
+            cantidad_enviada: '2',
+            nombre: 'Agua mineral',
+            impresora_id: 'impresora-barra',
+            impresora_nombre: 'Barra',
+            personalizacion: null,
+          },
+          {
+            cuenta_linea_id: 'linea-3',
+            cantidad: '1',
+            cantidad_enviada: '0',
+            nombre: 'Postre sin ruta',
+            impresora_id: null,
+            impresora_nombre: null,
+            personalizacion: null,
+          },
+        ]);
+      });
 
       const result = await service.previewComanda(TENANT, CUENTA);
 
@@ -495,8 +622,9 @@ describe('SalonesService', () => {
             {
               cuentaLineaId: 'linea-1',
               nombre: 'Lomo a lo pobre',
-              cantidad: '2', // diff a imprimir
-              cantidadEnviada: '3', // total absoluto a persistir al confirmar
+              cantidad: '2',
+              cantidadEnviada: '3',
+              nota: 'Sin Cebolla · sin cebolla',
             },
           ],
         },

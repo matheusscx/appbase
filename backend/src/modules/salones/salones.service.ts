@@ -24,6 +24,12 @@ import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import { VentasService } from '../ventas/ventas.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 import { GarzonesService } from '../garzones/garzones.service';
+import { ItemsService } from '../items/items.service';
+import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
+import {
+  hashPersonalizacion,
+  textoComandaPersonalizacion,
+} from '../../common/utils/personalizacion-receta.util';
 
 export interface MesaResumen {
   id: string;
@@ -49,6 +55,8 @@ export interface CuentaLineaDetalle {
   precioBase: string;
   monedaId: string;
   cantidad: string;
+  personalizacion?: PersonalizacionRecetaSnapshot | null;
+  personalizacionTexto?: string;
 }
 
 export interface ComandaEstacion {
@@ -59,6 +67,7 @@ export interface ComandaEstacion {
     nombre: string;
     cantidad: string;
     cantidadEnviada: string;
+    nota?: string;
   }[];
 }
 
@@ -87,6 +96,7 @@ export class SalonesService {
     private readonly cuentaLineaRepo: Repository<CuentaLinea>,
     private readonly ventasService: VentasService,
     private readonly garzonesService: GarzonesService,
+    private readonly itemsService: ItemsService,
   ) {}
 
   // ── Administración: salones ──────────────────────────────────────────────
@@ -341,19 +351,39 @@ export class SalonesService {
     dto: AddLineaDto,
   ): Promise<CuentaDetalle> {
     const cuenta = await this.getCuentaAbiertaOrThrow(tenantId, cuentaId);
-    await this.getItemVendibleOrThrow(tenantId, dto.itemId);
+    const item = await this.getItemVendibleOrThrow(tenantId, dto.itemId);
     if (new Decimal(dto.cantidad).lte(0)) {
       throw new BadRequestException('La cantidad debe ser mayor a cero');
     }
-    // Merge por ítem: si ya hay una línea del mismo ítem, suma la cantidad.
-    const existente = await this.cuentaLineaRepo.findOne({
+
+    let snapshot: PersonalizacionRecetaSnapshot | null = null;
+    if (dto.personalizacion) {
+      if (item.tipo !== 'receta') {
+        throw new BadRequestException(
+          'La personalización solo aplica a recetas',
+        );
+      }
+      const resolved = await this.itemsService.resolverPersonalizacionReceta(
+        this.dataSource.manager,
+        tenantId,
+        dto.itemId,
+        dto.personalizacion,
+      );
+      snapshot = resolved.snapshot;
+    }
+
+    const hash = hashPersonalizacion(snapshot);
+    const existentes = await this.cuentaLineaRepo.find({
       where: { tenantId, cuentaId, itemId: dto.itemId },
     });
-    if (existente) {
-      existente.cantidad = new Decimal(existente.cantidad)
+    const match = existentes.find(
+      (l) => hashPersonalizacion(l.personalizacion) === hash,
+    );
+    if (match) {
+      match.cantidad = new Decimal(match.cantidad)
         .plus(dto.cantidad)
         .toString();
-      await this.cuentaLineaRepo.save(existente);
+      await this.cuentaLineaRepo.save(match);
     } else {
       await this.cuentaLineaRepo.save(
         this.cuentaLineaRepo.create({
@@ -361,6 +391,7 @@ export class SalonesService {
           cuentaId,
           itemId: dto.itemId,
           cantidad: dto.cantidad,
+          personalizacion: snapshot,
         }),
       );
     }
@@ -448,9 +479,13 @@ export class SalonesService {
           where: { tenantId, cuentaId: origen.id },
         });
         for (const linea of lineas) {
-          const existente = await manager.findOne(CuentaLinea, {
+          const existentes = await manager.find(CuentaLinea, {
             where: { tenantId, cuentaId: destino.id, itemId: linea.itemId },
           });
+          const hashOrigen = hashPersonalizacion(linea.personalizacion);
+          const existente = existentes.find(
+            (l) => hashPersonalizacion(l.personalizacion) === hashOrigen,
+          );
           if (existente) {
             existente.cantidad = new Decimal(existente.cantidad)
               .plus(linea.cantidad)
@@ -511,7 +546,19 @@ export class SalonesService {
       }
 
       const ventaDto: CreateVentaDto = {
-        lineas: lineas.map((l) => ({ itemId: l.itemId, cantidad: l.cantidad })),
+        lineas: lineas.map((l) => ({
+          itemId: l.itemId,
+          cantidad: l.cantidad,
+          personalizacion: l.personalizacion
+            ? {
+                omitidos: l.personalizacion.omitidos,
+                extras: l.personalizacion.extras.map((e) => ({
+                  ingredienteItemId: e.ingredienteItemId,
+                })),
+                comentario: l.personalizacion.comentario,
+              }
+            : undefined,
+        })),
         pagos: dto.pagos,
         tipoDocumentoId: dto.tipoDocumentoId,
         customer: dto.customer,
@@ -557,7 +604,8 @@ export class SalonesService {
       this.sqlLineasComanda(),
       [cuentaId, tenantId],
     );
-    return { estaciones: this.agruparEstacionesComanda(rows) };
+    const nombres = await this.nombresIngredientesPersonalizacion(rows);
+    return { estaciones: this.agruparEstacionesComanda(rows, nombres) };
   }
 
   /**
@@ -588,13 +636,15 @@ export class SalonesService {
         nombre: string;
         impresora_id: string | null;
         impresora_nombre: string | null;
+        personalizacion: PersonalizacionRecetaSnapshot | null;
       }[] = await manager.query(
         `${this.sqlLineasComanda()}
          FOR UPDATE OF cl`,
         [cuentaId, tenantId],
       );
 
-      const estaciones = this.agruparEstacionesComanda(rows);
+      const nombres = await this.nombresIngredientesPersonalizacion(rows);
+      const estaciones = this.agruparEstacionesComanda(rows, nombres);
 
       for (const estacion of estaciones) {
         for (const item of estacion.items) {
@@ -613,7 +663,7 @@ export class SalonesService {
 
   private sqlLineasComanda(): string {
     return `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
-              i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
+              cl.personalizacion, i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
          FROM cuenta_lineas cl
          JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
          LEFT JOIN categorias c
@@ -632,13 +682,16 @@ export class SalonesService {
       nombre: string;
       impresora_id: string | null;
       impresora_nombre: string | null;
+      personalizacion?: PersonalizacionRecetaSnapshot | null;
     }[],
+    nombres: Map<string, string> = new Map(),
   ): ComandaEstacion[] {
     const estacionesMap = new Map<string, ComandaEstacion>();
     for (const row of rows) {
       const diff = new Decimal(row.cantidad).minus(row.cantidad_enviada);
       if (diff.lte(0) || !row.impresora_id) continue;
 
+      const nota = textoComandaPersonalizacion(row.personalizacion, nombres);
       const estacion = estacionesMap.get(row.impresora_id) ?? {
         impresoraId: row.impresora_id,
         nombre: row.impresora_nombre ?? '',
@@ -649,6 +702,7 @@ export class SalonesService {
         nombre: row.nombre,
         cantidad: diff.toString(),
         cantidadEnviada: row.cantidad,
+        ...(nota ? { nota } : {}),
       });
       estacionesMap.set(row.impresora_id, estacion);
     }
@@ -699,8 +753,9 @@ export class SalonesService {
       nombre: string;
       precio_base: string;
       moneda_id: string;
+      personalizacion: PersonalizacionRecetaSnapshot | null;
     }[] = await runner.query(
-      `SELECT cl.cuenta_linea_id, cl.item_id, cl.cantidad,
+      `SELECT cl.cuenta_linea_id, cl.item_id, cl.cantidad, cl.personalizacion,
               i.nombre, i.precio_base, i.moneda_id
          FROM cuenta_lineas cl
          JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
@@ -713,6 +768,7 @@ export class SalonesService {
       cuenta.garzonAperturaId,
       cuenta.garzonCierreId,
     );
+    const nombres = await this.nombresIngredientesPersonalizacion(lineas);
     return {
       id: cuenta.id,
       numero: cuenta.numero,
@@ -728,15 +784,45 @@ export class SalonesService {
       garzonCierreNombre: cuenta.garzonCierreId
         ? (nombresGarzon[cuenta.garzonCierreId] ?? null)
         : null,
-      lineas: lineas.map((l) => ({
-        id: l.cuenta_linea_id,
-        itemId: l.item_id,
-        nombre: l.nombre,
-        precioBase: l.precio_base,
-        monedaId: l.moneda_id,
-        cantidad: l.cantidad,
-      })),
+      lineas: lineas.map((l) => {
+        const personalizacionTexto = textoComandaPersonalizacion(
+          l.personalizacion,
+          nombres,
+        );
+        return {
+          id: l.cuenta_linea_id,
+          itemId: l.item_id,
+          nombre: l.nombre,
+          precioBase: l.precio_base,
+          monedaId: l.moneda_id,
+          cantidad: l.cantidad,
+          personalizacion: l.personalizacion,
+          ...(personalizacionTexto
+            ? { personalizacionTexto }
+            : {}),
+        };
+      }),
     };
+  }
+
+  private async nombresIngredientesPersonalizacion(
+    rows: { personalizacion?: PersonalizacionRecetaSnapshot | null }[],
+  ): Promise<Map<string, string>> {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      const p = row.personalizacion;
+      if (!p) continue;
+      for (const id of p.omitidos ?? []) ids.add(id);
+      for (const e of p.extras ?? []) ids.add(e.ingredienteItemId);
+    }
+    if (ids.size === 0) return new Map();
+    const nameRows: { item_id: string; nombre: string }[] =
+      await this.dataSource.query(
+        `SELECT item_id, nombre FROM items
+          WHERE item_id = ANY($1) AND eliminado_el IS NULL`,
+        [[...ids]],
+      );
+    return new Map(nameRows.map((r) => [r.item_id, r.nombre]));
   }
 
   /** Resuelve los nombres de los garzones de apertura/cierre en una query. */
@@ -781,9 +867,9 @@ export class SalonesService {
   private async getItemVendibleOrThrow(
     tenantId: string,
     itemId: string,
-  ): Promise<void> {
-    const rows: { item_id: string }[] = await this.dataSource.query(
-      `SELECT item_id FROM items
+  ): Promise<{ itemId: string; tipo: string }> {
+    const rows: { item_id: string; tipo: string }[] = await this.dataSource.query(
+      `SELECT item_id, tipo FROM items
         WHERE item_id = $1 AND tenant_id = $2
           AND activo = true AND eliminado_el IS NULL`,
       [itemId, tenantId],
@@ -791,5 +877,6 @@ export class SalonesService {
     if (rows.length === 0) {
       throw new NotFoundException(`Ítem ${itemId} no encontrado`);
     }
+    return { itemId: rows[0].item_id, tipo: rows[0].tipo };
   }
 }

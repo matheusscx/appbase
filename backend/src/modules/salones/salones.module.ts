@@ -12,12 +12,14 @@ import { Cuenta } from './entities/cuenta.entity';
 import { CuentaLinea } from './entities/cuenta-linea.entity';
 import { VentasModule } from '../ventas/ventas.module';
 import { GarzonesModule } from '../garzones/garzones.module';
+import { ItemsModule } from '../items/items.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Salon, Mesa, Cuenta, CuentaLinea]),
     VentasModule,
     GarzonesModule,
+    ItemsModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [SalonesService],
