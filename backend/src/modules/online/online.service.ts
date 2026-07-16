@@ -7,6 +7,20 @@ import type { ResultadoVenta } from '../calculo-precios/calculo-precios.engine';
 import { MetodosPagoService } from '../metodos-pago/metodos-pago.service';
 import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.service';
 import { PagosRedirectService } from '../pasarela/services/pagos-redirect.service';
+import { ItemsService } from '../items/items.service';
+import { CatalogService } from '../catalog/catalog.service';
+import {
+  assertPresentacionPareada,
+  resolverCantidadDesdePresentacion,
+  type UnidadCat,
+} from '../../common/utils/cantidad-presentacion.util';
+
+export interface CheckoutLineaSnapshot {
+  itemId: string;
+  cantidad: string;
+  cantidadPresentacion?: string;
+  unidadCodigoPresentacion?: string;
+}
 
 export interface CheckoutResponse {
   resultado: ResultadoVenta;
@@ -22,7 +36,7 @@ export interface CheckoutSnapshot {
     // la moneda del ítem, así que fijar el precio ya convertido lo re-convertiría
     // (doble conversión en ítems no-oficiales). El monto cobrado se preserva en
     // totalFinal y se registra como el pago.
-    lineas: { itemId: string; cantidad: string }[];
+    lineas: CheckoutLineaSnapshot[];
     // Ambos métodos se resuelven server-side; el callback elige según el
     // payment_type_code real de Transbank (VD → débito, resto → crédito).
     metodoCreditoId: string;
@@ -54,13 +68,19 @@ export class OnlineService {
     private readonly tenantPasarelaService: TenantPasarelaService,
     private readonly pagosRedirect: PagosRedirectService,
     private readonly config: ConfigService,
+    private readonly itemsService: ItemsService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   async checkout(
     tenantId: string,
     dto: CalcularVentaDto,
   ): Promise<CheckoutResponse> {
-    const resultado = await this.calculoPreciosService.calcular(tenantId, dto);
+    const { calcularDto } = await this.prepararLineasCheckout(tenantId, dto);
+    const resultado = await this.calculoPreciosService.calcular(
+      tenantId,
+      calcularDto,
+    );
     const checkoutRef = randomUUID();
 
     return {
@@ -79,10 +99,20 @@ export class OnlineService {
     // Fallback: sin Webpay Plus activo, mantener la pasarela simulada actual.
     const tieneWebpay = await this.webpayActivo(tenantId);
     if (!tieneWebpay) {
-      return { modo: 'simulado', ...(await this.checkout(tenantId, dto)) };
+      return {
+        modo: 'simulado',
+        ...(await this.checkout(tenantId, dto)),
+      };
     }
 
-    const resultado = await this.calculoPreciosService.calcular(tenantId, dto);
+    const { calcularDto, lineasSnapshot } = await this.prepararLineasCheckout(
+      tenantId,
+      dto,
+    );
+    const resultado = await this.calculoPreciosService.calcular(
+      tenantId,
+      calcularDto,
+    );
     const totalFinal = resultado.totales.totalFinal;
     const { metodoCreditoId, metodoDebitoId } =
       await this.resolverMetodosTarjeta(tenantId);
@@ -90,10 +120,7 @@ export class OnlineService {
     const snapshot: CheckoutSnapshot = {
       origenApp: 'tienda-online',
       checkout: {
-        lineas: resultado.lineas.map((l) => ({
-          itemId: l.itemId,
-          cantidad: l.cantidad,
-        })),
+        lineas: lineasSnapshot,
         metodoCreditoId,
         metodoDebitoId,
         totalFinal,
@@ -166,6 +193,68 @@ export class OnlineService {
     return {
       metodoCreditoId,
       metodoDebitoId: debito?.metodoPagoId ?? null,
+    };
+  }
+
+  private async prepararLineasCheckout(
+    tenantId: string,
+    dto: CalcularVentaDto,
+  ): Promise<{
+    calcularDto: CalcularVentaDto;
+    lineasSnapshot: CheckoutLineaSnapshot[];
+  }> {
+    const unidades = await this.catalogService.findAllUnidadesMedida();
+    const catalogo: UnidadCat[] = unidades.map((u) => ({
+      codigo: u.codigo,
+      magnitud: u.magnitud,
+      factorBase: u.factorBase,
+    }));
+
+    const lineasSnapshot: CheckoutLineaSnapshot[] = [];
+    const calcularLineas = [];
+
+    for (const linea of dto.lineas) {
+      assertPresentacionPareada(
+        linea.cantidadPresentacion,
+        linea.unidadCodigoPresentacion,
+      );
+      const item = await this.itemsService.findOne(tenantId, linea.itemId);
+      const unidadBase =
+        item.tipo === 'receta' ? 'unidad' : (item.unidadMedida ?? 'unidad');
+
+      let cantidadCanonica = linea.cantidad;
+      let cantidadPresentacion: string | undefined;
+      let unidadCodigoPresentacion: string | undefined;
+
+      if (linea.cantidadPresentacion && linea.unidadCodigoPresentacion) {
+        const res = resolverCantidadDesdePresentacion({
+          cantidadPresentacion: linea.cantidadPresentacion,
+          unidadCodigoPresentacion: linea.unidadCodigoPresentacion,
+          unidadBaseCodigo: unidadBase,
+          catalogo,
+          forzarConteo: item.tipo === 'receta',
+        });
+        cantidadCanonica = res.cantidadCanonica;
+        cantidadPresentacion = res.cantidadPresentacion;
+        unidadCodigoPresentacion = res.unidadCodigoPresentacion;
+      }
+
+      calcularLineas.push({
+        ...linea,
+        cantidad: cantidadCanonica,
+      });
+      lineasSnapshot.push({
+        itemId: linea.itemId,
+        cantidad: cantidadCanonica,
+        ...(cantidadPresentacion && unidadCodigoPresentacion
+          ? { cantidadPresentacion, unidadCodigoPresentacion }
+          : {}),
+      });
+    }
+
+    return {
+      calcularDto: { ...dto, lineas: calcularLineas },
+      lineasSnapshot,
     };
   }
 }

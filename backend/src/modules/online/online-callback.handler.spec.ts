@@ -83,6 +83,46 @@ describe('OnlineCallbackHandler', () => {
     expect(o.ventaId).toBe('venta-9');
   });
 
+  it('pasa presentación al CreateVentaDto cuando viene en snapshot', async () => {
+    ventas.crear.mockResolvedValue({ id: 'venta-pres' });
+    const o = orden();
+    (
+      o.metadata as {
+        checkout: {
+          lineas: {
+            itemId: string;
+            cantidad: string;
+            cantidadPresentacion: string;
+            unidadCodigoPresentacion: string;
+          }[];
+        };
+      }
+    ).checkout.lineas = [
+      {
+        itemId: ITEM_ID,
+        cantidad: '0.5',
+        cantidadPresentacion: '500',
+        unidadCodigoPresentacion: 'g',
+      },
+    ];
+    await handler.onOrdenResuelta(o);
+
+    expect(ventas.crear).toHaveBeenCalledWith(
+      't-1',
+      'u-1',
+      expect.objectContaining({
+        lineas: [
+          {
+            itemId: ITEM_ID,
+            cantidad: '0.5',
+            cantidadPresentacion: '500',
+            unidadCodigoPresentacion: 'g',
+          },
+        ],
+      }),
+    );
+  });
+
   it('débito RedCompra (VD) → usa el método débito del tenant', async () => {
     ventas.crear.mockResolvedValue({ id: 'venta-10' });
     const o = orden(

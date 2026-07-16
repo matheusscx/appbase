@@ -15,6 +15,14 @@ export class LineaDto {
   @IsNumberString()
   cantidad: string;
 
+  @IsOptional()
+  @IsNumberString()
+  cantidadPresentacion?: string;
+
+  @IsOptional()
+  @IsString()
+  unidadCodigoPresentacion?: string;
+
   /** Override opcional del precio_base del ítem. */
   @IsOptional()
   @IsNumberString()

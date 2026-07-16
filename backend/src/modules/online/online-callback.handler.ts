@@ -65,6 +65,12 @@ export class OnlineCallbackHandler
       lineas: checkout.lineas.map((l) => ({
         itemId: l.itemId,
         cantidad: l.cantidad,
+        ...(l.cantidadPresentacion && l.unidadCodigoPresentacion
+          ? {
+              cantidadPresentacion: l.cantidadPresentacion,
+              unidadCodigoPresentacion: l.unidadCodigoPresentacion,
+            }
+          : {}),
       })),
       pagos: [
         {

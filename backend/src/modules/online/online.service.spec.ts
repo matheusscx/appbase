@@ -6,6 +6,13 @@ import { CalculoPreciosService } from '../calculo-precios/calculo-precios.servic
 import { MetodosPagoService } from '../metodos-pago/metodos-pago.service';
 import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.service';
 import { PagosRedirectService } from '../pasarela/services/pagos-redirect.service';
+import { ItemsService } from '../items/items.service';
+import { CatalogService } from '../catalog/catalog.service';
+
+const UNIDADES = [
+  { codigo: 'g', magnitud: 'masa', factorBase: '1' },
+  { codigo: 'kg', magnitud: 'masa', factorBase: '1000' },
+];
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116';
@@ -44,6 +51,16 @@ describe('OnlineService', () => {
   const tenantPasarela = { resolverConfiguracionActiva: jest.fn() };
   const pagosRedirect = { iniciar: jest.fn(), obtenerResultado: jest.fn() };
   const config = { get: jest.fn().mockReturnValue('http://localhost:5173') };
+  const items = {
+    findOne: jest.fn().mockResolvedValue({
+      id: ITEM_ID,
+      tipo: 'producto',
+      unidadMedida: 'kg',
+    }),
+  };
+  const catalog = {
+    findAllUnidadesMedida: jest.fn().mockResolvedValue(UNIDADES),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -55,6 +72,8 @@ describe('OnlineService', () => {
         { provide: TenantPasarelaService, useValue: tenantPasarela },
         { provide: PagosRedirectService, useValue: pagosRedirect },
         { provide: ConfigService, useValue: config },
+        { provide: ItemsService, useValue: items },
+        { provide: CatalogService, useValue: catalog },
       ],
     }).compile();
     service = module.get(OnlineService);
@@ -64,7 +83,12 @@ describe('OnlineService', () => {
 
   it('checkout: calcula sin persistir y devuelve URL dummy', async () => {
     const result = await service.checkout(TENANT_ID, dto);
-    expect(calculo.calcular).toHaveBeenCalledWith(TENANT_ID, dto);
+    expect(calculo.calcular).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({
+        lineas: [expect.objectContaining({ itemId: ITEM_ID, cantidad: '2' })],
+      }),
+    );
     expect(result.checkoutUrl).toBe(
       `/tienda/pasarela?ref=${result.checkoutRef}`,
     );
@@ -137,6 +161,49 @@ describe('OnlineService', () => {
     expect(opts.metadataExtra.checkout.lineas).toEqual([
       { itemId: ITEM_ID, cantidad: '2' },
     ]);
+  });
+
+  it('pagar con presentación conserva campos en snapshot y calcula canónica', async () => {
+    tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+    metodos.findMetodosPago.mockResolvedValue([
+      { metodoPagoId: 'mp-credito', nombre: 'Crédito', habilitada: true },
+    ]);
+    pagosRedirect.iniciar.mockResolvedValue({
+      ordenId: 'orden-2',
+      urlWebpay: 'https://webpay/redirect',
+    });
+    calculo.calcular.mockResolvedValueOnce({
+      ...mockResultado,
+      lineas: [{ ...mockResultado.lineas[0], cantidad: '0.5' }],
+    });
+
+    await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', {
+      lineas: [
+        {
+          itemId: ITEM_ID,
+          cantidad: '999',
+          cantidadPresentacion: '500',
+          unidadCodigoPresentacion: 'g',
+        },
+      ],
+    });
+
+    expect(calculo.calcular).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({
+        lineas: [expect.objectContaining({ cantidad: '0.5' })],
+      }),
+    );
+    const opts = pagosRedirect.iniciar.mock.calls[0][2] as {
+      metadataExtra: { checkout: { lineas: unknown[] } };
+    };
+    expect(opts.metadataExtra.checkout.lineas[0]).toEqual({
+      itemId: ITEM_ID,
+      cantidad: '0.5',
+      cantidadPresentacion: '500',
+      unidadCodigoPresentacion: 'g',
+    });
   });
 
   it('pagar con Webpay pero sin métodos habilitados: rechaza', async () => {
