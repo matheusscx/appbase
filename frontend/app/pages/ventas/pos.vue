@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
 import { useVenta, descontarStockCatalogo, tieneCustomerData, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'

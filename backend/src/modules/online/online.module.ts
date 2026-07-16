@@ -5,6 +5,7 @@ import { PasarelaModule } from '../pasarela/pasarela.module';
 import { VentasModule } from '../ventas/ventas.module';
 import { ItemsModule } from '../items/items.module';
 import { CatalogModule } from '../catalog/catalog.module';
+import { SuscripcionesModule } from '../suscripciones/suscripciones.module';
 import { OnlineController } from './online.controller';
 import { OnlineService } from './online.service';
 import { OnlineCallbackHandler } from './online-callback.handler';

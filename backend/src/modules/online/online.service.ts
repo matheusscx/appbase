@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
-import type { CalcularVentaDto } from '../calculo-precios/dto/calcular.dto';
+import type {
+  CalcularVentaDto,
+  LineaDto,
+} from '../calculo-precios/dto/calcular.dto';
 import type { ResultadoVenta } from '../calculo-precios/calculo-precios.engine';
 import { MetodosPagoService } from '../metodos-pago/metodos-pago.service';
 import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.service';
@@ -211,7 +214,7 @@ export class OnlineService {
     }));
 
     const lineasSnapshot: CheckoutLineaSnapshot[] = [];
-    const calcularLineas = [];
+    const calcularLineas: LineaDto[] = [];
 
     for (const linea of dto.lineas) {
       assertPresentacionPareada(
