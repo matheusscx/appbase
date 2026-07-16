@@ -58,14 +58,14 @@ function personalizacionVacia(p: PersonalizacionPayload): boolean {
   return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
 }
 
-function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string) {
+function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, precioPreview: string) {
   const item = items.value.find((i) => i.id === recetaItemId.value)
   if (!item) return
   if (personalizacionVacia(payload)) {
     add(item)
   }
   else {
-    add(item, payload, resumen || undefined)
+    add(item, payload, resumen || undefined, precioPreview)
   }
   recetaDrawerOpen.value = false
   recetaItemId.value = null

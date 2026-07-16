@@ -112,6 +112,31 @@ describe('carrito helpers', () => {
     expect(r).toEqual({ lineas: [{ itemId: 'a', cantidad: '3' }] })
   })
 
+  it('toCalcularInput incluye precioUnitario cuando hay override', () => {
+    const r = toCalcularInput([
+      { item: item('a'), cantidad: '2', precioUnitarioOverride: '1500' },
+    ])
+    expect(r).toEqual({ lineas: [{ itemId: 'a', cantidad: '2', precioUnitario: '1500' }] })
+  })
+
+  it('agregarLinea merge mantiene precioUnitarioOverride', () => {
+    const receta = { ...item('r', '1000'), tipo: 'receta' }
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: 'extra-1' }],
+    }
+    const linea: CarritoLinea = {
+      item: receta,
+      cantidad: '1',
+      personalizacion: pers,
+      precioUnitarioOverride: '1500',
+    }
+    const r = agregarLinea([linea], receta, pers, undefined, '1500')
+    expect(r).toHaveLength(1)
+    expect(r[0]!.cantidad).toBe('2')
+    expect(r[0]!.precioUnitarioOverride).toBe('1500')
+  })
+
   it('descontarStockCatalogo resta las cantidades vendidas', () => {
     const catalogo = [item('a'), item('b', '50')]
     const r = descontarStockCatalogo(catalogo, [

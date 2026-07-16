@@ -25,6 +25,8 @@ export interface CarritoLinea {
   personalizacion?: PersonalizacionPayload
   /** texto UI precomputado al confirmar drawer */
   personalizacionResumen?: string
+  /** base+extras cuando la receta está personalizada */
+  precioUnitarioOverride?: string
 }
 
 export interface PagoInput {
@@ -60,9 +62,11 @@ export function agregarLinea(
   item: ItemCatalogo,
   personalizacion?: PersonalizacionPayload,
   personalizacionResumen?: string,
+  precioUnitarioOverride?: string,
 ): CarritoLinea[] {
   const pers = personalizacionVacia(personalizacion) ? undefined : personalizacion
   const resumen = pers ? personalizacionResumen : undefined
+  const precioOverride = pers ? precioUnitarioOverride : undefined
 
   const idx = lineas.findIndex(
     (l) => l.item.id === item.id && mismaPersonalizacion(l.personalizacion, pers),
@@ -79,6 +83,7 @@ export function agregarLinea(
   if (pers) {
     nueva.personalizacion = pers
     if (resumen) nueva.personalizacionResumen = resumen
+    if (precioOverride) nueva.precioUnitarioOverride = precioOverride
   }
   return [...lineas, nueva]
 }
@@ -100,7 +105,13 @@ export function setCantidad(
 
 export function toCalcularInput(lineas: CarritoLinea[]): CalcularVentaInput {
   return {
-    lineas: lineas.map((l) => ({ itemId: l.item.id, cantidad: l.cantidad })),
+    lineas: lineas.map((l) => ({
+      itemId: l.item.id,
+      cantidad: l.cantidad,
+      ...(l.precioUnitarioOverride
+        ? { precioUnitario: l.precioUnitarioOverride }
+        : {}),
+    })),
   }
 }
 
@@ -280,8 +291,15 @@ export function useVenta() {
     item: ItemCatalogo,
     personalizacion?: PersonalizacionPayload,
     personalizacionResumen?: string,
+    precioUnitarioOverride?: string,
   ) {
-    lineas.value = agregarLinea(lineas.value, item, personalizacion, personalizacionResumen)
+    lineas.value = agregarLinea(
+      lineas.value,
+      item,
+      personalizacion,
+      personalizacionResumen,
+      precioUnitarioOverride,
+    )
   }
   function quitar(index: number) {
     lineas.value = quitarLinea(lineas.value, index)

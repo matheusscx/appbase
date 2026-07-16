@@ -186,7 +186,7 @@ watch(clienteDrawerOpen, (open) => {
               {{ linea.personalizacionResumen }}
             </p>
             <p class="text-xs text-muted font-mono">
-              {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u
+              {{ formatMonto(convertirAMonedaOficial(linea.precioUnitarioOverride ?? linea.item.precioBase, linea.item.monedaId)) }} c/u
             </p>
           </div>
           <UInput
