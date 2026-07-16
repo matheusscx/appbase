@@ -554,6 +554,27 @@ CREATE UNIQUE INDEX "uq_receta_ingrediente_vivo"
   ON "receta_ingredientes" ("receta_item_id", "ingrediente_item_id")
   WHERE "eliminado_el" IS NULL;
 
+CREATE TABLE "receta_extras_permitidos" (
+  "receta_extra_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id" UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "receta_item_id" UUID NOT NULL REFERENCES "items" ("item_id"),
+  "ingrediente_item_id" UUID NOT NULL REFERENCES "items" ("item_id"),
+  "cantidad" NUMERIC(18,4) NOT NULL,
+  "unidad_codigo" TEXT NOT NULL REFERENCES "unidades_medida" ("codigo"),
+  "precio_extra" NUMERIC(18,4) NOT NULL,
+  "creado_el" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el" TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_receta_extra_vivo"
+  ON "receta_extras_permitidos" ("receta_item_id", "ingrediente_item_id")
+  WHERE "eliminado_el" IS NULL;
+
+ALTER TABLE "cuenta_lineas"
+  ADD COLUMN IF NOT EXISTS "personalizacion" JSONB;
+ALTER TABLE "venta_detalles"
+  ADD COLUMN IF NOT EXISTS "personalizacion" JSONB;
+
 -- Reglas de precio asociadas a cada item (N:M)
 CREATE TABLE "item_impuestos" (
   "item_id"     UUID NOT NULL REFERENCES "items" ("item_id") ON DELETE CASCADE,

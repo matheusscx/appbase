@@ -13,7 +13,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { RecetaIngredienteInputDto } from './create-item.dto';
+import {
+  RecetaExtraInputDto,
+  RecetaIngredienteInputDto,
+} from './create-item.dto';
 
 export class UpdateItemDto {
   @IsString()
@@ -91,6 +94,12 @@ export class UpdateItemDto {
   @Type(() => RecetaIngredienteInputDto)
   @IsOptional()
   ingredientes?: RecetaIngredienteInputDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecetaExtraInputDto)
+  @IsOptional()
+  extrasPermitidos?: RecetaExtraInputDto[];
 
   // Reglas N:M (undefined = no tocar; [] = limpiar todas)
   @IsArray()

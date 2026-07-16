@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
+import type { PersonalizacionRecetaSnapshot } from '../../../common/dto/personalizacion-receta.dto';
 
 @Entity('venta_detalles')
 export class VentaDetalle {
@@ -86,6 +87,9 @@ export class VentaDetalle {
     default: '0',
   })
   totalLinea: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  personalizacion: PersonalizacionRecetaSnapshot | null;
 
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;

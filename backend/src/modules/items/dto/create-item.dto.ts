@@ -62,6 +62,21 @@ export class RecetaIngredienteInputDto {
   bloqueante?: boolean;
 }
 
+export class RecetaExtraInputDto {
+  @IsUUID()
+  ingredienteItemId: string;
+
+  @IsNumberString()
+  cantidad: string;
+
+  @IsString()
+  @IsNotEmpty()
+  unidadCodigo: string;
+
+  @IsNumberString()
+  precioExtra: string;
+}
+
 export class CreateItemDto {
   @IsString()
   @IsNotEmpty()
@@ -136,6 +151,12 @@ export class CreateItemDto {
   @Type(() => RecetaIngredienteInputDto)
   @IsOptional()
   ingredientes?: RecetaIngredienteInputDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecetaExtraInputDto)
+  @IsOptional()
+  extrasPermitidos?: RecetaExtraInputDto[];
 
   // Extensión servicio
   @IsInt()
