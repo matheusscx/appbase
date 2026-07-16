@@ -44,6 +44,7 @@ interface Item {
   recargosIds?: string[]
   descuentosIds?: string[]
   ingredientes?: { ingredienteItemId: string; ingredienteNombre: string; cantidad: string; unidadCodigo: string; bloqueante: boolean }[]
+  extrasPermitidos?: { ingredienteItemId: string; ingredienteNombre?: string; cantidad: string; unidadCodigo: string; precioExtra: string }[]
   disponible?: number | null
 }
 
@@ -52,6 +53,13 @@ interface IngredienteRow {
   cantidad: string
   unidadCodigo: string
   bloqueante: boolean
+}
+
+interface ExtraPermitidoRow {
+  ingredienteItemId: string
+  cantidad: string
+  unidadCodigo: string
+  precioExtra: string
 }
 
 interface SerieRow { serie: string; condicion: string; garantiaHasta: string }
@@ -276,6 +284,7 @@ function emptyForm() {
     frecuencia: 'mensual',
     // ingredientes (modo receta)
     ingredientes: [] as IngredienteRow[],
+    extrasPermitidos: [] as ExtraPermitidoRow[],
     // reglas
     impuestosIds: [] as string[],
     recargosIds: [] as string[],
@@ -604,6 +613,12 @@ async function abrirEditar(item: Item) {
         unidadCodigo: i.unidadCodigo,
         bloqueante: i.bloqueante,
       })),
+      extrasPermitidos: (detalle.extrasPermitidos ?? []).map(e => ({
+        ingredienteItemId: e.ingredienteItemId,
+        cantidad: e.cantidad,
+        unidadCodigo: e.unidadCodigo,
+        precioExtra: e.precioExtra,
+      })),
       impuestosIds: detalle.impuestosIds ?? [],
       recargosIds: detalle.recargosIds ?? [],
       descuentosIds: detalle.descuentosIds ?? [],
@@ -738,6 +753,7 @@ async function guardar() {
       payload.requiereCita = form.value.requiereCita
     } else if (form.value.tipo === 'receta') {
       payload.ingredientes = form.value.ingredientes
+      payload.extrasPermitidos = form.value.extrasPermitidos
     } else {
       payload.frecuencia = form.value.frecuencia
     }
@@ -1419,6 +1435,59 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               <p v-else class="text-xs text-muted">
                 Completá ingredientes (insumo, cantidad y unidad) para calcular el costo.
               </p>
+
+              <div class="flex items-center justify-between pt-2">
+                <p class="text-sm font-medium text-muted">Extras permitidos ({{ form.extrasPermitidos.length }})</p>
+                <UButton
+                  size="xs"
+                  variant="ghost"
+                  icon="i-lucide-plus"
+                  @click="form.extrasPermitidos = [...form.extrasPermitidos, { ingredienteItemId: '', cantidad: '', unidadCodigo: '', precioExtra: '' }]"
+                >Agregar extra</UButton>
+              </div>
+
+              <div
+                v-for="(extra, idx) in form.extrasPermitidos"
+                :key="idx"
+                class="grid grid-cols-5 gap-2 items-end"
+              >
+                <UFormField label="Ingrediente" class="col-span-2">
+                  <USelectMenu
+                    v-model="form.extrasPermitidos[idx].ingredienteItemId"
+                    :items="productosIngredienteOpts"
+                    value-key="value"
+                    class="w-full"
+                  />
+                </UFormField>
+                <UFormField label="Cantidad">
+                  <UInput v-model="form.extrasPermitidos[idx].cantidad" inputmode="decimal" placeholder="0" class="w-full" />
+                </UFormField>
+                <UFormField label="Unidad">
+                  <USelectMenu
+                    v-model="form.extrasPermitidos[idx].unidadCodigo"
+                    :items="unidadesMedidaStore.unidades
+                      .filter(u => u.magnitud === unidadesMedidaStore.magnitudDe(
+                        productosIngrediente.find(p => p.id === form.extrasPermitidos[idx].ingredienteItemId)?.unidadMedida,
+                      ))
+                      .map(u => ({ label: u.codigo, value: u.codigo }))"
+                    value-key="value"
+                    class="w-full"
+                  />
+                </UFormField>
+                <div class="flex items-end gap-2">
+                  <UFormField label="Precio extra" class="flex-1">
+                    <MoneyInput v-model="form.extrasPermitidos[idx].precioExtra" :moneda-id="form.monedaId" class="w-full" />
+                  </UFormField>
+                  <UButton
+                    color="error"
+                    variant="ghost"
+                    icon="i-lucide-trash-2"
+                    size="sm"
+                    class="self-end"
+                    @click="form.extrasPermitidos = form.extrasPermitidos.filter((_, i) => i !== idx)"
+                  />
+                </div>
+              </div>
             </div>
           </template>
 
