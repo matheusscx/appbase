@@ -2170,7 +2170,17 @@ export class SeederService implements OnApplicationBootstrap {
       [[PAN_ID, CARNE_ID, QUESO_ID]],
     );
 
-    if (exists.length) return;
+    const RE_EXTRA_QUESO_ID = uuid(266);
+
+    if (exists.length) {
+      await this.seedRecetaExtraQuesoDemo(
+        PARIS,
+        HAMBURGUESA_ID,
+        QUESO_ID,
+        RE_EXTRA_QUESO_ID,
+      );
+      return;
+    }
 
     const ingredientes = [
       {
@@ -2250,6 +2260,33 @@ export class SeederService implements OnApplicationBootstrap {
         CARNE_ID,
         QUESO_ID,
       ],
+    );
+    await this.seedRecetaExtraQuesoDemo(
+      PARIS,
+      HAMBURGUESA_ID,
+      QUESO_ID,
+      RE_EXTRA_QUESO_ID,
+    );
+  }
+
+  /** Extra "porción de queso" en Hamburguesa Clásica (idempotente). */
+  private async seedRecetaExtraQuesoDemo(
+    tenantId: string,
+    recetaItemId: string,
+    quesoItemId: string,
+    recetaExtraId: string,
+  ): Promise<void> {
+    const extraExists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM receta_extras_permitidos WHERE receta_extra_id = $1`,
+      [recetaExtraId],
+    );
+    if (extraExists.length) return;
+
+    await this.dataSource.query(
+      `INSERT INTO receta_extras_permitidos
+         (receta_extra_id, tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, precio_extra)
+       VALUES ($1, $2, $3, $4, '20', 'g', '800')`,
+      [recetaExtraId, tenantId, recetaItemId, quesoItemId],
     );
   }
 
