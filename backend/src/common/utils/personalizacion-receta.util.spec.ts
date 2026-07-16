@@ -16,6 +16,30 @@ describe('personalizacion-receta.util', () => {
     expect(a).toBe(b);
   });
 
+  it('hash estable sin importar orden de extras', () => {
+    const extraA = {
+      ingredienteItemId: 'i1',
+      cantidad: '1',
+      unidadCodigo: 'unidad',
+      precioExtra: '500',
+    };
+    const extraB = {
+      ingredienteItemId: 'i2',
+      cantidad: '2',
+      unidadCodigo: 'unidad',
+      precioExtra: '800',
+    };
+    const a = hashPersonalizacion({
+      omitidos: [],
+      extras: [extraB, extraA],
+    });
+    const b = hashPersonalizacion({
+      omitidos: [],
+      extras: [extraA, extraB],
+    });
+    expect(a).toBe(b);
+  });
+
   it('hash distinto si cambia comentario', () => {
     expect(
       hashPersonalizacion({ omitidos: [], extras: [], comentario: 'medio' }),
