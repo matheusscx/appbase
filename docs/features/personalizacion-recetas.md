@@ -229,7 +229,7 @@ Tras arrancar el backend, la receta **Hamburguesa Clásica** (`550e8400-e29b-41d
 
 | Campo | Valor |
 |-------|-------|
-| `receta_extra_id` | `550e8400-e29b-41d4-a716-446655440266` |
+| `receta_extra_id` | `550e8400-e29b-41d4-a716-446655440276` |
 | Ingrediente | Queso laminado (`…440258`) |
 | Cantidad / unidad | `20` / `g` |
 | `precio_extra` | `800` |

@@ -2170,7 +2170,7 @@ export class SeederService implements OnApplicationBootstrap {
       [[PAN_ID, CARNE_ID, QUESO_ID]],
     );
 
-    const RE_EXTRA_QUESO_ID = uuid(266);
+    const RE_EXTRA_QUESO_ID = uuid(276);
 
     if (exists.length) {
       await this.seedRecetaExtraQuesoDemo(
