@@ -12,6 +12,20 @@ import { conTimeout } from '~/utils/con-timeout'
 /** Techo de espera de QZ Tray al imprimir (impresora apagada / host inalcanzable). */
 const PRINT_TIMEOUT_MS = 5_000
 const PRINT_TIMEOUT_MSG = 'La impresora no respondió (timeout 5 s)'
+const ESC_POS_CP850 = '\x1B\x74\x02'
+const ESC_POS_CORTE = '\x1B\x64\x04\x1D\x56\x00'
+
+export function buildQzConfigOptions() {
+  return { encoding: 'Cp850' }
+}
+
+export function buildEscposPrintData(lineas: string[]): string[] {
+  return [
+    ESC_POS_CP850,
+    `${lineas.join('\n')}\n`,
+    ESC_POS_CORTE,
+  ]
+}
 
 // ── Tipos (espejo del contrato del backend impresoras) ──────────────────────
 
@@ -110,15 +124,18 @@ async function imprimirEn(
   // "Red": QZ abre un socket raw a host:puerto (ESC/POS TCP 9100) y escribe los
   // bytes directamente, sin pasar por una cola del SO. Las líneas lógicas se unen
   // con '\n' (0x0A = avance de línea) para que el printer no las imprima pegadas.
+  const configOptions = buildQzConfigOptions()
   const config = impresora.tipoConexion === 'sistema'
-    ? qz.configs.create(impresora.nombreCola as string)
-    : qz.configs.create({ host: impresora.host as string, port: Number(impresora.puerto) })
+    ? qz.configs.create(impresora.nombreCola as string, configOptions)
+    : qz.configs.create(
+        { host: impresora.host as string, port: Number(impresora.puerto) },
+        configOptions,
+      )
   try {
     // ESC/POS al final del ticket: avanza 4 líneas (ESC d 4) y corta total
     // (GS V 0). Las impresoras sin cutter ignoran el comando sin efecto.
-    const CORTE = '\x1B\x64\x04\x1D\x56\x00'
     await conTimeout(
-      qz.print(config, [lineas.join('\n') + '\n', CORTE]),
+      qz.print(config, buildEscposPrintData(lineas)),
       PRINT_TIMEOUT_MS,
       PRINT_TIMEOUT_MSG,
     )

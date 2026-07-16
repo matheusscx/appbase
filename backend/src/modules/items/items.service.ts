@@ -1287,13 +1287,22 @@ export class ItemsService {
       if (!cat) {
         throw new BadRequestException('Extra no permitido para esta receta');
       }
+      const unidades = new Decimal(e.unidades ?? 1);
+      if (unidades.lt(1) || !unidades.isInteger()) {
+        throw new BadRequestException(
+          'Las unidades del extra deben ser un entero mayor o igual a 1',
+        );
+      }
       extrasResolved.push({
         ingredienteItemId: cat.ingredienteItemId,
         cantidad: cat.cantidad,
         unidadCodigo: cat.unidadCodigo,
         precioExtra: cat.precioExtra,
+        unidades: unidades.toString(),
       });
-      precioExtraTotal = precioExtraTotal.plus(cat.precioExtra);
+      precioExtraTotal = precioExtraTotal.plus(
+        new Decimal(cat.precioExtra).mul(unidades),
+      );
     }
 
     return {
@@ -1362,12 +1371,17 @@ export class ItemsService {
         const cat = extrasCat.find(
           (x) => x.ingredienteItemId === extra.ingredienteItemId,
         );
+        // Porción del extra × cuántas veces se agregó (unidades). Snapshots
+        // antiguos sin `unidades` equivalen a 1.
+        const cantidad = new Decimal(extra.cantidad)
+          .mul(extra.unidades ?? '1')
+          .toString();
         return {
           ingredienteItemId: extra.ingredienteItemId,
           ingredienteNombre: cat?.ingredienteNombre ?? 'Extra',
           ingredienteUnidadMedida:
             cat?.ingredienteUnidadMedida ?? extra.unidadCodigo,
-          cantidad: extra.cantidad,
+          cantidad,
           unidadCodigo: extra.unidadCodigo,
           bloqueante: false,
         };

@@ -1506,10 +1506,33 @@ describe('ItemsService', () => {
             cantidad: '30',
             unidadCodigo: 'g',
             precioExtra: '500.0000',
+            unidades: '1',
           },
         ],
         comentario: 'sin tomate',
       });
+    });
+
+    it('multiplica el precio del extra por unidades y las guarda en el snapshot', async () => {
+      mockIngredientesYExtras();
+
+      const result = await service.resolverPersonalizacionReceta(
+        managerMock as any,
+        TENANT,
+        RECETA_ID,
+        { extras: [{ ingredienteItemId: QUESO_ID, unidades: 3 }] },
+      );
+
+      expect(result.precioExtraTotal).toBe('1500.0000');
+      expect(result.snapshot.extras).toEqual([
+        {
+          ingredienteItemId: QUESO_ID,
+          cantidad: '30',
+          unidadCodigo: 'g',
+          precioExtra: '500.0000',
+          unidades: '3',
+        },
+      ]);
     });
 
     it('rechaza extra no permitido para la receta', async () => {
@@ -1778,6 +1801,47 @@ describe('ItemsService', () => {
       ).not.toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ itemId: 'tomate' }),
+      );
+    });
+
+    it('multiplica el consumo del extra por sus unidades', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin ingredientes base
+        .mockResolvedValueOnce([
+          {
+            ingrediente_item_id: 'queso',
+            ingrediente_nombre: 'Queso',
+            ingrediente_unidad_medida: 'kg',
+            cantidad: '30',
+            unidad_codigo: 'g',
+            precio_extra: '500.0000',
+          },
+        ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.12');
+
+      const snapshot = {
+        omitidos: [],
+        extras: [
+          {
+            ingredienteItemId: 'queso',
+            cantidad: '30',
+            unidadCodigo: 'g',
+            precioExtra: '500.0000',
+            unidades: '2',
+          },
+        ],
+      };
+
+      await service.venderIngredientesReceta(managerMock as any, {
+        ...PARAMS,
+        snapshot,
+      });
+
+      // porción 30 g × 2 unidades × 2 vendidas = 120 g
+      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith(
+        '120',
+        'g',
+        'kg',
       );
     });
   });

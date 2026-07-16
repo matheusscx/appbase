@@ -45,12 +45,30 @@ describe('carrito helpers', () => {
     const receta = { ...item('r'), tipo: 'receta' }
     const pers: PersonalizacionPayload = {
       omitidos: ['ing-1'],
-      extras: [{ ingredienteItemId: 'extra-1' }],
+      extras: [{ ingredienteItemId: 'extra-1', unidades: 1 }],
     }
     const linea: CarritoLinea = { item: receta, cantidad: '1', personalizacion: pers }
     const r = agregarLinea([linea], receta, pers)
     expect(r).toHaveLength(1)
     expect(r[0]!.cantidad).toBe('2')
+  })
+
+  it('agregarLinea crea dos líneas si mismo extra pero distintas unidades', () => {
+    const receta = { ...item('r'), tipo: 'receta' }
+    const persA: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: 'extra-1', unidades: 1 }],
+    }
+    const persB: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: 'extra-1', unidades: 2 }],
+    }
+    const r = agregarLinea(
+      [{ item: receta, cantidad: '1', personalizacion: persA }],
+      receta,
+      persB,
+    )
+    expect(r).toHaveLength(2)
   })
 
   it('agregarLinea crea dos líneas si mismo item pero distinta personalización', () => {
@@ -123,7 +141,7 @@ describe('carrito helpers', () => {
     const receta = { ...item('r', '1000'), tipo: 'receta' }
     const pers: PersonalizacionPayload = {
       omitidos: [],
-      extras: [{ ingredienteItemId: 'extra-1' }],
+      extras: [{ ingredienteItemId: 'extra-1', unidades: 1 }],
     }
     const linea: CarritoLinea = {
       item: receta,

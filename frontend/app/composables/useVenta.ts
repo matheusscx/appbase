@@ -45,7 +45,7 @@ function personalizacionVacia(p?: PersonalizacionPayload): boolean {
 function canonicalPersonalizacion(p?: PersonalizacionPayload): string {
   if (!p || personalizacionVacia(p)) return ''
   const omitidos = [...p.omitidos].sort()
-  const extras = p.extras.map((e) => e.ingredienteItemId).sort()
+  const extras = p.extras.map((e) => `${e.ingredienteItemId}:${e.unidades}`).sort()
   const comentario = p.comentario?.trim() ?? ''
   return JSON.stringify({ omitidos, extras, comentario })
 }

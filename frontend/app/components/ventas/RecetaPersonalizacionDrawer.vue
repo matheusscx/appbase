@@ -26,7 +26,8 @@ const apiUrl = config.public.apiUrl
 const receta = ref<RecetaDetallePersonalizacion | null>(null)
 const loading = ref(false)
 const incluidos = ref<Record<string, boolean>>({})
-const extrasChecked = ref<Record<string, boolean>>({})
+/** unidades por extra; ausente o 0 = no seleccionado. */
+const extrasCantidad = ref<Record<string, number>>({})
 const comentario = ref('')
 
 function resetForm(detalle: RecetaDetallePersonalizacion) {
@@ -36,8 +37,21 @@ function resetForm(detalle: RecetaDetallePersonalizacion) {
       !(!ing.bloqueante && sinStock(ing.stock))
   }
   incluidos.value = nextIncluidos
-  extrasChecked.value = {}
+  extrasCantidad.value = {}
   comentario.value = ''
+}
+
+function extraSeleccionado(id: string): boolean {
+  return (extrasCantidad.value[id] ?? 0) >= 1
+}
+
+function toggleExtra(id: string, checked: boolean) {
+  if (checked) extrasCantidad.value[id] = 1
+  else delete extrasCantidad.value[id]
+}
+
+function setExtraCantidad(id: string, unidades: number) {
+  extrasCantidad.value[id] = Math.max(1, Math.floor(unidades || 1))
 }
 
 async function cargarReceta(id: string) {
@@ -65,7 +79,7 @@ watch(
     if (!isOpen) {
       receta.value = null
       incluidos.value = {}
-      extrasChecked.value = {}
+      extrasCantidad.value = {}
       comentario.value = ''
     }
   },
@@ -81,7 +95,9 @@ function extraDeshabilitado(extra: RecetaDetallePersonalizacion['extrasPermitido
 
 const extrasSeleccionados = computed(() => {
   if (!receta.value) return []
-  return receta.value.extrasPermitidos.filter((e) => extrasChecked.value[e.ingredienteItemId])
+  return receta.value.extrasPermitidos
+    .filter((e) => extraSeleccionado(e.ingredienteItemId))
+    .map((e) => ({ ...e, unidades: extrasCantidad.value[e.ingredienteItemId] ?? 1 }))
 })
 
 const precioPreview = computed(() => {
@@ -94,8 +110,11 @@ const resumenPreview = computed(() => {
   const nombresOmitidos = receta.value.ingredientes
     .filter((ing) => !incluidos.value[ing.ingredienteItemId])
     .map((ing) => ing.ingredienteNombre)
-  const nombresExtras = extrasSeleccionados.value.map((e) => e.ingredienteNombre)
-  return resumenPersonalizacion(nombresOmitidos, nombresExtras, comentario.value)
+  const extras = extrasSeleccionados.value.map((e) => ({
+    nombre: e.ingredienteNombre,
+    unidades: e.unidades,
+  }))
+  return resumenPersonalizacion(nombresOmitidos, extras, comentario.value)
 })
 
 function cancelar() {
@@ -107,10 +126,13 @@ function agregar() {
   const omitidos = receta.value.ingredientes
     .filter((ing) => !incluidos.value[ing.ingredienteItemId])
     .map((ing) => ing.ingredienteItemId)
-  const extrasIds = extrasSeleccionados.value.map((e) => e.ingredienteItemId)
+  const extras = extrasSeleccionados.value.map((e) => ({
+    ingredienteItemId: e.ingredienteItemId,
+    unidades: e.unidades,
+  }))
   emit(
     'confirm',
-    buildPersonalizacionPayload(omitidos, extrasIds, comentario.value),
+    buildPersonalizacionPayload(omitidos, extras, comentario.value),
     resumenPreview.value,
     precioPreview.value,
   )
@@ -181,13 +203,24 @@ function agregar() {
               :key="extra.ingredienteItemId"
               class="px-4 py-3"
             >
-              <UCheckbox
-                :model-value="extrasChecked[extra.ingredienteItemId] ?? false"
-                :disabled="extraDeshabilitado(extra)"
-                :label="extra.ingredienteNombre"
-                :description="`+${formatMonto(extra.precioExtra, receta.monedaId)} · ${extra.cantidad} ${extra.unidadCodigo}`"
-                @update:model-value="extrasChecked[extra.ingredienteItemId] = $event"
-              />
+              <div class="flex items-start justify-between gap-3">
+                <UCheckbox
+                  :model-value="extraSeleccionado(extra.ingredienteItemId)"
+                  :disabled="extraDeshabilitado(extra)"
+                  :label="extra.ingredienteNombre"
+                  :description="`+${formatMonto(extra.precioExtra, receta.monedaId)} · ${extra.cantidad} ${extra.unidadCodigo}`"
+                  @update:model-value="toggleExtra(extra.ingredienteItemId, $event)"
+                />
+                <UInputNumber
+                  v-if="extraSeleccionado(extra.ingredienteItemId)"
+                  :model-value="extrasCantidad[extra.ingredienteItemId] ?? 1"
+                  :min="1"
+                  :disabled="extraDeshabilitado(extra)"
+                  class="w-28 shrink-0"
+                  :aria-label="`Cantidad de ${extra.ingredienteNombre}`"
+                  @update:model-value="setExtraCantidad(extra.ingredienteItemId, $event)"
+                />
+              </div>
               <p
                 v-if="extraDeshabilitado(extra)"
                 class="mt-1 flex items-center gap-1 pl-6 text-xs text-warning"

@@ -48,6 +48,32 @@ describe('personalizacion-receta.util', () => {
     );
   });
 
+  it('hash distinto si cambian las unidades de un extra', () => {
+    const base = {
+      ingredienteItemId: 'i1',
+      cantidad: '1',
+      unidadCodigo: 'unidad',
+      precioExtra: '500',
+    };
+    expect(
+      hashPersonalizacion({ omitidos: [], extras: [{ ...base, unidades: '1' }] }),
+    ).not.toBe(
+      hashPersonalizacion({ omitidos: [], extras: [{ ...base, unidades: '2' }] }),
+    );
+  });
+
+  it('hash trata unidades ausente como 1 (compat snapshots antiguos)', () => {
+    const base = {
+      ingredienteItemId: 'i1',
+      cantidad: '1',
+      unidadCodigo: 'unidad',
+      precioExtra: '500',
+    };
+    expect(hashPersonalizacion({ omitidos: [], extras: [{ ...base }] })).toBe(
+      hashPersonalizacion({ omitidos: [], extras: [{ ...base, unidades: '1' }] }),
+    );
+  });
+
   it('textoComanda arma Sin / Extra / comentario', () => {
     const nombres = new Map([
       ['i1', 'Cebolla'],
@@ -70,5 +96,26 @@ describe('personalizacion-receta.util', () => {
         nombres,
       ),
     ).toBe('Sin Cebolla · Extra Queso · término medio');
+  });
+
+  it('textoComanda muestra xN cuando unidades > 1', () => {
+    const nombres = new Map([['i2', 'Queso']]);
+    expect(
+      textoComandaPersonalizacion(
+        {
+          omitidos: [],
+          extras: [
+            {
+              ingredienteItemId: 'i2',
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioExtra: '800',
+              unidades: '3',
+            },
+          ],
+        },
+        nombres,
+      ),
+    ).toBe('Extra Queso x3');
   });
 });

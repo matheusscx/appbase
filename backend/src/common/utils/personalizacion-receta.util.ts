@@ -9,9 +9,9 @@ export function hashPersonalizacion(
   const normalized = p ?? { omitidos: [], extras: [] };
   const canonical = {
     omitidos: [...normalized.omitidos].sort(),
-    extras: [...normalized.extras].sort((a, b) =>
-      a.ingredienteItemId.localeCompare(b.ingredienteItemId),
-    ),
+    extras: [...normalized.extras]
+      .map((e) => ({ ...e, unidades: e.unidades ?? '1' }))
+      .sort((a, b) => a.ingredienteItemId.localeCompare(b.ingredienteItemId)),
     ...(normalized.comentario !== undefined
       ? { comentario: normalized.comentario }
       : {}),
@@ -32,9 +32,9 @@ export function textoComandaPersonalizacion(
   }
 
   for (const extra of p.extras) {
-    partes.push(
-      `Extra ${nombres.get(extra.ingredienteItemId) ?? extra.ingredienteItemId}`,
-    );
+    const nombre = nombres.get(extra.ingredienteItemId) ?? extra.ingredienteItemId;
+    const unidades = Number(extra.unidades ?? '1');
+    partes.push(unidades > 1 ? `Extra ${nombre} x${unidades}` : `Extra ${nombre}`);
   }
 
   if (p.comentario) {

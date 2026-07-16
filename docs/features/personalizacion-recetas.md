@@ -10,7 +10,7 @@
 
 ### What is it?
 
-Al seleccionar una **receta** en el catálogo (POS o Salones), se abre un drawer de personalización antes de agregar la línea al carrito o cuenta. El operador puede omitir ingredientes de la receta base (“sin cebolla”), elegir **extras permitidos** con cargo (“extra queso”) y dejar un comentario libre (“término medio”). Los **productos** (`tipo='producto'`) siguen agregándose con un solo click.
+Al seleccionar una **receta** en el catálogo (POS o Salones), se abre un drawer de personalización antes de agregar la línea al carrito o cuenta. El operador puede omitir ingredientes de la receta base (“sin cebolla”), elegir **extras permitidos** con cargo indicando **cuántas unidades** de cada uno (“extra queso ×2”, checkbox + stepper) y dejar un comentario libre (“término medio”). Los **productos** (`tipo='producto'`) siguen agregándose con un solo click.
 
 ### Why does it exist?
 
@@ -21,10 +21,10 @@ Food-service necesita adaptar el plato al pedido del comensal sin perder trazabi
 **Included:**
 - Drawer de personalización al click en receta (POS y Salones); productos sin cambio.
 - Configurar `extrasPermitidos` al crear/editar receta (ingrediente + cantidad + unidad + `precioExtra` por porción).
-- Snapshot en la línea: `omitidos`, `extras` elegidos, `comentario` (máx. 200 caracteres).
-- Precio cobrado = `precioBase` + Σ `precioExtra` de extras; **omitir no rebaja** el precio.
+- Snapshot en la línea: `omitidos`, `extras` elegidos con `unidades`, `comentario` (máx. 200 caracteres).
+- Precio cobrado = `precioBase` + Σ (`precioExtra` × `unidades`) de extras; **omitir no rebaja** el precio.
 - Persistencia del snapshot en **Salones** (`cuenta_lineas.personalizacion` JSONB); POS en memoria (`useVenta`).
-- Al vender / cerrar cuenta: inventario según snapshot (base − omitidos + extras).
+- Al vender / cerrar cuenta: inventario según snapshot (base − omitidos + extras × `unidades`).
 - Comanda con texto derivado del snapshot (omitidos, extras, comentario).
 - Stock en drawer: ingredientes opcionales y extras sin stock → warning + no seleccionables; bloqueantes mantienen reglas de venta existentes; extras al vender son no bloqueantes (omitir + advertencia si hay carrera).
 - Merge de líneas en cuenta solo si mismo `itemId` **y** misma personalización.
@@ -32,7 +32,6 @@ Food-service necesita adaptar el plato al pedido del comensal sin perder trazabi
 **NOT included (future):**
 - Persistir carrito del POS (draft / localStorage).
 - Recálculo de precio al omitir ingredientes.
-- Cantidad libre de extras en el drawer (un extra = la porción configurada).
 - Editar personalización de una línea ya agregada.
 - Canal online / tienda.
 - Extras bloqueantes configurables.
@@ -65,9 +64,10 @@ Un mismo ingrediente puede ser base de la receta **y** extra permitido (“extra
   omitidos: string[]  // ingredienteItemId quitados de la receta base
   extras: {
     ingredienteItemId: string
-    cantidad: string
+    cantidad: string     // porción por unidad de extra (del catálogo)
     unidadCodigo: string
-    precioExtra: string  // congelado al confirmar
+    precioExtra: string  // cargo por unidad, congelado al confirmar
+    unidades?: string    // cuántas veces se agrega el extra (≥ 1); ausente = 1 (compat)
   }[]
   comentario?: string
 }
@@ -79,7 +79,7 @@ Columnas:
 
 ### Precio
 
-`precioUnitario` efectivo = `item.precioBase + Σ precioExtra` de extras elegidos. El backend recalcula y valida; no confía en el precio enviado por el cliente. Omitir ingredientes **no** reduce el precio.
+`precioUnitario` efectivo = `item.precioBase + Σ (precioExtra × unidades)` de extras elegidos. El backend recalcula y valida; no confía en el precio enviado por el cliente. Omitir ingredientes **no** reduce el precio.
 
 ### Stock
 
@@ -142,7 +142,7 @@ Request (fragmento):
       "cantidad": "1",
       "personalizacion": {
         "omitidos": ["<ingrediente-opcional>"],
-        "extras": [{ "ingredienteItemId": "<queso>" }],
+        "extras": [{ "ingredienteItemId": "<queso>", "unidades": 2 }],
         "comentario": "término medio"
       }
     }
@@ -151,7 +151,7 @@ Request (fragmento):
 }
 ```
 
-Backend: valida omitidos ⊆ ingredientes; extras ∈ `receta_extras_permitidos`; congela snapshot; recalcula precio; `venderIngredientesReceta` con base − omitidos + extras.
+Backend: valida omitidos ⊆ ingredientes; extras ∈ `receta_extras_permitidos`; `unidades` entero ≥ 1 (default 1); congela snapshot; recalcula precio (× unidades); `venderIngredientesReceta` con base − omitidos + extras (porción × unidades).
 
 ### POST /cuentas/:id/lineas — `personalizacion`
 
@@ -165,7 +165,7 @@ Request:
   "cantidad": "1",
   "personalizacion": {
     "omitidos": [],
-    "extras": [{ "ingredienteItemId": "<queso>" }],
+    "extras": [{ "ingredienteItemId": "<queso>", "unidades": 1 }],
     "comentario": "sin cebolla cruda"
   }
 }
@@ -200,8 +200,8 @@ Merge por `(itemId, hash(personalizacion))`. Al cerrar cuenta, el snapshot pasa 
 
 ### Drawer compartido
 
-- `components/ventas/RecetaPersonalizacionDrawer.vue` (`VentasRecetaPersonalizacionDrawer`)
-- `composables/useRecetaPersonalizacion.ts` — helpers (resumen, cargos, validación vacía).
+- `components/ventas/RecetaPersonalizacionDrawer.vue` (`VentasRecetaPersonalizacionDrawer`) — extras con checkbox + `UInputNumber` (stepper, min 1) para elegir unidades.
+- `composables/useRecetaPersonalizacion.ts` — helpers (resumen con `xN`, cargos × unidades, payload con `unidades`, validación vacía).
 
 ### POS
 

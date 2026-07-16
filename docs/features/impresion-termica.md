@@ -110,6 +110,11 @@ pagado (evita el diálogo) queda como mejora futura opcional.
 función) para no romper el SSR: es una librería solo-navegador. Los tickets se arman
 como `string[]` de líneas lógicas y el composable las une con `\n` antes de enviarlas.
 
+**Acentos / encoding:** el transporte usa `encoding: 'Cp850'` en `qz.configs.create`
+y antepone `ESC t 2` (`\x1B\x74\x02`) antes del texto para seleccionar CP850 en
+ESC/POS. Esto evita que `á`, `é`, `ñ`, `ó`, `ú`, `¡` se impriman como caracteres
+corruptos en térmicas que no interpretan UTF-8.
+
 La conexión "de red" (`tipoConexion='red'`) abre un socket raw a `host:puerto`
 (típico ESC/POS TCP 9100), sin necesidad de instalar la impresora como cola del
 sistema operativo. **Ojo:** un `ping` (ICMP) a la impresora no garantiza que el
@@ -164,7 +169,7 @@ cd backend && npx jest impresoras categorias salones
 ### Unit (frontend)
 
 ```bash
-cd frontend && npx vitest run app/utils/ticket-builder.spec.ts
+cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/useImpresoras.spec.ts
 ```
 
 ### Manual

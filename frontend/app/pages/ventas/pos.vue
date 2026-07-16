@@ -179,6 +179,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
                 omitidos: l.personalizacion.omitidos,
                 extras: l.personalizacion.extras.map((e) => ({
                   ingredienteItemId: e.ingredienteItemId,
+                  unidades: e.unidades,
                 })),
                 ...(l.personalizacion.comentario
                   ? { comentario: l.personalizacion.comentario }

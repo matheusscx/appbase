@@ -49,7 +49,7 @@ export interface CuentaLineaDetalle {
   cantidad: string
   personalizacion?: {
     omitidos: string[]
-    extras: { ingredienteItemId: string, cantidad: string, unidadCodigo: string, precioExtra: string }[]
+    extras: { ingredienteItemId: string, cantidad: string, unidadCodigo: string, precioExtra: string, unidades: string }[]
     comentario?: string
   } | null
   personalizacionTexto?: string
@@ -88,7 +88,7 @@ export function precioUnitarioLinea(linea: CuentaLineaDetalle): string {
   const extras = linea.personalizacion?.extras ?? []
   if (extras.length === 0) return base.toString()
   return extras.reduce(
-    (acc, e) => acc.plus(new Decimal(e.precioExtra || '0')),
+    (acc, e) => acc.plus(new Decimal(e.precioExtra || '0').mul(e.unidades || '1')),
     base,
   ).toString()
 }

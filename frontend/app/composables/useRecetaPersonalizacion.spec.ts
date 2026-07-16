@@ -21,27 +21,37 @@ describe('sinStock', () => {
 })
 
 describe('precioConExtras', () => {
-  it('precioConExtras suma', () =>
-    expect(precioConExtras('5000', [{ precioExtra: '800' }])).toBe('5800'))
+  it('precioConExtras suma 1 unidad', () =>
+    expect(precioConExtras('5000', [{ precioExtra: '800', unidades: 1 }])).toBe('5800'))
+
+  it('precioConExtras multiplica por unidades', () =>
+    expect(precioConExtras('5000', [{ precioExtra: '800', unidades: 3 }])).toBe('7400'))
 
   it('precioConExtras sin extras devuelve base', () => {
     expect(precioConExtras('5000', [])).toBe('5000')
   })
 
-  it('precioConExtras suma varios extras', () => {
+  it('precioConExtras suma varios extras con sus unidades', () => {
     expect(
-      precioConExtras('5000', [{ precioExtra: '800' }, { precioExtra: '200' }]),
-    ).toBe('6000')
+      precioConExtras('5000', [
+        { precioExtra: '800', unidades: 2 },
+        { precioExtra: '200', unidades: 1 },
+      ]),
+    ).toBe('6800')
   })
 })
 
 describe('buildPersonalizacionPayload', () => {
-  it('arma omitidos, extras y comentario', () => {
+  it('arma omitidos, extras con unidades y comentario', () => {
     expect(
-      buildPersonalizacionPayload(['ing-1'], ['extra-1'], 'sin sal'),
+      buildPersonalizacionPayload(
+        ['ing-1'],
+        [{ ingredienteItemId: 'extra-1', unidades: 2 }],
+        'sin sal',
+      ),
     ).toEqual({
       omitidos: ['ing-1'],
-      extras: [{ ingredienteItemId: 'extra-1' }],
+      extras: [{ ingredienteItemId: 'extra-1', unidades: 2 }],
       comentario: 'sin sal',
     })
   })
@@ -62,14 +72,24 @@ describe('buildPersonalizacionPayload', () => {
 
 describe('resumenPersonalizacion', () => {
   it('resumen', () =>
-    expect(resumenPersonalizacion(['Cebolla'], ['Queso'], 'medio')).toContain(
-      'Sin Cebolla',
-    ))
+    expect(
+      resumenPersonalizacion(['Cebolla'], [{ nombre: 'Queso', unidades: 1 }], 'medio'),
+    ).toContain('Sin Cebolla'))
 
   it('incluye extra y comentario', () => {
-    const r = resumenPersonalizacion(['Cebolla'], ['Queso'], 'medio')
+    const r = resumenPersonalizacion(['Cebolla'], [{ nombre: 'Queso', unidades: 1 }], 'medio')
     expect(r).toContain('Extra Queso')
     expect(r).toContain('medio')
+  })
+
+  it('muestra xN cuando hay más de una unidad', () => {
+    const r = resumenPersonalizacion([], [{ nombre: 'Queso', unidades: 3 }])
+    expect(r).toContain('Extra Queso x3')
+  })
+
+  it('no muestra x1 con una sola unidad', () => {
+    const r = resumenPersonalizacion([], [{ nombre: 'Queso', unidades: 1 }])
+    expect(r).toBe('Extra Queso')
   })
 
   it('devuelve vacío si no hay personalización', () => {
