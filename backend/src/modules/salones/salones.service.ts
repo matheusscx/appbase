@@ -25,6 +25,12 @@ import { VentasService } from '../ventas/ventas.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
+import { CatalogService } from '../catalog/catalog.service';
+import {
+  assertPresentacionPareada,
+  resolverCantidadDesdePresentacion,
+  type UnidadCat,
+} from '../../common/utils/cantidad-presentacion.util';
 import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
 import {
   hashPersonalizacion,
@@ -55,6 +61,8 @@ export interface CuentaLineaDetalle {
   precioBase: string;
   monedaId: string;
   cantidad: string;
+  cantidadPresentacion?: string | null;
+  unidadCodigoPresentacion?: string | null;
   personalizacion?: PersonalizacionRecetaSnapshot | null;
   personalizacionTexto?: string;
 }
@@ -97,6 +105,7 @@ export class SalonesService {
     private readonly ventasService: VentasService,
     private readonly garzonesService: GarzonesService,
     private readonly itemsService: ItemsService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   // ── Administración: salones ──────────────────────────────────────────────
@@ -352,7 +361,15 @@ export class SalonesService {
   ): Promise<CuentaDetalle> {
     const cuenta = await this.getCuentaAbiertaOrThrow(tenantId, cuentaId);
     const item = await this.getItemVendibleOrThrow(tenantId, dto.itemId);
-    if (new Decimal(dto.cantidad).lte(0)) {
+    const catalogo = await this.loadCatalogoUnidades();
+    const resuelta = this.resolverCantidadLinea({
+      cantidad: dto.cantidad,
+      cantidadPresentacion: dto.cantidadPresentacion,
+      unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
+      item,
+      catalogo,
+    });
+    if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
       throw new BadRequestException('La cantidad debe ser mayor a cero');
     }
 
@@ -381,7 +398,7 @@ export class SalonesService {
     );
     if (match) {
       match.cantidad = new Decimal(match.cantidad)
-        .plus(dto.cantidad)
+        .plus(resuelta.cantidadCanonica)
         .toString();
       await this.cuentaLineaRepo.save(match);
     } else {
@@ -390,7 +407,9 @@ export class SalonesService {
           tenantId,
           cuentaId,
           itemId: dto.itemId,
-          cantidad: dto.cantidad,
+          cantidad: resuelta.cantidadCanonica,
+          cantidadPresentacion: resuelta.cantidadPresentacion,
+          unidadCodigoPresentacion: resuelta.unidadCodigoPresentacion,
           personalizacion: snapshot,
         }),
       );
@@ -405,14 +424,28 @@ export class SalonesService {
     dto: UpdateLineaDto,
   ): Promise<CuentaDetalle> {
     const cuenta = await this.getCuentaAbiertaOrThrow(tenantId, cuentaId);
-    if (new Decimal(dto.cantidad).lte(0)) {
-      throw new BadRequestException('La cantidad debe ser mayor a cero');
-    }
     const linea = await this.cuentaLineaRepo.findOne({
       where: { id: lineaId, tenantId, cuentaId },
     });
     if (!linea) throw new NotFoundException(`Línea ${lineaId} no encontrada`);
-    linea.cantidad = dto.cantidad;
+
+    const item = await this.getItemVendibleOrThrow(tenantId, linea.itemId);
+    const catalogo = await this.loadCatalogoUnidades();
+    const resuelta = this.resolverCantidadLinea({
+      cantidad: dto.cantidad,
+      cantidadPresentacion: dto.cantidadPresentacion,
+      unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
+      item,
+      catalogo,
+      syncPresentacionLegado: true,
+    });
+    if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
+      throw new BadRequestException('La cantidad debe ser mayor a cero');
+    }
+
+    linea.cantidad = resuelta.cantidadCanonica;
+    linea.cantidadPresentacion = resuelta.cantidadPresentacion;
+    linea.unidadCodigoPresentacion = resuelta.unidadCodigoPresentacion;
     await this.cuentaLineaRepo.save(linea);
     return this.armarDetalle(tenantId, cuenta);
   }
@@ -549,6 +582,12 @@ export class SalonesService {
         lineas: lineas.map((l) => ({
           itemId: l.itemId,
           cantidad: l.cantidad,
+          ...(l.cantidadPresentacion && l.unidadCodigoPresentacion
+            ? {
+                cantidadPresentacion: l.cantidadPresentacion,
+                unidadCodigoPresentacion: l.unidadCodigoPresentacion,
+              }
+            : {}),
           personalizacion: l.personalizacion
             ? {
                 omitidos: l.personalizacion.omitidos,
@@ -756,12 +795,16 @@ export class SalonesService {
       cuenta_linea_id: string;
       item_id: string;
       cantidad: string;
+      cantidad_presentacion: string | null;
+      unidad_codigo_presentacion: string | null;
       nombre: string;
       precio_base: string;
       moneda_id: string;
       personalizacion: PersonalizacionRecetaSnapshot | null;
     }[] = await runner.query(
-      `SELECT cl.cuenta_linea_id, cl.item_id, cl.cantidad, cl.personalizacion,
+      `SELECT cl.cuenta_linea_id, cl.item_id, cl.cantidad,
+              cl.cantidad_presentacion, cl.unidad_codigo_presentacion,
+              cl.personalizacion,
               i.nombre, i.precio_base, i.moneda_id
          FROM cuenta_lineas cl
          JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
@@ -805,6 +848,12 @@ export class SalonesService {
           precioBase: l.precio_base,
           monedaId: l.moneda_id,
           cantidad: l.cantidad,
+          ...(l.cantidad_presentacion && l.unidad_codigo_presentacion
+            ? {
+                cantidadPresentacion: l.cantidad_presentacion,
+                unidadCodigoPresentacion: l.unidad_codigo_presentacion,
+              }
+            : {}),
           personalizacion: l.personalizacion,
           ...(personalizacionTexto
             ? { personalizacionTexto }
@@ -874,19 +923,87 @@ export class SalonesService {
     return cuenta;
   }
 
+  private async loadCatalogoUnidades(): Promise<UnidadCat[]> {
+    const unidades = await this.catalogService.findAllUnidadesMedida();
+    return unidades.map((u) => ({
+      codigo: u.codigo,
+      magnitud: u.magnitud,
+      factorBase: u.factorBase,
+    }));
+  }
+
+  private resolverCantidadLinea(params: {
+    cantidad: string;
+    cantidadPresentacion?: string;
+    unidadCodigoPresentacion?: string;
+    item: { tipo: string; unidadMedida: string | null };
+    catalogo: UnidadCat[];
+    syncPresentacionLegado?: boolean;
+  }): {
+    cantidadCanonica: string;
+    cantidadPresentacion: string | null;
+    unidadCodigoPresentacion: string | null;
+  } {
+    const { cantidad, cantidadPresentacion, unidadCodigoPresentacion, item, catalogo } =
+      params;
+    assertPresentacionPareada(cantidadPresentacion, unidadCodigoPresentacion);
+
+    const unidadBase =
+      item.tipo === 'receta' ? 'unidad' : (item.unidadMedida ?? 'unidad');
+
+    if (cantidadPresentacion && unidadCodigoPresentacion) {
+      const res = resolverCantidadDesdePresentacion({
+        cantidadPresentacion,
+        unidadCodigoPresentacion,
+        unidadBaseCodigo: unidadBase,
+        catalogo,
+        forzarConteo: item.tipo === 'receta',
+      });
+      return {
+        cantidadCanonica: res.cantidadCanonica,
+        cantidadPresentacion: res.cantidadPresentacion,
+        unidadCodigoPresentacion: res.unidadCodigoPresentacion,
+      };
+    }
+
+    if (params.syncPresentacionLegado) {
+      return {
+        cantidadCanonica: cantidad,
+        cantidadPresentacion: cantidad,
+        unidadCodigoPresentacion: unidadBase,
+      };
+    }
+
+    return {
+      cantidadCanonica: cantidad,
+      cantidadPresentacion: null,
+      unidadCodigoPresentacion: null,
+    };
+  }
+
   private async getItemVendibleOrThrow(
     tenantId: string,
     itemId: string,
-  ): Promise<{ itemId: string; tipo: string }> {
-    const rows: { item_id: string; tipo: string }[] = await this.dataSource.query(
-      `SELECT item_id, tipo FROM items
-        WHERE item_id = $1 AND tenant_id = $2
-          AND activo = true AND eliminado_el IS NULL`,
+  ): Promise<{ itemId: string; tipo: string; unidadMedida: string | null }> {
+    const rows: {
+      item_id: string;
+      tipo: string;
+      unidad_medida: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT i.item_id, i.tipo, ip.unidad_medida
+         FROM items i
+         LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+        WHERE i.item_id = $1 AND i.tenant_id = $2
+          AND i.activo = true AND i.eliminado_el IS NULL`,
       [itemId, tenantId],
     );
     if (rows.length === 0) {
       throw new NotFoundException(`Ítem ${itemId} no encontrado`);
     }
-    return { itemId: rows[0].item_id, tipo: rows[0].tipo };
+    return {
+      itemId: rows[0].item_id,
+      tipo: rows[0].tipo,
+      unidadMedida: rows[0].unidad_medida,
+    };
   }
 }

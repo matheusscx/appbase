@@ -9,6 +9,13 @@ import { CuentaLinea } from './entities/cuenta-linea.entity';
 import { VentasService } from '../ventas/ventas.service';
 import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
+import { CatalogService } from '../catalog/catalog.service';
+
+const UNIDADES_CATALOGO = [
+  { codigo: 'g', magnitud: 'masa', factorBase: '1' },
+  { codigo: 'kg', magnitud: 'masa', factorBase: '1000' },
+  { codigo: 'unidad', magnitud: 'conteo', factorBase: '1' },
+];
 
 const TENANT = 'tenant-uuid';
 const USUARIO = 'usuario-uuid';
@@ -121,6 +128,14 @@ describe('SalonesService', () => {
         { provide: VentasService, useValue: ventas },
         { provide: GarzonesService, useValue: garzones },
         { provide: ItemsService, useValue: items },
+        {
+          provide: CatalogService,
+          useValue: {
+            findAllUnidadesMedida: jest
+              .fn()
+              .mockResolvedValue(UNIDADES_CATALOGO),
+          },
+        },
       ],
     }).compile();
 
@@ -382,8 +397,10 @@ describe('SalonesService', () => {
         estado: EstadoCuenta.ABIERTA,
       });
       dataSource.query.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT item_id, tipo'))
-          return Promise.resolve([{ item_id: ITEM, tipo: 'producto' }]);
+        if (sql.includes('SELECT i.item_id'))
+          return Promise.resolve([
+            { item_id: ITEM, tipo: 'producto', unidad_medida: 'kg' },
+          ]);
         return Promise.resolve([]);
       });
       dataSource.manager.query.mockResolvedValue([]);
@@ -407,6 +424,43 @@ describe('SalonesService', () => {
       expect(cuentaLineaRepo.save).toHaveBeenCalled();
     });
 
+    it('500 g sobre item kg → cantidad BD 0.5; detalle expone presentación', async () => {
+      cuentaLineaRepo.find.mockResolvedValue([]);
+      dataSource.manager.query.mockResolvedValueOnce([
+        {
+          cuenta_linea_id: 'linea-pres',
+          item_id: ITEM,
+          cantidad: '0.5',
+          cantidad_presentacion: '500',
+          unidad_codigo_presentacion: 'g',
+          nombre: 'Harina',
+          precio_base: '1000',
+          moneda_id: 'moneda-1',
+          personalizacion: null,
+        },
+      ]);
+
+      const detalle = await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '999',
+        cantidadPresentacion: '500',
+        unidadCodigoPresentacion: 'g',
+      });
+
+      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cantidad: '0.5',
+          cantidadPresentacion: '500',
+          unidadCodigoPresentacion: 'g',
+        }),
+      );
+      expect(detalle.lineas[0]).toMatchObject({
+        cantidad: '0.5',
+        cantidadPresentacion: '500',
+        unidadCodigoPresentacion: 'g',
+      });
+    });
+
     it('suma la cantidad si el ítem ya está en la cuenta sin personalización', async () => {
       cuentaLineaRepo.find.mockResolvedValue([
         { id: 'linea-1', cantidad: '2', personalizacion: null },
@@ -424,8 +478,10 @@ describe('SalonesService', () => {
 
     it('guarda personalización JSONB en recetas', async () => {
       dataSource.query.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT item_id, tipo'))
-          return Promise.resolve([{ item_id: RECETA, tipo: 'receta' }]);
+        if (sql.includes('SELECT i.item_id'))
+          return Promise.resolve([
+            { item_id: RECETA, tipo: 'receta', unidad_medida: null },
+          ]);
         return Promise.resolve([]);
       });
       cuentaLineaRepo.find.mockResolvedValue([]);
@@ -444,8 +500,10 @@ describe('SalonesService', () => {
 
     it('suma cantidad si misma personalización; crea línea nueva si difiere', async () => {
       dataSource.query.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT item_id, tipo'))
-          return Promise.resolve([{ item_id: RECETA, tipo: 'receta' }]);
+        if (sql.includes('SELECT i.item_id'))
+          return Promise.resolve([
+            { item_id: RECETA, tipo: 'receta', unidad_medida: null },
+          ]);
         return Promise.resolve([]);
       });
       const lineaMisma = {

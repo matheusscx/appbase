@@ -13,6 +13,7 @@ import { CuentaLinea } from './entities/cuenta-linea.entity';
 import { VentasModule } from '../ventas/ventas.module';
 import { GarzonesModule } from '../garzones/garzones.module';
 import { ItemsModule } from '../items/items.module';
+import { CatalogModule } from '../catalog/catalog.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ItemsModule } from '../items/items.module';
     VentasModule,
     GarzonesModule,
     ItemsModule,
+    CatalogModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [SalonesService],
