@@ -44,6 +44,8 @@ export interface ComandaEstacionItem {
   nombre: string
   cantidad: string // diff a imprimir
   cantidadEnviada: string // total absoluto a persistir al confirmar
+  /** Personalización + comentario (desde reclamarComanda). */
+  nota?: string
 }
 
 export interface ComandaEstacion {

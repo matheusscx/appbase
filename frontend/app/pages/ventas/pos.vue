@@ -217,11 +217,15 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
       try {
         await impresorasApi.imprimirBoleta({
           tenantNombre: tenantStore.activeTenant?.nombre ?? '',
-          items: resultadoVenta.lineas.map((l) => ({
-            nombre: lineasVenta.find((ln) => ln.item.id === l.itemId)?.item.nombre ?? '',
-            cantidad: l.cantidad,
-            totalLinea: l.totalLinea,
-          })),
+          items: resultadoVenta.lineas.map((l, i) => {
+            const ln = lineasVenta[i]
+            return {
+              nombre: ln?.item.nombre ?? '',
+              cantidad: l.cantidad,
+              totalLinea: l.totalLinea,
+              ...(ln?.personalizacionResumen ? { nota: ln.personalizacionResumen } : {}),
+            }
+          }),
           totales: resultadoVenta.totales,
           pagos: pagos.map((p) => ({
             nombre: metodos.value.find((m) => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',

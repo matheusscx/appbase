@@ -179,7 +179,8 @@ Merge por `(itemId, hash(personalizacion))`. Al cerrar cuenta, el snapshot pasa 
 
 - **Módulo items**: entidad `RecetaExtraPermitido`; CRUD de extras en `ItemsService` (create/update/findOne).
 - **Ventas**: `LineaVentaDto.personalizacion`; precio y stock con snapshot en `VentasService`.
-- **Salones**: `AddLineaDto.personalizacion`; persistencia JSONB; merge; comanda con texto derivado.
+- **Salones**: `AddLineaDto.personalizacion`; persistencia JSONB; merge; comanda con `nota` (`textoComandaPersonalizacion`).
+- **Impresión**: `TicketItem.nota` en comanda / precuenta / boleta (omitidos, extras, comentario).
 - **Util**: `personalizacion-receta.util` — hash estable para merge de líneas.
 
 ### Key methods
@@ -210,7 +211,7 @@ Merge por `(itemId, hash(personalizacion))`. Al cerrar cuenta, el snapshot pasa 
 
 ### Salones
 
-- `pages/salones/index.vue` — mismo drawer; `agregarLinea` con personalización → BD; líneas y comanda muestran resumen.
+- `pages/salones/index.vue` — mismo drawer; `agregarLinea` con personalización → BD; líneas y tickets (comanda/precuenta/boleta) muestran resumen.
 
 ---
 

@@ -3,6 +3,40 @@ import Decimal from 'decimal.js'
 export interface TicketItem {
   nombre: string
   cantidad: string
+  /**
+   * Personalización / comentario (comanda, precuenta, boleta).
+   * Puede venir como string unido con ` · ` o como partes ya separadas.
+   */
+  nota?: string
+  notas?: string[]
+}
+
+/** Líneas indentadas: Sin (−), Extra (+), y al final `comentario: …` si hay texto libre. */
+export function lineasNotaTicket(item: Pick<TicketItem, 'nota' | 'notas'>): string[] {
+  const partes = item.notas?.length
+    ? item.notas.map(p => p.trim()).filter(Boolean)
+    : (item.nota ?? '')
+        .split(' · ')
+        .map(p => p.trim())
+        .filter(Boolean)
+
+  const omitidos: string[] = []
+  const extras: string[] = []
+  const comentarios: string[] = []
+
+  for (const p of partes) {
+    // Prefijos canónicos de textoComandaPersonalizacion / resumenPersonalizacion.
+    // Case-sensitive para no tragar comentarios libres tipo "sin sal".
+    if (p.startsWith('Sin ')) omitidos.push(p)
+    else if (p.startsWith('Extra ')) extras.push(p)
+    else comentarios.push(p)
+  }
+
+  return [
+    ...omitidos.map(p => `  - ${p}`),
+    ...extras.map(p => `  + ${p}`),
+    ...comentarios.map(p => `comentario: ${p}`),
+  ]
 }
 
 export interface TicketTotales {
@@ -61,6 +95,7 @@ export function buildComandaTicket(input: {
   out.push(separador())
   for (const item of input.items) {
     out.push(`${item.cantidad} x ${item.nombre}`)
+    out.push(...lineasNotaTicket(item))
   }
   out.push('')
   out.push('')
@@ -85,6 +120,7 @@ export function buildPrecuentaTicket(input: {
   out.push(separador())
   for (const item of input.items) {
     out.push(`${item.cantidad} x ${item.nombre}`)
+    out.push(...lineasNotaTicket(item))
     out.push(`  ${input.formatMonto(item.totalLinea)}`)
   }
   out.push(separador())
@@ -110,6 +146,7 @@ export function buildBoletaTicket(input: {
   out.push(separador())
   for (const item of input.items) {
     out.push(`${item.cantidad} x ${item.nombre}`)
+    out.push(...lineasNotaTicket(item))
     out.push(`  ${input.formatMonto(item.totalLinea)}`)
   }
   out.push(separador())

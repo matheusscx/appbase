@@ -386,11 +386,17 @@ async function enviarComanda() {
 // Recibe el resultado explícito (no lee `resultado.value` vivo): al cerrar la cuenta
 // el ref puede recomputarse, así que el llamador pasa el snapshot que capturó.
 function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
-  return res.lineas.map(l => ({
-    nombre: cuenta.lineas.find(cl => cl.itemId === l.itemId)?.nombre ?? '',
-    cantidad: l.cantidad,
-    totalLinea: l.totalLinea,
-  }))
+  // Mismo orden que cuentaToCalcularInput (índice 1:1); find por itemId falla
+  // si hay dos líneas del mismo ítem con distinta personalización.
+  return res.lineas.map((l, i) => {
+    const cl = cuenta.lineas[i]
+    return {
+      nombre: cl?.nombre ?? '',
+      cantidad: l.cantidad,
+      totalLinea: l.totalLinea,
+      ...(cl?.personalizacionTexto ? { nota: cl.personalizacionTexto } : {}),
+    }
+  })
 }
 
 async function imprimirPrecuenta() {

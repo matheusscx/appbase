@@ -33,6 +33,32 @@ describe('buildComandaTicket', () => {
 
     expect(lines.some(l => l.startsWith('Garzón:'))).toBe(false)
   })
+
+  it('imprime Sin primero (−) y Extra al final (+)', () => {
+    const lines = buildComandaTicket({
+      estacionNombre: 'Cocina',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 1,
+      garzonNombre: null,
+      items: [{
+        nombre: 'Hamburguesa Clásica',
+        cantidad: '1',
+        // Orden deliberadamente mezclado (extra antes que sin + comentario)
+        nota: 'Extra Queso · Sin Cebolla · sin sal · Extra Tocino · Sin Tomate',
+      }],
+      fecha: FECHA,
+    })
+
+    expect(lines).toContain('1 x Hamburguesa Clásica')
+    const idx = lines.indexOf('1 x Hamburguesa Clásica')
+    expect(lines.slice(idx + 1, idx + 6)).toEqual([
+      '  - Sin Cebolla',
+      '  - Sin Tomate',
+      '  + Extra Queso',
+      '  + Extra Tocino',
+      'comentario: sin sal',
+    ])
+  })
 })
 
 describe('buildPrecuentaTicket', () => {
@@ -58,6 +84,34 @@ describe('buildPrecuentaTicket', () => {
     expect(lines).toContain('TOTAL: $21420')
     expect(lines.some(l => l.startsWith('Descuentos:'))).toBe(false)
   })
+
+  it('incluye personalización como lista entre nombre y monto', () => {
+    const lines = buildPrecuentaTicket({
+      tenantNombre: 'Restaurante Paris',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 1,
+      items: [{
+        nombre: 'Hamburguesa Clásica',
+        cantidad: '1',
+        totalLinea: '9800',
+        nota: 'Extra Queso · Sin Cebolla',
+      }],
+      totales: {
+        subtotalNeto: '9800',
+        totalDescuentos: '0',
+        totalRecargos: '0',
+        totalImpuestos: '0',
+        totalFinal: '9800',
+      },
+      fecha: FECHA,
+      formatMonto,
+    })
+
+    const idxNombre = lines.indexOf('1 x Hamburguesa Clásica')
+    expect(lines[idxNombre + 1]).toBe('  - Sin Cebolla')
+    expect(lines[idxNombre + 2]).toBe('  + Extra Queso')
+    expect(lines[idxNombre + 3]).toBe('  $9800')
+  })
 })
 
 describe('buildBoletaTicket', () => {
@@ -81,5 +135,31 @@ describe('buildBoletaTicket', () => {
     expect(lines).toContain('Descuentos: -$1000')
     expect(lines).toContain('Efectivo: $20420')
     expect(lines).toContain('TOTAL: $20420')
+  })
+
+  it('incluye personalización como lista bajo el ítem', () => {
+    const lines = buildBoletaTicket({
+      tenantNombre: 'Restaurante Paris',
+      items: [{
+        nombre: 'Hamburguesa Clásica',
+        cantidad: '1',
+        totalLinea: '9800',
+        nota: 'Sin Cebolla · Extra Queso',
+      }],
+      totales: {
+        subtotalNeto: '9800',
+        totalDescuentos: '0',
+        totalRecargos: '0',
+        totalImpuestos: '0',
+        totalFinal: '9800',
+      },
+      pagos: [{ nombre: 'Efectivo', monto: '9800' }],
+      fecha: FECHA,
+      formatMonto,
+    })
+
+    expect(lines).toContain('1 x Hamburguesa Clásica')
+    expect(lines).toContain('  - Sin Cebolla')
+    expect(lines).toContain('  + Extra Queso')
   })
 })

@@ -27,9 +27,9 @@ imprimiendo directo desde el dispositivo del garzón/cajero, que sí está en es
 - Incluido: CRUD de impresoras (rol `comanda`/`boleta`, conexión de red o cola del
   sistema), ruteo de comanda por `categorias.impresora_id`, envío manual de comanda
   con diff (`cuenta_lineas.cantidad_enviada`), precuenta y boleta desde Salones y
-  desde el POS de mostrador.
-- NO incluido (futuro): notas por ítem, reimpresión de comandas, impresoras de rol
-  dual, certificado firmado de QZ Tray (evita el diálogo de confianza).
+  desde el POS de mostrador; **nota de personalización** (omitidos, extras,
+  comentario) en comanda/precuenta/boleta vía `TicketItem.nota`.
+- NO incluido (futuro): reimpresión de comandas, impresoras de rol dual.
 
 ---
 
@@ -90,7 +90,9 @@ impresora `rol='boleta'` del tenant.
 - **Composable**: `app/composables/useImpresoras.ts` — CRUD + `imprimirComanda`,
   `imprimirPrecuenta`, `imprimirBoleta` (envuelven `qz-tray`).
 - **Formateo puro**: `app/utils/ticket-builder.ts` — `buildComandaTicket`,
-  `buildPrecuentaTicket`, `buildBoletaTicket` (sin Nuxt/Vue, 100% Vitest).
+  `buildPrecuentaTicket`, `buildBoletaTicket` (sin Nuxt/Vue, 100% Vitest). Cada
+  ítem puede llevar `nota?` (personalización + comentario), impresa indentada bajo
+  el nombre.
 - **Admin**: `pages/configuracion/impresoras.vue` (CRUD) + selector "Impresora de
   comanda" en `pages/configuracion/categorias.vue`.
 - **Operación**: botones "Enviar a cocina" / "Imprimir precuenta" en el drawer de
