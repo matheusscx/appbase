@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useVenta, descontarStockCatalogo, tieneCustomerData, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import Decimal from 'decimal.js'
@@ -41,6 +42,34 @@ const cobroOpen = ref(false)
 const submitting = ref(false)
 const movimientoDrawerOpen = ref(false)
 const cierreDrawerOpen = ref(false)
+const recetaDrawerOpen = ref(false)
+const recetaItemId = ref<string | null>(null)
+
+function onCatalogoAdd(item: ItemCatalogo) {
+  if (item.tipo === 'receta') {
+    recetaItemId.value = item.id
+    recetaDrawerOpen.value = true
+    return
+  }
+  add(item)
+}
+
+function personalizacionVacia(p: PersonalizacionPayload): boolean {
+  return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
+}
+
+function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string) {
+  const item = items.value.find((i) => i.id === recetaItemId.value)
+  if (!item) return
+  if (personalizacionVacia(payload)) {
+    add(item)
+  }
+  else {
+    add(item, payload, resumen || undefined)
+  }
+  recetaDrawerOpen.value = false
+  recetaItemId.value = null
+}
 
 function abrirMovimientoDrawer() { movimientoDrawerOpen.value = true }
 function abrirCierreDrawer() { cierreDrawerOpen.value = true }
@@ -141,7 +170,23 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
   submitting.value = true
   try {
     const body: Record<string, unknown> = {
-      lineas: lineas.value.map((l) => ({ itemId: l.item.id, cantidad: l.cantidad })),
+      lineas: lineas.value.map((l) => ({
+        itemId: l.item.id,
+        cantidad: l.cantidad,
+        ...(l.personalizacion
+          ? {
+              personalizacion: {
+                omitidos: l.personalizacion.omitidos,
+                extras: l.personalizacion.extras.map((e) => ({
+                  ingredienteItemId: e.ingredienteItemId,
+                })),
+                ...(l.personalizacion.comentario
+                  ? { comentario: l.personalizacion.comentario }
+                  : {}),
+              },
+            }
+          : {}),
+      })),
       pagos,
       tipoDocumentoId: tipoDocumentoId.value,
     }
@@ -240,7 +285,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
 
       <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full min-h-0 flex-1 overflow-hidden p-4">
         <div class="lg:col-span-3 min-h-0 flex flex-col overflow-hidden">
-          <VentasCatalogoGrid :items="itemsVisibles" :loading="loadingCatalogo" @add="add" />
+          <VentasCatalogoGrid :items="itemsVisibles" :loading="loadingCatalogo" @add="onCatalogoAdd" />
         </div>
         <div class="lg:col-span-2 min-h-0 flex flex-col overflow-hidden">
           <VentasCarritoPanel
@@ -260,6 +305,11 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
         </div>
       </div>
 
+      <VentasRecetaPersonalizacionDrawer
+        v-model:open="recetaDrawerOpen"
+        :item-id="recetaItemId"
+        @confirm="onRecetaConfirm"
+      />
       <VentasCobroModal
         v-model:open="cobroOpen"
         :total="totalFinal"

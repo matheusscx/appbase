@@ -13,7 +13,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  confirm: [PersonalizacionPayload]
+  confirm: [PersonalizacionPayload, string]
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -108,7 +108,7 @@ function agregar() {
     .filter((ing) => !incluidos.value[ing.ingredienteItemId])
     .map((ing) => ing.ingredienteItemId)
   const extrasIds = extrasSeleccionados.value.map((e) => e.ingredienteItemId)
-  emit('confirm', buildPersonalizacionPayload(omitidos, extrasIds, comentario.value))
+  emit('confirm', buildPersonalizacionPayload(omitidos, extrasIds, comentario.value), resumenPreview.value)
   open.value = false
 }
 </script>

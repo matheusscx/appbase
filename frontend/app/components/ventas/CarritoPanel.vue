@@ -14,8 +14,8 @@ const props = defineProps<{
   tieneCaja: boolean
 }>()
 const emit = defineEmits<{
-  'cambiar-cantidad': [itemId: string, cantidad: string]
-  quitar: [itemId: string]
+  'cambiar-cantidad': [index: number, cantidad: string]
+  quitar: [index: number]
   cobrar: []
   'limpiar-todo': []
 }>()
@@ -179,9 +179,12 @@ watch(clienteDrawerOpen, (open) => {
         Agregá ítems desde el catálogo.
       </div>
       <ul v-else class="divide-y divide-default">
-        <li v-for="linea in lineas" :key="linea.item.id" class="py-2 flex items-center gap-2">
+        <li v-for="(linea, index) in lineas" :key="`${linea.item.id}-${index}`" class="py-2 flex items-center gap-2">
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium text-default truncate">{{ linea.item.nombre }}</p>
+            <p v-if="linea.personalizacionResumen" class="text-xs text-muted truncate">
+              {{ linea.personalizacionResumen }}
+            </p>
             <p class="text-xs text-muted font-mono">
               {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u
             </p>
@@ -196,14 +199,14 @@ watch(clienteDrawerOpen, (open) => {
             class="w-20"
             @focusin="quitarReadonly"
             @focusout="ponerReadonly"
-            @update:model-value="(v: string | number) => emit('cambiar-cantidad', linea.item.id, String(v))"
+            @update:model-value="(v: string | number) => emit('cambiar-cantidad', index, String(v))"
           />
           <UButton
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
             size="xs"
-            @click="emit('quitar', linea.item.id)"
+            @click="emit('quitar', index)"
           />
         </li>
       </ul>

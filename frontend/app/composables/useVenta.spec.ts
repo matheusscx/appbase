@@ -14,6 +14,7 @@ import {
   type ItemCatalogo,
   type CustomerForm,
 } from './useVenta'
+import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
 
 const item = (id: string, precio = '100'): ItemCatalogo => ({
   id,
@@ -40,20 +41,70 @@ describe('carrito helpers', () => {
     expect(r[0]!.cantidad).toBe('2')
   })
 
+  it('agregarLinea incrementa cantidad si mismo item y misma personalización', () => {
+    const receta = { ...item('r'), tipo: 'receta' }
+    const pers: PersonalizacionPayload = {
+      omitidos: ['ing-1'],
+      extras: [{ ingredienteItemId: 'extra-1' }],
+    }
+    const linea: CarritoLinea = { item: receta, cantidad: '1', personalizacion: pers }
+    const r = agregarLinea([linea], receta, pers)
+    expect(r).toHaveLength(1)
+    expect(r[0]!.cantidad).toBe('2')
+  })
+
+  it('agregarLinea crea dos líneas si mismo item pero distinta personalización', () => {
+    const receta = { ...item('r'), tipo: 'receta' }
+    const persA: PersonalizacionPayload = { omitidos: ['ing-1'], extras: [] }
+    const persB: PersonalizacionPayload = { omitidos: ['ing-2'], extras: [] }
+    const r = agregarLinea(
+      [{ item: receta, cantidad: '1', personalizacion: persA }],
+      receta,
+      persB,
+    )
+    expect(r).toHaveLength(2)
+    expect(r[0]!.cantidad).toBe('1')
+    expect(r[1]!.cantidad).toBe('1')
+    expect(r[0]!.personalizacion).toEqual(persA)
+    expect(r[1]!.personalizacion).toEqual(persB)
+  })
+
+  it('agregarLinea sin personalización no fusiona con línea personalizada', () => {
+    const receta = { ...item('r'), tipo: 'receta' }
+    const pers: PersonalizacionPayload = { omitidos: ['ing-1'], extras: [] }
+    const r = agregarLinea(
+      [{ item: receta, cantidad: '1', personalizacion: pers }],
+      receta,
+    )
+    expect(r).toHaveLength(2)
+    expect(r[0]!.cantidad).toBe('1')
+    expect(r[1]!.cantidad).toBe('1')
+  })
+
   it('agregarLinea no muta el array original', () => {
     const original: CarritoLinea[] = []
     agregarLinea(original, item('a'))
     expect(original).toHaveLength(0)
   })
 
-  it('quitarLinea elimina por itemId', () => {
-    const r = quitarLinea([{ item: item('a'), cantidad: '1' }], 'a')
-    expect(r).toHaveLength(0)
+  it('quitarLinea elimina por índice', () => {
+    const lineas: CarritoLinea[] = [
+      { item: item('a'), cantidad: '1' },
+      { item: item('b'), cantidad: '2' },
+    ]
+    const r = quitarLinea(lineas, 0)
+    expect(r).toHaveLength(1)
+    expect(r[0]!.item.id).toBe('b')
   })
 
-  it('setCantidad reemplaza la cantidad de la línea', () => {
-    const r = setCantidad([{ item: item('a'), cantidad: '1' }], 'a', '5')
-    expect(r[0]!.cantidad).toBe('5')
+  it('setCantidad reemplaza la cantidad de la línea por índice', () => {
+    const lineas: CarritoLinea[] = [
+      { item: item('a'), cantidad: '1' },
+      { item: item('b'), cantidad: '2' },
+    ]
+    const r = setCantidad(lineas, 1, '5')
+    expect(r[0]!.cantidad).toBe('1')
+    expect(r[1]!.cantidad).toBe('5')
   })
 
   it('toCalcularInput mapea a { lineas: [{ itemId, cantidad }] }', () => {

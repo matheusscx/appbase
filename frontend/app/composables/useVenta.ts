@@ -2,6 +2,7 @@ import { ref, watch } from 'vue'
 import Decimal from 'decimal.js'
 import { useCalculoPrecios, type ResultadoVenta, type CalcularVentaInput } from './useCalculoPrecios'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
+import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
 
 // ── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,9 @@ export interface ItemCatalogo {
 export interface CarritoLinea {
   item: ItemCatalogo
   cantidad: string
+  personalizacion?: PersonalizacionPayload
+  /** texto UI precomputado al confirmar drawer */
+  personalizacionResumen?: string
 }
 
 export interface PagoInput {
@@ -31,36 +35,67 @@ export interface PagoInput {
 
 // ── Helpers de carrito (puros, inmutables) ──────────────────────────────────
 
+function personalizacionVacia(p?: PersonalizacionPayload): boolean {
+  if (!p) return true
+  return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
+}
+
+function canonicalPersonalizacion(p?: PersonalizacionPayload): string {
+  if (!p || personalizacionVacia(p)) return ''
+  const omitidos = [...p.omitidos].sort()
+  const extras = p.extras.map((e) => e.ingredienteItemId).sort()
+  const comentario = p.comentario?.trim() ?? ''
+  return JSON.stringify({ omitidos, extras, comentario })
+}
+
+export function mismaPersonalizacion(
+  a?: PersonalizacionPayload,
+  b?: PersonalizacionPayload,
+): boolean {
+  return canonicalPersonalizacion(a) === canonicalPersonalizacion(b)
+}
+
 export function agregarLinea(
   lineas: CarritoLinea[],
   item: ItemCatalogo,
+  personalizacion?: PersonalizacionPayload,
+  personalizacionResumen?: string,
 ): CarritoLinea[] {
-  const existente = lineas.find((l) => l.item.id === item.id)
-  if (existente) {
-    return lineas.map((l) =>
-      l.item.id === item.id
+  const pers = personalizacionVacia(personalizacion) ? undefined : personalizacion
+  const resumen = pers ? personalizacionResumen : undefined
+
+  const idx = lineas.findIndex(
+    (l) => l.item.id === item.id && mismaPersonalizacion(l.personalizacion, pers),
+  )
+  if (idx >= 0) {
+    return lineas.map((l, i) =>
+      i === idx
         ? { ...l, cantidad: new Decimal(l.cantidad || '0').plus(1).toString() }
         : l,
     )
   }
-  return [...lineas, { item, cantidad: '1' }]
+
+  const nueva: CarritoLinea = { item, cantidad: '1' }
+  if (pers) {
+    nueva.personalizacion = pers
+    if (resumen) nueva.personalizacionResumen = resumen
+  }
+  return [...lineas, nueva]
 }
 
 export function quitarLinea(
   lineas: CarritoLinea[],
-  itemId: string,
+  index: number,
 ): CarritoLinea[] {
-  return lineas.filter((l) => l.item.id !== itemId)
+  return lineas.filter((_, i) => i !== index)
 }
 
 export function setCantidad(
   lineas: CarritoLinea[],
-  itemId: string,
+  index: number,
   cantidad: string,
 ): CarritoLinea[] {
-  return lineas.map((l) =>
-    l.item.id === itemId ? { ...l, cantidad } : l,
-  )
+  return lineas.map((l, i) => (i === index ? { ...l, cantidad } : l))
 }
 
 export function toCalcularInput(lineas: CarritoLinea[]): CalcularVentaInput {
@@ -241,14 +276,18 @@ export function useVenta() {
     { deep: true },
   )
 
-  function add(item: ItemCatalogo) {
-    lineas.value = agregarLinea(lineas.value, item)
+  function add(
+    item: ItemCatalogo,
+    personalizacion?: PersonalizacionPayload,
+    personalizacionResumen?: string,
+  ) {
+    lineas.value = agregarLinea(lineas.value, item, personalizacion, personalizacionResumen)
   }
-  function quitar(itemId: string) {
-    lineas.value = quitarLinea(lineas.value, itemId)
+  function quitar(index: number) {
+    lineas.value = quitarLinea(lineas.value, index)
   }
-  function cambiarCantidad(itemId: string, cantidad: string) {
-    lineas.value = setCantidad(lineas.value, itemId, cantidad)
+  function cambiarCantidad(index: number, cantidad: string) {
+    lineas.value = setCantidad(lineas.value, index, cantidad)
   }
   function limpiar() {
     lineas.value = []

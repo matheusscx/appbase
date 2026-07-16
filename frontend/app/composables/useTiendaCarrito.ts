@@ -67,11 +67,11 @@ export function useTiendaCarrito() {
   function add(item: ItemCatalogo) {
     lineas.value = agregarLinea(lineas.value, item)
   }
-  function quitar(itemId: string) {
-    lineas.value = quitarLinea(lineas.value, itemId)
+  function quitar(index: number) {
+    lineas.value = quitarLinea(lineas.value, index)
   }
-  function cambiarCantidad(itemId: string, cantidad: string) {
-    lineas.value = setCantidad(lineas.value, itemId, cantidad)
+  function cambiarCantidad(index: number, cantidad: string) {
+    lineas.value = setCantidad(lineas.value, index, cantidad)
   }
   function limpiar() {
     lineas.value = []
