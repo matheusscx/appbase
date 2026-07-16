@@ -5,6 +5,7 @@ import { CajaModule } from '../caja/caja.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { ItemsModule } from '../items/items.module';
 import { PagosModule } from '../pagos/pagos.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import { VentasService } from './ventas.service';
 import {
   VentasController,
@@ -36,6 +37,7 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
     InventarioModule,
     ItemsModule,
     PagosModule,
+    CatalogModule,
     // Solo para registrar VentasReembolsoHandler en el ReembolsoCallbackRegistry
     // (pasarela nunca importa ventas; el borde se cruza en esta dirección).
     PasarelaModule,

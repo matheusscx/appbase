@@ -11,6 +11,7 @@ import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService } from '../pagos/pagos.service';
+import { CatalogService } from '../catalog/catalog.service';
 import { EstadoVenta } from './entities/venta.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 
@@ -44,10 +45,17 @@ const mockItem = {
   precioIncluyeImpuesto: false,
   monedaId: MONEDA_OFICIAL_ID,
   modoInventario: 'cantidad',
+  unidadMedida: 'kg',
   impuestosIds: [],
   descuentosIds: [],
   recargosIds: [],
 };
+
+const UNIDADES_CATALOGO = [
+  { codigo: 'g', magnitud: 'masa', factorBase: '1' },
+  { codigo: 'kg', magnitud: 'masa', factorBase: '1000' },
+  { codigo: 'unidad', magnitud: 'conteo', factorBase: '1' },
+];
 
 const mockResultadoVenta = {
   lineas: [
@@ -108,6 +116,7 @@ describe('VentasService', () => {
   let inventarioService: jest.Mocked<InventarioService>;
   let itemsService: jest.Mocked<ItemsService>;
   let pagosServiceMock: { registrar: jest.Mock };
+  let catalogService: jest.Mocked<CatalogService>;
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
 
   beforeEach(async () => {
@@ -167,6 +176,14 @@ describe('VentasService', () => {
           useValue: pagosServiceMock,
         },
         {
+          provide: CatalogService,
+          useValue: {
+            findAllUnidadesMedida: jest
+              .fn()
+              .mockResolvedValue(UNIDADES_CATALOGO),
+          },
+        },
+        {
           provide: getDataSourceToken(),
           useValue: dataSourceMock,
         },
@@ -178,6 +195,7 @@ describe('VentasService', () => {
     calculoPreciosService = module.get(CalculoPreciosService);
     inventarioService = module.get(InventarioService);
     itemsService = module.get(ItemsService);
+    catalogService = module.get(CatalogService);
   });
 
   const basePago = { metodoPagoId: EFECTIVO_ID, monto: '100.0000' };
@@ -217,6 +235,60 @@ describe('VentasService', () => {
           itemId: ITEM_ID,
         }),
       );
+    });
+
+    it('persiste presentación y usa canónica para precio/stock', async () => {
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      calculoPreciosService.calcular.mockImplementationOnce(
+        async (_tenantId, calcDto) => ({
+          ...mockResultadoVenta,
+          lineas: [
+            {
+              ...mockResultadoVenta.lineas[0],
+              cantidad: calcDto.lineas[0].cantidad,
+            },
+          ],
+        }),
+      );
+
+      const dtoPresentacion = {
+        lineas: [
+          {
+            itemId: ITEM_ID,
+            cantidad: '999',
+            cantidadPresentacion: '500',
+            unidadCodigoPresentacion: 'g',
+          },
+        ],
+        pagos: [basePago],
+      };
+
+      const result = await service.crear(
+        TENANT_ID,
+        USUARIO_ID,
+        dtoPresentacion as any,
+      );
+
+      expect(catalogService.findAllUnidadesMedida).toHaveBeenCalled();
+      expect(calculoPreciosService.calcular).toHaveBeenCalledWith(
+        TENANT_ID,
+        expect.objectContaining({
+          lineas: [expect.objectContaining({ cantidad: '0.5' })],
+        }),
+      );
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ cantidad: '0.5' }),
+      );
+      expect(result.detalles[0]).toMatchObject({
+        cantidad: '0.5',
+        cantidadPresentacion: '500',
+        unidadCodigoPresentacion: 'g',
+      });
     });
 
     it('no llama registrarMovimiento del inventario para items tipo servicio', async () => {

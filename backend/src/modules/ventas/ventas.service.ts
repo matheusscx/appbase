@@ -12,6 +12,11 @@ import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
+import { CatalogService } from '../catalog/catalog.service';
+import {
+  assertPresentacionPareada,
+  resolverCantidadDesdePresentacion,
+} from '../../common/utils/cantidad-presentacion.util';
 import type { CreateVentaDto } from './dto/create-venta.dto';
 import type { QueryVentasDto } from './dto/query-ventas.dto';
 import { Venta, EstadoVenta } from './entities/venta.entity';
@@ -70,6 +75,7 @@ export class VentasService {
     private readonly inventarioService: InventarioService,
     private readonly itemsService: ItemsService,
     private readonly pagosService: PagosService,
+    private readonly catalogService: CatalogService,
   ) {}
 
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
@@ -111,6 +117,46 @@ export class VentasService {
         );
       }
     }
+
+    const unidades = await this.catalogService.findAllUnidadesMedida();
+    const catalogo = unidades.map((u) => ({
+      codigo: u.codigo,
+      magnitud: u.magnitud,
+      factorBase: u.factorBase,
+    }));
+
+    const cantidadesResueltas = dto.lineas.map((linea, i) => {
+      const item = items[i];
+      assertPresentacionPareada(
+        linea.cantidadPresentacion,
+        linea.unidadCodigoPresentacion,
+      );
+
+      if (!linea.cantidadPresentacion || !linea.unidadCodigoPresentacion) {
+        return {
+          cantidadCanonica: linea.cantidad,
+          cantidadPresentacion: null as string | null,
+          unidadCodigoPresentacion: null as string | null,
+        };
+      }
+
+      const unidadBase =
+        item.tipo === 'receta' ? 'unidad' : (item.unidadMedida ?? 'unidad');
+
+      const res = resolverCantidadDesdePresentacion({
+        cantidadPresentacion: linea.cantidadPresentacion,
+        unidadCodigoPresentacion: linea.unidadCodigoPresentacion,
+        unidadBaseCodigo: unidadBase,
+        catalogo,
+        forzarConteo: item.tipo === 'receta',
+      });
+
+      return {
+        cantidadCanonica: res.cantidadCanonica,
+        cantidadPresentacion: res.cantidadPresentacion,
+        unidadCodigoPresentacion: res.unidadCodigoPresentacion,
+      };
+    });
 
     // 3. Resolver moneda oficial del tenant (es_default = true)
     const monedaRows: {
@@ -155,6 +201,8 @@ export class VentasService {
     const lineasConversion = dto.lineas.map((linea, i) => {
       const item = items[i];
       const pers = personalizaciones[i];
+      const { cantidadCanonica, cantidadPresentacion, unidadCodigoPresentacion } =
+        cantidadesResueltas[i];
       const tasa = new Decimal(tasaMap.get(item.monedaId) ?? '1');
       const precioOrigen =
         pers != null
@@ -164,6 +212,9 @@ export class VentasService {
       return {
         linea,
         item,
+        cantidadCanonica,
+        cantidadPresentacion,
+        unidadCodigoPresentacion,
         precioOrigen,
         tasa: tasa.toFixed(6),
         precioConvertido,
@@ -172,14 +223,16 @@ export class VentasService {
     });
 
     const calcularDto = {
-      lineas: lineasConversion.map(({ linea, precioConvertido }) => ({
-        itemId: linea.itemId,
-        cantidad: linea.cantidad,
-        precioUnitario: precioConvertido,
-        descuentoIds: linea.descuentoIds,
-        recargoIds: linea.recargoIds,
-        impuestoIds: linea.impuestoIds,
-      })),
+      lineas: lineasConversion.map(
+        ({ linea, precioConvertido, cantidadCanonica }) => ({
+          itemId: linea.itemId,
+          cantidad: cantidadCanonica,
+          precioUnitario: precioConvertido,
+          descuentoIds: linea.descuentoIds,
+          recargoIds: linea.recargoIds,
+          impuestoIds: linea.impuestoIds,
+        }),
+      ),
       metodoPagoId: dto.metodoPagoId,
       descuentosVentaIds: dto.descuentosVentaIds,
       recargosVentaIds: dto.recargosVentaIds,
@@ -228,8 +281,15 @@ export class VentasService {
     // 7b. Líneas / detalles
     const detalles = await Promise.all(
       resultado.lineas.map((rLinea, i) => {
-        const { item, precioOrigen, tasa, precioConvertido, personalizacion } =
-          lineasConversion[i];
+        const {
+          item,
+          precioOrigen,
+          tasa,
+          precioConvertido,
+          personalizacion,
+          cantidadPresentacion,
+          unidadCodigoPresentacion,
+        } = lineasConversion[i];
         return manager.save(
           VentaDetalle,
           manager.create(VentaDetalle, {
@@ -241,6 +301,8 @@ export class VentasService {
             precioUnitario: precioConvertido,
             descripcion: item.nombre,
             cantidad: rLinea.cantidad,
+            cantidadPresentacion,
+            unidadCodigoPresentacion,
             subtotal: rLinea.subtotalNeto,
             descuentoAplicado: rLinea.descuentoAplicado,
             recargoAplicado: rLinea.recargoAplicado,
@@ -338,14 +400,15 @@ export class VentasService {
     // 7f. Movimientos de inventario (productos y recetas)
     const advertenciasReceta: string[] = [];
     for (let i = 0; i < lineasConversion.length; i++) {
-      const { item, linea, personalizacion } = lineasConversion[i];
+      const { item, linea, personalizacion, cantidadCanonica } =
+        lineasConversion[i];
       if (item.tipo === 'producto') {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId,
           itemId: item.id,
           tipo: 'salida',
           motivo: 'venta',
-          cantidad: linea.cantidad,
+          cantidad: cantidadCanonica,
           usuarioId,
           ventaId: venta.id,
           unidadIds: linea.unidadIds,
@@ -360,7 +423,7 @@ export class VentasService {
             ventaId: venta.id,
             recetaItemId: item.id,
             recetaNombre: item.nombre,
-            cantidadVendida: linea.cantidad,
+            cantidadVendida: cantidadCanonica,
             snapshot: personalizacion ?? undefined,
           },
         );
