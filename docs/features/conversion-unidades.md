@@ -162,7 +162,7 @@ Response (200):
 | `factor_base` | NUMERIC(18,6) | NOT NULL, CHECK > 0 | Cuántas unidades base (de la magnitud) equivale 1 de esta. Ej: `kg` = 1000 g → `factor_base = 1000`. Runtime también valida en `convertirUnidad`. |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | — | Convención transversal; lecturas filtran `eliminado_el IS NULL` |
 
-### Semilla (6 Unidades)
+### Semilla (7 Unidades)
 
 | codigo | nombre | magnitud | factor_base | Notas |
 |--------|--------|----------|-------------|-------|
@@ -171,7 +171,8 @@ Response (200):
 | `ml` | Mililitro | volumen | 1 | Unidad base de volumen |
 | `l` | Litro | volumen | 1000 | 1 l = 1000 ml |
 | `unidad` | Unidad | conteo | 1 | Unidad base de conteo (items discretos) |
-| `m` | Metro | longitud | 1 | Unidad base de longitud (compatibilidad con seeder existente) |
+| `cm` | Centímetro | longitud | 1 | Unidad base de longitud |
+| `m` | Metro | longitud | 100 | 1 m = 100 cm (selector de presentación en carrito) |
 
 **Cero migración de datos:** Todos los productos existentes usan uno de estos códigos, así que son válidos desde el primer seed.
 

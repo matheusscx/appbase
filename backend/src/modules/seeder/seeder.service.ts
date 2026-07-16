@@ -232,7 +232,7 @@ export class SeederService implements OnApplicationBootstrap {
 
   /**
    * Catálogo global de unidades de medida. `factor_base` = cuántas unidades
-   * base de la magnitud equivale 1 de esta (kg → 1000 g).
+   * base de la magnitud equivale 1 de esta (kg → 1000 g; m → 100 cm).
    * Incluye 'unidad', 'kg', 'l' y 'm' porque ya hay datos sembrados con esos
    * códigos (ver seedItemsMonedaUnidadMatrix): quitarlos rompería la validación.
    */
@@ -274,11 +274,18 @@ export class SeederService implements OnApplicationBootstrap {
         factorBase: '1',
       },
       {
+        unidadMedidaId: '550e8400-e29b-41d4-a716-446655440256',
+        codigo: 'cm',
+        nombre: 'Centímetro',
+        magnitud: 'longitud',
+        factorBase: '1',
+      },
+      {
         unidadMedidaId: '550e8400-e29b-41d4-a716-446655440255',
         codigo: 'm',
         nombre: 'Metro',
         magnitud: 'longitud',
-        factorBase: '1',
+        factorBase: '100',
       },
     ];
 
@@ -290,6 +297,13 @@ export class SeederService implements OnApplicationBootstrap {
         await this.unidadMedidaRepo.save(this.unidadMedidaRepo.create(data));
       }
     }
+
+    // DBs antiguas tenían m con factor_base=1 (única unidad de longitud).
+    // Alinear a cm como base (m = 100 cm), igual que kg/g.
+    await this.unidadMedidaRepo.update(
+      { codigo: 'm' },
+      { factorBase: '100', nombre: 'Metro', magnitud: 'longitud' },
+    );
   }
 
   private async seedPais(): Promise<void> {

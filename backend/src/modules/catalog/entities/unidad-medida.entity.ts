@@ -19,7 +19,7 @@ export class UnidadMedida {
   @PrimaryGeneratedColumn('uuid', { name: 'unidad_medida_id' })
   unidadMedidaId: string;
 
-  /** Código guardado en `item_producto.unidad_medida` (kg, g, l, ml, unidad, m). */
+  /** Código guardado en `item_producto.unidad_medida` (kg, g, l, ml, unidad, m, cm). */
   @Column({ type: 'text', unique: true })
   codigo: string;
 

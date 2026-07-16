@@ -15,6 +15,8 @@ const CAT = [
   { codigo: 'unidad', magnitud: 'conteo', factorBase: '1' },
   { codigo: 'ml', magnitud: 'volumen', factorBase: '1' },
   { codigo: 'l', magnitud: 'volumen', factorBase: '1000' },
+  { codigo: 'cm', magnitud: 'longitud', factorBase: '1' },
+  { codigo: 'm', magnitud: 'longitud', factorBase: '100' },
 ]
 
 describe('cantidad-presentacion', () => {
@@ -23,9 +25,15 @@ describe('cantidad-presentacion', () => {
     expect(convertirPresentacion('0.5', 'kg', 'g', CAT)).toBe('500')
   })
 
+  it('convierte m ↔ cm', () => {
+    expect(convertirPresentacion('50', 'cm', 'm', CAT)).toBe('0.5')
+    expect(convertirPresentacion('0.5', 'm', 'cm', CAT)).toBe('50')
+  })
+
   it('opcionesMismaMagnitud filtra por magnitud', () => {
     const opts = opcionesMismaMagnitud('kg', CAT)
     expect(opts.map(o => o.codigo).sort()).toEqual(['g', 'kg'])
+    expect(opcionesMismaMagnitud('m', CAT).map(o => o.codigo).sort()).toEqual(['cm', 'm'])
   })
 
   it('conteo: puedeDecrementar false en 1', () => {
