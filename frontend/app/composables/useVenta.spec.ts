@@ -91,6 +91,29 @@ describe('carrito helpers', () => {
     descontarStockCatalogo(catalogo, [{ item: item('a'), cantidad: '1' }])
     expect(catalogo[0]!.stock).toBe('10')
   })
+
+  it('descontarStockCatalogo resta disponible de recetas', () => {
+    const receta: ItemCatalogo = {
+      ...item('r'),
+      tipo: 'receta',
+      stock: null,
+      disponible: 31,
+    }
+    const r = descontarStockCatalogo([receta], [{ item: receta, cantidad: '15' }])
+    expect(r[0]!.disponible).toBe(16)
+    expect(receta.disponible).toBe(31)
+  })
+
+  it('descontarStockCatalogo no baja disponible bajo cero', () => {
+    const receta: ItemCatalogo = {
+      ...item('r'),
+      tipo: 'receta',
+      stock: null,
+      disponible: 3,
+    }
+    const r = descontarStockCatalogo([receta], [{ item: receta, cantidad: '10' }])
+    expect(r[0]!.disponible).toBe(0)
+  })
 })
 
 describe('pagos helpers', () => {

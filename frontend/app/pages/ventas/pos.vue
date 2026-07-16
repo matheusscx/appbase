@@ -30,6 +30,9 @@ const metodos = ref<MetodoPago[]>([])
 const tiposDocumento = ref<TipoDoc[]>([])
 const loadingCatalogo = ref(false)
 
+/** Catálogo restando lo ya en el carrito (stock / disponible), reactivo. */
+const itemsVisibles = computed(() => descontarStockCatalogo(items.value, lineas.value))
+
 const tipoDocumentoId = ref<string | undefined>(undefined)
 const customer = ref<CustomerForm>({ nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null })
 const customerExpandido = ref(false)
@@ -186,7 +189,8 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
       }
     }
 
-    items.value = descontarStockCatalogo(items.value, lineas.value)
+    // Persiste la venta en el catálogo base; el carrito se limpia después.
+    items.value = descontarStockCatalogo(items.value, lineasVenta)
     const pagosConMonto = pagos.filter(p => new Decimal(p.monto || '0').gt(0))
     const bruto = pagosConMonto.reduce(
       (acc, p) => acc.plus(p.monto || '0'),
@@ -236,7 +240,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
 
       <div v-else class="grid grid-cols-1 lg:grid-cols-5 gap-4 h-full min-h-0 flex-1 overflow-hidden p-4">
         <div class="lg:col-span-3 min-h-0 flex flex-col overflow-hidden">
-          <VentasCatalogoGrid :items="items" :loading="loadingCatalogo" @add="add" />
+          <VentasCatalogoGrid :items="itemsVisibles" :loading="loadingCatalogo" @add="add" />
         </div>
         <div class="lg:col-span-2 min-h-0 flex flex-col overflow-hidden">
           <VentasCarritoPanel

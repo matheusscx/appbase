@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import type { ItemCatalogo, PagoInput } from '~/composables/useVenta'
+import { descontarStockCatalogo, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
@@ -48,6 +48,14 @@ const mesaDrawerOpen = ref(false)
 const cuentas = ref<CuentaDetalle[]>([])
 const loadingCuentas = ref(false)
 const activeCuenta = ref<CuentaDetalle | null>(null)
+
+/** Catálogo restando lo ya pedido en las cuentas abiertas de la mesa (stock / disponible). */
+const itemsVisibles = computed(() => {
+  const reservas = cuentas.value.flatMap(c =>
+    c.lineas.map(l => ({ item: { id: l.itemId }, cantidad: l.cantidad })),
+  )
+  return descontarStockCatalogo(items.value, reservas)
+})
 const resultado = ref<ResultadoVenta | null>(null)
 
 const fusionMode = ref(false)
@@ -612,7 +620,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
           <div v-else class="grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-5">
             <div class="flex min-h-0 flex-col overflow-hidden lg:col-span-3">
               <VentasCatalogoGrid
-                :items="items"
+                :items="itemsVisibles"
                 :loading="loadingCatalogo"
                 @add="addProducto"
               />

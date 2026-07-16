@@ -69,10 +69,14 @@ export function toCalcularInput(lineas: CarritoLinea[]): CalcularVentaInput {
   }
 }
 
-/** Descuenta del catálogo las cantidades vendidas (sin recargar desde API). */
+/**
+ * Descuenta del catálogo cantidades reservadas/vendidas (sin recargar desde API).
+ * Productos: baja `stock`. Recetas: baja `disponible` (porciones).
+ * Acepta líneas de carrito o de cuenta (`{ item: { id }, cantidad }`).
+ */
 export function descontarStockCatalogo(
   items: ItemCatalogo[],
-  lineas: CarritoLinea[],
+  lineas: { item: { id: string }, cantidad: string }[],
 ): ItemCatalogo[] {
   if (lineas.length === 0) return items
 
@@ -84,13 +88,30 @@ export function descontarStockCatalogo(
 
   return items.map((item) => {
     const vendido = vendidoPorItem.get(item.id)
-    if (!vendido || item.stock === null || item.stock === '') return item
-    try {
-      const nuevo = Decimal.max(0, new Decimal(item.stock).minus(vendido))
-      return { ...item, stock: nuevo.toString() }
-    } catch {
-      return item
+    if (!vendido) return item
+
+    let next = item
+    if (item.stock !== null && item.stock !== '') {
+      try {
+        next = {
+          ...next,
+          stock: Decimal.max(0, new Decimal(item.stock).minus(vendido)).toString(),
+        }
+      }
+      catch { /* mantener stock */ }
     }
+    if (item.disponible !== null && item.disponible !== undefined) {
+      try {
+        next = {
+          ...next,
+          disponible: Decimal.max(0, new Decimal(item.disponible).minus(vendido))
+            .floor()
+            .toNumber(),
+        }
+      }
+      catch { /* mantener disponible */ }
+    }
+    return next
   })
 }
 

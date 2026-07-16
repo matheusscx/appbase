@@ -14,13 +14,16 @@ const items = ref<ItemCatalogo[]>([])
 const loadingCatalogo = ref(false)
 const pagando = ref(false)
 
+/** Catálogo restando lo ya en el carrito (stock), reactivo al agregar/quitar. */
+const itemsVisibles = computed(() => descontarStockCatalogo(items.value, lineas.value))
+
 async function cargar() {
   loadingCatalogo.value = true
   try {
     const res = await useApiFetch<PaginatedResponse<ItemCatalogo>>(
       `${apiUrl}/items?tipo=producto&pageSize=100`,
     )
-    items.value = descontarStockCatalogo(res.data, lineas.value)
+    items.value = res.data
   } catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message
     toast.add({ title: msg ?? 'Error al cargar el catálogo', color: 'error' })
@@ -62,7 +65,7 @@ async function irAPagar() {
     <template #body>
       <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start p-4">
         <div class="lg:col-span-3">
-          <VentasCatalogoGrid :items="items" :loading="loadingCatalogo" @add="add" />
+          <VentasCatalogoGrid :items="itemsVisibles" :loading="loadingCatalogo" @add="add" />
         </div>
         <div class="lg:col-span-2 lg:sticky lg:top-4">
           <TiendaCarritoOnline
