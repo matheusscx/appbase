@@ -1247,6 +1247,18 @@ export class ItemsService {
     snapshot: PersonalizacionRecetaSnapshot;
     precioExtraTotal: string;
   }> {
+    const omitidos = dto?.omitidos ?? [];
+    if (omitidos.length !== new Set(omitidos).size) {
+      throw new BadRequestException(
+        'Ingrediente omitido duplicado en la personalización',
+      );
+    }
+
+    const extraIds = (dto?.extras ?? []).map((e) => e.ingredienteItemId);
+    if (extraIds.length !== new Set(extraIds).size) {
+      throw new BadRequestException('Extra duplicado en la personalización');
+    }
+
     const ingredientes = await this.obtenerIngredientesReceta(
       manager,
       tenantId,

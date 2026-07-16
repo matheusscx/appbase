@@ -1539,6 +1539,41 @@ describe('ItemsService', () => {
         new BadRequestException('Ingrediente omitido no pertenece a la receta'),
       );
     });
+
+    it('rechaza extra duplicado en la personalización', async () => {
+      await expect(
+        service.resolverPersonalizacionReceta(
+          managerMock as any,
+          TENANT,
+          RECETA_ID,
+          {
+            extras: [
+              { ingredienteItemId: QUESO_ID },
+              { ingredienteItemId: QUESO_ID },
+            ],
+          },
+        ),
+      ).rejects.toThrow(
+        new BadRequestException('Extra duplicado en la personalización'),
+      );
+      expect(managerMock.query).not.toHaveBeenCalled();
+    });
+
+    it('rechaza omitido duplicado en la personalización', async () => {
+      await expect(
+        service.resolverPersonalizacionReceta(
+          managerMock as any,
+          TENANT,
+          RECETA_ID,
+          { omitidos: [TOMATE_ID, TOMATE_ID] },
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Ingrediente omitido duplicado en la personalización',
+        ),
+      );
+      expect(managerMock.query).not.toHaveBeenCalled();
+    });
   });
 
   describe('venderIngredientesReceta', () => {
