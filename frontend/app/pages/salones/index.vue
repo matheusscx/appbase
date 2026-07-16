@@ -5,11 +5,13 @@ import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
   cuentaToCalcularInput,
+  precioUnitarioLinea,
   type SalonConMesas,
   type MesaResumen,
   type CuentaDetalle,
   type CuentaLineaDetalle,
 } from '~/composables/useSalones'
+import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -65,6 +67,8 @@ const fusionando = ref(false)
 const cobroOpen = ref(false)
 const submitting = ref(false)
 const cancelOpen = ref(false)
+const recetaDrawerOpen = ref(false)
+const recetaItemId = ref<string | null>(null)
 
 // ── Identificación de garzón por PIN ───────────────────────────────────────
 const pinModalOpen = ref(false)
@@ -136,12 +140,14 @@ function patchMesaOcupacion(mesaId: string, deltaAbiertas: number) {
 async function cargarCatalogo() {
   loadingCatalogo.value = true
   try {
-    const [itemsRes, metodosRes, tiposRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?pageSize=100`),
+    // Solo tipos vendibles (producto + receta). Los ingredientes (y resto) no van al catálogo.
+    const [productosRes, recetasRes, metodosRes, tiposRes] = await Promise.all([
+      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
+      useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?tipo=receta&pageSize=100`),
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
     ])
-    items.value = itemsRes.data
+    items.value = [...productosRes.data, ...recetasRes.data]
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes
   }
@@ -283,14 +289,44 @@ function syncCuenta(cuenta: CuentaDetalle) {
 }
 
 // ── Líneas de la cuenta ────────────────────────────────────────────────────
+function personalizacionVacia(p: PersonalizacionPayload): boolean {
+  return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
+}
+
 async function addProducto(item: ItemCatalogo) {
   if (!activeCuenta.value) return
+  if (item.tipo === 'receta') {
+    recetaItemId.value = item.id
+    recetaDrawerOpen.value = true
+    return
+  }
   try {
     const cuenta = await salonesApi.agregarLinea(activeCuenta.value.id, item.id, '1')
     syncCuenta(cuenta)
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al agregar el producto'), color: 'error' })
+  }
+}
+
+async function onRecetaConfirm(payload: PersonalizacionPayload, _resumen: string, _precioPreview?: string) {
+  if (!activeCuenta.value || !recetaItemId.value) return
+  try {
+    const personalizacion = personalizacionVacia(payload) ? undefined : payload
+    const cuenta = await salonesApi.agregarLinea(
+      activeCuenta.value.id,
+      recetaItemId.value,
+      '1',
+      personalizacion,
+    )
+    syncCuenta(cuenta)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al agregar la receta'), color: 'error' })
+  }
+  finally {
+    recetaDrawerOpen.value = false
+    recetaItemId.value = null
   }
 }
 
@@ -317,7 +353,7 @@ async function quitarLinea(linea: CuentaLineaDetalle) {
 }
 
 function lineaSubtotal(linea: CuentaLineaDetalle): string {
-  return new Decimal(linea.precioBase || '0').times(linea.cantidad || '0').toString()
+  return new Decimal(precioUnitarioLinea(linea)).times(linea.cantidad || '0').toString()
 }
 
 // ── Comanda / precuenta ─────────────────────────────────────────────────────
@@ -641,6 +677,9 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
                   >
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm font-medium text-default">{{ linea.nombre }}</p>
+                      <p v-if="linea.personalizacionTexto" class="text-xs text-muted">
+                        {{ linea.personalizacionTexto }}
+                      </p>
                       <p class="text-xs text-muted">{{ formatMonto(lineaSubtotal(linea), linea.monedaId) }}</p>
                     </div>
                     <UInput
@@ -722,6 +761,12 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
           </div>
         </template>
       </AppDrawer>
+
+      <VentasRecetaPersonalizacionDrawer
+        v-model:open="recetaDrawerOpen"
+        :item-id="recetaItemId"
+        @confirm="onRecetaConfirm"
+      />
 
       <VentasCobroModal
         v-model:open="cobroOpen"

@@ -1,5 +1,7 @@
+import Decimal from 'decimal.js'
 import { useApiFetch } from './useApiFetch'
 import type { CalcularVentaInput } from './useCalculoPrecios'
+import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
 
 // ── Tipos (espejo del contrato del backend salones) ─────────────────────────
 
@@ -45,6 +47,12 @@ export interface CuentaLineaDetalle {
   precioBase: string
   monedaId: string
   cantidad: string
+  personalizacion?: {
+    omitidos: string[]
+    extras: { ingredienteItemId: string, cantidad: string, unidadCodigo: string, precioExtra: string }[]
+    comentario?: string
+  } | null
+  personalizacionTexto?: string
 }
 
 export interface CuentaDetalle {
@@ -74,10 +82,30 @@ export interface CerrarCuentaBody {
   customer?: Record<string, unknown>
 }
 
+/** precioBase + Σ extras cuando la línea tiene personalización con extras. */
+export function precioUnitarioLinea(linea: CuentaLineaDetalle): string {
+  const base = new Decimal(linea.precioBase || '0')
+  const extras = linea.personalizacion?.extras ?? []
+  if (extras.length === 0) return base.toString()
+  return extras.reduce(
+    (acc, e) => acc.plus(new Decimal(e.precioExtra || '0')),
+    base,
+  ).toString()
+}
+
 /** Mapea las líneas de una cuenta a la entrada del motor de precios. */
 export function cuentaToCalcularInput(cuenta: CuentaDetalle): CalcularVentaInput {
   return {
-    lineas: cuenta.lineas.map(l => ({ itemId: l.itemId, cantidad: l.cantidad })),
+    lineas: cuenta.lineas.map((l) => {
+      const precioUnitario = l.personalizacion?.extras?.length
+        ? precioUnitarioLinea(l)
+        : undefined
+      return {
+        itemId: l.itemId,
+        cantidad: l.cantidad,
+        ...(precioUnitario ? { precioUnitario } : {}),
+      }
+    }),
   }
 }
 
@@ -158,10 +186,19 @@ export function useSalones() {
       body: { cuentaIds },
     })
 
-  const agregarLinea = (cuentaId: string, itemId: string, cantidad: string) =>
+  const agregarLinea = (
+    cuentaId: string,
+    itemId: string,
+    cantidad: string,
+    personalizacion?: PersonalizacionPayload,
+  ) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/lineas`, {
       method: 'POST',
-      body: { itemId, cantidad },
+      body: {
+        itemId,
+        cantidad,
+        ...(personalizacion ? { personalizacion } : {}),
+      },
     })
 
   const actualizarLinea = (cuentaId: string, lineaId: string, cantidad: string) =>
