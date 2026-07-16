@@ -158,6 +158,7 @@ describe('VentasService', () => {
           provide: ItemsService,
           useValue: {
             findOne: jest.fn().mockResolvedValue(mockItem),
+            resolverPersonalizacionReceta: jest.fn(),
             venderIngredientesReceta: jest.fn().mockResolvedValue([]),
           },
         },
@@ -328,6 +329,92 @@ describe('VentasService', () => {
       expect(result.advertenciasReceta).toEqual([
         'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
       ]);
+    });
+
+    it('recalcula precio con extras, persiste personalizacion y pasa snapshot al stock', async () => {
+      const QUESO_ID = 'queso-extra-uuid';
+      const snapshot = {
+        omitidos: [],
+        extras: [
+          {
+            ingredienteItemId: QUESO_ID,
+            cantidad: '30',
+            unidadCodigo: 'g',
+            precioExtra: '500.0000',
+          },
+        ],
+      };
+      const dtoPersonalizada = {
+        lineas: [
+          {
+            itemId: 'receta-uuid',
+            cantidad: '1',
+            precioUnitario: '9999.0000',
+            personalizacion: {
+              extras: [{ ingredienteItemId: QUESO_ID }],
+            },
+          },
+        ],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4000.0000' }],
+      };
+
+      itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
+      (
+        itemsService.resolverPersonalizacionReceta as jest.Mock
+      ).mockResolvedValueOnce({
+        snapshot,
+        precioExtraTotal: '500.0000',
+      });
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: [
+          {
+            ...mockResultadoVenta.lineas[0],
+            itemId: 'receta-uuid',
+            precioUnitario: '4000.0000',
+            subtotalNeto: '4000.0000',
+            totalLinea: '4000.0000',
+          },
+        ],
+        totales: {
+          ...mockResultadoVenta.totales,
+          subtotalNeto: '4000.0000',
+          totalFinal: '4000.0000',
+        },
+      });
+      pagosServiceMock.registrar.mockResolvedValueOnce([
+        { id: 'pago-uuid-001', monto: '4000.0000', vuelto: '0.0000' },
+      ]);
+
+      const result = await service.crear(
+        TENANT_ID,
+        USUARIO_ID,
+        dtoPersonalizada,
+      );
+
+      expect(itemsService.resolverPersonalizacionReceta).toHaveBeenCalledWith(
+        expect.anything(),
+        TENANT_ID,
+        'receta-uuid',
+        dtoPersonalizada.lineas[0].personalizacion,
+      );
+      expect(calculoPreciosService.calcular).toHaveBeenCalledWith(
+        TENANT_ID,
+        expect.objectContaining({
+          lineas: [
+            expect.objectContaining({
+              itemId: 'receta-uuid',
+              precioUnitario: '4000.0000',
+            }),
+          ],
+        }),
+      );
+      expect(result.detalles[0].precioUnitarioOrigen).toBe('4000.0000');
+      expect(result.detalles[0].personalizacion).toEqual(snapshot);
+      expect(itemsService.venderIngredientesReceta).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ snapshot }),
+      );
     });
   });
 

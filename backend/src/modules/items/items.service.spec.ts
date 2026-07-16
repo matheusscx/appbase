@@ -1446,6 +1446,101 @@ describe('ItemsService', () => {
     });
   });
 
+  describe('resolverPersonalizacionReceta', () => {
+    const RECETA_ID = 'receta-uuid';
+    const PAN_ID = 'pan-uuid';
+    const QUESO_ID = 'queso-uuid';
+    const TOMATE_ID = 'tomate-uuid';
+
+    function mockIngredientesYExtras() {
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            ingrediente_item_id: PAN_ID,
+            ingrediente_nombre: 'Pan',
+            ingrediente_unidad_medida: 'unidad',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingrediente_item_id: TOMATE_ID,
+            ingrediente_nombre: 'Tomate',
+            ingrediente_unidad_medida: 'kg',
+            cantidad: '50',
+            unidad_codigo: 'g',
+            bloqueante: false,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            ingrediente_item_id: QUESO_ID,
+            ingrediente_nombre: 'Queso',
+            cantidad: '30',
+            unidad_codigo: 'g',
+            precio_extra: '500.0000',
+          },
+        ]);
+    }
+
+    it('suma precios de extras del catálogo y arma snapshot', async () => {
+      mockIngredientesYExtras();
+
+      const result = await service.resolverPersonalizacionReceta(
+        managerMock as any,
+        TENANT,
+        RECETA_ID,
+        {
+          omitidos: [TOMATE_ID],
+          extras: [{ ingredienteItemId: QUESO_ID }],
+          comentario: '  sin tomate  ',
+        },
+      );
+
+      expect(result.precioExtraTotal).toBe('500.0000');
+      expect(result.snapshot).toEqual({
+        omitidos: [TOMATE_ID],
+        extras: [
+          {
+            ingredienteItemId: QUESO_ID,
+            cantidad: '30',
+            unidadCodigo: 'g',
+            precioExtra: '500.0000',
+          },
+        ],
+        comentario: 'sin tomate',
+      });
+    });
+
+    it('rechaza extra no permitido para la receta', async () => {
+      mockIngredientesYExtras();
+
+      await expect(
+        service.resolverPersonalizacionReceta(
+          managerMock as any,
+          TENANT,
+          RECETA_ID,
+          { extras: [{ ingredienteItemId: 'extra-ajeno' }] },
+        ),
+      ).rejects.toThrow(new BadRequestException('Extra no permitido para esta receta'));
+    });
+
+    it('rechaza omitido que no pertenece a la receta', async () => {
+      mockIngredientesYExtras();
+
+      await expect(
+        service.resolverPersonalizacionReceta(
+          managerMock as any,
+          TENANT,
+          RECETA_ID,
+          { omitidos: ['ingrediente-ajeno'] },
+        ),
+      ).rejects.toThrow(
+        new BadRequestException('Ingrediente omitido no pertenece a la receta'),
+      );
+    });
+  });
+
   describe('venderIngredientesReceta', () => {
     const PARAMS = {
       tenantId: TENANT,
@@ -1578,6 +1673,77 @@ describe('ItemsService', () => {
       await expect(
         service.venderIngredientesReceta(managerMock as any, PARAMS),
       ).rejects.toThrow('El item no tiene control de stock');
+    });
+
+    it('con snapshot omite ingredientes omitidos y descuenta extras como no bloqueantes', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            ingrediente_item_id: 'pan',
+            ingrediente_nombre: 'Pan',
+            ingrediente_unidad_medida: 'unidad',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingrediente_item_id: 'tomate',
+            ingrediente_nombre: 'Tomate',
+            ingrediente_unidad_medida: 'kg',
+            cantidad: '50',
+            unidad_codigo: 'g',
+            bloqueante: false,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            ingrediente_item_id: 'queso',
+            ingrediente_nombre: 'Queso',
+            ingrediente_unidad_medida: 'kg',
+            cantidad: '30',
+            unidad_codigo: 'g',
+            precio_extra: '500.0000',
+          },
+        ]);
+      catalogServiceMock.convertirUnidad
+        .mockResolvedValueOnce('2') // pan
+        .mockResolvedValueOnce('0.06'); // extra queso: 30*2 g → kg
+
+      const snapshot = {
+        omitidos: ['tomate'],
+        extras: [
+          {
+            ingredienteItemId: 'queso',
+            cantidad: '30',
+            unidadCodigo: 'g',
+            precioExtra: '500.0000',
+          },
+        ],
+      };
+
+      const advertencias = await service.venderIngredientesReceta(
+        managerMock as any,
+        { ...PARAMS, snapshot },
+      );
+
+      expect(advertencias).toEqual([]);
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(2);
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
+        1,
+        managerMock,
+        expect.objectContaining({ itemId: 'pan', cantidad: '2' }),
+      );
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
+        2,
+        managerMock,
+        expect.objectContaining({ itemId: 'queso', cantidad: '0.06' }),
+      );
+      expect(
+        inventarioServiceMock.registrarMovimiento,
+      ).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ itemId: 'tomate' }),
+      );
     });
   });
 

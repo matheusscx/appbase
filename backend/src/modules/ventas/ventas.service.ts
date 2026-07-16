@@ -26,6 +26,7 @@ import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
+import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
 
 /** Ítem/cantidad a devolver a stock en un reembolso (solo modo 'cantidad'). */
 export interface DevolucionReembolso {
@@ -135,11 +136,30 @@ export class VentasService {
       monedaRows.map((r) => [r.moneda_id, r.valor_del_dia ?? '1']),
     );
 
+    const personalizaciones = await Promise.all(
+      dto.lineas.map(async (linea, i) => {
+        const item = items[i];
+        if (item.tipo !== 'receta' || !linea.personalizacion) {
+          return null;
+        }
+        return this.itemsService.resolverPersonalizacionReceta(
+          manager,
+          tenantId,
+          item.id,
+          linea.personalizacion,
+        );
+      }),
+    );
+
     // 4. Construir DTO para el motor de precios con precios ya convertidos a moneda oficial
     const lineasConversion = dto.lineas.map((linea, i) => {
       const item = items[i];
+      const pers = personalizaciones[i];
       const tasa = new Decimal(tasaMap.get(item.monedaId) ?? '1');
-      const precioOrigen = linea.precioUnitario ?? item.precioBase;
+      const precioOrigen =
+        pers != null
+          ? new Decimal(item.precioBase).plus(pers.precioExtraTotal).toFixed(4)
+          : (linea.precioUnitario ?? item.precioBase);
       const precioConvertido = new Decimal(precioOrigen).times(tasa).toFixed(4);
       return {
         linea,
@@ -147,6 +167,7 @@ export class VentasService {
         precioOrigen,
         tasa: tasa.toFixed(6),
         precioConvertido,
+        personalizacion: (pers?.snapshot ?? null) as PersonalizacionRecetaSnapshot | null,
       };
     });
 
@@ -207,7 +228,7 @@ export class VentasService {
     // 7b. Líneas / detalles
     const detalles = await Promise.all(
       resultado.lineas.map((rLinea, i) => {
-        const { item, precioOrigen, tasa, precioConvertido } =
+        const { item, precioOrigen, tasa, precioConvertido, personalizacion } =
           lineasConversion[i];
         return manager.save(
           VentaDetalle,
@@ -225,6 +246,7 @@ export class VentasService {
             recargoAplicado: rLinea.recargoAplicado,
             impuestoAplicado: rLinea.impuestoAplicado,
             totalLinea: rLinea.totalLinea,
+            personalizacion,
           }),
         );
       }),
@@ -316,7 +338,7 @@ export class VentasService {
     // 7f. Movimientos de inventario (productos y recetas)
     const advertenciasReceta: string[] = [];
     for (let i = 0; i < lineasConversion.length; i++) {
-      const { item, linea } = lineasConversion[i];
+      const { item, linea, personalizacion } = lineasConversion[i];
       if (item.tipo === 'producto') {
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId,
@@ -339,6 +361,7 @@ export class VentasService {
             recetaItemId: item.id,
             recetaNombre: item.nombre,
             cantidadVendida: linea.cantidad,
+            snapshot: personalizacion ?? undefined,
           },
         );
         advertenciasReceta.push(...advertencias);

@@ -24,6 +24,10 @@ import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
+import {
+  PersonalizacionRecetaDto,
+  type PersonalizacionRecetaSnapshot,
+} from '../../common/dto/personalizacion-receta.dto';
 
 interface ItemRow {
   item_id: string;
@@ -1193,6 +1197,103 @@ export class ItemsService {
     }));
   }
 
+  async obtenerExtrasPermitidos(
+    manager: EntityManager,
+    tenantId: string,
+    recetaItemId: string,
+  ): Promise<
+    {
+      ingredienteItemId: string;
+      ingredienteNombre: string;
+      ingredienteUnidadMedida: string;
+      cantidad: string;
+      unidadCodigo: string;
+      precioExtra: string;
+    }[]
+  > {
+    const rows: {
+      ingrediente_item_id: string;
+      ingrediente_nombre: string;
+      ingrediente_unidad_medida: string;
+      cantidad: string;
+      unidad_codigo: string;
+      precio_extra: string;
+    }[] = await manager.query(
+      `SELECT re.ingrediente_item_id, i.nombre AS ingrediente_nombre,
+              ip.unidad_medida AS ingrediente_unidad_medida,
+              re.cantidad, re.unidad_codigo, re.precio_extra
+       FROM receta_extras_permitidos re
+       JOIN items i ON i.item_id = re.ingrediente_item_id AND i.eliminado_el IS NULL
+       JOIN item_producto ip ON ip.item_id = re.ingrediente_item_id
+       WHERE re.receta_item_id = $1 AND re.tenant_id = $2 AND re.eliminado_el IS NULL`,
+      [recetaItemId, tenantId],
+    );
+    return rows.map((r) => ({
+      ingredienteItemId: r.ingrediente_item_id,
+      ingredienteNombre: r.ingrediente_nombre,
+      ingredienteUnidadMedida: r.ingrediente_unidad_medida,
+      cantidad: r.cantidad,
+      unidadCodigo: r.unidad_codigo,
+      precioExtra: r.precio_extra,
+    }));
+  }
+
+  async resolverPersonalizacionReceta(
+    manager: EntityManager,
+    tenantId: string,
+    recetaItemId: string,
+    dto?: PersonalizacionRecetaDto,
+  ): Promise<{
+    snapshot: PersonalizacionRecetaSnapshot;
+    precioExtraTotal: string;
+  }> {
+    const ingredientes = await this.obtenerIngredientesReceta(
+      manager,
+      tenantId,
+      recetaItemId,
+    );
+    const extrasCat = await this.obtenerExtrasPermitidos(
+      manager,
+      tenantId,
+      recetaItemId,
+    );
+
+    for (const id of dto?.omitidos ?? []) {
+      if (!ingredientes.some((i) => i.ingredienteItemId === id)) {
+        throw new BadRequestException(
+          'Ingrediente omitido no pertenece a la receta',
+        );
+      }
+    }
+
+    const extrasResolved: PersonalizacionRecetaSnapshot['extras'] = [];
+    let precioExtraTotal = new Decimal(0);
+    for (const e of dto?.extras ?? []) {
+      const cat = extrasCat.find(
+        (x) => x.ingredienteItemId === e.ingredienteItemId,
+      );
+      if (!cat) {
+        throw new BadRequestException('Extra no permitido para esta receta');
+      }
+      extrasResolved.push({
+        ingredienteItemId: cat.ingredienteItemId,
+        cantidad: cat.cantidad,
+        unidadCodigo: cat.unidadCodigo,
+        precioExtra: cat.precioExtra,
+      });
+      precioExtraTotal = precioExtraTotal.plus(cat.precioExtra);
+    }
+
+    return {
+      snapshot: {
+        omitidos: [...(dto?.omitidos ?? [])],
+        extras: extrasResolved,
+        comentario: dto?.comentario?.trim() || undefined,
+      },
+      precioExtraTotal: precioExtraTotal.toFixed(4),
+    };
+  }
+
   async obtenerStockProducto(
     manager: EntityManager,
     itemId: string,
@@ -1222,16 +1323,48 @@ export class ItemsService {
       recetaItemId: string;
       recetaNombre: string;
       cantidadVendida: string;
+      snapshot?: PersonalizacionRecetaSnapshot;
     },
   ): Promise<string[]> {
-    const ingredientes = await this.obtenerIngredientesReceta(
+    const ingredientesBase = await this.obtenerIngredientesReceta(
       manager,
       params.tenantId,
       params.recetaItemId,
     );
+    const omitidos = new Set(params.snapshot?.omitidos ?? []);
+    const ingredientes = ingredientesBase.filter(
+      (ing) => !omitidos.has(ing.ingredienteItemId),
+    );
+
+    const extrasCat =
+      params.snapshot?.extras.length
+        ? await this.obtenerExtrasPermitidos(
+            manager,
+            params.tenantId,
+            params.recetaItemId,
+          )
+        : [];
+
+    const extrasIngredientes =
+      params.snapshot?.extras.map((extra) => {
+        const cat = extrasCat.find(
+          (x) => x.ingredienteItemId === extra.ingredienteItemId,
+        );
+        return {
+          ingredienteItemId: extra.ingredienteItemId,
+          ingredienteNombre: cat?.ingredienteNombre ?? 'Extra',
+          ingredienteUnidadMedida:
+            cat?.ingredienteUnidadMedida ?? extra.unidadCodigo,
+          cantidad: extra.cantidad,
+          unidadCodigo: extra.unidadCodigo,
+          bloqueante: false,
+        };
+      }) ?? [];
+
+    const todosIngredientes = [...ingredientes, ...extrasIngredientes];
     const advertencias: string[] = [];
 
-    for (const ing of ingredientes) {
+    for (const ing of todosIngredientes) {
       const cantidadPorReceta = new Decimal(ing.cantidad)
         .mul(params.cantidadVendida)
         .toString();

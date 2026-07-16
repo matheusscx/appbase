@@ -12,6 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 
 export class LineaVentaDto {
   @IsUUID()
@@ -43,6 +44,11 @@ export class LineaVentaDto {
   @IsOptional()
   @IsUUID()
   loteId?: string; // modo 'lote' salida
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PersonalizacionRecetaDto)
+  personalizacion?: PersonalizacionRecetaDto;
 }
 
 export class PagoVentaDto {
