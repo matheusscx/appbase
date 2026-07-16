@@ -262,6 +262,86 @@ describe('ItemsService', () => {
       expect(result.recargosIds).toEqual([]);
       expect(result.descuentosIds).toEqual([]);
     });
+
+    it('extrasPermitidos: findOne receta incluye stock en ingredientes y extras', async () => {
+      const baseRow = {
+        item_id: ITEM_ID,
+        nombre: 'Hamburguesa',
+        descripcion: null,
+        tipo: 'receta',
+        activo: true,
+        precio_base: '3500',
+        precio_incluye_impuesto: false,
+        moneda_id: MONEDA_ID,
+        moneda_codigo: 'CLP',
+        moneda_simbolo: '$',
+        categoria_id: null,
+        categoria_nombre: null,
+        creado_el: new Date(),
+        stock: null,
+        unidad_medida: null,
+        fecha_elaboracion: null,
+        fecha_vencimiento: null,
+        modo_inventario: null,
+        costo_actual: '1700',
+        duracion_estimada: null,
+        requiere_cita: null,
+        frecuencia: null,
+      };
+      dataSource.query
+        .mockResolvedValueOnce([baseRow])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            ingrediente_item_id: 'ingrediente-pan',
+            ingrediente_nombre: 'Pan',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            bloqueante: true,
+            stock: '8',
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            ingrediente_item_id: 'ingrediente-queso',
+            ingrediente_nombre: 'Queso',
+            cantidad: '20',
+            unidad_codigo: 'g',
+            precio_extra: '500',
+            stock: '2.5',
+          },
+        ]);
+
+      const result = await service.findOne(TENANT, ITEM_ID);
+
+      expect(result.ingredientes).toEqual([
+        {
+          ingredienteItemId: 'ingrediente-pan',
+          ingredienteNombre: 'Pan',
+          cantidad: '1',
+          unidadCodigo: 'unidad',
+          bloqueante: true,
+          stock: '8',
+        },
+      ]);
+      expect(result.extrasPermitidos).toEqual([
+        {
+          ingredienteItemId: 'ingrediente-queso',
+          ingredienteNombre: 'Queso',
+          cantidad: '20',
+          unidadCodigo: 'g',
+          precioExtra: '500',
+          stock: '2.5',
+        },
+      ]);
+      const ingQuery = dataSource.query.mock.calls[4][0] as string;
+      expect(ingQuery).toContain('ip.stock');
+      const extrasQuery = dataSource.query.mock.calls[5][0] as string;
+      expect(extrasQuery).toContain('receta_extras_permitidos');
+      expect(extrasQuery).toContain('ip.stock');
+    });
   });
 
   // ── create ─────────────────────────────────────────────────────────────────
@@ -560,6 +640,139 @@ describe('ItemsService', () => {
           expect.stringContaining('INSERT INTO item_receta'),
           [ITEM_ID, '1700'],
         );
+      });
+    });
+
+    describe('extrasPermitidos', () => {
+      const ingredientePan = {
+        ingredienteItemId: 'ingrediente-pan',
+        cantidad: '1',
+        unidadCodigo: 'unidad',
+        bloqueante: true,
+      };
+      const extraQueso = {
+        ingredienteItemId: 'ingrediente-queso',
+        cantidad: '20',
+        unidadCodigo: 'g',
+        precioExtra: '500',
+      };
+      const dtoRecetaConExtras = {
+        nombre: 'Hamburguesa con extras',
+        precioBase: '3500',
+        monedaId: MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [ingredientePan],
+        extrasPermitidos: [extraQueso],
+      };
+
+      it('create receta con extrasPermitidos válidos persiste e incluye extras en respuesta', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ codigo_iso: 'CLP', simbolo: '$' }]) // moneda
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+          .mockResolvedValueOnce([
+            {
+              tipo: 'ingrediente',
+              nombre: 'Pan',
+              modo_inventario: 'cantidad',
+              unidad_medida: 'unidad',
+              costo_actual: '500',
+            },
+          ]) // lookup pan
+          .mockResolvedValueOnce([]) // INSERT item_receta
+          .mockResolvedValueOnce([]) // INSERT receta_ingredientes pan
+          .mockResolvedValueOnce([
+            {
+              tipo: 'ingrediente',
+              nombre: 'Queso',
+              modo_inventario: 'cantidad',
+              unidad_medida: 'kg',
+            },
+          ]) // lookup queso extra
+          .mockResolvedValueOnce([]); // INSERT receta_extras_permitidos
+
+        catalogServiceMock.convertirUnidad.mockResolvedValueOnce('1');
+
+        const result = await service.create(
+          TENANT,
+          'user-uuid',
+          dtoRecetaConExtras as any,
+        );
+
+        expect(result.extrasPermitidos).toEqual([
+          {
+            ingredienteItemId: 'ingrediente-queso',
+            ingredienteNombre: 'Queso',
+            cantidad: '20',
+            unidadCodigo: 'g',
+            precioExtra: '500',
+          },
+        ]);
+        const insertExtra = managerMock.query.mock.calls.find(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' &&
+            (c[0] as string).includes('INSERT INTO receta_extras_permitidos'),
+        );
+        expect(insertExtra).toBeDefined();
+        expect(insertExtra?.[1]).toEqual([
+          TENANT,
+          ITEM_ID,
+          'ingrediente-queso',
+          '20',
+          'g',
+          '500',
+        ]);
+      });
+
+      it('create rechaza precioExtra negativo', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ codigo_iso: 'CLP', simbolo: '$' }])
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }])
+          .mockResolvedValueOnce([
+            {
+              tipo: 'ingrediente',
+              nombre: 'Pan',
+              modo_inventario: 'cantidad',
+              unidad_medida: 'unidad',
+              costo_actual: '500',
+            },
+          ])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([]);
+
+        catalogServiceMock.convertirUnidad.mockResolvedValueOnce('1');
+
+        await expect(
+          service.create(TENANT, 'user-uuid', {
+            ...dtoRecetaConExtras,
+            extrasPermitidos: [{ ...extraQueso, precioExtra: '-100' }],
+          } as any),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('create rechaza precioExtra no numérico', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ codigo_iso: 'CLP', simbolo: '$' }])
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }])
+          .mockResolvedValueOnce([
+            {
+              tipo: 'ingrediente',
+              nombre: 'Pan',
+              modo_inventario: 'cantidad',
+              unidad_medida: 'unidad',
+              costo_actual: '500',
+            },
+          ])
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([]);
+
+        catalogServiceMock.convertirUnidad.mockResolvedValueOnce('1');
+
+        await expect(
+          service.create(TENANT, 'user-uuid', {
+            ...dtoRecetaConExtras,
+            extrasPermitidos: [{ ...extraQueso, precioExtra: 'abc' }],
+          } as any),
+        ).rejects.toThrow(BadRequestException);
       });
     });
 
@@ -877,6 +1090,63 @@ describe('ItemsService', () => {
       );
       expect(updateReceta?.[0]).toContain('costo_propuesto_omitido = NULL');
       expect(updateReceta?.[1]).toEqual(['120', ITEM_ID]);
+    });
+
+    it('extrasPermitidos: update soft-deletea extras previos e inserta nuevos', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValueOnce([
+          {
+            tipo: 'ingrediente',
+            nombre: 'Queso',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+          },
+        ])
+        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos
+        .mockResolvedValueOnce([]); // INSERT receta_extras_permitidos
+
+      const result = await service.update(TENANT, ITEM_ID, {
+        extrasPermitidos: [
+          {
+            ingredienteItemId: 'ingrediente-queso',
+            cantidad: '30',
+            unidadCodigo: 'g',
+            precioExtra: '600',
+          },
+        ],
+      });
+
+      const softDeleteCall = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          (c[0] as string).includes('receta_extras_permitidos') &&
+          (c[0] as string).includes('eliminado_el = NOW()'),
+      );
+      expect(softDeleteCall).toBeDefined();
+      expect(softDeleteCall?.[1]).toEqual([ITEM_ID, TENANT]);
+      const insertCall = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          (c[0] as string).includes('INSERT INTO receta_extras_permitidos'),
+      );
+      expect(insertCall?.[1]).toEqual([
+        TENANT,
+        ITEM_ID,
+        'ingrediente-queso',
+        '30',
+        'g',
+        '600',
+      ]);
+      expect(result.extrasPermitidos).toEqual([
+        {
+          ingredienteItemId: 'ingrediente-queso',
+          ingredienteNombre: 'Queso',
+          cantidad: '30',
+          unidadCodigo: 'g',
+          precioExtra: '600',
+        },
+      ]);
     });
 
     it.each([

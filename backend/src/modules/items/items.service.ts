@@ -12,6 +12,7 @@ import { ItemServicio } from './entities/item-servicio.entity';
 import {
   CreateItemDto,
   RecetaIngredienteInputDto,
+  RecetaExtraInputDto,
 } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
@@ -230,6 +231,15 @@ export class ItemsService {
       cantidad: string;
       unidadCodigo: string;
       bloqueante: boolean;
+      stock: string;
+    }[] = [];
+    let extrasPermitidos: {
+      ingredienteItemId: string;
+      ingredienteNombre: string;
+      cantidad: string;
+      unidadCodigo: string;
+      precioExtra: string;
+      stock: string;
     }[] = [];
     if (rows[0].tipo === 'receta') {
       const ingRows: {
@@ -238,11 +248,13 @@ export class ItemsService {
         cantidad: string;
         unidad_codigo: string;
         bloqueante: boolean;
+        stock: string;
       }[] = await this.dataSource.query(
         `SELECT ri.ingrediente_item_id, i.nombre AS ingrediente_nombre,
-                ri.cantidad, ri.unidad_codigo, ri.bloqueante
+                ri.cantidad, ri.unidad_codigo, ri.bloqueante, ip.stock
          FROM receta_ingredientes ri
          JOIN items i ON i.item_id = ri.ingrediente_item_id AND i.eliminado_el IS NULL
+         JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
          WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
         [itemId, tenantId],
       );
@@ -252,6 +264,32 @@ export class ItemsService {
         cantidad: r.cantidad,
         unidadCodigo: r.unidad_codigo,
         bloqueante: r.bloqueante,
+        stock: r.stock,
+      }));
+
+      const extraRows: {
+        ingrediente_item_id: string;
+        ingrediente_nombre: string;
+        cantidad: string;
+        unidad_codigo: string;
+        precio_extra: string;
+        stock: string;
+      }[] = await this.dataSource.query(
+        `SELECT re.ingrediente_item_id, i.nombre AS ingrediente_nombre,
+                re.cantidad, re.unidad_codigo, re.precio_extra, ip.stock
+         FROM receta_extras_permitidos re
+         JOIN items i ON i.item_id = re.ingrediente_item_id AND i.eliminado_el IS NULL
+         JOIN item_producto ip ON ip.item_id = re.ingrediente_item_id
+         WHERE re.receta_item_id = $1 AND re.tenant_id = $2 AND re.eliminado_el IS NULL`,
+        [itemId, tenantId],
+      );
+      extrasPermitidos = extraRows.map((r) => ({
+        ingredienteItemId: r.ingrediente_item_id,
+        ingredienteNombre: r.ingrediente_nombre,
+        cantidad: r.cantidad,
+        unidadCodigo: r.unidad_codigo,
+        precioExtra: r.precio_extra,
+        stock: r.stock,
       }));
     }
 
@@ -261,6 +299,7 @@ export class ItemsService {
       recargosIds: recargosRows.map((r) => r.recargo_id),
       descuentosIds: descuentosRows.map((r) => r.descuento_id),
       ingredientes,
+      extrasPermitidos,
     };
   }
 
@@ -380,6 +419,13 @@ export class ItemsService {
         cantidad: string;
         unidadCodigo: string;
         bloqueante: boolean;
+      }[] = [];
+      let extrasPermitidos: {
+        ingredienteItemId: string;
+        ingredienteNombre: string;
+        cantidad: string;
+        unidadCodigo: string;
+        precioExtra: string;
       }[] = [];
 
       if (dto.tipo === 'producto' || dto.tipo === 'ingrediente') {
@@ -514,6 +560,29 @@ export class ItemsService {
             ],
           );
         }
+        if (dto.extrasPermitidos?.length) {
+          const extrasValidados = await this.validarExtrasPermitidos(
+            manager,
+            tenantId,
+            dto.extrasPermitidos,
+          );
+          extrasPermitidos = extrasValidados;
+          for (const extra of dto.extrasPermitidos) {
+            await manager.query(
+              `INSERT INTO receta_extras_permitidos
+                 (tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, precio_extra)
+               VALUES ($1,$2,$3,$4,$5,$6)`,
+              [
+                tenantId,
+                itemId,
+                extra.ingredienteItemId,
+                extra.cantidad,
+                extra.unidadCodigo,
+                extra.precioExtra,
+              ],
+            );
+          }
+        }
       } else {
         frecuencia = dto.frecuencia ?? null;
         await manager.query(
@@ -557,6 +626,7 @@ export class ItemsService {
         recargosIds: dto.recargosIds ?? [],
         descuentosIds: dto.descuentosIds ?? [],
         ingredientes,
+        extrasPermitidos,
       };
     });
   }
@@ -855,6 +925,35 @@ export class ItemsService {
           );
           patch.costoActual = costeo.costoActual;
           patch.ingredientes = costeo.ingredientes;
+        }
+        if (dto.extrasPermitidos !== undefined) {
+          const extrasValidados = await this.validarExtrasPermitidos(
+            manager,
+            tenantId,
+            dto.extrasPermitidos,
+          );
+          await manager.query(
+            `UPDATE receta_extras_permitidos
+             SET eliminado_el = NOW(), actualizado_el = NOW()
+             WHERE receta_item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+            [itemId, tenantId],
+          );
+          for (const extra of dto.extrasPermitidos) {
+            await manager.query(
+              `INSERT INTO receta_extras_permitidos
+                 (tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, precio_extra)
+               VALUES ($1,$2,$3,$4,$5,$6)`,
+              [
+                tenantId,
+                itemId,
+                extra.ingredienteItemId,
+                extra.cantidad,
+                extra.unidadCodigo,
+                extra.precioExtra,
+              ],
+            );
+          }
+          patch.extrasPermitidos = extrasValidados;
         }
       }
 
@@ -1333,6 +1432,91 @@ export class ItemsService {
         .toString(),
       ingredientes: detalle,
     };
+  }
+
+  private async validarExtrasPermitidos(
+    manager: EntityManager,
+    tenantId: string,
+    extras: RecetaExtraInputDto[],
+  ): Promise<
+    {
+      ingredienteItemId: string;
+      ingredienteNombre: string;
+      cantidad: string;
+      unidadCodigo: string;
+      precioExtra: string;
+    }[]
+  > {
+    const detalle: {
+      ingredienteItemId: string;
+      ingredienteNombre: string;
+      cantidad: string;
+      unidadCodigo: string;
+      precioExtra: string;
+    }[] = [];
+    for (const extra of extras) {
+      let cantidad;
+      try {
+        cantidad = new Decimal(extra.cantidad);
+      } catch {
+        throw new BadRequestException(
+          'La cantidad del extra permitido debe ser un número mayor a 0',
+        );
+      }
+      if (cantidad.isNaN() || cantidad.lessThanOrEqualTo(0)) {
+        throw new BadRequestException(
+          'La cantidad del extra permitido debe ser mayor a 0',
+        );
+      }
+      let precioExtra;
+      try {
+        precioExtra = new Decimal(extra.precioExtra);
+      } catch {
+        throw new BadRequestException(
+          'El precio extra debe ser un número mayor o igual a 0',
+        );
+      }
+      if (precioExtra.isNaN() || precioExtra.lessThan(0)) {
+        throw new BadRequestException(
+          'El precio extra debe ser mayor o igual a 0',
+        );
+      }
+      const rows: {
+        tipo: string;
+        nombre: string;
+        modo_inventario: string | null;
+        unidad_medida: string | null;
+      }[] = await manager.query(
+        `SELECT i.tipo, i.nombre, ip.modo_inventario, ip.unidad_medida
+         FROM items i
+         LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+         WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+        [extra.ingredienteItemId, tenantId],
+      );
+      if (!rows.length || rows[0].tipo !== 'ingrediente') {
+        throw new BadRequestException(
+          `El extra ${extra.ingredienteItemId} no es un item de tipo ingrediente válido`,
+        );
+      }
+      if (rows[0].modo_inventario !== 'cantidad') {
+        throw new BadRequestException(
+          'Los extras permitidos solo admiten modo de inventario "cantidad"',
+        );
+      }
+      await this.catalogService.convertirUnidad(
+        extra.cantidad,
+        extra.unidadCodigo,
+        rows[0].unidad_medida!,
+      );
+      detalle.push({
+        ingredienteItemId: extra.ingredienteItemId,
+        ingredienteNombre: rows[0].nombre,
+        cantidad: extra.cantidad,
+        unidadCodigo: extra.unidadCodigo,
+        precioExtra: extra.precioExtra,
+      });
+    }
+    return detalle;
   }
 
   private eq4(a: string | Decimal, b: string | Decimal): boolean {
