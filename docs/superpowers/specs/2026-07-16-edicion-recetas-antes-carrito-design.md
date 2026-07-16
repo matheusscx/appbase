@@ -1,6 +1,6 @@
 # Diseño — Edición de recetas antes de agregar al carrito
 
-**Status**: Draft
+**Status**: Approved
 **Date**: 2026-07-16
 **Owner**: Cesar Matheus
 **Depends on**: [Recetas + criticidad de ingredientes](./2026-07-15-recetas-criticidad-ingredientes-design.md)
