@@ -604,7 +604,10 @@ export class SalonesService {
       this.sqlLineasComanda(),
       [cuentaId, tenantId],
     );
-    const nombres = await this.nombresIngredientesPersonalizacion(rows);
+    const nombres = await this.nombresIngredientesPersonalizacion(
+      tenantId,
+      rows,
+    );
     return { estaciones: this.agruparEstacionesComanda(rows, nombres) };
   }
 
@@ -643,7 +646,10 @@ export class SalonesService {
         [cuentaId, tenantId],
       );
 
-      const nombres = await this.nombresIngredientesPersonalizacion(rows);
+      const nombres = await this.nombresIngredientesPersonalizacion(
+        tenantId,
+        rows,
+      );
       const estaciones = this.agruparEstacionesComanda(rows, nombres);
 
       for (const estacion of estaciones) {
@@ -768,7 +774,10 @@ export class SalonesService {
       cuenta.garzonAperturaId,
       cuenta.garzonCierreId,
     );
-    const nombres = await this.nombresIngredientesPersonalizacion(lineas);
+    const nombres = await this.nombresIngredientesPersonalizacion(
+      tenantId,
+      lineas,
+    );
     return {
       id: cuenta.id,
       numero: cuenta.numero,
@@ -806,6 +815,7 @@ export class SalonesService {
   }
 
   private async nombresIngredientesPersonalizacion(
+    tenantId: string,
     rows: { personalizacion?: PersonalizacionRecetaSnapshot | null }[],
   ): Promise<Map<string, string>> {
     const ids = new Set<string>();
@@ -819,8 +829,8 @@ export class SalonesService {
     const nameRows: { item_id: string; nombre: string }[] =
       await this.dataSource.query(
         `SELECT item_id, nombre FROM items
-          WHERE item_id = ANY($1) AND eliminado_el IS NULL`,
-        [[...ids]],
+          WHERE item_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [[...ids], tenantId],
       );
     return new Map(nameRows.map((r) => [r.item_id, r.nombre]));
   }

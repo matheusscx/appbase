@@ -287,6 +287,71 @@ describe('SalonesService', () => {
       expect(result.id).toBe(CUENTA_A);
     });
 
+    it('mantiene dos líneas si mismo itemId pero distinta personalización', async () => {
+      const cuentaA = {
+        id: CUENTA_A,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 1,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      const cuentaB = {
+        id: CUENTA_B,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 2,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      const lineaDestinoSinPerso = {
+        id: 'linea-a1',
+        tenantId: TENANT,
+        cuentaId: CUENTA_A,
+        itemId: 'item-1',
+        cantidad: '1',
+        cantidadEnviada: '0',
+        personalizacion: null,
+      };
+      const lineaOrigenConPerso = {
+        id: 'linea-b1',
+        tenantId: TENANT,
+        cuentaId: CUENTA_B,
+        itemId: 'item-1',
+        cantidad: '2',
+        cantidadEnviada: '0',
+        personalizacion: SNAPSHOT,
+      };
+
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockImplementation(
+        (entity: unknown, opts?: { where?: { cuentaId?: string; itemId?: string } }) => {
+          if (entity === Cuenta) return Promise.resolve([cuentaA, cuentaB]);
+          if (entity === CuentaLinea) {
+            if (opts?.where?.cuentaId === CUENTA_B)
+              return Promise.resolve([lineaOrigenConPerso]);
+            if (
+              opts?.where?.cuentaId === CUENTA_A &&
+              opts?.where?.itemId === 'item-1'
+            )
+              return Promise.resolve([lineaDestinoSinPerso]);
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([]);
+        },
+      );
+      manager.query.mockResolvedValue([]);
+
+      await service.fusionarCuentas(TENANT, MESA, {
+        cuentaIds: [CUENTA_A, CUENTA_B],
+      });
+
+      expect(lineaDestinoSinPerso.cantidad).toBe('1');
+      expect(lineaOrigenConPerso.cuentaId).toBe(CUENTA_A);
+      expect(manager.softDelete).not.toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({ id: 'linea-b1' }),
+      );
+    });
+
     it('lanza BadRequest si alguna cuenta no está abierta o no pertenece a la mesa', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
       manager.find.mockResolvedValue([{ id: CUENTA_A, numero: 1 }]);
