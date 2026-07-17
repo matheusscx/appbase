@@ -12,7 +12,9 @@ import {
   type CuentaLineaDetalle,
 } from '~/composables/useSalones'
 import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
+import type { Turno } from '~/composables/useTurnos'
 import { formatCantidadTicket, unidadBaseItem } from '~/utils/cantidad-presentacion'
+import { shellUi } from '~/utils/ui-shell'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -29,6 +31,8 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const cajaStore = useCajaStore()
 const salonesApi = useSalones()
+const turnosApi = useTurnos()
+const sesionesApi = useSesionesGarzon()
 const unidadesStore = useUnidadesMedidaStore()
 const { calcular } = useCalculoPrecios()
 const { formatMonto } = useFormatters()
@@ -90,6 +94,80 @@ function onPinConfirmado(pin: string, nombre: string) {
   const action = pinAction
   pinAction = null
   action?.(pin, nombre)
+}
+
+// ── Entrar / salir de turno ──────────────────────────────────────────────────
+const turnoModalOpen = ref(false)
+const turnosActivos = ref<Turno[]>([])
+const turnoSeleccionadoId = ref<string | undefined>(undefined)
+const cargandoTurnos = ref(false)
+const turnoItems = computed(() =>
+  turnosActivos.value.map(t => ({
+    label: `${t.nombre} (${t.horaInicio}–${t.horaFin})`,
+    value: t.id,
+  })),
+)
+
+async function abrirEntrarTurno() {
+  cargandoTurnos.value = true
+  turnoSeleccionadoId.value = undefined
+  try {
+    const todos = await turnosApi.listar()
+    turnosActivos.value = todos.filter(t => t.activo)
+    if (turnosActivos.value.length === 0) {
+      toast.add({ title: 'No hay turnos activos configurados', color: 'warning' })
+      return
+    }
+    turnoSeleccionadoId.value = turnosActivos.value[0]?.id
+    turnoModalOpen.value = true
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar turnos'), color: 'error' })
+  }
+  finally {
+    cargandoTurnos.value = false
+  }
+}
+
+function confirmarEntrarTurno() {
+  const turnoId = turnoSeleccionadoId.value
+  if (!turnoId) return
+  turnoModalOpen.value = false
+  solicitarPin('PIN del garzón para entrar a turno', (pin) => {
+    void iniciarSesionConPin(pin, turnoId)
+  })
+}
+
+async function iniciarSesionConPin(pin: string, turnoId: string) {
+  try {
+    const sesion = await sesionesApi.iniciar({ pin, turnoId })
+    toast.add({
+      title: `Sesión iniciada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
+      color: 'success',
+    })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al iniciar sesión'), color: 'error' })
+  }
+}
+
+function salirDeTurno() {
+  solicitarPin('PIN del garzón para salir de turno', (pin) => {
+    void cerrarSesionConPin(pin)
+  })
+}
+
+async function cerrarSesionConPin(pin: string) {
+  try {
+    const sesion = await sesionesApi.cerrar({ pin })
+    toast.add({
+      title: `Sesión cerrada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
+      color: 'success',
+    })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cerrar sesión'), color: 'error' })
+  }
 }
 
 const selectedSalon = computed(() =>
@@ -644,9 +722,28 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
               value-key="value"
               class="w-56"
             />
-            <p class="text-sm text-muted">
+            <p class="text-sm text-muted flex-1 min-w-40">
               Selecciona una mesa para gestionar sus cuentas.
             </p>
+            <div class="flex flex-wrap items-center gap-2 ml-auto">
+              <UButton
+                icon="i-lucide-log-in"
+                color="neutral"
+                variant="soft"
+                :loading="cargandoTurnos"
+                @click="abrirEntrarTurno"
+              >
+                Entrar a turno
+              </UButton>
+              <UButton
+                icon="i-lucide-log-out"
+                color="neutral"
+                variant="outline"
+                @click="salirDeTurno"
+              >
+                Salir de turno
+              </UButton>
+            </div>
           </div>
 
           <SalonesSalonPlano
@@ -898,6 +995,37 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
         :title="pinModalTitle"
         @confirm="onPinConfirmado"
       />
+
+      <UModal
+        v-model:open="turnoModalOpen"
+        title="Entrar a turno"
+        description="Selecciona el turno en el que vas a trabajar."
+        :ui="shellUi.modal"
+      >
+        <template #body>
+          <UFormField label="Turno" required>
+            <USelectMenu
+              v-model="turnoSeleccionadoId"
+              :items="turnoItems"
+              value-key="value"
+              class="w-full"
+            />
+          </UFormField>
+        </template>
+        <template #footer>
+          <AppModalFooter>
+            <UButton color="neutral" variant="ghost" @click="turnoModalOpen = false">
+              Cancelar
+            </UButton>
+            <UButton
+              :disabled="!turnoSeleccionadoId"
+              @click="confirmarEntrarTurno"
+            >
+              Continuar
+            </UButton>
+          </AppModalFooter>
+        </template>
+      </UModal>
     </template>
   </UDashboardPanel>
 </template>
