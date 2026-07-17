@@ -10,7 +10,10 @@ import {
   type MesaResumen,
   type CuentaDetalle,
   type CuentaLineaDetalle,
+  type CuentaAsignacionDetalle,
+  type MotivoCuentaAsignacion,
 } from '~/composables/useSalones'
+import type { Garzon } from '~/composables/useGarzones'
 import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { Turno } from '~/composables/useTurnos'
 import { formatCantidadTicket, unidadBaseItem } from '~/utils/cantidad-presentacion'
@@ -31,11 +34,13 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const cajaStore = useCajaStore()
 const salonesApi = useSalones()
+const garzonesApi = useGarzones()
 const turnosApi = useTurnos()
 const sesionesApi = useSesionesGarzon()
+const permissionsStore = usePermissionsStore()
 const unidadesStore = useUnidadesMedidaStore()
 const { calcular } = useCalculoPrecios()
-const { formatMonto } = useFormatters()
+const { formatMonto, formatFecha } = useFormatters()
 const impresorasApi = useImpresoras()
 const tenantStore = useTenantStore()
 
@@ -75,6 +80,36 @@ const submitting = ref(false)
 const cancelOpen = ref(false)
 const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
+
+const puedeTransferirAdmin = computed(
+  () => permissionsStore.esAdmin
+    || permissionsStore.can('Salones', 'Actualizar'),
+)
+
+const transferAdminOpen = ref(false)
+const transferAdminGarzonId = ref<string | undefined>()
+const garzonesActivos = ref<Garzon[]>([])
+const garzonesCargados = ref(false)
+const transfiriendo = ref(false)
+
+const historialOpen = ref(false)
+const historialLoading = ref(false)
+const asignaciones = ref<CuentaAsignacionDetalle[]>([])
+
+const garzonesTransferibles = computed(() => {
+  const responsableId = activeCuenta.value?.garzonResponsableId
+  return garzonesActivos.value.filter(g => g.id !== responsableId)
+})
+
+const garzonTransferItems = computed(() =>
+  garzonesTransferibles.value.map(g => ({ label: g.nombre, value: g.id })),
+)
+
+const motivoAsignacionLabel: Record<MotivoCuentaAsignacion, string> = {
+  apertura: 'Apertura',
+  transferencia_pin: 'Transferencia',
+  transferencia_admin: 'Transferencia admin',
+}
 
 // ── Identificación de garzón por PIN ───────────────────────────────────────
 const pinModalOpen = ref(false)
@@ -385,6 +420,100 @@ function syncCuenta(cuenta: CuentaDetalle) {
   const idx = cuentas.value.findIndex(c => c.id === cuenta.id)
   if (idx !== -1) cuentas.value[idx] = cuenta
   void recalcular()
+}
+
+function aplicarCuentaActualizada(actualizada: CuentaDetalle) {
+  cuentas.value = cuentas.value.map(c =>
+    c.id === actualizada.id ? actualizada : c,
+  )
+  if (activeCuenta.value?.id === actualizada.id) {
+    activeCuenta.value = actualizada
+  }
+}
+
+function tomarCuenta() {
+  if (!activeCuenta.value) return
+  solicitarPin('PIN para tomar esta cuenta', (pin) => {
+    void transferirCuentaConPin(pin)
+  })
+}
+
+async function transferirCuentaConPin(pin: string) {
+  const cuenta = activeCuenta.value
+  if (!cuenta || transfiriendo.value) return
+  transfiriendo.value = true
+  try {
+    const actualizada = await salonesApi.transferirCuenta(cuenta.id, pin)
+    aplicarCuentaActualizada(actualizada)
+    toast.add({
+      title: `Cuenta tomada por ${actualizada.garzonResponsableNombre ?? 'garzón'}`,
+      color: 'success',
+    })
+  }
+  catch (e: unknown) {
+    toastErrorOperativo(e, 'No se pudo tomar la cuenta')
+  }
+  finally {
+    transfiriendo.value = false
+  }
+}
+
+async function abrirTransferenciaAdmin() {
+  if (!activeCuenta.value) return
+  if (!garzonesCargados.value) {
+    try {
+      const todos = await garzonesApi.listar()
+      garzonesActivos.value = todos.filter(g => g.activo)
+      garzonesCargados.value = true
+    }
+    catch (e: unknown) {
+      toast.add({
+        title: apiErrorMsg(e, 'No se pudieron cargar los garzones'),
+        color: 'error',
+      })
+      return
+    }
+  }
+  transferAdminGarzonId.value = garzonesTransferibles.value[0]?.id
+  transferAdminOpen.value = true
+}
+
+async function confirmarTransferenciaAdmin() {
+  const cuenta = activeCuenta.value
+  const garzonId = transferAdminGarzonId.value
+  if (!cuenta || !garzonId || transfiriendo.value) return
+  transfiriendo.value = true
+  try {
+    const actualizada = await salonesApi.transferirCuentaAdmin(cuenta.id, garzonId)
+    aplicarCuentaActualizada(actualizada)
+    transferAdminOpen.value = false
+    toast.add({ title: 'Responsable actualizado', color: 'success' })
+  }
+  catch (e: unknown) {
+    toastErrorOperativo(e, 'No se pudo transferir la cuenta')
+  }
+  finally {
+    transfiriendo.value = false
+  }
+}
+
+async function abrirHistorial() {
+  const cuenta = activeCuenta.value
+  if (!cuenta) return
+  historialOpen.value = true
+  historialLoading.value = true
+  try {
+    asignaciones.value = await salonesApi.listarAsignaciones(cuenta.id)
+  }
+  catch (e: unknown) {
+    toast.add({
+      title: apiErrorMsg(e, 'No se pudo cargar el historial'),
+      color: 'error',
+    })
+  }
+  finally {
+    historialLoading.value = false
+  }
 }
 
 // ── Líneas de la cuenta ────────────────────────────────────────────────────
@@ -791,11 +920,11 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
               <template v-if="activeCuenta"> — Cuenta {{ activeCuenta.numero }}</template>
             </span>
             <span
-              v-if="activeCuenta?.garzonAperturaNombre"
+              v-if="activeCuenta?.garzonResponsableNombre"
               class="flex items-center gap-1 text-xs text-muted"
             >
               <UIcon name="i-lucide-user" class="size-3" />
-              {{ activeCuenta.garzonAperturaNombre }}
+              Responsable: {{ activeCuenta.garzonResponsableNombre }}
             </span>
           </div>
         </template>
@@ -864,11 +993,11 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
                         {{ cuenta.lineas.length }} producto(s)
                       </p>
                       <p
-                        v-if="cuenta.garzonAperturaNombre"
+                        v-if="cuenta.garzonResponsableNombre"
                         class="mt-0.5 flex items-center gap-1 text-xs text-muted"
                       >
                         <UIcon name="i-lucide-user" class="size-3" />
-                        {{ cuenta.garzonAperturaNombre }}
+                        Responsable: {{ cuenta.garzonResponsableNombre }}
                       </p>
                     </div>
                   </div>
@@ -889,6 +1018,32 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
             </div>
 
             <div class="flex min-h-0 flex-col gap-3 overflow-hidden lg:col-span-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <UButton
+                  label="Tomar cuenta"
+                  icon="i-lucide-user-check"
+                  color="neutral"
+                  variant="soft"
+                  :loading="transfiriendo"
+                  @click="tomarCuenta"
+                />
+                <UButton
+                  v-if="puedeTransferirAdmin"
+                  label="Transferir"
+                  icon="i-lucide-arrow-right-left"
+                  color="neutral"
+                  variant="ghost"
+                  @click="abrirTransferenciaAdmin"
+                />
+                <UButton
+                  label="Ver historial"
+                  icon="i-lucide-history"
+                  color="neutral"
+                  variant="ghost"
+                  @click="abrirHistorial"
+                />
+              </div>
+
               <p class="shrink-0 text-sm font-medium text-default">Productos de la cuenta</p>
 
               <div class="min-h-0 flex-1 overflow-y-auto">
@@ -1045,6 +1200,77 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
           </AppModalFooter>
         </template>
       </UModal>
+
+      <UModal
+        v-model:open="transferAdminOpen"
+        title="Transferir responsable"
+        description="Asigna la cuenta a otro garzón activo."
+        :ui="shellUi.modal"
+      >
+        <template #body>
+          <UFormField label="Nuevo responsable" required>
+            <USelectMenu
+              v-model="transferAdminGarzonId"
+              :items="garzonTransferItems"
+              value-key="value"
+              class="w-full"
+            />
+          </UFormField>
+        </template>
+        <template #footer>
+          <AppModalFooter>
+            <UButton color="neutral" variant="ghost" @click="transferAdminOpen = false">
+              Cancelar
+            </UButton>
+            <UButton
+              :disabled="!transferAdminGarzonId"
+              :loading="transfiriendo"
+              @click="confirmarTransferenciaAdmin"
+            >
+              Confirmar
+            </UButton>
+          </AppModalFooter>
+        </template>
+      </UModal>
+
+      <AppDrawer v-model:open="historialOpen" width="md">
+        <template #header>
+          <span class="font-semibold text-default">Historial de responsables</span>
+        </template>
+        <template #body>
+          <div v-if="historialLoading" class="flex justify-center py-8">
+            <UIcon name="i-lucide-loader" class="h-6 w-6 animate-spin text-muted" />
+          </div>
+          <div v-else-if="asignaciones.length === 0" class="py-8 text-center text-sm text-muted">
+            Sin asignaciones registradas.
+          </div>
+          <div v-else class="divide-y divide-default">
+            <div
+              v-for="asignacion in asignaciones"
+              :key="asignacion.id"
+              class="py-3"
+            >
+              <p class="font-medium text-default">
+                {{ asignacion.garzonNombre ?? '—' }}
+              </p>
+              <p class="text-sm text-muted">
+                {{ motivoAsignacionLabel[asignacion.motivo] }}
+              </p>
+              <p class="text-xs text-muted">
+                {{ formatFecha(asignacion.desdeEl) }}
+                —
+                {{ asignacion.hastaEl ? formatFecha(asignacion.hastaEl) : 'Vigente' }}
+              </p>
+              <p
+                v-if="asignacion.motivo === 'transferencia_admin' && asignacion.actorUsuarioNombre"
+                class="text-xs text-muted"
+              >
+                Por: {{ asignacion.actorUsuarioNombre }}
+              </p>
+            </div>
+          </div>
+        </template>
+      </AppDrawer>
     </template>
   </UDashboardPanel>
 </template>
