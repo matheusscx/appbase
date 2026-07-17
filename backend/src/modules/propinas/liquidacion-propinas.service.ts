@@ -20,6 +20,10 @@ import {
   PropinaDistribucionService,
 } from './propina-distribucion.service';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
+import {
+  UpdateLiquidacionDto,
+  UpdateLiquidacionParticipanteDto,
+} from './dto/update-liquidacion.dto';
 import { horasInterseccionHoras } from './utils/horas-interseccion';
 import { repartirMayoresRestos } from './utils/mayores-restos';
 
@@ -243,6 +247,291 @@ export class LiquidacionPropinasService {
     });
   }
 
+  async actualizar(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+    dto: UpdateLiquidacionDto,
+  ): Promise<LiquidacionDetalle> {
+    return this.dataSource.transaction(async (manager) => {
+      const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
+      this.assertBorrador(detalle.liquidacion);
+
+      let participantes = [...detalle.participantes];
+      for (const cambio of dto.participantes ?? []) {
+        participantes = await this.aplicarCambioParticipante(
+          manager,
+          tenantId,
+          detalle.liquidacion,
+          detalle.grupos,
+          participantes,
+          cambio,
+        );
+      }
+
+      if (dto.recalcular !== false) {
+        participantes = await this.recalcularParticipantesExistentes(
+          manager,
+          detalle.grupos,
+          participantes,
+          detalle.liquidacion.decimalesMoneda,
+        );
+      }
+
+      const evento = await manager.save(
+        LiquidacionPropinasEvento,
+        manager.create(LiquidacionPropinasEvento, {
+          tenantId,
+          liquidacionId: id,
+          tipo: TipoEventoLiquidacion.RECALCULADA,
+          payload: { participantes: dto.participantes?.length ?? 0 },
+          usuarioId,
+        }),
+      );
+
+      return this.toDetalle(detalle.liquidacion, {
+        grupos: detalle.grupos,
+        participantes,
+        fuentes: detalle.fuentes,
+        eventos: [...detalle.eventos, evento],
+        advertencias: [],
+      });
+    });
+  }
+
+  async actualizarConfig(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<LiquidacionDetalle & { diff: { antes: unknown[]; despues: unknown[] } }> {
+    const config = await this.distribucion.obtener(tenantId);
+
+    return this.dataSource.transaction(async (manager) => {
+      const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
+      this.assertBorrador(detalle.liquidacion);
+
+      const antes = detalle.grupos.map((g) => ({
+        tipoGarzon: g.tipoGarzon,
+        porcentaje: g.porcentaje,
+        criterio: g.criterio,
+        baseVentas: g.baseVentas,
+        manualModo: g.manualModo,
+      }));
+      const gruposConfig = config.grupos.filter((g) => g.activo);
+
+      await manager.softDelete(LiquidacionPropinasParticipante, {
+        liquidacionId: id,
+      });
+      await manager.softDelete(LiquidacionPropinasGrupo, { liquidacionId: id });
+
+      detalle.liquidacion.configuracionVersion = config.version;
+      await manager.save(LiquidacionPropinas, detalle.liquidacion);
+
+      const grupos = await this.crearSnapshotGrupos(
+        manager,
+        tenantId,
+        id,
+        detalle.liquidacion.poolTotal,
+        detalle.liquidacion.decimalesMoneda,
+        gruposConfig,
+      );
+      const tips = await this.buscarTipsPorFuentes(
+        manager,
+        tenantId,
+        detalle.fuentes.map((f) => f.ventaPropinaId),
+      );
+      const sesiones = await this.buscarSesionesPeriodo(
+        manager,
+        tenantId,
+        detalle.liquidacion.fechaDesde,
+        detalle.liquidacion.fechaHasta,
+        detalle.liquidacion.turnoIds,
+      );
+      const participantes = await this.crearParticipantes(
+        manager,
+        tenantId,
+        id,
+        grupos,
+        gruposConfig,
+        tips,
+        sesiones,
+        detalle.liquidacion.fechaDesde,
+        detalle.liquidacion.fechaHasta,
+        detalle.liquidacion.decimalesMoneda,
+      );
+      const despues = grupos.map((g) => ({
+        tipoGarzon: g.tipoGarzon,
+        porcentaje: g.porcentaje,
+        criterio: g.criterio,
+        baseVentas: g.baseVentas,
+        manualModo: g.manualModo,
+      }));
+      const evento = await manager.save(
+        LiquidacionPropinasEvento,
+        manager.create(LiquidacionPropinasEvento, {
+          tenantId,
+          liquidacionId: id,
+          tipo: TipoEventoLiquidacion.CONFIG_ACTUALIZADA,
+          payload: { antes, despues },
+          usuarioId,
+        }),
+      );
+
+      return {
+        ...this.toDetalle(detalle.liquidacion, {
+          grupos,
+          participantes,
+          fuentes: detalle.fuentes,
+          eventos: [...detalle.eventos, evento],
+          advertencias: this.advertenciasSesionesAbiertas(sesiones),
+        }),
+        diff: { antes, despues },
+      };
+    });
+  }
+
+  private async cargarDetalleManager(
+    manager: EntityManager,
+    tenantId: string,
+    id: string,
+    lock = false,
+  ): Promise<{
+    liquidacion: LiquidacionPropinas;
+    grupos: LiquidacionPropinasGrupo[];
+    participantes: LiquidacionPropinasParticipante[];
+    fuentes: LiquidacionPropinasFuente[];
+    eventos: LiquidacionPropinasEvento[];
+  }> {
+    const liquidacion = await manager.findOne(LiquidacionPropinas, {
+      where: { id, tenantId, eliminadoEl: IsNull() },
+      lock: lock ? { mode: 'pessimistic_write' } : undefined,
+    });
+    if (!liquidacion) {
+      throw new NotFoundException('Liquidación no encontrada');
+    }
+
+    const [grupos, participantes, fuentes, eventos] = await Promise.all([
+      manager.find(LiquidacionPropinasGrupo, {
+        where: { liquidacionId: id, eliminadoEl: IsNull() },
+        order: { orden: 'ASC', creadoEl: 'ASC' },
+      }),
+      manager.find(LiquidacionPropinasParticipante, {
+        where: { liquidacionId: id, eliminadoEl: IsNull() },
+        order: { creadoEl: 'ASC' },
+      }),
+      manager.find(LiquidacionPropinasFuente, {
+        where: { liquidacionId: id, eliminadoEl: IsNull() },
+        order: { creadoEl: 'ASC' },
+      }),
+      manager.find(LiquidacionPropinasEvento, {
+        where: { liquidacionId: id, eliminadoEl: IsNull() },
+        order: { creadoEl: 'ASC' },
+      }),
+    ]);
+
+    return { liquidacion, grupos, participantes, fuentes, eventos };
+  }
+
+  private assertBorrador(liquidacion: LiquidacionPropinas): void {
+    if (liquidacion.estado !== EstadoLiquidacion.BORRADOR) {
+      throw new BadRequestException('Solo se puede modificar una liquidación en borrador');
+    }
+  }
+
+  private async aplicarCambioParticipante(
+    manager: EntityManager,
+    tenantId: string,
+    liquidacion: LiquidacionPropinas,
+    grupos: LiquidacionPropinasGrupo[],
+    participantes: LiquidacionPropinasParticipante[],
+    cambio: UpdateLiquidacionParticipanteDto,
+  ): Promise<LiquidacionPropinasParticipante[]> {
+    if (cambio.id) {
+      const existente = participantes.find((p) => p.id === cambio.id);
+      if (!existente) {
+        throw new BadRequestException('Participante no encontrado en la liquidación');
+      }
+      if (
+        cambio.incluido === false &&
+        existente.origen === OrigenParticipante.SUGERIDO &&
+        !cambio.motivoAjuste?.trim()
+      ) {
+        throw new BadRequestException('Excluir un participante sugerido exige motivo');
+      }
+      if (cambio.incluido !== undefined) existente.incluido = cambio.incluido;
+      if (cambio.motivoAjuste !== undefined) {
+        existente.motivoAjuste = cambio.motivoAjuste;
+      }
+      if (cambio.pesoManual !== undefined) existente.pesoManual = cambio.pesoManual;
+      if (cambio.monto !== undefined) existente.monto = new Decimal(cambio.monto).toFixed(4);
+      if (cambio.ajusteMotivoMonto !== undefined) {
+        existente.ajusteMotivoMonto = cambio.ajusteMotivoMonto;
+      }
+      await manager.save(LiquidacionPropinasParticipante, existente);
+      return participantes.map((p) => (p.id === existente.id ? existente : p));
+    }
+
+    if (!cambio.garzonId || !cambio.grupoId || !cambio.motivoAjuste?.trim()) {
+      throw new BadRequestException('Agregar un participante manual exige garzón, grupo y motivo');
+    }
+    const grupo = grupos.find((g) => g.id === cambio.grupoId);
+    if (!grupo) {
+      throw new BadRequestException('Grupo no encontrado en la liquidación');
+    }
+    const creado = await manager.save(
+      LiquidacionPropinasParticipante,
+      manager.create(LiquidacionPropinasParticipante, {
+        tenantId,
+        liquidacionId: liquidacion.id,
+        grupoId: grupo.id,
+        garzonId: cambio.garzonId,
+        tipoGarzon: grupo.tipoGarzon,
+        incluido: true,
+        origen: OrigenParticipante.AGREGADO_MANUAL,
+        motivoAjuste: cambio.motivoAjuste,
+        horas: '0.0000',
+        ventasBase: '0.0000',
+        cuentas: '0.0000',
+        pesoManual: cambio.pesoManual ?? null,
+        monto: cambio.monto ? new Decimal(cambio.monto).toFixed(4) : '0.0000',
+        ajusteMotivoMonto: cambio.ajusteMotivoMonto ?? null,
+      }),
+    );
+    return [...participantes, creado];
+  }
+
+  private async recalcularParticipantesExistentes(
+    manager: EntityManager,
+    grupos: LiquidacionPropinasGrupo[],
+    participantes: LiquidacionPropinasParticipante[],
+    decimales: number,
+  ): Promise<LiquidacionPropinasParticipante[]> {
+    const recalculados: LiquidacionPropinasParticipante[] = [];
+    for (const grupo of grupos) {
+      const delGrupo = participantes.filter(
+        (p) => p.grupoId === grupo.id && p.incluido,
+      );
+      const omitidos = participantes.filter(
+        (p) => p.grupoId === grupo.id && !p.incluido,
+      );
+      const activos =
+        grupo.criterio === CriterioDistribucion.MANUAL &&
+        grupo.manualModo === ManualModo.MONTOS
+          ? delGrupo
+          : (this.repartirGrupo(
+              grupo,
+              grupo,
+              delGrupo,
+              decimales,
+            ) as LiquidacionPropinasParticipante[]);
+      for (const p of activos) {
+        await manager.save(LiquidacionPropinasParticipante, p);
+      }
+      recalculados.push(...activos, ...omitidos);
+    }
+    return recalculados;
+  }
+
   private async resolverMonedaOficial(
     manager: EntityManager,
     tenantId: string,
@@ -314,6 +603,31 @@ export class LiquidacionPropinasService {
          AND (cardinality($4::uuid[]) = 0 OR turno_id = ANY($4::uuid[]))
        ORDER BY inicio_el ASC`,
       [tenantId, fechaDesde, fechaHasta, turnoIds],
+    );
+  }
+
+  private async buscarTipsPorFuentes(
+    manager: EntityManager,
+    tenantId: string,
+    ventaPropinaIds: string[],
+  ): Promise<TipElegibleRow[]> {
+    if (ventaPropinaIds.length === 0) return [];
+    return manager.query(
+      `SELECT vp.venta_propina_id,
+              vp.garzon_id,
+              vp.tipo_garzon,
+              vp.turno_id,
+              vp.monto_pagado,
+              vp.venta_id,
+              v.base_ventas_total_final,
+              v.base_ventas_sin_impuestos
+       FROM venta_propina vp
+       JOIN ventas v ON v.venta_id = vp.venta_id AND v.eliminado_el IS NULL
+       WHERE vp.tenant_id = $1
+         AND vp.eliminado_el IS NULL
+         AND vp.venta_propina_id = ANY($2::uuid[])
+       ORDER BY vp.creado_el ASC`,
+      [tenantId, ventaPropinaIds],
     );
   }
 
@@ -506,7 +820,7 @@ export class LiquidacionPropinasService {
 
   private repartirGrupo(
     grupo: LiquidacionPropinasGrupo,
-    config: GrupoDistribucionPublico,
+    config: Pick<GrupoDistribucionPublico, 'manualModo'>,
     participantes: Omit<
       LiquidacionPropinasParticipante,
       'id' | 'creadoEl' | 'actualizadoEl' | 'eliminadoEl'

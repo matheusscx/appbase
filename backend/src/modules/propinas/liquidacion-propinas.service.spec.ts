@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { IsNull } from 'typeorm';
@@ -25,7 +26,10 @@ describe('LiquidacionPropinasService', () => {
   let distribucion: { obtener: jest.Mock };
   let manager: {
     create: jest.Mock;
+    find: jest.Mock;
+    findOne: jest.Mock;
     save: jest.Mock;
+    softDelete: jest.Mock;
     query: jest.Mock;
   };
   let dataSource: { transaction: jest.Mock };
@@ -86,12 +90,15 @@ describe('LiquidacionPropinasService', () => {
       create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({
         ...data,
       })),
+      find: jest.fn(),
+      findOne: jest.fn(),
       save: jest.fn((entity: { name?: string }, data: Record<string, unknown>) =>
         Promise.resolve({
           id: `${entity.name ?? 'Entity'}-${manager.save.mock.calls.length + 1}`,
           ...data,
         }),
       ),
+      softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
       query: jest
         .fn()
         .mockResolvedValueOnce(monedaRows)
@@ -203,11 +210,13 @@ describe('LiquidacionPropinasService', () => {
     });
   });
 
-  it('carga el detalle con grupos, participantes, fuentes y eventos', async () => {
-    const liquidacion = {
+  function liquidacionBase(
+    estado: EstadoLiquidacion = EstadoLiquidacion.BORRADOR,
+  ): LiquidacionPropinas {
+    return {
       id: 'liq-1',
       tenantId: TENANT,
-      estado: EstadoLiquidacion.BORRADOR,
+      estado,
       fechaDesde: new Date('2026-07-17T00:00:00.000Z'),
       fechaHasta: new Date('2026-07-18T00:00:00.000Z'),
       turnoIds: [],
@@ -224,8 +233,30 @@ describe('LiquidacionPropinasService', () => {
       creadoEl: new Date('2026-07-17T12:00:00.000Z'),
       actualizadoEl: new Date('2026-07-17T12:00:00.000Z'),
       eliminadoEl: null,
-    } as LiquidacionPropinas;
-    liquidacionRepo.findOne.mockResolvedValueOnce(liquidacion);
+    };
+  }
+
+  function grupoBase(): LiquidacionPropinasGrupo {
+    return {
+      id: 'grupo-1',
+      tenantId: TENANT,
+      liquidacionId: 'liq-1',
+      tipoGarzon: TipoGarzon.GARZON,
+      nombre: 'Garzones',
+      porcentaje: '1.000000',
+      criterio: CriterioDistribucion.PARTES_IGUALES,
+      baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+      manualModo: null,
+      montoGrupo: '150.0000',
+      orden: 0,
+      creadoEl: new Date('2026-07-17T12:00:00.000Z'),
+      actualizadoEl: new Date('2026-07-17T12:00:00.000Z'),
+      eliminadoEl: null,
+    };
+  }
+
+  it('carga el detalle con grupos, participantes, fuentes y eventos', async () => {
+    liquidacionRepo.findOne.mockResolvedValueOnce(liquidacionBase());
     grupoRepo.find.mockResolvedValueOnce([]);
     participanteRepo.find.mockResolvedValueOnce([]);
     fuenteRepo.find.mockResolvedValueOnce([]);
@@ -238,5 +269,94 @@ describe('LiquidacionPropinasService', () => {
       fuentes: [],
       eventos: [],
     });
+  });
+
+  it('exige motivo al excluir un participante sugerido', async () => {
+    const participante = {
+      id: 'part-1',
+      tenantId: TENANT,
+      liquidacionId: 'liq-1',
+      grupoId: 'grupo-1',
+      garzonId: 'garzon-1',
+      tipoGarzon: TipoGarzon.GARZON,
+      incluido: true,
+      origen: OrigenParticipante.SUGERIDO,
+      motivoAjuste: null,
+      horas: '0.0000',
+      ventasBase: '0.0000',
+      cuentas: '1.0000',
+      pesoManual: null,
+      monto: '150.0000',
+      ajusteMotivoMonto: null,
+      creadoEl: new Date(),
+      actualizadoEl: new Date(),
+      eliminadoEl: null,
+    } as LiquidacionPropinasParticipante;
+    manager.findOne.mockResolvedValueOnce(liquidacionBase());
+    manager.find
+      .mockResolvedValueOnce([grupoBase()])
+      .mockResolvedValueOnce([participante])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    await expect(
+      service.actualizar(TENANT, USER, 'liq-1', {
+        participantes: [{ id: 'part-1', incluido: false }],
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rechaza edición de una liquidación confirmada', async () => {
+    manager.findOne.mockResolvedValueOnce(
+      liquidacionBase(EstadoLiquidacion.CONFIRMADA),
+    );
+
+    await expect(
+      service.actualizar(TENANT, USER, 'liq-1', { participantes: [] }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('actualiza snapshot desde la configuración vigente y registra diff', async () => {
+    const nuevaConfig = {
+      ...config,
+      version: 4,
+      grupos: [
+        {
+          ...config.grupos[0],
+          id: 'cfg-garzon-v4',
+          porcentaje: '0.800000',
+          criterio: CriterioDistribucion.VENTAS_NETAS,
+        },
+      ],
+    };
+    distribucion.obtener.mockResolvedValueOnce(nuevaConfig);
+    manager.findOne.mockResolvedValueOnce(liquidacionBase());
+    manager.find
+      .mockResolvedValueOnce([grupoBase()])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    manager.query.mockReset().mockResolvedValueOnce([]);
+
+    const result = await service.actualizarConfig(TENANT, USER, 'liq-1');
+
+    expect(result.configuracionVersion).toBe(4);
+    expect(manager.softDelete).toHaveBeenCalledWith(
+      LiquidacionPropinasGrupo,
+      { liquidacionId: 'liq-1' },
+    );
+    expect(manager.save).toHaveBeenCalledWith(
+      LiquidacionPropinasEvento,
+      expect.objectContaining({
+        tipo: TipoEventoLiquidacion.CONFIG_ACTUALIZADA,
+        payload: expect.objectContaining({
+          antes: expect.any(Array),
+          despues: expect.any(Array),
+        }),
+      }),
+    );
   });
 });
