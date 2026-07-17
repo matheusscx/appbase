@@ -7,6 +7,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Turno } from './entities/turno.entity';
+import {
+  EstadoSesionGarzon,
+  SesionGarzon,
+} from './entities/sesion-garzon.entity';
 import { CreateTurnoDto } from './dto/create-turno.dto';
 import { UpdateTurnoDto } from './dto/update-turno.dto';
 
@@ -26,6 +30,8 @@ export class TurnosService {
   constructor(
     @InjectRepository(Turno)
     private readonly turnoRepo: Repository<Turno>,
+    @InjectRepository(SesionGarzon)
+    private readonly sesionRepo: Repository<SesionGarzon>,
   ) {}
 
   private toPublico(t: Turno): TurnoPublico {
@@ -73,14 +79,18 @@ export class TurnosService {
     }
     if (dto.horaInicio !== undefined) turno.horaInicio = dto.horaInicio;
     if (dto.horaFin !== undefined) turno.horaFin = dto.horaFin;
-    if (dto.activo !== undefined) turno.activo = dto.activo;
-    // Bloqueo por sesiones abiertas: Task 2 (SesionGarzon).
+    if (dto.activo !== undefined) {
+      if (dto.activo === false) {
+        await this.assertSinSesionesAbiertas(tenantId, id);
+      }
+      turno.activo = dto.activo;
+    }
     return this.toPublico(await this.turnoRepo.save(turno));
   }
 
   async eliminar(tenantId: string, id: string): Promise<void> {
     await this.getOrThrow(tenantId, id);
-    // Bloqueo por sesiones abiertas: Task 2 (SesionGarzon).
+    await this.assertSinSesionesAbiertas(tenantId, id);
     await this.turnoRepo.softDelete({ id, tenantId });
   }
 
@@ -96,13 +106,24 @@ export class TurnosService {
   }
 
   /**
-   * Stub: Task 2 implementará el chequeo contra SesionGarzon abiertas.
+   * Bloquea desactivar/eliminar un turno con sesiones de garzón abiertas.
    */
   async assertSinSesionesAbiertas(
-    _tenantId: string,
-    _turnoId: string,
+    tenantId: string,
+    turnoId: string,
   ): Promise<void> {
-    // no-op hasta Task 2
+    const abiertas = await this.sesionRepo.count({
+      where: {
+        tenantId,
+        turnoId,
+        estado: EstadoSesionGarzon.ABIERTA,
+      },
+    });
+    if (abiertas > 0) {
+      throw new BadRequestException(
+        'No se puede modificar un turno con sesiones abiertas',
+      );
+    }
   }
 
   private async getOrThrow(tenantId: string, id: string): Promise<Turno> {

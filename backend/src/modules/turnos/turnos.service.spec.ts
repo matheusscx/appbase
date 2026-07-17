@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { TurnosService } from './turnos.service';
 import { Turno } from './entities/turno.entity';
+import { SesionGarzon } from './entities/sesion-garzon.entity';
 
 const TENANT = 'tenant-uuid';
 
@@ -18,6 +19,10 @@ type Repo = {
   softDelete: jest.Mock;
 };
 
+type SesionRepo = {
+  count: jest.Mock;
+};
+
 function makeRepo(): Repo {
   return {
     find: jest.fn().mockResolvedValue([]),
@@ -25,6 +30,12 @@ function makeRepo(): Repo {
     create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
     softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+  };
+}
+
+function makeSesionRepo(): SesionRepo {
+  return {
+    count: jest.fn().mockResolvedValue(0),
   };
 }
 
@@ -46,13 +57,16 @@ function turno(over: Partial<Turno> = {}): Turno {
 describe('TurnosService', () => {
   let service: TurnosService;
   let repo: Repo;
+  let sesionRepo: SesionRepo;
 
   beforeEach(async () => {
     repo = makeRepo();
+    sesionRepo = makeSesionRepo();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TurnosService,
         { provide: getRepositoryToken(Turno), useValue: repo },
+        { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
       ],
     }).compile();
     service = module.get<TurnosService>(TurnosService);
@@ -198,5 +212,34 @@ describe('TurnosService', () => {
     await expect(service.eliminar(TENANT, 'missing')).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  it('actualizar rechaza desactivar turno con sesiones abiertas', async () => {
+    repo.findOne.mockResolvedValue(turno());
+    sesionRepo.count.mockResolvedValue(2);
+
+    await expect(
+      service.actualizar(TENANT, 't1', { activo: false }),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      service.actualizar(TENANT, 't1', { activo: false }),
+    ).rejects.toThrow('No se puede modificar un turno con sesiones abiertas');
+
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('eliminar rechaza turno con sesiones abiertas', async () => {
+    repo.findOne.mockResolvedValue(turno());
+    sesionRepo.count.mockResolvedValue(1);
+
+    await expect(service.eliminar(TENANT, 't1')).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.eliminar(TENANT, 't1')).rejects.toThrow(
+      'No se puede modificar un turno con sesiones abiertas',
+    );
+
+    expect(repo.softDelete).not.toHaveBeenCalled();
   });
 });

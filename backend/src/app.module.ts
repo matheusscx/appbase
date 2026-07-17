@@ -107,6 +107,7 @@ import { GarzonesModule } from './modules/garzones/garzones.module';
 import { Garzon } from './modules/garzones/entities/garzon.entity';
 import { TurnosModule } from './modules/turnos/turnos.module';
 import { Turno } from './modules/turnos/entities/turno.entity';
+import { SesionGarzon } from './modules/turnos/entities/sesion-garzon.entity';
 import { ImpresorasModule } from './modules/impresoras/impresoras.module';
 import { MermasModule } from './modules/mermas/mermas.module';
 import { Impresora } from './modules/impresoras/entities/impresora.entity';
@@ -194,6 +195,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           CuentaLinea,
           Garzon,
           Turno,
+          SesionGarzon,
           Impresora,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
