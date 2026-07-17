@@ -86,6 +86,11 @@ import { VentaPropina } from './modules/propinas/entities/venta-propina.entity';
 import { PropinaConfiguracion } from './modules/propinas/entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from './modules/propinas/entities/propina-grupo-distribucion.entity';
 import { PropinaGrupoPesoManual } from './modules/propinas/entities/propina-grupo-peso-manual.entity';
+import { LiquidacionPropinas } from './modules/propinas/entities/liquidacion-propinas.entity';
+import { LiquidacionPropinasGrupo } from './modules/propinas/entities/liquidacion-propinas-grupo.entity';
+import { LiquidacionPropinasParticipante } from './modules/propinas/entities/liquidacion-propinas-participante.entity';
+import { LiquidacionPropinasFuente } from './modules/propinas/entities/liquidacion-propinas-fuente.entity';
+import { LiquidacionPropinasEvento } from './modules/propinas/entities/liquidacion-propinas-evento.entity';
 import { PagosModule } from './modules/pagos/pagos.module';
 import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from './modules/terceros/entities/tercero.entity';
@@ -190,6 +195,11 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           PropinaConfiguracion,
           PropinaGrupoDistribucion,
           PropinaGrupoPesoManual,
+          LiquidacionPropinas,
+          LiquidacionPropinasGrupo,
+          LiquidacionPropinasParticipante,
+          LiquidacionPropinasFuente,
+          LiquidacionPropinasEvento,
           TipoDocumentoTributario,
           Tercero,
           Suscripcion,

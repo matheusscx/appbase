@@ -6,7 +6,7 @@
 
 **Plan E1:** `docs/superpowers/plans/2026-07-17-liquidacion-propinas-e1.md` ✅
 **Plan E2:** `docs/superpowers/plans/2026-07-17-liquidacion-propinas-e2.md` ✅
-(E3: plan aparte tras cerrar E2.)
+**Plan E3:** `docs/superpowers/plans/2026-07-17-liquidacion-propinas-e3.md` (In Progress)
 
 ---
 

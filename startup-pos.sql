@@ -1227,6 +1227,147 @@ CREATE TABLE propina_grupo_peso_manual (
 CREATE UNIQUE INDEX uq_propina_peso_grupo_garzon
   ON propina_grupo_peso_manual (grupo_id, garzon_id) WHERE eliminado_el IS NULL;
 
+-- Liquidación de propinas (E3): borrador, snapshot, confirmación/anulación
+CREATE TABLE liquidacion_propinas (
+  liquidacion_propinas_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  fecha_desde TIMESTAMPTZ NOT NULL,
+  fecha_hasta TIMESTAMPTZ NOT NULL,
+  turno_ids UUID[] NOT NULL DEFAULT '{}',
+  estado TEXT NOT NULL DEFAULT 'borrador',
+  pool_total NUMERIC(18,4) NOT NULL DEFAULT 0,
+  configuracion_version INT NOT NULL,
+  moneda_id UUID NOT NULL REFERENCES moneda(moneda_id),
+  decimales_moneda SMALLINT NOT NULL,
+  creado_por UUID NOT NULL REFERENCES usuarios(usuario_id),
+  confirmado_por UUID REFERENCES usuarios(usuario_id),
+  confirmado_el TIMESTAMPTZ,
+  anulado_por UUID REFERENCES usuarios(usuario_id),
+  anulado_el TIMESTAMPTZ,
+  motivo_anulacion TEXT,
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_liquidacion_estado
+    CHECK (estado IN ('borrador','confirmada','anulada')),
+  CONSTRAINT chk_liquidacion_rango CHECK (fecha_hasta > fecha_desde),
+  CONSTRAINT chk_liquidacion_pool CHECK (pool_total >= 0),
+  CONSTRAINT chk_liquidacion_decimales
+    CHECK (decimales_moneda >= 0 AND decimales_moneda <= 8)
+);
+CREATE INDEX idx_liquidacion_propinas_tenant_estado
+  ON liquidacion_propinas (tenant_id, estado, creado_el);
+
+CREATE TABLE liquidacion_propinas_grupo (
+  liquidacion_propinas_grupo_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  liquidacion_id UUID NOT NULL REFERENCES liquidacion_propinas(liquidacion_propinas_id),
+  tipo_garzon TEXT NOT NULL,
+  nombre TEXT NOT NULL,
+  porcentaje NUMERIC(10,6) NOT NULL,
+  criterio TEXT NOT NULL,
+  base_ventas TEXT NOT NULL DEFAULT 'TOTAL_FINAL',
+  manual_modo TEXT,
+  monto_grupo NUMERIC(18,4) NOT NULL DEFAULT 0,
+  orden INT NOT NULL DEFAULT 0,
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_liquidacion_grupo_tipo
+    CHECK (tipo_garzon IN ('garzon','cocina','barra')),
+  CONSTRAINT chk_liquidacion_grupo_criterio CHECK (criterio IN (
+    'VENTAS_NETAS','HORAS_TRABAJADAS','PARTES_IGUALES','CANTIDAD_CUENTAS','MANUAL'
+  )),
+  CONSTRAINT chk_liquidacion_grupo_base
+    CHECK (base_ventas IN ('TOTAL_FINAL','BASE_SIN_IMPUESTOS')),
+  CONSTRAINT chk_liquidacion_grupo_manual_modo
+    CHECK (manual_modo IS NULL OR manual_modo IN ('PESOS','MONTOS')),
+  CONSTRAINT chk_liquidacion_grupo_manual_parity CHECK (
+    (criterio = 'MANUAL' AND manual_modo IS NOT NULL)
+    OR (criterio <> 'MANUAL' AND manual_modo IS NULL)
+  ),
+  CONSTRAINT chk_liquidacion_grupo_porcentaje CHECK (porcentaje >= 0 AND porcentaje <= 1),
+  CONSTRAINT chk_liquidacion_grupo_monto CHECK (monto_grupo >= 0)
+);
+CREATE INDEX idx_liquidacion_propinas_grupo_liquidacion
+  ON liquidacion_propinas_grupo (liquidacion_id, orden);
+
+CREATE TABLE liquidacion_propinas_participante (
+  liquidacion_propinas_participante_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  liquidacion_id UUID NOT NULL REFERENCES liquidacion_propinas(liquidacion_propinas_id),
+  grupo_id UUID NOT NULL REFERENCES liquidacion_propinas_grupo(liquidacion_propinas_grupo_id),
+  garzon_id UUID NOT NULL REFERENCES garzones(garzon_id),
+  tipo_garzon TEXT NOT NULL,
+  incluido BOOLEAN NOT NULL DEFAULT TRUE,
+  origen TEXT NOT NULL,
+  motivo_ajuste TEXT,
+  horas NUMERIC(18,4) NOT NULL DEFAULT 0,
+  ventas_base NUMERIC(18,4) NOT NULL DEFAULT 0,
+  cuentas NUMERIC(18,4) NOT NULL DEFAULT 0,
+  peso_manual NUMERIC(18,4),
+  monto NUMERIC(18,4) NOT NULL DEFAULT 0,
+  ajuste_motivo_monto TEXT,
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_liquidacion_participante_tipo
+    CHECK (tipo_garzon IN ('garzon','cocina','barra')),
+  CONSTRAINT chk_liquidacion_participante_origen
+    CHECK (origen IN ('sugerido','agregado_manual')),
+  CONSTRAINT chk_liquidacion_participante_metricas CHECK (
+    horas >= 0 AND ventas_base >= 0 AND cuentas >= 0 AND monto >= 0
+    AND (peso_manual IS NULL OR peso_manual >= 0)
+  ),
+  CONSTRAINT chk_liquidacion_participante_motivo CHECK (
+    (origen = 'sugerido' AND incluido = TRUE)
+    OR motivo_ajuste IS NOT NULL
+  )
+);
+CREATE INDEX idx_liquidacion_propinas_participante_liquidacion
+  ON liquidacion_propinas_participante (liquidacion_id, grupo_id);
+CREATE UNIQUE INDEX uq_liquidacion_propinas_participante_garzon
+  ON liquidacion_propinas_participante (liquidacion_id, garzon_id)
+  WHERE eliminado_el IS NULL;
+
+CREATE TABLE liquidacion_propinas_fuente (
+  liquidacion_propinas_fuente_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  liquidacion_id UUID NOT NULL REFERENCES liquidacion_propinas(liquidacion_propinas_id),
+  venta_propina_id UUID NOT NULL REFERENCES venta_propina(venta_propina_id),
+  monto_pagado NUMERIC(18,4) NOT NULL,
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_liquidacion_fuente_monto CHECK (monto_pagado > 0)
+);
+CREATE UNIQUE INDEX uq_liquidacion_propinas_fuente_propina
+  ON liquidacion_propinas_fuente (liquidacion_id, venta_propina_id)
+  WHERE eliminado_el IS NULL;
+
+CREATE TABLE liquidacion_propinas_evento (
+  liquidacion_propinas_evento_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  liquidacion_id UUID NOT NULL REFERENCES liquidacion_propinas(liquidacion_propinas_id),
+  tipo TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  usuario_id UUID NOT NULL REFERENCES usuarios(usuario_id),
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_liquidacion_evento_tipo CHECK (tipo IN (
+    'creada','participante_agregado','participante_excluido','recalculada',
+    'config_actualizada','confirmada','anulada'
+  ))
+);
+CREATE INDEX idx_liquidacion_propinas_evento_liquidacion
+  ON liquidacion_propinas_evento (liquidacion_id, creado_el);
+
+ALTER TABLE venta_propina
+  ADD CONSTRAINT fk_venta_propina_liquidacion
+  FOREIGN KEY (liquidacion_id)
+  REFERENCES liquidacion_propinas(liquidacion_propinas_id);
+
 CREATE TABLE turnos (
     turno_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
