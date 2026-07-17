@@ -1,6 +1,6 @@
 # Diseño: Responsable de Cuenta, Transferencia e Historial
 
-**Status**: Draft / Approved (pending user review of written spec)
+**Status**: Done / Approved
 **Owner**: Cesar Matheus
 **Date**: 2026-07-16
 

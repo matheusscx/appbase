@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-12 (forma/tamaño de mesa)
+**Last Updated**: 2026-07-16 (responsable vigente y transferencias)
 
 ---
 
@@ -60,15 +60,33 @@ del garzón usa el permiso dedicado **`Operar`**.
 | DELETE | `/cuentas/:id/lineas/:lineaId` | Operar | Quitar producto |
 | POST | `/cuentas/:id/cancelar` | Operar | Anular cuenta (sin venta) |
 | POST | `/cuentas/:id/cerrar` | Operar | Cerrar → genera venta (`FOR UPDATE` de cuenta) |
+| POST | `/cuentas/:id/transferir` | Operar | Transferir responsable vigente por PIN (claim) |
+| POST | `/cuentas/:id/transferir-admin` | Actualizar | Transferir responsable vigente (admin, sin PIN) |
+| GET | `/cuentas/:id/asignaciones` | Leer | Historial auditable de asignaciones de la cuenta |
 
 `POST /cuentas/:id/cerrar` body: `{ pin, pagos?: PagoVentaDto[], tipoDocumentoId?, customer? }`
 (reusa las clases de `ventas/dto/create-venta.dto.ts`). Respuesta:
 `{ cuenta: CuentaDetalle, ventaId }`.
 
+`POST /cuentas/:id/transferir` body: `{ pin }` — el garzón destino reclama la cuenta
+con su PIN (requiere sesión abierta). `POST /cuentas/:id/transferir-admin` body:
+`{ garzonId }` — un usuario con permiso `Salones:Actualizar` fuerza la transferencia
+(registra `actor_usuario_id` en el historial).
+
+**Tres roles de garzón en la cuenta:**
+
+| Campo | Rol | Comportamiento |
+|---|---|---|
+| `garzon_apertura_id` | Auditoría | Inmutable: quien abrió con PIN |
+| `garzon_responsable_id` | Vigente | Cambia con transferencias; atribución futura (propinas/ventas) |
+| `garzon_cierre_id` | Auditoría | Solo al cerrar con PIN; puede diferir del responsable vigente |
+
 **Identificación por garzón (PIN):** abrir (`POST /mesas/:id/cuentas`) y cerrar cuenta
-requieren un `pin` de 6 dígitos que identifica al garzón responsable; la cuenta
-persiste `garzon_apertura_id` / `garzon_cierre_id` para trazabilidad. Ver
-[garzones.md](./garzones.md).
+requieren un `pin` de 6 dígitos. Al abrir se setean `garzon_apertura_id` y
+`garzon_responsable_id` (ambos al mismo garzón) y se registra el primer tramo en
+`cuenta_asignaciones`. Al cerrar solo se setea `garzon_cierre_id` (auditoría de quien
+cobró); el responsable vigente queda congelado para atribución. Ver
+[garzones.md](./garzones.md) y [turnos-garzones.md](./turnos-garzones.md).
 
 `POST /mesas/:id/cuentas/fusionar` body: `{ cuentaIds: string[] }` (mínimo 2, deben
 estar `abierta` y pertenecer a la mesa). Combina, por ejemplo, "1 y 3", "3 y 4" o
@@ -81,7 +99,9 @@ todas las de la mesa; ver detalle en Backend → Fusión de cuentas.
 - **Módulo**: `src/modules/salones/salones.module.ts` (importa `VentasModule`).
 - **Controllers**: `salones.controller.ts` → `SalonesController` (`/salones`),
   `MesasController` (`/mesas`), `CuentasController` (`/cuentas`).
-- **Service**: `salones.service.ts` → `SalonesService`.
+- **Services**: `salones.service.ts` → `SalonesService`;
+  `cuenta-asignaciones.service.ts` → `CuentaAsignacionesService` (responsable vigente,
+  transferencias e historial).
 
 ### Cierre de cuenta → venta (atómico)
 
@@ -122,10 +142,42 @@ normal (se reinicia en 1 cuando esa cuenta también se cierre).
 **mesa**, calculado solo entre las cuentas actualmente `abierta` de esa mesa → se
 reinicia en 1 cuando la mesa queda completamente libre, no es un correlativo
 histórico), `estado` (`abierta|cerrada|cancelada`), `venta_id` (set al cerrar),
-`abierta_el`, `cerrada_el`.
+`garzon_apertura_id`, `garzon_responsable_id`, `garzon_cierre_id` (FK → `garzones`),
+`abierta_el`, `cerrada_el`. Índice `idx_cuentas_responsable` sobre
+`(tenant_id, garzon_responsable_id)`.
+
+**`cuenta_asignaciones`**: timeline append-only del responsable vigente.
+`cuenta_asignacion_id` PK, `tenant_id`, `cuenta_id`, `garzon_id` (responsable del
+tramo), `desde_el`, `hasta_el` (`NULL` = tramo vigente), `motivo`
+(`apertura|transferencia_pin|transferencia_admin`), `origen_garzon_id` (responsable
+anterior; `NULL` en apertura), `actor_usuario_id` (solo en `transferencia_admin`).
+Índice parcial único: una sola fila con `hasta_el IS NULL` por cuenta. Al
+cerrar/cancelar/fusionar (cuentas origen) se cierra el tramo vigente
+(`hasta_el = now()`); no se borran filas.
 
 **`cuenta_lineas`**: `cuenta_linea_id` PK, `tenant_id`, `cuenta_id`, `item_id`,
 `cantidad numeric(18,4)`. El precio se resuelve al cerrar (igual que ventas).
+
+### Responsable vigente y transferencias
+
+`CuentaAsignacionesService` centraliza el ciclo de vida del responsable:
+
+1. **Apertura:** `garzon_responsable_id = garzon_apertura_id` + fila `motivo='apertura'`.
+2. **Transferencia (PIN o admin):** `FOR UPDATE` de la cuenta; cierra tramo vigente;
+   inserta nuevo tramo; actualiza `garzon_responsable_id`. El destino debe tener
+   sesión abierta. Rechaza si la cuenta no está `abierta` o si el destino ya es el
+   responsable (`400`).
+3. **Cerrar / cancelar / fusionar (origen):** cierra el tramo vigente sin cambiar
+   `garzon_responsable_id` (queda congelado para atribución futura).
+
+Backfill al arrancar: cuentas existentes sin responsable reciben
+`garzon_responsable_id = garzon_apertura_id` y una fila `apertura` retroactiva.
+
+### Concurrencia
+
+- Apertura de cuenta: `FOR UPDATE` de la mesa antes de calcular `MAX(numero)+1`.
+- Transferencia y cierre/cancelación: `FOR UPDATE` pesimista de la cuenta.
+- Un solo tramo vigente por cuenta: índice parcial único en `cuenta_asignaciones`.
 
 ---
 
@@ -135,9 +187,11 @@ histórico), `estado` (`abierta|cerrada|cancelada`), `venta_id` (set al cerrar),
 
 - `pages/salones/index.vue` — Operación del garzón: selector de salón → plano →
   drawer de la mesa (lista de cuentas / detalle de cuenta con catálogo, líneas, total
-  en vivo, cancelar y cerrar+cobrar). Con 2+ cuentas abiertas, "Fusionar cuentas"
-  activa un modo de selección múltiple (checkbox por cuenta + botón "Todas") y
-  fusiona las seleccionadas en la de menor número vía
+  en vivo, cancelar y cerrar+cobrar). Muestra responsable vigente; permite transferir
+  por PIN (claim) o, con permiso `Actualizar`, forzar transferencia admin. Drawer de
+  historial de asignaciones (`GET /cuentas/:id/asignaciones`). Con 2+ cuentas
+  abiertas, "Fusionar cuentas" activa un modo de selección múltiple (checkbox por
+  cuenta + botón "Todas") y fusiona las seleccionadas en la de menor número vía
   `POST /mesas/:id/cuentas/fusionar`.
 - `pages/configuracion/salones.vue` — Administración (dentro de Configuración): CRUD
   de salones/mesas + editor de plano con drag & drop y "Guardar distribución".
@@ -176,12 +230,14 @@ la administración vive dentro de Configuración (`pages/configuracion.vue` →
 ### Unit Tests (Backend)
 
 ```bash
-npm test -- modules/salones/salones.service.spec.ts
+npm test -- modules/salones/salones.service.spec.ts \
+  modules/salones/cuenta-asignaciones.service.spec.ts
 ```
 
 Cubre: número de cuenta correlativo, agregar/merge/quitar líneas, cierre que invoca
 `crearEnTransaccion` y marca la cuenta `cerrada` con `ventaId`, cancelar sin venta,
-aislamiento por tenant.
+transferencias PIN/admin, cierre de tramos al cancelar/cerrar/fusionar, responsable
+vigente en `CuentaDetalle`, aislamiento por tenant.
 
 ### Manual (Frontend)
 
@@ -208,3 +264,5 @@ aislamiento por tenant.
 - [ventas.md](./ventas.md) — motor de ventas y POS reusado en el cierre.
 - [gestion-cajas.md](./gestion-cajas.md) — caja física requerida para cobrar.
 - [roles-permisos.md](./roles-permisos.md) — módulo RBAC `Salones` y permiso `Operar`.
+- [garzones.md](./garzones.md) — identificación por PIN.
+- [turnos-garzones.md](./turnos-garzones.md) — sesión obligatoria para operar cuentas.
