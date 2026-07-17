@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 interface PasarelaGlobal {
@@ -262,6 +264,25 @@ onMounted(() => {
   cargarConfig()
   cargarKeys()
 })
+
+function subtituloConfig(c: TenantPasarelaRow): string {
+  const modo = c.modoIntegracion === 'mall' ? 'Mall' : 'Individual'
+  const ambiente = c.ambiente === 'pruebas' ? 'Pruebas' : 'Producción'
+  return `${modo} · ${ambiente} · prioridad ${c.prioridad}`
+}
+
+const configColumns: TableColumn<TenantPasarelaRow>[] = [
+  { accessorKey: 'nombre', header: 'Pasarela' },
+  { id: 'estado', header: 'Estado' },
+  { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
+
+const keyColumns: TableColumn<ApiKeyRow>[] = [
+  { accessorKey: 'nombre', header: 'API key' },
+  { id: 'ultimoUso', header: 'Último uso' },
+  { id: 'estado', header: 'Estado' },
+  { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
 </script>
 
 <template>
@@ -283,47 +304,53 @@ onMounted(() => {
           @click="abrirCrear"
         />
       </div>
-      <div v-if="loadingConfig" class="text-center text-muted py-8">
-        Cargando…
-      </div>
-      <div v-else-if="!configs.length" class="text-center text-muted py-8">
-        Aún no tienes pasarelas configuradas.
-      </div>
-      <ul v-else class="divide-y divide-default">
-        <li
-          v-for="c in configs" :key="c.tenantPasarelaId"
-          class="flex items-center justify-between gap-4 py-3"
-        >
-          <div>
-            <p class="font-medium text-default">
-              {{ c.nombre }}
-            </p>
-            <p class="text-sm text-muted">
-              {{ c.modoIntegracion === 'mall' ? 'Mall' : 'Individual' }} ·
-              {{ c.ambiente === 'pruebas' ? 'Pruebas' : 'Producción' }} ·
-              prioridad {{ c.prioridad }}
-            </p>
-          </div>
-          <div class="flex items-center gap-2">
-            <UBadge v-if="!c.tieneCredenciales" color="warning" variant="subtle">
+
+      <CrudTable :data="configs" :columns="configColumns" :loading="loadingConfig">
+        <template #nombre-cell="{ row }">
+          <CrudListItem
+            :title="row.original.nombre"
+            :subtitle="subtituloConfig(row.original)"
+          />
+        </template>
+
+        <template #estado-cell="{ row }">
+          <div class="flex flex-wrap items-center gap-2">
+            <UBadge v-if="!row.original.tieneCredenciales" color="warning" variant="subtle">
               Sin credenciales
             </UBadge>
-            <UBadge :color="c.activo ? 'success' : 'neutral'" variant="subtle">
-              {{ c.activo ? 'Activa' : 'Inactiva' }}
+            <UBadge :color="row.original.activo ? 'success' : 'neutral'" variant="subtle">
+              {{ row.original.activo ? 'Activa' : 'Inactiva' }}
             </UBadge>
+          </div>
+        </template>
+
+        <template #acciones-cell="{ row }">
+          <div class="flex justify-end gap-1">
             <UButton
               v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Actualizar')"
-              icon="i-lucide-pencil" color="neutral" variant="ghost" size="xs"
-              @click="abrirEditar(c)"
+              icon="i-lucide-square-pen"
+              color="neutral"
+              variant="ghost"
+              aria-label="Editar"
+              @click="abrirEditar(row.original)"
             />
             <UButton
               v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Eliminar')"
-              icon="i-lucide-trash-2" color="error" variant="ghost" size="xs"
-              @click="eliminandoConfig = c; eliminarConfigOpen = true"
+              icon="i-lucide-trash-2"
+              color="error"
+              variant="ghost"
+              aria-label="Eliminar"
+              @click="eliminandoConfig = row.original; eliminarConfigOpen = true"
             />
           </div>
-        </li>
-      </ul>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            Aún no tienes pasarelas configuradas.
+          </div>
+        </template>
+      </CrudTable>
     </template>
 
     <!-- Tab 2: API Keys -->
@@ -336,35 +363,50 @@ onMounted(() => {
           @click="crearKeyOpen = true"
         />
       </div>
-      <div v-if="loadingKeys" class="text-center text-muted py-8">
-        Cargando…
-      </div>
-      <div v-else-if="!keys.length" class="text-center text-muted py-8">
-        Sin API keys. Crea una para conectar tus apps externas.
-      </div>
-      <ul v-else class="divide-y divide-default">
-        <li v-for="k in keys" :key="k.apiKeyId" class="flex items-center justify-between gap-4 py-3">
-          <div>
-            <p class="font-medium text-default">
-              {{ k.nombre }}
+
+      <CrudTable :data="keys" :columns="keyColumns" :loading="loadingKeys">
+        <template #nombre-cell="{ row }">
+          <div class="min-w-0">
+            <p class="font-medium truncate">
+              {{ row.original.nombre }}
             </p>
             <p class="text-sm text-muted font-mono">
-              {{ k.prefijo }}
+              {{ row.original.prefijo }}
             </p>
           </div>
-          <div class="flex items-center gap-2 text-sm text-muted">
-            <span>Último uso: {{ k.ultimoUsoEl ? formatFecha(k.ultimoUsoEl) : 'nunca' }}</span>
-            <UBadge :color="k.revocadaEl ? 'neutral' : 'success'" variant="subtle">
-              {{ k.revocadaEl ? 'Revocada' : 'Activa' }}
-            </UBadge>
+        </template>
+
+        <template #ultimoUso-cell="{ row }">
+          <span class="text-sm text-muted">
+            {{ row.original.ultimoUsoEl ? formatFecha(row.original.ultimoUsoEl) : 'nunca' }}
+          </span>
+        </template>
+
+        <template #estado-cell="{ row }">
+          <UBadge :color="row.original.revocadaEl ? 'neutral' : 'success'" variant="subtle">
+            {{ row.original.revocadaEl ? 'Revocada' : 'Activa' }}
+          </UBadge>
+        </template>
+
+        <template #acciones-cell="{ row }">
+          <div class="flex justify-end gap-1">
             <UButton
-              v-if="!k.revocadaEl && (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Eliminar'))"
-              icon="i-lucide-ban" color="error" variant="ghost" size="xs"
-              @click="revocando = k; revocarOpen = true"
+              v-if="!row.original.revocadaEl && (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Eliminar'))"
+              icon="i-lucide-ban"
+              color="error"
+              variant="ghost"
+              aria-label="Revocar"
+              @click="revocando = row.original; revocarOpen = true"
             />
           </div>
-        </li>
-      </ul>
+        </template>
+
+        <template #empty>
+          <div class="py-8 text-center text-sm text-muted">
+            Sin API keys. Crea una para conectar tus apps externas.
+          </div>
+        </template>
+      </CrudTable>
     </template>
 
     <!-- Drawer alta/edición de pasarela -->
