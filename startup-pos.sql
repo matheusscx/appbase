@@ -1136,6 +1136,66 @@ CREATE TABLE cuentas (
 );
 CREATE INDEX idx_cuentas_mesa ON cuentas (mesa_id);
 
+-- Garzón responsable vigente de la cuenta. Cambia al transferir; los cargos
+-- (D/E) se atribuyen a este garzón.
+ALTER TABLE cuentas
+    ADD COLUMN garzon_responsable_id UUID REFERENCES garzones(garzon_id);
+
+CREATE INDEX idx_cuentas_responsable
+    ON cuentas (tenant_id, garzon_responsable_id);
+
+-- Historial de asignaciones de responsable por cuenta. La fila vigente tiene
+-- hasta_el IS NULL; el índice único parcial garantiza una sola vigente.
+CREATE TABLE cuenta_asignaciones (
+    cuenta_asignacion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    cuenta_id UUID NOT NULL REFERENCES cuentas(cuenta_id),
+    garzon_id UUID NOT NULL REFERENCES garzones(garzon_id),
+    desde_el TIMESTAMPTZ NOT NULL,
+    hasta_el TIMESTAMPTZ,
+    motivo TEXT NOT NULL,
+    origen_garzon_id UUID REFERENCES garzones(garzon_id),
+    actor_usuario_id UUID REFERENCES usuarios(usuario_id),
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ,
+    CONSTRAINT chk_cuenta_asignaciones_motivo CHECK (
+      motivo IN ('apertura', 'transferencia_pin', 'transferencia_admin')
+    )
+);
+
+CREATE INDEX idx_cuenta_asignaciones_timeline
+    ON cuenta_asignaciones (tenant_id, cuenta_id, desde_el);
+
+CREATE UNIQUE INDEX uq_cuenta_asignacion_vigente
+    ON cuenta_asignaciones (cuenta_id)
+    WHERE hasta_el IS NULL AND eliminado_el IS NULL;
+
+-- Backfill idempotente: responsable vigente = garzón de apertura.
+UPDATE cuentas
+   SET garzon_responsable_id = garzon_apertura_id
+ WHERE garzon_responsable_id IS NULL
+   AND garzon_apertura_id IS NOT NULL;
+
+-- Backfill idempotente: fila de historial 'apertura' por cuenta ya existente.
+INSERT INTO cuenta_asignaciones (
+    tenant_id, cuenta_id, garzon_id, desde_el, hasta_el, motivo
+)
+SELECT c.tenant_id,
+       c.cuenta_id,
+       c.garzon_apertura_id,
+       c.abierta_el,
+       CASE WHEN c.estado = 'abierta' THEN NULL ELSE c.cerrada_el END,
+       'apertura'
+  FROM cuentas c
+ WHERE c.garzon_apertura_id IS NOT NULL
+   AND NOT EXISTS (
+     SELECT 1
+       FROM cuenta_asignaciones ca
+      WHERE ca.cuenta_id = c.cuenta_id
+        AND ca.eliminado_el IS NULL
+   );
+
 -- Línea de cuenta: producto acumulado mientras la cuenta está abierta. El
 -- precio se resuelve al cerrar (igual que ventas), no se snapshotea aquí.
 CREATE TABLE cuenta_lineas (

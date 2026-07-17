@@ -103,6 +103,7 @@ import { Salon } from './modules/salones/entities/salon.entity';
 import { Mesa } from './modules/salones/entities/mesa.entity';
 import { Cuenta } from './modules/salones/entities/cuenta.entity';
 import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
+import { CuentaAsignacion } from './modules/salones/entities/cuenta-asignacion.entity';
 import { GarzonesModule } from './modules/garzones/garzones.module';
 import { Garzon } from './modules/garzones/entities/garzon.entity';
 import { TurnosModule } from './modules/turnos/turnos.module';
@@ -192,6 +193,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           Salon,
           Mesa,
           Cuenta,
+          CuentaAsignacion,
           CuentaLinea,
           Garzon,
           Turno,

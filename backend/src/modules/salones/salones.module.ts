@@ -10,6 +10,7 @@ import { Salon } from './entities/salon.entity';
 import { Mesa } from './entities/mesa.entity';
 import { Cuenta } from './entities/cuenta.entity';
 import { CuentaLinea } from './entities/cuenta-linea.entity';
+import { CuentaAsignacion } from './entities/cuenta-asignacion.entity';
 import { VentasModule } from '../ventas/ventas.module';
 import { GarzonesModule } from '../garzones/garzones.module';
 import { ItemsModule } from '../items/items.module';
@@ -18,7 +19,13 @@ import { TurnosModule } from '../turnos/turnos.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Salon, Mesa, Cuenta, CuentaLinea]),
+    TypeOrmModule.forFeature([
+      Salon,
+      Mesa,
+      Cuenta,
+      CuentaLinea,
+      CuentaAsignacion,
+    ]),
     VentasModule,
     GarzonesModule,
     ItemsModule,

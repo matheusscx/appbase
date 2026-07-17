@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -13,6 +14,7 @@ export enum EstadoCuenta {
   CANCELADA = 'cancelada',
 }
 
+@Index('idx_cuentas_responsable', ['tenantId', 'garzonResponsableId'])
 @Entity('cuentas')
 export class Cuenta {
   @PrimaryGeneratedColumn('uuid', { name: 'cuenta_id' })
@@ -41,6 +43,10 @@ export class Cuenta {
   // Garzón que abrió la cuenta (identificado por PIN). Trazabilidad operativa.
   @Column({ name: 'garzon_apertura_id', type: 'uuid', nullable: true })
   garzonAperturaId: string | null;
+
+  // Garzón responsable vigente. Cambia al transferir; D/E atribuyen a este ID.
+  @Column({ name: 'garzon_responsable_id', type: 'uuid', nullable: true })
+  garzonResponsableId: string | null;
 
   // Garzón que cerró la cuenta (identificado por PIN al generar la venta).
   @Column({ name: 'garzon_cierre_id', type: 'uuid', nullable: true })
