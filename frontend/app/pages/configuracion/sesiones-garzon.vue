@@ -16,6 +16,17 @@ const puedeForzarCierre = computed(
   () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Actualizar'),
 )
 
+const tab = ref('abiertas')
+const tabs = computed(() => [
+  {
+    label: 'Abiertas',
+    value: 'abiertas',
+    icon: 'i-lucide-radio',
+    badge: abiertas.value.length || undefined,
+  },
+  { label: 'Historial', value: 'historial', icon: 'i-lucide-history' },
+])
+
 // ── Sesiones abiertas ────────────────────────────────────────────────────────
 
 const abiertas = ref<SesionGarzon[]>([])
@@ -165,12 +176,9 @@ onMounted(async () => {
       description="Sesiones de trabajo abiertas e historial por turno."
     />
 
-    <!-- Abiertas ahora -->
-    <section class="space-y-3">
-      <h2 class="text-sm font-semibold text-default">
-        Abiertas ahora
-      </h2>
+    <UTabs v-model="tab" :items="tabs" :content="false" />
 
+    <template v-if="tab === 'abiertas'">
       <CrudTable
         :data="abiertas"
         :columns="columnsAbiertas"
@@ -211,105 +219,102 @@ onMounted(async () => {
           </div>
         </template>
       </CrudTable>
-    </section>
+    </template>
 
-    <!-- Historial -->
-    <section class="space-y-3">
-      <h2 class="text-sm font-semibold text-default">
-        Historial
-      </h2>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <USelectMenu
-          v-model="filtroGarzon"
-          :items="garzonOptions"
-          value-key="value"
-          placeholder="Garzón"
-          searchable
-          class="w-48"
-        />
-        <USelectMenu
-          v-model="filtroTurno"
-          :items="turnoOptions"
-          value-key="value"
-          placeholder="Turno"
-          searchable
-          class="w-44"
-        />
-        <USelect
-          v-model="filtroEstado"
-          :items="estadoOptions"
-          placeholder="Estado"
-          class="w-36"
-        />
-        <AppDateInput v-model="filtroDesde" class="w-44" qa="sesiones-desde" />
-        <AppDateInput v-model="filtroHasta" class="w-44" qa="sesiones-hasta" />
-        <UButton
-          v-if="hayFiltrosActivos"
-          label="Limpiar filtros"
-          icon="i-lucide-x"
-          variant="ghost"
-          color="neutral"
-          size="sm"
-          @click="limpiarFiltros"
-        />
-      </div>
-
-      <CrudTable
-        :data="historial"
-        :columns="columnsHistorial"
-        :loading="loadingHistorial"
-      >
-        <template #garzonNombre-cell="{ row }">
-          <span class="font-medium text-default">{{ row.original.garzonNombre || '—' }}</span>
-        </template>
-
-        <template #turnoNombre-cell="{ row }">
-          <span class="text-default">{{ row.original.turnoNombre || '—' }}</span>
-        </template>
-
-        <template #inicioEl-cell="{ row }">
-          <span class="whitespace-nowrap tabular-nums">{{ formatFecha(row.original.inicioEl) }}</span>
-        </template>
-
-        <template #finEl-cell="{ row }">
-          <span class="whitespace-nowrap tabular-nums text-muted">
-            {{ row.original.finEl ? formatFecha(row.original.finEl) : '—' }}
-          </span>
-        </template>
-
-        <template #estado-cell="{ row }">
-          <UBadge
-            :color="row.original.estado === 'abierta' ? 'success' : 'neutral'"
-            variant="subtle"
-            size="xs"
-          >
-            {{ row.original.estado === 'abierta' ? 'Abierta' : 'Cerrada' }}
-          </UBadge>
-        </template>
-
-        <template #origenCierre-cell="{ row }">
-          <span class="text-muted">{{ origenLabel(row.original.origenCierre) }}</span>
-        </template>
-
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            {{ hayFiltrosActivos ? 'Ninguna sesión coincide con los filtros.' : 'Sin sesiones registradas.' }}
-          </div>
-        </template>
-
-        <template
-          v-if="meta.total > pageSize"
-          #footer
-        >
-          <UPagination
-            v-model:page="page"
-            :items-per-page="pageSize"
-            :total="meta.total"
+    <template v-else-if="tab === 'historial'">
+      <div class="space-y-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <USelectMenu
+            v-model="filtroGarzon"
+            :items="garzonOptions"
+            value-key="value"
+            placeholder="Garzón"
+            searchable
+            class="w-48"
           />
-        </template>
-      </CrudTable>
-    </section>
+          <USelectMenu
+            v-model="filtroTurno"
+            :items="turnoOptions"
+            value-key="value"
+            placeholder="Turno"
+            searchable
+            class="w-44"
+          />
+          <USelect
+            v-model="filtroEstado"
+            :items="estadoOptions"
+            placeholder="Estado"
+            class="w-36"
+          />
+          <AppDateInput v-model="filtroDesde" class="w-44" qa="sesiones-desde" />
+          <AppDateInput v-model="filtroHasta" class="w-44" qa="sesiones-hasta" />
+          <UButton
+            v-if="hayFiltrosActivos"
+            label="Limpiar filtros"
+            icon="i-lucide-x"
+            variant="ghost"
+            color="neutral"
+            size="sm"
+            @click="limpiarFiltros"
+          />
+        </div>
+
+        <CrudTable
+          :data="historial"
+          :columns="columnsHistorial"
+          :loading="loadingHistorial"
+        >
+          <template #garzonNombre-cell="{ row }">
+            <span class="font-medium text-default">{{ row.original.garzonNombre || '—' }}</span>
+          </template>
+
+          <template #turnoNombre-cell="{ row }">
+            <span class="text-default">{{ row.original.turnoNombre || '—' }}</span>
+          </template>
+
+          <template #inicioEl-cell="{ row }">
+            <span class="whitespace-nowrap tabular-nums">{{ formatFecha(row.original.inicioEl) }}</span>
+          </template>
+
+          <template #finEl-cell="{ row }">
+            <span class="whitespace-nowrap tabular-nums text-muted">
+              {{ row.original.finEl ? formatFecha(row.original.finEl) : '—' }}
+            </span>
+          </template>
+
+          <template #estado-cell="{ row }">
+            <UBadge
+              :color="row.original.estado === 'abierta' ? 'success' : 'neutral'"
+              variant="subtle"
+              size="xs"
+            >
+              {{ row.original.estado === 'abierta' ? 'Abierta' : 'Cerrada' }}
+            </UBadge>
+          </template>
+
+          <template #origenCierre-cell="{ row }">
+            <span class="text-muted">{{ origenLabel(row.original.origenCierre) }}</span>
+          </template>
+
+          <template #empty>
+            <div class="py-8 text-center text-sm text-muted">
+              {{ hayFiltrosActivos ? 'Ninguna sesión coincide con los filtros.' : 'Sin sesiones registradas.' }}
+            </div>
+          </template>
+
+          <template
+            v-if="meta.total > pageSize"
+            #footer
+          >
+            <UPagination
+              v-model:page="page"
+              :items-per-page="pageSize"
+              :total="meta.total"
+            />
+          </template>
+        </CrudTable>
+      </div>
+    </template>
 
     <CrudModal
       v-model:open="cierreOpen"
