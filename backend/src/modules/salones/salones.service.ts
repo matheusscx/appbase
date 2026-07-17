@@ -314,7 +314,7 @@ export class SalonesService {
     dto: CreateCuentaDto,
   ): Promise<CuentaDetalle> {
     await this.getMesaOrThrow(tenantId, mesaId);
-    // Identifica al garzón responsable por su PIN (lanza 401 si es inválido).
+    // Identifica al garzón responsable por su PIN (lanza 400 si es inválido).
     const garzon = await this.garzonesService.resolverGarzonPorPin(
       tenantId,
       dto.pin,
@@ -558,7 +558,7 @@ export class SalonesService {
     cuentaId: string,
     dto: CerrarCuentaDto,
   ): Promise<{ cuenta: CuentaDetalle; ventaId: string }> {
-    // Identifica al garzón que cierra la cuenta por su PIN (401 si inválido).
+    // Identifica al garzón que cierra la cuenta por su PIN (400 si inválido).
     const garzon = await this.garzonesService.resolverGarzonPorPin(
       tenantId,
       dto.pin,
