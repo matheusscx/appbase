@@ -254,13 +254,15 @@ describe('SesionesGarzonService', () => {
 
     const result = await service.historial(TENANT, {});
 
-    const listSql = dataSource.query.mock.calls[1][0] as string;
+    const countCall = dataSource.query.mock.calls[0] as [string, ...unknown[]];
+    const listCall = dataSource.query.mock.calls[1] as [string, ...unknown[]];
+    const listSql = listCall[0];
     expect(listSql).toMatch(/LEFT JOIN\s+garzones/i);
     expect(listSql).toMatch(/LEFT JOIN\s+turnos/i);
     expect(listSql).not.toMatch(/(?<!LEFT )JOIN\s+garzones/i);
     expect(listSql).not.toMatch(/(?<!LEFT )JOIN\s+turnos/i);
 
-    const countSql = dataSource.query.mock.calls[0][0] as string;
+    const countSql = countCall[0];
     expect(countSql).toMatch(/FROM sesiones_garzon s/i);
     expect(countSql).not.toMatch(/JOIN/i);
 

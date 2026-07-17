@@ -32,7 +32,10 @@ el sistema de tokens.
 - **Incluido**: CRUD de garzones, regeneración de PIN, identificación por PIN, y
   captura del garzón responsable al **abrir** y **cerrar** una cuenta.
 - **NO incluido (futuro)**: transferir cuentas entre mesas con PIN, log por cada
-  acción individual (agregar línea, fusionar), turnos/horarios de garzón.
+  acción individual (agregar línea, fusionar).
+
+Turnos y sesiones de trabajo (entrada/salida con PIN, sesión obligatoria para
+operar cuentas): ver [turnos-garzones.md](./turnos-garzones.md).
 
 ---
 
@@ -146,5 +149,6 @@ persisten `garzon_apertura_id`/`garzon_cierre_id`.
 
 ## Related Features
 
+- [Turnos y Sesiones de Garzón](./turnos-garzones.md)
 - [Salones y Mesas](./salones-mesas.md)
 - [Ventas](./ventas.md)
