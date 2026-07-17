@@ -6,6 +6,7 @@ import {
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { GarzonesService } from '../garzones/garzones.service';
+import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { TurnosService } from './turnos.service';
 import {
   EstadoSesionGarzon,
@@ -27,6 +28,7 @@ export interface SesionPublica {
   garzonNombre: string;
   turnoId: string;
   turnoNombre: string;
+  tipoGarzon: TipoGarzon;
   inicioEl: Date;
   finEl: Date | null;
   estado: EstadoSesionGarzon;
@@ -41,6 +43,7 @@ export interface SesionListaItem {
   garzonNombre: string;
   turnoId: string;
   turnoNombre: string;
+  tipoGarzon: TipoGarzon;
   inicioEl: Date;
   finEl: Date | null;
   estado: EstadoSesionGarzon;
@@ -81,6 +84,7 @@ export class SesionesGarzonService {
       tenantId,
       garzonId: garzon.id,
       turnoId: turno.id,
+      tipoGarzon: garzon.tipo ?? TipoGarzon.GARZON,
       inicioEl: new Date(),
       finEl: null,
       estado: EstadoSesionGarzon.ABIERTA,
@@ -155,6 +159,7 @@ export class SesionesGarzonService {
       garzon_nombre: string | null;
       turno_id: string;
       turno_nombre: string | null;
+      tipo_garzon: TipoGarzon;
       inicio_el: Date;
       fin_el: Date | null;
       estado: EstadoSesionGarzon;
@@ -166,6 +171,7 @@ export class SesionesGarzonService {
               g.nombre AS garzon_nombre,
               s.turno_id,
               t.nombre AS turno_nombre,
+              s.tipo_garzon,
               s.inicio_el,
               s.fin_el,
               s.estado,
@@ -211,6 +217,7 @@ export class SesionesGarzonService {
       garzon_nombre: string | null;
       turno_id: string;
       turno_nombre: string | null;
+      tipo_garzon: TipoGarzon;
       inicio_el: Date;
       fin_el: Date | null;
       estado: EstadoSesionGarzon;
@@ -222,6 +229,7 @@ export class SesionesGarzonService {
               g.nombre AS garzon_nombre,
               s.turno_id,
               t.nombre AS turno_nombre,
+              s.tipo_garzon,
               s.inicio_el,
               s.fin_el,
               s.estado,
@@ -295,6 +303,7 @@ export class SesionesGarzonService {
       garzonNombre,
       turnoId: s.turnoId,
       turnoNombre,
+      tipoGarzon: s.tipoGarzon ?? TipoGarzon.GARZON,
       inicioEl: s.inicioEl,
       finEl: s.finEl,
       estado: s.estado,
@@ -309,6 +318,7 @@ export class SesionesGarzonService {
     garzon_nombre: string | null;
     turno_id: string;
     turno_nombre: string | null;
+    tipo_garzon: TipoGarzon;
     inicio_el: Date;
     fin_el: Date | null;
     estado: EstadoSesionGarzon;
@@ -321,6 +331,7 @@ export class SesionesGarzonService {
       garzonNombre: r.garzon_nombre ?? '',
       turnoId: r.turno_id,
       turnoNombre: r.turno_nombre ?? '',
+      tipoGarzon: r.tipo_garzon ?? TipoGarzon.GARZON,
       inicioEl: r.inicio_el,
       finEl: r.fin_el,
       estado: r.estado,

@@ -7,6 +7,7 @@ import {
   DeleteDateColumn,
   Index,
 } from 'typeorm';
+import { TipoGarzon } from '../../garzones/enums/tipo-garzon.enum';
 
 export enum EstadoSesionGarzon {
   ABIERTA = 'abierta',
@@ -35,6 +36,9 @@ export class SesionGarzon {
 
   @Column({ name: 'turno_id', type: 'uuid' })
   turnoId: string;
+
+  @Column({ name: 'tipo_garzon', type: 'text', default: TipoGarzon.GARZON })
+  tipoGarzon: TipoGarzon;
 
   @Column({ name: 'inicio_el', type: 'timestamptz' })
   inicioEl: Date;

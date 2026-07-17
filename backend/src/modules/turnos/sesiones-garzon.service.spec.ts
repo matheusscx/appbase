@@ -11,6 +11,7 @@ import {
 import { GarzonesService } from '../garzones/garzones.service';
 import { TurnosService } from './turnos.service';
 import type { Garzon } from '../garzones/entities/garzon.entity';
+import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import type { Turno } from './entities/turno.entity';
 
 const TENANT = 'tenant-uuid';
@@ -45,6 +46,7 @@ function garzon(over: Partial<Garzon> = {}): Garzon {
     nombre: 'Ana',
     pinHash: 'hash',
     activo: true,
+    tipo: TipoGarzon.GARZON,
     creadoEl: new Date('2026-01-01T00:00:00Z'),
     actualizadoEl: new Date('2026-01-01T00:00:00Z'),
     eliminadoEl: null,
@@ -73,6 +75,7 @@ function sesion(over: Partial<SesionGarzon> = {}): SesionGarzon {
     tenantId: TENANT,
     garzonId: GARZON_ID,
     turnoId: TURNO_ID,
+    tipoGarzon: TipoGarzon.GARZON,
     inicioEl: new Date('2026-07-16T12:00:00Z'),
     finEl: null,
     estado: EstadoSesionGarzon.ABIERTA,
@@ -141,6 +144,28 @@ describe('SesionesGarzonService', () => {
     expect(result.garzonNombre).toBe('Ana');
     expect(result.turnoNombre).toBe('Almuerzo');
     expect(result.estado).toBe(EstadoSesionGarzon.ABIERTA);
+  });
+
+  it('iniciar congela tipo_garzon del garzón', async () => {
+    garzones.resolverGarzonPorPin.mockResolvedValue(
+      garzon({ tipo: TipoGarzon.COCINA }),
+    );
+    sesionRepo.findOne.mockResolvedValue(null);
+    const saved = sesion({
+      id: 'sesion-new',
+      tipoGarzon: TipoGarzon.COCINA,
+    });
+    sesionRepo.save.mockResolvedValue(saved);
+
+    const result = await service.iniciar(TENANT, {
+      pin: PIN,
+      turnoId: TURNO_ID,
+    });
+
+    expect(sesionRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ tipoGarzon: TipoGarzon.COCINA }),
+    );
+    expect(result.tipoGarzon).toBe(TipoGarzon.COCINA);
   });
 
   it('iniciar rechaza si ya hay sesión abierta', async () => {
@@ -242,6 +267,7 @@ describe('SesionesGarzonService', () => {
         garzon_nombre: null,
         turno_id: TURNO_ID,
         turno_nombre: null,
+        tipo_garzon: TipoGarzon.GARZON,
         inicio_el: new Date('2026-07-16T12:00:00Z'),
         fin_el: null,
         estado: EstadoSesionGarzon.ABIERTA,
@@ -275,6 +301,7 @@ describe('SesionesGarzonService', () => {
           garzon_nombre: 'Ana',
           turno_id: TURNO_ID,
           turno_nombre: null,
+          tipo_garzon: TipoGarzon.GARZON,
           inicio_el: new Date('2026-07-16T12:00:00Z'),
           fin_el: new Date('2026-07-16T16:00:00Z'),
           estado: EstadoSesionGarzon.CERRADA,
