@@ -71,6 +71,9 @@ describe('SalonesService', () => {
   let asignaciones: {
     registrarApertura: jest.Mock;
     cerrarTramoVigente: jest.Mock;
+    transferirPorPin: jest.Mock;
+    transferirAdmin: jest.Mock;
+    listar: jest.Mock;
   };
   let items: { resolverPersonalizacionReceta: jest.Mock };
   let manager: {
@@ -106,6 +109,9 @@ describe('SalonesService', () => {
     asignaciones = {
       registrarApertura: jest.fn().mockResolvedValue(undefined),
       cerrarTramoVigente: jest.fn().mockResolvedValue(undefined),
+      transferirPorPin: jest.fn(),
+      transferirAdmin: jest.fn(),
+      listar: jest.fn(),
     };
     items = {
       resolverPersonalizacionReceta: jest.fn().mockResolvedValue({
@@ -969,6 +975,117 @@ describe('SalonesService', () => {
 
       expect(result.estaciones).toEqual([]);
       expect(manager.query).toHaveBeenCalledTimes(1); // solo SELECT, sin UPDATE
+    });
+  });
+
+  describe('transferirCuentaPorPin', () => {
+    it('delega en CuentaAsignacionesService y devuelve CuentaDetalle con responsable', async () => {
+      const cuentaTransferida = {
+        id: CUENTA,
+        tenantId: TENANT,
+        numero: 1,
+        nombre: null,
+        estado: EstadoCuenta.ABIERTA,
+        mesaId: MESA,
+        ventaId: null,
+        garzonAperturaId: GARZON,
+        garzonResponsableId: 'garzon-nuevo',
+        garzonCierreId: null,
+      };
+      asignaciones.transferirPorPin.mockResolvedValue(cuentaTransferida);
+      dataSource.manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM cuenta_lineas')) return Promise.resolve([]);
+        if (sql.includes('FROM garzones')) {
+          return Promise.resolve([
+            { garzon_id: GARZON, nombre: 'Ana Torres' },
+            { garzon_id: 'garzon-nuevo', nombre: 'Pedro López' },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      const result = await service.transferirCuentaPorPin(
+        TENANT,
+        CUENTA,
+        PIN,
+      );
+
+      expect(asignaciones.transferirPorPin).toHaveBeenCalledWith(
+        TENANT,
+        CUENTA,
+        PIN,
+      );
+      expect(result.garzonResponsableId).toBe('garzon-nuevo');
+      expect(result.garzonResponsableNombre).toBe('Pedro López');
+    });
+  });
+
+  describe('transferirCuentaAdmin', () => {
+    it('delega en CuentaAsignacionesService y devuelve CuentaDetalle con responsable', async () => {
+      const cuentaTransferida = {
+        id: CUENTA,
+        tenantId: TENANT,
+        numero: 2,
+        nombre: 'Mesa VIP',
+        estado: EstadoCuenta.ABIERTA,
+        mesaId: MESA,
+        ventaId: null,
+        garzonAperturaId: GARZON,
+        garzonResponsableId: 'garzon-admin',
+        garzonCierreId: null,
+      };
+      asignaciones.transferirAdmin.mockResolvedValue(cuentaTransferida);
+      dataSource.manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM cuenta_lineas')) return Promise.resolve([]);
+        if (sql.includes('FROM garzones')) {
+          return Promise.resolve([
+            { garzon_id: GARZON, nombre: 'Ana Torres' },
+            { garzon_id: 'garzon-admin', nombre: 'Carlos Ruiz' },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      const result = await service.transferirCuentaAdmin(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        'garzon-admin',
+      );
+
+      expect(asignaciones.transferirAdmin).toHaveBeenCalledWith(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        'garzon-admin',
+      );
+      expect(result.garzonResponsableId).toBe('garzon-admin');
+      expect(result.garzonResponsableNombre).toBe('Carlos Ruiz');
+    });
+  });
+
+  describe('listarAsignacionesCuenta', () => {
+    it('delega en CuentaAsignacionesService.listar', async () => {
+      const historial = [
+        {
+          id: 'asig-1',
+          garzonId: GARZON,
+          garzonNombre: 'Ana Torres',
+          desdeEl: new Date('2026-07-16T10:00:00Z'),
+          hastaEl: null,
+          motivo: 'apertura',
+          origenGarzonId: null,
+          origenGarzonNombre: null,
+          actorUsuarioId: null,
+          actorUsuarioNombre: null,
+        },
+      ];
+      asignaciones.listar.mockResolvedValue(historial);
+
+      const result = await service.listarAsignacionesCuenta(TENANT, CUENTA);
+
+      expect(asignaciones.listar).toHaveBeenCalledWith(TENANT, CUENTA);
+      expect(result).toEqual(historial);
     });
   });
 

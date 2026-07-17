@@ -28,6 +28,7 @@ import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
+import type { CuentaAsignacionDetalle } from './cuenta-asignaciones.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
@@ -804,6 +805,41 @@ export class SalonesService {
    * Marca cantidad_enviada = cantidadEnviada para las líneas (legado; el flujo
    * principal usa reclamarComanda). Idempotente ante reintentos.
    */
+  async transferirCuentaPorPin(
+    tenantId: string,
+    cuentaId: string,
+    pin: string,
+  ): Promise<CuentaDetalle> {
+    const cuenta = await this.cuentaAsignacionesService.transferirPorPin(
+      tenantId,
+      cuentaId,
+      pin,
+    );
+    return this.armarDetalle(tenantId, cuenta);
+  }
+
+  async transferirCuentaAdmin(
+    tenantId: string,
+    usuarioId: string,
+    cuentaId: string,
+    garzonId: string,
+  ): Promise<CuentaDetalle> {
+    const cuenta = await this.cuentaAsignacionesService.transferirAdmin(
+      tenantId,
+      usuarioId,
+      cuentaId,
+      garzonId,
+    );
+    return this.armarDetalle(tenantId, cuenta);
+  }
+
+  listarAsignacionesCuenta(
+    tenantId: string,
+    cuentaId: string,
+  ): Promise<CuentaAsignacionDetalle[]> {
+    return this.cuentaAsignacionesService.listar(tenantId, cuentaId);
+  }
+
   async confirmarComanda(
     tenantId: string,
     cuentaId: string,

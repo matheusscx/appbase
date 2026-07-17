@@ -28,6 +28,10 @@ import { UpdateLineaDto } from './dto/update-linea.dto';
 import { CerrarCuentaDto } from './dto/cerrar-cuenta.dto';
 import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
+import {
+  TransferirCuentaDto,
+  TransferirCuentaAdminDto,
+} from './dto/transferir-cuenta.dto';
 
 @ApiTags('salones')
 @ApiBearerAuth()
@@ -243,5 +247,43 @@ export class CuentasController {
   ) {
     const u = req.user as JwtUser;
     return this.salonesService.cerrarCuenta(u.tenantId ?? '', u.id, id, dto);
+  }
+
+  @Post(':id/transferir')
+  @RequiresPermiso('Salones', 'Operar')
+  transferir(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: TransferirCuentaDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.salonesService.transferirCuentaPorPin(
+      u.tenantId ?? '',
+      id,
+      dto.pin,
+    );
+  }
+
+  @Post(':id/transferir-admin')
+  @RequiresPermiso('Salones', 'Actualizar')
+  transferirAdmin(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: TransferirCuentaAdminDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.salonesService.transferirCuentaAdmin(
+      u.tenantId ?? '',
+      u.id,
+      id,
+      dto.garzonId,
+    );
+  }
+
+  @Get(':id/asignaciones')
+  @RequiresPermiso('Salones', 'Leer')
+  asignaciones(@Req() req: Request, @Param('id') id: string) {
+    const u = req.user as JwtUser;
+    return this.salonesService.listarAsignacionesCuenta(u.tenantId ?? '', id);
   }
 }
