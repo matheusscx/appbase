@@ -49,6 +49,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/pagos',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Propinas', 'Leer')) {
+    base.push({
+      label: 'Propinas',
+      icon: 'i-lucide-hand-coins',
+      to: '/propinas/liquidaciones',
+    })
+  }
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear')) {
     base.push({
       label: 'Punto de venta',
