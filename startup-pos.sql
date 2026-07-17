@@ -1175,7 +1175,8 @@ CREATE UNIQUE INDEX uq_cuenta_asignacion_vigente
 UPDATE cuentas
    SET garzon_responsable_id = garzon_apertura_id
  WHERE garzon_responsable_id IS NULL
-   AND garzon_apertura_id IS NOT NULL;
+   AND garzon_apertura_id IS NOT NULL
+   AND eliminado_el IS NULL;
 
 -- Backfill idempotente: fila de historial 'apertura' por cuenta ya existente.
 INSERT INTO cuenta_asignaciones (
@@ -1189,6 +1190,7 @@ SELECT c.tenant_id,
        'apertura'
   FROM cuentas c
  WHERE c.garzon_apertura_id IS NOT NULL
+   AND c.eliminado_el IS NULL
    AND NOT EXISTS (
      SELECT 1
        FROM cuenta_asignaciones ca

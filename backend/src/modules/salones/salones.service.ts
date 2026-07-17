@@ -529,8 +529,11 @@ export class SalonesService {
       );
     }
     return this.dataSource.transaction(async (manager) => {
+      // Lock pesimista sobre todas las cuentas: serializa fusión↔transferencia
+      // y doble fusión concurrente antes de validar/mover líneas/cancelar.
       const cuentas = await manager.find(Cuenta, {
         where: { id: In(ids), tenantId, mesaId, estado: EstadoCuenta.ABIERTA },
+        lock: { mode: 'pessimistic_write' },
       });
       if (cuentas.length !== ids.length) {
         throw new BadRequestException(

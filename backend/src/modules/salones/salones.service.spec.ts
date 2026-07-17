@@ -372,6 +372,17 @@ describe('SalonesService', () => {
       );
       expect(cuentaA.garzonResponsableId).toBe('garzon-destino');
       expect(result.id).toBe(CUENTA_A);
+      expect(manager.find).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: TENANT,
+            mesaId: MESA,
+            estado: EstadoCuenta.ABIERTA,
+          }),
+          lock: { mode: 'pessimistic_write' },
+        }),
+      );
     });
 
     it('mantiene dos líneas si mismo itemId pero distinta personalización', async () => {
