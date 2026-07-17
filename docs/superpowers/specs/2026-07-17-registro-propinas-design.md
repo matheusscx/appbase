@@ -1,6 +1,6 @@
 # Diseño: Registro de Propinas al Cerrar Cuenta
 
-**Status**: Draft
+**Status**: Approved
 **Owner**: Cesar Matheus
 **Date**: 2026-07-17
 
