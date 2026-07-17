@@ -704,6 +704,13 @@ describe('SalonesService', () => {
               },
             },
           ],
+          propinaCierreMesa: expect.objectContaining({
+            montoPagado: '0',
+            montoSugerido: '0',
+            porcentajeSugerido: '0.10',
+            garzonId: 'garzon-responsable',
+            estrategia: 'no_vuelto',
+          }),
         }),
       );
       expect(result.ventaId).toBe('venta-1');
@@ -720,6 +727,79 @@ describe('SalonesService', () => {
         cuenta.cerradaEl,
       );
       expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, GARZON);
+    });
+
+    it('pasa propinaCierreMesa con el monto y el garzón responsable', async () => {
+      const cuenta = {
+        id: CUENTA,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 85,
+        estado: EstadoCuenta.ABIERTA,
+        ventaId: null,
+        garzonResponsableId: 'garzon-responsable',
+        cerradaEl: null as Date | null,
+      };
+      manager.findOne.mockResolvedValue(cuenta);
+      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.query.mockResolvedValue([]);
+      ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-2' });
+
+      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        pin: PIN,
+        propinaMonto: '1500',
+        propinaSugerida: '1200',
+        propinaPorcentajeSugerido: '0.10',
+        pagos: [{ metodoPagoId: 'mp-1', monto: '11500' }],
+      });
+
+      expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        USUARIO,
+        expect.objectContaining({
+          propinaCierreMesa: {
+            montoPagado: '1500',
+            montoSugerido: '1200',
+            porcentajeSugerido: '0.10',
+            garzonId: 'garzon-responsable',
+            estrategia: 'no_vuelto',
+          },
+        }),
+      );
+    });
+
+    it('rechaza propina negativa', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: 'garzon-responsable',
+      });
+      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+
+      await expect(
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          pin: PIN,
+          propinaMonto: '-1',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
+    });
+
+    it('rechaza cerrar sin garzón responsable', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: null,
+      });
+      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+
+      await expect(
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
+      ).rejects.toThrow(BadRequestException);
+      expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
     it('cerrarCuenta rechaza si el garzón no tiene sesión abierta', async () => {

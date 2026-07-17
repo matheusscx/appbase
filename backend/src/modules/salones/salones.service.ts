@@ -23,6 +23,7 @@ import { FusionarCuentasDto } from './dto/fusionar-cuentas.dto';
 import { ConfirmarComandaDto } from './dto/confirmar-comanda.dto';
 import { VentasService } from '../ventas/ventas.service';
 import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
+import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
 import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -621,6 +622,16 @@ export class SalonesService {
       if (lineas.length === 0) {
         throw new BadRequestException('La cuenta no tiene productos');
       }
+      if (!cuenta.garzonResponsableId) {
+        throw new BadRequestException(
+          'La cuenta no tiene garzón responsable asignado',
+        );
+      }
+
+      const propinaMonto = dto.propinaMonto ?? '0';
+      if (new Decimal(propinaMonto).lt(0)) {
+        throw new BadRequestException('Propina inválida');
+      }
 
       const ventaDto: CreateVentaDto = {
         lineas: lineas.map((l) => ({
@@ -646,6 +657,13 @@ export class SalonesService {
         tipoDocumentoId: dto.tipoDocumentoId,
         customer: dto.customer,
         canal: 'fisico',
+        propinaCierreMesa: {
+          montoPagado: propinaMonto,
+          montoSugerido: dto.propinaSugerida ?? propinaMonto,
+          porcentajeSugerido: dto.propinaPorcentajeSugerido ?? '0.10',
+          garzonId: cuenta.garzonResponsableId,
+          estrategia: EstrategiaAsignacionPropina.NO_VUELTO,
+        },
       };
       const venta = await this.ventasService.crearEnTransaccion(
         manager,

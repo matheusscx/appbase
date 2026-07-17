@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
+import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 
 export class LineaVentaDto {
   @IsUUID()
@@ -152,4 +153,10 @@ export class CreateVentaDto {
   @IsOptional()
   @IsIn(['fisico', 'online'])
   canal?: 'fisico' | 'online';
+
+  /** Solo cierre de cuenta de mesa — crea venta_propina y eleva target de cobro. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PropinaCierreMesaDto)
+  propinaCierreMesa?: PropinaCierreMesaDto;
 }

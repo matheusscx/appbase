@@ -12,6 +12,8 @@ import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
+import { VentaPropinaService } from '../propinas/venta-propina.service';
+import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
 import { CatalogService } from '../catalog/catalog.service';
 import {
   assertPresentacionPareada,
@@ -75,6 +77,7 @@ export class VentasService {
     private readonly inventarioService: InventarioService,
     private readonly itemsService: ItemsService,
     private readonly pagosService: PagosService,
+    private readonly ventaPropinaService: VentaPropinaService,
     private readonly catalogService: CatalogService,
   ) {}
 
@@ -431,17 +434,46 @@ export class VentasService {
       }
     }
 
-    // 7g. Pagos — delegado a PagosService (incluye vuelto + movimientos de caja)
+    // 7g. Propina de cierre de mesa (antes de pagos, para referencia_id)
+    let ventaPropinaId: string | null = null;
+    let propinaMonto = '0';
+    if (dto.propinaCierreMesa) {
+      const tip = dto.propinaCierreMesa;
+      propinaMonto = tip.montoPagado;
+      const ventaPropina = await this.ventaPropinaService.crearEnTransaccion(
+        manager,
+        {
+          tenantId,
+          ventaId: venta.id,
+          garzonId: tip.garzonId,
+          porcentajeSugerido: tip.porcentajeSugerido ?? '0.10',
+          montoSugerido: tip.montoSugerido ?? tip.montoPagado,
+          montoPagado: tip.montoPagado,
+        },
+      );
+      ventaPropinaId = ventaPropina.id;
+    }
+
+    const targetCobro = new Decimal(resultado.totales.totalFinal)
+      .plus(propinaMonto)
+      .toFixed(4);
+
+    // 7h. Pagos — delegado a PagosService (incluye vuelto + aplicaciones + caja)
     const saved = await this.pagosService.registrar(manager, {
       tenantId,
       ventaId: venta.id,
       pagos: pagosDto,
       cajaId: caja.id,
       monedaOficialId,
-      target: resultado.totales.totalFinal,
+      target: targetCobro,
+      propinaMonto,
+      ventaPropinaId,
+      estrategia:
+        dto.propinaCierreMesa?.estrategia ??
+        EstrategiaAsignacionPropina.NO_VUELTO,
     });
 
-    // 7h. Actualizar estado de la venta según montos aplicados a la venta
+    // 7i. Actualizar estado de la venta según montos aplicados a la venta
     if (saved.pagos.length > 0) {
       const estadoFinal = calcularEstadoVenta(
         resultado.totales.totalFinal,

@@ -11,6 +11,7 @@ import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService } from '../pagos/pagos.service';
+import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { EstadoVenta } from './entities/venta.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
@@ -116,12 +117,18 @@ describe('VentasService', () => {
   let inventarioService: jest.Mocked<InventarioService>;
   let itemsService: jest.Mocked<ItemsService>;
   let pagosServiceMock: { registrar: jest.Mock };
+  let ventaPropinaServiceMock: { crearEnTransaccion: jest.Mock };
   let catalogService: jest.Mocked<CatalogService>;
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
 
   beforeEach(async () => {
     const manager = buildManagerMock();
     pagosServiceMock = { registrar: jest.fn().mockResolvedValue({ pagos: [], montoAplicadoVenta: '0.0000' }) };
+    ventaPropinaServiceMock = {
+      crearEnTransaccion: jest.fn().mockResolvedValue({
+        id: 'venta-propina-1',
+      }),
+    };
     dataSourceMock = {
       transaction: jest
         .fn()
@@ -174,6 +181,10 @@ describe('VentasService', () => {
         {
           provide: PagosService,
           useValue: pagosServiceMock,
+        },
+        {
+          provide: VentaPropinaService,
+          useValue: ventaPropinaServiceMock,
         },
         {
           provide: CatalogService,
@@ -336,6 +347,41 @@ describe('VentasService', () => {
         expect.objectContaining({ target: '100.0000' }),
       );
       expect(result.estado).toBe(EstadoVenta.PAGADA);
+    });
+
+    it('con propinaCierreMesa eleva target y crea venta_propina', async () => {
+      const dtoConPropina = {
+        ...baseDto,
+        propinaCierreMesa: {
+          montoPagado: '10.0000',
+          montoSugerido: '10.0000',
+          porcentajeSugerido: '0.10',
+          garzonId: '550e8400-e29b-41d4-a716-446655440200',
+        },
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '110.0000' }],
+      };
+      pagosServiceMock.registrar.mockResolvedValueOnce({
+        pagos: [{ id: 'pago-uuid-tip', monto: '110.0000', vuelto: '0.0000' }],
+        montoAplicadoVenta: '100.0000',
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, dtoConPropina as any);
+
+      expect(ventaPropinaServiceMock.crearEnTransaccion).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          montoPagado: '10.0000',
+          garzonId: '550e8400-e29b-41d4-a716-446655440200',
+        }),
+      );
+      expect(pagosServiceMock.registrar).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          target: '110.0000',
+          propinaMonto: '10.0000',
+          ventaPropinaId: 'venta-propina-1',
+        }),
+      );
     });
 
     it('lanza BadRequestException cuando excedente > 0 y ningún método permite vuelto', async () => {

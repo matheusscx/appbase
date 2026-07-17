@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsNumberString,
   IsOptional,
   IsUUID,
   Matches,
@@ -30,4 +31,19 @@ export class CerrarCuentaDto {
   @ValidateNested()
   @Type(() => CustomerVentaDto)
   customer?: CustomerVentaDto;
+
+  /** Monto de propina cobrado (0 = sin propina). Default 0 si se omite. */
+  @IsOptional()
+  @IsNumberString()
+  propinaMonto?: string;
+
+  /** Sugerencia mostrada en UI al momento del cobro. */
+  @IsOptional()
+  @IsNumberString()
+  propinaSugerida?: string;
+
+  /** Porcentaje usado para la sugerencia (decimal, ej. 0.10). */
+  @IsOptional()
+  @IsNumberString()
+  propinaPorcentajeSugerido?: string;
 }
