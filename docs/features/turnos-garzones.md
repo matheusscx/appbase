@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-07-16
+**Last Updated**: 2026-07-17 (snapshot `tipo_garzon` al iniciar sesión)
 
 ---
 
@@ -115,6 +115,7 @@ Errores esperados (todos `400`):
 | `tenant_id` | UUID | FK tenants |
 | `garzon_id` | UUID | FK garzones |
 | `turno_id` | UUID | FK turnos |
+| `tipo_garzon` | TEXT | snapshot de `garzones.tipo` al **iniciar** la sesión; CHECK `garzon` \| `cocina` \| `barra` |
 | `inicio_el` | TIMESTAMPTZ | |
 | `fin_el` | TIMESTAMPTZ | nullable mientras abierta |
 | `estado` | `abierta` \| `cerrada` | |
@@ -123,15 +124,17 @@ Errores esperados (todos `400`):
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | soft delete |
 
 Restricción efectiva: una sola sesión `abierta` por `(tenant_id, garzon_id)`.
+Índice único `(tenant_id, sesion_garzon_id, turno_id)` para FK compuesta desde
+`venta_propina` (liquidación E1).
 
 ### Métodos clave
 
 - `TurnosService.create/update/remove` — CRUD; bloquea desactivar/eliminar con
   sesiones abiertas.
 - `SesionesGarzonService.iniciar` / `cerrarPorPin` / `activaPorPin` — operación
-  diaria con PIN.
+  diaria con PIN. Al iniciar congela `tipo_garzon` del garzón.
 - `SesionesGarzonService.cerrarAdmin` — cierre forzado; `origen_cierre = admin`.
-- `SesionesGarzonService.assertSesionAbierta` — gate de Salones.
+- `SesionesGarzonService.assertSesionAbierta` / `obtenerSesionAbierta` — gate de Salones.
 
 ---
 

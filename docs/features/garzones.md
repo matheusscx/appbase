@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-16 (tres roles de garzón en cuenta)
+**Last Updated**: 2026-07-17 (tipo garzón/cocina/barra para liquidación)
 
 ---
 
@@ -34,7 +34,8 @@ el sistema de tokens.
   captura de auditoría al **abrir** (`garzon_apertura_id`) y **cerrar**
   (`garzon_cierre_id`) una cuenta. Al abrir también se setea el responsable
   vigente inicial (`garzon_responsable_id`); ese campo cambia con transferencias
-  (ver [salones-mesas.md](./salones-mesas.md)).
+  (ver [salones-mesas.md](./salones-mesas.md)). Campo `tipo` (`garzon` | `cocina`
+  | `barra`) para agrupar en liquidación de propinas (E1).
 - **NO incluido (futuro)**: mover cuentas entre mesas con PIN, log por cada
   acción individual (agregar línea, fusionar).
 
@@ -68,8 +69,8 @@ Todos bajo `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)`; `tenant_id` d
 | Método | Ruta | Permiso (`Salones`) | Descripción |
 |---|---|---|---|
 | GET | `/garzones` | `Leer` | Lista garzones del tenant (sin `pin_hash`) |
-| POST | `/garzones` | `Crear` | Crea `{ nombre, activo? }` → devuelve el garzón + `pin` generado (una vez) |
-| PATCH | `/garzones/:id` | `Actualizar` | Actualiza `{ nombre?, activo? }` |
+| POST | `/garzones` | `Crear` | Crea `{ nombre, activo?, tipo? }` → devuelve el garzón + `pin` generado (una vez) |
+| PATCH | `/garzones/:id` | `Actualizar` | Actualiza `{ nombre?, activo?, tipo? }` |
 | PATCH | `/garzones/:id/pin` | `Actualizar` | Regenera el PIN (sin body) → devuelve el garzón + nuevo `pin` (una vez) |
 | DELETE | `/garzones/:id` | `Eliminar` | Soft delete |
 | POST | `/garzones/identificar` | `Operar` | `{ pin }` → `{ garzonId, nombre }` (o 400) |
@@ -100,6 +101,7 @@ PIN o admin) vive en Salones — no en este módulo.
 | `nombre` | VARCHAR(100) | |
 | `pin_hash` | TEXT | bcrypt; nunca expuesto |
 | `activo` | BOOLEAN | default `true` |
+| `tipo` | TEXT | default `'garzon'`; CHECK `garzon` \| `cocina` \| `barra` |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | soft delete |
 
 `cuentas` tiene tres FKs a `garzones`: `garzon_apertura_id` y `garzon_cierre_id`

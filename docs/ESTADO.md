@@ -55,5 +55,6 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Turnos y sesiones de garzón: catálogo de turnos, marcar entrada/salida con PIN, cierre admin, sesión obligatoria para abrir/cerrar cuentas | ✅ Implementado (2026-07-16) |
 | Responsable vigente de cuenta + transferencia por PIN/admin + historial auditable | ✅ Implementado (2026-07-16) |
 | Registro de propinas al cerrar cuenta de mesa (`venta_propina` + `pago_aplicaciones`, estrategia `NO_VUELTO`, UI salones) | ✅ Implementado (2026-07-17) |
+| Liquidación propinas E1 — modelo base (tipo garzón, tip+sesión, bases venta) | ✅ Implementado (2026-07-17) |
 | Impresión Térmica (comandas cocina/barra por categoría via claim atómico + QZ Tray, precuenta, boleta) | ✅ Implementado (2026-07-13; claim atómico 2026-07-15) |
 | Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base/costo > 0) | ✅ Implementado (2026-07-15) |

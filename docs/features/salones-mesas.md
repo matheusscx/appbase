@@ -73,6 +73,9 @@ del garzón usa el permiso dedicado **`Operar`**.
 - La propina **no** entra en `total_final` ni en IVA; se persiste en `venta_propina`
   (siempre 1 fila por cierre de mesa, incluso tip `$0` → estado `sin_propina`).
 - `garzon_id` de la propina = `garzon_responsable_id` vigente (400 si falta).
+- Al cerrar se congela en `venta_propina`: `sesion_garzon_id`, `turno_id` y
+  `tipo_garzon` de la **sesión abierta del responsable** (paridad: las tres columnas
+  van juntas o son null en legado). `liquidacion_id` queda `NULL` hasta E3.
 - Cobro: Σ pagos == `total_final + propinaMonto`. El split tipado vive en
   `pago_aplicaciones` (`venta` | `propina`) con estrategia `NO_VUELTO` (tip primero
   a métodos sin vuelto).
