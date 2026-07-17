@@ -5,6 +5,7 @@ import { PropinaConfiguracion } from './entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from './entities/propina-grupo-distribucion.entity';
 import { PropinaGrupoPesoManual } from './entities/propina-grupo-peso-manual.entity';
 import { VentaPropinaService } from './venta-propina.service';
+import { PropinaDistribucionService } from './propina-distribucion.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { VentaPropinaService } from './venta-propina.service';
       PropinaGrupoPesoManual,
     ]),
   ],
-  providers: [VentaPropinaService],
-  exports: [VentaPropinaService],
+  providers: [VentaPropinaService, PropinaDistribucionService],
+  exports: [VentaPropinaService, PropinaDistribucionService],
 })
 export class PropinasModule {}
