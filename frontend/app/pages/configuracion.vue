@@ -95,6 +95,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-users',
       to: '/configuracion/garzones',
     })
+    items.push({
+      label: 'Turnos',
+      icon: 'i-lucide-clock-3',
+      to: '/configuracion/turnos',
+    })
   }
 
   if (permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Crear')) {
