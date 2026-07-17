@@ -29,6 +29,8 @@ versionada vigente al momento de crear el borrador.
 - Incluido: confirmar con bloqueo de propinas y anular liberando solo las tips de
   la liquidación.
 - Incluido: UI para listar, crear, revisar, editar, confirmar y anular.
+- Incluido: suite E2E QA `scripts/qa/liquidacion-propinas-e2e.sh` (fixtures SQL +
+  Chrome DevTools).
 - No incluido: reportes agregados, egreso de caja o nómina.
 
 ---
@@ -132,6 +134,16 @@ El layout dashboard muestra `Propinas` cuando el usuario es admin o tiene
 ```bash
 cd backend && npx jest src/modules/propinas --no-cache
 ```
+
+### QA E2E (Chrome DevTools)
+
+```bash
+chrome-devtools start --headless=false
+./scripts/qa/liquidacion-propinas-e2e.sh --all
+```
+
+Crea tips/ventas/sesión en runtime (seed no trae `venta_propina`), luego
+ejercita UI: crear → excluir → confirmar → 2ª liquidación vacía → anular.
 
 Incluye tests de:
 

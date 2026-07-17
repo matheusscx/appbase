@@ -384,7 +384,8 @@ describe('LiquidacionPropinasService', () => {
     manager.query
       .mockReset()
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ venta_propina_id: 'tip-1' }]);
+      // TypeORM pg: UPDATE RETURNING → [rows, rowCount]
+      .mockResolvedValueOnce([[{ venta_propina_id: 'tip-1' }], 1]);
 
     const result = await service.confirmar(TENANT, USER, 'liq-1');
 
@@ -408,9 +409,10 @@ describe('LiquidacionPropinasService', () => {
         fuenteBase('fuente-2', 'tip-2'),
       ])
       .mockResolvedValueOnce([]);
-    manager.query.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([
-      { venta_propina_id: 'tip-1' },
-    ]);
+    manager.query
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([[{ venta_propina_id: 'tip-1' }], 1]);
 
     await expect(service.confirmar(TENANT, USER, 'liq-1')).rejects.toThrow(
       BadRequestException,

@@ -401,7 +401,12 @@ export class LiquidacionPropinasService {
       this.assertBorrador(detalle.liquidacion);
       this.validarManualMontos(detalle.grupos, detalle.participantes);
 
-      const tipIds = detalle.fuentes.map((f) => f.ventaPropinaId);
+      const tipIds = [
+        ...new Set(detalle.fuentes.map((f) => f.ventaPropinaId).filter(Boolean)),
+      ];
+      if (tipIds.length === 0) {
+        throw new BadRequestException('La liquidación no tiene propinas fuente');
+      }
       await manager.query(
         `SELECT venta_propina_id
          FROM venta_propina
@@ -409,7 +414,8 @@ export class LiquidacionPropinasService {
          FOR UPDATE`,
         [tipIds],
       );
-      const actualizadas: { venta_propina_id: string }[] = await manager.query(
+      // TypeORM + pg: UPDATE RETURNING llega como [rows, rowCount], no como rows.
+      const updateRaw = await manager.query(
         `UPDATE venta_propina
          SET liquidacion_id = $1, actualizado_el = NOW()
          WHERE venta_propina_id = ANY($2::uuid[])
@@ -418,6 +424,11 @@ export class LiquidacionPropinasService {
          RETURNING venta_propina_id`,
         [id, tipIds],
       );
+      const actualizadas: { venta_propina_id: string }[] = Array.isArray(
+        updateRaw?.[0],
+      )
+        ? updateRaw[0]
+        : updateRaw;
       if (actualizadas.length !== tipIds.length) {
         throw new BadRequestException(
           'Una o más propinas ya fueron liquidadas por otra corrida',
@@ -516,24 +527,22 @@ export class LiquidacionPropinasService {
       throw new NotFoundException('Liquidación no encontrada');
     }
 
-    const [grupos, participantes, fuentes, eventos] = await Promise.all([
-      manager.find(LiquidacionPropinasGrupo, {
-        where: { liquidacionId: id, eliminadoEl: IsNull() },
-        order: { orden: 'ASC', creadoEl: 'ASC' },
-      }),
-      manager.find(LiquidacionPropinasParticipante, {
-        where: { liquidacionId: id, eliminadoEl: IsNull() },
-        order: { creadoEl: 'ASC' },
-      }),
-      manager.find(LiquidacionPropinasFuente, {
-        where: { liquidacionId: id, eliminadoEl: IsNull() },
-        order: { creadoEl: 'ASC' },
-      }),
-      manager.find(LiquidacionPropinasEvento, {
-        where: { liquidacionId: id, eliminadoEl: IsNull() },
-        order: { creadoEl: 'ASC' },
-      }),
-    ]);
+    const grupos = await manager.find(LiquidacionPropinasGrupo, {
+      where: { liquidacionId: id, eliminadoEl: IsNull() },
+      order: { orden: 'ASC', creadoEl: 'ASC' },
+    });
+    const participantes = await manager.find(LiquidacionPropinasParticipante, {
+      where: { liquidacionId: id, eliminadoEl: IsNull() },
+      order: { creadoEl: 'ASC' },
+    });
+    const fuentes = await manager.find(LiquidacionPropinasFuente, {
+      where: { liquidacionId: id, eliminadoEl: IsNull() },
+      order: { creadoEl: 'ASC' },
+    });
+    const eventos = await manager.find(LiquidacionPropinasEvento, {
+      where: { liquidacionId: id, eliminadoEl: IsNull() },
+      order: { creadoEl: 'ASC' },
+    });
 
     return { liquidacion, grupos, participantes, fuentes, eventos };
   }
