@@ -23,6 +23,13 @@ export class PropinaDistribucionController {
     return this.distribucion.obtener(user.tenantId!);
   }
 
+  @Get('porcentaje-sugerido')
+  @RequiresPermiso('Salones', 'Operar')
+  porcentajeSugerido(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.distribucion.obtenerPorcentajeSugerido(user.tenantId!);
+  }
+
   @Put('distribucion')
   @RequiresPermiso('Propinas', 'Configurar')
   reemplazar(@Req() req: Request, @Body() dto: UpdateDistribucionDto) {

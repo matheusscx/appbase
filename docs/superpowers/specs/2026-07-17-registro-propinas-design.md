@@ -39,8 +39,8 @@ Incluido en esta fase:
 
 Fuera de alcance de esta fase:
 
-- Configuración de % de propina por tenant (v1 fijo 10% / `0.10` en front; el %
-  usado se congela en `venta_propina.porcentaje_sugerido`).
+- ~~Configuración de % de propina por tenant~~ → resuelto en
+  [`2026-07-17-propina-sugerida-config-design.md`](./2026-07-17-propina-sugerida-config-design.md).
 - Otras estrategias de asignación (`ULTIMO_PAGO`, `PRIMER_PAGO`, `PROPORCIONAL`,
   `MANUAL`) — solo el enum y el dispatch existen; lanzan error si se piden.
 - Config UI de estrategia por tenant (hardcode `NO_VUELTO` en el cierre de mesa).

@@ -1028,6 +1028,7 @@ export class SeederService implements OnApplicationBootstrap {
           id: CONFIG_ID,
           tenantId: PARIS,
           version: 1,
+          porcentajeSugerido: '0.10',
           actualizadoPor: null,
         }),
       );

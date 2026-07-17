@@ -1,6 +1,6 @@
 # Diseño: Configuración de propina sugerida
 
-**Status**: Approved  
+**Status**: Done  
 **Owner**: Cesar Matheus  
 **Date**: 2026-07-17
 

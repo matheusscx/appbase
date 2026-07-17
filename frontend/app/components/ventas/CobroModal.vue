@@ -20,8 +20,10 @@ const props = withDefaults(
     modoPropina?: boolean
     /** Total de la venta (sin propina) cuando modoPropina. */
     ventaTotal?: string
+    /** Decimal API, ej. '0.10'. Solo modoPropina. */
+    porcentajeSugerido?: string
   }>(),
-  { modoPropina: false, total: '0', ventaTotal: '0' },
+  { modoPropina: false, total: '0', ventaTotal: '0', porcentajeSugerido: '0.10' },
 )
 
 const emit = defineEmits<{ confirmar: [pagos: PagoInput[], vuelto: string] }>()
@@ -54,7 +56,10 @@ function resetPagos() {
 watch(open, (v) => {
   if (v) {
     if (props.modoPropina) {
-      propinaMonto.value = sugerirPropina(props.ventaTotal || '0')
+      propinaMonto.value = sugerirPropina(
+        props.ventaTotal || '0',
+        props.porcentajeSugerido || '0.10',
+      )
     }
     resetPagos()
   }

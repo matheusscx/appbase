@@ -8,6 +8,10 @@ import type {
   GrupoDistribucion,
   ManualModo,
 } from '~/composables/usePropinaDistribucion'
+import {
+  porcentajeDecimalAHumano,
+  porcentajeHumanoADecimal,
+} from '~/composables/usePropina'
 
 const toast = useToast()
 const { formatPorcentaje } = useFormatters()
@@ -22,6 +26,7 @@ const puedeConfigurar = computed(
 const loading = ref(false)
 const saving = ref(false)
 const version = ref(0)
+const porcentajeSugeridoHumano = ref('10')
 const grupos = ref<GrupoDistribucion[]>([])
 const garzones = ref<Garzon[]>([])
 
@@ -65,6 +70,9 @@ function grupoVacio(orden: number): GrupoDistribucion {
 
 function aplicarRespuesta(data: DistribucionPublica) {
   version.value = data.version
+  porcentajeSugeridoHumano.value = porcentajeDecimalAHumano(
+    data.porcentajeSugerido ?? '0.10',
+  )
   grupos.value = data.grupos.map(g => ({
     id: g.id,
     tipoGarzon: g.tipoGarzon,
@@ -165,6 +173,7 @@ async function guardar() {
   saving.value = true
   try {
     const body = {
+      porcentajeSugerido: porcentajeHumanoADecimal(porcentajeSugeridoHumano.value),
       grupos: grupos.value.map((g, i) => ({
         tipoGarzon: g.tipoGarzon,
         nombre: g.nombre,
@@ -197,7 +206,7 @@ async function guardar() {
   <div class="space-y-6">
     <CrudPageHeader
       title="Distribución de propinas"
-      description="Define qué porcentaje del pool va a cada grupo y con qué criterio se reparte dentro del grupo."
+      description="Configura la propina sugerida al cerrar mesas y cómo se reparte el pool entre grupos."
     >
       <template #actions>
         <UBadge
@@ -218,6 +227,21 @@ async function guardar() {
     </div>
 
     <template v-else>
+      <UCard>
+        <UFormField
+          label="Propina sugerida (%)"
+          hint="Porcentaje que se prellena al cerrar una cuenta de mesa. El cajero puede editarlo."
+        >
+          <UInput
+            v-model="porcentajeSugeridoHumano"
+            inputmode="decimal"
+            class="w-32"
+            :disabled="!puedeConfigurar"
+            data-qa="propina-sugerida-pct"
+          />
+        </UFormField>
+      </UCard>
+
       <div class="space-y-4">
         <div
           v-for="(g, index) in grupos"

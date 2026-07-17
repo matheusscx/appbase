@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import { descontarStockCatalogo, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
-import { sugerirPropina } from '~/composables/usePropina'
+import { sugerirPropina, fetchPorcentajeSugerido, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
@@ -81,7 +81,7 @@ const submitting = ref(false)
 const cancelOpen = ref(false)
 const propinaMonto = ref('0')
 const propinaSugerida = ref('0')
-const PROPINA_PORCENTAJE = '0.10'
+const propinaPorcentaje = ref(PROPINA_PORCENTAJE_DEFAULT)
 const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
@@ -239,7 +239,7 @@ const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
 
 watch(cobroOpen, (v) => {
   if (v) {
-    propinaSugerida.value = sugerirPropina(totalFinal.value, PROPINA_PORCENTAJE)
+    propinaSugerida.value = sugerirPropina(totalFinal.value, propinaPorcentaje.value)
   }
 })
 
@@ -304,7 +304,14 @@ async function cargarCatalogo() {
 }
 
 onMounted(async () => {
-  await Promise.all([cajaStore.cargarActiva(), cargarSalones(), cargarCatalogo(), unidadesStore.ensureLoaded()])
+  const [, , , , pct] = await Promise.all([
+    cajaStore.cargarActiva(),
+    cargarSalones(),
+    cargarCatalogo(),
+    unidadesStore.ensureLoaded(),
+    fetchPorcentajeSugerido(),
+  ])
+  propinaPorcentaje.value = pct
 })
 
 // ── Selección de mesa ──────────────────────────────────────────────────────
@@ -804,7 +811,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
       tipoDocumentoId: tiposDocumento.value[0]?.id,
       propinaMonto: tipMonto,
       propinaSugerida: tipSugerida,
-      propinaPorcentajeSugerido: PROPINA_PORCENTAJE,
+      propinaPorcentajeSugerido: propinaPorcentaje.value,
     })
     toast.add({
       title: new Decimal(tipMonto).gt(0)
@@ -1175,6 +1182,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
         modo-propina
         :venta-total="totalFinal"
         v-model:propina-monto="propinaMonto"
+        :porcentaje-sugerido="propinaPorcentaje"
         :metodos="metodos"
         :submitting="submitting"
         @confirmar="confirmarCobro"

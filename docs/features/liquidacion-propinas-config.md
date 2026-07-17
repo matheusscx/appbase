@@ -23,8 +23,10 @@ al liquidar se tomará un snapshot de esta config.
 - Incluido: tablas `propina_configuracion` / `propina_grupo_distribucion` /
   `propina_grupo_peso_manual`; GET/PUT; validación Σ activos = 100%; seed default
   al crear tenant + Paris; módulo RBAC `Propinas` (Leer, Configurar, Liquidar);
-  UI en `/configuracion/propinas-distribucion`.
-- NO incluido (E3): motor de liquidación, UI de liquidar, tablas
+  UI en `/configuracion/propinas-distribucion`; **propina sugerida**
+  (`porcentaje_sugerido`, default 10%) editable en la misma pantalla;
+  `GET /propinas/porcentaje-sugerido` (`Salones:Operar`) para el cobro.
+- NO incluido (ya en E3): motor de liquidación, UI de liquidar, tablas
   `liquidacion_propinas*`.
 
 ---
@@ -35,16 +37,29 @@ al liquidar se tomará un snapshot de esta config.
 
 Auth: JWT + tenant. Permiso: `Propinas:Leer`.
 
-Si no hay config, crea el default (v1, grupo Garzones 100% `PARTES_IGUALES`).
+Si no hay config, crea el default (v1, grupo Garzones 100% `PARTES_IGUALES`,
+`porcentajeSugerido: "0.10"`).
+
+Respuesta incluye `porcentajeSugerido` (decimal string).
+
+### `GET /propinas/porcentaje-sugerido`
+
+Auth: JWT + tenant. Permiso: `Salones:Operar`.
+
+```json
+{ "porcentajeSugerido": "0.10" }
+```
 
 ### `PUT /propinas/distribucion`
 
 Auth: JWT + tenant. Permiso: `Propinas:Configurar`.
 
 Reemplazo transaccional de grupos (soft-delete + recreate); `version++`.
+Body requiere `porcentajeSugerido` (decimal `0`–`1`).
 
 ```json
 {
+  "porcentajeSugerido": "0.15",
   "grupos": [
     {
       "tipoGarzon": "garzon",

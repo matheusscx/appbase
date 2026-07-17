@@ -33,12 +33,14 @@ export interface GrupoDistribucion {
 export interface DistribucionPublica {
   id: string
   version: number
+  porcentajeSugerido: string
   actualizadoPor: string | null
   actualizadoEl: string
   grupos: GrupoDistribucion[]
 }
 
 export interface UpdateDistribucionBody {
+  porcentajeSugerido: string
   grupos: Array<{
     tipoGarzon: TipoGarzon
     nombre: string
