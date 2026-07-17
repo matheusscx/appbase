@@ -360,11 +360,13 @@ describe('CuentaAsignacionesService', () => {
       expect(updateSql).toMatch(/UPDATE\s+cuentas/i);
       expect(updateSql).toMatch(/garzon_responsable_id\s*=\s*garzon_apertura_id/i);
       expect(updateSql).toMatch(/garzon_responsable_id\s+IS\s+NULL/i);
+      expect(updateSql).toMatch(/eliminado_el\s+IS\s+NULL/i);
 
       const insertSql = manager.query.mock.calls[1][0] as string;
       expect(insertSql).toMatch(/INSERT\s+INTO\s+cuenta_asignaciones/i);
       expect(insertSql).toMatch(/NOT\s+EXISTS/i);
       expect(insertSql).toMatch(/ca\.eliminado_el\s+IS\s+NULL/i);
+      expect(insertSql).toMatch(/c\.eliminado_el\s+IS\s+NULL/i);
       expect(insertSql).toMatch(/'apertura'/i);
     });
   });

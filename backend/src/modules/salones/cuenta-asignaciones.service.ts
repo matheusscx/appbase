@@ -162,6 +162,7 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
          SET garzon_responsable_id = garzon_apertura_id
        WHERE garzon_responsable_id IS NULL
          AND garzon_apertura_id IS NOT NULL
+         AND eliminado_el IS NULL
     `);
       await manager.query(`
       INSERT INTO cuenta_asignaciones (
@@ -175,6 +176,7 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
              'apertura'
         FROM cuentas c
        WHERE c.garzon_apertura_id IS NOT NULL
+         AND c.eliminado_el IS NULL
          AND NOT EXISTS (
            SELECT 1
              FROM cuenta_asignaciones ca
