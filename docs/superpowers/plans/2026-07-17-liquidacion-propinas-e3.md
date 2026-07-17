@@ -4,7 +4,7 @@
 
 **Goal:** Entregar el motor de liquidación de propinas por período: tablas snapshot/fuente/participantes/eventos, cálculo por los 5 criterios (incl. MANUAL PESOS/MONTOS) con mayores restos, API crear/editar/confirmar/anular con concurrencia segura, y UI lista + detalle.
 
-**Status:** In Progress
+**Status:** Done
 
 **Architecture:** Cinco tablas nuevas bajo `PropinasModule`. Al crear borrador se congelan tips en `liquidacion_propinas_fuente`, se copia la config vigente a `liquidacion_propinas_grupo`, se sugieren participantes y se calculan montos. Confirmar reserva tips con `FOR UPDATE` (`venta_propina.liquidacion_id`); anular solo libera tips de esa liquidación. El motor puro (`mayores-restos` + métricas) se testea aparte del orquestador HTTP.
 
