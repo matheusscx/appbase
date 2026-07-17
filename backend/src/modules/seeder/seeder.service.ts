@@ -501,6 +501,13 @@ export class SeederService implements OnApplicationBootstrap {
         icono: 'mdi-printer',
         tieneConfiguracion: false,
       },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440257',
+        nombre: 'Propinas',
+        url: '/propinas',
+        icono: 'mdi-cash-plus',
+        tieneConfiguracion: true,
+      },
     ];
 
     for (const data of modulos) {
@@ -541,6 +548,14 @@ export class SeederService implements OnApplicationBootstrap {
         permisoId: '550e8400-e29b-41d4-a716-446655440221',
         nombre: 'Operar',
       },
+      {
+        permisoId: '550e8400-e29b-41d4-a716-446655440258',
+        nombre: 'Configurar',
+      },
+      {
+        permisoId: '550e8400-e29b-41d4-a716-446655440259',
+        nombre: 'Liquidar',
+      },
     ];
 
     for (const data of permisos) {
@@ -565,6 +580,9 @@ export class SeederService implements OnApplicationBootstrap {
     const OPERAR = '550e8400-e29b-41d4-a716-446655440221';
     const SALONES = '550e8400-e29b-41d4-a716-446655440222';
     const IMPRESORAS = '550e8400-e29b-41d4-a716-446655440241';
+    const PROPINAS = '550e8400-e29b-41d4-a716-446655440257';
+    const CONFIGURAR = '550e8400-e29b-41d4-a716-446655440258';
+    const LIQUIDAR = '550e8400-e29b-41d4-a716-446655440259';
     const VENTAS = '550e8400-e29b-41d4-a716-446655440058';
     const PAGOS = '550e8400-e29b-41d4-a716-446655440180';
     const INVENTARIO = '550e8400-e29b-41d4-a716-446655440181';
@@ -794,6 +812,22 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440245',
         moduloAppId: IMPRESORAS,
         permisoId: ELIMINAR,
+      },
+      // Propinas (distribución E2 + liquidación E3)
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440260',
+        moduloAppId: PROPINAS,
+        permisoId: LEER,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440261',
+        moduloAppId: PROPINAS,
+        permisoId: CONFIGURAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440262',
+        moduloAppId: PROPINAS,
+        permisoId: LIQUIDAR,
       },
     ];
 
@@ -1095,6 +1129,13 @@ export class SeederService implements OnApplicationBootstrap {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440246',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440241', // Paris → Impresoras
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440263',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440257', // Paris → Propinas
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
