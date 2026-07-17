@@ -134,6 +134,32 @@ describe('GarzonesService', () => {
     });
   });
 
+  describe('obtenerActivoPorId', () => {
+    const GARZON = 'garzon-uuid';
+
+    it('devuelve un garzón activo del tenant', async () => {
+      repo.findOne.mockResolvedValue({
+        id: GARZON,
+        tenantId: TENANT,
+        activo: true,
+      });
+      await expect(service.obtenerActivoPorId(TENANT, GARZON)).resolves.toEqual(
+        expect.objectContaining({ id: GARZON }),
+      );
+    });
+
+    it('rechaza un garzón inactivo', async () => {
+      repo.findOne.mockResolvedValue({
+        id: GARZON,
+        tenantId: TENANT,
+        activo: false,
+      });
+      await expect(service.obtenerActivoPorId(TENANT, GARZON)).rejects.toThrow(
+        'Garzón no encontrado o inactivo',
+      );
+    });
+  });
+
   describe('regenerarPin', () => {
     it('genera un PIN nuevo, re-hashea y lo devuelve una sola vez', async () => {
       const g = garzon({ id: 'g1', pin: '111111' });

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SalonesService } from './salones.service';
+import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import {
   SalonesController,
   MesasController,
@@ -33,7 +34,7 @@ import { TurnosModule } from '../turnos/turnos.module';
     TurnosModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
-  providers: [SalonesService],
-  exports: [SalonesService],
+  providers: [SalonesService, CuentaAsignacionesService],
+  exports: [SalonesService, CuentaAsignacionesService],
 })
 export class SalonesModule {}

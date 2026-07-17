@@ -139,6 +139,16 @@ export class GarzonesService {
     throw new BadRequestException('PIN inválido');
   }
 
+  async obtenerActivoPorId(tenantId: string, id: string): Promise<Garzon> {
+    const garzon = await this.garzonRepo.findOne({
+      where: { id, tenantId, activo: true },
+    });
+    if (!garzon || !garzon.activo) {
+      throw new BadRequestException('Garzón no encontrado o inactivo');
+    }
+    return garzon;
+  }
+
   private async getOrThrow(tenantId: string, id: string): Promise<Garzon> {
     const garzon = await this.garzonRepo.findOne({ where: { id, tenantId } });
     if (!garzon) {
