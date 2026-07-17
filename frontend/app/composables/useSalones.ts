@@ -102,6 +102,9 @@ export interface CerrarCuentaBody {
   pagos?: { metodoPagoId: string, monto: string, referencia?: string }[]
   tipoDocumentoId?: string
   customer?: Record<string, unknown>
+  propinaMonto?: string
+  propinaSugerida?: string
+  propinaPorcentajeSugerido?: string
 }
 
 /** precioBase + Σ extras cuando la línea tiene personalización con extras. */

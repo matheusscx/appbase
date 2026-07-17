@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import { descontarStockCatalogo, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { sugerirPropina } from '~/composables/usePropina'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
@@ -78,6 +79,9 @@ const fusionando = ref(false)
 const cobroOpen = ref(false)
 const submitting = ref(false)
 const cancelOpen = ref(false)
+const propinaMonto = ref('0')
+const propinaSugerida = ref('0')
+const PROPINA_PORCENTAJE = '0.10'
 const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
@@ -232,6 +236,12 @@ const salonItems = computed(() =>
 )
 const tieneCaja = computed(() => cajaStore.activa !== null)
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
+
+watch(cobroOpen, (v) => {
+  if (v) {
+    propinaSugerida.value = sugerirPropina(totalFinal.value, PROPINA_PORCENTAJE)
+  }
+})
 
 // En el detalle de cuenta cada columna scrollea internamente (catálogo / líneas),
 // así que el body del drawer no debe scrollear como unidad (evita el doble scroll).
@@ -785,13 +795,23 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
   submitting.value = true
   const cuentaCerrada = activeCuenta.value
   const resultadoCerrado = resultado.value
+  const tipMonto = propinaMonto.value || '0'
+  const tipSugerida = propinaSugerida.value || tipMonto
   try {
     await salonesApi.cerrarCuenta(cuentaCerrada.id, {
       pin,
       pagos,
       tipoDocumentoId: tiposDocumento.value[0]?.id,
+      propinaMonto: tipMonto,
+      propinaSugerida: tipSugerida,
+      propinaPorcentajeSugerido: PROPINA_PORCENTAJE,
     })
-    toast.add({ title: 'Cuenta cerrada — venta generada', color: 'success' })
+    toast.add({
+      title: new Decimal(tipMonto).gt(0)
+        ? 'Cuenta cerrada — propina registrada'
+        : 'Cuenta cerrada — venta generada',
+      color: 'success',
+    })
 
     if (resultadoCerrado) {
       try {
@@ -820,10 +840,10 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
       (acc, p) => acc.plus(p.monto || '0'),
       new Decimal(0),
     )
-    // Vuelto no viene en el cierre de cuenta aquí; el neto se aproxima con el total cobrado.
-    const neto = resultadoCerrado
-      ? Decimal.min(bruto, new Decimal(resultadoCerrado.totales.totalFinal)).toFixed(4)
-      : bruto.toFixed(4)
+    const targetCobro = resultadoCerrado
+      ? new Decimal(resultadoCerrado.totales.totalFinal).plus(tipMonto)
+      : bruto
+    const neto = Decimal.min(bruto, targetCobro).toFixed(4)
     cajaStore.aplicarCobroLocal(neto, pagosConMonto.length)
     volverACuentas()
   }
@@ -1152,7 +1172,9 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
 
       <VentasCobroModal
         v-model:open="cobroOpen"
-        :total="totalFinal"
+        modo-propina
+        :venta-total="totalFinal"
+        v-model:propina-monto="propinaMonto"
         :metodos="metodos"
         :submitting="submitting"
         @confirmar="confirmarCobro"

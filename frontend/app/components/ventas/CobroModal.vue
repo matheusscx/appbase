@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import { resumenCobro, setMontoPago, sumaPagos, type PagoInput } from '~/composables/useVenta'
+import { sugerirPropina } from '~/composables/usePropina'
 
 interface MetodoPago {
   metodoPagoId: string
@@ -9,9 +10,23 @@ interface MetodoPago {
   habilitada: boolean
 }
 
-const props = defineProps<{ total: string; metodos: MetodoPago[]; submitting?: boolean }>()
+const props = withDefaults(
+  defineProps<{
+    /** Total a cobrar (POS). En modo propina se ignora: usa ventaTotal + propina. */
+    total?: string
+    metodos: MetodoPago[]
+    submitting?: boolean
+    /** Solo cierre de mesa: muestra desglose venta/propina. */
+    modoPropina?: boolean
+    /** Total de la venta (sin propina) cuando modoPropina. */
+    ventaTotal?: string
+  }>(),
+  { modoPropina: false, total: '0', ventaTotal: '0' },
+)
+
 const emit = defineEmits<{ confirmar: [pagos: PagoInput[], vuelto: string] }>()
 const open = defineModel<boolean>('open', { required: true })
+const propinaMonto = defineModel<string>('propinaMonto', { default: '0' })
 
 const pagos = ref<PagoInput[]>([])
 
@@ -20,21 +35,37 @@ const metodoItems = computed(() =>
   metodosHabilitados.value.map((m) => ({ label: m.nombre, value: m.metodoPagoId })),
 )
 
+const totalAPagar = computed(() => {
+  if (props.modoPropina) {
+    return new Decimal(props.ventaTotal || '0')
+      .plus(propinaMonto.value || '0')
+      .toFixed(4)
+  }
+  return props.total || '0'
+})
+
+function resetPagos() {
+  const def = metodosHabilitados.value[0]
+  pagos.value = def
+    ? [{ metodoPagoId: def.metodoPagoId, monto: totalAPagar.value }]
+    : []
+}
+
 watch(open, (v) => {
   if (v) {
-    const def = metodosHabilitados.value[0]
-    pagos.value = def
-      ? [{ metodoPagoId: def.metodoPagoId, monto: props.total }]
-      : []
+    if (props.modoPropina) {
+      propinaMonto.value = sugerirPropina(props.ventaTotal || '0')
+    }
+    resetPagos()
   }
 })
 
-// El cajero no saca cuentas ("500 en efectivo y el resto en tarjeta"): al
-// escribir un monto, los demás pagos absorben el excedente vía setMontoPago,
-// y el pago nuevo se prellena con el restante. La regla de sobrepago sin
-// vuelto se valida al confirmar.
+watch(propinaMonto, () => {
+  if (open.value && props.modoPropina) resetPagos()
+})
+
 function setMonto(i: number, monto: string) {
-  pagos.value = setMontoPago(props.total, pagos.value, i, monto)
+  pagos.value = setMontoPago(totalAPagar.value, pagos.value, i, monto)
 }
 function agregarPago() {
   const def = metodosHabilitados.value[0]
@@ -47,7 +78,7 @@ function quitarPago(i: number) {
 
 const resumen = computed(() =>
   resumenCobro(
-    props.total,
+    totalAPagar.value,
     pagos.value,
     props.metodos.map((m) => ({ metodoPagoId: m.metodoPagoId, permiteVuelto: m.permiteVuelto })),
   ),
@@ -56,7 +87,6 @@ const suma = computed(() => sumaPagos(pagos.value))
 
 const { formatMonto } = useFormatters()
 
-// Los pagos absorbidos a $0 por setMontoPago no se registran en el ledger.
 const pagosValidos = computed(() =>
   pagos.value.filter((p) => new Decimal(p.monto || '0').gt(0)),
 )
@@ -74,8 +104,29 @@ function confirmar() {
   <UModal v-model:open="open" title="Cobrar venta" :ui="shellUi.modal">
     <template #body>
       <div class="flex flex-col gap-4">
-        <div class="flex justify-between text-base font-semibold">
-          <span>Total a pagar</span><span>{{ formatMonto(total) }}</span>
+        <div v-if="modoPropina" class="text-sm space-y-1">
+          <div class="flex justify-between text-muted">
+            <span>Total venta</span>
+            <span>{{ formatMonto(ventaTotal || '0') }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-muted">Propina</span>
+            <MoneyInput
+              :model-value="propinaMonto"
+              oficial
+              class="w-32"
+              size="sm"
+              @update:model-value="propinaMonto = $event"
+            />
+          </div>
+          <div class="flex justify-between text-base font-semibold border-t border-default pt-2">
+            <span>Total a pagar</span>
+            <span>{{ formatMonto(totalAPagar) }}</span>
+          </div>
+        </div>
+        <div v-else class="flex justify-between text-base font-semibold">
+          <span>Total a pagar</span>
+          <span>{{ formatMonto(totalAPagar) }}</span>
         </div>
 
         <div class="flex flex-col gap-2">
