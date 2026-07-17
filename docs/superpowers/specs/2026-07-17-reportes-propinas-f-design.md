@@ -99,7 +99,9 @@ métrica histórica de anulaciones no se suma a ellas.
 ### Reglas del período
 
 - `desde` es inclusivo y `hasta` exclusivo.
-- Ambos son ISO-8601 con zona horaria; `hasta` debe ser posterior a `desde`.
+- Ambos son fechas calendario `YYYY-MM-DD`. El backend convierte cada límite a
+  medianoche en la zona horaria del país del tenant; así un administrador remoto
+  obtiene el mismo período que el local.
 - Rango máximo: 366 días para proteger consultas agregadas.
 - KPIs de cobranza, tendencia, turno y origen por trabajador filtran
   `venta_propina.creado_el >= desde AND < hasta`.
@@ -160,8 +162,8 @@ Ambos usan `JwtAuthGuard`, `TenantGuard`, `PermisosGuard` y
 Query común:
 
 ```text
-desde       ISO-8601 requerido, inclusivo
-hasta       ISO-8601 requerido, exclusivo
+desde       YYYY-MM-DD requerido, inclusivo
+hasta       YYYY-MM-DD requerido, exclusivo
 turnoIds    UUID separados por coma, opcional
 tipoGarzon  garzon | cocina | barra, opcional
 ```
@@ -179,8 +181,8 @@ en español.
 ```json
 {
   "periodo": {
-    "desde": "2026-07-01T00:00:00.000Z",
-    "hasta": "2026-08-01T00:00:00.000Z"
+    "desde": "2026-07-01",
+    "hasta": "2026-08-01"
   },
   "cobranza": {
     "cierres": 120,
@@ -349,7 +351,7 @@ y carga solo el tab activo.
 
 1. La página inicializa los últimos 30 días y carga turnos.
 2. El usuario aplica filtros.
-3. El composable serializa fechas ISO, turnos y tipo.
+3. El composable serializa fechas calendario, turnos y tipo.
 4. Se consulta únicamente el endpoint del tab activo.
 5. El backend valida período y filtros, ejecuta agregados por tenant y retorna
    contratos ya normalizados.
