@@ -255,6 +255,19 @@ describe('LiquidacionPropinasService', () => {
     };
   }
 
+  function fuenteBase(id = 'fuente-1', tipId = 'tip-1'): LiquidacionPropinasFuente {
+    return {
+      id,
+      tenantId: TENANT,
+      liquidacionId: 'liq-1',
+      ventaPropinaId: tipId,
+      montoPagado: '150.0000',
+      creadoEl: new Date('2026-07-17T12:00:00.000Z'),
+      actualizadoEl: new Date('2026-07-17T12:00:00.000Z'),
+      eliminadoEl: null,
+    };
+  }
+
   it('carga el detalle con grupos, participantes, fuentes y eventos', async () => {
     liquidacionRepo.findOne.mockResolvedValueOnce(liquidacionBase());
     grupoRepo.find.mockResolvedValueOnce([]);
@@ -357,6 +370,74 @@ describe('LiquidacionPropinasService', () => {
           despues: expect.any(Array),
         }),
       }),
+    );
+  });
+
+  it('confirma un borrador asignando liquidacion_id a sus tips', async () => {
+    const liquidacion = liquidacionBase();
+    manager.findOne.mockResolvedValueOnce(liquidacion);
+    manager.find
+      .mockResolvedValueOnce([grupoBase()])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([fuenteBase('fuente-1', 'tip-1')])
+      .mockResolvedValueOnce([]);
+    manager.query
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ venta_propina_id: 'tip-1' }]);
+
+    const result = await service.confirmar(TENANT, USER, 'liq-1');
+
+    expect(result.estado).toBe(EstadoLiquidacion.CONFIRMADA);
+    expect(liquidacion.estado).toBe(EstadoLiquidacion.CONFIRMADA);
+    expect(manager.query.mock.calls[1][0]).toContain('UPDATE venta_propina');
+    expect(manager.query.mock.calls[1][1]).toEqual(['liq-1', ['tip-1']]);
+    expect(manager.save).toHaveBeenCalledWith(
+      LiquidacionPropinasEvento,
+      expect.objectContaining({ tipo: TipoEventoLiquidacion.CONFIRMADA }),
+    );
+  });
+
+  it('falla al confirmar si otra corrida ya tomó un tip', async () => {
+    manager.findOne.mockResolvedValueOnce(liquidacionBase());
+    manager.find
+      .mockResolvedValueOnce([grupoBase()])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        fuenteBase('fuente-1', 'tip-1'),
+        fuenteBase('fuente-2', 'tip-2'),
+      ])
+      .mockResolvedValueOnce([]);
+    manager.query.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { venta_propina_id: 'tip-1' },
+    ]);
+
+    await expect(service.confirmar(TENANT, USER, 'liq-1')).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('anula una confirmada liberando solo sus tips', async () => {
+    const liquidacion = liquidacionBase(EstadoLiquidacion.CONFIRMADA);
+    manager.findOne.mockResolvedValueOnce(liquidacion);
+    manager.find
+      .mockResolvedValueOnce([grupoBase()])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([fuenteBase('fuente-1', 'tip-1')])
+      .mockResolvedValueOnce([]);
+    manager.query.mockReset().mockResolvedValueOnce([]);
+
+    const result = await service.anular(TENANT, USER, 'liq-1', {
+      motivo: 'Error de período',
+    });
+
+    expect(result.estado).toBe(EstadoLiquidacion.ANULADA);
+    expect(manager.query.mock.calls[0][0]).toContain('UPDATE venta_propina');
+    expect(manager.query.mock.calls[0][1]).toEqual(['liq-1']);
+    expect(liquidacion.motivoAnulacion).toBe('Error de período');
+    expect(manager.save).toHaveBeenCalledWith(
+      LiquidacionPropinasEvento,
+      expect.objectContaining({ tipo: TipoEventoLiquidacion.ANULADA }),
     );
   });
 });

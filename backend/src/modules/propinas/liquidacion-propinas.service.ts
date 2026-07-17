@@ -24,6 +24,7 @@ import {
   UpdateLiquidacionDto,
   UpdateLiquidacionParticipanteDto,
 } from './dto/update-liquidacion.dto';
+import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { horasInterseccionHoras } from './utils/horas-interseccion';
 import { repartirMayoresRestos } from './utils/mayores-restos';
 
@@ -390,6 +391,111 @@ export class LiquidacionPropinasService {
     });
   }
 
+  async confirmar(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<LiquidacionDetalle> {
+    return this.dataSource.transaction(async (manager) => {
+      const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
+      this.assertBorrador(detalle.liquidacion);
+      this.validarManualMontos(detalle.grupos, detalle.participantes);
+
+      const tipIds = detalle.fuentes.map((f) => f.ventaPropinaId);
+      await manager.query(
+        `SELECT venta_propina_id
+         FROM venta_propina
+         WHERE venta_propina_id = ANY($1::uuid[])
+         FOR UPDATE`,
+        [tipIds],
+      );
+      const actualizadas: { venta_propina_id: string }[] = await manager.query(
+        `UPDATE venta_propina
+         SET liquidacion_id = $1, actualizado_el = NOW()
+         WHERE venta_propina_id = ANY($2::uuid[])
+           AND liquidacion_id IS NULL
+           AND eliminado_el IS NULL
+         RETURNING venta_propina_id`,
+        [id, tipIds],
+      );
+      if (actualizadas.length !== tipIds.length) {
+        throw new BadRequestException(
+          'Una o más propinas ya fueron liquidadas por otra corrida',
+        );
+      }
+
+      detalle.liquidacion.estado = EstadoLiquidacion.CONFIRMADA;
+      detalle.liquidacion.confirmadoPor = usuarioId;
+      detalle.liquidacion.confirmadoEl = new Date();
+      await manager.save(LiquidacionPropinas, detalle.liquidacion);
+
+      const evento = await manager.save(
+        LiquidacionPropinasEvento,
+        manager.create(LiquidacionPropinasEvento, {
+          tenantId,
+          liquidacionId: id,
+          tipo: TipoEventoLiquidacion.CONFIRMADA,
+          payload: { tips: tipIds.length },
+          usuarioId,
+        }),
+      );
+
+      return this.toDetalle(detalle.liquidacion, {
+        grupos: detalle.grupos,
+        participantes: detalle.participantes,
+        fuentes: detalle.fuentes,
+        eventos: [...detalle.eventos, evento],
+        advertencias: [],
+      });
+    });
+  }
+
+  async anular(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+    dto: AnularLiquidacionDto,
+  ): Promise<LiquidacionDetalle> {
+    return this.dataSource.transaction(async (manager) => {
+      const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
+      if (detalle.liquidacion.estado !== EstadoLiquidacion.CONFIRMADA) {
+        throw new BadRequestException('Solo se puede anular una liquidación confirmada');
+      }
+
+      await manager.query(
+        `UPDATE venta_propina
+         SET liquidacion_id = NULL, actualizado_el = NOW()
+         WHERE liquidacion_id = $1`,
+        [id],
+      );
+
+      detalle.liquidacion.estado = EstadoLiquidacion.ANULADA;
+      detalle.liquidacion.anuladoPor = usuarioId;
+      detalle.liquidacion.anuladoEl = new Date();
+      detalle.liquidacion.motivoAnulacion = dto.motivo;
+      await manager.save(LiquidacionPropinas, detalle.liquidacion);
+
+      const evento = await manager.save(
+        LiquidacionPropinasEvento,
+        manager.create(LiquidacionPropinasEvento, {
+          tenantId,
+          liquidacionId: id,
+          tipo: TipoEventoLiquidacion.ANULADA,
+          payload: { motivo: dto.motivo },
+          usuarioId,
+        }),
+      );
+
+      return this.toDetalle(detalle.liquidacion, {
+        grupos: detalle.grupos,
+        participantes: detalle.participantes,
+        fuentes: detalle.fuentes,
+        eventos: [...detalle.eventos, evento],
+        advertencias: [],
+      });
+    });
+  }
+
   private async cargarDetalleManager(
     manager: EntityManager,
     tenantId: string,
@@ -435,6 +541,28 @@ export class LiquidacionPropinasService {
   private assertBorrador(liquidacion: LiquidacionPropinas): void {
     if (liquidacion.estado !== EstadoLiquidacion.BORRADOR) {
       throw new BadRequestException('Solo se puede modificar una liquidación en borrador');
+    }
+  }
+
+  private validarManualMontos(
+    grupos: LiquidacionPropinasGrupo[],
+    participantes: LiquidacionPropinasParticipante[],
+  ): void {
+    for (const grupo of grupos) {
+      if (
+        grupo.criterio !== CriterioDistribucion.MANUAL ||
+        grupo.manualModo !== ManualModo.MONTOS
+      ) {
+        continue;
+      }
+      const suma = participantes
+        .filter((p) => p.grupoId === grupo.id && p.incluido)
+        .reduce((acc, p) => acc.plus(p.monto), new Decimal(0));
+      if (!suma.equals(grupo.montoGrupo)) {
+        throw new BadRequestException(
+          'La suma de montos manuales debe coincidir con el monto del grupo',
+        );
+      }
     }
   }
 
