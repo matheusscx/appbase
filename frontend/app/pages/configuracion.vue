@@ -115,6 +115,18 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     })
   }
 
+  if (
+    permissionsStore.esAdmin
+    || permissionsStore.can('Propinas', 'Configurar')
+    || permissionsStore.can('Propinas', 'Leer')
+  ) {
+    items.push({
+      label: 'Propinas',
+      icon: 'i-lucide-hand-coins',
+      to: '/configuracion/propinas-distribucion',
+    })
+  }
+
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
     items.push({
       label: 'Items',
