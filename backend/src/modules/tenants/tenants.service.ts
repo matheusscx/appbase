@@ -125,6 +125,7 @@ export class TenantsService {
         manager.create(PropinaConfiguracion, {
           tenantId: savedTenant.id,
           version: 1,
+          porcentajeSugerido: '0.10',
           actualizadoPor: null,
         }),
       );

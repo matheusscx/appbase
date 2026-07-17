@@ -30,6 +30,7 @@ export interface GrupoDistribucionPublico {
 export interface DistribucionPublica {
   id: string;
   version: number;
+  porcentajeSugerido: string;
   actualizadoPor: string | null;
   actualizadoEl: Date;
   grupos: GrupoDistribucionPublico[];
@@ -71,6 +72,7 @@ export class PropinaDistribucionService {
         manager.create(PropinaConfiguracion, {
           tenantId,
           version: 1,
+          porcentajeSugerido: '0.10',
           actualizadoPor: null,
         }),
       );
@@ -93,11 +95,19 @@ export class PropinaDistribucionService {
     });
   }
 
+  async obtenerPorcentajeSugerido(
+    tenantId: string,
+  ): Promise<{ porcentajeSugerido: string }> {
+    const config = await this.asegurarDefault(tenantId);
+    return { porcentajeSugerido: config.porcentajeSugerido };
+  }
+
   async reemplazar(
     tenantId: string,
     usuarioId: string,
     dto: UpdateDistribucionDto,
   ): Promise<DistribucionPublica> {
+    this.validarPorcentajeSugerido(dto.porcentajeSugerido);
     this.validarGrupos(dto.grupos);
 
     return this.dataSource.transaction(async (manager) => {
@@ -111,10 +121,13 @@ export class PropinaDistribucionService {
           manager.create(PropinaConfiguracion, {
             tenantId,
             version: 1,
+            porcentajeSugerido: '0.10',
             actualizadoPor: null,
           }),
         );
       }
+
+      config.porcentajeSugerido = new Decimal(dto.porcentajeSugerido).toFixed(6);
 
       const gruposPrevios = await manager.find(PropinaGrupoDistribucion, {
         where: { tenantId, configuracionId: config.id, eliminadoEl: IsNull() },
@@ -178,6 +191,15 @@ export class PropinaDistribucionService {
 
       return this.cargarPublica(tenantId, manager);
     });
+  }
+
+  private validarPorcentajeSugerido(porcentajeSugerido: string): void {
+    const pct = new Decimal(porcentajeSugerido);
+    if (pct.lt(0) || pct.gt(1)) {
+      throw new BadRequestException(
+        'porcentajeSugerido debe ser decimal (0.10 = 10%), no porcentaje entero',
+      );
+    }
   }
 
   private validarGrupos(grupos: GrupoDistribucionDto[]): void {
@@ -263,6 +285,7 @@ export class PropinaDistribucionService {
     return {
       id: config.id,
       version: config.version,
+      porcentajeSugerido: config.porcentajeSugerido,
       actualizadoPor: config.actualizadoPor,
       actualizadoEl: config.actualizadoEl,
       grupos: grupos.map((g) => ({

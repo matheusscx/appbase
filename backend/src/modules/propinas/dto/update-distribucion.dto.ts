@@ -66,6 +66,9 @@ export class GrupoDistribucionDto {
 }
 
 export class UpdateDistribucionDto {
+  @IsNumberString()
+  porcentajeSugerido: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

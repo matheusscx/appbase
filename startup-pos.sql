@@ -1172,10 +1172,14 @@ CREATE TABLE propina_configuracion (
   propina_configuracion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
   version INT NOT NULL DEFAULT 1,
+  porcentaje_sugerido NUMERIC(10,6) NOT NULL DEFAULT 0.10,
   actualizado_por UUID REFERENCES usuarios(usuario_id),
   creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  eliminado_el TIMESTAMPTZ
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_propina_config_pct_sugerido CHECK (
+    porcentaje_sugerido >= 0 AND porcentaje_sugerido <= 1
+  )
 );
 CREATE UNIQUE INDEX uq_propina_config_tenant
   ON propina_configuracion (tenant_id) WHERE eliminado_el IS NULL;

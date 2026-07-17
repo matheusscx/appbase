@@ -23,6 +23,15 @@ export class PropinaConfiguracion {
   @Column({ type: 'int', default: 1 })
   version: number;
 
+  @Column({
+    name: 'porcentaje_sugerido',
+    type: 'numeric',
+    precision: 10,
+    scale: 6,
+    default: '0.10',
+  })
+  porcentajeSugerido: string;
+
   @Column({ name: 'actualizado_por', type: 'uuid', nullable: true })
   actualizadoPor: string | null;
 

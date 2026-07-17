@@ -81,11 +81,16 @@ describe('PropinaDistribucionService', () => {
     service = module.get(PropinaDistribucionService);
   });
 
-  function stubCargarPublica(version = 1, grupos: PropinaGrupoDistribucion[] = []) {
+  function stubCargarPublica(
+    version = 1,
+    grupos: PropinaGrupoDistribucion[] = [],
+    porcentajeSugerido = '0.10',
+  ) {
     const config = {
       id: 'cfg-1',
       tenantId: TENANT,
       version,
+      porcentajeSugerido,
       actualizadoPor: null,
       actualizadoEl: new Date(),
       eliminadoEl: null,
@@ -161,11 +166,95 @@ describe('PropinaDistribucionService', () => {
     );
     expect(result.grupos).toHaveLength(1);
     expect(result.grupos[0].tipoGarzon).toBe(TipoGarzon.GARZON);
+    expect(result.porcentajeSugerido).toBe('0.10');
+  });
+
+  it('reemplazar persiste porcentajeSugerido y lo devuelve', async () => {
+    const config = {
+      id: 'cfg-1',
+      tenantId: TENANT,
+      version: 1,
+      porcentajeSugerido: '0.10',
+      actualizadoPor: null,
+      actualizadoEl: new Date(),
+      eliminadoEl: null,
+    } as PropinaConfiguracion;
+    manager.findOne.mockResolvedValue(config);
+    manager.find.mockResolvedValue([]);
+    manager.save.mockImplementation((_e: unknown, data: Record<string, unknown>) =>
+      Promise.resolve({ id: data['id'] ?? 'saved', ...data }),
+    );
+
+    stubCargarPublica(2, [], '0.150000');
+
+    const result = await service.reemplazar(TENANT, USER, {
+      porcentajeSugerido: '0.15',
+      grupos: [
+        {
+          tipoGarzon: TipoGarzon.GARZON,
+          nombre: 'Garzones',
+          porcentaje: '1',
+          criterio: CriterioDistribucion.PARTES_IGUALES,
+          activo: true,
+          orden: 0,
+        },
+      ],
+    });
+
+    expect(result.porcentajeSugerido).toBe('0.150000');
+    expect(manager.save).toHaveBeenCalledWith(
+      PropinaConfiguracion,
+      expect.objectContaining({ porcentajeSugerido: '0.150000' }),
+    );
+  });
+
+  it('reemplazar rechaza porcentajeSugerido > 1', async () => {
+    await expect(
+      service.reemplazar(TENANT, USER, {
+        porcentajeSugerido: '10',
+        grupos: [
+          {
+            tipoGarzon: TipoGarzon.GARZON,
+            nombre: 'Garzones',
+            porcentaje: '1',
+            criterio: CriterioDistribucion.PARTES_IGUALES,
+            activo: true,
+            orden: 0,
+          },
+        ],
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('obtenerPorcentajeSugerido asegura default y responde string', async () => {
+    configRepo.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'cfg-1',
+        tenantId: TENANT,
+        version: 1,
+        porcentajeSugerido: '0.10',
+      });
+    manager.findOne.mockResolvedValueOnce(null);
+    manager.save
+      .mockResolvedValueOnce({
+        id: 'cfg-1',
+        tenantId: TENANT,
+        version: 1,
+        porcentajeSugerido: '0.10',
+        actualizadoPor: null,
+      })
+      .mockResolvedValueOnce({ id: 'g-1' });
+
+    const result = await service.obtenerPorcentajeSugerido(TENANT);
+    expect(result).toEqual({ porcentajeSugerido: '0.10' });
   });
 
   it('reemplazar valida Σ porcentaje activos = 1.0000', async () => {
     await expect(
       service.reemplazar(TENANT, USER, {
+        porcentajeSugerido: '0.10',
         grupos: [
           {
             tipoGarzon: TipoGarzon.GARZON,
@@ -230,6 +319,7 @@ describe('PropinaDistribucionService', () => {
     ]);
 
     const result = await service.reemplazar(TENANT, USER, {
+      porcentajeSugerido: '0.10',
       grupos: [
         {
           tipoGarzon: TipoGarzon.GARZON,
@@ -257,6 +347,7 @@ describe('PropinaDistribucionService', () => {
   it('rechaza dos grupos activos con mismo tipo_garzon', async () => {
     await expect(
       service.reemplazar(TENANT, USER, {
+        porcentajeSugerido: '0.10',
         grupos: [
           {
             tipoGarzon: TipoGarzon.GARZON,
@@ -278,6 +369,7 @@ describe('PropinaDistribucionService', () => {
   it('MANUAL exige manualModo; no-MANUAL exige manualModo null', async () => {
     await expect(
       service.reemplazar(TENANT, USER, {
+        porcentajeSugerido: '0.10',
         grupos: [
           {
             tipoGarzon: TipoGarzon.GARZON,
@@ -291,6 +383,7 @@ describe('PropinaDistribucionService', () => {
 
     await expect(
       service.reemplazar(TENANT, USER, {
+        porcentajeSugerido: '0.10',
         grupos: [
           {
             tipoGarzon: TipoGarzon.GARZON,
@@ -307,6 +400,7 @@ describe('PropinaDistribucionService', () => {
   it('MANUAL + PESOS acepta pesos; MANUAL + MONTOS rechaza pesos en config', async () => {
     await expect(
       service.reemplazar(TENANT, USER, {
+        porcentajeSugerido: '0.10',
         grupos: [
           {
             tipoGarzon: TipoGarzon.GARZON,
@@ -333,6 +427,7 @@ describe('PropinaDistribucionService', () => {
     stubCargarPublica(2, []);
 
     await service.reemplazar(TENANT, USER, {
+      porcentajeSugerido: '0.10',
       grupos: [
         {
           tipoGarzon: TipoGarzon.GARZON,
@@ -368,6 +463,7 @@ describe('PropinaDistribucionService', () => {
     stubCargarPublica(2, []);
 
     await service.reemplazar(TENANT, USER, {
+      porcentajeSugerido: '0.10',
       grupos: [
         {
           tipoGarzon: TipoGarzon.GARZON,
