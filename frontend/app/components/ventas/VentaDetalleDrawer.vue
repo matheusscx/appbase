@@ -3,6 +3,12 @@ import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
 import { formatCantidadTicket } from '~/utils/cantidad-presentacion'
 
+interface PagoAplicacion {
+  tipo: string
+  monto: string
+  referenciaId: string | null
+}
+
 interface Pago {
   id: string
   metodoPagoId: string
@@ -10,6 +16,20 @@ interface Pago {
   vuelto: string
   fecha: string
   referencia: string | null
+  aplicaciones?: PagoAplicacion[]
+  montoAplicadoVenta?: string
+  montoAplicadoPropina?: string
+}
+
+interface PropinaVenta {
+  id: string
+  porcentajeSugerido: string
+  montoSugerido: string
+  montoPagado: string
+  tipo: string
+  estado: string
+  garzonId: string
+  garzonNombre: string | null
 }
 
 interface Detalle {
@@ -59,6 +79,7 @@ interface VentaDetalle {
   detalles: Detalle[]
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
+  propina: PropinaVenta | null
 }
 
 interface MetodoPago {
@@ -98,6 +119,10 @@ const permissionsStore = usePermissionsStore()
 const montoPagado = computed(() => {
   if (!venta.value) return '0'
   return venta.value.pagos.reduce((acc, p) => {
+    // Preferir aplicaciones tipo venta (excluye propina del saldo de la venta).
+    if (p.montoAplicadoVenta != null) {
+      return new Decimal(acc).plus(p.montoAplicadoVenta).toString()
+    }
     return new Decimal(acc).plus(new Decimal(p.monto)).minus(new Decimal(p.vuelto ?? '0')).toString()
   }, '0')
 })
@@ -426,6 +451,42 @@ function onNcSuccess(payload: {
             </dl>
           </UCard>
 
+          <UCard v-if="venta.propina">
+            <template #header>
+              <h2 class="text-base font-semibold">
+                Propina
+              </h2>
+            </template>
+            <dl class="space-y-2 text-sm">
+              <div class="flex justify-between">
+                <dt class="text-muted">
+                  % sugerido
+                </dt>
+                <dd>{{ new Decimal(venta.propina.porcentajeSugerido).mul(100).toFixed(0) }}%</dd>
+              </div>
+              <div class="flex justify-between">
+                <dt class="text-muted">
+                  Monto sugerido
+                </dt>
+                <dd class="font-mono">
+                  {{ formatMonto(venta.propina.montoSugerido) }}
+                </dd>
+              </div>
+              <div class="flex justify-between font-semibold">
+                <dt>Monto pagado</dt>
+                <dd class="font-mono">
+                  {{ formatMonto(venta.propina.montoPagado) }}
+                </dd>
+              </div>
+              <div class="flex justify-between">
+                <dt class="text-muted">
+                  Garzón
+                </dt>
+                <dd>{{ venta.propina.garzonNombre ?? '—' }}</dd>
+              </div>
+            </dl>
+          </UCard>
+
           <UCard>
             <template #header>
               <div class="flex items-center justify-between">
@@ -450,14 +511,25 @@ function onNcSuccess(payload: {
               <li
                 v-for="(p, i) in venta.pagos"
                 :key="p.id"
-                class="flex justify-between gap-2 py-2"
+                class="flex flex-col gap-1 py-2"
               >
-                <span class="text-muted">Pago {{ i + 1 }}</span>
-                <span class="font-mono">{{ formatMonto(p.monto) }}</span>
-                <span v-if="p.vuelto && new Decimal(p.vuelto).gt(0)" class="text-xs text-muted">
-                  (vuelto: {{ formatMonto(p.vuelto) }})
-                </span>
-                <span class="text-xs text-muted">{{ formatFecha(p.fecha) }}</span>
+                <div class="flex justify-between gap-2">
+                  <span class="text-muted">Pago {{ i + 1 }}</span>
+                  <span class="font-mono">{{ formatMonto(p.monto) }}</span>
+                  <span v-if="p.vuelto && new Decimal(p.vuelto).gt(0)" class="text-xs text-muted">
+                    (vuelto: {{ formatMonto(p.vuelto) }})
+                  </span>
+                  <span class="text-xs text-muted">{{ formatFecha(p.fecha) }}</span>
+                </div>
+                <p
+                  v-if="p.aplicaciones?.length"
+                  class="text-xs text-muted"
+                >
+                  <template v-for="(a, ai) in p.aplicaciones" :key="ai">
+                    <span v-if="ai > 0"> · </span>
+                    {{ a.tipo }}: {{ formatMonto(a.monto) }}
+                  </template>
+                </p>
               </li>
             </ul>
 

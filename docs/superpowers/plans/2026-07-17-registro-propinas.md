@@ -1,6 +1,6 @@
 # Registro de Propinas al Cerrar Cuenta — Plan de Implementación
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Capturar propina separada de la venta (compatible SII) al cerrar cuenta de mesa, cobrando venta + tip en un solo flujo y persistiendo el split determinista en `pago_aplicaciones`.
 
@@ -86,7 +86,7 @@
 - Produces: `VentaPropina`, `PagoAplicacion`, `EstrategiaAsignacionPropina`, `TipoPagoAplicacion`.
 - Consumes: convenciones entity del repo (ADR-004, soft delete).
 
-- [ ] **Step 1: Crear enums**
+- [x] **Step 1: Crear enums**
 
 ```typescript
 // backend/src/modules/propinas/enums/estrategia-asignacion-propina.enum.ts
@@ -115,23 +115,23 @@ export enum TipoPagoAplicacion {
 }
 ```
 
-- [ ] **Step 2: Crear entidad `VentaPropina`**
+- [x] **Step 2: Crear entidad `VentaPropina`**
 
 Campos según spec: `venta_propina_id`, `tenant_id`, `venta_id` (unique partial),
 `garzon_id`, `porcentaje_sugerido` numeric(10,6), `monto_sugerido`, `monto_pagado`,
 `tipo`, `estado`, timestamps + soft delete. Todos los UUID con `type: 'uuid'`.
 
-- [ ] **Step 3: Crear entidad `PagoAplicacion`**
+- [x] **Step 3: Crear entidad `PagoAplicacion`**
 
 `pago_aplicacion_id`, `tenant_id`, `pago_id`, `tipo`, `referencia_id` nullable,
 `monto` numeric(18,4). Índice en `pago_id` y (`tenant_id`, `tipo`, `referencia_id`).
 
-- [ ] **Step 4: Registrar en `app.module.ts` y módulos**
+- [x] **Step 4: Registrar en `app.module.ts` y módulos**
 
 `TypeOrmModule.forFeature([PagoAplicacion])` en `pagos.module.ts`.
 `PropinasModule` con `VentaPropina` + `VentaPropinaService` (stub vacío por ahora).
 
-- [ ] **Step 5: Actualizar `startup-pos.sql`**
+- [x] **Step 5: Actualizar `startup-pos.sql`**
 
 CREATE `venta_propina` y `pago_aplicaciones` con CHECKs:
 - `monto >= 0`, `porcentaje_sugerido >= 0`
@@ -151,7 +151,7 @@ WHERE p.eliminado_el IS NULL
   );
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/modules/propinas backend/src/modules/pagos/entities/pago-aplicacion.entity.ts backend/src/modules/pagos/pagos.module.ts backend/src/app.module.ts startup-pos.sql
@@ -192,7 +192,7 @@ git commit -m "feat(propinas): entidades venta_propina y pago_aplicaciones"
   ```
 - Consumes: `EstrategiaAsignacionPropina` de Task 1.
 
-- [ ] **Step 1: Escribir tests que fallan**
+- [x] **Step 1: Escribir tests que fallan**
 
 Casos obligatorios:
 1. Solo tarjeta $55k, venta 50k, propina 5k → venta 50k + propina 5k en mismo pago.
@@ -201,19 +201,19 @@ Casos obligatorios:
 4. Propina 0 → solo aplicaciones `venta`.
 5. `dispatchAsignacionPropina(PROPORCIONAL, ...)` → lanza `BadRequestException` con mensaje `Estrategia de asignación no soportada`.
 
-- [ ] **Step 2: Implementar**
+- [x] **Step 2: Implementar**
 
 Orden estable: `permiteVuelto=false` primero, luego `true`; dentro de cada grupo
 `metodoPagoId` ASC. Omitir filas con monto `0`. Usar Decimal.js.
 
-- [ ] **Step 3: Ejecutar tests**
+- [x] **Step 3: Ejecutar tests**
 
 ```bash
 cd backend && npm test -- asignacion-propina.spec.ts
 ```
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git commit -m "feat(pagos): algoritmo determinista NO_VUELTO para split propina"
@@ -246,23 +246,23 @@ git commit -m "feat(pagos): algoritmo determinista NO_VUELTO para split propina"
   ```
 - Consumes: `VentaPropina` entity, Decimal.js.
 
-- [ ] **Step 1: Tests**
+- [x] **Step 1: Tests**
 
 - `monto_pagado === monto_sugerido` → `tipo=sugerida`, `estado=pagada` (si >0).
 - `monto_pagado=0` → `estado=sin_propina`, `tipo=manual` si sugerido >0.
 - `monto_pagado` distinto de sugerido → `tipo=manual`.
 
-- [ ] **Step 2: Implementar `crearEnTransaccion`**
+- [x] **Step 2: Implementar `crearEnTransaccion`**
 
 Validar `montoPagado >= 0`. Persistir con `manager.save`.
 
-- [ ] **Step 3: Tests**
+- [x] **Step 3: Tests**
 
 ```bash
 cd backend && npm test -- venta-propina.service.spec.ts
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git commit -m "feat(propinas): servicio de registro venta_propina"
@@ -296,15 +296,15 @@ git commit -m "feat(propinas): servicio de registro venta_propina"
   ): Promise<{ pagos: Pago[]; montoAplicadoVenta: string }>
   ```
 
-- [ ] **Step 1: Tests — registrar sin propina**
+- [x] **Step 1: Tests — registrar sin propina**
 
 Target 100, un pago efectivo 100 → una aplicación `venta` 100, `montoAplicadoVenta=100`.
 
-- [ ] **Step 2: Tests — registrar con propina mixta**
+- [x] **Step 2: Tests — registrar con propina mixta**
 
 Target 55k (venta 50k + tip 5k), efectivo 30k + tarjeta 25k → aplicaciones según Task 2; `montoAplicadoVenta=50k`.
 
-- [ ] **Step 3: Implementar**
+- [x] **Step 3: Implementar**
 
 Flujo:
 1. Calcular vuelto sobre `target` (igual que hoy).
@@ -314,17 +314,17 @@ Flujo:
 5. Sumar `montoAplicadoVenta` desde aplicaciones calculadas.
 6. Movimientos caja sin cambio (`monto - vuelto`).
 
-- [ ] **Step 4: Actualizar `registrarAbono`**
+- [x] **Step 4: Actualizar `registrarAbono`**
 
 Pasar `propinaMonto: '0'`; debe seguir creando solo aplicación `venta`.
 
-- [ ] **Step 5: Ejecutar tests**
+- [x] **Step 5: Ejecutar tests**
 
 ```bash
 cd backend && npm test -- pagos.service.spec.ts
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat(pagos): persistir pago_aplicaciones al registrar pagos"
@@ -348,14 +348,14 @@ git commit -m "feat(pagos): persistir pago_aplicaciones al registrar pagos"
 - `CreateVentaDto.propinaCierreMesa?: PropinaCierreMesaDto`.
 - `CerrarCuentaDto`: `propinaMonto?`, `propinaSugerida?`, `propinaPorcentajeSugerido?` (`@IsNumberString`, `@IsOptional`).
 
-- [ ] **Step 1: Tests `salones.service.spec` — cerrar con propina**
+- [x] **Step 1: Tests `salones.service.spec` — cerrar con propina**
 
 Mock ventas/pagos o integración ligera:
 - `cerrarCuenta` pasa `propinaCierreMesa` con `garzonId = cuenta.garzonResponsableId`.
 - `target` de pagos = `total_final + propinaMonto`.
 - `propinaMonto` omitido → `'0'`.
 
-- [ ] **Step 2: Modificar `crearEnTransaccion`**
+- [x] **Step 2: Modificar `crearEnTransaccion`**
 
 Después de crear cabecera venta (paso 7a) y antes de pagos:
 - Si `dto.propinaCierreMesa`: llamar `ventaPropinaService.crearEnTransaccion`.
@@ -363,7 +363,7 @@ Después de crear cabecera venta (paso 7a) y antes de pagos:
 - Llamar `pagosService.registrar` con `propinaMonto`, `ventaPropinaId`, `estrategia`.
 - Estado venta: `calcularEstadoVenta(totalFinal, montoAplicadoVenta)` — **no** usar bruto de pagos.
 
-- [ ] **Step 3: Modificar `cerrarCuenta`**
+- [x] **Step 3: Modificar `cerrarCuenta`**
 
 ```typescript
 const propinaMonto = dto.propinaMonto ?? '0';
@@ -386,13 +386,13 @@ const ventaDto: CreateVentaDto = {
 
 Validar que `garzonResponsableId` no sea null (400 si falta).
 
-- [ ] **Step 4: Ejecutar tests**
+- [x] **Step 4: Ejecutar tests**
 
 ```bash
 cd backend && npm test -- salones.service.spec.ts ventas.service.spec.ts
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat(salones): cierre de cuenta con propina separada de la venta"
@@ -424,13 +424,13 @@ git commit -m "feat(salones): cierre de cuenta con propina separada de la venta"
   pagos[].montoAplicadoPropina?: string
   ```
 
-- [ ] **Step 1: JOIN `venta_propina` + garzones en `findOne`**
+- [x] **Step 1: JOIN `venta_propina` + garzones en `findOne`**
 
-- [ ] **Step 2: Cargar `pago_aplicaciones` por pago**
+- [x] **Step 2: Cargar `pago_aplicaciones` por pago**
 
-- [ ] **Step 3: Test manual vía spec o e2e ligero**
+- [x] **Step 3: Test manual vía spec o e2e ligero**
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git commit -m "feat(ventas): exponer propina y aplicaciones en detalle"
@@ -458,7 +458,7 @@ Enfoque recomendado: `CobroModal` con `v-model:propinaMonto` cuando `modoPropina
 muestra filas Venta / Propina / Total a pagar; `total` computado internamente =
 `ventaTotal + propinaMonto`.
 
-- [ ] **Step 1: Tests `usePropina.spec.ts`**
+- [x] **Step 1: Tests `usePropina.spec.ts`**
 
 ```typescript
 expect(sugerirPropina('50000')).toBe('5000')
@@ -466,15 +466,15 @@ expect(sugerirPropina('50001')).toBe('5000') // half-up según caso documentado
 expect(sugerirPropina('0')).toBe('0')
 ```
 
-- [ ] **Step 2: Extender `useSalones.cerrarCuenta`**
+- [x] **Step 2: Extender `useSalones.cerrarCuenta`**
 
 Body incluye `propinaMonto`, `propinaSugerida`, `propinaPorcentajeSugerido`.
 
-- [ ] **Step 3: `CobroModal` modo propina**
+- [x] **Step 3: `CobroModal` modo propina**
 
 Solo activo desde salones (`modo-propina`). POS no pasa la prop.
 
-- [ ] **Step 4: `salones/index.vue`**
+- [x] **Step 4: `salones/index.vue`**
 
 ```vue
 <VentasCobroModal
@@ -491,14 +491,14 @@ Solo activo desde salones (`modo-propina`). POS no pasa la prop.
 En `confirmarCobro` / `cerrarCuentaConPin` enviar campos propina.
 Toast si `propinaMonto > 0`: "Cuenta cerrada — propina registrada".
 
-- [ ] **Step 5: Ejecutar tests front**
+- [x] **Step 5: Ejecutar tests front**
 
 ```bash
 cd frontend && npm run test -- usePropina.spec.ts
 cd frontend && npm run build
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "feat(salones): UI de propina en cierre de cuenta"
@@ -514,18 +514,18 @@ git commit -m "feat(salones): UI de propina en cierre de cuenta"
 - Modify: `docs/ESTADO.md`
 - Modify: `docs/superpowers/specs/2026-07-17-registro-propinas-design.md`
 
-- [ ] **Step 1: Mostrar bloque propina en drawer** (si `venta.propina`)
+- [x] **Step 1: Mostrar bloque propina en drawer** (si `venta.propina`)
 
 Líneas: % sugerido, monto sugerido, monto pagado, garzón.
 
-- [ ] **Step 2: Opcional — desglose aplicaciones por pago** (colapsable o texto muted)
+- [x] **Step 2: Opcional — desglose aplicaciones por pago** (colapsable o texto muted)
 
-- [ ] **Step 3: Actualizar docs**
+- [x] **Step 3: Actualizar docs**
 
 `salones-mesas.md`: body cierre, invariantes, ejemplo cobro mixto.
 `ESTADO.md`: fila "Registro de propinas al cerrar cuenta" ✅.
 
-- [ ] **Step 4: Verificación final**
+- [x] **Step 4: Verificación final**
 
 ```bash
 cd backend && npm test && npm run build
@@ -539,7 +539,7 @@ Manual (checklist spec):
 4. Mixto efectivo+tarjeta — ver aplicaciones en detalle venta.
 5. Arqueo caja cuadra.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "docs: registrar propinas en salones y estado del proyecto"

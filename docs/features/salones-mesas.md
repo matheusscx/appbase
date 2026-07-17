@@ -64,9 +64,23 @@ del garzón usa el permiso dedicado **`Operar`**.
 | POST | `/cuentas/:id/transferir-admin` | Actualizar | Transferir responsable vigente (admin, sin PIN) |
 | GET | `/cuentas/:id/asignaciones` | Leer | Historial auditable de asignaciones de la cuenta |
 
-`POST /cuentas/:id/cerrar` body: `{ pin, pagos?: PagoVentaDto[], tipoDocumentoId?, customer? }`
-(reusa las clases de `ventas/dto/create-venta.dto.ts`). Respuesta:
+`POST /cuentas/:id/cerrar` body:
+`{ pin, pagos?, tipoDocumentoId?, customer?, propinaMonto?, propinaSugerida?, propinaPorcentajeSugerido? }`
+(reusa DTOs de ventas; `propina*` son `@IsNumberString` opcionales). Respuesta:
 `{ cuenta: CuentaDetalle, ventaId }`.
+
+**Propina en el cierre (subproyecto D):**
+- La propina **no** entra en `total_final` ni en IVA; se persiste en `venta_propina`
+  (siempre 1 fila por cierre de mesa, incluso tip `$0` → estado `sin_propina`).
+- `garzon_id` de la propina = `garzon_responsable_id` vigente (400 si falta).
+- Cobro: Σ pagos == `total_final + propinaMonto`. El split tipado vive en
+  `pago_aplicaciones` (`venta` | `propina`) con estrategia `NO_VUELTO` (tip primero
+  a métodos sin vuelto).
+- UI: `VentasCobroModal` con `modo-propina` sugiere 10% half-up a pesos enteros;
+  editable; $0 permitido.
+- Estado de la venta: solo Σ aplicaciones `tipo=venta` (la propina no afecta
+  `pagada` / `pagada_parcial`).
+- POS y ventas online **no** registran propina en esta fase.
 
 `POST /cuentas/:id/transferir` body: `{ pin }` — el garzón destino reclama la cuenta
 con su PIN (requiere sesión abierta). `POST /cuentas/:id/transferir-admin` body:
@@ -78,7 +92,7 @@ con su PIN (requiere sesión abierta). `POST /cuentas/:id/transferir-admin` body
 | Campo | Rol | Comportamiento |
 |---|---|---|
 | `garzon_apertura_id` | Auditoría | Inmutable: quien abrió con PIN |
-| `garzon_responsable_id` | Vigente | Cambia con transferencias; atribución futura (propinas/ventas) |
+| `garzon_responsable_id` | Vigente | Cambia con transferencias; atribución de propina al cerrar |
 | `garzon_cierre_id` | Auditoría | Solo al cerrar con PIN; puede diferir del responsable vigente |
 
 **Identificación por garzón (PIN):** abrir (`POST /mesas/:id/cuentas`) y cerrar cuenta
