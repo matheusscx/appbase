@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { Garzon } from '~/composables/useGarzones'
+import type { Garzon, TipoGarzon } from '~/composables/useGarzones'
+
+const TIPO_GARZON_OPTIONS: { label: string, value: TipoGarzon }[] = [
+  { label: 'Garzón', value: 'garzon' },
+  { label: 'Cocina', value: 'cocina' },
+  { label: 'Barra', value: 'barra' },
+]
+
+function labelTipo(tipo: TipoGarzon): string {
+  return TIPO_GARZON_OPTIONS.find(o => o.value === tipo)?.label ?? tipo
+}
 
 const toast = useToast()
 const garzonesApi = useGarzones()
@@ -43,9 +53,10 @@ onMounted(cargar)
 // ── Crear / editar garzón ──────────────────────────────────────────────────
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
-const form = ref<{ nombre: string, activo: boolean }>({
+const form = ref<{ nombre: string, activo: boolean, tipo: TipoGarzon }>({
   nombre: '',
   activo: true,
+  tipo: 'garzon',
 })
 const saving = ref(false)
 
@@ -55,13 +66,17 @@ const drawerTitle = computed(() =>
 
 function abrirCrear() {
   editingId.value = null
-  form.value = { nombre: '', activo: true }
+  form.value = { nombre: '', activo: true, tipo: 'garzon' }
   drawerOpen.value = true
 }
 
 function abrirEditar(garzon: Garzon) {
   editingId.value = garzon.id
-  form.value = { nombre: garzon.nombre, activo: garzon.activo }
+  form.value = {
+    nombre: garzon.nombre,
+    activo: garzon.activo,
+    tipo: garzon.tipo ?? 'garzon',
+  }
   drawerOpen.value = true
 }
 
@@ -72,6 +87,7 @@ async function guardar() {
       const saved = await garzonesApi.actualizar(editingId.value, {
         nombre: form.value.nombre,
         activo: form.value.activo,
+        tipo: form.value.tipo,
       })
       upsertLocal(saved)
       toast.add({ title: 'Garzón actualizado', color: 'success' })
@@ -81,6 +97,7 @@ async function guardar() {
       const creado = await garzonesApi.crear({
         nombre: form.value.nombre,
         activo: form.value.activo,
+        tipo: form.value.tipo,
       })
       const { pin, ...garzon } = creado
       upsertLocal(garzon)
@@ -160,6 +177,7 @@ async function eliminar() {
 
 const columns: TableColumn<Garzon>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
+  { accessorKey: 'tipo', header: 'Tipo' },
   { accessorKey: 'activo', header: 'Estado' },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
@@ -181,6 +199,12 @@ const columns: TableColumn<Garzon>[] = [
     <CrudTable :data="garzones" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
         <span class="font-medium text-default">{{ row.original.nombre }}</span>
+      </template>
+
+      <template #tipo-cell="{ row }">
+        <UBadge color="neutral" variant="subtle" size="xs">
+          {{ labelTipo(row.original.tipo ?? 'garzon') }}
+        </UBadge>
       </template>
 
       <template #activo-cell="{ row }">
@@ -235,6 +259,14 @@ const columns: TableColumn<Garzon>[] = [
         <UForm id="garzon-form" :state="form" class="space-y-4" @submit="guardar">
           <UFormField label="Nombre" required>
             <UInput v-model="form.nombre" placeholder="Ana Torres" autofocus />
+          </UFormField>
+          <UFormField label="Tipo" required>
+            <USelect
+              v-model="form.tipo"
+              :items="TIPO_GARZON_OPTIONS"
+              value-key="value"
+              label-key="label"
+            />
           </UFormField>
           <p v-if="!editingId" class="text-sm text-muted">
             Al crear el garzón se generará automáticamente un PIN de 6 dígitos y

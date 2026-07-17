@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
+import { TipoGarzon } from '../enums/tipo-garzon.enum';
 
 /**
  * Garzón: identidad operativa liviana dentro de un tenant (restaurante).
@@ -30,6 +31,9 @@ export class Garzon {
 
   @Column({ default: true })
   activo: boolean;
+
+  @Column({ type: 'text', default: TipoGarzon.GARZON })
+  tipo: TipoGarzon;
 
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;

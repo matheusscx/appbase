@@ -11,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { Garzon } from './entities/garzon.entity';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
+import { TipoGarzon } from './enums/tipo-garzon.enum';
 import {
   EstadoSesionGarzon,
   SesionGarzon,
@@ -26,6 +27,7 @@ export interface GarzonPublico {
   id: string;
   nombre: string;
   activo: boolean;
+  tipo: TipoGarzon;
   creadoEl: Date;
   actualizadoEl: Date;
 }
@@ -52,6 +54,7 @@ export class GarzonesService {
       id: g.id,
       nombre: g.nombre,
       activo: g.activo,
+      tipo: g.tipo ?? TipoGarzon.GARZON,
       creadoEl: g.creadoEl,
       actualizadoEl: g.actualizadoEl,
     };
@@ -72,6 +75,7 @@ export class GarzonesService {
       nombre: dto.nombre,
       pinHash: await bcrypt.hash(pin, BCRYPT_COST),
       activo: dto.activo ?? true,
+      tipo: dto.tipo ?? TipoGarzon.GARZON,
     });
     const guardado = await this.garzonRepo.save(garzon);
     return { ...this.toPublico(guardado), pin };
@@ -85,6 +89,7 @@ export class GarzonesService {
     const garzon = await this.getOrThrow(tenantId, id);
     if (dto.nombre !== undefined) garzon.nombre = dto.nombre;
     if (dto.activo !== undefined) garzon.activo = dto.activo;
+    if (dto.tipo !== undefined) garzon.tipo = dto.tipo;
     return this.toPublico(await this.garzonRepo.save(garzon));
   }
 

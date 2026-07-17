@@ -1,4 +1,5 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { TipoGarzon } from '../enums/tipo-garzon.enum';
 
 export class CreateGarzonDto {
   @IsString()
@@ -11,4 +12,8 @@ export class CreateGarzonDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  @IsOptional()
+  @IsIn(Object.values(TipoGarzon))
+  tipo?: TipoGarzon;
 }

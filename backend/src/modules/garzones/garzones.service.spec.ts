@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { GarzonesService } from './garzones.service';
 import { Garzon } from './entities/garzon.entity';
+import { TipoGarzon } from './enums/tipo-garzon.enum';
 import {
   EstadoSesionGarzon,
   SesionGarzon,
@@ -57,6 +58,7 @@ function garzon(over: Partial<Garzon> & { pin?: string }): Garzon {
     nombre: 'Ana',
     pinHash: pin ? bcrypt.hashSync(pin, 10) : 'x',
     activo: true,
+    tipo: TipoGarzon.GARZON,
     creadoEl: new Date(),
     actualizadoEl: new Date(),
     eliminadoEl: null,
@@ -96,6 +98,26 @@ describe('GarzonesService', () => {
       expect(await bcrypt.compare(result.pin, saved.pinHash)).toBe(true);
       expect(result).not.toHaveProperty('pinHash');
       expect(result.nombre).toBe('Ana');
+    });
+
+    it('crear persiste tipo cocina', async () => {
+      const result = await service.crear(TENANT, {
+        nombre: 'Ana',
+        tipo: TipoGarzon.COCINA,
+      });
+
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ tipo: TipoGarzon.COCINA }),
+      );
+      expect(result.tipo).toBe(TipoGarzon.COCINA);
+    });
+
+    it('crear sin tipo usa garzon por defecto', async () => {
+      await service.crear(TENANT, { nombre: 'Pedro' });
+
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ tipo: TipoGarzon.GARZON }),
+      );
     });
 
     it('reintenta si el PIN generado ya está en uso en el tenant', async () => {

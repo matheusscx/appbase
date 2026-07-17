@@ -2,10 +2,13 @@ import { useApiFetch } from './useApiFetch'
 
 // ── Tipos (espejo del contrato del backend garzones) ────────────────────────
 
+export type TipoGarzon = 'garzon' | 'cocina' | 'barra'
+
 export interface Garzon {
   id: string
   nombre: string
   activo: boolean
+  tipo: TipoGarzon
   creadoEl: string
   actualizadoEl: string
 }
@@ -27,10 +30,10 @@ export function useGarzones() {
     useApiFetch<Garzon[]>(`${apiUrl}/garzones`)
 
   /** Crea el garzón; el backend genera el PIN y lo devuelve una sola vez. */
-  const crear = (body: { nombre: string, activo?: boolean }) =>
+  const crear = (body: { nombre: string, activo?: boolean, tipo?: TipoGarzon }) =>
     useApiFetch<GarzonConPin>(`${apiUrl}/garzones`, { method: 'POST', body })
 
-  const actualizar = (id: string, body: { nombre?: string, activo?: boolean }) =>
+  const actualizar = (id: string, body: { nombre?: string, activo?: boolean, tipo?: TipoGarzon }) =>
     useApiFetch<Garzon>(`${apiUrl}/garzones/${id}`, { method: 'PATCH', body })
 
   /** Regenera el PIN del garzón; devuelve el nuevo PIN una sola vez. */

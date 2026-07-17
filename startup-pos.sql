@@ -1111,9 +1111,11 @@ CREATE TABLE garzones (
     nombre VARCHAR(100) NOT NULL,
     pin_hash TEXT NOT NULL, -- bcrypt del PIN; nunca se expone por la API
     activo BOOLEAN NOT NULL DEFAULT TRUE,
+    tipo TEXT NOT NULL DEFAULT 'garzon',
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el TIMESTAMPTZ
+    eliminado_el TIMESTAMPTZ,
+    CONSTRAINT chk_garzones_tipo CHECK (tipo IN ('garzon', 'cocina', 'barra'))
 );
 CREATE INDEX idx_garzones_tenant ON garzones (tenant_id);
 
