@@ -1244,7 +1244,7 @@ export class SeederService implements OnApplicationBootstrap {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const turnos: Partial<Turno>[] = [
       {
-        id: '550e8400-e29b-41d4-a716-446655440257',
+        id: '550e8400-e29b-41d4-a716-446655440277',
         tenantId: PARIS,
         nombre: 'Mañana',
         horaInicio: '08:00',
@@ -1252,7 +1252,7 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
       },
       {
-        id: '550e8400-e29b-41d4-a716-446655440258',
+        id: '550e8400-e29b-41d4-a716-446655440278',
         tenantId: PARIS,
         nombre: 'Tarde',
         horaInicio: '15:00',
@@ -1260,7 +1260,7 @@ export class SeederService implements OnApplicationBootstrap {
         activo: true,
       },
       {
-        id: '550e8400-e29b-41d4-a716-446655440259',
+        id: '550e8400-e29b-41d4-a716-446655440279',
         tenantId: PARIS,
         nombre: 'Noche',
         horaInicio: '22:00',
