@@ -502,10 +502,12 @@ async function abrirHistorial() {
   if (!cuenta) return
   historialOpen.value = true
   historialLoading.value = true
+  asignaciones.value = []
   try {
     asignaciones.value = await salonesApi.listarAsignaciones(cuenta.id)
   }
   catch (e: unknown) {
+    asignaciones.value = []
     toast.add({
       title: apiErrorMsg(e, 'No se pudo cargar el historial'),
       color: 'error',
@@ -688,7 +690,7 @@ async function enviarComanda() {
     const estaciones = await impresorasApi.imprimirComanda(activeCuenta.value.id, {
       mesaNombre: selectedMesa.value.nombre,
       cuentaNumero: activeCuenta.value.numero,
-      garzonNombre: activeCuenta.value.garzonAperturaNombre,
+      garzonNombre: activeCuenta.value.garzonResponsableNombre,
     })
     // null = no hay impresoras de comanda activas → se saltó el flujo sin toast.
     if (estaciones === null) return
@@ -1208,7 +1210,13 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
         :ui="shellUi.modal"
       >
         <template #body>
-          <UFormField label="Nuevo responsable" required>
+          <p
+            v-if="garzonTransferItems.length === 0"
+            class="text-sm text-muted"
+          >
+            No hay otros garzones activos disponibles para transferir.
+          </p>
+          <UFormField v-else label="Nuevo responsable" required>
             <USelectMenu
               v-model="transferAdminGarzonId"
               :items="garzonTransferItems"
@@ -1223,7 +1231,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
               Cancelar
             </UButton>
             <UButton
-              :disabled="!transferAdminGarzonId"
+              :disabled="!transferAdminGarzonId || garzonTransferItems.length === 0"
               :loading="transfiriendo"
               @click="confirmarTransferenciaAdmin"
             >
