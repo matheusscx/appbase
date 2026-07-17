@@ -497,10 +497,18 @@ const columns: TableColumn<Regla>[] = [
             <!-- Fechas -->
             <div v-if="config.campoFechaInicio || config.campoFechaFin" class="grid grid-cols-2 gap-4">
               <UFormField v-if="config.campoFechaInicio" label="Fecha inicio" :required="config.fechasRequeridas">
-                <UInput :model-value="form.fechaInicio ?? undefined" type="date" class="w-full" @update:model-value="form.fechaInicio = $event || null" />
+                <AppDateInput
+                  :model-value="form.fechaInicio"
+                  qa="descuento-fecha-inicio"
+                  @update:model-value="form.fechaInicio = $event || null"
+                />
               </UFormField>
               <UFormField v-if="config.campoFechaFin" label="Fecha fin" :required="config.fechasRequeridas">
-                <UInput :model-value="form.fechaFin ?? undefined" type="date" class="w-full" @update:model-value="form.fechaFin = $event || null" />
+                <AppDateInput
+                  :model-value="form.fechaFin"
+                  qa="descuento-fecha-fin"
+                  @update:model-value="form.fechaFin = $event || null"
+                />
               </UFormField>
             </div>
           </template>

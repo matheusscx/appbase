@@ -217,13 +217,13 @@ const columns: TableColumn<Turno>[] = [
       <template #body>
         <UForm id="turno-form" :state="form" class="space-y-4" @submit="guardar">
           <UFormField label="Nombre" required>
-            <UInput v-model="form.nombre" placeholder="Brunch" autofocus />
+            <UInput v-model="form.nombre" placeholder="Brunch" autofocus data-qa="turno-nombre" />
           </UFormField>
           <UFormField label="Hora inicio" required>
-            <UInput v-model="form.horaInicio" placeholder="08:00" />
+            <AppTimeInput v-model="form.horaInicio" qa="turno-hora-inicio" />
           </UFormField>
           <UFormField label="Hora fin" required>
-            <UInput v-model="form.horaFin" placeholder="08:00" />
+            <AppTimeInput v-model="form.horaFin" qa="turno-hora-fin" />
           </UFormField>
           <UFormField label="Activo">
             <USwitch v-model="form.activo" />

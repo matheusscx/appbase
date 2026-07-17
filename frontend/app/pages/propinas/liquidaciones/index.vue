@@ -134,10 +134,10 @@ onMounted(cargar)
 
           <div class="grid gap-4 md:grid-cols-4">
             <UFormField label="Desde">
-              <UInput v-model="fechaDesde" type="datetime-local" />
+              <AppDateTimeInput v-model="fechaDesde" qa="liq-fecha-desde" />
             </UFormField>
             <UFormField label="Hasta">
-              <UInput v-model="fechaHasta" type="datetime-local" />
+              <AppDateTimeInput v-model="fechaHasta" qa="liq-fecha-hasta" />
             </UFormField>
             <UFormField label="Turnos (opcional)">
               <USelectMenu

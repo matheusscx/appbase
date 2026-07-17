@@ -196,6 +196,12 @@ se maneja como **string en todo el flujo**: el `ref` del form es string, el inpu
 mantiene string, y viaja string en el body **sin conversiones**.
 
 - **Campos monetarios con moneda:** usar `MoneyInput` con `v-model` string (ver §8).
+- **Fechas / fecha-hora / hora:** usar `AppDateInput` (`YYYY-MM-DD`),
+  `AppDateTimeInput` (`YYYY-MM-DDTHH:mm`, `hour-cycle` 24) o `AppTimeInput`
+  (`HH:mm`, p. ej. turnos). Wrappers de `UInputDate` / `UInputTime` (+ `UCalendar`
+  en popover para fechas) — **prohibido** `type="date"` / `type="datetime-local"` /
+  texto libre para horas (picker nativo o formato inconsistente). Locale: `UApp`
+  con `es-CL` en `app.vue`.
 - **Otros decimales (stock, porcentajes, tasas):** `UInput` de texto con
   `inputmode="decimal"` (teclado numérico en móvil). **Prohibido `type="number"`**
   en campos `@IsNumberString`: hace que `v-model` escriba un **`number`** y produce
@@ -206,11 +212,23 @@ mantiene string, y viaja string en el body **sin conversiones**.
 <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" />
 <MoneyInput v-model="form.saldoInicial" oficial />
 
+<!-- ✅ Fechas / horas → AppDate* / AppTimeInput (Nuxt UI, no nativo) -->
+<AppDateInput v-model="filtroDesde" />
+<AppDateTimeInput v-model="fechaDesde" qa="liq-fecha-desde" />
+<AppTimeInput v-model="form.horaInicio" qa="turno-hora-inicio" />
+
+<!-- QA: ./scripts/qa/date-time-inputs-e2e.sh --all -->
+
 <!-- ✅ Stock, porcentaje, tasa de cambio → UInput decimal sin maska de moneda -->
 <UInput v-model="form.stock" inputmode="decimal" placeholder="0" />
 
 <!-- ❌ type="number" → v-model pasa a number → 400 "must be a number string" -->
 <UInput v-model="form.precioBase" type="number" />
+
+<!-- ❌ pickers nativos / hora como texto libre -->
+<UInput v-model="fecha" type="date" />
+<UInput v-model="desde" type="datetime-local" />
+<UInput v-model="horaInicio" placeholder="08:00" />
 ```
 
 El payload va directo, sin `String(...)` (el valor ya es string); defaults tipo

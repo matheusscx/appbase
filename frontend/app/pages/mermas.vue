@@ -274,16 +274,8 @@ const columns: TableColumn<MermaListItem>[] = [
         class="w-52"
         placeholder="Causa"
       />
-      <UInput
-        v-model="filtroDesde"
-        type="date"
-        class="w-40"
-      />
-      <UInput
-        v-model="filtroHasta"
-        type="date"
-        class="w-40"
-      />
+      <AppDateInput v-model="filtroDesde" class="w-40" qa="mermas-desde" />
+      <AppDateInput v-model="filtroHasta" class="w-40" qa="mermas-hasta" />
     </div>
 
     <CrudTable

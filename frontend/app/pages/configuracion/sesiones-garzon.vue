@@ -242,16 +242,8 @@ onMounted(async () => {
           placeholder="Estado"
           class="w-36"
         />
-        <UInput
-          v-model="filtroDesde"
-          type="date"
-          class="w-40"
-        />
-        <UInput
-          v-model="filtroHasta"
-          type="date"
-          class="w-40"
-        />
+        <AppDateInput v-model="filtroDesde" class="w-44" qa="sesiones-desde" />
+        <AppDateInput v-model="filtroHasta" class="w-44" qa="sesiones-hasta" />
         <UButton
           v-if="hayFiltrosActivos"
           label="Limpiar filtros"

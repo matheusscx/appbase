@@ -1257,10 +1257,10 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
                   </UFormField>
                   <UFormField label="Fecha elaboración">
-                    <UInput v-model="form.fechaElaboracion" type="date" class="w-full" />
+                    <AppDateInput v-model="form.fechaElaboracion" />
                   </UFormField>
                   <UFormField label="Fecha vencimiento">
-                    <UInput v-model="form.fechaVencimiento" type="date" class="w-full" />
+                    <AppDateInput v-model="form.fechaVencimiento" />
                   </UFormField>
                 </div>
               </template>
@@ -1295,7 +1295,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     </UFormField>
                     <div class="flex gap-2">
                       <UFormField label="Garantía hasta" class="flex-1">
-                        <UInput v-model="form.series[idx].garantiaHasta" type="date" class="w-full" />
+                        <AppDateInput v-model="form.series[idx].garantiaHasta" />
                       </UFormField>
                       <UButton
                         color="error"
@@ -1322,10 +1322,10 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
                     </UFormField>
                     <UFormField label="Fecha elaboración">
-                      <UInput v-model="form.loteInicial.fechaElaboracion" type="date" class="w-full" />
+                      <AppDateInput v-model="form.loteInicial.fechaElaboracion" />
                     </UFormField>
                     <UFormField label="Fecha vencimiento">
-                      <UInput v-model="form.loteInicial.fechaVencimiento" type="date" class="w-full" />
+                      <AppDateInput v-model="form.loteInicial.fechaVencimiento" />
                     </UFormField>
                   </div>
                 </div>
@@ -1666,7 +1666,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   </UFormField>
                   <div class="flex gap-2">
                     <UFormField label="Garantía hasta" class="flex-1">
-                      <UInput v-model="ajusteForm.series[idx].garantiaHasta" type="date" class="w-full" />
+                      <AppDateInput v-model="ajusteForm.series[idx].garantiaHasta" />
                     </UFormField>
                     <UButton
                       color="error"
@@ -1726,10 +1726,10 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   <UInput v-model="ajusteForm.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
                 </UFormField>
                 <UFormField label="Fecha elaboración">
-                  <UInput v-model="ajusteForm.loteFechaElab" type="date" class="w-full" />
+                  <AppDateInput v-model="ajusteForm.loteFechaElab" />
                 </UFormField>
                 <UFormField label="Fecha vencimiento">
-                  <UInput v-model="ajusteForm.loteFechaVenc" type="date" class="w-full" />
+                  <AppDateInput v-model="ajusteForm.loteFechaVenc" />
                 </UFormField>
               </div>
             </template>

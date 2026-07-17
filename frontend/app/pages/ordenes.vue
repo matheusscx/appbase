@@ -163,19 +163,17 @@ const columns: TableColumn<OrdenRow>[] = [
             placeholder="Origen"
             class="w-36"
           />
-          <UInput
+          <AppDateInput
             :model-value="filtroFechaDesde"
-            type="date"
-            placeholder="Desde"
-            class="w-40"
-            @update:model-value="filtroFechaDesde = ($event as string) || undefined"
+            class="w-44"
+            qa="ordenes-desde"
+            @update:model-value="filtroFechaDesde = $event || undefined"
           />
-          <UInput
+          <AppDateInput
             :model-value="filtroFechaHasta"
-            type="date"
-            placeholder="Hasta"
-            class="w-40"
-            @update:model-value="filtroFechaHasta = ($event as string) || undefined"
+            class="w-44"
+            qa="ordenes-hasta"
+            @update:model-value="filtroFechaHasta = $event || undefined"
           />
           <UButton
             v-if="hayFiltrosActivos"

@@ -135,7 +135,25 @@ El layout dashboard muestra `Propinas` cuando el usuario es admin o tiene
 cd backend && npx jest src/modules/propinas --no-cache
 ```
 
-### QA E2E (Chrome DevTools)
+Incluye tests de:
+
+- `repartirMayoresRestos`
+- `horasInterseccionHoras`
+- creación, edición, actualización de config, confirmación y anulación de
+  liquidaciones.
+
+### QA E2E date/time inputs (Chrome DevTools)
+
+Cubre pickers Nuxt UI (`AppDate*` / `AppTimeInput`) con smoke + mutaciones
+(turno, liquidación, descuento promocional, filtros):
+
+```bash
+chrome-devtools start --headless=false
+./scripts/qa/date-time-inputs-e2e.sh --all
+# o: --case turno-crear | liquidacion-crear | descuento-promocional | …
+```
+
+### QA E2E liquidación propinas (Chrome DevTools)
 
 ```bash
 chrome-devtools start --headless=false
@@ -144,13 +162,6 @@ chrome-devtools start --headless=false
 
 Crea tips/ventas/sesión en runtime (seed no trae `venta_propina`), luego
 ejercita UI: crear → excluir → confirmar → 2ª liquidación vacía → anular.
-
-Incluye tests de:
-
-- `repartirMayoresRestos`
-- `horasInterseccionHoras`
-- creación, edición, actualización de config, confirmación y anulación de
-  liquidaciones.
 
 ### Builds
 

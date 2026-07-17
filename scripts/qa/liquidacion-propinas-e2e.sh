@@ -345,18 +345,17 @@ set_datetime_inputs() {
   local from_js to_js
   from_js=$(printf '%s' "$from_local" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
   to_js=$(printf '%s' "$to_local" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+  # AppDateTimeInput escucha CustomEvent('qa-set-value') en [data-qa]
   cd_eval "() => {
-    const inputs = [...document.querySelectorAll('input[type=datetime-local]')];
-    if (inputs.length < 2) return 'no-inputs:' + inputs.length;
-    const setVal = (el, v) => {
-      const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-      d.set.call(el, v);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+    const set = (qa, v) => {
+      const el = document.querySelector('[data-qa=\"' + qa + '\"]');
+      if (!el) return 'miss:' + qa;
+      el.dispatchEvent(new CustomEvent('qa-set-value', { detail: v }));
+      return 'ok';
     };
-    setVal(inputs[0], $from_js);
-    setVal(inputs[1], $to_js);
-    return 'ok';
+    const a = set('liq-fecha-desde', $from_js);
+    if (a !== 'ok') return a;
+    return set('liq-fecha-hasta', $to_js);
   }" | eval_extract >/dev/null
   sleep 0.3
 }
