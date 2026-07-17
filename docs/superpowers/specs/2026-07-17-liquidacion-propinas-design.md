@@ -1,11 +1,12 @@
 # Diseño: Liquidación de Propinas (subproyecto E)
 
-**Status**: Approved — **E1 Done** (2026-07-17)
+**Status**: Approved — **E2 Done** (2026-07-17)
 **Owner**: Cesar Matheus
 **Date**: 2026-07-17
 
 **Plan E1:** `docs/superpowers/plans/2026-07-17-liquidacion-propinas-e1.md` ✅
-(E2/E3: planes aparte tras cerrar E1.)
+**Plan E2:** `docs/superpowers/plans/2026-07-17-liquidacion-propinas-e2.md` ✅
+(E3: plan aparte tras cerrar E2.)
 
 ---
 

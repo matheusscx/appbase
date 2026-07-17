@@ -56,5 +56,6 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Responsable vigente de cuenta + transferencia por PIN/admin + historial auditable | ✅ Implementado (2026-07-16) |
 | Registro de propinas al cerrar cuenta de mesa (`venta_propina` + `pago_aplicaciones`, estrategia `NO_VUELTO`, UI salones) | ✅ Implementado (2026-07-17) |
 | Liquidación propinas E1 — modelo base (tipo garzón, tip+sesión, bases venta) | ✅ Implementado (2026-07-17) |
+| Liquidación propinas E2 — config distribución versionada (grupos %, criterios, MANUAL pesos) | ✅ Implementado (2026-07-17) |
 | Impresión Térmica (comandas cocina/barra por categoría via claim atómico + QZ Tray, precuenta, boleta) | ✅ Implementado (2026-07-13; claim atómico 2026-07-15) |
 | Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base/costo > 0) | ✅ Implementado (2026-07-15) |
