@@ -13,6 +13,7 @@ import { VentaPropinaService } from './venta-propina.service';
 import { PropinaDistribucionService } from './propina-distribucion.service';
 import { LiquidacionPropinasService } from './liquidacion-propinas.service';
 import { PropinaDistribucionController } from './propina-distribucion.controller';
+import { LiquidacionPropinasController } from './liquidacion-propinas.controller';
 
 @Module({
   imports: [
@@ -28,7 +29,7 @@ import { PropinaDistribucionController } from './propina-distribucion.controller
       LiquidacionPropinasEvento,
     ]),
   ],
-  controllers: [PropinaDistribucionController],
+  controllers: [PropinaDistribucionController, LiquidacionPropinasController],
   providers: [
     VentaPropinaService,
     PropinaDistribucionService,
