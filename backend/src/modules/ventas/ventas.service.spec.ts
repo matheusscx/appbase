@@ -849,6 +849,49 @@ describe('VentasService', () => {
               comentario: 'NC por reembolso orden O-1',
             },
           ]);
+        if (sql.includes('FROM venta_propina'))
+          return Promise.resolve([
+            {
+              venta_propina_id: 'vp-1',
+              porcentaje_sugerido: '0.100000',
+              monto_sugerido: '1131.0000',
+              monto_pagado: '1000.0000',
+              tipo: 'manual',
+              estado: 'pagada',
+              garzon_id: 'garzon-1',
+              garzon_nombre: 'Ana',
+            },
+          ]);
+        if (sql.includes('FROM pagos '))
+          return Promise.resolve([
+            {
+              pago_id: 'pago-1',
+              metodo_pago_id: EFECTIVO_ID,
+              moneda_oficial_id: MONEDA_OFICIAL_ID,
+              caja_id: CAJA_VIRTUAL_ID,
+              monto: '12305.0000',
+              vuelto: '0.0000',
+              fecha: new Date('2026-07-10'),
+              referencia: null,
+            },
+          ]);
+        if (sql.includes('FROM pago_aplicaciones'))
+          return Promise.resolve([
+            {
+              pago_aplicacion_id: 'pa-1',
+              pago_id: 'pago-1',
+              tipo: 'venta',
+              referencia_id: VENTA_ORIG_ID,
+              monto: '11305.0000',
+            },
+            {
+              pago_aplicacion_id: 'pa-2',
+              pago_id: 'pago-1',
+              tipo: 'propina',
+              referencia_id: 'vp-1',
+              monto: '1000.0000',
+            },
+          ]);
         if (sql.includes('FROM ventas'))
           return Promise.resolve([
             {
@@ -904,6 +947,35 @@ describe('VentasService', () => {
           comentario: 'NC por reembolso orden O-1',
         }),
       ]);
+      expect(res.propina).toEqual({
+        id: 'vp-1',
+        porcentajeSugerido: '0.100000',
+        montoSugerido: '1131.0000',
+        montoPagado: '1000.0000',
+        tipo: 'manual',
+        estado: 'pagada',
+        garzonId: 'garzon-1',
+        garzonNombre: 'Ana',
+      });
+      expect(res.pagos[0]).toEqual(
+        expect.objectContaining({
+          id: 'pago-1',
+          montoAplicadoVenta: '11305.0000',
+          montoAplicadoPropina: '1000.0000',
+          aplicaciones: [
+            {
+              tipo: 'venta',
+              monto: '11305.0000',
+              referenciaId: VENTA_ORIG_ID,
+            },
+            {
+              tipo: 'propina',
+              monto: '1000.0000',
+              referenciaId: 'vp-1',
+            },
+          ],
+        }),
+      );
     });
 
     it('listar mapea totalReembolsado y esNotaCredito', async () => {

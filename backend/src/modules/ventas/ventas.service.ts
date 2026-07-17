@@ -1123,6 +1123,49 @@ export class VentasService {
       [ventaId],
     );
 
+    const pagoIds = pagos.map((p) => p['pago_id'] as string);
+    const aplicacionesRows: {
+      pago_aplicacion_id: string;
+      pago_id: string;
+      tipo: string;
+      referencia_id: string | null;
+      monto: string;
+    }[] =
+      pagoIds.length > 0
+        ? await this.dataSource.query(
+            `SELECT pago_aplicacion_id, pago_id, tipo, referencia_id, monto
+             FROM pago_aplicaciones
+             WHERE pago_id = ANY($1::uuid[]) AND eliminado_el IS NULL
+             ORDER BY creado_el ASC`,
+            [pagoIds],
+          )
+        : [];
+    const aplicacionesPorPago = new Map<string, typeof aplicacionesRows>();
+    for (const a of aplicacionesRows) {
+      const list = aplicacionesPorPago.get(a.pago_id) ?? [];
+      list.push(a);
+      aplicacionesPorPago.set(a.pago_id, list);
+    }
+
+    const propinaRows: {
+      venta_propina_id: string;
+      porcentaje_sugerido: string;
+      monto_sugerido: string;
+      monto_pagado: string;
+      tipo: string;
+      estado: string;
+      garzon_id: string;
+      garzon_nombre: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT vp.venta_propina_id, vp.porcentaje_sugerido, vp.monto_sugerido, vp.monto_pagado,
+              vp.tipo, vp.estado, vp.garzon_id, g.nombre AS garzon_nombre
+       FROM venta_propina vp
+       LEFT JOIN garzones g ON g.garzon_id = vp.garzon_id AND g.eliminado_el IS NULL
+       WHERE vp.venta_id = $1 AND vp.tenant_id = $2 AND vp.eliminado_el IS NULL`,
+      [ventaId, tenantId],
+    );
+    const propinaRow = propinaRows[0] ?? null;
+
     const customerRow = customerRows[0];
 
     return {
@@ -1148,6 +1191,18 @@ export class VentasService {
       comentario: v.comentario,
       fecha: v.fecha,
       creadoEl: v.creado_el,
+      propina: propinaRow
+        ? {
+            id: propinaRow.venta_propina_id,
+            porcentajeSugerido: propinaRow.porcentaje_sugerido,
+            montoSugerido: propinaRow.monto_sugerido,
+            montoPagado: propinaRow.monto_pagado,
+            tipo: propinaRow.tipo,
+            estado: propinaRow.estado,
+            garzonId: propinaRow.garzon_id,
+            garzonNombre: propinaRow.garzon_nombre,
+          }
+        : null,
       detalles: detalles.map((d) => ({
         id: d['detalle_id'],
         itemId: d['item_id'],
@@ -1215,16 +1270,34 @@ export class VentasService {
             email: customerRow['email'],
           }
         : null,
-      pagos: pagos.map((p) => ({
-        id: p['pago_id'],
-        metodoPagoId: p['metodo_pago_id'],
-        monedaOficialId: p['moneda_oficial_id'],
-        cajaId: p['caja_id'],
-        monto: p['monto'],
-        vuelto: p['vuelto'],
-        fecha: p['fecha'],
-        referencia: p['referencia'],
-      })),
+      pagos: pagos.map((p) => {
+        const apps = aplicacionesPorPago.get(p['pago_id'] as string) ?? [];
+        const montoAplicadoVenta = apps
+          .filter((a) => a.tipo === 'venta')
+          .reduce((acc, a) => acc.plus(a.monto), new Decimal(0))
+          .toFixed(4);
+        const montoAplicadoPropina = apps
+          .filter((a) => a.tipo === 'propina')
+          .reduce((acc, a) => acc.plus(a.monto), new Decimal(0))
+          .toFixed(4);
+        return {
+          id: p['pago_id'],
+          metodoPagoId: p['metodo_pago_id'],
+          monedaOficialId: p['moneda_oficial_id'],
+          cajaId: p['caja_id'],
+          monto: p['monto'],
+          vuelto: p['vuelto'],
+          fecha: p['fecha'],
+          referencia: p['referencia'],
+          aplicaciones: apps.map((a) => ({
+            tipo: a.tipo,
+            monto: a.monto,
+            referenciaId: a.referencia_id,
+          })),
+          montoAplicadoVenta,
+          montoAplicadoPropina,
+        };
+      }),
     };
   }
 }
