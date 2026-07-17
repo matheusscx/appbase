@@ -105,6 +105,8 @@ import { Cuenta } from './modules/salones/entities/cuenta.entity';
 import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
 import { GarzonesModule } from './modules/garzones/garzones.module';
 import { Garzon } from './modules/garzones/entities/garzon.entity';
+import { TurnosModule } from './modules/turnos/turnos.module';
+import { Turno } from './modules/turnos/entities/turno.entity';
 import { ImpresorasModule } from './modules/impresoras/impresoras.module';
 import { MermasModule } from './modules/mermas/mermas.module';
 import { Impresora } from './modules/impresoras/entities/impresora.entity';
@@ -191,6 +193,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           Cuenta,
           CuentaLinea,
           Garzon,
+          Turno,
           Impresora,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
@@ -226,6 +229,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
     CronModule,
     SalonesModule,
     GarzonesModule,
+    TurnosModule,
     ImpresorasModule,
     MermasModule,
   ],
