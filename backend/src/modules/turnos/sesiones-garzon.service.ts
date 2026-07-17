@@ -87,9 +87,16 @@ export class SesionesGarzonService {
       origenCierre: null,
       cerradaPorUsuarioId: null,
     });
-    const guardada = await this.sesionRepo.save(sesion);
-
-    return this.toPublico(guardada, garzon.nombre, turno.nombre);
+    try {
+      const guardada = await this.sesionRepo.save(sesion);
+      return this.toPublico(guardada, garzon.nombre, turno.nombre);
+    } catch (err: unknown) {
+      const pg = err as { code?: string };
+      if (pg.code === '23505') {
+        throw new BadRequestException('El garzón ya tiene una sesión abierta');
+      }
+      throw err;
+    }
   }
 
   async cerrarPorPin(tenantId: string, pin: string): Promise<SesionPublica> {
@@ -201,9 +208,9 @@ export class SesionesGarzonService {
     const rows: {
       sesion_garzon_id: string;
       garzon_id: string;
-      garzon_nombre: string;
+      garzon_nombre: string | null;
       turno_id: string;
-      turno_nombre: string;
+      turno_nombre: string | null;
       inicio_el: Date;
       fin_el: Date | null;
       estado: EstadoSesionGarzon;
@@ -221,8 +228,8 @@ export class SesionesGarzonService {
               s.origen_cierre,
               s.cerrada_por_usuario_id
        FROM sesiones_garzon s
-       JOIN garzones g ON g.garzon_id = s.garzon_id AND g.eliminado_el IS NULL
-       JOIN turnos t ON t.turno_id = s.turno_id AND t.eliminado_el IS NULL
+       LEFT JOIN garzones g ON g.garzon_id = s.garzon_id AND g.eliminado_el IS NULL
+       LEFT JOIN turnos t ON t.turno_id = s.turno_id AND t.eliminado_el IS NULL
        WHERE s.tenant_id = $1
          AND s.eliminado_el IS NULL
          ${filters}
@@ -299,9 +306,9 @@ export class SesionesGarzonService {
   private mapListaRow(r: {
     sesion_garzon_id: string;
     garzon_id: string;
-    garzon_nombre: string;
+    garzon_nombre: string | null;
     turno_id: string;
-    turno_nombre: string;
+    turno_nombre: string | null;
     inicio_el: Date;
     fin_el: Date | null;
     estado: EstadoSesionGarzon;
@@ -311,9 +318,9 @@ export class SesionesGarzonService {
     return {
       id: r.sesion_garzon_id,
       garzonId: r.garzon_id,
-      garzonNombre: r.garzon_nombre,
+      garzonNombre: r.garzon_nombre ?? '',
       turnoId: r.turno_id,
-      turnoNombre: r.turno_nombre,
+      turnoNombre: r.turno_nombre ?? '',
       inicioEl: r.inicio_el,
       finEl: r.fin_el,
       estado: r.estado,

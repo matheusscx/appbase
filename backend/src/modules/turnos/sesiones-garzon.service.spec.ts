@@ -233,4 +233,54 @@ describe('SesionesGarzonService', () => {
       service.assertSesionAbierta(TENANT, GARZON_ID),
     ).resolves.toBeUndefined();
   });
+
+  it('historial incluye sesión aunque el turno esté soft-deleted', async () => {
+    dataSource.query
+      .mockResolvedValueOnce([{ total: 1 }])
+      .mockResolvedValueOnce([
+        {
+          sesion_garzon_id: SESION_ID,
+          garzon_id: GARZON_ID,
+          garzon_nombre: 'Ana',
+          turno_id: TURNO_ID,
+          turno_nombre: null,
+          inicio_el: new Date('2026-07-16T12:00:00Z'),
+          fin_el: new Date('2026-07-16T16:00:00Z'),
+          estado: EstadoSesionGarzon.CERRADA,
+          origen_cierre: OrigenCierreSesion.PIN,
+          cerrada_por_usuario_id: null,
+        },
+      ]);
+
+    const result = await service.historial(TENANT, {});
+
+    const listSql = dataSource.query.mock.calls[1][0] as string;
+    expect(listSql).toMatch(/LEFT JOIN\s+garzones/i);
+    expect(listSql).toMatch(/LEFT JOIN\s+turnos/i);
+    expect(listSql).not.toMatch(/(?<!LEFT )JOIN\s+garzones/i);
+    expect(listSql).not.toMatch(/(?<!LEFT )JOIN\s+turnos/i);
+
+    const countSql = dataSource.query.mock.calls[0][0] as string;
+    expect(countSql).toMatch(/FROM sesiones_garzon s/i);
+    expect(countSql).not.toMatch(/JOIN/i);
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].id).toBe(SESION_ID);
+    expect(result.data[0].turnoId).toBe(TURNO_ID);
+    expect(result.data[0].turnoNombre).toBe('');
+    expect(result.meta.total).toBe(1);
+  });
+
+  it('iniciar mapea unique violation 23505 a sesión ya abierta', async () => {
+    sesionRepo.findOne.mockResolvedValue(null);
+    sesionRepo.save.mockRejectedValue({ code: '23505' });
+
+    await expect(
+      service.iniciar(TENANT, { pin: PIN, turnoId: TURNO_ID }),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      service.iniciar(TENANT, { pin: PIN, turnoId: TURNO_ID }),
+    ).rejects.toThrow('El garzón ya tiene una sesión abierta');
+  });
 });
