@@ -100,6 +100,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-clock-3',
       to: '/configuracion/turnos',
     })
+    items.push({
+      label: 'Sesiones',
+      icon: 'i-lucide-timer',
+      to: '/configuracion/sesiones-garzon',
+    })
   }
 
   if (permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Crear')) {
