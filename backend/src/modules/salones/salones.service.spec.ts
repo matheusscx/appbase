@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SalonesService } from './salones.service';
+import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import { Salon } from './entities/salon.entity';
 import { Mesa } from './entities/mesa.entity';
 import { Cuenta, EstadoCuenta } from './entities/cuenta.entity';
@@ -67,6 +68,10 @@ describe('SalonesService', () => {
   let ventas: { crearEnTransaccion: jest.Mock };
   let garzones: { resolverGarzonPorPin: jest.Mock };
   let sesiones: { assertSesionAbierta: jest.Mock };
+  let asignaciones: {
+    registrarApertura: jest.Mock;
+    cerrarTramoVigente: jest.Mock;
+  };
   let items: { resolverPersonalizacionReceta: jest.Mock };
   let manager: {
     query: jest.Mock;
@@ -97,6 +102,10 @@ describe('SalonesService', () => {
     };
     sesiones = {
       assertSesionAbierta: jest.fn().mockResolvedValue(undefined),
+    };
+    asignaciones = {
+      registrarApertura: jest.fn().mockResolvedValue(undefined),
+      cerrarTramoVigente: jest.fn().mockResolvedValue(undefined),
     };
     items = {
       resolverPersonalizacionReceta: jest.fn().mockResolvedValue({
@@ -133,6 +142,7 @@ describe('SalonesService', () => {
         { provide: VentasService, useValue: ventas },
         { provide: GarzonesService, useValue: garzones },
         { provide: SesionesGarzonService, useValue: sesiones },
+        { provide: CuentaAsignacionesService, useValue: asignaciones },
         { provide: ItemsService, useValue: items },
         {
           provide: CatalogService,
@@ -222,6 +232,31 @@ describe('SalonesService', () => {
         service.abrirCuenta(TENANT, MESA, { pin: PIN }),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('asigna responsable = apertura y registra tramo APERTURA', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.query
+        .mockResolvedValueOnce([{ mesa_id: MESA }])
+        .mockResolvedValueOnce([{ next: '1' }]);
+      manager.save.mockImplementation((_e: unknown, row: Record<string, unknown>) =>
+        Promise.resolve({ ...row, id: CUENTA }),
+      );
+
+      await service.abrirCuenta(TENANT, MESA, { pin: PIN });
+
+      expect(manager.create).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({
+          garzonAperturaId: GARZON,
+          garzonResponsableId: GARZON,
+        }),
+      );
+      expect(asignaciones.registrarApertura).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ id: CUENTA }),
+        GARZON,
+      );
+    });
   });
 
   describe('fusionarCuentas', () => {
@@ -235,6 +270,7 @@ describe('SalonesService', () => {
         mesaId: MESA,
         numero: 1,
         estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: 'garzon-destino',
       };
       const cuentaB = {
         id: CUENTA_B,
@@ -242,6 +278,8 @@ describe('SalonesService', () => {
         mesaId: MESA,
         numero: 3,
         estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: 'garzon-origen',
+        cerradaEl: null as Date | null,
       };
       const lineaExistenteDestino = {
         id: 'linea-a1',
@@ -318,7 +356,15 @@ describe('SalonesService', () => {
         lineaOrigenOtroItem,
       );
       expect(cuentaB.estado).toBe(EstadoCuenta.CANCELADA);
+      expect(cuentaB.cerradaEl).toBeInstanceOf(Date);
       expect(manager.save).toHaveBeenCalledWith(Cuenta, cuentaB);
+      expect(asignaciones.cerrarTramoVigente).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        CUENTA_B,
+        cuentaB.cerradaEl,
+      );
+      expect(cuentaA.garzonResponsableId).toBe('garzon-destino');
       expect(result.id).toBe(CUENTA_A);
     });
 
@@ -602,6 +648,8 @@ describe('SalonesService', () => {
         numero: 85,
         estado: EstadoCuenta.ABIERTA,
         ventaId: null,
+        garzonResponsableId: 'garzon-responsable',
+        cerradaEl: null as Date | null,
       };
       manager.findOne.mockResolvedValue(cuenta);
       manager.find.mockResolvedValue([
@@ -646,6 +694,13 @@ describe('SalonesService', () => {
       expect(cuenta.ventaId).toBe('venta-1');
       expect((cuenta as { garzonCierreId?: string }).garzonCierreId).toBe(
         GARZON,
+      );
+      expect(cuenta.garzonResponsableId).toBe('garzon-responsable');
+      expect(asignaciones.cerrarTramoVigente).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        CUENTA,
+        cuenta.cerradaEl,
       );
       expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, GARZON);
     });
@@ -696,15 +751,64 @@ describe('SalonesService', () => {
         id: CUENTA,
         tenantId: TENANT,
         estado: EstadoCuenta.ABIERTA,
+        cerradaEl: null as Date | null,
       };
-      cuentaRepo.findOne.mockResolvedValue(cuenta);
+      manager.findOne.mockResolvedValue(cuenta);
+      manager.query.mockResolvedValue([]);
 
       const result = await service.cancelarCuenta(TENANT, CUENTA);
 
+      expect(manager.findOne).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({
+          where: { id: CUENTA, tenantId: TENANT },
+          lock: { mode: 'pessimistic_write' },
+        }),
+      );
       expect(cuenta.estado).toBe(EstadoCuenta.CANCELADA);
+      expect(cuenta.cerradaEl).toBeInstanceOf(Date);
       expect(result.estado).toBe(EstadoCuenta.CANCELADA);
-      expect(cuentaRepo.save).toHaveBeenCalled();
+      expect(manager.save).toHaveBeenCalledWith(Cuenta, cuenta);
+      expect(asignaciones.cerrarTramoVigente).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        CUENTA,
+        cuenta.cerradaEl,
+      );
+      expect(cuentaRepo.save).not.toHaveBeenCalled();
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('armarDetalle / responsable', () => {
+    it('devuelve ID/nombre del responsable aunque el garzón esté soft-deleted', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue([
+        {
+          id: CUENTA,
+          numero: 1,
+          nombre: null,
+          estado: EstadoCuenta.ABIERTA,
+          mesaId: MESA,
+          ventaId: null,
+          garzonAperturaId: GARZON,
+          garzonResponsableId: GARZON,
+          garzonCierreId: null,
+        },
+      ]);
+      dataSource.manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM cuenta_lineas')) return Promise.resolve([]);
+        if (sql.includes('FROM garzones')) {
+          expect(sql).not.toMatch(/eliminado_el\s+IS\s+NULL/i);
+          return Promise.resolve([{ garzon_id: GARZON, nombre: 'Ana Torres' }]);
+        }
+        return Promise.resolve([]);
+      });
+
+      const [detalle] = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalle.garzonResponsableId).toBe(GARZON);
+      expect(detalle.garzonResponsableNombre).toBe('Ana Torres');
     });
   });
 

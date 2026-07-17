@@ -27,6 +27,7 @@ import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
+import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
@@ -89,6 +90,8 @@ export interface CuentaDetalle {
   ventaId: string | null;
   garzonAperturaId: string | null;
   garzonAperturaNombre: string | null;
+  garzonResponsableId: string | null;
+  garzonResponsableNombre: string | null;
   garzonCierreId: string | null;
   garzonCierreNombre: string | null;
   lineas: CuentaLineaDetalle[];
@@ -106,6 +109,7 @@ export class SalonesService {
     private readonly ventasService: VentasService,
     private readonly garzonesService: GarzonesService,
     private readonly sesionesGarzonService: SesionesGarzonService,
+    private readonly cuentaAsignacionesService: CuentaAsignacionesService,
     private readonly itemsService: ItemsService,
     private readonly catalogService: CatalogService,
   ) {}
@@ -342,7 +346,7 @@ export class SalonesService {
         [tenantId, mesaId, EstadoCuenta.ABIERTA],
       );
       const numero = Number(row[0].next);
-      return manager.save(
+      const creada = await manager.save(
         Cuenta,
         manager.create(Cuenta, {
           tenantId,
@@ -351,8 +355,15 @@ export class SalonesService {
           nombre: dto.nombre ?? null,
           estado: EstadoCuenta.ABIERTA,
           garzonAperturaId: garzon.id,
+          garzonResponsableId: garzon.id,
         }),
       );
+      await this.cuentaAsignacionesService.registrarApertura(
+        manager,
+        creada,
+        garzon.id,
+      );
+      return creada;
     });
     return this.armarDetalle(tenantId, cuenta);
   }
@@ -474,10 +485,28 @@ export class SalonesService {
     tenantId: string,
     cuentaId: string,
   ): Promise<CuentaDetalle> {
-    const cuenta = await this.getCuentaAbiertaOrThrow(tenantId, cuentaId);
-    cuenta.estado = EstadoCuenta.CANCELADA;
-    await this.cuentaRepo.save(cuenta);
-    return this.armarDetalle(tenantId, cuenta);
+    return this.dataSource.transaction(async (manager) => {
+      const cuenta = await manager.findOne(Cuenta, {
+        where: { id: cuentaId, tenantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!cuenta) {
+        throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+      }
+      if (cuenta.estado !== EstadoCuenta.ABIERTA) {
+        throw new BadRequestException('La cuenta no está abierta');
+      }
+      cuenta.estado = EstadoCuenta.CANCELADA;
+      cuenta.cerradaEl = new Date();
+      await this.cuentaAsignacionesService.cerrarTramoVigente(
+        manager,
+        tenantId,
+        cuenta.id,
+        cuenta.cerradaEl,
+      );
+      await manager.save(Cuenta, cuenta);
+      return this.armarDetalle(tenantId, cuenta, manager);
+    });
   }
 
   /**
@@ -540,6 +569,13 @@ export class SalonesService {
           }
         }
         origen.estado = EstadoCuenta.CANCELADA;
+        origen.cerradaEl = new Date();
+        await this.cuentaAsignacionesService.cerrarTramoVigente(
+          manager,
+          tenantId,
+          origen.id,
+          origen.cerradaEl,
+        );
         await manager.save(Cuenta, origen);
       }
 
@@ -618,6 +654,12 @@ export class SalonesService {
       cuenta.ventaId = venta.id;
       cuenta.cerradaEl = new Date();
       cuenta.garzonCierreId = garzon.id;
+      await this.cuentaAsignacionesService.cerrarTramoVigente(
+        manager,
+        tenantId,
+        cuenta.id,
+        cuenta.cerradaEl,
+      );
       await manager.save(Cuenta, cuenta);
 
       const detalle = await this.armarDetalle(tenantId, cuenta, manager);
@@ -820,6 +862,7 @@ export class SalonesService {
       runner,
       cuenta.garzonAperturaId,
       cuenta.garzonCierreId,
+      cuenta.garzonResponsableId,
     );
     const nombres = await this.nombresIngredientesPersonalizacion(
       tenantId,
@@ -835,6 +878,10 @@ export class SalonesService {
       garzonAperturaId: cuenta.garzonAperturaId,
       garzonAperturaNombre: cuenta.garzonAperturaId
         ? (nombresGarzon[cuenta.garzonAperturaId] ?? null)
+        : null,
+      garzonResponsableId: cuenta.garzonResponsableId,
+      garzonResponsableNombre: cuenta.garzonResponsableId
+        ? (nombresGarzon[cuenta.garzonResponsableId] ?? null)
         : null,
       garzonCierreId: cuenta.garzonCierreId,
       garzonCierreNombre: cuenta.garzonCierreId
@@ -895,9 +942,11 @@ export class SalonesService {
   ): Promise<Record<string, string>> {
     const garzonIds = [...new Set(ids.filter((id): id is string => !!id))];
     if (garzonIds.length === 0) return {};
+    // Sin filtro eliminado_el: el detalle histórico debe mostrar nombres
+    // aunque el garzón haya sido soft-deleted después de la operación.
     const rows: { garzon_id: string; nombre: string }[] = await runner.query(
       `SELECT garzon_id, nombre FROM garzones
-        WHERE garzon_id = ANY($1) AND eliminado_el IS NULL`,
+        WHERE garzon_id = ANY($1)`,
       [garzonIds],
     );
     return Object.fromEntries(rows.map((r) => [r.garzon_id, r.nombre]));
