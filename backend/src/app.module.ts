@@ -83,6 +83,9 @@ import { Pago } from './modules/pagos/entities/pago.entity';
 import { PagoAplicacion } from './modules/pagos/entities/pago-aplicacion.entity';
 import { PropinasModule } from './modules/propinas/propinas.module';
 import { VentaPropina } from './modules/propinas/entities/venta-propina.entity';
+import { PropinaConfiguracion } from './modules/propinas/entities/propina-configuracion.entity';
+import { PropinaGrupoDistribucion } from './modules/propinas/entities/propina-grupo-distribucion.entity';
+import { PropinaGrupoPesoManual } from './modules/propinas/entities/propina-grupo-peso-manual.entity';
 import { PagosModule } from './modules/pagos/pagos.module';
 import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from './modules/terceros/entities/tercero.entity';
@@ -184,6 +187,9 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           Pago,
           PagoAplicacion,
           VentaPropina,
+          PropinaConfiguracion,
+          PropinaGrupoDistribucion,
+          PropinaGrupoPesoManual,
           TipoDocumentoTributario,
           Tercero,
           Suscripcion,

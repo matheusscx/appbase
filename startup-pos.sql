@@ -1167,6 +1167,66 @@ CREATE INDEX idx_venta_propina_liquidacion
 CREATE INDEX idx_venta_propina_turno
   ON venta_propina (tenant_id, turno_id, creado_el);
 
+-- Configuración versionada de distribución de propinas (E2)
+CREATE TABLE propina_configuracion (
+  propina_configuracion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  version INT NOT NULL DEFAULT 1,
+  actualizado_por UUID REFERENCES usuarios(usuario_id),
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_propina_config_tenant
+  ON propina_configuracion (tenant_id) WHERE eliminado_el IS NULL;
+
+CREATE TABLE propina_grupo_distribucion (
+  propina_grupo_distribucion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  configuracion_id UUID NOT NULL REFERENCES propina_configuracion(propina_configuracion_id),
+  tipo_garzon TEXT NOT NULL,
+  nombre TEXT NOT NULL,
+  porcentaje NUMERIC(10,6) NOT NULL,
+  criterio TEXT NOT NULL,
+  base_ventas TEXT NOT NULL DEFAULT 'TOTAL_FINAL',
+  manual_modo TEXT,
+  activo BOOLEAN NOT NULL DEFAULT TRUE,
+  orden INT NOT NULL DEFAULT 0,
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_propina_grupo_tipo CHECK (tipo_garzon IN ('garzon','cocina','barra')),
+  CONSTRAINT chk_propina_grupo_criterio CHECK (criterio IN (
+    'VENTAS_NETAS','HORAS_TRABAJADAS','PARTES_IGUALES','CANTIDAD_CUENTAS','MANUAL'
+  )),
+  CONSTRAINT chk_propina_grupo_base CHECK (base_ventas IN ('TOTAL_FINAL','BASE_SIN_IMPUESTOS')),
+  CONSTRAINT chk_propina_grupo_manual_modo CHECK (
+    manual_modo IS NULL OR manual_modo IN ('PESOS','MONTOS')
+  ),
+  CONSTRAINT chk_propina_grupo_manual_parity CHECK (
+    (criterio = 'MANUAL' AND manual_modo IS NOT NULL)
+    OR (criterio <> 'MANUAL' AND manual_modo IS NULL)
+  ),
+  CONSTRAINT chk_propina_grupo_porcentaje CHECK (porcentaje >= 0 AND porcentaje <= 1)
+);
+CREATE UNIQUE INDEX uq_propina_grupo_tipo_activo
+  ON propina_grupo_distribucion (tenant_id, tipo_garzon)
+  WHERE activo = true AND eliminado_el IS NULL;
+
+CREATE TABLE propina_grupo_peso_manual (
+  propina_grupo_peso_manual_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  grupo_id UUID NOT NULL REFERENCES propina_grupo_distribucion(propina_grupo_distribucion_id),
+  garzon_id UUID NOT NULL REFERENCES garzones(garzon_id),
+  peso NUMERIC(18,4) NOT NULL,
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_propina_peso_positivo CHECK (peso > 0)
+);
+CREATE UNIQUE INDEX uq_propina_peso_grupo_garzon
+  ON propina_grupo_peso_manual (grupo_id, garzon_id) WHERE eliminado_el IS NULL;
+
 CREATE TABLE turnos (
     turno_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),

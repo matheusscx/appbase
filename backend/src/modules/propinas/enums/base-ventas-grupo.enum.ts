@@ -1,0 +1,4 @@
+export enum BaseVentasGrupo {
+  TOTAL_FINAL = 'TOTAL_FINAL',
+  BASE_SIN_IMPUESTOS = 'BASE_SIN_IMPUESTOS',
+}
