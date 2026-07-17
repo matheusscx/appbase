@@ -844,6 +844,38 @@ CREATE TABLE "pagos" (
   "eliminado_el"      TIMESTAMPTZ
 );
 
+-- Split tipado venta/propina por pago (extensible a otros conceptos).
+CREATE TABLE "pago_aplicaciones" (
+  "pago_aplicacion_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"          UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "pago_id"            UUID          NOT NULL REFERENCES "pagos" ("pago_id"),
+  "tipo"               TEXT          NOT NULL,
+  "referencia_id"      UUID,
+  "monto"              NUMERIC(18,4) NOT NULL,
+  "creado_el"          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"     TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "eliminado_el"       TIMESTAMPTZ,
+  CONSTRAINT chk_pago_aplicaciones_tipo CHECK (tipo IN ('venta', 'propina')),
+  CONSTRAINT chk_pago_aplicaciones_monto CHECK (monto >= 0)
+);
+
+CREATE INDEX idx_pago_aplicaciones_pago
+  ON pago_aplicaciones (pago_id)
+  WHERE eliminado_el IS NULL;
+
+CREATE INDEX idx_pago_aplicaciones_ref
+  ON pago_aplicaciones (tenant_id, tipo, referencia_id);
+
+-- Backfill idempotente: pagos legacy = 100% aplicado a venta.
+INSERT INTO pago_aplicaciones (pago_aplicacion_id, tenant_id, pago_id, tipo, referencia_id, monto, creado_el, actualizado_el)
+SELECT gen_random_uuid(), p.tenant_id, p.pago_id, 'venta', p.venta_id, p.monto - p.vuelto, NOW(), NOW()
+FROM pagos p
+WHERE p.eliminado_el IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM pago_aplicaciones pa
+    WHERE pa.pago_id = p.pago_id AND pa.eliminado_el IS NULL
+  );
+
 -- FKs diferidas de movimientos_caja (dependen de ventas y pagos)
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("venta_id") REFERENCES "ventas" ("venta_id");
 ALTER TABLE "movimientos_caja" ADD FOREIGN KEY ("pago_id")  REFERENCES "pagos" ("pago_id");
@@ -1084,6 +1116,35 @@ CREATE TABLE garzones (
     eliminado_el TIMESTAMPTZ
 );
 CREATE INDEX idx_garzones_tenant ON garzones (tenant_id);
+
+-- Propina separada de la venta (SII): 1 fila por cierre de mesa (incluso tip $0).
+-- Depende de garzones + ventas; se declara aquí tras garzones.
+CREATE TABLE "venta_propina" (
+  "venta_propina_id"     UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"            UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "venta_id"             UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
+  "garzon_id"            UUID          NOT NULL REFERENCES "garzones" ("garzon_id"),
+  "porcentaje_sugerido"  NUMERIC(10,6) NOT NULL,
+  "monto_sugerido"       NUMERIC(18,4) NOT NULL,
+  "monto_pagado"         NUMERIC(18,4) NOT NULL,
+  "tipo"                 TEXT          NOT NULL,
+  "estado"               TEXT          NOT NULL,
+  "creado_el"            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "eliminado_el"         TIMESTAMPTZ,
+  CONSTRAINT chk_venta_propina_tipo CHECK (tipo IN ('sugerida', 'manual')),
+  CONSTRAINT chk_venta_propina_estado CHECK (estado IN ('pagada', 'sin_propina')),
+  CONSTRAINT chk_venta_propina_montos CHECK (
+    monto_sugerido >= 0 AND monto_pagado >= 0 AND porcentaje_sugerido >= 0
+  )
+);
+
+CREATE UNIQUE INDEX uq_venta_propina_venta
+  ON venta_propina (venta_id)
+  WHERE eliminado_el IS NULL;
+
+CREATE INDEX idx_venta_propina_garzon
+  ON venta_propina (tenant_id, garzon_id, creado_el);
 
 CREATE TABLE turnos (
     turno_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

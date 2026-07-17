@@ -80,6 +80,9 @@ import { VentaRecargo } from './modules/ventas/entities/venta-recargo.entity';
 import { VentaImpuesto } from './modules/ventas/entities/venta-impuesto.entity';
 import { VentaCustomer } from './modules/ventas/entities/venta-customer.entity';
 import { Pago } from './modules/pagos/entities/pago.entity';
+import { PagoAplicacion } from './modules/pagos/entities/pago-aplicacion.entity';
+import { PropinasModule } from './modules/propinas/propinas.module';
+import { VentaPropina } from './modules/propinas/entities/venta-propina.entity';
 import { PagosModule } from './modules/pagos/pagos.module';
 import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from './modules/terceros/entities/tercero.entity';
@@ -179,6 +182,8 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           VentaImpuesto,
           VentaCustomer,
           Pago,
+          PagoAplicacion,
+          VentaPropina,
           TipoDocumentoTributario,
           Tercero,
           Suscripcion,
@@ -225,6 +230,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
     CajaModule,
     VentasModule,
     PagosModule,
+    PropinasModule,
     TercerosModule,
     OnlineModule,
     SuscripcionesModule,
