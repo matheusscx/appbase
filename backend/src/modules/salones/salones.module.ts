@@ -14,6 +14,7 @@ import { VentasModule } from '../ventas/ventas.module';
 import { GarzonesModule } from '../garzones/garzones.module';
 import { ItemsModule } from '../items/items.module';
 import { CatalogModule } from '../catalog/catalog.module';
+import { TurnosModule } from '../turnos/turnos.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { CatalogModule } from '../catalog/catalog.module';
     GarzonesModule,
     ItemsModule,
     CatalogModule,
+    TurnosModule,
   ],
   controllers: [SalonesController, MesasController, CuentasController],
   providers: [SalonesService],

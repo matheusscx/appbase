@@ -26,6 +26,7 @@ import type { CreateVentaDto } from '../ventas/dto/create-venta.dto';
 import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
@@ -104,6 +105,7 @@ export class SalonesService {
     private readonly cuentaLineaRepo: Repository<CuentaLinea>,
     private readonly ventasService: VentasService,
     private readonly garzonesService: GarzonesService,
+    private readonly sesionesGarzonService: SesionesGarzonService,
     private readonly itemsService: ItemsService,
     private readonly catalogService: CatalogService,
   ) {}
@@ -317,6 +319,7 @@ export class SalonesService {
       tenantId,
       dto.pin,
     );
+    await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
     const cuenta = await this.dataSource.transaction(async (manager) => {
       // Ancla de serialización por mesa: sin este lock, dos aperturas concurrentes
       // pueden calcular el mismo MAX(numero)+1.
@@ -560,6 +563,7 @@ export class SalonesService {
       tenantId,
       dto.pin,
     );
+    await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
     return this.dataSource.transaction(async (manager) => {
       // Lock pesimista: evita doble cierre / doble venta concurrente.
       const cuenta = await manager.findOne(Cuenta, {

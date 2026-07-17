@@ -10,6 +10,7 @@ import { VentasService } from '../ventas/ventas.service';
 import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 
 const UNIDADES_CATALOGO = [
   { codigo: 'g', magnitud: 'masa', factorBase: '1' },
@@ -65,6 +66,7 @@ describe('SalonesService', () => {
   let cuentaLineaRepo: Repo;
   let ventas: { crearEnTransaccion: jest.Mock };
   let garzones: { resolverGarzonPorPin: jest.Mock };
+  let sesiones: { assertSesionAbierta: jest.Mock };
   let items: { resolverPersonalizacionReceta: jest.Mock };
   let manager: {
     query: jest.Mock;
@@ -92,6 +94,9 @@ describe('SalonesService', () => {
         id: GARZON,
         nombre: 'Ana Torres',
       }),
+    };
+    sesiones = {
+      assertSesionAbierta: jest.fn().mockResolvedValue(undefined),
     };
     items = {
       resolverPersonalizacionReceta: jest.fn().mockResolvedValue({
@@ -127,6 +132,7 @@ describe('SalonesService', () => {
         { provide: getDataSourceToken(), useValue: dataSource },
         { provide: VentasService, useValue: ventas },
         { provide: GarzonesService, useValue: garzones },
+        { provide: SesionesGarzonService, useValue: sesiones },
         { provide: ItemsService, useValue: items },
         {
           provide: CatalogService,
@@ -171,6 +177,20 @@ describe('SalonesService', () => {
           garzonAperturaId: GARZON,
         }),
       );
+      expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, GARZON);
+    });
+
+    it('abrirCuenta rechaza si el garzón no tiene sesión abierta', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      sesiones.assertSesionAbierta.mockRejectedValue(
+        new BadRequestException(
+          'El garzón no tiene una sesión de trabajo abierta',
+        ),
+      );
+      await expect(
+        service.abrirCuenta(TENANT, MESA, { pin: PIN }),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.create).not.toHaveBeenCalled();
     });
 
     it('rechaza abrir la cuenta si el PIN del garzón es inválido', async () => {
@@ -627,6 +647,19 @@ describe('SalonesService', () => {
       expect((cuenta as { garzonCierreId?: string }).garzonCierreId).toBe(
         GARZON,
       );
+      expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, GARZON);
+    });
+
+    it('cerrarCuenta rechaza si el garzón no tiene sesión abierta', async () => {
+      sesiones.assertSesionAbierta.mockRejectedValue(
+        new BadRequestException(
+          'El garzón no tiene una sesión de trabajo abierta',
+        ),
+      );
+      await expect(
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
+      ).rejects.toThrow(BadRequestException);
+      expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
     it('rechaza cerrar una cuenta sin productos', async () => {
