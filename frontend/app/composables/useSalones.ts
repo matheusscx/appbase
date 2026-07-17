@@ -7,6 +7,11 @@ import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
 
 export type EstadoCuenta = 'abierta' | 'cerrada' | 'cancelada'
 
+export type MotivoCuentaAsignacion =
+  | 'apertura'
+  | 'transferencia_pin'
+  | 'transferencia_admin'
+
 export type FormaMesa = 'redonda' | 'cuadrada' | 'rectangular'
 export type TamanoMesa = 'pequeno' | 'mediano' | 'grande' | 'extra_grande'
 
@@ -57,6 +62,19 @@ export interface CuentaLineaDetalle {
   personalizacionTexto?: string
 }
 
+export interface CuentaAsignacionDetalle {
+  id: string
+  garzonId: string
+  garzonNombre: string | null
+  desdeEl: string
+  hastaEl: string | null
+  motivo: MotivoCuentaAsignacion
+  origenGarzonId: string | null
+  origenGarzonNombre: string | null
+  actorUsuarioId: string | null
+  actorUsuarioNombre: string | null
+}
+
 export interface CuentaDetalle {
   id: string
   numero: number
@@ -66,6 +84,8 @@ export interface CuentaDetalle {
   ventaId: string | null
   garzonAperturaId: string | null
   garzonAperturaNombre: string | null
+  garzonResponsableId: string | null
+  garzonResponsableNombre: string | null
   garzonCierreId: string | null
   garzonCierreNombre: string | null
   lineas: CuentaLineaDetalle[]
@@ -234,6 +254,23 @@ export function useSalones() {
       { method: 'POST', body },
     )
 
+  const transferirCuenta = (cuentaId: string, pin: string) =>
+    useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/transferir`, {
+      method: 'POST',
+      body: { pin },
+    })
+
+  const transferirCuentaAdmin = (cuentaId: string, garzonId: string) =>
+    useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/transferir-admin`, {
+      method: 'POST',
+      body: { garzonId },
+    })
+
+  const listarAsignaciones = (cuentaId: string) =>
+    useApiFetch<CuentaAsignacionDetalle[]>(
+      `${apiUrl}/cuentas/${cuentaId}/asignaciones`,
+    )
+
   return {
     listarSalones,
     crearSalon,
@@ -252,5 +289,8 @@ export function useSalones() {
     quitarLinea,
     cancelarCuenta,
     cerrarCuenta,
+    transferirCuenta,
+    transferirCuentaAdmin,
+    listarAsignaciones,
   }
 }
