@@ -1008,6 +1008,14 @@ describe('VentasService', () => {
       });
 
       const res = await service.listar(TENANT_ID, {});
+      const listSql = dataSourceMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          (c[0] as string).includes('FROM ventas v') &&
+          (c[0] as string).includes('LIMIT'),
+      )?.[0] as string;
+      expect(listSql).toContain("pa.tipo = 'venta'");
+      expect(listSql).toContain('pago_aplicaciones');
       expect(res.data[0]).toEqual(
         expect.objectContaining({
           totalReembolsado: '1100.0000',
@@ -1032,6 +1040,8 @@ describe('VentasService', () => {
         unknown[],
       ];
       expect(sql).toContain('IS DISTINCT FROM');
+      expect(sql).toContain("pa.tipo = 'venta'");
+      expect(sql).toContain('pago_aplicaciones');
       expect(params).toContain(TIPO_DOCUMENTO_NC_ID);
     });
 

@@ -889,8 +889,10 @@ export class VentasService {
               COALESCE(SUM(v.total_final), 0)::text AS total_facturado,
               COALESCE(SUM(
                 v.total_final - COALESCE((
-                  SELECT SUM(p.monto - p.vuelto)
+                  SELECT SUM(pa.monto)
                   FROM pagos p
+                  JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
+                       AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
                   WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
                 ), 0)
               ), 0)::text AS saldo_pendiente
@@ -943,8 +945,10 @@ export class VentasService {
       `SELECT v.venta_id, v.canal, v.estado, v.total_final, v.fecha, v.creado_el,
               v.tipo_documento_id,
               COALESCE((
-                SELECT SUM(p.monto - p.vuelto)
+                SELECT SUM(pa.monto)
                 FROM pagos p
+                JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
+                     AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
                 WHERE p.venta_id = v.venta_id AND p.eliminado_el IS NULL
               ), 0) AS monto_pagado,
               COALESCE((
