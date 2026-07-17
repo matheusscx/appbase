@@ -143,8 +143,8 @@ Restricción efectiva: una sola sesión `abierta` por `(tenant_id, garzon_id)`.
 - **Composables**: `useTurnos.ts`, `useSesionesGarzon.ts`
 - **Config → Turnos**: `pages/configuracion/turnos.vue` — CRUD local (`ref` +
   upsert/remove sin re-fetch).
-- **Config → Sesiones**: `pages/configuracion/sesiones-garzon.vue` — abiertas +
-  forzar cierre + historial filtrado.
+- **Módulo → Sesiones**: `pages/sesiones-garzon.vue` — abiertas + forzar cierre +
+  historial filtrado (tabs). Ruta antigua `/configuracion/sesiones-garzon` redirige.
 - **Salones**: `pages/salones/index.vue` — “Entrar a turno” / “Salir de turno”
   con `GarzonPinModal`; toast si falta sesión al abrir/cerrar cuenta.
 

@@ -318,7 +318,7 @@ case_no_nativos() {
     "/configuracion/turnos"
     "/mermas"
     "/ordenes"
-    "/configuracion/sesiones-garzon"
+    "/sesiones-garzon"
     "/configuracion/descuentos"
   )
   local r out native ui ok=1
@@ -595,7 +595,7 @@ case_filtros_ordenes() {
 case_filtros_sesiones() {
   echo "→ filtros-sesiones"
   ensure_session
-  goto "/configuracion/sesiones-garzon" 1.6
+  goto "/sesiones-garzon" 1.6
   cd_eval '() => { performance.clearResourceTimings(); return "ok"; }' >/dev/null
   qa_set "sesiones-desde" "2026-07-01"
   qa_set "sesiones-hasta" "2026-07-31"

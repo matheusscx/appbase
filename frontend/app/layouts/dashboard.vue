@@ -70,6 +70,13 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/salones',
     })
   }
+  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Leer')) {
+    base.push({
+      label: 'Sesiones',
+      icon: 'i-lucide-timer',
+      to: '/sesiones-garzon',
+    })
+  }
   if (permissionsStore.esAdmin || permissionsStore.can('Tienda Online', 'Leer')) {
     base.push({
       label: 'Tienda Online',
