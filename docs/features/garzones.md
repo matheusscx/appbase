@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-13
+**Last Updated**: 2026-07-16 (tres roles de garzón en cuenta)
 
 ---
 
@@ -19,9 +19,10 @@ el sistema pide el **PIN del garzón** al abrir o cerrar una cuenta.
 ### ¿Por qué existe?
 
 - Evitar el login/logout continuo en dispositivos compartidos.
-- Identificar rápido al garzón responsable de cada cuenta.
+- Identificar al garzón por PIN en dispositivos compartidos (apertura, cierre,
+  claim de cuenta).
 - Incorporar personal temporal **sin crear usuarios del sistema**.
-- Trazabilidad de **quién abrió y quién cerró** cada cuenta.
+- Trazabilidad de **quién abrió y quién cerró** cada cuenta (auditoría).
 
 Un garzón **no es un usuario del sistema**: no tiene login ni JWT. El PIN es un
 **identificador operativo** dentro de la sesión del tenant ya autenticada — no toca
@@ -30,12 +31,17 @@ el sistema de tokens.
 ### Scope
 
 - **Incluido**: CRUD de garzones, regeneración de PIN, identificación por PIN, y
-  captura del garzón responsable al **abrir** y **cerrar** una cuenta.
-- **NO incluido (futuro)**: transferir cuentas entre mesas con PIN, log por cada
+  captura de auditoría al **abrir** (`garzon_apertura_id`) y **cerrar**
+  (`garzon_cierre_id`) una cuenta. Al abrir también se setea el responsable
+  vigente inicial (`garzon_responsable_id`); ese campo cambia con transferencias
+  (ver [salones-mesas.md](./salones-mesas.md)).
+- **NO incluido (futuro)**: mover cuentas entre mesas con PIN, log por cada
   acción individual (agregar línea, fusionar).
 
 Turnos y sesiones de trabajo (entrada/salida con PIN, sesión obligatoria para
 operar cuentas): ver [turnos-garzones.md](./turnos-garzones.md).
+Responsable vigente, transferencia por PIN/admin e historial:
+[salones-mesas.md](./salones-mesas.md).
 
 ---
 
@@ -69,8 +75,11 @@ Todos bajo `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)`; `tenant_id` d
 | POST | `/garzones/identificar` | `Operar` | `{ pin }` → `{ garzonId, nombre }` (o 400) |
 
 Al **abrir** cuenta (`POST /mesas/:id/cuentas`) y **cerrar** cuenta
-(`POST /cuentas/:id/cerrar`) el body incluye ahora `pin` (6 dígitos). El backend
-resuelve el garzón y persiste `garzon_apertura_id` / `garzon_cierre_id`.
+(`POST /cuentas/:id/cerrar`) el body incluye `pin` (6 dígitos). El backend
+resuelve el garzón y persiste `garzon_apertura_id` / `garzon_cierre_id`
+(auditoría). Al abrir también setea `garzon_responsable_id` al mismo garzón
+(responsable vigente inicial). La transferencia de responsable vigente (claim por
+PIN o admin) vive en Salones — no en este módulo.
 
 ---
 
@@ -93,7 +102,9 @@ resuelve el garzón y persiste `garzon_apertura_id` / `garzon_cierre_id`.
 | `activo` | BOOLEAN | default `true` |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | soft delete |
 
-`cuentas` gana `garzon_apertura_id` y `garzon_cierre_id` (UUID nullable, FK a `garzones`).
+`cuentas` tiene tres FKs a `garzones`: `garzon_apertura_id` y `garzon_cierre_id`
+(auditoría de quién abrió/cerró) y `garzon_responsable_id` (vigente; cambia con
+transferencias — ver Salones).
 
 ### Métodos clave del service
 
@@ -118,8 +129,9 @@ resuelve el garzón y persiste `garzon_apertura_id` / `garzon_cierre_id`.
   **modal una sola vez** (con aviso de que no se volverá a mostrar).
   Entrada de nav bajo Configuración (gated `Salones/Crear`).
 - **Componente**: `components/salones/GarzonPinModal.vue` — teclado numérico de 6
-  dígitos que auto-verifica vía `identificar` y emite el PIN. Reutilizado al abrir y
-  cerrar cuentas en `pages/salones/index.vue`, que muestra el garzón responsable.
+  dígitos que auto-verifica vía `identificar` y emite el PIN. Reutilizado al abrir,
+  cerrar y tomar (claim) cuentas en `pages/salones/index.vue`, que muestra el
+  responsable vigente (independiente de quién abrió/cerró).
 
 ---
 
@@ -133,7 +145,8 @@ cd backend && npx jest garzones salones
 
 Cubre: generación y unicidad del PIN (con reintento ante colisión),
 `resolverGarzonPorPin` (match / 400), regeneración de PIN, y que abrir/cerrar cuenta
-persisten `garzon_apertura_id`/`garzon_cierre_id`.
+persisten `garzon_apertura_id`/`garzon_cierre_id` (auditoría) y al abrir también
+`garzon_responsable_id`.
 
 ### Manual (frontend)
 
@@ -141,9 +154,10 @@ persisten `garzon_apertura_id`/`garzon_cierre_id`.
    Bruno=222222, Carla=333333 en el tenant Paris; los nuevos garzones creados por la
    UI reciben un PIN autogenerado).
 2. Configuración → Garzones: crear (el PIN se muestra una vez), regenerar PIN.
-3. Salones → abrir cuenta: PIN correcto abre la cuenta con el responsable visible;
-   PIN incorrecto muestra "PIN inválido" (sin cerrar sesión).
-4. Cerrar y cobrar: pide el PIN antes de generar la venta.
+3. Salones → abrir cuenta: PIN correcto abre la cuenta (apertura + responsable vigente
+   inicial visibles); PIN incorrecto muestra "PIN inválido" (sin cerrar sesión).
+4. Cerrar y cobrar: pide el PIN del garzón que cierra (auditoría; puede diferir del
+   responsable vigente).
 
 ---
 

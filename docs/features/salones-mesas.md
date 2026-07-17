@@ -150,10 +150,13 @@ histórico), `estado` (`abierta|cerrada|cancelada`), `venta_id` (set al cerrar),
 `cuenta_asignacion_id` PK, `tenant_id`, `cuenta_id`, `garzon_id` (responsable del
 tramo), `desde_el`, `hasta_el` (`NULL` = tramo vigente), `motivo`
 (`apertura|transferencia_pin|transferencia_admin`), `origen_garzon_id` (responsable
-anterior; `NULL` en apertura), `actor_usuario_id` (solo en `transferencia_admin`).
-Índice parcial único: una sola fila con `hasta_el IS NULL` por cuenta. Al
-cerrar/cancelar/fusionar (cuentas origen) se cierra el tramo vigente
-(`hasta_el = now()`); no se borran filas.
+anterior; `NULL` en apertura), `actor_usuario_id` (solo en `transferencia_admin`),
+más soft delete estándar (`creado_el` / `actualizado_el` / `eliminado_el`). En
+práctica no se edita ni borra (append-only); las lecturas filtran
+`eliminado_el IS NULL`. Índice parcial único: una sola fila con
+`hasta_el IS NULL AND eliminado_el IS NULL` por cuenta. Al cerrar/cancelar/fusionar
+(cuentas origen) se cierra el tramo vigente (`hasta_el = now()`); no se borran
+filas.
 
 **`cuenta_lineas`**: `cuenta_linea_id` PK, `tenant_id`, `cuenta_id`, `item_id`,
 `cantidad numeric(18,4)`. El precio se resuelve al cerrar (igual que ventas).
@@ -245,7 +248,15 @@ vigente en `CuentaDetalle`, aislamiento por tenant.
    tenant Paris.
 2. Con caja física abierta: en `/salones` elegir salón → mesa → nueva cuenta → agregar
    productos → "Cerrar y cobrar" → verificar la venta en `/ventas`.
-3. En `/configuracion/salones` crear salón/mesa, arrastrar mesas y "Guardar distribución".
+3. **Tomar cuenta por PIN:** con sesión abierta de otro garzón, en el detalle de una
+   cuenta abierta usar "Tomar cuenta" / transferir por PIN → la UI muestra el nuevo
+   responsable vigente; `garzon_apertura_id` no cambia.
+4. **Transferir admin:** con permiso `Salones:Actualizar`, forzar transferencia a un
+   garzón con sesión abierta (sin PIN) → responsable vigente actualizado y
+   `actor_usuario_id` en el historial.
+5. **Historial:** abrir el drawer de asignaciones de la cuenta y verificar timeline
+   (`apertura` + `transferencia_pin` / `transferencia_admin`) con fechas y nombres.
+6. En `/configuracion/salones` crear salón/mesa, arrastrar mesas y "Guardar distribución".
 
 ---
 
