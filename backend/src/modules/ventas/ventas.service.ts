@@ -263,6 +263,12 @@ export class VentasService {
 
     // 7. Transacción atómica (manager recibido por parámetro)
     // 7a. Cabecera de venta (estado inicial PENDIENTE; se actualiza tras registrar pagos)
+    const totalFinal = resultado.totales.totalFinal;
+    const totalImpuestos = resultado.totales.totalImpuestos;
+    const baseVentasSinImpuestos = new Decimal(totalFinal)
+      .minus(totalImpuestos)
+      .toFixed(4);
+
     const venta = await manager.save(
       Venta,
       manager.create(Venta, {
@@ -275,8 +281,10 @@ export class VentasService {
         totalBruto: resultado.totales.subtotalNeto,
         totalDescuentos: resultado.totales.totalDescuentos,
         totalRecargos: resultado.totales.totalRecargos,
-        totalImpuestos: resultado.totales.totalImpuestos,
-        totalFinal: resultado.totales.totalFinal,
+        totalImpuestos,
+        totalFinal,
+        baseVentasTotalFinal: totalFinal,
+        baseVentasSinImpuestos,
         comentario: dto.comentario ?? null,
       }),
     );
@@ -1033,6 +1041,8 @@ export class VentasService {
       total_recargos: string;
       total_impuestos: string;
       total_final: string;
+      base_ventas_total_final: string;
+      base_ventas_sin_impuestos: string;
       comentario: string | null;
       fecha: Date;
       creado_el: Date;
@@ -1042,6 +1052,7 @@ export class VentasService {
     }[] = await this.dataSource.query(
       `SELECT v.venta_id, v.caja_id, v.moneda_id, v.tipo_documento_id, v.canal, v.estado,
               v.total_bruto, v.total_descuentos, v.total_recargos, v.total_impuestos, v.total_final,
+              v.base_ventas_total_final, v.base_ventas_sin_impuestos,
               v.comentario, v.fecha, v.creado_el, v.venta_referencia_id,
               td.codigo AS tipo_documento_codigo, td.nombre AS tipo_documento_nombre
        FROM ventas v
@@ -1192,6 +1203,8 @@ export class VentasService {
       totalRecargos: v.total_recargos,
       totalImpuestos: v.total_impuestos,
       totalFinal: v.total_final,
+      baseVentasTotalFinal: v.base_ventas_total_final,
+      baseVentasSinImpuestos: v.base_ventas_sin_impuestos,
       comentario: v.comentario,
       fecha: v.fecha,
       creadoEl: v.creado_el,

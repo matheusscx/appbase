@@ -13,7 +13,7 @@ import { ItemsService } from '../items/items.service';
 import { PagosService } from '../pagos/pagos.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { EstadoVenta } from './entities/venta.entity';
+import { EstadoVenta, Venta } from './entities/venta.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -234,6 +234,36 @@ describe('VentasService', () => {
       expect(calculoPreciosService.calcular).toHaveBeenCalled();
       expect(dataSourceMock.transaction).toHaveBeenCalled();
       expect(result.estado).toBe(EstadoVenta.PAGADA);
+    });
+
+    it('congela bases de venta al crear', async () => {
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        totales: {
+          subtotalNeto: '10000.0000',
+          totalDescuentos: '0.0000',
+          totalRecargos: '0.0000',
+          totalImpuestos: '1900.0000',
+          totalFinal: '11900.0000',
+        },
+      });
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      const ventaCreate = manager.create.mock.calls.find(
+        (call) => call[0] === Venta,
+      );
+      expect(ventaCreate?.[1]).toEqual(
+        expect.objectContaining({
+          totalFinal: '11900.0000',
+          baseVentasTotalFinal: '11900.0000',
+          baseVentasSinImpuestos: '10000.0000',
+        }),
+      );
     });
 
     it('llama registrarMovimiento del inventario para items tipo producto', async () => {

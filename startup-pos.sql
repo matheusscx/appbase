@@ -741,6 +741,8 @@ CREATE TABLE "ventas" (
   "total_recargos"        NUMERIC(18,4) NOT NULL DEFAULT 0,
   "total_impuestos"       NUMERIC(18,4) NOT NULL DEFAULT 0,
   "total_final"           NUMERIC(18,4) NOT NULL DEFAULT 0,
+  "base_ventas_total_final"   NUMERIC(18,4) NOT NULL DEFAULT 0,
+  "base_ventas_sin_impuestos" NUMERIC(18,4) NOT NULL DEFAULT 0,
   "venta_referencia_id"   UUID          REFERENCES "ventas" ("venta_id"),  -- para notas de crédito
   "comentario"            TEXT,
   "creado_el"             TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

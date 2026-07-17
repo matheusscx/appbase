@@ -90,6 +90,24 @@ export class Venta {
   })
   totalFinal: string;
 
+  @Column({
+    name: 'base_ventas_total_final',
+    type: 'decimal',
+    precision: 18,
+    scale: 4,
+    default: '0',
+  })
+  baseVentasTotalFinal: string;
+
+  @Column({
+    name: 'base_ventas_sin_impuestos',
+    type: 'decimal',
+    precision: 18,
+    scale: 4,
+    default: '0',
+  })
+  baseVentasSinImpuestos: string;
+
   @Column({ name: 'venta_referencia_id', type: 'uuid', nullable: true })
   ventaReferenciaId: string | null;
 
