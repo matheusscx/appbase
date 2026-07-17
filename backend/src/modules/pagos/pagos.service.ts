@@ -9,6 +9,15 @@ import Decimal from 'decimal.js';
 import { CajaService } from '../caja/caja.service';
 import { EstadoVenta } from '../ventas/entities/venta.entity';
 import { Pago } from './entities/pago.entity';
+import {
+  PagoAplicacion,
+  TipoPagoAplicacion,
+} from './entities/pago-aplicacion.entity';
+import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
+import {
+  dispatchAsignacionPropina,
+  type PagoNetoInput,
+} from './asignacion-propina';
 import type { CreatePagoDto, PagoItemDto } from './dto/create-pago.dto';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
@@ -86,6 +95,7 @@ export class PagosService {
   /**
    * Lógica compartida de creación de pagos dentro de una transacción existente.
    * Usada tanto en VentasService (al crear) como en PagosService.registrarAbono.
+   * Persiste `pago_aplicaciones` (venta / propina) vía estrategia NO_VUELTO.
    */
   async registrar(
     manager: EntityManager,
@@ -96,13 +106,27 @@ export class PagosService {
       cajaId: string;
       monedaOficialId: string;
       target: string;
+      propinaMonto?: string;
+      ventaPropinaId?: string | null;
+      estrategia?: EstrategiaAsignacionPropina;
     },
-  ): Promise<Pago[]> {
-    const { tenantId, ventaId, pagos, cajaId, monedaOficialId, target } =
-      params;
+  ): Promise<{ pagos: Pago[]; montoAplicadoVenta: string }> {
+    const {
+      tenantId,
+      ventaId,
+      pagos,
+      cajaId,
+      monedaOficialId,
+      target,
+      propinaMonto = '0',
+      ventaPropinaId = null,
+      estrategia = EstrategiaAsignacionPropina.NO_VUELTO,
+    } = params;
 
     // Ventas sin pago = cuentas por cobrar
-    if (pagos.length === 0) return [];
+    if (pagos.length === 0) {
+      return { pagos: [], montoAplicadoVenta: '0.0000' };
+    }
 
     // Resolver nombre + permite_vuelto de cada método de pago
     const metodoPagoRows: {
@@ -147,7 +171,7 @@ export class PagosService {
       }
     }
 
-    // Guardar pagos + movimientos de caja
+    // Guardar pagos
     const pagosGuardados: Pago[] = [];
     for (let i = 0; i < pagos.length; i++) {
       const p = pagos[i];
@@ -171,7 +195,49 @@ export class PagosService {
       pagosGuardados.push(pago);
     }
 
-    // Movimiento de caja por cada pago
+    // Split venta / propina (determinista)
+    const pagosNetos: PagoNetoInput[] = pagosGuardados.map((pago, i) => ({
+      pagoIdx: i,
+      metodoPagoId: pago.metodoPagoId,
+      permiteVuelto:
+        metodoPagoMap.get(pago.metodoPagoId)?.permiteVuelto === true,
+      neto: new Decimal(pago.monto)
+        .minus(new Decimal(pago.vuelto ?? '0'))
+        .toFixed(4),
+    }));
+
+    const aplicaciones = dispatchAsignacionPropina(
+      estrategia,
+      pagosNetos,
+      propinaMonto,
+    );
+
+    let montoAplicadoVenta = new Decimal(0);
+    for (const app of aplicaciones) {
+      const pago = pagosGuardados[app.pagoIdx];
+      const tipo =
+        app.tipo === 'venta'
+          ? TipoPagoAplicacion.VENTA
+          : TipoPagoAplicacion.PROPINA;
+      if (tipo === TipoPagoAplicacion.VENTA) {
+        montoAplicadoVenta = montoAplicadoVenta.plus(app.monto);
+      }
+      await manager.save(
+        PagoAplicacion,
+        manager.create(PagoAplicacion, {
+          tenantId,
+          pagoId: pago.id,
+          tipo,
+          referenciaId:
+            tipo === TipoPagoAplicacion.PROPINA
+              ? (ventaPropinaId ?? null)
+              : ventaId,
+          monto: app.monto,
+        }),
+      );
+    }
+
+    // Movimiento de caja por cada pago (neto incluye tip)
     for (let i = 0; i < pagos.length; i++) {
       const p = pagos[i];
       const vueltoDecimal = new Decimal(pagosGuardados[i].vuelto ?? '0');
@@ -187,7 +253,10 @@ export class PagosService {
       });
     }
 
-    return pagosGuardados;
+    return {
+      pagos: pagosGuardados,
+      montoAplicadoVenta: montoAplicadoVenta.toFixed(4),
+    };
   }
 
   /**
@@ -252,22 +321,19 @@ export class PagosService {
       const saldo = Decimal.max(0, totalFinal.minus(montoAplicado));
 
       // Registrar los nuevos pagos
-      const savedPagos = await this.registrar(manager, {
-        tenantId,
-        ventaId: dto.ventaId,
-        pagos: dto.pagos,
-        cajaId: caja.id,
-        monedaOficialId: venta.moneda_id,
-        target: saldo.toFixed(4),
-      });
+      const { pagos: savedPagos, montoAplicadoVenta: montoNuevosVenta } =
+        await this.registrar(manager, {
+          tenantId,
+          ventaId: dto.ventaId,
+          pagos: dto.pagos,
+          cajaId: caja.id,
+          monedaOficialId: venta.moneda_id,
+          target: saldo.toFixed(4),
+          propinaMonto: '0',
+        });
 
-      // Recalcular monto total aplicado y nuevo estado
-      const montoNuevosPagos = savedPagos.reduce(
-        (acc, p) =>
-          acc.plus(new Decimal(p.monto).minus(new Decimal(p.vuelto ?? '0'))),
-        new Decimal(0),
-      );
-      const newMontoAplicado = montoAplicado.plus(montoNuevosPagos);
+      // Recalcular monto total aplicado y nuevo estado (solo aplicaciones venta)
+      const newMontoAplicado = montoAplicado.plus(montoNuevosVenta);
       const newEstado = calcularEstadoVenta(
         venta.total_final,
         newMontoAplicado.toFixed(4),

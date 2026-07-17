@@ -121,7 +121,7 @@ describe('VentasService', () => {
 
   beforeEach(async () => {
     const manager = buildManagerMock();
-    pagosServiceMock = { registrar: jest.fn().mockResolvedValue([]) };
+    pagosServiceMock = { registrar: jest.fn().mockResolvedValue({ pagos: [], montoAplicadoVenta: '0.0000' }) };
     dataSourceMock = {
       transaction: jest
         .fn()
@@ -213,9 +213,10 @@ describe('VentasService', () => {
     });
 
     it('crea venta en estado pagada cuando monto cubre el total', async () => {
-      pagosServiceMock.registrar.mockResolvedValueOnce([
-        { id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' },
-      ]);
+      pagosServiceMock.registrar.mockResolvedValueOnce({
+        pagos: [{ id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' }],
+        montoAplicadoVenta: '100.0000',
+      });
       const result = await service.crear(TENANT_ID, USUARIO_ID, baseDto);
       expect(result).toBeDefined();
       // eslint-disable-next-line @typescript-eslint/unbound-method
@@ -321,9 +322,10 @@ describe('VentasService', () => {
         ...baseDto,
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '150.0000' }],
       };
-      pagosServiceMock.registrar.mockResolvedValueOnce([
-        { id: 'pago-uuid-001', monto: '150.0000', vuelto: '50.0000' },
-      ]);
+      pagosServiceMock.registrar.mockResolvedValueOnce({
+        pagos: [{ id: 'pago-uuid-001', monto: '150.0000', vuelto: '50.0000' }],
+        montoAplicadoVenta: '100.0000',
+      });
       const result = await service.crear(
         TENANT_ID,
         USUARIO_ID,
@@ -454,9 +456,10 @@ describe('VentasService', () => {
           totalFinal: '4000.0000',
         },
       });
-      pagosServiceMock.registrar.mockResolvedValueOnce([
-        { id: 'pago-uuid-001', monto: '4000.0000', vuelto: '0.0000' },
-      ]);
+      pagosServiceMock.registrar.mockResolvedValueOnce({
+        pagos: [{ id: 'pago-uuid-001', monto: '4000.0000', vuelto: '0.0000' }],
+        montoAplicadoVenta: '4000.0000',
+      });
 
       const result = await service.crear(
         TENANT_ID,
@@ -497,9 +500,10 @@ describe('VentasService', () => {
     };
 
     it('usa la caja virtual del tenant en vez de la caja física del usuario', async () => {
-      pagosServiceMock.registrar.mockResolvedValueOnce([
-        { id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' },
-      ]);
+      pagosServiceMock.registrar.mockResolvedValueOnce({
+        pagos: [{ id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' }],
+        montoAplicadoVenta: '100.0000',
+      });
       const result = await service.crear(TENANT_ID, USUARIO_ID, dtoOnline);
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(cajaService.findVirtual).toHaveBeenCalledWith(TENANT_ID);

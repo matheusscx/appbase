@@ -141,7 +141,7 @@ describe('PagosService', () => {
           target: '100.0000',
         },
       );
-      expect(result).toEqual([]);
+      expect(result).toEqual({ pagos: [], montoAplicadoVenta: '0.0000' });
       expect(manager.save).not.toHaveBeenCalled();
     });
 
@@ -161,9 +161,78 @@ describe('PagosService', () => {
         target: '100.0000',
       });
 
-      expect(result).toHaveLength(1);
+      expect(result.pagos).toHaveLength(1);
+      expect(result.montoAplicadoVenta).toBe('100.0000');
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(cajaSvc.registrarMovimientoEnTransaccion).toHaveBeenCalledTimes(1);
+    });
+
+    it('persiste aplicación venta y propina con cobro mixto (orden-independiente)', async () => {
+      const manager = buildManagerMock([
+        ...METODO_EFECTIVO_ROWS,
+        ...METODO_TARJETA_ROWS,
+      ]);
+      // Cada save de Pago necesita id distinto
+      let pagoSeq = 0;
+      manager.save.mockImplementation(
+        (_entity: unknown, data: Record<string, unknown>): Promise<unknown> => {
+          if (data['metodoPagoId'] !== undefined) {
+            pagoSeq += 1;
+            return Promise.resolve({
+              id: `pago-${pagoSeq}`,
+              ...data,
+              vuelto: (data['vuelto'] as string | undefined) ?? '0.0000',
+            });
+          }
+          return Promise.resolve({ id: 'app-1', ...data });
+        },
+      );
+
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+
+      const result = await svc.registrar(manager as unknown as EntityManager, {
+        tenantId: TENANT_ID,
+        ventaId: VENTA_ID,
+        pagos: [
+          { metodoPagoId: EFECTIVO_ID, monto: '30000' },
+          { metodoPagoId: TARJETA_ID, monto: '25000' },
+        ],
+        cajaId: CAJA_ID,
+        monedaOficialId: MONEDA_ID,
+        target: '55000',
+        propinaMonto: '5000',
+        ventaPropinaId: 'vp-uuid',
+      });
+
+      expect(result.montoAplicadoVenta).toBe('50000.0000');
+      const appSaves = (
+        manager.save.mock.calls as [unknown, Record<string, unknown>][]
+      ).filter((c) => c[1]?.['tipo'] !== undefined);
+      const tipos = appSaves.map((c) => ({
+        tipo: c[1]['tipo'],
+        monto: c[1]['monto'],
+        pagoId: c[1]['pagoId'],
+      }));
+      expect(tipos).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            tipo: 'venta',
+            monto: '30000.0000',
+            pagoId: 'pago-1',
+          }),
+          expect.objectContaining({
+            tipo: 'venta',
+            monto: '20000.0000',
+            pagoId: 'pago-2',
+          }),
+          expect.objectContaining({
+            tipo: 'propina',
+            monto: '5000.0000',
+            pagoId: 'pago-2',
+          }),
+        ]),
+      );
     });
 
     it('asigna vuelto al pago con permite_vuelto cuando suma supera el target', async () => {

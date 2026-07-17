@@ -432,7 +432,7 @@ export class VentasService {
     }
 
     // 7g. Pagos — delegado a PagosService (incluye vuelto + movimientos de caja)
-    const savedPagos = await this.pagosService.registrar(manager, {
+    const saved = await this.pagosService.registrar(manager, {
       tenantId,
       ventaId: venta.id,
       pagos: pagosDto,
@@ -441,16 +441,11 @@ export class VentasService {
       target: resultado.totales.totalFinal,
     });
 
-    // 7h. Actualizar estado de la venta según montos netos de los pagos registrados
-    if (savedPagos.length > 0) {
-      const montoAplicado = savedPagos.reduce(
-        (acc, p) =>
-          acc.plus(new Decimal(p.monto)).minus(new Decimal(p.vuelto ?? '0')),
-        new Decimal(0),
-      );
+    // 7h. Actualizar estado de la venta según montos aplicados a la venta
+    if (saved.pagos.length > 0) {
       const estadoFinal = calcularEstadoVenta(
         resultado.totales.totalFinal,
-        montoAplicado.toFixed(4),
+        saved.montoAplicadoVenta,
       );
       await manager.query(
         `UPDATE ventas SET estado=$1, actualizado_el=NOW() WHERE venta_id=$2`,
