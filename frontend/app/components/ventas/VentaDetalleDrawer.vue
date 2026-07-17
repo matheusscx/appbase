@@ -172,6 +172,8 @@ function cantidadDetalleLabel(det: Detalle): string {
   }
   return det.cantidad
 }
+
+function estadoLabel(estado: string): string {
   const map: Record<string, string> = {
     pendiente: 'Pendiente',
     pagada_parcial: 'Parcial',
