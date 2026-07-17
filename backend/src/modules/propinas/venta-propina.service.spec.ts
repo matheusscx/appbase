@@ -6,6 +6,7 @@ import {
   TipoVentaPropina,
   VentaPropina,
 } from './entities/venta-propina.entity';
+import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { VentaPropinaService } from './venta-propina.service';
 
 describe('VentaPropinaService', () => {
@@ -40,6 +41,9 @@ describe('VentaPropinaService', () => {
     ventaId: 'v1',
     garzonId: 'g1',
     porcentajeSugerido: '0.10',
+    sesionGarzonId: null as string | null,
+    turnoId: null as string | null,
+    tipoGarzon: null as TipoGarzon | null,
   };
 
   it('tipo=sugerida y estado=pagada cuando montoPagado === montoSugerido > 0', async () => {
@@ -94,6 +98,62 @@ describe('VentaPropinaService', () => {
         ...base,
         montoSugerido: '0',
         montoPagado: '-1',
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('persiste sesion, turno y tipo_garzon', async () => {
+    const result = await service.crearEnTransaccion(
+      manager as unknown as EntityManager,
+      {
+        ...base,
+        montoSugerido: '500',
+        montoPagado: '500',
+        sesionGarzonId: 's1',
+        turnoId: 'tu1',
+        tipoGarzon: TipoGarzon.GARZON,
+      },
+    );
+    expect(manager.create).toHaveBeenCalledWith(
+      VentaPropina,
+      expect.objectContaining({
+        sesionGarzonId: 's1',
+        turnoId: 'tu1',
+        tipoGarzon: TipoGarzon.GARZON,
+        liquidacionId: null,
+      }),
+    );
+    expect(result.sesionGarzonId).toBe('s1');
+  });
+
+  it('permite nulls en backfill/legado', async () => {
+    await service.crearEnTransaccion(manager as unknown as EntityManager, {
+      ...base,
+      montoSugerido: '500',
+      montoPagado: '500',
+      sesionGarzonId: null,
+      turnoId: null,
+      tipoGarzon: null,
+    });
+    expect(manager.create).toHaveBeenCalledWith(
+      VentaPropina,
+      expect.objectContaining({
+        sesionGarzonId: null,
+        turnoId: null,
+        tipoGarzon: null,
+      }),
+    );
+  });
+
+  it('rechaza sesión/turno/tipo desbalanceados', async () => {
+    await expect(
+      service.crearEnTransaccion(manager as unknown as EntityManager, {
+        ...base,
+        montoSugerido: '500',
+        montoPagado: '500',
+        sesionGarzonId: 's1',
+        turnoId: null,
+        tipoGarzon: null,
       }),
     ).rejects.toThrow(BadRequestException);
   });

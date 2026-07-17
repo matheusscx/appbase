@@ -1133,6 +1133,10 @@ CREATE TABLE "venta_propina" (
   "monto_pagado"         NUMERIC(18,4) NOT NULL,
   "tipo"                 TEXT          NOT NULL,
   "estado"               TEXT          NOT NULL,
+  "sesion_garzon_id"     UUID,
+  "turno_id"             UUID,
+  "tipo_garzon"          TEXT,
+  "liquidacion_id"       UUID,
   "creado_el"            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "eliminado_el"         TIMESTAMPTZ,
@@ -1140,7 +1144,14 @@ CREATE TABLE "venta_propina" (
   CONSTRAINT chk_venta_propina_estado CHECK (estado IN ('pagada', 'sin_propina')),
   CONSTRAINT chk_venta_propina_montos CHECK (
     monto_sugerido >= 0 AND monto_pagado >= 0 AND porcentaje_sugerido >= 0
-  )
+  ),
+  CONSTRAINT chk_venta_propina_tipo_garzon
+    CHECK (tipo_garzon IS NULL OR tipo_garzon IN ('garzon', 'cocina', 'barra')),
+  CONSTRAINT chk_venta_propina_sesion_turno_parity
+    CHECK (
+      (sesion_garzon_id IS NULL AND turno_id IS NULL AND tipo_garzon IS NULL)
+      OR (sesion_garzon_id IS NOT NULL AND turno_id IS NOT NULL AND tipo_garzon IS NOT NULL)
+    )
 );
 
 CREATE UNIQUE INDEX uq_venta_propina_venta
@@ -1149,6 +1160,12 @@ CREATE UNIQUE INDEX uq_venta_propina_venta
 
 CREATE INDEX idx_venta_propina_garzon
   ON venta_propina (tenant_id, garzon_id, creado_el);
+
+CREATE INDEX idx_venta_propina_liquidacion
+  ON venta_propina (tenant_id, liquidacion_id);
+
+CREATE INDEX idx_venta_propina_turno
+  ON venta_propina (tenant_id, turno_id, creado_el);
 
 CREATE TABLE turnos (
     turno_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1186,6 +1203,19 @@ CREATE UNIQUE INDEX uq_sesion_garzon_abierta
   WHERE estado = 'abierta' AND eliminado_el IS NULL;
 CREATE UNIQUE INDEX uq_sesion_garzon_tenant_id_turno
   ON sesiones_garzon (tenant_id, sesion_garzon_id, turno_id);
+
+ALTER TABLE venta_propina
+  ADD CONSTRAINT fk_venta_propina_sesion_garzon
+  FOREIGN KEY (sesion_garzon_id) REFERENCES sesiones_garzon (sesion_garzon_id);
+
+ALTER TABLE venta_propina
+  ADD CONSTRAINT fk_venta_propina_turno
+  FOREIGN KEY (turno_id) REFERENCES turnos (turno_id);
+
+ALTER TABLE venta_propina
+  ADD CONSTRAINT fk_venta_propina_sesion_turno
+  FOREIGN KEY (tenant_id, sesion_garzon_id, turno_id)
+  REFERENCES sesiones_garzon (tenant_id, sesion_garzon_id, turno_id);
 
 CREATE TABLE cuentas (
     cuenta_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

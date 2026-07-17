@@ -457,6 +457,9 @@ export class VentasService {
           porcentajeSugerido: tip.porcentajeSugerido ?? '0.10',
           montoSugerido: tip.montoSugerido ?? tip.montoPagado,
           montoPagado: tip.montoPagado,
+          sesionGarzonId: tip.sesionGarzonId ?? null,
+          turnoId: tip.turnoId ?? null,
+          tipoGarzon: tip.tipoGarzon ?? null,
         },
       );
       ventaPropinaId = ventaPropina.id;

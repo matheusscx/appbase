@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
+import { TipoGarzon } from '../../garzones/enums/tipo-garzon.enum';
 
 export enum TipoVentaPropina {
   SUGERIDA = 'sugerida',
@@ -66,6 +67,18 @@ export class VentaPropina {
 
   @Column({ type: 'text' })
   estado: EstadoVentaPropina;
+
+  @Column({ name: 'sesion_garzon_id', type: 'uuid', nullable: true })
+  sesionGarzonId: string | null;
+
+  @Column({ name: 'turno_id', type: 'uuid', nullable: true })
+  turnoId: string | null;
+
+  @Column({ name: 'tipo_garzon', type: 'text', nullable: true })
+  tipoGarzon: TipoGarzon | null;
+
+  @Column({ name: 'liquidacion_id', type: 'uuid', nullable: true })
+  liquidacionId: string | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

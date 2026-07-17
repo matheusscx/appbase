@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
+import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import {
   EstadoVentaPropina,
   TipoVentaPropina,
@@ -14,6 +15,9 @@ export interface CrearVentaPropinaInput {
   porcentajeSugerido: string;
   montoSugerido: string;
   montoPagado: string;
+  sesionGarzonId: string | null;
+  turnoId: string | null;
+  tipoGarzon: TipoGarzon | null;
 }
 
 @Injectable()
@@ -26,6 +30,15 @@ export class VentaPropinaService {
     const montoSugerido = new Decimal(input.montoSugerido || '0');
     if (montoPagado.lt(0)) {
       throw new BadRequestException('Propina inválida');
+    }
+
+    if (
+      (input.sesionGarzonId == null) !== (input.turnoId == null) ||
+      (input.sesionGarzonId == null) !== (input.tipoGarzon == null)
+    ) {
+      throw new BadRequestException(
+        'Sesión, turno y tipo de propina deben ir juntos o ser todos null',
+      );
     }
 
     const tipo = montoPagado.equals(montoSugerido)
@@ -44,6 +57,10 @@ export class VentaPropinaService {
       montoPagado: montoPagado.toFixed(4),
       tipo,
       estado,
+      sesionGarzonId: input.sesionGarzonId,
+      turnoId: input.turnoId,
+      tipoGarzon: input.tipoGarzon,
+      liquidacionId: null,
     });
     return manager.save(VentaPropina, entity);
   }
