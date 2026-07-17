@@ -37,6 +37,11 @@ import {
   RolImpresora,
   TipoConexionImpresora,
 } from '../impresoras/entities/impresora.entity';
+import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
+import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
+import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
+import { CriterioDistribucion } from '../propinas/enums/criterio-distribucion.enum';
+import { BaseVentasGrupo } from '../propinas/enums/base-ventas-grupo.enum';
 import { Caja } from '../caja/entities/caja.entity';
 import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
@@ -122,6 +127,10 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly turnoRepo: Repository<Turno>,
     @InjectRepository(Impresora)
     private readonly impresoraRepo: Repository<Impresora>,
+    @InjectRepository(PropinaConfiguracion)
+    private readonly propinaConfigRepo: Repository<PropinaConfiguracion>,
+    @InjectRepository(PropinaGrupoDistribucion)
+    private readonly propinaGrupoRepo: Repository<PropinaGrupoDistribucion>,
     private readonly credencialesService: CredencialesService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
@@ -148,6 +157,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedTenants();
     await this.seedCausasMerma();
     await this.seedCajasVirtuales();
+    await this.seedPropinaConfiguracion();
     await this.seedTerceros();
     await this.seedTenantMonedas();
     await this.seedTenantMetodosPago();
@@ -1001,6 +1011,47 @@ export class SeederService implements OnApplicationBootstrap {
           }),
         );
       }
+    }
+  }
+
+  private async seedPropinaConfiguracion(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CONFIG_ID = '550e8400-e29b-41d4-a716-446655440264';
+    const GRUPO_ID = '550e8400-e29b-41d4-a716-446655440265';
+
+    const configExists = await this.propinaConfigRepo.findOne({
+      where: { id: CONFIG_ID },
+    });
+    if (!configExists) {
+      await this.propinaConfigRepo.save(
+        this.propinaConfigRepo.create({
+          id: CONFIG_ID,
+          tenantId: PARIS,
+          version: 1,
+          actualizadoPor: null,
+        }),
+      );
+    }
+
+    const grupoExists = await this.propinaGrupoRepo.findOne({
+      where: { id: GRUPO_ID },
+    });
+    if (!grupoExists) {
+      await this.propinaGrupoRepo.save(
+        this.propinaGrupoRepo.create({
+          id: GRUPO_ID,
+          tenantId: PARIS,
+          configuracionId: CONFIG_ID,
+          tipoGarzon: TipoGarzon.GARZON,
+          nombre: 'Garzones',
+          porcentaje: '1.000000',
+          criterio: CriterioDistribucion.PARTES_IGUALES,
+          baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+          manualModo: null,
+          activo: true,
+          orden: 0,
+        }),
+      );
     }
   }
 

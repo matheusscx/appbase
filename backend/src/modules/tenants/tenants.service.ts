@@ -14,6 +14,11 @@ import { TenantModulo } from './entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from './entities/tenant-formula-precio.entity';
 import { Caja } from '../caja/entities/caja.entity';
 import { RazonSocial } from './entities/razon-social.entity';
+import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
+import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
+import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
+import { CriterioDistribucion } from '../propinas/enums/criterio-distribucion.enum';
+import { BaseVentasGrupo } from '../propinas/enums/base-ventas-grupo.enum';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
@@ -113,6 +118,31 @@ export class TenantsService {
         saldoInicial: '0',
       });
       await manager.save(Caja, caja);
+
+      // 6b. Configuración default de distribución de propinas (100% Garzones)
+      const propinaConfig = await manager.save(
+        PropinaConfiguracion,
+        manager.create(PropinaConfiguracion, {
+          tenantId: savedTenant.id,
+          version: 1,
+          actualizadoPor: null,
+        }),
+      );
+      await manager.save(
+        PropinaGrupoDistribucion,
+        manager.create(PropinaGrupoDistribucion, {
+          tenantId: savedTenant.id,
+          configuracionId: propinaConfig.id,
+          tipoGarzon: TipoGarzon.GARZON,
+          nombre: 'Garzones',
+          porcentaje: '1.000000',
+          criterio: CriterioDistribucion.PARTES_IGUALES,
+          baseVentas: BaseVentasGrupo.TOTAL_FINAL,
+          manualModo: null,
+          activo: true,
+          orden: 0,
+        }),
+      );
 
       // 7. Sembrar causas de merma fijas del sistema
       for (const nombre of CAUSAS_MERMA_FIJAS) {
