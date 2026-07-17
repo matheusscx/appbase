@@ -129,6 +129,25 @@ async function abrirEntrarTurno() {
   }
 }
 
+/** Toast de error; si falta sesión de trabajo, ofrece CTA para entrar a turno. */
+function toastErrorOperativo(e: unknown, fallback: string) {
+  const msg = apiErrorMsg(e, fallback)
+  if (msg.includes('sesión de trabajo')) {
+    toast.add({
+      title: msg,
+      color: 'error',
+      actions: [{
+        label: 'Entrar a turno',
+        color: 'neutral',
+        variant: 'outline',
+        onClick: () => { void abrirEntrarTurno() },
+      }],
+    })
+    return
+  }
+  toast.add({ title: msg, color: 'error' })
+}
+
 function confirmarEntrarTurno() {
   const turnoId = turnoSeleccionadoId.value
   if (!turnoId) return
@@ -299,7 +318,7 @@ async function abrirCuentaConPin(pin: string, nombre: string) {
     toast.add({ title: `Cuenta abierta por ${nombre}`, color: 'success' })
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al abrir la cuenta'), color: 'error' })
+    toastErrorOperativo(e, 'Error al abrir la cuenta')
   }
 }
 
@@ -678,7 +697,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
     volverACuentas()
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cerrar la cuenta'), color: 'error' })
+    toastErrorOperativo(e, 'Error al cerrar la cuenta')
   }
   finally {
     submitting.value = false

@@ -42,7 +42,7 @@ export function useGarzones() {
   const eliminar = (id: string) =>
     useApiFetch(`${apiUrl}/garzones/${id}`, { method: 'DELETE' })
 
-  /** Verifica un PIN y devuelve el garzón identificado (o lanza 401). */
+  /** Verifica un PIN y devuelve el garzón identificado (o lanza 400). */
   const identificar = (pin: string) =>
     useApiFetch<GarzonIdentificado>(`${apiUrl}/garzones/identificar`, {
       method: 'POST',

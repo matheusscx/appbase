@@ -234,6 +234,37 @@ describe('SesionesGarzonService', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('listarAbiertas incluye sesión aunque garzón/turno estén soft-deleted', async () => {
+    dataSource.query.mockResolvedValueOnce([
+      {
+        sesion_garzon_id: SESION_ID,
+        garzon_id: GARZON_ID,
+        garzon_nombre: null,
+        turno_id: TURNO_ID,
+        turno_nombre: null,
+        inicio_el: new Date('2026-07-16T12:00:00Z'),
+        fin_el: null,
+        estado: EstadoSesionGarzon.ABIERTA,
+        origen_cierre: null,
+        cerrada_por_usuario_id: null,
+      },
+    ]);
+
+    const result = await service.listarAbiertas(TENANT);
+
+    const listCall = dataSource.query.mock.calls[0] as [string, ...unknown[]];
+    const listSql = listCall[0];
+    expect(listSql).toMatch(/LEFT JOIN\s+garzones/i);
+    expect(listSql).toMatch(/LEFT JOIN\s+turnos/i);
+    expect(listSql).not.toMatch(/(?<!LEFT )JOIN\s+garzones/i);
+    expect(listSql).not.toMatch(/(?<!LEFT )JOIN\s+turnos/i);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe(SESION_ID);
+    expect(result[0].garzonNombre).toBe('');
+    expect(result[0].turnoNombre).toBe('');
+  });
+
   it('historial incluye sesión aunque el turno esté soft-deleted', async () => {
     dataSource.query
       .mockResolvedValueOnce([{ total: 1 }])

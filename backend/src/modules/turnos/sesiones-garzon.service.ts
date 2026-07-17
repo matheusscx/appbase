@@ -152,9 +152,9 @@ export class SesionesGarzonService {
     const rows: {
       sesion_garzon_id: string;
       garzon_id: string;
-      garzon_nombre: string;
+      garzon_nombre: string | null;
       turno_id: string;
-      turno_nombre: string;
+      turno_nombre: string | null;
       inicio_el: Date;
       fin_el: Date | null;
       estado: EstadoSesionGarzon;
@@ -172,8 +172,8 @@ export class SesionesGarzonService {
               s.origen_cierre,
               s.cerrada_por_usuario_id
        FROM sesiones_garzon s
-       JOIN garzones g ON g.garzon_id = s.garzon_id AND g.eliminado_el IS NULL
-       JOIN turnos t ON t.turno_id = s.turno_id AND t.eliminado_el IS NULL
+       LEFT JOIN garzones g ON g.garzon_id = s.garzon_id AND g.eliminado_el IS NULL
+       LEFT JOIN turnos t ON t.turno_id = s.turno_id AND t.eliminado_el IS NULL
        WHERE s.tenant_id = $1
          AND s.estado = 'abierta'
          AND s.eliminado_el IS NULL

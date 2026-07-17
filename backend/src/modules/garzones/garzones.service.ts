@@ -11,6 +11,10 @@ import * as bcrypt from 'bcryptjs';
 import { Garzon } from './entities/garzon.entity';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
+import {
+  EstadoSesionGarzon,
+  SesionGarzon,
+} from '../turnos/entities/sesion-garzon.entity';
 
 const BCRYPT_COST = 10;
 // El PIN se genera automáticamente; estos acotan la generación única.
@@ -39,6 +43,8 @@ export class GarzonesService {
   constructor(
     @InjectRepository(Garzon)
     private readonly garzonRepo: Repository<Garzon>,
+    @InjectRepository(SesionGarzon)
+    private readonly sesionRepo: Repository<SesionGarzon>,
   ) {}
 
   private toPublico(g: Garzon): GarzonPublico {
@@ -96,6 +102,18 @@ export class GarzonesService {
 
   async eliminar(tenantId: string, id: string): Promise<void> {
     await this.getOrThrow(tenantId, id);
+    const abiertas = await this.sesionRepo.count({
+      where: {
+        tenantId,
+        garzonId: id,
+        estado: EstadoSesionGarzon.ABIERTA,
+      },
+    });
+    if (abiertas > 0) {
+      throw new BadRequestException(
+        'No se puede eliminar un garzón con una sesión abierta',
+      );
+    }
     await this.garzonRepo.softDelete({ id, tenantId });
   }
 

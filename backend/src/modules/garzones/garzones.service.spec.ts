@@ -5,6 +5,10 @@ import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { GarzonesService } from './garzones.service';
 import { Garzon } from './entities/garzon.entity';
+import {
+  EstadoSesionGarzon,
+  SesionGarzon,
+} from '../turnos/entities/sesion-garzon.entity';
 
 // `crypto.randomInt` es no-configurable (no se puede spyOn), así que se mockea
 // el módulo dejando la implementación real por defecto y sobrescribiéndola solo
@@ -24,6 +28,10 @@ type Repo = {
   softDelete: jest.Mock;
 };
 
+type SesionRepo = {
+  count: jest.Mock;
+};
+
 function makeRepo(): Repo {
   return {
     find: jest.fn().mockResolvedValue([]),
@@ -31,6 +39,12 @@ function makeRepo(): Repo {
     create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
     softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+  };
+}
+
+function makeSesionRepo(): SesionRepo {
+  return {
+    count: jest.fn().mockResolvedValue(0),
   };
 }
 
@@ -53,13 +67,16 @@ function garzon(over: Partial<Garzon> & { pin?: string }): Garzon {
 describe('GarzonesService', () => {
   let service: GarzonesService;
   let repo: Repo;
+  let sesionRepo: SesionRepo;
 
   beforeEach(async () => {
     repo = makeRepo();
+    sesionRepo = makeSesionRepo();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GarzonesService,
         { provide: getRepositoryToken(Garzon), useValue: repo },
+        { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
       ],
     }).compile();
     service = module.get<GarzonesService>(GarzonesService);
@@ -136,6 +153,40 @@ describe('GarzonesService', () => {
       await expect(service.regenerarPin(TENANT, 'inexistente')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('eliminar', () => {
+    it('bloquea soft-delete si el garzón tiene sesión abierta', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1' }));
+      sesionRepo.count.mockResolvedValue(1);
+
+      await expect(service.eliminar(TENANT, 'g1')).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.eliminar(TENANT, 'g1')).rejects.toThrow(
+        'No se puede eliminar un garzón con una sesión abierta',
+      );
+      expect(sesionRepo.count).toHaveBeenCalledWith({
+        where: {
+          tenantId: TENANT,
+          garzonId: 'g1',
+          estado: EstadoSesionGarzon.ABIERTA,
+        },
+      });
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('soft-deletea si no hay sesión abierta', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1' }));
+      sesionRepo.count.mockResolvedValue(0);
+
+      await service.eliminar(TENANT, 'g1');
+
+      expect(repo.softDelete).toHaveBeenCalledWith({
+        id: 'g1',
+        tenantId: TENANT,
+      });
     });
   });
 });
