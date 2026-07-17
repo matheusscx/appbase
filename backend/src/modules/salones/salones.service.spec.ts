@@ -12,6 +12,7 @@ import { GarzonesService } from '../garzones/garzones.service';
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
+import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 
 const UNIDADES_CATALOGO = [
   { codigo: 'g', magnitud: 'masa', factorBase: '1' },
@@ -28,6 +29,9 @@ const RECETA = 'receta-uuid';
 const ING = 'ing-uuid';
 const GARZON = 'garzon-uuid';
 const PIN = '111111';
+const SESION_RESPONSABLE = 'sesion-responsable';
+const TURNO = 'turno-uuid';
+const GARZON_RESPONSABLE = 'garzon-responsable';
 
 const SNAPSHOT = {
   omitidos: [ING],
@@ -67,7 +71,10 @@ describe('SalonesService', () => {
   let cuentaLineaRepo: Repo;
   let ventas: { crearEnTransaccion: jest.Mock };
   let garzones: { resolverGarzonPorPin: jest.Mock };
-  let sesiones: { assertSesionAbierta: jest.Mock };
+  let sesiones: {
+    assertSesionAbierta: jest.Mock;
+    obtenerSesionAbierta: jest.Mock;
+  };
   let asignaciones: {
     registrarApertura: jest.Mock;
     cerrarTramoVigente: jest.Mock;
@@ -105,6 +112,11 @@ describe('SalonesService', () => {
     };
     sesiones = {
       assertSesionAbierta: jest.fn().mockResolvedValue(undefined),
+      obtenerSesionAbierta: jest.fn().mockResolvedValue({
+        id: SESION_RESPONSABLE,
+        turnoId: TURNO,
+        tipoGarzon: TipoGarzon.GARZON,
+      }),
     };
     asignaciones = {
       registrarApertura: jest.fn().mockResolvedValue(undefined),
@@ -665,7 +677,7 @@ describe('SalonesService', () => {
         numero: 85,
         estado: EstadoCuenta.ABIERTA,
         ventaId: null,
-        garzonResponsableId: 'garzon-responsable',
+        garzonResponsableId: GARZON_RESPONSABLE,
         cerradaEl: null as Date | null,
       };
       manager.findOne.mockResolvedValue(cuenta);
@@ -708,10 +720,17 @@ describe('SalonesService', () => {
             montoPagado: '0',
             montoSugerido: '0',
             porcentajeSugerido: '0.10',
-            garzonId: 'garzon-responsable',
+            garzonId: GARZON_RESPONSABLE,
+            sesionGarzonId: SESION_RESPONSABLE,
+            turnoId: TURNO,
+            tipoGarzon: TipoGarzon.GARZON,
             estrategia: 'no_vuelto',
           }),
         }),
+      );
+      expect(sesiones.obtenerSesionAbierta).toHaveBeenCalledWith(
+        TENANT,
+        GARZON_RESPONSABLE,
       );
       expect(result.ventaId).toBe('venta-1');
       expect(cuenta.estado).toBe(EstadoCuenta.CERRADA);
@@ -719,7 +738,7 @@ describe('SalonesService', () => {
       expect((cuenta as { garzonCierreId?: string }).garzonCierreId).toBe(
         GARZON,
       );
-      expect(cuenta.garzonResponsableId).toBe('garzon-responsable');
+      expect(cuenta.garzonResponsableId).toBe(GARZON_RESPONSABLE);
       expect(asignaciones.cerrarTramoVigente).toHaveBeenCalledWith(
         manager,
         TENANT,
@@ -737,7 +756,7 @@ describe('SalonesService', () => {
         numero: 85,
         estado: EstadoCuenta.ABIERTA,
         ventaId: null,
-        garzonResponsableId: 'garzon-responsable',
+        garzonResponsableId: GARZON_RESPONSABLE,
         cerradaEl: null as Date | null,
       };
       manager.findOne.mockResolvedValue(cuenta);
@@ -758,13 +777,58 @@ describe('SalonesService', () => {
         TENANT,
         USUARIO,
         expect.objectContaining({
-          propinaCierreMesa: {
+          propinaCierreMesa: expect.objectContaining({
             montoPagado: '1500',
             montoSugerido: '1200',
             porcentajeSugerido: '0.10',
-            garzonId: 'garzon-responsable',
+            garzonId: GARZON_RESPONSABLE,
+            sesionGarzonId: SESION_RESPONSABLE,
+            turnoId: TURNO,
+            tipoGarzon: TipoGarzon.GARZON,
             estrategia: 'no_vuelto',
-          },
+          }),
+        }),
+      );
+    });
+
+    it('pasa sesion/turno/tipo del responsable al crear venta', async () => {
+      const cuenta = {
+        id: CUENTA,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 85,
+        estado: EstadoCuenta.ABIERTA,
+        ventaId: null,
+        garzonResponsableId: GARZON_RESPONSABLE,
+        cerradaEl: null as Date | null,
+      };
+      manager.findOne.mockResolvedValue(cuenta);
+      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.query.mockResolvedValue([]);
+      ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-3' });
+      sesiones.obtenerSesionAbierta.mockResolvedValueOnce({
+        id: 's1',
+        turnoId: 'tu1',
+        tipoGarzon: TipoGarzon.COCINA,
+      });
+
+      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        pin: PIN,
+        propinaMonto: '500',
+        pagos: [{ metodoPagoId: 'mp-1', monto: '4000' }],
+      });
+
+      expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        USUARIO,
+        expect.objectContaining({
+          propinaCierreMesa: expect.objectContaining({
+            garzonId: GARZON_RESPONSABLE,
+            sesionGarzonId: 's1',
+            turnoId: 'tu1',
+            tipoGarzon: TipoGarzon.COCINA,
+          }),
         }),
       );
     });
@@ -774,7 +838,7 @@ describe('SalonesService', () => {
         id: CUENTA,
         tenantId: TENANT,
         estado: EstadoCuenta.ABIERTA,
-        garzonResponsableId: 'garzon-responsable',
+        garzonResponsableId: GARZON_RESPONSABLE,
       });
       manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
 

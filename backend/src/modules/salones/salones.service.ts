@@ -628,6 +628,12 @@ export class SalonesService {
         );
       }
 
+      const sesionResponsable =
+        await this.sesionesGarzonService.obtenerSesionAbierta(
+          tenantId,
+          cuenta.garzonResponsableId,
+        );
+
       const propinaMonto = dto.propinaMonto ?? '0';
       if (new Decimal(propinaMonto).lt(0)) {
         throw new BadRequestException('Propina inválida');
@@ -662,6 +668,9 @@ export class SalonesService {
           montoSugerido: dto.propinaSugerida ?? propinaMonto,
           porcentajeSugerido: dto.propinaPorcentajeSugerido ?? '0.10',
           garzonId: cuenta.garzonResponsableId,
+          sesionGarzonId: sesionResponsable.id,
+          turnoId: sesionResponsable.turnoId,
+          tipoGarzon: sesionResponsable.tipoGarzon,
           estrategia: EstrategiaAsignacionPropina.NO_VUELTO,
         },
       };

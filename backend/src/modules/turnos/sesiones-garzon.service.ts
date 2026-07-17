@@ -282,6 +282,13 @@ export class SesionesGarzonService {
   }
 
   async assertSesionAbierta(tenantId: string, garzonId: string): Promise<void> {
+    await this.obtenerSesionAbierta(tenantId, garzonId);
+  }
+
+  async obtenerSesionAbierta(
+    tenantId: string,
+    garzonId: string,
+  ): Promise<SesionGarzon> {
     const abierta = await this.sesionRepo.findOne({
       where: { tenantId, garzonId, estado: EstadoSesionGarzon.ABIERTA },
     });
@@ -290,6 +297,7 @@ export class SesionesGarzonService {
         'El garzón no tiene una sesión de trabajo abierta',
       );
     }
+    return abierta;
   }
 
   private toPublico(

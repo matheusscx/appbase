@@ -259,6 +259,23 @@ describe('SesionesGarzonService', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('obtenerSesionAbierta devuelve la sesión abierta', async () => {
+    const abierta = sesion();
+    sesionRepo.findOne.mockResolvedValue(abierta);
+
+    const result = await service.obtenerSesionAbierta(TENANT, GARZON_ID);
+
+    expect(result).toBe(abierta);
+  });
+
+  it('obtenerSesionAbierta lanza 400 si no hay abierta', async () => {
+    sesionRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.obtenerSesionAbierta(TENANT, GARZON_ID),
+    ).rejects.toThrow(BadRequestException);
+  });
+
   it('listarAbiertas incluye sesión aunque garzón/turno estén soft-deleted', async () => {
     dataSource.query.mockResolvedValueOnce([
       {

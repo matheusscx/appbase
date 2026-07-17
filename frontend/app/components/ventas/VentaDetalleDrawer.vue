@@ -30,6 +30,10 @@ interface PropinaVenta {
   estado: string
   garzonId: string
   garzonNombre: string | null
+  sesionGarzonId?: string | null
+  turnoId?: string | null
+  tipoGarzon?: string | null
+  liquidacionId?: string | null
 }
 
 interface Detalle {

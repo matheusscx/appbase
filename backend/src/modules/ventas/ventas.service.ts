@@ -1174,9 +1174,14 @@ export class VentasService {
       estado: string;
       garzon_id: string;
       garzon_nombre: string | null;
+      sesion_garzon_id: string | null;
+      turno_id: string | null;
+      tipo_garzon: string | null;
+      liquidacion_id: string | null;
     }[] = await this.dataSource.query(
       `SELECT vp.venta_propina_id, vp.porcentaje_sugerido, vp.monto_sugerido, vp.monto_pagado,
-              vp.tipo, vp.estado, vp.garzon_id, g.nombre AS garzon_nombre
+              vp.tipo, vp.estado, vp.garzon_id, g.nombre AS garzon_nombre,
+              vp.sesion_garzon_id, vp.turno_id, vp.tipo_garzon, vp.liquidacion_id
        FROM venta_propina vp
        LEFT JOIN garzones g ON g.garzon_id = vp.garzon_id AND g.eliminado_el IS NULL
        WHERE vp.venta_id = $1 AND vp.tenant_id = $2 AND vp.eliminado_el IS NULL`,
@@ -1221,6 +1226,10 @@ export class VentasService {
             estado: propinaRow.estado,
             garzonId: propinaRow.garzon_id,
             garzonNombre: propinaRow.garzon_nombre,
+            sesionGarzonId: propinaRow.sesion_garzon_id,
+            turnoId: propinaRow.turno_id,
+            tipoGarzon: propinaRow.tipo_garzon,
+            liquidacionId: propinaRow.liquidacion_id,
           }
         : null,
       detalles: detalles.map((d) => ({

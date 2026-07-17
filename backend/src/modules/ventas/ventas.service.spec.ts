@@ -402,6 +402,9 @@ describe('VentasService', () => {
         expect.objectContaining({
           montoPagado: '10.0000',
           garzonId: '550e8400-e29b-41d4-a716-446655440200',
+          sesionGarzonId: null,
+          turnoId: null,
+          tipoGarzon: null,
         }),
       );
       expect(pagosServiceMock.registrar).toHaveBeenCalledWith(
