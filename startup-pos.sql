@@ -1085,6 +1085,39 @@ CREATE TABLE garzones (
 );
 CREATE INDEX idx_garzones_tenant ON garzones (tenant_id);
 
+CREATE TABLE turnos (
+    turno_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    nombre VARCHAR(100) NOT NULL,
+    hora_inicio VARCHAR(5) NOT NULL, -- HH:mm referencial
+    hora_fin VARCHAR(5) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_turnos_tenant ON turnos (tenant_id);
+
+CREATE TABLE sesiones_garzon (
+    sesion_garzon_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    garzon_id UUID NOT NULL REFERENCES garzones(garzon_id),
+    turno_id UUID NOT NULL REFERENCES turnos(turno_id),
+    inicio_el TIMESTAMPTZ NOT NULL,
+    fin_el TIMESTAMPTZ,
+    estado TEXT NOT NULL DEFAULT 'abierta', -- abierta|cerrada
+    origen_cierre TEXT, -- pin|admin
+    cerrada_por_usuario_id UUID REFERENCES usuarios(usuario_id),
+    creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el TIMESTAMPTZ
+);
+CREATE INDEX idx_sesiones_garzon_tenant ON sesiones_garzon (tenant_id);
+CREATE INDEX idx_sesiones_garzon_garzon ON sesiones_garzon (garzon_id);
+CREATE UNIQUE INDEX uq_sesion_garzon_abierta
+  ON sesiones_garzon (tenant_id, garzon_id)
+  WHERE estado = 'abierta' AND eliminado_el IS NULL;
+
 CREATE TABLE cuentas (
     cuenta_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),

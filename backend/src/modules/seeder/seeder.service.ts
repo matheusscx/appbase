@@ -31,6 +31,7 @@ import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Garzon } from '../garzones/entities/garzon.entity';
+import { Turno } from '../turnos/entities/turno.entity';
 import {
   Impresora,
   RolImpresora,
@@ -117,6 +118,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly mesaRepo: Repository<Mesa>,
     @InjectRepository(Garzon)
     private readonly garzonRepo: Repository<Garzon>,
+    @InjectRepository(Turno)
+    private readonly turnoRepo: Repository<Turno>,
     @InjectRepository(Impresora)
     private readonly impresoraRepo: Repository<Impresora>,
     private readonly credencialesService: CredencialesService,
@@ -170,6 +173,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedSalones();
     await this.seedMesas();
     await this.seedGarzones();
+    await this.seedTurnos();
 
     this.logger.log('Seed complete.');
   }
@@ -1232,6 +1236,42 @@ export class SeederService implements OnApplicationBootstrap {
       const exists = await this.garzonRepo.findOne({ where: { id: data.id } });
       if (!exists) {
         await this.garzonRepo.save(this.garzonRepo.create(data));
+      }
+    }
+  }
+
+  private async seedTurnos(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const turnos: Partial<Turno>[] = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440257',
+        tenantId: PARIS,
+        nombre: 'Mañana',
+        horaInicio: '08:00',
+        horaFin: '15:00',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440258',
+        tenantId: PARIS,
+        nombre: 'Tarde',
+        horaInicio: '15:00',
+        horaFin: '22:00',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440259',
+        tenantId: PARIS,
+        nombre: 'Noche',
+        horaInicio: '22:00',
+        horaFin: '08:00',
+        activo: true,
+      },
+    ];
+    for (const data of turnos) {
+      const exists = await this.turnoRepo.findOne({ where: { id: data.id } });
+      if (!exists) {
+        await this.turnoRepo.save(this.turnoRepo.create(data));
       }
     }
   }

@@ -37,6 +37,7 @@ import { PasarelaModule } from '../pasarela/pasarela.module';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa } from '../salones/entities/mesa.entity';
 import { Garzon } from '../garzones/entities/garzon.entity';
+import { Turno } from '../turnos/entities/turno.entity';
 import { Impresora } from '../impresoras/entities/impresora.entity';
 
 @Module({
@@ -78,6 +79,7 @@ import { Impresora } from '../impresoras/entities/impresora.entity';
       Salon,
       Mesa,
       Garzon,
+      Turno,
       Impresora,
     ]),
   ],
