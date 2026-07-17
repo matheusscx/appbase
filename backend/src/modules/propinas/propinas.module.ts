@@ -11,6 +11,7 @@ import { LiquidacionPropinasFuente } from './entities/liquidacion-propinas-fuent
 import { LiquidacionPropinasEvento } from './entities/liquidacion-propinas-evento.entity';
 import { VentaPropinaService } from './venta-propina.service';
 import { PropinaDistribucionService } from './propina-distribucion.service';
+import { LiquidacionPropinasService } from './liquidacion-propinas.service';
 import { PropinaDistribucionController } from './propina-distribucion.controller';
 
 @Module({
@@ -28,7 +29,15 @@ import { PropinaDistribucionController } from './propina-distribucion.controller
     ]),
   ],
   controllers: [PropinaDistribucionController],
-  providers: [VentaPropinaService, PropinaDistribucionService],
-  exports: [VentaPropinaService, PropinaDistribucionService],
+  providers: [
+    VentaPropinaService,
+    PropinaDistribucionService,
+    LiquidacionPropinasService,
+  ],
+  exports: [
+    VentaPropinaService,
+    PropinaDistribucionService,
+    LiquidacionPropinasService,
+  ],
 })
 export class PropinasModule {}
