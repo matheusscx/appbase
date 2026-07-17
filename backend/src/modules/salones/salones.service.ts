@@ -801,10 +801,6 @@ export class SalonesService {
     return [...estacionesMap.values()];
   }
 
-  /**
-   * Marca cantidad_enviada = cantidadEnviada para las líneas (legado; el flujo
-   * principal usa reclamarComanda). Idempotente ante reintentos.
-   */
   async transferirCuentaPorPin(
     tenantId: string,
     cuentaId: string,
@@ -833,13 +829,23 @@ export class SalonesService {
     return this.armarDetalle(tenantId, cuenta);
   }
 
-  listarAsignacionesCuenta(
+  async listarAsignacionesCuenta(
     tenantId: string,
     cuentaId: string,
   ): Promise<CuentaAsignacionDetalle[]> {
+    const cuenta = await this.cuentaRepo.findOne({
+      where: { id: cuentaId, tenantId },
+    });
+    if (!cuenta) {
+      throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+    }
     return this.cuentaAsignacionesService.listar(tenantId, cuentaId);
   }
 
+  /**
+   * Marca cantidad_enviada = cantidadEnviada para las líneas (legado; el flujo
+   * principal usa reclamarComanda). Idempotente ante reintentos.
+   */
   async confirmarComanda(
     tenantId: string,
     cuentaId: string,

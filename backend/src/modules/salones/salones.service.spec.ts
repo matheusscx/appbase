@@ -1080,12 +1080,25 @@ describe('SalonesService', () => {
           actorUsuarioNombre: null,
         },
       ];
+      cuentaRepo.findOne.mockResolvedValue({ id: CUENTA, tenantId: TENANT });
       asignaciones.listar.mockResolvedValue(historial);
 
       const result = await service.listarAsignacionesCuenta(TENANT, CUENTA);
 
+      expect(cuentaRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CUENTA, tenantId: TENANT },
+      });
       expect(asignaciones.listar).toHaveBeenCalledWith(TENANT, CUENTA);
       expect(result).toEqual(historial);
+    });
+
+    it('lanza NotFound si la cuenta no existe o pertenece a otro tenant', async () => {
+      cuentaRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.listarAsignacionesCuenta(TENANT, CUENTA),
+      ).rejects.toThrow(NotFoundException);
+      expect(asignaciones.listar).not.toHaveBeenCalled();
     });
   });
 
