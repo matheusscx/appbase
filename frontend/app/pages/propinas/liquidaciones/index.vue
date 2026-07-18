@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-await navigateTo({ path: '/propinas', query: { tab: 'liquidaciones' } }, { replace: true })
+await navigateTo({ path: '/propinas' }, { replace: true })
 </script>
 
 <template>
