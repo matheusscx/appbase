@@ -18,6 +18,7 @@ import type { Garzon } from '~/composables/useGarzones'
 import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { Turno } from '~/composables/useTurnos'
 import { formatCantidadTicket, unidadBaseItem } from '~/utils/cantidad-presentacion'
+import { agregarImpuestosVenta } from '~/utils/ticket-builder'
 import { shellUi } from '~/utils/ui-shell'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -44,6 +45,8 @@ const { calcular } = useCalculoPrecios()
 const { formatMonto, formatFecha } = useFormatters()
 const impresorasApi = useImpresoras()
 const tenantStore = useTenantStore()
+const authStore = useAuthStore()
+const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
 const enviandoComanda = ref(false)
 const imprimiendoPrecuenta = ref(false)
@@ -310,6 +313,7 @@ onMounted(async () => {
     cargarCatalogo(),
     unidadesStore.ensureLoaded(),
     fetchPorcentajeSugerido(),
+    cargarEmisor(),
   ])
   propinaPorcentaje.value = pct
 })
@@ -739,6 +743,7 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
     return {
       nombre: cl?.nombre ?? '',
       cantidad: cantidadTicket,
+      precioUnitario: l.precioUnitario,
       totalLinea: l.totalLinea,
       ...(cl?.personalizacionTexto ? { nota: cl.personalizacionTexto } : {}),
     }
@@ -755,6 +760,12 @@ async function imprimirPrecuenta() {
       cuentaNumero: activeCuenta.value.numero,
       items: itemsParaTicket(activeCuenta.value, resultado.value),
       totales: resultado.value.totales,
+      ...(new Decimal(propinaPorcentaje.value || '0').gt(0)
+        ? { propinaSugerida: {
+            porcentaje: propinaPorcentaje.value,
+            monto: new Decimal(resultado.value.totales.totalFinal).times(propinaPorcentaje.value).toDecimalPlaces(0).toString(),
+          } }
+        : {}),
       formatMonto: (v: string) => formatMonto(v),
     })
   }
@@ -823,9 +834,16 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
     if (resultadoCerrado) {
       try {
         await impresorasApi.imprimirBoleta({
-          tenantNombre: tenantStore.activeTenant?.nombre ?? '',
+          emisor: emisor.value,
+          facturacionElectronica: false,
+          meta: {
+            cajero: authStore.user?.nombre ?? undefined,
+            mesa: selectedMesa.value?.nombre,
+          },
           items: itemsParaTicket(cuentaCerrada, resultadoCerrado),
           totales: resultadoCerrado.totales,
+          impuestos: agregarImpuestosVenta(resultadoCerrado.lineas),
+          ...(new Decimal(tipMonto).gt(0) ? { propina: { monto: tipMonto } } : {}),
           pagos: pagos.map(p => ({
             nombre: metodos.value.find(m => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
             monto: p.monto,
