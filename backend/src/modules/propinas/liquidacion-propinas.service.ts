@@ -53,6 +53,11 @@ interface SesionRow {
   fin_el: Date | string | null;
 }
 
+export type ParticipanteData = Omit<
+  LiquidacionPropinasParticipante,
+  'id' | 'creadoEl' | 'actualizadoEl' | 'eliminadoEl'
+>;
+
 export interface LiquidacionResumen {
   id: string;
   estado: EstadoLiquidacion;
@@ -768,6 +773,20 @@ export class LiquidacionPropinasService {
     );
   }
 
+  private montosPorGrupo(
+    poolTotal: string,
+    gruposConfig: GrupoDistribucionPublico[],
+    decimales: number,
+  ): Map<string, string> {
+    return new Map(
+      repartirMayoresRestos(
+        poolTotal,
+        gruposConfig.map((g) => ({ id: g.id, peso: g.porcentaje })),
+        decimales,
+      ).map((r) => [r.id, new Decimal(r.monto).toFixed(4)] as const),
+    );
+  }
+
   private async crearSnapshotGrupos(
     manager: EntityManager,
     tenantId: string,
@@ -776,13 +795,7 @@ export class LiquidacionPropinasService {
     decimales: number,
     gruposConfig: GrupoDistribucionPublico[],
   ): Promise<LiquidacionPropinasGrupo[]> {
-    const montosGrupo = new Map(
-      repartirMayoresRestos(
-        poolTotal,
-        gruposConfig.map((g) => ({ id: g.id, peso: g.porcentaje })),
-        decimales,
-      ).map((r) => [r.id, new Decimal(r.monto).toFixed(4)] as const),
-    );
+    const montosGrupo = this.montosPorGrupo(poolTotal, gruposConfig, decimales);
 
     const grupos: LiquidacionPropinasGrupo[] = [];
     for (const g of gruposConfig) {
@@ -829,8 +842,7 @@ export class LiquidacionPropinasService {
     return fuentes;
   }
 
-  private async crearParticipantes(
-    manager: EntityManager,
+  private buildParticipantesData(
     tenantId: string,
     liquidacionId: string,
     grupos: LiquidacionPropinasGrupo[],
@@ -840,8 +852,8 @@ export class LiquidacionPropinasService {
     fechaDesde: Date,
     fechaHasta: Date,
     decimales: number,
-  ): Promise<LiquidacionPropinasParticipante[]> {
-    const participantes: LiquidacionPropinasParticipante[] = [];
+  ): ParticipanteData[] {
+    const participantes: ParticipanteData[] = [];
     const gruposByTipo = new Map(grupos.map((g) => [g.tipoGarzon, g]));
     const configByTipo = new Map(gruposConfig.map((g) => [g.tipoGarzon, g]));
 
@@ -862,16 +874,44 @@ export class LiquidacionPropinasService {
           fechaHasta,
         }),
       );
-      const repartidos = this.repartirGrupo(grupo, config, borradores, decimales);
+      participantes.push(
+        ...this.repartirGrupo(grupo, config, borradores, decimales),
+      );
+    }
+    return participantes;
+  }
 
-      for (const data of repartidos) {
-        participantes.push(
-          await manager.save(
-            LiquidacionPropinasParticipante,
-            manager.create(LiquidacionPropinasParticipante, data),
-          ),
-        );
-      }
+  private async crearParticipantes(
+    manager: EntityManager,
+    tenantId: string,
+    liquidacionId: string,
+    grupos: LiquidacionPropinasGrupo[],
+    gruposConfig: GrupoDistribucionPublico[],
+    tips: TipElegibleRow[],
+    sesiones: SesionRow[],
+    fechaDesde: Date,
+    fechaHasta: Date,
+    decimales: number,
+  ): Promise<LiquidacionPropinasParticipante[]> {
+    const data = this.buildParticipantesData(
+      tenantId,
+      liquidacionId,
+      grupos,
+      gruposConfig,
+      tips,
+      sesiones,
+      fechaDesde,
+      fechaHasta,
+      decimales,
+    );
+    const participantes: LiquidacionPropinasParticipante[] = [];
+    for (const d of data) {
+      participantes.push(
+        await manager.save(
+          LiquidacionPropinasParticipante,
+          manager.create(LiquidacionPropinasParticipante, d),
+        ),
+      );
     }
     return participantes;
   }
