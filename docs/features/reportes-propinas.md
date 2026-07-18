@@ -88,9 +88,9 @@ exponer su PIN.
 - Composable: `frontend/app/composables/usePropinaReportes.ts`
 - Navegación: grupo Propinas en `frontend/app/layouts/dashboard.vue`
 
-Cada tab solicita solo su endpoint y cachea por combinación de filtros. Aplicar
-filtros invalida ambas caches. Los montos se muestran con `useFormatters`; solo
-la proporción visual de las barras convierte a `number`.
+Cada tab solicita solo su endpoint y cachea por tenant + combinación de
+filtros. Aplicar filtros invalida ambas caches. Los montos se muestran con
+`useFormatters`; solo la proporción visual de las barras convierte a `number`.
 
 ## Testing
 

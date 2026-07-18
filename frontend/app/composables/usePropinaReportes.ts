@@ -175,8 +175,16 @@ export function claveFiltrosReporte(filtros: PropinaReporteFiltrosUi): string {
   return JSON.stringify(serializarFiltrosReporte(filtros));
 }
 
+export function claveCachePropinaReportes(
+  tenantId: string | null | undefined,
+  filtros: PropinaReporteFiltrosUi,
+): string {
+  return `${tenantId ?? 'sin-tenant'}:${claveFiltrosReporte(filtros)}`;
+}
+
 export function usePropinaReportes() {
   const apiUrl = useRuntimeConfig().public.apiUrl;
+  const authStore = useAuthStore();
 
   const resumen = (filtros: PropinaReporteFiltrosUi) =>
     useApiFetch<PropinaReporteResumen>(
@@ -192,6 +200,7 @@ export function usePropinaReportes() {
     resumen,
     trabajadores,
     cache,
-    claveFiltros: claveFiltrosReporte,
+    claveFiltros: (filtros: PropinaReporteFiltrosUi) =>
+      claveCachePropinaReportes(authStore.activeTenantId, filtros),
   };
 }

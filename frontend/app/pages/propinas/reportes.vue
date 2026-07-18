@@ -287,7 +287,6 @@ onMounted(async () => {
           <div v-if="resumen.cobranza.cierres === 0" class="py-10 text-center text-sm text-muted">
             No hay cierres con propina en este período.
           </div>
-          <template v-else>
             <UAlert
               v-if="resumen.advertencias.liquidacionesParcialmenteSolapadas > 0"
               color="warning"
@@ -384,7 +383,6 @@ onMounted(async () => {
                 </ul>
               </UCard>
             </div>
-          </template>
         </template>
 
         <template v-else-if="tab === 'trabajadores' && trabajadores">

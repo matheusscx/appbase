@@ -187,7 +187,7 @@ Toda columna PK o FK de tipo UUID **debe** declarar `type: 'uuid'` explícitamen
 `PropinaReportesService` ejecuta agregados SQL de solo lectura, usando fecha de
 tip para cobranza y períodos completamente contenidos para asignación.
 `usePropinaReportes` mantiene los contratos frontend y una caché independiente
-por tab y combinación de filtros.
+por tenant, tab y combinación de filtros.
 
 ### Stores Pinia
 

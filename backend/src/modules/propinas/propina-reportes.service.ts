@@ -476,7 +476,7 @@ export class PropinaReportesService {
         AND t.eliminado_el IS NULL
        WHERE 1 = 1 ${filtros.sql}
        GROUP BY vp.turno_id
-       ORDER BY monto_cobrado DESC, turno_nombre ASC NULLS LAST`,
+       ORDER BY SUM(vp.monto_pagado) DESC, turno_nombre ASC NULLS LAST`,
       filtros.params,
     );
   }
@@ -496,7 +496,7 @@ export class PropinaReportesService {
        FROM venta_propina vp
        WHERE 1 = 1 ${filtros.sql}
        GROUP BY vp.tipo_garzon
-       ORDER BY monto_cobrado DESC, vp.tipo_garzon ASC NULLS LAST`,
+       ORDER BY SUM(vp.monto_pagado) DESC, vp.tipo_garzon ASC NULLS LAST`,
       filtros.params,
     );
   }

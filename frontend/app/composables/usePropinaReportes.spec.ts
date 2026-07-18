@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  claveCachePropinaReportes,
   crearCachePropinaReportes,
   serializarFiltrosReporte,
   type PropinaReporteResumen,
@@ -57,6 +58,18 @@ describe('serializarFiltrosReporte', () => {
 });
 
 describe('crearCachePropinaReportes', () => {
+  it('separa las claves por tenant', () => {
+    const filtros = {
+      desde: '2026-07-01',
+      hasta: '2026-07-31',
+      turnoIds: [],
+    };
+
+    expect(claveCachePropinaReportes('tenant-a', filtros)).not.toBe(
+      claveCachePropinaReportes('tenant-b', filtros),
+    );
+  });
+
   it('cachea cada tab por clave y clear invalida ambos', () => {
     const cache = crearCachePropinaReportes();
     const resumen = { periodo: { desde: 'a', hasta: 'b' } } as PropinaReporteResumen;

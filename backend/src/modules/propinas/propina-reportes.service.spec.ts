@@ -157,6 +157,20 @@ describe('PropinaReportesService', () => {
       expect(result.porTurno[0].turnoNombre).toBe('Sin turno');
       expect(result.porTipo[0].tipoGarzon).toBeNull();
       expect(result.advertencias.liquidacionesParcialmenteSolapadas).toBe(2);
+      expect(
+        query.mock.calls.some(
+          ([sql]) =>
+            sql.includes('GROUP BY vp.turno_id') &&
+            sql.includes('ORDER BY SUM(vp.monto_pagado) DESC'),
+        ),
+      ).toBe(true);
+      expect(
+        query.mock.calls.some(
+          ([sql]) =>
+            sql.includes('GROUP BY vp.tipo_garzon') &&
+            sql.includes('ORDER BY SUM(vp.monto_pagado) DESC'),
+        ),
+      ).toBe(true);
     });
   });
 
