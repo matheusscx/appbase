@@ -151,4 +151,145 @@ describe('PropinaReportesService', () => {
       expect(result.advertencias.liquidacionesParcialmenteSolapadas).toBe(2);
     });
   });
+
+  describe('trabajadores', () => {
+    it('une originadores y participantes y calcula totales decimales', async () => {
+      query
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([
+          {
+            garzon_id: 'camila',
+            tipo_garzon: TipoGarzon.GARZON,
+            cierres: '30',
+            con_propina: '25',
+            monto: '220000.0000',
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            garzon_id: 'camila',
+            tipo_garzon: TipoGarzon.GARZON,
+            monto: '180000.0000',
+            horas: '80.0000',
+            ventas_base: '2200000.0000',
+            cuentas: '34.0000',
+            liquidaciones: '3',
+            ultima_liquidacion_el: '2026-07-31T18:30:00.000Z',
+          },
+          {
+            garzon_id: 'pedro',
+            tipo_garzon: TipoGarzon.COCINA,
+            monto: '120000.0000',
+            horas: '60.0000',
+            ventas_base: '0',
+            cuentas: '0',
+            liquidaciones: '3',
+            ultima_liquidacion_el: '2026-07-31T18:30:00.000Z',
+          },
+        ])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([
+          {
+            garzon_id: 'camila',
+            nombre: 'Camila',
+            tipo_garzon: TipoGarzon.GARZON,
+          },
+          {
+            garzon_id: 'pedro',
+            nombre: 'Pedro',
+            tipo_garzon: TipoGarzon.COCINA,
+          },
+        ]);
+
+      const result = await service.trabajadores(TENANT_ID, QUERY);
+
+      expect(result.data.map((item) => item.nombre)).toEqual([
+        'Camila',
+        'Pedro',
+      ]);
+      expect(result.totales).toEqual({
+        trabajadores: 2,
+        montoOriginado: '220000',
+        montoAsignado: '300000',
+        horas: '140',
+        ventasBase: '2200000',
+        cuentas: '34',
+      });
+      expect(result.data[1].origen.monto).toBe('0');
+    });
+
+    it('ordena por monto asignado desc y luego nombre asc', async () => {
+      query
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            garzon_id: 'pedro',
+            tipo_garzon: TipoGarzon.GARZON,
+            monto: '10',
+            horas: '0',
+            ventas_base: '0',
+            cuentas: '0',
+            liquidaciones: '1',
+            ultima_liquidacion_el: null,
+          },
+          {
+            garzon_id: 'ana',
+            tipo_garzon: TipoGarzon.GARZON,
+            monto: '20',
+            horas: '0',
+            ventas_base: '0',
+            cuentas: '0',
+            liquidaciones: '1',
+            ultima_liquidacion_el: null,
+          },
+          {
+            garzon_id: 'camila',
+            tipo_garzon: TipoGarzon.GARZON,
+            monto: '20',
+            horas: '0',
+            ventas_base: '0',
+            cuentas: '0',
+            liquidaciones: '1',
+            ultima_liquidacion_el: null,
+          },
+        ])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([
+          { garzon_id: 'ana', nombre: 'Ana', tipo_garzon: 'garzon' },
+          { garzon_id: 'camila', nombre: 'Camila', tipo_garzon: 'garzon' },
+          { garzon_id: 'pedro', nombre: 'Pedro', tipo_garzon: 'garzon' },
+        ]);
+
+      const result = await service.trabajadores(TENANT_ID, QUERY);
+
+      expect(result.data.map((item) => item.nombre)).toEqual([
+        'Ana',
+        'Camila',
+        'Pedro',
+      ]);
+    });
+
+    it('reporta liquidaciones de todos los turnos excluidas', async () => {
+      query
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ cantidad: '1' }])
+        .mockResolvedValueOnce([{ cantidad: '2' }])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.trabajadores(TENANT_ID, {
+        ...QUERY,
+        turnoIds: [TURNO_ID],
+      });
+
+      expect(result.advertencias).toEqual({
+        liquidacionesParcialmenteSolapadas: 1,
+        liquidacionesTodosLosTurnosExcluidas: 2,
+      });
+    });
+  });
 });
