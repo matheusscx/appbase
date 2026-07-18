@@ -1,4 +1,4 @@
-import { DataSource } from 'typeorm';
+import { type DataSource } from 'typeorm';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { PropinaReportesService } from './propina-reportes.service';
 
@@ -7,7 +7,9 @@ const TURNO_ID = '550e8400-e29b-41d4-a716-446655440002';
 const QUERY = { desde: '2026-07-01', hasta: '2026-08-01' };
 
 describe('PropinaReportesService', () => {
-  let query: jest.Mock;
+  let query: jest.MockedFunction<
+    (sql: string, params?: unknown[]) => Promise<unknown>
+  >;
   let service: PropinaReportesService;
 
   beforeEach(() => {
@@ -37,9 +39,7 @@ describe('PropinaReportesService', () => {
           liquidada_monto: '0',
         },
       ])
-      .mockResolvedValueOnce([
-        { liquidaciones: '0', monto_liberado: '0' },
-      ])
+      .mockResolvedValueOnce([{ liquidaciones: '0', monto_liberado: '0' }])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -47,6 +47,14 @@ describe('PropinaReportesService', () => {
   }
 
   describe('resumen', () => {
+    it('rechaza tenant sin zona horaria resoluble', async () => {
+      query.mockResolvedValueOnce([]);
+
+      await expect(service.resumen(TENANT_ID, QUERY)).rejects.toThrow(
+        'No se encontró la zona horaria del tenant',
+      );
+    });
+
     it('mapea ceros y pasa tenant a todas las consultas', async () => {
       prepararResumenVacio();
 
@@ -290,6 +298,28 @@ describe('PropinaReportesService', () => {
         liquidacionesParcialmenteSolapadas: 1,
         liquidacionesTodosLosTurnosExcluidas: 2,
       });
+    });
+
+    it('parametriza tipo y turnos en la asignación confirmada', async () => {
+      query
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([{ cantidad: '0' }]);
+
+      await service.trabajadores(TENANT_ID, {
+        ...QUERY,
+        turnoIds: [TURNO_ID],
+        tipoGarzon: TipoGarzon.COCINA,
+      });
+
+      const assignmentCall = query.mock.calls.find(([sql]) =>
+        sql.includes('liquidacion_propinas_participante p'),
+      );
+      expect(assignmentCall?.[0]).toContain('p.tipo_garzon');
+      expect(assignmentCall?.[0]).toContain('l.turno_ids <@');
+      expect(assignmentCall?.[1]).toContain(TipoGarzon.COCINA);
     });
   });
 });

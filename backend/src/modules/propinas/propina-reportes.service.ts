@@ -126,9 +126,7 @@ export class PropinaReportesService {
         montoSugerido: decimal(cobranza.monto_sugerido),
         promedioConPropina: decimal(cobranza.promedio_con_propina),
         tasaConPropina: decimal(cobranza.tasa_con_propina),
-        tasaSugerenciaAceptada: decimal(
-          cobranza.tasa_sugerencia_aceptada,
-        ),
+        tasaSugerenciaAceptada: decimal(cobranza.tasa_sugerencia_aceptada),
       },
       estadoActual: {
         pendienteLibreCantidad: count(cobranza.pendiente_libre_cantidad),
@@ -190,12 +188,8 @@ export class PropinaReportesService {
       ]),
     ];
     const etiquetas = await this.etiquetasGarzones(tenantId, ids);
-    const etiquetaPorId = new Map(
-      etiquetas.map((row) => [row.garzon_id, row]),
-    );
-    const origenPorId = new Map(
-      origenRows.map((row) => [row.garzon_id, row]),
-    );
+    const etiquetaPorId = new Map(etiquetas.map((row) => [row.garzon_id, row]));
+    const origenPorId = new Map(origenRows.map((row) => [row.garzon_id, row]));
     const asignacionPorId = new Map(
       asignacionRows.map((row) => [row.garzon_id, row]),
     );
@@ -239,10 +233,7 @@ export class PropinaReportesService {
 
     const sum = (selector: (item: PropinaReporteTrabajador) => string) =>
       data
-        .reduce(
-          (total, item) => total.plus(selector(item)),
-          new Decimal(0),
-        )
+        .reduce((total, item) => total.plus(selector(item)), new Decimal(0))
         .toString();
 
     return {
@@ -268,12 +259,7 @@ export class PropinaReportesService {
     zonaHoraria: string,
     alias = 'vp',
   ): { sql: string; params: unknown[] } {
-    const params: unknown[] = [
-      tenantId,
-      rango.desde,
-      rango.hasta,
-      zonaHoraria,
-    ];
+    const params: unknown[] = [tenantId, rango.desde, rango.hasta, zonaHoraria];
     let sql = ` AND ${alias}.tenant_id = $1
       AND ${alias}.eliminado_el IS NULL
       AND ${alias}.creado_el >= ($2::date::timestamp AT TIME ZONE $4)
@@ -290,7 +276,7 @@ export class PropinaReportesService {
   }
 
   private async zonaHoraria(tenantId: string): Promise<string> {
-    const rows = (await this.dataSource.query(
+    const rows = await this.dataSource.query<Array<{ zona_horaria: string }>>(
       `SELECT p.zona_horaria_principal AS zona_horaria
        FROM tenants t
        JOIN provincia pr
@@ -302,7 +288,7 @@ export class PropinaReportesService {
        WHERE t.tenant_id = $1
          AND t.eliminado_el IS NULL`,
       [tenantId],
-    )) as Array<{ zona_horaria: string }>;
+    );
     if (!rows[0]?.zona_horaria) {
       throw new NotFoundException('No se encontró la zona horaria del tenant');
     }
@@ -315,7 +301,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<CobranzaRow> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    const rows = (await this.dataSource.query(
+    const rows = await this.dataSource.query<CobranzaRow[]>(
       `WITH base AS (
          SELECT vp.*
          FROM venta_propina vp
@@ -398,7 +384,7 @@ export class PropinaReportesService {
          ), 0)::text AS liquidada_monto
        FROM clasificada`,
       filtros.params,
-    )) as CobranzaRow[];
+    );
     return rows[0];
   }
 
@@ -414,7 +400,7 @@ export class PropinaReportesService {
       filtroTurno = ` AND cardinality(l.turno_ids) > 0
         AND l.turno_ids <@ $${params.length}::uuid[]`;
     }
-    const rows = (await this.dataSource.query(
+    const rows = await this.dataSource.query<AnulacionRow[]>(
       `SELECT
          COUNT(DISTINCT l.liquidacion_propinas_id)::text AS liquidaciones,
          COALESCE(SUM(f.monto_pagado), 0)::text AS monto_liberado
@@ -430,7 +416,7 @@ export class PropinaReportesService {
          AND l.fecha_hasta <= ($3::date::timestamp AT TIME ZONE $4)
          ${filtroTurno}`,
       params,
-    )) as AnulacionRow[];
+    );
     return rows[0];
   }
 
@@ -440,7 +426,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<TendenciaRow[]> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    return (await this.dataSource.query(
+    return await this.dataSource.query<TendenciaRow[]>(
       `WITH dias AS (
          SELECT generate_series(
            $2::date,
@@ -467,7 +453,7 @@ export class PropinaReportesService {
        LEFT JOIN agregado a ON a.fecha = d.fecha
        ORDER BY d.fecha`,
       filtros.params,
-    )) as TendenciaRow[];
+    );
   }
 
   private async porTurno(
@@ -476,7 +462,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<TurnoRow[]> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    return (await this.dataSource.query(
+    return await this.dataSource.query<TurnoRow[]>(
       `SELECT
          vp.turno_id,
          MAX(t.nombre) AS turno_nombre,
@@ -492,7 +478,7 @@ export class PropinaReportesService {
        GROUP BY vp.turno_id
        ORDER BY monto_cobrado DESC, turno_nombre ASC NULLS LAST`,
       filtros.params,
-    )) as TurnoRow[];
+    );
   }
 
   private async porTipo(
@@ -501,7 +487,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<TipoRow[]> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    return (await this.dataSource.query(
+    return await this.dataSource.query<TipoRow[]>(
       `SELECT
          vp.tipo_garzon,
          COUNT(*)::text AS cierres,
@@ -512,7 +498,7 @@ export class PropinaReportesService {
        GROUP BY vp.tipo_garzon
        ORDER BY monto_cobrado DESC, vp.tipo_garzon ASC NULLS LAST`,
       filtros.params,
-    )) as TipoRow[];
+    );
   }
 
   private async solapadas(
@@ -527,7 +513,7 @@ export class PropinaReportesService {
       filtroTurno = ` AND cardinality(l.turno_ids) > 0
         AND l.turno_ids <@ $${params.length}::uuid[]`;
     }
-    const rows = (await this.dataSource.query(
+    const rows = await this.dataSource.query<Array<{ cantidad: NumericValue }>>(
       `SELECT COUNT(*)::text AS cantidad
        FROM liquidacion_propinas l
        WHERE l.tenant_id = $1
@@ -541,7 +527,7 @@ export class PropinaReportesService {
          )
          ${filtroTurno}`,
       params,
-    )) as Array<{ cantidad: NumericValue }>;
+    );
     return count(rows[0]?.cantidad);
   }
 
@@ -551,7 +537,7 @@ export class PropinaReportesService {
     zona: string,
   ): Promise<OrigenTrabajadorRow[]> {
     const filtros = this.filtrosVenta(tenantId, rango, zona);
-    return (await this.dataSource.query(
+    return await this.dataSource.query<OrigenTrabajadorRow[]>(
       `SELECT
          vp.garzon_id,
          MAX(vp.tipo_garzon) AS tipo_garzon,
@@ -562,7 +548,7 @@ export class PropinaReportesService {
        WHERE 1 = 1 ${filtros.sql}
        GROUP BY vp.garzon_id`,
       filtros.params,
-    )) as OrigenTrabajadorRow[];
+    );
   }
 
   private async asignacionTrabajadores(
@@ -581,7 +567,7 @@ export class PropinaReportesService {
       filtros += ` AND cardinality(l.turno_ids) > 0
         AND l.turno_ids <@ $${params.length}::uuid[]`;
     }
-    return (await this.dataSource.query(
+    return await this.dataSource.query<AsignacionTrabajadorRow[]>(
       `SELECT
          p.garzon_id,
          MAX(p.tipo_garzon) AS tipo_garzon,
@@ -605,7 +591,7 @@ export class PropinaReportesService {
          ${filtros}
        GROUP BY p.garzon_id`,
       params,
-    )) as AsignacionTrabajadorRow[];
+    );
   }
 
   private async todosLosTurnosExcluidas(
@@ -633,7 +619,7 @@ export class PropinaReportesService {
           AND p.tipo_garzon = $${params.length}
       )`;
     }
-    const rows = (await this.dataSource.query(
+    const rows = await this.dataSource.query<Array<{ cantidad: NumericValue }>>(
       `SELECT COUNT(*)::text AS cantidad
        FROM liquidacion_propinas l
        WHERE l.tenant_id = $1
@@ -645,7 +631,7 @@ export class PropinaReportesService {
          AND cardinality(l.turno_ids) = 0
          ${filtroTipo}`,
       params,
-    )) as Array<{ cantidad: NumericValue }>;
+    );
     return count(rows[0]?.cantidad);
   }
 
@@ -654,7 +640,7 @@ export class PropinaReportesService {
     ids: string[],
   ): Promise<GarzonEtiquetaRow[]> {
     if (!ids.length) return [];
-    return (await this.dataSource.query(
+    return await this.dataSource.query<GarzonEtiquetaRow[]>(
       `SELECT
          g.garzon_id,
          g.nombre,
@@ -663,6 +649,6 @@ export class PropinaReportesService {
        WHERE g.tenant_id = $1
          AND g.garzon_id = ANY($2::uuid[])`,
       [tenantId, ids],
-    )) as GarzonEtiquetaRow[];
+    );
   }
 }

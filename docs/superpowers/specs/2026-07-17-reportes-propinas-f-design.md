@@ -1,6 +1,6 @@
 # Diseño: Reportes Agregados de Propinas (F)
 
-**Status**: Approved  
+**Status**: Done
 **Owner**: Cesar Matheus  
 **Date**: 2026-07-17
 

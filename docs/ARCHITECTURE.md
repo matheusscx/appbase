@@ -48,6 +48,7 @@ startup-app/
 │   │       ├── ventas/           # Procesamiento de ventas transaccional + tipos de documento
 │   │       ├── pagos/            # Abonos a ventas pendientes y ledger de pagos
 │   │       ├── caja/             # Gestión de cajas (física/virtual, movimientos, cierre)
+│   │       ├── propinas/         # Registro, distribución, liquidación y reportes agregados
 │   │       ├── seeder/           # Seed de datos de desarrollo (corre al arrancar)
 │   │       └── test/             # Módulo de prueba para validación RBAC end-to-end
 │   ├── test/                     # Tests e2e
@@ -176,6 +177,17 @@ Toda columna PK o FK de tipo UUID **debe** declarar `type: 'uuid'` explícitamen
 | `/pagos` | `pagos/index.vue` | Ledger de pagos del tenant |
 | `/caja` | `caja/index.vue` | Gestión de cajas |
 | `/caja/:id` | `caja/[id].vue` | Detalle de caja abierta |
+| `/propinas/liquidaciones` | `propinas/liquidaciones/index.vue` | Borradores y liquidaciones de propinas |
+| `/propinas/reportes` | `propinas/reportes.vue` | Resumen del ciclo completo y agregados por trabajador |
+
+### Reportes de propinas
+
+`PropinaReportesController` expone `/propinas/reportes/resumen` y
+`/propinas/reportes/trabajadores`, ambos con `Propinas:Leer`.
+`PropinaReportesService` ejecuta agregados SQL de solo lectura, usando fecha de
+tip para cobranza y períodos completamente contenidos para asignación.
+`usePropinaReportes` mantiene los contratos frontend y una caché independiente
+por tab y combinación de filtros.
 
 ### Stores Pinia
 

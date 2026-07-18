@@ -8,7 +8,7 @@
 
 **Tech Stack:** NestJS 11, TypeORM/PostgreSQL 15, class-validator, Decimal.js, Jest, Nuxt 4, Vue 3, Nuxt UI 4, Vitest.
 
-**Status:** In Progress  
+**Status:** Done
 **Date:** 2026-07-17  
 **Owner:** Cesar Matheus
 
@@ -100,7 +100,7 @@ SQL y recorrido manual del ciclo completo.
 - Produces: `QueryPropinaReporteDto`, `normalizarRangoReporte(dto)`, `PropinaReporteResumen`, `PropinaReporteTrabajadores`.
 - Consumes: `TipoGarzon` existente.
 
-- [ ] **Step 1: Escribir tests RED del DTO**
+- [x] **Step 1: Escribir tests RED del DTO**
 
 Crear `query-propina-reporte.dto.spec.ts` con `plainToInstance` + `validate`:
 
@@ -160,7 +160,7 @@ describe('QueryPropinaReporteDto', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar RED**
+- [x] **Step 2: Ejecutar RED**
 
 Run:
 
@@ -170,14 +170,14 @@ cd backend && npm test -- query-propina-reporte.dto.spec.ts --runInBand
 
 Expected: FAIL porque el DTO todavía no existe.
 
-- [ ] **Step 3: Commit del checkpoint RED**
+- [x] **Step 3: Commit del checkpoint RED**
 
 ```bash
 git add backend/src/modules/propinas/dto/query-propina-reporte.dto.spec.ts
 git commit -m "test(propinas): definir filtros de reportes F"
 ```
 
-- [ ] **Step 4: Implementar el DTO**
+- [x] **Step 4: Implementar el DTO**
 
 Crear `query-propina-reporte.dto.ts`:
 
@@ -254,7 +254,7 @@ export function normalizarRangoReporte(
 }
 ```
 
-- [ ] **Step 5: Definir contratos públicos**
+- [x] **Step 5: Definir contratos públicos**
 
 Crear `propina-reportes.types.ts` con estas propiedades exactas:
 
@@ -347,7 +347,7 @@ export interface PropinaReporteTrabajadores {
 }
 ```
 
-- [ ] **Step 6: Ejecutar GREEN y commit**
+- [x] **Step 6: Ejecutar GREEN y commit**
 
 Run:
 
@@ -375,7 +375,7 @@ git commit -m "feat(propinas): validar filtros de reportes F"
 - Consumes: `QueryPropinaReporteDto`, `normalizarRangoReporte`.
 - Produces: `PropinaReportesService.resumen(tenantId, query): Promise<PropinaReporteResumen>`.
 
-- [ ] **Step 1: Escribir tests RED del resumen**
+- [x] **Step 1: Escribir tests RED del resumen**
 
 El test debe crear el service con `{ query: jest.fn() } as unknown as DataSource`,
 devolver filas para cada consulta y verificar:
@@ -425,7 +425,7 @@ describe('resumen', () => {
 Agregar casos para tendencia con días cero, turno `null` como
 `"Sin turno"`, tipo `null`, monto liberado histórico y solapamientos.
 
-- [ ] **Step 2: Ejecutar RED y commit**
+- [x] **Step 2: Ejecutar RED y commit**
 
 ```bash
 cd backend && npm test -- propina-reportes.service.spec.ts --runInBand
@@ -438,7 +438,7 @@ git add backend/src/modules/propinas/propina-reportes.service.spec.ts
 git commit -m "test(propinas): cubrir resumen agregado F"
 ```
 
-- [ ] **Step 3: Implementar filtros SQL reutilizables**
+- [x] **Step 3: Implementar filtros SQL reutilizables**
 
 En `propina-reportes.service.ts`, declarar:
 
@@ -480,7 +480,7 @@ Todas las consultas deben conservar `$1 = tenantId`; `$2/$3` son fechas calendar
 y `$4` es la zona horaria. Esto permite que el test inspeccione aislamiento y
 conversión sin interpolación.
 
-- [ ] **Step 4: Implementar consultas del resumen**
+- [x] **Step 4: Implementar consultas del resumen**
 
 Implementar métodos privados:
 
@@ -608,7 +608,7 @@ y hace `LEFT JOIN` a una agregación de `venta_propina` por
 `(vp.creado_el AT TIME ZONE $4)::date`. `porTurno` hace `LEFT JOIN turnos` con
 tenant y soft-delete; `porTipo` agrupa el snapshot `vp.tipo_garzon`.
 
-- [ ] **Step 5: Implementar `resumen` y mappers**
+- [x] **Step 5: Implementar `resumen` y mappers**
 
 Usar `Promise.all` después de obtener zona horaria. Convertir conteos con helper
 local:
@@ -622,7 +622,7 @@ const decimal = (value: string | null): string => value ?? '0';
 original `YYYY-MM-DD`, etiquetar turno faltante como
 `Sin turno` y no realizar cálculos financieros en JS.
 
-- [ ] **Step 6: Ejecutar GREEN y commit**
+- [x] **Step 6: Ejecutar GREEN y commit**
 
 ```bash
 cd backend && npm test -- propina-reportes.service.spec.ts --runInBand
@@ -649,7 +649,7 @@ git commit -m "feat(propinas): agregar resumen agregado F"
 - Produces: `PropinaReportesService.trabajadores(tenantId, query): Promise<PropinaReporteTrabajadores>`.
 - Produces: `GET /propinas/reportes/resumen` y `GET /propinas/reportes/trabajadores`.
 
-- [ ] **Step 1: Agregar tests RED de trabajadores**
+- [x] **Step 1: Agregar tests RED de trabajadores**
 
 Cubrir como mínimo:
 
@@ -677,7 +677,7 @@ it('ordena por monto asignado desc y nombre asc', async () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar RED y commit**
+- [x] **Step 2: Ejecutar RED y commit**
 
 ```bash
 cd backend && npm test -- propina-reportes.service.spec.ts --runInBand
@@ -690,7 +690,7 @@ git add backend/src/modules/propinas/propina-reportes.service.spec.ts
 git commit -m "test(propinas): cubrir reporte F por trabajador"
 ```
 
-- [ ] **Step 3: Implementar agregados de origen y asignación**
+- [x] **Step 3: Implementar agregados de origen y asignación**
 
 `origenTrabajadores` agrupa la misma base filtrada por:
 
@@ -749,14 +749,14 @@ data.sort((a, b) => {
 Totales se calculan con `Decimal.sum` sobre los strings retornados y
 `toFixed()`/`toString()`, nunca `Number`.
 
-- [ ] **Step 4: Implementar advertencias de trabajadores**
+- [x] **Step 4: Implementar advertencias de trabajadores**
 
 - Reutilizar el conteo de liquidaciones parcialmente solapadas.
 - Cuando hay `turnoIds`, contar liquidaciones confirmadas contenidas con
   `cardinality(turno_ids) = 0`; sin filtro retornar `0`.
 - Toda query conserva `$1 = tenantId`.
 
-- [ ] **Step 5: Crear controller y registrar módulo**
+- [x] **Step 5: Crear controller y registrar módulo**
 
 Crear `propina-reportes.controller.ts`:
 
@@ -803,7 +803,7 @@ providers: [
 
 No exportar `PropinaReportesService`: ningún módulo externo lo consume.
 
-- [ ] **Step 6: Ejecutar GREEN, build y commit**
+- [x] **Step 6: Ejecutar GREEN, build y commit**
 
 ```bash
 cd backend
@@ -833,7 +833,7 @@ git commit -m "feat(propinas): exponer reportes F por trabajador"
   `crearCachePropinaReportes`, `usePropinaReportes`.
 - Consumes: `useApiFetch`.
 
-- [ ] **Step 1: Escribir tests RED**
+- [x] **Step 1: Escribir tests RED**
 
 ```typescript
 describe('serializarFiltrosReporte', () => {
@@ -865,7 +865,7 @@ describe('crearCachePropinaReportes', () => {
 
 Agregar prueba para `hasta` exclusivo, clave estable y fechas inválidas.
 
-- [ ] **Step 2: Ejecutar RED y commit**
+- [x] **Step 2: Ejecutar RED y commit**
 
 ```bash
 cd frontend && npm test -- --run app/composables/usePropinaReportes.spec.ts
@@ -878,7 +878,7 @@ git add frontend/app/composables/usePropinaReportes.spec.ts
 git commit -m "test(frontend): definir filtros y caché de reportes F"
 ```
 
-- [ ] **Step 3: Implementar tipos y serialización**
+- [x] **Step 3: Implementar tipos y serialización**
 
 Copiar exactamente los contratos camelCase de `propina-reportes.types.ts`.
 Definir:
@@ -919,7 +919,7 @@ El cliente envía fechas calendario sin zona. El backend las convierte a
 medianoche usando `pais.zona_horaria_principal`, por lo que el resultado no
 depende de la zona del dispositivo del administrador.
 
-- [ ] **Step 4: Implementar caché y API**
+- [x] **Step 4: Implementar caché y API**
 
 ```typescript
 export function crearCachePropinaReportes() {
@@ -959,7 +959,7 @@ const trabajadores = (filtros: PropinaReporteFiltrosUi) =>
 Retornar `{ resumen, trabajadores, cache, claveFiltros }`, donde
 `claveFiltros = JSON.stringify(serializarFiltrosReporte(filtros))`.
 
-- [ ] **Step 5: Ejecutar GREEN y commit**
+- [x] **Step 5: Ejecutar GREEN y commit**
 
 ```bash
 cd frontend && npm test -- --run app/composables/usePropinaReportes.spec.ts
@@ -985,7 +985,7 @@ git commit -m "feat(frontend): agregar cliente de reportes F"
   `Propinas:Leer`.
 - Produces: ruta `/propinas/reportes`.
 
-- [ ] **Step 1: Crear estado y flujo de carga**
+- [x] **Step 1: Crear estado y flujo de carga**
 
 En `reportes.vue`:
 
@@ -1025,7 +1025,7 @@ const error = ref('');
 llama `cargarTab({ force: true })`. Un `watch(tab)` actualiza `tab` en URL y carga
 el nuevo tab sin invalidar caché.
 
-- [ ] **Step 2: Construir shell y filtros**
+- [x] **Step 2: Construir shell y filtros**
 
 Template obligatorio:
 
@@ -1085,7 +1085,7 @@ Template obligatorio:
 
 Antes de cargar, redirigir a `/` si no es admin ni tiene `Propinas:Leer`.
 
-- [ ] **Step 3: Implementar tab Resumen**
+- [x] **Step 3: Implementar tab Resumen**
 
 Renderizar:
 
@@ -1113,7 +1113,7 @@ const pendienteTotal = computed(() =>
 Agregar `aria-label` a cada barra con fecha y monto. Usar `bg-elevated`,
 `bg-muted`, `text-default`, `text-muted`, `border-default`; no hardcodear grises.
 
-- [ ] **Step 4: Implementar tab Por trabajador**
+- [x] **Step 4: Implementar tab Por trabajador**
 
 Definir `TableColumn<PropinaReporteTrabajador>[]` para:
 
@@ -1131,7 +1131,7 @@ tabla, cards compactas con trabajadores, monto originado, monto asignado y horas
 En móvil ocultar ventas/cuentas/última mediante `meta.class` responsive y mostrar
 un subtítulo compacto en la celda trabajador.
 
-- [ ] **Step 5: Implementar estados y advertencias**
+- [x] **Step 5: Implementar estados y advertencias**
 
 - `UAlert color="error"` persistente con botón Reintentar.
 - Skeleton/loading de Nuxt UI mientras no hay respuesta.
@@ -1139,7 +1139,7 @@ un subtítulo compacto en la celda trabajador.
 - `UAlert color="warning"` si cualquier contador de advertencia es mayor a cero.
 - Copy de advertencia explica exclusión, no la presenta como error.
 
-- [ ] **Step 6: Convertir Propinas en navegación anidada**
+- [x] **Step 6: Convertir Propinas en navegación anidada**
 
 En `dashboard.vue`, reemplazar el link simple por:
 
@@ -1165,7 +1165,7 @@ base.push({
 
 Mantener la condición existente `esAdmin || can('Propinas', 'Leer')`.
 
-- [ ] **Step 7: Build frontend y commit**
+- [x] **Step 7: Build frontend y commit**
 
 ```bash
 cd frontend
@@ -1197,6 +1197,9 @@ git commit -m "feat(frontend): mostrar reportes agregados de propinas"
 
 - [ ] **Step 1: Verificar planes SQL en PostgreSQL**
 
+> Bloqueado en cierre: el servidor PostgreSQL de solo lectura respondió error
+> interno y el contenedor backend no pudo resolver el host `postgres`.
+
 Con datos de desarrollo, ejecutar `EXPLAIN (ANALYZE, BUFFERS)` para:
 
 1. query central de cobranza/estado;
@@ -1209,7 +1212,7 @@ seed. Si el planner demuestra necesidad, agregar únicamente el índice candidat
 correspondiente a la spec en `startup-pos.sql` y una migración/DDL idempotente
 siguiendo el mecanismo actual del repositorio. Si no, no tocar esquema.
 
-- [ ] **Step 2: Ejecutar pruebas y cobertura**
+- [x] **Step 2: Ejecutar pruebas y cobertura**
 
 ```bash
 cd backend
@@ -1226,6 +1229,9 @@ Expected: todo PASS, builds exit 0 y archivos nuevos con cobertura >= 80%.
 
 - [ ] **Step 3: Verificación manual**
 
+> Bloqueado en cierre: el navegador de verificación no tenía sesión y fue
+> redirigido a `/login`.
+
 1. Abrir `/propinas/reportes` como admin.
 2. Confirmar preset de 30 días y query params.
 3. Verificar que solo se llama `/resumen` en el primer tab.
@@ -1238,7 +1244,7 @@ Expected: todo PASS, builds exit 0 y archivos nuevos con cobertura >= 80%.
 9. Probar usuario con `Propinas:Leer` y usuario sin permiso.
 10. Confirmar responsive y dark mode.
 
-- [ ] **Step 4: Crear documentación de feature**
+- [x] **Step 4: Crear documentación de feature**
 
 Crear `docs/features/reportes-propinas.md` desde `TEMPLATE.md`, incluyendo:
 
@@ -1255,7 +1261,7 @@ Añadir link en `docs/README.md`; marcar
 `docs/ESTADO.md`; añadir controller/service/composable/página a
 `docs/ARCHITECTURE.md`; cambiar la spec a `**Status**: Done`.
 
-- [ ] **Step 5: Lint final**
+- [x] **Step 5: Lint final**
 
 ```bash
 cd backend && npm run lint
@@ -1265,7 +1271,7 @@ git diff --check
 
 Expected: exit 0. Revisar que lint no haya modificado archivos ajenos al alcance.
 
-- [ ] **Step 6: Commit de cierre**
+- [x] **Step 6: Commit de cierre**
 
 ```bash
 git add docs/features/reportes-propinas.md docs/README.md docs/ESTADO.md \

@@ -12,8 +12,18 @@ import { TipoGarzon } from '../../garzones/enums/tipo-garzon.enum';
 
 function parseTurnoIds({ value }: { value: unknown }): string[] | undefined {
   if (value === undefined || value === null || value === '') return undefined;
-  const source = Array.isArray(value) ? value : String(value).split(',');
-  return [...new Set(source.map(String).map((id) => id.trim()).filter(Boolean))];
+  const source: unknown[] = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [value];
+  return [
+    ...new Set(
+      source
+        .map((id) => (typeof id === 'string' ? id.trim() : '__invalid__'))
+        .filter(Boolean),
+    ),
+  ];
 }
 
 export class QueryPropinaReporteDto {
@@ -64,9 +74,7 @@ export function normalizarRangoReporte(
     throw new BadRequestException('Las fechas deben usar YYYY-MM-DD');
   }
   if (hastaMs <= desdeMs) {
-    throw new BadRequestException(
-      'La fecha hasta debe ser posterior a desde',
-    );
+    throw new BadRequestException('La fecha hasta debe ser posterior a desde');
   }
   if (hastaMs - desdeMs > 366 * 24 * 60 * 60 * 1000) {
     throw new BadRequestException('El rango máximo del reporte es 366 días');

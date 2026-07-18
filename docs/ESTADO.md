@@ -59,5 +59,6 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Liquidación propinas E2 — config distribución versionada (grupos %, criterios, MANUAL pesos) | ✅ Implementado (2026-07-17) |
 | Liquidación propinas E3 — motor por período, confirmación/anulación y UI | ✅ Implementado (2026-07-17) |
 | Configuración de propina sugerida por tenant (`propina_configuracion.porcentaje_sugerido`) | ✅ Implementado (2026-07-17) |
+| Reportes de propinas F — resumen del ciclo completo y agregados por trabajador | ✅ Implementado (2026-07-17) |
 | Impresión Térmica (comandas cocina/barra por categoría via claim atómico + QZ Tray, precuenta, boleta) | ✅ Implementado (2026-07-13; claim atómico 2026-07-15) |
 | Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base/costo > 0) | ✅ Implementado (2026-07-15) |

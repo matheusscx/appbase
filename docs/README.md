@@ -60,6 +60,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [turnos-garzones.md](./features/turnos-garzones.md) | Turnos y sesiones de garzón: catálogo de turnos, marca de entrada/salida con PIN, cierre admin y sesión obligatoria para abrir/cerrar cuentas |
 | [liquidacion-propinas-config.md](./features/liquidacion-propinas-config.md) | Liquidación propinas E2: configuración versionada de distribución por grupos |
 | [liquidacion-propinas-motor.md](./features/liquidacion-propinas-motor.md) | Liquidación propinas E3: motor por período, confirmación/anulación y UI |
+| [reportes-propinas.md](./features/reportes-propinas.md) | Reportes F: resumen del ciclo completo y agregados auditables por trabajador |
 | [impresion-termica.md](./features/impresion-termica.md) | Impresión térmica vía QZ Tray: comandas de cocina/barra ruteadas por categoría (envío en dos fases), precuenta y boleta desde Salones y el POS |
 
 ## Otros
