@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js'
+import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 
 export interface RecetaIngredientePersonalizacion {
   ingredienteItemId: string
@@ -93,4 +94,26 @@ export function resumenPersonalizacion(
   const trimmed = comentario?.trim()
   if (trimmed) partes.push(trimmed)
   return partes.join(' · ')
+}
+
+/**
+ * Detalle priceado (preview del drawer, antes de confirmar) para boleta/precuenta:
+ * omitidos primero en $0 (nunca tienen costo), extras después con precioExtra × unidades.
+ */
+export function detallePersonalizacionPreview(
+  nombresOmitidos: string[],
+  extras: { nombre: string, unidades: number, precioExtra: string }[],
+): PersonalizacionDetalleLinea[] {
+  const omitidos: PersonalizacionDetalleLinea[] = nombresOmitidos.map(nombre => ({
+    nombre,
+    tipo: 'omitido',
+    monto: '0',
+  }))
+  const extrasDetalle: PersonalizacionDetalleLinea[] = extras.map(e => ({
+    nombre: e.nombre,
+    tipo: 'extra',
+    unidades: e.unidades,
+    monto: new Decimal(e.precioExtra || '0').times(e.unidades || 0).toString(),
+  }))
+  return [...omitidos, ...extrasDetalle]
 }

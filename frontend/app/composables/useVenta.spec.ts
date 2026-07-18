@@ -179,6 +179,40 @@ describe('carrito helpers', () => {
     expect(r[0]!.precioUnitarioOverride).toBe('1500')
   })
 
+  it('agregarLinea guarda personalizacionDetalle solo cuando hay personalización', () => {
+    const receta = { ...item('r', '1000'), tipo: 'receta' }
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: 'extra-1', unidades: 1 }],
+    }
+    const detalle = [{ nombre: 'Queso', tipo: 'extra' as const, unidades: 1, monto: '1000' }]
+
+    const conPers = agregarLinea([], receta, CAT, pers, 'Extra Queso', '1500', detalle)
+    expect(conPers[0]!.personalizacionDetalle).toEqual(detalle)
+
+    const sinPers = agregarLinea([], item('a'), CAT, undefined, undefined, undefined, detalle)
+    expect(sinPers[0]!.personalizacionDetalle).toBeUndefined()
+  })
+
+  it('agregarLinea merge mantiene personalizacionDetalle', () => {
+    const receta = { ...item('r', '1000'), tipo: 'receta' }
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [{ ingredienteItemId: 'extra-1', unidades: 1 }],
+    }
+    const detalle = [{ nombre: 'Queso', tipo: 'extra' as const, unidades: 1, monto: '1000' }]
+    const linea: CarritoLinea = {
+      item: receta,
+      cantidad: '1',
+      personalizacion: pers,
+      personalizacionDetalle: detalle,
+    }
+    const r = agregarLinea([linea], receta, CAT, pers, undefined, undefined, detalle)
+    expect(r).toHaveLength(1)
+    expect(r[0]!.cantidad).toBe('2')
+    expect(r[0]!.personalizacionDetalle).toEqual(detalle)
+  })
+
   it('descontarStockCatalogo resta las cantidades vendidas', () => {
     const catalogo = [item('a'), item('b', '50')]
     const r = descontarStockCatalogo(catalogo, [

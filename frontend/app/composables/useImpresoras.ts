@@ -11,6 +11,7 @@ import {
   type BoletaCliente,
   type BoletaItem,
   type ImpuestoBoleta,
+  type PersonalizacionDetalleLinea,
 } from '~/utils/ticket-builder'
 import { conTimeout } from '~/utils/con-timeout'
 
@@ -220,7 +221,11 @@ export function useImpresoras() {
     tenantNombre: string
     mesaNombre: string
     cuentaNumero: number
-    items: (TicketItem & { totalLinea: string })[]
+    items: (TicketItem & {
+      totalLinea: string
+      personalizacionDetalle?: PersonalizacionDetalleLinea[]
+      comentario?: string
+    })[]
     totales: TicketTotales
     propinaSugerida?: { porcentaje: string, monto: string }
     formatMonto: (v: string) => string

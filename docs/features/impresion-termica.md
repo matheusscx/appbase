@@ -116,6 +116,18 @@ impresora `rol='boleta'` del tenant.
     sugerida (monto calculado desde `propinaSugerida`).
   - Cada ítem puede llevar `nota?` (personalización + comentario), impresa indentada
     bajo el nombre.
+  - `buildBoletaTicket`/`buildPrecuentaTicket`: alternativa priceada a `nota?` vía
+    `personalizacionDetalle?: PersonalizacionDetalleLinea[]` (transparencia ante
+    reclamos) — omitidos como texto plano sin monto (nunca tienen costo), extras
+    con su precio (`precioExtra × unidades`) alineado a la derecha, y `comentario?`
+    libre al final sin precio. Si el ítem no trae `personalizacionDetalle`, cae al
+    formato `nota`/`notas` existente. Backend: `detallePersonalizacion()` en
+    `personalizacion-receta.util.ts` resuelve nombres + montos desde el snapshot
+    persistido (`armarDetalle` en `salones.service.ts`, campo
+    `CuentaLineaDetalle.personalizacionDetalle`). Mostrador: preview equivalente
+    calculado en el cliente por `detallePersonalizacionPreview()` en
+    `useRecetaPersonalizacion.ts`, emitido por `RecetaPersonalizacionDrawer.vue` y
+    guardado en `CarritoLinea.personalizacionDetalle` (`useVenta.ts`).
 - **Composable `useRazonSocialEmisor`**: nueva utilidad en
   `app/composables/useRazonSocialEmisor.ts` — selecciona la razón social preferida
   del tenant como emisor; fallback a primera habilitada, luego nombre del tenant.
@@ -184,13 +196,13 @@ impresión) sin romperse. Ver diseño en
 ### Unit (backend)
 
 ```bash
-cd backend && npx jest impresoras categorias salones
+cd backend && npx jest impresoras categorias salones personalizacion-receta
 ```
 
 ### Unit (frontend)
 
 ```bash
-cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/useImpresoras.spec.ts app/composables/useRazonSocialEmisor.spec.ts
+cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/useImpresoras.spec.ts app/composables/useRazonSocialEmisor.spec.ts app/composables/useVenta.spec.ts app/composables/useRecetaPersonalizacion.spec.ts
 ```
 
 ### Manual

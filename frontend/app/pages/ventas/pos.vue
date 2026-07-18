@@ -5,7 +5,7 @@ import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizac
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import { formatCantidadTicket } from '~/utils/cantidad-presentacion'
-import { agregarImpuestosVenta } from '~/utils/ticket-builder'
+import { agregarImpuestosVenta, type PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -62,14 +62,14 @@ function personalizacionVacia(p: PersonalizacionPayload): boolean {
   return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
 }
 
-function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, precioPreview: string) {
+function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, precioPreview: string, detalle: PersonalizacionDetalleLinea[]) {
   const item = items.value.find((i) => i.id === recetaItemId.value)
   if (!item) return
   if (personalizacionVacia(payload)) {
     add(item)
   }
   else {
-    add(item, payload, resumen || undefined, precioPreview)
+    add(item, payload, resumen || undefined, precioPreview, detalle)
   }
   recetaDrawerOpen.value = false
   recetaItemId.value = null
@@ -256,7 +256,9 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
                 : l.cantidad,
               precioUnitario: l.precioUnitario,
               totalLinea: l.totalLinea,
-              ...(ln?.personalizacionResumen ? { nota: ln.personalizacionResumen } : {}),
+              ...(ln?.personalizacionDetalle
+                ? { personalizacionDetalle: ln.personalizacionDetalle, comentario: ln.personalizacion?.comentario }
+                : ln?.personalizacionResumen ? { nota: ln.personalizacionResumen } : {}),
             }
           }),
           totales: resultadoVenta.totales,

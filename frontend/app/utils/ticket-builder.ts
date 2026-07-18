@@ -75,6 +75,36 @@ export function lineasNotaTicket(item: Pick<TicketItem, 'nota' | 'notas'>): stri
   ]
 }
 
+export interface PersonalizacionDetalleLinea {
+  nombre: string
+  tipo: 'omitido' | 'extra'
+  unidades?: number
+  monto: string
+}
+
+/**
+ * Igual que `lineasNotaTicket` pero con precio en los extras (transparencia ante
+ * reclamos): omitidos como texto plano (nunca tienen costo), extras con su monto
+ * alineado a la derecha, y el comentario libre al final.
+ */
+function lineasPersonalizacionPreciada(
+  detalle: PersonalizacionDetalleLinea[],
+  comentario: string | undefined,
+  formatMonto: (v: string) => string,
+  width: number,
+): string[] {
+  const out: string[] = []
+  for (const d of detalle.filter(d => d.tipo === 'omitido')) {
+    out.push(`  - Sin ${d.nombre}`)
+  }
+  for (const d of detalle.filter(d => d.tipo === 'extra')) {
+    const sufijo = d.unidades && d.unidades > 1 ? ` x${d.unidades}` : ''
+    out.push(padLR(`  + Extra ${d.nombre}${sufijo}`, formatMonto(d.monto), width))
+  }
+  if (comentario) out.push(`comentario: ${comentario}`)
+  return out
+}
+
 export interface TicketTotales {
   subtotalNeto: string
   totalDescuentos: string
@@ -184,7 +214,13 @@ export function buildPrecuentaTicket(input: {
   tenantNombre: string
   mesaNombre: string
   cuentaNumero: number
-  items: (TicketItem & { totalLinea: string })[]
+  items: (TicketItem & {
+    totalLinea: string
+    /** Detalle priceado de omitidos/extras. Si viene, reemplaza `nota`/`notas`. */
+    personalizacionDetalle?: PersonalizacionDetalleLinea[]
+    /** Comentario libre (sin precio) cuando se usa `personalizacionDetalle`. */
+    comentario?: string
+  })[]
   totales: TicketTotales
   propinaSugerida?: { porcentaje: string, monto: string }
   fecha: Date
@@ -208,7 +244,9 @@ export function buildPrecuentaTicket(input: {
       { texto: item.nombre, ancho: COL_DESC_PRECUENTA, alinear: 'izq' },
       { texto: input.formatMonto(item.totalLinea), ancho: COL_MONTO, alinear: 'der' },
     ]))
-    out.push(...lineasNotaTicket(item))
+    out.push(...(item.personalizacionDetalle
+      ? lineasPersonalizacionPreciada(item.personalizacionDetalle, item.comentario, input.formatMonto, BOLETA_WIDTH)
+      : lineasNotaTicket(item)))
   }
   out.push(separador(BOLETA_WIDTH))
   out.push(...buildTotalesLines(input.totales, input.formatMonto))
@@ -256,6 +294,10 @@ export interface BoletaCliente {
 export interface BoletaItem extends TicketItem {
   precioUnitario: string
   totalLinea: string
+  /** Detalle priceado de omitidos/extras. Si viene, reemplaza `nota`/`notas`. */
+  personalizacionDetalle?: PersonalizacionDetalleLinea[]
+  /** Comentario libre (sin precio) cuando se usa `personalizacionDetalle`. */
+  comentario?: string
 }
 
 /** Comprobante de venta (mesa o mostrador) — plantilla unificada interna/electrónica. */
@@ -330,7 +372,9 @@ export function buildBoletaTicket(input: {
       { texto: formatMonto(item.precioUnitario), ancho: COL_MONTO, alinear: 'der' },
       { texto: formatMonto(item.totalLinea), ancho: COL_MONTO, alinear: 'der' },
     ]))
-    out.push(...lineasNotaTicket(item))
+    out.push(...(item.personalizacionDetalle
+      ? lineasPersonalizacionPreciada(item.personalizacionDetalle, item.comentario, formatMonto, BOLETA_WIDTH)
+      : lineasNotaTicket(item)))
   }
   out.push(separador(BOLETA_WIDTH))
 

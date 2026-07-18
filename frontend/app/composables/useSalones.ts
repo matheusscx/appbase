@@ -2,6 +2,7 @@ import Decimal from 'decimal.js'
 import { useApiFetch } from './useApiFetch'
 import type { CalcularVentaInput } from './useCalculoPrecios'
 import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
+import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 
 // ── Tipos (espejo del contrato del backend salones) ─────────────────────────
 
@@ -60,6 +61,7 @@ export interface CuentaLineaDetalle {
     comentario?: string
   } | null
   personalizacionTexto?: string
+  personalizacionDetalle?: PersonalizacionDetalleLinea[]
 }
 
 export interface CuentaAsignacionDetalle {

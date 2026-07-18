@@ -142,6 +142,28 @@ describe('buildPrecuentaTicket', () => {
     expect(lines[idxFila + 2]).toBe('  + Extra Queso')
   })
 
+  it('con personalizacionDetalle imprime omitidos sin monto y extras con su precio', () => {
+    const lines = buildPrecuentaTicket({
+      tenantNombre: 'Restaurante Paris',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 1,
+      items: [{
+        nombre: 'Hamburguesa Clásica',
+        cantidad: '1',
+        totalLinea: '10500',
+        personalizacionDetalle: [
+          { nombre: 'Cebolla', tipo: 'omitido', monto: '0' },
+          { nombre: 'Queso Cheddar', tipo: 'extra', unidades: 1, monto: '1000' },
+        ],
+      }],
+      totales: { subtotalNeto: '10500', totalDescuentos: '0', totalRecargos: '0', totalImpuestos: '0', totalFinal: '10500' },
+      fecha: FECHA,
+      formatMonto,
+    })
+    expect(lines).toContain('  - Sin Cebolla')
+    expect(lines.some(l => l.startsWith('  + Extra Queso Cheddar') && l.includes('$1000'))).toBe(true)
+  })
+
   it('con propinaSugerida imprime el bloque sugerido y la leyenda voluntaria', () => {
     const lines = buildPrecuentaTicket({
       tenantNombre: 'Restaurante Paris',
@@ -304,6 +326,57 @@ describe('buildBoletaTicket', () => {
     expect(fila!.slice(6, 16)).toBe('Pisco Sour')
     expect(fila!.slice(33, 38)).toBe('$5000')
     expect(fila!.slice(43, 48)).toBe('$5000')
+  })
+
+  it('con personalizacionDetalle imprime omitidos sin monto y extras con su precio', () => {
+    const lines = boleta({
+      items: [{
+        nombre: 'Hamburguesa Clásica',
+        cantidad: '1',
+        precioUnitario: '8000',
+        totalLinea: '10500',
+        personalizacionDetalle: [
+          { nombre: 'Cebolla', tipo: 'omitido', monto: '0' },
+          { nombre: 'Pepinillos', tipo: 'omitido', monto: '0' },
+          { nombre: 'Queso Cheddar', tipo: 'extra', unidades: 1, monto: '1000' },
+          { nombre: 'Tocino', tipo: 'extra', unidades: 2, monto: '1500' },
+        ],
+      }],
+    })
+    expect(lines).toContain('  - Sin Cebolla')
+    expect(lines).toContain('  - Sin Pepinillos')
+    expect(lines.some(l => l.startsWith('  + Extra Queso Cheddar') && l.includes('$1000'))).toBe(true)
+    expect(lines.some(l => l.startsWith('  + Extra Tocino x2') && l.includes('$1500'))).toBe(true)
+    // Los omitidos nunca muestran monto (nunca tienen costo).
+    expect(lines.some(l => l.startsWith('  - Sin Cebolla') && /\$/.test(l))).toBe(false)
+  })
+
+  it('con personalizacionDetalle también imprime el comentario libre al final', () => {
+    const lines = boleta({
+      items: [{
+        nombre: 'Hamburguesa Clásica',
+        cantidad: '1',
+        precioUnitario: '8000',
+        totalLinea: '8000',
+        personalizacionDetalle: [],
+        comentario: 'término medio',
+      }],
+    })
+    expect(lines).toContain('comentario: término medio')
+  })
+
+  it('sin personalizacionDetalle cae al formato de nota plano existente', () => {
+    const lines = boleta({
+      items: [{
+        nombre: 'Hamburguesa Clásica',
+        cantidad: '1',
+        precioUnitario: '8000',
+        totalLinea: '8000',
+        nota: 'Sin Cebolla · Extra Queso',
+      }],
+    })
+    expect(lines).toContain('  - Sin Cebolla')
+    expect(lines).toContain('  + Extra Queso')
   })
 })
 

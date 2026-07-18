@@ -4,6 +4,7 @@ import {
   precioConExtras,
   buildPersonalizacionPayload,
   resumenPersonalizacion,
+  detallePersonalizacionPreview,
 } from './useRecetaPersonalizacion'
 
 describe('sinStock', () => {
@@ -94,5 +95,23 @@ describe('resumenPersonalizacion', () => {
 
   it('devuelve vacío si no hay personalización', () => {
     expect(resumenPersonalizacion([], [], '')).toBe('')
+  })
+})
+
+describe('detallePersonalizacionPreview', () => {
+  it('omitidos primero en $0, extras después con monto = precioExtra × unidades', () => {
+    const r = detallePersonalizacionPreview(
+      ['Cebolla'],
+      [{ nombre: 'Queso', unidades: 1, precioExtra: '1000' }, { nombre: 'Tocino', unidades: 2, precioExtra: '750' }],
+    )
+    expect(r).toEqual([
+      { nombre: 'Cebolla', tipo: 'omitido', monto: '0' },
+      { nombre: 'Queso', tipo: 'extra', unidades: 1, monto: '1000' },
+      { nombre: 'Tocino', tipo: 'extra', unidades: 2, monto: '1500' },
+    ])
+  })
+
+  it('devuelve [] si no hay omitidos ni extras', () => {
+    expect(detallePersonalizacionPreview([], [])).toEqual([])
   })
 })

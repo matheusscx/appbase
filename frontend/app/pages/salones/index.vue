@@ -745,7 +745,9 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
       cantidad: cantidadTicket,
       precioUnitario: l.precioUnitario,
       totalLinea: l.totalLinea,
-      ...(cl?.personalizacionTexto ? { nota: cl.personalizacionTexto } : {}),
+      ...(cl?.personalizacionDetalle?.length
+        ? { personalizacionDetalle: cl.personalizacionDetalle, comentario: cl.personalizacion?.comentario }
+        : cl?.personalizacionTexto ? { nota: cl.personalizacionTexto } : {}),
     }
   })
 }
