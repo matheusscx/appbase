@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-07-17
+**Last Updated**: 2026-07-17 (operatividad simplificada)
 
 ---
 
@@ -35,6 +35,35 @@ versionada vigente al momento de crear el borrador.
 
 ---
 
+## Operatividad (flujo simplificado)
+
+El panel de reportes pesado del front (`PropinaReportesPanel.vue` +
+`usePropinaReportes.ts` + página `/propinas/reportes`) se retiró: la operación
+diaria vive completa en una **pantalla única `/propinas`**.
+
+- **Métricas**: "pendiente por liquidar" y "cobrado del mes" (`usePropinaResumen`,
+  sigue consumiendo `GET /propinas/reportes/resumen` del backend de reportes,
+  que se mantiene sin cambios).
+- **Selector período + turnos**: rango de fechas y turnos opcionales; cada
+  cambio recalcula el reparto en vivo llamando a `preview` (no persiste nada).
+- **Reparto en vivo**: muestra grupos y participantes con los montos que
+  resultarían de liquidar ahora mismo, según la config de distribución vigente.
+- **Ajustes en memoria**: excluir/incluir personas del reparto y fijar un monto
+  manual por persona en grupos `MANUAL` — se envían como `ajustes` en el mismo
+  body de `preview`/`liquidar`, sin tocar el borrador hasta confirmar.
+- **Botón "Liquidar período"**: llama a `POST /propinas/liquidaciones/liquidar`,
+  que crea, aplica los ajustes y confirma en una sola transacción atómica.
+- **Impresión**: página `/propinas/liquidaciones/:id/imprimir?tipo=persona|resumen|grupo`
+  (un solo componente, 3 vistas por query param), pensada para `window.print()`
+  a A4 con saltos de página por grupo/persona (`usePropinaImpresion.ts` arma los
+  grupos imprimibles a partir del `LiquidacionDetalle`).
+
+La configuración de grupos, criterios y porcentajes de distribución
+(`liquidacion-propinas-config.md`) **no cambió** — este flujo solo simplifica
+cómo se dispara/ajusta/liquida un período y cómo se imprime el resultado.
+
+---
+
 ## API Endpoints
 
 Todos requieren JWT, tenant activo y permisos reales en backend:
@@ -42,6 +71,8 @@ Todos requieren JWT, tenant activo y permisos reales en backend:
 - `GET /propinas/liquidaciones` — `Propinas:Leer`
 - `GET /propinas/liquidaciones/:id` — `Propinas:Leer`
 - `POST /propinas/liquidaciones` — `Propinas:Liquidar`
+- `POST /propinas/liquidaciones/preview` — `Propinas:Leer`
+- `POST /propinas/liquidaciones/liquidar` — `Propinas:Liquidar`
 - `PATCH /propinas/liquidaciones/:id` — `Propinas:Liquidar`
 - `POST /propinas/liquidaciones/:id/actualizar-config` — `Propinas:Liquidar`
 - `POST /propinas/liquidaciones/:id/confirmar` — `Propinas:Liquidar`
@@ -64,6 +95,43 @@ Authorization: Bearer <token>
 
 Respuesta: `LiquidacionDetalle` con cabecera, grupos, participantes, fuentes,
 eventos y advertencias.
+
+### Preview del reparto (sin persistir)
+
+```http
+POST /propinas/liquidaciones/preview
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "fechaDesde": "2026-07-17T00:00:00.000Z",
+  "fechaHasta": "2026-07-18T00:00:00.000Z",
+  "turnoIds": ["uuid-turno"],
+  "ajustes": {
+    "exclusiones": ["uuid-garzon"],
+    "montosManuales": [{ "garzonId": "uuid-garzon", "monto": "15000" }]
+  }
+}
+```
+
+Calcula el reparto por grupo/participante con la config vigente **sin escribir
+en base de datos** — usado por la pantalla operativa para el reparto en vivo
+mientras el usuario ajusta período, turnos, exclusiones y montos manuales.
+Solo requiere `Propinas:Leer`.
+
+### Liquidar (atómico)
+
+```http
+POST /propinas/liquidaciones/liquidar
+Authorization: Bearer <token>
+```
+
+Mismo body que `preview`. Ejecuta en una sola transacción: crea el borrador,
+aplica los `ajustes` (exclusiones/montos manuales) y confirma — equivalente a
+encadenar `crear` → `actualizar` → `confirmar`, pero sin dejar borradores
+intermedios si algo falla. Requiere `Propinas:Liquidar`. Respuesta:
+`LiquidacionDetalle` ya confirmado.
 
 ---
 

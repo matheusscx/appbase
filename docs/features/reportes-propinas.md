@@ -10,12 +10,21 @@
 
 ### What is it?
 
-Vista operativa en `/propinas?tab=reportes` (tab dentro de Propinas) con dos vistas:
+Dos endpoints de backend con reportes agregados de propinas:
 
 - **Resumen:** cobranza, estado actual, anulaciones históricas, tendencia diaria
   y desgloses por turno/tipo.
 - **Por trabajador:** propina originada y asignación confirmada, con las bases
   congeladas usadas en la liquidación.
+
+> **2026-07-17 — front de reportes retirado.** El panel pesado con tabs
+> (`PropinaReportesPanel.vue`, `usePropinaReportes.ts`, página
+> `/propinas/reportes`) se eliminó al simplificar la operatividad del módulo
+> (ver [`liquidacion-propinas-motor.md`](./liquidacion-propinas-motor.md)).
+> Ambos endpoints **se mantienen intactos**; hoy solo `resumen` se consume,
+> desde la pantalla `/propinas` (`usePropinaResumen`), para 2 métricas
+> ("pendiente por liquidar" y "cobrado del mes"). `trabajadores` queda
+> disponible sin consumidor en el front.
 
 ### Why does it exist?
 
@@ -84,14 +93,12 @@ exponer su PIN.
 
 ## Frontend
 
-- Página: `frontend/app/pages/propinas/index.vue` (tab Reportes) + `PropinaReportesPanel.vue`
-- Redirect compat: `/propinas/reportes` → `/propinas?tab=reportes`
-- Composable: `frontend/app/composables/usePropinaReportes.ts`
-- Navegación: grupo Propinas en `frontend/app/layouts/dashboard.vue`
-
-Cada tab solicita solo su endpoint y cachea por tenant + combinación de
-filtros. Aplicar filtros invalida ambas caches. Los montos se muestran con
-`useFormatters`; solo la proporción visual de las barras convierte a `number`.
+- Página: `frontend/app/pages/propinas/index.vue` — solo consume `resumen` vía
+  `frontend/app/composables/usePropinaResumen.ts` para las 2 métricas de
+  cabecera (pendiente por liquidar, cobrado del mes).
+- Navegación: grupo Propinas en `frontend/app/layouts/dashboard.vue`.
+- El panel con tabs, sus filtros propios y el cache dual descritos antes del
+  2026-07-17 ya no existen; `trabajadores` no tiene consumidor en el front.
 
 ## Testing
 
@@ -101,7 +108,6 @@ npm test -- query-propina-reporte.dto.spec.ts propina-reportes.service.spec.ts -
 npm run build
 
 cd ../frontend
-npm test -- --run app/composables/usePropinaReportes.spec.ts
 npm run build
 ```
 
@@ -110,9 +116,9 @@ Verificación manual:
 1. Consultar sugeridas, manuales y cierres sin propina.
 2. Comparar pendiente libre, fuentes en borrador y confirmadas.
 3. Anular y reliquidar; comprobar que anulación queda como histórico separado.
-4. Cambiar tabs y comprobar cache; Aplicar debe consultar solo el tab activo.
-5. Filtrar por turno/tipo y revisar advertencias.
-6. Probar usuario con y sin `Propinas:Leer`.
+4. Filtrar por turno/tipo y revisar advertencias (vía backend/API directa; el
+   front ya no expone filtros de reportes).
+5. Probar usuario con y sin `Propinas:Leer`.
 
 ## Acceptance Criteria
 
