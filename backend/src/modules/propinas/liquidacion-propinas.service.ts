@@ -787,6 +787,21 @@ export class LiquidacionPropinasService {
     return [...participantes, creado];
   }
 
+  private redistribuirGrupo<T extends ParticipanteData>(
+    grupo: LiquidacionPropinasGrupo,
+    participantesGrupo: T[],
+    decimales: number,
+  ): { activos: T[]; omitidos: T[] } {
+    const delGrupo = participantesGrupo.filter((p) => p.incluido);
+    const omitidos = participantesGrupo.filter((p) => !p.incluido);
+    const activos =
+      grupo.criterio === CriterioDistribucion.MANUAL &&
+      grupo.manualModo === ManualModo.MONTOS
+        ? delGrupo
+        : (this.repartirGrupo(grupo, grupo, delGrupo, decimales) as T[]);
+    return { activos, omitidos };
+  }
+
   private async recalcularParticipantesExistentes(
     manager: EntityManager,
     grupos: LiquidacionPropinasGrupo[],
@@ -795,22 +810,12 @@ export class LiquidacionPropinasService {
   ): Promise<LiquidacionPropinasParticipante[]> {
     const recalculados: LiquidacionPropinasParticipante[] = [];
     for (const grupo of grupos) {
-      const delGrupo = participantes.filter(
-        (p) => p.grupoId === grupo.id && p.incluido,
+      const delGrupo = participantes.filter((p) => p.grupoId === grupo.id);
+      const { activos, omitidos } = this.redistribuirGrupo(
+        grupo,
+        delGrupo,
+        decimales,
       );
-      const omitidos = participantes.filter(
-        (p) => p.grupoId === grupo.id && !p.incluido,
-      );
-      const activos =
-        grupo.criterio === CriterioDistribucion.MANUAL &&
-        grupo.manualModo === ManualModo.MONTOS
-          ? delGrupo
-          : (this.repartirGrupo(
-              grupo,
-              grupo,
-              delGrupo,
-              decimales,
-            ) as LiquidacionPropinasParticipante[]);
       for (const p of activos) {
         await manager.save(LiquidacionPropinasParticipante, p);
       }
@@ -1048,17 +1053,12 @@ export class LiquidacionPropinasService {
 
     const recomputados: ParticipanteData[] = [];
     for (const grupo of grupos) {
-      const delGrupo = conInclusion.filter(
-        (p) => p.grupoId === grupo.id && p.incluido,
+      const delGrupo = conInclusion.filter((p) => p.grupoId === grupo.id);
+      const { activos, omitidos } = this.redistribuirGrupo(
+        grupo,
+        delGrupo,
+        decimales,
       );
-      const omitidos = conInclusion.filter(
-        (p) => p.grupoId === grupo.id && !p.incluido,
-      );
-      const activos =
-        grupo.criterio === CriterioDistribucion.MANUAL &&
-        grupo.manualModo === ManualModo.MONTOS
-          ? delGrupo
-          : this.repartirGrupo(grupo, grupo, delGrupo, decimales);
       recomputados.push(...activos, ...omitidos);
     }
 
