@@ -169,19 +169,20 @@ function filaColumnas(cols: Columna[]): string {
 function buildTotalesLines(
   totales: TicketTotales,
   formatMonto: (v: string) => string,
+  width: number,
 ): string[] {
   const out: string[] = []
-  out.push(`Subtotal: ${formatMonto(totales.subtotalNeto)}`)
+  out.push(padLR('Subtotal', formatMonto(totales.subtotalNeto), width))
   if (new Decimal(totales.totalDescuentos || '0').gt(0)) {
-    out.push(`Descuentos: -${formatMonto(totales.totalDescuentos)}`)
+    out.push(padLR('Descuentos', `-${formatMonto(totales.totalDescuentos)}`, width))
   }
   if (new Decimal(totales.totalRecargos || '0').gt(0)) {
-    out.push(`Recargos: +${formatMonto(totales.totalRecargos)}`)
+    out.push(padLR('Recargos', `+${formatMonto(totales.totalRecargos)}`, width))
   }
   if (new Decimal(totales.totalImpuestos || '0').gt(0)) {
-    out.push(`Impuestos: ${formatMonto(totales.totalImpuestos)}`)
+    out.push(padLR('Impuestos', formatMonto(totales.totalImpuestos), width))
   }
-  out.push(`TOTAL: ${formatMonto(totales.totalFinal)}`)
+  out.push(padLR('TOTAL', formatMonto(totales.totalFinal), width))
   return out
 }
 
@@ -249,7 +250,7 @@ export function buildPrecuentaTicket(input: {
       : lineasNotaTicket(item)))
   }
   out.push(separador(BOLETA_WIDTH))
-  out.push(...buildTotalesLines(input.totales, input.formatMonto))
+  out.push(...buildTotalesLines(input.totales, input.formatMonto, BOLETA_WIDTH))
   if (input.propinaSugerida) {
     out.push(separador(BOLETA_WIDTH))
     out.push(padLR(

@@ -86,8 +86,11 @@ describe('buildPrecuentaTicket', () => {
     })
 
     expect(lines.some(l => l.includes('PRECUENTA (no válido como boleta)'))).toBe(true)
-    expect(lines).toContain('TOTAL: $21420')
-    expect(lines.some(l => l.startsWith('Descuentos:'))).toBe(false)
+    const total = lines.find(l => l.startsWith('TOTAL'))
+    expect(total).toBeDefined()
+    expect(total).toHaveLength(48)
+    expect(total!.slice(43, 48)).toBe('21420')
+    expect(lines.some(l => l.startsWith('Descuentos'))).toBe(false)
 
     const fila = lines.find(l => l.includes('Lomo a lo pobre'))
     expect(fila).toBeDefined()
