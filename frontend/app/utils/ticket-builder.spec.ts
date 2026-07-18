@@ -120,72 +120,88 @@ describe('buildPrecuentaTicket', () => {
   })
 })
 
+const EMISOR = { nombre: 'Comercial Paris SpA', rut: '76.123.456-7', direccion: 'Av. Providencia 1234', telefono: '+56 2 2345 6789' }
+const TOTALES_BASE = { subtotalNeto: '37000', totalDescuentos: '0', totalRecargos: '0', totalImpuestos: '5908', totalFinal: '37000' }
+const ITEM = { nombre: 'Pisco Sour', cantidad: '1', precioUnitario: '5000', totalLinea: '5000' }
+const IVA = [{ nombre: 'IVA', tasa: '0.19', monto: '5908' }]
+
 describe('buildBoletaTicket', () => {
-  it('incluye ítems, totales y los pagos', () => {
-    const lines = buildBoletaTicket({
-      tenantNombre: 'Restaurante Paris',
-      items: [{ nombre: 'Lomo a lo pobre', cantidad: '2', totalLinea: '18000' }],
-      totales: {
-        subtotalNeto: '18000',
-        totalDescuentos: '1000',
-        totalRecargos: '0',
-        totalImpuestos: '3420',
-        totalFinal: '20420',
-      },
-      pagos: [{ nombre: 'Efectivo', monto: '20420' }],
+  function boleta(over: Partial<Parameters<typeof buildBoletaTicket>[0]> = {}) {
+    return buildBoletaTicket({
+      emisor: EMISOR,
+      facturacionElectronica: false,
+      meta: { cajero: 'Juan Pérez' },
+      items: [ITEM],
+      totales: TOTALES_BASE,
+      impuestos: IVA,
+      pagos: [{ nombre: 'Efectivo', monto: '37000' }],
       fecha: FECHA,
       formatMonto,
+      ...over,
     })
+  }
 
-    expect(lines).toContain('BOLETA')
-    expect(lines).toContain('Descuentos: -$1000')
-    expect(lines).toContain('Efectivo: $20420')
-    expect(lines).toContain('TOTAL: $20420')
+  it('imprime la cabecera del emisor con RUT y dirección', () => {
+    const lines = boleta()
+    expect(lines.some(l => l.includes('Comercial Paris SpA'))).toBe(true)
+    expect(lines.some(l => l.includes('RUT: 76.123.456-7'))).toBe(true)
+    expect(lines.some(l => l.includes('Av. Providencia 1234'))).toBe(true)
   })
 
-  it('imprime cantidad con unidad de presentación preformateada', () => {
-    const lines = buildBoletaTicket({
-      tenantNombre: 'Restaurante Paris',
-      items: [{ nombre: 'Harina', cantidad: '500 g', totalLinea: '2500' }],
-      totales: {
-        subtotalNeto: '2500',
-        totalDescuentos: '0',
-        totalRecargos: '0',
-        totalImpuestos: '0',
-        totalFinal: '2500',
-      },
-      pagos: [{ nombre: 'Efectivo', monto: '2500' }],
-      fecha: FECHA,
-      formatMonto,
-    })
-
-    expect(lines).toContain('500 g x Harina')
+  it('omite RUT/dirección/teléfono cuando el emisor no los trae', () => {
+    const lines = boleta({ emisor: { nombre: 'Kiosco Simple' } })
+    expect(lines.some(l => l.includes('RUT:'))).toBe(false)
+    expect(lines.some(l => l.startsWith('Tel:'))).toBe(false)
   })
 
-  it('incluye personalización como lista bajo el ítem', () => {
-    const lines = buildBoletaTicket({
-      tenantNombre: 'Restaurante Paris',
-      items: [{
-        nombre: 'Hamburguesa Clásica',
-        cantidad: '1',
-        totalLinea: '9800',
-        nota: 'Sin Cebolla · Extra Queso',
-      }],
-      totales: {
-        subtotalNeto: '9800',
-        totalDescuentos: '0',
-        totalRecargos: '0',
-        totalImpuestos: '0',
-        totalFinal: '9800',
-      },
-      pagos: [{ nombre: 'Efectivo', monto: '9800' }],
-      fecha: FECHA,
-      formatMonto,
-    })
+  it('en modo interno imprime DOCUMENTO INTERNO y SIN VALIDEZ FISCAL, nunca SII', () => {
+    const lines = boleta()
+    expect(lines.some(l => l.includes('DOCUMENTO INTERNO'))).toBe(true)
+    expect(lines.some(l => l.includes('SIN VALIDEZ FISCAL'))).toBe(true)
+    expect(lines.some(l => l.includes('SII'))).toBe(false)
+    expect(lines.some(l => l.includes('BOLETA ELECTRÓNICA'))).toBe(false)
+  })
 
-    expect(lines).toContain('1 x Hamburguesa Clásica')
-    expect(lines).toContain('  - Sin Cebolla')
-    expect(lines).toContain('  + Extra Queso')
+  it('en modo electrónico imprime BOLETA ELECTRÓNICA + folio + timbre SII, nunca SIN VALIDEZ', () => {
+    const lines = boleta({ facturacionElectronica: true, folio: '00000123' })
+    expect(lines.some(l => l.includes('BOLETA ELECTRÓNICA'))).toBe(true)
+    expect(lines.some(l => l.includes('00000123'))).toBe(true)
+    expect(lines.some(l => l.includes('Timbre Electrónico SII'))).toBe(true)
+    expect(lines.some(l => l.includes('SIN VALIDEZ FISCAL'))).toBe(false)
+  })
+
+  it('imprime Neto y una línea por impuesto con nombre y tasa reales', () => {
+    const lines = boleta()
+    // Neto = totalFinal - totalImpuestos = 37000 - 5908 = 31092
+    expect(lines.some(l => l.startsWith('Neto') && l.includes('$31092'))).toBe(true)
+    expect(lines.some(l => l.startsWith('IVA (19%)') && l.includes('$5908'))).toBe(true)
+    expect(lines.some(l => l.startsWith('TOTAL BOLETA') && l.includes('$37000'))).toBe(true)
+  })
+
+  it('omite la metadata operativa vacía y comparte línea mesa/garzón', () => {
+    const soloMesa = boleta({ meta: { mesa: 'MESA-12', garzon: 'Carlos' } })
+    expect(soloMesa.some(l => l.includes('MESA-12') && l.includes('Carlos'))).toBe(true)
+    const sinMesa = boleta({ meta: { cajero: 'Juan Pérez' } })
+    expect(sinMesa.some(l => l.startsWith('Mesa'))).toBe(false)
+  })
+
+  it('con propina > 0 imprime Propina y TOTAL A PAGAR = total + propina', () => {
+    const lines = boleta({ propina: { monto: '3700' } })
+    expect(lines.some(l => l.startsWith('Propina') && l.includes('$3700'))).toBe(true)
+    expect(lines.some(l => l.startsWith('TOTAL A PAGAR') && l.includes('$40700'))).toBe(true)
+  })
+
+  it('sin propina no imprime bloque de propina ni TOTAL A PAGAR', () => {
+    const lines = boleta()
+    expect(lines.some(l => l.startsWith('Propina'))).toBe(false)
+    expect(lines.some(l => l.startsWith('TOTAL A PAGAR'))).toBe(false)
+  })
+
+  it('imprime el ítem en 2 líneas (nombre + precio/total)', () => {
+    const lines = boleta()
+    const idx = lines.indexOf('1 x Pisco Sour')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(lines[idx + 1]).toContain('$5000')
   })
 })
 
