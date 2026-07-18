@@ -101,6 +101,53 @@ export interface UpdateLiquidacionBody {
   recalcular?: boolean
 }
 
+export interface PreviewGrupo {
+  id: string
+  tipoGarzon: TipoGarzon
+  nombre: string
+  porcentaje: string
+  criterio: CriterioDistribucion
+  baseVentas: BaseVentasGrupo
+  manualModo: ManualModo | null
+  montoGrupo: string
+  orden: number
+}
+
+export interface PreviewParticipante {
+  garzonId: string
+  grupoId: string
+  tipoGarzon: TipoGarzon
+  incluido: boolean
+  horas: string
+  ventasBase: string
+  cuentas: string
+  pesoManual: string | null
+  monto: string
+}
+
+export interface PreviewReparto {
+  poolTotal: string
+  monedaId: string
+  decimalesMoneda: number
+  grupos: PreviewGrupo[]
+  participantes: PreviewParticipante[]
+  advertencias: string[]
+}
+
+export interface AjustesReparto {
+  exclusiones?: string[]
+  montosManuales?: Array<{ garzonId: string, monto: string }>
+}
+
+export interface PreviewBody {
+  fechaDesde: string
+  fechaHasta: string
+  turnoIds?: string[]
+  ajustes?: AjustesReparto
+}
+
+export interface LiquidarBody extends PreviewBody {}
+
 export function usePropinaLiquidaciones() {
   const apiUrl = useRuntimeConfig().public.apiUrl
   const base = `${apiUrl}/propinas/liquidaciones`
@@ -123,6 +170,10 @@ export function usePropinaLiquidaciones() {
       method: 'POST',
       body,
     })
+  const preview = (body: PreviewBody) =>
+    useApiFetch<PreviewReparto>(`${base}/preview`, { method: 'POST', body })
+  const liquidar = (body: LiquidarBody) =>
+    useApiFetch<LiquidacionDetalle>(`${base}/liquidar`, { method: 'POST', body })
 
-  return { listar, crear, detalle, actualizar, actualizarConfig, confirmar, anular }
+  return { listar, crear, detalle, actualizar, actualizarConfig, confirmar, anular, preview, liquidar }
 }
