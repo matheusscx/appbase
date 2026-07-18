@@ -1,12 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import Decimal from 'decimal.js';
 import { DataSource } from 'typeorm';
+import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import {
   normalizarRangoReporte,
   QueryPropinaReporteDto,
   RangoReporteNormalizado,
 } from './dto/query-propina-reporte.dto';
-import { PropinaReporteResumen } from './propina-reportes.types';
+import {
+  PropinaReporteResumen,
+  PropinaReporteTrabajador,
+  PropinaReporteTrabajadores,
+} from './propina-reportes.types';
 
 type NumericValue = string | number | null;
 
@@ -53,6 +59,31 @@ interface TipoRow {
   cierres: NumericValue;
   con_propina: NumericValue;
   monto_cobrado: string | null;
+}
+
+interface OrigenTrabajadorRow {
+  garzon_id: string;
+  tipo_garzon: TipoGarzon | null;
+  cierres: NumericValue;
+  con_propina: NumericValue;
+  monto: string | null;
+}
+
+interface AsignacionTrabajadorRow {
+  garzon_id: string;
+  tipo_garzon: TipoGarzon;
+  monto: string | null;
+  horas: string | null;
+  ventas_base: string | null;
+  cuentas: string | null;
+  liquidaciones: NumericValue;
+  ultima_liquidacion_el: Date | string | null;
+}
+
+interface GarzonEtiquetaRow {
+  garzon_id: string;
+  nombre: string | null;
+  tipo_garzon: TipoGarzon;
 }
 
 const count = (value: NumericValue): number => Number(value ?? 0);
@@ -131,6 +162,103 @@ export class PropinaReportesService {
         montoCobrado: decimal(row.monto_cobrado),
       })),
       advertencias: { liquidacionesParcialmenteSolapadas },
+    };
+  }
+
+  async trabajadores(
+    tenantId: string,
+    query: QueryPropinaReporteDto,
+  ): Promise<PropinaReporteTrabajadores> {
+    const rango = normalizarRangoReporte(query);
+    const zona = await this.zonaHoraria(tenantId);
+    const [
+      origenRows,
+      asignacionRows,
+      liquidacionesParcialmenteSolapadas,
+      liquidacionesTodosLosTurnosExcluidas,
+    ] = await Promise.all([
+      this.origenTrabajadores(tenantId, rango, zona),
+      this.asignacionTrabajadores(tenantId, rango, zona),
+      this.solapadas(tenantId, rango, zona),
+      this.todosLosTurnosExcluidas(tenantId, rango, zona),
+    ]);
+
+    const ids = [
+      ...new Set([
+        ...origenRows.map((row) => row.garzon_id),
+        ...asignacionRows.map((row) => row.garzon_id),
+      ]),
+    ];
+    const etiquetas = await this.etiquetasGarzones(tenantId, ids);
+    const etiquetaPorId = new Map(
+      etiquetas.map((row) => [row.garzon_id, row]),
+    );
+    const origenPorId = new Map(
+      origenRows.map((row) => [row.garzon_id, row]),
+    );
+    const asignacionPorId = new Map(
+      asignacionRows.map((row) => [row.garzon_id, row]),
+    );
+
+    const data: PropinaReporteTrabajador[] = ids.map((garzonId) => {
+      const origen = origenPorId.get(garzonId);
+      const asignacion = asignacionPorId.get(garzonId);
+      const etiqueta = etiquetaPorId.get(garzonId);
+      return {
+        garzonId,
+        nombre: etiqueta?.nombre ?? 'Trabajador eliminado',
+        tipoGarzon:
+          asignacion?.tipo_garzon ??
+          origen?.tipo_garzon ??
+          etiqueta?.tipo_garzon ??
+          TipoGarzon.GARZON,
+        origen: {
+          cierres: count(origen?.cierres ?? 0),
+          conPropina: count(origen?.con_propina ?? 0),
+          monto: decimal(origen?.monto ?? null),
+        },
+        asignacionConfirmada: {
+          monto: decimal(asignacion?.monto ?? null),
+          horas: decimal(asignacion?.horas ?? null),
+          ventasBase: decimal(asignacion?.ventas_base ?? null),
+          cuentas: decimal(asignacion?.cuentas ?? null),
+          liquidaciones: count(asignacion?.liquidaciones ?? 0),
+          ultimaLiquidacionEl: asignacion?.ultima_liquidacion_el
+            ? new Date(asignacion.ultima_liquidacion_el).toISOString()
+            : null,
+        },
+      };
+    });
+
+    data.sort((a, b) => {
+      const byAmount = new Decimal(b.asignacionConfirmada.monto).cmp(
+        a.asignacionConfirmada.monto,
+      );
+      return byAmount || a.nombre.localeCompare(b.nombre, 'es');
+    });
+
+    const sum = (selector: (item: PropinaReporteTrabajador) => string) =>
+      data
+        .reduce(
+          (total, item) => total.plus(selector(item)),
+          new Decimal(0),
+        )
+        .toString();
+
+    return {
+      data,
+      totales: {
+        trabajadores: data.length,
+        montoOriginado: sum((item) => item.origen.monto),
+        montoAsignado: sum((item) => item.asignacionConfirmada.monto),
+        horas: sum((item) => item.asignacionConfirmada.horas),
+        ventasBase: sum((item) => item.asignacionConfirmada.ventasBase),
+        cuentas: sum((item) => item.asignacionConfirmada.cuentas),
+      },
+      advertencias: {
+        liquidacionesParcialmenteSolapadas,
+        liquidacionesTodosLosTurnosExcluidas,
+      },
     };
   }
 
@@ -415,5 +543,126 @@ export class PropinaReportesService {
       params,
     )) as Array<{ cantidad: NumericValue }>;
     return count(rows[0]?.cantidad);
+  }
+
+  private async origenTrabajadores(
+    tenantId: string,
+    rango: RangoReporteNormalizado,
+    zona: string,
+  ): Promise<OrigenTrabajadorRow[]> {
+    const filtros = this.filtrosVenta(tenantId, rango, zona);
+    return (await this.dataSource.query(
+      `SELECT
+         vp.garzon_id,
+         MAX(vp.tipo_garzon) AS tipo_garzon,
+         COUNT(*)::text AS cierres,
+         COUNT(*) FILTER (WHERE vp.monto_pagado > 0)::text AS con_propina,
+         COALESCE(SUM(vp.monto_pagado), 0)::text AS monto
+       FROM venta_propina vp
+       WHERE 1 = 1 ${filtros.sql}
+       GROUP BY vp.garzon_id`,
+      filtros.params,
+    )) as OrigenTrabajadorRow[];
+  }
+
+  private async asignacionTrabajadores(
+    tenantId: string,
+    rango: RangoReporteNormalizado,
+    zona: string,
+  ): Promise<AsignacionTrabajadorRow[]> {
+    const params: unknown[] = [tenantId, rango.desde, rango.hasta, zona];
+    let filtros = '';
+    if (rango.tipoGarzon) {
+      params.push(rango.tipoGarzon);
+      filtros += ` AND p.tipo_garzon = $${params.length}`;
+    }
+    if (rango.turnoIds.length) {
+      params.push(rango.turnoIds);
+      filtros += ` AND cardinality(l.turno_ids) > 0
+        AND l.turno_ids <@ $${params.length}::uuid[]`;
+    }
+    return (await this.dataSource.query(
+      `SELECT
+         p.garzon_id,
+         MAX(p.tipo_garzon) AS tipo_garzon,
+         COALESCE(SUM(p.monto), 0)::text AS monto,
+         COALESCE(SUM(p.horas), 0)::text AS horas,
+         COALESCE(SUM(p.ventas_base), 0)::text AS ventas_base,
+         COALESCE(SUM(p.cuentas), 0)::text AS cuentas,
+         COUNT(DISTINCT l.liquidacion_propinas_id)::text AS liquidaciones,
+         MAX(l.confirmado_el) AS ultima_liquidacion_el
+       FROM liquidacion_propinas_participante p
+       JOIN liquidacion_propinas l
+         ON l.liquidacion_propinas_id = p.liquidacion_id
+        AND l.tenant_id = $1
+        AND l.estado = 'confirmada'
+        AND l.eliminado_el IS NULL
+       WHERE p.tenant_id = $1
+         AND p.eliminado_el IS NULL
+         AND p.incluido = true
+         AND l.fecha_desde >= ($2::date::timestamp AT TIME ZONE $4)
+         AND l.fecha_hasta <= ($3::date::timestamp AT TIME ZONE $4)
+         ${filtros}
+       GROUP BY p.garzon_id`,
+      params,
+    )) as AsignacionTrabajadorRow[];
+  }
+
+  private async todosLosTurnosExcluidas(
+    tenantId: string,
+    rango: RangoReporteNormalizado,
+    zona: string,
+  ): Promise<number> {
+    const params: unknown[] = [
+      tenantId,
+      rango.desde,
+      rango.hasta,
+      zona,
+      rango.turnoIds.length > 0,
+    ];
+    let filtroTipo = '';
+    if (rango.tipoGarzon) {
+      params.push(rango.tipoGarzon);
+      filtroTipo = ` AND EXISTS (
+        SELECT 1
+        FROM liquidacion_propinas_participante p
+        WHERE p.liquidacion_id = l.liquidacion_propinas_id
+          AND p.tenant_id = $1
+          AND p.eliminado_el IS NULL
+          AND p.incluido = true
+          AND p.tipo_garzon = $${params.length}
+      )`;
+    }
+    const rows = (await this.dataSource.query(
+      `SELECT COUNT(*)::text AS cantidad
+       FROM liquidacion_propinas l
+       WHERE l.tenant_id = $1
+         AND l.eliminado_el IS NULL
+         AND l.estado = 'confirmada'
+         AND l.fecha_desde >= ($2::date::timestamp AT TIME ZONE $4)
+         AND l.fecha_hasta <= ($3::date::timestamp AT TIME ZONE $4)
+         AND $5::boolean
+         AND cardinality(l.turno_ids) = 0
+         ${filtroTipo}`,
+      params,
+    )) as Array<{ cantidad: NumericValue }>;
+    return count(rows[0]?.cantidad);
+  }
+
+  private async etiquetasGarzones(
+    tenantId: string,
+    ids: string[],
+  ): Promise<GarzonEtiquetaRow[]> {
+    if (!ids.length) return [];
+    return (await this.dataSource.query(
+      `SELECT
+         g.garzon_id,
+         g.nombre,
+         g.tipo AS tipo_garzon
+       FROM garzones g
+       WHERE g.tenant_id = $1
+         AND g.garzon_id = ANY($2::uuid[])`,
+      [tenantId, ids],
+    )) as GarzonEtiquetaRow[];
   }
 }
