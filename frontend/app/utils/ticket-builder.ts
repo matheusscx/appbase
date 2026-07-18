@@ -108,6 +108,33 @@ function padLR(left: string, right: string, width = WIDTH): string {
   return espacio < 1 ? `${left} ${right}` : left + ' '.repeat(espacio) + right
 }
 
+// Boleta y precuenta usan papel de 80mm (48 caracteres a fuente normal ESC/POS Font A) —
+// la comanda se mantiene a 32 (papel/fuente distinta, sin columnas de precio).
+const BOLETA_WIDTH = 48
+const COL_CANT = 5
+const COL_MONTO = 9
+const COL_DESC_BOLETA = 22 // CANT(5) + DESC(22) + P.UNIT(9) + TOTAL(9) + 3 separadores = 48
+const COL_DESC_PRECUENTA = 32 // CANT(5) + DESC(32) + TOTAL(9) + 2 separadores = 48
+
+interface Columna {
+  texto: string
+  ancho: number
+  alinear: 'izq' | 'der'
+}
+
+function ajustarColumna(texto: string, ancho: number, alinear: 'izq' | 'der'): string {
+  if (texto.length > ancho) {
+    return alinear === 'izq' ? `${texto.slice(0, ancho - 1)}…` : texto.slice(texto.length - ancho)
+  }
+  const relleno = ' '.repeat(ancho - texto.length)
+  return alinear === 'izq' ? texto + relleno : relleno + texto
+}
+
+/** Fila de columnas de ancho fijo separadas por un espacio (tabla CANT/DESCRIPCIÓN/P.UNIT/TOTAL). */
+function filaColumnas(cols: Columna[]): string {
+  return cols.map(c => ajustarColumna(c.texto, c.ancho, c.alinear)).join(' ')
+}
+
 function buildTotalesLines(
   totales: TicketTotales,
   formatMonto: (v: string) => string,
@@ -163,27 +190,38 @@ export function buildPrecuentaTicket(input: {
   formatMonto: (v: string) => string
 }): string[] {
   const out: string[] = []
-  out.push(input.tenantNombre)
-  out.push('PRECUENTA (no válido como boleta)')
+  out.push(center(input.tenantNombre, BOLETA_WIDTH))
+  out.push(center('PRECUENTA (no válido como boleta)', BOLETA_WIDTH))
   out.push(`Mesa: ${input.mesaNombre}   Cuenta: ${input.cuentaNumero}`)
   out.push(input.fecha.toLocaleString('es-CL'))
-  out.push(separador())
+  out.push(separador(BOLETA_WIDTH))
+  out.push(filaColumnas([
+    { texto: 'CANT', ancho: COL_CANT, alinear: 'izq' },
+    { texto: 'DESCRIPCIÓN', ancho: COL_DESC_PRECUENTA, alinear: 'izq' },
+    { texto: 'TOTAL', ancho: COL_MONTO, alinear: 'der' },
+  ]))
+  out.push(separador(BOLETA_WIDTH))
   for (const item of input.items) {
-    out.push(`${item.cantidad} x ${item.nombre}`)
+    out.push(filaColumnas([
+      { texto: item.cantidad, ancho: COL_CANT, alinear: 'izq' },
+      { texto: item.nombre, ancho: COL_DESC_PRECUENTA, alinear: 'izq' },
+      { texto: input.formatMonto(item.totalLinea), ancho: COL_MONTO, alinear: 'der' },
+    ]))
     out.push(...lineasNotaTicket(item))
-    out.push(`  ${input.formatMonto(item.totalLinea)}`)
   }
-  out.push(separador())
+  out.push(separador(BOLETA_WIDTH))
   out.push(...buildTotalesLines(input.totales, input.formatMonto))
   if (input.propinaSugerida) {
-    out.push(separador())
+    out.push(separador(BOLETA_WIDTH))
     out.push(padLR(
       `Propina sugerida ${formatTasaPorcentaje(input.propinaSugerida.porcentaje)}`,
       input.formatMonto(input.propinaSugerida.monto),
+      BOLETA_WIDTH,
     ))
     out.push(padLR(
       'Total sugerido',
       input.formatMonto(new Decimal(input.totales.totalFinal).plus(input.propinaSugerida.monto).toString()),
+      BOLETA_WIDTH,
     ))
     out.push('* Propina sugerida, de aceptación voluntaria.')
   }
@@ -238,21 +276,21 @@ export function buildBoletaTicket(input: {
   const out: string[] = []
 
   // Cabecera emisor
-  out.push(center(emisor.nombre))
-  if (emisor.rut) out.push(center(`RUT: ${emisor.rut}`))
-  if (emisor.direccion) out.push(center(emisor.direccion))
-  if (emisor.telefono) out.push(center(`Tel: ${emisor.telefono}`))
-  out.push(separador())
+  out.push(center(emisor.nombre, BOLETA_WIDTH))
+  if (emisor.rut) out.push(center(`RUT: ${emisor.rut}`, BOLETA_WIDTH))
+  if (emisor.direccion) out.push(center(emisor.direccion, BOLETA_WIDTH))
+  if (emisor.telefono) out.push(center(`Tel: ${emisor.telefono}`, BOLETA_WIDTH))
+  out.push(separador(BOLETA_WIDTH))
 
   // Tipo de documento
   if (input.facturacionElectronica) {
-    out.push(center('BOLETA ELECTRÓNICA'))
-    if (input.folio) out.push(center(`N° ${input.folio}`))
+    out.push(center('BOLETA ELECTRÓNICA', BOLETA_WIDTH))
+    if (input.folio) out.push(center(`N° ${input.folio}`, BOLETA_WIDTH))
   }
   else {
-    out.push(center('DOCUMENTO INTERNO'))
+    out.push(center('DOCUMENTO INTERNO', BOLETA_WIDTH))
   }
-  out.push(separador())
+  out.push(separador(BOLETA_WIDTH))
 
   // Metadata operativa (omitir vacíos)
   out.push(`Fecha : ${input.fecha.toLocaleString('es-CL')}`)
@@ -261,7 +299,7 @@ export function buildBoletaTicket(input: {
   if (meta.mesa || meta.garzon) {
     const mesa = meta.mesa ? `Mesa  : ${meta.mesa}` : ''
     const garzon = meta.garzon ? `Garzón: ${meta.garzon}` : ''
-    out.push(mesa && garzon ? padLR(mesa, garzon) : mesa || garzon)
+    out.push(mesa && garzon ? padLR(mesa, garzon, BOLETA_WIDTH) : mesa || garzon)
   }
   if (meta.pedido) out.push(`Pedido: ${meta.pedido}`)
   if (meta.observaciones) out.push(`Obs   : ${meta.observaciones}`)
@@ -272,57 +310,68 @@ export function buildBoletaTicket(input: {
     if (cliente.rut) out.push(`RUT Cli: ${cliente.rut}`)
     if (cliente.direccion) out.push(`Dir Cli: ${cliente.direccion}`)
   }
-  out.push(separador())
+  out.push(separador(BOLETA_WIDTH))
 
-  // Ítems en 2 líneas
+  // Ítems en columnas: CANT / DESCRIPCIÓN / P.UNIT / TOTAL
+  out.push(filaColumnas([
+    { texto: 'CANT', ancho: COL_CANT, alinear: 'izq' },
+    { texto: 'DESCRIPCIÓN', ancho: COL_DESC_BOLETA, alinear: 'izq' },
+    { texto: 'P.UNIT', ancho: COL_MONTO, alinear: 'der' },
+    { texto: 'TOTAL', ancho: COL_MONTO, alinear: 'der' },
+  ]))
+  out.push(separador(BOLETA_WIDTH))
   for (const item of input.items) {
-    out.push(`${item.cantidad} x ${item.nombre}`)
+    out.push(filaColumnas([
+      { texto: item.cantidad, ancho: COL_CANT, alinear: 'izq' },
+      { texto: item.nombre, ancho: COL_DESC_BOLETA, alinear: 'izq' },
+      { texto: formatMonto(item.precioUnitario), ancho: COL_MONTO, alinear: 'der' },
+      { texto: formatMonto(item.totalLinea), ancho: COL_MONTO, alinear: 'der' },
+    ]))
     out.push(...lineasNotaTicket(item))
-    out.push(padLR(`  ${formatMonto(item.precioUnitario)}`, formatMonto(item.totalLinea)))
   }
-  out.push(separador())
+  out.push(separador(BOLETA_WIDTH))
 
   // Totales: Subtotal, Descuento?, Recargo?, Neto, impuestos*, TOTAL BOLETA
-  out.push(padLR('Subtotal', formatMonto(input.totales.subtotalNeto)))
+  out.push(padLR('Subtotal', formatMonto(input.totales.subtotalNeto), BOLETA_WIDTH))
   if (new Decimal(input.totales.totalDescuentos || '0').gt(0)) {
-    out.push(padLR('Descuento', `-${formatMonto(input.totales.totalDescuentos)}`))
+    out.push(padLR('Descuento', `-${formatMonto(input.totales.totalDescuentos)}`, BOLETA_WIDTH))
   }
   if (new Decimal(input.totales.totalRecargos || '0').gt(0)) {
-    out.push(padLR('Recargo', `+${formatMonto(input.totales.totalRecargos)}`))
+    out.push(padLR('Recargo', `+${formatMonto(input.totales.totalRecargos)}`, BOLETA_WIDTH))
   }
   const neto = new Decimal(input.totales.totalFinal).minus(input.totales.totalImpuestos || '0').toString()
-  out.push(padLR('Neto', formatMonto(neto)))
+  out.push(padLR('Neto', formatMonto(neto), BOLETA_WIDTH))
   for (const imp of input.impuestos) {
-    out.push(padLR(`${imp.nombre} (${formatTasaPorcentaje(imp.tasa)})`, formatMonto(imp.monto)))
+    out.push(padLR(`${imp.nombre} (${formatTasaPorcentaje(imp.tasa)})`, formatMonto(imp.monto), BOLETA_WIDTH))
   }
-  out.push(separador())
-  out.push(padLR('TOTAL BOLETA', formatMonto(input.totales.totalFinal)))
+  out.push(separador(BOLETA_WIDTH))
+  out.push(padLR('TOTAL BOLETA', formatMonto(input.totales.totalFinal), BOLETA_WIDTH))
 
   // Propina (solo si > 0) → TOTAL A PAGAR
   const propina = input.propina ? new Decimal(input.propina.monto || '0') : new Decimal(0)
   if (propina.gt(0)) {
-    out.push(separador())
-    out.push(padLR('Propina', formatMonto(propina.toString())))
-    out.push(separador())
-    out.push(padLR('TOTAL A PAGAR', formatMonto(new Decimal(input.totales.totalFinal).plus(propina).toString())))
+    out.push(separador(BOLETA_WIDTH))
+    out.push(padLR('Propina', formatMonto(propina.toString()), BOLETA_WIDTH))
+    out.push(separador(BOLETA_WIDTH))
+    out.push(padLR('TOTAL A PAGAR', formatMonto(new Decimal(input.totales.totalFinal).plus(propina).toString()), BOLETA_WIDTH))
   }
-  out.push(separador())
+  out.push(separador(BOLETA_WIDTH))
 
   // Pagos
   for (const pago of input.pagos) {
-    out.push(padLR(pago.nombre, formatMonto(pago.monto)))
+    out.push(padLR(pago.nombre, formatMonto(pago.monto), BOLETA_WIDTH))
   }
 
   // Pie condicional
   out.push('')
   if (input.facturacionElectronica) {
-    out.push(center('Timbre Electrónico SII'))
+    out.push(center('Timbre Electrónico SII', BOLETA_WIDTH))
     // TODO(SII futuro): renderizar el PDF417 real aquí cuando exista integración.
-    out.push(center('Verifique en www.sii.cl'))
+    out.push(center('Verifique en www.sii.cl', BOLETA_WIDTH))
   }
   else {
-    out.push(center('*** SIN VALIDEZ FISCAL ***'))
-    out.push(center('No constituye documento tributario'))
+    out.push(center('*** SIN VALIDEZ FISCAL ***', BOLETA_WIDTH))
+    out.push(center('No constituye documento tributario', BOLETA_WIDTH))
   }
   out.push('')
   out.push('')

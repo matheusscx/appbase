@@ -85,13 +85,35 @@ describe('buildPrecuentaTicket', () => {
       formatMonto,
     })
 
-    expect(lines).toContain('PRECUENTA (no válido como boleta)')
-    expect(lines).toContain('2 x Lomo a lo pobre')
+    expect(lines.some(l => l.includes('PRECUENTA (no válido como boleta)'))).toBe(true)
     expect(lines).toContain('TOTAL: $21420')
     expect(lines.some(l => l.startsWith('Descuentos:'))).toBe(false)
+
+    const fila = lines.find(l => l.includes('Lomo a lo pobre'))
+    expect(fila).toBeDefined()
+    expect(fila!.slice(0, 1)).toBe('2')
+    expect(fila!.slice(6, 21)).toBe('Lomo a lo pobre')
+    expect(fila!.slice(42, 48)).toBe('$18000')
   })
 
-  it('incluye personalización como lista entre nombre y monto', () => {
+  it('imprime el header de columnas CANT/DESCRIPCIÓN/TOTAL a 48 caracteres', () => {
+    const lines = buildPrecuentaTicket({
+      tenantNombre: 'Restaurante Paris',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 2,
+      items: [{ nombre: 'Lomo', cantidad: '1', totalLinea: '5000' }],
+      totales: { subtotalNeto: '5000', totalDescuentos: '0', totalRecargos: '0', totalImpuestos: '0', totalFinal: '5000' },
+      fecha: FECHA,
+      formatMonto,
+    })
+    const header = lines.find(l => l.startsWith('CANT'))
+    expect(header).toBeDefined()
+    expect(header).toHaveLength(48)
+    expect(header!.slice(6, 17)).toBe('DESCRIPCIÓN')
+    expect(header!.slice(43, 48)).toBe('TOTAL')
+  })
+
+  it('incluye personalización como lista debajo de la fila del ítem', () => {
     const lines = buildPrecuentaTicket({
       tenantNombre: 'Restaurante Paris',
       mesaNombre: 'Mesa 1',
@@ -113,10 +135,11 @@ describe('buildPrecuentaTicket', () => {
       formatMonto,
     })
 
-    const idxNombre = lines.indexOf('1 x Hamburguesa Clásica')
-    expect(lines[idxNombre + 1]).toBe('  - Sin Cebolla')
-    expect(lines[idxNombre + 2]).toBe('  + Extra Queso')
-    expect(lines[idxNombre + 3]).toBe('  $9800')
+    const idxFila = lines.findIndex(l => l.includes('Hamburguesa Clásica'))
+    expect(idxFila).toBeGreaterThanOrEqual(0)
+    expect(lines[idxFila]!.slice(43, 48)).toBe('$9800')
+    expect(lines[idxFila + 1]).toBe('  - Sin Cebolla')
+    expect(lines[idxFila + 2]).toBe('  + Extra Queso')
   })
 
   it('con propinaSugerida imprime el bloque sugerido y la leyenda voluntaria', () => {
@@ -199,9 +222,22 @@ describe('buildBoletaTicket', () => {
     expect(lines.some(l => l.includes('SIN VALIDEZ FISCAL'))).toBe(false)
   })
 
-  it('imprime cantidad con unidad de presentación preformateada', () => {
+  it('imprime cantidad con unidad de presentación preformateada dentro de la columna CANT', () => {
     const lines = boleta({ items: [{ nombre: 'Harina', cantidad: '500 g', precioUnitario: '2500', totalLinea: '2500' }] })
-    expect(lines).toContain('500 g x Harina')
+    const fila = lines.find(l => l.includes('Harina'))
+    expect(fila).toBeDefined()
+    expect(fila!.slice(0, 5)).toBe('500 g')
+    expect(fila!.slice(6, 12)).toBe('Harina')
+  })
+
+  it('imprime el header de columnas CANT/DESCRIPCIÓN/P.UNIT/TOTAL a 48 caracteres', () => {
+    const lines = boleta()
+    const header = lines.find(l => l.startsWith('CANT'))
+    expect(header).toBeDefined()
+    expect(header).toHaveLength(48)
+    expect(header!.slice(6, 17)).toBe('DESCRIPCIÓN')
+    expect(header!.slice(32, 38)).toBe('P.UNIT')
+    expect(header!.slice(43, 48)).toBe('TOTAL')
   })
 
   it('imprime Neto y una línea por impuesto con nombre y tasa reales', () => {
@@ -231,11 +267,15 @@ describe('buildBoletaTicket', () => {
     expect(lines.some(l => l.startsWith('TOTAL A PAGAR'))).toBe(false)
   })
 
-  it('imprime el ítem en 2 líneas (nombre + precio/total)', () => {
+  it('imprime el ítem en una fila de columnas con precio unitario y total', () => {
     const lines = boleta()
-    const idx = lines.indexOf('1 x Pisco Sour')
-    expect(idx).toBeGreaterThanOrEqual(0)
-    expect(lines[idx + 1]).toContain('$5000')
+    const fila = lines.find(l => l.includes('Pisco Sour'))
+    expect(fila).toBeDefined()
+    expect(fila).toHaveLength(48)
+    expect(fila!.slice(0, 1)).toBe('1')
+    expect(fila!.slice(6, 16)).toBe('Pisco Sour')
+    expect(fila!.slice(33, 38)).toBe('$5000')
+    expect(fila!.slice(43, 48)).toBe('$5000')
   })
 })
 

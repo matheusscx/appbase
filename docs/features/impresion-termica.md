@@ -106,9 +106,12 @@ impresora `rol='boleta'` del tenant.
     `Neto` + impuestos con nombre y tasa reales del tenant vía nuevo helper
     `agregarImpuestosVenta` y `formatTasaPorcentaje`, bloque de propina opcional
     (`Propina` + `TOTAL A PAGAR`, solo si monto > 0), pie `SIN VALIDEZ FISCAL`.
-    Ancho fijo 32 caracteres.
-  - `buildPrecuentaTicket`: agrega bloque opcional de propina sugerida (monto
-    calculado desde `propinaSugerida`).
+    Ítems en tabla de columnas fijas (`CANT`/`DESCRIPCIÓN`/`P.UNIT`/`TOTAL`) con
+    header, a **48 caracteres** (papel térmico 80mm, ESC/POS Font A) — la comanda se
+    mantiene a 32 (papel/necesidad distinta, sin columnas de precio).
+  - `buildPrecuentaTicket`: mismo ancho de 48 y tabla de columnas
+    (`CANT`/`DESCRIPCIÓN`/`TOTAL`, sin `P.UNIT`); agrega bloque opcional de propina
+    sugerida (monto calculado desde `propinaSugerida`).
   - Cada ítem puede llevar `nota?` (personalización + comentario), impresa indentada
     bajo el nombre.
 - **Composable `useRazonSocialEmisor`**: nueva utilidad en
