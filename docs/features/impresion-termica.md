@@ -88,16 +88,32 @@ impresora `rol='boleta'` del tenant.
 ## Frontend
 
 - **Composable**: `app/composables/useImpresoras.ts` — CRUD + `imprimirComanda`,
-  `imprimirPrecuenta`, `imprimirBoleta` (envuelven `qz-tray`).
-- **Formateo puro**: `app/utils/ticket-builder.ts` — `buildComandaTicket`,
-  `buildPrecuentaTicket`, `buildBoletaTicket` (sin Nuxt/Vue, 100% Vitest). Cada
-  ítem puede llevar `nota?` (personalización + comentario), impresa indentada bajo
-  el nombre.
+  `imprimirPrecuenta`, `imprimirBoleta` (envuelven `qz-tray`). Firmas extendidas
+  para pasar emisor, tipo documento, metadata operativa y propina.
 - **Admin**: `pages/configuracion/impresoras.vue` (CRUD) + selector "Impresora de
   comanda" en `pages/configuracion/categorias.vue`.
 - **Operación**: botones "Enviar a cocina" / "Imprimir precuenta" en el drawer de
   cuenta de `pages/salones/index.vue`, boleta automática tras cerrar cuenta o tras
   cobrar en `pages/ventas/pos.vue`.
+
+- **Formateo puro**: `app/utils/ticket-builder.ts` — `buildComandaTicket`,
+  `buildPrecuentaTicket`, `buildBoletaTicket` (sin Nuxt/Vue, 100% Vitest).
+  - `buildBoletaTicket`: reescrito con cabecera emisor (razón social preferida con
+    RUT y dirección/teléfono vía nuevo composable `useRazonSocialEmisor`), tipo de
+    documento condicional (`DOCUMENTO INTERNO` siempre hoy; rama
+    `BOLETA ELECTRÓNICA` codificada pero dormante sin folio/PDF417/timbre reales),
+    metadata operativa condicional (cajero, caja, mesa, garzón, cliente), desglose
+    `Neto` + impuestos con nombre y tasa reales del tenant vía nuevo helper
+    `agregarImpuestosVenta` y `formatTasaPorcentaje`, bloque de propina opcional
+    (`Propina` + `TOTAL A PAGAR`, solo si monto > 0), pie `SIN VALIDEZ FISCAL`.
+    Ancho fijo 32 caracteres.
+  - `buildPrecuentaTicket`: agrega bloque opcional de propina sugerida (monto
+    calculado desde `propinaSugerida`).
+  - Cada ítem puede llevar `nota?` (personalización + comentario), impresa indentada
+    bajo el nombre.
+- **Composable `useRazonSocialEmisor`**: nueva utilidad en
+  `app/composables/useRazonSocialEmisor.ts` — selecciona la razón social preferida
+  del tenant como emisor; fallback a primera habilitada, luego nombre del tenant.
 
 ### QZ Tray
 
@@ -169,7 +185,7 @@ cd backend && npx jest impresoras categorias salones
 ### Unit (frontend)
 
 ```bash
-cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/useImpresoras.spec.ts
+cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/useImpresoras.spec.ts app/composables/useRazonSocialEmisor.spec.ts
 ```
 
 ### Manual
@@ -187,9 +203,12 @@ cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/u
 
 ## Decisiones
 
-Ver `docs/superpowers/specs/2026-07-13-impresion-termica-design.md` para el detalle
-completo de decisiones (QZ Tray vs. alternativas, ruteo por categoría, `cantidad_
-enviada` vs. tabla de historial, envío de comanda manual, dos fases preview/confirmar).
+- QZ Tray, ruteo por categoría, `cantidad_enviada` vs. tabla de historial, envío de
+  comanda manual, dos fases preview/confirmar: ver
+  `docs/superpowers/specs/2026-07-13-impresion-termica-design.md`.
+- Plantilla unificada de boleta (emisor con RUT, DOCUMENTO INTERNO / slot electrónico
+  dormante, Neto+impuestos reales, propina → TOTAL A PAGAR) + precuenta con propina
+  sugerida: ver `docs/superpowers/specs/2026-07-18-boleta-pos-plantilla-unificada-design.md`.
 
 ## Related Features
 
