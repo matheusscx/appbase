@@ -5,6 +5,7 @@ import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizac
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import { formatCantidadTicket } from '~/utils/cantidad-presentacion'
+import { agregarImpuestosVenta } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -21,11 +22,12 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const toast = useToast()
 const cajaStore = useCajaStore()
+const authStore = useAuthStore()
+const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
 const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidadPresentacion, limpiar } = useVenta()
 const unidadesStore = useUnidadesMedidaStore()
 const impresorasApi = useImpresoras()
-const tenantStore = useTenantStore()
 const { formatMonto } = useFormatters()
 
 const items = ref<ItemCatalogo[]>([])
@@ -150,7 +152,7 @@ async function cargar() {
 }
 
 onMounted(async () => {
-  await Promise.all([cajaStore.cargarActiva(), cargar(), unidadesStore.ensureLoaded()])
+  await Promise.all([cajaStore.cargarActiva(), cargar(), unidadesStore.ensureLoaded(), cargarEmisor()])
 })
 
 function onCambiarCantidadPresentacion(
@@ -237,7 +239,14 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
     if (resultadoVenta) {
       try {
         await impresorasApi.imprimirBoleta({
-          tenantNombre: tenantStore.activeTenant?.nombre ?? '',
+          emisor: emisor.value,
+          facturacionElectronica: false,
+          meta: {
+            cajero: authStore.user?.nombre ?? undefined,
+          },
+          cliente: incluirCustomer
+            ? { nombre: customer.value.nombre || undefined, rut: customer.value.rut || undefined, direccion: customer.value.direccion || undefined }
+            : undefined,
           items: resultadoVenta.lineas.map((l, i) => {
             const ln = lineasVenta[i]
             return {
@@ -245,11 +254,13 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
               cantidad: ln?.cantidadPresentacion && ln?.unidadCodigoPresentacion
                 ? formatCantidadTicket(ln.cantidadPresentacion, ln.unidadCodigoPresentacion)
                 : l.cantidad,
+              precioUnitario: l.precioUnitario,
               totalLinea: l.totalLinea,
               ...(ln?.personalizacionResumen ? { nota: ln.personalizacionResumen } : {}),
             }
           }),
           totales: resultadoVenta.totales,
+          impuestos: agregarImpuestosVenta(resultadoVenta.lineas),
           pagos: pagos.map((p) => ({
             nombre: metodos.value.find((m) => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
             monto: p.monto,
