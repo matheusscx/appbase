@@ -118,6 +118,35 @@ describe('buildPrecuentaTicket', () => {
     expect(lines[idxNombre + 2]).toBe('  + Extra Queso')
     expect(lines[idxNombre + 3]).toBe('  $9800')
   })
+
+  it('con propinaSugerida imprime el bloque sugerido y la leyenda voluntaria', () => {
+    const lines = buildPrecuentaTicket({
+      tenantNombre: 'Restaurante Paris',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 2,
+      items: [{ nombre: 'Lomo', cantidad: '1', totalLinea: '45000' }],
+      totales: { subtotalNeto: '45000', totalDescuentos: '0', totalRecargos: '0', totalImpuestos: '0', totalFinal: '45000' },
+      propinaSugerida: { porcentaje: '0.10', monto: '4500' },
+      fecha: FECHA,
+      formatMonto,
+    })
+    expect(lines.some(l => l.startsWith('Propina sugerida 10%') && l.includes('$4500'))).toBe(true)
+    expect(lines.some(l => l.startsWith('Total sugerido') && l.includes('$49500'))).toBe(true)
+    expect(lines.some(l => l.includes('aceptación voluntaria'))).toBe(true)
+  })
+
+  it('sin propinaSugerida no imprime bloque sugerido', () => {
+    const lines = buildPrecuentaTicket({
+      tenantNombre: 'Restaurante Paris',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 2,
+      items: [{ nombre: 'Lomo', cantidad: '1', totalLinea: '45000' }],
+      totales: { subtotalNeto: '45000', totalDescuentos: '0', totalRecargos: '0', totalImpuestos: '0', totalFinal: '45000' },
+      fecha: FECHA,
+      formatMonto,
+    })
+    expect(lines.some(l => l.startsWith('Propina sugerida'))).toBe(false)
+  })
 })
 
 const EMISOR = { nombre: 'Comercial Paris SpA', rut: '76.123.456-7', direccion: 'Av. Providencia 1234', telefono: '+56 2 2345 6789' }

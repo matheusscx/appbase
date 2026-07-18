@@ -158,6 +158,7 @@ export function buildPrecuentaTicket(input: {
   cuentaNumero: number
   items: (TicketItem & { totalLinea: string })[]
   totales: TicketTotales
+  propinaSugerida?: { porcentaje: string, monto: string }
   fecha: Date
   formatMonto: (v: string) => string
 }): string[] {
@@ -174,6 +175,18 @@ export function buildPrecuentaTicket(input: {
   }
   out.push(separador())
   out.push(...buildTotalesLines(input.totales, input.formatMonto))
+  if (input.propinaSugerida) {
+    out.push(separador())
+    out.push(padLR(
+      `Propina sugerida ${formatTasaPorcentaje(input.propinaSugerida.porcentaje)}`,
+      input.formatMonto(input.propinaSugerida.monto),
+    ))
+    out.push(padLR(
+      'Total sugerido',
+      input.formatMonto(new Decimal(input.totales.totalFinal).plus(input.propinaSugerida.monto).toString()),
+    ))
+    out.push('* Propina sugerida, de aceptación voluntaria.')
+  }
   out.push('')
   out.push('')
   return out
