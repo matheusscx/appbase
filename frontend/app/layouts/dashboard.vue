@@ -53,7 +53,19 @@ const items = computed<NavigationMenuItem[]>(() => {
     base.push({
       label: 'Propinas',
       icon: 'i-lucide-hand-coins',
-      to: '/propinas/liquidaciones',
+      defaultOpen: route.path.startsWith('/propinas'),
+      children: [
+        {
+          label: 'Liquidaciones',
+          icon: 'i-lucide-hand-coins',
+          to: '/propinas/liquidaciones',
+        },
+        {
+          label: 'Reportes',
+          icon: 'i-lucide-chart-no-axes-combined',
+          to: '/propinas/reportes',
+        },
+      ],
     })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear')) {
