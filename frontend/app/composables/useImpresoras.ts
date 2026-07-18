@@ -6,6 +6,11 @@ import {
   type TicketItem,
   type TicketTotales,
   type TicketPago,
+  type BoletaEmisor,
+  type BoletaMetaOperativa,
+  type BoletaCliente,
+  type BoletaItem,
+  type ImpuestoBoleta,
 } from '~/utils/ticket-builder'
 import { conTimeout } from '~/utils/con-timeout'
 
@@ -217,6 +222,7 @@ export function useImpresoras() {
     cuentaNumero: number
     items: (TicketItem & { totalLinea: string })[]
     totales: TicketTotales
+    propinaSugerida?: { porcentaje: string, monto: string }
     formatMonto: (v: string) => string
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()
@@ -226,9 +232,15 @@ export function useImpresoras() {
   }
 
   async function imprimirBoleta(input: {
-    tenantNombre: string
-    items: (TicketItem & { totalLinea: string })[]
+    emisor: BoletaEmisor
+    facturacionElectronica: boolean
+    folio?: string | null
+    meta: BoletaMetaOperativa
+    cliente?: BoletaCliente
+    items: BoletaItem[]
     totales: TicketTotales
+    impuestos: ImpuestoBoleta[]
+    propina?: { monto: string }
     pagos: TicketPago[]
     formatMonto: (v: string) => string
   }): Promise<void> {
