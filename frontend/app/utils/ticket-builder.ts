@@ -122,9 +122,10 @@ interface Columna {
   alinear: 'izq' | 'der'
 }
 
+/** Corta sin agregar marcador: '…' (fuera de CP850) se imprime como '?' en la térmica. */
 function ajustarColumna(texto: string, ancho: number, alinear: 'izq' | 'der'): string {
   if (texto.length > ancho) {
-    return alinear === 'izq' ? `${texto.slice(0, ancho - 1)}…` : texto.slice(texto.length - ancho)
+    return alinear === 'izq' ? texto.slice(0, ancho) : texto.slice(texto.length - ancho)
   }
   const relleno = ' '.repeat(ancho - texto.length)
   return alinear === 'izq' ? texto + relleno : relleno + texto

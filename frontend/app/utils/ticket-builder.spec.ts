@@ -230,6 +230,16 @@ describe('buildBoletaTicket', () => {
     expect(fila!.slice(6, 12)).toBe('Harina')
   })
 
+  it('trunca cantidad/nombre que exceden su columna sin agregar caracteres fuera de CP850', () => {
+    const lines = boleta({ items: [{ nombre: 'Un Producto con Nombre Larguísimo', cantidad: '12,5 kg', precioUnitario: '2500', totalLinea: '2500' }] })
+    const fila = lines.find(l => l.startsWith('12,5'))
+    expect(fila).toBeDefined()
+    // Columna CANT = 5 chars: '12,5 kg' (7) se corta a '12,5 ' sin marcador especial.
+    expect(fila!.slice(0, 5)).toBe('12,5 ')
+    expect(fila!).not.toContain('…')
+    expect(fila!).not.toContain('?')
+  })
+
   it('imprime el header de columnas CANT/DESCRIPCIÓN/P.UNIT/TOTAL a 48 caracteres', () => {
     const lines = boleta()
     const header = lines.find(l => l.startsWith('CANT'))
