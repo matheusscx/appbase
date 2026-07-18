@@ -161,88 +161,30 @@ export class LiquidacionPropinasService {
     const turnoIds = dto.turnoIds ?? [];
 
     return this.dataSource.transaction(async (manager) => {
-      const moneda = await this.resolverMonedaOficial(manager, tenantId);
-      const tips = await this.buscarTipsElegibles(
-        manager,
-        tenantId,
-        fechaDesde,
-        fechaHasta,
-        turnoIds,
-      );
-      const sesiones = await this.buscarSesionesPeriodo(
-        manager,
-        tenantId,
-        fechaDesde,
-        fechaHasta,
-        turnoIds,
-      );
-      const poolTotal = tips
-        .reduce((acc, t) => acc.plus(t.monto_pagado), new Decimal(0))
-        .toFixed(4);
-
-      const liquidacion = await manager.save(
-        LiquidacionPropinas,
-        manager.create(LiquidacionPropinas, {
-          tenantId,
-          fechaDesde,
-          fechaHasta,
-          turnoIds,
-          estado: EstadoLiquidacion.BORRADOR,
-          poolTotal,
-          configuracionVersion: config.version,
-          monedaId: moneda.monedaId,
-          decimalesMoneda: moneda.decimales,
-          creadoPor: usuarioId,
-        }),
-      );
-
-      const grupos = await this.crearSnapshotGrupos(
-        manager,
-        tenantId,
-        liquidacion.id,
-        poolTotal,
-        moneda.decimales,
-        gruposConfig,
-      );
-      const fuentes = await this.crearFuentes(
-        manager,
-        tenantId,
-        liquidacion.id,
-        tips,
-      );
-      const participantes = await this.crearParticipantes(
-        manager,
-        tenantId,
-        liquidacion.id,
+      const {
+        liquidacion,
         grupos,
-        gruposConfig,
-        tips,
+        fuentes,
+        participantes,
         sesiones,
+        eventoCreada,
+      } = await this.construirBorrador(
+        manager,
+        tenantId,
+        usuarioId,
         fechaDesde,
         fechaHasta,
-        moneda.decimales,
+        turnoIds,
+        gruposConfig,
+        config.version,
       );
       const advertencias = this.advertenciasSesionesAbiertas(sesiones);
-      const evento = await manager.save(
-        LiquidacionPropinasEvento,
-        manager.create(LiquidacionPropinasEvento, {
-          tenantId,
-          liquidacionId: liquidacion.id,
-          tipo: TipoEventoLiquidacion.CREADA,
-          payload: {
-            fuenteCount: fuentes.length,
-            poolTotal,
-            configuracionVersion: config.version,
-          },
-          usuarioId,
-        }),
-      );
 
       return this.toDetalle(liquidacion, {
         grupos,
         participantes,
         fuentes,
-        eventos: [evento],
+        eventos: [eventoCreada],
         advertencias,
       });
     });
@@ -588,89 +530,32 @@ export class LiquidacionPropinasService {
     const turnoIds = dto.turnoIds ?? [];
 
     return this.dataSource.transaction(async (manager) => {
-      const moneda = await this.resolverMonedaOficial(manager, tenantId);
-      const tips = await this.buscarTipsElegibles(
-        manager,
-        tenantId,
-        fechaDesde,
-        fechaHasta,
-        turnoIds,
-      );
-      const sesiones = await this.buscarSesionesPeriodo(
-        manager,
-        tenantId,
-        fechaDesde,
-        fechaHasta,
-        turnoIds,
-      );
-      const poolTotal = tips
-        .reduce((acc, t) => acc.plus(t.monto_pagado), new Decimal(0))
-        .toFixed(4);
-
-      const liquidacion = await manager.save(
-        LiquidacionPropinas,
-        manager.create(LiquidacionPropinas, {
-          tenantId,
-          fechaDesde,
-          fechaHasta,
-          turnoIds,
-          estado: EstadoLiquidacion.BORRADOR,
-          poolTotal,
-          configuracionVersion: config.version,
-          monedaId: moneda.monedaId,
-          decimalesMoneda: moneda.decimales,
-          creadoPor: usuarioId,
-        }),
-      );
-      const grupos = await this.crearSnapshotGrupos(
-        manager,
-        tenantId,
-        liquidacion.id,
-        poolTotal,
-        moneda.decimales,
-        gruposConfig,
-      );
-      const fuentes = await this.crearFuentes(
-        manager,
-        tenantId,
-        liquidacion.id,
-        tips,
-      );
-      let participantes = await this.crearParticipantes(
-        manager,
-        tenantId,
-        liquidacion.id,
+      const {
+        liquidacion,
         grupos,
-        gruposConfig,
-        tips,
+        fuentes,
+        participantes: participantesIniciales,
         sesiones,
+        eventoCreada,
+      } = await this.construirBorrador(
+        manager,
+        tenantId,
+        usuarioId,
         fechaDesde,
         fechaHasta,
-        moneda.decimales,
+        turnoIds,
+        gruposConfig,
+        config.version,
       );
 
-      participantes = await this.aplicarAjustesPersistido(
+      const participantes = await this.aplicarAjustesPersistido(
         manager,
         grupos,
-        participantes,
+        participantesIniciales,
         dto.ajustes,
-        moneda.decimales,
+        liquidacion.decimalesMoneda,
       );
 
-      const eventoCreada = await manager.save(
-        LiquidacionPropinasEvento,
-        manager.create(LiquidacionPropinasEvento, {
-          tenantId,
-          liquidacionId: liquidacion.id,
-          tipo: TipoEventoLiquidacion.CREADA,
-          payload: {
-            fuenteCount: fuentes.length,
-            poolTotal,
-            configuracionVersion: config.version,
-          },
-          usuarioId,
-        }),
-      );
       const eventoConfirmada = await this.confirmarEnTransaccion(
         manager,
         tenantId,
@@ -803,6 +688,110 @@ export class LiquidacionPropinasService {
         );
       }
     }
+  }
+
+  private async construirBorrador(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    fechaDesde: Date,
+    fechaHasta: Date,
+    turnoIds: string[],
+    gruposConfig: GrupoDistribucionPublico[],
+    configVersion: number,
+  ): Promise<{
+    liquidacion: LiquidacionPropinas;
+    grupos: LiquidacionPropinasGrupo[];
+    fuentes: LiquidacionPropinasFuente[];
+    participantes: LiquidacionPropinasParticipante[];
+    sesiones: SesionRow[];
+    eventoCreada: LiquidacionPropinasEvento;
+  }> {
+    const moneda = await this.resolverMonedaOficial(manager, tenantId);
+    const tips = await this.buscarTipsElegibles(
+      manager,
+      tenantId,
+      fechaDesde,
+      fechaHasta,
+      turnoIds,
+    );
+    const sesiones = await this.buscarSesionesPeriodo(
+      manager,
+      tenantId,
+      fechaDesde,
+      fechaHasta,
+      turnoIds,
+    );
+    const poolTotal = tips
+      .reduce((acc, t) => acc.plus(t.monto_pagado), new Decimal(0))
+      .toFixed(4);
+
+    const liquidacion = await manager.save(
+      LiquidacionPropinas,
+      manager.create(LiquidacionPropinas, {
+        tenantId,
+        fechaDesde,
+        fechaHasta,
+        turnoIds,
+        estado: EstadoLiquidacion.BORRADOR,
+        poolTotal,
+        configuracionVersion: configVersion,
+        monedaId: moneda.monedaId,
+        decimalesMoneda: moneda.decimales,
+        creadoPor: usuarioId,
+      }),
+    );
+
+    const grupos = await this.crearSnapshotGrupos(
+      manager,
+      tenantId,
+      liquidacion.id,
+      poolTotal,
+      moneda.decimales,
+      gruposConfig,
+    );
+    const fuentes = await this.crearFuentes(
+      manager,
+      tenantId,
+      liquidacion.id,
+      tips,
+    );
+    const participantes = await this.crearParticipantes(
+      manager,
+      tenantId,
+      liquidacion.id,
+      grupos,
+      gruposConfig,
+      tips,
+      sesiones,
+      fechaDesde,
+      fechaHasta,
+      moneda.decimales,
+    );
+
+    const eventoCreada = await manager.save(
+      LiquidacionPropinasEvento,
+      manager.create(LiquidacionPropinasEvento, {
+        tenantId,
+        liquidacionId: liquidacion.id,
+        tipo: TipoEventoLiquidacion.CREADA,
+        payload: {
+          fuenteCount: fuentes.length,
+          poolTotal,
+          configuracionVersion: configVersion,
+        },
+        usuarioId,
+      }),
+    );
+
+    return {
+      liquidacion,
+      grupos,
+      fuentes,
+      participantes,
+      sesiones,
+      eventoCreada,
+    };
   }
 
   private async confirmarEnTransaccion(
