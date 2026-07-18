@@ -270,6 +270,8 @@ export function buildBoletaTicket(input: {
   impuestos: ImpuestoBoleta[]
   propina?: { monto: string }
   pagos: TicketPago[]
+  /** Excedente devuelto en efectivo — 0 o ausente cuando el pago fue con tarjeta/transferencia. */
+  vuelto?: string
   fecha: Date
   formatMonto: (v: string) => string
 }): string[] {
@@ -361,6 +363,13 @@ export function buildBoletaTicket(input: {
   // Pagos
   for (const pago of input.pagos) {
     out.push(padLR(pago.nombre, formatMonto(pago.monto), BOLETA_WIDTH))
+  }
+
+  // Vuelto (solo si > 0) — pagos con tarjeta/transferencia siempre lo omiten.
+  const vuelto = new Decimal(input.vuelto || '0')
+  if (vuelto.gt(0)) {
+    out.push(separador(BOLETA_WIDTH))
+    out.push(padLR('Vuelto', formatMonto(vuelto.toString()), BOLETA_WIDTH))
   }
 
   // Pie condicional

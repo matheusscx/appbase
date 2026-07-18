@@ -242,6 +242,7 @@ export function useImpresoras() {
     impuestos: ImpuestoBoleta[]
     propina?: { monto: string }
     pagos: TicketPago[]
+    vuelto?: string
     formatMonto: (v: string) => string
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()

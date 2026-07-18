@@ -105,7 +105,9 @@ impresora `rol='boleta'` del tenant.
     metadata operativa condicional (cajero, caja, mesa, garzón, cliente), desglose
     `Neto` + impuestos con nombre y tasa reales del tenant vía nuevo helper
     `agregarImpuestosVenta` y `formatTasaPorcentaje`, bloque de propina opcional
-    (`Propina` + `TOTAL A PAGAR`, solo si monto > 0), pie `SIN VALIDEZ FISCAL`.
+    (`Propina` + `TOTAL A PAGAR`, solo si monto > 0), línea `Vuelto` opcional tras
+    los pagos (solo si `vuelto > 0` — se omite en pagos con tarjeta/transferencia,
+    calculado por `resumenCobro` en `useVenta.ts`), pie `SIN VALIDEZ FISCAL`.
     Ítems en tabla de columnas fijas (`CANT`/`DESCRIPCIÓN`/`P.UNIT`/`TOTAL`) con
     header, a **48 caracteres** (papel térmico 80mm, ESC/POS Font A) — la comanda se
     mantiene a 32 (papel/necesidad distinta, sin columnas de precio).

@@ -277,6 +277,24 @@ describe('buildBoletaTicket', () => {
     expect(lines.some(l => l.startsWith('TOTAL A PAGAR'))).toBe(false)
   })
 
+  it('con vuelto > 0 imprime la línea Vuelto después de los pagos', () => {
+    const lines = boleta({
+      pagos: [{ nombre: 'Efectivo', monto: '40000' }],
+      vuelto: '3000',
+    })
+    expect(lines.some(l => l.startsWith('Vuelto') && l.includes('$3000'))).toBe(true)
+    const idxPago = lines.findIndex(l => l.startsWith('Efectivo'))
+    const idxVuelto = lines.findIndex(l => l.startsWith('Vuelto'))
+    expect(idxVuelto).toBeGreaterThan(idxPago)
+  })
+
+  it('sin vuelto (o en 0) no imprime la línea Vuelto', () => {
+    const sinVuelto = boleta()
+    expect(sinVuelto.some(l => l.startsWith('Vuelto'))).toBe(false)
+    const vueltoCero = boleta({ vuelto: '0' })
+    expect(vueltoCero.some(l => l.startsWith('Vuelto'))).toBe(false)
+  })
+
   it('imprime el ítem en una fila de columnas con precio unitario y total', () => {
     const lines = boleta()
     const fila = lines.find(l => l.includes('Pisco Sour'))

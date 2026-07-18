@@ -173,7 +173,7 @@ const estadoToastTitle: Record<string, string> = {
   pendiente: 'Venta registrada — pendiente de pago',
 }
 
-async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
+async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   const docSel = tiposDocumento.value.find((t) => t.id === tipoDocumentoId.value)
   const incluirCustomer = docSel?.customerRequerido || customerExpandido.value
 
@@ -265,6 +265,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
             nombre: metodos.value.find((m) => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
             monto: p.monto,
           })),
+          vuelto,
           formatMonto: (v: string) => formatMonto(v),
         })
       } catch (e: unknown) {
@@ -280,7 +281,7 @@ async function confirmarCobro(pagos: PagoInput[], _vuelto: string) {
       new Decimal(0),
     )
     cajaStore.aplicarCobroLocal(
-      bruto.minus(_vuelto || '0').toFixed(4),
+      bruto.minus(vuelto || '0').toFixed(4),
       pagosConMonto.length,
     )
     limpiar()

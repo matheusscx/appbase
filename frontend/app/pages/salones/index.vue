@@ -796,19 +796,19 @@ async function confirmarCancelar() {
   }
 }
 
-function confirmarCobro(pagos: PagoInput[]) {
+function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   if (!activeCuenta.value) return
   // El cobro recolecta los pagos; el PIN identifica al garzón que cierra.
   cobroOpen.value = false
   solicitarPin('PIN del garzón para cerrar la cuenta', (pin) => {
     void (async () => {
       await flushPendientes()
-      await cerrarCuentaConPin(pagos, pin)
+      await cerrarCuentaConPin(pagos, pin, vuelto)
     })()
   })
 }
 
-async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
+async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: string) {
   if (!activeCuenta.value) return
   submitting.value = true
   const cuentaCerrada = activeCuenta.value
@@ -848,6 +848,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string) {
             nombre: metodos.value.find(m => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
             monto: p.monto,
           })),
+          vuelto,
           formatMonto: (v: string) => formatMonto(v),
         })
       }
