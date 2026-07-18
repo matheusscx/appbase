@@ -20,4 +20,11 @@ describe('elegirEmisor', () => {
   it('cae al nombre del tenant si no hay razones', () => {
     expect(elegirEmisor([], 'Tenant X')).toEqual({ nombre: 'Tenant X' })
   })
+
+  it('ignora una preferida deshabilitada y cae a la primera habilitada', () => {
+    const preferidaDeshabilitada = { nombre: 'Preferida Deshabilitada', rut: '76.3-3', habilitado: false, preferida: true }
+    expect(elegirEmisor([preferidaDeshabilitada, B], 'Tenant X')).toEqual({
+      nombre: 'Razón Habilitada', rut: '76.2-2', direccion: undefined, telefono: undefined,
+    })
+  })
 })

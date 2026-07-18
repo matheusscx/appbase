@@ -199,6 +199,11 @@ describe('buildBoletaTicket', () => {
     expect(lines.some(l => l.includes('SIN VALIDEZ FISCAL'))).toBe(false)
   })
 
+  it('imprime cantidad con unidad de presentación preformateada', () => {
+    const lines = boleta({ items: [{ nombre: 'Harina', cantidad: '500 g', precioUnitario: '2500', totalLinea: '2500' }] })
+    expect(lines).toContain('500 g x Harina')
+  })
+
   it('imprime Neto y una línea por impuesto con nombre y tasa reales', () => {
     const lines = boleta()
     // Neto = totalFinal - totalImpuestos = 37000 - 5908 = 31092

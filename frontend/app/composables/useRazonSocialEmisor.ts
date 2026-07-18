@@ -10,9 +10,9 @@ export interface RazonSocialRow {
   preferida?: boolean
 }
 
-/** Selecciona el emisor: preferida → primera habilitada → nombre del tenant. */
+/** Selecciona el emisor: preferida (habilitada) → primera habilitada → nombre del tenant. */
 export function elegirEmisor(razones: RazonSocialRow[], tenantNombre: string): BoletaEmisor {
-  const elegida = razones.find(r => r.preferida) ?? razones.find(r => r.habilitado)
+  const elegida = razones.find(r => r.preferida && r.habilitado) ?? razones.find(r => r.habilitado)
   if (!elegida) return { nombre: tenantNombre }
   return {
     nombre: elegida.nombre,
