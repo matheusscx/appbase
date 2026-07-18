@@ -10,7 +10,7 @@
 
 ### What is it?
 
-Vista operativa en `/propinas/reportes` con dos tabs:
+Vista operativa en `/propinas?tab=reportes` (tab dentro de Propinas) con dos vistas:
 
 - **Resumen:** cobranza, estado actual, anulaciones históricas, tendencia diaria
   y desgloses por turno/tipo.
@@ -84,7 +84,8 @@ exponer su PIN.
 
 ## Frontend
 
-- Página: `frontend/app/pages/propinas/reportes.vue`
+- Página: `frontend/app/pages/propinas/index.vue` (tab Reportes) + `PropinaReportesPanel.vue`
+- Redirect compat: `/propinas/reportes` → `/propinas?tab=reportes`
 - Composable: `frontend/app/composables/usePropinaReportes.ts`
 - Navegación: grupo Propinas en `frontend/app/layouts/dashboard.vue`
 

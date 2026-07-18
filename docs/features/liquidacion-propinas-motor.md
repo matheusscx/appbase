@@ -110,8 +110,8 @@ creación del borrador, las fuentes quedan congeladas en
 
 ### Pages
 
-- `frontend/app/pages/propinas/liquidaciones/index.vue` — listado y creación de
-  borradores.
+- `frontend/app/pages/propinas/index.vue` + `PropinaLiquidacionesPanel.vue` —
+  listado y creación de borradores (tab Liquidaciones).
 - `frontend/app/pages/propinas/liquidaciones/[id].vue` — detalle, ajustes y
   acciones.
 

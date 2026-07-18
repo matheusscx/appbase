@@ -3,6 +3,8 @@ import {
   claveCachePropinaReportes,
   crearCachePropinaReportes,
   serializarFiltrosReporte,
+  tipoTrabajadorDesdeSelect,
+  tipoTrabajadorParaSelect,
   type PropinaReporteResumen,
 } from './usePropinaReportes';
 
@@ -80,5 +82,13 @@ describe('crearCachePropinaReportes', () => {
     expect(cache.get('trabajadores', 'clave')).toBeUndefined();
     cache.clear();
     expect(cache.get('resumen', 'clave')).toBeUndefined();
+  });
+});
+
+describe('selector de tipo de trabajador', () => {
+  it('usa un valor no vacío para representar todos', () => {
+    expect(tipoTrabajadorParaSelect(undefined)).toBe('todos');
+    expect(tipoTrabajadorDesdeSelect('todos')).toBeUndefined();
+    expect(tipoTrabajadorDesdeSelect('cocina')).toBe('cocina');
   });
 });

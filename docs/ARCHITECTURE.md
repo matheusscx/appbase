@@ -177,8 +177,7 @@ Toda columna PK o FK de tipo UUID **debe** declarar `type: 'uuid'` explícitamen
 | `/pagos` | `pagos/index.vue` | Ledger de pagos del tenant |
 | `/caja` | `caja/index.vue` | Gestión de cajas |
 | `/caja/:id` | `caja/[id].vue` | Detalle de caja abierta |
-| `/propinas/liquidaciones` | `propinas/liquidaciones/index.vue` | Borradores y liquidaciones de propinas |
-| `/propinas/reportes` | `propinas/reportes.vue` | Resumen del ciclo completo y agregados por trabajador |
+| `/propinas` | `propinas/index.vue` | Liquidaciones y reportes (tabs); detalle en `/propinas/liquidaciones/:id` |
 
 ### Reportes de propinas
 

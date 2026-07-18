@@ -2,6 +2,19 @@ import { useApiFetch } from './useApiFetch';
 
 export type TipoTrabajador = 'garzon' | 'cocina' | 'barra';
 export type ReporteTab = 'resumen' | 'trabajadores';
+export type TipoTrabajadorSelect = TipoTrabajador | 'todos';
+
+export function tipoTrabajadorParaSelect(
+  tipo: TipoTrabajador | undefined,
+): TipoTrabajadorSelect {
+  return tipo ?? 'todos';
+}
+
+export function tipoTrabajadorDesdeSelect(
+  value: TipoTrabajadorSelect,
+): TipoTrabajador | undefined {
+  return value === 'todos' ? undefined : value;
+}
 
 export interface PropinaReporteFiltrosUi {
   desde: string;
