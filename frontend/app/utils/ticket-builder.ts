@@ -143,8 +143,7 @@ function padLR(left: string, right: string, width = WIDTH): string {
 const BOLETA_WIDTH = 48
 const COL_CANT = 5
 const COL_MONTO = 9
-const COL_DESC_BOLETA = 22 // CANT(5) + DESC(22) + P.UNIT(9) + TOTAL(9) + 3 separadores = 48
-const COL_DESC_PRECUENTA = 32 // CANT(5) + DESC(32) + TOTAL(9) + 2 separadores = 48
+const COL_DESC = 22 // CANT(5) + DESC(22) + P.UNIT(9) + TOTAL(9) + 3 separadores = 48
 
 interface Columna {
   texto: string
@@ -166,23 +165,86 @@ function filaColumnas(cols: Columna[]): string {
   return cols.map(c => ajustarColumna(c.texto, c.ancho, c.alinear)).join(' ')
 }
 
-function buildTotalesLines(
+export interface BoletaEmisor {
+  nombre: string
+  rut?: string
+  direccion?: string
+  telefono?: string
+}
+
+export interface BoletaItem extends TicketItem {
+  precioUnitario: string
+  totalLinea: string
+  /** Detalle priceado de omitidos/extras. Si viene, reemplaza `nota`/`notas`. */
+  personalizacionDetalle?: PersonalizacionDetalleLinea[]
+  /** Comentario libre (sin precio) cuando se usa `personalizacionDetalle`. */
+  comentario?: string
+}
+
+// ── Bloques compartidos entre boleta y precuenta (misma tabla, mismo desglose) ──
+
+/** Cabecera del emisor: nombre centrado + RUT/dirección/teléfono si existen. */
+function lineasEmisor(emisor: BoletaEmisor, width: number): string[] {
+  const out: string[] = []
+  out.push(center(emisor.nombre, width))
+  if (emisor.rut) out.push(center(`RUT: ${emisor.rut}`, width))
+  if (emisor.direccion) out.push(center(emisor.direccion, width))
+  if (emisor.telefono) out.push(center(`Tel: ${emisor.telefono}`, width))
+  return out
+}
+
+/** Header de la tabla de ítems: CANT / DESCRIPCIÓN / P.UNIT / TOTAL. */
+function filaHeaderItems(width: number): string {
+  return filaColumnas([
+    { texto: 'CANT', ancho: COL_CANT, alinear: 'izq' },
+    { texto: 'DESCRIPCIÓN', ancho: COL_DESC, alinear: 'izq' },
+    { texto: 'P.UNIT', ancho: COL_MONTO, alinear: 'der' },
+    { texto: 'TOTAL', ancho: COL_MONTO, alinear: 'der' },
+  ])
+}
+
+/** Fila de un ítem (columnas) + sus notas/personalización debajo. */
+function lineasItem(
+  item: BoletaItem,
+  formatMonto: (v: string) => string,
+  width: number,
+): string[] {
+  const out: string[] = []
+  out.push(filaColumnas([
+    { texto: item.cantidad, ancho: COL_CANT, alinear: 'izq' },
+    { texto: item.nombre, ancho: COL_DESC, alinear: 'izq' },
+    { texto: formatMonto(item.precioUnitario), ancho: COL_MONTO, alinear: 'der' },
+    { texto: formatMonto(item.totalLinea), ancho: COL_MONTO, alinear: 'der' },
+  ]))
+  out.push(...(item.personalizacionDetalle
+    ? lineasPersonalizacionPreciada(item.personalizacionDetalle, item.comentario, formatMonto, width)
+    : lineasNotaTicket(item)))
+  return out
+}
+
+/**
+ * Subtotal, Descuento?, Recargo?, Neto, una línea por impuesto (nombre + tasa).
+ * NO incluye la línea de total final (su etiqueta varía entre boleta/precuenta).
+ */
+function lineasTotalesConImpuestos(
   totales: TicketTotales,
+  impuestos: ImpuestoBoleta[],
   formatMonto: (v: string) => string,
   width: number,
 ): string[] {
   const out: string[] = []
   out.push(padLR('Subtotal', formatMonto(totales.subtotalNeto), width))
   if (new Decimal(totales.totalDescuentos || '0').gt(0)) {
-    out.push(padLR('Descuentos', `-${formatMonto(totales.totalDescuentos)}`, width))
+    out.push(padLR('Descuento', `-${formatMonto(totales.totalDescuentos)}`, width))
   }
   if (new Decimal(totales.totalRecargos || '0').gt(0)) {
-    out.push(padLR('Recargos', `+${formatMonto(totales.totalRecargos)}`, width))
+    out.push(padLR('Recargo', `+${formatMonto(totales.totalRecargos)}`, width))
   }
-  if (new Decimal(totales.totalImpuestos || '0').gt(0)) {
-    out.push(padLR('Impuestos', formatMonto(totales.totalImpuestos), width))
+  const neto = new Decimal(totales.totalFinal).minus(totales.totalImpuestos || '0').toString()
+  out.push(padLR('Neto', formatMonto(neto), width))
+  for (const imp of impuestos) {
+    out.push(padLR(`${imp.nombre} (${formatTasaPorcentaje(imp.tasa)})`, formatMonto(imp.monto), width))
   }
-  out.push(padLR('TOTAL', formatMonto(totales.totalFinal), width))
   return out
 }
 
@@ -210,57 +272,49 @@ export function buildComandaTicket(input: {
   return out
 }
 
-/** Resumen no fiscal del consumo actual de una cuenta, antes de cobrar. */
+/**
+ * Resumen no fiscal del consumo actual de una cuenta, antes de cobrar. Comparte
+ * la misma cabecera de emisor, tabla de columnas y desglose de totales que
+ * `buildBoletaTicket` — es, a propósito, lo más parecida posible a la boleta.
+ */
 export function buildPrecuentaTicket(input: {
-  tenantNombre: string
+  emisor: BoletaEmisor
   mesaNombre: string
   cuentaNumero: number
-  items: (TicketItem & {
-    totalLinea: string
-    /** Detalle priceado de omitidos/extras. Si viene, reemplaza `nota`/`notas`. */
-    personalizacionDetalle?: PersonalizacionDetalleLinea[]
-    /** Comentario libre (sin precio) cuando se usa `personalizacionDetalle`. */
-    comentario?: string
-  })[]
+  items: BoletaItem[]
   totales: TicketTotales
+  impuestos: ImpuestoBoleta[]
   propinaSugerida?: { porcentaje: string, monto: string }
   fecha: Date
   formatMonto: (v: string) => string
 }): string[] {
+  const { formatMonto } = input
   const out: string[] = []
-  out.push(center(input.tenantNombre, BOLETA_WIDTH))
+  out.push(...lineasEmisor(input.emisor, BOLETA_WIDTH))
+  out.push(separador(BOLETA_WIDTH))
   out.push(center('PRECUENTA (no válido como boleta)', BOLETA_WIDTH))
   out.push(`Mesa: ${input.mesaNombre}   Cuenta: ${input.cuentaNumero}`)
   out.push(input.fecha.toLocaleString('es-CL'))
   out.push(separador(BOLETA_WIDTH))
-  out.push(filaColumnas([
-    { texto: 'CANT', ancho: COL_CANT, alinear: 'izq' },
-    { texto: 'DESCRIPCIÓN', ancho: COL_DESC_PRECUENTA, alinear: 'izq' },
-    { texto: 'TOTAL', ancho: COL_MONTO, alinear: 'der' },
-  ]))
+  out.push(filaHeaderItems(BOLETA_WIDTH))
   out.push(separador(BOLETA_WIDTH))
   for (const item of input.items) {
-    out.push(filaColumnas([
-      { texto: item.cantidad, ancho: COL_CANT, alinear: 'izq' },
-      { texto: item.nombre, ancho: COL_DESC_PRECUENTA, alinear: 'izq' },
-      { texto: input.formatMonto(item.totalLinea), ancho: COL_MONTO, alinear: 'der' },
-    ]))
-    out.push(...(item.personalizacionDetalle
-      ? lineasPersonalizacionPreciada(item.personalizacionDetalle, item.comentario, input.formatMonto, BOLETA_WIDTH)
-      : lineasNotaTicket(item)))
+    out.push(...lineasItem(item, formatMonto, BOLETA_WIDTH))
   }
   out.push(separador(BOLETA_WIDTH))
-  out.push(...buildTotalesLines(input.totales, input.formatMonto, BOLETA_WIDTH))
+  out.push(...lineasTotalesConImpuestos(input.totales, input.impuestos, formatMonto, BOLETA_WIDTH))
+  out.push(separador(BOLETA_WIDTH))
+  out.push(padLR('TOTAL', formatMonto(input.totales.totalFinal), BOLETA_WIDTH))
   if (input.propinaSugerida) {
     out.push(separador(BOLETA_WIDTH))
     out.push(padLR(
       `Propina sugerida ${formatTasaPorcentaje(input.propinaSugerida.porcentaje)}`,
-      input.formatMonto(input.propinaSugerida.monto),
+      formatMonto(input.propinaSugerida.monto),
       BOLETA_WIDTH,
     ))
     out.push(padLR(
       'Total sugerido',
-      input.formatMonto(new Decimal(input.totales.totalFinal).plus(input.propinaSugerida.monto).toString()),
+      formatMonto(new Decimal(input.totales.totalFinal).plus(input.propinaSugerida.monto).toString()),
       BOLETA_WIDTH,
     ))
     out.push('* Propina sugerida, de aceptación voluntaria.')
@@ -268,13 +322,6 @@ export function buildPrecuentaTicket(input: {
   out.push('')
   out.push('')
   return out
-}
-
-export interface BoletaEmisor {
-  nombre: string
-  rut?: string
-  direccion?: string
-  telefono?: string
 }
 
 export interface BoletaMetaOperativa {
@@ -290,15 +337,6 @@ export interface BoletaCliente {
   nombre?: string
   rut?: string
   direccion?: string
-}
-
-export interface BoletaItem extends TicketItem {
-  precioUnitario: string
-  totalLinea: string
-  /** Detalle priceado de omitidos/extras. Si viene, reemplaza `nota`/`notas`. */
-  personalizacionDetalle?: PersonalizacionDetalleLinea[]
-  /** Comentario libre (sin precio) cuando se usa `personalizacionDetalle`. */
-  comentario?: string
 }
 
 /** Comprobante de venta (mesa o mostrador) — plantilla unificada interna/electrónica. */
@@ -318,14 +356,11 @@ export function buildBoletaTicket(input: {
   fecha: Date
   formatMonto: (v: string) => string
 }): string[] {
-  const { emisor, meta, cliente, formatMonto } = input
+  const { meta, cliente, formatMonto } = input
   const out: string[] = []
 
   // Cabecera emisor
-  out.push(center(emisor.nombre, BOLETA_WIDTH))
-  if (emisor.rut) out.push(center(`RUT: ${emisor.rut}`, BOLETA_WIDTH))
-  if (emisor.direccion) out.push(center(emisor.direccion, BOLETA_WIDTH))
-  if (emisor.telefono) out.push(center(`Tel: ${emisor.telefono}`, BOLETA_WIDTH))
+  out.push(...lineasEmisor(input.emisor, BOLETA_WIDTH))
   out.push(separador(BOLETA_WIDTH))
 
   // Tipo de documento
@@ -359,39 +394,15 @@ export function buildBoletaTicket(input: {
   out.push(separador(BOLETA_WIDTH))
 
   // Ítems en columnas: CANT / DESCRIPCIÓN / P.UNIT / TOTAL
-  out.push(filaColumnas([
-    { texto: 'CANT', ancho: COL_CANT, alinear: 'izq' },
-    { texto: 'DESCRIPCIÓN', ancho: COL_DESC_BOLETA, alinear: 'izq' },
-    { texto: 'P.UNIT', ancho: COL_MONTO, alinear: 'der' },
-    { texto: 'TOTAL', ancho: COL_MONTO, alinear: 'der' },
-  ]))
+  out.push(filaHeaderItems(BOLETA_WIDTH))
   out.push(separador(BOLETA_WIDTH))
   for (const item of input.items) {
-    out.push(filaColumnas([
-      { texto: item.cantidad, ancho: COL_CANT, alinear: 'izq' },
-      { texto: item.nombre, ancho: COL_DESC_BOLETA, alinear: 'izq' },
-      { texto: formatMonto(item.precioUnitario), ancho: COL_MONTO, alinear: 'der' },
-      { texto: formatMonto(item.totalLinea), ancho: COL_MONTO, alinear: 'der' },
-    ]))
-    out.push(...(item.personalizacionDetalle
-      ? lineasPersonalizacionPreciada(item.personalizacionDetalle, item.comentario, formatMonto, BOLETA_WIDTH)
-      : lineasNotaTicket(item)))
+    out.push(...lineasItem(item, formatMonto, BOLETA_WIDTH))
   }
   out.push(separador(BOLETA_WIDTH))
 
   // Totales: Subtotal, Descuento?, Recargo?, Neto, impuestos*, TOTAL BOLETA
-  out.push(padLR('Subtotal', formatMonto(input.totales.subtotalNeto), BOLETA_WIDTH))
-  if (new Decimal(input.totales.totalDescuentos || '0').gt(0)) {
-    out.push(padLR('Descuento', `-${formatMonto(input.totales.totalDescuentos)}`, BOLETA_WIDTH))
-  }
-  if (new Decimal(input.totales.totalRecargos || '0').gt(0)) {
-    out.push(padLR('Recargo', `+${formatMonto(input.totales.totalRecargos)}`, BOLETA_WIDTH))
-  }
-  const neto = new Decimal(input.totales.totalFinal).minus(input.totales.totalImpuestos || '0').toString()
-  out.push(padLR('Neto', formatMonto(neto), BOLETA_WIDTH))
-  for (const imp of input.impuestos) {
-    out.push(padLR(`${imp.nombre} (${formatTasaPorcentaje(imp.tasa)})`, formatMonto(imp.monto), BOLETA_WIDTH))
-  }
+  out.push(...lineasTotalesConImpuestos(input.totales, input.impuestos, formatMonto, BOLETA_WIDTH))
   out.push(separador(BOLETA_WIDTH))
   out.push(padLR('TOTAL BOLETA', formatMonto(input.totales.totalFinal), BOLETA_WIDTH))
 

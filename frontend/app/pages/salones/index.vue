@@ -44,7 +44,6 @@ const unidadesStore = useUnidadesMedidaStore()
 const { calcular } = useCalculoPrecios()
 const { formatMonto, formatFecha } = useFormatters()
 const impresorasApi = useImpresoras()
-const tenantStore = useTenantStore()
 const authStore = useAuthStore()
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
@@ -757,11 +756,12 @@ async function imprimirPrecuenta() {
   imprimiendoPrecuenta.value = true
   try {
     await impresorasApi.imprimirPrecuenta({
-      tenantNombre: tenantStore.activeTenant?.nombre ?? '',
+      emisor: emisor.value,
       mesaNombre: selectedMesa.value.nombre,
       cuentaNumero: activeCuenta.value.numero,
       items: itemsParaTicket(activeCuenta.value, resultado.value),
       totales: resultado.value.totales,
+      impuestos: agregarImpuestosVenta(resultado.value.lineas),
       ...(new Decimal(propinaPorcentaje.value || '0').gt(0)
         ? { propinaSugerida: {
             porcentaje: propinaPorcentaje.value,

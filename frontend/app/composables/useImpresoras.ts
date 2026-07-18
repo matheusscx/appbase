@@ -3,7 +3,6 @@ import {
   buildComandaTicket,
   buildPrecuentaTicket,
   buildBoletaTicket,
-  type TicketItem,
   type TicketTotales,
   type TicketPago,
   type BoletaEmisor,
@@ -11,7 +10,6 @@ import {
   type BoletaCliente,
   type BoletaItem,
   type ImpuestoBoleta,
-  type PersonalizacionDetalleLinea,
 } from '~/utils/ticket-builder'
 import { conTimeout } from '~/utils/con-timeout'
 
@@ -218,15 +216,12 @@ export function useImpresoras() {
   }
 
   async function imprimirPrecuenta(input: {
-    tenantNombre: string
+    emisor: BoletaEmisor
     mesaNombre: string
     cuentaNumero: number
-    items: (TicketItem & {
-      totalLinea: string
-      personalizacionDetalle?: PersonalizacionDetalleLinea[]
-      comentario?: string
-    })[]
+    items: BoletaItem[]
     totales: TicketTotales
+    impuestos: ImpuestoBoleta[]
     propinaSugerida?: { porcentaje: string, monto: string }
     formatMonto: (v: string) => string
   }): Promise<void> {

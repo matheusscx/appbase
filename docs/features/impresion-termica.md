@@ -111,9 +111,15 @@ impresora `rol='boleta'` del tenant.
     Ítems en tabla de columnas fijas (`CANT`/`DESCRIPCIÓN`/`P.UNIT`/`TOTAL`) con
     header, a **48 caracteres** (papel térmico 80mm, ESC/POS Font A) — la comanda se
     mantiene a 32 (papel/necesidad distinta, sin columnas de precio).
-  - `buildPrecuentaTicket`: mismo ancho de 48 y tabla de columnas
-    (`CANT`/`DESCRIPCIÓN`/`TOTAL`, sin `P.UNIT`); agrega bloque opcional de propina
-    sugerida (monto calculado desde `propinaSugerida`).
+  - `buildPrecuentaTicket`: **lo más parecida posible a `buildBoletaTicket`** —
+    comparte cabecera de emisor (`lineasEmisor`), tabla de columnas idéntica
+    (`filaHeaderItems`/`lineasItem`, incluye `P.UNIT`) y el mismo desglose
+    `Neto` + impuestos por nombre/tasa (`lineasTotalesConImpuestos`); recibe
+    `emisor`/`items: BoletaItem[]`/`impuestos: ImpuestoBoleta[]` igual que la
+    boleta. Difiere solo en lo que estructuralmente debe diferir: label
+    `PRECUENTA (no válido como boleta)` en vez de tipo de documento/pie fiscal,
+    sin sección de pagos/vuelto, y bloque propio de propina *sugerida* (monto
+    calculado desde `propinaSugerida`) en vez de propina aceptada.
   - Cada ítem puede llevar `nota?` (personalización + comentario), impresa indentada
     bajo el nombre.
   - `buildBoletaTicket`/`buildPrecuentaTicket`: alternativa priceada a `nota?` vía
