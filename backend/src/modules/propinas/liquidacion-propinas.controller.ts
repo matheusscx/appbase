@@ -17,6 +17,7 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
+import { PreviewLiquidacionDto } from './dto/preview-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { LiquidacionPropinasService } from './liquidacion-propinas.service';
 
@@ -32,6 +33,19 @@ export class LiquidacionPropinasController {
   crear(@Req() req: Request, @Body() dto: CreateLiquidacionDto) {
     const user = req.user as JwtUser;
     return this.liquidaciones.crear(user.tenantId!, user.id, dto);
+  }
+
+  @Post('preview')
+  @RequiresPermiso('Propinas', 'Leer')
+  preview(@Req() req: Request, @Body() dto: PreviewLiquidacionDto) {
+    const user = req.user as JwtUser;
+    return this.liquidaciones.computarReparto(
+      user.tenantId!,
+      new Date(dto.fechaDesde),
+      new Date(dto.fechaHasta),
+      dto.turnoIds ?? [],
+      dto.ajustes,
+    );
   }
 
   @Get()

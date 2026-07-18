@@ -32,7 +32,7 @@ describe('LiquidacionPropinasService', () => {
     softDelete: jest.Mock;
     query: jest.Mock;
   };
-  let dataSource: { transaction: jest.Mock };
+  let dataSource: { transaction: jest.Mock; manager: unknown };
   let liquidacionRepo: { find: jest.Mock; findOne: jest.Mock };
   let grupoRepo: { find: jest.Mock };
   let participanteRepo: { find: jest.Mock };
@@ -109,6 +109,7 @@ describe('LiquidacionPropinasService', () => {
       transaction: jest.fn(async (cb: (m: typeof manager) => unknown) =>
         cb(manager),
       ),
+      manager,
     };
     liquidacionRepo = { find: jest.fn(), findOne: jest.fn() };
     grupoRepo = { find: jest.fn() };
@@ -441,5 +442,76 @@ describe('LiquidacionPropinasService', () => {
       LiquidacionPropinasEvento,
       expect.objectContaining({ tipo: TipoEventoLiquidacion.ANULADA }),
     );
+  });
+
+  const garzonAId = 'garzon-a';
+  const garzonBId = 'garzon-b';
+
+  function mockeaTipsParaPreview(): void {
+    manager.query
+      .mockReset()
+      .mockResolvedValueOnce(monedaRows)
+      .mockResolvedValueOnce([
+        {
+          venta_propina_id: 'tip-a',
+          garzon_id: garzonAId,
+          tipo_garzon: TipoGarzon.GARZON,
+          turno_id: 'turno-1',
+          monto_pagado: '1000.0000',
+          venta_id: 'venta-a',
+          base_ventas_total_final: '1000.0000',
+          base_ventas_sin_impuestos: '1000.0000',
+        },
+        {
+          venta_propina_id: 'tip-b',
+          garzon_id: garzonBId,
+          tipo_garzon: TipoGarzon.GARZON,
+          turno_id: 'turno-1',
+          monto_pagado: '1000.0000',
+          venta_id: 'venta-b',
+          base_ventas_total_final: '1000.0000',
+          base_ventas_sin_impuestos: '1000.0000',
+        },
+      ])
+      .mockResolvedValueOnce([]);
+  }
+
+  it('computarReparto calcula el pool y reparte sin persistir', async () => {
+    mockeaTipsParaPreview();
+
+    const result = await service.computarReparto(
+      TENANT,
+      new Date('2026-07-01T00:00:00Z'),
+      new Date('2026-07-08T00:00:00Z'),
+      [],
+    );
+
+    expect(result.poolTotal).toBe('2000.0000');
+    expect(result.grupos).toHaveLength(1);
+    expect(result.grupos[0].montoGrupo).toBe('2000.0000');
+    expect(result.participantes).toHaveLength(2);
+    expect(result.participantes.map((p) => p.monto).sort()).toEqual([
+      '1000.0000',
+      '1000.0000',
+    ]);
+    // no se guardó ninguna liquidación
+    expect(manager.save).not.toHaveBeenCalled();
+  });
+
+  it('computarReparto excluye un participante y redistribuye', async () => {
+    mockeaTipsParaPreview();
+
+    const result = await service.computarReparto(
+      TENANT,
+      new Date('2026-07-01T00:00:00Z'),
+      new Date('2026-07-08T00:00:00Z'),
+      [],
+      { exclusiones: [garzonBId] },
+    );
+
+    const incluidos = result.participantes.filter((p) => p.incluido);
+    expect(incluidos).toHaveLength(1);
+    expect(incluidos[0].garzonId).toBe(garzonAId);
+    expect(incluidos[0].monto).toBe('2000.0000'); // recibe todo el grupo
   });
 });

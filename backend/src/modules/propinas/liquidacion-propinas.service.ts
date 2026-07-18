@@ -68,6 +68,44 @@ export interface LiquidacionResumen {
   creadoEl: Date;
 }
 
+export interface PreviewGrupo {
+  id: string;
+  tipoGarzon: TipoGarzon;
+  nombre: string;
+  porcentaje: string;
+  criterio: CriterioDistribucion;
+  baseVentas: BaseVentasGrupo;
+  manualModo: ManualModo | null;
+  montoGrupo: string;
+  orden: number;
+}
+
+export interface PreviewParticipante {
+  garzonId: string;
+  grupoId: string;
+  tipoGarzon: TipoGarzon;
+  incluido: boolean;
+  horas: string;
+  ventasBase: string;
+  cuentas: string;
+  pesoManual: string | null;
+  monto: string;
+}
+
+export interface PreviewReparto {
+  poolTotal: string;
+  monedaId: string;
+  decimalesMoneda: number;
+  grupos: PreviewGrupo[];
+  participantes: PreviewParticipante[];
+  advertencias: string[];
+}
+
+export interface AjustesReparto {
+  exclusiones?: string[];
+  montosManuales?: { garzonId: string; monto: string }[];
+}
+
 export interface LiquidacionDetalle extends LiquidacionResumen {
   turnoIds: string[];
   monedaId: string;
@@ -207,6 +245,113 @@ export class LiquidacionPropinasService {
         advertencias,
       });
     });
+  }
+
+  async computarReparto(
+    tenantId: string,
+    fechaDesde: Date,
+    fechaHasta: Date,
+    turnoIds: string[],
+    ajustes?: AjustesReparto,
+  ): Promise<PreviewReparto> {
+    if (fechaHasta <= fechaDesde) {
+      throw new BadRequestException(
+        'La fecha hasta debe ser posterior a desde',
+      );
+    }
+    const config = await this.distribucion.obtener(tenantId);
+    const gruposConfig = config.grupos.filter((g) => g.activo);
+    if (gruposConfig.length === 0) {
+      throw new BadRequestException('No hay grupos activos para liquidar');
+    }
+
+    const manager = this.dataSource.manager;
+    const moneda = await this.resolverMonedaOficial(manager, tenantId);
+    const tips = await this.buscarTipsElegibles(
+      manager,
+      tenantId,
+      fechaDesde,
+      fechaHasta,
+      turnoIds,
+    );
+    const sesiones = await this.buscarSesionesPeriodo(
+      manager,
+      tenantId,
+      fechaDesde,
+      fechaHasta,
+      turnoIds,
+    );
+    const poolTotal = tips
+      .reduce((acc, t) => acc.plus(t.monto_pagado), new Decimal(0))
+      .toFixed(4);
+
+    const montos = this.montosPorGrupo(
+      poolTotal,
+      gruposConfig,
+      moneda.decimales,
+    );
+    // Grupos en memoria: id = id del grupo de configuración (clave estable para el front).
+    const grupos = gruposConfig.map(
+      (g) =>
+        ({
+          id: g.id,
+          tipoGarzon: g.tipoGarzon,
+          nombre: g.nombre,
+          porcentaje: new Decimal(g.porcentaje).toFixed(6),
+          criterio: g.criterio,
+          baseVentas: g.baseVentas,
+          manualModo: g.manualModo,
+          montoGrupo: montos.get(g.id) ?? '0.0000',
+          orden: g.orden,
+        }) as LiquidacionPropinasGrupo,
+    );
+
+    const dataBase = this.buildParticipantesData(
+      tenantId,
+      'preview',
+      grupos,
+      gruposConfig,
+      tips,
+      sesiones,
+      fechaDesde,
+      fechaHasta,
+      moneda.decimales,
+    );
+    const data = this.aplicarAjustesEnMemoria(
+      grupos,
+      dataBase,
+      ajustes,
+      moneda.decimales,
+    );
+
+    return {
+      poolTotal,
+      monedaId: moneda.monedaId,
+      decimalesMoneda: moneda.decimales,
+      grupos: grupos.map((g) => ({
+        id: g.id,
+        tipoGarzon: g.tipoGarzon,
+        nombre: g.nombre,
+        porcentaje: g.porcentaje,
+        criterio: g.criterio,
+        baseVentas: g.baseVentas,
+        manualModo: g.manualModo,
+        montoGrupo: g.montoGrupo,
+        orden: g.orden,
+      })),
+      participantes: data.map((p) => ({
+        garzonId: p.garzonId,
+        grupoId: p.grupoId,
+        tipoGarzon: p.tipoGarzon,
+        incluido: p.incluido,
+        horas: p.horas,
+        ventasBase: p.ventasBase,
+        cuentas: p.cuentas,
+        pesoManual: p.pesoManual,
+        monto: p.monto,
+      })),
+      advertencias: this.advertenciasSesionesAbiertas(sesiones),
+    };
   }
 
   async listar(tenantId: string): Promise<LiquidacionResumen[]> {
@@ -879,6 +1024,49 @@ export class LiquidacionPropinasService {
       );
     }
     return participantes;
+  }
+
+  private aplicarAjustesEnMemoria(
+    grupos: LiquidacionPropinasGrupo[],
+    participantes: ParticipanteData[],
+    ajustes: AjustesReparto | undefined,
+    decimales: number,
+  ): ParticipanteData[] {
+    if (!ajustes) return participantes;
+    const exclusiones = new Set(ajustes.exclusiones ?? []);
+    const montosManuales = new Map(
+      (ajustes.montosManuales ?? []).map((m) => [
+        m.garzonId,
+        new Decimal(m.monto).toFixed(4),
+      ]),
+    );
+
+    const conInclusion = participantes.map((p) => ({
+      ...p,
+      incluido: !exclusiones.has(p.garzonId),
+    }));
+
+    const recomputados: ParticipanteData[] = [];
+    for (const grupo of grupos) {
+      const delGrupo = conInclusion.filter(
+        (p) => p.grupoId === grupo.id && p.incluido,
+      );
+      const omitidos = conInclusion.filter(
+        (p) => p.grupoId === grupo.id && !p.incluido,
+      );
+      const activos =
+        grupo.criterio === CriterioDistribucion.MANUAL &&
+        grupo.manualModo === ManualModo.MONTOS
+          ? delGrupo
+          : this.repartirGrupo(grupo, grupo, delGrupo, decimales);
+      recomputados.push(...activos, ...omitidos);
+    }
+
+    return recomputados.map((p) =>
+      montosManuales.has(p.garzonId)
+        ? { ...p, monto: montosManuales.get(p.garzonId)! }
+        : p,
+    );
   }
 
   private async crearParticipantes(
