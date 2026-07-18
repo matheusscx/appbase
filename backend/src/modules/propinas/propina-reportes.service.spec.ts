@@ -70,7 +70,12 @@ describe('PropinaReportesService', () => {
       });
 
       expect(
-        query.mock.calls.some(([, params]) => params?.includes(TURNO_ID)),
+        query.mock.calls.some(([, params]) =>
+          params?.some(
+            (param: unknown) =>
+              Array.isArray(param) && param.includes(TURNO_ID),
+          ),
+        ),
       ).toBe(true);
       expect(
         query.mock.calls.some(([, params]) =>
