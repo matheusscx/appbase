@@ -25,6 +25,7 @@ import {
   UpdateLiquidacionParticipanteDto,
 } from './dto/update-liquidacion.dto';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
+import { LiquidarDto } from './dto/liquidar.dto';
 import { horasInterseccionHoras } from './utils/horas-interseccion';
 import { repartirMayoresRestos } from './utils/mayores-restos';
 
@@ -549,56 +550,14 @@ export class LiquidacionPropinasService {
     return this.dataSource.transaction(async (manager) => {
       const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
       this.assertBorrador(detalle.liquidacion);
-      this.validarManualMontos(detalle.grupos, detalle.participantes);
-
-      const tipIds = [
-        ...new Set(detalle.fuentes.map((f) => f.ventaPropinaId).filter(Boolean)),
-      ];
-      if (tipIds.length === 0) {
-        throw new BadRequestException('La liquidación no tiene propinas fuente');
-      }
-      await manager.query(
-        `SELECT venta_propina_id
-         FROM venta_propina
-         WHERE venta_propina_id = ANY($1::uuid[])
-         FOR UPDATE`,
-        [tipIds],
-      );
-      // TypeORM + pg: UPDATE RETURNING llega como [rows, rowCount], no como rows.
-      const updateRaw = await manager.query(
-        `UPDATE venta_propina
-         SET liquidacion_id = $1, actualizado_el = NOW()
-         WHERE venta_propina_id = ANY($2::uuid[])
-           AND liquidacion_id IS NULL
-           AND eliminado_el IS NULL
-         RETURNING venta_propina_id`,
-        [id, tipIds],
-      );
-      const actualizadas: { venta_propina_id: string }[] = Array.isArray(
-        updateRaw?.[0],
-      )
-        ? updateRaw[0]
-        : updateRaw;
-      if (actualizadas.length !== tipIds.length) {
-        throw new BadRequestException(
-          'Una o más propinas ya fueron liquidadas por otra corrida',
-        );
-      }
-
-      detalle.liquidacion.estado = EstadoLiquidacion.CONFIRMADA;
-      detalle.liquidacion.confirmadoPor = usuarioId;
-      detalle.liquidacion.confirmadoEl = new Date();
-      await manager.save(LiquidacionPropinas, detalle.liquidacion);
-
-      const evento = await manager.save(
-        LiquidacionPropinasEvento,
-        manager.create(LiquidacionPropinasEvento, {
-          tenantId,
-          liquidacionId: id,
-          tipo: TipoEventoLiquidacion.CONFIRMADA,
-          payload: { tips: tipIds.length },
-          usuarioId,
-        }),
+      const evento = await this.confirmarEnTransaccion(
+        manager,
+        tenantId,
+        usuarioId,
+        detalle.liquidacion,
+        detalle.grupos,
+        detalle.participantes,
+        detalle.fuentes,
       );
 
       return this.toDetalle(detalle.liquidacion, {
@@ -607,6 +566,127 @@ export class LiquidacionPropinasService {
         fuentes: detalle.fuentes,
         eventos: [...detalle.eventos, evento],
         advertencias: [],
+      });
+    });
+  }
+
+  async liquidar(
+    tenantId: string,
+    usuarioId: string,
+    dto: LiquidarDto,
+  ): Promise<LiquidacionDetalle> {
+    const fechaDesde = new Date(dto.fechaDesde);
+    const fechaHasta = new Date(dto.fechaHasta);
+    if (fechaHasta <= fechaDesde) {
+      throw new BadRequestException('La fecha hasta debe ser posterior a desde');
+    }
+    const config = await this.distribucion.obtener(tenantId);
+    const gruposConfig = config.grupos.filter((g) => g.activo);
+    if (gruposConfig.length === 0) {
+      throw new BadRequestException('No hay grupos activos para liquidar');
+    }
+    const turnoIds = dto.turnoIds ?? [];
+
+    return this.dataSource.transaction(async (manager) => {
+      const moneda = await this.resolverMonedaOficial(manager, tenantId);
+      const tips = await this.buscarTipsElegibles(
+        manager,
+        tenantId,
+        fechaDesde,
+        fechaHasta,
+        turnoIds,
+      );
+      const sesiones = await this.buscarSesionesPeriodo(
+        manager,
+        tenantId,
+        fechaDesde,
+        fechaHasta,
+        turnoIds,
+      );
+      const poolTotal = tips
+        .reduce((acc, t) => acc.plus(t.monto_pagado), new Decimal(0))
+        .toFixed(4);
+
+      const liquidacion = await manager.save(
+        LiquidacionPropinas,
+        manager.create(LiquidacionPropinas, {
+          tenantId,
+          fechaDesde,
+          fechaHasta,
+          turnoIds,
+          estado: EstadoLiquidacion.BORRADOR,
+          poolTotal,
+          configuracionVersion: config.version,
+          monedaId: moneda.monedaId,
+          decimalesMoneda: moneda.decimales,
+          creadoPor: usuarioId,
+        }),
+      );
+      const grupos = await this.crearSnapshotGrupos(
+        manager,
+        tenantId,
+        liquidacion.id,
+        poolTotal,
+        moneda.decimales,
+        gruposConfig,
+      );
+      const fuentes = await this.crearFuentes(
+        manager,
+        tenantId,
+        liquidacion.id,
+        tips,
+      );
+      let participantes = await this.crearParticipantes(
+        manager,
+        tenantId,
+        liquidacion.id,
+        grupos,
+        gruposConfig,
+        tips,
+        sesiones,
+        fechaDesde,
+        fechaHasta,
+        moneda.decimales,
+      );
+
+      participantes = await this.aplicarAjustesPersistido(
+        manager,
+        grupos,
+        participantes,
+        dto.ajustes,
+        moneda.decimales,
+      );
+
+      const eventoCreada = await manager.save(
+        LiquidacionPropinasEvento,
+        manager.create(LiquidacionPropinasEvento, {
+          tenantId,
+          liquidacionId: liquidacion.id,
+          tipo: TipoEventoLiquidacion.CREADA,
+          payload: {
+            fuenteCount: fuentes.length,
+            poolTotal,
+            configuracionVersion: config.version,
+          },
+          usuarioId,
+        }),
+      );
+      const eventoConfirmada = await this.confirmarEnTransaccion(
+        manager,
+        tenantId,
+        usuarioId,
+        liquidacion,
+        grupos,
+        participantes,
+        fuentes,
+      );
+
+      return this.toDetalle(liquidacion, {
+        grupos,
+        participantes,
+        fuentes,
+        eventos: [eventoCreada, eventoConfirmada],
+        advertencias: this.advertenciasSesionesAbiertas(sesiones),
       });
     });
   }
@@ -723,6 +803,102 @@ export class LiquidacionPropinasService {
         );
       }
     }
+  }
+
+  private async confirmarEnTransaccion(
+    manager: EntityManager,
+    tenantId: string,
+    usuarioId: string,
+    liquidacion: LiquidacionPropinas,
+    grupos: LiquidacionPropinasGrupo[],
+    participantes: LiquidacionPropinasParticipante[],
+    fuentes: LiquidacionPropinasFuente[],
+  ): Promise<LiquidacionPropinasEvento> {
+    this.validarManualMontos(grupos, participantes);
+
+    const tipIds = [
+      ...new Set(fuentes.map((f) => f.ventaPropinaId).filter(Boolean)),
+    ];
+    if (tipIds.length === 0) {
+      throw new BadRequestException('La liquidación no tiene propinas fuente');
+    }
+    await manager.query(
+      `SELECT venta_propina_id
+       FROM venta_propina
+       WHERE venta_propina_id = ANY($1::uuid[])
+       FOR UPDATE`,
+      [tipIds],
+    );
+    // TypeORM + pg: UPDATE RETURNING llega como [rows, rowCount], no como rows.
+    const updateRaw = await manager.query(
+      `UPDATE venta_propina
+       SET liquidacion_id = $1, actualizado_el = NOW()
+       WHERE venta_propina_id = ANY($2::uuid[])
+         AND liquidacion_id IS NULL
+         AND eliminado_el IS NULL
+       RETURNING venta_propina_id`,
+      [liquidacion.id, tipIds],
+    );
+    const actualizadas: { venta_propina_id: string }[] = Array.isArray(
+      updateRaw?.[0],
+    )
+      ? updateRaw[0]
+      : updateRaw;
+    if (actualizadas.length !== tipIds.length) {
+      throw new BadRequestException(
+        'Una o más propinas ya fueron liquidadas por otra corrida',
+      );
+    }
+
+    liquidacion.estado = EstadoLiquidacion.CONFIRMADA;
+    liquidacion.confirmadoPor = usuarioId;
+    liquidacion.confirmadoEl = new Date();
+    await manager.save(LiquidacionPropinas, liquidacion);
+
+    return manager.save(
+      LiquidacionPropinasEvento,
+      manager.create(LiquidacionPropinasEvento, {
+        tenantId,
+        liquidacionId: liquidacion.id,
+        tipo: TipoEventoLiquidacion.CONFIRMADA,
+        payload: { tips: tipIds.length },
+        usuarioId,
+      }),
+    );
+  }
+
+  private async aplicarAjustesPersistido(
+    manager: EntityManager,
+    grupos: LiquidacionPropinasGrupo[],
+    participantes: LiquidacionPropinasParticipante[],
+    ajustes: AjustesReparto | undefined,
+    decimales: number,
+  ): Promise<LiquidacionPropinasParticipante[]> {
+    if (!ajustes) return participantes;
+    const exclusiones = new Set(ajustes.exclusiones ?? []);
+    const montosManuales = new Map(
+      (ajustes.montosManuales ?? []).map((m) => [
+        m.garzonId,
+        new Decimal(m.monto).toFixed(4),
+      ]),
+    );
+
+    for (const p of participantes) {
+      p.incluido = !exclusiones.has(p.garzonId);
+    }
+    const recalculados = await this.recalcularParticipantesExistentes(
+      manager,
+      grupos,
+      participantes,
+      decimales,
+    );
+    for (const p of recalculados) {
+      if (montosManuales.has(p.garzonId)) {
+        p.monto = montosManuales.get(p.garzonId)!;
+        await manager.save(LiquidacionPropinasParticipante, p);
+      }
+    }
+    return recalculados;
   }
 
   private async aplicarCambioParticipante(

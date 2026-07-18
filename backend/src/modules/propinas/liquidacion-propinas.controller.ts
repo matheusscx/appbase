@@ -17,6 +17,7 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { CreateLiquidacionDto } from './dto/create-liquidacion.dto';
+import { LiquidarDto } from './dto/liquidar.dto';
 import { PreviewLiquidacionDto } from './dto/preview-liquidacion.dto';
 import { UpdateLiquidacionDto } from './dto/update-liquidacion.dto';
 import { LiquidacionPropinasService } from './liquidacion-propinas.service';
@@ -46,6 +47,13 @@ export class LiquidacionPropinasController {
       dto.turnoIds ?? [],
       dto.ajustes,
     );
+  }
+
+  @Post('liquidar')
+  @RequiresPermiso('Propinas', 'Liquidar')
+  liquidar(@Req() req: Request, @Body() dto: LiquidarDto) {
+    const user = req.user as JwtUser;
+    return this.liquidaciones.liquidar(user.tenantId!, user.id, dto);
   }
 
   @Get()

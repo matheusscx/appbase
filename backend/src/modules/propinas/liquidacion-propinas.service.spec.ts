@@ -514,4 +514,40 @@ describe('LiquidacionPropinasService', () => {
     expect(incluidos[0].garzonId).toBe(garzonAId);
     expect(incluidos[0].monto).toBe('2000.0000'); // recibe todo el grupo
   });
+
+  it('liquidar crea, aplica exclusión y confirma bloqueando las propinas', async () => {
+    mockeaTipsParaPreview();
+    manager.query
+      // SELECT ... FOR UPDATE (lock de tips antes de bloquear)
+      .mockResolvedValueOnce([])
+      // UPDATE ... RETURNING → [rows, rowCount]
+      .mockResolvedValueOnce([
+        [{ venta_propina_id: 'tip-a' }, { venta_propina_id: 'tip-b' }],
+        2,
+      ]);
+
+    const result = await service.liquidar(TENANT, USER, {
+      fechaDesde: '2026-07-01T00:00:00Z',
+      fechaHasta: '2026-07-08T00:00:00Z',
+      ajustes: { exclusiones: [garzonBId] },
+    });
+
+    expect(result.estado).toBe(EstadoLiquidacion.CONFIRMADA);
+    const incluidos = result.participantes.filter((p) => p.incluido);
+    expect(incluidos).toHaveLength(1);
+    expect(incluidos[0].monto).toBe('2000.0000');
+    // se ejecutó el UPDATE de bloqueo de venta_propina
+    expect(manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE venta_propina'),
+      expect.anything(),
+    );
+    expect(manager.save).toHaveBeenCalledWith(
+      LiquidacionPropinasEvento,
+      expect.objectContaining({ tipo: TipoEventoLiquidacion.CREADA }),
+    );
+    expect(manager.save).toHaveBeenCalledWith(
+      LiquidacionPropinasEvento,
+      expect.objectContaining({ tipo: TipoEventoLiquidacion.CONFIRMADA }),
+    );
+  });
 });
