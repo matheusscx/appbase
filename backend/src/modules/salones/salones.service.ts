@@ -37,8 +37,10 @@ import {
 } from '../../common/utils/cantidad-presentacion.util';
 import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
 import {
+  detallePersonalizacion,
   hashPersonalizacion,
   textoComandaPersonalizacion,
+  type PersonalizacionDetalleLinea,
 } from '../../common/utils/personalizacion-receta.util';
 
 export interface MesaResumen {
@@ -69,6 +71,7 @@ export interface CuentaLineaDetalle {
   unidadCodigoPresentacion?: string | null;
   personalizacion?: PersonalizacionRecetaSnapshot | null;
   personalizacionTexto?: string;
+  personalizacionDetalle?: PersonalizacionDetalleLinea[];
 }
 
 export interface ComandaEstacion {
@@ -964,6 +967,10 @@ export class SalonesService {
           l.personalizacion,
           nombres,
         );
+        const personalizacionDetalle = detallePersonalizacion(
+          l.personalizacion,
+          nombres,
+        );
         return {
           id: l.cuenta_linea_id,
           itemId: l.item_id,
@@ -980,6 +987,9 @@ export class SalonesService {
           personalizacion: l.personalizacion,
           ...(personalizacionTexto
             ? { personalizacionTexto }
+            : {}),
+          ...(personalizacionDetalle.length
+            ? { personalizacionDetalle }
             : {}),
         };
       }),

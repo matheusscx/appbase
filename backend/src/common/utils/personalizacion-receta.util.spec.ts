@@ -1,4 +1,5 @@
 import {
+  detallePersonalizacion,
   hashPersonalizacion,
   textoComandaPersonalizacion,
 } from './personalizacion-receta.util';
@@ -117,5 +118,40 @@ describe('personalizacion-receta.util', () => {
         nombres,
       ),
     ).toBe('Extra Queso x3');
+  });
+
+  it('detallePersonalizacion devuelve [] si no hay personalización', () => {
+    expect(detallePersonalizacion(null, new Map())).toEqual([]);
+    expect(detallePersonalizacion(undefined, new Map())).toEqual([]);
+  });
+
+  it('detallePersonalizacion arma omitidos primero en $0 y extras con su monto (precioExtra x unidades)', () => {
+    const nombres = new Map([
+      ['i1', 'Cebolla'],
+      ['i2', 'Queso Cheddar'],
+      ['i3', 'Tocino'],
+    ]);
+    expect(
+      detallePersonalizacion(
+        {
+          omitidos: ['i1'],
+          extras: [
+            { ingredienteItemId: 'i2', cantidad: '1', unidadCodigo: 'unidad', precioExtra: '1000' },
+            { ingredienteItemId: 'i3', cantidad: '1', unidadCodigo: 'unidad', precioExtra: '750', unidades: '2' },
+          ],
+        },
+        nombres,
+      ),
+    ).toEqual([
+      { nombre: 'Cebolla', tipo: 'omitido', monto: '0' },
+      { nombre: 'Queso Cheddar', tipo: 'extra', unidades: 1, monto: '1000' },
+      { nombre: 'Tocino', tipo: 'extra', unidades: 2, monto: '1500' },
+    ]);
+  });
+
+  it('detallePersonalizacion usa el id como fallback si el nombre no está en el mapa', () => {
+    expect(
+      detallePersonalizacion({ omitidos: ['id-desconocido'], extras: [] }, new Map()),
+    ).toEqual([{ nombre: 'id-desconocido', tipo: 'omitido', monto: '0' }]);
   });
 });
