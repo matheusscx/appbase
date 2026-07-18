@@ -1,5 +1,41 @@
 import Decimal from 'decimal.js'
 
+export interface ImpuestoBoleta {
+  nombre: string
+  tasa: string // decimal, ej. '0.19'
+  monto: string
+}
+
+/**
+ * Agrega las trazas de impuesto de todas las líneas de una venta agrupando por id.
+ * Conserva nombre/tasa de la primera aparición; suma montos con Decimal.
+ */
+export function agregarImpuestosVenta(
+  lineas: { trazas: { impuestos: { id: string, nombre: string, tasa: string, monto: string }[] } }[],
+): ImpuestoBoleta[] {
+  const orden: string[] = []
+  const acc = new Map<string, ImpuestoBoleta>()
+  for (const linea of lineas) {
+    for (const imp of linea.trazas.impuestos) {
+      const prev = acc.get(imp.id)
+      if (prev) {
+        prev.monto = new Decimal(prev.monto).plus(imp.monto).toString()
+      }
+      else {
+        orden.push(imp.id)
+        acc.set(imp.id, { nombre: imp.nombre, tasa: imp.tasa, monto: new Decimal(imp.monto).toString() })
+      }
+    }
+  }
+  return orden.map(id => acc.get(id)!)
+}
+
+/** '0.19' -> '19%'; '0.195' -> '19,5%'. Sin decimales innecesarios, coma decimal es-CL. */
+export function formatTasaPorcentaje(tasa: string): string {
+  const pct = new Decimal(tasa).times(100).toDecimalPlaces(2)
+  return `${pct.toString().replace('.', ',')}%`
+}
+
 export interface TicketItem {
   nombre: string
   cantidad: string

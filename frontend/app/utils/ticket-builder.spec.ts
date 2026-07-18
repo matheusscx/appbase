@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { buildComandaTicket, buildPrecuentaTicket, buildBoletaTicket } from './ticket-builder'
+import {
+  buildComandaTicket,
+  buildPrecuentaTicket,
+  buildBoletaTicket,
+  agregarImpuestosVenta,
+  formatTasaPorcentaje,
+} from './ticket-builder'
 
 const formatMonto = (v: string) => `$${v}`
 const FECHA = new Date('2026-07-13T20:30:00')
@@ -180,5 +186,45 @@ describe('buildBoletaTicket', () => {
     expect(lines).toContain('1 x Hamburguesa Clásica')
     expect(lines).toContain('  - Sin Cebolla')
     expect(lines).toContain('  + Extra Queso')
+  })
+})
+
+describe('agregarImpuestosVenta', () => {
+  it('devuelve [] si ninguna línea tiene impuestos', () => {
+    expect(agregarImpuestosVenta([{ trazas: { impuestos: [] } }])).toEqual([])
+  })
+
+  it('suma el mismo impuesto en varias líneas agrupando por id', () => {
+    const r = agregarImpuestosVenta([
+      { trazas: { impuestos: [{ id: 'iva', nombre: 'IVA', tasa: '0.19', monto: '1900' }] } },
+      { trazas: { impuestos: [{ id: 'iva', nombre: 'IVA', tasa: '0.19', monto: '4008' }] } },
+    ])
+    expect(r).toEqual([{ nombre: 'IVA', tasa: '0.19', monto: '5908' }])
+  })
+
+  it('conserva múltiples impuestos en orden de primera aparición', () => {
+    const r = agregarImpuestosVenta([
+      { trazas: { impuestos: [
+        { id: 'iva', nombre: 'IVA', tasa: '0.19', monto: '1900' },
+        { id: 'ila', nombre: 'ILA', tasa: '0.10', monto: '1000' },
+      ] } },
+      { trazas: { impuestos: [{ id: 'ila', nombre: 'ILA', tasa: '0.10', monto: '500' }] } },
+    ])
+    expect(r).toEqual([
+      { nombre: 'IVA', tasa: '0.19', monto: '1900' },
+      { nombre: 'ILA', tasa: '0.10', monto: '1500' },
+    ])
+  })
+})
+
+describe('formatTasaPorcentaje', () => {
+  it('convierte decimal a porcentaje sin decimales innecesarios', () => {
+    expect(formatTasaPorcentaje('0.19')).toBe('19%')
+  })
+  it('mantiene decimales significativos con coma', () => {
+    expect(formatTasaPorcentaje('0.195')).toBe('19,5%')
+  })
+  it('formatea cero', () => {
+    expect(formatTasaPorcentaje('0')).toBe('0%')
   })
 })
