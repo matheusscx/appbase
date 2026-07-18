@@ -87,7 +87,13 @@
       "Bash(codegraph sync *)",
       "Bash(codegraph explore *)",
       "Bash(codegraph node *)",
-      "Bash(codegraph --help)"
+      "Bash(codegraph --help)",
+      "Bash(/Users/m2pro/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 72e284e *)",
+      "Bash(sed -i '' 's/| 2 computarReparto + preview | pending | |/| 2 computarReparto + preview | complete | `72e284e..5c27c5a` |/' .superpowers/sdd/progress.md)",
+      "Bash(/Users/m2pro/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-07-17-propinas-operatividad.md 3)",
+      "Bash(npx eslint *)",
+      "Bash(/Users/m2pro/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 5c27c5a *)",
+      "Bash(node *)"
     ]
   },
   "enabledMcpjsonServers": [
