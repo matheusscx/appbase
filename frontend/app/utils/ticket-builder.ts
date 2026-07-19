@@ -293,6 +293,7 @@ export function buildPrecuentaTicket(input: {
   out.push(...lineasEmisor(input.emisor, BOLETA_WIDTH))
   out.push(separador(BOLETA_WIDTH))
   out.push(center('PRECUENTA (no válido como boleta)', BOLETA_WIDTH))
+  out.push(separador(BOLETA_WIDTH))
   out.push(`Mesa: ${input.mesaNombre}   Cuenta: ${input.cuentaNumero}`)
   out.push(input.fecha.toLocaleString('es-CL'))
   out.push(separador(BOLETA_WIDTH))

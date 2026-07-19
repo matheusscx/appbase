@@ -89,9 +89,12 @@ describe('buildPrecuentaTicket', () => {
     expect(lines.some(l => l.includes('Av. Providencia 1234'))).toBe(true)
   })
 
-  it('imprime el label PRECUENTA y los datos de mesa/cuenta', () => {
+  it('imprime PRECUENTA como su propia sección con separador, igual que DOCUMENTO INTERNO en la boleta', () => {
     const lines = precuenta()
-    expect(lines.some(l => l.includes('PRECUENTA (no válido como boleta)'))).toBe(true)
+    const idxLabel = lines.findIndex(l => l.includes('PRECUENTA (no válido como boleta)'))
+    expect(idxLabel).toBeGreaterThanOrEqual(0)
+    expect(lines[idxLabel - 1]).toBe('-'.repeat(48))
+    expect(lines[idxLabel + 1]).toBe('-'.repeat(48))
     expect(lines).toContain('Mesa: Mesa 1   Cuenta: 2')
   })
 
