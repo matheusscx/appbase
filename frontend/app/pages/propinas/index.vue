@@ -9,6 +9,7 @@ import type {
 } from '~/composables/usePropinaLiquidaciones'
 import type { Turno } from '~/composables/useTurnos'
 import type { Garzon } from '~/composables/useGarzones'
+import { finDiaExclusivoIso, inicioDiaIso } from '~/utils/date-value'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -98,17 +99,13 @@ function criterioLabel(criterio: string): string {
   return map[criterio] ?? criterio
 }
 
-function toIso(value: string): string {
-  return new Date(value).toISOString()
-}
-
 async function cargarPreview() {
   if (!fechaDesde.value || !fechaHasta.value) return
   loadingPreview.value = true
   try {
     reparto.value = await api.preview({
-      fechaDesde: toIso(fechaDesde.value),
-      fechaHasta: toIso(fechaHasta.value),
+      fechaDesde: inicioDiaIso(fechaDesde.value),
+      fechaHasta: finDiaExclusivoIso(fechaHasta.value),
       turnoIds: turnoIds.value,
       ajustes: ajustes.value,
     })
@@ -137,8 +134,8 @@ async function liquidar() {
   liquidando.value = true
   try {
     const detalle = await api.liquidar({
-      fechaDesde: toIso(fechaDesde.value),
-      fechaHasta: toIso(fechaHasta.value),
+      fechaDesde: inicioDiaIso(fechaDesde.value),
+      fechaHasta: finDiaExclusivoIso(fechaHasta.value),
       turnoIds: turnoIds.value,
       ajustes: ajustes.value,
     })
@@ -233,10 +230,10 @@ onMounted(async () => {
         <UCard>
           <div class="grid gap-4 md:grid-cols-4">
             <UFormField label="Desde">
-              <AppDateTimeInput v-model="fechaDesde" qa="prop-desde" />
+              <AppDateInput v-model="fechaDesde" qa="prop-desde" />
             </UFormField>
             <UFormField label="Hasta">
-              <AppDateTimeInput v-model="fechaHasta" qa="prop-hasta" />
+              <AppDateInput v-model="fechaHasta" qa="prop-hasta" />
             </UFormField>
             <UFormField label="Turnos (opcional)">
               <USelectMenu

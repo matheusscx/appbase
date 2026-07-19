@@ -182,6 +182,13 @@ creación del borrador, las fuentes quedan congeladas en
   listado y creación de borradores (tab Liquidaciones).
 - `frontend/app/pages/propinas/liquidaciones/[id].vue` — detalle, ajustes y
   acciones.
+- Selectores "Desde"/"Hasta": `AppDateInput` (solo fecha, sin hora — el
+  calendario nunca permitió elegir hora; el input con hora era engañoso).
+  El backend usa límite superior **exclusivo**; `inicioDiaIso`/
+  `finDiaExclusivoIso` (`~/utils/date-value.ts`) convierten evitando el bug de
+  `new Date('YYYY-MM-DD')` (parsea como medianoche UTC, corriendo la fecha un
+  día en timezones negativas como Chile) y suman 1 día a "Hasta" para que el
+  día elegido en el calendario quede incluido en el rango.
 
 ### Composable
 

@@ -28,6 +28,32 @@ export function fromCalendarDate(value: DateValue | null | undefined): string {
   return `${y}-${m}-${d}`
 }
 
+function partesYmd(value: string): [number, number, number] {
+  const [y, m, d] = value.split('-').map(Number)
+  return [y!, m!, d!]
+}
+
+/**
+ * 'YYYY-MM-DD' → inicio del día LOCAL en ISO (límite inferior inclusive de un
+ * rango). Construye el Date por componentes (no `new Date(string)`, que
+ * interpreta fechas sin hora como medianoche UTC y corre la fecha un día en
+ * timezones negativas como Chile).
+ */
+export function inicioDiaIso(value: string): string {
+  const [y, m, d] = partesYmd(value)
+  return new Date(y, m - 1, d).toISOString()
+}
+
+/**
+ * 'YYYY-MM-DD' → inicio del día siguiente en ISO. Para rangos cuyo backend usa
+ * límite superior EXCLUSIVO: pasar la fecha "Hasta" que el usuario eligió en
+ * el calendario para que ese día quede incluido en el rango.
+ */
+export function finDiaExclusivoIso(value: string): string {
+  const [y, m, d] = partesYmd(value)
+  return new Date(y, m - 1, d + 1).toISOString()
+}
+
 /**
  * datetime-local / ISO parcial → CalendarDateTime.
  * Acepta `YYYY-MM-DDTHH:mm`, `YYYY-MM-DDTHH:mm:ss` o ISO con zona.

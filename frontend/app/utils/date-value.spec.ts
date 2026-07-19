@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  finDiaExclusivoIso,
   fromCalendarDate,
   fromCalendarDateTime,
   fromTime,
+  inicioDiaIso,
   mergeDateKeepingTime,
   toCalendarDate,
   toCalendarDateTime,
@@ -40,5 +42,17 @@ describe('date-value', () => {
     expect(toTime('25:00')).toBeNull()
     expect(toTime('')).toBeNull()
     expect(fromTime(null)).toBe('')
+  })
+
+  it('inicioDiaIso: inicio del día LOCAL en ISO (no UTC — new Date(string) correría la fecha en TZ negativas)', () => {
+    expect(inicioDiaIso('2026-07-18')).toBe(new Date(2026, 6, 18).toISOString())
+  })
+
+  it('finDiaExclusivoIso: inicio del día siguiente, para límites superiores exclusivos (el día elegido queda incluido)', () => {
+    expect(finDiaExclusivoIso('2026-07-18')).toBe(new Date(2026, 6, 19).toISOString())
+  })
+
+  it('finDiaExclusivoIso: rueda mes/año correctamente en el último día del período', () => {
+    expect(finDiaExclusivoIso('2026-12-31')).toBe(new Date(2027, 0, 1).toISOString())
   })
 })
