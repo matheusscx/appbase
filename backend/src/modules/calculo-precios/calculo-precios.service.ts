@@ -52,10 +52,10 @@ export class CalculoPreciosService {
       this.descuentosService.findAll(tenantId),
       this.recargosService.findAll(tenantId),
     ]);
-    const impuestoMap = new Map<string, ImpuestoResuelto>(
+    const impuestoMap = new Map<string, ImpuestoResuelto & { tipo: string }>(
       impuestos.map((i) => [
         i.id,
-        { id: i.id, nombre: i.nombre, porcentaje: i.porcentaje },
+        { id: i.id, nombre: i.nombre, porcentaje: i.porcentaje, tipo: i.tipo },
       ]),
     );
     const descuentoMap = this.indexarReglas(descuentos);
@@ -132,7 +132,7 @@ export class CalculoPreciosService {
   private async resolverLinea(
     tenantId: string,
     linea: LineaDto,
-    impuestoMap: Map<string, ImpuestoResuelto>,
+    impuestoMap: Map<string, ImpuestoResuelto & { tipo: string }>,
     descuentoMap: Map<string, ReglaResuelta>,
     recargoMap: Map<string, ReglaResuelta>,
     tasaMap: Map<string, string>,
@@ -157,9 +157,14 @@ export class CalculoPreciosService {
       cantidad: linea.cantidad,
       precioUnitario,
       precioIncluyeImpuesto: item.precioIncluyeImpuesto,
-      impuestos: impuestoIds.map((id) =>
-        this.requerir(impuestoMap, id, 'impuesto'),
-      ),
+      // Exento = exento de IVA: se suprimen solo los impuestos tipo 'iva';
+      // los adicionales ('otro') aplican siempre (DL 825 / IndExe del DTE).
+      impuestos: impuestoIds
+        .map((id) => this.requerir(impuestoMap, id, 'impuesto'))
+        .filter(
+          (imp) =>
+            item.clasificacionTributaria !== 'exento' || imp.tipo !== 'iva',
+        ),
       descuentos: this.resolverReglas(descuentoIds, descuentoMap, 'descuento'),
       recargos: this.resolverReglas(recargoIds, recargoMap, 'recargo'),
     };

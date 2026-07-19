@@ -31,6 +31,7 @@ describe('CalculoPreciosService', () => {
     precioBase: '100',
     monedaId: 'moneda-clp',
     precioIncluyeImpuesto: false,
+    clasificacionTributaria: 'afecto',
     impuestosIds: ['imp-1'],
     descuentosIds: ['desc-1'],
     recargosIds: [],
@@ -40,11 +41,10 @@ describe('CalculoPreciosService', () => {
   beforeEach(async () => {
     itemsService = { findOne: jest.fn().mockResolvedValue(item()) };
     impuestosService = {
-      findAll: jest
-        .fn()
-        .mockResolvedValue([
-          { id: 'imp-1', nombre: 'IVA', porcentaje: '0.19' },
-        ]),
+      findAll: jest.fn().mockResolvedValue([
+        { id: 'imp-1', nombre: 'IVA', porcentaje: '0.19', tipo: 'iva' },
+        { id: 'imp-2', nombre: 'Adicional', porcentaje: '0.10', tipo: 'otro' },
+      ]),
     };
     descuentosService = {
       findAll: jest.fn().mockResolvedValue([
@@ -155,5 +155,30 @@ describe('CalculoPreciosService', () => {
         lineas: [{ itemId: 'item-1', cantidad: '0' }],
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('línea exenta: omite impuestos tipo iva y conserva los otros', async () => {
+    itemsService.findOne.mockResolvedValueOnce(
+      item({
+        clasificacionTributaria: 'exento',
+        impuestosIds: ['imp-1', 'imp-2'],
+        descuentosIds: [],
+      }),
+    );
+    const r = await service.calcular(TENANT, {
+      lineas: [{ itemId: 'item-1', cantidad: '1' }],
+    });
+    expect(r.lineas[0].impuestoAplicado).toBe('10.000000'); // solo imp-2 (0.10 * 100)
+    expect(r.lineas[0].totalLinea).toBe('110.000000');
+  });
+
+  it('línea afecta: aplica todos los impuestos asociados', async () => {
+    itemsService.findOne.mockResolvedValueOnce(
+      item({ impuestosIds: ['imp-1', 'imp-2'], descuentosIds: [] }),
+    );
+    const r = await service.calcular(TENANT, {
+      lineas: [{ itemId: 'item-1', cantidad: '1' }],
+    });
+    expect(r.lineas[0].impuestoAplicado).toBe('29.000000'); // 19 + 10
   });
 });
