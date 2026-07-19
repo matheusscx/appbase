@@ -270,6 +270,9 @@ Response (400 — Stock insuficiente):
 
 - `pages/inventario.vue` — Vista global del kardex
   - Tabla de movimientos con columnas: Item, Tipo, Motivo, Cantidad, Stock Anterior, Stock Resultante, Usuario, Fecha
+  - Cantidad y Stock Resultante formateados por magnitud vía `formatStock`
+    (`useFormatters`) — `MovimientoListItem.unidadMedida` (viene de
+    `item_producto.unidad_medida` vía `LEFT JOIN` en `findMovimientos`)
   - Filtros laterales: por item (select/search), por motivo (select multi), por rango de fechas
   - Paginación
   - Botón "Exportar a CSV" (opcional)

@@ -16,6 +16,7 @@ interface MermaListItem {
   comentario: string | null
   creadoEl: string
   usuarioNombre: string | null
+  unidadMedida: string | null
 }
 
 interface ProductoOpt {
@@ -35,7 +36,7 @@ interface Opt { label: string; value: string }
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
-const { formatFecha, formatMonto } = useFormatters()
+const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
 const unidadesMedidaStore = useUnidadesMedidaStore()
 
@@ -290,7 +291,7 @@ const columns: TableColumn<MermaListItem>[] = [
         <span class="font-medium text-default">{{ row.original.itemNombre }}</span>
       </template>
       <template #cantidad-cell="{ row }">
-        <span class="text-warning">{{ row.original.cantidad }}</span>
+        <span class="text-warning">{{ formatStock(row.original.cantidad, row.original.unidadMedida) }}</span>
       </template>
       <template #causaNombre-cell="{ row }">
         <UBadge

@@ -5,7 +5,7 @@ import type { PaginatedResponse } from '~/composables/usePaginatedList'
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const toast = useToast()
-const { formatFecha, formatMonto } = useFormatters()
+const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
 
 interface Movimiento {
@@ -162,11 +162,11 @@ const columns: TableColumn<Movimiento>[] = [
           </template>
           <template #cantidad-cell="{ row }">
             <span :class="row.original.tipo === 'entrada' ? 'text-success' : 'text-warning'">
-              {{ row.original.cantidad }}
+              {{ formatStock(row.original.cantidad, row.original.unidadMedida) }}
             </span>
           </template>
           <template #stockResultante-cell="{ row }">
-            <span class="font-medium">{{ row.original.stockResultante }}</span>
+            <span class="font-medium">{{ formatStock(row.original.stockResultante, row.original.unidadMedida) }}</span>
           </template>
           <template #costoPerdido-cell="{ row }">
             <span
