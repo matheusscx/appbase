@@ -7,6 +7,14 @@ Guía para Claude Code (claude.ai/code) al trabajar en este repositorio.
 > El proyecto está en **etapa de desarrollo activo**. **No crear ramas nuevas ni PRs**:
 > trabajar y commitear **directamente sobre `main`**.
 
+> ## 🔎 CodeGraph — usar antes de grep/find/leer archivos
+>
+> Este repo tiene `.codegraph/` indexado. Para entender o ubicar código, usar
+> `codegraph_explore` (MCP, cargarla vía tool search si aparece diferida) o
+> `codegraph explore "<símbolos o pregunta>"` por shell **antes** de grep/find/Read
+> exploratorio. Devuelve en una sola llamada el código fuente + call paths, más barato
+> en tokens que leer archivos sueltos.
+
 ## Visión — SaaS POS Multi-tenant
 
 Sistema SaaS de punto de venta y facturación **multi-tenant**: cada tenant (empresa)
