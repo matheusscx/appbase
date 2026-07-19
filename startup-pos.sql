@@ -765,6 +765,7 @@ CREATE TABLE "venta_detalles" (
   "tasa_cambio"            NUMERIC(18,4),
   "precio_unitario"        NUMERIC(18,4) NOT NULL,
   "descripcion"            TEXT,
+  "clasificacion_tributaria" TEXT        NOT NULL DEFAULT 'afecto',  -- snapshot fiscal por línea
   "cantidad"               NUMERIC(18,4) NOT NULL,
   "subtotal"               NUMERIC(18,4) NOT NULL DEFAULT 0,
   "descuento_aplicado"     NUMERIC(18,4) NOT NULL DEFAULT 0,

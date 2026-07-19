@@ -46,6 +46,14 @@ export class VentaDetalle {
   @Column({ type: 'text', nullable: true })
   descripcion: string | null;
 
+  // Snapshot fiscal congelado al vender (equivalente del IndExe por línea del DTE).
+  @Column({
+    name: 'clasificacion_tributaria',
+    type: 'text',
+    default: 'afecto',
+  })
+  clasificacionTributaria: string; // 'afecto' | 'exento'
+
   @Column({ type: 'decimal', precision: 18, scale: 4 })
   cantidad: string;
 

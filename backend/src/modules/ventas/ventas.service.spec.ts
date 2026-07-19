@@ -14,6 +14,7 @@ import { PagosService } from '../pagos/pagos.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { EstadoVenta, Venta } from './entities/venta.entity';
+import { VentaDetalle } from './entities/venta-detalle.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -50,6 +51,7 @@ const mockItem = {
   impuestosIds: [],
   descuentosIds: [],
   recargosIds: [],
+  clasificacionTributaria: 'afecto',
 };
 
 const UNIDADES_CATALOGO = [
@@ -263,6 +265,26 @@ describe('VentasService', () => {
           baseVentasTotalFinal: '11900.0000',
           baseVentasSinImpuestos: '10000.0000',
         }),
+      );
+    });
+
+    it('congela la clasificación tributaria del item en el detalle', async () => {
+      itemsService.findOne.mockResolvedValueOnce({
+        ...mockItem,
+        clasificacionTributaria: 'exento',
+      } as any);
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      const detalleCreate = manager.create.mock.calls.find(
+        (call) => call[0] === VentaDetalle,
+      );
+      expect(detalleCreate?.[1]).toEqual(
+        expect.objectContaining({ clasificacionTributaria: 'exento' }),
       );
     });
 
@@ -648,6 +670,7 @@ describe('VentasService', () => {
         tasa_cambio: '1.000000',
         moneda_id_origen: MONEDA_OFICIAL_ID,
         descripcion: 'Smartphone',
+        clasificacion_tributaria: 'exento',
         modo_inventario: 'cantidad',
       },
       {
@@ -747,6 +770,7 @@ describe('VentasService', () => {
           precioUnitario: '100.0000',
           monedaIdOrigen: MONEDA_OFICIAL_ID,
           totalLinea: '200.0000',
+          clasificacionTributaria: 'exento',
         }),
       );
       // eslint-disable-next-line @typescript-eslint/unbound-method

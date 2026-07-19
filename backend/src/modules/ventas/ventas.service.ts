@@ -311,6 +311,7 @@ export class VentasService {
             tasaCambio: tasa,
             precioUnitario: precioConvertido,
             descripcion: item.nombre,
+            clasificacionTributaria: item.clasificacionTributaria ?? 'afecto',
             cantidad: rLinea.cantidad,
             cantidadPresentacion,
             unidadCodigoPresentacion,
@@ -602,6 +603,7 @@ export class VentasService {
             tasaCambio: linea.tasaCambio,
             precioUnitario: linea.precioUnitario,
             descripcion: linea.descripcion,
+            clasificacionTributaria: linea.clasificacionTributaria ?? 'afecto',
             cantidad: linea.cantidad,
             subtotal: totalLinea,
             totalLinea,
@@ -780,6 +782,7 @@ export class VentasService {
       tasaCambio: string | null;
       monedaIdOrigen: string;
       descripcion: string | null;
+      clasificacionTributaria: string;
     }[]
   > {
     if (!devoluciones.length) return [];
@@ -792,10 +795,12 @@ export class VentasService {
       tasa_cambio: string | null;
       moneda_id_origen: string;
       descripcion: string | null;
+      clasificacion_tributaria: string;
       modo_inventario: string | null;
     }[] = await manager.query(
       `SELECT d.item_id, d.cantidad, d.precio_unitario, d.precio_unitario_origen,
-              d.tasa_cambio, d.moneda_id_origen, d.descripcion, ip.modo_inventario
+              d.tasa_cambio, d.moneda_id_origen, d.descripcion, d.clasificacion_tributaria,
+              ip.modo_inventario
        FROM venta_detalles d
        LEFT JOIN item_producto ip ON ip.item_id = d.item_id
        WHERE d.venta_id = $1 AND d.eliminado_el IS NULL`,
@@ -856,6 +861,7 @@ export class VentasService {
         tasaCambio: detalle.tasa_cambio,
         monedaIdOrigen: detalle.moneda_id_origen,
         descripcion: detalle.descripcion,
+        clasificacionTributaria: detalle.clasificacion_tributaria,
       };
     });
   }
