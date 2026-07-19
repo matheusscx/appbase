@@ -1917,32 +1917,74 @@ export class SeederService implements OnApplicationBootstrap {
     }
   }
 
+  /** Catálogo de impuestos del sistema (por país) + remapeo de duplicados legados. */
   private async seedImpuestos(): Promise<void> {
-    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
-    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
-    const impuestos: Partial<Impuesto>[] = [
-      {
-        id: '550e8400-e29b-41d4-a716-446655440112',
-        tenantId: PARIS,
-        nombre: 'IVA 19%',
-        porcentaje: '0.19',
-        activo: true,
-      },
-      {
-        id: '550e8400-e29b-41d4-a716-446655440113',
-        tenantId: FALABELLA,
-        nombre: 'IVA 19%',
-        porcentaje: '0.19',
-        activo: true,
-      },
-    ];
+    const CHILE = '550e8400-e29b-41d4-a716-446655440000';
+    const IVA_CL = '550e8400-e29b-41d4-a716-446655440280';
 
-    for (const data of impuestos) {
-      const exists = await this.impuestoRepo.findOne({
-        where: { id: data.id },
-      });
-      if (!exists) {
-        await this.impuestoRepo.save(this.impuestoRepo.create(data));
+    const exists = await this.impuestoRepo.findOne({ where: { id: IVA_CL } });
+    if (!exists) {
+      await this.impuestoRepo.save(
+        this.impuestoRepo.create({
+          id: IVA_CL,
+          tenantId: null,
+          paisId: CHILE,
+          nombre: 'IVA',
+          porcentaje: '0.19',
+          tipo: 'iva',
+          activo: true,
+        }),
+      );
+    }
+
+    await this.remapImpuestosOficialesDuplicados();
+  }
+
+  /**
+   * Migra impuestos personalizados que duplican un impuesto oficial del país del
+   * tenant (mismo porcentaje y nombre con "IVA"): remapea item_impuestos al del
+   * sistema y soft-deletea el duplicado. Idempotente: los duplicados quedan
+   * soft-deleteados y no vuelven a matchear. Los snapshots de ventas_impuestos
+   * NO se tocan (ya congelaron porcentaje y valor).
+   */
+  private async remapImpuestosOficialesDuplicados(): Promise<void> {
+    const sistemas: {
+      impuesto_id: string;
+      pais_id: string;
+      porcentaje: string;
+    }[] = await this.dataSource.query(
+      `SELECT impuesto_id, pais_id, porcentaje FROM impuestos
+        WHERE tenant_id IS NULL AND tipo = 'iva' AND eliminado_el IS NULL`,
+    );
+
+    for (const sys of sistemas) {
+      const duplicados: { impuesto_id: string }[] = await this.dataSource.query(
+        `SELECT i.impuesto_id
+           FROM impuestos i
+           JOIN tenants t ON t.tenant_id = i.tenant_id
+           JOIN provincia p ON p.provincia_id = t.provincia_id
+          WHERE p.pais_id = $1
+            AND i.eliminado_el IS NULL
+            AND i.porcentaje = $2::numeric
+            AND i.nombre ILIKE '%iva%'`,
+        [sys.pais_id, sys.porcentaje],
+      );
+
+      for (const dup of duplicados) {
+        await this.dataSource.query(
+          `INSERT INTO item_impuestos (item_id, impuesto_id)
+           SELECT item_id, $1 FROM item_impuestos WHERE impuesto_id = $2
+           ON CONFLICT DO NOTHING`,
+          [sys.impuesto_id, dup.impuesto_id],
+        );
+        await this.dataSource.query(
+          `DELETE FROM item_impuestos WHERE impuesto_id = $1`,
+          [dup.impuesto_id],
+        );
+        await this.dataSource.query(
+          `UPDATE impuestos SET eliminado_el = NOW() WHERE impuesto_id = $1`,
+          [dup.impuesto_id],
+        );
       }
     }
   }
@@ -2447,7 +2489,7 @@ export class SeederService implements OnApplicationBootstrap {
     const UF = '550e8400-e29b-41d4-a716-446655440004';
     const USD = '550e8400-e29b-41d4-a716-446655440005';
     const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
-    const IVA_19 = '550e8400-e29b-41d4-a716-446655440112';
+    const IVA_19 = '550e8400-e29b-41d4-a716-446655440280'; // IVA sistema Chile
 
     const monedas = [
       { id: CLP, codigo: 'CLP', precioBase: '5000' },
