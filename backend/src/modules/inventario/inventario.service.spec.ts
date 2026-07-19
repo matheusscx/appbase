@@ -647,6 +647,36 @@ describe('InventarioService', () => {
       );
     });
 
+    it('findMovimientos expone unidadMedida del producto', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'mov-1',
+            item_id: ITEM_ID,
+            item_nombre: 'Harina',
+            tipo: 'entrada',
+            motivo: 'compra',
+            cantidad: '5.0000',
+            stock_anterior: '10.0000',
+            stock_resultante: '15.0000',
+            usuario_id: USER_ID,
+            usuario_nombre: 'Admin',
+            comentario: null,
+            creado_el: new Date('2026-06-23T10:00:00Z'),
+            unidad_medida: 'kg',
+          },
+        ]);
+
+      const res = await service.findMovimientos(TENANT, {} as never);
+
+      expect(res.data[0].unidadMedida).toBe('kg');
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('unidad_medida'),
+        expect.any(Array),
+      );
+    });
+
     it('findMovimientos expone costoUnitario', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 1 }]) // COUNT

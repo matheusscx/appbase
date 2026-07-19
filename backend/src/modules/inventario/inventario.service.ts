@@ -580,9 +580,11 @@ export class InventarioService {
          mv.usuario_id, u.nombre AS usuario_nombre,
          mv.comentario, mv.creado_el, mv.costo_unitario,
          mv.causa_merma_id,
-         cm.nombre AS causa_nombre
+         cm.nombre AS causa_nombre,
+         p.unidad_medida
        FROM movimientos_inventario mv
        JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
@@ -647,6 +649,7 @@ export class InventarioService {
         r.motivo === 'merma' && r.costo_unitario != null
           ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(4)
           : null,
+      unidadMedida: r.unidad_medida,
     };
   }
 }
@@ -668,6 +671,7 @@ export interface MovimientoListItem {
   causaMermaId: string | null;
   causaNombre: string | null;
   costoPerdido: string | null;
+  unidadMedida: string | null;
 }
 
 interface MovimientoRow {
@@ -686,4 +690,5 @@ interface MovimientoRow {
   costo_unitario: string | null;
   causa_merma_id: string | null;
   causa_nombre: string | null;
+  unidad_medida: string | null;
 }

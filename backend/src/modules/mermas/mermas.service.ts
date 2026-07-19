@@ -39,6 +39,7 @@ export interface MermaListItem {
   comentario: string | null;
   creadoEl: Date;
   usuarioNombre: string | null;
+  unidadMedida: string | null;
 }
 
 interface MermaRow {
@@ -52,6 +53,7 @@ interface MermaRow {
   comentario: string | null;
   creado_el: Date;
   usuario_nombre: string | null;
+  unidad_medida: string | null;
 }
 
 @Injectable()
@@ -175,6 +177,7 @@ export class MermasService {
           comentario: dto.comentario ?? null,
           creadoEl: new Date(),
           usuarioNombre: null,
+          unidadMedida: itemRows[0].unidad_medida,
         },
       };
     });
@@ -207,9 +210,11 @@ export class MermasService {
          mv.movimiento_id, mv.item_id, i.nombre AS item_nombre,
          mv.cantidad, mv.costo_unitario,
          mv.causa_merma_id, cm.nombre AS causa_nombre,
-         mv.comentario, mv.creado_el, u.nombre AS usuario_nombre
+         mv.comentario, mv.creado_el, u.nombre AS usuario_nombre,
+         p.unidad_medida
        FROM movimientos_inventario mv
        JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN item_producto p ON p.item_id = mv.item_id
        LEFT JOIN usuarios u ON u.usuario_id = mv.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN causas_merma cm ON cm.causa_merma_id = mv.causa_merma_id AND cm.eliminado_el IS NULL
        WHERE mv.tenant_id = $1 AND mv.eliminado_el IS NULL
@@ -270,6 +275,7 @@ export class MermasService {
       comentario: r.comentario,
       creadoEl: r.creado_el,
       usuarioNombre: r.usuario_nombre,
+      unidadMedida: r.unidad_medida,
     };
   }
 }

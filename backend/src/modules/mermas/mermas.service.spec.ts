@@ -24,6 +24,7 @@ describe('MermasService', () => {
   let service: MermasService;
   let transactionQueryMock: jest.Mock;
   let transactionMock: jest.Mock;
+  let dataSourceQueryMock: jest.Mock;
   let inventarioService: { registrarMovimiento: jest.Mock };
   let catalogService: { convertirUnidad: jest.Mock };
   let causasService: { assertCausaActiva: jest.Mock };
@@ -33,6 +34,7 @@ describe('MermasService', () => {
     transactionMock = jest.fn((cb: (manager: { query: jest.Mock }) => unknown) =>
       cb({ query: transactionQueryMock }),
     );
+    dataSourceQueryMock = jest.fn();
     inventarioService = { registrarMovimiento: jest.fn() };
     catalogService = { convertirUnidad: jest.fn() };
     causasService = { assertCausaActiva: jest.fn() };
@@ -42,7 +44,7 @@ describe('MermasService', () => {
         MermasService,
         {
           provide: getDataSourceToken(),
-          useValue: { transaction: transactionMock },
+          useValue: { transaction: transactionMock, query: dataSourceQueryMock },
         },
         { provide: InventarioService, useValue: inventarioService },
         { provide: CatalogService, useValue: catalogService },
@@ -242,6 +244,64 @@ describe('MermasService', () => {
         causaNombre: 'Vencimiento',
         merma: { id: 'mov-ing', itemId: ITEM },
       });
+    });
+
+    it('expone unidadMedida del producto en la merma registrada', async () => {
+      transactionQueryMock.mockResolvedValueOnce([itemRow({ unidad_medida: 'l' })]);
+      causasService.assertCausaActiva.mockResolvedValueOnce({
+        id: CAUSA,
+        nombre: 'Vencimiento',
+      });
+      inventarioService.registrarMovimiento.mockResolvedValueOnce({
+        movimientoId: 'mov-1',
+        stockAnterior: '10',
+        stockResultante: '9',
+      });
+
+      const result = await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        cantidad: '1',
+        causaMermaId: CAUSA,
+      });
+
+      expect(result.merma.unidadMedida).toBe('l');
+    });
+  });
+
+  describe('findAll', () => {
+    it('mapea filas snake_case a camelCase incluyendo unidadMedida', async () => {
+      dataSourceQueryMock
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'mov-1',
+            item_id: ITEM,
+            item_nombre: 'Harina',
+            cantidad: '2.5000',
+            costo_unitario: '1000',
+            causa_merma_id: CAUSA,
+            causa_nombre: 'Vencimiento',
+            comentario: null,
+            creado_el: new Date('2026-07-18T00:00:00Z'),
+            usuario_nombre: 'Admin',
+            unidad_medida: 'kg',
+          },
+        ]);
+
+      const res = await service.findAll(TENANT, {} as never);
+
+      expect(res.data[0]).toMatchObject({
+        id: 'mov-1',
+        itemId: ITEM,
+        itemNombre: 'Harina',
+        cantidad: '2.5000',
+        unidadMedida: 'kg',
+        costoPerdido: '2500.0000',
+      });
+      expect(dataSourceQueryMock).toHaveBeenCalledWith(
+        expect.stringContaining('unidad_medida'),
+        expect.any(Array),
+      );
     });
   });
 });

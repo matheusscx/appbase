@@ -23,6 +23,7 @@ interface Movimiento {
   causaNombre?: string | null
   costoUnitario?: string | null
   costoPerdido?: string | null
+  unidadMedida: string | null
 }
 interface Opt { label: string; value: string }
 
@@ -30,6 +31,7 @@ const { public: { apiUrl } } = useRuntimeConfig()
 const productosOpts = ref<Opt[]>([])
 const filtroItem = ref('todos')
 const filtroMotivo = ref('todos')
+const unidadesMedidaStore = useUnidadesMedidaStore()
 
 const listFilters = computed(() => ({
   itemId: filtroItem.value !== 'todos' ? filtroItem.value : undefined,
@@ -75,7 +77,10 @@ async function cargarProductos() {
   }
 }
 
-onMounted(cargarProductos)
+onMounted(() => {
+  void cargarProductos()
+  void unidadesMedidaStore.ensureLoaded()
+})
 
 function motivoLabel(mov: Movimiento): string {
   const base = motivoOpts.find(o => o.value === mov.motivo)?.label ?? mov.motivo
