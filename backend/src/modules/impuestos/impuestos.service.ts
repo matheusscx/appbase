@@ -53,11 +53,10 @@ export class ImpuestosService {
       where: paisId ? [{ tenantId }, { paisId }] : { tenantId },
       order: { nombre: 'ASC' },
     });
-    return impuestos.map((i) =>
-      Object.assign(i, {
-        origen: i.tenantId ? 'personalizado' : 'sistema',
-      }),
-    );
+    return impuestos.map((i) => ({
+      ...i,
+      origen: i.tenantId ? ('personalizado' as const) : ('sistema' as const),
+    }));
   }
 
   async create(tenantId: string, dto: CreateImpuestoDto): Promise<Impuesto> {
