@@ -252,7 +252,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
             return {
               nombre: ln?.item.nombre ?? '',
               cantidad: ln?.cantidadPresentacion && ln?.unidadCodigoPresentacion
-                ? formatCantidadTicket(ln.cantidadPresentacion, ln.unidadCodigoPresentacion)
+                ? formatCantidadTicket(ln.cantidadPresentacion, ln.unidadCodigoPresentacion, unidadesStore.esFraccionaria(ln.unidadCodigoPresentacion))
                 : l.cantidad,
               precioUnitario: l.precioUnitario,
               totalLinea: l.totalLinea,

@@ -110,6 +110,7 @@ const open = defineModel<boolean>('open', { required: true })
 const config = useRuntimeConfig()
 const toast = useToast()
 const cajaStore = useCajaStore()
+const unidadesStore = useUnidadesMedidaStore()
 const { formatMonto, formatFecha } = useFormatters()
 const apiUrl = config.public.apiUrl
 
@@ -197,7 +198,7 @@ function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral
 
 function cantidadDetalleLabel(det: Detalle): string {
   if (det.cantidadPresentacion && det.unidadCodigoPresentacion) {
-    return formatCantidadTicket(det.cantidadPresentacion, det.unidadCodigoPresentacion)
+    return formatCantidadTicket(det.cantidadPresentacion, det.unidadCodigoPresentacion, unidadesStore.esFraccionaria(det.unidadCodigoPresentacion))
   }
   return det.cantidad
 }
@@ -244,7 +245,10 @@ async function cargar(id: string) {
 watch(
   () => [open.value, props.ventaId] as const,
   ([isOpen, id]) => {
-    if (isOpen && id) cargar(id)
+    if (isOpen && id) {
+      cargar(id)
+      void unidadesStore.ensureLoaded()
+    }
     else if (!isOpen) {
       venta.value = null
       abonoOpen.value = false

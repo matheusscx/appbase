@@ -57,8 +57,21 @@ describe('cantidad-presentacion', () => {
     expect(esConteo('kg', CAT)).toBe(false)
   })
 
-  it('formatCantidadTicket incluye unidad', () => {
-    expect(formatCantidadTicket('500', 'g')).toBe('500 g')
-    expect(formatCantidadTicket('2', null)).toBe('2')
+  it('formatCantidadTicket incluye unidad para magnitudes fraccionarias', () => {
+    expect(formatCantidadTicket('500', 'g', true)).toBe('500 g')
+  })
+
+  it('formatCantidadTicket recorta ceros sobrantes en fraccionarias', () => {
+    expect(formatCantidadTicket('1.50', 'kg', true)).toBe('1.5 kg')
+    expect(formatCantidadTicket('2.00', 'kg', true)).toBe('2 kg')
+  })
+
+  it('formatCantidadTicket redondea a entero y omite el sufijo de unidad en conteo', () => {
+    expect(formatCantidadTicket('2', 'unidad', false)).toBe('2')
+    expect(formatCantidadTicket('2.00', 'unidad', false)).toBe('2')
+  })
+
+  it('formatCantidadTicket sin unidadCodigo devuelve la cantidad tal cual', () => {
+    expect(formatCantidadTicket('2', null, true)).toBe('2')
   })
 })

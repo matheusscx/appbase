@@ -737,7 +737,7 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
   return res.lineas.map((l, i) => {
     const cl = cuenta.lineas[i]
     const cantidadTicket = cl?.cantidadPresentacion && cl?.unidadCodigoPresentacion
-      ? formatCantidadTicket(cl.cantidadPresentacion, cl.unidadCodigoPresentacion)
+      ? formatCantidadTicket(cl.cantidadPresentacion, cl.unidadCodigoPresentacion, unidadesStore.esFraccionaria(cl.unidadCodigoPresentacion))
       : l.cantidad
     return {
       nombre: cl?.nombre ?? '',

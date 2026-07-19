@@ -111,6 +111,13 @@ impresora `rol='boleta'` del tenant.
     Ítems en tabla de columnas fijas (`CANT`/`DESCRIPCIÓN`/`P.UNIT`/`TOTAL`) con
     header, a **48 caracteres** (papel térmico 80mm, ESC/POS Font A) — la comanda se
     mantiene a 32 (papel/necesidad distinta, sin columnas de precio).
+  - **Cantidad por tipo de unidad**: `formatCantidadTicket()` en
+    `app/utils/cantidad-presentacion.ts` recibe `esFraccionaria: boolean` (el
+    caller lo calcula con `unidadesMedidaStore.esFraccionaria(unidadCodigo)`, que
+    ya resuelve la magnitud del catálogo). Conteo (`unidad`) → entero, sin sufijo
+    de unidad (`"2"`). Fraccionaria (masa/volumen/etc.) → recorta ceros sobrantes
+    y muestra el código (`"1.5 kg"`, no `"1.50 kg"`). Mismo helper para comanda,
+    precuenta, boleta y el drawer de detalle de venta (`VentaDetalleDrawer.vue`).
   - `buildPrecuentaTicket`: **lo más parecida posible a `buildBoletaTicket`** —
     comparte cabecera de emisor (`lineasEmisor`), tabla de columnas idéntica
     (`filaHeaderItems`/`lineasItem`, incluye `P.UNIT`) y el mismo desglose

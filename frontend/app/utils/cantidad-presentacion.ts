@@ -74,12 +74,23 @@ export function puedeDecrementar(
   return val.greaterThan(1)
 }
 
+/**
+ * Formatea la cantidad para tickets (comanda/precuenta/boleta) según su magnitud:
+ * conteo → entero, sin sufijo de unidad; fraccionaria (masa/volumen/etc.) → recorta
+ * ceros sobrantes y muestra el código de unidad. `esFraccionaria` la calcula el
+ * caller (ej. `unidadesMedidaStore.esFraccionaria(unidadCodigo)`), para mantener
+ * este util libre de dependencias de Pinia/Nuxt.
+ */
 export function formatCantidadTicket(
   cantidad: string,
-  unidadCodigo?: string | null,
+  unidadCodigo: string | null | undefined,
+  esFraccionaria: boolean,
 ): string {
   if (!unidadCodigo) return cantidad
-  return `${cantidad} ${unidadCodigo}`
+  if (!esFraccionaria) {
+    return new Decimal(cantidad).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toString()
+  }
+  return `${new Decimal(cantidad).toString()} ${unidadCodigo}`
 }
 
 export function unidadBaseItem(item: { tipo: string, unidadMedida?: string | null }): string {
