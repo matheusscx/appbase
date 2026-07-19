@@ -39,6 +39,9 @@ export class Item {
   @Column({ type: 'text' })
   tipo: string;
 
+  @Column({ name: 'clasificacion_tributaria', type: 'text', default: 'afecto' })
+  clasificacionTributaria: string; // 'afecto' | 'exento' — tratamiento fiscal (IVA)
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

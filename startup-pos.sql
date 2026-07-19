@@ -496,6 +496,7 @@ CREATE TABLE "items" (
   "precio_incluye_impuesto" BOOLEAN       NOT NULL DEFAULT false,
   "activo"                  BOOLEAN       NOT NULL DEFAULT true,
   "tipo"                    TEXT          NOT NULL,   -- 'producto' | 'servicio' | 'suscripcion' | 'receta' | 'ingrediente'
+  "clasificacion_tributaria" TEXT         NOT NULL DEFAULT 'afecto',  -- 'afecto' | 'exento'
   "creado_el"               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"          TIMESTAMPTZ,
   "eliminado_el"            TIMESTAMPTZ

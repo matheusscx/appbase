@@ -107,6 +107,10 @@ export class CreateItemDto {
   @IsOptional()
   activo?: boolean;
 
+  @IsOptional()
+  @IsIn(['afecto', 'exento'])
+  clasificacionTributaria?: string;
+
   // Extensión producto
   @IsIn(['cantidad', 'lote', 'serie'])
   @IsOptional()

@@ -901,6 +901,67 @@ describe('ItemsService', () => {
       expect(insertProducto?.[0]).toContain('costo_actual');
       expect(insertProducto?.[1]).toContain('4000');
     });
+
+    it('persiste la clasificación tributaria y la devuelve en la respuesta', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+        .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
+        .mockResolvedValueOnce([]); // INSERT item_producto
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-0',
+        stockAnterior: '0',
+        stockResultante: '5',
+      });
+
+      const result = await service.create(TENANT, 'user-uuid', {
+        ...baseDtoProducto,
+        clasificacionTributaria: 'exento',
+      } as any);
+
+      const insertCall = managerMock.query.mock.calls.find((c) =>
+        (c[0] as string).includes('INSERT INTO items'),
+      );
+      expect(insertCall?.[1]).toContain('exento');
+      expect(result).toMatchObject({ clasificacionTributaria: 'exento' });
+    });
+
+    it('default afecto cuando no se envía clasificación', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID }])
+        .mockResolvedValueOnce([]);
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-0',
+        stockAnterior: '0',
+        stockResultante: '5',
+      });
+
+      const result = await service.create(TENANT, 'user-uuid', baseDtoProducto);
+
+      expect(result).toMatchObject({ clasificacionTributaria: 'afecto' });
+    });
+
+    it('valida impuestos aceptando los del catálogo del sistema (pais_id)', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+        .mockResolvedValueOnce([{ cnt: '1' }]) // validarImpuestos
+        .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
+        .mockResolvedValue([]); // extensión + item_impuestos
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-0',
+        stockAnterior: '0',
+        stockResultante: '5',
+      });
+
+      await service.create(TENANT, 'user-uuid', {
+        ...baseDtoProducto,
+        impuestosIds: ['iva-sistema'],
+      } as any);
+
+      const valCall = managerMock.query.mock.calls[1];
+      expect(valCall[0]).toContain('pais_id');
+      expect(valCall[1]).toEqual([['iva-sistema'], TENANT]);
+    });
   });
 
   // ── update ─────────────────────────────────────────────────────────────────

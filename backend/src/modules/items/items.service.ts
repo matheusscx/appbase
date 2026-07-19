@@ -35,6 +35,7 @@ interface ItemRow {
   descripcion: string | null;
   tipo: string;
   activo: boolean;
+  clasificacion_tributaria: string;
   precio_base: string;
   precio_incluye_impuesto: boolean;
   moneda_id: string;
@@ -92,6 +93,7 @@ export class ItemsService {
     SELECT
       i.item_id, i.nombre, i.descripcion, i.tipo, i.activo,
       i.precio_base, i.precio_incluye_impuesto,
+      i.clasificacion_tributaria,
       i.moneda_id, i.categoria_id, i.creado_el,
       m.codigo_iso AS moneda_codigo, m.simbolo AS moneda_simbolo,
       c.nombre AS categoria_nombre,
@@ -118,6 +120,7 @@ export class ItemsService {
       activo: r.activo,
       precioBase: r.precio_base,
       precioIncluyeImpuesto: r.precio_incluye_impuesto,
+      clasificacionTributaria: r.clasificacion_tributaria,
       monedaId: r.moneda_id,
       monedaCodigo: r.moneda_codigo,
       monedaSimbolo: r.moneda_simbolo,
@@ -355,13 +358,7 @@ export class ItemsService {
         ? await this.validarCategoria(manager, tenantId, dto.categoriaId)
         : null;
       if (dto.impuestosIds?.length) {
-        await this.validarReglas(
-          manager,
-          tenantId,
-          dto.impuestosIds,
-          'impuestos',
-          'impuesto_id',
-        );
+        await this.validarImpuestos(manager, tenantId, dto.impuestosIds);
       }
       if (dto.recargosIds?.length) {
         await this.validarReglas(
@@ -391,8 +388,8 @@ export class ItemsService {
       }[] = await manager.query(
         `INSERT INTO items
            (tenant_id, moneda_id, categoria_id, nombre, descripcion,
-            precio_base, precio_incluye_impuesto, activo, tipo)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          RETURNING item_id, creado_el`,
         [
           tenantId,
@@ -404,6 +401,7 @@ export class ItemsService {
           dto.precioIncluyeImpuesto ?? false,
           dto.activo ?? true,
           dto.tipo,
+          dto.clasificacionTributaria ?? 'afecto',
         ],
       );
       const itemId = itemRows[0].item_id;
@@ -611,6 +609,7 @@ export class ItemsService {
         activo: dto.activo ?? true,
         precioBase: precioBasePersistido,
         precioIncluyeImpuesto: dto.precioIncluyeImpuesto ?? false,
+        clasificacionTributaria: dto.clasificacionTributaria ?? 'afecto',
         monedaId: dto.monedaId,
         monedaCodigo: moneda.codigo,
         monedaSimbolo: moneda.simbolo,
@@ -693,13 +692,7 @@ export class ItemsService {
         );
       }
       if (dto.impuestosIds?.length) {
-        await this.validarReglas(
-          manager,
-          tenantId,
-          dto.impuestosIds,
-          'impuestos',
-          'impuesto_id',
-        );
+        await this.validarImpuestos(manager, tenantId, dto.impuestosIds);
       }
       if (dto.recargosIds?.length) {
         await this.validarReglas(
@@ -758,6 +751,11 @@ export class ItemsService {
         setClauses.push(`activo = $${idx++}`);
         params.push(dto.activo);
         patch.activo = dto.activo;
+      }
+      if (dto.clasificacionTributaria !== undefined) {
+        setClauses.push(`clasificacion_tributaria = $${idx++}`);
+        params.push(dto.clasificacionTributaria);
+        patch.clasificacionTributaria = dto.clasificacionTributaria;
       }
 
       if (setClauses.length) {
@@ -2039,6 +2037,29 @@ export class ItemsService {
     if (parseInt(rows[0].cnt) !== ids.length) {
       throw new BadRequestException(
         `Una o más reglas de ${tabla} no pertenecen a este tenant`,
+      );
+    }
+  }
+
+  /** Impuestos válidos: personalizados del tenant o del catálogo del sistema del país del tenant. */
+  private async validarImpuestos(
+    manager: EntityManager,
+    tenantId: string,
+    ids: string[],
+  ): Promise<void> {
+    const rows: { cnt: string }[] = await manager.query(
+      `SELECT COUNT(*) AS cnt FROM impuestos i
+        WHERE i.impuesto_id = ANY($1::uuid[]) AND i.eliminado_el IS NULL
+          AND (i.tenant_id = $2
+               OR i.pais_id = (SELECT p.pais_id
+                                 FROM tenants t
+                                 JOIN provincia p ON p.provincia_id = t.provincia_id
+                                WHERE t.tenant_id = $2 AND t.eliminado_el IS NULL))`,
+      [ids, tenantId],
+    );
+    if (parseInt(rows[0].cnt) !== ids.length) {
+      throw new BadRequestException(
+        'Uno o más impuestos no están disponibles para este tenant',
       );
     }
   }
