@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js'
+import { formatStock } from './stock-format'
 
 export type UnidadCat = { codigo: string, magnitud: string, factorBase: string }
 
@@ -75,11 +76,12 @@ export function puedeDecrementar(
 }
 
 /**
- * Formatea la cantidad para tickets (comanda/precuenta/boleta) según su magnitud:
- * conteo → entero, sin sufijo de unidad; fraccionaria (masa/volumen/etc.) → recorta
- * ceros sobrantes y muestra el código de unidad. `esFraccionaria` la calcula el
- * caller (ej. `unidadesMedidaStore.esFraccionaria(unidadCodigo)`), para mantener
- * este util libre de dependencias de Pinia/Nuxt.
+ * Formatea la cantidad para tickets (comanda/precuenta/boleta) según su magnitud —
+ * delega en `formatStock` (mismo formateador que usa el resto de la UI para stock)
+ * para no duplicar el recorte de decimales ni el separador decimal es-CL (coma).
+ * `esFraccionaria` la calcula el caller (ej.
+ * `unidadesMedidaStore.esFraccionaria(unidadCodigo)`), para mantener este util
+ * libre de dependencias de Pinia/Nuxt.
  */
 export function formatCantidadTicket(
   cantidad: string,
@@ -87,10 +89,7 @@ export function formatCantidadTicket(
   esFraccionaria: boolean,
 ): string {
   if (!unidadCodigo) return cantidad
-  if (!esFraccionaria) {
-    return new Decimal(cantidad).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toString()
-  }
-  return `${new Decimal(cantidad).toString()} ${unidadCodigo}`
+  return formatStock(cantidad, unidadCodigo, esFraccionaria)
 }
 
 export function unidadBaseItem(item: { tipo: string, unidadMedida?: string | null }): string {

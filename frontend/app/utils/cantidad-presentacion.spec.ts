@@ -61,8 +61,8 @@ describe('cantidad-presentacion', () => {
     expect(formatCantidadTicket('500', 'g', true)).toBe('500 g')
   })
 
-  it('formatCantidadTicket recorta ceros sobrantes en fraccionarias', () => {
-    expect(formatCantidadTicket('1.50', 'kg', true)).toBe('1.5 kg')
+  it('formatCantidadTicket recorta ceros sobrantes en fraccionarias, con coma decimal (es-CL)', () => {
+    expect(formatCantidadTicket('1.50', 'kg', true)).toBe('1,5 kg')
     expect(formatCantidadTicket('2.00', 'kg', true)).toBe('2 kg')
   })
 
