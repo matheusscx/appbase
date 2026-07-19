@@ -26,6 +26,8 @@ const fechaDesde = ref('')
 const fechaHasta = ref('')
 const turnoIds = ref<string[]>([])
 
+const tab = ref('propinas')
+
 const reparto = ref<PreviewReparto | null>(null)
 const exclusiones = ref<string[]>([])
 const montosManuales = reactive<Record<string, string>>({})
@@ -41,6 +43,11 @@ const garzones = ref<Garzon[]>([])
 const puedeLiquidar = computed(
   () => permissions.esAdmin || permissions.can('Propinas', 'Liquidar'),
 )
+
+const tabs = computed(() => [
+  { label: 'Propinas', value: 'propinas', icon: 'i-lucide-hand-coins' },
+  { label: 'Liquidaciones cerradas', value: 'liquidaciones', icon: 'i-lucide-history' },
+])
 
 const turnoOptions = computed(() =>
   turnos.value
@@ -206,192 +213,194 @@ onMounted(async () => {
           description="Revisa el fondo de propinas del período, ajusta el reparto entre los grupos y liquídalo."
         />
 
-        <!-- Métricas -->
-        <div class="grid gap-4 sm:grid-cols-2">
-          <UCard>
-            <p class="text-sm text-muted">
-              Pendiente por liquidar
-            </p>
-            <p class="text-2xl font-semibold text-default">
-              {{ resumen ? formatMonto(resumen.pendienteLibreMonto) : '—' }}
-            </p>
-          </UCard>
-          <UCard>
-            <p class="text-sm text-muted">
-              Cobrado (mes)
-            </p>
-            <p class="text-2xl font-semibold text-default">
-              {{ resumen ? formatMonto(resumen.montoCobrado) : '—' }}
-            </p>
-          </UCard>
-        </div>
+        <UTabs v-model="tab" :items="tabs" :content="false" />
 
-        <!-- Selector de período -->
-        <UCard>
-          <div class="grid gap-4 md:grid-cols-4">
-            <UFormField label="Desde">
-              <AppDateInput v-model="fechaDesde" qa="prop-desde" />
-            </UFormField>
-            <UFormField label="Hasta">
-              <AppDateInput v-model="fechaHasta" qa="prop-hasta" />
-            </UFormField>
-            <UFormField label="Turnos (opcional)">
-              <USelectMenu
-                v-model="turnoIds"
-                multiple
-                :items="turnoOptions"
-                value-key="value"
-                placeholder="Todos los turnos"
-              />
-            </UFormField>
-            <div class="flex items-end">
-              <UButton
-                class="w-full justify-center"
-                icon="i-lucide-calculator"
-                label="Ver reparto"
-                :loading="loadingPreview"
-                @click="cargarPreview"
-              />
-            </div>
-          </div>
-        </UCard>
-
-        <!-- Reparto en vivo -->
-        <template v-if="reparto">
-          <UCard>
-            <p class="text-sm text-muted">
-              Fondo total del período
-            </p>
-            <p class="text-3xl font-bold text-default">
-              {{ formatMonto(reparto.poolTotal, reparto.monedaId) }}
-            </p>
-          </UCard>
-
-          <UAlert
-            v-for="w in reparto.advertencias"
-            :key="w"
-            color="warning"
-            variant="subtle"
-            icon="i-lucide-triangle-alert"
-            :title="w"
-          />
-
-          <div class="space-y-4">
-            <UCard v-for="grupo in reparto.grupos" :key="grupo.id">
-              <template #header>
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p class="font-medium text-default">
-                      {{ grupo.nombre }}
-                    </p>
-                    <p class="text-sm text-muted">
-                      {{ formatPorcentaje(grupo.porcentaje) }} · {{ criterioLabel(grupo.criterio) }}
-                    </p>
-                  </div>
-                  <p class="font-semibold text-default">
-                    {{ formatMonto(grupo.montoGrupo, reparto.monedaId) }}
-                  </p>
-                </div>
-              </template>
-              <div class="space-y-3">
-                <div
-                  v-for="p in participantesGrupo(grupo)"
-                  :key="p.garzonId"
-                  class="rounded-lg border border-default p-3"
-                >
-                  <div class="grid gap-3 lg:grid-cols-[1fr_140px_140px_auto] lg:items-center">
-                    <div>
-                      <p class="font-medium text-default" :class="{ 'line-through opacity-60': !p.incluido }">
-                        {{ garzonNombre(p.garzonId) }}
-                      </p>
-                      <p v-if="!p.incluido" class="text-xs text-muted">
-                        Excluido
-                      </p>
-                    </div>
-                    <div class="text-sm">
-                      <p class="text-muted">
-                        Monto
-                      </p>
-                      <p class="font-medium text-default">
-                        {{ formatMonto(p.monto, reparto.monedaId) }}
-                      </p>
-                    </div>
-                    <div v-if="grupo.criterio === 'MANUAL' && puedeLiquidar" class="flex items-end gap-2">
-                      <UInput
-                        v-model="montosManuales[p.garzonId]"
-                        size="sm"
-                        inputmode="decimal"
-                        placeholder="Monto manual"
-                        @keyup.enter="guardarMonto"
-                      />
-                      <UButton
-                        size="sm"
-                        variant="outline"
-                        icon="i-lucide-save"
-                        :loading="loadingPreview"
-                        @click="guardarMonto"
-                      />
-                    </div>
-                    <div v-else />
-                    <div class="flex items-end">
-                      <UButton
-                        size="sm"
-                        class="w-full justify-center"
-                        :variant="p.incluido ? 'outline' : 'solid'"
-                        :color="p.incluido ? 'neutral' : 'primary'"
-                        :label="p.incluido ? 'Excluir' : 'Incluir'"
-                        :disabled="!puedeLiquidar"
-                        :loading="loadingPreview"
-                        @click="toggleExcluir(p.garzonId)"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
+        <template v-if="tab === 'propinas'">
+          <!-- Métricas -->
+          <div class="grid gap-4 sm:grid-cols-2">
+            <UCard>
+              <p class="text-sm text-muted">
+                Pendiente por liquidar
+              </p>
+              <p class="text-2xl font-semibold text-default">
+                {{ resumen ? formatMonto(resumen.pendienteLibreMonto) : '—' }}
+              </p>
+            </UCard>
+            <UCard>
+              <p class="text-sm text-muted">
+                Cobrado (mes)
+              </p>
+              <p class="text-2xl font-semibold text-default">
+                {{ resumen ? formatMonto(resumen.montoCobrado) : '—' }}
+              </p>
             </UCard>
           </div>
 
-          <div class="flex justify-end">
-            <UButton
-              icon="i-lucide-hand-coins"
-              label="Liquidar período"
-              size="lg"
-              :loading="liquidando"
-              :disabled="!reparto || Number(reparto.poolTotal) === 0 || !puedeLiquidar"
-              @click="liquidar"
+          <!-- Selector de período -->
+          <UCard>
+            <div class="grid gap-4 md:grid-cols-4">
+              <UFormField label="Desde">
+                <AppDateInput v-model="fechaDesde" qa="prop-desde" />
+              </UFormField>
+              <UFormField label="Hasta">
+                <AppDateInput v-model="fechaHasta" qa="prop-hasta" />
+              </UFormField>
+              <UFormField label="Turnos (opcional)">
+                <USelectMenu
+                  v-model="turnoIds"
+                  multiple
+                  :items="turnoOptions"
+                  value-key="value"
+                  placeholder="Todos los turnos"
+                />
+              </UFormField>
+              <div class="flex items-end">
+                <UButton
+                  class="w-full justify-center"
+                  icon="i-lucide-calculator"
+                  label="Ver reparto"
+                  :loading="loadingPreview"
+                  @click="cargarPreview"
+                />
+              </div>
+            </div>
+          </UCard>
+
+          <!-- Reparto en vivo -->
+          <template v-if="reparto">
+            <UCard>
+              <p class="text-sm text-muted">
+                Fondo total del período
+              </p>
+              <p class="text-3xl font-bold text-default">
+                {{ formatMonto(reparto.poolTotal, reparto.monedaId) }}
+              </p>
+            </UCard>
+
+            <UAlert
+              v-for="w in reparto.advertencias"
+              :key="w"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              :title="w"
             />
-          </div>
+
+            <div class="space-y-4">
+              <UCard v-for="grupo in reparto.grupos" :key="grupo.id">
+                <template #header>
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p class="font-medium text-default">
+                        {{ grupo.nombre }}
+                      </p>
+                      <p class="text-sm text-muted">
+                        {{ formatPorcentaje(grupo.porcentaje) }} · {{ criterioLabel(grupo.criterio) }}
+                      </p>
+                    </div>
+                    <p class="font-semibold text-default">
+                      {{ formatMonto(grupo.montoGrupo, reparto.monedaId) }}
+                    </p>
+                  </div>
+                </template>
+                <div class="space-y-3">
+                  <div
+                    v-for="p in participantesGrupo(grupo)"
+                    :key="p.garzonId"
+                    class="rounded-lg border border-default p-3"
+                  >
+                    <div class="grid gap-3 lg:grid-cols-[1fr_140px_140px_auto] lg:items-center">
+                      <div>
+                        <p class="font-medium text-default" :class="{ 'line-through opacity-60': !p.incluido }">
+                          {{ garzonNombre(p.garzonId) }}
+                        </p>
+                        <p v-if="!p.incluido" class="text-xs text-muted">
+                          Excluido
+                        </p>
+                      </div>
+                      <div class="text-sm">
+                        <p class="text-muted">
+                          Monto
+                        </p>
+                        <p class="font-medium text-default">
+                          {{ formatMonto(p.monto, reparto.monedaId) }}
+                        </p>
+                      </div>
+                      <div v-if="grupo.criterio === 'MANUAL' && puedeLiquidar" class="flex items-end gap-2">
+                        <UInput
+                          v-model="montosManuales[p.garzonId]"
+                          size="sm"
+                          inputmode="decimal"
+                          placeholder="Monto manual"
+                          @keyup.enter="guardarMonto"
+                        />
+                        <UButton
+                          size="sm"
+                          variant="outline"
+                          icon="i-lucide-save"
+                          :loading="loadingPreview"
+                          @click="guardarMonto"
+                        />
+                      </div>
+                      <div v-else />
+                      <div class="flex items-end">
+                        <UButton
+                          size="sm"
+                          class="w-full justify-center"
+                          :variant="p.incluido ? 'outline' : 'solid'"
+                          :color="p.incluido ? 'neutral' : 'primary'"
+                          :label="p.incluido ? 'Excluir' : 'Incluir'"
+                          :disabled="!puedeLiquidar"
+                          :loading="loadingPreview"
+                          @click="toggleExcluir(p.garzonId)"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </UCard>
+            </div>
+
+            <div class="flex justify-end">
+              <UButton
+                icon="i-lucide-hand-coins"
+                label="Liquidar período"
+                size="lg"
+                :loading="liquidando"
+                :disabled="!reparto || Number(reparto.poolTotal) === 0 || !puedeLiquidar"
+                @click="liquidar"
+              />
+            </div>
+          </template>
         </template>
 
-        <!-- Historial -->
-        <UCard>
-          <template #header>
-            <span class="font-medium text-default">Liquidaciones cerradas</span>
-          </template>
-          <UTable
-            :data="historial"
-            :columns="columns"
-            @select="(_, row) => router.push(`/propinas/liquidaciones/${row.original.id}/imprimir?tipo=resumen`)"
-          >
-            <template #fechaDesde-cell="{ row }">
-              {{ formatFecha(row.original.fechaDesde) }}
-            </template>
-            <template #fechaHasta-cell="{ row }">
-              {{ formatFecha(row.original.fechaHasta) }}
-            </template>
-            <template #estado-cell="{ row }">
-              <UBadge :color="estadoColor(row.original.estado)" variant="subtle">
-                {{ estadoLabel(row.original.estado) }}
-              </UBadge>
-            </template>
-            <template #poolTotal-cell="{ row }">
-              {{ formatMonto(row.original.poolTotal) }}
-            </template>
-          </UTable>
-          <p v-if="historial.length === 0" class="py-8 text-center text-sm text-muted">
-            Todavía no hay liquidaciones cerradas.
-          </p>
-        </UCard>
+        <template v-if="tab === 'liquidaciones'">
+          <UCard>
+            <UTable
+              :data="historial"
+              :columns="columns"
+              @select="(_, row) => router.push(`/propinas/liquidaciones/${row.original.id}/imprimir?tipo=resumen`)"
+            >
+              <template #fechaDesde-cell="{ row }">
+                {{ formatFecha(row.original.fechaDesde) }}
+              </template>
+              <template #fechaHasta-cell="{ row }">
+                {{ formatFecha(row.original.fechaHasta) }}
+              </template>
+              <template #estado-cell="{ row }">
+                <UBadge :color="estadoColor(row.original.estado)" variant="subtle">
+                  {{ estadoLabel(row.original.estado) }}
+                </UBadge>
+              </template>
+              <template #poolTotal-cell="{ row }">
+                {{ formatMonto(row.original.poolTotal) }}
+              </template>
+            </UTable>
+            <p v-if="historial.length === 0" class="py-8 text-center text-sm text-muted">
+              Todavía no hay liquidaciones cerradas.
+            </p>
+          </UCard>
+        </template>
       </div>
     </template>
   </UDashboardPanel>

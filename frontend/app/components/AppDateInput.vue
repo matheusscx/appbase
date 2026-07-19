@@ -65,11 +65,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootEl" :data-qa="qa" class="w-full min-w-0">
+  <div ref="rootEl" :data-qa="qa" class="min-w-0" :class="props.class">
     <UInputDate
       v-model="internal"
       :disabled="disabled"
-      :class="props.class"
       class="w-full"
     >
       <template #trailing="{ ui }">
