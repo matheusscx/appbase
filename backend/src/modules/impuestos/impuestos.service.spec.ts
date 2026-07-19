@@ -1,11 +1,12 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ImpuestosService } from './impuestos.service';
 import { Impuesto } from './entities/impuesto.entity';
 
 const TENANT = 'tenant-uuid';
 const IMP = 'impuesto-uuid';
+const PAIS = 'pais-uuid';
 
 describe('ImpuestosService', () => {
   let service: ImpuestosService;
@@ -16,6 +17,7 @@ describe('ImpuestosService', () => {
     save: jest.Mock;
     softDelete: jest.Mock;
   };
+  let dataSource: { query: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -25,11 +27,15 @@ describe('ImpuestosService', () => {
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
     };
+    dataSource = {
+      query: jest.fn().mockResolvedValue([{ pais_id: PAIS }]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ImpuestosService,
         { provide: getRepositoryToken(Impuesto), useValue: repo },
+        { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
 
@@ -37,17 +43,49 @@ describe('ImpuestosService', () => {
   });
 
   describe('findAll', () => {
-    it('lista solo los impuestos del tenant', async () => {
-      const rows = [{ id: IMP, tenantId: TENANT, nombre: 'IVA' }];
+    it('lista la unión de impuestos del tenant y del país, con origen', async () => {
+      const rows = [
+        {
+          id: 'sys-1',
+          tenantId: null,
+          paisId: PAIS,
+          nombre: 'IVA',
+          tipo: 'iva',
+        },
+        {
+          id: IMP,
+          tenantId: TENANT,
+          paisId: null,
+          nombre: 'Propina',
+          tipo: 'otro',
+        },
+      ];
       repo.find.mockResolvedValue(rows);
 
       const result = await service.findAll(TENANT);
+
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('pais_id'),
+        [TENANT],
+      );
+      expect(repo.find).toHaveBeenCalledWith({
+        where: [{ tenantId: TENANT }, { paisId: PAIS }],
+        order: { nombre: 'ASC' },
+      });
+      expect(result[0].origen).toBe('sistema');
+      expect(result[1].origen).toBe('personalizado');
+    });
+
+    it('sin país resuelto, lista solo los del tenant', async () => {
+      dataSource.query.mockResolvedValue([]);
+      repo.find.mockResolvedValue([]);
+
+      await service.findAll(TENANT);
 
       expect(repo.find).toHaveBeenCalledWith({
         where: { tenantId: TENANT },
         order: { nombre: 'ASC' },
       });
-      expect(result).toBe(rows);
     });
   });
 
@@ -63,8 +101,20 @@ describe('ImpuestosService', () => {
         nombre: 'IVA',
         porcentaje: '0.19',
         activo: true,
+        tipo: 'otro',
       });
       expect(result).toMatchObject({ nombre: 'IVA', porcentaje: '0.19' });
+    });
+
+    it('acepta tipo iva explícito', async () => {
+      await service.create(TENANT, {
+        nombre: 'IVA propio',
+        porcentaje: '0.19',
+        tipo: 'iva',
+      });
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ tipo: 'iva' }),
+      );
     });
 
     it('rechaza porcentaje igual a 0', async () => {

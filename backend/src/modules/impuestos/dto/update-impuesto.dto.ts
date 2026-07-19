@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsNotEmpty,
   IsNumberString,
   IsOptional,
@@ -19,4 +20,8 @@ export class UpdateImpuestoDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  @IsOptional()
+  @IsIn(['iva', 'otro'])
+  tipo?: string;
 }

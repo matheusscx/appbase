@@ -3,18 +3,24 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Impuesto } from './entities/impuesto.entity';
 import { CreateImpuestoDto } from './dto/create-impuesto.dto';
 import { UpdateImpuestoDto } from './dto/update-impuesto.dto';
+
+export type ImpuestoConOrigen = Impuesto & {
+  origen: 'sistema' | 'personalizado';
+};
 
 @Injectable()
 export class ImpuestosService {
   constructor(
     @InjectRepository(Impuesto)
     private readonly impuestoRepo: Repository<Impuesto>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   private validarPorcentaje(porcentaje: string): void {
@@ -29,11 +35,29 @@ export class ImpuestosService {
     }
   }
 
-  findAll(tenantId: string): Promise<Impuesto[]> {
-    return this.impuestoRepo.find({
-      where: { tenantId },
+  /** País del tenant: tenants.provincia_id → provincia.pais_id. */
+  private async paisIdDeTenant(tenantId: string): Promise<string | null> {
+    const rows: { pais_id: string }[] = await this.dataSource.query(
+      `SELECT p.pais_id
+         FROM tenants t
+         JOIN provincia p ON p.provincia_id = t.provincia_id AND p.eliminado_el IS NULL
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL`,
+      [tenantId],
+    );
+    return rows[0]?.pais_id ?? null;
+  }
+
+  async findAll(tenantId: string): Promise<ImpuestoConOrigen[]> {
+    const paisId = await this.paisIdDeTenant(tenantId);
+    const impuestos = await this.impuestoRepo.find({
+      where: paisId ? [{ tenantId }, { paisId }] : { tenantId },
       order: { nombre: 'ASC' },
     });
+    return impuestos.map((i) =>
+      Object.assign(i, {
+        origen: i.tenantId ? 'personalizado' : 'sistema',
+      }),
+    );
   }
 
   async create(tenantId: string, dto: CreateImpuestoDto): Promise<Impuesto> {
@@ -43,6 +67,7 @@ export class ImpuestosService {
       nombre: dto.nombre,
       porcentaje: dto.porcentaje,
       activo: dto.activo ?? true,
+      tipo: dto.tipo ?? 'otro',
     });
     return this.impuestoRepo.save(impuesto);
   }

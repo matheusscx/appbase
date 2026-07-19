@@ -371,15 +371,20 @@ CREATE TABLE "categorias" (
   "eliminado_el"   TIMESTAMPTZ
 );
 
+-- Impuestos: del sistema (tenant_id NULL + pais_id, sembrados por seeder, no editables
+-- por tenants) o personalizados (tenant_id set). tipo 'iva' se suprime en líneas exentas.
 CREATE TABLE "impuestos" (
   "impuesto_id"    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-  "tenant_id"      UUID         NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "tenant_id"      UUID         REFERENCES "tenants" ("tenant_id"),
+  "pais_id"        UUID         REFERENCES "pais" ("pais_id"),
   "nombre"         TEXT         NOT NULL,
   "porcentaje"     NUMERIC(7,4) NOT NULL,   -- decimal: 0.19 = 19%
+  "tipo"           TEXT         NOT NULL DEFAULT 'otro',  -- 'iva' | 'otro'
   "activo"         BOOLEAN      NOT NULL DEFAULT true,
   "creado_el"      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  CONSTRAINT "CHK_impuestos_scope" CHECK (("tenant_id" IS NULL) <> ("pais_id" IS NULL))
 );
 
 -- Catálogo GLOBAL de tipos de regla (sembrado por el sistema). Una sola tabla con
