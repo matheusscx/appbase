@@ -25,6 +25,7 @@ interface Item {
   activo: boolean
   precioBase: string
   precioIncluyeImpuesto: boolean
+  clasificacionTributaria?: 'afecto' | 'exento'
   monedaId: string
   monedaCodigo: string
   monedaSimbolo: string | null
@@ -286,6 +287,7 @@ function emptyForm() {
     ingredientes: [] as IngredienteRow[],
     extrasPermitidos: [] as ExtraPermitidoRow[],
     // reglas
+    clasificacionTributaria: 'afecto' as 'afecto' | 'exento',
     impuestosIds: [] as string[],
     recargosIds: [] as string[],
     descuentosIds: [] as string[],
@@ -547,7 +549,10 @@ async function cargarCatalogos() {
 
     impuestosOpts.value = impuestos
       .filter((i) => i.activo)
-      .map((i) => ({ label: i.nombre, value: i.id }))
+      .map((i) => ({
+        label: i.origen === 'sistema' ? `${i.nombre} (Sistema)` : i.nombre,
+        value: i.id,
+      }))
 
     descuentosOpts.value = descuentos
       .filter((d) => d.activo)
@@ -619,6 +624,7 @@ async function abrirEditar(item: Item) {
         unidadCodigo: e.unidadCodigo,
         precioExtra: e.precioExtra,
       })),
+      clasificacionTributaria: detalle.clasificacionTributaria ?? 'afecto',
       impuestosIds: detalle.impuestosIds ?? [],
       recargosIds: detalle.recargosIds ?? [],
       descuentosIds: detalle.descuentosIds ?? [],
@@ -712,6 +718,7 @@ async function guardar() {
     if (form.value.tipo !== 'ingrediente') {
       payload.precioBase = form.value.precioBase
       payload.precioIncluyeImpuesto = form.value.precioIncluyeImpuesto
+      payload.clasificacionTributaria = form.value.clasificacionTributaria
       payload.impuestosIds = form.value.impuestosIds
       payload.recargosIds = form.value.recargosIds
       payload.descuentosIds = form.value.descuentosIds
@@ -1519,6 +1526,20 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           <USeparator />
           <div class="space-y-3">
             <p class="text-sm font-medium text-muted">Reglas asociadas</p>
+
+            <UFormField
+              label="Clasificación tributaria"
+              help="Exento: no se aplica IVA (los demás impuestos sí). Se congela en cada venta."
+            >
+              <USelect
+                v-model="form.clasificacionTributaria"
+                :items="[
+                  { label: 'Afecto', value: 'afecto' },
+                  { label: 'Exento', value: 'exento' },
+                ]"
+                class="w-full"
+              />
+            </UFormField>
 
             <UFormField label="Impuestos">
               <USelectMenu
