@@ -1,8 +1,16 @@
 # Diseño: Items tipo combo + grupos de modificadores reutilizables
 
-**Status**: Approved
+**Status**: Superseded (2026-07-20)
 **Date**: 2026-07-19
 **Owner**: SDD Team
+
+> ⚠️ **Reemplazada.** Este diseño se dividió en dos specs independientes con simplificaciones
+> (grupo sin tipo declarado + homogeneidad verificada, `min`/`max` en vez de `cantidad_a_elegir`,
+> regla fija de agotados, reuso de `orden`):
+> - [Ticket A — Combos](2026-07-20-combos-design.md)
+> - [Ticket B — Grupos de modificadores](2026-07-20-grupos-modificadores-design.md)
+>
+> Se conserva como referencia histórica del razonamiento original.
 
 ---
 
