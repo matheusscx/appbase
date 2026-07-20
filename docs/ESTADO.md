@@ -65,3 +65,4 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Boleta POS — plantilla unificada (emisor con RUT, DOCUMENTO INTERNO / slot electrónico dormante, Neto+impuestos reales, propina → TOTAL A PAGAR) + precuenta con propina sugerida | ✅ Implementado (2026-07-18) |
 | Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base/costo > 0) | ✅ Implementado (2026-07-15) |
 | Catálogo de impuestos del sistema + clasificación tributaria | ✅ Implementado (2026-07-19) |
+| Combos (paquetes con precio propio fijo, componentes producto/receta/servicio bloqueantes, una línea de venta, disponibilidad conservadora) | ✅ Implementado (2026-07-20) |

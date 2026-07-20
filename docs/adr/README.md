@@ -23,6 +23,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [009](./009-callback-pasarela-venta-por-callback.md) | Callback de pasarela — venta creada por callback (registry in-process vs HTTP), no por el navegador | Accepted | 2026-07-08 |
 | [010](./010-preparacion-sii-datos-fiscales.md) | Preparación para SII — capturar y congelar el dato fiscal ahora, diferir la integración | Accepted | 2026-07-14 |
 | [011](./011-catalogo-impuestos-sistema.md) | Catálogo de impuestos del sistema por país + semántica de "exento" (solo IVA) | Accepted | 2026-07-19 |
+| [012](./012-combos-precio-propio-y-descuento-por-tipo.md) | Combos: precio propio fijo, una línea de venta, sin conocimiento de inventario | Accepted | 2026-07-20 |
 
 ## Creating a New ADR
 

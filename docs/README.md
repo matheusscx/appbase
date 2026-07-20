@@ -63,6 +63,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [reportes-propinas.md](./features/reportes-propinas.md) | Reportes F: resumen del ciclo completo y agregados auditables por trabajador |
 | [impresion-termica.md](./features/impresion-termica.md) | Impresión térmica vía QZ Tray: comandas de cocina/barra ruteadas por categoría (envío en dos fases), precuenta y boleta desde Salones y el POS |
 | [impuestos.md](./features/impuestos.md) | Catálogo de impuestos del sistema por país + personalizados por tenant, clasificación tributaria afecto/exento en items congelada por línea de venta |
+| [combos.md](./features/combos.md) | Combos (paquetes con precio propio): componentes fijos producto/receta/servicio, una línea de venta, disponibilidad conservadora |
 
 ## Otros
 

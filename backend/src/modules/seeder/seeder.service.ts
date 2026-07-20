@@ -2232,6 +2232,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedItemsMonedaUnidadMatrix();
     await this.seedItemsSuscripcion();
     await this.seedRecetaDemo();
+    await this.seedCombos();
   }
 
   private async seedItemSoporte(): Promise<void> {
@@ -2476,6 +2477,85 @@ export class SeederService implements OnApplicationBootstrap {
          (receta_extra_id, tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, precio_extra)
        VALUES ($1, $2, $3, $4, '20', 'g', '800')`,
       [recetaExtraId, tenantId, recetaItemId, quesoItemId],
+    );
+  }
+
+  /**
+   * Combo demo "Combo Clásico" — pieza 4 del cluster food-service.
+   * Componentes fijos bloqueantes: Hamburguesa Clásica (receta, ×1) + Papas
+   * fritas (producto con stock propio, ×1). Precio propio fijo (no es la
+   * suma de sus componentes); costo_actual = Σ(costo componente × cantidad).
+   */
+  private async seedCombos(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const uuid = (suffix: number): string =>
+      `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
+
+    const HAMBURGUESA_ID = uuid(259); // ya sembrada por seedRecetaDemo
+    const PAPAS_ID = uuid(281);
+    const MOV_PAPAS_ID = uuid(282);
+    const COMBO_ID = uuid(283);
+    const CC_HAMBURGUESA_ID = uuid(284);
+    const CC_PAPAS_ID = uuid(285);
+
+    const exists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [COMBO_ID],
+    );
+    if (exists.length) {
+      return;
+    }
+
+    // Papas fritas: producto con stock propio, costo actual 800/unidad.
+    const PAPAS_COSTO = '800';
+    const PAPAS_STOCK = '40';
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,'Papas fritas','1500',false,true,'producto')`,
+      [PAPAS_ID, PARIS, CLP],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario, costo_actual)
+       VALUES ($1,'0','unidad','cantidad',$2)`,
+      [PAPAS_ID, PAPAS_COSTO],
+    );
+    await this.dataSource.query(
+      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
+      [PAPAS_STOCK, PAPAS_ID],
+    );
+    await this.dataSource.query(
+      `INSERT INTO movimientos_inventario
+         (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
+       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed combo demo)')`,
+      [MOV_PAPAS_ID, PARIS, PAPAS_ID, PAPAS_STOCK, PAPAS_COSTO],
+    );
+
+    // Combo Clásico: precio propio fijo ($4200), no la suma de sus componentes.
+    // costo_actual = costo Hamburguesa (receta, 1820) + costo Papas (producto, 800) = 2620
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,'Combo Clásico','Hamburguesa Clásica + Papas fritas','4200',false,true,'combo')`,
+      [COMBO_ID, PARIS, CLP],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_combo (item_id, costo_actual) VALUES ($1,'2620.0000')`,
+      [COMBO_ID],
+    );
+    await this.dataSource.query(
+      `INSERT INTO combo_componentes
+         (combo_componente_id, tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
+       VALUES
+         ($1,$3,$4,$2,'1',true),
+         ($5,$3,$4,$6,'1',true)`,
+      [
+        CC_HAMBURGUESA_ID,
+        HAMBURGUESA_ID,
+        PARIS,
+        COMBO_ID,
+        CC_PAPAS_ID,
+        PAPAS_ID,
+      ],
     );
   }
 

@@ -175,12 +175,14 @@ Extensiones actuales:
 - **`item_producto`** — stock, unidad de medida, fecha elaboración, fecha vencimiento
 - **`item_servicio`** — duración estimada, `requiere_cita` (flag informativo, sin agenda por ahora)
 - **`item_suscripcion`** — `frecuencia` (`'semanal'` | `'quincenal'` | `'mensual'`). Representa un ítem de cobro recurrente (ver 10b); no fija día de cobro ni tarjeta — eso lo elige el customer al suscribirse.
+- **`item_receta`** — producto compuesto sin stock propio; descuenta stock de sus ingredientes al venderse (ver `docs/features/recetas.md`).
+- **`item_combo`** — paquete con precio propio fijo, sin stock propio; descuenta stock de sus componentes fijos al venderse (ver 8c).
 
 Cada item:
 - Puede tener N impuestos, N descuentos, N recargos asociados
-- El stock se descuenta **automáticamente** al procesar una venta, generando un movimiento de inventario (ver 8b) — **solo aplica a `producto`**; `servicio` y `suscripcion` no participan del tracking de inventario.
+- El stock se descuenta **automáticamente** al procesar una venta, generando un movimiento de inventario (ver 8b) — **solo aplica a `producto`**; `servicio` y `suscripcion` no participan del tracking de inventario. `receta` y `combo` no tienen stock propio: descuentan el de sus ingredientes/componentes (ver 8c).
 
-Extensiones futuras contempladas: combos/paquetes, items digitales, modificadores.
+Extensiones futuras contempladas: combos con grupos de modificadores (elección, ej. "elige tu bebida"), items digitales.
 
 **Alertas útiles:** stock bajo, productos próximos a vencer.
 
@@ -200,6 +202,41 @@ Trazabilidad de stock para items tipo **producto**. Todo cambio de stock queda r
 - `tenant_id` y `usuario_id` vienen del token, nunca del body.
 
 **Fuera de alcance (fases futuras):** bodegas/almacenes y stock por bodega, traspasos, costeo y valoración de inventario, conteos físicos masivos.
+
+---
+
+### 8c. Combos (paquetes con precio propio)
+
+Un item `tipo='combo'` (ej. "Combo Clásico" = Hamburguesa Clásica + Papas) es un
+paquete de venta con **componentes fijos** (`producto` | `receta` | `servicio`,
+cada uno con cantidad y flag `bloqueante`). No tiene stock propio: al venderse,
+descuenta el de cada componente según su tipo (producto → salida directa; receta
+→ se expande a sus ingredientes; servicio → sin efecto de inventario).
+
+**Reglas de negocio:**
+- **Precio propio, no la suma de componentes.** El tenant fija `precio_base` del
+  combo igual que cualquier item; no se deriva automáticamente del precio de sus
+  piezas. Solo `item_combo.costo_actual` (para margen) sí es la suma de los
+  costos de sus componentes.
+- **Una sola línea de venta.** Un combo vendido genera **una** línea en
+  `venta_detalles` al precio del combo — no se explota en N líneas por
+  componente. El descuento de stock por componente ocurre por debajo, en la
+  misma transacción de la venta, sin afectar el total cobrado ni el desglose
+  visible al customer.
+- **Disponibilidad conservadora.** `disponible` en el listado es el mínimo entre
+  los componentes **bloqueantes** (los no bloqueantes no limitan la
+  disponibilidad mostrada); un componente `servicio` se ignora en el cálculo.
+  `null` si el combo no tiene componentes bloqueantes.
+- **Bloqueante sin stock aborta; no bloqueante advierte.** Mismo criterio que
+  recetas: un componente bloqueante sin stock suficiente aborta toda la venta;
+  uno no bloqueante se omite y la venta continúa con una advertencia.
+- **Sin combos anidados.** Un combo no puede ser componente de otro combo — solo
+  producto/receta/servicio.
+
+**Fuera de alcance (fase futura — grupos de modificadores):** combos con
+elección del customer ("elige tu bebida entre 3 opciones"). Requiere un modelo
+de grupos y opciones que hoy no existe; esta fase solo cubre combos de
+componentes fijos, sin elección.
 
 ---
 
