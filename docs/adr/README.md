@@ -22,6 +22,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [008](./008-cifrado-credenciales-pasarela.md) | Cifrado de credenciales de la pasarela de pagos (AES-256-GCM app-level) | Accepted | 2026-07-08 |
 | [009](./009-callback-pasarela-venta-por-callback.md) | Callback de pasarela — venta creada por callback (registry in-process vs HTTP), no por el navegador | Accepted | 2026-07-08 |
 | [010](./010-preparacion-sii-datos-fiscales.md) | Preparación para SII — capturar y congelar el dato fiscal ahora, diferir la integración | Accepted | 2026-07-14 |
+| [011](./011-catalogo-impuestos-sistema.md) | Catálogo de impuestos del sistema por país + semántica de "exento" (solo IVA) | Accepted | 2026-07-19 |
 
 ## Creating a New ADR
 
