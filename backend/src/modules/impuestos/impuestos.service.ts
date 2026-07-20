@@ -66,7 +66,7 @@ export class ImpuestosService {
       nombre: dto.nombre,
       porcentaje: dto.porcentaje,
       activo: dto.activo ?? true,
-      tipo: dto.tipo ?? 'otro',
+      tipo: 'otro',
     });
     return this.impuestoRepo.save(impuesto);
   }

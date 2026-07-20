@@ -3,6 +3,7 @@ import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ImpuestosService } from './impuestos.service';
 import { Impuesto } from './entities/impuesto.entity';
+import type { CreateImpuestoDto } from './dto/create-impuesto.dto';
 
 const TENANT = 'tenant-uuid';
 const IMP = 'impuesto-uuid';
@@ -106,14 +107,21 @@ describe('ImpuestosService', () => {
       expect(result).toMatchObject({ nombre: 'IVA', porcentaje: '0.19' });
     });
 
-    it('acepta tipo iva explícito', async () => {
-      await service.create(TENANT, {
+    it('siempre persiste tipo=otro, aunque el caller intente inyectar tipo=iva bypasseando el DTO', async () => {
+      // `CreateImpuestoDto` ya no declara `tipo` (no compila pasarlo desde TS),
+      // pero simulamos un caller que bypasea el tipado (ej. un cliente HTTP
+      // enviando `tipo` en el body) para confirmar que el service lo ignora
+      // por completo y siempre persiste 'otro'.
+      const dtoConTipoInyectado = {
         nombre: 'IVA propio',
         porcentaje: '0.19',
         tipo: 'iva',
-      });
+      } as unknown as CreateImpuestoDto;
+
+      await service.create(TENANT, dtoConTipoInyectado);
+
       expect(repo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ tipo: 'iva' }),
+        expect.objectContaining({ tipo: 'otro' }),
       );
     });
 

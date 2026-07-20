@@ -6,7 +6,6 @@ interface Impuesto {
   nombre: string
   porcentaje: string
   activo: boolean
-  tipo: 'iva' | 'otro'
   origen: 'sistema' | 'personalizado'
 }
 
@@ -23,16 +22,10 @@ const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
 const toggling = reactive(new Set<string>())
 
-const tipoOpts = [
-  { label: 'IVA', value: 'iva' },
-  { label: 'Otro', value: 'otro' },
-]
-
 const emptyForm = () => ({
   nombre: '',
   porcentaje: '',
   activo: true,
-  tipo: 'otro' as 'iva' | 'otro',
 })
 const form = ref(emptyForm())
 
@@ -97,7 +90,6 @@ function abrirEditar(imp: Impuesto) {
     nombre: imp.nombre,
     porcentaje: imp.porcentaje,
     activo: imp.activo,
-    tipo: imp.tipo,
   }
   drawerOpen.value = true
 }
@@ -109,7 +101,6 @@ async function guardar() {
       nombre: form.value.nombre,
       porcentaje: form.value.porcentaje,
       activo: form.value.activo,
-      tipo: form.value.tipo,
     }
     const isNew = !editingId.value
     const saved = isNew
@@ -285,9 +276,6 @@ const columns: TableColumn<Impuesto>[] = [
               inputmode="decimal"
               placeholder="0.19"
             />
-          </UFormField>
-          <UFormField label="Tipo" help="Los impuestos tipo IVA no se aplican a items exentos.">
-            <USelect v-model="form.tipo" :items="tipoOpts" class="w-full" />
           </UFormField>
           <UFormField label="Activo">
             <USwitch v-model="form.activo" />
