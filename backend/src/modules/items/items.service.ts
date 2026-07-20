@@ -1606,7 +1606,30 @@ export class ItemsService {
 
       if (comp.tipo === 'receta') {
         // La receta gestiona el bloqueo a nivel de ingrediente. Si el componente
-        // es no bloqueante, un fallo por stock se degrada a advertencia.
+        // es no bloqueante, primero se pre-chequea disponibilidad: sin esto,
+        // `venderIngredientesReceta` podría deducir algunos de sus propios
+        // ingredientes bloqueantes (los que sí tienen stock) antes de lanzar
+        // por otro que no lo tiene, y ese throw quedaría engullido más abajo
+        // sin revertir las deducciones ya escritas en la misma transacción
+        // (deriva silenciosa de inventario). Si no alcanza, se omite el
+        // llamado completo (cero escrituras) y se reporta como advertencia.
+        // El try/catch se conserva como defensa en profundidad para la
+        // ventana de carrera residual entre el pre-chequeo y la deducción.
+        if (!comp.bloqueante) {
+          const disponible = await this.calcularDisponibleReceta(
+            params.tenantId,
+            comp.componente_item_id,
+          );
+          if (
+            disponible !== null &&
+            new Decimal(disponible).lessThan(cantidadTotal)
+          ) {
+            advertencias.push(
+              `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
+            );
+            continue;
+          }
+        }
         try {
           const adv = await this.venderIngredientesReceta(manager, {
             tenantId: params.tenantId,
@@ -1887,6 +1910,15 @@ export class ItemsService {
       throw new BadRequestException(
         'Los combos requieren al menos un componente',
       );
+    }
+    const idsVistos = new Set<string>();
+    for (const c of componentes) {
+      if (idsVistos.has(c.componenteItemId)) {
+        throw new BadRequestException(
+          'Un item no puede aparecer más de una vez como componente del combo',
+        );
+      }
+      idsVistos.add(c.componenteItemId);
     }
     let costoTotal = new Decimal(0);
     const detalle: {

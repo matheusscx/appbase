@@ -986,6 +986,26 @@ describe('ItemsService', () => {
           /componente.*producto.*receta.*servicio/i,
         );
       });
+
+      it('rechaza componentes duplicados (mismo componenteItemId dos veces) sin consultar la BD', async () => {
+        const componentes = [
+          { componenteItemId: PROD_ID, cantidad: '1', bloqueante: true },
+          { componenteItemId: PROD_ID, cantidad: '2', bloqueante: true },
+        ];
+
+        await expect(
+          (service as any).validarYCostearComponentes(
+            managerMock,
+            TENANT,
+            componentes,
+          ),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Un item no puede aparecer más de una vez como componente del combo',
+          ),
+        );
+        expect(managerMock.query).not.toHaveBeenCalled();
+      });
     });
 
     describe('ingrediente', () => {
@@ -2286,6 +2306,118 @@ describe('ItemsService', () => {
           cantidadVendida: '1',
         }),
       ).rejects.toThrow('Stock insuficiente para la salida');
+    });
+
+    it('componente receta NO bloqueante sin disponible suficiente → pre-chequeo omite el llamado (cero escrituras)', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'receta-uuid',
+          componente_nombre: 'Hamburguesa',
+          tipo: 'receta',
+          cantidad: '1',
+          bloqueante: false,
+        },
+      ]);
+      // La receta solo tiene disponible 1, pero se necesitan 2 (cantidad 1 × cantidadVendida 2)
+      const spyDisponible = jest
+        .spyOn(service as any, 'calcularDisponibleReceta')
+        .mockResolvedValueOnce(1);
+      const spyReceta = jest
+        .spyOn(service, 'venderIngredientesReceta')
+        .mockResolvedValue([]);
+
+      const advertencias = await service.venderComponentesCombo(
+        managerMock as any,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          comboItemId: COMBO_NO_BLOQ_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '2',
+        },
+      );
+
+      expect(spyDisponible).toHaveBeenCalledWith(TENANT, 'receta-uuid');
+      // venderIngredientesReceta (y por ende registrarMovimiento para sus
+      // ingredientes) NUNCA se llama: cero escrituras para esta receta.
+      expect(spyReceta).not.toHaveBeenCalled();
+      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+      expect(advertencias).toEqual([
+        'Combo: no había stock suficiente de Hamburguesa, se vendió sin ese componente',
+      ]);
+    });
+
+    it('componente receta NO bloqueante con disponible suficiente → procede normalmente', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'receta-uuid',
+          componente_nombre: 'Hamburguesa',
+          tipo: 'receta',
+          cantidad: '1',
+          bloqueante: false,
+        },
+      ]);
+      jest
+        .spyOn(service as any, 'calcularDisponibleReceta')
+        .mockResolvedValueOnce(5);
+      const spyReceta = jest
+        .spyOn(service, 'venderIngredientesReceta')
+        .mockResolvedValue([]);
+
+      const advertencias = await service.venderComponentesCombo(
+        managerMock as any,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          comboItemId: COMBO_NO_BLOQ_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '2',
+        },
+      );
+
+      expect(spyReceta).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          recetaItemId: 'receta-uuid',
+          cantidadVendida: '2',
+        }),
+      );
+      expect(advertencias).toEqual([]);
+    });
+
+    it('componente receta NO bloqueante con disponible=null (sin ingredientes bloqueantes) → procede normalmente', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'receta-uuid',
+          componente_nombre: 'Hamburguesa',
+          tipo: 'receta',
+          cantidad: '1',
+          bloqueante: false,
+        },
+      ]);
+      jest
+        .spyOn(service as any, 'calcularDisponibleReceta')
+        .mockResolvedValueOnce(null);
+      const spyReceta = jest
+        .spyOn(service, 'venderIngredientesReceta')
+        .mockResolvedValue([]);
+
+      const advertencias = await service.venderComponentesCombo(
+        managerMock as any,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          comboItemId: COMBO_NO_BLOQ_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '2',
+        },
+      );
+
+      expect(spyReceta).toHaveBeenCalled();
+      expect(advertencias).toEqual([]);
     });
   });
 
