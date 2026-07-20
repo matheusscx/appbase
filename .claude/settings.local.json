@@ -97,7 +97,16 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/docs)",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__fill"
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__fill",
+      "Bash(./node_modules/.bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(~/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package ab7f1cd *)",
+      "Bash(xargs -I{} echo {})",
+      "Bash(echo \"---exit code $?---\")",
+      "Bash(npx tsc *)",
+      "Bash(tee /tmp/tsc-out.txt)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(tee /tmp/npm-test-out.txt)",
+      "Bash(./node_modules/.bin/eslint 'src/modules/seeder/**/*.ts')"
     ]
   },
   "enabledMcpjsonServers": [
