@@ -6,6 +6,8 @@ interface Impuesto {
   nombre: string
   porcentaje: string
   activo: boolean
+  tipo: 'iva' | 'otro'
+  origen: 'sistema' | 'personalizado'
 }
 
 const config = useRuntimeConfig()
@@ -21,10 +23,16 @@ const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
 const toggling = reactive(new Set<string>())
 
+const tipoOpts = [
+  { label: 'IVA', value: 'iva' },
+  { label: 'Otro', value: 'otro' },
+]
+
 const emptyForm = () => ({
   nombre: '',
   porcentaje: '',
   activo: true,
+  tipo: 'otro' as 'iva' | 'otro',
 })
 const form = ref(emptyForm())
 
@@ -82,12 +90,14 @@ function abrirCrear() {
 }
 
 function abrirEditar(imp: Impuesto) {
+  if (imp.origen === 'sistema') return
   resetDrawer()
   editingId.value = imp.id
   form.value = {
     nombre: imp.nombre,
     porcentaje: imp.porcentaje,
     activo: imp.activo,
+    tipo: imp.tipo,
   }
   drawerOpen.value = true
 }
@@ -99,6 +109,7 @@ async function guardar() {
       nombre: form.value.nombre,
       porcentaje: form.value.porcentaje,
       activo: form.value.activo,
+      tipo: form.value.tipo,
     }
     const isNew = !editingId.value
     const saved = isNew
@@ -107,7 +118,10 @@ async function guardar() {
           method: 'PATCH',
           body,
         })
-    upsertLocal(saved)
+    // El backend no incluye `origen` en la respuesta de POST/PATCH (solo en GET);
+    // toda fila que llega aquí es siempre personalizada (las de sistema no
+    // pasan por este form, ver guard en abrirEditar).
+    upsertLocal({ ...saved, origen: 'personalizado' })
     toast.add({ title: isNew ? 'Impuesto creado' : 'Impuesto actualizado', color: 'success' })
     drawerOpen.value = false
   }
@@ -121,6 +135,7 @@ async function guardar() {
 }
 
 async function toggleActivo(imp: Impuesto) {
+  if (imp.origen === 'sistema') return
   if (toggling.has(imp.id)) return
   toggling.add(imp.id)
   const prev = imp.activo
@@ -140,6 +155,12 @@ async function toggleActivo(imp: Impuesto) {
   finally {
     toggling.delete(imp.id)
   }
+}
+
+function pedirEliminar(imp: Impuesto) {
+  if (imp.origen === 'sistema') return
+  confirmDeleteId.value = imp.id
+  confirmModalOpen.value = true
 }
 
 async function eliminar(id: string) {
@@ -173,7 +194,7 @@ const columns: TableColumn<Impuesto>[] = [
   <div class="space-y-6">
     <CrudPageHeader
       title="Impuestos"
-      description="Tasas impositivas del tenant (en decimal: 0.19 = 19%)."
+      description="Impuestos oficiales del país (Sistema) e impuestos propios del tenant (en decimal: 0.19 = 19%)."
     >
       <template #actions>
         <UButton
@@ -187,15 +208,24 @@ const columns: TableColumn<Impuesto>[] = [
 
     <CrudTable :data="impuestos" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
-        <CrudListItem
-          :title="row.original.nombre"
-          :subtitle="`Porcentaje: ${row.original.porcentaje}`"
-        />
+        <div class="flex items-center gap-2">
+          <CrudListItem
+            :title="row.original.nombre"
+            :subtitle="`Porcentaje: ${row.original.porcentaje}`"
+          />
+          <UBadge
+            :label="row.original.origen === 'sistema' ? 'Sistema' : 'Personalizado'"
+            :color="row.original.origen === 'sistema' ? 'info' : 'neutral'"
+            variant="soft"
+            size="sm"
+          />
+        </div>
       </template>
 
         <template #activo-cell="{ row }">
           <div class="flex justify-end">
             <USwitch
+              v-if="row.original.origen === 'personalizado'"
               :model-value="row.original.activo"
               :disabled="toggling.has(row.original.id)"
               @update:model-value="toggleActivo(row.original)"
@@ -205,18 +235,21 @@ const columns: TableColumn<Impuesto>[] = [
 
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-2">
-            <UButton
-              icon="i-lucide-square-pen"
-              color="neutral"
-              variant="ghost"
-              @click="abrirEditar(row.original)"
-            />
-            <UButton
-              icon="i-lucide-trash-2"
-              color="error"
-              variant="ghost"
-              @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
-            />
+            <template v-if="row.original.origen === 'personalizado'">
+              <UButton
+                icon="i-lucide-square-pen"
+                color="neutral"
+                variant="ghost"
+                @click="abrirEditar(row.original)"
+              />
+              <UButton
+                icon="i-lucide-trash-2"
+                color="error"
+                variant="ghost"
+                @click="pedirEliminar(row.original)"
+              />
+            </template>
+            <span v-else class="text-xs text-muted">Catálogo oficial</span>
           </div>
         </template>
 
@@ -252,6 +285,9 @@ const columns: TableColumn<Impuesto>[] = [
               inputmode="decimal"
               placeholder="0.19"
             />
+          </UFormField>
+          <UFormField label="Tipo" help="Los impuestos tipo IVA no se aplican a items exentos.">
+            <USelect v-model="form.tipo" :items="tipoOpts" class="w-full" />
           </UFormField>
           <UFormField label="Activo">
             <USwitch v-model="form.activo" />
