@@ -123,9 +123,13 @@ borrado físico).
 - "Exento" queda modelado de forma inequívoca y consistente con ADR-010: un
   estado explícito, congelado por línea, listo para alimentar el futuro DTE sin
   reconstrucción de datos históricos.
-- Un tenant en un país sin catálogo sembrado puede seguir marcando su propio IVA
-  como impuesto personalizado (`tipo: 'iva'` opcional en el DTO) — no bloquea
-  operar mientras se agrega el país al seed.
+- `tipo = 'iva'` queda reservado exclusivamente para filas del sistema
+  (`CreateImpuestoDto`/`UpdateImpuestoDto` no exponen `tipo`; `create()` fuerza
+  `'otro'` en todo impuesto de tenant) — evita que un tenant recree por error el
+  problema original (duplicados de IVA por tenant) marcando su propio impuesto
+  como `iva`. Un tenant en un país sin catálogo sembrado simplemente no tiene
+  impuestos `tipo='iva'` hasta que se agregue el país al seed; sus impuestos
+  personalizados operan igual (siempre `'otro'`, nunca suprimidos por exención).
 - El remapeo idempotente permite evolucionar instalaciones existentes sin
   downtime ni script de migración manual separado.
 

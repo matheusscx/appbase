@@ -92,9 +92,11 @@ Request (POST/PATCH):
 {
   "nombre": "Impuesto verde",
   "porcentaje": "0.05",     // decimal: 0.19 = 19%
-  "activo": true,
-  "tipo": "otro"            // opcional, default 'otro'; 'iva' | 'otro'
+  "activo": true
 }
+// `tipo` NO es aceptado en este DTO: todo impuesto creado/editado por un
+// tenant queda forzado a 'otro' en el servicio. 'tipo=iva' es exclusivo de
+// filas del sistema, sembradas solo por seeder.service.ts.
 ```
 
 No existe endpoint para crear impuestos del sistema — se siembran solo vía
@@ -148,8 +150,9 @@ Sin cambios en `item_impuestos` ni `ventas_impuestos` (mismas FKs de siempre).
 
 ### DTOs
 
-- `CreateImpuestoDto` / `UpdateImpuestoDto` (`dto/`) — `tipo?: 'iva' | 'otro'`
-  (`@IsIn(['iva', 'otro'])`), default `'otro'` cuando se omite.
+- `CreateImpuestoDto` / `UpdateImpuestoDto` (`dto/`) — no declaran `tipo`; el
+  servicio lo fuerza a `'otro'` en `create()` para toda fila creada por un
+  tenant, sin importar qué envíe el cliente (enforcement en backend, no en UI).
 
 ### `ImpuestosService`
 
@@ -212,9 +215,9 @@ clasificación después.
 - Filas de origen `'sistema'`: solo lectura — sin editar, sin eliminar, sin
   toggle de activo (los handlers de editar/eliminar retornan temprano si
   `origen === 'sistema'`).
-- Form de alta/edición (solo aplica a personalizados): campo **Tipo** (`USelect`
-  "IVA"/"Otro", default "Otro") con ayuda contextual: "Los impuestos tipo IVA no
-  se aplican a items exentos."
+- Form de alta/edición (solo aplica a personalizados): sin campo de tipo — todo
+  impuesto creado por el tenant queda `tipo='otro'` (forzado en backend);
+  `tipo='iva'` es exclusivo de las filas del sistema.
 
 ### `configuracion/items.vue`
 
@@ -263,7 +266,8 @@ cd backend && npm test -- modules/ventas/ventas.service.spec.ts
 
 - `impuestos.service.spec`: `findAll` devuelve la unión sistema+tenant con
   `origen` correcto; `create`/`update`/`remove` no alcanzan filas del sistema
-  (404); `tipo` default `'otro'`.
+  (404); `create()` persiste `tipo='otro'` aunque el caller intente forzar
+  `'iva'` (DTO no lo declara — enforcement en backend).
 - `calculo-precios.service.spec`: línea exenta omite impuestos `tipo='iva'` y
   conserva `tipo='otro'`; línea afecta sin cambios de comportamiento.
 - `ventas.service.spec`: `clasificacion_tributaria` congelada en el detalle

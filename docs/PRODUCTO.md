@@ -147,7 +147,7 @@ Cada tenant define sus propias reglas reutilizables:
 
 **Impuestos** — nombre + porcentaje (decimal) + activo + `tipo` (`iva` | `otro`). Dos orígenes conviven en el mismo catálogo:
 - **Oficiales por país** (`origen: 'sistema'`) — ej. IVA Chile 19%, compartido por todos los tenants de ese país. **No editables por el tenant** (solo lectura en la UI); se administran únicamente vía seeder — agregar un país nuevo es agregar su catálogo al seed, sin CRUD superadmin.
-- **Personalizados por tenant** (`origen: 'personalizado'`) — el tenant puede crear/editar/eliminar los suyos, incluyendo su propio `tipo` (útil si su país aún no tiene catálogo oficial sembrado).
+- **Personalizados por tenant** (`origen: 'personalizado'`) — el tenant puede crear/editar/eliminar los suyos, siempre con `tipo = 'otro'` (forzado en backend; `tipo = 'iva'` es exclusivo de las filas del sistema, para evitar que un tenant recree duplicados de IVA).
 
 **Regla "exento" (clasificación tributaria del item):** un item puede marcarse `afecto` (default) o `exento`. `exento` suprime **únicamente** los impuestos `tipo = 'iva'` de esa línea; los impuestos `tipo = 'otro'` (adicionales) siempre se aplican, esté o no exento. La clasificación se **congela por línea de venta** (`venta_detalles.clasificacion_tributaria`) en el momento de vender — no se recalcula si el item cambia de clasificación después, y una nota de crédito hereda la clasificación congelada de la línea original, no la del item vigente. Ver [ADR-011](./adr/011-catalogo-impuestos-sistema.md) y [features/impuestos.md](./features/impuestos.md).
 
