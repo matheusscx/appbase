@@ -464,12 +464,8 @@ describe('ItemsService', () => {
           stock: null,
         },
       ]);
-      expect(
-        result.componentes.some((c) => c.bloqueante === true),
-      ).toBe(true);
-      expect(
-        result.componentes.some((c) => c.bloqueante === false),
-      ).toBe(true);
+      expect(result.componentes.some((c) => c.bloqueante === true)).toBe(true);
+      expect(result.componentes.some((c) => c.bloqueante === false)).toBe(true);
 
       const compQuery = dataSource.query.mock.calls[4][0] as string;
       expect(compQuery).toContain('combo_componentes');
@@ -1463,6 +1459,47 @@ describe('ItemsService', () => {
       );
       expect(updateItems).toBeDefined();
       expect(updateItems?.[1]?.[0]).toBe('0');
+    });
+
+    describe('update/remove combo', () => {
+      const PROD_ID = 'producto-uuid';
+
+      it('reemplaza componentes y recalcula costo en update', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([
+            {
+              nombre: 'Producto base',
+              tipo: 'producto',
+              costo_actual: '500',
+            },
+          ]) // lookup PROD_ID
+          .mockResolvedValueOnce([]) // soft-delete combo_componentes
+          .mockResolvedValueOnce([]) // INSERT combo_componentes
+          .mockResolvedValueOnce([]); // UPDATE item_combo
+
+        const patch = await service.update(TENANT, COMBO_ID, {
+          componentes: [
+            { componenteItemId: PROD_ID, cantidad: '2', bloqueante: true },
+          ],
+        });
+        expect(patch.costoActual).toBe('1000'); // costo 500 × 2
+        expect(patch.componentes).toHaveLength(1);
+      });
+
+      it('bloquea borrar un item usado como componente de un combo vivo', async () => {
+        itemRepo.findOne.mockResolvedValueOnce({
+          id: PROD_ID,
+          tenantId: TENANT,
+        });
+        dataSource.query
+          .mockResolvedValueOnce([]) // no receta_ingredientes
+          .mockResolvedValueOnce([{ nombre: 'Combo Clásico' }]); // combo usage
+
+        await expect(service.remove(TENANT, PROD_ID)).rejects.toThrow(
+          /No se puede eliminar.*componente de/i,
+        );
+      });
     });
   });
 

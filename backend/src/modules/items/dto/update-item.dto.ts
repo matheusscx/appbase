@@ -16,6 +16,7 @@ import { Type } from 'class-transformer';
 import {
   RecetaExtraInputDto,
   RecetaIngredienteInputDto,
+  ComboComponenteInputDto,
 } from './create-item.dto';
 
 export class UpdateItemDto {
@@ -104,6 +105,13 @@ export class UpdateItemDto {
   @Type(() => RecetaExtraInputDto)
   @IsOptional()
   extrasPermitidos?: RecetaExtraInputDto[];
+
+  // Extensión combo (reemplazo total de la lista)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ComboComponenteInputDto)
+  @IsOptional()
+  componentes?: ComboComponenteInputDto[];
 
   // Reglas N:M (undefined = no tocar; [] = limpiar todas)
   @IsArray()

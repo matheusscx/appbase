@@ -1032,6 +1032,38 @@ export class ItemsService {
           }
           patch.extrasPermitidos = extrasValidados;
         }
+      } else if (tipo === 'combo' && dto.componentes !== undefined) {
+        const costeo = await this.validarYCostearComponentes(
+          manager,
+          tenantId,
+          dto.componentes,
+        );
+        await manager.query(
+          `UPDATE combo_componentes
+           SET eliminado_el = NOW(), actualizado_el = NOW()
+           WHERE combo_item_id = $1 AND eliminado_el IS NULL`,
+          [itemId],
+        );
+        for (const comp of dto.componentes) {
+          await manager.query(
+            `INSERT INTO combo_componentes
+               (tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [
+              tenantId,
+              itemId,
+              comp.componenteItemId,
+              comp.cantidad,
+              comp.bloqueante ?? true,
+            ],
+          );
+        }
+        await manager.query(
+          `UPDATE item_combo SET costo_actual = $1 WHERE item_id = $2`,
+          [costeo.costoActual, itemId],
+        );
+        patch.costoActual = costeo.costoActual;
+        patch.componentes = costeo.componentes;
       }
 
       if (dto.impuestosIds !== undefined) {
@@ -1092,6 +1124,20 @@ export class ItemsService {
     if (usoRows.length) {
       throw new BadRequestException(
         `No se puede eliminar: es ingrediente de ${usoRows.map((r) => r.nombre).join(', ')}`,
+      );
+    }
+
+    const comboRows: { nombre: string }[] = await this.dataSource.query(
+      `SELECT DISTINCT c_item.nombre
+       FROM combo_componentes cc
+       JOIN items c_item ON c_item.item_id = cc.combo_item_id
+         AND c_item.eliminado_el IS NULL
+       WHERE cc.componente_item_id = $1 AND cc.eliminado_el IS NULL`,
+      [itemId],
+    );
+    if (comboRows.length) {
+      throw new BadRequestException(
+        `No se puede eliminar: es componente de ${comboRows.map((r) => r.nombre).join(', ')}`,
       );
     }
 
