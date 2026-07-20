@@ -19,15 +19,15 @@ function tieneStock(item: ItemCatalogo): boolean {
   }
 }
 
-/** Recetas nunca bloquean el click: la validación real vive en el backend. */
+/** Recetas y combos nunca bloquean el click: la validación real vive en el backend. */
 function puedeAgregar(item: ItemCatalogo): boolean {
-  if (item.tipo === 'receta') return true
+  if (item.tipo === 'receta' || item.tipo === 'combo') return true
   return tieneStock(item)
 }
 
-/** Solo atenúa visualmente — no bloquea el click en recetas. */
+/** Solo atenúa visualmente — no bloquea el click en recetas/combos. */
 function sinStockVisual(item: ItemCatalogo): boolean {
-  if (item.tipo === 'receta') return item.disponible === 0
+  if (item.tipo === 'receta' || item.tipo === 'combo') return item.disponible === 0
   return !tieneStock(item)
 }
 
@@ -103,7 +103,7 @@ function onAgregar(item: ItemCatalogo) {
             <span v-if="item.tipo === 'producto'" class="text-xs text-muted shrink-0">
               Stock: {{ formatStock(item.stock, item.unidadMedida) }}
             </span>
-            <span v-else-if="item.tipo === 'receta' && item.disponible !== null && item.disponible !== undefined" class="text-xs text-muted shrink-0">
+            <span v-else-if="(item.tipo === 'receta' || item.tipo === 'combo') && item.disponible !== null && item.disponible !== undefined" class="text-xs text-muted shrink-0">
               Disponibles: {{ item.disponible }}
             </span>
             <div

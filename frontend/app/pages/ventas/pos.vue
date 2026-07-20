@@ -129,17 +129,20 @@ watch(tipoDocumentoId, () => {
 async function cargar() {
   loadingCatalogo.value = true
   try {
-    const [productosRes, recetasRes, metodosRes, tiposRes] = await Promise.all([
+    const [productosRes, recetasRes, combosRes, metodosRes, tiposRes] = await Promise.all([
       useApiFetch<PaginatedResponse<ItemCatalogo>>(
         `${apiUrl}/items?tipo=producto&pageSize=100`,
       ),
       useApiFetch<PaginatedResponse<ItemCatalogo>>(
         `${apiUrl}/items?tipo=receta&pageSize=100`,
       ),
+      useApiFetch<PaginatedResponse<ItemCatalogo>>(
+        `${apiUrl}/items?tipo=combo&pageSize=100`,
+      ),
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
     ])
-    items.value = [...productosRes.data, ...recetasRes.data]
+    items.value = [...productosRes.data, ...recetasRes.data, ...combosRes.data]
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes
     tipoDocumentoId.value = tiposRes[0]?.id
