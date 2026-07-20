@@ -394,6 +394,88 @@ describe('ItemsService', () => {
       expect(extrasQuery).toContain('receta_extras_permitidos');
       expect(extrasQuery).toContain('ip.stock');
     });
+
+    it('findOne combo incluye componentes bloqueantes y no bloqueantes', async () => {
+      const baseRow = {
+        item_id: COMBO_ID,
+        nombre: 'Combo Hamburguesa + Bebida',
+        descripcion: null,
+        tipo: 'combo',
+        activo: true,
+        precio_base: '5000',
+        precio_incluye_impuesto: false,
+        moneda_id: MONEDA_ID,
+        moneda_codigo: 'CLP',
+        moneda_simbolo: '$',
+        categoria_id: null,
+        categoria_nombre: null,
+        creado_el: new Date(),
+        stock: null,
+        unidad_medida: null,
+        fecha_elaboracion: null,
+        fecha_vencimiento: null,
+        modo_inventario: null,
+        costo_actual: '3000',
+        duracion_estimada: null,
+        requiere_cita: null,
+        frecuencia: null,
+      };
+      dataSource.query
+        .mockResolvedValueOnce([baseRow])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            componente_item_id: 'ingrediente-pan',
+            componente_nombre: 'Hamburguesa',
+            tipo: 'receta',
+            cantidad: '1',
+            bloqueante: true,
+            stock: null,
+          },
+          {
+            componente_item_id: 'servicio-envoltorio',
+            componente_nombre: 'Envoltorio para llevar',
+            tipo: 'servicio',
+            cantidad: '1',
+            bloqueante: false,
+            stock: null,
+          },
+        ]);
+
+      const result = await service.findOne(TENANT, COMBO_ID);
+
+      expect(result.componentes).toEqual([
+        {
+          componenteItemId: 'ingrediente-pan',
+          componenteNombre: 'Hamburguesa',
+          tipo: 'receta',
+          cantidad: '1',
+          bloqueante: true,
+          stock: null,
+        },
+        {
+          componenteItemId: 'servicio-envoltorio',
+          componenteNombre: 'Envoltorio para llevar',
+          tipo: 'servicio',
+          cantidad: '1',
+          bloqueante: false,
+          stock: null,
+        },
+      ]);
+      expect(
+        result.componentes.some((c) => c.bloqueante === true),
+      ).toBe(true);
+      expect(
+        result.componentes.some((c) => c.bloqueante === false),
+      ).toBe(true);
+
+      const compQuery = dataSource.query.mock.calls[4][0] as string;
+      expect(compQuery).toContain('combo_componentes');
+      expect(compQuery).toContain('ip.stock');
+      expect(compQuery).not.toContain('cc.bloqueante = true');
+    });
   });
 
   // ── create ─────────────────────────────────────────────────────────────────
