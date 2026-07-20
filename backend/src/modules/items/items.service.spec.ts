@@ -14,6 +14,8 @@ const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
 const MONEDA_ID = 'moneda-uuid';
 const CATEGORIA_ID = 'categoria-uuid';
+const COMBO_ID = 'combo-uuid';
+const COMBO_SIN_BLOQUEANTES_ID = 'combo-sin-bloqueantes-uuid';
 
 describe('ItemsService', () => {
   let service: ItemsService;
@@ -215,6 +217,56 @@ describe('ItemsService', () => {
 
       const result = await service.findAll(TENANT, {});
       expect(result.data[0].disponible).toBeNull();
+    });
+  });
+
+  // ── disponible de combo ────────────────────────────────────────────────────
+
+  describe('disponible de combo', () => {
+    it('es el mínimo floor(stock/cantidad) entre componentes bloqueantes; servicio se ignora', async () => {
+      // producto stock 10, cantidad 2 → 5 ; receta disponible 3, cantidad 1 → 3 ; servicio ignorado
+      // se espera 3
+      dataSource.query.mockResolvedValueOnce([
+        // calcularDisponibleCombo query
+        {
+          componente_item_id: 'prod-uuid',
+          tipo: 'producto',
+          cantidad: '2',
+          stock: '10',
+        },
+        {
+          componente_item_id: 'receta-uuid',
+          tipo: 'receta',
+          cantidad: '1',
+          stock: null,
+        },
+        {
+          componente_item_id: 'servicio-uuid',
+          tipo: 'servicio',
+          cantidad: '1',
+          stock: null,
+        },
+      ]);
+
+      jest
+        .spyOn(service as any, 'calcularDisponibleReceta')
+        .mockResolvedValueOnce(3);
+
+      const disp = await (service as any).calcularDisponibleCombo(
+        TENANT,
+        COMBO_ID,
+      );
+      expect(disp).toBe(3);
+    });
+
+    it('devuelve null si el combo no tiene componentes bloqueantes', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const disp = await (service as any).calcularDisponibleCombo(
+        TENANT,
+        COMBO_SIN_BLOQUEANTES_ID,
+      );
+      expect(disp).toBeNull();
     });
   });
 

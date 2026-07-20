@@ -100,7 +100,7 @@ export class ItemsService {
       c.nombre AS categoria_nombre,
       ip.stock, ip.unidad_medida, ip.fecha_elaboracion, ip.fecha_vencimiento,
       ip.modo_inventario,
-      COALESCE(ip.costo_actual, ir.costo_actual) AS costo_actual,
+      COALESCE(ip.costo_actual, ir.costo_actual, icb.costo_actual) AS costo_actual,
       isr.duracion_estimada, isr.requiere_cita,
       isu.frecuencia
     FROM items i
@@ -110,6 +110,7 @@ export class ItemsService {
     LEFT JOIN item_servicio isr ON isr.item_id = i.item_id
     LEFT JOIN item_suscripcion isu ON isu.item_id = i.item_id
     LEFT JOIN item_receta ir ON ir.item_id = i.item_id
+    LEFT JOIN item_combo icb ON icb.item_id = i.item_id
   `;
 
   private mapRow(r: ItemRow) {
@@ -199,7 +200,9 @@ export class ItemsService {
         const disponible =
           base.tipo === 'receta'
             ? await this.calcularDisponibleReceta(tenantId, base.id)
-            : null;
+            : base.tipo === 'combo'
+              ? await this.calcularDisponibleCombo(tenantId, base.id)
+              : null;
         return { ...base, disponible };
       }),
     );
@@ -248,6 +251,14 @@ export class ItemsService {
       unidadCodigo: string;
       precioExtra: string;
       stock: string;
+    }[] = [];
+    let componentes: {
+      componenteItemId: string;
+      componenteNombre: string;
+      tipo: string;
+      cantidad: string;
+      bloqueante: boolean;
+      stock: string | null;
     }[] = [];
     if (rows[0].tipo === 'receta') {
       const ingRows: {
@@ -301,6 +312,33 @@ export class ItemsService {
       }));
     }
 
+    if (rows[0].tipo === 'combo') {
+      const compRows: {
+        componente_item_id: string;
+        componente_nombre: string;
+        tipo: string;
+        cantidad: string;
+        bloqueante: boolean;
+        stock: string | null;
+      }[] = await this.dataSource.query(
+        `SELECT cc.componente_item_id, i.nombre AS componente_nombre, i.tipo,
+                cc.cantidad, cc.bloqueante, ip.stock
+         FROM combo_componentes cc
+         JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+         LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
+         WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL`,
+        [itemId, tenantId],
+      );
+      componentes = compRows.map((r) => ({
+        componenteItemId: r.componente_item_id,
+        componenteNombre: r.componente_nombre,
+        tipo: r.tipo,
+        cantidad: r.cantidad,
+        bloqueante: r.bloqueante,
+        stock: r.stock,
+      }));
+    }
+
     return {
       ...this.mapRow(rows[0]),
       impuestosIds: impuestosRows.map((r) => r.impuesto_id),
@@ -308,6 +346,7 @@ export class ItemsService {
       descuentosIds: descuentosRows.map((r) => r.descuento_id),
       ingredientes,
       extrasPermitidos,
+      componentes,
     };
   }
 
@@ -1536,6 +1575,50 @@ export class ItemsService {
         r.ingrediente_unidad_medida,
       );
       const posibles = new Decimal(r.stock).div(cantidadBase).floor();
+      if (minimo === null || posibles.lessThan(minimo)) minimo = posibles;
+    }
+    return minimo === null ? null : minimo.toNumber();
+  }
+
+  /**
+   * Mínimo, entre los componentes BLOQUEANTES de un combo, de las unidades que
+   * alcanzan: producto → floor(stock/cantidad); receta → floor(disponibleReceta/
+   * cantidad); servicio ignorado. null si no hay componentes bloqueantes.
+   */
+  private async calcularDisponibleCombo(
+    tenantId: string,
+    comboItemId: string,
+  ): Promise<number | null> {
+    const rows: {
+      componente_item_id: string;
+      tipo: string;
+      cantidad: string;
+      stock: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT cc.componente_item_id, i.tipo, cc.cantidad, ip.stock
+       FROM combo_componentes cc
+       JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+       LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
+       WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2
+         AND cc.bloqueante = true AND cc.eliminado_el IS NULL`,
+      [comboItemId, tenantId],
+    );
+
+    let minimo: Decimal | null = null;
+    for (const r of rows) {
+      let posibles: Decimal;
+      if (r.tipo === 'servicio') {
+        continue;
+      } else if (r.tipo === 'receta') {
+        const dispReceta = await this.calcularDisponibleReceta(
+          tenantId,
+          r.componente_item_id,
+        );
+        if (dispReceta === null) continue;
+        posibles = new Decimal(dispReceta).div(r.cantidad).floor();
+      } else {
+        posibles = new Decimal(r.stock ?? '0').div(r.cantidad).floor();
+      }
       if (minimo === null || posibles.lessThan(minimo)) minimo = posibles;
     }
     return minimo === null ? null : minimo.toNumber();
