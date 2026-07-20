@@ -1561,6 +1561,117 @@ export class ItemsService {
     return advertencias;
   }
 
+  /**
+   * Vende N unidades de un combo: expande a un efecto de stock por cada
+   * componente. Producto → movimiento de salida directo; receta → delega en
+   * `venderIngredientesReceta` (que ya maneja su propio bloqueo a nivel de
+   * ingrediente); servicio → sin efecto de stock. Un componente bloqueante
+   * sin stock deja propagar el error y aborta toda la transacción de la
+   * venta; uno no bloqueante degrada el fallo por stock a advertencia.
+   */
+  async venderComponentesCombo(
+    manager: EntityManager,
+    params: {
+      tenantId: string;
+      usuarioId: string | null;
+      ventaId: string;
+      comboItemId: string;
+      comboNombre: string;
+      cantidadVendida: string;
+    },
+  ): Promise<string[]> {
+    const componentes: {
+      componente_item_id: string;
+      componente_nombre: string;
+      tipo: string;
+      cantidad: string;
+      bloqueante: boolean;
+    }[] = await manager.query(
+      `SELECT cc.componente_item_id, i.nombre AS componente_nombre, i.tipo,
+              cc.cantidad, cc.bloqueante
+       FROM combo_componentes cc
+       JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+       WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL`,
+      [params.comboItemId, params.tenantId],
+    );
+
+    const advertencias: string[] = [];
+
+    for (const comp of componentes) {
+      const cantidadTotal = new Decimal(comp.cantidad)
+        .mul(params.cantidadVendida)
+        .toString();
+
+      if (comp.tipo === 'servicio') continue;
+
+      if (comp.tipo === 'receta') {
+        // La receta gestiona el bloqueo a nivel de ingrediente. Si el componente
+        // es no bloqueante, un fallo por stock se degrada a advertencia.
+        try {
+          const adv = await this.venderIngredientesReceta(manager, {
+            tenantId: params.tenantId,
+            usuarioId: params.usuarioId,
+            ventaId: params.ventaId,
+            recetaItemId: comp.componente_item_id,
+            recetaNombre: comp.componente_nombre,
+            cantidadVendida: cantidadTotal,
+          });
+          advertencias.push(...adv);
+        } catch (error) {
+          if (
+            !comp.bloqueante &&
+            error instanceof BadRequestException &&
+            error.message === 'Stock insuficiente para la salida'
+          ) {
+            advertencias.push(
+              `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
+            );
+          } else {
+            throw error;
+          }
+        }
+        continue;
+      }
+
+      // producto
+      const movimientoParams = {
+        tenantId: params.tenantId,
+        itemId: comp.componente_item_id,
+        tipo: 'salida' as const,
+        motivo: 'venta',
+        cantidad: cantidadTotal,
+        usuarioId: params.usuarioId,
+        ventaId: params.ventaId,
+      };
+      if (comp.bloqueante) {
+        await this.inventarioService.registrarMovimiento(
+          manager,
+          movimientoParams,
+        );
+        continue;
+      }
+      try {
+        await this.inventarioService.registrarMovimiento(
+          manager,
+          movimientoParams,
+        );
+      } catch (error) {
+        if (
+          error instanceof BadRequestException &&
+          error.message === 'Stock insuficiente para la salida'
+        ) {
+          advertencias.push(
+            `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
+          );
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return advertencias;
+  }
+
   // ── private helpers ────────────────────────────────────────────────────────
 
   /** Rechaza costos presentes que no sean > 0 (NULL = sin costo sigue permitido). */

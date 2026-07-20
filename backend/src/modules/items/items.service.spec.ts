@@ -2161,6 +2161,134 @@ describe('ItemsService', () => {
     });
   });
 
+  describe('venderComponentesCombo', () => {
+    const USUARIO_ID = 'usuario-uuid';
+    const VENTA_ID = 'venta-uuid';
+    const COMBO_NO_BLOQ_ID = 'combo-no-bloq-uuid';
+    const COMBO_BLOQ_ID = 'combo-bloq-uuid';
+
+    it('producto → salida; receta → venderIngredientesReceta; servicio → nada', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'prod-uuid',
+          componente_nombre: 'Papas',
+          tipo: 'producto',
+          cantidad: '1',
+          bloqueante: true,
+        },
+        {
+          componente_item_id: 'receta-uuid',
+          componente_nombre: 'Hamburguesa',
+          tipo: 'receta',
+          cantidad: '1',
+          bloqueante: true,
+        },
+        {
+          componente_item_id: 'servicio-uuid',
+          componente_nombre: 'Envoltura',
+          tipo: 'servicio',
+          cantidad: '1',
+          bloqueante: true,
+        },
+      ]);
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({} as any);
+      const spyReceta = jest
+        .spyOn(service, 'venderIngredientesReceta')
+        .mockResolvedValue([]);
+
+      const advertencias = await service.venderComponentesCombo(
+        managerMock as any,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          comboItemId: COMBO_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '2',
+        },
+      );
+
+      expect(advertencias).toEqual([]);
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ itemId: 'prod-uuid', cantidad: '2' }),
+      );
+      expect(spyReceta).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          recetaItemId: 'receta-uuid',
+          cantidadVendida: '2',
+        }),
+      );
+      // servicio no genera movimiento ni delega en receta
+      expect(spyMov).not.toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ itemId: 'servicio-uuid' }),
+      );
+    });
+
+    it('componente NO bloqueante sin stock → advertencia (no aborta)', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'prod-uuid',
+          componente_nombre: 'Papas',
+          tipo: 'producto',
+          cantidad: '1',
+          bloqueante: false,
+        },
+      ]);
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockRejectedValue(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+
+      const advertencias = await service.venderComponentesCombo(
+        managerMock as any,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          comboItemId: COMBO_NO_BLOQ_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '1',
+        },
+      );
+
+      expect(advertencias.length).toBe(1);
+    });
+
+    it('componente bloqueante sin stock → aborta', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'prod-uuid',
+          componente_nombre: 'Papas',
+          tipo: 'producto',
+          cantidad: '1',
+          bloqueante: true,
+        },
+      ]);
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockRejectedValue(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+
+      await expect(
+        service.venderComponentesCombo(managerMock as any, {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          comboItemId: COMBO_BLOQ_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '1',
+        }),
+      ).rejects.toThrow('Stock insuficiente para la salida');
+    });
+  });
+
   describe('desfases de costo de recetas', () => {
     const RECETA_ID = 'receta-1';
     const CARNE_ID = 'carne-1';

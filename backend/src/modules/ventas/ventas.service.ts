@@ -144,14 +144,16 @@ export class VentasService {
       }
 
       const unidadBase =
-        item.tipo === 'receta' ? 'unidad' : (item.unidadMedida ?? 'unidad');
+        item.tipo === 'receta' || item.tipo === 'combo'
+          ? 'unidad'
+          : (item.unidadMedida ?? 'unidad');
 
       const res = resolverCantidadDesdePresentacion({
         cantidadPresentacion: linea.cantidadPresentacion,
         unidadCodigoPresentacion: linea.unidadCodigoPresentacion,
         unidadBaseCodigo: unidadBase,
         catalogo,
-        forzarConteo: item.tipo === 'receta',
+        forzarConteo: item.tipo === 'receta' || item.tipo === 'combo',
       });
 
       return {
@@ -437,6 +439,19 @@ export class VentasService {
             recetaNombre: item.nombre,
             cantidadVendida: cantidadCanonica,
             snapshot: personalizacion ?? undefined,
+          },
+        );
+        advertenciasReceta.push(...advertencias);
+      } else if (item.tipo === 'combo') {
+        const advertencias = await this.itemsService.venderComponentesCombo(
+          manager,
+          {
+            tenantId,
+            usuarioId,
+            ventaId: venta.id,
+            comboItemId: item.id,
+            comboNombre: item.nombre,
+            cantidadVendida: cantidadCanonica,
           },
         );
         advertenciasReceta.push(...advertencias);
