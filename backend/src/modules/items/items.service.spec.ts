@@ -695,7 +695,7 @@ describe('ItemsService', () => {
         const result = await service.create(
           TENANT,
           'user-uuid',
-          dtoRecetaConExtras as any,
+          dtoRecetaConExtras,
         );
 
         expect(result.extrasPermitidos).toEqual([
@@ -710,7 +710,7 @@ describe('ItemsService', () => {
         const insertExtra = managerMock.query.mock.calls.find(
           (c: unknown[]) =>
             typeof c[0] === 'string' &&
-            (c[0] as string).includes('INSERT INTO receta_extras_permitidos'),
+            c[0].includes('INSERT INTO receta_extras_permitidos'),
         );
         expect(insertExtra).toBeDefined();
         expect(insertExtra?.[1]).toEqual([
@@ -776,6 +776,88 @@ describe('ItemsService', () => {
       });
     });
 
+    describe('create combo', () => {
+      const PROD_ID = 'producto-uuid';
+      const RECETA_ID = 'receta-uuid';
+      const OTRO_COMBO_ID = 'combo-uuid';
+
+      it('calcula costo_actual = Σ(costo componente × cantidad) e inserta componentes', async () => {
+        // producto costo 500 ×1  +  receta costo 1200 ×1  = 1700
+        const dto = {
+          nombre: 'Combo Clásico',
+          precioBase: '5000',
+          monedaId: MONEDA_ID,
+          tipo: 'combo',
+          componentes: [
+            { componenteItemId: PROD_ID, cantidad: '1', bloqueante: true },
+            { componenteItemId: RECETA_ID, cantidad: '1', bloqueante: true },
+          ],
+        } as any;
+        managerMock.query
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+          .mockResolvedValueOnce([
+            {
+              nombre: 'Producto base',
+              tipo: 'producto',
+              costo_actual: '500',
+            },
+          ]) // lookup PROD_ID
+          .mockResolvedValueOnce([
+            {
+              nombre: 'Receta base',
+              tipo: 'receta',
+              costo_actual: '1200',
+            },
+          ]) // lookup RECETA_ID
+          .mockResolvedValueOnce([]) // INSERT item_combo
+          .mockResolvedValueOnce([]) // INSERT combo_componentes PROD_ID
+          .mockResolvedValueOnce([]); // INSERT combo_componentes RECETA_ID
+
+        const res = await service.create(TENANT, 'user-uuid', dto);
+        expect(res.tipo).toBe('combo');
+        expect(res.costoActual).toBe('1700');
+        expect(res.componentes).toHaveLength(2);
+      });
+
+      it('rechaza un combo sin componentes', async () => {
+        const dto = {
+          nombre: 'X',
+          precioBase: '1',
+          monedaId: MONEDA_ID,
+          tipo: 'combo',
+          componentes: [],
+        } as any;
+        await expect(service.create(TENANT, 'user-uuid', dto)).rejects.toThrow(
+          'Los combos requieren al menos un componente',
+        );
+      });
+
+      it('rechaza un componente de tipo combo o suscripcion', async () => {
+        const dto = {
+          nombre: 'X',
+          precioBase: '1',
+          monedaId: MONEDA_ID,
+          tipo: 'combo',
+          componentes: [{ componenteItemId: OTRO_COMBO_ID, cantidad: '1' }],
+        } as any;
+        managerMock.query
+          .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+          .mockResolvedValueOnce([
+            {
+              nombre: 'Otro combo',
+              tipo: 'combo',
+              costo_actual: '5000',
+            },
+          ]); // lookup OTRO_COMBO_ID
+
+        await expect(service.create(TENANT, 'user-uuid', dto)).rejects.toThrow(
+          /componente.*producto.*receta.*servicio/i,
+        );
+      });
+    });
+
     describe('ingrediente', () => {
       const dtoIng = {
         nombre: 'Carne molida',
@@ -798,10 +880,10 @@ describe('ItemsService', () => {
           stockResultante: '10',
         });
 
-        await service.create(TENANT, 'user-uuid', dtoIng as any);
+        await service.create(TENANT, 'user-uuid', dtoIng);
 
-        const insertItemsCall = managerMock.query.mock.calls.find((c: unknown[]) =>
-          String(c[0]).includes('INSERT INTO items'),
+        const insertItemsCall = managerMock.query.mock.calls.find(
+          (c: unknown[]) => String(c[0]).includes('INSERT INTO items'),
         );
         expect(insertItemsCall[1][5]).toBe('0'); // precio_base
         expect(insertItemsCall[1][8]).toBe('ingrediente'); // tipo
@@ -916,7 +998,7 @@ describe('ItemsService', () => {
       const result = await service.create(TENANT, 'user-uuid', {
         ...baseDtoProducto,
         clasificacionTributaria: 'exento',
-      } as any);
+      });
 
       const insertCall = managerMock.query.mock.calls.find((c) =>
         (c[0] as string).includes('INSERT INTO items'),
@@ -956,7 +1038,7 @@ describe('ItemsService', () => {
       await service.create(TENANT, 'user-uuid', {
         ...baseDtoProducto,
         impuestosIds: ['iva-sistema'],
-      } as any);
+      });
 
       const valCall = managerMock.query.mock.calls[1];
       expect(valCall[0]).toContain('pais_id');
@@ -1146,8 +1228,8 @@ describe('ItemsService', () => {
       const updateReceta = managerMock.query.mock.calls.find(
         (c: unknown[]) =>
           typeof c[0] === 'string' &&
-          (c[0] as string).includes('UPDATE item_receta') &&
-          (c[0] as string).includes('costo_actual'),
+          c[0].includes('UPDATE item_receta') &&
+          c[0].includes('costo_actual'),
       );
       expect(updateReceta?.[0]).toContain('costo_propuesto_omitido = NULL');
       expect(updateReceta?.[1]).toEqual(['120', ITEM_ID]);
@@ -1181,15 +1263,15 @@ describe('ItemsService', () => {
       const softDeleteCall = managerMock.query.mock.calls.find(
         (c: unknown[]) =>
           typeof c[0] === 'string' &&
-          (c[0] as string).includes('receta_extras_permitidos') &&
-          (c[0] as string).includes('eliminado_el = NOW()'),
+          c[0].includes('receta_extras_permitidos') &&
+          c[0].includes('eliminado_el = NOW()'),
       );
       expect(softDeleteCall).toBeDefined();
       expect(softDeleteCall?.[1]).toEqual([ITEM_ID, TENANT]);
       const insertCall = managerMock.query.mock.calls.find(
         (c: unknown[]) =>
           typeof c[0] === 'string' &&
-          (c[0] as string).includes('INSERT INTO receta_extras_permitidos'),
+          c[0].includes('INSERT INTO receta_extras_permitidos'),
       );
       expect(insertCall?.[1]).toEqual([
         TENANT,
@@ -1214,18 +1296,15 @@ describe('ItemsService', () => {
       { field: 'impuestosIds', value: ['imp-1'] },
       { field: 'recargosIds', value: ['rec-1'] },
       { field: 'descuentosIds', value: ['desc-1'] },
-    ])(
-      'rechaza $field en ingrediente',
-      async ({ field, value }) => {
-        managerMock.query.mockResolvedValueOnce([
-          { item_id: ITEM_ID, tipo: 'ingrediente' },
-        ]);
+    ])('rechaza $field en ingrediente', async ({ field, value }) => {
+      managerMock.query.mockResolvedValueOnce([
+        { item_id: ITEM_ID, tipo: 'ingrediente' },
+      ]);
 
-        await expect(
-          service.update(TENANT, ITEM_ID, { [field]: value } as any),
-        ).rejects.toThrow(BadRequestException);
-      },
-    );
+      await expect(
+        service.update(TENANT, ITEM_ID, { [field]: value } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
 
     it('rechaza modoInventario distinto de cantidad en ingrediente', async () => {
       managerMock.query.mockResolvedValueOnce([
@@ -1606,7 +1685,9 @@ describe('ItemsService', () => {
           RECETA_ID,
           { extras: [{ ingredienteItemId: 'extra-ajeno' }] },
         ),
-      ).rejects.toThrow(new BadRequestException('Extra no permitido para esta receta'));
+      ).rejects.toThrow(
+        new BadRequestException('Extra no permitido para esta receta'),
+      );
     });
 
     it('rechaza omitido que no pertenece a la receta', async () => {
@@ -1846,7 +1927,9 @@ describe('ItemsService', () => {
       );
 
       expect(advertencias).toEqual([]);
-      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(2);
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(
+        2,
+      );
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
         1,
         managerMock,
@@ -2062,8 +2145,12 @@ describe('ItemsService', () => {
       );
       expect(rows).toHaveLength(1);
       // calls[0] = exists check; calls[1] = cabeceras filtradas por ingrediente
-      expect(dataSource.query.mock.calls[0][0]).toContain("tipo = 'ingrediente'");
-      expect(dataSource.query.mock.calls[1][0]).toContain('ingrediente_item_id');
+      expect(dataSource.query.mock.calls[0][0]).toContain(
+        "tipo = 'ingrediente'",
+      );
+      expect(dataSource.query.mock.calls[1][0]).toContain(
+        'ingrediente_item_id',
+      );
       expect(dataSource.query.mock.calls[1][1]).toEqual(
         expect.arrayContaining([TENANT, CARNE_ID]),
       );
@@ -2110,7 +2197,9 @@ describe('ItemsService', () => {
 
       it('aplicar sin checkbox no toca precio_base', async () => {
         managerMock.query
-          .mockResolvedValueOnce([{ receta_item_id: RECETA_ID, tipo: 'receta' }])
+          .mockResolvedValueOnce([
+            { receta_item_id: RECETA_ID, tipo: 'receta' },
+          ])
           .mockResolvedValueOnce([
             {
               cantidad: '1',
@@ -2128,9 +2217,9 @@ describe('ItemsService', () => {
         const sqls = managerMock.query.mock.calls.map(
           (c: unknown[]) => c[0] as string,
         );
-        expect(sqls.some((s) => s.includes('UPDATE items SET precio_base'))).toBe(
-          false,
-        );
+        expect(
+          sqls.some((s) => s.includes('UPDATE items SET precio_base')),
+        ).toBe(false);
       });
 
       it('aplicar con actualizarPrecio exige precioBase > 0', async () => {
@@ -2178,7 +2267,7 @@ describe('ItemsService', () => {
         const omitSql = managerMock.query.mock.calls.find(
           (c: unknown[]) =>
             typeof c[0] === 'string' &&
-            (c[0] as string).includes('SET costo_propuesto_omitido'),
+            c[0].includes('SET costo_propuesto_omitido'),
         );
         expect(omitSql).toBeUndefined();
       });

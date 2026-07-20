@@ -576,6 +576,31 @@ CREATE UNIQUE INDEX "uq_receta_extra_vivo"
   ON "receta_extras_permitidos" ("receta_item_id", "ingrediente_item_id")
   WHERE "eliminado_el" IS NULL;
 
+-- Extensión 1:1 para tipo 'combo' (item vendible sin stock propio; descuenta el de sus componentes)
+CREATE TABLE "item_combo" (
+  "item_id"      UUID PRIMARY KEY REFERENCES "items" ("item_id"),
+  "costo_actual" NUMERIC(18,4)  -- Σ(costo componente × cantidad); cacheado, no se recalcula solo
+);
+
+-- Componentes fijos de un combo (N por combo)
+CREATE TABLE "combo_componentes" (
+  "combo_componente_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"           UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "combo_item_id"       UUID          NOT NULL REFERENCES "items" ("item_id"),
+  "componente_item_id"  UUID          NOT NULL REFERENCES "items" ("item_id"),
+  -- componente_item_id apunta a un item tipo producto | receta | servicio
+  "cantidad"            NUMERIC(18,4) NOT NULL,  -- por 1 unidad del combo
+  "bloqueante"          BOOLEAN       NOT NULL DEFAULT true,
+  "creado_el"           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"      TIMESTAMPTZ,
+  "eliminado_el"        TIMESTAMPTZ
+);
+
+-- Un mismo item no puede aparecer dos veces como componente del mismo combo activo
+CREATE UNIQUE INDEX "uq_combo_componente_vivo"
+  ON "combo_componentes" ("combo_item_id", "componente_item_id")
+  WHERE "eliminado_el" IS NULL;
+
 ALTER TABLE "cuenta_lineas"
   ADD COLUMN IF NOT EXISTS "personalizacion" JSONB;
 ALTER TABLE "venta_detalles"

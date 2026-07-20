@@ -9,6 +9,8 @@ import { RecetaIngrediente } from './entities/receta-ingrediente.entity';
 import { RecetaExtraPermitido } from './entities/receta-extra-permitido.entity';
 import { ItemLote } from './entities/item-lote.entity';
 import { ItemUnidad } from './entities/item-unidad.entity';
+import { ItemCombo } from './entities/item-combo.entity';
+import { ComboComponente } from './entities/combo-componente.entity';
 import { ItemsService } from './items.service';
 import { ItemsController } from './items.controller';
 import { RecetasDesfasesController } from './recetas-desfases.controller';
@@ -27,6 +29,8 @@ import { CatalogModule } from '../catalog/catalog.module';
       RecetaExtraPermitido,
       ItemLote,
       ItemUnidad,
+      ItemCombo,
+      ComboComponente,
     ]),
     InventarioModule,
     CatalogModule,

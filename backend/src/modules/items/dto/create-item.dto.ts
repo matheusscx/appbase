@@ -77,6 +77,18 @@ export class RecetaExtraInputDto {
   precioExtra: string;
 }
 
+export class ComboComponenteInputDto {
+  @IsUUID()
+  componenteItemId: string;
+
+  @IsNumberString()
+  cantidad: string;
+
+  @IsBoolean()
+  @IsOptional()
+  bloqueante?: boolean;
+}
+
 export class CreateItemDto {
   @IsString()
   @IsNotEmpty()
@@ -96,7 +108,14 @@ export class CreateItemDto {
   @IsOptional()
   categoriaId?: string;
 
-  @IsIn(['producto', 'servicio', 'suscripcion', 'receta', 'ingrediente'])
+  @IsIn([
+    'producto',
+    'servicio',
+    'suscripcion',
+    'receta',
+    'ingrediente',
+    'combo',
+  ])
   tipo: string;
 
   @IsBoolean()
@@ -161,6 +180,13 @@ export class CreateItemDto {
   @Type(() => RecetaExtraInputDto)
   @IsOptional()
   extrasPermitidos?: RecetaExtraInputDto[];
+
+  // Extensión combo
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ComboComponenteInputDto)
+  @IsOptional()
+  componentes?: ComboComponenteInputDto[];
 
   // Extensión servicio
   @IsInt()

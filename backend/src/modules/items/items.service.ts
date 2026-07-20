@@ -13,6 +13,7 @@ import {
   CreateItemDto,
   RecetaIngredienteInputDto,
   RecetaExtraInputDto,
+  ComboComponenteInputDto,
 } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
@@ -326,6 +327,11 @@ export class ItemsService {
         'Las recetas requieren al menos un ingrediente',
       );
     }
+    if (dto.tipo === 'combo' && !dto.componentes?.length) {
+      throw new BadRequestException(
+        'Los combos requieren al menos un componente',
+      );
+    }
     if (dto.tipo === 'ingrediente') {
       if (
         dto.impuestosIds?.length ||
@@ -429,6 +435,13 @@ export class ItemsService {
         unidadCodigo: string;
         precioExtra: string;
       }[] = [];
+      let componentes: {
+        componenteItemId: string;
+        componenteNombre: string;
+        tipo: string;
+        cantidad: string;
+        bloqueante: boolean;
+      }[] = [];
 
       if (dto.tipo === 'producto' || dto.tipo === 'ingrediente') {
         if (dto.unidadMedida !== undefined) {
@@ -441,13 +454,9 @@ export class ItemsService {
             : (dto.modoInventario ?? 'cantidad');
         unidadMedida = dto.unidadMedida ?? 'unidad';
         fechaElaboracion =
-          dto.tipo === 'ingrediente'
-            ? null
-            : (dto.fechaElaboracion ?? null);
+          dto.tipo === 'ingrediente' ? null : (dto.fechaElaboracion ?? null);
         fechaVencimiento =
-          dto.tipo === 'ingrediente'
-            ? null
-            : (dto.fechaVencimiento ?? null);
+          dto.tipo === 'ingrediente' ? null : (dto.fechaVencimiento ?? null);
         modoInventario = modo;
         costoActual = dto.costo ?? null;
         stock = '0';
@@ -585,6 +594,32 @@ export class ItemsService {
             );
           }
         }
+      } else if (dto.tipo === 'combo') {
+        const costeo = await this.validarYCostearComponentes(
+          manager,
+          tenantId,
+          dto.componentes!,
+        );
+        costoActual = costeo.costoActual;
+        componentes = costeo.componentes;
+        await manager.query(
+          `INSERT INTO item_combo (item_id, costo_actual) VALUES ($1,$2)`,
+          [itemId, costoActual],
+        );
+        for (const comp of dto.componentes!) {
+          await manager.query(
+            `INSERT INTO combo_componentes
+               (tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [
+              tenantId,
+              itemId,
+              comp.componenteItemId,
+              comp.cantidad,
+              comp.bloqueante ?? true,
+            ],
+          );
+        }
       } else {
         frecuencia = dto.frecuencia ?? null;
         await manager.query(
@@ -630,6 +665,7 @@ export class ItemsService {
         descuentosIds: dto.descuentosIds ?? [],
         ingredientes,
         extrasPermitidos,
+        componentes,
       };
     });
   }
@@ -1040,7 +1076,10 @@ export class ItemsService {
         [itemId, tenantId],
       );
       if (!itemRows.length) throw new NotFoundException('Item no encontrado');
-      if (itemRows[0].tipo !== 'producto' && itemRows[0].tipo !== 'ingrediente') {
+      if (
+        itemRows[0].tipo !== 'producto' &&
+        itemRows[0].tipo !== 'ingrediente'
+      ) {
         throw new BadRequestException('El item no es inventariable');
       }
 
@@ -1355,14 +1394,13 @@ export class ItemsService {
       (ing) => !omitidos.has(ing.ingredienteItemId),
     );
 
-    const extrasCat =
-      params.snapshot?.extras.length
-        ? await this.obtenerExtrasPermitidos(
-            manager,
-            params.tenantId,
-            params.recetaItemId,
-          )
-        : [];
+    const extrasCat = params.snapshot?.extras.length
+      ? await this.obtenerExtrasPermitidos(
+          manager,
+          params.tenantId,
+          params.recetaItemId,
+        )
+      : [];
 
     const extrasIngredientes =
       params.snapshot?.extras.map((extra) => {
@@ -1588,6 +1626,80 @@ export class ItemsService {
         .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
         .toString(),
       ingredientes: detalle,
+    };
+  }
+
+  private async validarYCostearComponentes(
+    manager: EntityManager,
+    tenantId: string,
+    componentes: ComboComponenteInputDto[],
+  ): Promise<{
+    costoActual: string;
+    componentes: {
+      componenteItemId: string;
+      componenteNombre: string;
+      tipo: string;
+      cantidad: string;
+      bloqueante: boolean;
+    }[];
+  }> {
+    if (!componentes.length) {
+      throw new BadRequestException(
+        'Los combos requieren al menos un componente',
+      );
+    }
+    let costoTotal = new Decimal(0);
+    const detalle: {
+      componenteItemId: string;
+      componenteNombre: string;
+      tipo: string;
+      cantidad: string;
+      bloqueante: boolean;
+    }[] = [];
+    for (const c of componentes) {
+      const rows: {
+        nombre: string;
+        tipo: string;
+        costo_actual: string | null;
+      }[] = await manager.query(
+        `SELECT i.nombre, i.tipo,
+                  COALESCE(ip.costo_actual, ir.costo_actual) AS costo_actual
+           FROM items i
+           LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+           LEFT JOIN item_receta ir ON ir.item_id = i.item_id
+           WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+        [c.componenteItemId, tenantId],
+      );
+      if (!rows.length) {
+        throw new BadRequestException(
+          `Componente no encontrado: ${c.componenteItemId}`,
+        );
+      }
+      const { nombre, tipo, costo_actual } = rows[0];
+      if (!['producto', 'receta', 'servicio'].includes(tipo)) {
+        throw new BadRequestException(
+          `Un componente de combo debe ser producto, receta o servicio (recibido: ${tipo})`,
+        );
+      }
+      if (new Decimal(c.cantidad).lessThanOrEqualTo(0)) {
+        throw new BadRequestException(
+          `La cantidad del componente ${nombre} debe ser mayor a 0`,
+        );
+      }
+      costoTotal = costoTotal.plus(
+        new Decimal(costo_actual ?? '0').mul(c.cantidad),
+      );
+      detalle.push({
+        componenteItemId: c.componenteItemId,
+        componenteNombre: nombre,
+        tipo,
+        cantidad: c.cantidad,
+        bloqueante: c.bloqueante ?? true,
+      });
+    }
+    return {
+      costoActual: costoTotal.toDecimalPlaces(4).toString(),
+      componentes: detalle,
     };
   }
 

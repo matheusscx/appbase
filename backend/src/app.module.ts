@@ -65,6 +65,8 @@ import { ItemRecargo } from './modules/items/entities/item-recargo.entity';
 import { ItemDescuento } from './modules/items/entities/item-descuento.entity';
 import { ItemLote } from './modules/items/entities/item-lote.entity';
 import { ItemUnidad } from './modules/items/entities/item-unidad.entity';
+import { ItemCombo } from './modules/items/entities/item-combo.entity';
+import { ComboComponente } from './modules/items/entities/combo-componente.entity';
 import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
 import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
@@ -179,6 +181,8 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           ItemDescuento,
           ItemLote,
           ItemUnidad,
+          ItemCombo,
+          ComboComponente,
           CausaMerma,
           MovimientoInventario,
           MovimientoInventarioDetalle,
