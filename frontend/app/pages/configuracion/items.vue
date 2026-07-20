@@ -46,6 +46,7 @@ interface Item {
   descuentosIds?: string[]
   ingredientes?: { ingredienteItemId: string; ingredienteNombre: string; cantidad: string; unidadCodigo: string; bloqueante: boolean }[]
   extrasPermitidos?: { ingredienteItemId: string; ingredienteNombre?: string; cantidad: string; unidadCodigo: string; precioExtra: string }[]
+  componentes?: { componenteItemId: string; componenteNombre?: string; tipo?: string; cantidad: string; bloqueante: boolean; stock?: string | null }[]
   disponible?: number | null
 }
 
@@ -53,6 +54,12 @@ interface IngredienteRow {
   ingredienteItemId: string
   cantidad: string
   unidadCodigo: string
+  bloqueante: boolean
+}
+
+interface ComponenteRow {
+  componenteItemId: string
+  cantidad: string
   bloqueante: boolean
 }
 
@@ -180,6 +187,24 @@ const recargosOpts = ref<Opt[]>([])
 	  productosIngrediente.value.map(p => ({ label: p.nombre, value: p.id })),
 	)
 
+	const itemsVendibles = ref<{ id: string; nombre: string; tipo: string; costoActual: string | null }[]>([])
+	const itemsVendiblesOpts = computed(() =>
+	  itemsVendibles.value.map(i => ({ label: `${i.nombre} (${i.tipo})`, value: i.id })),
+	)
+	async function cargarItemsVendibles() {
+	  try {
+	    const [p, r, s] = await Promise.all([
+	      useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=producto&pageSize=100`),
+	      useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=receta&pageSize=100`),
+	      useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=servicio&pageSize=100`),
+	    ])
+	    itemsVendibles.value = [...p.data, ...r.data, ...s.data]
+	      .map(i => ({ id: i.id, nombre: i.nombre, tipo: i.tipo, costoActual: i.costoActual ?? null }))
+	  } catch {
+	    toast.add({ title: 'Error al cargar items para combos', color: 'error' })
+	  }
+	}
+
 	/** Sin re-fetch: el POST/PATCH devuelve el item y se mergea en estado local. */
 	function itemCoincideFiltros(item: Item): boolean {
 	  const tipo = listFilters.value.tipo
@@ -226,6 +251,19 @@ const recargosOpts = ref<Opt[]>([])
 	  }
 	}
 
+	function syncItemVendible(item: Item) {
+	  if (!['producto', 'receta', 'servicio'].includes(item.tipo)) return
+	  const entry = { id: item.id, nombre: item.nombre, tipo: item.tipo, costoActual: item.costoActual ?? null }
+	  const idx = itemsVendibles.value.findIndex(i => i.id === item.id)
+	  if (idx >= 0) {
+	    itemsVendibles.value[idx] = entry
+	  }
+	  else {
+	    itemsVendibles.value = [...itemsVendibles.value, entry]
+	      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+	  }
+	}
+
 	function removeItemLocal(id: string) {
 	  const idx = items.value.findIndex(i => i.id === id)
 	  if (idx >= 0) {
@@ -233,6 +271,7 @@ const recargosOpts = ref<Opt[]>([])
 	    meta.value = { ...meta.value, total: Math.max(0, meta.value.total - 1) }
 	  }
 	  productosIngrediente.value = productosIngrediente.value.filter(p => p.id !== id)
+	  itemsVendibles.value = itemsVendibles.value.filter(i => i.id !== id)
 	}
 
 const tiposOpts: Opt[] = [
@@ -241,6 +280,7 @@ const tiposOpts: Opt[] = [
   { label: 'Servicio', value: 'servicio' },
   { label: 'Suscripción', value: 'suscripcion' },
   { label: 'Receta', value: 'receta' },
+  { label: 'Combo', value: 'combo' },
 ]
 
 const unidadesMedidaStore = useUnidadesMedidaStore()
@@ -253,6 +293,7 @@ const filtrosTipoOpts = [
   { label: 'Servicios', value: 'servicio' },
   { label: 'Suscripciones', value: 'suscripcion' },
   { label: 'Recetas', value: 'receta' },
+  { label: 'Combos', value: 'combo' },
 ]
 
 // ── Formulario ─────────────────────────────────────────────────────────────
@@ -286,6 +327,8 @@ function emptyForm() {
     // ingredientes (modo receta)
     ingredientes: [] as IngredienteRow[],
     extrasPermitidos: [] as ExtraPermitidoRow[],
+    // componentes (modo combo)
+    componentes: [] as ComponenteRow[],
     // reglas
     clasificacionTributaria: 'afecto' as 'afecto' | 'exento',
     impuestosIds: [] as string[],
@@ -352,6 +395,18 @@ const costoRecetaCalculado = computed((): string | null => {
     algunaCompleta = true
   }
   if (!algunaCompleta) return null
+  return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString()
+})
+
+/** Preview en vivo del costo del combo al agregar/quitar/cambiar componentes. */
+const costoComboPreview = computed((): string | null => {
+  if (form.value.tipo !== 'combo') return null
+  let total = new Decimal(0)
+  for (const c of form.value.componentes) {
+    if (!c.componenteItemId || !c.cantidad) continue
+    const it = itemsVendibles.value.find(i => i.id === c.componenteItemId)
+    total = total.plus(new Decimal(it?.costoActual ?? '0').mul(c.cantidad))
+  }
   return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toString()
 })
 
@@ -574,7 +629,10 @@ async function cargarCatalogos() {
   }
 }
 
-onMounted(cargarCatalogos)
+onMounted(() => {
+  cargarCatalogos()
+  cargarItemsVendibles()
+})
 
 // ── CRUD modal ─────────────────────────────────────────────────────────────
 
@@ -623,6 +681,11 @@ async function abrirEditar(item: Item) {
         cantidad: e.cantidad,
         unidadCodigo: e.unidadCodigo,
         precioExtra: e.precioExtra,
+      })),
+      componentes: (detalle.componentes ?? []).map(c => ({
+        componenteItemId: c.componenteItemId,
+        cantidad: c.cantidad,
+        bloqueante: c.bloqueante,
       })),
       clasificacionTributaria: detalle.clasificacionTributaria ?? 'afecto',
       impuestosIds: detalle.impuestosIds ?? [],
@@ -761,6 +824,8 @@ async function guardar() {
     } else if (form.value.tipo === 'receta') {
       payload.ingredientes = form.value.ingredientes
       payload.extrasPermitidos = form.value.extrasPermitidos
+    } else if (form.value.tipo === 'combo') {
+      payload.componentes = form.value.componentes
     } else {
       payload.frecuencia = form.value.frecuencia
     }
@@ -784,6 +849,7 @@ async function guardar() {
 
     upsertItemEnLista(saved, isNew)
     syncProductoIngrediente(saved)
+    syncItemVendible(saved)
     toast.add({
       title: isNew ? 'Item creado' : 'Item actualizado',
       color: 'success',
@@ -995,6 +1061,7 @@ const tipoLabels: Record<string, string> = {
   servicio: 'Servicio',
   suscripcion: 'Suscripción',
   receta: 'Receta',
+  combo: 'Combo',
 }
 const tipoColors: Record<string, 'primary' | 'secondary' | 'info' | 'warning' | 'neutral'> = {
   producto: 'primary',
@@ -1002,6 +1069,7 @@ const tipoColors: Record<string, 'primary' | 'secondary' | 'info' | 'warning' | 
   servicio: 'secondary',
   suscripcion: 'info',
   receta: 'neutral',
+  combo: 'neutral',
 }
 
 const columnsHistorial: TableColumn<Movimiento>[] = [
@@ -1495,6 +1563,59 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   />
                 </div>
               </div>
+            </div>
+          </template>
+
+          <!-- Extensión combo -->
+          <template v-if="form.tipo === 'combo'">
+            <USeparator />
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-medium text-muted">Componentes ({{ form.componentes.length }})</p>
+                <UButton
+                  size="xs"
+                  variant="ghost"
+                  icon="i-lucide-plus"
+                  @click="form.componentes = [...form.componentes, { componenteItemId: '', cantidad: '1', bloqueante: true }]"
+                >Agregar componente</UButton>
+              </div>
+
+              <div
+                v-for="(comp, idx) in form.componentes"
+                :key="idx"
+                class="grid grid-cols-4 gap-2 items-end"
+              >
+                <UFormField label="Item" class="col-span-2">
+                  <USelectMenu
+                    v-model="form.componentes[idx].componenteItemId"
+                    :items="itemsVendiblesOpts"
+                    value-key="value"
+                    class="w-full"
+                  />
+                </UFormField>
+                <UFormField label="Cantidad">
+                  <UInput v-model="form.componentes[idx].cantidad" inputmode="decimal" placeholder="1" class="w-full" />
+                </UFormField>
+                <div class="flex items-end gap-2">
+                  <UFormField label="Bloqueante">
+                    <USwitch v-model="form.componentes[idx].bloqueante" />
+                  </UFormField>
+                  <UButton
+                    color="error"
+                    variant="ghost"
+                    icon="i-lucide-trash-2"
+                    size="sm"
+                    @click="form.componentes = form.componentes.filter((_, i) => i !== idx)"
+                  />
+                </div>
+              </div>
+
+              <p v-if="form.componentes.length && costoComboPreview != null" class="text-xs text-muted">
+                Costo actual: {{ formatMonto(costoComboPreview, form.monedaId) }}
+              </p>
+              <p v-else class="text-xs text-muted">
+                Agregá componentes (item y cantidad) para calcular el costo.
+              </p>
             </div>
           </template>
 
