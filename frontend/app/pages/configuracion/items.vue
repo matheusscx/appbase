@@ -47,6 +47,14 @@ interface Item {
   ingredientes?: { ingredienteItemId: string; ingredienteNombre: string; cantidad: string; unidadCodigo: string; bloqueante: boolean }[]
   extrasPermitidos?: { ingredienteItemId: string; ingredienteNombre?: string; cantidad: string; unidadCodigo: string; precioExtra: string }[]
   componentes?: { componenteItemId: string; componenteNombre?: string; tipo?: string; cantidad: string; bloqueante: boolean; stock?: string | null }[]
+  grupos?: {
+    grupoModificadorId: string
+    nombre: string
+    min: number
+    max: number
+    orden: number
+    opciones: { grupoOpcionId: string; itemId: string; itemNombre: string; tipo: string; cantidad: string; unidadCodigo: string | null; precioExtra: string; orden: number; stock: string | null }[]
+  }[]
   disponible?: number | null
 }
 
@@ -61,6 +69,13 @@ interface ComponenteRow {
   componenteItemId: string
   cantidad: string
   bloqueante: boolean
+}
+
+interface GrupoAsocRow {
+  grupoModificadorId: string
+  min: string
+  max: string
+  orden: string
 }
 
 interface ExtraPermitidoRow {
@@ -205,6 +220,18 @@ const recargosOpts = ref<Opt[]>([])
 	  }
 	}
 
+	const gruposCatalogo = ref<{ grupoModificadorId: string; nombre: string; familia: string; opciones: { itemNombre: string; precioExtra: string }[] }[]>([])
+	const gruposCatalogoOpts = computed(() =>
+	  gruposCatalogo.value.map(g => ({ label: `${g.nombre} (${g.familia})`, value: g.grupoModificadorId })),
+	)
+	async function cargarGruposCatalogo() {
+	  try {
+	    gruposCatalogo.value = await useApiFetch<typeof gruposCatalogo.value>(`${apiUrl}/grupos-modificadores`)
+	  } catch {
+	    toast.add({ title: 'Error al cargar grupos de modificadores', color: 'error' })
+	  }
+	}
+
 	/** Sin re-fetch: el POST/PATCH devuelve el item y se mergea en estado local. */
 	function itemCoincideFiltros(item: Item): boolean {
 	  const tipo = listFilters.value.tipo
@@ -329,6 +356,8 @@ function emptyForm() {
     extrasPermitidos: [] as ExtraPermitidoRow[],
     // componentes (modo combo)
     componentes: [] as ComponenteRow[],
+    // grupos de modificadores (modo combo | receta)
+    gruposModificadores: [] as GrupoAsocRow[],
     // reglas
     clasificacionTributaria: 'afecto' as 'afecto' | 'exento',
     impuestosIds: [] as string[],
@@ -632,6 +661,7 @@ async function cargarCatalogos() {
 onMounted(() => {
   cargarCatalogos()
   cargarItemsVendibles()
+  cargarGruposCatalogo()
 })
 
 // ── CRUD modal ─────────────────────────────────────────────────────────────
@@ -686,6 +716,12 @@ async function abrirEditar(item: Item) {
         componenteItemId: c.componenteItemId,
         cantidad: c.cantidad,
         bloqueante: c.bloqueante,
+      })),
+      gruposModificadores: (detalle.grupos ?? []).map(g => ({
+        grupoModificadorId: g.grupoModificadorId,
+        min: String(g.min),
+        max: String(g.max),
+        orden: String(g.orden),
       })),
       clasificacionTributaria: detalle.clasificacionTributaria ?? 'afecto',
       impuestosIds: detalle.impuestosIds ?? [],
@@ -828,6 +864,15 @@ async function guardar() {
       payload.componentes = form.value.componentes
     } else {
       payload.frecuencia = form.value.frecuencia
+    }
+
+    if (form.value.tipo === 'combo' || form.value.tipo === 'receta') {
+      payload.gruposModificadores = form.value.gruposModificadores.map(g => ({
+        grupoModificadorId: g.grupoModificadorId,
+        min: Number(g.min),
+        max: Number(g.max),
+        orden: Number(g.orden || '0'),
+      }))
     }
 
     const productoId = editingId.value
@@ -1616,6 +1661,80 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               <p v-else class="text-xs text-muted">
                 Agregá componentes (item y cantidad) para calcular el costo.
               </p>
+            </div>
+          </template>
+
+          <!-- Grupos de modificadores (compartido combo + receta) -->
+          <template v-if="form.tipo === 'combo' || form.tipo === 'receta'">
+            <USeparator />
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-medium text-muted">Grupos de modificadores ({{ form.gruposModificadores.length }})</p>
+                <UButton
+                  size="xs"
+                  variant="ghost"
+                  icon="i-lucide-plus"
+                  @click="form.gruposModificadores = [...form.gruposModificadores, { grupoModificadorId: '', min: '1', max: '1', orden: String(form.gruposModificadores.length) }]"
+                >Agregar grupo</UButton>
+              </div>
+
+              <div
+                v-for="(grupo, idx) in form.gruposModificadores"
+                :key="idx"
+                class="rounded-lg border border-default p-3 space-y-2"
+              >
+                <div class="grid grid-cols-4 gap-2 items-end">
+                  <UFormField label="Grupo" class="col-span-2">
+                    <USelectMenu
+                      v-model="form.gruposModificadores[idx].grupoModificadorId"
+                      :items="gruposCatalogoOpts.filter(o =>
+                        o.value === grupo.grupoModificadorId
+                        || !form.gruposModificadores.some(g => g.grupoModificadorId === o.value),
+                      )"
+                      value-key="value"
+                      class="w-full"
+                    />
+                  </UFormField>
+                  <UFormField label="Mín.">
+                    <UInput v-model="form.gruposModificadores[idx].min" type="number" min="0" placeholder="0" class="w-full" />
+                  </UFormField>
+                  <div class="flex items-end gap-2">
+                    <UFormField label="Máx." class="flex-1">
+                      <UInput v-model="form.gruposModificadores[idx].max" type="number" min="1" placeholder="1" class="w-full" />
+                    </UFormField>
+                    <UButton
+                      color="error"
+                      variant="ghost"
+                      icon="i-lucide-trash-2"
+                      size="sm"
+                      @click="form.gruposModificadores = form.gruposModificadores.filter((_, i) => i !== idx)"
+                    />
+                  </div>
+                </div>
+
+                <div v-if="grupo.grupoModificadorId" class="pl-1">
+                  <p class="text-xs text-muted mb-1">Opciones del grupo (solo lectura):</p>
+                  <ul class="text-xs text-muted space-y-0.5">
+                    <li
+                      v-for="op in gruposCatalogo.find(g => g.grupoModificadorId === grupo.grupoModificadorId)?.opciones ?? []"
+                      :key="op.itemNombre"
+                    >
+                      {{ op.itemNombre }}
+                      <span v-if="Number(op.precioExtra) > 0">(+{{ formatMonto(op.precioExtra, form.monedaId) }})</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <UButton
+                v-if="form.gruposModificadores.length"
+                to="/configuracion/grupos-modificadores"
+                target="_blank"
+                variant="link"
+                size="xs"
+                icon="i-lucide-external-link"
+                class="px-0"
+              >Administrar grupos de modificadores</UButton>
             </div>
           </template>
 
