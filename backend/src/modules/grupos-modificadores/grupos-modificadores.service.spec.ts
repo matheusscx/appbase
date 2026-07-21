@@ -368,6 +368,32 @@ describe('GruposModificadoresService', () => {
       });
     });
 
+    it('propaga cantidad null en una opción de lectura (columna nullable)', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // SELECT grupos
+        .mockResolvedValueOnce([
+          {
+            grupo_modificador_id: 'G1',
+            grupo_opcion_id: 'O1',
+            item_id: ITEM_PROD,
+            item_nombre: 'Coca',
+            tipo: 'producto',
+            cantidad: null,
+            unidad_codigo: null,
+            precio_extra: '0',
+            orden: 0,
+            stock: null,
+          },
+        ]) // SELECT opciones batcheadas (ANY)
+        .mockResolvedValueOnce([]); // conteos
+
+      const res = await service.findAll(TENANT_ID);
+
+      expect(res[0].opciones[0].cantidad).toBeNull();
+    });
+
     it('devuelve [] sin más queries si el tenant no tiene grupos', async () => {
       dataSourceMock.query.mockResolvedValueOnce([]);
       const res = await service.findAll(TENANT_ID);

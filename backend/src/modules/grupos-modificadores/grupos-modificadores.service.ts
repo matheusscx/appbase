@@ -30,7 +30,7 @@ interface OpcionRow {
   item_id: string;
   item_nombre: string;
   tipo: string;
-  cantidad: string;
+  cantidad: string | null;
   unidad_codigo: string | null;
   precio_extra: string;
   orden: number;
