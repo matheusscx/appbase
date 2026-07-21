@@ -67,3 +67,4 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Catálogo de impuestos del sistema + clasificación tributaria | ✅ Implementado (2026-07-19) |
 | Combos (paquetes con precio propio fijo, componentes producto/receta/servicio bloqueantes, una línea de venta, disponibilidad conservadora) | ✅ Implementado (2026-07-20) |
 | Grupos de modificadores reutilizables (asociables a combos/recetas, familia derivada ingrediente/vendible, min/max en unidades, precio en el grupo, opción siempre bloqueante, snapshot congelado; impresión térmica de la opción elegida diferida) | ✅ Implementado (2026-07-20) |
+| Grupos de modificadores — cantidad/precioExtra overrideables por receta (modelo híbrido default+override, `COALESCE`, estado pendiente, upsert-preservando UUID, drawer de recetas + override en lote) | ✅ Implementado (2026-07-21) |

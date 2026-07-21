@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: SDD Team
-**Last Updated**: 2026-07-20
+**Last Updated**: 2026-07-21
 
 ---
 
@@ -22,9 +22,12 @@ distintas.
 
 Ejemplos del seed demo:
 - **Proteína** (familia ingrediente): carne / pollo (+$0), chuleta (+$1.500),
-  150 g cada una. Asociado a la receta **Hamburguesa Especial** (`min:1,
-  max:1` — obligatorio, una sola proteína, y a diferencia de "Hamburguesa
-  Clásica" no la lleva como `receta_ingrediente` fijo).
+  150 g cada una (default del grupo). Asociado a **dos** recetas: "Hamburguesa
+  Especial" (`min:1, max:1` — obligatorio, una sola proteína, y a diferencia
+  de "Hamburguesa Clásica" no la lleva como `receta_ingrediente` fijo) usa los
+  150 g por defecto sin overridear, y "Hamburguesa Especial XL" reutiliza el
+  **mismo grupo** con la cantidad overrideada a 250 g por opción (ver
+  "Cantidades de consumo por item" más abajo).
 - **Bebida** (familia vendible): Coca-Cola (+$0), Bebida premium (+$800).
   Asociado al **Combo Clásico** existente (`min:1, max:1` — obligatorio).
 
@@ -91,7 +94,13 @@ alternativas homogéneas**, que `receta_extras_permitidos` no modela.
   recetas) — ahora también renderiza grupos para combos y recetas, exige
   min/max antes de habilitar "Agregar", y hace merge de líneas en Salones por
   la misma personalización congelada (grupos incluidos en la clave de merge).
-- Seed demo: grupos "Proteína" y "Bebida" (ver sección Seed demo).
+- **Cantidad/recargo overrideables por receta** (`item_grupo_modificador_opciones`,
+  2026-07-21): el grupo mantiene `cantidad`/`unidadCodigo`/`precioExtra` como
+  default opcional por opción; cada asociación item↔grupo puede overridear esos
+  valores para SU receta sin tocar el grupo ni las demás recetas que lo usan.
+  Ver "Cantidades de consumo por item" más abajo.
+- Seed demo: grupos "Proteína" (con override 150 g / 250 g entre dos recetas)
+  y "Bebida" (ver sección Seed demo).
 
 **NOT included (future):**
 - **Impresión térmica de las opciones elegidas de un grupo** — diferida
@@ -103,10 +112,6 @@ alternativas homogéneas**, que `receta_extras_permitidos` no modela.
   opción elegida, unidades) para implementarlo después **sin migración** — el
   trabajo pendiente es puramente de plantilla de impresión
   (`docs/features/impresion-termica.md`), no de modelo de datos.
-- Override de `precioExtra` por item — el precio de una opción es del grupo,
-  compartido por todos los items que lo usan; si dos combos necesitan precios
-  distintos para "Bebida premium" hoy se requiere **dos grupos** (ver ADR-013,
-  trade-off asumido).
 - Grupos anidados (una opción de grupo que a su vez tenga grupos propios).
 - Evaluación de condiciones para habilitar/deshabilitar opciones (fase futura,
   igual que descuentos/recargos condicionales).
@@ -132,13 +137,13 @@ tipo permitido → familia `vendible`).
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `grupo_opcion_id` | UUID PK | |
+| `grupo_opcion_id` | UUID PK | Preservado en updates (upsert-preservando, ver `docs/patterns/backend.md` §14) |
 | `tenant_id` | UUID | |
 | `grupo_modificador_id` | UUID FK | |
 | `item_id` | UUID FK → items | `producto \| receta \| servicio \| ingrediente` |
-| `cantidad` | NUMERIC(18,4) | Por 1 unidad elegida |
+| `cantidad` | NUMERIC(18,4), **nullable** | Default por 1 unidad elegida; `NULL` = sin default (toda receta que use esta opción sin override queda *pendiente*, ver sección "Cantidades de consumo por item") |
 | `unidad_codigo` | TEXT, nullable | Solo familia `ingrediente`; `NULL` en `vendible` |
-| `precio_extra` | NUMERIC(18,4) | Recargo ≥ 0, por unidad elegida |
+| `precio_extra` | NUMERIC(18,4) NOT NULL DEFAULT 0 | Recargo ≥ 0 default, por unidad elegida — nunca `NULL` |
 | `orden` | INT | Orden de presentación |
 | `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | Soft delete al reemplazar lista (mismo patrón que `combo_componentes`) |
 
@@ -149,7 +154,7 @@ tipo permitido → familia `vendible`).
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `item_grupo_id` | UUID PK | |
+| `item_grupo_id` | UUID PK | Preservado en updates (upsert-preservando) — es la llave del override, ver abajo |
 | `tenant_id` | UUID | |
 | `item_id` | UUID FK → items | Combo o receta |
 | `grupo_modificador_id` | UUID FK | |
@@ -167,6 +172,100 @@ todas las opciones" (una sola proteína, cualquiera sea); un grupo con `min:1,
 max:2` permitiría elegir 2 unidades de la misma opción o 1+1 de dos distintas
 — la suma de `unidades` por opción elegida es lo que se valida contra
 `min`/`max`, nunca la cantidad de opciones distintas elegidas.
+
+### `item_grupo_modificador_opciones`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `item_grupo_opcion_id` | UUID PK | |
+| `tenant_id` | UUID | |
+| `item_grupo_id` | UUID FK → `item_grupos_modificadores` | La asociación item↔grupo que overridea |
+| `grupo_opcion_id` | UUID FK → `grupo_modificador_opciones` | La opción reutilizable que overridea |
+| `cantidad` | NUMERIC(18,4), nullable | `NULL` = hereda el default del grupo (`COALESCE(override, default)`) |
+| `unidad_codigo` | TEXT, nullable | Idem — override de unidad, solo familia `ingrediente` |
+| `precio_extra` | NUMERIC(18,4), nullable | `NULL` = hereda el default del grupo (que nunca es `NULL`, así el efectivo tampoco) |
+| `creado_el` / `actualizado_el` / `eliminado_el` | TIMESTAMPTZ | Soft delete — un override eliminado vuelve a heredar el default |
+
+Fila **por opción efectivamente overrideada** de una asociación, no una fila
+por cada opción del grupo — si una receta no overridea nada, esta tabla no
+tiene filas para su `item_grupo_id` y toda opción resuelve al default del
+grupo. Detalle completo del modelo en "Cantidades de consumo por item" más
+abajo.
+
+---
+
+## Cantidades de consumo por item
+
+**Modelo híbrido**, no puro: el grupo sigue siendo un **catálogo reutilizable**
+con `cantidad`/`unidadCodigo`/`precioExtra` como **default opcional** por
+opción (`grupo_modificador_opciones`); cada receta (o combo) que usa el grupo
+puede **overridear** esos valores para SU propio consumo, sin tocar el grupo
+ni afectar a las demás recetas que lo comparten. El caso demo del seed: el
+grupo "Proteína" tiene default de 150 g por opción; "Hamburguesa Especial" lo
+usa tal cual (150 g), "Hamburguesa Especial XL" overridea a 250 g — el mismo
+grupo, dos cantidades de consumo distintas.
+
+**Por qué híbrido y no puro** (cantidad solo en el grupo, o solo por receta):
+- **Cero migración de datos.** Los grupos y recetas ya existentes (creados
+  antes de este cambio) siguen funcionando exactamente igual: sin filas de
+  override, todo resuelve al default del grupo — ninguna venta pasada ni
+  receta viva cambia de comportamiento.
+- **Opciones nuevas vendibles desde el día 1** si el grupo ya tiene default —
+  agregar una opción al grupo no exige que cada receta que lo usa declare
+  antes su propia cantidad.
+- **El drawer de recetas se pre-llena**, no exige N formularios vacíos: al
+  asociar un grupo a una receta, el formulario ya muestra el default como
+  punto de partida; el usuario solo overridea lo que necesita distinto.
+
+**Resolución — `COALESCE(override, default)`.** Toda lectura de la cantidad
+(y del recargo) efectiva de una opción para una receta hace `LEFT JOIN
+item_grupo_modificador_opciones ovr ON ovr.grupo_opcion_id = o.grupo_opcion_id
+AND ovr.item_grupo_id = <esta asociación> AND ovr.eliminado_el IS NULL` y
+selecciona `COALESCE(ovr.cantidad, o.cantidad)` / `COALESCE(ovr.unidad_codigo,
+o.unidad_codigo)` / `COALESCE(ovr.precio_extra, o.precio_extra)`. Misma query
+en `ItemsService` (detalle de item, `GET /items/:id`) y en
+`resolverGruposDeItem` (al vender) — el snapshot de venta congela el valor
+efectivo, nunca el default crudo.
+
+**Estado *pendiente*.** Si una opción no tiene `cantidad` ni en el override ni
+en el default del grupo (`COALESCE` resuelve a `NULL`), esa opción queda
+*pendiente* para esa receta: `esPendiente: true` en la respuesta, el POS no la
+ofrece para elegir, y `resolverGruposDeItem` la **rechaza** (`400`) si llega
+elegida desde el frontend. **No bloquea** guardar el grupo (una opción sin
+default es válida, solo pendiente hasta que alguna receta la overridee o el
+grupo defina un default) ni guardar la asociación item↔grupo (una receta
+puede asociar el grupo hoy y overridear cantidades después, vía el drawer de
+recetas).
+
+**`precioExtra` sigue la misma lógica de default+override.** A diferencia de
+`cantidad`, el default de `precioExtra` en el grupo es `NOT NULL DEFAULT 0` —
+el valor efectivo nunca es `NULL` incluso sin override (nunca queda
+"recargo pendiente", solo cantidad).
+
+**Llave del override — UUIDs preservados, no llave de negocio.** Un override
+en `item_grupo_modificador_opciones` se identifica por el par
+(`item_grupo_id`, `grupo_opcion_id`) — los UUIDs de la asociación item↔grupo y
+de la opción del grupo, **preservados** entre updates en vez de una llave de
+negocio estable (ej. nombre de opción). Esto exige que los dos flujos de
+"reemplazo total" existentes (guardar opciones de un grupo; guardar grupos
+asociados a un item) se comporten como **upsert-preservando** en vez de
+soft-delete-todo-e-insertar-todo — de lo contrario, cada edición generaría
+UUIDs nuevos y **huérfanaría** cualquier override existente (el override
+seguiría apuntando al `grupo_opcion_id` viejo, ya soft-deleted). Ver
+`docs/patterns/backend.md` §14 ("Upsert-preservando UUID por llave de
+negocio") para el patrón general y ADR-014 para la decisión completa.
+
+**Upsert-preservando con cascada.** Al guardar de nuevo las opciones de un
+grupo (o los grupos asociados a un item), cada fila que coincide con una
+existente por su llave de negocio (`itemId` de la opción; `grupoModificadorId`
+de la asociación) **reutiliza el mismo UUID** (`UPDATE`, no
+soft-delete+insert); solo lo que ya no viene se soft-deletea. Las opciones/
+asociaciones soft-deletadas en esa pasada arrastran en cascada el soft-delete
+de sus overrides en `item_grupo_modificador_opciones` (para que no queden
+overrides vivos apuntando a algo eliminado). Un override eliminado (porque la
+receta dejó de overridear esa opción, o porque la opción/asociación fue
+eliminada) simplemente vuelve a heredar el default del grupo la próxima vez
+que se lea — nunca hay que "reconstruir" el override manualmente.
 
 ---
 
@@ -201,18 +300,38 @@ Response (201):
   derivada, opciones vivas y `itemsUsandoCount` (cuántos items vivos lo usan).
 - `GET /grupos-modificadores/:id` — detalle (mismo shape que un elemento de la
   lista).
-- `PATCH /grupos-modificadores/:id` — `nombre` y/o `opciones` (reemplazo
-  total: soft-delete de las vivas + insert de las nuevas). Reusa la misma
-  validación de homogeneidad que `create`.
+- `PATCH /grupos-modificadores/:id` — `nombre` y/o `opciones` (reemplazo total
+  **upsert-preservando**: la opción cuyo `itemId` ya existía reutiliza su
+  mismo `grupo_opcion_id`, `UPDATE` en vez de soft-delete+insert; solo lo que
+  ya no viene se soft-deletea, con cascada de soft-delete a sus overrides en
+  `item_grupo_modificador_opciones` — así una edición no huérfana overrides
+  existentes de otras recetas. Ver `docs/patterns/backend.md` §14). Reusa la
+  misma validación de homogeneidad que `create`.
 - `DELETE /grupos-modificadores/:id` — `400` si el grupo está asociado a algún
   item vivo (`item_grupos_modificadores`).
+- `GET /grupos-modificadores/:id/items` — drawer de recetas: cada asociación
+  (`itemGrupoId`, item que usa el grupo) con sus opciones y `cantidad`
+  efectiva/`cantidadDefault`/`esPendiente` por opción — para editar los
+  overrides de cantidad/precio de cada receta desde el grupo.
+- `PATCH /grupos-modificadores/:id/overrides` (`AplicarOverridesDto`) —
+  aplica en **lote** el mismo override (`cantidad`/`unidadCodigo`/
+  `precioExtra`) a una `grupoOpcionId` en varias asociaciones (`itemGrupoIds[]`)
+  a la vez (ej. "cambiar la porción de chuleta a 200 g en todas las recetas
+  que la usan" sin editar receta por receta). Mismo upsert-preservando que
+  el resto de los overrides.
 
 ### Asociación item↔grupo (extensión de `/items`)
 
 `POST /items` y `PATCH /items/:id` (tipo `combo` o `receta`) aceptan
-`gruposModificadores: { grupoModificadorId, min, max, orden? }[]`. Para combos,
-`componentes` y `gruposModificadores` son independientes: se requiere al
-menos uno de los dos (nunca ambos vacíos).
+`gruposModificadores: { grupoModificadorId, min, max, orden?, opciones? }[]`,
+donde `opciones?: { grupoOpcionId, cantidad?, unidadCodigo?, precioExtra? }[]`
+son los **overrides** de cantidad/recargo de ESTA receta para opciones del
+grupo asociado (omitir una opción = sin override, hereda el default del
+grupo). Para combos, `componentes` y `gruposModificadores` son independientes:
+se requiere al menos uno de los dos (nunca ambos vacíos). `PATCH` reemplaza
+`gruposModificadores` completo pero vía **upsert-preservando** (mismo
+`item_grupo_id` para el grupo que sigue asociado, mismo `item_grupo_opcion_id`
+para el override que sigue viniendo) — ver `docs/patterns/backend.md` §14.
 
 `GET /items/:id` de un combo o receta agrega:
 
@@ -226,13 +345,20 @@ menos uno de los dos (nunca ambos vacíos).
     "orden": 0,
     "opciones": [
       { "grupoOpcionId": "...", "itemId": "...", "itemNombre": "Chuleta de cerdo",
-        "tipo": "ingrediente", "cantidad": "150.0000", "unidadCodigo": "g",
-        "precioExtra": "1500.0000", "orden": 2, "stock": "6.0000" }
+        "tipo": "ingrediente", "cantidad": "250.0000", "cantidadDefault": "150.0000",
+        "unidadCodigo": "g", "precioExtra": "1500.0000", "orden": 2,
+        "stock": "6.0000", "esPendiente": false }
     ]
   }
 ],
 "disponibleCondicional": true   // solo combos: true si tiene ≥1 grupo asociado
 ```
+
+`cantidad` es el valor **efectivo** para ESTA receta (`COALESCE(override,
+default)`, ver "Cantidades de consumo por item"); `cantidadDefault` es el
+default del grupo sin overridear (para que el frontend pueda mostrar "vs.
+default" o pre-llenar el formulario de override). `esPendiente: true` cuando
+ni el override ni el default tienen `cantidad` — ver esa misma sección.
 
 `GET /items?tipo=combo` incluye `disponibleCondicional` en cada fila (una sola
 query extra para todos los combos, no N+1).
@@ -280,16 +406,23 @@ ignora cualquier precio que mande el frontend — y congela el snapshot en
 ## Frontend
 
 - `pages/configuracion/grupos-modificadores.vue` — CRUD de grupos (nombre +
-  tabla de opciones con selector de item, cantidad, unidad si ingrediente,
-  precio extra).
+  tabla de opciones con selector de item, cantidad **opcional** (default),
+  unidad si ingrediente, precio extra); drawer de recetas por grupo (`GET
+  /grupos-modificadores/:id/items`) para ver/editar los overrides de cantidad
+  por receta y aplicar un override en lote a varias recetas a la vez
+  (`PATCH .../overrides`, selección múltiple).
 - `pages/configuracion/items.vue` — sección "Grupos de modificadores"
-  compartida entre combo y receta (selector de grupo + `min`/`max`/`orden`).
+  compartida entre combo y receta (selector de grupo + `min`/`max`/`orden` +
+  override de `cantidad`/`precioExtra` por opción, pre-llenado con el default
+  del grupo; opciones sin cantidad efectiva se marcan *pendiente* en la UI).
 - `components/ventas/ItemPersonalizacionDrawer.vue` — drawer unificado
   (renombrado desde el drawer específico de recetas): renderiza ingredientes
   omitibles + extras (receta) y/o grupos (combo y receta) según lo que el
   item tenga; exige `min ≤ Σunidades ≤ max` por grupo antes de habilitar
   "Agregar"; combos con ≥1 grupo asociado ahora abren el drawer (antes, sin
-  grupos, se agregaban con un click).
+  grupos, se agregaban con un click). El POS/drawer **oculta** opciones
+  *pendientes* (`esPendiente: true`) — no se pueden elegir hasta que la
+  receta tenga una cantidad efectiva.
 - `composables/useRecetaPersonalizacion.ts` — resolución de grupos en el
   frontend (espejo de `resolverGruposDeItem`, para UX inmediata; el backend
   revalida igual).
@@ -311,22 +444,33 @@ invocado tras `seedCombos()` (idempotente, guarda por la existencia del grupo
 |---|---|---|
 | Ingrediente "Pechuga de pollo" | `…440286` | Nuevo, 8 kg stock, costo 6000/kg |
 | Ingrediente "Chuleta de cerdo" | `…440288` | Nuevo, 6 kg stock, costo 9000/kg |
-| Grupo "Proteína" | `…440290` | Familia `ingrediente` |
-| Opción carne (reutiliza `…440257`) | `…440291` | 150 g, +$0 |
-| Opción pollo | `…440292` | 150 g, +$0 |
-| Opción chuleta | `…440293` | 150 g, +$1.500 |
-| Item "Hamburguesa Especial" (receta) | `…440294` | Pan + queso fijos, SIN proteína fija; `min:1, max:1` con "Proteína" |
+| Grupo "Proteína" | `…440290` | Familia `ingrediente`, default 150 g/opción |
+| Opción carne (reutiliza `…440257`) | `…440291` | Default 150 g, +$0 |
+| Opción pollo | `…440292` | Default 150 g, +$0 |
+| Opción chuleta | `…440293` | Default 150 g, +$1.500 |
+| Item "Hamburguesa Especial" (receta) | `…440294` | Pan + queso fijos, SIN proteína fija; `min:1, max:1` con "Proteína", **sin override** (usa 150 g default) |
 | Item "Coca-Cola" (producto) | `…440298` | Nuevo, 100 unidad stock, costo 500 |
 | Item "Bebida premium" (producto) | `…440300` | Nuevo, 40 unidad stock, costo 1200 |
 | Grupo "Bebida" | `…440302` | Familia `vendible` |
 | Opción Coca-Cola | `…440303` | +$0 |
 | Opción Bebida premium | `…440304` | +$800 |
 | Asociación "Bebida" ↔ Combo Clásico (`…440283`) | `…440305` | `min:1, max:1` |
+| Item "Hamburguesa Especial XL" (receta) | `…440306` | Mismos ingredientes fijos que "Hamburguesa Especial"; `min:1, max:1` con el **mismo** grupo "Proteína" (`…440290`) |
+| Asociación "Proteína" ↔ Hamburguesa Especial XL | `…440309` | `item_grupos_modificadores` |
+| Override cantidad carne/pollo/chuleta → 250 g | `…440310`–`…440312` | `item_grupo_modificador_opciones`, llavado por (`…440309`, cada `grupo_opcion_id` `…440291`–`…440293`); `precioExtra` sin overridear (hereda el default) |
+
+Demo viva del modelo híbrido: **mismo grupo, dos cantidades de consumo** —
+"Hamburguesa Especial" resuelve 150 g (default puro, sin fila de override);
+"Hamburguesa Especial XL" resuelve 250 g (override explícito), sin que el
+grupo ni la primera receta cambien.
 
 Verificado tras `docker-compose up` / restart del backend: log `Seed
 complete.` sin errores; `GET /grupos-modificadores` devuelve ambos grupos;
 `GET /items?tipo=combo` muestra "Combo Clásico" con `disponibleCondicional:
-true`.
+true`; `GET /items/<…440294>` muestra las 3 opciones de "Proteína" con
+`cantidad: "150.0000"`; `GET /items/<…440306>` muestra las mismas 3 opciones
+con `cantidad: "250.0000"` y `cantidadDefault: "150.0000"` (verificado en vivo
+el 2026-07-21 contra el stack Docker corriendo).
 
 ---
 
@@ -334,7 +478,7 @@ true`.
 
 ```bash
 cd backend && npm test -- grupos-modificadores.service.spec.ts items.service.spec.ts ventas.service.spec.ts
-cd backend && npm run test:e2e -- grupos-modificadores.e2e-spec.ts combos.e2e-spec.ts
+cd backend && npm run test:e2e -- grupos-modificadores.e2e-spec.ts grupos-modificadores-overrides.e2e-spec.ts combos.e2e-spec.ts
 ```
 
 ---
@@ -350,8 +494,11 @@ cd backend && npm run test:e2e -- grupos-modificadores.e2e-spec.ts combos.e2e-sp
 - [x] Descuento de inventario por opción elegida (siempre bloqueante)
 - [x] CRUD de grupos en Configuración + sección compartida en Items
 - [x] Drawer de personalización unificado con grupos
-- [x] Seed demo (Proteína + Bebida) + Docs (este archivo) + ESTADO + PRODUCTO
-      + ADR
+- [x] Cantidad/precioExtra overrideables por receta (híbrido, `COALESCE`),
+      estado *pendiente*, upsert-preservando en ambos flujos de reemplazo
+      total, endpoints de drawer + aplicar override en lote
+- [x] Seed demo (Proteína con override 150 g/250 g + Bebida) + Docs (este
+      archivo) + ESTADO + PRODUCTO + patterns/backend + ADR-014
 
 ---
 
@@ -368,8 +515,12 @@ cd backend && npm run test:e2e -- grupos-modificadores.e2e-spec.ts combos.e2e-sp
 - [impresion-termica.md](./impresion-termica.md) — pendiente: imprimir la
   opción elegida de un grupo en comanda/boleta (diferido, ver Scope)
 - ADR: [013](../adr/013-grupos-modificadores-reutilizables.md) — grupos
-  reutilizables sin tipo declarado, precio en el grupo sin override, `min`/`max`
-  en unidades, opción siempre bloqueante
+  reutilizables sin tipo declarado, `min`/`max` en unidades, opción siempre
+  bloqueante (su punto (c), "sin override por item", queda parcialmente
+  revisado por ADR-014)
+- ADR: [014](../adr/014-cantidades-consumo-por-item.md) — modelo híbrido
+  default+override para cantidad/precioExtra por receta, llave del override
+  por UUIDs preservados, cero migración de datos
 
 ## Notes
 

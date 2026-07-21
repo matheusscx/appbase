@@ -1,7 +1,7 @@
 # Backend Patterns — Playbook
 
 **Status**: Living
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-21
 
 Patrón de referencia para construir un módulo de feature (NestJS + TypeORM),
 extraído del código real (`modules/monedas/`, `modules/tenants/`). **Léelo antes de
@@ -195,6 +195,45 @@ Implementación de referencia: `modules/pasarela` (`PagoCallbackRegistry` +
 Claves: el dispatcher hace `registry.get()?.onOrdenResuelta(orden)` con `await`
 (monolito) o POST fire-and-forget (destinos externos); el handler debe ser
 **idempotente**; un fallo del callback no rompe el flujo del core (`try/catch` + log).
+
+---
+
+## 14. Upsert-preservando UUID por llave de negocio
+
+Cuando un flujo de "reemplazo total" (`PATCH` que recibe la lista completa de
+hijos y reemplaza lo existente) tiene **otra tabla que referencia el UUID del
+hijo** (un override, una tabla puente, un snapshot), el patrón habitual
+**soft-delete todo lo vivo + insertar todo lo nuevo** rompe esa referencia: el
+hijo recibe un UUID nuevo en cada guardado, y cualquier fila que apuntaba al
+UUID viejo queda huérfana (apunta a algo ya soft-deleted).
+
+**Patrón: upsert-preservando por llave de negocio.**
+1. Cargar los hijos vivos actuales con su UUID.
+2. Por cada hijo entrante, resolver su **llave de negocio** estable (no el
+   UUID) — ej. `itemId` de una opción de grupo, `grupoModificadorId` de una
+   asociación item↔grupo. Si coincide con uno vivo existente: `UPDATE` sobre
+   ese mismo UUID (preserva la fila, y por lo tanto todo lo que la referencia).
+   Si no coincide con ninguno: `INSERT` con UUID nuevo.
+3. Los vivos que ya no vinieron en la lista entrante: `soft-delete`.
+4. **Cascada**: si el hijo soft-deleted tiene sus propios overrides/hijos en
+   otra tabla, soft-deletearlos también en la misma pasada (`WHERE
+   <fk_del_padre> = ANY($1::uuid[])`) — para que no queden vivos apuntando a
+   un padre eliminado.
+
+Ejemplo real: `GruposModificadoresService.update` (opciones de un grupo,
+llave de negocio `itemId` → preserva `grupo_opcion_id`) y el análogo en
+`ItemsService` para `item_grupos_modificadores` (llave de negocio
+`grupoModificadorId` → preserva `item_grupo_id`) — ambos con cascada de
+soft-delete a `item_grupo_modificador_opciones` (los overrides por receta,
+llavados por `item_grupo_id` + `grupo_opcion_id`, los dos UUIDs preservados).
+Ver `docs/features/grupos-modificadores.md` § "Cantidades de consumo por
+item" y [ADR-014](../adr/014-cantidades-consumo-por-item.md).
+
+**Cuándo NO hace falta:** si nada referencia el UUID del hijo (soft-delete +
+insert es más simple y suficiente) o si la llave de negocio no es estable
+(ej. un texto libre editable) — ahí no hay forma de saber con certeza qué fila
+entrante "es" cuál existente, y forzar el upsert arriesga más que soft-delete
++ insert.
 
 ---
 

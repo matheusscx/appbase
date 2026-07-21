@@ -2568,6 +2568,11 @@ export class SeederService implements OnApplicationBootstrap {
    *   150 g por elección. Asociado a la receta nueva "Hamburguesa Especial"
    *   (min:1, max:1 — obligatorio, una sola proteína) que NO lleva proteína
    *   fija como receta_ingrediente (a diferencia de "Hamburguesa Clásica").
+   *   El mismo grupo "Proteína" se reutiliza en una segunda receta,
+   *   "Hamburguesa Especial XL", con cantidad overrideada a 250 g por
+   *   opción (vía item_grupo_modificador_opciones) mientras "Hamburguesa
+   *   Especial" sigue en los 150 g por defecto del grupo — demo viva del
+   *   modelo híbrido default+override (COALESCE).
    * - "Bebida" (familia vendible): Coca-Cola $0, Bebida premium +$800,
    *   asociado al "Combo Clásico" existente (min:1, max:1 — obligatorio).
    * Idempotente: guarda por la existencia del grupo "Proteína".
@@ -2596,6 +2601,17 @@ export class SeederService implements OnApplicationBootstrap {
     const HE_RI_PAN_ID = uuid(295);
     const HE_RI_QUESO_ID = uuid(296);
     const HE_ITEM_GRUPO_ID = uuid(297);
+    // "Hamburguesa Especial XL": misma familia "Proteína", pero con cantidad
+    // de proteína overrideada (250 g en vez de 150 g) por receta — demuestra
+    // el modelo híbrido (grupo = catálogo reutilizable con default; la
+    // receta define su propia cantidad efectiva vía item_grupo_modificador_opciones).
+    const HAMBURGUESA_ESPECIAL_XL_ID = uuid(306);
+    const HE_XL_RI_PAN_ID = uuid(307);
+    const HE_XL_RI_QUESO_ID = uuid(308);
+    const HE_XL_ITEM_GRUPO_ID = uuid(309);
+    const HE_XL_OV_CARNE_ID = uuid(310);
+    const HE_XL_OV_POLLO_ID = uuid(311);
+    const HE_XL_OV_CHULETA_ID = uuid(312);
     const COCACOLA_ID = uuid(298);
     const MOV_COCACOLA_ID = uuid(299);
     const BEBIDA_PREMIUM_ID = uuid(300);
@@ -2610,6 +2626,26 @@ export class SeederService implements OnApplicationBootstrap {
       [PROTEINA_GRUPO_ID],
     );
     if (exists.length) {
+      // Grupo "Proteína" ya sembrado en un boot anterior — solo falta
+      // verificar/agregar la receta XL (guardas independientes: agregar la
+      // XL no requiere re-sembrar lo demás ni tocar datos existentes).
+      await this.seedHamburguesaEspecialXl({
+        PARIS,
+        CLP,
+        PAN_ID,
+        QUESO_ID,
+        PROTEINA_GRUPO_ID,
+        PROTEINA_OP_CARNE_ID,
+        PROTEINA_OP_POLLO_ID,
+        PROTEINA_OP_CHULETA_ID,
+        HAMBURGUESA_ESPECIAL_XL_ID,
+        HE_XL_RI_PAN_ID,
+        HE_XL_RI_QUESO_ID,
+        HE_XL_ITEM_GRUPO_ID,
+        HE_XL_OV_CARNE_ID,
+        HE_XL_OV_POLLO_ID,
+        HE_XL_OV_CHULETA_ID,
+      });
       return;
     }
 
@@ -2720,6 +2756,26 @@ export class SeederService implements OnApplicationBootstrap {
       [HE_ITEM_GRUPO_ID, PARIS, HAMBURGUESA_ESPECIAL_ID, PROTEINA_GRUPO_ID],
     );
 
+    // Receta "Hamburguesa Especial XL": reutiliza el mismo grupo "Proteína"
+    // con cantidad overrideada a 250 g (ver seedHamburguesaEspecialXl).
+    await this.seedHamburguesaEspecialXl({
+      PARIS,
+      CLP,
+      PAN_ID,
+      QUESO_ID,
+      PROTEINA_GRUPO_ID,
+      PROTEINA_OP_CARNE_ID,
+      PROTEINA_OP_POLLO_ID,
+      PROTEINA_OP_CHULETA_ID,
+      HAMBURGUESA_ESPECIAL_XL_ID,
+      HE_XL_RI_PAN_ID,
+      HE_XL_RI_QUESO_ID,
+      HE_XL_ITEM_GRUPO_ID,
+      HE_XL_OV_CARNE_ID,
+      HE_XL_OV_POLLO_ID,
+      HE_XL_OV_CHULETA_ID,
+    });
+
     // Coca-Cola y Bebida premium: productos demo nuevos con stock propio
     // (mismo estilo que "Papas fritas" en seedCombos).
     const COCACOLA_COSTO = '500';
@@ -2803,6 +2859,121 @@ export class SeederService implements OnApplicationBootstrap {
          (item_grupo_id, tenant_id, item_id, grupo_modificador_id, min, max, orden)
        VALUES ($1,$2,$3,$4,1,1,0)`,
       [COMBO_ITEM_GRUPO_ID, PARIS, COMBO_ID, BEBIDA_GRUPO_ID],
+    );
+  }
+
+  /**
+   * Receta "Hamburguesa Especial XL": REUTILIZA el mismo grupo "Proteína"
+   * (mismas 3 opciones, mismo precio_extra de chuleta) que "Hamburguesa
+   * Especial", pero consume 250 g de proteína en vez de los 150 g por
+   * defecto del grupo. El default del grupo NO cambia — se inserta un
+   * override por opción en item_grupo_modificador_opciones, llavado por
+   * (item_grupo_id, grupo_opcion_id). El precio_extra no se overridea:
+   * hereda el default del grupo vía COALESCE. Demo viva del modelo híbrido.
+   * Guarda independiente (existencia de la propia receta XL) para poder
+   * agregarse en un boot posterior a instalaciones donde "Proteína" ya
+   * estaba sembrada, sin re-sembrar ni tocar nada existente.
+   */
+  private async seedHamburguesaEspecialXl(ids: {
+    PARIS: string;
+    CLP: string;
+    PAN_ID: string;
+    QUESO_ID: string;
+    PROTEINA_GRUPO_ID: string;
+    PROTEINA_OP_CARNE_ID: string;
+    PROTEINA_OP_POLLO_ID: string;
+    PROTEINA_OP_CHULETA_ID: string;
+    HAMBURGUESA_ESPECIAL_XL_ID: string;
+    HE_XL_RI_PAN_ID: string;
+    HE_XL_RI_QUESO_ID: string;
+    HE_XL_ITEM_GRUPO_ID: string;
+    HE_XL_OV_CARNE_ID: string;
+    HE_XL_OV_POLLO_ID: string;
+    HE_XL_OV_CHULETA_ID: string;
+  }): Promise<void> {
+    const {
+      PARIS,
+      CLP,
+      PAN_ID,
+      QUESO_ID,
+      PROTEINA_GRUPO_ID,
+      PROTEINA_OP_CARNE_ID,
+      PROTEINA_OP_POLLO_ID,
+      PROTEINA_OP_CHULETA_ID,
+      HAMBURGUESA_ESPECIAL_XL_ID,
+      HE_XL_RI_PAN_ID,
+      HE_XL_RI_QUESO_ID,
+      HE_XL_ITEM_GRUPO_ID,
+      HE_XL_OV_CARNE_ID,
+      HE_XL_OV_POLLO_ID,
+      HE_XL_OV_CHULETA_ID,
+    } = ids;
+
+    const exists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [HAMBURGUESA_ESPECIAL_XL_ID],
+    );
+    if (exists.length) {
+      return;
+    }
+
+    // costo_actual = costo pan (500×1) + costo queso (6000×0.02) = 620,
+    // igual que "Hamburguesa Especial" (mismos ingredientes fijos).
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,'Hamburguesa Especial XL','Pan y queso fijos; elige tu proteína (porción XL 250 g)','4900',false,true,'receta')`,
+      [HAMBURGUESA_ESPECIAL_XL_ID, PARIS, CLP],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_receta (item_id, costo_actual) VALUES ($1,'620.0000')`,
+      [HAMBURGUESA_ESPECIAL_XL_ID],
+    );
+    await this.dataSource.query(
+      `INSERT INTO receta_ingredientes
+         (receta_ingrediente_id, tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, bloqueante)
+       VALUES
+         ($1,$4,$5,$2,'1','unidad',true),
+         ($3,$4,$5,$6,'20','g',false)`,
+      [
+        HE_XL_RI_PAN_ID,
+        PAN_ID,
+        HE_XL_RI_QUESO_ID,
+        PARIS,
+        HAMBURGUESA_ESPECIAL_XL_ID,
+        QUESO_ID,
+      ],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_grupos_modificadores
+         (item_grupo_id, tenant_id, item_id, grupo_modificador_id, min, max, orden)
+       VALUES ($1,$2,$3,$4,1,1,0)`,
+      [
+        HE_XL_ITEM_GRUPO_ID,
+        PARIS,
+        HAMBURGUESA_ESPECIAL_XL_ID,
+        PROTEINA_GRUPO_ID,
+      ],
+    );
+    // Override de cantidad (150 g default → 250 g) para las 3 opciones del
+    // grupo, acotado a ESTA asociación (item_grupo_id); "Hamburguesa
+    // Especial" sigue usando el default de 150 g sin ningún override.
+    await this.dataSource.query(
+      `INSERT INTO item_grupo_modificador_opciones
+         (item_grupo_opcion_id, tenant_id, item_grupo_id, grupo_opcion_id, cantidad, unidad_codigo)
+       VALUES
+         ($1,$5,$6,$2,'250','g'),
+         ($3,$5,$6,$7,'250','g'),
+         ($4,$5,$6,$8,'250','g')`,
+      [
+        HE_XL_OV_CARNE_ID,
+        PROTEINA_OP_CARNE_ID,
+        HE_XL_OV_POLLO_ID,
+        HE_XL_OV_CHULETA_ID,
+        PARIS,
+        HE_XL_ITEM_GRUPO_ID,
+        PROTEINA_OP_POLLO_ID,
+        PROTEINA_OP_CHULETA_ID,
+      ],
     );
   }
 

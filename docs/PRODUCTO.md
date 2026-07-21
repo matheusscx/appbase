@@ -261,10 +261,19 @@ customer (`min`/`max`).
   opción); `min:1, max:2` permite 2 unidades de la misma opción o 1+1 de dos
   distintas — se valida la **suma de unidades** elegidas, no cuántas opciones
   distintas se tocaron.
-- **Precio en el grupo, sin override por item.** El recargo (`precioExtra`) de
-  cada opción vive en la opción del grupo — el mismo para todos los items que
-  usan ese grupo. Si dos combos necesitan precios distintos para la misma
-  opción, se requieren **dos grupos** (trade-off asumido; ver ADR-013).
+- **La cantidad y el recargo de una opción se definen por receta; el grupo es
+  catálogo reutilizable con un default opcional** (2026-07-21). Cada opción
+  del grupo tiene una `cantidad`/`unidadCodigo`/`precioExtra` **default**,
+  pero cada receta o combo que usa el grupo puede **overridear** esos valores
+  para su propio consumo, sin duplicar el grupo ni afectar a las demás
+  recetas que lo comparten — el mismo grupo "Proteína" puede consumir 150 g
+  en una receta y 250 g en otra. Si el default falta y ninguna receta lo
+  overridea, la opción queda **pendiente** para esa receta (no se ofrece en
+  el POS) hasta que se defina una cantidad, por override o por default del
+  grupo. Ver `docs/features/grupos-modificadores.md` § "Cantidades de consumo
+  por item" y ADR-014 (esto reemplaza el trade-off "sin override" de
+  ADR-013(c), que solo cubría precio y obligaba a duplicar el grupo entero
+  para variar un valor).
 - **Opción siempre bloqueante.** A diferencia de los ingredientes fijos de una
   receta (que pueden marcarse no bloqueantes), una opción de grupo elegida
   explícitamente por el customer sin stock **aborta la venta** — no hay
