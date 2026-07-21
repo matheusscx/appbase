@@ -125,6 +125,9 @@ import { SesionGarzon } from './modules/turnos/entities/sesion-garzon.entity';
 import { ImpresorasModule } from './modules/impresoras/impresoras.module';
 import { MermasModule } from './modules/mermas/mermas.module';
 import { Impresora } from './modules/impresoras/entities/impresora.entity';
+import { GrupoModificador } from './modules/grupos-modificadores/entities/grupo-modificador.entity';
+import { GrupoModificadorOpcion } from './modules/grupos-modificadores/entities/grupo-modificador-opcion.entity';
+import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos-modificadores.module';
 
 @Module({
   imports: [
@@ -224,6 +227,8 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
           Turno,
           SesionGarzon,
           Impresora,
+          GrupoModificador,
+          GrupoModificadorOpcion,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -262,6 +267,7 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
     TurnosModule,
     ImpresorasModule,
     MermasModule,
+    GruposModificadoresModule,
   ],
   controllers: [AppController],
   providers: [AppService],

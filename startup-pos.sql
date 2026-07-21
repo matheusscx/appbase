@@ -601,6 +601,38 @@ CREATE UNIQUE INDEX "uq_combo_componente_vivo"
   ON "combo_componentes" ("combo_item_id", "componente_item_id")
   WHERE "eliminado_el" IS NULL;
 
+-- Grupos de modificadores reutilizables a nivel tenant (sin tipo declarado;
+-- la familia de efecto se deriva de las opciones y se verifica al guardar)
+CREATE TABLE "grupos_modificadores" (
+  "grupo_modificador_id" UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"            UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"              TEXT        NOT NULL,
+  "creado_el"           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"      TIMESTAMPTZ,
+  "eliminado_el"        TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_grupo_modificador_nombre_vivo"
+  ON "grupos_modificadores" ("tenant_id", LOWER("nombre"))
+  WHERE "eliminado_el" IS NULL;
+
+-- Opciones de un grupo (item + recargo). unidad_codigo solo para familia ingrediente.
+CREATE TABLE "grupo_modificador_opciones" (
+  "grupo_opcion_id"      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"            UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "grupo_modificador_id" UUID          NOT NULL REFERENCES "grupos_modificadores" ("grupo_modificador_id"),
+  "item_id"              UUID          NOT NULL REFERENCES "items" ("item_id"),
+  "cantidad"             NUMERIC(18,4) NOT NULL,   -- por unidad elegida
+  "unidad_codigo"        TEXT          REFERENCES "unidades_medida" ("codigo"),
+  "precio_extra"         NUMERIC(18,4) NOT NULL DEFAULT 0,  -- recargo ≥ 0
+  "orden"                INT           NOT NULL DEFAULT 0,
+  "creado_el"            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"       TIMESTAMPTZ,
+  "eliminado_el"         TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_grupo_opcion_item_vivo"
+  ON "grupo_modificador_opciones" ("grupo_modificador_id", "item_id")
+  WHERE "eliminado_el" IS NULL;
+
 ALTER TABLE "cuenta_lineas"
   ADD COLUMN IF NOT EXISTS "personalizacion" JSONB;
 ALTER TABLE "venta_detalles"
