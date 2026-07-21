@@ -17,6 +17,7 @@ import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { GruposModificadoresService } from './grupos-modificadores.service';
 import { CreateGrupoModificadorDto } from './dto/create-grupo-modificador.dto';
 import { UpdateGrupoModificadorDto } from './dto/update-grupo-modificador.dto';
+import { AplicarOverridesDto } from './dto/aplicar-overrides.dto';
 
 @Controller('grupos-modificadores')
 @UseGuards(JwtAuthGuard, TenantGuard)
@@ -40,6 +41,23 @@ export class GruposModificadoresController {
   findOne(@Req() req: Request, @Param('id') id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.service.findOne(tenantId, id);
+  }
+
+  @Get(':id/items')
+  itemsUsando(@Req() req: Request, @Param('id') id: string) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.service.itemsUsando(tenantId, id);
+  }
+
+  @Patch(':id/overrides')
+  @UseGuards(TenantAdminGuard)
+  aplicarOverrides(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: AplicarOverridesDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.service.aplicarOverrides(tenantId, id, dto);
   }
 
   @Patch(':id')

@@ -11,6 +11,7 @@ import {
   GrupoOpcionInputDto,
 } from './dto/create-grupo-modificador.dto';
 import { UpdateGrupoModificadorDto } from './dto/update-grupo-modificador.dto';
+import { AplicarOverridesDto } from './dto/aplicar-overrides.dto';
 import { CatalogService } from '../catalog/catalog.service';
 
 export type FamiliaEfecto = 'ingrediente' | 'vendible';
@@ -530,6 +531,189 @@ export class GruposModificadoresService {
          WHERE grupo_modificador_id = $1`,
         [grupoId],
       );
+    });
+  }
+
+  /**
+   * Lista, para el drawer de "dónde se usa este grupo", todas las recetas/
+   * combos vivos que lo tienen asociado junto con el estado efectivo
+   * (COALESCE override → default) de cada opción. Batchea las opciones de
+   * todas las asociaciones en una sola query (evita N+1 por item).
+   */
+  async itemsUsando(tenantId: string, grupoId: string) {
+    const asociaciones: {
+      item_grupo_id: string;
+      item_id: string;
+      item_nombre: string;
+      tipo: string;
+    }[] = await this.dataSource.query(
+      `SELECT igm.item_grupo_id, i.item_id, i.nombre AS item_nombre, i.tipo
+       FROM item_grupos_modificadores igm
+       JOIN items i ON i.item_id = igm.item_id AND i.eliminado_el IS NULL
+       WHERE igm.grupo_modificador_id = $1 AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL
+       ORDER BY i.nombre ASC`,
+      [grupoId, tenantId],
+    );
+    if (!asociaciones.length) return [];
+
+    const igIds = asociaciones.map((a) => a.item_grupo_id);
+    const opRows: {
+      item_grupo_id: string;
+      grupo_opcion_id: string;
+      item_nombre: string;
+      cantidad_efectiva: string | null;
+      cantidad_default: string | null;
+      unidad_codigo: string | null;
+      precio_extra: string;
+      orden: number;
+    }[] = await this.dataSource.query(
+      `SELECT igm.item_grupo_id, o.grupo_opcion_id, i.nombre AS item_nombre,
+              COALESCE(ovr.cantidad, o.cantidad) AS cantidad_efectiva,
+              o.cantidad AS cantidad_default,
+              COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
+              COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra,
+              o.orden
+       FROM item_grupos_modificadores igm
+       JOIN grupo_modificador_opciones o ON o.grupo_modificador_id = igm.grupo_modificador_id
+         AND o.eliminado_el IS NULL
+       JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN item_grupo_modificador_opciones ovr
+         ON ovr.grupo_opcion_id = o.grupo_opcion_id AND ovr.item_grupo_id = igm.item_grupo_id
+        AND ovr.eliminado_el IS NULL
+       WHERE igm.item_grupo_id = ANY($1::uuid[]) AND igm.tenant_id = $2
+       ORDER BY o.orden ASC`,
+      [igIds, tenantId],
+    );
+
+    const opsPorIg = new Map<string, typeof opRows>();
+    for (const r of opRows) {
+      const list = opsPorIg.get(r.item_grupo_id) ?? [];
+      list.push(r);
+      opsPorIg.set(r.item_grupo_id, list);
+    }
+
+    return asociaciones.map((a) => ({
+      itemId: a.item_id,
+      itemNombre: a.item_nombre,
+      tipo: a.tipo,
+      itemGrupoId: a.item_grupo_id,
+      opciones: (opsPorIg.get(a.item_grupo_id) ?? []).map((r) => ({
+        grupoOpcionId: r.grupo_opcion_id,
+        itemNombre: r.item_nombre,
+        cantidad: r.cantidad_efectiva,
+        cantidadDefault: r.cantidad_default,
+        unidadCodigo: r.unidad_codigo,
+        precioExtra: r.precio_extra,
+        esPendiente: r.cantidad_efectiva == null,
+      })),
+    }));
+  }
+
+  /**
+   * Aplica en lote el mismo override (cantidad/unidad/precioExtra) a varias
+   * asociaciones item↔grupo del mismo grupo_opcion_id — upsert-preservando
+   * por (item_grupo_id, grupo_opcion_id), análoga a upsertOverridesDeGrupo
+   * (Task 3) pero resolviendo por el lado del grupo. Valida que el grupo
+   * exista, que la opción pertenezca al grupo, y que cada item_grupo_id sea
+   * una asociación viva de ESTE grupo en este tenant.
+   */
+  async aplicarOverrides(
+    tenantId: string,
+    grupoId: string,
+    dto: AplicarOverridesDto,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
+        `SELECT grupo_modificador_id FROM grupos_modificadores
+           WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [grupoId, tenantId],
+      );
+      if (!grupoRows.length) {
+        throw new NotFoundException('Grupo de modificadores no encontrado');
+      }
+
+      const opRows: { grupo_opcion_id: string }[] = await manager.query(
+        `SELECT grupo_opcion_id FROM grupo_modificador_opciones
+         WHERE grupo_opcion_id = $1 AND grupo_modificador_id = $2 AND tenant_id = $3
+           AND eliminado_el IS NULL`,
+        [dto.grupoOpcionId, grupoId, tenantId],
+      );
+      if (!opRows.length) {
+        throw new BadRequestException('La opción no pertenece al grupo');
+      }
+
+      // item_grupo_ids válidos: asociaciones vivas de ESTE grupo en ESTE tenant.
+      const validos: { item_grupo_id: string }[] = await manager.query(
+        `SELECT item_grupo_id FROM item_grupos_modificadores
+         WHERE item_grupo_id = ANY($1::uuid[]) AND grupo_modificador_id = $2
+           AND tenant_id = $3 AND eliminado_el IS NULL`,
+        [dto.itemGrupoIds, grupoId, tenantId],
+      );
+      const validSet = new Set(validos.map((r) => r.item_grupo_id));
+      for (const ig of dto.itemGrupoIds) {
+        if (!validSet.has(ig)) {
+          throw new BadRequestException(
+            `item_grupo_id no válido para este grupo: ${ig}`,
+          );
+        }
+      }
+
+      if (
+        dto.cantidad != null &&
+        dto.cantidad !== '' &&
+        new Decimal(dto.cantidad).lessThanOrEqualTo(0)
+      ) {
+        throw new BadRequestException('La cantidad debe ser mayor a 0');
+      }
+      if (
+        dto.precioExtra != null &&
+        dto.precioExtra !== '' &&
+        new Decimal(dto.precioExtra).lessThan(0)
+      ) {
+        throw new BadRequestException(
+          'El precio extra debe ser mayor o igual a 0',
+        );
+      }
+      const cantidad =
+        dto.cantidad != null && dto.cantidad !== '' ? dto.cantidad : null;
+      const unidad = dto.unidadCodigo || null;
+      const precio =
+        dto.precioExtra != null && dto.precioExtra !== ''
+          ? dto.precioExtra
+          : null;
+
+      let actualizados = 0;
+      for (const itemGrupoId of dto.itemGrupoIds) {
+        const vivos: { item_grupo_opcion_id: string }[] = await manager.query(
+          `SELECT item_grupo_opcion_id FROM item_grupo_modificador_opciones
+           WHERE item_grupo_id = $1 AND grupo_opcion_id = $2 AND eliminado_el IS NULL`,
+          [itemGrupoId, dto.grupoOpcionId],
+        );
+        if (vivos.length) {
+          await manager.query(
+            `UPDATE item_grupo_modificador_opciones
+             SET cantidad = $1, unidad_codigo = $2, precio_extra = $3, actualizado_el = NOW()
+             WHERE item_grupo_opcion_id = $4`,
+            [cantidad, unidad, precio, vivos[0].item_grupo_opcion_id],
+          );
+        } else {
+          await manager.query(
+            `INSERT INTO item_grupo_modificador_opciones
+               (tenant_id, item_grupo_id, grupo_opcion_id, cantidad, unidad_codigo, precio_extra)
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [
+              tenantId,
+              itemGrupoId,
+              dto.grupoOpcionId,
+              cantidad,
+              unidad,
+              precio,
+            ],
+          );
+        }
+        actualizados++;
+      }
+      return { actualizados };
     });
   }
 }

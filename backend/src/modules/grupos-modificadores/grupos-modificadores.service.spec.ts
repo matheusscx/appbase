@@ -9,6 +9,7 @@ const ITEM_ING_A = '550e8400-e29b-41d4-a716-4466554400a1';
 const ITEM_ING_B = '550e8400-e29b-41d4-a716-4466554400a2';
 const ITEM_PROD = '550e8400-e29b-41d4-a716-4466554400b1';
 const ITEM_PROD_2 = '550e8400-e29b-41d4-a716-4466554400b2';
+const OPCION_ID = '550e8400-e29b-41d4-a716-4466554400c1';
 
 describe('GruposModificadoresService', () => {
   let service: GruposModificadoresService;
@@ -479,6 +480,43 @@ describe('GruposModificadoresService', () => {
       const res = await service.findAll(TENANT_ID);
       expect(res).toEqual([]);
       expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('itemsUsando / aplicarOverrides', () => {
+    it('aplicarOverrides hace upsert del mismo valor a varias asociaciones', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // grupo vivo
+        .mockResolvedValueOnce([{ grupo_opcion_id: OPCION_ID }]) // opción pertenece al grupo
+        .mockResolvedValueOnce([
+          { item_grupo_id: 'IG1' },
+          { item_grupo_id: 'IG2' },
+        ]) // asociaciones válidas del grupo
+        .mockResolvedValueOnce([]) // overrides vivos de IG1
+        .mockResolvedValueOnce([]) // INSERT override IG1
+        .mockResolvedValueOnce([]) // overrides vivos de IG2
+        .mockResolvedValueOnce([]); // INSERT override IG2
+      const res = await service.aplicarOverrides(TENANT_ID, 'G1', {
+        itemGrupoIds: ['IG1', 'IG2'],
+        grupoOpcionId: OPCION_ID,
+        cantidad: '150',
+        unidadCodigo: 'g',
+      });
+      expect(res.actualizados).toBe(2);
+    });
+
+    it('rechaza aplicar a un item_grupo_id que no pertenece al grupo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+        .mockResolvedValueOnce([{ grupo_opcion_id: OPCION_ID }])
+        .mockResolvedValueOnce([{ item_grupo_id: 'IG1' }]); // solo IG1 es válido; IG9 no
+      await expect(
+        service.aplicarOverrides(TENANT_ID, 'G1', {
+          itemGrupoIds: ['IG1', 'IG9'],
+          grupoOpcionId: OPCION_ID,
+          cantidad: '150',
+        }),
+      ).rejects.toThrow(/no pertenece|no válid/i);
     });
   });
 });
