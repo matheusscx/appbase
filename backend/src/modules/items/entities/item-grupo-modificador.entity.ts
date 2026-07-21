@@ -1,6 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
 
 @Entity('item_grupos_modificadores')
+@Index('uq_item_grupo_vivo', ['itemId', 'grupoModificadorId'], {
+  unique: true,
+  where: '"eliminado_el" IS NULL',
+})
 export class ItemGrupoModificador {
   @PrimaryGeneratedColumn('uuid', { name: 'item_grupo_id' })
   itemGrupoId: string;

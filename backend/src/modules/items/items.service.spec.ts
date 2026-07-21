@@ -1498,7 +1498,8 @@ describe('ItemsService', () => {
           ]) // lookup PROD_ID
           .mockResolvedValueOnce([]) // soft-delete combo_componentes
           .mockResolvedValueOnce([]) // INSERT combo_componentes
-          .mockResolvedValueOnce([]); // UPDATE item_combo
+          .mockResolvedValueOnce([]) // UPDATE item_combo
+          .mockResolvedValueOnce([{ componentes: '1', grupos: '0' }]); // conteo vivos post-cambio
 
         const patch = await service.update(TENANT, COMBO_ID, {
           componentes: [
@@ -1507,6 +1508,38 @@ describe('ItemsService', () => {
         });
         expect(patch.costoActual).toBe('1000'); // costo 500 × 2
         expect(patch.componentes).toHaveLength(1);
+      });
+
+      it('rechaza vaciar los grupos de un combo solo-grupos (queda huérfano)', async () => {
+        // Combo creado sin componentes fijos (solo grupos, Ticket B). El PATCH
+        // no toca `componentes` (nunca existieron) y vacía `gruposModificadores`
+        // — sin la validación, el combo queda sin componentes NI grupos.
+        managerMock.query
+          .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores (soft-delete previos)
+          .mockResolvedValueOnce([{ componentes: '0', grupos: '0' }]); // conteo vivos post-cambio
+
+        await expect(
+          service.update(TENANT, COMBO_ID, { gruposModificadores: [] }),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('permite vaciar los grupos si el combo conserva otro grupo vivo', async () => {
+        const OTRO_GRUPO_ID = 'otro-grupo-uuid';
+        managerMock.query
+          .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores (soft-delete previos)
+          .mockResolvedValueOnce([{ grupo_modificador_id: OTRO_GRUPO_ID }]) // grupo existe/pertenece al tenant
+          .mockResolvedValueOnce([]) // INSERT item_grupos_modificadores
+          .mockResolvedValueOnce([{ componentes: '0', grupos: '1' }]); // conteo vivos post-cambio
+
+        const patch = await service.update(TENANT, COMBO_ID, {
+          gruposModificadores: [
+            { grupoModificadorId: OTRO_GRUPO_ID, min: 1, max: 1, orden: 0 },
+          ],
+        });
+
+        expect(patch.gruposModificadores).toHaveLength(1);
       });
 
       it('bloquea borrar un item usado como componente de un combo vivo', async () => {

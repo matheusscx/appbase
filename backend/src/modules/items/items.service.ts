@@ -1200,6 +1200,32 @@ export class ItemsService {
         patch.gruposModificadores = dto.gruposModificadores;
       }
 
+      // Un combo no puede quedar huérfano: si este PATCH tocó componentes
+      // y/o grupos, verificar que sobreviva al menos uno de los dos (vivo)
+      // antes de cerrar la transacción — replica la regla de create().
+      if (
+        tipo === 'combo' &&
+        (dto.componentes !== undefined || dto.gruposModificadores !== undefined)
+      ) {
+        const vivosRows: { componentes: string; grupos: string }[] =
+          await manager.query(
+            `SELECT
+               (SELECT COUNT(*) FROM combo_componentes
+                 WHERE combo_item_id = $1 AND eliminado_el IS NULL) AS componentes,
+               (SELECT COUNT(*) FROM item_grupos_modificadores
+                 WHERE item_id = $1 AND eliminado_el IS NULL) AS grupos`,
+            [itemId],
+          );
+        const totalVivos =
+          parseInt(vivosRows[0].componentes, 10) +
+          parseInt(vivosRows[0].grupos, 10);
+        if (totalVivos === 0) {
+          throw new BadRequestException(
+            'Los combos requieren al menos un componente o un grupo de modificadores',
+          );
+        }
+      }
+
       if (dto.impuestosIds !== undefined) {
         await manager.query(`DELETE FROM item_impuestos WHERE item_id = $1`, [
           itemId,
