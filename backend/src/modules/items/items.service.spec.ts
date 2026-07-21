@@ -2264,6 +2264,45 @@ describe('ItemsService', () => {
         'kg',
       );
     });
+
+    it('descuenta también las opciones de grupo del snapshot (siempre bloqueante)', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // sin ingredientes base
+      const spyOpciones = jest
+        .spyOn(service as any, 'venderOpcionesGrupos')
+        .mockResolvedValue(undefined);
+
+      const grupos = [
+        {
+          grupoId: 'G',
+          grupoNombre: 'Extra',
+          opciones: [
+            {
+              itemId: 'bebida-uuid',
+              nombre: 'Coca',
+              cantidad: '1',
+              precioExtra: '800',
+              unidades: '1',
+            },
+          ],
+        },
+      ];
+
+      await service.venderIngredientesReceta(managerMock as any, {
+        ...PARAMS,
+        snapshot: { omitidos: [], extras: [], grupos },
+      });
+
+      expect(spyOpciones).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          tenantId: PARAMS.tenantId,
+          usuarioId: PARAMS.usuarioId,
+          ventaId: PARAMS.ventaId,
+          cantidadVendida: PARAMS.cantidadVendida,
+        }),
+        grupos,
+      );
+    });
   });
 
   describe('venderComponentesCombo', () => {
@@ -2503,6 +2542,207 @@ describe('ItemsService', () => {
 
       expect(spyReceta).toHaveBeenCalled();
       expect(advertencias).toEqual([]);
+    });
+
+    it('descuenta también las opciones de grupo del snapshot (siempre bloqueante)', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // combo sin componentes fijos
+      const spyOpciones = jest
+        .spyOn(service as any, 'venderOpcionesGrupos')
+        .mockResolvedValue(undefined);
+
+      const grupos = [
+        {
+          grupoId: 'G',
+          grupoNombre: 'Bebida',
+          opciones: [
+            {
+              itemId: 'bebida-uuid',
+              nombre: 'Coca',
+              cantidad: '1',
+              precioExtra: '800',
+              unidades: '1',
+            },
+          ],
+        },
+      ];
+
+      await service.venderComponentesCombo(managerMock as any, {
+        tenantId: TENANT,
+        usuarioId: USUARIO_ID,
+        ventaId: VENTA_ID,
+        comboItemId: COMBO_ID,
+        comboNombre: 'Combo',
+        cantidadVendida: '2',
+        snapshot: { omitidos: [], extras: [], grupos },
+      });
+
+      expect(spyOpciones).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          cantidadVendida: '2',
+        }),
+        grupos,
+      );
+    });
+  });
+
+  describe('venderOpcionesGrupos', () => {
+    const USUARIO_ID = 'usuario-uuid';
+    const VENTA_ID = 'venta-uuid';
+    const PROD_ID = 'bebida-uuid';
+    const ING_ID = 'carne-uuid';
+    const RECETA_ID = 'salsa-uuid';
+
+    it('producto → salida; ingrediente → salida con conversión; receta → venderIngredientesReceta; servicio → nada', async () => {
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({} as any);
+      const spyReceta = jest
+        .spyOn(service, 'venderIngredientesReceta')
+        .mockResolvedValue([]);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('200');
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto', unidad_medida: 'unidad' }])
+        .mockResolvedValueOnce([{ tipo: 'ingrediente', unidad_medida: 'g' }])
+        .mockResolvedValueOnce([{ tipo: 'receta', unidad_medida: null }]);
+
+      await (service as any).venderOpcionesGrupos(
+        managerMock,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          cantidadVendida: '2',
+        },
+        [
+          {
+            grupoId: 'G',
+            grupoNombre: 'Proteína',
+            opciones: [
+              {
+                itemId: PROD_ID,
+                nombre: 'Coca',
+                cantidad: '1',
+                precioExtra: '0',
+                unidades: '1',
+              },
+              {
+                itemId: ING_ID,
+                nombre: 'Carne',
+                cantidad: '100',
+                unidadCodigo: 'g',
+                precioExtra: '0',
+                unidades: '1',
+              },
+              {
+                itemId: RECETA_ID,
+                nombre: 'Salsa',
+                cantidad: '1',
+                precioExtra: '0',
+                unidades: '1',
+              },
+            ],
+          },
+        ],
+      );
+
+      expect(spyMov).toHaveBeenCalledTimes(2); // producto + ingrediente
+      expect(spyReceta).toHaveBeenCalled(); // receta
+    });
+
+    it('opción sin stock → aborta (siempre bloqueante)', async () => {
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockRejectedValue(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+      managerMock.query.mockResolvedValueOnce([
+        { tipo: 'producto', unidad_medida: 'unidad' },
+      ]);
+
+      await expect(
+        (service as any).venderOpcionesGrupos(
+          managerMock,
+          {
+            tenantId: TENANT,
+            usuarioId: USUARIO_ID,
+            ventaId: VENTA_ID,
+            cantidadVendida: '1',
+          },
+          [
+            {
+              grupoId: 'G',
+              grupoNombre: 'Bebida',
+              opciones: [
+                {
+                  itemId: PROD_ID,
+                  nombre: 'Coca',
+                  cantidad: '1',
+                  precioExtra: '0',
+                  unidades: '1',
+                },
+              ],
+            },
+          ],
+        ),
+      ).rejects.toThrow('Stock insuficiente para la salida');
+    });
+
+    it('grupos undefined → no hace nada', async () => {
+      const spyMov = jest.spyOn(inventarioServiceMock, 'registrarMovimiento');
+
+      await (service as any).venderOpcionesGrupos(
+        managerMock,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          cantidadVendida: '1',
+        },
+        undefined,
+      );
+
+      expect(spyMov).not.toHaveBeenCalled();
+      expect(managerMock.query).not.toHaveBeenCalled();
+    });
+
+    it('item tipo servicio → no genera movimiento ni delega en receta', async () => {
+      const spyMov = jest.spyOn(inventarioServiceMock, 'registrarMovimiento');
+      const spyReceta = jest.spyOn(service, 'venderIngredientesReceta');
+      managerMock.query.mockResolvedValueOnce([
+        { tipo: 'servicio', unidad_medida: null },
+      ]);
+
+      await (service as any).venderOpcionesGrupos(
+        managerMock,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          cantidadVendida: '1',
+        },
+        [
+          {
+            grupoId: 'G',
+            grupoNombre: 'Bebida',
+            opciones: [
+              {
+                itemId: 'servicio-uuid',
+                nombre: 'Envoltura',
+                cantidad: '1',
+                precioExtra: '0',
+                unidades: '1',
+              },
+            ],
+          },
+        ],
+      );
+
+      expect(spyMov).not.toHaveBeenCalled();
+      expect(spyReceta).not.toHaveBeenCalled();
     });
   });
 

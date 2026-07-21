@@ -1856,6 +1856,17 @@ export class ItemsService {
       }
     }
 
+    await this.venderOpcionesGrupos(
+      manager,
+      {
+        tenantId: params.tenantId,
+        usuarioId: params.usuarioId,
+        ventaId: params.ventaId,
+        cantidadVendida: params.cantidadVendida,
+      },
+      params.snapshot?.grupos,
+    );
+
     return advertencias;
   }
 
@@ -1876,6 +1887,7 @@ export class ItemsService {
       comboItemId: string;
       comboNombre: string;
       cantidadVendida: string;
+      snapshot?: PersonalizacionRecetaSnapshot;
     },
   ): Promise<string[]> {
     const componentes: {
@@ -1990,7 +2002,90 @@ export class ItemsService {
       }
     }
 
+    await this.venderOpcionesGrupos(
+      manager,
+      {
+        tenantId: params.tenantId,
+        usuarioId: params.usuarioId,
+        ventaId: params.ventaId,
+        cantidadVendida: params.cantidadVendida,
+      },
+      params.snapshot?.grupos,
+    );
+
     return advertencias;
+  }
+
+  /**
+   * Vende las opciones elegidas de los grupos de modificadores (SnapshotGrupo[])
+   * congelados en la personalización. A diferencia de los componentes fijos de
+   * combo/ingredientes de receta, las opciones de grupo NO tienen concepto de
+   * "no bloqueante": cualquier error de stock insuficiente se propaga sin
+   * capturar y aborta toda la transacción de la venta.
+   */
+  private async venderOpcionesGrupos(
+    manager: EntityManager,
+    params: {
+      tenantId: string;
+      usuarioId: string | null;
+      ventaId: string;
+      cantidadVendida: string;
+    },
+    grupos: SnapshotGrupo[] | undefined,
+  ): Promise<void> {
+    for (const grupo of grupos ?? []) {
+      for (const op of grupo.opciones) {
+        const rows: { tipo: string; unidad_medida: string | null }[] =
+          await manager.query(
+            `SELECT i.tipo, ip.unidad_medida
+             FROM items i
+             LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+             WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+            [op.itemId, params.tenantId],
+          );
+        if (!rows.length) continue;
+        const { tipo, unidad_medida } = rows[0];
+        if (tipo === 'servicio') continue;
+
+        // cantidad total = cantidad de la opción × unidades elegidas × cantidad vendida del item
+        const cantidadTotal = new Decimal(op.cantidad)
+          .mul(op.unidades)
+          .mul(params.cantidadVendida)
+          .toString();
+
+        if (tipo === 'receta') {
+          // Para una opción receta, cantidadTotal son unidades enteras de la receta.
+          await this.venderIngredientesReceta(manager, {
+            tenantId: params.tenantId,
+            usuarioId: params.usuarioId,
+            ventaId: params.ventaId,
+            recetaItemId: op.itemId,
+            recetaNombre: op.nombre,
+            cantidadVendida: cantidadTotal,
+          });
+          continue;
+        }
+
+        // producto o ingrediente → salida (siempre bloqueante: el error se propaga)
+        const cantidadSalida =
+          tipo === 'ingrediente' && op.unidadCodigo
+            ? await this.catalogService.convertirUnidad(
+                cantidadTotal,
+                op.unidadCodigo,
+                unidad_medida!,
+              )
+            : cantidadTotal;
+        await this.inventarioService.registrarMovimiento(manager, {
+          tenantId: params.tenantId,
+          itemId: op.itemId,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: cantidadSalida,
+          usuarioId: params.usuarioId,
+          ventaId: params.ventaId,
+        });
+      }
+    }
   }
 
   // ── private helpers ────────────────────────────────────────────────────────

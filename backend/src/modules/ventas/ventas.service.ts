@@ -460,6 +460,7 @@ export class VentasService {
             comboItemId: item.id,
             comboNombre: item.nombre,
             cantidadVendida: cantidadCanonica,
+            snapshot: personalizacion ?? undefined,
           },
         );
         advertenciasReceta.push(...advertencias);
