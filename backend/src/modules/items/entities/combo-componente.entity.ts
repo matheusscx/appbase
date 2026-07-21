@@ -1,6 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
 
 @Entity('combo_componentes')
+@Index('uq_combo_componente_vivo', ['comboItemId', 'componenteItemId'], {
+  unique: true,
+  where: '"eliminado_el" IS NULL',
+})
 export class ComboComponente {
   @PrimaryGeneratedColumn('uuid', { name: 'combo_componente_id' })
   comboComponenteId: string;
