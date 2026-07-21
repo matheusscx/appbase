@@ -10,6 +10,19 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
+export interface SnapshotGrupo {
+  grupoId: string;
+  grupoNombre: string;
+  opciones: {
+    itemId: string;
+    nombre: string;
+    cantidad: string;
+    unidadCodigo?: string;
+    precioExtra: string;
+    unidades: string;
+  }[];
+}
+
 export interface PersonalizacionRecetaSnapshot {
   omitidos: string[];
   extras: {
@@ -21,6 +34,7 @@ export interface PersonalizacionRecetaSnapshot {
     unidades?: string;
   }[];
   comentario?: string;
+  grupos?: SnapshotGrupo[];
 }
 
 export class PersonalizacionExtraInputDto {
@@ -31,6 +45,26 @@ export class PersonalizacionExtraInputDto {
   @IsInt()
   @Min(1)
   unidades?: number;
+}
+
+export class PersonalizacionGrupoOpcionInputDto {
+  @IsUUID()
+  itemId: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  unidades?: number;
+}
+
+export class PersonalizacionGrupoInputDto {
+  @IsUUID()
+  grupoId: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PersonalizacionGrupoOpcionInputDto)
+  opciones: PersonalizacionGrupoOpcionInputDto[];
 }
 
 export class PersonalizacionRecetaDto {
@@ -49,4 +83,10 @@ export class PersonalizacionRecetaDto {
   @IsString()
   @MaxLength(200)
   comentario?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PersonalizacionGrupoInputDto)
+  grupos?: PersonalizacionGrupoInputDto[];
 }

@@ -1815,7 +1815,9 @@ describe('ItemsService', () => {
             unidad_codigo: 'g',
             precio_extra: '500.0000',
           },
-        ]);
+        ])
+        // resolverGruposDeItem: la receta no tiene grupos de modificadores asociados.
+        .mockResolvedValueOnce([]);
     }
 
     it('suma precios de extras del catálogo y arma snapshot', async () => {
@@ -1933,6 +1935,85 @@ describe('ItemsService', () => {
         ),
       );
       expect(managerMock.query).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolverGruposDeItem', () => {
+    const GRUPO_ID = 'grupo-uuid';
+    const OPCION_ID = 'opcion-uuid';
+    const OPCION_AJENA_ID = 'opcion-ajena-uuid';
+
+    it('congela opciones y suma precioExtra × unidades; valida min/max', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: GRUPO_ID, nombre: 'Tamaño', min: 1, max: 1 },
+        ])
+        .mockResolvedValueOnce([
+          {
+            item_id: OPCION_ID,
+            nombre: 'Grande',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '1500.0000',
+          },
+        ]);
+
+      const res = await service.resolverGruposDeItem(
+        managerMock as any,
+        TENANT,
+        ITEM_ID,
+        [{ grupoId: GRUPO_ID, opciones: [{ itemId: OPCION_ID, unidades: 1 }] }],
+      );
+
+      expect(res.precioExtraTotal).toBe('1500.0000');
+      expect(res.grupos[0].opciones[0].nombre).toBeDefined();
+    });
+
+    it('rechaza Σ unidades fuera de [min, max]', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: GRUPO_ID, nombre: 'Tamaño', min: 1, max: 1 },
+        ])
+        .mockResolvedValueOnce([
+          {
+            item_id: OPCION_ID,
+            nombre: 'Grande',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '1500.0000',
+          },
+        ]);
+
+      await expect(
+        service.resolverGruposDeItem(managerMock as any, TENANT, ITEM_ID, [
+          { grupoId: GRUPO_ID, opciones: [] }, // min 1 → 0 elegido
+        ]),
+      ).rejects.toThrow(/elegir|mínimo|entre/i);
+    });
+
+    it('rechaza una opción que no pertenece al grupo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: GRUPO_ID, nombre: 'Tamaño', min: 1, max: 1 },
+        ])
+        .mockResolvedValueOnce([
+          {
+            item_id: OPCION_ID,
+            nombre: 'Grande',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '1500.0000',
+          },
+        ]);
+
+      await expect(
+        service.resolverGruposDeItem(managerMock as any, TENANT, ITEM_ID, [
+          {
+            grupoId: GRUPO_ID,
+            opciones: [{ itemId: OPCION_AJENA_ID, unidades: 1 }],
+          },
+        ]),
+      ).rejects.toThrow(/no pertenece|opción/i);
     });
   });
 

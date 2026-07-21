@@ -190,15 +190,23 @@ export class VentasService {
     const personalizaciones = await Promise.all(
       dto.lineas.map(async (linea, i) => {
         const item = items[i];
-        if (item.tipo !== 'receta' || !linea.personalizacion) {
-          return null;
+        if (item.tipo === 'receta' && linea.personalizacion) {
+          return this.itemsService.resolverPersonalizacionReceta(
+            manager,
+            tenantId,
+            item.id,
+            linea.personalizacion,
+          );
         }
-        return this.itemsService.resolverPersonalizacionReceta(
-          manager,
-          tenantId,
-          item.id,
-          linea.personalizacion,
-        );
+        if (item.tipo === 'combo' && linea.personalizacion) {
+          return this.itemsService.resolverPersonalizacionCombo(
+            manager,
+            tenantId,
+            item.id,
+            linea.personalizacion,
+          );
+        }
+        return null;
       }),
     );
 

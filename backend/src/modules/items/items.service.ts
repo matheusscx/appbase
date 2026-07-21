@@ -28,7 +28,9 @@ import {
 } from '../../common/utils/pagination.util';
 import {
   PersonalizacionRecetaDto,
+  PersonalizacionGrupoInputDto,
   type PersonalizacionRecetaSnapshot,
+  type SnapshotGrupo,
 } from '../../common/dto/personalizacion-receta.dto';
 
 interface ItemRow {
@@ -1572,13 +1574,164 @@ export class ItemsService {
       );
     }
 
+    const gruposResueltos = await this.resolverGruposDeItem(
+      manager,
+      tenantId,
+      recetaItemId,
+      dto?.grupos,
+    );
+    const precioExtraTotalFinal = precioExtraTotal.plus(
+      gruposResueltos.precioExtraTotal,
+    );
+
     return {
       snapshot: {
         omitidos: [...(dto?.omitidos ?? [])],
         extras: extrasResolved,
         comentario: dto?.comentario?.trim() || undefined,
+        ...(gruposResueltos.grupos.length
+          ? { grupos: gruposResueltos.grupos }
+          : {}),
       },
+      precioExtraTotal: precioExtraTotalFinal.toFixed(4),
+    };
+  }
+
+  /**
+   * Resuelve y congela la selección de grupos de modificadores de un item
+   * (receta o combo): valida que cada opción elegida pertenezca al grupo,
+   * que la suma de unidades elegidas por grupo esté entre min y max, y
+   * calcula el recargo total (Σ precioExtra × unidades).
+   */
+  async resolverGruposDeItem(
+    manager: EntityManager,
+    tenantId: string,
+    itemId: string,
+    gruposDto: PersonalizacionGrupoInputDto[] | undefined,
+  ): Promise<{ grupos: SnapshotGrupo[]; precioExtraTotal: string }> {
+    const asociados: {
+      grupo_modificador_id: string;
+      nombre: string;
+      min: number;
+      max: number;
+    }[] = await manager.query(
+      `SELECT igm.grupo_modificador_id, g.nombre, igm.min, igm.max
+       FROM item_grupos_modificadores igm
+       JOIN grupos_modificadores g ON g.grupo_modificador_id = igm.grupo_modificador_id
+         AND g.eliminado_el IS NULL
+       WHERE igm.item_id = $1 AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL`,
+      [itemId, tenantId],
+    );
+
+    const elegidosPorGrupo = new Map(
+      (gruposDto ?? []).map((g) => [g.grupoId, g.opciones]),
+    );
+    // No permitir grupos elegidos que no están asociados al item.
+    for (const g of gruposDto ?? []) {
+      if (!asociados.some((a) => a.grupo_modificador_id === g.grupoId)) {
+        throw new BadRequestException(
+          'Grupo de modificadores no asociado a este item',
+        );
+      }
+    }
+
+    const snapshotGrupos: SnapshotGrupo[] = [];
+    let precioExtraTotal = new Decimal(0);
+
+    for (const asoc of asociados) {
+      const opcionesCat: {
+        item_id: string;
+        nombre: string;
+        cantidad: string;
+        unidad_codigo: string | null;
+        precio_extra: string;
+      }[] = await manager.query(
+        `SELECT o.item_id, i.nombre, o.cantidad, o.unidad_codigo, o.precio_extra
+         FROM grupo_modificador_opciones o
+         JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+         WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2 AND o.eliminado_el IS NULL`,
+        [asoc.grupo_modificador_id, tenantId],
+      );
+
+      const elegidas = elegidosPorGrupo.get(asoc.grupo_modificador_id) ?? [];
+      let totalUnidades = new Decimal(0);
+      const opcionesSnap: SnapshotGrupo['opciones'] = [];
+      for (const el of elegidas) {
+        const cat = opcionesCat.find((o) => o.item_id === el.itemId);
+        if (!cat) {
+          throw new BadRequestException(
+            `La opción ${el.itemId} no pertenece al grupo ${asoc.nombre}`,
+          );
+        }
+        const unidades = new Decimal(el.unidades ?? 1);
+        if (unidades.lt(1) || !unidades.isInteger()) {
+          throw new BadRequestException(
+            'Las unidades de la opción deben ser un entero ≥ 1',
+          );
+        }
+        totalUnidades = totalUnidades.plus(unidades);
+        opcionesSnap.push({
+          itemId: cat.item_id,
+          nombre: cat.nombre,
+          cantidad: cat.cantidad,
+          unidadCodigo: cat.unidad_codigo ?? undefined,
+          precioExtra: cat.precio_extra,
+          unidades: unidades.toString(),
+        });
+        precioExtraTotal = precioExtraTotal.plus(
+          new Decimal(cat.precio_extra).mul(unidades),
+        );
+      }
+
+      if (totalUnidades.lt(asoc.min) || totalUnidades.gt(asoc.max)) {
+        throw new BadRequestException(
+          `El grupo "${asoc.nombre}" requiere elegir entre ${asoc.min} y ${asoc.max} unidades`,
+        );
+      }
+
+      // Solo se congela el grupo si hay opciones elegidas (min=0 puede venir vacío).
+      if (opcionesSnap.length) {
+        snapshotGrupos.push({
+          grupoId: asoc.grupo_modificador_id,
+          grupoNombre: asoc.nombre,
+          opciones: opcionesSnap,
+        });
+      }
+    }
+
+    return {
+      grupos: snapshotGrupos,
       precioExtraTotal: precioExtraTotal.toFixed(4),
+    };
+  }
+
+  /**
+   * Resuelve la personalización de un combo: solo admite grupos de
+   * modificadores (sin ingredientes/extras, esos son propios de receta).
+   */
+  async resolverPersonalizacionCombo(
+    manager: EntityManager,
+    tenantId: string,
+    comboItemId: string,
+    dto?: PersonalizacionRecetaDto,
+  ): Promise<{
+    snapshot: PersonalizacionRecetaSnapshot;
+    precioExtraTotal: string;
+  }> {
+    const { grupos, precioExtraTotal } = await this.resolverGruposDeItem(
+      manager,
+      tenantId,
+      comboItemId,
+      dto?.grupos,
+    );
+    return {
+      snapshot: {
+        omitidos: [],
+        extras: [],
+        comentario: dto?.comentario?.trim() || undefined,
+        grupos: grupos.length ? grupos : undefined,
+      },
+      precioExtraTotal,
     };
   }
 
