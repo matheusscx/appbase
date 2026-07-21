@@ -1,9 +1,7 @@
 import { Test } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
 import { getDataSourceToken } from '@nestjs/typeorm';
+import { NotFoundException } from '@nestjs/common';
 import { GruposModificadoresService } from './grupos-modificadores.service';
-import { GrupoModificador } from './entities/grupo-modificador.entity';
-import { GrupoModificadorOpcion } from './entities/grupo-modificador-opcion.entity';
 import { CatalogService } from '../catalog/catalog.service';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440000';
@@ -14,12 +12,13 @@ const ITEM_PROD = '550e8400-e29b-41d4-a716-4466554400b1';
 describe('GruposModificadoresService', () => {
   let service: GruposModificadoresService;
   let managerMock: { query: jest.Mock };
+  let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
   let convertirUnidad: jest.Mock;
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
     convertirUnidad = jest.fn().mockResolvedValue('1');
-    const dataSourceMock = {
+    dataSourceMock = {
       transaction: jest.fn((cb: (m: typeof managerMock) => unknown) =>
         cb(managerMock),
       ),
@@ -28,8 +27,6 @@ describe('GruposModificadoresService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         GruposModificadoresService,
-        { provide: getRepositoryToken(GrupoModificador), useValue: {} },
-        { provide: getRepositoryToken(GrupoModificadorOpcion), useValue: {} },
         { provide: getDataSourceToken(), useValue: dataSourceMock },
         { provide: CatalogService, useValue: { convertirUnidad } },
       ],
@@ -79,6 +76,8 @@ describe('GruposModificadoresService', () => {
     });
     expect(res.familia).toBe('ingrediente');
     expect(res.opciones).toHaveLength(2);
+    // Grupo recién creado: shape consistente con GET/PATCH (itemsUsandoCount).
+    expect(res.itemsUsandoCount).toBe(0);
   });
 
   it('rechaza mezclar familia ingrediente y vendible', async () => {
@@ -164,7 +163,7 @@ describe('GruposModificadoresService', () => {
         .mockResolvedValueOnce([
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },
         ]) // SELECT grupo vivo
-        .mockResolvedValueOnce([]) // assertNombreLibre
+        // (nombre sin cambio → no se llama assertNombreLibre ni UPDATE nombre)
         .mockResolvedValueOnce([{ affected: 1 }]) // soft-delete opciones viejas
         .mockResolvedValueOnce([
           {
@@ -206,6 +205,64 @@ describe('GruposModificadoresService', () => {
       expect(res.opciones[0].stock).toBeNull();
     });
 
+    it('renombra sin reemplazar opciones (rama solo-rename) y verifica disponibilidad', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // SELECT grupo vivo
+        .mockResolvedValueOnce([]) // assertNombreLibre (nombre cambió)
+        .mockResolvedValueOnce([]) // UPDATE nombre
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebidas' },
+        ]) // cargarGrupo: SELECT grupo
+        .mockResolvedValueOnce([]) // cargarGrupo: SELECT opciones
+        .mockResolvedValueOnce([{ total: 0 }]); // cargarGrupo: COUNT uso
+
+      const res = await service.update(TENANT_ID, 'G1', { nombre: 'Bebidas' });
+
+      expect(res.nombre).toBe('Bebidas');
+      const updateNombre = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          c[0].includes('UPDATE grupos_modificadores SET nombre'),
+      );
+      expect(updateNombre).toBeDefined();
+    });
+
+    it('no verifica disponibilidad de nombre si el nombre no cambia', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // SELECT grupo vivo
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // cargarGrupo: SELECT grupo
+        .mockResolvedValueOnce([]) // cargarGrupo: SELECT opciones
+        .mockResolvedValueOnce([{ total: 0 }]); // cargarGrupo: COUNT uso
+
+      await service.update(TENANT_ID, 'G1', { nombre: 'Bebida' });
+
+      const checkNombre = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' && c[0].includes('LOWER(nombre)'),
+      );
+      expect(checkNombre).toBeUndefined();
+    });
+
+    it('update lanza 404 si el grupo no existe', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // SELECT grupo vivo → vacío
+      await expect(
+        service.update(TENANT_ID, 'inexistente', { nombre: 'X' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('remove lanza 404 si el grupo no existe', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // SELECT grupo vivo → vacío
+      await expect(service.remove(TENANT_ID, 'inexistente')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
     it('bloquea borrar un grupo asociado a items vivos', async () => {
       managerMock.query
         .mockResolvedValueOnce([
@@ -215,6 +272,67 @@ describe('GruposModificadoresService', () => {
       await expect(service.remove(TENANT_ID, 'G1')).rejects.toThrow(
         /No se puede eliminar.*Combo Clásico/i,
       );
+    });
+  });
+
+  describe('findAll', () => {
+    it('batchea opciones y conteos (3 queries totales, sin N+1 por grupo)', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+          { grupo_modificador_id: 'G2', nombre: 'Proteína' },
+        ]) // SELECT grupos
+        .mockResolvedValueOnce([
+          {
+            grupo_modificador_id: 'G1',
+            grupo_opcion_id: 'O1',
+            item_id: ITEM_PROD,
+            item_nombre: 'Coca',
+            tipo: 'producto',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '0',
+            orden: 0,
+            stock: '10',
+          },
+          {
+            grupo_modificador_id: 'G2',
+            grupo_opcion_id: 'O2',
+            item_id: ITEM_ING_A,
+            item_nombre: 'Carne',
+            tipo: 'ingrediente',
+            cantidad: '100',
+            unidad_codigo: 'g',
+            precio_extra: '0',
+            orden: 0,
+            stock: '500',
+          },
+        ]) // SELECT opciones batcheadas (ANY)
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'G1', total: 3 }]); // conteos
+
+      const res = await service.findAll(TENANT_ID);
+
+      // 3 queries totales, no una tanda de 3 por cada grupo.
+      expect(dataSourceMock.query).toHaveBeenCalledTimes(3);
+      expect(res).toHaveLength(2);
+      expect(res[0]).toMatchObject({
+        grupoModificadorId: 'G1',
+        familia: 'vendible',
+        itemsUsandoCount: 3,
+      });
+      expect(res[0].opciones).toHaveLength(1);
+      expect(res[1]).toMatchObject({
+        grupoModificadorId: 'G2',
+        familia: 'ingrediente',
+        itemsUsandoCount: 0, // no aparece en usoRows → 0 por defecto
+      });
+    });
+
+    it('devuelve [] sin más queries si el tenant no tiene grupos', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([]);
+      const res = await service.findAll(TENANT_ID);
+      expect(res).toEqual([]);
+      expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
     });
   });
 });

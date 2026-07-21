@@ -3,11 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
-import { GrupoModificador } from './entities/grupo-modificador.entity';
-import { GrupoModificadorOpcion } from './entities/grupo-modificador-opcion.entity';
 import {
   CreateGrupoModificadorDto,
   GrupoOpcionInputDto,
@@ -27,13 +25,21 @@ export interface OpcionResuelta {
   orden: number;
 }
 
+interface OpcionRow {
+  grupo_opcion_id: string;
+  item_id: string;
+  item_nombre: string;
+  tipo: string;
+  cantidad: string;
+  unidad_codigo: string | null;
+  precio_extra: string;
+  orden: number;
+  stock: string | null;
+}
+
 @Injectable()
 export class GruposModificadoresService {
   constructor(
-    @InjectRepository(GrupoModificador)
-    private readonly grupoRepo: Repository<GrupoModificador>,
-    @InjectRepository(GrupoModificadorOpcion)
-    private readonly opcionRepo: Repository<GrupoModificadorOpcion>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly catalogService: CatalogService,
@@ -41,6 +47,20 @@ export class GruposModificadoresService {
 
   private familiaDeTipo(tipo: string): FamiliaEfecto {
     return tipo === 'ingrediente' ? 'ingrediente' : 'vendible';
+  }
+
+  private mapOpcionRow(r: OpcionRow) {
+    return {
+      grupoOpcionId: r.grupo_opcion_id,
+      itemId: r.item_id,
+      itemNombre: r.item_nombre,
+      tipo: r.tipo,
+      cantidad: r.cantidad,
+      unidadCodigo: r.unidad_codigo,
+      precioExtra: r.precio_extra,
+      orden: r.orden,
+      stock: r.stock,
+    };
   }
 
   /**
@@ -62,7 +82,7 @@ export class GruposModificadoresService {
     const vistos = new Set<string>();
     let familia: FamiliaEfecto | null = null;
     const resueltas: OpcionResuelta[] = [];
-    let orden = 0;
+    let ordenAuto = 0;
     for (const op of opciones) {
       if (vistos.has(op.itemId)) {
         throw new BadRequestException(
@@ -141,6 +161,7 @@ export class GruposModificadoresService {
         unidadCodigo = op.unidadCodigo;
       }
 
+      const orden = op.orden ?? ordenAuto;
       const resuelta: OpcionResuelta = {
         itemId: op.itemId,
         itemNombre: nombre,
@@ -148,13 +169,15 @@ export class GruposModificadoresService {
         cantidad: op.cantidad,
         unidadCodigo,
         precioExtra: op.precioExtra,
-        orden: op.orden ?? orden,
+        orden,
       };
       if (onResuelto) {
         await onResuelto(resuelta);
       }
       resueltas.push(resuelta);
-      orden++;
+      // El siguiente auto-orden continúa desde el que se acaba de usar, así un
+      // orden explícito no colisiona con los auto-asignados posteriores.
+      ordenAuto = orden + 1;
     }
     return { familia: familia!, opciones: resueltas };
   }
@@ -216,6 +239,9 @@ export class GruposModificadoresService {
         nombre: dto.nombre,
         familia,
         opciones: resueltas,
+        // Grupo recién creado: aún no puede estar asociado a ningún item.
+        // Se incluye para que la respuesta comparta shape con GET/PATCH.
+        itemsUsandoCount: 0,
       };
     });
   }
@@ -239,17 +265,7 @@ export class GruposModificadoresService {
       );
     if (!grupoRows.length) return null;
 
-    const opRows: {
-      grupo_opcion_id: string;
-      item_id: string;
-      item_nombre: string;
-      tipo: string;
-      cantidad: string;
-      unidad_codigo: string | null;
-      precio_extra: string;
-      orden: number;
-      stock: string | null;
-    }[] = await runner.query(
+    const opRows: OpcionRow[] = await runner.query(
       `SELECT o.grupo_opcion_id, o.item_id, i.nombre AS item_nombre, i.tipo,
               o.cantidad, o.unidad_codigo, o.precio_extra, o.orden, ip.stock
        FROM grupo_modificador_opciones o
@@ -272,33 +288,70 @@ export class GruposModificadoresService {
       grupoModificadorId: grupoRows[0].grupo_modificador_id,
       nombre: grupoRows[0].nombre,
       familia,
-      opciones: opRows.map((r) => ({
-        grupoOpcionId: r.grupo_opcion_id,
-        itemId: r.item_id,
-        itemNombre: r.item_nombre,
-        tipo: r.tipo,
-        cantidad: r.cantidad,
-        unidadCodigo: r.unidad_codigo,
-        precioExtra: r.precio_extra,
-        orden: r.orden,
-        stock: r.stock,
-      })),
+      opciones: opRows.map((r) => this.mapOpcionRow(r)),
       itemsUsandoCount: usoRows[0]?.total ?? 0,
     };
   }
 
+  /**
+   * Lista los grupos del tenant con opciones y conteo de uso. Batchea las
+   * opciones y los conteos en una sola query cada uno (3 queries totales,
+   * no N+1 por grupo).
+   */
   async findAll(tenantId: string) {
-    const rows: { grupo_modificador_id: string }[] =
+    const grupoRows: { grupo_modificador_id: string; nombre: string }[] =
       await this.dataSource.query(
-        `SELECT grupo_modificador_id FROM grupos_modificadores
+        `SELECT grupo_modificador_id, nombre FROM grupos_modificadores
          WHERE tenant_id = $1 AND eliminado_el IS NULL ORDER BY nombre ASC`,
         [tenantId],
       );
-    return Promise.all(
-      rows.map((r) =>
-        this.cargarGrupo(this.dataSource, tenantId, r.grupo_modificador_id),
-      ),
+    if (!grupoRows.length) return [];
+    const ids = grupoRows.map((g) => g.grupo_modificador_id);
+
+    const opRows: (OpcionRow & { grupo_modificador_id: string })[] =
+      await this.dataSource.query(
+        `SELECT o.grupo_modificador_id, o.grupo_opcion_id, o.item_id,
+                i.nombre AS item_nombre, i.tipo, o.cantidad, o.unidad_codigo,
+                o.precio_extra, o.orden, ip.stock
+         FROM grupo_modificador_opciones o
+         JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+         LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+         WHERE o.grupo_modificador_id = ANY($1::uuid[]) AND o.tenant_id = $2
+           AND o.eliminado_el IS NULL
+         ORDER BY o.orden ASC`,
+        [ids, tenantId],
+      );
+
+    const usoRows: { grupo_modificador_id: string; total: number }[] =
+      await this.dataSource.query(
+        `SELECT igm.grupo_modificador_id, COUNT(*)::int AS total
+         FROM item_grupos_modificadores igm
+         JOIN items i ON i.item_id = igm.item_id AND i.eliminado_el IS NULL
+         WHERE igm.grupo_modificador_id = ANY($1::uuid[]) AND igm.eliminado_el IS NULL
+         GROUP BY igm.grupo_modificador_id`,
+        [ids],
+      );
+
+    const opcionesPorGrupo = new Map<string, OpcionRow[]>();
+    for (const r of opRows) {
+      const list = opcionesPorGrupo.get(r.grupo_modificador_id) ?? [];
+      list.push(r);
+      opcionesPorGrupo.set(r.grupo_modificador_id, list);
+    }
+    const usoPorGrupo = new Map<string, number>(
+      usoRows.map((u) => [u.grupo_modificador_id, u.total]),
     );
+
+    return grupoRows.map((g) => {
+      const ops = opcionesPorGrupo.get(g.grupo_modificador_id) ?? [];
+      return {
+        grupoModificadorId: g.grupo_modificador_id,
+        nombre: g.nombre,
+        familia: ops.length ? this.familiaDeTipo(ops[0].tipo) : null,
+        opciones: ops.map((r) => this.mapOpcionRow(r)),
+        itemsUsandoCount: usoPorGrupo.get(g.grupo_modificador_id) ?? 0,
+      };
+    });
   }
 
   async findOne(tenantId: string, grupoId: string) {
@@ -331,15 +384,13 @@ export class GruposModificadoresService {
         throw new NotFoundException('Grupo de modificadores no encontrado');
       }
 
-      if (dto.nombre !== undefined) {
+      if (dto.nombre !== undefined && dto.nombre !== grupoRows[0].nombre) {
         await this.assertNombreLibre(manager, tenantId, dto.nombre, grupoId);
-        if (dto.nombre !== grupoRows[0].nombre) {
-          await manager.query(
-            `UPDATE grupos_modificadores SET nombre = $1, actualizado_el = NOW()
-             WHERE grupo_modificador_id = $2`,
-            [dto.nombre, grupoId],
-          );
-        }
+        await manager.query(
+          `UPDATE grupos_modificadores SET nombre = $1, actualizado_el = NOW()
+           WHERE grupo_modificador_id = $2`,
+          [dto.nombre, grupoId],
+        );
       }
 
       if (dto.opciones === undefined) {
