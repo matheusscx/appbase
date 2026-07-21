@@ -12,6 +12,7 @@ import { ItemUnidad } from './entities/item-unidad.entity';
 import { ItemCombo } from './entities/item-combo.entity';
 import { ComboComponente } from './entities/combo-componente.entity';
 import { ItemGrupoModificador } from './entities/item-grupo-modificador.entity';
+import { ItemGrupoModificadorOpcion } from './entities/item-grupo-modificador-opcion.entity';
 import { ItemsService } from './items.service';
 import { ItemsController } from './items.controller';
 import { RecetasDesfasesController } from './recetas-desfases.controller';
@@ -33,6 +34,7 @@ import { CatalogModule } from '../catalog/catalog.module';
       ItemCombo,
       ComboComponente,
       ItemGrupoModificador,
+      ItemGrupoModificadorOpcion,
     ]),
     InventarioModule,
     CatalogModule,

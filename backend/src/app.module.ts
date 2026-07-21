@@ -68,6 +68,7 @@ import { ItemUnidad } from './modules/items/entities/item-unidad.entity';
 import { ItemCombo } from './modules/items/entities/item-combo.entity';
 import { ComboComponente } from './modules/items/entities/combo-componente.entity';
 import { ItemGrupoModificador } from './modules/items/entities/item-grupo-modificador.entity';
+import { ItemGrupoModificadorOpcion } from './modules/items/entities/item-grupo-modificador-opcion.entity';
 import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
 import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
@@ -231,6 +232,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
           GrupoModificador,
           GrupoModificadorOpcion,
           ItemGrupoModificador,
+          ItemGrupoModificadorOpcion,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),

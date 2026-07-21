@@ -19,7 +19,7 @@ export interface OpcionResuelta {
   itemId: string;
   itemNombre: string;
   tipo: string;
-  cantidad: string;
+  cantidad: string | null;
   unidadCodigo: string | null;
   precioExtra: string;
   orden: number;
@@ -104,10 +104,16 @@ export class GruposModificadoresService {
           'El precio extra debe ser mayor o igual a 0',
         );
       }
-      if (new Decimal(op.cantidad).lessThanOrEqualTo(0)) {
-        throw new BadRequestException(
-          'La cantidad de la opción debe ser mayor a 0',
-        );
+      if (
+        op.cantidad !== undefined &&
+        op.cantidad !== null &&
+        op.cantidad !== ''
+      ) {
+        if (new Decimal(op.cantidad).lessThanOrEqualTo(0)) {
+          throw new BadRequestException(
+            'La cantidad de la opción debe ser mayor a 0',
+          );
+        }
       }
 
       const rows: {
@@ -147,18 +153,24 @@ export class GruposModificadoresService {
             'Las opciones ingrediente solo admiten modo de inventario "cantidad"',
           );
         }
-        if (!op.unidadCodigo) {
-          throw new BadRequestException(
-            'Las opciones ingrediente requieren unidad de medida',
+        // Con default de cantidad, exigir y verificar la unidad. Sin default,
+        // la unidad se define en el override por receta (Task 3).
+        if (op.cantidad != null && op.cantidad !== '') {
+          if (!op.unidadCodigo) {
+            throw new BadRequestException(
+              'Las opciones ingrediente con cantidad requieren unidad de medida',
+            );
+          }
+          // Verifica magnitud/convertibilidad contra la unidad base del ingrediente.
+          await this.catalogService.convertirUnidad(
+            op.cantidad,
+            op.unidadCodigo,
+            unidad_medida!,
           );
+          unidadCodigo = op.unidadCodigo;
+        } else if (op.unidadCodigo) {
+          unidadCodigo = op.unidadCodigo; // unidad default sin cantidad default: se permite
         }
-        // Verifica magnitud/convertibilidad contra la unidad base del ingrediente.
-        await this.catalogService.convertirUnidad(
-          op.cantidad,
-          op.unidadCodigo,
-          unidad_medida!,
-        );
-        unidadCodigo = op.unidadCodigo;
       }
 
       const orden = op.orden ?? ordenAuto;
@@ -166,7 +178,8 @@ export class GruposModificadoresService {
         itemId: op.itemId,
         itemNombre: nombre,
         tipo,
-        cantidad: op.cantidad,
+        cantidad:
+          op.cantidad != null && op.cantidad !== '' ? op.cantidad : null,
         unidadCodigo,
         precioExtra: op.precioExtra,
         orden,

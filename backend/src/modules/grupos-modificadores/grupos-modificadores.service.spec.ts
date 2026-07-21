@@ -157,6 +157,46 @@ describe('GruposModificadoresService', () => {
     ).rejects.toThrow(/producto.*receta.*servicio|ingrediente/i);
   });
 
+  it('permite crear una opción sin cantidad default (queda null)', async () => {
+    managerMock.query
+      .mockResolvedValueOnce([]) // assertNombreLibre
+      .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // INSERT grupo
+      .mockResolvedValueOnce([
+        {
+          tipo: 'producto',
+          nombre: 'Coca',
+          modo_inventario: 'cantidad',
+          unidad_medida: 'unidad',
+        },
+      ])
+      .mockResolvedValueOnce([{ grupo_opcion_id: 'O1' }]); // INSERT opción
+    const res = await service.create(TENANT_ID, {
+      nombre: 'Bebida',
+      opciones: [{ itemId: ITEM_PROD, precioExtra: '0' }], // sin cantidad
+    });
+    expect(res.opciones[0].cantidad).toBeNull();
+  });
+
+  it('rechaza cantidad default explícita <= 0', async () => {
+    managerMock.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+      .mockResolvedValueOnce([
+        {
+          tipo: 'producto',
+          nombre: 'Coca',
+          modo_inventario: 'cantidad',
+          unidad_medida: 'unidad',
+        },
+      ]);
+    await expect(
+      service.create(TENANT_ID, {
+        nombre: 'Bebida',
+        opciones: [{ itemId: ITEM_PROD, cantidad: '0', precioExtra: '0' }],
+      } as any),
+    ).rejects.toThrow(/cantidad.*mayor a 0/i);
+  });
+
   describe('update/remove grupo', () => {
     it('reemplaza opciones manteniendo la familia y devuelve shape completo (itemsUsandoCount + stock)', async () => {
       managerMock.query

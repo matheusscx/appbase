@@ -621,7 +621,7 @@ CREATE TABLE "grupo_modificador_opciones" (
   "tenant_id"            UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "grupo_modificador_id" UUID          NOT NULL REFERENCES "grupos_modificadores" ("grupo_modificador_id"),
   "item_id"              UUID          NOT NULL REFERENCES "items" ("item_id"),
-  "cantidad"             NUMERIC(18,4) NOT NULL,   -- por unidad elegida
+  "cantidad"             NUMERIC(18,4),   -- default opcional; null = sin default (override por receta)
   "unidad_codigo"        TEXT          REFERENCES "unidades_medida" ("codigo"),
   "precio_extra"         NUMERIC(18,4) NOT NULL DEFAULT 0,  -- recargo ≥ 0
   "orden"                INT           NOT NULL DEFAULT 0,
@@ -631,6 +631,24 @@ CREATE TABLE "grupo_modificador_opciones" (
 );
 CREATE UNIQUE INDEX "uq_grupo_opcion_item_vivo"
   ON "grupo_modificador_opciones" ("grupo_modificador_id", "item_id")
+  WHERE "eliminado_el" IS NULL;
+
+-- Override de consumo/recargo por asociación item↔grupo↔opción (modelo híbrido).
+-- La cantidad/unidad/precio efectivos = COALESCE(override, default del grupo).
+CREATE TABLE "item_grupo_modificador_opciones" (
+  "item_grupo_opcion_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"            UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "item_grupo_id"       UUID          NOT NULL REFERENCES "item_grupos_modificadores" ("item_grupo_id"),
+  "grupo_opcion_id"     UUID          NOT NULL REFERENCES "grupo_modificador_opciones" ("grupo_opcion_id"),
+  "cantidad"            NUMERIC(18,4),  -- null = hereda default
+  "unidad_codigo"       TEXT          REFERENCES "unidades_medida" ("codigo"),
+  "precio_extra"        NUMERIC(18,4),  -- null = hereda default
+  "creado_el"           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"      TIMESTAMPTZ,
+  "eliminado_el"        TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_item_grupo_opcion_vivo"
+  ON "item_grupo_modificador_opciones" ("item_grupo_id", "grupo_opcion_id")
   WHERE "eliminado_el" IS NULL;
 
 -- Asociación item↔grupo (min/max en unidades totales del grupo)

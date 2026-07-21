@@ -18,8 +18,8 @@ export class GrupoModificadorOpcion {
   @Column({ name: 'item_id', type: 'uuid' })
   itemId: string;
 
-  @Column({ type: 'numeric', precision: 18, scale: 4 })
-  cantidad: string;
+  @Column({ type: 'numeric', precision: 18, scale: 4, nullable: true })
+  cantidad: string | null;
 
   @Column({ name: 'unidad_codigo', type: 'text', nullable: true })
   unidadCodigo: string | null;

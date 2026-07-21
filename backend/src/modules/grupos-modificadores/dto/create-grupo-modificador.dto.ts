@@ -16,8 +16,9 @@ export class GrupoOpcionInputDto {
   @IsUUID()
   itemId: string;
 
+  @IsOptional()
   @IsNumberString()
-  cantidad: string;
+  cantidad?: string;
 
   // Solo opciones de familia ingrediente; el backend lo verifica.
   @IsOptional()
