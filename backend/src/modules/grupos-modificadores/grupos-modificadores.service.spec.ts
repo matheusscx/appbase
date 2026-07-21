@@ -8,6 +8,7 @@ const TENANT_ID = '550e8400-e29b-41d4-a716-446655440000';
 const ITEM_ING_A = '550e8400-e29b-41d4-a716-4466554400a1';
 const ITEM_ING_B = '550e8400-e29b-41d4-a716-4466554400a2';
 const ITEM_PROD = '550e8400-e29b-41d4-a716-4466554400b1';
+const ITEM_PROD_2 = '550e8400-e29b-41d4-a716-4466554400b2';
 
 describe('GruposModificadoresService', () => {
   let service: GruposModificadoresService;
@@ -199,12 +200,14 @@ describe('GruposModificadoresService', () => {
 
   describe('update/remove grupo', () => {
     it('reemplaza opciones manteniendo la familia y devuelve shape completo (itemsUsandoCount + stock)', async () => {
+      // Upsert-preservando (Task 2): sin opciones vivas previas, la opción
+      // entrante es nueva → INSERT (no hay reemplazo-total con delete-all).
       managerMock.query
         .mockResolvedValueOnce([
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },
         ]) // SELECT grupo vivo
         // (nombre sin cambio → no se llama assertNombreLibre ni UPDATE nombre)
-        .mockResolvedValueOnce([{ affected: 1 }]) // soft-delete opciones viejas
+        .mockResolvedValueOnce([]) // SELECT opciones vivas actuales (map por item_id) — ninguna
         .mockResolvedValueOnce([
           {
             tipo: 'producto',
@@ -213,7 +216,7 @@ describe('GruposModificadoresService', () => {
             unidad_medida: 'unidad',
           },
         ]) // item lookup
-        .mockResolvedValueOnce([{ grupo_opcion_id: 'O9' }]) // INSERT opción
+        .mockResolvedValueOnce([{ grupo_opcion_id: 'O9' }]) // INSERT opción (nueva)
         .mockResolvedValueOnce([
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },
         ]) // cargarGrupo: SELECT grupo vivo
@@ -243,6 +246,83 @@ describe('GruposModificadoresService', () => {
       expect(res.itemsUsandoCount).toBe(2);
       expect(res.opciones[0]).toHaveProperty('stock');
       expect(res.opciones[0].stock).toBeNull();
+    });
+
+    it('preserva grupo_opcion_id de una opción que sigue viva (UPDATE, no delete+insert)', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // SELECT grupo vivo
+        // SELECT opciones vivas actuales (map por item_id)
+        .mockResolvedValueOnce([
+          { grupo_opcion_id: 'O-EXIST', item_id: ITEM_PROD },
+        ])
+        // item lookup de la opción entrante (validarYResolverOpciones)
+        .mockResolvedValueOnce([
+          {
+            tipo: 'producto',
+            nombre: 'Coca',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'unidad',
+          },
+        ])
+        .mockResolvedValueOnce([]) // UPDATE de la opción existente
+        .mockResolvedValueOnce([]); // cargarGrupo: SELECT grupo → [] → devuelve null (no importa para este test)
+      await service.update(TENANT_ID, 'G1', {
+        nombre: 'Bebida',
+        opciones: [{ itemId: ITEM_PROD, cantidad: '1', precioExtra: '900' }],
+      });
+      const updateCall = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          /UPDATE grupo_modificador_opciones SET/i.test(c[0]) &&
+          /precio_extra/i.test(c[0]),
+      );
+      expect(updateCall).toBeTruthy(); // hubo UPDATE de la opción, no un INSERT nuevo
+      const insertCall = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          /INSERT INTO grupo_modificador_opciones/i.test(c[0]),
+      );
+      expect(insertCall).toBeUndefined();
+    });
+
+    it('soft-borra los overrides de una opción eliminada del grupo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ])
+        .mockResolvedValueOnce([
+          { grupo_opcion_id: 'O-GONE', item_id: ITEM_PROD },
+        ]) // vivas actuales
+        // opciones entrantes: ITEM_PROD_2 en vez de ITEM_PROD → O-GONE desaparece
+        .mockResolvedValueOnce([
+          {
+            tipo: 'producto',
+            nombre: 'Fanta',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'unidad',
+          },
+        ]) // item de la nueva opción
+        .mockResolvedValueOnce([{ grupo_opcion_id: 'O-NEW' }]) // INSERT nueva
+        .mockResolvedValueOnce([]) // soft-delete overrides de O-GONE
+        .mockResolvedValueOnce([]) // soft-delete opción O-GONE
+        .mockResolvedValueOnce([]); // cargarGrupo: SELECT grupo → [] → devuelve null
+      await service.update(TENANT_ID, 'G1', {
+        opciones: [{ itemId: ITEM_PROD_2, cantidad: '1', precioExtra: '0' }],
+      });
+      const ovrDelete = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          /UPDATE item_grupo_modificador_opciones SET eliminado_el/i.test(c[0]),
+      );
+      expect(ovrDelete).toBeTruthy();
+      const opcionDelete = managerMock.query.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' &&
+          /UPDATE grupo_modificador_opciones SET eliminado_el/i.test(c[0]),
+      );
+      expect(opcionDelete).toBeTruthy();
     });
 
     it('renombra sin reemplazar opciones (rama solo-rename) y verifica disponibilidad', async () => {

@@ -375,11 +375,14 @@ export class GruposModificadoresService {
   }
 
   /**
-   * Reemplazo total de opciones (soft-delete de las vivas + insert de las
-   * nuevas), preservando homogeneidad de familia vía validarYResolverOpciones.
-   * Si el nombre no cambia se evita el UPDATE de nombre, pero igual se
-   * verifica disponibilidad (assertNombreLibre con exceptoId = el propio
-   * grupo) cuando viene en el DTO.
+   * Upsert-preservando de opciones: las que siguen vivas (mismo item_id)
+   * reciben UPDATE conservando su grupo_opcion_id — clave de la que cuelgan
+   * los overrides en item_grupo_modificador_opciones —, las nuevas se
+   * insertan, y las que desaparecen se soft-borran junto con sus overrides.
+   * Preserva homogeneidad de familia vía validarYResolverOpciones. Si el
+   * nombre no cambia se evita el UPDATE de nombre, pero igual se verifica
+   * disponibilidad (assertNombreLibre con exceptoId = el propio grupo)
+   * cuando viene en el DTO.
    */
   async update(
     tenantId: string,
@@ -412,34 +415,78 @@ export class GruposModificadoresService {
         return (await this.cargarGrupo(manager, tenantId, grupoId))!;
       }
 
-      await manager.query(
-        `UPDATE grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()
-         WHERE grupo_modificador_id = $1 AND eliminado_el IS NULL`,
-        [grupoId],
+      // Upsert-preservando: mantiene el grupo_opcion_id de las opciones cuyo
+      // item_id sigue vivo (UPDATE en vez de delete+insert), para no
+      // huerfanar los overrides en item_grupo_modificador_opciones (llave =
+      // grupo_opcion_id). Las opciones que desaparecen se soft-borran junto
+      // con sus overrides.
+      const vivas: { grupo_opcion_id: string; item_id: string }[] =
+        await manager.query(
+          `SELECT grupo_opcion_id, item_id FROM grupo_modificador_opciones
+           WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+          [grupoId, tenantId],
+        );
+      const opcionIdPorItem = new Map(
+        vivas.map((r) => [r.item_id, r.grupo_opcion_id]),
       );
+      const itemsEntrantes = new Set<string>();
 
       await this.validarYResolverOpciones(
         manager,
         tenantId,
         dto.opciones,
         async (op) => {
-          await manager.query(
-            `INSERT INTO grupo_modificador_opciones
-               (tenant_id, grupo_modificador_id, item_id, cantidad, unidad_codigo, precio_extra, orden)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)
-             RETURNING grupo_opcion_id`,
-            [
-              tenantId,
-              grupoId,
-              op.itemId,
-              op.cantidad,
-              op.unidadCodigo,
-              op.precioExtra,
-              op.orden,
-            ],
-          );
+          itemsEntrantes.add(op.itemId);
+          const existente = opcionIdPorItem.get(op.itemId);
+          if (existente) {
+            await manager.query(
+              `UPDATE grupo_modificador_opciones SET
+                 cantidad = $1, unidad_codigo = $2, precio_extra = $3, orden = $4,
+                 actualizado_el = NOW()
+               WHERE grupo_opcion_id = $5`,
+              [
+                op.cantidad,
+                op.unidadCodigo,
+                op.precioExtra,
+                op.orden,
+                existente,
+              ],
+            );
+          } else {
+            await manager.query(
+              `INSERT INTO grupo_modificador_opciones
+                 (tenant_id, grupo_modificador_id, item_id, cantidad, unidad_codigo, precio_extra, orden)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)
+               RETURNING grupo_opcion_id`,
+              [
+                tenantId,
+                grupoId,
+                op.itemId,
+                op.cantidad,
+                op.unidadCodigo,
+                op.precioExtra,
+                op.orden,
+              ],
+            );
+          }
         },
       );
+
+      // Opciones que desaparecieron: soft-delete de la opción y de sus overrides.
+      const eliminadas = vivas.filter((r) => !itemsEntrantes.has(r.item_id));
+      if (eliminadas.length) {
+        const idsEliminadas = eliminadas.map((r) => r.grupo_opcion_id);
+        await manager.query(
+          `UPDATE item_grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()
+           WHERE grupo_opcion_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
+          [idsEliminadas],
+        );
+        await manager.query(
+          `UPDATE grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()
+           WHERE grupo_opcion_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
+          [idsEliminadas],
+        );
+      }
 
       return (await this.cargarGrupo(manager, tenantId, grupoId))!;
     });

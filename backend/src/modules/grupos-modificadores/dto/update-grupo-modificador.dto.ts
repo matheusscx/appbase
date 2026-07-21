@@ -15,7 +15,9 @@ export class UpdateGrupoModificadorDto {
   @IsNotEmpty()
   nombre?: string;
 
-  // Reemplazo total: si viene, sustituye todas las opciones vivas.
+  // Upsert-preservando: si viene, sincroniza las opciones vivas con este
+  // array (UPDATE si el item_id persiste, INSERT si es nuevo, soft-delete
+  // + cascada de overrides si desaparece). Ver GruposModificadoresService.update.
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
