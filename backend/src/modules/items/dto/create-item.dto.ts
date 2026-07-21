@@ -11,6 +11,7 @@ import {
   Min,
   IsArray,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -93,15 +94,18 @@ export class ItemGrupoOpcionOverrideInputDto {
   @IsUUID()
   grupoOpcionId: string;
 
+  @ValidateIf((o: ItemGrupoOpcionOverrideInputDto) => o.cantidad !== '')
   @IsOptional()
   @IsNumberString()
   cantidad?: string;
 
+  @ValidateIf((o: ItemGrupoOpcionOverrideInputDto) => o.unidadCodigo !== '')
   @IsOptional()
   @IsString()
   @IsNotEmpty()
   unidadCodigo?: string;
 
+  @ValidateIf((o: ItemGrupoOpcionOverrideInputDto) => o.precioExtra !== '')
   @IsOptional()
   @IsNumberString()
   precioExtra?: string;

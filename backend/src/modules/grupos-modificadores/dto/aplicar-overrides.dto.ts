@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  ValidateIf,
 } from 'class-validator';
 
 export class AplicarOverridesDto {
@@ -17,15 +18,18 @@ export class AplicarOverridesDto {
   @IsUUID()
   grupoOpcionId: string;
 
+  @ValidateIf((o: AplicarOverridesDto) => o.cantidad !== '')
   @IsOptional()
   @IsNumberString()
   cantidad?: string;
 
+  @ValidateIf((o: AplicarOverridesDto) => o.unidadCodigo !== '')
   @IsOptional()
   @IsString()
   @IsNotEmpty()
   unidadCodigo?: string;
 
+  @ValidateIf((o: AplicarOverridesDto) => o.precioExtra !== '')
   @IsOptional()
   @IsNumberString()
   precioExtra?: string;
