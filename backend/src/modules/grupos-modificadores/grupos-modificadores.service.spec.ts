@@ -159,7 +159,7 @@ describe('GruposModificadoresService', () => {
   });
 
   describe('update/remove grupo', () => {
-    it('reemplaza opciones manteniendo la familia', async () => {
+    it('reemplaza opciones manteniendo la familia y devuelve shape completo (itemsUsandoCount + stock)', async () => {
       managerMock.query
         .mockResolvedValueOnce([
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },
@@ -173,14 +173,37 @@ describe('GruposModificadoresService', () => {
             modo_inventario: 'cantidad',
             unidad_medida: 'unidad',
           },
-        ])
-        .mockResolvedValueOnce([{ grupo_opcion_id: 'O9' }]);
+        ]) // item lookup
+        .mockResolvedValueOnce([{ grupo_opcion_id: 'O9' }]) // INSERT opción
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // cargarGrupo: SELECT grupo vivo
+        .mockResolvedValueOnce([
+          {
+            grupo_opcion_id: 'O9',
+            item_id: ITEM_PROD,
+            item_nombre: 'Coca',
+            tipo: 'producto',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '800',
+            orden: 0,
+            stock: null,
+          },
+        ]) // cargarGrupo: SELECT opciones con JOIN items
+        .mockResolvedValueOnce([{ total: 2 }]); // cargarGrupo: SELECT COUNT uso
       const res = await service.update(TENANT_ID, 'G1', {
         nombre: 'Bebida',
         opciones: [{ itemId: ITEM_PROD, cantidad: '1', precioExtra: '800' }],
       });
       expect(res.familia).toBe('vendible');
       expect(res.opciones).toHaveLength(1);
+      // Shape consistente con findOne/findAll: itemsUsandoCount y stock por
+      // opción deben venir siempre, también tras reemplazar opciones.
+      expect(typeof res.itemsUsandoCount).toBe('number');
+      expect(res.itemsUsandoCount).toBe(2);
+      expect(res.opciones[0]).toHaveProperty('stock');
+      expect(res.opciones[0].stock).toBeNull();
     });
 
     it('bloquea borrar un grupo asociado a items vivos', async () => {

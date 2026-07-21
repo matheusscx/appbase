@@ -331,27 +331,21 @@ export class GruposModificadoresService {
         throw new NotFoundException('Grupo de modificadores no encontrado');
       }
 
-      let nombre = grupoRows[0].nombre;
       if (dto.nombre !== undefined) {
         await this.assertNombreLibre(manager, tenantId, dto.nombre, grupoId);
-        if (dto.nombre !== nombre) {
+        if (dto.nombre !== grupoRows[0].nombre) {
           await manager.query(
             `UPDATE grupos_modificadores SET nombre = $1, actualizado_el = NOW()
              WHERE grupo_modificador_id = $2`,
             [dto.nombre, grupoId],
           );
-          nombre = dto.nombre;
         }
       }
 
       if (dto.opciones === undefined) {
-        const actual = await this.cargarGrupo(manager, tenantId, grupoId);
-        return {
-          grupoModificadorId: grupoId,
-          nombre,
-          familia: actual?.familia ?? null,
-          opciones: actual?.opciones ?? [],
-        };
+        // El grupo se acaba de confirmar vivo arriba, dentro de la misma
+        // transacción: cargarGrupo no puede devolver null aquí.
+        return (await this.cargarGrupo(manager, tenantId, grupoId))!;
       }
 
       await manager.query(
@@ -360,13 +354,12 @@ export class GruposModificadoresService {
         [grupoId],
       );
 
-      const resueltas: (OpcionResuelta & { grupoOpcionId: string })[] = [];
-      const { familia } = await this.validarYResolverOpciones(
+      await this.validarYResolverOpciones(
         manager,
         tenantId,
         dto.opciones,
         async (op) => {
-          const rows: { grupo_opcion_id: string }[] = await manager.query(
+          await manager.query(
             `INSERT INTO grupo_modificador_opciones
                (tenant_id, grupo_modificador_id, item_id, cantidad, unidad_codigo, precio_extra, orden)
              VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -381,16 +374,10 @@ export class GruposModificadoresService {
               op.orden,
             ],
           );
-          resueltas.push({ ...op, grupoOpcionId: rows[0].grupo_opcion_id });
         },
       );
 
-      return {
-        grupoModificadorId: grupoId,
-        nombre,
-        familia,
-        opciones: resueltas,
-      };
+      return (await this.cargarGrupo(manager, tenantId, grupoId))!;
     });
   }
 
