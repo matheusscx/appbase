@@ -44,11 +44,12 @@ de 5), reutilizando el costeo y la venta de productos/recetas ya existentes.
   combos junto a productos/recetas con badge de disponibilidad, un click.
 - Seed demo "Combo Clásico" (Hamburguesa Clásica + Papas fritas, IDs 0281–0285).
 
-**NOT included (future — Ticket B):**
-- **Grupos de modificadores** (combos con elección, ej. "elige tu bebida"): el
-  cliente elige entre alternativas dentro de un grupo antes de agregar el combo
-  al carrito. Este ticket solo cubre combos de **componentes fijos** — ningún
-  campo de grupos/elección existe todavía en el modelo.
+**NOT included (este ticket — cubierto por Ticket B, ya implementado):**
+- ~~Grupos de modificadores (combos con elección, ej. "elige tu bebida")~~ —
+  implementado en Ticket B, ver [grupos-modificadores.md](./grupos-modificadores.md).
+  Un combo puede asociar N grupos además de (o en vez de) sus componentes
+  fijos; `disponibleCondicional: true` en el listado quiere decir que la
+  disponibilidad depende de la opción elegida.
 - Combos anidados (un combo como componente de otro combo).
 - Recálculo silencioso de `costo_actual` cuando cambia el costo de un componente
   (mismo trato que recetas — ver [simulador-impacto-costos.md](./simulador-impacto-costos.md)).
@@ -216,19 +217,27 @@ arrancar el backend, con componentes Hamburguesa Clásica (receta,
 
 - [recetas.md](./recetas.md) — item compuesto que descuenta ingredientes (un
   componente de combo puede ser una receta)
+- [grupos-modificadores.md](./grupos-modificadores.md) — combos con elección
+  del customer (Ticket B): grupos reutilizables asociables a un combo,
+  `disponibleCondicional` cuando el combo tiene ≥1 grupo
 - [inventario-kardex.md](./inventario-kardex.md) — movimientos de salida
 - [ventas.md](./ventas.md) — flujo de cobro POS
 - [motor-calculo-precios.md](./motor-calculo-precios.md) — dónde entra el
   precio propio del combo (como cualquier `precio_base` de item)
 - ADR: [012](../adr/012-combos-precio-propio-y-descuento-por-tipo.md) — precio
   propio fijo, una línea de venta, combos no conocen inventario
+- ADR: [013](../adr/013-grupos-modificadores-reutilizables.md) — grupos de
+  modificadores (elección del customer)
 - Spec: [`docs/superpowers/specs/2026-07-20-combos-design.md`](../superpowers/specs/2026-07-20-combos-design.md)
 
 ## Notes
 
-**Grupos de modificadores (Ticket B, no implementado):** un combo con
-elección ("elige tu bebida entre Coca-Cola / Sprite / agua") requiere un modelo
-adicional de grupos y opciones que hoy no existe. Cuando se implemente, el
-cálculo de `disponible` dejará de ser un número simple para reflejar que la
-disponibilidad final depende de la opción elegida (`Disponible*` en vez de un
-mínimo fijo). Este ticket cubre exclusivamente combos de **componentes fijos**.
+**Grupos de modificadores (Ticket B, implementado):** un combo con elección
+("elige tu bebida") ahora puede asociar N grupos de modificadores
+reutilizables (ver [grupos-modificadores.md](./grupos-modificadores.md)) además
+de, o en vez de, sus componentes fijos. El seed demo asocia el grupo "Bebida"
+al "Combo Clásico" — su `disponibleCondicional` es `true` desde entonces, y el
+cálculo de disponibilidad real depende de la opción que elija el customer
+(`Disponible*` en el frontend, no un número fijo). Este archivo (`combos.md`)
+sigue describiendo el caso de **componentes fijos**; el caso de elección vive
+en `grupos-modificadores.md`.

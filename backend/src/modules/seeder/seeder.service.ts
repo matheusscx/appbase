@@ -2233,6 +2233,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedItemsSuscripcion();
     await this.seedRecetaDemo();
     await this.seedCombos();
+    await this.seedGruposModificadores();
   }
 
   private async seedItemSoporte(): Promise<void> {
@@ -2556,6 +2557,252 @@ export class SeederService implements OnApplicationBootstrap {
         CC_PAPAS_ID,
         PAPAS_ID,
       ],
+    );
+  }
+
+  /**
+   * Grupos de modificadores reutilizables demo — pieza final del cluster
+   * food-service (Ticket B). Dos grupos:
+   * - "Proteína" (familia ingrediente, derivada): carne (reutiliza la de
+   *   seedRecetaDemo) y pollo con recargo $0, chuleta con recargo $1.500,
+   *   150 g por elección. Asociado a la receta nueva "Hamburguesa Especial"
+   *   (min:1, max:1 — obligatorio, una sola proteína) que NO lleva proteína
+   *   fija como receta_ingrediente (a diferencia de "Hamburguesa Clásica").
+   * - "Bebida" (familia vendible): Coca-Cola $0, Bebida premium +$800,
+   *   asociado al "Combo Clásico" existente (min:1, max:1 — obligatorio).
+   * Idempotente: guarda por la existencia del grupo "Proteína".
+   */
+  private async seedGruposModificadores(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const uuid = (suffix: number): string =>
+      `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
+
+    // Reutilizados de seedRecetaDemo()/seedCombos().
+    const PAN_ID = uuid(256);
+    const CARNE_ID = uuid(257);
+    const QUESO_ID = uuid(258);
+    const COMBO_ID = uuid(283); // Combo Clásico
+
+    const POLLO_ID = uuid(286);
+    const MOV_POLLO_ID = uuid(287);
+    const CHULETA_ID = uuid(288);
+    const MOV_CHULETA_ID = uuid(289);
+    const PROTEINA_GRUPO_ID = uuid(290);
+    const PROTEINA_OP_CARNE_ID = uuid(291);
+    const PROTEINA_OP_POLLO_ID = uuid(292);
+    const PROTEINA_OP_CHULETA_ID = uuid(293);
+    const HAMBURGUESA_ESPECIAL_ID = uuid(294);
+    const HE_RI_PAN_ID = uuid(295);
+    const HE_RI_QUESO_ID = uuid(296);
+    const HE_ITEM_GRUPO_ID = uuid(297);
+    const COCACOLA_ID = uuid(298);
+    const MOV_COCACOLA_ID = uuid(299);
+    const BEBIDA_PREMIUM_ID = uuid(300);
+    const MOV_BEBIDA_PREMIUM_ID = uuid(301);
+    const BEBIDA_GRUPO_ID = uuid(302);
+    const BEBIDA_OP_COCACOLA_ID = uuid(303);
+    const BEBIDA_OP_PREMIUM_ID = uuid(304);
+    const COMBO_ITEM_GRUPO_ID = uuid(305);
+
+    const exists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM grupos_modificadores WHERE grupo_modificador_id = $1`,
+      [PROTEINA_GRUPO_ID],
+    );
+    if (exists.length) {
+      return;
+    }
+
+    // Pollo y chuleta: ingredientes demo nuevos (carne reutiliza la de
+    // seedRecetaDemo, mismo estilo que "Papas fritas" en seedCombos).
+    const nuevosIngredientes = [
+      {
+        id: POLLO_ID,
+        movId: MOV_POLLO_ID,
+        nombre: 'Pechuga de pollo',
+        unidad: 'kg',
+        stock: '8',
+        costo: '6000',
+      },
+      {
+        id: CHULETA_ID,
+        movId: MOV_CHULETA_ID,
+        nombre: 'Chuleta de cerdo',
+        unidad: 'kg',
+        stock: '6',
+        costo: '9000',
+      },
+    ];
+    for (const ing of nuevosIngredientes) {
+      await this.dataSource.query(
+        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
+         VALUES ($1,$2,$3,$4,'0',$5,$6,'ingrediente')`,
+        [ing.id, PARIS, CLP, ing.nombre, false, true],
+      );
+      await this.dataSource.query(
+        `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario, costo_actual)
+         VALUES ($1,'0',$2,'cantidad',$3)`,
+        [ing.id, ing.unidad, ing.costo],
+      );
+      await this.dataSource.query(
+        `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
+        [ing.stock, ing.id],
+      );
+      await this.dataSource.query(
+        `INSERT INTO movimientos_inventario
+           (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
+         VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed grupo Proteína)')`,
+        [ing.movId, PARIS, ing.id, ing.stock, ing.costo],
+      );
+    }
+
+    // Grupo "Proteína" (familia ingrediente, derivada de sus opciones):
+    // carne y pollo sin recargo, chuleta +$1.500. 150 g por elección, igual
+    // porción que la carne bloqueante de "Hamburguesa Clásica".
+    await this.dataSource.query(
+      `INSERT INTO grupos_modificadores (grupo_modificador_id, tenant_id, nombre)
+       VALUES ($1,$2,'Proteína')`,
+      [PROTEINA_GRUPO_ID, PARIS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO grupo_modificador_opciones
+         (grupo_opcion_id, tenant_id, grupo_modificador_id, item_id, cantidad, unidad_codigo, precio_extra, orden)
+       VALUES
+         ($1,$5,$6,$2,'150','g','0',0),
+         ($3,$5,$6,$7,'150','g','0',1),
+         ($4,$5,$6,$8,'150','g','1500',2)`,
+      [
+        PROTEINA_OP_CARNE_ID,
+        CARNE_ID,
+        PROTEINA_OP_POLLO_ID,
+        PROTEINA_OP_CHULETA_ID,
+        PARIS,
+        PROTEINA_GRUPO_ID,
+        POLLO_ID,
+        CHULETA_ID,
+      ],
+    );
+
+    // Receta "Hamburguesa Especial": pan (1 unidad, bloqueante) + queso
+    // (20 g, no bloqueante) fijos — SIN proteína fija como receta_ingrediente
+    // (a diferencia de "Hamburguesa Clásica"): la proteína se elige vía el
+    // grupo "Proteína" (min:1, max:1, obligatorio) y su costo se realiza al
+    // vender, con el movimiento de inventario de la opción elegida.
+    // costo_actual = costo pan (500×1) + costo queso (6000×0.02) = 620.
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,'Hamburguesa Especial','Pan y queso fijos; elige tu proteína','3900',false,true,'receta')`,
+      [HAMBURGUESA_ESPECIAL_ID, PARIS, CLP],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_receta (item_id, costo_actual) VALUES ($1,'620.0000')`,
+      [HAMBURGUESA_ESPECIAL_ID],
+    );
+    await this.dataSource.query(
+      `INSERT INTO receta_ingredientes
+         (receta_ingrediente_id, tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, bloqueante)
+       VALUES
+         ($1,$4,$5,$2,'1','unidad',true),
+         ($3,$4,$5,$6,'20','g',false)`,
+      [
+        HE_RI_PAN_ID,
+        PAN_ID,
+        HE_RI_QUESO_ID,
+        PARIS,
+        HAMBURGUESA_ESPECIAL_ID,
+        QUESO_ID,
+      ],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_grupos_modificadores
+         (item_grupo_id, tenant_id, item_id, grupo_modificador_id, min, max, orden)
+       VALUES ($1,$2,$3,$4,1,1,0)`,
+      [HE_ITEM_GRUPO_ID, PARIS, HAMBURGUESA_ESPECIAL_ID, PROTEINA_GRUPO_ID],
+    );
+
+    // Coca-Cola y Bebida premium: productos demo nuevos con stock propio
+    // (mismo estilo que "Papas fritas" en seedCombos).
+    const COCACOLA_COSTO = '500';
+    const COCACOLA_STOCK = '100';
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,'Coca-Cola','1200',false,true,'producto')`,
+      [COCACOLA_ID, PARIS, CLP],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario, costo_actual)
+       VALUES ($1,'0','unidad','cantidad',$2)`,
+      [COCACOLA_ID, COCACOLA_COSTO],
+    );
+    await this.dataSource.query(
+      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
+      [COCACOLA_STOCK, COCACOLA_ID],
+    );
+    await this.dataSource.query(
+      `INSERT INTO movimientos_inventario
+         (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
+       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed grupo Bebida)')`,
+      [MOV_COCACOLA_ID, PARIS, COCACOLA_ID, COCACOLA_STOCK, COCACOLA_COSTO],
+    );
+
+    const PREMIUM_COSTO = '1200';
+    const PREMIUM_STOCK = '40';
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,'Bebida premium','2000',false,true,'producto')`,
+      [BEBIDA_PREMIUM_ID, PARIS, CLP],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario, costo_actual)
+       VALUES ($1,'0','unidad','cantidad',$2)`,
+      [BEBIDA_PREMIUM_ID, PREMIUM_COSTO],
+    );
+    await this.dataSource.query(
+      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
+      [PREMIUM_STOCK, BEBIDA_PREMIUM_ID],
+    );
+    await this.dataSource.query(
+      `INSERT INTO movimientos_inventario
+         (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
+       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed grupo Bebida)')`,
+      [
+        MOV_BEBIDA_PREMIUM_ID,
+        PARIS,
+        BEBIDA_PREMIUM_ID,
+        PREMIUM_STOCK,
+        PREMIUM_COSTO,
+      ],
+    );
+
+    // Grupo "Bebida" (familia vendible): Coca-Cola sin recargo, Bebida
+    // premium +$800. Sin unidad_codigo (solo aplica a familia ingrediente).
+    await this.dataSource.query(
+      `INSERT INTO grupos_modificadores (grupo_modificador_id, tenant_id, nombre)
+       VALUES ($1,$2,'Bebida')`,
+      [BEBIDA_GRUPO_ID, PARIS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO grupo_modificador_opciones
+         (grupo_opcion_id, tenant_id, grupo_modificador_id, item_id, cantidad, unidad_codigo, precio_extra, orden)
+       VALUES
+         ($1,$4,$5,$2,'1',NULL,'0',0),
+         ($3,$4,$5,$6,'1',NULL,'800',1)`,
+      [
+        BEBIDA_OP_COCACOLA_ID,
+        COCACOLA_ID,
+        BEBIDA_OP_PREMIUM_ID,
+        PARIS,
+        BEBIDA_GRUPO_ID,
+        BEBIDA_PREMIUM_ID,
+      ],
+    );
+
+    // Asocia "Bebida" al Combo Clásico existente (min:1, max:1 — obligatorio).
+    await this.dataSource.query(
+      `INSERT INTO item_grupos_modificadores
+         (item_grupo_id, tenant_id, item_id, grupo_modificador_id, min, max, orden)
+       VALUES ($1,$2,$3,$4,1,1,0)`,
+      [COMBO_ITEM_GRUPO_ID, PARIS, COMBO_ID, BEBIDA_GRUPO_ID],
     );
   }
 

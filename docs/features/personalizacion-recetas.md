@@ -258,4 +258,8 @@ Idempotente: `seedRecetaDemo()` en `seeder.service.ts`.
 - [recetas.md](./recetas.md) — recetas base, ingredientes, criticidad
 - [ventas.md](./ventas.md) — flujo POS y cobro
 - [tipo-ingrediente.md](./tipo-ingrediente.md) — insumos como ingredientes/extras
+- [grupos-modificadores.md](./grupos-modificadores.md) — grupos reutilizables
+  (Ticket B): el drawer descrito en este archivo (`ItemPersonalizacionDrawer.vue`,
+  renombrado) ahora también renderiza grupos para combos y recetas, con
+  `min`/`max` obligando la elección antes de habilitar "Agregar"
 - Spec: [`docs/superpowers/specs/2026-07-16-edicion-recetas-antes-carrito-design.md`](../superpowers/specs/2026-07-16-edicion-recetas-antes-carrito-design.md)

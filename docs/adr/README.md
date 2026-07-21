@@ -24,6 +24,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [010](./010-preparacion-sii-datos-fiscales.md) | Preparación para SII — capturar y congelar el dato fiscal ahora, diferir la integración | Accepted | 2026-07-14 |
 | [011](./011-catalogo-impuestos-sistema.md) | Catálogo de impuestos del sistema por país + semántica de "exento" (solo IVA) | Accepted | 2026-07-19 |
 | [012](./012-combos-precio-propio-y-descuento-por-tipo.md) | Combos: precio propio fijo, una línea de venta, sin conocimiento de inventario | Accepted | 2026-07-20 |
+| [013](./013-grupos-modificadores-reutilizables.md) | Grupos de modificadores reutilizables: sin tipo declarado (familia derivada), precio en el grupo sin override, min/max en unidades, opción siempre bloqueante | Accepted | 2026-07-20 |
 
 ## Creating a New ADR
 

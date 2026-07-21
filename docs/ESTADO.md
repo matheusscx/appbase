@@ -66,3 +66,4 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base/costo > 0) | ✅ Implementado (2026-07-15) |
 | Catálogo de impuestos del sistema + clasificación tributaria | ✅ Implementado (2026-07-19) |
 | Combos (paquetes con precio propio fijo, componentes producto/receta/servicio bloqueantes, una línea de venta, disponibilidad conservadora) | ✅ Implementado (2026-07-20) |
+| Grupos de modificadores reutilizables (asociables a combos/recetas, familia derivada ingrediente/vendible, min/max en unidades, precio en el grupo, opción siempre bloqueante, snapshot congelado; impresión térmica de la opción elegida diferida) | ✅ Implementado (2026-07-20) |

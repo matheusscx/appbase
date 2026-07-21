@@ -159,6 +159,11 @@ Seed demo: `550e8400-e29b-41d4-a716-446655440259` (Hamburguesa Clásica) tras ar
 - [tipo-ingrediente.md](./tipo-ingrediente.md) — tipología de insumos no vendibles
 - [conversion-unidades.md](./conversion-unidades.md) — conversión en consumo de ingredientes
 - [inventario-kardex.md](./inventario-kardex.md) — movimientos de salida
+- [personalizacion-recetas.md](./personalizacion-recetas.md) — omitir/extras antes del carrito
+- [grupos-modificadores.md](./grupos-modificadores.md) — una receta puede
+  asociar grupos reutilizables además de sus ingredientes fijos (ej. "elige tu
+  proteína"); a diferencia de un ingrediente fijo, una opción de grupo elegida
+  siempre es bloqueante
 - [ventas.md](./ventas.md) — flujo de cobro POS
 - Spec: [`docs/superpowers/specs/2026-07-15-recetas-criticidad-ingredientes-design.md`](../superpowers/specs/2026-07-15-recetas-criticidad-ingredientes-design.md)
 - Análisis cluster: [`docs/superpowers/specs/2026-07-14-alineamiento-cliente-foodservice-analisis.md`](../superpowers/specs/2026-07-14-alineamiento-cliente-foodservice-analisis.md)

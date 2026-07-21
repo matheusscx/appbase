@@ -233,10 +233,61 @@ descuenta el de cada componente según su tipo (producto → salida directa; rec
 - **Sin combos anidados.** Un combo no puede ser componente de otro combo — solo
   producto/receta/servicio.
 
-**Fuera de alcance (fase futura — grupos de modificadores):** combos con
-elección del customer ("elige tu bebida entre 3 opciones"). Requiere un modelo
-de grupos y opciones que hoy no existe; esta fase solo cubre combos de
-componentes fijos, sin elección.
+**Grupos de modificadores (elección del customer):** ver sección 8d — un combo
+puede llevar, además o en vez de componentes fijos, grupos de modificadores
+asociados (ej. "elige tu bebida").
+
+---
+
+### 8d. Grupos de modificadores reutilizables
+
+Un **grupo de modificadores** es un conjunto de opciones definido **una vez a
+nivel tenant** y asociable a **N combos o recetas distintos** (ej. el grupo
+"Bebida" puede vivir en varios combos sin duplicar su catálogo de opciones).
+Cada opción es un item existente (`producto | receta | servicio |
+ingrediente`) con cantidad y recargo propios dentro del grupo. Al asociar un
+grupo a un item se define cuántas **unidades totales** debe elegir el
+customer (`min`/`max`).
+
+**Reglas de negocio:**
+- **Reutilizable, sin tipo declarado.** El grupo no dice de antemano "soy de
+  ingredientes" o "soy de productos" — su **familia de efecto**
+  (`ingrediente` | `vendible`) se **deriva** del tipo de sus opciones y se
+  **verifica homogénea** al guardar (todas `ingrediente`, o todas
+  `producto/receta/servicio` — nunca mezcladas). La familia no se persiste;
+  se recalcula en cada lectura.
+- **`min`/`max` en unidades totales, no en cantidad de opciones distintas.**
+  Un grupo `min:1, max:1` exige elegir exactamente 1 unidad (de cualquier
+  opción); `min:1, max:2` permite 2 unidades de la misma opción o 1+1 de dos
+  distintas — se valida la **suma de unidades** elegidas, no cuántas opciones
+  distintas se tocaron.
+- **Precio en el grupo, sin override por item.** El recargo (`precioExtra`) de
+  cada opción vive en la opción del grupo — el mismo para todos los items que
+  usan ese grupo. Si dos combos necesitan precios distintos para la misma
+  opción, se requieren **dos grupos** (trade-off asumido; ver ADR-013).
+- **Opción siempre bloqueante.** A diferencia de los ingredientes fijos de una
+  receta (que pueden marcarse no bloqueantes), una opción de grupo elegida
+  explícitamente por el customer sin stock **aborta la venta** — no hay
+  "elegí X pero se vendió sin X".
+- **Combos: "≥1 componente" se relaja a "≥1 componente o grupo".** Un combo
+  puede existir compuesto **solo** por grupos (sin componentes fijos); en ese
+  caso su `costo_actual` es `0` hasta que se vende (el costo real se realiza
+  vía el movimiento de inventario de la opción elegida).
+- **Snapshot congelado, revalidado por el backend.** La elección del customer
+  (grupo + opción + unidades) se congela en `personalizacion` de la línea de
+  venta; el backend siempre revalida `min ≤ Σunidades ≤ max` y recalcula el
+  precio contra el catálogo vivo — nunca confía en el precio que mande el
+  frontend.
+- **Bloqueo de borrado en ambos sentidos.** Un item que es opción viva de un
+  grupo no puede eliminarse; un grupo asociado a items vivos no puede
+  eliminarse.
+
+**Fuera de alcance (diferido, no un olvido):** la **impresión térmica** de la
+opción elegida de un grupo en comanda/precuenta/boleta queda para un ticket
+aparte (decisión confirmada por el usuario, 2026-07-20) — hoy la comanda
+imprime el item por su nombre sin desglosar la opción elegida. El snapshot ya
+congela todo lo necesario (`grupoNombre`, `itemNombre` de la opción,
+`unidades`) para implementarlo después sin migración.
 
 ---
 
