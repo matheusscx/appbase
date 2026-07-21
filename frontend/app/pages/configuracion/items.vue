@@ -53,7 +53,7 @@ interface Item {
     min: number
     max: number
     orden: number
-    opciones: { grupoOpcionId: string; itemId: string; itemNombre: string; tipo: string; cantidad: string; unidadCodigo: string | null; precioExtra: string; orden: number; stock: string | null }[]
+    opciones: { grupoOpcionId: string; itemId: string; itemNombre: string; tipo: string; cantidad: string | null; cantidadDefault: string | null; unidadCodigo: string | null; precioExtra: string; orden: number; stock: string | null; esPendiente: boolean }[]
   }[]
   disponible?: number | null
 }
@@ -71,11 +71,22 @@ interface ComponenteRow {
   bloqueante: boolean
 }
 
+interface GrupoOpcionOverrideRow {
+  grupoOpcionId: string
+  itemNombre: string
+  cantidad: string // efectiva (pre-llenada con default; '' = pendiente)
+  cantidadDefault: string | null
+  unidadCodigo?: string
+  precioExtra: string
+  esPendiente: boolean
+}
+
 interface GrupoAsocRow {
   grupoModificadorId: string
   min: string
   max: string
   orden: string
+  opciones: GrupoOpcionOverrideRow[]
 }
 
 interface ExtraPermitidoRow {
@@ -220,7 +231,7 @@ const recargosOpts = ref<Opt[]>([])
 	  }
 	}
 
-	const gruposCatalogo = ref<{ grupoModificadorId: string; nombre: string; familia: string; opciones: { itemNombre: string; precioExtra: string }[] }[]>([])
+	const gruposCatalogo = ref<{ grupoModificadorId: string; nombre: string; familia: string; opciones: { grupoOpcionId: string; itemNombre: string; cantidad: string | null; unidadCodigo: string | null; precioExtra: string }[] }[]>([])
 	const gruposCatalogoOpts = computed(() =>
 	  gruposCatalogo.value.map(g => ({ label: `${g.nombre} (${g.familia})`, value: g.grupoModificadorId })),
 	)
@@ -230,6 +241,20 @@ const recargosOpts = ref<Opt[]>([])
 	  } catch {
 	    toast.add({ title: 'Error al cargar grupos de modificadores', color: 'error' })
 	  }
+	}
+
+	/** Al elegir un grupo en el form de item: pre-llena la tabla de overrides con el default de cada opción. */
+	function onSelectGrupo(idx: number, grupoId: string) {
+	  const catalogo = gruposCatalogo.value.find(g => g.grupoModificadorId === grupoId)
+	  form.value.gruposModificadores[idx]!.opciones = (catalogo?.opciones ?? []).map(o => ({
+	    grupoOpcionId: o.grupoOpcionId,
+	    itemNombre: o.itemNombre,
+	    cantidad: o.cantidad ?? '',
+	    cantidadDefault: o.cantidad,
+	    unidadCodigo: o.unidadCodigo ?? undefined,
+	    precioExtra: o.precioExtra,
+	    esPendiente: o.cantidad === null,
+	  }))
 	}
 
 	/** Sin re-fetch: el POST/PATCH devuelve el item y se mergea en estado local. */
@@ -722,6 +747,15 @@ async function abrirEditar(item: Item) {
         min: String(g.min),
         max: String(g.max),
         orden: String(g.orden),
+        opciones: (g.opciones ?? []).map(o => ({
+          grupoOpcionId: o.grupoOpcionId,
+          itemNombre: o.itemNombre,
+          cantidad: o.cantidad ?? '',
+          cantidadDefault: o.cantidadDefault,
+          unidadCodigo: o.unidadCodigo ?? undefined,
+          precioExtra: o.precioExtra,
+          esPendiente: o.esPendiente,
+        })),
       })),
       clasificacionTributaria: detalle.clasificacionTributaria ?? 'afecto',
       impuestosIds: detalle.impuestosIds ?? [],
@@ -872,6 +906,14 @@ async function guardar() {
         min: Number(g.min),
         max: Number(g.max),
         orden: Number(g.orden || '0'),
+        opciones: g.opciones
+          .filter(o => o.cantidad !== '' || o.unidadCodigo || o.precioExtra !== '')
+          .map(o => ({
+            grupoOpcionId: o.grupoOpcionId,
+            cantidad: o.cantidad || undefined,
+            unidadCodigo: o.unidadCodigo || undefined,
+            precioExtra: o.precioExtra || undefined,
+          })),
       }))
     }
 
@@ -1674,7 +1716,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   size="xs"
                   variant="ghost"
                   icon="i-lucide-plus"
-                  @click="form.gruposModificadores = [...form.gruposModificadores, { grupoModificadorId: '', min: '1', max: '1', orden: String(form.gruposModificadores.length) }]"
+                  @click="form.gruposModificadores = [...form.gruposModificadores, { grupoModificadorId: '', min: '1', max: '1', orden: String(form.gruposModificadores.length), opciones: [] }]"
                 >Agregar grupo</UButton>
               </div>
 
@@ -1693,6 +1735,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       )"
                       value-key="value"
                       class="w-full"
+                      @update:model-value="onSelectGrupo(idx, $event as string)"
                     />
                   </UFormField>
                   <UFormField label="Mín.">
@@ -1712,17 +1755,51 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   </div>
                 </div>
 
-                <div v-if="grupo.grupoModificadorId" class="pl-1">
-                  <p class="text-xs text-muted mb-1">Opciones del grupo (solo lectura):</p>
-                  <ul class="text-xs text-muted space-y-0.5">
-                    <li
-                      v-for="op in gruposCatalogo.find(g => g.grupoModificadorId === grupo.grupoModificadorId)?.opciones ?? []"
-                      :key="op.itemNombre"
-                    >
-                      {{ op.itemNombre }}
-                      <span v-if="Number(op.precioExtra) > 0">(+{{ formatMonto(op.precioExtra, form.monedaId) }})</span>
-                    </li>
-                  </ul>
+                <div v-if="grupo.grupoModificadorId && grupo.opciones.length" class="pl-1 space-y-2">
+                  <p class="text-xs text-muted">
+                    Vacío = hereda el default del grupo. Sin default = opción pendiente (no vendible en este item).
+                  </p>
+                  <div class="grid grid-cols-12 gap-2 text-xs text-muted">
+                    <span class="col-span-4">Opción</span>
+                    <span class="col-span-2">Cantidad</span>
+                    <span class="col-span-2">Unidad</span>
+                    <span class="col-span-3">Precio extra</span>
+                    <span class="col-span-1" />
+                  </div>
+                  <div
+                    v-for="(op, opIdx) in grupo.opciones"
+                    :key="op.grupoOpcionId"
+                    class="grid grid-cols-12 gap-2 items-center"
+                  >
+                    <span class="col-span-4 truncate text-sm text-default">{{ op.itemNombre }}</span>
+                    <UInput
+                      v-model="grupo.opciones[opIdx]!.cantidad"
+                      inputmode="decimal"
+                      :placeholder="op.cantidadDefault ?? 'Pendiente'"
+                      class="col-span-2 w-full"
+                    />
+                    <USelectMenu
+                      v-if="gruposCatalogo.find(g => g.grupoModificadorId === grupo.grupoModificadorId)?.familia === 'ingrediente'"
+                      v-model="grupo.opciones[opIdx]!.unidadCodigo"
+                      :items="unidadesMedidaOpts"
+                      value-key="value"
+                      class="col-span-2 w-full"
+                    />
+                    <span v-else class="col-span-2" />
+                    <MoneyInput
+                      v-model="grupo.opciones[opIdx]!.precioExtra"
+                      :moneda-id="form.monedaId"
+                      class="col-span-3 w-full"
+                    />
+                    <UBadge
+                      v-if="op.cantidad === '' && !op.cantidadDefault"
+                      color="warning"
+                      variant="subtle"
+                      size="sm"
+                      class="col-span-1 justify-self-end"
+                    >Pendiente</UBadge>
+                    <span v-else class="col-span-1" />
+                  </div>
                 </div>
               </div>
 

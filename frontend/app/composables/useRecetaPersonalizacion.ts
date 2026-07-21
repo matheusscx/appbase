@@ -31,6 +31,8 @@ export interface GrupoOpcionPersonalizacion {
   orden: number
   /** null = ítem no rastrea stock (no bloquea la opción). */
   stock: string | null
+  /** true = sin cantidad default ni override: no vendible en este item (nunca seleccionable). */
+  esPendiente?: boolean
 }
 
 /** Grupo de modificadores asociado a un item (receta o combo) — `GET /items/:id`. */

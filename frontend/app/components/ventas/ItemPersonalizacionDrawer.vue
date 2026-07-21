@@ -134,7 +134,14 @@ function totalUnidadesGrupo(g: GrupoPersonalizacion): number {
 }
 
 function opcionDeshabilitada(o: GrupoOpcionPersonalizacion): boolean {
-  return opcionSinStock(o.stock)
+  return !!o.esPendiente || opcionSinStock(o.stock)
+}
+
+/** Motivo de la opción no seleccionable, para mensaje y tooltip. */
+function opcionMotivo(o: GrupoOpcionPersonalizacion): string | null {
+  if (o.esPendiente) return 'No configurada para este item'
+  if (opcionSinStock(o.stock)) return 'Sin stock disponible'
+  return null
 }
 
 /** Grupo obligatorio (min ≥ 1) sin ninguna opción disponible: nunca se puede cumplir. */
@@ -168,7 +175,7 @@ interface RadioGrupoItem {
 function radioItems(g: GrupoPersonalizacion): RadioGrupoItem[] {
   const items: RadioGrupoItem[] = g.opciones.map((o) => ({
     label: o.itemNombre,
-    description: opcionDescripcion(o),
+    description: opcionMotivo(o) ?? opcionDescripcion(o),
     value: o.itemId,
     disabled: opcionDeshabilitada(o),
   }))
@@ -350,6 +357,7 @@ function agregar() {
                 v-for="opcion in grupo.opciones"
                 :key="opcion.grupoOpcionId"
                 class="px-4 py-3"
+                :title="opcionMotivo(opcion) ?? undefined"
               >
                 <div class="flex items-start justify-between gap-3">
                   <UCheckbox
@@ -370,11 +378,11 @@ function agregar() {
                   />
                 </div>
                 <p
-                  v-if="opcionDeshabilitada(opcion)"
+                  v-if="opcionMotivo(opcion)"
                   class="mt-1 flex items-center gap-1 pl-6 text-xs text-warning"
                 >
                   <UIcon name="i-lucide-triangle-alert" class="size-3.5 shrink-0" />
-                  Sin stock disponible
+                  {{ opcionMotivo(opcion) }}
                 </p>
               </div>
             </div>
