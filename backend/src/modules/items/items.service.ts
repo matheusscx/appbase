@@ -368,22 +368,25 @@ export class ItemsService {
         itemId: string;
         itemNombre: string;
         tipo: string;
-        cantidad: string;
+        cantidad: string | null;
+        cantidadDefault: string | null;
         unidadCodigo: string | null;
         precioExtra: string;
         orden: number;
         stock: string | null;
+        esPendiente: boolean;
       }[];
     }[] = [];
     if (rows[0].tipo === 'combo' || rows[0].tipo === 'receta') {
       const grupoRows: {
         grupo_modificador_id: string;
+        item_grupo_id: string;
         nombre: string;
         min: number;
         max: number;
         orden: number;
       }[] = await this.dataSource.query(
-        `SELECT igm.grupo_modificador_id, g.nombre, igm.min, igm.max, igm.orden
+        `SELECT igm.grupo_modificador_id, igm.item_grupo_id, g.nombre, igm.min, igm.max, igm.orden
          FROM item_grupos_modificadores igm
          JOIN grupos_modificadores g ON g.grupo_modificador_id = igm.grupo_modificador_id
            AND g.eliminado_el IS NULL
@@ -397,20 +400,29 @@ export class ItemsService {
           item_id: string;
           item_nombre: string;
           tipo: string;
-          cantidad: string;
+          cantidad_efectiva: string | null;
+          cantidad_default: string | null;
           unidad_codigo: string | null;
           precio_extra: string;
           orden: number;
           stock: string | null;
         }[] = await this.dataSource.query(
           `SELECT o.grupo_opcion_id, o.item_id, i.nombre AS item_nombre, i.tipo,
-                  o.cantidad, o.unidad_codigo, o.precio_extra, o.orden, ip.stock
+                  COALESCE(ovr.cantidad, o.cantidad) AS cantidad_efectiva,
+                  o.cantidad AS cantidad_default,
+                  COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
+                  COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra,
+                  o.orden, ip.stock
            FROM grupo_modificador_opciones o
            JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
            LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+           LEFT JOIN item_grupo_modificador_opciones ovr
+             ON ovr.grupo_opcion_id = o.grupo_opcion_id
+            AND ovr.item_grupo_id = $3
+            AND ovr.eliminado_el IS NULL
            WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2 AND o.eliminado_el IS NULL
            ORDER BY o.orden ASC`,
-          [gr.grupo_modificador_id, tenantId],
+          [gr.grupo_modificador_id, tenantId, gr.item_grupo_id],
         );
         grupos.push({
           grupoModificadorId: gr.grupo_modificador_id,
@@ -423,11 +435,13 @@ export class ItemsService {
             itemId: r.item_id,
             itemNombre: r.item_nombre,
             tipo: r.tipo,
-            cantidad: r.cantidad,
+            cantidad: r.cantidad_efectiva,
+            cantidadDefault: r.cantidad_default,
             unidadCodigo: r.unidad_codigo,
             precioExtra: r.precio_extra,
             orden: r.orden,
             stock: r.stock,
+            esPendiente: r.cantidad_efectiva == null,
           })),
         });
       }
@@ -1643,11 +1657,12 @@ export class ItemsService {
   ): Promise<{ grupos: SnapshotGrupo[]; precioExtraTotal: string }> {
     const asociados: {
       grupo_modificador_id: string;
+      item_grupo_id: string;
       nombre: string;
       min: number;
       max: number;
     }[] = await manager.query(
-      `SELECT igm.grupo_modificador_id, g.nombre, igm.min, igm.max
+      `SELECT igm.grupo_modificador_id, igm.item_grupo_id, g.nombre, igm.min, igm.max
        FROM item_grupos_modificadores igm
        JOIN grupos_modificadores g ON g.grupo_modificador_id = igm.grupo_modificador_id
          AND g.eliminado_el IS NULL
@@ -1674,15 +1689,22 @@ export class ItemsService {
       const opcionesCat: {
         item_id: string;
         nombre: string;
-        cantidad: string;
+        cantidad: string | null;
         unidad_codigo: string | null;
         precio_extra: string;
       }[] = await manager.query(
-        `SELECT o.item_id, i.nombre, o.cantidad, o.unidad_codigo, o.precio_extra
+        `SELECT o.item_id, i.nombre,
+                COALESCE(ovr.cantidad, o.cantidad) AS cantidad,
+                COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
+                COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra
          FROM grupo_modificador_opciones o
          JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+         LEFT JOIN item_grupo_modificador_opciones ovr
+           ON ovr.grupo_opcion_id = o.grupo_opcion_id
+          AND ovr.item_grupo_id = $3
+          AND ovr.eliminado_el IS NULL
          WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2 AND o.eliminado_el IS NULL`,
-        [asoc.grupo_modificador_id, tenantId],
+        [asoc.grupo_modificador_id, tenantId, asoc.item_grupo_id],
       );
 
       const elegidas = elegidosPorGrupo.get(asoc.grupo_modificador_id) ?? [];
@@ -1693,6 +1715,11 @@ export class ItemsService {
         if (!cat) {
           throw new BadRequestException(
             `La opción ${el.itemId} no pertenece al grupo ${asoc.nombre}`,
+          );
+        }
+        if (cat.cantidad == null) {
+          throw new BadRequestException(
+            `La opción "${cat.nombre}" no tiene cantidad configurada para este item (pendiente)`,
           );
         }
         const unidades = new Decimal(el.unidades ?? 1);

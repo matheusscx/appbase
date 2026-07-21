@@ -2068,6 +2068,71 @@ describe('ItemsService', () => {
     });
   });
 
+  describe('resolución de grupos con override (COALESCE)', () => {
+    const ITEM_OPCION = 'opcion-carne-uuid';
+
+    it('resolverGruposDeItem usa el override de cantidad y precio sobre el default', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            grupo_modificador_id: 'G1',
+            item_grupo_id: 'IG1',
+            nombre: 'Proteína',
+            min: 0,
+            max: 1,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_OPCION,
+            nombre: 'Carne',
+            cantidad: '250',
+            unidad_codigo: 'g',
+            precio_extra: '700',
+          },
+        ]);
+
+      const res = await service.resolverGruposDeItem(
+        managerMock as any,
+        TENANT,
+        ITEM_ID,
+        [{ grupoId: 'G1', opciones: [{ itemId: ITEM_OPCION, unidades: 1 }] }],
+      );
+
+      expect(res.grupos[0].opciones[0].cantidad).toBe('250');
+      expect(res.grupos[0].opciones[0].precioExtra).toBe('700');
+      expect(res.precioExtraTotal).toBe('700.0000');
+    });
+
+    it('rechaza elegir una opción pendiente (cantidad efectiva null)', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            grupo_modificador_id: 'G1',
+            item_grupo_id: 'IG1',
+            nombre: 'Proteína',
+            min: 1,
+            max: 1,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_OPCION,
+            nombre: 'Carne',
+            cantidad: null,
+            unidad_codigo: null,
+            precio_extra: '0',
+          },
+        ]);
+
+      await expect(
+        service.resolverGruposDeItem(managerMock as any, TENANT, ITEM_ID, [
+          { grupoId: 'G1', opciones: [{ itemId: ITEM_OPCION, unidades: 1 }] },
+        ]),
+      ).rejects.toThrow(/sin cantidad configurada|pendiente/i);
+    });
+  });
+
   describe('venderIngredientesReceta', () => {
     const PARAMS = {
       tenantId: TENANT,
