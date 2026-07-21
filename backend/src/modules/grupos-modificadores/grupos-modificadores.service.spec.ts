@@ -157,4 +157,41 @@ describe('GruposModificadoresService', () => {
       } as any),
     ).rejects.toThrow(/producto.*receta.*servicio|ingrediente/i);
   });
+
+  describe('update/remove grupo', () => {
+    it('reemplaza opciones manteniendo la familia', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // SELECT grupo vivo
+        .mockResolvedValueOnce([]) // assertNombreLibre
+        .mockResolvedValueOnce([{ affected: 1 }]) // soft-delete opciones viejas
+        .mockResolvedValueOnce([
+          {
+            tipo: 'producto',
+            nombre: 'Coca',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'unidad',
+          },
+        ])
+        .mockResolvedValueOnce([{ grupo_opcion_id: 'O9' }]);
+      const res = await service.update(TENANT_ID, 'G1', {
+        nombre: 'Bebida',
+        opciones: [{ itemId: ITEM_PROD, cantidad: '1', precioExtra: '800' }],
+      });
+      expect(res.familia).toBe('vendible');
+      expect(res.opciones).toHaveLength(1);
+    });
+
+    it('bloquea borrar un grupo asociado a items vivos', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // SELECT grupo
+        .mockResolvedValueOnce([{ nombre: 'Combo Clásico' }]); // items asociados vivos
+      await expect(service.remove(TENANT_ID, 'G1')).rejects.toThrow(
+        /No se puede eliminar.*Combo Clásico/i,
+      );
+    });
+  });
 });
