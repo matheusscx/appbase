@@ -3039,8 +3039,8 @@ export class ItemsService {
     const vivos: { item_grupo_opcion_id: string; grupo_opcion_id: string }[] =
       await manager.query(
         `SELECT item_grupo_opcion_id, grupo_opcion_id FROM item_grupo_modificador_opciones
-         WHERE item_grupo_id = $1 AND eliminado_el IS NULL`,
-        [itemGrupoId],
+         WHERE item_grupo_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [itemGrupoId, tenantId],
       );
     const overrideIdPorOpcion = new Map(
       vivos.map((r) => [r.grupo_opcion_id, r.item_grupo_opcion_id]),
@@ -3049,11 +3049,22 @@ export class ItemsService {
 
     for (const o of opciones) {
       opcionesEntrantes.add(o.grupoOpcionId);
-      // La opción debe pertenecer a ESTE grupo (viva).
-      const perteneceRows: { grupo_opcion_id: string }[] = await manager.query(
-        `SELECT grupo_opcion_id FROM grupo_modificador_opciones
-         WHERE grupo_opcion_id = $1 AND grupo_modificador_id = $2 AND tenant_id = $3
-           AND eliminado_el IS NULL`,
+      // La opción debe pertenecer a ESTE grupo (viva). Se traen además tipo,
+      // default y unidad base para validar la unidad de ingrediente (abajo).
+      const perteneceRows: {
+        grupo_opcion_id: string;
+        tipo: string;
+        default_cantidad: string | null;
+        default_unidad: string | null;
+        unidad_medida: string | null;
+      }[] = await manager.query(
+        `SELECT o.grupo_opcion_id, i.tipo, o.cantidad AS default_cantidad,
+                o.unidad_codigo AS default_unidad, ip.unidad_medida
+         FROM grupo_modificador_opciones o
+         JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+         LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+         WHERE o.grupo_opcion_id = $1 AND o.grupo_modificador_id = $2 AND o.tenant_id = $3
+           AND o.eliminado_el IS NULL`,
         [o.grupoOpcionId, grupoModificadorId, tenantId],
       );
       if (!perteneceRows.length) {
@@ -3085,13 +3096,33 @@ export class ItemsService {
       const precio =
         o.precioExtra != null && o.precioExtra !== '' ? o.precioExtra : null;
 
+      // Igual que el path del default del grupo: una opción ingrediente con
+      // cantidad efectiva debe tener unidad efectiva convertible a su unidad
+      // base, o el motor de inventario descontaría el número crudo como unidad
+      // base (mis-medición silenciosa). Efectivas = override ?? default.
+      const pertenece = perteneceRows[0];
+      const efectivaCantidad = cantidad ?? pertenece.default_cantidad;
+      const efectivaUnidad = unidad ?? pertenece.default_unidad;
+      if (pertenece.tipo === 'ingrediente' && efectivaCantidad != null) {
+        if (!efectivaUnidad) {
+          throw new BadRequestException(
+            'La opción ingrediente requiere unidad de medida para la cantidad configurada',
+          );
+        }
+        await this.catalogService.convertirUnidad(
+          efectivaCantidad,
+          efectivaUnidad,
+          pertenece.unidad_medida!,
+        );
+      }
+
       const existente = overrideIdPorOpcion.get(o.grupoOpcionId);
       if (existente) {
         await manager.query(
           `UPDATE item_grupo_modificador_opciones
            SET cantidad = $1, unidad_codigo = $2, precio_extra = $3, actualizado_el = NOW()
-           WHERE item_grupo_opcion_id = $4`,
-          [cantidad, unidad, precio, existente],
+           WHERE item_grupo_opcion_id = $4 AND tenant_id = $5`,
+          [cantidad, unidad, precio, existente, tenantId],
         );
       } else {
         await manager.query(

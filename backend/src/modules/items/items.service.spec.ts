@@ -3500,6 +3500,65 @@ describe('ItemsService', () => {
       ).rejects.toThrow(/opción.*no pertenece al grupo/i);
     });
 
+    it('rechaza un override de cantidad en opción ingrediente sin unidad efectiva', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin asociaciones vivas
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe
+        .mockResolvedValueOnce([{ item_grupo_id: 'IG-NEW' }]) // INSERT asociación RETURNING
+        .mockResolvedValueOnce([]) // sin overrides vivos previos
+        .mockResolvedValueOnce([
+          {
+            grupo_opcion_id: OPCION_ID,
+            tipo: 'ingrediente',
+            default_cantidad: null,
+            default_unidad: null,
+            unidad_medida: 'g',
+          },
+        ]); // opción pertenece (ingrediente, sin default de cantidad/unidad)
+      await expect(
+        (service as any).asociarGruposModificadores(managerMock, TENANT, ITEM_ID, [
+          {
+            grupoModificadorId: GRUPO_ID,
+            min: 1,
+            max: 1,
+            opciones: [{ grupoOpcionId: OPCION_ID, cantidad: '250' }], // sin unidadCodigo
+          },
+        ]),
+      ).rejects.toThrow(/unidad de medida/i);
+    });
+
+    it('rechaza un override con unidad incompatible en opción ingrediente', async () => {
+      catalogServiceMock.convertirUnidad.mockRejectedValueOnce(
+        new Error('unidad incompatible'),
+      );
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin asociaciones vivas
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe
+        .mockResolvedValueOnce([{ item_grupo_id: 'IG-NEW' }]) // INSERT asociación RETURNING
+        .mockResolvedValueOnce([]) // sin overrides vivos previos
+        .mockResolvedValueOnce([
+          {
+            grupo_opcion_id: OPCION_ID,
+            tipo: 'ingrediente',
+            default_cantidad: null,
+            default_unidad: null,
+            unidad_medida: 'g',
+          },
+        ]);
+      await expect(
+        (service as any).asociarGruposModificadores(managerMock, TENANT, ITEM_ID, [
+          {
+            grupoModificadorId: GRUPO_ID,
+            min: 1,
+            max: 1,
+            opciones: [
+              { grupoOpcionId: OPCION_ID, cantidad: '250', unidadCodigo: 'ml' },
+            ],
+          },
+        ]),
+      ).rejects.toThrow(/incompatible/i);
+    });
+
     it('bloquea borrar un item usado como opción de un grupo vivo', async () => {
       itemRepo.findOne.mockResolvedValueOnce({
         id: ITEM_OPCION_ID,

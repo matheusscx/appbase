@@ -444,13 +444,14 @@ export class GruposModificadoresService {
               `UPDATE grupo_modificador_opciones SET
                  cantidad = $1, unidad_codigo = $2, precio_extra = $3, orden = $4,
                  actualizado_el = NOW()
-               WHERE grupo_opcion_id = $5`,
+               WHERE grupo_opcion_id = $5 AND tenant_id = $6`,
               [
                 op.cantidad,
                 op.unidadCodigo,
                 op.precioExtra,
                 op.orden,
                 existente,
+                tenantId,
               ],
             );
           } else {
@@ -632,10 +633,20 @@ export class GruposModificadoresService {
         throw new NotFoundException('Grupo de modificadores no encontrado');
       }
 
-      const opRows: { grupo_opcion_id: string }[] = await manager.query(
-        `SELECT grupo_opcion_id FROM grupo_modificador_opciones
-         WHERE grupo_opcion_id = $1 AND grupo_modificador_id = $2 AND tenant_id = $3
-           AND eliminado_el IS NULL`,
+      const opRows: {
+        grupo_opcion_id: string;
+        tipo: string;
+        default_cantidad: string | null;
+        default_unidad: string | null;
+        unidad_medida: string | null;
+      }[] = await manager.query(
+        `SELECT o.grupo_opcion_id, i.tipo, o.cantidad AS default_cantidad,
+                o.unidad_codigo AS default_unidad, ip.unidad_medida
+         FROM grupo_modificador_opciones o
+         JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+         LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+         WHERE o.grupo_opcion_id = $1 AND o.grupo_modificador_id = $2 AND o.tenant_id = $3
+           AND o.eliminado_el IS NULL`,
         [dto.grupoOpcionId, grupoId, tenantId],
       );
       if (!opRows.length) {
@@ -681,6 +692,27 @@ export class GruposModificadoresService {
         dto.precioExtra != null && dto.precioExtra !== ''
           ? dto.precioExtra
           : null;
+
+      // Igual que el path del default del grupo: una opción ingrediente con
+      // cantidad efectiva debe tener unidad efectiva convertible a su unidad
+      // base, o el motor de inventario descontaría el número crudo como unidad
+      // base (mis-medición silenciosa). La cantidad/unidad efectivas combinan
+      // el override con el default del grupo.
+      const op = opRows[0];
+      const efectivaCantidad = cantidad ?? op.default_cantidad;
+      const efectivaUnidad = unidad ?? op.default_unidad;
+      if (op.tipo === 'ingrediente' && efectivaCantidad != null) {
+        if (!efectivaUnidad) {
+          throw new BadRequestException(
+            'La opción ingrediente requiere unidad de medida para la cantidad configurada',
+          );
+        }
+        await this.catalogService.convertirUnidad(
+          efectivaCantidad,
+          efectivaUnidad,
+          op.unidad_medida!,
+        );
+      }
 
       let actualizados = 0;
       for (const itemGrupoId of dto.itemGrupoIds) {

@@ -518,5 +518,51 @@ describe('GruposModificadoresService', () => {
         }),
       ).rejects.toThrow(/no pertenece|no válid/i);
     });
+
+    it('rechaza override de cantidad en opción ingrediente sin unidad efectiva', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // grupo vivo
+        .mockResolvedValueOnce([
+          {
+            grupo_opcion_id: OPCION_ID,
+            tipo: 'ingrediente',
+            default_cantidad: null,
+            default_unidad: null,
+            unidad_medida: 'g',
+          },
+        ]) // opción pertenece (ingrediente, sin default de cantidad/unidad)
+        .mockResolvedValueOnce([{ item_grupo_id: 'IG1' }]); // asociaciones válidas
+      await expect(
+        service.aplicarOverrides(TENANT_ID, 'G1', {
+          itemGrupoIds: ['IG1'],
+          grupoOpcionId: OPCION_ID,
+          cantidad: '150', // sin unidadCodigo → unidad efectiva null
+        }),
+      ).rejects.toThrow(/unidad de medida/i);
+    });
+
+    it('rechaza override con unidad incompatible en opción ingrediente', async () => {
+      convertirUnidad.mockRejectedValueOnce(new Error('unidad incompatible'));
+      managerMock.query
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }])
+        .mockResolvedValueOnce([
+          {
+            grupo_opcion_id: OPCION_ID,
+            tipo: 'ingrediente',
+            default_cantidad: null,
+            default_unidad: null,
+            unidad_medida: 'g',
+          },
+        ])
+        .mockResolvedValueOnce([{ item_grupo_id: 'IG1' }]);
+      await expect(
+        service.aplicarOverrides(TENANT_ID, 'G1', {
+          itemGrupoIds: ['IG1'],
+          grupoOpcionId: OPCION_ID,
+          cantidad: '150',
+          unidadCodigo: 'ml',
+        }),
+      ).rejects.toThrow(/incompatible/i);
+    });
   });
 });
