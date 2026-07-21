@@ -665,6 +665,7 @@ export class SalonesService {
                 omitidos: l.personalizacion.omitidos,
                 extras: l.personalizacion.extras.map((e) => ({
                   ingredienteItemId: e.ingredienteItemId,
+                  ...(e.unidades ? { unidades: Number(e.unidades) } : {}),
                 })),
                 comentario: l.personalizacion.comentario,
                 ...(l.personalizacion.grupos?.length

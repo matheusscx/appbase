@@ -62,6 +62,19 @@ const SNAPSHOT_COMBO = {
   ],
 };
 
+const SNAPSHOT_EXTRA = {
+  omitidos: [],
+  extras: [
+    {
+      ingredienteItemId: ING,
+      cantidad: '1',
+      unidadCodigo: 'unidad',
+      precioExtra: '500',
+      unidades: '3',
+    },
+  ],
+};
+
 type Repo = {
   find: jest.Mock;
   findOne: jest.Mock;
@@ -842,6 +855,45 @@ describe('SalonesService', () => {
                     opciones: [{ itemId: OPCION_ITEM, unidades: 1 }],
                   },
                 ],
+              }),
+            }),
+          ],
+        }),
+      );
+    });
+
+    it('preserva las unidades de un extra al reconstruir la venta al cerrar', async () => {
+      const cuenta = {
+        id: CUENTA,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 85,
+        estado: EstadoCuenta.ABIERTA,
+        ventaId: null,
+        garzonResponsableId: GARZON_RESPONSABLE,
+        cerradaEl: null as Date | null,
+      };
+      manager.findOne.mockResolvedValue(cuenta);
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', personalizacion: SNAPSHOT_EXTRA },
+      ]);
+      manager.query.mockResolvedValue([]);
+      ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
+
+      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        pin: PIN,
+        pagos: [{ metodoPagoId: 'mp-1', monto: '500' }],
+      });
+
+      expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        USUARIO,
+        expect.objectContaining({
+          lineas: [
+            expect.objectContaining({
+              personalizacion: expect.objectContaining({
+                extras: [{ ingredienteItemId: ING, unidades: 3 }],
               }),
             }),
           ],
