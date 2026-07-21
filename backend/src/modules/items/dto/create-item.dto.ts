@@ -89,6 +89,24 @@ export class ComboComponenteInputDto {
   bloqueante?: boolean;
 }
 
+export class ItemGrupoOpcionOverrideInputDto {
+  @IsUUID()
+  grupoOpcionId: string;
+
+  @IsOptional()
+  @IsNumberString()
+  cantidad?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  unidadCodigo?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  precioExtra?: string;
+}
+
 export class ItemGrupoModificadorInputDto {
   @IsUUID()
   grupoModificadorId: string;
@@ -105,6 +123,12 @@ export class ItemGrupoModificadorInputDto {
   @IsOptional()
   @Min(0)
   orden?: number;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => ItemGrupoOpcionOverrideInputDto)
+  opciones?: ItemGrupoOpcionOverrideInputDto[];
 }
 
 export class CreateItemDto {

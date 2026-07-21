@@ -15,6 +15,7 @@ import {
   RecetaExtraInputDto,
   ComboComponenteInputDto,
   ItemGrupoModificadorInputDto,
+  ItemGrupoOpcionOverrideInputDto,
 } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
@@ -2899,19 +2900,29 @@ export class ItemsService {
     }
   }
 
-  /** Reemplazo total de la asociación item↔grupo de modificadores. */
+  /**
+   * Upsert de la asociación item↔grupo preservando `item_grupo_id` de los grupos
+   * que persisten (para no huérfanar sus overrides), + upsert de los overrides de
+   * consumo/recargo por opción. Soft-borra asociaciones y overrides que desaparecen.
+   */
   private async asociarGruposModificadores(
     manager: EntityManager,
     tenantId: string,
     itemId: string,
     grupos: ItemGrupoModificadorInputDto[],
   ): Promise<void> {
-    await manager.query(
-      `UPDATE item_grupos_modificadores SET eliminado_el = NOW(), actualizado_el = NOW()
-       WHERE item_id = $1 AND eliminado_el IS NULL`,
-      [itemId],
+    const vivas: { item_grupo_id: string; grupo_modificador_id: string }[] =
+      await manager.query(
+        `SELECT item_grupo_id, grupo_modificador_id FROM item_grupos_modificadores
+         WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [itemId, tenantId],
+      );
+    const itemGrupoIdPorGrupo = new Map(
+      vivas.map((r) => [r.grupo_modificador_id, r.item_grupo_id]),
     );
+
     const vistos = new Set<string>();
+    const gruposEntrantes = new Set<string>();
     let orden = 0;
     for (const g of grupos) {
       if (vistos.has(g.grupoModificadorId)) {
@@ -2920,34 +2931,161 @@ export class ItemsService {
         );
       }
       vistos.add(g.grupoModificadorId);
+      gruposEntrantes.add(g.grupoModificadorId);
       if (g.max < Math.max(g.min, 1)) {
         throw new BadRequestException(
           'El máximo del grupo debe ser mayor o igual a max(min, 1)',
         );
       }
-      const rows: { grupo_modificador_id: string }[] = await manager.query(
+      const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `SELECT grupo_modificador_id FROM grupos_modificadores
          WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
         [g.grupoModificadorId, tenantId],
       );
-      if (!rows.length) {
+      if (!grupoRows.length) {
         throw new BadRequestException(
           `Grupo de modificadores no encontrado: ${g.grupoModificadorId}`,
         );
       }
-      await manager.query(
-        `INSERT INTO item_grupos_modificadores (tenant_id, item_id, grupo_modificador_id, min, max, orden)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [
-          tenantId,
-          itemId,
-          g.grupoModificadorId,
-          g.min,
-          g.max,
-          g.orden ?? orden,
-        ],
-      );
+
+      let itemGrupoId = itemGrupoIdPorGrupo.get(g.grupoModificadorId);
+      if (itemGrupoId) {
+        await manager.query(
+          `UPDATE item_grupos_modificadores
+           SET min = $1, max = $2, orden = $3, actualizado_el = NOW()
+           WHERE item_grupo_id = $4`,
+          [g.min, g.max, g.orden ?? orden, itemGrupoId],
+        );
+      } else {
+        const insRows: { item_grupo_id: string }[] = await manager.query(
+          `INSERT INTO item_grupos_modificadores (tenant_id, item_id, grupo_modificador_id, min, max, orden)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING item_grupo_id`,
+          [
+            tenantId,
+            itemId,
+            g.grupoModificadorId,
+            g.min,
+            g.max,
+            g.orden ?? orden,
+          ],
+        );
+        itemGrupoId = insRows[0].item_grupo_id;
+      }
       orden++;
+
+      await this.upsertOverridesDeGrupo(
+        manager,
+        tenantId,
+        itemGrupoId,
+        g.grupoModificadorId,
+        g.opciones ?? [],
+      );
+    }
+
+    // Asociaciones que desaparecen: soft-delete de la asociación + sus overrides.
+    const eliminadas = vivas.filter(
+      (r) => !gruposEntrantes.has(r.grupo_modificador_id),
+    );
+    if (eliminadas.length) {
+      const ids = eliminadas.map((r) => r.item_grupo_id);
+      await manager.query(
+        `UPDATE item_grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()
+         WHERE item_grupo_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
+        [ids],
+      );
+      await manager.query(
+        `UPDATE item_grupos_modificadores SET eliminado_el = NOW(), actualizado_el = NOW()
+         WHERE item_grupo_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
+        [ids],
+      );
+    }
+  }
+
+  /** Upsert-preservando de los overrides de un grupo asociado (por grupo_opcion_id). */
+  private async upsertOverridesDeGrupo(
+    manager: EntityManager,
+    tenantId: string,
+    itemGrupoId: string,
+    grupoModificadorId: string,
+    opciones: ItemGrupoOpcionOverrideInputDto[],
+  ): Promise<void> {
+    const vivos: { item_grupo_opcion_id: string; grupo_opcion_id: string }[] =
+      await manager.query(
+        `SELECT item_grupo_opcion_id, grupo_opcion_id FROM item_grupo_modificador_opciones
+         WHERE item_grupo_id = $1 AND eliminado_el IS NULL`,
+        [itemGrupoId],
+      );
+    const overrideIdPorOpcion = new Map(
+      vivos.map((r) => [r.grupo_opcion_id, r.item_grupo_opcion_id]),
+    );
+    const opcionesEntrantes = new Set<string>();
+
+    for (const o of opciones) {
+      opcionesEntrantes.add(o.grupoOpcionId);
+      // La opción debe pertenecer a ESTE grupo (viva).
+      const perteneceRows: { grupo_opcion_id: string }[] = await manager.query(
+        `SELECT grupo_opcion_id FROM grupo_modificador_opciones
+         WHERE grupo_opcion_id = $1 AND grupo_modificador_id = $2 AND tenant_id = $3
+           AND eliminado_el IS NULL`,
+        [o.grupoOpcionId, grupoModificadorId, tenantId],
+      );
+      if (!perteneceRows.length) {
+        throw new BadRequestException(
+          `La opción ${o.grupoOpcionId} no pertenece al grupo asociado`,
+        );
+      }
+      if (
+        o.cantidad != null &&
+        o.cantidad !== '' &&
+        new Decimal(o.cantidad).lessThanOrEqualTo(0)
+      ) {
+        throw new BadRequestException(
+          'La cantidad del override debe ser mayor a 0',
+        );
+      }
+      if (
+        o.precioExtra != null &&
+        o.precioExtra !== '' &&
+        new Decimal(o.precioExtra).lessThan(0)
+      ) {
+        throw new BadRequestException(
+          'El precio extra del override debe ser mayor o igual a 0',
+        );
+      }
+      const cantidad =
+        o.cantidad != null && o.cantidad !== '' ? o.cantidad : null;
+      const unidad = o.unidadCodigo || null;
+      const precio =
+        o.precioExtra != null && o.precioExtra !== '' ? o.precioExtra : null;
+
+      const existente = overrideIdPorOpcion.get(o.grupoOpcionId);
+      if (existente) {
+        await manager.query(
+          `UPDATE item_grupo_modificador_opciones
+           SET cantidad = $1, unidad_codigo = $2, precio_extra = $3, actualizado_el = NOW()
+           WHERE item_grupo_opcion_id = $4`,
+          [cantidad, unidad, precio, existente],
+        );
+      } else {
+        await manager.query(
+          `INSERT INTO item_grupo_modificador_opciones
+             (tenant_id, item_grupo_id, grupo_opcion_id, cantidad, unidad_codigo, precio_extra)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [tenantId, itemGrupoId, o.grupoOpcionId, cantidad, unidad, precio],
+        );
+      }
+    }
+
+    // Overrides que ya no vienen: soft-delete (vuelven a heredar el default).
+    const aBorrar = vivos.filter(
+      (r) => !opcionesEntrantes.has(r.grupo_opcion_id),
+    );
+    if (aBorrar.length) {
+      await manager.query(
+        `UPDATE item_grupo_modificador_opciones SET eliminado_el = NOW(), actualizado_el = NOW()
+         WHERE item_grupo_opcion_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
+        [aBorrar.map((r) => r.item_grupo_opcion_id)],
+      );
     }
   }
 }

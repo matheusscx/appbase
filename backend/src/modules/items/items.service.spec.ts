@@ -1533,7 +1533,7 @@ describe('ItemsService', () => {
         // — sin la validación, el combo queda sin componentes NI grupos.
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
-          .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores (soft-delete previos)
+          .mockResolvedValueOnce([]) // SELECT asociaciones vivas (ninguna)
           .mockResolvedValueOnce([{ componentes: '0', grupos: '0' }]); // conteo vivos post-cambio
 
         await expect(
@@ -1545,9 +1545,10 @@ describe('ItemsService', () => {
         const OTRO_GRUPO_ID = 'otro-grupo-uuid';
         managerMock.query
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
-          .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores (soft-delete previos)
+          .mockResolvedValueOnce([]) // SELECT asociaciones vivas (ninguna)
           .mockResolvedValueOnce([{ grupo_modificador_id: OTRO_GRUPO_ID }]) // grupo existe/pertenece al tenant
-          .mockResolvedValueOnce([]) // INSERT item_grupos_modificadores
+          .mockResolvedValueOnce([{ item_grupo_id: 'ig-otro-uuid' }]) // INSERT asociación RETURNING
+          .mockResolvedValueOnce([]) // SELECT overrides vivos (ninguno)
           .mockResolvedValueOnce([{ componentes: '0', grupos: '1' }]); // conteo vivos post-cambio
 
         const patch = await service.update(TENANT, COMBO_ID, {
@@ -3172,6 +3173,8 @@ describe('ItemsService', () => {
     const GRUPO_ID = 'grupo-modificador-uuid';
     const PROD_ID = 'producto-uuid';
     const ITEM_OPCION_ID = 'item-opcion-uuid';
+    const OPCION_ID = 'grupo-opcion-uuid';
+    const OPCION_AJENA = 'grupo-opcion-ajena-uuid';
 
     it('asocia grupos a un combo con min/max válidos', async () => {
       const dto = {
@@ -3194,9 +3197,10 @@ describe('ItemsService', () => {
         ]) // lookup PROD_ID
         .mockResolvedValueOnce([]) // INSERT item_combo
         .mockResolvedValueOnce([]) // INSERT combo_componentes
-        .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores (soft delete previos)
+        .mockResolvedValueOnce([]) // SELECT asociaciones vivas (ninguna)
         .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe/pertenece al tenant
-        .mockResolvedValueOnce([]); // INSERT item_grupos_modificadores
+        .mockResolvedValueOnce([{ item_grupo_id: 'ig-nuevo-uuid' }]) // INSERT asociación RETURNING
+        .mockResolvedValueOnce([]); // SELECT overrides vivos (ninguno)
 
       const res = await service.create(TENANT, 'user-uuid', dto);
 
@@ -3208,6 +3212,7 @@ describe('ItemsService', () => {
     });
 
     it('rechaza max < min', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // SELECT asociaciones vivas
       await expect(
         (service as any).asociarGruposModificadores(
           managerMock,
@@ -3217,7 +3222,9 @@ describe('ItemsService', () => {
         ),
       ).rejects.toThrow(/máximo.*mayor o igual/i);
       expect(managerMock.query).not.toHaveBeenCalledWith(
-        expect.stringContaining('SELECT grupo_modificador_id'),
+        expect.stringContaining(
+          'SELECT grupo_modificador_id FROM grupos_modificadores',
+        ),
         expect.anything(),
       );
     });
@@ -3235,14 +3242,88 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
         .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
         .mockResolvedValueOnce([]) // INSERT item_combo (costo_actual = '0', sin componentes)
-        .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores (soft delete previos)
+        .mockResolvedValueOnce([]) // SELECT asociaciones vivas (ninguna)
         .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe/pertenece al tenant
-        .mockResolvedValueOnce([]); // INSERT item_grupos_modificadores
+        .mockResolvedValueOnce([{ item_grupo_id: 'ig-nuevo-uuid' }]) // INSERT asociación RETURNING
+        .mockResolvedValueOnce([]); // SELECT overrides vivos (ninguno)
 
       const res = await service.create(TENANT, 'user-uuid', dto);
       expect(res).toBeDefined();
       expect(res.costoActual).toBe('0');
       expect(res.componentes).toEqual([]);
+    });
+
+    it('preserva item_grupo_id de una asociación que persiste (UPDATE min/max)', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { item_grupo_id: 'IG-EXIST', grupo_modificador_id: GRUPO_ID },
+        ]) // asociaciones vivas
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe/pertenece
+        .mockResolvedValueOnce([]) // UPDATE de la asociación
+        .mockResolvedValueOnce([]); // SELECT overrides vivos (ninguno)
+      await (service as any).asociarGruposModificadores(
+        managerMock,
+        TENANT,
+        ITEM_ID,
+        [{ grupoModificadorId: GRUPO_ID, min: 1, max: 2, opciones: [] }],
+      );
+      const upd = managerMock.query.mock.calls.find((c) =>
+        /UPDATE item_grupos_modificadores\s+SET min/i.test(c[0]),
+      );
+      expect(upd).toBeTruthy();
+    });
+
+    it('persiste un override de cantidad para una opción del grupo asociado', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin asociaciones vivas
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe
+        .mockResolvedValueOnce([{ item_grupo_id: 'IG-NEW' }]) // INSERT asociación RETURNING
+        .mockResolvedValueOnce([]) // sin overrides vivos previos
+        .mockResolvedValueOnce([{ grupo_opcion_id: OPCION_ID }]) // opción pertenece al grupo
+        .mockResolvedValueOnce([]); // INSERT override
+      await (service as any).asociarGruposModificadores(
+        managerMock,
+        TENANT,
+        ITEM_ID,
+        [
+          {
+            grupoModificadorId: GRUPO_ID,
+            min: 1,
+            max: 1,
+            opciones: [
+              { grupoOpcionId: OPCION_ID, cantidad: '250', unidadCodigo: 'g' },
+            ],
+          },
+        ],
+      );
+      const ins = managerMock.query.mock.calls.find((c) =>
+        /INSERT INTO item_grupo_modificador_opciones/i.test(c[0]),
+      );
+      expect(ins).toBeTruthy();
+    });
+
+    it('rechaza un override cuya opción no pertenece al grupo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }])
+        .mockResolvedValueOnce([{ item_grupo_id: 'IG-NEW' }])
+        .mockResolvedValueOnce([]) // sin overrides vivos previos
+        .mockResolvedValueOnce([]); // opción NO pertenece
+      await expect(
+        (service as any).asociarGruposModificadores(
+          managerMock,
+          TENANT,
+          ITEM_ID,
+          [
+            {
+              grupoModificadorId: GRUPO_ID,
+              min: 1,
+              max: 1,
+              opciones: [{ grupoOpcionId: OPCION_AJENA, cantidad: '1' }],
+            },
+          ],
+        ),
+      ).rejects.toThrow(/opción.*no pertenece al grupo/i);
     });
 
     it('bloquea borrar un item usado como opción de un grupo vivo', async () => {
