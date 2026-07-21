@@ -474,6 +474,113 @@ describe('ItemsService', () => {
       expect(compQuery).toContain('ip.stock');
       expect(compQuery).not.toContain('cc.bloqueante = true');
     });
+
+    it('findOne combo: grupos incluye cantidad efectiva (COALESCE) y esPendiente', async () => {
+      const baseRow = {
+        item_id: COMBO_ID,
+        nombre: 'Combo Hamburguesa + Bebida',
+        descripcion: null,
+        tipo: 'combo',
+        activo: true,
+        precio_base: '5000',
+        precio_incluye_impuesto: false,
+        moneda_id: MONEDA_ID,
+        moneda_codigo: 'CLP',
+        moneda_simbolo: '$',
+        categoria_id: null,
+        categoria_nombre: null,
+        creado_el: new Date(),
+        stock: null,
+        unidad_medida: null,
+        fecha_elaboracion: null,
+        fecha_vencimiento: null,
+        modo_inventario: null,
+        costo_actual: '3000',
+        duracion_estimada: null,
+        requiere_cita: null,
+        frecuencia: null,
+      };
+      dataSource.query
+        .mockResolvedValueOnce([baseRow])
+        .mockResolvedValueOnce([]) // impuestos
+        .mockResolvedValueOnce([]) // recargos
+        .mockResolvedValueOnce([]) // descuentos
+        .mockResolvedValueOnce([]) // componentes (combo)
+        .mockResolvedValueOnce([
+          {
+            grupo_modificador_id: 'grupo-1',
+            item_grupo_id: 'item-grupo-1',
+            nombre: 'Salsas',
+            min: 0,
+            max: 2,
+            orden: 0,
+          },
+        ]) // grupoRows
+        .mockResolvedValueOnce([
+          {
+            grupo_opcion_id: 'op-1',
+            item_id: 'item-salsa-bbq',
+            item_nombre: 'Salsa BBQ',
+            tipo: 'producto',
+            cantidad_efectiva: '2',
+            cantidad_default: '1',
+            unidad_codigo: 'unidad',
+            precio_extra: '300',
+            orden: 0,
+            stock: '10',
+          },
+          {
+            grupo_opcion_id: 'op-2',
+            item_id: 'item-salsa-mayo',
+            item_nombre: 'Mayo',
+            tipo: 'producto',
+            cantidad_efectiva: null,
+            cantidad_default: null,
+            unidad_codigo: null,
+            precio_extra: '0',
+            orden: 1,
+            stock: '5',
+          },
+        ]); // opRows
+
+      const result = await service.findOne(TENANT, COMBO_ID);
+
+      expect(result.grupos).toHaveLength(1);
+      expect(result.grupos[0].grupoModificadorId).toBe('grupo-1');
+      expect(result.grupos[0].opciones).toEqual([
+        {
+          grupoOpcionId: 'op-1',
+          itemId: 'item-salsa-bbq',
+          itemNombre: 'Salsa BBQ',
+          tipo: 'producto',
+          cantidad: '2',
+          cantidadDefault: '1',
+          unidadCodigo: 'unidad',
+          precioExtra: '300',
+          orden: 0,
+          stock: '10',
+          esPendiente: false,
+        },
+        {
+          grupoOpcionId: 'op-2',
+          itemId: 'item-salsa-mayo',
+          itemNombre: 'Mayo',
+          tipo: 'producto',
+          cantidad: null,
+          cantidadDefault: null,
+          unidadCodigo: null,
+          precioExtra: '0',
+          orden: 1,
+          stock: '5',
+          esPendiente: true,
+        },
+      ]);
+
+      const opQueryCall = dataSource.query.mock.calls[6];
+      expect(opQueryCall[0]).toContain('grupo_modificador_opciones');
+      expect(opQueryCall[0]).toContain('COALESCE');
+      expect(opQueryCall[1]).toEqual(['grupo-1', TENANT, 'item-grupo-1']);
+    });
   });
 
   // ── create ─────────────────────────────────────────────────────────────────
