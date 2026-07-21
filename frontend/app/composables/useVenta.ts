@@ -24,6 +24,8 @@ export interface ItemCatalogo {
   unidadMedida: string | null
   tipo: string
   disponible?: number | null
+  /** Combos con al menos un grupo de modificadores asociado: la disponibilidad final depende de la opción elegida. */
+  disponibleCondicional?: boolean
 }
 
 export interface CarritoLinea {
@@ -51,7 +53,12 @@ export interface PagoInput {
 
 function personalizacionVacia(p?: PersonalizacionPayload): boolean {
   if (!p) return true
-  return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
+  return (
+    p.omitidos.length === 0
+    && p.extras.length === 0
+    && !p.comentario?.trim()
+    && !(p.grupos && p.grupos.length > 0)
+  )
 }
 
 function canonicalPersonalizacion(p?: PersonalizacionPayload): string {
@@ -59,7 +66,15 @@ function canonicalPersonalizacion(p?: PersonalizacionPayload): string {
   const omitidos = [...p.omitidos].sort()
   const extras = p.extras.map((e) => `${e.ingredienteItemId}:${e.unidades}`).sort()
   const comentario = p.comentario?.trim() ?? ''
-  return JSON.stringify({ omitidos, extras, comentario })
+  // Dos combos con distinta opción elegida en un grupo (p. ej. bebida distinta)
+  // nunca deben fusionarse en la misma línea del carrito.
+  const grupos = [...(p.grupos ?? [])]
+    .map((g) => ({
+      grupoId: g.grupoId,
+      opciones: [...g.opciones].map((o) => `${o.itemId}:${o.unidades}`).sort(),
+    }))
+    .sort((a, b) => a.grupoId.localeCompare(b.grupoId))
+  return JSON.stringify({ omitidos, extras, comentario, grupos })
 }
 
 export function mismaPersonalizacion(
@@ -200,6 +215,9 @@ export function toVentaLineasBody(lineas: CarritoLinea[]) {
             })),
             ...(l.personalizacion.comentario
               ? { comentario: l.personalizacion.comentario }
+              : {}),
+            ...(l.personalizacion.grupos?.length
+              ? { grupos: l.personalizacion.grupos }
               : {}),
           },
         }

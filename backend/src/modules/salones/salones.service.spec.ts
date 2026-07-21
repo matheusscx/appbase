@@ -26,6 +26,9 @@ const MESA = 'mesa-uuid';
 const CUENTA = 'cuenta-uuid';
 const ITEM = 'item-uuid';
 const RECETA = 'receta-uuid';
+const COMBO = 'combo-uuid';
+const GRUPO = 'grupo-uuid';
+const OPCION_ITEM = 'opcion-item-uuid';
 const ING = 'ing-uuid';
 const GARZON = 'garzon-uuid';
 const PIN = '111111';
@@ -37,6 +40,26 @@ const SNAPSHOT = {
   omitidos: [ING],
   extras: [],
   comentario: 'sin cebolla',
+};
+
+const SNAPSHOT_COMBO = {
+  omitidos: [],
+  extras: [],
+  grupos: [
+    {
+      grupoId: GRUPO,
+      grupoNombre: 'Bebida',
+      opciones: [
+        {
+          itemId: OPCION_ITEM,
+          nombre: 'Coca-Cola',
+          cantidad: '1',
+          precioExtra: '1500',
+          unidades: '1',
+        },
+      ],
+    },
+  ],
 };
 
 type Repo = {
@@ -82,7 +105,10 @@ describe('SalonesService', () => {
     transferirAdmin: jest.Mock;
     listar: jest.Mock;
   };
-  let items: { resolverPersonalizacionReceta: jest.Mock };
+  let items: {
+    resolverPersonalizacionReceta: jest.Mock;
+    resolverPersonalizacionCombo: jest.Mock;
+  };
   let manager: {
     query: jest.Mock;
     findOne: jest.Mock;
@@ -129,6 +155,10 @@ describe('SalonesService', () => {
       resolverPersonalizacionReceta: jest.fn().mockResolvedValue({
         snapshot: SNAPSHOT,
         precioExtraTotal: '0.0000',
+      }),
+      resolverPersonalizacionCombo: jest.fn().mockResolvedValue({
+        snapshot: SNAPSHOT_COMBO,
+        precioExtraTotal: '1500.0000',
       }),
     };
 
@@ -593,6 +623,31 @@ describe('SalonesService', () => {
       );
     });
 
+    it('guarda personalización de grupos en combos (resolverPersonalizacionCombo, no receta)', async () => {
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT i.item_id'))
+          return Promise.resolve([
+            { item_id: COMBO, tipo: 'combo', unidad_medida: null },
+          ]);
+        return Promise.resolve([]);
+      });
+      cuentaLineaRepo.find.mockResolvedValue([]);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: COMBO,
+        cantidad: '1',
+        personalizacion: {
+          grupos: [{ grupoId: GRUPO, opciones: [{ itemId: OPCION_ITEM, unidades: 1 }] }],
+        },
+      });
+
+      expect(items.resolverPersonalizacionCombo).toHaveBeenCalled();
+      expect(items.resolverPersonalizacionReceta).not.toHaveBeenCalled();
+      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ personalizacion: SNAPSHOT_COMBO }),
+      );
+    });
+
     it('suma cantidad si misma personalización; crea línea nueva si difiere', async () => {
       dataSource.query.mockImplementation((sql: string) => {
         if (sql.includes('SELECT i.item_id'))
@@ -746,6 +801,52 @@ describe('SalonesService', () => {
         cuenta.cerradaEl,
       );
       expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, GARZON);
+    });
+
+    it('reenvía personalizacion.grupos a la venta cuando la línea tiene un combo con grupos', async () => {
+      const cuenta = {
+        id: CUENTA,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 85,
+        estado: EstadoCuenta.ABIERTA,
+        ventaId: null,
+        garzonResponsableId: GARZON_RESPONSABLE,
+        cerradaEl: null as Date | null,
+      };
+      manager.findOne.mockResolvedValue(cuenta);
+      manager.find.mockResolvedValue([
+        { itemId: COMBO, cantidad: '1', personalizacion: SNAPSHOT_COMBO },
+      ]);
+      manager.query.mockResolvedValue([]);
+      ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
+
+      await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        pin: PIN,
+        pagos: [{ metodoPagoId: 'mp-1', monto: '1500' }],
+      });
+
+      expect(ventas.crearEnTransaccion).toHaveBeenCalledWith(
+        manager,
+        TENANT,
+        USUARIO,
+        expect.objectContaining({
+          lineas: [
+            expect.objectContaining({
+              itemId: COMBO,
+              cantidad: '1',
+              personalizacion: expect.objectContaining({
+                grupos: [
+                  {
+                    grupoId: GRUPO,
+                    opciones: [{ itemId: OPCION_ITEM, unidades: 1 }],
+                  },
+                ],
+              }),
+            }),
+          ],
+        }),
+      );
     });
 
     it('pasa propinaCierreMesa con el monto y el garzón responsable', async () => {

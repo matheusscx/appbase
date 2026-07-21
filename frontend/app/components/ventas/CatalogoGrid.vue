@@ -103,6 +103,14 @@ function onAgregar(item: ItemCatalogo) {
             <span v-if="item.tipo === 'producto'" class="text-xs text-muted shrink-0">
               Stock: {{ formatStock(item.stock, item.unidadMedida) }}
             </span>
+            <span v-else-if="item.tipo === 'combo' && item.disponibleCondicional" class="text-xs text-muted shrink-0">
+              <UTooltip text="La disponibilidad final depende de la opción elegida">
+                <span class="inline-flex items-center gap-1 cursor-help">
+                  Disponible*
+                  <UIcon name="i-lucide-info" class="size-3" />
+                </span>
+              </UTooltip>
+            </span>
             <span v-else-if="(item.tipo === 'receta' || item.tipo === 'combo') && item.disponible !== null && item.disponible !== undefined" class="text-xs text-muted shrink-0">
               Disponibles: {{ item.disponible }}
             </span>

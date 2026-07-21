@@ -63,6 +63,73 @@ describe('personalizacion-receta.util', () => {
     );
   });
 
+  it('hash distinto si cambia la opción elegida en un grupo (combos)', () => {
+    const base = { omitidos: [], extras: [] };
+    const a = hashPersonalizacion({
+      ...base,
+      grupos: [
+        {
+          grupoId: 'g1',
+          grupoNombre: 'Bebida',
+          opciones: [
+            { itemId: 'coca', nombre: 'Coca-Cola', cantidad: '1', precioExtra: '0', unidades: '1' },
+          ],
+        },
+      ],
+    });
+    const b = hashPersonalizacion({
+      ...base,
+      grupos: [
+        {
+          grupoId: 'g1',
+          grupoNombre: 'Bebida',
+          opciones: [
+            { itemId: 'sprite', nombre: 'Sprite', cantidad: '1', precioExtra: '0', unidades: '1' },
+          ],
+        },
+      ],
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it('hash de grupos estable sin importar el orden de grupos/opciones', () => {
+    const grupoA = {
+      grupoId: 'g1',
+      grupoNombre: 'Bebida',
+      opciones: [
+        { itemId: 'coca', nombre: 'Coca-Cola', cantidad: '1', precioExtra: '0', unidades: '1' },
+        { itemId: 'sprite', nombre: 'Sprite', cantidad: '1', precioExtra: '0', unidades: '1' },
+      ],
+    };
+    const grupoB = {
+      grupoId: 'g2',
+      grupoNombre: 'Extra',
+      opciones: [
+        { itemId: 'papas', nombre: 'Papas', cantidad: '1', precioExtra: '500', unidades: '1' },
+      ],
+    };
+    const a = hashPersonalizacion({
+      omitidos: [],
+      extras: [],
+      grupos: [grupoA, grupoB],
+    });
+    const b = hashPersonalizacion({
+      omitidos: [],
+      extras: [],
+      grupos: [
+        { ...grupoB },
+        { ...grupoA, opciones: [...grupoA.opciones].reverse() },
+      ],
+    });
+    expect(a).toBe(b);
+  });
+
+  it('hash sin grupos coincide con snapshot que trae grupos: [] explícito', () => {
+    const a = hashPersonalizacion({ omitidos: [], extras: [] });
+    const b = hashPersonalizacion({ omitidos: [], extras: [], grupos: [] });
+    expect(a).toBe(b);
+  });
+
   it('hash trata unidades ausente como 1 (compat snapshots antiguos)', () => {
     const base = {
       ingredienteItemId: 'i1',

@@ -50,7 +50,7 @@ const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
 function onCatalogoAdd(item: ItemCatalogo) {
-  if (item.tipo === 'receta') {
+  if (item.tipo === 'receta' || (item.tipo === 'combo' && item.disponibleCondicional)) {
     recetaItemId.value = item.id
     recetaDrawerOpen.value = true
     return
@@ -59,7 +59,12 @@ function onCatalogoAdd(item: ItemCatalogo) {
 }
 
 function personalizacionVacia(p: PersonalizacionPayload): boolean {
-  return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
+  return (
+    p.omitidos.length === 0
+    && p.extras.length === 0
+    && !p.comentario?.trim()
+    && !(p.grupos && p.grupos.length > 0)
+  )
 }
 
 function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, precioPreview: string, detalle: PersonalizacionDetalleLinea[]) {
@@ -209,6 +214,9 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
                 ...(l.personalizacion.comentario
                   ? { comentario: l.personalizacion.comentario }
                   : {}),
+                ...(l.personalizacion.grupos?.length
+                  ? { grupos: l.personalizacion.grupos }
+                  : {}),
               },
             }
           : {}),
@@ -349,7 +357,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         </div>
       </div>
 
-      <VentasRecetaPersonalizacionDrawer
+      <VentasItemPersonalizacionDrawer
         v-model:open="recetaDrawerOpen"
         :item-id="recetaItemId"
         @confirm="onRecetaConfirm"

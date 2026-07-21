@@ -16,6 +16,16 @@ export function hashPersonalizacion(
     ...(normalized.comentario !== undefined
       ? { comentario: normalized.comentario }
       : {}),
+    // Dos combos/recetas con distinta opción de grupo elegida (p. ej. bebida
+    // distinta) nunca deben fusionarse en la misma línea de cuenta.
+    grupos: [...(normalized.grupos ?? [])]
+      .map((g) => ({
+        grupoId: g.grupoId,
+        opciones: [...g.opciones]
+          .map((o) => ({ itemId: o.itemId, unidades: o.unidades ?? '1' }))
+          .sort((a, b) => a.itemId.localeCompare(b.itemId)),
+      }))
+      .sort((a, b) => a.grupoId.localeCompare(b.grupoId)),
   };
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }

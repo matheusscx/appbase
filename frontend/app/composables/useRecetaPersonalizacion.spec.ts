@@ -1,11 +1,27 @@
 import { describe, it, expect } from 'vitest'
 import {
   sinStock,
+  opcionSinStock,
   precioConExtras,
   buildPersonalizacionPayload,
   resumenPersonalizacion,
   detallePersonalizacionPreview,
 } from './useRecetaPersonalizacion'
+
+describe('opcionSinStock', () => {
+  it('null = no rastreado, nunca bloquea', () => {
+    expect(opcionSinStock(null)).toBe(false)
+  })
+
+  it('true si 0 o negativo', () => {
+    expect(opcionSinStock('0')).toBe(true)
+    expect(opcionSinStock('-1')).toBe(true)
+  })
+
+  it('false si hay stock positivo', () => {
+    expect(opcionSinStock('5')).toBe(false)
+  })
+})
 
 describe('sinStock', () => {
   it('sinStock true si 0', () => expect(sinStock('0')).toBe(true))
@@ -69,6 +85,22 @@ describe('buildPersonalizacionPayload', () => {
     const payload = buildPersonalizacionPayload([], [], largo)
     expect(payload.comentario).toHaveLength(200)
   })
+
+  it('incluye grupos con opciones elegidas', () => {
+    const payload = buildPersonalizacionPayload([], [], '', [
+      { grupoId: 'g1', opciones: [{ itemId: 'coca', unidades: 1 }] },
+    ])
+    expect(payload.grupos).toEqual([
+      { grupoId: 'g1', opciones: [{ itemId: 'coca', unidades: 1 }] },
+    ])
+  })
+
+  it('omite grupos sin ninguna opción elegida', () => {
+    const payload = buildPersonalizacionPayload([], [], '', [
+      { grupoId: 'g1', opciones: [] },
+    ])
+    expect(payload.grupos).toBeUndefined()
+  })
 })
 
 describe('resumenPersonalizacion', () => {
@@ -95,6 +127,20 @@ describe('resumenPersonalizacion', () => {
 
   it('devuelve vacío si no hay personalización', () => {
     expect(resumenPersonalizacion([], [], '')).toBe('')
+  })
+
+  it('incluye la opción elegida de un grupo como "Grupo: Opción"', () => {
+    const r = resumenPersonalizacion([], [], undefined, [
+      { grupoNombre: 'Bebida', opcionNombre: 'Coca-Cola', unidades: 1 },
+    ])
+    expect(r).toBe('Bebida: Coca-Cola')
+  })
+
+  it('grupo con más de una unidad muestra xN', () => {
+    const r = resumenPersonalizacion([], [], undefined, [
+      { grupoNombre: 'Papas', opcionNombre: 'Porción extra', unidades: 2 },
+    ])
+    expect(r).toBe('Papas: Porción extra x2')
   })
 })
 

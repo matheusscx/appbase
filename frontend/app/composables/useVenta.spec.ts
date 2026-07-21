@@ -5,6 +5,7 @@ import {
   setCantidad,
   setCantidadPresentacion,
   toCalcularInput,
+  toVentaLineasBody,
   descontarStockCatalogo,
   sumaPagos,
   resumenCobro,
@@ -123,6 +124,46 @@ describe('carrito helpers', () => {
     expect(r[1]!.cantidad).toBe('1')
   })
 
+  it('agregarLinea crea dos líneas si dos combos eligen distinta opción de grupo', () => {
+    const combo = { ...item('c'), tipo: 'combo' }
+    const persCoca: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      grupos: [{ grupoId: 'g1', opciones: [{ itemId: 'coca', unidades: 1 }] }],
+    }
+    const persSprite: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      grupos: [{ grupoId: 'g1', opciones: [{ itemId: 'sprite', unidades: 1 }] }],
+    }
+    const r = agregarLinea(
+      [{ item: combo, cantidad: '1', personalizacion: persCoca }],
+      combo,
+      CAT,
+      persSprite,
+    )
+    expect(r).toHaveLength(2)
+    expect(r[0]!.cantidad).toBe('1')
+    expect(r[1]!.cantidad).toBe('1')
+  })
+
+  it('agregarLinea suma cantidad si dos combos eligen la misma opción de grupo', () => {
+    const combo = { ...item('c'), tipo: 'combo' }
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      grupos: [{ grupoId: 'g1', opciones: [{ itemId: 'coca', unidades: 1 }] }],
+    }
+    const r = agregarLinea(
+      [{ item: combo, cantidad: '1', personalizacion: pers }],
+      combo,
+      CAT,
+      { ...pers, grupos: [{ grupoId: 'g1', opciones: [{ itemId: 'coca', unidades: 1 }] }] },
+    )
+    expect(r).toHaveLength(1)
+    expect(r[0]!.cantidad).toBe('2')
+  })
+
   it('agregarLinea no muta el array original', () => {
     const original: CarritoLinea[] = []
     agregarLinea(original, item('a'), CAT)
@@ -152,6 +193,25 @@ describe('carrito helpers', () => {
   it('toCalcularInput mapea a { lineas: [{ itemId, cantidad }] }', () => {
     const r = toCalcularInput([{ item: item('a'), cantidad: '3' }])
     expect(r).toEqual({ lineas: [{ itemId: 'a', cantidad: '3' }] })
+  })
+
+  it('toVentaLineasBody incluye personalizacion.grupos cuando la línea tiene grupos elegidos', () => {
+    const combo = { ...item('c'), tipo: 'combo' }
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      grupos: [{ grupoId: 'g1', opciones: [{ itemId: 'coca', unidades: 1 }] }],
+    }
+    const r = toVentaLineasBody([{ item: combo, cantidad: '1', personalizacion: pers }])
+    expect(r[0]).toMatchObject({
+      itemId: 'c',
+      cantidad: '1',
+      personalizacion: {
+        omitidos: [],
+        extras: [],
+        grupos: [{ grupoId: 'g1', opciones: [{ itemId: 'coca', unidades: 1 }] }],
+      },
+    })
   })
 
   it('toCalcularInput incluye precioUnitario cuando hay override', () => {

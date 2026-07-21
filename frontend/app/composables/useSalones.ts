@@ -4,6 +4,20 @@ import type { CalcularVentaInput } from './useCalculoPrecios'
 import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
 import type { PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 
+/** Snapshot congelado de un grupo de modificadores en una línea de cuenta (espejo de `SnapshotGrupo` del backend). */
+export interface CuentaLineaGrupoSnapshot {
+  grupoId: string
+  grupoNombre: string
+  opciones: {
+    itemId: string
+    nombre: string
+    cantidad: string
+    unidadCodigo?: string
+    precioExtra: string
+    unidades: string
+  }[]
+}
+
 // ── Tipos (espejo del contrato del backend salones) ─────────────────────────
 
 export type EstadoCuenta = 'abierta' | 'cerrada' | 'cancelada'
@@ -59,6 +73,7 @@ export interface CuentaLineaDetalle {
     omitidos: string[]
     extras: { ingredienteItemId: string, cantidad: string, unidadCodigo: string, precioExtra: string, unidades: string }[]
     comentario?: string
+    grupos?: CuentaLineaGrupoSnapshot[]
   } | null
   personalizacionTexto?: string
   personalizacionDetalle?: PersonalizacionDetalleLinea[]
@@ -109,22 +124,29 @@ export interface CerrarCuentaBody {
   propinaPorcentajeSugerido?: string
 }
 
-/** precioBase + Σ extras cuando la línea tiene personalización con extras. */
+/** precioBase + Σ extras + Σ opciones de grupo cuando la línea tiene personalización con recargo. */
 export function precioUnitarioLinea(linea: CuentaLineaDetalle): string {
   const base = new Decimal(linea.precioBase || '0')
   const extras = linea.personalizacion?.extras ?? []
-  if (extras.length === 0) return base.toString()
-  return extras.reduce(
-    (acc, e) => acc.plus(new Decimal(e.precioExtra || '0').mul(e.unidades || '1')),
-    base,
-  ).toString()
+  const gruposOpciones = (linea.personalizacion?.grupos ?? []).flatMap((g) => g.opciones)
+  if (extras.length === 0 && gruposOpciones.length === 0) return base.toString()
+  return [...extras, ...gruposOpciones]
+    .reduce(
+      (acc, o) => acc.plus(new Decimal(o.precioExtra || '0').mul(o.unidades || '1')),
+      base,
+    )
+    .toString()
+}
+
+function tienePersonalizacionConRecargo(l: CuentaLineaDetalle): boolean {
+  return Boolean(l.personalizacion?.extras?.length || l.personalizacion?.grupos?.length)
 }
 
 /** Mapea las líneas de una cuenta a la entrada del motor de precios. */
 export function cuentaToCalcularInput(cuenta: CuentaDetalle): CalcularVentaInput {
   return {
     lineas: cuenta.lineas.map((l) => {
-      const precioUnitario = l.personalizacion?.extras?.length
+      const precioUnitario = tienePersonalizacionConRecargo(l)
         ? precioUnitarioLinea(l)
         : undefined
       return {

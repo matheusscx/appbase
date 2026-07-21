@@ -541,7 +541,12 @@ async function abrirHistorial() {
 
 // ── Líneas de la cuenta ────────────────────────────────────────────────────
 function personalizacionVacia(p: PersonalizacionPayload): boolean {
-  return p.omitidos.length === 0 && p.extras.length === 0 && !p.comentario?.trim()
+  return (
+    p.omitidos.length === 0
+    && p.extras.length === 0
+    && !p.comentario?.trim()
+    && !(p.grupos && p.grupos.length > 0)
+  )
 }
 
 const pendingByLinea = new Map<string, ReturnType<typeof setTimeout>>()
@@ -651,7 +656,7 @@ async function flushPendientes() {
 
 async function addProducto(item: ItemCatalogo) {
   if (!activeCuenta.value) return
-  if (item.tipo === 'receta') {
+  if (item.tipo === 'receta' || (item.tipo === 'combo' && item.disponibleCondicional)) {
     recetaItemId.value = item.id
     recetaDrawerOpen.value = true
     return
@@ -1193,7 +1198,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
         </template>
       </AppDrawer>
 
-      <VentasRecetaPersonalizacionDrawer
+      <VentasItemPersonalizacionDrawer
         v-model:open="recetaDrawerOpen"
         :item-id="recetaItemId"
         @confirm="onRecetaConfirm"

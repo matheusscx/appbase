@@ -394,17 +394,25 @@ export class SalonesService {
 
     let snapshot: PersonalizacionRecetaSnapshot | null = null;
     if (dto.personalizacion) {
-      if (item.tipo !== 'receta') {
+      if (item.tipo !== 'receta' && item.tipo !== 'combo') {
         throw new BadRequestException(
-          'La personalización solo aplica a recetas',
+          'La personalización solo aplica a recetas y combos',
         );
       }
-      const resolved = await this.itemsService.resolverPersonalizacionReceta(
-        this.dataSource.manager,
-        tenantId,
-        dto.itemId,
-        dto.personalizacion,
-      );
+      const resolved =
+        item.tipo === 'combo'
+          ? await this.itemsService.resolverPersonalizacionCombo(
+              this.dataSource.manager,
+              tenantId,
+              dto.itemId,
+              dto.personalizacion,
+            )
+          : await this.itemsService.resolverPersonalizacionReceta(
+              this.dataSource.manager,
+              tenantId,
+              dto.itemId,
+              dto.personalizacion,
+            );
       snapshot = resolved.snapshot;
     }
 
@@ -659,6 +667,17 @@ export class SalonesService {
                   ingredienteItemId: e.ingredienteItemId,
                 })),
                 comentario: l.personalizacion.comentario,
+                ...(l.personalizacion.grupos?.length
+                  ? {
+                      grupos: l.personalizacion.grupos.map((g) => ({
+                        grupoId: g.grupoId,
+                        opciones: g.opciones.map((o) => ({
+                          itemId: o.itemId,
+                          unidades: Number(o.unidades),
+                        })),
+                      })),
+                    }
+                  : {}),
               }
             : undefined,
         })),
