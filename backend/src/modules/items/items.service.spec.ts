@@ -364,7 +364,8 @@ describe('ItemsService', () => {
             precio_extra: '500',
             stock: '2.5',
           },
-        ]);
+        ])
+        .mockResolvedValueOnce([]); // grupoRows (sin grupos asociados)
 
       const result = await service.findOne(TENANT, ITEM_ID);
 
@@ -442,7 +443,8 @@ describe('ItemsService', () => {
             bloqueante: false,
             stock: null,
           },
-        ]);
+        ])
+        .mockResolvedValueOnce([]); // grupoRows (sin grupos asociados)
 
       const result = await service.findOne(TENANT, COMBO_ID);
 
@@ -1560,6 +1562,8 @@ describe('ItemsService', () => {
       itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
       dataSource.query
         .mockResolvedValueOnce([]) // sin recetas que lo usen
+        .mockResolvedValueOnce([]) // sin combos que lo usen
+        .mockResolvedValueOnce([]) // sin grupos que lo usen como opción
         .mockResolvedValueOnce([]); // UPDATE items (soft delete)
 
       await expect(service.remove(TENANT, ITEM_ID)).resolves.toBeUndefined();
@@ -2702,6 +2706,101 @@ describe('ItemsService', () => {
         );
         expect(omitSql).toBeUndefined();
       });
+    });
+  });
+
+  // ── grupos modificadores en item ──────────────────────────────────────────
+
+  describe('grupos modificadores en item', () => {
+    const GRUPO_ID = 'grupo-modificador-uuid';
+    const PROD_ID = 'producto-uuid';
+    const ITEM_OPCION_ID = 'item-opcion-uuid';
+
+    it('asocia grupos a un combo con min/max válidos', async () => {
+      const dto = {
+        nombre: 'Combo Bebida',
+        precioBase: '5000',
+        monedaId: MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: PROD_ID, cantidad: '1', bloqueante: true },
+        ],
+        gruposModificadores: [
+          { grupoModificadorId: GRUPO_ID, min: 1, max: 1, orden: 0 },
+        ],
+      } as any;
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+        .mockResolvedValueOnce([
+          { nombre: 'Producto base', tipo: 'producto', costo_actual: '500' },
+        ]) // lookup PROD_ID
+        .mockResolvedValueOnce([]) // INSERT item_combo
+        .mockResolvedValueOnce([]) // INSERT combo_componentes
+        .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores (soft delete previos)
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe/pertenece al tenant
+        .mockResolvedValueOnce([]); // INSERT item_grupos_modificadores
+
+      const res = await service.create(TENANT, 'user-uuid', dto);
+
+      expect(res.tipo).toBe('combo');
+      expect(managerMock.query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO item_grupos_modificadores'),
+        [TENANT, ITEM_ID, GRUPO_ID, 1, 1, 0],
+      );
+    });
+
+    it('rechaza max < min', async () => {
+      await expect(
+        (service as any).asociarGruposModificadores(
+          managerMock,
+          TENANT,
+          ITEM_ID,
+          [{ grupoModificadorId: GRUPO_ID, min: 3, max: 1 }],
+        ),
+      ).rejects.toThrow(/máximo.*mayor o igual/i);
+      expect(managerMock.query).not.toHaveBeenCalledWith(
+        expect.stringContaining('SELECT grupo_modificador_id'),
+        expect.anything(),
+      );
+    });
+
+    it('permite crear un combo sin componentes fijos si tiene un grupo', async () => {
+      const dto = {
+        nombre: 'Combo Solo Grupo',
+        precioBase: '3000',
+        monedaId: MONEDA_ID,
+        tipo: 'combo',
+        componentes: [],
+        gruposModificadores: [{ grupoModificadorId: GRUPO_ID, min: 1, max: 1 }],
+      } as any;
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+        .mockResolvedValueOnce([]) // INSERT item_combo (costo_actual = '0', sin componentes)
+        .mockResolvedValueOnce([]) // UPDATE item_grupos_modificadores (soft delete previos)
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe/pertenece al tenant
+        .mockResolvedValueOnce([]); // INSERT item_grupos_modificadores
+
+      const res = await service.create(TENANT, 'user-uuid', dto);
+      expect(res).toBeDefined();
+      expect(res.costoActual).toBe('0');
+      expect(res.componentes).toEqual([]);
+    });
+
+    it('bloquea borrar un item usado como opción de un grupo vivo', async () => {
+      itemRepo.findOne.mockResolvedValueOnce({
+        id: ITEM_OPCION_ID,
+        tenantId: TENANT,
+      });
+      dataSource.query
+        .mockResolvedValueOnce([]) // sin recetas que lo usen
+        .mockResolvedValueOnce([]) // sin combos que lo usen
+        .mockResolvedValueOnce([{ nombre: 'Proteína' }]); // usado como opción de grupo
+
+      await expect(service.remove(TENANT, ITEM_OPCION_ID)).rejects.toThrow(
+        /No se puede eliminar.*opción de/i,
+      );
     });
   });
 });

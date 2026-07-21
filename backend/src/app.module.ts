@@ -67,6 +67,7 @@ import { ItemLote } from './modules/items/entities/item-lote.entity';
 import { ItemUnidad } from './modules/items/entities/item-unidad.entity';
 import { ItemCombo } from './modules/items/entities/item-combo.entity';
 import { ComboComponente } from './modules/items/entities/combo-componente.entity';
+import { ItemGrupoModificador } from './modules/items/entities/item-grupo-modificador.entity';
 import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
 import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
@@ -229,6 +230,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
           Impresora,
           GrupoModificador,
           GrupoModificadorOpcion,
+          ItemGrupoModificador,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),

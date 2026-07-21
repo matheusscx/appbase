@@ -17,6 +17,7 @@ import {
   RecetaExtraInputDto,
   RecetaIngredienteInputDto,
   ComboComponenteInputDto,
+  ItemGrupoModificadorInputDto,
 } from './create-item.dto';
 
 export class UpdateItemDto {
@@ -112,6 +113,13 @@ export class UpdateItemDto {
   @Type(() => ComboComponenteInputDto)
   @IsOptional()
   componentes?: ComboComponenteInputDto[];
+
+  // Asociación de grupos de modificadores (combo | receta, reemplazo total)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ItemGrupoModificadorInputDto)
+  @IsOptional()
+  gruposModificadores?: ItemGrupoModificadorInputDto[];
 
   // Reglas N:M (undefined = no tocar; [] = limpiar todas)
   @IsArray()

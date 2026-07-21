@@ -89,6 +89,24 @@ export class ComboComponenteInputDto {
   bloqueante?: boolean;
 }
 
+export class ItemGrupoModificadorInputDto {
+  @IsUUID()
+  grupoModificadorId: string;
+
+  @IsInt()
+  @Min(0)
+  min: number;
+
+  @IsInt()
+  @Min(1)
+  max: number;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  orden?: number;
+}
+
 export class CreateItemDto {
   @IsString()
   @IsNotEmpty()
@@ -187,6 +205,13 @@ export class CreateItemDto {
   @Type(() => ComboComponenteInputDto)
   @IsOptional()
   componentes?: ComboComponenteInputDto[];
+
+  // Asociación de grupos de modificadores (combo | receta)
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ItemGrupoModificadorInputDto)
+  @IsOptional()
+  gruposModificadores?: ItemGrupoModificadorInputDto[];
 
   // Extensión servicio
   @IsInt()

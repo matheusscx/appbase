@@ -14,6 +14,7 @@ import {
   RecetaIngredienteInputDto,
   RecetaExtraInputDto,
   ComboComponenteInputDto,
+  ItemGrupoModificadorInputDto,
 } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { AjusteStockDto } from './dto/ajuste-stock.dto';
@@ -194,6 +195,18 @@ export class ItemsService {
       listParams,
     );
 
+    // Los combo ids con grupos se cargan de una sola vez para no disparar
+    // N queries extra (una por combo) al calcular disponibleCondicional.
+    let comboIdsConGrupos = new Set<string>();
+    if (rows.some((r) => r.tipo === 'combo')) {
+      const grupoItemRows: { item_id: string }[] = await this.dataSource.query(
+        `SELECT DISTINCT item_id FROM item_grupos_modificadores
+         WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+        [tenantId],
+      );
+      comboIdsConGrupos = new Set(grupoItemRows.map((r) => r.item_id));
+    }
+
     const data = await Promise.all(
       rows.map(async (r) => {
         const base = this.mapRow(r);
@@ -203,7 +216,9 @@ export class ItemsService {
             : base.tipo === 'combo'
               ? await this.calcularDisponibleCombo(tenantId, base.id)
               : null;
-        return { ...base, disponible };
+        const disponibleCondicional =
+          base.tipo === 'combo' && comboIdsConGrupos.has(base.id);
+        return { ...base, disponible, disponibleCondicional };
       }),
     );
 
@@ -339,6 +354,82 @@ export class ItemsService {
       }));
     }
 
+    const grupos: {
+      grupoModificadorId: string;
+      nombre: string;
+      min: number;
+      max: number;
+      orden: number;
+      opciones: {
+        grupoOpcionId: string;
+        itemId: string;
+        itemNombre: string;
+        tipo: string;
+        cantidad: string;
+        unidadCodigo: string | null;
+        precioExtra: string;
+        orden: number;
+        stock: string | null;
+      }[];
+    }[] = [];
+    if (rows[0].tipo === 'combo' || rows[0].tipo === 'receta') {
+      const grupoRows: {
+        grupo_modificador_id: string;
+        nombre: string;
+        min: number;
+        max: number;
+        orden: number;
+      }[] = await this.dataSource.query(
+        `SELECT igm.grupo_modificador_id, g.nombre, igm.min, igm.max, igm.orden
+         FROM item_grupos_modificadores igm
+         JOIN grupos_modificadores g ON g.grupo_modificador_id = igm.grupo_modificador_id
+           AND g.eliminado_el IS NULL
+         WHERE igm.item_id = $1 AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL
+         ORDER BY igm.orden ASC`,
+        [itemId, tenantId],
+      );
+      for (const gr of grupoRows) {
+        const opRows: {
+          grupo_opcion_id: string;
+          item_id: string;
+          item_nombre: string;
+          tipo: string;
+          cantidad: string;
+          unidad_codigo: string | null;
+          precio_extra: string;
+          orden: number;
+          stock: string | null;
+        }[] = await this.dataSource.query(
+          `SELECT o.grupo_opcion_id, o.item_id, i.nombre AS item_nombre, i.tipo,
+                  o.cantidad, o.unidad_codigo, o.precio_extra, o.orden, ip.stock
+           FROM grupo_modificador_opciones o
+           JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+           LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+           WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2 AND o.eliminado_el IS NULL
+           ORDER BY o.orden ASC`,
+          [gr.grupo_modificador_id, tenantId],
+        );
+        grupos.push({
+          grupoModificadorId: gr.grupo_modificador_id,
+          nombre: gr.nombre,
+          min: gr.min,
+          max: gr.max,
+          orden: gr.orden,
+          opciones: opRows.map((r) => ({
+            grupoOpcionId: r.grupo_opcion_id,
+            itemId: r.item_id,
+            itemNombre: r.item_nombre,
+            tipo: r.tipo,
+            cantidad: r.cantidad,
+            unidadCodigo: r.unidad_codigo,
+            precioExtra: r.precio_extra,
+            orden: r.orden,
+            stock: r.stock,
+          })),
+        });
+      }
+    }
+
     return {
       ...this.mapRow(rows[0]),
       impuestosIds: impuestosRows.map((r) => r.impuesto_id),
@@ -347,6 +438,8 @@ export class ItemsService {
       ingredientes,
       extrasPermitidos,
       componentes,
+      grupos,
+      disponibleCondicional: rows[0].tipo === 'combo' && grupos.length > 0,
     };
   }
 
@@ -366,9 +459,13 @@ export class ItemsService {
         'Las recetas requieren al menos un ingrediente',
       );
     }
-    if (dto.tipo === 'combo' && !dto.componentes?.length) {
+    if (
+      dto.tipo === 'combo' &&
+      !dto.componentes?.length &&
+      !dto.gruposModificadores?.length
+    ) {
       throw new BadRequestException(
-        'Los combos requieren al menos un componente',
+        'Los combos requieren al menos un componente o un grupo de modificadores',
       );
     }
     if (dto.tipo === 'ingrediente') {
@@ -634,29 +731,39 @@ export class ItemsService {
           }
         }
       } else if (dto.tipo === 'combo') {
-        const costeo = await this.validarYCostearComponentes(
-          manager,
-          tenantId,
-          dto.componentes!,
-        );
-        costoActual = costeo.costoActual;
-        componentes = costeo.componentes;
-        await manager.query(
-          `INSERT INTO item_combo (item_id, costo_actual) VALUES ($1,$2)`,
-          [itemId, costoActual],
-        );
-        for (const comp of dto.componentes!) {
+        if (dto.componentes?.length) {
+          const costeo = await this.validarYCostearComponentes(
+            manager,
+            tenantId,
+            dto.componentes,
+          );
+          costoActual = costeo.costoActual;
+          componentes = costeo.componentes;
           await manager.query(
-            `INSERT INTO combo_componentes
-               (tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
-             VALUES ($1,$2,$3,$4,$5)`,
-            [
-              tenantId,
-              itemId,
-              comp.componenteItemId,
-              comp.cantidad,
-              comp.bloqueante ?? true,
-            ],
+            `INSERT INTO item_combo (item_id, costo_actual) VALUES ($1,$2)`,
+            [itemId, costoActual],
+          );
+          for (const comp of dto.componentes) {
+            await manager.query(
+              `INSERT INTO combo_componentes
+                 (tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
+               VALUES ($1,$2,$3,$4,$5)`,
+              [
+                tenantId,
+                itemId,
+                comp.componenteItemId,
+                comp.cantidad,
+                comp.bloqueante ?? true,
+              ],
+            );
+          }
+        } else {
+          // Combo solo-grupos: sin componentes fijos, el costo se realiza al
+          // vender vía el movimiento de inventario de la opción elegida.
+          costoActual = '0';
+          await manager.query(
+            `INSERT INTO item_combo (item_id, costo_actual) VALUES ($1, '0')`,
+            [itemId],
           );
         }
       } else {
@@ -674,6 +781,18 @@ export class ItemsService {
         dto.recargosIds ?? [],
         dto.descuentosIds ?? [],
       );
+
+      if (
+        (dto.tipo === 'combo' || dto.tipo === 'receta') &&
+        dto.gruposModificadores?.length
+      ) {
+        await this.asociarGruposModificadores(
+          manager,
+          tenantId,
+          itemId,
+          dto.gruposModificadores,
+        );
+      }
 
       return {
         id: itemId,
@@ -1066,6 +1185,19 @@ export class ItemsService {
         patch.componentes = costeo.componentes;
       }
 
+      if (
+        (tipo === 'combo' || tipo === 'receta') &&
+        dto.gruposModificadores !== undefined
+      ) {
+        await this.asociarGruposModificadores(
+          manager,
+          tenantId,
+          itemId,
+          dto.gruposModificadores,
+        );
+        patch.gruposModificadores = dto.gruposModificadores;
+      }
+
       if (dto.impuestosIds !== undefined) {
         await manager.query(`DELETE FROM item_impuestos WHERE item_id = $1`, [
           itemId,
@@ -1138,6 +1270,19 @@ export class ItemsService {
     if (comboRows.length) {
       throw new BadRequestException(
         `No se puede eliminar: es componente de ${comboRows.map((r) => r.nombre).join(', ')}`,
+      );
+    }
+
+    const opcionRows: { nombre: string }[] = await this.dataSource.query(
+      `SELECT DISTINCT g.nombre FROM grupo_modificador_opciones o
+       JOIN grupos_modificadores g ON g.grupo_modificador_id = o.grupo_modificador_id
+         AND g.eliminado_el IS NULL
+       WHERE o.item_id = $1 AND o.eliminado_el IS NULL`,
+      [itemId],
+    );
+    if (opcionRows.length) {
+      throw new BadRequestException(
+        `No se puede eliminar: es opción de ${opcionRows.map((r) => r.nombre).join(', ')}`,
       );
     }
 
@@ -2472,6 +2617,58 @@ export class ItemsService {
         `INSERT INTO item_descuentos (item_id, descuento_id) VALUES ($1,$2)`,
         [itemId, id],
       );
+    }
+  }
+
+  /** Reemplazo total de la asociación item↔grupo de modificadores. */
+  private async asociarGruposModificadores(
+    manager: EntityManager,
+    tenantId: string,
+    itemId: string,
+    grupos: ItemGrupoModificadorInputDto[],
+  ): Promise<void> {
+    await manager.query(
+      `UPDATE item_grupos_modificadores SET eliminado_el = NOW(), actualizado_el = NOW()
+       WHERE item_id = $1 AND eliminado_el IS NULL`,
+      [itemId],
+    );
+    const vistos = new Set<string>();
+    let orden = 0;
+    for (const g of grupos) {
+      if (vistos.has(g.grupoModificadorId)) {
+        throw new BadRequestException(
+          'Un grupo no puede asociarse dos veces al mismo item',
+        );
+      }
+      vistos.add(g.grupoModificadorId);
+      if (g.max < Math.max(g.min, 1)) {
+        throw new BadRequestException(
+          'El máximo del grupo debe ser mayor o igual a max(min, 1)',
+        );
+      }
+      const rows: { grupo_modificador_id: string }[] = await manager.query(
+        `SELECT grupo_modificador_id FROM grupos_modificadores
+         WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [g.grupoModificadorId, tenantId],
+      );
+      if (!rows.length) {
+        throw new BadRequestException(
+          `Grupo de modificadores no encontrado: ${g.grupoModificadorId}`,
+        );
+      }
+      await manager.query(
+        `INSERT INTO item_grupos_modificadores (tenant_id, item_id, grupo_modificador_id, min, max, orden)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          tenantId,
+          itemId,
+          g.grupoModificadorId,
+          g.min,
+          g.max,
+          g.orden ?? orden,
+        ],
+      );
+      orden++;
     }
   }
 }
