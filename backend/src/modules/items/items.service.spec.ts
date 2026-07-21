@@ -3271,6 +3271,7 @@ describe('ItemsService', () => {
         /UPDATE item_grupos_modificadores\s+SET min/i.test(c[0]),
       );
       expect(upd).toBeTruthy();
+      expect(upd![1]).toContain('IG-EXIST');
     });
 
     it('persiste un override de cantidad para una opción del grupo asociado', async () => {
@@ -3300,6 +3301,7 @@ describe('ItemsService', () => {
         /INSERT INTO item_grupo_modificador_opciones/i.test(c[0]),
       );
       expect(ins).toBeTruthy();
+      expect(ins![1]).toEqual(expect.arrayContaining(['250', 'g']));
     });
 
     it('rechaza un override cuya opción no pertenece al grupo', async () => {
