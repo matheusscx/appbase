@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 
@@ -6,7 +7,8 @@ type Familia = 'ingrediente' | 'vendible'
 
 interface OpcionRow {
   itemId: string
-  cantidad: string
+  /** Opcional: sin cantidad, la opción se configura por receta (override en item_grupo_modificador_opciones). */
+  cantidad?: string
   unidadCodigo?: string
   precioExtra: string
 }
@@ -38,8 +40,28 @@ interface ItemCatalogo {
   unidadMedida: string | null
 }
 
+/** Estado efectivo (override o default del grupo) de una opción para una receta que usa el grupo. */
+interface RecetaUsandoOpcion {
+  grupoOpcionId: string
+  itemNombre: string
+  cantidad: string | null
+  cantidadDefault: string | null
+  unidadCodigo: string | null
+  precioExtra: string
+  esPendiente: boolean
+}
+
+interface RecetaUsando {
+  itemId: string
+  itemNombre: string
+  tipo: string
+  itemGrupoId: string
+  opciones: RecetaUsandoOpcion[]
+}
+
 const config = useRuntimeConfig()
 const toast = useToast()
+const { formatMonto } = useFormatters()
 const apiUrl = config.public.apiUrl
 const unidadesMedidaStore = useUnidadesMedidaStore()
 
@@ -58,6 +80,19 @@ const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
+
+// ── Drawer "usado en recetas" ────────────────────────────────────────────
+const recetasDrawerOpen = ref(false)
+const recetasGrupoId = ref<string | null>(null)
+const recetasUsando = ref<RecetaUsando[]>([])
+const recetasLoading = ref(false)
+/** TanStack row-selection state (`v-model:row-selection` de `UTable`), keyed por `itemGrupoId` vía `get-row-id`. */
+const rowSelection = ref<Record<string, boolean>>({})
+const loteCantidad = ref('')
+const loteUnidad = ref<string | undefined>(undefined)
+const lotePrecio = ref('')
+const loteOpcionId = ref<string | undefined>(undefined)
+const aplicandoLote = ref(false)
 
 const emptyForm = () => ({
   nombre: '',
@@ -126,6 +161,99 @@ function unidadesFiltradas(idx: number) {
   return unidadesMedidaStore.unidades
     .filter(u => u.magnitud === magnitud)
     .map(u => ({ label: u.codigo, value: u.codigo }))
+}
+
+// ── Drawer "usado en recetas" — helpers ──────────────────────────────────
+
+/** itemGrupoId de las filas seleccionadas en la UTable del drawer. */
+const seleccionIg = computed<Set<string>>(() =>
+  new Set(Object.entries(rowSelection.value).filter(([, v]) => v).map(([k]) => k)),
+)
+
+const recetasGrupoActual = computed(() =>
+  grupos.value.find(g => g.grupoModificadorId === recetasGrupoId.value) ?? null,
+)
+
+const loteOpcionesItems = computed(() =>
+  (recetasGrupoActual.value?.opciones ?? []).map(o => ({ label: o.itemNombre, value: o.grupoOpcionId })),
+)
+
+const loteEsIngrediente = computed(() => recetasGrupoActual.value?.familia === 'ingrediente')
+
+/** Unidades de la misma magnitud que la unidad base del item de la opción elegida en el lote. */
+function loteUnidadesFiltradas() {
+  const opcion = recetasGrupoActual.value?.opciones.find(o => o.grupoOpcionId === loteOpcionId.value)
+  const item = itemsCatalogo.value.find(i => i.id === opcion?.itemId)
+  const magnitud = unidadesMedidaStore.magnitudDe(item?.unidadMedida)
+  if (!magnitud) return []
+  return unidadesMedidaStore.unidades
+    .filter(u => u.magnitud === magnitud)
+    .map(u => ({ label: u.codigo, value: u.codigo }))
+}
+
+/** Estado efectivo de la opción activa (`loteOpcionId`) para una fila (receta) del drawer. */
+function opcionDeFila(fila: RecetaUsando): RecetaUsandoOpcion | undefined {
+  return fila.opciones.find(o => o.grupoOpcionId === loteOpcionId.value)
+}
+
+async function cargarRecetasUsando() {
+  if (!recetasGrupoId.value) return
+  recetasUsando.value = await useApiFetch<RecetaUsando[]>(
+    `${apiUrl}/grupos-modificadores/${recetasGrupoId.value}/items`,
+  )
+}
+
+async function abrirRecetas(grupo: Grupo) {
+  recetasGrupoId.value = grupo.grupoModificadorId
+  rowSelection.value = {}
+  loteOpcionId.value = grupo.opciones[0]?.grupoOpcionId ?? undefined
+  loteCantidad.value = ''
+  loteUnidad.value = undefined
+  lotePrecio.value = ''
+  recetasLoading.value = true
+  try {
+    await cargarRecetasUsando()
+    recetasDrawerOpen.value = true
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar las recetas que usan el grupo'), color: 'error' })
+  }
+  finally {
+    recetasLoading.value = false
+  }
+}
+
+async function aplicarLote() {
+  if (!recetasGrupoId.value || !loteOpcionId.value || !seleccionIg.value.size) return
+  aplicandoLote.value = true
+  try {
+    const { actualizados } = await useApiFetch<{ actualizados: number }>(
+      `${apiUrl}/grupos-modificadores/${recetasGrupoId.value}/overrides`,
+      {
+        method: 'PATCH',
+        body: {
+          itemGrupoIds: [...seleccionIg.value],
+          grupoOpcionId: loteOpcionId.value,
+          cantidad: loteCantidad.value || undefined,
+          unidadCodigo: loteUnidad.value || undefined,
+          precioExtra: lotePrecio.value || undefined,
+        },
+      },
+    )
+    // Excepción a "mutar y actualizar el ref local en vez de recargar": el PATCH
+    // /overrides devuelve solo `{ actualizados }`, no el estado por opción
+    // recalculado (cantidad efectiva, esPendiente) — re-pedir la lista del
+    // drawer es la forma más simple de reflejar los efectivos.
+    await cargarRecetasUsando()
+    rowSelection.value = {}
+    toast.add({ title: `Aplicado a ${actualizados} recetas`, color: 'success' })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al aplicar en lote'), color: 'error' })
+  }
+  finally {
+    aplicandoLote.value = false
+  }
 }
 
 function onSelectItemOpcion(idx: number, itemId: string | undefined) {
@@ -229,7 +357,16 @@ function validarForm(): string | null {
   if (!form.value.opciones.length) return 'Agregá al menos una opción'
   for (const o of form.value.opciones) {
     if (!o.itemId) return 'Seleccioná un item para cada opción'
-    if (!o.cantidad) return 'Completá la cantidad de cada opción'
+    if (o.cantidad) {
+      let cantidad: Decimal
+      try {
+        cantidad = new Decimal(o.cantidad)
+      }
+      catch {
+        return 'La cantidad debe ser un número válido'
+      }
+      if (cantidad.isNaN() || cantidad.lessThanOrEqualTo(0)) return 'La cantidad debe ser mayor a 0'
+    }
     if (!o.precioExtra) return 'Completá el precio extra de cada opción (puede ser 0)'
     if (familiaDeItem(o.itemId) === 'ingrediente' && !o.unidadCodigo) {
       return 'Las opciones ingrediente requieren unidad de medida'
@@ -249,13 +386,13 @@ async function guardar() {
     const body = {
       nombre: form.value.nombre,
       opciones: form.value.opciones.map((o, i) => {
-        const payload: { itemId: string, cantidad: string, precioExtra: string, orden: number, unidadCodigo?: string } = {
+        const payload: { itemId: string, precioExtra: string, orden: number, unidadCodigo?: string, cantidad?: string } = {
           itemId: o.itemId,
-          cantidad: o.cantidad,
           precioExtra: o.precioExtra,
           orden: i,
         }
         if (o.unidadCodigo) payload.unidadCodigo = o.unidadCodigo
+        if (o.cantidad) payload.cantidad = o.cantidad
         return payload
       }),
     }
@@ -299,6 +436,13 @@ const columns: TableColumn<Grupo>[] = [
   { id: 'uso', header: 'Items que lo usan', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
+
+const recetasColumns: TableColumn<RecetaUsando>[] = [
+  { id: 'select', meta: { class: { th: 'w-10', td: 'w-10' } } },
+  { accessorKey: 'itemNombre', header: 'Receta' },
+  { id: 'tipo', header: 'Tipo' },
+  { id: 'efectivo', header: 'Cantidad / unidad / precio' },
+]
 </script>
 
 <template>
@@ -334,7 +478,16 @@ const columns: TableColumn<Grupo>[] = [
       </template>
 
       <template #uso-cell="{ row }">
-        <span class="text-sm">{{ row.original.itemsUsandoCount }}</span>
+        <UButton
+          v-if="row.original.itemsUsandoCount > 0"
+          variant="link"
+          color="neutral"
+          class="p-0 text-sm"
+          @click="abrirRecetas(row.original)"
+        >
+          {{ row.original.itemsUsandoCount }}
+        </UButton>
+        <span v-else class="text-sm text-muted">0</span>
       </template>
 
       <template #acciones-cell="{ row }">
@@ -414,7 +567,10 @@ const columns: TableColumn<Grupo>[] = [
                 />
               </UFormField>
 
-              <UFormField label="Cantidad">
+              <UFormField
+                label="Cantidad (opcional)"
+                description="Vacío = se configura por receta"
+              >
                 <UInput v-model="op.cantidad" inputmode="decimal" placeholder="1" class="w-full" />
               </UFormField>
 
@@ -465,6 +621,120 @@ const columns: TableColumn<Grupo>[] = [
           :loading="saving"
         >
           {{ submitLabel }}
+        </UButton>
+      </template>
+    </AppDrawer>
+
+    <AppDrawer v-model:open="recetasDrawerOpen" width="xl">
+      <template #header>
+        <span class="font-semibold text-default">
+          Usado en {{ recetasUsando.length }} {{ recetasUsando.length === 1 ? 'receta' : 'recetas' }}
+        </span>
+      </template>
+
+      <template #body>
+        <div class="space-y-4">
+          <div class="grid grid-cols-12 items-end gap-2 rounded-lg border border-default p-3">
+            <UFormField label="Opción" class="col-span-4">
+              <USelectMenu
+                v-model="loteOpcionId"
+                :items="loteOpcionesItems"
+                value-key="value"
+                placeholder="Elegí una opción"
+                class="w-full"
+              />
+            </UFormField>
+
+            <UFormField label="Cantidad" class="col-span-2">
+              <UInput v-model="loteCantidad" inputmode="decimal" placeholder="150" class="w-full" />
+            </UFormField>
+
+            <UFormField v-if="loteEsIngrediente" label="Unidad" class="col-span-2">
+              <USelectMenu
+                v-model="loteUnidad"
+                :items="loteUnidadesFiltradas()"
+                value-key="value"
+                class="w-full"
+              />
+            </UFormField>
+
+            <UFormField label="Precio extra" :class="loteEsIngrediente ? 'col-span-2' : 'col-span-4'">
+              <UInput v-model="lotePrecio" inputmode="decimal" placeholder="0" class="w-full" />
+            </UFormField>
+
+            <div class="col-span-2 flex justify-end">
+              <UButton
+                :disabled="!loteOpcionId || !seleccionIg.size"
+                :loading="aplicandoLote"
+                @click="aplicarLote"
+              >
+                Aplicar a seleccionadas ({{ seleccionIg.size }})
+              </UButton>
+            </div>
+          </div>
+
+          <UTable
+            v-model:row-selection="rowSelection"
+            :get-row-id="(row: RecetaUsando) => row.itemGrupoId"
+            :data="recetasUsando"
+            :columns="recetasColumns"
+            :loading="recetasLoading"
+          >
+            <template #select-header="{ table }">
+              <UCheckbox
+                :model-value="table.getIsSomePageRowsSelected() ? 'indeterminate' : table.getIsAllPageRowsSelected()"
+                aria-label="Seleccionar todas"
+                @update:model-value="(v: boolean | 'indeterminate') => table.toggleAllPageRowsSelected(!!v)"
+              />
+            </template>
+            <template #select-cell="{ row }">
+              <UCheckbox
+                :model-value="row.getIsSelected()"
+                aria-label="Seleccionar fila"
+                @update:model-value="(v: boolean | 'indeterminate') => row.toggleSelected(!!v)"
+              />
+            </template>
+
+            <template #tipo-cell="{ row }">
+              <span class="text-sm text-muted">{{ tipoLabels[row.original.tipo] ?? row.original.tipo }}</span>
+            </template>
+
+            <template #efectivo-cell="{ row }">
+              <span v-if="!loteOpcionId" class="text-sm text-muted">Elegí una opción arriba</span>
+              <template v-else-if="opcionDeFila(row.original)">
+                <div class="flex items-center gap-2">
+                  <UBadge
+                    v-if="opcionDeFila(row.original)!.esPendiente"
+                    label="Pendiente"
+                    color="warning"
+                    variant="subtle"
+                    size="sm"
+                  />
+                  <span v-else class="text-sm text-default">
+                    {{ opcionDeFila(row.original)!.cantidad }} {{ opcionDeFila(row.original)!.unidadCodigo }}
+                    · {{ formatMonto(opcionDeFila(row.original)!.precioExtra) }}
+                  </span>
+                </div>
+              </template>
+              <span v-else class="text-sm text-muted">—</span>
+            </template>
+
+            <template #empty>
+              <div class="py-8 text-center text-sm text-muted">
+                Ninguna receta usa este grupo todavía.
+              </div>
+            </template>
+          </UTable>
+        </div>
+      </template>
+
+      <template #actions>
+        <UButton
+          color="neutral"
+          variant="ghost"
+          @click="recetasDrawerOpen = false"
+        >
+          Cerrar
         </UButton>
       </template>
     </AppDrawer>
