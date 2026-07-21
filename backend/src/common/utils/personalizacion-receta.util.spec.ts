@@ -92,6 +92,24 @@ describe('personalizacion-receta.util', () => {
     expect(a).not.toBe(b);
   });
 
+  it('hash distinto si la misma opción de grupo cambia de precioExtra', () => {
+    const base = { omitidos: [], extras: [] };
+    const conGrupo = (precioExtra: string) =>
+      hashPersonalizacion({
+        ...base,
+        grupos: [
+          {
+            grupoId: 'g1',
+            grupoNombre: 'Bebida',
+            opciones: [
+              { itemId: 'coca', nombre: 'Coca-Cola', cantidad: '1', precioExtra, unidades: '1' },
+            ],
+          },
+        ],
+      });
+    expect(conGrupo('0')).not.toBe(conGrupo('1500'));
+  });
+
   it('hash de grupos estable sin importar el orden de grupos/opciones', () => {
     const grupoA = {
       grupoId: 'g1',

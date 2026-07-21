@@ -22,7 +22,13 @@ export function hashPersonalizacion(
       .map((g) => ({
         grupoId: g.grupoId,
         opciones: [...g.opciones]
-          .map((o) => ({ itemId: o.itemId, unidades: o.unidades ?? '1' }))
+          .map((o) => ({
+            itemId: o.itemId,
+            unidades: o.unidades ?? '1',
+            // El precio de la opción distingue selecciones (igual que en extras):
+            // dos opciones iguales a distinto precio no deben fusionarse en la línea.
+            precioExtra: o.precioExtra ?? '0',
+          }))
           .sort((a, b) => a.itemId.localeCompare(b.itemId)),
       }))
       .sort((a, b) => a.grupoId.localeCompare(b.grupoId)),
