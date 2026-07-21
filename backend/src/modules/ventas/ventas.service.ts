@@ -190,7 +190,7 @@ export class VentasService {
     const personalizaciones = await Promise.all(
       dto.lineas.map(async (linea, i) => {
         const item = items[i];
-        if (item.tipo === 'receta' && linea.personalizacion) {
+        if (item.tipo === 'receta') {
           return this.itemsService.resolverPersonalizacionReceta(
             manager,
             tenantId,
@@ -198,7 +198,7 @@ export class VentasService {
             linea.personalizacion,
           );
         }
-        if (item.tipo === 'combo' && linea.personalizacion) {
+        if (item.tipo === 'combo') {
           return this.itemsService.resolverPersonalizacionCombo(
             manager,
             tenantId,

@@ -177,7 +177,9 @@ describe('VentasService', () => {
           useValue: {
             findOne: jest.fn().mockResolvedValue(mockItem),
             resolverPersonalizacionReceta: jest.fn(),
+            resolverPersonalizacionCombo: jest.fn(),
             venderIngredientesReceta: jest.fn().mockResolvedValue([]),
+            venderComponentesCombo: jest.fn().mockResolvedValue([]),
           },
         },
         {
@@ -590,6 +592,97 @@ describe('VentasService', () => {
       expect(itemsService.venderIngredientesReceta).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ snapshot }),
+      );
+    });
+  });
+
+  describe('crear() — grupos de modificadores obligatorios sin personalizacion', () => {
+    // Regresión: el gate en crearEnTransaccion antes exigía
+    // `linea.personalizacion` truthy para llamar a resolverPersonalizacionReceta
+    // /resolverPersonalizacionCombo. Si el cliente omitía por completo el campo
+    // `personalizacion`, resolverGruposDeItem nunca se ejecutaba y la validación
+    // "min >= 1 => grupo obligatorio" se saltaba silenciosamente. El resolver
+    // debe llamarse SIEMPRE (con dto undefined si corresponde) para que la
+    // validación de grupos obligatorios se aplique también en ese caso.
+    const mockReceta = {
+      id: 'receta-uuid',
+      nombre: 'Hamburguesa',
+      tipo: 'receta',
+      precioBase: '3500.0000',
+      precioIncluyeImpuesto: false,
+      monedaId: MONEDA_OFICIAL_ID,
+      impuestosIds: [],
+      descuentosIds: [],
+      recargosIds: [],
+    };
+    const mockCombo = {
+      id: 'combo-uuid',
+      nombre: 'Combo Familiar',
+      tipo: 'combo',
+      precioBase: '9000.0000',
+      precioIncluyeImpuesto: false,
+      monedaId: MONEDA_OFICIAL_ID,
+      impuestosIds: [],
+      descuentosIds: [],
+      recargosIds: [],
+    };
+
+    it('rechaza la venta de una receta con grupo obligatorio (min:1,max:1) cuando la linea omite personalizacion', async () => {
+      const dtoSinPersonalizacion = {
+        lineas: [{ itemId: 'receta-uuid', cantidad: '1' }],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '3500.0000' }],
+      };
+
+      itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
+      // Simula el comportamiento real de resolverGruposDeItem: con
+      // gruposDto=undefined evalúa cada grupo asociado contra cero unidades
+      // elegidas y lanza si algún grupo tiene min >= 1.
+      (
+        itemsService.resolverPersonalizacionReceta as jest.Mock
+      ).mockRejectedValueOnce(
+        new BadRequestException(
+          'El grupo "Tamaño" requiere elegir entre 1 y 1 unidades',
+        ),
+      );
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoSinPersonalizacion),
+      ).rejects.toThrow(BadRequestException);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(itemsService.resolverPersonalizacionReceta).toHaveBeenCalledWith(
+        expect.anything(),
+        TENANT_ID,
+        'receta-uuid',
+        undefined,
+      );
+    });
+
+    it('rechaza la venta de un combo con grupo obligatorio (min:1,max:1) cuando la linea omite personalizacion', async () => {
+      const dtoSinPersonalizacion = {
+        lineas: [{ itemId: 'combo-uuid', cantidad: '1' }],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '9000.0000' }],
+      };
+
+      itemsService.findOne.mockResolvedValueOnce(mockCombo as never);
+      (
+        itemsService.resolverPersonalizacionCombo as jest.Mock
+      ).mockRejectedValueOnce(
+        new BadRequestException(
+          'El grupo "Bebida" requiere elegir entre 1 y 1 unidades',
+        ),
+      );
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoSinPersonalizacion),
+      ).rejects.toThrow(BadRequestException);
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(itemsService.resolverPersonalizacionCombo).toHaveBeenCalledWith(
+        expect.anything(),
+        TENANT_ID,
+        'combo-uuid',
+        undefined,
       );
     });
   });
