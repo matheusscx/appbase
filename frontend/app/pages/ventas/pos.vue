@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import { useVenta, descontarStockCatalogo, tieneCustomerData, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { useVenta, descontarStockCatalogo, tieneCustomerData, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
@@ -194,33 +194,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   submitting.value = true
   try {
     const body: Record<string, unknown> = {
-      lineas: lineas.value.map((l) => ({
-        itemId: l.item.id,
-        cantidad: l.cantidad,
-        ...(l.cantidadPresentacion && l.unidadCodigoPresentacion
-          ? {
-              cantidadPresentacion: l.cantidadPresentacion,
-              unidadCodigoPresentacion: l.unidadCodigoPresentacion,
-            }
-          : {}),
-        ...(l.personalizacion
-          ? {
-              personalizacion: {
-                omitidos: l.personalizacion.omitidos,
-                extras: l.personalizacion.extras.map((e) => ({
-                  ingredienteItemId: e.ingredienteItemId,
-                  unidades: e.unidades,
-                })),
-                ...(l.personalizacion.comentario
-                  ? { comentario: l.personalizacion.comentario }
-                  : {}),
-                ...(l.personalizacion.grupos?.length
-                  ? { grupos: l.personalizacion.grupos }
-                  : {}),
-              },
-            }
-          : {}),
-      })),
+      lineas: toVentaLineasBody(lineas.value),
       pagos,
       tipoDocumentoId: tipoDocumentoId.value,
     }
