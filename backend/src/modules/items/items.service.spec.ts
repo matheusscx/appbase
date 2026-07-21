@@ -1510,6 +1510,23 @@ describe('ItemsService', () => {
         expect(patch.componentes).toHaveLength(1);
       });
 
+      it('permite vaciar los componentes si el combo conserva un grupo vivo (solo-grupos, costo 0)', async () => {
+        // Simétrico con create(): un combo puede quedar solo-grupos vía PATCH
+        // `componentes: []` mientras sobreviva ≥1 grupo. No debe llamar a
+        // validarYCostearComponentes (que rechaza []) y su costo se vuelve 0.
+        managerMock.query
+          .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
+          .mockResolvedValueOnce([]) // soft-delete combo_componentes
+          .mockResolvedValueOnce([]) // UPDATE item_combo costo_actual = 0
+          .mockResolvedValueOnce([{ componentes: '0', grupos: '1' }]); // conteo vivos post-cambio
+
+        const patch = await service.update(TENANT, COMBO_ID, {
+          componentes: [],
+        });
+        expect(patch.costoActual).toBe('0');
+        expect(patch.componentes).toEqual([]);
+      });
+
       it('rechaza vaciar los grupos de un combo solo-grupos (queda huérfano)', async () => {
         // Combo creado sin componentes fijos (solo grupos, Ticket B). El PATCH
         // no toca `componentes` (nunca existieron) y vacía `gruposModificadores`
@@ -2684,6 +2701,92 @@ describe('ItemsService', () => {
 
       expect(spyMov).toHaveBeenCalledTimes(2); // producto + ingrediente
       expect(spyReceta).toHaveBeenCalled(); // receta
+    });
+
+    it('calcula cantidad = cantidad × unidades × cantidadVendida (producto, sin conversión)', async () => {
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({} as any);
+      managerMock.query.mockResolvedValueOnce([
+        { tipo: 'producto', unidad_medida: 'unidad' },
+      ]);
+
+      await (service as any).venderOpcionesGrupos(
+        managerMock,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          cantidadVendida: '4',
+        },
+        [
+          {
+            grupoId: 'G',
+            grupoNombre: 'Proteína',
+            opciones: [
+              {
+                itemId: PROD_ID,
+                nombre: 'Coca',
+                cantidad: '2',
+                precioExtra: '0',
+                unidades: '3',
+              },
+            ],
+          },
+        ],
+      );
+
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          itemId: PROD_ID,
+          tipo: 'salida',
+          cantidad: '24', // 2 × 3 × 4
+        }),
+      );
+    });
+
+    it('para ingrediente convierte la cantidadTotal (cantidad × unidades × cantidadVendida) a la unidad base', async () => {
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({} as any);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('600');
+      managerMock.query.mockResolvedValueOnce([
+        { tipo: 'ingrediente', unidad_medida: 'g' },
+      ]);
+
+      await (service as any).venderOpcionesGrupos(
+        managerMock,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          cantidadVendida: '2',
+        },
+        [
+          {
+            grupoId: 'G',
+            grupoNombre: 'Proteína',
+            opciones: [
+              {
+                itemId: ING_ID,
+                nombre: 'Carne',
+                cantidad: '100',
+                unidadCodigo: 'g',
+                precioExtra: '0',
+                unidades: '3',
+              },
+            ],
+          },
+        ],
+      );
+
+      // cantidadTotal = 100 × 3 × 2 = 600 se pasa a convertirUnidad antes de la salida.
+      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith(
+        '600',
+        'g',
+        'g',
+      );
     });
 
     it('opción sin stock → aborta (siempre bloqueante)', async () => {

@@ -1154,11 +1154,16 @@ export class ItemsService {
           patch.extrasPermitidos = extrasValidados;
         }
       } else if (tipo === 'combo' && dto.componentes !== undefined) {
-        const costeo = await this.validarYCostearComponentes(
-          manager,
-          tenantId,
-          dto.componentes,
-        );
+        // `componentes: []` es válido si el combo queda sostenido por grupos
+        // (el guard de huérfano de más abajo lo verifica): combo solo-grupos
+        // con costo 0, simétrico con create().
+        const costeo = dto.componentes.length
+          ? await this.validarYCostearComponentes(
+              manager,
+              tenantId,
+              dto.componentes,
+            )
+          : { costoActual: '0', componentes: [] };
         await manager.query(
           `UPDATE combo_componentes
            SET eliminado_el = NOW(), actualizado_el = NOW()
