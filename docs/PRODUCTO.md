@@ -235,7 +235,10 @@ descuenta el de cada componente según su tipo (producto → salida directa; rec
 
 **Grupos de modificadores (elección del customer):** ver sección 8d — un combo
 puede llevar, además o en vez de componentes fijos, grupos de modificadores
-asociados (ej. "elige tu bebida").
+asociados (ej. "elige tu bebida"). **Además**, si un componente es una
+**receta** que a su vez tiene su propio grupo (ej. "elige tu proteína"), esa
+elección se ofrece automáticamente al vender el combo, **por unidad** del
+componente — ver sección 8d, "Grupos anidados en combos".
 
 ---
 
@@ -297,6 +300,29 @@ aparte (decisión confirmada por el usuario, 2026-07-20) — hoy la comanda
 imprime el item por su nombre sin desglosar la opción elegida. El snapshot ya
 congela todo lo necesario (`grupoNombre`, `itemNombre` de la opción,
 `unidades`) para implementarlo después sin migración.
+
+**Grupos anidados en combos, un nivel (2026-07-22).** Al vender un combo cuyo
+componente es una receta con su propio grupo de modificadores, el customer
+elige, **por cada unidad** de ese componente, la opción de cada uno de sus
+grupos (ej. un combo con 2 hamburguesas pregunta la proteína dos veces,
+pudiendo ser distinta en cada una). Reglas:
+- **Automático, sin configuración del combo.** Cualquier componente receta
+  con grupos los expone al vender el combo — no hace falta asociar nada al
+  combo mismo ni curar qué grupos aplican.
+- **Por unidad, elecciones independientes.** El snapshot y el descuento de
+  stock trackean cada (componente, unidad) por separado.
+- **Solo componentes receta.** Un componente `producto` puro no tiene grupos
+  propios (los grupos solo se asocian a `receta` o `combo`).
+- **Un nivel de profundidad.** Combo → componente receta → sus grupos; no se
+  soporta un nivel adicional (un grupo cuya opción a su vez tenga grupos).
+- El recargo de la opción elegida se suma al precio del combo (Decimal.js,
+  igual canal que los grupos propios); el stock de la opción elegida se
+  descuenta siempre bloqueante, por unidad, dentro de la misma venta.
+- Dos combos idénticos con distinta elección por unidad **no se mergean** en
+  la misma línea (Salones).
+
+Detalle técnico completo: `docs/features/grupos-modificadores.md` §
+"Grupos anidados en combos (un nivel)" y ADR-015.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: SDD Team
-**Last Updated**: 2026-07-20
+**Last Updated**: 2026-07-22
 
 ---
 
@@ -49,7 +49,10 @@ de 5), reutilizando el costeo y la venta de productos/recetas ya existentes.
   implementado en Ticket B, ver [grupos-modificadores.md](./grupos-modificadores.md).
   Un combo puede asociar N grupos además de (o en vez de) sus componentes
   fijos; `disponibleCondicional: true` en el listado quiere decir que la
-  disponibilidad depende de la opción elegida.
+  disponibilidad depende de la opción elegida. **Además (2026-07-22):** la
+  personalización de un combo ahora incluye, automáticamente, los grupos de
+  sus componentes **receta** (no solo los grupos propios del combo) — ver
+  "Grupos anidados en combos (un nivel)" en `grupos-modificadores.md`.
 - Combos anidados (un combo como componente de otro combo).
 - Recálculo silencioso de `costo_actual` cuando cambia el costo de un componente
   (mismo trato que recetas — ver [simulador-impacto-costos.md](./simulador-impacto-costos.md)).
@@ -131,8 +134,11 @@ bloqueantes.
 ### GET /items/:id
 
 Si es combo, agrega `componentes: { componenteItemId, componenteNombre, tipo,
-cantidad, bloqueante, stock }[]`. `costoActual` viene de `item_combo` (COALESCE
-en el query base, igual patrón que receta/producto).
+cantidad, bloqueante, stock, grupos }[]`. `costoActual` viene de `item_combo`
+(COALESCE en el query base, igual patrón que receta/producto). `grupos` es
+`[]` salvo que el componente sea `receta` y tenga ≥1 grupo de modificadores
+asociado (ver [grupos-modificadores.md](./grupos-modificadores.md) §
+"Grupos anidados en combos").
 
 ### DELETE /items/:id
 
@@ -199,6 +205,12 @@ arrancar el backend, con componentes Hamburguesa Clásica (receta,
 `550e8400-e29b-41d4-a716-446655440259`) y Papas fritas (producto,
 `550e8400-e29b-41d4-a716-446655440281`).
 
+Seed demo (2026-07-22): `550e8400-e29b-41d4-a716-446655440313` ("Combo
+Especial") — componentes Hamburguesa Especial (receta con el grupo "Proteína"
+propio, `…440294`) + Papas fritas (`…440281`, reutilizada). Demuestra grupos
+anidados en combos: ver
+[grupos-modificadores.md](./grupos-modificadores.md).
+
 ---
 
 ## Acceptance Criteria
@@ -228,7 +240,10 @@ arrancar el backend, con componentes Hamburguesa Clásica (receta,
   propio fijo, una línea de venta, combos no conocen inventario
 - ADR: [013](../adr/013-grupos-modificadores-reutilizables.md) — grupos de
   modificadores (elección del customer)
+- ADR: [015](../adr/015-grupos-anidados-combo-un-nivel.md) — grupos anidados
+  en combos: el grupo de un componente receta se expone automáticamente
 - Spec: [`docs/superpowers/specs/2026-07-20-combos-design.md`](../superpowers/specs/2026-07-20-combos-design.md)
+- Spec: [`docs/superpowers/specs/2026-07-22-grupos-modificadores-anidados-combo-design.md`](../superpowers/specs/2026-07-22-grupos-modificadores-anidados-combo-design.md)
 
 ## Notes
 
@@ -241,3 +256,11 @@ cálculo de disponibilidad real depende de la opción que elija el customer
 (`Disponible*` en el frontend, no un número fijo). Este archivo (`combos.md`)
 sigue describiendo el caso de **componentes fijos**; el caso de elección vive
 en `grupos-modificadores.md`.
+
+**Grupos anidados en combos, un nivel (2026-07-22):** además de sus propios
+grupos, un combo ahora expone automáticamente los grupos de cualquier
+componente **receta** que los tenga — el seed demo agrega "Combo Especial"
+(Hamburguesa Especial + Papas fritas) donde la elección de "Proteína" viene
+del componente, no del combo. Detalle completo, snapshot y stock por unidad:
+[grupos-modificadores.md](./grupos-modificadores.md) §
+"Grupos anidados en combos (un nivel)".

@@ -141,6 +141,26 @@ AppDrawer footer        px-6 py-4, gap-2 entre botones
 </UFormField>
 ```
 
+### Elección entre alternativas — selector, no radio buttons
+
+Para elegir entre opciones homogéneas (ej. la opción de un grupo de
+modificadores: "elige tu proteína"), usar `USelectMenu`/`USelect` de Nuxt UI
+— **simple** cuando solo se puede elegir 1 (`max === 1`), **múltiple** cuando
+se pueden elegir varias (`max > 1`). No usar radio buttons/checkboxes para
+esto: con varios bloques de elección en el mismo drawer (ej. un combo que
+pregunta el grupo de cada componente, por unidad), una lista de radios por
+bloque crece demasiado. Ejemplo real: `components/ventas/ItemPersonalizacionGrupo.vue`
+(ver `docs/adr/015-grupos-anidados-combo-un-nivel.md`).
+
+```vue
+<USelectMenu
+  v-model="opcionElegida"
+  :items="opciones"
+  :multiple="grupo.max > 1"
+  placeholder="Elegir..."
+/>
+```
+
 ### Card
 ```vue
 <UCard>

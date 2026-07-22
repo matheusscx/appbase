@@ -32,6 +32,25 @@ interface MovimientoInventario {
   tipo: string;
   motivo: string;
   item_id: string;
+  cantidad?: string;
+}
+interface GrupoOpcionDetalle {
+  itemId: string;
+  precioExtra: string;
+}
+interface GrupoDetalle {
+  grupoModificadorId: string;
+  min: number;
+  max: number;
+  opciones: GrupoOpcionDetalle[];
+}
+interface ComboComponenteDetalle {
+  componenteItemId: string;
+  grupos: GrupoDetalle[];
+}
+interface ComboDetalleResponse {
+  id: string;
+  componentes: ComboComponenteDetalle[];
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -248,5 +267,129 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       [panId],
     );
     expect(stockPanRows[0]?.stock).toBe('9.0000');
+  });
+
+  // Grupos anidados en combos (un nivel) — seed "Combo Especial":
+  // Hamburguesa Especial (receta, ya trae el grupo "Proteína") + Papas
+  // fritas (producto). Ver docs/features/grupos-modificadores.md
+  // § "Grupos anidados en combos (un nivel)" y seeder.service.ts
+  // seedComboEspecial().
+  const COMBO_ESPECIAL_ID = '550e8400-e29b-41d4-a716-446655440313';
+  const HAMBURGUESA_ESPECIAL_ID = '550e8400-e29b-41d4-a716-446655440294';
+  const PROTEINA_GRUPO_ID = '550e8400-e29b-41d4-a716-446655440290';
+  const CHULETA_ID = '550e8400-e29b-41d4-a716-446655440288';
+
+  it('7. GET /items/:id del "Combo Especial" expone el grupo "Proteína" (min:1, max:1) de su componente receta "Hamburguesa Especial", con la opción chuleta a +$1.500', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/items/${COMBO_ESPECIAL_ID}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const detalle = res.body as ComboDetalleResponse;
+    const componenteHamburguesa = detalle.componentes.find(
+      (c) => c.componenteItemId === HAMBURGUESA_ESPECIAL_ID,
+    );
+    expect(componenteHamburguesa).toBeDefined();
+
+    const grupoProteina = componenteHamburguesa?.grupos.find(
+      (g) => g.grupoModificadorId === PROTEINA_GRUPO_ID,
+    );
+    expect(grupoProteina?.min).toBe(1);
+    expect(grupoProteina?.max).toBe(1);
+
+    const opcionChuleta = grupoProteina?.opciones.find(
+      (o) => o.itemId === CHULETA_ID,
+    );
+    expect(opcionChuleta?.precioExtra).toBe('1500.0000');
+  });
+
+  it('8. vende el "Combo Especial" eligiendo chuleta en la unidad 1 de la Hamburguesa Especial → total = precioBase (4300) + precioExtra chuleta (1500), descuenta 150 g de chuleta', async () => {
+    const resVenta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [
+          {
+            itemId: COMBO_ESPECIAL_ID,
+            cantidad: '1',
+            personalizacion: {
+              componentes: [
+                {
+                  componenteItemId: HAMBURGUESA_ESPECIAL_ID,
+                  unidad: 1,
+                  grupos: [
+                    {
+                      grupoId: PROTEINA_GRUPO_ID,
+                      opciones: [{ itemId: CHULETA_ID, unidades: 1 }],
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '5800.0000' }],
+      });
+
+    expect(resVenta.status).toBe(201);
+    const venta = resVenta.body as VentaResponse;
+    expect(venta.estado).toBe('pagada');
+    expect(venta.advertenciasReceta ?? []).toEqual([]);
+    // Total = precioBase del Combo Especial (4300) + precioExtra de la chuleta (1500)
+    expect(venta.totalFinal).toBe('5800.0000');
+
+    // Movimiento de salida de la proteína elegida (chuleta), 150 g — default
+    // del grupo "Proteína" para "Hamburguesa Especial" (sin override, a
+    // diferencia de "Hamburguesa Especial XL") — convertidos a la unidad base
+    // del ingrediente (kg): 150 g = 0.15 kg (mismo `CatalogService.convertirUnidad`
+    // que usan los ingredientes de receta).
+    const movs: MovimientoInventario[] = await ds.query(
+      `SELECT tipo, motivo, item_id, cantidad FROM movimientos_inventario
+       WHERE venta_id = $1 AND item_id = $2 AND eliminado_el IS NULL`,
+      [venta.id, CHULETA_ID],
+    );
+    expect(movs).toHaveLength(1);
+    expect(movs[0].tipo).toBe('salida');
+    expect(movs[0].motivo).toBe('venta');
+    expect(movs[0].cantidad).toBe('0.1500');
+  });
+
+  it('9. (negativo) POST /ventas con un componenteItemId que no es componente del "Combo Especial" → 400', async () => {
+    const ajenoId = await crearProducto(
+      app,
+      token,
+      'Ajeno combo especial E2E',
+      '5',
+      '100',
+    );
+
+    const res = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [
+          {
+            itemId: COMBO_ESPECIAL_ID,
+            cantidad: '1',
+            personalizacion: {
+              componentes: [
+                {
+                  componenteItemId: ajenoId,
+                  unidad: 1,
+                  grupos: [
+                    {
+                      grupoId: PROTEINA_GRUPO_ID,
+                      opciones: [{ itemId: CHULETA_ID, unidades: 1 }],
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4300.0000' }],
+      });
+
+    expect(res.status).toBe(400);
   });
 });

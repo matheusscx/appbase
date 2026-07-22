@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: SDD Team
-**Last Updated**: 2026-07-21
+**Last Updated**: 2026-07-22
 
 ---
 
@@ -101,6 +101,9 @@ alternativas homogéneas**, que `receta_extras_permitidos` no modela.
   Ver "Cantidades de consumo por item" más abajo.
 - Seed demo: grupos "Proteína" (con override 150 g / 250 g entre dos recetas)
   y "Bebida" (ver sección Seed demo).
+- **Grupos anidados en combos, un nivel** (2026-07-22): un combo expone
+  automáticamente los grupos de sus componentes **receta** al vender — ver
+  sección "Grupos anidados en combos (un nivel)" más abajo.
 
 **NOT included (future):**
 - **Impresión térmica de las opciones elegidas de un grupo** — diferida
@@ -112,7 +115,15 @@ alternativas homogéneas**, que `receta_extras_permitidos` no modela.
   opción elegida, unidades) para implementarlo después **sin migración** — el
   trabajo pendiente es puramente de plantilla de impresión
   (`docs/features/impresion-termica.md`), no de modelo de datos.
-- Grupos anidados (una opción de grupo que a su vez tenga grupos propios).
+- **Anidamiento de más de un nivel** (combo → componente → grupo de una
+  OPCIÓN del grupo del componente) — solo un nivel de profundidad (combo →
+  componente receta → sus grupos).
+- **Grupos en `producto` puro** (sin ser receta) — hoy solo `receta` (y
+  `combo`) pueden tener grupos asociados; un `producto` no.
+- **Curaduría por combo** de los grupos heredados de un componente (min/max
+  propios del combo sobre el grupo del componente, distintos de los que ya
+  tiene la receta) — sigue siendo automático y 1:1 con lo que la receta
+  declara.
 - Evaluación de condiciones para habilitar/deshabilitar opciones (fase futura,
   igual que descuentos/recargos condicionales).
 
@@ -269,6 +280,86 @@ que se lea — nunca hay que "reconstruir" el override manualmente.
 
 ---
 
+## Grupos anidados en combos (un nivel)
+
+**Problema que resuelve (2026-07-22):** un combo con un componente **receta**
+que a su vez tiene su propio grupo de modificadores no exponía ese grupo al
+vender el combo. Ejemplo real: "Combo Clásico" = Hamburguesa Clásica (receta) +
+Bebida (grupo del combo) — la Hamburguesa Clásica tiene su propio grupo
+"Proteína", pero agregar el combo al carrito solo ofrecía elegir la Bebida
+(grupo del combo), nunca la Proteína (grupo del componente). Esto no era un
+bug: los grupos anidados estaban explícitamente fuera de alcance del diseño
+original (ver Scope arriba, versión anterior a esta fecha).
+
+**Decisiones cerradas (owner, ver `docs/superpowers/specs/2026-07-22-grupos-modificadores-anidados-combo-design.md`):**
+- **Automático (estilo Square):** cualquier componente receta con grupos los
+  expone al vender el combo, sin configuración extra ni curaduría del combo.
+- **Por unidad:** un componente con `cantidad = N` pregunta N veces —
+  independientes entre sí (2 hamburguesas → una proteína por cada una, pueden
+  ser distintas). El snapshot y el descuento de stock trackean por unidad.
+- **Solo recetas:** hoy solo `receta` (y `combo`) pueden tener grupos; un
+  `producto` puro no.
+- **Un nivel de profundidad:** combo → componente receta → sus grupos, sin ir
+  más hondo (coincide con el tope de Toast/Square).
+
+**Reuso de la maquinaria existente — cero tablas nuevas.**
+`ItemsService.resolverGruposDeItem(manager, tenantId, itemId, gruposDto)` ya
+era agnóstico del item: resuelve los grupos de cualquier item por su propia
+`item_grupos_modificadores` y devuelve `{ grupos, precioExtraTotal }`. Se
+reutiliza tal cual pasándole el `itemId` de cada componente. El recargo viaja
+por el mismo canal (`precioExtraTotal` sumado a la línea) — **el motor de
+cálculo de precios no se toca**. El descuento de stock por opción reutiliza
+`venderOpcionesGrupos` (siempre bloqueante, igual que los grupos propios del
+combo). Solo se agregó: una dimensión en el snapshot, lectura batched en `GET
+/items/:id`, un loop de validación/resolución en la venta, el DTO de entrada y
+el render del drawer.
+
+**Lectura — `GET /items/:id` (combo).** Cada componente **receta** trae
+`grupos` con la misma forma que los grupos propios del combo (ver ejemplo en
+"API" más abajo), cargados **batched** (2 queries fijas, sin N+1
+proporcional a la cantidad de componentes). `disponibleCondicional` pasa a
+`true` si el combo tiene grupos propios **o** algún componente los tiene.
+
+**Venta — snapshot por (componente, unidad).** El body de venta acepta
+`personalizacion.componentes: { componenteItemId, unidad, grupos }[]` — una
+entrada por cada (componente, unidad) con elección. El backend:
+1. Valida que `componenteItemId` sea un componente **vivo** de ESTE combo y
+   de tipo `receta` (rechaza con `400` cualquier item ajeno al combo o que no
+   admita grupos — el frontend no puede inyectar grupos de items arbitrarios).
+2. Valida `unidad ∈ 1..cantidad` del componente, sin `unidad` duplicada.
+3. Resuelve cada (componente, unidad) vía `resolverGruposDeItem` — incluso las
+   que el frontend omitió, para que un grupo obligatorio sin elección dispare
+   la validación de `min` igual que hoy.
+4. Suma el `precioExtraTotal` de todas (Decimal.js) al recargo del combo.
+5. Congela el snapshot en `personalizacion.componentes[]` (`componenteItemId`,
+   `componenteNombre`, `unidad`, `grupos`) — aditivo y opcional: un snapshot
+   viejo sin este campo sigue siendo válido (retrocompatibilidad total, cero
+   migración).
+
+**Stock por unidad.** Además del descuento normal por componente (producto →
+salida; receta → expande a sus ingredientes fijos; servicio → nada), por cada
+(componente, unidad) con grupos congelados se llama a `venderOpcionesGrupos`
+— descuenta la opción elegida (ej. la proteína), siempre bloqueante, dentro de
+la misma transacción de la venta.
+
+**Merge en Salones.** La clave de merge de línea incluye componente/unidad/
+opción — dos combos idénticos con proteínas distintas por unidad no se
+mergean en una sola línea.
+
+**UX — selector en vez de radio buttons (cambio global).** El drawer de
+personalización (`ItemPersonalizacionDrawer.vue` /
+`ItemPersonalizacionGrupo.vue`) pasó de radio buttons a `USelectMenu` de Nuxt
+UI para elegir la opción de un grupo — simple cuando `max === 1`, múltiple
+cuando `max > 1`. Este cambio aplica a **todos** los grupos (propios de combo/
+receta, no solo a los anidados de componente): con varios componentes
+preguntando su propio grupo por unidad, una lista de radios crecía demasiado
+en el drawer.
+
+Ver `docs/adr/015-grupos-anidados-combo-un-nivel.md` para la decisión completa
+y las alternativas descartadas.
+
+---
+
 ## API
 
 ### CRUD de grupos (`/grupos-modificadores`)
@@ -363,6 +454,38 @@ ni el override ni el default tienen `cantidad` — ver esa misma sección.
 `GET /items?tipo=combo` incluye `disponibleCondicional` en cada fila (una sola
 query extra para todos los combos, no N+1).
 
+**Combo — grupos de sus componentes receta.** `GET /items/:id` de un combo
+agrega `grupos` (misma forma de arriba) a cada entrada de `componentes[]`
+cuyo componente sea `receta` y tenga ≥1 grupo asociado:
+
+```
+"componentes": [
+  {
+    "componenteItemId": "<hamburguesa especial>",
+    "componenteNombre": "Hamburguesa Especial",
+    "tipo": "receta",
+    "cantidad": "1",
+    "bloqueante": true,
+    "stock": null,
+    "grupos": [
+      {
+        "grupoModificadorId": "<proteína>",
+        "nombre": "Proteína",
+        "min": 1,
+        "max": 1,
+        "orden": 0,
+        "opciones": [
+          { "grupoOpcionId": "...", "itemId": "<chuleta>", "itemNombre": "Chuleta de cerdo",
+            "tipo": "ingrediente", "cantidad": "150.0000", "cantidadDefault": "150.0000",
+            "unidadCodigo": "g", "precioExtra": "1500.0000", "orden": 2,
+            "stock": "6.0000", "esPendiente": false }
+        ]
+      }
+    ]
+  }
+]
+```
+
 ### Personalización al vender (extensión de `/ventas`, cuentas de mesa)
 
 El body de venta/línea de cuenta acepta `personalizacion.grupos: {
@@ -370,6 +493,36 @@ grupoId, opciones: { itemId, unidades }[] }[]`. El backend
 (`ItemsService.resolverGruposDeItem`) revalida contra el catálogo vivo —
 ignora cualquier precio que mande el frontend — y congela el snapshot en
 `cuenta_lineas.personalizacion` / `venta_detalles.personalizacion`.
+
+**Combo — grupos por componente/unidad.** Un combo acepta además
+`personalizacion.componentes: { componenteItemId, unidad, grupos }[]` — una
+entrada por cada (componente receta, unidad) con elección:
+
+```
+{
+  "lineas": [{
+    "itemId": "<combo especial>",
+    "cantidad": "1",
+    "personalizacion": {
+      "componentes": [
+        {
+          "componenteItemId": "<hamburguesa especial>",
+          "unidad": 1,
+          "grupos": [
+            { "grupoId": "<proteína>", "opciones": [{ "itemId": "<chuleta>", "unidades": 1 }] }
+          ]
+        }
+      ]
+    }
+  }]
+}
+```
+
+`400` si `componenteItemId` no es un componente vivo de ESE combo, o si
+`unidad` está fuera de `1..cantidad` del componente o duplicada. El recargo se
+suma (Decimal.js) al del combo; el descuento de stock por opción es siempre
+bloqueante, igual que los grupos propios. Ver "Grupos anidados en combos (un
+nivel)" arriba para el detalle completo.
 
 ---
 
@@ -395,9 +548,18 @@ ignora cualquier precio que mande el frontend — y congela el snapshot en
 - `GruposModificadoresService.familiaDeTipo` (privado) — deriva
   `'ingrediente' | 'vendible'` del `tipo` del item.
 - `ItemsService.resolverGruposDeItem` — valida elección contra `min`/`max`,
-  congela snapshot, calcula recargo. Reusado por recetas (`resolverIngredientesYExtras`)
-  y por `resolverPersonalizacionCombo` (combos solo admiten grupos, no
-  ingredientes/extras — esos son propios de receta).
+  congela snapshot, calcula recargo. Reusado por recetas (`resolverIngredientesYExtras`),
+  por `resolverPersonalizacionCombo` (grupos propios del combo) y por sí mismo
+  otra vez para los grupos de **cada componente receta** (grupos anidados en
+  combos, un nivel — pasándole el `itemId` del componente).
+- `ItemsService.resolverPersonalizacionCombo` — además de los grupos propios,
+  valida (`componenteItemId` vivo de este combo + `unidad` en rango, sin
+  duplicar) y resuelve los grupos de cada (componente, unidad) vía
+  `resolverGruposDeItem`, sumando el recargo total y congelando
+  `snapshot.componentes[]`.
+- `ItemsService.venderComponentesCombo` — además del descuento normal por
+  componente, itera `snapshot.componentes[]` y llama a
+  `venderOpcionesGrupos` por cada (componente, unidad) con grupos congelados.
 - `ItemsService.venderOpcionesGrupos` (privado) — efecto de inventario por
   tipo de opción al vender, siempre bloqueante.
 
@@ -422,15 +584,24 @@ ignora cualquier precio que mande el frontend — y congela el snapshot en
   "Agregar"; combos con ≥1 grupo asociado ahora abren el drawer (antes, sin
   grupos, se agregaban con un click). El POS/drawer **oculta** opciones
   *pendientes* (`esPendiente: true`) — no se pueden elegir hasta que la
-  receta tenga una cantidad efectiva.
+  receta tenga una cantidad efectiva. Para un combo con componentes receta
+  con grupos, repite el bloque de grupos **una vez por unidad** del
+  componente, etiquetado ("Hamburguesa #1", "Hamburguesa #2").
+- `components/ventas/ItemPersonalizacionGrupo.vue` — render de un grupo
+  (propio o de componente); usa `USelectMenu` (selector), **no** radio
+  buttons — simple cuando `max === 1`, múltiple cuando `max > 1`. Cambio
+  global: aplica a todos los grupos, no solo a los anidados de componente
+  (una lista de radios con varios componentes preguntando por unidad crecía
+  demasiado en el drawer).
 - `composables/useRecetaPersonalizacion.ts` — resolución de grupos en el
   frontend (espejo de `resolverGruposDeItem`, para UX inmediata; el backend
-  revalida igual).
+  revalida igual), incluyendo los grupos por componente/unidad de un combo.
 - Catálogo POS/Salones: `Disponible*` en vez de un número fijo para combos con
   `disponibleCondicional: true` (la disponibilidad depende de la opción
   elegida).
-- Merge de líneas en Salones: la clave de merge incluye los grupos elegidos
-  (dos líneas del mismo combo con distinta proteína/bebida no se mergean).
+- Merge de líneas en Salones: la clave de merge incluye los grupos elegidos,
+  también los de componente/unidad (dos líneas del mismo combo con distinta
+  proteína/bebida — propia o de un componente — no se mergean).
 
 ---
 
@@ -472,6 +643,27 @@ true`; `GET /items/<…440294>` muestra las 3 opciones de "Proteína" con
 con `cantidad: "250.0000"` y `cantidadDefault: "150.0000"` (verificado en vivo
 el 2026-07-21 contra el stack Docker corriendo).
 
+**Grupos anidados en combos — "Combo Especial" (2026-07-22).**
+`seedComboEspecial()`, invocado tras `seedGruposModificadores()` (idempotente,
+guarda por la existencia del propio combo). Cero cambio al "Combo Clásico"
+existente — combo nuevo, aparte, para no acoplar el caso de "componente con
+grupo" a un combo que ya tenía su propio grupo "Bebida":
+
+| Entidad | ID | Notas |
+|---|---|---|
+| Item "Combo Especial" (combo) | `…440313` | Precio propio $4.300; componentes: Hamburguesa Especial (receta, `…440294`) + Papas fritas (producto, `…440281`, reutilizada del Combo Clásico) |
+| Componente Hamburguesa Especial | `…440314` | `combo_componentes`, cantidad 1, bloqueante |
+| Componente Papas fritas | `…440315` | `combo_componentes`, cantidad 1, bloqueante |
+
+Como "Hamburguesa Especial" (`…440294`) ya trae asociado el grupo "Proteína"
+(`…440290`, `min:1, max:1`), el "Combo Especial" expone esa elección
+**automáticamente** al vender — sin asociar nada al combo mismo. Verificado
+vía `combos.e2e-spec.ts`: `GET /items/<…440313>` trae `componentes[].grupos`
+para la Hamburguesa Especial con la opción chuleta a `precioExtra:
+"1500.0000"`; vender eligiendo chuleta cobra `precioBase (4300) + 1500 =
+5800.0000` y descuenta `0.15` kg (150 g convertidos a la unidad base del
+ingrediente) de chuleta.
+
 ---
 
 ## Testing
@@ -480,6 +672,11 @@ el 2026-07-21 contra el stack Docker corriendo).
 cd backend && npm test -- grupos-modificadores.service.spec.ts items.service.spec.ts ventas.service.spec.ts
 cd backend && npm run test:e2e -- grupos-modificadores.e2e-spec.ts grupos-modificadores-overrides.e2e-spec.ts combos.e2e-spec.ts
 ```
+
+`combos.e2e-spec.ts` cubre los grupos anidados: `GET /items/:id` del "Combo
+Especial" expone el grupo de su componente receta; vender eligiendo la opción
+premium suma el recargo al total y descuenta la opción por unidad; un
+`componenteItemId` que no pertenece al combo → `400`.
 
 ---
 
@@ -499,6 +696,10 @@ cd backend && npm run test:e2e -- grupos-modificadores.e2e-spec.ts grupos-modifi
       total, endpoints de drawer + aplicar override en lote
 - [x] Seed demo (Proteína con override 150 g/250 g + Bebida) + Docs (este
       archivo) + ESTADO + PRODUCTO + patterns/backend + ADR-014
+- [x] Grupos anidados en combos, un nivel: automático + por unidad + solo
+      recetas; `GET /items/:id` batched; snapshot `personalizacion.componentes`;
+      descuento de stock por componente/unidad; selector en vez de radio
+      (cambio global); seed "Combo Especial" + E2E + Docs + ADR-015
 
 ---
 
@@ -521,6 +722,9 @@ cd backend && npm run test:e2e -- grupos-modificadores.e2e-spec.ts grupos-modifi
 - ADR: [014](../adr/014-cantidades-consumo-por-item.md) — modelo híbrido
   default+override para cantidad/precioExtra por receta, llave del override
   por UUIDs preservados, cero migración de datos
+- ADR: [015](../adr/015-grupos-anidados-combo-un-nivel.md) — grupos anidados
+  en combos: automático + por unidad + un nivel + cero tablas nuevas, reuso de
+  `resolverGruposDeItem`/`venderOpcionesGrupos`
 
 ## Notes
 
@@ -530,3 +734,11 @@ comanda/precuenta/boleta queda para un ticket aparte. El snapshot
 `personalizacion.grupos` ya persiste `grupoNombre` + `itemNombre` + `unidades`
 de cada opción elegida — implementar la impresión después es un cambio de
 plantilla, no requiere migración ni cambio de modelo de datos.
+
+**Grupos anidados en combos, un nivel (2026-07-22):** confirmado con el owner
+que la exposición del grupo de un componente receta es **automática** (sin
+curaduría por combo) y limitada a **un nivel** (combo → componente receta →
+sus grupos) — anidar más hondo, o habilitar grupos en `producto` puro, queda
+fuera de alcance hasta que aparezca un caso real. Ver
+`docs/superpowers/specs/2026-07-22-grupos-modificadores-anidados-combo-design.md`
+para la investigación de mercado (Square/Toast) que respaldó estas decisiones.

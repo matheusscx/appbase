@@ -2230,6 +2230,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedRecetaDemo();
     await this.seedCombos();
     await this.seedGruposModificadores();
+    await this.seedComboEspecial();
   }
 
   private async seedItemSoporte(): Promise<void> {
@@ -2855,6 +2856,65 @@ export class SeederService implements OnApplicationBootstrap {
          (item_grupo_id, tenant_id, item_id, grupo_modificador_id, min, max, orden)
        VALUES ($1,$2,$3,$4,1,1,0)`,
       [COMBO_ITEM_GRUPO_ID, PARIS, COMBO_ID, BEBIDA_GRUPO_ID],
+    );
+  }
+
+  /**
+   * Combo demo "Combo Especial" — grupos anidados en combos (un nivel):
+   * componentes "Hamburguesa Especial" (receta, `…440294`, ya trae su propio
+   * grupo "Proteína" asociado) + "Papas fritas" (producto, `…440281`,
+   * reutilizada del "Combo Clásico"). A diferencia de "Combo Clásico" (sin
+   * grupos propios ni de componentes con grupos hasta este ticket), este
+   * combo demuestra que el grupo de un COMPONENTE receta se expone
+   * automáticamente al vender el combo — sin asociar nada al combo mismo.
+   * Precio propio fijo ($4300); costo_actual = costo Hamburguesa Especial
+   * (receta, 620) + costo Papas fritas (producto, 800) = 1420.
+   * Cero cambio al "Combo Clásico" existente — combo nuevo, aparte.
+   * Idempotente: guarda por la existencia del propio combo.
+   */
+  private async seedComboEspecial(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const uuid = (suffix: number): string =>
+      `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
+
+    const HAMBURGUESA_ESPECIAL_ID = uuid(294); // ya sembrada por seedGruposModificadores
+    const PAPAS_ID = uuid(281); // ya sembrada por seedCombos
+    const COMBO_ESPECIAL_ID = uuid(313);
+    const CC_HAMBURGUESA_ESPECIAL_ID = uuid(314);
+    const CC_PAPAS_ID = uuid(315);
+
+    const exists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [COMBO_ESPECIAL_ID],
+    );
+    if (exists.length) {
+      return;
+    }
+
+    await this.dataSource.query(
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,'Combo Especial','Hamburguesa Especial (elige tu proteína) + Papas fritas','4300',false,true,'combo')`,
+      [COMBO_ESPECIAL_ID, PARIS, CLP],
+    );
+    await this.dataSource.query(
+      `INSERT INTO item_combo (item_id, costo_actual) VALUES ($1,'1420.0000')`,
+      [COMBO_ESPECIAL_ID],
+    );
+    await this.dataSource.query(
+      `INSERT INTO combo_componentes
+         (combo_componente_id, tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
+       VALUES
+         ($1,$3,$4,$2,'1',true),
+         ($5,$3,$4,$6,'1',true)`,
+      [
+        CC_HAMBURGUESA_ESPECIAL_ID,
+        HAMBURGUESA_ESPECIAL_ID,
+        PARIS,
+        COMBO_ESPECIAL_ID,
+        CC_PAPAS_ID,
+        PAPAS_ID,
+      ],
     );
   }
 
