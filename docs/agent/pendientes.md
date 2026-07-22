@@ -35,6 +35,28 @@ ya identificamos con ubicación concreta.
 
 ---
 
+## Harness / tooling (CodeGraph)
+
+- [ ] **Sync de CodeGraph en un git hook + niveles de búsqueda** (harness)
+  El índice `.codegraph/codegraph.db` (gitignoreado, local por clone — no se versiona) lo
+  mantiene al día un daemon con file-watcher (`.codegraph/daemon.sock`, ~1s de lag). Si el
+  daemon no corre (recién clonado, otra terminal, tras un rebase/checkout grande), el
+  índice queda viejo y `codegraph explore` devuelve call-paths desactualizados sin avisar.
+  **Fix hook:** agregar `codegraph sync --quiet` (el flag existe literalmente "for git
+  hooks") como guard **no-bloqueante**. Preferir un `pre-push` nuevo antes que
+  `.githooks/pre-commit`: correr en cada commit es redundante con el daemon, en push es una
+  garantía barata antes de cambiar de contexto. Nunca `codegraph index` en un hook
+  (reconstruye todo el índice, caro); `sync` es incremental. Si falla (daemon/CLI ausente),
+  no bloquear el push — es red de seguridad, no un gate.
+  **Definir niveles de búsqueda:** estandarizar el `--max-files` de `codegraph explore`
+  como convención (p.ej. *rápido* = default para "¿dónde está X?"; *profundo* =
+  `--max-files` alto para entender un módulo o su arquitectura) y documentarlo en el
+  "Orden de búsqueda" de `CLAUDE.md`, para no re-decidir la profundidad en cada consulta.
+  **Verificar:** con el daemon apagado, tocar un símbolo, pushear, y confirmar que
+  `codegraph status` refleja el cambio sin haber corrido `index` a mano.
+
+---
+
 ## Suite E2E de navegador (fundación lista, flujos por escribir)
 
 Scaffold Playwright ya funciona (`frontend/e2e/`, auth vía storageState, 1 smoke verde).
