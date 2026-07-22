@@ -34,6 +34,12 @@ function opcionDeshabilitada(o: GrupoOpcionPersonalizacion): boolean {
   return !!o.esPendiente || opcionSinStock(o.stock)
 }
 
+function opcionMotivo(o: GrupoOpcionPersonalizacion): string | undefined {
+  if (o.esPendiente) return 'No configurada para este item'
+  if (opcionSinStock(o.stock)) return 'Sin stock disponible'
+  return undefined
+}
+
 /** Grupo obligatorio (min ≥ 1) sin ninguna opción disponible: nunca se puede cumplir. */
 const grupoAgotado = computed(
   () => props.grupo.min >= 1 && props.grupo.opciones.every((o) => opcionDeshabilitada(o)),
@@ -48,13 +54,21 @@ function labelOpcion(o: GrupoOpcionPersonalizacion): string {
 interface SelectItem {
   label: string
   value: string
+  disabled?: boolean
+  description?: string
 }
 
-/** Opciones seleccionables — se excluyen las no vendibles (`esPendiente`/sin stock). */
+/**
+ * Todas las opciones se listan, incluidas las no vendibles (`esPendiente`/sin
+ * stock): se muestran deshabilitadas con su motivo, en vez de desaparecer.
+ */
 const items = computed<SelectItem[]>(() => {
-  const base = props.grupo.opciones
-    .filter((o) => !opcionDeshabilitada(o))
-    .map((o) => ({ label: labelOpcion(o), value: o.itemId }))
+  const base = props.grupo.opciones.map((o) => ({
+    label: labelOpcion(o),
+    value: o.itemId,
+    disabled: opcionDeshabilitada(o),
+    description: opcionMotivo(o),
+  }))
   if (props.grupo.min === 0 && props.grupo.max === 1) {
     return [{ label: 'Ninguna', value: NINGUNA }, ...base]
   }
