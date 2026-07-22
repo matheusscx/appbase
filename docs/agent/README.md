@@ -59,12 +59,22 @@ De ~19 propuestas se adoptaron 6.
 
 No reabrir sin argumento nuevo.
 
-- **Diez agentes especializados por dominio.** Sobredimensionado, y `fiscal` e
-  `inventory` son subconjuntos de las reglas de negocio del POS. Además el pipeline
-  lineal (architect → domain → backend → frontend → reviewer) es caro y frágil: cada
-  subagente arranca con contexto propio y cada salto pierde información. Si en algún
-  momento se agregan, empezar por `architect`, `domain-pos` y `reviewer`, invocados
-  por riesgo y no siempre en cadena.
+- **Agentes constructores partidos por capa técnica (backend / frontend).** El motivo
+  no es "sobredimensionado": es que **el eje de corte está mal**. Escribir código es lo
+  único que no se puede rebanar — cada edit depende de los demás — y un agente backend
+  + uno frontend cortan justo por la costura que más importa vigilar: el contrato DTO
+  que el back emite y el front consume. Arrancan con vista parcial, toman decisiones
+  implícitas en conflicto y exigen un paso extra para reconciliarlas. No compran
+  conocimiento (el modelo es el mismo Opus: un "agente backend" no sabe más NestJS que
+  la sesión principal); solo agregan handoffs que pierden contexto y multiplican tokens
+  (3–10×). Es el consenso de 2026 (Cognition "Don't Build Multi-Agents" para coding +
+  Anthropic, que reserva el multi-agente para trabajo read-heavy / research).
+  **El eje correcto es lectura-vs-escritura, no capa técnica:** un sub-agente aporta
+  valor cuando aísla *revisión* o *búsqueda* (su ceguera de contexto es el punto) y deja
+  la *construcción* entera en la sesión principal. Por eso los agentes que sí existen
+  son read-only e invocados por riesgo: `domain-reviewer` y `api-security-reviewer` en
+  el paso 7 de `verify-feature` (ver más abajo). Si alguna vez hace falta más, que sea
+  `domain-pos` (consultor read-only de reglas de negocio), nunca un constructor por capa.
 - **Handoffs por contrato YAML/JSON escrito a mano.** El diagnóstico (degradación de
   contexto entre agentes) es correcto, la solución no: un plan estructurado por feature
   queda desincronizado a la segunda iteración, y un portón que exige artefacto previo
@@ -88,6 +98,8 @@ No reabrir sin argumento nuevo.
 | `docs/patterns/`, `docs/features/`, ADRs | Cómo está resuelto esto | Bajo condición explícita |
 | `docs/agent/anti-patterns.md` | Qué salió mal antes aquí | Antes de implementar |
 | `.claude/skills/verify-feature/` | Cómo se cierra una tarea | Al cerrar |
+| `.claude/agents/domain-reviewer.md` | Revisión independiente del diff (invariantes, N+1, alcance) | Paso 7 de `verify-feature` |
+| `.claude/agents/api-security-reviewer.md` | Guards, validación, exposición de datos, SQLi | Paso 7, solo si el diff toca capa HTTP |
 
 `.claude/skills/` es la ruta que Claude Code descubre automáticamente. `plans/` y
 `specs/` siguen en `docs/superpowers/`.
