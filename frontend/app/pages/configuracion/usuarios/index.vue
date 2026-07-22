@@ -186,7 +186,7 @@ const columns: TableColumn<Member>[] = [
           <UButton
             color="neutral"
             variant="ghost"
-            @click="modalOpen = false"
+            @click="() => { modalOpen = false }"
           >
             Cancelar
           </UButton>

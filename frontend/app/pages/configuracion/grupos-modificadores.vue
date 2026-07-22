@@ -611,7 +611,7 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
         <UButton
           color="neutral"
           variant="ghost"
-          @click="drawerOpen = false"
+          @click="() => { drawerOpen = false }"
         >
           Cancelar
         </UButton>
@@ -732,7 +732,7 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
         <UButton
           color="neutral"
           variant="ghost"
-          @click="recetasDrawerOpen = false"
+          @click="() => { recetasDrawerOpen = false }"
         >
           Cerrar
         </UButton>

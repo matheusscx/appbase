@@ -278,7 +278,7 @@ const columns: TableColumn<Garzon>[] = [
         </UForm>
       </template>
       <template #actions>
-        <UButton color="neutral" variant="ghost" @click="drawerOpen = false">
+        <UButton color="neutral" variant="ghost" @click="() => { drawerOpen = false }">
           Cancelar
         </UButton>
         <UButton type="submit" form="garzon-form" :loading="saving">
@@ -319,7 +319,7 @@ const columns: TableColumn<Garzon>[] = [
       </template>
       <template #footer>
         <AppModalFooter>
-          <UButton label="Entendido" @click="pinReveladoOpen = false" />
+          <UButton label="Entendido" @click="() => { pinReveladoOpen = false }" />
         </AppModalFooter>
       </template>
     </UModal>

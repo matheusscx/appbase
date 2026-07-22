@@ -286,7 +286,7 @@ const columns: TableColumn<Impresora>[] = [
       </template>
 
       <template #actions>
-        <UButton color="neutral" variant="ghost" @click="drawerOpen = false">
+        <UButton color="neutral" variant="ghost" @click="() => { drawerOpen = false }">
           Cancelar
         </UButton>
         <UButton type="submit" form="impresora-form" :loading="saving">

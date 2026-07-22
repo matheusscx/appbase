@@ -287,7 +287,7 @@ const columns: TableColumn<Impuesto>[] = [
         <UButton
           color="neutral"
           variant="ghost"
-          @click="drawerOpen = false"
+          @click="() => { drawerOpen = false }"
         >
           Cancelar
         </UButton>
