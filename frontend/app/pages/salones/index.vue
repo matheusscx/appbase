@@ -15,7 +15,7 @@ import {
   type MotivoCuentaAsignacion,
 } from '~/composables/useSalones'
 import type { Garzon } from '~/composables/useGarzones'
-import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
+import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { Turno } from '~/composables/useTurnos'
 import { formatCantidadTicket, unidadBaseItem } from '~/utils/cantidad-presentacion'
 import { agregarImpuestosVenta } from '~/utils/ticket-builder'
@@ -540,15 +540,6 @@ async function abrirHistorial() {
 }
 
 // ── Líneas de la cuenta ────────────────────────────────────────────────────
-function personalizacionVacia(p: PersonalizacionPayload): boolean {
-  return (
-    p.omitidos.length === 0
-    && p.extras.length === 0
-    && !p.comentario?.trim()
-    && !(p.grupos && p.grupos.length > 0)
-  )
-}
-
 const pendingByLinea = new Map<string, ReturnType<typeof setTimeout>>()
 const inflight = ref(new Set<string>())
 

@@ -151,6 +151,17 @@ export function buildPersonalizacionPayload(
   return payload
 }
 
+export function personalizacionVacia(p?: PersonalizacionPayload): boolean {
+  if (!p) return true
+  return (
+    p.omitidos.length === 0
+    && p.extras.length === 0
+    && !p.comentario?.trim()
+    && !(p.grupos && p.grupos.length > 0)
+    && !(p.componentes && p.componentes.length > 0)
+  )
+}
+
 export function resumenPersonalizacion(
   nombresOmitidos: string[],
   extras: { nombre: string, unidades: number }[],

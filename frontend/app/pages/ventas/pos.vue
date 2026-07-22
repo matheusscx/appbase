@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import { useVenta, descontarStockCatalogo, tieneCustomerData, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
-import type { PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
+import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import { formatCantidadTicket } from '~/utils/cantidad-presentacion'
@@ -56,15 +56,6 @@ function onCatalogoAdd(item: ItemCatalogo) {
     return
   }
   add(item)
-}
-
-function personalizacionVacia(p: PersonalizacionPayload): boolean {
-  return (
-    p.omitidos.length === 0
-    && p.extras.length === 0
-    && !p.comentario?.trim()
-    && !(p.grupos && p.grupos.length > 0)
-  )
 }
 
 function onRecetaConfirm(payload: PersonalizacionPayload, resumen: string, precioPreview: string, detalle: PersonalizacionDetalleLinea[]) {

@@ -2,7 +2,7 @@ import { ref, watch } from 'vue'
 import Decimal from 'decimal.js'
 import { useCalculoPrecios, type ResultadoVenta, type CalcularVentaInput } from './useCalculoPrecios'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
-import type { PersonalizacionPayload } from './useRecetaPersonalizacion'
+import { personalizacionVacia, type PersonalizacionPayload } from './useRecetaPersonalizacion'
 import {
   aCantidadCanonica,
   desdeCantidadCanonica,
@@ -50,17 +50,6 @@ export interface PagoInput {
 }
 
 // ── Helpers de carrito (puros, inmutables) ──────────────────────────────────
-
-function personalizacionVacia(p?: PersonalizacionPayload): boolean {
-  if (!p) return true
-  return (
-    p.omitidos.length === 0
-    && p.extras.length === 0
-    && !p.comentario?.trim()
-    && !(p.grupos && p.grupos.length > 0)
-    && !(p.componentes && p.componentes.length > 0)
-  )
-}
 
 /** Serializa `grupos` de forma determinística (mismo orden para top-level y por componente). */
 function canonicalGrupos(grupos?: PersonalizacionPayload['grupos']) {

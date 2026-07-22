@@ -401,6 +401,28 @@ describe('carrito helpers', () => {
     expect(r[0]!.precioUnitarioOverride).toBe('1500')
   })
 
+  it('agregarLinea mantiene precioUnitarioOverride cuando la única personalización es de componentes (combo sin grupos propios)', () => {
+    // Regresión: "Combo Especial" (burger con elección de Proteína, sin grupos
+    // propios del combo) se descartaba en pos.vue/salones porque su
+    // personalizacionVacia local no chequeaba `componentes`.
+    const combo = { ...item('combo-especial', '4300'), tipo: 'combo' }
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      componentes: [
+        {
+          componenteItemId: 'burger-1',
+          unidad: 1,
+          grupos: [{ grupoId: 'grupo-proteina', opciones: [{ itemId: 'proteina-carne', unidades: 1 }] }],
+        },
+      ],
+    }
+    const r = agregarLinea([], combo, CAT, pers, 'Proteína: Carne', '7300')
+    expect(r).toHaveLength(1)
+    expect(r[0]!.personalizacion).toEqual(pers)
+    expect(r[0]!.precioUnitarioOverride).toBe('7300')
+  })
+
   it('agregarLinea guarda personalizacionDetalle solo cuando hay personalización', () => {
     const receta = { ...item('r', '1000'), tipo: 'receta' }
     const pers: PersonalizacionPayload = {
