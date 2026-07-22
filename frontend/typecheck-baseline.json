@@ -1,8 +1,4 @@
 {
-  "total": 13,
-  "files": {
-    "app/composables/usePropinaImpresion.spec.ts": 3,
-    "app/middleware/auth.spec.ts": 8,
-    "app/stores/auth.spec.ts": 2
-  }
+  "total": 0,
+  "files": {}
 }

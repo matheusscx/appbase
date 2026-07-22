@@ -265,6 +265,20 @@ fix **solo-de-tipo, cero runtime**:
   declara `style` aunque reka lo reenvía en runtime. Castear a `DrawerProps['content']`
   (importado de `@nuxt/ui`, dep directa — nunca de `reka-ui` transitivo).
 
+### ❌ Tipado estricto en unit tests (vitest) — TS2321/2347/2532/2554
+
+Al entrar los `.spec.ts` bajo vue-tsc estricto salieron cuatro fricciones, todas
+solo-de-tipo:
+
+- **Middleware Nuxt tipa `(to, from)`** — llamarlo con un solo arg en el test da TS2554.
+  Pasar ambos (el middleware ignora `from`): `authMiddleware(ctx, ctx)`.
+- **`require('vue')` es `any`** → `ref<T>(...)` da TS2347. Castear el require:
+  `const { ref } = require('vue') as typeof import('vue')`.
+- **`$fetch` global (rutas tipadas de Nuxt)** dispara TS2321 (recursión) en `vi.mocked`.
+  Alias plano una vez: `const $fetchMock = vi.mocked($fetch as unknown as (...a: unknown[]) => Promise<unknown>)`.
+- **Índice tras `expect(x).toHaveLength(n)`** sigue siendo `T | undefined` → `x[0]!.campo`
+  (misma convención `!` del índice guardado).
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

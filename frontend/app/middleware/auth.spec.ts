@@ -15,7 +15,7 @@ vi.mock('#app/nuxt', () => ({
 
 vi.mock('#app/composables/cookie', () => ({
   useCookie: vi.fn((_name: string, _opts?: unknown) => {
-    const { ref } = require('vue')
+    const { ref } = require('vue') as typeof import('vue')
     return ref<string | null>(null)
   }),
   refreshCookie: vi.fn(),
@@ -100,7 +100,7 @@ describe('middleware/auth', () => {
   it('sin token y sin refresh válido → redirige a /login', async () => {
     mockToken = null
     mockTryRefresh.mockResolvedValue(false)
-    await authMiddleware(makeContext('/'))
+    await authMiddleware(makeContext('/'), makeContext('/'))
     expect(mockTryRefresh).toHaveBeenCalled()
     expect(mockNavigateTo).toHaveBeenCalledWith('/login')
   })
@@ -114,7 +114,7 @@ describe('middleware/auth', () => {
       mockToken = 'restored.token'
       return true
     })
-    await authMiddleware(makeContext('/'))
+    await authMiddleware(makeContext('/'), makeContext('/'))
     expect(mockTryRefresh).toHaveBeenCalled()
     expect(mockNavigateTo).not.toHaveBeenCalledWith('/login')
   })
@@ -123,7 +123,7 @@ describe('middleware/auth', () => {
     mockToken = 'some.token.here'
     mockUser = { id: '1', nombre: 'Test' }
     mockActiveTenantId = null
-    await authMiddleware(makeContext('/'))
+    await authMiddleware(makeContext('/'), makeContext('/'))
     expect(mockHandlePostLogin).toHaveBeenCalled()
   })
 
@@ -132,7 +132,7 @@ describe('middleware/auth', () => {
     mockUser = { id: '1', nombre: 'Test' }
     mockActiveTenantId = 'tenant-uuid'
     mockTenants = [{ tenantId: 'tenant-uuid', nombre: 'Empresa A' }]
-    await authMiddleware(makeContext('/'))
+    await authMiddleware(makeContext('/'), makeContext('/'))
     expect(mockNavigateTo).not.toHaveBeenCalled()
   })
 
@@ -141,7 +141,7 @@ describe('middleware/auth', () => {
     mockUser = { id: '1', nombre: 'Test' }
     mockActiveTenantId = 'tenant-uuid'
     mockTenants = []
-    await authMiddleware(makeContext('/'))
+    await authMiddleware(makeContext('/'), makeContext('/'))
     expect(mockFetchMyTenants).toHaveBeenCalled()
     expect(mockNavigateTo).not.toHaveBeenCalled()
   })
@@ -151,7 +151,7 @@ describe('middleware/auth', () => {
     mockUser = { id: '1', nombre: 'Test' }
     mockActiveTenantId = 'tenant-uuid'
     mockTenants = [{ tenantId: 'tenant-uuid', nombre: 'Empresa A' }]
-    await authMiddleware(makeContext('/'))
+    await authMiddleware(makeContext('/'), makeContext('/'))
     expect(mockFetchMyTenants).not.toHaveBeenCalled()
   })
 
@@ -159,7 +159,7 @@ describe('middleware/auth', () => {
     mockToken = 'some.token.here'
     mockUser = { id: '1', nombre: 'Test' }
     mockActiveTenantId = null
-    await authMiddleware(makeContext('/select-tenant'))
+    await authMiddleware(makeContext('/select-tenant'), makeContext('/select-tenant'))
     expect(mockHandlePostLogin).not.toHaveBeenCalled()
     expect(mockNavigateTo).not.toHaveBeenCalled()
   })

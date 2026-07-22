@@ -22,9 +22,9 @@ describe('agruparParaImpresion', () => {
   it('agrupa personas incluidas con su nombre y monto', () => {
     const grupos = agruparParaImpresion(detalle, garzones as never)
     expect(grupos).toHaveLength(2)
-    expect(grupos[0].nombre).toBe('Garzones')
-    expect(grupos[0].personas).toEqual([{ garzonId: 'g1', nombre: 'Ana', monto: '1000.0000' }])
+    expect(grupos[0]!.nombre).toBe('Garzones')
+    expect(grupos[0]!.personas).toEqual([{ garzonId: 'g1', nombre: 'Ana', monto: '1000.0000' }])
     // excluidos no aparecen
-    expect(grupos[1].personas).toEqual([{ garzonId: 'g2', nombre: 'Pedro', monto: '500.0000' }])
+    expect(grupos[1]!.personas).toEqual([{ garzonId: 'g2', nombre: 'Pedro', monto: '500.0000' }])
   })
 })

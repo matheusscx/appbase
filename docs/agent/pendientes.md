@@ -12,24 +12,12 @@ ya identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **Burndown de typecheck del frontend — 20 errores** (frontend)
-  Bajo ratchet en `frontend/typecheck-baseline.json`. Todos los patrones documentados
-  (`@click`, spread/índice guardado, `string|null`→prop) ya quemados (84→20, jul-2026).
-  **Restan 2 grupos, ambos SIN patrón documentado — evaluar/preguntar antes de tocar:**
-  - **Patrones nuevos (7, no-spec):** `AppDateInput`/`AppDateTimeInput` (handler param
-    `{start,end}` vs `DateRange` de la lib); `AppDrawer` (`:content` computed
-    `{style}|undefined` vs `DialogContentProps`); `MoneyInput` (`MaskaDetail` no exportado
-    por `maska/vue`); `ItemPersonalizacionDrawer` (`$event` `string|boolean` → param
-    `boolean`); `propinas-distribucion` ×2 (param del handler narrower que el emit `string`).
-  - **Specs (13):** `middleware/auth.spec.ts` (8: TS2347/TS2554), `usePropinaImpresion.spec.ts`
-    (3: TS2532), `stores/auth.spec.ts` (2: TS2321 excessive stack depth de rutas Nuxt).
-    Patrón distinto (mocks/tipado de test), no `@click`/índice.
-  **Fix (patrones ya documentados en `anti-patterns.md`):** TS2322 `@click`/handler que
-  devuelve valor → arrow inline o función nombrada; TS2532/18048 índice guardado →
-  aserción no-nula `!`; `string|null`→prop → `?? undefined` (una vía) o tipar el form
-  `string` con `?? ''` al cargar.
-  Tras cada tanda: `npm run typecheck:ratchet -- --update` y commitear la baseline en el
-  mismo commit. **Verificar:** total de la baseline baja; ratchet en verde.
+- [x] **Burndown de typecheck del frontend — COMPLETO (0 errores)** (frontend) — jul-2026
+  Los 84 errores de vue-tsc estricto se quemaron por tandas. `typecheck-baseline.json`
+  quedó vacío: el `typecheck:ratchet` ahora es un gate totalmente estricto (cualquier
+  error nuevo bloquea CI). Todos los patrones y sus fixes solo-de-tipo quedaron en
+  `anti-patterns.md` (`@click`→arrow inline; spread/índice guardado→`!`; `string|null`→prop
+  con `?? undefined`/tipar form; mismatches Nuxt UI·reka; tipado de unit tests vitest).
 
 ---
 

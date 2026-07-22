@@ -36,6 +36,10 @@ vi.stubGlobal('$fetch', vi.fn())
 
 import { useAuthStore } from './auth'
 
+// El tipo de rutas de `$fetch` (Nuxt) dispara TS2321 (recursión de tipos) al pasar por
+// vi.mocked; en el test lo tratamos como un mock plano.
+const $fetchMock = vi.mocked($fetch as unknown as (...args: unknown[]) => Promise<unknown>)
+
 // Token de prueba con tenant_id y es_superadmin
 const makeToken = (payload: object) => {
   const body = btoa(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
@@ -79,13 +83,13 @@ describe('useAuthStore — computed claims', () => {
 describe('useAuthStore — restauración de sesión', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    vi.mocked($fetch).mockReset()
+    $fetchMock.mockReset()
   })
 
   it('tryRefresh exitoso guarda el nuevo token y devuelve true', async () => {
     const store = useAuthStore()
     const fresh = makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 'abc-123', es_superadmin: false, iat: 0, exp: 9999 })
-    vi.mocked($fetch).mockResolvedValueOnce({ access_token: fresh })
+    $fetchMock.mockResolvedValueOnce({ access_token: fresh })
     const ok = await store.tryRefresh()
     expect(ok).toBe(true)
     expect(store.token).toBe(fresh)
@@ -94,7 +98,7 @@ describe('useAuthStore — restauración de sesión', () => {
 
   it('tryRefresh fallido devuelve false y no setea token', async () => {
     const store = useAuthStore()
-    vi.mocked($fetch).mockRejectedValueOnce(new Error('401'))
+    $fetchMock.mockRejectedValueOnce(new Error('401'))
     const ok = await store.tryRefresh()
     expect(ok).toBe(false)
     expect(store.token).toBeNull()
@@ -104,7 +108,7 @@ describe('useAuthStore — restauración de sesión', () => {
     const store = useAuthStore()
     store.setToken(makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 }))
     const fresh = makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 })
-    vi.mocked($fetch)
+    $fetchMock
       .mockRejectedValueOnce(new Error('401')) // /auth/me con token vencido
       .mockResolvedValueOnce({ access_token: fresh }) // /auth/refresh
       .mockResolvedValueOnce({ id: 'u1', nombre: 'Ana' }) // /auth/me reintento
@@ -116,7 +120,7 @@ describe('useAuthStore — restauración de sesión', () => {
   it('fetchMe limpia la sesión si el refresh también falla', async () => {
     const store = useAuthStore()
     store.setToken(makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 }))
-    vi.mocked($fetch)
+    $fetchMock
       .mockRejectedValueOnce(new Error('401')) // /auth/me
       .mockRejectedValueOnce(new Error('401')) // /auth/refresh
     await store.fetchMe()
