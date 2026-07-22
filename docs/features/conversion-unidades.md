@@ -442,7 +442,6 @@ npm run test:e2e -- inventario.e2e-spec.ts
 ## Related Features
 
 - [Inventario — Kardex de movimientos de stock](./inventario-kardex.md) — El kardex siempre queda en unidad base; esta feature convierte antes de escribir.
-- [Catálogo de items (productos y servicios)](./catalogo-items.md) — `item_producto.unidad_medida` es validado por este catálogo.
 - [Recetas](./recetas.md) — **Pieza 3 del cluster**: requiere conversión para expresar "200 g de insumo stockeado en kg".
 
 ---

@@ -594,8 +594,8 @@ npm run test:e2e -- caja.e2e.spec.ts
 
 ## Related Features
 
-- [Gestión de ventas](./procesamiento-ventas.md) — Las ventas físicas asocian la caja activa del usuario
-- [Registro de pagos](./registro-pagos.md) — Los pagos se asocian a la caja donde se cobran
+- [Gestión de ventas](./ventas.md) — Las ventas físicas asocian la caja activa del usuario
+- [Registro de pagos](./pagos.md) — Los pagos se asocian a la caja donde se cobran
 - [Roles y Permisos (RBAC)](./roles-permisos.md) — Los permisos `Caja/*` controlan el acceso
 
 ---

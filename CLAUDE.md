@@ -99,8 +99,9 @@ Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_UR
 `JWT_SECRET`, `PORT`, `API_PREFIX`; frontend lee `VITE_API_URL`.
 
 **Git hook (una vez por clone):** `git config core.hooksPath .githooks` activa el
-pre-commit (`.githooks/pre-commit`), que bloquea el casing malo de `tenant_id`, el
-`DELETE` físico y errores de `lint:check` sobre backend staged. No cubre N+1 ni el
+pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
+`tenant_id`, `DELETE` físico, errores de `lint:check` (backend), tokens de diseño
+hardcodeados (`.vue`) y enlaces internos de docs rotos (`.md`). No cubre N+1 ni el
 filtro de borrado (juicio) — eso es la revisión independiente del skill `verify-feature`.
 Escape puntual: `git commit --no-verify`.
 

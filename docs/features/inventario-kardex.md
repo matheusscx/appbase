@@ -518,9 +518,8 @@ npm run test:e2e -- inventario.e2e.spec.ts
 
 ## Related Features
 
-- [Catálogo de items (productos y servicios)](./catalogo-items.md) — Donde vive `item_producto.stock`
 - [Procesamiento de ventas](./ventas.md) — Integración automática: cada venta genera salida
-- [Gestión de cajas](./cajas.md) — Ventas se asocian a cajas (futuro: movimientos de caja)
+- [Gestión de cajas](./gestion-cajas.md) — Ventas se asocian a cajas (futuro: movimientos de caja)
 
 ---
 

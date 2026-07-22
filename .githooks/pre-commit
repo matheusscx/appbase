@@ -73,6 +73,15 @@ if [ -n "$staged_vue" ]; then
   fi
 fi
 
+# ── Guard 5: enlaces internos de docs staged ─────────────────────────────────
+staged_md=$(git diff --cached --name-only --diff-filter=ACM -- '*.md')
+if [ -n "$staged_md" ]; then
+  if ! node scripts/check-docs-links.mjs --staged ; then
+    red "✗ Enlaces de docs rotos en .md staged (ver arriba)."
+    fail=1
+  fi
+fi
+
 # ── Recordatorio no-bloqueante: review de juicio ─────────────────────────────
 if echo "$backend_ts" | grep -qE '\.service\.ts$'; then
   ylw "⚠ Tocaste services de backend. El hook NO revisa N+1 ni 'SELECT sin eliminado_el IS NULL'."

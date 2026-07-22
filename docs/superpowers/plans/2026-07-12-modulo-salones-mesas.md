@@ -38,7 +38,7 @@ RBAC nuevo (módulo "Salones" con permiso extra `Operar`) + dos vistas frontend
 ## Modelo de datos (nuevas tablas)
 
 Convenciones obligatorias en todas: `type: 'uuid'` explícito en PK/FK
-([ADR-004](docs/adr/004-uuid-column-types.md)), `tenant_id` del token, soft delete
+([ADR-004](../../adr/004-uuid-column-types.md)), `tenant_id` del token, soft delete
 `@DeleteDateColumn({ name: 'eliminado_el' })`, `creado_el`/`actualizado_el`,
 `numeric(18,4)` → string con Decimal.js, columnas `snake_case` vía `name:`.
 

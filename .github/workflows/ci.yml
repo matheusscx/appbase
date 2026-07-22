@@ -59,6 +59,11 @@ jobs:
             backend/package-lock.json
             frontend/package-lock.json
 
+      # ── Docs ─────────────────────────────────────────────────────────────
+      # Falla rápido si la doc del proyecto tiene enlaces internos rotos (sin deps).
+      - name: docs · enlaces internos
+        run: node scripts/check-docs-links.mjs
+
       # ── Backend ──────────────────────────────────────────────────────────
       - name: backend · install
         working-directory: backend
