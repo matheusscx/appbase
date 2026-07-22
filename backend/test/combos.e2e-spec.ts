@@ -4,6 +4,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import type { PersonalizacionRecetaSnapshot } from '../src/common/dto/personalizacion-receta.dto';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -46,6 +47,7 @@ interface GrupoDetalle {
 }
 interface ComboComponenteDetalle {
   componenteItemId: string;
+  cantidad: string;
   grupos: GrupoDetalle[];
 }
 interface ComboDetalleResponse {
@@ -142,6 +144,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
   let panId: string;
   let hamburguesaId: string;
   let comboId: string;
+  let comboDobleId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -278,6 +281,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
   const HAMBURGUESA_ESPECIAL_ID = '550e8400-e29b-41d4-a716-446655440294';
   const PROTEINA_GRUPO_ID = '550e8400-e29b-41d4-a716-446655440290';
   const CHULETA_ID = '550e8400-e29b-41d4-a716-446655440288';
+  const CARNE_MOLIDA_ID = '550e8400-e29b-41d4-a716-446655440257';
 
   it('7. GET /items/:id del "Combo Especial" expone el grupo "Proteína" (min:1, max:1) de su componente receta "Hamburguesa Especial", con la opción chuleta a +$1.500', async () => {
     const res = await request(app.getHttpServer())
@@ -391,5 +395,151 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       });
 
     expect(res.status).toBe(400);
+  });
+
+  // Componente cantidad>1 con elección de proteínas DISTINTAS por unidad —
+  // combo self-contained (no toca el seed) creado con la receta
+  // "Hamburguesa Especial" (grupo "Proteína", min:1 max:1) como componente
+  // en cantidad 2. Cierra el gap de evidencia: hasta ahora solo había
+  // cobertura mockeada de cantidad>1 + elecciones distintas por unidad.
+  it('10. crea un combo self-contained con "Hamburguesa Especial" x2 como componente bloqueante', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Combo Doble Hamburguesa E2E ${Date.now()}`,
+        precioBase: '5000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          {
+            componenteItemId: HAMBURGUESA_ESPECIAL_ID,
+            cantidad: '2',
+            bloqueante: true,
+          },
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    comboDobleId = (res.body as ItemResponse).id;
+  });
+
+  it('11. (sanity) GET /items/:id del combo doble expone cantidad=2 y el grupo "Proteína" con la opción chuleta a +$1.500', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/items/${comboDobleId}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const detalle = res.body as ComboDetalleResponse;
+    const componenteHamburguesa = detalle.componentes.find(
+      (c) => c.componenteItemId === HAMBURGUESA_ESPECIAL_ID,
+    );
+    expect(componenteHamburguesa).toBeDefined();
+    expect(componenteHamburguesa?.cantidad).toBe('2.0000');
+
+    const grupoProteina = componenteHamburguesa?.grupos.find(
+      (g) => g.grupoModificadorId === PROTEINA_GRUPO_ID,
+    );
+    expect(grupoProteina?.min).toBe(1);
+    expect(grupoProteina?.max).toBe(1);
+
+    const opcionChuleta = grupoProteina?.opciones.find(
+      (o) => o.itemId === CHULETA_ID,
+    );
+    expect(opcionChuleta?.precioExtra).toBe('1500.0000');
+
+    const opcionCarne = grupoProteina?.opciones.find(
+      (o) => o.itemId === CARNE_MOLIDA_ID,
+    );
+    expect(opcionCarne).toBeDefined();
+  });
+
+  it('12. vende el combo doble eligiendo chuleta en la unidad 1 y carne molida en la unidad 2 → total = precioBase(5000) + chuleta(1500) + carne(0), persiste dos entradas de snapshot (una por unidad, cada una con su propia proteína) y descuenta stock por separado de AMBAS proteínas', async () => {
+    const resVenta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [
+          {
+            itemId: comboDobleId,
+            cantidad: '1',
+            personalizacion: {
+              componentes: [
+                {
+                  componenteItemId: HAMBURGUESA_ESPECIAL_ID,
+                  unidad: 1,
+                  grupos: [
+                    {
+                      grupoId: PROTEINA_GRUPO_ID,
+                      opciones: [{ itemId: CHULETA_ID, unidades: 1 }],
+                    },
+                  ],
+                },
+                {
+                  componenteItemId: HAMBURGUESA_ESPECIAL_ID,
+                  unidad: 2,
+                  grupos: [
+                    {
+                      grupoId: PROTEINA_GRUPO_ID,
+                      opciones: [{ itemId: CARNE_MOLIDA_ID, unidades: 1 }],
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '6500.0000' }],
+      });
+
+    expect(resVenta.status).toBe(201);
+    const venta = resVenta.body as VentaResponse;
+    expect(venta.estado).toBe('pagada');
+    expect(venta.advertenciasReceta ?? []).toEqual([]);
+    // Total = precioBase del combo doble (5000) + precioExtra chuleta (1500)
+    // + precioExtra carne molida (0)
+    expect(venta.totalFinal).toBe('6500.0000');
+
+    // Snapshot congelado persistido por unidad: `componentes` debe tener DOS
+    // entradas (unidad 1 y unidad 2), cada una con la proteína elegida en
+    // esa unidad — sin mezclarse ni pisarse entre sí.
+    const detalleRows: {
+      personalizacion: PersonalizacionRecetaSnapshot | null;
+    }[] = await ds.query(
+      `SELECT personalizacion FROM venta_detalles
+       WHERE venta_id = $1 AND item_id = $2 AND eliminado_el IS NULL`,
+      [venta.id, comboDobleId],
+    );
+    expect(detalleRows).toHaveLength(1);
+    const snapshot = detalleRows[0].personalizacion;
+    expect(snapshot?.componentes).toHaveLength(2);
+
+    const snapshotUnidad1 = snapshot?.componentes?.find((c) => c.unidad === 1);
+    const snapshotUnidad2 = snapshot?.componentes?.find((c) => c.unidad === 2);
+    expect(snapshotUnidad1?.grupos[0]?.opciones[0]?.itemId).toBe(CHULETA_ID);
+    expect(snapshotUnidad2?.grupos[0]?.opciones[0]?.itemId).toBe(
+      CARNE_MOLIDA_ID,
+    );
+
+    // Stock descontado por unidad, por ítem distinto: una salida separada
+    // para la chuleta (150 g → 0.15 kg) y otra separada para la carne
+    // molida (150 g → 0.15 kg), ambas ligadas a esta venta — prueba que
+    // cada unidad descontó el stock de SU propia elección.
+    const movs: MovimientoInventario[] = await ds.query(
+      `SELECT tipo, motivo, item_id, cantidad FROM movimientos_inventario
+       WHERE venta_id = $1 AND item_id = ANY($2) AND eliminado_el IS NULL`,
+      [venta.id, [CHULETA_ID, CARNE_MOLIDA_ID]],
+    );
+    expect(movs).toHaveLength(2);
+
+    const movChuleta = movs.find((m) => m.item_id === CHULETA_ID);
+    expect(movChuleta?.tipo).toBe('salida');
+    expect(movChuleta?.motivo).toBe('venta');
+    expect(movChuleta?.cantidad).toBe('0.1500');
+
+    const movCarne = movs.find((m) => m.item_id === CARNE_MOLIDA_ID);
+    expect(movCarne?.tipo).toBe('salida');
+    expect(movCarne?.motivo).toBe('venta');
+    expect(movCarne?.cantidad).toBe('0.1500');
   });
 });
