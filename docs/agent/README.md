@@ -106,7 +106,12 @@ No reabrir sin argumento nuevo.
   - [x] tipo `uuid` explícito → test `src/common/invariants/uuid-columns.invariant.spec.ts`.
   - [x] Tailwind hardcoded fuera de Caja → `frontend/scripts/check-design-tokens.mjs`
     (`npm run design:check` en el gate + `--staged` en el pre-commit).
-  - [ ] `number` en campos de monto (candidato a lint; baja factibilidad estática).
+  - [~] `number` en campos de monto → **deliberadamente NO automatizada.** Estáticamente
+    no se sabe qué valor es dinero: el monto se tipa como `string` (columna `numeric`) y
+    `precio * tasa` es indistinguible de `ms = 2 * 60 * 1000`. Un lint daría una avalancha
+    de falsos positivos sobre tiempo/índices/cantidades → se desactivaría. Se queda como
+    regla en `anti-patterns.md` + la revisión independiente de `verify-feature` (paso 7),
+    que sí razona el contexto. No es laguna: es la herramienta correcta.
 
 ## Pendiente
 
