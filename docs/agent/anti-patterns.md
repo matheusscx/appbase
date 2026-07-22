@@ -85,6 +85,36 @@ En los pocos caminos por repositorio de TypeORM, el equivalente es `repo.softDel
 en vez de `repo.delete(id)`. Omitir el filtro en una query nueva hace reaparecer
 registros borrados en listados y reportes.
 
+### ❌ N+1 — una query por iteración sobre un resultado
+
+```ts
+// MAL — 1 query para la lista + 1 query por fila (N+1)
+const rows = await this.dataSource.query(`SELECT ... FROM items WHERE ...`, [p]);
+const data = await Promise.all(
+  rows.map(async (r) => ({
+    ...this.mapRow(r),
+    disponible: await this.calcularDisponible(tenantId, r.id), // query por fila
+  })),
+);
+
+// BIEN — resolver el dato derivado para todas las filas en una sola query
+const ids = rows.map((r) => r.id);
+const dispRows = await this.dataSource.query(
+  `SELECT item_id, ... FROM ... WHERE item_id = ANY($1) AND eliminado_el IS NULL
+   GROUP BY item_id`,
+  [ids],
+);
+const byId = new Map(dispRows.map((d) => [d.item_id, d]));
+const data = rows.map((r) => ({ ...this.mapRow(r), disponible: byId.get(r.id) ?? null }));
+```
+
+Un `map(async … query)` o un `for` con `await query` dentro escala lineal con las
+filas: un listado de 50 items dispara 50+ queries. Resolver siempre en una query con
+`JOIN`/agregación, o batch-fetch con `WHERE id = ANY($1)` y mapear en memoria. Aplica
+igual a `Promise.all` sobre queries: sigue siendo N round-trips.
+→ *Instancia real: `items.service.ts` `findAll` llamaba `calcularDisponibleReceta`/
+`Combo` por fila. Difícil de detectar por lint → se revisa en el cierre (`verify-feature`).*
+
 ---
 
 ## Frontend

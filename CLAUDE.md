@@ -159,7 +159,10 @@ Los patrones completos están en `docs/patterns/backend.md` y `docs/patterns/fro
   arrancar). IDs fijos, patrón `550e8400-e29b-41d4-a716-446655440XXX` — usar el
   siguiente número libre. Detalle: `docs/patterns/backend.md` §8.
 - **Backend:** feature en `src/modules/<nombre>/`, registrada en `app.module.ts`. DTOs
-  con `class-validator`. Controller valida y delega; el service tiene la lógica.
+  con `class-validator`. Controller valida y delega; el service tiene la lógica. **Nunca
+  una query por iteración (N+1):** el dato derivado por fila se resuelve en una sola
+  query (`JOIN`/agregación) o batch con `WHERE id = ANY($1)`. Toda `SELECT`/`JOIN` nueva
+  filtra `eliminado_el IS NULL`. Ejemplos: `docs/agent/anti-patterns.md`.
 - **Frontend:** `$fetch`/`useApiFetch`, nunca axios. Runtime config pública con prefijo
   `VITE_`. Utilidades de presentación en composables de `app/composables/`, nunca
   locales a un `.vue`. Las páginas no contienen lógica de negocio.

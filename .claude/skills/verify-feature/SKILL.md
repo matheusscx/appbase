@@ -32,13 +32,28 @@ Revisar el diff (`git diff`) contra las invariantes de `CLAUDE.md`:
 
 - [ ] `tenant_id` proviene del token, nunca del body/query/params
 - [ ] Todo cálculo de dinero o porcentaje usa Decimal.js; porcentajes en decimal
-- [ ] Sin `DELETE` físico; toda lectura nueva filtra `eliminado_el IS NULL`
+- [ ] Sin `DELETE` físico; **toda `SELECT`/`JOIN` nueva filtra `eliminado_el IS NULL`**
+      (revisar cada query raw agregada en el diff, una por una — no asumir)
 - [ ] Columnas PK/FK UUID con `type: 'uuid'` explícito
 - [ ] Sin cambios al sistema de tokens JWT
 - [ ] "Exento" tratado como estado explícito, no como ausencia de impuesto
 - [ ] Rutas nuevas con guard de permisos en el backend
 
 Cualquier violación: **detener el cierre y reportar**, no corregir sobre la marcha.
+
+## 2b. Consultas y rendimiento
+
+Errores recurrentes que ni el lint ni los tests atrapan — revisar el diff a mano:
+
+- [ ] **Sin N+1.** Ningún `for`/`.map(async …)`/`Promise.all` que ejecute una query
+      por iteración sobre un resultado. El dato derivado por fila se resuelve en una
+      sola query (`JOIN`/agregación) o batch-fetch con `WHERE id = ANY($1)` + map en
+      memoria. Ver `docs/agent/anti-patterns.md` → "N+1".
+- [ ] Toda query raw nueva lleva su filtro `eliminado_el IS NULL` en cada tabla del
+      `FROM`/`JOIN` (ligado al check de soft delete de arriba).
+- [ ] Sin `SELECT *` en tablas anchas ni traer columnas que no se usan.
+
+Si aparece un N+1 o una lectura sin filtro de borrado: **detener el cierre y reportar.**
 
 ## 3. Alcance
 
@@ -88,12 +103,13 @@ Cerrar con este formato, sin adornos:
 VERIFICACIÓN — <tarea>
 
 Comandos
-  backend lint      ✅ / ❌ <resumen del error>
-  backend test      ✅ / ❌
-  backend test:e2e  ✅ / ❌
-  frontend build    ✅ / ❌
+  backend lint:check  ✅ / ❌ <resumen del error>
+  backend test        ✅ / ❌
+  backend test:e2e    ✅ / ❌
+  frontend build      ✅ / ❌
 
 Invariantes      ✅ / ⚠️ <cuál>
+Consultas        ✅ / ⚠️ <N+1 o lectura sin filtro de borrado>
 Alcance          ✅ / ⚠️ <archivos fuera de alcance>
 Anti-patrones    ✅ / ⚠️ <entrada>
 Documentación    ✅ / ⚠️ <qué falta>
