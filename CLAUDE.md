@@ -35,6 +35,13 @@ No asumir reglas de negocio. Detenerse y consultar al usuario si la tarea:
   **auditoría**;
 - exige una **dependencia nueva** (verificar antes si el stack actual la resuelve).
 
+**Investigación de mercado (al detenerse por una regla de negocio no documentada):** si
+además el mercado ya resolvió el tema (POS maduros: Toast/Square/Lightspeed…) y el owner
+no es experto del dominio, **preguntar si quiere una pasada de investigación antes de
+diseñar** — nunca ejecutarla sin confirmación. El owner también puede pedirla cuando
+quiera. Lo que traiga es **insumo para cruzar y adaptar, no verdad a copiar**. Plantilla
+y regla del cruce: `docs/agent/investigacion-mercado.md`.
+
 ## 🔧 Alcance del trabajo
 
 No refactorizar código fuera del alcance solicitado. Solo intervenir código ajeno
@@ -255,6 +262,7 @@ Procedimiento completo: skill `verify-feature`.
 | `docs/agent/anti-patterns.md` | Errores reales ya cometidos en el repo |
 | `docs/agent/pendientes.md` | Backlog de correcciones diferidas a corregir al cerrar el harness |
 | `docs/agent/README.md` | Por qué este setup está escrito así |
+| `docs/agent/investigacion-mercado.md` | Plantilla de investigación de mercado + regla del cruce |
 | `docs/ESTADO.md` | Estado de todas las funcionalidades y roadmap |
 | `docs/PRODUCTO.md` | Especificación funcional completa con reglas de negocio |
 | `startup-pos.sql` | Esquema de BD completo |
