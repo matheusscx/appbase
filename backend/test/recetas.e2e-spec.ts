@@ -77,7 +77,7 @@ async function crearIngrediente(
       nombre: `${nombre} ${Date.now()}`,
       precioBase: costo,
       monedaId: CLP_MONEDA_ID,
-      tipo: 'producto',
+      tipo: 'ingrediente',
       unidadMedida: unidad,
       stock,
       costo,

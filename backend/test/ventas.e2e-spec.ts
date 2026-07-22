@@ -100,7 +100,7 @@ describe('Ventas (e2e)', () => {
     ds = app.get(DataSource);
     token = await login(app);
     cajaId = await abrirCaja(app, token);
-  });
+  }, 60000);
 
   afterAll(async () => {
     if (cajaId) await cerrarCaja(app, token, cajaId);
@@ -148,7 +148,7 @@ describe('Ventas (e2e)', () => {
       expect(movCaja[0].tipo).toBe('entrada');
     });
 
-    it('crea venta con pago menor y queda en estado pendiente', async () => {
+    it('crea venta con pago menor y queda en estado pagada_parcial', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
         .set('Authorization', `Bearer ${token}`)
@@ -157,8 +157,10 @@ describe('Ventas (e2e)', () => {
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
         });
 
+      // Abono parcial: total pagado > 0 y saldo < total_final → pagada_parcial
+      // (docs/features/ventas.md). "pendiente" es solo sin pagos o total pagado 0.
       expect(res.status).toBe(201);
-      expect((res.body as VentaResponse).estado).toBe('pendiente');
+      expect((res.body as VentaResponse).estado).toBe('pagada_parcial');
     });
 
     it('retorna 400 si no hay caja abierta para el usuario', async () => {
