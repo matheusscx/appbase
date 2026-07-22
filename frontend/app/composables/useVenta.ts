@@ -234,6 +234,9 @@ export function toVentaLineasBody(lineas: CarritoLinea[]) {
             ...(l.personalizacion.grupos?.length
               ? { grupos: l.personalizacion.grupos }
               : {}),
+            ...(l.personalizacion.componentes?.length
+              ? { componentes: l.personalizacion.componentes }
+              : {}),
           },
         }
       : {}),

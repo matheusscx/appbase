@@ -178,6 +178,26 @@ const gruposOpcionesSeleccionadas = computed(() => {
   return flat
 })
 
+/** Opciones elegidas en los grupos de cada (componente, unidad), aplanadas para el preview de precio. */
+const componentesOpcionesSeleccionadas = computed(() => {
+  if (!detalle.value) return []
+  const flat: { precioExtra: string, unidades: number }[] = []
+  for (const comp of detalle.value.componentes ?? []) {
+    if (!comp.grupos.length) continue
+    for (let u = 1; u <= Number(comp.cantidad); u++) {
+      const sel = componentesSeleccion.value[`${comp.componenteItemId}#${u}`] ?? {}
+      for (const g of comp.grupos) {
+        const selGrupo = sel[g.grupoModificadorId] ?? {}
+        for (const o of g.opciones) {
+          const unidades = selGrupo[o.itemId] ?? 0
+          if (unidades > 0) flat.push({ precioExtra: o.precioExtra, unidades })
+        }
+      }
+    }
+  }
+  return flat
+})
+
 const gruposResumen = computed(() => {
   if (!detalle.value) return []
   const partes: { grupoNombre: string, opcionNombre: string, unidades: number }[] = []
@@ -186,6 +206,26 @@ const gruposResumen = computed(() => {
     for (const o of g.opciones) {
       const unidades = sel[o.itemId] ?? 0
       if (unidades > 0) partes.push({ grupoNombre: g.nombre, opcionNombre: o.itemNombre, unidades })
+    }
+  }
+  for (const comp of detalle.value.componentes ?? []) {
+    if (!comp.grupos.length) continue
+    for (let u = 1; u <= Number(comp.cantidad); u++) {
+      const sel = componentesSeleccion.value[`${comp.componenteItemId}#${u}`] ?? {}
+      const sufijoUnidad = Number(comp.cantidad) > 1 ? ` #${u}` : ''
+      for (const g of comp.grupos) {
+        const selGrupo = sel[g.grupoModificadorId] ?? {}
+        for (const o of g.opciones) {
+          const unidades = selGrupo[o.itemId] ?? 0
+          if (unidades > 0) {
+            partes.push({
+              grupoNombre: `${comp.componenteNombre}${sufijoUnidad} · ${g.nombre}`,
+              opcionNombre: o.itemNombre,
+              unidades,
+            })
+          }
+        }
+      }
     }
   }
   return partes
@@ -205,6 +245,7 @@ const precioPreview = computed(() => {
   return precioConExtras(detalle.value.precioBase, [
     ...extrasSeleccionados.value,
     ...gruposOpcionesSeleccionadas.value,
+    ...componentesOpcionesSeleccionadas.value,
   ])
 })
 

@@ -345,6 +345,37 @@ describe('carrito helpers', () => {
     })
   })
 
+  it('toVentaLineasBody incluye personalizacion.componentes cuando el combo tiene grupos anidados elegidos (regla: el backend nunca cobra lo que no recibe)', () => {
+    const combo = { ...item('c'), tipo: 'combo' }
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      componentes: [
+        {
+          componenteItemId: 'chuleta-1',
+          unidad: 1,
+          grupos: [{ grupoId: 'g-carne', opciones: [{ itemId: 'carne-premium', unidades: 1 }] }],
+        },
+      ],
+    }
+    const r = toVentaLineasBody([{ item: combo, cantidad: '1', personalizacion: pers }])
+    expect(r[0]).toMatchObject({
+      itemId: 'c',
+      cantidad: '1',
+      personalizacion: {
+        omitidos: [],
+        extras: [],
+        componentes: [
+          {
+            componenteItemId: 'chuleta-1',
+            unidad: 1,
+            grupos: [{ grupoId: 'g-carne', opciones: [{ itemId: 'carne-premium', unidades: 1 }] }],
+          },
+        ],
+      },
+    })
+  })
+
   it('toCalcularInput incluye precioUnitario cuando hay override', () => {
     const r = toCalcularInput([
       { item: item('a'), cantidad: '2', precioUnitarioOverride: '1500' },

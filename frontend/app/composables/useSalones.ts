@@ -133,13 +133,21 @@ export interface CerrarCuentaBody {
   propinaPorcentajeSugerido?: string
 }
 
-/** precioBase + Σ extras + Σ opciones de grupo cuando la línea tiene personalización con recargo. */
+/**
+ * precioBase + Σ extras + Σ opciones de grupo (propios del combo/receta) + Σ opciones de
+ * grupo por componente (combos con grupos anidados) cuando la línea tiene recargo.
+ */
 export function precioUnitarioLinea(linea: CuentaLineaDetalle): string {
   const base = new Decimal(linea.precioBase || '0')
   const extras = linea.personalizacion?.extras ?? []
   const gruposOpciones = (linea.personalizacion?.grupos ?? []).flatMap((g) => g.opciones)
-  if (extras.length === 0 && gruposOpciones.length === 0) return base.toString()
-  return [...extras, ...gruposOpciones]
+  const componentesOpciones = (linea.personalizacion?.componentes ?? []).flatMap((c) =>
+    c.grupos.flatMap((g) => g.opciones),
+  )
+  if (extras.length === 0 && gruposOpciones.length === 0 && componentesOpciones.length === 0) {
+    return base.toString()
+  }
+  return [...extras, ...gruposOpciones, ...componentesOpciones]
     .reduce(
       (acc, o) => acc.plus(new Decimal(o.precioExtra || '0').mul(o.unidades || '1')),
       base,
