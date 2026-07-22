@@ -1,12 +1,11 @@
 {
-  "total": 62,
+  "total": 56,
   "files": {
     "app/components/AppDateInput.vue": 1,
     "app/components/AppDateTimeInput.vue": 1,
     "app/components/AppDrawer.vue": 1,
     "app/components/AppInfoButton.vue": 2,
     "app/components/caja/CajaCierreDrawer.vue": 1,
-    "app/components/caja/CajaMovimientoDrawer.vue": 3,
     "app/components/MoneyInput.vue": 1,
     "app/components/ordenes/OrdenDetalleDrawer.vue": 2,
     "app/components/ordenes/ReembolsoModal.vue": 1,
@@ -18,7 +17,6 @@
     "app/components/ventas/CobroModal.vue": 1,
     "app/components/ventas/ItemPersonalizacionDrawer.vue": 1,
     "app/components/ventas/NotaCreditoModal.vue": 1,
-    "app/components/ventas/VentaDetalleDrawer.vue": 3,
     "app/composables/useJwt.ts": 1,
     "app/composables/usePropinaImpresion.spec.ts": 3,
     "app/middleware/auth.spec.ts": 8,

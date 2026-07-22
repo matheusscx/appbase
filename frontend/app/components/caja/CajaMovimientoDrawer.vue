@@ -77,7 +77,7 @@ async function guardar() {
               color="success"
               icon="i-lucide-circle-arrow-down"
               label="Entrada"
-              @click="form.tipo = 'entrada'"
+              @click="() => { form.tipo = 'entrada' }"
             />
             <UButton
               type="button"
@@ -87,7 +87,7 @@ async function guardar() {
               color="error"
               icon="i-lucide-circle-arrow-up"
               label="Salida"
-              @click="form.tipo = 'salida'"
+              @click="() => { form.tipo = 'salida' }"
             />
           </div>
         </UFormField>
@@ -116,7 +116,7 @@ async function guardar() {
     </template>
 
     <template #actions>
-      <UButton color="neutral" variant="ghost" @click="open = false">
+      <UButton color="neutral" variant="ghost" @click="() => { open = false }">
         Cancelar
       </UButton>
       <UButton

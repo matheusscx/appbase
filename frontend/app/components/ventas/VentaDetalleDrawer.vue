@@ -625,7 +625,7 @@ function onNcSuccess(payload: {
       <UButton
         color="neutral"
         variant="ghost"
-        @click="open = false"
+        @click="() => { open = false }"
       >
         Cerrar
       </UButton>
@@ -635,13 +635,13 @@ function onNcSuccess(payload: {
         icon="i-lucide-file-minus"
         color="neutral"
         variant="outline"
-        @click="ncOpen = true"
+        @click="() => { ncOpen = true }"
       />
       <UButton
         v-if="puedeAbonar"
         label="Registrar pago"
         icon="i-lucide-plus"
-        @click="abonoOpen = true"
+        @click="() => { abonoOpen = true }"
       />
     </template>
   </AppDrawer>
