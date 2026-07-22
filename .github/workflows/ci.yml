@@ -1,0 +1,95 @@
+name: CI
+
+# Backstop del lado del servidor: corre el gate determinista en cada push a main,
+# sin depender de que el agente/dev invoque verify-feature localmente.
+# Lo que NO puede correr acá (revisión de juicio: N+1, dinero-Decimal, alcance) vive
+# en el sub-agente de verify-feature (paso 7).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: appuser
+          POSTGRES_PASSWORD: apppass
+          POSTGRES_DB: appdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U appuser -d appdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # synchronize crea el schema porque NODE_ENV != production; el seeder corre al bootstrap.
+      DATABASE_URL: postgres://appuser:apppass@localhost:5432/appdb
+      NODE_ENV: test
+      API_PREFIX: api
+      PORT: '3000'
+      JWT_SECRET: ci-only-not-a-real-secret
+      JWT_REFRESH_SECRET: ci-only-not-a-real-refresh-secret
+      JWT_EXPIRATION: 15m
+      JWT_REFRESH_EXPIRATION: 7d
+      VITE_API_URL: http://localhost:3000/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      # ── Backend ──────────────────────────────────────────────────────────
+      - name: backend · install
+        working-directory: backend
+        run: npm ci
+
+      - name: backend · lint:check
+        working-directory: backend
+        run: npm run lint:check
+
+      - name: backend · typecheck
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: backend · unit tests
+        working-directory: backend
+        run: npm test
+
+      - name: backend · e2e (Postgres real)
+        working-directory: backend
+        run: npm run test:e2e
+
+      # ── Frontend ─────────────────────────────────────────────────────────
+      - name: frontend · install
+        working-directory: frontend
+        run: npm ci
+
+      - name: frontend · build
+        working-directory: frontend
+        run: npm run build
+
+      - name: frontend · typecheck ratchet
+        working-directory: frontend
+        run: npm run typecheck:ratchet
+
+      - name: frontend · design tokens
+        working-directory: frontend
+        run: npm run design:check

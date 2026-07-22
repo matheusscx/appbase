@@ -217,6 +217,10 @@ cd frontend && npm run build && npm run typecheck:ratchet && npm run design:chec
 `isolatedModules` hace que `npm test` (ts-jest) **no** chequee tipos; `backend typecheck`
 (`tsc --noEmit`) lo cubre. Tolerancia-cero — el backend está limpio.
 
+El **mismo gate corre en CI** (`.github/workflows/ci.yml`, Postgres real) en cada push a
+`main` — backstop del servidor que no depende de invocar `verify-feature` localmente. La
+revisión de juicio (N+1, dinero-Decimal, alcance) no corre en CI: vive en el paso 7.
+
 `nuxt build` **no tipa-chequea**; `typecheck:ratchet` (vue-tsc vs
 `frontend/typecheck-baseline.json`) falla solo si un archivo mete errores de tipo
 **nuevos** — la deuda preexistente se quema por tandas con `-- --update`.
