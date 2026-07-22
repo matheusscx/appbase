@@ -211,7 +211,7 @@ Ejecutar, no afirmar. Si algo falla, la tarea no está terminada.
 
 ```bash
 cd backend  && npm run lint:check && npm test && npm run test:e2e
-cd frontend && npm run build && npm run typecheck:ratchet
+cd frontend && npm run build && npm run typecheck:ratchet && npm run design:check
 ```
 
 `nuxt build` **no tipa-chequea**; `typecheck:ratchet` (vue-tsc vs

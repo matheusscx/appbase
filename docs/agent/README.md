@@ -104,8 +104,9 @@ No reabrir sin argumento nuevo.
   estos archivos crezcan sin límite.
 - **Las invariantes son un backlog de automatización**, no un sustituto permanente.
   - [x] tipo `uuid` explícito → test `src/common/invariants/uuid-columns.invariant.spec.ts`.
-  - [ ] `number` en campos de monto (candidato a lint).
-  - [ ] clases Tailwind hardcoded fuera del módulo Caja (candidato a lint/test).
+  - [x] Tailwind hardcoded fuera de Caja → `frontend/scripts/check-design-tokens.mjs`
+    (`npm run design:check` en el gate + `--staged` en el pre-commit).
+  - [ ] `number` en campos de monto (candidato a lint; baja factibilidad estática).
 
 ## Pendiente
 

@@ -138,8 +138,10 @@ Detalle: `docs/patterns/frontend.md`.
 
 Rompe el modo oscuro y el theming por tenant. Excepción única: colores financieros
 (verde/rojo/azul) en el módulo Caja.
-→ *Candidato a regla de lint: prohibir clases `text-gray-*`, `bg-white`, `dark:bg-*`
-fuera de `app/components/caja/`.*
+→ *AUTOMATIZADO: `frontend/scripts/check-design-tokens.mjs` (`npm run design:check` en el
+gate; `--staged` en el pre-commit) falla si un `.vue` fuera de `app/components/caja/` usa
+neutrales hardcodeados (`*-gray-N`, `bg-white/black`, `dark:` sobre neutrales). Los
+colores de marca (`bg-primary-*`, `text-white` sobre marca) quedan fuera de alcance.*
 
 ### ❌ Función de formato definida dentro de un `.vue`
 

@@ -21,6 +21,7 @@ cd backend  && npm test
 cd backend  && npm run test:e2e
 cd frontend && npm run build
 cd frontend && npm run typecheck:ratchet
+cd frontend && npm run design:check
 ```
 
 Registrar el resultado real de cada comando. **No declarar que un paso pasó sin
@@ -158,6 +159,7 @@ Comandos
   backend test:e2e    ✅ / ❌
   frontend build      ✅ / ❌
   frontend typecheck  ✅ sin regresión / ❌ <archivo que empeoró>
+  frontend design     ✅ / ❌ <neutral hardcodeado archivo:línea>
 
 Invariantes      ✅ / ⚠️ <cuál>
 Consultas        ✅ / ⚠️ <N+1 o lectura sin filtro de borrado>
