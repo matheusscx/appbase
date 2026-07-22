@@ -90,6 +90,8 @@ npm run lint | npm test | npm run test:e2e   # test:e2e = API (Jest + supertest)
 
 cd frontend
 npm run dev | npm run build
+npm run e2e        # E2E de navegador (Playwright) — requiere `docker-compose up` (stack real)
+npm run e2e:smoke  # solo el subconjunto @smoke
 ```
 
 Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_URL`,

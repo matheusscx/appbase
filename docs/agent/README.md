@@ -115,16 +115,21 @@ No reabrir sin argumento nuevo.
 
 ## Pendiente
 
-- **Suite E2E de navegador (Playwright).** El `npm run test:e2e` actual del backend es
-  Jest + supertest, no navegador — no reutilizar ese nombre de script. El estado
-  determinista ya está resuelto por `seeder.service.ts` con UUIDs fijos, que es la
-  parte difícil. Flujos candidatos: venta completa hasta documento, pago mixto,
-  nota de crédito, apertura/cierre de caja, descuento de stock, y cambio de tenant sin
-  fuga de datos (este último no lo detecta ninguna prueba unitaria). Restricciones:
-  reloj congelado (cierres de caja dependen de zona horaria por tenant), sin llamadas
-  reales al SII, login vía `storageState`, cero esperas fijas, etiqueta `@smoke` para
-  el subconjunto que corre en cada tarea.
+- **Suite E2E de navegador (Playwright).** [x] **Fundación lista** (`frontend/playwright.config.ts`,
+  `e2e/auth.setup.ts` con login vía `storageState`, `e2e/smoke/*.smoke.spec.ts`, scripts
+  `e2e`/`e2e:smoke`). Corre contra el stack real (`docker-compose up`). El `test:e2e` del
+  backend es Jest + supertest, no navegador — no confundir. [ ] **Flujos por escribir**
+  (ver `docs/agent/pendientes.md`): venta completa hasta documento, pago mixto, nota de
+  crédito, apertura/cierre de caja, descuento de stock, y cambio de tenant sin fuga de
+  datos (este último no lo detecta ninguna prueba unitaria). Restricciones: reloj
+  congelado (cierres de caja dependen de zona horaria por tenant), sin llamadas reales al
+  SII, cero esperas fijas (usar aserciones web-first, no `waitForTimeout`), etiqueta
+  `@smoke` para el subconjunto que corre en cada tarea.
   Riesgo a cubrir: un agente al que se le pide "escribe tests" escribe tests que
   describen lo que el código hace hoy. Las aserciones de montos, impuestos y stock se
   derivan de `docs/features/`, nunca de ejecutar el código y copiar el resultado.
-- **Sección E2E de `anti-patterns.md`**, a poblar cuando la suite exista.
+- [ ] **E2E en CI** — el workflow actual no levanta el stack completo para navegador.
+  Integrar `@smoke` cuando la suite tenga masa crítica.
+- [ ] **Sección E2E de `anti-patterns.md`**, a poblar cuando aparezcan errores reales
+  (candidato ya visto: tipear antes de la hidratación de Nuxt deja el `v-model` sin
+  capturar → el fix es esperar la condición, `networkidle` + `toBeEnabled`, no un sleep).

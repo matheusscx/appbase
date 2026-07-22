@@ -32,6 +32,22 @@ ya identificamos con ubicación concreta.
 
 ---
 
+## Suite E2E de navegador (fundación lista, flujos por escribir)
+
+Scaffold Playwright ya funciona (`frontend/e2e/`, auth vía storageState, 1 smoke verde).
+Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/features/`
+(NUNCA del output del código), `@smoke` en el subconjunto barato, cero esperas fijas:
+
+- [ ] Venta completa hasta documento (afecto + exento; total contra `docs/features/ventas.md`).
+- [ ] Pago mixto (múltiples métodos; vuelto solo si `permite_vuelto`).
+- [ ] Nota de crédito (referencia a la venta original).
+- [ ] Apertura/cierre de caja (reloj congelado; `diferencia` calculada por el sistema).
+- [ ] Descuento de stock en una venta (movimiento + saldo materializado).
+- [ ] **Cambio de tenant sin fuga de datos** (el más valioso — ninguna prueba unitaria
+  lo cubre; login como usuario multi-tenant, verificar aislamiento de catálogo/ventas).
+- [ ] Integrar `@smoke` al CI cuando haya masa crítica (hoy el CI no levanta el stack
+  de navegador).
+
 ## Limpiezas menores (opcionales, no bloqueantes)
 
 - [ ] `items.vue:81` — campo `esPendiente` en `GrupoOpcionOverrideRow` se setea pero
