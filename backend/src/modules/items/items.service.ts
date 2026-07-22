@@ -60,6 +60,27 @@ interface ItemRow {
   frecuencia: string | null;
 }
 
+type GrupoDetalle = {
+  grupoModificadorId: string;
+  nombre: string;
+  min: number;
+  max: number;
+  orden: number;
+  opciones: {
+    grupoOpcionId: string;
+    itemId: string;
+    itemNombre: string;
+    tipo: string;
+    cantidad: string | null;
+    cantidadDefault: string | null;
+    unidadCodigo: string | null;
+    precioExtra: string;
+    orden: number;
+    stock: string | null;
+    esPendiente: boolean;
+  }[];
+};
+
 export interface DesfaseIngredienteDto {
   itemId: string;
   nombre: string;
@@ -204,7 +225,13 @@ export class ItemsService {
     if (rows.some((r) => r.tipo === 'combo')) {
       const grupoItemRows: { item_id: string }[] = await this.dataSource.query(
         `SELECT DISTINCT item_id FROM item_grupos_modificadores
-         WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+         WHERE tenant_id = $1 AND eliminado_el IS NULL
+         UNION
+         SELECT DISTINCT cc.combo_item_id AS item_id
+         FROM combo_componentes cc
+         JOIN item_grupos_modificadores igm ON igm.item_id = cc.componente_item_id
+           AND igm.tenant_id = cc.tenant_id AND igm.eliminado_el IS NULL
+         WHERE cc.tenant_id = $1 AND cc.eliminado_el IS NULL`,
         [tenantId],
       );
       comboIdsConGrupos = new Set(grupoItemRows.map((r) => r.item_id));
@@ -239,6 +266,105 @@ export class ItemsService {
       data,
       meta: buildPaginationMeta(page, pageSize, total),
     };
+  }
+
+  /**
+   * Carga los grupos de modificadores (con opciones y override efectivo) de un
+   * conjunto de items, en un nº constante de queries (batch, sin N+1). Devuelve
+   * un Map itemId → grupos con la MISMA forma que el `grupos[]` de findOne.
+   */
+  private async cargarGruposPorItem(
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<Map<string, GrupoDetalle[]>> {
+    const out = new Map<string, GrupoDetalle[]>();
+    if (!itemIds.length) return out;
+
+    const asoc: {
+      item_id: string;
+      grupo_modificador_id: string;
+      item_grupo_id: string;
+      nombre: string;
+      min: number;
+      max: number;
+      orden: number;
+    }[] = await this.dataSource.query(
+      `SELECT igm.item_id, igm.grupo_modificador_id, igm.item_grupo_id,
+              g.nombre, igm.min, igm.max, igm.orden
+       FROM item_grupos_modificadores igm
+       JOIN grupos_modificadores g ON g.grupo_modificador_id = igm.grupo_modificador_id
+         AND g.eliminado_el IS NULL
+       WHERE igm.item_id = ANY($1) AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL
+       ORDER BY igm.orden ASC`,
+      [itemIds, tenantId],
+    );
+    if (!asoc.length) return out;
+
+    const itemGrupoIds = asoc.map((a) => a.item_grupo_id);
+    const ops: {
+      item_grupo_id: string;
+      grupo_opcion_id: string;
+      item_id: string;
+      item_nombre: string;
+      tipo: string;
+      cantidad_efectiva: string | null;
+      cantidad_default: string | null;
+      unidad_codigo: string | null;
+      precio_extra: string;
+      orden: number;
+      stock: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT igm.item_grupo_id, o.grupo_opcion_id, o.item_id, i.nombre AS item_nombre, i.tipo,
+              COALESCE(ovr.cantidad, o.cantidad) AS cantidad_efectiva,
+              o.cantidad AS cantidad_default,
+              COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
+              COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra,
+              o.orden, ip.stock
+       FROM item_grupos_modificadores igm
+       JOIN grupo_modificador_opciones o ON o.grupo_modificador_id = igm.grupo_modificador_id
+         AND o.tenant_id = igm.tenant_id AND o.eliminado_el IS NULL
+       JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+       LEFT JOIN item_producto ip ON ip.item_id = o.item_id
+       LEFT JOIN item_grupo_modificador_opciones ovr
+         ON ovr.grupo_opcion_id = o.grupo_opcion_id
+        AND ovr.item_grupo_id = igm.item_grupo_id
+        AND ovr.eliminado_el IS NULL
+       WHERE igm.item_grupo_id = ANY($1) AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL
+       ORDER BY o.orden ASC`,
+      [itemGrupoIds, tenantId],
+    );
+    const opsPorItemGrupo = new Map<string, typeof ops>();
+    for (const o of ops) {
+      const arr = opsPorItemGrupo.get(o.item_grupo_id) ?? [];
+      arr.push(o);
+      opsPorItemGrupo.set(o.item_grupo_id, arr);
+    }
+
+    for (const a of asoc) {
+      const arr = out.get(a.item_id) ?? [];
+      arr.push({
+        grupoModificadorId: a.grupo_modificador_id,
+        nombre: a.nombre,
+        min: a.min,
+        max: a.max,
+        orden: a.orden,
+        opciones: (opsPorItemGrupo.get(a.item_grupo_id) ?? []).map((r) => ({
+          grupoOpcionId: r.grupo_opcion_id,
+          itemId: r.item_id,
+          itemNombre: r.item_nombre,
+          tipo: r.tipo,
+          cantidad: r.cantidad_efectiva,
+          cantidadDefault: r.cantidad_default,
+          unidadCodigo: r.unidad_codigo,
+          precioExtra: r.precio_extra,
+          orden: r.orden,
+          stock: r.stock,
+          esPendiente: r.cantidad_efectiva == null,
+        })),
+      });
+      out.set(a.item_id, arr);
+    }
+    return out;
   }
 
   async findOne(tenantId: string, itemId: string) {
@@ -287,6 +413,7 @@ export class ItemsService {
       cantidad: string;
       bloqueante: boolean;
       stock: string | null;
+      grupos: GrupoDetalle[];
     }[] = [];
     if (rows[0].tipo === 'receta') {
       const ingRows: {
@@ -357,6 +484,12 @@ export class ItemsService {
          WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL`,
         [itemId, tenantId],
       );
+      const gruposPorComp = await this.cargarGruposPorItem(
+        tenantId,
+        compRows
+          .filter((r) => r.tipo === 'receta')
+          .map((r) => r.componente_item_id),
+      );
       componentes = compRows.map((r) => ({
         componenteItemId: r.componente_item_id,
         componenteNombre: r.componente_nombre,
@@ -364,29 +497,11 @@ export class ItemsService {
         cantidad: r.cantidad,
         bloqueante: r.bloqueante,
         stock: r.stock,
+        grupos: gruposPorComp.get(r.componente_item_id) ?? [],
       }));
     }
 
-    const grupos: {
-      grupoModificadorId: string;
-      nombre: string;
-      min: number;
-      max: number;
-      orden: number;
-      opciones: {
-        grupoOpcionId: string;
-        itemId: string;
-        itemNombre: string;
-        tipo: string;
-        cantidad: string | null;
-        cantidadDefault: string | null;
-        unidadCodigo: string | null;
-        precioExtra: string;
-        orden: number;
-        stock: string | null;
-        esPendiente: boolean;
-      }[];
-    }[] = [];
+    const grupos: GrupoDetalle[] = [];
     if (rows[0].tipo === 'combo' || rows[0].tipo === 'receta') {
       const grupoRows: {
         grupo_modificador_id: string;
@@ -466,7 +581,10 @@ export class ItemsService {
       extrasPermitidos,
       componentes,
       grupos,
-      disponibleCondicional: rows[0].tipo === 'combo' && grupos.length > 0,
+      disponibleCondicional:
+        rows[0].tipo === 'combo' &&
+        (grupos.length > 0 ||
+          componentes.some((c) => (c.grupos?.length ?? 0) > 0)),
     };
   }
 

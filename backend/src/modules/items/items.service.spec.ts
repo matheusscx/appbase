@@ -462,7 +462,8 @@ describe('ItemsService', () => {
             stock: null,
           },
         ])
-        .mockResolvedValueOnce([]); // grupoRows (sin grupos asociados)
+        .mockResolvedValueOnce([]) // cargarGruposPorItem: asoc (sin grupos en el componente receta)
+        .mockResolvedValueOnce([]); // grupoRows (sin grupos asociados al combo)
 
       const result = await service.findOne(TENANT, COMBO_ID);
 
@@ -474,6 +475,7 @@ describe('ItemsService', () => {
           cantidad: '1',
           bloqueante: true,
           stock: null,
+          grupos: [],
         },
         {
           componenteItemId: 'servicio-envoltorio',
@@ -482,6 +484,7 @@ describe('ItemsService', () => {
           cantidad: '1',
           bloqueante: false,
           stock: null,
+          grupos: [],
         },
       ]);
       expect(result.componentes.some((c) => c.bloqueante === true)).toBe(true);
@@ -598,6 +601,90 @@ describe('ItemsService', () => {
       expect(opQueryCall[0]).toContain('grupo_modificador_opciones');
       expect(opQueryCall[0]).toContain('COALESCE');
       expect(opQueryCall[1]).toEqual(['grupo-1', TENANT, 'item-grupo-1']);
+    });
+
+    it('adjunta los grupos de cada componente receta en el detalle del combo', async () => {
+      const RECETA_ID = 'receta-componente-uuid';
+      const PROTEINA_ID = 'proteina-uuid';
+      const baseRow = {
+        item_id: COMBO_ID,
+        nombre: 'Combo Hamburguesa + Bebida',
+        descripcion: null,
+        tipo: 'combo',
+        activo: true,
+        precio_base: '5000',
+        precio_incluye_impuesto: false,
+        moneda_id: MONEDA_ID,
+        moneda_codigo: 'CLP',
+        moneda_simbolo: '$',
+        categoria_id: null,
+        categoria_nombre: null,
+        creado_el: new Date(),
+        stock: null,
+        unidad_medida: null,
+        fecha_elaboracion: null,
+        fecha_vencimiento: null,
+        modo_inventario: null,
+        costo_actual: '3000',
+        duracion_estimada: null,
+        requiere_cita: null,
+        frecuencia: null,
+      };
+      dataSource.query
+        .mockResolvedValueOnce([baseRow])
+        .mockResolvedValueOnce([]) // impuestos
+        .mockResolvedValueOnce([]) // recargos
+        .mockResolvedValueOnce([]) // descuentos
+        .mockResolvedValueOnce([
+          {
+            componente_item_id: RECETA_ID,
+            componente_nombre: 'Hamburguesa',
+            tipo: 'receta',
+            cantidad: '1',
+            bloqueante: true,
+            stock: null,
+          },
+        ]) // componentes (combo)
+        .mockResolvedValueOnce([
+          {
+            item_id: RECETA_ID,
+            grupo_modificador_id: PROTEINA_ID,
+            item_grupo_id: 'item-grupo-proteina',
+            nombre: 'Proteína',
+            min: 1,
+            max: 1,
+            orden: 0,
+          },
+        ]) // cargarGruposPorItem: asoc
+        .mockResolvedValueOnce([
+          {
+            item_grupo_id: 'item-grupo-proteina',
+            grupo_opcion_id: 'op-carne',
+            item_id: 'item-carne',
+            item_nombre: 'Carne',
+            tipo: 'producto',
+            cantidad_efectiva: '1',
+            cantidad_default: '1',
+            unidad_codigo: 'unidad',
+            precio_extra: '0',
+            orden: 0,
+            stock: '5',
+          },
+        ]) // cargarGruposPorItem: ops
+        .mockResolvedValueOnce([]); // grupoRows (el combo no tiene grupos propios)
+
+      const result = await service.findOne(TENANT, COMBO_ID);
+
+      const comp = result.componentes.find(
+        (c: any) => c.componenteItemId === RECETA_ID,
+      )!;
+      expect(comp.grupos).toHaveLength(1);
+      expect(comp.grupos[0]).toMatchObject({
+        grupoModificadorId: PROTEINA_ID,
+        min: 1,
+        max: 1,
+      });
+      expect(result.disponibleCondicional).toBe(true);
     });
   });
 
