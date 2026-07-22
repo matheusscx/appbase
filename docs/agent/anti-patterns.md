@@ -112,8 +112,9 @@ Un `map(async … query)` o un `for` con `await query` dentro escala lineal con 
 filas: un listado de 50 items dispara 50+ queries. Resolver siempre en una query con
 `JOIN`/agregación, o batch-fetch con `WHERE id = ANY($1)` y mapear en memoria. Aplica
 igual a `Promise.all` sobre queries: sigue siendo N round-trips.
-→ *Instancia real: `items.service.ts` `findAll` llamaba `calcularDisponibleReceta`/
-`Combo` por fila. Difícil de detectar por lint → se revisa en el cierre (`verify-feature`).*
+→ *Instancia real (deuda viva, aún sin corregir): `items.service.ts` `findAll` llama
+`calcularDisponibleReceta`/`Combo` por fila. Difícil de detectar por lint → se revisa en
+el cierre con el sub-agente independiente de `verify-feature`.*
 
 ---
 

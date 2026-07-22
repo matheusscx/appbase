@@ -1,6 +1,6 @@
 ---
 name: verify-feature
-description: Verifica que una tarea o feature está realmente terminada antes de commitear. Ejecuta lint, tests, test:e2e de API y build del frontend, y revisa invariantes, alcance y documentación. Usar al cerrar cualquier tarea, antes de commitear a main, o cuando el usuario pida "verifica", "revisa si está listo" o "cierra la tarea".
+description: Verifica que una tarea o feature está realmente terminada antes de commitear. Ejecuta lint, tests, test:e2e de API y build del frontend; revisa invariantes, N+1/consultas, alcance y documentación; y cierra con una revisión independiente por sub-agente de contexto fresco. Usar al cerrar cualquier tarea, antes de commitear a main, o cuando el usuario pida "verifica", "revisa si está listo" o "cierra la tarea".
 ---
 
 # verify-feature
@@ -95,6 +95,48 @@ y actualizar `Status`.
 - [ ] Sin código muerto ni imports sin usar
 - [ ] Sin `console.log` de depuración
 
+## 7. Revisión independiente — OBLIGATORIA, no self-review
+
+Los pasos 2–6 son la auto-revisión del autor: débil por diseño: el mismo agente que
+escribió el N+1 o se saltó el filtro de borrado es el que juzga si lo hizo, y racionaliza.
+Este paso lo cierra un **par de ojos con contexto fresco**.
+
+**Lanzar un sub-agente independiente** (Task/Agent, tipo `general-purpose`) que **solo ve
+el diff**, no la conversación que lo produjo. Prompt exacto:
+
+```
+Sos un revisor independiente. NO escribas ni corrijas código: solo auditás.
+Corré `git diff <base>..HEAD` (o `git diff --staged`) y revisá SOLO lo que cambió
+contra estas reglas de startup-app. Para cada hallazgo cita archivo:línea.
+
+INVARIANTES (cualquier violación = BLOQUEA):
+- tenant_id sale del token (req.user.tenantId), nunca del body/query/params.
+- Dinero/porcentajes con Decimal.js; porcentajes en decimal (0.19).
+- Sin DELETE físico; toda SELECT/JOIN nueva filtra `eliminado_el IS NULL` en cada tabla.
+- Columnas PK/FK UUID con `type: 'uuid'` explícito.
+- Sin cambios al sistema de tokens JWT. "Exento" es estado explícito.
+- Rutas nuevas con guard de permisos en el backend.
+
+CONSULTAS/RENDIMIENTO (bloquea):
+- N+1: ningún for/.map(async)/Promise.all que ejecute una query por iteración sobre
+  un resultado. Debe resolverse en una query (JOIN/agregación) o WHERE id = ANY($1).
+- Sin SELECT * en tablas anchas.
+
+ALCANCE: el diff no refactoriza nada ajeno a la tarea; no crea archivos que cabían en
+uno existente; no agrega dependencias ni patrones nuevos donde ya había uno.
+
+Ejemplos ❌/✅ de estos errores: docs/agent/anti-patterns.md.
+Devolvé: lista de hallazgos (archivo:línea + regla + por qué), y un veredicto
+final BLOQUEA / LIMPIO. Si dudás entre bloquear y pasar, bloqueá.
+```
+
+Reglas de este paso:
+- **No sustituir la revisión independiente por la propia.** Si el sub-agente no se pudo
+  lanzar, reportarlo y **no** declarar el paso como pasado.
+- Los hallazgos del revisor **no se corrigen dentro de este skill**: se reportan al
+  usuario. `verify-feature` audita, no arregla (ver encabezado).
+- Un veredicto BLOQUEA del revisor ⇒ RESULTADO BLOQUEADO, sin importar los pasos 1–6.
+
 ## Reporte
 
 Cerrar con este formato, sin adornos:
@@ -114,6 +156,8 @@ Alcance          ✅ / ⚠️ <archivos fuera de alcance>
 Anti-patrones    ✅ / ⚠️ <entrada>
 Documentación    ✅ / ⚠️ <qué falta>
 Limpieza         ✅ / ⚠️
+
+Revisión independiente   ✅ LIMPIO / ❌ BLOQUEA <hallazgos archivo:línea> / ⚠️ no se pudo lanzar
 
 RESULTADO: LISTO PARA COMMIT / BLOQUEADO
 ```
