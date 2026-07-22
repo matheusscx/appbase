@@ -41,12 +41,14 @@ no declara `type: 'uuid'`.*
 // MAL
 const { tenant_id } = dto;
 
-// BIEN
-const tenantId = req.user.tenant_id;
+// BIEN — el payload JWT es camelCase (`tenantId`), no la columna DB (`tenant_id`)
+const { tenantId } = req.user as { tenantId: string };
+// o vía decorador: @CurrentUser() user: JwtUser  →  user.tenantId
 ```
 
 Cualquier cliente puede enviar otro `tenant_id` en el body y leer o escribir datos
-de otro tenant. Es una fuga multi-tenant, no un descuido de estilo.
+de otro tenant. Es una fuga multi-tenant, no un descuido de estilo. Ojo con el casing:
+`req.user.tenant_id` es `undefined` — el campo decodificado es `tenantId`.
 
 ### ❌ `number` nativo para dinero o porcentajes
 
@@ -64,16 +66,24 @@ multiplica el impuesto por cien.
 
 ### ❌ Borrado físico de filas
 
-```ts
-// MAL
-await repo.delete(id);
+El proyecto es mayormente SQL raw, así que el fallo real es una query nueva sin el
+filtro, o un `DELETE` físico crudo:
 
-// BIEN
-await repo.softDelete(id);   // marca eliminado_el
+```sql
+-- MAL — borra la fila
+DELETE FROM ventas WHERE venta_id = $1;
+-- MAL — lectura nueva sin filtrar borrados
+SELECT * FROM ventas WHERE tenant_id = $1;
+
+-- BIEN — marcar
+UPDATE ventas SET eliminado_el = NOW() WHERE venta_id = $1 AND tenant_id = $2;
+-- BIEN — toda lectura filtra
+SELECT * FROM ventas WHERE tenant_id = $1 AND eliminado_el IS NULL;
 ```
 
-Y toda lectura filtra `eliminado_el IS NULL`. Omitir el filtro en una query nueva
-hace reaparecer registros borrados en listados y reportes.
+En los pocos caminos por repositorio de TypeORM, el equivalente es `repo.softDelete(id)`
+en vez de `repo.delete(id)`. Omitir el filtro en una query nueva hace reaparecer
+registros borrados en listados y reportes.
 
 ---
 
