@@ -15,12 +15,13 @@ y esperar confirmación.** Nunca resolverlo por cuenta propia.
    decimal: `0.19` = 19%, nunca `19`.
 3. **Soft delete en todo.** Nunca `DELETE`; marcar `eliminado_el`. Toda lectura filtra
    `eliminado_el IS NULL`.
-4. **Toda columna PK/FK de UUID declara `type: 'uuid'` explícito**
-   ([ADR-004](docs/adr/004-uuid-column-types.md)).
-5. **No modificar el sistema de tokens JWT** (access + refresh, ya implementado).
-6. **"Exento" es un estado fiscal explícito**, nunca la ausencia de impuesto.
-7. **Permisos con enforcement real en el backend** (guards por ruta). Validar en el
+4. **No modificar el sistema de tokens JWT** (access + refresh, ya implementado).
+5. **"Exento" es un estado fiscal explícito**, nunca la ausencia de impuesto.
+6. **Permisos con enforcement real en el backend** (guards por ruta). Validar en el
    frontend nunca sustituye al guard.
+
+(El `type: 'uuid'` explícito en PK/FK —ADR-004— salió de la lista: ya lo fuerza un test +
+CI, sin juicio. Invariantes automatizadas y su porqué: `docs/agent/README.md`.)
 
 ## 🛑 Detenerse y preguntar
 
@@ -186,10 +187,9 @@ antes de implementar.**
 
 ## Planes de implementación
 
-Los planes se persisten en `docs/superpowers/plans/YYYY-MM-DD-<kebab-slug>.md` (formato
-y metadata en `docs/superpowers/README.md`). Flujo: el agente redacta el plan → el
-usuario lo edita → pasa la ruta → el agente lo ejecuta tarea por tarea marcando los
-checkboxes. `specs/` es diseño y contexto; `plans/` son pasos ejecutables.
+Planes ejecutables en `docs/superpowers/plans/YYYY-MM-DD-<kebab-slug>.md`; specs de diseño
+en `specs/`. Formato, metadata y flujo (agente redacta → usuario edita → pasa la ruta →
+agente ejecuta marcando checkboxes): `docs/superpowers/README.md`.
 
 ## Documentación viva (actualizar en el mismo commit que el código)
 
@@ -216,16 +216,12 @@ cd backend  && npm run lint:check && npm run typecheck && npm test && npm run te
 cd frontend && npm run build && npm run typecheck:ratchet && npm run design:check
 ```
 
-`isolatedModules` hace que `npm test` (ts-jest) **no** chequee tipos; `backend typecheck`
-(`tsc --noEmit`) lo cubre. Tolerancia-cero — el backend está limpio.
-
 El **mismo gate corre en CI** (`.github/workflows/ci.yml`, Postgres real) en cada push a
-`main` — backstop del servidor que no depende de invocar `verify-feature` localmente. La
-revisión de juicio (N+1, dinero-Decimal, alcance) no corre en CI: vive en el paso 7.
+`main` — backstop que no depende de invocar `verify-feature` localmente. La revisión de
+juicio (N+1, dinero-Decimal, alcance) no corre en CI: vive en el paso 7 del skill.
 
-`nuxt build` **no tipa-chequea**; `typecheck:ratchet` (vue-tsc vs
-`frontend/typecheck-baseline.json`) falla solo si un archivo mete errores de tipo
-**nuevos** — la deuda preexistente se quema por tandas con `-- --update`.
+Mecánica de cada comando (por qué `isolatedModules` obliga a `typecheck` aparte, cómo
+funciona el ratchet de `vue-tsc`): `verify-feature` paso 1.
 
 Además verificar:
 
