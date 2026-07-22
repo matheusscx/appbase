@@ -1,0 +1,23 @@
+#!/bin/sh
+# ─────────────────────────────────────────────────────────────────────────────
+# pre-push — mantiene fresco el índice local de CodeGraph.
+# RED DE SEGURIDAD, NUNCA bloquea el push.
+#
+# Por qué: el índice `.codegraph/` (gitignoreado, local por clone) lo mantiene al día
+# un daemon con file-watcher, pero el daemon no siempre corre (recién clonado, otra
+# terminal, tras un rebase/checkout grande). Cuando no corre, el índice queda viejo y
+# `codegraph explore` devuelve call-paths desactualizados SIN avisar. `sync` es
+# incremental (~1s: reconcilia solo lo cambiado desde el último index) → barato como
+# garantía antes de cambiar de contexto.
+#
+# Nunca `codegraph index` acá: reconstruye todo el índice (caro). Si codegraph no está
+# instalado o no hay `.codegraph/`, el hook no hace nada. Si `sync` falla, el push sigue.
+#
+# Escape (nunca debería hacer falta, es no-bloqueante):  git push --no-verify
+# ─────────────────────────────────────────────────────────────────────────────
+
+if command -v codegraph >/dev/null 2>&1 && [ -d .codegraph ]; then
+  codegraph sync --quiet 2>/dev/null || true
+fi
+
+exit 0

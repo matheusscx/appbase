@@ -51,6 +51,14 @@ No introducir una arquitectura nueva para un problema pequeño.
 3. **CodeGraph** — `codegraph_explore` (MCP, cargar vía tool search si aparece
    diferida) o `codegraph explore "<símbolos o pregunta>"` por shell. Devuelve código
    fuente + call paths en una llamada, más barato en tokens que leer archivos sueltos.
+   Elegir el **nivel** por la profundidad que necesitás, no por reflejo:
+   - **Rápido** — *"¿dónde está X?"*, localizar un símbolo y sus llamadores directos:
+     default (sin flag). No pidas más fuente de la que vas a leer.
+   - **Normal** — entender un flujo o feature acotada: `--max-files 3-5`.
+   - **Profundo** — mapear un módulo entero o su arquitectura: `--max-files 10+`.
+
+   `codegraph node <símbolo-o-archivo>` para el fuente + llamadores de un solo símbolo,
+   o leer un archivo con números de línea.
 4. Código fuente
 
 Si tras estos cuatro pasos el patrón no aparece, **preguntar** en vez de inventarlo.
@@ -104,6 +112,11 @@ pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
 hardcodeados (`.vue`) y enlaces internos de docs rotos (`.md`). No cubre N+1 ni el
 filtro de borrado (juicio) — eso es la revisión independiente del skill `verify-feature`.
 Escape puntual: `git commit --no-verify`.
+
+El mismo `hooksPath` activa el **pre-push** (`.githooks/pre-push`): corre
+`codegraph sync --quiet` para refrescar el índice local antes de cambiar de contexto.
+Es **red de seguridad no-bloqueante** (el daemon de CodeGraph no siempre corre → el
+índice deriva sin avisar); nunca frena el push y no hace nada si CodeGraph no está.
 
 ## Estado actual
 
