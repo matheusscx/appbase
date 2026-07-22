@@ -177,8 +177,14 @@ function removeSerie(idx: number) {
 }
 ```
 
+Un cierre de modal (`@click="drawerOpen = false"`) también devuelve valor (la asignación
+evalúa a `boolean`). Ahí no hace falta función nombrada por un one-liner: arrow inline
+`@click="() => { drawerOpen = false }"` (el bloque `{}` sin `return` es `void`) — patrón
+ya usado en el repo para handlers de varias sentencias.
+
 `nuxt build` no lo detecta; `typecheck:ratchet` sí. Además saca lógica del template.
-Fue el patrón dominante de los 122 errores de tipo del frontend (jul-2026).
+Fue el patrón dominante de los errores de tipo del frontend (jul-2026): `items.vue`
+solo tenía 38 (16 así + 22 del índice de abajo).
 
 ### ❌ Acceso por índice sin guard en el template (TS2532)
 

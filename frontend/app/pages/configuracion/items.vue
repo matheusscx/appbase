@@ -509,6 +509,52 @@ const condicionOpts = [
 ]
 const ajusteForm = ref(emptyAjusteForm())
 
+// Mutación de filas de los arrays del form vía función nombrada: una expresión
+// `form.x = [...]` en @click devuelve el array → el handler no es void (TS2322 con
+// vue-tsc estricto). Extraerla lo vuelve void y saca lógica del template.
+function addSerie() {
+  form.value.series.push({ serie: '', condicion: 'nuevo', garantiaHasta: '' })
+}
+function removeSerie(idx: number) {
+  form.value.series.splice(idx, 1)
+}
+function addIngrediente() {
+  form.value.ingredientes.push({ ingredienteItemId: '', cantidad: '', unidadCodigo: '', bloqueante: true })
+}
+function removeIngrediente(idx: number) {
+  form.value.ingredientes.splice(idx, 1)
+}
+function addExtraPermitido() {
+  form.value.extrasPermitidos.push({ ingredienteItemId: '', cantidad: '', unidadCodigo: '', precioExtra: '' })
+}
+function removeExtraPermitido(idx: number) {
+  form.value.extrasPermitidos.splice(idx, 1)
+}
+function addComponente() {
+  form.value.componentes.push({ componenteItemId: '', cantidad: '1', bloqueante: true })
+}
+function removeComponente(idx: number) {
+  form.value.componentes.splice(idx, 1)
+}
+function addGrupoModificador() {
+  form.value.gruposModificadores.push({
+    grupoModificadorId: '',
+    min: '1',
+    max: '1',
+    orden: String(form.value.gruposModificadores.length),
+    opciones: [],
+  })
+}
+function removeGrupoModificador(idx: number) {
+  form.value.gruposModificadores.splice(idx, 1)
+}
+function addAjusteSerie() {
+  ajusteForm.value.series.push({ serie: '', condicion: 'nuevo', garantiaHasta: '' })
+}
+function removeAjusteSerie(idx: number) {
+  ajusteForm.value.series.splice(idx, 1)
+}
+
 const ajusteTipoOpts = [
   { label: 'Entrada (sumar)', value: 'entrada' },
   { label: 'Salida (restar)', value: 'salida' },
@@ -1436,7 +1482,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       size="xs"
                       variant="ghost"
                       icon="i-lucide-plus"
-                      @click="form.series = [...form.series, { serie: '', condicion: 'nuevo', garantiaHasta: '' }]"
+                      @click="addSerie"
                     >Agregar</UButton>
                   </div>
                   <div
@@ -1445,11 +1491,11 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     class="grid grid-cols-3 gap-2 items-end"
                   >
                     <UFormField label="Nro Serie">
-                      <UInput v-model="form.series[idx].serie" placeholder="IMEI o código" class="w-full" />
+                      <UInput v-model="form.series[idx]!.serie" placeholder="IMEI o código" class="w-full" />
                     </UFormField>
                     <UFormField label="Condición">
                       <USelectMenu
-                        v-model="form.series[idx].condicion"
+                        v-model="form.series[idx]!.condicion"
                         :items="condicionOpts"
                         value-key="value"
                         class="w-full"
@@ -1457,7 +1503,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     </UFormField>
                     <div class="flex gap-2">
                       <UFormField label="Garantía hasta" class="flex-1">
-                        <AppDateInput v-model="form.series[idx].garantiaHasta" />
+                        <AppDateInput v-model="form.series[idx]!.garantiaHasta" />
                       </UFormField>
                       <UButton
                         color="error"
@@ -1465,7 +1511,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                         icon="i-lucide-trash-2"
                         size="sm"
                         class="self-end"
-                        @click="form.series = form.series.filter((_, i) => i !== idx)"
+                        @click="removeSerie(idx)"
                       />
                     </div>
                   </div>
@@ -1545,7 +1591,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   size="xs"
                   variant="ghost"
                   icon="i-lucide-plus"
-                  @click="form.ingredientes = [...form.ingredientes, { ingredienteItemId: '', cantidad: '', unidadCodigo: '', bloqueante: true }]"
+                  @click="addIngrediente"
                 >Agregar ingrediente</UButton>
               </div>
 
@@ -1556,21 +1602,21 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               >
                 <UFormField label="Ingrediente" class="col-span-2">
                   <USelectMenu
-                    v-model="form.ingredientes[idx].ingredienteItemId"
+                    v-model="form.ingredientes[idx]!.ingredienteItemId"
                     :items="productosIngredienteOpts"
                     value-key="value"
                     class="w-full"
                   />
                 </UFormField>
                 <UFormField label="Cantidad">
-                  <UInput v-model="form.ingredientes[idx].cantidad" inputmode="decimal" placeholder="0" class="w-full" />
+                  <UInput v-model="form.ingredientes[idx]!.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
                 </UFormField>
                 <UFormField label="Unidad">
                   <USelectMenu
-                    v-model="form.ingredientes[idx].unidadCodigo"
+                    v-model="form.ingredientes[idx]!.unidadCodigo"
                     :items="unidadesMedidaStore.unidades
                       .filter(u => u.magnitud === unidadesMedidaStore.magnitudDe(
-                        productosIngrediente.find(p => p.id === form.ingredientes[idx].ingredienteItemId)?.unidadMedida,
+                        productosIngrediente.find(p => p.id === form.ingredientes[idx]!.ingredienteItemId)?.unidadMedida,
                       ))
                       .map(u => ({ label: u.codigo, value: u.codigo }))"
                     value-key="value"
@@ -1579,14 +1625,14 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 </UFormField>
                 <div class="flex items-end gap-2">
                   <UFormField label="Bloqueante">
-                    <USwitch v-model="form.ingredientes[idx].bloqueante" />
+                    <USwitch v-model="form.ingredientes[idx]!.bloqueante" />
                   </UFormField>
                   <UButton
                     color="error"
                     variant="ghost"
                     icon="i-lucide-trash-2"
                     size="sm"
-                    @click="form.ingredientes = form.ingredientes.filter((_, i) => i !== idx)"
+                    @click="removeIngrediente(idx)"
                   />
                 </div>
               </div>
@@ -1604,7 +1650,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   size="xs"
                   variant="ghost"
                   icon="i-lucide-plus"
-                  @click="form.extrasPermitidos = [...form.extrasPermitidos, { ingredienteItemId: '', cantidad: '', unidadCodigo: '', precioExtra: '' }]"
+                  @click="addExtraPermitido"
                 >Agregar extra</UButton>
               </div>
 
@@ -1615,21 +1661,21 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               >
                 <UFormField label="Ingrediente" class="col-span-2">
                   <USelectMenu
-                    v-model="form.extrasPermitidos[idx].ingredienteItemId"
+                    v-model="form.extrasPermitidos[idx]!.ingredienteItemId"
                     :items="productosIngredienteOpts"
                     value-key="value"
                     class="w-full"
                   />
                 </UFormField>
                 <UFormField label="Cantidad">
-                  <UInput v-model="form.extrasPermitidos[idx].cantidad" inputmode="decimal" placeholder="0" class="w-full" />
+                  <UInput v-model="form.extrasPermitidos[idx]!.cantidad" inputmode="decimal" placeholder="0" class="w-full" />
                 </UFormField>
                 <UFormField label="Unidad">
                   <USelectMenu
-                    v-model="form.extrasPermitidos[idx].unidadCodigo"
+                    v-model="form.extrasPermitidos[idx]!.unidadCodigo"
                     :items="unidadesMedidaStore.unidades
                       .filter(u => u.magnitud === unidadesMedidaStore.magnitudDe(
-                        productosIngrediente.find(p => p.id === form.extrasPermitidos[idx].ingredienteItemId)?.unidadMedida,
+                        productosIngrediente.find(p => p.id === form.extrasPermitidos[idx]!.ingredienteItemId)?.unidadMedida,
                       ))
                       .map(u => ({ label: u.codigo, value: u.codigo }))"
                     value-key="value"
@@ -1638,7 +1684,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 </UFormField>
                 <div class="flex items-end gap-2">
                   <UFormField label="Precio extra" class="flex-1">
-                    <MoneyInput v-model="form.extrasPermitidos[idx].precioExtra" :moneda-id="form.monedaId" class="w-full" />
+                    <MoneyInput v-model="form.extrasPermitidos[idx]!.precioExtra" :moneda-id="form.monedaId" class="w-full" />
                   </UFormField>
                   <UButton
                     color="error"
@@ -1646,7 +1692,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     icon="i-lucide-trash-2"
                     size="sm"
                     class="self-end"
-                    @click="form.extrasPermitidos = form.extrasPermitidos.filter((_, i) => i !== idx)"
+                    @click="removeExtraPermitido(idx)"
                   />
                 </div>
               </div>
@@ -1663,7 +1709,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   size="xs"
                   variant="ghost"
                   icon="i-lucide-plus"
-                  @click="form.componentes = [...form.componentes, { componenteItemId: '', cantidad: '1', bloqueante: true }]"
+                  @click="addComponente"
                 >Agregar componente</UButton>
               </div>
 
@@ -1674,25 +1720,25 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               >
                 <UFormField label="Item" class="col-span-2">
                   <USelectMenu
-                    v-model="form.componentes[idx].componenteItemId"
+                    v-model="form.componentes[idx]!.componenteItemId"
                     :items="itemsVendiblesOpts"
                     value-key="value"
                     class="w-full"
                   />
                 </UFormField>
                 <UFormField label="Cantidad">
-                  <UInput v-model="form.componentes[idx].cantidad" inputmode="decimal" placeholder="1" class="w-full" />
+                  <UInput v-model="form.componentes[idx]!.cantidad" inputmode="decimal" placeholder="1" class="w-full" />
                 </UFormField>
                 <div class="flex items-end gap-2">
                   <UFormField label="Bloqueante">
-                    <USwitch v-model="form.componentes[idx].bloqueante" />
+                    <USwitch v-model="form.componentes[idx]!.bloqueante" />
                   </UFormField>
                   <UButton
                     color="error"
                     variant="ghost"
                     icon="i-lucide-trash-2"
                     size="sm"
-                    @click="form.componentes = form.componentes.filter((_, i) => i !== idx)"
+                    @click="removeComponente(idx)"
                   />
                 </div>
               </div>
@@ -1716,7 +1762,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   size="xs"
                   variant="ghost"
                   icon="i-lucide-plus"
-                  @click="form.gruposModificadores = [...form.gruposModificadores, { grupoModificadorId: '', min: '1', max: '1', orden: String(form.gruposModificadores.length), opciones: [] }]"
+                  @click="addGrupoModificador"
                 >Agregar grupo</UButton>
               </div>
 
@@ -1728,7 +1774,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 <div class="grid grid-cols-4 gap-2 items-end">
                   <UFormField label="Grupo" class="col-span-2">
                     <USelectMenu
-                      v-model="form.gruposModificadores[idx].grupoModificadorId"
+                      v-model="form.gruposModificadores[idx]!.grupoModificadorId"
                       :items="gruposCatalogoOpts.filter(o =>
                         o.value === grupo.grupoModificadorId
                         || !form.gruposModificadores.some(g => g.grupoModificadorId === o.value),
@@ -1739,18 +1785,18 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     />
                   </UFormField>
                   <UFormField label="Mín.">
-                    <UInput v-model="form.gruposModificadores[idx].min" type="number" min="0" placeholder="0" class="w-full" />
+                    <UInput v-model="form.gruposModificadores[idx]!.min" type="number" min="0" placeholder="0" class="w-full" />
                   </UFormField>
                   <div class="flex items-end gap-2">
                     <UFormField label="Máx." class="flex-1">
-                      <UInput v-model="form.gruposModificadores[idx].max" type="number" min="1" placeholder="1" class="w-full" />
+                      <UInput v-model="form.gruposModificadores[idx]!.max" type="number" min="1" placeholder="1" class="w-full" />
                     </UFormField>
                     <UButton
                       color="error"
                       variant="ghost"
                       icon="i-lucide-trash-2"
                       size="sm"
-                      @click="form.gruposModificadores = form.gruposModificadores.filter((_, i) => i !== idx)"
+                      @click="removeGrupoModificador(idx)"
                     />
                   </div>
                 </div>
@@ -1899,7 +1945,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         <UButton
           color="neutral"
           variant="ghost"
-          @click="drawerOpen = false"
+          @click="() => { drawerOpen = false }"
         >
           Cancelar
         </UButton>
@@ -1983,7 +2029,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     size="xs"
                     variant="ghost"
                     icon="i-lucide-plus"
-                    @click="ajusteForm.series = [...ajusteForm.series, { serie: '', condicion: 'nuevo', garantiaHasta: '' }]"
+                    @click="addAjusteSerie"
                   >Agregar</UButton>
                 </div>
                 <div
@@ -1992,11 +2038,11 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   class="grid grid-cols-3 gap-2 items-end"
                 >
                   <UFormField label="Nro Serie">
-                    <UInput v-model="ajusteForm.series[idx].serie" placeholder="IMEI o código" class="w-full" />
+                    <UInput v-model="ajusteForm.series[idx]!.serie" placeholder="IMEI o código" class="w-full" />
                   </UFormField>
                   <UFormField label="Condición">
                     <USelectMenu
-                      v-model="ajusteForm.series[idx].condicion"
+                      v-model="ajusteForm.series[idx]!.condicion"
                       :items="condicionOpts"
                       value-key="value"
                       class="w-full"
@@ -2004,7 +2050,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   </UFormField>
                   <div class="flex gap-2">
                     <UFormField label="Garantía hasta" class="flex-1">
-                      <AppDateInput v-model="ajusteForm.series[idx].garantiaHasta" />
+                      <AppDateInput v-model="ajusteForm.series[idx]!.garantiaHasta" />
                     </UFormField>
                     <UButton
                       color="error"
@@ -2012,7 +2058,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       icon="i-lucide-trash-2"
                       size="sm"
                       class="self-end"
-                      @click="ajusteForm.series = ajusteForm.series.filter((_, i) => i !== idx)"
+                      @click="removeAjusteSerie(idx)"
                     />
                   </div>
                 </div>
@@ -2091,7 +2137,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       </template>
       <template #footer>
         <div class="flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" @click="stockModalOpen = false">
+          <UButton color="neutral" variant="ghost" @click="() => { stockModalOpen = false }">
             Cancelar
           </UButton>
           <UButton :loading="ajustando" @click="ejecutarAjusteStock">
@@ -2166,7 +2212,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       </template>
       <template #footer>
         <div class="flex justify-end">
-          <UButton color="neutral" variant="ghost" @click="verUnidadesOpen = false">Cerrar</UButton>
+          <UButton color="neutral" variant="ghost" @click="() => { verUnidadesOpen = false }">Cerrar</UButton>
         </div>
       </template>
     </UModal>
@@ -2215,7 +2261,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       </template>
       <template #footer>
         <div class="flex justify-end">
-          <UButton color="neutral" variant="ghost" @click="historialOpen = false">Cerrar</UButton>
+          <UButton color="neutral" variant="ghost" @click="() => { historialOpen = false }">Cerrar</UButton>
         </div>
       </template>
     </UModal>

@@ -12,11 +12,15 @@ ya identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **Burndown de typecheck del frontend — 122 errores** (frontend)
+- [ ] **Burndown de typecheck del frontend — 84 errores** (frontend)
   Bajo ratchet en `frontend/typecheck-baseline.json`. Quemar por tandas (por archivo).
-  `items.vue` es el peor (38) → primera tanda natural.
-  **Fix:** TS2322 → extraer `@click` a funciones nombradas en `<script setup>`;
-  TS2532 → aserción no-nula `arr[idx]!.campo` sobre índice de `v-for`.
+  `items.vue` (era el peor, 38) ya está en 0 (jul-2026). Peor `.vue` restante:
+  `pages/configuracion/pasarelas.vue` (6). `middleware/auth.spec.ts` (8) es el mayor,
+  pero es un spec → patrón distinto (no `@click`/índice), evaluar aparte.
+  **Fix (patrones de `.vue`):** TS2322 → `@click` con expresión que devuelve valor:
+  mutación de arrays a funciones nombradas en `<script setup>`; cierre de modal
+  (`x = false`) a arrow inline `() => { x = false }`. TS2532 → aserción no-nula
+  `arr[idx]!.campo` sobre índice del mismo `v-for`.
   Ejemplos en `anti-patterns.md`. Tras cada tanda: `npm run typecheck:ratchet -- --update`
   y commitear la baseline en el mismo commit.
   **Verificar:** total de la baseline baja; ratchet en verde.
