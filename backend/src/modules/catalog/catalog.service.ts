@@ -65,8 +65,41 @@ export class CatalogService {
     const unidades = await this.unidadMedidaRepo.find({
       where: { codigo: In([codigoDesde, codigoHacia]) },
     });
-    const desde = unidades.find((u) => u.codigo === codigoDesde);
-    const hacia = unidades.find((u) => u.codigo === codigoHacia);
+    const mapa = new Map(unidades.map((u) => [u.codigo, u]));
+    return this.convertirConMapa(cantidad, codigoDesde, codigoHacia, mapa);
+  }
+
+  /**
+   * Versión batch: convierte muchas cantidades cargando las unidades en UNA sola
+   * query (evita el N+1 de llamar `convertirUnidad` por cada fila). Preserva la
+   * misma semántica de error, unidad por unidad.
+   */
+  async convertirUnidades(
+    conversiones: { cantidad: string; desde: string; hacia: string }[],
+  ): Promise<string[]> {
+    const codigos = [
+      ...new Set(conversiones.flatMap((c) => [c.desde, c.hacia])),
+    ];
+    const unidades = codigos.length
+      ? await this.unidadMedidaRepo.find({ where: { codigo: In(codigos) } })
+      : [];
+    const mapa = new Map(unidades.map((u) => [u.codigo, u]));
+    return conversiones.map((c) =>
+      this.convertirConMapa(c.cantidad, c.desde, c.hacia, mapa),
+    );
+  }
+
+  /** Cálculo puro de conversión sobre un mapa de unidades ya cargado. */
+  private convertirConMapa(
+    cantidad: string,
+    codigoDesde: string,
+    codigoHacia: string,
+    unidades: Map<string, UnidadMedida>,
+  ): string {
+    if (codigoDesde === codigoHacia) return cantidad;
+
+    const desde = unidades.get(codigoDesde);
+    const hacia = unidades.get(codigoHacia);
 
     if (!desde) {
       throw new BadRequestException(

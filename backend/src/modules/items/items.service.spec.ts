@@ -28,6 +28,7 @@ describe('ItemsService', () => {
   let catalogServiceMock: {
     findAllUnidadesMedida: jest.Mock;
     convertirUnidad: jest.Mock;
+    convertirUnidades: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -49,6 +50,7 @@ describe('ItemsService', () => {
         { codigo: 'kg', magnitud: 'masa', factorBase: '1000' },
       ]),
       convertirUnidad: jest.fn(),
+      convertirUnidades: jest.fn().mockResolvedValue([]),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -163,21 +165,24 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            receta_item_id: 'receta-uuid',
             cantidad: '1',
             unidad_codigo: 'unidad',
             ingrediente_unidad_medida: 'unidad',
             stock: '8',
           }, // pan
           {
+            receta_item_id: 'receta-uuid',
             cantidad: '150',
             unidad_codigo: 'g',
             ingrediente_unidad_medida: 'kg',
             stock: '1',
           }, // carne: 1kg = 1000g
         ]);
-      catalogServiceMock.convertirUnidad
-        .mockResolvedValueOnce('1') // pan
-        .mockResolvedValueOnce('0.15'); // carne 150g → 0.15kg
+      catalogServiceMock.convertirUnidades.mockResolvedValueOnce([
+        '1', // pan
+        '0.15', // carne 150g → 0.15kg
+      ]);
 
       const result = await service.findAll(TENANT, { tipo: 'receta' } as any);
 
@@ -222,51 +227,64 @@ describe('ItemsService', () => {
 
   // ── disponible de combo ────────────────────────────────────────────────────
 
-  describe('disponible de combo', () => {
+  describe('disponible de combo (batch)', () => {
     it('es el mínimo floor(stock/cantidad) entre componentes bloqueantes; servicio se ignora', async () => {
       // producto stock 10, cantidad 2 → 5 ; receta disponible 3, cantidad 1 → 3 ; servicio ignorado
       // se espera 3
-      dataSource.query.mockResolvedValueOnce([
-        // calcularDisponibleCombo query
-        {
-          componente_item_id: 'prod-uuid',
-          tipo: 'producto',
-          cantidad: '2',
-          stock: '10',
-        },
-        {
-          componente_item_id: 'receta-uuid',
-          tipo: 'receta',
-          cantidad: '1',
-          stock: null,
-        },
-        {
-          componente_item_id: 'servicio-uuid',
-          tipo: 'servicio',
-          cantidad: '1',
-          stock: null,
-        },
-      ]);
+      dataSource.query
+        .mockResolvedValueOnce([
+          // 1) combo_componentes bloqueantes
+          {
+            combo_item_id: COMBO_ID,
+            componente_item_id: 'prod-uuid',
+            tipo: 'producto',
+            cantidad: '2',
+            stock: '10',
+          },
+          {
+            combo_item_id: COMBO_ID,
+            componente_item_id: 'receta-uuid',
+            tipo: 'receta',
+            cantidad: '1',
+            stock: null,
+          },
+          {
+            combo_item_id: COMBO_ID,
+            componente_item_id: 'servicio-uuid',
+            tipo: 'servicio',
+            cantidad: '1',
+            stock: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          // 2) ingredientes bloqueantes de receta-uuid → disponibilidad 3
+          {
+            receta_item_id: 'receta-uuid',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            ingrediente_unidad_medida: 'unidad',
+            stock: '3',
+          },
+        ]);
+      catalogServiceMock.convertirUnidades.mockResolvedValueOnce(['1']);
 
-      jest
-        .spyOn(service as any, 'calcularDisponibleReceta')
-        .mockResolvedValueOnce(3);
-
-      const disp = await (service as any).calcularDisponibleCombo(
+      const disp = await (service as any).calcularDisponibilidadBatch(
         TENANT,
-        COMBO_ID,
+        [],
+        [COMBO_ID],
       );
-      expect(disp).toBe(3);
+      expect(disp.get(COMBO_ID)).toBe(3);
     });
 
     it('devuelve null si el combo no tiene componentes bloqueantes', async () => {
       dataSource.query.mockResolvedValueOnce([]);
 
-      const disp = await (service as any).calcularDisponibleCombo(
+      const disp = await (service as any).calcularDisponibilidadBatch(
         TENANT,
-        COMBO_SIN_BLOQUEANTES_ID,
+        [],
+        [COMBO_SIN_BLOQUEANTES_ID],
       );
-      expect(disp).toBeNull();
+      expect(disp.get(COMBO_SIN_BLOQUEANTES_ID)).toBeNull();
     });
   });
 

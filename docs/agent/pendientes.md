@@ -12,15 +12,6 @@ ya identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **N+1 real en `items.service.findAll`** (backend)
-  `backend/src/modules/items/items.service.ts` — el listado paginado llama
-  `calcularDisponibleReceta`/`calcularDisponibleCombo` por cada fila; cada una consulta
-  la BD. Listar N items = N+ queries.
-  **Fix:** resolver disponibilidad de todas las filas en una query batch
-  (`WHERE item_id = ANY($1)` + agregación) y mapear en memoria. Con test.
-  **Verificar:** el endpoint hace un nº constante de queries sin importar el nº de filas.
-  Ancla el anti-patrón N+1 de `anti-patterns.md`.
-
 - [ ] **Estabilizar `typecheck:ratchet` en CI — vue-tsc/typescript** (frontend/CI)
   El step `frontend · typecheck ratchet` está marcado `continue-on-error: true` en
   `.github/workflows/ci.yml`: `nuxi typecheck` resuelve `vue-tsc` vía `npx` y en CI baja

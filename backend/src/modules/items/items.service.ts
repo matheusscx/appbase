@@ -210,20 +210,30 @@ export class ItemsService {
       comboIdsConGrupos = new Set(grupoItemRows.map((r) => r.item_id));
     }
 
-    const data = await Promise.all(
-      rows.map(async (r) => {
-        const base = this.mapRow(r);
-        const disponible =
-          base.tipo === 'receta'
-            ? await this.calcularDisponibleReceta(tenantId, base.id)
-            : base.tipo === 'combo'
-              ? await this.calcularDisponibleCombo(tenantId, base.id)
-              : null;
-        const disponibleCondicional =
-          base.tipo === 'combo' && comboIdsConGrupos.has(base.id);
-        return { ...base, disponible, disponibleCondicional };
-      }),
+    // Disponibilidad de recetas/combos en un nº CONSTANTE de queries (batch),
+    // no una por fila (N+1).
+    const recetaIds = rows
+      .filter((r) => r.tipo === 'receta')
+      .map((r) => r.item_id);
+    const comboIds = rows
+      .filter((r) => r.tipo === 'combo')
+      .map((r) => r.item_id);
+    const disponibilidad = await this.calcularDisponibilidadBatch(
+      tenantId,
+      recetaIds,
+      comboIds,
     );
+
+    const data = rows.map((r) => {
+      const base = this.mapRow(r);
+      const disponible =
+        base.tipo === 'receta' || base.tipo === 'combo'
+          ? (disponibilidad.get(base.id) ?? null)
+          : null;
+      const disponibleCondicional =
+        base.tipo === 'combo' && comboIdsConGrupos.has(base.id);
+      return { ...base, disponible, disponibleCondicional };
+    });
 
     return {
       data,
@@ -2213,47 +2223,114 @@ export class ItemsService {
   }
 
   /**
-   * Mínimo, entre los componentes BLOQUEANTES de un combo, de las unidades que
-   * alcanzan: producto → floor(stock/cantidad); receta → floor(disponibleReceta/
-   * cantidad); servicio ignorado. null si no hay componentes bloqueantes.
+   * Disponibilidad de todas las recetas/combos de una página en un nº CONSTANTE
+   * de queries, en vez de una por fila (N+1). Mismo resultado que
+   * `calcularDisponibleReceta`/`calcularDisponibleCombo` fila a fila: el mínimo
+   * de unidades que el stock de los componentes BLOQUEANTES permite armar.
    */
-  private async calcularDisponibleCombo(
+  private async calcularDisponibilidadBatch(
     tenantId: string,
-    comboItemId: string,
-  ): Promise<number | null> {
-    const rows: {
+    recetaIds: string[],
+    comboIds: string[],
+  ): Promise<Map<string, number | null>> {
+    const resultado = new Map<string, number | null>();
+    if (!recetaIds.length && !comboIds.length) return resultado;
+
+    // 1) Componentes bloqueantes de todos los combos (una query).
+    const comboRows: {
+      combo_item_id: string;
       componente_item_id: string;
       tipo: string;
       cantidad: string;
       stock: string | null;
-    }[] = await this.dataSource.query(
-      `SELECT cc.componente_item_id, i.tipo, cc.cantidad, ip.stock
-       FROM combo_componentes cc
-       JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
-       LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
-       WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2
-         AND cc.bloqueante = true AND cc.eliminado_el IS NULL`,
-      [comboItemId, tenantId],
+    }[] = comboIds.length
+      ? await this.dataSource.query(
+          `SELECT cc.combo_item_id, cc.componente_item_id, i.tipo, cc.cantidad, ip.stock
+           FROM combo_componentes cc
+           JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+           LEFT JOIN item_producto ip ON ip.item_id = cc.componente_item_id
+           WHERE cc.combo_item_id = ANY($1) AND cc.tenant_id = $2
+             AND cc.bloqueante = true AND cc.eliminado_el IS NULL`,
+          [comboIds, tenantId],
+        )
+      : [];
+
+    // Las recetas usadas como componente de un combo también necesitan su
+    // disponibilidad, aunque no estén listadas en la página.
+    const recetasDeCombos = comboRows
+      .filter((r) => r.tipo === 'receta')
+      .map((r) => r.componente_item_id);
+    const todasRecetas = [...new Set([...recetaIds, ...recetasDeCombos])];
+
+    // 2) Ingredientes bloqueantes de todas las recetas (una query).
+    const ingRows: {
+      receta_item_id: string;
+      cantidad: string;
+      unidad_codigo: string;
+      ingrediente_unidad_medida: string;
+      stock: string;
+    }[] = todasRecetas.length
+      ? await this.dataSource.query(
+          `SELECT ri.receta_item_id, ri.cantidad, ri.unidad_codigo,
+                  ip.unidad_medida AS ingrediente_unidad_medida, ip.stock
+           FROM receta_ingredientes ri
+           JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+           WHERE ri.receta_item_id = ANY($1) AND ri.tenant_id = $2
+             AND ri.bloqueante = true AND ri.eliminado_el IS NULL`,
+          [todasRecetas, tenantId],
+        )
+      : [];
+
+    // 3) Todas las conversiones de unidad resolviendo las unidades en una sola
+    // query (evita el N+1 anidado de convertir ingrediente por ingrediente).
+    const cantidadesBase = await this.catalogService.convertirUnidades(
+      ingRows.map((r) => ({
+        cantidad: r.cantidad,
+        desde: r.unidad_codigo,
+        hacia: r.ingrediente_unidad_medida,
+      })),
     );
 
-    let minimo: Decimal | null = null;
-    for (const r of rows) {
+    // 4) Disponibilidad de cada receta = mínimo de floor(stock / cantidadBase).
+    const dispReceta = new Map<string, Decimal | null>();
+    for (const id of todasRecetas) dispReceta.set(id, null);
+    ingRows.forEach((r, i) => {
+      const posibles = new Decimal(r.stock).div(cantidadesBase[i]).floor();
+      const actual = dispReceta.get(r.receta_item_id) ?? null;
+      if (actual === null || posibles.lessThan(actual)) {
+        dispReceta.set(r.receta_item_id, posibles);
+      }
+    });
+    for (const id of recetaIds) {
+      const d = dispReceta.get(id) ?? null;
+      resultado.set(id, d === null ? null : d.toNumber());
+    }
+
+    // 5) Disponibilidad de cada combo = mínimo entre sus componentes bloqueantes
+    // (servicio se ignora; receta usa su propia disponibilidad ya calculada).
+    const dispCombo = new Map<string, Decimal | null>();
+    for (const id of comboIds) dispCombo.set(id, null);
+    for (const r of comboRows) {
+      if (r.tipo === 'servicio') continue;
       let posibles: Decimal;
-      if (r.tipo === 'servicio') {
-        continue;
-      } else if (r.tipo === 'receta') {
-        const dispReceta = await this.calcularDisponibleReceta(
-          tenantId,
-          r.componente_item_id,
-        );
-        if (dispReceta === null) continue;
-        posibles = new Decimal(dispReceta).div(r.cantidad).floor();
+      if (r.tipo === 'receta') {
+        const disp = dispReceta.get(r.componente_item_id) ?? null;
+        if (disp === null) continue;
+        posibles = disp.div(r.cantidad).floor();
       } else {
         posibles = new Decimal(r.stock ?? '0').div(r.cantidad).floor();
       }
-      if (minimo === null || posibles.lessThan(minimo)) minimo = posibles;
+      const actual = dispCombo.get(r.combo_item_id) ?? null;
+      if (actual === null || posibles.lessThan(actual)) {
+        dispCombo.set(r.combo_item_id, posibles);
+      }
     }
-    return minimo === null ? null : minimo.toNumber();
+    for (const id of comboIds) {
+      const d = dispCombo.get(id) ?? null;
+      resultado.set(id, d === null ? null : d.toNumber());
+    }
+
+    return resultado;
   }
 
   /**
