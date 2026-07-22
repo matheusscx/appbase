@@ -94,14 +94,14 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      # NO bloqueante a propósito: vue-tsc se resuelve vía npx y en CI baja una versión
-      # incompatible con typescript@6 (ERR_PACKAGE_PATH_NOT_EXPORTED './lib/tsc'). Es un
-      # problema de tooling, no una regresión de tipos. El ratchet sigue siendo gate LOCAL
-      # en verify-feature. Estabilizar el pin es tarea propia (docs/agent/pendientes.md).
+      # Bloqueante: `vue-tsc` y `typescript` están pineados exactos como devDependencies
+      # (3.3.7 / 6.0.3), así `nuxi typecheck` resuelve ambos localmente y NO cae al
+      # fallback `npx -p vue-tsc -p typescript` (que en CI bajaba @latest de ambos →
+      # typescript@7, incompatible → ERR_PACKAGE_PATH_NOT_EXPORTED './lib/tsc'). El pin
+      # hace la resolución determinista; el ratchet impide que la deuda de tipos crezca.
       - name: frontend · typecheck ratchet
         working-directory: frontend
         run: npm run typecheck:ratchet
-        continue-on-error: true
 
       - name: frontend · design tokens
         working-directory: frontend
