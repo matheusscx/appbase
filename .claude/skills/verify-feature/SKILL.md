@@ -20,11 +20,19 @@ cd backend  && npm run lint:check
 cd backend  && npm test
 cd backend  && npm run test:e2e
 cd frontend && npm run build
+cd frontend && npm run typecheck:ratchet
 ```
 
 Registrar el resultado real de cada comando. **No declarar que un paso pasó sin
 haberlo ejecutado.** Si el stack no está levantado, usar `docker-compose up -d` antes
 de `test:e2e`.
+
+**`typecheck:ratchet`**: `nuxt build` NO tipa-chequea, así que el frontend arrastra una
+deuda de errores de tipo (vue-tsc estricto) registrada en `frontend/typecheck-baseline.json`.
+El ratchet falla solo si un archivo **empeora** respecto a la baseline — no bloquea por la
+deuda preexistente, sí impide meter nuevos. Si quemaste errores en esta tarea (bajó el
+total), apretá el ratchet: `npm run typecheck:ratchet -- --update` y commiteá la baseline
+en el mismo commit. Tarda ~1-2 min; por eso vive acá y no en el pre-commit.
 
 ## 2. Invariantes
 
@@ -149,6 +157,7 @@ Comandos
   backend test        ✅ / ❌
   backend test:e2e    ✅ / ❌
   frontend build      ✅ / ❌
+  frontend typecheck  ✅ sin regresión / ❌ <archivo que empeoró>
 
 Invariantes      ✅ / ⚠️ <cuál>
 Consultas        ✅ / ⚠️ <N+1 o lectura sin filtro de borrado>

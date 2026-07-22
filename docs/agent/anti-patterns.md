@@ -165,7 +165,41 @@ Cada copia local diverge en separadores, decimales y moneda. El formato de monto
 depende de la moneda oficial del tenant, así que una copia local es un bug de datos,
 no de estilo.
 
----
+### ❌ `@click` con expresión que devuelve valor (TS2322)
+
+```vue
+<!-- MAL — la expresión devuelve el array/boolean → handler no es void (vue-tsc estricto) -->
+<UButton @click="form.series = [...form.series, { serie: '', condicion: 'nuevo' }]" />
+<UButton @click="form.series = form.series.filter((_, i) => i !== idx)" />
+
+<!-- BIEN — extraer a función nombrada en <script setup> (devuelve void) -->
+<UButton @click="addSerie" />
+<UButton @click="removeSerie(idx)" />
+```
+```ts
+function addSerie() {
+  form.series.push({ serie: '', condicion: 'nuevo', garantiaHasta: '' })
+}
+function removeSerie(idx: number) {
+  form.series.splice(idx, 1)
+}
+```
+
+`nuxt build` no lo detecta; `typecheck:ratchet` sí. Además saca lógica del template.
+Fue el patrón dominante de los 122 errores de tipo del frontend (jul-2026).
+
+### ❌ Acceso por índice sin guard en el template (TS2532)
+
+```vue
+<!-- MAL — con noUncheckedIndexedAccess, form.series[idx] es T | undefined -->
+<UInput v-model="form.series[idx].serie" />
+
+<!-- BIEN — el índice viene del mismo v-for, existe: aserción no-nula -->
+<UInput v-model="form.series[idx]!.serie" />
+```
+
+Convención establecida en el repo para `v-model` sobre índice de un `v-for` de la misma
+lista. No usar en accesos donde el índice sí puede no existir — ahí, guard real (`v-if`).
 
 ## Pruebas E2E de navegador
 
