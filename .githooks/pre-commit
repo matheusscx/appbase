@@ -1,0 +1,78 @@
+#!/bin/sh
+# ─────────────────────────────────────────────────────────────────────────────
+# pre-commit — gate mecánico de startup-app
+#
+# Cubre SOLO lo determinista/grepeable de docs/agent/anti-patterns.md:
+#   · casing tenant_id (req.user.tenant_id → undefined)
+#   · DELETE físico en SQL raw
+#   · lint:check (eslint sin --fix) sobre los .ts de backend staged
+#
+# NO cubre el juicio (N+1, SELECT sin `eliminado_el IS NULL`): eso es la revisión
+# independiente por sub-agente del skill `verify-feature`, que un hook de shell no
+# puede ejecutar. El hook lo recuerda cuando tocás services de backend.
+#
+# Escape para el caso legítimo raro:  git commit --no-verify
+# ─────────────────────────────────────────────────────────────────────────────
+
+fail=0
+red()  { printf '\033[31m%s\033[0m\n' "$1"; }
+ylw()  { printf '\033[33m%s\033[0m\n' "$1"; }
+grn()  { printf '\033[32m%s\033[0m\n' "$1"; }
+
+# Líneas AGREGADAS en .ts staged (excluye tests y este propio hook), sin el prefijo '+'
+added_ts_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.ts' \
+                 | grep -v -E '\.spec\.ts$|/test/|\.e2e-spec\.ts$')
+
+added_lines() {
+  # $1 = patrón egrep sobre líneas agregadas de los .ts staged (sin tests)
+  for f in $added_ts_files; do
+    git diff --cached -U0 -- "$f" \
+      | grep -E '^\+' | grep -v -E '^\+\+\+' \
+      | grep -nE "$1" | sed "s#^#$f: #"
+  done
+}
+
+# ── Guard 1: casing de tenant_id ─────────────────────────────────────────────
+hits=$(added_lines 'req\.user\.tenant_id\b')
+if [ -n "$hits" ]; then
+  red "✗ tenant_id con casing equivocado — el payload JWT es 'tenantId', no 'tenant_id'."
+  red "  req.user.tenant_id es undefined → fuga/ruptura multi-tenant."
+  echo "$hits"
+  echo "  Usar: const { tenantId } = req.user as { tenantId: string }"
+  fail=1
+fi
+
+# ── Guard 2: DELETE físico en SQL raw ────────────────────────────────────────
+hits=$(added_lines 'DELETE[[:space:]]+FROM')
+if [ -n "$hits" ]; then
+  red "✗ DELETE físico detectado — el proyecto usa soft delete (UPDATE ... eliminado_el = NOW())."
+  echo "$hits"
+  echo "  Si es un borrado legítimo (tabla efímera/cleanup), commiteá con --no-verify."
+  fail=1
+fi
+
+# ── Guard 3: lint:check sobre los .ts de backend staged ──────────────────────
+backend_ts=$(git diff --cached --name-only --diff-filter=ACM -- 'backend/*.ts' 'backend/**/*.ts')
+if [ -n "$backend_ts" ]; then
+  # rutas relativas a backend/
+  rel=$(printf '%s\n' $backend_ts | sed 's#^backend/##')
+  if ! ( cd backend && npx --no-install eslint $rel ) ; then
+    red "✗ lint:check falló en archivos de backend staged."
+    fail=1
+  else
+    grn "✓ lint:check OK (backend staged)"
+  fi
+fi
+
+# ── Recordatorio no-bloqueante: review de juicio ─────────────────────────────
+if echo "$backend_ts" | grep -qE '\.service\.ts$'; then
+  ylw "⚠ Tocaste services de backend. El hook NO revisa N+1 ni 'SELECT sin eliminado_el IS NULL'."
+  ylw "  Corré el skill verify-feature (paso 7: revisión independiente por sub-agente) antes de dar la tarea por cerrada."
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo
+  red "commit BLOQUEADO por el pre-commit. Corregí, o usá 'git commit --no-verify' si es un falso positivo."
+  exit 1
+fi
+exit 0

@@ -95,6 +95,12 @@ npm run dev | npm run build
 Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_URL`,
 `JWT_SECRET`, `PORT`, `API_PREFIX`; frontend lee `VITE_API_URL`.
 
+**Git hook (una vez por clone):** `git config core.hooksPath .githooks` activa el
+pre-commit (`.githooks/pre-commit`), que bloquea el casing malo de `tenant_id`, el
+`DELETE` físico y errores de `lint:check` sobre backend staged. No cubre N+1 ni el
+filtro de borrado (juicio) — eso es la revisión independiente del skill `verify-feature`.
+Escape puntual: `git commit --no-verify`.
+
 ## Estado actual
 
 El estado de todas las funcionalidades (✅/🔲 con fechas) y el roadmap viven en
