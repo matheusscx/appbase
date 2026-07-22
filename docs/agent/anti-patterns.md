@@ -199,6 +199,23 @@ solo tenía 38 (16 así + 22 del índice de abajo).
 Convención establecida en el repo para `v-model` sobre índice de un `v-for` de la misma
 lista. No usar en accesos donde el índice sí puede no existir — ahí, guard real (`v-if`).
 
+**Variante en `<script>` (TS2322, no TS2532):** el mismo `T | undefined` del índice se
+propaga al hacer spread y reasignar la fila tras un `findIndex`:
+
+```ts
+// MAL — arr.value[idx] es T | undefined; con `saved` parcial el objeto resultante
+// tiene todos los campos opcionales → no asignable a T
+const idx = configs.value.findIndex(c => c.id === saved.id)
+if (idx >= 0) configs.value[idx] = { ...configs.value[idx], ...saved }
+
+// BIEN — el idx viene de findIndex y está guardado por `idx >= 0`: la fila existe
+if (idx >= 0) configs.value[idx] = { ...configs.value[idx]!, ...saved }
+```
+
+Aserción no-nula sobre el spread source, no sobre `saved`. Solo aplica cuando `saved`
+(el patch) es parcial; si trae el tipo completo, no falla (por eso `items.vue` no lo
+tenía). Misma justificación que arriba: el índice existe, no es un acceso dudoso.
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

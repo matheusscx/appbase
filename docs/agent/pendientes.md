@@ -12,15 +12,17 @@ ya identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **Burndown de typecheck del frontend — 84 errores** (frontend)
+- [ ] **Burndown de typecheck del frontend — 78 errores** (frontend)
   Bajo ratchet en `frontend/typecheck-baseline.json`. Quemar por tandas (por archivo).
-  `items.vue` (era el peor, 38) ya está en 0 (jul-2026). Peor `.vue` restante:
-  `pages/configuracion/pasarelas.vue` (6). `middleware/auth.spec.ts` (8) es el mayor,
-  pero es un spec → patrón distinto (no `@click`/índice), evaluar aparte.
+  `items.vue` (era el peor, 38) y `pasarelas.vue` (6) ya están en 0 (jul-2026). Peor
+  `.vue` restante: `pages/configuracion/descuentos.vue` / `recargos.vue` / `salones.vue`
+  y `pages/salones/index.vue` (4 c/u). `middleware/auth.spec.ts` (8) es el mayor, pero
+  es un spec → patrón distinto (no `@click`/índice), evaluar aparte.
   **Fix (patrones de `.vue`):** TS2322 → `@click` con expresión que devuelve valor:
   mutación de arrays a funciones nombradas en `<script setup>`; cierre de modal
   (`x = false`) a arrow inline `() => { x = false }`. TS2532 → aserción no-nula
-  `arr[idx]!.campo` sobre índice del mismo `v-for`.
+  `arr[idx]!.campo` sobre índice del mismo `v-for`; variante en `<script>`:
+  `arr.value[idx] = { ...arr.value[idx]!, ...saved }` tras `findIndex` guardado.
   Ejemplos en `anti-patterns.md`. Tras cada tanda: `npm run typecheck:ratchet -- --update`
   y commitear la baseline en el mismo commit.
   **Verificar:** total de la baseline baja; ratchet en verde.

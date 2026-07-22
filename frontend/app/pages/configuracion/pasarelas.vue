@@ -143,7 +143,7 @@ async function guardarConfig() {
       )
       const idx = configs.value.findIndex(c => c.tenantPasarelaId === saved.tenantPasarelaId)
       if (idx >= 0) {
-        configs.value[idx] = { ...configs.value[idx], ...saved }
+        configs.value[idx] = { ...configs.value[idx]!, ...saved }
       }
     }
     else {
@@ -248,7 +248,7 @@ async function confirmarRevocar() {
     )
     const idx = keys.value.findIndex(k => k.apiKeyId === res.apiKeyId)
     if (idx >= 0) {
-      keys.value[idx] = { ...keys.value[idx], revocadaEl: res.revocadaEl }
+      keys.value[idx] = { ...keys.value[idx]!, revocadaEl: res.revocadaEl }
     }
     toast.add({ title: 'API key revocada', color: 'success' })
   }
@@ -360,7 +360,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
           v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Crear')"
           icon="i-lucide-plus"
           label="Nueva API key"
-          @click="crearKeyOpen = true"
+          @click="() => { crearKeyOpen = true }"
         />
       </div>
 
@@ -482,7 +482,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
       </template>
 
       <template #actions>
-        <UButton color="neutral" variant="ghost" @click="drawerOpen = false">
+        <UButton color="neutral" variant="ghost" @click="() => { drawerOpen = false }">
           Cancelar
         </UButton>
         <UButton :loading="savingConfig" @click="guardarConfig">
@@ -513,7 +513,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
       </template>
       <template #footer>
         <AppModalFooter>
-          <UButton color="neutral" variant="ghost" @click="crearKeyOpen = false">
+          <UButton color="neutral" variant="ghost" @click="() => { crearKeyOpen = false }">
             Cancelar
           </UButton>
           <UButton label="Crear" :loading="creandoKey" :disabled="!nuevaKeyNombre.trim()" @click="crearKey" />
@@ -535,7 +535,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
       </template>
       <template #footer>
         <AppModalFooter>
-          <UButton label="Entendido" @click="keyCreadaModal = false" />
+          <UButton label="Entendido" @click="() => { keyCreadaModal = false }" />
         </AppModalFooter>
       </template>
     </UModal>
