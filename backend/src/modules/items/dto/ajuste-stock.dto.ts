@@ -13,12 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const MOTIVOS = [
-  'compra',
-  'devolucion',
-  'ajuste_manual',
-  'inventario_inicial',
-];
+const MOTIVOS = ['compra', 'devolucion', 'ajuste_manual', 'inventario_inicial'];
 
 export class SerieAjusteInputDto {
   @IsString()

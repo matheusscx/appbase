@@ -125,7 +125,11 @@ describe('VentasService', () => {
 
   beforeEach(async () => {
     const manager = buildManagerMock();
-    pagosServiceMock = { registrar: jest.fn().mockResolvedValue({ pagos: [], montoAplicadoVenta: '0.0000' }) };
+    pagosServiceMock = {
+      registrar: jest
+        .fn()
+        .mockResolvedValue({ pagos: [], montoAplicadoVenta: '0.0000' }),
+    };
     ventaPropinaServiceMock = {
       crearEnTransaccion: jest.fn().mockResolvedValue({
         id: 'venta-propina-1',
@@ -234,7 +238,7 @@ describe('VentasService', () => {
       });
       const result = await service.crear(TENANT_ID, USUARIO_ID, baseDto);
       expect(result).toBeDefined();
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(calculoPreciosService.calcular).toHaveBeenCalled();
       expect(dataSourceMock.transaction).toHaveBeenCalled();
       expect(result.estado).toBe(EstadoVenta.PAGADA);
@@ -292,7 +296,7 @@ describe('VentasService', () => {
 
     it('llama registrarMovimiento del inventario para items tipo producto', async () => {
       await service.crear(TENANT_ID, USUARIO_ID, baseDto);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -336,7 +340,7 @@ describe('VentasService', () => {
       const result = await service.crear(
         TENANT_ID,
         USUARIO_ID,
-        dtoPresentacion as any,
+        dtoPresentacion,
       );
 
       expect(catalogService.findAllUnidadesMedida).toHaveBeenCalled();
@@ -363,7 +367,7 @@ describe('VentasService', () => {
         tipo: 'servicio',
       } as never);
       await service.crear(TENANT_ID, USUARIO_ID, baseDto);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
@@ -419,7 +423,7 @@ describe('VentasService', () => {
         montoAplicadoVenta: '100.0000',
       });
 
-      await service.crear(TENANT_ID, USUARIO_ID, dtoConPropina as any);
+      await service.crear(TENANT_ID, USUARIO_ID, dtoConPropina);
 
       expect(ventaPropinaServiceMock.crearEnTransaccion).toHaveBeenCalledWith(
         expect.anything(),
@@ -479,7 +483,6 @@ describe('VentasService', () => {
       itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
       await service.crear(TENANT_ID, USUARIO_ID, dtoReceta);
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(itemsService.venderIngredientesReceta).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -489,7 +492,7 @@ describe('VentasService', () => {
           cantidadVendida: '2',
         }),
       );
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
@@ -649,7 +652,6 @@ describe('VentasService', () => {
         service.crear(TENANT_ID, USUARIO_ID, dtoSinPersonalizacion),
       ).rejects.toThrow(BadRequestException);
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(itemsService.resolverPersonalizacionReceta).toHaveBeenCalledWith(
         expect.anything(),
         TENANT_ID,
@@ -677,7 +679,6 @@ describe('VentasService', () => {
         service.crear(TENANT_ID, USUARIO_ID, dtoSinPersonalizacion),
       ).rejects.toThrow(BadRequestException);
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(itemsService.resolverPersonalizacionCombo).toHaveBeenCalledWith(
         expect.anything(),
         TENANT_ID,
@@ -699,9 +700,9 @@ describe('VentasService', () => {
         montoAplicadoVenta: '100.0000',
       });
       const result = await service.crear(TENANT_ID, USUARIO_ID, dtoOnline);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(cajaService.findVirtual).toHaveBeenCalledWith(TENANT_ID);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(cajaService.findActiva).not.toHaveBeenCalled();
       expect(result.cajaId).toBe(CAJA_VIRTUAL_ID);
       expect(result.canal).toBe('online');
@@ -846,7 +847,7 @@ describe('VentasService', () => {
       );
       // una sola persistencia: la cabecera (sin líneas)
       expect(ncManager.save).toHaveBeenCalledTimes(1);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
@@ -866,7 +867,7 @@ describe('VentasService', () => {
           clasificacionTributaria: 'exento',
         }),
       );
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
         ncManager,
         expect.objectContaining({
@@ -904,7 +905,7 @@ describe('VentasService', () => {
           devoluciones: [{ itemId: ITEM_ID, cantidad: '2' }],
         }),
       ).rejects.toThrow(BadRequestException);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
@@ -924,7 +925,7 @@ describe('VentasService', () => {
           devoluciones: [{ itemId: ITEM_SERIE_ID, cantidad: '1' }],
         }),
       ).rejects.toThrow(BadRequestException);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
@@ -1161,8 +1162,8 @@ describe('VentasService', () => {
       const listSql = dataSourceMock.query.mock.calls.find(
         (c: unknown[]) =>
           typeof c[0] === 'string' &&
-          (c[0] as string).includes('FROM ventas v') &&
-          (c[0] as string).includes('LIMIT'),
+          c[0].includes('FROM ventas v') &&
+          c[0].includes('LIMIT'),
       )?.[0] as string;
       expect(listSql).toContain("pa.tipo = 'venta'");
       expect(listSql).toContain('pago_aplicaciones');
@@ -1204,7 +1205,7 @@ describe('VentasService', () => {
         comentario: 'Devolución por reembolso orden O-1',
       });
       expect(ncManager.save).not.toHaveBeenCalled();
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
         ncManager,
         expect.objectContaining({
@@ -1223,7 +1224,7 @@ describe('VentasService', () => {
         expect(res.totalFinal).toBe('1100.0000');
         expect(res.movimientoCajaId).toBeNull();
         // prettier-ignore
-        // eslint-disable-next-line @typescript-eslint/unbound-method
+
         expect(cajaService.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
       });
 
@@ -1256,13 +1257,13 @@ describe('VentasService', () => {
           devolverDinero: true,
         });
         expect(res.movimientoCajaId).toBe('mov-caja-nc-1');
-        // eslint-disable-next-line @typescript-eslint/unbound-method
+
         expect(cajaService.findActiva).toHaveBeenCalledWith(
           TENANT_ID,
           USUARIO_ID,
         );
         // prettier-ignore
-        // eslint-disable-next-line @typescript-eslint/unbound-method
+
         expect(cajaService.registrarMovimientoEnTransaccion).toHaveBeenCalledWith(
           ncManager,
           expect.objectContaining({
@@ -1294,7 +1295,7 @@ describe('VentasService', () => {
           }),
         ).rejects.toThrow('Saldo insuficiente en caja');
         // prettier-ignore
-        // eslint-disable-next-line @typescript-eslint/unbound-method
+
         expect(cajaService.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
       });
 
@@ -1303,7 +1304,7 @@ describe('VentasService', () => {
         const res = await service.crearNotaCredito(baseParams);
         expect(res.movimientoCajaId).toBeNull();
         // prettier-ignore
-        // eslint-disable-next-line @typescript-eslint/unbound-method
+
         expect(cajaService.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
       });
     });

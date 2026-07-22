@@ -174,7 +174,12 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resCompra = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'entrada', motivo: 'compra', cantidad: 500, unidadCodigo: 'g' });
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: 500,
+        unidadCodigo: 'g',
+      });
     expect(resCompra.status).toBe(200);
 
     const resGet1 = await request(app.getHttpServer())
@@ -209,7 +214,12 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resCross = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'entrada', motivo: 'compra', cantidad: 1, unidadCodigo: 'l' });
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: 1,
+        unidadCodigo: 'l',
+      });
     expect(resCross.status).toBe(400);
 
     // 5. Cambiar la unidad base con movimientos ya registrados → rechazado

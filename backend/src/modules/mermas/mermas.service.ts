@@ -89,7 +89,10 @@ export class MermasService {
       if (!itemRows.length) {
         throw new NotFoundException('Item no encontrado');
       }
-      if (itemRows[0].tipo !== 'producto' && itemRows[0].tipo !== 'ingrediente') {
+      if (
+        itemRows[0].tipo !== 'producto' &&
+        itemRows[0].tipo !== 'ingrediente'
+      ) {
         throw new BadRequestException(
           'Solo se puede mermar un producto o un ingrediente',
         );
@@ -101,7 +104,7 @@ export class MermasService {
         dto.causaMermaId,
       );
 
-      let cantidad = new Decimal(dto.cantidad);
+      const cantidad = new Decimal(dto.cantidad);
       if (cantidad.lessThanOrEqualTo(0) || cantidad.isNaN()) {
         throw new BadRequestException('La cantidad debe ser mayor a cero');
       }

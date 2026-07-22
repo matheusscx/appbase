@@ -27,9 +27,17 @@ export class CausaMerma {
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 
-  @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz', nullable: true })
+  @UpdateDateColumn({
+    name: 'actualizado_el',
+    type: 'timestamptz',
+    nullable: true,
+  })
   actualizadoEl: Date | null;
 
-  @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz', nullable: true })
+  @DeleteDateColumn({
+    name: 'eliminado_el',
+    type: 'timestamptz',
+    nullable: true,
+  })
   eliminadoEl: Date | null;
 }

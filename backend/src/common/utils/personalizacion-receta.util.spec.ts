@@ -57,9 +57,15 @@ describe('personalizacion-receta.util', () => {
       precioExtra: '500',
     };
     expect(
-      hashPersonalizacion({ omitidos: [], extras: [{ ...base, unidades: '1' }] }),
+      hashPersonalizacion({
+        omitidos: [],
+        extras: [{ ...base, unidades: '1' }],
+      }),
     ).not.toBe(
-      hashPersonalizacion({ omitidos: [], extras: [{ ...base, unidades: '2' }] }),
+      hashPersonalizacion({
+        omitidos: [],
+        extras: [{ ...base, unidades: '2' }],
+      }),
     );
   });
 
@@ -72,7 +78,13 @@ describe('personalizacion-receta.util', () => {
           grupoId: 'g1',
           grupoNombre: 'Bebida',
           opciones: [
-            { itemId: 'coca', nombre: 'Coca-Cola', cantidad: '1', precioExtra: '0', unidades: '1' },
+            {
+              itemId: 'coca',
+              nombre: 'Coca-Cola',
+              cantidad: '1',
+              precioExtra: '0',
+              unidades: '1',
+            },
           ],
         },
       ],
@@ -84,7 +96,13 @@ describe('personalizacion-receta.util', () => {
           grupoId: 'g1',
           grupoNombre: 'Bebida',
           opciones: [
-            { itemId: 'sprite', nombre: 'Sprite', cantidad: '1', precioExtra: '0', unidades: '1' },
+            {
+              itemId: 'sprite',
+              nombre: 'Sprite',
+              cantidad: '1',
+              precioExtra: '0',
+              unidades: '1',
+            },
           ],
         },
       ],
@@ -102,7 +120,13 @@ describe('personalizacion-receta.util', () => {
             grupoId: 'g1',
             grupoNombre: 'Bebida',
             opciones: [
-              { itemId: 'coca', nombre: 'Coca-Cola', cantidad: '1', precioExtra, unidades: '1' },
+              {
+                itemId: 'coca',
+                nombre: 'Coca-Cola',
+                cantidad: '1',
+                precioExtra,
+                unidades: '1',
+              },
             ],
           },
         ],
@@ -115,15 +139,33 @@ describe('personalizacion-receta.util', () => {
       grupoId: 'g1',
       grupoNombre: 'Bebida',
       opciones: [
-        { itemId: 'coca', nombre: 'Coca-Cola', cantidad: '1', precioExtra: '0', unidades: '1' },
-        { itemId: 'sprite', nombre: 'Sprite', cantidad: '1', precioExtra: '0', unidades: '1' },
+        {
+          itemId: 'coca',
+          nombre: 'Coca-Cola',
+          cantidad: '1',
+          precioExtra: '0',
+          unidades: '1',
+        },
+        {
+          itemId: 'sprite',
+          nombre: 'Sprite',
+          cantidad: '1',
+          precioExtra: '0',
+          unidades: '1',
+        },
       ],
     };
     const grupoB = {
       grupoId: 'g2',
       grupoNombre: 'Extra',
       opciones: [
-        { itemId: 'papas', nombre: 'Papas', cantidad: '1', precioExtra: '500', unidades: '1' },
+        {
+          itemId: 'papas',
+          nombre: 'Papas',
+          cantidad: '1',
+          precioExtra: '500',
+          unidades: '1',
+        },
       ],
     };
     const a = hashPersonalizacion({
@@ -156,7 +198,10 @@ describe('personalizacion-receta.util', () => {
       precioExtra: '500',
     };
     expect(hashPersonalizacion({ omitidos: [], extras: [{ ...base }] })).toBe(
-      hashPersonalizacion({ omitidos: [], extras: [{ ...base, unidades: '1' }] }),
+      hashPersonalizacion({
+        omitidos: [],
+        extras: [{ ...base, unidades: '1' }],
+      }),
     );
   });
 
@@ -221,8 +266,19 @@ describe('personalizacion-receta.util', () => {
         {
           omitidos: ['i1'],
           extras: [
-            { ingredienteItemId: 'i2', cantidad: '1', unidadCodigo: 'unidad', precioExtra: '1000' },
-            { ingredienteItemId: 'i3', cantidad: '1', unidadCodigo: 'unidad', precioExtra: '750', unidades: '2' },
+            {
+              ingredienteItemId: 'i2',
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioExtra: '1000',
+            },
+            {
+              ingredienteItemId: 'i3',
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioExtra: '750',
+              unidades: '2',
+            },
           ],
         },
         nombres,
@@ -236,7 +292,10 @@ describe('personalizacion-receta.util', () => {
 
   it('detallePersonalizacion usa el id como fallback si el nombre no está en el mapa', () => {
     expect(
-      detallePersonalizacion({ omitidos: ['id-desconocido'], extras: [] }, new Map()),
+      detallePersonalizacion(
+        { omitidos: ['id-desconocido'], extras: [] },
+        new Map(),
+      ),
     ).toEqual([{ nombre: 'id-desconocido', tipo: 'omitido', monto: '0' }]);
   });
 });

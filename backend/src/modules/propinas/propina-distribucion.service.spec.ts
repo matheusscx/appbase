@@ -65,7 +65,10 @@ describe('PropinaDistribucionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PropinaDistribucionService,
-        { provide: getRepositoryToken(PropinaConfiguracion), useValue: configRepo },
+        {
+          provide: getRepositoryToken(PropinaConfiguracion),
+          useValue: configRepo,
+        },
         {
           provide: getRepositoryToken(PropinaGrupoDistribucion),
           useValue: grupoRepo,
@@ -181,8 +184,9 @@ describe('PropinaDistribucionService', () => {
     } as PropinaConfiguracion;
     manager.findOne.mockResolvedValue(config);
     manager.find.mockResolvedValue([]);
-    manager.save.mockImplementation((_e: unknown, data: Record<string, unknown>) =>
-      Promise.resolve({ id: data['id'] ?? 'saved', ...data }),
+    manager.save.mockImplementation(
+      (_e: unknown, data: Record<string, unknown>) =>
+        Promise.resolve({ id: data['id'] ?? 'saved', ...data }),
     );
 
     stubCargarPublica(2, [], '0.150000');
@@ -228,14 +232,12 @@ describe('PropinaDistribucionService', () => {
   });
 
   it('obtenerPorcentajeSugerido asegura default y responde string', async () => {
-    configRepo.findOne
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        id: 'cfg-1',
-        tenantId: TENANT,
-        version: 1,
-        porcentajeSugerido: '0.10',
-      });
+    configRepo.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 'cfg-1',
+      tenantId: TENANT,
+      version: 1,
+      porcentajeSugerido: '0.10',
+    });
     manager.findOne.mockResolvedValueOnce(null);
     manager.save
       .mockResolvedValueOnce({
@@ -285,8 +287,9 @@ describe('PropinaDistribucionService', () => {
     } as PropinaConfiguracion;
     manager.findOne.mockResolvedValue(config);
     manager.find.mockResolvedValue([{ id: 'old-g' }]);
-    manager.save.mockImplementation((_e: unknown, data: Record<string, unknown>) =>
-      Promise.resolve({ id: data['id'] ?? 'saved', ...data }),
+    manager.save.mockImplementation(
+      (_e: unknown, data: Record<string, unknown>) =>
+        Promise.resolve({ id: data['id'] ?? 'saved', ...data }),
     );
 
     stubCargarPublica(2, [
@@ -435,7 +438,9 @@ describe('PropinaDistribucionService', () => {
           porcentaje: '1',
           criterio: CriterioDistribucion.MANUAL,
           manualModo: ManualModo.PESOS,
-          pesos: [{ garzonId: '550e8400-e29b-41d4-a716-446655440238', peso: '2' }],
+          pesos: [
+            { garzonId: '550e8400-e29b-41d4-a716-446655440238', peso: '2' },
+          ],
         },
       ],
     });

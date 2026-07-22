@@ -36,10 +36,7 @@ export function calcularAplicacionesNoVuelto(
     return a.metodoPagoId.localeCompare(b.metodoPagoId);
   });
 
-  const porPago = new Map<
-    number,
-    { venta: Decimal; propina: Decimal }
-  >();
+  const porPago = new Map<number, { venta: Decimal; propina: Decimal }>();
 
   for (const p of ordenados) {
     const neto = new Decimal(p.neto || '0');

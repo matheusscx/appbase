@@ -146,9 +146,7 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
       .set('Authorization', `Bearer ${token}`)
       .send({
         nombre: `Bebida GM E2E ${Date.now()}`,
-        opciones: [
-          { itemId: bebidaId, cantidad: '1', precioExtra: '800' },
-        ],
+        opciones: [{ itemId: bebidaId, cantidad: '1', precioExtra: '800' }],
       });
 
     expect(res.status).toBe(201);

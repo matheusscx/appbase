@@ -9,13 +9,14 @@ import {
 } from 'typeorm';
 
 @Entity('liquidacion_propinas_fuente')
-@Index('uq_liquidacion_propinas_fuente_propina', [
-  'liquidacionId',
-  'ventaPropinaId',
-], {
-  unique: true,
-  where: '"eliminado_el" IS NULL',
-})
+@Index(
+  'uq_liquidacion_propinas_fuente_propina',
+  ['liquidacionId', 'ventaPropinaId'],
+  {
+    unique: true,
+    where: '"eliminado_el" IS NULL',
+  },
+)
 export class LiquidacionPropinasFuente {
   @PrimaryGeneratedColumn('uuid', { name: 'liquidacion_propinas_fuente_id' })
   id: string;

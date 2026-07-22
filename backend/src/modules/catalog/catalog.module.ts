@@ -9,7 +9,15 @@ import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ModuloApp, Permiso, Pais, Provincia, UnidadMedida])],
+  imports: [
+    TypeOrmModule.forFeature([
+      ModuloApp,
+      Permiso,
+      Pais,
+      Provincia,
+      UnidadMedida,
+    ]),
+  ],
   controllers: [CatalogController],
   providers: [CatalogService],
   exports: [CatalogService],

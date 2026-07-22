@@ -1,4 +1,10 @@
-import { ArrayUnique, IsArray, IsISO8601, IsOptional, IsUUID } from 'class-validator';
+import {
+  ArrayUnique,
+  IsArray,
+  IsISO8601,
+  IsOptional,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateLiquidacionDto {
   @IsISO8601()

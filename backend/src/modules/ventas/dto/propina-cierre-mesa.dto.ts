@@ -1,4 +1,10 @@
-import { IsEnum, IsIn, IsNumberString, IsOptional, IsUUID } from 'class-validator';
+import {
+  IsEnum,
+  IsIn,
+  IsNumberString,
+  IsOptional,
+  IsUUID,
+} from 'class-validator';
 import { EstrategiaAsignacionPropina } from '../../propinas/enums/estrategia-asignacion-propina.enum';
 import { TipoGarzon } from '../../garzones/enums/tipo-garzon.enum';
 

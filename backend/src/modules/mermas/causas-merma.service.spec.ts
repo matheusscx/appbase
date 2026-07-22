@@ -27,16 +27,14 @@ describe('CausasMermaService', () => {
 
   describe('create', () => {
     it('inserta con es_fijo=false y nombre trim', async () => {
-      queryMock
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([
-          {
-            causa_merma_id: CAUSA,
-            nombre: 'Rotura',
-            activo: true,
-            es_fijo: false,
-          },
-        ]);
+      queryMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          causa_merma_id: CAUSA,
+          nombre: 'Rotura',
+          activo: true,
+          es_fijo: false,
+        },
+      ]);
 
       const result = await service.create(TENANT, { nombre: '  Rotura  ' });
 

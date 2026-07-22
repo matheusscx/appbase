@@ -176,7 +176,10 @@ describe('TurnosService', () => {
 
     await service.eliminar(TENANT, 't1');
 
-    expect(repo.softDelete).toHaveBeenCalledWith({ id: 't1', tenantId: TENANT });
+    expect(repo.softDelete).toHaveBeenCalledWith({
+      id: 't1',
+      tenantId: TENANT,
+    });
   });
 
   it('getActivoOrThrow lanza 400 si inactivo o inexistente', async () => {

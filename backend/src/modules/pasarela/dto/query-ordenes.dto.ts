@@ -40,6 +40,8 @@ export class QueryOrdenesDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   search?: string;
 }

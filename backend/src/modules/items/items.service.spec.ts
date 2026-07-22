@@ -3516,14 +3516,19 @@ describe('ItemsService', () => {
           },
         ]); // opción pertenece (ingrediente, sin default de cantidad/unidad)
       await expect(
-        (service as any).asociarGruposModificadores(managerMock, TENANT, ITEM_ID, [
-          {
-            grupoModificadorId: GRUPO_ID,
-            min: 1,
-            max: 1,
-            opciones: [{ grupoOpcionId: OPCION_ID, cantidad: '250' }], // sin unidadCodigo
-          },
-        ]),
+        (service as any).asociarGruposModificadores(
+          managerMock,
+          TENANT,
+          ITEM_ID,
+          [
+            {
+              grupoModificadorId: GRUPO_ID,
+              min: 1,
+              max: 1,
+              opciones: [{ grupoOpcionId: OPCION_ID, cantidad: '250' }], // sin unidadCodigo
+            },
+          ],
+        ),
       ).rejects.toThrow(/unidad de medida/i);
     });
 
@@ -3546,16 +3551,25 @@ describe('ItemsService', () => {
           },
         ]);
       await expect(
-        (service as any).asociarGruposModificadores(managerMock, TENANT, ITEM_ID, [
-          {
-            grupoModificadorId: GRUPO_ID,
-            min: 1,
-            max: 1,
-            opciones: [
-              { grupoOpcionId: OPCION_ID, cantidad: '250', unidadCodigo: 'ml' },
-            ],
-          },
-        ]),
+        (service as any).asociarGruposModificadores(
+          managerMock,
+          TENANT,
+          ITEM_ID,
+          [
+            {
+              grupoModificadorId: GRUPO_ID,
+              min: 1,
+              max: 1,
+              opciones: [
+                {
+                  grupoOpcionId: OPCION_ID,
+                  cantidad: '250',
+                  unidadCodigo: 'ml',
+                },
+              ],
+            },
+          ],
+        ),
       ).rejects.toThrow(/incompatible/i);
     });
 

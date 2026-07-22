@@ -13,9 +13,5 @@ export function horasInterseccionHoras(
     return '0.0000';
   }
 
-  return new Decimal(fin - inicio)
-    .div(1000)
-    .div(60)
-    .div(60)
-    .toFixed(4);
+  return new Decimal(fin - inicio).div(1000).div(60).div(60).toFixed(4);
 }

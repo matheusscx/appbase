@@ -190,7 +190,7 @@ export class CausasMermaService {
       params.push(excludeId);
       sql += ` AND causa_merma_id <> $3`;
     }
-    const rows = await this.dataSource.query(sql, params);
+    const rows: unknown[] = await this.dataSource.query(sql, params);
     if (rows.length) {
       throw new BadRequestException(
         `Ya existe una causa de merma con el nombre "${nombre}"`,

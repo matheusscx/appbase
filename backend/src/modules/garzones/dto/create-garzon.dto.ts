@@ -1,4 +1,10 @@
-import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { TipoGarzon } from '../enums/tipo-garzon.enum';
 
 export class CreateGarzonDto {

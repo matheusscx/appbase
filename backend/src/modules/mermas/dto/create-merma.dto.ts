@@ -1,9 +1,4 @@
-import {
-  IsNumberString,
-  IsOptional,
-  IsString,
-  IsUUID,
-} from 'class-validator';
+import { IsNumberString, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateMermaDto {
   @IsUUID()

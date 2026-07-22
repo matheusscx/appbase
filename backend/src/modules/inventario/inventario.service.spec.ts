@@ -668,7 +668,7 @@ describe('InventarioService', () => {
           },
         ]);
 
-      const res = await service.findMovimientos(TENANT, {} as never);
+      const res = await service.findMovimientos(TENANT, {});
 
       expect(res.data[0].unidadMedida).toBe('kg');
       expect(dataSource.query).toHaveBeenCalledWith(
@@ -698,7 +698,7 @@ describe('InventarioService', () => {
           },
         ]); // list
 
-      const res = await service.findMovimientos(TENANT, {} as never);
+      const res = await service.findMovimientos(TENANT, {});
 
       expect(res.data[0].costoUnitario).toBe('4200');
     });
@@ -726,7 +726,7 @@ describe('InventarioService', () => {
           },
         ]);
 
-      const res = await service.findMovimientos(TENANT, {} as never);
+      const res = await service.findMovimientos(TENANT, {});
 
       expect(res.data[0]).toMatchObject({
         causaMermaId: CAUSA_MERMA_ID,

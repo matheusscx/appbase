@@ -163,7 +163,7 @@ describe('PagosService', () => {
 
       expect(result.pagos).toHaveLength(1);
       expect(result.montoAplicadoVenta).toBe('100.0000');
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+
       expect(cajaSvc.registrarMovimientoEnTransaccion).toHaveBeenCalledTimes(1);
     });
 

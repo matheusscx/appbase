@@ -117,9 +117,7 @@ export class InventarioService {
       params.tipo === 'entrada' &&
       params.motivo === 'compra';
     const costoUnitarioCongelado =
-      params.costoUnitario != null
-        ? params.costoUnitario
-        : costoActualPrevio;
+      params.costoUnitario != null ? params.costoUnitario : costoActualPrevio;
 
     let result: MoverResult;
 

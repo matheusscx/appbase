@@ -32,7 +32,8 @@ export class ImpresorasService {
       tipoConexion: dto.tipoConexion,
       host: dto.tipoConexion === 'red' ? (dto.host ?? null) : null,
       puerto: dto.tipoConexion === 'red' ? (dto.puerto ?? null) : null,
-      nombreCola: dto.tipoConexion === 'sistema' ? (dto.nombreCola ?? null) : null,
+      nombreCola:
+        dto.tipoConexion === 'sistema' ? (dto.nombreCola ?? null) : null,
       activo: dto.activo ?? true,
     });
     return this.impresoraRepo.save(impresora);
@@ -46,7 +47,8 @@ export class ImpresorasService {
     const impresora = await this.getOrThrow(tenantId, id);
     if (dto.nombre !== undefined) impresora.nombre = dto.nombre;
     if (dto.rol !== undefined) impresora.rol = dto.rol;
-    if (dto.tipoConexion !== undefined) impresora.tipoConexion = dto.tipoConexion;
+    if (dto.tipoConexion !== undefined)
+      impresora.tipoConexion = dto.tipoConexion;
     if (dto.host !== undefined) impresora.host = dto.host;
     if (dto.puerto !== undefined) impresora.puerto = dto.puerto;
     if (dto.nombreCola !== undefined) impresora.nombreCola = dto.nombreCola;

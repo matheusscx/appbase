@@ -1,4 +1,4 @@
-import { ConfigService } from '@nestjs/config';
+import { type ConfigService } from '@nestjs/config';
 import { BadRequestException } from '@nestjs/common';
 import { generateKeyPairSync, createVerify } from 'crypto';
 import { QzFirmaService } from './qz-firma.service';

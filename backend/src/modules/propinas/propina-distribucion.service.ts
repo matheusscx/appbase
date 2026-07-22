@@ -127,7 +127,9 @@ export class PropinaDistribucionService {
         );
       }
 
-      config.porcentajeSugerido = new Decimal(dto.porcentajeSugerido).toFixed(6);
+      config.porcentajeSugerido = new Decimal(dto.porcentajeSugerido).toFixed(
+        6,
+      );
 
       const gruposPrevios = await manager.find(PropinaGrupoDistribucion, {
         where: { tenantId, configuracionId: config.id, eliminadoEl: IsNull() },
@@ -275,7 +277,10 @@ export class PropinaDistribucionService {
         : await repoPeso.find({
             where: { grupoId: In(grupoIds), eliminadoEl: IsNull() },
           });
-    const pesosByGrupo = new Map<string, { garzonId: string; peso: string }[]>();
+    const pesosByGrupo = new Map<
+      string,
+      { garzonId: string; peso: string }[]
+    >();
     for (const p of pesos) {
       const list = pesosByGrupo.get(p.grupoId) ?? [];
       list.push({ garzonId: p.garzonId, peso: p.peso });

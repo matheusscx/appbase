@@ -33,4 +33,19 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
+  {
+    // Archivos de test: acceder a `any` de mocks y respuestas HTTP (res.body.x,
+    // spies de jest) es uso legítimo, no deuda de tipos. Relajamos la familia
+    // no-unsafe y unbound-method solo aquí; el código de producción sí las exige.
+    files: ['**/*.spec.ts', 'test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/unbound-method': 'off',
+      // mock async que espeja una firma async pero no usa await: patrón de jest.
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
 );

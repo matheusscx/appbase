@@ -32,11 +32,7 @@ import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tribu
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Garzon } from '../garzones/entities/garzon.entity';
 import { Turno } from '../turnos/entities/turno.entity';
-import {
-  Impresora,
-  RolImpresora,
-  TipoConexionImpresora,
-} from '../impresoras/entities/impresora.entity';
+import { Impresora } from '../impresoras/entities/impresora.entity';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
@@ -970,7 +966,7 @@ export class SeederService implements OnApplicationBootstrap {
     for (const tenantId of [PARIS, FALABELLA]) {
       for (const nombre of nombres) {
         const causaId = uuid(id++);
-        const exists = await this.dataSource.query(
+        const exists: unknown[] = await this.dataSource.query(
           `SELECT 1 FROM causas_merma WHERE causa_merma_id = $1`,
           [causaId],
         );

@@ -4,7 +4,6 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
-const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CARNE_MOLIDA_ID = '550e8400-e29b-41d4-a716-446655440257';
 const CAUSA_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';

@@ -1,7 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 
-export type UnidadCat = { codigo: string; magnitud: string; factorBase: string };
+export type UnidadCat = {
+  codigo: string;
+  magnitud: string;
+  factorBase: string;
+};
 
 export function assertPresentacionPareada(
   cantidadPresentacion?: string | null,

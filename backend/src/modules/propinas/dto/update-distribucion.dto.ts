@@ -45,7 +45,9 @@ export class GrupoDistribucionDto {
   @IsIn(Object.values(BaseVentasGrupo))
   baseVentas?: BaseVentasGrupo;
 
-  @ValidateIf((o: GrupoDistribucionDto) => o.criterio === CriterioDistribucion.MANUAL)
+  @ValidateIf(
+    (o: GrupoDistribucionDto) => o.criterio === CriterioDistribucion.MANUAL,
+  )
   @IsIn(Object.values(ManualModo))
   manualModo?: ManualModo | null;
 

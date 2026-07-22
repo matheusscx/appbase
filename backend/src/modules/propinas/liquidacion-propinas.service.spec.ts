@@ -6,7 +6,6 @@ import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { BaseVentasGrupo } from './enums/base-ventas-grupo.enum';
 import { CriterioDistribucion } from './enums/criterio-distribucion.enum';
 import { EstadoLiquidacion } from './enums/estado-liquidacion.enum';
-import { ManualModo } from './enums/manual-modo.enum';
 import { OrigenParticipante } from './enums/origen-participante.enum';
 import { TipoEventoLiquidacion } from './enums/tipo-evento-liquidacion.enum';
 import { LiquidacionPropinas } from './entities/liquidacion-propinas.entity';
@@ -92,11 +91,12 @@ describe('LiquidacionPropinasService', () => {
       })),
       find: jest.fn(),
       findOne: jest.fn(),
-      save: jest.fn((entity: { name?: string }, data: Record<string, unknown>) =>
-        Promise.resolve({
-          id: `${entity.name ?? 'Entity'}-${manager.save.mock.calls.length + 1}`,
-          ...data,
-        }),
+      save: jest.fn(
+        (entity: { name?: string }, data: Record<string, unknown>) =>
+          Promise.resolve({
+            id: `${entity.name ?? 'Entity'}-${manager.save.mock.calls.length + 1}`,
+            ...data,
+          }),
       ),
       softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
       query: jest
@@ -122,14 +122,26 @@ describe('LiquidacionPropinasService', () => {
         LiquidacionPropinasService,
         { provide: PropinaDistribucionService, useValue: distribucion },
         { provide: getDataSourceToken(), useValue: dataSource },
-        { provide: getRepositoryToken(LiquidacionPropinas), useValue: liquidacionRepo },
-        { provide: getRepositoryToken(LiquidacionPropinasGrupo), useValue: grupoRepo },
+        {
+          provide: getRepositoryToken(LiquidacionPropinas),
+          useValue: liquidacionRepo,
+        },
+        {
+          provide: getRepositoryToken(LiquidacionPropinasGrupo),
+          useValue: grupoRepo,
+        },
         {
           provide: getRepositoryToken(LiquidacionPropinasParticipante),
           useValue: participanteRepo,
         },
-        { provide: getRepositoryToken(LiquidacionPropinasFuente), useValue: fuenteRepo },
-        { provide: getRepositoryToken(LiquidacionPropinasEvento), useValue: eventoRepo },
+        {
+          provide: getRepositoryToken(LiquidacionPropinasFuente),
+          useValue: fuenteRepo,
+        },
+        {
+          provide: getRepositoryToken(LiquidacionPropinasEvento),
+          useValue: eventoRepo,
+        },
       ],
     }).compile();
 
@@ -256,7 +268,10 @@ describe('LiquidacionPropinasService', () => {
     };
   }
 
-  function fuenteBase(id = 'fuente-1', tipId = 'tip-1'): LiquidacionPropinasFuente {
+  function fuenteBase(
+    id = 'fuente-1',
+    tipId = 'tip-1',
+  ): LiquidacionPropinasFuente {
     return {
       id,
       tenantId: TENANT,
@@ -358,10 +373,9 @@ describe('LiquidacionPropinasService', () => {
     const result = await service.actualizarConfig(TENANT, USER, 'liq-1');
 
     expect(result.configuracionVersion).toBe(4);
-    expect(manager.softDelete).toHaveBeenCalledWith(
-      LiquidacionPropinasGrupo,
-      { liquidacionId: 'liq-1' },
-    );
+    expect(manager.softDelete).toHaveBeenCalledWith(LiquidacionPropinasGrupo, {
+      liquidacionId: 'liq-1',
+    });
     expect(manager.save).toHaveBeenCalledWith(
       LiquidacionPropinasEvento,
       expect.objectContaining({

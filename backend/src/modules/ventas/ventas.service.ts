@@ -33,7 +33,6 @@ import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
-import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
 
 /** Ítem/cantidad a devolver a stock en un reembolso (solo modo 'cantidad'). */
 export interface DevolucionReembolso {
@@ -214,8 +213,11 @@ export class VentasService {
     const lineasConversion = dto.lineas.map((linea, i) => {
       const item = items[i];
       const pers = personalizaciones[i];
-      const { cantidadCanonica, cantidadPresentacion, unidadCodigoPresentacion } =
-        cantidadesResueltas[i];
+      const {
+        cantidadCanonica,
+        cantidadPresentacion,
+        unidadCodigoPresentacion,
+      } = cantidadesResueltas[i];
       const tasa = new Decimal(tasaMap.get(item.monedaId) ?? '1');
       const precioOrigen =
         pers != null
@@ -231,7 +233,7 @@ export class VentasService {
         precioOrigen,
         tasa: tasa.toFixed(6),
         precioConvertido,
-        personalizacion: (pers?.snapshot ?? null) as PersonalizacionRecetaSnapshot | null,
+        personalizacion: pers?.snapshot ?? null,
       };
     });
 

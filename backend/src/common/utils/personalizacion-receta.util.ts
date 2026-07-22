@@ -49,9 +49,12 @@ export function textoComandaPersonalizacion(
   }
 
   for (const extra of p.extras) {
-    const nombre = nombres.get(extra.ingredienteItemId) ?? extra.ingredienteItemId;
+    const nombre =
+      nombres.get(extra.ingredienteItemId) ?? extra.ingredienteItemId;
     const unidades = Number(extra.unidades ?? '1');
-    partes.push(unidades > 1 ? `Extra ${nombre} x${unidades}` : `Extra ${nombre}`);
+    partes.push(
+      unidades > 1 ? `Extra ${nombre} x${unidades}` : `Extra ${nombre}`,
+    );
   }
 
   if (p.comentario) {
@@ -82,13 +85,20 @@ export function detallePersonalizacion(
   const detalle: PersonalizacionDetalleLinea[] = [];
 
   for (const id of p.omitidos) {
-    detalle.push({ nombre: nombres.get(id) ?? id, tipo: 'omitido', monto: '0' });
+    detalle.push({
+      nombre: nombres.get(id) ?? id,
+      tipo: 'omitido',
+      monto: '0',
+    });
   }
 
   for (const extra of p.extras) {
-    const nombre = nombres.get(extra.ingredienteItemId) ?? extra.ingredienteItemId;
+    const nombre =
+      nombres.get(extra.ingredienteItemId) ?? extra.ingredienteItemId;
     const unidades = Number(extra.unidades ?? '1');
-    const monto = new Decimal(extra.precioExtra || '0').times(unidades).toString();
+    const monto = new Decimal(extra.precioExtra || '0')
+      .times(unidades)
+      .toString();
     detalle.push({ nombre, tipo: 'extra', unidades, monto });
   }
 

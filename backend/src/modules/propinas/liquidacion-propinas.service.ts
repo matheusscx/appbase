@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
@@ -15,7 +19,6 @@ import { LiquidacionPropinasFuente } from './entities/liquidacion-propinas-fuent
 import { LiquidacionPropinasGrupo } from './entities/liquidacion-propinas-grupo.entity';
 import { LiquidacionPropinasParticipante } from './entities/liquidacion-propinas-participante.entity';
 import {
-  DistribucionPublica,
   GrupoDistribucionPublico,
   PropinaDistribucionService,
 } from './propina-distribucion.service';
@@ -150,7 +153,9 @@ export class LiquidacionPropinasService {
     const fechaDesde = new Date(dto.fechaDesde);
     const fechaHasta = new Date(dto.fechaHasta);
     if (fechaHasta <= fechaDesde) {
-      throw new BadRequestException('La fecha hasta debe ser posterior a desde');
+      throw new BadRequestException(
+        'La fecha hasta debe ser posterior a desde',
+      );
     }
 
     const config = await this.distribucion.obtener(tenantId);
@@ -348,7 +353,12 @@ export class LiquidacionPropinasService {
     dto: UpdateLiquidacionDto,
   ): Promise<LiquidacionDetalle> {
     return this.dataSource.transaction(async (manager) => {
-      const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
+      const detalle = await this.cargarDetalleManager(
+        manager,
+        tenantId,
+        id,
+        true,
+      );
       this.assertBorrador(detalle.liquidacion);
 
       let participantes = [...detalle.participantes];
@@ -397,11 +407,18 @@ export class LiquidacionPropinasService {
     tenantId: string,
     usuarioId: string,
     id: string,
-  ): Promise<LiquidacionDetalle & { diff: { antes: unknown[]; despues: unknown[] } }> {
+  ): Promise<
+    LiquidacionDetalle & { diff: { antes: unknown[]; despues: unknown[] } }
+  > {
     const config = await this.distribucion.obtener(tenantId);
 
     return this.dataSource.transaction(async (manager) => {
-      const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
+      const detalle = await this.cargarDetalleManager(
+        manager,
+        tenantId,
+        id,
+        true,
+      );
       this.assertBorrador(detalle.liquidacion);
 
       const antes = detalle.grupos.map((g) => ({
@@ -490,7 +507,12 @@ export class LiquidacionPropinasService {
     id: string,
   ): Promise<LiquidacionDetalle> {
     return this.dataSource.transaction(async (manager) => {
-      const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
+      const detalle = await this.cargarDetalleManager(
+        manager,
+        tenantId,
+        id,
+        true,
+      );
       this.assertBorrador(detalle.liquidacion);
       const evento = await this.confirmarEnTransaccion(
         manager,
@@ -520,7 +542,9 @@ export class LiquidacionPropinasService {
     const fechaDesde = new Date(dto.fechaDesde);
     const fechaHasta = new Date(dto.fechaHasta);
     if (fechaHasta <= fechaDesde) {
-      throw new BadRequestException('La fecha hasta debe ser posterior a desde');
+      throw new BadRequestException(
+        'La fecha hasta debe ser posterior a desde',
+      );
     }
     const config = await this.distribucion.obtener(tenantId);
     const gruposConfig = config.grupos.filter((g) => g.activo);
@@ -583,9 +607,16 @@ export class LiquidacionPropinasService {
     dto: AnularLiquidacionDto,
   ): Promise<LiquidacionDetalle> {
     return this.dataSource.transaction(async (manager) => {
-      const detalle = await this.cargarDetalleManager(manager, tenantId, id, true);
+      const detalle = await this.cargarDetalleManager(
+        manager,
+        tenantId,
+        id,
+        true,
+      );
       if (detalle.liquidacion.estado !== EstadoLiquidacion.CONFIRMADA) {
-        throw new BadRequestException('Solo se puede anular una liquidación confirmada');
+        throw new BadRequestException(
+          'Solo se puede anular una liquidación confirmada',
+        );
       }
 
       await manager.query(
@@ -664,7 +695,9 @@ export class LiquidacionPropinasService {
 
   private assertBorrador(liquidacion: LiquidacionPropinas): void {
     if (liquidacion.estado !== EstadoLiquidacion.BORRADOR) {
-      throw new BadRequestException('Solo se puede modificar una liquidación en borrador');
+      throw new BadRequestException(
+        'Solo se puede modificar una liquidación en borrador',
+      );
     }
   }
 
@@ -819,7 +852,7 @@ export class LiquidacionPropinasService {
       [tipIds],
     );
     // TypeORM + pg: UPDATE RETURNING llega como [rows, rowCount], no como rows.
-    const updateRaw = await manager.query(
+    const updateRaw: unknown = await manager.query(
       `UPDATE venta_propina
        SET liquidacion_id = $1, actualizado_el = NOW()
        WHERE venta_propina_id = ANY($2::uuid[])
@@ -829,10 +862,10 @@ export class LiquidacionPropinasService {
       [liquidacion.id, tipIds],
     );
     const actualizadas: { venta_propina_id: string }[] = Array.isArray(
-      updateRaw?.[0],
+      (updateRaw as unknown[])[0],
     )
-      ? updateRaw[0]
-      : updateRaw;
+      ? (updateRaw as { venta_propina_id: string }[][])[0]
+      : (updateRaw as { venta_propina_id: string }[]);
     if (actualizadas.length !== tipIds.length) {
       throw new BadRequestException(
         'Una o más propinas ya fueron liquidadas por otra corrida',
@@ -901,21 +934,27 @@ export class LiquidacionPropinasService {
     if (cambio.id) {
       const existente = participantes.find((p) => p.id === cambio.id);
       if (!existente) {
-        throw new BadRequestException('Participante no encontrado en la liquidación');
+        throw new BadRequestException(
+          'Participante no encontrado en la liquidación',
+        );
       }
       if (
         cambio.incluido === false &&
         existente.origen === OrigenParticipante.SUGERIDO &&
         !cambio.motivoAjuste?.trim()
       ) {
-        throw new BadRequestException('Excluir un participante sugerido exige motivo');
+        throw new BadRequestException(
+          'Excluir un participante sugerido exige motivo',
+        );
       }
       if (cambio.incluido !== undefined) existente.incluido = cambio.incluido;
       if (cambio.motivoAjuste !== undefined) {
         existente.motivoAjuste = cambio.motivoAjuste;
       }
-      if (cambio.pesoManual !== undefined) existente.pesoManual = cambio.pesoManual;
-      if (cambio.monto !== undefined) existente.monto = new Decimal(cambio.monto).toFixed(4);
+      if (cambio.pesoManual !== undefined)
+        existente.pesoManual = cambio.pesoManual;
+      if (cambio.monto !== undefined)
+        existente.monto = new Decimal(cambio.monto).toFixed(4);
       if (cambio.ajusteMotivoMonto !== undefined) {
         existente.ajusteMotivoMonto = cambio.ajusteMotivoMonto;
       }
@@ -924,7 +963,9 @@ export class LiquidacionPropinasService {
     }
 
     if (!cambio.garzonId || !cambio.grupoId || !cambio.motivoAjuste?.trim()) {
-      throw new BadRequestException('Agregar un participante manual exige garzón, grupo y motivo');
+      throw new BadRequestException(
+        'Agregar un participante manual exige garzón, grupo y motivo',
+      );
     }
     const grupo = grupos.find((g) => g.id === cambio.grupoId);
     if (!grupo) {
@@ -1276,9 +1317,7 @@ export class LiquidacionPropinasService {
   ): string[] {
     return [
       ...new Set([
-        ...tips
-          .filter((t) => t.tipo_garzon === tipo)
-          .map((t) => t.garzon_id),
+        ...tips.filter((t) => t.tipo_garzon === tipo).map((t) => t.garzon_id),
         ...sesiones
           .filter((s) => s.tipo_garzon === tipo)
           .map((s) => s.garzon_id),
@@ -1302,7 +1341,9 @@ export class LiquidacionPropinasService {
   > {
     const tipsGarzon = args.tips.filter((t) => t.garzon_id === args.garzonId);
     const sesionesGarzon = args.sesiones.filter(
-      (s) => s.garzon_id === args.garzonId && s.tipo_garzon === args.grupo.tipoGarzon,
+      (s) =>
+        s.garzon_id === args.garzonId &&
+        s.tipo_garzon === args.grupo.tipoGarzon,
     );
     const ventasBase = tipsGarzon.reduce((acc, tip) => {
       const base =
@@ -1402,7 +1443,10 @@ export class LiquidacionPropinasService {
     if (criterio === CriterioDistribucion.CANTIDAD_CUENTAS) {
       return participante.cuentas;
     }
-    if (criterio === CriterioDistribucion.MANUAL && manualModo === ManualModo.PESOS) {
+    if (
+      criterio === CriterioDistribucion.MANUAL &&
+      manualModo === ManualModo.PESOS
+    ) {
       return participante.pesoManual ?? '0';
     }
     return '0';

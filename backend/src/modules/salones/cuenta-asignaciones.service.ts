@@ -199,7 +199,8 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
         where: { id: cuentaId, tenantId },
         lock: { mode: 'pessimistic_write' },
       });
-      if (!cuenta) throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+      if (!cuenta)
+        throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
       if (cuenta.estado !== EstadoCuenta.ABIERTA) {
         throw new BadRequestException('La cuenta no está abierta');
       }

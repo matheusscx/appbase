@@ -39,9 +39,30 @@ const mockUnidadMedida: UnidadMedida = {
   eliminadoEl: null as unknown as Date,
 };
 
-const unidadG: UnidadMedida = { ...mockUnidadMedida, unidadMedidaId: 'g-uuid', codigo: 'g', nombre: 'Gramo', magnitud: 'masa', factorBase: '1.000000' };
-const unidadKg: UnidadMedida = { ...mockUnidadMedida, unidadMedidaId: 'kg-uuid', codigo: 'kg', nombre: 'Kilogramo', magnitud: 'masa', factorBase: '1000.000000' };
-const unidadL: UnidadMedida = { ...mockUnidadMedida, unidadMedidaId: 'l-uuid', codigo: 'l', nombre: 'Litro', magnitud: 'volumen', factorBase: '1000.000000' };
+const unidadG: UnidadMedida = {
+  ...mockUnidadMedida,
+  unidadMedidaId: 'g-uuid',
+  codigo: 'g',
+  nombre: 'Gramo',
+  magnitud: 'masa',
+  factorBase: '1.000000',
+};
+const unidadKg: UnidadMedida = {
+  ...mockUnidadMedida,
+  unidadMedidaId: 'kg-uuid',
+  codigo: 'kg',
+  nombre: 'Kilogramo',
+  magnitud: 'masa',
+  factorBase: '1000.000000',
+};
+const unidadL: UnidadMedida = {
+  ...mockUnidadMedida,
+  unidadMedidaId: 'l-uuid',
+  codigo: 'l',
+  nombre: 'Litro',
+  magnitud: 'volumen',
+  factorBase: '1000.000000',
+};
 
 describe('CatalogService', () => {
   let service: CatalogService;
@@ -64,7 +85,10 @@ describe('CatalogService', () => {
         { provide: getRepositoryToken(Permiso), useValue: { find: jest.fn() } },
         { provide: getRepositoryToken(Pais), useValue: paisRepo },
         { provide: getRepositoryToken(Provincia), useValue: provinciaRepo },
-        { provide: getRepositoryToken(UnidadMedida), useValue: unidadMedidaRepo },
+        {
+          provide: getRepositoryToken(UnidadMedida),
+          useValue: unidadMedidaRepo,
+        },
       ],
     }).compile();
 
@@ -138,9 +162,9 @@ describe('CatalogService', () => {
 
     it('rechaza una unidad desconocida', async () => {
       unidadMedidaRepo.find.mockResolvedValue([unidadKg]);
-      await expect(service.convertirUnidad('1', 'inventada', 'kg')).rejects.toThrow(
-        'Unidad de medida no reconocida: inventada',
-      );
+      await expect(
+        service.convertirUnidad('1', 'inventada', 'kg'),
+      ).rejects.toThrow('Unidad de medida no reconocida: inventada');
     });
 
     it('rechaza convertir entre magnitudes distintas', async () => {
@@ -152,9 +176,9 @@ describe('CatalogService', () => {
 
     it('rechaza una cantidad que se perdería al redondear a la precisión de stock', async () => {
       unidadMedidaRepo.find.mockResolvedValue([unidadG, unidadKg]);
-      await expect(service.convertirUnidad('0.00004', 'g', 'kg')).rejects.toThrow(
-        'menor a la precisión de stock',
-      );
+      await expect(
+        service.convertirUnidad('0.00004', 'g', 'kg'),
+      ).rejects.toThrow('menor a la precisión de stock');
     });
 
     it('rechaza factor_base <= 0', async () => {

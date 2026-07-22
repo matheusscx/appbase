@@ -31,8 +31,9 @@ describe('MermasService', () => {
 
   beforeEach(async () => {
     transactionQueryMock = jest.fn();
-    transactionMock = jest.fn((cb: (manager: { query: jest.Mock }) => unknown) =>
-      cb({ query: transactionQueryMock }),
+    transactionMock = jest.fn(
+      (cb: (manager: { query: jest.Mock }) => unknown) =>
+        cb({ query: transactionQueryMock }),
     );
     dataSourceQueryMock = jest.fn();
     inventarioService = { registrarMovimiento: jest.fn() };
@@ -44,7 +45,10 @@ describe('MermasService', () => {
         MermasService,
         {
           provide: getDataSourceToken(),
-          useValue: { transaction: transactionMock, query: dataSourceQueryMock },
+          useValue: {
+            transaction: transactionMock,
+            query: dataSourceQueryMock,
+          },
         },
         { provide: InventarioService, useValue: inventarioService },
         { provide: CatalogService, useValue: catalogService },
@@ -153,7 +157,8 @@ describe('MermasService', () => {
       );
       const updateCostoCalls = transactionQueryMock.mock.calls.filter(
         ([sql]: [string]) =>
-          typeof sql === 'string' && sql.includes('UPDATE item_producto SET costo_actual'),
+          typeof sql === 'string' &&
+          sql.includes('UPDATE item_producto SET costo_actual'),
       );
       expect(updateCostoCalls).toHaveLength(0);
       expect(result.costoPerdido).toBe('100.0000');
@@ -247,7 +252,9 @@ describe('MermasService', () => {
     });
 
     it('expone unidadMedida del producto en la merma registrada', async () => {
-      transactionQueryMock.mockResolvedValueOnce([itemRow({ unidad_medida: 'l' })]);
+      transactionQueryMock.mockResolvedValueOnce([
+        itemRow({ unidad_medida: 'l' }),
+      ]);
       causasService.assertCausaActiva.mockResolvedValueOnce({
         id: CAUSA,
         nombre: 'Vencimiento',
@@ -288,7 +295,7 @@ describe('MermasService', () => {
           },
         ]);
 
-      const res = await service.findAll(TENANT, {} as never);
+      const res = await service.findAll(TENANT, {});
 
       expect(res.data[0]).toMatchObject({
         id: 'mov-1',

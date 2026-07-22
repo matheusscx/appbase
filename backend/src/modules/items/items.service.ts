@@ -2285,7 +2285,7 @@ export class ItemsService {
       bloqueante: boolean;
     }[] = [];
     for (const ing of ingredientes) {
-      let cantidad;
+      let cantidad: Decimal;
       try {
         cantidad = new Decimal(ing.cantidad);
       } catch {
@@ -2448,7 +2448,7 @@ export class ItemsService {
       precioExtra: string;
     }[] = [];
     for (const extra of extras) {
-      let cantidad;
+      let cantidad: Decimal;
       try {
         cantidad = new Decimal(extra.cantidad);
       } catch {
@@ -2461,7 +2461,7 @@ export class ItemsService {
           'La cantidad del extra permitido debe ser mayor a 0',
         );
       }
-      let precioExtra;
+      let precioExtra: Decimal;
       try {
         precioExtra = new Decimal(extra.precioExtra);
       } catch {

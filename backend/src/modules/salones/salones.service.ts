@@ -739,10 +739,18 @@ export class SalonesService {
       throw new BadRequestException('La cuenta no está abierta');
     }
 
-    const rows = await this.dataSource.query(
-      this.sqlLineasComanda(),
-      [cuentaId, tenantId],
-    );
+    const rows: {
+      cuenta_linea_id: string;
+      cantidad: string;
+      cantidad_enviada: string;
+      nombre: string;
+      impresora_id: string | null;
+      impresora_nombre: string | null;
+      personalizacion: PersonalizacionRecetaSnapshot | null;
+    }[] = await this.dataSource.query(this.sqlLineasComanda(), [
+      cuentaId,
+      tenantId,
+    ]);
     const nombres = await this.nombresIngredientesPersonalizacion(
       tenantId,
       rows,
@@ -1005,12 +1013,8 @@ export class SalonesService {
               }
             : {}),
           personalizacion: l.personalizacion,
-          ...(personalizacionTexto
-            ? { personalizacionTexto }
-            : {}),
-          ...(personalizacionDetalle.length
-            ? { personalizacionDetalle }
-            : {}),
+          ...(personalizacionTexto ? { personalizacionTexto } : {}),
+          ...(personalizacionDetalle.length ? { personalizacionDetalle } : {}),
         };
       }),
     };
@@ -1099,8 +1103,13 @@ export class SalonesService {
     cantidadPresentacion: string | null;
     unidadCodigoPresentacion: string | null;
   } {
-    const { cantidad, cantidadPresentacion, unidadCodigoPresentacion, item, catalogo } =
-      params;
+    const {
+      cantidad,
+      cantidadPresentacion,
+      unidadCodigoPresentacion,
+      item,
+      catalogo,
+    } = params;
     assertPresentacionPareada(cantidadPresentacion, unidadCodigoPresentacion);
 
     const unidadBase =

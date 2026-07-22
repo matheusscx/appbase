@@ -299,8 +299,9 @@ describe('SalonesService', () => {
       manager.query
         .mockResolvedValueOnce([{ mesa_id: MESA }])
         .mockResolvedValueOnce([{ next: '1' }]);
-      manager.save.mockImplementation((_e: unknown, row: Record<string, unknown>) =>
-        Promise.resolve({ ...row, id: CUENTA }),
+      manager.save.mockImplementation(
+        (_e: unknown, row: Record<string, unknown>) =>
+          Promise.resolve({ ...row, id: CUENTA }),
       );
 
       await service.abrirCuenta(TENANT, MESA, { pin: PIN });
@@ -373,17 +374,26 @@ describe('SalonesService', () => {
           _entity: unknown,
           opts: { where: { itemId?: string; cuentaId?: string } },
         ) => {
-          if (opts.where.itemId === 'item-1' && opts.where.cuentaId === CUENTA_A)
+          if (
+            opts.where.itemId === 'item-1' &&
+            opts.where.cuentaId === CUENTA_A
+          )
             return Promise.resolve(lineaExistenteDestino);
           return Promise.resolve(null);
         },
       );
       manager.find.mockImplementation(
-        (entity: unknown, opts?: { where?: { cuentaId?: string; itemId?: string } }) => {
+        (
+          entity: unknown,
+          opts?: { where?: { cuentaId?: string; itemId?: string } },
+        ) => {
           if (entity === Cuenta) return Promise.resolve([cuentaB, cuentaA]);
           if (entity === CuentaLinea) {
             if (opts?.where?.cuentaId === CUENTA_B)
-              return Promise.resolve([lineaOrigenMismoItem, lineaOrigenOtroItem]);
+              return Promise.resolve([
+                lineaOrigenMismoItem,
+                lineaOrigenOtroItem,
+              ]);
             if (
               opts?.where?.cuentaId === CUENTA_A &&
               opts?.where?.itemId === 'item-1'
@@ -476,7 +486,10 @@ describe('SalonesService', () => {
 
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
       manager.find.mockImplementation(
-        (entity: unknown, opts?: { where?: { cuentaId?: string; itemId?: string } }) => {
+        (
+          entity: unknown,
+          opts?: { where?: { cuentaId?: string; itemId?: string } },
+        ) => {
           if (entity === Cuenta) return Promise.resolve([cuentaA, cuentaB]);
           if (entity === CuentaLinea) {
             if (opts?.where?.cuentaId === CUENTA_B)
@@ -650,7 +663,12 @@ describe('SalonesService', () => {
         itemId: COMBO,
         cantidad: '1',
         personalizacion: {
-          grupos: [{ grupoId: GRUPO, opciones: [{ itemId: OPCION_ITEM, unidades: 1 }] }],
+          grupos: [
+            {
+              grupoId: GRUPO,
+              opciones: [{ itemId: OPCION_ITEM, unidades: 1 }],
+            },
+          ],
         },
       });
 
@@ -1312,11 +1330,7 @@ describe('SalonesService', () => {
         return Promise.resolve([]);
       });
 
-      const result = await service.transferirCuentaPorPin(
-        TENANT,
-        CUENTA,
-        PIN,
-      );
+      const result = await service.transferirCuentaPorPin(TENANT, CUENTA, PIN);
 
       expect(asignaciones.transferirPorPin).toHaveBeenCalledWith(
         TENANT,

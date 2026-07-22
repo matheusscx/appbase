@@ -115,9 +115,7 @@ describe('calcularAplicacionesNoVuelto', () => {
       },
     ];
     const apps = calcularAplicacionesNoVuelto(pagos, '0');
-    expect(apps).toEqual([
-      { pagoIdx: 0, tipo: 'venta', monto: '50000.0000' },
-    ]);
+    expect(apps).toEqual([{ pagoIdx: 0, tipo: 'venta', monto: '50000.0000' }]);
   });
 });
 

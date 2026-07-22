@@ -28,7 +28,12 @@ export class LiquidacionPropinas {
   @Column({ name: 'fecha_hasta', type: 'timestamptz' })
   fechaHasta: Date;
 
-  @Column({ name: 'turno_ids', type: 'uuid', array: true, default: () => "'{}'" })
+  @Column({
+    name: 'turno_ids',
+    type: 'uuid',
+    array: true,
+    default: () => "'{}'",
+  })
   turnoIds: string[];
 
   @Column({ type: 'text', default: EstadoLiquidacion.BORRADOR })

@@ -15,13 +15,14 @@ import { OrigenParticipante } from '../enums/origen-participante.enum';
   'liquidacionId',
   'grupoId',
 ])
-@Index('uq_liquidacion_propinas_participante_garzon', [
-  'liquidacionId',
-  'garzonId',
-], {
-  unique: true,
-  where: '"eliminado_el" IS NULL',
-})
+@Index(
+  'uq_liquidacion_propinas_participante_garzon',
+  ['liquidacionId', 'garzonId'],
+  {
+    unique: true,
+    where: '"eliminado_el" IS NULL',
+  },
+)
 export class LiquidacionPropinasParticipante {
   @PrimaryGeneratedColumn('uuid', {
     name: 'liquidacion_propinas_participante_id',

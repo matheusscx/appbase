@@ -19,9 +19,9 @@ describe('repartirMayoresRestos', () => {
       { id: 'juan', monto: '33334' },
       { id: 'maria', monto: '33334' },
     ]);
-    expect(result.reduce((acc, r) => acc.plus(r.monto), new Decimal(0)).toString()).toBe(
-      '100001',
-    );
+    expect(
+      result.reduce((acc, r) => acc.plus(r.monto), new Decimal(0)).toString(),
+    ).toBe('100001');
   });
 
   it('conserva la suma exacta con moneda de dos decimales', () => {
@@ -40,9 +40,9 @@ describe('repartirMayoresRestos', () => {
       { id: 'b', monto: '3.34' },
       { id: 'c', monto: '3.33' },
     ]);
-    expect(result.reduce((acc, r) => acc.plus(r.monto), new Decimal(0)).toFixed(2)).toBe(
-      '10.01',
-    );
+    expect(
+      result.reduce((acc, r) => acc.plus(r.monto), new Decimal(0)).toFixed(2),
+    ).toBe('10.01');
   });
 
   it('asigna todo el monto a un único participante', () => {

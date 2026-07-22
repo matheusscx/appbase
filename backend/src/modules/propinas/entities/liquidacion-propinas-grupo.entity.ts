@@ -13,10 +13,7 @@ import { CriterioDistribucion } from '../enums/criterio-distribucion.enum';
 import { ManualModo } from '../enums/manual-modo.enum';
 
 @Entity('liquidacion_propinas_grupo')
-@Index('idx_liquidacion_propinas_grupo_liquidacion', [
-  'liquidacionId',
-  'orden',
-])
+@Index('idx_liquidacion_propinas_grupo_liquidacion', ['liquidacionId', 'orden'])
 export class LiquidacionPropinasGrupo {
   @PrimaryGeneratedColumn('uuid', { name: 'liquidacion_propinas_grupo_id' })
   id: string;

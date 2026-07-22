@@ -92,7 +92,10 @@ describe('CuentaAsignacionesService', () => {
           lock: { mode: 'pessimistic_write' },
         }),
       );
-      expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, DESTINO);
+      expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(
+        TENANT,
+        DESTINO,
+      );
       expect(manager.update).toHaveBeenCalledWith(
         CuentaAsignacion,
         expect.objectContaining({
@@ -205,7 +208,10 @@ describe('CuentaAsignacionesService', () => {
       );
 
       expect(garzones.obtenerActivoPorId).toHaveBeenCalledWith(TENANT, DESTINO);
-      expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, DESTINO);
+      expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(
+        TENANT,
+        DESTINO,
+      );
       expect(manager.create).toHaveBeenCalledWith(
         CuentaAsignacion,
         expect.objectContaining({
@@ -341,7 +347,10 @@ describe('CuentaAsignacionesService', () => {
 
       await service.listar(TENANT, CUENTA);
 
-      const [sql, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
       expect(sql).toMatch(/ca\.tenant_id\s*=\s*\$1/i);
       expect(sql).toMatch(/ca\.cuenta_id\s*=\s*\$2/i);
       expect(sql).toMatch(/ca\.eliminado_el\s+IS\s+NULL/i);
@@ -358,7 +367,9 @@ describe('CuentaAsignacionesService', () => {
 
       const updateSql = manager.query.mock.calls[0][0] as string;
       expect(updateSql).toMatch(/UPDATE\s+cuentas/i);
-      expect(updateSql).toMatch(/garzon_responsable_id\s*=\s*garzon_apertura_id/i);
+      expect(updateSql).toMatch(
+        /garzon_responsable_id\s*=\s*garzon_apertura_id/i,
+      );
       expect(updateSql).toMatch(/garzon_responsable_id\s+IS\s+NULL/i);
       expect(updateSql).toMatch(/eliminado_el\s+IS\s+NULL/i);
 

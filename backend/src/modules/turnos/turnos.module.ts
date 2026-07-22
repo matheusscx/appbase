@@ -9,10 +9,7 @@ import { SesionesGarzonController } from './sesiones-garzon.controller';
 import { GarzonesModule } from '../garzones/garzones.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Turno, SesionGarzon]),
-    GarzonesModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Turno, SesionGarzon]), GarzonesModule],
   controllers: [TurnosController, SesionesGarzonController],
   providers: [TurnosService, SesionesGarzonService],
   exports: [TurnosService, SesionesGarzonService],
