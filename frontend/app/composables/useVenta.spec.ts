@@ -164,6 +164,73 @@ describe('carrito helpers', () => {
     expect(r[0]!.cantidad).toBe('2')
   })
 
+  it('agregarLinea crea dos líneas si dos combos eligen distinta opción de grupo por componente', () => {
+    const combo = { ...item('c'), tipo: 'combo' }
+    const persChuleta: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      componentes: [
+        {
+          componenteItemId: 'burger-1',
+          unidad: 1,
+          grupos: [{ grupoId: 'g-proteina', opciones: [{ itemId: 'chuleta', unidades: 1 }] }],
+        },
+      ],
+    }
+    const persCarne: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      componentes: [
+        {
+          componenteItemId: 'burger-1',
+          unidad: 1,
+          grupos: [{ grupoId: 'g-proteina', opciones: [{ itemId: 'carne', unidades: 1 }] }],
+        },
+      ],
+    }
+    const r = agregarLinea(
+      [{ item: combo, cantidad: '1', personalizacion: persChuleta }],
+      combo,
+      CAT,
+      persCarne,
+    )
+    expect(r).toHaveLength(2)
+    expect(r[0]!.cantidad).toBe('1')
+    expect(r[1]!.cantidad).toBe('1')
+  })
+
+  it('agregarLinea suma cantidad si dos combos eligen la misma opción de grupo por componente', () => {
+    const combo = { ...item('c'), tipo: 'combo' }
+    const pers: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      componentes: [
+        {
+          componenteItemId: 'burger-1',
+          unidad: 1,
+          grupos: [{ grupoId: 'g-proteina', opciones: [{ itemId: 'chuleta', unidades: 1 }] }],
+        },
+      ],
+    }
+    const r = agregarLinea(
+      [{ item: combo, cantidad: '1', personalizacion: pers }],
+      combo,
+      CAT,
+      {
+        ...pers,
+        componentes: [
+          {
+            componenteItemId: 'burger-1',
+            unidad: 1,
+            grupos: [{ grupoId: 'g-proteina', opciones: [{ itemId: 'chuleta', unidades: 1 }] }],
+          },
+        ],
+      },
+    )
+    expect(r).toHaveLength(1)
+    expect(r[0]!.cantidad).toBe('2')
+  })
+
   it('agregarLinea no muta el array original', () => {
     const original: CarritoLinea[] = []
     agregarLinea(original, item('a'), CAT)

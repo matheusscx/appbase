@@ -58,7 +58,18 @@ function personalizacionVacia(p?: PersonalizacionPayload): boolean {
     && p.extras.length === 0
     && !p.comentario?.trim()
     && !(p.grupos && p.grupos.length > 0)
+    && !(p.componentes && p.componentes.length > 0)
   )
+}
+
+/** Serializa `grupos` de forma determinística (mismo orden para top-level y por componente). */
+function canonicalGrupos(grupos?: PersonalizacionPayload['grupos']) {
+  return [...(grupos ?? [])]
+    .map((g) => ({
+      grupoId: g.grupoId,
+      opciones: [...g.opciones].map((o) => `${o.itemId}:${o.unidades}`).sort(),
+    }))
+    .sort((a, b) => a.grupoId.localeCompare(b.grupoId))
 }
 
 function canonicalPersonalizacion(p?: PersonalizacionPayload): string {
@@ -68,13 +79,17 @@ function canonicalPersonalizacion(p?: PersonalizacionPayload): string {
   const comentario = p.comentario?.trim() ?? ''
   // Dos combos con distinta opción elegida en un grupo (p. ej. bebida distinta)
   // nunca deben fusionarse en la misma línea del carrito.
-  const grupos = [...(p.grupos ?? [])]
-    .map((g) => ({
-      grupoId: g.grupoId,
-      opciones: [...g.opciones].map((o) => `${o.itemId}:${o.unidades}`).sort(),
+  const grupos = canonicalGrupos(p.grupos)
+  // Combos con componentes (p. ej. burger #1 con chuleta vs burger #1 con carne)
+  // tampoco deben fusionarse si la elección de grupo por componente difiere.
+  const componentes = [...(p.componentes ?? [])]
+    .map((c) => ({
+      componenteItemId: c.componenteItemId,
+      unidad: c.unidad,
+      grupos: canonicalGrupos(c.grupos),
     }))
-    .sort((a, b) => a.grupoId.localeCompare(b.grupoId))
-  return JSON.stringify({ omitidos, extras, comentario, grupos })
+    .sort((a, b) => a.componenteItemId.localeCompare(b.componenteItemId) || a.unidad - b.unidad)
+  return JSON.stringify({ omitidos, extras, comentario, grupos, componentes })
 }
 
 export function mismaPersonalizacion(
