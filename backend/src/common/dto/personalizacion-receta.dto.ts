@@ -35,6 +35,18 @@ export interface PersonalizacionRecetaSnapshot {
   }[];
   comentario?: string;
   grupos?: SnapshotGrupo[];
+  /**
+   * Combos: elección de grupos de los componentes receta, por unidad.
+   * Una entrada por (componente, unidad). Ausente en snapshots antiguos
+   * y en combos sin componentes con grupos.
+   */
+  componentes?: {
+    componenteItemId: string;
+    componenteNombre: string;
+    /** 1..cantidad del componente en el combo. */
+    unidad: number;
+    grupos: SnapshotGrupo[];
+  }[];
 }
 
 export class PersonalizacionExtraInputDto {
@@ -67,6 +79,20 @@ export class PersonalizacionGrupoInputDto {
   opciones: PersonalizacionGrupoOpcionInputDto[];
 }
 
+export class PersonalizacionComponenteInputDto {
+  @IsUUID()
+  componenteItemId: string;
+
+  @IsInt()
+  @Min(1)
+  unidad: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PersonalizacionGrupoInputDto)
+  grupos: PersonalizacionGrupoInputDto[];
+}
+
 export class PersonalizacionRecetaDto {
   @IsOptional()
   @IsArray()
@@ -89,4 +115,10 @@ export class PersonalizacionRecetaDto {
   @ValidateNested({ each: true })
   @Type(() => PersonalizacionGrupoInputDto)
   grupos?: PersonalizacionGrupoInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PersonalizacionComponenteInputDto)
+  componentes?: PersonalizacionComponenteInputDto[];
 }
