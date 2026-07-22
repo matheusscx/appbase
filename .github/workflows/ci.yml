@@ -44,6 +44,9 @@ jobs:
       JWT_EXPIRATION: 15m
       JWT_REFRESH_EXPIRATION: 7d
       VITE_API_URL: http://localhost:3000/api
+      # CredencialesService (módulo pasarela) tira error en el constructor si falta
+      # → sin esto, todo test e2e muere al bootear AppModule. Valor de test (32 bytes b64).
+      PASARELA_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 
     steps:
       - uses: actions/checkout@v4
