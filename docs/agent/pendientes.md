@@ -21,6 +21,18 @@ ya identificamos con ubicación concreta.
   **Verificar:** el endpoint hace un nº constante de queries sin importar el nº de filas.
   Ancla el anti-patrón N+1 de `anti-patterns.md`.
 
+- [ ] **Estabilizar `typecheck:ratchet` en CI — vue-tsc/typescript** (frontend/CI)
+  El step `frontend · typecheck ratchet` está marcado `continue-on-error: true` en
+  `.github/workflows/ci.yml`: `nuxi typecheck` resuelve `vue-tsc` vía `npx` y en CI baja
+  una versión incompatible con `typescript@6` → `ERR_PACKAGE_PATH_NOT_EXPORTED './lib/tsc'`.
+  Local funciona porque el caché de npx tiene una `vue-tsc` compatible. No es regresión de
+  tipos: es nondeterminismo de `npx`. Mientras tanto el ratchet sigue siendo gate **local**
+  en verify-feature, pero **no bloquea CI**.
+  **Fix:** pinear `vue-tsc` + `typescript` exactos como devDependencies del frontend a
+  versiones que casen (verificar `npx nuxi typecheck` en limpio antes de pushear — un
+  intento previo bumpeó TS a 7 y rompió todo local). Al cerrar, quitar el `continue-on-error`.
+  **Verificar:** `npm ci` en frontend limpio + `npm run typecheck:ratchet` pasa en CI.
+
 - [ ] **Burndown de typecheck del frontend — 122 errores** (frontend)
   Bajo ratchet en `frontend/typecheck-baseline.json`. Quemar por tandas (por archivo).
   `items.vue` es el peor (38) → primera tanda natural.
