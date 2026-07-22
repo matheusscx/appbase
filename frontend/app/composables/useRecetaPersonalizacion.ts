@@ -45,6 +45,15 @@ export interface GrupoPersonalizacion {
   opciones: GrupoOpcionPersonalizacion[]
 }
 
+/** Componente receta de un combo, con sus grupos — `GET /items/:id`. */
+export interface ComponentePersonalizacion {
+  componenteItemId: string
+  componenteNombre: string
+  tipo: string
+  cantidad: string
+  grupos: GrupoPersonalizacion[]
+}
+
 export interface RecetaDetallePersonalizacion {
   id: string
   nombre: string
@@ -54,6 +63,8 @@ export interface RecetaDetallePersonalizacion {
   extrasPermitidos: RecetaExtraPersonalizacion[]
   /** Combos: siempre []. Recetas/combos con grupos configurados: uno por grupo asociado. */
   grupos: GrupoPersonalizacion[]
+  /** Combos: componentes con sus grupos (para la elección por unidad). */
+  componentes?: ComponentePersonalizacion[]
 }
 
 export interface PersonalizacionExtraPayload {
@@ -72,11 +83,19 @@ export interface PersonalizacionGrupoPayload {
   opciones: PersonalizacionGrupoOpcionPayload[]
 }
 
+export interface PersonalizacionComponentePayload {
+  componenteItemId: string
+  /** 1..cantidad del componente. */
+  unidad: number
+  grupos: PersonalizacionGrupoPayload[]
+}
+
 export interface PersonalizacionPayload {
   omitidos: string[]
   extras: PersonalizacionExtraPayload[]
   comentario?: string
   grupos?: PersonalizacionGrupoPayload[]
+  componentes?: PersonalizacionComponentePayload[]
 }
 
 export function sinStock(stock: string): boolean {
@@ -112,6 +131,7 @@ export function buildPersonalizacionPayload(
   extras: PersonalizacionExtraPayload[],
   comentario: string,
   grupos: PersonalizacionGrupoPayload[] = [],
+  componentes: PersonalizacionComponentePayload[] = [],
 ): PersonalizacionPayload {
   const payload: PersonalizacionPayload = {
     omitidos,
@@ -122,9 +142,12 @@ export function buildPersonalizacionPayload(
   }
   const trimmed = comentario.trim()
   if (trimmed) payload.comentario = trimmed.slice(0, 200)
-  // El backend solo congela un grupo si tiene opciones elegidas (min=0 puede venir vacío).
   const gruposConSeleccion = grupos.filter((g) => g.opciones.length > 0)
   if (gruposConSeleccion.length) payload.grupos = gruposConSeleccion
+  const compConSeleccion = componentes
+    .map((c) => ({ ...c, grupos: c.grupos.filter((g) => g.opciones.length > 0) }))
+    .filter((c) => c.grupos.length > 0)
+  if (compConSeleccion.length) payload.componentes = compConSeleccion
   return payload
 }
 
