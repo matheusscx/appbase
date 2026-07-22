@@ -231,6 +231,70 @@ describe('carrito helpers', () => {
     expect(r[0]!.cantidad).toBe('2')
   })
 
+  it('agregarLinea suma cantidad si dos combos eligen las mismas opciones de componentes en distinto orden (independencia de orden)', () => {
+    const combo = { ...item('c'), tipo: 'combo' }
+    // Mismo contenido, distinto orden: componentes (burger-2 antes que burger-1) y,
+    // dentro del componente burger-1, opciones del grupo (tocino antes que queso).
+    // Si el sort canónico de useVenta.ts:85-91 (o canonicalGrupos) fuera un no-op,
+    // el JSON.stringify resultante difeririría por el orden y esto NO fusionaría.
+    const persOrdenA: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      componentes: [
+        {
+          componenteItemId: 'burger-2',
+          unidad: 1,
+          grupos: [{ grupoId: 'g-proteina', opciones: [{ itemId: 'chuleta', unidades: 1 }] }],
+        },
+        {
+          componenteItemId: 'burger-1',
+          unidad: 1,
+          grupos: [
+            {
+              grupoId: 'g-extra',
+              opciones: [
+                { itemId: 'queso', unidades: 1 },
+                { itemId: 'tocino', unidades: 1 },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const persOrdenB: PersonalizacionPayload = {
+      omitidos: [],
+      extras: [],
+      componentes: [
+        {
+          componenteItemId: 'burger-1',
+          unidad: 1,
+          grupos: [
+            {
+              grupoId: 'g-extra',
+              opciones: [
+                { itemId: 'tocino', unidades: 1 },
+                { itemId: 'queso', unidades: 1 },
+              ],
+            },
+          ],
+        },
+        {
+          componenteItemId: 'burger-2',
+          unidad: 1,
+          grupos: [{ grupoId: 'g-proteina', opciones: [{ itemId: 'chuleta', unidades: 1 }] }],
+        },
+      ],
+    }
+    const r = agregarLinea(
+      [{ item: combo, cantidad: '1', personalizacion: persOrdenA }],
+      combo,
+      CAT,
+      persOrdenB,
+    )
+    expect(r).toHaveLength(1)
+    expect(r[0]!.cantidad).toBe('2')
+  })
+
   it('agregarLinea no muta el array original', () => {
     const original: CarritoLinea[] = []
     agregarLinea(original, item('a'), CAT)

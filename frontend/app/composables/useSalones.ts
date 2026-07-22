@@ -18,6 +18,14 @@ export interface CuentaLineaGrupoSnapshot {
   }[]
 }
 
+/** Combos: elección de grupos por componente, por unidad (espejo de `PersonalizacionRecetaSnapshot.componentes` del backend). */
+export interface CuentaLineaComponenteSnapshot {
+  componenteItemId: string
+  componenteNombre: string
+  unidad: number
+  grupos: CuentaLineaGrupoSnapshot[]
+}
+
 // ── Tipos (espejo del contrato del backend salones) ─────────────────────────
 
 export type EstadoCuenta = 'abierta' | 'cerrada' | 'cancelada'
@@ -74,6 +82,7 @@ export interface CuentaLineaDetalle {
     extras: { ingredienteItemId: string, cantidad: string, unidadCodigo: string, precioExtra: string, unidades: string }[]
     comentario?: string
     grupos?: CuentaLineaGrupoSnapshot[]
+    componentes?: CuentaLineaComponenteSnapshot[]
   } | null
   personalizacionTexto?: string
   personalizacionDetalle?: PersonalizacionDetalleLinea[]
@@ -139,7 +148,11 @@ export function precioUnitarioLinea(linea: CuentaLineaDetalle): string {
 }
 
 function tienePersonalizacionConRecargo(l: CuentaLineaDetalle): boolean {
-  return Boolean(l.personalizacion?.extras?.length || l.personalizacion?.grupos?.length)
+  return Boolean(
+    l.personalizacion?.extras?.length
+    || l.personalizacion?.grupos?.length
+    || l.personalizacion?.componentes?.length,
+  )
 }
 
 /** Mapea las líneas de una cuenta a la entrada del motor de precios. */
