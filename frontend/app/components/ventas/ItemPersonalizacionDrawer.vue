@@ -342,7 +342,7 @@ function agregar() {
       </div>
 
       <div v-else-if="detalle" class="space-y-6">
-        <ItemPersonalizacionGrupo
+        <VentasItemPersonalizacionGrupo
           v-for="grupo in detalle.grupos"
           :key="grupo.grupoModificadorId"
           :grupo="grupo"
@@ -364,7 +364,7 @@ function agregar() {
             <p class="text-sm font-semibold text-default">
               {{ comp.componenteNombre }}<span v-if="Number(comp.cantidad) > 1" class="text-muted"> #{{ u }}</span>
             </p>
-            <ItemPersonalizacionGrupo
+            <VentasItemPersonalizacionGrupo
               v-for="grupo in comp.grupos"
               :key="grupo.grupoModificadorId"
               :grupo="grupo"
