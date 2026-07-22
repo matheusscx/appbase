@@ -210,9 +210,12 @@ Corta y accionable.
 Ejecutar, no afirmar. Si algo falla, la tarea no está terminada.
 
 ```bash
-cd backend  && npm run lint:check && npm test && npm run test:e2e
+cd backend  && npm run lint:check && npm run typecheck && npm test && npm run test:e2e
 cd frontend && npm run build && npm run typecheck:ratchet && npm run design:check
 ```
+
+`isolatedModules` hace que `npm test` (ts-jest) **no** chequee tipos; `backend typecheck`
+(`tsc --noEmit`) lo cubre. Tolerancia-cero — el backend está limpio.
 
 `nuxt build` **no tipa-chequea**; `typecheck:ratchet` (vue-tsc vs
 `frontend/typecheck-baseline.json`) falla solo si un archivo mete errores de tipo

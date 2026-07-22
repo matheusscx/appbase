@@ -21,25 +21,25 @@ describe('QueryPropinaReporteDto', () => {
   });
 
   it.each([
-    [{ hasta: '2026-08-01' }, 'desde requerido'],
-    [{ desde: '2026-07-01' }, 'hasta requerido'],
-    [
-      {
+    { label: 'desde requerido', input: { hasta: '2026-08-01' } },
+    { label: 'hasta requerido', input: { desde: '2026-07-01' } },
+    {
+      label: 'turno inválido',
+      input: {
         desde: '2026-07-01',
         hasta: '2026-08-01',
         turnoIds: 'no-es-uuid',
       },
-      'turno inválido',
-    ],
-    [
-      {
+    },
+    {
+      label: 'tipo inválido',
+      input: {
         desde: '2026-07-01',
         hasta: '2026-08-01',
         tipoGarzon: 'administrador',
       },
-      'tipo inválido',
-    ],
-  ])('rechaza %s (%s)', async (input) => {
+    },
+  ])('rechaza $label', async ({ input }) => {
     const errors = await validate(
       plainToInstance(QueryPropinaReporteDto, input),
     );

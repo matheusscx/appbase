@@ -17,6 +17,7 @@ Correr en orden y detenerse en el primer fallo:
 
 ```bash
 cd backend  && npm run lint:check
+cd backend  && npm run typecheck
 cd backend  && npm test
 cd backend  && npm run test:e2e
 cd frontend && npm run build
@@ -155,6 +156,7 @@ VERIFICACIÓN — <tarea>
 
 Comandos
   backend lint:check  ✅ / ❌ <resumen del error>
+  backend typecheck   ✅ / ❌ <error de tipo>
   backend test        ✅ / ❌
   backend test:e2e    ✅ / ❌
   frontend build      ✅ / ❌
