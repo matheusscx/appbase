@@ -1787,20 +1787,108 @@ export class ItemsService {
     snapshot: PersonalizacionRecetaSnapshot;
     precioExtraTotal: string;
   }> {
-    const { grupos, precioExtraTotal } = await this.resolverGruposDeItem(
+    // 1. Grupos propios del combo (comportamiento existente).
+    const propios = await this.resolverGruposDeItem(
       manager,
       tenantId,
       comboItemId,
       dto?.grupos,
     );
+    let precioExtraTotal = new Decimal(propios.precioExtraTotal);
+
+    // 2. Componentes receta del combo con sus cantidades (para validar
+    //    pertenencia y rango de unidad, y saber cuántas unidades esperar).
+    const compRows: {
+      componente_item_id: string;
+      nombre: string;
+      cantidad: string;
+    }[] = await manager.query(
+      `SELECT cc.componente_item_id, i.nombre, cc.cantidad
+       FROM combo_componentes cc
+       JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
+       WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2
+         AND cc.eliminado_el IS NULL AND i.tipo = 'receta'`,
+      [comboItemId, tenantId],
+    );
+    const compById = new Map(compRows.map((c) => [c.componente_item_id, c]));
+
+    // 3. Qué componentes receta tienen ≥1 grupo asociado (batch, sin N+1).
+    const recetaIds = compRows.map((c) => c.componente_item_id);
+    const conGrupos = new Set<string>();
+    if (recetaIds.length) {
+      const rows: { item_id: string }[] = await manager.query(
+        `SELECT DISTINCT item_id FROM item_grupos_modificadores
+         WHERE item_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [recetaIds, tenantId],
+      );
+      for (const r of rows) conGrupos.add(r.item_id);
+    }
+
+    // 4. Validar las entradas que mandó el front: componente vivo + unidad en rango + sin duplicar.
+    const elegidasPorClave = new Map<string, PersonalizacionGrupoInputDto[]>();
+    for (const c of dto?.componentes ?? []) {
+      const comp = compById.get(c.componenteItemId);
+      if (!comp) {
+        throw new BadRequestException(
+          'El componente no pertenece a este combo o no admite grupos',
+        );
+      }
+      if (
+        !Number.isInteger(c.unidad) ||
+        c.unidad < 1 ||
+        new Decimal(comp.cantidad).lt(c.unidad)
+      ) {
+        throw new BadRequestException(
+          `Unidad inválida para el componente ${comp.nombre}`,
+        );
+      }
+      const clave = `${c.componenteItemId}#${c.unidad}`;
+      if (elegidasPorClave.has(clave)) {
+        throw new BadRequestException(
+          `Unidad ${c.unidad} duplicada para el componente ${comp.nombre}`,
+        );
+      }
+      elegidasPorClave.set(clave, c.grupos);
+    }
+
+    // 5. Resolver TODA (componente con grupos, unidad) esperada — aunque el
+    //    front la haya omitido — para que un grupo obligatorio sin elección
+    //    dispare la validación de min dentro de resolverGruposDeItem.
+    const componentesSnap: NonNullable<
+      PersonalizacionRecetaSnapshot['componentes']
+    > = [];
+    for (const comp of compRows) {
+      if (!conGrupos.has(comp.componente_item_id)) continue;
+      const unidades = new Decimal(comp.cantidad).toNumber();
+      for (let u = 1; u <= unidades; u++) {
+        const grupos = elegidasPorClave.get(`${comp.componente_item_id}#${u}`);
+        const resuelto = await this.resolverGruposDeItem(
+          manager,
+          tenantId,
+          comp.componente_item_id,
+          grupos,
+        );
+        precioExtraTotal = precioExtraTotal.plus(resuelto.precioExtraTotal);
+        if (resuelto.grupos.length) {
+          componentesSnap.push({
+            componenteItemId: comp.componente_item_id,
+            componenteNombre: comp.nombre,
+            unidad: u,
+            grupos: resuelto.grupos,
+          });
+        }
+      }
+    }
+
     return {
       snapshot: {
         omitidos: [],
         extras: [],
         comentario: dto?.comentario?.trim() || undefined,
-        grupos: grupos.length ? grupos : undefined,
+        grupos: propios.grupos.length ? propios.grupos : undefined,
+        componentes: componentesSnap.length ? componentesSnap : undefined,
       },
-      precioExtraTotal,
+      precioExtraTotal: precioExtraTotal.toFixed(4),
     };
   }
 

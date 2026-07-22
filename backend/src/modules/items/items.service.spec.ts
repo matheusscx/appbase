@@ -2193,6 +2193,156 @@ describe('ItemsService', () => {
     });
   });
 
+  describe('resolverPersonalizacionCombo', () => {
+    const RECETA_ID = 'receta-combo-uuid';
+    const PROTEINA_ID = 'proteina-uuid';
+    const ITEM_GRUPO_ID = 'item-grupo-uuid';
+    const CHULETA_ID = 'chuleta-uuid';
+    const CARNE_ID = 'carne-uuid';
+    const ITEM_AJENO_ID = 'item-ajeno-uuid';
+
+    function mockAsociadosYOpcionesProteina() {
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            grupo_modificador_id: PROTEINA_ID,
+            item_grupo_id: ITEM_GRUPO_ID,
+            nombre: 'Proteína',
+            min: 1,
+            max: 1,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            item_id: CHULETA_ID,
+            nombre: 'Chuleta',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '1500.0000',
+          },
+          {
+            item_id: CARNE_ID,
+            nombre: 'Carne',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '0.0000',
+          },
+        ]);
+    }
+
+    it('resuelve los grupos de un componente receta por unidad y suma el recargo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // resolverGruposDeItem del combo: sin grupos propios
+        .mockResolvedValueOnce([
+          {
+            componente_item_id: RECETA_ID,
+            nombre: 'Hamburguesa',
+            cantidad: '2',
+          },
+        ]) // combo_componentes receta con cantidad 2
+        .mockResolvedValueOnce([{ item_id: RECETA_ID }]); // batch: componentes con ≥1 grupo asociado
+      mockAsociadosYOpcionesProteina(); // resolverGruposDeItem(RECETA_ID) — unidad 1
+      mockAsociadosYOpcionesProteina(); // resolverGruposDeItem(RECETA_ID) — unidad 2
+
+      const dto = {
+        componentes: [
+          {
+            componenteItemId: RECETA_ID,
+            unidad: 1,
+            grupos: [
+              {
+                grupoId: PROTEINA_ID,
+                opciones: [{ itemId: CHULETA_ID, unidades: 1 }],
+              },
+            ],
+          },
+          {
+            componenteItemId: RECETA_ID,
+            unidad: 2,
+            grupos: [
+              {
+                grupoId: PROTEINA_ID,
+                opciones: [{ itemId: CARNE_ID, unidades: 1 }],
+              },
+            ],
+          },
+        ],
+      };
+
+      const res = await service.resolverPersonalizacionCombo(
+        managerMock as any,
+        TENANT,
+        COMBO_ID,
+        dto,
+      );
+
+      expect(res.precioExtraTotal).toBe('1500.0000');
+      expect(res.snapshot.componentes).toHaveLength(2);
+      expect(res.snapshot.componentes![0]).toMatchObject({
+        componenteItemId: RECETA_ID,
+        unidad: 1,
+      });
+      expect(res.snapshot.componentes![1]).toMatchObject({
+        componenteItemId: RECETA_ID,
+        unidad: 2,
+      });
+    });
+
+    it('rechaza un componenteItemId que no es componente vivo del combo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // resolverGruposDeItem del combo: sin grupos propios
+        .mockResolvedValueOnce([
+          {
+            componente_item_id: RECETA_ID,
+            nombre: 'Hamburguesa',
+            cantidad: '2',
+          },
+        ]) // combo_componentes
+        .mockResolvedValueOnce([{ item_id: RECETA_ID }]); // batch componentes con grupos
+
+      const dto = {
+        componentes: [
+          { componenteItemId: ITEM_AJENO_ID, unidad: 1, grupos: [] },
+        ],
+      };
+
+      await expect(
+        service.resolverPersonalizacionCombo(
+          managerMock as any,
+          TENANT,
+          COMBO_ID,
+          dto as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rechaza una unidad fuera del rango 1..cantidad del componente', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // resolverGruposDeItem del combo: sin grupos propios
+        .mockResolvedValueOnce([
+          {
+            componente_item_id: RECETA_ID,
+            nombre: 'Hamburguesa',
+            cantidad: '2',
+          },
+        ]) // combo_componentes
+        .mockResolvedValueOnce([{ item_id: RECETA_ID }]); // batch componentes con grupos
+
+      const dto = {
+        componentes: [{ componenteItemId: RECETA_ID, unidad: 3, grupos: [] }], // cantidad = 2
+      };
+
+      await expect(
+        service.resolverPersonalizacionCombo(
+          managerMock as any,
+          TENANT,
+          COMBO_ID,
+          dto as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
   describe('resolución de grupos con override (COALESCE)', () => {
     const ITEM_OPCION = 'opcion-carne-uuid';
 
