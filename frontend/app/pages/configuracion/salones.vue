@@ -209,7 +209,7 @@ async function guardarMesa() {
       const idx = salon.mesas.findIndex(m => m.id === saved.id)
       if (idx >= 0) {
         salon.mesas[idx] = {
-          ...salon.mesas[idx],
+          ...salon.mesas[idx]!,
           nombre: saved.nombre,
           posX: saved.posX,
           posY: saved.posY,
@@ -312,7 +312,7 @@ async function eliminarMesa() {
           icon="i-lucide-trash-2"
           color="error"
           variant="ghost"
-          @click="deleteSalonOpen = true"
+          @click="() => { deleteSalonOpen = true }"
         />
       </div>
 
@@ -372,7 +372,7 @@ async function eliminarMesa() {
         </UForm>
       </template>
       <template #actions>
-        <UButton color="neutral" variant="ghost" @click="salonDrawerOpen = false">
+        <UButton color="neutral" variant="ghost" @click="() => { salonDrawerOpen = false }">
           Cancelar
         </UButton>
         <UButton type="submit" form="salon-form" :loading="savingSalon">
@@ -418,7 +418,7 @@ async function eliminarMesa() {
         >
           Eliminar
         </UButton>
-        <UButton color="neutral" variant="ghost" @click="mesaDrawerOpen = false">
+        <UButton color="neutral" variant="ghost" @click="() => { mesaDrawerOpen = false }">
           Cancelar
         </UButton>
         <UButton type="submit" form="mesa-form" :loading="savingMesa">

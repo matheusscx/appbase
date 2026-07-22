@@ -1,5 +1,5 @@
 {
-  "total": 78,
+  "total": 70,
   "files": {
     "app/components/AppDateInput.vue": 1,
     "app/components/AppDateTimeInput.vue": 1,
@@ -33,12 +33,10 @@
     "app/pages/configuracion/razones-sociales.vue": 1,
     "app/pages/configuracion/recargos.vue": 4,
     "app/pages/configuracion/roles/index.vue": 1,
-    "app/pages/configuracion/salones.vue": 4,
     "app/pages/configuracion/turnos.vue": 1,
     "app/pages/configuracion/usuarios/index.vue": 1,
     "app/pages/mermas.vue": 2,
     "app/pages/propinas/liquidaciones/[id]/imprimir.vue": 1,
-    "app/pages/salones/index.vue": 4,
     "app/pages/terceros.vue": 1,
     "app/pages/tienda/suscripciones.vue": 2,
     "app/stores/auth.spec.ts": 2,

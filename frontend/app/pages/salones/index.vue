@@ -1179,7 +1179,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                     color="error"
                     variant="soft"
                     class="flex-1 justify-center"
-                    @click="cancelOpen = true"
+                    @click="() => { cancelOpen = true }"
                   >
                     Cancelar cuenta
                   </UButton>
@@ -1187,7 +1187,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                     color="primary"
                     class="flex-1 justify-center"
                     :disabled="activeCuenta.lineas.length === 0 || !tieneCaja"
-                    @click="cobroOpen = true"
+                    @click="() => { cobroOpen = true }"
                   >
                     Cerrar y cobrar
                   </UButton>
@@ -1247,7 +1247,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
         </template>
         <template #footer>
           <AppModalFooter>
-            <UButton color="neutral" variant="ghost" @click="turnoModalOpen = false">
+            <UButton color="neutral" variant="ghost" @click="() => { turnoModalOpen = false }">
               Cancelar
             </UButton>
             <UButton
@@ -1284,7 +1284,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
         </template>
         <template #footer>
           <AppModalFooter>
-            <UButton color="neutral" variant="ghost" @click="transferAdminOpen = false">
+            <UButton color="neutral" variant="ghost" @click="() => { transferAdminOpen = false }">
               Cancelar
             </UButton>
             <UButton
