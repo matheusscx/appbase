@@ -18,22 +18,12 @@ conocimiento que no se puede derivar leyendo el código correcto.
 
 ## Backend
 
-### ❌ Columna UUID sin `type: 'uuid'` explícito
+### ✅ Columna UUID sin `type: 'uuid'` explícito — AUTOMATIZADO
 
-```ts
-// MAL — TypeORM infiere varchar
-@Column()
-tenant_id: string;
-
-// BIEN
-@Column({ type: 'uuid' })
-tenant_id: string;
-```
-
-Sin el tipo explícito los JOINs en SQL raw fallan silenciosamente por comparación
-`varchar` vs `uuid`. Ver [ADR-004](../adr/004-uuid-column-types.md).
-→ *Candidato a test de esquema: recorrer entidades y fallar si una columna `*_id`
-no declara `type: 'uuid'`.*
+Ya enforced por test: `src/common/invariants/uuid-columns.invariant.spec.ts` recorre las
+entities y falla si una columna `*_id` no declara `type: 'uuid'` (con allowlist para ids
+externos como `google_id`). El porqué (JOINs raw fallan `varchar` vs `uuid`) vive en
+[ADR-004](../adr/004-uuid-column-types.md). Regla movida del `.md` al test.
 
 ### ❌ `tenant_id` tomado del request
 

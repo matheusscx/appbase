@@ -39,3 +39,7 @@ ya identificamos con ubicación concreta.
   o quitarlo del tipo.
 - [ ] DTOs de override — normalizar `@IsUUID('4')` vs `@IsUUID()` (inconsistencia de
   estrictez, inofensiva con seed v4).
+- [ ] `backend/src/modules/users/user.entity.ts` (clase `User`) parece **código muerto**:
+  duplicado legacy de `Usuario` (`usuario.entity.ts`), sin referencias ni `forFeature`.
+  Confirmar y eliminar. (Detectado al automatizar la invariante uuid — ambos tenían el
+  mismo `googleId`.)

@@ -103,8 +103,9 @@ No reabrir sin argumento nuevo.
   lint o test, se borra el texto y queda la referencia. Es el mecanismo que evita que
   estos archivos crezcan sin límite.
 - **Las invariantes son un backlog de automatización**, no un sustituto permanente.
-  Tres son testeables hoy: tipo `uuid` explícito, `number` en campos de monto, y
-  clases Tailwind hardcoded fuera del módulo Caja.
+  - [x] tipo `uuid` explícito → test `src/common/invariants/uuid-columns.invariant.spec.ts`.
+  - [ ] `number` en campos de monto (candidato a lint).
+  - [ ] clases Tailwind hardcoded fuera del módulo Caja (candidato a lint/test).
 
 ## Pendiente
 
