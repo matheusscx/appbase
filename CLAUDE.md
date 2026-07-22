@@ -2,18 +2,66 @@
 
 Guía para Claude Code (claude.ai/code) al trabajar en este repositorio.
 
-> ## ⚠️ Flujo de trabajo — Etapa de desarrollo
->
-> El proyecto está en **etapa de desarrollo activo**. **No crear ramas nuevas ni PRs**:
-> trabajar y commitear **directamente sobre `main`**.
+---
 
-> ## 🔎 CodeGraph — usar antes de grep/find/leer archivos
->
-> Este repo tiene `.codegraph/` indexado. Para entender o ubicar código, usar
-> `codegraph_explore` (MCP, cargarla vía tool search si aparece diferida) o
-> `codegraph explore "<símbolos o pregunta>"` por shell **antes** de grep/find/Read
-> exploratorio. Devuelve en una sola llamada el código fuente + call paths, más barato
-> en tokens que leer archivos sueltos.
+## ⛔ Invariantes — violarlas es detenerse, no corregir
+
+Si una tarea requiere romper alguna de estas reglas: **detenerse, reportar el conflicto
+y esperar confirmación.** Nunca resolverlo por cuenta propia.
+
+1. **`tenant_id` sale siempre del token** del usuario autenticado — nunca del body,
+   query ni parámetro de ruta.
+2. **Dinero y porcentajes con Decimal.js**, nunca `number` nativo. Porcentajes en
+   decimal: `0.19` = 19%, nunca `19`.
+3. **Soft delete en todo.** Nunca `DELETE`; marcar `eliminado_el`. Toda lectura filtra
+   `eliminado_el IS NULL`.
+4. **Toda columna PK/FK de UUID declara `type: 'uuid'` explícito**
+   ([ADR-004](docs/adr/004-uuid-column-types.md)).
+5. **No modificar el sistema de tokens JWT** (access + refresh, ya implementado).
+6. **"Exento" es un estado fiscal explícito**, nunca la ausencia de impuesto.
+7. **Permisos con enforcement real en el backend** (guards por ruta). Validar en el
+   frontend nunca sustituye al guard.
+
+## 🛑 Detenerse y preguntar
+
+No asumir reglas de negocio. Detenerse y consultar al usuario si la tarea:
+
+- toca el **motor de cálculo de precios** o el cálculo de impuestos;
+- escribe en **`movimientos_inventario`** o altera `modo_inventario`;
+- requiere una regla de negocio que **no esté documentada** en `docs/PRODUCTO.md`
+  ni en `docs/features/`;
+- rompe compatibilidad **multi-tenant**, **multi-moneda**, **fiscal (SII)** o de
+  **auditoría**;
+- exige una **dependencia nueva** (verificar antes si el stack actual la resuelve).
+
+## 🔧 Alcance del trabajo
+
+No refactorizar código fuera del alcance solicitado. Solo intervenir código ajeno
+a la tarea cuando: hay un bug que impide que la tarea funcione, rompe la compilación
+o los tests, bloquea la implementación pedida, o el usuario lo solicita explícitamente.
+
+Si existen dos formas de resolver algo en el proyecto, seguir la ya existente.
+No introducir una arquitectura nueva para un problema pequeño.
+
+## 🔎 Orden de búsqueda — antes de grep/find/Read exploratorio
+
+1. `docs/patterns/backend.md` y `docs/patterns/frontend.md` (playbook de-facto)
+2. `docs/features/<feature>.md`, `docs/ARCHITECTURE.md`, ADRs
+3. **CodeGraph** — `codegraph_explore` (MCP, cargar vía tool search si aparece
+   diferida) o `codegraph explore "<símbolos o pregunta>"` por shell. Devuelve código
+   fuente + call paths en una llamada, más barato en tokens que leer archivos sueltos.
+4. Código fuente
+
+Si tras estos cuatro pasos el patrón no aparece, **preguntar** en vez de inventarlo.
+
+## ⚠️ Flujo de trabajo — etapa de desarrollo
+
+El proyecto está en **desarrollo activo**. **No crear ramas nuevas ni PRs**: trabajar
+y commitear **directamente sobre `main`**. Como no hay PR que sirva de red, el
+[checklist de cierre](#-checklist-antes-de-dar-una-tarea-por-terminada) es obligatorio
+antes de cada commit.
+
+---
 
 ## Visión — SaaS POS Multi-tenant
 
@@ -27,7 +75,6 @@ Node.js/PostgreSQL local):
 - **backend/** — NestJS (TypeScript), API REST puerto 3000 (Swagger en `3000/api/docs`)
 - **frontend/** — Nuxt 4 (Vue 3), SPA/SSR puerto 5173
 - **PostgreSQL 15** — puerto 5432
-- **Aritmética financiera: Decimal.js** — nunca `number` nativo para dinero o porcentajes
 
 Estructura de directorios, mapa de módulos y flujo de requests: `docs/ARCHITECTURE.md`.
 
@@ -38,10 +85,11 @@ docker-compose up            # Stack completo (preferido); --build reconstruye i
 docker-compose down -v       # Detener y borrar el volumen de la BD
 
 cd backend
-npm run start:dev            # Watch mode | npm test | npm run test:e2e | npm run lint
+npm run start:dev            # Watch mode
+npm run lint | npm test | npm run test:e2e   # test:e2e = API (Jest + supertest)
 
 cd frontend
-npm run dev                  # Dev server | npm run build
+npm run dev | npm run build
 ```
 
 Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_URL`,
@@ -49,103 +97,88 @@ Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_UR
 
 ## Estado actual
 
-El estado de todas las funcionalidades (✅/🔲 con fechas) vive en **`docs/ESTADO.md`**.
-Consultarlo para saber qué existe y **actualizarlo en el mismo commit** que implementa
-o cambia una feature.
+El estado de todas las funcionalidades (✅/🔲 con fechas) y el roadmap viven en
+**`docs/ESTADO.md`**. Consultarlo para saber qué existe y **actualizarlo en el mismo
+commit** que implementa o cambia una feature.
 
-## Decisiones de arquitectura tomadas
+---
 
-### Terminología (crítico — no mezclar)
+## Terminología (crítico — no mezclar)
+
 | Concepto | Tabla DB | Nombre en código/docs |
 |---|---|---|
 | Empresa que contrata el SaaS | `tenants` | **tenant** |
 | Comprador final en una venta | `venta_customer` | **customer** |
 | Entidad externa (proveedor, empresa) | `terceros` | **tercero** |
 
-### Reglas transversales
-- **Auth:** JWT access + refresh ya implementado — no modificar el sistema de tokens.
-- **Permisos:** enforcement **real en el backend** (guards por ruta, no solo frontend).
-  Modelo: `rol → módulo contratado (tenant_modulos) → permisos`. Superadmin: flag
-  `es_superadmin` en `usuarios`, rutas `/admin/*` con guard propio independiente del
-  RBAC de tenants. El rol `admin` del tenant es fijo (`es_fijo = true`), se crea
-  automáticamente con cada tenant.
-- **Monedas:** la moneda oficial viene de `pais.moneda_oficial_id` — no la elige el
-  tenant. Tasas de cambio (`valor_del_dia`) en `tenant_moneda`, por tenant. Todos los
-  totales de venta se persisten convertidos a la moneda oficial.
-  **Porcentajes siempre en decimal:** `0.19` = 19%, nunca `19`.
-- **Motor de precios:** `precioNeto → pasos según tenant_formula_precio → totalFinal`
-  (default: `descuentos → recargos → impuestos`; cada paso aplica sobre el acumulado).
-  `items.precio_incluye_impuesto` y `tenants.calculo_descuentos` (`'base'`|`'compuesto'`)
-  modulan el cálculo. Detalle: `docs/features/motor-calculo-precios.md`.
-- **Fiscal (SII):** la emisión electrónica al SII llega **a futuro, no ahora**; se diseña
-  todo **compatible con SII sin integrarlo**. Regla: **capturar y congelar el hecho fiscal
-  en el momento de la transacción; diferir lo que solo transmite/formatea** (DTE, folios/CAF,
-  firma). "Exento" es un estado explícito, nunca la ausencia de impuesto. No construir
-  infraestructura DTE especulativa (YAGNI). Detalle y qué-hacer-ahora vs qué-diferir: ADR-010.
-- **Ventas:** canales `'fisico'` (requiere caja abierta) y `'online'` (directo a
-  `pagada`, caja virtual). Estados: `borrador → pendiente → pagada | cancelada`, más
-  `pagada_parcial` derivado (saldo > 0 y < total). Sin array `pagos` al crear → queda
-  `pendiente` (cuenta por cobrar). Saldo = total_final − Σ(monto − vuelto). Tipos de
-  documento por país desde `tipos_documento_tributario` (tabla, no enum). Nota de
-  crédito referencia la venta original con `venta_referencia_id`.
-  Detalle: `docs/features/ventas.md`.
-- **Cajas:** `'fisica'` (apertura manual con saldo inicial; una sola abierta por
-  tenant+usuario) y `'virtual'` (una por tenant, automática, siempre abierta, para
-  ventas online). Al cerrar: `monto_contado` → sistema calcula `diferencia`.
-  Detalle: `docs/features/gestion-cajas.md`.
-- **Inventario:** solo items `tipo='producto'` tienen stock. `movimientos_inventario`
-  es la fuente de verdad auditable; `item_producto.stock` es saldo materializado.
-  Movimiento + saldo en una transacción; `salida` valida stock no negativo. Eje
-  `modo_inventario`: `cantidad` (default) | `serie` (unidades con identidad) | `lote`
-  (agrupadas con vencimiento) — inmutable una vez hay movimientos.
-  Detalle: `docs/features/inventario-serializado.md` y ADR-007.
-- **Pagos:** una venta acepta múltiples pagos de distintos métodos; `vuelto` solo si
-  `permite_vuelto = true`. Detalle: `docs/features/pagos.md`.
-- **BD:** soft delete en todo (`eliminado_el TIMESTAMPTZ`; toda lectura filtra
-  `IS NULL`), timestamps `creado_el`/`actualizado_el`, PKs UUID. Items: modelo base +
-  extensión (`item_producto`, `item_servicio`, `item_suscripcion` con `frecuencia`).
-- **Fases futuras:** evaluación de condiciones en descuentos/recargos, proveedor
-  externo de tasas de cambio, sub-tenants, bodegas/traspasos/costeo.
+## Reglas de dominio — qué leer antes de tocar qué
+
+Lo mínimo para decidir si hay que leer más. El detalle vive en un solo lugar.
+
+- **Permisos** — `rol → módulo contratado (tenant_modulos) → permisos`. Superadmin es
+  un eje aparte (`es_superadmin`, rutas `/admin/*`, guard propio). El rol `admin` del
+  tenant es fijo y automático.
+- **Monedas** — la moneda oficial viene del país, no la elige el tenant. Tasas por
+  tenant en `tenant_moneda`. Los totales de venta se persisten convertidos a la
+  moneda oficial.
+- **Motor de precios** — `precioNeto → pasos según tenant_formula_precio → totalFinal`;
+  cada paso aplica sobre el acumulado. Lo modulan `items.precio_incluye_impuesto` y
+  `tenants.calculo_descuentos`.
+  → Antes de tocarlo: `docs/features/motor-calculo-precios.md`.
+- **Fiscal (SII)** — la emisión electrónica llega a futuro; se diseña compatible sin
+  integrarla. Regla: congelar el hecho fiscal en la transacción, diferir lo que solo
+  transmite o formatea. No construir infraestructura DTE especulativa.
+  → Antes de tocar impuestos o documentos tributarios: **ADR-010**.
+  → Detalle funcional: `docs/features/impuestos.md`.
+- **Ventas** — canales `'fisico'` (requiere caja abierta) y `'online'`. Estados
+  `borrador → pendiente → pagada | cancelada`, más `pagada_parcial` derivado. Tipos de
+  documento por país desde tabla, no enum.
+  → Antes de tocar estados, saldos o notas de crédito: `docs/features/ventas.md`.
+- **Cajas** — `'fisica'` (apertura manual, una abierta por tenant+usuario) y
+  `'virtual'` (una por tenant, siempre abierta).
+  → Antes de tocar apertura/cierre o cuadratura: `docs/features/gestion-cajas.md`.
+- **Inventario** — solo `tipo='producto'` tiene stock. `movimientos_inventario` es la
+  fuente de verdad auditable; `item_producto.stock` es saldo materializado. Movimiento
+  y saldo en una transacción. `modo_inventario` es inmutable con movimientos existentes.
+  → Antes de tocar stock: `docs/features/inventario-serializado.md` y **ADR-007**.
+- **Pagos** — múltiples pagos por venta; `vuelto` solo si `permite_vuelto = true`.
+  → Detalle: `docs/features/pagos.md`.
+- **BD** — timestamps `creado_el`/`actualizado_el`, PKs UUID, items como modelo base +
+  extensión (`item_producto`, `item_servicio`, `item_suscripcion`).
+
+---
 
 ## Convenciones
 
-- Soft delete en todo — nunca borrar filas, marcar `eliminado_el`.
-- Todo cálculo de dinero y porcentajes usa Decimal.js.
-- `tenant_id` en las queries siempre del token del usuario autenticado, nunca del body.
+Los patrones completos están en `docs/patterns/backend.md` y `docs/patterns/frontend.md`
+— leerlos antes de planificar. Aquí solo lo que no se deduce del código:
+
 - Al crear un tenant, sembrar automáticamente: rol admin, fórmula de precio por
   defecto, caja virtual.
-- **Seed de desarrollo:** fuente de verdad `backend/src/modules/seeder/seeder.service.ts`
-  (corre al arrancar el backend). Un método privado por entidad; IDs fijos con patrón
-  `550e8400-e29b-41d4-a716-446655440XXX` (usar el siguiente número libre).
-  Detalle: `docs/patterns/backend.md` §8.
-- **Backend:** cada feature en `src/modules/<nombre>/` (controller, service, entity,
-  DTOs), registrada en `app.module.ts`. DTOs con `class-validator` (ValidationPipe
-  global en `main.ts`). **Toda columna PK/FK de UUID declara `type: 'uuid'` explícito**
-  — sin él TypeORM infiere `varchar` y rompe los JOINs en SQL raw
-  ([ADR-004](docs/adr/004-uuid-column-types.md)).
-- **Frontend:** routing por `pages/`. Llamadas API con `$fetch`/`useApiFetch`, no
-  axios. Runtime config pública con prefijo `VITE_` vía `useRuntimeConfig().public`.
-  Funciones de formato (`formatMonto`, `formatFecha` y toda utilidad de presentación
-  reutilizable) centralizadas en composables de `app/composables/` (hoy
-  `useFormatters`), nunca definidas localmente en un `.vue`.
-  **Anti-patrón:** mutar (POST/PUT/PATCH/DELETE) y luego `cargar()`/`fetch` de la
-  lista. El backend devuelve la entidad o un patch mergeable; el front actualiza
-  el `ref` local. Detalle: `docs/patterns/frontend.md`.
-- **Design System:** siempre tokens semánticos de Nuxt UI (`text-muted`,
-  `divide-default`, `bg-default`), nunca Tailwind hardcoded (`text-gray-500`,
-  `bg-white dark:bg-gray-900`). Excepción: colores financieros (verde/rojo/azul) en
-  el módulo Caja. Referencia: `frontend/docs/DESIGN-SYSTEM.md` y `app/app.config.ts`.
+- **Seed:** fuente de verdad `backend/src/modules/seeder/seeder.service.ts` (corre al
+  arrancar). IDs fijos, patrón `550e8400-e29b-41d4-a716-446655440XXX` — usar el
+  siguiente número libre. Detalle: `docs/patterns/backend.md` §8.
+- **Backend:** feature en `src/modules/<nombre>/`, registrada en `app.module.ts`. DTOs
+  con `class-validator`. Controller valida y delega; el service tiene la lógica.
+- **Frontend:** `$fetch`/`useApiFetch`, nunca axios. Runtime config pública con prefijo
+  `VITE_`. Utilidades de presentación en composables de `app/composables/`, nunca
+  locales a un `.vue`. Las páginas no contienen lógica de negocio.
+- **Design System:** tokens semánticos de Nuxt UI, nunca Tailwind hardcoded. Excepción:
+  colores financieros en el módulo Caja. Referencia: `frontend/docs/DESIGN-SYSTEM.md`
+  y `frontend/app.config.ts`.
+- **Archivos:** no crear uno nuevo si la implementación cabe en uno existente. Evitar
+  `utils.ts`/`helpers.ts`/`common.ts`/`misc.ts`. Sin helpers de un solo uso; duplicar
+  dos veces es aceptable, se extrae a la tercera.
+
+**Ejemplos ❌/✅ de los errores ya cometidos aquí: `docs/agent/anti-patterns.md` — leer
+antes de implementar.**
 
 ## Planes de implementación
 
-- **Antes de planificar:** leer `docs/patterns/backend.md` y `docs/patterns/frontend.md`
-  para reusar los patrones de-facto en vez de re-escanear el repo.
-- Todo plan se persiste en `docs/superpowers/plans/YYYY-MM-DD-<kebab-slug>.md`, con
-  metadata `Status` (Draft/Approved/In Progress/Done) / `Date` / `Owner` y secciones
-  Context, Scope, Backend, Frontend, Verification, Decisions; tareas con `- [ ]`.
-- Flujo: el agente redacta y guarda el plan → el usuario lo edita → el usuario pasa
-  la ruta del plan → el agente lo ejecuta tarea por tarea marcando los checkboxes.
-- `docs/superpowers/specs/` es diseño/contexto; `plans/` son pasos ejecutables.
+Los planes se persisten en `docs/superpowers/plans/YYYY-MM-DD-<kebab-slug>.md` (formato
+y metadata en `docs/superpowers/README.md`). Flujo: el agente redacta el plan → el
+usuario lo edita → pasa la ruta → el agente lo ejecuta tarea por tarea marcando los
+checkboxes. `specs/` es diseño y contexto; `plans/` son pasos ejecutables.
 
 ## Documentación viva (actualizar en el mismo commit que el código)
 
@@ -158,13 +191,38 @@ o cambia una feature.
 | Cambio en reglas de negocio | `docs/PRODUCTO.md` |
 | Nueva convención de código/doc | `docs/CONVENTIONS.md` |
 | Patrón backend/frontend nuevo o cambiado | `docs/patterns/backend.md` o `docs/patterns/frontend.md` |
+| Bug de patrón que se repitió | `docs/agent/anti-patterns.md` |
+
+La documentación describe **el porqué y las reglas de negocio**, no repite el código.
+Corta y accionable.
+
+## ✅ Checklist antes de dar una tarea por terminada
+
+Ejecutar, no afirmar. Si algo falla, la tarea no está terminada.
+
+```bash
+cd backend  && npm run lint:check && npm test && npm run test:e2e
+cd frontend && npm run build
+```
+
+Además verificar:
+
+- [ ] Sigue las convenciones y los patrones existentes del proyecto
+- [ ] No se refactorizó nada fuera del alcance pedido
+- [ ] Documentación actualizada según la tabla de arriba
+- [ ] Sin `TODO`, sin código comentado, sin código muerto
+- [ ] Ninguna invariante violada
+
+Procedimiento completo: skill `verify-feature`.
 
 ## Archivos de referencia
 
 | Archivo | Contenido |
 |---|---|
 | `docs/patterns/` | **Playbook backend/frontend — leer ANTES de planificar una feature** |
-| `docs/ESTADO.md` | Estado de todas las funcionalidades |
+| `docs/agent/anti-patterns.md` | Errores reales ya cometidos en el repo |
+| `docs/agent/README.md` | Por qué este setup está escrito así |
+| `docs/ESTADO.md` | Estado de todas las funcionalidades y roadmap |
 | `docs/PRODUCTO.md` | Especificación funcional completa con reglas de negocio |
 | `startup-pos.sql` | Esquema de BD completo |
 | `backend/src/modules/seeder/seeder.service.ts` | Fuente de verdad del seed (corre al arrancar) |
