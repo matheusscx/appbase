@@ -106,7 +106,9 @@
       "Bash(tee /tmp/tsc-out.txt)",
       "Bash(echo \"EXIT: $?\")",
       "Bash(tee /tmp/npm-test-out.txt)",
-      "Bash(./node_modules/.bin/eslint 'src/modules/seeder/**/*.ts')"
+      "Bash(./node_modules/.bin/eslint 'src/modules/seeder/**/*.ts')",
+      "Bash(./task-brief /Users/m2pro/cmatheus/startup-app/docs/superpowers/plans/2026-07-21-cantidades-consumo-por-item.md 1)",
+      "Bash(/Users/m2pro/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/task-brief *)"
     ]
   },
   "enabledMcpjsonServers": [
