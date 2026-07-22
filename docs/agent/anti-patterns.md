@@ -216,6 +216,31 @@ Aserción no-nula sobre el spread source, no sobre `saved`. Solo aplica cuando `
 (el patch) es parcial; si trae el tipo completo, no falla (por eso `items.vue` no lo
 tenía). Misma justificación que arriba: el índice existe, no es un acceso dudoso.
 
+### ❌ Estado `string | null` bindeado a prop/`v-model` de Nuxt UI (TS2322)
+
+Los inputs de Nuxt UI aceptan `string | undefined`, no `null`. Un ref de error o un
+campo de form tipado `| null` no es asignable:
+
+```vue
+<!-- MAL — nombreError es string | null; :error quiere string | boolean | undefined -->
+<UFormField :error="nombreError" />
+<!-- BIEN (una vía) — coerción ya usada en el repo (AppDateInput.vue) -->
+<UFormField :error="nombreError ?? undefined" />
+```
+```ts
+// MAL — v-model de dos vías sobre campo string | null (no se puede coercer inline)
+const form = ref({ modo: 'porcentaje' as string | null })
+// BIEN — el form nunca guarda null: tiparlo string y coercer al cargar
+const form = ref({ modo: 'porcentaje' as string })
+function abrirEditar(d: Regla) { form.value = { modo: d.modo ?? '', /* … */ } }
+```
+
+`?? ''` al cargar es el mismo patrón ya usado en el repo para tramos (`t.minimo ?? ''`).
+Antes de aplicarlo verificar que el `null` no viaje al payload: en `descuentos`/`recargos`
+el campo solo se manda cuando `cfg` lo habilita, y ahí el valor siempre es un string real,
+así que la coerción es payload-neutral. Si el `null` sí llegara al body, es decisión de
+negocio (limpiar vs omitir) — preguntar.
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

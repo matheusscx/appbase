@@ -45,8 +45,8 @@ const CONFIG_MAP = DESCUENTO_CONFIG
 const emptyForm = () => ({
   nombre: '',
   tipoReglaId: '',
-  modo: 'porcentaje' as string | null,
-  valor: '' as string | null,
+  modo: 'porcentaje' as string,
+  valor: '' as string,
   metodoPagoIds: [] as string[],
   tramos: [] as { minimo: string; valor: string }[],
   diasVencimiento: null as number | null,
@@ -167,8 +167,8 @@ function abrirEditar(d: Regla) {
   form.value = {
     nombre: d.nombre,
     tipoReglaId: d.tipoReglaId,
-    modo: d.modo,
-    valor: d.valor,
+    modo: d.modo ?? '',
+    valor: d.valor ?? '',
     metodoPagoIds: d.metodoPagoIds ?? [],
     tramos: d.tramos?.map(t => ({ minimo: t.minimo ?? '', valor: t.valor ?? '' })) ?? [],
     diasVencimiento: d.diasVencimiento ?? null,
@@ -384,7 +384,7 @@ const columns: TableColumn<Regla>[] = [
           @submit="guardar"
         >
           <!-- Nombre (always visible) -->
-          <UFormField label="Nombre" required :error="nombreError">
+          <UFormField label="Nombre" required :error="nombreError ?? undefined">
             <UInput
               v-model="form.nombre"
               placeholder="Mi descuento"
@@ -524,7 +524,7 @@ const columns: TableColumn<Regla>[] = [
         <UButton
           color="neutral"
           variant="ghost"
-          @click="drawerOpen = false"
+          @click="() => { drawerOpen = false }"
         >
           Cancelar
         </UButton>
