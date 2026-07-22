@@ -1,6 +1,7 @@
 # Análisis: Motor de promociones
 
-**Status**: En análisis (borrador — NO es diseño cerrado ni plan ejecutable)
+**Status**: Alcance de Fase 1 CERRADO — falta diseñar la arquitectura (tablas +
+evaluador). Todavía NO es plan ejecutable.
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-07-22
 
@@ -162,6 +163,34 @@ después = un registro nuevo, no una migración.
    hecho, auditado por snapshot); **reusa** lo que el motor ya sabe (descuentos
    por línea + trazas). El "cómo se ve en la boleta" queda como formateo futuro.
 
+4. **Fase 1 = solo familia (A)** — descuentos sobre líneas ya pedidas. La familia
+   (B) (agregar un ítem que el cliente no pidió) queda para después.
+
+5. **Regla producto-vs-promo (cuándo usar cada herramienta).** Estructura de
+   producto (catálogo + grupos modificadores) y motor de promos **no son dos formas
+   de hacer lo mismo**: modelan realidades distintas, y la elección la dicta el
+   negocio, no el gusto del usuario. Pregunta de decisión:
+
+   > ¿Esto está **siempre en la carta como un producto con su precio** (→ catálogo)
+   > o es una **condición que aparece/desaparece según día/hora/cantidad** (→ promo)?
+
+   - **Producto** — permanente, se pide como unidad, precio conocido: "Combo 2 Tragos
+     $8.990", "Pizza + Bebida $9.990" (grupo modificador + precio fijo del combo).
+   - **Promo** — descuento condicional/temporal sobre ítems que se venden normal:
+     "2x1 los martes 18–20h", "el más barato gratis" (eso *es* un descuento).
+
+   **Por qué importa:** si el tenant arma su happy hour como "producto combo", el
+   descuento queda escondido y no se puede medir ("¿cuánto descontamos en promos este
+   mes?"). **El descuento tiene que vivir donde se mide como descuento.** Esta regla
+   debe quedar escrita en `docs/PRODUCTO.md` + feature-doc cuando se cierre el diseño.
+
+6. **El scope lo trae cada promo** (no hay "lista global de promociones"). Cada promo
+   declara a qué aplica, en una de tres formas: **lista explícita de ítems** /
+   **categoría entera** (incluye ítems futuros) / **todo el pedido**. Es el "*Buy
+   Items*" del mercado. El punto de contacto limpio con estructura es la **categoría**,
+   nunca reusar un grupo modificador como scope (acopla catálogo con precios: editar el
+   menú cambiaría en silencio qué está en promoción).
+
 ---
 
 ## Insight arquitectónico central
@@ -188,29 +217,40 @@ motor de precios → zona "detenerse y preguntar" de CLAUDE.md.**
 
 ---
 
-## Propuesta de alcance — Fase 1
+## Alcance de Fase 1 — CERRADO
+
+Scope acordado (2026-07-22). Todas las preguntas abiertas resueltas.
 
 - Tablas genéricas Promoción / Condición / Beneficio + evaluador cross-carrito.
 - Set chico de tipos atados a casos reales: **happy hour %, 2x1/NxM (paga la más
   cara), precio fijo combo**.
-- **Solo familia (A)** (descuentos sobre líneas existentes).
-- **Solo aplicación automática** (cupón/manual después).
-- **Sin** sucursales, fidelización, canales ricos.
-- Representación fiscal decidida como "descuento portable" (arriba).
+- **Solo familia (A)** — descuentos sobre líneas existentes (decisión 4).
+- **Scope por promo:** lista de ítems / categoría / todo el pedido (decisión 6).
+- **Solo activación automática** (cupón/manual = fase posterior).
+- **Conflictos: no acumulación, gana la de mayor descuento** — una promo por línea.
+- **Sin** sucursales, fidelización, canales ricos, mesa>N (no existen los datos).
+- Representación fiscal: "descuento portable" (decisión 3).
+- Regla producto-vs-promo escrita como principio (decisión 5).
+
+**Siguiente:** cerrado el alcance, falta diseñar la **arquitectura** (esquema de las
+tablas, forma del evaluador cross-carrito y su punto de integración con
+`calculo-precios.engine.ts` — zona "detenerse y preguntar"). Ese es el diseño que se
+promueve a `-design.md` → plan.
 
 ---
 
 ## Preguntas abiertas (para cerrar el esqueleto)
 
-1. **¿Fase 1 = solo familia (A)?** ¿O hay un caso (B) —típicamente "regalo una
-   bebida que el cliente no tenía en el pedido"— que ya se necesita sí o sí?
-2. **Confirmar exclusiones de Fase 1:** sucursales, fidelización, canales ricos,
-   cupón/manual → afuera. (Pendiente de confirmación explícita.)
-3. **Resolución de conflictos** (prioridad / exclusión / acumulación): definir la
-   estrategia mínima de Fase 1 (¿"gana el de mayor descuento"? ¿grupos de
-   exclusión?).
-4. **Mesa > N comensales:** ¿`salones` guarda nº de personas? (verificar antes de
-   ofrecer esa condición).
+1. ~~¿Fase 1 = solo familia (A)?~~ **Resuelto: sí, solo (A)** (decisión 4).
+2. ~~Activación: ¿automática o cupón?~~ **Resuelto: solo automática** (cupón/manual
+   = fase posterior). Sucursales/fidelización/canales ricos caen solas: no existen.
+3. ~~Resolución de conflictos~~ **Resuelto: no acumulación, gana la de mayor
+   descuento** (una promo por línea). Grupos de exclusión y stacking = fase posterior;
+   la comparación de candidatas que esto construye es la base para agregarlos luego.
+4. ~~Mesa > N comensales~~ **Resuelto: fuera de Fase 1 por falta de dato.** Verificado
+   en código: `Mesa` guarda forma/tamaño (visual), `Cuenta.numero` es nº de cuenta, no
+   de personas. No hay campo de comensales en ningún lado → la condición no se puede
+   ofrecer. Si algún día se necesita, es agregar el dato primero.
 
 ---
 
