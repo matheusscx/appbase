@@ -16,7 +16,7 @@ const customer = defineModel<CustomerForm>('customer', { required: true })
     </template>
 
     <template #actions>
-      <UButton label="Listo" color="primary" block @click="open = false" />
+      <UButton label="Listo" color="primary" block @click="() => { open = false }" />
     </template>
   </AppDrawer>
 </template>

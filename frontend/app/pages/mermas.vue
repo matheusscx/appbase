@@ -439,7 +439,7 @@ const columns: TableColumn<MermaListItem>[] = [
         <UButton
           color="neutral"
           variant="ghost"
-          @click="drawerOpen = false"
+          @click="() => { drawerOpen = false }"
         >
           Cancelar
         </UButton>
@@ -467,7 +467,7 @@ const columns: TableColumn<MermaListItem>[] = [
           <UButton
             color="neutral"
             variant="ghost"
-            @click="costoSinActualModalOpen = false"
+            @click="() => { costoSinActualModalOpen = false }"
           >
             Entendido
           </UButton>

@@ -19,7 +19,7 @@ defineProps<{
       square
       class="-my-1 text-muted hover:text-default"
       :aria-label="ariaLabel ?? `Más información: ${title}`"
-      @click.stop="open = true"
+      @click.stop="() => { open = true }"
     />
 
     <UModal
@@ -36,7 +36,7 @@ defineProps<{
 
       <template #footer>
         <AppModalFooter>
-          <UButton color="primary" @click="open = false">
+          <UButton color="primary" @click="() => { open = false }">
             Entendido
           </UButton>
         </AppModalFooter>

@@ -324,7 +324,7 @@ function onReembolsoSuccess(payload: {
       <UButton
         color="neutral"
         variant="ghost"
-        @click="open = false"
+        @click="() => { open = false }"
       >
         Cerrar
       </UButton>
@@ -334,7 +334,7 @@ function onReembolsoSuccess(payload: {
         icon="i-lucide-undo-2"
         color="error"
         variant="subtle"
-        @click="reembolsoOpen = true"
+        @click="() => { reembolsoOpen = true }"
       />
     </template>
   </AppDrawer>

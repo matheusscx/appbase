@@ -186,7 +186,7 @@ function estadoLabel(estado: string): string {
       <UButton
         color="neutral"
         variant="ghost"
-        @click="open = false"
+        @click="() => { open = false }"
       >
         Cerrar
       </UButton>

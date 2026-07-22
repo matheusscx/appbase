@@ -332,7 +332,7 @@ const columns: TableColumn<Tercero>[] = [
             <UButton
               color="neutral"
               variant="ghost"
-              @click="drawerOpen = false"
+              @click="() => { drawerOpen = false }"
             >
               Cancelar
             </UButton>

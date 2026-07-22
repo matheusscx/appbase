@@ -410,7 +410,7 @@ onMounted(async () => {
               <UButton
                 color="neutral"
                 variant="ghost"
-                @click="cambiarTarjetaModalOpen = false"
+                @click="() => { cambiarTarjetaModalOpen = false }"
               >
                 Cancelar
               </UButton>
@@ -527,7 +527,7 @@ onMounted(async () => {
           </template>
 
           <template #actions>
-            <UButton color="neutral" variant="ghost" @click="drawerOpen = false">
+            <UButton color="neutral" variant="ghost" @click="() => { drawerOpen = false }">
               Cancelar
             </UButton>
             <UButton

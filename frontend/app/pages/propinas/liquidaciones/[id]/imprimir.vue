@@ -123,7 +123,7 @@ onMounted(cargar)
           variant="ghost"
           color="neutral"
           label="Volver"
-          @click="router.push('/propinas')"
+          @click="() => { router.push('/propinas') }"
         />
         <div class="flex items-center gap-2">
           <div class="flex rounded-lg bg-elevated p-0.5">

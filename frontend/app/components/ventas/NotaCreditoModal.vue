@@ -133,7 +133,7 @@ async function confirmar() {
 
     <template #footer>
       <AppModalFooter>
-        <UButton label="Cancelar" color="neutral" variant="ghost" @click="open = false" />
+        <UButton label="Cancelar" color="neutral" variant="ghost" @click="() => { open = false }" />
         <UButton
           label="Generar nota de crédito"
           :loading="submitting"

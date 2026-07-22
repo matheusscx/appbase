@@ -128,7 +128,7 @@ watch(clienteDrawerOpen, (open) => {
               color="neutral"
               size="sm"
               :disabled="!hayAlgoQueLimpiar"
-              @click="vaciarModalOpen = true"
+              @click="() => { vaciarModalOpen = true }"
             />
           </UTooltip>
         </div>
@@ -157,7 +157,7 @@ watch(clienteDrawerOpen, (open) => {
             variant="ghost"
             color="neutral"
             size="xs"
-            @click="clienteDrawerOpen = true"
+            @click="() => { clienteDrawerOpen = true }"
           />
           <UButton
             v-if="!customerRequerido"

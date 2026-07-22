@@ -109,7 +109,7 @@ async function cerrarCaja() {
     </template>
 
     <template #actions>
-      <UButton color="neutral" variant="ghost" @click="open = false">
+      <UButton color="neutral" variant="ghost" @click="() => { open = false }">
         Cancelar
       </UButton>
       <UButton
