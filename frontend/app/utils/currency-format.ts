@@ -26,7 +26,7 @@ export function formatMontoManual(d: Decimal, cfg: MonedaDisplayConfig): string 
   const fixed = abs.toFixed(cfg.decimals)
   const [entero, frac] = fixed.split('.')
   const milesRegex = /\B(?=(\d{3})+(?!\d))/g
-  const enteroFmt = entero.replace(milesRegex, cfg.thousands)
+  const enteroFmt = entero!.replace(milesRegex, cfg.thousands)
   const numero = cfg.decimals > 0 && frac !== undefined
     ? `${enteroFmt}${cfg.decimal}${frac}`
     : enteroFmt

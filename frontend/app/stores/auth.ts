@@ -154,7 +154,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (list.length === 0) {
       await navigateTo('/no-tenant')
     } else if (list.length === 1) {
-      await tenantStore.switchTenant(list[0].tenantId)
+      await tenantStore.switchTenant(list[0]!.tenantId)
     } else {
       await navigateTo('/select-tenant')
     }

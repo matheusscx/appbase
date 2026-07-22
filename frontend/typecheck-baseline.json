@@ -1,18 +1,14 @@
 {
-  "total": 25,
+  "total": 20,
   "files": {
     "app/components/AppDateInput.vue": 1,
     "app/components/AppDateTimeInput.vue": 1,
     "app/components/AppDrawer.vue": 1,
     "app/components/MoneyInput.vue": 1,
-    "app/components/RecetasDesfasesPanel.vue": 2,
     "app/components/ventas/ItemPersonalizacionDrawer.vue": 1,
-    "app/composables/useJwt.ts": 1,
     "app/composables/usePropinaImpresion.spec.ts": 3,
     "app/middleware/auth.spec.ts": 8,
     "app/pages/configuracion/propinas-distribucion.vue": 2,
-    "app/stores/auth.spec.ts": 2,
-    "app/stores/auth.ts": 1,
-    "app/utils/currency-format.ts": 1
+    "app/stores/auth.spec.ts": 2
   }
 }

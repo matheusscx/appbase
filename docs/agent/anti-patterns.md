@@ -216,6 +216,11 @@ Aserción no-nula sobre el spread source, no sobre `saved`. Solo aplica cuando `
 (el patch) es parcial; si trae el tipo completo, no falla (por eso `items.vue` no lo
 tenía). Misma justificación que arriba: el índice existe, no es un acceso dudoso.
 
+Igual criterio para índice/destructuring ya guardado en `<script>`/`.ts` (TS2532/18048):
+`parts[1]!` tras `if (parts.length !== 3) return`, `list[0]!` dentro de `length === 1`,
+`entero!` del `split('.')` de un `toFixed`, o `v-model="map[k]!.campo"` bajo `v-if="map[k]"`.
+El `!` solo donde una guarda previa garantiza la existencia — nunca en el índice dudoso.
+
 ### ❌ Estado `string | null` bindeado a prop/`v-model` de Nuxt UI (TS2322)
 
 Los inputs de Nuxt UI aceptan `string | undefined`, no `null`. Un ref de error o un

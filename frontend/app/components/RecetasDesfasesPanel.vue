@@ -210,7 +210,7 @@ function onDescartar() {
               <div class="flex min-w-40 flex-col gap-2">
                 <MoneyInput
                   v-if="rowState[fila.recetaItemId]"
-                  v-model="rowState[fila.recetaItemId].precioEditado"
+                  v-model="rowState[fila.recetaItemId]!.precioEditado"
                   oficial
                   size="sm"
                   class="w-full"
@@ -218,7 +218,7 @@ function onDescartar() {
                 />
                 <UCheckbox
                   v-if="rowState[fila.recetaItemId]"
-                  v-model="rowState[fila.recetaItemId].actualizarPrecio"
+                  v-model="rowState[fila.recetaItemId]!.actualizarPrecio"
                   label="Actualizar precio"
                 />
               </div>
