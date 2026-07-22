@@ -1,14 +1,8 @@
 {
-  "total": 20,
+  "total": 13,
   "files": {
-    "app/components/AppDateInput.vue": 1,
-    "app/components/AppDateTimeInput.vue": 1,
-    "app/components/AppDrawer.vue": 1,
-    "app/components/MoneyInput.vue": 1,
-    "app/components/ventas/ItemPersonalizacionDrawer.vue": 1,
     "app/composables/usePropinaImpresion.spec.ts": 3,
     "app/middleware/auth.spec.ts": 8,
-    "app/pages/configuracion/propinas-distribucion.vue": 2,
     "app/stores/auth.spec.ts": 2
   }
 }

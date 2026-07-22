@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { vMaska, type MaskaDetail } from 'maska/vue'
+import { vMaska } from 'maska/vue'
+import type { MaskaDetail } from 'maska'
 import { formatMontoDisplay } from '~/utils/currency-format'
 
 const props = withDefaults(

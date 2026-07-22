@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DrawerProps } from '@nuxt/ui'
 import { resolveDrawerWidth, type DrawerWidth } from '~/utils/drawer-width'
 
 defineOptions({ inheritAttrs: false })
@@ -24,15 +25,17 @@ const isHorizontal = computed(
   () => props.direction === 'left' || props.direction === 'right',
 )
 
-const drawerContent = computed(() => {
+const drawerContent = computed<DrawerProps['content']>(() => {
   if (!isHorizontal.value) return undefined
   const size = resolveDrawerWidth(props.width)
+  // reka reenvía `style` al elemento de contenido en runtime; el tipo del prop `content`
+  // (DialogContentProps) no modela `style`, así que casteamos el objeto.
   return {
     style: {
       width: size,
       maxWidth: size,
     },
-  }
+  } as DrawerProps['content']
 })
 
 const drawerUi = computed(() => {

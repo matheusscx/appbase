@@ -303,7 +303,7 @@ async function guardar() {
                 value-key="value"
                 :disabled="!puedeConfigurar"
                 class="w-full"
-                @update:model-value="(v: CriterioDistribucion) => onCriterioChange(g, v)"
+                @update:model-value="(v: string) => onCriterioChange(g, v as CriterioDistribucion)"
               />
             </UFormField>
             <UFormField
@@ -329,7 +329,7 @@ async function guardar() {
                 value-key="value"
                 :disabled="!puedeConfigurar"
                 class="w-full"
-                @update:model-value="(v: ManualModo) => onManualModoChange(g, v)"
+                @update:model-value="(v: string) => onManualModoChange(g, v as ManualModo)"
               />
             </UFormField>
           </div>

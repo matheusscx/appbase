@@ -246,6 +246,25 @@ el campo solo se manda cuando `cfg` lo habilita, y ahí el valor siempre es un s
 así que la coerción es payload-neutral. Si el `null` sí llegara al body, es decisión de
 negocio (limpiar vs omitir) — preguntar.
 
+### ❌ Mismatch de tipos con handlers/props de Nuxt UI · reka (TS2322/2345/2459)
+
+Casos puntuales de vue-tsc estricto contra los tipos de `@nuxt/ui`/`reka-ui`. Todos con
+fix **solo-de-tipo, cero runtime**:
+
+- **Param del handler más estrecho que el emit** — `@update:model-value="(v: Criterio) => f(v)"`
+  falla si el componente emite `string`. Ensanchar el param al tipo emitido y castear
+  dentro: `(v: string) => f(v as Criterio)`.
+- **`$event` de `USwitch`/`UCheckbox`** es `string | boolean` (por `indeterminate`).
+  Si el handler quiere `boolean`: `f(id, $event as boolean)`.
+- **Forma de `DateRange`** (reka) es `{ start: DateValue | undefined; end: DateValue | undefined }`.
+  Un handler que declara `{ start: DateValue; end: DateValue }` no acepta el emit → alinear
+  con `| undefined`.
+- **Tipo no exportado por el subpath** — `MaskaDetail` no se exporta desde `maska/vue`
+  pero sí desde `maska`. Importar el tipo desde la raíz: `import type { MaskaDetail } from 'maska'`.
+- **Prop que no modela `style`** — el `content` de `UDrawer` (`DialogContentProps`) no
+  declara `style` aunque reka lo reenvía en runtime. Castear a `DrawerProps['content']`
+  (importado de `@nuxt/ui`, dep directa — nunca de `reka-ui` transitivo).
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

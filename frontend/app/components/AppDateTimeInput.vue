@@ -52,7 +52,7 @@ watch(internal, (v) => {
   emit('update:modelValue', fromCalendarDateTime(v))
 })
 
-function onCalendar(v: DateValue | DateValue[] | null | undefined | { start: DateValue, end: DateValue }) {
+function onCalendar(v: DateValue | DateValue[] | null | undefined | { start: DateValue | undefined, end: DateValue | undefined }) {
   if (!v || Array.isArray(v) || ('start' in v)) return
   internal.value = mergeDateKeepingTime(v, internal.value)
 }

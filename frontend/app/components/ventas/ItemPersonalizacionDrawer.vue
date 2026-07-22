@@ -450,7 +450,7 @@ function agregar() {
                   :disabled="extraDeshabilitado(extra)"
                   :label="extra.ingredienteNombre"
                   :description="`+${formatMonto(extra.precioExtra, detalle.monedaId)} · ${extra.cantidad} ${extra.unidadCodigo}`"
-                  @update:model-value="toggleExtra(extra.ingredienteItemId, $event)"
+                  @update:model-value="toggleExtra(extra.ingredienteItemId, $event as boolean)"
                 />
                 <UInputNumber
                   v-if="extraSeleccionado(extra.ingredienteItemId)"
