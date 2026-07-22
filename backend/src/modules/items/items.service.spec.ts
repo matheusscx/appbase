@@ -2978,6 +2978,68 @@ describe('ItemsService', () => {
         grupos,
       );
     });
+
+    it('descuenta el stock de la opción de grupo de cada componente-unidad', async () => {
+      const RECETA_ID = 'receta-combo-componentes-uuid';
+      const PROTEINA_ID = 'proteina-componentes-uuid';
+      const CHULETA_ID = 'chuleta-componentes-uuid';
+
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({} as any);
+
+      managerMock.query
+        .mockResolvedValueOnce([]) // combo_componentes: sin componentes fijos
+        .mockResolvedValueOnce([{ tipo: 'producto', unidad_medida: 'g' }]); // lookup items/item_producto de la opción chuleta
+
+      const snapshot = {
+        omitidos: [],
+        extras: [],
+        componentes: [
+          {
+            componenteItemId: RECETA_ID,
+            componenteNombre: 'Hamburguesa',
+            unidad: 1,
+            grupos: [
+              {
+                grupoId: PROTEINA_ID,
+                grupoNombre: 'Proteína',
+                opciones: [
+                  {
+                    itemId: CHULETA_ID,
+                    nombre: 'Chuleta',
+                    cantidad: '150',
+                    unidadCodigo: 'g',
+                    precioExtra: '1500',
+                    unidades: '1',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      await service.venderComponentesCombo(managerMock as any, {
+        tenantId: TENANT,
+        usuarioId: USUARIO_ID,
+        ventaId: VENTA_ID,
+        comboItemId: COMBO_ID,
+        comboNombre: 'Combo',
+        cantidadVendida: '1',
+        snapshot,
+      });
+
+      // se registró una salida para la chuleta (ítem de la opción de grupo del componente)
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          itemId: CHULETA_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+        }),
+      );
+    });
   });
 
   describe('venderOpcionesGrupos', () => {

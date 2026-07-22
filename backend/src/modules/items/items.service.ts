@@ -2170,6 +2170,26 @@ export class ItemsService {
       params.snapshot?.grupos,
     );
 
+    // Grupos de los componentes receta (elección por unidad congelada en el
+    // snapshot). Cada entrada es UNA unidad → venderOpcionesGrupos ya
+    // multiplica por cantidadVendida; no multiplicar por la cantidad del
+    // componente (ya está enumerada como unidades separadas).
+    const gruposComponentes = (params.snapshot?.componentes ?? []).flatMap(
+      (c) => c.grupos,
+    );
+    if (gruposComponentes.length) {
+      await this.venderOpcionesGrupos(
+        manager,
+        {
+          tenantId: params.tenantId,
+          usuarioId: params.usuarioId,
+          ventaId: params.ventaId,
+          cantidadVendida: params.cantidadVendida,
+        },
+        gruposComponentes,
+      );
+    }
+
     return advertencias;
   }
 
