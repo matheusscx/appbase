@@ -2983,6 +2983,7 @@ describe('ItemsService', () => {
       const RECETA_ID = 'receta-combo-componentes-uuid';
       const PROTEINA_ID = 'proteina-componentes-uuid';
       const CHULETA_ID = 'chuleta-componentes-uuid';
+      const POLLO_ID = 'pollo-componentes-uuid';
 
       const spyMov = jest
         .spyOn(inventarioServiceMock, 'registrarMovimiento')
@@ -2990,8 +2991,13 @@ describe('ItemsService', () => {
 
       managerMock.query
         .mockResolvedValueOnce([]) // combo_componentes: sin componentes fijos
-        .mockResolvedValueOnce([{ tipo: 'producto', unidad_medida: 'g' }]); // lookup items/item_producto de la opción chuleta
+        .mockResolvedValueOnce([{ tipo: 'producto', unidad_medida: 'g' }]) // lookup de la opción de la unidad 1 (chuleta)
+        .mockResolvedValueOnce([{ tipo: 'producto', unidad_medida: 'g' }]); // lookup de la opción de la unidad 2 (pollo)
 
+      // Dos "componente-unidad" (dos hamburguesas del combo), cada una con su
+      // propia elección de grupo. Cada entrada del snapshot es UNA unidad: si
+      // venderOpcionesGrupos multiplicara además por `unidad` (1, 2) o por el
+      // número de entradas (2), las cantidades calculadas abajo no coincidirían.
       const snapshot = {
         omitidos: [],
         extras: [],
@@ -3011,6 +3017,27 @@ describe('ItemsService', () => {
                     cantidad: '150',
                     unidadCodigo: 'g',
                     precioExtra: '1500',
+                    unidades: '2',
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            componenteItemId: RECETA_ID,
+            componenteNombre: 'Hamburguesa',
+            unidad: 2,
+            grupos: [
+              {
+                grupoId: PROTEINA_ID,
+                grupoNombre: 'Proteína',
+                opciones: [
+                  {
+                    itemId: POLLO_ID,
+                    nombre: 'Pollo',
+                    cantidad: '200',
+                    unidadCodigo: 'g',
+                    precioExtra: '1200',
                     unidades: '1',
                   },
                 ],
@@ -3026,19 +3053,31 @@ describe('ItemsService', () => {
         ventaId: VENTA_ID,
         comboItemId: COMBO_ID,
         comboNombre: 'Combo',
-        cantidadVendida: '1',
+        cantidadVendida: '3',
         snapshot,
       });
 
-      // se registró una salida para la chuleta (ítem de la opción de grupo del componente)
+      // unidad 1 (chuleta): 150 × 2 × 3 = 900 — sin multiplicar por `unidad` (1) ni por las 2 entradas del snapshot
       expect(spyMov).toHaveBeenCalledWith(
         managerMock,
         expect.objectContaining({
           itemId: CHULETA_ID,
           tipo: 'salida',
           motivo: 'venta',
+          cantidad: '900', // 150 × 2 × 3
         }),
       );
+      // unidad 2 (pollo): 200 × 1 × 3 = 600 — si se multiplicara por `unidad` (2) o por las 2 entradas, daría 1200
+      expect(spyMov).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          itemId: POLLO_ID,
+          tipo: 'salida',
+          motivo: 'venta',
+          cantidad: '600', // 200 × 1 × 3
+        }),
+      );
+      expect(spyMov).toHaveBeenCalledTimes(2);
     });
   });
 
