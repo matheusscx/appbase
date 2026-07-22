@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import Decimal from 'decimal.js'
 import {
   buildPersonalizacionPayload,
   precioConExtras,
@@ -9,6 +8,7 @@ import {
   opcionSinStock,
   type PersonalizacionPayload,
   type PersonalizacionGrupoPayload,
+  type PersonalizacionComponentePayload,
   type RecetaDetallePersonalizacion,
   type GrupoPersonalizacion,
   type GrupoOpcionPersonalizacion,
@@ -39,6 +39,8 @@ const extrasCantidad = ref<Record<string, number>>({})
 const comentario = ref('')
 /** grupoModificadorId -> itemId de la opción -> unidades elegidas. */
 const gruposSeleccion = ref<Record<string, Record<string, number>>>({})
+/** Selección de grupos de componentes: clave `componenteItemId#unidad` → grupoId → itemId → unidades. */
+const componentesSeleccion = ref<Record<string, Record<string, Record<string, number>>>>({})
 
 function resetForm(det: RecetaDetallePersonalizacion) {
   const nextIncluidos: Record<string, boolean> = {}
@@ -50,6 +52,7 @@ function resetForm(det: RecetaDetallePersonalizacion) {
   extrasCantidad.value = {}
   comentario.value = ''
   gruposSeleccion.value = {}
+  componentesSeleccion.value = {}
 }
 
 function extraSeleccionado(id: string): boolean {
@@ -93,6 +96,7 @@ watch(
       extrasCantidad.value = {}
       comentario.value = ''
       gruposSeleccion.value = {}
+      componentesSeleccion.value = {}
     }
   },
 )
@@ -107,41 +111,8 @@ function extraDeshabilitado(extra: RecetaDetallePersonalizacion['extrasPermitido
 
 // ── Grupos de modificadores ──────────────────────────────────────────────
 
-const NINGUNA = '__ninguna__'
-
-function reglaGrupo(g: GrupoPersonalizacion): string {
-  if (g.min === g.max) return g.min === 1 ? 'Elige 1' : `Elige ${g.min}`
-  if (g.min === 0) return `Elige hasta ${g.max}`
-  return `Elige entre ${g.min} y ${g.max}`
-}
-
-/** Opción única (`max === 1`) → radio; varias (`max > 1`) → checkbox + stepper. */
-function esGrupoUnico(g: GrupoPersonalizacion): boolean {
-  return g.max === 1
-}
-
-function unidadesOpcion(grupoId: string, itemId: string): number {
-  return gruposSeleccion.value[grupoId]?.[itemId] ?? 0
-}
-
-function opcionSeleccionada(grupoId: string, itemId: string): boolean {
-  return unidadesOpcion(grupoId, itemId) >= 1
-}
-
-function totalUnidadesGrupo(g: GrupoPersonalizacion): number {
-  const sel = gruposSeleccion.value[g.grupoModificadorId] ?? {}
-  return Object.values(sel).reduce((acc, u) => acc + u, 0)
-}
-
 function opcionDeshabilitada(o: GrupoOpcionPersonalizacion): boolean {
   return !!o.esPendiente || opcionSinStock(o.stock)
-}
-
-/** Motivo de la opción no seleccionable, para mensaje y tooltip. */
-function opcionMotivo(o: GrupoOpcionPersonalizacion): string | null {
-  if (o.esPendiente) return 'No configurada para este item'
-  if (opcionSinStock(o.stock)) return 'Sin stock disponible'
-  return null
 }
 
 /** Grupo obligatorio (min ≥ 1) sin ninguna opción disponible: nunca se puede cumplir. */
@@ -149,65 +120,49 @@ function grupoAgotado(g: GrupoPersonalizacion): boolean {
   return g.min >= 1 && g.opciones.every((o) => opcionDeshabilitada(o))
 }
 
-function grupoValido(g: GrupoPersonalizacion): boolean {
+function totalUnidadesGrupoEn(sel: Record<string, number>): number {
+  return Object.values(sel).reduce((acc, u) => acc + u, 0)
+}
+
+function grupoValidoEn(g: GrupoPersonalizacion, sel: Record<string, number>): boolean {
   if (grupoAgotado(g)) return false
-  const total = totalUnidadesGrupo(g)
+  const total = totalUnidadesGrupoEn(sel)
   return total >= g.min && total <= g.max
 }
 
 const gruposValidos = computed(() =>
-  (detalle.value?.grupos ?? []).every((g) => grupoValido(g)),
+  (detalle.value?.grupos ?? []).every((g) =>
+    grupoValidoEn(g, gruposSeleccion.value[g.grupoModificadorId] ?? {}),
+  ),
 )
 
-function radioSeleccionado(g: GrupoPersonalizacion): string {
-  const sel = gruposSeleccion.value[g.grupoModificadorId] ?? {}
-  const elegido = Object.entries(sel).find(([, u]) => u > 0)
-  return elegido?.[0] ?? NINGUNA
-}
-
-interface RadioGrupoItem {
-  label: string
-  description?: string
-  value: string
-  disabled: boolean
-}
-
-function radioItems(g: GrupoPersonalizacion): RadioGrupoItem[] {
-  const items: RadioGrupoItem[] = g.opciones.map((o) => ({
-    label: o.itemNombre,
-    description: opcionMotivo(o) ?? opcionDescripcion(o),
-    value: o.itemId,
-    disabled: opcionDeshabilitada(o),
-  }))
-  if (g.min === 0) {
-    items.unshift({ label: 'Ninguna', value: NINGUNA, disabled: false })
+/** Cada (componente, unidad) cumple min/max de todos sus grupos. */
+const componentesValidos = computed(() => {
+  for (const comp of detalle.value?.componentes ?? []) {
+    if (!comp.grupos.length) continue
+    for (let u = 1; u <= Number(comp.cantidad); u++) {
+      const sel = componentesSeleccion.value[`${comp.componenteItemId}#${u}`] ?? {}
+      for (const g of comp.grupos) {
+        if (!grupoValidoEn(g, sel[g.grupoModificadorId] ?? {})) return false
+      }
+    }
   }
-  return items
-}
+  return true
+})
 
-function onRadioChange(g: GrupoPersonalizacion, value: string) {
-  const nuevo: Record<string, number> = {}
-  if (value !== NINGUNA) nuevo[value] = 1
-  gruposSeleccion.value = { ...gruposSeleccion.value, [g.grupoModificadorId]: nuevo }
-}
-
-function toggleOpcionMulti(g: GrupoPersonalizacion, itemId: string, checked: boolean | 'indeterminate') {
-  const sel = { ...(gruposSeleccion.value[g.grupoModificadorId] ?? {}) }
-  if (checked === true) sel[itemId] = 1
-  else delete sel[itemId]
-  gruposSeleccion.value = { ...gruposSeleccion.value, [g.grupoModificadorId]: sel }
-}
-
-function setUnidadesOpcion(g: GrupoPersonalizacion, itemId: string, unidades: number) {
-  const sel = { ...(gruposSeleccion.value[g.grupoModificadorId] ?? {}) }
-  sel[itemId] = Math.max(1, Math.floor(unidades || 1))
-  gruposSeleccion.value = { ...gruposSeleccion.value, [g.grupoModificadorId]: sel }
-}
-
-function opcionDescripcion(o: GrupoOpcionPersonalizacion): string {
-  return new Decimal(o.precioExtra || '0').greaterThan(0)
-    ? `+${formatMonto(o.precioExtra, detalle.value?.monedaId ?? '')}`
-    : 'Sin costo adicional'
+/** Escribe la selección de un grupo de (componente, unidad) manteniendo el resto. */
+function setComponenteSeleccion(
+  componenteItemId: string,
+  unidad: number,
+  grupoId: string,
+  sel: Record<string, number>,
+) {
+  const key = `${componenteItemId}#${unidad}`
+  const actual = componentesSeleccion.value[key] ?? {}
+  componentesSeleccion.value = {
+    ...componentesSeleccion.value,
+    [key]: { ...actual, [grupoId]: sel },
+  }
 }
 
 const gruposOpcionesSeleccionadas = computed(() => {
@@ -278,14 +233,22 @@ const detallePreview = computed<PersonalizacionDetalleLinea[]>(() => {
   return detallePersonalizacionPreview(nombresOmitidos, extras)
 })
 
-const confirmDisabled = computed(() => loading.value || !detalle.value || !gruposValidos.value)
+const confirmDisabled = computed(() =>
+  loading.value || !detalle.value || !gruposValidos.value || !componentesValidos.value,
+)
 
 function cancelar() {
   open.value = false
 }
 
+function opcionesDe(sel: Record<string, number>): PersonalizacionGrupoPayload['opciones'] {
+  return Object.entries(sel)
+    .filter(([, unidades]) => unidades > 0)
+    .map(([itemId, unidades]) => ({ itemId, unidades }))
+}
+
 function agregar() {
-  if (!detalle.value || !gruposValidos.value) return
+  if (!detalle.value || !gruposValidos.value || !componentesValidos.value) return
   const omitidos = detalle.value.ingredientes
     .filter((ing) => !incluidos.value[ing.ingredienteItemId])
     .map((ing) => ing.ingredienteItemId)
@@ -293,16 +256,28 @@ function agregar() {
     ingredienteItemId: e.ingredienteItemId,
     unidades: e.unidades,
   }))
-  const grupos: PersonalizacionGrupoPayload[] = detalle.value.grupos.map((g) => {
-    const sel = gruposSeleccion.value[g.grupoModificadorId] ?? {}
-    const opciones = Object.entries(sel)
-      .filter(([, unidades]) => unidades > 0)
-      .map(([itemId, unidades]) => ({ itemId, unidades }))
-    return { grupoId: g.grupoModificadorId, opciones }
-  })
+  const grupos: PersonalizacionGrupoPayload[] = detalle.value.grupos.map((g) => ({
+    grupoId: g.grupoModificadorId,
+    opciones: opcionesDe(gruposSeleccion.value[g.grupoModificadorId] ?? {}),
+  }))
+  const componentes: PersonalizacionComponentePayload[] = []
+  for (const comp of detalle.value.componentes ?? []) {
+    if (!comp.grupos.length) continue
+    for (let u = 1; u <= Number(comp.cantidad); u++) {
+      const sel = componentesSeleccion.value[`${comp.componenteItemId}#${u}`] ?? {}
+      componentes.push({
+        componenteItemId: comp.componenteItemId,
+        unidad: u,
+        grupos: comp.grupos.map((g) => ({
+          grupoId: g.grupoModificadorId,
+          opciones: opcionesDe(sel[g.grupoModificadorId] ?? {}),
+        })),
+      })
+    }
+  }
   emit(
     'confirm',
-    buildPersonalizacionPayload(omitidos, extras, comentario.value, grupos),
+    buildPersonalizacionPayload(omitidos, extras, comentario.value, grupos, componentes),
     resumenPreview.value,
     precioPreview.value,
     detallePreview.value,
@@ -326,74 +301,37 @@ function agregar() {
       </div>
 
       <div v-else-if="detalle" class="space-y-6">
-        <section
+        <ItemPersonalizacionGrupo
           v-for="grupo in detalle.grupos"
           :key="grupo.grupoModificadorId"
-          class="space-y-3"
+          :grupo="grupo"
+          :moneda-id="detalle.monedaId"
+          :seleccion="gruposSeleccion[grupo.grupoModificadorId] ?? {}"
+          @update:seleccion="gruposSeleccion[grupo.grupoModificadorId] = $event"
+        />
+
+        <section
+          v-for="comp in (detalle.componentes ?? []).filter((c) => c.grupos.length)"
+          :key="comp.componenteItemId"
+          class="space-y-4"
         >
-          <div class="flex items-center justify-between gap-3">
-            <h3 class="text-sm font-medium text-default">{{ grupo.nombre }}</h3>
-            <span class="text-xs text-muted shrink-0">{{ reglaGrupo(grupo) }}</span>
-          </div>
-
-          <p
-            v-if="grupoAgotado(grupo)"
-            class="flex items-center gap-1 text-xs text-error"
+          <div
+            v-for="u in Number(comp.cantidad)"
+            :key="`${comp.componenteItemId}#${u}`"
+            class="space-y-3 rounded-lg border border-default p-4"
           >
-            <UIcon name="i-lucide-circle-alert" class="size-3.5 shrink-0" />
-            Sin opciones disponibles — no se puede agregar este ítem
-          </p>
-
-          <template v-else>
-            <URadioGroup
-              v-if="esGrupoUnico(grupo)"
-              :model-value="radioSeleccionado(grupo)"
-              :items="radioItems(grupo)"
-              @update:model-value="onRadioChange(grupo, $event as string)"
-            />
-
-            <div v-else class="divide-y divide-default rounded-lg border border-default">
-              <div
-                v-for="opcion in grupo.opciones"
-                :key="opcion.grupoOpcionId"
-                class="px-4 py-3"
-                :title="opcionMotivo(opcion) ?? undefined"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <UCheckbox
-                    :model-value="opcionSeleccionada(grupo.grupoModificadorId, opcion.itemId)"
-                    :disabled="opcionDeshabilitada(opcion)"
-                    :label="opcion.itemNombre"
-                    :description="opcionDescripcion(opcion)"
-                    @update:model-value="toggleOpcionMulti(grupo, opcion.itemId, $event)"
-                  />
-                  <UInputNumber
-                    v-if="opcionSeleccionada(grupo.grupoModificadorId, opcion.itemId)"
-                    :model-value="unidadesOpcion(grupo.grupoModificadorId, opcion.itemId)"
-                    :min="1"
-                    :disabled="opcionDeshabilitada(opcion)"
-                    class="w-28 shrink-0"
-                    :aria-label="`Unidades de ${opcion.itemNombre}`"
-                    @update:model-value="setUnidadesOpcion(grupo, opcion.itemId, $event)"
-                  />
-                </div>
-                <p
-                  v-if="opcionMotivo(opcion)"
-                  class="mt-1 flex items-center gap-1 pl-6 text-xs text-warning"
-                >
-                  <UIcon name="i-lucide-triangle-alert" class="size-3.5 shrink-0" />
-                  {{ opcionMotivo(opcion) }}
-                </p>
-              </div>
-            </div>
-
-            <p
-              v-if="!grupoValido(grupo)"
-              class="text-xs text-warning"
-            >
-              {{ reglaGrupo(grupo) }} para continuar
+            <p class="text-sm font-semibold text-default">
+              {{ comp.componenteNombre }}<span v-if="Number(comp.cantidad) > 1" class="text-muted"> #{{ u }}</span>
             </p>
-          </template>
+            <ItemPersonalizacionGrupo
+              v-for="grupo in comp.grupos"
+              :key="grupo.grupoModificadorId"
+              :grupo="grupo"
+              :moneda-id="detalle.monedaId"
+              :seleccion="componentesSeleccion[`${comp.componenteItemId}#${u}`]?.[grupo.grupoModificadorId] ?? {}"
+              @update:seleccion="setComponenteSeleccion(comp.componenteItemId, u, grupo.grupoModificadorId, $event)"
+            />
+          </div>
         </section>
 
         <section v-if="detalle.ingredientes.length" class="space-y-3">
