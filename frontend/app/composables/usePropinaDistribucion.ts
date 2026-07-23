@@ -34,6 +34,8 @@ export interface DistribucionPublica {
   id: string
   version: number
   porcentajeSugerido: string
+  habilitadoPos: boolean
+  habilitadoSalones: boolean
   actualizadoPor: string | null
   actualizadoEl: string
   grupos: GrupoDistribucion[]
@@ -41,6 +43,8 @@ export interface DistribucionPublica {
 
 export interface UpdateDistribucionBody {
   porcentajeSugerido: string
+  habilitadoPos?: boolean
+  habilitadoSalones?: boolean
   grupos: Array<{
     tipoGarzon: TipoGarzon
     nombre: string

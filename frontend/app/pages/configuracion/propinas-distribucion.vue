@@ -27,6 +27,8 @@ const loading = ref(false)
 const saving = ref(false)
 const version = ref(0)
 const porcentajeSugeridoHumano = ref('10')
+const habilitadoPos = ref(true)
+const habilitadoSalones = ref(true)
 const grupos = ref<GrupoDistribucion[]>([])
 const garzones = ref<Garzon[]>([])
 
@@ -73,6 +75,8 @@ function aplicarRespuesta(data: DistribucionPublica) {
   porcentajeSugeridoHumano.value = porcentajeDecimalAHumano(
     data.porcentajeSugerido ?? '0.10',
   )
+  habilitadoPos.value = data.habilitadoPos ?? true
+  habilitadoSalones.value = data.habilitadoSalones ?? true
   grupos.value = data.grupos.map(g => ({
     id: g.id,
     tipoGarzon: g.tipoGarzon,
@@ -174,6 +178,8 @@ async function guardar() {
   try {
     const body = {
       porcentajeSugerido: porcentajeHumanoADecimal(porcentajeSugeridoHumano.value),
+      habilitadoPos: habilitadoPos.value,
+      habilitadoSalones: habilitadoSalones.value,
       grupos: grupos.value.map((g, i) => ({
         tipoGarzon: g.tipoGarzon,
         nombre: g.nombre,
@@ -238,6 +244,28 @@ async function guardar() {
             class="w-32"
             :disabled="!puedeConfigurar"
             data-qa="propina-sugerida-pct"
+          />
+        </UFormField>
+        <UFormField
+          label="Habilitar propina en POS"
+          hint="Si se apaga, el POS no ofrece propina al cobrar."
+          class="mt-4"
+        >
+          <USwitch
+            v-model="habilitadoPos"
+            :disabled="!puedeConfigurar"
+            data-qa="propina-habilitado-pos"
+          />
+        </UFormField>
+        <UFormField
+          label="Habilitar propina en Salones"
+          hint="Si se apaga, el cierre de mesa no ofrece propina."
+          class="mt-4"
+        >
+          <USwitch
+            v-model="habilitadoSalones"
+            :disabled="!puedeConfigurar"
+            data-qa="propina-habilitado-salones"
           />
         </UFormField>
       </UCard>
