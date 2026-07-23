@@ -5,7 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, IsNull } from 'typeorm';
 import Decimal from 'decimal.js';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { CajaService } from '../caja/caja.service';
@@ -14,6 +14,7 @@ import { ItemsService } from '../items/items.service';
 import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
+import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { CatalogService } from '../catalog/catalog.service';
 import { GarzonesService } from '../garzones/garzones.service';
 import {
@@ -477,10 +478,17 @@ export class VentasService {
         'No se puede combinar propina de cierre de mesa con propina directa',
       );
     }
+    // Flags de canal: propina de un canal deshabilitado se ignora (la venta
+    // se crea sin propina). Ver docs/features/liquidacion-propinas-config.md.
+    const propinaConfig = await manager.findOne(PropinaConfiguracion, {
+      where: { tenantId, eliminadoEl: IsNull() },
+    });
+    const habilitadoPos = propinaConfig?.habilitadoPos ?? true;
+    const habilitadoSalones = propinaConfig?.habilitadoSalones ?? true;
     let ventaPropinaId: string | null = null;
     let propinaMonto = '0';
     let estrategiaPropina = EstrategiaAsignacionPropina.NO_VUELTO;
-    if (dto.propinaCierreMesa) {
+    if (dto.propinaCierreMesa && habilitadoSalones) {
       const tip = dto.propinaCierreMesa;
       propinaMonto = tip.montoPagado;
       estrategiaPropina =
@@ -500,7 +508,7 @@ export class VentasService {
         },
       );
       ventaPropinaId = ventaPropina.id;
-    } else if (dto.propinaDirecta) {
+    } else if (dto.propinaDirecta && habilitadoPos) {
       const tip = dto.propinaDirecta;
       propinaMonto = tip.montoPagado;
       const mostrador = await this.garzonesService.asegurarMostrador(

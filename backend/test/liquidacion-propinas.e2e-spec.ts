@@ -187,12 +187,22 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
   async function putDistribucion(
     grupos: GrupoDistribucion[],
     porcentajeSugerido = '0.10',
+    flags: { habilitadoPos?: boolean; habilitadoSalones?: boolean } = {},
   ): Promise<void> {
     await request(app.getHttpServer())
       .put('/api/propinas/distribucion')
       .set('Authorization', `Bearer ${token}`)
-      .send({ porcentajeSugerido, grupos })
+      .send({ porcentajeSugerido, grupos, ...flags })
       .expect(200);
+  }
+
+  async function contarPropinasDeVenta(ventaId: string): Promise<number> {
+    const rows: { n: number }[] = await ds.query(
+      `SELECT COUNT(*)::int AS n FROM venta_propina
+       WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [ventaId],
+    );
+    return rows[0]?.n ?? 0;
   }
 
   const incluidos = (p: Participante[]): Participante[] =>
@@ -472,6 +482,76 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
       // Reconciliación global.
       expect(suma(incluidos(prev.participantes))).toBe(pool.toFixed(4));
+    });
+  });
+
+  describe('enforcement de propina por canal', () => {
+    afterAll(async () => {
+      await putDistribucion(DISTRIBUCION_DEFAULT, '0.10', {
+        habilitadoPos: true,
+        habilitadoSalones: true,
+      });
+    });
+
+    it('POS deshabilitado: la venta con propinaDirecta se crea SIN venta_propina', async () => {
+      await putDistribucion(DISTRIBUCION_DEFAULT, '0.10', {
+        habilitadoPos: false,
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+          propinaDirecta: { montoPagado: '5000', porcentajeSugerido: '0.10' },
+        })
+        .expect(201);
+
+      const ventaId = (res.body as { id: string }).id;
+      expect(await contarPropinasDeVenta(ventaId)).toBe(0);
+    });
+
+    it('Salones deshabilitado: la venta con propinaCierreMesa se crea SIN venta_propina', async () => {
+      await putDistribucion(DISTRIBUCION_DEFAULT, '0.10', {
+        habilitadoSalones: false,
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+          propinaCierreMesa: {
+            garzonId: ANA_ID,
+            montoPagado: '5000',
+            porcentajeSugerido: '0.10',
+          },
+        })
+        .expect(201);
+
+      const ventaId = (res.body as { id: string }).id;
+      expect(await contarPropinasDeVenta(ventaId)).toBe(0);
+    });
+
+    it('POS habilitado (default): la propinaDirecta SÍ crea venta_propina', async () => {
+      await putDistribucion(DISTRIBUCION_DEFAULT, '0.10', {
+        habilitadoPos: true,
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+          propinaDirecta: { montoPagado: '5000', porcentajeSugerido: '0.10' },
+        })
+        .expect(201);
+
+      const ventaId = (res.body as { id: string }).id;
+      expect(await contarPropinasDeVenta(ventaId)).toBe(1);
     });
   });
 });
