@@ -215,6 +215,35 @@ cd frontend && npm run build
 
 ---
 
+## Propina en el POS
+
+La propina ingresada en el POS (canal `fisico` sin mesero asignado) se persiste como `venta_propina` atribuida al garzón placeholder **"Mostrador"** del tenant, con `tipoGarzon = null`, `sesionGarzonId = null` y `turnoId = null`. Esta atribución neutral permite que la propina sume al pool sin asignarse directamente al placeholder.
+
+### Por qué reparte correctamente
+
+- El pool de liquidación (`buscarTipsElegibles`) no filtra por `tipo_garzon`, así que el monto suma al total a distribuir.
+- Como `tipo_garzon = null`, el placeholder no matchea ningún grupo en `garzonesGrupo`, por lo que **nunca recibe dinero directo**.
+- La plata se reparte entre los participantes reales según la configuración de distribución vigente del tenant.
+
+### Edge del turno
+
+- La propina de POS no tiene turno asignado (`turno_id = null`).
+- Se liquida en la liquidación de **período completo** (sin filtro de turno).
+- Operativamente: para liquidar las propinas de POS, ejecutar una liquidación del período sin especificar filtro de turno.
+
+### Características del placeholder
+
+- `activo = false` — no aparece en listados de garzones operacionales.
+- `pin_hash` inutilizable — no se puede identificar por PIN.
+- `es_placeholder = true` — marca interno para distinguir de garzones reales.
+- Oculto en la UI de selección de garzones.
+
+### Porcentaje sugerido
+
+La ruta `GET /api/propinas/porcentaje-sugerido-venta` devuelve el porcentaje sugerido para una venta en el POS, guardado en `propina_configuracion.porcentaje_sugerido`. Requiere permiso `Ventas:Crear`.
+
+---
+
 ## Related Features
 
 - [ventas.md](./ventas.md) — Procesamiento de ventas y frontend POS

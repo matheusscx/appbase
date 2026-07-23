@@ -61,6 +61,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Configuración de propina sugerida por tenant (`propina_configuracion.porcentaje_sugerido`) | ✅ Implementado (2026-07-17) |
 | Reportes de propinas F — resumen del ciclo completo y agregados por trabajador (front de reportes pesado retirado; backend `resumen`/`trabajadores` se mantiene, solo `resumen` se consume hoy desde `/propinas`) | ✅ Implementado (2026-07-17) |
 | Liquidación propinas — operatividad simplificada (pantalla única: reparto en vivo `preview` → `liquidar` atómico → impresión PDF/A4 persona/resumen/grupo; reportes reducidos a 2 métricas) | ✅ Implementado (2026-07-17) |
+| Propina en el POS (venta directa `fisico`) — `propinaDirecta` → `venta_propina` en garzón placeholder "Mostrador" (atribución neutra, reparte por config del tenant) | ✅ Implementado (2026-07-22) |
 | Impresión Térmica (comandas cocina/barra por categoría via claim atómico + QZ Tray, precuenta, boleta) | ✅ Implementado (2026-07-13; claim atómico 2026-07-15) |
 | Boleta POS — plantilla unificada (emisor con RUT, DOCUMENTO INTERNO / slot electrónico dormante, Neto+impuestos reales, propina → TOTAL A PAGAR) + precuenta con propina sugerida | ✅ Implementado (2026-07-18) |
 | Hardening concurrency/validaciones (locks TOCTOU salones/caja/comanda/ajustarStock; costo_actual solo compra; factor_base/costo > 0) | ✅ Implementado (2026-07-15) |
