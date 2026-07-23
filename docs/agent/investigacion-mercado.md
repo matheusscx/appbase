@@ -30,9 +30,16 @@ owner, y todo lo que traiga se **cruza contra el código existente** antes de di
 
 Reemplazar lo que está `{entre llaves}`. Borrar las preguntas que no apliquen.
 
+> 🇨🇱 **Regla fija:** toda investigación incluye ejemplos del **mercado chileno** (POS
+> locales + reglas del país: SII/boleta, redondeo en efectivo, propina, medios de pago),
+> no solo POS internacionales. Es donde opera el producto; lo internacional da el patrón,
+> Chile da la realidad que se aplica. La pregunta 6 de la plantilla es obligatoria.
+
 > Soy fundador de un POS multi-tenant (restaurantes, minimarkets, retail). Estoy
 > diseñando **{FEATURE}**. No soy experto en el dominio. Explicame, con ejemplos
-> concretos de POS reales (Toast, Square, Lightspeed, Clover), cómo funciona:
+> concretos de POS reales —internacionales (Toast, Square, Lightspeed, Clover) **y del
+> mercado chileno** (Bsale, Toteat, Defontana, Nubox, GestioPolis/Rocket)—, cómo
+> funciona:
 >
 > 1. **Modelo de datos / conceptos**: ¿cuáles son las entidades y cómo se relacionan?
 >    ¿Qué nombre estándar de la industria tiene cada una?
@@ -43,6 +50,9 @@ Reemplazar lo que está `{entre llaves}`. Borrar las preguntas que no apliquen.
 > 4. **Casos que cruzan otros módulos**: {inventario, impuestos, caja, multi-moneda…}
 >    — ¿cómo lo resuelven?
 > 5. **Casos borde** que se suelen olvidar al diseñar esto desde 0.
+> 6. **Realidad chilena** (obligatorio): ¿cómo lo resuelven los POS locales y qué
+>    imponen las reglas del país —SII/boleta electrónica, redondeo en efectivo, propina
+>    sugerida 10%, Transbank/medios de pago— que un POS internacional no contempla?
 >
 > Contexto de lo que ya tengo resuelto (para que no me expliques lo básico):
 > {LO QUE YA EXISTE EN EL PROYECTO}.
@@ -61,10 +71,16 @@ Reemplazar lo que está `{entre llaves}`. Borrar las preguntas que no apliquen.
    ni fidelización).
 3. Recién ahí se propone diseño. Si algo del mercado choca con una invariante o una
    regla no documentada → **detenerse y preguntar** (no auto-resolver).
-4. Lo que sobrevive al cruce se registra en el `-analisis.md` del tema, **con las
-   fuentes**, para que sea auditable y no haya que reinvestigar.
+4. Lo que sobrevive al cruce se registra **con las fuentes**, para que sea auditable y no
+   haya que reinvestigar. **Dónde:**
+   - **Investigación aún sin diseño** (apenas estamos explorando el dominio) →
+     `docs/agent/investigaciones/YYYY-MM-DD-<tema>.md`. **No es una spec** — no va en
+     `docs/superpowers/specs/` (ahí solo diseño `-design.md`).
+   - **Investigación que ya alimenta un diseño concreto** → sección "Investigación de
+     mercado" dentro del `-analisis.md`/spec de ese tema.
 
-**Ejemplo trabajado:** `docs/superpowers/specs/2026-07-22-motor-promociones-analisis.md`
-(sección "Investigación de mercado") aplicó esto para promociones: el mercado aportó el
-modelo BOGO, pero "conviven descuentos y promos" y "fiscal diferido" fueron decisiones
-del owner, no del mercado.
+**Ejemplos:** investigación pura → `docs/agent/investigaciones/2026-07-23-gestion-caja.md`
+(gestión de caja: el mercado y Chile endurecieron que la caja es solo efectivo, pero la
+decisión sigue abierta). Investigación embebida en diseño →
+`docs/superpowers/specs/2026-07-22-motor-promociones-analisis.md` (promociones: el mercado
+aportó BOGO, pero "conviven descuentos y promos" y "fiscal diferido" fueron del owner).

@@ -61,6 +61,27 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
   sin garantía de `> 0`, y no se restringe al canal `fisico`. Es el mismo patrón que
   `propinaCierreMesa` preexistente (no regresión); si se endurece, hacerlo en ambos.
 
+## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
+
+El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado
+(**"Cajas"**). Se decidió que **"Cajas" arranca solo-lectura**; los poderes de escritura del
+encargado se difieren a propósito para no acoplar el refactor de IA/permisos a un cambio de
+modelo con implicancias de auditoría. Investigación y cruce de mercado:
+[`investigaciones/2026-07-23-gestion-caja.md §6`](investigaciones/2026-07-23-gestion-caja.md).
+
+- [ ] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — habilitar que
+  un usuario con permiso `Cajas` cierre la caja de un cajero que dejó el turno abierto
+  (escenario: cajero que se fue de urgencia). Requiere agregar **`cerrada_por`** a la tabla
+  `cajas` (quién contó/cerró), distinto de `usuario_id` (de quién es el turno): sin ese
+  campo el cierre mentiría sobre quién respondió por el efectivo. Rompe el owner-only del
+  cierre bajo permiso `Cajas:Actualizar`. Mercado: la separación de funciones favorece que
+  un segundo intervenga en el cuadre.
+- [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
+  si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
+  aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más
+  fiel al mercado; mayor alcance. Depende de resolver antes el `saldo_esperado` efectivo vs.
+  total (§3 de la investigación), que hoy inflaría toda diferencia.
+
 ## Limpiezas menores (opcionales, no bloqueantes)
 
 - [ ] `items.vue:81` — campo `esPendiente` en `GrupoOpcionOverrideRow` se setea pero
