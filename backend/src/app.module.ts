@@ -78,6 +78,7 @@ import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.
 import { CajaModule } from './modules/caja/caja.module';
 import { CajonesModule } from './modules/cajones/cajones.module';
 import { Cajon } from './modules/cajones/entities/cajon.entity';
+import { CajonUsuario } from './modules/cajones/entities/cajon-usuario.entity';
 import { VentasModule } from './modules/ventas/ventas.module';
 import { Venta } from './modules/ventas/entities/venta.entity';
 import { VentaDetalle } from './modules/ventas/entities/venta-detalle.entity';
@@ -158,6 +159,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
           TenantFormulaPrecio,
           Caja,
           Cajon,
+          CajonUsuario,
           RazonSocial,
           Rol,
           RolUsuario,

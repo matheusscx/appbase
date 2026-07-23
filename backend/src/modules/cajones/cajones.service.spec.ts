@@ -1,8 +1,14 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CajonesService } from './cajones.service';
 import { Cajon } from './entities/cajon.entity';
+import { CajonUsuario } from './entities/cajon-usuario.entity';
+import { UsuarioTenant } from '../tenants/entities/usuario-tenant.entity';
 
 const TENANT = 'tenant-uuid';
 
@@ -16,6 +22,18 @@ describe('CajonesService', () => {
     save: jest.Mock;
     softDelete: jest.Mock;
   };
+  let cuRepo: {
+    find: jest.Mock;
+  };
+  let utRepo: {
+    count: jest.Mock;
+  };
+  let manager: {
+    softDelete: jest.Mock;
+    save: jest.Mock;
+    create: jest.Mock;
+  };
+  let dataSource: { transaction: jest.Mock };
 
   beforeEach(async () => {
     repo = {
@@ -26,11 +44,26 @@ describe('CajonesService', () => {
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
     };
+    cuRepo = { find: jest.fn() };
+    utRepo = { count: jest.fn() };
+    manager = {
+      softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+      save: jest.fn((row: unknown) => Promise.resolve(row)),
+      create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({
+        ...data,
+      })),
+    };
+    dataSource = {
+      transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CajonesService,
         { provide: getRepositoryToken(Cajon), useValue: repo },
+        { provide: getRepositoryToken(CajonUsuario), useValue: cuRepo },
+        { provide: getRepositoryToken(UsuarioTenant), useValue: utRepo },
+        { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
 
@@ -94,5 +127,89 @@ describe('CajonesService', () => {
     await expect(service.remove(TENANT, 'x')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  describe('allow-list de usuarios', () => {
+    const CAJON = 'cajon-uuid';
+
+    it('getUsuarios devuelve los ids habilitados y valida el cajón', async () => {
+      repo.findOne.mockResolvedValue({ id: CAJON, tenantId: TENANT });
+      cuRepo.find.mockResolvedValue([{ usuarioId: 'u1' }, { usuarioId: 'u2' }]);
+      const res = await service.getUsuarios(TENANT, CAJON);
+      expect(res).toEqual(['u1', 'u2']);
+    });
+
+    it('getUsuarios lanza 404 si el cajón no existe', async () => {
+      repo.findOne.mockResolvedValue(null);
+      await expect(service.getUsuarios(TENANT, CAJON)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('setUsuarios agrega los que entran y no borra nada cuando parte vacío', async () => {
+      repo.findOne.mockResolvedValue({ id: CAJON, tenantId: TENANT });
+      utRepo.count.mockResolvedValue(2);
+      cuRepo.find.mockResolvedValue([]); // sin habilitaciones vivas
+      const res = await service.setUsuarios(TENANT, CAJON, ['u1', 'u2']);
+      expect(res).toEqual(['u1', 'u2']);
+      expect(manager.softDelete).not.toHaveBeenCalled();
+      expect(manager.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('setUsuarios hace el diff: quita uno, agrega otro, conserva el resto', async () => {
+      repo.findOne.mockResolvedValue({ id: CAJON, tenantId: TENANT });
+      utRepo.count.mockResolvedValue(2);
+      cuRepo.find.mockResolvedValue([
+        { id: 'r-a', usuarioId: 'A' },
+        { id: 'r-b', usuarioId: 'B' },
+      ]);
+      const res = await service.setUsuarios(TENANT, CAJON, ['A', 'C']);
+      expect(res).toEqual(['A', 'C']);
+      // quita B
+      expect(manager.softDelete).toHaveBeenCalledWith(CajonUsuario, {
+        id: expect.anything(),
+      });
+      // agrega solo C (no re-crea A)
+      const saved = manager.save.mock.calls[0][0] as Array<{
+        usuarioId: string;
+      }>;
+      expect(saved).toHaveLength(1);
+      expect(saved[0].usuarioId).toBe('C');
+    });
+
+    it('setUsuarios idempotente: mismo set no borra ni crea', async () => {
+      repo.findOne.mockResolvedValue({ id: CAJON, tenantId: TENANT });
+      utRepo.count.mockResolvedValue(1);
+      cuRepo.find.mockResolvedValue([{ id: 'r-a', usuarioId: 'A' }]);
+      await service.setUsuarios(TENANT, CAJON, ['A']);
+      expect(manager.softDelete).not.toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('setUsuarios rechaza (400) un usuario que no es del tenant', async () => {
+      repo.findOne.mockResolvedValue({ id: CAJON, tenantId: TENANT });
+      utRepo.count.mockResolvedValue(1); // pidieron 2, solo 1 es miembro
+      await expect(
+        service.setUsuarios(TENANT, CAJON, ['A', 'ajeno']),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('setUsuarios con array vacío deja el cajón sin asignados (borra los vivos)', async () => {
+      repo.findOne.mockResolvedValue({ id: CAJON, tenantId: TENANT });
+      cuRepo.find.mockResolvedValue([{ id: 'r-a', usuarioId: 'A' }]);
+      const res = await service.setUsuarios(TENANT, CAJON, []);
+      expect(res).toEqual([]);
+      expect(utRepo.count).not.toHaveBeenCalled(); // no valida si no hay ids
+      expect(manager.softDelete).toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('setUsuarios lanza 404 si el cajón no existe', async () => {
+      repo.findOne.mockResolvedValue(null);
+      await expect(
+        service.setUsuarios(TENANT, CAJON, ['A']),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 });
