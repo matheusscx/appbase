@@ -28,11 +28,19 @@ const items = computed<NavigationMenuItem[]>(() => {
       to: '/',
     },
   ]
-  if (permissionsStore.esAdmin || permissionsStore.can('Caja', 'Leer')) {
+  if (permissionsStore.esAdmin || permissionsStore.can('MiCaja', 'Leer')) {
     base.push({
-      label: 'Caja',
+      label: 'Mi caja',
       icon: 'i-lucide-banknote',
-      to: '/caja',
+      to: '/mi-caja',
+    })
+  }
+
+  if (permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer')) {
+    base.push({
+      label: 'Cajas',
+      icon: 'i-lucide-layout-dashboard',
+      to: '/cajas',
     })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Leer')) {
