@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-07-01
+**Last Updated**: 2026-07-23
 
 ---
 
@@ -241,6 +241,26 @@ La propina ingresada en el POS (canal `fisico` sin mesero asignado) se persiste 
 ### Porcentaje sugerido
 
 La ruta `GET /api/propinas/porcentaje-sugerido-venta` devuelve el porcentaje sugerido para una venta en el POS, guardado en `propina_configuracion.porcentaje_sugerido`. Requiere permiso `Ventas:Crear`.
+
+### Habilitar/deshabilitar propina por canal
+
+El admin puede apagar la propina por canal desde `/configuracion/propinas-distribucion`
+(`propina_configuracion.habilitado_pos` / `habilitado_salones`, ver
+[liquidacion-propinas-config.md](./liquidacion-propinas-config.md)). El enforcement
+vive en `POST /ventas` (bloque 7g de `ventas.service.ts`), no en el DTO: si el canal
+está deshabilitado, la propina enviada **se ignora**, no se rechaza — la venta se crea
+igual, solo que sin fila `venta_propina`.
+
+- **POS** (`dto.propinaDirecta`, único productor: `pos.vue`): se ignora si
+  `habilitado_pos = false`. Con el flag en `true` (default), se registra como se
+  describe arriba (garzón placeholder "Mostrador").
+- **Salones** (`dto.propinaCierreMesa`, único productor: `salones.service.ts` al
+  cerrar cuenta): se ignora si `habilitado_salones = false`. Con el flag en `true`
+  (default), se registra atribuida al `garzon_responsable_id` vigente — ver
+  [salones-mesas.md](./salones-mesas.md).
+- Tenant sin fila de config aún (nunca abrió la pantalla de configuración): ambos
+  canales se tratan como habilitados (`?? true`), preservando el comportamiento previo
+  a este flag.
 
 ---
 

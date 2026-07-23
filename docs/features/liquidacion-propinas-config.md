@@ -1,7 +1,7 @@
 # Feature: Liquidación de propinas — configuración de distribución (E2)
 
 **Status**: Complete (E2)  
-**Last Updated**: 2026-07-17
+**Last Updated**: 2026-07-23
 
 ---
 
@@ -25,7 +25,9 @@ al liquidar se tomará un snapshot de esta config.
   al crear tenant + Paris; módulo RBAC `Propinas` (Leer, Configurar, Liquidar);
   UI en `/configuracion/propinas-distribucion`; **propina sugerida**
   (`porcentaje_sugerido`, default 10%) editable en la misma pantalla;
-  `GET /propinas/porcentaje-sugerido` (`Salones:Operar`) para el cobro.
+  `GET /propinas/porcentaje-sugerido` (`Salones:Operar`) para el cobro;
+  **habilitar/deshabilitar propina por canal** (`habilitado_pos` /
+  `habilitado_salones`, ambos default `true`) editable en la misma pantalla.
 - NO incluido (ya en E3): motor de liquidación, UI de liquidar, tablas
   `liquidacion_propinas*`.
 
@@ -38,28 +40,46 @@ al liquidar se tomará un snapshot de esta config.
 Auth: JWT + tenant. Permiso: `Propinas:Leer`.
 
 Si no hay config, crea el default (v1, grupo Garzones 100% `PARTES_IGUALES`,
-`porcentajeSugerido: "0.10"`).
+`porcentajeSugerido: "0.10"`, `habilitadoPos: true`, `habilitadoSalones: true`).
 
-Respuesta incluye `porcentajeSugerido` (decimal string).
+Respuesta incluye `porcentajeSugerido` (decimal string), `habilitadoPos` y
+`habilitadoSalones` (booleanos, el on/off de propina por canal).
 
-### `GET /propinas/porcentaje-sugerido`
+### `GET /propinas/porcentaje-sugerido` (Salones)
 
 Auth: JWT + tenant. Permiso: `Salones:Operar`.
 
 ```json
-{ "porcentajeSugerido": "0.10" }
+{ "porcentajeSugerido": "0.10", "habilitado": true }
 ```
+
+`habilitado` refleja `habilitado_salones` de la config del tenant.
+
+### `GET /propinas/porcentaje-sugerido-venta` (POS)
+
+Auth: JWT + tenant. Permiso: `Ventas:Crear`.
+
+```json
+{ "porcentajeSugerido": "0.10", "habilitado": true }
+```
+
+Mismo dato que el endpoint de Salones, pero para el POS (el rol Vendedor no
+tiene `Salones:Operar`). `habilitado` refleja `habilitado_pos`.
 
 ### `PUT /propinas/distribucion`
 
 Auth: JWT + tenant. Permiso: `Propinas:Configurar`.
 
 Reemplazo transaccional de grupos (soft-delete + recreate); `version++`.
-Body requiere `porcentajeSugerido` (decimal `0`–`1`).
+Body requiere `porcentajeSugerido` (decimal `0`–`1`). `habilitadoPos` y
+`habilitadoSalones` son **opcionales**: si el body no los manda, se conserva
+el valor ya persistido (no se sobreescriben a un default).
 
 ```json
 {
   "porcentajeSugerido": "0.15",
+  "habilitadoPos": true,
+  "habilitadoSalones": false,
   "grupos": [
     {
       "tipoGarzon": "garzon",
@@ -84,6 +104,9 @@ Body requiere `porcentajeSugerido` (decimal `0`–`1`).
 
 Reglas: Σ `porcentaje` de activos = `1`; un tipo activo a la vez; `MANUAL`
 exige `manualModo`; pesos solo con `MANUAL` + `PESOS`.
+
+Enforcement de los flags al crear la venta (ignorar propina de canal
+deshabilitado, no rechazar): [pagos.md](./pagos.md#propina-en-el-pos).
 
 ---
 
