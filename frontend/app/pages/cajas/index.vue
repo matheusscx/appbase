@@ -4,7 +4,7 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 const perms = usePermissionsStore()
 const cajaStore = useCajaStore()
 const toast = useToast()
-const loading = ref(false)
+const loading = ref(true)
 
 onMounted(async () => {
   if (!perms.loading && perms.permisos.length === 0) {
