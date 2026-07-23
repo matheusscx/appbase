@@ -39,6 +39,7 @@ import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { CriterioDistribucion } from '../propinas/enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from '../propinas/enums/base-ventas-grupo.enum';
 import { Caja } from '../caja/entities/caja.entity';
+import { Cajon } from '../cajones/entities/cajon.entity';
 import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { CredencialesService } from '../pasarela/services/credenciales.service';
@@ -109,6 +110,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly terceroRepo: Repository<Tercero>,
     @InjectRepository(Caja)
     private readonly cajaRepo: Repository<Caja>,
+    @InjectRepository(Cajon)
+    private readonly cajonRepo: Repository<Cajon>,
     @InjectRepository(Pasarela)
     private readonly pasarelaRepo: Repository<Pasarela>,
     @InjectRepository(TenantPasarela)
@@ -153,6 +156,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedTenants();
     await this.seedCausasMerma();
     await this.seedCajasVirtuales();
+    await this.seedCajones();
     await this.seedPropinaConfiguracion();
     await this.seedTerceros();
     await this.seedTenantMonedas();
@@ -629,6 +633,21 @@ export class SeederService implements OnApplicationBootstrap {
         permisoId: LEER,
       },
       {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440288',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440282', // Cajas
+        permisoId: CREAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440289',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440282', // Cajas
+        permisoId: ACTUALIZAR,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440290',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440282', // Cajas
+        permisoId: ELIMINAR,
+      },
+      {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440059',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440058', // Ventas
         permisoId: LEER,
@@ -1011,6 +1030,34 @@ export class SeederService implements OnApplicationBootstrap {
             tipo: 'virtual',
             estado: 'abierta',
             saldoInicial: '0',
+          }),
+        );
+      }
+    }
+  }
+
+  private async seedCajones(): Promise<void> {
+    const cajones: Array<{ id: string; tenantId: string; nombre: string }> = [
+      {
+        id: '550e8400-e29b-41d4-a716-446655440286',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007', // Paris
+        nombre: 'Mostrador',
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440287',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040', // Falabella
+        nombre: 'Mostrador',
+      },
+    ];
+
+    for (const data of cajones) {
+      const exists = await this.cajonRepo.findOne({ where: { id: data.id } });
+      if (!exists) {
+        await this.cajonRepo.save(
+          this.cajonRepo.create({
+            id: data.id,
+            tenantId: data.tenantId,
+            nombre: data.nombre,
           }),
         );
       }

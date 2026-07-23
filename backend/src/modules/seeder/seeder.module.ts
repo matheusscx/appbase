@@ -31,6 +31,7 @@ import { MovimientoInventario } from '../inventario/entities/movimiento-inventar
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Caja } from '../caja/entities/caja.entity';
+import { Cajon } from '../cajones/entities/cajon.entity';
 import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { PasarelaModule } from '../pasarela/pasarela.module';
@@ -76,6 +77,7 @@ import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-dis
       TipoDocumentoTributario,
       Tercero,
       Caja,
+      Cajon,
       Pasarela,
       TenantPasarela,
       Salon,
