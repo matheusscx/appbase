@@ -151,6 +151,7 @@ function toggleSeleccion(usuarioId: string, marcado: boolean) {
 }
 
 async function abrirUsuarios(c: Cajon) {
+  const targetId = c.id
   usuariosCajonId.value = c.id
   usuariosCajonNombre.value = c.nombre
   usuariosDrawerOpen.value = true
@@ -162,16 +163,18 @@ async function abrirUsuarios(c: Cajon) {
         : useApiFetch<Member[]>(`${apiUrl}/tenants/members`),
       useApiFetch<string[]>(`${apiUrl}/cajones/${c.id}/usuarios`),
     ])
+    if (usuariosCajonId.value !== targetId) return
     miembros.value = mem
     miembrosCargados.value = true
     seleccionados.value = asignados
   }
   catch (e: unknown) {
+    if (usuariosCajonId.value !== targetId) return
     toast.add({ title: apiErrorMsg(e, 'Error al cargar usuarios'), color: 'error' })
     usuariosDrawerOpen.value = false
   }
   finally {
-    loadingUsuarios.value = false
+    if (usuariosCajonId.value === targetId) loadingUsuarios.value = false
   }
 }
 
