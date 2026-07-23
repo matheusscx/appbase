@@ -2281,7 +2281,9 @@ export class SeederService implements OnApplicationBootstrap {
         movId: MOV_CARNE_ID,
         nombre: 'Carne molida',
         unidad: 'kg',
-        stock: '10',
+        // 1.5 kg: stock bajo para probar descuentos, con margen sobre el
+        // consumo del e2e (mermas 1 kg + combos 0.15 kg).
+        stock: '1.5',
         costo: '8000',
       },
       {
@@ -2413,7 +2415,9 @@ export class SeederService implements OnApplicationBootstrap {
         movId: MOV_POLLO_ID,
         nombre: 'Pechuga de pollo',
         unidad: 'kg',
-        stock: '8',
+        // 300 g = 0.3 kg: ningún e2e lo consume, así que es el caso limpio para
+        // probar validaciones a mano (2 ventas de 150 g y a la 3ª "sin stock").
+        stock: '0.3',
         costo: '6000',
       },
       {
@@ -2421,7 +2425,9 @@ export class SeederService implements OnApplicationBootstrap {
         movId: MOV_CHULETA_ID,
         nombre: 'Chuleta de cerdo',
         unidad: 'kg',
-        stock: '6',
+        // 0.6 kg: stock bajo para probar descuentos, con margen sobre el
+        // consumo del e2e de combos (0.3 kg).
+        stock: '0.6',
         costo: '9000',
       },
     ];
