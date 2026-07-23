@@ -110,6 +110,8 @@ function buildManagerMock() {
         },
       ),
     query: jest.fn().mockResolvedValue([]),
+    // Sin config de propinas -> ambos canales habilitados por default (?? true).
+    findOne: jest.fn().mockResolvedValue(null),
   };
 }
 
