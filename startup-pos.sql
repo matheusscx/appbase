@@ -838,6 +838,23 @@ CREATE UNIQUE INDEX "ux_cajones_tenant_nombre"
   ON "cajones" ("tenant_id", "nombre")
   WHERE "eliminado_el" IS NULL;
 
+-- Allow-list cajón↔usuario: qué usuarios están autorizados a abrir cada cajón.
+-- Sub-proyecto 2/3 del refactor general de caja. Lista vacía para un cajón = sin
+-- restricción (abierto a cualquiera con MiCaja:Crear); el enforcement al abrir
+-- llega en el sub-proyecto 3.
+CREATE TABLE "cajon_usuario" (
+  "cajon_usuario_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "cajon_id"         UUID          NOT NULL REFERENCES "cajones" ("cajon_id"),
+  "usuario_id"       UUID          NOT NULL REFERENCES "usuarios" ("usuario_id"),
+  "tenant_id"        UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el"   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "eliminado_el"     TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "ux_cajon_usuario_cajon_usuario"
+  ON "cajon_usuario" ("cajon_id", "usuario_id")
+  WHERE "eliminado_el" IS NULL;
+
 -- =============================================================
 -- 9. VENTAS
 -- =============================================================

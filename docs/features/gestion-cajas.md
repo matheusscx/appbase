@@ -138,6 +138,66 @@ módulo `Caja` (sesión) y su controller/service **no se tocaron**.
   etiqueta de UI que ve el admin ("Cajas") mapea a la entidad `cajones` — ver nota de
   terminología arriba.
 
+### Autorización: qué usuarios abren qué cajones (allow-list)
+
+**Sub-proyecto 2 de 3** del refactor general de caja (roadmap
+[§9](../agent/investigaciones/2026-07-23-gestion-caja.md#9-roadmap-del-refactor-general-de-caja-decisión-2026-07-23)).
+El admin define, por cajón, la lista de usuarios autorizados a abrirlo — un mapeo
+N-a-N, no un amarre 1-a-1.
+
+**Table**: `cajon_usuario` (tenant-owned)
+
+| Column | Type | Constraints | Notes |
+|--------|------|-------------|-------|
+| `cajon_usuario_id` | UUID | PK | |
+| `cajon_id` | UUID | FK cajones, NOT NULL | |
+| `usuario_id` | UUID | FK usuarios, NOT NULL | |
+| `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
+| `creado_el` | TIMESTAMPTZ | NOT NULL | |
+| `actualizado_el` | TIMESTAMPTZ | NOT NULL | |
+| `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
+
+Índice único parcial `ux_cajon_usuario_cajon_usuario` sobre `(cajon_id, usuario_id)`
+filtrando `eliminado_el IS NULL` — una habilitación viva por par no se repite; al
+quitar y re-habilitar un usuario, la fila anterior queda soft-deleted y se crea una
+fila nueva.
+
+**Endpoints** (mismo controller `cajones.controller.ts`):
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| GET | `/cajones/:id/usuarios` | `Cajas` / `Leer` | Lista `usuarioId` autorizados del cajón |
+| PUT | `/cajones/:id/usuarios` | `Cajas` / `Actualizar` | Reemplaza el set completo (replace-set, no incremental) |
+
+`PUT` recibe la lista completa de `usuarioIds` deseada; el service calcula el diff
+contra los vivos (`quitar` = softDelete de los que sobran, `agregar` = insertar los
+nuevos) dentro de una transacción. La pertenencia de cada `usuarioId` se valida en un
+solo `count` contra `usuarios_tenants` (miembro del tenant) — `400` si alguno es
+ajeno; sin N+1.
+
+**Regla de lista vacía = permisiva.** Un cajón sin ningún `cajon_usuario` vivo **no
+está bloqueado para nadie** — queda abierto a cualquier usuario con `MiCaja:Crear`.
+La allow-list es una restricción opt-in que el admin agrega cajón por cajón, no un
+default cerrado.
+
+**Sin enforcement todavía.** Hoy el mapeo solo se persiste — nada en el flujo de
+apertura de caja (`POST /caja/abrir`, sin `cajon_id` aún) lo consulta ni lo bloquea.
+El enforcement real al abrir (elegir un cajón, validar que el usuario esté
+autorizado o que la lista esté vacía) llega en el **sub-proyecto 3**, junto con el
+campo `cajon_id` en la sesión (`cajas`).
+
+**Ortogonalidad con `MiCaja:Crear`:** son dos preguntas distintas que se cruzan recién
+al abrir (sub-3), no una redundancia.
+
+| Pregunta | Responde |
+|---|---|
+| ¿Puede este usuario operar caja en general? | `MiCaja:Crear` (RBAC) |
+| ¿En cuáles cajones puede hacerlo? | Allow-list (`cajon_usuario`) |
+
+Un usuario sin `MiCaja:Crear` no abre ningún cajón aunque esté en la allow-list de
+todos; un usuario con `MiCaja:Crear` pero fuera de la allow-list de un cajón
+específico no podrá abrir *ese* cajón en particular (una vez exista el enforcement).
+
 ---
 
 ## API Endpoints

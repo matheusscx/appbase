@@ -429,8 +429,11 @@ Modelo acordado (§8.1 + brainstorming):
   tenant (entidad `cajones`, config admin-only). Spec:
   [`2026-07-23-cajones-definicion-admin-design.md`](../../superpowers/specs/2026-07-23-cajones-definicion-admin-design.md) ·
   Plan: [`2026-07-23-cajones-definicion-admin.md`](../../superpowers/plans/2026-07-23-cajones-definicion-admin.md).
-- [ ] **2. Autorización: qué usuarios abren qué cajones** — allow-list N‑a‑N gestionada por
-  el admin. Convive con el permiso RBAC (`MiCaja:Crear`). Depende de 1. Spec: _(pendiente)_.
+- [x] **2. Autorización: qué usuarios abren qué cajones** — ✅ implementado (definición del
+  allow-list; enforcement al abrir en el sub-3). Mapeo N‑a‑N `cajon_usuario`, gestión desde el
+  cajón (`GET`/`PUT /cajones/:id/usuarios`, permisos `Cajas`). Lista vacía = permisivo. Spec:
+  [`2026-07-23-cajones-allowlist-usuarios-design.md`](../../superpowers/specs/2026-07-23-cajones-allowlist-usuarios-design.md) ·
+  Plan: [`2026-07-23-cajones-allowlist-usuarios.md`](../../superpowers/plans/2026-07-23-cajones-allowlist-usuarios.md).
 - [ ] **3. Sesión sobre cajón + terminología** — la sesión (hoy `cajas`) gana `cajon_id`; la
   apertura elige un cajón autorizado y libre; unicidad por cajón; resolución del rename
   terminológico y ajuste de las superficies `MiCaja`/`Cajas`. Depende de 1+2. Spec: _(pendiente)_.
