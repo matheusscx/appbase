@@ -38,10 +38,24 @@ export async function fetchPorcentajeSugerido(): Promise<string> {
   }
 }
 
+export async function fetchPorcentajeSugeridoVenta(): Promise<string> {
+  const apiUrl = useRuntimeConfig().public.apiUrl
+  try {
+    const res = await useApiFetch<{ porcentajeSugerido: string }>(
+      `${apiUrl}/propinas/porcentaje-sugerido-venta`,
+    )
+    return res.porcentajeSugerido || PROPINA_PORCENTAJE_DEFAULT
+  }
+  catch {
+    return PROPINA_PORCENTAJE_DEFAULT
+  }
+}
+
 export function usePropina() {
   return {
     sugerirPropina,
     fetchPorcentajeSugerido,
+    fetchPorcentajeSugeridoVenta,
     porcentajeHumanoADecimal,
     porcentajeDecimalAHumano,
   }

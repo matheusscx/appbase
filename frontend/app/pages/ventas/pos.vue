@@ -7,6 +7,7 @@ import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import { formatCantidadTicket } from '~/utils/cantidad-presentacion'
 import { agregarImpuestosVenta, type PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
+import { fetchPorcentajeSugeridoVenta, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -44,6 +45,8 @@ const customerExpandido = ref(false)
 
 const cobroOpen = ref(false)
 const submitting = ref(false)
+const propinaMonto = ref('0')
+const propinaPorcentaje = ref(PROPINA_PORCENTAJE_DEFAULT)
 const movimientoDrawerOpen = ref(false)
 const cierreDrawerOpen = ref(false)
 const recetaDrawerOpen = ref(false)
@@ -152,6 +155,7 @@ async function cargar() {
 
 onMounted(async () => {
   await Promise.all([cajaStore.cargarActiva(), cargar(), unidadesStore.ensureLoaded(), cargarEmisor()])
+  propinaPorcentaje.value = await fetchPorcentajeSugeridoVenta()
 })
 
 function onCambiarCantidadPresentacion(
@@ -189,6 +193,12 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
       pagos,
       tipoDocumentoId: tipoDocumentoId.value,
     }
+    if (new Decimal(propinaMonto.value || '0').gt(0)) {
+      body.propinaDirecta = {
+        montoPagado: propinaMonto.value,
+        porcentajeSugerido: propinaPorcentaje.value,
+      }
+    }
     if (incluirCustomer) {
       body.customer = {
         nombre: customer.value.nombre,
@@ -211,6 +221,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
       toast.add({ title: advertencia, color: 'warning' })
     }
     cobroOpen.value = false
+    propinaMonto.value = '0'
 
     if (resultadoVenta) {
       try {
@@ -329,7 +340,11 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
       />
       <VentasCobroModal
         v-model:open="cobroOpen"
+        v-model:propina-monto="propinaMonto"
+        modo-propina
         :total="totalFinal"
+        :venta-total="totalFinal"
+        :porcentaje-sugerido="propinaPorcentaje"
         :metodos="metodos"
         :submitting="submitting"
         @confirmar="confirmarCobro"
