@@ -679,6 +679,21 @@ export class SalonesService {
                       })),
                     }
                   : {}),
+                ...(l.personalizacion.componentes?.length
+                  ? {
+                      componentes: l.personalizacion.componentes.map((c) => ({
+                        componenteItemId: c.componenteItemId,
+                        unidad: c.unidad,
+                        grupos: c.grupos.map((g) => ({
+                          grupoId: g.grupoId,
+                          opciones: g.opciones.map((o) => ({
+                            itemId: o.itemId,
+                            unidades: Number(o.unidades),
+                          })),
+                        })),
+                      })),
+                    }
+                  : {}),
               }
             : undefined,
         })),

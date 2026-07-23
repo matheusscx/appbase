@@ -542,4 +542,94 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     expect(movCarne?.motivo).toBe('venta');
     expect(movCarne?.cantidad).toBe('0.1500');
   });
+
+  // Regresión: cierre de cuenta de salón (mesa) con un combo cuya elección de
+  // grupo vive POR COMPONENTE (Proteína en la Hamburguesa Especial). El bug:
+  // `cerrarCuenta` armaba el CreateVentaDto desde la línea persistida pero
+  // omitía `componentes` al mapear la personalización → la venta se creaba sin
+  // la proteína y el combo la rechazaba con "El grupo Proteína requiere elegir
+  // entre 1 y 1 unidades" (400). La venta directa por POST /ventas (tests 8/12)
+  // nunca ejercita esta ruta; solo el flujo de salones lo hace.
+  const MESA_1_ID = '550e8400-e29b-41d4-a716-446655440232';
+  const ANA_PIN = '111111';
+  const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
+
+  it('13. cierra una cuenta de mesa con "Combo Especial" (Proteína: carne molida, elegida por componente) → 201 y la venta persiste la elección en `componentes`', async () => {
+    // Sesión de garzón abierta. El cerrar previo la deja idempotente ante
+    // corridas locales que hayan dejado una sesión abierta (en CI no hay).
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pin: ANA_PIN });
+    const resSesion = await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/iniciar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pin: ANA_PIN, turnoId: TURNO_MANANA_ID });
+    expect(resSesion.status).toBe(201);
+
+    // Abre una cuenta en la mesa (Ana queda como garzón responsable).
+    const resCuenta = await request(app.getHttpServer())
+      .post(`/api/mesas/${MESA_1_ID}/cuentas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pin: ANA_PIN });
+    expect(resCuenta.status).toBe(201);
+    const cuentaId = (resCuenta.body as { id: string }).id;
+
+    // Agrega el Combo Especial con la proteína elegida en su componente receta.
+    const resLinea = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: COMBO_ESPECIAL_ID,
+        cantidad: '1',
+        personalizacion: {
+          componentes: [
+            {
+              componenteItemId: HAMBURGUESA_ESPECIAL_ID,
+              unidad: 1,
+              grupos: [
+                {
+                  grupoId: PROTEINA_GRUPO_ID,
+                  opciones: [{ itemId: CARNE_MOLIDA_ID, unidades: 1 }],
+                },
+              ],
+            },
+          ],
+        },
+      });
+    expect(resLinea.status).toBe(201);
+
+    // Cierra y cobra. Antes del fix esto respondía 400 ("El grupo Proteína
+    // requiere elegir entre 1 y 1 unidades"): la proteína del componente se
+    // perdía al mapear la línea persistida → CreateVentaDto.
+    const resCerrar = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cerrar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        pin: ANA_PIN,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4300.0000' }],
+      });
+    expect(resCerrar.status).toBe(201);
+    const cierre = resCerrar.body as {
+      cuenta: { estado: string; ventaId: string | null };
+      ventaId: string;
+    };
+    expect(cierre.cuenta.estado).toBe('cerrada');
+    expect(cierre.ventaId).toBeTruthy();
+
+    // El snapshot congelado en la venta conserva la elección por componente.
+    const detalleRows: {
+      personalizacion: PersonalizacionRecetaSnapshot | null;
+    }[] = await ds.query(
+      `SELECT personalizacion FROM venta_detalles
+       WHERE venta_id = $1 AND item_id = $2 AND eliminado_el IS NULL`,
+      [cierre.ventaId, COMBO_ESPECIAL_ID],
+    );
+    expect(detalleRows).toHaveLength(1);
+    const snapshot = detalleRows[0].personalizacion;
+    expect(snapshot?.componentes).toHaveLength(1);
+    expect(snapshot?.componentes?.[0]?.grupos[0]?.opciones[0]?.itemId).toBe(
+      CARNE_MOLIDA_ID,
+    );
+  });
 });
