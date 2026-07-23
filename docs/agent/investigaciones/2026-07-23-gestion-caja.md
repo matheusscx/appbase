@@ -1,7 +1,9 @@
 # Gestión de caja — análisis de mercado vs. implementación
 
-**Fecha:** 2026-07-23
+**Fecha:** 2026-07-23 (tres pasadas: §1–§6 internacional + Chile; §7 Fudo/LatAm + cruce del esperado; §8 mecánica y ciclo de vida del arqueo)
 **Estado:** 🔎 En investigación — insumo, todavía no hay diseño ni decisión tomada. No se tocó código.
+El hilo bloqueante (§3, esperado del cierre) quedó **reencuadrado en §7** con 3 salidas (A solo-efectivo / B multi-medio / C status quo) — decisión de negocio del owner, aún abierta.
+Del brainstorming salió además un **refactor general de caja** dividido en sub-proyectos: ver **roadmap en §9** (arranca por la definición de cajones).
 **Feature relacionada:** [`docs/features/gestion-cajas.md`](../../features/gestion-cajas.md)
 
 > ⚠️ Método (`docs/agent/investigacion-mercado.md`): lo que trae el mercado es **insumo
@@ -123,10 +125,13 @@ efectivo, y punto.**
   vs. efectivo de propina**, no mezclarlos en un único `saldo_esperado`.
 
 - **Boleta electrónica SII integrada al cierre.** Todos los POS locales emiten boleta
-  electrónica al SII en tiempo real, y el **cierre Z suele acompañarse del reporte de
-  ventas para el SII**. Para nosotros es contexto ya cubierto por el diseño fiscal
-  diferido (**ADR-010**), no una brecha de caja — pero anota que el "cierre de turno"
-  chileno tiene una dimensión tributaria además de la de arqueo.
+  electrónica al SII en tiempo real. Para nosotros es contexto ya cubierto por el diseño
+  fiscal diferido (**ADR-010**), no una brecha de caja.
+  > ⚠️ **Corregido en §8.7 (2026-07-23):** una afirmación previa de este punto ("el cierre
+  > Z suele acompañarse del reporte de ventas para el SII" / "el cierre de turno tiene una
+  > dimensión tributaria") quedó **desactualizada**. Desde ago-2022 el SII eliminó el
+  > Resumen de Ventas Diarias (RVD); la boleta viaja **transaccional en tiempo real** y el
+  > arqueo/cierre **no** es un hecho fiscal ni lleva envío consolidado al SII. Ver §8.7.
 
 **Conclusión del cruce local:** Chile no cambia el diagnóstico, lo **endurece**. La
 opción 1 de §3 (efectivo puro) no es solo "lo que hace el mercado internacional": es lo
@@ -194,6 +199,250 @@ con implicancias de auditoría. Items diferidos registrados en
 
 ---
 
+## 7. Cruce con Fudo y el mercado LatAm (2026-07-23, 2ª pasada)
+
+Motivación: antes de elegir un hilo abierto (§3, §5, §6) se corrió una segunda pasada con
+foco en el **mercado local**, tomando **Fudo** como caso central (POS de restaurantes muy
+usado en Chile) más Bsale, Toteat, Defontana, Maxirest. **Insumo, no verdad** — abajo se
+marca qué sobrevive al cruce contra nuestro código y qué queda como decisión del owner.
+
+### 7.1 El hallazgo que reencuadra §3 — no es "efectivo vs. total", son tres modelos
+
+La primera pasada (§3) planteó el problema como binario: esperado = **efectivo puro** o
+**total del turno**. El mercado local usa una tercera forma que no estaba sobre la mesa:
+
+- **Arqueo *multi-medio* (Fudo, Bsale, Toteat) — norma LatAm.** El cierre tiene **una fila
+  esperado-vs-contado por cada método de pago**. El efectivo se cuenta físico; la tarjeta
+  se concilia contra el total del terminal Transbank (que tiene su **propio cierre de
+  lote**, aparte). Toteat pide explícitamente **restar la propina** del monto de tarjeta al
+  cuadrar cuando el local no recauda propina en la venta. Fudo, con Terminal Fudo propio,
+  autocompleta la fila de tarjeta; con terminal Transbank externo (lo común en Chile) la
+  concilia contra el cierre del terminal.
+- **Cash drawer *solo-efectivo* (Toast, Square) — escuela internacional.** El cajón es una
+  entidad efectivo-only por diseño; `Cash expected = inicial + ventas efectivo − vueltos −
+  paid-outs`. La tarjeta vive **entera fuera** del arqueo, la liquida el procesador.
+- **Coinciden en lo único que importa para nuestro bug:** ninguno mete la tarjeta dentro
+  de **un solo esperado de efectivo**. Es exactamente lo que hacemos hoy.
+
+⚠️ Diferencia de **modelo de datos**, no de UI: LatAm modela el arqueo como objeto
+multi-fila (una por método); Toast/Square como cajón efectivo-only separado del cierre de
+tarjeta.
+
+### 7.2 Cruce contra nuestro código — la sorpresa buena
+
+| Verificado | Hallazgo |
+|---|---|
+| `movimiento-caja.entity.ts` (`MovimientoCaja`) | **Ya tiene `metodo_pago_id` por fila** (nullable) |
+| `pagos.service.ts:252` | **Ya lo puebla** en cada movimiento derivado de venta |
+| `caja.service.ts:154-169` (`calcularSaldoEsperado`) | Colapsa **todo** en un número: `SUM(m.monto) FILTER (WHERE m.tipo='entrada')`, **sin mirar el método** ← raíz del faltante fantasma |
+| `metodo-pago.entity.ts` (`MetodoPago`) | **NO** tiene marca de efectivo (solo `nombre`/`abreviatura`/`activo`) |
+
+Traducción: el **modelo multi-medio (B) ya está soportado a nivel de datos** — el
+`metodo_pago_id` está en cada movimiento; lo que colapsa la información es una sola query
+de agregación y un `montoContado` de campo único (`caja.service.ts:199,202`). Lo pesado de
+B **no es la BD**, es el DTO de cierre (un contado por método) y la UI. La opción
+efectivo-puro (A) es más simple en el cierre pero **sí** exige agregar `es_efectivo` (o un
+`tipo`) a `metodos_pago` → toca el modelo de pagos.
+
+### 7.3 §3 reencuadrado — tres salidas (decisión de negocio, abierta)
+
+- **A) Esperado solo-efectivo** (Toast/Square + opción 1 de §3). La tarjeta queda
+  informativa, no cuadra contra conteo físico. Necesita `es_efectivo` en `metodos_pago`.
+  Cierre simple (un solo contado). Al implementar, el efectivo de una venta es el **monto
+  redondeado** (Ley 20.956, §4), no el `total_final` nominal.
+- **B) Arqueo multi-medio** (Fudo/Bsale/Toteat, norma local). Un esperado/contado por
+  método. **Nuestra data ya lo soporta** (`metodo_pago_id`); el peso está en cierre+UI y en
+  separar propina del monto de tarjeta (§4). Es lo más fiel al mercado chileno real.
+- **C) Status quo** (un total, tarjeta incluida). Rompe bajo las dos escuelas. Descartable.
+
+### 7.4 Cruce de los otros hilos
+
+- **§6 cierre forzado — precedente local casi nulo, pero confirma `cerrada_por`.** Ningún
+  POS LatAm investigado documenta "el supervisor cierra por el cajero ausente" (solo Toast,
+  con *Cash Drawer Lockdown Override*). **Pero** la feature "Conciliación de Caja" (Plan Pro)
+  de Fudo registra **"usuario que realizó el cierre"** como campo y usa flujo *Operador
+  cierra → Supervisor revisa/ajusta/valida* — o sea la distinción **`cerrada_por` ≠
+  dueño-del-turno** que §6 predijo **existe en el mercado**. El escenario "ausencia" en sí
+  sigue sin precedente local claro.
+- **§6 umbral de aprobación — reencuadre: Fudo NO usa umbral.** Exige justificar **toda**
+  diferencia (sin importar monto) con **motivo categorizado** + comentario. El umbral
+  configurable de dos niveles (warning / aprobación obligatoria) solo aparece en **Toast**.
+  La norma local es "justificar siempre", no "aprobar si supera X" → si se quiere umbral,
+  se adapta de Toast, no se copia de un competidor regional.
+- **§5 blind count — el mejor confirmado.** Fudo ("Arqueo de caja ciego"), Toteat ("Cierre
+  Ciego") y Toast, todos, como **permiso de rol que oculta el "según sistema"/esperado** al
+  cajero. Barato, mapea limpio a nuestro RBAC (un permiso que oculta `saldoEsperado` en el
+  drawer). En Fudo es el Administrador quien lo activa por rol, no un supervisor en runtime.
+- **Nuevo (no estaba en §1–§6): motivos categorizados de diferencia.** Fudo obliga a un
+  motivo tipificado en cualquier descuadre (falta / sobra / divergencia de tarjeta / error
+  de lanzamiento manual / registro de pago ausente / error operacional / otro). Cruza y
+  extiende el gap ya anotado en §2 (paid-in/out con concepto de texto libre, sin motivos).
+
+### 7.5 Qué sobrevive al cruce
+
+- **Sobrevive (mercado + código convergen):** que la tarjeta **no** vaya en un único
+  esperado de efectivo (§3, refuerza §4); que `cerrada_por` es una distinción real (§6);
+  que blind count es un permiso de rol barato (§5); que los descuadres piden motivo
+  tipificado (nuevo).
+- **Decisión de negocio del owner (no auto-resolver):** elegir modelo A vs B para el
+  esperado (§7.3) — B toca cierre+UI, A toca `metodos_pago`; si se quiere umbral (§6),
+  adaptarlo de Toast asumiendo que la norma local es justificar-siempre.
+- **Huecos honestos del mercado (no inventar sobre esto):** si Fudo autocompleta o concilia
+  manual la tarjeta con terminal Transbank **externo**; si el permiso "listar/actualizar
+  todos" de Fudo habilita operar sobre el arqueo *abierto* de otro usuario o solo verlo;
+  y el detalle de auditoría fino del cierre forzado (ningún POS lo documenta público).
+
+---
+
+## 8. Mecánica y ciclo de vida del arqueo (2026-07-23, 3ª pasada)
+
+Motivación: profundizar el **arqueo como objeto y proceso** (no el modelo del esperado, ya
+resuelto en §7): qué es, sus tipos, conteo, movimientos, diferencia, estados y el cruce
+chileno. Fudo como caso central + Bsale, Toteat, Defontana, Maxirest. **Insumo, no verdad.**
+
+### 8.1 El arqueo como sesión — y el cruce que revela nuestro modelo
+
+En el mercado, "arqueo" es la **sesión temporal** que abre/cierra sobre una **Caja
+persistente**:
+- **Fudo:** la "Caja" es el objeto persistente (Administración › Cajas: caja de mesas, de
+  mostrador, de delivery); el usuario se asigna a una o más; el **arqueo** es la sesión que
+  corre sobre **una** caja. No se abren dos arqueos con la misma caja; sí varios en paralelo
+  si hay varias cajas.
+- **Defontana:** modelo de **dos niveles explícito** — Caja (contenedor) contiene varios
+  **Turnos** anidados; se cierran todos los turnos y recién ahí se cierra la Caja.
+- **Square:** "cash drawer" físico + "session" pausable/reanudable — mismo patrón
+  contenedor + sesión.
+
+**Cruce contra nuestro código — el hallazgo:** nuestro `cajas` **conflaciona contenedor y
+sesión en una sola fila** (`caja.entity.ts:27-68`): cada `abrir` inserta una fila con su
+propio `fecha_apertura`/`fecha_cierre`/`saldo_inicial`/`monto_contado`/`diferencia`/`estado`.
+En vocabulario de mercado, **nuestro `cajas` = el "arqueo/sesión", NO el contenedor "Caja"
+persistente**. No existe una caja física nombrada que persista entre sesiones; el "cajón" es
+implícitamente `(tenant, usuario)` (doc: "una física abierta por tenant+usuario"). → Confirma
+desde el modelo que el **multi-cajón nombrado por local** (caja de mesas/mostrador/delivery)
+es la **dimensión futura** que §2 declaró fuera de alcance, no un gap del diseño actual.
+
+### 8.2 Tipos de arqueo — LatAm no usa X/Z, y nosotros ya tenemos el equivalente
+
+Fudo/Bsale/Toteat/Maxirest documentan solo **apertura** y **cierre** (cada cierre es
+terminal). La nomenclatura **X report (lectura viva) / Z report (cierre)** es de cajas
+registradoras fiscales EE.UU.; **ningún POS LatAm investigado la usa**. Defontana es lo más
+cercano (cerrar turno vs. cerrar turno+sesión).
+**Cruce:** ya tenemos el equivalente al X — `GET /:id/movimientos/resumen` (KPIs vivos sin
+cerrar). No falta un objeto "arqueo parcial": el cierre es el único evento terminal, igual
+que el mercado local. Alineado.
+
+### 8.3 Conteo por denominación — nadie local lo hace
+
+No hay fuente pública de que Fudo, Bsale, Toteat o Defontana ofrezcan conteo por
+denominación (billete a billete); todos piden **un monto único por medio de pago** (Maxirest
+es ambiguo). Solo **Lightspeed** lo confirma como opción configurable internacional.
+**Cruce:** nuestro `montoContado` único (`caja.service.ts:199,202`) está **alineado con la
+norma local**. La denominación es nice-to-have (ya anotado en §5), sin presión de mercado.
+
+### 8.4 Movimientos del turno — alineado, con un matiz sobre "motivos"
+
+Fudo "Movimientos de Caja" (ingreso/egreso no ligado a venta): **monto obligatorio, tipo,
+comentario opcional**; impactan directo el esperado del arqueo en curso. Aparte, los "Gastos"
+solo impactan si tienen flag "Usar en Arqueo" y caen en la franja horaria del arqueo.
+**Cruce:** nuestro `movimientos_caja.concepto` (texto libre) + `tipo` entrada/salida está
+alineado. **Matiz que corrige §7.4:** el **motivo categorizado** de Fudo es sobre la
+**diferencia del cierre** (conciliación), no sobre cada movimiento — para el movimiento el
+comentario es *opcional*. No distinguimos "gasto usado en arqueo" vs. movimiento (Fudo sí);
+menor.
+
+### 8.5 Diferencia — sin tolerancia ni bloqueo (igual que nosotros)
+
+Ningún POS LatAm documenta **tolerancia configurable** ni que el descuadre **bloquee** el
+cierre. Maxirest es el único con bifurcación explícita: **recontar** o **cerrar aplicando un
+ajuste** por la diferencia. El **over/short histórico agregado por cajero** solo aparece en
+Toast/Square, en ninguno de los 5 locales.
+**Cruce:** nuestro `diferencia = montoContado − saldoEsperado` (`caja.service.ts:199`) sin
+tolerancia y sin bloqueo está **alineado con la norma local**. El reporte histórico por
+cajero es un nice-to-have (el dato existe por caja; falta la agregación) — ya en §2/§5.
+
+### 8.6 Estados y reapertura — hueco transversal del mercado
+
+Fudo: **Abierto → Cerrado**, y "una vez cerrado no puede reabrirse" (solo se puede editar un
+movimiento mientras el arqueo sigue abierto). Ningún POS documenta públicamente **quién puede
+reabrir/editar un arqueo cerrado ni bajo qué permiso**.
+**Cruce:** nuestro `estado` `'abierta'|'cerrada'` (`caja.entity.ts:67`) coincide. El tercer
+estado "pendiente de conciliación/validado" pertenece al flujo de conciliación de Fudo Pro
+(§7.4) — sería relevante solo si implementamos cierre forzado/conciliación (diferido en §6).
+
+### 8.7 Realidad chilena — corrige un dato y refuerza otros
+
+- **🛑 Corrección a §4: el arqueo/cierre NO es un hecho fiscal.** Desde **ago-2022 el SII
+  eliminó la obligación del Resumen de Ventas Diarias (RVD)**: el Registro de Ventas se
+  alimenta de las boletas electrónicas ya recibidas por transacción. No existe "cierre Z
+  enviado al SII". El arqueo es **control interno de caja**; la boleta viaja sola, en tiempo
+  real. La "dimensión tributaria del cierre" que insinuaba §4 **no aplica** hoy.
+- **Redondeo (Ley 20.956):** confirmado efectivo-only, el documento refleja el precio sin
+  redondear. **Hueco real:** ningún POS (ni Fudo ni los otros) documenta si el *esperado en
+  efectivo del arqueo* incorpora el redondeo. Queda como decisión al resolver §3-opción A/B.
+- **Propina en efectivo:** en Fudo **impacta el arqueo por defecto** salvo que se registre un
+  retiro/egreso manual — no hay separación automática. Refuerza §4 (el arqueo debe poder
+  separar efectivo de venta vs. de propina).
+- **Cierre del terminal Transbank:** paso **separado** si el datáfono es standalone (cierre
+  diario del terminal, imprime total por marca); **integrado** si es nativo (Terminal Fudo /
+  Toteat+Transbank eliminan el paso). Refuerza §4/§7.
+
+### 8.8 Qué sobrevive al cruce
+
+- **Sobrevive (mercado + nuestro modelo convergen):** apertura/cierre como único evento
+  terminal, con el `resumen` como lectura viva (§8.2); monto único de conteo (§8.3);
+  movimientos con concepto y sin bloqueo por diferencia (§8.4–8.5); estados abierta/cerrada
+  sin reapertura (§8.6). **Nuestro modelo actual está alineado con la norma local** en la
+  mecánica del arqueo — el trabajo pendiente real es §3 (el esperado), no la mecánica.
+- **Corrección registrada:** el cierre **no** es evento fiscal (§8.7) — ajustar cualquier
+  diseño que asumiera lo contrario.
+- **Dimensión futura, no gap:** caja física nombrada persistente (multi-cajón) — §8.1, ya
+  fuera de alcance en §2.
+- **Huecos honestos del mercado (no inventar):** conteo por denominación, tolerancia
+  configurable, over/short histórico por cajero, y reapertura/edición de arqueo cerrado con
+  permiso — ninguno documentado por los POS locales (varios sí en Toast/Square/Lightspeed).
+
+---
+
+## 9. Roadmap del refactor general de caja (decisión 2026-07-23)
+
+Del brainstorming del owner salió un **refactor general** del módulo de caja que introduce el
+**cajón físico como entidad** (hoy `cajas` conflaciona contenedor + sesión, §8.1). Es
+demasiado para un solo spec → se **divide en sub-proyectos**, cada uno con su propia spec,
+plan y ciclo de implementación. Este roadmap es el índice; se enlaza cada spec al crearla.
+
+**Alcance elegido = A (solo estructura).** El refactor entrega la estructura (cajones +
+autorización + sesión sobre cajón). Las features de negocio (§3 esperado, §6 cierre forzado,
+§5 blind count/motivos) quedan **fuera** y se montan *después* sobre esta estructura — no la
+bloquean. El owner además fijó el **orden**: primero la definición de cajones.
+
+Modelo acordado (§8.1 + brainstorming):
+- El **admin define** los cajones físicos del tenant (Mostrador, Delivery, Barra…).
+- El **admin autoriza** qué usuarios pueden abrir qué cajones (**allow-list** N‑a‑N, "puede
+  abrir" — no amarre 1‑a‑1).
+- **Un cajón físico:** máximo una sesión abierta a la vez. **Un cajero:** máximo una sesión
+  abierta a la vez (regla actual, se conserva).
+
+### Sub-proyectos (opción A)
+
+- [ ] **1. Definición de cajones (admin)** — ✅ *spec aprobada, lista para plan*. CRUD de
+  cajones físicos por tenant (entidad `cajones`, config admin-only). Entregable y testeable
+  por sí solo. Spec: [`2026-07-23-cajones-definicion-admin-design.md`](../../superpowers/specs/2026-07-23-cajones-definicion-admin-design.md).
+- [ ] **2. Autorización: qué usuarios abren qué cajones** — allow-list N‑a‑N gestionada por
+  el admin. Convive con el permiso RBAC (`MiCaja:Crear`). Depende de 1. Spec: _(pendiente)_.
+- [ ] **3. Sesión sobre cajón + terminología** — la sesión (hoy `cajas`) gana `cajon_id`; la
+  apertura elige un cajón autorizado y libre; unicidad por cajón; resolución del rename
+  terminológico y ajuste de las superficies `MiCaja`/`Cajas`. Depende de 1+2. Spec: _(pendiente)_.
+
+### Features de negocio diferidas (fuera de A, se montan sobre la estructura)
+
+- [ ] **§3 — Modelo del esperado** (efectivo puro vs. arqueo multi-medio). Bloqueante del
+  propósito de la feature; decisión de negocio abierta (§7.3).
+- [ ] **§6 — Cierre forzado + `cerrada_por`** y conciliación operador→supervisor (§7.4).
+- [ ] **§5 — Blind count, motivos categorizados de diferencia, denominación** (§8.4–8.5).
+
+---
+
 ## Fuentes
 
 - Toast — [Shift Review Overview](https://support.toasttab.com/en/article/Shift-Review-Overview) ·
@@ -224,3 +473,39 @@ con implicancias de auditoría. Items diferidos registrados en
 - [MangoApps — Cash Drawer Close & Reconcile SOP (separación de funciones en variance)](https://www.mangoapps.com/templates/sop/cash-drawer-close-reconcile)
 - Defontana — [Apertura de Caja / Turno (cajero vs. supervisor)](https://defontana.atlassian.net/wiki/spaces/CDAV2/pages/23069789)
 - Bsale — [Cierre de caja ciego](https://ayuda.bsale.com.mx/support/solutions/articles/151000212864-cierre-de-caja-ciego-o-sin-detalle)
+
+**Fudo y mercado LatAm (§7, 2ª pasada):**
+- Fudo — [Arqueos de caja](https://soporte.fu.do/es/articles/11730865-3-arqueos-de-caja) ·
+  [Arqueo de caja ciego](https://soporte.fu.do/es/articles/11730856-como-configurar-un-arqueo-de-caja-ciego) ·
+  [Conciliación de Caja (operador vs. supervisor, "usuario que realizó el cierre")](https://soporte.fu.do/es/articles/14658427-conciliacion-de-caja) ·
+  [Motivos de diferencia de arqueo](https://soporte.fu.do/es/articles/11730868-principales-motivos-de-diferencia-de-arqueo-de-caja) ·
+  [Roles de usuario](https://soporte.fu.do/es/articles/11730991-roles-de-usuario) ·
+  [Función de permisos de usuario](https://soporte.fu.do/es/articles/11730992-funcion-de-permisos-de-usuario) ·
+  [Terminal Fudo CL: sincronización con arqueos](https://soporte.fu.do/es/articles/11732104-terminal-de-fudo-cl-sincronizacion-con-arqueos-de-caja) ·
+  [Cierre de caja en restaurantes (blog)](https://blog.fu.do/cierre-de-caja-en-restaurantes-como-pasar-de-horas-a-minutos-con-la-terminal-fudo)
+- Toteat — [Cerrar caja cuando NO recaudan propina (restar propina de tarjeta)](http://ayuda.toteat.com/es/articles/2164086-pasos-para-cerrar-la-caja-de-forma-correcta-cuando-no-recaudan-propina) ·
+  [Perfiles de usuarios (permisos, cierre ciego)](https://toteat.com/ayuda/operacion-en-restaurante/articulo-ayuda/perfiles-de-usuarios-permisos)
+- Bsale — [¿Cómo hacer un cierre de caja? (multi-medio)](https://ayuda.bsale.com.mx/support/solutions/articles/151000212827--c%C3%B3mo-hacer-un-cierre-de-caja-)
+- Maxirest — [Fin de turno](https://ayuda.maxirest.com/fin-de-turno) · [Arqueo de caja](https://ayuda.maxirest.com/arqueo-de-caja)
+- Defontana — [Cierre de turno - Pos](https://defontana.atlassian.net/wiki/spaces/CDAV2/pages/23069819/Cierre+de+turno+-+Pos)
+- Toast — [Cash drawer operations (Closeout Over/Short Max, umbral)](https://doc.toasttab.com/doc/platformguide/adminCashDrawerOperations.html) ·
+  [Job roles (Cash Drawers Blind)](https://support.toasttab.com/en/article/Creating-and-Editing-Job-Roles)
+- Square — [Start and end a cash drawer session (cash-only expected)](https://squareup.com/help/us/en/article/8344-start-and-end-a-cash-drawer-session)
+- Transbank — [Cierre de turno y tienda con Transbank (cierre de terminal separado)](https://www.pos-xpress.cl/tutoriales/caja/CIERRE%20DE%20TURNO%20Y%20TIENDA%20CON%20TRANSBANK.pdf)
+
+**Mecánica y ciclo de vida del arqueo (§8, 3ª pasada):**
+- Fudo — [Arqueos de caja](https://soporte.fu.do/es/articles/11730865-3-arqueos-de-caja) ·
+  [Arqueo de caja — preguntas frecuentes](https://soporte.fu.do/es/articles/11730869-arqueo-de-caja-preguntas-frecuentes) ·
+  [Movimientos de caja (monto oblig., comentario opcional)](https://soporte.fu.do/es/articles/11730862-2-movimientos-de-caja) ·
+  [Abrir más de un arqueo (uno por caja)](https://soporte.fu.do/es/articles/12044091-como-abrir-mas-de-un-arqueo-de-caja) ·
+  [Emitir boletas/facturas SII en Chile](https://soporte.fu.do/es/articles/12429735-como-emitir-e-imprimir-boletas-y-facturas-electronicas-en-chile-desde-fudo-sii)
+- Defontana — [Cierre de turno y caja (Caja contiene varios turnos)](https://intercom.help/defontanaerp/es/articles/5318588-cierre-de-turno-y-caja)
+- Bsale — [Generar un cierre de caja (Chile)](https://ayuda.bsale.io/support/solutions/articles/151000224795--c%C3%B3mo-generar-un-cierre-de-caja-) ·
+  [Resumen de cierre: aperturas, retiros, vueltos (Perú)](https://ayuda.bsale.com.pe/support/solutions/articles/151000212324--c%C3%B3mo-generar-un-cierre-de-caja-)
+- Maxirest — [Fin de turno (recontar vs. cerrar con ajuste; "cantidad de billetes")](https://ayuda.maxirest.com/fin-turno/fin-de-turno)
+- Lightspeed — [Finalise your takings (denominación opcional)](https://o-series-support.lightspeedhq.com/hc/en-us/articles/31329369881755-Finalise-your-takings)
+- Toast — [Close Out Day / Z Report (X vs Z)](https://support.toasttab.com/en/article/Close-Out-Day-Z-Report-Auto-Capture) ·
+  [Cash Drawer Reports (over/short histórico por cajero)](https://support.toasttab.com/en/article/Cash-Drawer-Reports-Overview)
+- SII / RVD — [SII elimina obligatoriedad del Resumen de Ventas Diarias (ago-2022)](https://www.sii.cl/noticias/2022/160622noti01rp.htm) ·
+  [LibreDTE — análisis de la eliminación del RVD](https://www.libredte.cl/blog/2022-06-20-sii-elimina-la-obligatoriedad-de-envio-del-rvd)
+- Transbank — [Cierre de ventas diario del terminal (paso separado)](https://ayuda.transbank.cl/cierre-ventas-diario-transbank)
