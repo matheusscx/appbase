@@ -42,7 +42,7 @@ como el owner los nombra. Este sub-proyecto **no toca** la tabla `cajas` ni los 
 
 **Incluido:**
 - Entidad/tabla `cajones` (tenant-owned).
-- CRUD de cajones desde configuración (admin-only): crear, listar, renombrar, activar/desactivar, borrar (soft).
+- CRUD de cajones desde configuración, gateado por **permisos RBAC del módulo `Cajas`** (Leer/Crear/Actualizar/Eliminar): crear, listar, renombrar, activar/desactivar, borrar (soft).
 - Unicidad de `nombre` por tenant.
 - Seed de un cajón demo por tenant existente.
 - Página `configuracion/cajas.vue`.
@@ -74,18 +74,26 @@ por tenant entre cajones no borrados.
 ## Backend
 
 **Módulo standalone** `src/modules/cajones/` (controller + service + entity + DTOs),
-registrado en `app.module.ts`. No se mete en `caja` (distinto guard, distinta
-responsabilidad).
+registrado en `app.module.ts`. No se mete en `caja`: distinta responsabilidad (definir el
+mueble ≠ operar la sesión) y distintas rutas, aunque ambos usen `PermisosGuard`.
 
-**Controller** `@Controller('cajones')`, clase bajo `@UseGuards(JwtAuthGuard, TenantGuard)`;
-cada endpoint agrega `@UseGuards(TenantAdminGuard)` (admin-only, patrón de `metodos-pago`):
+**Gobierno de permisos — extiende el módulo `Cajas` existente.** En vez de un guard
+admin-only (`TenantAdminGuard`), el CRUD se gatea con el módulo RBAC `Cajas` (el mismo de la
+supervisión de sesiones, creado en el refactor 2026-07-23). Hoy `Cajas` solo tiene `Leer`;
+se le agregan `Crear`/`Actualizar`/`Eliminar` (asociaciones `modulo_app_permiso`). Así:
+`Cajas:Leer` = supervisar sesiones **+** ver cajones; `Cajas:Crear|Actualizar|Eliminar` =
+definir cajones. Operar la sesión sigue owner-only bajo `MiCaja` (sin cambios). El admin
+`es_fijo` obtiene todos los permisos de `Cajas` por short-circuit.
 
-| Método | Ruta | Acción | Respuestas |
-|---|---|---|---|
-| `GET` | `/cajones` | Lista cajones del tenant (activos + inactivos) | 200 `Cajon[]` |
-| `POST` | `/cajones` | Crea `{ nombre }` | 201 `Cajon` · 409 nombre duplicado |
-| `PATCH` | `/cajones/:id` | Renombra y/o togglea `activo` | 200 `Cajon` · 404 · 409 duplicado |
-| `DELETE` | `/cajones/:id` | Soft delete (`eliminado_el = now()`) | 204 · 404 |
+**Controller** `@Controller('cajones')`, clase bajo `@UseGuards(JwtAuthGuard, TenantGuard,
+PermisosGuard)`; cada endpoint con `@RequiresPermiso('Cajas', <permiso>)`:
+
+| Método | Ruta | Permiso | Acción | Respuestas |
+|---|---|---|---|---|
+| `GET` | `/cajones` | `Cajas:Leer` | Lista cajones del tenant (activos + inactivos) | 200 `Cajon[]` |
+| `POST` | `/cajones` | `Cajas:Crear` | Crea `{ nombre }` | 201 `Cajon` · 409 nombre duplicado |
+| `PATCH` | `/cajones/:id` | `Cajas:Actualizar` | Renombra y/o togglea `activo` | 200 `Cajon` · 404 · 409 duplicado |
+| `DELETE` | `/cajones/:id` | `Cajas:Eliminar` | Soft delete (`eliminado_el = now()`) | 200 · 404 |
 
 **DTOs** (`class-validator`):
 - `CreateCajonDto` — `{ nombre: string }` (`@IsString`, `@IsNotEmpty`, `@MaxLength(60)`).
@@ -109,12 +117,17 @@ cada endpoint agrega `@UseGuards(TenantAdminGuard)` (admin-only, patrón de `met
 
 ## Seed
 
-En `seeder.service.ts`, sembrar un cajón por tenant existente con UUIDs fijos (siguiente
-número libre del patrón `550e8400-e29b-41d4-a716-446655440XXX`):
-- Paris → cajón "Mostrador"
-- Falabella → cajón "Mostrador"
+Dos cosas en `seeder.service.ts` (UUIDs fijos, patrón `550e8400-e29b-41d4-a716-446655440XXX`,
+libres: 286, 287, 288, 289, 290):
 
-Idempotente como el resto del seed (no duplica si ya existe).
+1. **Permisos RBAC** — agregar al array `modulo_app_permiso` las asociaciones del módulo
+   `Cajas` (`...440282`) con `Crear` (`...440013`), `Actualizar` (`...440014`) y `Eliminar`
+   (`...440015`), con IDs `...440288`/`...440289`/`...440290`. `Cajas:Leer` (`...440283`) y
+   los `tenant_modulos` de `Cajas` (Paris `...440284`, Falabella `...440285`) ya existen.
+2. **Datos demo** — un cajón por tenant existente (Paris `...440286`, Falabella `...440287`),
+   nombre "Mostrador".
+
+Todo idempotente como el resto del seed (no duplica si ya existe).
 
 ## Frontend
 
@@ -123,8 +136,10 @@ Idempotente como el resto del seed (no duplica si ya existe).
 `activo` + acción borrar (con confirmación). Acceso a datos con store (`stores/cajones.ts`) o
 composable (`useCajones`) siguiendo el patrón de config existente — se decide en el plan.
 
-**Sidebar:** entrada "Cajas" dentro de Configuración. Tokens semánticos de Nuxt UI (sin
-Tailwind hardcodeado).
+**Sidebar:** entrada "Cajas" dentro de Configuración, visible con `esAdmin || can('Cajas',
+'Leer')` (patrón de Salones/Impresoras). Los botones de escritura (Nueva/editar/borrar) se
+gatean con `can('Cajas','Crear'|'Actualizar'|'Eliminar')` — UX, no reemplaza el guard del
+backend. Tokens semánticos de Nuxt UI (sin Tailwind hardcodeado).
 
 ## Testing
 
@@ -145,11 +160,12 @@ Tailwind hardcodeado).
 ## Criterios de aceptación
 
 - [ ] Tabla `cajones` con soft delete e índice único parcial `(tenant_id, nombre)`.
-- [ ] `GET/POST/PATCH/DELETE /cajones` funcionando, todos admin-only (`TenantAdminGuard`).
+- [ ] `GET/POST/PATCH/DELETE /cajones` funcionando, gateados por `@RequiresPermiso('Cajas', Leer/Crear/Actualizar/Eliminar)` + `PermisosGuard`.
+- [ ] El módulo `Cajas` extendido con `Crear`/`Actualizar`/`Eliminar` (seed `modulo_app_permiso` `...440288/289/290`).
 - [ ] `nombre` único por tenant → 409 en create y rename.
 - [ ] `tenant_id` siempre del token; nunca del body.
 - [ ] Soft delete; toda lectura filtra `eliminado_el IS NULL`.
-- [ ] Seed de un cajón por tenant existente (Paris, Falabella).
-- [ ] Página `configuracion/cajas.vue` con tabla + crear/editar/activar/borrar.
-- [ ] Unit + e2e verdes; no-admin recibe 403; aislamiento multi-tenant verificado.
+- [ ] Seed de un cajón por tenant existente (Paris `...440286`, Falabella `...440287`).
+- [ ] Página `configuracion/cajas.vue` con tabla + crear/editar/activar/borrar; nav y botones gateados por `Cajas`.
+- [ ] Unit + e2e verdes; usuario sin `Cajas` recibe 403; aislamiento multi-tenant verificado.
 - [ ] Docs actualizadas (gestion-cajas.md, ESTADO.md, §9 de la investigación).
