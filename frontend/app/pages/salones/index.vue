@@ -122,6 +122,10 @@ const pinModalOpen = ref(false)
 const pinModalTitle = ref('Identifícate con tu PIN')
 let pinAction: ((pin: string, nombre: string) => void) | null = null
 
+// Acción de garzón que falló por no tener sesión de trabajo abierta: se guarda como
+// closure (con su PIN ya capturado) para reintentarla apenas se inicia el turno.
+let accionPendiente: (() => void) | null = null
+
 function solicitarPin(
   title: string,
   action: (pin: string, nombre: string) => void,
@@ -170,23 +174,29 @@ async function abrirEntrarTurno() {
   }
 }
 
-/** Toast de error; si falta sesión de trabajo, ofrece CTA para entrar a turno. */
-function toastErrorOperativo(e: unknown, fallback: string) {
+/**
+ * Toast de error. Si falta sesión de trabajo abre directo el modal para entrar a turno
+ * y, si el llamador pasó `retry`, lo guarda para reintentar la acción al iniciar el turno.
+ */
+function toastErrorOperativo(e: unknown, fallback: string, retry?: () => void) {
   const msg = apiErrorMsg(e, fallback)
   if (msg.includes('sesión de trabajo')) {
+    accionPendiente = retry ?? null
     toast.add({
-      title: msg,
-      color: 'error',
-      actions: [{
-        label: 'Entrar a turno',
-        color: 'neutral',
-        variant: 'outline',
-        onClick: () => { void abrirEntrarTurno() },
-      }],
+      title: 'Primero inicia tu turno',
+      description: 'No tienes una sesión de trabajo abierta.',
+      color: 'warning',
     })
+    void abrirEntrarTurno()
     return
   }
   toast.add({ title: msg, color: 'error' })
+}
+
+/** Cierra el modal de turno sin iniciar y descarta la acción que quedó pendiente. */
+function cancelarEntrarTurno() {
+  turnoModalOpen.value = false
+  accionPendiente = null
 }
 
 function confirmarEntrarTurno() {
@@ -205,6 +215,10 @@ async function iniciarSesionConPin(pin: string, turnoId: string) {
       title: `Sesión iniciada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
       color: 'success',
     })
+    // Reintenta la acción que disparó el inicio de turno (ej. abrir la cuenta).
+    const retry = accionPendiente
+    accionPendiente = null
+    retry?.()
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al iniciar sesión'), color: 'error' })
@@ -374,7 +388,7 @@ async function abrirCuentaConPin(pin: string, nombre: string) {
     toast.add({ title: `Cuenta abierta por ${nombre}`, color: 'success' })
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al abrir la cuenta')
+    toastErrorOperativo(e, 'Error al abrir la cuenta', () => { void abrirCuentaConPin(pin, nombre) })
   }
 }
 
@@ -472,7 +486,7 @@ async function transferirCuentaConPin(pin: string) {
     })
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'No se pudo tomar la cuenta')
+    toastErrorOperativo(e, 'No se pudo tomar la cuenta', () => { void transferirCuentaConPin(pin) })
   }
   finally {
     transfiriendo.value = false
@@ -873,7 +887,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
     volverACuentas()
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al cerrar la cuenta')
+    toastErrorOperativo(e, 'Error al cerrar la cuenta', () => { void cerrarCuentaConPin(pagos, pin, vuelto) })
   }
   finally {
     submitting.value = false
@@ -1238,7 +1252,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
         </template>
         <template #footer>
           <AppModalFooter>
-            <UButton color="neutral" variant="ghost" @click="() => { turnoModalOpen = false }">
+            <UButton color="neutral" variant="ghost" @click="cancelarEntrarTurno">
               Cancelar
             </UButton>
             <UButton

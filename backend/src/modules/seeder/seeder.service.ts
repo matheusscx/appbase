@@ -243,8 +243,8 @@ export class SeederService implements OnApplicationBootstrap {
   /**
    * Catálogo global de unidades de medida. `factor_base` = cuántas unidades
    * base de la magnitud equivale 1 de esta (kg → 1000 g; m → 100 cm).
-   * Incluye 'unidad', 'kg', 'l' y 'm' porque ya hay datos sembrados con esos
-   * códigos (ver seedItemsMonedaUnidadMatrix): quitarlos rompería la validación.
+   * Incluye 'unidad', 'kg', 'l' y 'm' como catálogo base de magnitudes; el
+   * seed usa 'unidad' y 'kg' (productos e ingredientes demo).
    */
   private async seedUnidadesMedida(): Promise<void> {
     const unidades: Partial<UnidadMedida>[] = [
@@ -918,7 +918,7 @@ export class SeederService implements OnApplicationBootstrap {
       {
         id: '550e8400-e29b-41d4-a716-446655440007',
         provinciaId: '550e8400-e29b-41d4-a716-446655440001',
-        nombre: 'Paris',
+        nombre: 'Demo Restaurante',
         correo: 'contacto@paris.cl',
         telefono: '+56226005000',
         direccion: 'Av. Presidente Kennedy 9001, Las Condes, Santiago',
@@ -926,7 +926,7 @@ export class SeederService implements OnApplicationBootstrap {
       {
         id: '550e8400-e29b-41d4-a716-446655440040',
         provinciaId: '550e8400-e29b-41d4-a716-446655440001',
-        nombre: 'Falabella',
+        nombre: 'Demo Bodega',
         correo: 'contacto@falabella.cl',
         telefono: '+56226007000',
         direccion: 'Av. Presidente Kennedy 6400, Las Condes, Santiago',
@@ -2224,112 +2224,22 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedItems(): Promise<void> {
-    await this.seedItemSoporte();
-    await this.seedItemsMonedaUnidadMatrix();
-    await this.seedItemsSuscripcion();
-    await this.seedRecetaDemo();
-    await this.seedCombos();
+    await this.seedProductoDemoVentas();
+    await this.seedIngredientesBase();
+    await this.seedPapasFritas();
     await this.seedGruposModificadores();
     await this.seedComboEspecial();
   }
 
-  private async seedItemSoporte(): Promise<void> {
-    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
-    const CLP = '550e8400-e29b-41d4-a716-446655440003';
-    const ITEM_SOPORTE = '550e8400-e29b-41d4-a716-446655440117';
-
-    const existsSoporte: unknown[] = await this.dataSource.query(
-      `SELECT 1 FROM items WHERE item_id = $1`,
-      [ITEM_SOPORTE],
-    );
-    if (!existsSoporte.length) {
-      await this.dataSource.query(
-        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion,
-                            precio_base, precio_incluye_impuesto, activo, tipo)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [
-          ITEM_SOPORTE,
-          PARIS,
-          CLP,
-          'Soporte técnico premium',
-          'Soporte técnico en sitio para equipos tecnológicos',
-          '45000',
-          false,
-          true,
-          'servicio',
-        ],
-      );
-      await this.dataSource.query(
-        `INSERT INTO item_servicio (item_id, duracion_estimada, requiere_cita) VALUES ($1,$2,$3)`,
-        [ITEM_SOPORTE, 60, true],
-      );
-    }
-  }
-
-  private async seedItemsSuscripcion(): Promise<void> {
-    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
-    const CLP = '550e8400-e29b-41d4-a716-446655440003';
-
-    const suscripciones = [
-      {
-        itemId: '550e8400-e29b-41d4-a716-446655440170',
-        nombre: 'Mensualidad Gimnasio',
-        descripcion: 'Acceso mensual al gimnasio',
-        precioBase: '30000',
-        frecuencia: 'mensual',
-      },
-      {
-        itemId: '550e8400-e29b-41d4-a716-446655440158',
-        nombre: 'Clase semanal de yoga',
-        descripcion: 'Clase de yoga semanal',
-        precioBase: '8000',
-        frecuencia: 'semanal',
-      },
-      {
-        itemId: '550e8400-e29b-41d4-a716-446655440171',
-        nombre: 'Plan quincenal de limpieza',
-        descripcion: 'Plan de limpieza cada 15 días',
-        precioBase: '15000',
-        frecuencia: 'quincenal',
-      },
-    ];
-
-    for (const s of suscripciones) {
-      const existsSuscripcion: unknown[] = await this.dataSource.query(
-        `SELECT 1 FROM items WHERE item_id = $1`,
-        [s.itemId],
-      );
-      if (!existsSuscripcion.length) {
-        await this.dataSource.query(
-          `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion,
-                              precio_base, precio_incluye_impuesto, activo, tipo)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-          [
-            s.itemId,
-            PARIS,
-            CLP,
-            s.nombre,
-            s.descripcion,
-            s.precioBase,
-            false,
-            true,
-            'suscripcion',
-          ],
-        );
-        await this.dataSource.query(
-          `INSERT INTO item_suscripcion (item_id, frecuencia) VALUES ($1,$2)`,
-          [s.itemId, s.frecuencia],
-        );
-      }
-    }
-  }
-
   /**
-   * Receta demo "Hamburguesa Clásica" — pieza 3 del cluster food-service.
-   * Pan y carne bloqueantes, queso no bloqueante; carne/queso se compran en
-   * kg y la receta los consume en gramos, para ejercitar la conversión.
+   * Ingredientes base del cluster food-service demo: pan, carne molida y
+   * queso laminado, con stock inicial. Los consume "Hamburguesa Especial"
+   * (pan/queso fijos) y el grupo "Proteína" (carne como opción). Carne molida
+   * también es el producto seed que ejercita el flujo de mermas.
+   * Carne/queso se compran en kg; las recetas los consumen en gramos, para
+   * ejercitar la conversión de unidades.
    */
-  private async seedRecetaDemo(): Promise<void> {
+  private async seedIngredientesBase(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const CLP = '550e8400-e29b-41d4-a716-446655440003';
     const uuid = (suffix: number): string =>
@@ -2338,18 +2248,9 @@ export class SeederService implements OnApplicationBootstrap {
     const PAN_ID = uuid(256);
     const CARNE_ID = uuid(257);
     const QUESO_ID = uuid(258);
-    const HAMBURGUESA_ID = uuid(259);
-    const RI_PAN_ID = uuid(260);
-    const RI_CARNE_ID = uuid(261);
-    const RI_QUESO_ID = uuid(262);
     const MOV_PAN_ID = uuid(263);
     const MOV_CARNE_ID = uuid(264);
     const MOV_QUESO_ID = uuid(265);
-
-    const exists: unknown[] = await this.dataSource.query(
-      `SELECT 1 FROM items WHERE item_id = $1`,
-      [HAMBURGUESA_ID],
-    );
 
     // Migración soft: DBs ya sembradas con tipo=producto
     await this.dataSource.query(
@@ -2358,15 +2259,11 @@ export class SeederService implements OnApplicationBootstrap {
       [[PAN_ID, CARNE_ID, QUESO_ID]],
     );
 
-    const RE_EXTRA_QUESO_ID = uuid(276);
-
+    const exists: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM items WHERE item_id = $1`,
+      [CARNE_ID],
+    );
     if (exists.length) {
-      await this.seedRecetaExtraQuesoDemo(
-        PARIS,
-        HAMBURGUESA_ID,
-        QUESO_ID,
-        RE_EXTRA_QUESO_ID,
-      );
       return;
     }
 
@@ -2415,97 +2312,33 @@ export class SeederService implements OnApplicationBootstrap {
       await this.dataSource.query(
         `INSERT INTO movimientos_inventario
            (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
-         VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed receta demo)')`,
+         VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed ingredientes base)')`,
         [ing.movId, PARIS, ing.id, ing.stock, ing.costo],
       );
     }
-
-    // Hamburguesa: pan (1 unidad, bloqueante) + carne (150 g, bloqueante) + queso (20 g, no bloqueante)
-    // costo = 500*1 + 8000*0.15 + 6000*0.02 = 500 + 1200 + 120 = 1820
-    await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,'Hamburguesa Clásica','3500',false,true,'receta')`,
-      [HAMBURGUESA_ID, PARIS, CLP],
-    );
-    await this.dataSource.query(
-      `INSERT INTO item_receta (item_id, costo_actual) VALUES ($1,'1820.0000')`,
-      [HAMBURGUESA_ID],
-    );
-    await this.dataSource.query(
-      `INSERT INTO receta_ingredientes
-         (receta_ingrediente_id, tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, bloqueante)
-       VALUES
-         ($1,$5,$6,$2,'1','unidad',true),
-         ($3,$5,$6,$7,'150','g',true),
-         ($4,$5,$6,$8,'20','g',false)`,
-      [
-        RI_PAN_ID,
-        PAN_ID,
-        RI_CARNE_ID,
-        RI_QUESO_ID,
-        PARIS,
-        HAMBURGUESA_ID,
-        CARNE_ID,
-        QUESO_ID,
-      ],
-    );
-    await this.seedRecetaExtraQuesoDemo(
-      PARIS,
-      HAMBURGUESA_ID,
-      QUESO_ID,
-      RE_EXTRA_QUESO_ID,
-    );
-  }
-
-  /** Extra "porción de queso" en Hamburguesa Clásica (idempotente). */
-  private async seedRecetaExtraQuesoDemo(
-    tenantId: string,
-    recetaItemId: string,
-    quesoItemId: string,
-    recetaExtraId: string,
-  ): Promise<void> {
-    const extraExists: unknown[] = await this.dataSource.query(
-      `SELECT 1 FROM receta_extras_permitidos WHERE receta_extra_id = $1`,
-      [recetaExtraId],
-    );
-    if (extraExists.length) return;
-
-    await this.dataSource.query(
-      `INSERT INTO receta_extras_permitidos
-         (receta_extra_id, tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, precio_extra)
-       VALUES ($1, $2, $3, $4, '20', 'g', '800')`,
-      [recetaExtraId, tenantId, recetaItemId, quesoItemId],
-    );
   }
 
   /**
-   * Combo demo "Combo Clásico" — pieza 4 del cluster food-service.
-   * Componentes fijos bloqueantes: Hamburguesa Clásica (receta, ×1) + Papas
-   * fritas (producto con stock propio, ×1). Precio propio fijo (no es la
-   * suma de sus componentes); costo_actual = Σ(costo componente × cantidad).
+   * Papas fritas: producto con stock propio (costo 800/unidad). Componente
+   * fijo bloqueante del "Combo Especial" (ver seedComboEspecial).
    */
-  private async seedCombos(): Promise<void> {
+  private async seedPapasFritas(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const CLP = '550e8400-e29b-41d4-a716-446655440003';
     const uuid = (suffix: number): string =>
       `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
 
-    const HAMBURGUESA_ID = uuid(259); // ya sembrada por seedRecetaDemo
     const PAPAS_ID = uuid(281);
     const MOV_PAPAS_ID = uuid(282);
-    const COMBO_ID = uuid(283);
-    const CC_HAMBURGUESA_ID = uuid(284);
-    const CC_PAPAS_ID = uuid(285);
 
     const exists: unknown[] = await this.dataSource.query(
       `SELECT 1 FROM items WHERE item_id = $1`,
-      [COMBO_ID],
+      [PAPAS_ID],
     );
     if (exists.length) {
       return;
     }
 
-    // Papas fritas: producto con stock propio, costo actual 800/unidad.
     const PAPAS_COSTO = '800';
     const PAPAS_STOCK = '40';
     await this.dataSource.query(
@@ -2525,53 +2358,19 @@ export class SeederService implements OnApplicationBootstrap {
     await this.dataSource.query(
       `INSERT INTO movimientos_inventario
          (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
-       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed combo demo)')`,
+       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed papas fritas)')`,
       [MOV_PAPAS_ID, PARIS, PAPAS_ID, PAPAS_STOCK, PAPAS_COSTO],
-    );
-
-    // Combo Clásico: precio propio fijo ($4200), no la suma de sus componentes.
-    // costo_actual = costo Hamburguesa (receta, 1820) + costo Papas (producto, 800) = 2620
-    await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,'Combo Clásico','Hamburguesa Clásica + Papas fritas','4200',false,true,'combo')`,
-      [COMBO_ID, PARIS, CLP],
-    );
-    await this.dataSource.query(
-      `INSERT INTO item_combo (item_id, costo_actual) VALUES ($1,'2620.0000')`,
-      [COMBO_ID],
-    );
-    await this.dataSource.query(
-      `INSERT INTO combo_componentes
-         (combo_componente_id, tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
-       VALUES
-         ($1,$3,$4,$2,'1',true),
-         ($5,$3,$4,$6,'1',true)`,
-      [
-        CC_HAMBURGUESA_ID,
-        HAMBURGUESA_ID,
-        PARIS,
-        COMBO_ID,
-        CC_PAPAS_ID,
-        PAPAS_ID,
-      ],
     );
   }
 
   /**
-   * Grupos de modificadores reutilizables demo — pieza final del cluster
-   * food-service (Ticket B). Dos grupos:
-   * - "Proteína" (familia ingrediente, derivada): carne (reutiliza la de
-   *   seedRecetaDemo) y pollo con recargo $0, chuleta con recargo $1.500,
-   *   150 g por elección. Asociado a la receta nueva "Hamburguesa Especial"
-   *   (min:1, max:1 — obligatorio, una sola proteína) que NO lleva proteína
-   *   fija como receta_ingrediente (a diferencia de "Hamburguesa Clásica").
-   *   El mismo grupo "Proteína" se reutiliza en una segunda receta,
-   *   "Hamburguesa Especial XL", con cantidad overrideada a 250 g por
-   *   opción (vía item_grupo_modificador_opciones) mientras "Hamburguesa
-   *   Especial" sigue en los 150 g por defecto del grupo — demo viva del
-   *   modelo híbrido default+override (COALESCE).
-   * - "Bebida" (familia vendible): Coca-Cola $0, Bebida premium +$800,
-   *   asociado al "Combo Clásico" existente (min:1, max:1 — obligatorio).
+   * Grupo de modificadores reutilizable demo — pieza final del cluster
+   * food-service. "Proteína" (familia ingrediente, derivada de sus opciones):
+   * carne (reutiliza la de seedIngredientesBase) y pollo con recargo $0,
+   * chuleta con recargo $1.500, 150 g por elección. Asociado a la receta
+   * "Hamburguesa Especial" (min:1, max:1 — obligatorio, una sola proteína),
+   * que lleva pan y queso fijos como receta_ingrediente pero NO proteína fija:
+   * la proteína se elige vía el grupo y su costo se realiza al vender.
    * Idempotente: guarda por la existencia del grupo "Proteína".
    */
   private async seedGruposModificadores(): Promise<void> {
@@ -2580,11 +2379,10 @@ export class SeederService implements OnApplicationBootstrap {
     const uuid = (suffix: number): string =>
       `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
 
-    // Reutilizados de seedRecetaDemo()/seedCombos().
+    // Reutilizados de seedIngredientesBase().
     const PAN_ID = uuid(256);
     const CARNE_ID = uuid(257);
     const QUESO_ID = uuid(258);
-    const COMBO_ID = uuid(283); // Combo Clásico
 
     const POLLO_ID = uuid(286);
     const MOV_POLLO_ID = uuid(287);
@@ -2598,56 +2396,17 @@ export class SeederService implements OnApplicationBootstrap {
     const HE_RI_PAN_ID = uuid(295);
     const HE_RI_QUESO_ID = uuid(296);
     const HE_ITEM_GRUPO_ID = uuid(297);
-    // "Hamburguesa Especial XL": misma familia "Proteína", pero con cantidad
-    // de proteína overrideada (250 g en vez de 150 g) por receta — demuestra
-    // el modelo híbrido (grupo = catálogo reutilizable con default; la
-    // receta define su propia cantidad efectiva vía item_grupo_modificador_opciones).
-    const HAMBURGUESA_ESPECIAL_XL_ID = uuid(306);
-    const HE_XL_RI_PAN_ID = uuid(307);
-    const HE_XL_RI_QUESO_ID = uuid(308);
-    const HE_XL_ITEM_GRUPO_ID = uuid(309);
-    const HE_XL_OV_CARNE_ID = uuid(310);
-    const HE_XL_OV_POLLO_ID = uuid(311);
-    const HE_XL_OV_CHULETA_ID = uuid(312);
-    const COCACOLA_ID = uuid(298);
-    const MOV_COCACOLA_ID = uuid(299);
-    const BEBIDA_PREMIUM_ID = uuid(300);
-    const MOV_BEBIDA_PREMIUM_ID = uuid(301);
-    const BEBIDA_GRUPO_ID = uuid(302);
-    const BEBIDA_OP_COCACOLA_ID = uuid(303);
-    const BEBIDA_OP_PREMIUM_ID = uuid(304);
-    const COMBO_ITEM_GRUPO_ID = uuid(305);
 
     const exists: unknown[] = await this.dataSource.query(
       `SELECT 1 FROM grupos_modificadores WHERE grupo_modificador_id = $1`,
       [PROTEINA_GRUPO_ID],
     );
     if (exists.length) {
-      // Grupo "Proteína" ya sembrado en un boot anterior — solo falta
-      // verificar/agregar la receta XL (guardas independientes: agregar la
-      // XL no requiere re-sembrar lo demás ni tocar datos existentes).
-      await this.seedHamburguesaEspecialXl({
-        PARIS,
-        CLP,
-        PAN_ID,
-        QUESO_ID,
-        PROTEINA_GRUPO_ID,
-        PROTEINA_OP_CARNE_ID,
-        PROTEINA_OP_POLLO_ID,
-        PROTEINA_OP_CHULETA_ID,
-        HAMBURGUESA_ESPECIAL_XL_ID,
-        HE_XL_RI_PAN_ID,
-        HE_XL_RI_QUESO_ID,
-        HE_XL_ITEM_GRUPO_ID,
-        HE_XL_OV_CARNE_ID,
-        HE_XL_OV_POLLO_ID,
-        HE_XL_OV_CHULETA_ID,
-      });
       return;
     }
 
     // Pollo y chuleta: ingredientes demo nuevos (carne reutiliza la de
-    // seedRecetaDemo, mismo estilo que "Papas fritas" en seedCombos).
+    // seedIngredientesBase, mismo estilo que "Papas fritas").
     const nuevosIngredientes = [
       {
         id: POLLO_ID,
@@ -2690,8 +2449,7 @@ export class SeederService implements OnApplicationBootstrap {
     }
 
     // Grupo "Proteína" (familia ingrediente, derivada de sus opciones):
-    // carne y pollo sin recargo, chuleta +$1.500. 150 g por elección, igual
-    // porción que la carne bloqueante de "Hamburguesa Clásica".
+    // carne y pollo sin recargo, chuleta +$1.500. 150 g por elección.
     await this.dataSource.query(
       `INSERT INTO grupos_modificadores (grupo_modificador_id, tenant_id, nombre)
        VALUES ($1,$2,'Proteína')`,
@@ -2717,10 +2475,10 @@ export class SeederService implements OnApplicationBootstrap {
     );
 
     // Receta "Hamburguesa Especial": pan (1 unidad, bloqueante) + queso
-    // (20 g, no bloqueante) fijos — SIN proteína fija como receta_ingrediente
-    // (a diferencia de "Hamburguesa Clásica"): la proteína se elige vía el
-    // grupo "Proteína" (min:1, max:1, obligatorio) y su costo se realiza al
-    // vender, con el movimiento de inventario de la opción elegida.
+    // (20 g, no bloqueante) fijos — SIN proteína fija como receta_ingrediente:
+    // la proteína se elige vía el grupo "Proteína" (min:1, max:1, obligatorio)
+    // y su costo se realiza al vender, con el movimiento de inventario de la
+    // opción elegida.
     // costo_actual = costo pan (500×1) + costo queso (6000×0.02) = 620.
     await this.dataSource.query(
       `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
@@ -2752,124 +2510,16 @@ export class SeederService implements OnApplicationBootstrap {
        VALUES ($1,$2,$3,$4,1,1,0)`,
       [HE_ITEM_GRUPO_ID, PARIS, HAMBURGUESA_ESPECIAL_ID, PROTEINA_GRUPO_ID],
     );
-
-    // Receta "Hamburguesa Especial XL": reutiliza el mismo grupo "Proteína"
-    // con cantidad overrideada a 250 g (ver seedHamburguesaEspecialXl).
-    await this.seedHamburguesaEspecialXl({
-      PARIS,
-      CLP,
-      PAN_ID,
-      QUESO_ID,
-      PROTEINA_GRUPO_ID,
-      PROTEINA_OP_CARNE_ID,
-      PROTEINA_OP_POLLO_ID,
-      PROTEINA_OP_CHULETA_ID,
-      HAMBURGUESA_ESPECIAL_XL_ID,
-      HE_XL_RI_PAN_ID,
-      HE_XL_RI_QUESO_ID,
-      HE_XL_ITEM_GRUPO_ID,
-      HE_XL_OV_CARNE_ID,
-      HE_XL_OV_POLLO_ID,
-      HE_XL_OV_CHULETA_ID,
-    });
-
-    // Coca-Cola y Bebida premium: productos demo nuevos con stock propio
-    // (mismo estilo que "Papas fritas" en seedCombos).
-    const COCACOLA_COSTO = '500';
-    const COCACOLA_STOCK = '100';
-    await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,'Coca-Cola','1200',false,true,'producto')`,
-      [COCACOLA_ID, PARIS, CLP],
-    );
-    await this.dataSource.query(
-      `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario, costo_actual)
-       VALUES ($1,'0','unidad','cantidad',$2)`,
-      [COCACOLA_ID, COCACOLA_COSTO],
-    );
-    await this.dataSource.query(
-      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
-      [COCACOLA_STOCK, COCACOLA_ID],
-    );
-    await this.dataSource.query(
-      `INSERT INTO movimientos_inventario
-         (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
-       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed grupo Bebida)')`,
-      [MOV_COCACOLA_ID, PARIS, COCACOLA_ID, COCACOLA_STOCK, COCACOLA_COSTO],
-    );
-
-    const PREMIUM_COSTO = '1200';
-    const PREMIUM_STOCK = '40';
-    await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,'Bebida premium','2000',false,true,'producto')`,
-      [BEBIDA_PREMIUM_ID, PARIS, CLP],
-    );
-    await this.dataSource.query(
-      `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario, costo_actual)
-       VALUES ($1,'0','unidad','cantidad',$2)`,
-      [BEBIDA_PREMIUM_ID, PREMIUM_COSTO],
-    );
-    await this.dataSource.query(
-      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
-      [PREMIUM_STOCK, BEBIDA_PREMIUM_ID],
-    );
-    await this.dataSource.query(
-      `INSERT INTO movimientos_inventario
-         (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad, stock_anterior, stock_resultante, costo_unitario, comentario)
-       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5,'Stock inicial (seed grupo Bebida)')`,
-      [
-        MOV_BEBIDA_PREMIUM_ID,
-        PARIS,
-        BEBIDA_PREMIUM_ID,
-        PREMIUM_STOCK,
-        PREMIUM_COSTO,
-      ],
-    );
-
-    // Grupo "Bebida" (familia vendible): Coca-Cola sin recargo, Bebida
-    // premium +$800. Sin unidad_codigo (solo aplica a familia ingrediente).
-    await this.dataSource.query(
-      `INSERT INTO grupos_modificadores (grupo_modificador_id, tenant_id, nombre)
-       VALUES ($1,$2,'Bebida')`,
-      [BEBIDA_GRUPO_ID, PARIS],
-    );
-    await this.dataSource.query(
-      `INSERT INTO grupo_modificador_opciones
-         (grupo_opcion_id, tenant_id, grupo_modificador_id, item_id, cantidad, unidad_codigo, precio_extra, orden)
-       VALUES
-         ($1,$4,$5,$2,'1',NULL,'0',0),
-         ($3,$4,$5,$6,'1',NULL,'800',1)`,
-      [
-        BEBIDA_OP_COCACOLA_ID,
-        COCACOLA_ID,
-        BEBIDA_OP_PREMIUM_ID,
-        PARIS,
-        BEBIDA_GRUPO_ID,
-        BEBIDA_PREMIUM_ID,
-      ],
-    );
-
-    // Asocia "Bebida" al Combo Clásico existente (min:1, max:1 — obligatorio).
-    await this.dataSource.query(
-      `INSERT INTO item_grupos_modificadores
-         (item_grupo_id, tenant_id, item_id, grupo_modificador_id, min, max, orden)
-       VALUES ($1,$2,$3,$4,1,1,0)`,
-      [COMBO_ITEM_GRUPO_ID, PARIS, COMBO_ID, BEBIDA_GRUPO_ID],
-    );
   }
 
   /**
    * Combo demo "Combo Especial" — grupos anidados en combos (un nivel):
    * componentes "Hamburguesa Especial" (receta, `…440294`, ya trae su propio
-   * grupo "Proteína" asociado) + "Papas fritas" (producto, `…440281`,
-   * reutilizada del "Combo Clásico"). A diferencia de "Combo Clásico" (sin
-   * grupos propios ni de componentes con grupos hasta este ticket), este
-   * combo demuestra que el grupo de un COMPONENTE receta se expone
-   * automáticamente al vender el combo — sin asociar nada al combo mismo.
+   * grupo "Proteína" asociado) + "Papas fritas" (producto, `…440281`).
+   * Demuestra que el grupo de un COMPONENTE receta se expone automáticamente
+   * al vender el combo — sin asociar nada al combo mismo.
    * Precio propio fijo ($4300); costo_actual = costo Hamburguesa Especial
    * (receta, 620) + costo Papas fritas (producto, 800) = 1420.
-   * Cero cambio al "Combo Clásico" existente — combo nuevo, aparte.
    * Idempotente: guarda por la existencia del propio combo.
    */
   private async seedComboEspecial(): Promise<void> {
@@ -2879,7 +2529,7 @@ export class SeederService implements OnApplicationBootstrap {
       `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
 
     const HAMBURGUESA_ESPECIAL_ID = uuid(294); // ya sembrada por seedGruposModificadores
-    const PAPAS_ID = uuid(281); // ya sembrada por seedCombos
+    const PAPAS_ID = uuid(281); // ya sembrada por seedPapasFritas
     const COMBO_ESPECIAL_ID = uuid(313);
     const CC_HAMBURGUESA_ESPECIAL_ID = uuid(314);
     const CC_PAPAS_ID = uuid(315);
@@ -2919,221 +2569,52 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   /**
-   * Receta "Hamburguesa Especial XL": REUTILIZA el mismo grupo "Proteína"
-   * (mismas 3 opciones, mismo precio_extra de chuleta) que "Hamburguesa
-   * Especial", pero consume 250 g de proteína en vez de los 150 g por
-   * defecto del grupo. El default del grupo NO cambia — se inserta un
-   * override por opción en item_grupo_modificador_opciones, llavado por
-   * (item_grupo_id, grupo_opcion_id). El precio_extra no se overridea:
-   * hereda el default del grupo vía COALESCE. Demo viva del modelo híbrido.
-   * Guarda independiente (existencia de la propia receta XL) para poder
-   * agregarse en un boot posterior a instalaciones donde "Proteína" ya
-   * estaba sembrada, sin re-sembrar ni tocar nada existente.
+   * Producto demo unidad·CLP con IVA 19% — base de los tests E2E de ventas.
+   * IDs 116 (item) / 120 (movimiento) reservados para esos tests.
    */
-  private async seedHamburguesaEspecialXl(ids: {
-    PARIS: string;
-    CLP: string;
-    PAN_ID: string;
-    QUESO_ID: string;
-    PROTEINA_GRUPO_ID: string;
-    PROTEINA_OP_CARNE_ID: string;
-    PROTEINA_OP_POLLO_ID: string;
-    PROTEINA_OP_CHULETA_ID: string;
-    HAMBURGUESA_ESPECIAL_XL_ID: string;
-    HE_XL_RI_PAN_ID: string;
-    HE_XL_RI_QUESO_ID: string;
-    HE_XL_ITEM_GRUPO_ID: string;
-    HE_XL_OV_CARNE_ID: string;
-    HE_XL_OV_POLLO_ID: string;
-    HE_XL_OV_CHULETA_ID: string;
-  }): Promise<void> {
-    const {
-      PARIS,
-      CLP,
-      PAN_ID,
-      QUESO_ID,
-      PROTEINA_GRUPO_ID,
-      PROTEINA_OP_CARNE_ID,
-      PROTEINA_OP_POLLO_ID,
-      PROTEINA_OP_CHULETA_ID,
-      HAMBURGUESA_ESPECIAL_XL_ID,
-      HE_XL_RI_PAN_ID,
-      HE_XL_RI_QUESO_ID,
-      HE_XL_ITEM_GRUPO_ID,
-      HE_XL_OV_CARNE_ID,
-      HE_XL_OV_POLLO_ID,
-      HE_XL_OV_CHULETA_ID,
-    } = ids;
+  private async seedProductoDemoVentas(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CLP = '550e8400-e29b-41d4-a716-446655440003';
+    const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
+    const IVA_19 = '550e8400-e29b-41d4-a716-446655440280'; // IVA sistema Chile
+    const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116';
+    const MOV_ID = '550e8400-e29b-41d4-a716-446655440120';
+    const STOCK = '50';
 
     const exists: unknown[] = await this.dataSource.query(
       `SELECT 1 FROM items WHERE item_id = $1`,
-      [HAMBURGUESA_ESPECIAL_XL_ID],
+      [ITEM_ID],
     );
     if (exists.length) {
       return;
     }
 
-    // costo_actual = costo pan (500×1) + costo queso (6000×0.02) = 620,
-    // igual que "Hamburguesa Especial" (mismos ingredientes fijos).
     await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,'Hamburguesa Especial XL','Pan y queso fijos; elige tu proteína (porción XL 250 g)','4900',false,true,'receta')`,
-      [HAMBURGUESA_ESPECIAL_XL_ID, PARIS, CLP],
+      `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
+                          precio_base, precio_incluye_impuesto, activo, tipo)
+       VALUES ($1,$2,$3,$4,'Producto demo (unidad · CLP)','Item de desarrollo: Unidad, precio en CLP','5000',false,true,'producto')`,
+      [ITEM_ID, PARIS, CLP, ELECTRONICA],
     );
     await this.dataSource.query(
-      `INSERT INTO item_receta (item_id, costo_actual) VALUES ($1,'620.0000')`,
-      [HAMBURGUESA_ESPECIAL_XL_ID],
+      `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
+       VALUES ($1,'0','unidad','cantidad')`,
+      [ITEM_ID],
     );
     await this.dataSource.query(
-      `INSERT INTO receta_ingredientes
-         (receta_ingrediente_id, tenant_id, receta_item_id, ingrediente_item_id, cantidad, unidad_codigo, bloqueante)
-       VALUES
-         ($1,$4,$5,$2,'1','unidad',true),
-         ($3,$4,$5,$6,'20','g',false)`,
-      [
-        HE_XL_RI_PAN_ID,
-        PAN_ID,
-        HE_XL_RI_QUESO_ID,
-        PARIS,
-        HAMBURGUESA_ESPECIAL_XL_ID,
-        QUESO_ID,
-      ],
+      `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      [ITEM_ID, IVA_19],
     );
     await this.dataSource.query(
-      `INSERT INTO item_grupos_modificadores
-         (item_grupo_id, tenant_id, item_id, grupo_modificador_id, min, max, orden)
-       VALUES ($1,$2,$3,$4,1,1,0)`,
-      [
-        HE_XL_ITEM_GRUPO_ID,
-        PARIS,
-        HAMBURGUESA_ESPECIAL_XL_ID,
-        PROTEINA_GRUPO_ID,
-      ],
+      `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
+      [STOCK, ITEM_ID],
     );
-    // Override de cantidad (150 g default → 250 g) para las 3 opciones del
-    // grupo, acotado a ESTA asociación (item_grupo_id); "Hamburguesa
-    // Especial" sigue usando el default de 150 g sin ningún override.
     await this.dataSource.query(
-      `INSERT INTO item_grupo_modificador_opciones
-         (item_grupo_opcion_id, tenant_id, item_grupo_id, grupo_opcion_id, cantidad, unidad_codigo)
-       VALUES
-         ($1,$5,$6,$2,'250','g'),
-         ($3,$5,$6,$7,'250','g'),
-         ($4,$5,$6,$8,'250','g')`,
-      [
-        HE_XL_OV_CARNE_ID,
-        PROTEINA_OP_CARNE_ID,
-        HE_XL_OV_POLLO_ID,
-        HE_XL_OV_CHULETA_ID,
-        PARIS,
-        HE_XL_ITEM_GRUPO_ID,
-        PROTEINA_OP_POLLO_ID,
-        PROTEINA_OP_CHULETA_ID,
-      ],
+      `INSERT INTO movimientos_inventario
+         (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
+          stock_anterior, stock_resultante, comentario)
+       VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,'Stock inicial (seed producto demo ventas)')`,
+      [MOV_ID, PARIS, ITEM_ID, STOCK],
     );
-  }
-
-  /**
-   * Un producto por cada par (unidad_medida × moneda), sin duplicados.
-   * IDs 116/120 reservados para unidad·CLP (compat. tests E2E de ventas).
-   */
-  private async seedItemsMonedaUnidadMatrix(): Promise<void> {
-    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
-    const CLP = '550e8400-e29b-41d4-a716-446655440003';
-    const UF = '550e8400-e29b-41d4-a716-446655440004';
-    const USD = '550e8400-e29b-41d4-a716-446655440005';
-    const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
-    const IVA_19 = '550e8400-e29b-41d4-a716-446655440280'; // IVA sistema Chile
-
-    const monedas = [
-      { id: CLP, codigo: 'CLP', precioBase: '5000' },
-      { id: UF, codigo: 'UF', precioBase: '2.5' },
-      { id: USD, codigo: 'USD', precioBase: '10' },
-    ];
-
-    const unidades = [
-      { valor: 'unidad', label: 'Unidad', stock: '50' },
-      { valor: 'kg', label: 'Kilogramo', stock: '100' },
-      { valor: 'l', label: 'Litro', stock: '75' },
-      { valor: 'm', label: 'Metro', stock: '200' },
-    ];
-
-    const uuid = (suffix: number): string =>
-      `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
-
-    // 12 pares únicos; 116/120 = unidad·CLP (tests E2E de ventas)
-    const itemIds = [
-      116, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157,
-    ];
-    const movIds = [120, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169];
-
-    let comboIndex = 0;
-    for (const unidad of unidades) {
-      for (const moneda of monedas) {
-        const itemId = uuid(itemIds[comboIndex]);
-        const movimientoId = uuid(movIds[comboIndex]);
-        comboIndex++;
-
-        const exists: unknown[] = await this.dataSource.query(
-          `SELECT 1 FROM items WHERE item_id = $1`,
-          [itemId],
-        );
-        if (exists.length) {
-          continue;
-        }
-
-        const nombre = `Producto demo (${unidad.valor} · ${moneda.codigo})`;
-        const descripcion = `Item de desarrollo: ${unidad.label}, precio en ${moneda.codigo}`;
-
-        await this.dataSource.query(
-          `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
-                              precio_base, precio_incluye_impuesto, activo, tipo)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [
-            itemId,
-            PARIS,
-            moneda.id,
-            ELECTRONICA,
-            nombre,
-            descripcion,
-            moneda.precioBase,
-            false,
-            true,
-            'producto',
-          ],
-        );
-
-        await this.dataSource.query(
-          `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
-           VALUES ($1,'0',$2,'cantidad')`,
-          [itemId, unidad.valor],
-        );
-
-        await this.dataSource.query(
-          `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [itemId, IVA_19],
-        );
-
-        await this.dataSource.query(
-          `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,
-          [unidad.stock, itemId],
-        );
-
-        await this.dataSource.query(
-          `INSERT INTO movimientos_inventario
-             (movimiento_id, tenant_id, item_id, tipo, motivo, cantidad,
-              stock_anterior, stock_resultante, comentario)
-           VALUES ($1,$2,$3,'entrada','inventario_inicial',$4,'0',$4,$5)`,
-          [
-            movimientoId,
-            PARIS,
-            itemId,
-            unidad.stock,
-            `Stock inicial (seed ${unidad.valor}/${moneda.codigo})`,
-          ],
-        );
-      }
-    }
   }
 
   private async seedTiposDocumentoTributario(): Promise<void> {
@@ -3187,7 +2668,7 @@ export class SeederService implements OnApplicationBootstrap {
       {
         id: '550e8400-e29b-41d4-a716-446655440056',
         tenantId: '550e8400-e29b-41d4-a716-446655440007',
-        nombre: 'Paris S.A.',
+        nombre: 'Demo Restaurante S.A.',
         rut: '76.123.456-7',
         direccion: 'Av. Presidente Kennedy 9001, Las Condes',
         telefono: '+56226005000',
@@ -3196,7 +2677,7 @@ export class SeederService implements OnApplicationBootstrap {
       {
         id: '550e8400-e29b-41d4-a716-446655440057',
         tenantId: '550e8400-e29b-41d4-a716-446655440040',
-        nombre: 'Falabella Retail S.A.',
+        nombre: 'Demo Bodega S.A.',
         rut: '96.654.390-9',
         direccion: 'Av. Presidente Kennedy 6400, Las Condes',
         telefono: '+56226007000',

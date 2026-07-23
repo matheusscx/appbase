@@ -8,6 +8,11 @@ export interface TenantItem {
 
 export const useTenantStore = defineStore('tenant', () => {
   const config = useRuntimeConfig()
+  // En SSR (dentro de Docker el server Nuxt escucha en localhost:3000, el mismo
+  // origen que `public.apiUrl`) hay que usar el host interno del backend; si no,
+  // el $fetch hace loopback al propio server SSR. Mismo patrón que `auth.ts`.
+  const serverApiUrl = import.meta.server ? (config as Record<string, unknown>).apiUrl as string | undefined : undefined
+  const resolvedApiUrl = import.meta.server ? (serverApiUrl ?? config.public.apiUrl) : config.public.apiUrl
   const tenants = ref<TenantItem[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -24,7 +29,7 @@ export const useTenantStore = defineStore('tenant', () => {
     error.value = null
     try {
       tenants.value = await useApiFetch<TenantItem[]>(
-        `${config.public.apiUrl}/auth/my-tenants`,
+        `${resolvedApiUrl}/auth/my-tenants`,
       )
     }
     catch (e: unknown) {
@@ -43,7 +48,7 @@ export const useTenantStore = defineStore('tenant', () => {
       useMonedasStore().reset()
       const auth = useAuthStore()
       const data = await useApiFetch<{ access_token: string }>(
-        `${config.public.apiUrl}/auth/switch-tenant`,
+        `${resolvedApiUrl}/auth/switch-tenant`,
         { method: 'POST', body: { tenantId } },
       )
       auth.setToken(data.access_token)

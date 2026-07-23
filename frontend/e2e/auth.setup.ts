@@ -6,7 +6,7 @@ import { test as setup, expect } from '@playwright/test'
 const authFile = 'e2e/.auth/paris.json'
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@sistema.com'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'admin'
-const TENANT = process.env.E2E_TENANT ?? 'Paris'
+const TENANT = process.env.E2E_TENANT ?? 'Demo Restaurante'
 
 setup('autenticar y elegir tenant', async ({ page }) => {
   // networkidle: esperar la hidratación de Nuxt antes de tipear, si no el v-model

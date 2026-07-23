@@ -279,6 +279,25 @@ solo-de-tipo:
 - **Índice tras `expect(x).toHaveLength(n)`** sigue siendo `T | undefined` → `x[0]!.campo`
   (misma convención `!` del índice guardado).
 
+### ❌ Dependencia nueva sin `optimizeDeps.include` en `nuxt.config.ts`
+
+```ts
+// Al importar un paquete nuevo (sobre todo CJS) desde un composable/componente,
+// Vite lo descubre en runtime y fuerza un reload de página:
+//   ℹ Vite discovered new dependencies at runtime: qz-tray ← ./app/composables/useImpresoras.ts
+
+// BIEN — registrarlo en el pre-bundle en el mismo cambio que lo agrega
+vite: {
+  optimizeDeps: {
+    include: ['@internationalized/date', 'decimal.js', 'maska/vue', 'qz-tray'],
+  },
+},
+```
+
+Si no se pre-bundlea, el dev server recarga la página la primera vez que se ejecuta
+la ruta que lo importa (peor con paquetes CJS). Al `npm install` de una dependencia
+nueva de runtime, sumarla a `include` en el mismo commit — no esperar a ver el warning.
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

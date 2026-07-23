@@ -9,7 +9,7 @@ export default defineNuxtConfig({
   },
   vite: {
     optimizeDeps: {
-      include: ['@vue/devtools-core', '@vue/devtools-kit', 'decimal.js', 'maska/vue'],
+      include: ['@internationalized/date', '@vue/devtools-core', '@vue/devtools-kit', 'decimal.js', 'maska/vue', 'qz-tray'],
     },
   },
   runtimeConfig: {
