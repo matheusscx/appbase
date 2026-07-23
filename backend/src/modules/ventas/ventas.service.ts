@@ -478,11 +478,16 @@ export class VentasService {
         'No se puede combinar propina de cierre de mesa con propina directa',
       );
     }
-    // Flags de canal: propina de un canal deshabilitado se ignora (la venta
-    // se crea sin propina). Ver docs/features/liquidacion-propinas-config.md.
-    const propinaConfig = await manager.findOne(PropinaConfiguracion, {
-      where: { tenantId, eliminadoEl: IsNull() },
-    });
+    // Flags de canal: propina de un canal deshabilitado se ignora (la venta se
+    // crea sin propina). La config solo se consulta si la venta trae propina,
+    // para no pegarle a la BD en cada venta sin propina (camino caliente del
+    // POS). Ver docs/features/liquidacion-propinas-config.md.
+    const propinaConfig =
+      dto.propinaCierreMesa || dto.propinaDirecta
+        ? await manager.findOne(PropinaConfiguracion, {
+            where: { tenantId, eliminadoEl: IsNull() },
+          })
+        : null;
     const habilitadoPos = propinaConfig?.habilitadoPos ?? true;
     const habilitadoSalones = propinaConfig?.habilitadoSalones ?? true;
     let ventaPropinaId: string | null = null;
