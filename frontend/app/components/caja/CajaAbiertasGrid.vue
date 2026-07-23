@@ -32,7 +32,7 @@ async function onOpened(cajaId: string): Promise<void> {
   aperturaModalOpen.value = false
   await Promise.all([
     cajaStore.cargarAbiertas(),
-    navigateTo(`/caja/${cajaId}`),
+    navigateTo(`/cajas/${cajaId}`),
   ])
 }
 </script>
@@ -67,7 +67,7 @@ async function onOpened(cajaId: string): Promise<void> {
         v-for="caja in cajasOrdenadas"
         :key="caja.id"
         class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-        @click="navigateTo(`/caja/${caja.id}`)"
+        @click="navigateTo(`/cajas/${caja.id}`)"
       >
         <template #header>
           <div class="flex items-center justify-between gap-2">

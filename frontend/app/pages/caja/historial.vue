@@ -37,7 +37,7 @@ onMounted(async () => {
           Volver a caja
         </ULink>
 
-        <CajaHistorial :usuario-id="usuarioIdFromQuery" />
+        <CajaHistorial :usuario-id="usuarioIdFromQuery" :base-path="'/caja'" />
       </div>
     </template>
   </UDashboardPanel>

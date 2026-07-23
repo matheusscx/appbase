@@ -4,7 +4,7 @@ import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
 import type { Caja } from '~/stores/caja'
 
-const props = defineProps<{ usuarioId?: string }>()
+const props = defineProps<{ usuarioId?: string; basePath: string }>()
 
 const route = useRoute()
 
@@ -21,7 +21,7 @@ const usuarioIdEfectivo = computed(() => {
 })
 
 const puedeVerTodas = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Caja', 'Ver todas'),
+  () => permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer'),
 )
 
 const listFilters = computed(() => ({
@@ -54,7 +54,7 @@ function toggleTodas() {
 }
 
 function onSelectCaja(_e: Event, row: Row<Caja>) {
-  navigateTo(`/caja/${row.original.id}`)
+  navigateTo(`${props.basePath}/${row.original.id}`)
 }
 </script>
 
