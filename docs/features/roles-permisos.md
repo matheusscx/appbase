@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-07-01
+**Last Updated**: 2026-07-23
 
 ---
 
@@ -31,9 +31,20 @@ que los permisos de roles personalizados surtieran efecto.
 ### Modelo: multi-rol por usuario
 
 Un usuario puede tener **varios roles** por tenant. Los permisos son la **unión** de
-todos sus roles. Permite roles granulares y componibles (ej. "Caja" + "Reportes") en
+todos sus roles. Permite roles granulares y componibles (ej. "MiCaja" + "Reportes") en
 vez de obligar a crear un rol a medida por usuario. El backend ya unía permisos de
 todos los roles (`RbacService.getMisPermisos` / `userHasPermiso`).
+
+### Nota: módulo `Caja` renombrado a `MiCaja` + módulo nuevo `Cajas` (2026-07-23)
+
+El módulo de permiso `Caja` se renombró a **`MiCaja`** (operar el propio turno; acciones
+`Leer`/`Crear`/`Actualizar`/`Eliminar`, mismo id de siempre) y se creó un módulo nuevo
+**`Cajas`** (supervisar todas, solo `Leer`). La acción global `Ver todas` **dejó de
+asociarse a caja**: ya no existe `MiCaja:Ver todas`. El diferenciador "supervisor" pasó
+de ser una acción CRUD reutilizada a ser tener contratado el módulo `Cajas` — el patrón
+a seguir si otro módulo necesita separar "operar lo propio" de "supervisar todo", en vez
+de seguir sobrecargando `Ver todas`. Detalle funcional y de permisos:
+[`docs/features/gestion-cajas.md`](./gestion-cajas.md#modelo-de-acceso-por-permiso).
 
 ---
 
@@ -115,8 +126,8 @@ body: { moduloAppPermisoIds: string[] }
 **Pasos:**
 1. `docker-compose up --build`
 2. Login como admin de Paris → Configuración → "Roles y permisos" y "Usuarios" visibles.
-3. Editar rol Vendedor → activar "Eliminar" en módulo Caja → Guardar.
-4. Re-login como `vendedor@paris.cl` → verificar en `/caja` que la acción de eliminar
+3. Editar rol Vendedor → activar "Eliminar" en módulo MiCaja → Guardar.
+4. Re-login como `vendedor@paris.cl` → verificar en `/mi-caja` que la acción de eliminar
    queda habilitada → confirma que `modulos_roles` se pobló (fix).
 5. Login como vendedor: el menú Roles/Usuarios no aparece; `PATCH /roles/:id` directo → 403.
 

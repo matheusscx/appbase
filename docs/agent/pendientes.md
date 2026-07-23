@@ -69,6 +69,14 @@ encargado se difieren a propósito para no acoplar el refactor de IA/permisos a 
 modelo con implicancias de auditoría. Investigación y cruce de mercado:
 [`investigaciones/2026-07-23-gestion-caja.md §6`](investigaciones/2026-07-23-gestion-caja.md).
 
+- [x] **Refactor de IA/permisos — HECHO** (2026-07-23) — módulo `Caja` renombrado a
+  `MiCaja` (mismo id, `Leer`/`Crear`/`Actualizar`/`Eliminar`); módulo nuevo `Cajas`
+  (solo `Leer`); `Ver todas` dejó de asociarse a caja; guards remapeados por endpoint en
+  `caja.controller.ts` (mismo controller/service, rutas `/caja/*` sin cambio); dos
+  superficies frontend `/mi-caja*` y `/cajas*` (`/caja` redirige a `/mi-caja`);
+  escrituras siguen owner-only aun con `Cajas:Leer`. Detalle:
+  [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#modelo-de-acceso-por-permiso).
+  Los dos ítems siguientes **quedan pendientes** (fuera de este refactor):
 - [ ] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — habilitar que
   un usuario con permiso `Cajas` cierre la caja de un cajero que dejó el turno abierto
   (escenario: cajero que se fue de urgencia). Requiere agregar **`cerrada_por`** a la tabla

@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: —
-**Last Updated**: 2026-07-01
+**Last Updated**: 2026-07-23
 
 ---
 
@@ -44,14 +44,30 @@ cajero cuenta (`monto_contado`), generando el reporte de cuadre de caja.
 
 ## Modelo de acceso por permiso
 
-El módulo Caja distingue dos niveles de acceso según los permisos del usuario:
+Operar el propio turno y supervisar todas las cajas del tenant son dos responsabilidades
+distintas, y hasta 2026-07-23 convivían en un solo módulo `Caja` bifurcado por el permiso
+`Ver todas` — una acción CRUD genérica haciendo de "rol supervisor" disfrazado. Se separaron
+en **dos módulos de permiso y dos superficies de navegación**:
 
-| Permiso | Qué puede hacer |
-|---------|----------------|
-| `Caja:Leer` (sin `Ver todas`) | Accede a `/caja` y opera su propia caja (abrir, movimientos, cierre). Solo ve su historial. |
-| `Caja:Ver todas` | Además de lo anterior, ve la pestaña "Todas las cajas" en `/caja` con el grid de todas las cajas físicas abiertas del tenant. Puede navegar a `/caja/[id]` de cualquier caja en modo read-only (sin botones de operar). |
+| Módulo | Permiso | Superficie (frontend) | Qué puede hacer |
+|---|---|---|---|
+| `MiCaja` | `Leer` / `Crear` / `Actualizar` | `/mi-caja*` | El cajero opera **su propio** turno: abrir, registrar movimientos, cerrar con cuadre, ver su propio historial. |
+| `Cajas` | `Leer` (única acción) | `/cajas*` | El encargado **supervisa** todas las cajas físicas del tenant: grid de abiertas, historial de todos (filtro por cajero), detalle de cualquier caja — **siempre read-only**, sin botones de operar. |
 
-La visibilidad del link "Caja" en el sidebar requiere solo `Caja:Leer`.
+Un usuario con ambos módulos ve las dos entradas de sidebar de forma independiente:
+"Mi caja" es su propio turno, "Cajas" es supervisión — sin lógica especial para el caso
+"admin que también opera". El rol admin (`es_fijo`) obtiene `Cajas:Leer` automáticamente
+en cuanto el tenant contrata el módulo `Cajas` (short-circuit de rol fijo).
+
+**El backend no se reorganizó**: las rutas siguen siendo `/caja/*` en un único
+`caja.controller.ts` / `caja.service.ts` — el usuario nunca ve esas URLs, las llama el
+frontend. Lo único que cambió es el `@RequiresPermiso` de cada endpoint. Ver
+[endpoints](#api-endpoints) y [Backend](#backend).
+
+**Escrituras siempre owner-only**: tener `Cajas:Leer` nunca habilita `POST
+/caja/:id/movimientos` ni `POST /caja/:id/cerrar` sobre una caja ajena — esa validación
+vive en el service y no depende del módulo de permiso. El cierre forzado de una caja
+ajena por el encargado queda diferido (ver `docs/agent/pendientes.md`).
 
 ---
 
@@ -63,9 +79,9 @@ La visibilidad del link "Caja" en el sidebar requiere solo `Caja:Leer`.
 GET /caja/abiertas
 Authorization: Bearer <token>
 
-Permiso requerido: Caja / Leer
-Nota: devuelve todas las cajas del tenant si el usuario tiene "Ver todas";
-      solo la propia si no.
+Permiso requerido: Cajas / Leer
+Nota: endpoint exclusivo de supervisión — siempre devuelve todas las cajas físicas
+      abiertas del tenant (quien llega tiene `Cajas:Leer`).
 
 Response (200):
 [
@@ -89,7 +105,7 @@ GET /caja/activa
 Authorization: Bearer <token>
 X-Tenant-ID: <tenantId>  (via guard, del token)
 
-Permiso requerido: Caja / Leer
+Permiso requerido: MiCaja / Leer
 
 Response (200):
 {
@@ -113,7 +129,7 @@ null
 POST /caja/abrir
 Authorization: Bearer <token>
 
-Permiso requerido: Caja / Crear
+Permiso requerido: MiCaja / Crear
 
 Request:
 {
@@ -140,7 +156,7 @@ Error (409) si ya hay una caja abierta para este usuario+tenant.
 POST /caja/:id/movimientos
 Authorization: Bearer <token>
 
-Permiso requerido: Caja / Crear
+Permiso requerido: MiCaja / Crear
 
 Request:
 {
@@ -162,7 +178,7 @@ Response (201):
 }
 
 Error (422) si tipo es "salida" y monto > saldo_esperado actual.
-Error (403) si la caja no pertenece al usuario (salvo permiso "Ver todas").
+Error (403) si la caja no pertenece al usuario (owner-only, aun con `Cajas:Leer`).
 ```
 
 ### GET /caja/:id/movimientos/resumen — KPIs del turno
@@ -170,6 +186,9 @@ Error (403) si la caja no pertenece al usuario (salvo permiso "Ver todas").
 ```
 GET /caja/:id/movimientos/resumen
 Authorization: Bearer <token>
+
+Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compartida,
+                   ver nota en GET /caja/:id/movimientos.
 
 Response (200):
 {
@@ -189,9 +208,11 @@ Totales globales del turno (independientes de la página del listado).
 GET /caja/:id/movimientos?page=1&pageSize=15&tipo=entrada
 Authorization: Bearer <token>
 
-Permiso requerido: Caja / Leer
-Nota: usuarios con "Ver todas" pueden listar movimientos de cajas ajenas (read-only).
-      Solo el dueño puede registrar movimientos (POST) o cerrar (POST /cerrar).
+Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — resuelto por el helper
+                   `resolverLecturaCompartida` del controller (403 si no tiene ninguno).
+Nota: usuarios con Cajas:Leer pueden listar movimientos de cajas ajenas (read-only).
+      Solo el dueño puede registrar movimientos (POST) o cerrar (POST /cerrar),
+      sin importar Cajas:Leer.
 
 Response (200):
 {
@@ -217,7 +238,7 @@ Response (200):
 POST /caja/:id/cerrar
 Authorization: Bearer <token>
 
-Permiso requerido: Caja / Actualizar
+Permiso requerido: MiCaja / Actualizar (owner-only; `Cajas:Leer` no habilita cerrar)
 
 Request:
 {
@@ -244,11 +265,13 @@ Error (409) si la caja ya está cerrada.
 
 ```
 GET /caja?page=1&pageSize=15
-GET /caja?todas=true&page=1&pageSize=15   // requiere permiso "Ver todas"
-GET /caja?usuarioId=uuid&page=1&pageSize=15   // historial de un cajero (detalle /caja/:id)
+GET /caja?todas=true&page=1&pageSize=15   // requiere Cajas:Leer
+GET /caja?usuarioId=uuid&page=1&pageSize=15   // historial de un cajero (detalle /caja/:id); ajeno requiere Cajas:Leer
 Authorization: Bearer <token>
 
-Permiso requerido: Caja / Leer (+ "Ver todas" para todas=true o usuarioId ajeno)
+Permiso requerido: MiCaja:Leer o Cajas:Leer (lectura compartida). `todas=true` o
+                   `usuarioId` de otro usuario solo escalan el alcance si tiene
+                   `Cajas:Leer`; si no, se ignora y devuelve solo lo propio.
 
 Response (200):
 {
@@ -278,10 +301,10 @@ Response (200):
 GET /caja/:id
 Authorization: Bearer <token>
 
-Permiso requerido: Caja / Leer
+Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena)
 
 Response (200): objeto caja completo con movimientos embebidos.
-Error (403) si la caja pertenece a otro usuario y no tiene permiso "Ver todas".
+Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 ```
 
 ---
@@ -352,26 +375,39 @@ Error (403) si la caja pertenece a otro usuario y no tiene permiso "Ver todas".
 
 ### Guards
 
-El módulo `Caja` es el primer módulo de **feature** (no configuración) que usa
-`@RequiresPermiso` + `PermisosGuard` en lugar de `TenantAdminGuard`. Todos los
-endpoints están bajo `JwtAuthGuard + TenantGuard` en la clase y `@RequiresPermiso`
-por método:
+El módulo `Caja` (backend) fue el primer módulo de **feature** (no configuración) en
+usar `@RequiresPermiso` + `PermisosGuard` en lugar de `TenantAdminGuard`; sigue siéndolo
+tras el refactor de 2026-07-23, solo que ahora referencia dos módulos de permiso
+distintos (`MiCaja` / `Cajas`) sobre el mismo controller. Todos los endpoints están bajo
+`JwtAuthGuard + TenantGuard + PermisosGuard` en la clase; los endpoints **operativos**
+(propios del cajero) usan `@RequiresPermiso` directo, y el endpoint exclusivo de
+supervisión (`/caja/abiertas`) usa `@RequiresPermiso('Cajas', 'Leer')`:
 
 ```typescript
-@UseGuards(JwtAuthGuard, TenantGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('caja')
 export class CajaController {
-  @UseGuards(PermisosGuard)
-  @RequiresPermiso('Caja', 'Leer')
+  @RequiresPermiso('MiCaja', 'Leer')
   @Get('activa')
-  getCajaActiva(@Req() req) { ... }
+  activa(@Req() req) { ... }
 
-  @UseGuards(PermisosGuard)
-  @RequiresPermiso('Caja', 'Crear')
+  @RequiresPermiso('MiCaja', 'Crear')
   @Post('abrir')
-  abrirCaja(@Req() req, @Body() dto: AbrirCajaDto) { ... }
+  abrir(@Req() req, @Body() dto: AbrirCajaDto) { ... }
+
+  @RequiresPermiso('Cajas', 'Leer')
+  @Get('abiertas')
+  abiertas(@Req() req) { ... }
 }
 ```
+
+Los endpoints de **lectura compartida** (`GET /caja`, `/:id`, `/:id/movimientos`,
+`/:id/movimientos/resumen`) no usan `@RequiresPermiso` — llaman al helper privado
+`resolverLecturaCompartida(u)`, que exige `MiCaja:Leer` **o** `Cajas:Leer` (403 si no
+tiene ninguno) y devuelve `verTodas = tieneCajas` para que el service resuelva el
+alcance (propia vs. todas). Este patrón — permiso compuesto resuelto a mano en vez de
+un solo `@RequiresPermiso` — es específico de este controller por tener dos módulos
+sirviendo las mismas rutas de lectura; no es el patrón por defecto del proyecto.
 
 Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso` vs. `TenantAdminGuard`.
 
@@ -381,33 +417,54 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 
 ### Pages
 
-- `pages/caja/index.vue` — Pantalla principal con dos modos según permisos:
-  - **Sin `Ver todas`**: sin caja abierta → formulario de apertura + botón "Ver historial" → `/caja/historial`; con caja abierta → redirect a `/caja/[id]`
-  - **Con `Ver todas`**: botón "Ver historial" → `/caja/historial` + grid de cajas abiertas (`CajaAbiertasGrid`)
-- `pages/caja/historial.vue` — Historial paginado de sesiones de caja (`CajaHistorial`). Soporta `?usuarioId=` para filtrar por cajero (desde detalle admin). Toggle "Ver todas" para supervisores.
-- `pages/caja/[id].vue` — Detalle de un turno: KPIs + tabla de movimientos (`CajaActivaDashboard`). Modo read-only si la caja no es la propia activa. Admin: links "Volver al listado" y "Ver historial del cajero". Sin historial embebido (evita tablas duplicadas). 403/404 → redirect a `/caja`.
+Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.vue`):
+
+- `pages/mi-caja/index.vue` — Cajero opera su propio turno: sin caja abierta →
+  formulario de apertura + botón "Ver historial" → `/mi-caja/historial`; con caja
+  abierta → redirect a `/mi-caja/[id]`. Gate: `MiCaja:Leer`.
+- `pages/mi-caja/historial.vue` — Historial paginado del propio cajero
+  (`CajaHistorial`, sin `usuarioId` ni toggle "todas").
+- `pages/mi-caja/[id].vue` — Detalle operable de su turno activo: KPIs + tabla de
+  movimientos (`CajaActivaDashboard`), botones de operar (+Movimiento / Cerrar).
+- `pages/cajas/index.vue` — Grid de cajas físicas abiertas del tenant
+  (`CajaAbiertasGrid`), read-only. Gate: `Cajas:Leer`.
+- `pages/cajas/historial.vue` — Historial de todos los cajeros con toggle "Ver todas"
+  y soporte `?usuarioId=` para filtrar por cajero.
+- `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de
+  operar, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en modo
+  read-only). Links "Volver a cajas" y "Ver historial del cajero". 403/404 →
+  redirect a `/cajas`.
+- `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
+  internos previos al refactor).
 
 ### Components
 
-- `components/caja/CajaActivaDashboard.vue` — Orquestador del turno: compone header, resumen KPIs y tabla de movimientos; modales de movimiento y cierre
+`components/caja/` se mantiene **compartida** entre las dos superficies (`/mi-caja` y
+`/cajas`) — son piezas de presentación reusadas por ambas, no específicas de un módulo
+de permiso; separarlas en `components/mi-caja/` + `components/cajas/` habría duplicado
+sin necesidad.
+
+- `components/caja/CajaActivaDashboard.vue` — Orquestador del turno: compone header, resumen KPIs y tabla de movimientos; modales de movimiento y cierre. Prop `readonly` para la superficie `/cajas` (oculta botones de operar)
 - `components/caja/CajaTurnoHeader.vue` — Título, badge de estado, fecha de apertura, botones +Movimiento / Cerrar caja
 - `components/caja/CajaTurnoResumen.vue` — Grid de 4 KPIs (saldo inicial, entradas, salidas, saldo esperado)
 - `components/caja/CajaMovimientosTable.vue` — Tabla paginada de movimientos con filtro por tipo, scroll interno y thead sticky
-- `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); prop `usuarioId` o query `?usuarioId=`
+- `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); prop `usuarioId` o query `?usuarioId=`; usado sin `usuarioId`/toggle en `/mi-caja/historial` y con ambos en `/cajas/historial`
 - `components/caja/CajaAperturaForm.vue` — Formulario de apertura (saldo inicial + comentario)
 - `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
 - `components/caja/CajaCierreDrawer.vue` — Drawer de cierre con cuadre (esperado vs. contado → diferencia)
-- `components/caja/CajaAbiertasGrid.vue` — Grid de cards para usuarios con `Ver todas`: cajas físicas abiertas del tenant. Click → `/caja/[id]`
+- `components/caja/CajaAbiertasGrid.vue` — Grid de cards para la superficie `/cajas` (permiso `Cajas:Leer`): cajas físicas abiertas del tenant. Click → `/cajas/[id]`
 
 ### Pinia Store
 
 **File**: `stores/caja.ts`
 
+Un único store sirve a ambas superficies — no se partió por módulo de permiso.
+
 **State**:
 - `cajaActiva: Caja | null` — caja abierta del usuario actual
 - `historial: Caja[]` — lista de sesiones pasadas
 - `movimientos: MovimientoCaja[]` — movimientos de la caja activa
-- `abiertas: CajaAbierta[]` — cajas físicas abiertas del tenant (para usuarios con `Ver todas`)
+- `abiertas: CajaAbierta[]` — cajas físicas abiertas del tenant (superficie `/cajas`, permiso `Cajas:Leer`)
 - `detalle: CajaDetalle | null` — detalle de una caja ajena (página read-only)
 - `loading: boolean`
 - `error: string | null`
@@ -429,7 +486,7 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 ### Abrir caja
 
 ```
-[Usuario llega al turno → /caja muestra "Sin caja activa"]
+[Usuario llega al turno → /mi-caja muestra "Sin caja activa"]
   ↓ clic "Abrir caja"
 [AbrirCajaForm: saldo inicial + comentario]
   ↓ useCajaStore.abrirCaja(dto)
@@ -443,7 +500,7 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
   ↓
 [Store: cajaActiva = nueva caja]
   ↓
-[/caja muestra panel "Caja abierta"]
+[/mi-caja muestra panel "Caja abierta"]
 ```
 
 ### Registrar movimiento manual
@@ -478,7 +535,7 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
   ↓
 [Store: cajaActiva = null; historial.unshift(caja cerrada)]
   ↓
-[/caja vuelve a estado "Sin caja activa"]
+[/mi-caja vuelve a estado "Sin caja activa"]
 ```
 
 ---
@@ -513,15 +570,23 @@ y se usa para ventas `canal='online'`. Está **excluida** de todos los flujos
 manuales: no aparece en `GET /caja/activa`, no puede abrirse ni cerrarse
 manualmente, y no acepta movimientos manuales.
 
-### Permiso "Ver todas"
+### Módulo `Cajas` (supervisión, solo lectura)
 
-El permiso `Caja / Ver todas` permite a supervisores o administradores:
+El módulo `Cajas` con permiso `Leer` permite a supervisores o administradores:
 
 - Consultar todas las cajas del tenant (historial completo vía `GET /caja?todas=true`).
-- Ver el grid de cajas físicas actualmente abiertas (`GET /caja/abiertas` retorna todas).
+- Ver el grid de cajas físicas actualmente abiertas (`GET /caja/abiertas`).
 - Acceder en read-only al detalle de cualquier caja (`GET /caja/:id` y `GET /caja/:id/movimientos`).
 
-**Owner-only (independientemente de `Ver todas`):** `POST /caja/:id/movimientos` y `POST /caja/:id/cerrar` solo los puede ejecutar el dueño de la caja.
+Hasta 2026-07-23 este diferenciador era la acción global `Ver todas` dentro del módulo
+`Caja`; se reemplazó por un módulo dedicado (`Cajas`) para que el supervisor sea una
+responsabilidad de acceso propia, no una acción CRUD reutilizada. `Ver todas` sigue
+existiendo como acción global para otros módulos — solo se dejó de asociar a caja.
+
+**Owner-only (independientemente de `Cajas:Leer`):** `POST /caja/:id/movimientos` y
+`POST /caja/:id/cerrar` solo los puede ejecutar el dueño de la caja (permiso `MiCaja`).
+Habilitar que el encargado fuerce el cierre de una caja ajena es un cambio de modelo
+(requiere `cajas.cerrada_por`) diferido a propósito — ver `docs/agent/pendientes.md`.
 
 ---
 
@@ -539,34 +604,36 @@ npm test -- modules/caja/caja.controller.spec.ts
 
 ```bash
 cd backend
-npm run test:e2e -- caja.e2e.spec.ts
+npm run test:e2e -- caja.e2e-spec.ts
 ```
 
 ### Manual Testing (Swagger)
 
 1. Abrir http://localhost:3000/api/docs
-2. Autenticar con Bearer token (con permiso `Caja/Leer` y `Caja/Crear`)
+2. Autenticar con Bearer token (con permiso `MiCaja/Leer` y `MiCaja/Crear`)
 3. `GET /caja/activa` → debe retornar `null` si no hay caja
 4. `POST /caja/abrir` con `{ "saldoInicial": "500" }` → 201
 5. `POST /caja/:id/movimientos` con `{ "tipo": "entrada", "concepto": "Prueba", "monto": "100" }` → 201
 6. `POST /caja/:id/movimientos` con `{ "tipo": "salida", "monto": "700" }` → 422 (saldo insuficiente)
 7. `POST /caja/:id/cerrar` con `{ "montoContado": "598" }` → 200 con cuadre
 8. `GET /caja` → historial con la caja cerrada
+9. Con un token que solo tenga `Cajas/Leer` (sin `MiCaja`): `GET /caja/abiertas` → 200 (todas); `POST /caja/abrir` → 403
 
 ### Manual Testing (Frontend)
 
 1. `docker-compose up`
 2. Login + selección de tenant
-3. Navegar a `/caja`
-4. Abrir caja → verificar panel de caja activa en `/caja/[id]`
+3. Navegar a `/mi-caja`
+4. Abrir caja → verificar panel de caja activa en `/mi-caja/[id]`
 5. Agregar movimientos entrada/salida → verificar saldo esperado actualizado
 6. Intentar salida mayor al saldo → verificar error
 7. Cerrar caja → verificar cuadre (diferencia)
-8. `/caja` (cajero sin caja): formulario de apertura + botón "Ver historial" → `/caja/historial`
-9. Admin en `/caja`: grid de abiertas
-10. `/caja/historial`: toggle "Ver todas"; click en fila → `/caja/[id]`
-11. `/caja/[id]` (admin): una sola tabla de movimientos; link "Ver historial del cajero" con `?usuarioId=`
+8. `/mi-caja` (cajero sin caja): formulario de apertura + botón "Ver historial" → `/mi-caja/historial`
+9. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
+10. `/cajas`: grid de abiertas; `/cajas/historial`: toggle "Ver todas"; click en fila → `/cajas/[id]`
+11. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); link "Ver historial del cajero" con `?usuarioId=`
 12. KPIs visibles al hacer scroll en movimientos (thead sticky)
+13. `/caja` redirige a `/mi-caja` (compatibilidad)
 
 ---
 
@@ -577,16 +644,17 @@ npm run test:e2e -- caja.e2e.spec.ts
 - [x] Movimientos `salida` validan saldo suficiente (422 si excede)
 - [x] Cierre calcula `diferencia = montoContado − saldoEsperado` con Decimal.js
 - [x] Caja virtual excluida de todos los flujos manuales
-- [x] Permiso "Ver todas" permite supervisores ver cajas de todo el tenant
-- [x] `GET /caja/abiertas` retorna todas las cajas abiertas del tenant (o solo la propia sin `Ver todas`)
-- [x] `GET /caja/:id/movimientos` permite lectura de caja ajena con `Ver todas`; registrar y cerrar siguen owner-only
-- [x] Frontend `/caja` muestra grid de abiertas para usuarios con `Ver todas`
+- [x] Módulo `MiCaja` (operar el propio turno) y módulo `Cajas` (supervisar, solo lectura) separados
+- [x] `GET /caja/abiertas` requiere `Cajas:Leer` y retorna todas las cajas abiertas del tenant
+- [x] `GET /caja/:id/movimientos` permite lectura de caja ajena con `Cajas:Leer`; registrar y cerrar siguen owner-only bajo `MiCaja`
+- [x] Frontend `/cajas` muestra grid de abiertas para usuarios con `Cajas:Leer`
 - [x] `CajaAbiertasGrid` muestra cards de cajas abiertas con badge "Mía" y navegación a detalle
-- [x] Página `/caja/historial` con historial paginado y filtro `?usuarioId=`
-- [x] Página `/caja/[id]` con KPIs + movimientos (sin historial embebido); 403/404 redirige a `/caja`
-- [x] Store `useCajaStore` con `abiertas`, `detalle`, `cargarAbiertas()` y `cargarDetalle(id)`
+- [x] Página `/cajas/historial` con historial paginado y filtro `?usuarioId=`
+- [x] Página `/cajas/[id]` con KPIs + movimientos (sin historial embebido, siempre read-only); 403/404 redirige a `/cajas`
+- [x] `/caja` redirige a `/mi-caja` (compatibilidad de enlaces previos)
+- [x] Store `useCajaStore` con `abiertas`, `detalle`, `cargarAbiertas()` y `cargarDetalle(id)` (compartido por ambas superficies)
 - [x] Todos los guards usan `@RequiresPermiso` + `PermisosGuard` (no `TenantAdminGuard`)
-- [x] Frontend página `/caja` con máquina de estados y store `useCajaStore`
+- [x] Frontend páginas `/mi-caja` y `/cajas` con máquina de estados propia y store `useCajaStore` compartido
 - [x] Soft delete en cajas y movimientos
 - [x] `tenant_id` y `usuario_id` siempre del token (nunca del body)
 
@@ -596,7 +664,7 @@ npm run test:e2e -- caja.e2e.spec.ts
 
 - [Gestión de ventas](./ventas.md) — Las ventas físicas asocian la caja activa del usuario
 - [Registro de pagos](./pagos.md) — Los pagos se asocian a la caja donde se cobran
-- [Roles y Permisos (RBAC)](./roles-permisos.md) — Los permisos `Caja/*` controlan el acceso
+- [Roles y Permisos (RBAC)](./roles-permisos.md) — Los permisos `MiCaja/*` y `Cajas:Leer` controlan el acceso
 
 ---
 
