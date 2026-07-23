@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   Post,
@@ -33,66 +34,65 @@ export class CajaController {
     private readonly rbacService: RbacService,
   ) {}
 
+  /**
+   * Endpoints de lectura que sirven tanto al dueño (módulo MiCaja) como al
+   * supervisor (módulo Cajas). Devuelve `verTodas=true` si el usuario tiene
+   * `Cajas:Leer`; lanza 403 si no tiene ni `MiCaja:Leer` ni `Cajas:Leer`.
+   * El alcance (propia vs. todas) y la escritura owner-only los sigue
+   * resolviendo el service.
+   */
+  private async resolverLecturaCompartida(u: JwtUser): Promise<boolean> {
+    const [tieneMiCaja, tieneCajas] = await Promise.all([
+      this.rbacService.userHasPermiso(u.id, u.tenantId!, 'MiCaja', 'Leer'),
+      this.rbacService.userHasPermiso(u.id, u.tenantId!, 'Cajas', 'Leer'),
+    ]);
+    if (!tieneMiCaja && !tieneCajas) {
+      throw new ForbiddenException('No tienes permiso para esta acción');
+    }
+    return tieneCajas;
+  }
+
   @Get()
-  @RequiresPermiso('Caja', 'Leer')
   async historial(@Req() req: Request, @Query() query: QueryHistorialCajaDto) {
     const u = req.user as JwtUser;
+    const verTodas = await this.resolverLecturaCompartida(u);
     const consultaOtroUsuario =
       query.usuarioId != null && query.usuarioId !== u.id;
-    let verTodas = false;
-    if (query.todas || consultaOtroUsuario) {
-      verTodas = await this.rbacService.userHasPermiso(
-        u.id,
-        u.tenantId!,
-        'Caja',
-        'Ver todas',
-      );
-    }
-    return this.cajaService.historial(u.tenantId!, u.id, query, verTodas);
+    const scope = query.todas || consultaOtroUsuario ? verTodas : false;
+    return this.cajaService.historial(u.tenantId!, u.id, query, scope);
   }
 
   @Get('activa')
-  @RequiresPermiso('Caja', 'Leer')
+  @RequiresPermiso('MiCaja', 'Leer')
   activa(@Req() req: Request) {
     const u = req.user as JwtUser;
     return this.cajaService.findActiva(u.tenantId!, u.id);
   }
 
   @Get('abiertas')
-  @RequiresPermiso('Caja', 'Leer')
-  async abiertas(@Req() req: Request) {
+  @RequiresPermiso('Cajas', 'Leer')
+  abiertas(@Req() req: Request) {
     const u = req.user as JwtUser;
-    const tieneVerTodas = await this.rbacService.userHasPermiso(
-      u.id,
-      u.tenantId!,
-      'Caja',
-      'Ver todas',
-    );
-    return this.cajaService.abiertas(u.tenantId!, u.id, tieneVerTodas);
+    // Endpoint exclusivo de supervisión: quien llega tiene Cajas:Leer → ve todas.
+    return this.cajaService.abiertas(u.tenantId!, u.id, true);
   }
 
   @Get(':id')
-  @RequiresPermiso('Caja', 'Leer')
   async detalle(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;
-    const tieneVerTodas = await this.rbacService.userHasPermiso(
-      u.id,
-      u.tenantId!,
-      'Caja',
-      'Ver todas',
-    );
-    return this.cajaService.findOne(u.tenantId!, u.id, cajaId, tieneVerTodas);
+    const verTodas = await this.resolverLecturaCompartida(u);
+    return this.cajaService.findOne(u.tenantId!, u.id, cajaId, verTodas);
   }
 
   @Post('abrir')
-  @RequiresPermiso('Caja', 'Crear')
+  @RequiresPermiso('MiCaja', 'Crear')
   abrir(@Req() req: Request, @Body() dto: AbrirCajaDto) {
     const u = req.user as JwtUser;
     return this.cajaService.abrir(u.tenantId!, u.id, dto);
   }
 
   @Post(':id/movimientos')
-  @RequiresPermiso('Caja', 'Crear')
+  @RequiresPermiso('MiCaja', 'Crear')
   registrarMovimiento(
     @Req() req: Request,
     @Param('id') cajaId: string,
@@ -103,7 +103,7 @@ export class CajaController {
   }
 
   @Post(':id/cerrar')
-  @RequiresPermiso('Caja', 'Actualizar')
+  @RequiresPermiso('MiCaja', 'Actualizar')
   cerrar(
     @Req() req: Request,
     @Param('id') cajaId: string,
@@ -114,43 +114,31 @@ export class CajaController {
   }
 
   @Get(':id/movimientos/resumen')
-  @RequiresPermiso('Caja', 'Leer')
   async resumenMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;
-    const tieneVerTodas = await this.rbacService.userHasPermiso(
-      u.id,
-      u.tenantId!,
-      'Caja',
-      'Ver todas',
-    );
+    const verTodas = await this.resolverLecturaCompartida(u);
     return this.cajaService.resumenMovimientos(
       u.tenantId!,
       u.id,
       cajaId,
-      tieneVerTodas,
+      verTodas,
     );
   }
 
   @Get(':id/movimientos')
-  @RequiresPermiso('Caja', 'Leer')
   async listarMovimientos(
     @Req() req: Request,
     @Param('id') cajaId: string,
     @Query() query: QueryMovimientosCajaDto,
   ) {
     const u = req.user as JwtUser;
-    const tieneVerTodas = await this.rbacService.userHasPermiso(
-      u.id,
-      u.tenantId!,
-      'Caja',
-      'Ver todas',
-    );
+    const verTodas = await this.resolverLecturaCompartida(u);
     return this.cajaService.listarMovimientos(
       u.tenantId!,
       u.id,
       cajaId,
       query,
-      tieneVerTodas,
+      verTodas,
     );
   }
 }
