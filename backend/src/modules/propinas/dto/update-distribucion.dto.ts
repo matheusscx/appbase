@@ -76,4 +76,12 @@ export class UpdateDistribucionDto {
   @ValidateNested({ each: true })
   @Type(() => GrupoDistribucionDto)
   grupos: GrupoDistribucionDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  habilitadoPos?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  habilitadoSalones?: boolean;
 }

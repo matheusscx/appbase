@@ -27,7 +27,10 @@ export class PropinaDistribucionController {
   @RequiresPermiso('Salones', 'Operar')
   porcentajeSugerido(@Req() req: Request) {
     const user = req.user as JwtUser;
-    return this.distribucion.obtenerPorcentajeSugerido(user.tenantId!);
+    return this.distribucion.obtenerPorcentajeSugerido(
+      user.tenantId!,
+      'salones',
+    );
   }
 
   // Mismo dato que /porcentaje-sugerido, pero para el POS: el rol Vendedor no
@@ -36,7 +39,7 @@ export class PropinaDistribucionController {
   @RequiresPermiso('Ventas', 'Crear')
   porcentajeSugeridoVenta(@Req() req: Request) {
     const user = req.user as JwtUser;
-    return this.distribucion.obtenerPorcentajeSugerido(user.tenantId!);
+    return this.distribucion.obtenerPorcentajeSugerido(user.tenantId!, 'pos');
   }
 
   @Put('distribucion')

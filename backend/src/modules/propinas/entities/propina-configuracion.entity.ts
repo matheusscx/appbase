@@ -32,6 +32,12 @@ export class PropinaConfiguracion {
   })
   porcentajeSugerido: string;
 
+  @Column({ name: 'habilitado_pos', type: 'boolean', default: true })
+  habilitadoPos: boolean;
+
+  @Column({ name: 'habilitado_salones', type: 'boolean', default: true })
+  habilitadoSalones: boolean;
+
   @Column({ name: 'actualizado_por', type: 'uuid', nullable: true })
   actualizadoPor: string | null;
 

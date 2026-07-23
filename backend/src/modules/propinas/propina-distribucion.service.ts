@@ -14,6 +14,8 @@ import {
   UpdateDistribucionDto,
 } from './dto/update-distribucion.dto';
 
+export type CanalPropina = 'pos' | 'salones';
+
 export interface GrupoDistribucionPublico {
   id: string;
   tipoGarzon: TipoGarzon;
@@ -31,6 +33,8 @@ export interface DistribucionPublica {
   id: string;
   version: number;
   porcentajeSugerido: string;
+  habilitadoPos: boolean;
+  habilitadoSalones: boolean;
   actualizadoPor: string | null;
   actualizadoEl: Date;
   grupos: GrupoDistribucionPublico[];
@@ -97,9 +101,12 @@ export class PropinaDistribucionService {
 
   async obtenerPorcentajeSugerido(
     tenantId: string,
-  ): Promise<{ porcentajeSugerido: string }> {
+    canal: CanalPropina,
+  ): Promise<{ porcentajeSugerido: string; habilitado: boolean }> {
     const config = await this.asegurarDefault(tenantId);
-    return { porcentajeSugerido: config.porcentajeSugerido };
+    const habilitado =
+      canal === 'pos' ? config.habilitadoPos : config.habilitadoSalones;
+    return { porcentajeSugerido: config.porcentajeSugerido, habilitado };
   }
 
   async reemplazar(
@@ -130,6 +137,10 @@ export class PropinaDistribucionService {
       config.porcentajeSugerido = new Decimal(dto.porcentajeSugerido).toFixed(
         6,
       );
+      if (dto.habilitadoPos !== undefined)
+        config.habilitadoPos = dto.habilitadoPos;
+      if (dto.habilitadoSalones !== undefined)
+        config.habilitadoSalones = dto.habilitadoSalones;
 
       const gruposPrevios = await manager.find(PropinaGrupoDistribucion, {
         where: { tenantId, configuracionId: config.id, eliminadoEl: IsNull() },
@@ -291,6 +302,8 @@ export class PropinaDistribucionService {
       id: config.id,
       version: config.version,
       porcentajeSugerido: config.porcentajeSugerido,
+      habilitadoPos: config.habilitadoPos,
+      habilitadoSalones: config.habilitadoSalones,
       actualizadoPor: config.actualizadoPor,
       actualizadoEl: config.actualizadoEl,
       grupos: grupos.map((g) => ({

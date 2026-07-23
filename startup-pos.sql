@@ -1273,6 +1273,8 @@ CREATE TABLE propina_configuracion (
   tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
   version INT NOT NULL DEFAULT 1,
   porcentaje_sugerido NUMERIC(10,6) NOT NULL DEFAULT 0.10,
+  habilitado_pos BOOLEAN NOT NULL DEFAULT true,
+  habilitado_salones BOOLEAN NOT NULL DEFAULT true,
   actualizado_por UUID REFERENCES usuarios(usuario_id),
   creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),

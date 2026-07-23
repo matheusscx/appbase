@@ -245,12 +245,14 @@ describe('PropinaDistribucionService', () => {
         tenantId: TENANT,
         version: 1,
         porcentajeSugerido: '0.10',
+        habilitadoPos: true,
+        habilitadoSalones: true,
         actualizadoPor: null,
       })
       .mockResolvedValueOnce({ id: 'g-1' });
 
-    const result = await service.obtenerPorcentajeSugerido(TENANT);
-    expect(result).toEqual({ porcentajeSugerido: '0.10' });
+    const result = await service.obtenerPorcentajeSugerido(TENANT, 'salones');
+    expect(result).toEqual({ porcentajeSugerido: '0.10', habilitado: true });
   });
 
   it('reemplazar valida Σ porcentaje activos = 1.0000', async () => {
