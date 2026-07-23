@@ -115,6 +115,14 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     })
   }
 
+  if (permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer')) {
+    items.push({
+      label: 'Cajas',
+      icon: 'i-lucide-inbox',
+      to: '/configuracion/cajas',
+    })
+  }
+
   if (
     permissionsStore.esAdmin
     || permissionsStore.can('Propinas', 'Configurar')
