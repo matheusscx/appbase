@@ -7,6 +7,7 @@ import { ItemsModule } from '../items/items.module';
 import { PagosModule } from '../pagos/pagos.module';
 import { PropinasModule } from '../propinas/propinas.module';
 import { CatalogModule } from '../catalog/catalog.module';
+import { GarzonesModule } from '../garzones/garzones.module';
 import { VentasService } from './ventas.service';
 import {
   VentasController,
@@ -40,6 +41,7 @@ import { VentasReembolsoHandler } from './reembolso-callback.handler';
     PagosModule,
     PropinasModule,
     CatalogModule,
+    GarzonesModule,
     // Solo para registrar VentasReembolsoHandler en el ReembolsoCallbackRegistry
     // (pasarela nunca importa ventas; el borde se cruza en esta dirección).
     PasarelaModule,

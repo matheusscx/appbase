@@ -14,6 +14,7 @@ import {
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
+import { PropinaDirectaDto } from './propina-directa.dto';
 
 export class LineaVentaDto {
   @IsUUID()
@@ -159,4 +160,9 @@ export class CreateVentaDto {
   @ValidateNested()
   @Type(() => PropinaCierreMesaDto)
   propinaCierreMesa?: PropinaCierreMesaDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PropinaDirectaDto)
+  propinaDirecta?: PropinaDirectaDto;
 }

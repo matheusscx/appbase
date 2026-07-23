@@ -329,4 +329,66 @@ describe('Ventas (e2e)', () => {
       expect(stockDespues).toBe(stockActual);
     });
   });
+
+  describe('POST /ventas con propina directa (POS)', () => {
+    const MOSTRADOR_ID = '550e8400-e29b-41d4-a716-446655440281';
+
+    it('crea venta_propina en el Mostrador con atribución neutra', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+          propinaDirecta: { montoPagado: '5000', porcentajeSugerido: '0.10' },
+        })
+        .expect(201);
+
+      const ventaId = (res.body as { id: string }).id;
+      const rows: Array<{
+        garzon_id: string;
+        monto_pagado: string;
+        tipo_garzon: string | null;
+        sesion_garzon_id: string | null;
+        turno_id: string | null;
+        estado: string;
+      }> = await ds.query(
+        `SELECT garzon_id, monto_pagado, tipo_garzon, sesion_garzon_id, turno_id, estado
+           FROM venta_propina WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].garzon_id).toBe(MOSTRADOR_ID);
+      expect(rows[0].tipo_garzon).toBeNull();
+      expect(rows[0].sesion_garzon_id).toBeNull();
+      expect(rows[0].turno_id).toBeNull();
+      expect(Number(rows[0].monto_pagado)).toBe(5000);
+      expect(rows[0].estado).toBe('pagada');
+    });
+
+    it('el Mostrador no aparece en GET /garzones', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/garzones')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const ids = (res.body as Array<{ id: string }>).map((g) => g.id);
+      expect(ids).not.toContain(MOSTRADOR_ID);
+    });
+
+    it('rechaza combinar propinaDirecta con propinaCierreMesa', async () => {
+      await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+          propinaDirecta: { montoPagado: '5000' },
+          propinaCierreMesa: {
+            montoPagado: '5000',
+            garzonId: '550e8400-e29b-41d4-a716-446655440238',
+          },
+        })
+        .expect(400);
+    });
+  });
 });

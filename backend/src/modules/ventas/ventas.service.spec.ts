@@ -13,6 +13,7 @@ import { ItemsService } from '../items/items.service';
 import { PagosService } from '../pagos/pagos.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { GarzonesService } from '../garzones/garzones.service';
 import { EstadoVenta, Venta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
@@ -200,6 +201,14 @@ describe('VentasService', () => {
             findAllUnidadesMedida: jest
               .fn()
               .mockResolvedValue(UNIDADES_CATALOGO),
+          },
+        },
+        {
+          provide: GarzonesService,
+          useValue: {
+            asegurarMostrador: jest
+              .fn()
+              .mockResolvedValue({ id: 'mostrador-1' }),
           },
         },
         {

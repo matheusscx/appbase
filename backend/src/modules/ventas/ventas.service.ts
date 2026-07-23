@@ -15,6 +15,7 @@ import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
 import { CatalogService } from '../catalog/catalog.service';
+import { GarzonesService } from '../garzones/garzones.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
@@ -78,6 +79,7 @@ export class VentasService {
     private readonly pagosService: PagosService,
     private readonly ventaPropinaService: VentaPropinaService,
     private readonly catalogService: CatalogService,
+    private readonly garzonesService: GarzonesService,
   ) {}
 
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
@@ -469,12 +471,20 @@ export class VentasService {
       }
     }
 
-    // 7g. Propina de cierre de mesa (antes de pagos, para referencia_id)
+    // 7g. Propina (cierre de mesa o directa del POS) — antes de pagos, para referencia_id
+    if (dto.propinaCierreMesa && dto.propinaDirecta) {
+      throw new BadRequestException(
+        'No se puede combinar propina de cierre de mesa con propina directa',
+      );
+    }
     let ventaPropinaId: string | null = null;
     let propinaMonto = '0';
+    let estrategiaPropina = EstrategiaAsignacionPropina.NO_VUELTO;
     if (dto.propinaCierreMesa) {
       const tip = dto.propinaCierreMesa;
       propinaMonto = tip.montoPagado;
+      estrategiaPropina =
+        tip.estrategia ?? EstrategiaAsignacionPropina.NO_VUELTO;
       const ventaPropina = await this.ventaPropinaService.crearEnTransaccion(
         manager,
         {
@@ -487,6 +497,28 @@ export class VentasService {
           sesionGarzonId: tip.sesionGarzonId ?? null,
           turnoId: tip.turnoId ?? null,
           tipoGarzon: tip.tipoGarzon ?? null,
+        },
+      );
+      ventaPropinaId = ventaPropina.id;
+    } else if (dto.propinaDirecta) {
+      const tip = dto.propinaDirecta;
+      propinaMonto = tip.montoPagado;
+      const mostrador = await this.garzonesService.asegurarMostrador(
+        manager,
+        tenantId,
+      );
+      const ventaPropina = await this.ventaPropinaService.crearEnTransaccion(
+        manager,
+        {
+          tenantId,
+          ventaId: venta.id,
+          garzonId: mostrador.id,
+          porcentajeSugerido: tip.porcentajeSugerido ?? '0.10',
+          montoSugerido: tip.montoSugerido ?? tip.montoPagado,
+          montoPagado: tip.montoPagado,
+          sesionGarzonId: null,
+          turnoId: null,
+          tipoGarzon: null,
         },
       );
       ventaPropinaId = ventaPropina.id;
@@ -506,9 +538,7 @@ export class VentasService {
       target: targetCobro,
       propinaMonto,
       ventaPropinaId,
-      estrategia:
-        dto.propinaCierreMesa?.estrategia ??
-        EstrategiaAsignacionPropina.NO_VUELTO,
+      estrategia: estrategiaPropina,
     });
 
     // 7i. Actualizar estado de la venta según montos aplicados a la venta
