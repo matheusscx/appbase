@@ -76,6 +76,8 @@ import { CausaMerma } from './modules/mermas/entities/causa-merma.entity';
 import { InventarioModule } from './modules/inventario/inventario.module';
 import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.module';
 import { CajaModule } from './modules/caja/caja.module';
+import { CajonesModule } from './modules/cajones/cajones.module';
+import { Cajon } from './modules/cajones/entities/cajon.entity';
 import { VentasModule } from './modules/ventas/ventas.module';
 import { Venta } from './modules/ventas/entities/venta.entity';
 import { VentaDetalle } from './modules/ventas/entities/venta-detalle.entity';
@@ -155,6 +157,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
           TenantModulo,
           TenantFormulaPrecio,
           Caja,
+          Cajon,
           RazonSocial,
           Rol,
           RolUsuario,
@@ -257,6 +260,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
     InventarioModule,
     CalculoPreciosModule,
     CajaModule,
+    CajonesModule,
     VentasModule,
     PagosModule,
     PropinasModule,
