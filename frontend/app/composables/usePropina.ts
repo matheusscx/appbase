@@ -25,29 +25,41 @@ export function porcentajeDecimalAHumano(decimal: string): string {
   return n.equals(n.toDecimalPlaces(0)) ? n.toFixed(0) : n.toString()
 }
 
-export async function fetchPorcentajeSugerido(): Promise<string> {
+export async function fetchPorcentajeSugerido(): Promise<{
+  porcentajeSugerido: string
+  habilitado: boolean
+}> {
   const apiUrl = useRuntimeConfig().public.apiUrl
   try {
-    const res = await useApiFetch<{ porcentajeSugerido: string }>(
+    const res = await useApiFetch<{ porcentajeSugerido: string, habilitado: boolean }>(
       `${apiUrl}/propinas/porcentaje-sugerido`,
     )
-    return res.porcentajeSugerido || PROPINA_PORCENTAJE_DEFAULT
+    return {
+      porcentajeSugerido: res.porcentajeSugerido || PROPINA_PORCENTAJE_DEFAULT,
+      habilitado: res.habilitado ?? true,
+    }
   }
   catch {
-    return PROPINA_PORCENTAJE_DEFAULT
+    return { porcentajeSugerido: PROPINA_PORCENTAJE_DEFAULT, habilitado: true }
   }
 }
 
-export async function fetchPorcentajeSugeridoVenta(): Promise<string> {
+export async function fetchPorcentajeSugeridoVenta(): Promise<{
+  porcentajeSugerido: string
+  habilitado: boolean
+}> {
   const apiUrl = useRuntimeConfig().public.apiUrl
   try {
-    const res = await useApiFetch<{ porcentajeSugerido: string }>(
+    const res = await useApiFetch<{ porcentajeSugerido: string, habilitado: boolean }>(
       `${apiUrl}/propinas/porcentaje-sugerido-venta`,
     )
-    return res.porcentajeSugerido || PROPINA_PORCENTAJE_DEFAULT
+    return {
+      porcentajeSugerido: res.porcentajeSugerido || PROPINA_PORCENTAJE_DEFAULT,
+      habilitado: res.habilitado ?? true,
+    }
   }
   catch {
-    return PROPINA_PORCENTAJE_DEFAULT
+    return { porcentajeSugerido: PROPINA_PORCENTAJE_DEFAULT, habilitado: true }
   }
 }
 

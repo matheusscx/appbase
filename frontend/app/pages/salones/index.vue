@@ -84,6 +84,7 @@ const cancelOpen = ref(false)
 const propinaMonto = ref('0')
 const propinaSugerida = ref('0')
 const propinaPorcentaje = ref(PROPINA_PORCENTAJE_DEFAULT)
+const propinaHabilitada = ref(true)
 const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
@@ -321,7 +322,7 @@ async function cargarCatalogo() {
 }
 
 onMounted(async () => {
-  const [, , , , pct] = await Promise.all([
+  const [, , , , sugerido] = await Promise.all([
     cajaStore.cargarActiva(),
     cargarSalones(),
     cargarCatalogo(),
@@ -329,7 +330,8 @@ onMounted(async () => {
     fetchPorcentajeSugerido(),
     cargarEmisor(),
   ])
-  propinaPorcentaje.value = pct
+  propinaPorcentaje.value = sugerido.porcentajeSugerido
+  propinaHabilitada.value = sugerido.habilitado
 })
 
 // ── Selección de mesa ──────────────────────────────────────────────────────
@@ -773,7 +775,7 @@ async function imprimirPrecuenta() {
       items: itemsParaTicket(activeCuenta.value, resultado.value),
       totales: resultado.value.totales,
       impuestos: agregarImpuestosVenta(resultado.value.lineas),
-      ...(new Decimal(propinaPorcentaje.value || '0').gt(0)
+      ...(propinaHabilitada.value && new Decimal(propinaPorcentaje.value || '0').gt(0)
         ? { propinaSugerida: {
             porcentaje: propinaPorcentaje.value,
             monto: new Decimal(resultado.value.totales.totalFinal).times(propinaPorcentaje.value).toDecimalPlaces(0).toString(),
@@ -856,7 +858,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
           items: itemsParaTicket(cuentaCerrada, resultadoCerrado),
           totales: resultadoCerrado.totales,
           impuestos: agregarImpuestosVenta(resultadoCerrado.lineas),
-          ...(new Decimal(tipMonto).gt(0) ? { propina: { monto: tipMonto } } : {}),
+          ...(propinaHabilitada.value && new Decimal(tipMonto).gt(0) ? { propina: { monto: tipMonto } } : {}),
           pagos: pagos.map(p => ({
             nombre: metodos.value.find(m => m.metodoPagoId === p.metodoPagoId)?.nombre ?? '',
             monto: p.monto,
@@ -1211,7 +1213,8 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
 
       <VentasCobroModal
         v-model:open="cobroOpen"
-        modo-propina
+        :modo-propina="propinaHabilitada"
+        :total="totalFinal"
         :venta-total="totalFinal"
         v-model:propina-monto="propinaMonto"
         :porcentaje-sugerido="propinaPorcentaje"

@@ -47,6 +47,7 @@ const cobroOpen = ref(false)
 const submitting = ref(false)
 const propinaMonto = ref('0')
 const propinaPorcentaje = ref(PROPINA_PORCENTAJE_DEFAULT)
+const propinaHabilitada = ref(true)
 const movimientoDrawerOpen = ref(false)
 const cierreDrawerOpen = ref(false)
 const recetaDrawerOpen = ref(false)
@@ -155,7 +156,9 @@ async function cargar() {
 
 onMounted(async () => {
   await Promise.all([cajaStore.cargarActiva(), cargar(), unidadesStore.ensureLoaded(), cargarEmisor()])
-  propinaPorcentaje.value = await fetchPorcentajeSugeridoVenta()
+  const { porcentajeSugerido, habilitado } = await fetchPorcentajeSugeridoVenta()
+  propinaPorcentaje.value = porcentajeSugerido
+  propinaHabilitada.value = habilitado
 })
 
 function onCambiarCantidadPresentacion(
@@ -193,7 +196,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
       pagos,
       tipoDocumentoId: tipoDocumentoId.value,
     }
-    if (new Decimal(propinaMonto.value || '0').gt(0)) {
+    if (propinaHabilitada.value && new Decimal(propinaMonto.value || '0').gt(0)) {
       body.propinaDirecta = {
         montoPagado: propinaMonto.value,
         porcentajeSugerido: propinaPorcentaje.value,
@@ -341,7 +344,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
       <VentasCobroModal
         v-model:open="cobroOpen"
         v-model:propina-monto="propinaMonto"
-        modo-propina
+        :modo-propina="propinaHabilitada"
         :total="totalFinal"
         :venta-total="totalFinal"
         :porcentaje-sugerido="propinaPorcentaje"
