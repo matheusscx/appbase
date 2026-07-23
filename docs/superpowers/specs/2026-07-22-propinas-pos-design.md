@@ -119,15 +119,19 @@ período sin filtrar turno. **Se documenta; no se cambia el motor.**
    `tipoGarzon/sesionGarzonId/turnoId = null` y `estrategia = NO_VUELTO`. Reusa el
    paso 7g/pagos existente (generalizar el armado del input de propina para que
    acepte cualquiera de las dos fuentes).
-4. **Permiso del sugerido**: `GET /propinas/porcentaje-sugerido` hoy exige
-   `Salones:Operar`. Un cajero de POS puede no tenerlo → **ampliar el guard** para
-   que también lo permita quien tiene `Ventas:Crear` (o exponer el sugerido por una
-   ruta accesible al POS). A resolver en el plan.
+4. **Permiso del sugerido**: `GET /propinas/porcentaje-sugerido` exige
+   `Salones:Operar`, y el rol **Vendedor** (el que usa el POS: Caja/Ventas/Pagos/
+   Items) **no lo tiene**. Decisión: **agregar una ruta nueva** para el sugerido
+   guardada con el permiso del POS —`@RequiresPermiso('Ventas', 'Crear')`— que
+   reusa el mismo `obtenerPorcentajeSugerido(tenantId)`. La ruta de salones
+   (`Salones:Operar`) queda intacta. Nombre sugerido:
+   `GET /propinas/porcentaje-sugerido-venta`.
 
 ### Frontend
 
 5. **`pos.vue`**: activar `modoPropina` en el `CobroModal` (ya soportado por el
-   componente compartido), cargar el porcentaje sugerido, y enviar `propinaDirecta`
+   componente compartido), cargar el porcentaje sugerido desde la ruta nueva
+   (`GET /propinas/porcentaje-sugerido-venta`, punto 4), y enviar `propinaDirecta`
    en el payload de `POST /ventas`. Mismo look & feel que el cobro de salones.
 
 ### Docs
