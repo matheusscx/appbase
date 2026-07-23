@@ -229,8 +229,16 @@ Cubre el reparto end-to-end contra la Postgres real: siembra receptores
 "Mostrador" reciba nunca, el ajuste de exclusión (redistribuye sin perder
 dinero) y `liquidar` (asigna `liquidacion_id` y saca las propinas de futuros
 repartos). Idempotente entre corridas: los tips liquidados quedan fuera del
-pool. Los criterios `VENTAS_NETAS`/`HORAS_TRABAJADAS`/`MANUAL` no se ejercitan
-acá (requieren config de grupo que el seed no trae) — los cubren los unit tests.
+pool.
+
+Un segundo bloque muta la config de distribución por la API real
+(`PUT /propinas/distribucion`, versionada) y la restaura en `afterAll`: cubre
+`VENTAS_NETAS` (reparto proporcional a la base de ventas de cada garzón, no
+parejo) y dos grupos (`Garzones` 70% + `Cocina` 30%, el pool se parte por
+porcentaje y cada persona recibe solo de su grupo — la pertenencia sale del
+`tipo_garzon` del tip, no de `garzon.tipo`). Cada caso parte de pool 0 (liquida
+el remanente) y siembra sus propios tips, así es determinista sin importar el
+orden. `HORAS_TRABAJADAS`/`MANUAL` siguen cubiertos por los unit tests.
 
 ### QA E2E date/time inputs (Chrome DevTools)
 

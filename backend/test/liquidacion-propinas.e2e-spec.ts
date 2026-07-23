@@ -32,11 +32,19 @@ interface Participante {
   grupoId: string;
   tipoGarzon: string | null;
   incluido: boolean;
+  ventasBase: string;
   monto: string;
+}
+interface GrupoPreview {
+  id: string;
+  tipoGarzon: string | null;
+  porcentaje: string;
+  criterio: string;
+  montoGrupo: string;
 }
 interface PreviewReparto {
   poolTotal: string;
-  grupos: Array<{ id: string; criterio: string; montoGrupo: string }>;
+  grupos: GrupoPreview[];
   participantes: Participante[];
   advertencias: unknown[];
 }
@@ -44,6 +52,28 @@ interface AjustesReparto {
   exclusiones?: string[];
   montosManuales?: Array<{ garzonId: string; monto: string }>;
 }
+interface GrupoDistribucion {
+  tipoGarzon: string;
+  nombre: string;
+  porcentaje: string;
+  criterio: string;
+  baseVentas?: string;
+  activo?: boolean;
+  orden?: number;
+}
+// Config default sembrada para PARIS (seeder.service.ts): un único grupo
+// Garzones al 100% PARTES_IGUALES. Se restaura en afterAll tras mutar la config.
+const DISTRIBUCION_DEFAULT: GrupoDistribucion[] = [
+  {
+    tipoGarzon: 'garzon',
+    nombre: 'Garzones',
+    porcentaje: '1',
+    criterio: 'PARTES_IGUALES',
+    baseVentas: 'TOTAL_FINAL',
+    activo: true,
+    orden: 0,
+  },
+];
 
 async function login(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
@@ -116,21 +146,32 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
     return (res.body as { id: string }).id;
   }
 
-  // Siembra un tip de un garzón REAL (tipo_garzon='garzon'), como haría el
-  // cierre de mesa: lo vuelve receptor del grupo y suma su monto al pool.
-  // Referencia una venta real para satisfacer el JOIN a ventas.
+  // Siembra un tip de un garzón REAL, como haría el cierre de mesa: lo vuelve
+  // receptor del grupo de su tipo_garzon y suma su monto al pool. La venta
+  // (cantidad 1) satisface el JOIN a ventas; `baseVentas`, si se da, fija por SQL
+  // la base de esa venta (peso del criterio VENTAS_NETAS) sin consumir más stock
+  // del producto demo. `tipoGarzon` decide a qué grupo pertenece.
   async function sembrarTipGarzon(
     garzonId: string,
     monto: string,
+    opts: { baseVentas?: string; tipoGarzon?: string } = {},
   ): Promise<void> {
     const ventaId = await crearVentaSinPropina();
+    if (opts.baseVentas) {
+      await ds.query(
+        `UPDATE ventas
+           SET base_ventas_total_final = $1, base_ventas_sin_impuestos = $1
+         WHERE venta_id = $2`,
+        [opts.baseVentas, ventaId],
+      );
+    }
     await ds.query(
       `INSERT INTO venta_propina
          (tenant_id, venta_id, garzon_id, porcentaje_sugerido, monto_sugerido,
           monto_pagado, tipo, estado, sesion_garzon_id, turno_id, tipo_garzon,
           liquidacion_id, creado_el)
-       VALUES ($1,$2,$3,'0.100000',$4,$4,'manual','pagada',NULL,NULL,'garzon',NULL,NOW())`,
-      [PARIS_TENANT_ID, ventaId, garzonId, monto],
+       VALUES ($1,$2,$3,'0.100000',$4,$4,'manual','pagada',NULL,NULL,$5,NULL,NOW())`,
+      [PARIS_TENANT_ID, ventaId, garzonId, monto, opts.tipoGarzon ?? 'garzon'],
     );
   }
 
@@ -141,6 +182,17 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
       .send({ fechaDesde, fechaHasta, ...(ajustes ? { ajustes } : {}) })
       .expect(201);
     return res.body as PreviewReparto;
+  }
+
+  async function putDistribucion(
+    grupos: GrupoDistribucion[],
+    porcentajeSugerido = '0.10',
+  ): Promise<void> {
+    await request(app.getHttpServer())
+      .put('/api/propinas/distribucion')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ porcentajeSugerido, grupos })
+      .expect(200);
   }
 
   const incluidos = (p: Participante[]): Participante[] =>
@@ -280,5 +332,146 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
     // Un nuevo reparto ya no ve esas propinas: el pool queda en cero.
     const despues = await preview();
     expect(new Decimal(despues.poolTotal).toNumber()).toBe(0);
+  });
+
+  // Estos casos mutan la config de distribución de PARIS por la API real
+  // (PUT /propinas/distribucion, versionada) y la restauran en afterAll. Cada
+  // test parte de pool 0 (resetPool liquida cualquier remanente) y siembra sus
+  // propios tips, así el resultado es determinista sin importar el orden.
+  describe('config alternativa de distribución', () => {
+    async function resetPool(): Promise<void> {
+      const prev = await preview();
+      if (new Decimal(prev.poolTotal).lte(0)) return;
+      await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/liquidar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fechaDesde, fechaHasta })
+        .expect(201);
+    }
+
+    afterAll(async () => {
+      await putDistribucion(DISTRIBUCION_DEFAULT);
+    });
+
+    it('VENTAS_NETAS reparte proporcional a las ventas de cada garzón', async () => {
+      await resetPool();
+      // Mismo aporte al pool (1000 c/u) pero base de ventas 3000:2000:1000 → el
+      // peso de VENTAS_NETAS difiere aunque el dinero puesto sea igual.
+      await sembrarTipGarzon(ANA_ID, '1000', { baseVentas: '3000' });
+      await sembrarTipGarzon(BRUNO_ID, '1000', { baseVentas: '2000' });
+      await sembrarTipGarzon(CARLA_ID, '1000', { baseVentas: '1000' });
+
+      await putDistribucion([
+        {
+          tipoGarzon: 'garzon',
+          nombre: 'Garzones',
+          porcentaje: '1',
+          criterio: 'VENTAS_NETAS',
+          baseVentas: 'TOTAL_FINAL',
+          activo: true,
+          orden: 0,
+        },
+      ]);
+
+      const prev = await preview();
+      expect(prev.grupos).toHaveLength(1);
+      expect(prev.grupos[0].criterio).toBe('VENTAS_NETAS');
+
+      const porId = (g: string): Participante =>
+        prev.participantes.find((p) => p.garzonId === g)!;
+      const [ana, bruno, carla] = [ANA_ID, BRUNO_ID, CARLA_ID].map(porId);
+
+      // La base de ventas quedó 3:2:1 (precondición del criterio).
+      expect(new Decimal(ana.ventasBase).gt(bruno.ventasBase)).toBe(true);
+      expect(new Decimal(bruno.ventasBase).gt(carla.ventasBase)).toBe(true);
+
+      // El reparto sigue esa base: quien vendió más recibe más.
+      expect(new Decimal(ana.monto).gt(bruno.monto)).toBe(true);
+      expect(new Decimal(bruno.monto).gt(carla.monto)).toBe(true);
+
+      // No es un reparto parejo (así se distingue de PARTES_IGUALES).
+      const montos = [ana, bruno, carla].map((p) => new Decimal(p.monto));
+      expect(
+        Decimal.max(...montos)
+          .minus(Decimal.min(...montos))
+          .gt(1),
+      ).toBe(true);
+
+      // Reconciliación: lo repartido iguala el pool.
+      expect(suma(incluidos(prev.participantes))).toBe(
+        new Decimal(prev.poolTotal).toFixed(4),
+      );
+    });
+
+    it('dos grupos parten el pool por porcentaje y reparten internamente', async () => {
+      await resetPool();
+      // Ana y Bruno al grupo Garzones; Carla al grupo Cocina (por el tipo_garzon
+      // del tip, no por garzon.tipo). Aportes iguales → pool 3000.
+      await sembrarTipGarzon(ANA_ID, '1000');
+      await sembrarTipGarzon(BRUNO_ID, '1000');
+      await sembrarTipGarzon(CARLA_ID, '1000', { tipoGarzon: 'cocina' });
+
+      await putDistribucion([
+        {
+          tipoGarzon: 'garzon',
+          nombre: 'Garzones',
+          porcentaje: '0.70',
+          criterio: 'PARTES_IGUALES',
+          activo: true,
+          orden: 0,
+        },
+        {
+          tipoGarzon: 'cocina',
+          nombre: 'Cocina',
+          porcentaje: '0.30',
+          criterio: 'PARTES_IGUALES',
+          activo: true,
+          orden: 1,
+        },
+      ]);
+
+      const prev = await preview();
+      expect(prev.grupos).toHaveLength(2);
+
+      const grupoGarzon = prev.grupos.find((g) => g.tipoGarzon === 'garzon')!;
+      const grupoCocina = prev.grupos.find((g) => g.tipoGarzon === 'cocina')!;
+      const pool = new Decimal(prev.poolTotal);
+
+      // El pool se parte por porcentaje entre grupos (±1 por mayores restos).
+      expect(
+        new Decimal(grupoGarzon.montoGrupo)
+          .minus(pool.times('0.70'))
+          .abs()
+          .lte(1),
+      ).toBe(true);
+      expect(
+        new Decimal(grupoCocina.montoGrupo)
+          .minus(pool.times('0.30'))
+          .abs()
+          .lte(1),
+      ).toBe(true);
+      // Los dos grupos juntos suman el pool: no se pierde dinero.
+      expect(
+        new Decimal(grupoGarzon.montoGrupo)
+          .plus(grupoCocina.montoGrupo)
+          .toFixed(4),
+      ).toBe(pool.toFixed(4));
+
+      // Cada persona recibe solo de su grupo.
+      const porId = (g: string): Participante =>
+        prev.participantes.find((p) => p.garzonId === g)!;
+      expect(porId(ANA_ID).grupoId).toBe(grupoGarzon.id);
+      expect(porId(BRUNO_ID).grupoId).toBe(grupoGarzon.id);
+      expect(porId(CARLA_ID).grupoId).toBe(grupoCocina.id);
+      expect(porId(CARLA_ID).tipoGarzon).toBe('cocina');
+
+      // Carla es la única de Cocina: recibe todo el monto del grupo Cocina.
+      expect(porId(CARLA_ID).monto).toBe(
+        new Decimal(grupoCocina.montoGrupo).toFixed(4),
+      );
+
+      // Reconciliación global.
+      expect(suma(incluidos(prev.participantes))).toBe(pool.toFixed(4));
+    });
   });
 });
