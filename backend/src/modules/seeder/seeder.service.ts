@@ -432,9 +432,16 @@ export class SeederService implements OnApplicationBootstrap {
     const modulos: Partial<ModuloApp>[] = [
       {
         moduloAppId: '550e8400-e29b-41d4-a716-446655440011',
-        nombre: 'Caja',
-        url: '/caja',
+        nombre: 'MiCaja',
+        url: '/mi-caja',
         icono: 'mdi-cash-register',
+        tieneConfiguracion: false,
+      },
+      {
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440282',
+        nombre: 'Cajas',
+        url: '/cajas',
+        icono: 'mdi-cash-multiple',
         tieneConfiguracion: false,
       },
       {
@@ -617,9 +624,9 @@ export class SeederService implements OnApplicationBootstrap {
         permisoId: ELIMINAR,
       },
       {
-        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440038',
-        moduloAppId: CAJA,
-        permisoId: VER_TODAS,
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440283',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440282', // Cajas
+        permisoId: LEER,
       },
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440059',
@@ -1100,6 +1107,20 @@ export class SeederService implements OnApplicationBootstrap {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440043',
         tenantId: '550e8400-e29b-41d4-a716-446655440040',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440011', // Falabella → Caja
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440284',
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440282', // Paris → Cajas
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        moduloTenantId: '550e8400-e29b-41d4-a716-446655440285',
+        tenantId: '550e8400-e29b-41d4-a716-446655440040',
+        moduloAppId: '550e8400-e29b-41d4-a716-446655440282', // Falabella → Cajas
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
@@ -2712,7 +2733,7 @@ export class SeederService implements OnApplicationBootstrap {
 
   private async seedVendedorPermisosCaja(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
-    // moduloTenantId para Paris → Caja (definido en seedTenantModulo)
+    // moduloTenantId para Paris → MiCaja (definido en seedTenantModulo)
     const MODULO_TENANT_CAJA = '550e8400-e29b-41d4-a716-446655440023';
     // moduloTenantId para Paris → Ventas (recién agregado en Paso 3)
     const MODULO_TENANT_VENTAS = '550e8400-e29b-41d4-a716-446655440061';
@@ -2775,7 +2796,8 @@ export class SeederService implements OnApplicationBootstrap {
       [rolId, MODULO_TENANT_ITEMS],
     );
 
-    // Asignar Caja: Leer, Crear, Actualizar (sin VerTodas — ese es el diferenciador admin/supervisor)
+    // Asignar MiCaja: Leer, Crear, Actualizar (sin el módulo Cajas — ese es el
+    // diferenciador supervisor/encargado, que da lectura de todas las cajas)
     for (const moduloAppPermisoId of [CAJA_LEER, CAJA_CREAR, CAJA_ACTUALIZAR]) {
       await this.dataSource.query(
         `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
