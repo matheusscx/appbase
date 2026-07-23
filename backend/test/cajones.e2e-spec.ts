@@ -22,6 +22,9 @@ interface CajonResponse {
   nombre: string;
   activo: boolean;
 }
+interface Member {
+  usuarioId: string;
+}
 
 async function login(
   app: INestApplication<App>,
@@ -162,5 +165,77 @@ describe('Cajones (e2e) — CRUD admin-only + aislamiento', () => {
     expect(
       (resFalabella.body as CajonResponse[]).some((c) => c.nombre === nombre),
     ).toBe(false);
+  });
+
+  describe('allow-list de usuarios por cajón', () => {
+    let cajonId: string;
+    let miembros: string[];
+
+    beforeAll(async () => {
+      const resMiembros = await request(app.getHttpServer())
+        .get('/api/tenants/members')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      miembros = (resMiembros.body as Member[]).map((m) => m.usuarioId);
+      expect(miembros.length).toBeGreaterThanOrEqual(2);
+
+      const resCajon = await request(app.getHttpServer())
+        .post('/api/cajones')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ nombre: `E2E AllowList ${Date.now()}` });
+      cajonId = (resCajon.body as CajonResponse).id;
+      creados.push(cajonId);
+    });
+
+    it('admin asigna un conjunto y GET lo devuelve', async () => {
+      const set = [miembros[0], miembros[1]];
+      const resPut = await request(app.getHttpServer())
+        .put(`/api/cajones/${cajonId}/usuarios`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ usuarioIds: set });
+      expect(resPut.status).toBe(200);
+
+      const resGet = await request(app.getHttpServer())
+        .get(`/api/cajones/${cajonId}/usuarios`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resGet.status).toBe(200);
+      expect((resGet.body as string[]).sort()).toEqual([...set].sort());
+    });
+
+    it('reemplazar el conjunto refleja el diff (quita uno, agrega ninguno nuevo)', async () => {
+      const resPut = await request(app.getHttpServer())
+        .put(`/api/cajones/${cajonId}/usuarios`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ usuarioIds: [miembros[0]] });
+      expect(resPut.status).toBe(200);
+
+      const resGet = await request(app.getHttpServer())
+        .get(`/api/cajones/${cajonId}/usuarios`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resGet.body as string[]).toEqual([miembros[0]]);
+    });
+
+    it('un usuarioId ajeno al tenant devuelve 400', async () => {
+      const resPut = await request(app.getHttpServer())
+        .put(`/api/cajones/${cajonId}/usuarios`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ usuarioIds: ['00000000-0000-4000-8000-000000000000'] });
+      expect(resPut.status).toBe(400);
+    });
+
+    it('vendedor sin Cajas:Actualizar recibe 403 en el PUT', async () => {
+      const resPut = await request(app.getHttpServer())
+        .put(`/api/cajones/${cajonId}/usuarios`)
+        .set('Authorization', `Bearer ${tokenVendedor}`)
+        .send({ usuarioIds: [miembros[0]] });
+      expect(resPut.status).toBe(403);
+    });
+
+    it('aislamiento: Falabella no puede tocar el allow-list de un cajón de Paris (404)', async () => {
+      const resPut = await request(app.getHttpServer())
+        .put(`/api/cajones/${cajonId}/usuarios`)
+        .set('Authorization', `Bearer ${tokenFalabella}`)
+        .send({ usuarioIds: [] });
+      expect(resPut.status).toBe(404);
+    });
   });
 });

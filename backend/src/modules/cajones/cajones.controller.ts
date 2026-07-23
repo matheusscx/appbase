@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import { CajonesService } from './cajones.service';
 import { CreateCajonDto } from './dto/create-cajon.dto';
 import { UpdateCajonDto } from './dto/update-cajon.dto';
+import { SetCajonUsuariosDto } from './dto/set-cajon-usuarios.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('cajones')
@@ -53,5 +55,23 @@ export class CajonesController {
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as { tenantId: string };
     return this.cajonesService.remove(user.tenantId, id);
+  }
+
+  @RequiresPermiso('Cajas', 'Leer')
+  @Get(':id/usuarios')
+  getUsuarios(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as { tenantId: string };
+    return this.cajonesService.getUsuarios(user.tenantId, id);
+  }
+
+  @RequiresPermiso('Cajas', 'Actualizar')
+  @Put(':id/usuarios')
+  setUsuarios(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: SetCajonUsuariosDto,
+  ) {
+    const user = req.user as { tenantId: string };
+    return this.cajonesService.setUsuarios(user.tenantId, id, dto.usuarioIds);
   }
 }
