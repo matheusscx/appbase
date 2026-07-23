@@ -425,9 +425,10 @@ Modelo acordado (§8.1 + brainstorming):
 
 ### Sub-proyectos (opción A)
 
-- [ ] **1. Definición de cajones (admin)** — ✅ *spec aprobada, lista para plan*. CRUD de
-  cajones físicos por tenant (entidad `cajones`, config admin-only). Entregable y testeable
-  por sí solo. Spec: [`2026-07-23-cajones-definicion-admin-design.md`](../../superpowers/specs/2026-07-23-cajones-definicion-admin-design.md).
+- [x] **1. Definición de cajones (admin)** — ✅ implementado. CRUD de cajones físicos por
+  tenant (entidad `cajones`, config admin-only). Spec:
+  [`2026-07-23-cajones-definicion-admin-design.md`](../../superpowers/specs/2026-07-23-cajones-definicion-admin-design.md) ·
+  Plan: [`2026-07-23-cajones-definicion-admin.md`](../../superpowers/plans/2026-07-23-cajones-definicion-admin.md).
 - [ ] **2. Autorización: qué usuarios abren qué cajones** — allow-list N‑a‑N gestionada por
   el admin. Convive con el permiso RBAC (`MiCaja:Crear`). Depende de 1. Spec: _(pendiente)_.
 - [ ] **3. Sesión sobre cajón + terminología** — la sesión (hoy `cajas`) gana `cajon_id`; la

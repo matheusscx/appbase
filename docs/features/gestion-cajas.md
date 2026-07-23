@@ -71,6 +71,75 @@ ajena por el encargado queda diferido (ver `docs/agent/pendientes.md`).
 
 ---
 
+## Definición de cajones (Configuración → Cajas)
+
+**Sub-proyecto 1 de 3** del refactor general de caja (ver roadmap §9 de la
+[investigación de mercado](../agent/investigaciones/2026-07-23-gestion-caja.md)).
+Introduce el **cajón físico** (Mostrador, Delivery, Barra…) como entidad propia que el
+admin del tenant define en Configuración. El vínculo `cajon_id` en la sesión de caja
+(`cajas`) y la autorización de qué usuario puede abrir qué cajón llegan en el
+sub-proyecto 3 — por ahora la definición de cajones no afecta el flujo de
+apertura/cierre documentado arriba.
+
+**Nota de terminología:** `cajones` (este módulo, el mueble físico) ≠ `cajas` (la
+sesión/turno documentada en el resto de este archivo). A partir de este sub-proyecto,
+"cajón" es siempre el mueble físico y "caja" es siempre la sesión — no usar ambos
+términos indistintamente.
+
+### Entidad `cajones`
+
+**Table**: `cajones` (tenant-owned)
+
+| Column | Type | Constraints | Notes |
+|--------|------|-------------|-------|
+| `cajon_id` | UUID | PK | |
+| `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
+| `nombre` | TEXT | NOT NULL | Único por tenant (ver regla abajo) |
+| `activo` | BOOLEAN | NOT NULL, default `true` | Desactivar sin borrar |
+| `creado_el` | TIMESTAMPTZ | NOT NULL | |
+| `actualizado_el` | TIMESTAMPTZ | NOT NULL | |
+| `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
+
+Índice único parcial `ux_cajones_tenant_nombre` sobre `(tenant_id, nombre)` filtrando
+`eliminado_el IS NULL` — la garantía dura contra duplicados bajo concurrencia; el
+service valida antes (`validarNombreUnico`) para devolver un `409` con mensaje amable.
+
+### Endpoints
+
+- **Module**: `src/modules/cajones/cajones.module.ts`
+- **Controller**: `src/modules/cajones/cajones.controller.ts`
+- **Service**: `src/modules/cajones/cajones.service.ts`
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| GET | `/cajones` | `Cajas` / `Leer` | Lista cajones del tenant, ordenados por nombre |
+| POST | `/cajones` | `Cajas` / `Crear` | Crea cajón; `409` si el `nombre` ya existe (no borrado) en el tenant |
+| PATCH | `/cajones/:id` | `Cajas` / `Actualizar` | Edita `nombre` y/o `activo`; `409` si el nuevo nombre choca con otro cajón |
+| DELETE | `/cajones/:id` | `Cajas` / `Eliminar` | Soft delete (`softDelete`, nunca `DELETE` físico) |
+
+Todos bajo `JwtAuthGuard + TenantGuard + PermisosGuard` en la clase, igual que el resto
+de módulos de feature — ver `docs/patterns/backend.md §4`.
+
+### Módulo de permiso `Cajas` extendido (antes solo `Leer`)
+
+Hasta este sub-proyecto, el módulo de permiso `Cajas` solo tenía la acción `Leer`
+(supervisión read-only de sesiones — ver [Modelo de acceso por
+permiso](#modelo-de-acceso-por-permiso)). Se **extendió** con `Crear` / `Actualizar` /
+`Eliminar` para gobernar también el CRUD de cajones: no se creó un módulo de permiso
+nuevo porque supervisar sesiones y definir cajones son responsabilidades del mismo rol
+"encargado de caja" del tenant. Solo se agregaron filas `modulo_app_permiso` — el
+módulo `Caja` (sesión) y su controller/service **no se tocaron**.
+
+### Frontend
+
+- **Page**: `pages/configuracion/cajas.vue` — CRUD de cajones dentro de Configuración
+  (tabla + drawer crear/editar + confirm de eliminar). Gate por `Cajas:Crear` /
+  `Actualizar` / `Eliminar` (UX-only; el backend enforcea con `@RequiresPermiso`). La
+  etiqueta de UI que ve el admin ("Cajas") mapea a la entidad `cajones` — ver nota de
+  terminología arriba.
+
+---
+
 ## API Endpoints
 
 ### GET /caja/abiertas — Cajas físicas abiertas del tenant

@@ -821,6 +821,23 @@ CREATE TABLE "movimientos_caja" (
   "eliminado_el"   TIMESTAMPTZ
 );
 
+-- Cajones: mueble físico (Configuración → Cajas), NO confundir con `cajas` (la
+-- sesión/turno arriba). Sub-proyecto 1/3 del refactor general de caja — el vínculo
+-- cajon_id en `cajas` llega en el sub-proyecto 3.
+CREATE TABLE "cajones" (
+  "cajon_id"       UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"      UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"         TEXT          NOT NULL,
+  "activo"         BOOLEAN       NOT NULL DEFAULT TRUE,
+  "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX "ux_cajones_tenant_nombre"
+  ON "cajones" ("tenant_id", "nombre")
+  WHERE "eliminado_el" IS NULL;
+
 -- =============================================================
 -- 9. VENTAS
 -- =============================================================
