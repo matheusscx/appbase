@@ -48,6 +48,19 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
 - [ ] Integrar `@smoke` al CI cuando haya masa crítica (hoy el CI no levanta el stack
   de navegador).
 
+## Propinas en POS (notas de la revisión final, severidad baja — no bloqueantes)
+
+- [ ] **Unique index para el garzón placeholder "Mostrador"** (backend) — `asegurarMostrador`
+  (`garzones.service.ts`) es find-or-create sin restricción única sobre `(tenant_id,
+  es_placeholder)`. En la práctica el placeholder ya existe (se siembra al crear el tenant
+  y en el seed), así que el camino on-demand es solo fallback para tenants preexistentes;
+  bajo concurrencia, dos "primeras" propinas de POS de un tenant sin placeholder podrían
+  insertar dos "Mostrador" (duplicado benigno: ambos neutros y ocultos). Cerrar con un
+  índice único parcial `WHERE es_placeholder = true AND eliminado_el IS NULL`.
+- [ ] **Validación de `propinaDirecta`** (backend) — `montoPagado` es `@IsNumberString()`
+  sin garantía de `> 0`, y no se restringe al canal `fisico`. Es el mismo patrón que
+  `propinaCierreMesa` preexistente (no regresión); si se endurece, hacerlo en ambos.
+
 ## Limpiezas menores (opcionales, no bloqueantes)
 
 - [ ] `items.vue:81` — campo `esPendiente` en `GrupoOpcionOverrideRow` se setea pero
