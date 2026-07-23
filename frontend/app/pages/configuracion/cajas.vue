@@ -7,6 +7,12 @@ interface Cajon {
   activo: boolean
 }
 
+interface Member {
+  usuarioId: string
+  nombre: string
+  apellido: string | null
+}
+
 const runtimeConfig = useRuntimeConfig()
 const toast = useToast()
 const perms = usePermissionsStore()
@@ -20,6 +26,15 @@ const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
 const toggling = reactive(new Set<string>())
+
+const usuariosDrawerOpen = ref(false)
+const usuariosCajonId = ref<string | null>(null)
+const usuariosCajonNombre = ref('')
+const miembros = ref<Member[]>([])
+const miembrosCargados = ref(false)
+const seleccionados = ref<string[]>([])
+const loadingUsuarios = ref(false)
+const savingUsuarios = ref(false)
 
 const emptyForm = () => ({ nombre: '', activo: true })
 const form = ref(emptyForm())
@@ -126,6 +141,59 @@ async function eliminar(id: string) {
   }
 }
 
+function toggleSeleccion(usuarioId: string, marcado: boolean) {
+  if (marcado) {
+    if (!seleccionados.value.includes(usuarioId)) seleccionados.value = [...seleccionados.value, usuarioId]
+  }
+  else {
+    seleccionados.value = seleccionados.value.filter(id => id !== usuarioId)
+  }
+}
+
+async function abrirUsuarios(c: Cajon) {
+  usuariosCajonId.value = c.id
+  usuariosCajonNombre.value = c.nombre
+  usuariosDrawerOpen.value = true
+  loadingUsuarios.value = true
+  try {
+    const [mem, asignados] = await Promise.all([
+      miembrosCargados.value
+        ? Promise.resolve(miembros.value)
+        : useApiFetch<Member[]>(`${apiUrl}/tenants/members`),
+      useApiFetch<string[]>(`${apiUrl}/cajones/${c.id}/usuarios`),
+    ])
+    miembros.value = mem
+    miembrosCargados.value = true
+    seleccionados.value = asignados
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar usuarios'), color: 'error' })
+    usuariosDrawerOpen.value = false
+  }
+  finally {
+    loadingUsuarios.value = false
+  }
+}
+
+async function guardarUsuarios() {
+  if (!usuariosCajonId.value) return
+  savingUsuarios.value = true
+  try {
+    await useApiFetch(`${apiUrl}/cajones/${usuariosCajonId.value}/usuarios`, {
+      method: 'PUT',
+      body: { usuarioIds: seleccionados.value },
+    })
+    toast.add({ title: 'Usuarios actualizados', color: 'success' })
+    usuariosDrawerOpen.value = false
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al guardar usuarios'), color: 'error' })
+  }
+  finally {
+    savingUsuarios.value = false
+  }
+}
+
 onMounted(() => {
   cargar()
 })
@@ -169,6 +237,13 @@ const columns: TableColumn<Cajon>[] = [
 
       <template #acciones-cell="{ row }">
         <div class="flex justify-end gap-2">
+          <UButton
+            v-if="puedeActualizar"
+            icon="i-lucide-users"
+            color="neutral"
+            variant="ghost"
+            @click="abrirUsuarios(row.original)"
+          />
           <UButton
             v-if="puedeActualizar"
             icon="i-lucide-square-pen"
@@ -216,6 +291,44 @@ const columns: TableColumn<Cajon>[] = [
         </UButton>
         <UButton type="submit" form="cajon-form" :loading="saving">
           {{ submitLabel }}
+        </UButton>
+      </template>
+    </AppDrawer>
+
+    <AppDrawer v-model:open="usuariosDrawerOpen" width="40%">
+      <template #header>
+        <span class="font-semibold text-default">Usuarios habilitados — {{ usuariosCajonNombre }}</span>
+      </template>
+
+      <template #body>
+        <div v-if="loadingUsuarios" class="py-8 text-center text-sm text-muted">
+          Cargando…
+        </div>
+        <div v-else class="space-y-4">
+          <p class="text-sm text-muted">
+            Marcá quién puede abrir esta caja. Si no seleccionás a nadie, cualquiera con permiso de caja puede abrirla.
+          </p>
+          <div v-if="miembros.length === 0" class="text-sm text-muted">
+            No hay usuarios en el tenant.
+          </div>
+          <div v-else class="space-y-2">
+            <UCheckbox
+              v-for="m in miembros"
+              :key="m.usuarioId"
+              :model-value="seleccionados.includes(m.usuarioId)"
+              :label="`${m.nombre} ${m.apellido ?? ''}`"
+              @update:model-value="(v) => toggleSeleccion(m.usuarioId, v === true)"
+            />
+          </div>
+        </div>
+      </template>
+
+      <template #actions>
+        <UButton color="neutral" variant="ghost" @click="() => { usuariosDrawerOpen = false }">
+          Cancelar
+        </UButton>
+        <UButton :loading="savingUsuarios" @click="guardarUsuarios">
+          Guardar
         </UButton>
       </template>
     </AppDrawer>
