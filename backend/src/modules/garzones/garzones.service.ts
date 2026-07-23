@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository, type EntityManager } from 'typeorm';
 import { randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { Garzon } from './entities/garzon.entity';
@@ -152,6 +152,34 @@ export class GarzonesService {
       throw new BadRequestException('Garzón no encontrado o inactivo');
     }
     return garzon;
+  }
+
+  /**
+   * Resuelve el garzón placeholder "Mostrador" del tenant — receptor neutro de
+   * la propina del POS. Idempotente: si no existe lo crea con `activo=false`,
+   * `esPlaceholder=true` y un `pin_hash` inutilizable, para que nunca opere ni
+   * se identifique por PIN. Se ejecuta dentro del `manager` de la transacción
+   * de la venta. Ver docs/features/pagos.md.
+   */
+  async asegurarMostrador(
+    manager: EntityManager,
+    tenantId: string,
+  ): Promise<Garzon> {
+    const existente = await manager.findOne(Garzon, {
+      where: { tenantId, esPlaceholder: true, eliminadoEl: IsNull() },
+    });
+    if (existente) return existente;
+    return manager.save(
+      Garzon,
+      manager.create(Garzon, {
+        tenantId,
+        nombre: 'Mostrador',
+        pinHash: '!',
+        activo: false,
+        tipo: TipoGarzon.GARZON,
+        esPlaceholder: true,
+      }),
+    );
   }
 
   private async getOrThrow(tenantId: string, id: string): Promise<Garzon> {

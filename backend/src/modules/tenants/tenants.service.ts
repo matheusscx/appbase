@@ -17,6 +17,7 @@ import { RazonSocial } from './entities/razon-social.entity';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
+import { GarzonesService } from '../garzones/garzones.service';
 import { CriterioDistribucion } from '../propinas/enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from '../propinas/enums/base-ventas-grupo.enum';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -52,6 +53,7 @@ export class TenantsService {
     private readonly razonSocialRepo: Repository<RazonSocial>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly garzonesService: GarzonesService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -118,6 +120,9 @@ export class TenantsService {
         saldoInicial: '0',
       });
       await manager.save(Caja, caja);
+
+      // 6a. Garzón placeholder "Mostrador" (receptor neutro de propina del POS)
+      await this.garzonesService.asegurarMostrador(manager, savedTenant.id);
 
       // 6b. Configuración default de distribución de propinas (100% Garzones)
       const propinaConfig = await manager.save(

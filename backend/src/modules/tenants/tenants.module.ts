@@ -8,6 +8,7 @@ import { Caja } from '../caja/entities/caja.entity';
 import { RazonSocial } from './entities/razon-social.entity';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
+import { GarzonesModule } from '../garzones/garzones.module';
 import { TenantsService } from './tenants.service';
 import {
   AdminTenantsController,
@@ -26,6 +27,7 @@ import {
       PropinaConfiguracion,
       PropinaGrupoDistribucion,
     ]),
+    GarzonesModule,
   ],
   controllers: [AdminTenantsController, TenantsController],
   providers: [TenantsService],

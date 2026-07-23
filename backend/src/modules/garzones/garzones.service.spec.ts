@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import type { EntityManager } from 'typeorm';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { GarzonesService } from './garzones.service';
@@ -237,5 +238,68 @@ describe('GarzonesService', () => {
         tenantId: TENANT,
       });
     });
+  });
+});
+
+describe('GarzonesService.asegurarMostrador', () => {
+  let service: GarzonesService;
+
+  beforeEach(async () => {
+    const repo = makeRepo();
+    const sesionRepo = makeSesionRepo();
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        GarzonesService,
+        { provide: getRepositoryToken(Garzon), useValue: repo },
+        { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
+      ],
+    }).compile();
+    service = module.get(GarzonesService);
+  });
+
+  function mockManager(existente: Partial<Garzon> | null) {
+    return {
+      findOne: jest.fn().mockResolvedValue(existente),
+      create: jest
+        .fn()
+        .mockImplementation((_e: unknown, data: Record<string, unknown>) => ({
+          ...data,
+        })),
+      save: jest
+        .fn()
+        .mockImplementation((_e: unknown, data: Record<string, unknown>) =>
+          Promise.resolve({ id: 'mostrador-nuevo', ...data }),
+        ),
+    };
+  }
+
+  it('devuelve el placeholder existente sin crear otro', async () => {
+    const manager = mockManager({ id: 'mostrador-1', esPlaceholder: true });
+    const res = await service.asegurarMostrador(
+      manager as unknown as EntityManager,
+      't1',
+    );
+    expect(res.id).toBe('mostrador-1');
+    expect(manager.save).not.toHaveBeenCalled();
+  });
+
+  it('crea el placeholder con atribución neutra si no existe', async () => {
+    const manager = mockManager(null);
+    const res = await service.asegurarMostrador(
+      manager as unknown as EntityManager,
+      't1',
+    );
+    expect(res.id).toBe('mostrador-nuevo');
+    expect(manager.create).toHaveBeenCalledWith(
+      Garzon,
+      expect.objectContaining({
+        tenantId: 't1',
+        nombre: 'Mostrador',
+        activo: false,
+        esPlaceholder: true,
+        pinHash: '!',
+        tipo: TipoGarzon.GARZON,
+      }),
+    );
   });
 });

@@ -12,6 +12,7 @@ import { TenantModulo } from './entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from './entities/tenant-formula-precio.entity';
 import { Caja } from '../caja/entities/caja.entity';
 import { RazonSocial } from './entities/razon-social.entity';
+import { GarzonesService } from '../garzones/garzones.service';
 import type { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 
 const mockTenant: Tenant = {
@@ -106,6 +107,10 @@ describe('TenantsService', () => {
         },
         { provide: getRepositoryToken(RazonSocial), useValue: razonSocialRepo },
         { provide: getDataSourceToken(), useValue: dataSource },
+        {
+          provide: GarzonesService,
+          useValue: { asegurarMostrador: jest.fn() },
+        },
       ],
     }).compile();
 
