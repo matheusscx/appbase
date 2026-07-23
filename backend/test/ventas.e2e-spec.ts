@@ -391,4 +391,22 @@ describe('Ventas (e2e)', () => {
         .expect(400);
     });
   });
+
+  describe('GET /propinas/porcentaje-sugerido-venta', () => {
+    it('devuelve el porcentaje sugerido del tenant', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/propinas/porcentaje-sugerido-venta')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(
+        typeof (res.body as { porcentajeSugerido: string }).porcentajeSugerido,
+      ).toBe('string');
+    });
+
+    it('retorna 401 sin token', async () => {
+      await request(app.getHttpServer())
+        .get('/api/propinas/porcentaje-sugerido-venta')
+        .expect(401);
+    });
+  });
 });

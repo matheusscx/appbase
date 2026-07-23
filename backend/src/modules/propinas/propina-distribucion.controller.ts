@@ -30,6 +30,15 @@ export class PropinaDistribucionController {
     return this.distribucion.obtenerPorcentajeSugerido(user.tenantId!);
   }
 
+  // Mismo dato que /porcentaje-sugerido, pero para el POS: el rol Vendedor no
+  // tiene Salones:Operar. Ver docs/features/pagos.md.
+  @Get('porcentaje-sugerido-venta')
+  @RequiresPermiso('Ventas', 'Crear')
+  porcentajeSugeridoVenta(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.distribucion.obtenerPorcentajeSugerido(user.tenantId!);
+  }
+
   @Put('distribucion')
   @RequiresPermiso('Propinas', 'Configurar')
   reemplazar(@Req() req: Request, @Body() dto: UpdateDistribucionDto) {
