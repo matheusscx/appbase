@@ -217,6 +217,21 @@ Incluye tests de:
 - creación, edición, actualización de config, confirmación y anulación de
   liquidaciones.
 
+### API E2E del reparto (Jest + supertest — corre en el gate/CI)
+
+```bash
+cd backend && npm run test:e2e   # test/liquidacion-propinas.e2e-spec.ts
+```
+
+Cubre el reparto end-to-end contra la Postgres real: siembra receptores
+(garzones con tip propio), reparto `PARTES_IGUALES` con reconciliación
+(suma de incluidos == pool), la propina del POS entrando al pool sin que el
+"Mostrador" reciba nunca, el ajuste de exclusión (redistribuye sin perder
+dinero) y `liquidar` (asigna `liquidacion_id` y saca las propinas de futuros
+repartos). Idempotente entre corridas: los tips liquidados quedan fuera del
+pool. Los criterios `VENTAS_NETAS`/`HORAS_TRABAJADAS`/`MANUAL` no se ejercitan
+acá (requieren config de grupo que el seed no trae) — los cubren los unit tests.
+
 ### QA E2E date/time inputs (Chrome DevTools)
 
 Cubre pickers Nuxt UI (`AppDate*` / `AppTimeInput`) con smoke + mutaciones
