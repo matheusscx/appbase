@@ -830,7 +830,7 @@ CREATE TABLE "cajones" (
   "nombre"         TEXT          NOT NULL,
   "activo"         BOOLEAN       NOT NULL DEFAULT TRUE,
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  "actualizado_el" TIMESTAMPTZ,
+  "actualizado_el" TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "eliminado_el"   TIMESTAMPTZ
 );
 
