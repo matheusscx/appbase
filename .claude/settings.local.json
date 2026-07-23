@@ -115,7 +115,11 @@
       "Bash(npx vitest *)",
       "Bash(curl -s -o /dev/null -w \"front:%{http_code}\\\\n\" http://localhost:5173)",
       "Bash(curl -s -o /dev/null -w \"api:%{http_code}\\\\n\" http://localhost:3000/api/docs)",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__click"
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__click",
+      "Bash(gh run *)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_console_messages",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_network_requests",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__get_network_request"
     ]
   },
   "enabledMcpjsonServers": [
