@@ -1437,6 +1437,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     v-model="form.unidadMedida"
                     :items="unidadesMedidaOpts"
                     value-key="value"
+                    :disabled="!!editingId"
                     class="w-full"
                   />
                 </UFormField>
@@ -1461,8 +1462,14 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               <!-- Modo cantidad: stock inicial + fechas genéricas -->
               <template v-if="form.modoInventario === 'cantidad'">
                 <div class="grid grid-cols-2 gap-4">
-                  <UFormField label="Stock inicial">
-                    <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
+                  <UFormField :label="editingId ? 'Stock actual' : 'Stock inicial'">
+                    <UInput
+                      v-model="form.stock"
+                      inputmode="decimal"
+                      placeholder="0"
+                      :disabled="!!editingId"
+                      class="w-full"
+                    />
                   </UFormField>
                   <UFormField label="Fecha elaboración">
                     <AppDateInput v-model="form.fechaElaboracion" />
@@ -1472,6 +1479,14 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   </UFormField>
                 </div>
               </template>
+
+              <!-- Edición serie/lote: stock informativo (los ajustes van por el flujo de ajuste de stock) -->
+              <UFormField
+                v-if="editingId && (form.modoInventario === 'serie' || form.modoInventario === 'lote')"
+                :label="form.modoInventario === 'serie' ? 'Stock actual (unidades)' : 'Stock actual (lotes)'"
+              >
+                <UInput :model-value="form.stock" disabled class="w-full" />
+              </UFormField>
 
               <!-- Modo serie: lista de unidades iniciales -->
               <template v-if="form.modoInventario === 'serie' && !editingId">
@@ -1552,6 +1567,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     v-model="form.unidadMedida"
                     :items="unidadesMedidaOpts"
                     value-key="value"
+                    :disabled="!!editingId"
                     class="w-full"
                   />
                 </UFormField>
@@ -1560,6 +1576,9 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 </UFormField>
                 <UFormField v-if="!editingId" label="Stock inicial">
                   <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />
+                </UFormField>
+                <UFormField v-else label="Stock actual">
+                  <UInput :model-value="form.stock" disabled class="w-full" />
                 </UFormField>
               </div>
             </div>
