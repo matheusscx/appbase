@@ -1320,6 +1320,15 @@ export class SeederService implements OnApplicationBootstrap {
         pinHash: '$2b$10$j8RWk.ZD2t1QNqeareWYwOZLGXo.vX2WnkTpcl8qS1TTIeqTd/QMK',
         activo: true,
       },
+      {
+        // Placeholder "Mostrador": receptor neutro de la propina del POS.
+        id: '550e8400-e29b-41d4-a716-446655440281',
+        tenantId: PARIS,
+        nombre: 'Mostrador',
+        pinHash: '!', // inutilizable: no es bcrypt válido → nunca matchea un PIN
+        activo: false,
+        esPlaceholder: true,
+      },
     ];
     for (const data of garzones) {
       const exists = await this.garzonRepo.findOne({ where: { id: data.id } });

@@ -62,7 +62,7 @@ export class GarzonesService {
 
   async listar(tenantId: string): Promise<GarzonPublico[]> {
     const garzones = await this.garzonRepo.find({
-      where: { tenantId },
+      where: { tenantId, esPlaceholder: false },
       order: { nombre: 'ASC' },
     });
     return garzones.map((g) => this.toPublico(g));

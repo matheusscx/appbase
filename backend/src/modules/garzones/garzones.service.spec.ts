@@ -59,6 +59,7 @@ function garzon(over: Partial<Garzon> & { pin?: string }): Garzon {
     pinHash: pin ? bcrypt.hashSync(pin, 10) : 'x',
     activo: true,
     tipo: TipoGarzon.GARZON,
+    esPlaceholder: false,
     creadoEl: new Date(),
     actualizadoEl: new Date(),
     eliminadoEl: null,

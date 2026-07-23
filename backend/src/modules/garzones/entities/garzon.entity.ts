@@ -35,6 +35,12 @@ export class Garzon {
   @Column({ type: 'text', default: TipoGarzon.GARZON })
   tipo: TipoGarzon;
 
+  // Garzón placeholder "Mostrador": recibe la propina del POS con atribución
+  // neutra. No opera (activo=false), no se identifica por PIN y se oculta del
+  // listado de garzones. Ver docs/features/pagos.md.
+  @Column({ name: 'es_placeholder', type: 'boolean', default: false })
+  esPlaceholder: boolean;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

@@ -1213,6 +1213,7 @@ CREATE TABLE garzones (
     pin_hash TEXT NOT NULL, -- bcrypt del PIN; nunca se expone por la API
     activo BOOLEAN NOT NULL DEFAULT TRUE,
     tipo TEXT NOT NULL DEFAULT 'garzon',
+    es_placeholder BOOLEAN NOT NULL DEFAULT false, -- garzón "Mostrador": recibe la propina del POS con atribución neutra
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     eliminado_el TIMESTAMPTZ,

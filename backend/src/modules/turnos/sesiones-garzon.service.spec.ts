@@ -47,6 +47,7 @@ function garzon(over: Partial<Garzon> = {}): Garzon {
     pinHash: 'hash',
     activo: true,
     tipo: TipoGarzon.GARZON,
+    esPlaceholder: false,
     creadoEl: new Date('2026-01-01T00:00:00Z'),
     actualizadoEl: new Date('2026-01-01T00:00:00Z'),
     eliminadoEl: null,
