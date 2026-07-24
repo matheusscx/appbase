@@ -30,6 +30,9 @@ onMounted(async () => {
     if (!cajaStore.detalle) {
       throw new Error('not-found')
     }
+    if (cajaStore.detalle.estado === 'cerrada') {
+      await cajaStore.cargarArqueo(cajaId.value)
+    }
   }
   catch {
     toast.add({ title: 'No tenés acceso a esta caja o no existe', color: 'warning' })
@@ -67,13 +70,23 @@ onMounted(async () => {
           Cargando…
         </div>
 
-        <div v-else-if="cajaStore.detalle">
+        <div v-else-if="cajaStore.detalle" class="space-y-6">
           <CajaActivaDashboard
             :caja="cajaStore.detalle"
             :readonly="true"
             :historial-url="historialCajonUrl"
             historial-label="Ver historial"
           />
+
+          <UCard v-if="cajaStore.detalle.estado === 'cerrada' && cajaStore.arqueo.length > 0" class="w-full">
+            <template #header>
+              <h3 class="text-sm font-semibold text-default">
+                Arqueo del cierre
+              </h3>
+            </template>
+
+            <CajaArqueoTable :lineas="cajaStore.arqueo" />
+          </UCard>
         </div>
       </div>
     </template>
