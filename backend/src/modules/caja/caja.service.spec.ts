@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -8,8 +9,10 @@ import {
 } from '@nestjs/common';
 import { IsNull } from 'typeorm';
 import { CajaService } from './caja.service';
+import type { LineaArqueo } from './caja.service';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
+import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 
@@ -76,6 +79,10 @@ describe('CajaService', () => {
         CajaService,
         { provide: getRepositoryToken(Caja), useValue: cajaRepo },
         { provide: getRepositoryToken(MovimientoCaja), useValue: {} },
+        {
+          provide: getRepositoryToken(CajaArqueoMedio),
+          useValue: { create: jest.fn((x) => x), save: jest.fn() },
+        },
         { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
@@ -231,103 +238,146 @@ describe('CajaService', () => {
   });
 
   describe('cerrar', () => {
-    const dto: CerrarCajaDto = {
-      montoContado: '1200',
-      comentario: 'Cierre diario',
-    };
+    const arqueoRecomputado: LineaArqueo[] = [
+      {
+        metodoPagoId: null,
+        nombre: 'Efectivo',
+        esEfectivo: true,
+        esperado: '1000.0000',
+        requiereConteo: true,
+      },
+      {
+        metodoPagoId: 'dddddddd-0000-0000-0000-000000000004',
+        nombre: 'Tarjeta de débito',
+        esEfectivo: false,
+        esperado: '800.0000',
+        requiereConteo: false,
+      },
+    ];
 
     beforeEach(() => {
       managerMock.query.mockResolvedValue([{ caja_id: CAJA_ID }]); // FOR UPDATE
-      // Mock calcularSaldoEsperado so cerrar tests don't depend on query internals
-      jest
-        .spyOn(service, 'calcularSaldoEsperado')
-        .mockResolvedValue('1000.0000');
-    });
-
-    it('(a) cuadre exacto: diferencia = "0.0000"', async () => {
       managerMock.findOne.mockResolvedValue({ ...mockCajaAbierta });
+      managerMock.save.mockImplementation((_e: unknown, x: unknown) => x);
       jest
-        .spyOn(service, 'calcularSaldoEsperado')
-        .mockResolvedValue('1200.0000');
-      managerMock.save.mockImplementation((_entity: unknown, data: unknown) =>
-        Promise.resolve(data),
-      );
-
-      const dtoExacto: CerrarCajaDto = { montoContado: '1200.0000' };
-      const result = await service.cerrar(
-        TENANT_ID,
-        USUARIO_ID,
-        CAJA_ID,
-        dtoExacto,
-      );
-
-      expect(result.diferencia).toBe('0.0000');
-      expect(result.estado).toBe('cerrada');
-      expect(result.saldoFinal).toBe('1200.0000');
-      expect(result.fechaCierre).toBeInstanceOf(Date);
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue(arqueoRecomputado);
     });
 
-    it('(b) sobrante: monto contado > saldo esperado → diferencia positiva', async () => {
-      managerMock.findOne.mockResolvedValue({ ...mockCajaAbierta });
-      jest
-        .spyOn(service, 'calcularSaldoEsperado')
-        .mockResolvedValue('1000.0000');
-      managerMock.save.mockImplementation((_entity: unknown, data: unknown) =>
-        Promise.resolve(data),
-      );
-
-      const dtoSobrante: CerrarCajaDto = { montoContado: '1200' };
-      const result = await service.cerrar(
-        TENANT_ID,
-        USUARIO_ID,
-        CAJA_ID,
-        dtoSobrante,
-      );
-
-      expect(result.diferencia).toBe('200.0000');
-      expect(result.estado).toBe('cerrada');
-    });
-
-    it('(c) faltante: monto contado < saldo esperado → diferencia negativa', async () => {
-      managerMock.findOne.mockResolvedValue({ ...mockCajaAbierta });
-      jest
-        .spyOn(service, 'calcularSaldoEsperado')
-        .mockResolvedValue('1000.0000');
-      managerMock.save.mockImplementation((_entity: unknown, data: unknown) =>
-        Promise.resolve(data),
-      );
-
-      const dtoFaltante: CerrarCajaDto = { montoContado: '800' };
-      const result = await service.cerrar(
-        TENANT_ID,
-        USUARIO_ID,
-        CAJA_ID,
-        dtoFaltante,
-      );
-
-      expect(result.diferencia).toBe('-200.0000');
-      expect(result.estado).toBe('cerrada');
-    });
-
-    it('(d) caja ya cerrada o no encontrada → ForbiddenException', async () => {
-      managerMock.query.mockResolvedValueOnce([]); // lock falla (no abierta)
-
-      await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('(e) caja ajena → ForbiddenException', async () => {
-      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]);
-      const cajaOtroUsuario: Partial<Caja> = {
-        ...mockCajaAbierta,
-        usuarioId: OTRO_USUARIO,
+    it('congela el arqueo y fija los agregados de cajas = línea de efectivo', async () => {
+      const dto: CerrarCajaDto = {
+        lineas: [
+          { metodoPagoId: null, montoContado: '1000' },
+          {
+            metodoPagoId: 'dddddddd-0000-0000-0000-000000000004',
+            montoContado: '800',
+          },
+        ],
       };
-      managerMock.findOne.mockResolvedValue(cajaOtroUsuario);
+      const { caja, arqueo } = await service.cerrar(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dto,
+      );
+      expect(caja.estado).toBe('cerrada');
+      expect(caja.saldoFinal).toBe('1000.0000'); // esperado efectivo
+      expect(caja.montoContado).toBe('1000'); // contado efectivo
+      expect(caja.diferencia).toBe('0.0000');
+      const efectivo = arqueo.find((l) => l.metodoPagoId === null);
+      const tarjeta = arqueo.find((l) => l.metodoPagoId !== null);
+      expect(efectivo?.diferencia).toBe('0.0000');
+      expect(tarjeta?.contado).toBe('800.0000');
+      expect(tarjeta?.diferencia).toBe('0.0000');
+    });
 
+    it('deja la línea opcional omitida como informativa (contado NULL)', async () => {
+      const dto: CerrarCajaDto = {
+        lineas: [{ metodoPagoId: null, montoContado: '900' }], // solo efectivo
+      };
+      const { caja, arqueo } = await service.cerrar(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dto,
+      );
+      expect(caja.diferencia).toBe('-100.0000');
+      const tarjeta = arqueo.find((l) => l.metodoPagoId !== null);
+      expect(tarjeta?.contado).toBeNull();
+      expect(tarjeta?.diferencia).toBeNull();
+    });
+
+    it('400 si falta la línea de efectivo (obligatoria)', async () => {
+      const dto: CerrarCajaDto = {
+        lineas: [
+          {
+            metodoPagoId: 'dddddddd-0000-0000-0000-000000000004',
+            montoContado: '800',
+          },
+        ],
+      };
       await expect(
         service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('400 si el DTO trae un metodoPagoId ajeno al arqueo', async () => {
+      const dto: CerrarCajaDto = {
+        lineas: [
+          { metodoPagoId: null, montoContado: '1000' },
+          {
+            metodoPagoId: 'eeeeeeee-0000-0000-0000-000000000099',
+            montoContado: '50',
+          },
+        ],
+      };
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('400 si una línea no-efectivo con requiere_conteo llega sin contado', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue([
+          arqueoRecomputado[0],
+          { ...arqueoRecomputado[1], requiereConteo: true },
+        ]);
+      const dto: CerrarCajaDto = {
+        lineas: [{ metodoPagoId: null, montoContado: '1000' }],
+      };
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('acepta montoContado con decimales', async () => {
+      const dto: CerrarCajaDto = {
+        lineas: [
+          { metodoPagoId: null, montoContado: '1000.5000' },
+          {
+            metodoPagoId: 'dddddddd-0000-0000-0000-000000000004',
+            montoContado: '800',
+          },
+        ],
+      };
+      const { caja } = await service.cerrar(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dto,
+      );
+      expect(caja.diferencia).toBe('0.5000');
+    });
+
+    it('lanza si la caja no está abierta (lock falla)', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // lock vacío
+      const dto: CerrarCajaDto = {
+        lineas: [{ metodoPagoId: null, montoContado: '1000' }],
+      };
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 
@@ -809,6 +859,10 @@ describe('CajaService.abrir', () => {
         CajaService,
         { provide: getRepositoryToken(Caja), useValue: cajaRepo },
         { provide: getRepositoryToken(MovimientoCaja), useValue: {} },
+        {
+          provide: getRepositoryToken(CajaArqueoMedio),
+          useValue: { create: jest.fn((x) => x), save: jest.fn() },
+        },
         { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();

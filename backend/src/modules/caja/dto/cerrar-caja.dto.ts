@@ -1,8 +1,12 @@
-import { IsNumberString, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { LineaCierreDto } from './linea-cierre.dto';
 
 export class CerrarCajaDto {
-  @IsNumberString({ no_symbols: true })
-  montoContado: string;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => LineaCierreDto)
+  lineas: LineaCierreDto[];
 
   @IsOptional()
   @IsString()

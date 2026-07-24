@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -16,6 +17,7 @@ import {
 import Decimal from 'decimal.js';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
+import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
 import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
@@ -93,6 +95,8 @@ export class CajaService {
     private readonly cajaRepo: Repository<Caja>,
     @InjectRepository(MovimientoCaja)
     private readonly movimientoCajaRepo: Repository<MovimientoCaja>,
+    @InjectRepository(CajaArqueoMedio)
+    private readonly arqueoMedioRepo: Repository<CajaArqueoMedio>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -257,33 +261,6 @@ export class CajaService {
     }
   }
 
-  async calcularSaldoEsperado(
-    cajaId: string,
-    manager: EntityManager,
-  ): Promise<string> {
-    const rows: {
-      saldo_inicial: string;
-      total_entradas: string | null;
-      total_salidas: string | null;
-    }[] = await manager.query(
-      `SELECT c.saldo_inicial,
-              SUM(m.monto) FILTER (WHERE m.tipo = 'entrada' AND m.eliminado_el IS NULL) AS total_entradas,
-              SUM(m.monto) FILTER (WHERE m.tipo = 'salida'  AND m.eliminado_el IS NULL) AS total_salidas
-       FROM cajas c
-       LEFT JOIN movimientos_caja m ON m.caja_id = c.caja_id
-       WHERE c.caja_id = $1
-         AND c.eliminado_el IS NULL
-       GROUP BY c.saldo_inicial`,
-      [cajaId],
-    );
-
-    const row = rows[0];
-    const saldoInicial = new Decimal(row?.saldo_inicial ?? '0');
-    const entradas = new Decimal(row?.total_entradas ?? '0');
-    const salidas = new Decimal(row?.total_salidas ?? '0');
-    return saldoInicial.plus(entradas).minus(salidas).toFixed(4);
-  }
-
   /**
    * Línea de efectivo del arqueo: fondo + entradas de métodos es_efectivo +
    * entradas manuales (metodo_pago_id NULL) − todas las salidas. Los vueltos ya
@@ -392,7 +369,7 @@ export class CajaService {
     usuarioId: string,
     cajaId: string,
     dto: CerrarCajaDto,
-  ): Promise<Caja> {
+  ): Promise<{ caja: Caja; arqueo: LineaArqueo[] }> {
     return this.dataSource.transaction(async (manager) => {
       await this.bloquearCajaAbierta(manager, cajaId, tenantId);
 
@@ -404,26 +381,76 @@ export class CajaService {
           eliminadoEl: IsNull(),
         },
       });
-
       if (!caja) {
         throw new ForbiddenException('Caja no encontrada o no está abierta');
       }
-
       if (caja.usuarioId !== usuarioId) {
         throw new ForbiddenException('No tienes acceso a esta caja');
       }
 
-      const saldoEsperado = await this.calcularSaldoEsperado(cajaId, manager);
-      const diferencia = new Decimal(dto.montoContado).minus(saldoEsperado);
+      // Esperado recomputado y CONGELADO server-side (nunca viene del cliente).
+      const arqueo = await this.calcularArqueo(cajaId, tenantId, manager);
 
-      caja.saldoFinal = saldoEsperado;
-      caja.montoContado = dto.montoContado;
-      caja.diferencia = diferencia.toFixed(4);
+      // Contado declarado por el cajero, indexado por clave de línea.
+      const claveDe = (id: string | null) => id ?? 'EFECTIVO';
+      const contadoPorClave = new Map<string, string>();
+      for (const linea of dto.lineas) {
+        contadoPorClave.set(claveDe(linea.metodoPagoId), linea.montoContado);
+      }
+
+      // Ninguna línea del DTO puede ser ajena al arqueo recomputado.
+      const clavesArqueo = new Set(arqueo.map((l) => claveDe(l.metodoPagoId)));
+      for (const clave of contadoPorClave.keys()) {
+        if (!clavesArqueo.has(clave)) {
+          throw new BadRequestException(
+            'Método de pago no pertenece al arqueo',
+          );
+        }
+      }
+
+      // Resolver contado/diferencia por línea + validar obligatorias.
+      const lineasResueltas = arqueo.map((l) => {
+        const contadoRaw = contadoPorClave.get(claveDe(l.metodoPagoId));
+        const obligatoria = l.esEfectivo || l.requiereConteo;
+        if (obligatoria && contadoRaw === undefined) {
+          throw new BadRequestException(`Falta el conteo de ${l.nombre}`);
+        }
+        const contado =
+          contadoRaw === undefined ? null : new Decimal(contadoRaw).toFixed(4);
+        const diferencia =
+          contado === null
+            ? null
+            : new Decimal(contado).minus(l.esperado).toFixed(4);
+        return { ...l, contado, diferencia };
+      });
+
+      // Congelar todas las líneas.
+      await manager.save(
+        CajaArqueoMedio,
+        lineasResueltas.map((l) =>
+          manager.create(CajaArqueoMedio, {
+            cajaId,
+            tenantId,
+            metodoPagoId: l.metodoPagoId,
+            esEfectivo: l.esEfectivo,
+            esperado: l.esperado,
+            contado: l.contado,
+            diferencia: l.diferencia,
+          }),
+        ),
+      );
+
+      // Agregados de cajas = línea de efectivo (cuadre del cajón físico).
+      const efectivo = lineasResueltas.find((l) => l.metodoPagoId === null)!;
+      caja.saldoFinal = efectivo.esperado;
+      caja.montoContado = contadoPorClave.get('EFECTIVO')!; // obligatoria → presente
+      caja.diferencia = efectivo.diferencia;
       caja.fechaCierre = new Date();
       caja.estado = 'cerrada';
       caja.comentario = dto.comentario ?? null;
+      await manager.save(Caja, caja);
 
-      return manager.save(Caja, caja);
+      return { caja, arqueo: lineasResueltas };
     });
   }
 
