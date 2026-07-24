@@ -35,6 +35,7 @@ export interface CajaAbierta {
   saldoEsperado: string;
   fechaApertura: Date;
   esPropia: boolean;
+  cajonNombre: string | null;
 }
 
 export interface MovimientoCajaListItem {
@@ -69,6 +70,7 @@ export interface CajaHistorialItem {
   fechaApertura: Date;
   fechaCierre: Date | null;
   comentario: string | null;
+  cajonNombre: string | null;
 }
 
 @Injectable()
@@ -427,6 +429,7 @@ export class CajaService {
       fecha_apertura: Date;
       fecha_cierre: Date | null;
       comentario: string | null;
+      cajon_nombre: string | null;
     }[] = await this.dataSource.query(
       `SELECT c.caja_id,
               c.tenant_id,
@@ -439,8 +442,10 @@ export class CajaService {
               c.diferencia,
               c.fecha_apertura,
               c.fecha_cierre,
-              c.comentario
+              c.comentario,
+              cj.nombre AS cajon_nombre
        FROM cajas c
+       LEFT JOIN cajones cj ON cj.cajon_id = c.cajon_id AND cj.eliminado_el IS NULL
        WHERE c.tenant_id = $1
          ${filters}
        ORDER BY c.fecha_apertura DESC
@@ -488,6 +493,7 @@ export class CajaService {
     fecha_apertura: Date;
     fecha_cierre: Date | null;
     comentario: string | null;
+    cajon_nombre: string | null;
   }): CajaHistorialItem {
     return {
       id: r.caja_id,
@@ -504,6 +510,7 @@ export class CajaService {
       fechaApertura: r.fecha_apertura,
       fechaCierre: r.fecha_cierre,
       comentario: r.comentario,
+      cajonNombre: r.cajon_nombre,
     };
   }
 
@@ -521,6 +528,7 @@ export class CajaService {
       fecha_apertura: Date;
       total_entradas: string | null;
       total_salidas: string | null;
+      cajon_nombre: string | null;
     }[] = await this.dataSource.query(
       `SELECT c.caja_id,
               c.usuario_id,
@@ -529,16 +537,18 @@ export class CajaService {
               c.saldo_inicial,
               c.fecha_apertura,
               SUM(m.monto) FILTER (WHERE m.tipo = 'entrada' AND m.eliminado_el IS NULL) AS total_entradas,
-              SUM(m.monto) FILTER (WHERE m.tipo = 'salida'  AND m.eliminado_el IS NULL) AS total_salidas
+              SUM(m.monto) FILTER (WHERE m.tipo = 'salida'  AND m.eliminado_el IS NULL) AS total_salidas,
+              cj.nombre AS cajon_nombre
        FROM cajas c
        LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN movimientos_caja m ON m.caja_id = c.caja_id
+       LEFT JOIN cajones cj ON cj.cajon_id = c.cajon_id AND cj.eliminado_el IS NULL
        WHERE c.tenant_id = $1
          AND c.tipo = 'fisica'
          AND c.estado = 'abierta'
          AND c.eliminado_el IS NULL
          AND ($2::boolean OR c.usuario_id = $3)
-       GROUP BY c.caja_id, u.nombre, u.apellido
+       GROUP BY c.caja_id, u.nombre, u.apellido, cj.nombre
        ORDER BY c.fecha_apertura DESC`,
       [tenantId, tieneVerTodas, usuarioId],
     );
@@ -560,6 +570,7 @@ export class CajaService {
         saldoEsperado,
         fechaApertura: r.fecha_apertura,
         esPropia: r.usuario_id === usuarioId,
+        cajonNombre: r.cajon_nombre,
       };
     });
   }
