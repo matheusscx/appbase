@@ -61,24 +61,16 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
     <template #body>
       <div class="w-full space-y-6">
         <div
-          v-if="!loading && cajaStore.detalle"
+          v-if="!loading && cajaStore.detalle && readonly"
           class="flex flex-wrap items-center gap-4"
         >
           <ULink
-            v-if="readonly"
             to="/mi-caja"
             class="text-sm text-highlighted inline-flex items-center gap-1"
           >
             <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
             Volver a caja
           </ULink>
-          <UButton
-            to="/mi-caja/historial"
-            variant="outline"
-            color="neutral"
-            icon="i-lucide-history"
-            label="Ver historial"
-          />
         </div>
 
         <div v-if="loading" class="py-12 text-center text-sm text-muted">
@@ -87,7 +79,11 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
         </div>
 
         <div v-else-if="cajaStore.detalle">
-          <CajaActivaDashboard :caja="cajaStore.detalle" :readonly="readonly" />
+          <CajaActivaDashboard
+            :caja="cajaStore.detalle"
+            :readonly="readonly"
+            historial-url="/mi-caja/historial"
+          />
         </div>
       </div>
     </template>

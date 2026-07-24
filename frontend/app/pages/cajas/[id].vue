@@ -60,13 +60,6 @@ onMounted(async () => {
             <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
             Volver a cajas
           </ULink>
-          <UButton
-            :to="historialCajeroUrl"
-            variant="outline"
-            color="neutral"
-            icon="i-lucide-history"
-            label="Ver historial del cajero"
-          />
         </div>
 
         <div v-if="loading" class="py-12 text-center text-sm text-muted">
@@ -75,7 +68,12 @@ onMounted(async () => {
         </div>
 
         <div v-else-if="cajaStore.detalle">
-          <CajaActivaDashboard :caja="cajaStore.detalle" :readonly="true" />
+          <CajaActivaDashboard
+            :caja="cajaStore.detalle"
+            :readonly="true"
+            :historial-url="historialCajeroUrl"
+            historial-label="Ver historial del cajero"
+          />
         </div>
       </div>
     </template>

@@ -627,7 +627,9 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
 - `pages/mi-caja/historial.vue` — Historial paginado del propio cajero
   (`CajaHistorial`, sin `usuarioId` ni toggle "todas").
 - `pages/mi-caja/[id].vue` — Detalle operable de su turno activo: KPIs + tabla de
-  movimientos (`CajaActivaDashboard`), botones de operar (+Movimiento / Cerrar).
+  movimientos (`CajaActivaDashboard`). En el header de la tarjeta de caja: "Ver historial"
+  + botones de operar (+Movimiento / Cerrar). En vista read-only (caja ajena/cerrada) queda
+  solo "Ver historial" + back-link "Volver a caja".
 - `pages/cajas/index.vue` — Grid de **todos los cajones activos** del tenant y su estado
   (`CajaCajonesGrid`), read-only. **Sin apertura** (la caja se abre en `/mi-caja`). El botón
   "Ver historial" abre `/cajas/historial?todas=true` (arranca mostrando todas). Gate:
@@ -637,8 +639,8 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
   `?todas=true` en la URL (por eso "Ver historial" en `/cajas` aterriza directo en todas).
 - `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de
   operar, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en modo
-  read-only). Links "Volver a cajas" y "Ver historial del cajero". 403/404 →
-  redirect a `/cajas`.
+  read-only). Botón "Ver historial del cajero" en el header de la tarjeta + back-link
+  "Volver a cajas". 403/404 → redirect a `/cajas`.
 - `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
   internos previos al refactor).
 

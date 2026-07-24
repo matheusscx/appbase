@@ -5,6 +5,8 @@ defineProps<{
     fechaApertura: string
   }
   readonly?: boolean
+  historialUrl?: string
+  historialLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -30,23 +32,33 @@ const { formatFecha } = useFormatters()
         Apertura: {{ formatFecha(caja.fechaApertura) }}
       </p>
     </div>
-    <div v-if="!readonly" class="flex gap-2">
+    <div v-if="historialUrl || !readonly" class="flex flex-wrap justify-end gap-2">
       <UButton
-        icon="i-lucide-circle-plus"
+        v-if="historialUrl"
+        :to="historialUrl"
+        icon="i-lucide-history"
         color="neutral"
         variant="outline"
-        @click="emit('movimiento')"
-      >
-        + Movimiento
-      </UButton>
-      <UButton
-        icon="i-lucide-lock"
-        color="error"
-        variant="soft"
-        @click="emit('cerrar')"
-      >
-        Cerrar caja
-      </UButton>
+        :label="historialLabel ?? 'Ver historial'"
+      />
+      <template v-if="!readonly">
+        <UButton
+          icon="i-lucide-circle-plus"
+          color="neutral"
+          variant="outline"
+          @click="emit('movimiento')"
+        >
+          + Movimiento
+        </UButton>
+        <UButton
+          icon="i-lucide-lock"
+          color="error"
+          variant="soft"
+          @click="emit('cerrar')"
+        >
+          Cerrar caja
+        </UButton>
+      </template>
     </div>
   </div>
 </template>

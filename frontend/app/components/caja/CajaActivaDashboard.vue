@@ -9,6 +9,8 @@ const props = defineProps<{
     fechaApertura: string
   }
   readonly?: boolean
+  historialUrl?: string
+  historialLabel?: string
 }>()
 
 const cajaStore = useCajaStore()
@@ -66,6 +68,8 @@ watch(() => props.caja.id, () => {
         <CajaTurnoHeader
           :caja="caja"
           :readonly="readonly"
+          :historial-url="historialUrl"
+          :historial-label="historialLabel"
           @movimiento="movimientoDrawerOpen = true"
           @cerrar="cierreDrawerOpen = true"
         />
