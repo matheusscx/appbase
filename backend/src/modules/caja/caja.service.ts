@@ -350,6 +350,10 @@ export class CajaService {
               COALESCE(tmp.requiere_conteo, false) AS requiere_conteo,
               COALESCE(SUM(m.monto), 0) AS entradas
        FROM movimientos_caja m
+       -- Igual que en calcularEsperadoEfectivo: NO se filtra mp.eliminado_el.
+       -- es_efectivo/nombre son intrínsecos al método del movimiento histórico;
+       -- filtrarlo (es INNER JOIN) haría desaparecer del arqueo la línea de un
+       -- método borrado después de usarse en una venta.
        JOIN metodos_pago mp ON mp.metodo_pago_id = m.metodo_pago_id
        LEFT JOIN tenant_metodo_pago tmp
               ON tmp.metodo_pago_id = m.metodo_pago_id
