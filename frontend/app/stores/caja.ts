@@ -37,15 +37,20 @@ export interface CajaTurnoResumen {
   totalMovimientos: number
 }
 
-export interface CajaAbierta {
-  id: string
+export interface SesionCajon {
+  cajaId: string
   usuarioId: string | null
   usuarioNombre: string
   saldoInicial: string
   saldoEsperado: string
   fechaApertura: string
   esPropia: boolean
-  cajonNombre: string | null
+}
+
+export interface CajonEstado {
+  cajonId: string
+  nombre: string
+  sesion: SesionCajon | null
 }
 
 export interface CajonDisponible {
@@ -65,7 +70,7 @@ export const useCajaStore = defineStore('caja', () => {
 
   const activa = ref<Caja | null>(null)
   const resumenTurno = ref<CajaTurnoResumen | null>(null)
-  const abiertas = ref<CajaAbierta[]>([])
+  const cajonesEstado = ref<CajonEstado[]>([])
   const detalle = ref<Caja | null>(null)
   const cajonesDisponibles = ref<CajonDisponible[]>([])
   const loadingActiva = ref(false)
@@ -167,9 +172,9 @@ export const useCajaStore = defineStore('caja', () => {
     return caja
   }
 
-  async function cargarAbiertas(): Promise<void> {
-    abiertas.value = await useApiFetch<CajaAbierta[]>(
-      `${config.public.apiUrl}/caja/abiertas`,
+  async function cargarCajonesEstado(): Promise<void> {
+    cajonesEstado.value = await useApiFetch<CajonEstado[]>(
+      `${config.public.apiUrl}/caja/cajones-estado`,
     )
   }
 
@@ -183,7 +188,7 @@ export const useCajaStore = defineStore('caja', () => {
   return {
     activa,
     resumenTurno,
-    abiertas,
+    cajonesEstado,
     detalle,
     cajonesDisponibles,
     loadingActiva,
@@ -195,7 +200,7 @@ export const useCajaStore = defineStore('caja', () => {
     aplicarCobroLocal,
     registrarMovimiento,
     cerrar,
-    cargarAbiertas,
+    cargarCajonesEstado,
     cargarDetalle,
     cargarCajonesDisponibles,
   }

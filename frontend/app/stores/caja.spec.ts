@@ -115,22 +115,14 @@ describe('useCajaStore — cargarAbiertas / cargarDetalle', () => {
     mockApiFetch.mockReset()
   })
 
-  it('cargarAbiertas popula abiertas con la lista del API', async () => {
+  it('cargarCajonesEstado popula cajonesEstado con la lista del API', async () => {
     const store = useCajaStore()
-    const lista = [{
-      id: 'c1',
-      usuarioId: 'u1',
-      usuarioNombre: 'Ana Pérez',
-      saldoInicial: '1000.0000',
-      saldoEsperado: '1150.0000',
-      fechaApertura: '2026-06-29T10:00:00Z',
-      esPropia: true,
-    }]
+    const lista = [{ cajonId: 'c1', nombre: 'Mostrador', sesion: null }]
     mockApiFetch.mockResolvedValue(lista)
 
-    await store.cargarAbiertas()
+    await store.cargarCajonesEstado()
 
-    expect(store.abiertas).toEqual(lista)
+    expect(store.cajonesEstado).toEqual(lista)
   })
 
   it('cargarDetalle popula detalle con la caja del API', async () => {
