@@ -69,12 +69,12 @@ export class CajaController {
     return this.cajaService.findActiva(u.tenantId!, u.id);
   }
 
-  @Get('abiertas')
+  @Get('cajones-estado')
   @RequiresPermiso('Cajas', 'Leer')
-  abiertas(@Req() req: Request) {
+  cajonesEstado(@Req() req: Request) {
     const u = req.user as JwtUser;
-    // Endpoint exclusivo de supervisión: quien llega tiene Cajas:Leer → ve todas.
-    return this.cajaService.abiertas(u.tenantId!, u.id, true);
+    // Endpoint exclusivo de supervisión: quien llega tiene Cajas:Leer → ve todos.
+    return this.cajaService.cajonesEstado(u.tenantId!, u.id);
   }
 
   @Get('cajones-disponibles')

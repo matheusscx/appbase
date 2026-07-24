@@ -144,19 +144,25 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     await app.close();
   });
 
-  describe('GET /caja/abiertas', () => {
+  describe('GET /caja/cajones-estado', () => {
     it('un cajero (solo MiCaja, sin Cajas) recibe 403', async () => {
       await request(app.getHttpServer())
-        .get('/api/caja/abiertas')
+        .get('/api/caja/cajones-estado')
         .set('Authorization', `Bearer ${tokenCajero}`)
         .expect(403);
     });
 
-    it('un supervisor (Cajas:Leer) puede listar todas las cajas abiertas', async () => {
-      await request(app.getHttpServer())
-        .get('/api/caja/abiertas')
-        .set('Authorization', `Bearer ${tokenSupervisor}`)
-        .expect(200);
+    it('un supervisor (Cajas:Leer) recibe la lista de cajones con su estado', async () => {
+      const r = await request(app.getHttpServer())
+        .get('/api/caja/cajones-estado')
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(r.status).toBe(200);
+      expect(Array.isArray(r.body)).toBe(true);
+      for (const item of r.body as Array<Record<string, unknown>>) {
+        expect(typeof item.cajonId).toBe('string');
+        expect(typeof item.nombre).toBe('string');
+        expect('sesion' in item).toBe(true);
+      }
     });
   });
 
