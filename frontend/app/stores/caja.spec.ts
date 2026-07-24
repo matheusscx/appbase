@@ -109,7 +109,7 @@ describe('useCajaStore — cargarActiva', () => {
   })
 })
 
-describe('useCajaStore — cargarAbiertas / cargarDetalle', () => {
+describe('useCajaStore — cargarCajonesEstado / cargarDetalle', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     mockApiFetch.mockReset()
