@@ -6,7 +6,13 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  IsNull,
+  QueryFailedError,
+  Repository,
+} from 'typeorm';
 import Decimal from 'decimal.js';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
@@ -109,16 +115,75 @@ export class CajaService {
       throw new ConflictException('Ya tienes una caja abierta');
     }
 
-    const caja = this.cajaRepo.create({
-      tenantId,
-      usuarioId,
-      tipo: 'fisica',
-      estado: 'abierta',
-      saldoInicial: dto.saldoInicial,
-      comentario: dto.comentario,
-    });
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        // 2. Cajón válido + activo (del tenant, no borrado)
+        const cajonRows: { cajon_id: string; activo: boolean }[] =
+          await manager.query(
+            `SELECT cajon_id, activo FROM cajones
+              WHERE cajon_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+            [dto.cajonId, tenantId],
+          );
+        const cajon = cajonRows[0];
+        if (!cajon) throw new NotFoundException('Cajón no encontrado');
+        if (!cajon.activo)
+          throw new ConflictException('El cajón está inactivo');
 
-    return this.cajaRepo.save(caja);
+        // 3. Autorizado — allow-list del sub-2. Vacía = permisivo.
+        const totalRows: { total: number }[] = await manager.query(
+          `SELECT COUNT(*)::int AS total FROM cajon_usuario
+            WHERE cajon_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+          [dto.cajonId, tenantId],
+        );
+        if ((totalRows[0]?.total ?? 0) > 0) {
+          const miRows: { total: number }[] = await manager.query(
+            `SELECT COUNT(*)::int AS total FROM cajon_usuario
+              WHERE cajon_id = $1 AND tenant_id = $2 AND usuario_id = $3
+                AND eliminado_el IS NULL`,
+            [dto.cajonId, tenantId, usuarioId],
+          );
+          if ((miRows[0]?.total ?? 0) === 0) {
+            throw new ForbiddenException(
+              'No estás autorizado a abrir este cajón',
+            );
+          }
+        }
+
+        // 4. Cajón libre — lockea las sesiones abiertas de ese cajón
+        const ocupadas: { caja_id: string }[] = await manager.query(
+          `SELECT caja_id FROM cajas
+            WHERE cajon_id = $1 AND tenant_id = $2
+              AND estado = 'abierta' AND eliminado_el IS NULL
+            FOR UPDATE`,
+          [dto.cajonId, tenantId],
+        );
+        if (ocupadas.length > 0) {
+          throw new ConflictException('El cajón ya tiene una caja abierta');
+        }
+
+        // 5. Crear la sesión física sobre el cajón
+        const caja = manager.create(Caja, {
+          tenantId,
+          usuarioId,
+          cajonId: dto.cajonId,
+          tipo: 'fisica',
+          estado: 'abierta',
+          saldoInicial: dto.saldoInicial,
+          comentario: dto.comentario,
+        });
+        return await manager.save(caja);
+      });
+    } catch (e) {
+      // Backstop de concurrencia: dos aperturas simultáneas sobre el mismo cajón
+      // → una viola el índice único parcial (23505).
+      if (
+        e instanceof QueryFailedError &&
+        (e as { code?: string }).code === '23505'
+      ) {
+        throw new ConflictException('El cajón ya tiene una caja abierta');
+      }
+      throw e;
+    }
   }
 
   /**

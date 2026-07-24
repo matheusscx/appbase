@@ -5,9 +5,16 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   DeleteDateColumn,
+  Index,
 } from 'typeorm';
 
+// Índice único parcial: máximo una sesión abierta por cajón (backstop duro bajo
+// concurrencia). La virtual tiene cajon_id null → no participa del índice único.
 @Entity('cajas')
+@Index('ux_cajas_cajon_abierta', ['cajonId'], {
+  unique: true,
+  where: 'estado = \'abierta\' AND "eliminado_el" IS NULL',
+})
 export class Caja {
   @PrimaryGeneratedColumn('uuid', { name: 'caja_id' })
   id: string;
@@ -17,6 +24,9 @@ export class Caja {
 
   @Column({ name: 'usuario_id', type: 'uuid', nullable: true })
   usuarioId: string | null;
+
+  @Column({ name: 'cajon_id', type: 'uuid', nullable: true })
+  cajonId: string | null;
 
   @Column({ name: 'moneda_id', type: 'uuid', nullable: true })
   monedaId: string | null;

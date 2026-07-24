@@ -10,7 +10,6 @@ import { IsNull } from 'typeorm';
 import { CajaService } from './caja.service';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
-import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 
@@ -108,52 +107,6 @@ describe('CajaService', () => {
       const result = await service.findActiva(TENANT_ID, USUARIO_ID);
 
       expect(result).toBeNull();
-    });
-  });
-
-  describe('abrir', () => {
-    const dto: AbrirCajaDto = {
-      saldoInicial: '500',
-      comentario: 'Apertura matutina',
-    };
-
-    it('should create and return a new open physical caja', async () => {
-      cajaRepo.findOne.mockResolvedValue(null); // no hay caja activa
-      const created: Partial<Caja> = {
-        tenantId: TENANT_ID,
-        usuarioId: USUARIO_ID,
-        tipo: 'fisica',
-        estado: 'abierta',
-        saldoInicial: dto.saldoInicial,
-        comentario: dto.comentario ?? null,
-      };
-      const saved = { id: 'new-uuid', ...created };
-      cajaRepo.create.mockReturnValue(created);
-      cajaRepo.save.mockResolvedValue(saved);
-
-      const result = await service.abrir(TENANT_ID, USUARIO_ID, dto);
-
-      expect(cajaRepo.create).toHaveBeenCalledWith({
-        tenantId: TENANT_ID,
-        usuarioId: USUARIO_ID,
-        tipo: 'fisica',
-        estado: 'abierta',
-        saldoInicial: dto.saldoInicial,
-        comentario: dto.comentario,
-      });
-      expect(cajaRepo.save).toHaveBeenCalledWith(created);
-      expect(result).toEqual(saved);
-    });
-
-    it('should throw ConflictException when user already has an open physical caja', async () => {
-      cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
-
-      await expect(service.abrir(TENANT_ID, USUARIO_ID, dto)).rejects.toThrow(
-        new ConflictException('Ya tienes una caja abierta'),
-      );
-
-      expect(cajaRepo.create).not.toHaveBeenCalled();
-      expect(cajaRepo.save).not.toHaveBeenCalled();
     });
   });
 
@@ -665,5 +618,141 @@ describe('CajaService', () => {
       const [, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
       expect(params).toEqual([TENANT_ID, false, USUARIO_ID]);
     });
+  });
+});
+
+const TENANT = 'tenant-uuid';
+const USER = 'user-uuid';
+const CAJON = 'cajon-uuid';
+
+// Respuestas por tabla que consulta abrir(): cajon (SELECT ... FROM cajones),
+// allow-list total (COUNT ... cajon_usuario sin usuario_id), mi-allow
+// (COUNT ... cajon_usuario con usuario_id), ocupadas (SELECT ... FROM cajas ... FOR UPDATE).
+interface AbrirMocks {
+  cajon?: Array<{ cajon_id: string; activo: boolean }>;
+  allowTotal?: number;
+  miAllow?: number;
+  ocupadas?: Array<{ caja_id: string }>;
+}
+
+function makeManager(m: AbrirMocks) {
+  return {
+    query: jest.fn((sql: string) => {
+      if (/FROM cajones/i.test(sql)) return Promise.resolve(m.cajon ?? []);
+      if (/FROM cajon_usuario/i.test(sql)) {
+        // el que filtra por usuario_id es "mi-allow"
+        if (/usuario_id\s*=/i.test(sql)) {
+          return Promise.resolve([{ total: m.miAllow ?? 0 }]);
+        }
+        return Promise.resolve([{ total: m.allowTotal ?? 0 }]);
+      }
+      if (/FROM cajas/i.test(sql)) return Promise.resolve(m.ocupadas ?? []);
+      return Promise.resolve([]);
+    }),
+    create: jest.fn((_e: unknown, data: Record<string, unknown>) => ({
+      ...data,
+    })),
+    save: jest.fn((row: unknown) => Promise.resolve(row)),
+  };
+}
+
+describe('CajaService.abrir', () => {
+  let service: CajaService;
+  let cajaRepo: { findOne: jest.Mock };
+  let dataSource: { transaction: jest.Mock; query: jest.Mock };
+  let manager: ReturnType<typeof makeManager>;
+
+  function build(mocks: AbrirMocks, existente: Caja | null = null) {
+    cajaRepo.findOne.mockResolvedValue(existente);
+    manager = makeManager(mocks);
+    dataSource.transaction.mockImplementation(
+      (cb: (m: typeof manager) => unknown) => cb(manager),
+    );
+  }
+
+  beforeEach(async () => {
+    cajaRepo = { findOne: jest.fn() };
+    dataSource = { transaction: jest.fn(), query: jest.fn() };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CajaService,
+        { provide: getRepositoryToken(Caja), useValue: cajaRepo },
+        { provide: getRepositoryToken(MovimientoCaja), useValue: {} },
+        { provide: getDataSourceToken(), useValue: dataSource },
+      ],
+    }).compile();
+    service = module.get<CajaService>(CajaService);
+  });
+
+  const dto = { cajonId: CAJON, saldoInicial: '0', comentario: undefined };
+
+  it('abre sobre un cajón autorizado (allow-list vacía) y libre', async () => {
+    build({
+      cajon: [{ cajon_id: CAJON, activo: true }],
+      allowTotal: 0,
+      ocupadas: [],
+    });
+    const res = await service.abrir(TENANT, USER, dto);
+    expect(res).toMatchObject({
+      cajonId: CAJON,
+      tipo: 'fisica',
+      estado: 'abierta',
+    });
+    expect(manager.save).toHaveBeenCalled();
+  });
+
+  it('rechaza si el usuario ya tiene una caja abierta (409)', async () => {
+    build({}, { id: 'x' } as Caja);
+    await expect(service.abrir(TENANT, USER, dto)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('rechaza cajón inexistente (404)', async () => {
+    build({ cajon: [] });
+    await expect(service.abrir(TENANT, USER, dto)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('rechaza cajón inactivo (409)', async () => {
+    build({ cajon: [{ cajon_id: CAJON, activo: false }] });
+    await expect(service.abrir(TENANT, USER, dto)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
+  it('rechaza si la allow-list no está vacía y el usuario no está (403)', async () => {
+    build({
+      cajon: [{ cajon_id: CAJON, activo: true }],
+      allowTotal: 2,
+      miAllow: 0,
+    });
+    await expect(service.abrir(TENANT, USER, dto)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('permite si la allow-list contiene al usuario', async () => {
+    build({
+      cajon: [{ cajon_id: CAJON, activo: true }],
+      allowTotal: 2,
+      miAllow: 1,
+      ocupadas: [],
+    });
+    const res = await service.abrir(TENANT, USER, dto);
+    expect(res).toMatchObject({ cajonId: CAJON });
+  });
+
+  it('rechaza si el cajón ya tiene una caja abierta (409)', async () => {
+    build({
+      cajon: [{ cajon_id: CAJON, activo: true }],
+      allowTotal: 0,
+      ocupadas: [{ caja_id: 'otra' }],
+    });
+    await expect(service.abrir(TENANT, USER, dto)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 });
