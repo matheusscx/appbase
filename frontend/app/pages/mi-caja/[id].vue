@@ -49,7 +49,7 @@ onMounted(async () => {
 // Se usa oldActiva para detectar el cierre sin depender de readonly (que ya
 // recomputa a true cuando activa es null).
 watch(() => cajaStore.activa, (newActiva, oldActiva) => {
-  if (oldActiva !== null && newActiva === null) {
+  if (oldActiva !== null && newActiva === null && !cajaStore.arqueoCiego) {
     navigateTo('/mi-caja')
   }
 })

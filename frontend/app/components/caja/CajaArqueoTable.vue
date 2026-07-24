@@ -31,7 +31,7 @@ const { formatMonto } = useFormatters()
             {{ l.nombre }}
           </td>
           <td class="py-2 text-right text-default">
-            {{ formatMonto(l.esperado) }}
+            {{ l.esperado != null ? formatMonto(l.esperado) : '—' }}
           </td>
           <td class="py-2 text-right text-default">
             {{ l.contado != null ? formatMonto(l.contado) : '—' }}

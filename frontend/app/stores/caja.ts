@@ -63,7 +63,7 @@ export interface ArqueoLinea {
   metodoPagoId: string | null
   nombre: string
   esEfectivo: boolean
-  esperado: string
+  esperado: string | null
   requiereConteo: boolean
   contado?: string | null
   diferencia?: string | null

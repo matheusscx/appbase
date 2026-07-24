@@ -16,6 +16,8 @@ const contado = ref<Record<string, string>>({})
 
 const claveDe = (l: ArqueoLinea) => l.metodoPagoId ?? 'EFECTIVO'
 
+const ciego = computed(() => cajaStore.arqueoCiego)
+
 const obligatorias = computed(() =>
   cajaStore.arqueo.filter(l => l.esEfectivo || l.requiereConteo),
 )
@@ -24,6 +26,7 @@ const informativas = computed(() =>
 )
 
 function diferenciaDe(l: ArqueoLinea): Decimal | null {
+  if (l.esperado == null) return null
   const c = contado.value[claveDe(l)]
   if (!c) return null
   try {
@@ -65,9 +68,32 @@ async function cerrarCaja() {
         metodoPagoId: clave === 'EFECTIVO' ? null : clave,
         montoContado,
       }))
-    await cajaStore.cerrar(props.cajaId, { lineas, comentario: comentario.value || undefined })
-    toast.add({ title: 'Caja cerrada correctamente', color: 'success' })
-    open.value = false
+    const res = await cajaStore.cerrar(props.cajaId, { lineas, comentario: comentario.value || undefined })
+
+    if (ciego.value) {
+      // Revelación: reusa el detalle de la caja cerrada (CajaArqueoTable congelado).
+      // Se mantiene arqueoCiego=true durante este flujo para que el watcher de
+      // mi-caja/[id].vue NO redirija a /mi-caja (ver Step 4); el arqueo se muestra
+      // en el detalle. Desde POS/dashboard, navigateTo remonta el detalle y su
+      // onMounted recarga todo (reseteando arqueoCiego a false).
+      cajaStore.arqueo = res.arqueo
+      if (cajaStore.detalle?.id === props.cajaId) {
+        cajaStore.detalle = { ...cajaStore.detalle, ...res.caja }
+      }
+      const efectivo = res.arqueo.find(l => l.esEfectivo)
+      const dif = efectivo?.diferencia ?? '0'
+      toast.add({
+        title: 'Caja cerrada',
+        description: `Diferencia de efectivo: ${formatMonto(dif)}`,
+        color: new Decimal(dif).gte(0) ? 'success' : 'error',
+      })
+      open.value = false
+      await navigateTo(`/mi-caja/${props.cajaId}`)
+    }
+    else {
+      toast.add({ title: 'Caja cerrada correctamente', color: 'success' })
+      open.value = false
+    }
   }
   catch (e: unknown) {
     const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al cerrar la caja'
@@ -109,7 +135,7 @@ watch(open, (isOpen) => { if (!isOpen) comentario.value = '' })
           >
             <div class="flex justify-between text-sm">
               <span class="font-medium text-default">{{ l.nombre }}</span>
-              <span class="text-muted">Esperado {{ formatMonto(l.esperado) }}</span>
+              <span v-if="l.esperado != null" class="text-muted">Esperado {{ formatMonto(l.esperado) }}</span>
             </div>
             <MoneyInput
               :model-value="contado[claveDe(l)] ?? ''"
@@ -117,7 +143,7 @@ watch(open, (isOpen) => { if (!isOpen) comentario.value = '' })
               class="w-full"
               @update:model-value="(v: string) => { contado[claveDe(l)] = v }"
             />
-            <div class="flex justify-between text-sm font-semibold">
+            <div v-if="l.esperado != null" class="flex justify-between text-sm font-semibold">
               <span class="text-default">Diferencia</span>
               <span
                 v-if="diferenciaDe(l) !== null"
