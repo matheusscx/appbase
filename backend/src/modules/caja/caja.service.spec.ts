@@ -524,6 +524,32 @@ describe('CajaService', () => {
     });
   });
 
+  describe('getArqueoCiego / setArqueoCiego', () => {
+    it('getArqueoCiego lee tenants.arqueo_ciego filtrando soft-delete', async () => {
+      dataSource.query.mockResolvedValueOnce([{ arqueo_ciego: true }]);
+      const res = await service.getArqueoCiego(TENANT_ID);
+      expect(res).toBe(true);
+      const [sql, params] = dataSource.query.mock.calls[0];
+      expect(sql).toContain('FROM tenants');
+      expect(sql).toContain('eliminado_el IS NULL');
+      expect(params).toEqual([TENANT_ID]);
+    });
+
+    it('getArqueoCiego → false cuando no hay fila', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+      expect(await service.getArqueoCiego(TENANT_ID)).toBe(false);
+    });
+
+    it('setArqueoCiego actualiza la columna con el tenant del token', async () => {
+      dataSource.query.mockResolvedValueOnce(undefined);
+      await service.setArqueoCiego(TENANT_ID, true);
+      const [sql, params] = dataSource.query.mock.calls[0];
+      expect(sql).toContain('UPDATE tenants');
+      expect(sql).toContain('eliminado_el IS NULL');
+      expect(params).toEqual([true, TENANT_ID]);
+    });
+  });
+
   describe('historial', () => {
     const mockRow = {
       caja_id: CAJA_ID,

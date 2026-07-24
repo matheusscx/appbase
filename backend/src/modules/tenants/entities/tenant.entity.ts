@@ -48,6 +48,9 @@ export class Tenant {
   })
   montoTolerancia: string;
 
+  @Column({ name: 'arqueo_ciego', type: 'boolean', default: false })
+  arqueoCiego: boolean;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

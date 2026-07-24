@@ -20,6 +20,8 @@ describe('CajaController', () => {
       resumenMovimientos: jest.fn(),
       listarMovimientos: jest.fn(),
       obtenerArqueo: jest.fn(),
+      getArqueoCiego: jest.fn(),
+      setArqueoCiego: jest.fn(),
     } as unknown as CajaService;
 
     rbacService = {
@@ -290,6 +292,24 @@ describe('CajaController', () => {
       controller.cajonesEstado(req);
       expect(cajaService.cajonesEstado).toHaveBeenCalledWith('t1', 'u1');
       expect(rbacService.userHasPermiso).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('config arqueo-ciego (permiso Cajas)', () => {
+    it('GET delega en getArqueoCiego con el tenant del token', async () => {
+      jest.spyOn(cajaService, 'getArqueoCiego').mockResolvedValue(true);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      const res = await controller.getArqueoCiego(req);
+      expect(cajaService.getArqueoCiego).toHaveBeenCalledWith('t1');
+      expect(res).toEqual({ arqueoCiego: true });
+    });
+
+    it('PUT delega en setArqueoCiego con el tenant del token y el valor del DTO', async () => {
+      jest.spyOn(cajaService, 'setArqueoCiego').mockResolvedValue(undefined);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      const res = await controller.setArqueoCiego(req, { arqueoCiego: false });
+      expect(cajaService.setArqueoCiego).toHaveBeenCalledWith('t1', false);
+      expect(res).toEqual({ arqueoCiego: false });
     });
   });
 });

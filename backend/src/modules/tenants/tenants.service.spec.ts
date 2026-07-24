@@ -27,6 +27,7 @@ const mockTenant: Tenant = {
   escalaCalculo: 6,
   modoRedondeo: 'HALF_UP',
   montoTolerancia: '0',
+  arqueoCiego: false,
   creadoEl: new Date(),
   actualizadoEl: new Date(),
   eliminadoEl: null,

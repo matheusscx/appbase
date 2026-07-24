@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -23,6 +24,7 @@ import { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 import { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
+import { SetArqueoCiegoDto } from './dto/set-arqueo-ciego.dto';
 
 @ApiTags('caja')
 @ApiBearerAuth()
@@ -85,6 +87,22 @@ export class CajaController {
   cajonesDisponibles(@Req() req: Request) {
     const u = req.user as JwtUser;
     return this.cajaService.cajonesDisponibles(u.tenantId!, u.id);
+  }
+
+  @Get('arqueo-ciego')
+  @RequiresPermiso('Cajas', 'Leer')
+  async getArqueoCiego(@Req() req: Request) {
+    const u = req.user as JwtUser;
+    const arqueoCiego = await this.cajaService.getArqueoCiego(u.tenantId!);
+    return { arqueoCiego };
+  }
+
+  @Put('arqueo-ciego')
+  @RequiresPermiso('Cajas', 'Actualizar')
+  async setArqueoCiego(@Req() req: Request, @Body() dto: SetArqueoCiegoDto) {
+    const u = req.user as JwtUser;
+    await this.cajaService.setArqueoCiego(u.tenantId!, dto.arqueoCiego);
+    return { arqueoCiego: dto.arqueoCiego };
   }
 
   @Get(':id/arqueo')

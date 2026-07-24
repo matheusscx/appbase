@@ -365,6 +365,27 @@ export class CajaService {
   }
 
   /**
+   * Config del modo ciego por tenant (columna tenants.arqueo_ciego). Lectura y
+   * escritura por query raw parametrizada; tenant del token; filtra soft-delete.
+   */
+  async getArqueoCiego(tenantId: string): Promise<boolean> {
+    const rows: { arqueo_ciego: boolean }[] = await this.dataSource.query(
+      `SELECT arqueo_ciego FROM tenants
+        WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+      [tenantId],
+    );
+    return rows[0]?.arqueo_ciego ?? false;
+  }
+
+  async setArqueoCiego(tenantId: string, valor: boolean): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE tenants SET arqueo_ciego = $1
+        WHERE tenant_id = $2 AND eliminado_el IS NULL`,
+      [valor, tenantId],
+    );
+  }
+
+  /**
    * Arqueo para el drawer de cierre y el detalle read-only. Caja abierta →
    * preview recomputado (sin contado). Caja cerrada → líneas congeladas.
    * (Punto de cambio del sub-proyecto B: en modo ciego retendrá `esperado`.)
