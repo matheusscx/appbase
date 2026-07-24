@@ -313,6 +313,88 @@ describe('CajaService', () => {
     });
   });
 
+  describe('calcularEsperadoEfectivo', () => {
+    it('suma fondo + entradas efectivo + manuales − salidas (sin no-efectivo)', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { saldo_inicial: '1000', entradas_efectivo: '500', salidas: '200' },
+      ]);
+      const r = await service.calcularEsperadoEfectivo(
+        CAJA_ID,
+        managerMock as never,
+      );
+      expect(r).toBe('1300.0000'); // 1000 + 500 − 200
+    });
+
+    it('devuelve el fondo cuando no hay movimientos', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { saldo_inicial: '1000', entradas_efectivo: null, salidas: null },
+      ]);
+      const r = await service.calcularEsperadoEfectivo(
+        CAJA_ID,
+        managerMock as never,
+      );
+      expect(r).toBe('1000.0000');
+    });
+  });
+
+  describe('calcularArqueo', () => {
+    it('agrega la línea de efectivo + una línea por cada no-efectivo con movimientos', async () => {
+      // 1ª query: esperado efectivo (reusa calcularEsperadoEfectivo)
+      managerMock.query.mockResolvedValueOnce([
+        { saldo_inicial: '1000', entradas_efectivo: '500', salidas: '0' },
+      ]);
+      // 2ª query: líneas no-efectivo
+      managerMock.query.mockResolvedValueOnce([
+        {
+          metodo_pago_id: 'dddddddd-0000-0000-0000-000000000004',
+          nombre: 'Tarjeta de débito',
+          requiere_conteo: false,
+          entradas: '800',
+        },
+      ]);
+      const lineas = await service.calcularArqueo(
+        CAJA_ID,
+        TENANT_ID,
+        managerMock as never,
+      );
+      expect(lineas).toEqual([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '1500.0000',
+          requiereConteo: true,
+        },
+        {
+          metodoPagoId: 'dddddddd-0000-0000-0000-000000000004',
+          nombre: 'Tarjeta de débito',
+          esEfectivo: false,
+          esperado: '800.0000',
+          requiereConteo: false,
+        },
+      ]);
+    });
+
+    it('devuelve solo la línea de efectivo cuando no hubo ventas no-efectivo', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { saldo_inicial: '1000', entradas_efectivo: '0', salidas: '0' },
+      ]);
+      managerMock.query.mockResolvedValueOnce([]); // sin no-efectivo
+      const lineas = await service.calcularArqueo(
+        CAJA_ID,
+        TENANT_ID,
+        managerMock as never,
+      );
+      expect(lineas).toHaveLength(1);
+      expect(lineas[0]).toMatchObject({
+        metodoPagoId: null,
+        esEfectivo: true,
+        requiereConteo: true,
+        esperado: '1000.0000',
+      });
+    });
+  });
+
   describe('historial', () => {
     const mockRow = {
       caja_id: CAJA_ID,

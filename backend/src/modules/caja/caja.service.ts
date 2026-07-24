@@ -60,6 +60,16 @@ export interface CajaTurnoResumen {
   totalMovimientos: number;
 }
 
+export interface LineaArqueo {
+  metodoPagoId: string | null;
+  nombre: string;
+  esEfectivo: boolean;
+  esperado: string;
+  requiereConteo: boolean;
+  contado?: string | null;
+  diferencia?: string | null;
+}
+
 export interface CajaHistorialItem {
   id: string;
   tenantId: string;
@@ -272,6 +282,105 @@ export class CajaService {
     const entradas = new Decimal(row?.total_entradas ?? '0');
     const salidas = new Decimal(row?.total_salidas ?? '0');
     return saldoInicial.plus(entradas).minus(salidas).toFixed(4);
+  }
+
+  /**
+   * Línea de efectivo del arqueo: fondo + entradas de métodos es_efectivo +
+   * entradas manuales (metodo_pago_id NULL) − todas las salidas. Los vueltos ya
+   * están netos en el movimiento (pagos.service inserta monto = pago − vuelto).
+   * El LEFT JOIN a metodos_pago NO filtra eliminado_el a propósito: es_efectivo
+   * es intrínseco al método del movimiento histórico (ver spec, invariante).
+   */
+  async calcularEsperadoEfectivo(
+    cajaId: string,
+    manager: EntityManager,
+  ): Promise<string> {
+    const rows: {
+      saldo_inicial: string;
+      entradas_efectivo: string | null;
+      salidas: string | null;
+    }[] = await manager.query(
+      `SELECT c.saldo_inicial,
+              SUM(m.monto) FILTER (
+                WHERE m.tipo = 'entrada' AND m.eliminado_el IS NULL
+                  AND (m.metodo_pago_id IS NULL OR COALESCE(mp.es_efectivo, false) = true)
+              ) AS entradas_efectivo,
+              SUM(m.monto) FILTER (
+                WHERE m.tipo = 'salida' AND m.eliminado_el IS NULL
+              ) AS salidas
+       FROM cajas c
+       LEFT JOIN movimientos_caja m ON m.caja_id = c.caja_id
+       LEFT JOIN metodos_pago mp ON mp.metodo_pago_id = m.metodo_pago_id
+       WHERE c.caja_id = $1
+         AND c.eliminado_el IS NULL
+       GROUP BY c.saldo_inicial`,
+      [cajaId],
+    );
+
+    const row = rows[0];
+    const saldoInicial = new Decimal(row?.saldo_inicial ?? '0');
+    const entradas = new Decimal(row?.entradas_efectivo ?? '0');
+    const salidas = new Decimal(row?.salidas ?? '0');
+    return saldoInicial.plus(entradas).minus(salidas).toFixed(4);
+  }
+
+  /**
+   * Arqueo completo: la línea de efectivo agregada (siempre presente, siempre
+   * obligatoria) + una línea por cada método no-efectivo con movimientos. Dos
+   * queries fijas, sin N+1. El `esperado` de cada línea es el valor a cuadrar.
+   */
+  async calcularArqueo(
+    cajaId: string,
+    tenantId: string,
+    manager: EntityManager,
+  ): Promise<LineaArqueo[]> {
+    const esperadoEfectivo = await this.calcularEsperadoEfectivo(
+      cajaId,
+      manager,
+    );
+
+    const noEfectivo: {
+      metodo_pago_id: string;
+      nombre: string;
+      requiere_conteo: boolean;
+      entradas: string;
+    }[] = await manager.query(
+      `SELECT m.metodo_pago_id,
+              mp.nombre,
+              COALESCE(tmp.requiere_conteo, false) AS requiere_conteo,
+              COALESCE(SUM(m.monto), 0) AS entradas
+       FROM movimientos_caja m
+       JOIN metodos_pago mp ON mp.metodo_pago_id = m.metodo_pago_id
+       LEFT JOIN tenant_metodo_pago tmp
+              ON tmp.metodo_pago_id = m.metodo_pago_id
+             AND tmp.tenant_id = $2
+             AND tmp.eliminado_el IS NULL
+       WHERE m.caja_id = $1
+         AND m.eliminado_el IS NULL
+         AND m.tipo = 'entrada'
+         AND m.metodo_pago_id IS NOT NULL
+         AND COALESCE(mp.es_efectivo, false) = false
+       GROUP BY m.metodo_pago_id, mp.nombre, tmp.requiere_conteo
+       ORDER BY mp.nombre ASC`,
+      [cajaId, tenantId],
+    );
+
+    return [
+      {
+        metodoPagoId: null,
+        nombre: 'Efectivo',
+        esEfectivo: true,
+        esperado: esperadoEfectivo,
+        requiereConteo: true,
+      },
+      ...noEfectivo.map((r) => ({
+        metodoPagoId: r.metodo_pago_id,
+        nombre: r.nombre,
+        esEfectivo: false,
+        esperado: new Decimal(r.entradas).toFixed(4),
+        requiereConteo: r.requiere_conteo,
+      })),
+    ];
   }
 
   async cerrar(
