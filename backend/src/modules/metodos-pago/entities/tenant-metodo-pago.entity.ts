@@ -21,6 +21,11 @@ export class TenantMetodoPago {
   @Column({ default: false })
   habilitada: boolean;
 
+  // Política operativa por tenant: fuerza el conteo obligatorio de un método
+  // no-efectivo al cerrar. obligatorio = es_efectivo OR requiere_conteo.
+  @Column({ name: 'requiere_conteo', default: false })
+  requiereConteo: boolean;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

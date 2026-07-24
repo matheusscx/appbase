@@ -21,6 +21,12 @@ export class MetodoPago {
   @Column({ default: true })
   activo: boolean;
 
+  // Intrínseco al método (catálogo global): define qué entra a la línea de
+  // efectivo del arqueo (fondo + manuales + vueltos). No confundir con
+  // requiere_conteo (política por tenant). Ver spec arqueo-multimedio.
+  @Column({ name: 'es_efectivo', default: false })
+  esEfectivo: boolean;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

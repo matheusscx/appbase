@@ -1713,6 +1713,7 @@ export class SeederService implements OnApplicationBootstrap {
         nombre: 'Efectivo',
         abreviatura: 'EFE',
         activo: true,
+        esEfectivo: true,
       },
       {
         metodoPagoId: '550e8400-e29b-41d4-a716-446655440106',
@@ -1742,6 +1743,13 @@ export class SeederService implements OnApplicationBootstrap {
         await this.metodoPagoRepo.save(this.metodoPagoRepo.create(data));
       }
     }
+
+    // Backfill idempotente del flag es_efectivo (los métodos ya existentes no se
+    // re-guardan por el if(!exists) de arriba; synchronize los crea con default false).
+    await this.metodoPagoRepo.update(
+      { metodoPagoId: '550e8400-e29b-41d4-a716-446655440105' },
+      { esEfectivo: true },
+    );
   }
 
   private async seedTiposRegla(): Promise<void> {
