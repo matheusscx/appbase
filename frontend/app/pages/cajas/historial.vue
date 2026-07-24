@@ -10,6 +10,11 @@ const usuarioIdFromQuery = computed(() => {
   return typeof id === 'string' && id ? id : undefined
 })
 
+const cajonIdFromQuery = computed(() => {
+  const id = route.query.cajonId
+  return typeof id === 'string' && id ? id : undefined
+})
+
 onMounted(async () => {
   if (!perms.loading && perms.permisos.length === 0) {
     await perms.fetchPermisos()
@@ -37,7 +42,11 @@ onMounted(async () => {
           Volver a cajas
         </ULink>
 
-        <CajaHistorial :usuario-id="usuarioIdFromQuery" :base-path="'/cajas'" />
+        <CajaHistorial
+          :usuario-id="usuarioIdFromQuery"
+          :cajon-id="cajonIdFromQuery"
+          :base-path="'/cajas'"
+        />
       </div>
     </template>
   </UDashboardPanel>

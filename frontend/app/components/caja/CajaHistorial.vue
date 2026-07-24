@@ -4,7 +4,7 @@ import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
 import type { Caja } from '~/stores/caja'
 
-const props = defineProps<{ usuarioId?: string; basePath: string }>()
+const props = defineProps<{ usuarioId?: string; cajonId?: string; basePath: string }>()
 
 const route = useRoute()
 
@@ -20,13 +20,20 @@ const usuarioIdEfectivo = computed(() => {
   return typeof id === 'string' && id ? id : undefined
 })
 
+const cajonIdEfectivo = computed(() => {
+  if (props.cajonId) return props.cajonId
+  const id = route.query.cajonId
+  return typeof id === 'string' && id ? id : undefined
+})
+
 const puedeVerTodas = computed(
   () => permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer'),
 )
 
 const listFilters = computed(() => ({
   usuarioId: usuarioIdEfectivo.value,
-  todas: !usuarioIdEfectivo.value && todasActivo.value ? 'true' : undefined,
+  cajonId: cajonIdEfectivo.value,
+  todas: !usuarioIdEfectivo.value && !cajonIdEfectivo.value && todasActivo.value ? 'true' : undefined,
 }))
 
 const { items: historial, meta, page, loading } = usePaginatedList<Caja>({
@@ -70,7 +77,7 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
           </span>
         </h2>
         <UButton
-          v-if="puedeVerTodas && !usuarioIdEfectivo"
+          v-if="puedeVerTodas && !usuarioIdEfectivo && !cajonIdEfectivo"
           size="sm"
           :color="todasActivo ? 'primary' : 'neutral'"
           :variant="todasActivo ? 'solid' : 'outline'"
