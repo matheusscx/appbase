@@ -27,15 +27,18 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 
-export interface CajaAbierta {
-  id: string;
-  usuarioId: string | null;
-  usuarioNombre: string;
-  saldoInicial: string;
-  saldoEsperado: string;
-  fechaApertura: Date;
-  esPropia: boolean;
-  cajonNombre: string | null;
+export interface CajonEstado {
+  cajonId: string;
+  nombre: string;
+  sesion: {
+    cajaId: string;
+    usuarioId: string | null;
+    usuarioNombre: string;
+    saldoInicial: string;
+    saldoEsperado: string;
+    fechaApertura: Date;
+    esPropia: boolean;
+  } | null;
 }
 
 export interface MovimientoCajaListItem {
@@ -514,63 +517,74 @@ export class CajaService {
     };
   }
 
-  async abiertas(
+  async cajonesEstado(
     tenantId: string,
     usuarioId: string,
-    tieneVerTodas: boolean,
-  ): Promise<CajaAbierta[]> {
+  ): Promise<CajonEstado[]> {
     const rows: {
-      caja_id: string;
+      cajon_id: string;
+      nombre: string;
+      caja_id: string | null;
       usuario_id: string | null;
       usuario_nombre: string | null;
       usuario_apellido: string | null;
-      saldo_inicial: string;
-      fecha_apertura: Date;
+      saldo_inicial: string | null;
+      fecha_apertura: Date | null;
       total_entradas: string | null;
       total_salidas: string | null;
-      cajon_nombre: string | null;
     }[] = await this.dataSource.query(
-      `SELECT c.caja_id,
+      `SELECT cj.cajon_id,
+              cj.nombre,
+              c.caja_id,
               c.usuario_id,
               u.nombre   AS usuario_nombre,
               u.apellido AS usuario_apellido,
               c.saldo_inicial,
               c.fecha_apertura,
               SUM(m.monto) FILTER (WHERE m.tipo = 'entrada' AND m.eliminado_el IS NULL) AS total_entradas,
-              SUM(m.monto) FILTER (WHERE m.tipo = 'salida'  AND m.eliminado_el IS NULL) AS total_salidas,
-              cj.nombre AS cajon_nombre
-       FROM cajas c
+              SUM(m.monto) FILTER (WHERE m.tipo = 'salida'  AND m.eliminado_el IS NULL) AS total_salidas
+       FROM cajones cj
+       LEFT JOIN cajas c
+              ON c.cajon_id = cj.cajon_id
+             AND c.tipo = 'fisica'
+             AND c.estado = 'abierta'
+             AND c.eliminado_el IS NULL
        LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN movimientos_caja m ON m.caja_id = c.caja_id
-       LEFT JOIN cajones cj ON cj.cajon_id = c.cajon_id AND cj.eliminado_el IS NULL
-       WHERE c.tenant_id = $1
-         AND c.tipo = 'fisica'
-         AND c.estado = 'abierta'
-         AND c.eliminado_el IS NULL
-         AND ($2::boolean OR c.usuario_id = $3)
-       GROUP BY c.caja_id, u.nombre, u.apellido, cj.nombre
-       ORDER BY c.fecha_apertura DESC`,
-      [tenantId, tieneVerTodas, usuarioId],
+       WHERE cj.tenant_id = $1
+         AND cj.activo = true
+         AND cj.eliminado_el IS NULL
+       GROUP BY cj.cajon_id, cj.nombre, c.caja_id, c.usuario_id, u.nombre, u.apellido,
+                c.saldo_inicial, c.fecha_apertura
+       ORDER BY cj.nombre ASC`,
+      [tenantId],
     );
 
     return rows.map((r) => {
-      const saldoEsperado = new Decimal(r.saldo_inicial)
+      if (!r.caja_id) {
+        return { cajonId: r.cajon_id, nombre: r.nombre, sesion: null };
+      }
+      const saldoEsperado = new Decimal(r.saldo_inicial ?? '0')
         .plus(r.total_entradas ?? '0')
         .minus(r.total_salidas ?? '0')
         .toFixed(4);
-      const nombre = [r.usuario_nombre, r.usuario_apellido]
-        .filter((p): p is string => Boolean(p))
-        .join(' ')
-        .trim();
+      const usuarioNombre =
+        [r.usuario_nombre, r.usuario_apellido]
+          .filter((p): p is string => Boolean(p))
+          .join(' ')
+          .trim() || 'Sin usuario';
       return {
-        id: r.caja_id,
-        usuarioId: r.usuario_id,
-        usuarioNombre: nombre || 'Sin usuario',
-        saldoInicial: new Decimal(r.saldo_inicial).toFixed(4),
-        saldoEsperado,
-        fechaApertura: r.fecha_apertura,
-        esPropia: r.usuario_id === usuarioId,
-        cajonNombre: r.cajon_nombre,
+        cajonId: r.cajon_id,
+        nombre: r.nombre,
+        sesion: {
+          cajaId: r.caja_id,
+          usuarioId: r.usuario_id,
+          usuarioNombre,
+          saldoInicial: new Decimal(r.saldo_inicial ?? '0').toFixed(4),
+          saldoEsperado,
+          fechaApertura: r.fecha_apertura as Date,
+          esPropia: r.usuario_id === usuarioId,
+        },
       };
     });
   }

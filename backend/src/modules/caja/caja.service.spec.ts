@@ -557,10 +557,12 @@ describe('CajaService', () => {
     });
   });
 
-  describe('abiertas', () => {
-    it('mapea filas a CajaAbierta con nombre completo y saldo esperado', async () => {
+  describe('cajonesEstado', () => {
+    it('mapea un cajón ocupado con sesión (nombre completo, saldo esperado, esPropia)', async () => {
       dataSource.query.mockResolvedValue([
         {
+          cajon_id: 'cajon-1',
+          nombre: 'Mostrador',
           caja_id: CAJA_ID,
           usuario_id: USUARIO_ID,
           usuario_nombre: 'Ana',
@@ -572,24 +574,53 @@ describe('CajaService', () => {
         },
       ]);
 
-      const result = await service.abiertas(TENANT_ID, USUARIO_ID, true);
+      const result = await service.cajonesEstado(TENANT_ID, USUARIO_ID);
 
       expect(result).toEqual([
         {
-          id: CAJA_ID,
-          usuarioId: USUARIO_ID,
-          usuarioNombre: 'Ana Pérez',
-          saldoInicial: '1000.0000',
-          saldoEsperado: '1150.0000',
-          fechaApertura: new Date('2026-06-29T10:00:00Z'),
-          esPropia: true,
+          cajonId: 'cajon-1',
+          nombre: 'Mostrador',
+          sesion: {
+            cajaId: CAJA_ID,
+            usuarioId: USUARIO_ID,
+            usuarioNombre: 'Ana Pérez',
+            saldoInicial: '1000.0000',
+            saldoEsperado: '1150.0000',
+            fechaApertura: new Date('2026-06-29T10:00:00Z'),
+            esPropia: true,
+          },
         },
       ]);
     });
 
-    it('trata entradas/salidas nulas como 0 y marca esPropia=false para otro usuario', async () => {
+    it('mapea un cajón libre (sin sesión) con sesion=null', async () => {
       dataSource.query.mockResolvedValue([
         {
+          cajon_id: 'cajon-2',
+          nombre: 'Delivery',
+          caja_id: null,
+          usuario_id: null,
+          usuario_nombre: null,
+          usuario_apellido: null,
+          saldo_inicial: null,
+          fecha_apertura: null,
+          total_entradas: null,
+          total_salidas: null,
+        },
+      ]);
+
+      const result = await service.cajonesEstado(TENANT_ID, USUARIO_ID);
+
+      expect(result).toEqual([
+        { cajonId: 'cajon-2', nombre: 'Delivery', sesion: null },
+      ]);
+    });
+
+    it('marca esPropia=false para sesión de otro usuario y trata montos nulos como 0', async () => {
+      dataSource.query.mockResolvedValue([
+        {
+          cajon_id: 'cajon-3',
+          nombre: 'Barra',
           caja_id: CAJA_ID,
           usuario_id: OTRO_USUARIO,
           usuario_nombre: 'Beto',
@@ -601,22 +632,22 @@ describe('CajaService', () => {
         },
       ]);
 
-      const result = await service.abiertas(TENANT_ID, USUARIO_ID, true);
+      const result = await service.cajonesEstado(TENANT_ID, USUARIO_ID);
 
-      expect(result[0]).toMatchObject({
+      expect(result[0]?.sesion).toMatchObject({
         usuarioNombre: 'Beto',
         saldoEsperado: '500.0000',
         esPropia: false,
       });
     });
 
-    it('pasa tenantId, el flag tieneVerTodas y usuarioId como parámetros de la query', async () => {
+    it('pasa tenantId como único parámetro de la query', async () => {
       dataSource.query.mockResolvedValue([]);
 
-      await service.abiertas(TENANT_ID, USUARIO_ID, false);
+      await service.cajonesEstado(TENANT_ID, USUARIO_ID);
 
       const [, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
-      expect(params).toEqual([TENANT_ID, false, USUARIO_ID]);
+      expect(params).toEqual([TENANT_ID]);
     });
   });
 });
