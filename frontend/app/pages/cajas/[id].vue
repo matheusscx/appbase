@@ -72,7 +72,7 @@ onMounted(async () => {
             :caja="cajaStore.detalle"
             :readonly="true"
             :historial-url="historialCajonUrl"
-            historial-label="Ver historial del cajón"
+            historial-label="Ver historial"
           />
         </div>
       </div>

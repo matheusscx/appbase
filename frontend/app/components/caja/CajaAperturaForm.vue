@@ -35,7 +35,7 @@ async function abrir() {
     return
   }
   if (!form.value.cajonId) {
-    toast.add({ title: 'Selecciona un cajón', color: 'warning' })
+    toast.add({ title: 'Selecciona una caja', color: 'warning' })
     return
   }
   saving.value = true
@@ -73,7 +73,7 @@ async function abrir() {
     </template>
 
     <UForm id="caja-apertura-form" :state="form" class="space-y-4" @submit="abrir">
-      <UFormField label="Cajón" required>
+      <UFormField label="Caja" required>
         <USelectMenu
           v-model="form.cajonId"
           :items="cajaStore.cajonesDisponibles"
@@ -81,7 +81,7 @@ async function abrir() {
           label-key="nombre"
           :loading="loadingCajones"
           :disabled="sinCajones"
-          placeholder="Selecciona un cajón"
+          placeholder="Selecciona una caja"
           class="w-full"
         />
         <p v-if="sinCajones" class="text-sm text-warning mt-1">

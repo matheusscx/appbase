@@ -45,7 +45,7 @@ const { items: historial, meta, page, loading } = usePaginatedList<Caja>({
 const columns: TableColumn<Caja>[] = [
   { accessorKey: 'fechaApertura', header: 'Apertura' },
   { accessorKey: 'fechaCierre', header: 'Cierre' },
-  { accessorKey: 'cajonNombre', header: 'Cajón' },
+  { accessorKey: 'cajonNombre', header: 'Caja' },
   { accessorKey: 'estado', header: 'Estado' },
   { accessorKey: 'saldoInicial', header: 'Saldo inicial', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'saldoFinal', header: 'Saldo final', meta: { class: { th: 'text-right', td: 'text-right' } } },

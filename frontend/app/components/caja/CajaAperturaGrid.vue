@@ -96,7 +96,7 @@ async function abrir() {
           </div>
         </template>
         <p class="text-sm text-muted">
-          Disponible. Hacé click para abrir tu caja en este cajón.
+          Disponible. Hacé click para abrir tu caja.
         </p>
       </UCard>
     </div>

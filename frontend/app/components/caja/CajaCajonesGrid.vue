@@ -89,7 +89,7 @@ const cajonesOrdenados = computed(() =>
         </dl>
 
         <p v-else class="text-sm text-muted">
-          Sin caja abierta. Ver historial del cajón.
+          Sin caja abierta. Ver historial.
         </p>
       </UCard>
     </div>
