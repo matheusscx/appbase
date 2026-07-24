@@ -81,14 +81,6 @@ function abrirCierreDrawer() { cierreDrawerOpen.value = true }
 const tieneCaja = computed(() => cajaStore.activa !== null)
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
 
-const saldoEsperado = computed(() => {
-  if (!cajaStore.activa) return new Decimal(0)
-  if (cajaStore.resumenTurno) {
-    return new Decimal(cajaStore.resumenTurno.saldoEsperado)
-  }
-  return new Decimal(cajaStore.activa.saldoInicial)
-})
-
 const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [
   [
     {
