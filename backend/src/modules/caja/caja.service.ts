@@ -475,9 +475,16 @@ export class CajaService {
     if (query.usuarioId) {
       filters += ` AND c.usuario_id = $${paramIdx++}`;
       params.push(query.usuarioId);
+    } else if (query.cajonId && tieneVerTodas) {
+      // Historial del cajón (supervisión): sin restricción por usuario.
     } else if (!query.todas || !tieneVerTodas) {
       filters += ` AND c.usuario_id = $${paramIdx++}`;
       params.push(currentUserId);
+    }
+
+    if (query.cajonId) {
+      filters += ` AND c.cajon_id = $${paramIdx++}`;
+      params.push(query.cajonId);
     }
 
     return { filters, params };

@@ -58,7 +58,10 @@ export class CajaController {
     const verTodas = await this.resolverLecturaCompartida(u);
     const consultaOtroUsuario =
       query.usuarioId != null && query.usuarioId !== u.id;
-    const scope = query.todas || consultaOtroUsuario ? verTodas : false;
+    const scope =
+      query.todas || consultaOtroUsuario || query.cajonId != null
+        ? verTodas
+        : false;
     return this.cajaService.historial(u.tenantId!, u.id, query, scope);
   }
 

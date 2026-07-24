@@ -292,5 +292,15 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .send({ usuarioIds: [] });
       expect(limpiar.status).toBe(200);
     });
+
+    it('el historial filtrado por cajonId responde 200 y devuelve una lista', async () => {
+      const r = await request(app.getHttpServer())
+        .get(`/api/caja?cajonId=${cajonId}`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(r.status).toBe(200);
+      const data = (r.body as { data: Array<{ cajonNombre: string | null }> })
+        .data;
+      expect(Array.isArray(data)).toBe(true);
+    });
   });
 });

@@ -11,4 +11,8 @@ export class QueryHistorialCajaDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   usuarioId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  cajonId?: string;
 }
