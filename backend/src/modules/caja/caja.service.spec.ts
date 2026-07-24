@@ -210,6 +210,24 @@ describe('CajaService', () => {
         service.registrarMovimiento(TENANT_ID, USUARIO_ID, CAJA_ID, dtoEntrada),
       ).rejects.toThrow(ForbiddenException);
     });
+
+    it('la salida valida contra la línea de efectivo, no contra el total mezclado', async () => {
+      const dtoSalida: CrearMovimientoDto = {
+        tipo: 'salida',
+        concepto: 'Retiro',
+        monto: '600',
+      };
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock FOR UPDATE
+      managerMock.findOne.mockResolvedValueOnce(mockCajaAbierta);
+      // Efectivo real = 500 (aunque haya 800 en tarjeta): sacar 600 debe fallar.
+      jest
+        .spyOn(service, 'calcularEsperadoEfectivo')
+        .mockResolvedValueOnce('500.0000');
+
+      await expect(
+        service.registrarMovimiento(TENANT_ID, USUARIO_ID, CAJA_ID, dtoSalida),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    });
   });
 
   describe('cerrar', () => {

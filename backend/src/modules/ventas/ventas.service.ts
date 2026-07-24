@@ -705,11 +705,11 @@ export class VentasService {
           caja.id,
           params.tenantId,
         );
-        const saldo = await this.cajaService.calcularSaldoEsperado(
+        const saldoEfectivo = await this.cajaService.calcularEsperadoEfectivo(
           caja.id,
           manager,
         );
-        if (new Decimal(saldo).minus(params.monto).lt(0))
+        if (new Decimal(saldoEfectivo).minus(params.monto).lt(0))
           throw new UnprocessableEntityException('Saldo insuficiente en caja');
         const movimiento =
           await this.cajaService.registrarMovimientoEnTransaccion(manager, {

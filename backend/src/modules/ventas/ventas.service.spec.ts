@@ -162,7 +162,7 @@ describe('VentasService', () => {
           useValue: {
             findActiva: jest.fn().mockResolvedValue(mockCajaActiva),
             findVirtual: jest.fn().mockResolvedValue(mockCajaVirtual),
-            calcularSaldoEsperado: jest.fn().mockResolvedValue('50000.0000'),
+            calcularEsperadoEfectivo: jest.fn().mockResolvedValue('50000.0000'),
             bloquearCajaAbierta: jest.fn().mockResolvedValue(undefined),
             registrarMovimientoEnTransaccion: jest
               .fn()
@@ -1298,7 +1298,7 @@ describe('VentasService', () => {
       });
 
       it('devolverDinero con saldo insuficiente → 422 y no registra movimiento', async () => {
-        cajaService.calcularSaldoEsperado.mockResolvedValueOnce('1000.0000');
+        cajaService.calcularEsperadoEfectivo.mockResolvedValueOnce('1000.0000');
         await expect(
           service.crearNotaCreditoDesdeVenta({
             ...baseParams,

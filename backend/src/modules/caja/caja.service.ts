@@ -479,11 +479,14 @@ export class CajaService {
         throw new ForbiddenException('No tienes acceso a esta caja');
       }
 
-      const saldoEsperado = await this.calcularSaldoEsperado(cajaId, manager);
+      const esperadoEfectivo = await this.calcularEsperadoEfectivo(
+        cajaId,
+        manager,
+      );
 
       if (
         dto.tipo === 'salida' &&
-        new Decimal(saldoEsperado).minus(dto.monto).lt(0)
+        new Decimal(esperadoEfectivo).minus(dto.monto).lt(0)
       ) {
         throw new UnprocessableEntityException('Saldo insuficiente en caja');
       }
