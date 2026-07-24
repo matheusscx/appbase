@@ -71,10 +71,18 @@ async function abrirCaja(
   app: INestApplication<App>,
   token: string,
 ): Promise<string> {
+  const disp = await request(app.getHttpServer())
+    .get('/api/caja/cajones-disponibles')
+    .set('Authorization', `Bearer ${token}`);
+  const cajonId = (disp.body as Array<{ cajonId: string }>)[0]?.cajonId;
   const res = await request(app.getHttpServer())
     .post('/api/caja/abrir')
     .set('Authorization', `Bearer ${token}`)
-    .send({ saldoInicial: '100000.0000', comentario: 'Apertura E2E combos' });
+    .send({
+      cajonId,
+      saldoInicial: '100000.0000',
+      comentario: 'Apertura E2E combos',
+    });
   return (res.body as CajaResponse).id;
 }
 
@@ -86,7 +94,7 @@ async function cerrarCaja(
   await request(app.getHttpServer())
     .post(`/api/caja/${cajaId}/cerrar`)
     .set('Authorization', `Bearer ${token}`)
-    .send({ montoContado: '100000.0000' });
+    .send({ montoContado: '100000' });
 }
 
 async function crearProducto(
