@@ -26,6 +26,7 @@ import { TenantModulo } from './modules/tenants/entities/tenant-modulo.entity';
 import { TenantFormulaPrecio } from './modules/tenants/entities/tenant-formula-precio.entity';
 import { Caja } from './modules/caja/entities/caja.entity';
 import { MovimientoCaja } from './modules/caja/entities/movimiento-caja.entity';
+import { CajaArqueoMedio } from './modules/caja/entities/caja-arqueo-medio.entity';
 import { RazonSocial } from './modules/tenants/entities/razon-social.entity';
 import { Rol } from './modules/roles/entities/rol.entity';
 import { RolUsuario } from './modules/roles/entities/rol-usuario.entity';
@@ -197,6 +198,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
           MovimientoInventario,
           MovimientoInventarioDetalle,
           MovimientoCaja,
+          CajaArqueoMedio,
           Venta,
           VentaDetalle,
           VentaDescuento,

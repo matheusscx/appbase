@@ -94,7 +94,7 @@ async function cerrarCaja(
   await request(app.getHttpServer())
     .post(`/api/caja/${cajaId}/cerrar`)
     .set('Authorization', `Bearer ${token}`)
-    .send({ montoContado: '100000' });
+    .send({ lineas: [{ metodoPagoId: null, montoContado: '100000' }] });
 }
 
 async function crearProducto(

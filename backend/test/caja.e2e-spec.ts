@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -33,6 +34,15 @@ interface CajonDisponible {
 interface Member {
   usuarioId: string;
   correo: string;
+}
+interface ArqueoLinea {
+  metodoPagoId: string | null;
+  nombre: string;
+  esEfectivo: boolean;
+  esperado: string;
+  requiereConteo: boolean;
+  contado?: string | null;
+  diferencia?: string | null;
 }
 
 async function login(
@@ -178,7 +188,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         // montoContado usa IsNumberString({ no_symbols: true }): sin punto decimal.
-        .send({ montoContado: '10000' });
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
 
       expect(res.status).toBe(403);
       expect((res.body as { message: string }).message).toBe(
@@ -197,7 +207,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
           .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
           .set('Authorization', `Bearer ${tokenCajero}`)
           // montoContado usa IsNumberString({ no_symbols: true }): sin punto decimal.
-          .send({ montoContado: '10000' });
+          .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
       }
     });
   });
@@ -265,7 +275,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       const cerrar = await request(app.getHttpServer())
         .post(`/api/caja/${cajaId}/cerrar`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
-        .send({ montoContado: '0' });
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
       expect([200, 201]).toContain(cerrar.status);
     });
 
@@ -301,6 +311,217 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       const data = (r.body as { data: Array<{ cajonNombre: string | null }> })
         .data;
       expect(Array.isArray(data)).toBe(true);
+    });
+  });
+
+  describe('arqueo multi-medio', () => {
+    // Tarjeta de débito (es_efectivo=false, habilitada para Paris vía seed;
+    // requiere_conteo=false por defecto).
+    const TARJETA_DEBITO_ID = '550e8400-e29b-41d4-a716-446655440106';
+    const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
+    const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+
+    let ds: DataSource;
+    let cajonArqueoId: string;
+    // Item tipo 'servicio' (sin stock): evita depender de productos con stock
+    // compartido/agotable por otros specs (ver `docs/agent/pendientes.md`,
+    // caveat de polución local de stock acumulado entre corridas de e2e).
+    let itemId: string;
+
+    beforeAll(async () => {
+      ds = app.get(DataSource);
+      const r = await request(app.getHttpServer())
+        .post('/api/cajones')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ nombre: `E2E Arqueo ${Date.now()}` });
+      cajonArqueoId = (r.body as CajonResponse).id;
+
+      const item = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          nombre: `E2E Arqueo Servicio ${Date.now()}`,
+          precioBase: '5000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        });
+      itemId = (item.body as { id: string }).id;
+    });
+
+    afterAll(async () => {
+      // Higiene: la política de requiere_conteo es del tenant, no debe quedar
+      // alterada para otras corridas/specs que compartan la BD.
+      await ds.query(
+        `UPDATE tenant_metodo_pago SET requiere_conteo = false
+         WHERE tenant_id = $1 AND metodo_pago_id = $2`,
+        [PARIS_TENANT_ID, TARJETA_DEBITO_ID],
+      );
+      if (itemId) {
+        await request(app.getHttpServer())
+          .delete(`/api/items/${itemId}`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+      }
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonArqueoId}`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+    });
+
+    it('vender con tarjeta NO infla el esperado de efectivo (fin del faltante fantasma)', async () => {
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonArqueoId, saldoInicial: '0' });
+      expect(abrir.status).toBe(201);
+      const cajaId = (abrir.body as CajaResponse).id;
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          tipoDocumentoId: BOLETA_ID,
+          lineas: [{ itemId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: TARJETA_DEBITO_ID, monto: '5000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+
+      const preview = await request(app.getHttpServer())
+        .get(`/api/caja/${cajaId}/arqueo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(preview.status).toBe(200);
+      const lineas = preview.body as ArqueoLinea[];
+      const efectivo = lineas.find((l) => l.esEfectivo);
+      const tarjeta = lineas.find((l) => l.metodoPagoId === TARJETA_DEBITO_ID);
+      // El fondo era 0 y no hubo entradas en efectivo: la venta con tarjeta
+      // no debe inflar el esperado de efectivo (fin del faltante fantasma).
+      expect(efectivo?.esperado).toBe('0.0000');
+      expect(tarjeta?.esperado).toBe('5000.0000');
+
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
+      expect(cerrar.status).toBe(201);
+      const body = cerrar.body as { arqueo: ArqueoLinea[] };
+      const efectivoCerrado = body.arqueo.find((l) => l.esEfectivo);
+      expect(efectivoCerrado?.diferencia).toBe('0.0000');
+    });
+
+    it('la tarjeta sin requiere_conteo es informativa: cerrar solo con efectivo → 201', async () => {
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonArqueoId, saldoInicial: '10000.0000' });
+      expect(abrir.status).toBe(201);
+      const cajaId = (abrir.body as CajaResponse).id;
+
+      // Movimiento con tarjeta (requiere_conteo=false por defecto): la línea
+      // queda informativa, no bloquea el cierre.
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          tipoDocumentoId: BOLETA_ID,
+          lineas: [{ itemId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: TARJETA_DEBITO_ID, monto: '5000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '10000.0000' }] });
+      expect(cerrar.status).toBe(201);
+    });
+
+    it('con requiere_conteo=true en tarjeta, cerrar sin su contado → 400', async () => {
+      await ds.query(
+        `UPDATE tenant_metodo_pago SET requiere_conteo = true
+         WHERE tenant_id = $1 AND metodo_pago_id = $2`,
+        [PARIS_TENANT_ID, TARJETA_DEBITO_ID],
+      );
+
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonArqueoId, saldoInicial: '0' });
+      expect(abrir.status).toBe(201);
+      const cajaId = (abrir.body as CajaResponse).id;
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          tipoDocumentoId: BOLETA_ID,
+          lineas: [{ itemId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: TARJETA_DEBITO_ID, monto: '5000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+
+      const cerrarSinTarjeta = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
+      expect(cerrarSinTarjeta.status).toBe(400);
+
+      // Higiene: cerrar con el conteo de la tarjeta (ahora obligatoria) para
+      // no dejar la caja abierta, y restaurar la política del tenant.
+      const cerrarCompleto = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          lineas: [
+            { metodoPagoId: null, montoContado: '0' },
+            { metodoPagoId: TARJETA_DEBITO_ID, montoContado: '5000.0000' },
+          ],
+        });
+      expect(cerrarCompleto.status).toBe(201);
+
+      await ds.query(
+        `UPDATE tenant_metodo_pago SET requiere_conteo = false
+         WHERE tenant_id = $1 AND metodo_pago_id = $2`,
+        [PARIS_TENANT_ID, TARJETA_DEBITO_ID],
+      );
+    });
+
+    it('montoContado admite decimales', async () => {
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonArqueoId, saldoInicial: '10000.5000' });
+      expect(abrir.status).toBe(201);
+      const cajaId = (abrir.body as CajaResponse).id;
+
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '10000.5000' }] });
+      expect(cerrar.status).toBe(201);
+    });
+
+    it('la caja cerrada devuelve las líneas congeladas en GET /:id/arqueo', async () => {
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonArqueoId, saldoInicial: '1000.0000' });
+      expect(abrir.status).toBe(201);
+      const cajaId = (abrir.body as CajaResponse).id;
+
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '1000.0000' }] });
+      expect(cerrar.status).toBe(201);
+
+      const arqueoCerrado = await request(app.getHttpServer())
+        .get(`/api/caja/${cajaId}/arqueo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(arqueoCerrado.status).toBe(200);
+      const lineas = arqueoCerrado.body as ArqueoLinea[];
+      const efectivo = lineas.find((l) => l.esEfectivo);
+      expect(efectivo?.contado).not.toBeNull();
+      expect(efectivo?.diferencia).not.toBeNull();
+      expect(efectivo?.contado).toBe('1000.0000');
+      expect(efectivo?.diferencia).toBe('0.0000');
     });
   });
 });
