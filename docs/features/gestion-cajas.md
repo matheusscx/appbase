@@ -629,10 +629,12 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
 - `pages/mi-caja/[id].vue` — Detalle operable de su turno activo: KPIs + tabla de
   movimientos (`CajaActivaDashboard`), botones de operar (+Movimiento / Cerrar).
 - `pages/cajas/index.vue` — Grid de **todos los cajones activos** del tenant y su estado
-  (`CajaCajonesGrid`), read-only. **Sin apertura** (la caja se abre en `/mi-caja`). Gate:
+  (`CajaCajonesGrid`), read-only. **Sin apertura** (la caja se abre en `/mi-caja`). El botón
+  "Ver historial" abre `/cajas/historial?todas=true` (arranca mostrando todas). Gate:
   `Cajas:Leer`.
-- `pages/cajas/historial.vue` — Historial de todos los cajeros con toggle "Ver todas"
-  y soporte `?usuarioId=` para filtrar por cajero.
+- `pages/cajas/historial.vue` — Historial de cajeros con toggle "Ver todas / Ver mis cajas"
+  y soporte `?usuarioId=` para filtrar por cajero. El toggle inicializa su estado desde
+  `?todas=true` en la URL (por eso "Ver historial" en `/cajas` aterriza directo en todas).
 - `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de
   operar, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en modo
   read-only). Links "Volver a cajas" y "Ver historial del cajero". 403/404 →
@@ -848,7 +850,8 @@ npm run test:e2e -- caja.e2e-spec.ts
 10. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
 11. `/cajas`: grid de todos los cajones activos (ocupados con datos, libres con badge
     "Libre"); sin card de apertura. Click en ocupado → `/cajas/[id]`; click en libre →
-    `/cajas/historial?cajonId=…`. `/cajas/historial`: toggle "Ver todas"; click en fila → `/cajas/[id]`
+    `/cajas/historial?cajonId=…`. Botón "Ver historial" → `/cajas/historial?todas=true`
+    (arranca en todas); toggle "Ver todas / Ver mis cajas"; click en fila → `/cajas/[id]`
 12. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); link "Ver historial del cajero" con `?usuarioId=`
 13. KPIs visibles al hacer scroll en movimientos (thead sticky)
 14. `/caja` redirige a `/mi-caja` (compatibilidad)

@@ -12,7 +12,7 @@ const permissionsStore = usePermissionsStore()
 const { formatMonto, formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
 
-const todasActivo = ref(false)
+const todasActivo = ref(route.query.todas === 'true')
 
 const usuarioIdEfectivo = computed(() => {
   if (props.usuarioId) return props.usuarioId
