@@ -85,6 +85,7 @@ export const useCajaStore = defineStore('caja', () => {
   const detalle = ref<Caja | null>(null)
   const cajonesDisponibles = ref<CajonDisponible[]>([])
   const arqueo = ref<ArqueoLinea[]>([])
+  const arqueoCiego = ref(false)
   const loadingActiva = ref(false)
   const loadingResumenTurno = ref(false)
 
@@ -175,9 +176,25 @@ export const useCajaStore = defineStore('caja', () => {
   }
 
   async function cargarArqueo(cajaId: string): Promise<void> {
-    arqueo.value = await useApiFetch<ArqueoLinea[]>(
+    const res = await useApiFetch<{ ciego: boolean, lineas: ArqueoLinea[] }>(
       `${config.public.apiUrl}/caja/${cajaId}/arqueo`,
     )
+    arqueo.value = res.lineas
+    arqueoCiego.value = res.ciego
+  }
+
+  async function cargarArqueoCiego(): Promise<boolean> {
+    const res = await useApiFetch<{ arqueoCiego: boolean }>(
+      `${config.public.apiUrl}/caja/arqueo-ciego`,
+    )
+    return res.arqueoCiego
+  }
+
+  async function guardarArqueoCiego(valor: boolean): Promise<void> {
+    await useApiFetch(`${config.public.apiUrl}/caja/arqueo-ciego`, {
+      method: 'PUT',
+      body: { arqueoCiego: valor },
+    })
   }
 
   async function cerrar(
@@ -213,6 +230,7 @@ export const useCajaStore = defineStore('caja', () => {
     detalle,
     cajonesDisponibles,
     arqueo,
+    arqueoCiego,
     loadingActiva,
     loadingResumenTurno,
     cargarActiva,
@@ -226,5 +244,7 @@ export const useCajaStore = defineStore('caja', () => {
     cargarDetalle,
     cargarCajonesDisponibles,
     cargarArqueo,
+    cargarArqueoCiego,
+    guardarArqueoCiego,
   }
 })

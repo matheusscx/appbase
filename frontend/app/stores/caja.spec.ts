@@ -150,14 +150,35 @@ describe('useCajaStore — arqueo / cerrar', () => {
     mockApiFetch.mockReset()
   })
 
-  it('cargarArqueo llena el estado arqueo', async () => {
+  it('cargarArqueo llena el estado arqueo y arqueoCiego', async () => {
     const lineas = [
       { metodoPagoId: null, nombre: 'Efectivo', esEfectivo: true, esperado: '1000.0000', requiereConteo: true },
     ]
-    mockApiFetch.mockResolvedValueOnce(lineas)
+    mockApiFetch.mockResolvedValueOnce({ ciego: true, lineas })
     const store = useCajaStore()
     await store.cargarArqueo('caja-1')
     expect(store.arqueo).toEqual(lineas)
+    expect(store.arqueoCiego).toBe(true)
+  })
+
+  it('cargarArqueoCiego devuelve el flag del tenant', async () => {
+    mockApiFetch.mockResolvedValueOnce({ arqueoCiego: true })
+    const store = useCajaStore()
+    const result = await store.cargarArqueoCiego()
+    expect(result).toBe(true)
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/caja/arqueo-ciego'),
+    )
+  })
+
+  it('guardarArqueoCiego envía PUT con { arqueoCiego }', async () => {
+    mockApiFetch.mockResolvedValueOnce(undefined)
+    const store = useCajaStore()
+    await store.guardarArqueoCiego(false)
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/caja/arqueo-ciego'),
+      expect.objectContaining({ method: 'PUT', body: { arqueoCiego: false } }),
+    )
   })
 
   it('cerrar envía { lineas, comentario } y limpia el estado', async () => {

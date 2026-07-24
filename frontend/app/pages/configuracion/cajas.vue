@@ -26,6 +26,9 @@ const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
 const toggling = reactive(new Set<string>())
+const arqueoCiego = ref(false)
+const savingArqueoCiego = ref(false)
+const cajaStore = useCajaStore()
 
 const usuariosDrawerOpen = ref(false)
 const usuariosCajonId = ref<string | null>(null)
@@ -197,8 +200,29 @@ async function guardarUsuarios() {
   }
 }
 
-onMounted(() => {
+async function onToggleArqueoCiego(valor: boolean) {
+  const prev = arqueoCiego.value
+  arqueoCiego.value = valor
+  savingArqueoCiego.value = true
+  try {
+    await cajaStore.guardarArqueoCiego(valor)
+    toast.add({ title: valor ? 'Arqueo ciego activado' : 'Arqueo ciego desactivado', color: 'success' })
+  }
+  catch (e: unknown) {
+    arqueoCiego.value = prev
+    toast.add({ title: apiErrorMsg(e, 'Error al actualizar arqueo ciego'), color: 'error' })
+  }
+  finally {
+    savingArqueoCiego.value = false
+  }
+}
+
+onMounted(async () => {
   cargar()
+  try {
+    arqueoCiego.value = await cajaStore.cargarArqueoCiego()
+  }
+  catch { /* si no tiene Cajas:Leer, el toggle no se muestra igual */ }
 })
 
 const columns: TableColumn<Cajon>[] = [
@@ -270,6 +294,29 @@ const columns: TableColumn<Cajon>[] = [
         </div>
       </template>
     </CrudTable>
+
+    <UCard>
+      <template #header>
+        <h3 class="text-sm font-semibold text-default">
+          Política de cierre
+        </h3>
+      </template>
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-default">
+            Arqueo ciego
+          </p>
+          <p class="text-sm text-muted">
+            El cajero cuenta el cajón sin ver el monto esperado; el sistema revela la diferencia al cerrar.
+          </p>
+        </div>
+        <USwitch
+          :model-value="arqueoCiego"
+          :disabled="savingArqueoCiego || !puedeActualizar"
+          @update:model-value="onToggleArqueoCiego"
+        />
+      </div>
+    </UCard>
 
     <AppDrawer v-model:open="drawerOpen" width="40%">
       <template #header>
