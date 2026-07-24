@@ -612,9 +612,10 @@ Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso`
 
 Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.vue`):
 
-- `pages/mi-caja/index.vue` — Cajero opera su propio turno: sin caja abierta →
-  formulario de apertura + botón "Ver historial" → `/mi-caja/historial`; con caja
-  abierta → redirect a `/mi-caja/[id]`. Gate: `MiCaja:Leer`.
+- `pages/mi-caja/index.vue` — Cajero opera su propio turno: sin caja abierta → grid de
+  cajones disponibles (`CajaAperturaGrid`; click en un cajón → drawer con saldo inicial +
+  comentario → abre la caja sobre ese cajón) + botón "Ver historial" →
+  `/mi-caja/historial`; con caja abierta → redirect a `/mi-caja/[id]`. Gate: `MiCaja:Leer`.
 - `pages/mi-caja/historial.vue` — Historial paginado del propio cajero
   (`CajaHistorial`, sin `usuarioId` ni toggle "todas").
 - `pages/mi-caja/[id].vue` — Detalle operable de su turno activo: KPIs + tabla de
@@ -642,7 +643,8 @@ sin necesidad.
 - `components/caja/CajaTurnoResumen.vue` — Grid de 4 KPIs (saldo inicial, entradas, salidas, saldo esperado)
 - `components/caja/CajaMovimientosTable.vue` — Tabla paginada de movimientos con filtro por tipo, scroll interno y thead sticky
 - `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); prop `usuarioId` o query `?usuarioId=`; usado sin `usuarioId`/toggle en `/mi-caja/historial` y con ambos en `/cajas/historial`
-- `components/caja/CajaAperturaForm.vue` — Formulario de apertura: selector de cajón (poblado por `cajonesDisponibles`, obligatorio) + saldo inicial + comentario
+- `components/caja/CajaAperturaGrid.vue` — Apertura en `/mi-caja`: grid de cards de cajones disponibles (poblado por `cajonesDisponibles`); click en un cajón abre un `AppDrawer` con saldo inicial + comentario → `cajaStore.abrir`. Cajón implícito por la card (nombre en el título del drawer)
+- `components/caja/CajaAperturaForm.vue` — Formulario de apertura con selector de cajón (poblado por `cajonesDisponibles`, obligatorio) + saldo inicial + comentario; usado en el modal "Abrir mi caja" de `CajaAbiertasGrid` (`/cajas`)
 - `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
 - `components/caja/CajaCierreDrawer.vue` — Drawer de cierre con cuadre (esperado vs. contado → diferencia)
 - `components/caja/CajaAbiertasGrid.vue` — Grid de cards para la superficie `/cajas` (permiso `Cajas:Leer`): cajas físicas abiertas del tenant. Click → `/cajas/[id]`
