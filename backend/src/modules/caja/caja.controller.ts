@@ -87,6 +87,13 @@ export class CajaController {
     return this.cajaService.cajonesDisponibles(u.tenantId!, u.id);
   }
 
+  @Get(':id/arqueo')
+  async arqueo(@Req() req: Request, @Param('id') cajaId: string) {
+    const u = req.user as JwtUser;
+    const verTodas = await this.resolverLecturaCompartida(u);
+    return this.cajaService.obtenerArqueo(u.tenantId!, u.id, cajaId, verTodas);
+  }
+
   @Get(':id')
   async detalle(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;

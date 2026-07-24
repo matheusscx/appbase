@@ -463,6 +463,67 @@ describe('CajaService', () => {
     });
   });
 
+  describe('obtenerArqueo', () => {
+    it('caja abierta → preview recomputado (sin contado)', async () => {
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'abierta',
+      });
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '1000.0000',
+          requiereConteo: true,
+        },
+      ]);
+      const lineas = await service.obtenerArqueo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+      );
+      expect(lineas[0]).toMatchObject({
+        metodoPagoId: null,
+        esperado: '1000.0000',
+      });
+      expect(lineas[0].contado).toBeUndefined();
+    });
+
+    it('caja cerrada → líneas congeladas desde caja_arqueo_medio', async () => {
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+      });
+      dataSource.query.mockResolvedValueOnce([
+        {
+          metodo_pago_id: null,
+          nombre: 'Efectivo',
+          es_efectivo: true,
+          esperado: '1000.0000',
+          contado: '950.0000',
+          diferencia: '-50.0000',
+          requiere_conteo: true,
+        },
+      ]);
+      const lineas = await service.obtenerArqueo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+      );
+      expect(lineas[0]).toMatchObject({
+        metodoPagoId: null,
+        nombre: 'Efectivo',
+        esEfectivo: true,
+        esperado: '1000.0000',
+        contado: '950.0000',
+        diferencia: '-50.0000',
+      });
+    });
+  });
+
   describe('historial', () => {
     const mockRow = {
       caja_id: CAJA_ID,

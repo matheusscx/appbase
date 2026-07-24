@@ -19,6 +19,7 @@ describe('CajaController', () => {
       cerrar: jest.fn(),
       resumenMovimientos: jest.fn(),
       listarMovimientos: jest.fn(),
+      obtenerArqueo: jest.fn(),
     } as unknown as CajaService;
 
     rbacService = {
@@ -261,6 +262,24 @@ describe('CajaController', () => {
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       controller.cerrar(req, 'caja1', dto);
       expect(cajaService.cerrar).toHaveBeenCalledWith('t1', 'u1', 'caja1', dto);
+    });
+  });
+
+  describe('arqueo', () => {
+    it('resuelve lectura compartida y delega en obtenerArqueo', async () => {
+      jest
+        .spyOn(rbacService, 'userHasPermiso')
+        .mockResolvedValueOnce(false) // MiCaja:Leer
+        .mockResolvedValueOnce(true); // Cajas:Leer
+      jest.spyOn(cajaService, 'obtenerArqueo').mockResolvedValueOnce([]);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      await controller.arqueo(req, 'caja1');
+      expect(cajaService.obtenerArqueo).toHaveBeenCalledWith(
+        't1',
+        'u1',
+        'caja1',
+        true,
+      );
     });
   });
 

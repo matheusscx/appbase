@@ -364,6 +364,70 @@ export class CajaService {
     ];
   }
 
+  /**
+   * Arqueo para el drawer de cierre y el detalle read-only. Caja abierta →
+   * preview recomputado (sin contado). Caja cerrada → líneas congeladas.
+   * (Punto de cambio del sub-proyecto B: en modo ciego retendrá `esperado`.)
+   */
+  async obtenerArqueo(
+    tenantId: string,
+    usuarioId: string,
+    cajaId: string,
+    tieneVerTodas: boolean,
+  ): Promise<LineaArqueo[]> {
+    const caja = await this.verificarAccesoCaja(
+      tenantId,
+      usuarioId,
+      cajaId,
+      tieneVerTodas,
+    );
+
+    if (caja.estado === 'abierta') {
+      return this.dataSource.transaction((manager) =>
+        this.calcularArqueo(cajaId, tenantId, manager),
+      );
+    }
+
+    const rows: {
+      metodo_pago_id: string | null;
+      nombre: string | null;
+      es_efectivo: boolean;
+      esperado: string;
+      contado: string | null;
+      diferencia: string | null;
+      requiere_conteo: boolean;
+    }[] = await this.dataSource.query(
+      `SELECT am.metodo_pago_id,
+              COALESCE(mp.nombre, 'Efectivo') AS nombre,
+              am.es_efectivo,
+              am.esperado,
+              am.contado,
+              am.diferencia,
+              COALESCE(tmp.requiere_conteo, am.es_efectivo) AS requiere_conteo
+       FROM caja_arqueo_medio am
+       LEFT JOIN metodos_pago mp ON mp.metodo_pago_id = am.metodo_pago_id
+       LEFT JOIN tenant_metodo_pago tmp
+              ON tmp.metodo_pago_id = am.metodo_pago_id
+             AND tmp.tenant_id = $2
+             AND tmp.eliminado_el IS NULL
+       WHERE am.caja_id = $1
+         AND am.eliminado_el IS NULL
+       ORDER BY am.es_efectivo DESC, mp.nombre ASC`,
+      [cajaId, tenantId],
+    );
+
+    return rows.map((r) => ({
+      metodoPagoId: r.metodo_pago_id,
+      nombre: r.nombre ?? 'Efectivo',
+      esEfectivo: r.es_efectivo,
+      esperado: new Decimal(r.esperado).toFixed(4),
+      requiereConteo: r.requiere_conteo,
+      contado: r.contado === null ? null : new Decimal(r.contado).toFixed(4),
+      diferencia:
+        r.diferencia === null ? null : new Decimal(r.diferencia).toFixed(4),
+    }));
+  }
+
   async cerrar(
     tenantId: string,
     usuarioId: string,
