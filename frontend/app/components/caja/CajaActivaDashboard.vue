@@ -95,7 +95,6 @@ watch(() => props.caja.id, () => {
       <CajaCierreDrawer
         v-model:open="cierreDrawerOpen"
         :caja-id="caja.id"
-        :saldo-esperado="saldoEsperado"
       />
     </template>
   </div>

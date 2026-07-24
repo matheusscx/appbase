@@ -59,6 +59,16 @@ export interface CajonDisponible {
   nombre: string
 }
 
+export interface ArqueoLinea {
+  metodoPagoId: string | null
+  nombre: string
+  esEfectivo: boolean
+  esperado: string
+  requiereConteo: boolean
+  contado?: string | null
+  diferencia?: string | null
+}
+
 function recalcularSaldoEsperado(r: CajaTurnoResumen) {
   r.saldoEsperado = new Decimal(r.saldoInicial)
     .plus(r.totalEntradas)
@@ -74,6 +84,7 @@ export const useCajaStore = defineStore('caja', () => {
   const cajonesEstado = ref<CajonEstado[]>([])
   const detalle = ref<Caja | null>(null)
   const cajonesDisponibles = ref<CajonDisponible[]>([])
+  const arqueo = ref<ArqueoLinea[]>([])
   const loadingActiva = ref(false)
   const loadingResumenTurno = ref(false)
 
@@ -163,14 +174,23 @@ export const useCajaStore = defineStore('caja', () => {
     return mov
   }
 
-  async function cerrar(cajaId: string, payload: { montoContado: string, comentario?: string }): Promise<Caja> {
-    const caja = await useApiFetch<Caja>(
+  async function cargarArqueo(cajaId: string): Promise<void> {
+    arqueo.value = await useApiFetch<ArqueoLinea[]>(
+      `${config.public.apiUrl}/caja/${cajaId}/arqueo`,
+    )
+  }
+
+  async function cerrar(
+    cajaId: string,
+    payload: { lineas: { metodoPagoId: string | null, montoContado: string }[], comentario?: string },
+  ): Promise<{ caja: Caja, arqueo: ArqueoLinea[] }> {
+    const res = await useApiFetch<{ caja: Caja, arqueo: ArqueoLinea[] }>(
       `${config.public.apiUrl}/caja/${cajaId}/cerrar`,
       { method: 'POST', body: payload },
     )
     resumenTurno.value = null
     activa.value = null
-    return caja
+    return res
   }
 
   async function cargarCajonesEstado(): Promise<void> {
@@ -192,6 +212,7 @@ export const useCajaStore = defineStore('caja', () => {
     cajonesEstado,
     detalle,
     cajonesDisponibles,
+    arqueo,
     loadingActiva,
     loadingResumenTurno,
     cargarActiva,
@@ -204,5 +225,6 @@ export const useCajaStore = defineStore('caja', () => {
     cargarCajonesEstado,
     cargarDetalle,
     cargarCajonesDisponibles,
+    cargarArqueo,
   }
 })

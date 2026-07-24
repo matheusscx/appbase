@@ -143,3 +143,32 @@ describe('useCajaStore — cargarCajonesEstado / cargarDetalle', () => {
     expect(store.detalle).toBeNull()
   })
 })
+
+describe('useCajaStore — arqueo / cerrar', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockApiFetch.mockReset()
+  })
+
+  it('cargarArqueo llena el estado arqueo', async () => {
+    const lineas = [
+      { metodoPagoId: null, nombre: 'Efectivo', esEfectivo: true, esperado: '1000.0000', requiereConteo: true },
+    ]
+    mockApiFetch.mockResolvedValueOnce(lineas)
+    const store = useCajaStore()
+    await store.cargarArqueo('caja-1')
+    expect(store.arqueo).toEqual(lineas)
+  })
+
+  it('cerrar envía { lineas, comentario } y limpia el estado', async () => {
+    mockApiFetch.mockResolvedValueOnce({ caja: { id: 'caja-1' }, arqueo: [] })
+    const store = useCajaStore()
+    const payload = { lineas: [{ metodoPagoId: null, montoContado: '1000' }] }
+    await store.cerrar('caja-1', payload)
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/caja/caja-1/cerrar'),
+      expect.objectContaining({ method: 'POST', body: payload }),
+    )
+    expect(store.activa).toBeNull()
+  })
+})

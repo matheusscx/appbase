@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 
+// `saldoEsperado` queda opcional: la Task 7 la reemplaza por la carga de `arqueo` vía `cajaId`.
 const props = defineProps<{
   cajaId: string
-  saldoEsperado: Decimal
+  saldoEsperado?: Decimal
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -28,7 +29,7 @@ const montoContadoFormateado = computed(() => {
 })
 
 const diferencia = computed(() => {
-  if (!montoContado.value) return null
+  if (!montoContado.value || !props.saldoEsperado) return null
   try {
     return new Decimal(montoContado.value).minus(props.saldoEsperado)
   }
@@ -47,7 +48,7 @@ async function cerrarCaja() {
   saving.value = true
   try {
     await cajaStore.cerrar(props.cajaId, {
-      montoContado: montoContado.value,
+      lineas: [{ metodoPagoId: null, montoContado: montoContado.value }],
       comentario: comentario.value || undefined,
     })
     toast.add({ title: 'Caja cerrada correctamente', color: 'success' })

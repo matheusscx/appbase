@@ -361,7 +361,6 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         v-if="cajaStore.activa"
         v-model:open="cierreDrawerOpen"
         :caja-id="cajaStore.activa.id"
-        :saldo-esperado="saldoEsperado"
       />
     </template>
   </UDashboardPanel>
