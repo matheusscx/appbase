@@ -83,7 +83,7 @@ describe('useCajaStore — cargarActiva', () => {
     const store = useCajaStore()
     mockApiFetch.mockResolvedValueOnce(CAJA)
 
-    const result = await store.abrir({ saldoInicial: '1000.0000' })
+    const result = await store.abrir({ saldoInicial: '1000.0000', cajonId: 'cajon-1' })
 
     expect(result).toEqual(CAJA)
     expect(store.activa).toEqual(CAJA)

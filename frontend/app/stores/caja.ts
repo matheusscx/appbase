@@ -15,6 +15,7 @@ export interface Caja {
   fechaApertura: string
   fechaCierre: string | null
   comentario: string | null
+  cajonNombre: string | null
 }
 
 export interface MovimientoCaja {
@@ -44,6 +45,12 @@ export interface CajaAbierta {
   saldoEsperado: string
   fechaApertura: string
   esPropia: boolean
+  cajonNombre: string | null
+}
+
+export interface CajonDisponible {
+  cajonId: string
+  nombre: string
 }
 
 function recalcularSaldoEsperado(r: CajaTurnoResumen) {
@@ -60,6 +67,7 @@ export const useCajaStore = defineStore('caja', () => {
   const resumenTurno = ref<CajaTurnoResumen | null>(null)
   const abiertas = ref<CajaAbierta[]>([])
   const detalle = ref<Caja | null>(null)
+  const cajonesDisponibles = ref<CajonDisponible[]>([])
   const loadingActiva = ref(false)
   const loadingResumenTurno = ref(false)
 
@@ -79,7 +87,13 @@ export const useCajaStore = defineStore('caja', () => {
     }
   }
 
-  async function abrir(payload: { saldoInicial: string, comentario?: string }): Promise<Caja> {
+  async function cargarCajonesDisponibles(): Promise<void> {
+    cajonesDisponibles.value = await useApiFetch<CajonDisponible[]>(
+      `${config.public.apiUrl}/caja/cajones-disponibles`,
+    )
+  }
+
+  async function abrir(payload: { saldoInicial: string, comentario?: string, cajonId: string }): Promise<Caja> {
     const caja = await useApiFetch<Caja>(
       `${config.public.apiUrl}/caja/abrir`,
       { method: 'POST', body: payload },
@@ -171,6 +185,7 @@ export const useCajaStore = defineStore('caja', () => {
     resumenTurno,
     abiertas,
     detalle,
+    cajonesDisponibles,
     loadingActiva,
     loadingResumenTurno,
     cargarActiva,
@@ -182,5 +197,6 @@ export const useCajaStore = defineStore('caja', () => {
     cerrar,
     cargarAbiertas,
     cargarDetalle,
+    cargarCajonesDisponibles,
   }
 })

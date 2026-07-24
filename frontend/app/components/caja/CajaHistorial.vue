@@ -38,6 +38,7 @@ const { items: historial, meta, page, loading } = usePaginatedList<Caja>({
 const columns: TableColumn<Caja>[] = [
   { accessorKey: 'fechaApertura', header: 'Apertura' },
   { accessorKey: 'fechaCierre', header: 'Cierre' },
+  { accessorKey: 'cajonNombre', header: 'Cajón' },
   { accessorKey: 'estado', header: 'Estado' },
   { accessorKey: 'saldoInicial', header: 'Saldo inicial', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'saldoFinal', header: 'Saldo final', meta: { class: { th: 'text-right', td: 'text-right' } } },
@@ -101,6 +102,9 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
           <span class="text-default whitespace-nowrap">
             {{ formatFecha(row.original.fechaCierre) }}
           </span>
+        </template>
+        <template #cajonNombre-cell="{ row }">
+          <span class="text-default">{{ row.original.cajonNombre ?? '—' }}</span>
         </template>
         <template #estado-cell="{ row }">
           <UBadge

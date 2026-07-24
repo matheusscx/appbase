@@ -81,6 +81,12 @@ async function onOpened(cajaId: string): Promise<void> {
         <dl class="space-y-1 text-sm">
           <div class="flex justify-between">
             <dt class="text-muted">
+              Cajón
+            </dt>
+            <dd class="text-default">{{ caja.cajonNombre ?? '—' }}</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-muted">
               Saldo inicial
             </dt>
             <dd class="text-default">{{ formatMonto(caja.saldoInicial) }}</dd>
