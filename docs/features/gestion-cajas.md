@@ -639,8 +639,8 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
   `?todas=true` en la URL (por eso "Ver historial" en `/cajas` aterriza directo en todas).
 - `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de
   operar, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en modo
-  read-only). Botón "Ver historial del cajero" en el header de la tarjeta + back-link
-  "Volver a cajas". 403/404 → redirect a `/cajas`.
+  read-only). Botón "Ver historial del cajón" (`?cajonId=` de esa caja) en el header de
+  la tarjeta + back-link "Volver a cajas". 403/404 → redirect a `/cajas`.
 - `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
   internos previos al refactor).
 
@@ -854,7 +854,7 @@ npm run test:e2e -- caja.e2e-spec.ts
     "Libre"); sin card de apertura. Click en ocupado → `/cajas/[id]`; click en libre →
     `/cajas/historial?cajonId=…`. Botón "Ver historial" → `/cajas/historial?todas=true`
     (arranca en todas); toggle "Ver todas / Ver mis cajas"; click en fila → `/cajas/[id]`
-12. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); link "Ver historial del cajero" con `?usuarioId=`
+12. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); botón "Ver historial del cajón" con `?cajonId=` (todas las sesiones de ese cajón)
 13. KPIs visibles al hacer scroll en movimientos (thead sticky)
 14. `/caja` redirige a `/mi-caja` (compatibilidad)
 

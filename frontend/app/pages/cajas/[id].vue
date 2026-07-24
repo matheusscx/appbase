@@ -9,9 +9,9 @@ const loading = ref(true)
 
 const cajaId = computed(() => route.params.id as string)
 
-const historialCajeroUrl = computed(() => {
-  const usuarioId = cajaStore.detalle?.usuarioId
-  return usuarioId ? `/cajas/historial?usuarioId=${usuarioId}` : '/cajas/historial'
+const historialCajonUrl = computed(() => {
+  const cajonId = cajaStore.detalle?.cajonId
+  return cajonId ? `/cajas/historial?cajonId=${cajonId}` : '/cajas/historial'
 })
 
 onMounted(async () => {
@@ -71,8 +71,8 @@ onMounted(async () => {
           <CajaActivaDashboard
             :caja="cajaStore.detalle"
             :readonly="true"
-            :historial-url="historialCajeroUrl"
-            historial-label="Ver historial del cajero"
+            :historial-url="historialCajonUrl"
+            historial-label="Ver historial del cajón"
           />
         </div>
       </div>

@@ -15,6 +15,7 @@ export interface Caja {
   fechaApertura: string
   fechaCierre: string | null
   comentario: string | null
+  cajonId: string | null
   cajonNombre: string | null
 }
 
