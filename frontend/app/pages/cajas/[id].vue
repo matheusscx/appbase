@@ -60,13 +60,13 @@ onMounted(async () => {
             <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
             Volver a cajas
           </ULink>
-          <ULink
+          <UButton
             :to="historialCajeroUrl"
-            class="text-sm text-highlighted inline-flex items-center gap-1"
-          >
-            <UIcon name="i-lucide-history" class="w-4 h-4" />
-            Ver historial del cajero
-          </ULink>
+            variant="outline"
+            color="neutral"
+            icon="i-lucide-history"
+            label="Ver historial del cajero"
+          />
         </div>
 
         <div v-if="loading" class="py-12 text-center text-sm text-muted">
