@@ -295,10 +295,13 @@ método no-efectivo es obligatoria solo si el tenant activó `requiere_conteo` p
 método. El resto queda informativo: se puede declarar un contado si se quiere, pero no
 bloquea el cierre.
 
-`es_efectivo` se lee del movimiento histórico sin filtrar `metodos_pago.eliminado_el` ni
-`tenant_metodo_pago.eliminado_el` a propósito: es intrínseco al método que se usó en su
-momento, no al estado actual del catálogo — un método borrado después de usarse en una
-venta no debe desaparecer de la línea de efectivo del arqueo ni de su fila informativa.
+`es_efectivo` se lee del movimiento histórico sin filtrar `metodos_pago.eliminado_el` a
+propósito: es intrínseco al método que se usó en su momento, no al estado actual del
+catálogo — un método borrado después de usarse en una venta no debe desaparecer de la
+línea de efectivo del arqueo ni de su fila informativa. El join a `tenant_metodo_pago`
+sí filtra `tmp.eliminado_el IS NULL`: `requiere_conteo` no es intrínseco como
+`es_efectivo` — es política de tenant, así que si la config se borra, `requiere_conteo`
+cae a `false` vía `COALESCE`.
 
 ### Tabla `caja_arqueo_medio` — detalle del cierre, congelado
 
@@ -710,10 +713,10 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 | `cajon_id` | UUID | FK cajones, nullable | Obligatorio en `'fisica'`; siempre `NULL` en `'virtual'`. Índice único parcial `ux_cajas_cajon_abierta` sobre `(cajon_id)` filtrando `estado='abierta' AND eliminado_el IS NULL` — un cajón, una sesión abierta a la vez |
 | `tipo` | TEXT | NOT NULL | `'fisica'` \| `'virtual'` |
 | `estado` | TEXT | NOT NULL | `'abierta'` \| `'cerrada'` |
-| `saldo_inicial` | NUMERIC(18,6) | NOT NULL | Fondo al abrir; Decimal.js |
-| `saldo_final` | NUMERIC(18,6) | nullable | Congelado al cerrar = `esperado` de la línea de efectivo (`caja_arqueo_medio` con `metodo_pago_id IS NULL`), no el total mezclado — ver Arqueo de caja multi-medio |
-| `monto_contado` | NUMERIC(18,6) | nullable | Congelado al cerrar = `contado` de la línea de efectivo |
-| `diferencia` | NUMERIC(18,6) | nullable | Congelado al cerrar = `diferencia` de la línea de efectivo (`monto_contado − saldo_final`) |
+| `saldo_inicial` | NUMERIC(18,4) | NOT NULL | Fondo al abrir; Decimal.js |
+| `saldo_final` | NUMERIC(18,4) | nullable | Congelado al cerrar = `esperado` de la línea de efectivo (`caja_arqueo_medio` con `metodo_pago_id IS NULL`), no el total mezclado — ver Arqueo de caja multi-medio |
+| `monto_contado` | NUMERIC(18,4) | nullable | Congelado al cerrar = `contado` de la línea de efectivo |
+| `diferencia` | NUMERIC(18,4) | nullable | Congelado al cerrar = `diferencia` de la línea de efectivo (`monto_contado − saldo_final`) |
 | `comentario` | TEXT | nullable | Al abrir; se sobrescribe con el comentario de cierre al cerrar |
 | `abierta_el` / `fecha_apertura` | TIMESTAMPTZ | NOT NULL | `@CreateDateColumn` |
 | `fecha_cierre` | TIMESTAMPTZ | nullable | Se setea al cerrar |
@@ -746,9 +749,9 @@ recalcula después de escrita)
 | `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
 | `metodo_pago_id` | UUID | FK metodos_pago, nullable | `NULL` = línea de efectivo agregada |
 | `es_efectivo` | BOOLEAN | NOT NULL | Copiado de `metodos_pago.es_efectivo` al momento del cierre |
-| `esperado` | NUMERIC(18,6) | NOT NULL | Recomputado server-side en la transacción de cierre; nunca viene del cliente |
-| `contado` | NUMERIC(18,6) | nullable | `NULL` = línea informativa no contada |
-| `diferencia` | NUMERIC(18,6) | nullable | `contado − esperado`; `NULL` si `contado` es `NULL` |
+| `esperado` | NUMERIC(18,4) | NOT NULL | Recomputado server-side en la transacción de cierre; nunca viene del cliente |
+| `contado` | NUMERIC(18,4) | nullable | `NULL` = línea informativa no contada |
+| `diferencia` | NUMERIC(18,4) | nullable | `contado − esperado`; `NULL` si `contado` es `NULL` |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
 
