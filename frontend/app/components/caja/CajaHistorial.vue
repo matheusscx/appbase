@@ -4,7 +4,7 @@ import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
 import type { Caja } from '~/stores/caja'
 
-const props = defineProps<{ usuarioId?: string; cajonId?: string; basePath: string }>()
+const props = defineProps<{ usuarioId?: string; cajonId?: string; basePath: string; ocultarTodas?: boolean }>()
 
 const route = useRoute()
 
@@ -12,7 +12,7 @@ const permissionsStore = usePermissionsStore()
 const { formatMonto, formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
 
-const todasActivo = ref(route.query.todas === 'true')
+const todasActivo = ref(!props.ocultarTodas && route.query.todas === 'true')
 
 const usuarioIdEfectivo = computed(() => {
   if (props.usuarioId) return props.usuarioId
@@ -77,7 +77,7 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
           </span>
         </h2>
         <UButton
-          v-if="puedeVerTodas && !usuarioIdEfectivo && !cajonIdEfectivo"
+          v-if="puedeVerTodas && !usuarioIdEfectivo && !cajonIdEfectivo && !ocultarTodas"
           size="sm"
           :color="todasActivo ? 'primary' : 'neutral'"
           :variant="todasActivo ? 'solid' : 'outline'"
