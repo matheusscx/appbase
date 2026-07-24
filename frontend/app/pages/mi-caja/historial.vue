@@ -31,7 +31,7 @@ onMounted(async () => {
           Volver a caja
         </ULink>
 
-        <CajaHistorial :base-path="'/mi-caja'" ocultar-todas />
+        <CajaHistorial :base-path="'/mi-caja'" />
       </div>
     </template>
   </UDashboardPanel>

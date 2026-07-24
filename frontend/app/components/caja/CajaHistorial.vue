@@ -4,15 +4,12 @@ import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
 import type { Caja } from '~/stores/caja'
 
-const props = defineProps<{ usuarioId?: string; cajonId?: string; basePath: string; ocultarTodas?: boolean }>()
+const props = defineProps<{ usuarioId?: string; cajonId?: string; basePath: string; todas?: boolean }>()
 
 const route = useRoute()
 
-const permissionsStore = usePermissionsStore()
 const { formatMonto, formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
-
-const todasActivo = ref(!props.ocultarTodas && route.query.todas === 'true')
 
 const usuarioIdEfectivo = computed(() => {
   if (props.usuarioId) return props.usuarioId
@@ -26,14 +23,10 @@ const cajonIdEfectivo = computed(() => {
   return typeof id === 'string' && id ? id : undefined
 })
 
-const puedeVerTodas = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer'),
-)
-
 const listFilters = computed(() => ({
   usuarioId: usuarioIdEfectivo.value,
   cajonId: cajonIdEfectivo.value,
-  todas: !usuarioIdEfectivo.value && !cajonIdEfectivo.value && todasActivo.value ? 'true' : undefined,
+  todas: !usuarioIdEfectivo.value && !cajonIdEfectivo.value && props.todas ? 'true' : undefined,
 }))
 
 const { items: historial, meta, page, loading } = usePaginatedList<Caja>({
@@ -57,10 +50,6 @@ function diferenciaPositiva(val: string | null): boolean {
   return new Decimal(val).gte(0)
 }
 
-function toggleTodas() {
-  todasActivo.value = !todasActivo.value
-}
-
 function onSelectCaja(_e: Event, row: Row<Caja>) {
   navigateTo(`${props.basePath}/${row.original.id}`)
 }
@@ -69,23 +58,12 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
 <template>
   <UCard class="w-full">
     <template #header>
-      <div class="flex items-center justify-between">
-        <h2 class="text-base font-semibold text-default">
-          Historial de cajas
-          <span v-if="meta.total" class="text-muted font-normal text-sm">
-            ({{ meta.total }})
-          </span>
-        </h2>
-        <UButton
-          v-if="puedeVerTodas && !usuarioIdEfectivo && !cajonIdEfectivo && !ocultarTodas"
-          size="sm"
-          :color="todasActivo ? 'primary' : 'neutral'"
-          :variant="todasActivo ? 'solid' : 'outline'"
-          icon="i-lucide-users"
-          :label="todasActivo ? 'Ver mis cajas' : 'Ver todas'"
-          @click="toggleTodas"
-        />
-      </div>
+      <h2 class="text-base font-semibold text-default">
+        Historial de cajas
+        <span v-if="meta.total" class="text-muted font-normal text-sm">
+          ({{ meta.total }})
+        </span>
+      </h2>
     </template>
 
     <div v-if="loading" class="py-8 text-center text-sm text-muted">

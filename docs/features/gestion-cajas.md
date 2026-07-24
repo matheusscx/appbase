@@ -624,19 +624,18 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
   cajones disponibles (`CajaAperturaGrid`; click en un cajón → drawer con saldo inicial +
   comentario → abre la caja sobre ese cajón) + botón "Ver historial" →
   `/mi-caja/historial`; con caja abierta → redirect a `/mi-caja/[id]`. Gate: `MiCaja:Leer`.
-- `pages/mi-caja/historial.vue` — Historial paginado del propio cajero
-  (`CajaHistorial`, sin `usuarioId` ni toggle "todas").
+- `pages/mi-caja/historial.vue` — Historial paginado **del propio cajero**
+  (`CajaHistorial` con alcance por defecto = propias; sin `todas`).
 - `pages/mi-caja/[id].vue` — Detalle operable de su turno activo: KPIs + tabla de
   movimientos (`CajaActivaDashboard`). En el header de la tarjeta de caja: "Ver historial"
   + botones de operar (+Movimiento / Cerrar). En vista read-only (caja ajena/cerrada) queda
   solo "Ver historial" + back-link "Volver a caja".
 - `pages/cajas/index.vue` — Grid de **todos los cajones activos** del tenant y su estado
   (`CajaCajonesGrid`), read-only. **Sin apertura** (la caja se abre en `/mi-caja`). El botón
-  "Ver historial" abre `/cajas/historial?todas=true` (arranca mostrando todas). Gate:
-  `Cajas:Leer`.
-- `pages/cajas/historial.vue` — Historial de cajeros con toggle "Ver todas / Ver mis cajas"
-  y soporte `?usuarioId=` para filtrar por cajero. El toggle inicializa su estado desde
-  `?todas=true` en la URL (por eso "Ver historial" en `/cajas` aterriza directo en todas).
+  "Ver historial" abre `/cajas/historial`. Gate: `Cajas:Leer`.
+- `pages/cajas/historial.vue` — Historial de **todos los cajeros** del tenant
+  (`CajaHistorial` con `todas`; alcance fijo, sin toggle). Soporta `?usuarioId=` (por
+  cajero) y `?cajonId=` (por cajón). El alcance "solo propias" vive en `/mi-caja/historial`.
 - `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de
   operar, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en modo
   read-only). Botón "Ver historial del cajón" (`?cajonId=` de esa caja) en el header de
@@ -655,7 +654,7 @@ sin necesidad.
 - `components/caja/CajaTurnoHeader.vue` — Título, badge de estado, fecha de apertura, botones +Movimiento / Cerrar caja
 - `components/caja/CajaTurnoResumen.vue` — Grid de 4 KPIs (saldo inicial, entradas, salidas, saldo esperado)
 - `components/caja/CajaMovimientosTable.vue` — Tabla paginada de movimientos con filtro por tipo, scroll interno y thead sticky
-- `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); prop `usuarioId` o query `?usuarioId=`; usado sin `usuarioId`/toggle en `/mi-caja/historial` y con ambos en `/cajas/historial`
+- `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); props `todas` (alcance todo el tenant), `usuarioId` y `cajonId` (o sus `?query=`). El alcance es fijo por página: `/mi-caja/historial` sin `todas` (propias), `/cajas/historial` con `todas`. Sin toggle.
 - `components/caja/CajaAperturaGrid.vue` — Apertura en `/mi-caja`: grid de cards de cajones disponibles (poblado por `cajonesDisponibles`); click en un cajón abre un `AppDrawer` con saldo inicial + comentario → `cajaStore.abrir`. Cajón implícito por la card (nombre en el título del drawer)
 - `components/caja/CajaAperturaForm.vue` — Formulario de apertura con selector de cajón (poblado por `cajonesDisponibles`, obligatorio) + saldo inicial + comentario; usado en el POS (`pages/ventas/pos.vue`) para abrir caja sin salir de la venta
 - `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
@@ -852,8 +851,8 @@ npm run test:e2e -- caja.e2e-spec.ts
 10. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
 11. `/cajas`: grid de todos los cajones activos (ocupados con datos, libres con badge
     "Libre"); sin card de apertura. Click en ocupado → `/cajas/[id]`; click en libre →
-    `/cajas/historial?cajonId=…`. Botón "Ver historial" → `/cajas/historial?todas=true`
-    (arranca en todas); toggle "Ver todas / Ver mis cajas"; click en fila → `/cajas/[id]`
+    `/cajas/historial?cajonId=…`. Botón "Ver historial" → `/cajas/historial` (siempre todas,
+    sin toggle); click en fila → `/cajas/[id]`
 12. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); botón "Ver historial del cajón" con `?cajonId=` (todas las sesiones de ese cajón)
 13. KPIs visibles al hacer scroll en movimientos (thead sticky)
 14. `/caja` redirige a `/mi-caja` (compatibilidad)

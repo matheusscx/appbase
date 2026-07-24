@@ -28,7 +28,7 @@ onMounted(async () => {
             Cajones del tenant y su estado. La apertura de caja se hace en Mi caja.
           </p>
           <UButton
-            to="/cajas/historial?todas=true"
+            to="/cajas/historial"
             variant="outline"
             color="neutral"
             icon="i-lucide-history"

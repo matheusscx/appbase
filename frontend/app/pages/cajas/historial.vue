@@ -46,6 +46,7 @@ onMounted(async () => {
           :usuario-id="usuarioIdFromQuery"
           :cajon-id="cajonIdFromQuery"
           :base-path="'/cajas'"
+          todas
         />
       </div>
     </template>
