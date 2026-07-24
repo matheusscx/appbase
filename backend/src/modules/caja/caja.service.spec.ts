@@ -701,6 +701,27 @@ describe('CajaService.abrir', () => {
     expect(manager.save).toHaveBeenCalled();
   });
 
+  it('persiste saldoInicial y comentario del DTO en la caja creada', async () => {
+    build({
+      cajon: [{ cajon_id: CAJON, activo: true }],
+      allowTotal: 0,
+      ocupadas: [],
+    });
+    const dtoConDatos = {
+      cajonId: CAJON,
+      saldoInicial: '150.5',
+      comentario: 'apertura de prueba',
+    };
+    const res = await service.abrir(TENANT, USER, dtoConDatos);
+    expect(res).toMatchObject({
+      cajonId: CAJON,
+      tipo: 'fisica',
+      estado: 'abierta',
+      saldoInicial: '150.5',
+      comentario: 'apertura de prueba',
+    });
+  });
+
   it('rechaza si el usuario ya tiene una caja abierta (409)', async () => {
     build({}, { id: 'x' } as Caja);
     await expect(service.abrir(TENANT, USER, dto)).rejects.toBeInstanceOf(
