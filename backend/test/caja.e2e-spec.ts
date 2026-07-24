@@ -386,7 +386,8 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .get(`/api/caja/${cajaId}/arqueo`)
         .set('Authorization', `Bearer ${tokenSupervisor}`);
       expect(preview.status).toBe(200);
-      const lineas = preview.body as ArqueoLinea[];
+      const lineas = (preview.body as { ciego: boolean; lineas: ArqueoLinea[] })
+        .lineas;
       const efectivo = lineas.find((l) => l.esEfectivo);
       const tarjeta = lineas.find((l) => l.metodoPagoId === TARJETA_DEBITO_ID);
       // El fondo era 0 y no hubo entradas en efectivo: la venta con tarjeta
@@ -514,12 +515,85 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .get(`/api/caja/${cajaId}/arqueo`)
         .set('Authorization', `Bearer ${tokenSupervisor}`);
       expect(arqueoCerrado.status).toBe(200);
-      const lineas = arqueoCerrado.body as ArqueoLinea[];
+      const lineas = (
+        arqueoCerrado.body as { ciego: boolean; lineas: ArqueoLinea[] }
+      ).lineas;
       const efectivo = lineas.find((l) => l.esEfectivo);
       expect(efectivo?.contado).not.toBeNull();
       expect(efectivo?.diferencia).not.toBeNull();
       expect(efectivo?.contado).toBe('1000.0000');
       expect(efectivo?.diferencia).toBe('0.0000');
+    });
+
+    it('modo ciego + caja abierta: GET arqueo → ciego:true, sin esperado, solo obligatorias', async () => {
+      await ds.query(
+        `UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1`,
+        [PARIS_TENANT_ID],
+      );
+      try {
+        const abrir = await request(app.getHttpServer())
+          .post('/api/caja/abrir')
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({ cajonId: cajonArqueoId, saldoInicial: '10000.0000' });
+        expect(abrir.status).toBe(201);
+        const cajaId = (abrir.body as CajaResponse).id;
+
+        // Venta con tarjeta (informativa: es_efectivo=false, requiere_conteo=false).
+        const venta = await request(app.getHttpServer())
+          .post('/api/ventas')
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            tipoDocumentoId: BOLETA_ID,
+            lineas: [{ itemId, cantidad: '1' }],
+            pagos: [{ metodoPagoId: TARJETA_DEBITO_ID, monto: '5000.0000' }],
+          });
+        expect(venta.status).toBe(201);
+
+        const arqueo = await request(app.getHttpServer())
+          .get(`/api/caja/${cajaId}/arqueo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+        expect(arqueo.status).toBe(200);
+        const body = arqueo.body as { ciego: boolean; lineas: ArqueoLinea[] };
+        expect(body.ciego).toBe(true);
+        // Solo la línea de efectivo (obligatoria); la tarjeta informativa no viaja.
+        expect(body.lineas).toHaveLength(1);
+        expect(body.lineas[0].esEfectivo).toBe(true);
+        // Anti-fraude: el esperado no viaja en la respuesta.
+        expect(body.lineas[0].esperado).toBeNull();
+
+        // El cierre igual cuadra: el server recomputa el esperado (10000).
+        const cerrar = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/cerrar`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            lineas: [{ metodoPagoId: null, montoContado: '10000.0000' }],
+          });
+        expect(cerrar.status).toBe(201);
+        const cerrarBody = cerrar.body as { arqueo: ArqueoLinea[] };
+        const efectivoCerrado = cerrarBody.arqueo.find((l) => l.esEfectivo);
+        expect(efectivoCerrado?.esperado).toBe('10000.0000');
+        expect(efectivoCerrado?.diferencia).toBe('0.0000');
+
+        // La caja cerrada revela TODO (ciego:false) aunque el tenant sea ciego.
+        const revelado = await request(app.getHttpServer())
+          .get(`/api/caja/${cajaId}/arqueo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+        expect(revelado.status).toBe(200);
+        const revBody = revelado.body as {
+          ciego: boolean;
+          lineas: ArqueoLinea[];
+        };
+        expect(revBody.ciego).toBe(false);
+        const efectivoRevelado = revBody.lineas.find((l) => l.esEfectivo);
+        expect(efectivoRevelado?.esperado).toBe('10000.0000');
+        expect(efectivoRevelado?.diferencia).toBe('0.0000');
+      } finally {
+        // Higiene: restaurar la política para no contaminar otros specs/corridas.
+        await ds.query(
+          `UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1`,
+          [PARIS_TENANT_ID],
+        );
+      }
     });
   });
 });
