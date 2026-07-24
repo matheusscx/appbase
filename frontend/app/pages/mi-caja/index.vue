@@ -77,7 +77,7 @@ async function onOpened(cajaId: string): Promise<void> {
                 label="Ver historial"
               />
             </div>
-            <CajaAperturaForm @opened="onOpened" />
+            <CajaAperturaGrid @opened="onOpened" />
           </div>
         </template>
 
