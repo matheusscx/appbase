@@ -273,7 +273,9 @@ describe('CajaController', () => {
         .spyOn(rbacService, 'userHasPermiso')
         .mockResolvedValueOnce(false) // MiCaja:Leer
         .mockResolvedValueOnce(true); // Cajas:Leer
-      jest.spyOn(cajaService, 'obtenerArqueo').mockResolvedValueOnce([]);
+      jest
+        .spyOn(cajaService, 'obtenerArqueo')
+        .mockResolvedValueOnce({ ciego: false, lineas: [] });
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       await controller.arqueo(req, 'caja1');
       expect(cajaService.obtenerArqueo).toHaveBeenCalledWith(

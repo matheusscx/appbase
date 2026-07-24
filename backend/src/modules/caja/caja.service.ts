@@ -66,7 +66,7 @@ export interface LineaArqueo {
   metodoPagoId: string | null;
   nombre: string;
   esEfectivo: boolean;
-  esperado: string;
+  esperado: string | null;
   requiereConteo: boolean;
   contado?: string | null;
   diferencia?: string | null;
@@ -386,16 +386,17 @@ export class CajaService {
   }
 
   /**
-   * Arqueo para el drawer de cierre y el detalle read-only. Caja abierta →
-   * preview recomputado (sin contado). Caja cerrada → líneas congeladas.
-   * (Punto de cambio del sub-proyecto B: en modo ciego retendrá `esperado`.)
+   * Arqueo para el drawer de cierre y el detalle read-only.
+   * Caja abierta → preview recomputado (sin contado). En modo ciego (config del
+   * tenant) se RETIENE el `esperado` (null) y se filtra a las líneas obligatorias.
+   * Caja cerrada → líneas congeladas, SIEMPRE reveladas (ciego:false).
    */
   async obtenerArqueo(
     tenantId: string,
     usuarioId: string,
     cajaId: string,
     tieneVerTodas: boolean,
-  ): Promise<LineaArqueo[]> {
+  ): Promise<{ ciego: boolean; lineas: LineaArqueo[] }> {
     const caja = await this.verificarAccesoCaja(
       tenantId,
       usuarioId,
@@ -404,9 +405,19 @@ export class CajaService {
     );
 
     if (caja.estado === 'abierta') {
-      return this.dataSource.transaction((manager) =>
+      const lineas = await this.dataSource.transaction((manager) =>
         this.calcularArqueo(cajaId, tenantId, manager),
       );
+      const ciego = await this.getArqueoCiego(tenantId);
+      if (ciego) {
+        return {
+          ciego: true,
+          lineas: lineas
+            .filter((l) => l.esEfectivo || l.requiereConteo)
+            .map((l) => ({ ...l, esperado: null })),
+        };
+      }
+      return { ciego: false, lineas };
     }
 
     const rows: {
@@ -437,16 +448,19 @@ export class CajaService {
       [cajaId, tenantId],
     );
 
-    return rows.map((r) => ({
-      metodoPagoId: r.metodo_pago_id,
-      nombre: r.nombre ?? 'Efectivo',
-      esEfectivo: r.es_efectivo,
-      esperado: new Decimal(r.esperado).toFixed(4),
-      requiereConteo: r.requiere_conteo,
-      contado: r.contado === null ? null : new Decimal(r.contado).toFixed(4),
-      diferencia:
-        r.diferencia === null ? null : new Decimal(r.diferencia).toFixed(4),
-    }));
+    return {
+      ciego: false,
+      lineas: rows.map((r) => ({
+        metodoPagoId: r.metodo_pago_id,
+        nombre: r.nombre ?? 'Efectivo',
+        esEfectivo: r.es_efectivo,
+        esperado: new Decimal(r.esperado).toFixed(4),
+        requiereConteo: r.requiere_conteo,
+        contado: r.contado === null ? null : new Decimal(r.contado).toFixed(4),
+        diferencia:
+          r.diferencia === null ? null : new Decimal(r.diferencia).toFixed(4),
+      })),
+    };
   }
 
   async cerrar(
@@ -505,7 +519,7 @@ export class CajaService {
         const diferencia =
           contado === null
             ? null
-            : new Decimal(contado).minus(l.esperado).toFixed(4);
+            : new Decimal(contado).minus(l.esperado!).toFixed(4);
         return { ...l, contado, diferencia };
       });
 
@@ -518,7 +532,7 @@ export class CajaService {
             tenantId,
             metodoPagoId: l.metodoPagoId,
             esEfectivo: l.esEfectivo,
-            esperado: l.esperado,
+            esperado: l.esperado!,
             contado: l.contado,
             diferencia: l.diferencia,
           }),

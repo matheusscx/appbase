@@ -464,38 +464,82 @@ describe('CajaService', () => {
   });
 
   describe('obtenerArqueo', () => {
-    it('caja abierta → preview recomputado (sin contado)', async () => {
+    const previewEfectivo: LineaArqueo[] = [
+      {
+        metodoPagoId: null,
+        nombre: 'Efectivo',
+        esEfectivo: true,
+        esperado: '1000.0000',
+        requiereConteo: true,
+      },
+      {
+        metodoPagoId: 'mp-tarjeta',
+        nombre: 'Tarjeta',
+        esEfectivo: false,
+        esperado: '5000.0000',
+        requiereConteo: false,
+      },
+    ];
+
+    it('caja abierta + tenant NO ciego → ciego:false, líneas completas con esperado', async () => {
       cajaRepo.findOne.mockResolvedValueOnce({
         ...mockCajaAbierta,
         estado: 'abierta',
       });
-      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
-        {
-          metodoPagoId: null,
-          nombre: 'Efectivo',
-          esEfectivo: true,
-          esperado: '1000.0000',
-          requiereConteo: true,
-        },
-      ]);
-      const lineas = await service.obtenerArqueo(
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValueOnce(previewEfectivo);
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValueOnce(false);
+
+      const res = await service.obtenerArqueo(
         TENANT_ID,
         USUARIO_ID,
         CAJA_ID,
         false,
       );
-      expect(lineas[0]).toMatchObject({
+
+      expect(res.ciego).toBe(false);
+      expect(res.lineas).toHaveLength(2);
+      expect(res.lineas[0]).toMatchObject({
         metodoPagoId: null,
         esperado: '1000.0000',
       });
-      expect(lineas[0].contado).toBeUndefined();
+      expect(res.lineas[0].contado).toBeUndefined();
     });
 
-    it('caja cerrada → líneas congeladas desde caja_arqueo_medio', async () => {
+    it('caja abierta + tenant ciego → ciego:true, solo obligatorias, esperado null', async () => {
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'abierta',
+      });
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValueOnce(previewEfectivo);
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValueOnce(true);
+
+      const res = await service.obtenerArqueo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+      );
+
+      expect(res.ciego).toBe(true);
+      // La tarjeta (no efectivo, requiere_conteo=false) es informativa → se filtra.
+      expect(res.lineas).toHaveLength(1);
+      expect(res.lineas[0]).toMatchObject({
+        metodoPagoId: null,
+        esEfectivo: true,
+      });
+      expect(res.lineas[0].esperado).toBeNull();
+    });
+
+    it('caja cerrada → ciego:false SIEMPRE, líneas congeladas reveladas', async () => {
       cajaRepo.findOne.mockResolvedValueOnce({
         ...mockCajaAbierta,
         estado: 'cerrada',
       });
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValueOnce(true); // aunque el tenant sea ciego
       dataSource.query.mockResolvedValueOnce([
         {
           metodo_pago_id: null,
@@ -507,16 +551,17 @@ describe('CajaService', () => {
           requiere_conteo: true,
         },
       ]);
-      const lineas = await service.obtenerArqueo(
+
+      const res = await service.obtenerArqueo(
         TENANT_ID,
         USUARIO_ID,
         CAJA_ID,
         false,
       );
-      expect(lineas[0]).toMatchObject({
+
+      expect(res.ciego).toBe(false);
+      expect(res.lineas[0]).toMatchObject({
         metodoPagoId: null,
-        nombre: 'Efectivo',
-        esEfectivo: true,
         esperado: '1000.0000',
         contado: '950.0000',
         diferencia: '-50.0000',
