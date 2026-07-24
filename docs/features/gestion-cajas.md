@@ -77,9 +77,9 @@ ajena por el encargado queda diferido (ver `docs/agent/pendientes.md`).
 [investigación de mercado](../agent/investigaciones/2026-07-23-gestion-caja.md)).
 Introduce el **cajón físico** (Mostrador, Delivery, Barra…) como entidad propia que el
 admin del tenant define en Configuración. El vínculo `cajon_id` en la sesión de caja
-(`cajas`) y la autorización de qué usuario puede abrir qué cajón llegan en el
-sub-proyecto 3 — por ahora la definición de cajones no afecta el flujo de
-apertura/cierre documentado arriba.
+(`cajas`) y la autorización de qué usuario puede abrir qué cajón se documentan en
+[Apertura sobre un cajón](#apertura-sobre-un-cajón-sub-proyecto-33) más abajo — ese
+sub-proyecto cierra la **estructura** del refactor.
 
 **Nota de terminología:** `cajones` (este módulo, el mueble físico) ≠ `cajas` (la
 sesión/turno documentada en el resto de este archivo). A partir de este sub-proyecto,
@@ -180,14 +180,13 @@ está bloqueado para nadie** — queda abierto a cualquier usuario con `MiCaja:C
 La allow-list es una restricción opt-in que el admin agrega cajón por cajón, no un
 default cerrado.
 
-**Sin enforcement todavía.** Hoy el mapeo solo se persiste — nada en el flujo de
-apertura de caja (`POST /caja/abrir`, sin `cajon_id` aún) lo consulta ni lo bloquea.
-El enforcement real al abrir (elegir un cajón, validar que el usuario esté
-autorizado o que la lista esté vacía) llega en el **sub-proyecto 3**, junto con el
-campo `cajon_id` en la sesión (`cajas`).
+**Enforcement al abrir.** Desde el sub-proyecto 3 (ver [Apertura sobre un
+cajón](#apertura-sobre-un-cajón-sub-proyecto-33)), `POST /caja/abrir` consulta esta
+allow-list y la hace valer: cajón con lista vacía → cualquiera con `MiCaja:Crear`
+puede abrirlo; cajón con lista no vacía → solo un usuario en ella.
 
-**Ortogonalidad con `MiCaja:Crear`:** son dos preguntas distintas que se cruzan recién
-al abrir (sub-3), no una redundancia.
+**Ortogonalidad con `MiCaja:Crear`:** son dos preguntas distintas que se cruzan al
+abrir, no una redundancia.
 
 | Pregunta | Responde |
 |---|---|
@@ -196,7 +195,63 @@ al abrir (sub-3), no una redundancia.
 
 Un usuario sin `MiCaja:Crear` no abre ningún cajón aunque esté en la allow-list de
 todos; un usuario con `MiCaja:Crear` pero fuera de la allow-list de un cajón
-específico no podrá abrir *ese* cajón en particular (una vez exista el enforcement).
+específico no podrá abrir *ese* cajón en particular.
+
+---
+
+## Apertura sobre un cajón (sub-proyecto 3/3)
+
+**Sub-proyecto 3 de 3** del refactor general de caja (roadmap
+[§9](../agent/investigaciones/2026-07-23-gestion-caja.md#9-roadmap-del-refactor-general-de-caja-decisión-2026-07-23)).
+Cierra la **estructura** del refactor (opción A: cajones + autorización + sesión sobre
+cajón). Las features de negocio que salieron de la misma investigación — modelo del
+esperado multi-medio (§3), cierre forzado (§6), blind count/motivos categorizados (§5)
+— quedan **fuera de alcance**, diferidas para montarse después sobre esta estructura.
+
+**La caja física ya no se abre "al aire": se abre sobre un cajón.** `POST /caja/abrir`
+exige `cajonId` (antes solo pedía `saldoInicial`). La caja **virtual** no cambia: se
+sigue sembrando automáticamente por tenant con `cajon_id = NULL`, siempre abierta, y no
+pasa por este flujo.
+
+### Validaciones al abrir, en orden, bajo una transacción
+
+1. **Usuario libre** — sigue la regla previa: una sola caja física abierta por
+   `(tenant, usuario)` (`409` si ya tiene una).
+2. **Cajón válido y activo** — el `cajonId` debe existir en el tenant, no estar
+   soft-deleted y tener `activo = true` (`404` si no existe, `409` si está inactivo).
+3. **Autorizado** — hace valer la allow-list del sub-2 (`cajon_usuario`): lista vacía
+   para ese cajón = permisivo (cualquiera con `MiCaja:Crear`); lista no vacía = solo un
+   usuario en ella (`403` si no está autorizado).
+4. **Cajón libre** — sin sesión `abierta` para ese `cajonId`, con lock pesimista
+   (`FOR UPDATE`) sobre las sesiones abiertas del cajón antes de insertar, para cerrar
+   la ventana de carrera entre el chequeo y el insert (`409` si ya tiene una caja
+   abierta). Backstop de concurrencia: el índice único parcial (ver
+   [Entity & Database](#entity--database)) convierte cualquier condición de carrera que
+   igual pase el lock en un `23505` que el service traduce a `409`.
+
+### Picker: `GET /caja/cajones-disponibles`
+
+Antes de abrir, el frontend pide la lista de cajones que el usuario **puede** elegir:
+activos, sin sesión abierta y (lista vacía o el usuario está en la allow-list) — la
+intersección de los puntos 2–4 de arriba, resuelta en una sola query. Un cajón que no
+aparece en el picker no es un cajón que exista con otro estado escondido: es un cajón
+ocupado, inactivo o fuera de la allow-list del usuario.
+
+```
+GET /caja/cajones-disponibles
+Permiso requerido: MiCaja / Crear
+
+Response (200):
+[{ "cajonId": "uuid", "nombre": "Mostrador" }, ...]
+```
+
+### Integridad: no se puede inhabilitar un cajón en uso
+
+`PATCH /cajones/:id` con `activo: false` y `DELETE /cajones/:id` (soft delete)
+verifican que el cajón no tenga una sesión `abierta` antes de aplicar el cambio —
+`409 Conflict` si la tiene ("cierra la caja antes de desactivar/eliminar"). Sin esta
+guarda, desactivar o borrar un cajón con una sesión viva dejaría una caja abierta
+apuntando a un cajón inactivo o inexistente.
 
 ---
 
@@ -218,6 +273,7 @@ Response (200):
     "id": "uuid",
     "usuarioId": "uuid",
     "usuarioNombre": "Juan Pérez",
+    "cajonNombre": "Mostrador",
     "saldoInicial": "500.00",
     "saldoEsperado": "750.00",
     "fechaApertura": "2026-06-29T08:00:00Z",
@@ -262,6 +318,7 @@ Permiso requerido: MiCaja / Crear
 
 Request:
 {
+  "cajonId": "uuid",             // obligatorio — ver GET /caja/cajones-disponibles
   "saldoInicial": "500.00",
   "comentario": "Turno mañana"   // opcional
 }
@@ -276,7 +333,11 @@ Response (201):
   "abiertaEl": "2026-06-29T08:00:00Z"
 }
 
-Error (409) si ya hay una caja abierta para este usuario+tenant.
+Error (409) si ya hay una caja abierta para este usuario+tenant, o si el cajón
+      elegido ya tiene una sesión abierta, o si el cajón está inactivo.
+Error (404) si el cajón no existe en el tenant.
+Error (403) si el usuario no está en la allow-list del cajón (ver Autorización).
+Ver validaciones y orden en Apertura sobre un cajón (sub-proyecto 3/3).
 ```
 
 ### POST /caja/:id/movimientos — Registrar movimiento manual
@@ -409,6 +470,7 @@ Response (200):
       "id": "uuid",
       "tenantId": "uuid",
       "usuarioId": "uuid",
+      "cajonNombre": "Mostrador",
       "tipo": "fisica",
       "estado": "cerrada",
       "saldoInicial": "500.0000",
@@ -455,6 +517,7 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 | `caja_id` | UUID | PK | `@PrimaryGeneratedColumn('uuid')` |
 | `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
 | `usuario_id` | UUID | FK usuarios, NOT NULL | Del token |
+| `cajon_id` | UUID | FK cajones, nullable | Obligatorio en `'fisica'`; siempre `NULL` en `'virtual'`. Índice único parcial `ux_cajas_cajon_abierta` sobre `(cajon_id)` filtrando `estado='abierta' AND eliminado_el IS NULL` — un cajón, una sesión abierta a la vez |
 | `tipo` | TEXT | NOT NULL | `'fisica'` \| `'virtual'` |
 | `estado` | TEXT | NOT NULL | `'abierta'` \| `'cerrada'` |
 | `saldo_inicial` | NUMERIC(18,6) | NOT NULL | Fondo al abrir; Decimal.js |
@@ -485,7 +548,7 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 
 ### DTOs
 
-- `AbrirCajaDto` — `{ saldoInicial: string, comentario?: string }` (`@IsNumberString`, `@IsOptional`)
+- `AbrirCajaDto` — `{ cajonId: string, saldoInicial: string, comentario?: string }` (`@IsUUID`, `@IsNumberString`, `@IsOptional`)
 - `MovimientoCajaDto` — `{ tipo, concepto, monto: string, referencia? }`
 - `CerrarCajaDto` — `{ montoContado: string, comentario?: string }`
 - `CajaResponseDto` — Respuesta enriquecida con saldo esperado y cuadre
@@ -494,7 +557,8 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 
 - `cajaService.getCajaActiva(tenantId, usuarioId)` — caja física `estado='abierta'` del usuario
 - `cajaService.getCajasAbiertas(tenantId, usuarioId, verTodas)` — cajas físicas abiertas del tenant; si `verTodas=false`, filtra por `usuarioId`; cada elemento incluye `esPropia`
-- `cajaService.abrirCaja(tenantId, usuarioId, dto)` — crea caja; lanza 409 si ya hay una abierta
+- `cajaService.abrirCaja(tenantId, usuarioId, dto)` — valida usuario libre → cajón válido/activo → autorizado (allow-list) → cajón libre (lock) → crea caja sobre `dto.cajonId`; 409/404/403 según la validación que falle
+- `cajaService.cajonesDisponibles(tenantId, usuarioId)` — cajones activos, sin sesión abierta y autorizados para el usuario (allow-list vacía o incluido) — arma el picker de apertura
 - `cajaService.registrarMovimiento(cajaId, tenantId, usuarioId, dto)` — `FOR UPDATE` de la caja, valida propiedad (owner-only), valida saldo para `salida`, inserta movimiento
 - `cajaService.bloquearCajaAbierta(manager, cajaId, tenantId)` — lock pesimista reutilizable (p.ej. egreso de NC en la misma tx)
 - `cajaService.listarMovimientos(cajaId, tenantId, usuarioId, verTodas)` — lista `movimientos_caja`; acepta caja ajena si `verTodas=true`
@@ -578,7 +642,7 @@ sin necesidad.
 - `components/caja/CajaTurnoResumen.vue` — Grid de 4 KPIs (saldo inicial, entradas, salidas, saldo esperado)
 - `components/caja/CajaMovimientosTable.vue` — Tabla paginada de movimientos con filtro por tipo, scroll interno y thead sticky
 - `components/caja/CajaHistorial.vue` — Listado paginado de sesiones (`GET /caja`); prop `usuarioId` o query `?usuarioId=`; usado sin `usuarioId`/toggle en `/mi-caja/historial` y con ambos en `/cajas/historial`
-- `components/caja/CajaAperturaForm.vue` — Formulario de apertura (saldo inicial + comentario)
+- `components/caja/CajaAperturaForm.vue` — Formulario de apertura: selector de cajón (poblado por `cajonesDisponibles`, obligatorio) + saldo inicial + comentario
 - `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
 - `components/caja/CajaCierreDrawer.vue` — Drawer de cierre con cuadre (esperado vs. contado → diferencia)
 - `components/caja/CajaAbiertasGrid.vue` — Grid de cards para la superficie `/cajas` (permiso `Cajas:Leer`): cajas físicas abiertas del tenant. Click → `/cajas/[id]`
@@ -595,12 +659,14 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 - `movimientos: MovimientoCaja[]` — movimientos de la caja activa
 - `abiertas: CajaAbierta[]` — cajas físicas abiertas del tenant (superficie `/cajas`, permiso `Cajas:Leer`)
 - `detalle: CajaDetalle | null` — detalle de una caja ajena (página read-only)
+- `cajonesDisponibles: CajonDisponible[]` — opciones del picker de apertura (activos + libres + autorizados)
 - `loading: boolean`
 - `error: string | null`
 
 **Actions**:
 - `fetchCajaActiva()` — GET /caja/activa
-- `abrirCaja(dto)` — POST /caja/abrir
+- `cargarCajonesDisponibles()` — GET /caja/cajones-disponibles → puebla `cajonesDisponibles`
+- `abrirCaja(dto)` — POST /caja/abrir (`dto` incluye `cajonId`)
 - `registrarMovimiento(cajaId, dto)` — POST /caja/:id/movimientos
 - `fetchMovimientos(cajaId)` — GET /caja/:id/movimientos
 - `cerrarCaja(cajaId, dto)` — POST /caja/:id/cerrar
@@ -671,10 +737,14 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 
 ## Business Rules
 
-### Una sola caja física por tenant+usuario
+### Una sola caja física por tenant+usuario, y una sola sesión por cajón
 
 Solo puede haber una caja `tipo='fisica'` con `estado='abierta'` por combinación
-`(tenant_id, usuario_id)`. Intentar abrir una segunda retorna `409 Conflict`.
+`(tenant_id, usuario_id)`. Intentar abrir una segunda retorna `409 Conflict`. Desde el
+sub-proyecto 3, esto convive con una segunda regla independiente: un **cajón** físico
+también admite una sola sesión `abierta` a la vez (índice único parcial
+`ux_cajas_cajon_abierta`) — dos usuarios distintos no pueden abrir el mismo cajón en
+paralelo. Ver [Apertura sobre un cajón](#apertura-sobre-un-cajón-sub-proyecto-33).
 
 ### Fórmula de saldo esperado
 
@@ -697,7 +767,8 @@ La caja `tipo='virtual'` se crea automáticamente al crear un tenant (en la mism
 transacción que el rol admin y la fórmula de precios). Permanece siempre `abierta`
 y se usa para ventas `canal='online'`. Está **excluida** de todos los flujos
 manuales: no aparece en `GET /caja/activa`, no puede abrirse ni cerrarse
-manualmente, y no acepta movimientos manuales.
+manualmente, y no acepta movimientos manuales. No tiene cajón: `cajon_id` queda
+`NULL` — no pasa por `POST /caja/abrir` ni por sus validaciones de cajón.
 
 ### Módulo `Cajas` (supervisión, solo lectura)
 
@@ -741,28 +812,34 @@ npm run test:e2e -- caja.e2e-spec.ts
 1. Abrir http://localhost:3000/api/docs
 2. Autenticar con Bearer token (con permiso `MiCaja/Leer` y `MiCaja/Crear`)
 3. `GET /caja/activa` → debe retornar `null` si no hay caja
-4. `POST /caja/abrir` con `{ "saldoInicial": "500" }` → 201
-5. `POST /caja/:id/movimientos` con `{ "tipo": "entrada", "concepto": "Prueba", "monto": "100" }` → 201
-6. `POST /caja/:id/movimientos` con `{ "tipo": "salida", "monto": "700" }` → 422 (saldo insuficiente)
-7. `POST /caja/:id/cerrar` con `{ "montoContado": "598" }` → 200 con cuadre
-8. `GET /caja` → historial con la caja cerrada
-9. Con un token que solo tenga `Cajas/Leer` (sin `MiCaja`): `GET /caja/abiertas` → 200 (todas); `POST /caja/abrir` → 403
+4. `GET /caja/cajones-disponibles` → lista de cajones activos y libres para el usuario
+5. `POST /caja/abrir` con `{ "cajonId": "<uuid del picker>", "saldoInicial": "500" }` → 201
+6. `POST /caja/abrir` de nuevo con el mismo `cajonId` (otro usuario) → 409 (cajón ocupado)
+7. `POST /caja/:id/movimientos` con `{ "tipo": "entrada", "concepto": "Prueba", "monto": "100" }` → 201
+8. `POST /caja/:id/movimientos` con `{ "tipo": "salida", "monto": "700" }` → 422 (saldo insuficiente)
+9. `POST /caja/:id/cerrar` con `{ "montoContado": "598" }` → 200 con cuadre
+10. `GET /caja` → historial con la caja cerrada
+11. Con un token que solo tenga `Cajas/Leer` (sin `MiCaja`): `GET /caja/abiertas` → 200 (todas); `POST /caja/abrir` → 403
 
 ### Manual Testing (Frontend)
 
 1. `docker-compose up`
 2. Login + selección de tenant
 3. Navegar a `/mi-caja`
-4. Abrir caja → verificar panel de caja activa en `/mi-caja/[id]`
-5. Agregar movimientos entrada/salida → verificar saldo esperado actualizado
-6. Intentar salida mayor al saldo → verificar error
-7. Cerrar caja → verificar cuadre (diferencia)
-8. `/mi-caja` (cajero sin caja): formulario de apertura + botón "Ver historial" → `/mi-caja/historial`
-9. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
-10. `/cajas`: grid de abiertas; `/cajas/historial`: toggle "Ver todas"; click en fila → `/cajas/[id]`
-11. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); link "Ver historial del cajero" con `?usuarioId=`
-12. KPIs visibles al hacer scroll en movimientos (thead sticky)
-13. `/caja` redirige a `/mi-caja` (compatibilidad)
+4. Abrir caja: elegir un cajón en el selector (obligatorio) → verificar panel de caja
+   activa en `/mi-caja/[id]`
+5. Con una segunda sesión/usuario: el cajón recién abierto ya no aparece en el
+   selector de apertura (ocupado)
+6. Agregar movimientos entrada/salida → verificar saldo esperado actualizado
+7. Intentar salida mayor al saldo → verificar error
+8. Cerrar caja → verificar cuadre (diferencia)
+9. `/mi-caja` (cajero sin caja): formulario de apertura + botón "Ver historial" → `/mi-caja/historial`
+10. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
+11. `/cajas`: grid de abiertas muestra el nombre del cajón de cada sesión;
+    `/cajas/historial`: toggle "Ver todas"; click en fila → `/cajas/[id]`
+12. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); link "Ver historial del cajero" con `?usuarioId=`
+13. KPIs visibles al hacer scroll en movimientos (thead sticky)
+14. `/caja` redirige a `/mi-caja` (compatibilidad)
 
 ---
 
@@ -786,6 +863,11 @@ npm run test:e2e -- caja.e2e-spec.ts
 - [x] Frontend páginas `/mi-caja` y `/cajas` con máquina de estados propia y store `useCajaStore` compartido
 - [x] Soft delete en cajas y movimientos
 - [x] `tenant_id` y `usuario_id` siempre del token (nunca del body)
+- [x] `POST /caja/abrir` exige `cajonId` y valida cajón activo → autorizado (allow-list) → libre, bajo transacción
+- [x] `GET /caja/cajones-disponibles` arma el picker (activos + libres + autorizados)
+- [x] Un cajón admite una sola sesión abierta (`ux_cajas_cajon_abierta`); condición de carrera → `409`
+- [x] `PATCH /cajones/:id` (desactivar) y `DELETE /cajones/:id` retornan `409` si el cajón tiene sesión abierta
+- [x] Caja virtual sin cambios: `cajon_id` siempre `NULL`, no pasa por `POST /caja/abrir`
 
 ---
 

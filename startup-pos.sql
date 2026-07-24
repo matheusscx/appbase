@@ -792,6 +792,7 @@ CREATE TABLE "cajas" (
   "tenant_id"      UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "usuario_id"     UUID          REFERENCES "usuarios" ("usuario_id"),
   "moneda_id"      UUID          REFERENCES "moneda" ("moneda_id"),
+  "cajon_id"       UUID          REFERENCES "cajones" ("cajon_id"),  -- cajón físico; NULL en la virtual
   "tipo"           TEXT          NOT NULL DEFAULT 'fisica',  -- 'fisica' | 'virtual'
   "fecha_apertura" TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "fecha_cierre"   TIMESTAMPTZ,
@@ -805,6 +806,12 @@ CREATE TABLE "cajas" (
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
 );
+
+-- Unicidad de sesión por cajón: un cajón físico solo admite una caja abierta
+-- a la vez. Sub-proyecto 3/3 del refactor general de caja.
+CREATE UNIQUE INDEX "ux_cajas_cajon_abierta"
+  ON "cajas" ("cajon_id")
+  WHERE "estado" = 'abierta' AND "eliminado_el" IS NULL;
 
 CREATE TABLE "movimientos_caja" (
   "movimiento_id"  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -822,8 +829,9 @@ CREATE TABLE "movimientos_caja" (
 );
 
 -- Cajones: mueble físico (Configuración → Cajas), NO confundir con `cajas` (la
--- sesión/turno arriba). Sub-proyecto 1/3 del refactor general de caja — el vínculo
--- cajon_id en `cajas` llega en el sub-proyecto 3.
+-- sesión/turno arriba). Definido en el sub-proyecto 1/3 del refactor general de
+-- caja; el vínculo `cajas.cajon_id` (declarado arriba, sub-proyecto 3/3) referencia
+-- esta tabla.
 CREATE TABLE "cajones" (
   "cajon_id"       UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"      UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
@@ -841,7 +849,7 @@ CREATE UNIQUE INDEX "ux_cajones_tenant_nombre"
 -- Allow-list cajón↔usuario: qué usuarios están autorizados a abrir cada cajón.
 -- Sub-proyecto 2/3 del refactor general de caja. Lista vacía para un cajón = sin
 -- restricción (abierto a cualquiera con MiCaja:Crear); el enforcement al abrir
--- llega en el sub-proyecto 3.
+-- (sub-proyecto 3/3) se hace valer en `POST /caja/abrir`.
 CREATE TABLE "cajon_usuario" (
   "cajon_usuario_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "cajon_id"         UUID          NOT NULL REFERENCES "cajones" ("cajon_id"),

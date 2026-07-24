@@ -434,9 +434,11 @@ Modelo acordado (§8.1 + brainstorming):
   cajón (`GET`/`PUT /cajones/:id/usuarios`, permisos `Cajas`). Lista vacía = permisivo. Spec:
   [`2026-07-23-cajones-allowlist-usuarios-design.md`](../../superpowers/specs/2026-07-23-cajones-allowlist-usuarios-design.md) ·
   Plan: [`2026-07-23-cajones-allowlist-usuarios.md`](../../superpowers/plans/2026-07-23-cajones-allowlist-usuarios.md).
-- [ ] **3. Sesión sobre cajón + terminología** — la sesión (hoy `cajas`) gana `cajon_id`; la
-  apertura elige un cajón autorizado y libre; unicidad por cajón; resolución del rename
-  terminológico y ajuste de las superficies `MiCaja`/`Cajas`. Depende de 1+2. Spec: _(pendiente)_.
+- [x] **3. Sesión sobre cajón + terminología** — ✅ implementado. La sesión (`cajas`) gana
+  `cajon_id`; la apertura valida autorizado (allow-list) + libre + activo; unicidad de sesión
+  por cajón; integridad (cajón en uso); terminología sin rename. Cierra la estructura (opción A).
+  Spec: [`2026-07-23-caja-sesion-sobre-cajon-design.md`](../../superpowers/specs/2026-07-23-caja-sesion-sobre-cajon-design.md) ·
+  Plan: [`2026-07-23-caja-sesion-sobre-cajon.md`](../../superpowers/plans/2026-07-23-caja-sesion-sobre-cajon.md).
 
 ### Features de negocio diferidas (fuera de A, se montan sobre la estructura)
 
