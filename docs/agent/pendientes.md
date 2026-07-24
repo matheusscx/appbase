@@ -76,7 +76,14 @@ modelo con implicancias de auditoría. Investigación y cruce de mercado:
   superficies frontend `/mi-caja*` y `/cajas*` (`/caja` redirige a `/mi-caja`);
   escrituras siguen owner-only aun con `Cajas:Leer`. Detalle:
   [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#modelo-de-acceso-por-permiso).
-  Los dos ítems siguientes **quedan pendientes** (fuera de este refactor):
+- [x] **Sub-proyecto A — Arqueo de caja multi-medio — HECHO** (2026-07-24) — resuelve el
+  §3 de la investigación (faltante fantasma / esperado mezclado): el cierre pasa de un
+  número a una línea esperado-vs-contado por método (`es_efectivo` global +
+  `requiere_conteo` por tenant, tabla `caja_arqueo_medio` congelada, `GET
+  /caja/:id/arqueo`, `POST /caja/:id/cerrar` multi-línea). Detalle:
+  [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#arqueo-de-caja-multi-medio-sub-proyecto-de-negocio-a-post-estructura).
+  Los dos ítems siguientes **quedan pendientes** (features de negocio B/C, fuera de este
+  sub-proyecto):
 - [ ] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — habilitar que
   un usuario con permiso `Cajas` cierre la caja de un cajero que dejó el turno abierto
   (escenario: cajero que se fue de urgencia). Requiere agregar **`cerrada_por`** a la tabla
@@ -87,8 +94,12 @@ modelo con implicancias de auditoría. Investigación y cruce de mercado:
 - [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
   si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
   aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más
-  fiel al mercado; mayor alcance. Depende de resolver antes el `saldo_esperado` efectivo vs.
-  total (§3 de la investigación), que hoy inflaría toda diferencia.
+  fiel al mercado; mayor alcance. Ya no depende de resolver el modelo del esperado (§3,
+  **resuelto** por el sub-proyecto A de arriba) — el umbral se evaluaría sobre la
+  diferencia de cada línea del arqueo multi-medio, ya no sobre un total mezclado que
+  inflaba cualquier diferencia. Blind count y motivos categorizados de diferencia (§5 de
+  la investigación) siguen sin tracking en este archivo — quedan documentados solo en
+  [`investigaciones/2026-07-23-gestion-caja.md §9`](investigaciones/2026-07-23-gestion-caja.md).
 
 ## Endurecimiento para producción (pre-lanzamiento — hoy no hay prod)
 

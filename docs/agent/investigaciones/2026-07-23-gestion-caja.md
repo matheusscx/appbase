@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-07-23 (tres pasadas: §1–§6 internacional + Chile; §7 Fudo/LatAm + cruce del esperado; §8 mecánica y ciclo de vida del arqueo)
 **Estado:** 🔎 En investigación — insumo, todavía no hay diseño ni decisión tomada. No se tocó código.
-El hilo bloqueante (§3, esperado del cierre) quedó **reencuadrado en §7** con 3 salidas (A solo-efectivo / B multi-medio / C status quo) — decisión de negocio del owner, aún abierta.
+El hilo bloqueante (§3, esperado del cierre) quedó **reencuadrado en §7** con 3 salidas (A solo-efectivo / B multi-medio / C status quo); **resuelto 2026-07-24** — se implementó la opción B (arqueo multi-medio), ver §9.
 Del brainstorming salió además un **refactor general de caja** dividido en sub-proyectos: ver **roadmap en §9** (arranca por la definición de cajones).
 **Feature relacionada:** [`docs/features/gestion-cajas.md`](../../features/gestion-cajas.md)
 
@@ -442,8 +442,14 @@ Modelo acordado (§8.1 + brainstorming):
 
 ### Features de negocio diferidas (fuera de A, se montan sobre la estructura)
 
-- [ ] **§3 — Modelo del esperado** (efectivo puro vs. arqueo multi-medio). Bloqueante del
-  propósito de la feature; decisión de negocio abierta (§7.3).
+- [x] **§3 — Modelo del esperado — RESUELTO por el sub-proyecto A (2026-07-24).** Se
+  eligió la opción **B de §7.3 (arqueo multi-medio)**, no la A (efectivo puro): una línea
+  esperado-vs-contado por método de pago (línea de efectivo agregada + una por método
+  no-efectivo), `metodos_pago.es_efectivo` (global) + `tenant_metodo_pago.requiere_conteo`
+  (por tenant) gobiernan `obligatorio = es_efectivo OR requiere_conteo`, congelado en la
+  tabla `caja_arqueo_medio`. Elimina el faltante fantasma: vender con tarjeta ya no infla
+  el esperado de efectivo. Detalle:
+  [`docs/features/gestion-cajas.md` § Arqueo de caja multi-medio](../../features/gestion-cajas.md#arqueo-de-caja-multi-medio-sub-proyecto-de-negocio-a-post-estructura).
 - [ ] **§6 — Cierre forzado + `cerrada_por`** y conciliación operador→supervisor (§7.4).
 - [ ] **§5 — Blind count, motivos categorizados de diferencia, denominación** (§8.4–8.5).
 

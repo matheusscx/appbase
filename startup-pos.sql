@@ -123,6 +123,10 @@ CREATE TABLE "metodos_pago" (
   "nombre"         TEXT        NOT NULL,
   "abreviatura"    VARCHAR(5),
   "activo"         BOOLEAN     NOT NULL DEFAULT true,
+  -- Intrínseco al método (catálogo global, no lo decide el tenant): define qué entra a
+  -- la línea de efectivo del arqueo (fondo + manuales + vueltos). Ver caja_arqueo_medio
+  -- y docs/features/gestion-cajas.md § Arqueo de caja multi-medio.
+  "es_efectivo"    BOOLEAN     NOT NULL DEFAULT false,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
@@ -339,6 +343,9 @@ CREATE TABLE "tenant_metodo_pago" (
   "metodo_pago_id" UUID    NOT NULL REFERENCES "metodos_pago" ("metodo_pago_id"),
   "permite_vuelto" BOOLEAN NOT NULL DEFAULT false,
   "habilitada"     BOOLEAN DEFAULT false,
+  -- Política por tenant (no intrínseca al método): fuerza el conteo obligatorio de un
+  -- método no-efectivo al cerrar. obligatorio = es_efectivo OR requiere_conteo.
+  "requiere_conteo" BOOLEAN NOT NULL DEFAULT false,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ,
@@ -819,6 +826,7 @@ CREATE TABLE "movimientos_caja" (
   "tipo"           tipo_movimiento NOT NULL,
   "concepto"       TEXT            NOT NULL,
   "monto"          NUMERIC(18,4)   NOT NULL,
+  "metodo_pago_id" UUID            REFERENCES "metodos_pago" ("metodo_pago_id"),  -- NULL = manual (no ligado a un pago)
   "referencia"     TEXT,
   "fecha"          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
   "venta_id"       UUID,           -- FK definida después de crear ventas
@@ -827,6 +835,29 @@ CREATE TABLE "movimientos_caja" (
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
 );
+
+-- Arqueo de caja multi-medio: detalle del cierre por método de pago, CONGELADO
+-- (nunca se recalcula después de escrito). Sub-proyecto de negocio A, post-estructura
+-- (ver docs/features/gestion-cajas.md § Arqueo de caja multi-medio). Una fila por línea
+-- del cierre; "metodo_pago_id" NULL = la línea de efectivo agregada (fondo + entradas
+-- es_efectivo + manuales − salidas). "esperado" siempre se recomputa server-side, nunca
+-- viene del cliente; "contado"/"diferencia" nullable = línea informativa no contada.
+CREATE TABLE "caja_arqueo_medio" (
+  "arqueo_medio_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "caja_id"         UUID          NOT NULL REFERENCES "cajas" ("caja_id"),
+  "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "metodo_pago_id"  UUID          REFERENCES "metodos_pago" ("metodo_pago_id"),  -- NULL = línea de efectivo
+  "es_efectivo"     BOOLEAN       NOT NULL,
+  "esperado"        NUMERIC(18,4) NOT NULL,
+  "contado"         NUMERIC(18,4),
+  "diferencia"      NUMERIC(18,4),
+  "creado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "eliminado_el"    TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX "ux_caja_arqueo_medio"
+  ON "caja_arqueo_medio" ("caja_id", "metodo_pago_id")
+  WHERE "eliminado_el" IS NULL;
 
 -- Cajones: mueble físico (Configuración → Cajas), NO confundir con `cajas` (la
 -- sesión/turno arriba). Definido en el sub-proyecto 1/3 del refactor general de

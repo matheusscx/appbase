@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: —
-**Last Updated**: 2026-07-23
+**Last Updated**: 2026-07-24
 
 ---
 
@@ -255,6 +255,154 @@ apuntando a un cajón inactivo o inexistente.
 
 ---
 
+## Arqueo de caja multi-medio (sub-proyecto de negocio A, post-estructura)
+
+**Sub-proyecto A** de las features de negocio diferidas por el roadmap
+[§9](../agent/investigaciones/2026-07-23-gestion-caja.md#9-roadmap-del-refactor-general-de-caja-decisión-2026-07-23)
+del refactor general de caja — se monta sobre la estructura cajones + sesión (sub-1/2/3).
+Resuelve el hallazgo [§3/§7](../agent/investigaciones/2026-07-23-gestion-caja.md#3-lo-que-requiere-decisión-de-negocio-no-auto-resolver)
+de la investigación: hasta este sub-proyecto, `saldo_esperado` sumaba **toda** entrada de
+caja sin mirar el método de pago — vender $500 con tarjeta inflaba el esperado de
+efectivo en $500 (**faltante fantasma**), porque el cierre era un solo número mezclando
+efectivo y medios electrónicos que nunca están físicamente en el cajón.
+
+### El modelo: una línea esperado-vs-contado por método
+
+El cierre deja de ser "un número" y pasa a ser un **arreglo de líneas**, cada una con su
+propio `esperado`/`contado`/`diferencia`:
+
+- **Línea de efectivo** (`metodoPagoId = null`, agregada, siempre presente): fondo inicial
+  + entradas de métodos marcados efectivo + entradas manuales (`metodo_pago_id IS NULL`)
+  − todas las salidas. Los vueltos ya llegan netos (el `movimiento_caja` de un pago
+  registra `monto = pago − vuelto`), así que no se restan aparte.
+- **Una línea por método no-efectivo** que tuvo movimientos en la caja (tarjeta,
+  transferencia, etc.): `esperado` = suma de sus entradas. Es informativa salvo que el
+  tenant la haga obligatoria (ver abajo).
+
+Esto es **norma LatAm** (Fudo/Bsale/Toteat cuadran por medio de pago), no la escuela
+"cajón solo-efectivo" de Toast/Square — decisión tomada en la investigación §7.3.
+
+### Dos booleanos que no hay que confundir
+
+| Campo | Tabla | Alcance | Significa |
+|---|---|---|---|
+| `es_efectivo` | `metodos_pago` | Global (catálogo del sistema) | Intrínseco al método: define qué entra a la línea de efectivo agregada. No lo decide el tenant. |
+| `requiere_conteo` | `tenant_metodo_pago` | Por tenant | Política operativa: fuerza el conteo obligatorio de un método **no-efectivo** al cerrar (ej. el tenant quiere conciliar tarjeta contra el cierre del terminal Transbank todos los días). |
+
+**Regla de obligatoriedad:** `obligatorio = es_efectivo OR requiere_conteo`. La línea de
+efectivo es siempre obligatoria (no depende de ningún flag de tenant); una línea de
+método no-efectivo es obligatoria solo si el tenant activó `requiere_conteo` para ese
+método. El resto queda informativo: se puede declarar un contado si se quiere, pero no
+bloquea el cierre.
+
+`es_efectivo` se lee del movimiento histórico sin filtrar `metodos_pago.eliminado_el` ni
+`tenant_metodo_pago.eliminado_el` a propósito: es intrínseco al método que se usó en su
+momento, no al estado actual del catálogo — un método borrado después de usarse en una
+venta no debe desaparecer de la línea de efectivo del arqueo ni de su fila informativa.
+
+### Tabla `caja_arqueo_medio` — detalle del cierre, congelado
+
+Cada cierre inserta **una fila por línea del arqueo recomputado** (nunca se recalcula
+después): `metodo_pago_id NULL` = la línea de efectivo agregada. `esperado` es siempre
+`NOT NULL` (se congela aunque el método no sea obligatorio); `contado`/`diferencia` son
+nullable — `NULL` significa que esa línea informativa no se contó. Índice único parcial
+`(caja_id, metodo_pago_id)` filtrando `eliminado_el IS NULL`: una fila viva por línea y
+caja. Ver [Entity & Database](#entity--database).
+
+### `GET /caja/:id/arqueo` — preview o congelado según el estado
+
+```
+GET /caja/:id/arqueo
+Authorization: Bearer <token>
+
+Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compartida,
+                   igual que el resto de endpoints de lectura de este controller.
+
+Response (200) si la caja está 'abierta' — preview recomputado en vivo, sin contado:
+[
+  { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
+    "esperado": "750.0000", "requiereConteo": true },
+  { "metodoPagoId": "uuid", "nombre": "Tarjeta débito", "esEfectivo": false,
+    "esperado": "320.0000", "requiereConteo": false }
+]
+
+Response (200) si la caja está 'cerrada' — líneas congeladas de `caja_arqueo_medio`:
+[
+  { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
+    "esperado": "750.0000", "requiereConteo": true,
+    "contado": "748.5000", "diferencia": "-1.5000" },
+  { "metodoPagoId": "uuid", "nombre": "Tarjeta débito", "esEfectivo": false,
+    "esperado": "320.0000", "requiereConteo": false,
+    "contado": null, "diferencia": null }
+]
+```
+
+El drawer de cierre (`CajaCierreDrawer`) llama este endpoint al abrirse para armar el
+formulario; el detalle read-only de una caja cerrada lo usa para mostrar el desglose.
+
+### Cierre multi-línea
+
+`POST /caja/:id/cerrar` cambia de un `montoContado` único a un arreglo de líneas:
+
+```
+Request:
+{
+  "lineas": [
+    { "metodoPagoId": null, "montoContado": "748.50" },
+    { "metodoPagoId": "uuid-tarjeta", "montoContado": "320.00" }
+  ],
+  "comentario": "Faltó billete de 5"   // opcional
+}
+
+Response (200):
+{
+  "caja": { ...caja cerrada, "saldoFinal": "750.0000", "montoContado": "748.5000",
+            "diferencia": "-1.5000", ... },
+  "arqueo": [ ...líneas congeladas con contado/diferencia... ]
+}
+
+Error (400) si falta el conteo de una línea obligatoria (es_efectivo o requiere_conteo),
+      o si una línea del body no pertenece al arqueo recomputado del servidor.
+Error (409) si la caja ya está cerrada.
+```
+
+**El esperado nunca viene del cliente.** El servidor recomputa el arqueo completo dentro
+de la misma transacción del cierre (`calcularArqueo`, con lock pesimista de la caja) y lo
+congela junto con el `contado` que declaró el cajero; el body del cliente solo aporta
+`montoContado` por línea. Esto cierra la puerta a que un cliente manipulado declare un
+esperado distinto al real.
+
+### Agregados de `cajas` = línea de efectivo (backward-compat del historial)
+
+`cajas.saldo_final` / `monto_contado` / `diferencia` — los campos que ya existían antes
+de este sub-proyecto — pasan a representar **la línea de efectivo**, no un total
+mezclado: al cerrar, el service toma la línea `metodoPagoId === null` del arqueo
+congelado y la copia a esos tres campos. Así el historial (`GET /caja`) y cualquier
+reporte que ya lea `cajas.*` sigue funcionando sin cambios, y sigue significando lo mismo
+que documentaba esta feature desde el inicio: cuadre del efectivo físico del cajón.
+
+### El fix: salida manual y NC "devolver dinero" validan contra efectivo real
+
+Antes de este sub-proyecto, el bloqueo de saldo insuficiente (`422`, ver
+[Bloqueo de salida por saldo insuficiente](#bloqueo-de-salida-por-saldo-insuficiente-contra-la-línea-de-efectivo)) y
+el egreso de la nota de crédito con devolución de dinero (`POST
+/ventas/:id/notas-credito` con `devolverDinero: true`, ver
+[`docs/features/ventas.md`](./ventas.md)) validaban contra el mismo saldo mezclado. Ambos
+ahora llaman `calcularEsperadoEfectivo` (la misma fórmula de la línea de efectivo) antes
+de descontar — ya no se puede egresar efectivo físico contra plata que en realidad entró
+por tarjeta.
+
+### Backward-compat: cajas viejas sin desglose
+
+Las cajas cerradas **antes** de este sub-proyecto no tienen filas en
+`caja_arqueo_medio` (sin backfill). Su `GET /:id/arqueo` en una caja cerrada devuelve un
+arreglo vacío, y el detalle read-only (`/mi-caja/[id]`, `/cajas/[id]`) solo muestra la
+sección de desglose (`CajaArqueoTable`) si `arqueo.length > 0` — para esas cajas el
+cuadre agregado en `cajas.saldo_final`/`monto_contado`/`diferencia` sigue visible como
+antes, simplemente sin la tabla por método.
+
+---
+
 ## API Endpoints
 
 ### GET /caja/cajones-estado — Todos los cajones activos + su estado
@@ -372,7 +520,8 @@ Response (201):
   "creadoEl": "2026-06-29T10:00:00Z"
 }
 
-Error (422) si tipo es "salida" y monto > saldo_esperado actual.
+Error (422) si tipo es "salida" y monto > esperado de la línea de efectivo (no el total
+      mezclado — ver Arqueo de caja multi-medio § El fix).
 Error (403) si la caja no pertenece al usuario (owner-only, aun con `Cajas:Leer`).
 ```
 
@@ -427,7 +576,22 @@ Response (200):
 }
 ```
 
-### POST /caja/:id/cerrar — Cerrar caja con cuadre
+### GET /caja/:id/arqueo — Preview o desglose congelado del cierre
+
+```
+GET /caja/:id/arqueo
+Authorization: Bearer <token>
+
+Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compartida.
+
+Response (200): arreglo de líneas (una por método + la de efectivo agregada). Si la
+      caja está 'abierta', recomputado en vivo sin `contado`/`diferencia`; si está
+      'cerrada', las filas congeladas de `caja_arqueo_medio` (o `[]` si es una caja
+      cerrada antes de este sub-proyecto, sin backfill).
+Ver detalle de forma y campos en Arqueo de caja multi-medio § GET /caja/:id/arqueo.
+```
+
+### POST /caja/:id/cerrar — Cerrar caja con arqueo multi-medio
 
 ```
 POST /caja/:id/cerrar
@@ -437,24 +601,42 @@ Permiso requerido: MiCaja / Actualizar (owner-only; `Cajas:Leer` no habilita cer
 
 Request:
 {
-  "montoContado": "748.50",
+  "lineas": [
+    { "metodoPagoId": null, "montoContado": "748.50" },
+    { "metodoPagoId": "uuid-tarjeta", "montoContado": "320.00" }
+  ],
   "comentario": "Faltó billete de 5"   // opcional
 }
 
 Response (200):
 {
-  "cajaId": "uuid",
-  "estado": "cerrada",
-  "saldoInicial": "500.00",
-  "saldoEsperado": "750.00",
-  "montoContado": "748.50",
-  "diferencia": "-1.50",
-  "cerradaEl": "2026-06-29T18:00:00Z",
-  "comentarioCierre": "Faltó billete de 5"
+  "caja": {
+    "id": "uuid",
+    "estado": "cerrada",
+    "saldoInicial": "500.0000",
+    "saldoFinal": "750.0000",
+    "montoContado": "748.5000",
+    "diferencia": "-1.5000",
+    "fechaCierre": "2026-06-29T18:00:00Z",
+    "comentario": "Faltó billete de 5"
+  },
+  "arqueo": [
+    { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
+      "esperado": "750.0000", "requiereConteo": true,
+      "contado": "748.5000", "diferencia": "-1.5000" },
+    { "metodoPagoId": "uuid-tarjeta", "nombre": "Tarjeta débito", "esEfectivo": false,
+      "esperado": "320.0000", "requiereConteo": false,
+      "contado": "320.0000", "diferencia": "0.0000" }
+  ]
 }
 
+Error (400) si falta el conteo de una línea obligatoria (es_efectivo o requiere_conteo)
+      o si una línea del body no pertenece al arqueo recomputado del servidor.
 Error (409) si la caja ya está cerrada.
 ```
+
+`caja.saldoFinal`/`montoContado`/`diferencia` en la respuesta son la línea de efectivo —
+ver Arqueo de caja multi-medio § Agregados de `cajas`.
 
 ### GET /caja — Historial de cajas (paginado)
 
@@ -529,13 +711,12 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 | `tipo` | TEXT | NOT NULL | `'fisica'` \| `'virtual'` |
 | `estado` | TEXT | NOT NULL | `'abierta'` \| `'cerrada'` |
 | `saldo_inicial` | NUMERIC(18,6) | NOT NULL | Fondo al abrir; Decimal.js |
-| `saldo_esperado` | NUMERIC(18,6) | NOT NULL | Recalculado en cada movimiento |
-| `monto_contado` | NUMERIC(18,6) | nullable | Ingresado al cerrar |
-| `diferencia` | NUMERIC(18,6) | nullable | `monto_contado − saldo_esperado` |
-| `comentario` | TEXT | nullable | Al abrir |
-| `comentario_cierre` | TEXT | nullable | Al cerrar |
-| `abierta_el` | TIMESTAMPTZ | NOT NULL | `@CreateDateColumn` |
-| `cerrada_el` | TIMESTAMPTZ | nullable | Se setea al cerrar |
+| `saldo_final` | NUMERIC(18,6) | nullable | Congelado al cerrar = `esperado` de la línea de efectivo (`caja_arqueo_medio` con `metodo_pago_id IS NULL`), no el total mezclado — ver Arqueo de caja multi-medio |
+| `monto_contado` | NUMERIC(18,6) | nullable | Congelado al cerrar = `contado` de la línea de efectivo |
+| `diferencia` | NUMERIC(18,6) | nullable | Congelado al cerrar = `diferencia` de la línea de efectivo (`monto_contado − saldo_final`) |
+| `comentario` | TEXT | nullable | Al abrir; se sobrescribe con el comentario de cierre al cerrar |
+| `abierta_el` / `fecha_apertura` | TIMESTAMPTZ | NOT NULL | `@CreateDateColumn` |
+| `fecha_cierre` | TIMESTAMPTZ | nullable | Se setea al cerrar |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
 | `actualizado_el` | TIMESTAMPTZ | NOT NULL | |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
@@ -550,29 +731,51 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 | `tipo` | TEXT | NOT NULL | `'entrada'` \| `'salida'` \| `'apertura'` \| `'cierre'` |
 | `concepto` | TEXT | NOT NULL | Descripción del movimiento |
 | `monto` | NUMERIC(18,6) | NOT NULL | Siempre positivo; tipo define el signo |
+| `metodo_pago_id` | UUID | FK metodos_pago, nullable | `NULL` en movimientos manuales; poblado en los que vienen de un pago de venta — es la clave que agrupa el arqueo por método (ver Arqueo de caja multi-medio) |
 | `referencia` | TEXT | nullable | Referencia externa (nro. doc, etc.) |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
+
+**Table**: `caja_arqueo_medio` — detalle del cierre por método, CONGELADO (nunca se
+recalcula después de escrita)
+
+| Column | Type | Constraints | Notes |
+|--------|------|-------------|-------|
+| `arqueo_medio_id` | UUID | PK | |
+| `caja_id` | UUID | FK cajas, NOT NULL | |
+| `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
+| `metodo_pago_id` | UUID | FK metodos_pago, nullable | `NULL` = línea de efectivo agregada |
+| `es_efectivo` | BOOLEAN | NOT NULL | Copiado de `metodos_pago.es_efectivo` al momento del cierre |
+| `esperado` | NUMERIC(18,6) | NOT NULL | Recomputado server-side en la transacción de cierre; nunca viene del cliente |
+| `contado` | NUMERIC(18,6) | nullable | `NULL` = línea informativa no contada |
+| `diferencia` | NUMERIC(18,6) | nullable | `contado − esperado`; `NULL` si `contado` es `NULL` |
+| `creado_el` | TIMESTAMPTZ | NOT NULL | |
+| `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
+
+Índice único parcial `ux_caja_arqueo_medio` sobre `(caja_id, metodo_pago_id)` filtrando
+`eliminado_el IS NULL` — una fila viva por línea de arqueo y caja.
 
 ### DTOs
 
 - `AbrirCajaDto` — `{ cajonId: string, saldoInicial: string, comentario?: string }` (`@IsUUID`, `@IsNumberString`, `@IsOptional`)
 - `MovimientoCajaDto` — `{ tipo, concepto, monto: string, referencia? }`
-- `CerrarCajaDto` — `{ montoContado: string, comentario?: string }`
-- `CajaResponseDto` — Respuesta enriquecida con saldo esperado y cuadre
+- `CerrarCajaDto` — `{ lineas: LineaCierreDto[], comentario?: string }`
+- `LineaCierreDto` — `{ metodoPagoId: string | null, montoContado: string }` (`metodoPagoId: null` = línea de efectivo; `@IsNumberString` sin `no_symbols` para admitir decimales)
 
 ### Key Methods
 
-- `cajaService.getCajaActiva(tenantId, usuarioId)` — caja física `estado='abierta'` del usuario
-- `cajaService.getCajasAbiertas(tenantId, usuarioId, verTodas)` — cajas físicas abiertas del tenant; si `verTodas=false`, filtra por `usuarioId`; cada elemento incluye `esPropia`
-- `cajaService.abrirCaja(tenantId, usuarioId, dto)` — valida usuario libre → cajón válido/activo → autorizado (allow-list) → cajón libre (lock) → crea caja sobre `dto.cajonId`; 409/404/403 según la validación que falle
+- `cajaService.findActiva(tenantId, usuarioId)` — caja física `estado='abierta'` del usuario
+- `cajaService.abrir(tenantId, usuarioId, dto)` — valida usuario libre → cajón válido/activo → autorizado (allow-list) → cajón libre (lock) → crea caja sobre `dto.cajonId`; 409/404/403 según la validación que falle
 - `cajaService.cajonesDisponibles(tenantId, usuarioId)` — cajones activos, sin sesión abierta y autorizados para el usuario (allow-list vacía o incluido) — arma el picker de apertura
-- `cajaService.registrarMovimiento(cajaId, tenantId, usuarioId, dto)` — `FOR UPDATE` de la caja, valida propiedad (owner-only), valida saldo para `salida`, inserta movimiento
+- `cajaService.registrarMovimiento(tenantId, usuarioId, cajaId, dto)` — `FOR UPDATE` de la caja, valida propiedad (owner-only), valida saldo de la **línea de efectivo** (`calcularEsperadoEfectivo`) para `salida`, inserta movimiento
 - `cajaService.bloquearCajaAbierta(manager, cajaId, tenantId)` — lock pesimista reutilizable (p.ej. egreso de NC en la misma tx)
-- `cajaService.listarMovimientos(cajaId, tenantId, usuarioId, verTodas)` — lista `movimientos_caja`; acepta caja ajena si `verTodas=true`
-- `cajaService.cerrarCaja(cajaId, tenantId, usuarioId, dto)` — owner-only; calcula `diferencia`, marca `estado='cerrada'`
-- `cajaService.findAll(tenantId, usuarioId, todas)` — historial; `todas=true` retorna todas las cajas del tenant
-- `cajaService.findOne(cajaId, tenantId, usuarioId)` — detalle con movimientos
+- `cajaService.listarMovimientos(tenantId, usuarioId, cajaId, query, verTodas)` — lista `movimientos_caja`; acepta caja ajena si `verTodas=true`
+- `cajaService.calcularEsperadoEfectivo(cajaId, manager)` — fondo + entradas de métodos `es_efectivo`/manuales − salidas; usada por el cierre, la salida manual (422) y la NC "devolver dinero"
+- `cajaService.calcularArqueo(cajaId, tenantId, manager)` — línea de efectivo + una línea por método no-efectivo con movimientos (dos queries, sin N+1)
+- `cajaService.obtenerArqueo(tenantId, usuarioId, cajaId, verTodas)` — preview (`calcularArqueo` en vivo) si `abierta`; filas de `caja_arqueo_medio` si `cerrada`
+- `cajaService.cerrar(tenantId, usuarioId, cajaId, dto)` — owner-only; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, marca `estado='cerrada'`
+- `cajaService.historial(tenantId, usuarioId, query, todas)` — historial; `todas=true` retorna todas las cajas del tenant
+- `cajaService.findOne(tenantId, usuarioId, cajaId, verTodas)` — detalle de la caja
 
 ### Guards
 
@@ -658,7 +861,8 @@ sin necesidad.
 - `components/caja/CajaAperturaGrid.vue` — Apertura en `/mi-caja`: grid de cards de cajones disponibles (poblado por `cajonesDisponibles`); click en un cajón abre un `AppDrawer` con saldo inicial + comentario → `cajaStore.abrir`. Cajón implícito por la card (nombre en el título del drawer)
 - `components/caja/CajaAperturaForm.vue` — Formulario de apertura con selector de cajón (poblado por `cajonesDisponibles`, obligatorio) + saldo inicial + comentario; usado en el POS (`pages/ventas/pos.vue`) para abrir caja sin salir de la venta
 - `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
-- `components/caja/CajaCierreDrawer.vue` — Drawer de cierre con cuadre (esperado vs. contado → diferencia)
+- `components/caja/CajaCierreDrawer.vue` — Drawer de cierre multi-medio: carga el arqueo (`GET /caja/:id/arqueo`) al abrirse, separa líneas obligatorias (efectivo + `requiereConteo`) de informativas, un `MoneyInput` de contado por línea con su diferencia en vivo, y bloquea "Confirmar cierre" hasta completar las obligatorias
+- `components/caja/CajaArqueoTable.vue` — Tabla de solo lectura (método / esperado / contado / diferencia) para el desglose congelado; usada en el detalle read-only de una caja cerrada (`/mi-caja/[id]`, `/cajas/[id]`), solo si `arqueo.length > 0`
 - `components/caja/CajaCajonesGrid.vue` — Grid de cards para la superficie `/cajas` (permiso `Cajas:Leer`): **todos los cajones activos** del tenant con su estado (ocupado/libre), ocupados primero (la propia arriba). Card ocupada → `/cajas/[id]`; card libre (badge "Libre") → `/cajas/historial?cajonId=…`. No permite abrir caja (eso vive en `/mi-caja`)
 
 ### Pinia Store
@@ -674,6 +878,7 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 - `cajonesEstado: CajonEstado[]` — todos los cajones activos del tenant con su estado ocupado/libre (superficie `/cajas`, permiso `Cajas:Leer`)
 - `detalle: CajaDetalle | null` — detalle de una caja ajena (página read-only)
 - `cajonesDisponibles: CajonDisponible[]` — opciones del picker de apertura (activos + libres + autorizados)
+- `arqueo: ArqueoLinea[]` — líneas del arqueo (preview en vivo o congeladas), poblado por `cargarArqueo()`; se consume desde `CajaCierreDrawer` y `CajaArqueoTable`
 - `loading: boolean`
 - `error: string | null`
 
@@ -683,7 +888,8 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 - `abrirCaja(dto)` — POST /caja/abrir (`dto` incluye `cajonId`)
 - `registrarMovimiento(cajaId, dto)` — POST /caja/:id/movimientos
 - `fetchMovimientos(cajaId)` — GET /caja/:id/movimientos
-- `cerrarCaja(cajaId, dto)` — POST /caja/:id/cerrar
+- `cargarArqueo(cajaId)` — GET /caja/:id/arqueo → puebla `arqueo`
+- `cerrar(cajaId, { lineas, comentario? })` — POST /caja/:id/cerrar; devuelve `{ caja, arqueo }`
 - `fetchHistorial(todas?)` — GET /caja?todas=true
 - `cargarCajonesEstado()` — GET /caja/cajones-estado → puebla `cajonesEstado`
 - `cargarDetalle(id)` — GET /caja/:id + GET /caja/:id/movimientos → puebla `detalle`
@@ -728,21 +934,27 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 [Store: movimientos.push(nuevo); cajaActiva.saldoEsperado actualizado]
 ```
 
-### Cerrar caja con cuadre
+### Cerrar caja con arqueo multi-medio
 
 ```
 [Clic "Cerrar caja"]
-  ↓ CerrarCajaForm: usuario ingresa monto_contado
-  ↓ useCajaStore.cerrarCaja(cajaId, { montoContado, comentario })
+  ↓ CajaCierreDrawer se abre → useCajaStore.cargarArqueo(cajaId)
+[GET /caja/:id/arqueo] → preview en vivo (línea efectivo + una por método no-efectivo)
+  ↓
+[Usuario ingresa el contado de cada línea obligatoria (efectivo + requiereConteo);
+ las informativas quedan opcionales]
+  ↓ useCajaStore.cerrar(cajaId, { lineas, comentario })
 [POST /caja/:id/cerrar]
   ↓
-[Service: diferencia = montoContado − saldo_esperado (Decimal.js)]
-[Actualiza: estado='cerrada', cerrada_el=now(), monto_contado, diferencia]
-[Inserta movimiento `tipo='cierre'`]
+[Service, en una transacción: lock de la caja → recomputa `calcularArqueo`
+ (server-side, ignora cualquier "esperado" que mandara el cliente) → valida que
+ toda línea obligatoria tenga contado (400 si falta) → congela cada línea en
+ `caja_arqueo_medio` → copia la línea de efectivo a cajas.saldoFinal/montoContado/
+ diferencia → estado='cerrada']
   ↓
-[Response: objeto caja con cuadre]
+[Response: { caja, arqueo }]
   ↓
-[Store: cajaActiva = null; historial.unshift(caja cerrada)]
+[Store: activa = null; resumenTurno = null]
   ↓
 [/mi-caja vuelve a estado "Sin caja activa"]
 ```
@@ -760,20 +972,30 @@ también admite una sola sesión `abierta` a la vez (índice único parcial
 `ux_cajas_cajon_abierta`) — dos usuarios distintos no pueden abrir el mismo cajón en
 paralelo. Ver [Apertura sobre un cajón](#apertura-sobre-un-cajón-sub-proyecto-33).
 
-### Fórmula de saldo esperado
+### Fórmula del esperado — por línea, no un total mezclado
+
+Desde el sub-proyecto de arqueo multi-medio (ver
+[sección dedicada](#arqueo-de-caja-multi-medio-sub-proyecto-de-negocio-a-post-estructura)),
+el esperado no es un solo número: la **línea de efectivo** es la única con fórmula
+acumulativa sobre todo el turno —
 
 ```
-saldo_esperado = saldo_inicial
-              + Σ movimientos tipo='entrada'
-              − Σ movimientos tipo='salida'
+esperado_efectivo = saldo_inicial
+                  + Σ movimientos 'entrada' de métodos es_efectivo o manuales
+                  − Σ movimientos 'salida' (todos)
 ```
 
-Todo cálculo usa Decimal.js; nunca aritmética nativa de JavaScript.
+— y cada **línea no-efectivo** es simplemente la suma de sus entradas del turno
+(`Σ movimientos 'entrada' de ese método`), sin restar salidas (no hay salidas de
+tarjeta/transferencia por diseño). Todo cálculo usa Decimal.js; nunca aritmética nativa
+de JavaScript.
 
-### Bloqueo de salida por saldo insuficiente
+### Bloqueo de salida por saldo insuficiente (contra la línea de efectivo)
 
-Si `tipo='salida'` y `monto > saldo_esperado_actual`, el endpoint retorna `422 Unprocessable Entity`.
-No se permite saldo negativo.
+Si `tipo='salida'` y `monto > esperado_efectivo` (no el total de todas las entradas), el
+endpoint retorna `422 Unprocessable Entity`. No se permite que la línea de efectivo quede
+negativa. Antes del sub-proyecto de arqueo multi-medio esto se validaba contra el total
+mezclado (efectivo + tarjeta) — ver el fix documentado en esa sección.
 
 ### Caja virtual
 
@@ -830,10 +1052,12 @@ npm run test:e2e -- caja.e2e-spec.ts
 5. `POST /caja/abrir` con `{ "cajonId": "<uuid del picker>", "saldoInicial": "500" }` → 201
 6. `POST /caja/abrir` de nuevo con el mismo `cajonId` (otro usuario) → 409 (cajón ocupado)
 7. `POST /caja/:id/movimientos` con `{ "tipo": "entrada", "concepto": "Prueba", "monto": "100" }` → 201
-8. `POST /caja/:id/movimientos` con `{ "tipo": "salida", "monto": "700" }` → 422 (saldo insuficiente)
-9. `POST /caja/:id/cerrar` con `{ "montoContado": "598" }` → 200 con cuadre
-10. `GET /caja` → historial con la caja cerrada
-11. Con un token que solo tenga `Cajas/Leer` (sin `MiCaja`): `GET /caja/cajones-estado` → 200 (todos los cajones); `POST /caja/abrir` → 403
+8. `POST /caja/:id/movimientos` con `{ "tipo": "salida", "monto": "700" }` → 422 (saldo insuficiente de la línea de efectivo)
+9. `GET /caja/:id/arqueo` con la caja abierta → arreglo con la línea de efectivo + una por cada método no-efectivo usado
+10. `POST /caja/:id/cerrar` con `{ "lineas": [{ "metodoPagoId": null, "montoContado": "598" }] }` → 200 con `{ caja, arqueo }`; si falta el conteo de una línea obligatoria → 400
+11. `GET /caja/:id/arqueo` con la misma caja ya cerrada → las mismas líneas, ahora con `contado`/`diferencia` congelados
+12. `GET /caja` → historial con la caja cerrada; `saldoFinal`/`montoContado`/`diferencia` = línea de efectivo
+13. Con un token que solo tenga `Cajas/Leer` (sin `MiCaja`): `GET /caja/cajones-estado` → 200 (todos los cajones); `POST /caja/abrir` → 403
 
 ### Manual Testing (Frontend)
 
@@ -845,17 +1069,22 @@ npm run test:e2e -- caja.e2e-spec.ts
 5. Con una segunda sesión/usuario: el cajón recién abierto ya no aparece en el
    grid de cajones disponibles (ocupado)
 6. Agregar movimientos entrada/salida → verificar saldo esperado actualizado
-7. Intentar salida mayor al saldo → verificar error
-8. Cerrar caja → verificar cuadre (diferencia)
-9. `/mi-caja` (cajero sin caja): grid de cajones disponibles + botón "Ver historial" → `/mi-caja/historial`
-10. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
-11. `/cajas`: grid de todos los cajones activos (ocupados con datos, libres con badge
+7. Intentar salida mayor al saldo de efectivo → verificar error
+8. Cerrar caja: verificar que el drawer muestra la línea de efectivo (obligatoria) y,
+   si hubo ventas con tarjeta u otro método, una línea adicional por ese método;
+   completar el conteo de las obligatorias → verificar diferencia en vivo por línea →
+   confirmar cierre
+9. Reabrir el detalle de la caja recién cerrada → verificar la tabla de desglose por
+   método (`CajaArqueoTable`) con `esperado`/`contado`/`diferencia` congelados
+10. `/mi-caja` (cajero sin caja): grid de cajones disponibles + botón "Ver historial" → `/mi-caja/historial`
+11. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
+12. `/cajas`: grid de todos los cajones activos (ocupados con datos, libres con badge
     "Libre"); sin card de apertura. Click en ocupado → `/cajas/[id]`; click en libre →
     `/cajas/historial?cajonId=…`. Botón "Ver historial" → `/cajas/historial` (siempre todas,
     sin toggle); click en fila → `/cajas/[id]`
-12. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); botón "Ver historial del cajón" con `?cajonId=` (todas las sesiones de ese cajón)
-13. KPIs visibles al hacer scroll en movimientos (thead sticky)
-14. `/caja` redirige a `/mi-caja` (compatibilidad)
+13. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); botón "Ver historial del cajón" con `?cajonId=` (todas las sesiones de ese cajón)
+14. KPIs visibles al hacer scroll en movimientos (thead sticky)
+15. `/caja` redirige a `/mi-caja` (compatibilidad)
 
 ---
 
@@ -863,9 +1092,16 @@ npm run test:e2e -- caja.e2e-spec.ts
 
 - [x] Endpoint `GET /caja/activa` retorna la caja abierta o `null`
 - [x] `POST /caja/abrir` valida unicidad (solo una caja por usuario+tenant)
-- [x] Movimientos `salida` validan saldo suficiente (422 si excede)
-- [x] Cierre calcula `diferencia = montoContado − saldoEsperado` con Decimal.js
+- [x] Movimientos `salida` validan saldo suficiente de la **línea de efectivo** (422 si excede)
+- [x] Cierre calcula `diferencia = contado − esperado` por línea con Decimal.js
 - [x] Caja virtual excluida de todos los flujos manuales
+- [x] `metodos_pago.es_efectivo` (global) y `tenant_metodo_pago.requiere_conteo` (por tenant) gobiernan `obligatorio = es_efectivo OR requiere_conteo`
+- [x] `GET /caja/:id/arqueo` retorna preview recomputado (caja abierta) o líneas congeladas (caja cerrada)
+- [x] `POST /caja/:id/cerrar` recibe `lineas[]`, recomputa y congela el esperado server-side (nunca del cliente), `400` si falta una línea obligatoria
+- [x] `caja_arqueo_medio` congela una fila por línea con índice único parcial `(caja_id, metodo_pago_id)`
+- [x] `cajas.saldoFinal`/`montoContado`/`diferencia` representan la línea de efectivo (backward-compat del historial)
+- [x] La NC "devolver dinero" valida saldo contra la línea de efectivo, no el total mezclado
+- [x] Cajas cerradas antes del sub-proyecto (sin filas en `caja_arqueo_medio`) muestran el cuadre agregado sin desglose por método
 - [x] Módulo `MiCaja` (operar el propio turno) y módulo `Cajas` (supervisar, solo lectura) separados
 - [x] `GET /caja/cajones-estado` requiere `Cajas:Leer` y retorna todos los cajones activos del tenant con su estado (ocupado/libre)
 - [x] `GET /caja/:id/movimientos` permite lectura de caja ajena con `Cajas:Leer`; registrar y cerrar siguen owner-only bajo `MiCaja`
