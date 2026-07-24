@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
 import type { ArqueoLinea } from '~/stores/caja'
 
 defineProps<{ lineas: ArqueoLinea[] }>()
@@ -38,7 +39,7 @@ const { formatMonto } = useFormatters()
           <td class="py-2 text-right">
             <span
               v-if="l.diferencia != null"
-              :class="Number(l.diferencia) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+              :class="new Decimal(l.diferencia).gte(0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
             >
               {{ formatMonto(l.diferencia) }}
             </span>
