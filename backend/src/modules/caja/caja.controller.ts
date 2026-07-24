@@ -77,6 +77,13 @@ export class CajaController {
     return this.cajaService.abiertas(u.tenantId!, u.id, true);
   }
 
+  @Get('cajones-disponibles')
+  @RequiresPermiso('MiCaja', 'Crear')
+  cajonesDisponibles(@Req() req: Request) {
+    const u = req.user as JwtUser;
+    return this.cajaService.cajonesDisponibles(u.tenantId!, u.id);
+  }
+
   @Get(':id')
   async detalle(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;

@@ -9,6 +9,7 @@ import { CajonesService } from './cajones.service';
 import { Cajon } from './entities/cajon.entity';
 import { CajonUsuario } from './entities/cajon-usuario.entity';
 import { UsuarioTenant } from '../tenants/entities/usuario-tenant.entity';
+import { Caja } from '../caja/entities/caja.entity';
 
 const TENANT = 'tenant-uuid';
 
@@ -28,6 +29,7 @@ describe('CajonesService', () => {
   let utRepo: {
     count: jest.Mock;
   };
+  let cajaRepo: { count: jest.Mock };
   let manager: {
     softDelete: jest.Mock;
     save: jest.Mock;
@@ -46,6 +48,7 @@ describe('CajonesService', () => {
     };
     cuRepo = { find: jest.fn() };
     utRepo = { count: jest.fn() };
+    cajaRepo = { count: jest.fn() };
     manager = {
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
@@ -63,6 +66,7 @@ describe('CajonesService', () => {
         { provide: getRepositoryToken(Cajon), useValue: repo },
         { provide: getRepositoryToken(CajonUsuario), useValue: cuRepo },
         { provide: getRepositoryToken(UsuarioTenant), useValue: utRepo },
+        { provide: getRepositoryToken(Caja), useValue: cajaRepo },
         { provide: getDataSourceToken(), useValue: dataSource },
       ],
     }).compile();
@@ -210,6 +214,37 @@ describe('CajonesService', () => {
       await expect(
         service.setUsuarios(TENANT, CAJON, ['A']),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('integridad de cajón en uso', () => {
+    it('remove rechaza si el cajón tiene una caja abierta (409)', async () => {
+      repo.findOne.mockResolvedValue({ id: 'x', tenantId: TENANT });
+      cajaRepo.count.mockResolvedValue(1);
+      await expect(service.remove(TENANT, 'x')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('remove borra si no hay caja abierta', async () => {
+      repo.findOne.mockResolvedValue({ id: 'x', tenantId: TENANT });
+      cajaRepo.count.mockResolvedValue(0);
+      await service.remove(TENANT, 'x');
+      expect(repo.softDelete).toHaveBeenCalled();
+    });
+
+    it('update rechaza desactivar un cajón con caja abierta (409)', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'M',
+        activo: true,
+      });
+      cajaRepo.count.mockResolvedValue(1);
+      await expect(
+        service.update(TENANT, 'x', { activo: false }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

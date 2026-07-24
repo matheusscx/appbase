@@ -9,6 +9,7 @@ import { DataSource, In, Not, Repository } from 'typeorm';
 import { Cajon } from './entities/cajon.entity';
 import { CajonUsuario } from './entities/cajon-usuario.entity';
 import { UsuarioTenant } from '../tenants/entities/usuario-tenant.entity';
+import { Caja } from '../caja/entities/caja.entity';
 import { CreateCajonDto } from './dto/create-cajon.dto';
 import { UpdateCajonDto } from './dto/update-cajon.dto';
 
@@ -21,6 +22,8 @@ export class CajonesService {
     private readonly cajonUsuarioRepo: Repository<CajonUsuario>,
     @InjectRepository(UsuarioTenant)
     private readonly usuarioTenantRepo: Repository<UsuarioTenant>,
+    @InjectRepository(Caja)
+    private readonly cajaRepo: Repository<Caja>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -49,13 +52,19 @@ export class CajonesService {
       await this.validarNombreUnico(tenantId, dto.nombre, id);
       cajon.nombre = dto.nombre;
     }
-    if (dto.activo != null) cajon.activo = dto.activo;
+    if (dto.activo != null) {
+      if (dto.activo === false) {
+        await this.asegurarSinSesionAbierta(tenantId, id, 'desactivar');
+      }
+      cajon.activo = dto.activo;
+    }
     return this.cajonRepo.save(cajon);
   }
 
   async remove(tenantId: string, id: string): Promise<void> {
     const cajon = await this.cajonRepo.findOne({ where: { id, tenantId } });
     if (!cajon) throw new NotFoundException(`Cajón ${id} no encontrado`);
+    await this.asegurarSinSesionAbierta(tenantId, id, 'eliminar');
     await this.cajonRepo.softDelete({ id, tenantId });
   }
 
@@ -139,5 +148,20 @@ export class CajonesService {
     });
     if (!cajon) throw new NotFoundException(`Cajón ${cajonId} no encontrado`);
     return cajon;
+  }
+
+  private async asegurarSinSesionAbierta(
+    tenantId: string,
+    cajonId: string,
+    accion: 'desactivar' | 'eliminar',
+  ): Promise<void> {
+    const abiertas = await this.cajaRepo.count({
+      where: { tenantId, cajonId, estado: 'abierta' },
+    });
+    if (abiertas > 0) {
+      throw new ConflictException(
+        `El cajón tiene una caja abierta; ciérrala antes de ${accion}.`,
+      );
+    }
   }
 }

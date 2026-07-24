@@ -105,6 +105,41 @@ export class CajaService {
     });
   }
 
+  async cajonesDisponibles(
+    tenantId: string,
+    usuarioId: string,
+  ): Promise<{ cajonId: string; nombre: string }[]> {
+    const rows: { cajon_id: string; nombre: string }[] =
+      await this.dataSource.query(
+        `SELECT cj.cajon_id, cj.nombre
+           FROM cajones cj
+          WHERE cj.tenant_id = $1
+            AND cj.activo = true
+            AND cj.eliminado_el IS NULL
+            -- autorizado: allow-list vacía (permisivo) o el usuario está en ella
+            AND (
+              NOT EXISTS (
+                SELECT 1 FROM cajon_usuario cu
+                 WHERE cu.cajon_id = cj.cajon_id AND cu.eliminado_el IS NULL
+              )
+              OR EXISTS (
+                SELECT 1 FROM cajon_usuario cu
+                 WHERE cu.cajon_id = cj.cajon_id AND cu.usuario_id = $2
+                   AND cu.eliminado_el IS NULL
+              )
+            )
+            -- libre: sin sesión abierta
+            AND NOT EXISTS (
+              SELECT 1 FROM cajas c
+               WHERE c.cajon_id = cj.cajon_id
+                 AND c.estado = 'abierta' AND c.eliminado_el IS NULL
+            )
+          ORDER BY cj.nombre ASC`,
+        [tenantId, usuarioId],
+      );
+    return rows.map((r) => ({ cajonId: r.cajon_id, nombre: r.nombre }));
+  }
+
   async abrir(
     tenantId: string,
     usuarioId: string,
