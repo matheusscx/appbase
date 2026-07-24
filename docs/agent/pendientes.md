@@ -90,6 +90,68 @@ modelo con implicancias de auditoría. Investigación y cruce de mercado:
   fiel al mercado; mayor alcance. Depende de resolver antes el `saldo_esperado` efectivo vs.
   total (§3 de la investigación), que hoy inflaría toda diferencia.
 
+## Endurecimiento para producción (pre-lanzamiento — hoy no hay prod)
+
+El proyecto está en desarrollo y `main` no se despliega, así que nada de esto corre hoy.
+Pero el flujo actual (push directo a `main`; CI que corre **después** del push como
+detector, no como portón; sin ramas/PRs por decisión de la etapa de dev) **no es seguro
+para producción**: un CI rojo hoy es inofensivo porque `main` no despliega, pero el día
+que `main` auto-despliegue significaría subir código roto a prod y enterarse tarde. Esta
+sección se abre al encarar el paso a producción. Orden = prioridad.
+
+- [ ] **`synchronize: true` → migraciones (CRÍTICO, bloqueante de prod)** (backend) —
+  hoy el esquema lo crea `synchronize` al bootstrap (dev + CI, porque `NODE_ENV != production`).
+  En prod `synchronize` **puede dropear columnas y perder datos** al arrancar tras un cambio
+  de entidad. Antes de cualquier deploy real: apagar `synchronize` en prod, adoptar
+  migraciones TypeORM (generar desde el estado actual, versionar), y que el deploy corra
+  `migration:run`. `startup-pos.sql` deja de ser solo referencia y pasa a ser el baseline
+  de la primera migración. Es dinero y multi-tenant: sin esto un deploy puede corromper datos.
+- [ ] **CI como portón de deploy + branch protection** (harness/infra) — hoy
+  `.github/workflows/ci.yml` dispara `on: push: [main]` → corre DESPUÉS del push (detector),
+  y `main` **no está protegida**. Para prod: (1) el job de deploy declara `needs: [gate]`
+  (`if: success()`) → CI rojo = **no hay deploy**, prod queda en la última versión buena;
+  (2) reactivar PRs + `required status checks` sobre `main` (revierte la regla de dev
+  "trabajar directo sobre `main`") → el código roto ni toca la rama que despliega. Cierra el
+  agujero del post-mortem del 2026-07-23 (push a `main` con e2e rojo).
+- [ ] **Rate limiting** (backend) — hoy no hay throttling; los endpoints de auth
+  (`POST /auth/login`, `/auth/refresh`) son brute-forceables. Agregar `@nestjs/throttler`:
+  límite global por IP + límite estricto en auth. Cuidado multi-tenant: la key de rate limit
+  no debe filtrar entre tenants ni permitir que un tenant agote la cuota de otro. Considerar
+  store compartido (Redis) si corre en varias instancias — el límite en memoria no sirve tras
+  un load balancer.
+- [ ] **Deploy seguro: rollback + feature flags + canary** (infra) — el portón de CI evita
+  el error *conocido* (que los tests detectan), no el desconocido (bug que ningún test cubre y
+  pasa en verde). Para acotar ese: rollback rápido a la versión anterior (deploy inmutable),
+  canary/gradual (soltar al % del tráfico y mirar métricas antes del 100%), y feature flags
+  para apagar una feature sin re-desplegar.
+- [ ] **Secrets fuera del repo + rotación** (infra) — `JWT_SECRET`, `JWT_REFRESH_SECRET`,
+  `PASARELA_ENCRYPTION_KEY` hoy salen de `.env`. En prod deben venir de un secret manager
+  (no del repo, no de variables de entorno en texto plano en el CI), con rotación. Auditar que
+  ningún secreto real quedó commiteado. La `PASARELA_ENCRYPTION_KEY` es especialmente sensible:
+  cifra credenciales de pasarela de pago.
+- [ ] **Cabeceras de seguridad + CORS whitelist + HTTPS** (backend) — `main.ts`: `helmet`,
+  forzar HTTPS, y **CORS por whitelist env-driven**. Hoy `enableCors` permite un solo origen
+  (`FRONTEND_URL ?? http://localhost:5173`, `credentials: true`); generalizar a lista blanca:
+  `CORS_ORIGINS` (coma-separado) → `.split(',').map(trim).filter(Boolean)` → array a `origin`
+  (el paquete `cors` lo refleja si está, rechaza si no). Con `credentials: true` **no** se puede
+  usar `'*'`; la lista debe ser explícita. Documentar la var en `.env.example`. Prod define
+  `CORS_ORIGINS=https://app.tudominio.com[,...]`; dev queda con el default localhost.
+  **Nota de alcance:** CORS solo guarda al **navegador** (evita que la web de otro origen use la
+  sesión/cookie del usuario contra la API); no frena curl/Postman/servidor-a-servidor. El control
+  de acceso real es el JWT ya implementado — la whitelist es defensa en profundidad, no el candado.
+- [ ] **Observabilidad: logs estructurados + error tracking + alertas** (backend/infra) —
+  logging estructurado que **no filtre PII ni `tenant_id` cruzado**, captura de errores
+  (Sentry/equivalente), y alertas de error-rate/latencia para enterarse en minutos, no cuando
+  se queja un cliente. Es la contraparte del "bug que pasó el CI verde".
+- [ ] **Backups automáticos + restore probado (Postgres)** (infra) — datos financieros
+  multi-tenant: backups automáticos + point-in-time recovery, y **restore probado** (un backup
+  que nunca se restauró no es un backup). Tópico aparte del deploy de la app.
+- [ ] **Health/readiness + graceful shutdown** (backend) — endpoint `/health` para el
+  orquestador (readiness real: chequea la BD), y cierre ordenado de conexiones al recibir
+  SIGTERM para no cortar requests en vuelo durante un deploy.
+- [ ] **Escaneo de dependencias en CI** (harness) — `npm audit` / Dependabot como paso del
+  gate, para no arrastrar CVEs conocidos a prod.
+
 ## Limpiezas menores (opcionales, no bloqueantes)
 
 - [ ] `items.vue:81` — campo `esPendiente` en `GrupoOpcionOverrideRow` se setea pero
