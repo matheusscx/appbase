@@ -136,7 +136,9 @@ módulo `Caja` (sesión) y su controller/service **no se tocaron**.
   (tabla + drawer crear/editar + confirm de eliminar). Gate por `Cajas:Crear` /
   `Actualizar` / `Eliminar` (UX-only; el backend enforcea con `@RequiresPermiso`). La
   etiqueta de UI que ve el admin ("Cajas") mapea a la entidad `cajones` — ver nota de
-  terminología arriba.
+  terminología arriba. La misma página trae una tarjeta "Política de cierre" con el
+  toggle "Arqueo ciego" (`Cajas:Actualizar` para escribir, `Cajas:Leer` alcanza para
+  verlo deshabilitado) — ver [Cierre ciego](#cierre-ciego-modo-anti-fraude).
 
 ### Autorización: qué usuarios abren qué cajones (allow-list)
 
@@ -321,23 +323,34 @@ Authorization: Bearer <token>
 Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compartida,
                    igual que el resto de endpoints de lectura de este controller.
 
-Response (200) si la caja está 'abierta' — preview recomputado en vivo, sin contado:
-[
-  { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
-    "esperado": "750.0000", "requiereConteo": true },
-  { "metodoPagoId": "uuid", "nombre": "Tarjeta débito", "esEfectivo": false,
-    "esperado": "320.0000", "requiereConteo": false }
-]
+Response (200): { "ciego": boolean, "lineas": [...] } — ver por qué el envoltorio en
+                Cierre ciego (modo anti-fraude) más abajo.
 
-Response (200) si la caja está 'cerrada' — líneas congeladas de `caja_arqueo_medio`:
-[
-  { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
-    "esperado": "750.0000", "requiereConteo": true,
-    "contado": "748.5000", "diferencia": "-1.5000" },
-  { "metodoPagoId": "uuid", "nombre": "Tarjeta débito", "esEfectivo": false,
-    "esperado": "320.0000", "requiereConteo": false,
-    "contado": null, "diferencia": null }
-]
+Si la caja está 'abierta' y el tenant NO tiene arqueo ciego — preview recomputado en
+vivo, sin contado:
+{
+  "ciego": false,
+  "lineas": [
+    { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
+      "esperado": "750.0000", "requiereConteo": true },
+    { "metodoPagoId": "uuid", "nombre": "Tarjeta débito", "esEfectivo": false,
+      "esperado": "320.0000", "requiereConteo": false }
+  ]
+}
+
+Si la caja está 'cerrada' — SIEMPRE `ciego:false`, líneas congeladas de
+`caja_arqueo_medio` (el modo ciego solo retiene mientras la caja está abierta):
+{
+  "ciego": false,
+  "lineas": [
+    { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
+      "esperado": "750.0000", "requiereConteo": true,
+      "contado": "748.5000", "diferencia": "-1.5000" },
+    { "metodoPagoId": "uuid", "nombre": "Tarjeta débito", "esEfectivo": false,
+      "esperado": "320.0000", "requiereConteo": false,
+      "contado": null, "diferencia": null }
+  ]
+}
 ```
 
 El drawer de cierre (`CajaCierreDrawer`) llama este endpoint al abrirse para armar el
@@ -403,6 +416,92 @@ arreglo vacío, y el detalle read-only (`/mi-caja/[id]`, `/cajas/[id]`) solo mue
 sección de desglose (`CajaArqueoTable`) si `arqueo.length > 0` — para esas cajas el
 cuadre agregado en `cajas.saldo_final`/`monto_contado`/`diferencia` sigue visible como
 antes, simplemente sin la tabla por método.
+
+---
+
+## Cierre ciego (modo anti-fraude)
+
+**Sub-proyecto de negocio B**, montado sobre el arqueo multi-medio (sub-proyecto A, arriba) —
+resuelve la mitad barata del hallazgo "blind count" del roadmap
+[§9](../agent/investigaciones/2026-07-23-gestion-caja.md#9-roadmap-del-refactor-general-de-caja-decisión-2026-07-23)
+(§5/§6 de la investigación). En un **cierre ciego** el cajero cuenta el cajón **sin ver el
+monto esperado** — declara lo que contó y recién ahí el sistema revela la diferencia. Es el
+estándar anti-fraude de Bsale/Toteat en Chile: si el cajero ve el esperado, un faltante se
+puede "maquillar" declarando justo ese número.
+
+### Config por tenant, no por rol
+
+`tenants.arqueo_ciego` (booleano, default `false`) activa o desactiva el modo para **todo el
+tenant**. No es un permiso de rol — la distinción cajero/supervisor ya la dan los módulos
+`MiCaja`/`Cajas`; lo que cambia es la política operativa del negocio. Se edita en
+Configuración → Cajas (misma página que el CRUD de cajones, tarjeta "Política de cierre") con
+permiso `Cajas:Actualizar`; leerlo alcanza con `Cajas:Leer`.
+
+- `GET /caja/arqueo-ciego` (`Cajas:Leer`) → `{ "arqueoCiego": boolean }`
+- `PUT /caja/arqueo-ciego` (`Cajas:Actualizar`), body `{ "arqueoCiego": boolean }` →
+  `{ "arqueoCiego": boolean }`
+
+Cambiar la config afecta los cierres **desde ese momento**; no reescribe arqueos ya
+congelados de cierres anteriores.
+
+### Enforcement en el backend, no en la UI
+
+Ocultar el esperado solo en el frontend no sirve — el dato viajaría igual en la respuesta
+HTTP y sería evadible con curl/devtools. La retención vive en `obtenerArqueo`
+(`caja.service.ts`): en modo ciego **y** con la caja `abierta`, la respuesta devuelve
+`esperado: null` en cada línea y se **filtra** a solo las líneas obligatorias (efectivo +
+las que tengan `requiereConteo`) — las informativas ni siquiera se listan. Es la regla
+`ciego && abierta`, sin ramificar por rol: **nadie** ve el esperado de una caja abierta en
+modo ciego, ni el dueño del turno ni el supervisor con `Cajas:Leer`. Esto es una decisión
+explícita del owner, más estricta que el estándar de mercado (donde el supervisor sí lo ve).
+
+Por eso la respuesta de `GET /caja/:id/arqueo` cambió de un arreglo plano (`LineaArqueo[]`)
+a un envoltorio `{ ciego: boolean, lineas: LineaArqueo[] }` — el cliente necesita saber si
+está mirando un preview retenido o uno completo para renderizar el drawer en consecuencia
+(ver ejemplos en [GET /caja/:id/arqueo](#get-cajaidarqueo--preview-o-congelado-según-el-estado)
+más arriba).
+
+**Caja cerrada → siempre revela**, sin importar la config del tenant (`ciego:false` y las
+líneas congeladas completas, con `contado`/`diferencia`). El modo ciego afecta únicamente el
+conteo **en curso**; el histórico de una caja ya cerrada nunca queda retenido — sería inútil
+para conciliar y auditar después. La revelación es una propiedad de la respuesta al **cerrar**
+(`POST /caja/:id/cerrar`, sin cambios — ver abajo), no de un endpoint aparte.
+
+### `cerrar` no cambia — su respuesta ya es la revelación
+
+`POST /caja/:id/cerrar` sigue exactamente igual que en el sub-proyecto A: recompute
+server-side del arqueo completo + congelado en `caja_arqueo_medio`, sin conocer el modo
+ciego. Su response (`{ caja, arqueo }`) siempre trae el esperado/contado/diferencia
+completos — es, precisamente, el momento en que el cajero deja de estar ciego. El modo
+ciego solo gobierna qué revela el **preview** (`GET /:id/arqueo` con la caja todavía
+abierta), nunca el resultado del cierre.
+
+### Drawer ciego + revelación por redirección al detalle
+
+`CajaCierreDrawer` lee `cajaStore.arqueoCiego` (poblado por `cargarArqueo`, que ahora
+consume `{ ciego, lineas }`). En modo ciego el drawer solo muestra las líneas obligatorias,
+sin esperado ni diferencia en vivo (los inputs de conteo son los mismos, pero no hay número
+de referencia contra qué compararse mientras se escribe). Al confirmar el cierre, en vez de
+solo cerrar el drawer, el flujo **redirige al detalle** de la caja recién cerrada
+(`/mi-caja/[id]`) para que el cajero vea ahí la diferencia revelada vía `CajaArqueoTable` —
+la misma tabla congelada que usa cualquier caja cerrada, no una vista especial. En modo
+normal (`arqueoCiego === false`) el drawer se comporta exactamente como en el sub-proyecto A
+(esperado y diferencia visibles en vivo, sin redirección forzada al cerrar).
+
+### Qué queda diferido
+
+Fuera de alcance de este sub-proyecto, siguen pendientes en
+[`docs/agent/pendientes.md`](../agent/pendientes.md) y documentados en la investigación
+[§6](../agent/investigaciones/2026-07-23-gestion-caja.md#6-poderes-del-encargado-sobre-la-caja-del-cajero-investigación-2026-07-23):
+
+- **Cierre forzado de una caja ajena por el encargado** (requiere `cajas.cerrada_por`,
+  distinto de `usuario_id`, para no mentir sobre quién contó).
+- **Aprobación de cierre por umbral de diferencia** (patrón Toast: si el over/short supera
+  un umbral configurable, requiere aprobación del supervisor).
+- **Ocultar el resultado *después* del cierre** al cajero — en el modo ciego de hoy, al
+  enviar el cierre el cajero **sí** ve su propia diferencia (la revelación es inmediata,
+  vía el detalle); condicionarla a que solo el supervisor la vea de inmediato pertenece a
+  la conciliación del §6, no a este sub-proyecto.
 
 ---
 
@@ -587,12 +686,30 @@ Authorization: Bearer <token>
 
 Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compartida.
 
-Response (200): arreglo de líneas (una por método + la de efectivo agregada). Si la
-      caja está 'abierta', recomputado en vivo sin `contado`/`diferencia`; si está
-      'cerrada', las filas congeladas de `caja_arqueo_medio` (o `[]` si es una caja
-      cerrada antes de este sub-proyecto, sin backfill).
-Ver detalle de forma y campos en Arqueo de caja multi-medio § GET /caja/:id/arqueo.
+Response (200): { "ciego": boolean, "lineas": [...] } — una línea por método + la de
+      efectivo agregada. Si la caja está 'abierta', recomputado en vivo sin
+      `contado`/`diferencia` (y con `esperado:null` + solo líneas obligatorias si el
+      tenant tiene el modo ciego activo — ver Cierre ciego); si está 'cerrada', SIEMPRE
+      `ciego:false` con las filas congeladas de `caja_arqueo_medio` completas (o `[]` si
+      es una caja cerrada antes del sub-proyecto A, sin backfill).
+Ver detalle de forma y campos en Arqueo de caja multi-medio § GET /caja/:id/arqueo y en
+Cierre ciego (modo anti-fraude).
 ```
+
+### GET/PUT /caja/arqueo-ciego — Config del modo ciego por tenant
+
+```
+GET /caja/arqueo-ciego
+Permiso requerido: Cajas / Leer
+Response (200): { "arqueoCiego": boolean }
+
+PUT /caja/arqueo-ciego
+Permiso requerido: Cajas / Actualizar
+Request: { "arqueoCiego": boolean }
+Response (200): { "arqueoCiego": boolean }
+```
+
+Ver detalle de negocio en [Cierre ciego (modo anti-fraude)](#cierre-ciego-modo-anti-fraude).
 
 ### POST /caja/:id/cerrar — Cerrar caja con arqueo multi-medio
 
@@ -764,6 +881,7 @@ recalcula después de escrita)
 - `MovimientoCajaDto` — `{ tipo, concepto, monto: string, referencia? }`
 - `CerrarCajaDto` — `{ lineas: LineaCierreDto[], comentario?: string }`
 - `LineaCierreDto` — `{ metodoPagoId: string | null, montoContado: string }` (`metodoPagoId: null` = línea de efectivo; `@IsNumberString` sin `no_symbols` para admitir decimales)
+- `SetArqueoCiegoDto` — `{ arqueoCiego: boolean }` (`@IsBoolean`) — body de `PUT /caja/arqueo-ciego`
 
 ### Key Methods
 
@@ -775,8 +893,9 @@ recalcula después de escrita)
 - `cajaService.listarMovimientos(tenantId, usuarioId, cajaId, query, verTodas)` — lista `movimientos_caja`; acepta caja ajena si `verTodas=true`
 - `cajaService.calcularEsperadoEfectivo(cajaId, manager)` — fondo + entradas de métodos `es_efectivo`/manuales − salidas; usada por el cierre, la salida manual (422) y la NC "devolver dinero"
 - `cajaService.calcularArqueo(cajaId, tenantId, manager)` — línea de efectivo + una línea por método no-efectivo con movimientos (dos queries, sin N+1)
-- `cajaService.obtenerArqueo(tenantId, usuarioId, cajaId, verTodas)` — preview (`calcularArqueo` en vivo) si `abierta`; filas de `caja_arqueo_medio` si `cerrada`
-- `cajaService.cerrar(tenantId, usuarioId, cajaId, dto)` — owner-only; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, marca `estado='cerrada'`
+- `cajaService.obtenerArqueo(tenantId, usuarioId, cajaId, verTodas)` — `{ ciego, lineas }`; preview (`calcularArqueo` en vivo) si `abierta` — retenido (`esperado:null`, solo obligatorias) si el tenant tiene `arqueo_ciego`; filas completas de `caja_arqueo_medio` (`ciego:false` siempre) si `cerrada`
+- `cajaService.getArqueoCiego(tenantId)` / `setArqueoCiego(tenantId, valor)` — lee/escribe `tenants.arqueo_ciego`; query raw parametrizada, filtra `eliminado_el IS NULL`
+- `cajaService.cerrar(tenantId, usuarioId, cajaId, dto)` — owner-only; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, marca `estado='cerrada'` — sin cambios por el modo ciego, ver Cierre ciego
 - `cajaService.historial(tenantId, usuarioId, query, todas)` — historial; `todas=true` retorna todas las cajas del tenant
 - `cajaService.findOne(tenantId, usuarioId, cajaId, verTodas)` — detalle de la caja
 
@@ -864,7 +983,7 @@ sin necesidad.
 - `components/caja/CajaAperturaGrid.vue` — Apertura en `/mi-caja`: grid de cards de cajones disponibles (poblado por `cajonesDisponibles`); click en un cajón abre un `AppDrawer` con saldo inicial + comentario → `cajaStore.abrir`. Cajón implícito por la card (nombre en el título del drawer)
 - `components/caja/CajaAperturaForm.vue` — Formulario de apertura con selector de cajón (poblado por `cajonesDisponibles`, obligatorio) + saldo inicial + comentario; usado en el POS (`pages/ventas/pos.vue`) para abrir caja sin salir de la venta
 - `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
-- `components/caja/CajaCierreDrawer.vue` — Drawer de cierre multi-medio: carga el arqueo (`GET /caja/:id/arqueo`) al abrirse, separa líneas obligatorias (efectivo + `requiereConteo`) de informativas, un `MoneyInput` de contado por línea con su diferencia en vivo, y bloquea "Confirmar cierre" hasta completar las obligatorias
+- `components/caja/CajaCierreDrawer.vue` — Drawer de cierre multi-medio: carga el arqueo (`GET /caja/:id/arqueo`) al abrirse, separa líneas obligatorias (efectivo + `requiereConteo`) de informativas, un `MoneyInput` de contado por línea con su diferencia en vivo, y bloquea "Confirmar cierre" hasta completar las obligatorias. En modo ciego (`cajaStore.arqueoCiego`) oculta esperado/diferencia en vivo y, al confirmar, redirige al detalle en vez de solo cerrar el drawer — ver [Cierre ciego](#cierre-ciego-modo-anti-fraude)
 - `components/caja/CajaArqueoTable.vue` — Tabla de solo lectura (método / esperado / contado / diferencia) para el desglose congelado; usada en el detalle read-only de una caja cerrada (`/mi-caja/[id]`, `/cajas/[id]`), solo si `arqueo.length > 0`
 - `components/caja/CajaCajonesGrid.vue` — Grid de cards para la superficie `/cajas` (permiso `Cajas:Leer`): **todos los cajones activos** del tenant con su estado (ocupado/libre), ocupados primero (la propia arriba). Card ocupada → `/cajas/[id]`; card libre (badge "Libre") → `/cajas/historial?cajonId=…`. No permite abrir caja (eso vive en `/mi-caja`)
 
@@ -881,7 +1000,8 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 - `cajonesEstado: CajonEstado[]` — todos los cajones activos del tenant con su estado ocupado/libre (superficie `/cajas`, permiso `Cajas:Leer`)
 - `detalle: CajaDetalle | null` — detalle de una caja ajena (página read-only)
 - `cajonesDisponibles: CajonDisponible[]` — opciones del picker de apertura (activos + libres + autorizados)
-- `arqueo: ArqueoLinea[]` — líneas del arqueo (preview en vivo o congeladas), poblado por `cargarArqueo()`; se consume desde `CajaCierreDrawer` y `CajaArqueoTable`
+- `arqueo: ArqueoLinea[]` — líneas del arqueo (preview en vivo o congeladas), poblado por `cargarArqueo()`; se consume desde `CajaCierreDrawer` y `CajaArqueoTable`. `ArqueoLinea.esperado` es `string | null` (nullable desde el modo ciego)
+- `arqueoCiego: boolean` — `ciego` del último `cargarArqueo()`; consumida por `CajaCierreDrawer` para la rama ciega y por la config de Cajas para el toggle
 - `loading: boolean`
 - `error: string | null`
 
@@ -889,9 +1009,11 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 - `fetchCajaActiva()` — GET /caja/activa
 - `cargarCajonesDisponibles()` — GET /caja/cajones-disponibles → puebla `cajonesDisponibles`
 - `abrirCaja(dto)` — POST /caja/abrir (`dto` incluye `cajonId`)
+- `cargarArqueoCiego()` — GET /caja/arqueo-ciego → boolean (config del tenant)
+- `guardarArqueoCiego(valor)` — PUT /caja/arqueo-ciego
 - `registrarMovimiento(cajaId, dto)` — POST /caja/:id/movimientos
 - `fetchMovimientos(cajaId)` — GET /caja/:id/movimientos
-- `cargarArqueo(cajaId)` — GET /caja/:id/arqueo → puebla `arqueo`
+- `cargarArqueo(cajaId)` — GET /caja/:id/arqueo → puebla `arqueo` y `arqueoCiego` (del `{ ciego, lineas }` de la respuesta)
 - `cerrar(cajaId, { lineas, comentario? })` — POST /caja/:id/cerrar; devuelve `{ caja, arqueo }`
 - `fetchHistorial(todas?)` — GET /caja?todas=true
 - `cargarCajonesEstado()` — GET /caja/cajones-estado → puebla `cajonesEstado`
@@ -1123,6 +1245,12 @@ npm run test:e2e -- caja.e2e-spec.ts
 - [x] Un cajón admite una sola sesión abierta (`ux_cajas_cajon_abierta`); condición de carrera → `409`
 - [x] `PATCH /cajones/:id` (desactivar) y `DELETE /cajones/:id` retornan `409` si el cajón tiene sesión abierta
 - [x] Caja virtual sin cambios: `cajon_id` siempre `NULL`, no pasa por `POST /caja/abrir`
+- [x] `tenants.arqueo_ciego` (default `false`) con `GET`/`PUT /caja/arqueo-ciego` (`Cajas:Leer`/`Actualizar`)
+- [x] `GET /caja/:id/arqueo` responde `{ ciego, lineas }`; en modo ciego + caja abierta retiene `esperado:null` y filtra a solo líneas obligatorias, sin importar quién consulte
+- [x] Caja cerrada siempre revela (`ciego:false`, líneas completas), sin importar la config del tenant
+- [x] `POST /caja/:id/cerrar` sin cambios: sigue recomputando y congelando el arqueo completo, ignorando el modo ciego
+- [x] Toggle "Arqueo ciego" en Configuración → Cajas (`Cajas:Actualizar`)
+- [x] `CajaCierreDrawer` en modo ciego oculta esperado/diferencia en vivo y redirige al detalle tras cerrar
 
 ---
 

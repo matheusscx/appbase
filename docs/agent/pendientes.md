@@ -82,8 +82,17 @@ modelo con implicancias de auditoría. Investigación y cruce de mercado:
   `requiere_conteo` por tenant, tabla `caja_arqueo_medio` congelada, `GET
   /caja/:id/arqueo`, `POST /caja/:id/cerrar` multi-línea). Detalle:
   [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#arqueo-de-caja-multi-medio-sub-proyecto-de-negocio-a-post-estructura).
-  Los dos ítems siguientes **quedan pendientes** (features de negocio B/C, fuera de este
-  sub-proyecto):
+- [x] **Sub-proyecto B — Cierre ciego — HECHO** (2026-07-24) — resuelve la mitad barata de
+  §5/§6 de la investigación (blind count): config por tenant `tenants.arqueo_ciego`
+  (default `false`, `GET`/`PUT /caja/arqueo-ciego` con `Cajas:Leer`/`Actualizar`); en modo
+  ciego + caja abierta `GET /caja/:id/arqueo` retiene `esperado:null` y filtra a solo
+  líneas obligatorias (nadie ve el esperado de una caja abierta, ni dueño ni supervisor);
+  respuesta cambia de `LineaArqueo[]` a `{ ciego, lineas }`; caja cerrada siempre revela;
+  `cerrar` sin cambios (su respuesta es la revelación); drawer ciego revela por
+  redirección al detalle. Detalle:
+  [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#cierre-ciego-modo-anti-fraude).
+  Los ítems siguientes **quedan pendientes** (fuera de alcance de A y B, ver
+  [investigación §6](investigaciones/2026-07-23-gestion-caja.md#6-poderes-del-encargado-sobre-la-caja-del-cajero-investigación-2026-07-23)):
 - [ ] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — habilitar que
   un usuario con permiso `Cajas` cierre la caja de un cajero que dejó el turno abierto
   (escenario: cajero que se fue de urgencia). Requiere agregar **`cerrada_por`** a la tabla
@@ -97,8 +106,13 @@ modelo con implicancias de auditoría. Investigación y cruce de mercado:
   fiel al mercado; mayor alcance. Ya no depende de resolver el modelo del esperado (§3,
   **resuelto** por el sub-proyecto A de arriba) — el umbral se evaluaría sobre la
   diferencia de cada línea del arqueo multi-medio, ya no sobre un total mezclado que
-  inflaba cualquier diferencia. Blind count y motivos categorizados de diferencia (§5 de
-  la investigación) siguen sin tracking en este archivo — quedan documentados solo en
+  inflaba cualquier diferencia.
+- [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
+  ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el cierre (la
+  revelación es inmediata, vía el detalle). Condicionar que solo el supervisor la vea de
+  inmediato pertenece a la conciliación de §6, no al sub-proyecto B. Motivos categorizados
+  de diferencia y conteo por denominación (§5/§8.3 de la investigación) siguen sin
+  tracking en este archivo — quedan documentados solo en
   [`investigaciones/2026-07-23-gestion-caja.md §9`](investigaciones/2026-07-23-gestion-caja.md).
 
 ## Endurecimiento para producción (pre-lanzamiento — hoy no hay prod)

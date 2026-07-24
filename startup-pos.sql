@@ -189,6 +189,7 @@ CREATE TABLE "tenants" (
   "escala_calculo"     SMALLINT    NOT NULL DEFAULT 6,        -- decimales para cálculos intermedios (0-12)
   "modo_redondeo"      TEXT        NOT NULL DEFAULT 'HALF_UP', -- HALF_UP | HALF_EVEN | FLOOR | CEIL
   "monto_tolerancia"   NUMERIC(18,6) NOT NULL DEFAULT 0,      -- tolerancia en conciliaciones
+  "arqueo_ciego"       BOOLEAN     NOT NULL DEFAULT false,     -- cierre ciego: retiene el esperado durante el conteo
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
   "eliminado_el"       TIMESTAMPTZ

@@ -450,8 +450,20 @@ Modelo acordado (§8.1 + brainstorming):
   tabla `caja_arqueo_medio`. Elimina el faltante fantasma: vender con tarjeta ya no infla
   el esperado de efectivo. Detalle:
   [`docs/features/gestion-cajas.md` § Arqueo de caja multi-medio](../../features/gestion-cajas.md#arqueo-de-caja-multi-medio-sub-proyecto-de-negocio-a-post-estructura).
-- [ ] **§6 — Cierre forzado + `cerrada_por`** y conciliación operador→supervisor (§7.4).
-- [ ] **§5 — Blind count, motivos categorizados de diferencia, denominación** (§8.4–8.5).
+- [x] **Sub-proyecto B — Cierre ciego — RESUELTO (2026-07-24).** Resuelve la mitad barata
+  de §5 (blind count): config por tenant `tenants.arqueo_ciego` (default `false`); en modo
+  ciego + caja abierta el `GET /caja/:id/arqueo` retiene `esperado:null` y filtra a solo
+  líneas obligatorias — **nadie** ve el esperado de una caja abierta, ni el dueño del
+  turno ni el supervisor (`Cajas:Leer`), más estricto que el estándar de mercado descrito
+  en §6 (donde el supervisor sí lo ve). Caja cerrada siempre revela; `cerrar` no cambia.
+  Detalle:
+  [`docs/features/gestion-cajas.md` § Cierre ciego](../../features/gestion-cajas.md#cierre-ciego-modo-anti-fraude).
+- [ ] **§6 — Cierre forzado + `cerrada_por`**, aprobación por umbral y ocultar el
+  resultado post-cierre al cajero (conciliación operador→supervisor, §7.4) — siguen
+  diferidos, ver [`docs/agent/pendientes.md`](../pendientes.md).
+- [ ] **§5 — Motivos categorizados de diferencia, conteo por denominación** (§8.3–8.5) —
+  el blind count de §5 quedó resuelto por el sub-proyecto B de arriba; lo que sigue
+  pendiente de §5 es exclusivamente motivos/denominación.
 
 ---
 
