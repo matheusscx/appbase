@@ -187,7 +187,6 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       const res = await request(app.getHttpServer())
         .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
-        // montoContado usa IsNumberString({ no_symbols: true }): sin punto decimal.
         .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
 
       expect(res.status).toBe(403);
@@ -206,7 +205,6 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         await request(app.getHttpServer())
           .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
           .set('Authorization', `Bearer ${tokenCajero}`)
-          // montoContado usa IsNumberString({ no_symbols: true }): sin punto decimal.
           .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
       }
     });
