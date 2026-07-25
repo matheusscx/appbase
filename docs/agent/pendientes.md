@@ -214,6 +214,15 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 
 ## Limpiezas menores (opcionales, no bloqueantes)
 
+- [ ] **`crear-movimiento.dto.ts:16` — `monto` admite negativos** (backend) — al hacer real
+  el modo ciego (2026-07-25) el validador pasó de `@IsNumberString({ no_symbols: true })` a
+  `@IsNumberString()` (obligado: `no_symbols` rechaza el punto decimal y rompe montos de
+  dinero — mismo bug ya documentado en `linea-cierre.dto.ts`). Efecto colateral: ese endpoint
+  ahora acepta `monto` negativo, que `no_symbols` bloqueaba de rebote; como `tipo`
+  (entrada/salida) codifica el signo, una `salida` con monto negativo *sumaría* al esperado.
+  Es el **mismo patrón** que `propinaDirecta`/`propinaCierreMesa` (money `@IsNumberString()`
+  sin `> 0`) — cerrar con un **barrido de positividad** sobre los DTOs de dinero de caja y
+  propinas a la vez (no un fix aislado). Auditable en `movimientos_caja`; no bloqueante.
 - [ ] **`causas-merma.service.ts` — mismo latente `UPDATE ... RETURNING` sin unwrap que
   se corrigió en `motivos-diferencia.service.ts`** (backend) — `create()` (línea ~58) y
   `update()` (línea ~101) tipan directo el resultado de `dataSource.query('INSERT/UPDATE
