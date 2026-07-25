@@ -10,6 +10,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import {
   DataSource,
   EntityManager,
+  In,
   IsNull,
   QueryFailedError,
   Repository,
@@ -107,12 +108,14 @@ export class CajaService {
   ) {}
 
   async findActiva(tenantId: string, usuarioId: string): Promise<Caja | null> {
+    // 'en_conciliacion' sigue "ocupando" al cajero: la conciliación (fase 2)
+    // está pendiente, no puede abrir otra caja hasta resolverla.
     return this.cajaRepo.findOne({
       where: {
         tenantId,
         usuarioId,
         tipo: 'fisica',
-        estado: 'abierta',
+        estado: In(['abierta', 'en_conciliacion']),
         eliminadoEl: IsNull(),
       },
     });
@@ -152,11 +155,11 @@ export class CajaService {
                    AND cu.eliminado_el IS NULL
               )
             )
-            -- libre: sin sesión abierta
+            -- libre: sin sesión abierta ni conciliación pendiente
             AND NOT EXISTS (
               SELECT 1 FROM cajas c
                WHERE c.cajon_id = cj.cajon_id
-                 AND c.estado = 'abierta' AND c.eliminado_el IS NULL
+                 AND c.estado IN ('abierta', 'en_conciliacion') AND c.eliminado_el IS NULL
             )
           ORDER BY cj.nombre ASC`,
         [tenantId, usuarioId],
@@ -208,11 +211,12 @@ export class CajaService {
           }
         }
 
-        // 4. Cajón libre — lockea las sesiones abiertas de ese cajón
+        // 4. Cajón libre — lockea las sesiones abiertas o en conciliación de
+        // ese cajón (una conciliación pendiente también ocupa el cajón).
         const ocupadas: { caja_id: string }[] = await manager.query(
           `SELECT caja_id FROM cajas
             WHERE cajon_id = $1 AND tenant_id = $2
-              AND estado = 'abierta' AND eliminado_el IS NULL
+              AND estado IN ('abierta', 'en_conciliacion') AND eliminado_el IS NULL
             FOR UPDATE`,
           [dto.cajonId, tenantId],
         );
@@ -568,12 +572,21 @@ export class CajaService {
     return this.obtenerArqueo(tenantId, '', cajaId, true);
   }
 
-  async cerrar(
+  /**
+   * Fase 1 del cierre en dos fases: congela el arqueo (esperado recomputado
+   * server-side + contado declarado + diferencia) exactamente igual que el
+   * cierre anterior, y bifurca según cuadre:
+   *   - Sin descuadre en ninguna línea → auto-cierre (`estado: 'cerrada'`,
+   *     `fechaCierre` fijada). No requiere fase 2.
+   *   - Con descuadre en alguna línea → `estado: 'en_conciliacion'`, sin
+   *     `fechaCierre`. La fase 2 (Task 3, `cerrar`) resuelve la conciliación.
+   */
+  async enviarConteo(
     tenantId: string,
     usuarioId: string,
     cajaId: string,
     dto: CerrarCajaDto,
-  ): Promise<{ caja: Caja; arqueo: LineaArqueo[] }> {
+  ): Promise<{ estado: 'cerrada' | 'en_conciliacion'; arqueo: LineaArqueo[] }> {
     return this.dataSource.transaction(async (manager) => {
       await this.bloquearCajaAbierta(manager, cajaId, tenantId);
 
@@ -650,12 +663,26 @@ export class CajaService {
       caja.saldoFinal = efectivo.esperado;
       caja.montoContado = contadoPorClave.get('EFECTIVO')!; // obligatoria → presente
       caja.diferencia = efectivo.diferencia;
-      caja.fechaCierre = new Date();
-      caja.estado = 'cerrada';
       caja.comentario = dto.comentario ?? null;
+
+      // Bifurcación fase 1: cualquier línea descuadrada → conciliación
+      // pendiente (fase 2 la resuelve); todo cuadrado → auto-cierre.
+      const hayDescuadre = lineasResueltas.some(
+        (l) => l.diferencia !== null && !new Decimal(l.diferencia).isZero(),
+      );
+      if (hayDescuadre) {
+        caja.estado = 'en_conciliacion';
+        caja.fechaCierre = null;
+      } else {
+        caja.estado = 'cerrada';
+        caja.fechaCierre = new Date();
+      }
       await manager.save(Caja, caja);
 
-      return { caja, arqueo: lineasResueltas };
+      return {
+        estado: caja.estado as 'cerrada' | 'en_conciliacion',
+        arqueo: lineasResueltas,
+      };
     });
   }
 
@@ -902,7 +929,7 @@ export class CajaService {
        LEFT JOIN cajas c
               ON c.cajon_id = cj.cajon_id
              AND c.tipo = 'fisica'
-             AND c.estado = 'abierta'
+             AND c.estado IN ('abierta', 'en_conciliacion')
              AND c.eliminado_el IS NULL
        LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id AND u.eliminado_el IS NULL
        LEFT JOIN movimientos_caja m ON m.caja_id = c.caja_id

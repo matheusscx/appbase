@@ -7,7 +7,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { IsNull } from 'typeorm';
+import { In, IsNull } from 'typeorm';
 import { CajaService } from './caja.service';
 import type { LineaArqueo } from './caja.service';
 import { Caja } from './entities/caja.entity';
@@ -110,7 +110,7 @@ describe('CajaService', () => {
           tenantId: TENANT_ID,
           usuarioId: USUARIO_ID,
           tipo: 'fisica',
-          estado: 'abierta',
+          estado: In(['abierta', 'en_conciliacion']),
           eliminadoEl: IsNull(),
         },
       });
@@ -246,7 +246,7 @@ describe('CajaService', () => {
     });
   });
 
-  describe('cerrar', () => {
+  describe('enviarConteo', () => {
     const arqueoRecomputado: LineaArqueo[] = [
       {
         metodoPagoId: null,
@@ -264,6 +264,13 @@ describe('CajaService', () => {
       },
     ];
 
+    // Última llamada a manager.save(Caja, caja) — enviarConteo ya no
+    // devuelve la Caja completa (solo { estado, arqueo }).
+    const findSavedCaja = (): Partial<Caja> =>
+      managerMock.save.mock.calls.find(
+        (c: unknown[]) => c[0] === Caja,
+      )?.[1] as Partial<Caja>;
+
     beforeEach(() => {
       managerMock.query.mockResolvedValue([{ caja_id: CAJA_ID }]); // FOR UPDATE
       managerMock.findOne.mockResolvedValue({ ...mockCajaAbierta });
@@ -271,12 +278,62 @@ describe('CajaService', () => {
         (_e: unknown, data: unknown) => data,
       );
       managerMock.save.mockImplementation((_e: unknown, x: unknown) => x);
-      jest
-        .spyOn(service, 'calcularArqueo')
-        .mockResolvedValue(arqueoRecomputado);
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValue([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '1000.0000',
+          requiereConteo: true,
+        },
+      ]);
+    });
+
+    it('todo cuadra → estado cerrada (auto-cierre) + fechaCierre', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        usuarioId: USUARIO_ID,
+      });
+      const res = await service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, {
+        lineas: [{ metodoPagoId: null, montoContado: '1000' }],
+      });
+      expect(res.estado).toBe('cerrada');
+      const savedCaja =
+        managerMock.save.mock.calls.find(
+          (c) => c[0] === Caja || c[1]?.estado,
+        )?.[1] ?? managerMock.save.mock.calls.at(-1)[0];
+      expect(savedCaja.estado).toBe('cerrada');
+      expect(savedCaja.fechaCierre).toBeInstanceOf(Date);
+    });
+
+    it('hay descuadre → estado en_conciliacion, sin fechaCierre', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        usuarioId: USUARIO_ID,
+      });
+      const res = await service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, {
+        lineas: [{ metodoPagoId: null, montoContado: '900' }],
+      });
+      expect(res.estado).toBe('en_conciliacion');
+      // manager.save(Caja, caja) — el objeto guardado es el 2º argumento.
+      const savedCaja = managerMock.save.mock.calls.at(-1)[1];
+      expect(savedCaja.estado).toBe('en_conciliacion');
+      expect(savedCaja.fechaCierre).toBeNull();
+    });
+
+    it('la caja debe estar abierta', async () => {
+      managerMock.findOne.mockResolvedValueOnce(null);
+      await expect(
+        service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, {
+          lineas: [{ metodoPagoId: null, montoContado: '900' }],
+        } as any),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('congela el arqueo y fija los agregados de cajas = línea de efectivo', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue(arqueoRecomputado);
       const dto: CerrarCajaDto = {
         lineas: [
           { metodoPagoId: null, montoContado: '1000' },
@@ -286,16 +343,17 @@ describe('CajaService', () => {
           },
         ],
       };
-      const { caja, arqueo } = await service.cerrar(
+      const { estado, arqueo } = await service.enviarConteo(
         TENANT_ID,
         USUARIO_ID,
         CAJA_ID,
         dto,
       );
-      expect(caja.estado).toBe('cerrada');
-      expect(caja.saldoFinal).toBe('1000.0000'); // esperado efectivo
-      expect(caja.montoContado).toBe('1000'); // contado efectivo
-      expect(caja.diferencia).toBe('0.0000');
+      expect(estado).toBe('cerrada');
+      const savedCaja = findSavedCaja();
+      expect(savedCaja.saldoFinal).toBe('1000.0000'); // esperado efectivo
+      expect(savedCaja.montoContado).toBe('1000'); // contado efectivo
+      expect(savedCaja.diferencia).toBe('0.0000');
       const efectivo = arqueo.find((l) => l.metodoPagoId === null);
       const tarjeta = arqueo.find((l) => l.metodoPagoId !== null);
       expect(efectivo?.diferencia).toBe('0.0000');
@@ -304,6 +362,9 @@ describe('CajaService', () => {
     });
 
     it('deja la línea opcional omitida como informativa (contado NULL)', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue(arqueoRecomputado);
       const dto: CerrarCajaDto = {
         lineas: [
           {
@@ -312,19 +373,23 @@ describe('CajaService', () => {
           },
         ], // solo efectivo
       };
-      const { caja, arqueo } = await service.cerrar(
+      const { arqueo } = await service.enviarConteo(
         TENANT_ID,
         USUARIO_ID,
         CAJA_ID,
         dto,
       );
-      expect(caja.diferencia).toBe('-100.0000');
+      const savedCaja = findSavedCaja();
+      expect(savedCaja.diferencia).toBe('-100.0000');
       const tarjeta = arqueo.find((l) => l.metodoPagoId !== null);
       expect(tarjeta?.contado).toBeNull();
       expect(tarjeta?.diferencia).toBeNull();
     });
 
     it('400 si falta la línea de efectivo (obligatoria)', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue(arqueoRecomputado);
       const dto: CerrarCajaDto = {
         lineas: [
           {
@@ -334,11 +399,14 @@ describe('CajaService', () => {
         ],
       };
       await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+        service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('400 si el DTO trae un metodoPagoId ajeno al arqueo', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue(arqueoRecomputado);
       const dto: CerrarCajaDto = {
         lineas: [
           { metodoPagoId: null, montoContado: '1000' },
@@ -349,7 +417,7 @@ describe('CajaService', () => {
         ],
       };
       await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+        service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -364,11 +432,14 @@ describe('CajaService', () => {
         lineas: [{ metodoPagoId: null, montoContado: '1000' }],
       };
       await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+        service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('acepta montoContado con decimales', async () => {
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValue(arqueoRecomputado);
       const dto: CerrarCajaDto = {
         lineas: [
           {
@@ -381,13 +452,9 @@ describe('CajaService', () => {
           },
         ],
       };
-      const { caja } = await service.cerrar(
-        TENANT_ID,
-        USUARIO_ID,
-        CAJA_ID,
-        dto,
-      );
-      expect(caja.diferencia).toBe('0.5000');
+      await service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto);
+      const savedCaja = findSavedCaja();
+      expect(savedCaja.diferencia).toBe('0.5000');
     });
 
     it('lanza si la caja no está abierta (lock falla)', async () => {
@@ -396,11 +463,11 @@ describe('CajaService', () => {
         lineas: [{ metodoPagoId: null, montoContado: '1000' }],
       };
       await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
+        service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('permite cerrar con descuadre sin exigir motivo (cerrar ya no lo captura)', async () => {
+    it('descuadre → en_conciliacion sin exigir motivo (lo captura la fase 2)', async () => {
       jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
         {
           metodoPagoId: null,
@@ -414,7 +481,7 @@ describe('CajaService', () => {
         ...mockCajaAbierta,
         usuarioId: USUARIO_ID,
       });
-      const { caja, arqueo } = await service.cerrar(
+      const { estado, arqueo } = await service.enviarConteo(
         TENANT_ID,
         USUARIO_ID,
         CAJA_ID,
@@ -422,7 +489,9 @@ describe('CajaService', () => {
           lineas: [{ metodoPagoId: null, montoContado: '900' }],
         },
       );
-      expect(caja.diferencia).toBe('-100.0000');
+      expect(estado).toBe('en_conciliacion');
+      const savedCaja = findSavedCaja();
+      expect(savedCaja.diferencia).toBe('-100.0000');
       expect(arqueo[0].motivoDiferenciaId).toBeUndefined();
       expect(arqueo[0].comentarioDiferencia).toBeUndefined();
     });

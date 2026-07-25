@@ -75,7 +75,7 @@ export class Caja {
   diferencia: string | null;
 
   @Column({ default: 'abierta' })
-  estado: string; // 'abierta' | 'cerrada'
+  estado: string; // 'abierta' | 'en_conciliacion' | 'cerrada'
 
   @Column({ type: 'varchar', nullable: true })
   comentario: string | null;

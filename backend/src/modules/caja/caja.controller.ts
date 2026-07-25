@@ -155,6 +155,20 @@ export class CajaController {
     return this.cajaService.registrarMovimiento(u.tenantId!, u.id, cajaId, dto);
   }
 
+  @Post(':id/conteo')
+  @RequiresPermiso('MiCaja', 'Actualizar')
+  enviarConteo(
+    @Req() req: Request,
+    @Param('id') cajaId: string,
+    @Body() dto: CerrarCajaDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.cajaService.enviarConteo(u.tenantId!, u.id, cajaId, dto);
+  }
+
+  // Transitorio: `/cerrar` apunta hoy a la fase 1 (enviarConteo) solo para
+  // mantener el endpoint existente compilando; la fase 2 (resolución de la
+  // conciliación) lo redefine en la siguiente tarea del rediseño.
   @Post(':id/cerrar')
   @RequiresPermiso('MiCaja', 'Actualizar')
   cerrar(
@@ -163,7 +177,7 @@ export class CajaController {
     @Body() dto: CerrarCajaDto,
   ) {
     const u = req.user as JwtUser;
-    return this.cajaService.cerrar(u.tenantId!, u.id, cajaId, dto);
+    return this.cajaService.enviarConteo(u.tenantId!, u.id, cajaId, dto);
   }
 
   @Get(':id/movimientos/resumen')

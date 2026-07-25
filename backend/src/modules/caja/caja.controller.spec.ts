@@ -16,7 +16,7 @@ describe('CajaController', () => {
       findOne: jest.fn(),
       abrir: jest.fn(),
       registrarMovimiento: jest.fn(),
-      cerrar: jest.fn(),
+      enviarConteo: jest.fn(),
       resumenMovimientos: jest.fn(),
       listarMovimientos: jest.fn(),
       obtenerArqueo: jest.fn(),
@@ -259,12 +259,36 @@ describe('CajaController', () => {
       );
     });
 
-    it('cerrar delega en cajaService.cerrar', () => {
+    it('cerrar delega en cajaService.enviarConteo (transitorio, fase 2 en Task 3)', () => {
       const dto = { montoContado: '900' } as any;
-      jest.spyOn(cajaService, 'cerrar').mockResolvedValue({} as any);
+      jest.spyOn(cajaService, 'enviarConteo').mockResolvedValue({} as any);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       controller.cerrar(req, 'caja1', dto);
-      expect(cajaService.cerrar).toHaveBeenCalledWith('t1', 'u1', 'caja1', dto);
+      expect(cajaService.enviarConteo).toHaveBeenCalledWith(
+        't1',
+        'u1',
+        'caja1',
+        dto,
+      );
+    });
+  });
+
+  describe('enviarConteo', () => {
+    it('enviarConteo delega en cajaService.enviarConteo con tenant/usuario del token', () => {
+      const dto = {
+        lineas: [{ metodoPagoId: null, montoContado: '900' }],
+      } as any;
+      jest
+        .spyOn(cajaService, 'enviarConteo')
+        .mockResolvedValue({ estado: 'cerrada', arqueo: [] } as any);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      controller.enviarConteo(req, 'caja1', dto);
+      expect(cajaService.enviarConteo).toHaveBeenCalledWith(
+        't1',
+        'u1',
+        'caja1',
+        dto,
+      );
     });
   });
 
