@@ -74,6 +74,8 @@ import { ItemsModule } from './modules/items/items.module';
 import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
 import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
 import { CausaMerma } from './modules/mermas/entities/causa-merma.entity';
+import { MotivoDiferenciaCaja } from './modules/motivos-diferencia/entities/motivo-diferencia-caja.entity';
+import { MotivosDiferenciaModule } from './modules/motivos-diferencia/motivos-diferencia.module';
 import { InventarioModule } from './modules/inventario/inventario.module';
 import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.module';
 import { CajaModule } from './modules/caja/caja.module';
@@ -195,6 +197,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
           ItemCombo,
           ComboComponente,
           CausaMerma,
+          MotivoDiferenciaCaja,
           MovimientoInventario,
           MovimientoInventarioDetalle,
           MovimientoCaja,
@@ -280,6 +283,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
     ImpresorasModule,
     MermasModule,
     GruposModificadoresModule,
+    MotivosDiferenciaModule,
   ],
   controllers: [AppController],
   providers: [AppService],
