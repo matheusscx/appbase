@@ -458,12 +458,27 @@ Modelo acordado (§8.1 + brainstorming):
   en §6 (donde el supervisor sí lo ve). Caja cerrada siempre revela; `cerrar` no cambia.
   Detalle:
   [`docs/features/gestion-cajas.md` § Cierre ciego](../../features/gestion-cajas.md#cierre-ciego-modo-anti-fraude).
-- [ ] **§6 — Cierre forzado + `cerrada_por`**, aprobación por umbral y ocultar el
-  resultado post-cierre al cajero (conciliación operador→supervisor, §7.4) — siguen
-  diferidos, ver [`docs/agent/pendientes.md`](../pendientes.md).
-- [ ] **§5 — Motivos categorizados de diferencia, conteo por denominación** (§8.3–8.5) —
-  el blind count de §5 quedó resuelto por el sub-proyecto B de arriba; lo que sigue
-  pendiente de §5 es exclusivamente motivos/denominación.
+- [x] **Sub-proyecto C — Cierre en dos fases + motivos de diferencia — RESUELTO
+  (2026-07-24).** Resuelve la **conciliación operador→supervisor** de §6 y los
+  **motivos categorizados de diferencia** de §5: el cierre se parte en fase 1 (`POST
+  /caja/:id/conteo`, congela el arqueo server-side de forma inmutable y bifurca a
+  auto-cierre si todo cuadra o `estado='en_conciliacion'` si algo descuadra) y fase 2
+  (`POST /caja/:id/cerrar`, owner-**o**-admin, exige un motivo categorizado — o
+  comentario si el tenant no tiene motivos activos — por línea descuadrada y finaliza sin
+  recalcular nada); `en_conciliacion` ocupa igual que `abierta` (bloquea abrir otra caja,
+  el cajón, ventas y movimientos); catálogo `motivo_diferencia_caja` admin-only (mismo
+  patrón que `causas_merma`); override admin `PATCH /caja/:id/arqueo/motivos` corrige
+  motivos de una caja ya cerrada. **No** es el cierre forzado de §6 completo: un admin
+  solo *finaliza* una conciliación que el dueño ya congeló en la fase 1, nunca inicia el
+  conteo de una caja ajena desde cero — eso sigue requiriendo `cajas.cerrada_por`. Detalle:
+  [`docs/features/gestion-cajas.md` § Cierre en dos
+  fases](../../features/gestion-cajas.md#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
+- [ ] **§6 — Cierre forzado desde cero + `cerrada_por`**, aprobación por umbral y ocultar
+  el resultado post-cierre al cajero — siguen diferidos, ver
+  [`docs/agent/pendientes.md`](../pendientes.md).
+- [ ] **§5 — Conteo por denominación** (§8.3) — los motivos categorizados de diferencia de
+  §5 quedaron resueltos por el sub-proyecto C de arriba; lo que sigue pendiente de §5 es
+  exclusivamente el conteo por denominación de billetes/monedas.
 
 ---
 

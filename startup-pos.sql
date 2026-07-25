@@ -808,7 +808,13 @@ CREATE TABLE "cajas" (
   "saldo_final"    NUMERIC(18,4),
   "monto_contado"  NUMERIC(18,4),   -- monto físico ingresado por el usuario al cerrar
   "diferencia"     NUMERIC(18,4),   -- monto_contado − saldo_esperado
-  "estado"         TEXT          NOT NULL DEFAULT 'abierta',  -- 'abierta' | 'cerrada'
+  "estado"         TEXT          NOT NULL DEFAULT 'abierta',
+  -- 'abierta' | 'en_conciliacion' | 'cerrada'. `en_conciliacion`: cierre en dos
+  -- fases (sub-proyecto C, ver docs/features/gestion-cajas.md) — el conteo
+  -- (fase 1, POST /caja/:id/conteo) ya congeló el arqueo y descuadró alguna
+  -- línea; la caja sigue "ocupada" (bloquea abrir otra, vender, mover) hasta
+  -- que la fase 2 (POST /caja/:id/cerrar) justifique las diferencias con un
+  -- motivo y finalice a 'cerrada'.
   "comentario"     TEXT,
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
@@ -816,7 +822,11 @@ CREATE TABLE "cajas" (
 );
 
 -- Unicidad de sesión por cajón: un cajón físico solo admite una caja abierta
--- a la vez. Sub-proyecto 3/3 del refactor general de caja.
+-- a la vez. Sub-proyecto 3/3 del refactor general de caja. `en_conciliacion`
+-- también ocupa el cajón (ver comentario de `estado` arriba), pero queda
+-- fuera de este índice porque su condición es `estado = 'abierta'`; la
+-- ocupación de `en_conciliacion` la hace valer el service (`abrir`,
+-- `cajonesDisponibles`), no un constraint de BD.
 CREATE UNIQUE INDEX "ux_cajas_cajon_abierta"
   ON "cajas" ("cajon_id")
   WHERE "estado" = 'abierta' AND "eliminado_el" IS NULL;
@@ -837,23 +847,49 @@ CREATE TABLE "movimientos_caja" (
   "eliminado_el"   TIMESTAMPTZ
 );
 
+-- Catálogo de motivos de diferencia de caja por tenant (falta de efectivo, divergencia
+-- de tarjeta, etc.) — sub-proyecto de negocio C, cierre en dos fases (ver
+-- docs/features/gestion-cajas.md § Cierre en dos fases). Mismo patrón que
+-- "causas_merma": `es_fijo` sembrado por tenant, no renombrable/eliminable pero sí
+-- togglable en `activo`/`requiere_comentario`. `requiere_comentario` fuerza el
+-- comentario libre además del motivo al justificar una línea descuadrada.
+CREATE TABLE "motivo_diferencia_caja" (
+  "motivo_diferencia_id" UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"             UUID    NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"                TEXT    NOT NULL,
+  "activo"                BOOLEAN NOT NULL DEFAULT true,
+  "requiere_comentario"   BOOLEAN NOT NULL DEFAULT false,
+  "es_fijo"               BOOLEAN NOT NULL DEFAULT false,
+  "creado_el"             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"        TIMESTAMPTZ,
+  "eliminado_el"          TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_motivo_diferencia_caja_tenant_nombre"
+  ON "motivo_diferencia_caja" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
+
 -- Arqueo de caja multi-medio: detalle del cierre por método de pago, CONGELADO
 -- (nunca se recalcula después de escrito). Sub-proyecto de negocio A, post-estructura
 -- (ver docs/features/gestion-cajas.md § Arqueo de caja multi-medio). Una fila por línea
 -- del cierre; "metodo_pago_id" NULL = la línea de efectivo agregada (fondo + entradas
 -- es_efectivo + manuales − salidas). "esperado" siempre se recomputa server-side, nunca
 -- viene del cliente; "contado"/"diferencia" nullable = línea informativa no contada.
+-- "motivo_diferencia_id"/"comentario_diferencia" (sub-proyecto C): justificación de la
+-- línea descuadrada, aplicada en la fase 2 del cierre (`POST /caja/:id/cerrar`) o
+-- corregida después por el override admin (`PATCH /caja/:id/arqueo/motivos`); nunca
+-- tocan esperado/contado/diferencia, que siguen congelados desde la fase 1.
 CREATE TABLE "caja_arqueo_medio" (
-  "arqueo_medio_id" UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
-  "caja_id"         UUID          NOT NULL REFERENCES "cajas" ("caja_id"),
-  "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
-  "metodo_pago_id"  UUID          REFERENCES "metodos_pago" ("metodo_pago_id"),  -- NULL = línea de efectivo
-  "es_efectivo"     BOOLEAN       NOT NULL,
-  "esperado"        NUMERIC(18,4) NOT NULL,
-  "contado"         NUMERIC(18,4),
-  "diferencia"      NUMERIC(18,4),
-  "creado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  "eliminado_el"    TIMESTAMPTZ
+  "arqueo_medio_id"        UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  "caja_id"                UUID          NOT NULL REFERENCES "cajas" ("caja_id"),
+  "tenant_id"              UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "metodo_pago_id"         UUID          REFERENCES "metodos_pago" ("metodo_pago_id"),  -- NULL = línea de efectivo
+  "es_efectivo"            BOOLEAN       NOT NULL,
+  "esperado"               NUMERIC(18,4) NOT NULL,
+  "contado"                NUMERIC(18,4),
+  "diferencia"             NUMERIC(18,4),
+  "motivo_diferencia_id"   UUID          REFERENCES "motivo_diferencia_caja" ("motivo_diferencia_id"),
+  "comentario_diferencia"  TEXT,
+  "creado_el"              TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  "eliminado_el"           TIMESTAMPTZ
 );
 
 CREATE UNIQUE INDEX "ux_caja_arqueo_medio"

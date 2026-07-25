@@ -91,8 +91,23 @@ modelo con implicancias de auditoría. Investigación y cruce de mercado:
   `cerrar` sin cambios (su respuesta es la revelación); drawer ciego revela por
   redirección al detalle. Detalle:
   [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#cierre-ciego-modo-anti-fraude).
-  Los ítems siguientes **quedan pendientes** (fuera de alcance de A y B, ver
-  [investigación §6](investigaciones/2026-07-23-gestion-caja.md#6-poderes-del-encargado-sobre-la-caja-del-cajero-investigación-2026-07-23)):
+  Los ítems siguientes quedaron pendientes hasta el sub-proyecto C (abajo); "ocultar el
+  resultado post-cierre" **sigue** diferido incluso después de C (ver [investigación
+  §6](investigaciones/2026-07-23-gestion-caja.md#6-poderes-del-encargado-sobre-la-caja-del-cajero-investigación-2026-07-23)):
+- [x] **Sub-proyecto C — Cierre en dos fases + motivos de diferencia — HECHO** (2026-07-24)
+  — resuelve la conciliación operador→supervisor de §6 y los motivos categorizados de §5:
+  fase 1 `POST /caja/:id/conteo` congela el arqueo server-side (inmutable desde ahí) y
+  bifurca a auto-cierre (todo cuadró) o `estado='en_conciliacion'` (algún descuadre); fase
+  2 `POST /caja/:id/cerrar` (owner-**o**-admin, única escritura no estrictamente
+  owner-only del controller) exige un motivo categorizado — o comentario si el tenant no
+  tiene motivos activos (red de seguridad) — por línea descuadrada y finaliza sin
+  recalcular nada; `en_conciliacion` ocupa igual que `abierta` (bloquea abrir otra caja, el
+  cajón, ventas y movimientos); catálogo `motivo_diferencia_caja` admin-only (mismo patrón
+  que `causas_merma`); override admin `PATCH /caja/:id/arqueo/motivos` corrige motivos de
+  una caja ya cerrada. **No** es el cierre forzado de §6 (el admin solo *finaliza* una
+  conciliación que el dueño ya congeló, nunca inicia el conteo de una caja ajena) — ese
+  ítem sigue diferido más abajo. Detalle:
+  [`docs/features/gestion-cajas.md` § Cierre en dos fases](../features/gestion-cajas.md#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
 - [ ] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — habilitar que
   un usuario con permiso `Cajas` cierre la caja de un cajero que dejó el turno abierto
   (escenario: cajero que se fue de urgencia). Requiere agregar **`cerrada_por`** a la tabla
@@ -108,12 +123,15 @@ modelo con implicancias de auditoría. Investigación y cruce de mercado:
   diferencia de cada línea del arqueo multi-medio, ya no sobre un total mezclado que
   inflaba cualquier diferencia.
 - [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
-  ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el cierre (la
-  revelación es inmediata, vía el detalle). Condicionar que solo el supervisor la vea de
-  inmediato pertenece a la conciliación de §6, no al sub-proyecto B. Motivos categorizados
-  de diferencia y conteo por denominación (§5/§8.3 de la investigación) siguen sin
-  tracking en este archivo — quedan documentados solo en
-  [`investigaciones/2026-07-23-gestion-caja.md §9`](investigaciones/2026-07-23-gestion-caja.md).
+  ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el conteo (la
+  revelación es inmediata, vía el detalle), aunque la caja quede `en_conciliacion`. El
+  sub-proyecto C (arriba) resolvió la conciliación operador→supervisor de §6, pero no
+  condicionó la revelación a que solo el supervisor la vea de inmediato — sigue diferido.
+- [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
+  de diferencia de §5 quedaron **resueltos** por el sub-proyecto C (arriba); lo que sigue
+  pendiente de §5 es exclusivamente el conteo por denominación de billetes/monedas, sin
+  tracking más detallado que [`investigaciones/2026-07-23-gestion-caja.md
+  §9`](investigaciones/2026-07-23-gestion-caja.md).
 
 ## Endurecimiento para producción (pre-lanzamiento — hoy no hay prod)
 
@@ -196,6 +214,18 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 
 ## Limpiezas menores (opcionales, no bloqueantes)
 
+- [ ] **`causas-merma.service.ts` — mismo latente `UPDATE ... RETURNING` sin unwrap que
+  se corrigió en `motivos-diferencia.service.ts`** (backend) — `create()` (línea ~58) y
+  `update()` (línea ~101) tipan directo el resultado de `dataSource.query('INSERT/UPDATE
+  ... RETURNING ...')` como `CausaMermaRow[]` y leen `rows[0]` sin pasar por ningún
+  unwrap. `motivos-diferencia.service.ts` documenta el motivo real: "TypeORM + pg:
+  INSERT/UPDATE ... RETURNING llega como `[rows, rowCount]`, no como `rows`" y agrega un
+  helper `unwrap()` para los mismos dos métodos. `causas-merma.service.ts` no tiene ese
+  helper — hoy funciona porque nadie lo notó romperse (posible que la config actual del
+  driver no dispare el caso, o que quede enmascarado por otro camino), pero es el mismo
+  patrón de riesgo. Cerrar aplicando el mismo `unwrap()` (o extrayéndolo a un helper
+  compartido si se toca un tercer service con el mismo patrón — regla de "duplicar dos
+  veces es aceptable, se extrae a la tercera" de `CLAUDE.md`).
 - [ ] `items.vue:81` — campo `esPendiente` en `GrupoOpcionOverrideRow` se setea pero
   nunca se lee (el badge re-deriva la condición inline). O wirear el badge a este campo,
   o quitarlo del tipo.

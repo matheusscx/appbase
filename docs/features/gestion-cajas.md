@@ -29,7 +29,8 @@ cajero cuenta (`monto_contado`), generando el reporte de cuadre de caja.
 - Incluido:
   - Apertura de caja física con saldo inicial
   - Movimientos manuales (entrada / salida de efectivo)
-  - Cierre de caja con cuadre automático
+  - Cierre en dos fases con cuadre automático multi-medio y motivos categorizados de
+    diferencia (congela → concilia con motivo → finaliza; auto-cierre si todo cuadra)
   - Historial de sesiones de caja (propia + todas con permiso especial)
   - Caja virtual (creada automáticamente por tenant para ventas online — excluida de flujos manuales)
   - Permisos granulares vía `@RequiresPermiso` + `PermisosGuard`
@@ -39,6 +40,9 @@ cajero cuenta (`monto_contado`), generando el reporte de cuadre de caja.
   - Cajas de múltiples bodegas / sucursales
   - Reimpresión de recibos de apertura/cierre
   - Conciliación automática con pagos electrónicos
+  - Cierre forzado de una caja ajena desde cero por el encargado (requiere `cajas.cerrada_por`)
+  - Aprobación de cierre por umbral de diferencia (patrón Toast)
+  - Reporte agregado de over/short por cajero/motivo/período
 
 ---
 
@@ -64,10 +68,16 @@ en cuanto el tenant contrata el módulo `Cajas` (short-circuit de rol fijo).
 frontend. Lo único que cambió es el `@RequiresPermiso` de cada endpoint. Ver
 [endpoints](#api-endpoints) y [Backend](#backend).
 
-**Escrituras siempre owner-only**: tener `Cajas:Leer` nunca habilita `POST
-/caja/:id/movimientos` ni `POST /caja/:id/cerrar` sobre una caja ajena — esa validación
-vive en el service y no depende del módulo de permiso. El cierre forzado de una caja
-ajena por el encargado queda diferido (ver `docs/agent/pendientes.md`).
+**Escrituras casi siempre owner-only**: tener `Cajas:Leer` nunca habilita `POST
+/caja/:id/movimientos` ni `POST /caja/:id/conteo` (fase 1 del cierre) sobre una caja
+ajena — esa validación vive en el service y no depende del módulo de permiso. La única
+excepción es la **fase 2** del cierre en dos fases (`POST /caja/:id/cerrar`, sub-proyecto
+C — ver [Cierre en dos fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c)
+más abajo): un admin del tenant puede **finalizar** una conciliación que el dueño del
+turno ya congeló en la fase 1, nunca iniciar el conteo por él. Es más angosto que el
+"cierre forzado de una caja ajena" que sigue diferido (ver `docs/agent/pendientes.md`):
+ese ítem habilitaría a un admin a cerrar **desde cero** el turno de un cajero que se fue,
+algo que requeriría un campo `cerrada_por` que hoy no existe.
 
 ---
 
@@ -217,27 +227,32 @@ pasa por este flujo.
 
 ### Validaciones al abrir, en orden, bajo una transacción
 
-1. **Usuario libre** — sigue la regla previa: una sola caja física abierta por
-   `(tenant, usuario)` (`409` si ya tiene una).
+1. **Usuario libre** — sigue la regla previa: una sola caja física `abierta` o
+   `en_conciliacion` por `(tenant, usuario)` (`409` si ya tiene una; desde el
+   sub-proyecto C una conciliación pendiente también cuenta).
 2. **Cajón válido y activo** — el `cajonId` debe existir en el tenant, no estar
    soft-deleted y tener `activo = true` (`404` si no existe, `409` si está inactivo).
 3. **Autorizado** — hace valer la allow-list del sub-2 (`cajon_usuario`): lista vacía
    para ese cajón = permisivo (cualquiera con `MiCaja:Crear`); lista no vacía = solo un
    usuario en ella (`403` si no está autorizado).
-4. **Cajón libre** — sin sesión `abierta` para ese `cajonId`, con lock pesimista
-   (`FOR UPDATE`) sobre las sesiones abiertas del cajón antes de insertar, para cerrar
-   la ventana de carrera entre el chequeo y el insert (`409` si ya tiene una caja
-   abierta). Backstop de concurrencia: el índice único parcial (ver
-   [Entity & Database](#entity--database)) convierte cualquier condición de carrera que
-   igual pase el lock en un `23505` que el service traduce a `409`.
+4. **Cajón libre** — sin sesión `abierta` ni `en_conciliacion` para ese `cajonId`, con
+   lock pesimista (`FOR UPDATE`) sobre esas sesiones del cajón antes de insertar, para
+   cerrar la ventana de carrera entre el chequeo y el insert (`409` si ya tiene una).
+   Backstop de concurrencia: el índice único parcial (ver [Entity &
+   Database](#entity--database)) solo cubre `estado='abierta'` — convierte cualquier
+   condición de carrera entre dos aperturas simultáneas en un `23505` que el service
+   traduce a `409`; una sesión `en_conciliacion` la excluye el lock, no el índice (ver
+   [`en_conciliacion` ocupa igual que
+   `abierta`](#en_conciliacion-ocupa-igual-que-abierta)).
 
 ### Picker: `GET /caja/cajones-disponibles`
 
 Antes de abrir, el frontend pide la lista de cajones que el usuario **puede** elegir:
-activos, sin sesión abierta y (lista vacía o el usuario está en la allow-list) — la
-intersección de los puntos 2–4 de arriba, resuelta en una sola query. Un cajón que no
-aparece en el picker no es un cajón que exista con otro estado escondido: es un cajón
-ocupado, inactivo o fuera de la allow-list del usuario.
+activos, sin sesión `abierta` ni `en_conciliacion`, y (lista vacía o el usuario está en
+la allow-list) — la intersección de los puntos 2–4 de arriba, resuelta en una sola
+query. Un cajón que no aparece en el picker no es un cajón que exista con otro estado
+escondido: es un cajón ocupado (incluida una conciliación pendiente), inactivo o fuera
+de la allow-list del usuario.
 
 ```
 GET /caja/cajones-disponibles
@@ -338,30 +353,43 @@ vivo, sin contado:
   ]
 }
 
-Si la caja está 'cerrada' — SIEMPRE `ciego:false`, líneas congeladas de
-`caja_arqueo_medio` (el modo ciego solo retiene mientras la caja está abierta):
+Si la caja está 'en_conciliacion' o 'cerrada' — SIEMPRE `ciego:false`, líneas congeladas de
+`caja_arqueo_medio` (el modo ciego solo retiene mientras la caja está `abierta`; ambos
+estados no-`abierta` comparten la misma rama de lectura, ver [Cierre en dos
+fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c)):
 {
   "ciego": false,
   "lineas": [
     { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
       "esperado": "750.0000", "requiereConteo": true,
-      "contado": "748.5000", "diferencia": "-1.5000" },
+      "contado": "748.5000", "diferencia": "-1.5000",
+      "motivoDiferenciaId": "uuid-o-null", "motivoNombre": "falta de efectivo",
+      "comentarioDiferencia": "Faltó billete de 5" },
     { "metodoPagoId": "uuid", "nombre": "Tarjeta débito", "esEfectivo": false,
       "esperado": "320.0000", "requiereConteo": false,
-      "contado": null, "diferencia": null }
+      "contado": null, "diferencia": null,
+      "motivoDiferenciaId": null, "motivoNombre": null, "comentarioDiferencia": null }
   ]
 }
 ```
 
+`motivoDiferenciaId`/`motivoNombre`/`comentarioDiferencia` solo tienen valor cuando la
+línea descuadró y ya se justificó (fase 2 del cierre o el override admin); `null` en
+cualquier otro caso, incluida una línea que cuadró exacto.
+
 El drawer de cierre (`CajaCierreDrawer`) llama este endpoint al abrirse para armar el
 formulario; el detalle read-only de una caja cerrada lo usa para mostrar el desglose.
 
-### Cierre multi-línea
+### Conteo multi-línea (congelado en la fase 1 del cierre)
 
-`POST /caja/:id/cerrar` cambia de un `montoContado` único a un arreglo de líneas:
+Esta parte no cambió con el sub-proyecto C: sigue siendo un arreglo de líneas en vez de un
+`montoContado` único. Lo que sí cambió es **qué endpoint** lo recibe — `POST
+/caja/:id/conteo` (fase 1), no `POST /caja/:id/cerrar` (que ahora es la fase 2, sin
+`montoContado`). Ver [Cierre en dos fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c)
+para la razón de la división y el contrato completo de ambos endpoints.
 
 ```
-Request:
+Request POST /caja/:id/conteo:
 {
   "lineas": [
     { "metodoPagoId": null, "montoContado": "748.50" },
@@ -371,19 +399,11 @@ Request:
 }
 
 Response (200):
-{
-  "caja": { ...caja cerrada, "saldoFinal": "750.0000", "montoContado": "748.5000",
-            "diferencia": "-1.5000", ... },
-  "arqueo": [ ...líneas congeladas con contado/diferencia... ]
-}
-
-Error (400) si falta el conteo de una línea obligatoria (es_efectivo o requiere_conteo),
-      o si una línea del body no pertenece al arqueo recomputado del servidor.
-Error (409) si la caja ya está cerrada.
+{ "estado": "cerrada" | "en_conciliacion", "arqueo": [ ...líneas congeladas con contado/diferencia... ] }
 ```
 
 **El esperado nunca viene del cliente.** El servidor recomputa el arqueo completo dentro
-de la misma transacción del cierre (`calcularArqueo`, con lock pesimista de la caja) y lo
+de la misma transacción del conteo (`calcularArqueo`, con lock pesimista de la caja) y lo
 congela junto con el `contado` que declaró el cajero; el body del cliente solo aporta
 `montoContado` por línea. Esto cierra la puerta a que un cliente manipulado declare un
 esperado distinto al real.
@@ -392,10 +412,11 @@ esperado distinto al real.
 
 `cajas.saldo_final` / `monto_contado` / `diferencia` — los campos que ya existían antes
 de este sub-proyecto — pasan a representar **la línea de efectivo**, no un total
-mezclado: al cerrar, el service toma la línea `metodoPagoId === null` del arqueo
-congelado y la copia a esos tres campos. Así el historial (`GET /caja`) y cualquier
-reporte que ya lea `cajas.*` sigue funcionando sin cambios, y sigue significando lo mismo
-que documentaba esta feature desde el inicio: cuadre del efectivo físico del cajón.
+mezclado: al congelar el conteo (fase 1, `POST /caja/:id/conteo`) el service toma la línea
+`metodoPagoId === null` del arqueo congelado y la copia a esos tres campos. Así el
+historial (`GET /caja`) y cualquier reporte que ya lea `cajas.*` sigue funcionando sin
+cambios, y sigue significando lo mismo que documentaba esta feature desde el inicio:
+cuadre del efectivo físico del cajón.
 
 ### El fix: salida manual y NC "devolver dinero" validan contra efectivo real
 
@@ -461,20 +482,27 @@ está mirando un preview retenido o uno completo para renderizar el drawer en co
 (ver ejemplos en [GET /caja/:id/arqueo](#get-cajaidarqueo--preview-o-congelado-según-el-estado)
 más arriba).
 
-**Caja cerrada → siempre revela**, sin importar la config del tenant (`ciego:false` y las
-líneas congeladas completas, con `contado`/`diferencia`). El modo ciego afecta únicamente el
-conteo **en curso**; el histórico de una caja ya cerrada nunca queda retenido — sería inútil
-para conciliar y auditar después. La revelación es una propiedad de la respuesta al **cerrar**
-(`POST /caja/:id/cerrar`, sin cambios — ver abajo), no de un endpoint aparte.
+**Caja `en_conciliacion` o cerrada → siempre revela**, sin importar la config del tenant
+(`ciego:false` y las líneas congeladas completas, con `contado`/`diferencia`). El modo
+ciego afecta únicamente el conteo **en curso** (caja `abierta`); el histórico de una caja
+que ya pasó por la fase 1 nunca queda retenido — sería inútil para conciliar y auditar
+después. La revelación es una propiedad de la respuesta al **congelar el conteo** (fase 1,
+`POST /caja/:id/conteo` — ver abajo), no de un endpoint aparte.
 
-### `cerrar` no cambia — su respuesta ya es la revelación
+### La revelación ocurre en la fase 1 del cierre (`POST /caja/:id/conteo`)
 
-`POST /caja/:id/cerrar` sigue exactamente igual que en el sub-proyecto A: recompute
-server-side del arqueo completo + congelado en `caja_arqueo_medio`, sin conocer el modo
-ciego. Su response (`{ caja, arqueo }`) siempre trae el esperado/contado/diferencia
-completos — es, precisamente, el momento en que el cajero deja de estar ciego. El modo
-ciego solo gobierna qué revela el **preview** (`GET /:id/arqueo` con la caja todavía
-abierta), nunca el resultado del cierre.
+Con el sub-proyecto C el cierre se partió en dos fases (ver [Cierre en dos
+fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c) más abajo). La fase 1
+(`enviarConteo`) sigue haciendo exactamente lo que hacía el `cerrar` original de este
+sub-proyecto A: recompute server-side del arqueo completo + congelado en
+`caja_arqueo_medio`, sin conocer el modo ciego. Su response (`{ estado, arqueo }`) siempre
+trae el esperado/contado/diferencia completos, sea que el resultado bifurque a
+`estado: 'cerrada'` (auto-cierre, todo cuadró) o a `estado: 'en_conciliacion'` (algo
+descuadró) — es, en ambos casos, el momento en que el cajero deja de estar ciego. La
+fase 2 (`POST /caja/:id/cerrar`) no recomputa nada — solo aplica los motivos de las
+líneas descuadradas y finaliza —, así que no tiene ningún rol en la revelación. El modo
+ciego sigue gobernando únicamente el **preview** (`GET /:id/arqueo` con la caja todavía
+`abierta`), nunca el resultado del conteo ni de un cierre posterior.
 
 ### Drawer ciego + revelación por redirección al detalle
 
@@ -499,9 +527,191 @@ Fuera de alcance de este sub-proyecto, siguen pendientes en
 - **Aprobación de cierre por umbral de diferencia** (patrón Toast: si el over/short supera
   un umbral configurable, requiere aprobación del supervisor).
 - **Ocultar el resultado *después* del cierre** al cajero — en el modo ciego de hoy, al
-  enviar el cierre el cajero **sí** ve su propia diferencia (la revelación es inmediata,
-  vía el detalle); condicionarla a que solo el supervisor la vea de inmediato pertenece a
-  la conciliación del §6, no a este sub-proyecto.
+  enviar el conteo el cajero **sí** ve su propia diferencia (la revelación es inmediata,
+  vía el detalle) aunque la caja quede `en_conciliacion`. El sub-proyecto C (ver [Cierre
+  en dos fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c) más abajo)
+  resolvió la conciliación operador→supervisor de §6 pero no este ítem puntual — sigue
+  diferido en `docs/agent/pendientes.md`.
+
+---
+
+## Cierre en dos fases + motivos de diferencia (sub-proyecto C)
+
+**Sub-proyecto de negocio C**, montado sobre el arqueo multi-medio (A) y el cierre ciego
+(B) — resuelve la mitad que quedaba de §5/§6 de la investigación
+[`2026-07-23-gestion-caja.md`](../agent/investigaciones/2026-07-23-gestion-caja.md): la
+**conciliación operador→supervisor** (§6) y los **motivos categorizados de diferencia**
+(§5). Antes de este sub-proyecto, `POST /caja/:id/cerrar` recomputaba, congelaba y cerraba
+en un solo paso — un descuadre quedaba en el historial sin ninguna explicación
+estructurada de por qué pasó, y nadie más que el propio cajero podía cerrar su turno bajo
+ninguna circunstancia.
+
+### Por qué dos fases y no una
+
+Congelar el conteo y decidir qué hacer con el descuadre son dos preguntas distintas:
+*"¿cuánto hay realmente en el cajón?"* (un hecho, que no debería poder tocarse después de
+observado) y *"¿por qué no coincide con lo esperado?"* (una explicación de negocio, que
+puede tomar más tiempo — el cajero puede necesitar preguntarle al supervisor, revisar un
+comprobante, etc.). Congelarlas en un solo paso obligaba a justificar la diferencia *antes*
+de que existiera un registro inmutable de qué se contó — dejando una ventana donde el
+cajero podía "ajustar" el conteo a lo que le convenía justificar. Separar las fases cierra
+esa ventana: el hecho se congela primero, la explicación se resuelve después, sobre un
+número que ya no se puede cambiar.
+
+### Fase 1 — `POST /caja/:id/conteo`: congela y revela
+
+Igual que el `cerrar` del sub-proyecto A: recomputa el arqueo completo server-side
+(`calcularArqueo`, con lock pesimista de la caja `abierta`), lo congela en
+`caja_arqueo_medio` junto con el `contado` que declaró el cajero, y copia la línea de
+efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia` (ver [Agregados de
+`cajas`](#agregados-de-cajas--línea-de-efectivo-backward-compat-del-historial)). A partir
+de acá **ninguna línea vuelve a recomputarse** — ni en la fase 2 ni en el override admin.
+Owner-only (`MiCaja:Actualizar`), igual que el cierre original.
+
+Bifurca según el resultado:
+
+- **Ninguna línea descuadra** → auto-cierre: `estado: 'cerrada'` + `fechaCierre` fijada.
+  No hay fase 2 que resolver — el flujo termina acá, como antes del sub-proyecto C.
+- **Alguna línea descuadra** → `estado: 'en_conciliacion'`, sin `fechaCierre`. La fase 2
+  (abajo) es la única forma de sacarla de ese estado.
+
+```
+POST /caja/:id/conteo
+Permiso requerido: MiCaja / Actualizar (owner-only)
+Request: { "lineas": [{ "metodoPagoId": null | string, "montoContado": string }, ...], "comentario"?: string }
+Response (200): { "estado": "cerrada" | "en_conciliacion", "arqueo": LineaArqueo[] }
+Error (400) si falta el conteo de una línea obligatoria o una línea no pertenece al arqueo.
+Error (403) si la caja no existe, no está 'abierta', o no es del usuario.
+```
+
+### `en_conciliacion` ocupa igual que `abierta`
+
+Una caja `en_conciliacion` sigue "activa" a todo efecto de exclusión mutua — la
+conciliación pendiente es trabajo sin terminar, no un estado de reposo:
+
+- **Bloquea abrir otra caja** — `findActiva` la incluye junto a `abierta`; el cajero no
+  puede abrir un segundo turno mientras tenga una conciliación pendiente.
+- **Ocupa el cajón** — `abrir` y `cajonesDisponibles` tratan `en_conciliacion` igual que
+  `abierta` al decidir si un cajón está libre; otro usuario no puede abrir sobre ese cajón
+  hasta que la conciliación se resuelva.
+- **Bloquea ventas y movimientos** — `registrarMovimiento` y cualquier flujo que dependa de
+  `bloquearCajaAbierta` exige `estado = 'abierta'` a secas; una caja `en_conciliacion` no
+  la cumple, así que no admite entradas/salidas manuales ni nuevas ventas físicas sobre
+  ella. El único camino hacia adelante es la fase 2.
+- **`cajonesEstado`** (grid de supervisión) también considera ocupado un cajón con una
+  sesión `en_conciliacion`, para que el supervisor vea que ese cajón tiene trabajo
+  pendiente, no que está libre.
+
+El índice único parcial `ux_cajas_cajon_abierta` (BD) solo cubre `estado = 'abierta'` —
+la ocupación de `en_conciliacion` es una regla de aplicación (service), no un constraint
+de base de datos; ver el comentario en `startup-pos.sql`.
+
+### Fase 2 — `POST /caja/:id/cerrar`: justifica y finaliza (owner **o** admin)
+
+Recibe un motivo (y opcionalmente un comentario) por cada línea que descuadró en la fase
+1, los aplica sobre las filas ya congeladas de `caja_arqueo_medio` y recién entonces marca
+`estado: 'cerrada'` + `fechaCierre`. **No recalcula nada**: `esperado`/`contado`/
+`diferencia` quedaron fijados en la fase 1; esta fase solo escribe
+`motivo_diferencia_id`/`comentario_diferencia`. Si falta un motivo (o el comentario que
+ese motivo exige) para alguna línea descuadrada, lanza `400` y la caja **sigue**
+`en_conciliacion` — la transacción no finaliza a medias.
+
+```
+POST /caja/:id/cerrar
+Permiso requerido: MiCaja / Actualizar — owner-o-admin (ver más abajo)
+Request: { "lineas": [{ "metodoPagoId": null | string, "motivoDiferenciaId"?: string, "comentarioDiferencia"?: string }, ...] }
+Response (200): { "caja": Caja (estado 'cerrada'), "arqueo": LineaArqueo[] }
+Error (400) si falta el motivo (o el comentario que ese motivo exige) de una línea descuadrada.
+Error (403) si la caja no existe o no es del usuario ni el usuario es admin.
+Error (400) si la caja no está 'en_conciliacion'.
+```
+
+**Owner-o-admin, no `TenantAdminGuard`.** El endpoint NO usa `TenantAdminGuard` (eso
+bloquearía al cajero dueño de completar su propio cierre); el piso de permiso sigue siendo
+`MiCaja:Actualizar` y el controller resuelve `esAdmin` aparte
+(`rbacService.userIsTenantAdmin`) con el mismo criterio que usaría `TenantAdminGuard`, para
+permitir *además* que un admin no-dueño finalice la conciliación. Es angosto a propósito:
+el admin solo puede completar una conciliación que el dueño **ya congeló** en la fase 1 —
+no puede iniciar el conteo de una caja ajena ni saltarse la fase 1. No es el "cierre
+forzado" de §6 (que dejaría a un admin cerrar desde cero el turno de un cajero que se fue):
+ese sigue diferido porque requiere `cajas.cerrada_por` para no mentir sobre quién contó
+(ver [Qué sigue diferido](#qué-sigue-diferido) abajo). Tampoco hay un `cerrada_por` aquí:
+`cajas.usuario_id` sigue siendo el dueño del turno, sea quien sea quien haya completado la
+fase 2.
+
+### El conteo es inmutable desde la fase 1 (anti-fraude)
+
+`caja_arqueo_medio.esperado`/`contado`/`diferencia` se escriben una única vez, en la fase
+1, y **nada** los vuelve a tocar — ni la fase 2, ni el override admin (abajo), ni ningún
+flujo futuro. Es la misma lógica anti-fraude del cierre ciego (B): si el número se pudiera
+ajustar después de conocerse la diferencia, cualquier control de motivos sería teatro —
+bastaría con "corregir" el conteo para que la diferencia (y su justificación) desaparezcan.
+Congelar antes de exigir la explicación es lo que hace que la explicación signifique algo.
+
+### Motivos de diferencia — catálogo admin-only
+
+Igual patrón que `causas_merma` (mermas de inventario): catálogo por tenant, admin-only,
+con motivos **fijos** (`es_fijo`) sembrados por tenant que no se pueden renombrar ni
+eliminar, pero sí togglear en `activo` y en `requiere_comentario`.
+
+**Table**: `motivo_diferencia_caja` — ver columnas en [Entity &
+Database](#entity--database). Índice único parcial `(tenant_id, lower(nombre))` filtrando
+`eliminado_el IS NULL`.
+
+**Endpoints** (`src/modules/motivos-diferencia/`, controller/service propios, no
+`caja.controller.ts`):
+
+| Método | Ruta | Guard | Descripción |
+|---|---|---|---|
+| GET | `/motivos-diferencia` | `JwtAuthGuard + TenantGuard` | Lista los motivos del tenant; `?soloActivas=true` filtra a `activo=true`. Sin permiso dedicado — cualquier usuario autenticado del tenant puede leer el catálogo (lo necesita para justificar una diferencia) |
+| POST | `/motivos-diferencia` | `TenantAdminGuard` | Crea un motivo (`es_fijo: false` siempre) |
+| PATCH | `/motivos-diferencia/:id` | `TenantAdminGuard` | Edita `nombre`/`activo`/`requiereComentario`; en un motivo fijo bloquea el rename (`400`) pero permite togglear `activo`/`requiereComentario` — divergencia intencional de `causas_merma`, donde un fijo no admite ningún cambio |
+| DELETE | `/motivos-diferencia/:id` | `TenantAdminGuard` | Soft delete; `400` si el motivo es fijo |
+
+Sembrado por tenant (`motivos-diferencia.defaults.ts`): *falta de efectivo*, *sobra de
+efectivo*, *divergencia de tarjeta*, *error de lanzamiento manual*, *pago no registrado*,
+*error operacional* (sin comentario obligatorio) y *otro* (`requiereComentario: true`,
+la válvula de escape para lo que no encaja en ninguna categoría fija).
+
+### Red de seguridad: sin motivos activos, el comentario es obligatorio
+
+Un tenant puede desactivar todos sus motivos (o, en teoría, no tener ninguno). En ese caso
+`aplicarMotivosADescuadres` no exige `motivoDiferenciaId` — pero exige un
+`comentarioDiferencia` no vacío para cada línea descuadrada (`400` si falta). Nunca es
+válido cerrar/justificar una diferencia sin ninguna explicación, tenga o no el tenant el
+catálogo configurado.
+
+### Override admin: `PATCH /caja/:id/arqueo/motivos`
+
+Corrige (o completa) los motivos de una caja **ya `cerrada`** — el caso "el supervisor
+revisa el historial días después y ve una diferencia sin justificar, o justificada con el
+motivo equivocado". Mismo enforcement que la fase 2 (comparten
+`aplicarMotivosADescuadres`): solo toca `motivo_diferencia_id`/`comentario_diferencia` de
+las líneas ya congeladas, nunca `esperado`/`contado`/`diferencia`.
+
+```
+PATCH /caja/:id/arqueo/motivos
+Guard: TenantAdminGuard (admin-only, a diferencia de la fase 2 que es owner-o-admin)
+Request: { "lineas": [{ "metodoPagoId": null | string, "motivoDiferenciaId"?: string, "comentarioDiferencia"?: string }, ...] }
+Response (200): { "ciego": false, "lineas": LineaArqueo[] }
+Error (400) si la caja no está 'cerrada', o si falta el motivo/comentario de una línea descuadrada.
+```
+
+Frontend: `CajaArqueoTable` (usada en el detalle de cualquier caja cerrada, `/mi-caja/[id]`
+y `/cajas/[id]`) habilita edición inline de motivo/comentario por línea descuadrada
+solo si `puedeJustificar` (prop poblada con `perms.esAdmin`) — pre-cargada con lo ya
+justificado, para poder corregir, no solo completar.
+
+### Qué sigue diferido
+
+Igual que en el sub-proyecto B, quedan fuera de alcance y registrados en
+[`docs/agent/pendientes.md`](../agent/pendientes.md):
+
+- **Cierre forzado de una caja ajena por el encargado** (requiere `cajas.cerrada_por`) —
+  un admin hoy solo puede *finalizar* una conciliación que el dueño ya congeló en la fase
+  1, no iniciar el conteo de una caja ajena desde cero.
+- **Aprobación de cierre por umbral de diferencia** (patrón Toast).
+- **Reporte de over/short** agregado (histórico de diferencias por cajero/motivo/período).
 
 ---
 
@@ -515,8 +725,9 @@ Authorization: Bearer <token>
 
 Permiso requerido: Cajas / Leer
 Nota: endpoint exclusivo de supervisión (quien llega tiene `Cajas:Leer`). Devuelve
-      TODOS los cajones activos del tenant; cada uno con su sesión abierta (`sesion`) o
-      `null` si está libre. Una sola query (LEFT JOIN a la sesión abierta) — sin N+1.
+      TODOS los cajones activos del tenant; cada uno con su sesión `abierta` o
+      `en_conciliacion` (`sesion`, cualquiera de las dos cuenta como ocupado) o `null`
+      si está libre. Una sola query (LEFT JOIN a la sesión) — sin N+1.
 
 Response (200):
 [
@@ -689,9 +900,11 @@ Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena) — lectura compart
 Response (200): { "ciego": boolean, "lineas": [...] } — una línea por método + la de
       efectivo agregada. Si la caja está 'abierta', recomputado en vivo sin
       `contado`/`diferencia` (y con `esperado:null` + solo líneas obligatorias si el
-      tenant tiene el modo ciego activo — ver Cierre ciego); si está 'cerrada', SIEMPRE
-      `ciego:false` con las filas congeladas de `caja_arqueo_medio` completas (o `[]` si
-      es una caja cerrada antes del sub-proyecto A, sin backfill).
+      tenant tiene el modo ciego activo — ver Cierre ciego); si está 'en_conciliacion' o
+      'cerrada', SIEMPRE `ciego:false` con las filas congeladas de `caja_arqueo_medio`
+      completas (incluye `motivoDiferenciaId`/`motivoNombre`/`comentarioDiferencia` si ya
+      se justificó esa línea), o `[]` si es una caja cerrada antes del sub-proyecto A, sin
+      backfill.
 Ver detalle de forma y campos en Arqueo de caja multi-medio § GET /caja/:id/arqueo y en
 Cierre ciego (modo anti-fraude).
 ```
@@ -711,13 +924,13 @@ Response (200): { "arqueoCiego": boolean }
 
 Ver detalle de negocio en [Cierre ciego (modo anti-fraude)](#cierre-ciego-modo-anti-fraude).
 
-### POST /caja/:id/cerrar — Cerrar caja con arqueo multi-medio
+### POST /caja/:id/conteo — Fase 1 del cierre: congela y revela
 
 ```
-POST /caja/:id/cerrar
+POST /caja/:id/conteo
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja / Actualizar (owner-only; `Cajas:Leer` no habilita cerrar)
+Permiso requerido: MiCaja / Actualizar (owner-only; `Cajas:Leer` no habilita)
 
 Request:
 {
@@ -728,18 +941,19 @@ Request:
   "comentario": "Faltó billete de 5"   // opcional
 }
 
-Response (200):
+Response (200) — todo cuadró (auto-cierre):
 {
-  "caja": {
-    "id": "uuid",
-    "estado": "cerrada",
-    "saldoInicial": "500.0000",
-    "saldoFinal": "750.0000",
-    "montoContado": "748.5000",
-    "diferencia": "-1.5000",
-    "fechaCierre": "2026-06-29T18:00:00Z",
-    "comentario": "Faltó billete de 5"
-  },
+  "estado": "cerrada",
+  "arqueo": [
+    { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
+      "esperado": "750.0000", "requiereConteo": true,
+      "contado": "750.0000", "diferencia": "0.0000" }
+  ]
+}
+
+Response (200) — algo descuadró (pasa a conciliación):
+{
+  "estado": "en_conciliacion",
   "arqueo": [
     { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
       "esperado": "750.0000", "requiereConteo": true,
@@ -752,11 +966,99 @@ Response (200):
 
 Error (400) si falta el conteo de una línea obligatoria (es_efectivo o requiere_conteo)
       o si una línea del body no pertenece al arqueo recomputado del servidor.
-Error (409) si la caja ya está cerrada.
+Error (403) si la caja no existe, no está 'abierta' o no pertenece al usuario.
 ```
 
-`caja.saldoFinal`/`montoContado`/`diferencia` en la respuesta son la línea de efectivo —
-ver Arqueo de caja multi-medio § Agregados de `cajas`.
+`cajas.saldoFinal`/`montoContado`/`diferencia` quedan copiados de la línea de efectivo en
+ambos casos — ver Arqueo de caja multi-medio § Agregados de `cajas`. Detalle de negocio de
+la bifurcación en [Cierre en dos fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
+
+### POST /caja/:id/cerrar — Fase 2 del cierre: justifica y finaliza
+
+```
+POST /caja/:id/cerrar
+Authorization: Bearer <token>
+
+Permiso requerido: MiCaja / Actualizar — owner-o-admin (única escritura de este
+                   controller que no es estrictamente owner-only, ver Cierre en dos fases)
+
+Request:
+{
+  "lineas": [
+    { "metodoPagoId": null, "motivoDiferenciaId": "uuid-motivo", "comentarioDiferencia": "Faltó billete de 5" }
+  ]
+}
+
+Response (200):
+{
+  "caja": {
+    "id": "uuid",
+    "estado": "cerrada",
+    "saldoInicial": "500.0000",
+    "saldoFinal": "750.0000",
+    "montoContado": "748.5000",
+    "diferencia": "-1.5000",
+    "fechaCierre": "2026-06-29T18:05:00Z",
+    "comentario": "Faltó billete de 5"
+  },
+  "arqueo": [
+    { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
+      "esperado": "750.0000", "requiereConteo": true,
+      "contado": "748.5000", "diferencia": "-1.5000",
+      "motivoDiferenciaId": "uuid-motivo", "motivoNombre": "falta de efectivo",
+      "comentarioDiferencia": "Faltó billete de 5" }
+  ]
+}
+
+Error (400) si falta el motivo (o el comentario que ese motivo exige) de una línea
+      descuadrada.
+Error (403) si la caja no existe, no pertenece al usuario ni el usuario es admin.
+Error (400) si la caja no está 'en_conciliacion'.
+```
+
+No recibe `montoContado`: el conteo ya quedó congelado por la fase 1, este endpoint solo
+aplica motivos. Solo hay algo que enviar en `lineas` si el conteo dejó alguna diferencia
+(caja `en_conciliacion`); una caja que se auto-cerró en la fase 1 nunca llega a este
+endpoint.
+
+### PATCH /caja/:id/arqueo/motivos — Override admin sobre una caja cerrada
+
+```
+PATCH /caja/:id/arqueo/motivos
+Authorization: Bearer <token>
+
+Guard: TenantAdminGuard (admin-only)
+
+Request:
+{
+  "lineas": [
+    { "metodoPagoId": null, "motivoDiferenciaId": "uuid-otro-motivo", "comentarioDiferencia": "Corrección: se contó mal el vuelto" }
+  ]
+}
+
+Response (200): { "ciego": false, "lineas": [...] } — mismo shape que GET /caja/:id/arqueo
+
+Error (400) si la caja no está 'cerrada', o si falta el motivo/comentario de una línea
+      descuadrada.
+```
+
+Corrige o completa la justificación de una caja ya cerrada — nunca toca
+`esperado`/`contado`/`diferencia`. Detalle en [Cierre en dos
+fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
+
+### GET/POST/PATCH/DELETE /motivos-diferencia — Catálogo de motivos
+
+```
+GET    /motivos-diferencia?soloActivas=true   — cualquier usuario autenticado del tenant
+POST   /motivos-diferencia                    — TenantAdminGuard
+PATCH  /motivos-diferencia/:id                — TenantAdminGuard
+DELETE /motivos-diferencia/:id                — TenantAdminGuard
+
+Body (POST/PATCH): { "nombre"?: string, "activo"?: boolean, "requiereComentario"?: boolean }
+```
+
+Controller/service propios (`src/modules/motivos-diferencia/`), no `caja.controller.ts`.
+Detalle en [Cierre en dos fases § Motivos de diferencia](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
 
 ### GET /caja — Historial de cajas (paginado)
 
@@ -829,12 +1131,12 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 | `usuario_id` | UUID | FK usuarios, NOT NULL | Del token |
 | `cajon_id` | UUID | FK cajones, nullable | Obligatorio en `'fisica'`; siempre `NULL` en `'virtual'`. Índice único parcial `ux_cajas_cajon_abierta` sobre `(cajon_id)` filtrando `estado='abierta' AND eliminado_el IS NULL` — un cajón, una sesión abierta a la vez |
 | `tipo` | TEXT | NOT NULL | `'fisica'` \| `'virtual'` |
-| `estado` | TEXT | NOT NULL | `'abierta'` \| `'cerrada'` |
+| `estado` | TEXT | NOT NULL | `'abierta'` \| `'en_conciliacion'` \| `'cerrada'` — `en_conciliacion` la fija la fase 1 del cierre cuando alguna línea descuadra; ver [Cierre en dos fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c) |
 | `saldo_inicial` | NUMERIC(18,4) | NOT NULL | Fondo al abrir; Decimal.js |
-| `saldo_final` | NUMERIC(18,4) | nullable | Congelado al cerrar = `esperado` de la línea de efectivo (`caja_arqueo_medio` con `metodo_pago_id IS NULL`), no el total mezclado — ver Arqueo de caja multi-medio |
-| `monto_contado` | NUMERIC(18,4) | nullable | Congelado al cerrar = `contado` de la línea de efectivo |
-| `diferencia` | NUMERIC(18,4) | nullable | Congelado al cerrar = `diferencia` de la línea de efectivo (`monto_contado − saldo_final`) |
-| `comentario` | TEXT | nullable | Al abrir; se sobrescribe con el comentario de cierre al cerrar |
+| `saldo_final` | NUMERIC(18,4) | nullable | Congelado en la fase 1 del cierre (`POST /caja/:id/conteo`) = `esperado` de la línea de efectivo (`caja_arqueo_medio` con `metodo_pago_id IS NULL`), no el total mezclado — ver Arqueo de caja multi-medio |
+| `monto_contado` | NUMERIC(18,4) | nullable | Congelado en la fase 1 = `contado` de la línea de efectivo |
+| `diferencia` | NUMERIC(18,4) | nullable | Congelado en la fase 1 = `diferencia` de la línea de efectivo (`monto_contado − saldo_final`) |
+| `comentario` | TEXT | nullable | Al abrir; se sobrescribe con el comentario del conteo (fase 1) al enviarlo |
 | `abierta_el` / `fecha_apertura` | TIMESTAMPTZ | NOT NULL | `@CreateDateColumn` |
 | `fecha_cierre` | TIMESTAMPTZ | nullable | Se setea al cerrar |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
@@ -866,38 +1168,65 @@ recalcula después de escrita)
 | `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
 | `metodo_pago_id` | UUID | FK metodos_pago, nullable | `NULL` = línea de efectivo agregada |
 | `es_efectivo` | BOOLEAN | NOT NULL | Copiado de `metodos_pago.es_efectivo` al momento del cierre |
-| `esperado` | NUMERIC(18,4) | NOT NULL | Recomputado server-side en la transacción de cierre; nunca viene del cliente |
+| `esperado` | NUMERIC(18,4) | NOT NULL | Recomputado server-side en la transacción de la fase 1 (`POST /caja/:id/conteo`); nunca viene del cliente |
 | `contado` | NUMERIC(18,4) | nullable | `NULL` = línea informativa no contada |
 | `diferencia` | NUMERIC(18,4) | nullable | `contado − esperado`; `NULL` si `contado` es `NULL` |
+| `motivo_diferencia_id` | UUID | FK motivo_diferencia_caja, nullable | Escrito por la fase 2 del cierre o el override admin; `NULL` mientras no se justifique |
+| `comentario_diferencia` | TEXT | nullable | Comentario libre de la justificación; obligatorio si el motivo lo exige o si el tenant no tiene motivos activos (red de seguridad) |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
 
 Índice único parcial `ux_caja_arqueo_medio` sobre `(caja_id, metodo_pago_id)` filtrando
 `eliminado_el IS NULL` — una fila viva por línea de arqueo y caja.
 
+**Table**: `motivo_diferencia_caja` — catálogo de motivos de diferencia por tenant
+(sub-proyecto C, mismo patrón que `causas_merma`)
+
+| Column | Type | Constraints | Notes |
+|--------|------|-------------|-------|
+| `motivo_diferencia_id` | UUID | PK | |
+| `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
+| `nombre` | TEXT | NOT NULL | Único por tenant (case-insensitive), ver índice abajo |
+| `activo` | BOOLEAN | NOT NULL, default `true` | Desactivar sin borrar; togglable incluso en un motivo `es_fijo` |
+| `requiere_comentario` | BOOLEAN | NOT NULL, default `false` | Fuerza el comentario libre además del motivo al justificar una línea |
+| `es_fijo` | BOOLEAN | NOT NULL, default `false` | Sembrado por tenant; no renombrable ni eliminable, sí togglable en `activo`/`requiere_comentario` |
+| `creado_el` | TIMESTAMPTZ | NOT NULL | |
+| `actualizado_el` | TIMESTAMPTZ | nullable | |
+| `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
+
+Índice único parcial `uq_motivo_diferencia_caja_tenant_nombre` sobre
+`(tenant_id, lower(nombre))` filtrando `eliminado_el IS NULL`.
+
 ### DTOs
 
 - `AbrirCajaDto` — `{ cajonId: string, saldoInicial: string, comentario?: string }` (`@IsUUID`, `@IsNumberString`, `@IsOptional`)
 - `MovimientoCajaDto` — `{ tipo, concepto, monto: string, referencia? }`
-- `CerrarCajaDto` — `{ lineas: LineaCierreDto[], comentario?: string }`
+- `CerrarCajaDto` — `{ lineas: LineaCierreDto[], comentario?: string }` — body de la fase 1 (`POST /caja/:id/conteo`), pese al nombre heredado del sub-proyecto A
 - `LineaCierreDto` — `{ metodoPagoId: string | null, montoContado: string }` (`metodoPagoId: null` = línea de efectivo; `@IsNumberString` sin `no_symbols` para admitir decimales)
+- `FinalizarCierreDto` — `{ lineas: LineaJustificacionDto[] }` — body de la fase 2 (`POST /caja/:id/cerrar`)
+- `JustificarDiferenciasDto` — `{ lineas: LineaJustificacionDto[] }` — body del override admin (`PATCH /caja/:id/arqueo/motivos`); mismo shape que `FinalizarCierreDto`, DTO propio porque son endpoints distintos
+- `LineaJustificacionDto` — `{ metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }` (`@IsUUID('4')` opcional en ambos campos; `metodoPagoId` acepta `null` vía `@ValidateIf`)
 - `SetArqueoCiegoDto` — `{ arqueoCiego: boolean }` (`@IsBoolean`) — body de `PUT /caja/arqueo-ciego`
+- `CreateMotivoDiferenciaDto` / `UpdateMotivoDiferenciaDto` — `{ nombre?, activo?, requiereComentario? }`, mismo patrón que `causas_merma`
 
 ### Key Methods
 
-- `cajaService.findActiva(tenantId, usuarioId)` — caja física `estado='abierta'` del usuario
-- `cajaService.abrir(tenantId, usuarioId, dto)` — valida usuario libre → cajón válido/activo → autorizado (allow-list) → cajón libre (lock) → crea caja sobre `dto.cajonId`; 409/404/403 según la validación que falle
-- `cajaService.cajonesDisponibles(tenantId, usuarioId)` — cajones activos, sin sesión abierta y autorizados para el usuario (allow-list vacía o incluido) — arma el picker de apertura
-- `cajaService.registrarMovimiento(tenantId, usuarioId, cajaId, dto)` — `FOR UPDATE` de la caja, valida propiedad (owner-only), valida saldo de la **línea de efectivo** (`calcularEsperadoEfectivo`) para `salida`, inserta movimiento
-- `cajaService.bloquearCajaAbierta(manager, cajaId, tenantId)` — lock pesimista reutilizable (p.ej. egreso de NC en la misma tx)
+- `cajaService.findActiva(tenantId, usuarioId)` — caja física `estado IN ('abierta', 'en_conciliacion')` del usuario; una conciliación pendiente sigue "ocupando" al cajero
+- `cajaService.abrir(tenantId, usuarioId, dto)` — valida usuario libre → cajón válido/activo → autorizado (allow-list) → cajón libre (lock sobre `estado IN ('abierta', 'en_conciliacion')`) → crea caja sobre `dto.cajonId`; 409/404/403 según la validación que falle
+- `cajaService.cajonesDisponibles(tenantId, usuarioId)` — cajones activos, sin sesión `abierta` ni `en_conciliacion`, y autorizados para el usuario (allow-list vacía o incluido) — arma el picker de apertura
+- `cajaService.registrarMovimiento(tenantId, usuarioId, cajaId, dto)` — `FOR UPDATE` de la caja `abierta` (excluye `en_conciliacion`), valida propiedad (owner-only), valida saldo de la **línea de efectivo** (`calcularEsperadoEfectivo`) para `salida`, inserta movimiento
+- `cajaService.bloquearCajaAbierta(manager, cajaId, tenantId)` — lock pesimista de una caja `abierta`, reutilizable (p.ej. egreso de NC en la misma tx)
 - `cajaService.listarMovimientos(tenantId, usuarioId, cajaId, query, verTodas)` — lista `movimientos_caja`; acepta caja ajena si `verTodas=true`
-- `cajaService.calcularEsperadoEfectivo(cajaId, manager)` — fondo + entradas de métodos `es_efectivo`/manuales − salidas; usada por el cierre, la salida manual (422) y la NC "devolver dinero"
+- `cajaService.calcularEsperadoEfectivo(cajaId, manager)` — fondo + entradas de métodos `es_efectivo`/manuales − salidas; usada por el conteo, la salida manual (422) y la NC "devolver dinero"
 - `cajaService.calcularArqueo(cajaId, tenantId, manager)` — línea de efectivo + una línea por método no-efectivo con movimientos (dos queries, sin N+1)
-- `cajaService.obtenerArqueo(tenantId, usuarioId, cajaId, verTodas)` — `{ ciego, lineas }`; preview (`calcularArqueo` en vivo) si `abierta` — retenido (`esperado:null`, solo obligatorias) si el tenant tiene `arqueo_ciego`; filas completas de `caja_arqueo_medio` (`ciego:false` siempre) si `cerrada`
+- `cajaService.obtenerArqueo(tenantId, usuarioId, cajaId, verTodas)` — `{ ciego, lineas }`; preview (`calcularArqueo` en vivo) si `abierta` — retenido (`esperado:null`, solo obligatorias) si el tenant tiene `arqueo_ciego`; filas completas de `caja_arqueo_medio` (con motivo/comentario si ya se justificó, `ciego:false` siempre) si `en_conciliacion` o `cerrada`
 - `cajaService.getArqueoCiego(tenantId)` / `setArqueoCiego(tenantId, valor)` — lee/escribe `tenants.arqueo_ciego`; query raw parametrizada, filtra `eliminado_el IS NULL`
-- `cajaService.cerrar(tenantId, usuarioId, cajaId, dto)` — owner-only; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, marca `estado='cerrada'` — sin cambios por el modo ciego, ver Cierre ciego
+- `cajaService.enviarConteo(tenantId, usuarioId, cajaId, dto)` — **fase 1**, owner-only; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, bifurca a `estado='cerrada'` (todo cuadró) o `estado='en_conciliacion'` (algún descuadre) — sin cambios por el modo ciego, ver Cierre ciego
+- `cajaService.cerrar(tenantId, usuarioId, cajaId, esAdmin, dto)` — **fase 2**, owner-o-admin; lock de la caja `en_conciliacion`, aplica motivos vía `aplicarMotivosADescuadres` (`400` si falta alguno) y marca `estado='cerrada'` — no recalcula nada
+- `cajaService.justificarDiferencias(tenantId, cajaId, lineas)` — **override admin**, invocado desde el controller bajo `TenantAdminGuard`; misma validación que `cerrar` vía `aplicarMotivosADescuadres`, pero exige `estado='cerrada'` en vez de `en_conciliacion`
 - `cajaService.historial(tenantId, usuarioId, query, todas)` — historial; `todas=true` retorna todas las cajas del tenant
 - `cajaService.findOne(tenantId, usuarioId, cajaId, verTodas)` — detalle de la caja
+- `motivosDiferenciaService.hayMotivosActivos(runner, tenantId)` / `assertMotivoValido(runner, tenantId, motivoId)` — consultados por `aplicarMotivosADescuadres` para decidir si exigir motivo o solo comentario (red de seguridad)
 
 ### Guards
 
@@ -937,6 +1266,14 @@ sirviendo las mismas rutas de lectura; no es el patrón por defecto del proyecto
 
 Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso` vs. `TenantAdminGuard`.
 
+**El override admin es la única excepción de método.** `PATCH /caja/:id/arqueo/motivos`
+agrega `@UseGuards(TenantAdminGuard)` a nivel de método (sub-proyecto C) — el único
+endpoint del controller que exige admin puro en vez de `@RequiresPermiso`. `POST
+/caja/:id/cerrar` (fase 2, owner-o-admin) en cambio **no** usa `TenantAdminGuard`: sigue
+con `@RequiresPermiso('MiCaja', 'Actualizar')` y el controller resuelve `esAdmin` aparte
+(`rbacService.userIsTenantAdmin`) para no bloquear al cajero dueño — ver [Cierre en dos
+fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
+
 ---
 
 ## Frontend
@@ -967,6 +1304,10 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
   la tarjeta + back-link "Volver a cajas". 403/404 → redirect a `/cajas`.
 - `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
   internos previos al refactor).
+- `pages/configuracion/motivos-diferencia.vue` — CRUD admin-only del catálogo de motivos
+  de diferencia (sub-proyecto C), mismo patrón que `configuracion/causas-merma.vue`:
+  tabla + drawer crear/editar + toggle inline de `activo`; un fijo (`esFijo`) deshabilita
+  el campo nombre en el drawer pero permite togglear `activo`/`requiereComentario`.
 
 ### Components
 
@@ -983,8 +1324,30 @@ sin necesidad.
 - `components/caja/CajaAperturaGrid.vue` — Apertura en `/mi-caja`: grid de cards de cajones disponibles (poblado por `cajonesDisponibles`); click en un cajón abre un `AppDrawer` con saldo inicial + comentario → `cajaStore.abrir`. Cajón implícito por la card (nombre en el título del drawer)
 - `components/caja/CajaAperturaForm.vue` — Formulario de apertura con selector de cajón (poblado por `cajonesDisponibles`, obligatorio) + saldo inicial + comentario; usado en el POS (`pages/ventas/pos.vue`) para abrir caja sin salir de la venta
 - `components/caja/CajaMovimientoDrawer.vue` — Drawer entrada/salida manual
-- `components/caja/CajaCierreDrawer.vue` — Drawer de cierre multi-medio: carga el arqueo (`GET /caja/:id/arqueo`) al abrirse, separa líneas obligatorias (efectivo + `requiereConteo`) de informativas, un `MoneyInput` de contado por línea con su diferencia en vivo, y bloquea "Confirmar cierre" hasta completar las obligatorias. En modo ciego (`cajaStore.arqueoCiego`) oculta esperado/diferencia en vivo y, al confirmar, redirige al detalle en vez de solo cerrar el drawer — ver [Cierre ciego](#cierre-ciego-modo-anti-fraude)
-- `components/caja/CajaArqueoTable.vue` — Tabla de solo lectura (método / esperado / contado / diferencia) para el desglose congelado; usada en el detalle read-only de una caja cerrada (`/mi-caja/[id]`, `/cajas/[id]`), solo si `arqueo.length > 0`
+- `components/caja/CajaCierreDrawer.vue` — Drawer del **cierre en dos fases** (sub-proyecto
+  C), con estado local `fase: 'conteo' | 'conciliacion'`. Fase **conteo**: carga el arqueo
+  (`GET /caja/:id/arqueo`) al abrirse, separa líneas obligatorias (efectivo +
+  `requiereConteo`) de informativas, un `MoneyInput` de contado por línea con su diferencia
+  en vivo, y bloquea "Enviar conteo" hasta completar las obligatorias; llama
+  `cajaStore.enviarConteo`. Si la respuesta es `estado: 'en_conciliacion'`, el drawer NO se
+  cierra: carga el catálogo de motivos (`cargarMotivos(true)`) y pasa a fase
+  **conciliacion**, donde cada línea descuadrada pide un `USelect` de motivo + comentario
+  (obligatorio si el motivo lo exige o si no hay motivos activos) y llama
+  `cajaStore.cerrar`. **Retomar**: si se reabre el drawer con la caja ya
+  `en_conciliacion` (prop `resumir` o detección automática vía
+  `cajaStore.activa?.estado`), arranca directo en fase conciliacion sin repetir el conteo.
+  En modo ciego (`cajaStore.arqueoCiego`) oculta esperado/diferencia en vivo durante el
+  conteo y, al confirmar (cualquiera de las dos fases), redirige al detalle en vez de solo
+  cerrar el drawer — ver [Cierre ciego](#cierre-ciego-modo-anti-fraude) y [Cierre en dos
+  fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c)
+- `components/caja/CajaArqueoTable.vue` — Tabla (método / esperado / contado / diferencia /
+  motivo) para el desglose congelado; usada en el detalle de una caja `cerrada`
+  (`/mi-caja/[id]`, `/cajas/[id]`), solo si `arqueo.length > 0` — una caja
+  `en_conciliacion` no llega a esta tabla, la resuelve `CajaCierreDrawer` en fase
+  conciliacion. Prop `puedeJustificar` (poblada con `perms.esAdmin`) habilita edición
+  inline de motivo/comentario por línea descuadrada — el **override admin**
+  (sub-proyecto C, `PATCH /caja/:id/arqueo/motivos`), pre-cargado con lo ya justificado
+  para poder corregir
 - `components/caja/CajaCajonesGrid.vue` — Grid de cards para la superficie `/cajas` (permiso `Cajas:Leer`): **todos los cajones activos** del tenant con su estado (ocupado/libre), ocupados primero (la propia arriba). Card ocupada → `/cajas/[id]`; card libre (badge "Libre") → `/cajas/historial?cajonId=…`. No permite abrir caja (eso vive en `/mi-caja`)
 
 ### Pinia Store
@@ -994,30 +1357,30 @@ sin necesidad.
 Un único store sirve a ambas superficies — no se partió por módulo de permiso.
 
 **State**:
-- `cajaActiva: Caja | null` — caja abierta del usuario actual
-- `historial: Caja[]` — lista de sesiones pasadas
-- `movimientos: MovimientoCaja[]` — movimientos de la caja activa
+- `activa: Caja | null` — caja `abierta` o `en_conciliacion` del usuario actual
+- `resumenTurno: CajaTurnoResumen | null` — KPIs del turno (`GET /:id/movimientos/resumen`), con patch local optimista en cada movimiento/cobro
 - `cajonesEstado: CajonEstado[]` — todos los cajones activos del tenant con su estado ocupado/libre (superficie `/cajas`, permiso `Cajas:Leer`)
-- `detalle: CajaDetalle | null` — detalle de una caja ajena (página read-only)
+- `detalle: Caja | null` — detalle de una caja (propia o ajena, página read-only)
 - `cajonesDisponibles: CajonDisponible[]` — opciones del picker de apertura (activos + libres + autorizados)
-- `arqueo: ArqueoLinea[]` — líneas del arqueo (preview en vivo o congeladas), poblado por `cargarArqueo()`; se consume desde `CajaCierreDrawer` y `CajaArqueoTable`. `ArqueoLinea.esperado` es `string | null` (nullable desde el modo ciego)
+- `arqueo: ArqueoLinea[]` — líneas del arqueo (preview en vivo o congeladas), poblado por `cargarArqueo()`; se consume desde `CajaCierreDrawer` y `CajaArqueoTable`. `ArqueoLinea.esperado` es `string | null` (nullable desde el modo ciego); incluye `motivoDiferenciaId`/`motivoNombre`/`comentarioDiferencia` (sub-proyecto C)
 - `arqueoCiego: boolean` — `ciego` del último `cargarArqueo()`; consumida por `CajaCierreDrawer` para la rama ciega y por la config de Cajas para el toggle
-- `loading: boolean`
-- `error: string | null`
+- `motivos: MotivoDiferencia[]` — catálogo de motivos de diferencia (sub-proyecto C), poblado por `cargarMotivos()`; consumido por `CajaCierreDrawer` (fase 2) y `CajaArqueoTable` (override admin)
+- `loadingActiva` / `loadingResumenTurno: boolean`
 
 **Actions**:
-- `fetchCajaActiva()` — GET /caja/activa
+- `cargarActiva()` — GET /caja/activa
 - `cargarCajonesDisponibles()` — GET /caja/cajones-disponibles → puebla `cajonesDisponibles`
-- `abrirCaja(dto)` — POST /caja/abrir (`dto` incluye `cajonId`)
+- `abrir(dto)` — POST /caja/abrir (`dto` incluye `cajonId`)
 - `cargarArqueoCiego()` — GET /caja/arqueo-ciego → boolean (config del tenant)
 - `guardarArqueoCiego(valor)` — PUT /caja/arqueo-ciego
-- `registrarMovimiento(cajaId, dto)` — POST /caja/:id/movimientos
-- `fetchMovimientos(cajaId)` — GET /caja/:id/movimientos
+- `registrarMovimiento(cajaId, dto)` — POST /caja/:id/movimientos; aplica el patch local a `resumenTurno`
 - `cargarArqueo(cajaId)` — GET /caja/:id/arqueo → puebla `arqueo` y `arqueoCiego` (del `{ ciego, lineas }` de la respuesta)
-- `cerrar(cajaId, { lineas, comentario? })` — POST /caja/:id/cerrar; devuelve `{ caja, arqueo }`
-- `fetchHistorial(todas?)` — GET /caja?todas=true
+- `cargarMotivos(soloActivas?)` — GET /motivos-diferencia → puebla `motivos` (sub-proyecto C)
+- `enviarConteo(cajaId, { lineas, comentario? })` — **fase 1**: POST /caja/:id/conteo; devuelve `{ estado, arqueo }`; si `estado==='cerrada'` limpia `resumenTurno`/`activa`, si `'en_conciliacion'` avanza el `estado` local de `activa`/`detalle` para que el drawer detecte "retomar conciliación" sin recargar (sub-proyecto C)
+- `cerrar(cajaId, { lineas })` — **fase 2**: POST /caja/:id/cerrar; devuelve `{ caja, arqueo }`; limpia `resumenTurno`/`activa` (sub-proyecto C)
+- `justificarDiferencias(cajaId, lineas)` — **override admin**: PATCH /caja/:id/arqueo/motivos; devuelve `{ ciego, lineas }` (sub-proyecto C)
 - `cargarCajonesEstado()` — GET /caja/cajones-estado → puebla `cajonesEstado`
-- `cargarDetalle(id)` — GET /caja/:id + GET /caja/:id/movimientos → puebla `detalle`
+- `cargarDetalle(id)` — GET /caja/:id → puebla `detalle`
 
 ---
 
@@ -1059,30 +1422,44 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 [Store: movimientos.push(nuevo); cajaActiva.saldoEsperado actualizado]
 ```
 
-### Cerrar caja con arqueo multi-medio
+### Cerrar caja en dos fases (sub-proyecto C)
 
 ```
 [Clic "Cerrar caja"]
-  ↓ CajaCierreDrawer se abre → useCajaStore.cargarArqueo(cajaId)
+  ↓ CajaCierreDrawer se abre (fase='conteo') → cajaStore.cargarArqueo(cajaId)
 [GET /caja/:id/arqueo] → preview en vivo (línea efectivo + una por método no-efectivo)
   ↓
 [Usuario ingresa el contado de cada línea obligatoria (efectivo + requiereConteo);
  las informativas quedan opcionales]
-  ↓ useCajaStore.cerrar(cajaId, { lineas, comentario })
-[POST /caja/:id/cerrar]
+  ↓ cajaStore.enviarConteo(cajaId, { lineas, comentario })
+[POST /caja/:id/conteo — FASE 1]
   ↓
-[Service, en una transacción: lock de la caja → recomputa `calcularArqueo`
+[Service, en una transacción: lock de la caja 'abierta' → recomputa `calcularArqueo`
  (server-side, ignora cualquier "esperado" que mandara el cliente) → valida que
- toda línea obligatoria tenga contado (400 si falta) → congela cada línea en
- `caja_arqueo_medio` → copia la línea de efectivo a cajas.saldoFinal/montoContado/
- diferencia → estado='cerrada']
+ toda línea obligatoria tenga contado (400 si falta) → CONGELA cada línea en
+ `caja_arqueo_medio` (inmutable desde acá) → copia la línea de efectivo a
+ cajas.saldoFinal/montoContado/diferencia]
   ↓
-[Response: { caja, arqueo }]
-  ↓
-[Store: activa = null; resumenTurno = null]
-  ↓
-[/mi-caja vuelve a estado "Sin caja activa"]
+  ├─ [Ninguna línea descuadra] → estado='cerrada' + fechaCierre
+  │    ↓ Response { estado: 'cerrada', arqueo }
+  │    ↓ Store: activa = null; resumenTurno = null → /mi-caja "Sin caja activa"
+  │
+  └─ [Alguna línea descuadra] → estado='en_conciliacion' (sin fechaCierre)
+       ↓ Response { estado: 'en_conciliacion', arqueo }
+       ↓ Drawer pasa a fase='conciliacion' (sin cerrarse) → cajaStore.cargarMotivos(true)
+       ↓ Usuario elige motivo (o comentario, si no hay motivos activos) por línea descuadrada
+       ↓ cajaStore.cerrar(cajaId, { lineas: [{ metodoPagoId, motivoDiferenciaId?, comentarioDiferencia? }] })
+       [POST /caja/:id/cerrar — FASE 2, owner-o-admin]
+         ↓
+       [Service: lock de la caja 'en_conciliacion' → aplica motivos sobre las líneas
+        YA CONGELADAS (no recalcula nada) → 400 si falta un motivo/comentario → estado='cerrada' + fechaCierre]
+         ↓
+       [Response: { caja, arqueo }]
+         ↓
+       [Store: activa = null; resumenTurno = null → /mi-caja "Sin caja activa"]
 ```
+
+Si el drawer se cierra con la caja `en_conciliacion` sin completar la fase 2, la conciliación queda pendiente: la próxima vez que se abre el drawer (o el dashboard detecta `activa.estado === 'en_conciliacion'`) arranca directo en `fase='conciliacion'`, sin repetir el conteo — ver [Fase 1](#fase-1--post-cajaidconteo-congela-y-revela) y [`en_conciliacion` ocupa igual que `abierta`](#en_conciliacion-ocupa-igual-que-abierta).
 
 ---
 
@@ -1090,12 +1467,16 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 
 ### Una sola caja física por tenant+usuario, y una sola sesión por cajón
 
-Solo puede haber una caja `tipo='fisica'` con `estado='abierta'` por combinación
-`(tenant_id, usuario_id)`. Intentar abrir una segunda retorna `409 Conflict`. Desde el
-sub-proyecto 3, esto convive con una segunda regla independiente: un **cajón** físico
-también admite una sola sesión `abierta` a la vez (índice único parcial
-`ux_cajas_cajon_abierta`) — dos usuarios distintos no pueden abrir el mismo cajón en
-paralelo. Ver [Apertura sobre un cajón](#apertura-sobre-un-cajón-sub-proyecto-33).
+Solo puede haber una caja `tipo='fisica'` con `estado IN ('abierta', 'en_conciliacion')`
+por combinación `(tenant_id, usuario_id)` — desde el sub-proyecto C una conciliación
+pendiente también "ocupa" al cajero, no solo una caja `abierta`. Intentar abrir una
+segunda retorna `409 Conflict`. Desde el sub-proyecto 3, esto convive con una segunda
+regla independiente: un **cajón** físico también admite una sola sesión activa
+(`abierta` o `en_conciliacion`) a la vez — el índice único parcial `ux_cajas_cajon_abierta`
+(BD) solo cubre `estado='abierta'`, la ocupación de `en_conciliacion` la hace valer el
+service — dos usuarios distintos no pueden abrir el mismo cajón en paralelo. Ver
+[Apertura sobre un cajón](#apertura-sobre-un-cajón-sub-proyecto-33) y [`en_conciliacion`
+ocupa igual que `abierta`](#en_conciliacion-ocupa-igual-que-abierta).
 
 ### Fórmula del esperado — por línea, no un total mezclado
 
@@ -1145,9 +1526,13 @@ responsabilidad de acceso propia, no una acción CRUD reutilizada. `Ver todas` s
 existiendo como acción global para otros módulos — solo se dejó de asociar a caja.
 
 **Owner-only (independientemente de `Cajas:Leer`):** `POST /caja/:id/movimientos` y
-`POST /caja/:id/cerrar` solo los puede ejecutar el dueño de la caja (permiso `MiCaja`).
-Habilitar que el encargado fuerce el cierre de una caja ajena es un cambio de modelo
-(requiere `cajas.cerrada_por`) diferido a propósito — ver `docs/agent/pendientes.md`.
+`POST /caja/:id/conteo` (fase 1 del cierre) solo los puede ejecutar el dueño de la caja
+(permiso `MiCaja`). La única excepción es `POST /caja/:id/cerrar` (fase 2, sub-proyecto
+C): un admin del tenant puede finalizar una conciliación ya congelada por el dueño —
+nunca iniciar el conteo por él. Habilitar que el encargado fuerce el cierre **desde cero**
+de una caja ajena sigue siendo un cambio de modelo distinto (requiere `cajas.cerrada_por`)
+diferido a propósito — ver `docs/agent/pendientes.md` y [Cierre en dos
+fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
 
 ---
 
@@ -1159,6 +1544,7 @@ Habilitar que el encargado fuerce el cierre de una caja ajena es un cambio de mo
 cd backend
 npm test -- modules/caja/caja.service.spec.ts
 npm test -- modules/caja/caja.controller.spec.ts
+npm test -- modules/motivos-diferencia/motivos-diferencia.service.spec.ts
 ```
 
 ### E2E Tests
@@ -1166,6 +1552,7 @@ npm test -- modules/caja/caja.controller.spec.ts
 ```bash
 cd backend
 npm run test:e2e -- caja.e2e-spec.ts
+npm run test:e2e -- motivos-diferencia.e2e-spec.ts
 ```
 
 ### Manual Testing (Swagger)
@@ -1179,10 +1566,13 @@ npm run test:e2e -- caja.e2e-spec.ts
 7. `POST /caja/:id/movimientos` con `{ "tipo": "entrada", "concepto": "Prueba", "monto": "100" }` → 201
 8. `POST /caja/:id/movimientos` con `{ "tipo": "salida", "monto": "700" }` → 422 (saldo insuficiente de la línea de efectivo)
 9. `GET /caja/:id/arqueo` con la caja abierta → arreglo con la línea de efectivo + una por cada método no-efectivo usado
-10. `POST /caja/:id/cerrar` con `{ "lineas": [{ "metodoPagoId": null, "montoContado": "598" }] }` → 200 con `{ caja, arqueo }`; si falta el conteo de una línea obligatoria → 400
-11. `GET /caja/:id/arqueo` con la misma caja ya cerrada → las mismas líneas, ahora con `contado`/`diferencia` congelados
-12. `GET /caja` → historial con la caja cerrada; `saldoFinal`/`montoContado`/`diferencia` = línea de efectivo
-13. Con un token que solo tenga `Cajas/Leer` (sin `MiCaja`): `GET /caja/cajones-estado` → 200 (todos los cajones); `POST /caja/abrir` → 403
+10. `POST /caja/:id/conteo` con `{ "lineas": [{ "metodoPagoId": null, "montoContado": "598" }] }` que cuadra exacto → `{ "estado": "cerrada", arqueo }`; si falta el conteo de una línea obligatoria → 400
+11. Repetir la apertura + un conteo que **no** cuadre → `{ "estado": "en_conciliacion", arqueo }`; la caja queda ocupando el cajón (no aparece en `cajones-disponibles`) y bloquea `POST /:id/movimientos` (403, ya no está `'abierta'`)
+12. `POST /caja/:id/cerrar` sobre la caja `en_conciliacion` sin `lineas` (o sin motivo) → 400; con `{ "lineas": [{ "metodoPagoId": null, "motivoDiferenciaId": "<uuid de GET /motivos-diferencia>" }] }` → 200 con `{ caja, arqueo }`, `estado: 'cerrada'`
+13. `PATCH /caja/:id/arqueo/motivos` (con un token admin) sobre la caja recién cerrada, cambiando el motivo → 200; con un token no-admin → 403 (`TenantAdminGuard`)
+14. `GET /caja/:id/arqueo` con la misma caja ya cerrada → las mismas líneas, ahora con `contado`/`diferencia`/`motivoDiferenciaId` congelados
+15. `GET /caja` → historial con la caja cerrada; `saldoFinal`/`montoContado`/`diferencia` = línea de efectivo
+16. Con un token que solo tenga `Cajas/Leer` (sin `MiCaja`): `GET /caja/cajones-estado` → 200 (todos los cajones); `POST /caja/abrir` → 403
 
 ### Manual Testing (Frontend)
 
@@ -1195,21 +1585,33 @@ npm run test:e2e -- caja.e2e-spec.ts
    grid de cajones disponibles (ocupado)
 6. Agregar movimientos entrada/salida → verificar saldo esperado actualizado
 7. Intentar salida mayor al saldo de efectivo → verificar error
-8. Cerrar caja: verificar que el drawer muestra la línea de efectivo (obligatoria) y,
-   si hubo ventas con tarjeta u otro método, una línea adicional por ese método;
-   completar el conteo de las obligatorias → verificar diferencia en vivo por línea →
-   confirmar cierre
-9. Reabrir el detalle de la caja recién cerrada → verificar la tabla de desglose por
-   método (`CajaArqueoTable`) con `esperado`/`contado`/`diferencia` congelados
-10. `/mi-caja` (cajero sin caja): grid de cajones disponibles + botón "Ver historial" → `/mi-caja/historial`
-11. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
-12. `/cajas`: grid de todos los cajones activos (ocupados con datos, libres con badge
+8. Cerrar caja con un conteo que cuadra exacto: verificar que el drawer muestra la línea
+   de efectivo (obligatoria) y, si hubo ventas con tarjeta u otro método, una línea
+   adicional por ese método; completar el conteo de las obligatorias → verificar
+   diferencia en vivo por línea → "Enviar conteo" cierra directo (auto-cierre, sin fase 2)
+9. Cerrar caja con un conteo que **no** cuadra: "Enviar conteo" no cierra el drawer — pasa
+   a "Conciliar diferencias"; elegir un motivo (o escribir un comentario, si el tenant no
+   tiene motivos activos) por cada línea descuadrada → "Confirmar cierre"
+10. Cerrar el drawer en medio de una conciliación pendiente (sin confirmar) y volver a
+    entrar a `/mi-caja/[id]` → clic en "Cerrar caja" retoma directo en "Conciliar
+    diferencias" (no repite el conteo)
+11. Reabrir el detalle de la caja recién cerrada → verificar la tabla de desglose por
+    método (`CajaArqueoTable`) con `esperado`/`contado`/`diferencia`/motivo congelados
+12. Con un usuario admin: en el detalle de una caja cerrada con descuadre, editar el
+    motivo/comentario de una línea (override) → "Guardar" → verificar que persiste al
+    recargar. Con un usuario no-admin: la tabla no muestra los controles de edición
+13. Configuración → Motivos de diferencia: crear/editar/desactivar un motivo; un motivo
+    fijo no permite editar el nombre pero sí `activo`/`requiereComentario`; eliminar un
+    motivo no fijo
+14. `/mi-caja` (cajero sin caja): grid de cajones disponibles + botón "Ver historial" → `/mi-caja/historial`
+15. Admin: sidebar muestra "Mi caja" y "Cajas" como entradas independientes
+16. `/cajas`: grid de todos los cajones activos (ocupados con datos, libres con badge
     "Libre"); sin card de apertura. Click en ocupado → `/cajas/[id]`; click en libre →
     `/cajas/historial?cajonId=…`. Botón "Ver historial" → `/cajas/historial` (siempre todas,
     sin toggle); click en fila → `/cajas/[id]`
-13. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); botón "Ver historial del cajón" con `?cajonId=` (todas las sesiones de ese cajón)
-14. KPIs visibles al hacer scroll en movimientos (thead sticky)
-15. `/caja` redirige a `/mi-caja` (compatibilidad)
+17. `/cajas/[id]`: una sola tabla de movimientos, modo read-only (sin botones de operar); botón "Ver historial del cajón" con `?cajonId=` (todas las sesiones de ese cajón)
+18. KPIs visibles al hacer scroll en movimientos (thead sticky)
+19. `/caja` redirige a `/mi-caja` (compatibilidad)
 
 ---
 
@@ -1221,15 +1623,20 @@ npm run test:e2e -- caja.e2e-spec.ts
 - [x] Cierre calcula `diferencia = contado − esperado` por línea con Decimal.js
 - [x] Caja virtual excluida de todos los flujos manuales
 - [x] `metodos_pago.es_efectivo` (global) y `tenant_metodo_pago.requiere_conteo` (por tenant) gobiernan `obligatorio = es_efectivo OR requiere_conteo`
-- [x] `GET /caja/:id/arqueo` retorna preview recomputado (caja abierta) o líneas congeladas (caja cerrada)
-- [x] `POST /caja/:id/cerrar` recibe `lineas[]`, recomputa y congela el esperado server-side (nunca del cliente), `400` si falta una línea obligatoria
+- [x] `GET /caja/:id/arqueo` retorna preview recomputado (caja abierta) o líneas congeladas (caja `en_conciliacion` o cerrada)
+- [x] `POST /caja/:id/conteo` (fase 1) recibe `lineas[]`, recomputa y congela el esperado server-side (nunca del cliente), `400` si falta una línea obligatoria; bifurca a `'cerrada'` (todo cuadró) o `'en_conciliacion'` (algún descuadre)
 - [x] `caja_arqueo_medio` congela una fila por línea con índice único parcial `(caja_id, metodo_pago_id)`
 - [x] `cajas.saldoFinal`/`montoContado`/`diferencia` representan la línea de efectivo (backward-compat del historial)
 - [x] La NC "devolver dinero" valida saldo contra la línea de efectivo, no el total mezclado
 - [x] Cajas cerradas antes del sub-proyecto (sin filas en `caja_arqueo_medio`) muestran el cuadre agregado sin desglose por método
 - [x] Módulo `MiCaja` (operar el propio turno) y módulo `Cajas` (supervisar, solo lectura) separados
 - [x] `GET /caja/cajones-estado` requiere `Cajas:Leer` y retorna todos los cajones activos del tenant con su estado (ocupado/libre)
-- [x] `GET /caja/:id/movimientos` permite lectura de caja ajena con `Cajas:Leer`; registrar y cerrar siguen owner-only bajo `MiCaja`
+- [x] `GET /caja/:id/movimientos` permite lectura de caja ajena con `Cajas:Leer`; registrar y el conteo (fase 1) siguen owner-only bajo `MiCaja`
+- [x] `cajas.estado` admite `'en_conciliacion'`; `findActiva`/`abrir`/`cajonesDisponibles`/`cajonesEstado` la tratan como ocupada igual que `'abierta'`
+- [x] `POST /caja/:id/cerrar` (fase 2) es owner-o-admin, aplica motivos a las líneas descuadradas sin recalcular nada, `400` si falta un motivo/comentario obligatorio
+- [x] `PATCH /caja/:id/arqueo/motivos` (`TenantAdminGuard`) corrige motivos de una caja ya cerrada, mismo enforcement que la fase 2
+- [x] Catálogo `motivo_diferencia_caja` (admin-only CRUD, `es_fijo` no renombrable/eliminable pero togglable en `activo`/`requiereComentario`); sin motivos activos, el comentario es obligatorio (red de seguridad)
+- [x] El conteo (`esperado`/`contado`/`diferencia` en `caja_arqueo_medio`) es inmutable desde la fase 1 — ni la fase 2 ni el override lo recalculan
 - [x] Frontend `/cajas` muestra grid de todos los cajones activos (sin apertura) para usuarios con `Cajas:Leer`
 - [x] `CajaCajonesGrid` muestra cards por cajón: ocupado con badge "Mía"/datos → detalle; libre con badge "Libre" → historial del cajón
 - [x] Página `/cajas/historial` con historial paginado y filtros `?usuarioId=` y `?cajonId=`
@@ -1247,10 +1654,11 @@ npm run test:e2e -- caja.e2e-spec.ts
 - [x] Caja virtual sin cambios: `cajon_id` siempre `NULL`, no pasa por `POST /caja/abrir`
 - [x] `tenants.arqueo_ciego` (default `false`) con `GET`/`PUT /caja/arqueo-ciego` (`Cajas:Leer`/`Actualizar`)
 - [x] `GET /caja/:id/arqueo` responde `{ ciego, lineas }`; en modo ciego + caja abierta retiene `esperado:null` y filtra a solo líneas obligatorias, sin importar quién consulte
-- [x] Caja cerrada siempre revela (`ciego:false`, líneas completas), sin importar la config del tenant
-- [x] `POST /caja/:id/cerrar` sin cambios: sigue recomputando y congelando el arqueo completo, ignorando el modo ciego
+- [x] Caja `en_conciliacion` o cerrada siempre revela (`ciego:false`, líneas completas), sin importar la config del tenant
+- [x] `POST /caja/:id/conteo` (fase 1) sigue recomputando y congelando el arqueo completo, ignorando el modo ciego — es donde ocurre la revelación
 - [x] Toggle "Arqueo ciego" en Configuración → Cajas (`Cajas:Actualizar`)
-- [x] `CajaCierreDrawer` en modo ciego oculta esperado/diferencia en vivo y redirige al detalle tras cerrar
+- [x] `CajaCierreDrawer` en modo ciego oculta esperado/diferencia en vivo durante el conteo y redirige al detalle tras cerrar (cualquiera de las dos fases)
+- [x] `CajaCierreDrawer` retoma en fase "conciliacion" si se reabre sobre una caja ya `en_conciliacion`, sin repetir el conteo
 
 ---
 
