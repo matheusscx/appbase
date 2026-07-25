@@ -15,6 +15,7 @@ import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
+import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferencia.service';
 
 const TENANT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
 const USUARIO_ID = 'bbbbbbbb-0000-0000-0000-000000000002';
@@ -50,6 +51,10 @@ describe('CajaService', () => {
     transaction: jest.Mock;
     query: jest.Mock;
   };
+  const motivosService = {
+    assertMotivoValido: jest.fn(),
+    hayMotivosActivos: jest.fn(),
+  };
 
   beforeEach(async () => {
     cajaRepo = {
@@ -74,6 +79,9 @@ describe('CajaService', () => {
       query: jest.fn(),
     };
 
+    motivosService.assertMotivoValido.mockReset();
+    motivosService.hayMotivosActivos.mockReset();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CajaService,
@@ -84,6 +92,7 @@ describe('CajaService', () => {
           useValue: { create: jest.fn((x) => x), save: jest.fn() },
         },
         { provide: getDataSourceToken(), useValue: dataSource },
+        { provide: MotivosDiferenciaService, useValue: motivosService },
       ],
     }).compile();
 
@@ -258,10 +267,14 @@ describe('CajaService', () => {
     beforeEach(() => {
       managerMock.query.mockResolvedValue([{ caja_id: CAJA_ID }]); // FOR UPDATE
       managerMock.findOne.mockResolvedValue({ ...mockCajaAbierta });
+      managerMock.create.mockImplementation(
+        (_e: unknown, data: unknown) => data,
+      );
       managerMock.save.mockImplementation((_e: unknown, x: unknown) => x);
       jest
         .spyOn(service, 'calcularArqueo')
         .mockResolvedValue(arqueoRecomputado);
+      motivosService.hayMotivosActivos.mockResolvedValue(false);
     });
 
     it('congela el arqueo y fija los agregados de cajas = línea de efectivo', async () => {
@@ -293,7 +306,13 @@ describe('CajaService', () => {
 
     it('deja la línea opcional omitida como informativa (contado NULL)', async () => {
       const dto: CerrarCajaDto = {
-        lineas: [{ metodoPagoId: null, montoContado: '900' }], // solo efectivo
+        lineas: [
+          {
+            metodoPagoId: null,
+            montoContado: '900',
+            comentarioDiferencia: 'Faltante sin justificar aún',
+          },
+        ], // solo efectivo
       };
       const { caja, arqueo } = await service.cerrar(
         TENANT_ID,
@@ -354,7 +373,11 @@ describe('CajaService', () => {
     it('acepta montoContado con decimales', async () => {
       const dto: CerrarCajaDto = {
         lineas: [
-          { metodoPagoId: null, montoContado: '1000.5000' },
+          {
+            metodoPagoId: null,
+            montoContado: '1000.5000',
+            comentarioDiferencia: 'Sobrante de vueltos',
+          },
           {
             metodoPagoId: 'dddddddd-0000-0000-0000-000000000004',
             montoContado: '800',
@@ -378,6 +401,140 @@ describe('CajaService', () => {
       await expect(
         service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, dto),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('400 si una línea descuadra y NO trae motivo (habiendo motivos activos)', async () => {
+      // arqueo: efectivo esperado 1000, contado 900 → diferencia -100
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '1000.0000',
+          requiereConteo: true,
+        },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        usuarioId: USUARIO_ID,
+      });
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
+          lineas: [{ metodoPagoId: null, montoContado: '900' }],
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('400 si el motivo requiere_comentario y no viene comentario', async () => {
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '1000.0000',
+          requiereConteo: true,
+        },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      motivosService.assertMotivoValido.mockResolvedValueOnce({
+        id: 'm-otro',
+        nombre: 'otro',
+        requiereComentario: true,
+      });
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        usuarioId: USUARIO_ID,
+      });
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
+          lineas: [
+            {
+              metodoPagoId: null,
+              montoContado: '900',
+              motivoDiferenciaId: 'm-otro',
+            },
+          ],
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('red de seguridad: sin motivos activos, 400 sin comentario', async () => {
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '1000.0000',
+          requiereConteo: true,
+        },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(false);
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        usuarioId: USUARIO_ID,
+      });
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
+          lineas: [{ metodoPagoId: null, montoContado: '900' }],
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('congela motivo+comentario cuando la línea descuadra y trae motivo válido', async () => {
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '1000.0000',
+          requiereConteo: true,
+        },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      motivosService.assertMotivoValido.mockResolvedValueOnce({
+        id: 'm1',
+        nombre: 'falta de efectivo',
+        requiereComentario: false,
+      });
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        usuarioId: USUARIO_ID,
+      });
+      await service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
+        lineas: [
+          { metodoPagoId: null, montoContado: '900', motivoDiferenciaId: 'm1' },
+        ],
+      });
+      const saved = managerMock.save.mock.calls.find((c) =>
+        Array.isArray(c[1]),
+      )?.[1];
+      expect(saved[0]).toMatchObject({
+        motivoDiferenciaId: 'm1',
+        diferencia: '-100.0000',
+      });
+    });
+
+    it('línea que cuadra (diferencia 0) NO exige motivo', async () => {
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
+        {
+          metodoPagoId: null,
+          nombre: 'Efectivo',
+          esEfectivo: true,
+          esperado: '1000.0000',
+          requiereConteo: true,
+        },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        usuarioId: USUARIO_ID,
+      });
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
+          lineas: [{ metodoPagoId: null, montoContado: '1000' }],
+        } as any),
+      ).resolves.toBeDefined();
     });
   });
 
@@ -996,6 +1153,13 @@ describe('CajaService.abrir', () => {
           useValue: { create: jest.fn((x) => x), save: jest.fn() },
         },
         { provide: getDataSourceToken(), useValue: dataSource },
+        {
+          provide: MotivosDiferenciaService,
+          useValue: {
+            assertMotivoValido: jest.fn(),
+            hayMotivosActivos: jest.fn(),
+          },
+        },
       ],
     }).compile();
     service = module.get<CajaService>(CajaService);

@@ -18,6 +18,7 @@ import Decimal from 'decimal.js';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
+import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferencia.service';
 import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
@@ -99,6 +100,7 @@ export class CajaService {
     private readonly arqueoMedioRepo: Repository<CajaArqueoMedio>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly motivosService: MotivosDiferenciaService,
   ) {}
 
   async findActiva(tenantId: string, usuarioId: string): Promise<Caja | null> {
@@ -490,11 +492,16 @@ export class CajaService {
       // Esperado recomputado y CONGELADO server-side (nunca viene del cliente).
       const arqueo = await this.calcularArqueo(cajaId, tenantId, manager);
 
-      // Contado declarado por el cajero, indexado por clave de línea.
+      // Contado + motivo + comentario declarados, por clave de línea.
       const claveDe = (id: string | null) => id ?? 'EFECTIVO';
       const contadoPorClave = new Map<string, string>();
+      const motivoPorClave = new Map<string, string | undefined>();
+      const comentarioPorClave = new Map<string, string | undefined>();
       for (const linea of dto.lineas) {
-        contadoPorClave.set(claveDe(linea.metodoPagoId), linea.montoContado);
+        const clave = claveDe(linea.metodoPagoId);
+        contadoPorClave.set(clave, linea.montoContado);
+        motivoPorClave.set(clave, linea.motivoDiferenciaId);
+        comentarioPorClave.set(clave, linea.comentarioDiferencia);
       }
 
       // Ninguna línea del DTO puede ser ajena al arqueo recomputado.
@@ -507,21 +514,71 @@ export class CajaService {
         }
       }
 
-      // Resolver contado/diferencia por línea + validar obligatorias.
-      const lineasResueltas = arqueo.map((l) => {
-        const contadoRaw = contadoPorClave.get(claveDe(l.metodoPagoId));
-        const obligatoria = l.esEfectivo || l.requiereConteo;
-        if (obligatoria && contadoRaw === undefined) {
-          throw new BadRequestException(`Falta el conteo de ${l.nombre}`);
-        }
-        const contado =
-          contadoRaw === undefined ? null : new Decimal(contadoRaw).toFixed(4);
-        const diferencia =
-          contado === null
-            ? null
-            : new Decimal(contado).minus(l.esperado!).toFixed(4);
-        return { ...l, contado, diferencia };
-      });
+      const hayMotivos = await this.motivosService.hayMotivosActivos(
+        manager,
+        tenantId,
+      );
+
+      // Resolver contado/diferencia + validar obligatorias + justificación.
+      const lineasResueltas = await Promise.all(
+        arqueo.map(async (l) => {
+          const clave = claveDe(l.metodoPagoId);
+          const contadoRaw = contadoPorClave.get(clave);
+          const obligatoria = l.esEfectivo || l.requiereConteo;
+          if (obligatoria && contadoRaw === undefined) {
+            throw new BadRequestException(`Falta el conteo de ${l.nombre}`);
+          }
+          const contado =
+            contadoRaw === undefined
+              ? null
+              : new Decimal(contadoRaw).toFixed(4);
+          const diferencia =
+            contado === null
+              ? null
+              : new Decimal(contado).minus(l.esperado!).toFixed(4);
+
+          let motivoDiferenciaId: string | null = null;
+          let comentarioDiferencia: string | null = null;
+          if (diferencia !== null && !new Decimal(diferencia).isZero()) {
+            const motivoId = motivoPorClave.get(clave);
+            const comentario = comentarioPorClave.get(clave)?.trim() || null;
+            if (hayMotivos) {
+              if (!motivoId) {
+                throw new BadRequestException(
+                  `Falta el motivo de la diferencia de ${l.nombre}`,
+                );
+              }
+              const motivo = await this.motivosService.assertMotivoValido(
+                manager,
+                tenantId,
+                motivoId,
+              );
+              if (motivo.requiereComentario && !comentario) {
+                throw new BadRequestException(
+                  `El motivo "${motivo.nombre}" exige un comentario`,
+                );
+              }
+              motivoDiferenciaId = motivo.id;
+              comentarioDiferencia = comentario;
+            } else {
+              // Red de seguridad: sin motivos activos, comentario obligatorio.
+              if (!comentario) {
+                throw new BadRequestException(
+                  `Falta justificar la diferencia de ${l.nombre}`,
+                );
+              }
+              comentarioDiferencia = comentario;
+            }
+          }
+          return {
+            ...l,
+            contado,
+            diferencia,
+            motivoDiferenciaId,
+            comentarioDiferencia,
+          };
+        }),
+      );
 
       // Congelar todas las líneas.
       await manager.save(
@@ -535,6 +592,8 @@ export class CajaService {
             esperado: l.esperado!,
             contado: l.contado,
             diferencia: l.diferencia,
+            motivoDiferenciaId: l.motivoDiferenciaId,
+            comentarioDiferencia: l.comentarioDiferencia,
           }),
         ),
       );

@@ -5,9 +5,13 @@ import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
 import { CajaController } from './caja.controller';
 import { CajaService } from './caja.service';
+import { MotivosDiferenciaModule } from '../motivos-diferencia/motivos-diferencia.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Caja, MovimientoCaja, CajaArqueoMedio])],
+  imports: [
+    TypeOrmModule.forFeature([Caja, MovimientoCaja, CajaArqueoMedio]),
+    MotivosDiferenciaModule,
+  ],
   controllers: [CajaController],
   providers: [CajaService],
   exports: [CajaService],

@@ -41,6 +41,12 @@ export class CajaArqueoMedio {
   @Column({ type: 'decimal', precision: 18, scale: 4, nullable: true })
   diferencia: string | null;
 
+  @Column({ name: 'motivo_diferencia_id', type: 'uuid', nullable: true })
+  motivoDiferenciaId: string | null;
+
+  @Column({ name: 'comentario_diferencia', type: 'text', nullable: true })
+  comentarioDiferencia: string | null;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 
