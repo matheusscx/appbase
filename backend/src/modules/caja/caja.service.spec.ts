@@ -800,6 +800,91 @@ describe('CajaService', () => {
     });
   });
 
+  describe('cerrar (finalizar desde en_conciliacion)', () => {
+    it('400 si la caja no está en_conciliacion', async () => {
+      managerMock.query.mockResolvedValueOnce([]); // lock: no hay fila en_conciliacion
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+          lineas: [],
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('un no-owner que no es admin → 403', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: OTRO_USUARIO,
+      });
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+          lineas: [],
+        } as any),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('owner finaliza: aplica motivos y pasa a cerrada + fechaCierre', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: USUARIO_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '-100.0000' },
+      ]); // filas congeladas
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      motivosService.assertMotivoValido.mockResolvedValueOnce({
+        id: 'm1',
+        nombre: 'falta de efectivo',
+        requiereComentario: false,
+      });
+      managerMock.query.mockResolvedValueOnce(undefined); // UPDATE
+      // obtenerArqueo de relectura (fuera de la transacción):
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: USUARIO_ID,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const res = await service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+        lineas: [{ metodoPagoId: null, motivoDiferenciaId: 'm1' }],
+      });
+
+      // manager.save(Caja, caja) — el objeto guardado es el 2º argumento.
+      const savedCaja = managerMock.save.mock.calls.at(-1)[1];
+      expect(savedCaja.estado).toBe('cerrada');
+      expect(savedCaja.fechaCierre).toBeInstanceOf(Date);
+      expect(res.caja.estado).toBe('cerrada');
+    });
+
+    it('admin (no owner) puede finalizar', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: OTRO_USUARIO,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]); // sin descuadre → no exige motivo
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: OTRO_USUARIO,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const res = await service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, true, {
+        lineas: [],
+      });
+      expect(res.caja.estado).toBe('cerrada');
+    });
+  });
+
   describe('getArqueoCiego / setArqueoCiego', () => {
     it('getArqueoCiego lee tenants.arqueo_ciego filtrando soft-delete', async () => {
       dataSource.query.mockResolvedValueOnce([{ arqueo_ciego: true }]);

@@ -28,6 +28,7 @@ import { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 import { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
 import { SetArqueoCiegoDto } from './dto/set-arqueo-ciego.dto';
 import { JustificarDiferenciasDto } from './dto/justificar-diferencias.dto';
+import { FinalizarCierreDto } from './dto/finalizar-cierre.dto';
 
 @ApiTags('caja')
 @ApiBearerAuth()
@@ -166,18 +167,23 @@ export class CajaController {
     return this.cajaService.enviarConteo(u.tenantId!, u.id, cajaId, dto);
   }
 
-  // Transitorio: `/cerrar` apunta hoy a la fase 1 (enviarConteo) solo para
-  // mantener el endpoint existente compilando; la fase 2 (resolución de la
-  // conciliación) lo redefine en la siguiente tarea del rediseño.
+  /**
+   * Fase 2 del cierre: finaliza una caja `en_conciliacion`. Owner-o-admin, por
+   * eso NO lleva `TenantAdminGuard` (bloquearía al cajero dueño) — el piso de
+   * permiso es `MiCaja:Actualizar` y `esAdmin` se computa aparte, con el mismo
+   * criterio que `TenantAdminGuard` (`rbacService.userIsTenantAdmin`), para
+   * permitir además a un admin no-dueño finalizar la conciliación.
+   */
   @Post(':id/cerrar')
   @RequiresPermiso('MiCaja', 'Actualizar')
-  cerrar(
+  async cerrar(
     @Req() req: Request,
     @Param('id') cajaId: string,
-    @Body() dto: CerrarCajaDto,
+    @Body() dto: FinalizarCierreDto,
   ) {
     const u = req.user as JwtUser;
-    return this.cajaService.enviarConteo(u.tenantId!, u.id, cajaId, dto);
+    const esAdmin = await this.rbacService.userIsTenantAdmin(u.id, u.tenantId!);
+    return this.cajaService.cerrar(u.tenantId!, u.id, cajaId, esAdmin, dto);
   }
 
   @Get(':id/movimientos/resumen')

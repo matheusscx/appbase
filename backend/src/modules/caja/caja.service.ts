@@ -23,6 +23,7 @@ import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferenc
 import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
+import type { FinalizarCierreDto } from './dto/finalizar-cierre.dto';
 import type { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 import type { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
@@ -271,6 +272,28 @@ export class CajaService {
   }
 
   /**
+   * Lock pesimista de una caja en conciliación. Debe llamarse dentro de una
+   * transacción abierta antes de finalizar el cierre (fase 2) — evita TOCTOU
+   * entre dos intentos concurrentes de `cerrar`.
+   */
+  private async bloquearCajaEnConciliacion(
+    manager: EntityManager,
+    cajaId: string,
+    tenantId: string,
+  ): Promise<void> {
+    const rows: { caja_id: string }[] = await manager.query(
+      `SELECT caja_id FROM cajas
+        WHERE caja_id = $1 AND tenant_id = $2
+          AND estado = 'en_conciliacion' AND eliminado_el IS NULL
+        FOR UPDATE`,
+      [cajaId, tenantId],
+    );
+    if (!rows.length) {
+      throw new BadRequestException('La caja no está en conciliación');
+    }
+  }
+
+  /**
    * Línea de efectivo del arqueo: fondo + entradas de métodos es_efectivo +
    * entradas manuales (metodo_pago_id NULL) − todas las salidas. Los vueltos ya
    * están netos en el movimiento (pagos.service inserta monto = pago − vuelto).
@@ -485,10 +508,83 @@ export class CajaService {
   }
 
   /**
+   * Enforcement de motivos compartido entre la fase 2 del cierre (`cerrar`,
+   * desde `en_conciliacion`) y el override admin (`justificarDiferencias`,
+   * sobre una caja ya `cerrada`). Solo actualiza motivo_diferencia_id/
+   * comentario_diferencia de las líneas ya congeladas — nunca recalcula
+   * esperado/contado/diferencia.
+   */
+  private async aplicarMotivosADescuadres(
+    manager: EntityManager,
+    tenantId: string,
+    cajaId: string,
+    lineas: {
+      metodoPagoId: string | null;
+      motivoDiferenciaId?: string;
+      comentarioDiferencia?: string;
+    }[],
+  ): Promise<void> {
+    const filas: {
+      metodo_pago_id: string | null;
+      diferencia: string | null;
+    }[] = await manager.query(
+      `SELECT metodo_pago_id, diferencia FROM caja_arqueo_medio
+         WHERE caja_id = $1 AND eliminado_el IS NULL`,
+      [cajaId],
+    );
+    const claveDe = (id: string | null) => id ?? 'EFECTIVO';
+    const difPorClave = new Map(
+      filas.map((f) => [claveDe(f.metodo_pago_id), f.diferencia]),
+    );
+    const hayMotivos = await this.motivosService.hayMotivosActivos(
+      manager,
+      tenantId,
+    );
+    for (const l of lineas) {
+      const clave = claveDe(l.metodoPagoId);
+      const dif = difPorClave.get(clave);
+      if (dif == null || new Decimal(dif).isZero()) continue;
+      const comentario = l.comentarioDiferencia?.trim() || null;
+      let motivoId: string | null = null;
+      let comentarioFinal: string | null = null;
+      if (hayMotivos) {
+        if (!l.motivoDiferenciaId)
+          throw new BadRequestException('Falta el motivo de la diferencia');
+        const motivo = await this.motivosService.assertMotivoValido(
+          manager,
+          tenantId,
+          l.motivoDiferenciaId,
+        );
+        if (motivo.requiereComentario && !comentario) {
+          throw new BadRequestException(
+            `El motivo "${motivo.nombre}" exige un comentario`,
+          );
+        }
+        motivoId = motivo.id;
+        comentarioFinal = comentario;
+      } else {
+        if (!comentario)
+          throw new BadRequestException('Falta justificar la diferencia');
+        comentarioFinal = comentario;
+      }
+      await manager.query(
+        `UPDATE caja_arqueo_medio SET motivo_diferencia_id = $1, comentario_diferencia = $2
+         WHERE caja_id = $3 AND tenant_id = $4
+           AND ${l.metodoPagoId === null ? 'metodo_pago_id IS NULL' : 'metodo_pago_id = $5'}
+           AND eliminado_el IS NULL`,
+        l.metodoPagoId === null
+          ? [motivoId, comentarioFinal, cajaId, tenantId]
+          : [motivoId, comentarioFinal, cajaId, tenantId, l.metodoPagoId],
+      );
+    }
+  }
+
+  /**
    * Justifica (o re-justifica) las líneas que descuadran de una caja YA CERRADA.
    * Admin-only (guard en el controller). No recalcula ni toca esperado/contado/
    * diferencia: solo actualiza motivo_diferencia_id/comentario_diferencia de las
-   * filas congeladas por `cerrar`. Mismo enforcement que el cierre normal.
+   * filas congeladas por `cerrar`. Mismo enforcement que la fase 2 del cierre
+   * (`aplicarMotivosADescuadres`).
    */
   async justificarDiferencias(
     tenantId: string,
@@ -508,63 +604,7 @@ export class CajaService {
         throw new BadRequestException('La caja no está cerrada');
       }
 
-      const filas: {
-        metodo_pago_id: string | null;
-        diferencia: string | null;
-      }[] = await manager.query(
-        `SELECT metodo_pago_id, diferencia FROM caja_arqueo_medio
-         WHERE caja_id = $1 AND eliminado_el IS NULL`,
-        [cajaId],
-      );
-      const claveDe = (id: string | null) => id ?? 'EFECTIVO';
-      const difPorClave = new Map(
-        filas.map((f) => [claveDe(f.metodo_pago_id), f.diferencia]),
-      );
-      const hayMotivos = await this.motivosService.hayMotivosActivos(
-        manager,
-        tenantId,
-      );
-
-      for (const l of lineas) {
-        const clave = claveDe(l.metodoPagoId);
-        const dif = difPorClave.get(clave);
-        if (dif == null || new Decimal(dif).isZero()) continue; // solo descuadres
-        const comentario = l.comentarioDiferencia?.trim() || null;
-        let motivoId: string | null = null;
-        let comentarioFinal: string | null = null;
-        if (hayMotivos) {
-          if (!l.motivoDiferenciaId) {
-            throw new BadRequestException('Falta el motivo de la diferencia');
-          }
-          const motivo = await this.motivosService.assertMotivoValido(
-            manager,
-            tenantId,
-            l.motivoDiferenciaId,
-          );
-          if (motivo.requiereComentario && !comentario) {
-            throw new BadRequestException(
-              `El motivo "${motivo.nombre}" exige un comentario`,
-            );
-          }
-          motivoId = motivo.id;
-          comentarioFinal = comentario;
-        } else {
-          if (!comentario) {
-            throw new BadRequestException('Falta justificar la diferencia');
-          }
-          comentarioFinal = comentario;
-        }
-        await manager.query(
-          `UPDATE caja_arqueo_medio
-             SET motivo_diferencia_id = $1, comentario_diferencia = $2
-           WHERE caja_id = $3 AND tenant_id = $4
-             AND ${l.metodoPagoId === null ? 'metodo_pago_id IS NULL' : 'metodo_pago_id = $5'}
-             AND eliminado_el IS NULL`,
-          l.metodoPagoId === null
-            ? [motivoId, comentarioFinal, cajaId, tenantId]
-            : [motivoId, comentarioFinal, cajaId, tenantId, l.metodoPagoId],
-        );
-      }
+      await this.aplicarMotivosADescuadres(manager, tenantId, cajaId, lineas);
     });
     // Relectura con el arqueo revelado (ciego:false, caja cerrada). `tieneVerTodas`
     // en true porque el llamador ya pasó TenantAdminGuard; verificarAccesoCaja no
@@ -684,6 +724,58 @@ export class CajaService {
         arqueo: lineasResueltas,
       };
     });
+  }
+
+  /**
+   * Fase 2 del cierre en dos fases: finaliza una caja `en_conciliacion`.
+   * Owner-o-admin (el controller resuelve `esAdmin`). Aplica los motivos a las
+   * líneas descuadradas (mismo enforcement que el override, vía
+   * `aplicarMotivosADescuadres`) y solo entonces pasa a `cerrada` +
+   * `fechaCierre`. NO recalcula ni toca esperado/contado/diferencia: esas
+   * quedaron congeladas por `enviarConteo` (fase 1). Si falta un motivo, el
+   * helper lanza 400 y la transacción no finaliza — la caja sigue
+   * `en_conciliacion`.
+   */
+  async cerrar(
+    tenantId: string,
+    usuarioId: string,
+    cajaId: string,
+    esAdmin: boolean,
+    dto: FinalizarCierreDto,
+  ): Promise<{ caja: Caja; arqueo: LineaArqueo[] }> {
+    const caja = await this.dataSource.transaction(async (manager) => {
+      await this.bloquearCajaEnConciliacion(manager, cajaId, tenantId);
+      const caja = await manager.findOne(Caja, {
+        where: {
+          id: cajaId,
+          tenantId,
+          estado: 'en_conciliacion',
+          eliminadoEl: IsNull(),
+        },
+      });
+      if (!caja)
+        throw new BadRequestException('La caja no está en conciliación');
+      if (caja.usuarioId !== usuarioId && !esAdmin) {
+        throw new ForbiddenException('No tienes acceso a esta caja');
+      }
+      await this.aplicarMotivosADescuadres(
+        manager,
+        tenantId,
+        cajaId,
+        dto.lineas,
+      );
+      caja.estado = 'cerrada';
+      caja.fechaCierre = new Date();
+      await manager.save(Caja, caja);
+      return caja;
+    });
+    const { lineas } = await this.obtenerArqueo(
+      tenantId,
+      usuarioId,
+      cajaId,
+      true,
+    );
+    return { caja, arqueo: lineas };
   }
 
   async registrarMovimientoEnTransaccion(

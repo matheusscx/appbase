@@ -23,10 +23,12 @@ describe('CajaController', () => {
       getArqueoCiego: jest.fn(),
       setArqueoCiego: jest.fn(),
       justificarDiferencias: jest.fn(),
+      cerrar: jest.fn(),
     } as unknown as CajaService;
 
     rbacService = {
       userHasPermiso: jest.fn(),
+      userIsTenantAdmin: jest.fn(),
     } as unknown as RbacService;
 
     controller = new CajaController(cajaService, rbacService);
@@ -258,16 +260,38 @@ describe('CajaController', () => {
         dto,
       );
     });
+  });
 
-    it('cerrar delega en cajaService.enviarConteo (transitorio, fase 2 en Task 3)', () => {
-      const dto = { montoContado: '900' } as any;
-      jest.spyOn(cajaService, 'enviarConteo').mockResolvedValue({} as any);
+  describe('cerrar (fase 2: finalizar, owner-o-admin)', () => {
+    it('computa esAdmin=false para un cajero sin rol admin y delega en cajaService.cerrar', async () => {
+      const dto = {
+        lineas: [{ metodoPagoId: null, motivoDiferenciaId: 'm1' }],
+      } as any;
+      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(false);
+      jest.spyOn(cajaService, 'cerrar').mockResolvedValue({} as any);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
-      controller.cerrar(req, 'caja1', dto);
-      expect(cajaService.enviarConteo).toHaveBeenCalledWith(
+      await controller.cerrar(req, 'caja1', dto);
+      expect(rbacService.userIsTenantAdmin).toHaveBeenCalledWith('u1', 't1');
+      expect(cajaService.cerrar).toHaveBeenCalledWith(
         't1',
         'u1',
         'caja1',
+        false,
+        dto,
+      );
+    });
+
+    it('computa esAdmin=true para un admin del tenant y delega en cajaService.cerrar', async () => {
+      const dto = { lineas: [] } as any;
+      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(true);
+      jest.spyOn(cajaService, 'cerrar').mockResolvedValue({} as any);
+      const req = { user: { id: 'admin1', tenantId: 't1' } } as any;
+      await controller.cerrar(req, 'caja1', dto);
+      expect(cajaService.cerrar).toHaveBeenCalledWith(
+        't1',
+        'admin1',
+        'caja1',
+        true,
         dto,
       );
     });
