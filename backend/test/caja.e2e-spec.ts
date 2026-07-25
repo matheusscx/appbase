@@ -95,6 +95,34 @@ async function abrirOReusarCaja(
 }
 
 /**
+ * Cierre en dos fases (Task 3): fase 1 (`POST /:id/conteo`) congela el arqueo
+ * y auto-cierra si cuadra, o pasa a `en_conciliacion` si alguna línea
+ * descuadra. Si descuadra, esta función resuelve la fase 2 (`POST /:id/cerrar`)
+ * con los motivos de `justificar` (vacío si no se pasa). Devuelve la respuesta
+ * de la fase que terminó cerrando el flujo — `{estado, arqueo}` si auto-cerró
+ * en fase 1, o `{caja, arqueo}` si necesitó la fase 2.
+ */
+async function cerrarEnDosFases(
+  app: INestApplication<App>,
+  cajaId: string,
+  token: string,
+  contadas: any[],
+  justificar?: any[],
+) {
+  const c = await request(app.getHttpServer())
+    .post(`/api/caja/${cajaId}/conteo`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ lineas: contadas });
+  if ((c.body as { estado?: string }).estado === 'en_conciliacion') {
+    return request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/cerrar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: justificar ?? [] });
+  }
+  return c;
+}
+
+/**
  * Resuelve el usuarioId del dueño de `token` matcheando su correo en
  * GET /api/tenants/members (patrón de cajones.e2e-spec.ts).
  */
@@ -177,8 +205,8 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     });
   });
 
-  describe('POST /caja/:id/cerrar — owner-only', () => {
-    it('un supervisor NO puede cerrar la caja abierta por el cajero', async () => {
+  describe('POST /caja/:id/conteo — owner-only (fase 1)', () => {
+    it('un supervisor NO puede enviar el conteo de la caja abierta por el cajero', async () => {
       cajaDelCajeroId = await abrirOReusarCaja(
         app,
         tokenCajero,
@@ -186,7 +214,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       );
 
       const res = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
+        .post(`/api/caja/${cajaDelCajeroId}/conteo`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
 
@@ -199,14 +227,13 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     afterAll(async () => {
       // Higiene de reruns locales: cerrar la caja abierta por el cajero
       // (queda abierta a propósito durante el `it` de arriba, que verifica
-      // que el supervisor no puede cerrarla). Se cierra acá, antes de que
-      // otros describes intenten abrir una caja nueva para el cajero — solo
-      // puede tener una física abierta por (tenant, usuario) a la vez.
+      // que el supervisor no puede enviar su conteo). Se cierra acá, antes de
+      // que otros describes intenten abrir una caja nueva para el cajero —
+      // solo puede tener una física abierta por (tenant, usuario) a la vez.
       if (cajaDelCajeroId) {
-        await request(app.getHttpServer())
-          .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
-          .set('Authorization', `Bearer ${tokenCajero}`)
-          .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+        await cerrarEnDosFases(app, cajaDelCajeroId, tokenCajero, [
+          { metodoPagoId: null, montoContado: '10000' },
+        ]);
       }
     });
   });
@@ -271,10 +298,9 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(desactivar.status).toBe(409);
 
       // cerrar para dejar limpio (higiene de reruns locales)
-      const cerrar = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
-        .set('Authorization', `Bearer ${tokenSupervisor}`)
-        .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
+      const cerrar = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
+        { metodoPagoId: null, montoContado: '0' },
+      ]);
       expect([200, 201]).toContain(cerrar.status);
     });
 
@@ -396,12 +422,12 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(efectivo?.esperado).toBe('0.0000');
       expect(tarjeta?.esperado).toBe('5000.0000');
 
-      const cerrar = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
-        .set('Authorization', `Bearer ${tokenSupervisor}`)
-        .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
+      const cerrar = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
+        { metodoPagoId: null, montoContado: '0' },
+      ]);
       expect(cerrar.status).toBe(201);
-      const body = cerrar.body as { arqueo: ArqueoLinea[] };
+      const body = cerrar.body as { estado: string; arqueo: ArqueoLinea[] };
+      expect(body.estado).toBe('cerrada'); // cuadró → auto-cierre en fase 1
       const efectivoCerrado = body.arqueo.find((l) => l.esEfectivo);
       expect(efectivoCerrado?.diferencia).toBe('0.0000');
     });
@@ -426,14 +452,13 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         });
       expect(venta.status).toBe(201);
 
-      const cerrar = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
-        .set('Authorization', `Bearer ${tokenSupervisor}`)
-        .send({ lineas: [{ metodoPagoId: null, montoContado: '10000.0000' }] });
+      const cerrar = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
+        { metodoPagoId: null, montoContado: '10000.0000' },
+      ]);
       expect(cerrar.status).toBe(201);
     });
 
-    it('con requiere_conteo=true en tarjeta, cerrar sin su contado → 400', async () => {
+    it('con requiere_conteo=true en tarjeta, enviar el conteo sin su contado → 400', async () => {
       await ds.query(
         `UPDATE tenant_metodo_pago SET requiere_conteo = true
          WHERE tenant_id = $1 AND metodo_pago_id = $2`,
@@ -457,23 +482,25 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         });
       expect(venta.status).toBe(201);
 
-      const cerrarSinTarjeta = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
+      // La validación de "falta el conteo de X" (línea obligatoria sin
+      // contado) vive en la fase 1 (`enviarConteo`), no en `cerrar`.
+      const conteoSinTarjeta = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ lineas: [{ metodoPagoId: null, montoContado: '0' }] });
-      expect(cerrarSinTarjeta.status).toBe(400);
+      expect(conteoSinTarjeta.status).toBe(400);
 
       // Higiene: cerrar con el conteo de la tarjeta (ahora obligatoria) para
       // no dejar la caja abierta, y restaurar la política del tenant.
-      const cerrarCompleto = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
-        .set('Authorization', `Bearer ${tokenSupervisor}`)
-        .send({
-          lineas: [
-            { metodoPagoId: null, montoContado: '0' },
-            { metodoPagoId: TARJETA_DEBITO_ID, montoContado: '5000.0000' },
-          ],
-        });
+      const cerrarCompleto = await cerrarEnDosFases(
+        app,
+        cajaId,
+        tokenSupervisor,
+        [
+          { metodoPagoId: null, montoContado: '0' },
+          { metodoPagoId: TARJETA_DEBITO_ID, montoContado: '5000.0000' },
+        ],
+      );
       expect(cerrarCompleto.status).toBe(201);
 
       await ds.query(
@@ -491,10 +518,9 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(abrir.status).toBe(201);
       const cajaId = (abrir.body as CajaResponse).id;
 
-      const cerrar = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
-        .set('Authorization', `Bearer ${tokenSupervisor}`)
-        .send({ lineas: [{ metodoPagoId: null, montoContado: '10000.5000' }] });
+      const cerrar = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
+        { metodoPagoId: null, montoContado: '10000.5000' },
+      ]);
       expect(cerrar.status).toBe(201);
     });
 
@@ -506,10 +532,9 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(abrir.status).toBe(201);
       const cajaId = (abrir.body as CajaResponse).id;
 
-      const cerrar = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
-        .set('Authorization', `Bearer ${tokenSupervisor}`)
-        .send({ lineas: [{ metodoPagoId: null, montoContado: '1000.0000' }] });
+      const cerrar = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
+        { metodoPagoId: null, montoContado: '1000.0000' },
+      ]);
       expect(cerrar.status).toBe(201);
 
       const arqueoCerrado = await request(app.getHttpServer())
@@ -563,12 +588,9 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         expect(body.lineas[0].esperado).toBeNull();
 
         // El cierre igual cuadra: el server recomputa el esperado (10000).
-        const cerrar = await request(app.getHttpServer())
-          .post(`/api/caja/${cajaId}/cerrar`)
-          .set('Authorization', `Bearer ${tokenSupervisor}`)
-          .send({
-            lineas: [{ metodoPagoId: null, montoContado: '10000.0000' }],
-          });
+        const cerrar = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
+          { metodoPagoId: null, montoContado: '10000.0000' },
+        ]);
         expect(cerrar.status).toBe(201);
         const cerrarBody = cerrar.body as { arqueo: ArqueoLinea[] };
         const efectivoCerrado = cerrarBody.arqueo.find((l) => l.esEfectivo);
@@ -588,6 +610,79 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         const efectivoRevelado = revBody.lineas.find((l) => l.esEfectivo);
         expect(efectivoRevelado?.esperado).toBe('10000.0000');
         expect(efectivoRevelado?.diferencia).toBe('0.0000');
+      } finally {
+        // Higiene: restaurar la política para no contaminar otros specs/corridas.
+        await ds.query(
+          `UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1`,
+          [PARIS_TENANT_ID],
+        );
+      }
+    });
+
+    it('modo ciego + descuadre real: el conteo pasa a en_conciliacion y el GET /arqueo posterior revela; se finaliza con motivo', async () => {
+      // Motivo fijo del seed (`seedMotivosDiferencia`, Paris arranca en 291).
+      const FALTA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440291';
+
+      await ds.query(
+        `UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1`,
+        [PARIS_TENANT_ID],
+      );
+      try {
+        const abrir = await request(app.getHttpServer())
+          .post('/api/caja/abrir')
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({ cajonId: cajonArqueoId, saldoInicial: '10000.0000' });
+        expect(abrir.status).toBe(201);
+        const cajaId = (abrir.body as CajaResponse).id;
+
+        // Contado ≠ esperado (10000): la caja NO auto-cierra, pasa a conciliación.
+        const conteo = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/conteo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            lineas: [{ metodoPagoId: null, montoContado: '9000.0000' }],
+          });
+        expect(conteo.status).toBe(201);
+        expect((conteo.body as { estado: string }).estado).toBe(
+          'en_conciliacion',
+        );
+
+        // Aunque el tenant sea ciego, la caja ya no está "abierta": el GET
+        // /arqueo revela todo para poder conciliar (ciego solo aplica al
+        // preview de una caja abierta).
+        const arqueoRevelado = await request(app.getHttpServer())
+          .get(`/api/caja/${cajaId}/arqueo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+        expect(arqueoRevelado.status).toBe(200);
+        const revBody = arqueoRevelado.body as {
+          ciego: boolean;
+          lineas: ArqueoLinea[];
+        };
+        expect(revBody.ciego).toBe(false);
+        const efectivoRevelado = revBody.lineas.find((l) => l.esEfectivo);
+        expect(efectivoRevelado?.esperado).toBe('10000.0000');
+        expect(efectivoRevelado?.diferencia).toBe('-1000.0000');
+        expect(efectivoRevelado?.motivoNombre).toBeNull();
+
+        // Fase 2: finalizar la conciliación con motivo.
+        const cerrar = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/cerrar`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            lineas: [
+              { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
+            ],
+          });
+        expect([200, 201]).toContain(cerrar.status);
+
+        const arqueoFinal = await request(app.getHttpServer())
+          .get(`/api/caja/${cajaId}/arqueo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+        const lineasFinal = (arqueoFinal.body as { lineas: ArqueoLinea[] })
+          .lineas;
+        expect(lineasFinal.find((l) => l.esEfectivo)?.motivoNombre).toBe(
+          'falta de efectivo',
+        );
       } finally {
         // Higiene: restaurar la política para no contaminar otros specs/corridas.
         await ds.query(
@@ -618,7 +713,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .set('Authorization', `Bearer ${tokenSupervisor}`);
     });
 
-    it('cerrar con descuadre no exige motivo (201, línea sin justificar); PATCH la justifica después', async () => {
+    it('conteo con descuadre → en_conciliacion; cerrar sin motivo → 400; con motivo → cierra y GET /arqueo muestra motivoNombre', async () => {
       const abrir = await request(app.getHttpServer())
         .post('/api/caja/abrir')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
@@ -626,12 +721,15 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(abrir.status).toBe(201);
       const cajaId = (abrir.body as CajaResponse).id;
 
-      // Contado != esperado (10000), sin motivo → cerrar ya no lo exige: 201.
-      const cerrar = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
+      // Contado != esperado (10000): fase 1 NO auto-cierra, pasa a conciliación.
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ lineas: [{ metodoPagoId: null, montoContado: '9000.0000' }] });
-      expect(cerrar.status).toBe(201);
+      expect(conteo.status).toBe(201);
+      expect((conteo.body as { estado: string }).estado).toBe(
+        'en_conciliacion',
+      );
 
       const arqueoSinJustificar = await request(app.getHttpServer())
         .get(`/api/caja/${cajaId}/arqueo`)
@@ -646,16 +744,33 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(efectivoSinJustificar?.diferencia).toBe('-1000.0000');
       expect(efectivoSinJustificar?.motivoNombre).toBeNull();
 
-      // Justificación es un paso aparte: PATCH /caja/:id/arqueo/motivos.
-      const patch = await request(app.getHttpServer())
-        .patch(`/api/caja/${cajaId}/arqueo/motivos`)
+      // Fase 2 (`cerrar`) sin motivo, habiendo motivos activos en el tenant → 400.
+      const cerrarSinMotivo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null }] });
+      expect(cerrarSinMotivo.status).toBe(400);
+
+      // La caja sigue en_conciliacion: el 400 no finalizó la transacción, la
+      // línea sigue sin motivo.
+      const arqueoTrasFallo = await request(app.getHttpServer())
+        .get(`/api/caja/${cajaId}/arqueo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      const efectivoTrasFallo = (
+        arqueoTrasFallo.body as { lineas: ArqueoLinea[] }
+      ).lineas.find((l) => l.esEfectivo);
+      expect(efectivoTrasFallo?.motivoNombre).toBeNull();
+
+      // Con motivoDiferenciaId válido → cierra.
+      const cerrarConMotivo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({
           lineas: [
             { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
           ],
         });
-      expect(patch.status).toBe(200);
+      expect([200, 201]).toContain(cerrarConMotivo.status);
 
       const arqueo = await request(app.getHttpServer())
         .get(`/api/caja/${cajaId}/arqueo`)
@@ -694,12 +809,12 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .set('Authorization', `Bearer ${tokenSupervisor}`);
     });
 
-    it('en modo ciego, no-admin recibe 403 y admin puede re-justificar (PATCH) la línea', async () => {
-      // `cajaService.cerrar()` ya no exige (ni captura) motivo en ninguna
-      // rama — ciega o no. El cierre queda sin justificar y la justificación
-      // es un paso admin-only aparte vía `PATCH /caja/:id/arqueo/motivos`.
-      // Este caso prueba ese enforcement admin-only y que re-justificar una
-      // línea cerrada actualiza el `motivoNombre` que expone el GET.
+    it('en modo ciego con descuadre: conteo → en_conciliacion, se finaliza con motivo, y el override (PATCH) es admin-only', async () => {
+      // Motivo fijo del seed, distinto de DIVERGENCIA_TARJETA_ID (con el que
+      // se re-justifica más abajo), para poder verificar que el PATCH
+      // realmente reemplaza el motivo aplicado en la fase 2.
+      const FALTA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440291';
+
       await ds.query(
         `UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1`,
         [PARIS_TENANT_ID],
@@ -712,15 +827,31 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         expect(abrir.status).toBe(201);
         const cajaId = (abrir.body as CajaResponse).id;
 
-        const cerrar = await request(app.getHttpServer())
-          .post(`/api/caja/${cajaId}/cerrar`)
+        // Contado != esperado (10000): fase 1 pasa a en_conciliacion (el modo
+        // ciego del tenant no cambia esta bifurcación).
+        const conteo = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/conteo`)
           .set('Authorization', `Bearer ${tokenSupervisor}`)
           .send({
             lineas: [{ metodoPagoId: null, montoContado: '9500.0000' }],
           });
-        expect(cerrar.status).toBe(201);
+        expect(conteo.status).toBe(201);
+        expect((conteo.body as { estado: string }).estado).toBe(
+          'en_conciliacion',
+        );
 
-        // No-admin (Vendedor) no puede re-justificar.
+        // Fase 2: finaliza con motivo → la caja queda `cerrada`.
+        const cerrar = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/cerrar`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            lineas: [
+              { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
+            ],
+          });
+        expect([200, 201]).toContain(cerrar.status);
+
+        // No-admin (Vendedor) no puede re-justificar (override admin-only).
         const patchNoAdmin = await request(app.getHttpServer())
           .patch(`/api/caja/${cajaId}/arqueo/motivos`)
           .set('Authorization', `Bearer ${tokenCajero}`)
@@ -763,6 +894,46 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
           [PARIS_TENANT_ID],
         );
       }
+    });
+  });
+
+  describe('admin finaliza una conciliación ajena — fase 2 (POST /cerrar)', () => {
+    // Motivo fijo del seed (`seedMotivosDiferencia`, Paris arranca en 291).
+    const FALTA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440291';
+
+    it('el cajero deja la caja en_conciliacion y el admin (no dueño) la finaliza con motivo', async () => {
+      const cajaId = await abrirOReusarCaja(app, tokenCajero, cajonDelCajeroId);
+
+      // El cajero envía su conteo con descuadre: pasa a en_conciliacion, no
+      // auto-cierra, y no puede abrir otra caja hasta que se resuelva.
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
+        .set('Authorization', `Bearer ${tokenCajero}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '9999.0000' }] });
+      expect(conteo.status).toBe(201);
+      expect((conteo.body as { estado: string }).estado).toBe(
+        'en_conciliacion',
+      );
+
+      // El admin, sin ser dueño de la caja, finaliza la fase 2 con motivo.
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          lineas: [
+            { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
+          ],
+        });
+      expect([200, 201]).toContain(cerrar.status);
+
+      const arqueo = await request(app.getHttpServer())
+        .get(`/api/caja/${cajaId}/arqueo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(arqueo.status).toBe(200);
+      const lineas = (arqueo.body as { lineas: ArqueoLinea[] }).lineas;
+      expect(lineas.find((l) => l.esEfectivo)?.motivoNombre).toBe(
+        'falta de efectivo',
+      );
     });
   });
 });

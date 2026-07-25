@@ -119,6 +119,14 @@ describe('Motivos de diferencia (e2e) — CRUD admin-only + reglas de es_fijo', 
     expect(r.status).toBe(403);
   });
 
+  it('PATCH /motivos-diferencia/:id por no-admin → 403', async () => {
+    const r = await request(app.getHttpServer())
+      .patch(`/api/motivos-diferencia/${ERROR_OPERACIONAL_ID}`)
+      .set('Authorization', `Bearer ${tokenNoAdmin}`)
+      .send({ activo: false });
+    expect(r.status).toBe(403);
+  });
+
   it('PATCH sobre un motivo fijo cambiando nombre → 400', async () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/motivos-diferencia/${ERROR_OPERACIONAL_ID}`)
@@ -166,6 +174,13 @@ describe('Motivos de diferencia (e2e) — CRUD admin-only + reglas de es_fijo', 
       .delete(`/api/motivos-diferencia/${ERROR_OPERACIONAL_ID}`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(res.status).toBe(400);
+  });
+
+  it('DELETE /motivos-diferencia/:id por no-admin → 403', async () => {
+    const r = await request(app.getHttpServer())
+      .delete(`/api/motivos-diferencia/${customId}`)
+      .set('Authorization', `Bearer ${tokenNoAdmin}`);
+    expect(r.status).toBe(403);
   });
 
   it('DELETE sobre el motivo custom creado → 204', async () => {
