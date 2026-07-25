@@ -34,6 +34,9 @@ describe('CajaController', () => {
     } as unknown as RbacService;
 
     controller = new CajaController(cajaService, rbacService);
+    // Por defecto no-admin: el gating de ciego (esAdminTenant) resuelve false salvo
+    // que un test lo sobreescriba.
+    jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(false);
   });
 
   describe('detalle (lectura compartida MiCaja/Cajas)', () => {
@@ -97,7 +100,7 @@ describe('CajaController', () => {
         .mockResolvedValue({} as any);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       await controller.resumenMovimientos(req, 'caja1');
-      expect(resumen).toHaveBeenCalledWith('t1', 'u1', 'caja1', true);
+      expect(resumen).toHaveBeenCalledWith('t1', 'u1', 'caja1', true, false);
     });
 
     it('pasa verTodas=false para un cajero con solo MiCaja:Leer', async () => {
@@ -112,7 +115,7 @@ describe('CajaController', () => {
         .mockResolvedValue({} as any);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       await controller.resumenMovimientos(req, 'caja1');
-      expect(resumen).toHaveBeenCalledWith('t1', 'u1', 'caja1', false);
+      expect(resumen).toHaveBeenCalledWith('t1', 'u1', 'caja1', false, false);
     });
   });
 
@@ -138,7 +141,14 @@ describe('CajaController', () => {
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       const query = { tipo: 'entrada' } as any;
       await controller.listarMovimientos(req, 'caja1', query);
-      expect(listar).toHaveBeenCalledWith('t1', 'u1', 'caja1', query, true);
+      expect(listar).toHaveBeenCalledWith(
+        't1',
+        'u1',
+        'caja1',
+        query,
+        true,
+        false,
+      );
     });
 
     it('pasa verTodas=false para un cajero con solo MiCaja:Leer', async () => {
@@ -154,7 +164,14 @@ describe('CajaController', () => {
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       const query = {} as any;
       await controller.listarMovimientos(req, 'caja1', query);
-      expect(listar).toHaveBeenCalledWith('t1', 'u1', 'caja1', query, false);
+      expect(listar).toHaveBeenCalledWith(
+        't1',
+        'u1',
+        'caja1',
+        query,
+        false,
+        false,
+      );
     });
   });
 
@@ -334,7 +351,33 @@ describe('CajaController', () => {
         'u1',
         'caja1',
         true,
+        false,
       );
+    });
+
+    it('pasa esAdmin=true cuando el usuario es admin del tenant', async () => {
+      jest.spyOn(rbacService, 'userHasPermiso').mockResolvedValue(true);
+      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(true);
+      const obtener = jest
+        .spyOn(cajaService, 'obtenerArqueo')
+        .mockResolvedValue({ ciego: false, lineas: [] });
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      await controller.arqueo(req, 'caja1');
+      expect(obtener).toHaveBeenCalledWith('t1', 'u1', 'caja1', true, true);
+    });
+
+    it('pasa esAdmin=true para un superadmin sin consultar userIsTenantAdmin', async () => {
+      jest.spyOn(rbacService, 'userHasPermiso').mockResolvedValue(true);
+      const isAdmin = jest.spyOn(rbacService, 'userIsTenantAdmin');
+      const obtener = jest
+        .spyOn(cajaService, 'obtenerArqueo')
+        .mockResolvedValue({ ciego: false, lineas: [] });
+      const req = {
+        user: { id: 'u1', tenantId: 't1', esSuperadmin: true },
+      } as any;
+      await controller.arqueo(req, 'caja1');
+      expect(obtener).toHaveBeenCalledWith('t1', 'u1', 'caja1', true, true);
+      expect(isAdmin).not.toHaveBeenCalled();
     });
   });
 

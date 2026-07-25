@@ -650,6 +650,29 @@ describe('CajaService', () => {
       expect(res.lineas[0].esperado).toBeNull();
     });
 
+    it('caja abierta + tenant ciego pero esAdmin=true → ciego:false con esperado (no consulta el flag)', async () => {
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'abierta',
+      });
+      jest
+        .spyOn(service, 'calcularArqueo')
+        .mockResolvedValueOnce(previewEfectivo);
+      const flag = jest.spyOn(service, 'getArqueoCiego');
+
+      const res = await service.obtenerArqueo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+        true,
+      );
+
+      expect(res.ciego).toBe(false);
+      expect(res.lineas).toEqual(previewEfectivo);
+      expect(flag).not.toHaveBeenCalled();
+    });
+
     it('caja cerrada → ciego:false SIEMPRE, líneas congeladas reveladas', async () => {
       cajaRepo.findOne.mockResolvedValueOnce({
         ...mockCajaAbierta,
@@ -1143,6 +1166,38 @@ describe('CajaService', () => {
       expect(result.meta.total).toBe(0);
       expect(dataSource.query).not.toHaveBeenCalled();
     });
+
+    it('esAdmin=true: revela movimientos aun en caja abierta ciega (no consulta el flag)', async () => {
+      cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
+      const flag = jest.spyOn(service, 'getArqueoCiego');
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            movimiento_id: 'm1',
+            caja_id: CAJA_ID,
+            tipo: 'salida',
+            concepto: 'x',
+            monto: '500.0000',
+            referencia: null,
+            fecha: new Date('2026-01-01'),
+            venta_id: null,
+          },
+        ]);
+
+      const result = await service.listarMovimientos(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        {},
+        false,
+        true,
+      );
+
+      expect(result.meta.total).toBe(1);
+      expect(result.data).toHaveLength(1);
+      expect(flag).not.toHaveBeenCalled();
+    });
   });
 
   describe('resumenMovimientos', () => {
@@ -1202,6 +1257,32 @@ describe('CajaService', () => {
         saldoEsperado: null,
         totalMovimientos: null,
       });
+    });
+
+    it('esAdmin=true: revela cifras aun en caja abierta ciega (no consulta el flag)', async () => {
+      cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
+      const flag = jest.spyOn(service, 'getArqueoCiego');
+      dataSource.query.mockResolvedValue([
+        {
+          saldo_inicial: '1000.0000',
+          estado: 'abierta',
+          total_entradas: '500.0000',
+          total_salidas: '200.0000',
+          total_movimientos: 3,
+        },
+      ]);
+
+      const result = await service.resumenMovimientos(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+        true,
+      );
+
+      expect(result.ciego).toBe(false);
+      expect(result.saldoEsperado).toBe('1300.0000');
+      expect(flag).not.toHaveBeenCalled();
     });
   });
 

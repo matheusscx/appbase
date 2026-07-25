@@ -58,6 +58,19 @@ export class CajaController {
     return tieneCajas;
   }
 
+  /**
+   * ¿Al usuario NO le aplica el modo ciego? El admin del tenant y el superadmin
+   * ven el esperado/movimientos en vivo aun en caja abierta (§3.4 del spec
+   * header-caja-ciego): el dueño no es el objetivo del anti-fraude. El superadmin
+   * sale del token; el admin del tenant vía RBAC (mismo criterio que `cerrar`).
+   */
+  private async esAdminTenant(u: JwtUser): Promise<boolean> {
+    return (
+      u.esSuperadmin ||
+      (await this.rbacService.userIsTenantAdmin(u.id, u.tenantId!))
+    );
+  }
+
   @Get()
   async historial(@Req() req: Request, @Query() query: QueryHistorialCajaDto) {
     const u = req.user as JwtUser;
@@ -112,8 +125,17 @@ export class CajaController {
   @Get(':id/arqueo')
   async arqueo(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;
-    const verTodas = await this.resolverLecturaCompartida(u);
-    return this.cajaService.obtenerArqueo(u.tenantId!, u.id, cajaId, verTodas);
+    const [verTodas, esAdmin] = await Promise.all([
+      this.resolverLecturaCompartida(u),
+      this.esAdminTenant(u),
+    ]);
+    return this.cajaService.obtenerArqueo(
+      u.tenantId!,
+      u.id,
+      cajaId,
+      verTodas,
+      esAdmin,
+    );
   }
 
   @Patch(':id/arqueo/motivos')
@@ -189,12 +211,16 @@ export class CajaController {
   @Get(':id/movimientos/resumen')
   async resumenMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;
-    const verTodas = await this.resolverLecturaCompartida(u);
+    const [verTodas, esAdmin] = await Promise.all([
+      this.resolverLecturaCompartida(u),
+      this.esAdminTenant(u),
+    ]);
     return this.cajaService.resumenMovimientos(
       u.tenantId!,
       u.id,
       cajaId,
       verTodas,
+      esAdmin,
     );
   }
 
@@ -205,13 +231,17 @@ export class CajaController {
     @Query() query: QueryMovimientosCajaDto,
   ) {
     const u = req.user as JwtUser;
-    const verTodas = await this.resolverLecturaCompartida(u);
+    const [verTodas, esAdmin] = await Promise.all([
+      this.resolverLecturaCompartida(u),
+      this.esAdminTenant(u),
+    ]);
     return this.cajaService.listarMovimientos(
       u.tenantId!,
       u.id,
       cajaId,
       query,
       verTodas,
+      esAdmin,
     );
   }
 }

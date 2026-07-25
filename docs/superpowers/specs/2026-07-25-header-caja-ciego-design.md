@@ -84,15 +84,23 @@ fuga por completo. Es una decisión de negocio consciente, documentada acá.
    real en el backend). El backend no debe devolver las cifras ni los movimientos al operador
    ciego; esconderlos solo en el front dejaría la fuga abierta en devtools.
 
-4. **Nadie operativo ve las cifras en vivo mientras la caja está `abierta` en ciego** — ni el
-   cajero ni el **supervisor** (`Cajas:Leer`). No se inventa una vista "supervisor ve en vivo":
-   `Cajas:Leer` es el rol operativo que el ciego podría estar vigilando, no el dueño.
-   El gating espeja `obtenerArqueo`, que no condiciona su rama ciega a `tieneVerTodas`. El
-   reveal operativo es la **conciliación** (fase 1 → `en_conciliacion`) y la caja **cerrada**
-   vista desde el historial (readonly), que es el caso principal de "el admin ve todo". Por
-   diseño, incluso un admin contando su propia caja cuenta a ciegas (también podría skimear).
-   Si algún día se quisiera una vista en vivo, se ata al **eje admin del tenant** (el dueño),
-   nunca a `Cajas:Leer` — fuera de alcance (YAGNI).
+4. **El modo ciego NO aplica al admin del tenant ni al superadmin; sí al cajero y al supervisor
+   no-admin.** *(Reconsiderado 2026-07-25 por el owner — revierte la "decisión A" original de
+   "nadie ve en vivo".)* El **admin de un tenant es el dueño absoluto de ese tenant** y el
+   **superadmin es el dueño del software** (con acceso directo a la DB): ningún anti-fraude los
+   detiene, y si el admin "se roba a sí mismo" es su problema, no el del sistema. Por eso un
+   admin/superadmin ve el esperado y los movimientos **en vivo incluso en una caja `abierta`**,
+   **incluida la que él mismo opera** (decisión explícita: no se protege al dueño de sí mismo).
+   El ciego sigue aplicando a **quien el anti-fraude sí vigila**: el **cajero** (`MiCaja`) y el
+   **supervisor contratado** (`Cajas:Leer` sin ser admin) — `Cajas:Leer` **no** es confianza de
+   dueño. Para el no-admin el reveal sigue siendo la conciliación / caja cerrada.
+
+   **Criterio único, server-side:** `esAdmin = u.esSuperadmin || userIsTenantAdmin(u.id, tenant)`
+   (el `esSuperadmin` viene del token; `userIsTenantAdmin` cubre al admin del tenant). El ciego
+   pasa a `arqueo_ciego && estado === 'abierta' && !esAdmin`. Se calcula en el controller (mismo
+   patrón que `cerrar`, que ya computa `userIsTenantAdmin`) y se pasa a `obtenerArqueo`,
+   `resumenMovimientos` y `listarMovimientos`. No condiciona por `tieneVerTodas` (el supervisor
+   no-admin **sí** queda ciego).
 
 5. **Modo normal intacto.** Todo el cambio está detrás de `arqueo_ciego`. Si el tenant no opera
    en ciego, el header y la tabla quedan **exactamente como hoy**.
@@ -119,13 +127,20 @@ fuga por completo. Es una decisión de negocio consciente, documentada acá.
 - Al conciliar, los movimientos aparecen como parte del **detalle del arqueo** y ayudan a
   justificar el descuadre ("esta venta no se registró"). Es la misma vista revelada que ya
   existe para caja cerrada.
+- **Admin / superadmin (§3.4):** el ciego **no les aplica** — ven las 4 tarjetas y la tabla
+  siempre, incluso en una caja `abierta`, como en modo normal. La columna "Ciego + `abierta`"
+  de arriba describe al **cajero y al supervisor no-admin**, no al dueño.
 
 ---
 
 ## 5. Backend (enforcement real)
 
 Ninguna ruta nueva. Se endurecen dos endpoints existentes para el operador ciego, con el mismo
-criterio que `obtenerArqueo` (`arqueo_ciego && estado === 'abierta'`).
+criterio que `obtenerArqueo`: **`arqueo_ciego && estado === 'abierta' && !esAdmin`** (§3.4).
+Cada controller calcula `esAdmin = u.esSuperadmin || rbacService.userIsTenantAdmin(u.id,
+u.tenantId)` y lo pasa al service (un solo chequeo por request; para un admin/superadmin se
+cortocircuita antes de `getArqueoCiego`, sin N+1). El mismo `esAdmin` se agrega a
+`obtenerArqueo` (drawer de cierre / detalle) para que el admin vea el esperado en vivo ahí.
 
 ### 5.1 Resumen del turno — `GET /caja/:id/movimientos/resumen`
 `caja.service.ts → resumenMovimientos(tenantId, usuarioId, cajaId, tieneVerTodas)`.

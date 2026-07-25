@@ -551,7 +551,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(efectivo?.diferencia).toBe('0.0000');
     });
 
-    it('modo ciego + caja abierta: GET arqueo → ciego:true, sin esperado, solo obligatorias', async () => {
+    it('modo ciego + caja abierta operada por admin: el admin ve el arqueo completo (ciego no aplica al dueño)', async () => {
       await ds.query(
         `UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1`,
         [PARIS_TENANT_ID],
@@ -580,12 +580,12 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
           .set('Authorization', `Bearer ${tokenSupervisor}`);
         expect(arqueo.status).toBe(200);
         const body = arqueo.body as { ciego: boolean; lineas: ArqueoLinea[] };
-        expect(body.ciego).toBe(true);
-        // Solo la línea de efectivo (obligatoria); la tarjeta informativa no viaja.
-        expect(body.lineas).toHaveLength(1);
-        expect(body.lineas[0].esEfectivo).toBe(true);
-        // Anti-fraude: el esperado no viaja en la respuesta.
-        expect(body.lineas[0].esperado).toBeNull();
+        // El admin del tenant ve el arqueo completo aun en modo ciego (§3.4): el
+        // ciego no aplica al dueño, así que el esperado SÍ viaja.
+        expect(body.ciego).toBe(false);
+        const efectivo = body.lineas.find((l) => l.esEfectivo);
+        // La tarjeta NO infla el esperado de efectivo (fin del faltante fantasma).
+        expect(efectivo?.esperado).toBe('10000.0000');
 
         // El cierre igual cuadra: el server recomputa el esperado (10000).
         const cerrar = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
@@ -1055,5 +1055,112 @@ describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () 
     await cerrarEnDosFases(app, cajaId, token, [
       { metodoPagoId: null, montoContado: '10000.0000' },
     ]);
+  });
+});
+
+describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
+  let app: INestApplication<App>;
+  let tokenCajero: string;
+  let tokenAdmin: string;
+  let cajonId: string;
+  let ds: DataSource;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+    ds = app.get(DataSource);
+
+    tokenCajero = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
+    tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+    const r = await request(app.getHttpServer())
+      .post('/api/cajones')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: `E2E Ciego Admin ${Date.now()}` });
+    cajonId = (r.body as CajonResponse).id;
+  }, 60000);
+
+  afterAll(async () => {
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+    if (cajonId) {
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+    }
+    await app.close();
+  });
+
+  it('caja abierta del cajero en tenant ciego: el cajero la ve ciega, el admin (verTodas) la ve completa', async () => {
+    const cajaId = await abrirOReusarCaja(app, tokenCajero, cajonId);
+    await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/movimientos`)
+      .set('Authorization', `Bearer ${tokenCajero}`)
+      .send({ tipo: 'salida', concepto: 'retiro', monto: '500.0000' });
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+
+    // Cajero (no-admin, su propia caja) → ciega.
+    const rCajero = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos/resumen`)
+      .set('Authorization', `Bearer ${tokenCajero}`);
+    expect((rCajero.body as { ciego: boolean }).ciego).toBe(true);
+    expect((rCajero.body as { totalSalidas: unknown }).totalSalidas).toBeNull();
+    const mCajero = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos`)
+      .set('Authorization', `Bearer ${tokenCajero}`);
+    expect((mCajero.body as { meta: { total: number } }).meta.total).toBe(0);
+
+    // Admin del tenant (verTodas) → completo, aun estando la caja abierta y el tenant ciego.
+    const rAdmin = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos/resumen`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const adminBody = rAdmin.body as { ciego: boolean; totalSalidas: unknown };
+    expect(adminBody.ciego).toBe(false);
+    expect(typeof adminBody.totalSalidas).toBe('string');
+    const mAdmin = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(
+      (mAdmin.body as { meta: { total: number } }).meta.total,
+    ).toBeGreaterThanOrEqual(1);
+
+    // GET /arqueo respeta el mismo eje: el cajero lo ve ciego (esperado null), el
+    // admin lo ve revelado.
+    const aCajero = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/arqueo`)
+      .set('Authorization', `Bearer ${tokenCajero}`);
+    expect((aCajero.body as { ciego: boolean }).ciego).toBe(true);
+    const aAdmin = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/arqueo`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect((aAdmin.body as { ciego: boolean }).ciego).toBe(false);
+
+    // Higiene: apagar ciego y cerrar la caja (con motivo por si descuadra).
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+    const motivos = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia?soloActivas=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const motivoId = (motivos.body as { id: string }[])[0]?.id;
+    await cerrarEnDosFases(
+      app,
+      cajaId,
+      tokenCajero,
+      [{ metodoPagoId: null, montoContado: '0' }],
+      [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+    );
   });
 });
