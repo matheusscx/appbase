@@ -229,6 +229,16 @@ export const useCajaStore = defineStore('caja', () => {
       resumenTurno.value = null
       activa.value = null
     }
+    else if (res.estado === 'en_conciliacion') {
+      // Avanzar el estado local para que la detección de "retomar conciliación"
+      // (drawer / dashboard) funcione dentro de la misma sesión sin recargar.
+      if (activa.value?.id === cajaId) {
+        activa.value = { ...activa.value, estado: 'en_conciliacion' }
+      }
+      if (detalle.value?.id === cajaId) {
+        detalle.value = { ...detalle.value, estado: 'en_conciliacion' }
+      }
+    }
     return res
   }
 

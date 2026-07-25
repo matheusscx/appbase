@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import type { Caja } from './caja'
 
 // ─── Mock Nuxt virtual modules (same pattern as tenant.spec.ts) ──────────────
 vi.mock('#app/nuxt', () => ({
@@ -193,6 +194,16 @@ describe('useCajaStore — arqueo / cerrar', () => {
     )
     expect(res.estado).toBe('en_conciliacion')
     expect(store.arqueo).toEqual(arqueo)
+  })
+
+  it('enviarConteo avanza activa/detalle a "en_conciliacion" localmente (retomar sin recargar)', async () => {
+    mockApiFetch.mockResolvedValueOnce({ estado: 'en_conciliacion', arqueo: [] })
+    const store = useCajaStore()
+    store.activa = { id: 'caja-1', estado: 'abierta' } as unknown as Caja
+    store.detalle = { id: 'caja-1', estado: 'abierta' } as unknown as Caja
+    await store.enviarConteo('caja-1', { lineas: [{ metodoPagoId: null, montoContado: '900' }] })
+    expect(store.activa?.estado).toBe('en_conciliacion')
+    expect(store.detalle?.estado).toBe('en_conciliacion')
   })
 
   it('enviarConteo limpia activa/resumenTurno cuando el estado devuelto es "cerrada"', async () => {
