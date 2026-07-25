@@ -33,8 +33,9 @@ consuma las categorías.
 - **Dinero con Decimal.js**; la `diferencia` (de A) es Decimal — C solo la lee para decidir
   si una línea exige motivo.
 - El motor de precios, `movimientos_inventario` y el sistema JWT **no se tocan**.
-- **"Congelar el hecho transaccional":** el motivo se congela junto al arqueo en
-  `caja_arqueo_medio`, exactamente como A congela esperado/contado/diferencia.
+- **"Congelar el hecho transaccional":** el cierre congela esperado/contado/diferencia como en A.
+  El motivo/comentario se escriben **después**, en el paso de justificación, sin alterar esas
+  cifras congeladas.
 
 ## Alcance
 
@@ -42,26 +43,29 @@ consuma las categorías.
 - Tabla `motivo_diferencia_caja` (tenant-owned) + módulo CRUD (entidad, controller, service,
   DTOs, defaults, seed, página de Configuración).
 - Dos columnas en `caja_arqueo_medio`: `motivo_diferencia_id` (FK) + `comentario_diferencia`.
-- Captura del motivo en el **cierre normal** (inline, mismo `POST /cerrar`) y **justificación
-  post-cierre en modo ciego** (`PATCH`, **admin-only**).
+- **Justificación post-cierre como paso separado, admin-only** (`PATCH /caja/:id/arqueo/motivos`),
+  uniforme para modo normal y ciego. El cierre **no** captura motivo.
 
 **Fuera de alcance (siguen diferidos):**
+- **Obligar al cajero a justificar** (bloquearle abrir cajas nuevas mientras tenga descuadres
+  pendientes, o similar). Se diseña el "pendiente de justificación" pero **no** se fuerza todavía.
 - **Reporte over/short** agregado por cajero (§6).
 - **Aprobación por umbral** del encargado (§6) — la norma es justificar-siempre, sin umbral.
 - **Ocultar el resultado post-cierre** al cajero (§6).
 
 ## Decisiones de diseño (tomadas con el owner, 2026-07-24)
 
-1. **Captura del motivo — inline en normal, post-cierre en ciego.** En modo normal la
-   diferencia es visible en vivo antes de enviar → el motivo va **en el drawer, en el mismo
-   `POST /cerrar`** (bloqueante). En modo ciego la diferencia recién se revela **después** de
-   cerrar (B redirige al detalle) → el motivo se fija **después**, sobre la caja ya cerrada,
-   con un `PATCH`.
-2. **La justificación en ciego es admin-only (`TenantAdminGuard`).** El cajero cuenta a ciegas
-   y **ve** su diferencia al revelar, pero **el motivo lo fija el admin** en la conciliación
-   (separación de funciones, anti-fraude). El cierre normal sigue siendo el cajero
-   (`MiCaja:Actualizar`). Asimetría intencional: **normal → el cajero se auto-justifica;
-   ciego → el admin justifica.**
+1. **Cerrar y justificar son dos procesos separados.** El **cierre** (`POST /cerrar`, cajero,
+   owner-only) **nunca** captura ni exige motivo — congela esperado/contado/diferencia y punto.
+   Toda línea con diferencia ≠ 0 queda **"pendiente de justificación"**. La **justificación** es
+   un paso aparte. Esto vale **igual para modo normal y ciego** (sin asimetría; el drawer de
+   cierre no muestra ni pide motivo en ningún modo). Motivo: el cierre no debe bloquearse por la
+   justificación, y en ciego el cajero ni siquiera ve la diferencia al cerrar.
+2. **La justificación es admin-only (`TenantAdminGuard`) — deber del administrador.** Aclarar
+   cualquier descuadre es responsabilidad del admin: el `PATCH /caja/:id/arqueo/motivos` es el
+   **único** camino de justificación, admin-only, uniforme para ambos modos. El cajero cierra
+   pero no categoriza (separación de funciones, anti-fraude). *(Obligar al cajero a justificar
+   —p. ej. bloquearle abrir cajas con pendientes— queda diferido; ver Alcance.)*
 3. **CRUD admin-only espejando `causas-merma`.** El catálogo es configuración del tenant →
    `TenantAdminGuard` para escribir, **lectura abierta** al tenant (JwtAuthGuard+TenantGuard)
    para que el cajero vea el dropdown al cerrar. Coincide con el patrón del repo (catálogos =
@@ -71,9 +75,9 @@ consuma las categorías.
 5. **`es_fijo` bloquea rename y delete, pero `activo` es siempre togglable** — divergencia
    deliberada de `causas-merma` (que bloquea toda edición en fijas). Se necesita para la red de
    seguridad: el admin debe poder **desactivar** un default que no usa.
-6. **Red de seguridad (degradación, no bloqueo):** si el tenant no tiene **ningún** motivo
-   activo, la diferencia se justifica solo con **comentario obligatorio**. Nunca se bloquea el
-   cierre por falta de catálogo.
+6. **Red de seguridad (degradación) en la justificación:** si el tenant no tiene **ningún**
+   motivo activo, el admin justifica con **comentario obligatorio** (sin motivo). El catálogo
+   vacío nunca impide justificar (ni, por diseño, cerrar — el cierre no depende del catálogo).
 
 ## Modelo de datos
 
@@ -95,10 +99,11 @@ consuma las categorías.
 
 | Columna | Tipo | Constraints | Notas |
 |---|---|---|---|
-| `motivo_diferencia_id` | UUID | NULL, FK → `motivo_diferencia_caja` | solo en líneas con `diferencia ≠ 0` |
+| `motivo_diferencia_id` | UUID | NULL, FK → `motivo_diferencia_caja` | lo puebla el PATCH de justificación |
 | `comentario_diferencia` | TEXT | NULL | obligatorio si el motivo `requiere_comentario` o red de seguridad |
 
-Ambas se congelan al cerrar (normal) o al justificar (ciego). En líneas que cuadran quedan `NULL`.
+El cierre las deja `NULL`; las puebla el **paso de justificación** (`PATCH`). En líneas que
+cuadran quedan `NULL` siempre.
 
 ## Backend — catálogo CRUD
 
@@ -118,38 +123,31 @@ Módulo `motivos-diferencia` espejando `mermas/causas-merma.*`:
 - **DTOs** con `class-validator`: `CreateMotivoDiferenciaDto` (`nombre`, `activo?`,
   `requiere_comentario?`), `UpdateMotivoDiferenciaDto` (todos opcionales).
 
-## Backend — captura en el cierre normal
+## Backend — el cierre NO captura motivo
 
-`CerrarCajaDto` → cada línea (`LineaCierreDto`) gana **`motivoDiferenciaId?`** (uuid) y
-**`comentarioDiferencia?`** (string). `cerrar` (en `caja.service.ts`), **después** de recomputar
-la diferencia por línea, valida server-side por cada línea con `diferencia ≠ 0`:
+El cierre (`POST /caja/:id/cerrar`, `cerrar` en `caja.service.ts`) queda **exactamente como en
+A/B**: recomputa y congela esperado/contado/diferencia server-side. **No** exige ni acepta
+motivo por línea; `LineaCierreDto` **no** lleva campos de motivo. Las columnas
+`motivo_diferencia_id`/`comentario_diferencia` de una caja recién cerrada quedan `NULL` (líneas
+descuadradas = "pendiente de justificación"). El `comentario` global de cierre (de A) se conserva.
 
-1. Cargar los motivos **activos** del tenant (una query, sin N+1).
-2. Si hay motivos activos → `motivoDiferenciaId` **obligatorio** y debe pertenecer al tenant y
-   estar activo. Si el motivo elegido `requiere_comentario` → `comentarioDiferencia` obligatorio.
-3. Si **no** hay motivos activos (red de seguridad) → `comentarioDiferencia` obligatorio, sin motivo.
-4. Líneas con `diferencia = 0` → no se pide nada; si vienen con motivo, se ignora (queda NULL).
+## Backend — justificación (paso separado, admin-only)
 
-El motivo/comentario se **congela** en `caja_arqueo_medio` junto al resto de la línea. El
-`comentario` global de cierre (de A) **se conserva** y es independiente del comentario por línea.
-
-## Backend — justificación en modo ciego (post-cierre)
-
-Nuevo endpoint **`PATCH /caja/:id/arqueo/motivos`** (`@RequiresPermiso` **no**; guard
+Endpoint **`PATCH /caja/:id/arqueo/motivos`** (`@RequiresPermiso` **no**; guard
 **`TenantAdminGuard`** — admin-only). Body: `{ lineas: [{ metodoPagoId: string | null,
-motivoDiferenciaId?: string, comentarioDiferencia?: string }] }`.
+motivoDiferenciaId?: string, comentarioDiferencia?: string }] }`. Es el **único** camino de
+justificación, **uniforme para modo normal y ciego**.
 
 - Solo sobre una caja **cerrada** del tenant (valida estado + `tenant_id` del token).
-- Aplica las **mismas reglas** de validación que el cierre normal, pero sobre las filas
-  **congeladas** de `caja_arqueo_medio` cuya `diferencia ≠ 0`.
+- Opera sobre las filas **congeladas** de `caja_arqueo_medio` cuya `diferencia ≠ 0`. Por cada una:
+  1. Si hay motivos **activos** → `motivoDiferenciaId` obligatorio (del tenant, activo); si el
+     motivo `requiere_comentario` → `comentarioDiferencia` obligatorio.
+  2. Si **no** hay motivos activos (red de seguridad) → `comentarioDiferencia` obligatorio, sin motivo.
 - Actualiza `motivo_diferencia_id` + `comentario_diferencia` de esas filas (soft-update, sin
   recomputar esperado/contado/diferencia — el hecho transaccional no se altera).
 - Es **editable**: el admin puede corregir un motivo ya asignado (no hay lock ni deadline).
-
-**Consecuencia aceptada del modo ciego:** la caja ya está **cerrada** cuando se revela la
-diferencia, así que el motivo **no puede bloquear** el cierre ya hecho. Una línea descuadrada
-sin motivo queda como **"pendiente de justificación"** en el detalle hasta que el admin la
-categorice. En **normal** sí es bloqueante (diferencia visible antes de enviar).
+- Una línea descuadrada sin justificar queda **"pendiente de justificación"** en el detalle hasta
+  que el admin la categorice. *(Forzar que se justifique —bloquear al cajero, etc.— está diferido.)*
 
 ## Frontend
 
@@ -157,55 +155,54 @@ categorice. En **normal** sí es bloqueante (diferencia visible antes de enviar)
   (nombre, `activo` toggle, badge de fijo) + drawer crear/editar con campo `nombre`, switch
   `activo` y switch **`requiere_comentario`**; los fijos permiten togglear `activo`/
   `requiere_comentario` pero no renombrar/eliminar. Link en el nav de Configuración.
-- **`CajaCierreDrawer.vue` (modo normal):** cuando **cualquier** línea (obligatoria o
-  informativa contada) tiene `diferenciaDe(l) ≠ 0` en vivo, se muestra un `USelect` con los
-  motivos activos + un `UInput`/textarea de comentario (obligatorio si el motivo elegido
-  `requiere_comentario`, o si no hay motivos activos). El gate de submit se extiende: cada línea
-  que descuadra necesita su motivo (o comentario, red de seguridad). En **modo ciego el drawer
-  no cambia** — no muestra diferencia, no pide motivo (se justifica después).
-- **Detalle de caja (revelación / conciliación):** `CajaArqueoTable` gana una columna
-  **"Motivo"** (nombre + comentario, o "Sin justificar" si `diferencia ≠ 0` y sin motivo).
-  Para un **admin**, las líneas descuadradas sin justificar (o para corregir) ofrecen un
-  selector de motivo/comentario que hace el `PATCH /caja/:id/arqueo/motivos`. Para no-admin es
-  solo lectura. Store: `cargarArqueo` ya trae las líneas; se agrega `justificarDiferencias`.
+- **`CajaCierreDrawer.vue` — sin cambios de C.** El drawer de cierre **no** pide motivo (ni en
+  normal ni en ciego); queda como lo dejó B. El cierre es solo cierre.
+- **Detalle de caja (conciliación) — el paso de justificar:** `CajaArqueoTable` gana una columna
+  **"Motivo"** (nombre + comentario, o **"Sin justificar"** si `diferencia ≠ 0` y sin motivo).
+  Para un **admin**, las líneas descuadradas (sin justificar o para corregir) ofrecen un selector
+  de motivo/comentario que hace el `PATCH /caja/:id/arqueo/motivos`. Para no-admin es solo
+  lectura. Es la UI de justificación, **la misma para modo normal y ciego**. Store: `cargarArqueo`
+  ya trae las líneas (con motivo); se agrega `justificarDiferencias` + `motivos`/`cargarMotivos`.
 
 ## Reglas de negocio
 
-1. Toda línea con `diferencia ≠ 0` exige justificación: **motivo** (si hay motivos activos) o
-   **comentario** (red de seguridad, si no los hay). Si el motivo `requiere_comentario`, además
-   comentario.
-2. En **normal** la justificación es **bloqueante** en el cierre y la fija el **cajero**
-   (`MiCaja:Actualizar`, dentro de `cerrar`).
-3. En **ciego** la justificación es **post-cierre** y la fija **solo el admin**
-   (`TenantAdminGuard`, `PATCH`). Una diferencia sin justificar queda "pendiente".
-4. El **catálogo** lo gestiona **solo el admin** (`TenantAdminGuard`); la **lectura** está
-   abierta al tenant (dropdown de cierre).
-5. Un motivo `es_fijo` no se renombra ni se elimina, pero **sí** se puede activar/desactivar y
+1. **Cerrar y justificar son dos pasos.** El cierre nunca exige ni captura motivo (igual normal
+   y ciego); congela esperado/contado/diferencia. Toda línea con `diferencia ≠ 0` queda
+   "pendiente de justificación".
+2. La **justificación** (`PATCH /caja/:id/arqueo/motivos`) la hace **solo el admin**
+   (`TenantAdminGuard`): motivo si hay motivos activos, o comentario (red de seguridad) si no;
+   comentario además si el motivo `requiere_comentario`. Editable.
+3. El **catálogo** lo gestiona **solo el admin** (`TenantAdminGuard`); la **lectura** está
+   abierta al tenant.
+4. Un motivo `es_fijo` no se renombra ni se elimina, pero **sí** se puede activar/desactivar y
    cambiar su `requiere_comentario`.
-6. `tenant_id`/`usuario_id` del token; soft delete; el motivo se congela con el arqueo y no
-   altera esperado/contado/diferencia.
-7. Cambiar/desactivar motivos afecta cierres **desde ese momento**; no reescribe arqueos ya
-   congelados.
+5. `tenant_id`/`usuario_id` del token; soft delete; la justificación no altera
+   esperado/contado/diferencia (el hecho transaccional de A/B queda intacto).
+6. Cambiar/desactivar motivos afecta justificaciones **desde ese momento**; no reescribe lo ya
+   congelado.
+7. **Obligar** la justificación (bloquear al cajero, deadlines) está **diferido** — hoy una línea
+   puede quedar "pendiente" indefinidamente; es deber del admin resolverla.
 
 ## Testing
 
 - **Unit (`motivos-diferencia.service.spec`):** `create` (nombre único case-insensitive,
   soft-delete), `update`/`remove` bloqueados en `es_fijo` para nombre/delete pero permitidos
   para `activo`/`requiere_comentario`, `findAll` con `soloActivas`.
-- **Unit (`caja.service.spec`):** `cerrar` con línea que descuadra → 400 sin motivo (habiendo
-  motivos activos); 400 sin comentario cuando el motivo `requiere_comentario`; 201 congelando
-  motivo+comentario; **red de seguridad:** sin motivos activos, 400 sin comentario / 201 con
-  comentario. `justificarDiferencias` (PATCH ciego): actualiza filas congeladas, valida las
-  mismas reglas, no toca esperado/contado/diferencia.
+- **Unit (`caja.service.spec`):** `cerrar` con línea que descuadra **cierra sin exigir motivo**
+  (la fila queda con motivo NULL). `justificarDiferencias` (PATCH): 400 si la caja no está
+  cerrada; 400 sin motivo habiendo motivos activos; 400 sin comentario si el motivo
+  `requiere_comentario`; **red de seguridad** sin motivos activos (400 sin comentario / 200 con);
+  actualiza filas congeladas y **no** toca esperado/contado/diferencia.
 - **Unit (`caja.controller.spec`):** el `PATCH /:id/arqueo/motivos` exige `TenantAdminGuard`
   (admin-only); el CRUD exige `TenantAdminGuard` para escribir y lectura abierta.
 - **E2E (`caja.e2e-spec` + `motivos-diferencia.e2e-spec`):** CRUD admin-only (403 no-admin en
-  escritura, 200 en lectura); cierre normal con diferencia → exige motivo, lo congela y lo
-  revela en el detalle; ciego → cerrar con diferencia deja "pendiente", el `PATCH` admin la
-  justifica, un no-admin recibe 403.
+  escritura, 200 en lectura); **cerrar con diferencia (normal y ciego) → 201 sin motivo**, la
+  línea queda "pendiente"; el `PATCH` de un **no-admin** → 403, de un **admin** → 200 y el `GET`
+  posterior muestra `motivoNombre`. Caso `arqueo_ciego=true` restaurado en `finally`.
 - **Smoke navegador:** config de motivos (crear/editar/desactivar, fijo no renombrable);
-  cierre normal con descuadre pide motivo y lo muestra congelado; en ciego, el detalle muestra
-  "Sin justificar" y el admin justifica con el selector. Consola sin errores.
+  cerrar con descuadre (sin pedir motivo) → el detalle muestra "Sin justificar"; el admin
+  justifica con el selector y pasa a mostrar el motivo; un no-admin no ve el selector. Consola
+  sin errores.
 
 ## Seed
 
@@ -223,16 +220,16 @@ custom del admin nacen `es_fijo = false`.
 
 - Tablas/columnas nuevas creadas por `synchronize` al bootstrap (dev/CI). Sin migraciones.
 - **Cajas ya cerradas** antes de C: sus filas de `caja_arqueo_medio` tienen
-  `motivo_diferencia_id = NULL`; el detalle las muestra como "Sin justificar" si descuadran.
-  Sin efecto retroactivo (regla 7).
-- **`CerrarCajaDto`** gana campos **opcionales** por línea → los clientes de A/B que no los
-  mandan siguen funcionando salvo que la línea descuadre y existan motivos activos (ahí el
-  server exige motivo, comportamiento nuevo esperado).
+  `motivo_diferencia_id = NULL`; el detalle las muestra como "Sin justificar" si descuadran, y el
+  admin puede justificarlas con el `PATCH`. Sin efecto retroactivo (regla 6).
+- **`cerrar` no cambia su contrato** (no gana campos) → los clientes de A/B siguen funcionando
+  igual; el cierre nunca se bloquea por motivo.
 
 ## Docs a actualizar (mismo commit que el código)
 
-- `docs/features/gestion-cajas.md` — motivos categorizados (catálogo, captura normal vs
-  justificación ciega admin-only, red de seguridad), columnas nuevas de `caja_arqueo_medio`.
+- `docs/features/gestion-cajas.md` — motivos categorizados (catálogo, cierre-sin-motivo vs
+  justificación admin-only como paso separado, red de seguridad, "pendiente de justificación"),
+  columnas nuevas de `caja_arqueo_medio`.
 - `docs/ESTADO.md` — fila de la feature (motivos de diferencia).
 - `docs/agent/investigaciones/2026-07-23-gestion-caja.md` §9 / `docs/agent/pendientes.md` —
   marcar C hecho; reporte over/short y umbral (§6) siguen diferidos.
@@ -244,16 +241,16 @@ custom del admin nacen `es_fijo = false`.
 - [ ] `caja_arqueo_medio` con `motivo_diferencia_id` (FK) + `comentario_diferencia`.
 - [ ] CRUD `motivos-diferencia`: escritura `TenantAdminGuard`, lectura abierta; `es_fijo` bloquea
   rename/delete pero permite `activo`/`requiere_comentario`.
-- [ ] Cierre normal: línea con `diferencia ≠ 0` exige motivo (o comentario si red de seguridad),
-  comentario si `requiere_comentario`; lo congela.
-- [ ] `PATCH /caja/:id/arqueo/motivos` admin-only justifica caja cerrada (ciego), editable, sin
-  alterar esperado/contado/diferencia.
-- [ ] Página `configuracion/motivos-diferencia.vue` + drawer normal con motivo + detalle con
-  columna Motivo y justificación admin.
+- [ ] El **cierre no exige ni captura motivo** (igual normal y ciego); `LineaCierreDto` sin
+  campos de motivo; descuadre sin justificar = "pendiente".
+- [ ] `PATCH /caja/:id/arqueo/motivos` admin-only justifica una caja cerrada (normal o ciego),
+  editable, con red de seguridad, sin alterar esperado/contado/diferencia.
+- [ ] Página `configuracion/motivos-diferencia.vue` + detalle con columna Motivo y justificación
+  admin (el drawer de cierre **no** cambia).
 - [ ] Seed de los 7 en `seeder.service` y `tenants.service.create`; todos `es_fijo`, "otro"
   `requiere_comentario`.
 - [ ] `tenant_id`/`usuario_id` del token; soft delete; Decimal (diferencia de A intacta).
-- [ ] Unit + e2e verdes; smoke de config + cierre normal + justificación ciega.
+- [ ] Unit + e2e verdes; smoke de config + cierre-sin-motivo + justificación admin.
 - [ ] Docs actualizadas (gestion-cajas.md, ESTADO.md, §9/pendientes.md, startup-pos.sql).
 
 ---
@@ -262,7 +259,9 @@ custom del admin nacen `es_fijo = false`.
 
 - **A — Arqueo multi-medio** (hecho): esperado/contado/diferencia por método, congelados en
   `caja_arqueo_medio`. C agrega el motivo a cada línea que descuadra.
-- **B — Cierre ciego** (hecho): retiene el esperado durante el conteo. C respeta el modo ciego
-  moviendo la justificación a **post-cierre admin-only**.
-- **C — Motivos + catálogo** (este spec): categoriza cada descuadre. Habilita a futuro el
-  **reporte over/short por cajero** y la **aprobación por umbral** (§6), ambos diferidos.
+- **B — Cierre ciego** (hecho): retiene el esperado durante el conteo. C mantiene el cierre como
+  un paso limpio y mueve **toda** la justificación a un paso separado admin-only (compatible con
+  el modo ciego sin asimetría).
+- **C — Motivos + catálogo** (este spec): categoriza cada descuadre en un paso de justificación.
+  Habilita a futuro **obligar la justificación** (bloquear al cajero con pendientes), el **reporte
+  over/short por cajero** y la **aprobación por umbral** (§6), todos diferidos.
