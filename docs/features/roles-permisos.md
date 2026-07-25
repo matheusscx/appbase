@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-07-23
+**Last Updated**: 2026-07-25
 
 ---
 
@@ -45,6 +45,41 @@ de ser una acción CRUD reutilizada a ser tener contratado el módulo `Cajas` �
 a seguir si otro módulo necesita separar "operar lo propio" de "supervisar todo", en vez
 de seguir sobrecargando `Ver todas`. Detalle funcional y de permisos:
 [`docs/features/gestion-cajas.md`](./gestion-cajas.md#modelo-de-acceso-por-permiso).
+
+### Admin-only vs permiso de módulo — cuándo cada uno
+
+Dos mecanismos de autorización conviven, y la elección **no es por pantalla sino por la
+naturaleza de la acción**:
+
+- **`TenantAdminGuard` (solo admin/dueño, no delegable)** → **configuración y políticas**:
+  catálogos que administra el dueño (monedas, impuestos, descuentos, recargos, categorías,
+  métodos-pago, motivos de diferencia, roles) y **cualquier política que un rol operativo no
+  debería poder cambiarse a sí mismo**. La lectura suele quedar abierta al tenant; solo la
+  escritura es admin-only.
+- **`@RequiresPermiso('Modulo','Accion')` (permiso de módulo, delegable)** → **operación del
+  día a día**: caja (`MiCaja`/`Cajas`), ventas, pagos, inventario, etc. Un rol custom lo puede
+  recibir sin ser admin.
+
+**Los tres ejes de rol (no confundir):** el **admin/dueño** fija políticas; el **supervisor
+contratado** tiene permisos de módulo (`Cajas:*`), es operativo y es un posible vector de
+fraude él mismo; los **cajeros** operan lo suyo (`MiCaja:*`). Corolario anti-fraude: tener
+`Cajas:Leer` **no** equivale a "confianza de dueño" — no se le revelan cifras ciegas en vivo ni
+se le delegan políticas de control.
+
+**Zona gris — acción operativa que es política de control.** Un módulo operativo puede tener
+acciones que, por anti-fraude, deben reservarse al dueño aunque el resto del módulo sea
+delegable. La prueba: *¿un rol operativo podría desactivar o eludir el control sobre sí mismo?*
+Si la respuesta es sí, la acción es admin-only. Casos ya decididos así:
+
+- **Configurar el arqueo ciego** (`PUT /caja/arqueo-ciego`) → admin-only, aunque Caja sea un
+  módulo operativo: si un `Cajas:Actualizar` pudiera apagar el ciego, la política anti-fraude
+  quedaría decorativa. El **CRUD de cajones** de la misma pantalla sigue delegable a
+  `Cajas:Actualizar` — es operación, no política.
+- **Justificar el descuadre** en el cierre ciego (override admin sobre una caja cerrada) →
+  admin-only por el mismo motivo.
+
+Ante una acción de esta zona gris, **decidir con el owner, no asumir** (regla del proyecto:
+"detenerse y preguntar" ante una regla de negocio de control no documentada).
 
 ---
 

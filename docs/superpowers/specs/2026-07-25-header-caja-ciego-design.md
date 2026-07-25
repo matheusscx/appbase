@@ -3,8 +3,9 @@
 **Fecha:** 2026-07-25
 **Estado:** diseño aprobado, pendiente de plan
 **Alcance:** ajuste del header/resumen del turno y de la lista de movimientos para que el
-modo ciego (`tenants.arqueo_ciego`) sea **real** (enforcement en backend, no solo visual),
-más un fix independiente del color del badge de estado `en_conciliacion`.
+modo ciego (`tenants.arqueo_ciego`) sea **real** (enforcement en backend, no solo visual);
+mover su **configuración a admin-only** (que no la pueda apagar un rol operativo); más un
+fix independiente del color del badge de estado `en_conciliacion`.
 
 Se monta sobre A (arqueo multi-medio), B (cierre ciego) y C (motivos + cierre en dos
 fases), ya en `main`.
@@ -33,6 +34,14 @@ debería esconder. Esto produce dos problemas:
 El objetivo del ciego (anti-fraude) es que el cajero **cuente sin conocer el esperado**, para
 que no "cuente hacia atrás" ajustando el conteo al número del sistema. Con la fuga actual, el
 ciego no se sostiene.
+
+**Problema de control adicional.** Configurar el modo ciego hoy es un permiso de **módulo**
+(`Cajas:Actualizar`), delegable a un rol operativo — tanto en el backend (`PUT
+/caja/arqueo-ciego`) como en el front (`configuracion/cajas.vue`). El tenant tiene tres ejes de
+rol: el **admin/dueño** (fija la política), el **supervisor contratado** (`Cajas:*`, operativo,
+y un posible vector de fraude él mismo) y los **cajeros** (`MiCaja:*`). Que un supervisor con
+`Cajas:Actualizar` pueda **apagar el ciego** vuelve la política decorativa: es un agujero mayor
+que cualquier fuga de la tabla. La política anti-fraude la fija el dueño, no un rol operativo.
 
 ---
 
@@ -75,15 +84,24 @@ fuga por completo. Es una decisión de negocio consciente, documentada acá.
    real en el backend). El backend no debe devolver las cifras ni los movimientos al operador
    ciego; esconderlos solo en el front dejaría la fuga abierta en devtools.
 
-4. **La reveal del admin es la que B ya provee** — no se inventa una vista "admin ve en vivo".
-   Mientras la caja está `abierta` en ciego, el resumen/movimientos van en ciego para todos
-   (igual que `obtenerArqueo`, que no condiciona su rama ciega a `tieneVerTodas`). El admin usa
-   la vía de reveal existente de B. Por diseño, incluso un admin contando su propia caja cuenta
-   a ciegas (también podría descuadrar/skimear). Una caja **cerrada** vista desde el historial
-   (readonly) siempre se ve revelada, que es el caso principal de "el admin ve todo".
+4. **Nadie operativo ve las cifras en vivo mientras la caja está `abierta` en ciego** — ni el
+   cajero ni el **supervisor** (`Cajas:Leer`). No se inventa una vista "supervisor ve en vivo":
+   `Cajas:Leer` es el rol operativo que el ciego podría estar vigilando, no el dueño.
+   El gating espeja `obtenerArqueo`, que no condiciona su rama ciega a `tieneVerTodas`. El
+   reveal operativo es la **conciliación** (fase 1 → `en_conciliacion`) y la caja **cerrada**
+   vista desde el historial (readonly), que es el caso principal de "el admin ve todo". Por
+   diseño, incluso un admin contando su propia caja cuenta a ciegas (también podría skimear).
+   Si algún día se quisiera una vista en vivo, se ata al **eje admin del tenant** (el dueño),
+   nunca a `Cajas:Leer` — fuera de alcance (YAGNI).
 
 5. **Modo normal intacto.** Todo el cambio está detrás de `arqueo_ciego`. Si el tenant no opera
    en ciego, el header y la tabla quedan **exactamente como hoy**.
+
+6. **Configurar el modo ciego es admin-only (dueño), no delegable.** Activar/desactivar el
+   arqueo ciego es una **política anti-fraude**, no una acción operativa: se mueve a
+   `TenantAdminGuard` (mismo patrón catálogos/config que impuestos, monedas, motivos), con la
+   lectura abierta. El **CRUD de cajones de la misma página sigue** delegable a
+   `Cajas:Actualizar` (es operativo, no política) — no confundir ambos gates.
 
 ---
 
@@ -130,6 +148,18 @@ criterio que `obtenerArqueo` (`arqueo_ciego && estado === 'abierta'`).
 
 > Nota de eficiencia: chequear `getArqueoCiego` una sola vez por request (no por fila). Sin N+1.
 
+### 5.3 Config del modo ciego — admin-only
+`caja.controller.ts → PUT /caja/arqueo-ciego`.
+
+- Hoy: `@RequiresPermiso('Cajas', 'Actualizar')`. **Cambia a `@UseGuards(TenantAdminGuard)`**
+  (mismo patrón que `PATCH :id/arqueo/motivos`, que ya usa ese guard). Se quita el
+  `@RequiresPermiso` — `PermisosGuard` sin metadata es pass-through, igual que en
+  `justificarDiferencias`. `TenantAdminGuard` ya está importado en el controller.
+- **La lectura no cambia:** `GET /caja/arqueo-ciego` queda en `Cajas:Leer` (solo la escritura
+  es admin-only, patrón catálogos). El cajero no la necesita: su layout ciego lo decide
+  `resumenTurno.ciego` (§5.1), no este endpoint.
+- `tenant_id` sigue saliendo del token (invariante 1); no cambia la firma del service.
+
 ---
 
 ## 6. Frontend
@@ -148,6 +178,12 @@ criterio que `obtenerArqueo` (`arqueo_ciego && estado === 'abierta'`).
 
 - Los colores financieros hardcodeados de las tarjetas se mantienen (excepción del design
   system para el módulo Caja).
+
+- **`configuracion/cajas.vue`** — el toggle de arqueo ciego (`USwitch`, hoy línea ~315) pasa a
+  gatearse con un computed nuevo **`puedeConfigCiego = computed(() => perms.esAdmin)`**. **No
+  reusar `puedeActualizar`** (línea 50): ese computed también gobierna el CRUD de cajones
+  (líneas ~257-275), que **debe seguir** delegable a `Cajas:Actualizar`. Solo el toggle del
+  ciego cambia a admin-only; el resto de la página queda igual.
 
 ---
 
@@ -198,9 +234,14 @@ Cambio cosmético, sin lógica de negocio.
   `GET .../movimientos/resumen` devuelve `ciego:true` y `entradas/salidas/esperado` en null,
   `saldoInicial` presente; `GET .../movimientos` devuelve página vacía. Tras enviar conteo
   (`en_conciliacion`) → ambos endpoints revelan. Con `arqueo_ciego` off → todo visible siempre.
+- **Backend — config admin-only (e2e `caja.e2e-spec.ts`):** un usuario con `Cajas:Actualizar`
+  pero **no admin** recibe **403** en `PUT /caja/arqueo-ciego`; el admin del tenant puede.
+  `GET /caja/arqueo-ciego` sigue accesible con `Cajas:Leer`.
 - **Frontend (vitest):** `CajaTurnoResumen` con `ciego` renderiza solo `Saldo inicial`;
   `CajaActivaDashboard` con `resumenTurno.ciego` no monta la tabla. `CajaTurnoHeader` mapea los
-  tres estados al color correcto.
+  tres estados al color correcto. En `configuracion/cajas.vue`, el toggle del ciego queda
+  disabled para un no-admin **mientras** el CRUD de cajones sigue habilitado con
+  `Cajas:Actualizar`.
 - **Smoke navegador:** activar ciego en config; abrir caja; verificar header sin
   entradas/salidas/esperado y sin tabla; devtools/network sin las cifras; enviar conteo y ver el
   reveal con movimientos en el detalle del arqueo.
@@ -210,6 +251,9 @@ Cambio cosmético, sin lógica de negocio.
 ## 11. Fuera de alcance
 
 - Permiso separado de "ver totales del turno" (§7).
+- Vista "el dueño ve el esperado en vivo" (se ataría al eje admin, no a `Cajas:Leer` — §3.4).
+- Cambiar el gate del **CRUD de cajones**: sigue en `Cajas:Actualizar` (§6). Solo la config
+  del ciego se mueve a admin-only.
 - Conteo por denominación, umbral de aprobación por monto (ya en backlog de la investigación).
 - Cualquier cambio al modelo de esperado (A) o a la máquina de estados (C).
 

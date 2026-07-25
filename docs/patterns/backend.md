@@ -86,6 +86,12 @@ se pasa al service. Ejemplo completo: `monedas.controller.ts`.
   (ej.: `caja.controller.ts`). Un rol `es_fijo` (admin) tiene acceso total vía
   short-circuit en `RbacService.userHasPermiso`.
 
+> **Excepción — política dentro de un módulo operativo:** una acción concreta puede ser
+> admin-only (`TenantAdminGuard`) aunque su módulo sea RBAC, cuando es una **política** que un
+> rol operativo no debería poder cambiarse a sí mismo (ej. `PUT /caja/arqueo-ciego`: apagar el
+> arqueo ciego). Criterio, prueba y ejes de rol en `docs/features/roles-permisos.md`, sección
+> "Admin-only vs permiso de módulo".
+
 > Al agregar un módulo de negocio nuevo: registrar el `modulo_app` y sus
 > `modulo_app_permisos` (CRUD estándar Leer/Crear/Actualizar/Eliminar/Ver todas)
 > en `seeder.service.ts`, luego aplicar `PermisosGuard` + `@RequiresPermiso(...)`.
