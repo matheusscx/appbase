@@ -10,6 +10,17 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-24-motivos-diferencia-design.md`
 
+> ⚠️ **CAMBIO DE DISEÑO (2026-07-24, durante la ejecución):** el owner redirigió a un modelo de
+> **dos pasos**: **cerrar** (`POST /cerrar`, cajero) **nunca** captura ni exige motivo — congela y
+> deja los descuadres "pendientes"; **justificar** (`PATCH /caja/:id/arqueo/motivos`, **admin-only**)
+> es un paso separado, uniforme para normal y ciego. Consecuencias sobre este plan:
+> - **Task 3** (enforcement en `cerrar`): **REVERTIDO** — `cerrar` no captura motivo; `LineaCierreDto`
+>   no lleva campos de motivo. (Las 2 columnas de `caja_arqueo_medio` quedan.)
+> - **Task 7** (motivo en el drawer de cierre): **ELIMINADA** — el drawer no cambia.
+> - **Task 4** (PATCH justify admin-only + read del motivo): se mantiene, es el flujo central.
+> - **Task 5/6/8/9**: ajustadas al modelo de dos pasos (ver spec revisado). El código de abajo de las
+>   Tasks 3 y 7 quedó obsoleto; seguir el spec y el ledger.
+
 ## Global Constraints
 
 Toda tarea hereda estas reglas (violarlas = detenerse y reportar, no corregir):
