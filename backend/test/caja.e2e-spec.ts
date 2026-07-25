@@ -598,7 +598,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     });
   });
 
-  describe('cierre normal con motivo de diferencia', () => {
+  describe('cierre normal con descuadre — motivo es un paso aparte', () => {
     // Motivos fijos del seed (`seedMotivosDiferencia`, Paris arranca en 291).
     const FALTA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440291';
 
@@ -618,7 +618,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .set('Authorization', `Bearer ${tokenSupervisor}`);
     });
 
-    it('línea que descuadra sin motivo → 400; con motivo activo → 201; GET revela motivoNombre', async () => {
+    it('cerrar con descuadre no exige motivo (201, línea sin justificar); PATCH la justifica después', async () => {
       const abrir = await request(app.getHttpServer())
         .post('/api/caja/abrir')
         .set('Authorization', `Bearer ${tokenSupervisor}`)
@@ -626,28 +626,36 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(abrir.status).toBe(201);
       const cajaId = (abrir.body as CajaResponse).id;
 
-      // Contado != esperado (10000) sin motivoDiferenciaId → 400.
-      const cerrarSinMotivo = await request(app.getHttpServer())
+      // Contado != esperado (10000), sin motivo → cerrar ya no lo exige: 201.
+      const cerrar = await request(app.getHttpServer())
         .post(`/api/caja/${cajaId}/cerrar`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ lineas: [{ metodoPagoId: null, montoContado: '9000.0000' }] });
-      expect(cerrarSinMotivo.status).toBe(400);
+      expect(cerrar.status).toBe(201);
 
-      // La caja sigue abierta (la transacción del intento anterior se
-      // revirtió): reintentar con un motivo activo del tenant → 201.
-      const cerrarConMotivo = await request(app.getHttpServer())
-        .post(`/api/caja/${cajaId}/cerrar`)
+      const arqueoSinJustificar = await request(app.getHttpServer())
+        .get(`/api/caja/${cajaId}/arqueo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(arqueoSinJustificar.status).toBe(200);
+      const lineasSinJustificar = (
+        arqueoSinJustificar.body as { ciego: boolean; lineas: ArqueoLinea[] }
+      ).lineas;
+      const efectivoSinJustificar = lineasSinJustificar.find(
+        (l) => l.esEfectivo,
+      );
+      expect(efectivoSinJustificar?.diferencia).toBe('-1000.0000');
+      expect(efectivoSinJustificar?.motivoNombre).toBeNull();
+
+      // Justificación es un paso aparte: PATCH /caja/:id/arqueo/motivos.
+      const patch = await request(app.getHttpServer())
+        .patch(`/api/caja/${cajaId}/arqueo/motivos`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({
           lineas: [
-            {
-              metodoPagoId: null,
-              montoContado: '9000.0000',
-              motivoDiferenciaId: FALTA_EFECTIVO_ID,
-            },
+            { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
           ],
         });
-      expect(cerrarConMotivo.status).toBe(201);
+      expect(patch.status).toBe(200);
 
       const arqueo = await request(app.getHttpServer())
         .get(`/api/caja/${cajaId}/arqueo`)
@@ -662,11 +670,10 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
   });
 
   describe('justificación de diferencias — PATCH /caja/:id/arqueo/motivos (admin-only)', () => {
-    // Motivos fijos del seed, distintos del usado en el describe anterior
+    // Motivo fijo del seed, distinto del usado en el describe anterior
     // para no competir por el mismo registro (maxWorkers:1 en jest-e2e.json
     // hace que los archivos corran en serie, pero los `it` dentro de un mismo
     // describe podrían solaparse con otros describes si Jest los reordena).
-    const SOBRA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440292';
     const DIVERGENCIA_TARJETA_ID = '550e8400-e29b-41d4-a716-446655440293';
 
     let ds: DataSource;
@@ -688,17 +695,11 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     });
 
     it('en modo ciego, no-admin recibe 403 y admin puede re-justificar (PATCH) la línea', async () => {
-      // NOTA sobre alcance: `cajaService.cerrar()` no ramifica por
-      // `arqueo_ciego` (confirmado leyendo `caja.service.ts` y verificado en
-      // vivo contra la API real) — exige motivo igual que el cierre normal
-      // cuando hay una diferencia real y existen motivos activos, incluso en
-      // modo ciego. Por eso este caso NO reproduce "cierre en ciego sin
-      // motivo → línea queda sin justificar" (esa premisa del brief de la
-      // tarea no está soportada por el backend entregado en las tareas 1-4;
-      // reportado como hallazgo en `task-5-report.md`). Lo que sí se prueba
-      // acá, fiel al contrato ya entregado, es el enforcement admin-only de
-      // `PATCH /caja/:id/arqueo/motivos` y que re-justificar una línea
-      // cerrada actualiza el `motivoNombre` que expone el GET.
+      // `cajaService.cerrar()` ya no exige (ni captura) motivo en ninguna
+      // rama — ciega o no. El cierre queda sin justificar y la justificación
+      // es un paso admin-only aparte vía `PATCH /caja/:id/arqueo/motivos`.
+      // Este caso prueba ese enforcement admin-only y que re-justificar una
+      // línea cerrada actualiza el `motivoNombre` que expone el GET.
       await ds.query(
         `UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1`,
         [PARIS_TENANT_ID],
@@ -715,13 +716,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
           .post(`/api/caja/${cajaId}/cerrar`)
           .set('Authorization', `Bearer ${tokenSupervisor}`)
           .send({
-            lineas: [
-              {
-                metodoPagoId: null,
-                montoContado: '9500.0000',
-                motivoDiferenciaId: SOBRA_EFECTIVO_ID,
-              },
-            ],
+            lineas: [{ metodoPagoId: null, montoContado: '9500.0000' }],
           });
         expect(cerrar.status).toBe(201);
 

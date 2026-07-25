@@ -274,7 +274,6 @@ describe('CajaService', () => {
       jest
         .spyOn(service, 'calcularArqueo')
         .mockResolvedValue(arqueoRecomputado);
-      motivosService.hayMotivosActivos.mockResolvedValue(false);
     });
 
     it('congela el arqueo y fija los agregados de cajas = línea de efectivo', async () => {
@@ -310,7 +309,6 @@ describe('CajaService', () => {
           {
             metodoPagoId: null,
             montoContado: '900',
-            comentarioDiferencia: 'Faltante sin justificar aún',
           },
         ], // solo efectivo
       };
@@ -376,7 +374,6 @@ describe('CajaService', () => {
           {
             metodoPagoId: null,
             montoContado: '1000.5000',
-            comentarioDiferencia: 'Sobrante de vueltos',
           },
           {
             metodoPagoId: 'dddddddd-0000-0000-0000-000000000004',
@@ -403,8 +400,7 @@ describe('CajaService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('400 si una línea descuadra y NO trae motivo (habiendo motivos activos)', async () => {
-      // arqueo: efectivo esperado 1000, contado 900 → diferencia -100
+    it('permite cerrar con descuadre sin exigir motivo (cerrar ya no lo captura)', async () => {
       jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
         {
           metodoPagoId: null,
@@ -414,127 +410,21 @@ describe('CajaService', () => {
           requiereConteo: true,
         },
       ]);
-      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
       managerMock.findOne.mockResolvedValueOnce({
         ...mockCajaAbierta,
         usuarioId: USUARIO_ID,
       });
-      await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
+      const { caja, arqueo } = await service.cerrar(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        {
           lineas: [{ metodoPagoId: null, montoContado: '900' }],
-        } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('400 si el motivo requiere_comentario y no viene comentario', async () => {
-      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
-        {
-          metodoPagoId: null,
-          nombre: 'Efectivo',
-          esEfectivo: true,
-          esperado: '1000.0000',
-          requiereConteo: true,
         },
-      ]);
-      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
-      motivosService.assertMotivoValido.mockResolvedValueOnce({
-        id: 'm-otro',
-        nombre: 'otro',
-        requiereComentario: true,
-      });
-      managerMock.findOne.mockResolvedValueOnce({
-        ...mockCajaAbierta,
-        usuarioId: USUARIO_ID,
-      });
-      await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
-          lineas: [
-            {
-              metodoPagoId: null,
-              montoContado: '900',
-              motivoDiferenciaId: 'm-otro',
-            },
-          ],
-        } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('red de seguridad: sin motivos activos, 400 sin comentario', async () => {
-      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
-        {
-          metodoPagoId: null,
-          nombre: 'Efectivo',
-          esEfectivo: true,
-          esperado: '1000.0000',
-          requiereConteo: true,
-        },
-      ]);
-      motivosService.hayMotivosActivos.mockResolvedValueOnce(false);
-      managerMock.findOne.mockResolvedValueOnce({
-        ...mockCajaAbierta,
-        usuarioId: USUARIO_ID,
-      });
-      await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
-          lineas: [{ metodoPagoId: null, montoContado: '900' }],
-        } as any),
-      ).rejects.toBeInstanceOf(BadRequestException);
-    });
-
-    it('congela motivo+comentario cuando la línea descuadra y trae motivo válido', async () => {
-      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
-        {
-          metodoPagoId: null,
-          nombre: 'Efectivo',
-          esEfectivo: true,
-          esperado: '1000.0000',
-          requiereConteo: true,
-        },
-      ]);
-      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
-      motivosService.assertMotivoValido.mockResolvedValueOnce({
-        id: 'm1',
-        nombre: 'falta de efectivo',
-        requiereComentario: false,
-      });
-      managerMock.findOne.mockResolvedValueOnce({
-        ...mockCajaAbierta,
-        usuarioId: USUARIO_ID,
-      });
-      await service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
-        lineas: [
-          { metodoPagoId: null, montoContado: '900', motivoDiferenciaId: 'm1' },
-        ],
-      });
-      const saved = managerMock.save.mock.calls.find((c) =>
-        Array.isArray(c[1]),
-      )?.[1];
-      expect(saved[0]).toMatchObject({
-        motivoDiferenciaId: 'm1',
-        diferencia: '-100.0000',
-      });
-    });
-
-    it('línea que cuadra (diferencia 0) NO exige motivo', async () => {
-      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([
-        {
-          metodoPagoId: null,
-          nombre: 'Efectivo',
-          esEfectivo: true,
-          esperado: '1000.0000',
-          requiereConteo: true,
-        },
-      ]);
-      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
-      managerMock.findOne.mockResolvedValueOnce({
-        ...mockCajaAbierta,
-        usuarioId: USUARIO_ID,
-      });
-      await expect(
-        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, {
-          lineas: [{ metodoPagoId: null, montoContado: '1000' }],
-        } as any),
-      ).resolves.toBeDefined();
+      );
+      expect(caja.diferencia).toBe('-100.0000');
+      expect(arqueo[0].motivoDiferenciaId).toBeUndefined();
+      expect(arqueo[0].comentarioDiferencia).toBeUndefined();
     });
   });
 
