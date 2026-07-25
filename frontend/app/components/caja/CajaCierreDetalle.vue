@@ -58,7 +58,7 @@ const puedeFinalizar = computed(() => enConciliacion.value && !props.readonly)
       </template>
       <CajaArqueoTable
         :lineas="arqueo"
-        :puede-justificar="perms.esAdmin"
+        :puede-justificar="perms.esAdmin && caja.estado === 'cerrada'"
         :caja-id="caja.id"
       />
     </UCard>
