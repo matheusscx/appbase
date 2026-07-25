@@ -71,6 +71,9 @@ export interface LineaArqueo {
   requiereConteo: boolean;
   contado?: string | null;
   diferencia?: string | null;
+  motivoDiferenciaId?: string | null;
+  motivoNombre?: string | null;
+  comentarioDiferencia?: string | null;
 }
 
 export interface CajaHistorialItem {
@@ -430,6 +433,9 @@ export class CajaService {
       contado: string | null;
       diferencia: string | null;
       requiere_conteo: boolean;
+      motivo_nombre: string | null;
+      motivo_diferencia_id: string | null;
+      comentario_diferencia: string | null;
     }[] = await this.dataSource.query(
       `SELECT am.metodo_pago_id,
               COALESCE(mp.nombre, 'Efectivo') AS nombre,
@@ -437,9 +443,15 @@ export class CajaService {
               am.esperado,
               am.contado,
               am.diferencia,
-              COALESCE(tmp.requiere_conteo, am.es_efectivo) AS requiere_conteo
+              COALESCE(tmp.requiere_conteo, am.es_efectivo) AS requiere_conteo,
+              md.nombre AS motivo_nombre,
+              am.motivo_diferencia_id,
+              am.comentario_diferencia
        FROM caja_arqueo_medio am
        LEFT JOIN metodos_pago mp ON mp.metodo_pago_id = am.metodo_pago_id
+       LEFT JOIN motivo_diferencia_caja md
+              ON md.motivo_diferencia_id = am.motivo_diferencia_id
+             AND md.eliminado_el IS NULL
        LEFT JOIN tenant_metodo_pago tmp
               ON tmp.metodo_pago_id = am.metodo_pago_id
              AND tmp.tenant_id = $2
@@ -461,8 +473,99 @@ export class CajaService {
         contado: r.contado === null ? null : new Decimal(r.contado).toFixed(4),
         diferencia:
           r.diferencia === null ? null : new Decimal(r.diferencia).toFixed(4),
+        motivoDiferenciaId: r.motivo_diferencia_id ?? null,
+        motivoNombre: r.motivo_nombre ?? null,
+        comentarioDiferencia: r.comentario_diferencia ?? null,
       })),
     };
+  }
+
+  /**
+   * Justifica (o re-justifica) las líneas que descuadran de una caja YA CERRADA.
+   * Admin-only (guard en el controller). No recalcula ni toca esperado/contado/
+   * diferencia: solo actualiza motivo_diferencia_id/comentario_diferencia de las
+   * filas congeladas por `cerrar`. Mismo enforcement que el cierre normal.
+   */
+  async justificarDiferencias(
+    tenantId: string,
+    cajaId: string,
+    lineas: {
+      metodoPagoId: string | null;
+      motivoDiferenciaId?: string;
+      comentarioDiferencia?: string;
+    }[],
+  ): Promise<{ ciego: boolean; lineas: LineaArqueo[] }> {
+    await this.dataSource.transaction(async (manager) => {
+      const caja = await manager.findOne(Caja, {
+        where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
+      });
+      if (!caja) throw new NotFoundException('Caja no encontrada');
+      if (caja.estado !== 'cerrada') {
+        throw new BadRequestException('La caja no está cerrada');
+      }
+
+      const filas: {
+        metodo_pago_id: string | null;
+        diferencia: string | null;
+      }[] = await manager.query(
+        `SELECT metodo_pago_id, diferencia FROM caja_arqueo_medio
+         WHERE caja_id = $1 AND eliminado_el IS NULL`,
+        [cajaId],
+      );
+      const claveDe = (id: string | null) => id ?? 'EFECTIVO';
+      const difPorClave = new Map(
+        filas.map((f) => [claveDe(f.metodo_pago_id), f.diferencia]),
+      );
+      const hayMotivos = await this.motivosService.hayMotivosActivos(
+        manager,
+        tenantId,
+      );
+
+      for (const l of lineas) {
+        const clave = claveDe(l.metodoPagoId);
+        const dif = difPorClave.get(clave);
+        if (dif == null || new Decimal(dif).isZero()) continue; // solo descuadres
+        const comentario = l.comentarioDiferencia?.trim() || null;
+        let motivoId: string | null = null;
+        let comentarioFinal: string | null = null;
+        if (hayMotivos) {
+          if (!l.motivoDiferenciaId) {
+            throw new BadRequestException('Falta el motivo de la diferencia');
+          }
+          const motivo = await this.motivosService.assertMotivoValido(
+            manager,
+            tenantId,
+            l.motivoDiferenciaId,
+          );
+          if (motivo.requiereComentario && !comentario) {
+            throw new BadRequestException(
+              `El motivo "${motivo.nombre}" exige un comentario`,
+            );
+          }
+          motivoId = motivo.id;
+          comentarioFinal = comentario;
+        } else {
+          if (!comentario) {
+            throw new BadRequestException('Falta justificar la diferencia');
+          }
+          comentarioFinal = comentario;
+        }
+        await manager.query(
+          `UPDATE caja_arqueo_medio
+             SET motivo_diferencia_id = $1, comentario_diferencia = $2
+           WHERE caja_id = $3 AND tenant_id = $4
+             AND ${l.metodoPagoId === null ? 'metodo_pago_id IS NULL' : 'metodo_pago_id = $5'}
+             AND eliminado_el IS NULL`,
+          l.metodoPagoId === null
+            ? [motivoId, comentarioFinal, cajaId, tenantId]
+            : [motivoId, comentarioFinal, cajaId, tenantId, l.metodoPagoId],
+        );
+      }
+    });
+    // Relectura con el arqueo revelado (ciego:false, caja cerrada). `tieneVerTodas`
+    // en true porque el llamador ya pasó TenantAdminGuard; verificarAccesoCaja no
+    // exige owner en ese caso, así que usuarioId no se usa en esta rama.
+    return this.obtenerArqueo(tenantId, '', cajaId, true);
   }
 
   async cerrar(

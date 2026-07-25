@@ -22,6 +22,7 @@ describe('CajaController', () => {
       obtenerArqueo: jest.fn(),
       getArqueoCiego: jest.fn(),
       setArqueoCiego: jest.fn(),
+      justificarDiferencias: jest.fn(),
     } as unknown as CajaService;
 
     rbacService = {
@@ -294,6 +295,25 @@ describe('CajaController', () => {
       controller.cajonesEstado(req);
       expect(cajaService.cajonesEstado).toHaveBeenCalledWith('t1', 'u1');
       expect(rbacService.userHasPermiso).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('justificarDiferencias (admin-only)', () => {
+    it('delega en cajaService.justificarDiferencias con el tenant del token', async () => {
+      const dto = {
+        lineas: [{ metodoPagoId: null, motivoDiferenciaId: 'm1' }],
+      } as any;
+      jest
+        .spyOn(cajaService, 'justificarDiferencias')
+        .mockResolvedValue({ ciego: false, lineas: [] });
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      const res = await controller.justificarDiferencias(req, 'caja1', dto);
+      expect(cajaService.justificarDiferencias).toHaveBeenCalledWith(
+        't1',
+        'caja1',
+        dto.lineas,
+      );
+      expect(res).toEqual({ ciego: false, lineas: [] });
     });
   });
 

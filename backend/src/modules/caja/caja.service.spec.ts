@@ -726,6 +726,121 @@ describe('CajaService', () => {
     });
   });
 
+  describe('justificarDiferencias', () => {
+    it('actualiza el motivo de una línea congelada que descuadra', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+      });
+      // línea congelada con diferencia ≠ 0
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '-100.0000' },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      motivosService.assertMotivoValido.mockResolvedValueOnce({
+        id: 'm1',
+        nombre: 'falta de efectivo',
+        requiereComentario: false,
+      });
+      managerMock.query.mockResolvedValueOnce(undefined); // UPDATE
+      // obtenerArqueo de relectura (fuera de la transacción):
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const res = await service.justificarDiferencias(TENANT_ID, CAJA_ID, [
+        { metodoPagoId: null, motivoDiferenciaId: 'm1' },
+      ]);
+
+      expect(res).toEqual({ ciego: false, lineas: [] });
+      expect(motivosService.assertMotivoValido).toHaveBeenCalledWith(
+        managerMock,
+        TENANT_ID,
+        'm1',
+      );
+      const updateCall = managerMock.query.mock.calls[1];
+      expect(updateCall[0]).toContain('UPDATE caja_arqueo_medio');
+      expect(updateCall[1]).toEqual(['m1', null, CAJA_ID, TENANT_ID]);
+    });
+
+    it('no toca líneas que cuadran (diferencia = 0)', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.justificarDiferencias(TENANT_ID, CAJA_ID, [
+        { metodoPagoId: null, motivoDiferenciaId: 'm1' },
+      ]);
+
+      // Solo el SELECT inicial; ningún UPDATE porque la línea cuadra.
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
+      expect(motivosService.assertMotivoValido).not.toHaveBeenCalled();
+    });
+
+    it('400 si la caja no está cerrada', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'abierta',
+      });
+      await expect(
+        service.justificarDiferencias(TENANT_ID, CAJA_ID, []),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('404 si la caja no existe o no pertenece al tenant', async () => {
+      managerMock.findOne.mockResolvedValueOnce(null);
+      await expect(
+        service.justificarDiferencias(TENANT_ID, CAJA_ID, []),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('400 si hay motivos activos y falta motivoDiferenciaId', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '-100.0000' },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+
+      await expect(
+        service.justificarDiferencias(TENANT_ID, CAJA_ID, [
+          { metodoPagoId: null },
+        ]),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('400 si NO hay motivos activos y falta comentario (red de seguridad)', async () => {
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '-100.0000' },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(false);
+
+      await expect(
+        service.justificarDiferencias(TENANT_ID, CAJA_ID, [
+          { metodoPagoId: null },
+        ]),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
   describe('getArqueoCiego / setArqueoCiego', () => {
     it('getArqueoCiego lee tenants.arqueo_ciego filtrando soft-delete', async () => {
       dataSource.query.mockResolvedValueOnce([{ arqueo_ciego: true }]);

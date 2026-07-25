@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -15,6 +16,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
+import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { RbacService } from '../rbac/rbac.service';
@@ -25,6 +27,7 @@ import { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import { QueryMovimientosCajaDto } from './dto/query-movimientos-caja.dto';
 import { QueryHistorialCajaDto } from './dto/query-historial-caja.dto';
 import { SetArqueoCiegoDto } from './dto/set-arqueo-ciego.dto';
+import { JustificarDiferenciasDto } from './dto/justificar-diferencias.dto';
 
 @ApiTags('caja')
 @ApiBearerAuth()
@@ -110,6 +113,21 @@ export class CajaController {
     const u = req.user as JwtUser;
     const verTodas = await this.resolverLecturaCompartida(u);
     return this.cajaService.obtenerArqueo(u.tenantId!, u.id, cajaId, verTodas);
+  }
+
+  @Patch(':id/arqueo/motivos')
+  @UseGuards(TenantAdminGuard)
+  justificarDiferencias(
+    @Req() req: Request,
+    @Param('id') cajaId: string,
+    @Body() dto: JustificarDiferenciasDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.cajaService.justificarDiferencias(
+      u.tenantId!,
+      cajaId,
+      dto.lineas,
+    );
   }
 
   @Get(':id')
