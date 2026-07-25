@@ -109,6 +109,11 @@ export class VentasService {
           : 'No tienes una caja abierta',
       );
     }
+    if (caja.estado !== 'abierta') {
+      throw new BadRequestException(
+        'La caja está en conciliación y no admite ventas',
+      );
+    }
 
     // 2. Cargar todos los items para obtener monedaId, tipo, nombre
     const items = await Promise.all(

@@ -303,6 +303,11 @@ export class PagosService {
       if (!caja) {
         throw new BadRequestException('No tienes una caja abierta');
       }
+      if (caja.estado !== 'abierta') {
+        throw new BadRequestException(
+          'La caja está en conciliación y no admite pagos',
+        );
+      }
 
       // Calcular monto ya aplicado
       const pagosAplicadosRows: { monto_aplicado: string }[] =
