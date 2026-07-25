@@ -31,11 +31,12 @@ export interface MovimientoCaja {
 }
 
 export interface CajaTurnoResumen {
+  ciego: boolean
   saldoInicial: string
-  totalEntradas: string
-  totalSalidas: string
-  saldoEsperado: string
-  totalMovimientos: number
+  totalEntradas: string | null
+  totalSalidas: string | null
+  saldoEsperado: string | null
+  totalMovimientos: number | null
 }
 
 export interface SesionCajon {
@@ -81,9 +82,10 @@ export interface MotivoDiferencia {
 }
 
 function recalcularSaldoEsperado(r: CajaTurnoResumen) {
+  if (r.ciego || r.saldoEsperado === null) return
   r.saldoEsperado = new Decimal(r.saldoInicial)
-    .plus(r.totalEntradas)
-    .minus(r.totalSalidas)
+    .plus(r.totalEntradas ?? '0')
+    .minus(r.totalSalidas ?? '0')
     .toFixed(4)
 }
 
@@ -131,6 +133,7 @@ export const useCajaStore = defineStore('caja', () => {
     // Usar la respuesta del POST: evita depender de GET /activa justo después del write.
     activa.value = caja && typeof caja === 'object' ? caja : null
     resumenTurno.value = {
+      ciego: false,
       saldoInicial: caja.saldoInicial,
       totalEntradas: '0.0000',
       totalSalidas: '0.0000',
@@ -152,17 +155,17 @@ export const useCajaStore = defineStore('caja', () => {
     }
   }
 
-  /** Patch local del resumen tras un movimiento (sin GET). */
+  /** Patch local del resumen tras un movimiento (sin GET). No-op en modo ciego. */
   function aplicarMovimientoLocal(tipo: 'entrada' | 'salida', monto: string, count = 1) {
-    if (!resumenTurno.value) return
     const r = resumenTurno.value
+    if (!r || r.ciego) return
     if (tipo === 'entrada') {
-      r.totalEntradas = new Decimal(r.totalEntradas).plus(monto).toFixed(4)
+      r.totalEntradas = new Decimal(r.totalEntradas ?? '0').plus(monto).toFixed(4)
     }
     else {
-      r.totalSalidas = new Decimal(r.totalSalidas).plus(monto).toFixed(4)
+      r.totalSalidas = new Decimal(r.totalSalidas ?? '0').plus(monto).toFixed(4)
     }
-    r.totalMovimientos += count
+    r.totalMovimientos = (r.totalMovimientos ?? 0) + count
     recalcularSaldoEsperado(r)
   }
 

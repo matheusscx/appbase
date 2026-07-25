@@ -248,3 +248,48 @@ describe('useCajaStore — arqueo / cerrar', () => {
     expect(store.motivos).toEqual(motivos)
   })
 })
+
+describe('useCajaStore — resumen ciego', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockApiFetch.mockReset()
+  })
+
+  it('aplicarMovimientoLocal es no-op cuando el resumen es ciego', () => {
+    const store = useCajaStore()
+    store.resumenTurno = {
+      ciego: true,
+      saldoInicial: '1000.0000',
+      totalEntradas: null,
+      totalSalidas: null,
+      saldoEsperado: null,
+      totalMovimientos: null,
+    }
+    store.aplicarMovimientoLocal('entrada', '500')
+    expect(store.resumenTurno.totalEntradas).toBeNull()
+    expect(store.resumenTurno.saldoEsperado).toBeNull()
+    expect(store.resumenTurno.totalMovimientos).toBeNull()
+  })
+
+  it('aplicarMovimientoLocal actualiza totales cuando NO es ciego', () => {
+    const store = useCajaStore()
+    store.resumenTurno = {
+      ciego: false,
+      saldoInicial: '1000.0000',
+      totalEntradas: '0.0000',
+      totalSalidas: '0.0000',
+      saldoEsperado: '1000.0000',
+      totalMovimientos: 0,
+    }
+    store.aplicarMovimientoLocal('entrada', '500')
+    expect(store.resumenTurno.totalEntradas).toBe('500.0000')
+    expect(store.resumenTurno.saldoEsperado).toBe('1500.0000')
+  })
+
+  it('abrir siembra resumenTurno con ciego:false', async () => {
+    const store = useCajaStore()
+    mockApiFetch.mockResolvedValue({ ...CAJA, saldoInicial: '1000.0000' })
+    await store.abrir({ saldoInicial: '1000.0000', cajonId: 'cajon-1' })
+    expect(store.resumenTurno?.ciego).toBe(false)
+  })
+})
