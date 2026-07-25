@@ -27,6 +27,7 @@ import { UpdatePreferenciasFinancierasDto } from './dto/update-preferencias-fina
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
 import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
+import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
 
 export interface TenantMember {
   usuarioId: string;
@@ -156,6 +157,16 @@ export class TenantsService {
           `INSERT INTO causas_merma (tenant_id, nombre, activo, es_fijo)
            VALUES ($1, $2, true, true)`,
           [savedTenant.id, nombre],
+        );
+      }
+
+      // 7b. Sembrar los motivos de diferencia por defecto del sistema
+      for (const m of MOTIVOS_DIFERENCIA_DEFAULTS) {
+        await manager.query(
+          `INSERT INTO motivo_diferencia_caja
+             (tenant_id, nombre, activo, requiere_comentario, es_fijo)
+           VALUES ($1, $2, true, $3, true)`,
+          [savedTenant.id, m.nombre, m.requiereComentario],
         );
       }
 

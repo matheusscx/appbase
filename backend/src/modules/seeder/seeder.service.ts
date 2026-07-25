@@ -46,6 +46,7 @@ import { CredencialesService } from '../pasarela/services/credenciales.service';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
 import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
+import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -155,6 +156,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedModuloAppPermisos();
     await this.seedTenants();
     await this.seedCausasMerma();
+    await this.seedMotivosDiferencia();
     await this.seedCajasVirtuales();
     await this.seedCajones();
     await this.seedPropinaConfiguracion();
@@ -1002,6 +1004,37 @@ export class SeederService implements OnApplicationBootstrap {
                (causa_merma_id, tenant_id, nombre, activo, es_fijo)
              VALUES ($1,$2,$3,true,true)`,
             [causaId, tenantId, nombre],
+          );
+        }
+      }
+    }
+  }
+
+  private async seedMotivosDiferencia(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const uuid = (n: number) =>
+      `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
+
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_diferencia_tenant_nombre
+      ON motivo_diferencia_caja (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
+    let id = 291;
+    for (const tenantId of [PARIS, FALABELLA]) {
+      for (const m of MOTIVOS_DIFERENCIA_DEFAULTS) {
+        const motivoId = uuid(id++);
+        const exists: unknown[] = await this.dataSource.query(
+          `SELECT 1 FROM motivo_diferencia_caja WHERE motivo_diferencia_id = $1`,
+          [motivoId],
+        );
+        if (!exists.length) {
+          await this.dataSource.query(
+            `INSERT INTO motivo_diferencia_caja
+               (motivo_diferencia_id, tenant_id, nombre, activo, requiere_comentario, es_fijo)
+             VALUES ($1, $2, $3, true, $4, true)`,
+            [motivoId, tenantId, m.nombre, m.requiereComentario],
           );
         }
       }
