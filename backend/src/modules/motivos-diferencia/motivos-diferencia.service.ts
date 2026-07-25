@@ -29,6 +29,13 @@ type Runner = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
 const COLS =
   'motivo_diferencia_id, nombre, activo, requiere_comentario, es_fijo';
 
+// TypeORM + pg: INSERT/UPDATE ... RETURNING llega como [rows, rowCount], no como rows.
+function unwrap<T>(raw: unknown): T[] {
+  return Array.isArray((raw as unknown[])[0])
+    ? ((raw as T[][])[0] ?? [])
+    : ((raw as T[]) ?? []);
+}
+
 function toItem(r: Row): MotivoDiferenciaListItem {
   return {
     id: r.motivo_diferencia_id,
@@ -66,12 +73,14 @@ export class MotivosDiferenciaService {
   ): Promise<MotivoDiferenciaListItem> {
     const nombre = dto.nombre.trim();
     await this.assertNombreUnico(tenantId, nombre);
-    const rows: Row[] = await this.dataSource.query(
-      `INSERT INTO motivo_diferencia_caja
-         (tenant_id, nombre, activo, requiere_comentario, es_fijo)
-       VALUES ($1, $2, $3, $4, false)
-       RETURNING ${COLS}`,
-      [tenantId, nombre, dto.activo ?? true, dto.requiereComentario ?? false],
+    const rows = unwrap<Row>(
+      await this.dataSource.query(
+        `INSERT INTO motivo_diferencia_caja
+           (tenant_id, nombre, activo, requiere_comentario, es_fijo)
+         VALUES ($1, $2, $3, $4, false)
+         RETURNING ${COLS}`,
+        [tenantId, nombre, dto.activo ?? true, dto.requiereComentario ?? false],
+      ),
     );
     return toItem(rows[0]);
   }
@@ -109,12 +118,14 @@ export class MotivosDiferenciaService {
     }
 
     params.push(id, tenantId);
-    const rows: Row[] = await this.dataSource.query(
-      `UPDATE motivo_diferencia_caja SET ${sets.join(', ')}
-       WHERE motivo_diferencia_id = $${idx++} AND tenant_id = $${idx}
-         AND eliminado_el IS NULL
-       RETURNING ${COLS}`,
-      params,
+    const rows = unwrap<Row>(
+      await this.dataSource.query(
+        `UPDATE motivo_diferencia_caja SET ${sets.join(', ')}
+         WHERE motivo_diferencia_id = $${idx++} AND tenant_id = $${idx}
+           AND eliminado_el IS NULL
+         RETURNING ${COLS}`,
+        params,
+      ),
     );
     if (!rows.length) {
       throw new NotFoundException(`Motivo ${id} no encontrado`);

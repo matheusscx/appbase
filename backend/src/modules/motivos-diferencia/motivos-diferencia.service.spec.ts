@@ -108,4 +108,48 @@ describe('MotivosDiferenciaService', () => {
       BadRequestException,
     );
   });
+
+  it('create desenvuelve el shape [rows, rowCount] de RETURNING', async () => {
+    query.mockResolvedValueOnce([]); // assertNombreUnico
+    query.mockResolvedValueOnce([
+      [
+        {
+          motivo_diferencia_id: 'm1',
+          nombre: 'x',
+          activo: true,
+          requiere_comentario: false,
+          es_fijo: false,
+        },
+      ],
+      1,
+    ]); // INSERT ... RETURNING → [rows, rowCount]
+    const res = await service.create(TENANT, { nombre: 'x' });
+    expect(res).toMatchObject({ id: 'm1', nombre: 'x' });
+  });
+
+  it('update desenvuelve el shape [rows, rowCount] de RETURNING', async () => {
+    query.mockResolvedValueOnce([
+      {
+        motivo_diferencia_id: 'm1',
+        nombre: 'x',
+        activo: true,
+        requiere_comentario: false,
+        es_fijo: false,
+      },
+    ]); // findOneOrFail
+    query.mockResolvedValueOnce([
+      [
+        {
+          motivo_diferencia_id: 'm1',
+          nombre: 'x',
+          activo: false,
+          requiere_comentario: false,
+          es_fijo: false,
+        },
+      ],
+      1,
+    ]); // UPDATE ... RETURNING → [rows, rowCount]
+    const res = await service.update(TENANT, 'm1', { activo: false });
+    expect(res).toMatchObject({ id: 'm1', activo: false });
+  });
 });
