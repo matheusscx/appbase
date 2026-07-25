@@ -102,7 +102,7 @@ export class CajaController {
   }
 
   @Put('arqueo-ciego')
-  @RequiresPermiso('Cajas', 'Actualizar')
+  @UseGuards(TenantAdminGuard)
   async setArqueoCiego(@Req() req: Request, @Body() dto: SetArqueoCiegoDto) {
     const u = req.user as JwtUser;
     await this.cajaService.setArqueoCiego(u.tenantId!, dto.arqueoCiego);

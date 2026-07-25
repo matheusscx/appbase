@@ -49,6 +49,7 @@ const submitLabel = computed(() => (editingId.value ? 'Guardar' : 'Crear'))
 const puedeCrear = computed(() => perms.esAdmin || perms.can('Cajas', 'Crear'))
 const puedeActualizar = computed(() => perms.esAdmin || perms.can('Cajas', 'Actualizar'))
 const puedeEliminar = computed(() => perms.esAdmin || perms.can('Cajas', 'Eliminar'))
+const puedeConfigCiego = computed(() => perms.esAdmin)
 
 function resetDrawer() {
   editingId.value = null
@@ -312,7 +313,7 @@ const columns: TableColumn<Cajon>[] = [
         </div>
         <USwitch
           :model-value="arqueoCiego"
-          :disabled="savingArqueoCiego || !puedeActualizar"
+          :disabled="savingArqueoCiego || !puedeConfigCiego"
           @update:model-value="onToggleArqueoCiego"
         />
       </div>

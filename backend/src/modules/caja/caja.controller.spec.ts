@@ -1,7 +1,9 @@
+import 'reflect-metadata';
 import { ForbiddenException } from '@nestjs/common';
 import { CajaController } from './caja.controller';
 import { type CajaService } from './caja.service';
 import { type RbacService } from '../rbac/rbac.service';
+import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 
 describe('CajaController', () => {
   let controller: CajaController;
@@ -365,7 +367,7 @@ describe('CajaController', () => {
     });
   });
 
-  describe('config arqueo-ciego (permiso Cajas)', () => {
+  describe('config arqueo-ciego (admin-only)', () => {
     it('GET delega en getArqueoCiego con el tenant del token', async () => {
       jest.spyOn(cajaService, 'getArqueoCiego').mockResolvedValue(true);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
@@ -380,6 +382,14 @@ describe('CajaController', () => {
       const res = await controller.setArqueoCiego(req, { arqueoCiego: false });
       expect(cajaService.setArqueoCiego).toHaveBeenCalledWith('t1', false);
       expect(res).toEqual({ arqueoCiego: false });
+    });
+
+    it('PUT arqueo-ciego está protegido por TenantAdminGuard (config admin-only)', () => {
+      const guards = Reflect.getMetadata(
+        '__guards__',
+        CajaController.prototype.setArqueoCiego,
+      ) as unknown[];
+      expect(guards).toContain(TenantAdminGuard);
     });
   });
 });
