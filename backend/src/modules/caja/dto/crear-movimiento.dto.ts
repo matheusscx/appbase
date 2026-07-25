@@ -14,7 +14,7 @@ export class CrearMovimientoDto {
   @IsString()
   concepto: string;
 
-  @IsNumberString({ no_symbols: true })
+  @IsNumberString()
   monto: string;
 
   @IsOptional()

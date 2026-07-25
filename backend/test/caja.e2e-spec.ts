@@ -937,3 +937,123 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     });
   });
 });
+
+describe('Caja (e2e) — modo ciego oculta resumen y movimientos del turno', () => {
+  let app: INestApplication<App>;
+  let token: string;
+  let adminToken: string;
+  let cajonId: string;
+  let ds: DataSource;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+    ds = app.get(DataSource);
+
+    token = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
+    adminToken = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+    const r = await request(app.getHttpServer())
+      .post('/api/cajones')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ nombre: `E2E Ciego Resumen ${Date.now()}` });
+    cajonId = (r.body as CajonResponse).id;
+  }, 60000);
+
+  afterAll(async () => {
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+    if (cajonId) {
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+    }
+    await app.close();
+  });
+
+  it('ciego + caja abierta: resumen oculta cifras (ciego:true, totales null, saldoInicial presente) y movimientos devuelve página vacía', async () => {
+    const cajaId = await abrirOReusarCaja(app, token, cajonId);
+    await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/movimientos`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'salida', concepto: 'retiro', monto: '500.0000' });
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+
+    const resumen = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos/resumen`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resumen.status).toBe(200);
+    const rb = resumen.body as Record<string, unknown>;
+    expect(rb.ciego).toBe(true);
+    expect(rb.saldoInicial).toBe('10000.0000');
+    expect(rb.totalEntradas).toBeNull();
+    expect(rb.totalSalidas).toBeNull();
+    expect(rb.saldoEsperado).toBeNull();
+    expect(rb.totalMovimientos).toBeNull();
+
+    const movs = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(movs.status).toBe(200);
+    const mb = movs.body as { data: unknown[]; meta: { total: number } };
+    expect(mb.data).toEqual([]);
+    expect(mb.meta.total).toBe(0);
+
+    // Reveal al conciliar: descuadre → en_conciliacion → estado !== 'abierta' → revela.
+    const conteo = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/conteo`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: [{ metodoPagoId: null, montoContado: '12345.0000' }] });
+    expect((conteo.body as { estado: string }).estado).toBe('en_conciliacion');
+
+    const resumenReveal = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos/resumen`)
+      .set('Authorization', `Bearer ${token}`);
+    const rr = resumenReveal.body as Record<string, unknown>;
+    expect(rr.ciego).toBe(false);
+    expect(rr.totalSalidas).toBe('500.0000');
+    const movsReveal = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos`)
+      .set('Authorization', `Bearer ${token}`);
+    expect((movsReveal.body as { meta: { total: number } }).meta.total).toBe(1);
+
+    // Higiene (evita caja colgada en_conciliacion en reruns locales): fase 2 con un
+    // motivo real. En descuadre, POST /cerrar exige motivo por línea (sub-proyecto C).
+    const motivos = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia?soloActivas=true')
+      .set('Authorization', `Bearer ${adminToken}`);
+    const motivoId = (motivos.body as { id: string }[])[0]?.id;
+    await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/cerrar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: [{ metodoPagoId: null, motivoDiferenciaId: motivoId }] });
+  });
+
+  it('arqueo_ciego off: resumen revela cifras y movimientos lista las filas', async () => {
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+    const cajaId = await abrirOReusarCaja(app, token, cajonId);
+    const resumen = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/movimientos/resumen`)
+      .set('Authorization', `Bearer ${token}`);
+    const rb = resumen.body as Record<string, unknown>;
+    expect(rb.ciego).toBe(false);
+    expect(rb.saldoEsperado).toBe('10000.0000');
+    await cerrarEnDosFases(app, cajaId, token, [
+      { metodoPagoId: null, montoContado: '10000.0000' },
+    ]);
+  });
+});

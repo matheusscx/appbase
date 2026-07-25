@@ -58,11 +58,12 @@ export interface MovimientoCajaListItem {
 }
 
 export interface CajaTurnoResumen {
+  ciego: boolean;
   saldoInicial: string;
-  totalEntradas: string;
-  totalSalidas: string;
-  saldoEsperado: string;
-  totalMovimientos: number;
+  totalEntradas: string | null;
+  totalSalidas: string | null;
+  saldoEsperado: string | null;
+  totalMovimientos: number | null;
 }
 
 export interface LineaArqueo {
@@ -1091,11 +1092,13 @@ export class CajaService {
 
     const rows: {
       saldo_inicial: string;
+      estado: string;
       total_entradas: string;
       total_salidas: string;
       total_movimientos: number;
     }[] = await this.dataSource.query(
       `SELECT c.saldo_inicial,
+              c.estado,
               COALESCE(SUM(m.monto) FILTER (
                 WHERE m.tipo = 'entrada' AND m.eliminado_el IS NULL
               ), 0)::text AS total_entradas,
@@ -1110,16 +1113,32 @@ export class CajaService {
        WHERE c.caja_id = $1
          AND c.tenant_id = $2
          AND c.eliminado_el IS NULL
-       GROUP BY c.saldo_inicial`,
+       GROUP BY c.saldo_inicial, c.estado`,
       [cajaId, tenantId],
     );
 
     const row = rows[0];
     const saldoInicial = new Decimal(row?.saldo_inicial ?? '0');
+    const estado = row?.estado ?? 'abierta';
+
+    // Gating espejo de obtenerArqueo: ciego solo mientras la caja está abierta.
+    // getArqueoCiego se consulta una sola vez por request (sin N+1).
+    const ciego = (await this.getArqueoCiego(tenantId)) && estado === 'abierta';
+    if (ciego) {
+      return {
+        ciego: true,
+        saldoInicial: saldoInicial.toFixed(4),
+        totalEntradas: null,
+        totalSalidas: null,
+        saldoEsperado: null,
+        totalMovimientos: null,
+      };
+    }
+
     const totalEntradas = new Decimal(row?.total_entradas ?? '0');
     const totalSalidas = new Decimal(row?.total_salidas ?? '0');
-
     return {
+      ciego: false,
       saldoInicial: saldoInicial.toFixed(4),
       totalEntradas: totalEntradas.toFixed(4),
       totalSalidas: totalSalidas.toFixed(4),
@@ -1138,7 +1157,19 @@ export class CajaService {
     query: QueryMovimientosCajaDto,
     tieneVerTodas = false,
   ): Promise<PaginatedResponse<MovimientoCajaListItem>> {
-    await this.verificarAccesoCaja(tenantId, usuarioId, cajaId, tieneVerTodas);
+    const caja = await this.verificarAccesoCaja(
+      tenantId,
+      usuarioId,
+      cajaId,
+      tieneVerTodas,
+    );
+
+    // Ciego + abierta: el operador no recibe montos por ningún camino (ni devtools).
+    // Se corta antes de la query de filas. getArqueoCiego una sola vez (sin N+1).
+    if (caja.estado === 'abierta' && (await this.getArqueoCiego(tenantId))) {
+      const { page, pageSize } = resolvePagination(query);
+      return { data: [], meta: buildPaginationMeta(page, pageSize, 0) };
+    }
 
     const { page, pageSize, offset } = resolvePagination(query);
     const { filters, params } = this.buildMovimientosFilters(cajaId, query);
