@@ -43,6 +43,7 @@ interface ArqueoLinea {
   requiereConteo: boolean;
   contado?: string | null;
   diferencia?: string | null;
+  motivoNombre?: string | null;
 }
 
 async function login(
@@ -589,6 +590,179 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         expect(efectivoRevelado?.diferencia).toBe('0.0000');
       } finally {
         // Higiene: restaurar la política para no contaminar otros specs/corridas.
+        await ds.query(
+          `UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1`,
+          [PARIS_TENANT_ID],
+        );
+      }
+    });
+  });
+
+  describe('cierre normal con motivo de diferencia', () => {
+    // Motivos fijos del seed (`seedMotivosDiferencia`, Paris arranca en 291).
+    const FALTA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440291';
+
+    let cajonMotivoId: string;
+
+    beforeAll(async () => {
+      const r = await request(app.getHttpServer())
+        .post('/api/cajones')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ nombre: `E2E Motivo ${Date.now()}` });
+      cajonMotivoId = (r.body as CajonResponse).id;
+    });
+
+    afterAll(async () => {
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonMotivoId}`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+    });
+
+    it('línea que descuadra sin motivo → 400; con motivo activo → 201; GET revela motivoNombre', async () => {
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonMotivoId, saldoInicial: '10000.0000' });
+      expect(abrir.status).toBe(201);
+      const cajaId = (abrir.body as CajaResponse).id;
+
+      // Contado != esperado (10000) sin motivoDiferenciaId → 400.
+      const cerrarSinMotivo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '9000.0000' }] });
+      expect(cerrarSinMotivo.status).toBe(400);
+
+      // La caja sigue abierta (la transacción del intento anterior se
+      // revirtió): reintentar con un motivo activo del tenant → 201.
+      const cerrarConMotivo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          lineas: [
+            {
+              metodoPagoId: null,
+              montoContado: '9000.0000',
+              motivoDiferenciaId: FALTA_EFECTIVO_ID,
+            },
+          ],
+        });
+      expect(cerrarConMotivo.status).toBe(201);
+
+      const arqueo = await request(app.getHttpServer())
+        .get(`/api/caja/${cajaId}/arqueo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(arqueo.status).toBe(200);
+      const lineas = (arqueo.body as { ciego: boolean; lineas: ArqueoLinea[] })
+        .lineas;
+      const efectivo = lineas.find((l) => l.esEfectivo);
+      expect(efectivo?.diferencia).toBe('-1000.0000');
+      expect(efectivo?.motivoNombre).toBe('falta de efectivo');
+    });
+  });
+
+  describe('justificación de diferencias — PATCH /caja/:id/arqueo/motivos (admin-only)', () => {
+    // Motivos fijos del seed, distintos del usado en el describe anterior
+    // para no competir por el mismo registro (maxWorkers:1 en jest-e2e.json
+    // hace que los archivos corran en serie, pero los `it` dentro de un mismo
+    // describe podrían solaparse con otros describes si Jest los reordena).
+    const SOBRA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440292';
+    const DIVERGENCIA_TARJETA_ID = '550e8400-e29b-41d4-a716-446655440293';
+
+    let ds: DataSource;
+    let cajonJustificacionId: string;
+
+    beforeAll(async () => {
+      ds = app.get(DataSource);
+      const r = await request(app.getHttpServer())
+        .post('/api/cajones')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ nombre: `E2E Justificacion ${Date.now()}` });
+      cajonJustificacionId = (r.body as CajonResponse).id;
+    });
+
+    afterAll(async () => {
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonJustificacionId}`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+    });
+
+    it('en modo ciego, no-admin recibe 403 y admin puede re-justificar (PATCH) la línea', async () => {
+      // NOTA sobre alcance: `cajaService.cerrar()` no ramifica por
+      // `arqueo_ciego` (confirmado leyendo `caja.service.ts` y verificado en
+      // vivo contra la API real) — exige motivo igual que el cierre normal
+      // cuando hay una diferencia real y existen motivos activos, incluso en
+      // modo ciego. Por eso este caso NO reproduce "cierre en ciego sin
+      // motivo → línea queda sin justificar" (esa premisa del brief de la
+      // tarea no está soportada por el backend entregado en las tareas 1-4;
+      // reportado como hallazgo en `task-5-report.md`). Lo que sí se prueba
+      // acá, fiel al contrato ya entregado, es el enforcement admin-only de
+      // `PATCH /caja/:id/arqueo/motivos` y que re-justificar una línea
+      // cerrada actualiza el `motivoNombre` que expone el GET.
+      await ds.query(
+        `UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1`,
+        [PARIS_TENANT_ID],
+      );
+      try {
+        const abrir = await request(app.getHttpServer())
+          .post('/api/caja/abrir')
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({ cajonId: cajonJustificacionId, saldoInicial: '10000.0000' });
+        expect(abrir.status).toBe(201);
+        const cajaId = (abrir.body as CajaResponse).id;
+
+        const cerrar = await request(app.getHttpServer())
+          .post(`/api/caja/${cajaId}/cerrar`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            lineas: [
+              {
+                metodoPagoId: null,
+                montoContado: '9500.0000',
+                motivoDiferenciaId: SOBRA_EFECTIVO_ID,
+              },
+            ],
+          });
+        expect(cerrar.status).toBe(201);
+
+        // No-admin (Vendedor) no puede re-justificar.
+        const patchNoAdmin = await request(app.getHttpServer())
+          .patch(`/api/caja/${cajaId}/arqueo/motivos`)
+          .set('Authorization', `Bearer ${tokenCajero}`)
+          .send({
+            lineas: [
+              {
+                metodoPagoId: null,
+                motivoDiferenciaId: DIVERGENCIA_TARJETA_ID,
+              },
+            ],
+          });
+        expect(patchNoAdmin.status).toBe(403);
+
+        // Admin re-justifica con un motivo distinto.
+        const patchAdmin = await request(app.getHttpServer())
+          .patch(`/api/caja/${cajaId}/arqueo/motivos`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`)
+          .send({
+            lineas: [
+              {
+                metodoPagoId: null,
+                motivoDiferenciaId: DIVERGENCIA_TARJETA_ID,
+              },
+            ],
+          });
+        expect(patchAdmin.status).toBe(200);
+
+        const arqueo = await request(app.getHttpServer())
+          .get(`/api/caja/${cajaId}/arqueo`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+        expect(arqueo.status).toBe(200);
+        const lineas = (
+          arqueo.body as { ciego: boolean; lineas: ArqueoLinea[] }
+        ).lineas;
+        const efectivo = lineas.find((l) => l.esEfectivo);
+        expect(efectivo?.motivoNombre).toBe('divergencia de tarjeta');
+      } finally {
         await ds.query(
           `UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1`,
           [PARIS_TENANT_ID],
