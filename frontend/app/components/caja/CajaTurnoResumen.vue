@@ -6,6 +6,7 @@ defineProps<{
   totalEntradas: Decimal
   totalSalidas: Decimal
   saldoEsperado: Decimal
+  ciego?: boolean
   loading?: boolean
 }>()
 
@@ -13,7 +14,7 @@ const { formatMonto } = useFormatters()
 </script>
 
 <template>
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+  <div class="grid gap-4" :class="ciego ? 'grid-cols-1' : 'grid-cols-2 sm:grid-cols-4'">
     <div class="rounded-lg bg-muted p-3">
       <p class="text-xs text-muted uppercase tracking-wide">
         Saldo inicial
@@ -22,7 +23,7 @@ const { formatMonto } = useFormatters()
         {{ formatMonto(saldoInicial) }}
       </p>
     </div>
-    <div class="rounded-lg bg-green-50 dark:bg-green-900/20 p-3">
+    <div v-if="!ciego" class="rounded-lg bg-green-50 dark:bg-green-900/20 p-3">
       <p class="text-xs text-green-600 dark:text-green-400 uppercase tracking-wide">
         Entradas
       </p>
@@ -35,7 +36,7 @@ const { formatMonto } = useFormatters()
         </template>
       </p>
     </div>
-    <div class="rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
+    <div v-if="!ciego" class="rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
       <p class="text-xs text-red-600 dark:text-red-400 uppercase tracking-wide">
         Salidas
       </p>
@@ -48,7 +49,7 @@ const { formatMonto } = useFormatters()
         </template>
       </p>
     </div>
-    <div class="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
+    <div v-if="!ciego" class="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
       <p class="text-xs text-blue-600 dark:text-blue-400 uppercase tracking-wide">
         Saldo esperado
       </p>

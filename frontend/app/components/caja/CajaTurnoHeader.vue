@@ -17,6 +17,12 @@ const emit = defineEmits<{
 const { formatFecha } = useFormatters()
 
 const enConciliacion = computed(() => props.caja.estado === 'en_conciliacion')
+
+const badgeColor = computed(() => {
+  if (props.caja.estado === 'abierta') return 'success'
+  if (props.caja.estado === 'en_conciliacion') return 'warning'
+  return 'neutral'
+})
 </script>
 
 <template>
@@ -26,7 +32,7 @@ const enConciliacion = computed(() => props.caja.estado === 'en_conciliacion')
         <h2 class="text-base font-semibold text-default">
           Caja
         </h2>
-        <UBadge :color="caja.estado === 'abierta' ? 'success' : 'neutral'" variant="soft">
+        <UBadge :color="badgeColor" variant="soft">
           {{ caja.estado.toUpperCase() }}
         </UBadge>
       </div>

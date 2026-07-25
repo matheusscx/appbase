@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: —
-**Last Updated**: 2026-07-24
+**Last Updated**: 2026-07-25
 
 ---
 
@@ -712,6 +712,24 @@ Igual que en el sub-proyecto B, quedan fuera de alcance y registrados en
   1, no iniciar el conteo de una caja ajena desde cero.
 - **Aprobación de cierre por umbral de diferencia** (patrón Toast).
 - **Reporte de over/short** agregado (histórico de diferencias por cajero/motivo/período).
+
+---
+
+### Alcance del modo ciego (arqueo_ciego)
+
+Cuando el tenant opera en modo ciego, mientras la caja está `abierta` el operador
+—cajero o supervisor— **no ve ninguna cifra derivable del esperado**: el backend
+(`resumenMovimientos`, `listarMovimientos`) devuelve `ciego:true` con
+entradas/salidas/esperado en `null` y la lista de movimientos vacía. El header
+muestra solo `Saldo inicial` y no se renderiza la tabla de movimientos (sin
+placeholder). Al **conciliar** (fase 1 → `en_conciliacion`) o cerrar, se revela todo
+como detalle del arqueo. El gating espeja `obtenerArqueo`
+(`arqueo_ciego && estado === 'abierta'`) y no depende de quién mira.
+
+**Configurar el modo ciego es admin-only** (`TenantAdminGuard` en `PUT /caja/arqueo-ciego`):
+es una política anti-fraude, no una acción operativa. El CRUD de cajones de la misma
+pantalla sigue delegable a `Cajas:Actualizar`. Criterio: `docs/features/roles-permisos.md`,
+sección "Admin-only vs permiso de módulo".
 
 ---
 

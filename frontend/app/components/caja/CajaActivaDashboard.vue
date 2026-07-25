@@ -31,6 +31,7 @@ const totalSalidas = computed(() =>
 const saldoEsperado = computed(() =>
   new Decimal(cajaStore.resumenTurno?.saldoEsperado ?? props.caja.saldoInicial),
 )
+const ciego = computed(() => cajaStore.resumenTurno?.ciego ?? false)
 
 async function cargarResumen() {
   try {
@@ -80,11 +81,12 @@ watch(() => props.caja.id, () => {
         :total-entradas="totalEntradas"
         :total-salidas="totalSalidas"
         :saldo-esperado="saldoEsperado"
+        :ciego="ciego"
         :loading="loadingResumen"
       />
     </UCard>
 
-    <CajaMovimientosTable ref="movimientosTable" :caja-id="caja.id" />
+    <CajaMovimientosTable v-if="!ciego" ref="movimientosTable" :caja-id="caja.id" />
 
     <template v-if="!readonly">
       <CajaMovimientoDrawer
