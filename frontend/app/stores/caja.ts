@@ -67,6 +67,17 @@ export interface ArqueoLinea {
   requiereConteo: boolean
   contado?: string | null
   diferencia?: string | null
+  motivoDiferenciaId?: string | null
+  motivoNombre?: string | null
+  comentarioDiferencia?: string | null
+}
+
+export interface MotivoDiferencia {
+  id: string
+  nombre: string
+  activo: boolean
+  requiereComentario: boolean
+  esFijo: boolean
 }
 
 function recalcularSaldoEsperado(r: CajaTurnoResumen) {
@@ -86,6 +97,7 @@ export const useCajaStore = defineStore('caja', () => {
   const cajonesDisponibles = ref<CajonDisponible[]>([])
   const arqueo = ref<ArqueoLinea[]>([])
   const arqueoCiego = ref(false)
+  const motivos = ref<MotivoDiferencia[]>([])
   const loadingActiva = ref(false)
   const loadingResumenTurno = ref(false)
 
@@ -197,9 +209,32 @@ export const useCajaStore = defineStore('caja', () => {
     })
   }
 
-  async function cerrar(
+  async function cargarMotivos(soloActivas?: boolean): Promise<void> {
+    const qs = soloActivas ? '?soloActivas=true' : ''
+    motivos.value = await useApiFetch<MotivoDiferencia[]>(
+      `${config.public.apiUrl}/motivos-diferencia${qs}`,
+    )
+  }
+
+  async function enviarConteo(
     cajaId: string,
     payload: { lineas: { metodoPagoId: string | null, montoContado: string }[], comentario?: string },
+  ): Promise<{ estado: string, arqueo: ArqueoLinea[] }> {
+    const res = await useApiFetch<{ estado: string, arqueo: ArqueoLinea[] }>(
+      `${config.public.apiUrl}/caja/${cajaId}/conteo`,
+      { method: 'POST', body: payload },
+    )
+    arqueo.value = res.arqueo
+    if (res.estado === 'cerrada') {
+      resumenTurno.value = null
+      activa.value = null
+    }
+    return res
+  }
+
+  async function cerrar(
+    cajaId: string,
+    payload: { lineas: { metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }[] },
   ): Promise<{ caja: Caja, arqueo: ArqueoLinea[] }> {
     const res = await useApiFetch<{ caja: Caja, arqueo: ArqueoLinea[] }>(
       `${config.public.apiUrl}/caja/${cajaId}/cerrar`,
@@ -208,6 +243,16 @@ export const useCajaStore = defineStore('caja', () => {
     resumenTurno.value = null
     activa.value = null
     return res
+  }
+
+  async function justificarDiferencias(
+    cajaId: string,
+    lineas: { metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }[],
+  ): Promise<{ ciego: boolean, lineas: ArqueoLinea[] }> {
+    return await useApiFetch<{ ciego: boolean, lineas: ArqueoLinea[] }>(
+      `${config.public.apiUrl}/caja/${cajaId}/arqueo/motivos`,
+      { method: 'PATCH', body: { lineas } },
+    )
   }
 
   async function cargarCajonesEstado(): Promise<void> {
@@ -231,6 +276,7 @@ export const useCajaStore = defineStore('caja', () => {
     cajonesDisponibles,
     arqueo,
     arqueoCiego,
+    motivos,
     loadingActiva,
     loadingResumenTurno,
     cargarActiva,
@@ -239,12 +285,15 @@ export const useCajaStore = defineStore('caja', () => {
     aplicarMovimientoLocal,
     aplicarCobroLocal,
     registrarMovimiento,
+    enviarConteo,
     cerrar,
+    justificarDiferencias,
     cargarCajonesEstado,
     cargarDetalle,
     cargarCajonesDisponibles,
     cargarArqueo,
     cargarArqueoCiego,
     guardarArqueoCiego,
+    cargarMotivos,
   }
 })

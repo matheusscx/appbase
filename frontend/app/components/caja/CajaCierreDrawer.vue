@@ -68,18 +68,26 @@ async function cerrarCaja() {
         metodoPagoId: clave === 'EFECTIVO' ? null : clave,
         montoContado,
       }))
-    const res = await cajaStore.cerrar(props.cajaId, { lineas, comentario: comentario.value || undefined })
+    // Puente mínimo de compilación (Task 5): este drawer todavía habla el
+    // contrato de una sola fase. Task 7 lo reescribe para el flujo real de
+    // dos fases (fase 1 conteo → si `en_conciliacion`, fase 2 con motivos).
+    // Por ahora solo se envía la fase 1; si queda pendiente de conciliar no
+    // se resuelve aquí.
+    const res = await cajaStore.enviarConteo(props.cajaId, { lineas, comentario: comentario.value || undefined })
+
+    if (res.estado !== 'cerrada') {
+      // TODO(task-7): fase 2 — seleccionar motivo de diferencia y finalizar vía cerrar().
+      toast.add({ title: 'Conteo registrado, pendiente de conciliar', color: 'warning' })
+      open.value = false
+      return
+    }
 
     if (ciego.value) {
-      // Revelación: reusa el detalle de la caja cerrada (CajaArqueoTable congelado).
-      // Se mantiene arqueoCiego=true durante este flujo para que el watcher de
-      // mi-caja/[id].vue NO redirija a /mi-caja (ver Step 4); el arqueo se muestra
-      // en el detalle. Desde POS/dashboard, navigateTo remonta el detalle y su
-      // onMounted recarga todo (reseteando arqueoCiego a false).
-      cajaStore.arqueo = res.arqueo
-      if (cajaStore.detalle?.id === props.cajaId) {
-        cajaStore.detalle = { ...cajaStore.detalle, ...res.caja }
-      }
+      // Revelación: se mantiene arqueoCiego=true durante este flujo para que
+      // el watcher de mi-caja/[id].vue NO redirija a /mi-caja (ver Step 4); el
+      // arqueo se muestra en el detalle. Desde POS/dashboard, navigateTo
+      // remonta el detalle y su onMounted recarga todo (reseteando arqueoCiego
+      // a false).
       const efectivo = res.arqueo.find(l => l.esEfectivo)
       const dif = efectivo?.diferencia ?? '0'
       toast.add({

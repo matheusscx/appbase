@@ -181,15 +181,59 @@ describe('useCajaStore — arqueo / cerrar', () => {
     )
   })
 
-  it('cerrar envía { lineas, comentario } y limpia el estado', async () => {
+  it('enviarConteo envía { lineas, comentario } a /conteo y setea arqueo', async () => {
+    const arqueo = [{ metodoPagoId: null, nombre: 'Efectivo', esEfectivo: true, esperado: '1000.0000', requiereConteo: true }]
+    mockApiFetch.mockResolvedValueOnce({ estado: 'en_conciliacion', arqueo })
+    const store = useCajaStore()
+    const payload = { lineas: [{ metodoPagoId: null, montoContado: '900' }] }
+    const res = await store.enviarConteo('caja-1', payload)
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/caja/caja-1/conteo'),
+      expect.objectContaining({ method: 'POST', body: payload }),
+    )
+    expect(res.estado).toBe('en_conciliacion')
+    expect(store.arqueo).toEqual(arqueo)
+  })
+
+  it('enviarConteo limpia activa/resumenTurno cuando el estado devuelto es "cerrada"', async () => {
+    mockApiFetch.mockResolvedValueOnce({ estado: 'cerrada', arqueo: [] })
+    const store = useCajaStore()
+    store.activa = { id: 'caja-1' } as never
+    await store.enviarConteo('caja-1', { lineas: [{ metodoPagoId: null, montoContado: '1000' }] })
+    expect(store.activa).toBeNull()
+  })
+
+  it('cerrar (fase 2) envía { lineas } con motivos a /cerrar y limpia el estado', async () => {
     mockApiFetch.mockResolvedValueOnce({ caja: { id: 'caja-1' }, arqueo: [] })
     const store = useCajaStore()
-    const payload = { lineas: [{ metodoPagoId: null, montoContado: '1000' }] }
+    const payload = { lineas: [{ metodoPagoId: null, motivoDiferenciaId: 'motivo-1' }] }
     await store.cerrar('caja-1', payload)
     expect(mockApiFetch).toHaveBeenCalledWith(
       expect.stringContaining('/caja/caja-1/cerrar'),
       expect.objectContaining({ method: 'POST', body: payload }),
     )
     expect(store.activa).toBeNull()
+  })
+
+  it('justificarDiferencias envía PATCH { lineas } a /arqueo/motivos', async () => {
+    mockApiFetch.mockResolvedValueOnce({ ciego: false, lineas: [] })
+    const store = useCajaStore()
+    const lineas = [{ metodoPagoId: null, motivoDiferenciaId: 'motivo-2' }]
+    await store.justificarDiferencias('caja-1', lineas)
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/caja/caja-1/arqueo/motivos'),
+      expect.objectContaining({ method: 'PATCH', body: { lineas } }),
+    )
+  })
+
+  it('cargarMotivos(true) llama a /motivos-diferencia?soloActivas=true', async () => {
+    const motivos = [{ id: 'm1', nombre: 'Falta de efectivo', activo: true, requiereComentario: false, esFijo: true }]
+    mockApiFetch.mockResolvedValueOnce(motivos)
+    const store = useCajaStore()
+    await store.cargarMotivos(true)
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/motivos-diferencia?soloActivas=true'),
+    )
+    expect(store.motivos).toEqual(motivos)
   })
 })
