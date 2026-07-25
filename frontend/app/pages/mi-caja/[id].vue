@@ -32,7 +32,10 @@ onMounted(async () => {
     if (!cajaStore.detalle) {
       throw new Error('not-found')
     }
-    if (cajaStore.detalle.estado === 'cerrada') {
+    if (
+      cajaStore.detalle.estado === 'cerrada'
+      || cajaStore.detalle.estado === 'en_conciliacion'
+    ) {
       await cajaStore.cargarArqueo(cajaId.value)
     }
   }
@@ -83,24 +86,18 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
 
         <div v-else-if="cajaStore.detalle" class="space-y-6">
           <CajaActivaDashboard
+            v-if="cajaStore.detalle.estado === 'abierta'"
             :caja="cajaStore.detalle"
             :readonly="readonly"
             historial-url="/mi-caja/historial"
           />
-
-          <UCard v-if="cajaStore.detalle.estado === 'cerrada' && cajaStore.arqueo.length > 0" class="w-full">
-            <template #header>
-              <h3 class="text-sm font-semibold text-default">
-                Arqueo del cierre
-              </h3>
-            </template>
-
-            <CajaArqueoTable
-              :lineas="cajaStore.arqueo"
-              :puede-justificar="perms.esAdmin"
-              :caja-id="cajaId"
-            />
-          </UCard>
+          <CajaCierreDetalle
+            v-else
+            :caja="cajaStore.detalle"
+            :arqueo="cajaStore.arqueo"
+            :readonly="readonly"
+            historial-url="/mi-caja/historial"
+          />
         </div>
       </div>
     </template>

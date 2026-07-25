@@ -7,6 +7,7 @@ const props = defineProps<{
     estado: string
     saldoInicial: string
     fechaApertura: string
+    cajonNombre?: string | null
   }
   readonly?: boolean
   historialUrl?: string
@@ -97,7 +98,6 @@ watch(() => props.caja.id, () => {
       <CajaCierreDrawer
         v-model:open="cierreDrawerOpen"
         :caja-id="caja.id"
-        :resumir="caja.estado === 'en_conciliacion'"
       />
     </template>
   </div>

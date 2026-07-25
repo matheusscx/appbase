@@ -1072,7 +1072,7 @@ export class CajaService {
     usuarioId: string,
     cajaId: string,
     tieneVerTodas: boolean,
-  ): Promise<Caja> {
+  ): Promise<Caja & { cajonNombre: string | null }> {
     const caja = await this.cajaRepo.findOne({
       where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
     });
@@ -1082,7 +1082,19 @@ export class CajaService {
     if (caja.usuarioId !== usuarioId && !tieneVerTodas) {
       throw new ForbiddenException('No tienes acceso a esta caja');
     }
-    return caja;
+    // El detalle expone el nombre del cajón (el header lo muestra). La entidad solo
+    // guarda `cajonId`; se resuelve el nombre con una query liviana (una sola por
+    // request, solo para cajas físicas). La virtual tiene cajonId null.
+    let cajonNombre: string | null = null;
+    if (caja.cajonId) {
+      const rows: { nombre: string }[] = await this.dataSource.query(
+        `SELECT nombre FROM cajones
+          WHERE cajon_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [caja.cajonId, tenantId],
+      );
+      cajonNombre = rows[0]?.nombre ?? null;
+    }
+    return { ...caja, cajonNombre };
   }
 
   async resumenMovimientos(

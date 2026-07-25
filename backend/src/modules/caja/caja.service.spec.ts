@@ -1035,7 +1035,26 @@ describe('CajaService', () => {
       expect(cajaRepo.findOne).toHaveBeenCalledWith({
         where: { id: CAJA_ID, tenantId: TENANT_ID, eliminadoEl: IsNull() },
       });
-      expect(result).toEqual(mockCajaAbierta);
+      // Sin cajonId (mock) → no se consulta el nombre; cajonNombre queda null.
+      expect(result).toEqual({ ...mockCajaAbierta, cajonNombre: null });
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('(c2) resuelve el nombre del cajón para una caja física', async () => {
+      cajaRepo.findOne.mockResolvedValue({
+        ...mockCajaAbierta,
+        cajonId: 'cajon-1',
+      });
+      dataSource.query.mockResolvedValueOnce([{ nombre: 'Barra' }]);
+
+      const result = await service.findOne(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+      );
+
+      expect(result.cajonNombre).toBe('Barra');
     });
 
     it('(d) retorna la caja cuando tieneVerTodas=true aunque sea de otro usuario', async () => {
@@ -1049,7 +1068,7 @@ describe('CajaService', () => {
         true,
       );
 
-      expect(result).toEqual(cajaOtro);
+      expect(result).toEqual({ ...cajaOtro, cajonNombre: null });
     });
 
     it('(e) lanza ForbiddenException cuando no es del usuario y tieneVerTodas=false', async () => {

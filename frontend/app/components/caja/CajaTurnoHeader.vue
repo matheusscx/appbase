@@ -3,6 +3,7 @@ const props = defineProps<{
   caja: {
     estado: string
     fechaApertura: string
+    cajonNombre?: string | null
   }
   readonly?: boolean
   historialUrl?: string
@@ -16,13 +17,16 @@ const emit = defineEmits<{
 
 const { formatFecha } = useFormatters()
 
-const enConciliacion = computed(() => props.caja.estado === 'en_conciliacion')
-
 const badgeColor = computed(() => {
   if (props.caja.estado === 'abierta') return 'success'
   if (props.caja.estado === 'en_conciliacion') return 'warning'
   return 'neutral'
 })
+
+// Las acciones de operación solo existen para la caja abierta propia.
+const puedeOperar = computed(
+  () => props.caja.estado === 'abierta' && !props.readonly,
+)
 </script>
 
 <template>
@@ -30,7 +34,7 @@ const badgeColor = computed(() => {
     <div>
       <div class="flex items-center gap-2">
         <h2 class="text-base font-semibold text-default">
-          Caja
+          {{ caja.cajonNombre ?? 'Caja' }}
         </h2>
         <UBadge :color="badgeColor" variant="soft">
           {{ caja.estado.toUpperCase() }}
@@ -40,7 +44,7 @@ const badgeColor = computed(() => {
         Apertura: {{ formatFecha(caja.fechaApertura) }}
       </p>
     </div>
-    <div v-if="historialUrl || !readonly" class="flex flex-wrap justify-end gap-2">
+    <div v-if="historialUrl || puedeOperar" class="flex flex-wrap justify-end gap-2">
       <UButton
         v-if="historialUrl"
         :to="historialUrl"
@@ -49,10 +53,8 @@ const badgeColor = computed(() => {
         variant="outline"
         :label="historialLabel ?? 'Ver historial'"
       />
-      <template v-if="!readonly">
-        <!-- Una caja en_conciliacion queda congelada: no admite movimientos. -->
+      <template v-if="puedeOperar">
         <UButton
-          v-if="!enConciliacion"
           icon="i-lucide-circle-plus"
           color="neutral"
           variant="outline"
@@ -61,16 +63,6 @@ const badgeColor = computed(() => {
           + Movimiento
         </UButton>
         <UButton
-          v-if="enConciliacion"
-          icon="i-lucide-scale"
-          color="warning"
-          variant="soft"
-          @click="emit('cerrar')"
-        >
-          Continuar conciliación
-        </UButton>
-        <UButton
-          v-else
           icon="i-lucide-lock"
           color="error"
           variant="soft"
