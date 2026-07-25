@@ -82,6 +82,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         to: '/configuracion/causas-merma',
       },
       {
+        label: 'Motivos de diferencia',
+        icon: 'i-lucide-scale',
+        to: '/configuracion/motivos-diferencia',
+      },
+      {
         label: 'Grupos de modificadores',
         icon: 'i-lucide-list-plus',
         to: '/configuracion/grupos-modificadores',
