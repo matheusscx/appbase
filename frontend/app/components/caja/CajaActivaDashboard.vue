@@ -95,6 +95,7 @@ watch(() => props.caja.id, () => {
       <CajaCierreDrawer
         v-model:open="cierreDrawerOpen"
         :caja-id="caja.id"
+        :resumir="caja.estado === 'en_conciliacion'"
       />
     </template>
   </div>

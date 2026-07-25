@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   caja: {
     estado: string
     fechaApertura: string
@@ -15,6 +15,8 @@ const emit = defineEmits<{
 }>()
 
 const { formatFecha } = useFormatters()
+
+const enConciliacion = computed(() => props.caja.estado === 'en_conciliacion')
 </script>
 
 <template>
@@ -42,7 +44,9 @@ const { formatFecha } = useFormatters()
         :label="historialLabel ?? 'Ver historial'"
       />
       <template v-if="!readonly">
+        <!-- Una caja en_conciliacion queda congelada: no admite movimientos. -->
         <UButton
+          v-if="!enConciliacion"
           icon="i-lucide-circle-plus"
           color="neutral"
           variant="outline"
@@ -51,6 +55,16 @@ const { formatFecha } = useFormatters()
           + Movimiento
         </UButton>
         <UButton
+          v-if="enConciliacion"
+          icon="i-lucide-scale"
+          color="warning"
+          variant="soft"
+          @click="emit('cerrar')"
+        >
+          Continuar conciliación
+        </UButton>
+        <UButton
+          v-else
           icon="i-lucide-lock"
           color="error"
           variant="soft"

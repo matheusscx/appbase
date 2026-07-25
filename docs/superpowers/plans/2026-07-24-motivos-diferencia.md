@@ -617,19 +617,19 @@ git commit -m "feat(motivos): página de configuración de motivos de diferencia
 **Files:**
 - Modify: `frontend/app/components/caja/CajaCierreDrawer.vue`, `CajaArqueoTable.vue`, `CajaActivaDashboard.vue`, `pages/mi-caja/[id].vue`, `pages/cajas/[id].vue`
 
-- [ ] **Step 1: Drawer dos fases**
+- [x] **Step 1: Drawer dos fases**
 
 `CajaCierreDrawer.vue`: estado local `fase: 'conteo' | 'conciliacion'`. En `conteo` (como hoy: contados por línea, ciego respeta B), el botón principal es **"Enviar conteo"** → `cajaStore.enviarConteo`. Si la respuesta `estado==='cerrada'` → toast + cerrar el drawer + (si aplica) redirect como B. Si `estado==='en_conciliacion'` → `cargarMotivos(true)` y pasar a `fase='conciliacion'`: mostrar las líneas reveladas (`cajaStore.arqueo`) y, por cada una con `diferencia ≠ 0`, un `USelect` de motivos + comentario (obligatorio si el motivo `requiereComentario` o no hay motivos). Botón **"Confirmar cierre"** → `cajaStore.cerrar(cajaId, { lineas })` con los motivos. El drawer también acepta **abrir directo en `fase='conciliacion'`** cuando la caja ya está `en_conciliacion` (retomar): en ese caso `cargarArqueo` + `cargarMotivos` y saltear la fase de conteo.
 
-- [ ] **Step 2: Retomar desde el detalle/dashboard**
+- [x] **Step 2: Retomar desde el detalle/dashboard**
 
 `CajaActivaDashboard.vue` / `mi-caja/[id].vue`: si `caja.estado==='en_conciliacion'`, en vez de "Cerrar caja" mostrar **"Continuar conciliación"** que abre el drawer en `fase='conciliacion'`. Una caja `en_conciliacion` no permite movimientos (ocultar/deshabilitar "+ Movimiento").
 
-- [ ] **Step 3: Override admin en el detalle (caja cerrada)**
+- [x] **Step 3: Override admin en el detalle (caja cerrada)**
 
 `CajaArqueoTable.vue`: columna "Motivo" (nombre + comentario, o "Sin justificar" si `diferencia ≠ 0` sin motivo). Props `puedeJustificar?: boolean` (= `perms.esAdmin`) + `cajaId?`. Si `puedeJustificar` y la caja está `cerrada` con líneas sin justificar (o para corregir), selector inline de motivo/comentario + "Guardar" → `cajaStore.justificarDiferencias(cajaId, [...])`. Pasar `:puede-justificar="perms.esAdmin"` y `:caja-id` desde `mi-caja/[id].vue` y `cajas/[id].vue`.
 
-- [ ] **Step 4: Gate (+ smoke queda para el cierre) + commit**
+- [x] **Step 4: Gate (+ smoke queda para el cierre) + commit**
 
 Run: `cd frontend && npm run build && npm run typecheck:ratchet && npm run design:check`
 

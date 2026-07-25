@@ -95,7 +95,11 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
               </h3>
             </template>
 
-            <CajaArqueoTable :lineas="cajaStore.arqueo" />
+            <CajaArqueoTable
+              :lineas="cajaStore.arqueo"
+              :puede-justificar="perms.esAdmin"
+              :caja-id="cajaId"
+            />
           </UCard>
         </div>
       </div>
