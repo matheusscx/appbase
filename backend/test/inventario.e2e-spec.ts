@@ -25,6 +25,12 @@ interface MovimientoListItem {
   tipo: string;
   motivo: string;
   costoUnitario: string | null;
+  costoAnterior: string | null;
+}
+interface AjusteCostoResponse {
+  movimientoId: string;
+  costoAnterior: string | null;
+  costoNuevo: string;
 }
 interface PaginatedMovimientos {
   data: MovimientoListItem[];
@@ -68,7 +74,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
     await app.close();
   });
 
-  it('recorre el flujo completo de costo: creación, compra, edición manual y congelado en salida', async () => {
+  it('recorre el flujo completo de costo: creación, compra, ajuste de costo y congelado en salida', async () => {
     // 1. Crear item producto con costo inicial 4000
     const resCreate = await request(app.getHttpServer())
       .post('/api/items')
@@ -119,12 +125,28 @@ describe('Inventario — flujo de costo (e2e)', () => {
     expect(movCompra?.costoUnitario).toBe('4500.0000');
     const cantidadMovimientosAntes = movs1.length;
 
-    // 4. Edición manual de costo (sin pasar por stock) → costoActual = 4300, sin nuevo movimiento
-    const resUpdate = await request(app.getHttpServer())
+    // 4. La edición de costo desde el item quedó cerrada: PATCH /items/:id
+    // con costo devuelve 400 (esa puerta trasera no dejaba rastro en el kardex).
+    const resUpdateBloqueado = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ costo: '4300' });
-    expect(resUpdate.status).toBe(200);
+    expect(resUpdateBloqueado.status).toBe(400);
+
+    // El reemplazo es el ajuste de costo dedicado: costoActual = 4300 y SÍ
+    // deja un movimiento nuevo en el kardex (tipo='ajuste', motivo='ajuste_costo').
+    const resAjuste = await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId,
+        costoNuevo: '4300',
+        comentario: 'Corrección de costo E2E',
+      });
+    expect(resAjuste.status).toBe(201);
+    const ajuste = resAjuste.body as AjusteCostoResponse;
+    expect(ajuste.costoAnterior).toBe('4500.0000');
+    expect(ajuste.costoNuevo).toBe('4300.0000');
 
     const resGet3 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
@@ -135,7 +157,12 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .get(`/api/inventario/movimientos?itemId=${itemId}`)
       .set('Authorization', `Bearer ${token}`);
     const movs2 = (resMovs2.body as PaginatedMovimientos).data;
-    expect(movs2.length).toBe(cantidadMovimientosAntes);
+    expect(movs2.length).toBe(cantidadMovimientosAntes + 1);
+    const movAjuste = movs2.find((m) => m.motivo === 'ajuste_costo');
+    expect(movAjuste).toBeDefined();
+    expect(movAjuste?.tipo).toBe('ajuste');
+    expect(movAjuste?.costoAnterior).toBe('4500.0000');
+    expect(movAjuste?.costoUnitario).toBe('4300.0000');
 
     // 5. Merma ya no se registra por ajuste genérico (va por POST /mermas)
     const resMerma = await request(app.getHttpServer())

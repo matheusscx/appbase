@@ -188,10 +188,10 @@ describe('Simulador impacto costos (e2e)', () => {
     const recetaId = resRec.body.id as string;
 
     await request(app.getHttpServer())
-      .patch(`/api/items/${panId}`)
+      .post('/api/inventario/ajustes-costo')
       .set('Authorization', `Bearer ${token}`)
-      .send({ costo: '700' })
-      .expect(200);
+      .send({ itemId: panId, costoNuevo: '700', comentario: 'Ajuste E2E' })
+      .expect(201);
 
     await request(app.getHttpServer())
       .post('/api/recetas/desfases/descartar')
@@ -209,10 +209,10 @@ describe('Simulador impacto costos (e2e)', () => {
     ).toBe(false);
 
     await request(app.getHttpServer())
-      .patch(`/api/items/${panId}`)
+      .post('/api/inventario/ajustes-costo')
       .set('Authorization', `Bearer ${token}`)
-      .send({ costo: '800' })
-      .expect(200);
+      .send({ itemId: panId, costoNuevo: '800', comentario: 'Ajuste E2E' })
+      .expect(201);
 
     bandeja = await request(app.getHttpServer())
       .get('/api/recetas/desfases')
@@ -261,10 +261,10 @@ describe('Simulador impacto costos (e2e)', () => {
     const recetaId = resRec.body.id as string;
 
     await request(app.getHttpServer())
-      .patch(`/api/items/${quesoId}`)
+      .post('/api/inventario/ajustes-costo')
       .set('Authorization', `Bearer ${token}`)
-      .send({ costo: '9000' })
-      .expect(200);
+      .send({ itemId: quesoId, costoNuevo: '9000', comentario: 'Ajuste E2E' })
+      .expect(201);
 
     await request(app.getHttpServer())
       .post('/api/recetas/desfases/aplicar')
