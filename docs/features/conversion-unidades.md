@@ -426,9 +426,9 @@ npm run test:e2e -- inventario.e2e-spec.ts
 2. Producto en `kg`, merma de 250 g → stock 0.2500, movimiento en unidad base.
 3. Cross-magnitud: ajuste de producto en `kg` con unidad `ml` → 400 (BadRequest).
 4. Serie/lote: crear producto modo='serie', intentar ajuste con `unidadCodigo` ≠ base → 400 (BadRequest).
-5. (`costeo-cpp.e2e-spec.ts`) Producto en `g`, compra de 2 kg a $5.000/kg → stock 2000.0000,
-   `costoActual` resultante 5.0000 (valor total preservado).
 5. Cambio de base con movimientos: editar producto con movimientos, cambiar unidad → 400 (BadRequest).
+6. (`costeo-cpp.e2e-spec.ts`) Producto en `g`, compra de 2 kg a $5.000/kg → stock 2000.0000,
+   `costoActual` resultante 5.0000 (valor total preservado).
 
 ### Manual Testing (Swagger)
 
