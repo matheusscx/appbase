@@ -1059,8 +1059,13 @@ export class SeederService implements OnApplicationBootstrap {
       ON motivo_diferencia_inventario (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
     `);
 
+    // Empieza en 316: 291-304 lo ocupa el rango dinámico de
+    // seedMotivosDiferencia (2 tenants x 7 nombres, let id = 291) y 305-315
+    // lo ocupan uuid(N) de seedGruposModificadores/seedComboEspecial — ninguno
+    // de los dos visible a un grep de literales, porque ambos se generan en
+    // runtime (uuid(id++) / uuid(N)), no como string `44665544XXXX` fijo.
     const filas: { id: string; tenantId: string; nombre: string }[] = [];
-    let id = 292;
+    let id = 316;
     for (const tenantId of [PARIS, FALABELLA]) {
       for (const nombre of MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS) {
         filas.push({ id: uuid(id++), tenantId, nombre });
