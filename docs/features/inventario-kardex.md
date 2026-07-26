@@ -228,7 +228,7 @@ dentro de una transacción: no repite sus validaciones ni escribe
 | `tenant_id` | UUID | FK `tenants`, NOT NULL | Garantiza isolamiento multi-tenant |
 | `item_id` | UUID | FK `items`, NOT NULL | Producto del que se mueve stock |
 | `tipo` | enum | `'entrada'` \| `'salida'` \| `'ajuste'` | Define dirección del movimiento |
-| `motivo` | varchar | `'compra'` \| `'venta'` \| `'devolucion'` \| `'merma'` \| `'ajuste_manual'` \| `'inventario_inicial'` \| `'ajuste_costo'` | Razón del movimiento |
+| `motivo` | varchar | `'compra'` \| `'venta'` \| `'devolucion'` \| `'merma'` \| `'ajuste_manual'` \| `'inventario_inicial'` \| `'ajuste_costo'` \| `'recuento'` | Razón del movimiento |
 | `cantidad` | integer | NOT NULL, `> 0` excepto `ajuste_costo` (siempre `0`) | Siempre positiva; `tipo` define signo |
 | `stock_anterior` | integer | NOT NULL | Saldo antes del movimiento (snapshot) |
 | `stock_resultante` | integer | NOT NULL | Saldo después del movimiento (snapshot); en `ajuste_costo` es igual a `stock_anterior` |
@@ -289,8 +289,11 @@ dentro de una transacción: no repite sus validaciones ni escribe
 - Líneas sin conteo cargado (`cantidad_contada IS NULL`) o con delta cero se ignoran, sin
   generar movimiento. Líneas cuyo item fue eliminado se descartan con `razon: 'El producto
   fue eliminado'` en la respuesta, en vez de fallar toda la sesión.
-- Detalle funcional completo (estados de la sesión, permisos, catálogo de causas): ver el plan
-  de la feature en `.superpowers/sdd/2026-07-26-recuento-inventario/`.
+- La sesión de recuento (`recuento_inventario`) tiene estados `borrador → aplicado |
+  cancelado` (ambos terminales); `aplicar` requiere permiso `Inventario/Actualizar`,
+  distinto del `Inventario/Crear` que usan crear la sesión y cargar conteos — separa quien
+  cuenta de quien aprueba. Detalle funcional completo (catálogo de causas, permisos por
+  ruta): pendiente de un doc de feature dedicado (`docs/features/recuento-inventario.md`).
 
 **Índices (para performance):**
 - `(tenant_id, item_id)` — consultas por producto del tenant

@@ -473,8 +473,9 @@ export class RecuentosService {
                 i.eliminado_el AS item_eliminado_el,
                 l.stock_sistema, l.cantidad_contada, l.motivo_diferencia_id
            FROM recuento_inventario_linea l
-           LEFT JOIN items i ON i.item_id = l.item_id
-          WHERE l.recuento_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL`,
+           LEFT JOIN items i ON i.item_id = l.item_id AND i.tenant_id = l.tenant_id
+          WHERE l.recuento_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL
+          ORDER BY l.item_id`,
         [recuentoId, tenantId],
       );
 
@@ -518,6 +519,31 @@ export class RecuentosService {
         });
       }
 
+      // La causa se validó contra el catálogo al asignarla (updateLinea/update),
+      // pero pudo desactivarse o eliminarse entre ese momento y aplicar — el
+      // FK no filtra eliminado_el, así que sin esta segunda validación un
+      // motivo muerto quedaría congelado en el kardex. Una sola query batcheada
+      // por los motivoId distintos, nunca una por línea (N+1).
+      if (lineasAAplicar.length) {
+        const motivoIds = [...new Set(lineasAAplicar.map((l) => l.motivoId))];
+        const motivosActivos: { motivo_diferencia_inventario_id: string }[] =
+          await manager.query(
+            `SELECT motivo_diferencia_inventario_id
+               FROM motivo_diferencia_inventario
+              WHERE motivo_diferencia_inventario_id = ANY($1) AND tenant_id = $2
+                AND activo = true AND eliminado_el IS NULL`,
+            [motivoIds, tenantId],
+          );
+        const activos = new Set(
+          motivosActivos.map((m) => m.motivo_diferencia_inventario_id),
+        );
+        if (motivoIds.some((id) => !activos.has(id))) {
+          throw new BadRequestException(
+            'La causa de diferencia asignada ya no está activa',
+          );
+        }
+      }
+
       for (const linea of lineasAAplicar) {
         const mov = await this.inventarioService.registrarMovimiento(manager, {
           tenantId,
@@ -540,7 +566,7 @@ export class RecuentosService {
       await manager.query(
         `UPDATE recuento_inventario
             SET estado = 'aplicado', usuario_aplicador_id = $1, aplicado_el = NOW(), actualizado_el = NOW()
-          WHERE recuento_id = $2 AND tenant_id = $3`,
+          WHERE recuento_id = $2 AND tenant_id = $3 AND eliminado_el IS NULL`,
         [usuarioId, recuentoId, tenantId],
       );
 

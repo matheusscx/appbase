@@ -314,6 +314,7 @@ describe('RecuentosService', () => {
             motivo_diferencia_id: null,
           },
         ])
+        .mockResolvedValueOnce([{ motivo_diferencia_inventario_id: MOTIVO_ID }])
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce(undefined);
 
@@ -350,6 +351,7 @@ describe('RecuentosService', () => {
             motivo_diferencia_id: null,
           },
         ])
+        .mockResolvedValueOnce([{ motivo_diferencia_inventario_id: MOTIVO_ID }])
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce(undefined);
 
@@ -395,6 +397,7 @@ describe('RecuentosService', () => {
             motivo_diferencia_id: null,
           },
         ])
+        .mockResolvedValueOnce([{ motivo_diferencia_inventario_id: MOTIVO_ID }])
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce(undefined);
 
@@ -433,6 +436,36 @@ describe('RecuentosService', () => {
       expect(res.lineasAplicadas).toBe(0);
     });
 
+    it('rechaza aplicar si la causa resuelta fue desactivada entre cargar el conteo y aplicar', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            stock_sistema: '12400',
+            cantidad_contada: '11800',
+            motivo_diferencia_id: null,
+          },
+        ])
+        // La causa ya no aparece activa: se desactivó/eliminó después de cargar el conteo.
+        .mockResolvedValueOnce([]);
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toThrow('La causa de diferencia asignada ya no está activa');
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
     it('usa el override de la línea por sobre la causa por defecto', async () => {
       manager.query
         .mockResolvedValueOnce([
@@ -454,6 +487,7 @@ describe('RecuentosService', () => {
             motivo_diferencia_id: MOTIVO_B,
           },
         ])
+        .mockResolvedValueOnce([{ motivo_diferencia_inventario_id: MOTIVO_B }])
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce(undefined);
 
@@ -579,6 +613,9 @@ describe('RecuentosService', () => {
             cantidad_contada: '11800',
             motivo_diferencia_id: null,
           },
+        ])
+        .mockResolvedValueOnce([
+          { motivo_diferencia_inventario_id: MOTIVO_ID },
         ]);
       inventarioService.registrarMovimiento.mockRejectedValueOnce(
         new Error('Stock insuficiente para la salida'),

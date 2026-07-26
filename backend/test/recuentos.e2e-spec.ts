@@ -550,7 +550,6 @@ describe('Recuentos — aplicar (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let motivoId: string;
-  let itemId: string;
 
   const crearProducto = async (stock: number) => {
     const resCreateItem = await request(app.getHttpServer())
@@ -691,10 +690,10 @@ describe('Recuentos — aplicar (e2e)', () => {
     expect((item as ItemResponse).stock).toBe('10.0000');
   });
 
-  it('aplica el delta sobre el stock vigente, no el contado (venta entre contar y aplicar)', async () => {
+  it('aplica el delta sobre el stock vigente, no el contado (venta entre contar y aplicar), y el movimiento lleva motivo recuento y su causa', async () => {
     // 1. Producto con stock 1000; crear recuento congela stock_sistema = 1000.
-    itemId = await crearProducto(1000);
-    const recuentoId = await crearSesion([itemId]);
+    const id = await crearProducto(1000);
+    const recuentoId = await crearSesion([id]);
     const linea = await primeraLinea(recuentoId);
 
     // 2. Cargar cantidadContada = 900 → delta -100.
@@ -706,7 +705,7 @@ describe('Recuentos — aplicar (e2e)', () => {
 
     // 3. Vender/ajustar 200 fuera del recuento → stock vigente 800.
     await request(app.getHttpServer())
-      .patch(`/api/items/${itemId}/stock`)
+      .patch(`/api/items/${id}/stock`)
       .set('Authorization', `Bearer ${token}`)
       .send({ tipo: 'salida', motivo: 'ajuste_manual', cantidad: 200 })
       .expect(200);
@@ -718,17 +717,16 @@ describe('Recuentos — aplicar (e2e)', () => {
       .expect(201);
 
     const { body: detalle } = await request(app.getHttpServer())
-      .get(`/api/items/${itemId}`)
+      .get(`/api/items/${id}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(new Decimal((detalle as ItemResponse).stock!).toFixed(4)).toBe(
       '700.0000',
     );
-  });
 
-  it('el movimiento generado lleva motivo recuento y su causa', async () => {
+    // 5. El movimiento generado en el kardex lleva motivo='recuento' y su causa.
     const { body: kardex } = await request(app.getHttpServer())
-      .get(`/api/inventario/movimientos?itemId=${itemId}&motivo=recuento`)
+      .get(`/api/inventario/movimientos?itemId=${id}&motivo=recuento`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
