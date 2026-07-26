@@ -5,6 +5,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
+const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -17,6 +18,24 @@ interface MotivoDiferenciaInventarioItem {
   nombre: string;
   activo: boolean;
   esFijo: boolean;
+}
+interface ItemResponse {
+  id: string;
+  stock: string | null;
+}
+interface RecuentoCreateResponse {
+  id: string;
+}
+interface RecuentoLinea {
+  itemId: string;
+  stockSistema: string;
+  cantidadContada: string | null;
+  diferencia: string | null;
+}
+interface RecuentoDetalleResponse {
+  id: string;
+  estado: string;
+  lineas: RecuentoLinea[];
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -121,5 +140,110 @@ describe('Recuentos — catálogo de motivos de diferencia (e2e)', () => {
       .delete(`/api/motivos-diferencia-inventario/${custom.id}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(204);
+  });
+});
+
+describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
+  let app: INestApplication<App>;
+  let token: string;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    token = await login(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('crea una sesión y congela el stock del sistema en el detalle', async () => {
+    // 1. Producto con stock conocido: 10 unidades
+    const resCreateItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto recuento E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+      });
+    expect(resCreateItem.status).toBe(201);
+    const itemId = (resCreateItem.body as ItemResponse).id;
+
+    const resStock = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: 10,
+        costoUnitario: '1000',
+      });
+    expect(resStock.status).toBe(200);
+
+    const resItem = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect((resItem.body as ItemResponse).stock).toBe('10.0000');
+
+    // 2. Crear la sesión de recuento sobre ese producto
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemId] });
+    expect(resCreate.status).toBe(201);
+    const recuentoId = (resCreate.body as RecuentoCreateResponse).id;
+    expect(recuentoId).toBeDefined();
+
+    // 3. El detalle congela el stock del sistema, sin cantidad contada aún
+    const resDetalle = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDetalle.status).toBe(200);
+    const detalle = resDetalle.body as RecuentoDetalleResponse;
+    expect(detalle.estado).toBe('borrador');
+    expect(detalle.lineas).toHaveLength(1);
+    expect(detalle.lineas[0].stockSistema).toBe('10.0000');
+    expect(detalle.lineas[0].cantidadContada).toBeNull();
+    expect(detalle.lineas[0].diferencia).toBeNull();
+
+    // 4. La sesión aparece en el listado del tenant
+    const resList = await request(app.getHttpServer())
+      .get('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resList.status).toBe(200);
+    const lista = resList.body as { data: { id: string }[] };
+    expect(lista.data.some((r) => r.id === recuentoId)).toBe(true);
+  });
+
+  it('rechaza crear una sesión sobre un item en modo serie', async () => {
+    const resCreateItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto serie E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        modoInventario: 'serie',
+      });
+    expect(resCreateItem.status).toBe(201);
+    const itemId = (resCreateItem.body as ItemResponse).id;
+
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemId] });
+    expect(resCreate.status).toBe(400);
   });
 });

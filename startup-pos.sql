@@ -744,7 +744,7 @@ CREATE TABLE "movimientos_inventario" (
   "tenant_id"        UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "item_id"          UUID          NOT NULL REFERENCES "items" ("item_id"),
   "tipo"             TEXT          NOT NULL,   -- 'entrada' | 'salida' | 'ajuste'
-  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo'
+  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
   "cantidad"         NUMERIC(18,4) NOT NULL,   -- siempre positiva; el tipo define el signo
   "stock_anterior"   NUMERIC(18,4) NOT NULL,
   "stock_resultante" NUMERIC(18,4) NOT NULL,
@@ -754,6 +754,8 @@ CREATE TABLE "movimientos_inventario" (
   "costo_unitario"   NUMERIC(18,4),
   "costo_anterior"   NUMERIC(18,4),   -- costo vigente ANTES del movimiento; solo en motivo 'ajuste_costo'
   "causa_merma_id"   UUID REFERENCES "causas_merma" ("causa_merma_id"),
+  "motivo_diferencia_id" UUID REFERENCES "motivo_diferencia_inventario" ("motivo_diferencia_inventario_id"),
+  -- solo en motivo='recuento'; NULL en el resto
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ
@@ -807,6 +809,39 @@ CREATE TABLE "movimiento_inventario_detalle" (
   "cantidad"      NUMERIC(18,4) NOT NULL,
   "creado_el"     TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
+
+-- Sesión de conteo físico. La diferencia se aplica como DELTA sobre el stock
+-- vigente al momento de aplicar, no seteando el stock al valor contado: entre
+-- contar y aplicar el POS sigue vendiendo.
+CREATE TABLE "recuento_inventario" (
+  "recuento_id"                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"                     UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "estado"                        TEXT NOT NULL DEFAULT 'borrador',  -- 'borrador' | 'aplicado' | 'cancelado'
+  "motivo_diferencia_default_id"  UUID REFERENCES "motivo_diferencia_inventario" ("motivo_diferencia_inventario_id"),
+  "comentario"                    TEXT,
+  "usuario_creador_id"            UUID NOT NULL REFERENCES "usuarios" ("usuario_id"),
+  "usuario_aplicador_id"          UUID REFERENCES "usuarios" ("usuario_id"),
+  "aplicado_el"                   TIMESTAMPTZ,
+  "creado_el"                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"                TIMESTAMPTZ,
+  "eliminado_el"                  TIMESTAMPTZ
+);
+
+CREATE TABLE "recuento_inventario_linea" (
+  "linea_id"              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"             UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "recuento_id"           UUID NOT NULL REFERENCES "recuento_inventario" ("recuento_id"),
+  "item_id"               UUID NOT NULL REFERENCES "items" ("item_id"),
+  "stock_sistema"         NUMERIC(18,4) NOT NULL,   -- congelado al crear la línea; base del delta
+  "cantidad_contada"      NUMERIC(18,4),            -- NULL = todavía sin contar
+  "motivo_diferencia_id"  UUID REFERENCES "motivo_diferencia_inventario" ("motivo_diferencia_inventario_id"),
+  "movimiento_id"         UUID REFERENCES "movimientos_inventario" ("movimiento_id"),
+  "creado_el"             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"        TIMESTAMPTZ,
+  "eliminado_el"          TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_recuento_linea_item_vivo"
+  ON "recuento_inventario_linea" ("recuento_id", "item_id") WHERE "eliminado_el" IS NULL;
 
 -- =============================================================
 -- 8. CAJAS

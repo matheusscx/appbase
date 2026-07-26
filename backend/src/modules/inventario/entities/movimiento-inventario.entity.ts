@@ -22,7 +22,7 @@ export class MovimientoInventario {
   tipo: string; // 'entrada' | 'salida' | 'ajuste'
 
   @Column({ type: 'text' })
-  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo'
+  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;
@@ -67,6 +67,9 @@ export class MovimientoInventario {
 
   @Column({ name: 'causa_merma_id', type: 'uuid', nullable: true })
   causaMermaId: string | null;
+
+  @Column({ name: 'motivo_diferencia_id', type: 'uuid', nullable: true })
+  motivoDiferenciaId: string | null;
 
   @CreateDateColumn({ name: 'creado_el' }) creadoEl: Date;
   @UpdateDateColumn({ name: 'actualizado_el' }) actualizadoEl: Date;

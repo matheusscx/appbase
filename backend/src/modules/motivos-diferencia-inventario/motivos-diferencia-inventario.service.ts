@@ -127,6 +127,18 @@ export class MotivosDiferenciaInventarioService {
         'No se puede eliminar un motivo fijo del sistema',
       );
     }
+
+    const uso: { cnt: string }[] = await this.dataSource.query(
+      `SELECT COUNT(*)::text AS cnt FROM movimientos_inventario
+        WHERE motivo_diferencia_id = $1 AND eliminado_el IS NULL`,
+      [id],
+    );
+    if (parseInt(uso[0].cnt, 10) > 0) {
+      throw new BadRequestException(
+        'No se puede eliminar: el motivo está en uso en movimientos de recuento',
+      );
+    }
+
     await this.dataSource.query(
       `UPDATE motivo_diferencia_inventario SET eliminado_el = NOW(), actualizado_el = NOW()
        WHERE motivo_diferencia_inventario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,

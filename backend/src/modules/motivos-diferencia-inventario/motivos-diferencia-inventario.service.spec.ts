@@ -69,6 +69,23 @@ describe('MotivosDiferenciaInventarioService', () => {
     );
   });
 
+  it('rechaza eliminar un motivo en uso en movimientos', async () => {
+    queryMock
+      .mockResolvedValueOnce([
+        {
+          motivo_diferencia_inventario_id: MOTIVO_ID,
+          nombre: 'Robo',
+          activo: true,
+          es_fijo: false,
+        },
+      ])
+      .mockResolvedValueOnce([{ cnt: '1' }]);
+
+    await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
+      'No se puede eliminar: el motivo está en uso en movimientos de recuento',
+    );
+  });
+
   it('assertMotivoActivo rechaza un motivo inactivo o de otro tenant', async () => {
     const runner = { query: jest.fn().mockResolvedValueOnce([]) };
 

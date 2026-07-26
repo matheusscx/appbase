@@ -138,6 +138,9 @@ import { Impresora } from './modules/impresoras/entities/impresora.entity';
 import { GrupoModificador } from './modules/grupos-modificadores/entities/grupo-modificador.entity';
 import { GrupoModificadorOpcion } from './modules/grupos-modificadores/entities/grupo-modificador-opcion.entity';
 import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos-modificadores.module';
+import { RecuentoInventario } from './modules/recuentos/entities/recuento-inventario.entity';
+import { RecuentoInventarioLinea } from './modules/recuentos/entities/recuento-inventario-linea.entity';
+import { RecuentosModule } from './modules/recuentos/recuentos.module';
 
 @Module({
   imports: [
@@ -246,6 +249,8 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
           GrupoModificadorOpcion,
           ItemGrupoModificador,
           ItemGrupoModificadorOpcion,
+          RecuentoInventario,
+          RecuentoInventarioLinea,
         ],
         synchronize: config.get<string>('NODE_ENV') !== 'production',
       }),
@@ -288,6 +293,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
     GruposModificadoresModule,
     MotivosDiferenciaModule,
     MotivosDiferenciaInventarioModule,
+    RecuentosModule,
   ],
   controllers: [AppController],
   providers: [AppService],
