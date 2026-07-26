@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { RecuentosService } from './recuentos.service';
 import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
+import { InventarioService } from '../inventario/inventario.service';
 
 const TENANT_ID = 'tenant-uuid';
 const USUARIO_ID = 'usuario-uuid';
@@ -9,12 +10,15 @@ const ITEM_ID = 'item-uuid';
 const RECUENTO_ID = 'recuento-uuid';
 const LINEA_ID = 'linea-uuid';
 const MOTIVO_ID = 'motivo-uuid';
+const MOTIVO_A = 'motivo-a-uuid';
+const MOTIVO_B = 'motivo-b-uuid';
 
 describe('RecuentosService', () => {
   let service: RecuentosService;
   let manager: { query: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let motivosService: { assertMotivoActivo: jest.Mock };
+  let inventarioService: { registrarMovimiento: jest.Mock };
 
   beforeEach(async () => {
     manager = { query: jest.fn() };
@@ -23,6 +27,15 @@ describe('RecuentosService', () => {
       transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
     };
     motivosService = { assertMotivoActivo: jest.fn() };
+    inventarioService = {
+      registrarMovimiento: jest.fn().mockResolvedValue({
+        movimientoId: 'mov-uuid',
+        stockAnterior: '0',
+        stockResultante: '0',
+        costoActualPrevio: null,
+        costoActual: null,
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -32,6 +45,7 @@ describe('RecuentosService', () => {
           provide: MotivosDiferenciaInventarioService,
           useValue: motivosService,
         },
+        { provide: InventarioService, useValue: inventarioService },
       ],
     }).compile();
 
@@ -275,6 +289,309 @@ describe('RecuentosService', () => {
       await expect(service.cancelar(TENANT_ID, RECUENTO_ID)).rejects.toThrow(
         'El recuento ya fue aplicado',
       );
+    });
+  });
+
+  describe('RecuentosService — aplicar', () => {
+    it('genera una salida cuando el contado es menor que el sistema', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            stock_sistema: '12400',
+            cantidad_contada: '11800',
+            motivo_diferencia_id: null,
+          },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
+
+      await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          tipo: 'salida',
+          motivo: 'recuento',
+          cantidad: '600.0000',
+        }),
+      );
+    });
+
+    it('genera una entrada cuando el contado es mayor', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            stock_sistema: '4000',
+            cantidad_contada: '4200',
+            motivo_diferencia_id: null,
+          },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
+
+      await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          tipo: 'entrada',
+          motivo: 'recuento',
+          cantidad: '200.0000',
+        }),
+      );
+    });
+
+    it('ignora las líneas sin contar', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto contado',
+            item_eliminado_el: null,
+            stock_sistema: '100',
+            cantidad_contada: '90',
+            motivo_diferencia_id: null,
+          },
+          {
+            linea_id: 'linea-2-uuid',
+            item_id: 'item-2-uuid',
+            item_nombre: 'Producto sin contar',
+            item_eliminado_el: null,
+            stock_sistema: '50',
+            cantidad_contada: null,
+            motivo_diferencia_id: null,
+          },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
+
+      const res = await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledTimes(1);
+      expect(res.lineasAplicadas).toBe(1);
+    });
+
+    it('no genera movimiento cuando el delta es cero', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            stock_sistema: '8000',
+            cantidad_contada: '8000',
+            motivo_diferencia_id: null,
+          },
+        ])
+        .mockResolvedValueOnce(undefined);
+
+      const res = await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      expect(res.lineasAplicadas).toBe(0);
+    });
+
+    it('usa el override de la línea por sobre la causa por defecto', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_A,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            stock_sistema: '100',
+            cantidad_contada: '90',
+            motivo_diferencia_id: MOTIVO_B,
+          },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined);
+
+      await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ motivoDiferenciaId: MOTIVO_B }),
+      );
+    });
+
+    it('rechaza aplicar si hay diferencias y no hay causa por defecto ni override', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: null,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            stock_sistema: '12400',
+            cantidad_contada: '11800',
+            motivo_diferencia_id: null,
+          },
+        ]);
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toThrow('Falta la causa de la diferencia');
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
+    it('rechaza aplicar una sesión ya aplicada', async () => {
+      manager.query.mockResolvedValueOnce([
+        {
+          recuento_id: RECUENTO_ID,
+          estado: 'aplicado',
+          motivo_diferencia_default_id: null,
+          comentario: null,
+        },
+      ]);
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toThrow('El recuento ya fue aplicado');
+    });
+
+    it('rechaza aplicar una sesión cancelada', async () => {
+      manager.query.mockResolvedValueOnce([
+        {
+          recuento_id: RECUENTO_ID,
+          estado: 'cancelado',
+          motivo_diferencia_default_id: null,
+          comentario: null,
+        },
+      ]);
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toThrow('El recuento fue cancelado');
+    });
+
+    it('descarta la línea de un producto eliminado con su razón', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto eliminado',
+            item_eliminado_el: new Date('2026-01-01T00:00:00Z'),
+            stock_sistema: '100',
+            cantidad_contada: '90',
+            motivo_diferencia_id: null,
+          },
+        ])
+        .mockResolvedValueOnce(undefined);
+
+      const res = await service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID);
+
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      expect(res.lineasAplicadas).toBe(0);
+      expect(res.lineasDescartadas).toEqual([
+        {
+          itemId: ITEM_ID,
+          itemNombre: 'Producto eliminado',
+          razon: 'El producto fue eliminado',
+        },
+      ]);
+    });
+
+    it('propaga el rechazo de stock insuficiente sin dejar el recuento aplicado', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            stock_sistema: '12400',
+            cantidad_contada: '11800',
+            motivo_diferencia_id: null,
+          },
+        ]);
+      inventarioService.registrarMovimiento.mockRejectedValueOnce(
+        new Error('Stock insuficiente para la salida'),
+      );
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toThrow('Stock insuficiente para la salida');
+
+      const updateEstado = manager.query.mock.calls.find((c: unknown[]) =>
+        String(c[0]).includes("estado = 'aplicado'"),
+      );
+      expect(updateEstado).toBeUndefined();
     });
   });
 });

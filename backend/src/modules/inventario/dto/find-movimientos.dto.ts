@@ -9,6 +9,7 @@ const MOTIVOS = [
   'ajuste_manual',
   'ajuste_costo',
   'inventario_inicial',
+  'recuento',
 ];
 
 export class FindMovimientosDto extends PaginationQueryDto {

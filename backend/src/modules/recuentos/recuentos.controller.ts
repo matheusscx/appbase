@@ -78,4 +78,17 @@ export class RecuentosController {
     const { tenantId } = req.user as { tenantId: string };
     return this.recuentosService.cancelar(tenantId, id);
   }
+
+  // Distinto del 'Crear' que usan contar/cargar conteos: aplicar mueve stock
+  // real, es deliberadamente un permiso separado (quien cuenta no es
+  // necesariamente quien aprueba).
+  @Post(':id/aplicar')
+  @RequiresPermiso('Inventario', 'Actualizar')
+  aplicar(@Req() req: Request, @Param('id') id: string) {
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.recuentosService.aplicar(tenantId, usuarioId, id);
+  }
 }

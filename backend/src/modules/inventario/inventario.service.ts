@@ -49,6 +49,7 @@ export interface RegistrarMovimientoParams {
   lote?: LoteInput; // entrada lote: crea o agrega a lote existente
   loteId?: string; // salida lote: lote a descontar
   causaMermaId?: string | null;
+  motivoDiferenciaId?: string | null; // solo en motivo='recuento'
 }
 
 interface MoverResult {
@@ -123,6 +124,11 @@ export class InventarioService {
     if (params.motivo !== 'merma' && params.causaMermaId) {
       throw new BadRequestException('causa_merma_id solo aplica a merma');
     }
+    if (params.motivo !== 'recuento' && params.motivoDiferenciaId) {
+      throw new BadRequestException(
+        'motivo_diferencia_id solo aplica a recuento',
+      );
+    }
 
     const costoActualPrevio = productoRows[0].costo_actual ?? null;
 
@@ -191,8 +197,8 @@ export class InventarioService {
       `INSERT INTO movimientos_inventario
          (tenant_id, item_id, tipo, motivo, cantidad,
           stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
-          costo_unitario, costo_anterior, causa_merma_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          costo_unitario, costo_anterior, causa_merma_id, motivo_diferencia_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -208,6 +214,7 @@ export class InventarioService {
         costoUnitarioCongelado,
         esAjusteCosto ? costoActualPrevio : null,
         params.causaMermaId ?? null,
+        params.motivoDiferenciaId ?? null,
       ],
     );
 
@@ -727,7 +734,7 @@ export class InventarioService {
          mv.stock_anterior, mv.stock_resultante,
          mv.usuario_id, u.nombre AS usuario_nombre,
          mv.comentario, mv.creado_el, mv.costo_unitario, mv.costo_anterior,
-         mv.causa_merma_id,
+         mv.causa_merma_id, mv.motivo_diferencia_id,
          cm.nombre AS causa_nombre,
          p.unidad_medida
        FROM movimientos_inventario mv
@@ -794,6 +801,7 @@ export class InventarioService {
       costoAnterior: r.costo_anterior,
       causaMermaId: r.causa_merma_id,
       causaNombre: r.causa_nombre,
+      motivoDiferenciaId: r.motivo_diferencia_id,
       costoPerdido:
         r.motivo === 'merma' && r.costo_unitario != null
           ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(4)
@@ -820,6 +828,7 @@ export interface MovimientoListItem {
   costoAnterior: string | null;
   causaMermaId: string | null;
   causaNombre: string | null;
+  motivoDiferenciaId: string | null;
   costoPerdido: string | null;
   unidadMedida: string | null;
 }
@@ -841,5 +850,6 @@ interface MovimientoRow {
   costo_anterior: string | null;
   causa_merma_id: string | null;
   causa_nombre: string | null;
+  motivo_diferencia_id: string | null;
   unidad_medida: string | null;
 }

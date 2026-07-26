@@ -17,6 +17,7 @@ import { CreateRecuentoDto } from './dto/create-recuento.dto';
 import { UpdateRecuentoDto } from './dto/update-recuento.dto';
 import { UpdateRecuentoLineaDto } from './dto/update-recuento-linea.dto';
 import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
+import { InventarioService } from '../inventario/inventario.service';
 
 interface ItemParaRecuentoRow {
   item_id: string;
@@ -64,6 +65,23 @@ interface RecuentoLineaUpdateRow {
   motivo_diferencia_id: string | null;
 }
 
+interface RecuentoAplicarSesionRow {
+  recuento_id: string;
+  estado: string;
+  motivo_diferencia_default_id: string | null;
+  comentario: string | null;
+}
+
+interface RecuentoAplicarLineaRow {
+  linea_id: string;
+  item_id: string;
+  item_nombre: string | null;
+  item_eliminado_el: Date | null;
+  stock_sistema: string;
+  cantidad_contada: string | null;
+  motivo_diferencia_id: string | null;
+}
+
 export interface RecuentoListItem {
   id: string;
   estado: string;
@@ -104,12 +122,25 @@ export interface RecuentoLineaActualizada {
   motivoDiferenciaId: string | null;
 }
 
+export interface RecuentoLineaDescartada {
+  itemId: string;
+  itemNombre: string;
+  razon: string;
+}
+
+export interface RecuentoAplicarResultado {
+  recuentoId: string;
+  lineasAplicadas: number;
+  lineasDescartadas: RecuentoLineaDescartada[];
+}
+
 @Injectable()
 export class RecuentosService {
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly motivosDiferenciaInventarioService: MotivosDiferenciaInventarioService,
+    private readonly inventarioService: InventarioService,
   ) {}
 
   async create(
@@ -401,6 +432,123 @@ export class RecuentosService {
         ),
       );
       return { id: rows[0].recuento_id, estado: rows[0].estado };
+    });
+  }
+
+  // El corazón del diseño: la diferencia es un delta, no un absoluto. El
+  // stock_sistema quedó congelado al crear la línea; entre ese momento y
+  // aplicar puede haber movimiento real (ventas, otros ajustes). Aplicar el
+  // delta sobre el stock VIGENTE (que registrarMovimiento lee bajo FOR
+  // UPDATE) preserva ese movimiento intermedio; setear un absoluto lo
+  // pisaría.
+  async aplicar(
+    tenantId: string,
+    usuarioId: string,
+    recuentoId: string,
+  ): Promise<RecuentoAplicarResultado> {
+    return this.dataSource.transaction(async (manager: EntityManager) => {
+      const sesionRows: RecuentoAplicarSesionRow[] = await manager.query(
+        `SELECT recuento_id, estado, motivo_diferencia_default_id, comentario
+           FROM recuento_inventario
+          WHERE recuento_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [recuentoId, tenantId],
+      );
+      if (!sesionRows.length) {
+        throw new NotFoundException(`Recuento ${recuentoId} no encontrado`);
+      }
+      const sesion = sesionRows[0];
+      if (sesion.estado === 'aplicado') {
+        throw new BadRequestException('El recuento ya fue aplicado');
+      }
+      if (sesion.estado === 'cancelado') {
+        throw new BadRequestException('El recuento fue cancelado');
+      }
+
+      // LEFT JOIN sin filtrar eliminado_el a propósito: necesitamos detectar
+      // el item eliminado (o inexistente) para descartar la línea, no
+      // excluirla silenciosamente de la lectura.
+      const lineaRows: RecuentoAplicarLineaRow[] = await manager.query(
+        `SELECT l.linea_id, l.item_id, i.nombre AS item_nombre,
+                i.eliminado_el AS item_eliminado_el,
+                l.stock_sistema, l.cantidad_contada, l.motivo_diferencia_id
+           FROM recuento_inventario_linea l
+           LEFT JOIN items i ON i.item_id = l.item_id
+          WHERE l.recuento_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL`,
+        [recuentoId, tenantId],
+      );
+
+      const lineasDescartadas: RecuentoLineaDescartada[] = [];
+      const lineasAAplicar: {
+        lineaId: string;
+        itemId: string;
+        delta: Decimal;
+        motivoId: string;
+      }[] = [];
+
+      // Primera pasada: valida y calcula todo antes de mover stock. Si falta
+      // una causa en cualquier línea, el error llega sin haber tocado nada.
+      for (const l of lineaRows) {
+        if (l.item_nombre == null || l.item_eliminado_el != null) {
+          lineasDescartadas.push({
+            itemId: l.item_id,
+            itemNombre: l.item_nombre ?? l.item_id,
+            razon: 'El producto fue eliminado',
+          });
+          continue;
+        }
+        if (l.cantidad_contada == null) continue;
+
+        const delta = new Decimal(l.cantidad_contada).minus(l.stock_sistema);
+        if (delta.isZero()) continue;
+
+        const motivoId =
+          l.motivo_diferencia_id ?? sesion.motivo_diferencia_default_id;
+        if (!motivoId) {
+          throw new BadRequestException(
+            `Falta la causa de la diferencia para "${l.item_nombre}"`,
+          );
+        }
+
+        lineasAAplicar.push({
+          lineaId: l.linea_id,
+          itemId: l.item_id,
+          delta,
+          motivoId,
+        });
+      }
+
+      for (const linea of lineasAAplicar) {
+        const mov = await this.inventarioService.registrarMovimiento(manager, {
+          tenantId,
+          itemId: linea.itemId,
+          usuarioId,
+          tipo: linea.delta.isPositive() ? 'entrada' : 'salida',
+          motivo: 'recuento',
+          cantidad: linea.delta.abs().toFixed(4),
+          motivoDiferenciaId: linea.motivoId,
+          comentario: sesion.comentario ?? null,
+        });
+
+        await manager.query(
+          `UPDATE recuento_inventario_linea SET movimiento_id = $1, actualizado_el = NOW()
+           WHERE linea_id = $2`,
+          [mov.movimientoId, linea.lineaId],
+        );
+      }
+
+      await manager.query(
+        `UPDATE recuento_inventario
+            SET estado = 'aplicado', usuario_aplicador_id = $1, aplicado_el = NOW(), actualizado_el = NOW()
+          WHERE recuento_id = $2 AND tenant_id = $3`,
+        [usuarioId, recuentoId, tenantId],
+      );
+
+      return {
+        recuentoId,
+        lineasAplicadas: lineasAAplicar.length,
+        lineasDescartadas,
+      };
     });
   }
 

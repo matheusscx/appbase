@@ -19,18 +19,18 @@ El stock de productos es un activo crítico: cambios sin trazabilidad generan me
 ### Scope
 
 **Included in this version:**
-- Registro de movimientos `entrada`/`salida` con motivos (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `inventario_inicial`)
+- Registro de movimientos `entrada`/`salida` con motivos (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `inventario_inicial`, `recuento`)
 - Endpoint `GET /inventario/movimientos` con filtros por item, motivo y rango de fechas
 - Endpoint `PATCH /items/:id/stock` actualizado para registrar motivo + comentario
 - Creación automática de movimiento `inventario_inicial` al crear un producto con stock > 0
 - Integración con ventas: cada línea vendida genera `salida`/`motivo='venta'` de forma automática (transacción única)
+- Integración con recuento de inventario: `POST /recuentos/:id/aplicar` genera un movimiento
+  `entrada`/`salida` con `motivo='recuento'` por cada línea contada con diferencia — ver
+  "Regla del recuento: delta, no absoluto" más abajo
 - Vistas: modal "Historial" en `/configuracion/items` + página global `/inventario`
 - Validación: `salida` rechaza movimientos que resultarían en stock negativo
 
 **NOT included (future):**
-- Tipo `'ajuste'` con motivo de **recuento absoluto de inventario** (mueve cantidad —
-  reservado para fase posterior). El único uso hoy de `tipo='ajuste'` es el motivo
-  `ajuste_costo` (no mueve cantidad, ver "Regla de costo").
 - Bodegas / almacenes y stock por bodega
 - Traspasos entre bodegas
 - Integración con proveedores externos de inventario
@@ -92,7 +92,7 @@ Response (200):
 
 **Query Parameters:**
 - `itemId` (optional): Filtrar por item UUID
-- `motivo` (optional): Filtrar por motivo exacto (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `ajuste_costo`, `inventario_inicial`)
+- `motivo` (optional): Filtrar por motivo exacto (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `ajuste_costo`, `inventario_inicial`, `recuento`)
 - `desde` (optional): ISO-8601, filtrar movimientos a partir de esta fecha
 - `hasta` (optional): ISO-8601, filtrar movimientos hasta esta fecha
 - `skip` (optional, default 0): Paginación
@@ -237,6 +237,7 @@ dentro de una transacción: no repite sus validaciones ni escribe
 | `comentario` | text | nullable | Observaciones del usuario |
 | `costo_unitario` | NUMERIC(18,4) | nullable | Congela el costo del momento del movimiento (en `ajuste_costo`, el costo nuevo) |
 | `costo_anterior` | NUMERIC(18,4) | nullable | Solo poblado en `motivo='ajuste_costo'`: el `costo_actual` vigente antes del ajuste |
+| `motivo_diferencia_id` | UUID | FK `motivo_diferencia_inventario`, nullable | Solo poblado en `motivo='recuento'`: la causa tipificada de la diferencia (línea o default de la sesión) |
 | `creado_el` | TIMESTAMPTZ | NOT NULL, default NOW | Marca de tiempo |
 | `actualizado_el` | TIMESTAMPTZ | NOT NULL, default NOW | Marca de tiempo |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete (aunque movimientos raramente se borren) |
@@ -263,6 +264,33 @@ dentro de una transacción: no repite sus validaciones ni escribe
   mermas, esto **solo** aplica al `costoUnitario` explícito del DTO — cuando no se envía y se usa
   `costo_actual` del producto (ya en unidad base), no hay conversión. Detalle y ejemplo:
   [Conversión de Unidades — Conversión de Costo](./conversion-unidades.md#conversión-de-costo-junto-con-la-cantidad).
+
+**Regla del recuento: delta, no absoluto (`motivo='recuento'`):**
+- Al crear un recuento (`POST /recuentos`), cada línea congela `stock_sistema` = el stock
+  vigente en ese momento. Al cargar el conteo (`PATCH /recuentos/:id/lineas/:lineaId`), la
+  diferencia mostrada es `cantidad_contada − stock_sistema` — informativa, no lo que se aplica.
+- Al aplicar (`POST /recuentos/:id/aplicar`), lo que se mueve es
+  `delta = cantidad_contada − stock_sistema` sobre el **stock vigente en ese momento**, no
+  sobre `cantidad_contada` como si fuera un absoluto. `RecuentosService.aplicar` calcula el
+  `delta` y llama a `InventarioService.registrarMovimiento` con `cantidad = |delta|` y
+  `tipo = 'entrada'` (delta positivo) o `'salida'` (delta negativo); `registrarMovimiento` ya
+  aplica ese delta sobre el stock que lee bajo `FOR UPDATE`, así que nunca hay que calcular el
+  stock final a mano.
+- **Ejemplo (por qué importa):** un producto tiene 1000 unidades. Se cuenta 900 a las 10:00
+  (delta −100, congelado). Antes de aplicar, se vende/ajusta 200 fuera del recuento → stock
+  vigente 800. Al aplicar a las 14:00: `800 + (−100) = 700`. Si el recuento hubiera seteado el
+  stock al valor contado (900), habría pisado la venta intermedia; el faltante de 100 que
+  descubrió el conteo es real sin importar lo que se vendió después.
+- Requiere causa tipificada (`motivo_diferencia_id`, catálogo `motivo_diferencia_inventario`):
+  la línea puede traer su propio override; si no, se usa el `motivo_diferencia_default_id` de
+  la sesión. Si ninguno de los dos existe y hay una diferencia distinta de cero, `aplicar`
+  rechaza toda la sesión antes de mover cualquier stock (`400 Falta la causa de la
+  diferencia...`) — la transacción no deja líneas parcialmente aplicadas.
+- Líneas sin conteo cargado (`cantidad_contada IS NULL`) o con delta cero se ignoran, sin
+  generar movimiento. Líneas cuyo item fue eliminado se descartan con `razon: 'El producto
+  fue eliminado'` en la respuesta, en vez de fallar toda la sesión.
+- Detalle funcional completo (estados de la sesión, permisos, catálogo de causas): ver el plan
+  de la feature en `.superpowers/sdd/2026-07-26-recuento-inventario/`.
 
 **Índices (para performance):**
 - `(tenant_id, item_id)` — consultas por producto del tenant

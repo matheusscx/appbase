@@ -3,6 +3,7 @@ import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
+import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -44,6 +45,15 @@ interface RecuentoListItem {
   id: string;
   cantidadLineas: number;
   diferenciaNeta: string;
+}
+interface RecuentoAplicarResponse {
+  recuentoId: string;
+  lineasAplicadas: number;
+  lineasDescartadas: { itemId: string; itemNombre: string; razon: string }[];
+}
+interface MovimientoListItem {
+  motivo: string;
+  motivoDiferenciaId: string | null;
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -533,5 +543,198 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
       .set('Authorization', `Bearer ${token}`)
       .send({ cantidadContada: '1' });
     expect(resPatch.status).toBe(400);
+  });
+});
+
+describe('Recuentos — aplicar (e2e)', () => {
+  let app: INestApplication<App>;
+  let token: string;
+  let motivoId: string;
+  let itemId: string;
+
+  const crearProducto = async (stock: number) => {
+    const resCreateItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto aplicar E2E ${Date.now()}-${Math.random()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+      });
+    const id = (resCreateItem.body as ItemResponse).id;
+    await request(app.getHttpServer())
+      .patch(`/api/items/${id}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: stock,
+        costoUnitario: '1000',
+      });
+    return id;
+  };
+
+  const crearSesion = async (itemIds: string[]) => {
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds });
+    return (resCreate.body as RecuentoCreateResponse).id;
+  };
+
+  const primeraLinea = async (recuentoId: string) => {
+    const { body } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    return (body as RecuentoDetalleResponse).lineas[0];
+  };
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    token = await login(app);
+
+    const { body: motivos } = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia-inventario')
+      .set('Authorization', `Bearer ${token}`);
+    motivoId = (motivos as MotivoDiferenciaInventarioItem[]).find(
+      (m) => m.esFijo,
+    )!.id;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('aplica una salida y descuenta stock cuando el contado es menor al sistema', async () => {
+    const id = await crearProducto(100);
+    const recuentoId = await crearSesion([id]);
+    const linea = await primeraLinea(recuentoId);
+
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '90', motivoDiferenciaId: motivoId })
+      .expect(200);
+
+    const resAplicar = await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+    const aplicado = resAplicar.body as RecuentoAplicarResponse;
+    expect(aplicado.lineasAplicadas).toBe(1);
+    expect(aplicado.lineasDescartadas).toEqual([]);
+
+    const { body: item } = await request(app.getHttpServer())
+      .get(`/api/items/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect((item as ItemResponse).stock).toBe('90.0000');
+
+    const { body: detalle } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect((detalle as RecuentoDetalleResponse).estado).toBe('aplicado');
+  });
+
+  it('rechaza aplicar una sesión ya aplicada', async () => {
+    const id = await crearProducto(10);
+    const recuentoId = await crearSesion([id]);
+    const linea = await primeraLinea(recuentoId);
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '8', motivoDiferenciaId: motivoId })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const resSegundaVez = await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resSegundaVez.status).toBe(400);
+  });
+
+  it('rechaza aplicar si hay diferencias sin causa y no mueve stock', async () => {
+    const id = await crearProducto(10);
+    const recuentoId = await crearSesion([id]);
+    const linea = await primeraLinea(recuentoId);
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '5' })
+      .expect(200);
+
+    const resAplicar = await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resAplicar.status).toBe(400);
+
+    const { body: item } = await request(app.getHttpServer())
+      .get(`/api/items/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect((item as ItemResponse).stock).toBe('10.0000');
+  });
+
+  it('aplica el delta sobre el stock vigente, no el contado (venta entre contar y aplicar)', async () => {
+    // 1. Producto con stock 1000; crear recuento congela stock_sistema = 1000.
+    itemId = await crearProducto(1000);
+    const recuentoId = await crearSesion([itemId]);
+    const linea = await primeraLinea(recuentoId);
+
+    // 2. Cargar cantidadContada = 900 → delta -100.
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '900', motivoDiferenciaId: motivoId })
+      .expect(200);
+
+    // 3. Vender/ajustar 200 fuera del recuento → stock vigente 800.
+    await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'salida', motivo: 'ajuste_manual', cantidad: 200 })
+      .expect(200);
+
+    // 4. Aplicar. Esperado: 800 - 100 = 700 (si seteara el absoluto daría 900).
+    await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const { body: detalle } = await request(app.getHttpServer())
+      .get(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(new Decimal((detalle as ItemResponse).stock!).toFixed(4)).toBe(
+      '700.0000',
+    );
+  });
+
+  it('el movimiento generado lleva motivo recuento y su causa', async () => {
+    const { body: kardex } = await request(app.getHttpServer())
+      .get(`/api/inventario/movimientos?itemId=${itemId}&motivo=recuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const data = (kardex as { data: MovimientoListItem[] }).data;
+    expect(data.length).toBeGreaterThan(0);
+    expect(data[0].motivo).toBe('recuento');
+    expect(data[0].motivoDiferenciaId).toBeTruthy();
   });
 });
