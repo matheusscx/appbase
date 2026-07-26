@@ -233,6 +233,39 @@ En `ItemsService.ajustarStock` (líneas 593–652):
 - `registrarMovimiento` (inventario.service.ts) es agnóstico de unidades: solo registra una cantidad.
 - Así, una única representación de la verdad y sin duplicar lógica de conversión.
 
+### Conversión de Costo Junto con la Cantidad
+
+**Regla:** `costoUnitario` significa "costo por la unidad que el usuario ingresó" (la de
+`unidadCodigo`), **no** por la unidad base del producto. Si `unidadCodigo` difiere de la base
+—es decir, si hubo conversión de cantidad— el costo se convierte junto con ella, preservando el
+valor total de la operación.
+
+**Fórmula** (`convertirCostoUnitario`, `backend/src/common/utils/costo-conversion-unidad.util.ts`):
+```
+costoBase = (cantidadIngresada × costoUnitario) / cantidadConvertidaABase
+```
+
+**Ejemplo:** comprar 2 kg a $5.000/kg en un producto con unidad base `g`:
+- `cantidadConvertidaABase` = `convertirUnidad('2', 'kg', 'g')` = `2000`
+- `costoBase` = `(2 × 5.000) / 2000` = `5` (por gramo)
+- Valor total preservado: `2000 g × 5/g` = `2 kg × 5.000/kg` = `$10.000`
+
+**Por qué el bug original:** sin esta conversión, `cantidad` se convertía a `2000` pero
+`costoUnitario` se pasaba crudo (`5.000`), alimentando el promedio ponderado (CPP, ADR-016) con
+`2000 g × 5.000/g` — 1000× el valor real. El error se propagaba a `item_producto.costo_actual` y
+persistía en márgenes, food-cost y valorización de mermas.
+
+**Dónde aplica:**
+- `ItemsService.ajustarStock` — siempre que venga `costoUnitario` y haya conversión de cantidad.
+- `MermasService.registrar` — **solo** cuando `costoUnitario` viene explícito en el DTO. Cuando
+  no viene y el service usa `costo_actual` del producto para valorizar la merma, **no** se
+  convierte: `costo_actual` ya está en unidad base.
+
+**Frontend:** el prefill de costo en `mermas.vue` (costo actual del producto) y el label del
+input en ambos formularios ("Costo unitario (por _unidad_)") siguen la misma regla — ver
+`frontend/app/composables/useUnidadConversion.ts` (`convertirCosto`), espejo del cálculo del
+backend documentado acá (no hay workspace compartido entre backend y frontend).
+
 ---
 
 ## Frontend
@@ -362,13 +395,24 @@ La función `UNIDADES_FRACCIONARIAS` deja de ser un set hardcodeado (`{kg, l, m}
 - `convertirUnidad`: redondeo a 4 decimales correcto
 - `convertirUnidad`: cantidad → cero tras redondeo → BadRequest
 
+**`costo-conversion-unidad.util.spec.ts`:**
+- `convertirCostoUnitario`: valor total preservado tras la conversión
+- `convertirCostoUnitario`: identidad cuando no hubo conversión real
+- `convertirCostoUnitario`: redondeo a 4 decimales
+
 **`items.service.spec.ts`:**
 - `ajustarStock` con `unidadCodigo` distinto convierte antes de `registrarMovimiento`
 - `ajustarStock` sin `unidadCodigo` no convierte
 - `ajustarStock` con `unidadCodigo` ≠ base y modo `'serie'` → BadRequest
 - `ajustarStock` con `unidadCodigo` ≠ base y modo `'lote'` → BadRequest
+- `ajustarStock` convierte `costoUnitario` junto con la cantidad preservando el valor total
+- `ajustarStock` no convierte `costoUnitario` cuando la compra ya viene en la unidad base
 - `create` con `unidadMedida` inválido → BadRequest
 - `update` con `unidadMedida` inválido → BadRequest
+
+**`mermas.service.spec.ts`:**
+- `registrar` convierte `costoUnitario` junto con la cantidad cuando viene explícito y hay conversión
+- `registrar` usa `costo_actual` (ya en unidad base) sin convertir cuando no viene `costoUnitario`
 - `update` cambio de base con movimientos → BadRequest
 
 ### E2E Tests
@@ -382,6 +426,8 @@ npm run test:e2e -- inventario.e2e-spec.ts
 2. Producto en `kg`, merma de 250 g → stock 0.2500, movimiento en unidad base.
 3. Cross-magnitud: ajuste de producto en `kg` con unidad `ml` → 400 (BadRequest).
 4. Serie/lote: crear producto modo='serie', intentar ajuste con `unidadCodigo` ≠ base → 400 (BadRequest).
+5. (`costeo-cpp.e2e-spec.ts`) Producto en `g`, compra de 2 kg a $5.000/kg → stock 2000.0000,
+   `costoActual` resultante 5.0000 (valor total preservado).
 5. Cambio de base con movimientos: editar producto con movimientos, cambiar unidad → 400 (BadRequest).
 
 ### Manual Testing (Swagger)

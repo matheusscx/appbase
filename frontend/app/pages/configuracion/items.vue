@@ -400,32 +400,7 @@ function emptyForm() {
 
 const form = ref(emptyForm())
 const formCostoActual = ref<string | null>(null)
-
-/** Misma aritmética que el backend: cantidad → unidad base del insumo × costo_actual. */
-function convertirCantidadABase(
-  cantidad: string,
-  desdeCodigo: string,
-  haciaCodigo: string,
-): Decimal | null {
-  if (desdeCodigo === haciaCodigo) {
-    try {
-      return new Decimal(cantidad)
-    } catch {
-      return null
-    }
-  }
-  const uDesde = unidadesMedidaStore.getByCodigo(desdeCodigo)
-  const uHacia = unidadesMedidaStore.getByCodigo(haciaCodigo)
-  if (!uDesde || !uHacia || uDesde.magnitud !== uHacia.magnitud) return null
-  try {
-    return new Decimal(cantidad)
-      .mul(uDesde.factorBase)
-      .div(uHacia.factorBase)
-      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
-  } catch {
-    return null
-  }
-}
+const { convertirCantidad } = useUnidadConversion()
 
 /** Preview en vivo del costo de receta al agregar/quitar/cambiar ingredientes. */
 const costoRecetaCalculado = computed((): string | null => {
@@ -446,7 +421,7 @@ const costoRecetaCalculado = computed((): string | null => {
       continue
     }
     if (cantidad.isNaN() || cantidad.lessThanOrEqualTo(0)) continue
-    const cantidadBase = convertirCantidadABase(
+    const cantidadBase = convertirCantidad(
       ing.cantidad,
       ing.unidadCodigo,
       prod.unidadMedida,
@@ -1012,20 +987,15 @@ const conversionPreview = computed(() => {
   const cantidad = ajusteForm.value.cantidad
   if (!base || !desde || !cantidad || desde === base) return null
 
-  const uDesde = unidadesMedidaStore.getByCodigo(desde)
-  const uBase = unidadesMedidaStore.getByCodigo(base)
-  if (!uDesde || !uBase || uDesde.magnitud !== uBase.magnitud) return null
+  const convertida = convertirCantidad(cantidad, desde, base)
+  if (!convertida) return null
+  return `${cantidad} ${desde} → ${formatStock(convertida.toString(), base)}`
+})
 
-  try {
-    const convertida = new Decimal(cantidad)
-      .mul(uDesde.factorBase)
-      .div(uBase.factorBase)
-      .toDecimalPlaces(4, Decimal.ROUND_HALF_UP)
-    return `${cantidad} ${desde} → ${formatStock(convertida.toString(), base)}`
-  }
-  catch {
-    return null
-  }
+/** El costo se ingresa "por la unidad seleccionada", no por la unidad base. */
+const costoUnitarioLabel = computed(() => {
+  const unidad = ajusteForm.value.unidadCodigo || stockItem.value?.unidadMedida
+  return unidad ? `Costo unitario (por ${unidad})` : 'Costo unitario'
 })
 
 async function abrirAjusteStock(item: Item) {
@@ -1992,7 +1962,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
           <UFormField
             v-if="ajusteForm.tipo === 'entrada' && ajusteForm.motivo === 'compra'"
-            label="Costo unitario"
+            :label="costoUnitarioLabel"
           >
             <MoneyInput v-model="ajusteForm.costoUnitario" :moneda-id="stockItem?.monedaId" class="w-full" />
           </UFormField>

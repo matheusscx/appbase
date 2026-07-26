@@ -195,6 +195,69 @@ describe('MermasService', () => {
       );
     });
 
+    it('convierte costoUnitario junto con la cantidad preservando el valor total', async () => {
+      // Producto en base 'g'; el usuario merma 2 kg a $5.000/kg.
+      transactionQueryMock.mockResolvedValueOnce([
+        itemRow({ unidad_medida: 'g' }),
+      ]);
+      causasService.assertCausaActiva.mockResolvedValueOnce({
+        id: CAUSA,
+        nombre: 'Vencimiento',
+      });
+      catalogService.convertirUnidad.mockResolvedValueOnce('2000'); // 2 kg → 2000 g
+      inventarioService.registrarMovimiento.mockResolvedValueOnce({
+        movimientoId: 'mov-4',
+        stockAnterior: '3000',
+        stockResultante: '1000',
+      });
+
+      const result = await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        cantidad: '2',
+        unidadCodigo: 'kg',
+        causaMermaId: CAUSA,
+        costoUnitario: '5000',
+      });
+
+      // Valor total preservado: 2 kg × 5.000/kg = 10.000 = 2000 g × 5/g.
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ cantidad: '2000', costoUnitario: '5.0000' }),
+      );
+      expect(result.costoUnitario).toBe('5.0000');
+      expect(result.costoPerdido).toBe('10000.0000');
+    });
+
+    it('sin costoUnitario explícito usa costo_actual (ya en unidad base) sin convertir', async () => {
+      transactionQueryMock.mockResolvedValueOnce([
+        itemRow({ unidad_medida: 'kg', costo_actual: '100' }),
+      ]);
+      causasService.assertCausaActiva.mockResolvedValueOnce({
+        id: CAUSA,
+        nombre: 'Vencimiento',
+      });
+      catalogService.convertirUnidad.mockResolvedValueOnce('0.5'); // 500 g → 0.5 kg
+      inventarioService.registrarMovimiento.mockResolvedValueOnce({
+        movimientoId: 'mov-5',
+        stockAnterior: '10',
+        stockResultante: '9.5',
+      });
+
+      const result = await service.registrar(TENANT, USER, {
+        itemId: ITEM,
+        cantidad: '500',
+        unidadCodigo: 'g',
+        causaMermaId: CAUSA,
+      });
+
+      expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ cantidad: '0.5', costoUnitario: undefined }),
+      );
+      expect(result.costoUnitario).toBe('100'); // costo_actual tal cual, sin convertir
+      expect(result.costoPerdido).toBe('50.0000'); // 0.5 kg × 100/kg
+    });
+
     it('rechaza causa inactiva vía assertCausaActiva', async () => {
       transactionQueryMock.mockResolvedValueOnce([itemRow()]);
       causasService.assertCausaActiva.mockRejectedValueOnce(

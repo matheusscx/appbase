@@ -2019,6 +2019,58 @@ describe('ItemsService', () => {
       );
     });
 
+    it('convierte costoUnitario junto con la cantidad preservando el valor total', async () => {
+      // Producto en base 'g'; se compran 2 kg a $5.000/kg.
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          { unidad_medida: 'g', modo_inventario: 'cantidad' },
+        ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('2000'); // 2 kg → 2000 g
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        stockResultante: '2000',
+      });
+
+      await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        cantidad: 2,
+        tipo: 'entrada',
+        motivo: 'compra',
+        unidadCodigo: 'kg',
+        costoUnitario: '5000',
+      } as never);
+
+      // Valor total preservado: 2 kg × 5.000/kg = 10.000 = 2000 g × 5/g.
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ cantidad: '2000', costoUnitario: '5.0000' }),
+      );
+    });
+
+    it('no convierte costoUnitario cuando la compra ya viene en la unidad base', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          { unidad_medida: 'kg', modo_inventario: 'cantidad' },
+        ]);
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        stockResultante: '2',
+      });
+
+      await service.ajustarStock('tenant-uuid', 'usuario-uuid', 'item-uuid', {
+        cantidad: 2,
+        tipo: 'entrada',
+        motivo: 'compra',
+        unidadCodigo: 'kg',
+        costoUnitario: '5000',
+      } as never);
+
+      expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ cantidad: '2', costoUnitario: '5000' }),
+      );
+    });
+
     it('no consulta el catálogo si no se envía unidadCodigo', async () => {
       managerMock.query.mockResolvedValueOnce([{ tipo: 'producto' }]);
       inventarioServiceMock.registrarMovimiento.mockResolvedValue({

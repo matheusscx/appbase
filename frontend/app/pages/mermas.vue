@@ -39,6 +39,7 @@ const toast = useToast()
 const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
 const unidadesMedidaStore = useUnidadesMedidaStore()
+const { convertirCosto } = useUnidadConversion()
 
 const productos = ref<ProductoOpt[]>([])
 const causas = ref<CausaOpt[]>([])
@@ -113,15 +114,40 @@ const mostrarSelectorUnidad = computed(() =>
   && unidadesOpts.value.length > 1,
 )
 
+/** El costo se ingresa "por la unidad seleccionada", no por la unidad base. */
+const costoUnitarioLabel = computed(() => {
+  const unidad = form.value.unidadCodigo || productoSeleccionado.value?.unidadMedida
+  return unidad ? `Costo unitario (por ${unidad})` : 'Costo unitario'
+})
+
+/** costoUnitario significa "costo por la unidad seleccionada": el prefill
+ * (costo_actual, que está en unidad base) se convierte a la unidad elegida. */
+function prefillCostoUnitario() {
+  const prod = productoSeleccionado.value
+  if (!prod || prod.costoActual == null) {
+    form.value.costoUnitario = prod?.costoActual ?? ''
+    return
+  }
+  const base = prod.unidadMedida ?? 'unidad'
+  const seleccionada = form.value.unidadCodigo || base
+  const convertido = convertirCosto(prod.costoActual, base, seleccionada)
+  form.value.costoUnitario = convertido ? convertido.toString() : prod.costoActual
+}
+
 watch(() => form.value.itemId, (itemId) => {
   const prod = productos.value.find(p => p.id === itemId)
   if (!prod) return
   form.value.unidadCodigo = prod.unidadMedida ?? 'unidad'
-  form.value.costoUnitario = prod.costoActual ?? ''
+  prefillCostoUnitario()
   costoSinActualAck.value = false
   if (prod.costoActual == null) {
     costoSinActualModalOpen.value = true
   }
+})
+
+watch(() => form.value.unidadCodigo, () => {
+  if (!form.value.itemId) return
+  prefillCostoUnitario()
 })
 
 async function cargarCatalogos() {
@@ -403,7 +429,7 @@ const columns: TableColumn<MermaListItem>[] = [
           </UFormField>
 
           <UFormField
-            label="Costo unitario"
+            :label="costoUnitarioLabel"
             :required="sinCostoActual"
             :help="sinCostoActual
               ? 'Obligatorio: valoriza solo esta merma, no actualiza el costo del producto.'

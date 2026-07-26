@@ -26,6 +26,7 @@ import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
+import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
 import {
   PersonalizacionRecetaDto,
   PersonalizacionGrupoInputDto,
@@ -1486,6 +1487,11 @@ export class ItemsService {
       // La conversión ocurre acá y no en registrarMovimiento: el kardex siempre
       // guarda la unidad base del producto, así que no necesita saber de unidades.
       let cantidad = new Decimal(dto.cantidad).toString();
+      // costoUnitario significa "costo por la unidad ingresada", no por la
+      // unidad base: si hay conversión de cantidad, el costo se convierte
+      // junto con ella preservando el valor total (cantidadIngresada ×
+      // costoUnitario == cantidadBase × costoBase).
+      let costoUnitario: string | null = dto.costoUnitario ?? null;
       if (dto.unidadCodigo) {
         const prodRows: { unidad_medida: string; modo_inventario: string }[] =
           await manager.query(
@@ -1499,11 +1505,19 @@ export class ItemsService {
               'Los productos por serie o lote solo admiten su unidad base',
             );
           }
+          const cantidadIngresada = cantidad;
           cantidad = await this.catalogService.convertirUnidad(
             cantidad,
             dto.unidadCodigo,
             unidadBase,
           );
+          if (costoUnitario != null) {
+            costoUnitario = convertirCostoUnitario(
+              cantidadIngresada,
+              costoUnitario,
+              cantidad,
+            );
+          }
         }
       }
 
@@ -1520,7 +1534,7 @@ export class ItemsService {
           unidadIds: dto.unidadIds,
           lote: dto.lote,
           loteId: dto.loteId,
-          costoUnitario: dto.costoUnitario ?? null,
+          costoUnitario,
         });
 
       return { stock: stockResultante, costoActual };

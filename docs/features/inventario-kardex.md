@@ -255,6 +255,14 @@ dentro de una transacción: no repite sus validaciones ni escribe
   `costo_actual` de `item_producto`).
 - Costos `<= 0` se rechazan.
 - En `ajustarStock`, la fila `item_producto` se bloquea con `FOR UPDATE` antes de convertir unidades.
+- **`costoUnitario` se ingresa "por la unidad elegida" (`unidadCodigo`), nunca por la unidad
+  base.** Si hubo conversión de cantidad (`unidadCodigo` distinto de la base del producto), el
+  costo se convierte junto con ella preservando el valor total de la operación
+  (`cantidadIngresada × costoUnitario == cantidadBase × costoBase`); función pura
+  `convertirCostoUnitario` en `backend/src/common/utils/costo-conversion-unidad.util.ts`. En
+  mermas, esto **solo** aplica al `costoUnitario` explícito del DTO — cuando no se envía y se usa
+  `costo_actual` del producto (ya en unidad base), no hay conversión. Detalle y ejemplo:
+  [Conversión de Unidades — Conversión de Costo](./conversion-unidades.md#conversión-de-costo-junto-con-la-cantidad).
 
 **Índices (para performance):**
 - `(tenant_id, item_id)` — consultas por producto del tenant

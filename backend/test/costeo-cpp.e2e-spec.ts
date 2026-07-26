@@ -120,6 +120,48 @@ describe('Costeo CPP (e2e)', () => {
     );
   });
 
+  it('compra en unidad no-base convierte cantidad y costo preservando el valor total', async () => {
+    // Producto con unidad base 'g'; se compra en 'kg' (2 kg a $5.000/kg).
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `CPP Conversión Test ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '0',
+        unidadMedida: 'g',
+      });
+    expect(resCreate.status).toBe(201);
+    const itemUnidadId = (resCreate.body as ItemResponse).id;
+
+    const resCompra = await request(app.getHttpServer())
+      .patch(`/api/items/${itemUnidadId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        cantidad: 2,
+        tipo: 'entrada',
+        motivo: 'compra',
+        unidadCodigo: 'kg',
+        costoUnitario: '5000',
+      });
+    expect(resCompra.status).toBe(200);
+    expect(
+      new Decimal((resCompra.body as { stock: string }).stock).toFixed(4),
+    ).toBe('2000.0000');
+
+    const { body: detalle } = await request(app.getHttpServer())
+      .get(`/api/items/${itemUnidadId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    // Valor total preservado: 2 kg × 5.000/kg = 10.000 = 2000 g × 5/g.
+    expect(new Decimal((detalle as ItemResponse).costoActual!).toFixed(4)).toBe(
+      '5.0000',
+    );
+  });
+
   it('el ajuste de costo pisa el promedio y queda en el kardex', async () => {
     const { body } = await request(app.getHttpServer())
       .post('/api/inventario/ajustes-costo')

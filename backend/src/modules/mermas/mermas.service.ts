@@ -11,6 +11,7 @@ import {
   buildPaginationMeta,
   resolvePagination,
 } from '../../common/utils/pagination.util';
+import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { CausasMermaService } from './causas-merma.service';
@@ -111,7 +112,10 @@ export class MermasService {
       let cantidadStr = cantidad.toString();
 
       const unidadBase = itemRows[0].unidad_medida ?? 'unidad';
-      if (dto.unidadCodigo && dto.unidadCodigo !== unidadBase) {
+      const cantidadIngresada = cantidad;
+      const huboConversion =
+        !!dto.unidadCodigo && dto.unidadCodigo !== unidadBase;
+      if (huboConversion) {
         if (itemRows[0].modo_inventario !== 'cantidad') {
           throw new BadRequestException(
             'Los productos por serie o lote solo admiten su unidad base',
@@ -119,7 +123,7 @@ export class MermasService {
         }
         cantidadStr = await this.catalogService.convertirUnidad(
           cantidadStr,
-          dto.unidadCodigo,
+          dto.unidadCodigo!,
           unidadBase,
         );
       }
@@ -140,7 +144,17 @@ export class MermasService {
         if (c.isNaN() || c.lessThanOrEqualTo(0)) {
           throw new BadRequestException('El costo unitario debe ser mayor a 0');
         }
-        costoUnitarioParam = c.toString();
+        // costoUnitario es "costo por la unidad ingresada" (dto.unidadCodigo),
+        // no por la unidad base: si hubo conversión de cantidad, se convierte
+        // junto con ella preservando el valor total. costo_actual, en cambio,
+        // ya está en unidad base y nunca pasa por acá.
+        costoUnitarioParam = huboConversion
+          ? convertirCostoUnitario(
+              cantidadIngresada.toString(),
+              dto.costoUnitario,
+              cantidadStr,
+            )
+          : c.toString();
       } else {
         costoUnitarioParam = undefined;
       }
