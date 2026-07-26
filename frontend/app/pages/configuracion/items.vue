@@ -130,6 +130,7 @@ interface Movimiento {
   stockAnterior: string
   stockResultante: string
   costoUnitario: string | null
+  costoAnterior: string | null
   usuarioNombre: string | null
   comentario: string | null
   creadoEl: string
@@ -763,7 +764,7 @@ async function abrirEditar(item: Item) {
       precioIncluyeImpuesto: detalle.precioIncluyeImpuesto,
       activo: detalle.activo,
       stock: detalle.stock ?? '0',
-      costo: detalle.costoActual ?? '',
+      costo: '',
       unidadMedida: detalle.unidadMedida ?? 'unidad',
       modoInventario: detalle.modoInventario ?? 'cantidad',
       fechaElaboracion: detalle.fechaElaboracion
@@ -1080,14 +1081,14 @@ async function ejecutarAjusteStock() {
         body.loteId = f.loteId
       }
     }
-    const result = await useApiFetch<{ stock: string }>(
+    const result = await useApiFetch<{ stock: string; costoActual: string | null }>(
       `${apiUrl}/items/${productoId}/stock`,
       { method: 'PATCH', body },
     )
     const item = items.value.find((i) => i.id === productoId)
     if (item) {
       item.stock = result.stock
-      if (envioCostoCompra) item.costoActual = f.costoUnitario
+      item.costoActual = result.costoActual
     }
     toast.add({ title: `Stock actualizado: ${result.stock}`, color: 'success' })
     stockModalOpen.value = false
@@ -2226,14 +2227,23 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           </template>
           <template #tipo-cell="{ row }">
             <UBadge
-              :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
-              :color="row.original.tipo === 'entrada' ? 'success' : 'warning'"
+              :label="row.original.tipo === 'entrada' ? 'Entrada' : row.original.tipo === 'salida' ? 'Salida' : 'Ajuste'"
+              :color="row.original.tipo === 'entrada' ? 'success' : row.original.tipo === 'salida' ? 'warning' : 'neutral'"
               variant="subtle"
               size="sm"
             />
           </template>
+          <template #cantidad-cell="{ row }">
+            <span v-if="row.original.motivo === 'ajuste_costo'" class="text-muted">—</span>
+            <span v-else>{{ row.original.cantidad }}</span>
+          </template>
           <template #costoUnitario-cell="{ row }">
-            <span class="font-mono">
+            <span v-if="row.original.motivo === 'ajuste_costo'" class="font-mono">
+              {{ formatMonto(row.original.costoAnterior, historialItemMonedaId) }}
+              <span class="text-muted">→</span>
+              {{ formatMonto(row.original.costoUnitario, historialItemMonedaId) }}
+            </span>
+            <span v-else class="font-mono">
               {{ row.original.costoUnitario ? formatMonto(row.original.costoUnitario, historialItemMonedaId) : '—' }}
             </span>
           </template>
