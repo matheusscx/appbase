@@ -252,9 +252,3 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   duplicado legacy de `Usuario` (`usuario.entity.ts`), sin referencias ni `forFeature`.
   Confirmar y eliminar. (Detectado al automatizar la invariante uuid — ambos tenían el
   mismo `googleId`.)
-- [ ] `inventario.service.ts` (~líneas 112-115 y 297-300) — dos comentarios dicen que el
-  pre-check de `registrarAjusteCosto` corre "fuera de la transacción". Está **dentro**
-  (mismo `manager` de `dataSource.transaction`); lo que ocurre es que corre **antes del
-  row lock**. El código es correcto —bajo READ COMMITTED una compra concurrente que
-  commitea entre el `SELECT` del pre-check y el `SELECT ... FOR UPDATE` sí es visible—,
-  pero la redacción explica mal el mecanismo. Corregir la frase a "antes del lock".

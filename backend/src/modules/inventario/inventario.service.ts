@@ -76,8 +76,9 @@ export class InventarioService {
     stockResultante: string;
     // Costo vigente antes/después de este movimiento, leídos dentro del mismo
     // FOR UPDATE que serializa la concurrencia — a diferencia de un pre-check
-    // fuera de la transacción, estos valores son los que de verdad quedaron
-    // escritos en el kardex.
+    // que corre antes de tomar el lock (bajo READ COMMITTED, una compra
+    // concurrente que commitea en el medio ya es visible), estos valores son
+    // los que de verdad quedaron escritos en el kardex.
     costoActualPrevio: string | null;
     costoActual: string | null;
   }> {
