@@ -40,21 +40,30 @@ Arreglar (a) sin cerrar (b) no sirve: el promedio calculado se pisaría igual.
    "un costo por producto" del que dependen `item_receta.costo_actual`, `item_combo.costo_actual`
    y el simulador de impacto de costos. CPP es un escalar: encaja en la columna que ya existe.
 2. **Método fijo, no configurable por tenant.** Sin datos productivos, si más adelante hace
-   falta FIFO se agrega la columna y el branch sin migrar a nadie. No se construye hoy la mitad
-   de una feature fiscal que todavía no sabemos si el producto necesita — la pregunta
-   "costo de gestión vs costo tributario" (investigación §6.1) sigue abierta y **este diseño no
-   la cierra**.
-3. **Una sola regla, verificable en CI:** `item_producto.costo_actual` **nunca cambia salvo
+   falta FIFO se agrega la columna y el branch sin migrar a nadie.
+3. **El costo es de gestión, deliberadamente compatible con lo tributario.** Decisión del owner
+   (2026-07-26), cierra la pregunta §6.1 de la investigación. El costo existe para margen,
+   food-cost y valorización de mermas; **el número tributario lo produce el contador**, no
+   nosotros. La compatibilidad consiste en usar un método que el SII admite (CPP, art. 30 LIR)
+   para que el kardex le sirva de punto de partida.
+
+   Lo que lo sostiene: el **art. 41 N°3 LIR** obliga a corregir las existencias a **costo de
+   reposición** al cierre del balance. O sea, un reporte de existencias valorizadas que
+   construyéramos **no sería el número tributario final de todos modos** — sería un insumo del
+   contador. Construirlo como si fuera la respuesta sería falsa precisión. Es la misma forma
+   del **ADR-010**: congelar el hecho en la transacción, diferir lo que solo formatea o
+   transmite.
+4. **Una sola regla, verificable en CI:** `item_producto.costo_actual` **nunca cambia salvo
    como consecuencia de un movimiento en `movimientos_inventario`**. Tres productores, ninguno
    más.
-4. **El costo sale del form de edición del item.** No es un atributo que se tipea junto al
+5. **El costo sale del form de edición del item.** No es un atributo que se tipea junto al
    nombre y el SKU: es una consecuencia de mover mercadería. Se mantiene en la **creación**
    (es el costo de apertura, y va acompañado del movimiento `inventario_inicial`).
-5. **Existe una salida legítima para corregir un costo**, pero auditada: la nueva operación
+6. **Existe una salida legítima para corregir un costo**, pero auditada: la nueva operación
    `ajuste_costo`. Sin ella, quien tipeó mal un costo y ya tiene stock inventaría una compra
    falsa para corregirlo, ensuciando stock *y* costo. Es el mismo movimiento que ya se hizo con
    las mermas: de ajuste anónimo a operación con motivo explícito.
-6. **`ajuste_costo` estrena `tipo='ajuste'`**, valor ya reservado en el enum del kardex y nunca
+7. **`ajuste_costo` estrena `tipo='ajuste'`**, valor ya reservado en el enum del kardex y nunca
    implementado. El recuento de inventario (eje 4 de la investigación) entrará después por la
    misma puerta con `motivo='recuento'`. No se inventa un eje nuevo.
 
@@ -231,12 +240,14 @@ fenómeno recurrente que se quiera reportar por categoría.
 
 ## 8. Fuera de alcance
 
-- FIFO y capas de costo — decisión 2. Se agrega si aparece la necesidad fiscal.
+- FIFO, capas de costo y elección de método por tenant — decisiones 2 y 3.
 - Módulo de compras / órdenes de compra / recepción parcial (eje 3 de la investigación).
 - Recuento de inventario y `motivo='recuento'` (eje 4).
 - Bodegas y traslados (eje 2).
 - *Landed cost* (flete e impuestos prorrateados al costo unitario).
-- Reporte de existencias valorizadas.
+- Reporte de existencias valorizadas y corrección monetaria — decisión 3: el número tributario
+  lo produce el contador. Lo que sí queda pendiente como insumo útil (no en esta spec) es un
+  **kardex valorizado exportable**.
 - Costo por lote o por unidad serializada.
 - Recálculo histórico de movimientos ya registrados: el kardex es inmutable, el cambio rige
   hacia adelante. Sin datos productivos no hay backfill que hacer — se actualiza el seeder y se
@@ -249,7 +260,7 @@ fenómeno recurrente que se quiera reportar por categoría.
 | Archivo | Qué cambia |
 |---|---|
 | `docs/features/inventario-kardex.md` | Semántica de `costo_actual`, tabla de motivos, `ajuste_costo`, endpoint nuevo |
-| `docs/adr/016-costeo-promedio-ponderado-movil.md` | ADR nuevo: por qué CPP y no FIFO, por qué fijo y no configurable |
+| `docs/adr/016-costeo-promedio-ponderado-movil.md` | ADR nuevo: por qué CPP y no FIFO, por qué fijo y no configurable, y por qué el costo es de gestión y no tributario (art. 41 N°3 LIR) |
 | `docs/adr/README.md` | Índice |
 | `docs/ESTADO.md` | Fila de la funcionalidad |
 | `docs/PRODUCTO.md` | Regla de negocio: cómo se determina el costo de un producto |
