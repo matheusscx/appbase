@@ -83,4 +83,29 @@ describe('RecuentosService', () => {
       ).rejects.toThrow('El recuento necesita al menos un producto');
     });
   });
+
+  describe('RecuentosService — listar sesiones', () => {
+    it('formatea diferenciaNeta con Decimal.js aunque Postgres devuelva el literal entero del COALESCE', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            recuento_id: 'recuento-1',
+            estado: 'borrador',
+            comentario: null,
+            creado_el: new Date('2026-07-26T10:00:00Z'),
+            aplicado_el: null,
+            cantidad_lineas: 2,
+            // Postgres devuelve '0' (sin escala) cuando COALESCE cae en el
+            // literal entero, no '0.0000' — el bug que este test fija.
+            diferencia_neta: '0',
+          },
+        ]);
+
+      const res = await service.findAll(TENANT_ID, {});
+
+      expect(res.data[0].diferenciaNeta).toBe('0.0000');
+      expect(res.data[0].cantidadLineas).toBe(2);
+    });
+  });
 });

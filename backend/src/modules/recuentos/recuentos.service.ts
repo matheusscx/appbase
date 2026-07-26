@@ -196,7 +196,7 @@ export class RecuentosService {
         creadoEl: r.creado_el,
         aplicadoEl: r.aplicado_el,
         cantidadLineas: r.cantidad_lineas,
-        diferenciaNeta: r.diferencia_neta,
+        diferenciaNeta: new Decimal(r.diferencia_neta).toFixed(4),
       })),
       meta: buildPaginationMeta(page, pageSize, total),
     };
