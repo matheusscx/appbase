@@ -22,7 +22,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Catálogo de items (productos y servicios) | ✅ Implementado |
 | Gestión de inventario (kardex de movimientos de stock) | ✅ Implementado |
 | Inventario serializado (modo `serie`) y por lote (modo `lote`) | ✅ Implementado (2026-06-28) |
-| Costo por producto (último costo) + congelado en kardex | ✅ Implementado (2026-07-14) |
+| Costeo por promedio ponderado móvil (CPP) + ajuste de costo auditado | ✅ Implementado (2026-07-26) |
 | Conversión de unidades de medida (catálogo global + conversión en movimientos) | ✅ Implementado (2026-07-14) |
 | Tipo item ingrediente (insumos no vendibles) | ✅ Implementado (2026-07-15) |
 | Recetas + criticidad de ingredientes (bloqueante/no bloqueante) | ✅ Implementado (2026-07-15) |

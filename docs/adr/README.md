@@ -27,6 +27,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [013](./013-grupos-modificadores-reutilizables.md) | Grupos de modificadores reutilizables: sin tipo declarado (familia derivada), precio en el grupo sin override, min/max en unidades, opción siempre bloqueante | Accepted | 2026-07-20 |
 | [014](./014-cantidades-consumo-por-item.md) | Cantidades de consumo por item: modelo híbrido default+override sobre grupos de modificadores (cantidad/precioExtra por receta), llave del override por UUIDs preservados, cero migración | Accepted | 2026-07-21 |
 | [015](./015-grupos-anidados-combo-un-nivel.md) | Grupos anidados en combos: automático, por unidad, un nivel, cero tablas nuevas (reuso de `resolverGruposDeItem`/`venderOpcionesGrupos`); cambio global de selector en vez de radio buttons | Accepted | 2026-07-22 |
+| [016](./016-costeo-promedio-ponderado-movil.md) | Costeo por promedio ponderado móvil (CPP), método fijo, de gestión — no FIFO, no elegible por tenant, no tributario | Accepted | 2026-07-26 |
 
 ## Creating a New ADR
 

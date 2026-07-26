@@ -201,7 +201,23 @@ Trazabilidad de stock para items tipo **producto**. Todo cambio de stock queda r
 - **Ajustes manuales:** entrada/salida/ajuste con `motivo = 'ajuste_manual'` y comentario.
 - `tenant_id` y `usuario_id` vienen del token, nunca del body.
 
-**Fuera de alcance (fases futuras):** bodegas/almacenes y stock por bodega, traspasos, costeo y valoración de inventario, conteos físicos masivos.
+**Costo de un producto: promedio ponderado móvil (CPP), no último costo.**
+`item_producto.costo_actual` se recalcula **solo** con una entrada `motivo = 'compra'`
+que trae `costoUnitario`: `(stock_anterior × costo_actual + cantidad × costo_compra) /
+(stock_anterior + cantidad)`. Sin stock previo o sin costo previo, el costo de compra
+manda tal cual (no hay masa que promediar). Ninguna otra entrada ni ninguna salida mueve
+el costo — ni siquiera la devolución de venta, porque la unidad que vuelve ya salió con
+un costo congelado y re-promediarla mezclaría costo de venta con costo de compra.
+
+Corregir un costo mal cargado (typo, migración) tiene una vía explícita y auditada: la
+operación `ajuste_costo` (`tipo = 'ajuste'`), que exige un comentario y deja registrado
+en el kardex el costo anterior y el nuevo. `PATCH /items/:id` **no** puede escribir el
+costo directo — solo existe en la creación del item, como costo de apertura. El costo es
+de gestión (margen, food-cost, valorización de mermas), no la valorización tributaria de
+existencias: esa la produce el contador. Detalle y porqué: [ADR-016](./adr/016-costeo-promedio-ponderado-movil.md).
+
+**Fuera de alcance (fases futuras):** bodegas/almacenes y stock por bodega, traspasos,
+conteos físicos masivos, FIFO o método de costeo elegible por tenant.
 
 ---
 

@@ -106,6 +106,56 @@ igual a `Promise.all` sobre queries: sigue siendo N round-trips.
 `calcularDisponibleReceta`/`Combo` por fila. Difícil de detectar por lint → se revisa en
 el cierre con el sub-agente independiente de `verify-feature`.*
 
+### ❌ Campo que escribe estado derivado sin pasar por su choke point
+
+`item_producto.costo_actual` es un valor derivado del kardex (promedio ponderado móvil,
+ver [ADR-016](../adr/016-costeo-promedio-ponderado-movil.md)) — su única puerta legítima
+es `InventarioService.registrarMovimiento`. `PATCH /items/:id` aceptaba `dto.costo` y lo
+escribía directo en `costo_actual`, sin generar ningún movimiento de inventario: el
+número quedaba corrompido sin rastro de quién lo cambió ni por qué.
+
+```ts
+// MAL — escribe el campo derivado directo, sin movimiento de inventario
+if (dto.costo !== undefined) {
+  await repo.update(id, { costoActual: dto.costo });
+}
+
+// BIEN — el campo se rechaza siempre, con un validador que siempre falla
+@ValidatorConstraint({ name: 'costoNoEditable', async: false })
+class CostoNoEditableConstraint implements ValidatorConstraintInterface {
+  validate(): boolean { return false; }
+  defaultMessage(): string {
+    return 'El costo no se edita desde el item: usá Inventario → Ajuste de costo';
+  }
+}
+// @ValidateIf, no @IsOptional: @IsOptional también saltea la validación cuando
+// el valor es `null` explícito, no solo cuando la propiedad falta — dejaría
+// pasar `{ "costo": null }` con 200. @ValidateIf solo saltea si falta.
+@ValidateIf((o) => o.costo !== undefined)
+@Validate(CostoNoEditableConstraint)
+costo?: string;
+```
+
+**La trampa del `ValidationPipe`:** el pipe global usa `whitelist: true` **sin**
+`forbidNonWhitelisted` (`main.ts`). Si la solución es simplemente *borrar* el campo del
+DTO, la propiedad no autorizada se **descarta en silencio** — el request devuelve **200**
+sin haber cambiado nada, un fallo callado peor que el bug original. Hay que rechazarlo
+**explícitamente** con un validador que siempre falla y un mensaje que diga dónde sí
+hacerlo; activar `forbidNonWhitelisted` globalmente cambiaría el comportamiento de todos
+los endpoints y es una decisión aparte, no el parche de un campo.
+
+**Límite conocido del test de invariante que lo enforca**
+(`backend/src/common/invariants/costo-actual-choke-point.invariant.spec.ts`): es una
+heurística de texto sobre template literals SQL (busca `costo_actual\s*=\s*\$` fuera de
+`inventario.service.ts`). **No detectaría** una escritura hecha vía el
+`Repository<ItemProducto>` inyectado en `items.service.ts` (hoy sin uso) llamando a
+`.save()`/`.update()` con la propiedad camelCase `costoActual` — el texto literal
+`costo_actual` no aparece en un `.ts` que arma el UPDATE vía TypeORM en vez de SQL crudo.
+El test frena el patrón de bug real (SQL directo, que es como se rompió antes) y el
+copy-paste accidental de ese SQL; no es un parser que entienda TypeORM. Si alguna vez se
+usa ese repositorio para escribir en `item_producto`, la revisión de código —no el test—
+es quien tiene que atajarlo.
+
 ---
 
 ## Frontend
