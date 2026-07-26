@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { unwrap } from '../../common/utils/pg-returning.util';
 import { CreateMotivoDiferenciaDto } from './dto/create-motivo-diferencia.dto';
 import { UpdateMotivoDiferenciaDto } from './dto/update-motivo-diferencia.dto';
 
@@ -28,13 +29,6 @@ type Runner = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
 
 const COLS =
   'motivo_diferencia_id, nombre, activo, requiere_comentario, es_fijo';
-
-// TypeORM + pg: INSERT/UPDATE ... RETURNING llega como [rows, rowCount], no como rows.
-function unwrap<T>(raw: unknown): T[] {
-  return Array.isArray((raw as unknown[])[0])
-    ? ((raw as T[][])[0] ?? [])
-    : ((raw as T[]) ?? []);
-}
 
 function toItem(r: Row): MotivoDiferenciaListItem {
   return {

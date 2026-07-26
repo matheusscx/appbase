@@ -128,6 +128,11 @@ se pasa al service. Ejemplo completo: `monedas.controller.ts`.
   `findOne` después del write. Create → entidad para insertar en lista; update →
   patch mergeable (`{ id, ...camposTocados }`). El front hace
   `{ ...prev, ...saved }` sin otro GET.
+- **`RETURNING` con `dataSource.query` siempre pasa por `unwrap()`:** TypeORM +
+  pg devuelve `INSERT/UPDATE ... RETURNING` como `[rows, rowCount]`, no como
+  `rows` — tipar el resultado directo compila pero trae la forma equivocada en
+  runtime. Usar `unwrap<T>(...)` de `common/utils/pg-returning.util.ts` sobre
+  el resultado de toda query con `RETURNING`.
 
 ---
 

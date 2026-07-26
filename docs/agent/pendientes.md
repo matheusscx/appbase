@@ -231,18 +231,6 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   Es el **mismo patrón** que `propinaDirecta`/`propinaCierreMesa` (money `@IsNumberString()`
   sin `> 0`) — cerrar con un **barrido de positividad** sobre los DTOs de dinero de caja y
   propinas a la vez (no un fix aislado). Auditable en `movimientos_caja`; no bloqueante.
-- [ ] **`causas-merma.service.ts` — mismo latente `UPDATE ... RETURNING` sin unwrap que
-  se corrigió en `motivos-diferencia.service.ts`** (backend) — `create()` (línea ~58) y
-  `update()` (línea ~101) tipan directo el resultado de `dataSource.query('INSERT/UPDATE
-  ... RETURNING ...')` como `CausaMermaRow[]` y leen `rows[0]` sin pasar por ningún
-  unwrap. `motivos-diferencia.service.ts` documenta el motivo real: "TypeORM + pg:
-  INSERT/UPDATE ... RETURNING llega como `[rows, rowCount]`, no como `rows`" y agrega un
-  helper `unwrap()` para los mismos dos métodos. `causas-merma.service.ts` no tiene ese
-  helper — hoy funciona porque nadie lo notó romperse (posible que la config actual del
-  driver no dispare el caso, o que quede enmascarado por otro camino), pero es el mismo
-  patrón de riesgo. Cerrar aplicando el mismo `unwrap()` (o extrayéndolo a un helper
-  compartido si se toca un tercer service con el mismo patrón — regla de "duplicar dos
-  veces es aceptable, se extrae a la tercera" de `CLAUDE.md`).
 - [ ] `items.vue:81` — campo `esPendiente` en `GrupoOpcionOverrideRow` se setea pero
   nunca se lee (el badge re-deriva la condición inline). O wirear el badge a este campo,
   o quitarlo del tipo.
