@@ -33,6 +33,7 @@ interface RecuentoLinea {
   stockSistema: string;
   cantidadContada: string | null;
   diferencia: string | null;
+  motivoDiferenciaId: string | null;
 }
 interface RecuentoDetalleResponse {
   id: string;
@@ -351,5 +352,186 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     ).data.find((r) => r.id === recuentoId)!;
     expect(filaConConteo.cantidadLineas).toBe(2);
     expect(filaConConteo.diferenciaNeta).toBe('5.0000');
+  });
+});
+
+describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () => {
+  let app: INestApplication<App>;
+  let token: string;
+  let motivoId: string;
+
+  const crearProducto = async (stock: number) => {
+    const resCreateItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto carga-conteo E2E ${Date.now()}-${Math.random()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+      });
+    const id = (resCreateItem.body as ItemResponse).id;
+    await request(app.getHttpServer())
+      .patch(`/api/items/${id}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'entrada',
+        motivo: 'compra',
+        cantidad: stock,
+        costoUnitario: '1000',
+      });
+    return id;
+  };
+
+  const crearSesion = async (itemIds: string[]) => {
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds });
+    return (resCreate.body as RecuentoCreateResponse).id;
+  };
+
+  const primeraLinea = async (recuentoId: string) => {
+    const { body } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    return (body as RecuentoDetalleResponse).lineas[0];
+  };
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    token = await login(app);
+
+    const { body: motivos } = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia-inventario')
+      .set('Authorization', `Bearer ${token}`);
+    motivoId = (motivos as MotivoDiferenciaInventarioItem[]).find(
+      (m) => m.esFijo,
+    )!.id;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('PATCH de línea guarda la cantidad contada y calcula la diferencia', async () => {
+    const itemId = await crearProducto(10);
+    const recuentoId = await crearSesion([itemId]);
+    const linea = await primeraLinea(recuentoId);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '8' });
+    expect(res.status).toBe(200);
+
+    const { body } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    const lineaActualizada = (body as RecuentoDetalleResponse).lineas[0];
+    expect(lineaActualizada.cantidadContada).toBe('8.0000');
+    expect(lineaActualizada.diferencia).toBe('-2.0000');
+  });
+
+  it('PATCH de línea rechaza una cantidad negativa con 400', async () => {
+    const itemId = await crearProducto(5);
+    const recuentoId = await crearSesion([itemId]);
+    const linea = await primeraLinea(recuentoId);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '-1' });
+    expect(res.status).toBe(400);
+  });
+
+  it('PATCH de línea rechaza un motivoDiferenciaId de otro tenant o inexistente', async () => {
+    const itemId = await crearProducto(5);
+    const recuentoId = await crearSesion([itemId]);
+    const linea = await primeraLinea(recuentoId);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        cantidadContada: '3',
+        motivoDiferenciaId: '00000000-0000-0000-0000-000000000000',
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('PATCH de línea acepta un motivo de diferencia válido del catálogo', async () => {
+    const itemId = await crearProducto(5);
+    const recuentoId = await crearSesion([itemId]);
+    const linea = await primeraLinea(recuentoId);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '3', motivoDiferenciaId: motivoId });
+    expect(res.status).toBe(200);
+
+    const { body } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect((body as RecuentoDetalleResponse).lineas[0].motivoDiferenciaId).toBe(
+      motivoId,
+    );
+  });
+
+  it('PATCH de sesión actualiza el comentario y el motivo por defecto', async () => {
+    const itemId = await crearProducto(5);
+    const recuentoId = await crearSesion([itemId]);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        comentario: 'Recuento mensual',
+        motivoDiferenciaDefaultId: motivoId,
+      });
+    expect(res.status).toBe(200);
+
+    const { body } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    const detalle = body as RecuentoDetalleResponse & {
+      comentario: string | null;
+      motivoDiferenciaDefaultId: string | null;
+    };
+    expect(detalle.comentario).toBe('Recuento mensual');
+    expect(detalle.motivoDiferenciaDefaultId).toBe(motivoId);
+  });
+
+  it('POST cancelar deja la sesión en cancelado y bloquea nuevos conteos', async () => {
+    const itemId = await crearProducto(5);
+    const recuentoId = await crearSesion([itemId]);
+    const linea = await primeraLinea(recuentoId);
+
+    const resCancelar = await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resCancelar.status).toBe(201);
+
+    const { body } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect((body as RecuentoDetalleResponse).estado).toBe('cancelado');
+
+    const resPatch = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '1' });
+    expect(resPatch.status).toBe(400);
   });
 });

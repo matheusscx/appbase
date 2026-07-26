@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -16,6 +17,8 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { RecuentosService } from './recuentos.service';
 import { CreateRecuentoDto } from './dto/create-recuento.dto';
+import { UpdateRecuentoDto } from './dto/update-recuento.dto';
+import { UpdateRecuentoLineaDto } from './dto/update-recuento-linea.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('recuentos')
@@ -44,5 +47,35 @@ export class RecuentosController {
   findOne(@Req() req: Request, @Param('id') id: string) {
     const { tenantId } = req.user as { tenantId: string };
     return this.recuentosService.findOne(tenantId, id);
+  }
+
+  @Patch(':id/lineas/:lineaId')
+  @RequiresPermiso('Inventario', 'Crear')
+  updateLinea(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('lineaId') lineaId: string,
+    @Body() dto: UpdateRecuentoLineaDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.recuentosService.updateLinea(tenantId, id, lineaId, dto);
+  }
+
+  @Patch(':id')
+  @RequiresPermiso('Inventario', 'Crear')
+  update(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: UpdateRecuentoDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.recuentosService.update(tenantId, id, dto);
+  }
+
+  @Post(':id/cancelar')
+  @RequiresPermiso('Inventario', 'Crear')
+  cancelar(@Req() req: Request, @Param('id') id: string) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.recuentosService.cancelar(tenantId, id);
   }
 }

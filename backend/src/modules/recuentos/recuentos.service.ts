@@ -14,6 +14,9 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import { CreateRecuentoDto } from './dto/create-recuento.dto';
+import { UpdateRecuentoDto } from './dto/update-recuento.dto';
+import { UpdateRecuentoLineaDto } from './dto/update-recuento-linea.dto';
+import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
 
 interface ItemParaRecuentoRow {
   item_id: string;
@@ -53,6 +56,14 @@ interface RecuentoLineaRow {
   motivo_diferencia_id: string | null;
 }
 
+interface RecuentoLineaUpdateRow {
+  linea_id: string;
+  item_id: string;
+  stock_sistema: string;
+  cantidad_contada: string | null;
+  motivo_diferencia_id: string | null;
+}
+
 export interface RecuentoListItem {
   id: string;
   estado: string;
@@ -84,11 +95,21 @@ export interface RecuentoDetalle {
   lineas: RecuentoLinea[];
 }
 
+export interface RecuentoLineaActualizada {
+  lineaId: string;
+  itemId: string;
+  stockSistema: string;
+  cantidadContada: string | null;
+  diferencia: string | null;
+  motivoDiferenciaId: string | null;
+}
+
 @Injectable()
 export class RecuentosService {
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly motivosDiferenciaInventarioService: MotivosDiferenciaInventarioService,
   ) {}
 
   async create(
@@ -249,5 +270,161 @@ export class RecuentosService {
         motivoDiferenciaId: l.motivo_diferencia_id,
       })),
     };
+  }
+
+  async updateLinea(
+    tenantId: string,
+    recuentoId: string,
+    lineaId: string,
+    dto: UpdateRecuentoLineaDto,
+  ): Promise<RecuentoLineaActualizada> {
+    if (
+      dto.cantidadContada !== undefined &&
+      dto.cantidadContada !== null &&
+      new Decimal(dto.cantidadContada).lessThan(0)
+    ) {
+      throw new BadRequestException(
+        'La cantidad contada no puede ser negativa',
+      );
+    }
+
+    return this.dataSource.transaction(async (manager: EntityManager) => {
+      await this.assertBorrador(manager, tenantId, recuentoId);
+
+      if (dto.motivoDiferenciaId !== undefined) {
+        await this.motivosDiferenciaInventarioService.assertMotivoActivo(
+          manager,
+          tenantId,
+          dto.motivoDiferenciaId,
+        );
+      }
+
+      const sets = ['actualizado_el = NOW()'];
+      const params: unknown[] = [];
+      let idx = 1;
+
+      if (dto.cantidadContada !== undefined) {
+        sets.push(`cantidad_contada = $${idx++}`);
+        params.push(
+          dto.cantidadContada === null
+            ? null
+            : new Decimal(dto.cantidadContada).toFixed(4),
+        );
+      }
+      if (dto.motivoDiferenciaId !== undefined) {
+        sets.push(`motivo_diferencia_id = $${idx++}`);
+        params.push(dto.motivoDiferenciaId);
+      }
+
+      params.push(lineaId, recuentoId, tenantId);
+      const rows = unwrap<RecuentoLineaUpdateRow>(
+        await manager.query(
+          `UPDATE recuento_inventario_linea SET ${sets.join(', ')}
+           WHERE linea_id = $${idx++} AND recuento_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
+           RETURNING linea_id, item_id, stock_sistema, cantidad_contada, motivo_diferencia_id`,
+          params,
+        ),
+      );
+      if (!rows.length) {
+        throw new NotFoundException(`Línea ${lineaId} no encontrada`);
+      }
+      const l = rows[0];
+      return {
+        lineaId: l.linea_id,
+        itemId: l.item_id,
+        stockSistema: l.stock_sistema,
+        cantidadContada: l.cantidad_contada,
+        diferencia:
+          l.cantidad_contada != null
+            ? new Decimal(l.cantidad_contada).minus(l.stock_sistema).toFixed(4)
+            : null,
+        motivoDiferenciaId: l.motivo_diferencia_id,
+      };
+    });
+  }
+
+  async update(
+    tenantId: string,
+    recuentoId: string,
+    dto: UpdateRecuentoDto,
+  ): Promise<{ id: string }> {
+    return this.dataSource.transaction(async (manager: EntityManager) => {
+      await this.assertBorrador(manager, tenantId, recuentoId);
+
+      if (dto.motivoDiferenciaDefaultId !== undefined) {
+        await this.motivosDiferenciaInventarioService.assertMotivoActivo(
+          manager,
+          tenantId,
+          dto.motivoDiferenciaDefaultId,
+        );
+      }
+
+      const sets = ['actualizado_el = NOW()'];
+      const params: unknown[] = [];
+      let idx = 1;
+
+      if (dto.motivoDiferenciaDefaultId !== undefined) {
+        sets.push(`motivo_diferencia_default_id = $${idx++}`);
+        params.push(dto.motivoDiferenciaDefaultId);
+      }
+      if (dto.comentario !== undefined) {
+        sets.push(`comentario = $${idx++}`);
+        params.push(dto.comentario);
+      }
+
+      params.push(recuentoId, tenantId);
+      const rows = unwrap<{ recuento_id: string }>(
+        await manager.query(
+          `UPDATE recuento_inventario SET ${sets.join(', ')}
+           WHERE recuento_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
+           RETURNING recuento_id`,
+          params,
+        ),
+      );
+      return { id: rows[0].recuento_id };
+    });
+  }
+
+  async cancelar(
+    tenantId: string,
+    recuentoId: string,
+  ): Promise<{ id: string; estado: string }> {
+    return this.dataSource.transaction(async (manager: EntityManager) => {
+      await this.assertBorrador(manager, tenantId, recuentoId);
+
+      const rows = unwrap<{ recuento_id: string; estado: string }>(
+        await manager.query(
+          `UPDATE recuento_inventario SET estado = 'cancelado', actualizado_el = NOW()
+           WHERE recuento_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+           RETURNING recuento_id, estado`,
+          [recuentoId, tenantId],
+        ),
+      );
+      return { id: rows[0].recuento_id, estado: rows[0].estado };
+    });
+  }
+
+  // Solo 'borrador' admite modificaciones: 'aplicado' y 'cancelado' son
+  // terminales. La usan updateLinea, update y cancelar antes de mutar.
+  private async assertBorrador(
+    manager: EntityManager,
+    tenantId: string,
+    recuentoId: string,
+  ): Promise<void> {
+    const rows: { estado: string }[] = await manager.query(
+      `SELECT estado FROM recuento_inventario
+        WHERE recuento_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+        FOR UPDATE`,
+      [recuentoId, tenantId],
+    );
+    if (!rows.length) {
+      throw new NotFoundException(`Recuento ${recuentoId} no encontrado`);
+    }
+    if (rows[0].estado === 'aplicado') {
+      throw new BadRequestException('El recuento ya fue aplicado');
+    }
+    if (rows[0].estado === 'cancelado') {
+      throw new BadRequestException('El recuento fue cancelado');
+    }
   }
 }
