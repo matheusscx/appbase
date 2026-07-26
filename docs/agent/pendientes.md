@@ -252,3 +252,17 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   duplicado legacy de `Usuario` (`usuario.entity.ts`), sin referencias ni `forFeature`.
   Confirmar y eliminar. (Detectado al automatizar la invariante uuid — ambos tenían el
   mismo `googleId`.)
+- [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
+  (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los
+  productos por serie o lote quedan fuera del listado y agregarlos a una sesión devuelve 400.
+  No es una extensión trivial del mismo formulario:
+  - **`lote`**: es un número **por lote vivo** (una fila por lote con su vencimiento). El delta
+    y el movimiento se resuelven por lote, no por producto. Es el más cercano a lo ya hecho.
+  - **`serie`**: no es una cantidad sino una **diferencia de conjuntos** — qué identificadores
+    esperaba el sistema, cuáles se escanearon, cuáles faltan (→ salida de esas unidades) y
+    cuáles aparecieron sin estar registrados. Ese último caso **no tiene respuesta obvia**
+    (¿entrada de una unidad desconocida? ¿error a corregir aparte?) y es una decisión de
+    negocio del owner antes de diseñar.
+
+  Cerrar cuando aparezca la necesidad real: hoy el caso que motiva el recuento es food-service,
+  donde insumos e ingredientes son todos `cantidad`.
