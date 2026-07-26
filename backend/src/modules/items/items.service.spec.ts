@@ -1537,21 +1537,19 @@ describe('ItemsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('update producto cambia costo_actual sin crear movimiento', async () => {
-      managerMock.query
-        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
-        .mockResolvedValueOnce(undefined); // UPDATE item_producto
+    it('ignora costo en el update: ya no se edita desde el item (cerrado en Task 4 CPP)', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { item_id: ITEM_ID, tipo: 'producto' },
+      ]); // SELECT existing
 
       await service.update(TENANT, ITEM_ID, { costo: '4300' });
 
-      const updateProducto = managerMock.query.mock.calls.find(
-        (c: unknown[]) =>
-          typeof c[0] === 'string' &&
-          c[0].includes('UPDATE item_producto') &&
-          c[0].includes('costo_actual'),
+      const calls = managerMock.query.mock.calls.map(
+        (c: unknown[]) => c[0] as string,
       );
-      expect(updateProducto).toBeDefined();
-      expect(updateProducto?.[1]).toContain('4300');
+      expect(calls.some((sql) => sql.includes('UPDATE item_producto'))).toBe(
+        false,
+      );
     });
 
     it('receta: reemplaza los ingredientes y recalcula costoActual', async () => {

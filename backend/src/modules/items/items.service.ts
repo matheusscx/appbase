@@ -1180,14 +1180,6 @@ export class ItemsService {
           prodParams.push(dto.fechaVencimiento);
           patch.fechaVencimiento = dto.fechaVencimiento;
         }
-        if (dto.costo !== undefined) {
-          if (dto.costo != null) {
-            this.validarCostoPositivo(dto.costo);
-          }
-          prodClauses.push(`costo_actual = $${pidx++}`);
-          prodParams.push(dto.costo);
-          patch.costoActual = dto.costo;
-        }
         if (prodClauses.length) {
           prodParams.push(itemId);
           await manager.query(

@@ -11,6 +11,9 @@ import {
   Min,
   IsArray,
   ValidateNested,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import {
@@ -19,6 +22,17 @@ import {
   ComboComponenteInputDto,
   ItemGrupoModificadorInputDto,
 } from './create-item.dto';
+
+@ValidatorConstraint({ name: 'costoNoEditable', async: false })
+export class CostoNoEditableConstraint implements ValidatorConstraintInterface {
+  validate(): boolean {
+    return false;
+  }
+
+  defaultMessage(): string {
+    return 'El costo no se edita desde el item: usá Inventario → Ajuste de costo';
+  }
+}
 
 export class UpdateItemDto {
   @IsString()
@@ -75,7 +89,12 @@ export class UpdateItemDto {
   @IsOptional()
   fechaVencimiento?: string;
 
-  @IsNumberString()
+  // El costo ya no se edita desde el item: es una consecuencia de mover
+  // mercadería (compra) o de una corrección auditada (ajuste de costo).
+  // El campo se conserva —en vez de borrarse— porque el ValidationPipe global
+  // usa whitelist sin forbidNonWhitelisted: borrarlo haría que la propiedad se
+  // descarte en silencio y el request devuelva 200 sin cambiar nada.
+  @Validate(CostoNoEditableConstraint)
   @IsOptional()
   costo?: string;
 

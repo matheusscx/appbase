@@ -156,4 +156,22 @@ describe('Costeo CPP (e2e)', () => {
       .send({ itemId, costoNuevo: '300' })
       .expect(400);
   });
+
+  it('PATCH /items/:id rechaza el costo con mensaje explícito', async () => {
+    const { body } = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ costo: '999' })
+      .expect(400);
+
+    expect(JSON.stringify(body.message)).toContain('Ajuste de costo');
+  });
+
+  it('PATCH /items/:id sigue permitiendo editar otros campos', async () => {
+    await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'CPP Test renombrado' })
+      .expect(200);
+  });
 });
