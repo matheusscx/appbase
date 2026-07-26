@@ -22,7 +22,7 @@ export class MovimientoInventario {
   tipo: string; // 'entrada' | 'salida' | 'ajuste'
 
   @Column({ type: 'text' })
-  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial'
+  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo'
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;
@@ -55,6 +55,15 @@ export class MovimientoInventario {
     nullable: true,
   })
   costoUnitario: string | null;
+
+  @Column({
+    name: 'costo_anterior',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  costoAnterior: string | null;
 
   @Column({ name: 'causa_merma_id', type: 'uuid', nullable: true })
   causaMermaId: string | null;

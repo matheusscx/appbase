@@ -653,6 +653,108 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Ajuste de costo (no mueve cantidad, mueve valor)
+  // ---------------------------------------------------------------------------
+  describe('ajuste de costo', () => {
+    it('registra el movimiento sin mover stock y guarda el costo anterior', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '100' },
+        ]) // SELECT FOR UPDATE
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-ac1' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // UPDATE costo_actual
+
+      const res = await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          usuarioId: USER_ID,
+          tipo: 'ajuste',
+          motivo: 'ajuste_costo',
+          cantidad: '0',
+          costoUnitario: '250',
+          comentario: 'Corrección de costo inicial mal tipeado',
+        },
+      );
+
+      expect(res.stockAnterior).toBe('10');
+      expect(res.stockResultante).toBe('10');
+
+      const insert = managerMock.query.mock.calls.find((c: unknown[]) =>
+        String(c[0]).includes('INSERT INTO movimientos_inventario'),
+      );
+      expect(insert).toBeDefined();
+      // costo_anterior = 100 (el vigente), costo_unitario = 250 (el nuevo)
+      expect(insert![1]).toEqual(expect.arrayContaining(['100', '250']));
+
+      // No debe haber UPDATE de stock
+      const updateStock = managerMock.query.mock.calls.find((c: unknown[]) =>
+        String(c[0]).includes('SET stock ='),
+      );
+      expect(updateStock).toBeUndefined();
+
+      // Sí debe haber UPDATE de costo_actual con el valor nuevo
+      const updateCosto = managerMock.query.mock.calls.find((c: unknown[]) =>
+        String(c[0]).includes('SET costo_actual ='),
+      );
+      expect(updateCosto![1][0]).toBe('250.0000');
+    });
+
+    it('rechaza el ajuste de costo con cantidad distinta de cero', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '10', modo_inventario: 'cantidad', costo_actual: '100' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          usuarioId: USER_ID,
+          tipo: 'ajuste',
+          motivo: 'ajuste_costo',
+          cantidad: '3',
+          costoUnitario: '250',
+        }),
+      ).rejects.toThrow('El ajuste de costo no mueve cantidad');
+    });
+
+    it('rechaza el ajuste de costo sin costoUnitario', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '10', modo_inventario: 'cantidad', costo_actual: '100' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          usuarioId: USER_ID,
+          tipo: 'ajuste',
+          motivo: 'ajuste_costo',
+          cantidad: '0',
+        }),
+      ).rejects.toThrow('El ajuste de costo requiere el costo nuevo');
+    });
+
+    it('sigue rechazando cantidad cero en los demás motivos', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '10', modo_inventario: 'cantidad', costo_actual: '100' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          usuarioId: USER_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '0',
+        }),
+      ).rejects.toThrow('La cantidad debe ser mayor a cero');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // findMovimientos
   // ---------------------------------------------------------------------------
   describe('findMovimientos', () => {

@@ -28,7 +28,9 @@ El stock de productos es un activo crítico: cambios sin trazabilidad generan me
 - Validación: `salida` rechaza movimientos que resultarían en stock negativo
 
 **NOT included (future):**
-- Tipo `'ajuste'` (recuento absoluto de inventario — reservado para fase posterior)
+- Tipo `'ajuste'` con motivo de **recuento absoluto de inventario** (mueve cantidad —
+  reservado para fase posterior). El único uso hoy de `tipo='ajuste'` es el motivo
+  `ajuste_costo` (no mueve cantidad, ver "Regla de costo").
 - Bodegas / almacenes y stock por bodega
 - Traspasos entre bodegas
 - Integración con proveedores externos de inventario
@@ -164,14 +166,15 @@ Response (400 — Stock insuficiente):
 | `tenant_id` | UUID | FK `tenants`, NOT NULL | Garantiza isolamiento multi-tenant |
 | `item_id` | UUID | FK `items`, NOT NULL | Producto del que se mueve stock |
 | `tipo` | enum | `'entrada'` \| `'salida'` \| `'ajuste'` | Define dirección del movimiento |
-| `motivo` | varchar | `'compra'` \| `'venta'` \| `'devolucion'` \| `'merma'` \| `'ajuste_manual'` \| `'inventario_inicial'` | Razón del movimiento |
-| `cantidad` | integer | NOT NULL, `> 0` | Siempre positiva; `tipo` define signo |
+| `motivo` | varchar | `'compra'` \| `'venta'` \| `'devolucion'` \| `'merma'` \| `'ajuste_manual'` \| `'inventario_inicial'` \| `'ajuste_costo'` | Razón del movimiento |
+| `cantidad` | integer | NOT NULL, `> 0` excepto `ajuste_costo` (siempre `0`) | Siempre positiva; `tipo` define signo |
 | `stock_anterior` | integer | NOT NULL | Saldo antes del movimiento (snapshot) |
-| `stock_resultante` | integer | NOT NULL | Saldo después del movimiento (snapshot) |
+| `stock_resultante` | integer | NOT NULL | Saldo después del movimiento (snapshot); en `ajuste_costo` es igual a `stock_anterior` |
 | `usuario_id` | UUID | FK `usuarios`, NOT NULL | Quién registró el movimiento |
 | `venta_id` | UUID | FK `ventas`, nullable | Si es `motivo = 'venta'`, referencia a la venta |
 | `comentario` | text | nullable | Observaciones del usuario |
-| `costo_unitario` | NUMERIC(18,4) | nullable | Congela el costo del momento del movimiento |
+| `costo_unitario` | NUMERIC(18,4) | nullable | Congela el costo del momento del movimiento (en `ajuste_costo`, el costo nuevo) |
+| `costo_anterior` | NUMERIC(18,4) | nullable | Solo poblado en `motivo='ajuste_costo'`: el `costo_actual` vigente antes del ajuste |
 | `creado_el` | TIMESTAMPTZ | NOT NULL, default NOW | Marca de tiempo |
 | `actualizado_el` | TIMESTAMPTZ | NOT NULL, default NOW | Marca de tiempo |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete (aunque movimientos raramente se borren) |
@@ -181,6 +184,13 @@ Response (400 — Stock insuficiente):
 - **Otras entradas con `costoUnitario`:** congelan el valor en el kardex **sin** pisar `costo_actual`.
 - **Cualquier otro movimiento (sin costoUnitario):** congela el `costo_actual` vigente del momento en `costo_unitario` (snapshot del costo).
 - **El kardex (`costo_unitario` del movimiento) siempre congela lo que se PAGÓ en ese movimiento, nunca el promedio** — el promedio solo vive en `item_producto.costo_actual`. Salidas y devoluciones nunca recalculan el promedio: la unidad que sale (o vuelve) ya tiene un costo congelado; re-promediarla mezclaría costo de venta con costo de compra.
+- **`ajuste_costo` (`tipo='ajuste'`):** corrige `item_producto.costo_actual` directamente, sin
+  pasar por el promedio ponderado — es para arreglar un costo mal cargado, no una compra.
+  No mueve cantidad (`cantidad` debe ser `0`, `stock_resultante = stock_anterior`, no toca
+  `item_producto.stock` ni genera filas en `movimiento_inventario_detalle`) y requiere
+  `costoUnitario` (el costo nuevo). El kardex guarda ambos lados del ajuste: `costo_anterior`
+  (el `costo_actual` vigente antes) y `costo_unitario` (el nuevo, que también pasa a ser el
+  `costo_actual` de `item_producto`).
 - Costos `<= 0` se rechazan.
 - En `ajustarStock`, la fila `item_producto` se bloquea con `FOR UPDATE` antes de convertir unidades.
 
@@ -529,5 +539,5 @@ npm run test:e2e -- inventario.e2e.spec.ts
 ## Notes
 
 - **Reutilización de `InventarioService.registrarMovimiento(manager, ...)`:** El servicio está diseñado para recibir un `EntityManager`, permitiendo que el módulo de ventas (o futuras integraciones) use la misma lógica dentro de su propia transacción sin duplicar código.
-- **Tipo `'ajuste'` reservado:** SQL permite `'ajuste'` pero esta fase solo usa `'entrada'`/`'salida'`. El tipo `'ajuste'` está reservado para fase futura cuando se implemente recuento absoluto de inventario.
+- **Tipo `'ajuste'`:** hoy solo se usa con `motivo='ajuste_costo'` (corrige valor, no cantidad). El recuento absoluto de inventario (que sí movería cantidad) queda reservado para fase futura.
 - **Confirmación en BD:** el nombre real de la columna de usuario en `usuarios` se usa en JOINs (`usuarios.nombre AS usuario_nombre`). Ajustar si la columna tiene otro nombre o alias.

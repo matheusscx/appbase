@@ -27,7 +27,7 @@ export interface LoteInput {
 export interface RegistrarMovimientoParams {
   tenantId: string;
   itemId: string;
-  tipo: 'entrada' | 'salida';
+  tipo: 'entrada' | 'salida' | 'ajuste';
   motivo: string;
   cantidad: string;
   usuarioId: string | null;
@@ -86,7 +86,22 @@ export class InventarioService {
     const stockAnterior = new Decimal(productoRows[0].stock);
     const cantidad = new Decimal(params.cantidad);
 
-    if (cantidad.lessThanOrEqualTo(0)) {
+    // El ajuste de costo no mueve cantidad, mueve valor: es el único motivo
+    // que registra cantidad 0.
+    const esAjusteCosto = params.motivo === 'ajuste_costo';
+    if (esAjusteCosto) {
+      if (params.tipo !== 'ajuste') {
+        throw new BadRequestException("El ajuste de costo usa tipo 'ajuste'");
+      }
+      if (!cantidad.isZero()) {
+        throw new BadRequestException('El ajuste de costo no mueve cantidad');
+      }
+      if (params.costoUnitario == null) {
+        throw new BadRequestException(
+          'El ajuste de costo requiere el costo nuevo',
+        );
+      }
+    } else if (cantidad.lessThanOrEqualTo(0)) {
       throw new BadRequestException('La cantidad debe ser mayor a cero');
     }
 
@@ -126,6 +141,8 @@ export class InventarioService {
         cantidad,
         params.costoUnitario,
       );
+    } else if (esAjusteCosto) {
+      costoActualNuevo = new Decimal(params.costoUnitario!).toFixed(4);
     }
 
     // El kardex congela lo que se PAGÓ en este movimiento, no el promedio.
@@ -134,7 +151,12 @@ export class InventarioService {
 
     let result: MoverResult;
 
-    if (modo === 'cantidad') {
+    if (esAjusteCosto) {
+      // No hay movimiento de stock: ni branch por modo, ni UPDATE de stock,
+      // ni filas en movimiento_inventario_detalle (insertarDetalleMovimiento
+      // es no-op cuando result solo trae stockResultante).
+      result = { stockResultante: stockAnterior };
+    } else if (modo === 'cantidad') {
       result = await this.moverCantidad(
         manager,
         params,
@@ -156,8 +178,9 @@ export class InventarioService {
     const insertRows: { movimiento_id: string }[] = await manager.query(
       `INSERT INTO movimientos_inventario
          (tenant_id, item_id, tipo, motivo, cantidad,
-          stock_anterior, stock_resultante, venta_id, usuario_id, comentario, costo_unitario, causa_merma_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          stock_anterior, stock_resultante, venta_id, usuario_id, comentario,
+          costo_unitario, costo_anterior, causa_merma_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING movimiento_id`,
       [
         params.tenantId,
@@ -171,6 +194,7 @@ export class InventarioService {
         params.usuarioId,
         params.comentario ?? null,
         costoUnitarioCongelado,
+        esAjusteCosto ? costoActualPrevio : null,
         params.causaMermaId ?? null,
       ],
     );

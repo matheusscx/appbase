@@ -521,7 +521,7 @@ CREATE TABLE "item_producto" (
   -- 'cantidad' (fungible, saldo numérico)
   -- 'lote'     (stock = SUM cantidad_disponible de item_lote)
   -- 'serie'    (stock = COUNT unidades disponibles en item_unidad)
-  "costo_actual"      NUMERIC(18,4)
+  "costo_actual"      NUMERIC(18,4)  -- promedio ponderado móvil (CPP); solo lo recalcula la entrada por compra
 );
 
 -- Extensión 1:1 para tipo 'servicio'
@@ -728,7 +728,7 @@ CREATE TABLE "movimientos_inventario" (
   "tenant_id"        UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "item_id"          UUID          NOT NULL REFERENCES "items" ("item_id"),
   "tipo"             TEXT          NOT NULL,   -- 'entrada' | 'salida' | 'ajuste'
-  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial'
+  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo'
   "cantidad"         NUMERIC(18,4) NOT NULL,   -- siempre positiva; el tipo define el signo
   "stock_anterior"   NUMERIC(18,4) NOT NULL,
   "stock_resultante" NUMERIC(18,4) NOT NULL,
@@ -736,6 +736,7 @@ CREATE TABLE "movimientos_inventario" (
   "usuario_id"       UUID          REFERENCES "usuarios" ("usuario_id"),
   "comentario"       TEXT,
   "costo_unitario"   NUMERIC(18,4),
+  "costo_anterior"   NUMERIC(18,4),   -- costo vigente ANTES del movimiento; solo en motivo 'ajuste_costo'
   "causa_merma_id"   UUID REFERENCES "causas_merma" ("causa_merma_id"),
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
