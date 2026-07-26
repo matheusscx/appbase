@@ -167,6 +167,16 @@ describe('Costeo CPP (e2e)', () => {
     expect(JSON.stringify(body.message)).toContain('Ajuste de costo');
   });
 
+  it('PATCH /items/:id rechaza costo: null explícito (no es lo mismo que omitirlo)', async () => {
+    const { body } = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ costo: null })
+      .expect(400);
+
+    expect(JSON.stringify(body.message)).toContain('Ajuste de costo');
+  });
+
   it('PATCH /items/:id sigue permitiendo editar otros campos', async () => {
     await request(app.getHttpServer())
       .patch(`/api/items/${itemId}`)

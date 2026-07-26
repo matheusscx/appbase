@@ -53,10 +53,15 @@ describe('Invariante: costo_actual solo se escribe desde el kardex', () => {
       // Busca cualquier fragmento de SQL que asigne costo_actual (incluidos
       // los que arman el SET dinámicamente en varios literales), salvo que
       // sea explícitamente un UPDATE de item_receta o item_combo.
+      // La excepción exige que item_receta/item_combo aparezca como tabla del
+      // propio UPDATE (`UPDATE item_receta`/`UPDATE item_combo`), no solo en
+      // cualquier parte del literal — de lo contrario un comentario SQL
+      // (`-- item_combo`) al final de un UPDATE real de item_producto
+      // evadiría la detección sin que Postgres le dé ningún significado.
       const sospechoso = extraeTemplateLiterals(contenido).some(
         (chunk) =>
           /costo_actual\s*=\s*\$/.test(chunk) &&
-          !/item_receta|item_combo/.test(chunk),
+          !/UPDATE\s+item_(receta|combo)\b/i.test(chunk),
       );
       if (sospechoso) offenders.push(file);
     }

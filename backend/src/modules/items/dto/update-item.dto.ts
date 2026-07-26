@@ -12,6 +12,7 @@ import {
   IsArray,
   ValidateNested,
   Validate,
+  ValidateIf,
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
@@ -94,8 +95,13 @@ export class UpdateItemDto {
   // El campo se conserva —en vez de borrarse— porque el ValidationPipe global
   // usa whitelist sin forbidNonWhitelisted: borrarlo haría que la propiedad se
   // descarte en silencio y el request devuelva 200 sin cambiar nada.
+  // @ValidateIf (no @IsOptional): @IsOptional también saltea la validación
+  // cuando el valor es `null` explícito, no solo cuando falta la propiedad —
+  // eso dejaría pasar `{ "costo": null }` con 200. @ValidateIf solo saltea
+  // cuando la propiedad falta (undefined), así que un `null` explícito sigue
+  // cayendo en el validador que siempre rechaza.
+  @ValidateIf((o: UpdateItemDto) => o.costo !== undefined)
   @Validate(CostoNoEditableConstraint)
-  @IsOptional()
   costo?: string;
 
   // Extensión servicio
