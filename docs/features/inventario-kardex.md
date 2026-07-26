@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: SDD Team  
-**Last Updated**: 2026-06-23
+**Last Updated**: 2026-07-26
 
 ---
 
@@ -31,8 +31,9 @@ El stock de productos es un activo crítico: cambios sin trazabilidad generan me
 - Tipo `'ajuste'` (recuento absoluto de inventario — reservado para fase posterior)
 - Bodegas / almacenes y stock por bodega
 - Traspasos entre bodegas
-- Costeo y valoración de inventario (FIFO, promedio)
 - Integración con proveedores externos de inventario
+
+Nota: el costeo por promedio ponderado móvil (CPP) de `item_producto.costo_actual` en la compra sí está implementado (ver "Regla de costo" más abajo); FIFO/LIFO no.
 
 ---
 
@@ -176,9 +177,11 @@ Response (400 — Stock insuficiente):
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete (aunque movimientos raramente se borren) |
 
 **Regla de costo:**
-- **Entrada con motivo `compra` y `costoUnitario`:** actualiza `item_producto.costo_actual` y congela ese costo en `costo_unitario` del movimiento. Costos `<= 0` se rechazan.
+- **`item_producto.costo_actual` es un promedio ponderado móvil (CPP), no el último costo.** Solo la entrada por compra lo recalcula: `(stock_anterior × costo_actual_previo + cantidad × costo_compra) / (stock_anterior + cantidad)`, redondeado a 4 decimales. Sin stock previo o sin costo previo (no hay masa que promediar, y evita dividir por cero), el costo de compra manda tal cual. Implementado en `InventarioService.calcularCostoPromedio` (privado) y cableado en `registrarMovimiento` vía la variable `costoActualNuevo` (`string | null`; `null` = no se toca `item_producto`).
 - **Otras entradas con `costoUnitario`:** congelan el valor en el kardex **sin** pisar `costo_actual`.
 - **Cualquier otro movimiento (sin costoUnitario):** congela el `costo_actual` vigente del momento en `costo_unitario` (snapshot del costo).
+- **El kardex (`costo_unitario` del movimiento) siempre congela lo que se PAGÓ en ese movimiento, nunca el promedio** — el promedio solo vive en `item_producto.costo_actual`. Salidas y devoluciones nunca recalculan el promedio: la unidad que sale (o vuelve) ya tiene un costo congelado; re-promediarla mezclaría costo de venta con costo de compra.
+- Costos `<= 0` se rechazan.
 - En `ajustarStock`, la fila `item_producto` se bloquea con `FOR UPDATE` antes de convertir unidades.
 
 **Índices (para performance):**

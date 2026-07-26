@@ -33,8 +33,9 @@ export interface RegistrarMovimientoParams {
   usuarioId: string | null;
   ventaId?: string | null;
   comentario?: string | null;
-  // Costo (último costo): si viene en una entrada, congela y actualiza costo_actual;
-  // si no viene, se congela el costo_actual vigente.
+  // Costo pagado en este movimiento. En una entrada por compra recalcula el
+  // promedio ponderado de item_producto.costo_actual; en el resto solo se
+  // congela en el kardex. Si no viene, se congela el costo_actual vigente.
   costoUnitario?: string | null;
   // Modo 'serie'
   series?: SerieInput[]; // entrada serie: N unidades a crear
@@ -110,12 +111,24 @@ export class InventarioService {
       }
     }
 
-    // Solo la compra actualiza costo_actual; otras entradas pueden congelar un
-    // costoUnitario en el movimiento sin pisar el vigente del producto.
-    const aplicaCostoNuevo =
+    // Costo a persistir en item_producto. null = no se toca.
+    // Solo la compra lo recalcula (promedio ponderado móvil); las demás entradas
+    // pueden congelar un costoUnitario en el movimiento sin pisar el vigente.
+    let costoActualNuevo: string | null = null;
+    if (
       params.costoUnitario != null &&
       params.tipo === 'entrada' &&
-      params.motivo === 'compra';
+      params.motivo === 'compra'
+    ) {
+      costoActualNuevo = this.calcularCostoPromedio(
+        stockAnterior,
+        costoActualPrevio,
+        cantidad,
+        params.costoUnitario,
+      );
+    }
+
+    // El kardex congela lo que se PAGÓ en este movimiento, no el promedio.
     const costoUnitarioCongelado =
       params.costoUnitario != null ? params.costoUnitario : costoActualPrevio;
 
@@ -170,10 +183,10 @@ export class InventarioService {
       result,
     );
 
-    if (aplicaCostoNuevo) {
+    if (costoActualNuevo != null) {
       await manager.query(
         `UPDATE item_producto SET costo_actual = $1 WHERE item_id = $2`,
-        [params.costoUnitario, params.itemId],
+        [costoActualNuevo, params.itemId],
       );
     }
 
@@ -182,6 +195,33 @@ export class InventarioService {
       stockAnterior: stockAnterior.toString(),
       stockResultante: stockResultante.toString(),
     };
+  }
+
+  /**
+   * Promedio ponderado móvil (CPP). Solo la compra lo recalcula: las salidas
+   * nunca mueven el promedio, y la devolución tampoco (la unidad que vuelve ya
+   * salió con un costo congelado; re-promediarla metería costo de venta dentro
+   * del costo de compra).
+   *
+   * Sin stock previo o sin costo previo no hay masa que promediar: manda el
+   * costo de compra. Eso además evita dividir por cero.
+   */
+  private calcularCostoPromedio(
+    stockAnterior: Decimal,
+    costoActualPrevio: string | null,
+    cantidad: Decimal,
+    costoCompra: string,
+  ): string {
+    const compra = new Decimal(costoCompra);
+    if (stockAnterior.lessThanOrEqualTo(0) || costoActualPrevio == null) {
+      return compra.toFixed(4);
+    }
+    const valorPrevio = stockAnterior.mul(new Decimal(costoActualPrevio));
+    const valorEntrante = cantidad.mul(compra);
+    return valorPrevio
+      .plus(valorEntrante)
+      .div(stockAnterior.plus(cantidad))
+      .toFixed(4);
   }
 
   // ---------------------------------------------------------------------------

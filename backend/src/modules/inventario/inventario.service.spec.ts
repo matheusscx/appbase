@@ -3,6 +3,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, type EntityManager } from 'typeorm';
 import { BadRequestException } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { InventarioService } from './inventario.service';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 
@@ -508,15 +509,17 @@ describe('InventarioService', () => {
         },
       );
 
-      // El INSERT del movimiento (3ª llamada) incluye costo_unitario = 4500
+      // El INSERT del movimiento (3ª llamada) congela lo PAGADO en el kardex: 4500
       const insertCall = managerMock.query.mock.calls[2];
       expect(insertCall[0]).toContain('costo_unitario');
       expect(insertCall[1]).toContain('4500');
-      // La 4ª llamada actualiza costo_actual = 4500
+      // La 4ª llamada actualiza costo_actual con el promedio ponderado (CPP), no
+      // con el costo de compra crudo: (10×4000 + 5×4500) / 15 = 4166.6667.
+      // Antes del CPP este valor era '4500' (último costo) — ese era el bug.
       expect(managerMock.query).toHaveBeenNthCalledWith(
         4,
         expect.stringContaining('costo_actual'),
-        ['4500', ITEM_ID],
+        ['4166.6667', ITEM_ID],
       );
     });
 
@@ -588,6 +591,64 @@ describe('InventarioService', () => {
       const insertCall = managerMock.query.mock.calls[2];
       expect(insertCall[1]).toContain('4200');
       expect(managerMock.query).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Costo promedio ponderado (CPP)
+  // ---------------------------------------------------------------------------
+  describe('costo promedio ponderado (CPP)', () => {
+    it('promedia el costo previo con el de compra según las cantidades', () => {
+      // 10 unidades a 100 + 10 unidades a 200 → 150
+      const resultado = (service as any).calcularCostoPromedio(
+        new Decimal('10'),
+        '100',
+        new Decimal('10'),
+        '200',
+      );
+      expect(resultado).toBe('150.0000');
+    });
+
+    it('sin stock previo, el costo de compra manda', () => {
+      const resultado = (service as any).calcularCostoPromedio(
+        new Decimal('0'),
+        '999',
+        new Decimal('5'),
+        '200',
+      );
+      expect(resultado).toBe('200.0000');
+    });
+
+    it('sin costo previo, el costo de compra manda', () => {
+      const resultado = (service as any).calcularCostoPromedio(
+        new Decimal('10'),
+        null,
+        new Decimal('5'),
+        '200',
+      );
+      expect(resultado).toBe('200.0000');
+    });
+
+    it('pondera por cantidad, no promedia los precios', () => {
+      // 1 a 100 + 9 a 200 → 190, no 150
+      const resultado = (service as any).calcularCostoPromedio(
+        new Decimal('1'),
+        '100',
+        new Decimal('9'),
+        '200',
+      );
+      expect(resultado).toBe('190.0000');
+    });
+
+    it('redondea a 4 decimales', () => {
+      // (3×10 + 1×20) / 4 = 12.5 ; con divisiones no exactas no debe explotar
+      const resultado = (service as any).calcularCostoPromedio(
+        new Decimal('3'),
+        '10',
+        new Decimal('1'),
+        '20',
+      );
+      expect(resultado).toBe('12.5000');
     });
   });
 
