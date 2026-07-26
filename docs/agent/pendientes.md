@@ -252,3 +252,20 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   duplicado legacy de `Usuario` (`usuario.entity.ts`), sin referencias ni `forFeature`.
   Confirmar y eliminar. (Detectado al automatizar la invariante uuid — ambos tenían el
   mismo `googleId`.)
+- [ ] **`PATCH /items/:id/stock` — `costoUnitario` no se convierte de unidad** (backend +
+  frontend) — `items.service.ts` (~línea 1500) convierte `cantidad` a la unidad base del
+  producto, pero pasa `costoUnitario` **sin convertir**, y la UI (`items.vue`, modal de
+  ajuste de stock) rotula el campo solo como "Costo unitario", sin decir por cuál unidad.
+  Comprar "2 kg a 5.000/kg" en un producto con unidad base `g` alimenta la fórmula con
+  `cantidad=2000, costoUnitario=5000` → el costo por gramo queda inflado 1000×. **No es
+  regresión** (la magnitud del error era la misma bajo "último costo"), pero desde
+  ADR-016 el `costo_actual` es un promedio ponderado que alimenta márgenes, food-cost y
+  valorización de mermas, así que el error ahora se propaga y persiste. Cerrar
+  convirtiendo el costo junto con la cantidad, o rotulando el input con la unidad base.
+  (Detectado por la revisión final del sub-proyecto de costeo CPP.)
+- [ ] `inventario.service.ts` (~líneas 112-115 y 297-300) — dos comentarios dicen que el
+  pre-check de `registrarAjusteCosto` corre "fuera de la transacción". Está **dentro**
+  (mismo `manager` de `dataSource.transaction`); lo que ocurre es que corre **antes del
+  row lock**. El código es correcto —bajo READ COMMITTED una compra concurrente que
+  commitea entre el `SELECT` del pre-check y el `SELECT ... FOR UPDATE` sí es visible—,
+  pero la redacción explica mal el mecanismo. Corregir la frase a "antes del lock".
