@@ -199,4 +199,40 @@ describe('Costeo CPP (e2e)', () => {
       .send({ nombre: 'CPP Test renombrado' })
       .expect(200);
   });
+
+  it('un ajuste_costo con stock 0 no bloquea cambiar modoInventario/unidadMedida después', async () => {
+    // Producto nuevo, sin compras todavía: solo un ajuste_costo (corrige la
+    // semilla antes de recibir mercadería — spec §6). No debe congelar el modo
+    // ni la unidad, porque el ajuste no movió stock.
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `CPP Ajuste sin stock ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '0',
+        modoInventario: 'cantidad',
+        costo: '50',
+      });
+    expect(resCreate.status).toBe(201);
+    const itemSinStockId = (resCreate.body as ItemResponse).id;
+
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        itemId: itemSinStockId,
+        costoNuevo: '80',
+        comentario: 'Corrige el costo de la semilla',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/items/${itemSinStockId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ modoInventario: 'lote' })
+      .expect(200);
+  });
 });

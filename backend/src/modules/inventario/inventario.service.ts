@@ -74,6 +74,12 @@ export class InventarioService {
     movimientoId: string;
     stockAnterior: string;
     stockResultante: string;
+    // Costo vigente antes/después de este movimiento, leídos dentro del mismo
+    // FOR UPDATE que serializa la concurrencia — a diferencia de un pre-check
+    // fuera de la transacción, estos valores son los que de verdad quedaron
+    // escritos en el kardex.
+    costoActualPrevio: string | null;
+    costoActual: string | null;
   }> {
     const productoRows: {
       stock: string;
@@ -223,6 +229,8 @@ export class InventarioService {
       movimientoId,
       stockAnterior: stockAnterior.toString(),
       stockResultante: stockResultante.toString(),
+      costoActualPrevio,
+      costoActual: costoActualNuevo ?? costoActualPrevio,
     };
   }
 
@@ -286,9 +294,13 @@ export class InventarioService {
         comentario: dto.comentario,
       });
 
+      // El costoAnterior del pre-check es solo para la validación temprana
+      // ("igual al vigente"); la respuesta usa el que registrarMovimiento leyó
+      // dentro del FOR UPDATE, que es el que de verdad quedó en el kardex —
+      // evita que una compra concurrente deje la respuesta desincronizada.
       return {
         movimientoId: mov.movimientoId,
-        costoAnterior,
+        costoAnterior: mov.costoActualPrevio,
         costoNuevo: costoNuevo.toFixed(4),
       };
     });

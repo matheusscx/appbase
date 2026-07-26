@@ -61,6 +61,8 @@ describe('InventarioService', () => {
         movimientoId: 'mov-1',
         stockAnterior: '10',
         stockResultante: '15',
+        costoActualPrevio: null,
+        costoActual: null,
       });
       // La 2ª llamada es UPDATE item_producto con el nuevo saldo
       expect(managerMock.query).toHaveBeenNthCalledWith(
@@ -751,6 +753,36 @@ describe('InventarioService', () => {
           cantidad: '0',
         }),
       ).rejects.toThrow('La cantidad debe ser mayor a cero');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // registrarAjusteCosto — la respuesta usa el costo leído dentro del lock
+  // ---------------------------------------------------------------------------
+  describe('registrarAjusteCosto', () => {
+    it('responde con el costoAnterior leído dentro del FOR UPDATE, no el del pre-check', async () => {
+      (dataSource as unknown as { transaction: jest.Mock }).transaction =
+        jest.fn((cb: (m: typeof managerMock) => unknown) => cb(managerMock));
+
+      managerMock.query
+        // Pre-check (fuera del lock): ve un costo desactualizado, como si una
+        // compra concurrente hubiera cambiado el promedio justo después.
+        .mockResolvedValueOnce([{ tipo: 'producto', costo_actual: '100' }])
+        // SELECT ... FOR UPDATE dentro de registrarMovimiento: el valor real.
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '150' },
+        ])
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-ac2' }]) // INSERT movimiento
+        .mockResolvedValueOnce(undefined); // UPDATE costo_actual
+
+      const res = await service.registrarAjusteCosto(TENANT, USER_ID, {
+        itemId: ITEM_ID,
+        costoNuevo: '300',
+        comentario: 'Corrección de costo',
+      });
+
+      expect(res.costoAnterior).toBe('150');
+      expect(res.costoNuevo).toBe('300.0000');
     });
   });
 

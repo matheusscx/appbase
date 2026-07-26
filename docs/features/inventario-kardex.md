@@ -100,8 +100,8 @@ Response (200):
 
 Cada item de `data` incluye `costoAnterior: string | null` — el `costo_actual`
 vigente antes del movimiento. Solo se popula cuando `motivo='ajuste_costo'`
-(ver "Regla de costo" más abajo); `null` en el resto. Task 6 (frontend) lo usa
-para mostrar "anterior → nuevo" en el historial de un ajuste de costo.
+(ver "Regla de costo" más abajo); `null` en el resto. El frontend lo usa para
+mostrar "anterior → nuevo" en el historial de un ajuste de costo.
 
 ---
 
@@ -150,6 +150,12 @@ Response (400 — Stock insuficiente):
 - Solo para items con `tipo = 'producto'`
 - `cantidad > 0`
 - Si `tipo = 'salida'`, valida que `item_producto.stock >= cantidad`
+
+La respuesta real (`{ stock, costoActual }`) siempre incluye `costoActual`: el
+`costo_actual` vigente después del movimiento (el promedio recién recalculado
+si fue una compra con `costoUnitario`, o el que ya tenía en cualquier otro
+caso). El frontend lo usa para reflejar en la lista el promedio que quedó, no
+el precio pagado en la compra puntual.
 
 ---
 

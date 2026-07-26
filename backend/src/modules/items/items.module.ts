@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Item } from './entities/item.entity';
-import { ItemProducto } from './entities/item-producto.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
 import { ItemSuscripcion } from './entities/item-suscripcion.entity';
 import { ItemReceta } from './entities/item-receta.entity';
@@ -23,7 +22,6 @@ import { CatalogModule } from '../catalog/catalog.module';
   imports: [
     TypeOrmModule.forFeature([
       Item,
-      ItemProducto,
       ItemServicio,
       ItemSuscripcion,
       ItemReceta,

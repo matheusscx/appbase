@@ -7,7 +7,6 @@ import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { Item } from './entities/item.entity';
-import { ItemProducto } from './entities/item-producto.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
 import {
   CreateItemDto,
@@ -105,8 +104,6 @@ export class ItemsService {
   constructor(
     @InjectRepository(Item)
     private readonly itemRepo: Repository<Item>,
-    @InjectRepository(ItemProducto)
-    private readonly itemProductoRepo: Repository<ItemProducto>,
     @InjectRepository(ItemServicio)
     private readonly itemServicioRepo: Repository<ItemServicio>,
     @InjectDataSource()
@@ -1137,9 +1134,14 @@ export class ItemsService {
             prodRows[0].unidad_medida !== dto.unidadMedida;
 
           if (modoCambia || unidadCambia) {
+            // Un ajuste_costo (tipo='ajuste') no mueve stock, solo corrige el
+            // costo: no cuenta para bloquear el modo/unidad. Sin este filtro,
+            // un ajuste hecho sobre stock 0 (antes de recibir mercadería)
+            // congelaría ambos para siempre sin que nunca hubiera existido un
+            // movimiento de stock real.
             const movRows: { cnt: string }[] = await manager.query(
               `SELECT COUNT(*) AS cnt FROM movimientos_inventario
-               WHERE item_id = $1 AND eliminado_el IS NULL`,
+               WHERE item_id = $1 AND eliminado_el IS NULL AND tipo <> 'ajuste'`,
               [itemId],
             );
             if (parseInt(movRows[0].cnt) > 0) {
@@ -1505,7 +1507,7 @@ export class ItemsService {
         }
       }
 
-      const { stockResultante } =
+      const { stockResultante, costoActual } =
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId,
           itemId,
@@ -1521,7 +1523,7 @@ export class ItemsService {
           costoUnitario: dto.costoUnitario ?? null,
         });
 
-      return { stock: stockResultante };
+      return { stock: stockResultante, costoActual };
     });
   }
 

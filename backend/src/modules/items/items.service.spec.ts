@@ -5,7 +5,6 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { ItemsService } from './items.service';
 import { Item } from './entities/item.entity';
-import { ItemProducto } from './entities/item-producto.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
 import { InventarioService } from '../inventario/inventario.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -20,7 +19,6 @@ const COMBO_SIN_BLOQUEANTES_ID = 'combo-sin-bloqueantes-uuid';
 describe('ItemsService', () => {
   let service: ItemsService;
   let itemRepo: { findOne: jest.Mock };
-  let itemProductoRepo: { findOne: jest.Mock };
   let itemServicioRepo: { findOne: jest.Mock };
   let managerMock: { query: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
@@ -40,7 +38,6 @@ describe('ItemsService', () => {
       ),
     };
     itemRepo = { findOne: jest.fn() };
-    itemProductoRepo = { findOne: jest.fn() };
     itemServicioRepo = { findOne: jest.fn() };
     inventarioServiceMock = { registrarMovimiento: jest.fn() };
     catalogServiceMock = {
@@ -57,10 +54,6 @@ describe('ItemsService', () => {
       providers: [
         ItemsService,
         { provide: getRepositoryToken(Item), useValue: itemRepo },
-        {
-          provide: getRepositoryToken(ItemProducto),
-          useValue: itemProductoRepo,
-        },
         {
           provide: getRepositoryToken(ItemServicio),
           useValue: itemServicioRepo,
@@ -1509,6 +1502,27 @@ describe('ItemsService', () => {
       expect(calls.some((sql) => sql.includes('modo_inventario'))).toBe(true);
     });
 
+    it('permite cambiar modoInventario cuando el único movimiento registrado es un ajuste_costo', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', unidad_medida: 'kg' },
+        ]) // SELECT actual
+        .mockResolvedValueOnce([{ cnt: '0' }]) // COUNT excluye tipo='ajuste' → 0
+        .mockResolvedValueOnce(undefined); // UPDATE item_producto
+
+      await expect(
+        service.update(TENANT, ITEM_ID, { modoInventario: 'lote' }),
+      ).resolves.not.toThrow();
+
+      const calls = managerMock.query.mock.calls as [string, unknown[]][];
+      const countCall = calls.find(([sql]) =>
+        sql.includes('FROM movimientos_inventario'),
+      );
+      expect(countCall).toBeDefined();
+      expect(countCall?.[0]).toContain("tipo <> 'ajuste'");
+    });
+
     it('actualiza frecuencia de un item suscripción existente', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'suscripcion' }]) // SELECT existing
@@ -1537,7 +1551,7 @@ describe('ItemsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('ignora costo en el update: ya no se edita desde el item (cerrado en Task 4 CPP)', async () => {
+    it('ignora costo en el update: ya no se edita desde el item', async () => {
       managerMock.query.mockResolvedValueOnce([
         { item_id: ITEM_ID, tipo: 'producto' },
       ]); // SELECT existing
@@ -1840,6 +1854,8 @@ describe('ItemsService', () => {
         movimientoId: 'mov-1',
         stockAnterior: '10',
         stockResultante: '15',
+        costoActualPrevio: '100.0000',
+        costoActual: '150.0000',
       });
 
       const res = await service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
@@ -1848,7 +1864,7 @@ describe('ItemsService', () => {
         motivo: 'compra',
       });
 
-      expect(res).toEqual({ stock: '15' });
+      expect(res).toEqual({ stock: '15', costoActual: '150.0000' });
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
         managerMock,
         expect.objectContaining({
