@@ -4,7 +4,7 @@
 **Estado:** diseño aprobado, pendiente de plan
 **Alcance:** sesión de conteo físico con ciclo de vida (borrador → aplicado), que compara lo
 contado contra el stock del sistema y aplica la diferencia al kardex con una causa tipificada.
-Incluye la extracción del CRUD de catálogos por tenant, hoy triplicado. Backend + frontend.
+Incluye centralizar el helper `unwrap()` de pg, hoy presente en un solo catálogo. Backend + frontend.
 **Investigación de origen:** [`docs/agent/investigaciones/2026-07-26-inventario.md`](../../agent/investigaciones/2026-07-26-inventario.md) §4
 **Depende de:** [`2026-07-26-costeo-cpp-design.md`](2026-07-26-costeo-cpp-design.md) — el costo que valoriza la diferencia
 
@@ -67,11 +67,28 @@ Eso deja dos huecos:
    lleva el signo. `tipo='ajuste'` quedó reservado para movimientos que **no** mueven cantidad
    (hoy solo `ajuste_costo`). Lo que identifica al recuento es `motivo='recuento'`.
 
-7. **El CRUD de catálogos por tenant se extrae.** Este sería el **tercer** catálogo con forma
-   idéntica (`causas_merma`, `motivo_diferencia_caja`, `motivo_diferencia_inventario`).
-   `CLAUDE.md`: *"duplicar dos veces es aceptable, se extrae a la tercera"*. Se extrae el
-   **código**, no las tablas: cada catálogo conserva la suya (una tabla polimórfica sacrificaría
-   claridad de dominio y complicaría los FK).
+7. **El CRUD de catálogos NO se extrae; solo se extrae `unwrap()`.** La intención original era
+   extraerlo —sería el tercer catálogo de forma parecida— pero al leer los dos servicios
+   existentes completos aparecieron divergencias **deliberadas**, no accidentales:
+
+   | | `causas_merma` | `motivo_diferencia_caja` |
+   |---|---|---|
+   | Columnas | — | tiene `requiere_comentario` |
+   | Editar uno `es_fijo` | bloquea **todo** el update | bloquea **solo el rename** |
+   | Al eliminar | valida que no esté **en uso** | no valida uso |
+
+   Las dos últimas filas son políticas de producto distintas, y la divergencia está documentada
+   a propósito en `motivos-diferencia.service.ts:94`. Una base compartida tendría que
+   parametrizarse con tabla, PK, columnas extra, política de `es_fijo`, query de uso y sustantivo
+   de error — a esa altura no es código compartido sino una caja de configuración, y leer un
+   catálogo concreto exigiría leer también la base. Choca con *"no introducir una arquitectura
+   nueva para un problema pequeño"* de `CLAUDE.md`.
+
+   **Lo que sí se centraliza** es `unwrap()`: el helper que resuelve la trampa de pg
+   (`INSERT/UPDATE ... RETURNING` llega como `[rows, rowCount]`, no como `rows`). Hoy existe solo
+   en `motivos-diferencia.service.ts:33`; `causas-merma.service.ts` no lo tiene y por eso está
+   registrado como latente en `pendientes.md`. Se va a `common/utils/` y lo usan los tres —
+   cerrando ese latente sin tocar comportamiento.
 
 ---
 
@@ -184,25 +201,30 @@ configuración son admin-only con lectura abierta; las features operativas usan
 
 ---
 
-## 6. El CRUD compartido
+## 6. El helper `unwrap()` compartido
 
-Hoy `causas-merma.service.ts` y `motivos-diferencia.service.ts` implementan el mismo CRUD con
-distinta tabla. El tercero se extrae en vez de copiarse.
+Único fragmento que se centraliza (ver decisión 7 para por qué el CRUD **no** se extrae).
 
-**Qué se comparte:** listar (con filtro `soloActivas`), crear validando nombre único por tenant,
-editar rechazando los `es_fijo`, desactivar, y eliminar por soft delete rechazando los `es_fijo`
-y los que estén en uso.
+```ts
+// TypeORM + pg: INSERT/UPDATE ... RETURNING llega como [rows, rowCount], no como rows.
+export function unwrap<T>(raw: unknown): T[] {
+  return Array.isArray((raw as unknown[])[0])
+    ? ((raw as T[][])[0] ?? [])
+    : ((raw as T[]) ?? []);
+}
+```
 
-**Qué NO se comparte:** la tabla, la entidad, el DTO, el controller y la ruta de cada catálogo.
-Cada dominio conserva los suyos.
+Se mueve de `motivos-diferencia.service.ts:33` a `backend/src/common/utils/`, con su propio
+`.spec.ts`, y lo consumen los tres catálogos. `causas-merma.service.ts` pasa a usarlo en
+`create()` y `update()`, que hoy tipan el resultado directo — eso **cierra el latente**
+registrado en `pendientes.md`.
 
-`causas_merma` y `motivo_diferencia_caja` **migran a usarlo en este mismo trabajo** — si se deja
-la migración para después, quedan tres implementaciones en vez de una y el ejercicio pierde
-sentido. Sus tests existentes son la red: deben seguir pasando sin cambios de comportamiento.
+El servicio del catálogo nuevo se escribe **explícito**, siguiendo `causas-merma.service.ts`
+como modelo por ser el precedente más cercano (mismo dominio de inventario, y valida uso antes
+de eliminar, que es lo que necesitamos: una causa referenciada por un movimiento no se borra).
 
-**Nota:** `causas-merma.service.ts` tiene un latente registrado en `pendientes.md` — tipa directo
-el resultado de `INSERT/UPDATE ... RETURNING` sin el `unwrap()` que `motivos-diferencia.service.ts`
-sí aplica. Al unificar, **gana la versión con `unwrap()`**, y el pendiente queda cerrado.
+Los tests existentes de ambos catálogos son la red: deben seguir pasando **sin cambios**, porque
+esta tarea no cambia comportamiento observable.
 
 ---
 
@@ -253,14 +275,16 @@ sí aplica. Al unificar, **gana la versión con `unwrap()`**, y el pendiente que
 - **Unit**: el cálculo del delta y su signo; que una línea sin contar se ignora; que el delta se
   aplica sobre el stock vigente y no sobre el congelado; el rechazo por stock negativo
   resultante; la resolución override-o-default de la causa.
-- **Unit del CRUD compartido**: nombre duplicado por tenant, `es_fijo` protegido, soft delete,
-  filtro `soloActivas`. Una sola batería para los tres catálogos.
+- **Unit de `unwrap()`**: que desenvuelva la forma `[rows, rowCount]` y que deje pasar la forma
+  `rows` sin tocarla, incluido el caso de resultado vacío.
+- **Unit del catálogo nuevo**: nombre duplicado por tenant, `es_fijo` protegido en update y en
+  delete, rechazo de borrado cuando la causa está en uso, filtro `soloActivas`.
 - **E2E**: crear sesión → cargar conteos → aplicar → verificar que el stock cambió por el delta,
   que hay un movimiento `motivo='recuento'` por línea con su `motivo_diferencia_id`, y que la
   sesión quedó `aplicado`. Más el caso de venta concurrente entre contar y aplicar (§4), que es
   el que justifica todo el diseño.
 - **Regresión**: los tests de `causas_merma` y `motivo_diferencia_caja` deben pasar **sin cambios**
-  tras migrar al CRUD compartido.
+  tras adoptar el `unwrap()` compartido.
 - **Smoke de navegador** de la pantalla de detalle antes de cerrar.
 
 ---
@@ -273,7 +297,7 @@ sí aplica. Al unificar, **gana la versión con `unwrap()`**, y el pendiente que
 | `docs/README.md` | Link a la feature |
 | `docs/ESTADO.md` | Fila de la funcionalidad |
 | `docs/PRODUCTO.md` | Regla de negocio: qué es un recuento y por qué la diferencia es un delta |
-| `docs/patterns/backend.md` | El CRUD de catálogos por tenant compartido |
+| `docs/patterns/backend.md` | La trampa de `INSERT/UPDATE ... RETURNING` en pg y el helper `unwrap()` |
 | `docs/features/inventario-kardex.md` | `motivo='recuento'` y la columna `motivo_diferencia_id` |
 | `docs/agent/pendientes.md` | Cierra el latente de `causas-merma` (`unwrap()`); abre serie/lote |
 | `startup-pos.sql` | Tres tablas nuevas + columna en el kardex |
