@@ -92,11 +92,16 @@ Response (200):
 
 **Query Parameters:**
 - `itemId` (optional): Filtrar por item UUID
-- `motivo` (optional): Filtrar por motivo exacto (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `inventario_inicial`)
+- `motivo` (optional): Filtrar por motivo exacto (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `ajuste_costo`, `inventario_inicial`)
 - `desde` (optional): ISO-8601, filtrar movimientos a partir de esta fecha
 - `hasta` (optional): ISO-8601, filtrar movimientos hasta esta fecha
 - `skip` (optional, default 0): Paginación
 - `take` (optional, default 50): Cantidad por página
+
+Cada item de `data` incluye `costoAnterior: string | null` — el `costo_actual`
+vigente antes del movimiento. Solo se popula cuando `motivo='ajuste_costo'`
+(ver "Regla de costo" más abajo); `null` en el resto. Task 6 (frontend) lo usa
+para mostrar "anterior → nuevo" en el historial de un ajuste de costo.
 
 ---
 

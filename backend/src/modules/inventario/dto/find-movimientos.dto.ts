@@ -7,6 +7,7 @@ const MOTIVOS = [
   'devolucion',
   'merma',
   'ajuste_manual',
+  'ajuste_costo',
   'inventario_inicial',
 ];
 

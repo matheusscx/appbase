@@ -713,7 +713,7 @@ export class InventarioService {
          mv.tipo, mv.motivo, mv.cantidad,
          mv.stock_anterior, mv.stock_resultante,
          mv.usuario_id, u.nombre AS usuario_nombre,
-         mv.comentario, mv.creado_el, mv.costo_unitario,
+         mv.comentario, mv.creado_el, mv.costo_unitario, mv.costo_anterior,
          mv.causa_merma_id,
          cm.nombre AS causa_nombre,
          p.unidad_medida
@@ -778,6 +778,7 @@ export class InventarioService {
       comentario: r.comentario,
       creadoEl: r.creado_el,
       costoUnitario: r.costo_unitario,
+      costoAnterior: r.costo_anterior,
       causaMermaId: r.causa_merma_id,
       causaNombre: r.causa_nombre,
       costoPerdido:
@@ -803,6 +804,7 @@ export interface MovimientoListItem {
   comentario: string | null;
   creadoEl: Date;
   costoUnitario: string | null;
+  costoAnterior: string | null;
   causaMermaId: string | null;
   causaNombre: string | null;
   costoPerdido: string | null;
@@ -823,6 +825,7 @@ interface MovimientoRow {
   comentario: string | null;
   creado_el: Date;
   costo_unitario: string | null;
+  costo_anterior: string | null;
   causa_merma_id: string | null;
   causa_nombre: string | null;
   unidad_medida: string | null;

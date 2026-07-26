@@ -26,6 +26,8 @@ interface AjusteCostoResponse {
 interface MovimientoListItem {
   motivo: string;
   cantidad: string;
+  costoUnitario: string | null;
+  costoAnterior: string | null;
 }
 interface PaginatedMovimientos {
   data: MovimientoListItem[];
@@ -139,6 +141,19 @@ describe('Costeo CPP (e2e)', () => {
     );
     expect(mov).toBeDefined();
     expect(mov?.cantidad).toBe('0.0000');
+    expect(new Decimal(mov!.costoAnterior!).toFixed(4)).toBe('150.0000');
+    expect(new Decimal(mov!.costoUnitario!).toFixed(4)).toBe('250.0000');
+  });
+
+  it('GET /inventario/movimientos?motivo=ajuste_costo trae el movimiento del ajuste', async () => {
+    const { body: kardex } = await request(app.getHttpServer())
+      .get(`/api/inventario/movimientos?itemId=${itemId}&motivo=ajuste_costo`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const movimientos = (kardex as PaginatedMovimientos).data;
+    expect(movimientos.length).toBeGreaterThan(0);
+    expect(movimientos.every((m) => m.motivo === 'ajuste_costo')).toBe(true);
   });
 
   it('rechaza el ajuste de costo si el costo nuevo es igual al vigente', async () => {
