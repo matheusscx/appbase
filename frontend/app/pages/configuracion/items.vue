@@ -145,11 +145,17 @@ const stockModalOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 
-// Simulador de impacto de costos en recetas
-const desfasesOpen = ref(false)
-const desfasesLoading = ref(false)
-const desfasesFilas = ref<DesfaseRecetaDto[]>([])
-const desfasesHighlightId = ref<string | null>(null)
+// Simulador de impacto de costos en recetas: se dispara tras una compra
+// (ejecutarAjusteStock) — la edición manual del item ya no cambia el costo.
+const {
+  desfasesOpen,
+  desfasesLoading,
+  desfasesFilas,
+  desfasesHighlightId,
+  maybeAbrirDesfases,
+  onAplicarDesfases: aplicarDesfases,
+  onDescartarDesfases,
+} = useSimuladorDesfases()
 const stockItem = ref<Item | null>(null)
 const toggling = reactive(new Set<string>())
 const filtroTipo = ref('todos')
@@ -815,72 +821,18 @@ async function abrirEditar(item: Item) {
   }
 }
 
-function costoProductoCambio(): boolean {
-  if (!form.value.costo) return false
-  if (formCostoActual.value == null || formCostoActual.value === '') return true
-  try {
-    return !new Decimal(form.value.costo).eq(new Decimal(formCostoActual.value))
-  } catch {
-    return form.value.costo !== formCostoActual.value
+/** Refleja en la lista local el costo/precio que acaba de aplicar el simulador. */
+function syncDesfaseEnLista(fila: DesfaseRecetaDto, aplicado: AplicarDesfaseItem) {
+  const row = items.value.find(i => i.id === fila.recetaItemId)
+  if (!row) return
+  row.costoActual = fila.costoPropuesto
+  if (aplicado.actualizarPrecio && aplicado.precioBase) {
+    row.precioBase = aplicado.precioBase
   }
 }
 
-async function maybeAbrirDesfases(productoId: string) {
-  try {
-    const filas = await useApiFetch<DesfaseRecetaDto[]>(
-      `${apiUrl}/items/${productoId}/recetas-afectadas`,
-    )
-    if (filas.length) {
-      desfasesFilas.value = filas
-      desfasesHighlightId.value = productoId
-      desfasesOpen.value = true
-    }
-  } catch { /* no bloquear el flujo de guardado */ }
-}
-
-async function onAplicarDesfases(aplicados: AplicarDesfaseItem[]) {
-  desfasesLoading.value = true
-  try {
-    await useApiFetch(`${apiUrl}/recetas/desfases/aplicar`, {
-      method: 'POST',
-      body: { items: aplicados },
-    })
-    const byId = new Map(aplicados.map(a => [a.recetaItemId, a]))
-    for (const fila of desfasesFilas.value) {
-      const apply = byId.get(fila.recetaItemId)
-      if (!apply) continue
-      const row = items.value.find(i => i.id === fila.recetaItemId)
-      if (!row) continue
-      row.costoActual = fila.costoPropuesto
-      if (apply.actualizarPrecio && apply.precioBase) {
-        row.precioBase = apply.precioBase
-      }
-    }
-    toast.add({ title: 'Costos de recetas actualizados', color: 'success' })
-    desfasesOpen.value = false
-  } catch (e) {
-    const msg = apiErrorMsg(e, 'Error al aplicar desfases')
-    toast.add({ title: msg, color: 'error' })
-  } finally {
-    desfasesLoading.value = false
-  }
-}
-
-async function onDescartarDesfases(recetaItemIds: string[]) {
-  desfasesLoading.value = true
-  try {
-    await useApiFetch(`${apiUrl}/recetas/desfases/descartar`, {
-      method: 'POST',
-      body: { recetaItemIds },
-    })
-    toast.add({ title: 'Avisos descartados', color: 'success' })
-    desfasesOpen.value = false
-  } catch (e) {
-    const msg = apiErrorMsg(e, 'Error al descartar desfases')
-    toast.add({ title: msg, color: 'error' })
-  } finally {
-    desfasesLoading.value = false
-  }
+function onAplicarDesfases(aplicados: AplicarDesfaseItem[]) {
+  return aplicarDesfases(aplicados, syncDesfaseEnLista)
 }
 
 async function guardar() {
@@ -909,7 +861,10 @@ async function guardar() {
 
     if (form.value.tipo === 'producto') {
       payload.unidadMedida = form.value.unidadMedida
-      if (form.value.costo) payload.costo = form.value.costo
+      // El costo solo se manda al crear: en edición es de solo lectura (se
+      // ajusta desde Inventario → Ajuste de costo) y el backend rechaza el
+      // campo con 400 si viene en el PATCH.
+      if (!editingId.value && form.value.costo) payload.costo = form.value.costo
       if (form.value.fechaElaboracion) payload.fechaElaboracion = form.value.fechaElaboracion
       if (form.value.fechaVencimiento) payload.fechaVencimiento = form.value.fechaVencimiento
       if (!editingId.value) {
@@ -930,7 +885,7 @@ async function guardar() {
     } else if (form.value.tipo === 'ingrediente') {
       payload.precioBase = '0'
       payload.unidadMedida = form.value.unidadMedida
-      if (form.value.costo) payload.costo = form.value.costo
+      if (!editingId.value && form.value.costo) payload.costo = form.value.costo
       if (!editingId.value) {
         payload.stock = form.value.stock || '0'
       }
@@ -963,12 +918,7 @@ async function guardar() {
       }))
     }
 
-    const productoId = editingId.value
     const isNew = !editingId.value
-    const chequearDesfases =
-      !!productoId
-      && (form.value.tipo === 'producto' || form.value.tipo === 'ingrediente')
-      && costoProductoCambio()
 
     const saved = isNew
       ? await useApiFetch<Item>(`${apiUrl}/items`, {
@@ -989,9 +939,6 @@ async function guardar() {
     })
 
     drawerOpen.value = false
-    if (chequearDesfases && productoId) {
-      await maybeAbrirDesfases(productoId)
-    }
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al guardar')
     toast.add({ title: msg, color: 'error' })
@@ -1454,8 +1401,23 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     class="w-full"
                   />
                 </UFormField>
-                <UFormField label="Costo">
+                <UFormField v-if="!editingId" label="Costo">
                   <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" class="w-full" />
+                </UFormField>
+                <UFormField v-else label="Costo vigente">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-mono text-sm text-default">
+                      {{ formCostoActual != null ? formatMonto(formCostoActual, form.monedaId) : '—' }}
+                    </span>
+                    <UButton
+                      to="/inventario"
+                      target="_blank"
+                      variant="link"
+                      size="xs"
+                      icon="i-lucide-external-link"
+                      class="px-0"
+                    >Ajustar costo</UButton>
+                  </div>
                 </UFormField>
               </div>
 
@@ -1571,8 +1533,23 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     class="w-full"
                   />
                 </UFormField>
-                <UFormField label="Costo">
+                <UFormField v-if="!editingId" label="Costo">
                   <MoneyInput v-model="form.costo" :moneda-id="form.monedaId" class="w-full" />
+                </UFormField>
+                <UFormField v-else label="Costo vigente">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-mono text-sm text-default">
+                      {{ formCostoActual != null ? formatMonto(formCostoActual, form.monedaId) : '—' }}
+                    </span>
+                    <UButton
+                      to="/inventario"
+                      target="_blank"
+                      variant="link"
+                      size="xs"
+                      icon="i-lucide-external-link"
+                      class="px-0"
+                    >Ajustar costo</UButton>
+                  </div>
                 </UFormField>
                 <UFormField v-if="!editingId" label="Stock inicial">
                   <UInput v-model="form.stock" inputmode="decimal" placeholder="0" class="w-full" />

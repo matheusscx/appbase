@@ -22,13 +22,22 @@ interface Movimiento {
   creadoEl: string
   causaNombre?: string | null
   costoUnitario?: string | null
+  costoAnterior?: string | null
   costoPerdido?: string | null
   unidadMedida: string | null
 }
+
+interface ProductoCosto {
+  id: string
+  nombre: string
+  costoActual: string | null
+  monedaId: string
+}
+
 interface Opt { label: string; value: string }
 
 const { public: { apiUrl } } = useRuntimeConfig()
-const productosOpts = ref<Opt[]>([])
+const productos = ref<ProductoCosto[]>([])
 const filtroItem = ref('todos')
 const filtroMotivo = ref('todos')
 const unidadesMedidaStore = useUnidadesMedidaStore()
@@ -38,11 +47,12 @@ const listFilters = computed(() => ({
   motivo: filtroMotivo.value !== 'todos' ? filtroMotivo.value : undefined,
 }))
 
-const { items: movimientos, meta, page, loading } = usePaginatedList<Movimiento>({
-  path: '/inventario/movimientos',
-  pageSize,
-  filters: listFilters,
-})
+const { items: movimientos, meta, page, loading, fetch: fetchMovimientos } =
+  usePaginatedList<Movimiento>({
+    path: '/inventario/movimientos',
+    pageSize,
+    filters: listFilters,
+  })
 
 const motivoOpts: Opt[] = [
   { label: 'Todos los motivos', value: 'todos' },
@@ -51,26 +61,32 @@ const motivoOpts: Opt[] = [
   { label: 'Devolución', value: 'devolucion' },
   { label: 'Merma', value: 'merma' },
   { label: 'Ajuste manual', value: 'ajuste_manual' },
+  { label: 'Ajuste de costo', value: 'ajuste_costo' },
   { label: 'Inventario inicial', value: 'inventario_inicial' },
 ]
+
+const productosOpts = computed<Opt[]>(() => [
+  { label: 'Todos los productos', value: 'todos' },
+  ...productos.value.map(p => ({ label: p.nombre, value: p.id })),
+])
+
+const productosFormOpts = computed<Opt[]>(() =>
+  productos.value.map(p => ({ label: p.nombre, value: p.id })),
+)
 
 async function cargarProductos() {
   try {
     const [prodRes, ingRes] = await Promise.all([
-      useApiFetch<PaginatedResponse<{ id: string; nombre: string }>>(
+      useApiFetch<PaginatedResponse<ProductoCosto>>(
         `${apiUrl}/items?tipo=producto&pageSize=100`,
       ),
-      useApiFetch<PaginatedResponse<{ id: string; nombre: string }>>(
+      useApiFetch<PaginatedResponse<ProductoCosto>>(
         `${apiUrl}/items?tipo=ingrediente&pageSize=100`,
       ),
     ])
-    const merged = [...prodRes.data, ...ingRes.data].sort((a, b) =>
+    productos.value = [...prodRes.data, ...ingRes.data].sort((a, b) =>
       a.nombre.localeCompare(b.nombre, 'es'),
     )
-    productosOpts.value = [
-      { label: 'Todos los productos', value: 'todos' },
-      ...merged.map(i => ({ label: i.nombre, value: i.id })),
-    ]
   }
   catch {
     toast.add({ title: 'Error al cargar productos', color: 'error' })
@@ -96,10 +112,64 @@ const columns: TableColumn<Movimiento>[] = [
   { accessorKey: 'tipo', header: 'Tipo' },
   { accessorKey: 'motivo', header: 'Motivo' },
   { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'costoAjuste', header: 'Costo', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'stockResultante', header: 'Resultante', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'costoPerdido', header: 'Costo perdido', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'usuarioNombre', header: 'Usuario' },
 ]
+
+// ── Ajuste de costo ──────────────────────────────────────────────────────────
+
+const ajusteCostoOpen = ref(false)
+const ajustandoCosto = ref(false)
+
+function emptyAjusteCostoForm() {
+  return { itemId: '', costoNuevo: '', comentario: '' }
+}
+const ajusteCostoForm = ref(emptyAjusteCostoForm())
+
+const productoAjusteSeleccionado = computed(() =>
+  productos.value.find(p => p.id === ajusteCostoForm.value.itemId) ?? null,
+)
+
+// Simulador de impacto de costos en recetas: se dispara tras un ajuste de
+// costo exitoso, igual que tras una compra en configuracion/items.vue.
+const { desfasesOpen, desfasesLoading, desfasesFilas, desfasesHighlightId, maybeAbrirDesfases, onAplicarDesfases, onDescartarDesfases } =
+  useSimuladorDesfases()
+
+function abrirAjusteCosto() {
+  ajusteCostoForm.value = emptyAjusteCostoForm()
+  ajusteCostoOpen.value = true
+}
+
+async function registrarAjusteCosto() {
+  const f = ajusteCostoForm.value
+  if (!f.itemId || !f.costoNuevo || !f.comentario.trim()) {
+    toast.add({ title: 'Completa producto, costo nuevo y comentario', color: 'error' })
+    return
+  }
+  ajustandoCosto.value = true
+  try {
+    await useApiFetch(`${apiUrl}/inventario/ajustes-costo`, {
+      method: 'POST',
+      body: {
+        itemId: f.itemId,
+        costoNuevo: f.costoNuevo,
+        comentario: f.comentario.trim(),
+      },
+    })
+    toast.add({ title: 'Costo ajustado', color: 'success' })
+    ajusteCostoOpen.value = false
+    await Promise.all([fetchMovimientos(), cargarProductos()])
+    await maybeAbrirDesfases(f.itemId)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al ajustar costo'), color: 'error' })
+  }
+  finally {
+    ajustandoCosto.value = false
+  }
+}
 </script>
 
 <template>
@@ -114,7 +184,13 @@ const columns: TableColumn<Movimiento>[] = [
           large
           title="Inventario"
           description="Kardex de movimientos de stock"
-        />
+        >
+          <template #actions>
+            <UButton icon="i-lucide-circle-dollar-sign" @click="abrirAjusteCosto">
+              Ajustar costo
+            </UButton>
+          </template>
+        </CrudPageHeader>
 
         <div class="flex flex-wrap gap-2">
           <USelectMenu
@@ -146,8 +222,8 @@ const columns: TableColumn<Movimiento>[] = [
           </template>
           <template #tipo-cell="{ row }">
             <UBadge
-              :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
-              :color="row.original.tipo === 'entrada' ? 'success' : 'warning'"
+              :label="row.original.tipo === 'entrada' ? 'Entrada' : row.original.tipo === 'salida' ? 'Salida' : 'Ajuste'"
+              :color="row.original.tipo === 'entrada' ? 'success' : row.original.tipo === 'salida' ? 'warning' : 'neutral'"
               variant="subtle"
               size="sm"
             />
@@ -161,9 +237,18 @@ const columns: TableColumn<Movimiento>[] = [
             />
           </template>
           <template #cantidad-cell="{ row }">
-            <span :class="row.original.tipo === 'entrada' ? 'text-success' : 'text-warning'">
+            <span v-if="row.original.motivo === 'ajuste_costo'" class="text-muted">—</span>
+            <span v-else :class="row.original.tipo === 'entrada' ? 'text-success' : 'text-warning'">
               {{ formatStock(row.original.cantidad, row.original.unidadMedida) }}
             </span>
+          </template>
+          <template #costoAjuste-cell="{ row }">
+            <span v-if="row.original.motivo === 'ajuste_costo'" class="font-mono">
+              {{ formatMonto(row.original.costoAnterior) }}
+              <span class="text-muted">→</span>
+              {{ formatMonto(row.original.costoUnitario) }}
+            </span>
+            <span v-else class="text-muted">—</span>
           </template>
           <template #stockResultante-cell="{ row }">
             <span class="font-medium">{{ formatStock(row.original.stockResultante, row.original.unidadMedida) }}</span>
@@ -201,6 +286,95 @@ const columns: TableColumn<Movimiento>[] = [
             :total="meta.total"
           />
         </div>
+
+        <AppDrawer
+          v-model:open="ajusteCostoOpen"
+          width="md"
+        >
+          <template #header>
+            <span class="font-semibold text-default">Ajustar costo</span>
+          </template>
+
+          <template #body>
+            <UForm
+              id="ajuste-costo-form"
+              :state="ajusteCostoForm"
+              class="space-y-4"
+              @submit="registrarAjusteCosto"
+            >
+              <UFormField label="Producto" required>
+                <USelectMenu
+                  v-model="ajusteCostoForm.itemId"
+                  :items="productosFormOpts"
+                  value-key="value"
+                  placeholder="Selecciona un producto"
+                  class="w-full"
+                />
+              </UFormField>
+
+              <UFormField v-if="productoAjusteSeleccionado" label="Costo vigente">
+                <UInput
+                  :model-value="formatMonto(productoAjusteSeleccionado.costoActual, productoAjusteSeleccionado.monedaId)"
+                  disabled
+                  class="w-full"
+                />
+              </UFormField>
+
+              <UFormField label="Costo nuevo" required>
+                <MoneyInput
+                  v-model="ajusteCostoForm.costoNuevo"
+                  :moneda-id="productoAjusteSeleccionado?.monedaId"
+                  class="w-full"
+                />
+              </UFormField>
+
+              <UFormField label="Comentario" required help="Obligatorio: un ajuste de costo es una corrección y queda auditada.">
+                <UTextarea
+                  v-model="ajusteCostoForm.comentario"
+                  :rows="2"
+                  placeholder="Por qué se corrige el costo"
+                  class="w-full"
+                />
+              </UFormField>
+            </UForm>
+          </template>
+
+          <template #actions>
+            <UButton
+              color="neutral"
+              variant="ghost"
+              @click="() => { ajusteCostoOpen = false }"
+            >
+              Cancelar
+            </UButton>
+            <UButton
+              type="submit"
+              form="ajuste-costo-form"
+              :loading="ajustandoCosto"
+            >
+              Ajustar costo
+            </UButton>
+          </template>
+        </AppDrawer>
+
+        <!-- Impacto de costos en recetas tras el ajuste -->
+        <AppDrawer
+          v-model:open="desfasesOpen"
+          width="75%"
+          title="Impacto en recetas"
+          description="El costo del producto cambió; estas recetas quedaron desfasadas."
+        >
+          <template #body>
+            <RecetasDesfasesPanel
+              :filas="desfasesFilas"
+              :highlight-ingrediente-id="desfasesHighlightId"
+              :loading="desfasesLoading"
+              @aplicar="onAplicarDesfases"
+              @descartar="onDescartarDesfases"
+              @cerrar="desfasesOpen = false"
+            />
+          </template>
+        </AppDrawer>
       </div>
     </template>
   </UDashboardPanel>
