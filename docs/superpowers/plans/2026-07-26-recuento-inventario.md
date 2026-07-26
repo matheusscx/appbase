@@ -242,10 +242,10 @@ describe('MotivosDiferenciaInventarioService', () => {
     ).rejects.toThrow('No se puede modificar un motivo fijo del sistema');
   });
 
-  it('rechaza eliminar un motivo en uso en movimientos', async () => {
-    // mock: findOneOrFail esFijo false; COUNT devuelve 1
+  it('rechaza eliminar un motivo fijo del sistema', async () => {
+    // mock: findOneOrFail devuelve esFijo: true
     await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
-      'No se puede eliminar: el motivo está en uso en movimientos de recuento',
+      'No se puede eliminar un motivo fijo del sistema',
     );
   });
 
@@ -535,7 +535,17 @@ Ahora que la columna existe, agregar en `motivos-diferencia-inventario.service.t
     }
 ```
 
-El test del Step 3 de la Task 2 que cubría este caso ahora debe pasar.
+Y agregar **acá** su test unitario (no en la Task 2: la columna no existía todavía), en
+`motivos-diferencia-inventario.service.spec.ts`:
+
+```typescript
+  it('rechaza eliminar un motivo en uso en movimientos', async () => {
+    // mock: findOneOrFail devuelve esFijo: false; el COUNT devuelve cnt '1'
+    await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
+      'No se puede eliminar: el motivo está en uso en movimientos de recuento',
+    );
+  });
+```
 
 - [ ] **Step 7: Correr los tests**
 
