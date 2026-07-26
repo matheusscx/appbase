@@ -1,0 +1,17 @@
+import { IsUUID, IsNumberString, IsString, IsNotEmpty } from 'class-validator';
+
+export class AjusteCostoDto {
+  @IsUUID()
+  itemId: string;
+
+  // Costo nuevo del producto. Pisa el promedio ponderado vigente.
+  @IsNumberString()
+  costoNuevo: string;
+
+  // Obligatorio: un ajuste de costo es una corrección y tiene que quedar
+  // explicada. No lleva causa tipificada (a diferencia de las mermas): es un
+  // evento puntual, no un fenómeno recurrente que se reporte por categoría.
+  @IsString()
+  @IsNotEmpty()
+  comentario: string;
+}

@@ -1,5 +1,9 @@
 // backend/src/modules/inventario/inventario.service.ts
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
@@ -10,6 +14,7 @@ import {
 } from '../../common/utils/pagination.util';
 import { MovimientoInventario } from './entities/movimiento-inventario.entity';
 import type { FindMovimientosDto } from './dto/find-movimientos.dto';
+import type { AjusteCostoDto } from './dto/ajuste-costo.dto';
 
 export interface SerieInput {
   serie: string;
@@ -219,6 +224,74 @@ export class InventarioService {
       stockAnterior: stockAnterior.toString(),
       stockResultante: stockResultante.toString(),
     };
+  }
+
+  /**
+   * Ajuste manual de `item_producto.costo_actual`: corrige un costo mal
+   * cargado (no una compra), sin pasar por el promedio ponderado. Delega en
+   * `registrarMovimiento` (motivo `ajuste_costo`), que valida `tipo='ajuste'`,
+   * `cantidad=0` y el `costoUnitario`, puebla `costo_anterior` en el kardex y
+   * hace el único `UPDATE` de `costo_actual`.
+   */
+  async registrarAjusteCosto(
+    tenantId: string,
+    usuarioId: string,
+    dto: AjusteCostoDto,
+  ): Promise<{
+    movimientoId: string;
+    costoAnterior: string | null;
+    costoNuevo: string;
+  }> {
+    const costoNuevo = new Decimal(dto.costoNuevo);
+    if (costoNuevo.isNaN() || costoNuevo.lessThanOrEqualTo(0)) {
+      throw new BadRequestException('El costo nuevo debe ser mayor a 0');
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const rows: { tipo: string; costo_actual: string | null }[] =
+        await manager.query(
+          `SELECT i.tipo, p.costo_actual
+             FROM items i
+             JOIN item_producto p ON p.item_id = i.item_id
+            WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+          [dto.itemId, tenantId],
+        );
+      if (!rows.length) {
+        throw new NotFoundException('Item no encontrado');
+      }
+      if (rows[0].tipo !== 'producto' && rows[0].tipo !== 'ingrediente') {
+        throw new BadRequestException(
+          'Solo un producto o un ingrediente tiene costo propio',
+        );
+      }
+
+      const costoAnterior = rows[0].costo_actual;
+      if (
+        costoAnterior != null &&
+        costoNuevo.equals(new Decimal(costoAnterior))
+      ) {
+        throw new BadRequestException(
+          'El costo nuevo es igual al vigente: no hay nada que ajustar',
+        );
+      }
+
+      const mov = await this.registrarMovimiento(manager, {
+        tenantId,
+        itemId: dto.itemId,
+        usuarioId,
+        tipo: 'ajuste',
+        motivo: 'ajuste_costo',
+        cantidad: '0',
+        costoUnitario: costoNuevo.toFixed(4),
+        comentario: dto.comentario,
+      });
+
+      return {
+        movimientoId: mov.movimientoId,
+        costoAnterior,
+        costoNuevo: costoNuevo.toFixed(4),
+      };
+    });
   }
 
   /**

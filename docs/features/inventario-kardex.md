@@ -148,6 +148,57 @@ Response (400 — Stock insuficiente):
 
 ---
 
+### POST /inventario/ajustes-costo
+
+Corrige `item_producto.costo_actual` directamente (no un promedio, no una compra):
+para arreglar un costo mal cargado. Registra un movimiento `tipo='ajuste'`,
+`motivo='ajuste_costo'`, `cantidad=0` en el kardex — no mueve stock.
+
+```
+POST /api/inventario/ajustes-costo
+
+Authorization: Bearer <token>
+
+Request:
+{
+  "itemId": "uuid",
+  "costoNuevo": "250.00",
+  "comentario": "Corrección de costo mal cargado en la carga inicial"
+}
+
+Response (201):
+{
+  "movimientoId": "uuid",
+  "costoAnterior": "150.0000",
+  "costoNuevo": "250.0000"
+}
+```
+
+**Permiso:** `Inventario/Actualizar` (RBAC estándar — admin del tenant lo tiene
+por short-circuit).
+
+**Request Body (`AjusteCostoDto`):**
+- `itemId` (required): UUID del item.
+- `costoNuevo` (required): string numérico, costo nuevo. Debe ser `> 0`.
+- `comentario` (required): texto libre, no vacío. Un ajuste de costo es una
+  corrección y tiene que quedar explicada; a diferencia de las mermas, no lleva
+  causa tipificada (es un evento puntual, no un fenómeno recurrente que se
+  reporte por categoría).
+
+**Validaciones / errores:**
+- `400` si `costoNuevo <= 0` o no es numérico.
+- `404` si el item no existe en el tenant (o está soft-deleted).
+- `400` si el item no es de `tipo='producto'` ni `'ingrediente'` (solo esos
+  tienen costo propio en `item_producto`).
+- `400` si `costoNuevo` es igual al `costo_actual` vigente (no hay nada que
+  ajustar).
+
+Delega en `InventarioService.registrarMovimiento` (ver "Regla de costo" arriba)
+dentro de una transacción: no repite sus validaciones ni escribe
+`costo_actual` directamente — ese `UPDATE` está centralizado ahí.
+
+---
+
 ## Backend
 
 ### Module & Services

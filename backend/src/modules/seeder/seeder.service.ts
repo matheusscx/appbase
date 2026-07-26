@@ -727,6 +727,11 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppId: INVENTARIO,
         permisoId: VER_TODAS,
       },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440291',
+        moduloAppId: INVENTARIO,
+        permisoId: ACTUALIZAR,
+      },
       // Items (Catálogo)
       {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440192',
