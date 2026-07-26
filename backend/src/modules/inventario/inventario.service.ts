@@ -124,6 +124,11 @@ export class InventarioService {
     if (params.motivo !== 'merma' && params.causaMermaId) {
       throw new BadRequestException('causa_merma_id solo aplica a merma');
     }
+    if (params.motivo === 'recuento' && !params.motivoDiferenciaId) {
+      throw new BadRequestException(
+        'El recuento requiere una causa de diferencia tipificada',
+      );
+    }
     if (params.motivo !== 'recuento' && params.motivoDiferenciaId) {
       throw new BadRequestException(
         'motivo_diferencia_id solo aplica a recuento',

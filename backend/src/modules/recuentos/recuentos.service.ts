@@ -532,8 +532,8 @@ export class RecuentosService {
 
         await manager.query(
           `UPDATE recuento_inventario_linea SET movimiento_id = $1, actualizado_el = NOW()
-           WHERE linea_id = $2`,
-          [mov.movimientoId, linea.lineaId],
+           WHERE linea_id = $2 AND tenant_id = $3 AND eliminado_el IS NULL`,
+          [mov.movimientoId, linea.lineaId, tenantId],
         );
       }
 

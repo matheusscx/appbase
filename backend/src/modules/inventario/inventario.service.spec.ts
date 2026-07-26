@@ -14,6 +14,7 @@ const UNIDAD_1 = 'unidad-uuid-1';
 const UNIDAD_2 = 'unidad-uuid-2';
 const LOTE_ID = 'lote-uuid-1';
 const CAUSA_MERMA_ID = 'causa-merma-uuid';
+const MOTIVO_DIFERENCIA_ID = 'motivo-diferencia-uuid';
 
 describe('InventarioService', () => {
   let service: InventarioService;
@@ -482,6 +483,78 @@ describe('InventarioService', () => {
       const insertCall = managerMock.query.mock.calls[2];
       expect(insertCall[0]).toContain('causa_merma_id');
       expect(insertCall[1]).toContain(CAUSA_MERMA_ID);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Causa de diferencia (recuento)
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — motivo_diferencia_id', () => {
+    it('motivo recuento sin motivoDiferenciaId lanza BadRequest', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'recuento',
+          cantidad: '2',
+          usuarioId: USER_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'El recuento requiere una causa de diferencia tipificada',
+        ),
+      );
+    });
+
+    it('motivo distinto de recuento con motivoDiferenciaId lanza BadRequest', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+      ]);
+
+      await expect(
+        service.registrarMovimiento(managerMock as unknown as EntityManager, {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'ajuste_manual',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          motivoDiferenciaId: MOTIVO_DIFERENCIA_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('motivo_diferencia_id solo aplica a recuento'),
+      );
+    });
+
+    it('motivo recuento con motivoDiferenciaId incluye motivo_diferencia_id en el INSERT', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([
+          { stock: '10', modo_inventario: 'cantidad', costo_actual: '4000' },
+        ])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-r1' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'salida',
+          motivo: 'recuento',
+          cantidad: '2',
+          usuarioId: USER_ID,
+          motivoDiferenciaId: MOTIVO_DIFERENCIA_ID,
+        },
+      );
+
+      const insertCall = managerMock.query.mock.calls[2];
+      expect(insertCall[0]).toContain('motivo_diferencia_id');
+      expect(insertCall[1]).toContain(MOTIVO_DIFERENCIA_ID);
     });
   });
 
