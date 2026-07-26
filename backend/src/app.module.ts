@@ -132,6 +132,8 @@ import { Turno } from './modules/turnos/entities/turno.entity';
 import { SesionGarzon } from './modules/turnos/entities/sesion-garzon.entity';
 import { ImpresorasModule } from './modules/impresoras/impresoras.module';
 import { MermasModule } from './modules/mermas/mermas.module';
+import { MotivoDiferenciaInventario } from './modules/motivos-diferencia-inventario/entities/motivo-diferencia-inventario.entity';
+import { MotivosDiferenciaInventarioModule } from './modules/motivos-diferencia-inventario/motivos-diferencia-inventario.module';
 import { Impresora } from './modules/impresoras/entities/impresora.entity';
 import { GrupoModificador } from './modules/grupos-modificadores/entities/grupo-modificador.entity';
 import { GrupoModificadorOpcion } from './modules/grupos-modificadores/entities/grupo-modificador-opcion.entity';
@@ -198,6 +200,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
           ComboComponente,
           CausaMerma,
           MotivoDiferenciaCaja,
+          MotivoDiferenciaInventario,
           MovimientoInventario,
           MovimientoInventarioDetalle,
           MovimientoCaja,
@@ -284,6 +287,7 @@ import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos
     MermasModule,
     GruposModificadoresModule,
     MotivosDiferenciaModule,
+    MotivosDiferenciaInventarioModule,
   ],
   controllers: [AppController],
   providers: [AppService],

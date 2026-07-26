@@ -721,6 +721,22 @@ CREATE TABLE "causas_merma" (
 CREATE UNIQUE INDEX "uq_causas_merma_tenant_nombre"
   ON "causas_merma" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
 
+-- Causas de diferencia detectada en un recuento físico. Catálogo por tenant.
+-- NO se reusa causas_merma: un recuento puede dar SOBRANTE, y ninguna causa de
+-- merma lo explica. Ver ADR/spec de recuento de inventario.
+CREATE TABLE "motivo_diferencia_inventario" (
+  "motivo_diferencia_inventario_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"      UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"         TEXT NOT NULL,
+  "activo"         BOOLEAN NOT NULL DEFAULT true,
+  "es_fijo"        BOOLEAN NOT NULL DEFAULT false,
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX "uq_motivo_dif_inv_tenant_nombre"
+  ON "motivo_diferencia_inventario" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
+
 -- Kardex de movimientos de stock (solo items tipo 'producto')
 -- item_producto.stock es el saldo materializado; esta tabla es la fuente de verdad auditable.
 CREATE TABLE "movimientos_inventario" (

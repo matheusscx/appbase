@@ -28,6 +28,7 @@ import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
 import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
 import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
+import { MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.defaults';
 
 export interface TenantMember {
   usuarioId: string;
@@ -169,6 +170,16 @@ export class TenantsService {
           [savedTenant.id, m.nombre, m.requiereComentario],
         );
       }
+
+      // 7c. Sembrar los motivos de diferencia de inventario del sistema
+      const valores = MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS.map(
+        (_, i) => `($1, $${i + 2}, true, true)`,
+      ).join(', ');
+      await manager.query(
+        `INSERT INTO motivo_diferencia_inventario (tenant_id, nombre, activo, es_fijo)
+         VALUES ${valores}`,
+        [savedTenant.id, ...MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS],
+      );
 
       // 8. Habilitar la moneda oficial del país del tenant (default, tasa = 1)
       const oficialRows: { moneda_oficial_id: string | null }[] =

@@ -47,6 +47,7 @@ import { Salon } from '../salones/entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
 import { CAUSAS_MERMA_FIJAS } from '../mermas/causas-merma.defaults';
 import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
+import { MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.defaults';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -157,6 +158,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedTenants();
     await this.seedCausasMerma();
     await this.seedMotivosDiferencia();
+    await this.seedMotivosDiferenciaInventario();
     await this.seedCajasVirtuales();
     await this.seedCajones();
     await this.seedPropinaConfiguracion();
@@ -1044,6 +1046,40 @@ export class SeederService implements OnApplicationBootstrap {
         }
       }
     }
+  }
+
+  private async seedMotivosDiferenciaInventario(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const uuid = (n: number) =>
+      `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
+
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_dif_inv_tenant_nombre
+      ON motivo_diferencia_inventario (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
+    const filas: { id: string; tenantId: string; nombre: string }[] = [];
+    let id = 292;
+    for (const tenantId of [PARIS, FALABELLA]) {
+      for (const nombre of MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS) {
+        filas.push({ id: uuid(id++), tenantId, nombre });
+      }
+    }
+
+    const valores = filas
+      .map(
+        (_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3}, true, true)`,
+      )
+      .join(', ');
+    const params = filas.flatMap((f) => [f.id, f.tenantId, f.nombre]);
+    await this.dataSource.query(
+      `INSERT INTO motivo_diferencia_inventario
+         (motivo_diferencia_inventario_id, tenant_id, nombre, activo, es_fijo)
+       VALUES ${valores}
+       ON CONFLICT (motivo_diferencia_inventario_id) DO NOTHING`,
+      params,
+    );
   }
 
   private async seedCajasVirtuales(): Promise<void> {
