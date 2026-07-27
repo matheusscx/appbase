@@ -201,8 +201,13 @@ Todas con soft delete (`eliminado_el`) y triada de auditoría. PKs UUID con `typ
 | `cancelada` | Anulación explícita |
 | `borrador` | Estado transitorio previo a confirmar |
 
-⚠️ `cancelada` y `borrador` están en el enum y en esta tabla, pero **hoy ningún punto
-del backend los asigna** y no hay endpoint de anulación. Ver `docs/agent/pendientes.md`.
+⚠️ `cancelada` y `borrador` están en el enum y en esta tabla, pero **hoy ningún punto del
+backend los asigna** y no hay endpoint de anulación. Decidido el 2026-07-27 tras
+investigación de mercado (`docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`):
+`cancelada` se implementa acotada a ventas `pendiente` sin pagos ni documento emitido —el
+resto se revierte con nota de crédito, como exige el SII— y **`borrador` se elimina**,
+porque `cuenta`/`cuenta_lineas` de salones ya son el ticket en construcción. Hasta que eso
+se implemente, esta tabla describe el enum, no el comportamiento.
 
 El saldo se recalcula en cada abono sobre **lo aplicado a la venta**, no sobre el bruto
 cobrado: `saldo = total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta')`.

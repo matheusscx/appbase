@@ -225,31 +225,38 @@ información, no diffs. Orden = severidad.
   estados que deben rechazarse (`:1242-1252`). Sacar `'pagada_parcial'` de la whitelist
   de `ventas.service.ts:619` no rompe ningún test.
 
-### Decisiones de owner que salieron de la auditoría (no son bugs)
+### Decidido por el owner tras investigación de mercado (2026-07-27)
 
-No los reporta como defectos: son reglas de negocio que **no están documentadas**, así
-que decidirlas es del owner (`CLAUDE.md` → "detenerse y preguntar").
+Las tres salieron de la auditoría como reglas de negocio no documentadas. Se corrió una
+pasada de investigación sobre dos de ellas y el owner decidió las tres. Método, cruce
+contra el código y fuentes: **`docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`**.
+Lo de abajo es **trabajo pendiente con la forma ya definida**, no preguntas abiertas.
 
-- [ ] **¿La nota de crédito debe acotarse a lo efectivamente cobrado?**
-  (`ventas/ventas.service.ts:634-639`) — hoy el único tope es
-  `total_final − Σ NCs previas`. Sobre una venta `pagada_parcial` de 1000 con solo 200
-  cobrados, una NC de 1000 con `devolverDinero: true` pasa: el único freno adicional es
-  el saldo **global** de efectivo de la caja, que puede venir de otras ventas.
-  `docs/features/reembolsos-nota-credito.md:140-144` solo exige estado elegible y saldo
-  en caja; nada dice sobre acotar al monto cobrado.
-- [ ] **¿El POS necesita idempotencia en la creación de venta?**
-  (`ventas/ventas.service.ts:86-90`) — no existe clave de idempotencia en ningún
-  endpoint. Un doble clic en "cobrar" o un reintento del cliente tras un timeout crea
-  **dos ventas completas**: doble descuento de stock y doble cobro. El `FOR UPDATE` de
-  inventario evita stock negativo, no la venta duplicada. Es diseño faltante, no código
-  roto: decidir si se agrega `Idempotency-Key` o se resuelve en el cliente.
-- [ ] **Los estados `borrador` y `cancelada` están documentados pero no existen**
-  (`ventas/entities/venta.entity.ts:10-16`) — el enum los declara y
-  `docs/features/ventas.md:199-201` + `docs/PRODUCTO.md:426,429` los especifican, pero
-  **ningún punto del backend los asigna** y no hay endpoint de anulación. Consecuencia
-  real: una venta mal ingresada no se puede anular; el único mecanismo de reversión es
-  la nota de crédito, que no cambia el estado de la original. Decidir si se implementan
-  o si la doc se corrige para reflejar que no existen.
+- [ ] **Acotar el dinero devuelto por una NC a lo cobrado EN EFECTIVO en esa venta**
+  (backend, `ventas/ventas.service.ts:699-728`) — hoy `devolverDinero` genera **siempre**
+  una salida de efectivo sin mirar con qué pagó el cliente, validada solo contra el saldo
+  **global** de la caja. Dos agujeros en uno: se puede devolver más de lo que esa venta
+  ingresó, y se puede dar efectivo por una compra con tarjeta — el vector de fraude
+  interno que la investigación identifica como principal (Clover, Lightspeed y Toast lo
+  bloquean por diseño). Un solo tope cierra los dos: `Σ(pago_aplicaciones tipo='venta' de
+  pagos con método es_efectivo) − Σ(ya devuelto en efectivo)`. Los datos ya están.
+  **El tope documental de la NC (`total_final − Σ NCs previas`) NO se toca**: coincide con
+  la regla dura del SII, que rechaza una NC que exceda el documento de referencia.
+- [ ] **Implementar `cancelada` en su subconjunto seguro** (backend + frontend) — anular
+  solo una venta `pendiente`, **sin pagos** y **sin documento emitido**, con motivo
+  obligatorio (Toteat exige 10 caracteres mínimo). Es lo inequívocamente anulable hoy y lo
+  seguirá siendo tras integrar el SII: no hay hecho fiscal que compensar ni dinero que
+  devolver. Todo lo demás ya tiene camino por la nota de crédito. Cierra el agujero real:
+  hoy una venta mal ingresada obliga a emitir un documento tributario para deshacer un
+  tipeo. **No** modelar el plazo de 6 meses de la Ley 21.398 (se cuenta desde la entrega
+  del bien): es infraestructura DTE especulativa, prohibida por ADR-010.
+- [ ] **Sacar `borrador` del enum y de la doc** (`ventas/entities/venta.entity.ts:10-16`,
+  `docs/features/ventas.md`, `docs/PRODUCTO.md:426`) — `cuenta`, `cuenta_lineas` y
+  `cuenta_asignaciones` de `modules/salones/` ya son el *open ticket* que describe el
+  mercado; un `borrador` de venta en paralelo sería una segunda forma de resolver lo
+  mismo. El único hueco que quedaría es parquear un ticket en **mostrador**, fuera de
+  salones — nadie lo pidió, se diseña si aparece. Sin datos productivos, cambiar el enum
+  es cambiar el esquema y resembrar.
 
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
@@ -332,6 +339,19 @@ para producción**: un CI rojo hoy es inofensivo porque `main` no despliega, per
 que `main` auto-despliegue significaría subir código roto a prod y enterarse tarde. Esta
 sección se abre al encarar el paso a producción. Orden = prioridad.
 
+- [ ] **Idempotencia en la creación de venta** (backend + frontend) — decidido 2026-07-27:
+  va acá y no antes, porque hoy no hay usuarios que puedan sufrir el doble cobro y es una
+  feature con superficie propia (contrato HTTP, tabla, cliente), no un fix. **El problema:**
+  no existe clave de idempotencia en ningún endpoint; un doble clic en "cobrar" o un
+  reintento del cliente tras un timeout crea **dos ventas completas** — doble descuento de
+  stock y doble cobro. El `FOR UPDATE` de inventario evita stock negativo, no la venta
+  duplicada, y deshabilitar el botón en el frontend no sobrevive a un timeout de red.
+  **Forma:** `Idempotency-Key` generada por el cliente **por intento de cobro** (no por
+  carrito), tabla que guarda clave → respuesta, y reproducción de la respuesta original en
+  el reintento en vez de recrear.
+  ⛔ **La opción barata es la incorrecta:** deduplicar por hash del carrito en una ventana
+  de segundos rompe el caso real de dos clientes comprando lo mismo con segundos de
+  diferencia — cotidiano en un minimarket o una cafetería. No es un atajo aceptable.
 - [ ] **`synchronize: true` → migraciones (CRÍTICO, bloqueante de prod)** (backend) —
   hoy el esquema lo crea `synchronize` al bootstrap (dev + CI, porque `NODE_ENV != production`).
   En prod `synchronize` **puede dropear columnas y perder datos** al arrancar tras un cambio
