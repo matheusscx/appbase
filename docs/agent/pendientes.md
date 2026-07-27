@@ -105,6 +105,153 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
   ver `backend/src/common/decorators/decimal-signo.decorator.ts`): queda solo la
   restricción de canal, sin regresión respecto al comportamiento previo.
 
+## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
+
+Pasada de 7 lentes según `docs/agent/auditoria-codigo.md`. 20 hallazgos crudos → 15
+confirmados tras refutación (3 eran el mismo bug visto por lentes distintas, 3 pasaron a
+decisión de owner, abajo). **Ninguno se corrigió en la pasada**: la auditoría produce
+información, no diffs. Orden = severidad.
+
+- [ ] **El vuelto se asigna íntegro a un pago sin acotarlo a su propio monto**
+  (backend, `pagos/pagos.service.ts:160-178` y `:244`) — `excedente` va completo al
+  **primer** método con `permite_vuelto=true`, sin comprobar que ese pago alcance para
+  cubrirlo. Con `[tarjeta 150 (sin vuelto), efectivo 10 (con vuelto)]` y `target=100`:
+  `excedente=60` → el pago de efectivo queda con `monto=10, vuelto=60`, y su neto
+  (`monto - vuelto = -50`) se persiste como movimiento de caja **`tipo='entrada'` con
+  monto negativo**. La regla correcta ya está escrita, pero solo del lado del cliente:
+  `docs/features/ventas.md:241` describe `excedenteSinVuelto` en `resumenCobro` del
+  frontend. Invariante 6: validar en el frontend nunca sustituye al guard del backend.
+  Cierre: validar `excedente <= pago.monto` en `registrar()` y decidir qué pasa con el
+  excedente no devolvible. Detectado por 3 lentes independientes (dinero, ciclo de vida,
+  tests).
+- [ ] **`registrarAbono` calcula el saldo con la suma bruta de pagos, no con lo aplicado
+  a la venta** (backend, `pagos/pagos.service.ts:313-320`) — usa
+  `SUM(monto - vuelto)`, que incluye la parte del pago asignada a **propina**. El resto
+  del código ya usa la fuente correcta (`pago_aplicaciones` con `tipo='venta'`):
+  `ventas.service.ts:1038-1044` (listar), `:985` (resumen) y `:1235`. `registrarAbono`
+  es el único outlier, y encima mezcla las dos fuentes: base bruta + incremento
+  venta-only (`:341`). Escenario: venta `total=100` + propina `20`, pago inicial `90`
+  (target de creación = `totalFinal + propina`, `ventas.service.ts:545`) → aplicado a
+  venta `70`, a propina `20`. En el abono lee `90` en vez de `70`, calcula `saldo=10` en
+  vez de `30`; el cliente abona `10` y la venta queda **`pagada` habiendo cobrado 80 de
+  100**. Cierre: usar `pago_aplicaciones tipo='venta'` **y corregir la fórmula
+  documentada en `docs/features/ventas.md:203`**, que quedó escrita antes de las propinas.
+- [ ] **`metodoPagoId` se persiste sin validar que esté habilitado para el tenant**
+  (backend, `pagos/pagos.service.ts:132-152` vs `:176-196`) — la query de pertenencia a
+  `tenant_metodo_pago` se usa solo para resolver `nombre`/`permite_vuelto`; su resultado
+  nunca se usa como gate. La FK apunta al catálogo **global** (`startup-pos.sql:1094` →
+  `metodos_pago`), así que cualquier id del catálogo pasa. Dos consecuencias: el pago se
+  graba con un método no contratado, y como `listar()` hace **INNER JOIN** contra
+  `tenant_metodo_pago` filtrado por tenant (`:443-449`), **ese pago desaparece del
+  listado de pagos** — plata registrada e invisible. Además `permiteVuelto` se lee como
+  `false` en silencio. Cierre: rechazar todo `metodoPagoId` ausente de `metodoPagoMap`.
+- [ ] **`garzonId` de propina no se valida contra el tenant y el JOIN de lectura lo
+  expone** (backend, `ventas/ventas.service.ts:501-520` y `:1261-1269`) — la ruta
+  `propinaCierreMesa` guarda el `garzonId` del DTO sin comprobar pertenencia
+  (`venta-propina.service.ts:51-64`), pese a que `GarzonesService.obtenerActivoPorId
+  (tenantId, id)` existe y valida. En la lectura, `LEFT JOIN garzones` solo filtra
+  `eliminado_el`, no `tenant_id` → `GET /ventas/:id` devuelve el **nombre de un empleado
+  de otro tenant**. Peor que la fuga: esa propina entra a la liquidación del garzón
+  ajeno. (`propinaDirecta` usa `asegurarMostrador`, tenant-scoped: no afectada.)
+  Cierre: validar pertenencia al crear + `AND g.tenant_id = vp.tenant_id` en el JOIN.
+- [ ] **La caja se verifica sin lock y el movimiento se escribe después sin re-chequear**
+  (backend, `ventas/ventas.service.ts:101-116`, `pagos/pagos.service.ts:301-310`,
+  `caja/caja.service.ts:785-809`) — `findActiva` lee por repositorio (fuera del manager
+  transaccional) y no toma lock; entre esa lectura y el `INSERT INTO movimientos_caja`
+  del final pasa toda la venta. `registrarMovimientoEnTransaccion` **no valida el estado
+  de la caja**. Si un cierre (`enviarConteo` → `bloquearCajaAbierta`, `:635`) commitea en
+  el medio, el movimiento queda contra una caja ya `cerrada` cuyo arqueo ya se congeló →
+  descuadre. El patrón correcto ya existe en el repo y se usa en la nota de crédito
+  (`ventas.service.ts:708-712`); falta en el camino principal de venta y en el abono.
+- [ ] **N+1 al crear una venta: un `itemsService.findOne` por línea del carrito**
+  (backend, `ventas/ventas.service.ts:119-121`) — `Promise.all(dto.lineas.map(l =>
+  findOne(...)))` en el camino caliente del POS; cada `findOne` abre varias queries
+  propias (impuestos, recargos, descuentos, y receta/combo). Un ticket de 10 líneas
+  dispara decenas de queries para resolver ítems que ya se conocen por `itemId`. Es el
+  anti-patrón "N+1 indirecto" de `docs/agent/anti-patterns.md`. Cierre: batch
+  `WHERE item_id = ANY($1)` + `Map` en memoria.
+- [ ] **`registrarAbono` sin `FOR UPDATE` sobre la venta ni sobre la suma de pagos**
+  (backend, `pagos/pagos.service.ts:275-320`) — dos abonos concurrentes sobre la misma
+  venta leen el mismo saldo y ambos lo aplican: sobre-pago que ninguno de los dos ve.
+  El repo ya tiene el patrón (`lockVentaOriginal`, `bloquearCajaAbierta`). Distinto del
+  bug de fuente de datos de arriba: ese es *qué* se lee, este es *sin qué garantía*.
+- [ ] **N+1 al resolver personalización de recetas/combos**
+  (backend, `ventas/ventas.service.ts:197-218`) — mismo patrón que el anterior, una
+  resolución independiente por línea `receta`/`combo`. Mismo camino caliente.
+- [ ] **Orden de locks de `item_producto` decidido por el cliente → deadlock**
+  (backend, `ventas/ventas.service.ts:434-478` + `inventario/inventario.service.ts:91`)
+  — el `SELECT … FOR UPDATE` por ítem se toma en el orden de `dto.lineas`. Dos ventas
+  simultáneas con los mismos dos productos en orden inverso se bloquean en cruz;
+  Postgres aborta una. No corrompe datos (la transacción se revierte entera), pero
+  tumba una venta con un error opaco. Cierre barato: ordenar las líneas por `itemId`
+  antes de iterar.
+- [ ] **`esNotaCredito` se recalcula en el drawer con un código hardcodeado**
+  (backend `ventas/ventas.service.ts:1110` vs frontend
+  `components/ventas/VentaDetalleDrawer.vue:144`) — el listado recibe el booleano ya
+  calculado por el backend (`tipo_documento_id === TIPO_DOCUMENTO_NC_ID`), pero
+  `findOne()` no lo emite y el drawer lo reconstruye con `tipoDocumento?.codigo === '61'`.
+  `codigo` es nullable y por país; si no es `'61'`, el drawer ofrece "Nota de crédito"
+  sobre una NC (el backend la rechaza recién al confirmar) mientras el listado sí la
+  marca. Cierre: emitir `esNotaCredito` en `findOne()` y consumirlo.
+- [ ] **`tasa_cambio` se calcula con 6 decimales y se persiste en escala 4**
+  (backend, `ventas/ventas.service.ts:242` vs
+  `ventas/entities/venta-detalle.entity.ts:34-41`) — `tasa.toFixed(6)` entra en una
+  columna `NUMERIC(18,4)` y Postgres la redondea. Los totales son correctos
+  (`precioConvertido` se calcula con la tasa completa antes de redondear); lo que se
+  pierde es la **reproducibilidad del campo de auditoría**: recalcular
+  `precioUnitarioOrigen × tasaCambio` ya no da `precioUnitario`. Severidad baja, sin
+  impacto en plata cobrada.
+- [ ] **`pos.vue` y `AbonoModal.vue` no usan `apiErrorMsg`**
+  (frontend, `pages/ventas/pos.vue:274-276`, `components/pagos/AbonoModal.vue:98-100`)
+  — tipan `data.message` como `string`, pero el `ValidationPipe` global (`main.ts:19`,
+  sin `exceptionFactory`) devuelve `string[]` en errores de validación → el toast
+  muestra el array interpolado. El helper ya existe, está testeado para ambos casos
+  (`utils/api-error.spec.ts`) y lo usan `NotaCreditoModal.vue` y `VentaDetalleDrawer.vue`
+  del mismo módulo. Severidad baja.
+- [ ] **La rama "caja en conciliación" no la ejerce ningún test** (backend,
+  `ventas/ventas.service.spec.ts:32,40` y `pagos/pagos.service.spec.ts:22`) — los mocks
+  de caja solo existen con `estado: 'abierta'`; `en_conciliacion` no aparece en ninguno
+  de los dos specs. Borrar los `if (caja.estado !== 'abierta')` de
+  `ventas.service.ts:112-115` y `pagos.service.ts:306-309` no rompe ningún test. Es el
+  caso §2c de `verify-feature`: distinción real en el código, cero cobertura — el mismo
+  molde del bug de permisos de recuentos.
+- [ ] **Nadie ejerce a cuál pago se le asigna el vuelto con métodos mixtos** (backend,
+  `pagos/pagos.service.spec.ts:238`) — el único test con excedente usa **un solo**
+  método (índice 0 = siempre "correcto"), y el único test con dos métodos no tiene
+  excedente. Es la razón por la que el bug del vuelto (primer ítem de esta lista) pasó
+  todos los gates. Cierre: el test que lo cubra es el mismo que verifica ese fix.
+- [ ] **La nota de crédito sobre `pagada_parcial` no se prueba nunca en éxito**
+  (backend, `ventas/ventas.service.spec.ts`) — `pagada_parcial` **no aparece en el
+  spec**; el camino feliz usa siempre `'pagada'` (`:766`) y el `it.each` solo cubre los
+  estados que deben rechazarse (`:1242-1252`). Sacar `'pagada_parcial'` de la whitelist
+  de `ventas.service.ts:619` no rompe ningún test.
+
+### Decisiones de owner que salieron de la auditoría (no son bugs)
+
+No los reporta como defectos: son reglas de negocio que **no están documentadas**, así
+que decidirlas es del owner (`CLAUDE.md` → "detenerse y preguntar").
+
+- [ ] **¿La nota de crédito debe acotarse a lo efectivamente cobrado?**
+  (`ventas/ventas.service.ts:634-639`) — hoy el único tope es
+  `total_final − Σ NCs previas`. Sobre una venta `pagada_parcial` de 1000 con solo 200
+  cobrados, una NC de 1000 con `devolverDinero: true` pasa: el único freno adicional es
+  el saldo **global** de efectivo de la caja, que puede venir de otras ventas.
+  `docs/features/reembolsos-nota-credito.md:140-144` solo exige estado elegible y saldo
+  en caja; nada dice sobre acotar al monto cobrado.
+- [ ] **¿El POS necesita idempotencia en la creación de venta?**
+  (`ventas/ventas.service.ts:86-90`) — no existe clave de idempotencia en ningún
+  endpoint. Un doble clic en "cobrar" o un reintento del cliente tras un timeout crea
+  **dos ventas completas**: doble descuento de stock y doble cobro. El `FOR UPDATE` de
+  inventario evita stock negativo, no la venta duplicada. Es diseño faltante, no código
+  roto: decidir si se agrega `Idempotency-Key` o se resuelve en el cliente.
+- [ ] **Los estados `borrador` y `cancelada` están documentados pero no existen**
+  (`ventas/entities/venta.entity.ts:10-16`) — el enum los declara y
+  `docs/features/ventas.md:199-201` + `docs/PRODUCTO.md:426,429` los especifican, pero
+  **ningún punto del backend los asigna** y no hay endpoint de anulación. Consecuencia
+  real: una venta mal ingresada no se puede anular; el único mecanismo de reversión es
+  la nota de crédito, que no cambia el estado de la original. Decidir si se implementan
+  o si la doc se corrige para reflejar que no existen.
+
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
 El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado

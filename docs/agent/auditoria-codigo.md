@@ -19,10 +19,23 @@ cosas: lo que ningún gate mira porque nadie lo miró nunca como un cuerpo enter
 dos cosas.
 
 El motivo es empírico. Un agente al que le pedís bugs **encuentra bugs**, existan o no.
-En la pasada de jul-2026 sobre 39 commits de código recién escrito: 13 hallazgos, 10
-sobrevivieron a la refutación (77%). Sobre código maduro que ya pasó gates, e2e y
-revisiones, la densidad real de bugs es mucho más baja **pero la tasa de hallazgos no
-baja igual** — el ruido sube en proporción. Esperá algo como 40 hallazgos con 8 reales.
+Dos pasadas medidas en jul-2026: sobre 39 commits de código recién escrito, 13 hallazgos
+y 10 supervivientes (77%); sobre `ventas`+`pagos` —código maduro, con gates, e2e y
+revisiones encima— 20 hallazgos y 15 supervivientes (75%).
+
+**La predicción de que el ruido subiría sobre código maduro no se cumplió**, y la razón
+importa: la precisión no vino de que los buscadores acertaran más, sino de tres cosas del
+prompt que hay que sostener en cada pasada. (1) Se les pasó **lo ya conocido** —las
+entradas de `pendientes.md` del módulo, los barridos ya hechos— así que no gastaron
+hallazgos en redescubrirlo. (2) Se les exigió **escenario reproducible con `archivo:línea`
+verificado abriendo el archivo**; un buscador que tiene que abrir el archivo para citar la
+línea descarta solo sus propias corazonadas. (3) Una lente por agente: sin superposición
+no hay relleno para llegar al cupo. Aflojá cualquiera de las tres y la tasa se desploma.
+
+Lo que sí cambia sobre código maduro es **la forma** del hallazgo: menos errores de
+escritura reciente y más deuda estructural que ningún gate mira (una fórmula que quedó
+vieja cuando llegó una feature nueva, una validación que solo existe en el cliente, una
+rama que nunca tuvo test).
 
 De ahí el reparto:
 
@@ -100,6 +113,7 @@ Qué se auditó, cuándo, y con qué resultado. Una fila por pasada.
 |---|---|---|---|---|---|
 | 39 commits: costeo CPP, recuentos, motivos de diferencia | 2026-07-27 | 5 | 13 | 10 | Multi-tenant/permisos salió limpio. 1 refutado por preexistente → `pendientes.md` |
 | Los 2 commits de corrección de esa pasada | 2026-07-27 | 1 (`domain-reviewer`) | 2 | 2 | 1 bloqueante: regresión de UI del rol aprobador |
+| `ventas` + `pagos` (backend completo + pantallas del módulo) | 2026-07-27 | 7 | 20 | 15 | **Soft delete salió limpio** (tabla por tabla, 0 hallazgos). 3 lentes independientes cayeron sobre el mismo bug del vuelto → se contó una vez. 3 hallazgos pasaron a decisión de owner por regla no documentada, no a la lista de bugs |
 
 ### Orden propuesto para lo que falta
 
@@ -107,12 +121,12 @@ Por riesgo, no por tamaño. Lo de arriba primero.
 
 | Prioridad | Alcance | Por qué |
 |---|---|---|
-| 1 | `ventas` (+ `pagos`) | Núcleo transaccional: dinero, impuestos, inventario, caja y concurrencia a la vez |
-| 2 | `caja` + `propinas`/liquidación | Dinero y cuadratura; la liquidación es de las más grandes del repo |
-| 3 | `items` (motor de precios) | El más grande (3.5k LOC) y modula todo el cálculo |
-| 4 | `inventario` fuera de lo ya auditado | Kardex, mermas, conversión de unidades |
-| 5 | RBAC, auth y tenants | La invariante más cara si se rompe, aunque cambia poco |
-| 6 | Catálogos y configuración | Bajo riesgo: CRUD admin-only con lectura abierta |
+| ~~1~~ | ~~`ventas` (+ `pagos`)~~ | ✅ Hecho 2026-07-27 |
+| 1 | `caja` + `propinas`/liquidación | Dinero y cuadratura; la liquidación es de las más grandes del repo. **La pasada de ventas dejó dos hilos que terminan acá**: el movimiento de caja con monto negativo y el movimiento escrito contra una caja ya cerrada |
+| 2 | `items` (motor de precios) | El más grande (3.5k LOC) y modula todo el cálculo. La pasada de ventas dejó un hilo: `itemsService.findOne` como fuente de dos N+1 |
+| 3 | `inventario` fuera de lo ya auditado | Kardex, mermas, conversión de unidades |
+| 4 | RBAC, auth y tenants | La invariante más cara si se rompe, aunque cambia poco |
+| 5 | Catálogos y configuración | Bajo riesgo: CRUD admin-only con lectura abierta |
 
 Cerrar cada pasada actualizando **las dos tablas**: la de cobertura con lo hecho, y esta
 con lo que quede pendiente.
