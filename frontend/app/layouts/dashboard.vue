@@ -127,6 +127,11 @@ const items = computed<NavigationMenuItem[]>(() => {
       icon: 'i-lucide-trash-2',
       to: '/mermas',
     })
+    base.push({
+      label: 'Recuentos',
+      icon: 'i-lucide-clipboard-check',
+      to: '/inventario/recuentos',
+    })
   }
   if (permissionsStore.esAdmin || permissionsStore.can('Items', 'Leer')) {
     base.push({

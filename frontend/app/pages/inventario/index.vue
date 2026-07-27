@@ -63,6 +63,7 @@ const motivoOpts: Opt[] = [
   { label: 'Ajuste manual', value: 'ajuste_manual' },
   { label: 'Ajuste de costo', value: 'ajuste_costo' },
   { label: 'Inventario inicial', value: 'inventario_inicial' },
+  { label: 'Recuento', value: 'recuento' },
 ]
 
 const productosOpts = computed<Opt[]>(() => [

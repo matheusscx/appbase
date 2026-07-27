@@ -87,6 +87,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
         to: '/configuracion/motivos-diferencia',
       },
       {
+        label: 'Motivos de diferencia (inventario)',
+        icon: 'i-lucide-clipboard-check',
+        to: '/configuracion/motivos-diferencia-inventario',
+      },
+      {
         label: 'Grupos de modificadores',
         icon: 'i-lucide-list-plus',
         to: '/configuracion/grupos-modificadores',
