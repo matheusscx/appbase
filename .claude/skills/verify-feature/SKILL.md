@@ -146,13 +146,32 @@ Este paso lo cierra un **par de ojos con contexto fresco**.
 **Lanzar el sub-agente `domain-reviewer`** (Agent, `subagent_type: "domain-reviewer"`).
 Arranca en frío: solo ve el diff, no la conversación que lo produjo — ese aislamiento
 es el punto. Su system prompt ya lleva las invariantes, el chequeo N+1/consultas y el
-alcance; no hay que pasarle el checklist. Basta con indicarle la base del diff si no es
-`--staged`:
+alcance; no hay que pasarle el checklist:
 
 ```
 Revisá el cierre de esta tarea. Corré `git diff --staged` (o `git diff <base>..HEAD`
 si te doy una base) y devolvé hallazgos + veredicto BLOQUEA/LIMPIO.
 ```
+
+**Ese prompt a secas rinde poco. Pedile propiedades concretas.** En jul-2026, nueve
+rondas de revisión sobre la misma tanda: las que decían solo "revisá el diff" volvieron
+LIMPIO varias veces seguidas; las que nombraban una propiedad a verificar produjeron
+**cuatro bloqueos, los cuatro correctos** — y ninguno lo había visto el gate completo.
+Agregá al prompt, además de la base del diff:
+
+- **Qué cambió y por qué**, en dos o tres líneas. Aclarando que es contexto para juzgar
+  el alcance, no algo en lo que confiar.
+- **Las preguntas que te dan miedo**, formuladas como propiedad falsable. Las que
+  funcionaron: *"¿este test puede pasar por una razón distinta de la que dice probar?"*,
+  *"¿queda algún consumidor de este valor sin actualizar?"*, *"¿esta condición rechaza
+  algún caso legítimo?"*, *"¿el orden de locks nuevo abre un deadlock con otro camino?"*.
+- **Las decisiones de juicio que tomaste** y que querés que alguien discuta: qué dejaste
+  deliberadamente afuera y por qué.
+- ⚠️ **`No modifiques el árbol de trabajo`** — sin eso un revisor puede hacer `git stash`
+  para probar un mutante y dejarte cambios sin commitear en el piso.
+
+No es pasarle el checklist (ya lo tiene): es dirigir la atención al lugar donde tu propia
+revisión es más débil, que es exactamente donde no podés mirarte a vos mismo.
 
 **Si el diff toca controllers, guards, DTOs o entidades**, lanzar además
 `api-security-reviewer` (`subagent_type: "api-security-reviewer"`) sobre esos archivos:

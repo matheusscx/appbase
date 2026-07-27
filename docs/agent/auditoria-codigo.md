@@ -83,6 +83,9 @@ y costeo, cuadratura de caja, ciclo de vida de la venta.
    de refutación: (a) hay un guard/lock aguas arriba que el buscador no vio; (b) el
    escenario es imposible por construcción; (c) es **preexistente y de otro alcance**;
    (d) es una decisión de diseño documentada.
+   ⚠️ Al **arreglar** lo que sobrevive, la revisión independiente del cierre se pide
+   nombrando propiedades concretas, no "revisá el diff" — ver `verify-feature` paso 7.
+   Esa diferencia produjo los cuatro únicos bloqueos de la tanda de jul-2026.
 5. **Triar los sobrevivientes**: los que son del alcance van a `pendientes.md`; los
    refutados por *preexistente* **también** — no eran falsos, eran de otro alcance. Esa
    distinción es la diferencia entre filtrar ruido y perder señal.
