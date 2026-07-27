@@ -128,14 +128,25 @@ export class MotivosDiferenciaInventarioService {
       );
     }
 
-    const uso: { cnt: string }[] = await this.dataSource.query(
-      `SELECT COUNT(*)::text AS cnt FROM movimientos_inventario
-        WHERE motivo_diferencia_id = $1 AND eliminado_el IS NULL`,
+    // Una sola query cubre las tres referencias posibles a la causa: el
+    // kardex ya aplicado, el override de línea de un recuento en borrador y
+    // la causa por defecto de la sesión — nunca tres queries sueltas.
+    const uso: { existe: boolean }[] = await this.dataSource.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM movimientos_inventario
+          WHERE motivo_diferencia_id = $1 AND eliminado_el IS NULL
+         UNION ALL
+         SELECT 1 FROM recuento_inventario_linea
+          WHERE motivo_diferencia_id = $1 AND eliminado_el IS NULL
+         UNION ALL
+         SELECT 1 FROM recuento_inventario
+          WHERE motivo_diferencia_default_id = $1 AND eliminado_el IS NULL
+       ) AS existe`,
       [id],
     );
-    if (parseInt(uso[0].cnt, 10) > 0) {
+    if (uso[0].existe) {
       throw new BadRequestException(
-        'No se puede eliminar: el motivo está en uso en movimientos de recuento',
+        'No se puede eliminar: el motivo está en uso en movimientos o recuentos de inventario',
       );
     }
 

@@ -8,7 +8,6 @@ import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
-import type { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   buildPaginationMeta,
   resolvePagination,
@@ -16,6 +15,7 @@ import {
 import { CreateRecuentoDto } from './dto/create-recuento.dto';
 import { UpdateRecuentoDto } from './dto/update-recuento.dto';
 import { UpdateRecuentoLineaDto } from './dto/update-recuento-linea.dto';
+import { FindRecuentosDto } from './dto/find-recuentos.dto';
 import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
 import { InventarioService } from '../inventario/inventario.service';
 
@@ -212,16 +212,25 @@ export class RecuentosService {
 
   async findAll(
     tenantId: string,
-    query: PaginationQueryDto,
+    query: FindRecuentosDto,
   ): Promise<PaginatedResponse<RecuentoListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
 
+    const estadoFilter = query.estado ? ' AND r.estado = $2' : '';
+    const countParams = query.estado ? [tenantId, query.estado] : [tenantId];
+
     const countRows: { total: number }[] = await this.dataSource.query(
-      `SELECT COUNT(*)::int AS total FROM recuento_inventario
-        WHERE tenant_id = $1 AND eliminado_el IS NULL`,
-      [tenantId],
+      `SELECT COUNT(*)::int AS total FROM recuento_inventario r
+        WHERE r.tenant_id = $1 AND r.eliminado_el IS NULL${estadoFilter}`,
+      countParams,
     );
     const total = countRows[0]?.total ?? 0;
+
+    const listParams = query.estado
+      ? [tenantId, query.estado, pageSize, offset]
+      : [tenantId, pageSize, offset];
+    const limitIdx = query.estado ? 3 : 2;
+    const offsetIdx = query.estado ? 4 : 3;
 
     const rows: RecuentoListRow[] = await this.dataSource.query(
       `SELECT r.recuento_id, r.estado, r.comentario, r.creado_el, r.aplicado_el,
@@ -238,11 +247,11 @@ export class RecuentosService {
            ON l.recuento_id = r.recuento_id AND l.eliminado_el IS NULL
          LEFT JOIN usuarios u
            ON u.usuario_id = r.usuario_creador_id AND u.eliminado_el IS NULL
-        WHERE r.tenant_id = $1 AND r.eliminado_el IS NULL
+        WHERE r.tenant_id = $1 AND r.eliminado_el IS NULL${estadoFilter}
         GROUP BY r.recuento_id, u.nombre
         ORDER BY r.creado_el DESC
-        LIMIT $2 OFFSET $3`,
-      [tenantId, pageSize, offset],
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      listParams,
     );
 
     return {
@@ -502,6 +511,7 @@ export class RecuentosService {
       const lineasAAplicar: {
         lineaId: string;
         itemId: string;
+        itemNombre: string;
         delta: Decimal;
         motivoId: string;
       }[] = [];
@@ -533,6 +543,7 @@ export class RecuentosService {
         lineasAAplicar.push({
           lineaId: l.linea_id,
           itemId: l.item_id,
+          itemNombre: l.item_nombre,
           delta,
           motivoId,
         });
@@ -564,16 +575,33 @@ export class RecuentosService {
       }
 
       for (const linea of lineasAAplicar) {
-        const mov = await this.inventarioService.registrarMovimiento(manager, {
-          tenantId,
-          itemId: linea.itemId,
-          usuarioId,
-          tipo: linea.delta.isPositive() ? 'entrada' : 'salida',
-          motivo: 'recuento',
-          cantidad: linea.delta.abs().toFixed(4),
-          motivoDiferenciaId: linea.motivoId,
-          comentario: sesion.comentario ?? null,
-        });
+        let mov: { movimientoId: string };
+        try {
+          mov = await this.inventarioService.registrarMovimiento(manager, {
+            tenantId,
+            itemId: linea.itemId,
+            usuarioId,
+            tipo: linea.delta.isPositive() ? 'entrada' : 'salida',
+            motivo: 'recuento',
+            cantidad: linea.delta.abs().toFixed(4),
+            motivoDiferenciaId: linea.motivoId,
+            comentario: sesion.comentario ?? null,
+          });
+        } catch (error) {
+          // El mensaje genérico del kardex no dice cuál línea lo bloqueó — en
+          // un recuento de decenas de productos eso es inutilizable para el
+          // operador. Lo renombramos con el producto de esta línea; cualquier
+          // otro error se propaga tal cual.
+          if (
+            error instanceof BadRequestException &&
+            error.message === 'Stock insuficiente para la salida'
+          ) {
+            throw new BadRequestException(
+              `Stock insuficiente para aplicar la diferencia de "${linea.itemNombre}"`,
+            );
+          }
+          throw error;
+        }
 
         await manager.query(
           `UPDATE recuento_inventario_linea SET movimiento_id = $1, actualizado_el = NOW()

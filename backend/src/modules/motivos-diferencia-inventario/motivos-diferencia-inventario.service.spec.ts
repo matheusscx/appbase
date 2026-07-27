@@ -79,11 +79,31 @@ describe('MotivosDiferenciaInventarioService', () => {
           es_fijo: false,
         },
       ])
-      .mockResolvedValueOnce([{ cnt: '1' }]);
+      .mockResolvedValueOnce([{ existe: true }]);
 
     await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
-      'No se puede eliminar: el motivo está en uso en movimientos de recuento',
+      'No se puede eliminar: el motivo está en uso en movimientos o recuentos de inventario',
     );
+  });
+
+  it('rechaza eliminar un motivo referenciado solo por una línea o el default de un recuento en borrador', async () => {
+    queryMock
+      .mockResolvedValueOnce([
+        {
+          motivo_diferencia_inventario_id: MOTIVO_ID,
+          nombre: 'Robo',
+          activo: true,
+          es_fijo: false,
+        },
+      ])
+      .mockResolvedValueOnce([{ existe: true }]);
+
+    await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
+      'No se puede eliminar: el motivo está en uso en movimientos o recuentos de inventario',
+    );
+    const usoQuery = queryMock.mock.calls[1][0] as string;
+    expect(usoQuery).toContain('recuento_inventario_linea');
+    expect(usoQuery).toContain('motivo_diferencia_default_id');
   });
 
   it('assertMotivoActivo rechaza un motivo inactivo o de otro tenant', async () => {

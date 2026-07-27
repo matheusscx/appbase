@@ -7,10 +7,15 @@ import Decimal from 'decimal.js';
 import { AppModule } from '../src/app.module';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
+const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
+// `contacto@falabella.cl` no es un usuario logueable; el admin real de
+// Falabella es el superadmin con rol Administrador asignado en ese tenant.
+const ADMIN_FALABELLA_EMAIL = 'admin@sistema.com';
+const ADMIN_FALABELLA_PASS = 'admin';
 
 interface TokenResponse {
   access_token: string;
@@ -66,6 +71,19 @@ async function login(app: INestApplication<App>): Promise<string> {
     .post('/api/auth/switch-tenant')
     .set('Authorization', `Bearer ${initialToken}`)
     .send({ tenantId: PARIS_TENANT_ID });
+  return (resTenant.body as TokenResponse).access_token;
+}
+
+async function loginFalabella(app: INestApplication<App>): Promise<string> {
+  const resLogin = await request(app.getHttpServer())
+    .post('/api/auth/login')
+    .send({ email: ADMIN_FALABELLA_EMAIL, password: ADMIN_FALABELLA_PASS });
+  const initialToken = (resLogin.body as TokenResponse).access_token;
+
+  const resTenant = await request(app.getHttpServer())
+    .post('/api/auth/switch-tenant')
+    .set('Authorization', `Bearer ${initialToken}`)
+    .send({ tenantId: FALABELLA_TENANT_ID });
   return (resTenant.body as TokenResponse).access_token;
 }
 
@@ -363,12 +381,63 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     expect(filaConConteo.cantidadLineas).toBe(2);
     expect(filaConConteo.diferenciaNeta).toBe('5.0000');
   });
+
+  it('GET /recuentos?estado filtra por estado y descarta el resto', async () => {
+    const resCreateItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto filtro-estado E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+      });
+    const itemId = (resCreateItem.body as ItemResponse).id;
+
+    const resBorrador = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemId] });
+    const recuentoBorradorId = (resBorrador.body as RecuentoCreateResponse).id;
+
+    const resParaCancelar = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemIds: [itemId] });
+    const recuentoCanceladoId = (resParaCancelar.body as RecuentoCreateResponse)
+      .id;
+    await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoCanceladoId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const resFiltroBorrador = await request(app.getHttpServer())
+      .get('/api/recuentos?estado=borrador')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resFiltroBorrador.status).toBe(200);
+    const idsBorrador = (
+      resFiltroBorrador.body as { data: { id: string }[] }
+    ).data.map((r) => r.id);
+    expect(idsBorrador).toContain(recuentoBorradorId);
+    expect(idsBorrador).not.toContain(recuentoCanceladoId);
+
+    const resFiltroCancelado = await request(app.getHttpServer())
+      .get('/api/recuentos?estado=cancelado')
+      .set('Authorization', `Bearer ${token}`);
+    expect(resFiltroCancelado.status).toBe(200);
+    const idsCancelado = (
+      resFiltroCancelado.body as { data: { id: string }[] }
+    ).data.map((r) => r.id);
+    expect(idsCancelado).toContain(recuentoCanceladoId);
+    expect(idsCancelado).not.toContain(recuentoBorradorId);
+  });
 });
 
 describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () => {
   let app: INestApplication<App>;
   let token: string;
   let motivoId: string;
+  let motivoIdFalabella: string;
 
   const crearProducto = async (stock: number) => {
     const resCreateItem = await request(app.getHttpServer())
@@ -428,6 +497,16 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
     motivoId = (motivos as MotivoDiferenciaInventarioItem[]).find(
       (m) => m.esFijo,
     )!.id;
+
+    // Motivo real de OTRO tenant (Falabella) — no un uuid inventado — para
+    // cubrir el caso de aislamiento multi-tenant, no solo el inexistente.
+    const tokenFalabella = await loginFalabella(app);
+    const { body: motivosFalabella } = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia-inventario')
+      .set('Authorization', `Bearer ${tokenFalabella}`);
+    motivoIdFalabella = (
+      motivosFalabella as MotivoDiferenciaInventarioItem[]
+    ).find((m) => m.esFijo)!.id;
   });
 
   afterAll(async () => {
@@ -470,14 +549,25 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
     const recuentoId = await crearSesion([itemId]);
     const linea = await primeraLinea(recuentoId);
 
-    const res = await request(app.getHttpServer())
+    const resInexistente = await request(app.getHttpServer())
       .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
       .set('Authorization', `Bearer ${token}`)
       .send({
         cantidadContada: '3',
         motivoDiferenciaId: '00000000-0000-0000-0000-000000000000',
       });
-    expect(res.status).toBe(400);
+    expect(resInexistente.status).toBe(400);
+
+    // Motivo real, pero del tenant de Falabella: el aislamiento multi-tenant
+    // debe rechazarlo igual que el inexistente, no solo la validez del uuid.
+    const resOtroTenant = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        cantidadContada: '3',
+        motivoDiferenciaId: motivoIdFalabella,
+      });
+    expect(resOtroTenant.status).toBe(400);
   });
 
   it('PATCH de línea acepta un motivo de diferencia válido del catálogo', async () => {

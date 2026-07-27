@@ -14,11 +14,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { RecuentosService } from './recuentos.service';
 import { CreateRecuentoDto } from './dto/create-recuento.dto';
 import { UpdateRecuentoDto } from './dto/update-recuento.dto';
 import { UpdateRecuentoLineaDto } from './dto/update-recuento-linea.dto';
+import { FindRecuentosDto } from './dto/find-recuentos.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('recuentos')
@@ -37,7 +37,7 @@ export class RecuentosController {
 
   @Get()
   @RequiresPermiso('Inventario', 'Leer')
-  findAll(@Req() req: Request, @Query() query: PaginationQueryDto) {
+  findAll(@Req() req: Request, @Query() query: FindRecuentosDto) {
     const { tenantId } = req.user as { tenantId: string };
     return this.recuentosService.findAll(tenantId, query);
   }

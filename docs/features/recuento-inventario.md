@@ -171,10 +171,12 @@ Response (201):
 { "id": "uuid-recuento" }
 ```
 
-Valida que cada item exista en el tenant, tenga `tipo='producto'`/`'ingrediente'` con
-`modo_inventario='cantidad'`; cualquier item fuera de eso rechaza toda la creación con
-400 (nombrando el producto). Congela `stock_sistema` de cada línea con una sola query
-batcheada (`WHERE item_id = ANY($1)`), nunca una por item.
+Valida que cada item exista en el tenant y tenga control de stock (`tipo='producto'`/
+`'ingrediente'` con fila en `item_producto`); si no, rechaza toda la creación con 400
+genérico (`'El item no tiene control de stock'`, sin nombre — no hay fila resuelta para
+nombrar). Si el item existe pero su `modo_inventario` no es `'cantidad'`, el 400 sí
+nombra el producto. Congela `stock_sistema` de cada línea con una sola query batcheada
+(`WHERE item_id = ANY($1)`), nunca una por item.
 
 ### PATCH /api/recuentos/:id/lineas/:lineaId
 

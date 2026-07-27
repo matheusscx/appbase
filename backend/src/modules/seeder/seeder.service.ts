@@ -159,6 +159,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedCausasMerma();
     await this.seedMotivosDiferencia();
     await this.seedMotivosDiferenciaInventario();
+    await this.seedRecuentoInventarioLineaIndex();
     await this.seedCajasVirtuales();
     await this.seedCajones();
     await this.seedPropinaConfiguracion();
@@ -1085,6 +1086,16 @@ export class SeederService implements OnApplicationBootstrap {
        ON CONFLICT (motivo_diferencia_inventario_id) DO NOTHING`,
       params,
     );
+  }
+
+  // No hay filas fijas que sembrar (las sesiones las crean los usuarios): solo
+  // la defensa declarada en startup-pos.sql que faltaba en la BD real — una
+  // línea viva por item dentro de un mismo recuento.
+  private async seedRecuentoInventarioLineaIndex(): Promise<void> {
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_recuento_linea_item_vivo
+      ON recuento_inventario_linea (recuento_id, item_id) WHERE eliminado_el IS NULL
+    `);
   }
 
   private async seedCajasVirtuales(): Promise<void> {

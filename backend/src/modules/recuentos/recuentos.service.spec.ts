@@ -1,4 +1,5 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { RecuentosService } from './recuentos.service';
 import { MotivosDiferenciaInventarioService } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.service';
@@ -635,7 +636,7 @@ describe('RecuentosService', () => {
       ]);
     });
 
-    it('propaga el rechazo de stock insuficiente sin dejar el recuento aplicado', async () => {
+    it('propaga el rechazo de stock insuficiente nombrando el producto de la línea, sin dejar el recuento aplicado', async () => {
       manager.query
         .mockResolvedValueOnce([
           {
@@ -660,17 +661,52 @@ describe('RecuentosService', () => {
           { motivo_diferencia_inventario_id: MOTIVO_ID },
         ]);
       inventarioService.registrarMovimiento.mockRejectedValueOnce(
-        new Error('Stock insuficiente para la salida'),
+        new BadRequestException('Stock insuficiente para la salida'),
       );
 
       await expect(
         service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
-      ).rejects.toThrow('Stock insuficiente para la salida');
+      ).rejects.toThrow(
+        'Stock insuficiente para aplicar la diferencia de "Producto test"',
+      );
 
       const updateEstado = manager.query.mock.calls.find((c: unknown[]) =>
         String(c[0]).includes("estado = 'aplicado'"),
       );
       expect(updateEstado).toBeUndefined();
+    });
+
+    it('propaga sin envolver un error distinto de stock insuficiente', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            stock_sistema: '12400',
+            cantidad_contada: '11800',
+            motivo_diferencia_id: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          { motivo_diferencia_inventario_id: MOTIVO_ID },
+        ]);
+      inventarioService.registrarMovimiento.mockRejectedValueOnce(
+        new Error('Error de conexión inesperado'),
+      );
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toThrow('Error de conexión inesperado');
     });
   });
 });
