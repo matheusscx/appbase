@@ -16,6 +16,7 @@ antes de que un cambio quede en la rama principal.
 Correr en orden y detenerse en el primer fallo:
 
 ```bash
+./scripts/reset-db.sh        # obligatorio antes del e2e — ver abajo
 cd backend  && npm run lint:check
 cd backend  && npm run typecheck
 cd backend  && npm test
@@ -26,8 +27,16 @@ cd frontend && npm run design:check
 ```
 
 Registrar el resultado real de cada comando. **No declarar que un paso pasó sin
-haberlo ejecutado.** Si el stack no está levantado, usar `docker-compose up -d` antes
-de `test:e2e`.
+haberlo ejecutado.**
+
+**`reset-db.sh` no es opcional.** El e2e local se contamina solo: correr
+`test:e2e` dos veces seguidas deja cajas abiertas, causas duplicadas y stock
+agotado, y **los números de la 2da corrida no son válidos**. Solo la primera
+corrida sobre una base recién sembrada cuenta. El script borra el volumen,
+levanta el stack y espera el `Seed complete` del backend — esperar ese log es el
+punto: el contenedor levanta antes de que el seed termine, y una suite que
+arranca a mitad del seed falla con errores que no son regresiones. Tarda ~30s.
+No hay datos productivos que perder (decisión registrada del owner).
 
 **`typecheck:ratchet`**: `nuxt build` NO tipa-chequea, así que el frontend arrastra una
 deuda de errores de tipo (vue-tsc estricto) registrada en `frontend/typecheck-baseline.json`.

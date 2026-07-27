@@ -224,12 +224,13 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   (1) **Gate determinista primero** (rápido, sin infra, cero falsos rojos): backend `lint:check`
   + `typecheck` + `test` (unit); frontend `test` (vitest) + `typecheck:ratchet` + `design:check`
   + `build`. Si algo falla, corta acá sin tocar Docker.
-  (2) **e2e con DB fresca**: `docker-compose down -v && docker-compose up -d` → esperar Postgres
-  healthy → `npm run test:e2e`. La DB limpia es imprescindible: contra la DB de dev acumulada da
-  **falsos rojos** por polución de seed ([[e2e-cumulative-stock-pollution]]) → entrena `--no-verify`
-  y mata el hook. NO usar `--build`: el e2e levanta su Nest en el host y solo necesita Postgres
-  fresco; rebuildear imágenes solo suma minutos. `down -v` es destructivo con la data local —
-  aceptado (el owner no la necesita).
+  (2) **e2e con DB fresca**: `./scripts/reset-db.sh` → `npm run test:e2e`. El script ya existe
+  (jul-2026) y resuelve esta parte: borra el volumen, levanta y **espera el `Seed complete`** —
+  no alcanza con esperar a Postgres healthy, porque el contenedor levanta antes de que el seed
+  termine y una suite que arranca a mitad falla con errores que no son regresiones. La DB limpia
+  es imprescindible: contra la DB de dev acumulada da **falsos rojos** por polución de seed
+  ([[e2e-cumulative-stock-pollution]]) → entrena `--no-verify` y mata el hook. NO usar `--build`:
+  el e2e levanta su Nest en el host y solo necesita Postgres fresco.
   (3) **Solo el bloque pesado (Docker + e2e) si el rango a pushear tocó `backend/`**; el gate
   determinista corre siempre. Evita 4 min de stack+e2e en un push de solo-docs.
   (4) Bloqueante; escape `git push --no-verify`. Es el enforcement de [[rigor-sobre-velocidad]].

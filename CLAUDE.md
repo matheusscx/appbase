@@ -99,6 +99,7 @@ Estructura de directorios, mapa de módulos y flujo de requests: `docs/ARCHITECT
 ```bash
 docker-compose up            # Stack completo (preferido); --build reconstruye imágenes
 docker-compose down -v       # Detener y borrar el volumen de la BD
+./scripts/reset-db.sh        # Reset + espera del seed, ANTES de cada test:e2e (~30s)
 
 cd backend
 npm run start:dev            # Watch mode
