@@ -69,14 +69,31 @@ const SIN_CAUSA = '__sin_causa__'
 const motivoOpts = computed<Opt[]>(() =>
   motivos.value.filter(m => m.activo).map(m => ({ label: m.nombre, value: m.id })),
 )
+
+// Si una causa ya asignada (default de la sesión u override de línea) se
+// desactiva después, sigue sin estar en motivoOpts (solo activas) — sin esto
+// el USelectMenu no tendría su label y mostraría el select vacío aunque el
+// dato siga persistido. Se agrega marcada como inactiva, sin duplicar si ya
+// está entre las activas.
+function opcionCausaAsignada(id: string | null): Opt[] {
+  if (!id) return []
+  const m = motivos.value.find(m => m.id === id)
+  if (!m || m.activo) return []
+  return [{ label: `${m.nombre} (inactiva)`, value: m.id }]
+}
+
 const motivoDefaultOpts = computed<Opt[]>(() => [
   { label: 'Sin causa por defecto', value: SIN_CAUSA },
   ...motivoOpts.value,
+  ...opcionCausaAsignada(detalle.value?.motivoDiferenciaDefaultId ?? null),
 ])
-const motivoOverrideOpts = computed<Opt[]>(() => [
-  { label: 'Usar la causa por defecto', value: SIN_CAUSA },
-  ...motivoOpts.value,
-])
+function motivoOverrideOpts(lineaMotivoId: string | null): Opt[] {
+  return [
+    { label: 'Usar la causa por defecto', value: SIN_CAUSA },
+    ...motivoOpts.value,
+    ...opcionCausaAsignada(lineaMotivoId),
+  ]
+}
 
 const sesionForm = ref({ motivoDiferenciaDefaultId: SIN_CAUSA, comentario: '' })
 let comentarioOriginal = ''
@@ -427,7 +444,7 @@ const columns: TableColumn<LineaRow>[] = [
             <template #motivo-cell="{ row }">
               <USelectMenu
                 :model-value="row.original.motivoInput"
-                :items="motivoOverrideOpts"
+                :items="motivoOverrideOpts(row.original.motivoDiferenciaId)"
                 value-key="value"
                 :disabled="readOnly || row.original.guardando"
                 class="w-56"

@@ -13,6 +13,7 @@ interface RecuentoListItem {
   aplicadoEl: string | null
   cantidadLineas: number
   diferenciaNeta: string
+  usuarioCreadorNombre: string | null
 }
 
 interface ProductoOpt {
@@ -125,6 +126,7 @@ const columns: TableColumn<RecuentoListItem>[] = [
   { id: 'estado', header: 'Estado' },
   { accessorKey: 'cantidadLineas', header: 'Líneas', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'diferenciaNeta', header: 'Diferencia neta', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'usuarioCreadorNombre', header: 'Creado por' },
   { accessorKey: 'comentario', header: 'Comentario' },
 ]
 </script>
@@ -187,6 +189,9 @@ const columns: TableColumn<RecuentoListItem>[] = [
             >
               {{ row.original.diferenciaNeta }}
             </span>
+          </template>
+          <template #usuarioCreadorNombre-cell="{ row }">
+            <span class="text-sm text-muted">{{ row.original.usuarioCreadorNombre || '—' }}</span>
           </template>
           <template #comentario-cell="{ row }">
             <span class="text-sm text-muted">{{ row.original.comentario || '—' }}</span>

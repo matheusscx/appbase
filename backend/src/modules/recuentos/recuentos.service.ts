@@ -36,6 +36,7 @@ interface RecuentoListRow {
   aplicado_el: Date | null;
   cantidad_lineas: number;
   diferencia_neta: string;
+  usuario_creador_nombre: string | null;
 }
 
 interface RecuentoRow {
@@ -90,6 +91,7 @@ export interface RecuentoListItem {
   aplicadoEl: Date | null;
   cantidadLineas: number;
   diferenciaNeta: string;
+  usuarioCreadorNombre: string | null;
 }
 
 export interface RecuentoLinea {
@@ -223,6 +225,7 @@ export class RecuentosService {
 
     const rows: RecuentoListRow[] = await this.dataSource.query(
       `SELECT r.recuento_id, r.estado, r.comentario, r.creado_el, r.aplicado_el,
+              u.nombre AS usuario_creador_nombre,
               COUNT(l.linea_id)::int AS cantidad_lineas,
               COALESCE(SUM(
                 CASE WHEN l.cantidad_contada IS NOT NULL
@@ -233,8 +236,10 @@ export class RecuentosService {
          FROM recuento_inventario r
          LEFT JOIN recuento_inventario_linea l
            ON l.recuento_id = r.recuento_id AND l.eliminado_el IS NULL
+         LEFT JOIN usuarios u
+           ON u.usuario_id = r.usuario_creador_id AND u.eliminado_el IS NULL
         WHERE r.tenant_id = $1 AND r.eliminado_el IS NULL
-        GROUP BY r.recuento_id
+        GROUP BY r.recuento_id, u.nombre
         ORDER BY r.creado_el DESC
         LIMIT $2 OFFSET $3`,
       [tenantId, pageSize, offset],
@@ -249,6 +254,7 @@ export class RecuentosService {
         aplicadoEl: r.aplicado_el,
         cantidadLineas: r.cantidad_lineas,
         diferenciaNeta: new Decimal(r.diferencia_neta).toFixed(4),
+        usuarioCreadorNombre: r.usuario_creador_nombre,
       })),
       meta: buildPaginationMeta(page, pageSize, total),
     };
@@ -322,7 +328,15 @@ export class RecuentosService {
     return this.dataSource.transaction(async (manager: EntityManager) => {
       await this.assertBorrador(manager, tenantId, recuentoId);
 
-      if (dto.motivoDiferenciaId !== undefined) {
+      // null explícito significa "limpiar el override de línea" — solo se
+      // valida contra el catálogo cuando llega un id de verdad. `!== undefined`
+      // a secas dejaba pasar null y lo validaba igual, y ningún motivo matchea
+      // `WHERE motivo_diferencia_inventario_id = NULL` en Postgres: la limpieza
+      // fallaba siempre con 400.
+      if (
+        dto.motivoDiferenciaId !== undefined &&
+        dto.motivoDiferenciaId !== null
+      ) {
         await this.motivosDiferenciaInventarioService.assertMotivoActivo(
           manager,
           tenantId,
@@ -382,7 +396,12 @@ export class RecuentosService {
     return this.dataSource.transaction(async (manager: EntityManager) => {
       await this.assertBorrador(manager, tenantId, recuentoId);
 
-      if (dto.motivoDiferenciaDefaultId !== undefined) {
+      // Mismo criterio que updateLinea: null explícito limpia la causa por
+      // defecto de la sesión sin pasar por la validación del catálogo.
+      if (
+        dto.motivoDiferenciaDefaultId !== undefined &&
+        dto.motivoDiferenciaDefaultId !== null
+      ) {
         await this.motivosDiferenciaInventarioService.assertMotivoActivo(
           manager,
           tenantId,

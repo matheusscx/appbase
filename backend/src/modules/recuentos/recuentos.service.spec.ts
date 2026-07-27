@@ -123,6 +123,7 @@ describe('RecuentosService', () => {
             // Postgres devuelve '0' (sin escala) cuando COALESCE cae en el
             // literal entero, no '0.0000' — el bug que este test fija.
             diferencia_neta: '0',
+            usuario_creador_nombre: 'Ana Admin',
           },
         ]);
 
@@ -130,6 +131,7 @@ describe('RecuentosService', () => {
 
       expect(res.data[0].diferenciaNeta).toBe('0.0000');
       expect(res.data[0].cantidadLineas).toBe(2);
+      expect(res.data[0].usuarioCreadorNombre).toBe('Ana Admin');
     });
   });
 
@@ -236,6 +238,30 @@ describe('RecuentosService', () => {
       expect(update![1]).toEqual(expect.arrayContaining([null]));
     });
 
+    it('null explícito limpia el override de causa de la línea sin validar contra el catálogo', async () => {
+      manager.query
+        .mockResolvedValueOnce([{ estado: 'borrador' }])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            stock_sistema: '12000',
+            cantidad_contada: '11800.0000',
+            motivo_diferencia_id: null,
+          },
+        ]);
+
+      await service.updateLinea(TENANT_ID, RECUENTO_ID, LINEA_ID, {
+        motivoDiferenciaId: null,
+      });
+
+      expect(motivosService.assertMotivoActivo).not.toHaveBeenCalled();
+      const update = manager.query.mock.calls.find((c: unknown[]) =>
+        String(c[0]).includes('UPDATE recuento_inventario_linea'),
+      );
+      expect(update![1]).toEqual(expect.arrayContaining([null]));
+    });
+
     it('rechaza editar la sesión aplicada', async () => {
       manager.query.mockResolvedValueOnce([{ estado: 'aplicado' }]);
 
@@ -262,6 +288,22 @@ describe('RecuentosService', () => {
         TENANT_ID,
         MOTIVO_ID,
       );
+    });
+
+    it('null explícito limpia la causa por defecto de la sesión sin validar contra el catálogo', async () => {
+      manager.query
+        .mockResolvedValueOnce([{ estado: 'borrador' }])
+        .mockResolvedValueOnce([{ recuento_id: RECUENTO_ID }]);
+
+      await service.update(TENANT_ID, RECUENTO_ID, {
+        motivoDiferenciaDefaultId: null,
+      });
+
+      expect(motivosService.assertMotivoActivo).not.toHaveBeenCalled();
+      const update = manager.query.mock.calls.find((c: unknown[]) =>
+        String(c[0]).includes('UPDATE recuento_inventario SET'),
+      );
+      expect(update![1]).toEqual(expect.arrayContaining([null]));
     });
 
     it('cancelar deja la sesión en cancelado sin tocar stock', async () => {

@@ -523,6 +523,59 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
     expect(detalle.motivoDiferenciaDefaultId).toBe(motivoId);
   });
 
+  it('PATCH de sesión limpia la causa por defecto con null explícito', async () => {
+    const itemId = await crearProducto(5);
+    const recuentoId = await crearSesion([itemId]);
+
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivoDiferenciaDefaultId: motivoId })
+      .expect(200);
+
+    const resLimpiar = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivoDiferenciaDefaultId: null });
+    expect(resLimpiar.status).toBe(200);
+
+    const { body } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(
+      (
+        body as RecuentoDetalleResponse & {
+          motivoDiferenciaDefaultId: string | null;
+        }
+      ).motivoDiferenciaDefaultId,
+    ).toBeNull();
+  });
+
+  it('PATCH de línea limpia el override de causa con null explícito', async () => {
+    const itemId = await crearProducto(5);
+    const recuentoId = await crearSesion([itemId]);
+    const linea = await primeraLinea(recuentoId);
+
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivoDiferenciaId: motivoId })
+      .expect(200);
+
+    const resLimpiar = await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivoDiferenciaId: null });
+    expect(resLimpiar.status).toBe(200);
+
+    const { body } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(
+      (body as RecuentoDetalleResponse).lineas[0].motivoDiferenciaId,
+    ).toBeNull();
+  });
+
   it('POST cancelar deja la sesión en cancelado y bloquea nuevos conteos', async () => {
     const itemId = await crearProducto(5);
     const recuentoId = await crearSesion([itemId]);
@@ -734,5 +787,51 @@ describe('Recuentos — aplicar (e2e)', () => {
     expect(data.length).toBeGreaterThan(0);
     expect(data[0].motivo).toBe('recuento');
     expect(data[0].motivoDiferenciaId).toBeTruthy();
+  });
+
+  it('limpiar el override de línea con null hace que aplicar use la causa por defecto de la sesión', async () => {
+    const id = await crearProducto(50);
+    const recuentoId = await crearSesion([id]);
+    const linea = await primeraLinea(recuentoId);
+
+    // Otra causa fija distinta de motivoId, para distinguir cuál quedó aplicada.
+    const { body: motivos } = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia-inventario')
+      .set('Authorization', `Bearer ${token}`);
+    const motivoDefaultId = (motivos as MotivoDiferenciaInventarioItem[]).find(
+      (m) => m.esFijo && m.id !== motivoId,
+    )!.id;
+
+    // 1. Causa por defecto de la sesión + override de línea con otra causa.
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivoDiferenciaDefaultId: motivoDefaultId })
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '45', motivoDiferenciaId: motivoId })
+      .expect(200);
+
+    // 2. Limpiar el override con null explícito.
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivoDiferenciaId: null })
+      .expect(200);
+
+    // 3. Aplicar: sin override, debe usar la causa por defecto de la sesión.
+    await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(201);
+
+    const { body: kardex } = await request(app.getHttpServer())
+      .get(`/api/inventario/movimientos?itemId=${id}&motivo=recuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const data = (kardex as { data: MovimientoListItem[] }).data;
+    expect(data[0].motivoDiferenciaId).toBe(motivoDefaultId);
   });
 });
