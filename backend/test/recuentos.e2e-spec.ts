@@ -74,6 +74,23 @@ async function login(app: INestApplication<App>): Promise<string> {
   return (resTenant.body as TokenResponse).access_token;
 }
 
+/** Login como cualquier usuario de Paris, para los roles no-admin del seed. */
+async function loginParisComo(
+  app: INestApplication<App>,
+  email: string,
+): Promise<string> {
+  const resLogin = await request(app.getHttpServer())
+    .post('/api/auth/login')
+    .send({ email, password: 'admin' });
+  const initialToken = (resLogin.body as TokenResponse).access_token;
+
+  const resTenant = await request(app.getHttpServer())
+    .post('/api/auth/switch-tenant')
+    .set('Authorization', `Bearer ${initialToken}`)
+    .send({ tenantId: PARIS_TENANT_ID });
+  return (resTenant.body as TokenResponse).access_token;
+}
+
 async function loginFalabella(app: INestApplication<App>): Promise<string> {
   const resLogin = await request(app.getHttpServer())
     .post('/api/auth/login')
@@ -969,5 +986,125 @@ describe('Recuentos — aplicar (e2e)', () => {
       .expect(200);
     const data = (kardex as { data: MovimientoListItem[] }).data;
     expect(data[0].motivoDiferenciaId).toBe(motivoDefaultId);
+  });
+});
+
+// La razón de ser del diseño: contar es `Inventario/Crear` y aplicar es
+// `Inventario/Actualizar`, para que quien cuenta no sea quien aprueba. Hasta
+// jul-2026 esa asimetría no la ejercía NADA —el seed solo tenía admins, que
+// tienen los dos permisos— y un bug de UI que le escondía "Aplicar" al
+// aprobador pasó los tres gates sin que nada pudiera verlo.
+describe('Recuentos — la asimetría contar/aprobar (e2e)', () => {
+  let app: INestApplication<App>;
+  let tokenContador: string;
+  let tokenAprobador: string;
+  let itemId: string;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    tokenContador = await loginParisComo(app, 'contador@paris.cl');
+    tokenAprobador = await loginParisComo(app, 'aprobador@paris.cl');
+
+    const { body } = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${await login(app)}`)
+      .send({
+        nombre: `Producto asimetría E2E ${Date.now()}`,
+        precioBase: '10000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+      });
+    itemId = (body as ItemResponse).id;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('ambos roles leen, pero solo el contador crea la sesión', async () => {
+    await request(app.getHttpServer())
+      .get('/api/recuentos')
+      .set('Authorization', `Bearer ${tokenContador}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/api/recuentos')
+      .set('Authorization', `Bearer ${tokenAprobador}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${tokenAprobador}`)
+      .send({ itemIds: [itemId] })
+      .expect(403);
+  });
+
+  it('el contador cuenta y el aprobador aplica; ninguno puede hacer lo del otro', async () => {
+    const { body: creado } = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${tokenContador}`)
+      .send({ itemIds: [itemId] })
+      .expect(201);
+    const recuentoId = (creado as RecuentoCreateResponse).id;
+
+    const { body: detalle } = await request(app.getHttpServer())
+      .get(`/api/recuentos/${recuentoId}`)
+      .set('Authorization', `Bearer ${tokenContador}`);
+    const lineaId = (detalle as RecuentoDetalleResponse).lineas[0].lineaId;
+
+    const { body: motivos } = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia-inventario')
+      .set('Authorization', `Bearer ${tokenContador}`);
+    const motivoId = (motivos as MotivoDiferenciaInventarioItem[])[0].id;
+
+    // El aprobador no puede cargar el conteo…
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${lineaId}`)
+      .set('Authorization', `Bearer ${tokenAprobador}`)
+      .send({ cantidadContada: '9' })
+      .expect(403);
+
+    // …y el contador sí.
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoId}/lineas/${lineaId}`)
+      .set('Authorization', `Bearer ${tokenContador}`)
+      .send({ cantidadContada: '3', motivoDiferenciaId: motivoId })
+      .expect(200);
+
+    // El contador no puede aplicar lo que contó…
+    await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${tokenContador}`)
+      .expect(403);
+
+    // …y el aprobador sí.
+    const { body: aplicado } = await request(app.getHttpServer())
+      .post(`/api/recuentos/${recuentoId}/aplicar`)
+      .set('Authorization', `Bearer ${tokenAprobador}`)
+      .expect(201);
+    expect((aplicado as { lineasAplicadas: number }).lineasAplicadas).toBe(1);
+  });
+
+  it('ajustar costo es del aprobador, no del contador', async () => {
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${tokenContador}`)
+      .send({ itemId, costoNuevo: '500', comentario: 'Corrección' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/api/inventario/ajustes-costo')
+      .set('Authorization', `Bearer ${tokenAprobador}`)
+      .send({ itemId, costoNuevo: '500', comentario: 'Corrección' })
+      .expect(201);
   });
 });

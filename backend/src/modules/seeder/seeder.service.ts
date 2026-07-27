@@ -185,6 +185,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedUsuariosTenants();
     await this.seedRolesUsuarios();
     await this.seedVendedorPermisosCaja();
+    await this.seedRolesInventario();
     await this.seedSalones();
     await this.seedMesas();
     await this.seedGarzones();
@@ -928,6 +929,30 @@ export class SeederService implements OnApplicationBootstrap {
         apellido: 'Paris',
         telefono: '987654322',
         correo: 'vendedor@paris.cl',
+        esSuperadmin: false,
+      },
+      // Los dos lados de la asimetría de recuentos: contar y aprobar son
+      // permisos distintos a propósito, y sin estos usuarios esa separación no
+      // se puede ejercer ni a mano ni desde un test — el único no-admin previo
+      // (vendedor.paris) no tiene Inventario. Ver seedRolesInventario.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440328',
+        nombreUsuario: 'contador.paris',
+        contrasena: HASH,
+        nombre: 'Contador',
+        apellido: 'Inventario',
+        telefono: '987654323',
+        correo: 'contador@paris.cl',
+        esSuperadmin: false,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440329',
+        nombreUsuario: 'aprobador.paris',
+        contrasena: HASH,
+        nombre: 'Aprobador',
+        apellido: 'Inventario',
+        telefono: '987654324',
+        correo: 'aprobador@paris.cl',
         esSuperadmin: false,
       },
     ];
@@ -1718,11 +1743,15 @@ export class SeederService implements OnApplicationBootstrap {
     const VENDEDOR_PARIS = '550e8400-e29b-41d4-a716-446655440045';
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
+    const CONTADOR_PARIS = '550e8400-e29b-41d4-a716-446655440328';
+    const APROBADOR_PARIS = '550e8400-e29b-41d4-a716-446655440329';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
       [ADMIN_PARIS, PARIS], // admin tenant → Paris
       [VENDEDOR_PARIS, PARIS], // vendedor → Paris
+      [CONTADOR_PARIS, PARIS], // cuenta recuentos, no los aplica → Paris
+      [APROBADOR_PARIS, PARIS], // aplica recuentos, no cuenta → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -1800,6 +1829,105 @@ export class SeederService implements OnApplicationBootstrap {
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
       [VENDEDOR_PARIS, PARIS, resolvedVendedorRolId],
     );
+  }
+
+  /**
+   * Los dos lados de la asimetría de recuentos, en Paris: quien cuenta
+   * (`Inventario/Crear`) y quien aprueba (`Inventario/Actualizar`). Ninguno es
+   * admin, y ninguno tiene el permiso del otro — esa es toda la gracia.
+   *
+   * Existe porque la separación contar/aprobar no se podía ejercer con nada:
+   * el único no-admin del seed (vendedor.paris) no tiene Inventario, y el admin
+   * tiene todo. Un bug de UI que le escondía "Aplicar" al aprobador pasó los
+   * tres gates sin que nada pudiera detectarlo.
+   *
+   * IDs 330-331: el 328-329 lo ocupan los usuarios de estos roles y el máximo
+   * previo era 327 (el loop `let id = 316` de seedMotivosDiferenciaInventario
+   * siembra 6 motivos x 2 tenants, invisible a un grep de literales).
+   */
+  private async seedRolesInventario(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const CONTADOR = '550e8400-e29b-41d4-a716-446655440328';
+    const APROBADOR = '550e8400-e29b-41d4-a716-446655440329';
+    // moduloTenantId para Paris → Inventario (definido en seedTenantModulo)
+    const MODULO_TENANT_INVENTARIO = '550e8400-e29b-41d4-a716-446655440201';
+    // moduloTenantId para Paris → Items: ambas pantallas listan productos
+    // (`GET /items`) para elegir qué contar y para filtrar el kardex. Sin este
+    // permiso el rol no puede ni empezar un recuento.
+    const MODULO_TENANT_ITEMS = '550e8400-e29b-41d4-a716-446655440202';
+    // moduloAppPermiso IDs (definidos en seedModuloAppPermisos)
+    const INVENTARIO_LEER = '550e8400-e29b-41d4-a716-446655440189';
+    const INVENTARIO_CREAR = '550e8400-e29b-41d4-a716-446655440190';
+    const INVENTARIO_ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440291';
+    const ITEMS_LEER = '550e8400-e29b-41d4-a716-446655440192';
+
+    const INV = MODULO_TENANT_INVENTARIO;
+    const ITEMS = MODULO_TENANT_ITEMS;
+
+    const roles = [
+      {
+        rolId: '550e8400-e29b-41d4-a716-446655440330',
+        nombre: 'Inventario · Conteo',
+        descripcion: 'Cuenta y carga recuentos, pero no los aplica',
+        usuarioId: CONTADOR,
+        permisos: [
+          { modulo: INV, permiso: INVENTARIO_LEER },
+          { modulo: INV, permiso: INVENTARIO_CREAR },
+          { modulo: ITEMS, permiso: ITEMS_LEER },
+        ],
+      },
+      {
+        rolId: '550e8400-e29b-41d4-a716-446655440331',
+        nombre: 'Inventario · Aprobación',
+        descripcion: 'Aplica recuentos y ajusta costos, pero no cuenta',
+        usuarioId: APROBADOR,
+        permisos: [
+          { modulo: INV, permiso: INVENTARIO_LEER },
+          { modulo: INV, permiso: INVENTARIO_ACTUALIZAR },
+          { modulo: ITEMS, permiso: ITEMS_LEER },
+        ],
+      },
+    ];
+
+    for (const rol of roles) {
+      const existing: { rol_id: string }[] = await this.dataSource.query(
+        `SELECT rol_id FROM roles
+          WHERE tenant_id = $1 AND nombre = $2 AND eliminado_el IS NULL`,
+        [PARIS, rol.nombre],
+      );
+
+      if (existing.length === 0) {
+        await this.dataSource.query(
+          `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+           VALUES ($1, $2, $3, $4, false, NOW(), NOW())`,
+          [rol.rolId, PARIS, rol.nombre, rol.descripcion],
+        );
+      }
+
+      const rolId = existing[0]?.rol_id ?? rol.rolId;
+
+      for (const moduloTenantId of new Set(rol.permisos.map((p) => p.modulo))) {
+        await this.dataSource.query(
+          `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+           VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+          [rolId, moduloTenantId],
+        );
+      }
+
+      for (const { modulo, permiso } of rol.permisos) {
+        await this.dataSource.query(
+          `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+           VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+          [rolId, modulo, permiso],
+        );
+      }
+
+      await this.dataSource.query(
+        `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+         VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+        [rol.usuarioId, PARIS, rolId],
+      );
+    }
   }
 
   private async seedMetodosPago(): Promise<void> {

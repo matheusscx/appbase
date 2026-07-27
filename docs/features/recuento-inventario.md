@@ -133,6 +133,29 @@ ser una propuesta revisable y volvería a ser un ajuste inmediato, exactamente l
 diseño existe para evitar. Crear, cargar, editar y cancelar no tocan stock: son la
 preparación de la propuesta, y quedan bajo `Inventario/Crear`.
 
+### Cómo se prueba la asimetría
+
+Durante meses no se probaba con nada: el seed solo tenía usuarios admin, que tienen
+los dos permisos, así que la separación existía en el diseño pero **ninguna prueba ni
+verificación manual podía ejercerla**. Un bug de UI que le escondía "Aplicar" al
+aprobador pasó lint, typecheck, unit, e2e y build sin que nada pudiera detectarlo.
+
+El seed de desarrollo trae ahora los dos lados (`seedRolesInventario`, tenant Paris,
+contraseña `admin` como el resto):
+
+| Usuario | Rol | Permisos |
+|---|---|---|
+| `contador@paris.cl` | Inventario · Conteo | `Inventario` Leer + Crear, `Items` Leer |
+| `aprobador@paris.cl` | Inventario · Aprobación | `Inventario` Leer + Actualizar, `Items` Leer |
+
+Ambos necesitan `Items/Leer` porque las dos pantallas listan productos (`GET /items`)
+para elegir qué contar y para filtrar el kardex; sin ese permiso el rol no puede ni
+empezar un recuento.
+
+El e2e `Recuentos — la asimetría contar/aprobar` recorre el ciclo completo con los dos
+roles y afirma los 403 cruzados. Es lo que impide que la separación vuelva a quedar sin
+cobertura.
+
 El catálogo de causas (`/api/motivos-diferencia-inventario`) es CRUD bajo
 `TenantAdminGuard`, siguiendo la regla del proyecto de que catálogos y configuración son
 admin-only con lectura abierta; las features operativas usan `@RequiresPermiso`.
