@@ -136,9 +136,23 @@ si te doy una base) y devolvé hallazgos + veredicto BLOQUEA/LIMPIO.
 audita guards faltantes, inputs sin validar, exposición de datos, SQLi y mass-assignment
 — ejes que `domain-reviewer` no cubre. Si el diff no toca capa HTTP, omitirlo.
 
+**Al cerrar en LIMPIO, dejar el recibo.** El pre-commit bloquea el commit si el diff
+toca services de backend o `.vue` de `pages`/`components` y no hay un recibo para
+**ese diff exacto**:
+
+```bash
+git diff --cached | git hash-object --stdin > .git/verify-feature.receipt
+```
+
+El recibo se emite **después** de que los revisores devuelvan LIMPIO, nunca antes.
+Si después de revisar cambiás algo y lo stageás, el hash deja de coincidir y hay
+que revisar de nuevo — que es exactamente lo que se quiere. Existe porque el aviso
+no alcanzaba: en jul-2026 el hook lo imprimió en 4 commits seguidos, las 4 veces se
+ignoró, y un bug de permisos llegó a `main`.
+
 Reglas de este paso:
 - **No sustituir la revisión independiente por la propia.** Si el sub-agente no se pudo
-  lanzar, reportarlo y **no** declarar el paso como pasado.
+  lanzar, reportarlo y **no** declarar el paso como pasado. Sin revisión no hay recibo.
 - Los hallazgos del revisor **no se corrigen dentro de este skill**: se reportan al
   usuario. `verify-feature` audita, no arregla (ver encabezado).
 - Un veredicto BLOQUEA de cualquiera de los dos revisores ⇒ RESULTADO BLOQUEADO, sin

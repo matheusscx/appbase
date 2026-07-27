@@ -117,9 +117,11 @@ Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_UR
 **Git hook (una vez por clone):** `git config core.hooksPath .githooks` activa el
 pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
 `tenant_id`, `DELETE` físico, errores de `lint:check` (backend), tokens de diseño
-hardcodeados (`.vue`) y enlaces internos de docs rotos (`.md`). No cubre N+1 ni el
-filtro de borrado (juicio) — eso es la revisión independiente del skill `verify-feature`.
-Escape puntual: `git commit --no-verify`.
+hardcodeados (`.vue`) y enlaces internos de docs rotos (`.md`). N+1 y el filtro de
+borrado son juicio y un hook no los puede evaluar, pero **sí exige la revisión que
+los cubre**: si el diff toca services de backend o `.vue` de `pages`/`components`,
+bloquea hasta que exista el recibo de la revisión independiente de `verify-feature`
+para ese diff exacto (paso 7 del skill). Escape puntual: `git commit --no-verify`.
 
 El mismo `hooksPath` activa el **pre-push** (`.githooks/pre-push`): corre
 `codegraph sync --quiet` para refrescar el índice local antes de cambiar de contexto.

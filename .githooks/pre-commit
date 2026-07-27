@@ -9,7 +9,9 @@
 #
 # NO cubre el juicio (N+1, SELECT sin `eliminado_el IS NULL`): eso es la revisión
 # independiente por sub-agente del skill `verify-feature`, que un hook de shell no
-# puede ejecutar. El hook lo recuerda cuando tocás services de backend.
+# puede ejecutar. Lo que sí hace es EXIGIRLA: si el diff toca services de backend
+# o .vue de pages/components, el commit se bloquea hasta que exista un recibo de
+# esa revisión para este diff exacto.
 #
 # Escape para el caso legítimo raro:  git commit --no-verify
 # ─────────────────────────────────────────────────────────────────────────────
@@ -82,10 +84,35 @@ if [ -n "$staged_md" ]; then
   fi
 fi
 
-# ── Recordatorio no-bloqueante: review de juicio ─────────────────────────────
-if echo "$backend_ts" | grep -qE '\.service\.ts$'; then
-  ylw "⚠ Tocaste services de backend. El hook NO revisa N+1 ni 'SELECT sin eliminado_el IS NULL'."
-  ylw "  Corré el skill verify-feature (paso 7: revisión independiente por sub-agente) antes de dar la tarea por cerrada."
+# ── Gate: revisión independiente sobre este diff exacto ──────────────────────
+# Antes era un aviso. No alcanzó: en la sesión de jul-2026 el hook lo imprimió
+# en 4 commits seguidos y las 4 veces se ignoró — un bug de permisos que dejaba
+# al rol aprobador sin el botón "Aplicar" llegó a main y lo encontró una
+# revisión posterior. Un aviso ignorado 4 de 4 no es un control, así que ahora
+# bloquea: el escape sigue existiendo, pero pasa a ser una decisión explícita.
+#
+# Incluye .vue de pages/components a propósito: aquel bug era un template, y el
+# trigger viejo (solo *.service.ts) ni se habría disparado en un commit de
+# solo-frontend.
+#
+# El recibo ata la revisión a ESTE diff: si cambiás algo después de revisar, el
+# hash deja de coincidir y hay que revisar de nuevo. Vive en .git/ — no se
+# commitea y muere con el clone.
+needs_review=$(git diff --cached --name-only --diff-filter=ACM \
+               | grep -E 'backend/src/.*\.service\.ts$|frontend/app/(pages|components)/.*\.vue$' || true)
+
+if [ -n "$needs_review" ]; then
+  recorded=$(cat .git/verify-feature.receipt 2>/dev/null || echo '')
+  actual=$(git diff --cached | git hash-object --stdin)
+  if [ "$actual" != "$recorded" ]; then
+    red "✗ Este diff no pasó la revisión independiente (verify-feature paso 7)."
+    red "  El hook cubre lo grepeable; N+1, filtro de borrado y alcance son juicio."
+    ylw "  Archivos que la exigen:"
+    echo "$needs_review" | sed 's/^/    /'
+    ylw "  Corré el skill verify-feature. Al cerrar en LIMPIO deja el recibo con:"
+    ylw "    git diff --cached | git hash-object --stdin > .git/verify-feature.receipt"
+    fail=1
+  fi
 fi
 
 if [ "$fail" -ne 0 ]; then
