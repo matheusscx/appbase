@@ -857,6 +857,26 @@ describe('InventarioService', () => {
       expect(res.costoAnterior).toBe('150');
       expect(res.costoNuevo).toBe('300.0000');
     });
+
+    it('rechaza un costo que solo difiere más allá del 4º decimal', async () => {
+      (dataSource as unknown as { transaction: jest.Mock }).transaction =
+        jest.fn((cb: (m: typeof managerMock) => unknown) => cb(managerMock));
+
+      managerMock.query.mockResolvedValueOnce([
+        { tipo: 'producto', costo_actual: '5000.0000' },
+      ]);
+
+      // costo_actual es NUMERIC(18,4): esto se persistiría como 5000.0000,
+      // idéntico al vigente, dejando un ajuste sin cambio en el kardex.
+      await expect(
+        service.registrarAjusteCosto(TENANT, USER_ID, {
+          itemId: ITEM_ID,
+          costoNuevo: '5000.00004',
+          comentario: 'Corrección de costo',
+        }),
+      ).rejects.toThrow('El costo nuevo es igual al vigente');
+      expect(managerMock.query).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ---------------------------------------------------------------------------

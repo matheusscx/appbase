@@ -421,7 +421,9 @@ tras adoptar `unwrap()` compartido.
 
 | Risk | Impact | Mitigation |
 |------|--------|-----------|
-| Aplicar una sesión con causa desactivada entre la carga y el aplicar | Movimiento quedaría con causa muerta en el kardex | `aplicar` revalida `activo=true` de todas las causas resueltas justo antes de mover stock, en una sola query batcheada |
+| Aplicar una sesión con causa desactivada entre la carga y el aplicar | Movimiento quedaría con causa muerta en el kardex | `aplicar` revalida `activo=true` de todas las causas resueltas justo antes de mover stock, en una sola query batcheada y **con `FOR SHARE`**: sin el lock, un `DELETE` o una desactivación se cuela entre la validación y los `INSERT` (el `EXISTS` del catálogo no ve movimientos sin commitear). Del otro lado, `remove`/`update` del catálogo corren en transacción y toman la fila `FOR UPDATE`, así que esperan el commit |
+| Producto que cambia de `modo_inventario` mientras la sesión está en borrador | El kardex rechazaría la línea con "faltan las series", sin decir cuál | `aplicar` revalida `modo_inventario = 'cantidad'` por línea y nombra el producto. Pasa con productos sin movimientos, que sí admiten el cambio de modo |
+| Deadlock contra una venta simultánea | Postgres aborta una de las dos (40P01) y el usuario ve un 500 | `aplicar` lockea por `item_id` ascendente, pero una venta lockea en el orden del carrito, que arma el cliente — y sus recetas y combos no pueden garantizar ningún orden. En vez de imponérselo a ventas, `aplicar` **reintenta una vez** ante 40P01: el rollback dejó la transacción sin efecto, así que el reintento es seguro |
 | Producto eliminado entre contar y aplicar | Fallaría toda la sesión | La línea se descarta (`lineasDescartadas` en la respuesta) y el resto se aplica igual |
 | Dos sesiones en `borrador` sobre el mismo producto | Doble conteo pisándose | Cada línea congela su propio `stock_sistema`; el delta se calcula contra ese congelado, así que aplicar ambas en cualquier orden da el mismo resultado final |
 | Delta dejaría stock negativo | Saldo inconsistente | Rechazo con el producto nombrado — misma invariante que cualquier salida del kardex |

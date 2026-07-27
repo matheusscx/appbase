@@ -22,7 +22,17 @@ describe('MotivosDiferenciaInventarioService', () => {
           provide: getRepositoryToken(MotivoDiferenciaInventario),
           useValue: {},
         },
-        { provide: getDataSourceToken(), useValue: { query: queryMock } },
+        {
+          provide: getDataSourceToken(),
+          // `update` y `remove` corren en transacción (lockean la fila del
+          // motivo); el manager comparte el mismo queryMock para que el orden
+          // de respuestas siga siendo el de las llamadas.
+          useValue: {
+            query: queryMock,
+            transaction: (cb: (m: { query: jest.Mock }) => unknown) =>
+              cb({ query: queryMock }),
+          },
+        },
       ],
     }).compile();
 
@@ -86,7 +96,12 @@ describe('MotivosDiferenciaInventarioService', () => {
     );
   });
 
-  it('rechaza eliminar un motivo referenciado solo por una línea o el default de un recuento en borrador', async () => {
+  // Que el UNION cubra de verdad los tres orígenes solo lo puede probar la BD
+  // real: está en recuentos.e2e-spec.ts ("rechaza eliminar la causa mientras
+  // un recuento en borrador la referencia"). Acá se prueba lo que el mock no
+  // decide: que la fila se lea bloqueada, que el chequeo sea UNA query y que
+  // un motivo en uso no se borre.
+  it('lee el motivo bloqueado, chequea el uso en una sola query y no borra si está en uso', async () => {
     queryMock
       .mockResolvedValueOnce([
         {
@@ -101,9 +116,19 @@ describe('MotivosDiferenciaInventarioService', () => {
     await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
       'No se puede eliminar: el motivo está en uso en movimientos o recuentos de inventario',
     );
+
+    expect(queryMock.mock.calls[0][0] as string).toContain('FOR UPDATE');
     const usoQuery = queryMock.mock.calls[1][0] as string;
+    expect(usoQuery).toContain('movimientos_inventario');
     expect(usoQuery).toContain('recuento_inventario_linea');
     expect(usoQuery).toContain('motivo_diferencia_default_id');
+
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(
+      queryMock.mock.calls.some((c) =>
+        String(c[0]).includes('eliminado_el = NOW()'),
+      ),
+    ).toBe(false);
   });
 
   it('assertMotivoActivo rechaza un motivo inactivo o de otro tenant', async () => {

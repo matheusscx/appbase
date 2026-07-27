@@ -320,10 +320,11 @@ describe('RecuentosService', () => {
         String(c[0]).includes("estado = 'cancelado'"),
       );
       expect(upd).toBeDefined();
-      const tocaStock = manager.query.mock.calls.find((c: unknown[]) =>
-        String(c[0]).includes('UPDATE item_producto'),
-      );
-      expect(tocaStock).toBeUndefined();
+      // El servicio nunca escribe stock por SQL directo: la única vía es
+      // registrarMovimiento. Buscar 'UPDATE item_producto' en manager.query
+      // no puede fallar (pasaría en verde incluso sobre aplicar, que sí mueve
+      // stock), así que la aserción que vale es sobre el colaborador.
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
     it('rechaza cancelar una sesión ya aplicada', async () => {
@@ -352,6 +353,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto test',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '12400',
             cantidad_contada: '11800',
             motivo_diferencia_id: null,
@@ -389,6 +391,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto test',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '4000',
             cantidad_contada: '4200',
             motivo_diferencia_id: null,
@@ -426,6 +429,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto contado',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '100',
             cantidad_contada: '90',
             motivo_diferencia_id: null,
@@ -435,6 +439,7 @@ describe('RecuentosService', () => {
             item_id: 'item-2-uuid',
             item_nombre: 'Producto sin contar',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '50',
             cantidad_contada: null,
             motivo_diferencia_id: null,
@@ -466,6 +471,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto test',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '8000',
             cantidad_contada: '8000',
             motivo_diferencia_id: null,
@@ -495,6 +501,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto test',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '12400',
             cantidad_contada: '11800',
             motivo_diferencia_id: null,
@@ -506,6 +513,37 @@ describe('RecuentosService', () => {
       await expect(
         service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
       ).rejects.toThrow('La causa de diferencia asignada ya no está activa');
+      expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+    });
+
+    it('rechaza aplicar si el producto cambió de modo entre crear el recuento y aplicar', async () => {
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            estado: 'borrador',
+            motivo_diferencia_default_id: MOTIVO_ID,
+            comentario: null,
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            linea_id: LINEA_ID,
+            item_id: ITEM_ID,
+            item_nombre: 'Producto test',
+            item_eliminado_el: null,
+            // Se contó por cantidad, pero el producto pasó a serie mientras la
+            // sesión estaba en borrador.
+            modo_inventario: 'serie',
+            stock_sistema: '10',
+            cantidad_contada: '12',
+            motivo_diferencia_id: null,
+          },
+        ]);
+
+      await expect(
+        service.aplicar(TENANT_ID, USUARIO_ID, RECUENTO_ID),
+      ).rejects.toThrow('"Producto test" cambió a modo serie');
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
@@ -525,6 +563,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto test',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '100',
             cantidad_contada: '90',
             motivo_diferencia_id: MOTIVO_B,
@@ -558,6 +597,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto test',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '12400',
             cantidad_contada: '11800',
             motivo_diferencia_id: null,
@@ -652,6 +692,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto test',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '12400',
             cantidad_contada: '11800',
             motivo_diferencia_id: null,
@@ -692,6 +733,7 @@ describe('RecuentosService', () => {
             item_id: ITEM_ID,
             item_nombre: 'Producto test',
             item_eliminado_el: null,
+            modo_inventario: 'cantidad',
             stock_sistema: '12400',
             cantidad_contada: '11800',
             motivo_diferencia_id: null,

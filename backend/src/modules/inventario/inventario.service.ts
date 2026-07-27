@@ -286,10 +286,15 @@ export class InventarioService {
         );
       }
 
+      // La comparación va sobre el valor REDONDEADO, no sobre el string crudo
+      // del DTO: `costo_actual` es NUMERIC(18,4), así que un costo que solo
+      // difiere más allá del 4º decimal se persiste idéntico al vigente y
+      // dejaría en el kardex un ajuste que no cambió nada.
       const costoAnterior = rows[0].costo_actual;
+      const costoNuevo4 = costoNuevo.toFixed(4);
       if (
         costoAnterior != null &&
-        costoNuevo.equals(new Decimal(costoAnterior))
+        costoNuevo4 === new Decimal(costoAnterior).toFixed(4)
       ) {
         throw new BadRequestException(
           'El costo nuevo es igual al vigente: no hay nada que ajustar',
@@ -303,7 +308,7 @@ export class InventarioService {
         tipo: 'ajuste',
         motivo: 'ajuste_costo',
         cantidad: '0',
-        costoUnitario: costoNuevo.toFixed(4),
+        costoUnitario: costoNuevo4,
         comentario: dto.comentario,
       });
 
@@ -741,7 +746,10 @@ export class InventarioService {
          mv.comentario, mv.creado_el, mv.costo_unitario, mv.costo_anterior,
          mv.causa_merma_id, mv.motivo_diferencia_id,
          cm.nombre AS causa_nombre,
-         p.unidad_medida
+         p.unidad_medida,
+         -- El kardex global mezcla ítems de distintas monedas: sin esto la UI
+         -- formatea todo costo con la moneda oficial del tenant.
+         i.moneda_id
        FROM movimientos_inventario mv
        JOIN items i ON i.item_id = mv.item_id AND i.eliminado_el IS NULL
        LEFT JOIN item_producto p ON p.item_id = mv.item_id
@@ -812,6 +820,7 @@ export class InventarioService {
           ? new Decimal(r.cantidad).mul(r.costo_unitario).toFixed(4)
           : null,
       unidadMedida: r.unidad_medida,
+      monedaId: r.moneda_id,
     };
   }
 }
@@ -836,6 +845,7 @@ export interface MovimientoListItem {
   motivoDiferenciaId: string | null;
   costoPerdido: string | null;
   unidadMedida: string | null;
+  monedaId: string;
 }
 
 interface MovimientoRow {
@@ -857,4 +867,5 @@ interface MovimientoRow {
   causa_nombre: string | null;
   motivo_diferencia_id: string | null;
   unidad_medida: string | null;
+  moneda_id: string;
 }

@@ -7,6 +7,14 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 const toast = useToast()
 const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
+const permissionsStore = usePermissionsStore()
+
+// El nav abre esta página con Inventario/Leer, pero POST /inventario/ajustes-costo
+// exige Inventario/Actualizar: sin este gate el usuario llena el formulario
+// entero para recibir un 403.
+const puedeAjustarCosto = computed(() =>
+  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Actualizar'),
+)
 
 interface Movimiento {
   id: string
@@ -25,6 +33,7 @@ interface Movimiento {
   costoAnterior?: string | null
   costoPerdido?: string | null
   unidadMedida: string | null
+  monedaId: string
 }
 
 interface ProductoCosto {
@@ -187,7 +196,11 @@ async function registrarAjusteCosto() {
           description="Kardex de movimientos de stock"
         >
           <template #actions>
-            <UButton icon="i-lucide-circle-dollar-sign" @click="abrirAjusteCosto">
+            <UButton
+              v-if="puedeAjustarCosto"
+              icon="i-lucide-circle-dollar-sign"
+              @click="abrirAjusteCosto"
+            >
               Ajustar costo
             </UButton>
           </template>
@@ -245,9 +258,9 @@ async function registrarAjusteCosto() {
           </template>
           <template #costoAjuste-cell="{ row }">
             <span v-if="row.original.motivo === 'ajuste_costo'" class="font-mono">
-              {{ formatMonto(row.original.costoAnterior) }}
+              {{ formatMonto(row.original.costoAnterior, row.original.monedaId) }}
               <span class="text-muted">→</span>
-              {{ formatMonto(row.original.costoUnitario) }}
+              {{ formatMonto(row.original.costoUnitario, row.original.monedaId) }}
             </span>
             <span v-else class="text-muted">—</span>
           </template>
@@ -259,7 +272,7 @@ async function registrarAjusteCosto() {
               v-if="row.original.costoPerdido != null"
               class="font-medium text-error"
             >
-              {{ formatMonto(row.original.costoPerdido) }}
+              {{ formatMonto(row.original.costoPerdido, row.original.monedaId) }}
             </span>
             <span v-else class="text-muted">—</span>
           </template>

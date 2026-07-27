@@ -9,6 +9,11 @@ import { unwrap } from '../../common/utils/pg-returning.util';
 import { CreateMotivoDiferenciaInventarioDto } from './dto/create-motivo-diferencia-inventario.dto';
 import { UpdateMotivoDiferenciaInventarioDto } from './dto/update-motivo-diferencia-inventario.dto';
 
+/** `DataSource` o el `EntityManager` de una transacción: ambos exponen `query`. */
+type SqlRunner = {
+  query: (sql: string, params?: unknown[]) => Promise<unknown>;
+};
+
 export interface MotivoDiferenciaInventarioListItem {
   id: string;
   nombre: string;
@@ -72,89 +77,102 @@ export class MotivosDiferenciaInventarioService {
     };
   }
 
+  // Transaccional y con la fila bloqueada por la misma razón que `remove`:
+  // desactivar (`activo = false`) durante un `aplicar()` en vuelo dejaría en
+  // el kardex una causa inactiva. Ver el comentario de `remove`.
   async update(
     tenantId: string,
     id: string,
     dto: UpdateMotivoDiferenciaInventarioDto,
   ): Promise<MotivoDiferenciaInventarioListItem> {
-    const motivo = await this.findOneOrFail(tenantId, id);
-    if (motivo.esFijo) {
-      throw new BadRequestException(
-        'No se puede modificar un motivo fijo del sistema',
+    return this.dataSource.transaction(async (manager) => {
+      const motivo = await this.findOneOrFail(tenantId, id, manager, true);
+      if (motivo.esFijo) {
+        throw new BadRequestException(
+          'No se puede modificar un motivo fijo del sistema',
+        );
+      }
+      if (dto.nombre !== undefined) {
+        await this.assertNombreUnico(tenantId, dto.nombre.trim(), id, manager);
+      }
+
+      const sets = ['actualizado_el = NOW()'];
+      const params: unknown[] = [];
+      let idx = 1;
+
+      if (dto.nombre !== undefined) {
+        sets.push(`nombre = $${idx++}`);
+        params.push(dto.nombre.trim());
+      }
+      if (dto.activo !== undefined) {
+        sets.push(`activo = $${idx++}`);
+        params.push(dto.activo);
+      }
+
+      params.push(id, tenantId);
+      const rows = unwrap<MotivoDiferenciaInventarioRow>(
+        await manager.query(
+          `UPDATE motivo_diferencia_inventario SET ${sets.join(', ')}
+           WHERE motivo_diferencia_inventario_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
+           RETURNING motivo_diferencia_inventario_id, nombre, activo, es_fijo`,
+          params,
+        ),
       );
-    }
-    if (dto.nombre !== undefined) {
-      await this.assertNombreUnico(tenantId, dto.nombre.trim(), id);
-    }
-
-    const sets = ['actualizado_el = NOW()'];
-    const params: unknown[] = [];
-    let idx = 1;
-
-    if (dto.nombre !== undefined) {
-      sets.push(`nombre = $${idx++}`);
-      params.push(dto.nombre.trim());
-    }
-    if (dto.activo !== undefined) {
-      sets.push(`activo = $${idx++}`);
-      params.push(dto.activo);
-    }
-
-    params.push(id, tenantId);
-    const rows = unwrap<MotivoDiferenciaInventarioRow>(
-      await this.dataSource.query(
-        `UPDATE motivo_diferencia_inventario SET ${sets.join(', ')}
-         WHERE motivo_diferencia_inventario_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
-         RETURNING motivo_diferencia_inventario_id, nombre, activo, es_fijo`,
-        params,
-      ),
-    );
-    if (!rows.length) {
-      throw new NotFoundException(`Motivo de diferencia ${id} no encontrado`);
-    }
-    return {
-      id: rows[0].motivo_diferencia_inventario_id,
-      nombre: rows[0].nombre,
-      activo: rows[0].activo,
-      esFijo: rows[0].es_fijo,
-    };
+      if (!rows.length) {
+        throw new NotFoundException(`Motivo de diferencia ${id} no encontrado`);
+      }
+      return {
+        id: rows[0].motivo_diferencia_inventario_id,
+        nombre: rows[0].nombre,
+        activo: rows[0].activo,
+        esFijo: rows[0].es_fijo,
+      };
+    });
   }
 
+  // Verificar el uso y borrar en queries sueltas era un check-then-act: bajo
+  // READ COMMITTED el EXISTS no ve los INSERT todavía sin commitear de un
+  // `aplicar()` de recuento en vuelo, así que el motivo se eliminaba igual y
+  // quedaba congelado en el kardex. El lock de la fila lo cierra: `aplicar()`
+  // la toma con FOR SHARE mientras revalida, este FOR UPDATE espera a que
+  // commitee y recién entonces el EXISTS ve los movimientos.
   async remove(tenantId: string, id: string): Promise<void> {
-    const motivo = await this.findOneOrFail(tenantId, id);
-    if (motivo.esFijo) {
-      throw new BadRequestException(
-        'No se puede eliminar un motivo fijo del sistema',
-      );
-    }
+    await this.dataSource.transaction(async (manager) => {
+      const motivo = await this.findOneOrFail(tenantId, id, manager, true);
+      if (motivo.esFijo) {
+        throw new BadRequestException(
+          'No se puede eliminar un motivo fijo del sistema',
+        );
+      }
 
-    // Una sola query cubre las tres referencias posibles a la causa: el
-    // kardex ya aplicado, el override de línea de un recuento en borrador y
-    // la causa por defecto de la sesión — nunca tres queries sueltas.
-    const uso: { existe: boolean }[] = await this.dataSource.query(
-      `SELECT EXISTS (
-         SELECT 1 FROM movimientos_inventario
-          WHERE motivo_diferencia_id = $1 AND eliminado_el IS NULL
-         UNION ALL
-         SELECT 1 FROM recuento_inventario_linea
-          WHERE motivo_diferencia_id = $1 AND eliminado_el IS NULL
-         UNION ALL
-         SELECT 1 FROM recuento_inventario
-          WHERE motivo_diferencia_default_id = $1 AND eliminado_el IS NULL
-       ) AS existe`,
-      [id],
-    );
-    if (uso[0].existe) {
-      throw new BadRequestException(
-        'No se puede eliminar: el motivo está en uso en movimientos o recuentos de inventario',
+      // Una sola query cubre las tres referencias posibles a la causa: el
+      // kardex ya aplicado, el override de línea de un recuento en borrador y
+      // la causa por defecto de la sesión — nunca tres queries sueltas.
+      const uso: { existe: boolean }[] = await manager.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM movimientos_inventario
+            WHERE motivo_diferencia_id = $1 AND eliminado_el IS NULL
+           UNION ALL
+           SELECT 1 FROM recuento_inventario_linea
+            WHERE motivo_diferencia_id = $1 AND eliminado_el IS NULL
+           UNION ALL
+           SELECT 1 FROM recuento_inventario
+            WHERE motivo_diferencia_default_id = $1 AND eliminado_el IS NULL
+         ) AS existe`,
+        [id],
       );
-    }
+      if (uso[0].existe) {
+        throw new BadRequestException(
+          'No se puede eliminar: el motivo está en uso en movimientos o recuentos de inventario',
+        );
+      }
 
-    await this.dataSource.query(
-      `UPDATE motivo_diferencia_inventario SET eliminado_el = NOW(), actualizado_el = NOW()
-       WHERE motivo_diferencia_inventario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
-      [id, tenantId],
-    );
+      await manager.query(
+        `UPDATE motivo_diferencia_inventario SET eliminado_el = NOW(), actualizado_el = NOW()
+         WHERE motivo_diferencia_inventario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [id, tenantId],
+      );
+    });
   }
 
   async assertMotivoActivo(
@@ -183,13 +201,16 @@ export class MotivosDiferenciaInventarioService {
   private async findOneOrFail(
     tenantId: string,
     id: string,
+    runner: SqlRunner = this.dataSource,
+    bloquear = false,
   ): Promise<MotivoDiferenciaInventarioListItem> {
-    const rows: MotivoDiferenciaInventarioRow[] = await this.dataSource.query(
+    const rows = (await runner.query(
       `SELECT motivo_diferencia_inventario_id, nombre, activo, es_fijo
        FROM motivo_diferencia_inventario
-       WHERE motivo_diferencia_inventario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+       WHERE motivo_diferencia_inventario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+       ${bloquear ? 'FOR UPDATE' : ''}`,
       [id, tenantId],
-    );
+    )) as MotivoDiferenciaInventarioRow[];
     if (!rows.length) {
       throw new NotFoundException(`Motivo de diferencia ${id} no encontrado`);
     }
@@ -205,6 +226,7 @@ export class MotivosDiferenciaInventarioService {
     tenantId: string,
     nombre: string,
     excludeId?: string,
+    runner: SqlRunner = this.dataSource,
   ): Promise<void> {
     const params: unknown[] = [tenantId, nombre];
     let sql = `
@@ -214,7 +236,7 @@ export class MotivosDiferenciaInventarioService {
       params.push(excludeId);
       sql += ` AND motivo_diferencia_inventario_id <> $3`;
     }
-    const rows: unknown[] = await this.dataSource.query(sql, params);
+    const rows = (await runner.query(sql, params)) as unknown[];
     if (rows.length) {
       throw new BadRequestException(
         `Ya existe un motivo de diferencia con el nombre "${nombre}"`,

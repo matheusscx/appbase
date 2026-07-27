@@ -12,6 +12,34 @@ ya identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **Cambiar `unidad_medida` no reconvierte `costo_actual` (error de 1000×)**
+  (backend, `items/items.service.ts` — `update`) — un producto creado con `stock: 0` no
+  genera movimiento de inventario, así que el guard que bloquea el cambio de unidad
+  (COUNT de movimientos) no dispara. Al pasar de `kg` a `g`, `costo_actual` sigue en
+  5000 "por kg" pero ahora se interpreta por gramo. **Preexistente** (reproducible en
+  `2c6fc61`, antes del trabajo de CPP y recuento): lo detectó la pasada de revisión de
+  jul-2026 y se refutó como hallazgo de ese diff justamente por ser anterior. El cierre
+  es convertir `costo_actual` en `update()` con `convertirCostoUnitario` (ya existe en
+  `common/utils/costo-conversion-unidad.util.ts`) o bloquear el cambio de unidad cuando
+  hay costo vigente. Decidir cuál es del owner: convertir es silencioso pero cómodo;
+  bloquear es explícito pero obliga a un ajuste manual. Mitigación disponible hoy:
+  `POST /inventario/ajustes-costo` corrige el costo con traza en el kardex.
+- [ ] **`npm test` del frontend arrastra el smoke de Playwright y falla**
+  (frontend, `vitest.config.ts`) — el `include` de vitest captura
+  `e2e/smoke/dashboard.smoke.spec.ts`, que es un test de Playwright (`page.goto`), así
+  que `npm test` termina en rojo con 275 tests verdes y 1 archivo caído. **Preexistente**
+  (el archivo ya estaba en `2c6fc61`) y hoy invisible porque el gate del frontend en
+  `CLAUDE.md` es `build` + `typecheck:ratchet` + `design:check`, sin unit. Cierre:
+  excluir `e2e/**` del `include` de vitest y, si se quiere, sumar `npm test` al gate
+  del frontend para que los specs de composables cuenten.
+- [ ] **Botones de escritura sin gatear por permiso en pantallas preexistentes**
+  (frontend, `pages/mermas.vue`) — el botón de registrar merma se renderiza con solo el
+  permiso de lectura, pero el endpoint exige `Inventario/Crear`: el usuario llena el
+  formulario y recibe 403. No es hueco de seguridad (el guard del backend enforcea), es
+  un callejón sin salida de UX. La convención ya quedó escrita en
+  `docs/patterns/frontend.md` §1.1 y aplicada a las pantallas de inventario y recuentos
+  en jul-2026; falta el barrido de las pantallas anteriores, que sale del alcance de esa
+  sesión y necesita su propia verificación.
 - [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
   (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
   (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue

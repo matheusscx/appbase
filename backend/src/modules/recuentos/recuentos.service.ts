@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
@@ -81,6 +81,7 @@ interface RecuentoAplicarLineaRow {
   stock_sistema: string;
   cantidad_contada: string | null;
   motivo_diferencia_id: string | null;
+  modo_inventario: string | null;
 }
 
 export interface RecuentoListItem {
@@ -463,13 +464,37 @@ export class RecuentosService {
     });
   }
 
+  // Aplicar lockea los item_producto en orden de item_id; una venta simultánea
+  // lockea los mismos en el orden del carrito, que arma el cliente. Con órdenes
+  // incompatibles Postgres detecta el ciclo y aborta una de las dos (40P01).
+  // Reintentar una vez es seguro —el rollback dejó la transacción sin ningún
+  // efecto— y no le impone a ventas un orden de locks que sus recetas y combos
+  // no pueden garantizar de todos modos.
+  async aplicar(
+    tenantId: string,
+    usuarioId: string,
+    recuentoId: string,
+  ): Promise<RecuentoAplicarResultado> {
+    try {
+      return await this.aplicarEnTransaccion(tenantId, usuarioId, recuentoId);
+    } catch (error) {
+      if (
+        !(error instanceof QueryFailedError) ||
+        (error as { code?: string }).code !== '40P01'
+      ) {
+        throw error;
+      }
+      return this.aplicarEnTransaccion(tenantId, usuarioId, recuentoId);
+    }
+  }
+
   // El corazón del diseño: la diferencia es un delta, no un absoluto. El
   // stock_sistema quedó congelado al crear la línea; entre ese momento y
   // aplicar puede haber movimiento real (ventas, otros ajustes). Aplicar el
   // delta sobre el stock VIGENTE (que registrarMovimiento lee bajo FOR
   // UPDATE) preserva ese movimiento intermedio; setear un absoluto lo
   // pisaría.
-  async aplicar(
+  private aplicarEnTransaccion(
     tenantId: string,
     usuarioId: string,
     recuentoId: string,
@@ -499,9 +524,11 @@ export class RecuentosService {
       const lineaRows: RecuentoAplicarLineaRow[] = await manager.query(
         `SELECT l.linea_id, l.item_id, i.nombre AS item_nombre,
                 i.eliminado_el AS item_eliminado_el,
-                l.stock_sistema, l.cantidad_contada, l.motivo_diferencia_id
+                l.stock_sistema, l.cantidad_contada, l.motivo_diferencia_id,
+                p.modo_inventario
            FROM recuento_inventario_linea l
            LEFT JOIN items i ON i.item_id = l.item_id AND i.tenant_id = l.tenant_id
+           LEFT JOIN item_producto p ON p.item_id = l.item_id
           WHERE l.recuento_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL
           ORDER BY l.item_id`,
         [recuentoId, tenantId],
@@ -532,6 +559,16 @@ export class RecuentosService {
         const delta = new Decimal(l.cantidad_contada).minus(l.stock_sistema);
         if (delta.isZero()) continue;
 
+        // El modo se validó al crear la sesión, pero un producto sin
+        // movimientos puede cambiarlo mientras el recuento está en borrador.
+        // Sin esto el error llega desde el kardex ("faltan las series") sin
+        // decir qué línea lo causó, y en un conteo de decenas es inservible.
+        if (l.modo_inventario !== 'cantidad') {
+          throw new BadRequestException(
+            `"${l.item_nombre}" cambió a modo ${l.modo_inventario ?? 'desconocido'} desde que se creó el recuento: no se puede aplicar por cantidad`,
+          );
+        }
+
         const motivoId =
           l.motivo_diferencia_id ?? sesion.motivo_diferencia_default_id;
         if (!motivoId) {
@@ -558,10 +595,15 @@ export class RecuentosService {
         const motivoIds = [...new Set(lineasAAplicar.map((l) => l.motivoId))];
         const motivosActivos: { motivo_diferencia_inventario_id: string }[] =
           await manager.query(
+            // FOR SHARE, no un SELECT suelto: sin el lock, un DELETE o una
+            // desactivación del motivo puede colarse entre esta validación y
+            // los INSERT del kardex de abajo. Los servicios del catálogo lo
+            // toman con FOR UPDATE, así que quedan a la espera del commit.
             `SELECT motivo_diferencia_inventario_id
                FROM motivo_diferencia_inventario
               WHERE motivo_diferencia_inventario_id = ANY($1) AND tenant_id = $2
-                AND activo = true AND eliminado_el IS NULL`,
+                AND activo = true AND eliminado_el IS NULL
+              FOR SHARE`,
             [motivoIds, tenantId],
           );
         const activos = new Set(

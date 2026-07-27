@@ -613,6 +613,52 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
     expect(detalle.motivoDiferenciaDefaultId).toBe(motivoId);
   });
 
+  // Contra la BD real a propósito: el chequeo de uso es un UNION de tres
+  // orígenes y en unit el mock decide la respuesta, así que un branch roto
+  // (columna equivocada, WHERE que nunca matchea) pasaría en verde. Acá el
+  // único motivo referenciado es el de un recuento en BORRADOR, sin ningún
+  // movimiento de kardex: si el branch de recuentos se rompe, el DELETE
+  // devuelve 204 y el test falla.
+  it('DELETE rechaza una causa referenciada solo por un recuento en borrador', async () => {
+    const crearMotivo = async (nombre: string) => {
+      const { body } = await request(app.getHttpServer())
+        .post('/api/motivos-diferencia-inventario')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre })
+        .expect(201);
+      return (body as MotivoDiferenciaInventarioItem).id;
+    };
+
+    // a) referenciada como override de una línea
+    const motivoLinea = await crearMotivo(`Solo línea ${Date.now()}`);
+    const recuentoA = await crearSesion([await crearProducto(5)]);
+    const linea = await primeraLinea(recuentoA);
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoA}/lineas/${linea.lineaId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ cantidadContada: '4', motivoDiferenciaId: motivoLinea })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete(`/api/motivos-diferencia-inventario/${motivoLinea}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+
+    // b) referenciada solo como causa por defecto de la sesión
+    const motivoDefault = await crearMotivo(`Solo default ${Date.now()}`);
+    const recuentoB = await crearSesion([await crearProducto(5)]);
+    await request(app.getHttpServer())
+      .patch(`/api/recuentos/${recuentoB}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivoDiferenciaDefaultId: motivoDefault })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete(`/api/motivos-diferencia-inventario/${motivoDefault}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+  });
+
   it('PATCH de sesión limpia la causa por defecto con null explícito', async () => {
     const itemId = await crearProducto(5);
     const recuentoId = await crearSesion([itemId]);

@@ -103,6 +103,11 @@ vigente antes del movimiento. Solo se popula cuando `motivo='ajuste_costo'`
 (ver "Regla de costo" más abajo); `null` en el resto. El frontend lo usa para
 mostrar "anterior → nuevo" en el historial de un ajuste de costo.
 
+También incluye `monedaId: string` — la moneda del **ítem**, que es en la que
+está expresado su costo. El kardex global mezcla productos de distintas
+monedas, así que sin este campo la UI formatearía todo costo con la moneda
+oficial del tenant y mostraría un costo en USD con símbolo y decimales de CLP.
+
 ---
 
 ### PATCH /items/:id/stock
@@ -187,6 +192,11 @@ Response (201):
 
 **Permiso:** `Inventario/Actualizar` (RBAC estándar — admin del tenant lo tiene
 por short-circuit).
+
+Se rechaza con 400 si el costo nuevo es **igual al vigente**, y la comparación
+va sobre el valor ya redondeado a 4 decimales: `costo_actual` es
+`NUMERIC(18,4)`, así que un costo que solo difiere en el 5º decimal se
+persistiría idéntico y dejaría en el kardex un ajuste que no cambió nada.
 
 **Request Body (`AjusteCostoDto`):**
 - `itemId` (required): UUID del item.

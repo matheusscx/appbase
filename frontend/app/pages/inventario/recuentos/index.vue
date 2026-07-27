@@ -28,6 +28,12 @@ const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
+const permissionsStore = usePermissionsStore()
+
+// Crear la sesión exige Inventario/Crear; el nav abre esta página con Leer.
+const puedeContar = computed(() =>
+  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Crear'),
+)
 
 const filtroEstado = ref<string>('todos')
 
@@ -146,6 +152,7 @@ const columns: TableColumn<RecuentoListItem>[] = [
         >
           <template #actions>
             <UButton
+              v-if="puedeContar"
               icon="i-lucide-plus"
               @click="abrirCrear"
             >

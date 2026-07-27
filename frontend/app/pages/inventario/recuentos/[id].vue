@@ -55,7 +55,19 @@ const detalle = ref<RecuentoDetalleApi | null>(null)
 const lineas = ref<LineaRow[]>([])
 const motivos = ref<MotivoOpt[]>([])
 
-const readOnly = computed(() => detalle.value?.estado !== 'borrador')
+// Contar y aplicar son permisos distintos a propósito (separan a quien cuenta
+// de quien aprueba). readOnly cubre las dos razones por las que no se puede
+// escribir el conteo: la sesión ya no está en borrador, o el usuario no tiene
+// Inventario/Crear — el mismo permiso que exigen los PATCH de línea, el PATCH
+// de sesión y el cancelar. Sin esto los campos se ven editables y cada blur
+// vuelve con un 403.
+const puedeContar = computed(() =>
+  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Crear'),
+)
+
+const readOnly = computed(
+  () => detalle.value?.estado !== 'borrador' || !puedeContar.value,
+)
 
 const puedeAplicar = computed(() =>
   permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Actualizar'),

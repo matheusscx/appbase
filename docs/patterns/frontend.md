@@ -38,6 +38,33 @@ Pantallas CRUD simples pueden usar `app/components/crud/` (`CrudPageHeader`,
 `CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD
 y `configuracion/categorias.vue`.
 
+### 1.1 Gatear los controles de escritura por permiso
+
+Una pantalla se abre casi siempre con el permiso de **lectura** del módulo, pero
+sus botones de escritura pegan a endpoints con `@RequiresPermiso(...)` más
+estrictos. Si el control se renderiza igual, el usuario completa el formulario
+entero para recibir un 403: un callejón sin salida.
+
+**Regla:** todo control que dispare una escritura se gatea con el **mismo**
+permiso que exige su endpoint. El guard del backend es el que manda —
+esconder el botón es UX, nunca seguridad (invariante 6).
+
+```typescript
+const permissionsStore = usePermissionsStore()
+const puedeContar = computed(() =>
+  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Crear'),
+)
+```
+
+Cuando la escritura ya está condicionada por estado, sumar el permiso a esa
+misma condición en vez de agregar un `v-if` paralelo — así queda un solo lugar
+que decide (`recuentos/[id].vue`: `readOnly = estado !== 'borrador' || !puedeContar`).
+
+Ojo con los permisos **asimétricos** dentro de una pantalla: en recuentos,
+contar es `Inventario/Crear` y aplicar es `Inventario/Actualizar` a propósito,
+para separar a quien cuenta de quien aprueba. Un solo `puedeEditar` para toda
+la página sería incorrecto.
+
 ---
 
 ## 2. Página — estructura `<script setup>`
