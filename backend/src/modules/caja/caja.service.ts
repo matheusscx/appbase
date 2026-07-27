@@ -40,7 +40,8 @@ export interface CajonEstado {
     usuarioId: string | null;
     usuarioNombre: string;
     saldoInicial: string;
-    saldoEsperado: string;
+    /** `null` en modo ciego con la caja `abierta` — ver `cajonesEstado`. */
+    saldoEsperado: string | null;
     fechaApertura: Date;
     esPropia: boolean;
   } | null;
@@ -537,17 +538,24 @@ export class CajaService {
       [cajaId],
     );
     const claveDe = (id: string | null) => id ?? 'EFECTIVO';
-    const difPorClave = new Map(
-      filas.map((f) => [claveDe(f.metodo_pago_id), f.diferencia]),
+    // El recorrido va sobre las filas descuadradas de la BD, NO sobre lo que
+    // manda el cliente: iterar `lineas` dejaba cerrar una caja descuadrada con
+    // `lineas: []` (el `for` no ejecutaba cuerpo y nadie miraba el arqueo real).
+    const lineaPorClave = new Map(
+      lineas.map((l) => [claveDe(l.metodoPagoId), l]),
     );
     const hayMotivos = await this.motivosService.hayMotivosActivos(
       manager,
       tenantId,
     );
-    for (const l of lineas) {
-      const clave = claveDe(l.metodoPagoId);
-      const dif = difPorClave.get(clave);
+    for (const fila of filas) {
+      const dif = fila.diferencia;
       if (dif == null || new Decimal(dif).isZero()) continue;
+      // Una línea descuadrada ausente del payload se trata igual que una
+      // presente pero vacía: cae en el mismo 400 con el mismo mensaje.
+      const l: (typeof lineas)[number] = lineaPorClave.get(
+        claveDe(fila.metodo_pago_id),
+      ) ?? { metodoPagoId: fila.metodo_pago_id };
       const comentario = l.comentarioDiferencia?.trim() || null;
       let motivoId: string | null = null;
       let comentarioFinal: string | null = null;
@@ -571,14 +579,19 @@ export class CajaService {
           throw new BadRequestException('Falta justificar la diferencia');
         comentarioFinal = comentario;
       }
+      // El `WHERE` se arma con el método de LA FILA, no con el del payload: son
+      // el mismo valor (la clave del cruce sale de ahí), pero apuntar a la fila
+      // que se está recorriendo hace imposible escribir el motivo en otra línea
+      // si algún día cambia `claveDe` — un error que devolvería 200.
+      const metodoPagoId = fila.metodo_pago_id;
       await manager.query(
         `UPDATE caja_arqueo_medio SET motivo_diferencia_id = $1, comentario_diferencia = $2
          WHERE caja_id = $3 AND tenant_id = $4
-           AND ${l.metodoPagoId === null ? 'metodo_pago_id IS NULL' : 'metodo_pago_id = $5'}
+           AND ${metodoPagoId === null ? 'metodo_pago_id IS NULL' : 'metodo_pago_id = $5'}
            AND eliminado_el IS NULL`,
-        l.metodoPagoId === null
+        metodoPagoId === null
           ? [motivoId, comentarioFinal, cajaId, tenantId]
-          : [motivoId, comentarioFinal, cajaId, tenantId, l.metodoPagoId],
+          : [motivoId, comentarioFinal, cajaId, tenantId, metodoPagoId],
       );
     }
   }
@@ -995,14 +1008,23 @@ export class CajaService {
     };
   }
 
+  /**
+   * Grilla de supervisión de cajones. En modo ciego, con la caja `abierta`,
+   * RETIENE el `saldoEsperado` (null) para quien no sea admin del tenant —
+   * misma regla que `obtenerArqueo`/`resumenMovimientos`/`listarMovimientos`.
+   * Sin eso esta grilla era la puerta de atrás del cierre ciego: el supervisor
+   * con `Cajas:Leer` leía acá el número que el arqueo le retiene.
+   */
   async cajonesEstado(
     tenantId: string,
     usuarioId: string,
+    esAdmin = false,
   ): Promise<CajonEstado[]> {
     const rows: {
       cajon_id: string;
       nombre: string;
       caja_id: string | null;
+      estado: string | null;
       usuario_id: string | null;
       usuario_nombre: string | null;
       usuario_apellido: string | null;
@@ -1014,6 +1036,7 @@ export class CajaService {
       `SELECT cj.cajon_id,
               cj.nombre,
               c.caja_id,
+              c.estado,
               c.usuario_id,
               u.nombre   AS usuario_nombre,
               u.apellido AS usuario_apellido,
@@ -1032,20 +1055,27 @@ export class CajaService {
        WHERE cj.tenant_id = $1
          AND cj.activo = true
          AND cj.eliminado_el IS NULL
-       GROUP BY cj.cajon_id, cj.nombre, c.caja_id, c.usuario_id, u.nombre, u.apellido,
+       GROUP BY cj.cajon_id, cj.nombre, c.caja_id, c.estado, c.usuario_id, u.nombre, u.apellido,
                 c.saldo_inicial, c.fecha_apertura
        ORDER BY cj.nombre ASC`,
       [tenantId],
     );
 
+    const ciego = !esAdmin && (await this.getArqueoCiego(tenantId));
+
     return rows.map((r) => {
       if (!r.caja_id) {
         return { cajonId: r.cajon_id, nombre: r.nombre, sesion: null };
       }
-      const saldoEsperado = new Decimal(r.saldo_inicial ?? '0')
-        .plus(r.total_entradas ?? '0')
-        .minus(r.total_salidas ?? '0')
-        .toFixed(4);
+      // El ciego solo retiene mientras la caja está `abierta`; en
+      // `en_conciliacion` el conteo ya se congeló y el esperado está revelado.
+      const saldoEsperado =
+        ciego && r.estado === 'abierta'
+          ? null
+          : new Decimal(r.saldo_inicial ?? '0')
+              .plus(r.total_entradas ?? '0')
+              .minus(r.total_salidas ?? '0')
+              .toFixed(4);
       const usuarioNombre =
         [r.usuario_nombre, r.usuario_apellido]
           .filter((p): p is string => Boolean(p))

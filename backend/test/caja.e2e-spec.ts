@@ -782,6 +782,51 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(efectivo?.diferencia).toBe('-1000.0000');
       expect(efectivo?.motivoNombre).toBe('falta de efectivo');
     });
+
+    it('cerrar con `lineas: []` NO finaliza una caja descuadrada: 400 y sigue en_conciliacion', async () => {
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonMotivoId, saldoInicial: '10000.0000' });
+      expect(abrir.status).toBe(201);
+      const cajaId = (abrir.body as CajaResponse).id;
+
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '9500.0000' }] });
+      expect(conteo.status).toBe(201);
+      expect((conteo.body as { estado: string }).estado).toBe(
+        'en_conciliacion',
+      );
+
+      // El payload no menciona la línea descuadrada. Mientras el recorrido salía
+      // de `dto.lineas`, esto devolvía 200 y cerraba la caja con la diferencia
+      // sin justificar — el faltante quedaba sin explicación para siempre.
+      const cerrarVacio = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [] });
+      expect(cerrarVacio.status).toBe(400);
+
+      const detalle = await request(app.getHttpServer())
+        .get(`/api/caja/${cajaId}`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect((detalle.body as { estado: string }).estado).toBe(
+        'en_conciliacion',
+      );
+
+      // Higiene: cerrar de verdad para liberar el cajón (ver pendientes.md).
+      const cerrarOk = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          lineas: [
+            { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
+          ],
+        });
+      expect([200, 201]).toContain(cerrarOk.status);
+    });
   });
 
   describe('justificación de diferencias — PATCH /caja/:id/arqueo/motivos (admin-only)', () => {

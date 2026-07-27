@@ -616,6 +616,13 @@ Recibe un motivo (y opcionalmente un comentario) por cada línea que descuadró 
 ese motivo exige) para alguna línea descuadrada, lanza `400` y la caja **sigue**
 `en_conciliacion` — la transacción no finaliza a medias.
 
+⚠️ **La completitud se verifica contra el arqueo congelado, no contra el payload.** El
+recorrido sale de las filas descuadradas de `caja_arqueo_medio`: una línea que descuadra y
+que el request **omite** falla igual que una que llega vacía, con el mismo mensaje. Mientras
+el recorrido salía de `lineas`, mandar `{"lineas": []}` cerraba la caja dejando el faltante
+sin justificar para siempre (auditoría 2026-07-27). Las líneas que cuadran se ignoran, así
+que un cierre sin descuadres sigue aceptando `lineas: []`.
+
 ```
 POST /caja/:id/cerrar
 Permiso requerido: MiCaja / Actualizar — owner-o-admin (ver más abajo)
@@ -724,7 +731,15 @@ entradas/salidas/esperado en `null` y la lista de movimientos vacía. El header
 muestra solo `Saldo inicial` y no se renderiza la tabla de movimientos (sin
 placeholder). Al **conciliar** (fase 1 → `en_conciliacion`) o cerrar, se revela todo
 como detalle del arqueo. El gating espeja `obtenerArqueo`
-(`arqueo_ciego && estado === 'abierta'`) y no depende de quién mira.
+(`arqueo_ciego && estado === 'abierta'`), con la única excepción del admin del tenant y el
+superadmin, a quienes el ciego no aplica.
+
+**Los cuatro caminos que retienen son `obtenerArqueo`, `resumenMovimientos`,
+`listarMovimientos` y `cajonesEstado`.** El último se sumó en la auditoría del 2026-07-27:
+la grilla de supervisión calculaba `saldoEsperado` en vivo y lo devolvía sin gatear, así que
+un supervisor con `Cajas:Leer` leía desde `/cajas` el número que el arqueo le retenía. La
+regla del ciego solo vale si la cumplen **todas** las superficies que exponen el esperado o
+algo de donde derivarlo: al agregar una nueva, gatearla es parte de agregarla.
 
 **Configurar el modo ciego es admin-only** (`TenantAdminGuard` en `PUT /caja/arqueo-ciego`):
 es una política anti-fraude, no una acción operativa. El CRUD de cajones de la misma
@@ -746,6 +761,10 @@ Nota: endpoint exclusivo de supervisión (quien llega tiene `Cajas:Leer`). Devue
       TODOS los cajones activos del tenant; cada uno con su sesión `abierta` o
       `en_conciliacion` (`sesion`, cualquiera de las dos cuenta como ocupado) o `null`
       si está libre. Una sola query (LEFT JOIN a la sesión) — sin N+1.
+      `saldoEsperado` llega en `null` si el tenant está en modo ciego, la caja está
+      `abierta` y quien consulta no es admin del tenant ni superadmin — misma regla
+      que `GET /:id/arqueo` (ver Alcance del modo ciego). En `en_conciliacion` siempre
+      se revela: el conteo ya se congeló. El front muestra "—" en ese caso.
 
 Response (200):
 [
@@ -757,7 +776,7 @@ Response (200):
       "usuarioId": "uuid",
       "usuarioNombre": "Juan Pérez",
       "saldoInicial": "500.0000",
-      "saldoEsperado": "750.0000",
+      "saldoEsperado": "750.0000",   // null si el ciego aplica — ver Nota
       "fechaApertura": "2026-06-29T08:00:00Z",
       "esPropia": true
     }

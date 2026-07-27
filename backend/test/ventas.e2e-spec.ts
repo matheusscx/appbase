@@ -79,10 +79,17 @@ async function cerrarCaja(
     .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
 
   if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
+    // El conteo declara solo el saldo inicial, así que las ventas en efectivo de
+    // esta suite SIEMPRE descuadran. La fase 2 exige un motivo por línea
+    // descuadrada: mandar `lineas: []` da 400 y deja el cajón ocupado.
+    const motivos = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia?soloActivas=true')
+      .set('Authorization', `Bearer ${token}`);
+    const motivoId = (motivos.body as { id: string }[])[0]?.id;
     const cierre = await request(app.getHttpServer())
       .post(`/api/caja/${cajaId}/cerrar`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ lineas: [] });
+      .send({ lineas: [{ metodoPagoId: null, motivoDiferenciaId: motivoId }] });
     expect([200, 201]).toContain(cierre.status);
   }
 }

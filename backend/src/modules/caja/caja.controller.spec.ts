@@ -382,12 +382,24 @@ describe('CajaController', () => {
   });
 
   describe('cajonesEstado (Cajas:Leer exclusivo)', () => {
-    it('delega en cajaService.cajonesEstado sin consultar rbacService', () => {
+    it('pasa esAdmin=false para un supervisor no-admin (queda ciego)', async () => {
+      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(false);
       jest.spyOn(cajaService, 'cajonesEstado').mockResolvedValue([]);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
-      controller.cajonesEstado(req);
-      expect(cajaService.cajonesEstado).toHaveBeenCalledWith('t1', 'u1');
+      await controller.cajonesEstado(req);
+      expect(cajaService.cajonesEstado).toHaveBeenCalledWith('t1', 'u1', false);
+      // El permiso lo enforcea el guard, no el handler.
       expect(rbacService.userHasPermiso).not.toHaveBeenCalled();
+    });
+
+    it('pasa esAdmin=true para el admin del tenant (el ciego no le aplica)', async () => {
+      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(true);
+      const cajones = jest
+        .spyOn(cajaService, 'cajonesEstado')
+        .mockResolvedValue([]);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      await controller.cajonesEstado(req);
+      expect(cajones).toHaveBeenCalledWith('t1', 'u1', true);
     });
   });
 

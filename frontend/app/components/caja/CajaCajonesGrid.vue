@@ -80,7 +80,13 @@ const cajonesOrdenados = computed(() =>
             <dt class="text-muted">
               Saldo esperado
             </dt>
-            <dd class="text-default">{{ formatMonto(cajon.sesion.saldoEsperado) }}</dd>
+            <dd v-if="cajon.sesion.saldoEsperado !== null" class="text-default">
+              {{ formatMonto(cajon.sesion.saldoEsperado) }}
+            </dd>
+            <!-- Modo ciego con la caja abierta: el backend retiene el esperado. -->
+            <dd v-else class="text-muted">
+              —
+            </dd>
           </div>
           <div class="flex justify-between text-xs text-muted pt-1">
             <dt>Apertura</dt>

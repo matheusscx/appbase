@@ -93,10 +93,12 @@ export class CajaController {
 
   @Get('cajones-estado')
   @RequiresPermiso('Cajas', 'Leer')
-  cajonesEstado(@Req() req: Request) {
+  async cajonesEstado(@Req() req: Request) {
     const u = req.user as JwtUser;
     // Endpoint exclusivo de supervisión: quien llega tiene Cajas:Leer → ve todos.
-    return this.cajaService.cajonesEstado(u.tenantId!, u.id);
+    // `esAdmin` no gatea el acceso, solo si el modo ciego le retiene el esperado.
+    const esAdmin = await this.esAdminTenant(u);
+    return this.cajaService.cajonesEstado(u.tenantId!, u.id, esAdmin);
   }
 
   @Get('cajones-disponibles')

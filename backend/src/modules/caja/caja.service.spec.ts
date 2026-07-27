@@ -906,6 +906,130 @@ describe('CajaService', () => {
       });
       expect(res.caja.estado).toBe('cerrada');
     });
+
+    // El recorrido tiene que salir del arqueo congelado, no del payload: mientras
+    // iteraba `dto.lineas`, mandar `lineas: []` cerraba la caja sin justificar
+    // nada. El test de arriba (diferencia 0 + `lineas: []` → cierra) es el par que
+    // impide "arreglarlo" exigiendo siempre un array no vacío.
+    it('400 si una línea descuadra y el payload la omite (mandar `lineas: []` no alcanza)', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: USUARIO_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '-1000.0000' },
+      ]); // el arqueo congelado SÍ tiene un descuadre
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+          lineas: [],
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      // Y corta antes de tocar la caja: sigue en_conciliacion.
+      expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    // Camino de éxito con cruce de clave no trivial: sin esto, un bug que cruzara
+    // mal payload↔fila escribiría el motivo en la línea equivocada y devolvería
+    // 200 — un error silencioso que ningún test de fallo detecta.
+    it('dos líneas descuadradas justificadas: cada motivo va a SU propia fila', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: USUARIO_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '-1000.0000' },
+        { metodo_pago_id: 'mp-tarjeta', diferencia: '-500.0000' },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      // Dependiente del ARGUMENTO, no del orden de llamada: si el mock resolviera
+      // por orden, un cruce roto igual escribiría el motivo "correcto" y el test
+      // pasaría sin comprobar nada. En producción `assertMotivoValido` filtra por
+      // el id recibido, así que esto reproduce su contrato real.
+      motivosService.assertMotivoValido.mockImplementation(
+        (_manager: unknown, _tenantId: string, motivoId: string) =>
+          Promise.resolve({
+            id: motivoId,
+            nombre: motivoId,
+            requiereComentario: false,
+          }),
+      );
+      managerMock.query.mockResolvedValueOnce(undefined); // UPDATE efectivo
+      managerMock.query.mockResolvedValueOnce(undefined); // UPDATE tarjeta
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: USUARIO_ID,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const res = await service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+        lineas: [
+          { metodoPagoId: 'mp-tarjeta', motivoDiferenciaId: 'm-tarjeta' },
+          { metodoPagoId: null, motivoDiferenciaId: 'm-efectivo' },
+        ],
+      });
+
+      expect(res.caja.estado).toBe('cerrada');
+      // El payload viene en orden inverso al del arqueo a propósito: si el cruce
+      // fuera posicional en vez de por método, los motivos saldrían cambiados.
+      const updates = managerMock.query.mock.calls
+        .filter(([sql]: [string]) => sql.includes('UPDATE caja_arqueo_medio'))
+        .map(([sql, params]) => ({
+          porNull: sql.includes('metodo_pago_id IS NULL'),
+          params,
+        }));
+      expect(updates).toHaveLength(2);
+      const efectivo = updates.find((u) => u.porNull);
+      const tarjeta = updates.find((u) => !u.porNull);
+      expect(efectivo?.params).toEqual([
+        'm-efectivo',
+        null,
+        CAJA_ID,
+        TENANT_ID,
+      ]);
+      expect(tarjeta?.params).toEqual([
+        'm-tarjeta',
+        null,
+        CAJA_ID,
+        TENANT_ID,
+        'mp-tarjeta',
+      ]);
+    });
+
+    it('400 si descuadran dos líneas y el payload solo justifica una', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: USUARIO_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '-1000.0000' },
+        { metodo_pago_id: 'mp-tarjeta', diferencia: '-500.0000' },
+      ]);
+      motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      motivosService.assertMotivoValido.mockResolvedValueOnce({
+        id: 'm1',
+        nombre: 'falta de efectivo',
+        requiereComentario: false,
+      });
+      managerMock.query.mockResolvedValueOnce(undefined); // UPDATE de la de efectivo
+
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+          lineas: [{ metodoPagoId: null, motivoDiferenciaId: 'm1' }],
+        } as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(managerMock.save).not.toHaveBeenCalled();
+    });
   });
 
   describe('getArqueoCiego / setArqueoCiego', () => {
@@ -1306,12 +1430,19 @@ describe('CajaService', () => {
   });
 
   describe('cajonesEstado', () => {
+    // El default de la grilla es "tenant sin modo ciego": cada test que ejerce
+    // el ciego lo pisa explícitamente.
+    beforeEach(() => {
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValue(false);
+    });
+
     it('mapea un cajón ocupado con sesión (nombre completo, saldo esperado, esPropia)', async () => {
       dataSource.query.mockResolvedValue([
         {
           cajon_id: 'cajon-1',
           nombre: 'Mostrador',
           caja_id: CAJA_ID,
+          estado: 'abierta',
           usuario_id: USUARIO_ID,
           usuario_nombre: 'Ana',
           usuario_apellido: 'Pérez',
@@ -1370,6 +1501,7 @@ describe('CajaService', () => {
           cajon_id: 'cajon-3',
           nombre: 'Barra',
           caja_id: CAJA_ID,
+          estado: 'abierta',
           usuario_id: OTRO_USUARIO,
           usuario_nombre: 'Beto',
           usuario_apellido: null,
@@ -1396,6 +1528,57 @@ describe('CajaService', () => {
 
       const [, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
       expect(params).toEqual([TENANT_ID]);
+    });
+
+    // La grilla de supervisión era la puerta de atrás del cierre ciego: mostraba
+    // el esperado que `obtenerArqueo` retiene. Los tres tests de abajo fijan las
+    // tres condiciones de la regla (`!esAdmin`, ciego, caja `abierta`); sacar
+    // cualquiera de las tres hace fallar exactamente uno.
+    const filaOcupada = (estado: string) => ({
+      cajon_id: 'cajon-1',
+      nombre: 'Mostrador',
+      caja_id: CAJA_ID,
+      estado,
+      usuario_id: USUARIO_ID,
+      usuario_nombre: 'Ana',
+      usuario_apellido: 'Pérez',
+      saldo_inicial: '1000',
+      fecha_apertura: new Date('2026-06-29T10:00:00Z'),
+      total_entradas: '200',
+      total_salidas: '50',
+    });
+
+    it('modo ciego + caja abierta + no-admin: retiene el saldoEsperado (null)', async () => {
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValue(true);
+      dataSource.query.mockResolvedValue([filaOcupada('abierta')]);
+
+      const result = await service.cajonesEstado(TENANT_ID, USUARIO_ID, false);
+
+      expect(result[0]?.sesion?.saldoEsperado).toBeNull();
+      // El saldo inicial NO es secreto: el cajero lo declaró al abrir.
+      expect(result[0]?.sesion?.saldoInicial).toBe('1000.0000');
+    });
+
+    it('modo ciego + caja abierta + admin: revela el saldoEsperado sin consultar el flag', async () => {
+      const flag = jest
+        .spyOn(service, 'getArqueoCiego')
+        .mockResolvedValue(true);
+      dataSource.query.mockResolvedValue([filaOcupada('abierta')]);
+
+      const result = await service.cajonesEstado(TENANT_ID, USUARIO_ID, true);
+
+      expect(result[0]?.sesion?.saldoEsperado).toBe('1150.0000');
+      // Cortocircuito: para un admin ni se consulta la config (sin query de más).
+      expect(flag).not.toHaveBeenCalled();
+    });
+
+    it('modo ciego + caja en_conciliacion: revela, porque el conteo ya se congeló', async () => {
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValue(true);
+      dataSource.query.mockResolvedValue([filaOcupada('en_conciliacion')]);
+
+      const result = await service.cajonesEstado(TENANT_ID, USUARIO_ID, false);
+
+      expect(result[0]?.sesion?.saldoEsperado).toBe('1150.0000');
     });
   });
 });

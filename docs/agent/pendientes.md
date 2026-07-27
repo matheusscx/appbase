@@ -284,28 +284,27 @@ auditoría produce información, no diffs. Orden = severidad.
 
 ### Alta
 
-- [ ] **`POST /caja/:id/cerrar` con `lineas: []` cierra una caja descuadrada sin
-  justificar** (backend, `caja/caja.service.ts:547`) — `aplicarMotivosADescuadres` itera
-  sobre `dto.lineas` (lo que manda el cliente) y usa las diferencias reales de
-  `caja_arqueo_medio` solo como diccionario de consulta. Con el array vacío el `for` no
-  ejecuta cuerpo, no lanza, y `cerrar` sigue a `estado='cerrada'` (`:771`);
-  `FinalizarCierreDto` es `@IsArray()` sin mínimo. Un faltante de $1.000 queda cerrado con
-  `motivo_diferencia_id` NULL para siempre. Anula el sub-proyecto C con un payload trivial y
-  contradice [`gestion-cajas.md`](../features/gestion-cajas.md) ("nunca es válido cerrar una
-  diferencia sin ninguna explicación"). **Cierre:** invertir el loop — recorrer las filas
-  descuadradas de BD y exigir que cada una traiga su entrada en `dto.lineas`. Los dos tests
-  que existen cubren "línea presente sin motivo", nunca "línea omitida".
-- [ ] **`GET /caja/cajones-estado` revela el esperado de una caja abierta en modo ciego**
-  (backend + frontend, `caja/caja.service.ts:1045-1062`, `caja/caja.controller.ts:94`,
-  `components/caja/CajaCajonesGrid.vue:83`) — calcula
-  `saldoEsperado = saldoInicial + entradas − salidas` y lo devuelve **sin ninguna rama por
-  modo ciego**, a cualquiera con `Cajas:Leer`. Los otros tres caminos (`obtenerArqueo:441`,
-  `resumenMovimientos:1143`, `listarMovimientos:1189`) sí gatean con
-  `!esAdmin && abierta && arqueoCiego`. El frontend lo rotula "Saldo esperado". Es la misma
-  clase de fuga derivable que el spec del ciego cerró para el header y la tabla de
-  movimientos; a esta grilla no la barrió. Matiz: es el total mezclado de
-  `movimientos_caja`, no la línea por método — en un tenant cash-only es exactamente el
-  número secreto.
+- [x] ~~**`POST /caja/:id/cerrar` con `lineas: []` cierra una caja descuadrada sin
+  justificar**~~ — cerrado 2026-07-27: `aplicarMotivosADescuadres` ahora **recorre las filas
+  descuadradas de `caja_arqueo_medio`**, no `dto.lineas`; una línea que descuadra y que el
+  payload omite cae en el mismo 400 (y con el mismo mensaje) que una que llega vacía. Las
+  que cuadran se siguen ignorando, así que un cierre sin descuadres sigue aceptando
+  `lineas: []` — hay un test por cada lado, para que "arreglarlo" exigiendo siempre un array
+  no vacío también falle. Cubierto por unit (línea omitida, y dos descuadres con una sola
+  justificada) y por un e2e real contra la BD. El override admin
+  (`PATCH /:id/arqueo/motivos`) comparte el helper y hereda la misma completitud, que es lo
+  que ya prometía su docblock.
+- [x] ~~**`GET /caja/cajones-estado` revela el esperado de una caja abierta en modo
+  ciego**~~ — cerrado 2026-07-27: `cajonesEstado` recibe `esAdmin` y retiene
+  `saldoEsperado: null` con la misma regla que los otros tres caminos
+  (`!esAdmin && arqueoCiego && estado === 'abierta'`); en `en_conciliacion` revela, porque
+  el conteo ya se congeló. `saldoInicial` sigue visible: no es secreto, lo declaró el propio
+  cajero al abrir. El front muestra "—". Seis mutantes verificados (quitar cada una de las
+  tres condiciones, retener siempre, revelar siempre, y que el controller no pase `esAdmin`)
+  y cada uno mata exactamente el test que le toca.
+  ⚠️ **Sin cobertura e2e a propósito**: el caso que importa es un supervisor con `Cajas:Leer`
+  que **no** sea admin, y ese usuario no existe en el seed — es el ítem ya abierto en
+  "Limpiezas menores". Hoy lo cubren el unit del service y el del controller.
 - [ ] **Un monto manual de propina se aplica en cualquier criterio y no conserva el total
   del grupo** (backend, `propinas/liquidacion-propinas.service.ts:917-921` y `:956`) —
   `aplicarAjustesPersistido` sobreescribe `p.monto` de cualquier participante que aparezca

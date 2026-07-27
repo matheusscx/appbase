@@ -44,7 +44,8 @@ export interface SesionCajon {
   usuarioId: string | null
   usuarioNombre: string
   saldoInicial: string
-  saldoEsperado: string
+  /** `null` en modo ciego con la caja abierta: el backend lo retiene. */
+  saldoEsperado: string | null
   fechaApertura: string
   esPropia: boolean
 }
