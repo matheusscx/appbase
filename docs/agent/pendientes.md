@@ -144,6 +144,10 @@ información, no diffs. Orden = severidad.
   de `findOne` lleva `AND g.tenant_id = vp.tenant_id`. Se sembró un garzón de Falabella
   (`…440332`) **solo** para que el e2e pueda ejercer el cruce: es activo y válido, así que
   el único motivo de rechazo posible es el tenant.
+  ⚠️ Ese garzón **aparece en el listado de garzones de Falabella** (es `activo: true` a
+  propósito: con `activo: false` el test pasaría por "inactivo" sin tocar el chequeo de
+  tenant). Hoy ningún test cuenta garzones de ese tenant. Si algún día uno lo hace y da
+  uno de más, la causa está acá — no lo desactives, ajustá el conteo.
 - [ ] **Otros tres `LEFT JOIN garzones` sin filtro de `tenant_id`** (backend,
   `turnos/sesiones-garzon.service.ts:181` y `:239`, `salones/cuenta-asignaciones.service.ts:131`
   y `:133`) — mismo patrón que el hallazgo de arriba: la tabla principal filtra por tenant
