@@ -11,6 +11,7 @@ import { CatalogService } from '../catalog/catalog.service';
 
 const TENANT = 'tenant-uuid';
 const ITEM_ID = 'item-uuid';
+const USUARIO = 'usuario-uuid';
 const MONEDA_ID = 'moneda-uuid';
 const CATEGORIA_ID = 'categoria-uuid';
 const COMBO_ID = 'combo-uuid';
@@ -1409,7 +1410,7 @@ describe('ItemsService', () => {
     it('lanza NotFoundException cuando el item no existe', async () => {
       managerMock.query.mockResolvedValue([]);
       await expect(
-        service.update(TENANT, ITEM_ID, { nombre: 'Nuevo nombre' }),
+        service.update(TENANT, USUARIO, ITEM_ID, { nombre: 'Nuevo nombre' }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -1420,7 +1421,9 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]) // DELETE item_impuestos
         .mockResolvedValueOnce([]); // INSERT item_impuestos
 
-      await service.update(TENANT, ITEM_ID, { impuestosIds: ['imp-nuevo'] });
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        impuestosIds: ['imp-nuevo'],
+      });
 
       const calls = managerMock.query.mock.calls.map(
         (c: unknown[]) => c[0] as string,
@@ -1438,7 +1441,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'servicio' }])
         .mockResolvedValueOnce([]); // UPDATE items con activo
 
-      await service.update(TENANT, ITEM_ID, { activo: false });
+      await service.update(TENANT, USUARIO, ITEM_ID, { activo: false });
 
       const calls = managerMock.query.mock.calls.map(
         (c: unknown[]) => c[0] as string,
@@ -1457,7 +1460,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ cnt: '3' }]); // COUNT movimientos > 0
 
       await expect(
-        service.update(TENANT, ITEM_ID, { modoInventario: 'lote' }),
+        service.update(TENANT, USUARIO, ITEM_ID, { modoInventario: 'lote' }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1469,7 +1472,7 @@ describe('ItemsService', () => {
         ]) // SELECT actual — mismo modo
         .mockResolvedValueOnce(undefined); // UPDATE item_producto
 
-      await service.update(TENANT, ITEM_ID, {
+      await service.update(TENANT, USUARIO, ITEM_ID, {
         modoInventario: 'cantidad',
         costo: '9000',
       });
@@ -1494,7 +1497,9 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ cnt: '0' }]) // COUNT movimientos = 0
         .mockResolvedValueOnce(undefined); // UPDATE item_producto
 
-      await service.update(TENANT, ITEM_ID, { modoInventario: 'lote' });
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        modoInventario: 'lote',
+      });
 
       const calls = managerMock.query.mock.calls.map(
         (c: unknown[]) => c[0] as string,
@@ -1512,7 +1517,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce(undefined); // UPDATE item_producto
 
       await expect(
-        service.update(TENANT, ITEM_ID, { modoInventario: 'lote' }),
+        service.update(TENANT, USUARIO, ITEM_ID, { modoInventario: 'lote' }),
       ).resolves.not.toThrow();
 
       const calls = managerMock.query.mock.calls as [string, unknown[]][];
@@ -1528,7 +1533,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'suscripcion' }]) // SELECT existing
         .mockResolvedValueOnce([]); // UPDATE item_suscripcion
 
-      const result = await service.update(TENANT, ITEM_ID, {
+      const result = await service.update(TENANT, USUARIO, ITEM_ID, {
         frecuencia: 'quincenal',
       });
 
@@ -1547,7 +1552,9 @@ describe('ItemsService', () => {
       ]); // SELECT existing
 
       await expect(
-        service.update(TENANT, ITEM_ID, { frecuencia: 'mensual' } as any),
+        service.update(TENANT, USUARIO, ITEM_ID, {
+          frecuencia: 'mensual',
+        } as any),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1556,7 +1563,7 @@ describe('ItemsService', () => {
         { item_id: ITEM_ID, tipo: 'producto' },
       ]); // SELECT existing
 
-      await service.update(TENANT, ITEM_ID, { costo: '4300' });
+      await service.update(TENANT, USUARIO, ITEM_ID, { costo: '4300' });
 
       const calls = managerMock.query.mock.calls.map(
         (c: unknown[]) => c[0] as string,
@@ -1583,7 +1590,7 @@ describe('ItemsService', () => {
 
       catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.02'); // 20 g → 0.02 kg
 
-      await service.update(TENANT, ITEM_ID, {
+      await service.update(TENANT, USUARIO, ITEM_ID, {
         ingredientes: [
           {
             ingredienteItemId: 'ingrediente-queso',
@@ -1625,7 +1632,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos
         .mockResolvedValueOnce([]); // INSERT receta_extras_permitidos
 
-      const result = await service.update(TENANT, ITEM_ID, {
+      const result = await service.update(TENANT, USUARIO, ITEM_ID, {
         extrasPermitidos: [
           {
             ingredienteItemId: 'ingrediente-queso',
@@ -1678,7 +1685,7 @@ describe('ItemsService', () => {
       ]);
 
       await expect(
-        service.update(TENANT, ITEM_ID, { [field]: value } as any),
+        service.update(TENANT, USUARIO, ITEM_ID, { [field]: value } as any),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1688,7 +1695,7 @@ describe('ItemsService', () => {
       ]);
 
       await expect(
-        service.update(TENANT, ITEM_ID, { modoInventario: 'lote' }),
+        service.update(TENANT, USUARIO, ITEM_ID, { modoInventario: 'lote' }),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1697,7 +1704,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'ingrediente' }]) // SELECT existing
         .mockResolvedValueOnce(undefined); // UPDATE items
 
-      await service.update(TENANT, ITEM_ID, { precioBase: '999' });
+      await service.update(TENANT, USUARIO, ITEM_ID, { precioBase: '999' });
 
       const updateItems = managerMock.query.mock.calls.find(
         (c: unknown[]) =>
@@ -1725,7 +1732,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([]) // UPDATE item_combo
           .mockResolvedValueOnce([{ componentes: '1', grupos: '0' }]); // conteo vivos post-cambio
 
-        const patch = await service.update(TENANT, COMBO_ID, {
+        const patch = await service.update(TENANT, USUARIO, COMBO_ID, {
           componentes: [
             { componenteItemId: PROD_ID, cantidad: '2', bloqueante: true },
           ],
@@ -1744,7 +1751,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([]) // UPDATE item_combo costo_actual = 0
           .mockResolvedValueOnce([{ componentes: '0', grupos: '1' }]); // conteo vivos post-cambio
 
-        const patch = await service.update(TENANT, COMBO_ID, {
+        const patch = await service.update(TENANT, USUARIO, COMBO_ID, {
           componentes: [],
         });
         expect(patch.costoActual).toBe('0');
@@ -1761,7 +1768,9 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ componentes: '0', grupos: '0' }]); // conteo vivos post-cambio
 
         await expect(
-          service.update(TENANT, COMBO_ID, { gruposModificadores: [] }),
+          service.update(TENANT, USUARIO, COMBO_ID, {
+            gruposModificadores: [],
+          }),
         ).rejects.toThrow(BadRequestException);
       });
 
@@ -1775,7 +1784,7 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([]) // SELECT overrides vivos (ninguno)
           .mockResolvedValueOnce([{ componentes: '0', grupos: '1' }]); // conteo vivos post-cambio
 
-        const patch = await service.update(TENANT, COMBO_ID, {
+        const patch = await service.update(TENANT, USUARIO, COMBO_ID, {
           gruposModificadores: [
             { grupoModificadorId: OTRO_GRUPO_ID, min: 1, max: 1, orden: 0 },
           ],
@@ -1971,7 +1980,9 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ cnt: '3' }]); // movimientos existentes
 
       await expect(
-        service.update('tenant-uuid', 'item-uuid', { unidadMedida: 'g' }),
+        service.update('tenant-uuid', USUARIO, 'item-uuid', {
+          unidadMedida: 'g',
+        }),
       ).rejects.toThrow(
         'No se puede cambiar la unidad de medida de un producto con movimientos registrados',
       );
@@ -1984,8 +1995,68 @@ describe('ItemsService', () => {
         .mockResolvedValue([]);
 
       await expect(
-        service.update('tenant-uuid', 'item-uuid', { unidadMedida: 'kg' }),
+        service.update('tenant-uuid', USUARIO, 'item-uuid', {
+          unidadMedida: 'kg',
+        }),
       ).resolves.toMatchObject({ id: 'item-uuid', unidadMedida: 'kg' });
+    });
+
+    // Sin esto, un producto creado con stock 0 (que no genera movimiento, así
+    // que el guard de arriba no dispara) pasaba de kg a g conservando 5000 de
+    // costo: el mismo número, interpretado por gramo. Error de 1000×.
+    it('reconvierte el costo al cambiar de unidad, por el choke point', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }]) // lectura del item
+        .mockResolvedValueOnce([
+          {
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+            costo_actual: '5000.0000',
+          },
+        ])
+        .mockResolvedValueOnce([{ cnt: '0' }]) // sin movimientos: el cambio se permite
+        .mockResolvedValue([]);
+      catalogServiceMock.convertirUnidad.mockResolvedValue('1000'); // 1 kg = 1000 g
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-1',
+      });
+
+      await service.update('tenant-uuid', USUARIO, 'item-uuid', {
+        unidadMedida: 'g',
+      });
+
+      // El costo NO se escribe con un UPDATE directo: va por registrarMovimiento
+      // (ADR-016), que además lo deja auditado en el kardex.
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({
+          tipo: 'ajuste',
+          motivo: 'ajuste_costo',
+          cantidad: '0',
+          costoUnitario: '5.0000', // 5.000/kg → 5/g
+          usuarioId: USUARIO,
+        }),
+      );
+    });
+
+    it('no toca el costo si la unidad cambia pero no hay costo vigente', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          {
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+            costo_actual: null,
+          },
+        ])
+        .mockResolvedValueOnce([{ cnt: '0' }])
+        .mockResolvedValue([]);
+
+      await service.update('tenant-uuid', USUARIO, 'item-uuid', {
+        unidadMedida: 'g',
+      });
+
+      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
     });
   });
 

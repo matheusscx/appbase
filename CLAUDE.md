@@ -234,7 +234,7 @@ Ejecutar, no afirmar. Si algo falla, la tarea no está terminada.
 
 ```bash
 cd backend  && npm run lint:check && npm run typecheck && npm test && npm run test:e2e
-cd frontend && npm run build && npm run typecheck:ratchet && npm run design:check
+cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check
 ```
 
 El **mismo gate corre en CI** (`.github/workflows/ci.yml`, Postgres real) en cada push a

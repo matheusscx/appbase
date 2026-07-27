@@ -64,8 +64,11 @@ export class ItemsController {
     @Param('id') id: string,
     @Body() dto: UpdateItemDto,
   ) {
-    const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.update(tenantId, id, dto);
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.itemsService.update(tenantId, usuarioId, id, dto);
   }
 
   @Delete(':id')

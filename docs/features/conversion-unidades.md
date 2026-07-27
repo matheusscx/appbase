@@ -216,6 +216,16 @@ if (dto.unidadMedida !== undefined) {
 - Validar contra el catálogo si se envía.
 - **Si cambia la unidad base y el producto ya tiene movimientos** → `BadRequest` ("No se puede cambiar la unidad de medida de un producto con movimientos registrados").
   - Razón: El stock guardado está en la unidad vieja; cambiar el código sin reescribir el kardex lo corrompe silenciosamente (100 kg pasarían a leerse como 100 g).
+- **Si cambia la unidad y el producto tiene `costo_actual`** → el costo se
+  **reconvierte automáticamente**, aunque el cambio esté permitido.
+  - Razón: `costo_actual` significa "costo por `unidad_medida`". Sin reconvertir,
+    5.000 por kg pasa a leerse como 5.000 por gramo — un error de 1000×. El guard de
+    movimientos no cubre este caso: un producto creado con `stock: 0` no genera
+    ningún movimiento y sí puede tener costo.
+  - La escritura va por `InventarioService.registrarMovimiento`, nunca por un `UPDATE`
+    directo: `costo_actual` solo se escribe desde el choke point (ADR-016, con test de
+    invariante). Como efecto deseado, el cambio queda auditado en el kardex como un
+    `ajuste_costo` con su `costo_anterior`.
 
 ### Conversión en el Ajuste de Stock
 

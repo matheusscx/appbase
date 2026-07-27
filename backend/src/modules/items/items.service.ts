@@ -971,7 +971,12 @@ export class ItemsService {
     });
   }
 
-  async update(tenantId: string, itemId: string, dto: UpdateItemDto) {
+  async update(
+    tenantId: string,
+    usuarioId: string,
+    itemId: string,
+    dto: UpdateItemDto,
+  ) {
     // Patch mergeable: solo campos tocados + RETURNING de columnas UPDATE.
     // El front hace `{ ...prev, ...saved }` — sin findOne post-write.
     return this.dataSource.transaction(async (manager) => {
@@ -1106,6 +1111,15 @@ export class ItemsService {
         );
       }
 
+      // Cambio de unidad con costo vigente: hay que reconvertir el costo (ver
+      // más abajo). Se resuelve después del UPDATE, pero el valor previo se
+      // lee antes; este par lo cruza.
+      let costoAReconvertir: {
+        desde: string;
+        hacia: string;
+        costo: string;
+      } | null = null;
+
       if (tipo === 'producto' || tipo === 'ingrediente') {
         // El frontend reenvía modoInventario/unidadMedida en toda edición.
         // Solo se rechaza si el valor cambia de verdad y ya hay movimientos.
@@ -1120,8 +1134,10 @@ export class ItemsService {
           const prodRows: {
             modo_inventario: string;
             unidad_medida: string;
+            costo_actual: string | null;
           }[] = await manager.query(
-            `SELECT modo_inventario, unidad_medida FROM item_producto WHERE item_id = $1`,
+            `SELECT modo_inventario, unidad_medida, costo_actual
+               FROM item_producto WHERE item_id = $1`,
             [itemId],
           );
 
@@ -1152,6 +1168,19 @@ export class ItemsService {
                   : 'No se puede cambiar la unidad de medida de un producto con movimientos registrados',
               );
             }
+          }
+
+          // `costo_actual` es "costo por unidad_medida": si la unidad cambia y
+          // el costo se queda, pasa a significar otra cosa (5.000 por kg leído
+          // como 5.000 por gramo, error de 1000×). El guard de arriba no cubre
+          // este caso porque un producto creado con stock 0 no tiene ningún
+          // movimiento y sí puede tener costo.
+          if (unidadCambia && prodRows[0].costo_actual != null) {
+            costoAReconvertir = {
+              desde: prodRows[0].unidad_medida,
+              hacia: dto.unidadMedida!,
+              costo: prodRows[0].costo_actual,
+            };
           }
         }
 
@@ -1184,6 +1213,35 @@ export class ItemsService {
             `UPDATE item_producto SET ${prodClauses.join(', ')} WHERE item_id = $${pidx++}`,
             prodParams,
           );
+        }
+
+        // La reconversión va por registrarMovimiento, no por un UPDATE directo:
+        // `costo_actual` solo se escribe desde el choke point (ADR-016, con test
+        // de invariante). De paso deja el cambio auditado en el kardex como un
+        // ajuste_costo, con el costo anterior y el nuevo.
+        if (costoAReconvertir) {
+          // 1 unidad vieja equivale a N nuevas (1 kg = 1000 g), así que el
+          // costo por unidad nueva es el viejo dividido por N.
+          const unaUnidadVieja = await this.catalogService.convertirUnidad(
+            '1',
+            costoAReconvertir.desde,
+            costoAReconvertir.hacia,
+          );
+          const costoNuevo = convertirCostoUnitario(
+            '1',
+            costoAReconvertir.costo,
+            unaUnidadVieja,
+          );
+          await this.inventarioService.registrarMovimiento(manager, {
+            tenantId,
+            itemId,
+            usuarioId,
+            tipo: 'ajuste',
+            motivo: 'ajuste_costo',
+            cantidad: '0',
+            costoUnitario: costoNuevo,
+            comentario: `Cambio de unidad ${costoAReconvertir.desde} → ${costoAReconvertir.hacia}: costo reconvertido`,
+          });
         }
       } else if (tipo === 'servicio') {
         const srvClauses: string[] = [];

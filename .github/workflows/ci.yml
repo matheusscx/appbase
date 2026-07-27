@@ -94,6 +94,13 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # Los specs de composables (conversión de unidades, formato de dinero) no
+      # corrían en CI: eran decorativos. `vitest.config.ts` excluye `e2e/`, que
+      # es de Playwright.
+      - name: frontend · unit
+        working-directory: frontend
+        run: npm test
+
       # Bloqueante: `vue-tsc` y `typescript` están pineados exactos como devDependencies
       # (3.3.7 / 6.0.3), así `nuxi typecheck` resuelve ambos localmente y NO cae al
       # fallback `npx -p vue-tsc -p typescript` (que en CI bajaba @latest de ambos →
