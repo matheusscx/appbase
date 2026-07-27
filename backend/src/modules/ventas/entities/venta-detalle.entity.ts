@@ -31,11 +31,17 @@ export class VentaDetalle {
   })
   precioUnitarioOrigen: string | null;
 
+  /**
+   * Escala 6, igual que `tenant_moneda.valor_del_dia` de donde sale. Estaba en 4
+   * y Postgres la redondeaba al insertar: recalcular
+   * `precioUnitarioOrigen × tasaCambio` ya no daba `precioUnitario`, y este campo
+   * existe justamente para poder auditar esa conversión.
+   */
   @Column({
     name: 'tasa_cambio',
     type: 'decimal',
     precision: 18,
-    scale: 4,
+    scale: 6,
     nullable: true,
   })
   tasaCambio: string | null;

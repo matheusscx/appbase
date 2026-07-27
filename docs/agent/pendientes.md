@@ -179,11 +179,9 @@ información, no diffs. Orden = severidad.
   carrito. Resultó peor de lo reportado: la venta usa solo campos del row base, así que
   las 3-6 queries extra que `findOne` hacía por ítem (impuestos, recargos, descuentos,
   ingredientes, componentes, grupos) construían colecciones que se descartaban enteras.
-- [ ] **`registrarAbono` sin `FOR UPDATE` sobre la venta ni sobre la suma de pagos**
-  (backend, `pagos/pagos.service.ts:275-320`) — dos abonos concurrentes sobre la misma
-  venta leen el mismo saldo y ambos lo aplican: sobre-pago que ninguno de los dos ve.
-  El repo ya tiene el patrón (`lockVentaOriginal`, `bloquearCajaAbierta`). Distinto del
-  bug de fuente de datos de arriba: ese es *qué* se lee, este es *sin qué garantía*.
+- [x] ~~**`registrarAbono` sin `FOR UPDATE` sobre la venta**~~ — cerrado 2026-07-27: la
+  carga de la venta toma `FOR UPDATE`, así que los abonos sobre la misma venta se
+  serializan hasta el commit y la suma de `pago_aplicaciones` queda bajo ese lock.
 - [~] **N+1 al resolver personalización de recetas/combos** — parcialmente cerrado
   2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
   `resolverGruposDeItem` disparaba una query **por cada grupo de modificadores** del ítem.
@@ -198,36 +196,28 @@ información, no diffs. Orden = severidad.
   **Es decisión de owner si se encara**, con este número sobre la mesa: un carrito de 5
   líneas de receta pasó de 5×(3+G) queries a 15 fijas; batchear entre líneas lo llevaría
   a ~3.
-- [ ] **Orden de locks de `item_producto` decidido por el cliente → deadlock**
-  (backend, `ventas/ventas.service.ts:434-478` + `inventario/inventario.service.ts:91`)
-  — el `SELECT … FOR UPDATE` por ítem se toma en el orden de `dto.lineas`. Dos ventas
-  simultáneas con los mismos dos productos en orden inverso se bloquean en cruz;
-  Postgres aborta una. No corrompe datos (la transacción se revierte entera), pero
-  tumba una venta con un error opaco. Cierre barato: ordenar las líneas por `itemId`
-  antes de iterar.
-- [ ] **`esNotaCredito` se recalcula en el drawer con un código hardcodeado**
-  (backend `ventas/ventas.service.ts:1110` vs frontend
-  `components/ventas/VentaDetalleDrawer.vue:144`) — el listado recibe el booleano ya
-  calculado por el backend (`tipo_documento_id === TIPO_DOCUMENTO_NC_ID`), pero
-  `findOne()` no lo emite y el drawer lo reconstruye con `tipoDocumento?.codigo === '61'`.
-  `codigo` es nullable y por país; si no es `'61'`, el drawer ofrece "Nota de crédito"
-  sobre una NC (el backend la rechaza recién al confirmar) mientras el listado sí la
-  marca. Cierre: emitir `esNotaCredito` en `findOne()` y consumirlo.
-- [ ] **`tasa_cambio` se calcula con 6 decimales y se persiste en escala 4**
-  (backend, `ventas/ventas.service.ts:242` vs
-  `ventas/entities/venta-detalle.entity.ts:34-41`) — `tasa.toFixed(6)` entra en una
-  columna `NUMERIC(18,4)` y Postgres la redondea. Los totales son correctos
-  (`precioConvertido` se calcula con la tasa completa antes de redondear); lo que se
-  pierde es la **reproducibilidad del campo de auditoría**: recalcular
-  `precioUnitarioOrigen × tasaCambio` ya no da `precioUnitario`. Severidad baja, sin
-  impacto en plata cobrada.
-- [ ] **`pos.vue` y `AbonoModal.vue` no usan `apiErrorMsg`**
-  (frontend, `pages/ventas/pos.vue:274-276`, `components/pagos/AbonoModal.vue:98-100`)
-  — tipan `data.message` como `string`, pero el `ValidationPipe` global (`main.ts:19`,
-  sin `exceptionFactory`) devuelve `string[]` en errores de validación → el toast
-  muestra el array interpolado. El helper ya existe, está testeado para ambos casos
-  (`utils/api-error.spec.ts`) y lo usan `NotaCreditoModal.vue` y `VentaDetalleDrawer.vue`
-  del mismo módulo. Severidad baja.
+- [x] ~~**Orden de locks de `item_producto` decidido por el cliente → deadlock**~~ —
+  cerrado 2026-07-27: los movimientos de inventario se recorren en orden determinista por
+  `itemId` (desempate por posición), no en el del carrito. Un orden global fijo hace
+  imposible el bloqueo en cruz entre dos ventas con los mismos productos.
+- [x] ~~**`esNotaCredito` se recalcula en el drawer con un código hardcodeado**~~ —
+  cerrado 2026-07-27: `findOne()` lo emite con el mismo criterio que `listar()` (el id del
+  tipo de documento) y el drawer lo consume. Hay un test con una NC de código `'9999'`:
+  comparar por código daría `false` y el test falla.
+- [x] ~~**`tasa_cambio` se calcula con 6 decimales y se persiste en escala 4**~~ —
+  cerrado 2026-07-27: la columna pasa a `NUMERIC(18,6)`, la misma escala que
+  `tenant_moneda.valor_del_dia` de donde sale la tasa. El campo vuelve a reproducir
+  `precioUnitario`, que es para lo que existe.
+- [x] ~~**`pos.vue` y `AbonoModal.vue` no usan `apiErrorMsg`**~~ — cerrado 2026-07-27
+  (las dos ocurrencias de `pos.vue`, no solo la del hallazgo).
+- [ ] **Otros 14 `.vue`/composables arman el mensaje de error a mano** (frontend,
+  `components/caja/*` ×5, `components/configuracion/*` ×2, `composables/usePaginatedList`,
+  `useTarjetas`, `useUserPreferences`, `pages/tienda/*` ×3, `pages/ventas/index.vue`,
+  `pages/pagos/index.vue`) — mismo patrón que se acaba de cerrar en ventas/pagos: tipan
+  `data.message` como `string` y el `ValidationPipe` global devuelve `string[]` en errores
+  de validación, así que el toast muestra el array interpolado. Degrada, no rompe. Quedan
+  fuera porque no son del alcance auditado (`ventas`+`pagos`); es un barrido de una línea
+  por archivo usando `apiErrorMsg`, que ya existe y está testeado.
 - [x] ~~**La rama "caja en conciliación" no la ejerce ningún test**~~ — cerrado
   2026-07-27: un test por service verifica que una caja presente-pero-no-abierta se
   rechaza, y que corta **antes** de escribir (sin lock, sin cargar ítems, sin `save`).

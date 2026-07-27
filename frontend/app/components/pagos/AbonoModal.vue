@@ -96,8 +96,7 @@ async function confirmar() {
     open.value = false
     emit('success', res)
   } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al registrar pago', color: 'error' })
+    toast.add({ title: apiErrorMsg(e, 'Error al registrar pago'), color: 'error' })
   } finally {
     submitting.value = false
   }

@@ -78,6 +78,8 @@ interface VentaDetalle {
   totalFinal: string
   ventaReferenciaId: string | null
   tipoDocumento: { id: string, codigo: string | null, nombre: string | null } | null
+  /** Lo calcula el backend contra el id del tipo de documento, no contra `codigo`. */
+  esNotaCredito: boolean
   reembolsos: Reembolso[]
   notasCredito: NotaCredito[]
   detalles: Detalle[]
@@ -142,7 +144,9 @@ const puedeAbonar = computed(() =>
   !!venta.value && ['pendiente', 'pagada_parcial'].includes(venta.value.estado),
 )
 
-const esNotaCredito = computed(() => venta.value?.tipoDocumento?.codigo === '61')
+// Del backend: `codigo` es nullable y varía por país, así que reconstruirlo acá
+// daba un resultado distinto al del listado sobre la misma venta.
+const esNotaCredito = computed(() => venta.value?.esNotaCredito === true)
 
 // Máximo emitible: total de la venta menos las NCs ya emitidas (validado también en backend)
 const disponibleNC = computed(() => {

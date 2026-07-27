@@ -446,8 +446,23 @@ export class VentasService {
     }
 
     // 7f. Movimientos de inventario (productos y recetas)
+    //
+    // Orden determinista por `itemId`, NO el del carrito: `registrarMovimiento`
+    // toma `SELECT … FOR UPDATE` sobre `item_producto` por línea, así que el
+    // orden de bloqueo lo decidía el cliente. Dos ventas simultáneas con los
+    // mismos dos productos en orden inverso se bloqueaban en cruz y Postgres
+    // abortaba una — venta caída con un error opaco, sin corrupción pero sin
+    // explicación. Un orden global fijo hace el deadlock imposible.
     const advertenciasReceta: string[] = [];
-    for (let i = 0; i < lineasConversion.length; i++) {
+    const ordenLocks = lineasConversion
+      .map((_, idx) => idx)
+      .sort((a, b) => {
+        const cmp = lineasConversion[a].item.id.localeCompare(
+          lineasConversion[b].item.id,
+        );
+        return cmp !== 0 ? cmp : a - b;
+      });
+    for (const i of ordenLocks) {
       const { item, linea, personalizacion, cantidadCanonica } =
         lineasConversion[i];
       if (item.tipo === 'producto') {
@@ -1457,6 +1472,11 @@ export class VentasService {
             nombre: v.tipo_documento_nombre,
           }
         : null,
+      // Mismo criterio que `listar()`: el id del tipo de documento, no su
+      // `codigo`. El frontend lo reconstruía comparando `codigo === '61'`, que
+      // es nullable y varía por país — con otro código, el drawer ofrecía
+      // "Nota de crédito" sobre una NC mientras el listado sí la marcaba.
+      esNotaCredito: v.tipo_documento_id === TIPO_DOCUMENTO_NC_ID,
       ventaReferenciaId: v.venta_referencia_id,
       canal: v.canal,
       estado: v.estado,

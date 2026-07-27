@@ -326,11 +326,17 @@ export class PagosService {
         estado: string;
         moneda_id: string;
       }[] = await manager.query(
+        // FOR UPDATE: serializa los abonos sobre la MISMA venta hasta el commit.
+        // Sin el lock, dos abonos concurrentes leen el mismo saldo y ambos lo
+        // aplican — sobre-pago que ninguno de los dos ve, porque cada uno
+        // comparó contra un saldo que el otro ya invalidó. La suma de
+        // `pago_aplicaciones` de más abajo también queda bajo este lock.
         `SELECT venta_id, total_final, estado, moneda_id
          FROM ventas
          WHERE venta_id = $1
            AND tenant_id = $2
-           AND eliminado_el IS NULL`,
+           AND eliminado_el IS NULL
+         FOR UPDATE`,
         [dto.ventaId, tenantId],
       );
 

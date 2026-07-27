@@ -1103,6 +1103,42 @@ describe('VentasService', () => {
       expect(updates).toHaveLength(0);
     });
 
+    it('findOne marca esNotaCredito por el ID del tipo de documento, no por su código', async () => {
+      // El frontend lo reconstruía con `codigo === '61'`. `codigo` es nullable y
+      // varía por país: acá el documento ES una NC con OTRO código, así que
+      // comparar por código daría false y el drawer ofrecería emitir una NC
+      // sobre una NC. Solo mirar el id acierta.
+      dataSourceMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM ventas'))
+          return Promise.resolve([
+            {
+              venta_id: VENTA_ORIG_ID,
+              caja_id: CAJA_VIRTUAL_ID,
+              moneda_id: MONEDA_OFICIAL_ID,
+              tipo_documento_id: TIPO_DOCUMENTO_NC_ID,
+              canal: 'fisico',
+              estado: 'pagada',
+              total_bruto: '100.0000',
+              total_descuentos: '0',
+              total_recargos: '0',
+              total_impuestos: '0',
+              total_final: '100.0000',
+              comentario: null,
+              fecha: new Date('2026-07-10'),
+              creado_el: new Date('2026-07-10'),
+              venta_referencia_id: 'venta-madre',
+              tipo_documento_codigo: '9999',
+              tipo_documento_nombre: 'Nota de crédito (otro país)',
+            },
+          ]);
+        return Promise.resolve([]);
+      });
+
+      const res = await service.findOne(TENANT_ID, VENTA_ORIG_ID);
+      expect(res.tipoDocumento?.codigo).toBe('9999');
+      expect(res.esNotaCredito).toBe(true);
+    });
+
     it('findOne expone referencia, tipo documento, modo/devuelto por detalle, reembolsos y NCs hijas', async () => {
       dataSourceMock.query.mockImplementation((sql: string) => {
         if (sql.includes('FROM movimientos_inventario'))
@@ -1221,6 +1257,7 @@ describe('VentasService', () => {
         codigo: '39',
         nombre: 'Boleta de Venta',
       });
+      expect(res.esNotaCredito).toBe(false);
       expect(res.detalles[0]).toEqual(
         expect.objectContaining({
           itemId: ITEM_ID,

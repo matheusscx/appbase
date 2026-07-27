@@ -139,8 +139,7 @@ async function cargar() {
     tiposDocumento.value = tiposRes
     tipoDocumentoId.value = tiposRes[0]?.id
   } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar el POS', color: 'error' })
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar el POS'), color: 'error' })
   } finally {
     loadingCatalogo.value = false
   }
@@ -272,8 +271,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     customerExpandido.value = false
     customer.value = { nombre: '', rut: '', direccion: '', telefono: '', email: '', terceroId: null }
   } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al registrar la venta', color: 'error' })
+    toast.add({ title: apiErrorMsg(e, 'Error al registrar la venta'), color: 'error' })
   } finally {
     submitting.value = false
   }

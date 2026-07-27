@@ -1021,7 +1021,7 @@ CREATE TABLE "venta_detalles" (
   "item_id"                UUID          NOT NULL REFERENCES "items" ("item_id"),
   "moneda_id_origen"       UUID          NOT NULL REFERENCES "moneda" ("moneda_id"),
   "precio_unitario_origen" NUMERIC(18,4),
-  "tasa_cambio"            NUMERIC(18,4),
+  "tasa_cambio"            NUMERIC(18,6),   -- misma escala que tenant_moneda.valor_del_dia: el campo es auditable y debe reproducir precio_unitario
   "precio_unitario"        NUMERIC(18,4) NOT NULL,
   "descripcion"            TEXT,
   "clasificacion_tributaria" TEXT        NOT NULL DEFAULT 'afecto',  -- snapshot fiscal por línea
