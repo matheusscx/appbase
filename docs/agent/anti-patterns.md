@@ -369,6 +369,69 @@ Si no se pre-bundlea, el dev server recarga la página la primera vez que se eje
 la ruta que lo importa (peor con paquetes CJS). Al `npm install` de una dependencia
 nueva de runtime, sumarla a `include` en el mismo commit — no esperar a ver el warning.
 
+### ❌ Control con permiso propio anidado bajo el `v-if` de otro permiso
+
+```vue
+<!-- MAL — "Aplicar" hereda el gate de readOnly, que es el permiso de CONTAR -->
+<div v-if="!readOnly">
+  <UButton @click="cancelar">Cancelar recuento</UButton>
+  <UButton v-if="puedeAplicar">Aplicar</UButton>
+</div>
+
+<!-- BIEN — cada control con el permiso que exige SU endpoint -->
+<div v-if="esBorrador && (puedeContar || puedeAplicar)">
+  <UButton v-if="puedeContar" @click="cancelar">Cancelar recuento</UButton>
+  <UButton v-if="puedeAplicar">Aplicar</UButton>
+</div>
+```
+
+`readOnly` incluye `!puedeContar` (`Inventario/Crear`), pero aplicar exige
+`Inventario/Actualizar`. Anidado, el rol aprobador —`Leer` + `Actualizar`, sin `Crear`—
+se quedaba sin la acción que le corresponde, rompiendo la asimetría que el diseño existe
+para sostener. Los dos computeds eran correctos por separado: el defecto vivía en el
+anidamiento, así que ningún unit test de la lógica lo habría visto. Regla completa y
+trampa: `docs/patterns/frontend.md` §1.1.
+
+## Pruebas (unit)
+
+### ❌ Aserción que no puede fallar
+
+```ts
+// MAL — el servicio nunca emite ese SQL: todo el stock se mueve por
+// registrarMovimiento, que en esta suite está mockeado.
+const tocaStock = manager.query.mock.calls.find((c) =>
+  String(c[0]).includes('UPDATE item_producto'),
+)
+expect(tocaStock).toBeUndefined()
+
+// BIEN — asertar sobre el colaborador que haría el trabajo
+expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled()
+```
+
+La misma aserción pasaba en verde sobre `aplicar()`, que **sí** mueve stock: buscaba un
+string que el código bajo prueba no puede producir. Antes de asertar la ausencia de algo,
+verificar que ese algo podría aparecer si el bug existiera.
+
+### ❌ Test cuyo resultado lo decide el mock
+
+```ts
+// MAL — el mock ya trae la respuesta; el branch que el título dice probar
+// ("referenciado solo por un recuento") nunca se ejerce.
+queryMock.mockResolvedValueOnce([{ existe: true }])
+await expect(service.remove(TENANT, ID)).rejects.toThrow('en uso')
+expect(sql).toContain('recuento_inventario_linea') // sobrevive aunque el WHERE esté roto
+
+// BIEN — en unit, solo lo que el mock NO decide…
+expect(queryMock).toHaveBeenCalledTimes(2) // una query, no tres: sin N+1
+expect(
+  queryMock.mock.calls.some((c) => String(c[0]).includes('eliminado_el = NOW()')),
+).toBe(false) // no borró
+// …y el branch real, contra la BD, en el e2e.
+```
+
+Dos tests con títulos distintos y setup idéntico son un solo test. Un branch de SQL
+(columna equivocada, `WHERE` que nunca matchea) solo lo prueba la base real.
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

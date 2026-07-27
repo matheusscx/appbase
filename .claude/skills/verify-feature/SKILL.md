@@ -74,6 +74,29 @@ Errores recurrentes que ni el lint ni los tests atrapan — revisar el diff a ma
 
 Si aparece un N+1 o una lectura sin filtro de borrado: **detener el cierre y reportar.**
 
+## 2c. Cobertura — inspeccionar no es ejercer
+
+Los tres errores más caros de jul-2026 fueron el mismo: algo se verificó **mirándolo**
+en vez de **usándolo**, y el gate quedó verde sobre una feature rota.
+
+- [ ] **¿Qué ejercita esta distinción?** Si el cambio introduce una distinción —dos
+      permisos que difieren, dos estados, dos roles, dos ramas de una regla— nombrar
+      qué la ejerce. Si la respuesta es "nada", la distinción es **decorativa**: existe
+      en el diseño y en la doc, pero ningún bug ahí es detectable.
+      Caso real: contar (`Crear`) vs aplicar (`Actualizar`) en recuentos vivió meses sin
+      que nada la ejerciera —el seed solo tenía admins, que tienen los dos permisos— y
+      un bug de UI que le escondía "Aplicar" al aprobador pasó los cinco gates.
+- [ ] **¿El gate corre lo que escribiste?** Un test que no está en CI es decorativo.
+      Caso real: los 275 unit del frontend no estaban en `ci.yml`; el spec recién
+      escrito para cubrir un bug no se ejecutaba en ningún lado.
+- [ ] **Lo sembrado, ¿se puede usar?** Un seed correcto en SQL puede ser inservible en
+      la app. Verificarlo **usándolo** (login + el flujo real), no consultando la tabla.
+      Caso real: dos roles con los permisos exactos en la BD, pero sin `Items/Leer` no
+      podían ni listar productos para empezar un recuento.
+
+Si algo acá queda en "nada lo ejercita": **no está terminado**. No es deuda a documentar,
+es el agujero por donde entra el próximo bug invisible.
+
 ## 3. Alcance
 
 - [ ] El diff no contiene refactors ajenos a la tarea pedida

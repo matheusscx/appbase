@@ -54,6 +54,8 @@ De ~19 propuestas se adoptaron 6.
 | Orden de búsqueda con salida a preguntar en el paso 5 | Evita exploración aleatoria; el paso de escape evita que invente el patrón faltante |
 | Reglas de dominio comprimidas a discriminador + condición de lectura | Elimina la doble fuente de verdad. Lo que queda inline es lo mínimo para decidir *si hay que leer más* |
 | Checklist con comandos reales | Un checklist que el agente no puede ejecutar solo lo lleva a afirmar que lo cumplió |
+| Los hallazgos de una revisión pasan por un refutador antes de reportarse | En la pasada de jul-2026, 3 de 13 hallazgos no sobrevivieron: dos eran decisiones de diseño ya documentadas y uno era código preexistente ajeno al diff. Sin ese paso, el owner recibe ruido con el mismo formato que la señal y deja de leer el reporte. El refutado por **preexistente** igual se anota en `pendientes.md`: no era falso, era de otro alcance |
+| El pre-commit **exige** la revisión independiente, no la recuerda | El aviso no-bloqueante se imprimió en 4 commits seguidos y se ignoró las 4; un bug llegó a `main`. Un control que se puede omitir en silencio no es un control — el escape tiene que ser explícito (`--no-verify`) |
 
 ## Decisiones rechazadas
 
