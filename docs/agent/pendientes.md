@@ -65,6 +65,18 @@ ya identificamos con ubicación concreta.
   error nuevo bloquea CI). Todos los patrones y sus fixes solo-de-tipo quedaron en
   `anti-patterns.md` (`@click`→arrow inline; spread/índice guardado→`!`; `string|null`→prop
   con `?? undefined`/tipar form; mismatches Nuxt UI·reka; tipado de unit tests vitest).
+- [ ] **Cinco suites e2e dejan la caja abierta al terminar** (backend, `test/combos`,
+  `liquidacion-propinas`, `grupos-modificadores`, `grupos-modificadores-overrides` y
+  `recetas.e2e-spec.ts`) — el cierre de caja es en **dos fases** (`POST /:id/conteo`
+  congela el arqueo y auto-cierra si cuadra; si descuadra pasa a `en_conciliacion` y hay
+  que resolver con `POST /:id/cerrar`). Las cinco llaman solo a la segunda **e ignoran el
+  status**, así que no cierran nada y el cajón queda ocupado. Hoy la suite pasa porque
+  sobran cajones, no porque esté bien: al agregar tests cambia el orden en que jest
+  ordena las suites y la fuga aparece como un `409` críptico en `caja.e2e-spec.ts`, a
+  varios archivos de distancia de la causa. Ya pasó (jul-2026) y costó media hora
+  diagnosticarlo. `ventas.e2e-spec.ts` ya está corregido (commit `c8e3abe`): copiar ese
+  helper `cerrarCaja`, que además **asevera** el cierre en vez de tragarse el error.
+  El patrón bueno de referencia es `cerrarEnDosFases` en `caja.e2e-spec.ts:105`.
 
 ---
 
