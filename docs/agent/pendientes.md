@@ -12,15 +12,14 @@ ya identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **`LineaVentaDto.precioUnitario` sin barrido de signo (ambiguo, no cerrado)**
-  (backend, `ventas/dto/create-venta.dto.ts`) — quedó fuera del barrido de positividad
-  de dinero (jul-2026) a propósito: es un override que entra directo al motor de
-  cálculo de precios (`calculoPreciosService.calcular`), y tocar su validación de
-  signo linda con la regla de "detenerse y preguntar" del motor de precios. Además no
-  está claro si `0` es ilegítimo — podría representar un ítem promocional/gratis. Sí
-  debería rechazar negativos (la regla de "ningún campo de dinero acepta negativos" es
-  absoluta), pero decidir `> 0` vs `>= 0` es una regla de negocio del owner. Requiere
-  confirmación antes de validar.
+- [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
+  (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
+  (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue
+  abierto es si el `0` debería seguir siendo válido o si el owner quiere prohibirlo
+  también (podría representar un ítem promocional/gratis, o podría ser una laguna para
+  vaciar el `totalFinal` de una línea sin tocar el resto). Decidir `>= 0` (estado
+  actual) vs `> 0` (`IsDecimalPositivo`) es una regla de negocio del owner, no algo a
+  inferir. Requiere confirmación antes de endurecer más.
 - [x] **Burndown de typecheck del frontend — COMPLETO (0 errores)** (frontend) — jul-2026
   Los 84 errores de vue-tsc estricto se quemaron por tandas. `typecheck-baseline.json`
   quedó vacío: el `typecheck:ratchet` ahora es un gate totalmente estricto (cualquier

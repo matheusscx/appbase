@@ -13,7 +13,10 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsDecimalPositivo,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
 
@@ -34,6 +37,7 @@ export class LineaVentaDto {
 
   @IsOptional()
   @IsNumberString()
+  @IsDecimalNoNegativo()
   precioUnitario?: string;
 
   @IsOptional()
