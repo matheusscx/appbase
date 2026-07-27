@@ -124,18 +124,12 @@ confirmados tras refutación (3 eran el mismo bug visto por lentes distintas, 3 
 decisión de owner, abajo). **Ninguno se corrigió en la pasada**: la auditoría produce
 información, no diffs. Orden = severidad.
 
-- [ ] **El vuelto se asigna íntegro a un pago sin acotarlo a su propio monto**
-  (backend, `pagos/pagos.service.ts:160-178` y `:244`) — `excedente` va completo al
-  **primer** método con `permite_vuelto=true`, sin comprobar que ese pago alcance para
-  cubrirlo. Con `[tarjeta 150 (sin vuelto), efectivo 10 (con vuelto)]` y `target=100`:
-  `excedente=60` → el pago de efectivo queda con `monto=10, vuelto=60`, y su neto
-  (`monto - vuelto = -50`) se persiste como movimiento de caja **`tipo='entrada'` con
-  monto negativo**. La regla correcta ya está escrita, pero solo del lado del cliente:
-  `docs/features/ventas.md:241` describe `excedenteSinVuelto` en `resumenCobro` del
-  frontend. Invariante 6: validar en el frontend nunca sustituye al guard del backend.
-  Cierre: validar `excedente <= pago.monto` en `registrar()` y decidir qué pasa con el
-  excedente no devolvible. Detectado por 3 lentes independientes (dinero, ciclo de vida,
-  tests).
+- [x] ~~**El vuelto se asigna íntegro a un pago sin acotarlo a su propio monto**~~ —
+  cerrado 2026-07-27: el excedente se reparte entre los pagos con `permite_vuelto`,
+  acotado al monto de cada uno y en orden determinista por `metodoPagoId`; si supera lo
+  devolvible (es decir, si los métodos sin vuelto superan el target) se rechaza con 400.
+  Se acabaron los movimientos de caja `entrada` con monto negativo. Era el hallazgo que
+  detectaron 3 lentes independientes.
 - [x] ~~**`registrarAbono` calcula el saldo con la suma bruta de pagos**~~ — cerrado
   2026-07-27: `registrarAbono` lee `pago_aplicaciones` con `tipo='venta'`, igual que
   `listar()`/`resumen()`. La fórmula documentada en `docs/features/ventas.md` y
@@ -153,15 +147,12 @@ información, no diffs. Orden = severidad.
   de otro tenant**. Peor que la fuga: esa propina entra a la liquidación del garzón
   ajeno. (`propinaDirecta` usa `asegurarMostrador`, tenant-scoped: no afectada.)
   Cierre: validar pertenencia al crear + `AND g.tenant_id = vp.tenant_id` en el JOIN.
-- [ ] **La caja se verifica sin lock y el movimiento se escribe después sin re-chequear**
-  (backend, `ventas/ventas.service.ts:101-116`, `pagos/pagos.service.ts:301-310`,
-  `caja/caja.service.ts:785-809`) — `findActiva` lee por repositorio (fuera del manager
-  transaccional) y no toma lock; entre esa lectura y el `INSERT INTO movimientos_caja`
-  del final pasa toda la venta. `registrarMovimientoEnTransaccion` **no valida el estado
-  de la caja**. Si un cierre (`enviarConteo` → `bloquearCajaAbierta`, `:635`) commitea en
-  el medio, el movimiento queda contra una caja ya `cerrada` cuyo arqueo ya se congeló →
-  descuadre. El patrón correcto ya existe en el repo y se usa en la nota de crédito
-  (`ventas.service.ts:708-712`); falta en el camino principal de venta y en el abono.
+- [x] ~~**La caja se verifica sin lock y el movimiento se escribe después sin
+  re-chequear**~~ — cerrado 2026-07-27: la creación de venta (canal físico) y el abono
+  toman `bloquearCajaAbierta` dentro de la transacción, el mismo patrón que ya usaba la
+  nota de crédito. Los tres caminos que escriben en `movimientos_caja` sostienen ahora el
+  lock hasta el commit. La caja virtual queda deliberadamente fuera: nunca se cierra y
+  bloquearla serializaría todas las ventas online del tenant.
 - [ ] **N+1 al crear una venta: un `itemsService.findOne` por línea del carrito**
   (backend, `ventas/ventas.service.ts:119-121`) — `Promise.all(dto.lineas.map(l =>
   findOne(...)))` en el camino caliente del POS; cada `findOne` abre varias queries

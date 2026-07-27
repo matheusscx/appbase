@@ -255,6 +255,23 @@ describe('VentasService', () => {
       expect(result.estado).toBe(EstadoVenta.PAGADA);
     });
 
+    it('bloquea la caja física dentro de la transacción antes de escribir', async () => {
+      // `findActiva` lee por repositorio, fuera del manager transaccional: sin el
+      // lock, un cierre concurrente puede commitear mientras se procesa la venta
+      // y el movimiento de caja del final cae en una caja ya cerrada.
+      pagosServiceMock.registrar.mockResolvedValueOnce({
+        pagos: [{ id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' }],
+        montoAplicadoVenta: '100.0000',
+      });
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      expect(cajaService.bloquearCajaAbierta).toHaveBeenCalledWith(
+        expect.anything(),
+        CAJA_ID,
+        TENANT_ID,
+      );
+    });
+
     it('congela bases de venta al crear', async () => {
       calculoPreciosService.calcular.mockResolvedValueOnce({
         ...mockResultadoVenta,
@@ -717,6 +734,16 @@ describe('VentasService', () => {
       expect(cajaService.findActiva).not.toHaveBeenCalled();
       expect(result.cajaId).toBe(CAJA_VIRTUAL_ID);
       expect(result.canal).toBe('online');
+    });
+
+    it('NO bloquea la caja virtual: nunca se cierra y el lock serializaría todas las ventas online', async () => {
+      pagosServiceMock.registrar.mockResolvedValueOnce({
+        pagos: [{ id: 'pago-uuid-001', monto: '100.0000', vuelto: '0.0000' }],
+        montoAplicadoVenta: '100.0000',
+      });
+      await service.crear(TENANT_ID, USUARIO_ID, dtoOnline);
+
+      expect(cajaService.bloquearCajaAbierta).not.toHaveBeenCalled();
     });
 
     it('lanza BadRequestException si el tenant no tiene caja virtual', async () => {

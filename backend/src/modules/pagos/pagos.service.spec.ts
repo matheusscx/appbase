@@ -30,6 +30,13 @@ const METODO_TARJETA_ROWS = [
   { metodo_pago_id: TARJETA_ID, nombre: 'Tarjeta', permite_vuelto: false },
 ];
 
+// Segundo método con vuelto, para ejercer el reparto del excedente entre varios.
+// Su id ordena DESPUÉS de EFECTIVO_ID, que es el criterio determinista del reparto.
+const VALE_ID = '550e8400-e29b-41d4-a716-446655440109';
+const METODO_VALE_ROWS = [
+  { metodo_pago_id: VALE_ID, nombre: 'Vale vista', permite_vuelto: true },
+];
+
 function buildManagerMock(metodoRows = METODO_EFECTIVO_ROWS) {
   const pago = { id: 'pago-uuid-001' };
   return {
@@ -107,6 +114,7 @@ describe('PagosService', () => {
           provide: CajaService,
           useValue: {
             findActiva: jest.fn().mockResolvedValue(cajaActiva),
+            bloquearCajaAbierta: jest.fn().mockResolvedValue(undefined),
             registrarMovimientoEnTransaccion: jest.fn().mockResolvedValue({}),
           },
         },
@@ -309,6 +317,77 @@ describe('PagosService', () => {
       expect(pagoData['vuelto']).toBe('50.0000');
     });
 
+    it('rechaza el excedente que no se puede devolver: los métodos sin vuelto superan el target', async () => {
+      // El bug: el excedente (60) se asignaba entero al único pago con vuelto,
+      // que solo aportó 10 → su neto quedaba en -50 y se persistía un movimiento
+      // de caja `entrada` con monto negativo.
+      const manager = buildManagerMock([
+        ...METODO_EFECTIVO_ROWS,
+        ...METODO_TARJETA_ROWS,
+      ]);
+
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+      const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
+
+      await expect(
+        svc.registrar(manager as unknown as EntityManager, {
+          tenantId: TENANT_ID,
+          ventaId: VENTA_ID,
+          pagos: [
+            { metodoPagoId: TARJETA_ID, monto: '150.0000' },
+            { metodoPagoId: EFECTIVO_ID, monto: '10.0000' },
+          ],
+          cajaId: CAJA_ID,
+          monedaOficialId: MONEDA_ID,
+          target: '100.0000',
+        }),
+      ).rejects.toThrow('El excedente supera lo devolvible');
+
+      expect(manager.save).not.toHaveBeenCalled();
+      expect(cajaSvc.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+    });
+
+    it('reparte el vuelto entre los métodos que lo permiten, acotado al monto de cada pago', async () => {
+      const manager = buildManagerMock([
+        ...METODO_EFECTIVO_ROWS,
+        ...METODO_VALE_ROWS,
+      ]);
+
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+      const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
+
+      // suma 110, target 50 → excedente 60, mayor que el primer pago con vuelto.
+      await svc.registrar(manager as unknown as EntityManager, {
+        tenantId: TENANT_ID,
+        ventaId: VENTA_ID,
+        pagos: [
+          { metodoPagoId: EFECTIVO_ID, monto: '10.0000' },
+          { metodoPagoId: VALE_ID, monto: '100.0000' },
+        ],
+        cajaId: CAJA_ID,
+        monedaOficialId: MONEDA_ID,
+        target: '50.0000',
+      });
+
+      const vueltos = (manager.save.mock.calls as unknown[][])
+        .map((c) => c[1] as Record<string, unknown>)
+        .filter((d) => d && d['vuelto'] !== undefined)
+        .map((d) => d['vuelto']);
+      // Orden determinista por metodoPagoId: efectivo (…105) antes que vale (…109).
+      expect(vueltos).toEqual(['10.0000', '50.0000']);
+
+      // La invariante que el bug rompía: ningún movimiento de caja negativo.
+      const montos = cajaSvc.registrarMovimientoEnTransaccion.mock.calls.map(
+        (c) => (c[1] as { monto: string }).monto,
+      );
+      expect(montos).toEqual(['0.0000', '50.0000']);
+      for (const m of montos) {
+        expect(new Decimal(m).isNegative()).toBe(false);
+      }
+    });
+
     it('lanza BadRequestException cuando excedente > 0 y ningún método permite vuelto', async () => {
       const manager = buildManagerMock(METODO_TARJETA_ROWS);
 
@@ -434,6 +513,29 @@ describe('PagosService', () => {
 
       expect(result.venta.estado).toBe(EstadoVenta.PAGADA_PARCIAL);
       expect(new Decimal(result.venta.saldo).toNumber()).toBeLessThan(100);
+    });
+
+    it('toma el lock de la caja dentro de la transacción antes de escribir', async () => {
+      // `findActiva` lee por repositorio, fuera de la transacción: sin este lock
+      // un cierre concurrente puede commitear antes del movimiento de caja.
+      const manager = buildAbonableManager('pendiente', '100.0000', '0');
+      manager.query.mockResolvedValueOnce(METODO_EFECTIVO_ROWS);
+      manager.query.mockResolvedValueOnce([]);
+
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+      const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
+
+      await svc.registrarAbono(TENANT_ID, USUARIO_ID, {
+        ventaId: VENTA_ID,
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+      });
+
+      expect(cajaSvc.bloquearCajaAbierta).toHaveBeenCalledWith(
+        manager,
+        CAJA_ID,
+        TENANT_ID,
+      );
     });
 
     it('retorna estado=pagada y saldo=0 cuando abono completa el pago', async () => {

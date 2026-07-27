@@ -171,15 +171,51 @@ export class PagosService {
     const targetDecimal = new Decimal(target);
     const excedente = Decimal.max(0, sumaPagos.minus(targetDecimal));
 
-    let pagoConVueltoIdx = -1;
+    // El vuelto sale SOLO de los pagos cuyo método lo permite, y ninguno puede
+    // devolver más de lo que ese pago aportó. Se reparte entre ellos en orden
+    // determinista (por metodoPagoId, mismo criterio que `asignacion-propina`) en
+    // vez de cargárselo entero al primero: si el excedente superaba el monto de
+    // ese pago, su neto (`monto - vuelto`) quedaba negativo y se persistía un
+    // movimiento de caja `entrada` con monto negativo.
+    const vueltoPorIdx = new Map<number, Decimal>();
     if (excedente.gt(0)) {
-      pagoConVueltoIdx = pagos.findIndex(
-        (p) => metodoPagoMap.get(p.metodoPagoId)?.permiteVuelto === true,
-      );
-      if (pagoConVueltoIdx === -1) {
+      const conVuelto = pagos
+        .map((p, idx) => ({ p, idx }))
+        .filter(
+          ({ p }) => metodoPagoMap.get(p.metodoPagoId)?.permiteVuelto === true,
+        )
+        .sort((a, b) =>
+          a.p.metodoPagoId === b.p.metodoPagoId
+            ? a.idx - b.idx
+            : a.p.metodoPagoId.localeCompare(b.p.metodoPagoId),
+        );
+
+      if (conVuelto.length === 0) {
         throw new BadRequestException(
           'El pago supera el total pero ningún método de pago permite vuelto',
         );
+      }
+
+      const devolvible = conVuelto.reduce(
+        (acc, { p }) => acc.plus(p.monto),
+        new Decimal(0),
+      );
+      // Equivale a que los pagos SIN vuelto superen el target: ese excedente no
+      // hay con qué devolverlo. Es la regla que el frontend ya aplicaba en
+      // `resumenCobro` (`excedenteSinVuelto`) y que el backend no gateaba —
+      // validar en el frontend no sustituye al guard.
+      if (excedente.gt(devolvible)) {
+        throw new BadRequestException(
+          'El excedente supera lo devolvible: los métodos que no permiten vuelto no pueden superar el total a cobrar',
+        );
+      }
+
+      let restante = excedente;
+      for (const { p, idx } of conVuelto) {
+        if (restante.lte(0)) break;
+        const asignado = Decimal.min(restante, new Decimal(p.monto));
+        vueltoPorIdx.set(idx, asignado);
+        restante = restante.minus(asignado);
       }
     }
 
@@ -187,7 +223,7 @@ export class PagosService {
     const pagosGuardados: Pago[] = [];
     for (let i = 0; i < pagos.length; i++) {
       const p = pagos[i];
-      const vuelto = i === pagoConVueltoIdx ? excedente.toFixed(4) : '0.0000';
+      const vuelto = (vueltoPorIdx.get(i) ?? new Decimal(0)).toFixed(4);
       const pago = await manager.save(
         Pago,
         manager.create(Pago, {
@@ -320,6 +356,10 @@ export class PagosService {
           'La caja está en conciliación y no admite pagos',
         );
       }
+      // Mismo lock que en la creación de venta: `findActiva` lee fuera de la
+      // transacción, así que sin esto el estado 'abierta' no se sostiene hasta el
+      // INSERT del movimiento de caja. El abono siempre opera sobre caja física.
+      await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);
 
       // Lo ya aplicado A LA VENTA sale de `pago_aplicaciones` con tipo='venta',
       // no de `monto - vuelto`: un pago puede repartirse entre venta y propina,

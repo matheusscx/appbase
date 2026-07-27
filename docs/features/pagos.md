@@ -139,6 +139,13 @@ Response (200):
   - Saldo = 0 → `pagada`
   - 0 < saldo < total_final → `pagada_parcial`
 - `vuelto` se genera solo si algún método tiene `permite_vuelto = true` y la suma supera el saldo.
+- **El vuelto se reparte entre los pagos que lo permiten, acotado al monto de cada uno**
+  (orden determinista por `metodoPagoId`, mismo criterio que el split de propina). Ningún
+  pago puede devolver más de lo que aportó: si pudiera, su neto (`monto − vuelto`) quedaría
+  negativo y se persistiría un movimiento de caja `entrada` con monto negativo.
+- **Si el excedente supera lo devolvible → 400.** Equivale a que los pagos con métodos sin
+  vuelto superen el total a cobrar: ese excedente no hay con qué devolverlo. El frontend ya
+  lo marcaba en `resumenCobro` (`excedenteSinVuelto`); ahora también es guard de backend.
 - Los pagos son inmutables: no hay edición ni eliminación (soft delete solo para auditoría).
 
 ---

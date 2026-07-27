@@ -114,6 +114,17 @@ export class VentasService {
         'La caja está en conciliación y no admite ventas',
       );
     }
+    // Lock pesimista sostenido hasta el commit. `findActiva` lee por repositorio,
+    // FUERA del manager transaccional y sin lock, así que el chequeo de arriba no
+    // garantiza nada: un cierre puede commitear mientras se procesan ítems,
+    // precios e inventario, y el INSERT en `movimientos_caja` del final no
+    // revalida el estado — el movimiento caería en una caja ya cerrada cuyo
+    // arqueo ya quedó congelado. La caja virtual NO se bloquea: nunca se cierra
+    // (una por tenant, siempre abierta) y el lock serializaría todas las ventas
+    // online del tenant sin proteger de nada.
+    if (canal !== 'online') {
+      await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);
+    }
 
     // 2. Cargar todos los items para obtener monedaId, tipo, nombre
     const items = await Promise.all(
