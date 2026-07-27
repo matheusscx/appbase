@@ -254,3 +254,17 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 
   Cerrar cuando aparezca la necesidad real: hoy el caso que motiva el recuento es food-service,
   donde insumos e ingredientes son todos `cantidad`.
+- [ ] **`PATCH /items/:id` escribe `item_producto.stock` sin movimiento de kardex, y la
+  invariante de CI no lo cubre** (backend) — `items.service.ts` (~1166-1191) acepta `stock`
+  en el body y hace `UPDATE item_producto SET stock = $n` directo, sin pasar por
+  `registrarMovimiento` y sin dejar rastro auditable. Es **la misma clase de bug** que se
+  cerró para `costo_actual` en el sub-proyecto de costeo CPP (ver ADR-016 y
+  `docs/agent/anti-patterns.md`), en otra columna: un seteo absoluto sin kardex.
+  El test `backend/src/common/invariants/costo-actual-choke-point.invariant.spec.ts` **solo
+  vigila `costo_actual`, no `stock`**, así que este camino nunca se detectó.
+  Importa más desde el recuento de inventario: la feature existe precisamente para
+  reemplazar el seteo absoluto por una sesión auditada con causa tipificada, y hoy se puede
+  saltear entera desde el formulario de item.
+  Cerrar: (a) extender la invariante a `stock`, y (b) decidir si `dto.stock` debe seguir
+  siendo editable en `update` o si el stock inicial solo se declara al crear.
+  (Detectado por la revisión final del sub-proyecto de recuento.)
