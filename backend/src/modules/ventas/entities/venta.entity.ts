@@ -7,8 +7,13 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+/**
+ * No hay `borrador`: la venta en construcción vive en `cuenta`/`cuenta_lineas`
+ * de salones, que es el *open ticket* del dominio. Un estado paralelo en `ventas`
+ * sería una segunda forma de resolver lo mismo.
+ * Decidido 2026-07-27 — ver `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`.
+ */
 export enum EstadoVenta {
-  BORRADOR = 'borrador',
   PENDIENTE = 'pendiente',
   PAGADA_PARCIAL = 'pagada_parcial',
   PAGADA = 'pagada',

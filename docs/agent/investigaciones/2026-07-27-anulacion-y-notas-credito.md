@@ -105,7 +105,50 @@ Vale dejar el recorrido escrito porque es el ejemplo de por qué el cruce no es 
 El hueco que quedaría es parquear un ticket en **mostrador**, fuera de salones (minimarket,
 retail). Nadie lo pidió: se diseña si aparece la necesidad, no antes.
 
-## 6. Contradicción de fuentes que hay que respetar
+## 6. Devolución por medio de pago y plazos — tema abierto (aporte del owner)
+
+El owner aportó experiencia de dominio que confirma el hallazgo del mercado y lo extiende.
+Se registra acá porque **es un tema propio, no parte de los fixes de la auditoría**.
+
+**Lo verificado en el código:** las devoluciones de Transbank **ya están implementadas**
+(`reembolsar()` en los providers de Webpay Plus y Oneclick, contra
+`/transactions/{token}/refunds`). Transbank responde `type: REVERSED | NULLIFIED`, que es
+literalmente la frontera void↔refund de §4: el adquirente ya modela la distinción que
+nosotros no. **No hay ninguna validación de plazo** en los providers ni en
+`cobros.service`: se llama y el límite se descubre como un rechazo en runtime.
+
+**Lo estructural:** hoy existen **dos caminos de devolución que no se conocen entre sí**.
+El de tarjeta arranca en la pasarela y *termina* creando una nota de crédito; el de
+efectivo arranca en la NC y sale por la caja. Nada compone las patas ni impide pagar con
+tarjeta y recibir efectivo. El tope "efectivo devuelto ≤ efectivo cobrado" (§0) es
+correcto, pero es **la pata en efectivo** de una regla más general —una devolución tiene
+una pata por medio de pago—, no la regla completa.
+
+**Los plazos son tres relojes distintos, y confundirlos es el error caro:**
+
+| Reloj | Quién lo fija | ¿Configurable por el tenant? |
+|---|---|---|
+| Fiscal (SII) | Ley 21.398: 6 meses desde la **entrega** para rebajar débito fiscal | **No** — sale del país |
+| Adquirente (Transbank) | La integración y el medio de pago | **No** — es propiedad del proveedor |
+| Política comercial ("30 días con boleta") | El tenant | **Sí — la única que lo es** |
+
+El canal importa, pero al revés de lo intuitivo: en Chile la Ley 19.496 da **derecho a
+retracto de 10 días en venta a distancia**, inexistente en tienda física. Para `online` el
+plazo no es un máximo configurable sino un **piso que el tenant no puede bajar**.
+
+De ahí el modelo que se propone si esto se encara: la política comercial es lo
+configurable, con el plazo fiscal y el del adquirente como **techos** que la config no
+puede exceder, y el retracto como **piso** en online.
+
+⚠️ **Costo de construirlo plano** (un solo "plazo por método y canal" editable): un tenant
+configura 12 meses, el cajero acepta la devolución al mes 8, y la empresa **se come el
+IVA** porque la NC ya no puede rebajar débito fiscal. Un error de configuración se vuelve
+pérdida de plata sin que nadie lo note.
+
+**Sin investigar:** plazos reales de Transbank para Webpay y Oneclick (y si difieren entre
+sí), y el alcance exacto del retracto. Es lo único que falta para poder diseñar.
+
+## 7. Contradicción de fuentes que hay que respetar
 
 Un proveedor de pagos (TUU, secundaria) afirma que el SII solo permite anular boletas
 **del mismo día**. Las FAQ oficiales del SII **no dicen eso**: el único plazo que fijan es

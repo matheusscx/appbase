@@ -25,7 +25,7 @@ CREATE TYPE "modo_regla" AS ENUM (
 );
 
 CREATE TYPE "estado_venta" AS ENUM (
-  'borrador',
+  -- sin 'borrador': la venta en construcción vive en cuenta/cuenta_lineas (salones)
   'pendiente',
   'pagada_parcial',
   'pagada',         -- era 'aprobada'

@@ -731,6 +731,47 @@ export class VentasService {
           caja.id,
           params.tenantId,
         );
+        // Tope de la devolución EN EFECTIVO: lo que esa venta cobró en efectivo,
+        // menos lo ya devuelto en efectivo por NCs anteriores. El saldo global de
+        // la caja (abajo) no alcanza como control: viene de otras ventas, así que
+        // sin este tope se puede sacar plata que esta venta nunca ingresó, y dar
+        // billetes por una compra con tarjeta — el vector de fraude interno que
+        // Clover, Lightspeed y Toast bloquean por diseño.
+        // OJO: acota el DINERO, no el documento. La NC puede seguir emitiéndose
+        // por el total (tope `total_final − Σ NCs previas`, regla dura del SII):
+        // anular una venta a crédito es legítimo, devolver efectivo que nunca
+        // entró no lo es. Ver docs/agent/investigaciones/2026-07-27-…
+        const efectivoRows: { cobrado: string; devuelto: string }[] =
+          await manager.query(
+            `SELECT
+               COALESCE((
+                 SELECT SUM(pa.monto)
+                 FROM pagos p
+                 JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
+                      AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
+                 JOIN metodos_pago mp ON mp.metodo_pago_id = p.metodo_pago_id
+                      AND mp.es_efectivo = true AND mp.eliminado_el IS NULL
+                 WHERE p.venta_id = $1 AND p.eliminado_el IS NULL
+               ), 0)::text AS cobrado,
+               COALESCE((
+                 SELECT SUM(mc.monto)
+                 FROM ventas nc
+                 JOIN movimientos_caja mc ON mc.venta_id = nc.venta_id
+                      AND mc.tipo = 'salida' AND mc.eliminado_el IS NULL
+                 WHERE nc.venta_referencia_id = $1
+                   AND nc.tipo_documento_id = $2
+                   AND nc.eliminado_el IS NULL
+               ), 0)::text AS devuelto`,
+            [params.ventaOriginalId, TIPO_DOCUMENTO_NC_ID],
+          );
+        const devolvibleEfectivo = new Decimal(
+          efectivoRows[0]?.cobrado ?? '0',
+        ).minus(efectivoRows[0]?.devuelto ?? '0');
+        if (new Decimal(params.monto).gt(devolvibleEfectivo))
+          throw new UnprocessableEntityException(
+            `No se puede devolver en efectivo más de lo que esta venta cobró en efectivo (disponible: ${devolvibleEfectivo.toFixed(4)}). Emití la nota de crédito sin devolución de dinero, o devolvé por el medio de pago original.`,
+          );
+
         const saldoEfectivo = await this.cajaService.calcularEsperadoEfectivo(
           caja.id,
           manager,

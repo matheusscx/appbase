@@ -142,6 +142,18 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 - `devolverDinero`: movimiento `salida` ("Devolución · Nota de crédito") en la
   caja física abierta del usuario, en la **misma transacción** que la NC
   (todo-o-nada; valida saldo suficiente). Sin caja o sin saldo → 422.
+- **Tope de la devolución en efectivo (2026-07-27):** `Σ(pagos en efectivo aplicados
+  a la venta) − Σ(ya devuelto en efectivo por NCs anteriores)`. El saldo global de la
+  caja no alcanza como control: viene de otras ventas, así que sin este tope se puede
+  sacar plata que esta venta nunca ingresó, y dar billetes por una compra con tarjeta.
+  Excederlo → 422.
+  **Acota el dinero, no el documento.** La NC puede seguir emitiéndose por el total
+  (tope `total_final − Σ NCs previas`, regla dura del SII): anular una venta cobrada a
+  medias es legítimo —borra la cuenta por cobrar—, devolver efectivo que nunca entró no.
+  La devolución por el medio de pago original (tarjeta vía Transbank) ya existe en el
+  módulo `pasarela` y **no pasa por este camino**; componer ambas patas en una sola
+  operación es tema abierto:
+  `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md` §6.
 - Backend: `VentasService.crearNotaCreditoDesdeVenta` → `crearNotaCredito` con
   flags `validarVentaElegible`/`devolverDinero`; el flujo de reembolsos de
   pasarela llama sin flags y no cambia.

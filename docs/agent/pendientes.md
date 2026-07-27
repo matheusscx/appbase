@@ -65,6 +65,19 @@ ya identificamos con ubicación concreta.
   error nuevo bloquea CI). Todos los patrones y sus fixes solo-de-tipo quedaron en
   `anti-patterns.md` (`@click`→arrow inline; spread/índice guardado→`!`; `string|null`→prop
   con `?? undefined`/tipar form; mismatches Nuxt UI·reka; tipado de unit tests vitest).
+- [ ] **Los mapas de estado de venta están duplicados en 4 `.vue`** (frontend,
+  `pages/ventas/index.vue`, `components/ventas/VentaDetalleDrawer.vue`,
+  `pages/pagos/index.vue`, `components/pagos/PagoDetalleDrawer.vue`) — cada uno con su
+  copia de `estadoColor`/`estadoLabel`, contra la convención de `CLAUDE.md` ("utilidades
+  de presentación en composables de `app/composables/`, nunca locales a un `.vue`").
+  **Ya causó una regresión real** (jul-2026): al sacar `borrador` del enum se limpiaron
+  las dos copias de ventas y no las de pagos, y el filtro de `/pagos` quedó ofreciendo un
+  estado que el backend ahora rechaza con 400 vía `@IsEnum(EstadoVenta)` — la tabla
+  dejaba de cargar. Lo cazó la revisión independiente, no el gate: build, typecheck,
+  design y 275 unit pasaron con la regresión adentro, porque ningún test renderiza ese
+  filtro. Cierre: un `useEstadoVenta()` con ambos mapas, consumido por los cuatro.
+  **Lección del incidente:** al sacar un valor de un enum compartido, grepear el repo
+  entero — el grep acotado a la carpeta del módulo fue exactamente lo que falló.
 - [ ] **Cinco suites e2e dejan la caja abierta al terminar** (backend, `test/combos`,
   `liquidacion-propinas`, `grupos-modificadores`, `grupos-modificadores-overrides` y
   `recetas.e2e-spec.ts`) — el cierre de caja es en **dos fases** (`POST /:id/conteo`
@@ -241,16 +254,24 @@ pasada de investigación sobre dos de ellas y el owner decidió las tres. Métod
 contra el código y fuentes: **`docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`**.
 Lo de abajo es **trabajo pendiente con la forma ya definida**, no preguntas abiertas.
 
-- [ ] **Acotar el dinero devuelto por una NC a lo cobrado EN EFECTIVO en esa venta**
-  (backend, `ventas/ventas.service.ts:699-728`) — hoy `devolverDinero` genera **siempre**
-  una salida de efectivo sin mirar con qué pagó el cliente, validada solo contra el saldo
-  **global** de la caja. Dos agujeros en uno: se puede devolver más de lo que esa venta
-  ingresó, y se puede dar efectivo por una compra con tarjeta — el vector de fraude
-  interno que la investigación identifica como principal (Clover, Lightspeed y Toast lo
-  bloquean por diseño). Un solo tope cierra los dos: `Σ(pago_aplicaciones tipo='venta' de
-  pagos con método es_efectivo) − Σ(ya devuelto en efectivo)`. Los datos ya están.
-  **El tope documental de la NC (`total_final − Σ NCs previas`) NO se toca**: coincide con
-  la regla dura del SII, que rechaza una NC que exceda el documento de referencia.
+- [ ] **Devolución por medio de pago + configuración de plazos** (backend, tema propio con
+  spec) — surgido del aporte del owner el 2026-07-27, **no es parte de los fixes de la
+  auditoría**. Hoy hay dos caminos de devolución que no se conocen entre sí: el de tarjeta
+  arranca en la pasarela (`reembolsar()` de Webpay/Oneclick, ya implementado) y termina en
+  una NC; el de efectivo arranca en la NC y sale por la caja. Nada compone las patas ni
+  impide pagar con tarjeta y recibir efectivo. Además **no hay validación de plazo en
+  ningún lado**: el límite de Transbank se descubre como rechazo en runtime. La
+  configuración de plazos que se proponga debe separar **tres relojes** —fiscal (SII, sale
+  del país), adquirente (propiedad de la integración) y política comercial (lo único
+  configurable por el tenant)—, con los dos primeros como techos y el retracto de venta a
+  distancia como piso en `online`. Construirlo plano permite que un tenant configure 12
+  meses y la empresa se coma el IVA. Análisis completo y fuentes:
+  `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md` §6.
+- [x] ~~**Acotar el dinero devuelto por una NC a lo cobrado EN EFECTIVO en esa venta**~~ —
+  cerrado 2026-07-27. El tope es `Σ(efectivo aplicado a la venta) − Σ(ya devuelto en
+  efectivo)`; excederlo da 422. Acota el **dinero, no el documento**: la NC sigue
+  emitiéndose por el total (regla dura del SII). La pata de tarjeta ya existe en
+  `pasarela` y no pasa por acá — componer ambas es el tema abierto de arriba.
 - [ ] **Implementar `cancelada` en su subconjunto seguro** (backend + frontend) — anular
   solo una venta `pendiente`, **sin pagos** y **sin documento emitido**, con motivo
   obligatorio (Toteat exige 10 caracteres mínimo). Es lo inequívocamente anulable hoy y lo
@@ -259,13 +280,10 @@ Lo de abajo es **trabajo pendiente con la forma ya definida**, no preguntas abie
   hoy una venta mal ingresada obliga a emitir un documento tributario para deshacer un
   tipeo. **No** modelar el plazo de 6 meses de la Ley 21.398 (se cuenta desde la entrega
   del bien): es infraestructura DTE especulativa, prohibida por ADR-010.
-- [ ] **Sacar `borrador` del enum y de la doc** (`ventas/entities/venta.entity.ts:10-16`,
-  `docs/features/ventas.md`, `docs/PRODUCTO.md:426`) — `cuenta`, `cuenta_lineas` y
-  `cuenta_asignaciones` de `modules/salones/` ya son el *open ticket* que describe el
-  mercado; un `borrador` de venta en paralelo sería una segunda forma de resolver lo
-  mismo. El único hueco que quedaría es parquear un ticket en **mostrador**, fuera de
-  salones — nadie lo pidió, se diseña si aparece. Sin datos productivos, cambiar el enum
-  es cambiar el esquema y resembrar.
+- [x] ~~**Sacar `borrador` del enum y de la doc**~~ — cerrado 2026-07-27: fuera del enum
+  de TypeScript, del tipo `estado_venta` de Postgres, de los mapas de color/etiqueta y del
+  filtro del frontend, y de `ventas.md`/`PRODUCTO.md`. Si algún día hace falta parquear un
+  ticket en **mostrador** (fuera de salones), se diseña ahí — nadie lo pidió.
 
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 

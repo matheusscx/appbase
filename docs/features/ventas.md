@@ -19,7 +19,7 @@ Es el corazón del POS: sin él no hay ventas registradas. Concentra en una sola
 ### Scope
 
 - **In scope**: canal `fisico`, pagos inline con auto-estado (`pagada`/`pendiente`), cálculo de vuelto, movimientos de inventario y caja dentro de la transacción, historial en `/ventas`, POS en `/ventas/pos`.
-- **Out of scope**: canal `online`/caja virtual, notas de crédito, estado `borrador`.
+- **Out of scope**: canal `online`/caja virtual, notas de crédito.
 
 ---
 
@@ -199,15 +199,16 @@ Todas con soft delete (`eliminado_el`) y triada de auditoría. PKs UUID con `typ
 | `pagada_parcial` | Al registrar un abono parcial: saldo > 0 pero < total_final |
 | `pagada` | El saldo llega a 0 (lo aplicado a la venta ≥ total_final) |
 | `cancelada` | Anulación explícita |
-| `borrador` | Estado transitorio previo a confirmar |
 
-⚠️ `cancelada` y `borrador` están en el enum y en esta tabla, pero **hoy ningún punto del
-backend los asigna** y no hay endpoint de anulación. Decidido el 2026-07-27 tras
-investigación de mercado (`docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`):
-`cancelada` se implementa acotada a ventas `pendiente` sin pagos ni documento emitido —el
-resto se revierte con nota de crédito, como exige el SII— y **`borrador` se elimina**,
-porque `cuenta`/`cuenta_lineas` de salones ya son el ticket en construcción. Hasta que eso
-se implemente, esta tabla describe el enum, no el comportamiento.
+**No existe `borrador`** (eliminado del enum el 2026-07-27): la venta en construcción vive
+en `cuenta`/`cuenta_lineas` de salones, que es el *open ticket* del dominio; un estado
+paralelo en `ventas` sería una segunda forma de resolver lo mismo.
+
+⚠️ `cancelada` está en el enum y en esta tabla pero **todavía ningún punto del backend la
+asigna**. Decidido el 2026-07-27 tras investigación de mercado
+(`docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`): se implementa
+acotada a ventas `pendiente` sin pagos ni documento emitido; el resto se revierte con nota
+de crédito, como exige el SII.
 
 El saldo se recalcula en cada abono sobre **lo aplicado a la venta**, no sobre el bruto
 cobrado: `saldo = total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta')`.

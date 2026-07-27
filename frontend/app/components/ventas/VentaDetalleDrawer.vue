@@ -191,7 +191,6 @@ function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral
     pagada_parcial: 'info',
     pagada: 'success',
     cancelada: 'error',
-    borrador: 'neutral',
   }
   return map[estado] ?? 'neutral'
 }
@@ -209,7 +208,6 @@ function estadoLabel(estado: string): string {
     pagada_parcial: 'Parcial',
     pagada: 'Pagada',
     cancelada: 'Cancelada',
-    borrador: 'Borrador',
   }
   return map[estado] ?? estado
 }

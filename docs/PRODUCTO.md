@@ -423,7 +423,7 @@ La venta lleva un campo `canal` (`'fisico'` | `'online'`) que determina el flujo
 **Tipos de documento tributario:** tabla propia `tipos_documento_tributario` vinculada a `pais` — cada país define sus documentos legales. Ejemplos Chile: Boleta, Factura, Nota de Crédito, Nota de Débito. No es un enum fijo.
 
 **Estados de la venta:**
-- `borrador` — venta en construcción, no confirmada
+- (sin `borrador`: la venta en construcción es la `cuenta` de salones)
 - `pendiente` — confirmada, esperando pago (canal físico)
 - `pagada` — pago recibido y confirmado. Las ventas online llegan directamente aquí.
 - `cancelada` — anulada

@@ -930,12 +930,18 @@ describe('VentasService', () => {
     let ventaRows: unknown[];
     let ncPreviasTotal: string;
     let devueltosRows: { item_id: string; devuelto: string }[];
+    // Tope de la devolución en efectivo: por defecto la venta se cobró entera en
+    // efectivo, así que no restringe y los tests preexistentes no cambian.
+    let efectivoCobrado: string;
+    let efectivoDevuelto: string;
 
     beforeEach(() => {
       ncManager = buildManagerMock();
       ventaRows = [ventaOriginalRow];
       ncPreviasTotal = '0';
       devueltosRows = [];
+      efectivoCobrado = '1100.0000';
+      efectivoDevuelto = '0';
       ncManager.query.mockImplementation((sql: string) => {
         if (sql.includes('FOR UPDATE')) return Promise.resolve(ventaRows);
         if (sql.includes('SUM(total_final)'))
@@ -944,6 +950,10 @@ describe('VentasService', () => {
           return Promise.resolve(detallesRows);
         if (sql.includes('FROM movimientos_inventario'))
           return Promise.resolve(devueltosRows);
+        if (sql.includes('es_efectivo'))
+          return Promise.resolve([
+            { cobrado: efectivoCobrado, devuelto: efectivoDevuelto },
+          ]);
         return Promise.resolve([]);
       });
       dataSourceMock.transaction.mockImplementation(
@@ -1376,7 +1386,7 @@ describe('VentasService', () => {
         expect(res.totalFinal).toBe('1100.0000');
       });
 
-      it.each(['pendiente', 'borrador', 'cancelada'])(
+      it.each(['pendiente', 'cancelada'])(
         'rechaza ventas en estado %s',
         async (estado) => {
           ventaRows = [{ ...ventaOriginalRow, estado }];
@@ -1387,6 +1397,49 @@ describe('VentasService', () => {
           );
         },
       );
+
+      it('rechaza devolver en efectivo más de lo que la venta cobró en efectivo', async () => {
+        // Venta de 1100 pagada con 200 en efectivo y el resto con tarjeta: el
+        // saldo GLOBAL de la caja alcanza (viene de otras ventas), pero esta
+        // venta solo ingresó 200 en billetes.
+        efectivoCobrado = '200.0000';
+
+        await expect(
+          service.crearNotaCreditoDesdeVenta({
+            ...baseParams,
+            devolverDinero: true,
+          }),
+        ).rejects.toThrow(
+          /más de lo que esta venta cobró en efectivo \(disponible: 200\.0000\)/,
+        );
+
+        expect(
+          cajaService.registrarMovimientoEnTransaccion,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('el tope acota el DINERO, no el documento: la NC sin devolución pasa igual', async () => {
+        // Distinción central: anular una venta cobrada a medias es legítimo
+        // (borra la cuenta por cobrar); devolver efectivo que nunca entró, no.
+        efectivoCobrado = '0.0000';
+
+        const res = await service.crearNotaCreditoDesdeVenta(baseParams);
+
+        expect(res.totalFinal).toBe('1100.0000');
+        expect(res.movimientoCajaId).toBeNull();
+      });
+
+      it('descuenta lo ya devuelto en efectivo por NCs anteriores', async () => {
+        efectivoCobrado = '1100.0000';
+        efectivoDevuelto = '900.0000'; // disponible: 200
+
+        await expect(
+          service.crearNotaCreditoDesdeVenta({
+            ...baseParams,
+            devolverDinero: true,
+          }),
+        ).rejects.toThrow(/disponible: 200\.0000/);
+      });
 
       it('rechaza NC sobre otra NC', async () => {
         ventaRows = [
