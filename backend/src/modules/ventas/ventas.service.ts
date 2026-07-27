@@ -514,6 +514,11 @@ export class VentasService {
       propinaMonto = tip.montoPagado;
       estrategiaPropina =
         tip.estrategia ?? EstrategiaAsignacionPropina.NO_VUELTO;
+      // `garzonId` viene del body: sin este chequeo se persiste tal cual y la
+      // propina se acredita a un garzón de otro tenant, que después la cobra en
+      // su liquidación. Lanza si no existe, no es del tenant o está inactivo.
+      // (`propinaDirecta` no lo necesita: `asegurarMostrador` ya es tenant-scoped.)
+      await this.garzonesService.obtenerActivoPorId(tenantId, tip.garzonId);
       const ventaPropina = await this.ventaPropinaService.crearEnTransaccion(
         manager,
         {
@@ -1274,7 +1279,9 @@ export class VentasService {
               vp.tipo, vp.estado, vp.garzon_id, g.nombre AS garzon_nombre,
               vp.sesion_garzon_id, vp.turno_id, vp.tipo_garzon, vp.liquidacion_id
        FROM venta_propina vp
-       LEFT JOIN garzones g ON g.garzon_id = vp.garzon_id AND g.eliminado_el IS NULL
+       LEFT JOIN garzones g ON g.garzon_id = vp.garzon_id
+                            AND g.tenant_id = vp.tenant_id
+                            AND g.eliminado_el IS NULL
        WHERE vp.venta_id = $1 AND vp.tenant_id = $2 AND vp.eliminado_el IS NULL`,
       [ventaId, tenantId],
     );

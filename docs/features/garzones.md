@@ -119,6 +119,13 @@ transferencias — ver Salones).
   autenticación de la sesión del dispositivo — un `401` haría que el frontend
   (`useApiFetch`) intente refrescar el token y cierre la sesión del restaurante.
   Usado por el endpoint `identificar` y por `SalonesService` al abrir/cerrar.
+- `obtenerActivoPorId(tenantId, id)` — valida pertenencia al tenant + `activo`, o lanza
+  `400 Garzón no encontrado o inactivo`. **Todo `garzonId` que llegue desde el body pasa
+  por acá antes de persistirse.** Lo usa `VentasService` para `propinaCierreMesa`: sin esa
+  validación la propina se acredita a un garzón de otro tenant y este la cobra en su
+  liquidación. (`propinaDirecta` no lo necesita: `asegurarMostrador` ya es tenant-scoped.)
+  El seed incluye un garzón de Falabella (`…440332`) cuya única razón de existir es que el
+  e2e pueda ejercer ese cruce con un garzón activo y válido.
 
 ---
 

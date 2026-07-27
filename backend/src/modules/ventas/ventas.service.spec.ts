@@ -123,6 +123,10 @@ describe('VentasService', () => {
   let itemsService: jest.Mocked<ItemsService>;
   let pagosServiceMock: { registrar: jest.Mock };
   let ventaPropinaServiceMock: { crearEnTransaccion: jest.Mock };
+  let garzonesServiceMock: {
+    asegurarMostrador: jest.Mock;
+    obtenerActivoPorId: jest.Mock;
+  };
   let catalogService: jest.Mocked<CatalogService>;
   let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
 
@@ -137,6 +141,10 @@ describe('VentasService', () => {
       crearEnTransaccion: jest.fn().mockResolvedValue({
         id: 'venta-propina-1',
       }),
+    };
+    garzonesServiceMock = {
+      asegurarMostrador: jest.fn().mockResolvedValue({ id: 'mostrador-1' }),
+      obtenerActivoPorId: jest.fn().mockResolvedValue({ id: 'garzon-1' }),
     };
     dataSourceMock = {
       transaction: jest
@@ -207,11 +215,7 @@ describe('VentasService', () => {
         },
         {
           provide: GarzonesService,
-          useValue: {
-            asegurarMostrador: jest
-              .fn()
-              .mockResolvedValue({ id: 'mostrador-1' }),
-          },
+          useValue: garzonesServiceMock,
         },
         {
           provide: getDataSourceToken(),
@@ -471,6 +475,33 @@ describe('VentasService', () => {
           ventaPropinaId: 'venta-propina-1',
         }),
       );
+    });
+
+    it('valida que el garzón de propinaCierreMesa sea del tenant antes de persistir', async () => {
+      // `garzonId` viene del body: sin validar, la propina se acredita a un
+      // garzón de otro tenant y este la cobra en su liquidación.
+      garzonesServiceMock.obtenerActivoPorId.mockRejectedValueOnce(
+        new BadRequestException('Garzón no encontrado o inactivo'),
+      );
+
+      const dtoGarzonAjeno = {
+        ...baseDto,
+        propinaCierreMesa: {
+          montoPagado: '10.0000',
+          garzonId: '550e8400-e29b-41d4-a716-446655440332',
+        },
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '110.0000' }],
+      };
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoGarzonAjeno as any),
+      ).rejects.toThrow('Garzón no encontrado o inactivo');
+
+      expect(garzonesServiceMock.obtenerActivoPorId).toHaveBeenCalledWith(
+        TENANT_ID,
+        '550e8400-e29b-41d4-a716-446655440332',
+      );
+      expect(ventaPropinaServiceMock.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
     it('lanza BadRequestException cuando excedente > 0 y ningún método permite vuelto', async () => {

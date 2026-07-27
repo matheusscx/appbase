@@ -1480,6 +1480,7 @@ export class SeederService implements OnApplicationBootstrap {
 
   private async seedGarzones(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
 
     await this.dataSource.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS uq_garzones_mostrador_tenant
@@ -1517,6 +1518,18 @@ export class SeederService implements OnApplicationBootstrap {
         pinHash: '!', // inutilizable: no es bcrypt válido → nunca matchea un PIN
         activo: false,
         esPlaceholder: true,
+      },
+      {
+        // Garzón de OTRO tenant. Existe solo para que el e2e pueda ejercer el
+        // aislamiento multi-tenant de la propina: activo y válido, así que el
+        // único motivo por el que una venta de Paris debe rechazarlo es el
+        // tenant. Sin un garzón ajeno sembrado, esa distinción no la ejerce nada
+        // y un bug de fuga pasa los gates (ver `verify-feature` §2c).
+        id: '550e8400-e29b-41d4-a716-446655440332',
+        tenantId: FALABELLA,
+        nombre: 'Diego Soto (Falabella)',
+        pinHash: '!', // no opera por PIN: es fixture de aislamiento, no un garzón real
+        activo: true,
       },
     ];
     for (const data of garzones) {

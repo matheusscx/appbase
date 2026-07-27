@@ -511,6 +511,44 @@ describe('Ventas (e2e)', () => {
     });
   });
 
+  describe('POST /ventas con propina a un garzón de otro tenant', () => {
+    // Garzón activo y válido, pero de Falabella. Está sembrado precisamente para
+    // que el único motivo de rechazo posible sea el tenant: si el test usara un
+    // UUID inexistente pasaría por "no encontrado" y no probaría el aislamiento.
+    const GARZON_OTRO_TENANT = '550e8400-e29b-41d4-a716-446655440332';
+
+    it('responde 400, no crea la propina ni descuenta stock', async () => {
+      const stockAntes = await getStock(ds, ITEM_ID);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000.0000' }],
+          propinaCierreMesa: {
+            montoPagado: '5000',
+            garzonId: GARZON_OTRO_TENANT,
+          },
+        })
+        .expect(400);
+
+      expect((res.body as { message: string }).message).toBe(
+        'Garzón no encontrado o inactivo',
+      );
+
+      // La propina de otro tenant no quedó registrada en ninguna venta...
+      const propinas: unknown[] = await ds.query(
+        `SELECT 1 FROM venta_propina
+          WHERE garzon_id = $1 AND eliminado_el IS NULL`,
+        [GARZON_OTRO_TENANT],
+      );
+      expect(propinas).toHaveLength(0);
+      // ...y la transacción revirtió entera.
+      expect(await getStock(ds, ITEM_ID)).toBe(stockAntes);
+    });
+  });
+
   describe('GET /propinas/porcentaje-sugerido-venta', () => {
     it('devuelve el porcentaje sugerido del tenant', async () => {
       const res = await request(app.getHttpServer())

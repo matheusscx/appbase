@@ -138,15 +138,19 @@ información, no diffs. Orden = severidad.
 - [x] ~~**`metodoPagoId` se persiste sin validar que esté habilitado para el tenant**~~
   — cerrado 2026-07-27: `registrar()` rechaza con 400 cualquier `metodoPagoId` ausente
   del mapa tenant-scoped, antes de escribir nada.
-- [ ] **`garzonId` de propina no se valida contra el tenant y el JOIN de lectura lo
-  expone** (backend, `ventas/ventas.service.ts:501-520` y `:1261-1269`) — la ruta
-  `propinaCierreMesa` guarda el `garzonId` del DTO sin comprobar pertenencia
-  (`venta-propina.service.ts:51-64`), pese a que `GarzonesService.obtenerActivoPorId
-  (tenantId, id)` existe y valida. En la lectura, `LEFT JOIN garzones` solo filtra
-  `eliminado_el`, no `tenant_id` → `GET /ventas/:id` devuelve el **nombre de un empleado
-  de otro tenant**. Peor que la fuga: esa propina entra a la liquidación del garzón
-  ajeno. (`propinaDirecta` usa `asegurarMostrador`, tenant-scoped: no afectada.)
-  Cierre: validar pertenencia al crear + `AND g.tenant_id = vp.tenant_id` en el JOIN.
+- [x] ~~**`garzonId` de propina no se valida contra el tenant y el JOIN de lectura lo
+  expone**~~ — cerrado 2026-07-27: `propinaCierreMesa` valida con
+  `GarzonesService.obtenerActivoPorId(tenantId, garzonId)` antes de persistir, y el JOIN
+  de `findOne` lleva `AND g.tenant_id = vp.tenant_id`. Se sembró un garzón de Falabella
+  (`…440332`) **solo** para que el e2e pueda ejercer el cruce: es activo y válido, así que
+  el único motivo de rechazo posible es el tenant.
+- [ ] **Otros tres `LEFT JOIN garzones` sin filtro de `tenant_id`** (backend,
+  `turnos/sesiones-garzon.service.ts:181` y `:239`, `salones/cuenta-asignaciones.service.ts:131`
+  y `:133`) — mismo patrón que el hallazgo de arriba: la tabla principal filtra por tenant
+  y la unida solo por `eliminado_el`. Hoy **no son explotables por sí solos** (el
+  `garzon_id` de esas filas se escribe por caminos tenant-scoped), pero son la misma
+  defensa faltante y quedan a un bug de distancia de convertirse en fuga. Fuera del
+  alcance auditado (`ventas`+`pagos`); entran cuando se audite `turnos` y `salones`.
 - [x] ~~**La caja se verifica sin lock y el movimiento se escribe después sin
   re-chequear**~~ — cerrado 2026-07-27: la creación de venta (canal físico) y el abono
   toman `bloquearCajaAbierta` dentro de la transacción, el mismo patrón que ya usaba la
