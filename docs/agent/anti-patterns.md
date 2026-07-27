@@ -448,6 +448,48 @@ expect(
 Dos tests con títulos distintos y setup idéntico son un solo test. Un branch de SQL
 (columna equivocada, `WHERE` que nunca matchea) solo lo prueba la base real.
 
+### ❌ Test que pasa por una razón distinta de la que dice probar
+
+Un test verde no prueba nada si el escenario dispara **otra** regla antes de llegar a la
+que se quería cubrir. Pasó tres veces en jul-2026, y las tres fueron descubiertas
+apagando el fix a mano, nunca leyendo el test.
+
+```ts
+// MAL — "rechaza el método de pago no contratado": 400 verde… emitido por la regla
+// del vuelto, porque 10000 supera el total. El gate del método nunca se ejecutó.
+pagos: [{ metodoPagoId: METODO_AJENO, monto: '10000.0000' }]   // total = 5950
+  .expect(400)
+
+// MAL — "el vuelto va al método que lo permite": el método con vuelto era el primero
+// del array Y el primero por orden de id, así que elegir-por-permiso, elegir-el-primero
+// y elegir-por-id dan lo mismo. El test no distingue entre las tres.
+
+// PEOR — el 2º intento del mismo test, con el orden dado vuelta. Con SOLO DOS
+// elementos el ganador es inevitablemente "el último", "el de id mayor" y "el de
+// monto mayor" a la vez: es imposible aislar el criterio. Hacen falta TRES, con el
+// caso correcto en el MEDIO de cada dimensión que podría confundirse.
+
+// MAL — "rechaza un garzón de otro tenant" con un UUID inexistente: pasa por
+// "garzón no encontrado" sin tocar nunca el chequeo de tenant.
+```
+
+**Regla:** construir el escenario de modo que **la regla bajo prueba sea la única que
+puede fallar** —monto por debajo del total, el caso correcto en la posición que ninguna
+heurística acierta, un garzón real de otro tenant sembrado a propósito— y **aseverar el
+mensaje**, no solo el status.
+
+**Cómo se detecta, siempre igual:** apagar el fix en el código de producción y correr el
+test. Si sigue verde, no prueba lo que dice. Son treinta segundos y es lo único que
+separa un test real de uno decorativo.
+
+⚠️ **Un solo mutante no alcanza cuando lo que se prueba es una *elección* entre
+candidatos.** El 2º intento del test del vuelto sobrevivió al mutante obvio (el bug
+histórico: "elegir el primero") y aun así no probaba nada, porque otras tres heurísticas
+igual de plausibles daban el mismo resultado. Para una elección hay que enumerar **todas
+las heurísticas alternativas que el fixture no descarta** —posición, orden de id, monto,
+cantidad— y correr un mutante por cada una. Si con dos elementos alguna es indistinguible,
+el fixture necesita un tercero.
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

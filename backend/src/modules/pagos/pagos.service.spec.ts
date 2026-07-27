@@ -37,6 +37,16 @@ const METODO_VALE_ROWS = [
   { metodo_pago_id: VALE_ID, nombre: 'Vale vista', permite_vuelto: true },
 ];
 
+// Método SIN vuelto cuyo id ordena ANTES que EFECTIVO_ID. Existe para que el
+// test del vuelto no pueda pasar por coincidencia: si el método con vuelto
+// fuera también el primero del array y el primero por id, "elegir por permiso",
+// "elegir el primero" y "elegir por orden de id" darían todos el mismo
+// resultado y el test no distinguiría entre las tres.
+const CHEQUE_ID = '550e8400-e29b-41d4-a716-446655440100';
+const METODO_CHEQUE_ROWS = [
+  { metodo_pago_id: CHEQUE_ID, nombre: 'Cheque', permite_vuelto: false },
+];
+
 function buildManagerMock(metodoRows = METODO_EFECTIVO_ROWS) {
   const pago = { id: 'pago-uuid-001' };
   return {
@@ -317,6 +327,60 @@ describe('PagosService', () => {
       expect(pagoData['vuelto']).toBe('50.0000');
     });
 
+    it('con métodos mixtos, el vuelto va al que lo permite y a ningún otro', async () => {
+      // El único test de excedente usaba UN solo método, así que el índice 0 era
+      // siempre "el correcto" pasara lo que pasara.
+      //
+      // Hacen falta TRES pagos, no dos: con dos, el que permite vuelto es a la
+      // vez "el último del array", "el de id mayor" y "el de monto mayor", así
+      // que el test pasaría igual con cualquiera de esas heurísticas erróneas.
+      // Acá el efectivo queda en el medio en las cuatro dimensiones:
+      //   posición  → cheque(0)   efectivo(1)   tarjeta(2)
+      //   id        → cheque…0100 efectivo…0105 tarjeta…0200
+      //   monto     → cheque 30   efectivo 50   tarjeta 70
+      // Ninguna heurística de posición, id o monto acierta: solo mirar
+      // `permite_vuelto` da el resultado aseverado.
+      const manager = buildManagerMock([
+        ...METODO_CHEQUE_ROWS,
+        ...METODO_EFECTIVO_ROWS,
+        ...METODO_TARJETA_ROWS,
+      ]);
+
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+      const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
+
+      // suma 150, target 120 → excedente 30, cubierto por el efectivo (50).
+      await svc.registrar(manager as unknown as EntityManager, {
+        tenantId: TENANT_ID,
+        ventaId: VENTA_ID,
+        pagos: [
+          { metodoPagoId: CHEQUE_ID, monto: '30.0000' },
+          { metodoPagoId: EFECTIVO_ID, monto: '50.0000' },
+          { metodoPagoId: TARJETA_ID, monto: '70.0000' },
+        ],
+        cajaId: CAJA_ID,
+        monedaOficialId: MONEDA_ID,
+        target: '120.0000',
+      });
+
+      const vueltos = (manager.save.mock.calls as unknown[][])
+        .map((c) => c[1] as Record<string, unknown>)
+        .filter((d) => d && d['vuelto'] !== undefined)
+        .map((d) => ({ metodo: d['metodoPagoId'], vuelto: d['vuelto'] }));
+      expect(vueltos).toEqual([
+        { metodo: CHEQUE_ID, vuelto: '0.0000' },
+        { metodo: EFECTIVO_ID, vuelto: '30.0000' },
+        { metodo: TARJETA_ID, vuelto: '0.0000' },
+      ]);
+
+      // Netos: 30, 50−30 y 70. Ninguno negativo y suman el target.
+      const montos = cajaSvc.registrarMovimientoEnTransaccion.mock.calls.map(
+        (c) => (c[1] as { monto: string }).monto,
+      );
+      expect(montos).toEqual(['30.0000', '20.0000', '70.0000']);
+    });
+
     it('rechaza el excedente que no se puede devolver: los métodos sin vuelto superan el target', async () => {
       // El bug: el excedente (60) se asignaba entero al único pago con vuelto,
       // que solo aportó 10 → su neto quedaba en -50 y se persistía un movimiento
@@ -494,6 +558,29 @@ describe('PagosService', () => {
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rechaza el abono si la caja existe pero está en conciliación', async () => {
+      // Gemela del test de VentasService: `!caja` ya tenía cobertura, pero la
+      // caja presente-pero-no-abierta no la ejercía nada. Borrar el `if` de
+      // `pagos.service.ts` no rompía ningún test.
+      const manager = buildAbonableManager('pendiente');
+      const module: TestingModule = await setupModule(manager, {
+        ...mockCajaActiva,
+        estado: 'en_conciliacion',
+      });
+      const svc = module.get<PagosService>(PagosService);
+      const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
+
+      await expect(
+        svc.registrarAbono(TENANT_ID, USUARIO_ID, {
+          ventaId: VENTA_ID,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '50.0000' }],
+        }),
+      ).rejects.toThrow('La caja está en conciliación y no admite pagos');
+
+      expect(cajaSvc.bloquearCajaAbierta).not.toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
     });
 
     it('retorna estado=pagada_parcial y saldo reducido con abono parcial', async () => {

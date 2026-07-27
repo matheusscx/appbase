@@ -215,23 +215,24 @@ información, no diffs. Orden = severidad.
   muestra el array interpolado. El helper ya existe, está testeado para ambos casos
   (`utils/api-error.spec.ts`) y lo usan `NotaCreditoModal.vue` y `VentaDetalleDrawer.vue`
   del mismo módulo. Severidad baja.
-- [ ] **La rama "caja en conciliación" no la ejerce ningún test** (backend,
-  `ventas/ventas.service.spec.ts:32,40` y `pagos/pagos.service.spec.ts:22`) — los mocks
-  de caja solo existen con `estado: 'abierta'`; `en_conciliacion` no aparece en ninguno
-  de los dos specs. Borrar los `if (caja.estado !== 'abierta')` de
-  `ventas.service.ts:112-115` y `pagos.service.ts:306-309` no rompe ningún test. Es el
-  caso §2c de `verify-feature`: distinción real en el código, cero cobertura — el mismo
-  molde del bug de permisos de recuentos.
-- [ ] **Nadie ejerce a cuál pago se le asigna el vuelto con métodos mixtos** (backend,
-  `pagos/pagos.service.spec.ts:238`) — el único test con excedente usa **un solo**
-  método (índice 0 = siempre "correcto"), y el único test con dos métodos no tiene
-  excedente. Es la razón por la que el bug del vuelto (primer ítem de esta lista) pasó
-  todos los gates. Cierre: el test que lo cubra es el mismo que verifica ese fix.
-- [ ] **La nota de crédito sobre `pagada_parcial` no se prueba nunca en éxito**
-  (backend, `ventas/ventas.service.spec.ts`) — `pagada_parcial` **no aparece en el
-  spec**; el camino feliz usa siempre `'pagada'` (`:766`) y el `it.each` solo cubre los
-  estados que deben rechazarse (`:1242-1252`). Sacar `'pagada_parcial'` de la whitelist
-  de `ventas.service.ts:619` no rompe ningún test.
+- [x] ~~**La rama "caja en conciliación" no la ejerce ningún test**~~ — cerrado
+  2026-07-27: un test por service verifica que una caja presente-pero-no-abierta se
+  rechaza, y que corta **antes** de escribir (sin lock, sin cargar ítems, sin `save`).
+- [x] ~~**Nadie ejerce a cuál pago se le asigna el vuelto con métodos mixtos**~~ —
+  cerrado 2026-07-27, en **dos** intentos, los dos fallidos por la misma causa. La 1ª
+  versión ponía el método con vuelto primero en el array y primero por id: "elegir por
+  permiso", "elegir el primero" y "elegir por id" coincidían. La 2ª agregó un método sin
+  vuelto delante… pero con **solo dos pagos el ganador es a la vez el último, el de id
+  mayor y el de monto mayor**, así que seguía sin descartar esas tres. Lo cazó la
+  revisión independiente, no yo. La versión final usa **tres** pagos con el efectivo en
+  el medio en posición, id y monto; se verificó contra cuatro implementaciones erróneas
+  (primero, último, mayor monto, id mayor) y las cuatro lo hacen fallar.
+- [x] ~~**La nota de crédito sobre `pagada_parcial` no se prueba nunca en éxito**~~ —
+  cerrado 2026-07-27: camino feliz sobre `pagada_parcial`, no solo su ausencia de la
+  lista de rechazo.
+
+Los cuatro se validaron con mutantes sobre el código de producción: borrar cada guard o
+sacar `pagada_parcial` de la whitelist hace fallar exactamente el test que lo cubre.
 
 ### Decidido por el owner tras investigación de mercado (2026-07-27)
 

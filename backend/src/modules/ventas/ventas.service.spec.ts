@@ -272,6 +272,24 @@ describe('VentasService', () => {
       expect(result.estado).toBe(EstadoVenta.PAGADA);
     });
 
+    it('rechaza la venta si la caja existe pero está en conciliación', async () => {
+      // `!caja` y `caja.estado !== 'abierta'` son dos condiciones distintas con
+      // mensajes distintos, y solo la primera tenía cobertura: los mocks de caja
+      // nacían siempre 'abierta'. Borrar el segundo `if` no rompía ningún test.
+      cajaService.findActiva.mockResolvedValueOnce({
+        ...mockCajaActiva,
+        estado: 'en_conciliacion',
+      } as never);
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, baseDto),
+      ).rejects.toThrow('La caja está en conciliación y no admite ventas');
+
+      // Corta antes de tocar nada: ni lock, ni ítems, ni transacción de escritura.
+      expect(cajaService.bloquearCajaAbierta).not.toHaveBeenCalled();
+      expect(itemsService.cargarBasePorIds).not.toHaveBeenCalled();
+    });
+
     it('resuelve TODO el carrito en una sola llamada, no una por línea', async () => {
       // Guarda contra la regresión al N+1: `findOne` por línea disparaba 4+
       // queries por ítem para construir colecciones que la venta ni lee.
@@ -1344,6 +1362,18 @@ describe('VentasService', () => {
         // prettier-ignore
 
         expect(cajaService.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+      });
+
+      it('acepta una venta pagada_parcial (no solo pagada)', async () => {
+        // `pagada_parcial` está en la whitelist de estados elegibles, pero el
+        // spec solo lo cubría por ausencia de la lista de rechazo: el camino
+        // feliz usaba siempre 'pagada'. Sacarlo de la whitelist en
+        // `ventas.service.ts` no rompía ningún test.
+        ventaRows = [{ ...ventaOriginalRow, estado: 'pagada_parcial' }];
+
+        const res = await service.crearNotaCreditoDesdeVenta(baseParams);
+
+        expect(res.totalFinal).toBe('1100.0000');
       });
 
       it.each(['pendiente', 'borrador', 'cancelada'])(
