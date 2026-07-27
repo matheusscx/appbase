@@ -164,7 +164,8 @@ Lo mínimo para decidir si hay que leer más. El detalle vive en un solo lugar.
   → Antes de tocar impuestos o documentos tributarios: **ADR-010**.
   → Detalle funcional: `docs/features/impuestos.md`.
 - **Ventas** — canales `'fisico'` (requiere caja abierta) y `'online'`. Estados
-  `borrador → pendiente → pagada | cancelada`, más `pagada_parcial` derivado. Tipos de
+  `pendiente → pagada | cancelada`, más `pagada_parcial` derivado (sin `borrador`: la
+  venta en construcción es la `cuenta` de salones). Tipos de
   documento por país desde tabla, no enum.
   → Antes de tocar estados, saldos o notas de crédito: `docs/features/ventas.md`.
 - **Cajas** — `'fisica'` (apertura manual, una abierta por tenant+usuario) y
