@@ -65,9 +65,11 @@ const puedeContar = computed(() =>
   permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Crear'),
 )
 
-const readOnly = computed(
-  () => detalle.value?.estado !== 'borrador' || !puedeContar.value,
-)
+const esBorrador = computed(() => detalle.value?.estado === 'borrador')
+
+// readOnly gatea SOLO la carga del conteo (los campos), que es Inventario/Crear.
+// Las acciones de la cabecera llevan su propio permiso — ver el template.
+const readOnly = computed(() => !esBorrador.value || !puedeContar.value)
 
 const puedeAplicar = computed(() =>
   permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Actualizar'),
@@ -370,11 +372,18 @@ const columns: TableColumn<LineaRow>[] = [
               />
             </div>
 
+            <!--
+              Cada botón con SU permiso, no colgados de readOnly: cancelar exige
+              Crear (como contar) y aplicar exige Actualizar. Anidar aplicar bajo
+              readOnly dejaba al rol aprobador —Leer + Actualizar, sin Crear— sin
+              forma de aplicar un recuento ya cargado.
+            -->
             <div
-              v-if="!readOnly"
+              v-if="esBorrador && (puedeContar || puedeAplicar)"
               class="flex gap-2"
             >
               <UButton
+                v-if="puedeContar"
                 color="neutral"
                 variant="outline"
                 icon="i-lucide-x"

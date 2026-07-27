@@ -1222,11 +1222,21 @@ export class ItemsService {
         if (costoAReconvertir) {
           // 1 unidad vieja equivale a N nuevas (1 kg = 1000 g), así que el
           // costo por unidad nueva es el viejo dividido por N.
-          const unaUnidadVieja = await this.catalogService.convertirUnidad(
-            '1',
-            costoAReconvertir.desde,
-            costoAReconvertir.hacia,
-          );
+          // Entre magnitudes distintas (unidad → kg) no hay N posible, y el
+          // error de convertirUnidad ("no se puede convertir de conteo a masa")
+          // no dice qué lo bloqueó: acá es el costo, no la cantidad.
+          let unaUnidadVieja: string;
+          try {
+            unaUnidadVieja = await this.catalogService.convertirUnidad(
+              '1',
+              costoAReconvertir.desde,
+              costoAReconvertir.hacia,
+            );
+          } catch {
+            throw new BadRequestException(
+              `No se puede cambiar la unidad de ${costoAReconvertir.desde} a ${costoAReconvertir.hacia}: el costo vigente está expresado por ${costoAReconvertir.desde} y no se puede reconvertir entre magnitudes distintas`,
+            );
+          }
           const costoNuevo = convertirCostoUnitario(
             '1',
             costoAReconvertir.costo,

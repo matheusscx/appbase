@@ -58,12 +58,19 @@ const puedeContar = computed(() =>
 
 Cuando la escritura ya está condicionada por estado, sumar el permiso a esa
 misma condición en vez de agregar un `v-if` paralelo — así queda un solo lugar
-que decide (`recuentos/[id].vue`: `readOnly = estado !== 'borrador' || !puedeContar`).
+que decide (`recuentos/[id].vue`: `readOnly = !esBorrador || !puedeContar`).
 
-Ojo con los permisos **asimétricos** dentro de una pantalla: en recuentos,
-contar es `Inventario/Crear` y aplicar es `Inventario/Actualizar` a propósito,
-para separar a quien cuenta de quien aprueba. Un solo `puedeEditar` para toda
-la página sería incorrecto.
+**Pero un `readOnly` así vale para UN permiso, no para la pantalla entera.** Ojo
+con los permisos **asimétricos**: en recuentos, contar es `Inventario/Crear` y
+aplicar es `Inventario/Actualizar` a propósito, para separar a quien cuenta de
+quien aprueba. `readOnly` gatea solo los campos del conteo; los botones de la
+cabecera llevan cada uno el suyo.
+
+Trampa concreta, ya cometida acá: si un botón cuelga de `v-if="!readOnly"`,
+hereda el permiso de `readOnly` aunque tenga su propio `v-if` adentro. Así el
+rol aprobador (`Leer` + `Actualizar`, sin `Crear`) se quedó sin el botón
+"Aplicar" — anidado bajo el `readOnly` de contar. Un control con permiso propio
+no va anidado bajo el gate de otro permiso.
 
 ---
 
