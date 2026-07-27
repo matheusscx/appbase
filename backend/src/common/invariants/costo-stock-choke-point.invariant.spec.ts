@@ -1,17 +1,20 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-// Invariante: item_producto.costo_actual NUNCA se escribe fuera de
-// inventario.service.ts (registrarMovimiento). El costo es un valor derivado
-// del kardex — un promedio ponderado móvil — y escribirlo directo lo corrompe
-// sin dejar rastro. Fue exactamente el bug que originó este diseño:
-// PATCH /items/:id escribía el costo sin movimiento de inventario.
+// Invariante: item_producto.costo_actual y item_producto.stock NUNCA se
+// escriben fuera de inventario.service.ts (registrarMovimiento). Ambos son
+// valores derivados del kardex — costo_actual es un promedio ponderado
+// móvil, stock es el saldo materializado de los movimientos — y escribirlos
+// directo los corrompe sin dejar rastro. Fue exactamente el bug que originó
+// este diseño: PATCH /items/:id escribía el costo (y, después, el stock) sin
+// movimiento de inventario.
 // Ver docs/superpowers/specs/2026-07-26-costeo-cpp-design.md
 
 const ARCHIVOS_AUTORIZADOS = [
   join('modules', 'inventario', 'inventario.service.ts'),
   // El INSERT de creación del producto y el seeder no son UPDATE: el INSERT
-  // siembra el costo de apertura junto con el movimiento inventario_inicial.
+  // siembra el costo/stock de apertura junto con el movimiento
+  // inventario_inicial.
   join('modules', 'seeder', 'seeder.service.ts'),
 ];
 
@@ -42,7 +45,7 @@ function extraeTemplateLiterals(contenido: string): string[] {
   return out;
 }
 
-describe('Invariante: costo_actual solo se escribe desde el kardex', () => {
+describe('Invariante: costo_actual y stock solo se escriben desde el kardex', () => {
   it('ningún UPDATE de item_producto toca costo_actual fuera de inventario.service', () => {
     const srcRoot = join(__dirname, '..', '..');
     const offenders: string[] = [];
@@ -62,6 +65,27 @@ describe('Invariante: costo_actual solo se escribe desde el kardex', () => {
         (chunk) =>
           /costo_actual\s*=\s*\$/.test(chunk) &&
           !/UPDATE\s+item_(receta|combo)\b/i.test(chunk),
+      );
+      if (sospechoso) offenders.push(file);
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('ningún UPDATE de item_producto toca stock fuera de inventario.service', () => {
+    const srcRoot = join(__dirname, '..', '..');
+    const offenders: string[] = [];
+
+    for (const file of findTsFiles(srcRoot)) {
+      if (ARCHIVOS_AUTORIZADOS.some((a) => file.endsWith(a))) continue;
+      const contenido = readFileSync(file, 'utf8');
+      // A diferencia de costo_actual, `stock` no es columna de ninguna otra
+      // tabla del esquema, así que no hace falta una excepción de tabla —
+      // solo el `\b` inicial para no confundir `stock_sistema` (columna de
+      // recuento_inventario_linea, congelada por INSERT, no por este UPDATE)
+      // con `stock`.
+      const sospechoso = extraeTemplateLiterals(contenido).some((chunk) =>
+        /\bstock\s*=\s*\$/.test(chunk),
       );
       if (sospechoso) offenders.push(file);
     }

@@ -35,6 +35,17 @@ export class CostoNoEditableConstraint implements ValidatorConstraintInterface {
   }
 }
 
+@ValidatorConstraint({ name: 'stockNoEditable', async: false })
+export class StockNoEditableConstraint implements ValidatorConstraintInterface {
+  validate(): boolean {
+    return false;
+  }
+
+  defaultMessage(): string {
+    return 'El stock no se edita desde el item: usá PATCH /items/:id/stock (ajuste con motivo) o un recuento de inventario';
+  }
+}
+
 export class UpdateItemDto {
   @IsString()
   @IsNotEmpty()
@@ -74,8 +85,16 @@ export class UpdateItemDto {
   @IsOptional()
   modoInventario?: string;
 
-  @IsNumberString()
-  @IsOptional()
+  // El stock ya no se edita desde el item: es una consecuencia de mover
+  // mercadería (ajuste de stock) o de un recuento de inventario auditado. El
+  // campo se conserva —en vez de borrarse— por la misma razón que `costo`:
+  // el ValidationPipe global usa whitelist sin forbidNonWhitelisted, así que
+  // borrarlo haría que la propiedad se descarte en silencio y el request
+  // devuelva 200 sin cambiar nada.
+  // @ValidateIf (no @IsOptional): ver la nota en `costo` — un `null` explícito
+  // debe seguir cayendo en el validador que siempre rechaza.
+  @ValidateIf((o: UpdateItemDto) => o.stock !== undefined)
+  @Validate(StockNoEditableConstraint)
   stock?: string;
 
   @IsString()

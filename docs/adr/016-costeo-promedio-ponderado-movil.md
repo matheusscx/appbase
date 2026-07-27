@@ -90,9 +90,11 @@ La puerta trasera de `PATCH /items/:id` se cierra: el campo `costo` del DTO de e
 ahora rechaza siempre con un mensaje explícito en vez de aceptarse en silencio (ver
 `docs/agent/anti-patterns.md`, "campo que escribe estado derivado sin pasar por su
 choke point"). El test de invariante
-`backend/src/common/invariants/costo-actual-choke-point.invariant.spec.ts` corre en el
+`backend/src/common/invariants/costo-stock-choke-point.invariant.spec.ts` corre en el
 gate y en CI: falla si cualquier archivo fuera de `inventario.service.ts` (o el seeder)
-contiene un `UPDATE` de `item_producto` que asigna `costo_actual`.
+contiene un `UPDATE` de `item_producto` que asigna `costo_actual` (el mismo archivo
+también vigila `stock`, cerrado por el mismo patrón — ver
+`docs/agent/anti-patterns.md`).
 
 ## Consequences
 

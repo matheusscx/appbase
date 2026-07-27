@@ -17,6 +17,7 @@ interface TokenResponse {
 interface ItemResponse {
   id: string;
   costoActual: string | null;
+  stock: string | null;
 }
 interface AjusteCostoResponse {
   movimientoId: string;
@@ -240,6 +241,50 @@ describe('Costeo CPP (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ nombre: 'CPP Test renombrado' })
       .expect(200);
+  });
+
+  it('PATCH /items/:id rechaza el stock con mensaje explícito', async () => {
+    const { body } = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ stock: '999' })
+      .expect(400);
+
+    expect(JSON.stringify(body.message)).toContain('/items/:id/stock');
+  });
+
+  it('PATCH /items/:id rechaza stock: null explícito (no es lo mismo que omitirlo)', async () => {
+    const { body } = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ stock: null })
+      .expect(400);
+
+    expect(JSON.stringify(body.message)).toContain('/items/:id/stock');
+  });
+
+  it('POST /items sigue aceptando stock al crear (stock inicial vía inventario_inicial)', async () => {
+    const resCreate = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `CPP Stock inicial Test ${Date.now()}`,
+        tipo: 'producto',
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        stock: '25',
+      });
+    expect(resCreate.status).toBe(201);
+    const itemStockInicialId = (resCreate.body as ItemResponse).id;
+
+    const { body: detalle } = await request(app.getHttpServer())
+      .get(`/api/items/${itemStockInicialId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(new Decimal((detalle as ItemResponse).stock!).toFixed(4)).toBe(
+      '25.0000',
+    );
   });
 
   it('un ajuste_costo con stock 0 no bloquea cambiar modoInventario/unidadMedida después', async () => {

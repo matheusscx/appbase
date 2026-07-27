@@ -1163,11 +1163,6 @@ export class ItemsService {
           prodParams.push(dto.modoInventario);
           patch.modoInventario = dto.modoInventario;
         }
-        if (dto.stock !== undefined) {
-          prodClauses.push(`stock = $${pidx++}`);
-          prodParams.push(dto.stock);
-          patch.stock = dto.stock;
-        }
         if (dto.unidadMedida !== undefined) {
           prodClauses.push(`unidad_medida = $${pidx++}`);
           prodParams.push(dto.unidadMedida);
