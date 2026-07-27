@@ -12,6 +12,15 @@ ya identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **`LineaVentaDto.precioUnitario` sin barrido de signo (ambiguo, no cerrado)**
+  (backend, `ventas/dto/create-venta.dto.ts`) — quedó fuera del barrido de positividad
+  de dinero (jul-2026) a propósito: es un override que entra directo al motor de
+  cálculo de precios (`calculoPreciosService.calcular`), y tocar su validación de
+  signo linda con la regla de "detenerse y preguntar" del motor de precios. Además no
+  está claro si `0` es ilegítimo — podría representar un ítem promocional/gratis. Sí
+  debería rechazar negativos (la regla de "ningún campo de dinero acepta negativos" es
+  absoluta), pero decidir `> 0` vs `>= 0` es una regla de negocio del owner. Requiere
+  confirmación antes de validar.
 - [x] **Burndown de typecheck del frontend — COMPLETO (0 errores)** (frontend) — jul-2026
   Los 84 errores de vue-tsc estricto se quemaron por tandas. `typecheck-baseline.json`
   quedó vacío: el `typecheck:ratchet` ahora es un gate totalmente estricto (cualquier
@@ -50,16 +59,13 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
 
 ## Propinas en POS (notas de la revisión final, severidad baja — no bloqueantes)
 
-- [ ] **Unique index para el garzón placeholder "Mostrador"** (backend) — `asegurarMostrador`
-  (`garzones.service.ts`) es find-or-create sin restricción única sobre `(tenant_id,
-  es_placeholder)`. En la práctica el placeholder ya existe (se siembra al crear el tenant
-  y en el seed), así que el camino on-demand es solo fallback para tenants preexistentes;
-  bajo concurrencia, dos "primeras" propinas de POS de un tenant sin placeholder podrían
-  insertar dos "Mostrador" (duplicado benigno: ambos neutros y ocultos). Cerrar con un
-  índice único parcial `WHERE es_placeholder = true AND eliminado_el IS NULL`.
-- [ ] **Validación de `propinaDirecta`** (backend) — `montoPagado` es `@IsNumberString()`
-  sin garantía de `> 0`, y no se restringe al canal `fisico`. Es el mismo patrón que
-  `propinaCierreMesa` preexistente (no regresión); si se endurece, hacerlo en ambos.
+- [ ] **`propinaDirecta`/`propinaCierreMesa` no se restringen al canal `fisico`**
+  (backend) — `ventas.service.ts` solo gatea la propina con `habilitadoPos`/
+  `habilitadoSalones`, no con `canal`; una venta `online` podría en teoría enviar
+  `propinaDirecta`/`propinaCierreMesa`. El signo ya no es el problema (barrido de
+  positividad jul-2026, ambos DTOs ahora exigen `>= 0` vía `IsDecimalNoNegativo` —
+  ver `backend/src/common/decorators/decimal-signo.decorator.ts`): queda solo la
+  restricción de canal, sin regresión respecto al comportamiento previo.
 
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
@@ -222,24 +228,6 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   el seed solo tiene admin (admin.paris, que hace de "supervisor") y cajero (vendedor), ninguno
   es supervisor-no-admin. Sembrar un rol `Cajas`-solo-lectura no-fijo + su usuario y agregar un
   e2e que verifique que ve la caja abierta ciega. Cierra el gap que marcó la revisión de seguridad.
-- [ ] **`crear-movimiento.dto.ts:16` — `monto` admite negativos** (backend) — al hacer real
-  el modo ciego (2026-07-25) el validador pasó de `@IsNumberString({ no_symbols: true })` a
-  `@IsNumberString()` (obligado: `no_symbols` rechaza el punto decimal y rompe montos de
-  dinero — mismo bug ya documentado en `linea-cierre.dto.ts`). Efecto colateral: ese endpoint
-  ahora acepta `monto` negativo, que `no_symbols` bloqueaba de rebote; como `tipo`
-  (entrada/salida) codifica el signo, una `salida` con monto negativo *sumaría* al esperado.
-  Es el **mismo patrón** que `propinaDirecta`/`propinaCierreMesa` (money `@IsNumberString()`
-  sin `> 0`) — cerrar con un **barrido de positividad** sobre los DTOs de dinero de caja y
-  propinas a la vez (no un fix aislado). Auditable en `movimientos_caja`; no bloqueante.
-- [ ] `items.vue:81` — campo `esPendiente` en `GrupoOpcionOverrideRow` se setea pero
-  nunca se lee (el badge re-deriva la condición inline). O wirear el badge a este campo,
-  o quitarlo del tipo.
-- [ ] DTOs de override — normalizar `@IsUUID('4')` vs `@IsUUID()` (inconsistencia de
-  estrictez, inofensiva con seed v4).
-- [ ] `backend/src/modules/users/user.entity.ts` (clase `User`) parece **código muerto**:
-  duplicado legacy de `Usuario` (`usuario.entity.ts`), sin referencias ni `forFeature`.
-  Confirmar y eliminar. (Detectado al automatizar la invariante uuid — ambos tenían el
-  mismo `googleId`.)
 - [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
   (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los
   productos por serie o lote quedan fuera del listado y agregarlos a una sesión devuelve 400.

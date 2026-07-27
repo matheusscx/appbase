@@ -12,7 +12,7 @@ import {
 export class AplicarOverridesDto {
   @IsArray()
   @ArrayMinSize(1)
-  @IsUUID('4', { each: true })
+  @IsUUID(undefined, { each: true })
   itemGrupoIds: string[];
 
   @IsUUID()

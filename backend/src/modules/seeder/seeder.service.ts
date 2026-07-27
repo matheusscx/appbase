@@ -1455,6 +1455,12 @@ export class SeederService implements OnApplicationBootstrap {
 
   private async seedGarzones(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_garzones_mostrador_tenant
+      ON garzones (tenant_id) WHERE es_placeholder = true AND eliminado_el IS NULL
+    `);
+
     // pinHash = bcrypt(PIN, 10). PINs de dev: Ana=111111, Bruno=222222, Carla=333333.
     const garzones: Partial<Garzon>[] = [
       {

@@ -78,7 +78,6 @@ interface GrupoOpcionOverrideRow {
   cantidadDefault: string | null
   unidadCodigo?: string
   precioExtra: string
-  esPendiente: boolean
 }
 
 interface GrupoAsocRow {
@@ -260,7 +259,6 @@ const recargosOpts = ref<Opt[]>([])
 	    cantidadDefault: o.cantidad,
 	    unidadCodigo: o.unidadCodigo ?? undefined,
 	    precioExtra: o.precioExtra,
-	    esPendiente: o.cantidad === null,
 	  }))
 	}
 
@@ -782,7 +780,6 @@ async function abrirEditar(item: Item) {
           cantidadDefault: o.cantidadDefault,
           unidadCodigo: o.unidadCodigo ?? undefined,
           precioExtra: o.precioExtra,
-          esPendiente: o.esPendiente,
         })),
       })),
       clasificacionTributaria: detalle.clasificacionTributaria ?? 'afecto',

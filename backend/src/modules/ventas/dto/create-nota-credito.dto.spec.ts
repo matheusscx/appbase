@@ -27,6 +27,18 @@ describe('CreateNotaCreditoDto', () => {
     expect(errores.some((e) => e.property === 'monto')).toBe(true);
   });
 
+  it('rechaza monto en 0', async () => {
+    const dto = plainToInstance(CreateNotaCreditoDto, { monto: '0' });
+    const errores = await validate(dto);
+    expect(errores.some((e) => e.property === 'monto')).toBe(true);
+  });
+
+  it('rechaza monto negativo', async () => {
+    const dto = plainToInstance(CreateNotaCreditoDto, { monto: '-5000' });
+    const errores = await validate(dto);
+    expect(errores.some((e) => e.property === 'monto')).toBe(true);
+  });
+
   it('rechaza devoluciones con itemId inválido', async () => {
     const dto = plainToInstance(CreateNotaCreditoDto, {
       monto: '5000',

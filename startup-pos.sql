@@ -1382,6 +1382,10 @@ CREATE TABLE garzones (
     CONSTRAINT chk_garzones_tipo CHECK (tipo IN ('garzon', 'cocina', 'barra'))
 );
 CREATE INDEX idx_garzones_tenant ON garzones (tenant_id);
+-- Evita duplicar el placeholder "Mostrador" bajo concurrencia (find-or-create
+-- en asegurarMostrador, garzones.service.ts): un solo placeholder vivo por tenant.
+CREATE UNIQUE INDEX uq_garzones_mostrador_tenant
+  ON garzones (tenant_id) WHERE es_placeholder = true AND eliminado_el IS NULL;
 
 -- Propina separada de la venta (SII): 1 fila por cierre de mesa (incluso tip $0).
 -- Depende de garzones + ventas; se declara aquí tras garzones.

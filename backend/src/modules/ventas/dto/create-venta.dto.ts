@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
+import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
 
@@ -65,7 +66,9 @@ export class PagoVentaDto {
   @IsUUID()
   metodoPagoId: string;
 
+  // Una línea de pago en $0 no aporta nada; el POS ya los omite al confirmar.
   @IsNumberString()
+  @IsDecimalPositivo()
   monto: string;
 
   @IsOptional()
