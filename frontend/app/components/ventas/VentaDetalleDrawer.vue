@@ -119,6 +119,7 @@ const metodos = ref<MetodoPago[]>([])
 const loading = ref(false)
 const abonoOpen = ref(false)
 const ncOpen = ref(false)
+const anularOpen = ref(false)
 const permissionsStore = usePermissionsStore()
 
 const montoPagado = computed(() => {
@@ -159,6 +160,19 @@ const puedeCrearNC = computed(() =>
   && !esNotaCredito.value
   && new Decimal(disponibleNC.value).gt(0)
   && permissionsStore.can('Ventas', 'Nota de crédito'),
+)
+
+/**
+ * Espeja el subconjunto seguro que valida el backend: pendiente, sin pagos y sin
+ * documento tributario. El backend es el que manda (el guard vive ahí); esto
+ * evita ofrecer un botón que siempre daría 400.
+ */
+const puedeAnular = computed(() =>
+  !!venta.value
+  && venta.value.estado === 'pendiente'
+  && venta.value.pagos.length === 0
+  && !venta.value.tipoDocumento
+  && permissionsStore.can('Ventas', 'Anular'),
 )
 
 const totalReembolsado = computed(() => {
@@ -278,6 +292,13 @@ function onAbonoSuccess(payload: {
     new Decimal(0),
   )
   cajaStore.aplicarCobroLocal(neto.toFixed(4), payload.pagos.length)
+  emitPatch()
+}
+
+function onAnularSuccess(payload: { estado: string }) {
+  anularOpen.value = false
+  if (!venta.value) return
+  venta.value.estado = payload.estado
   emitPatch()
 }
 
@@ -628,6 +649,14 @@ function onNcSuccess(payload: {
         Cerrar
       </UButton>
       <UButton
+        v-if="puedeAnular"
+        label="Anular"
+        icon="i-lucide-ban"
+        color="error"
+        variant="outline"
+        @click="() => { anularOpen = true }"
+      />
+      <UButton
         v-if="puedeCrearNC"
         label="Nota de crédito"
         icon="i-lucide-file-minus"
@@ -651,6 +680,13 @@ function onNcSuccess(payload: {
     :saldo="saldo"
     :metodos="metodos"
     @success="onAbonoSuccess"
+  />
+
+  <VentasAnularVentaModal
+    v-if="venta"
+    v-model:open="anularOpen"
+    :venta-id="venta.id"
+    @success="onAnularSuccess"
   />
 
   <VentasNotaCreditoModal

@@ -426,7 +426,10 @@ La venta lleva un campo `canal` (`'fisico'` | `'online'`) que determina el flujo
 - (sin `borrador`: la venta en construcción es la `cuenta` de salones)
 - `pendiente` — confirmada, esperando pago (canal físico)
 - `pagada` — pago recibido y confirmado. Las ventas online llegan directamente aquí.
-- `cancelada` — anulada
+- `cancelada` — anulada. **Solo desde `pendiente`, sin pagos y sin documento tributario**
+  (`POST /ventas/:id/anular`, permiso propio `Ventas/Anular`, motivo obligatorio). Una
+  venta cobrada o ya documentada no se anula: se revierte con nota de crédito, porque el
+  SII no permite anular un DTE aceptado.
 
 **Nota de crédito:** puede ser total (anula la venta completa) o parcial (anula parte). Referencia a la venta original mediante `venta_referencia_id` en la tabla `ventas`.
 

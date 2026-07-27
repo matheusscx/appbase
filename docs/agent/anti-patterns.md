@@ -448,6 +448,33 @@ expect(
 Dos tests con títulos distintos y setup idéntico son un solo test. Un branch de SQL
 (columna equivocada, `WHERE` que nunca matchea) solo lo prueba la base real.
 
+### ❌ Cambiar un vocabulario compartido y actualizar solo los consumidores del módulo que tenés delante
+
+Un valor de un enum, un motivo del kardex, un estado: viven en **más lugares que su
+módulo**. Pasó dos veces en jul-2026, las dos con el mismo síntoma —el gate completo en
+verde y la feature rota— y las dos las cazó la revisión independiente, no un test.
+
+```
+// Sacar `borrador` de EstadoVenta: se limpiaron pages/ventas y components/ventas…
+// …y quedó vivo en pages/pagos/index.vue, que ofrecía el filtro y recibía 400.
+
+// Agregar el motivo `anulacion` al kardex: se escribía bien, pero
+// find-movimientos.dto.ts seguía con el whitelist viejo (@IsIn) →
+// GET /inventario/movimientos?motivo=anulacion respondía 400.
+```
+
+**Antes de tocar un valor compartido, greapear el repo ENTERO** (no la carpeta del
+módulo) y clasificar cada consumidor en dos grupos, porque no todos van:
+
+- **Lectura** (filtros, whitelists de query, desplegables de consulta, mapas de
+  color/etiqueta) → casi siempre hay que actualizarlos.
+- **Escritura** (DTOs de creación manual, selectores de formulario) → a veces el valor
+  nuevo **no corresponde**: `anulacion` no va en el ajuste manual de stock, porque nadie
+  la elige a mano — la genera el flujo.
+
+Un valor nuevo que se escribe pero no se puede consultar deja media feature invisible, y
+la doc del mismo commit suele afirmar que funciona.
+
 ### ❌ Test que pasa por una razón distinta de la que dice probar
 
 Un test verde no prueba nada si el escenario dispara **otra** regla antes de llegar a la

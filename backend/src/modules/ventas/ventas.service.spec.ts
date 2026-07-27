@@ -1364,6 +1364,127 @@ describe('VentasService', () => {
       );
     });
 
+    describe('cancelar()', () => {
+      const cancelarParams = {
+        tenantId: TENANT_ID,
+        usuarioId: USUARIO_ID,
+        ventaId: VENTA_ORIG_ID,
+        motivo: 'Cliente se arrepintió antes de pagar',
+        reponerStock: true,
+      };
+      // Venta anulable: pendiente, sin documento. Los pagos se controlan con
+      // `conPagos` porque son otra query.
+      const ventaAnulable = {
+        ...ventaOriginalRow,
+        estado: 'pendiente',
+        tipo_documento_id: null,
+      };
+      let conPagos: unknown[];
+      let detallesStock: unknown[];
+
+      beforeEach(() => {
+        conPagos = [];
+        detallesStock = [
+          {
+            item_id: ITEM_ID,
+            cantidad: '2',
+            descripcion: 'Smartphone',
+            modo_inventario: 'cantidad',
+          },
+        ];
+        ventaRows = [ventaAnulable];
+        ncManager.query.mockImplementation((sql: string) => {
+          if (sql.includes('FOR UPDATE')) return Promise.resolve(ventaRows);
+          if (sql.includes('FROM pagos')) return Promise.resolve(conPagos);
+          if (sql.includes('modo_inventario'))
+            return Promise.resolve(detallesStock);
+          return Promise.resolve([]);
+        });
+      });
+
+      it('anula, repone el stock y deja el rastro de quién y por qué', async () => {
+        const res = await service.cancelar(cancelarParams);
+
+        expect(res.estado).toBe(EstadoVenta.CANCELADA);
+        expect(res.stockRepuesto).toBe(true);
+        expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
+          ncManager,
+          expect.objectContaining({
+            itemId: ITEM_ID,
+            tipo: 'entrada',
+            motivo: 'anulacion',
+            cantidad: '2',
+          }),
+        );
+        const update = ncManager.query.mock.calls.find((c) =>
+          String(c[0]).includes('UPDATE ventas'),
+        );
+        expect(update?.[1]).toEqual([
+          EstadoVenta.CANCELADA,
+          USUARIO_ID,
+          cancelarParams.motivo,
+          VENTA_ORIG_ID,
+        ]);
+      });
+
+      it('con reponerStock=false no toca el inventario', async () => {
+        const res = await service.cancelar({
+          ...cancelarParams,
+          reponerStock: false,
+        });
+
+        expect(res.stockRepuesto).toBe(false);
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['pagada', /Solo se anula una venta pendiente/],
+        ['pagada_parcial', /Solo se anula una venta pendiente/],
+        ['cancelada', /Solo se anula una venta pendiente/],
+      ])('rechaza una venta en estado %s', async (estado, mensaje) => {
+        ventaRows = [{ ...ventaAnulable, estado }];
+        await expect(service.cancelar(cancelarParams)).rejects.toThrow(mensaje);
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('rechaza una venta que ya tiene documento tributario', async () => {
+        ventaRows = [{ ...ventaAnulable, tipo_documento_id: 'doc-uuid' }];
+        await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+          /documento tributario: se revierte con nota de crédito/,
+        );
+      });
+
+      it('rechaza una venta con pagos registrados', async () => {
+        conPagos = [{ '1': 1 }];
+        await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+          /pagos registrados: se revierte con nota de crédito/,
+        );
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('rechaza reponer stock de un ítem serializado, antes de mover nada', async () => {
+        detallesStock = [
+          {
+            item_id: ITEM_ID,
+            cantidad: '1',
+            descripcion: 'Notebook',
+            modo_inventario: 'serie',
+          },
+          {
+            item_id: 'otro',
+            cantidad: '1',
+            descripcion: 'Mouse',
+            modo_inventario: 'cantidad',
+          },
+        ];
+        await expect(service.cancelar(cancelarParams)).rejects.toThrow(
+          /usa inventario por serie/,
+        );
+        // Valida TODAS las líneas antes de mover: no deja media reposición hecha.
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+    });
+
     describe('crearNotaCreditoDesdeVenta()', () => {
       it('feliz sin dinero: delega en crearNotaCredito y devuelve movimientoCajaId null', async () => {
         const res = await service.crearNotaCreditoDesdeVenta(baseParams);

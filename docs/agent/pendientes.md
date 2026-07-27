@@ -272,14 +272,14 @@ Lo de abajo es **trabajo pendiente con la forma ya definida**, no preguntas abie
   efectivo)`; excederlo da 422. Acota el **dinero, no el documento**: la NC sigue
   emitiéndose por el total (regla dura del SII). La pata de tarjeta ya existe en
   `pasarela` y no pasa por acá — componer ambas es el tema abierto de arriba.
-- [ ] **Implementar `cancelada` en su subconjunto seguro** (backend + frontend) — anular
-  solo una venta `pendiente`, **sin pagos** y **sin documento emitido**, con motivo
-  obligatorio (Toteat exige 10 caracteres mínimo). Es lo inequívocamente anulable hoy y lo
-  seguirá siendo tras integrar el SII: no hay hecho fiscal que compensar ni dinero que
-  devolver. Todo lo demás ya tiene camino por la nota de crédito. Cierra el agujero real:
-  hoy una venta mal ingresada obliga a emitir un documento tributario para deshacer un
-  tipeo. **No** modelar el plazo de 6 meses de la Ley 21.398 (se cuenta desde la entrega
-  del bien): es infraestructura DTE especulativa, prohibida por ADR-010.
+- [x] ~~**Implementar `cancelada` en su subconjunto seguro**~~ — cerrado 2026-07-27:
+  `POST /ventas/:id/anular` con permiso propio `Ventas/Anular`, motivo obligatorio (10
+  caracteres) y auditoría (`cancelada_el`, `cancelada_por_usuario_id`,
+  `motivo_cancelacion`). Repone stock por default con motivo **`anulacion`** —distinto de
+  `devolucion`— y admite `reponerStock: false` para mercadería no vendible. Reponer exige
+  `modo_inventario='cantidad'` en todas las líneas: serie y lote se rechazan con el mismo
+  mensaje que la devolución de una NC. No se modeló el plazo de 6 meses de la Ley 21.398
+  (infraestructura DTE especulativa, prohibida por ADR-010).
 - [x] ~~**Sacar `borrador` del enum y de la doc**~~ — cerrado 2026-07-27: fuera del enum
   de TypeScript, del tipo `estado_venta` de Postgres, de los mapas de color/etiqueta y del
   filtro del frontend, y de `ventas.md`/`PRODUCTO.md`. Si algún día hace falta parquear un

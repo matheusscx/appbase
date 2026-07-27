@@ -19,11 +19,15 @@ El stock de productos es un activo crítico: cambios sin trazabilidad generan me
 ### Scope
 
 **Included in this version:**
-- Registro de movimientos `entrada`/`salida` con motivos (`compra`, `venta`, `devolucion`, `merma`, `ajuste_manual`, `inventario_inicial`, `recuento`)
+- Registro de movimientos `entrada`/`salida` con motivos (`compra`, `venta`, `devolucion`, `anulacion`, `merma`, `ajuste_manual`, `inventario_inicial`, `recuento`)
 - Endpoint `GET /inventario/movimientos` con filtros por item, motivo y rango de fechas
 - Endpoint `PATCH /items/:id/stock` actualizado para registrar motivo + comentario
 - Creación automática de movimiento `inventario_inicial` al crear un producto con stock > 0
 - Integración con ventas: cada línea vendida genera `salida`/`motivo='venta'` de forma automática (transacción única)
+- **`anulacion` vs `devolucion`** — anular una venta mal ingresada (`POST /ventas/:id/anular`)
+  repone con `entrada`/`motivo='anulacion'`; que un cliente devuelva mercadería genera
+  `motivo='devolucion'`. Son eventos distintos y el kardex los separa: confundirlos ensucia
+  el análisis de mermas y no se recupera después.
 - Integración con recuento de inventario: `POST /recuentos/:id/aplicar` genera un movimiento
   `entrada`/`salida` con `motivo='recuento'` por cada línea contada con diferencia — ver
   "Regla del recuento: delta, no absoluto" más abajo

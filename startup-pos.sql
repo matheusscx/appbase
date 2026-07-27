@@ -744,7 +744,7 @@ CREATE TABLE "movimientos_inventario" (
   "tenant_id"        UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "item_id"          UUID          NOT NULL REFERENCES "items" ("item_id"),
   "tipo"             TEXT          NOT NULL,   -- 'entrada' | 'salida' | 'ajuste'
-  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
+  "motivo"           TEXT          NOT NULL,   -- 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
   "cantidad"         NUMERIC(18,4) NOT NULL,   -- siempre positiva; el tipo define el signo
   "stock_anterior"   NUMERIC(18,4) NOT NULL,
   "stock_resultante" NUMERIC(18,4) NOT NULL,
@@ -1005,6 +1005,11 @@ CREATE TABLE "ventas" (
   "base_ventas_sin_impuestos" NUMERIC(18,4) NOT NULL DEFAULT 0,
   "venta_referencia_id"   UUID          REFERENCES "ventas" ("venta_id"),  -- para notas de crédito
   "comentario"            TEXT,
+  -- Anulación (estado 'cancelada'). Solo aplica a ventas 'pendiente' sin pagos y
+  -- sin documento tributario; el resto se revierte con nota de crédito.
+  "cancelada_el"              TIMESTAMPTZ,
+  "cancelada_por_usuario_id"  UUID      REFERENCES "usuarios" ("usuario_id"),
+  "motivo_cancelacion"        TEXT,
   "creado_el"             TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"        TIMESTAMPTZ,
   "eliminado_el"          TIMESTAMPTZ

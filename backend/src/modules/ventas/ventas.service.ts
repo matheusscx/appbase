@@ -597,6 +597,116 @@ export class VentasService {
   }
 
   /**
+   * Anula una venta — el `void` del dominio, distinto de la devolución.
+   *
+   * Acotada al subconjunto que es seguro **hoy y después de integrar el SII**:
+   * venta `pendiente`, **sin pagos** y **sin documento tributario**. Ahí no hay
+   * hecho fiscal que compensar ni dinero que devolver, así que se puede deshacer
+   * de verdad. Todo lo demás se revierte con nota de crédito, como exige el SII:
+   * emitida y aceptada la boleta, el documento no se anula, se compensa.
+   *
+   * Decidido 2026-07-27 tras investigación de mercado — ver
+   * `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`.
+   */
+  async cancelar(params: {
+    tenantId: string;
+    usuarioId: string;
+    ventaId: string;
+    motivo: string;
+    reponerStock: boolean;
+  }): Promise<{
+    id: string;
+    estado: EstadoVenta;
+    stockRepuesto: boolean;
+    motivo: string;
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      const venta = await this.lockVentaOriginal(
+        manager,
+        params.tenantId,
+        params.ventaId,
+      );
+
+      // Literal y no `EstadoVenta.PENDIENTE`: `lockVentaOriginal` devuelve la
+      // fila cruda, con `estado` como string (mismo criterio que `crearNotaCredito`).
+      if (venta.estado !== 'pendiente')
+        throw new BadRequestException(
+          `Solo se anula una venta pendiente (esta está "${venta.estado}"). Una venta cobrada se revierte con nota de crédito.`,
+        );
+      if (venta.tipo_documento_id)
+        throw new BadRequestException(
+          'La venta ya tiene documento tributario: se revierte con nota de crédito, no se anula.',
+        );
+      const conPagos: unknown[] = await manager.query(
+        `SELECT 1 FROM pagos
+          WHERE venta_id = $1 AND eliminado_el IS NULL
+          LIMIT 1`,
+        [params.ventaId],
+      );
+      if (conPagos.length)
+        throw new BadRequestException(
+          'La venta tiene pagos registrados: se revierte con nota de crédito, no se anula.',
+        );
+
+      if (params.reponerStock) {
+        const detalles: {
+          item_id: string;
+          cantidad: string;
+          descripcion: string | null;
+          modo_inventario: string | null;
+        }[] = await manager.query(
+          `SELECT d.item_id, d.cantidad, d.descripcion, ip.modo_inventario
+             FROM venta_detalles d
+             JOIN item_producto ip ON ip.item_id = d.item_id
+            WHERE d.venta_id = $1 AND d.eliminado_el IS NULL`,
+          [params.ventaId],
+        );
+        // Solo `cantidad`: reponer serie o lote exige saber qué unidades/lotes
+        // salieron y recrearlos. Misma frontera —y mismo mensaje— que la
+        // devolución de una nota de crédito, para no inventar un segundo camino.
+        for (const d of detalles) {
+          if (d.modo_inventario !== 'cantidad')
+            throw new BadRequestException(
+              `"${d.descripcion ?? d.item_id}" usa inventario por ${d.modo_inventario}: anulá sin reponer stock y registrá el ingreso manualmente desde Inventario.`,
+            );
+        }
+        for (const d of detalles) {
+          await this.inventarioService.registrarMovimiento(manager, {
+            tenantId: params.tenantId,
+            itemId: d.item_id,
+            tipo: 'entrada',
+            motivo: 'anulacion',
+            cantidad: d.cantidad,
+            usuarioId: params.usuarioId,
+            ventaId: params.ventaId,
+            comentario: params.motivo,
+          });
+        }
+      }
+
+      await manager.query(
+        `UPDATE ventas
+            SET estado = $1, cancelada_el = NOW(), cancelada_por_usuario_id = $2,
+                motivo_cancelacion = $3, actualizado_el = NOW()
+          WHERE venta_id = $4`,
+        [
+          EstadoVenta.CANCELADA,
+          params.usuarioId,
+          params.motivo,
+          params.ventaId,
+        ],
+      );
+
+      return {
+        id: params.ventaId,
+        estado: EstadoVenta.CANCELADA,
+        stockRepuesto: params.reponerStock,
+        motivo: params.motivo,
+      };
+    });
+  }
+
+  /**
    * Crea una nota de crédito interna (sin SII) por un reembolso de pasarela.
    * Los totales se COPIAN del monto reembolsado — nunca pasan por el motor de
    * precios — y la venta original no se modifica (queda `pagada`; la NC

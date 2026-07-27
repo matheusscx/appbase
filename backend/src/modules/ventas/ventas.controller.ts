@@ -19,6 +19,7 @@ import { VentasService } from './ventas.service';
 import { CreateVentaDto } from './dto/create-venta.dto';
 import { QueryVentasDto } from './dto/query-ventas.dto';
 import { CreateNotaCreditoDto } from './dto/create-nota-credito.dto';
+import { CancelarVentaDto } from './dto/cancelar-venta.dto';
 
 @ApiTags('ventas')
 @ApiBearerAuth()
@@ -50,6 +51,24 @@ export class VentasController {
       comentario: dto.comentario,
       devoluciones: dto.devoluciones,
       devolverDinero: dto.devolverDinero === true,
+    });
+  }
+
+  @Post(':id/anular')
+  @RequiresPermiso('Ventas', 'Anular')
+  async anular(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: CancelarVentaDto,
+  ) {
+    const u = req.user as JwtUser;
+    return this.ventasService.cancelar({
+      tenantId: u.tenantId ?? '',
+      usuarioId: u.id,
+      ventaId: id,
+      motivo: dto.motivo,
+      // Por defecto repone: no hacerlo pierde inventario en silencio.
+      reponerStock: dto.reponerStock !== false,
     });
   }
 

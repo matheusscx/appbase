@@ -68,6 +68,7 @@ const motivoOpts: Opt[] = [
   { label: 'Compra', value: 'compra' },
   { label: 'Venta', value: 'venta' },
   { label: 'Devolución', value: 'devolucion' },
+  { label: 'Anulación de venta', value: 'anulacion' },
   { label: 'Merma', value: 'merma' },
   { label: 'Ajuste manual', value: 'ajuste_manual' },
   { label: 'Ajuste de costo', value: 'ajuste_costo' },

@@ -5,6 +5,7 @@ const MOTIVOS = [
   'compra',
   'venta',
   'devolucion',
+  'anulacion',
   'merma',
   'ajuste_manual',
   'ajuste_costo',

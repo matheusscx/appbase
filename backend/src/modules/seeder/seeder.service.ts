@@ -579,6 +579,13 @@ export class SeederService implements OnApplicationBootstrap {
         permisoId: '550e8400-e29b-41d4-a716-446655440259',
         nombre: 'Liquidar',
       },
+      {
+        // Anular una venta pendiente sin pagos ni documento. Permiso propio y no
+        // `Actualizar`: es la operación más sensible del módulo y el mercado la
+        // trata aparte (en Toteat, por defecto solo el dueño).
+        permisoId: '550e8400-e29b-41d4-a716-446655440333',
+        nombre: 'Anular',
+      },
     ];
 
     for (const data of permisos) {
@@ -606,6 +613,7 @@ export class SeederService implements OnApplicationBootstrap {
     const PROPINAS = '550e8400-e29b-41d4-a716-446655440257';
     const CONFIGURAR = '550e8400-e29b-41d4-a716-446655440258';
     const LIQUIDAR = '550e8400-e29b-41d4-a716-446655440259';
+    const ANULAR = '550e8400-e29b-41d4-a716-446655440333';
     const VENTAS = '550e8400-e29b-41d4-a716-446655440058';
     const PAGOS = '550e8400-e29b-41d4-a716-446655440180';
     const INVENTARIO = '550e8400-e29b-41d4-a716-446655440181';
@@ -808,6 +816,11 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440220',
         moduloAppId: VENTAS,
         permisoId: NOTA_CREDITO,
+      },
+      {
+        moduloAppPermisoId: '550e8400-e29b-41d4-a716-446655440334',
+        moduloAppId: VENTAS,
+        permisoId: ANULAR,
       },
       // Salones (administración de estructura + operación de garzón)
       {

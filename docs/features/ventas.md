@@ -101,6 +101,39 @@ Response (201):
 - `400` — `metodoPagoId` no habilitado para el tenant (rollback completo)
 - `400` — stock insuficiente (rollback completo)
 
+### POST /api/ventas/:id/anular
+
+Anula una venta — el *void* del dominio, distinto de la devolución. Permiso propio
+`Ventas/Anular` (no `Actualizar`: es la operación más sensible del módulo y el mercado la
+trata aparte).
+
+```
+POST /api/ventas/{id}/anular
+Request: { "motivo": "Ingresada por error", "reponerStock": true }
+Response (201): { "id": "uuid", "estado": "cancelada", "stockRepuesto": true, "motivo": "..." }
+```
+
+**Solo aplica a una venta `pendiente`, sin pagos y sin documento tributario.** Ahí no hay
+hecho fiscal que compensar ni dinero que devolver, así que se puede deshacer de verdad —
+y sigue siendo válido después de integrar el SII, que no permite anular un DTE aceptado.
+Todo lo demás se revierte con nota de crédito.
+
+- `motivo` obligatorio, mínimo 10 caracteres: una anulación sin explicación no sirve como
+  auditoría. Queda en `ventas.motivo_cancelacion`, junto con `cancelada_el` y
+  `cancelada_por_usuario_id`.
+- `reponerStock` (default `true`) devuelve al kardex lo que la venta descontó, con motivo
+  **`anulacion`** — distinto de `devolucion`, porque anular una venta mal ingresada y que
+  un cliente devuelva mercadería son eventos distintos. En `false` el descuento original
+  queda como pérdida (equivalente a la "Anulación no Recuperable" de Toteat).
+- Reponer stock exige que **todas** las líneas sean `modo_inventario='cantidad'`; serie y
+  lote se rechazan con el mismo mensaje que la devolución de una NC (registrarlo a mano
+  desde Inventario). Se valida antes de mover nada: no deja media reposición hecha.
+
+**Errores:** `400` motivo corto · `400` estado distinto de `pendiente` · `400` con pagos ·
+`400` con documento tributario · `400` reponer stock de serie/lote · `403` sin permiso.
+
+Origen de la decisión: `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`.
+
 ### GET /api/ventas/resumen
 
 KPIs globales del tenant (no dependen de la página actual del listado).
@@ -204,11 +237,7 @@ Todas con soft delete (`eliminado_el`) y triada de auditoría. PKs UUID con `typ
 en `cuenta`/`cuenta_lineas` de salones, que es el *open ticket* del dominio; un estado
 paralelo en `ventas` sería una segunda forma de resolver lo mismo.
 
-⚠️ `cancelada` está en el enum y en esta tabla pero **todavía ningún punto del backend la
-asigna**. Decidido el 2026-07-27 tras investigación de mercado
-(`docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`): se implementa
-acotada a ventas `pendiente` sin pagos ni documento emitido; el resto se revierte con nota
-de crédito, como exige el SII.
+`cancelada` la asigna `POST /ventas/:id/anular` (ver abajo), acotada al subconjunto seguro.
 
 El saldo se recalcula en cada abono sobre **lo aplicado a la venta**, no sobre el bruto
 cobrado: `saldo = total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta')`.

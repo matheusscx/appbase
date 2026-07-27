@@ -22,7 +22,7 @@ export class MovimientoInventario {
   tipo: string; // 'entrada' | 'salida' | 'ajuste'
 
   @Column({ type: 'text' })
-  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
+  motivo: string; // 'compra' | 'venta' | 'devolucion' | 'anulacion' | 'merma' | 'ajuste_manual' | 'inventario_inicial' | 'ajuste_costo' | 'recuento'
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;

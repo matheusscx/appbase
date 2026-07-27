@@ -119,6 +119,16 @@ export class Venta {
   @Column({ type: 'text', nullable: true })
   comentario: string | null;
 
+  /** Auditoría de la anulación. Ver `VentasService.cancelar`. */
+  @Column({ name: 'cancelada_el', type: 'timestamptz', nullable: true })
+  canceladaEl: Date | null;
+
+  @Column({ name: 'cancelada_por_usuario_id', type: 'uuid', nullable: true })
+  canceladaPorUsuarioId: string | null;
+
+  @Column({ name: 'motivo_cancelacion', type: 'text', nullable: true })
+  motivoCancelacion: string | null;
+
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;
 

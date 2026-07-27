@@ -7,8 +7,6 @@ import { AppModule } from '../src/app.module';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const USUARIO_ID = '550e8400-e29b-41d4-a716-446655440056'; // admin Paris
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116'; // Smartphone (stock = 10)
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
@@ -103,6 +101,19 @@ async function getAplicadoVenta(
     [ventaId],
   );
   return parseFloat(rows[0]?.total ?? '0');
+}
+
+/**
+ * Id del usuario autenticado, derivado del MISMO email con el que se loguea el
+ * spec. Estaba hardcodeado en una constante marcada como no usada, y apuntaba a
+ * otro usuario: nadie lo notó hasta que un test lo consumió de verdad.
+ */
+async function getUsuarioId(ds: DataSource): Promise<string> {
+  const rows: { usuario_id: string }[] = await ds.query(
+    `SELECT usuario_id FROM usuarios WHERE correo = $1 AND eliminado_el IS NULL`,
+    [ADMIN_EMAIL],
+  );
+  return rows[0].usuario_id;
 }
 
 async function getStock(ds: DataSource, itemId: string): Promise<number> {
@@ -546,6 +557,129 @@ describe('Ventas (e2e)', () => {
       expect(propinas).toHaveLength(0);
       // ...y la transacción revirtió entera.
       expect(await getStock(ds, ITEM_ID)).toBe(stockAntes);
+    });
+  });
+
+  describe('POST /ventas/:id/anular', () => {
+    /** Venta pendiente (sin pagos) — el único caso anulable. */
+    async function crearPendiente(): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ itemId: ITEM_ID, cantidad: '2' }], pagos: [] })
+        .expect(201);
+      return (res.body as { id: string }).id;
+    }
+
+    it('anula, repone el stock y persiste quién y por qué', async () => {
+      const stockAntes = await getStock(ds, ITEM_ID);
+      const ventaId = await crearPendiente();
+      expect(await getStock(ds, ITEM_ID)).toBe(stockAntes - 2);
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'Ingresada por error en la caja 2' })
+        .expect(201);
+
+      expect((res.body as { estado: string }).estado).toBe('cancelada');
+      // El stock volvió: la anulación no puede dejar el inventario corto.
+      expect(await getStock(ds, ITEM_ID)).toBe(stockAntes);
+
+      const rows: Array<{
+        estado: string;
+        motivo_cancelacion: string | null;
+        cancelada_por_usuario_id: string | null;
+        cancelada_el: Date | null;
+      }> = await ds.query(
+        `SELECT estado, motivo_cancelacion, cancelada_por_usuario_id, cancelada_el
+           FROM ventas WHERE venta_id = $1`,
+        [ventaId],
+      );
+      expect(rows[0].estado).toBe('cancelada');
+      expect(rows[0].motivo_cancelacion).toBe(
+        'Ingresada por error en la caja 2',
+      );
+      expect(rows[0].cancelada_por_usuario_id).toBe(await getUsuarioId(ds));
+      expect(rows[0].cancelada_el).not.toBeNull();
+
+      // El kardex distingue la anulación de una devolución de cliente.
+      const mov: Array<{ tipo: string; motivo: string }> = await ds.query(
+        `SELECT tipo, motivo FROM movimientos_inventario
+          WHERE venta_id = $1 AND motivo = 'anulacion' AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      expect(mov).toHaveLength(1);
+      expect(mov[0].tipo).toBe('entrada');
+    });
+
+    it('el movimiento de anulación se puede filtrar desde el kardex', async () => {
+      // El motivo nuevo hay que agregarlo al whitelist de `FindMovimientosDto`:
+      // escribirlo en el kardex y no poder consultarlo deja la mitad de la
+      // feature invisible. Sin este test, el 400 solo lo veía un humano.
+      const ventaId = await crearPendiente();
+      await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'Anulación para verificar el kardex' })
+        .expect(201);
+
+      const res = await request(app.getHttpServer())
+        .get('/api/inventario/movimientos?motivo=anulacion')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      const movs =
+        (res.body as { data?: Array<{ motivo: string }> }).data ??
+        (res.body as Array<{ motivo: string }>);
+      expect(movs.length).toBeGreaterThan(0);
+      expect(movs.every((m) => m.motivo === 'anulacion')).toBe(true);
+    });
+
+    it('con reponerStock=false anula sin devolver el stock', async () => {
+      const ventaId = await crearPendiente();
+      const stockTrasVenta = await getStock(ds, ITEM_ID);
+
+      await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          motivo: 'Mercadería dañada, no vuelve a stock',
+          reponerStock: false,
+        })
+        .expect(201);
+
+      expect(await getStock(ds, ITEM_ID)).toBe(stockTrasVenta);
+    });
+
+    it('rechaza un motivo demasiado corto', async () => {
+      const ventaId = await crearPendiente();
+      await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'error' })
+        .expect(400);
+    });
+
+    it('rechaza anular una venta ya pagada', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1069810.0000' }],
+        })
+        .expect(201);
+
+      const anular = await request(app.getHttpServer())
+        .post(`/api/ventas/${(res.body as { id: string }).id}/anular`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ motivo: 'Intento de anular una venta cobrada' })
+        .expect(400);
+
+      expect((anular.body as { message: string }).message).toMatch(
+        /Solo se anula una venta pendiente/,
+      );
     });
   });
 
