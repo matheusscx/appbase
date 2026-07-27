@@ -2350,6 +2350,7 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            grupo_modificador_id: GRUPO_ID,
             item_id: OPCION_ID,
             nombre: 'Grande',
             cantidad: '1',
@@ -2369,6 +2370,51 @@ describe('ItemsService', () => {
       expect(res.grupos[0].opciones[0].nombre).toBeDefined();
     });
 
+    it('carga las opciones de todos los grupos en una sola query', async () => {
+      // Guarda contra la regresión al N+1: antes se disparaba una query por
+      // grupo asociado al ítem.
+      const GRUPO_B = 'grupo-b-uuid';
+      const OPCION_B = 'opcion-b-uuid';
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: GRUPO_ID, nombre: 'Tamaño', min: 1, max: 1 },
+          { grupo_modificador_id: GRUPO_B, nombre: 'Salsa', min: 1, max: 1 },
+        ])
+        .mockResolvedValueOnce([
+          {
+            grupo_modificador_id: GRUPO_ID,
+            item_id: OPCION_ID,
+            nombre: 'Grande',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '1500.0000',
+          },
+          {
+            grupo_modificador_id: GRUPO_B,
+            item_id: OPCION_B,
+            nombre: 'BBQ',
+            cantidad: '1',
+            unidad_codigo: null,
+            precio_extra: '500.0000',
+          },
+        ]);
+
+      const res = await service.resolverGruposDeItem(
+        managerMock as any,
+        TENANT,
+        ITEM_ID,
+        [
+          { grupoId: GRUPO_ID, opciones: [{ itemId: OPCION_ID, unidades: 1 }] },
+          { grupoId: GRUPO_B, opciones: [{ itemId: OPCION_B, unidades: 1 }] },
+        ],
+      );
+
+      // 1 query de grupos asociados + 1 de opciones, con 2 grupos: no 3.
+      expect(managerMock.query).toHaveBeenCalledTimes(2);
+      expect(res.precioExtraTotal).toBe('2000.0000');
+      expect(res.grupos).toHaveLength(2);
+    });
+
     it('rechaza Σ unidades fuera de [min, max]', async () => {
       managerMock.query
         .mockResolvedValueOnce([
@@ -2376,6 +2422,7 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            grupo_modificador_id: GRUPO_ID,
             item_id: OPCION_ID,
             nombre: 'Grande',
             cantidad: '1',
@@ -2398,6 +2445,7 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            grupo_modificador_id: GRUPO_ID,
             item_id: OPCION_ID,
             nombre: 'Grande',
             cantidad: '1',
@@ -2438,6 +2486,7 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            grupo_modificador_id: PROTEINA_ID,
             item_id: CHULETA_ID,
             nombre: 'Chuleta',
             cantidad: '1',
@@ -2445,6 +2494,7 @@ describe('ItemsService', () => {
             precio_extra: '1500.0000',
           },
           {
+            grupo_modificador_id: PROTEINA_ID,
             item_id: CARNE_ID,
             nombre: 'Carne',
             cantidad: '1',
@@ -2583,6 +2633,7 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            grupo_modificador_id: 'G1',
             item_id: ITEM_OPCION,
             nombre: 'Carne',
             cantidad: '250',
@@ -2616,6 +2667,7 @@ describe('ItemsService', () => {
         ])
         .mockResolvedValueOnce([
           {
+            grupo_modificador_id: 'G1',
             item_id: ITEM_OPCION,
             nombre: 'Carne',
             cantidad: null,

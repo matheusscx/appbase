@@ -115,6 +115,18 @@ function buildManagerMock() {
   };
 }
 
+/**
+ * `ItemsService.cargarBasePorIds` devuelve un Map id→item. Este helper conserva
+ * la intención de los tests que antes mockeaban `findOne`: cualquier id pedido
+ * resuelve al mismo ítem.
+ */
+function mapaDe(item: unknown) {
+  // `as never` a propósito: los tests pasan ítems parciales, y un Map<string,
+  // never> es asignable al Map tipado que declara `cargarBasePorIds`.
+  return (_tenantId: string, ids: string[]) =>
+    Promise.resolve(new Map(ids.map((id) => [id, item as never])));
+}
+
 describe('VentasService', () => {
   let service: VentasService;
   let cajaService: jest.Mocked<CajaService>;
@@ -191,6 +203,7 @@ describe('VentasService', () => {
           provide: ItemsService,
           useValue: {
             findOne: jest.fn().mockResolvedValue(mockItem),
+            cargarBasePorIds: jest.fn().mockImplementation(mapaDe(mockItem)),
             resolverPersonalizacionReceta: jest.fn(),
             resolverPersonalizacionCombo: jest.fn(),
             venderIngredientesReceta: jest.fn().mockResolvedValue([]),
@@ -259,6 +272,36 @@ describe('VentasService', () => {
       expect(result.estado).toBe(EstadoVenta.PAGADA);
     });
 
+    it('resuelve TODO el carrito en una sola llamada, no una por línea', async () => {
+      // Guarda contra la regresión al N+1: `findOne` por línea disparaba 4+
+      // queries por ítem para construir colecciones que la venta ni lee.
+      const dtoTresLineas = {
+        ...baseDto,
+        lineas: [
+          { itemId: 'item-a', cantidad: '1' },
+          { itemId: 'item-b', cantidad: '2' },
+          { itemId: 'item-c', cantidad: '1' },
+        ],
+      };
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: dtoTresLineas.lineas.map((l) => ({
+          ...mockResultadoVenta.lineas[0],
+          itemId: l.itemId,
+        })),
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, dtoTresLineas);
+
+      expect(itemsService.cargarBasePorIds).toHaveBeenCalledTimes(1);
+      expect(itemsService.cargarBasePorIds).toHaveBeenCalledWith(TENANT_ID, [
+        'item-a',
+        'item-b',
+        'item-c',
+      ]);
+      expect(itemsService.findOne).not.toHaveBeenCalled();
+    });
+
     it('bloquea la caja física dentro de la transacción antes de escribir', async () => {
       // `findActiva` lee por repositorio, fuera del manager transaccional: sin el
       // lock, un cierre concurrente puede commitear mientras se procesa la venta
@@ -307,10 +350,12 @@ describe('VentasService', () => {
     });
 
     it('congela la clasificación tributaria del item en el detalle', async () => {
-      itemsService.findOne.mockResolvedValueOnce({
-        ...mockItem,
-        clasificacionTributaria: 'exento',
-      } as any);
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        mapaDe({
+          ...mockItem,
+          clasificacionTributaria: 'exento',
+        }),
+      );
       const manager = buildManagerMock();
       dataSourceMock.transaction.mockImplementationOnce(
         (cb: (m: typeof manager) => unknown) => cb(manager),
@@ -394,20 +439,24 @@ describe('VentasService', () => {
     });
 
     it('no llama registrarMovimiento del inventario para items tipo servicio', async () => {
-      itemsService.findOne.mockResolvedValueOnce({
-        ...mockItem,
-        tipo: 'servicio',
-      } as never);
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        mapaDe({
+          ...mockItem,
+          tipo: 'servicio',
+        }),
+      );
       await service.crear(TENANT_ID, USUARIO_ID, baseDto);
 
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
     it('rechaza línea con item tipo ingrediente', async () => {
-      itemsService.findOne.mockResolvedValueOnce({
-        ...mockItem,
-        tipo: 'ingrediente',
-      } as never);
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        mapaDe({
+          ...mockItem,
+          tipo: 'ingrediente',
+        }),
+      );
       await expect(
         service.crear(TENANT_ID, USUARIO_ID, baseDto as any),
       ).rejects.toThrow(
@@ -539,7 +588,7 @@ describe('VentasService', () => {
     };
 
     it('delega en itemsService.venderIngredientesReceta y no llama registrarMovimiento directo', async () => {
-      itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
+      itemsService.cargarBasePorIds.mockImplementationOnce(mapaDe(mockReceta));
       await service.crear(TENANT_ID, USUARIO_ID, dtoReceta);
 
       expect(itemsService.venderIngredientesReceta).toHaveBeenCalledWith(
@@ -556,7 +605,7 @@ describe('VentasService', () => {
     });
 
     it('agrega advertenciasReceta a la respuesta cuando hay advertencias', async () => {
-      itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
+      itemsService.cargarBasePorIds.mockImplementationOnce(mapaDe(mockReceta));
       (
         itemsService.venderIngredientesReceta as jest.Mock
       ).mockResolvedValueOnce([
@@ -597,7 +646,7 @@ describe('VentasService', () => {
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4000.0000' }],
       };
 
-      itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
+      itemsService.cargarBasePorIds.mockImplementationOnce(mapaDe(mockReceta));
       (
         itemsService.resolverPersonalizacionReceta as jest.Mock
       ).mockResolvedValueOnce({
@@ -695,7 +744,7 @@ describe('VentasService', () => {
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '3500.0000' }],
       };
 
-      itemsService.findOne.mockResolvedValueOnce(mockReceta as never);
+      itemsService.cargarBasePorIds.mockImplementationOnce(mapaDe(mockReceta));
       // Simula el comportamiento real de resolverGruposDeItem: con
       // gruposDto=undefined evalúa cada grupo asociado contra cero unidades
       // elegidas y lanza si algún grupo tiene min >= 1.
@@ -725,7 +774,7 @@ describe('VentasService', () => {
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '9000.0000' }],
       };
 
-      itemsService.findOne.mockResolvedValueOnce(mockCombo as never);
+      itemsService.cargarBasePorIds.mockImplementationOnce(mapaDe(mockCombo));
       (
         itemsService.resolverPersonalizacionCombo as jest.Mock
       ).mockRejectedValueOnce(

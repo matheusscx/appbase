@@ -161,21 +161,30 @@ información, no diffs. Orden = severidad.
   nota de crédito. Los tres caminos que escriben en `movimientos_caja` sostienen ahora el
   lock hasta el commit. La caja virtual queda deliberadamente fuera: nunca se cierra y
   bloquearla serializaría todas las ventas online del tenant.
-- [ ] **N+1 al crear una venta: un `itemsService.findOne` por línea del carrito**
-  (backend, `ventas/ventas.service.ts:119-121`) — `Promise.all(dto.lineas.map(l =>
-  findOne(...)))` en el camino caliente del POS; cada `findOne` abre varias queries
-  propias (impuestos, recargos, descuentos, y receta/combo). Un ticket de 10 líneas
-  dispara decenas de queries para resolver ítems que ya se conocen por `itemId`. Es el
-  anti-patrón "N+1 indirecto" de `docs/agent/anti-patterns.md`. Cierre: batch
-  `WHERE item_id = ANY($1)` + `Map` en memoria.
+- [x] ~~**N+1 al crear una venta: un `itemsService.findOne` por línea del carrito**~~ —
+  cerrado 2026-07-27 con `ItemsService.cargarBasePorIds`: **una** query para todo el
+  carrito. Resultó peor de lo reportado: la venta usa solo campos del row base, así que
+  las 3-6 queries extra que `findOne` hacía por ítem (impuestos, recargos, descuentos,
+  ingredientes, componentes, grupos) construían colecciones que se descartaban enteras.
 - [ ] **`registrarAbono` sin `FOR UPDATE` sobre la venta ni sobre la suma de pagos**
   (backend, `pagos/pagos.service.ts:275-320`) — dos abonos concurrentes sobre la misma
   venta leen el mismo saldo y ambos lo aplican: sobre-pago que ninguno de los dos ve.
   El repo ya tiene el patrón (`lockVentaOriginal`, `bloquearCajaAbierta`). Distinto del
   bug de fuente de datos de arriba: ese es *qué* se lee, este es *sin qué garantía*.
-- [ ] **N+1 al resolver personalización de recetas/combos**
-  (backend, `ventas/ventas.service.ts:197-218`) — mismo patrón que el anterior, una
-  resolución independiente por línea `receta`/`combo`. Mismo camino caliente.
+- [~] **N+1 al resolver personalización de recetas/combos** — parcialmente cerrado
+  2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
+  `resolverGruposDeItem` disparaba una query **por cada grupo de modificadores** del ítem.
+  Ese se cerró (`unnest` de pares grupo↔item_grupo en una sola query) y beneficia a los
+  **tres** llamadores —ventas, salones y combos— sin cambiar ninguna firma.
+  **Queda abierto lo reportado originalmente:** batchear *entre líneas*, es decir precargar
+  los catálogos de las recetas/combos distintos del carrito en vez de resolver cada línea
+  por su cuenta. Hoy cada línea `receta`/`combo` cuesta 3 queries fijas (ingredientes,
+  extras, grupos+opciones). Batchearlo exige pasar los catálogos precargados por parámetro
+  a `resolverPersonalizacionReceta`/`Combo` y `resolverGruposDeItem`, que tienen 3
+  llamadores incluido `salones.service.ts` — más riesgo y menos ganancia que lo ya hecho.
+  **Es decisión de owner si se encara**, con este número sobre la mesa: un carrito de 5
+  líneas de receta pasó de 5×(3+G) queries a 15 fijas; batchear entre líneas lo llevaría
+  a ~3.
 - [ ] **Orden de locks de `item_producto` decidido por el cliente → deadlock**
   (backend, `ventas/ventas.service.ts:434-478` + `inventario/inventario.service.ts:91`)
   — el `SELECT … FOR UPDATE` por ítem se toma en el orden de `dto.lineas`. Dos ventas

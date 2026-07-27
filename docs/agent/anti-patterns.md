@@ -106,6 +106,22 @@ igual a `Promise.all` sobre queries: sigue siendo N round-trips.
 `calcularDisponibleReceta`/`Combo` por fila. Difícil de detectar por lint → se revisa en
 el cierre con el sub-agente independiente de `verify-feature`.*
 
+**Dos variantes que cuestan más que el N+1 de manual** (ambas encontradas en jul-2026 en
+el camino caliente del POS, corregidas en la auditoría de `ventas`+`pagos`):
+
+1. **Traer de más y descartarlo.** `crearEnTransaccion` llamaba `itemsService.findOne` por
+   línea del carrito. Cada `findOne` abre 4-8 queries construyendo impuestos, recargos,
+   descuentos, ingredientes, componentes y grupos… de los que la venta **no lee ninguno**:
+   solo usa campos del row base. Antes de batchear, preguntar *qué campos usa realmente el
+   llamador*: a veces el arreglo no es "N queries → 1", es "N×8 queries → 1".
+2. **N+1 anidado dentro del método que ya parecía el problema.** El hallazgo reportado era
+   "una resolución de personalización por línea". Al abrirlo, `resolverGruposDeItem` tenía
+   adentro **una query por grupo de modificadores**, que multiplicaba a la anterior. El
+   interno se arregla sin tocar firmas y beneficia a todos los llamadores; conviene
+   cerrarlo antes de decidir si vale batchear el externo. Cuando el batch necesita un par
+   de claves (acá `grupo ↔ item_grupo`, por el override), `= ANY($1)` sobre una sola trae
+   filas cruzadas: van dos arrays paralelos con `unnest($1::uuid[], $2::uuid[])`.
+
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 
 `item_producto.costo_actual` y `item_producto.stock` son valores derivados del kardex

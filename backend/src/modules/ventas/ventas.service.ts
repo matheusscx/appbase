@@ -126,10 +126,15 @@ export class VentasService {
       await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);
     }
 
-    // 2. Cargar todos los items para obtener monedaId, tipo, nombre
-    const items = await Promise.all(
-      dto.lineas.map((l) => this.itemsService.findOne(tenantId, l.itemId)),
+    // 2. Cargar todos los items para obtener monedaId, tipo, nombre.
+    // UNA query para todo el carrito: `findOne` por línea disparaba 4+ queries
+    // por ítem construyendo impuestos, recargos, descuentos, ingredientes y
+    // grupos que la venta nunca lee. Ver `cargarBasePorIds`.
+    const itemsPorId = await this.itemsService.cargarBasePorIds(
+      tenantId,
+      dto.lineas.map((l) => l.itemId),
     );
+    const items = dto.lineas.map((l) => itemsPorId.get(l.itemId)!);
 
     for (const item of items) {
       if (item.tipo === 'ingrediente') {

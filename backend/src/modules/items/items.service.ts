@@ -365,6 +365,38 @@ export class ItemsService {
     return out;
   }
 
+  /**
+   * Fila base de varios ítems en UNA sola query, indexada por `itemId`.
+   *
+   * Existe para el camino caliente del POS: `crearEnTransaccion` necesita solo
+   * `tipo`, `nombre`, `precioBase`, `monedaId`, `unidadMedida` y
+   * `clasificacionTributaria` de cada línea del carrito — nada de impuestos,
+   * recargos, descuentos, ingredientes, componentes ni grupos. Resolverlo con
+   * `findOne` por línea disparaba 4+ queries por ítem para construir colecciones
+   * que la venta descarta.
+   *
+   * Lanza `NotFoundException` si algún id no existe o no es del tenant, igual
+   * que `findOne`, para no cambiar el comportamiento de sus llamadores.
+   */
+  async cargarBasePorIds(
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<Map<string, ReturnType<ItemsService['mapRow']>>> {
+    const unicos = [...new Set(itemIds)];
+    if (unicos.length === 0) return new Map();
+
+    const rows: ItemRow[] = await this.dataSource.query(
+      this.BASE_QUERY +
+        ` WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+      [unicos, tenantId],
+    );
+
+    const porId = new Map(rows.map((r) => [r.item_id, this.mapRow(r)]));
+    const faltante = unicos.find((id) => !porId.has(id));
+    if (faltante) throw new NotFoundException('Item no encontrado');
+    return porId;
+  }
+
   async findOne(tenantId: string, itemId: string) {
     const rows: ItemRow[] = await this.dataSource.query(
       this.BASE_QUERY +
@@ -1884,27 +1916,51 @@ export class ItemsService {
     const snapshotGrupos: SnapshotGrupo[] = [];
     let precioExtraTotal = new Decimal(0);
 
+    // Opciones de TODOS los grupos asociados en una sola query. El override
+    // (`item_grupo_modificador_opciones`) es por par grupo↔item_grupo, así que
+    // los pares viajan como dos arrays paralelos y se unen con `unnest`: usar
+    // `item_grupo_id = ANY(...)` traería el override de otro grupo.
+    const opcionesRows: {
+      grupo_modificador_id: string;
+      item_id: string;
+      nombre: string;
+      cantidad: string | null;
+      unidad_codigo: string | null;
+      precio_extra: string;
+    }[] = asociados.length
+      ? await manager.query(
+          `SELECT a.grupo_modificador_id, o.item_id, i.nombre,
+                  COALESCE(ovr.cantidad, o.cantidad) AS cantidad,
+                  COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
+                  COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra
+           FROM unnest($2::uuid[], $3::uuid[])
+                  AS a(grupo_modificador_id, item_grupo_id)
+           JOIN grupo_modificador_opciones o
+             ON o.grupo_modificador_id = a.grupo_modificador_id
+            AND o.tenant_id = $1
+            AND o.eliminado_el IS NULL
+           JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
+           LEFT JOIN item_grupo_modificador_opciones ovr
+             ON ovr.grupo_opcion_id = o.grupo_opcion_id
+            AND ovr.item_grupo_id = a.item_grupo_id
+            AND ovr.eliminado_el IS NULL`,
+          [
+            tenantId,
+            asociados.map((a) => a.grupo_modificador_id),
+            asociados.map((a) => a.item_grupo_id),
+          ],
+        )
+      : [];
+
+    const opcionesPorGrupo = new Map<string, typeof opcionesRows>();
+    for (const o of opcionesRows) {
+      const lista = opcionesPorGrupo.get(o.grupo_modificador_id) ?? [];
+      lista.push(o);
+      opcionesPorGrupo.set(o.grupo_modificador_id, lista);
+    }
+
     for (const asoc of asociados) {
-      const opcionesCat: {
-        item_id: string;
-        nombre: string;
-        cantidad: string | null;
-        unidad_codigo: string | null;
-        precio_extra: string;
-      }[] = await manager.query(
-        `SELECT o.item_id, i.nombre,
-                COALESCE(ovr.cantidad, o.cantidad) AS cantidad,
-                COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
-                COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra
-         FROM grupo_modificador_opciones o
-         JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
-         LEFT JOIN item_grupo_modificador_opciones ovr
-           ON ovr.grupo_opcion_id = o.grupo_opcion_id
-          AND ovr.item_grupo_id = $3
-          AND ovr.eliminado_el IS NULL
-         WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2 AND o.eliminado_el IS NULL`,
-        [asoc.grupo_modificador_id, tenantId, asoc.item_grupo_id],
-      );
+      const opcionesCat = opcionesPorGrupo.get(asoc.grupo_modificador_id) ?? [];
 
       const elegidas = elegidosPorGrupo.get(asoc.grupo_modificador_id) ?? [];
       let totalUnidades = new Decimal(0);
