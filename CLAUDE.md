@@ -266,6 +266,7 @@ Procedimiento completo: skill `verify-feature`.
 | `docs/agent/pendientes.md` | Backlog de correcciones diferidas a corregir al cerrar el harness |
 | `docs/agent/README.md` | Por qué este setup está escrito así |
 | `docs/agent/investigacion-mercado.md` | Plantilla de investigación de mercado + regla del cruce |
+| `docs/agent/auditoria-codigo.md` | Método de auditoría (Sonnet busca, el principal refuta) + mapa de qué se auditó |
 | `docs/ESTADO.md` | Estado de todas las funcionalidades y roadmap |
 | `docs/PRODUCTO.md` | Especificación funcional completa con reglas de negocio |
 | `startup-pos.sql` | Esquema de BD completo |

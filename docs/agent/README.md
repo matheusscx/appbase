@@ -102,6 +102,11 @@ No reabrir sin argumento nuevo.
 | `.claude/skills/verify-feature/` | Cómo se cierra una tarea | Al cerrar |
 | `.claude/agents/domain-reviewer.md` | Revisión independiente del diff (invariantes, N+1, alcance) | Paso 7 de `verify-feature` |
 | `.claude/agents/api-security-reviewer.md` | Guards, validación, exposición de datos, SQLi | Paso 7, solo si el diff toca capa HTTP |
+| `docs/agent/auditoria-codigo.md` | Confianza en lo YA construido: método + mapa de cobertura | Cuando se audita código viejo, no al cerrar una tarea |
+
+`verify-feature` audita **el diff** de la tarea que se cierra; `auditoria-codigo.md`
+audita **código que ya pasó los gates**. Son complementarios: el segundo existe porque el
+primero, por definición, nunca mira lo que ya está.
 
 `.claude/skills/` es la ruta que Claude Code descubre automáticamente. `plans/` y
 `specs/` siguen en `docs/superpowers/`.
