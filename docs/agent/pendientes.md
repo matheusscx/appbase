@@ -275,6 +275,202 @@ Lo de abajo es **trabajo pendiente con la forma ya definida**, no preguntas abie
   filtro del frontend, y de `ventas.md`/`PRODUCTO.md`. Si algún día hace falta parquear un
   ticket en **mostrador** (fuera de salones), se diseña ahí — nadie lo pidió.
 
+## Auditoría `caja` + `propinas` (2026-07-27) — hallazgos confirmados
+
+Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md). 25 hallazgos crudos →
+22 únicos (3 los vieron dos lentes por separado) → **20 sobreviven** tras refutación: 19
+defectos y 1 decisión de owner (al final). **Ninguno se corrigió en la pasada**: la
+auditoría produce información, no diffs. Orden = severidad.
+
+### Alta
+
+- [ ] **`POST /caja/:id/cerrar` con `lineas: []` cierra una caja descuadrada sin
+  justificar** (backend, `caja/caja.service.ts:547`) — `aplicarMotivosADescuadres` itera
+  sobre `dto.lineas` (lo que manda el cliente) y usa las diferencias reales de
+  `caja_arqueo_medio` solo como diccionario de consulta. Con el array vacío el `for` no
+  ejecuta cuerpo, no lanza, y `cerrar` sigue a `estado='cerrada'` (`:771`);
+  `FinalizarCierreDto` es `@IsArray()` sin mínimo. Un faltante de $1.000 queda cerrado con
+  `motivo_diferencia_id` NULL para siempre. Anula el sub-proyecto C con un payload trivial y
+  contradice [`gestion-cajas.md`](../features/gestion-cajas.md) ("nunca es válido cerrar una
+  diferencia sin ninguna explicación"). **Cierre:** invertir el loop — recorrer las filas
+  descuadradas de BD y exigir que cada una traiga su entrada en `dto.lineas`. Los dos tests
+  que existen cubren "línea presente sin motivo", nunca "línea omitida".
+- [ ] **`GET /caja/cajones-estado` revela el esperado de una caja abierta en modo ciego**
+  (backend + frontend, `caja/caja.service.ts:1045-1062`, `caja/caja.controller.ts:94`,
+  `components/caja/CajaCajonesGrid.vue:83`) — calcula
+  `saldoEsperado = saldoInicial + entradas − salidas` y lo devuelve **sin ninguna rama por
+  modo ciego**, a cualquiera con `Cajas:Leer`. Los otros tres caminos (`obtenerArqueo:441`,
+  `resumenMovimientos:1143`, `listarMovimientos:1189`) sí gatean con
+  `!esAdmin && abierta && arqueoCiego`. El frontend lo rotula "Saldo esperado". Es la misma
+  clase de fuga derivable que el spec del ciego cerró para el header y la tabla de
+  movimientos; a esta grilla no la barrió. Matiz: es el total mezclado de
+  `movimientos_caja`, no la línea por método — en un tenant cash-only es exactamente el
+  número secreto.
+- [ ] **Un monto manual de propina se aplica en cualquier criterio y no conserva el total
+  del grupo** (backend, `propinas/liquidacion-propinas.service.ts:917-921` y `:956`) —
+  `aplicarAjustesPersistido` sobreescribe `p.monto` de cualquier participante que aparezca
+  en `montosManuales`, **después** de redistribuir y **sin mirar el criterio del grupo**,
+  sin rebalancear a los demás; `validarManualMontos:709-713` hace `continue` salvo en grupos
+  `MANUAL`+`MONTOS`, así que nada verifica la conservación. Grupo `PARTES_IGUALES` con
+  `montoGrupo = 10.000` y dos personas a 5.000: fijar 9.000 a una deja 14.000 repartidos
+  sobre un pool de 10.000, y se confirma. Mismo agujero por `PATCH /liquidaciones/:id` con
+  `recalcular: false`. [`liquidacion-propinas-motor.md`](../features/liquidacion-propinas-motor.md)
+  dice que el monto manual es "en **grupos MANUAL**"; el código no impone esa restricción.
+- [ ] **Anular una venta no reconcilia `venta_propina`: la propina se paga igual**
+  (backend, `propinas/liquidacion-propinas.service.ts:1074-1082`) — `buscarTipsElegibles`
+  hace `JOIN ventas` pero **nunca filtra `v.estado`**: solo `liquidacion_id IS NULL AND
+  monto_pagado > 0`. Y `cancelar()` no toca `venta_propina`. Una cuenta de salón cerrada con
+  `pagos: []` (fiada) y propina deja la venta `pendiente` sin pagos —el subconjunto seguro
+  que habilita `POST /ventas/:id/anular`— con su `venta_propina` intacta, que entra a la
+  próxima liquidación. Si la liquidación corrió antes, la anulación posterior no deja ni
+  advertencia. ⚠️ **Lo abrió la feature `cancelada` cerrada el mismo día**; la interacción no
+  está documentada en ningún doc del alcance.
+
+### Media
+
+- [ ] **`garzonId` de participante manual no se resuelve contra el tenant** (backend,
+  `propinas/liquidacion-propinas.service.ts:980`, `propinas/propina-distribucion.service.ts:193`)
+  — se inserta `garzonId: cambio.garzonId` sin validar; el DTO solo pide `@IsUUID()`. Las
+  entidades no tienen FK a `garzones`, así que tampoco hay backstop de integridad. El caso
+  más probable no es el cross-tenant sino un **uuid inexistente**: entra como participante
+  fantasma con `incluido: true` y diluye el reparto de todos. La defensa correcta ya existe:
+  `GarzonesService.obtenerActivoPorId(tenantId, garzonId)`, del fix de ventas de jul-2026.
+- [ ] **Excluir a un participante le deja el `monto` viejo persistido** (backend,
+  `propinas/liquidacion-propinas.service.ts:996-1009` y `:1026`) — `redistribuirGrupo`
+  devuelve `omitidos` sin tocar `monto` y `recalcularParticipantesExistentes` solo re-guarda
+  `activos`. Hoy no paga de más (reportes e impresión filtran `incluido = true`), pero el
+  dato en reposo miente; y si se excluye a **todos** los de un grupo, el `montoGrupo` no
+  queda en ninguna fila con `incluido = true` y desaparece sin que nada lo señale.
+- [ ] **Dos cajas abiertas del mismo usuario bajo concurrencia** (backend,
+  `caja/caja.service.ts:177`) — el chequeo `findActiva` corre **fuera** de la transacción y
+  el único backstop de BD es `ux_cajas_cajon_abierta` (`startup-pos.sql:882`), único por
+  **cajón**. Dos aperturas simultáneas con `cajonId` distintos no compiten por nada. Con el
+  mismo cajón sí lo caza (23505 → 409, `:241`), así que un doble clic está cubierto: hace
+  falta seleccionar dos cajones distintos en paralelo. **Cierre:** índice único parcial por
+  `(tenant_id, usuario_id)` con `WHERE tipo='fisica' AND estado IN ('abierta','en_conciliacion')`,
+  que además cubre el hueco de `en_conciliacion` que el comentario de `startup-pos.sql:875`
+  deja explícitamente a cargo del service.
+- [ ] **"Diferencia" significa dos números distintos según la pantalla** (backend +
+  frontend, `caja/caja.service.ts:706-709`, `components/caja/CajaCierreResumen.vue:12-17`,
+  `components/caja/CajaHistorial.vue:45`) — el backend persiste `cajas.diferencia` = **solo
+  la línea de efectivo** (decisión deliberada y comentada en el código); el resumen del
+  detalle suma la `diferencia` de **todas** las líneas del arqueo; y el historial rotula
+  "Diferencia" la columna que muestra el campo cash-only. Con `requiere_conteo = true` en
+  tarjeta y un descuadre de -$500 ahí, el historial muestra +0 y el detalle -$500. No
+  esconde el descuadre al cerrar (la fase 2 lo exige justificar), pero el listado —la
+  superficie que barre el supervisor— miente.
+- [ ] **`etiquetasGarzones` no filtra `eliminado_el IS NULL`** (backend,
+  `propinas/propina-reportes.service.ts:643-651`) — contra la invariante de soft delete y
+  contra sus tres queries hermanas del mismo archivo, que sí filtran. La prueba de la
+  intención: deja **inalcanzable** el fallback `'Trabajador eliminado'` (`:203`). **Al
+  cerrarlo hay una decisión chica:** filtrar (y el fallback revive) **o** documentar la
+  excepción deliberada, como ya se hizo con `metodos_pago` en `caja/caja.service.ts:322`,
+  donde el nombre histórico es intrínseco al movimiento.
+- [ ] **Un garzón en dos grupos revienta la liquidación con un 23505 crudo** (backend + BD,
+  `startup-pos.sql:1606`, `propinas/liquidacion-propinas.service.ts:1216-1236`) —
+  `uq_liquidacion_propinas_participante_garzon` es único por `(liquidacion_id, garzon_id)`,
+  **sin `grupo_id`**, y `buildParticipantesData` itera por grupo sin deduplicar. Un garzón
+  reclasificado a mitad de período (`UpdateGarzonDto.tipo` es editable) genera tips con dos
+  `tipo_garzon`, la liquidación arma dos participantes con el mismo `garzonId`, el segundo
+  `INSERT` viola el índice y **nadie del período puede liquidarse**. Tensión con la doc: el
+  motor documenta la pertenencia por el snapshot `tipo_garzon` del tip y no por
+  `garzon.tipo`, lo que hace el caso alcanzable por diseño; el esquema no lo soporta.
+
+### Baja
+
+- [ ] **`registrarMovimientoEnTransaccion` no valida signo ni estado de la caja** (backend,
+  `caja/caja.service.ts:785-809`) — recibe un objeto plano y lo inserta tal cual: sin
+  `@IsDecimalPositivo` (que solo cubre el camino HTTP vía `CrearMovimientoDto`) y sin
+  verificar el estado. `startup-pos.sql:886` tampoco tiene `CHECK` sobre `monto`. Hoy **no
+  es explotable**: sus dos llamadores (`ventas.service.ts`, `pagos.service.ts`) toman
+  `bloquearCajaAbierta` antes y ya no producen montos negativos desde el fix del vuelto. Es
+  endurecimiento del chokepoint por donde entró ese bug, no un bug activo. Cierra el hilo
+  que la auditoría de ventas mandó acá: defendido en el endpoint, no en el método compartido.
+- [ ] **`asegurarDefault` de propinas devuelve 500 en el primer uso concurrente** (backend,
+  `propinas/propina-distribucion.service.ts:68`) — el `lock: pessimistic_write` sobre una
+  fila que **todavía no existe** no bloquea nada; dos requests insertan y el segundo viola
+  `uq_propina_config_tenant` (`startup-pos.sql:1457`) sin `catch`. No corrompe (el índice
+  hace su trabajo) y se cura tras el primer insert. El patrón correcto está tres módulos más
+  allá, en `caja/caja.service.ts:241`.
+- [ ] **El monto manual de propina no valida signo en el DTO** (backend,
+  `propinas/dto/ajustes-reparto.dto.ts:14`, `propinas/dto/update-liquidacion.dto.ts:34`) —
+  `@IsNumberString()` a secas acepta `'-5000'`; son los dos campos que quedaron fuera del
+  barrido de signo de `74f3f35`. **No llega a persistir**: `chk_liquidacion_participante_metricas`
+  (`startup-pos.sql:1595`) exige `monto >= 0`. Queda un 500 crudo donde correspondía un 400,
+  y el **preview** (que no persiste) devolviendo una propina negativa en pantalla.
+- [ ] **`crearFuentes` inserta fila por fila sobre un conjunto sin tope** (backend,
+  `propinas/liquidacion-propinas.service.ts:1187-1195`) — dentro de la transacción de
+  `liquidar()`, y `buscarTipsElegibles` no tiene `LIMIT`, así que N = ventas con propina del
+  período. Al cerrarlo, **verificar de verdad** que `save(array)` colapsa a un INSERT
+  multi-fila y no a N inserts igual.
+
+### Huecos de test (el gate verde no los ve)
+
+- [ ] **El guard de estado de la caja no lo ejercita ningún test real** (test,
+  `caja/caja.service.spec.ts:209`, `:460`, `:827`) — los tres mockean
+  `managerMock.query.mockResolvedValueOnce([])` sin relación con el SQL emitido: el
+  resultado lo decide el mock, no el `WHERE estado='abierta'`. Y `test/caja.e2e-spec.ts`
+  nunca intenta escribir contra una caja `cerrada`/`en_conciliacion`. Relajar el filtro a
+  `estado IN ('abierta','en_conciliacion')` no rompe nada. Es justamente la defensa que dos
+  lentes dieron por buena leyendo el código.
+- [ ] **El criterio `MANUAL` (`PESOS` y `MONTOS`) no tiene ningún test de reparto** (test) —
+  el único `criterio` ejercido en `liquidacion-propinas.service.spec.ts` y en el e2e es
+  `PARTES_IGUALES`/`VENTAS_NETAS`. `validarManualMontos` se puede borrar entera sin que
+  falle nada. (`propina-distribucion.service.spec.ts` sí prueba `MANUAL`, pero solo a nivel
+  **config**, no de reparto.)
+- [ ] **El test de partes iguales no discrimina `PARTES_IGUALES` de `CANTIDAD_CUENTAS`**
+  (test, `propinas/liquidacion-propinas.service.spec.ts:151-186`) — el fixture da
+  exactamente 1 tip a cada garzón, así que `cuentas = 1` para ambos y las dos fórmulas dan
+  `75.0000`/`75.0000`. `CANTIDAD_CUENTAS` no aparece en ningún test. Es el mismo error del
+  test del vuelto (ver [`anti-patterns.md`](anti-patterns.md)): el escenario tiene que
+  descartar las implementaciones incorrectas, no coincidir con ellas.
+- [ ] **`actualizarConfig` no assertea `result.participantes`** (test,
+  `propinas/liquidacion-propinas.service.spec.ts:348-389`) — si `crearParticipantes`
+  devolviera siempre `[]` el test sigue verde, porque el fixture monta `tips = []`.
+- [ ] **El e2e de historial por `cajonId` no discrimina** (test,
+  `test/caja.e2e-spec.ts:331-339`) — quien consulta es el mismo usuario que abrió la caja,
+  así que borrar la rama `cajonId && tieneVerTodas` (`caja/caja.service.ts:949`) sigue dando
+  200 con array no vacío. Solo assertea `status` y `Array.isArray`.
+
+**Ramas sin cobertura alguna**, para decidir si entran: `HORAS_TRABAJADAS`;
+`advertenciasSesionesAbiertas` con `fin_el = null`; las guardas `fechaHasta <= fechaDesde`,
+`gruposConfig.length === 0` y moneda oficial ausente; `aplicarCambioParticipante` (alta
+manual); `actualizar` con `recalcular: false`; los endpoints HTTP `confirmar`/`anular`;
+el rechazo de `peso <= 0` en `MANUAL/PESOS`; el spillover de propina entre pagos en
+`asignacion-propina.ts`; toda la capa SQL de `propina-reportes` (cero e2e);
+`registrarMovimientoEnTransaccion`; el backstop 23505 de `abrir()`; y el aislamiento
+multi-tenant de caja.
+
+### Decisión de owner — regla de negocio no documentada
+
+- [ ] **Un grupo sin peso agregado aborta la liquidación entera** (backend,
+  `propinas/utils/mayores-restos.ts:37-39`) — el guard contra división por cero lanza
+  `BadRequestException('La suma de pesos debe ser mayor a cero')` y nadie la atrapa por
+  grupo: revienta `crear`, el preview y `liquidar` completos, incluidos los grupos que
+  estaban bien. Lo encontraron **dos lentes por separado** y es alcanzable en tres criterios
+  (`VENTAS_NETAS` con base 0, `HORAS_TRABAJADAS` con 0h de solape, `CANTIDAD_CUENTAS` con 0
+  cuentas): basta un bartender que abrió turno y no cerró ninguna cuenta.
+  **La pregunta es qué debe pasar con la parte de ese grupo:** ¿cobra 0 y su porcentaje se
+  redistribuye entre los demás grupos? ¿queda sin repartir? ¿se reparte en partes iguales
+  entre los presentes aunque tengan peso 0? No está en `PRODUCTO.md` ni en
+  [`liquidacion-propinas-motor.md`](../features/liquidacion-propinas-motor.md). El patrón
+  del motor para casos así es degradar con advertencia (lo hace con las sesiones abiertas),
+  no reventar — pero cuál de las tres salidas es la correcta es del owner.
+
+### Refutados (no entran)
+
+- **Tres "N+1" de escritura** (`liquidacion-propinas.service.ts:1026`, `:365-374`, `:961`),
+  uno reportado como alta — no son el N+1 que prohíbe la invariante, que habla del **dato
+  derivado por fila en una lectura**. Escribir N filas con valores distintos exige N
+  `UPDATE`, y `save(array)` no los colapsa. Queda el punto real (tiempo con el lock tomado),
+  pero eso es contención, no N+1, y hoy no tiene escenario de daño.
+- **`UPDATE` de `anular()` sin `eliminado_el IS NULL` sobre `venta_propina`** — no existe
+  ningún `softDelete` sobre esa tabla, así que no hay fila borrada que tocar. Sin escenario
+  reproducible no entra.
+- **`porcentaje` de grupo sin validar signo** — un grupo negativo compensado por otro >100%
+  pasa la config, pero falla en el reparto antes de persistir dinero. Guard tardío, no
+  dinero mal calculado.
+
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
 El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado

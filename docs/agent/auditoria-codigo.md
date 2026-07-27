@@ -19,9 +19,17 @@ cosas: lo que ningún gate mira porque nadie lo miró nunca como un cuerpo enter
 dos cosas.
 
 El motivo es empírico. Un agente al que le pedís bugs **encuentra bugs**, existan o no.
-Dos pasadas medidas en jul-2026: sobre 39 commits de código recién escrito, 13 hallazgos
+Tres pasadas medidas en jul-2026: sobre 39 commits de código recién escrito, 13 hallazgos
 y 10 supervivientes (77%); sobre `ventas`+`pagos` —código maduro, con gates, e2e y
-revisiones encima— 20 hallazgos y 15 supervivientes (75%).
+revisiones encima— 20 hallazgos y 15 supervivientes (75%); sobre `caja`+`propinas`, 25
+hallazgos y 20 supervivientes (80%).
+
+**El refutador filtra menos de lo que corrige.** En la tercera pasada solo 2 hallazgos se
+cayeron enteros; el trabajo real fue **bajar severidades y arreglar el escenario**. Los
+buscadores marcaron "alta" casi todo, y tres afirmaciones no sobrevivieron a abrir el
+archivo: un monto negativo que "se persistía" y que en realidad frena un `CHECK` de BD, y
+dos "N+1" que eran escrituras de N filas. Si el refutador solo cuenta cuántos mató, va a
+creer que no hizo falta.
 
 **La predicción de que el ruido subiría sobre código maduro no se cumplió**, y la razón
 importa: la precisión no vino de que los buscadores acertaran más, sino de tres cosas del
@@ -117,6 +125,7 @@ Qué se auditó, cuándo, y con qué resultado. Una fila por pasada.
 | 39 commits: costeo CPP, recuentos, motivos de diferencia | 2026-07-27 | 5 | 13 | 10 | Multi-tenant/permisos salió limpio. 1 refutado por preexistente → `pendientes.md` |
 | Los 2 commits de corrección de esa pasada | 2026-07-27 | 1 (`domain-reviewer`) | 2 | 2 | 1 bloqueante: regresión de UI del rol aprobador |
 | `ventas` + `pagos` (backend completo + pantallas del módulo) | 2026-07-27 | 7 | 20 | 15 | **Soft delete salió limpio** (tabla por tabla, 0 hallazgos). 3 lentes independientes cayeron sobre el mismo bug del vuelto → se contó una vez. 3 hallazgos pasaron a decisión de owner por regla no documentada, no a la lista de bugs |
+| `caja` + `propinas` (backend completo + pantallas de los dos módulos) | 2026-07-27 | 8 | 25 | 20 | 3 hallazgos los vieron dos lentes cada uno → se contaron una vez. **La máquina de estados de caja salió limpia** (12 transiciones, las 11 inválidas bloqueadas), igual que la inmutabilidad del arqueo congelado y el anti-doble-pago de liquidaciones. Los 2 hilos que dejó la pasada de `ventas` cerraron: defendidos en el endpoint HTTP, **no** en el método compartido ni en ningún test |
 
 ### Orden propuesto para lo que falta
 
@@ -125,8 +134,9 @@ Por riesgo, no por tamaño. Lo de arriba primero.
 | Prioridad | Alcance | Por qué |
 |---|---|---|
 | ~~1~~ | ~~`ventas` (+ `pagos`)~~ | ✅ Hecho 2026-07-27 |
-| 1 | `caja` + `propinas`/liquidación | Dinero y cuadratura; la liquidación es de las más grandes del repo. **La pasada de ventas dejó dos hilos que terminan acá**: el movimiento de caja con monto negativo y el movimiento escrito contra una caja ya cerrada |
-| 2 | `items` (motor de precios) | El más grande (3.5k LOC) y modula todo el cálculo. La pasada de ventas dejó un hilo: `itemsService.findOne` como fuente de dos N+1 |
+| ~~1~~ | ~~`caja` + `propinas`/liquidación~~ | ✅ Hecho 2026-07-27 |
+| 1 | `items` (motor de precios) | El más grande (3.5k LOC) y modula todo el cálculo. La pasada de ventas dejó un hilo: `itemsService.findOne` como fuente de dos N+1 |
+| 2 | `turnos` + `salones` | La pasada de ventas dejó tres `LEFT JOIN garzones` sin filtro de `tenant_id` esperando acá, y la de propinas dejó dos: el `tipo_garzon` de la sesión se congela al abrir turno pero `garzones.tipo` es editable, y `sesiones_garzon` alimenta el reparto |
 | 3 | `inventario` fuera de lo ya auditado | Kardex, mermas, conversión de unidades |
 | 4 | RBAC, auth y tenants | La invariante más cara si se rompe, aunque cambia poco |
 | 5 | Catálogos y configuración | Bajo riesgo: CRUD admin-only con lectura abierta |
