@@ -98,6 +98,7 @@ Response (201):
 **Errores:**
 - `400` — sin caja abierta para el usuario
 - `400` — excedente de pago sin método con `permite_vuelto = true`
+- `400` — `metodoPagoId` no habilitado para el tenant (rollback completo)
 - `400` — stock insuficiente (rollback completo)
 
 ### GET /api/ventas/resumen
@@ -196,11 +197,20 @@ Todas con soft delete (`eliminado_el`) y triada de auditoría. PKs UUID con `typ
 |--------|-----------------|
 | `pendiente` | La venta se crea sin pagos, o el total pagado es 0 |
 | `pagada_parcial` | Al registrar un abono parcial: saldo > 0 pero < total_final |
-| `pagada` | El saldo llega a 0 (suma de pagos − vuelto ≥ total_final) |
+| `pagada` | El saldo llega a 0 (lo aplicado a la venta ≥ total_final) |
 | `cancelada` | Anulación explícita |
 | `borrador` | Estado transitorio previo a confirmar |
 
-El saldo se recalcula en cada abono: `saldo = total_final − Σ(pago.monto − pago.vuelto)`.
+⚠️ `cancelada` y `borrador` están en el enum y en esta tabla, pero **hoy ningún punto
+del backend los asigna** y no hay endpoint de anulación. Ver `docs/agent/pendientes.md`.
+
+El saldo se recalcula en cada abono sobre **lo aplicado a la venta**, no sobre el bruto
+cobrado: `saldo = total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta')`.
+
+La distinción no es cosmética: un pago puede repartirse entre venta y propina
+(`pago_aplicaciones` guarda el split), así que `Σ(pago.monto − pago.vuelto)` contaría la
+propina como si pagara la venta y la dejaría en `pagada` con parte del total sin cobrar.
+Misma fuente en `listar()`, `resumen()` y `registrarAbono()`.
 
 ---
 

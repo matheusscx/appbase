@@ -151,6 +151,18 @@ export class PagosService {
       ]),
     );
 
+    // La query de arriba ya filtra por tenant: un metodoPagoId ausente del mapa
+    // es un método que este tenant no tiene contratado. La FK apunta al catálogo
+    // GLOBAL (`metodos_pago`), así que la base no lo frena — sin este gate el
+    // pago se persiste y después desaparece del listado, que hace INNER JOIN
+    // contra `tenant_metodo_pago`; además `permiteVuelto` se leería como false.
+    const noHabilitado = pagos.find((p) => !metodoPagoMap.has(p.metodoPagoId));
+    if (noHabilitado) {
+      throw new BadRequestException(
+        'Método de pago no habilitado para este tenant',
+      );
+    }
+
     // Calcular excedente (vuelto global)
     const sumaPagos = pagos.reduce(
       (acc, p) => acc.plus(p.monto),
@@ -309,13 +321,19 @@ export class PagosService {
         );
       }
 
-      // Calcular monto ya aplicado
+      // Lo ya aplicado A LA VENTA sale de `pago_aplicaciones` con tipo='venta',
+      // no de `monto - vuelto`: un pago puede repartirse entre venta y propina,
+      // y la suma bruta contaría la propina como si fuera pago de la venta —
+      // dejando la venta en `pagada` con parte del total sin cobrar. Mismo
+      // criterio que `listar()` y `resumen()` en VentasService.
       const pagosAplicadosRows: { monto_aplicado: string }[] =
         await manager.query(
-          `SELECT COALESCE(SUM(monto - vuelto), 0) AS monto_aplicado
-           FROM pagos
-           WHERE venta_id = $1
-             AND eliminado_el IS NULL`,
+          `SELECT COALESCE(SUM(pa.monto), 0) AS monto_aplicado
+             FROM pagos p
+             JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
+                  AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
+            WHERE p.venta_id = $1
+              AND p.eliminado_el IS NULL`,
           [dto.ventaId],
         );
 

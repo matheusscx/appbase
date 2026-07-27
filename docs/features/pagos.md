@@ -50,6 +50,7 @@ Response (201):
 - `400` — venta no encontrada o no pertenece al tenant
 - `400` — venta en estado `pagada` o `cancelada` (no se puede abonar)
 - `400` — excedente sin método con `permite_vuelto = true`
+- `400` — `metodoPagoId` no habilitado para el tenant
 - `400` — sin caja abierta para el usuario
 
 ### GET /api/pagos
@@ -118,12 +119,22 @@ Response (200):
 
 1. Verificar caja abierta para el tenant+usuario.
 2. Cargar la venta y validar que pertenece al tenant y está en estado abonable (`pendiente` o `pagada_parcial`).
-3. Calcular el excedente de pagos; validar `permite_vuelto` si hay excedente.
-4. En transacción: crear registros en `pagos` → recalcular saldo → actualizar `venta.estado` → registrar movimientos de caja (efectivo).
+3. Calcular el saldo pendiente: `total_final − Σ(pago_aplicaciones.monto WHERE tipo = 'venta')`.
+4. Rechazar todo `metodoPagoId` que no esté en `tenant_metodo_pago` del tenant.
+5. Calcular el excedente de pagos; validar `permite_vuelto` si hay excedente.
+6. En transacción: crear registros en `pagos` → recalcular saldo → actualizar `venta.estado` → registrar movimientos de caja (efectivo).
 
 ### Reglas de negocio
 
 - Solo se puede abonar a ventas en estado `pendiente` o `pagada_parcial`.
+- **El saldo se mide sobre lo aplicado a la venta, no sobre el bruto cobrado.** Un pago
+  puede repartirse entre venta y propina (`pago_aplicaciones` guarda el split); usar
+  `Σ(pago.monto − pago.vuelto)` contaría la propina como pago de la venta y la dejaría
+  en `pagada` con parte del total sin cobrar.
+- **Un `metodoPagoId` que el tenant no tiene en `tenant_metodo_pago` se rechaza con 400.**
+  La FK apunta al catálogo global, así que la base no lo frena: sin ese gate el pago se
+  persiste y luego no aparece en `GET /pagos`, que hace INNER JOIN contra la tabla del
+  tenant.
 - El estado de la venta se actualiza automáticamente tras cada abono:
   - Saldo = 0 → `pagada`
   - 0 < saldo < total_final → `pagada_parcial`

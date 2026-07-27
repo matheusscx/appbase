@@ -145,6 +145,54 @@ describe('PagosService', () => {
       expect(manager.save).not.toHaveBeenCalled();
     });
 
+    it('rechaza un metodoPagoId que el tenant no tiene contratado', async () => {
+      // METODO_EFECTIVO_ROWS es lo que devuelve la query filtrada por tenant:
+      // TARJETA_ID existe en el catálogo global pero no para este tenant.
+      const manager = buildManagerMock(METODO_EFECTIVO_ROWS);
+
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+      const cajaSvc = module.get<jest.Mocked<CajaService>>(CajaService);
+
+      await expect(
+        svc.registrar(manager as unknown as EntityManager, {
+          tenantId: TENANT_ID,
+          ventaId: VENTA_ID,
+          pagos: [{ metodoPagoId: TARJETA_ID, monto: '100.0000' }],
+          cajaId: CAJA_ID,
+          monedaOficialId: MONEDA_ID,
+          target: '100.0000',
+        }),
+      ).rejects.toThrow('Método de pago no habilitado para este tenant');
+
+      // El gate corre ANTES de escribir: ni pago ni movimiento de caja.
+      expect(manager.save).not.toHaveBeenCalled();
+      expect(cajaSvc.registrarMovimientoEnTransaccion).not.toHaveBeenCalled();
+    });
+
+    it('rechaza el pago no habilitado aunque venga mezclado con uno válido', async () => {
+      const manager = buildManagerMock(METODO_EFECTIVO_ROWS);
+
+      const module: TestingModule = await setupModule(manager);
+      const svc = module.get<PagosService>(PagosService);
+
+      await expect(
+        svc.registrar(manager as unknown as EntityManager, {
+          tenantId: TENANT_ID,
+          ventaId: VENTA_ID,
+          pagos: [
+            { metodoPagoId: EFECTIVO_ID, monto: '50.0000' },
+            { metodoPagoId: TARJETA_ID, monto: '50.0000' },
+          ],
+          cajaId: CAJA_ID,
+          monedaOficialId: MONEDA_ID,
+          target: '100.0000',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
     it('guarda un Pago y llama registrarMovimientoEnTransaccion para un pago sin excedente', async () => {
       const manager = buildManagerMock(METODO_EFECTIVO_ROWS);
 

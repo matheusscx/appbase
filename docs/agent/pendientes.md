@@ -124,27 +124,14 @@ información, no diffs. Orden = severidad.
   Cierre: validar `excedente <= pago.monto` en `registrar()` y decidir qué pasa con el
   excedente no devolvible. Detectado por 3 lentes independientes (dinero, ciclo de vida,
   tests).
-- [ ] **`registrarAbono` calcula el saldo con la suma bruta de pagos, no con lo aplicado
-  a la venta** (backend, `pagos/pagos.service.ts:313-320`) — usa
-  `SUM(monto - vuelto)`, que incluye la parte del pago asignada a **propina**. El resto
-  del código ya usa la fuente correcta (`pago_aplicaciones` con `tipo='venta'`):
-  `ventas.service.ts:1038-1044` (listar), `:985` (resumen) y `:1235`. `registrarAbono`
-  es el único outlier, y encima mezcla las dos fuentes: base bruta + incremento
-  venta-only (`:341`). Escenario: venta `total=100` + propina `20`, pago inicial `90`
-  (target de creación = `totalFinal + propina`, `ventas.service.ts:545`) → aplicado a
-  venta `70`, a propina `20`. En el abono lee `90` en vez de `70`, calcula `saldo=10` en
-  vez de `30`; el cliente abona `10` y la venta queda **`pagada` habiendo cobrado 80 de
-  100**. Cierre: usar `pago_aplicaciones tipo='venta'` **y corregir la fórmula
-  documentada en `docs/features/ventas.md:203`**, que quedó escrita antes de las propinas.
-- [ ] **`metodoPagoId` se persiste sin validar que esté habilitado para el tenant**
-  (backend, `pagos/pagos.service.ts:132-152` vs `:176-196`) — la query de pertenencia a
-  `tenant_metodo_pago` se usa solo para resolver `nombre`/`permite_vuelto`; su resultado
-  nunca se usa como gate. La FK apunta al catálogo **global** (`startup-pos.sql:1094` →
-  `metodos_pago`), así que cualquier id del catálogo pasa. Dos consecuencias: el pago se
-  graba con un método no contratado, y como `listar()` hace **INNER JOIN** contra
-  `tenant_metodo_pago` filtrado por tenant (`:443-449`), **ese pago desaparece del
-  listado de pagos** — plata registrada e invisible. Además `permiteVuelto` se lee como
-  `false` en silencio. Cierre: rechazar todo `metodoPagoId` ausente de `metodoPagoMap`.
+- [x] ~~**`registrarAbono` calcula el saldo con la suma bruta de pagos**~~ — cerrado
+  2026-07-27: `registrarAbono` lee `pago_aplicaciones` con `tipo='venta'`, igual que
+  `listar()`/`resumen()`. La fórmula documentada en `docs/features/ventas.md` y
+  `pagos.md` también se corrigió (estaba escrita antes de las propinas). Cubierto por
+  e2e, no por unit: el mock del unit devuelve la fila igual con cualquier query.
+- [x] ~~**`metodoPagoId` se persiste sin validar que esté habilitado para el tenant**~~
+  — cerrado 2026-07-27: `registrar()` rechaza con 400 cualquier `metodoPagoId` ausente
+  del mapa tenant-scoped, antes de escribir nada.
 - [ ] **`garzonId` de propina no se valida contra el tenant y el JOIN de lectura lo
   expone** (backend, `ventas/ventas.service.ts:501-520` y `:1261-1269`) — la ruta
   `propinaCierreMesa` guarda el `garzonId` del DTO sin comprobar pertenencia

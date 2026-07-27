@@ -62,15 +62,47 @@ async function abrirCaja(
   return (res.body as CajaResponse).id;
 }
 
+/**
+ * El cierre es en DOS fases: `POST /:id/conteo` congela el arqueo y auto-cierra
+ * si cuadra; si descuadra pasa a `en_conciliacion` y hay que resolver la fase 2
+ * con `POST /:id/cerrar`. Llamar solo a `cerrar` no cierra nada y el cajón queda
+ * ocupado para las suites siguientes (409 al abrir). El teardown **asegura** el
+ * cierre en vez de ignorar el status: si vuelve a romperse, se ve acá y no como
+ * una falla críptica en otra suite.
+ */
 async function cerrarCaja(
   app: INestApplication<App>,
   token: string,
   cajaId: string,
 ): Promise<void> {
-  await request(app.getHttpServer())
-    .post(`/api/caja/${cajaId}/cerrar`)
+  const conteo = await request(app.getHttpServer())
+    .post(`/api/caja/${cajaId}/conteo`)
     .set('Authorization', `Bearer ${token}`)
     .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+
+  if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
+    const cierre = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/cerrar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: [] });
+    expect([200, 201]).toContain(cierre.status);
+  }
+}
+
+/** Lo efectivamente aplicado A LA VENTA (excluye la parte que fue a propina). */
+async function getAplicadoVenta(
+  ds: DataSource,
+  ventaId: string,
+): Promise<number> {
+  const rows: { total: string }[] = await ds.query(
+    `SELECT COALESCE(SUM(pa.monto), 0) AS total
+       FROM pagos p
+       JOIN pago_aplicaciones pa ON pa.pago_id = p.pago_id
+            AND pa.eliminado_el IS NULL AND pa.tipo = 'venta'
+      WHERE p.venta_id = $1 AND p.eliminado_el IS NULL`,
+    [ventaId],
+  );
+  return parseFloat(rows[0]?.total ?? '0');
 }
 
 async function getStock(ds: DataSource, itemId: string): Promise<number> {
@@ -393,6 +425,89 @@ describe('Ventas (e2e)', () => {
           },
         })
         .expect(400);
+    });
+  });
+
+  describe('POST /pagos (abono) sobre una venta con propina', () => {
+    const PROPINA = 2000;
+    const PAGO_INICIAL = 3000;
+    const ABONO = 1000;
+
+    it('descuenta del saldo solo lo aplicado a la venta, nunca la propina', async () => {
+      const resVenta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: String(PAGO_INICIAL) }],
+          propinaDirecta: { montoPagado: String(PROPINA) },
+        })
+        .expect(201);
+
+      const venta = resVenta.body as {
+        id: string;
+        estado: string;
+        totalFinal: string;
+      };
+      const totalFinal = Number(venta.totalFinal);
+      expect(totalFinal).toBeGreaterThan(PAGO_INICIAL);
+      expect(venta.estado).toBe('pagada_parcial');
+
+      // Regla NO_VUELTO: la propina se sirve primero; a la venta llega el resto.
+      const aplicadoInicial = await getAplicadoVenta(ds, venta.id);
+      expect(aplicadoInicial).toBe(PAGO_INICIAL - PROPINA);
+
+      const resAbono = await request(app.getHttpServer())
+        .post('/api/pagos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          ventaId: venta.id,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: String(ABONO) }],
+        })
+        .expect(201);
+
+      const abono = (
+        resAbono.body as { venta: { estado: string; saldo: string } }
+      ).venta;
+
+      // saldo = total − lo aplicado A LA VENTA. Si el saldo se calculara con la
+      // suma bruta de pagos, la propina descontaría del saldo y la venta
+      // quedaría cobrada de menos.
+      expect(Number(abono.saldo)).toBe(
+        totalFinal - (PAGO_INICIAL - PROPINA) - ABONO,
+      );
+      expect(abono.estado).toBe('pagada_parcial');
+      expect(await getAplicadoVenta(ds, venta.id)).toBe(
+        PAGO_INICIAL - PROPINA + ABONO,
+      );
+    });
+  });
+
+  describe('POST /ventas con un método de pago no contratado', () => {
+    // UUID bien formado (pasa el DTO) que no está en tenant_metodo_pago.
+    const METODO_AJENO = '550e8400-e29b-41d4-a716-446655440999';
+
+    it('responde 400 por el método no habilitado y no escribe nada', async () => {
+      const stockAntes = await getStock(ds, ITEM_ID);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          // Monto por debajo del total: si fuera excedente, el 400 vendría de
+          // la regla del vuelto y este test pasaría sin probar el gate.
+          pagos: [{ metodoPagoId: METODO_AJENO, monto: '1000.0000' }],
+        })
+        .expect(400);
+
+      expect((res.body as { message: string }).message).toBe(
+        'Método de pago no habilitado para este tenant',
+      );
+
+      // El gate corre dentro de la transacción y antes del commit: la venta no
+      // queda a medias ni se descuenta stock.
+      expect(await getStock(ds, ITEM_ID)).toBe(stockAntes);
     });
   });
 
