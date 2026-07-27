@@ -153,25 +153,31 @@ Revisá el cierre de esta tarea. Corré `git diff --staged` (o `git diff <base>.
 si te doy una base) y devolvé hallazgos + veredicto BLOQUEA/LIMPIO.
 ```
 
-**Ese prompt a secas rinde poco. Pedile propiedades concretas.** En jul-2026, nueve
-rondas de revisión sobre la misma tanda: las que decían solo "revisá el diff" volvieron
-LIMPIO varias veces seguidas; las que nombraban una propiedad a verificar produjeron
-**cuatro bloqueos, los cuatro correctos** — y ninguno lo había visto el gate completo.
-Agregá al prompt, además de la base del diff:
+**Delegale la duda que NO resolviste.** Ahí está todo el valor, y no en el formato del
+prompt. Medido sobre nueve rondas de jul-2026: todas llevaban una lista de "prestá
+atención a…", y aun así cinco volvieron LIMPIO. Los **cuatro bloqueos —los cuatro
+correctos, y ninguno visto por el gate completo—** salieron de las cuatro veces que le
+pedí verificar algo que yo no había verificado:
 
-- **Qué cambió y por qué**, en dos o tres líneas. Aclarando que es contexto para juzgar
-  el alcance, no algo en lo que confiar.
-- **Las preguntas que te dan miedo**, formuladas como propiedad falsable. Las que
-  funcionaron: *"¿este test puede pasar por una razón distinta de la que dice probar?"*,
-  *"¿queda algún consumidor de este valor sin actualizar?"*, *"¿esta condición rechaza
-  algún caso legítimo?"*, *"¿el orden de locks nuevo abre un deadlock con otro camino?"*.
-- **Las decisiones de juicio que tomaste** y que querés que alguien discuta: qué dejaste
-  deliberadamente afuera y por qué.
-- ⚠️ **`No modifiques el árbol de trabajo`** — sin eso un revisor puede hacer `git stash`
-  para probar un mutante y dejarte cambios sin commitear en el piso.
+| Lo que le pedí | Lo que yo no había hecho |
+|---|---|
+| ¿este test puede pasar por otra razón? | sospechaba y no lo había resuelto |
+| ¿queda algún consumidor de este valor sin actualizar? | grepeé la carpeta del módulo, no el repo |
+| ¿el fixture descarta todas las heurísticas alternativas? | probé un mutante, había cuatro |
+| ¿queda alguna referencia viva al valor que saqué? | ídem, búsqueda acotada |
 
-No es pasarle el checklist (ya lo tiene): es dirigir la atención al lugar donde tu propia
-revisión es más débil, que es exactamente donde no podés mirarte a vos mismo.
+La contracara: una lista sobre cosas que **ya comprobaste** pide confirmación, no revisión,
+y vuelve LIMPIO. Antes de lanzar, la pregunta es *"¿qué me quedó sin verificar?"* — y eso
+va en el prompt, formulado como propiedad falsable.
+
+Además: **qué cambió y por qué** en dos líneas (aclarando que es contexto para juzgar el
+alcance, no algo en qué confiar), **las decisiones de juicio** que querés que alguien
+discuta, y ⚠️ **`No modifiques el árbol de trabajo`** — sin eso un revisor puede hacer
+`git stash` para probar un mutante y dejarte cambios sin commitear en el piso.
+
+**Señal de humo para el owner:** si el reporte dice "volvió LIMPIO" y no nombra ninguna
+duda concreta que se haya delegado, se pidió confirmación. La pregunta que lo destapa es
+*"¿qué duda le delegaste al revisor?"*.
 
 **Si el diff toca controllers, guards, DTOs o entidades**, lanzar además
 `api-security-reviewer` (`subagent_type: "api-security-reviewer"`) sobre esos archivos:
