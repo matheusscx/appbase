@@ -293,7 +293,7 @@ dentro de una transacción: no repite sus validaciones ni escribe
   cancelado` (ambos terminales); `aplicar` requiere permiso `Inventario/Actualizar`,
   distinto del `Inventario/Crear` que usan crear la sesión y cargar conteos — separa quien
   cuenta de quien aprueba. Detalle funcional completo (catálogo de causas, permisos por
-  ruta): pendiente de un doc de feature dedicado (`docs/features/recuento-inventario.md`).
+  ruta): [`recuento-inventario.md`](./recuento-inventario.md).
 
 **Índices (para performance):**
 - `(tenant_id, item_id)` — consultas por producto del tenant
@@ -640,5 +640,5 @@ npm run test:e2e -- inventario.e2e.spec.ts
 ## Notes
 
 - **Reutilización de `InventarioService.registrarMovimiento(manager, ...)`:** El servicio está diseñado para recibir un `EntityManager`, permitiendo que el módulo de ventas (o futuras integraciones) use la misma lógica dentro de su propia transacción sin duplicar código.
-- **Tipo `'ajuste'`:** hoy solo se usa con `motivo='ajuste_costo'` (corrige valor, no cantidad). El recuento absoluto de inventario (que sí movería cantidad) queda reservado para fase futura.
+- **Tipo `'ajuste'`:** solo se usa con `motivo='ajuste_costo'` (corrige valor, no cantidad; `cantidad` siempre `0`). El recuento de inventario sí mueve cantidad, pero usa `tipo='entrada'`/`'salida'` como cualquier otro movimiento que mueve stock — respeta la convención de que `tipo='ajuste'` es exclusivo de lo que **no** mueve cantidad. Ver "Regla del recuento" arriba y [`recuento-inventario.md`](./recuento-inventario.md).
 - **Confirmación en BD:** el nombre real de la columna de usuario en `usuarios` se usa en JOINs (`usuarios.nombre AS usuario_nombre`). Ajustar si la columna tiene otro nombre o alias.

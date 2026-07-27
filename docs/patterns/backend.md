@@ -162,6 +162,29 @@ Dos lugares, ambos en el **mismo commit**:
    `550e8400-e29b-41d4-a716-446655440XXX` (siguiente número libre); PKs compuestas
    no necesitan ID fijo. Registrar la entity en `seeder.module.ts` (`forFeature`).
 
+   **Encontrar el siguiente número libre — un grep de literales no alcanza.**
+   `grep -o "446655440[0-9]\{3\}"` solo ve strings fijos (`'550e8400-...-446655440XXX'`) y
+   **no ve los IDs generados en runtime**: funciones `uuid(n)` locales a un método
+   (`const uuid = (n) => \`550e8400-e29b-41d4-a716-44665544${String(n).padStart(4,
+   '0')}\``) llamadas como `uuid(281)` sueltos, o dentro de un loop como
+   `uuid(id++)` con `let id = 291`. Esos rangos son invisibles para el grep pero
+   ocupan IDs igual. Ya causó una colisión real: el grep sugería 292 como libre,
+   pero el máximo realmente ocupado (por dos rangos dinámicos: `uuid(id++)` de un
+   loop de permisos y `uuid(N)` sueltos de otro método) era 315 — sembrar en 292
+   habría chocado en runtime, no en compilación (ver
+   `seeder.service.ts → seedMotivosDiferenciaInventario`, comentario en el código).
+
+   Antes de fijar un rango nuevo:
+   1. `grep -o "446655440[0-9]\{3\}" backend/src/modules/seeder/seeder.service.ts | sort -u | tail`
+      da un piso, no el máximo real.
+   2. Buscar además **todos** los generadores dinámicos: `grep -n "const uuid = "` y,
+      por cada uno, leer el rango que cubre — el argumento de cada `uuid(N)` suelto
+      y el valor inicial + cantidad de iteraciones de cada `uuid(id++)` en loop.
+   3. El máximo real es el mayor de todos los anteriores. Empezar el rango nuevo ahí
+      + 1, y dejar un comentario en el código (como el de
+      `seedMotivosDiferenciaInventario`) explicando qué rangos dinámicos ya estaban
+      ocupados, para que el próximo no repita el grep ingenuo.
+
 ---
 
 ## 10. Paginación server-side

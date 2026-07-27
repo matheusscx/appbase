@@ -192,7 +192,7 @@ Extensiones futuras contempladas: combos con grupos de modificadores (elección,
 
 Trazabilidad de stock para items tipo **producto**. Todo cambio de stock queda registrado como un movimiento auditable; el campo `item_producto.stock` es el **saldo materializado** para lectura rápida y alertas, y la tabla de movimientos es la **fuente de verdad**.
 
-**`movimientos_inventario`:** tenant, item, `tipo` (`entrada` | `salida` | `ajuste`), `motivo` (`compra` | `venta` | `devolucion` | `merma` | `ajuste_manual` | `inventario_inicial`), cantidad (siempre positiva; el tipo define el signo), `stock_anterior`, `stock_resultante`, `venta_id` opcional, `usuario_id` (quién lo registró), comentario.
+**`movimientos_inventario`:** tenant, item, `tipo` (`entrada` | `salida` | `ajuste`), `motivo` (`compra` | `venta` | `devolucion` | `merma` | `ajuste_manual` | `inventario_inicial` | `recuento`), cantidad (siempre positiva; el tipo define el signo), `stock_anterior`, `stock_resultante`, `venta_id` opcional, `usuario_id` (quién lo registró), comentario.
 
 **Reglas:**
 - Solo aplica a items `tipo = 'producto'` (los servicios no tienen stock).
@@ -217,7 +217,7 @@ de gestión (margen, food-cost, valorización de mermas), no la valorización tr
 existencias: esa la produce el contador. Detalle y porqué: [ADR-016](./adr/016-costeo-promedio-ponderado-movil.md).
 
 **Fuera de alcance (fases futuras):** bodegas/almacenes y stock por bodega, traspasos,
-conteos físicos masivos, FIFO o método de costeo elegible por tenant.
+FIFO o método de costeo elegible por tenant.
 
 ---
 
@@ -339,6 +339,44 @@ pudiendo ser distinta en cada una). Reglas:
 
 Detalle técnico completo: `docs/features/grupos-modificadores.md` §
 "Grupos anidados en combos (un nivel)" y ADR-015.
+
+---
+
+### 8e. Recuento de inventario (conteo físico)
+
+Una **sesión de conteo físico** con ciclo de vida (`borrador → aplicado | cancelado`)
+sobre productos en `modo_inventario='cantidad'`: se eligen los productos a contar (congela
+el stock del sistema de cada uno), se carga el conteo a lo largo del tiempo, y solo al
+**aplicar** se mueve stock real — no es un ajuste inmediato.
+
+**La diferencia se aplica como delta, no como valor absoluto.** Contar 11.800 unidades a
+las 10:00 y aplicar a las 14:00 habiendo vendido 500 en el medio: si el recuento seteara
+el stock al valor contado, pisaría esa venta y el stock quedaría inflado. La regla es
+`delta = cantidad_contada − stock_sistema` (calculado y congelado al cargar el conteo);
+al aplicar, ese delta se suma sobre el **stock vigente**, no sobre el contado. El faltante
+o sobrante que descubrió el conteo es real independientemente de lo que se haya vendido
+después — un POS de venta física sigue vendiendo mientras alguien cuenta, a diferencia de
+un almacén que bloquea la ubicación durante el conteo.
+
+**La causa de la diferencia usa un catálogo propio** (`motivo_diferencia_inventario`),
+no `causas_merma`: un recuento puede dar **sobrante**, y ninguna causa de merma explica un
+sobrante; además mezclar las dos ensuciaría el reporte de mermas. El movimiento del kardex
+siempre lleva `motivo='recuento'` — la causa es un atributo (`motivo_diferencia_id`), no
+reclasifica el movimiento. Hay una causa por defecto para toda la sesión, con override por
+línea cuando una unidad puntual tiene explicación propia.
+
+**Contar y aplicar exigen permisos distintos** (`Inventario/Crear` vs.
+`Inventario/Actualizar`): aplicar mueve stock real, así que separa a quien cuenta de quien
+aprueba a propósito — si contar exigiera el mismo permiso que aplicar, cualquiera que
+pudiera contar podría también aplicar, y la separación se cae.
+
+Es el insumo que le faltaba al reporte de varianza teórico-vs-real (AVT, patrón
+Toast/xtraCHEF): recetas costeadas y mermas valorizadas ya existían; el conteo periódico
+era la pieza que faltaba.
+
+**Fuera de alcance (fases futuras):** modos `serie` y `lote`, cycle count programado
+(recordatorio de contar cada N días), conteo ciego, reporte de varianza (AVT) en sí.
+Detalle completo: [`docs/features/recuento-inventario.md`](./features/recuento-inventario.md).
 
 ---
 
