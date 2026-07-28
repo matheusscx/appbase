@@ -265,6 +265,7 @@ Procedimiento completo: skill `verify-feature`.
 | `docs/patterns/` | **Playbook backend/frontend — leer ANTES de planificar una feature** |
 | `docs/agent/anti-patterns.md` | Errores reales ya cometidos en el repo |
 | `docs/agent/pendientes.md` | Backlog de correcciones diferidas a corregir al cerrar el harness |
+| `docs/agent/resueltos.md` | Archivo de las entradas de `pendientes.md` ya cerradas, con el detalle de cada fix |
 | `docs/agent/README.md` | Por qué este setup está escrito así |
 | `docs/agent/investigacion-mercado.md` | Plantilla de investigación de mercado + regla del cruce |
 | `docs/agent/auditoria-codigo.md` | Método de auditoría (Sonnet busca, el principal refuta) + mapa de qué se auditó |

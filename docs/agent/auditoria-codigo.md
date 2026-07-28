@@ -3,8 +3,9 @@
 > ⛔ **Esto no es una lista de bugs.** La lista de bugs es `pendientes.md`. Este archivo
 > es **el método** para buscarlos y **el mapa de qué se auditó y qué no**. Su producto no
 > es "encontramos 40 cosas": es poder mirar una tabla y saber en qué partes del sistema
-> confiamos y por qué. Un hallazgo confirmado se muda a `pendientes.md`; acá solo queda
-> registrado que ese módulo pasó por la pasada, cuándo y con qué resultado.
+> confiamos y por qué. Un hallazgo confirmado se muda a `pendientes.md` —y de ahí, al
+> corregirse, a `resueltos.md`—; acá solo queda registrado que ese módulo pasó por la
+> pasada, cuándo y con qué resultado.
 
 **Cuándo se usa:** cuando querés **confianza en lo ya construido**, no cuando estás
 cerrando una tarea. Para cerrar una tarea está `verify-feature`, que audita **el diff**.
