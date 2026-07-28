@@ -145,6 +145,41 @@ const stockModalOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 
+// El backend garantiza la partición: 'extra' siempre cae en `advertencias` y
+// nunca en `bloqueos`. Tipar cada lado con lo que realmente puede contener deja
+// que `vue-tsc` valide el acceso a ETIQUETA_USO en el template.
+type UsoItemTipoBloqueante = 'ingrediente' | 'combo' | 'opcion'
+
+interface UsoItem {
+  bloqueos: { tipo: UsoItemTipoBloqueante; nombre: string }[]
+  advertencias: { tipo: 'extra'; nombre: string }[]
+}
+
+const usoItem = ref<UsoItem | null>(null)
+
+const ETIQUETA_USO: Record<UsoItemTipoBloqueante, string> = {
+  ingrediente: 'Es ingrediente de',
+  combo: 'Es componente de',
+  opcion: 'Es opción de',
+}
+
+const eliminarBloqueado = computed(
+  () => (usoItem.value?.bloqueos.length ?? 0) > 0,
+)
+
+const eliminarTitulo = computed(() =>
+  eliminarBloqueado.value ? 'No se puede eliminar' : 'Eliminar item',
+)
+
+const eliminarMensaje = computed(() => {
+  if (eliminarBloqueado.value) return 'Este item está en uso y no se puede eliminar:'
+  const extras = usoItem.value?.advertencias ?? []
+  if (extras.length) {
+    return `Se ofrece como extra en ${extras.map((a) => a.nombre).join(', ')}. Si lo eliminás dejará de estar disponible en esas recetas.`
+  }
+  return '¿Estás seguro de que deseas eliminar este item? Esta acción no se puede deshacer.'
+})
+
 // Simulador de impacto de costos en recetas: se dispara tras una compra
 // (ejecutarAjusteStock) — la edición manual del item ya no cambia el costo.
 const {
@@ -920,7 +955,16 @@ async function guardar() {
   }
 }
 
-function confirmarEliminar(id: string) {
+async function confirmarEliminar(id: string) {
+  try {
+    usoItem.value = await useApiFetch<UsoItem>(`${apiUrl}/items/${id}/uso`)
+  } catch (e) {
+    toast.add({
+      title: apiErrorMsg(e, 'Error al verificar el uso del item'),
+      color: 'error',
+    })
+    return
+  }
   confirmDeleteId.value = id
   confirmModalOpen.value = true
 }
@@ -1925,10 +1969,22 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
     <CrudModal
       v-model:open="confirmModalOpen"
-      title="Eliminar item"
-      message="¿Estás seguro de que deseas eliminar este item? Esta acción no se puede deshacer."
+      :title="eliminarTitulo"
+      :message="eliminarMensaje"
+      :solo-cerrar="eliminarBloqueado"
       @confirm="eliminar"
-    />
+    >
+      <template v-if="eliminarBloqueado" #detalle>
+        <ul class="mt-2 list-disc pl-5 text-sm">
+          <li
+            v-for="b in usoItem?.bloqueos ?? []"
+            :key="`${b.tipo}-${b.nombre}`"
+          >
+            {{ ETIQUETA_USO[b.tipo] }} <strong>{{ b.nombre }}</strong>
+          </li>
+        </ul>
+      </template>
+    </CrudModal>
 
     <!-- Modal ajuste de stock -->
     <UModal v-model:open="stockModalOpen" title="Ajustar stock" :ui="{ content: 'max-w-2xl' }">

@@ -8,11 +8,13 @@ withDefaults(
     confirmLabel?: string
     confirmColor?: 'error' | 'primary' | 'neutral'
     loading?: boolean
+    soloCerrar?: boolean
   }>(),
   {
     confirmLabel: 'Eliminar',
     confirmColor: 'error',
     loading: false,
+    soloCerrar: false,
   },
 )
 
@@ -33,19 +35,29 @@ function cancelar() {
       <p class="text-sm">
         {{ message }}
       </p>
+      <slot name="detalle" />
     </template>
     <template #footer>
       <AppModalFooter>
-        <UButton color="neutral" variant="ghost" @click="cancelar">
-          Cancelar
-        </UButton>
         <UButton
-          :color="confirmColor"
-          :loading="loading"
-          @click="emit('confirm')"
+          v-if="soloCerrar"
+          color="neutral"
+          @click="cancelar"
         >
-          {{ confirmLabel }}
+          Entendido
         </UButton>
+        <template v-else>
+          <UButton color="neutral" variant="ghost" @click="cancelar">
+            Cancelar
+          </UButton>
+          <UButton
+            :color="confirmColor"
+            :loading="loading"
+            @click="emit('confirm')"
+          >
+            {{ confirmLabel }}
+          </UButton>
+        </template>
       </AppModalFooter>
     </template>
   </UModal>
