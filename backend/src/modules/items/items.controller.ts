@@ -71,6 +71,13 @@ export class ItemsController {
     return this.itemsService.update(tenantId, usuarioId, id, dto);
   }
 
+  @Get(':id/uso')
+  @RequiresPermiso('Items', 'Eliminar')
+  obtenerUso(@Req() req: Request, @Param('id') id: string) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.itemsService.obtenerUso(tenantId, id);
+  }
+
   @Delete(':id')
   @RequiresPermiso('Items', 'Eliminar')
   remove(@Req() req: Request, @Param('id') id: string) {

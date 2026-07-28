@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
@@ -97,6 +98,7 @@ async function crearIngrediente(
 
 describe('Recetas — flujo completo (e2e)', () => {
   let app: INestApplication<App>;
+  let ds: DataSource;
   let token: string;
   let cajaId: string;
   let panId: string;
@@ -114,6 +116,7 @@ describe('Recetas — flujo completo (e2e)', () => {
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     await app.init();
+    ds = app.get(DataSource);
 
     token = await login(app);
     cajaId = await abrirCaja(app, token);
@@ -379,5 +382,93 @@ describe('Recetas — flujo completo (e2e)', () => {
       .get(`/api/items/${paltaId}`)
       .set('Authorization', `Bearer ${token}`);
     expect((resPalta.body as ItemResponse).stock).toBe('4.9800');
+  });
+
+  it('8. /uso reporta como bloqueo el ingrediente que el DELETE rechaza', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/items/${panId}/uso`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const uso = res.body as {
+      bloqueos: { tipo: string; nombre: string }[];
+      advertencias: { tipo: string; nombre: string }[];
+    };
+    // Es el mismo item que el test 6 no deja borrar: /uso y remove() tienen que
+    // coincidir, porque leen la misma clasificación.
+    expect(uso.bloqueos.length).toBeGreaterThan(0);
+    expect(uso.bloqueos.every((b) => b.tipo === 'ingrediente')).toBe(true);
+  });
+
+  it('9. permite borrar un ingrediente usado solo como extra y soft-deletea la fila', async () => {
+    const cheddarId = await crearIngrediente(
+      app,
+      token,
+      'Cheddar solo extra E2E',
+      'kg',
+      '2',
+      '6000',
+    );
+    const panSoloId = await crearIngrediente(
+      app,
+      token,
+      'Pan solo extra E2E',
+      'unidad',
+      '10',
+      '500',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Sandwich extras E2E ${Date.now()}`,
+        precioBase: '3000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panSoloId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: cheddarId,
+            cantidad: '30',
+            unidadCodigo: 'g',
+            precioExtra: '700',
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+
+    const resUso = await request(app.getHttpServer())
+      .get(`/api/items/${cheddarId}/uso`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUso.status).toBe(200);
+    const uso = resUso.body as {
+      bloqueos: { tipo: string; nombre: string }[];
+      advertencias: { tipo: string; nombre: string }[];
+    };
+    expect(uso.bloqueos).toEqual([]);
+    expect(uso.advertencias.map((a) => a.tipo)).toEqual(['extra']);
+
+    const resDel = await request(app.getHttpServer())
+      .delete(`/api/items/${cheddarId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDel.status).toBe(200);
+
+    // Lo que discrimina del código anterior: que el borrado funcione pasaba
+    // igual antes. Que la fila del extra quede soft-deleted, no.
+    const filas: { eliminado_el: string | null }[] = await ds.query(
+      `SELECT eliminado_el FROM receta_extras_permitidos
+       WHERE ingrediente_item_id = $1`,
+      [cheddarId],
+    );
+    expect(filas).toHaveLength(1);
+    expect(filas[0]?.eliminado_el).not.toBeNull();
   });
 });

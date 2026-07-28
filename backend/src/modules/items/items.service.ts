@@ -1590,6 +1590,15 @@ export class ItemsService {
     return uso;
   }
 
+  async obtenerUso(tenantId: string, itemId: string): Promise<UsoItem> {
+    const item = await this.itemRepo.findOne({
+      where: { id: itemId, tenantId },
+    });
+    if (!item) throw new NotFoundException('Item no encontrado');
+
+    return this.obtenerUsoItem(this.dataSource.manager, tenantId, itemId);
+  }
+
   async remove(tenantId: string, itemId: string): Promise<void> {
     const item = await this.itemRepo.findOne({
       where: { id: itemId, tenantId },
