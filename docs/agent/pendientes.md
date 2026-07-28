@@ -251,6 +251,152 @@ multi-tenant de caja.
   la liquidación). La mitad barata —que la propina de una venta anulada no entre a
   liquidaciones **futuras**— ya está cerrada ([`resueltos.md`](resueltos.md)).
 
+## Auditoría `items` + `calculo-precios` (2026-07-28) — hallazgos confirmados
+
+Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md): 21 hallazgos crudos
+→ **21 sobreviven, ninguno se cayó entero**. El trabajo del refutador fue el documentado:
+**6 bajaron de severidad**, 2 se reclasificaron como decisión de owner, y tres afirmaciones
+perdieron la mitad que no aguantaba (ver cada entrada). Se suma 1 hallazgo del refutador
+que ninguna lente vio.
+
+**Lo que salió limpio, que es lo que la pasada vino a producir:** soft delete **0 hallazgos
+sobre 98 queries** revisadas una por una (cruzadas contra `startup-pos.sql` para no reportar
+filtro faltante donde la tabla no tiene la columna); **multi-tenant limpio en los 63 JOIN** y
+en cada id que llega del cliente; y la suite de `items.service.spec.ts` (4.136 líneas) resultó
+inusualmente rigurosa — trae la derivación aritmética comentada, así que mata mutantes.
+
+### Alta
+
+- [ ] **El motor de precios resuelve cada línea con el `findOne` pesado** (backend,
+  `calculo-precios.service.ts:71-83` y `:144`) — un `for` sobre las líneas del carrito, cada
+  una llamando `itemsService.findOne`: 4 queries fijas, más ingredientes/extras/grupos si es
+  receta o combo. **Es el hilo que la pasada de `ventas` dejó anotado**, y ahora se entiende
+  por qué `cargarBasePorIds` no lo cerró: ese fix resolvió el lado de **persistencia** de la
+  venta, no el de **precio**. No se puede reusar tal cual — `cargarBasePorIds` deliberadamente
+  no trae `impuestosIds`/`descuentosIds`/`recargosIds`, que es justo lo que el motor necesita.
+  Corre en los tres llamadores reales: `ventas.service.ts`, `suscripciones.service.ts` y
+  `online.service.ts`.
+- [ ] **Los grupos de un componente-combo se descuentan aunque el componente se haya
+  omitido por falta de stock** (backend, `items.service.ts:2418-2436`) — si un componente
+  `receta` no bloqueante no tiene stock, el pre-chequeo hace `continue` y no escribe nada
+  por él (cero movimientos, correcto). Pero después del loop `gruposComponentes` se arma
+  con **todo** `snapshot.componentes`, sin filtrar los omitidos, y se venden igual.
+  Escenario: combo con una hamburguesa no bloqueante y grupo "Proteína"; falta el pan, la
+  hamburguesa se omite con advertencia, y la chuleta elegida **se descuenta igual**.
+  Lo que lo vuelve alto: el comentario de `:2320-2329` dice explícitamente que el
+  pre-chequeo existe para evitar "deriva silenciosa de inventario" — y la deriva se cuela
+  por la puerta de al lado. El seed usa `bloqueante: true`, así que no se ve en el demo.
+- [ ] **Vender un extra cuyo catálogo cambió tras congelar el snapshot descuenta 1000× de
+  más** (backend, `items.service.ts:2201-2202`) — `ingredienteUnidadMedida:
+  cat?.ingredienteUnidadMedida ?? extra.unidadCodigo`. Si el extra ya no está en
+  `receta_extras_permitidos` al cobrar (un `PATCH` reemplaza la lista completa), el fallback
+  sustituye la unidad **de stock** por la unidad **de la porción**, y `convertirUnidad`
+  termina convirtiendo una unidad a sí misma. 20 g de queso pasan a descontarse como 20 kg.
+  Con stock bajo salta "Stock insuficiente" y queda en advertencia; con stock alto el
+  descuento silencioso ocurre. El `?? 'Extra'` de la línea de al lado muestra que el caso
+  "no está en el catálogo" se anticipó: el default elegido para la unidad es el equivocado.
+
+### Media
+
+- [ ] **Un descuento, recargo o impuesto desactivado sigue aplicándose** (backend,
+  `calculo-precios.service.ts:50-62` + `items.service.ts:408-419`) — `descuentos.findAll` e
+  `impuestos.findAll` no filtran `activo`, `indexarReglas` ni siquiera mapea el campo, y al
+  desactivar la regla nadie toca `item_descuentos`. **Refutada la mitad peor del hallazgo:**
+  las entidades usan `@DeleteDateColumn`, así que una regla **borrada** sí queda excluida por
+  TypeORM — es solo `activo`. Lo que lo vuelve bug y no decisión: `items.vue:685` ya filtra
+  por `activo` al ofrecer asociaciones nuevas, así que el front la esconde y el back la
+  sigue cobrando.
+- [ ] **`precio_base` se puede crear o editar en negativo** (backend,
+  `dto/create-item.dto.ts:147`, `dto/update-item.dto.ts:59`) — solo `@IsNumberString()`, sin
+  `CHECK` en la tabla (`startup-pos.sql:503`) y sin validación en `create`/`update`. El dato
+  que importa para priorizarlo: el barrido de positividad de jul-2026 dejó
+  `@IsDecimalNoNegativo` en `ventas`, `caja` y `propinas` — **los tres módulos que se
+  auditaron**. Se detuvo en el borde del alcance y el catálogo quedó afuera. El propio
+  módulo sabe hacerlo: `aplicarDesfases:3138` exige `precioBase > 0`.
+- [ ] **`AjusteStockDto.cantidad` es `number` nativo** (backend, `dto/ajuste-stock.dto.ts:51`)
+  — único en el módulo; los otros cinco campos de cantidad son string + `@IsNumberString()`.
+  **Escenario del buscador descartado** (exigía que el cliente ya mandara el número roto).
+  El sólido: la columna es `NUMERIC(18,4)` —18 dígitos significativos— y un double aguanta
+  15-17, así que una cantidad grande con decimales se corrompe al pasar por
+  `@Type(() => Number)`, y de ahí entra a `convertirCostoUnitario`, que es dinero.
+- [ ] **Deadlock en la expansión de recetas y combos** (backend,
+  `items.service.ts:1726-1735` y `:2301-2308`) — ninguna de las dos queries lleva `ORDER BY`:
+  iteran en orden físico y toman `FOR UPDATE` en ese orden. Es el mismo bug ya cerrado un
+  nivel más arriba, reaparecido adentro. **Corrección al hallazgo: no alcanza con agregar
+  `ORDER BY` a las dos queries** — un carrito que mezcla una línea de receta y una de combo
+  sigue tomando locks en orden de línea. El fix correcto es el de arriba: ordenar globalmente
+  los ids a bloquear.
+- [ ] **Tres carreras del mismo molde: leer para validar, escribir sin lock** (backend,
+  `items.service.ts`) — (a) `remove():1508` no es transaccional, así que su chequeo de uso
+  puede quedar obsoleto antes del `UPDATE`; (b) el guard de `modo_inventario` lee
+  `item_producto` **sin `FOR UPDATE`** (`:1166`) mientras `registrarMovimiento` sí lo toma,
+  así que no colisionan y el modo puede cambiar con un movimiento recién escrito; (c)
+  `item_receta.costo_actual` se puede pisar entre editar ingredientes y aplicar desfases.
+  Las tres bajadas de alta a media: ventana angosta, consecuencia silenciosa.
+- [ ] **No se puede vaciar `descripcion` ni `categoriaId` al editar un ítem** (frontend,
+  `configuracion/items.vue:816` y `:818`) — el backend distingue bien `undefined` ("no tocar")
+  de `''`/`null` ("borrar"), pero el front colapsa todo lo falsy con `|| undefined` y el campo
+  ni viaja. El usuario borra el texto, ve "Item actualizado", y el valor sigue ahí. Mismo bug
+  en `duracionEstimada` (`:866`), donde además tapa el `0` legítimo.
+- [ ] **La resolución de recargos por id nunca corre con datos** (backend,
+  `calculo-precios.service.spec.ts`) — el fixture fija `recargosIds: []` y el mock de
+  `findAll` devuelve `[]` en los 9 tests. Mutante que sobrevive: cambiar `recargoMap` por
+  `descuentoMap` en `calculo-precios.service.ts:169` y nada falla. El motor puro sí prueba
+  recargos a fondo, pero construyendo las reglas a mano — la capa que las resuelve por id no
+  la ejerce nadie. `ventas.service.spec.ts` también fija `recargosIds: []` en sus tres
+  fixtures.
+- [ ] **`findOne` de una receta con 5 grupos son 6 queries** (backend,
+  `items.service.ts:552`) — un `SELECT` de opciones por cada grupo, con la versión batcheada
+  (`cargarGruposPorItem:274`) ya escrita en el mismo archivo y usada dos líneas más arriba
+  para los componentes de un combo.
+
+### Baja
+
+- [ ] **`remove()` chequea uso sin filtrar por tenant** (backend, `items.service.ts:1514`,
+  `:1528`, `:1542`) — defensa en profundidad faltante, misma clase que los `LEFT JOIN
+  garzones` de `turnos`/`salones`. No explotable: el ítem ya se validó contra el tenant y
+  ningún camino de escritura permite que otro tenant lo referencie. Si la invariante se
+  rompiera, el fallo **no sería silencioso sino una fuga de nombres** — el mensaje de error
+  interpola el `nombre` de las recetas/combos/grupos encontrados.
+- [ ] **`precioUnitario` negativo en `/calculo-precios/calcular`** (backend,
+  `dto/calcular.dto.ts:27`) — `cantidad` se valida con `<= 0` en `resolverLinea:140` y
+  `precioUnitario` no. Bajado de media: el endpoint no persiste nada y el camino real de
+  venta ya exige `@IsDecimalNoNegativo`.
+- [ ] **`convertirAMonedaOficial` redondea a 4 fijo** (backend,
+  `calculo-precios.service.ts:188`) — **hallazgo del refutador, ninguna lente lo vio**: el
+  `.toFixed(4)` ignora `escalaCalculo` y `modoRedondeo` del tenant, y ocurre justo antes de
+  entregarle el precio al motor que sí los respeta. Un paso de redondeo fuera de la config.
+- [ ] **`aplicarDesfases`/`descartarDesfases` hacen 3-4 queries por receta** (backend,
+  `items.service.ts:3122` y `:3208`) — en un endpoint que la UI usa con "Seleccionar todas"
+  (`RecetasDesfasesPanel.vue`) y cuyo DTO solo exige `@ArrayMinSize(1)`, sin tope superior.
+- [ ] **Las tres `validarY…` hacen un `SELECT` por fila del payload** (backend,
+  `items.service.ts:2717`, `:2813`, `:2880`) — crear una receta con 15 ingredientes son 15
+  `SELECT` secuenciales. Son lecturas de validación, no el `INSERT` de N filas que está al
+  lado (ese está bien).
+- [ ] **Ingrediente o extra duplicado en una receta devuelve 500, no 400** (backend,
+  `items.service.ts:2695` y `:2860`) — `validarYCostearComponentes` rechaza duplicados con un
+  `Set` (`:2796`); sus dos funciones gemelas no. El payload pasa la validación y revienta
+  contra el índice único parcial. Bajado de media: la transacción revierte y el índice
+  sostiene el dato, lo único malo es la calidad del error. Asimetría entre gemelas, no
+  decisión consciente.
+
+### Decidido por el owner (pendiente de respuesta)
+
+- [ ] **¿El descuento debe tener piso en cero?** (backend,
+  `calculo-precios.engine.ts:239`) — `acc.plus(monto.times(signo))` sin `max(acc, 0)`. Un
+  `monto_fijo` de 500 sobre un ítem de 100 devuelve `totalLinea: -400`; `validarValor` de
+  descuentos solo topea el `< 1` cuando el modo es porcentaje. También se llega apilando
+  tres descuentos de 0.40 en modo `base`. **No hay regla documentada** que diga qué debe
+  pasar, y las opciones no son equivalentes: topear en cero en silencio, rechazar la línea
+  con 400, o permitirlo porque un total negativo podría ser legítimo en una nota de crédito.
+- [ ] **¿`remove()` debe bloquear el borrado de un ingrediente usado solo como extra?**
+  (backend, `items.service.ts:1508`) — bloquea si es ingrediente fijo, componente de combo u
+  opción de grupo, pero nunca consulta `receta_extras_permitidos`. `recetas.md` solo documenta
+  el bloqueo del ingrediente fijo. No está claro si omitirlo para extras fue deliberado
+  (menos fricción para borrar un insumo poco usado) o descuido, dado que sí se bloquea para
+  los otros tres usos vivos. **Es la condición habilitante del bug de conversión de unidad de
+  la sección Alta**, así que la respuesta cambia cuánto queda de ese bug tras corregirlo.
+
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
 El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado

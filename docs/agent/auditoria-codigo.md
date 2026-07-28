@@ -20,17 +20,29 @@ cosas: lo que ningún gate mira porque nadie lo miró nunca como un cuerpo enter
 dos cosas.
 
 El motivo es empírico. Un agente al que le pedís bugs **encuentra bugs**, existan o no.
-Tres pasadas medidas en jul-2026: sobre 39 commits de código recién escrito, 13 hallazgos
+Cuatro pasadas medidas en jul-2026: sobre 39 commits de código recién escrito, 13 hallazgos
 y 10 supervivientes (77%); sobre `ventas`+`pagos` —código maduro, con gates, e2e y
 revisiones encima— 20 hallazgos y 15 supervivientes (75%); sobre `caja`+`propinas`, 25
-hallazgos y 20 supervivientes (80%).
+hallazgos y 20 supervivientes (80%); sobre `items`+`calculo-precios` —el módulo más grande—
+21 y 21 (100%).
 
-**El refutador filtra menos de lo que corrige.** En la tercera pasada solo 2 hallazgos se
-cayeron enteros; el trabajo real fue **bajar severidades y arreglar el escenario**. Los
-buscadores marcaron "alta" casi todo, y tres afirmaciones no sobrevivieron a abrir el
-archivo: un monto negativo que "se persistía" y que en realidad frena un `CHECK` de BD, y
-dos "N+1" que eran escrituras de N filas. Si el refutador solo cuenta cuántos mató, va a
-creer que no hizo falta.
+**El refutador filtra menos de lo que corrige, y esa es la razón de tenerlo.** En la tercera
+pasada solo 2 hallazgos se cayeron enteros y en la cuarta ninguno; el trabajo real fue
+**bajar severidades y arreglar el escenario**. Los buscadores marcaron "alta" casi todo. En
+la tercera, tres afirmaciones no sobrevivieron a abrir el archivo: un monto negativo que "se
+persistía" y que en realidad frena un `CHECK` de BD, y dos "N+1" que eran escrituras de N
+filas. En la cuarta —con 0 muertes— el refutador igual cambió el resultado: **6 severidades
+abajo**, tres afirmaciones que perdieron su mitad peor (una regla "desactivada o borrada"
+que era solo desactivada, porque `@DeleteDateColumn` ya excluye lo borrado), un fix propuesto
+que era incorrecto (agregar `ORDER BY` no resuelve un deadlock que se decide un nivel más
+arriba), un escenario reemplazado por otro que sí se sostiene, y **1 hallazgo que ninguna
+lente vio**. También descartó una hipótesis propia que habría sido un falso positivo grande:
+leer un `.vue` por rangos sueltos sugería que tres ramas del `guardar()` eran inalcanzables;
+abrir el archivo entero mostró que eran dos cadenas `if/else` distintas.
+
+Si el refutador solo cuenta cuántos mató, va a creer que no hizo falta. **Una pasada con 100%
+de supervivencia no es una pasada sin refutación: es una donde la refutación se gastó
+entera en precisión.**
 
 **La predicción de que el ruido subiría sobre código maduro no se cumplió**, y la razón
 importa: la precisión no vino de que los buscadores acertaran más, sino de tres cosas del
@@ -127,6 +139,7 @@ Qué se auditó, cuándo, y con qué resultado. Una fila por pasada.
 | Los 2 commits de corrección de esa pasada | 2026-07-27 | 1 (`domain-reviewer`) | 2 | 2 | 1 bloqueante: regresión de UI del rol aprobador |
 | `ventas` + `pagos` (backend completo + pantallas del módulo) | 2026-07-27 | 7 | 20 | 15 | **Soft delete salió limpio** (tabla por tabla, 0 hallazgos). 3 lentes independientes cayeron sobre el mismo bug del vuelto → se contó una vez. 3 hallazgos pasaron a decisión de owner por regla no documentada, no a la lista de bugs |
 | `caja` + `propinas` (backend completo + pantallas de los dos módulos) | 2026-07-27 | 8 | 25 | 20 | 3 hallazgos los vieron dos lentes cada uno → se contaron una vez. **La máquina de estados de caja salió limpia** (12 transiciones, las 11 inválidas bloqueadas), igual que la inmutabilidad del arqueo congelado y el anti-doble-pago de liquidaciones. Los 2 hilos que dejó la pasada de `ventas` cerraron: defendidos en el endpoint HTTP, **no** en el método compartido ni en ningún test |
+| `items` + `calculo-precios` (backend completo + las 2 pantallas del módulo) | 2026-07-28 | 8 | 21 | 21 | **Ninguno se cayó entero** — 6 bajaron de severidad, 3 perdieron la mitad de la afirmación, 2 se reclasificaron como decisión de owner, y el refutador sumó 1 que ninguna lente vio. **Soft delete limpio: 0 sobre 98 queries** revisadas una por una; multi-tenant limpio en los 63 JOIN (su único hallazgo es defensa en profundidad no explotable). El hilo que dejó la pasada de `ventas` cerró con un matiz: el N+1 de `findOne` sobrevivía **del lado del precio**, no del de la persistencia que `cargarBasePorIds` ya había resuelto |
 
 ### Orden propuesto para lo que falta
 
@@ -136,7 +149,7 @@ Por riesgo, no por tamaño. Lo de arriba primero.
 |---|---|---|
 | ~~1~~ | ~~`ventas` (+ `pagos`)~~ | ✅ Hecho 2026-07-27 |
 | ~~1~~ | ~~`caja` + `propinas`/liquidación~~ | ✅ Hecho 2026-07-27 |
-| 1 | `items` (motor de precios) | El más grande (3.5k LOC) y modula todo el cálculo. La pasada de ventas dejó un hilo: `itemsService.findOne` como fuente de dos N+1 |
+| ~~1~~ | ~~`items` (motor de precios)~~ | ✅ Hecho 2026-07-28 |
 | 2 | `turnos` + `salones` | La pasada de ventas dejó tres `LEFT JOIN garzones` sin filtro de `tenant_id` esperando acá, y la de propinas dejó dos: el `tipo_garzon` de la sesión se congela al abrir turno pero `garzones.tipo` es editable, y `sesiones_garzon` alimenta el reparto |
 | 3 | `inventario` fuera de lo ya auditado | Kardex, mermas, conversión de unidades |
 | 4 | RBAC, auth y tenants | La invariante más cara si se rompe, aunque cambia poco |
