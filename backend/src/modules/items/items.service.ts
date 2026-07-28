@@ -397,6 +397,86 @@ export class ItemsService {
     return porId;
   }
 
+  /**
+   * Ids de impuestos/descuentos/recargos asociados a varios ítems, en UNA sola
+   * query, indexados por `itemId`. Compañero de `cargarBasePorIds` para el
+   * camino del motor de precios, que necesita la fila base **y** estas tres
+   * listas: resolverlo con `findOne` por línea costaba 4+ queries por ítem para
+   * construir además ingredientes, componentes y grupos que el motor descarta.
+   *
+   * Un ítem sin reglas no aparece en el mapa (el llamador usa `?? []`).
+   *
+   * **El orden de cada lista importa** cuando el tenant calcula en modo
+   * `compuesto`: cada regla se aplica sobre el acumulado de la anterior, y
+   * mezclar `monto_fijo` con porcentaje no conmuta.
+   *
+   * El `ORDER BY` de abajo lo vuelve **determinista por id**. Ojo con lo que
+   * eso NO significa: el orden anterior **no** era el del índice. `EXPLAIN`
+   * sobre estas tablas da `Bitmap Heap Scan`, que reordena por página del
+   * heap, así que las queries por ítem devolvían orden de inserción. O sea que
+   * este `ORDER BY` **puede** dar un total distinto al de antes en un tenant
+   * `compuesto` que mezcle modos en un mismo ítem. Hoy no hay ninguno (los dos
+   * tenants del seed están en `base`, ningún ítem tiene dos reglas de la misma
+   * clase y no hay datos productivos), pero la garantía es esa y no otra.
+   * Qué orden *debería* tener es una decisión de negocio abierta
+   * (ver `docs/agent/pendientes.md` → prioridad de descuentos).
+   */
+  async cargarReglasPorIds(
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<
+    Map<
+      string,
+      { impuestosIds: string[]; descuentosIds: string[]; recargosIds: string[] }
+    >
+  > {
+    const unicos = [...new Set(itemIds)];
+    if (unicos.length === 0) return new Map();
+
+    // El JOIN a `items` acota por tenant además de por id: el llamador ya
+    // validó pertenencia con `cargarBasePorIds`, pero las tablas puente no
+    // tienen `tenant_id` propio y dejar la lectura sin acotar es la defensa
+    // que ya faltó en otros lados de este archivo.
+    const rows: { clase: string; item_id: string; regla_id: string }[] =
+      await this.dataSource.query(
+        `SELECT 'impuesto' AS clase, ii.item_id, ii.impuesto_id AS regla_id
+           FROM item_impuestos ii
+           JOIN items i ON i.item_id = ii.item_id
+            AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+          WHERE ii.item_id = ANY($1::uuid[])
+         UNION ALL
+         SELECT 'descuento', idd.item_id, idd.descuento_id
+           FROM item_descuentos idd
+           JOIN items i ON i.item_id = idd.item_id
+            AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+          WHERE idd.item_id = ANY($1::uuid[])
+         UNION ALL
+         SELECT 'recargo', ir.item_id, ir.recargo_id
+           FROM item_recargos ir
+           JOIN items i ON i.item_id = ir.item_id
+            AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+          WHERE ir.item_id = ANY($1::uuid[])
+          ORDER BY item_id, clase, regla_id`,
+        [unicos, tenantId],
+      );
+
+    const porId = new Map<
+      string,
+      { impuestosIds: string[]; descuentosIds: string[]; recargosIds: string[] }
+    >();
+    for (const r of rows) {
+      let entrada = porId.get(r.item_id);
+      if (!entrada) {
+        entrada = { impuestosIds: [], descuentosIds: [], recargosIds: [] };
+        porId.set(r.item_id, entrada);
+      }
+      if (r.clase === 'impuesto') entrada.impuestosIds.push(r.regla_id);
+      else if (r.clase === 'descuento') entrada.descuentosIds.push(r.regla_id);
+      else entrada.recargosIds.push(r.regla_id);
+    }
+    return porId;
+  }
+
   async findOne(tenantId: string, itemId: string) {
     const rows: ItemRow[] = await this.dataSource.query(
       this.BASE_QUERY +

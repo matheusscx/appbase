@@ -267,17 +267,7 @@ inusualmente rigurosa — trae la derivación aritmética comentada, así que ma
 
 ### Alta
 
-- [ ] **El motor de precios resuelve cada línea con el `findOne` pesado** (backend,
-  `calculo-precios.service.ts:71-83` y `:144`) — un `for` sobre las líneas del carrito, cada
-  una llamando `itemsService.findOne`: 4 queries fijas, más ingredientes/extras/grupos si es
-  receta o combo. **Es el hilo que la pasada de `ventas` dejó anotado**, y ahora se entiende
-  por qué `cargarBasePorIds` no lo cerró: ese fix resolvió el lado de **persistencia** de la
-  venta, no el de **precio**. No se puede reusar tal cual — `cargarBasePorIds` deliberadamente
-  no trae `impuestosIds`/`descuentosIds`/`recargosIds`, que es justo lo que el motor necesita.
-  Corre en los tres llamadores reales: `ventas.service.ts`, `suscripciones.service.ts` y
-  `online.service.ts`.
-
-Los otros dos hallazgos de esta sección —los dos de inventario— se cerraron el 2026-07-28.
+Los tres hallazgos de severidad alta se cerraron el 2026-07-28.
 Ver [`resueltos.md`](resueltos.md).
 
 ### Media
@@ -322,13 +312,25 @@ Ver [`resueltos.md`](resueltos.md).
   de `''`/`null` ("borrar"), pero el front colapsa todo lo falsy con `|| undefined` y el campo
   ni viaja. El usuario borra el texto, ve "Item actualizado", y el valor sigue ahí. Mismo bug
   en `duracionEstimada` (`:866`), donde además tapa el `0` legítimo.
-- [ ] **La resolución de recargos por id nunca corre con datos** (backend,
-  `calculo-precios.service.spec.ts`) — el fixture fija `recargosIds: []` y el mock de
-  `findAll` devuelve `[]` en los 9 tests. Mutante que sobrevive: cambiar `recargoMap` por
-  `descuentoMap` en `calculo-precios.service.ts:169` y nada falla. El motor puro sí prueba
-  recargos a fondo, pero construyendo las reglas a mano — la capa que las resuelve por id no
-  la ejerce nadie. `ventas.service.spec.ts` también fija `recargosIds: []` en sus tres
-  fixtures.
+- [ ] **`online.service.ts` sigue con un `findOne` por línea en el checkout** (backend,
+  `online.service.ts:224`) — resto del N+1 del motor de precios cerrado el 2026-07-28
+  ([`resueltos.md`](resueltos.md)). La **capa de precio** ya carga el carrito en 2 queries
+  fijas, pero el checkout online, antes de llamarla, itera `dto.lineas` y llama al `findOne`
+  pesado para leer `tipo` y `unidadMedida` de cada ítem. Es preexistente y de otro alcance
+  —por eso no entró en ese fix—, pero conviene anotarlo o el cierre de aquella entrada lo
+  deja sin rastro. Se resuelve con `cargarBasePorIds`, que ya trae los dos campos.
+  Lo detectó la revisión independiente al verificar la frase "beneficia a los tres
+  llamadores", que era cierta para la capa de precio y engañosa para el request completo.
+- [ ] **Un `itemId` en mayúsculas devuelve 404 desde que se batchea** (backend,
+  `items.service.ts` → `cargarBasePorIds`) — `@IsUUID('4')` acepta mayúsculas y Postgres
+  castea sin problema, pero el mapa se arma con el UUID canónico en minúsculas que devuelve
+  la BD y el chequeo de faltantes compara contra el string tal cual lo mandó el cliente.
+  Con `findOne` funcionaba. Es un defecto heredado que ya afectaba a ventas y que ahora
+  llega también al endpoint de precios. Cierre: normalizar a minúsculas antes de comparar.
+- [ ] **`ventas.service.spec.ts` fija `recargosIds: []` en sus tres fixtures** (backend) —
+  resto del hallazgo de recargos sin ejercer, cuya mitad de `calculo-precios` se cerró el
+  2026-07-28 ([`resueltos.md`](resueltos.md)). Acá la venta real con recargos sigue sin
+  ejercerse en unit; el e2e sí la cubre de punta a punta.
 - [ ] **`findOne` de una receta con 5 grupos son 6 queries** (backend,
   `items.service.ts:552`) — un `SELECT` de opciones por cada grupo, con la versión batcheada
   (`cargarGruposPorItem:274`) ya escrita en el mismo archivo y usada dos líneas más arriba
@@ -366,6 +368,33 @@ Ver [`resueltos.md`](resueltos.md).
 
 ### Decidido por el owner (pendiente de respuesta)
 
+- [ ] **¿Con qué criterio se ordenan los descuentos de un ítem?** (backend,
+  `items.service.ts` → `cargarReglasPorIds`, y `calculo-precios.engine.ts:239`) — en modo
+  `compuesto` cada regla se aplica sobre el acumulado de la anterior, así que el orden
+  cambia el total. Donde más se nota es al mezclar `monto_fijo` con porcentaje: un ítem de
+  1.000 con un 20% y un fijo de 100 da 700 si el % va primero y 720 si va primero el fijo.
+  Entre porcentajes la composición es multiplicativa (`acc × (1-v)`), así que con **dos**
+  reglas el resultado es idéntico; con **tres o más**, el redondeo por paso
+  (`calculo-precios.engine.ts:237`) puede mover el último decimal de `escala_calculo`
+  — verificado con contraejemplo, no deducido: neto `4869.7278` con `0.441 / 0.1205 /
+  0.3833` da `3393.252159` en un orden y `3393.252158` en otro. Es 1e-6, muy por debajo del
+  centavo, pero no es cero: no asumir que un carrito solo-porcentajes es insensible al orden. Hoy ese orden
+  no está definido en ninguna query y **la tabla puente no tiene timestamp** (solo la PK
+  compuesta), así que "el orden en que el usuario los agregó" no existe ni se puede
+  recuperar. El batch de 2026-07-28 fijó `ORDER BY` por id solo para que sea
+  **determinista**, no porque sea el criterio correcto — y verificado con `EXPLAIN`, ese
+  orden **no** es el que las queries por ítem devolvían antes (`Bitmap Heap Scan` → orden de
+  inserción). Hoy da igual porque ambos tenants del seed están en `base` y ningún ítem tiene
+  dos reglas de la misma clase; la decisión sigue pendiente.
+  **Insumo de mercado que aportó el owner (2026-07-28) — a cruzar, no a copiar** (regla en
+  [`investigacion-mercado.md`](investigacion-mercado.md)): los e-commerce suelen darle a
+  cada descuento una **prioridad configurable** y aplicarlo sobre el subtotal resultante del
+  anterior, con un escalonado típico de ítem → cliente (VIP, convenio) → cupón → medio de
+  pago → cashback/puntos. La alternativa "primero el menor" no aporta para porcentajes;
+  donde sí es regla de negocio es al separar por **tipo** (obligatorios → promociones →
+  cupones). El owner se inclina por prioridad explícita por ser lo más flexible para una
+  pasarela/cobranza. **Encararlo es brainstorm → spec → plan:** agrega un campo a las reglas,
+  toca el motor y necesita decidir qué pasa con las reglas existentes sin prioridad.
 - [ ] **¿El descuento debe tener piso en cero?** (backend,
   `calculo-precios.engine.ts:239`) — `acc.plus(monto.times(signo))` sin `max(acc, 0)`. Un
   `monto_fijo` de 500 sobre un ítem de 100 devuelve `totalLinea: -400`; `validarValor` de

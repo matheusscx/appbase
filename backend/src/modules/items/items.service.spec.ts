@@ -2684,6 +2684,47 @@ describe('ItemsService', () => {
     });
   });
 
+  describe('cargarReglasPorIds', () => {
+    it('agrupa las tres clases por ítem en UNA sola query, preservando el orden', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        { clase: 'descuento', item_id: 'item-a', regla_id: 'desc-1' },
+        { clase: 'descuento', item_id: 'item-a', regla_id: 'desc-2' },
+        { clase: 'impuesto', item_id: 'item-a', regla_id: 'imp-1' },
+        { clase: 'recargo', item_id: 'item-b', regla_id: 'rec-1' },
+      ]);
+
+      const mapa = await service.cargarReglasPorIds(TENANT, [
+        'item-a',
+        'item-b',
+        'item-a', // duplicado: se deduplica antes de la query
+      ]);
+
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      expect(dataSource.query).toHaveBeenCalledWith(expect.any(String), [
+        ['item-a', 'item-b'],
+        TENANT,
+      ]);
+      // El orden dentro de cada lista importa en modo `compuesto`: desc-1 antes
+      // que desc-2, tal como los devolvió la query.
+      expect(mapa.get('item-a')).toEqual({
+        impuestosIds: ['imp-1'],
+        descuentosIds: ['desc-1', 'desc-2'],
+        recargosIds: [],
+      });
+      expect(mapa.get('item-b')).toEqual({
+        impuestosIds: [],
+        descuentosIds: [],
+        recargosIds: ['rec-1'],
+      });
+    });
+
+    it('no consulta si no hay ids', async () => {
+      const mapa = await service.cargarReglasPorIds(TENANT, []);
+      expect(mapa.size).toBe(0);
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+  });
+
   describe('venderIngredientesReceta', () => {
     const PARAMS = {
       tenantId: TENANT,

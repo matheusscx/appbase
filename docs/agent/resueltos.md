@@ -544,3 +544,43 @@ siguen diferidos están en `pendientes.md`.
   que alguien persista un snapshot y lo reutilice sin re-resolver (que es, conceptualmente,
   para lo que un snapshot existe), este bug y su hermano del combo se vuelven reales. Queda
   registrada acá porque es el supuesto del que cuelgan los dos fixes.
+
+### Alta (continuación)
+
+- [x] ~~**El motor de precios resuelve cada línea con el `findOne` pesado**~~ — cerrado
+  2026-07-28. Era el hilo que la pasada de `ventas` dejó anotado, y sobrevivía **del lado
+  del precio**: `cargarBasePorIds` había resuelto la persistencia de la venta, no el
+  cálculo. Cierre: `ItemsService.cargarReglasPorIds` —una query con `UNION ALL` sobre las
+  tres tablas puente— acompaña a `cargarBasePorIds`, y `calcular()` carga el carrito
+  entero en **2 queries fijas** antes del loop en vez de 4+ por línea. `resolverLinea`
+  dejó de ser `async`: ya no hace I/O. Beneficia **en la capa de precio** a los tres
+  llamadores (`ventas`, `suscripciones`, `online`) — pero no cierra el request entero:
+  el checkout online sigue con su propio `findOne` por línea antes de llamar al motor,
+  anotado como entrada propia en [`pendientes.md`](pendientes.md) para no perderle el
+  rastro al cerrar esta.
+  **Lo que hizo falta decidir y no se decidió acá:** el orden de las reglas cambia el total
+  en modo `compuesto`, y no estaba definido en ninguna query. El `ORDER BY` nuevo lo vuelve
+  determinista por id; qué orden *debería* tener quedó abierto como decisión de negocio en
+  [`pendientes.md`](pendientes.md), con el insumo de mercado que aportó el owner.
+  ⚠️ **Corregido por la revisión independiente, que bloqueó el cierre:** la primera versión
+  de este párrafo afirmaba que el `ORDER BY` *reproducía* el orden previo y que por lo tanto
+  batchear no podía mover ningún total. **Es falso, y se verificó con `EXPLAIN`:** estas
+  tablas resuelven con `Bitmap Heap Scan`, que reordena por página del heap, así que las
+  queries por ítem devolvían orden de **inserción**, no de índice. El cambio sí puede dar un
+  total distinto en un tenant `compuesto` que mezcle `monto_fijo` con porcentaje en un mismo
+  ítem. Que hoy no exista ninguno (ambos tenants del seed en `base`, ningún ítem con dos
+  reglas de la misma clase, sin datos productivos) es lo que lo vuelve inocuo — **no** la
+  garantía que se había escrito. La lección es la misma de
+  [`anti-patterns.md`](anti-patterns.md): una afirmación deducida ("la PK es compuesta,
+  luego el orden es el del índice") no es una afirmación verificada.
+  **Tests, con mutante verificado cada uno:** uno fija que N líneas producen un número
+  **constante** de cargas (el mutante que vuelve a cargar por línea lo mata), otro cubre el
+  agrupado de las tres clases en `cargarReglasPorIds`. Y se comprobó **empíricamente que el
+  e2e ejecuta la query nueva**, en vez de asumirlo: con la clase de impuesto mal etiquetada,
+  `ventas.e2e-spec.ts` pasa de 26 verdes a 15 fallos.
+- [x] ~~**La resolución de recargos por id nunca corre con datos**~~ — cerrado 2026-07-28,
+  junto con el batch de arriba. El fixture fijaba `recargosIds: []` en los 9 tests, así que
+  un mutante que le pasara el mapa de descuentos sobrevivía. Al reescribir el fixture para
+  los dos loaders nuevos, dejar la tercera lista sin ejercer habría repetido el mismo hueco
+  sobre código recién escrito. Hay un test con un recargo real y el mutante muere. Queda
+  abierta la mitad de `ventas.service.spec.ts` (otro archivo, otro alcance).

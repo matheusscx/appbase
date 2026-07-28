@@ -89,9 +89,32 @@ Todos los montos son strings con `escala_calculo` decimales.
   `RecargosModule`, `TenantsModule` — **reúsa** sus servicios, no crea entidades).
 - **Controller**: `calculo-precios.controller.ts` — `POST /calculo-precios/calcular`.
 - **Service**: `calculo-precios.service.ts` — resuelve datos del tenant (ítems,
-  catálogos de reglas, preferencias) y delega en el motor puro.
+  catálogos de reglas, preferencias) y delega en el motor puro. **Carga el
+  carrito entero en 2 queries fijas**, no una por línea:
+  `ItemsService.cargarBasePorIds` (fila base + validación de pertenencia al
+  tenant, 404 si falta) y `cargarReglasPorIds` (los ids de
+  impuestos/descuentos/recargos de todos los ítems en un `UNION ALL`).
+  `resolverLinea` no hace I/O.
 - **Motor puro**: `calculo-precios.engine.ts` — `calcularVenta(VentaResuelta)`,
   sin BD ni NestJS; 100% testeable de forma aislada.
+
+**Orden de las reglas (decisión abierta).** En modo `compuesto` cada regla se
+aplica sobre el acumulado de la anterior, así que el orden dentro de la lista de
+un ítem **cambia el total** cuando se mezclan `monto_fijo` y porcentaje (entre
+porcentajes no conmuta el redondeo, pero la composición sí es multiplicativa).
+Ese orden nunca estuvo definido y la tabla puente no guarda cuándo se asoció cada
+regla.
+
+Desde el batch de 2026-07-28 el orden es **determinista por id**
+(`ORDER BY` en `cargarReglasPorIds`). No es el mismo que antes: `EXPLAIN` sobre
+esas tablas da `Bitmap Heap Scan`, que reordena por página del heap, así que las
+queries por ítem devolvían **orden de inserción**. El cambio por lo tanto
+**puede** dar un total distinto en un tenant `compuesto` que mezcle modos en un
+mismo ítem — hoy no existe ninguno (ambos tenants del seed están en `base`,
+ningún ítem tiene dos reglas de la misma clase, y no hay datos productivos), pero
+la garantía es "determinista", no "idéntico a antes". Qué orden debería tener es
+una decisión de negocio abierta — ver
+[`docs/agent/pendientes.md`](../agent/pendientes.md).
 
 ### DTOs
 

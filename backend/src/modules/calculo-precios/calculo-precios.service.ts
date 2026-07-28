@@ -16,6 +16,9 @@ import {
   type ResultadoVenta,
 } from './calculo-precios.engine';
 
+type ItemsBaseMap = Awaited<ReturnType<ItemsService['cargarBasePorIds']>>;
+type ItemsReglasMap = Awaited<ReturnType<ItemsService['cargarReglasPorIds']>>;
+
 /**
  * Capa de servicio del motor: carga los datos del tenant (ítems, catálogos de
  * reglas y preferencias financieras) y delega el cálculo en el motor puro
@@ -68,19 +71,39 @@ export class CalculoPreciosService {
       ]),
     );
 
-    const lineas: LineaResuelta[] = [];
-    for (const linea of dto.lineas) {
-      lineas.push(
-        await this.resolverLinea(
-          tenantId,
-          linea,
-          impuestoMap,
-          descuentoMap,
-          recargoMap,
-          tasaMap,
-        ),
-      );
+    // Ítems del carrito en 2 queries fijas, no 4+ por línea: `cargarBasePorIds`
+    // valida pertenencia al tenant (lanza 404 igual que `findOne`) y
+    // `cargarReglasPorIds` trae las tres listas de reglas que el motor necesita.
+    // Antes cada línea llamaba a `findOne`, que además construía ingredientes,
+    // componentes y grupos para descartarlos acá.
+    // La cantidad se valida ANTES de cargar: si no, el 404 por ítem inexistente
+    // le ganaría al 400 por cantidad inválida de la MISMA línea, al revés que
+    // el camino por línea. (Entre líneas distintas el orden tampoco es el de
+    // antes: ahora todos los 400 preceden a todos los 404, sin importar la
+    // posición. Los dos son 4xx de cliente.)
+    for (const l of dto.lineas) {
+      if (new Decimal(l.cantidad).lessThanOrEqualTo(0)) {
+        throw new BadRequestException('La cantidad debe ser mayor a 0');
+      }
     }
+
+    const itemIds = dto.lineas.map((l) => l.itemId);
+    const [itemsBase, reglasPorItem] = await Promise.all([
+      this.itemsService.cargarBasePorIds(tenantId, itemIds),
+      this.itemsService.cargarReglasPorIds(tenantId, itemIds),
+    ]);
+
+    const lineas: LineaResuelta[] = dto.lineas.map((linea) =>
+      this.resolverLinea(
+        linea,
+        itemsBase,
+        reglasPorItem,
+        impuestoMap,
+        descuentoMap,
+        recargoMap,
+        tasaMap,
+      ),
+    );
 
     return calcularVenta({
       lineas,
@@ -129,23 +152,24 @@ export class CalculoPreciosService {
     );
   }
 
-  private async resolverLinea(
-    tenantId: string,
+  private resolverLinea(
     linea: LineaDto,
+    itemsBase: ItemsBaseMap,
+    reglasPorItem: ItemsReglasMap,
     impuestoMap: Map<string, ImpuestoResuelto & { tipo: string }>,
     descuentoMap: Map<string, ReglaResuelta>,
     recargoMap: Map<string, ReglaResuelta>,
     tasaMap: Map<string, string>,
-  ): Promise<LineaResuelta> {
-    if (new Decimal(linea.cantidad).lessThanOrEqualTo(0)) {
-      throw new BadRequestException('La cantidad debe ser mayor a 0');
-    }
-    // findOne valida pertenencia al tenant y trae los ids asociados.
-    const item = await this.itemsService.findOne(tenantId, linea.itemId);
+  ): LineaResuelta {
+    // La cantidad ya se validó en `calcular()`, antes de cargar nada.
+    // `cargarBasePorIds` ya validó pertenencia al tenant (404 si falta), así
+    // que acá el ítem existe sí o sí.
+    const item = itemsBase.get(linea.itemId)!;
+    const reglas = reglasPorItem.get(linea.itemId);
 
-    const impuestoIds = linea.impuestoIds ?? item.impuestosIds;
-    const descuentoIds = linea.descuentoIds ?? item.descuentosIds;
-    const recargoIds = linea.recargoIds ?? item.recargosIds;
+    const impuestoIds = linea.impuestoIds ?? reglas?.impuestosIds ?? [];
+    const descuentoIds = linea.descuentoIds ?? reglas?.descuentosIds ?? [];
+    const recargoIds = linea.recargoIds ?? reglas?.recargosIds ?? [];
 
     const precioUnitario =
       linea.precioUnitario !== undefined
