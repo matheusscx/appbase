@@ -1889,11 +1889,12 @@ describe('ItemsService', () => {
 
       await service.remove(TENANT, ITEM_ID);
 
-      // Llamada 3: la UNION de uso es la 1, el soft-delete de extras es la 2
-      // — ambas comparten firma `[ITEM_ID, TENANT]` con esta, así que hay que
+      // Llamada 4: la UNION de uso es la 1, los dos soft-delete de
+      // `receta_extras_permitidos` (por ingrediente y por receta) son la 2 y la 3
+      // — las tres comparten firma `[ITEM_ID, TENANT]` con esta, así que hay que
       // aislar la del `UPDATE items` puntual para no matchear cualquiera.
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        3,
+        4,
         expect.stringContaining('UPDATE items'),
         [ITEM_ID, TENANT],
       );
@@ -1914,10 +1915,31 @@ describe('ItemsService', () => {
       itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
       managerMock.query
         .mockResolvedValueOnce([]) // sin usos que lo bloqueen
-        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos
+        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (ingrediente_item_id)
+        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (receta_item_id)
         .mockResolvedValueOnce([]); // UPDATE items (soft delete)
 
       await expect(service.remove(TENANT, ITEM_ID)).resolves.toBeUndefined();
+    });
+
+    it('limpia también las filas donde el item borrado es la receta que ofrece el extra', async () => {
+      itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin usos que lo bloqueen
+        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (ingrediente_item_id)
+        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (receta_item_id)
+        .mockResolvedValueOnce([]); // UPDATE items (soft delete)
+
+      await service.remove(TENANT, ITEM_ID);
+
+      // Llamada 3 (índice 2): limpia por `receta_item_id`, no por
+      // `ingrediente_item_id` — aislada por índice de llamada porque las
+      // llamadas 2 y 3 comparten el mismo texto `UPDATE receta_extras_permitidos`
+      // y los mismos params `[ITEM_ID, TENANT]`.
+      expect(managerMock.query.mock.calls[2][0]).toEqual(
+        expect.stringContaining('WHERE receta_item_id = $1 AND tenant_id = $2'),
+      );
+      expect(managerMock.query.mock.calls[2][1]).toEqual([ITEM_ID, TENANT]);
     });
   });
 
@@ -4431,15 +4453,18 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ clase: 'extra', nombre: 'Hamburguesa' }])
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
 
       await service.remove(TENANT, ITEM_ID);
 
       const sqls = managerMock.query.mock.calls.map((c) => c[0] as string);
-      expect(sqls).toHaveLength(3);
+      expect(sqls).toHaveLength(4);
       expect(sqls[1]).toContain('UPDATE receta_extras_permitidos');
       expect(sqls[1]).toContain('eliminado_el = NOW()');
-      expect(sqls[2]).toContain('UPDATE items');
+      expect(sqls[2]).toContain('UPDATE receta_extras_permitidos');
+      expect(sqls[2]).toContain('eliminado_el = NOW()');
+      expect(sqls[3]).toContain('UPDATE items');
     });
 
     it('bloquea si es componente de un combo, sin filtrar el extra al mensaje', async () => {
@@ -4468,11 +4493,23 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
 
       await service.remove(TENANT, ITEM_ID);
 
       expect(managerMock.query.mock.calls[0][1]).toEqual([ITEM_ID, TENANT]);
+
+      // Afirmar sobre los params no alcanza: si alguien saca la condición de
+      // tenant de UNA sola rama del UNION, los params ($1, $2) no cambian y una
+      // aserción solo de parámetros seguiría en verde. Partir el SQL por `UNION`
+      // y exigir la condición de tenant en cada una de las cuatro ramas.
+      const sql = managerMock.query.mock.calls[0][0] as string;
+      const ramas = sql.split(/\bUNION\b/);
+      expect(ramas).toHaveLength(4);
+      for (const rama of ramas) {
+        expect(rama).toMatch(/tenant_id = \$2/);
+      }
     });
   });
 });

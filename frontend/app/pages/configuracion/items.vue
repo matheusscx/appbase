@@ -969,6 +969,8 @@ async function confirmarEliminar(id: string) {
     confirmDeleteId.value = id
     confirmModalOpen.value = true
   } catch (e) {
+    usoItem.value = null
+    confirmDeleteId.value = null
     toast.add({
       title: apiErrorMsg(e, 'Error al verificar el uso del item'),
       color: 'error',

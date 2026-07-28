@@ -451,6 +451,47 @@ Ver [`resueltos.md`](resueltos.md).
   topeado sin decir por qué** — el aviso aparece recién después de crear la venta, cuando ya
   es irreversible. Es el consumidor que más lo necesita.
 
+## Revisión final `borrado-ingrediente-extra` (2026-07-28)
+
+Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` +
+`remove()`. Ninguno bloqueaba el cierre; se difieren por alcance acotado a esa oleada.
+
+- [ ] **El guard de reentrancia de `items.vue` no tiene regresión automatizada**
+  (frontend) — el fix de `verificandoEliminarId` ("se borra el item equivocado" si
+  una respuesta de `/uso` obsoleta pisa `usoItem`/`confirmDeleteId` de un click
+  posterior sobre otra fila) está verificado solo a mano; el proyecto no testea
+  páginas. Escenario de reproducción: demorar la respuesta de `/uso` de un item y
+  clickear "Eliminar" en otra fila antes de que llegue.
+- [ ] **`UsoItemTipo` está duplicado a mano** (backend `items.service.ts` +
+  frontend `configuracion/items.vue`, tipo `UsoItemTipoBloqueante`) — sin enlace de
+  compilación entre ambos. Si el backend agrega un quinto tipo de uso a la
+  clasificación, el modal renderiza la viñeta con etiqueta vacía en vez de fallar el
+  build. Referencia cruzada en ambos lados como mitigación mínima mientras no se
+  cierre esto de raíz.
+- [ ] **Asimetría de guard entre rutas hermanas** (backend) — `GET /items/:id/uso`
+  exige `Items:Eliminar`; la ruta hermana `GET /items/:id/recetas-afectadas`
+  (`items.controller.ts:36`) exige solo `Items:Leer`. Es una decisión deliberada (solo
+  quien puede borrar necesita ver el impacto del borrado), no un descuido — se anota
+  por si el frontend en algún momento quiere el dato de uso fuera del flujo de
+  borrado, donde el guard más estricto no aplicaría.
+- [ ] **Carrera teórica entre `PATCH /items/:id` y `DELETE`** (backend,
+  `items.service.ts`) — bajo READ COMMITTED, un `DELETE` que commitea entre la
+  validación de un ingrediente en `PATCH` (edición de receta) y el `INSERT` de su
+  fila de `receta_extras_permitidos` deja una fila viva apuntando a un item ya
+  muerto. Ventana de milisegundos entre dos escrituras de admin; es la misma clase de
+  carrera que ya tienen los tres bloqueos preexistentes (ingrediente, combo, opción).
+- [ ] **`:disabled="!!verificandoEliminarId"` es global en `items.vue`** (frontend)
+  — mientras se verifica el uso de un item, el menú de acciones de **todas** las
+  demás filas queda deshabilitado, no solo el de esa fila. El guard de función
+  (`verificandoEliminarId` como lock de reentrancia) ya cubre la carrera real, así
+  que el `disabled` global es cinturón sobre tirantes; podría acotarse a la fila que
+  está en verificación.
+- [ ] **El modal de confirmación nunca nombra el item que se va a borrar**
+  (frontend, `configuracion/items.vue`) — preexistente al fix de `/uso`. Ahora que el
+  mensaje ya es dinámico según `bloqueos`/`advertencias`, incluir el nombre del item
+  cuesta poco y cierra una ambigüedad real si el usuario tiene el modal abierto y
+  duda de sobre cuál fila estaba parado.
+
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
 El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado

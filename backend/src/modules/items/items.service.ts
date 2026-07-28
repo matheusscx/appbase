@@ -1543,9 +1543,14 @@ export class ItemsService {
    * decide el plan y el modal lista los motivos distinto entre llamadas.
    *
    * El filtro por tenant va sobre la entidad padre de cada rama (`items`, o
-   * `grupos_modificadores` en la de opciones), no sobre la tabla puente: es la
-   * misma defensa que `cargarReglasPorIds`, que el llamador no debería tener que
-   * garantizar solo.
+   * `grupos_modificadores` en la de opciones), no sobre la tabla puente. A
+   * diferencia de `cargarReglasPorIds` —donde el JOIN a `items` es la única
+   * defensa posible porque sus tablas puente (`item_impuestos`, `item_descuentos`,
+   * `item_recargos`) no tienen `tenant_id` propio—, acá las cuatro tablas puente
+   * (`receta_ingredientes`, `combo_componentes`, `grupo_modificador_opciones`,
+   * `receta_extras_permitidos`) sí lo tienen: el filtro por la entidad padre es
+   * una elección de estilo (queda igual de acotado ir por la puente), no la
+   * única defensa disponible.
    */
   private async obtenerUsoItem(
     manager: EntityManager,
@@ -1634,6 +1639,17 @@ export class ItemsService {
         `UPDATE receta_extras_permitidos
          SET eliminado_el = NOW(), actualizado_el = NOW()
          WHERE ingrediente_item_id = $1 AND tenant_id = $2
+           AND eliminado_el IS NULL`,
+        [itemId, tenantId],
+      );
+
+      // Misma higiene en la otra dirección: si lo que se borra es la RECETA que
+      // ofrece el extra (no el ingrediente), sus filas de
+      // `receta_extras_permitidos` quedarían vivas apuntando a una receta muerta.
+      await manager.query(
+        `UPDATE receta_extras_permitidos
+         SET eliminado_el = NOW(), actualizado_el = NOW()
+         WHERE receta_item_id = $1 AND tenant_id = $2
            AND eliminado_el IS NULL`,
         [itemId, tenantId],
       );

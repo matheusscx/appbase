@@ -114,9 +114,12 @@ y los nombres de esos usos: sin ese item la receta, el combo o el grupo quedan
 incompletos. Ser **extra permitido** (`receta_extras_permitidos`) no bloquea, porque un
 extra es opcional por definición y su ausencia no rompe ninguna receta — pero sí
 **advierte**, porque el efecto (dejar de ofrecerse como extra en esas recetas) no es
-obvio desde la ficha del ingrediente. Al confirmar el borrado, las filas de
-`receta_extras_permitidos` del ingrediente se marcan `eliminado_el` en la misma
-transacción que el soft-delete del item.
+obvio desde la ficha del ingrediente. Al confirmar el borrado, se marcan `eliminado_el`
+—en la misma transacción que el soft-delete del item— las filas de
+`receta_extras_permitidos` en las **dos direcciones**: donde el item borrado es el
+**ingrediente extra** (`ingrediente_item_id`) y donde es la **receta** que ofrece ese
+extra (`receta_item_id`), para no dejar filas colgando si lo que se borra es la
+receta en vez del ingrediente.
 
 ### POST /ventas (línea con item tipo receta)
 

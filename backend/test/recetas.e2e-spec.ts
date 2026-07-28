@@ -471,4 +471,139 @@ describe('Recetas — flujo completo (e2e)', () => {
     expect(filas).toHaveLength(1);
     expect(filas[0]?.eliminado_el).not.toBeNull();
   });
+
+  it('10. /uso mixto: el mismo ingrediente es bloqueo de combo y advertencia de extra a la vez', async () => {
+    const salsaId = await crearIngrediente(
+      app,
+      token,
+      'Salsa mixta E2E',
+      'kg',
+      '5',
+      '3000',
+    );
+    const panMixtoId = await crearIngrediente(
+      app,
+      token,
+      'Pan mixto E2E',
+      'unidad',
+      '10',
+      '500',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Choripan mixto E2E ${Date.now()}`,
+        precioBase: '3000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panMixtoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: salsaId,
+            cantidad: '20',
+            unidadCodigo: 'g',
+            precioExtra: '400',
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+
+    // `validarYCostearComponentes` solo admite tipo producto|receta|servicio como
+    // componente de combo (items.service.ts ~2998), así que un ingrediente jamás
+    // llega a ser componente de combo por la API pública: el caso mixto que /uso
+    // tiene que clasificar (bloqueo de combo + advertencia de extra sobre el MISMO
+    // item) no es alcanzable end-to-end con las rutas de creación. Se arma un combo
+    // real con un producto válido y se agrega la fila de `combo_componentes` que
+    // referencia a la salsa directamente por SQL, para ejercer la clasificación de
+    // `/uso` en sí — que es lo que este test cubre — sin simular la creación.
+    const resProducto = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Producto combo mixto E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '10',
+        costo: '500',
+      });
+    expect(resProducto.status).toBe(201);
+    const productoComboId = (resProducto.body as ItemResponse).id;
+
+    const resCombo = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Combo mixto E2E ${Date.now()}`,
+        precioBase: '3500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'combo',
+        componentes: [
+          {
+            componenteItemId: productoComboId,
+            cantidad: '1',
+            bloqueante: true,
+          },
+        ],
+      });
+    expect(resCombo.status).toBe(201);
+    const comboId = (resCombo.body as ItemResponse).id;
+
+    await ds.query(
+      `INSERT INTO combo_componentes
+         (tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
+       VALUES ($1, $2, $3, '1', true)`,
+      [PARIS_TENANT_ID, comboId, salsaId],
+    );
+
+    const resUso = await request(app.getHttpServer())
+      .get(`/api/items/${salsaId}/uso`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resUso.status).toBe(200);
+    const uso = resUso.body as {
+      bloqueos: { tipo: string; nombre: string }[];
+      advertencias: { tipo: string; nombre: string }[];
+    };
+    expect(uso.bloqueos.length).toBeGreaterThan(0);
+    expect(uso.bloqueos.every((b) => b.tipo === 'combo')).toBe(true);
+    expect(uso.advertencias.map((a) => a.tipo)).toEqual(['extra']);
+
+    const resDel = await request(app.getHttpServer())
+      .delete(`/api/items/${salsaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDel.status).toBe(400);
+  });
+
+  it('11. /uso exige Items:Eliminar — Items:Leer no alcanza', async () => {
+    const resLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: 'vendedor@paris.cl', password: 'admin' });
+    const initialToken = (resLogin.body as TokenResponse).access_token;
+    const resTenant = await request(app.getHttpServer())
+      .post('/api/auth/switch-tenant')
+      .set('Authorization', `Bearer ${initialToken}`)
+      .send({ tenantId: PARIS_TENANT_ID });
+    const tokenVendedor = (resTenant.body as TokenResponse).access_token;
+
+    // vendedor@paris.cl (rol Vendedor) tiene Items:Leer (sembrado en
+    // seedVendedorPermisosCaja para que el POS liste el catálogo) pero nunca
+    // Items:Eliminar. Fija la decisión de diseño §2.4 del spec: /uso va detrás
+    // de Eliminar, no de Leer, para no abrir una vía lateral de inventariar
+    // el catálogo a cualquiera que solo pueda leerlo.
+    const res = await request(app.getHttpServer())
+      .get(`/api/items/${panId}/uso`)
+      .set('Authorization', `Bearer ${tokenVendedor}`);
+
+    expect(res.status).toBe(403);
+  });
 });
