@@ -89,7 +89,15 @@ export interface CajaHistorialItem {
   saldoInicial: string;
   saldoFinal: string | null;
   montoContado: string | null;
+  /** Diferencia de la línea de EFECTIVO: el cuadre del cajón físico. */
   diferencia: string | null;
+  /**
+   * Diferencia de TODAS las líneas del arqueo (efectivo + cada método con
+   * `requiere_conteo`). Es el número que responde "¿esta caja cuadró?"; el de
+   * arriba solo mira el efectivo y deja invisible un descuadre de tarjeta.
+   * `null` mientras la caja no tenga arqueo congelado (o sea, abierta).
+   */
+  diferenciaTotal: string | null;
   fechaApertura: Date;
   fechaCierre: Date | null;
   comentario: string | null;
@@ -240,13 +248,19 @@ export class CajaService {
         return await manager.save(caja);
       });
     } catch (e) {
-      // Backstop de concurrencia: dos aperturas simultáneas sobre el mismo cajón
-      // → una viola el índice único parcial (23505).
+      // Backstop de concurrencia: dos aperturas simultáneas violan un índice
+      // único parcial (23505). Cuál de los dos decide el mensaje — el chequeo
+      // aplicativo de arriba corre fuera de la transacción y no alcanza.
       if (
         e instanceof QueryFailedError &&
         (e as { code?: string }).code === '23505'
       ) {
-        throw new ConflictException('El cajón ya tiene una caja abierta');
+        const constraint = (e as { constraint?: string }).constraint;
+        throw new ConflictException(
+          constraint === 'ux_cajas_activa_por_usuario'
+            ? 'Ya tienes una caja abierta'
+            : 'El cajón ya tiene una caja abierta',
+        );
       }
       throw e;
     }
@@ -913,6 +927,7 @@ export class CajaService {
       saldo_final: string | null;
       monto_contado: string | null;
       diferencia: string | null;
+      diferencia_total: string | null;
       fecha_apertura: Date;
       fecha_cierre: Date | null;
       comentario: string | null;
@@ -927,12 +942,21 @@ export class CajaService {
               c.saldo_final,
               c.monto_contado,
               c.diferencia,
+              arq.diferencia_total,
               c.fecha_apertura,
               c.fecha_cierre,
               c.comentario,
               cj.nombre AS cajon_nombre
        FROM cajas c
        LEFT JOIN cajones cj ON cj.cajon_id = c.cajon_id AND cj.eliminado_el IS NULL
+       -- Lateral y no un JOIN + GROUP BY: una sola query para todas las filas
+       -- (sin N+1) y sin agrupar por las 13 columnas de arriba. Una caja abierta
+       -- todavía no tiene arqueo congelado → NULL, que el front muestra como "—".
+       LEFT JOIN LATERAL (
+         SELECT SUM(am.diferencia) AS diferencia_total
+           FROM caja_arqueo_medio am
+          WHERE am.caja_id = c.caja_id AND am.eliminado_el IS NULL
+       ) arq ON TRUE
        WHERE c.tenant_id = $1
          ${filters}
        ORDER BY c.fecha_apertura DESC
@@ -984,6 +1008,7 @@ export class CajaService {
     saldo_final: string | null;
     monto_contado: string | null;
     diferencia: string | null;
+    diferencia_total?: string | null;
     fecha_apertura: Date;
     fecha_cierre: Date | null;
     comentario: string | null;
@@ -1001,6 +1026,10 @@ export class CajaService {
         ? new Decimal(r.monto_contado).toFixed(4)
         : null,
       diferencia: r.diferencia ? new Decimal(r.diferencia).toFixed(4) : null,
+      diferenciaTotal:
+        r.diferencia_total != null
+          ? new Decimal(r.diferencia_total).toFixed(4)
+          : null,
       fechaApertura: r.fecha_apertura,
       fechaCierre: r.fecha_cierre,
       comentario: r.comentario,

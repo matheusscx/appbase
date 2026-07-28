@@ -15,6 +15,14 @@ import {
   unique: true,
   where: 'estado = \'abierta\' AND "eliminado_el" IS NULL',
 })
+// Backstop duro de "una caja física por tenant+usuario": el chequeo aplicativo de
+// `abrir()` corre FUERA de la transacción, así que dos aperturas simultáneas sobre
+// cajones DISTINTOS no competían por nada y el mismo cajero terminaba con dos cajas
+// abiertas. Incluye `en_conciliacion` porque también ocupa al cajero (`findActiva`).
+@Index('ux_cajas_activa_por_usuario', ['tenantId', 'usuarioId'], {
+  unique: true,
+  where: `tipo = 'fisica' AND estado IN ('abierta', 'en_conciliacion') AND "eliminado_el" IS NULL`,
+})
 export class Caja {
   @PrimaryGeneratedColumn('uuid', { name: 'caja_id' })
   id: string;

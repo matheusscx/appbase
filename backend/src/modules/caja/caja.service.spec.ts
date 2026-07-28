@@ -7,7 +7,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { In, IsNull } from 'typeorm';
+import { In, IsNull, QueryFailedError } from 'typeorm';
 import { CajaService } from './caja.service';
 import type { LineaArqueo } from './caja.service';
 import { Caja } from './entities/caja.entity';
@@ -1701,6 +1701,23 @@ describe('CajaService.abrir', () => {
       ConflictException,
     );
     expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  // El chequeo aplicativo corre fuera de la transacción, así que bajo
+  // concurrencia el que frena es el índice único (23505). Hay DOS índices y el
+  // mensaje tiene que decir cuál se violó: "ya tenés una caja" y "el cajón está
+  // ocupado" mandan al usuario a hacer cosas distintas.
+  it.each([
+    ['ux_cajas_activa_por_usuario', 'Ya tienes una caja abierta'],
+    ['ux_cajas_cajon_abierta', 'El cajón ya tiene una caja abierta'],
+  ])('traduce el 23505 de %s a su propio mensaje', async (constraint, msg) => {
+    build({ cajon: [{ cajon_id: CAJON, activo: true }] });
+    const err = new QueryFailedError('INSERT', [], new Error('duplicate key'));
+    (err as unknown as { code: string }).code = '23505';
+    (err as unknown as { constraint: string }).constraint = constraint;
+    manager.save.mockRejectedValueOnce(err);
+
+    await expect(service.abrir(TENANT, USER, dto)).rejects.toThrow(msg);
   });
 
   it('rechaza cajón inexistente (404)', async () => {

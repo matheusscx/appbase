@@ -256,6 +256,33 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .set('Authorization', `Bearer ${tokenSupervisor}`);
     });
 
+    // El chequeo aplicativo de `abrir` (findActiva) corre FUERA de la transacción,
+    // así que dos aperturas simultáneas sobre cajones DISTINTOS no competían por
+    // nada: el mismo cajero quedaba con dos cajas abiertas. La defensa real es el
+    // índice único parcial, y lo que este test asevera es que existe con la forma
+    // correcta — borrarlo del entity deja pasar la carrera otra vez.
+    it('existe el índice único que impide dos cajas activas del mismo usuario', async () => {
+      const ds = app.get(DataSource);
+      const rows: { indexdef: string }[] = await ds.query(
+        `SELECT indexdef FROM pg_indexes
+          WHERE tablename = 'cajas' AND indexname = 'ux_cajas_activa_por_usuario'`,
+      );
+      expect(rows).toHaveLength(1);
+      const def = rows[0].indexdef;
+      expect(def).toContain('UNIQUE');
+      expect(def).toContain('tenant_id');
+      expect(def).toContain('usuario_id');
+      // `en_conciliacion` también ocupa al cajero: sin ella, quien dejó una
+      // conciliación pendiente podría abrir una segunda caja bajo concurrencia.
+      expect(def).toContain('en_conciliacion');
+      expect(def).toContain('abierta');
+      // Las dos condiciones del `where` que hacen que el índice defienda ALGO:
+      // sobre 'virtual' no protegería ninguna caja física, y sin el filtro de
+      // borrado bloquearía reabrir tras un soft-delete legítimo.
+      expect(def).toContain(`'fisica'`);
+      expect(def).toContain('eliminado_el');
+    });
+
     it('el cajón recién creado aparece en cajones-disponibles del admin', async () => {
       const r = await request(app.getHttpServer())
         .get('/api/caja/cajones-disponibles')
@@ -456,6 +483,74 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         { metodoPagoId: null, montoContado: '10000.0000' },
       ]);
       expect(cerrar.status).toBe(201);
+    });
+
+    it('el historial reporta el descuadre de tarjeta, no solo el de efectivo', async () => {
+      await ds.query(
+        `UPDATE tenant_metodo_pago SET requiere_conteo = true
+         WHERE tenant_id = $1 AND metodo_pago_id = $2`,
+        [PARIS_TENANT_ID, TARJETA_DEBITO_ID],
+      );
+
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ cajonId: cajonArqueoId, saldoInicial: '0' });
+      expect(abrir.status).toBe(201);
+      const cajaId = (abrir.body as CajaResponse).id;
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          tipoDocumentoId: BOLETA_ID,
+          lineas: [{ itemId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: TARJETA_DEBITO_ID, monto: '5000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+
+      // El efectivo CUADRA (0 esperado, 0 contado) y la tarjeta descuadra en
+      // -500: es justo el caso que el historial mostraba como "+0".
+      const motivos = await request(app.getHttpServer())
+        .get('/api/motivos-diferencia?soloActivas=true')
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      const motivoId = (motivos.body as { id: string }[])[0]?.id;
+      const cerrar = await cerrarEnDosFases(
+        app,
+        cajaId,
+        tokenSupervisor,
+        [
+          { metodoPagoId: null, montoContado: '0' },
+          { metodoPagoId: TARJETA_DEBITO_ID, montoContado: '4500.0000' },
+        ],
+        [{ metodoPagoId: TARJETA_DEBITO_ID, motivoDiferenciaId: motivoId }],
+      );
+      expect([200, 201]).toContain(cerrar.status);
+
+      const historial = await request(app.getHttpServer())
+        .get(`/api/caja?cajonId=${cajonArqueoId}`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+      expect(historial.status).toBe(200);
+      const fila = (
+        historial.body as {
+          data: {
+            id: string;
+            diferencia: string | null;
+            diferenciaTotal: string | null;
+          }[];
+        }
+      ).data.find((c) => c.id === cajaId);
+
+      // El campo viejo sigue siendo el del cajón físico: el efectivo cuadró.
+      expect(fila?.diferencia).toBe('0.0000');
+      // El nuevo suma todas las líneas y por eso sí ve el descuadre de tarjeta.
+      expect(fila?.diferenciaTotal).toBe('-500.0000');
+
+      await ds.query(
+        `UPDATE tenant_metodo_pago SET requiere_conteo = false
+         WHERE tenant_id = $1 AND metodo_pago_id = $2`,
+        [PARIS_TENANT_ID, TARJETA_DEBITO_ID],
+      );
     });
 
     it('con requiere_conteo=true en tarjeta, enviar el conteo sin su contado → 400', async () => {

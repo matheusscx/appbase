@@ -883,6 +883,18 @@ CREATE UNIQUE INDEX "ux_cajas_cajon_abierta"
   ON "cajas" ("cajon_id")
   WHERE "estado" = 'abierta' AND "eliminado_el" IS NULL;
 
+-- Backstop duro de "una caja física abierta por tenant+usuario". El chequeo del
+-- service (`findActiva` en `abrir`) corre FUERA de la transacción, así que dos
+-- aperturas simultáneas sobre cajones DISTINTOS no competían por nada y el mismo
+-- cajero terminaba con dos cajas abiertas (auditoría 2026-07-27). A diferencia del
+-- índice de arriba, este SÍ incluye `en_conciliacion`: esa caja también ocupa al
+-- cajero. `tipo = 'fisica'` deja fuera la caja virtual del tenant.
+CREATE UNIQUE INDEX "ux_cajas_activa_por_usuario"
+  ON "cajas" ("tenant_id", "usuario_id")
+  WHERE "tipo" = 'fisica'
+    AND "estado" IN ('abierta', 'en_conciliacion')
+    AND "eliminado_el" IS NULL;
+
 CREATE TABLE "movimientos_caja" (
   "movimiento_id"  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
   "caja_id"        UUID            NOT NULL REFERENCES "cajas" ("caja_id"),

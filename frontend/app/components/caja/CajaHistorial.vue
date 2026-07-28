@@ -42,10 +42,10 @@ const columns: TableColumn<Caja>[] = [
   { accessorKey: 'estado', header: 'Estado' },
   { accessorKey: 'saldoInicial', header: 'Saldo inicial', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'saldoFinal', header: 'Saldo final', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'diferencia', header: 'Diferencia', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'diferenciaTotal', header: 'Diferencia', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
-function diferenciaPositiva(val: string | null): boolean {
+function diferenciaPositiva(val: string | null | undefined): boolean {
   if (val === null || val === undefined) return true
   return new Decimal(val).gte(0)
 }
@@ -106,15 +106,18 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
         <template #saldoFinal-cell="{ row }">
           <span class="font-mono">{{ formatMonto(row.original.saldoFinal) }}</span>
         </template>
-        <template #diferencia-cell="{ row }">
+        <!-- Suma de TODAS las líneas del arqueo, no solo el efectivo: con la
+             columna sobre `diferencia` una caja cerrada con -500 en tarjeta se
+             veía como "+0" acá y como "-500" al abrir el detalle. -->
+        <template #diferenciaTotal-cell="{ row }">
           <span
-            v-if="row.original.diferencia !== null"
+            v-if="row.original.diferenciaTotal != null"
             class="font-mono"
-            :class="diferenciaPositiva(row.original.diferencia)
+            :class="diferenciaPositiva(row.original.diferenciaTotal)
               ? 'text-green-600 dark:text-green-400'
               : 'text-red-600 dark:text-red-400'"
           >
-            {{ diferenciaPositiva(row.original.diferencia) ? '+' : '' }}{{ formatMonto(row.original.diferencia) }}
+            {{ diferenciaPositiva(row.original.diferenciaTotal) ? '+' : '' }}{{ formatMonto(row.original.diferenciaTotal) }}
           </span>
           <span v-else class="font-mono text-muted">—</span>
         </template>

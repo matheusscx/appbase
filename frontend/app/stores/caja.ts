@@ -11,7 +11,14 @@ export interface Caja {
   saldoInicial: string
   saldoFinal: string | null
   montoContado: string | null
+  /** Diferencia de la línea de EFECTIVO: el cuadre del cajón físico. */
   diferencia: string | null
+  /**
+   * Diferencia de TODAS las líneas del arqueo. Es la que responde "¿cuadró?";
+   * `diferencia` sola deja invisible un descuadre de tarjeta. Solo la emite el
+   * listado del historial, y es `null` mientras no haya arqueo congelado.
+   */
+  diferenciaTotal?: string | null
   fechaApertura: string
   fechaCierre: string | null
   comentario: string | null

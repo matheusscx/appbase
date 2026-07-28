@@ -341,24 +341,27 @@ auditoría produce información, no diffs. Orden = severidad.
   `activos`. Hoy no paga de más (reportes e impresión filtran `incluido = true`), pero el
   dato en reposo miente; y si se excluye a **todos** los de un grupo, el `montoGrupo` no
   queda en ninguna fila con `incluido = true` y desaparece sin que nada lo señale.
-- [ ] **Dos cajas abiertas del mismo usuario bajo concurrencia** (backend,
-  `caja/caja.service.ts:177`) — el chequeo `findActiva` corre **fuera** de la transacción y
-  el único backstop de BD es `ux_cajas_cajon_abierta` (`startup-pos.sql:882`), único por
-  **cajón**. Dos aperturas simultáneas con `cajonId` distintos no compiten por nada. Con el
-  mismo cajón sí lo caza (23505 → 409, `:241`), así que un doble clic está cubierto: hace
-  falta seleccionar dos cajones distintos en paralelo. **Cierre:** índice único parcial por
-  `(tenant_id, usuario_id)` con `WHERE tipo='fisica' AND estado IN ('abierta','en_conciliacion')`,
-  que además cubre el hueco de `en_conciliacion` que el comentario de `startup-pos.sql:875`
-  deja explícitamente a cargo del service.
-- [ ] **"Diferencia" significa dos números distintos según la pantalla** (backend +
-  frontend, `caja/caja.service.ts:706-709`, `components/caja/CajaCierreResumen.vue:12-17`,
-  `components/caja/CajaHistorial.vue:45`) — el backend persiste `cajas.diferencia` = **solo
-  la línea de efectivo** (decisión deliberada y comentada en el código); el resumen del
-  detalle suma la `diferencia` de **todas** las líneas del arqueo; y el historial rotula
-  "Diferencia" la columna que muestra el campo cash-only. Con `requiere_conteo = true` en
-  tarjeta y un descuadre de -$500 ahí, el historial muestra +0 y el detalle -$500. No
-  esconde el descuadre al cerrar (la fase 2 lo exige justificar), pero el listado —la
-  superficie que barre el supervisor— miente.
+- [x] ~~**Dos cajas abiertas del mismo usuario bajo concurrencia**~~ — cerrado 2026-07-27
+  con el índice único parcial `ux_cajas_activa_por_usuario` sobre `(tenant_id, usuario_id)`
+  con `WHERE tipo='fisica' AND estado IN ('abierta','en_conciliacion')`, declarado en la
+  **entidad** (que es lo que `synchronize` crea de verdad) y replicado en `startup-pos.sql`.
+  Incluye `en_conciliacion`, así que también cubre el hueco que el comentario del índice de
+  cajón dejaba explícitamente a cargo del service. El `catch` del 23505 ahora distingue por
+  `constraint` y devuelve el mensaje que corresponde: "ya tenés una caja" y "el cajón está
+  ocupado" mandan al usuario a hacer cosas distintas.
+  Tests: un e2e que assevera que el índice **existe con su forma** (leyendo `pg_indexes`;
+  borrarlo del entity lo hace fallar) y un unit parametrizado del mapeo de cada constraint a
+  su mensaje.
+- [x] ~~**"Diferencia" significa dos números distintos según la pantalla**~~ — cerrado
+  2026-07-27: el listado del historial emite `diferenciaTotal`, la suma de **todas** las
+  líneas del arqueo congelado, y la columna pasa a mostrar ese campo. `cajas.diferencia` se
+  queda como está —es deliberadamente el cuadre del **cajón físico**— y ahora ambos campos
+  dicen en el tipo cuál es cuál. El total sale por `LEFT JOIN LATERAL` con un `SUM` en la
+  **misma** query del listado: una sola consulta para todas las filas, sin N+1 y sin agrupar
+  por las 13 columnas. Una caja abierta todavía no tiene arqueo congelado → `null` → "—".
+  El e2e cierra una caja con el efectivo cuadrado y -500 en tarjeta y verifica los dos
+  campos por separado (`diferencia` = 0, `diferenciaTotal` = -500), que es exactamente el
+  caso que el historial mostraba como "+0".
 - [ ] **`etiquetasGarzones` no filtra `eliminado_el IS NULL`** (backend,
   `propinas/propina-reportes.service.ts:643-651`) — contra la invariante de soft delete y
   contra sus tres queries hermanas del mismo archivo, que sí filtran. La prueba de la

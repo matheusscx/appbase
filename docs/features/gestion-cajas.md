@@ -418,6 +418,16 @@ historial (`GET /caja`) y cualquier reporte que ya lea `cajas.*` sigue funcionan
 cambios, y sigue significando lo mismo que documentaba esta feature desde el inicio:
 cuadre del efectivo físico del cajón.
 
+⚠️ **Por eso el historial NO puede rotular `diferencia` como "la" diferencia de la caja.**
+Con `requiere_conteo = true` en un método no-efectivo, una caja podía cerrarse con -500 en
+tarjeta y el listado mostraba **+0** mientras el detalle mostraba **-500** — dos números
+distintos con la misma etiqueta, y el descuadre invisible justo en la superficie que barre
+el supervisor (auditoría 2026-07-27). El listado emite además **`diferenciaTotal`**: la
+suma de **todas** las líneas del arqueo congelado, que es la que responde "¿cuadró?" y la
+que muestra la columna. Sale por `LEFT JOIN LATERAL` con un `SUM` en la misma query del
+listado — una sola consulta para todas las filas, sin N+1. Es `null` mientras la caja no
+tenga arqueo congelado (o sea, mientras está `abierta`), y el front muestra "—".
+
 ### El fix: salida manual y NC "devolver dinero" validan contra efectivo real
 
 Antes de este sub-proyecto, el bloqueo de saldo insuficiente (`422`, ver
