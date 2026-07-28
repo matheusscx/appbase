@@ -8,6 +8,7 @@ import { PropinaGrupoPesoManual } from './entities/propina-grupo-peso-manual.ent
 import { CriterioDistribucion } from './enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from './enums/base-ventas-grupo.enum';
 import { ManualModo } from './enums/manual-modo.enum';
+import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { PropinaDistribucionService } from './propina-distribucion.service';
 
@@ -31,6 +32,7 @@ describe('PropinaDistribucionService', () => {
     getRepository: jest.Mock;
   };
   let dataSource: { transaction: jest.Mock };
+  let garzonesService: { obtenerActivoPorId: jest.Mock };
 
   beforeEach(async () => {
     configRepo = {
@@ -62,6 +64,10 @@ describe('PropinaDistribucionService', () => {
       ),
     };
 
+    garzonesService = {
+      obtenerActivoPorId: jest.fn().mockResolvedValue({ id: 'g1' }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PropinaDistribucionService,
@@ -78,6 +84,8 @@ describe('PropinaDistribucionService', () => {
           useValue: pesoRepo,
         },
         { provide: getDataSourceToken(), useValue: dataSource },
+        // Los pesos manuales resuelven el garzón contra el tenant.
+        { provide: GarzonesService, useValue: garzonesService },
       ],
     }).compile();
 

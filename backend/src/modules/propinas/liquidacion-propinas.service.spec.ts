@@ -14,6 +14,7 @@ import { LiquidacionPropinasFuente } from './entities/liquidacion-propinas-fuent
 import { LiquidacionPropinasGrupo } from './entities/liquidacion-propinas-grupo.entity';
 import { LiquidacionPropinasParticipante } from './entities/liquidacion-propinas-participante.entity';
 import { PropinaDistribucionService } from './propina-distribucion.service';
+import { GarzonesService } from '../garzones/garzones.service';
 import { LiquidacionPropinasService } from './liquidacion-propinas.service';
 
 const TENANT = '550e8400-e29b-41d4-a716-446655440007';
@@ -23,6 +24,7 @@ const MONEDA = '550e8400-e29b-41d4-a716-446655440003';
 describe('LiquidacionPropinasService', () => {
   let service: LiquidacionPropinasService;
   let distribucion: { obtener: jest.Mock };
+  let garzonesService: { obtenerActivoPorId: jest.Mock };
   let manager: {
     create: jest.Mock;
     find: jest.Mock;
@@ -70,6 +72,7 @@ describe('LiquidacionPropinasService', () => {
       venta_id: 'venta-1',
       base_ventas_total_final: '1000.0000',
       base_ventas_sin_impuestos: '800.0000',
+      creado_el: new Date('2026-07-17T10:00:00.000Z'),
     },
     {
       venta_propina_id: 'tip-2',
@@ -80,11 +83,15 @@ describe('LiquidacionPropinasService', () => {
       venta_id: 'venta-2',
       base_ventas_total_final: '500.0000',
       base_ventas_sin_impuestos: '400.0000',
+      creado_el: new Date('2026-07-17T11:00:00.000Z'),
     },
   ];
 
   beforeEach(async () => {
     distribucion = { obtener: jest.fn().mockResolvedValue(config) };
+    garzonesService = {
+      obtenerActivoPorId: jest.fn().mockResolvedValue({ id: 'garzon-1' }),
+    };
     manager = {
       create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({
         ...data,
@@ -121,6 +128,8 @@ describe('LiquidacionPropinasService', () => {
       providers: [
         LiquidacionPropinasService,
         { provide: PropinaDistribucionService, useValue: distribucion },
+        // El alta manual de participante resuelve el garzón contra el tenant.
+        { provide: GarzonesService, useValue: garzonesService },
         { provide: getDataSourceToken(), useValue: dataSource },
         {
           provide: getRepositoryToken(LiquidacionPropinas),
@@ -299,6 +308,35 @@ describe('LiquidacionPropinasService', () => {
       // 400, pero el genérico de `repartirMayoresRestos` ("la suma de pesos debe
       // ser mayor a cero"), que no le dice al usuario qué mirar.
       await expect(crear()).rejects.toThrow(/ningún participante puede/);
+    });
+
+    // El índice único es (liquidacion_id, garzon_id): una persona con propinas
+    // de dos tipo_garzon en el mismo período reventaba con un 23505 crudo a
+    // mitad de la transacción y bloqueaba la liquidación de TODO el período.
+    it('una persona en dos grupos: corta antes de escribir y dice dónde partir el período', async () => {
+      distribucion.obtener.mockResolvedValue(CONFIG_DOS_GRUPOS);
+      manager.query
+        .mockReset()
+        .mockResolvedValueOnce(monedaRows)
+        .mockResolvedValueOnce([
+          { ...tips[0], creado_el: new Date('2026-07-17T10:00:00.000Z') },
+          {
+            ...tips[0],
+            venta_propina_id: 'tip-barra',
+            tipo_garzon: TipoGarzon.BARRA,
+            creado_el: new Date('2026-07-17T18:00:00.000Z'),
+          },
+        ])
+        .mockResolvedValueOnce([]) // sesiones
+        .mockResolvedValueOnce([{ nombre: 'Luis Pérez' }]); // nombre del garzón
+
+      // Nombra a la persona, sus dos grupos, y el corte = primer tip del rol que
+      // arrancó después (18:00, no 10:00).
+      await expect(crear()).rejects.toThrow(
+        /Luis Pérez.+"Garzones".+"Barra".+2026-07-17T18:00:00\.000Z/,
+      );
+      // Y corta ANTES de crear la liquidación: nada que rollbackear.
+      expect(manager.save).not.toHaveBeenCalled();
     });
 
     it('período sin propinas: no es un error, todos en cero', async () => {
@@ -486,6 +524,38 @@ describe('LiquidacionPropinasService', () => {
         participantes: [{ id: 'part-1', incluido: false }],
       }),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  // El DTO del alta manual solo exige que `garzonId` sea un uuid: sin resolverlo
+  // contra el tenant, un id inexistente o ajeno entraba como participante
+  // fantasma con `incluido: true` y diluía el reparto de todos.
+  it('el alta manual de participante resuelve el garzón contra el tenant', async () => {
+    manager.findOne.mockResolvedValueOnce(liquidacionBase());
+    manager.find
+      .mockResolvedValueOnce([grupoBase()])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    garzonesService.obtenerActivoPorId.mockRejectedValueOnce(
+      new BadRequestException('Garzón no encontrado o inactivo'),
+    );
+
+    await expect(
+      service.actualizar(TENANT, USER, 'liq-1', {
+        participantes: [
+          {
+            garzonId: '550e8400-e29b-41d4-a716-4466554409ff',
+            grupoId: 'grupo-1',
+            motivoAjuste: 'entró a mitad de turno',
+          },
+        ],
+      }),
+    ).rejects.toThrow(/Garzón no encontrado/);
+
+    expect(garzonesService.obtenerActivoPorId).toHaveBeenCalledWith(
+      TENANT,
+      '550e8400-e29b-41d4-a716-4466554409ff',
+    );
   });
 
   it('rechaza edición de una liquidación confirmada', async () => {
@@ -698,6 +768,12 @@ describe('LiquidacionPropinasService', () => {
     expect(incluidos).toHaveLength(1);
     expect(incluidos[0].garzonId).toBe(garzonAId);
     expect(incluidos[0].monto).toBe('2000.0000'); // recibe todo el grupo
+
+    // El excluido queda en 0: antes conservaba el monto de cuando SÍ estaba
+    // incluido, así que la fila mentía y la suma del grupo no reconciliaba.
+    const excluido = result.participantes.find((p) => !p.incluido);
+    expect(excluido?.garzonId).toBe(garzonBId);
+    expect(excluido?.monto).toBe('0.0000');
   });
 
   it('liquidar crea, aplica exclusión y confirma bloqueando las propinas', async () => {

@@ -328,14 +328,23 @@ auditoría produce información, no diffs. Orden = severidad.
 
 ### Media
 
-- [ ] **`garzonId` de participante manual no se resuelve contra el tenant** (backend,
+- [x] ~~**`garzonId` de participante manual no se resuelve contra el tenant**~~ — cerrado
+  2026-07-27: el alta manual (`aplicarCambioParticipante`) y los pesos manuales de la config
+  (`propina-distribucion.service.ts`) resuelven el garzón con
+  `GarzonesService.obtenerActivoPorId(tenantId, garzonId)` antes de persistir — el mismo
+  guard que ya usaba el cierre de mesa en ventas. `PropinasModule` importa ahora
+  `GarzonesModule` (sin ciclo: no importa nada y ya lo usaban otros cuatro módulos).
+  Detalle original: (backend,
   `propinas/liquidacion-propinas.service.ts:980`, `propinas/propina-distribucion.service.ts:193`)
   — se inserta `garzonId: cambio.garzonId` sin validar; el DTO solo pide `@IsUUID()`. Las
   entidades no tienen FK a `garzones`, así que tampoco hay backstop de integridad. El caso
   más probable no es el cross-tenant sino un **uuid inexistente**: entra como participante
   fantasma con `incluido: true` y diluye el reparto de todos. La defensa correcta ya existe:
   `GarzonesService.obtenerActivoPorId(tenantId, garzonId)`, del fix de ventas de jul-2026.
-- [ ] **Excluir a un participante le deja el `monto` viejo persistido** (backend,
+- [x] ~~**Excluir a un participante le deja el `monto` viejo persistido**~~ — cerrado
+  2026-07-27: `redistribuirGrupo` devuelve los omitidos con `monto: '0.0000'` y
+  `recalcularParticipantesExistentes` los persiste junto con los activos. Detalle original:
+  (backend,
   `propinas/liquidacion-propinas.service.ts:996-1009` y `:1026`) — `redistribuirGrupo`
   devuelve `omitidos` sin tocar `monto` y `recalcularParticipantesExistentes` solo re-guarda
   `activos`. Hoy no paga de más (reportes e impresión filtran `incluido = true`), pero el
@@ -362,14 +371,37 @@ auditoría produce información, no diffs. Orden = severidad.
   El e2e cierra una caja con el efectivo cuadrado y -500 en tarjeta y verifica los dos
   campos por separado (`diferencia` = 0, `diferenciaTotal` = -500), que es exactamente el
   caso que el historial mostraba como "+0".
-- [ ] **`etiquetasGarzones` no filtra `eliminado_el IS NULL`** (backend,
+- [x] ~~**`etiquetasGarzones` no filtra `eliminado_el IS NULL`**~~ — cerrado 2026-07-27
+  agregando el filtro, que es lo que manda la invariante de soft delete y lo que hacían ya
+  sus tres queries hermanas del mismo archivo. El fallback `'Trabajador eliminado'` deja de
+  ser código muerto y el test lo ejerce. Detalle original: (backend,
   `propinas/propina-reportes.service.ts:643-651`) — contra la invariante de soft delete y
   contra sus tres queries hermanas del mismo archivo, que sí filtran. La prueba de la
   intención: deja **inalcanzable** el fallback `'Trabajador eliminado'` (`:203`). **Al
   cerrarlo hay una decisión chica:** filtrar (y el fallback revive) **o** documentar la
   excepción deliberada, como ya se hizo con `metodos_pago` en `caja/caja.service.ts:322`,
   donde el nombre histórico es intrínseco al movimiento.
-- [ ] **Un garzón en dos grupos revienta la liquidación con un 23505 crudo** (backend + BD,
+- [x] ~~**Un garzón en dos grupos revienta la liquidación con un 23505 crudo**~~ — cerrado
+  2026-07-27 **con la salida acotada que decidió el owner**: no se cambió el modelo, se
+  cambió el crash por un 400 accionable. `assertGarzonEnUnSoloGrupo` corre en los **cuatro**
+  puntos de entrada; en crear, liquidar y **el preview** corta antes de escribir nada (así
+  que se ve antes de intentar liquidar), y en `actualizarConfig` corre después de rehacer el
+  snapshot, dentro de la misma transacción que revierte. El mensaje nombra a la persona, sus dos grupos, y
+  la fecha de corte sugerida —el primer tip del rol que arrancó después—, de modo que
+  liquidar hasta ahí deja cada rol en su propia liquidación sin tocar la configuración.
+  ⚠️ **Queda abierto el cambio de modelo** (que la persona cobre en los dos grupos): es
+  índice `(liquidacion_id, grupo_id, garzon_id)` **más** re-keyear los ajustes, que hoy se
+  identifican solo por `garzonId` —excluir la sacaría de los dos grupos y un monto manual
+  escribiría el mismo número en sus dos filas, rompiendo la conservación de ambos—. Toca
+  DTO, service, composable, la página y la impresión por persona: medio día a un día, con
+  la decisión de cómo se imprime adentro. Se encara si el caso aparece de verdad.
+  ⚠️ **Dos precisiones que dejó la revisión independiente:** la fecha de corte sale solo de
+  los tips, así que si la persona tiene una sesión del primer rol que se extiende más allá
+  del corte, el conflicto reaparece en el segundo intento (vuelve a cortar con el mismo 400,
+  no genera datos malos, pero un solo corte no alcanza y hay que acotar turnos). Y falta un
+  test dedicado del conflicto por el camino de `actualizarConfig`: hoy solo se ejerce por
+  `crear`, aunque ambos comparten la misma función.
+  Detalle original: (backend + BD,
   `startup-pos.sql:1606`, `propinas/liquidacion-propinas.service.ts:1216-1236`) —
   `uq_liquidacion_propinas_participante_garzon` es único por `(liquidacion_id, garzon_id)`,
   **sin `grupo_id`**, y `buildParticipantesData` itera por grupo sin deduplicar. Un garzón

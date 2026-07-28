@@ -335,5 +335,28 @@ describe('PropinaReportesService', () => {
       expect(assignmentCall?.[0]).toContain('l.turno_ids <@');
       expect(assignmentCall?.[1]).toContain(TipoGarzon.COCINA);
     });
+
+    // Era la única query del archivo sin el filtro de borrado, contra la
+    // invariante de soft delete y contra sus tres hermanas. La prueba de que el
+    // comportamiento buscado era el otro: dejaba INALCANZABLE el fallback
+    // 'Trabajador eliminado' que el propio código define para ese caso.
+    it('la query de etiquetas filtra los garzones borrados', async () => {
+      query
+        .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+        .mockResolvedValueOnce([{ garzon_id: 'g1', cierres: '1' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([{ cantidad: '0' }])
+        .mockResolvedValueOnce([]); // etiquetasGarzones → sin filas
+
+      const result = await service.trabajadores(TENANT_ID, QUERY);
+
+      const etiquetasCall = query.mock.calls.find(([sql]) =>
+        sql.includes('FROM garzones g'),
+      );
+      expect(etiquetasCall?.[0]).toContain('g.eliminado_el IS NULL');
+      // Y el fallback deja de ser código muerto.
+      expect(result.data[0]?.nombre).toBe('Trabajador eliminado');
+    });
   });
 });

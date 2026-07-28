@@ -647,7 +647,8 @@ export class PropinaReportesService {
          g.tipo AS tipo_garzon
        FROM garzones g
        WHERE g.tenant_id = $1
-         AND g.garzon_id = ANY($2::uuid[])`,
+         AND g.garzon_id = ANY($2::uuid[])
+         AND g.eliminado_el IS NULL`,
       [tenantId, ids],
     );
   }

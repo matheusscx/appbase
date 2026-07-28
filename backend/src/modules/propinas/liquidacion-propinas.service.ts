@@ -29,6 +29,7 @@ import {
 } from './dto/update-liquidacion.dto';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { LiquidarDto } from './dto/liquidar.dto';
+import { GarzonesService } from '../garzones/garzones.service';
 import { horasInterseccionHoras } from './utils/horas-interseccion';
 import { repartirMayoresRestos } from './utils/mayores-restos';
 
@@ -46,6 +47,8 @@ interface TipElegibleRow {
   venta_id: string;
   base_ventas_total_final: string;
   base_ventas_sin_impuestos: string;
+  /** Se usa para sugerir dónde cortar el período cuando alguien cambió de rol. */
+  creado_el: Date;
 }
 
 interface SesionRow {
@@ -143,6 +146,7 @@ export class LiquidacionPropinasService {
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly distribucion: PropinaDistribucionService,
+    private readonly garzones: GarzonesService,
   ) {}
 
   async crear(
@@ -232,6 +236,14 @@ export class LiquidacionPropinasService {
     const poolTotal = tips
       .reduce((acc, t) => acc.plus(t.monto_pagado), new Decimal(0))
       .toFixed(4);
+
+    await this.assertGarzonEnUnSoloGrupo(
+      manager,
+      tenantId,
+      gruposConfig,
+      tips,
+      sesiones,
+    );
 
     const montos = this.montosPorGrupo(
       poolTotal,
@@ -459,6 +471,14 @@ export class LiquidacionPropinasService {
         detalle.liquidacion.fechaHasta,
         detalle.liquidacion.turnoIds,
       );
+      await this.assertGarzonEnUnSoloGrupo(
+        manager,
+        tenantId,
+        gruposConfig,
+        tips,
+        sesiones,
+      );
+
       const grupos = await this.crearSnapshotGrupos(
         manager,
         tenantId,
@@ -779,6 +799,14 @@ export class LiquidacionPropinasService {
       .reduce((acc, t) => acc.plus(t.monto_pagado), new Decimal(0))
       .toFixed(4);
 
+    await this.assertGarzonEnUnSoloGrupo(
+      manager,
+      tenantId,
+      gruposConfig,
+      tips,
+      sesiones,
+    );
+
     const liquidacion = await manager.save(
       LiquidacionPropinas,
       manager.create(LiquidacionPropinas, {
@@ -998,6 +1026,11 @@ export class LiquidacionPropinasService {
     if (!grupo) {
       throw new BadRequestException('Grupo no encontrado en la liquidación');
     }
+    // El garzón se resuelve contra el tenant ANTES de persistirlo: el DTO solo
+    // exige que sea un uuid, y sin esto un id inexistente (o de otro tenant)
+    // entraba como participante fantasma con `incluido: true`, diluyendo el
+    // reparto de todos. Mismo guard que usa el cierre de mesa en ventas.
+    await this.garzones.obtenerActivoPorId(tenantId, cambio.garzonId);
     const creado = await manager.save(
       LiquidacionPropinasParticipante,
       manager.create(LiquidacionPropinasParticipante, {
@@ -1026,7 +1059,13 @@ export class LiquidacionPropinasService {
     decimales: number,
   ): { activos: T[]; omitidos: T[] } {
     const delGrupo = participantesGrupo.filter((p) => p.incluido);
-    const omitidos = participantesGrupo.filter((p) => !p.incluido);
+    // Excluir a alguien le pone el monto en 0: antes se lo devolvía tal cual y
+    // conservaba el número de cuando SÍ estaba incluido, así que la fila mentía
+    // en reposo (y si se excluía a todo el grupo, su plata no quedaba en ninguna
+    // fila incluida y desaparecía de reportes e impresión sin avisar).
+    const omitidos = participantesGrupo
+      .filter((p) => !p.incluido)
+      .map((p) => ({ ...p, monto: '0.0000' }));
     const activos =
       grupo.criterio === CriterioDistribucion.MANUAL &&
       grupo.manualModo === ManualModo.MONTOS
@@ -1049,7 +1088,9 @@ export class LiquidacionPropinasService {
         delGrupo,
         decimales,
       );
-      for (const p of activos) {
+      // Los omitidos también se persisten: su monto pasó a 0 y esa corrección
+      // tiene que quedar en la fila, no solo en el objeto en memoria.
+      for (const p of [...activos, ...omitidos]) {
         await manager.save(LiquidacionPropinasParticipante, p);
       }
       recalculados.push(...activos, ...omitidos);
@@ -1095,6 +1136,7 @@ export class LiquidacionPropinasService {
               vp.turno_id,
               vp.monto_pagado,
               vp.venta_id,
+              vp.creado_el,
               v.base_ventas_total_final,
               v.base_ventas_sin_impuestos
        FROM venta_propina vp
@@ -1147,6 +1189,7 @@ export class LiquidacionPropinasService {
               vp.turno_id,
               vp.monto_pagado,
               vp.venta_id,
+              vp.creado_el,
               v.base_ventas_total_final,
               v.base_ventas_sin_impuestos
        FROM venta_propina vp
@@ -1211,6 +1254,84 @@ export class LiquidacionPropinasService {
       }, new Decimal(0));
       return suma.gt(0);
     });
+  }
+
+  /**
+   * Una persona no puede cobrar en dos grupos de la misma liquidación: el índice
+   * `uq_liquidacion_propinas_participante_garzon` es único por
+   * `(liquidacion_id, garzon_id)`. Pasa cuando alguien genera propinas con dos
+   * `tipo_garzon` distintos en el mismo período (se lo reclasifica a mitad de
+   * camino: `garzones.tipo` es editable y el tip congela el tipo que tenía).
+   *
+   * Sin este chequeo el segundo INSERT reventaba con un 23505 crudo **a mitad de
+   * la transacción**, y nadie del período podía liquidarse sin entender por qué.
+   * Acá se corta antes de escribir, nombrando a la persona, sus dos grupos y
+   * dónde conviene partir el período para que cada rol caiga en su liquidación.
+   *
+   * Que la persona cobre en los dos grupos es la otra salida posible y es un
+   * cambio de modelo (índice + los ajustes, que hoy se identifican solo por
+   * `garzonId`): queda anotado en `docs/agent/pendientes.md`.
+   */
+  private async assertGarzonEnUnSoloGrupo(
+    manager: EntityManager,
+    tenantId: string,
+    gruposConfig: GrupoDistribucionPublico[],
+    tips: TipElegibleRow[],
+    sesiones: SesionRow[],
+  ): Promise<void> {
+    const gruposPorGarzon = new Map<string, GrupoDistribucionPublico[]>();
+    for (const config of gruposConfig) {
+      for (const garzonId of this.garzonesGrupo(
+        config.tipoGarzon,
+        tips,
+        sesiones,
+      )) {
+        const acc = gruposPorGarzon.get(garzonId) ?? [];
+        acc.push(config);
+        gruposPorGarzon.set(garzonId, acc);
+      }
+    }
+
+    const conflicto = [...gruposPorGarzon.entries()].find(
+      ([, grupos]) => grupos.length > 1,
+    );
+    if (!conflicto) return;
+
+    const [garzonId, grupos] = conflicto;
+    const filas: { nombre: string }[] = await manager.query(
+      `SELECT nombre FROM garzones
+        WHERE garzon_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [garzonId, tenantId],
+    );
+    const quien = filas[0]?.nombre ?? 'Un trabajador';
+    const nombres = grupos.map((g) => `"${g.nombre}"`).join(' y ');
+
+    // Corte sugerido: el primer tip del rol que empezó DESPUÉS. Liquidar hasta
+    // ahí deja cada rol en su propia liquidación, sin tocar la configuración.
+    const primerTipPorTipo = new Map<string, Date>();
+    for (const tip of tips) {
+      if (tip.garzon_id !== garzonId || !tip.tipo_garzon) continue;
+      const actual = primerTipPorTipo.get(tip.tipo_garzon);
+      const creado = new Date(tip.creado_el);
+      if (!actual || creado < actual) {
+        primerTipPorTipo.set(tip.tipo_garzon, creado);
+      }
+    }
+    const inicios = [...primerTipPorTipo.values()].sort(
+      (a, b) => a.getTime() - b.getTime(),
+    );
+    const corte = inicios.length > 1 ? inicios[inicios.length - 1] : null;
+
+    throw new BadRequestException(
+      corte
+        ? `${quien} generó propinas en ${nombres} dentro de este período, y una ` +
+            `persona no puede cobrar en dos grupos de la misma liquidación. ` +
+            `Liquidá primero hasta ${corte.toISOString()} —donde arranca el ` +
+            `segundo rol— y después el resto del período.`
+        : `${quien} pertenece a ${nombres} en este período, y una persona no ` +
+            `puede cobrar en dos grupos de la misma liquidación. Acotá el período ` +
+            `o sus turnos para que cada rol caiga en una liquidación distinta.`,
+    );
   }
 
   private montosPorGrupo(

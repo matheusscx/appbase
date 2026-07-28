@@ -91,6 +91,30 @@ verificación se podía repartir más plata de la que había en el pool y confir
 La regla **no prohíbe el ajuste manual**: exige que la plata cuadre, así que un
 ajuste compensado entre dos personas del mismo grupo pasa sin problema.
 
+**2b. Una persona no puede cobrar en dos grupos de la misma liquidación.** La pertenencia
+sale del `tipo_garzon` **congelado en el tip**, y `garzones.tipo` es editable: quien se
+reclasifica a mitad de período genera propinas con dos roles y aparecería en dos grupos,
+contra el índice único `(liquidacion_id, garzon_id)`. Antes eso reventaba con un error de
+Postgres sin traducir **a mitad de la transacción**, y bloqueaba la liquidación de todo el
+período. Ahora corta con un `400` que nombra a la persona, sus dos grupos y **la fecha de
+corte sugerida** —el primer tip del rol que arrancó después—: liquidando hasta ahí, cada
+rol cae en su propia liquidación sin tocar la configuración.
+
+Corre en los **cuatro** puntos de entrada. En `crear`, `liquidar` y el **preview** corta
+antes de escribir nada, así que se ve antes de intentar liquidar. En `actualizarConfig`
+corre después de rehacer el snapshot (dos `softDelete` y un `save`), todo dentro de la
+misma transacción: revierte igual, pero ahí no es literalmente "antes de escribir".
+
+⚠️ **La fecha sugerida sale solo de los tips, no de las sesiones.** Si la persona tiene una
+sesión del primer rol abierta —o que termina después de ese corte—, esa sesión sigue
+solapando el segundo tramo (`buscarSesionesPeriodo` filtra por solapamiento de rango) y el
+conflicto vuelve a aparecer en el segundo intento. No genera datos incorrectos: vuelve a
+cortar con el mismo 400. Pero en ese caso un solo corte no alcanza, y hay que acotar
+también los turnos.
+Que la persona **sí** cobre en los dos grupos es la otra salida posible y es un cambio de
+modelo (el índice más los ajustes, que hoy se identifican solo por `garzonId`): queda
+anotado en `docs/agent/pendientes.md` con su costo, para encararlo si el caso aparece.
+
 **3. La propina de una venta anulada no se reparte.** `buscarTipsElegibles`
 excluye las ventas `cancelada`: esa plata nunca se cobró. Ver en
 `docs/agent/pendientes.md` el caso todavía abierto —la venta se anula **después**

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
+import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { PropinaConfiguracion } from './entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from './entities/propina-grupo-distribucion.entity';
@@ -51,6 +52,7 @@ export class PropinaDistribucionService {
     private readonly pesoRepo: Repository<PropinaGrupoPesoManual>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly garzones: GarzonesService,
   ) {}
 
   async obtener(tenantId: string): Promise<DistribucionPublica> {
@@ -185,6 +187,10 @@ export class PropinaDistribucionService {
             if (new Decimal(p.peso).lte(0)) {
               throw new BadRequestException('El peso debe ser mayor a cero');
             }
+            // El DTO solo exige un uuid: sin resolverlo contra el tenant se podía
+            // configurar el peso de un garzón inexistente o ajeno, que después
+            // pesa en el reparto de este tenant.
+            await this.garzones.obtenerActivoPorId(tenantId, p.garzonId);
             await manager.save(
               PropinaGrupoPesoManual,
               manager.create(PropinaGrupoPesoManual, {
