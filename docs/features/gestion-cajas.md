@@ -482,9 +482,12 @@ HTTP y sería evadible con curl/devtools. La retención vive en `obtenerArqueo`
 (`caja.service.ts`): en modo ciego **y** con la caja `abierta`, la respuesta devuelve
 `esperado: null` en cada línea y se **filtra** a solo las líneas obligatorias (efectivo +
 las que tengan `requiereConteo`) — las informativas ni siquiera se listan. Es la regla
-`ciego && abierta`, sin ramificar por rol: **nadie** ve el esperado de una caja abierta en
-modo ciego, ni el dueño del turno ni el supervisor con `Cajas:Leer`. Esto es una decisión
-explícita del owner, más estricta que el estándar de mercado (donde el supervisor sí lo ve).
+`ciego && abierta && !esAdmin`: no lo ve **ni el dueño del turno ni el supervisor con
+`Cajas:Leer`** — solo el admin del tenant y el superadmin, para quienes el ciego no aplica
+(ver [Alcance del modo ciego](#alcance-del-modo-ciego-arqueo_ciego) y el criterio
+`esAdmin = esSuperadmin || userIsTenantAdmin`). Que al supervisor **sí** le aplique es una
+decisión explícita del owner, más estricta que el estándar de mercado (donde el supervisor
+lo ve).
 
 Por eso la respuesta de `GET /caja/:id/arqueo` cambió de un arreglo plano (`LineaArqueo[]`)
 a un envoltorio `{ ciego: boolean, lineas: LineaArqueo[] }` — el cliente necesita saber si
@@ -750,6 +753,17 @@ la grilla de supervisión calculaba `saldoEsperado` en vivo y lo devolvía sin g
 un supervisor con `Cajas:Leer` leía desde `/cajas` el número que el arqueo le retenía. La
 regla del ciego solo vale si la cumplen **todas** las superficies que exponen el esperado o
 algo de donde derivarlo: al agregar una nueva, gatearla es parte de agregarla.
+
+**El usuario contra el que se define la regla existe en el seed:**
+`supervisor@paris.cl`, rol `Cajas · Supervisión` con `Cajas:Leer` y nada más. No es admin
+del tenant y no tiene `MiCaja`, así que ve todas las cajas y no opera ninguna — la única
+combinación a la que el ciego sí aplica *y* que llega a una caja ajena. Antes no existía
+—`admin.paris` hacía de "supervisor" pero es admin, y `vendedor.paris` no ve cajas
+ajenas—, así que la retención solo la cubrían mocks: ningún e2e podía distinguir "no ve el
+número porque es ciego" de "no ve el número porque no llega a la caja". Lo ejerce
+`caja.e2e-spec.ts` → *el modo ciego SÍ aplica al supervisor no-admin*, que assevera la
+sesión **no nula** con `saldoEsperado: null`, y contra el mismo cajón y la misma caja que
+el admin sí ve el número.
 
 **Configurar el modo ciego es admin-only** (`TenantAdminGuard` en `PUT /caja/arqueo-ciego`):
 es una política anti-fraude, no una acción operativa. El CRUD de cajones de la misma

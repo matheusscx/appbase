@@ -382,14 +382,6 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 
 ## Limpiezas menores (opcionales, no bloqueantes)
 
-- [ ] **Falta usuario semilla "supervisor `Cajas:Leer` no-admin" para e2e del ciego** (test) —
-  al hacer que el modo ciego NO aplique al admin/superadmin (2026-07-25), el criterio es
-  `esAdmin = esSuperadmin || userIsTenantAdmin`; un supervisor con `Cajas:Leer` que **no** sea
-  admin debe seguir ciego. Hoy eso lo cubren el unit del controller (`Cajas:Leer=true` +
-  `userIsTenantAdmin=false` → `esAdmin=false`) y la lógica del service, pero **no** un e2e real:
-  el seed solo tiene admin (admin.paris, que hace de "supervisor") y cajero (vendedor), ninguno
-  es supervisor-no-admin. Sembrar un rol `Cajas`-solo-lectura no-fijo + su usuario y agregar un
-  e2e que verifique que ve la caja abierta ciega. Cierra el gap que marcó la revisión de seguridad.
 - [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
   (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los
   productos por serie o lote quedan fuera del listado y agregarlos a una sesión devuelve 400.

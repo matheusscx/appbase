@@ -12,6 +12,12 @@ const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 
+// Supervisor de verdad: rol 'Cajas · Supervisión' (es_fijo=false) con
+// Cajas:Leer y NADA más. Ve todas las cajas y NO es admin del tenant — la
+// combinación exacta a la que el modo ciego sí le aplica.
+const SUPERVISOR_EMAIL = 'supervisor@paris.cl';
+const SUPERVISOR_PASS = 'admin';
+
 // Cajero: rol Vendedor, solo tiene MiCaja (sin Cajas).
 // Nota: el seed usa el mismo hash de dev para todos los usuarios (password 'admin');
 // ventas.e2e-spec.ts prueba con 'Vendedor1234!' pero ese test se salta en silencio
@@ -1462,5 +1468,143 @@ describe('Caja (e2e) — el modo ciego NO aplica al admin (ve en vivo)', () => {
       [{ metodoPagoId: null, montoContado: '0' }],
       [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
     );
+  });
+});
+
+describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () => {
+  let app: INestApplication<App>;
+  let tokenCajero: string;
+  let tokenAdmin: string;
+  let tokenSupervisor: string;
+  let cajonId: string;
+  let ds: DataSource;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+    ds = app.get(DataSource);
+
+    tokenCajero = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
+    tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+    tokenSupervisor = await login(app, SUPERVISOR_EMAIL, SUPERVISOR_PASS);
+    const r = await request(app.getHttpServer())
+      .post('/api/cajones')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: `E2E Ciego Supervisor ${Date.now()}` });
+    cajonId = (r.body as CajonResponse).id;
+  }, 60000);
+
+  afterAll(async () => {
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+    // Si el test falló antes de su cierre, el cajero se queda con la caja
+    // abierta y el 409 aparece varias suites más allá, lejos de la causa
+    // (ver `docs/agent/pendientes.md`). Liberarlo acá, pase lo que pase.
+    const activa = await request(app.getHttpServer())
+      .get('/api/caja/activa')
+      .set('Authorization', `Bearer ${tokenCajero}`);
+    const abiertaId = (activa.body as CajaResponse | null)?.id;
+    if (abiertaId) {
+      const motivos = await request(app.getHttpServer())
+        .get('/api/motivos-diferencia?soloActivas=true')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      const motivoId = (motivos.body as { id: string }[])[0]?.id;
+      await cerrarEnDosFases(
+        app,
+        abiertaId,
+        tokenCajero,
+        [{ metodoPagoId: null, montoContado: '0' }],
+        [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+      );
+    }
+    if (cajonId) {
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+    }
+    await app.close();
+  });
+
+  it('caja abierta ajena en tenant ciego: el supervisor la ve pero sin el esperado; el admin sí lo ve', async () => {
+    const cajaId = await abrirOReusarCaja(app, tokenCajero, cajonId);
+    await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/movimientos`)
+      .set('Authorization', `Bearer ${tokenCajero}`)
+      .send({
+        tipo: 'entrada',
+        concepto: 'venta efectivo',
+        monto: '3000.0000',
+      });
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+
+    interface Sesion {
+      cajaId: string;
+      saldoInicial: string;
+      saldoEsperado: string | null;
+    }
+    interface Fila {
+      cajonId: string;
+      sesion: Sesion | null;
+    }
+    const filaDe = (body: unknown) =>
+      (body as Fila[]).find((f) => f.cajonId === cajonId);
+
+    // Supervisor: LLEGA a la caja ajena (Cajas:Leer ⇒ verTodas) pero el ciego le
+    // retiene el esperado. Assertear la sesión no-nula es lo que separa "ciego"
+    // de "no la ve": sin ella, un 403 o una grilla vacía darían el mismo null.
+    const gSup = await request(app.getHttpServer())
+      .get('/api/caja/cajones-estado')
+      .set('Authorization', `Bearer ${tokenSupervisor}`);
+    expect(gSup.status).toBe(200);
+    const sesionSup = filaDe(gSup.body)?.sesion;
+    expect(sesionSup).toBeTruthy();
+    expect(sesionSup?.cajaId).toBe(cajaId);
+    expect(sesionSup?.saldoEsperado).toBeNull();
+
+    // Admin sobre la MISMA grilla y la misma caja: ve el esperado. Mata el
+    // mutante de "el controller no pasa esAdmin" (que dejaría ciegos a los dos).
+    const gAdmin = await request(app.getHttpServer())
+      .get('/api/caja/cajones-estado')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const sesionAdmin = filaDe(gAdmin.body)?.sesion;
+    expect(sesionAdmin?.saldoEsperado).not.toBeNull();
+
+    // El esperado del admin es el número de verdad (inicial + los 3000 que
+    // acaba de entrar), no un placeholder: si el ciego "revelara" un 0 o el
+    // saldo inicial pelado, esta igualdad falla.
+    const esperado = (Number(sesionAdmin?.saldoInicial ?? '0') + 3000).toFixed(
+      4,
+    );
+    expect(sesionAdmin?.saldoEsperado).toBe(esperado);
+
+    // El saldo inicial NO es secreto —lo declaró el propio cajero al abrir— y
+    // por eso viaja igual para los dos. Si alguien lo retuviera de más, acá se ve.
+    expect(sesionSup?.saldoInicial).toBe(sesionAdmin?.saldoInicial);
+
+    // Mismo eje en GET /:id/arqueo, el otro camino que consume `esAdmin`.
+    const aSup = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/arqueo`)
+      .set('Authorization', `Bearer ${tokenSupervisor}`);
+    expect(aSup.status).toBe(200);
+    expect((aSup.body as { ciego: boolean }).ciego).toBe(true);
+    const aAdmin = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/arqueo`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect((aAdmin.body as { ciego: boolean }).ciego).toBe(false);
+
+    // El apagado del ciego y el cierre de la caja los hace el `afterAll`, que
+    // corre también cuando este test falla.
   });
 });

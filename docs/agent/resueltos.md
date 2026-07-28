@@ -23,6 +23,32 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Limpiezas menores
+
+- [x] ~~**Falta usuario semilla "supervisor `Cajas:Leer` no-admin" para e2e del ciego**~~ —
+  cerrado 2026-07-28: el seed siembra `supervisor@paris.cl` con el rol `Cajas · Supervisión`
+  (no fijo, `Cajas:Leer` y **nada más**; sin `MiCaja`, así que no opera ninguna caja propia).
+  Es la combinación exacta contra la que se define el ciego —ve cajas ajenas y **no** es
+  admin— y no existía: `admin.paris` hacía de "supervisor" pero es admin, y `vendedor.paris`
+  no llega a una caja ajena.
+  El e2e nuevo assevera lo que ningún mock podía: la sesión de la caja del cajero llega
+  **no nula** con `saldoEsperado: null`. Esa aserción es la que separa "no ve el número
+  porque es ciego" de "no ve el número porque no llega a la caja" — sin ella un 403 o una
+  grilla vacía darían el mismo `null`. En la misma corrida, el admin sobre **el mismo
+  cajón** sí ve el esperado, y se verifica que sea el número de verdad (inicial + los 3000
+  que acaban de entrar), no un placeholder.
+  Tres mutantes verificados, cada uno mata su parte: `esAdminTenant` siempre `true` (el
+  supervisor recibe `13000.0000`), el controller que no pasa `esAdmin` (el **admin** queda
+  ciego), y `cajonesEstado` sin la retención.
+  ⚠️ **Lo que el mutante 2 destapó, y quedó arreglado:** al fallar el test, la caja del
+  cajero quedaba abierta y **contaminaba la corrida siguiente** —el mutante 3 dio un falso
+  resultado por eso—. El `afterAll` del describe nuevo ahora libera la caja pase lo que
+  pase, verificado empíricamente: con el mutante puesto la corrida falla, y la siguiente
+  sobre **la misma base** pasa. Es el patrón que [`pendientes.md`](pendientes.md) predice
+  para las tres suites que siguen sin cerrarla.
+
+---
+
 ## Harness / tooling (CodeGraph)
 
 - [x] **Sync de CodeGraph en un git hook + niveles de búsqueda — HECHO** (harness) — jul-2026

@@ -157,6 +157,7 @@ body: { moduloAppPermisoIds: string[] }
 |---|---|---|---|
 | `vendedor@paris.cl` | `admin` | Vendedor | Paris |
 | `admin.paris@paris.cl` | `admin` | Admin (fijo) | Paris |
+| `supervisor@paris.cl` | `admin` | Cajas · Supervisión (`Cajas:Leer`, no admin) | Paris |
 
 **Pasos:**
 1. `docker-compose up --build`

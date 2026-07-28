@@ -186,6 +186,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedRolesUsuarios();
     await this.seedVendedorPermisosCaja();
     await this.seedRolesInventario();
+    await this.seedRolSupervisorCajas();
     await this.seedSalones();
     await this.seedMesas();
     await this.seedGarzones();
@@ -966,6 +967,19 @@ export class SeederService implements OnApplicationBootstrap {
         apellido: 'Inventario',
         telefono: '987654324',
         correo: 'aprobador@paris.cl',
+        esSuperadmin: false,
+      },
+      // El supervisor de cajas que el cierre ciego necesitaba y no existía: ve
+      // TODAS las cajas (`Cajas:Leer`) y NO es admin, que es justo la
+      // combinación a la que el ciego sí le aplica. Ver seedRolSupervisorCajas.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440335',
+        nombreUsuario: 'supervisor.paris',
+        contrasena: HASH,
+        nombre: 'Supervisor',
+        apellido: 'Cajas',
+        telefono: '987654325',
+        correo: 'supervisor@paris.cl',
         esSuperadmin: false,
       },
     ];
@@ -1771,6 +1785,7 @@ export class SeederService implements OnApplicationBootstrap {
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
     const CONTADOR_PARIS = '550e8400-e29b-41d4-a716-446655440328';
     const APROBADOR_PARIS = '550e8400-e29b-41d4-a716-446655440329';
+    const SUPERVISOR_PARIS = '550e8400-e29b-41d4-a716-446655440335';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -1778,6 +1793,7 @@ export class SeederService implements OnApplicationBootstrap {
       [VENDEDOR_PARIS, PARIS], // vendedor → Paris
       [CONTADOR_PARIS, PARIS], // cuenta recuentos, no los aplica → Paris
       [APROBADOR_PARIS, PARIS], // aplica recuentos, no cuenta → Paris
+      [SUPERVISOR_PARIS, PARIS], // ve todas las cajas, no es admin → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -1954,6 +1970,66 @@ export class SeederService implements OnApplicationBootstrap {
         [rol.usuarioId, PARIS, rolId],
       );
     }
+  }
+
+  /**
+   * El supervisor de cajas de Paris: `Cajas:Leer` y nada más. No es admin del
+   * tenant y no tiene `MiCaja`, así que no opera ninguna caja propia — solo
+   * mira las ajenas.
+   *
+   * Existe porque el **cierre ciego** se define contra exactamente este
+   * usuario: `esAdmin = esSuperadmin || userIsTenantAdmin`, y el ciego aplica a
+   * quien NO lo es. Con el seed anterior esa combinación no existía —admin.paris
+   * hacía de "supervisor" pero es admin, y vendedor.paris no ve cajas ajenas—,
+   * así que la retención del esperado solo la cubrían mocks: ningún e2e podía
+   * distinguir "no ve el número porque es ciego" de "no ve el número porque no
+   * llega a la caja".
+   *
+   * ID 335/336: el máximo previo era 334 (`moduloAppPermisoId` de Ventas/Anular).
+   */
+  private async seedRolSupervisorCajas(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const SUPERVISOR = '550e8400-e29b-41d4-a716-446655440335';
+    const ROL_ID = '550e8400-e29b-41d4-a716-446655440336';
+    const NOMBRE = 'Cajas · Supervisión';
+    // moduloTenantId para Paris → Cajas (definido en seedTenantModulo)
+    const MODULO_TENANT_CAJAS = '550e8400-e29b-41d4-a716-446655440284';
+    // moduloAppPermiso Cajas/Leer (definido en seedModuloAppPermisos)
+    const CAJAS_LEER = '550e8400-e29b-41d4-a716-446655440283';
+
+    const existing: { rol_id: string }[] = await this.dataSource.query(
+      `SELECT rol_id FROM roles
+        WHERE tenant_id = $1 AND nombre = $2 AND eliminado_el IS NULL`,
+      [PARIS, NOMBRE],
+    );
+
+    if (existing.length === 0) {
+      await this.dataSource.query(
+        `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+         VALUES ($1, $2, $3, 'Ve todas las cajas del tenant; no opera ninguna ni es admin', false, NOW(), NOW())`,
+        [ROL_ID, PARIS, NOMBRE],
+      );
+    }
+
+    const rolId = existing[0]?.rol_id ?? ROL_ID;
+
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [rolId, MODULO_TENANT_CAJAS],
+    );
+
+    await this.dataSource.query(
+      `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [rolId, MODULO_TENANT_CAJAS, CAJAS_LEER],
+    );
+
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [SUPERVISOR, PARIS, rolId],
+    );
   }
 
   private async seedMetodosPago(): Promise<void> {
