@@ -413,7 +413,23 @@ auditoría produce información, no diffs. Orden = severidad.
 
 ### Baja
 
-- [ ] **`registrarMovimientoEnTransaccion` no valida signo ni estado de la caja** (backend,
+- [x] ~~**`registrarMovimientoEnTransaccion` no valida signo ni estado de la caja**~~ —
+  cerrado 2026-07-27 en el eje del signo, con **dos** capas: el helper rechaza negativos con
+  422, y `movimientos_caja` gana un `CHECK ("monto" >= 0)` declarado en la entidad (lo que
+  `synchronize` crea) y replicado en el `.sql`. Ese CHECK cubre cualquier camino, presente o
+  futuro, sin depender de que alguien se acuerde del guard.
+  ⚠️ **Es `>= 0`, no `> 0`, y el primer intento fue `> 0`.** La revisión independiente lo
+  bloqueó reproduciendo contra el backend real una venta legítima que devolvía 422: cuando
+  un pago se devuelve **íntegro** como vuelto, su `montoNeto = monto − vuelto` da 0
+  (`pagos.service.ts`), y el guard tumbaba la venta entera. El movimiento en cero no altera
+  el esperado del arqueo y conserva la traza del pago. Hay un e2e con dos pagos en efectivo
+  —uno devuelto entero— que lo fija, y el unit acepta 0 explícitamente.
+  **Lección:** endurecer un límite exige enumerar quién lo produce hoy, no suponerlo. Mi
+  texto original afirmaba que ningún caller producía `<= 0`: era cierto para negativos y
+  falso para el cero, justo el vecino del bug que este mismo hilo venía a cerrar.
+  El eje del **estado** queda como está a propósito: el patrón del módulo es "el caller toma
+  `bloquearCajaAbierta` y el helper confía", y re-chequear acá sería una query extra por
+  venta duplicando el lock que el llamador ya tiene. Detalle original: (backend,
   `caja/caja.service.ts:785-809`) — recibe un objeto plano y lo inserta tal cual: sin
   `@IsDecimalPositivo` (que solo cubre el camino HTTP vía `CrearMovimientoDto`) y sin
   verificar el estado. `startup-pos.sql:886` tampoco tiene `CHECK` sobre `monto`. Hoy **no
@@ -421,19 +437,30 @@ auditoría produce información, no diffs. Orden = severidad.
   `bloquearCajaAbierta` antes y ya no producen montos negativos desde el fix del vuelto. Es
   endurecimiento del chokepoint por donde entró ese bug, no un bug activo. Cierra el hilo
   que la auditoría de ventas mandó acá: defendido en el endpoint, no en el método compartido.
-- [ ] **`asegurarDefault` de propinas devuelve 500 en el primer uso concurrente** (backend,
+- [x] ~~**`asegurarDefault` de propinas devuelve 500 en el primer uso concurrente**~~ —
+  cerrado 2026-07-27: el 23505 se atrapa y se relee la config que ganó la carrera; cualquier
+  otro error se propaga (hay un test por cada lado). Mismo patrón que `caja.abrir()`.
+  Detalle original: (backend,
   `propinas/propina-distribucion.service.ts:68`) — el `lock: pessimistic_write` sobre una
   fila que **todavía no existe** no bloquea nada; dos requests insertan y el segundo viola
   `uq_propina_config_tenant` (`startup-pos.sql:1457`) sin `catch`. No corrompe (el índice
   hace su trabajo) y se cura tras el primer insert. El patrón correcto está tres módulos más
   allá, en `caja/caja.service.ts:241`.
-- [ ] **El monto manual de propina no valida signo en el DTO** (backend,
+- [x] ~~**El monto manual de propina no valida signo en el DTO**~~ — cerrado 2026-07-27:
+  los dos campos usan `@IsDecimalNoNegativo()`, así que el negativo se rechaza con 400 en
+  vez de llegar al `CHECK` de BD como 500 — y el **preview**, que no persiste y por eso no
+  tocaba ese CHECK, deja de devolver una propina negativa. Detalle original: (backend,
   `propinas/dto/ajustes-reparto.dto.ts:14`, `propinas/dto/update-liquidacion.dto.ts:34`) —
   `@IsNumberString()` a secas acepta `'-5000'`; son los dos campos que quedaron fuera del
   barrido de signo de `74f3f35`. **No llega a persistir**: `chk_liquidacion_participante_metricas`
   (`startup-pos.sql:1595`) exige `monto >= 0`. Queda un 500 crudo donde correspondía un 400,
   y el **preview** (que no persiste) devolviendo una propina negativa en pantalla.
-- [ ] **`crearFuentes` inserta fila por fila sobre un conjunto sin tope** (backend,
+- [x] ~~**`crearFuentes` inserta fila por fila sobre un conjunto sin tope**~~ — cerrado
+  2026-07-27 con un solo `save` del array. **Verificado empíricamente, como pedía esta
+  entrada**: con `log_statement='all'` en Postgres, la suite e2e de propinas produce **dos**
+  sentencias `INSERT INTO liquidacion_propinas_fuente` —una de 12 filas y otra de 3—, o sea
+  un INSERT multi-fila por liquidación y no uno por tip. El test lo fija asserteando que
+  hubo un único `save` y que recibió un array. Detalle original: (backend,
   `propinas/liquidacion-propinas.service.ts:1187-1195`) — dentro de la transacción de
   `liquidar()`, y `buscarTipsElegibles` no tiene `LIMIT`, así que N = ventas con propina del
   período. Al cerrarlo, **verificar de verdad** que `save(array)` colapsa a un INSERT

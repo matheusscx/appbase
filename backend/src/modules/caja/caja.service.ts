@@ -822,6 +822,20 @@ export class CajaService {
       metodoPagoId?: string | null;
     },
   ): Promise<MovimientoCaja> {
+    // El signo lo codifica `tipo`, nunca `monto`: una "entrada" negativa RESTA
+    // del esperado (`SUM(monto) FILTER (WHERE tipo='entrada')`). El endpoint HTTP
+    // ya lo validaba por DTO, pero este método —el que usan ventas y pagos— es
+    // por donde entró el bug del vuelto, y no tenía guard propio.
+    //
+    // Rechaza NEGATIVOS, no el cero: un pago devuelto íntegro como vuelto deja
+    // un neto de 0 y es una venta legítima (`pagos.service.ts`, monto − vuelto).
+    // El movimiento en cero no altera el esperado y conserva la traza del pago.
+    // Exigir `> 0` acá tumbaba esa venta entera con 422.
+    if (new Decimal(params.monto).lt(0)) {
+      throw new UnprocessableEntityException(
+        'El monto de un movimiento de caja no puede ser negativo',
+      );
+    }
     const movimiento = manager.create(MovimientoCaja, {
       cajaId: params.cajaId,
       tipo: params.tipo,

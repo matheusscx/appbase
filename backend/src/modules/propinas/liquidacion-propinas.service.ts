@@ -1405,21 +1405,21 @@ export class LiquidacionPropinasService {
     liquidacionId: string,
     tips: TipElegibleRow[],
   ): Promise<LiquidacionPropinasFuente[]> {
-    const fuentes: LiquidacionPropinasFuente[] = [];
-    for (const tip of tips) {
-      fuentes.push(
-        await manager.save(
-          LiquidacionPropinasFuente,
-          manager.create(LiquidacionPropinasFuente, {
-            tenantId,
-            liquidacionId,
-            ventaPropinaId: tip.venta_propina_id,
-            montoPagado: new Decimal(tip.monto_pagado).toFixed(4),
-          }),
-        ),
-      );
-    }
-    return fuentes;
+    if (tips.length === 0) return [];
+    // Un solo save con el array: `buscarTipsElegibles` no tiene LIMIT, así que N
+    // es la cantidad de ventas con propina del período (cientos en una semana
+    // real) y antes era un INSERT por fila dentro de la transacción de liquidar.
+    return manager.save(
+      LiquidacionPropinasFuente,
+      tips.map((tip) =>
+        manager.create(LiquidacionPropinasFuente, {
+          tenantId,
+          liquidacionId,
+          ventaPropinaId: tip.venta_propina_id,
+          montoPagado: new Decimal(tip.monto_pagado).toFixed(4),
+        }),
+      ),
+    );
   }
 
   private buildParticipantesData(

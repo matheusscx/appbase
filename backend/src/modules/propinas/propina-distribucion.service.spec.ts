@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { QueryFailedError } from 'typeorm';
 import { IsNull } from 'typeorm';
 import { PropinaConfiguracion } from './entities/propina-configuracion.entity';
 import { PropinaGrupoDistribucion } from './entities/propina-grupo-distribucion.entity';
@@ -508,6 +509,31 @@ describe('PropinaDistribucionService', () => {
     expect(dataSource.transaction).not.toHaveBeenCalled();
     expect(configRepo.findOne).toHaveBeenCalledWith({
       where: { tenantId: TENANT, eliminadoEl: IsNull() },
+    });
+  });
+
+  // El `FOR UPDATE` no puede bloquear una fila que todavía no existe: dos
+  // requests del primer uso del tenant insertan los dos y el segundo choca con
+  // el índice único. El índice hace su trabajo; lo que faltaba era no devolver
+  // un 500 al segundo usuario.
+  describe('asegurarDefault bajo concurrencia', () => {
+    it('si otro request ganó la carrera, relee su config en vez de reventar', async () => {
+      const ganadora = { id: 'cfg-ganadora', tenantId: TENANT };
+      configRepo.findOne
+        .mockResolvedValueOnce(null) // primera lectura: no existe
+        .mockResolvedValueOnce(ganadora); // relectura tras el 23505
+      const err = new QueryFailedError('INSERT', [], new Error('dup'));
+      (err as unknown as { code: string }).code = '23505';
+      dataSource.transaction.mockRejectedValueOnce(err);
+
+      await expect(service.asegurarDefault(TENANT)).resolves.toBe(ganadora);
+    });
+
+    it('un error que NO es de unicidad se propaga', async () => {
+      configRepo.findOne.mockResolvedValueOnce(null);
+      dataSource.transaction.mockRejectedValueOnce(new Error('boom'));
+
+      await expect(service.asegurarDefault(TENANT)).rejects.toThrow('boom');
     });
   });
 });

@@ -8,6 +8,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 
 export class UpdateLiquidacionParticipanteDto {
   @IsOptional()
@@ -34,8 +35,10 @@ export class UpdateLiquidacionParticipanteDto {
   @IsNumberString()
   pesoManual?: string;
 
+  // Mismo motivo que en `ajustes-reparto.dto.ts`: sin esto el negativo llegaba
+  // al CHECK de BD y salía como 500 en vez de 400.
   @IsOptional()
-  @IsNumberString()
+  @IsDecimalNoNegativo()
   monto?: string;
 
   @IsOptional()

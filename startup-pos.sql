@@ -908,7 +908,13 @@ CREATE TABLE "movimientos_caja" (
   "pago_id"        UUID,           -- FK definida después de crear pagos
   "creado_el"      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  -- El signo lo codifica `tipo`: un monto NEGATIVO en una 'entrada' RESTA del
+  -- esperado del arqueo. El DTO cubre el endpoint HTTP (ahí además exige > 0);
+  -- este CHECK cubre cualquier camino, incluido el helper que usan ventas y
+  -- pagos. Es `>= 0` porque un pago devuelto íntegro como vuelto deja neto 0 y
+  -- esa venta es legítima.
+  CONSTRAINT chk_movimientos_caja_monto_no_negativo CHECK ("monto" >= 0)
 );
 
 -- Catálogo de motivos de diferencia de caja por tenant (falta de efectivo, divergencia

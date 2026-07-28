@@ -98,12 +98,22 @@ describe('LiquidacionPropinasService', () => {
       })),
       find: jest.fn(),
       findOne: jest.fn(),
+      // `save` acepta una entidad o un ARRAY, y devuelve lo mismo que recibe.
+      // El mock viejo spreadeaba el array en un objeto, así que un `save(array)`
+      // legítimo se veía como un bug del código bajo prueba.
       save: jest.fn(
-        (entity: { name?: string }, data: Record<string, unknown>) =>
-          Promise.resolve({
-            id: `${entity.name ?? 'Entity'}-${manager.save.mock.calls.length + 1}`,
-            ...data,
-          }),
+        (
+          entity: { name?: string },
+          data: Record<string, unknown> | Record<string, unknown>[],
+        ) => {
+          const n = manager.save.mock.calls.length + 1;
+          const nombre = entity.name ?? 'Entity';
+          return Promise.resolve(
+            Array.isArray(data)
+              ? data.map((d, i) => ({ id: `${nombre}-${n}-${i}`, ...d }))
+              : { id: `${nombre}-${n}`, ...data },
+          );
+        },
       ),
       softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
       query: jest
@@ -187,6 +197,14 @@ describe('LiquidacionPropinasService', () => {
       ]),
     );
     expect(result.fuentes).toHaveLength(2);
+    // Las fuentes se guardan en UN save con el array, no una por una: N es la
+    // cantidad de ventas con propina del período y no tiene tope. Medido contra
+    // Postgres real (log_statement): un INSERT multi-fila, no N inserts.
+    const saveFuentes = manager.save.mock.calls.filter(
+      ([entity]) => entity === LiquidacionPropinasFuente,
+    );
+    expect(saveFuentes).toHaveLength(1);
+    expect(Array.isArray(saveFuentes[0][1])).toBe(true);
     expect(result.advertencias).toEqual([]);
     expect(manager.save).toHaveBeenCalledWith(
       LiquidacionPropinasEvento,

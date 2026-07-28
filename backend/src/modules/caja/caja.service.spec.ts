@@ -823,6 +823,36 @@ describe('CajaService', () => {
     });
   });
 
+  // El endpoint HTTP valida el signo por DTO, pero este helper es el que usan
+  // ventas y pagos, y es por donde entró el bug del vuelto: no tenía guard propio.
+  describe('registrarMovimientoEnTransaccion', () => {
+    it('rechaza un monto negativo: el signo lo codifica `tipo`, no el monto', async () => {
+      await expect(
+        service.registrarMovimientoEnTransaccion(managerMock as never, {
+          cajaId: CAJA_ID,
+          tipo: 'entrada',
+          concepto: 'prueba',
+          monto: '-500.0000',
+        }),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+      expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    // El par del test de arriba, y el que impide "endurecer" esto a `> 0`: un
+    // pago devuelto íntegro como vuelto deja neto 0 y esa venta es legítima.
+    // Exigir positivo acá la tumbaba entera con 422 (lo cazó la revisión).
+    it.each([['0.0000'], ['500.0000']])('acepta monto %s', async (monto) => {
+      managerMock.save.mockResolvedValueOnce({ id: 'mov-1' });
+      await service.registrarMovimientoEnTransaccion(managerMock as never, {
+        cajaId: CAJA_ID,
+        tipo: 'entrada',
+        concepto: 'prueba',
+        monto,
+      });
+      expect(managerMock.save).toHaveBeenCalled();
+    });
+  });
+
   describe('cerrar (finalizar desde en_conciliacion)', () => {
     it('400 si la caja no está en_conciliacion', async () => {
       managerMock.query.mockResolvedValueOnce([]); // lock: no hay fila en_conciliacion

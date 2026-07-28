@@ -1,4 +1,5 @@
 import {
+  Check,
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -7,7 +8,15 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
+// Backstop duro del signo: el tipo del movimiento ('entrada'/'salida') es lo que
+// codifica la dirección, así que un monto NEGATIVO invierte el aporte al esperado.
+// El DTO cubre el endpoint HTTP (donde además exige > 0, porque un movimiento
+// manual de cero no significa nada); esto cubre CUALQUIER camino, incluido el
+// helper compartido que usan ventas y pagos.
+// `>= 0` y no `> 0`: un pago devuelto íntegro como vuelto deja neto 0, y esa
+// venta es legítima.
 @Entity('movimientos_caja')
+@Check('chk_movimientos_caja_monto_no_negativo', '"monto" >= 0')
 export class MovimientoCaja {
   @PrimaryGeneratedColumn('uuid', { name: 'movimiento_id' })
   id: string;

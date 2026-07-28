@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, IsNull, Repository } from 'typeorm';
+import { DataSource, In, IsNull, QueryFailedError, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
 import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
@@ -66,6 +66,28 @@ export class PropinaDistribucionService {
     });
     if (existente) return existente;
 
+    try {
+      return await this.crearDefault(tenantId);
+    } catch (e) {
+      // El `FOR UPDATE` de abajo no puede bloquear una fila que TODAVÍA no
+      // existe, así que dos requests simultáneos del primer uso del tenant
+      // insertan los dos y el segundo viola `uq_propina_config_tenant`. El índice
+      // hace su trabajo (no hay fila duplicada); lo que faltaba era no devolver
+      // un 500: se relee la que ganó. Mismo patrón que `caja.abrir()`.
+      if (
+        e instanceof QueryFailedError &&
+        (e as { code?: string }).code === '23505'
+      ) {
+        const ganadora = await this.configRepo.findOne({
+          where: { tenantId, eliminadoEl: IsNull() },
+        });
+        if (ganadora) return ganadora;
+      }
+      throw e;
+    }
+  }
+
+  private async crearDefault(tenantId: string): Promise<PropinaConfiguracion> {
     return this.dataSource.transaction(async (manager) => {
       const race = await manager.findOne(PropinaConfiguracion, {
         where: { tenantId, eliminadoEl: IsNull() },

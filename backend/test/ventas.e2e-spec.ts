@@ -254,6 +254,38 @@ describe('Ventas (e2e)', () => {
       expect(res.status).toBe(400);
     });
 
+    // Un pago devuelto ÍNTEGRO como vuelto deja su movimiento de caja en neto
+    // cero, y eso es una venta legítima: el cliente puso dos billetes y el
+    // segundo alcanzaba solo. El movimiento de $0 no altera el esperado del
+    // arqueo. Un guard de "monto > 0" sobre el movimiento tumbaría la venta
+    // entera con 422 — la regresión que casi meto al endurecer el signo.
+    it('acepta una venta donde un pago se devuelve entero (movimiento de caja en cero)', async () => {
+      const precio = '500.0000';
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1', precioUnitario: precio }],
+          pagos: [
+            { metodoPagoId: EFECTIVO_ID, monto: '300.0000' },
+            { metodoPagoId: EFECTIVO_ID, monto: '595.0000' },
+          ],
+        });
+
+      expect(venta.status).toBe(201);
+      const ventaId = (venta.body as { id: string }).id;
+
+      // El movimiento del pago devuelto entero existe y vale 0: se registra,
+      // no se omite, así que la traza del pago queda completa.
+      const movimientos: { monto: string }[] = await ds.query(
+        `SELECT monto FROM movimientos_caja
+          WHERE venta_id = $1 AND eliminado_el IS NULL
+          ORDER BY monto ASC`,
+        [ventaId],
+      );
+      expect(movimientos.map((m) => Number(m.monto))).toContain(0);
+    });
+
     it('retorna 400 con payload vacío (validación DTO)', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
