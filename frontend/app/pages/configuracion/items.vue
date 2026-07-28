@@ -145,6 +145,12 @@ const stockModalOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 
+// Id del item cuya verificación de uso (GET /items/:id/uso) está en vuelo, o
+// null si no hay ninguna. `confirmarEliminar` la usa como guard: mientras haya
+// una verificación pendiente no dispara otra, así una respuesta obsoleta no
+// puede pisar `usoItem`/`confirmDeleteId` de un click posterior sobre otra fila.
+const verificandoEliminarId = ref<string | null>(null)
+
 // El backend garantiza la partición: 'extra' siempre cae en `advertencias` y
 // nunca en `bloqueos`. Tipar cada lado con lo que realmente puede contener deja
 // que `vue-tsc` valide el acceso a ETIQUETA_USO en el template.
@@ -956,17 +962,20 @@ async function guardar() {
 }
 
 async function confirmarEliminar(id: string) {
+  if (verificandoEliminarId.value) return
+  verificandoEliminarId.value = id
   try {
     usoItem.value = await useApiFetch<UsoItem>(`${apiUrl}/items/${id}/uso`)
+    confirmDeleteId.value = id
+    confirmModalOpen.value = true
   } catch (e) {
     toast.add({
       title: apiErrorMsg(e, 'Error al verificar el uso del item'),
       color: 'error',
     })
-    return
+  } finally {
+    verificandoEliminarId.value = null
   }
-  confirmDeleteId.value = id
-  confirmModalOpen.value = true
 }
 
 async function eliminar() {
@@ -1290,6 +1299,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 variant="ghost"
                 size="sm"
                 title="Más acciones"
+                :loading="verificandoEliminarId === row.original.id"
+                :disabled="!!verificandoEliminarId"
               />
             </UDropdownMenu>
           </div>
