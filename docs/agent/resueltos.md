@@ -584,3 +584,15 @@ siguen diferidos están en `pendientes.md`.
   los dos loaders nuevos, dejar la tercera lista sin ejercer habría repetido el mismo hueco
   sobre código recién escrito. Hay un test con un recargo real y el mutante muere. Queda
   abierta la mitad de `ventas.service.spec.ts` (otro archivo, otro alcance).
+- [x] ~~**`online.service.ts` sigue con un `findOne` por línea en el checkout**~~ — cerrado
+  2026-07-28, resto del N+1 del motor de precios. `prepararLineasCheckout` iteraba
+  `dto.lineas` llamando al `findOne` pesado para leer **solo** `tipo` y `unidadMedida`;
+  ahora una sola `cargarBasePorIds` para todo el carrito, que ya trae los dos campos y
+  lanza el mismo 404. Las validaciones por línea (`assertPresentacionPareada`) se movieron
+  **antes** de la carga, para no repetir el cambio de precedencia 400↔404 que la revisión
+  independiente había marcado en el fix hermano.
+  Lo fija un test con mutante verificado (volver a cargar por línea sube el contador de 1
+  a 3). **Sin SQL nuevo**: reutiliza un método que el e2e de ventas ya ejecuta contra
+  Postgres — distinto del caso de los extras, donde la query era nueva y hubo que probarla.
+  ⚠️ **Hueco de cobertura preexistente, que este fix no cierra:** ningún e2e toca el
+  checkout online. Lo cubierto acá es unit.

@@ -216,12 +216,29 @@ export class OnlineService {
     const lineasSnapshot: CheckoutLineaSnapshot[] = [];
     const calcularLineas: LineaDto[] = [];
 
+    // El pareado se valida ANTES de cargar, para que su 400 no pierda contra el
+    // 404 de un ítem inexistente. Ojo: es la única de las dos validaciones por
+    // línea que se puede adelantar — `resolverCantidadDesdePresentacion`
+    // necesita la `unidadBase` del ítem, así que su 400 sigue perdiendo contra
+    // el 404 cuando el carrito trae los dos errores a la vez.
     for (const linea of dto.lineas) {
       assertPresentacionPareada(
         linea.cantidadPresentacion,
         linea.unidadCodigoPresentacion,
       );
-      const item = await this.itemsService.findOne(tenantId, linea.itemId);
+    }
+
+    // Una carga para todo el carrito: acá solo se usan `tipo` y `unidadMedida`
+    // del row base. `findOne` por línea traía además impuestos, descuentos,
+    // recargos, ingredientes, componentes y grupos, todos descartados.
+    // `cargarBasePorIds` lanza el mismo 404 si un id no existe o no es del tenant.
+    const itemsBase = await this.itemsService.cargarBasePorIds(
+      tenantId,
+      dto.lineas.map((l) => l.itemId),
+    );
+
+    for (const linea of dto.lineas) {
+      const item = itemsBase.get(linea.itemId)!;
       const unidadBase =
         item.tipo === 'receta' ? 'unidad' : (item.unidadMedida ?? 'unidad');
 

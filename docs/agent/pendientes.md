@@ -312,21 +312,24 @@ Ver [`resueltos.md`](resueltos.md).
   de `''`/`null` ("borrar"), pero el front colapsa todo lo falsy con `|| undefined` y el campo
   ni viaja. El usuario borra el texto, ve "Item actualizado", y el valor sigue ahí. Mismo bug
   en `duracionEstimada` (`:866`), donde además tapa el `0` legítimo.
-- [ ] **`online.service.ts` sigue con un `findOne` por línea en el checkout** (backend,
-  `online.service.ts:224`) — resto del N+1 del motor de precios cerrado el 2026-07-28
-  ([`resueltos.md`](resueltos.md)). La **capa de precio** ya carga el carrito en 2 queries
-  fijas, pero el checkout online, antes de llamarla, itera `dto.lineas` y llama al `findOne`
-  pesado para leer `tipo` y `unidadMedida` de cada ítem. Es preexistente y de otro alcance
-  —por eso no entró en ese fix—, pero conviene anotarlo o el cierre de aquella entrada lo
-  deja sin rastro. Se resuelve con `cargarBasePorIds`, que ya trae los dos campos.
-  Lo detectó la revisión independiente al verificar la frase "beneficia a los tres
-  llamadores", que era cierta para la capa de precio y engañosa para el request completo.
 - [ ] **Un `itemId` en mayúsculas devuelve 404 desde que se batchea** (backend,
   `items.service.ts` → `cargarBasePorIds`) — `@IsUUID('4')` acepta mayúsculas y Postgres
   castea sin problema, pero el mapa se arma con el UUID canónico en minúsculas que devuelve
   la BD y el chequeo de faltantes compara contra el string tal cual lo mandó el cliente.
   Con `findOne` funcionaba. Es un defecto heredado que ya afectaba a ventas y que ahora
-  llega también al endpoint de precios. Cierre: normalizar a minúsculas antes de comparar.
+  llega también al **endpoint de precios** y al **checkout online**
+  (`online.service.ts:232`), los dos call sites que migraron a `cargarBasePorIds` el
+  2026-07-28. Cierre: normalizar a minúsculas antes de comparar, en `cargarBasePorIds`
+  —un solo lugar arregla los tres.
+- [ ] **`unidadBase`/`forzarConteo` divergen entre venta y checkout online** (backend,
+  `online.service.ts:239-253` vs `ventas.service.ts:169-180`) — la venta trata
+  `'receta' || 'combo'` como conteo; el checkout online, solo `'receta'`. Es la misma
+  función escrita dos veces y desincronizada. **`unidadBase` coincide por accidente** (un
+  combo no tiene fila en `item_producto`, así que `unidadMedida` viene `NULL` y el
+  `?? 'unidad'` tapa la diferencia), pero **`forzarConteo` sí difiere**: vender un combo
+  por presentación da distinto por POS que por la tienda online. Preexistente, detectado
+  por la revisión independiente del 2026-07-28 al mirar el archivo de al lado. Cierre:
+  una sola función compartida, o al menos igualar la condición.
 - [ ] **`ventas.service.spec.ts` fija `recargosIds: []` en sus tres fixtures** (backend) —
   resto del hallazgo de recargos sin ejercer, cuya mitad de `calculo-precios` se cerró el
   2026-07-28 ([`resueltos.md`](resueltos.md)). Acá la venta real con recargos sigue sin

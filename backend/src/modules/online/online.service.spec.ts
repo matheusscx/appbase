@@ -52,11 +52,15 @@ describe('OnlineService', () => {
   const pagosRedirect = { iniciar: jest.fn(), obtenerResultado: jest.fn() };
   const config = { get: jest.fn().mockReturnValue('http://localhost:5173') };
   const items = {
-    findOne: jest.fn().mockResolvedValue({
-      id: ITEM_ID,
-      tipo: 'producto',
-      unidadMedida: 'kg',
-    }),
+    cargarBasePorIds: jest
+      .fn()
+      .mockImplementation((_t: string, ids: string[]) =>
+        Promise.resolve(
+          new Map(
+            ids.map((id) => [id, { id, tipo: 'producto', unidadMedida: 'kg' }]),
+          ),
+        ),
+      ),
   };
   const catalog = {
     findAllUnidadesMedida: jest.fn().mockResolvedValue(UNIDADES),
@@ -204,6 +208,42 @@ describe('OnlineService', () => {
       cantidadPresentacion: '500',
       unidadCodigoPresentacion: 'g',
     });
+  });
+
+  it('resuelve las líneas del checkout con UNA carga, no una por línea', async () => {
+    tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+    metodos.findMetodosPago.mockResolvedValue([
+      { metodoPagoId: 'mp-credito', nombre: 'Crédito', habilitada: true },
+    ]);
+    pagosRedirect.iniciar.mockResolvedValue({
+      ordenId: 'orden-3',
+      urlWebpay: 'https://webpay/redirect',
+    });
+    calculo.calcular.mockResolvedValueOnce({
+      ...mockResultado,
+      lineas: [
+        { ...mockResultado.lineas[0], itemId: 'item-a' },
+        { ...mockResultado.lineas[0], itemId: 'item-b' },
+        { ...mockResultado.lineas[0], itemId: 'item-c' },
+      ],
+    });
+
+    await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', {
+      lineas: [
+        { itemId: 'item-a', cantidad: '1' },
+        { itemId: 'item-b', cantidad: '1' },
+        { itemId: 'item-c', cantidad: '1' },
+      ],
+    });
+
+    // Si alguien vuelve a resolver ítem por ítem, este contador pasa a 3.
+    expect(items.cargarBasePorIds).toHaveBeenCalledTimes(1);
+    expect(items.cargarBasePorIds).toHaveBeenCalledWith(TENANT_ID, [
+      'item-a',
+      'item-b',
+      'item-c',
+    ]);
   });
 
   it('pagar con Webpay pero sin métodos habilitados: rechaza', async () => {
