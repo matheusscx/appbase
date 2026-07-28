@@ -22,7 +22,11 @@ describe('ItemsService', () => {
   let itemRepo: { findOne: jest.Mock };
   let itemServicioRepo: { findOne: jest.Mock };
   let managerMock: { query: jest.Mock };
-  let dataSource: { query: jest.Mock; transaction: jest.Mock };
+  let dataSource: {
+    query: jest.Mock;
+    transaction: jest.Mock;
+    manager: { query: jest.Mock };
+  };
   let inventarioServiceMock: { registrarMovimiento: jest.Mock };
   let catalogServiceMock: {
     findAllUnidadesMedida: jest.Mock;
@@ -35,6 +39,7 @@ describe('ItemsService', () => {
     managerMock = { query: jest.fn() };
     dataSource = {
       query: jest.fn(),
+      manager: managerMock,
       transaction: jest.fn((cb: (m: typeof managerMock) => unknown) =>
         cb(managerMock),
       ),
@@ -1857,9 +1862,9 @@ describe('ItemsService', () => {
           id: PROD_ID,
           tenantId: TENANT,
         });
-        dataSource.query
-          .mockResolvedValueOnce([]) // no receta_ingredientes
-          .mockResolvedValueOnce([{ nombre: 'Combo Clásico' }]); // combo usage
+        managerMock.query.mockResolvedValueOnce([
+          { clase: 'combo', nombre: 'Combo Clásico' },
+        ]);
 
         await expect(service.remove(TENANT, PROD_ID)).rejects.toThrow(
           /No se puede eliminar.*componente de/i,
@@ -1880,11 +1885,11 @@ describe('ItemsService', () => {
 
     it('soft-delete cuando el item pertenece al tenant', async () => {
       itemRepo.findOne.mockResolvedValue({ id: ITEM_ID, tenantId: TENANT });
-      dataSource.query.mockResolvedValue([]);
+      managerMock.query.mockResolvedValue([]);
 
       await service.remove(TENANT, ITEM_ID);
 
-      expect(dataSource.query).toHaveBeenCalledWith(
+      expect(managerMock.query).toHaveBeenCalledWith(
         expect.stringContaining('eliminado_el = NOW()'),
         [ITEM_ID, TENANT],
       );
@@ -1892,8 +1897,8 @@ describe('ItemsService', () => {
 
     it('bloquea el borrado si el item es ingrediente de una receta activa', async () => {
       itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
-      dataSource.query.mockResolvedValueOnce([
-        { nombre: 'Hamburguesa Clásica' },
+      managerMock.query.mockResolvedValueOnce([
+        { clase: 'ingrediente', nombre: 'Hamburguesa Clásica' },
       ]);
 
       await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
@@ -1903,10 +1908,9 @@ describe('ItemsService', () => {
 
     it('permite el borrado si el item no es ingrediente de ninguna receta', async () => {
       itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
-      dataSource.query
-        .mockResolvedValueOnce([]) // sin recetas que lo usen
-        .mockResolvedValueOnce([]) // sin combos que lo usen
-        .mockResolvedValueOnce([]) // sin grupos que lo usen como opción
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin usos que lo bloqueen
+        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos
         .mockResolvedValueOnce([]); // UPDATE items (soft delete)
 
       await expect(service.remove(TENANT, ITEM_ID)).resolves.toBeUndefined();
@@ -4404,14 +4408,67 @@ describe('ItemsService', () => {
         id: ITEM_OPCION_ID,
         tenantId: TENANT,
       });
-      dataSource.query
-        .mockResolvedValueOnce([]) // sin recetas que lo usen
-        .mockResolvedValueOnce([]) // sin combos que lo usen
-        .mockResolvedValueOnce([{ nombre: 'Proteína' }]); // usado como opción de grupo
+      managerMock.query.mockResolvedValueOnce([
+        { clase: 'opcion', nombre: 'Proteína' },
+      ]);
 
       await expect(service.remove(TENANT, ITEM_OPCION_ID)).rejects.toThrow(
         /No se puede eliminar.*opción de/i,
       );
+    });
+  });
+
+  describe('remove — clasificación de usos', () => {
+    beforeEach(() => {
+      itemRepo.findOne.mockResolvedValue({ id: ITEM_ID, tenantId: TENANT });
+    });
+
+    it('borra un ingrediente usado solo como extra y soft-deletea sus filas de extras', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ clase: 'extra', nombre: 'Hamburguesa' }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await service.remove(TENANT, ITEM_ID);
+
+      const sqls = managerMock.query.mock.calls.map((c) => c[0] as string);
+      expect(sqls).toHaveLength(3);
+      expect(sqls[1]).toContain('UPDATE receta_extras_permitidos');
+      expect(sqls[1]).toContain('eliminado_el = NOW()');
+      expect(sqls[2]).toContain('UPDATE items');
+    });
+
+    it('bloquea si es componente de un combo, sin filtrar el extra al mensaje', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { clase: 'combo', nombre: 'Menú del día' },
+        { clase: 'extra', nombre: 'Hamburguesa' },
+      ]);
+
+      await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
+        'No se puede eliminar: es componente de Menú del día',
+      );
+    });
+
+    it('prioriza ingrediente sobre combo en el mensaje, como hacían las tres queries', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { clase: 'combo', nombre: 'Menú del día' },
+        { clase: 'ingrediente', nombre: 'Pizza' },
+      ]);
+
+      await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
+        'No se puede eliminar: es ingrediente de Pizza',
+      );
+    });
+
+    it('acota la consulta de uso por tenant', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await service.remove(TENANT, ITEM_ID);
+
+      expect(managerMock.query.mock.calls[0][1]).toEqual([ITEM_ID, TENANT]);
     });
   });
 });

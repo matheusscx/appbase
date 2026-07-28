@@ -100,6 +100,18 @@ export interface DesfaseRecetaDto {
   ingredientesAfectados: DesfaseIngredienteDto[];
 }
 
+export type UsoItemTipo = 'ingrediente' | 'combo' | 'opcion' | 'extra';
+
+export interface UsoItemRef {
+  tipo: UsoItemTipo;
+  nombre: string;
+}
+
+export interface UsoItem {
+  bloqueos: UsoItemRef[];
+  advertencias: UsoItemRef[];
+}
+
 @Injectable()
 export class ItemsService {
   constructor(
@@ -1524,58 +1536,105 @@ export class ItemsService {
     });
   }
 
+  /**
+   * Los cuatro lugares donde un item puede estar en uso, en una sola query.
+   * `UNION` y no `UNION ALL`: el dedupe es el mismo `DISTINCT` que hacía cada
+   * query por separado. El `ORDER BY` es por determinismo — sin él el orden lo
+   * decide el plan y el modal lista los motivos distinto entre llamadas.
+   *
+   * El filtro por tenant va sobre la entidad padre de cada rama (`items`, o
+   * `grupos_modificadores` en la de opciones), no sobre la tabla puente: es la
+   * misma defensa que `cargarReglasPorIds`, que el llamador no debería tener que
+   * garantizar solo.
+   */
+  private async obtenerUsoItem(
+    manager: EntityManager,
+    tenantId: string,
+    itemId: string,
+  ): Promise<UsoItem> {
+    const rows: { clase: UsoItemTipo; nombre: string }[] = await manager.query(
+      `SELECT 'ingrediente' AS clase, r.nombre
+         FROM receta_ingredientes ri
+         JOIN items r ON r.item_id = ri.receta_item_id
+          AND r.tenant_id = $2 AND r.eliminado_el IS NULL
+        WHERE ri.ingrediente_item_id = $1 AND ri.eliminado_el IS NULL
+       UNION
+       SELECT 'combo', c.nombre
+         FROM combo_componentes cc
+         JOIN items c ON c.item_id = cc.combo_item_id
+          AND c.tenant_id = $2 AND c.eliminado_el IS NULL
+        WHERE cc.componente_item_id = $1 AND cc.eliminado_el IS NULL
+       UNION
+       SELECT 'opcion', g.nombre
+         FROM grupo_modificador_opciones o
+         JOIN grupos_modificadores g
+           ON g.grupo_modificador_id = o.grupo_modificador_id
+          AND g.tenant_id = $2 AND g.eliminado_el IS NULL
+        WHERE o.item_id = $1 AND o.eliminado_el IS NULL
+       UNION
+       SELECT 'extra', r.nombre
+         FROM receta_extras_permitidos re
+         JOIN items r ON r.item_id = re.receta_item_id
+          AND r.tenant_id = $2 AND r.eliminado_el IS NULL
+        WHERE re.ingrediente_item_id = $1 AND re.eliminado_el IS NULL
+        ORDER BY 1, 2`,
+      [itemId, tenantId],
+    );
+
+    const uso: UsoItem = { bloqueos: [], advertencias: [] };
+    for (const r of rows) {
+      const ref: UsoItemRef = { tipo: r.clase, nombre: r.nombre };
+      if (r.clase === 'extra') uso.advertencias.push(ref);
+      else uso.bloqueos.push(ref);
+    }
+    return uso;
+  }
+
   async remove(tenantId: string, itemId: string): Promise<void> {
     const item = await this.itemRepo.findOne({
       where: { id: itemId, tenantId },
     });
     if (!item) throw new NotFoundException('Item no encontrado');
 
-    const usoRows: { nombre: string }[] = await this.dataSource.query(
-      `SELECT DISTINCT ri_item.nombre
-       FROM receta_ingredientes ri
-       JOIN items ri_item ON ri_item.item_id = ri.receta_item_id
-         AND ri_item.eliminado_el IS NULL
-       WHERE ri.ingrediente_item_id = $1 AND ri.eliminado_el IS NULL`,
-      [itemId],
-    );
-    if (usoRows.length) {
-      throw new BadRequestException(
-        `No se puede eliminar: es ingrediente de ${usoRows.map((r) => r.nombre).join(', ')}`,
-      );
-    }
+    await this.dataSource.transaction(async (manager) => {
+      const { bloqueos } = await this.obtenerUsoItem(manager, tenantId, itemId);
 
-    const comboRows: { nombre: string }[] = await this.dataSource.query(
-      `SELECT DISTINCT c_item.nombre
-       FROM combo_componentes cc
-       JOIN items c_item ON c_item.item_id = cc.combo_item_id
-         AND c_item.eliminado_el IS NULL
-       WHERE cc.componente_item_id = $1 AND cc.eliminado_el IS NULL`,
-      [itemId],
-    );
-    if (comboRows.length) {
-      throw new BadRequestException(
-        `No se puede eliminar: es componente de ${comboRows.map((r) => r.nombre).join(', ')}`,
-      );
-    }
+      // Mismo orden de prioridad que las tres queries que esto reemplaza: la
+      // primera clase con coincidencias es la que arma el mensaje, y los textos
+      // son los de siempre porque hay e2e que los afirman.
+      const etiquetas: [UsoItemTipo, string][] = [
+        ['ingrediente', 'es ingrediente de'],
+        ['combo', 'es componente de'],
+        ['opcion', 'es opción de'],
+      ];
+      for (const [tipo, etiqueta] of etiquetas) {
+        const nombres = bloqueos
+          .filter((b) => b.tipo === tipo)
+          .map((b) => b.nombre);
+        if (nombres.length) {
+          throw new BadRequestException(
+            `No se puede eliminar: ${etiqueta} ${nombres.join(', ')}`,
+          );
+        }
+      }
 
-    const opcionRows: { nombre: string }[] = await this.dataSource.query(
-      `SELECT DISTINCT g.nombre FROM grupo_modificador_opciones o
-       JOIN grupos_modificadores g ON g.grupo_modificador_id = o.grupo_modificador_id
-         AND g.eliminado_el IS NULL
-       WHERE o.item_id = $1 AND o.eliminado_el IS NULL`,
-      [itemId],
-    );
-    if (opcionRows.length) {
-      throw new BadRequestException(
-        `No se puede eliminar: es opción de ${opcionRows.map((r) => r.nombre).join(', ')}`,
+      // El item se va, pero las filas que lo ofrecen como extra quedarían vivas
+      // apuntando a un muerto. Las lecturas ya las filtran por el JOIN, así que
+      // esto es higiene referencial, no corrección.
+      await manager.query(
+        `UPDATE receta_extras_permitidos
+         SET eliminado_el = NOW(), actualizado_el = NOW()
+         WHERE ingrediente_item_id = $1 AND tenant_id = $2
+           AND eliminado_el IS NULL`,
+        [itemId, tenantId],
       );
-    }
 
-    await this.dataSource.query(
-      `UPDATE items SET activo = false, eliminado_el = NOW(), actualizado_el = NOW()
-       WHERE item_id = $1 AND tenant_id = $2`,
-      [itemId, tenantId],
-    );
+      await manager.query(
+        `UPDATE items SET activo = false, eliminado_el = NOW(), actualizado_el = NOW()
+         WHERE item_id = $1 AND tenant_id = $2`,
+        [itemId, tenantId],
+      );
+    });
   }
 
   async ajustarStock(
