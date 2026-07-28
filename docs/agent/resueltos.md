@@ -537,7 +537,7 @@ siguen diferidos están en `pendientes.md`.
   (`salones.service.ts:653-720`) lo mapea de vuelta a **solo ids** y `ventas.service.ts`
   lo **re-resuelve** contra el catálogo vivo en la misma transacción que descuenta, así que
   un extra fuera de carta muere en el mismo `400` que por `POST /ventas`
-  (`items.service.ts:1834`). O sea que este fix es **corrección y defensa en profundidad**,
+  (`items.service.ts:1937`). O sea que este fix es **corrección y defensa en profundidad**,
   no el cierre de un agujero explotable.
   **La invariante que en realidad sostiene esto —y que no estaba escrita en ningún lado—**
   es que *todo snapshot se re-resuelve en la misma transacción que descuenta stock*. El día
