@@ -106,15 +106,37 @@ async function abrirCaja(
   return (res.body as { id: string }).id;
 }
 
+/**
+ * El cierre es en DOS fases: `POST /:id/conteo` congela el arqueo y auto-cierra
+ * si cuadra; si descuadra pasa a `en_conciliacion` y hay que resolver la fase 2
+ * con `POST /:id/cerrar`, que exige un motivo por línea descuadrada. Esta suite
+ * vende en efectivo por montos grandes, así que SIEMPRE descuadra contra el
+ * conteo del saldo inicial. Llamar solo a `cerrar` —y encima con el body de la
+ * fase 1— no cerraba nada: el cajón quedaba ocupado y la suite siguiente que
+ * intentaba abrir se llevaba un 409 críptico. El teardown **asevera** el cierre.
+ */
 async function cerrarCaja(
   app: INestApplication<App>,
   token: string,
   cajaId: string,
 ): Promise<void> {
-  await request(app.getHttpServer())
-    .post(`/api/caja/${cajaId}/cerrar`)
+  const conteo = await request(app.getHttpServer())
+    .post(`/api/caja/${cajaId}/conteo`)
     .set('Authorization', `Bearer ${token}`)
     .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+  expect([200, 201]).toContain(conteo.status);
+
+  if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
+    const motivos = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia?soloActivas=true')
+      .set('Authorization', `Bearer ${token}`);
+    const motivoId = (motivos.body as { id: string }[])[0]?.id;
+    const cierre = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/cerrar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ lineas: [{ metodoPagoId: null, motivoDiferenciaId: motivoId }] });
+    expect([200, 201]).toContain(cierre.status);
+  }
 }
 
 describe('Liquidación de propinas — reparto (e2e)', () => {
@@ -298,6 +320,29 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
         .sort(),
     ).toEqual(receptoresAntes);
     // La propina del POS se reparte entre los garzones: la reconciliación se mantiene.
+    expect(suma(incluidos(despues.participantes))).toBe(
+      new Decimal(despues.poolTotal).toFixed(4),
+    );
+  });
+
+  it('la propina de una venta anulada no entra al pool', async () => {
+    const antes = await preview();
+
+    const ventaId = await crearVentaConPropina('7000');
+    const conPropina = await preview();
+    // Control: mientras la venta está viva, su propina SÍ suma al pool. Sin este
+    // paso el test pasaría igual aunque la propina nunca hubiera entrado.
+    expect(
+      new Decimal(conPropina.poolTotal).minus(antes.poolTotal).toString(),
+    ).toBe('7000');
+
+    await ds.query(
+      `UPDATE ventas SET estado = 'cancelada' WHERE venta_id = $1`,
+      [ventaId],
+    );
+
+    const despues = await preview();
+    expect(despues.poolTotal).toBe(antes.poolTotal);
     expect(suma(incluidos(despues.participantes))).toBe(
       new Decimal(despues.poolTotal).toFixed(4),
     );

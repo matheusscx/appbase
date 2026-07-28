@@ -200,6 +200,122 @@ describe('LiquidacionPropinasService', () => {
     ]);
   });
 
+  // Decisión de owner (2026-07-27): el pool se reparte SIEMPRE entero. Un grupo
+  // del que nadie puede cobrar no reserva su porcentaje — se redistribuye entre
+  // los que sí. Antes esto tenía dos comportamientos opuestos según hubiera o no
+  // una fila de sesión: reventaba la liquidación entera, o se comía la plata.
+  describe('grupo que no puede recibir su parte', () => {
+    const CONFIG_DOS_GRUPOS = {
+      ...config,
+      grupos: [
+        { ...config.grupos[0], id: 'cfg-garzon', porcentaje: '0.800000' },
+        {
+          ...config.grupos[0],
+          id: 'cfg-barra',
+          tipoGarzon: TipoGarzon.BARRA,
+          nombre: 'Barra',
+          porcentaje: '0.200000',
+          criterio: CriterioDistribucion.VENTAS_NETAS,
+        },
+      ],
+    };
+
+    const crear = () =>
+      service.crear(TENANT, USER, {
+        fechaDesde: '2026-07-17T00:00:00.000Z',
+        fechaHasta: '2026-07-18T00:00:00.000Z',
+        turnoIds: ['turno-1'],
+      });
+
+    it('sin nadie en el grupo: su 20% va a los demás, no desaparece', async () => {
+      distribucion.obtener.mockResolvedValue(CONFIG_DOS_GRUPOS);
+
+      const result = await crear();
+
+      const porTipo = new Map(
+        result.grupos.map((g) => [g.tipoGarzon, g.montoGrupo]),
+      );
+      expect(porTipo.get(TipoGarzon.GARZON)).toBe('150.0000');
+      expect(porTipo.get(TipoGarzon.BARRA)).toBe('0.0000');
+      // Sin redistribuir, Garzones se llevaría 120 y los 30 de Barra no
+      // aparecerían en ninguna fila: la suma repartida tiene que dar el pool.
+      const repartido = result.participantes.reduce(
+        (acc, p) => acc + Number(p.monto),
+        0,
+      );
+      expect(repartido).toBe(150);
+    });
+
+    it('con gente pero todos en peso 0: reparte igual y los deja en 0, sin reventar', async () => {
+      distribucion.obtener.mockResolvedValue(CONFIG_DOS_GRUPOS);
+      // Ana abrió turno en barra y no cerró ninguna cuenta → ventasBase 0, que
+      // con VENTAS_NETAS es peso 0. Antes, esto lanzaba 400 y se llevaba puesta
+      // la liquidación entera, incluidos los garzones que estaban bien.
+      manager.query
+        .mockReset()
+        .mockResolvedValueOnce(monedaRows)
+        .mockResolvedValueOnce(tips)
+        .mockResolvedValueOnce([
+          {
+            sesion_garzon_id: 'ses-1',
+            garzon_id: 'ana',
+            tipo_garzon: TipoGarzon.BARRA,
+            turno_id: 'turno-1',
+            inicio_el: new Date('2026-07-17T10:00:00.000Z'),
+            fin_el: new Date('2026-07-17T18:00:00.000Z'),
+          },
+        ]);
+
+      const result = await crear();
+
+      const ana = result.participantes.find((p) => p.garzonId === 'ana');
+      expect(ana?.monto).toBe('0.0000');
+      expect(
+        result.grupos.find((g) => g.tipoGarzon === TipoGarzon.GARZON)
+          ?.montoGrupo,
+      ).toBe('150.0000');
+    });
+
+    it('si NADIE puede recibir y hay pool, corta con un mensaje que dice qué revisar', async () => {
+      // Un solo grupo, criterio VENTAS_NETAS, y el único presente sin ventas.
+      distribucion.obtener.mockResolvedValue({
+        ...config,
+        grupos: [
+          {
+            ...config.grupos[0],
+            criterio: CriterioDistribucion.VENTAS_NETAS,
+          },
+        ],
+      });
+      manager.query
+        .mockReset()
+        .mockResolvedValueOnce(monedaRows)
+        .mockResolvedValueOnce([
+          { ...tips[0], base_ventas_total_final: '0.0000' },
+        ])
+        .mockResolvedValueOnce([]);
+
+      // Asserteamos el MENSAJE, no el tipo: sin el corte explícito igual sale un
+      // 400, pero el genérico de `repartirMayoresRestos` ("la suma de pesos debe
+      // ser mayor a cero"), que no le dice al usuario qué mirar.
+      await expect(crear()).rejects.toThrow(/ningún participante puede/);
+    });
+
+    it('período sin propinas: no es un error, todos en cero', async () => {
+      distribucion.obtener.mockResolvedValue(CONFIG_DOS_GRUPOS);
+      manager.query
+        .mockReset()
+        .mockResolvedValueOnce(monedaRows)
+        .mockResolvedValueOnce([]) // sin tips
+        .mockResolvedValueOnce([]); // sin sesiones
+
+      const result = await crear();
+
+      expect(result.poolTotal).toBe('0.0000');
+      expect(result.grupos.every((g) => g.montoGrupo === '0.0000')).toBe(true);
+    });
+  });
+
   it('lista liquidaciones activas del tenant', async () => {
     liquidacionRepo.find.mockResolvedValueOnce([
       {
@@ -267,6 +383,43 @@ describe('LiquidacionPropinasService', () => {
       eliminadoEl: null,
     };
   }
+
+  /**
+   * Participante de `grupo-1`. Los montos por defecto suman los 150 de
+   * `grupoBase()`: confirmar exige que lo repartido cuadre con el monto del
+   * grupo, así que un fixture con el grupo lleno y cero participantes no es un
+   * estado alcanzable.
+   */
+  function participanteBase(
+    garzonId: string,
+    monto: string,
+  ): LiquidacionPropinasParticipante {
+    return {
+      id: `part-${garzonId}`,
+      tenantId: TENANT,
+      liquidacionId: 'liq-1',
+      grupoId: 'grupo-1',
+      garzonId,
+      tipoGarzon: TipoGarzon.GARZON,
+      incluido: true,
+      origen: OrigenParticipante.SUGERIDO,
+      motivoAjuste: null,
+      horas: '0.0000',
+      ventasBase: '0.0000',
+      cuentas: '1.0000',
+      pesoManual: null,
+      monto,
+      ajusteMotivoMonto: null,
+      creadoEl: new Date('2026-07-17T12:00:00.000Z'),
+      actualizadoEl: new Date('2026-07-17T12:00:00.000Z'),
+      eliminadoEl: null,
+    };
+  }
+
+  const participantesQueCuadran = () => [
+    participanteBase('garzon-1', '75.0000'),
+    participanteBase('garzon-2', '75.0000'),
+  ];
 
   function fuenteBase(
     id = 'fuente-1',
@@ -361,18 +514,36 @@ describe('LiquidacionPropinasService', () => {
     distribucion.obtener.mockResolvedValueOnce(nuevaConfig);
     manager.findOne.mockResolvedValueOnce(liquidacionBase());
     manager.find
-      .mockResolvedValueOnce([grupoBase()])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([grupoBase()]) // grupos
+      .mockResolvedValueOnce([]) // participantes
+      // fuentes: de acá sale la lista de tips (sin fuentes no hay query de tips)
+      .mockResolvedValueOnce(
+        tips.map((t) => ({ ventaPropinaId: t.venta_propina_id })),
+      )
+      .mockResolvedValueOnce([]) // eventos
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
-    manager.query.mockReset().mockResolvedValueOnce([]);
+    // El pool (150) sale de los tips de las fuentes: un fixture con pool > 0 y
+    // cero tips es imposible en la realidad, y además dejaba el reparto sin nada
+    // que verificar.
+    manager.query
+      .mockReset()
+      .mockResolvedValueOnce(tips) // buscarTipsPorFuentes
+      .mockResolvedValueOnce([]); // buscarSesionesPeriodo
 
     const result = await service.actualizarConfig(TENANT, USER, 'liq-1');
 
     expect(result.configuracionVersion).toBe(4);
+    // VENTAS_NETAS sobre bases 1000 y 500 → 2/3 y 1/3 de 150. Con PARTES_IGUALES
+    // (el criterio de la config vieja) daría 75/75, así que el reparto se ejerce
+    // de verdad y no solo el número de versión.
+    expect(
+      result.participantes.map((p) => [p.garzonId, p.monto]).sort(),
+    ).toEqual([
+      ['garzon-1', '100.0000'],
+      ['garzon-2', '50.0000'],
+    ]);
     expect(manager.softDelete).toHaveBeenCalledWith(LiquidacionPropinasGrupo, {
       liquidacionId: 'liq-1',
     });
@@ -393,7 +564,7 @@ describe('LiquidacionPropinasService', () => {
     manager.findOne.mockResolvedValueOnce(liquidacion);
     manager.find
       .mockResolvedValueOnce([grupoBase()])
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(participantesQueCuadran())
       .mockResolvedValueOnce([fuenteBase('fuente-1', 'tip-1')])
       .mockResolvedValueOnce([]);
     manager.query
@@ -418,7 +589,7 @@ describe('LiquidacionPropinasService', () => {
     manager.findOne.mockResolvedValueOnce(liquidacionBase());
     manager.find
       .mockResolvedValueOnce([grupoBase()])
-      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(participantesQueCuadran())
       .mockResolvedValueOnce([
         fuenteBase('fuente-1', 'tip-1'),
         fuenteBase('fuente-2', 'tip-2'),
@@ -563,5 +734,55 @@ describe('LiquidacionPropinasService', () => {
       LiquidacionPropinasEvento,
       expect.objectContaining({ tipo: TipoEventoLiquidacion.CONFIRMADA }),
     );
+  });
+
+  // El monto manual pisaba el monto de un participante sin recalcular a los
+  // demás, y la única validación de suma se salteaba todo grupo que no fuera
+  // MANUAL+MONTOS: en un grupo por partes iguales se podía repartir más plata de
+  // la que había en el pool, y confirmarlo.
+  it('un monto manual que no cuadra con el grupo no se puede confirmar', async () => {
+    mockeaTipsParaPreview();
+    manager.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        [{ venta_propina_id: 'tip-a' }, { venta_propina_id: 'tip-b' }],
+        2,
+      ]);
+
+    // Grupo de 2000 con dos participantes a 1000. Fijarle 1900 a uno deja 2900
+    // repartidos sobre un pool de 2000.
+    await expect(
+      service.liquidar(TENANT, USER, {
+        fechaDesde: '2026-07-01T00:00:00Z',
+        fechaHasta: '2026-07-08T00:00:00Z',
+        ajustes: {
+          montosManuales: [{ garzonId: garzonAId, monto: '1900.0000' }],
+        },
+      }),
+    ).rejects.toThrow(/no coincide con el monto del grupo/);
+  });
+
+  it('un monto manual compensado entre los dos sí se confirma', async () => {
+    mockeaTipsParaPreview();
+    manager.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        [{ venta_propina_id: 'tip-a' }, { venta_propina_id: 'tip-b' }],
+        2,
+      ]);
+
+    // 1200 + 800 = 2000: la regla es que la plata cuadre, no prohibir el ajuste.
+    const result = await service.liquidar(TENANT, USER, {
+      fechaDesde: '2026-07-01T00:00:00Z',
+      fechaHasta: '2026-07-08T00:00:00Z',
+      ajustes: {
+        montosManuales: [
+          { garzonId: garzonAId, monto: '1200.0000' },
+          { garzonId: garzonBId, monto: '800.0000' },
+        ],
+      },
+    });
+
+    expect(result.estado).toBe(EstadoLiquidacion.CONFIRMADA);
   });
 });

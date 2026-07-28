@@ -237,6 +237,13 @@ export class LiquidacionPropinasService {
       poolTotal,
       gruposConfig,
       moneda.decimales,
+      this.gruposConReparto(
+        gruposConfig,
+        tips,
+        sesiones,
+        fechaDesde,
+        fechaHasta,
+      ),
     );
     // Grupos en memoria: id = id del grupo de configuración (clave estable para el front).
     const grupos = gruposConfig.map(
@@ -438,14 +445,8 @@ export class LiquidacionPropinasService {
       detalle.liquidacion.configuracionVersion = config.version;
       await manager.save(LiquidacionPropinas, detalle.liquidacion);
 
-      const grupos = await this.crearSnapshotGrupos(
-        manager,
-        tenantId,
-        id,
-        detalle.liquidacion.poolTotal,
-        detalle.liquidacion.decimalesMoneda,
-        gruposConfig,
-      );
+      // tips y sesiones se cargan ANTES del snapshot: de ellos sale qué grupos
+      // pueden recibir, y eso decide cómo se reparte el pool entre los grupos.
       const tips = await this.buscarTipsPorFuentes(
         manager,
         tenantId,
@@ -457,6 +458,21 @@ export class LiquidacionPropinasService {
         detalle.liquidacion.fechaDesde,
         detalle.liquidacion.fechaHasta,
         detalle.liquidacion.turnoIds,
+      );
+      const grupos = await this.crearSnapshotGrupos(
+        manager,
+        tenantId,
+        id,
+        detalle.liquidacion.poolTotal,
+        detalle.liquidacion.decimalesMoneda,
+        gruposConfig,
+        this.gruposConReparto(
+          gruposConfig,
+          tips,
+          sesiones,
+          detalle.liquidacion.fechaDesde,
+          detalle.liquidacion.fechaHasta,
+        ),
       );
       const participantes = await this.crearParticipantes(
         manager,
@@ -701,23 +717,27 @@ export class LiquidacionPropinasService {
     }
   }
 
-  private validarManualMontos(
+  /**
+   * Lo repartido en cada grupo tiene que dar exactamente su `montoGrupo`. Vale
+   * para TODOS los criterios, no solo `MANUAL`+`MONTOS`: los montos manuales
+   * (`ajustes.montosManuales`, o `monto` por `PATCH`) pisan el monto de un
+   * participante sin recalcular a los demás, así que en un grupo por partes
+   * iguales o por ventas se podía repartir más plata de la que había en el pool
+   * —y nada lo miraba, porque esta validación se salteaba esos grupos—.
+   * Se verifica al confirmar, que es cuando el dinero se da por pagado.
+   */
+  private validarConservacionPorGrupo(
     grupos: LiquidacionPropinasGrupo[],
     participantes: LiquidacionPropinasParticipante[],
   ): void {
     for (const grupo of grupos) {
-      if (
-        grupo.criterio !== CriterioDistribucion.MANUAL ||
-        grupo.manualModo !== ManualModo.MONTOS
-      ) {
-        continue;
-      }
       const suma = participantes
         .filter((p) => p.grupoId === grupo.id && p.incluido)
         .reduce((acc, p) => acc.plus(p.monto), new Decimal(0));
       if (!suma.equals(grupo.montoGrupo)) {
         throw new BadRequestException(
-          'La suma de montos manuales debe coincidir con el monto del grupo',
+          `Lo repartido en "${grupo.nombre}" (${suma.toFixed(4)}) no coincide ` +
+            `con el monto del grupo (${grupo.montoGrupo}): revisá los montos manuales`,
         );
       }
     }
@@ -782,6 +802,13 @@ export class LiquidacionPropinasService {
       poolTotal,
       moneda.decimales,
       gruposConfig,
+      this.gruposConReparto(
+        gruposConfig,
+        tips,
+        sesiones,
+        fechaDesde,
+        fechaHasta,
+      ),
     );
     const fuentes = await this.crearFuentes(
       manager,
@@ -836,7 +863,7 @@ export class LiquidacionPropinasService {
     participantes: LiquidacionPropinasParticipante[],
     fuentes: LiquidacionPropinasFuente[],
   ): Promise<LiquidacionPropinasEvento> {
-    this.validarManualMontos(grupos, participantes);
+    this.validarConservacionPorGrupo(grupos, participantes);
 
     const tipIds = [
       ...new Set(fuentes.map((f) => f.ventaPropinaId).filter(Boolean)),
@@ -1076,6 +1103,9 @@ export class LiquidacionPropinasService {
          AND vp.eliminado_el IS NULL
          AND vp.liquidacion_id IS NULL
          AND vp.monto_pagado > 0
+         -- La propina de una venta anulada no se reparte: esa plata nunca se
+         -- cobró. El JOIN estaba pero no miraba el estado.
+         AND v.estado <> 'cancelada'
          AND vp.creado_el >= $2
          AND vp.creado_el < $3
          AND (cardinality($4::uuid[]) = 0 OR vp.turno_id = ANY($4::uuid[]))
@@ -1129,15 +1159,82 @@ export class LiquidacionPropinasService {
     );
   }
 
+  /**
+   * Un grupo puede recibir su parte del pool si alguien suyo tiene peso > 0 con
+   * el criterio configurado. Un grupo sin nadie —o con todos en cero, p. ej. un
+   * bartender que abrió turno y no cerró ninguna cuenta con `VENTAS_NETAS`— no
+   * puede: su porcentaje se redistribuye entre los demás (decisión de owner
+   * 2026-07-27, ver `docs/features/liquidacion-propinas-motor.md`).
+   * `MANUAL`+`MONTOS` es la excepción: ahí el monto no sale de un peso, así que
+   * alcanza con que el grupo tenga participantes.
+   */
+  private gruposConReparto(
+    gruposConfig: GrupoDistribucionPublico[],
+    tips: TipElegibleRow[],
+    sesiones: SesionRow[],
+    fechaDesde: Date,
+    fechaHasta: Date,
+  ): GrupoDistribucionPublico[] {
+    return gruposConfig.filter((config) => {
+      const garzonIds = this.garzonesGrupo(config.tipoGarzon, tips, sesiones);
+      if (garzonIds.length === 0) return false;
+      if (
+        config.criterio === CriterioDistribucion.MANUAL &&
+        config.manualModo === ManualModo.MONTOS
+      ) {
+        return true;
+      }
+      // Grupo sintético: `crearParticipanteData` solo lee campos que el snapshot
+      // copia verbatim de la config, así que las métricas son las mismas.
+      const grupo = {
+        id: config.id,
+        tipoGarzon: config.tipoGarzon,
+        baseVentas: config.baseVentas,
+        criterio: config.criterio,
+        manualModo: config.manualModo,
+      } as LiquidacionPropinasGrupo;
+      const suma = garzonIds.reduce((acc, garzonId) => {
+        const data = this.crearParticipanteData({
+          tenantId: '',
+          liquidacionId: '',
+          grupo,
+          config,
+          garzonId,
+          tips,
+          sesiones,
+          fechaDesde,
+          fechaHasta,
+        });
+        return acc.plus(
+          this.pesoParticipante(data, config.criterio, config.manualModo),
+        );
+      }, new Decimal(0));
+      return suma.gt(0);
+    });
+  }
+
   private montosPorGrupo(
     poolTotal: string,
     gruposConfig: GrupoDistribucionPublico[],
     decimales: number,
+    elegibles: GrupoDistribucionPublico[],
   ): Map<string, string> {
+    // Sin pool no hay nada que repartir: todos en cero, sin error. Es el caso
+    // normal de un período vacío (preview de un rango sin propinas).
+    if (new Decimal(poolTotal || '0').lte(0)) {
+      return new Map(gruposConfig.map((g) => [g.id, '0.0000'] as const));
+    }
+    if (elegibles.length === 0) {
+      throw new BadRequestException(
+        'Hay propinas para repartir pero ningún participante puede recibirlas: ' +
+          'revisá los turnos del período y el criterio de cada grupo',
+      );
+    }
+    // Los no elegibles quedan fuera del Map y caen al '0.0000' de los llamadores.
     return new Map(
       repartirMayoresRestos(
         poolTotal,
-        gruposConfig.map((g) => ({ id: g.id, peso: g.porcentaje })),
+        elegibles.map((g) => ({ id: g.id, peso: g.porcentaje })),
         decimales,
       ).map((r) => [r.id, new Decimal(r.monto).toFixed(4)] as const),
     );
@@ -1150,8 +1247,14 @@ export class LiquidacionPropinasService {
     poolTotal: string,
     decimales: number,
     gruposConfig: GrupoDistribucionPublico[],
+    elegibles: GrupoDistribucionPublico[],
   ): Promise<LiquidacionPropinasGrupo[]> {
-    const montosGrupo = this.montosPorGrupo(poolTotal, gruposConfig, decimales);
+    const montosGrupo = this.montosPorGrupo(
+      poolTotal,
+      gruposConfig,
+      decimales,
+      elegibles,
+    );
 
     const grupos: LiquidacionPropinasGrupo[] = [];
     for (const g of gruposConfig) {
@@ -1413,6 +1516,16 @@ export class LiquidacionPropinasService {
       id: p.garzonId,
       peso: this.pesoParticipante(p, grupo.criterio, config.manualModo),
     }));
+    // Grupo que no puede recibir (nadie con peso > 0): sus participantes quedan
+    // en 0 y su parte del pool ya se redistribuyó en `montosPorGrupo`. Antes esto
+    // lanzaba y reventaba la liquidación entera, incluidos los grupos sanos.
+    const sumaPesos = pesos.reduce(
+      (acc, p) => acc.plus(p.peso || '0'),
+      new Decimal(0),
+    );
+    if (sumaPesos.lte(0)) {
+      return participantes.map((p) => ({ ...p, monto: '0.0000' }));
+    }
     const montos = new Map(
       repartirMayoresRestos(grupo.montoGrupo, pesos, decimales).map((r) => [
         r.id,

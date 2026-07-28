@@ -78,11 +78,16 @@ ya identificamos con ubicación concreta.
   filtro. Cierre: un `useEstadoVenta()` con ambos mapas, consumido por los cuatro.
   **Lección del incidente:** al sacar un valor de un enum compartido, grepear el repo
   entero — el grep acotado a la carpeta del módulo fue exactamente lo que falló.
-- [ ] **Cinco suites e2e dejan la caja abierta al terminar** (backend, `test/combos`,
-  `liquidacion-propinas`, `grupos-modificadores`, `grupos-modificadores-overrides` y
-  `recetas.e2e-spec.ts`) — el cierre de caja es en **dos fases** (`POST /:id/conteo`
+- [ ] **Tres suites e2e dejan la caja abierta al terminar** (backend, `test/combos`,
+  `grupos-modificadores`, `grupos-modificadores-overrides` y `recetas.e2e-spec.ts`)
+  — ✅ `liquidacion-propinas` corregida 2026-07-27: al agregarle un test cambió el orden en
+  que jest ordena los archivos, pasó a correr antes que `caja.e2e-spec.ts` y su fuga
+  apareció como **11 fallos con 409 al abrir**, exactamente el escenario que esta entrada
+  predecía. `ventas.e2e-spec.ts` también quedó corregida el mismo día (su `cerrar` mandaba
+  `lineas: []` sobre una caja que siempre descuadra). El cierre de caja es en **dos fases**
+  (`POST /:id/conteo`
   congela el arqueo y auto-cierra si cuadra; si descuadra pasa a `en_conciliacion` y hay
-  que resolver con `POST /:id/cerrar`). Las cinco llaman solo a la segunda **e ignoran el
+  que resolver con `POST /:id/cerrar`). Las que quedan llaman solo a la segunda **e ignoran el
   status**, así que no cierran nada y el cajón queda ocupado. Hoy la suite pasa porque
   sobran cajones, no porque esté bien: al agregar tests cambia el orden en que jest
   ordena las suites y la fuga aparece como un `409` críptico en `caja.e2e-spec.ts`, a
@@ -305,25 +310,21 @@ auditoría produce información, no diffs. Orden = severidad.
   ⚠️ **Sin cobertura e2e a propósito**: el caso que importa es un supervisor con `Cajas:Leer`
   que **no** sea admin, y ese usuario no existe en el seed — es el ítem ya abierto en
   "Limpiezas menores". Hoy lo cubren el unit del service y el del controller.
-- [ ] **Un monto manual de propina se aplica en cualquier criterio y no conserva el total
-  del grupo** (backend, `propinas/liquidacion-propinas.service.ts:917-921` y `:956`) —
-  `aplicarAjustesPersistido` sobreescribe `p.monto` de cualquier participante que aparezca
-  en `montosManuales`, **después** de redistribuir y **sin mirar el criterio del grupo**,
-  sin rebalancear a los demás; `validarManualMontos:709-713` hace `continue` salvo en grupos
-  `MANUAL`+`MONTOS`, así que nada verifica la conservación. Grupo `PARTES_IGUALES` con
-  `montoGrupo = 10.000` y dos personas a 5.000: fijar 9.000 a una deja 14.000 repartidos
-  sobre un pool de 10.000, y se confirma. Mismo agujero por `PATCH /liquidaciones/:id` con
-  `recalcular: false`. [`liquidacion-propinas-motor.md`](../features/liquidacion-propinas-motor.md)
-  dice que el monto manual es "en **grupos MANUAL**"; el código no impone esa restricción.
-- [ ] **Anular una venta no reconcilia `venta_propina`: la propina se paga igual**
-  (backend, `propinas/liquidacion-propinas.service.ts:1074-1082`) — `buscarTipsElegibles`
-  hace `JOIN ventas` pero **nunca filtra `v.estado`**: solo `liquidacion_id IS NULL AND
-  monto_pagado > 0`. Y `cancelar()` no toca `venta_propina`. Una cuenta de salón cerrada con
-  `pagos: []` (fiada) y propina deja la venta `pendiente` sin pagos —el subconjunto seguro
-  que habilita `POST /ventas/:id/anular`— con su `venta_propina` intacta, que entra a la
-  próxima liquidación. Si la liquidación corrió antes, la anulación posterior no deja ni
-  advertencia. ⚠️ **Lo abrió la feature `cancelada` cerrada el mismo día**; la interacción no
-  está documentada en ningún doc del alcance.
+- [x] ~~**Un monto manual de propina se aplica en cualquier criterio y no conserva el total
+  del grupo**~~ — cerrado 2026-07-27: `validarManualMontos` pasó a ser
+  `validarConservacionPorGrupo` y corre sobre **todos** los criterios, no solo
+  `MANUAL`+`MONTOS`. Al confirmar, lo repartido en cada grupo tiene que dar exactamente su
+  `montoGrupo`; el 400 nombra el grupo y los dos números. **No prohíbe el ajuste manual**:
+  exige que la plata cuadre, así que un ajuste compensado entre dos personas del mismo grupo
+  se confirma sin problema (hay un test por cada lado). El mutante que devuelve el `continue`
+  para los grupos no-`MANUAL` mata el test.
+- [x] ~~**Anular una venta no reconcilia `venta_propina`: la propina se paga igual**~~ —
+  cerrado 2026-07-27 **en su mitad**: `buscarTipsElegibles` ahora filtra
+  `v.estado <> 'cancelada'`, así que la propina de una venta anulada no entra nunca a una
+  liquidación nueva. Cubierto por e2e real: se crea la venta con propina, se verifica que el
+  pool sube (control, si no el test pasaría aunque nunca hubiera entrado), se anula y se
+  verifica que el pool vuelve al valor previo.
+  ⚠️ **La otra mitad quedó abierta y decidida** — ver abajo.
 
 ### Media
 
@@ -440,21 +441,44 @@ el rechazo de `peso <= 0` en `MANUAL/PESOS`; el spillover de propina entre pagos
 `registrarMovimientoEnTransaccion`; el backstop 23505 de `abrir()`; y el aislamiento
 multi-tenant de caja.
 
-### Decisión de owner — regla de negocio no documentada
+### Decidido por el owner (2026-07-27)
 
-- [ ] **Un grupo sin peso agregado aborta la liquidación entera** (backend,
-  `propinas/utils/mayores-restos.ts:37-39`) — el guard contra división por cero lanza
-  `BadRequestException('La suma de pesos debe ser mayor a cero')` y nadie la atrapa por
-  grupo: revienta `crear`, el preview y `liquidar` completos, incluidos los grupos que
-  estaban bien. Lo encontraron **dos lentes por separado** y es alcanzable en tres criterios
-  (`VENTAS_NETAS` con base 0, `HORAS_TRABAJADAS` con 0h de solape, `CANTIDAD_CUENTAS` con 0
-  cuentas): basta un bartender que abrió turno y no cerró ninguna cuenta.
-  **La pregunta es qué debe pasar con la parte de ese grupo:** ¿cobra 0 y su porcentaje se
-  redistribuye entre los demás grupos? ¿queda sin repartir? ¿se reparte en partes iguales
-  entre los presentes aunque tengan peso 0? No está en `PRODUCTO.md` ni en
-  [`liquidacion-propinas-motor.md`](../features/liquidacion-propinas-motor.md). El patrón
-  del motor para casos así es degradar con advertencia (lo hace con las sesiones abiertas),
-  no reventar — pero cuál de las tres salidas es la correcta es del owner.
+- [x] ~~**Un grupo sin peso agregado aborta la liquidación entera**~~ — cerrado 2026-07-27.
+  **Decisión del owner: el pool se reparte siempre entero.** Un grupo del que nadie puede
+  cobrar no reserva su porcentaje; su parte se redistribuye entre los que sí pueden. Al
+  implementarlo apareció que la misma situación tenía **dos comportamientos opuestos** según
+  hubiera o no una fila de sesión: con participantes en peso 0 reventaba la liquidación
+  entera, y con cero participantes el `montoGrupo` **desaparecía en silencio** (la suma
+  repartida daba menos que el pool). Ahora `montosPorGrupo` reparte solo entre los grupos
+  elegibles y `repartirGrupo` deja en 0 a los que no pueden, sin lanzar. Si **ningún** grupo
+  puede recibir y hay pool, corta con un 400 que dice qué revisar; un período sin propinas
+  sigue siendo válido con todos en cero. Regla escrita en
+  [`liquidacion-propinas-motor.md`](../features/liquidacion-propinas-motor.md).
+- [ ] **`buscarTipsPorFuentes` no filtra la venta anulada** (backend,
+  `propinas/liquidacion-propinas.service.ts:1153`) — es la copia hermana de
+  `buscarTipsElegibles` que usa `actualizarConfig` para recalcular pesos sobre las fuentes
+  ya fijadas de un borrador. Si la venta se anula **con el borrador abierto**, un
+  `actualizarConfig` posterior sigue usando sus datos para el peso (`VENTAS_NETAS`,
+  `CANTIDAD_CUENTAS`). Lo encontró la revisión independiente del 2026-07-27.
+  ⛔ **No es copiar la línea del hermano.** El `poolTotal` se congela al crear el borrador e
+  **incluye** esa propina: filtrar solo acá le saca el peso al garzón pero deja su plata en
+  el pool, o sea la redistribuye entre los demás. Decidir eso es la misma pregunta de
+  reconciliación del ítem de abajo (¿la plata de una venta anulada sale del pool, se
+  redistribuye, o queda como saldo?), así que va con esa spec y no antes.
+- [ ] **Saldo en contra cuando se anula una venta cuya propina YA se liquidó** (backend,
+  tema propio con spec) — decidido 2026-07-27, **no implementado**: es una entidad nueva y
+  toca el motor de reparto, así que no entra como fix de auditoría.
+  **El caso:** la propina se liquidó el lunes y se le pagó al garzón; el miércoles anulan
+  esa venta (sigue `pendiente` y sin pagos, así que `POST /ventas/:id/anular` la acepta). La
+  plata ya salió. **La forma decidida:** permitir la anulación y dejar el monto ya pagado
+  como **saldo en contra del garzón**, que se descuenta de su próxima liquidación.
+  Preguntas que la spec tiene que responder antes de escribir código: qué pasa si el garzón
+  no vuelve a liquidar nunca (¿el saldo caduca? ¿se pierde?); qué pasa si su próxima
+  liquidación es **menor** que el saldo (¿queda saldo remanente? ¿se le descuenta hasta
+  0?); si el saldo es por garzón y por tenant, o también por período/turno; si el descuento
+  se muestra en la impresión y el reporte; y cómo se audita (evento propio, como el resto de
+  la liquidación). La mitad barata —que la propina de una venta anulada no entre a
+  liquidaciones **futuras**— ya está cerrada arriba.
 
 ### Refutados (no entran)
 

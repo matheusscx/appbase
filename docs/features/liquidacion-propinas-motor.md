@@ -49,8 +49,10 @@ diaria vive completa en una **pantalla única `/propinas`**.
 - **Reparto en vivo**: muestra grupos y participantes con los montos que
   resultarían de liquidar ahora mismo, según la config de distribución vigente.
 - **Ajustes en memoria**: excluir/incluir personas del reparto y fijar un monto
-  manual por persona en grupos `MANUAL` — se envían como `ajustes` en el mismo
-  body de `preview`/`liquidar`, sin tocar el borrador hasta confirmar.
+  manual por persona — se envían como `ajustes` en el mismo body de
+  `preview`/`liquidar`, sin tocar el borrador hasta confirmar. El monto manual
+  está pensado para grupos `MANUAL`, pero **funciona en cualquier criterio**
+  siempre que lo repartido siga cuadrando con el monto del grupo (regla 2 abajo).
 - **Botón "Liquidar período"**: llama a `POST /propinas/liquidaciones/liquidar`,
   que crea, aplica los ajustes y confirma en una sola transacción atómica.
 - **Impresión**: página `/propinas/liquidaciones/:id/imprimir?tipo=persona|resumen|grupo`
@@ -61,6 +63,39 @@ diaria vive completa en una **pantalla única `/propinas`**.
 La configuración de grupos, criterios y porcentajes de distribución
 (`liquidacion-propinas-config.md`) **no cambió** — este flujo solo simplifica
 cómo se dispara/ajusta/liquida un período y cómo se imprime el resultado.
+
+### Reglas del reparto que no se pueden romper
+
+Las tres salieron de la auditoría del 2026-07-27 y cada una tiene tests que las
+fijan. Antes, las tres se violaban en silencio o reventaban la liquidación entera.
+
+**1. El pool se reparte siempre entero.** Un grupo del que **nadie puede cobrar**
+—porque no trabajó nadie de ese tipo, o porque todos los presentes tienen peso 0
+con el criterio configurado (un bartender que abrió turno y no cerró ninguna
+cuenta, con `VENTAS_NETAS`)— **no reserva su porcentaje**: su parte se
+redistribuye entre los grupos que sí pueden, en proporción a los porcentajes de
+ellos. Los participantes de ese grupo quedan en 0 y siguen apareciendo, para que
+se vea que estuvieron. Decisión de owner: el porcentaje es una regla para
+repartir entre quienes están, no una reserva.
+`MANUAL`+`MONTOS` es la excepción a "poder cobrar": ahí el monto no sale de un
+peso, así que alcanza con que el grupo tenga participantes.
+
+Si **ningún** grupo puede recibir y hay pool, la liquidación corta con un `400`
+que dice qué revisar (turnos del período y criterio de cada grupo). Un período
+**sin propinas** no es un error: todos quedan en cero.
+
+**2. Lo repartido en cada grupo tiene que dar su `montoGrupo`.** Se verifica al
+**confirmar**, sobre todos los criterios y no solo `MANUAL`+`MONTOS`. Un monto
+manual pisa el monto de una persona sin recalcular a las demás, así que sin esta
+verificación se podía repartir más plata de la que había en el pool y confirmarlo.
+La regla **no prohíbe el ajuste manual**: exige que la plata cuadre, así que un
+ajuste compensado entre dos personas del mismo grupo pasa sin problema.
+
+**3. La propina de una venta anulada no se reparte.** `buscarTipsElegibles`
+excluye las ventas `cancelada`: esa plata nunca se cobró. Ver en
+`docs/agent/pendientes.md` el caso todavía abierto —la venta se anula **después**
+de que la propina ya se liquidó y se pagó—, que el owner decidió resolver con un
+saldo en contra descontado de la próxima liquidación y necesita spec propia.
 
 ---
 
