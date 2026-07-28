@@ -73,6 +73,7 @@ const mockResultadoVenta = {
       impuestoAplicado: '0.0000',
       totalLinea: '100.0000',
       trazas: { descuentos: [], recargos: [], impuestos: [] },
+      advertencias: [],
     },
   ],
   totales: {
@@ -83,6 +84,7 @@ const mockResultadoVenta = {
     totalFinal: '100.0000',
   },
   trazasVenta: { descuentos: [], recargos: [] },
+  advertencias: [],
 };
 
 const MONEDA_ROWS = [

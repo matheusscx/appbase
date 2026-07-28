@@ -72,7 +72,8 @@ Response (201):
     "subtotalNeto", "totalDescuentos", "totalRecargos",
     "totalImpuestos", "totalFinal"
   },
-  "trazasVenta": { "descuentos": [...], "recargos": [...] }
+  "trazasVenta": { "descuentos": [...], "recargos": [...] },
+  "advertencias": ["Descuento \"X\": se aplicó … en vez de … porque superaba el monto disponible"]
 }
 ```
 
@@ -133,6 +134,42 @@ se aplican sobre el neto agregado.
 **Decisiones**: `monto_fijo` se aplica por línea (no por unidad); las reglas
 diferidas (`promocional`, `mora`, `pronto_pago`) devuelven monto 0; los ids de
 regla en la línea **reemplazan** a los asociados al ítem (override).
+
+**Piso en cero del descuento** (decisión del owner, 2026-07-28). **Ninguna regla
+puede dejar el total bajo cero** — un `precio_base` negativo sí puede, y eso es
+otro pendiente. Sin tope, un `monto_fijo` de 500 sobre un ítem de 100
+dejaba `totalLinea: -400` y el tenant terminaba pagándole al cliente. Cuatro
+precisiones que hacen a la regla:
+
+- Se topea **regla por regla, al aplicarla**, no al final sobre el total. Así la
+  traza registra lo que realmente se descontó y el comprobante cuadra
+  (`subtotalNeto − totalDescuentos` sigue dando el total). Con tres descuentos
+  del 40% en modo `base` sobre 100, la traza queda 40 / 40 / 20.
+- Aplica **también a los descuentos a nivel venta**, y ahí el tope se mide
+  contra el **total real** (`Σ totalLinea`, ya con descuentos e impuestos de
+  línea adentro), **no** contra el neto agregado. El neto sigue siendo la base de
+  los `%` —esa es la semántica de las reglas a nivel venta—, pero la plata
+  disponible para topear es otra magnitud. Confundirlas dejaba ventas en negativo
+  sin advertencia **y** recortaba descuentos sanos cobrando de más; lo detectó la
+  revisión independiente porque el primer test usaba una línea pelada, el único
+  caso donde las dos magnitudes coinciden.
+- **No frena la venta**: emite una advertencia, igual que un ingrediente no
+  bloqueante sin stock. Viaja en `advertencias` del cálculo y en
+  `advertenciasReceta` de la venta, que el POS muestra como toast. ⚠️ Hoy el
+  aviso llega **después** de crear la venta: la previsualización del carrito no
+  lo expone todavía, y los caminos de tienda online y suscripciones lo descartan
+  (ver `docs/agent/pendientes.md`).
+
+- **Ninguna regla aporta una magnitud negativa.** El signo lo pone el tipo de
+  regla, nunca el valor calculado. Hace falta porque el acumulado que sirve de
+  base en modo `compuesto` **sí** puede quedar negativo a nivel venta (arranca en
+  el neto agregado mientras la plata disponible es `Σ totalLinea`), y un `%`
+  sobre esa base producía un "recargo" que restaba y un "descuento" que le
+  cobraba al cliente, ambos impresos así en la traza. Un fuzz de 40.000 ventas
+  con configuración válida encontró el caso en el 0,78%.
+
+Los recargos **no tienen tope superior** —subir el total no tiene el problema
+que el piso resuelve— pero sí el piso en cero de arriba: un recargo nunca resta.
 
 ---
 

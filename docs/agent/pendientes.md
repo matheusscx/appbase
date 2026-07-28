@@ -296,6 +296,13 @@ Ver [`resueltos.md`](resueltos.md).
   `@IsDecimalNoNegativo` en `ventas`, `caja` y `propinas` — **los tres módulos que se
   auditaron**. Se detuvo en el borde del alcance y el catálogo quedó afuera. El propio
   módulo sabe hacerlo: `aplicarDesfases:3138` exige `precioBase > 0`.
+  ℹ️ **Dato para quien cierre esto:** desde el piso en cero (2026-07-28) el motor **ya
+  reacciona** a un neto negativo, y conviene saber cómo antes de endurecer el DTO: los
+  descuentos de esa línea quedan en 0 (el disponible da 0), con advertencia si eran
+  `monto_fijo` y **sin** advertencia si eran porcentaje —ahí el monto sale negativo y lo
+  neutraliza la invariante de "ninguna regla aporta magnitud negativa", sin llegar al tope—.
+  Lo que el motor **no** evita es que el total quede negativo por el precio en sí:
+  `precioUnitario: '-100'` sin reglas da `totalFinal: -100`.
 - [ ] **`AjusteStockDto.cantidad` es `number` nativo** (backend, `dto/ajuste-stock.dto.ts:51`)
   — único en el módulo; los otros cinco campos de cantidad son string + `@IsNumberString()`.
   **Escenario del buscador descartado** (exigía que el cliente ya mandara el número roto).
@@ -413,13 +420,36 @@ Ver [`resueltos.md`](resueltos.md).
   cupones). El owner se inclina por prioridad explícita por ser lo más flexible para una
   pasarela/cobranza. **Encararlo es brainstorm → spec → plan:** agrega un campo a las reglas,
   toca el motor y necesita decidir qué pasa con las reglas existentes sin prioridad.
-- [ ] **¿El descuento debe tener piso en cero?** (backend,
-  `calculo-precios.engine.ts:239`) — `acc.plus(monto.times(signo))` sin `max(acc, 0)`. Un
-  `monto_fijo` de 500 sobre un ítem de 100 devuelve `totalLinea: -400`; `validarValor` de
-  descuentos solo topea el `< 1` cuando el modo es porcentaje. También se llega apilando
-  tres descuentos de 0.40 en modo `base`. **No hay regla documentada** que diga qué debe
-  pasar, y las opciones no son equivalentes: topear en cero en silencio, rechazar la línea
-  con 400, o permitirlo porque un total negativo podría ser legítimo en una nota de crédito.
+- [ ] **`advertenciasReceta` de la venta ya no son solo de receta** (backend,
+  `ventas.service.ts`, + `pos.vue` y 4 e2e) — desde el piso en cero (2026-07-28) el campo
+  también transporta avisos del motor de precios. El POS las renderiza como toasts sueltos
+  y cada mensaje se explica solo, así que **funciona**; lo que quedó corto es el nombre.
+  Renombrarlo a `advertencias` toca 21 referencias en 7 archivos (incluidas 4 suites e2e),
+  por eso no entró en ese commit. Cierre: renombrar de una, no ir agregando campos nuevos
+  por tipo de aviso.
+- [ ] **¿Un descuento debe topearse aunque un recargo posterior levante el total?**
+  (backend, `calculo-precios.engine.ts`) — el piso en cero (2026-07-28) topea **regla por
+  regla** contra el acumulado en ese punto de la fórmula. Con fórmula `descuentos →
+  recargos`, neto 1000, descuento fijo 1200 y recargo fijo 2000: sin tope el total daba
+  1800 (positivo); con tope da 2000, o sea el cliente paga 200 más en una venta que nunca
+  fue negativa. La regla que decidiste habla del **total**, no del acumulado intermedio, así
+  que topear por regla es más estricto que lo pedido. La alternativa —topear recién al
+  final— rompe la coherencia de la traza, que es lo que el diseño actual protege.
+  Lo detectó la revisión independiente con un fuzz de 20.000 ventas. Es raro (exige un
+  descuento fijo mayor al neto **y** un recargo posterior que lo levante), por eso no se
+  resolvió sobre la marcha.
+- [ ] **El recorte de un descuento no queda auditado en ninguna parte** (backend) — cuando
+  el piso topea un descuento de 500 a 100, en BD queda un descuento de 100 sin ningún rastro
+  de que la regla valía 500; el motivo vive solo en un toast que el cajero puede no leer.
+  Para un sistema con ambición fiscal/auditable el **hecho** del tope debería quedar en la
+  transacción. Cierre posible: una columna o flag en el detalle de venta.
+- [ ] **Las advertencias del motor de precios llegan a un solo consumidor** (backend +
+  frontend) — `ventas.service.ts` las inyecta en `advertenciasReceta` y el POS las muestra,
+  pero `online.service.ts` y `suscripciones.service.ts` descartan `resultado.advertencias`,
+  y `pasarela.vue` no lee el campo. Peor: `useCalculoPrecios.ts` no incorporó
+  `advertencias` al tipo, así que **la previsualización del carrito muestra un total ya
+  topeado sin decir por qué** — el aviso aparece recién después de crear la venta, cuando ya
+  es irreversible. Es el consumidor que más lo necesita.
 - [ ] **¿`remove()` debe bloquear el borrado de un ingrediente usado solo como extra?**
   (backend, `items.service.ts:1508`) — bloquea si es ingrediente fijo, componente de combo u
   opción de grupo, pero nunca consulta `receta_extras_permitidos`. `recetas.md` solo documenta

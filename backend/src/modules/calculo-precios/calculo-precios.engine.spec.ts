@@ -368,6 +368,197 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     });
   });
 
+  describe('piso en cero del descuento', () => {
+    it('topea un monto_fijo que supera el neto y deja el total en 0, con advertencia', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [
+                regla({ nombre: 'Fijo 500', modo: 'monto_fijo', valor: '500' }),
+              ],
+            }),
+          ],
+        }),
+      );
+
+      expect(r.lineas[0].totalLinea).toBe('0.000000');
+      // La traza guarda lo APLICADO (100), no lo nominal (500): si guardara 500,
+      // `subtotalNeto - totalDescuentos` no daría el total del comprobante.
+      expect(r.lineas[0].descuentoAplicado).toBe('100.000000');
+      expect(r.lineas[0].trazas.descuentos[0].monto).toBe('100.000000');
+      expect(r.totales.totalFinal).toBe('0.000000');
+      expect(r.advertencias).toEqual([
+        'Descuento "Fijo 500": se aplicó 100.000000 en vez de 500.000000 porque superaba el monto disponible',
+      ]);
+    });
+
+    it('el comprobante cuadra al apilar descuentos que se pasan del neto', () => {
+      // Tres del 40% en modo `base` = 120% del neto. Sin piso, total -200.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [
+                regla({ id: 'd1', nombre: 'A', valor: '0.40' }),
+                regla({ id: 'd2', nombre: 'B', valor: '0.40' }),
+                regla({ id: 'd3', nombre: 'C', valor: '0.40' }),
+              ],
+            }),
+          ],
+        }),
+      );
+
+      expect(r.lineas[0].totalLinea).toBe('0.000000');
+      // 40 + 40 + 20 (el tercero topeado) = 100 = el neto exacto.
+      expect(r.lineas[0].trazas.descuentos.map((t) => t.monto)).toEqual([
+        '40.000000',
+        '40.000000',
+        '20.000000',
+      ]);
+      expect(r.lineas[0].descuentoAplicado).toBe('100.000000');
+      expect(r.advertencias).toHaveLength(1);
+    });
+
+    it('un descuento que NO se pasa no genera advertencia ni cambia nada', () => {
+      const r = calcularVenta(
+        venta({ lineas: [linea({ descuentos: [regla({ valor: '0.10' })] })] }),
+      );
+      expect(r.lineas[0].descuentoAplicado).toBe('10.000000');
+      expect(r.lineas[0].totalLinea).toBe('90.000000');
+      expect(r.advertencias).toEqual([]);
+    });
+
+    it('el piso de venta mide contra el TOTAL, no contra el neto (con descuentos e impuestos de línea)', () => {
+      // El test de abajo usaba una línea pelada, donde subtotalNeto == totalFinal:
+      // el único escenario en que este bug es invisible. Acá la línea ya trae
+      // descuento propio e IVA, así que el neto agregado (1000) y el total real
+      // (119) son magnitudes distintas.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              descuentos: [regla({ nombre: 'Linea 90%', valor: '0.90' })],
+              impuestos: [{ id: 'iva', nombre: 'IVA', porcentaje: '0.19' }],
+            }),
+          ],
+          descuentosVenta: [
+            regla({ nombre: 'Venta 500', modo: 'monto_fijo', valor: '500' }),
+          ],
+        }),
+      );
+
+      expect(r.totales.totalFinal).toBe('0.000000');
+      expect(r.advertencias.some((a) => a.includes('Venta 500'))).toBe(true);
+    });
+
+    it('el piso de venta no recorta un descuento que el total sí aguanta', () => {
+      // neto 1000 + IVA 19% = 1190 de total. Un descuento de venta de 1100 deja
+      // 90, no toca el piso: recortarlo a 1000 le cobraría 100 de más al cliente
+      // y avisaría un motivo que no ocurrió.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              impuestos: [{ id: 'iva', nombre: 'IVA', porcentaje: '0.19' }],
+            }),
+          ],
+          descuentosVenta: [
+            regla({ nombre: 'Cupón 1100', modo: 'monto_fijo', valor: '1100' }),
+          ],
+        }),
+      );
+
+      expect(r.totales.totalFinal).toBe('90.000000');
+      expect(r.advertencias).toEqual([]);
+    });
+
+    it('el piso también aplica a los descuentos a nivel VENTA', () => {
+      const r = calcularVenta(
+        venta({
+          descuentosVenta: [
+            regla({ nombre: 'Venta 999', modo: 'monto_fijo', valor: '999' }),
+          ],
+        }),
+      );
+      expect(r.totales.totalFinal).toBe('0.000000');
+      expect(r.totales.totalDescuentos).toBe('100.000000');
+      expect(r.advertencias[0]).toContain('Venta 999');
+    });
+
+    it('un recargo no tiene tope superior: puede subir el total libremente', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              recargos: [
+                regla({ nombre: 'Fijo 500', modo: 'monto_fijo', valor: '500' }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].totalLinea).toBe('600.000000');
+      expect(r.advertencias).toEqual([]);
+    });
+  });
+
+  describe('ninguna regla aporta un monto negativo', () => {
+    it('un recargo `compuesto` sobre una base negativa no resta ni hunde el total', () => {
+      // El descuento de venta consume TODA la plata (1190), pero `accVenta`
+      // —la base de los %— arranca en el neto (1000), así que queda en -190.
+      // Un recargo compuesto sobre esa base daría -19: un "recargo" que resta.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              impuestos: [{ id: 'iva', nombre: 'IVA', porcentaje: '0.19' }],
+            }),
+          ],
+          descuentosVenta: [
+            regla({ nombre: 'Cupón 1190', modo: 'monto_fijo', valor: '1190' }),
+          ],
+          recargosVenta: [regla({ nombre: 'Tarjeta 10%', valor: '0.10' })],
+          config: config({ calculoRecargos: 'compuesto' }),
+        }),
+      );
+
+      expect(r.totales.totalRecargos).toBe('0.000000');
+      expect(r.totales.totalFinal).toBe('0.000000');
+      expect(r.trazasVenta.recargos[0].monto).toBe('0.000000');
+    });
+
+    it('un segundo descuento `compuesto` sobre base negativa no le cobra al cliente', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              impuestos: [{ id: 'iva', nombre: 'IVA', porcentaje: '0.19' }],
+            }),
+          ],
+          descuentosVenta: [
+            regla({
+              id: 'd1',
+              nombre: 'Cupón 1100',
+              modo: 'monto_fijo',
+              valor: '1100',
+            }),
+            regla({ id: 'd2', nombre: 'Socio 10%', valor: '0.10' }),
+          ],
+          config: config({ calculoDescuentos: 'compuesto' }),
+        }),
+      );
+
+      // Sin el piso por regla, el segundo daba -10 y SUBÍA el total.
+      expect(r.trazasVenta.descuentos[1].monto).toBe('0.000000');
+      expect(r.totales.totalFinal).toBe('90.000000');
+    });
+  });
+
   describe('totales y trazas', () => {
     it('agrega totales y deja trazas por regla', () => {
       const r = calcularVenta(

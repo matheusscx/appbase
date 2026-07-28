@@ -647,3 +647,45 @@ siguen diferidos están en `pendientes.md`.
   El costo por fila **no se había eliminado, se había cambiado de tabla**: el pendiente
   hablaba de 15 `SELECT` para 15 ingredientes, y tras el primer intento eran 1 batch + 15
   lecturas de `unidades_medida`.
+
+### Decidido por el owner y ya implementado
+
+- [x] ~~**¿El descuento debe tener piso en cero?**~~ — **sí**, decidido por el owner el
+  2026-07-28 ("si el piso no es 0, terminaría pagando el tenant") e implementado el mismo
+  día en `calculo-precios.engine.ts`. Tres precisiones que no estaban en la pregunta y
+  hacen a la regla:
+  - **Se topea regla por regla, al aplicarla**, no al final sobre el total. Es lo único que
+    mantiene coherente el comprobante: topear al final dejaría la traza diciendo "500" con
+    un total que solo bajó 100, y `subtotal − descuentos` dejaría de dar el total. Con tres
+    descuentos del 40% en modo `base` sobre 100, la traza queda 40 / 40 / 20.
+  - **Aplica también a los descuentos a nivel venta.** Sin eso el agujero se mudaba: tres
+    líneas con piso propio y un descuento de venta que hunde el total igual.
+    ⚠️ **La primera versión lo afirmaba y no lo cumplía; la revisión independiente bloqueó
+    el cierre.** El tope de venta medía contra el **neto agregado** en vez del total real
+    (`Σ totalLinea`, que ya trae descuentos e impuestos de línea). Con una línea de 1000,
+    90% de descuento propio e IVA, un descuento de venta de 500 dejaba `totalFinal: -381`
+    **y `advertencias: []`** — el bug exacto que la tarea venía a cerrar, ahora con el
+    agravante de estar documentado como resuelto. Y en el sentido inverso recortaba
+    descuentos sanos: 1190 de total menos un cupón de 1100 daba 190 en vez de 90, cobrando
+    100 de más con un aviso que afirmaba un motivo falso.
+    **Por qué no lo vi:** mi test usaba una línea sin descuentos ni impuestos, donde
+    `subtotalNeto == totalFinal` — el único escenario en que las dos magnitudes coinciden y
+    el bug es invisible. Tercera vez en el día que un test pasa por la razón equivocada.
+    Cerrado separando `disponible` (la plata sobre la que se topea) de `acc` (la base de
+    los `%`), con dos tests que reproducen los dos sentidos y dos mutantes verificados.
+  - **No frena la venta**, decisión explícita del owner entre topear en silencio, rechazar
+    con 400 y topear avisando: emite advertencia, igual que un ingrediente no bloqueante sin
+    stock. Viaja al POS por el canal que ya existía.
+  - **Ninguna regla aporta una magnitud negativa**, invariante que hizo falta agregar tras
+    el **segundo bloqueo**: al desacoplar la plata de la base de los `%`, el acumulado de
+    venta quedó sin piso, y un `compuesto` sobre esa base negativa devolvía un "recargo" de
+    `-19.00` que **restaba** —total negativo otra vez, y sin advertencia— o un segundo
+    descuento negativo que le cobraba al cliente. Ambos se imprimían así en la traza. El
+    revisor lo encontró con un fuzz de 40.000 ventas de configuración válida: 0,78%. No era
+    regresión contra `HEAD`, pero la doc volvía a certificar cerrado un agujero abierto.
+  Los recargos no tienen **tope superior** (subir el total no es el problema que el piso
+  resuelve), pero sí el piso en cero: un recargo nunca resta.
+  Nueve tests en el motor puro y tres mutantes verificados. La identidad del comprobante
+  (`subtotal − descuentos + recargos + impuestos == totalFinal`) se verificó con un fuzz de
+  60.000 ventas sobre las 4 órdenes de fórmula, `base`/`compuesto`, 3 escalas y los 4 modos
+  de redondeo: 0 fallos.

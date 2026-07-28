@@ -90,6 +90,8 @@ export interface ResultadoLinea {
     recargos: TrazaRegla[];
     impuestos: TrazaImpuesto[];
   };
+  /** Descuentos topeados por el piso en cero en esta línea. */
+  advertencias: string[];
 }
 
 export interface ResultadoVenta {
@@ -105,6 +107,11 @@ export interface ResultadoVenta {
     descuentos: TrazaRegla[];
     recargos: TrazaRegla[];
   };
+  /**
+   * Avisos que no frenan el cálculo. Hoy: descuentos topeados por el piso en
+   * cero. Vacío en el caso normal.
+   */
+  advertencias: string[];
 }
 
 // ── Constantes de estrategia ────────────────────────────────────────────────
@@ -204,18 +211,37 @@ interface ResultadoPaso {
   acc: Decimal;
   total: Decimal;
   trazas: TrazaRegla[];
+  advertencias: string[];
 }
 
 /**
  * Aplica una lista de reglas (descuentos o recargos) sobre el acumulador.
  * `signo` = -1 para descuentos (restan), +1 para recargos (suman).
  * `modoCalculo` = 'base' (% sobre neto) | 'compuesto' (% sobre acumulado).
+ *
+ * **Piso en cero (decisión del owner, 2026-07-28):** un descuento nunca puede
+ * dejar el acumulado bajo cero — el tenant terminaría pagándole al cliente. Se
+ * topea **regla por regla, al aplicarla**, no al final sobre el total: así la
+ * traza guarda lo que realmente se descontó y el comprobante cuadra
+ * (`subtotal − descuentos` sigue dando el total). Topear al final dejaría la
+ * traza diciendo "500" con un total que solo bajó 100.
+ * El tope no frena la venta: emite advertencia, igual que un ingrediente no
+ * bloqueante sin stock.
  */
 function procesarReglas(
   reglas: ReglaResuelta[],
   params: {
     neto: Decimal;
     acc: Decimal;
+    /**
+     * Monto realmente disponible para topear descuentos. Por defecto `acc`, que
+     * es lo correcto por línea (ahí el acumulado ES la plata de la línea). A
+     * nivel venta hay que pasarlo aparte: el acumulado arranca en el neto
+     * agregado —que es la base de los `%`— mientras que la plata real es la
+     * suma de `totalLinea`, ya con descuentos e impuestos de línea adentro.
+     * Confundir las dos dejaba ventas en negativo sin advertencia.
+     */
+    disponible?: Decimal;
     cantidad: Decimal;
     signo: -1 | 1;
     modoCalculo: string;
@@ -224,8 +250,10 @@ function procesarReglas(
   },
 ): ResultadoPaso {
   let { acc } = params;
+  let disponible = params.disponible ?? params.acc;
   let total = ZERO;
   const trazas: TrazaRegla[] = [];
+  const advertencias: string[] = [];
 
   for (const regla of reglas) {
     const base = params.modoCalculo === 'compuesto' ? acc : params.neto;
@@ -236,7 +264,28 @@ function procesarReglas(
       metodoPagoId: params.metodoPagoId,
     });
     monto = redondear(monto, params.cfg);
+
+    // Ninguna regla aporta una magnitud negativa: el signo lo pone el TIPO de
+    // regla (descuento resta, recargo suma), nunca el valor calculado. Hace
+    // falta porque el acumulado que sirve de base en modo `compuesto` sí puede
+    // quedar negativo a nivel venta —arranca en el neto agregado mientras que
+    // la plata disponible es la suma de `totalLinea`—, y un `%` sobre esa base
+    // producía un "recargo" que restaba y un "descuento" que le cobraba al
+    // cliente, ambos impresos así en la traza.
+    monto = Decimal.max(monto, ZERO);
+
+    if (params.signo === -1) {
+      const tope = Decimal.max(disponible, ZERO);
+      if (monto.greaterThan(tope)) {
+        advertencias.push(
+          `Descuento "${regla.nombre}": se aplicó ${fmt(tope, params.cfg)} en vez de ${fmt(monto, params.cfg)} porque superaba el monto disponible`,
+        );
+        monto = tope;
+      }
+    }
+
     acc = acc.plus(monto.times(params.signo));
+    disponible = disponible.plus(monto.times(params.signo));
     total = total.plus(monto);
     trazas.push({
       id: regla.id,
@@ -245,7 +294,7 @@ function procesarReglas(
     });
   }
 
-  return { acc, total, trazas };
+  return { acc, total, trazas, advertencias };
 }
 
 // ── Cálculo por línea ───────────────────────────────────────────────────────
@@ -273,6 +322,7 @@ function calcularLinea(
   let descuentoAplicado = ZERO;
   let recargoAplicado = ZERO;
   let impuestoAplicado = ZERO;
+  const advertencias: string[] = [];
   const trazas = {
     descuentos: [] as TrazaRegla[],
     recargos: [] as TrazaRegla[],
@@ -293,6 +343,7 @@ function calcularLinea(
       acc = r.acc;
       descuentoAplicado = r.total;
       trazas.descuentos = r.trazas;
+      advertencias.push(...r.advertencias);
     } else if (paso === 'recargos') {
       const r = procesarReglas(linea.recargos, {
         neto: subtotalNeto,
@@ -333,6 +384,7 @@ function calcularLinea(
     impuestoAplicado: fmt(impuestoAplicado, cfg),
     totalLinea: fmt(acc, cfg),
     trazas,
+    advertencias,
   };
 }
 
@@ -364,14 +416,30 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
   // Reglas a nivel venta: aplican sobre el neto agregado, respetando el orden
   // de la fórmula del tenant (el paso `impuestos` no aplica a nivel venta).
   let accVenta = subtotalNeto;
-  let dv: ResultadoPaso = { acc: accVenta, total: ZERO, trazas: [] };
-  let rv: ResultadoPaso = { acc: accVenta, total: ZERO, trazas: [] };
+  let dv: ResultadoPaso = {
+    acc: accVenta,
+    total: ZERO,
+    trazas: [],
+    advertencias: [],
+  };
+  let rv: ResultadoPaso = {
+    acc: accVenta,
+    total: ZERO,
+    trazas: [],
+    advertencias: [],
+  };
+
+  // Plata real de la venta sobre la que se topea: la suma de `totalLinea`, no
+  // el neto agregado. `accVenta` sigue siendo la base de los `%` (el neto), que
+  // es la semántica documentada de las reglas a nivel venta.
+  let disponibleVenta = totalFinal;
 
   for (const paso of cfg.formula) {
     if (paso === 'descuentos') {
       dv = procesarReglas(venta.descuentosVenta, {
         neto: subtotalNeto,
         acc: accVenta,
+        disponible: disponibleVenta,
         cantidad: cantidadTotal,
         signo: -1,
         modoCalculo: cfg.calculoDescuentos,
@@ -379,6 +447,7 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
         cfg,
       });
       accVenta = dv.acc;
+      disponibleVenta = disponibleVenta.minus(dv.total);
     } else if (paso === 'recargos') {
       rv = procesarReglas(venta.recargosVenta, {
         neto: subtotalNeto,
@@ -390,6 +459,7 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
         cfg,
       });
       accVenta = rv.acc;
+      disponibleVenta = disponibleVenta.plus(rv.total);
     }
   }
 
@@ -407,5 +477,9 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
       totalFinal: fmt(totalFinal, cfg),
     },
     trazasVenta: { descuentos: dv.trazas, recargos: rv.trazas },
+    advertencias: [
+      ...lineas.flatMap((l) => l.advertencias),
+      ...dv.advertencias,
+    ],
   };
 }

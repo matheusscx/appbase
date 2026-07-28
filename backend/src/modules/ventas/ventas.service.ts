@@ -453,7 +453,11 @@ export class VentasService {
     // mismos dos productos en orden inverso se bloqueaban en cruz y Postgres
     // abortaba una — venta caída con un error opaco, sin corrupción pero sin
     // explicación. Un orden global fijo hace el deadlock imposible.
-    const advertenciasReceta: string[] = [];
+    // Arranca con lo que avisó el motor de precios (hoy: descuentos topeados por
+    // el piso en cero) y se le suma lo de recetas/combos más abajo. El POS las
+    // renderiza como toasts sueltos, cada mensaje se explica solo — el nombre
+    // del campo quedó más angosto que su contenido (ver `pendientes.md`).
+    const advertenciasReceta: string[] = [...resultado.advertencias];
     const ordenLocks = lineasConversion
       .map((_, idx) => idx)
       .sort((a, b) => {
