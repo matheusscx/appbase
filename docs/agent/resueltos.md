@@ -689,3 +689,34 @@ siguen diferidos están en `pendientes.md`.
   (`subtotal − descuentos + recargos + impuestos == totalFinal`) se verificó con un fuzz de
   60.000 ventas sobre las 4 órdenes de fórmula, `base`/`compuesto`, 3 escalas y los 4 modos
   de redondeo: 0 fallos.
+- [x] ~~**¿`remove()` debe bloquear el borrado de un ingrediente usado solo como
+  extra?**~~ — **no bloquea, advierte con confirmación informada**, decidido por el
+  owner e implementado el 2026-07-28. Ser extra es opcional por definición — sin él la
+  receta sigue completa — a diferencia de ser ingrediente fijo, componente de combo u
+  opción de grupo, que sí bloquean porque dejan la composición incompleta.
+  `GET /items/:id/uso` (guard `Items:Eliminar`) devuelve los cuatro usos ya
+  clasificados en una sola query `UNION`: `{ bloqueos: [{tipo, nombre}], advertencias:
+  [{tipo:'extra', nombre}] }`. `remove()` reusa esa misma query dentro de su
+  transacción para decidir si bloquea, y al confirmar marca `eliminado_el` en las
+  filas de `receta_extras_permitidos` del ingrediente en la misma transacción que el
+  soft-delete del item. El modal de Configuración → Items la consulta antes de
+  abrirse: con bloqueos muestra "No se puede eliminar" + motivos y solo "Entendido";
+  con solo advertencias nombra las recetas y deja confirmar; sin usos, el texto
+  genérico de siempre. Detalle y regla de negocio:
+  [`recetas.md`](../features/recetas.md#delete-itemsid).
+  ⚠️ **Corrige una afirmación falsa del ítem original.** Decía que este hueco era "la
+  condición habilitante del bug de conversión de unidad" de la sección Alta de esta
+  misma auditoría. Es falso desde `51df04c` (el cierre de los tres N+1 restantes de
+  `items`): las dos lecturas de extras en tiempo de venta —
+  `obtenerExtrasPermitidos` (`items.service.ts:1858`) y el `findOne` de receta
+  (`items.service.ts:577`)— hacen ambas `JOIN items i ON i.item_id =
+  re.ingrediente_item_id AND i.eliminado_el IS NULL`. Un ingrediente borrado
+  desaparece del `JOIN`, así que el extra queda **ausente** del catálogo de extras de
+  la receta, no con una unidad de medida equivocada: vender ese extra da
+  `400 'Extra no permitido para esta receta'` (`items.service.ts:1921`), el mismo
+  error que un extra sacado de la carta por cualquier otro motivo — verificado leyendo
+  ambas queries antes de escribir esta entrada, no asumido del texto original. El bug
+  de conversión de unidad real (fallback de unidad de porción vs. unidad de stock) ya
+  está cerrado y documentado en su propia entrada, arriba en esta misma sección de
+  auditoría ("Vender un extra cuyo catálogo cambió tras congelar el snapshot descuenta
+  1000× de más").

@@ -98,9 +98,25 @@ Cada item incluye `disponible: number | null` — mínimo de `floor(stock / cant
 
 Si es receta, agrega `ingredientes: { ingredienteItemId, ingredienteNombre, cantidad, unidadCodigo, bloqueante }[]`. `costoActual` viene de `item_receta` (COALESCE en el query base).
 
+### GET /items/:id/uso
+
+Antes de confirmar un borrado, clasifica en una sola query (`UNION` sobre los cuatro
+usos posibles) dónde se usa el item: `{ bloqueos: [{tipo, nombre}], advertencias:
+[{tipo, nombre}] }`, con `tipo` = `'ingrediente' | 'combo' | 'opcion'` en `bloqueos` y
+`'extra'` en `advertencias`. Guard `Items:Eliminar` (mismo permiso que el borrado).
+
 ### DELETE /items/:id
 
-Si el item es ingrediente de alguna receta viva → `400` con los nombres de esas recetas.
+**Borrar un ingrediente que se usa como extra.** Ser ingrediente fijo de una receta,
+componente de un combo u opción de un grupo (ver
+[grupos-modificadores.md](./grupos-modificadores.md)) **bloquea** el borrado con `400`
+y los nombres de esos usos: sin ese item la receta, el combo o el grupo quedan
+incompletos. Ser **extra permitido** (`receta_extras_permitidos`) no bloquea, porque un
+extra es opcional por definición y su ausencia no rompe ninguna receta — pero sí
+**advierte**, porque el efecto (dejar de ofrecerse como extra en esas recetas) no es
+obvio desde la ficha del ingrediente. Al confirmar el borrado, las filas de
+`receta_extras_permitidos` del ingrediente se marcan `eliminado_el` en la misma
+transacción que el soft-delete del item.
 
 ### POST /ventas (línea con item tipo receta)
 
@@ -120,12 +136,14 @@ Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad conve
 - `validarYCostearIngredientes` (privado) — create/update.
 - `obtenerIngredientesReceta` / `venderIngredientesReceta` — venta.
 - `calcularDisponibleReceta` (privado) — listado.
+- `obtenerUsoItem` (privado) — la query `UNION` de `GET /items/:id/uso`; `remove` la
+  reusa dentro de su transacción para decidir si bloquea.
 
 ---
 
 ## Frontend
 
-- `pages/configuracion/items.vue` — tipo Receta + editor de filas (ingrediente, cantidad, unidad por magnitud, bloqueante); selector de insumos vía `GET /items?tipo=ingrediente`; costo de solo lectura al editar.
+- `pages/configuracion/items.vue` — tipo Receta + editor de filas (ingrediente, cantidad, unidad por magnitud, bloqueante); selector de insumos vía `GET /items?tipo=ingrediente`; costo de solo lectura al editar. Al pedir borrar un item, consulta `GET /items/:id/uso` antes de abrir el modal de confirmación: con `bloqueos` muestra "No se puede eliminar" + motivos y solo el botón "Entendido"; con solo `advertencias` nombra las recetas donde deja de ofrecerse como extra y deja confirmar; sin usos, el texto genérico de siempre.
 - `pages/ventas/pos.vue` — fetch paralelo `tipo=producto` y `tipo=receta`; toasts `warning` por cada `advertenciasReceta`.
 - `components/ventas/CatalogoGrid.vue` — receta nunca bloquea el click; se atenúa si `disponible === 0`; badge "Disponibles: N".
 - `composables/useVenta.ts` — `ItemCatalogo.disponible?: number | null`.
@@ -149,6 +167,8 @@ Seed demo: `550e8400-e29b-41d4-a716-446655440259` (Hamburguesa Clásica) tras ar
 - [x] Venta descuenta ingredientes; bloqueante aborta; no bloqueante advierte
 - [x] `disponible` en listado; ingredientes en detalle
 - [x] Editor en configuración + POS
+- [x] `GET /items/:id/uso` clasifica bloqueos vs advertencias; borrar un extra advierte
+      en vez de bloquear
 - [x] Unit + E2E
 - [x] Docs (este archivo) + ESTADO
 

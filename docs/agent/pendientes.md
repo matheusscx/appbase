@@ -450,13 +450,6 @@ Ver [`resueltos.md`](resueltos.md).
   `advertencias` al tipo, así que **la previsualización del carrito muestra un total ya
   topeado sin decir por qué** — el aviso aparece recién después de crear la venta, cuando ya
   es irreversible. Es el consumidor que más lo necesita.
-- [ ] **¿`remove()` debe bloquear el borrado de un ingrediente usado solo como extra?**
-  (backend, `items.service.ts:1508`) — bloquea si es ingrediente fijo, componente de combo u
-  opción de grupo, pero nunca consulta `receta_extras_permitidos`. `recetas.md` solo documenta
-  el bloqueo del ingrediente fijo. No está claro si omitirlo para extras fue deliberado
-  (menos fricción para borrar un insumo poco usado) o descuido, dado que sí se bloquea para
-  los otros tres usos vivos. **Es la condición habilitante del bug de conversión de unidad de
-  la sección Alta**, así que la respuesta cambia cuánto queda de ese bug tras corregirlo.
 
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 

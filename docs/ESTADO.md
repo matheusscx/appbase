@@ -26,6 +26,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Conversión de unidades de medida (catálogo global + conversión en movimientos) | ✅ Implementado (2026-07-14) |
 | Tipo item ingrediente (insumos no vendibles) | ✅ Implementado (2026-07-15) |
 | Recetas + criticidad de ingredientes (bloqueante/no bloqueante) | ✅ Implementado (2026-07-15) |
+| Borrado informado de items (bloqueos vs advertencias; el extra advierte, no bloquea) | ✅ Implementado (2026-07-28) |
 | Personalización de recetas antes del carrito (omitir, extras, comentario; POS + Salones) | ✅ Implementado (2026-07-16) |
 | Cantidad con unidad de presentación en carrito (POS / Salones / Online; `AppCantidadInput`, tickets e historial) | ✅ Implementado (2026-07-16) |
 | Mermas tipificadas y valorizadas | ✅ Implementado (2026-07-15) |
