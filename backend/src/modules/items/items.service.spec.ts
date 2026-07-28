@@ -1922,6 +1922,28 @@ describe('ItemsService', () => {
       await expect(service.remove(TENANT, ITEM_ID)).resolves.toBeUndefined();
     });
 
+    it('limpia primero las filas donde el item borrado es el ingrediente ofrecido como extra', async () => {
+      itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin usos que lo bloqueen
+        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (ingrediente_item_id)
+        .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (receta_item_id)
+        .mockResolvedValueOnce([]); // UPDATE items (soft delete)
+
+      await service.remove(TENANT, ITEM_ID);
+
+      // Llamada 2 (índice 1): limpia por `ingrediente_item_id`, no por
+      // `receta_item_id` — aislada por índice de llamada porque las llamadas 2
+      // y 3 comparten el mismo texto `UPDATE receta_extras_permitidos` y los
+      // mismos params `[ITEM_ID, TENANT]`.
+      expect(managerMock.query.mock.calls[1][0]).toEqual(
+        expect.stringContaining(
+          'WHERE ingrediente_item_id = $1 AND tenant_id = $2',
+        ),
+      );
+      expect(managerMock.query.mock.calls[1][1]).toEqual([ITEM_ID, TENANT]);
+    });
+
     it('limpia también las filas donde el item borrado es la receta que ofrece el extra', async () => {
       itemRepo.findOne.mockResolvedValueOnce({ id: ITEM_ID, tenantId: TENANT });
       managerMock.query

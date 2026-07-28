@@ -708,7 +708,7 @@ siguen diferidos están en `pendientes.md`.
   condición habilitante del bug de conversión de unidad" de la sección Alta de esta
   misma auditoría. Es falso desde `51df04c` (el cierre de los tres N+1 restantes de
   `items`): las dos lecturas de extras del catálogo —
-  `obtenerExtrasPermitidos` (`items.service.ts:1859`), que corre dentro de la
+  `obtenerExtrasPermitidos` (`items.service.ts:1875`), que corre dentro de la
   transacción de venta al resolver la personalización, y el `findOne` de receta
   (`items.service.ts:577`), que alimenta el detalle del item y el drawer de
   personalización, no la transacción de venta — hacen ambas `JOIN items i ON
@@ -716,7 +716,7 @@ siguen diferidos están en `pendientes.md`.
   ambas, distinto momento en que corre). Un ingrediente borrado
   desaparece del `JOIN`, así que el extra queda **ausente** del catálogo de extras de
   la receta, no con una unidad de medida equivocada: vender ese extra da
-  `400 'Extra no permitido para esta receta'` (`items.service.ts:1921`), el mismo
+  `400 'Extra no permitido para esta receta'` (`items.service.ts:1937`), el mismo
   error que un extra sacado de la carta por cualquier otro motivo — verificado leyendo
   ambas queries antes de escribir esta entrada, no asumido del texto original. El bug
   de conversión de unidad real (fallback de unidad de porción vs. unidad de stock) ya

@@ -472,7 +472,13 @@ describe('Recetas — flujo completo (e2e)', () => {
     expect(filas[0]?.eliminado_el).not.toBeNull();
   });
 
-  it('10. /uso mixto: el mismo ingrediente es bloqueo de combo y advertencia de extra a la vez', async () => {
+  it('10. /uso mixto: el mismo ingrediente es bloqueo de una receta y advertencia de extra en otra', async () => {
+    // El caso mixto real (no el de "extra + componente de combo", que
+    // `validarYCostearComponentes` y `validarExtrasPermitidos` hacen inalcanzable
+    // por la API pública: un componente de combo solo admite tipo
+    // producto|receta|servicio, y un extra solo admite tipo ingrediente) es un
+    // ingrediente que es ingrediente FIJO de una receta y EXTRA de otra. Se
+    // construye íntegramente por `POST /api/items`, sin SQL directo.
     const salsaId = await crearIngrediente(
       app,
       token,
@@ -489,18 +495,53 @@ describe('Recetas — flujo completo (e2e)', () => {
       '10',
       '500',
     );
+    const panExtraMixtoId = await crearIngrediente(
+      app,
+      token,
+      'Pan extra mixto E2E',
+      'unidad',
+      '10',
+      '500',
+    );
 
-    const resReceta = await request(app.getHttpServer())
+    const nombreRecetaBloqueo = `Choripan mixto E2E ${Date.now()}`;
+    const resRecetaBloqueo = await request(app.getHttpServer())
       .post('/api/items')
       .set('Authorization', `Bearer ${token}`)
       .send({
-        nombre: `Choripan mixto E2E ${Date.now()}`,
+        nombre: nombreRecetaBloqueo,
         precioBase: '3000',
         monedaId: CLP_MONEDA_ID,
         tipo: 'receta',
         ingredientes: [
           {
             ingredienteItemId: panMixtoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+          {
+            ingredienteItemId: salsaId,
+            cantidad: '20',
+            unidadCodigo: 'g',
+            bloqueante: true,
+          },
+        ],
+      });
+    expect(resRecetaBloqueo.status).toBe(201);
+
+    const nombreRecetaExtra = `Sandwich mixto extra E2E ${Date.now()}`;
+    const resRecetaExtra = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: nombreRecetaExtra,
+        precioBase: '3000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panExtraMixtoId,
             cantidad: '1',
             unidadCodigo: 'unidad',
             bloqueante: true,
@@ -515,56 +556,7 @@ describe('Recetas — flujo completo (e2e)', () => {
           },
         ],
       });
-    expect(resReceta.status).toBe(201);
-
-    // `validarYCostearComponentes` solo admite tipo producto|receta|servicio como
-    // componente de combo (items.service.ts ~2998), así que un ingrediente jamás
-    // llega a ser componente de combo por la API pública: el caso mixto que /uso
-    // tiene que clasificar (bloqueo de combo + advertencia de extra sobre el MISMO
-    // item) no es alcanzable end-to-end con las rutas de creación. Se arma un combo
-    // real con un producto válido y se agrega la fila de `combo_componentes` que
-    // referencia a la salsa directamente por SQL, para ejercer la clasificación de
-    // `/uso` en sí — que es lo que este test cubre — sin simular la creación.
-    const resProducto = await request(app.getHttpServer())
-      .post('/api/items')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        nombre: `Producto combo mixto E2E ${Date.now()}`,
-        precioBase: '1000',
-        monedaId: CLP_MONEDA_ID,
-        tipo: 'producto',
-        unidadMedida: 'unidad',
-        stock: '10',
-        costo: '500',
-      });
-    expect(resProducto.status).toBe(201);
-    const productoComboId = (resProducto.body as ItemResponse).id;
-
-    const resCombo = await request(app.getHttpServer())
-      .post('/api/items')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        nombre: `Combo mixto E2E ${Date.now()}`,
-        precioBase: '3500',
-        monedaId: CLP_MONEDA_ID,
-        tipo: 'combo',
-        componentes: [
-          {
-            componenteItemId: productoComboId,
-            cantidad: '1',
-            bloqueante: true,
-          },
-        ],
-      });
-    expect(resCombo.status).toBe(201);
-    const comboId = (resCombo.body as ItemResponse).id;
-
-    await ds.query(
-      `INSERT INTO combo_componentes
-         (tenant_id, combo_item_id, componente_item_id, cantidad, bloqueante)
-       VALUES ($1, $2, $3, '1', true)`,
-      [PARIS_TENANT_ID, comboId, salsaId],
-    );
+    expect(resRecetaExtra.status).toBe(201);
 
     const resUso = await request(app.getHttpServer())
       .get(`/api/items/${salsaId}/uso`)
@@ -574,14 +566,22 @@ describe('Recetas — flujo completo (e2e)', () => {
       bloqueos: { tipo: string; nombre: string }[];
       advertencias: { tipo: string; nombre: string }[];
     };
-    expect(uso.bloqueos.length).toBeGreaterThan(0);
-    expect(uso.bloqueos.every((b) => b.tipo === 'combo')).toBe(true);
-    expect(uso.advertencias.map((a) => a.tipo)).toEqual(['extra']);
+    // Ambos arrays vienen poblados a la vez: bloqueo por ser ingrediente fijo
+    // de una receta, advertencia por ser extra de otra.
+    expect(uso.bloqueos).toEqual([
+      { tipo: 'ingrediente', nombre: nombreRecetaBloqueo },
+    ]);
+    expect(uso.advertencias).toEqual([
+      { tipo: 'extra', nombre: nombreRecetaExtra },
+    ]);
 
     const resDel = await request(app.getHttpServer())
       .delete(`/api/items/${salsaId}`)
       .set('Authorization', `Bearer ${token}`);
     expect(resDel.status).toBe(400);
+    expect((resDel.body as { message: string }).message).toBe(
+      `No se puede eliminar: es ingrediente de ${nombreRecetaBloqueo}`,
+    );
   });
 
   it('11. /uso exige Items:Eliminar — Items:Leer no alcanza', async () => {
