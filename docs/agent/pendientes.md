@@ -380,7 +380,16 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   (4) Bloqueante; escape `git push --no-verify`. Es el enforcement de [[rigor-sobre-velocidad]].
   Complementa (no reemplaza) el CI, que sigue siendo la verdad con DB fresca de verdad.
 
-## Limpiezas menores (opcionales, no bloqueantes)
+## Features diferidas (necesitan spec y decisión de negocio)
+
+No son correcciones ni deuda: son funcionalidad que todavía no existe y que **no se puede
+empezar sin una decisión del owner**. Se listan acá para no perderlas, con la pregunta que
+hay que responder antes de diseñar. Encararlas es brainstorm → spec → plan, nunca "un rato".
+
+Los otros tres temas de esta clase viven donde los dejó su procedencia, porque el contexto
+de dónde salieron es parte del enunciado: **saldo en contra por propina ya liquidada**,
+**una persona cobrando en dos grupos** y **devolución por medio de pago con plazos**, los
+tres en la sección de auditorías de arriba.
 
 - [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
   (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los

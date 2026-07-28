@@ -195,8 +195,10 @@ auditoría produce información, no diffs. Orden = severidad.
   tres condiciones, retener siempre, revelar siempre, y que el controller no pase `esAdmin`)
   y cada uno mata exactamente el test que le toca.
   ⚠️ **Sin cobertura e2e a propósito**: el caso que importa es un supervisor con `Cajas:Leer`
-  que **no** sea admin, y ese usuario no existe en el seed — es el ítem ya abierto en
-  "Limpiezas menores". Hoy lo cubren el unit del service y el del controller.
+  que **no** sea admin, y ese usuario no existía en el seed. Hoy lo cubren el unit del
+  service y el del controller.
+  ✅ **Cerrado el 2026-07-28**: el usuario existe (`supervisor@paris.cl`) y el e2e ejerce el
+  caso — ver la entrada de Limpiezas menores en este mismo archivo.
 - [x] ~~**Un monto manual de propina se aplica en cualquier criterio y no conserva el total
   del grupo**~~ — cerrado 2026-07-27: `validarManualMontos` pasó a ser
   `validarConservacionPorGrupo` y corre sobre **todos** los criterios, no solo
