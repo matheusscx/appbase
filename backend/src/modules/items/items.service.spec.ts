@@ -28,6 +28,7 @@ describe('ItemsService', () => {
     findAllUnidadesMedida: jest.Mock;
     convertirUnidad: jest.Mock;
     convertirUnidades: jest.Mock;
+    crearConversor: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -49,6 +50,23 @@ describe('ItemsService', () => {
       ]),
       convertirUnidad: jest.fn(),
       convertirUnidades: jest.fn().mockResolvedValue([]),
+      // Conversor con el catálogo ya cargado (`crearConversor`): reproduce la
+      // semántica real para las unidades que usan los tests, así el costo se
+      // calcula de verdad en vez de salir de un valor mockeado.
+      crearConversor: jest
+        .fn()
+        .mockResolvedValue((cantidad: string, desde: string, hacia: string) => {
+          if (desde === hacia) return cantidad;
+          const factor: Record<string, string> = {
+            g: '1',
+            kg: '1000',
+            unidad: '1',
+          };
+          return new Decimal(cantidad)
+            .mul(factor[desde] ?? '1')
+            .div(factor[hacia] ?? '1')
+            .toString();
+        }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -521,8 +539,12 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]) // recargos
         .mockResolvedValueOnce([]) // descuentos
         .mockResolvedValueOnce([]) // componentes (combo)
+        // Los grupos del propio ítem se resuelven con `cargarGruposPorItem`:
+        // 2 queries fijas (asociaciones + opciones de todas ellas), no una de
+        // opciones por cada grupo.
         .mockResolvedValueOnce([
           {
+            item_id: COMBO_ID,
             grupo_modificador_id: 'grupo-1',
             item_grupo_id: 'item-grupo-1',
             nombre: 'Salsas',
@@ -530,9 +552,10 @@ describe('ItemsService', () => {
             max: 2,
             orden: 0,
           },
-        ]) // grupoRows
+        ]) // asociaciones
         .mockResolvedValueOnce([
           {
+            item_grupo_id: 'item-grupo-1',
             grupo_opcion_id: 'op-1',
             item_id: 'item-salsa-bbq',
             item_nombre: 'Salsa BBQ',
@@ -545,6 +568,7 @@ describe('ItemsService', () => {
             stock: '10',
           },
           {
+            item_grupo_id: 'item-grupo-1',
             grupo_opcion_id: 'op-2',
             item_id: 'item-salsa-mayo',
             item_nombre: 'Mayo',
@@ -556,7 +580,7 @@ describe('ItemsService', () => {
             orden: 1,
             stock: '5',
           },
-        ]); // opRows
+        ]); // opciones de TODAS las asociaciones
 
       const result = await service.findOne(TENANT, COMBO_ID);
 
@@ -594,7 +618,12 @@ describe('ItemsService', () => {
       const opQueryCall = dataSource.query.mock.calls[6];
       expect(opQueryCall[0]).toContain('grupo_modificador_opciones');
       expect(opQueryCall[0]).toContain('COALESCE');
-      expect(opQueryCall[1]).toEqual(['grupo-1', TENANT, 'item-grupo-1']);
+      // Las opciones se piden para TODAS las asociaciones de una (array de
+      // `item_grupo_id`), no de a un grupo por vez: si alguien vuelve al loop,
+      // el parámetro deja de ser un array y este assert falla.
+      expect(opQueryCall[1]).toEqual([['item-grupo-1'], TENANT]);
+      // Y no hay una séptima query: 2 fijas para los grupos, no 1 + N.
+      expect(dataSource.query).toHaveBeenCalledTimes(7);
     });
 
     it('adjunta los grupos de cada componente receta en el detalle del combo', async () => {
@@ -891,12 +920,14 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
           .mockResolvedValueOnce([
             {
+              item_id: 'ingrediente-pan',
+              nombre: 'Pan',
               tipo: 'producto',
               modo_inventario: 'cantidad',
               unidad_medida: 'unidad',
               costo_actual: '500',
             },
-          ]); // lookup pan → producto vendible ya no vale como insumo
+          ]); // lookup batch → pan es producto vendible, no vale como insumo
 
         await expect(
           service.create(TENANT, 'user-uuid', dtoReceta as any),
@@ -909,12 +940,14 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
           .mockResolvedValueOnce([
             {
+              item_id: 'ingrediente-pan',
+              nombre: 'Pan',
               tipo: 'producto',
               modo_inventario: 'cantidad',
               unidad_medida: 'unidad',
               costo_actual: '500',
             },
-          ]); // lookup pan → no es ingrediente
+          ]); // lookup batch → pan no es ingrediente
 
         await expect(
           service.create(TENANT, 'user-uuid', dtoReceta as any),
@@ -927,6 +960,8 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ item_id: ITEM_ID }])
           .mockResolvedValueOnce([
             {
+              item_id: 'ingrediente-pan',
+              nombre: 'Pan',
               tipo: 'ingrediente',
               modo_inventario: 'serie',
               unidad_medida: 'unidad',
@@ -943,22 +978,25 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
           .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items
+          // UNA query para los dos ingredientes, no una por ingrediente
           .mockResolvedValueOnce([
             {
+              item_id: 'ingrediente-pan',
+              nombre: 'Pan',
               tipo: 'ingrediente',
               modo_inventario: 'cantidad',
               unidad_medida: 'unidad',
               costo_actual: '500',
             },
-          ]) // pan
-          .mockResolvedValueOnce([
             {
+              item_id: 'ingrediente-carne',
+              nombre: 'Carne',
               tipo: 'ingrediente',
               modo_inventario: 'cantidad',
               unidad_medida: 'kg',
               costo_actual: '8000',
             },
-          ]) // carne
+          ]) // lookup batch de ingredientes
           .mockResolvedValueOnce([]) // INSERT item_receta
           .mockResolvedValueOnce([]) // INSERT receta_ingredientes pan
           .mockResolvedValueOnce([]); // INSERT receta_ingredientes carne
@@ -971,13 +1009,24 @@ describe('ItemsService', () => {
 
         expect(result).toMatchObject({ id: ITEM_ID });
         // Orden de llamadas a managerMock.query: 1=moneda, 2=INSERT items,
-        // 3=lookup pan, 4=lookup carne, 5=INSERT item_receta, 6/7=INSERT receta_ingredientes.
+        // 3=lookup batch de LOS DOS ingredientes, 4=INSERT item_receta,
+        // 5/6=INSERT receta_ingredientes. Antes el lookup era uno por
+        // ingrediente y el INSERT caía en la 5ª.
         // costo = 500*1 + 8000*0.15 = 500 + 1200 = 1700
         expect(managerMock.query).toHaveBeenNthCalledWith(
-          5,
+          4,
           expect.stringContaining('INSERT INTO item_receta'),
           [ITEM_ID, '1700'],
         );
+        // Un solo SELECT de validación para los dos ingredientes.
+        const selects = (
+          managerMock.query.mock.calls as [string, unknown[]][]
+        ).filter(([sql]) => sql.includes('LEFT JOIN item_producto ip'));
+        expect(selects).toHaveLength(1);
+        // Y una sola carga del catálogo de unidades: la conversión corre en
+        // memoria dentro del loop, no con una query por ingrediente.
+        expect(catalogServiceMock.crearConversor).toHaveBeenCalledTimes(1);
+        expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
       });
     });
 
@@ -1009,26 +1058,26 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
           .mockResolvedValueOnce([
             {
+              item_id: 'ingrediente-pan',
               tipo: 'ingrediente',
               nombre: 'Pan',
               modo_inventario: 'cantidad',
               unidad_medida: 'unidad',
               costo_actual: '500',
             },
-          ]) // lookup pan
+          ]) // lookup batch de ingredientes
           .mockResolvedValueOnce([]) // INSERT item_receta
           .mockResolvedValueOnce([]) // INSERT receta_ingredientes pan
           .mockResolvedValueOnce([
             {
+              item_id: 'ingrediente-queso',
               tipo: 'ingrediente',
               nombre: 'Queso',
               modo_inventario: 'cantidad',
               unidad_medida: 'kg',
             },
-          ]) // lookup queso extra
+          ]) // lookup batch de extras
           .mockResolvedValueOnce([]); // INSERT receta_extras_permitidos
-
-        catalogServiceMock.convertirUnidad.mockResolvedValueOnce('1');
 
         const result = await service.create(
           TENANT,
@@ -1045,6 +1094,10 @@ describe('ItemsService', () => {
             precioExtra: '500',
           },
         ]);
+        // La compatibilidad de unidades del extra se valida con el conversor ya
+        // cargado, no con una query por fila (sin esto, revertir a
+        // `convertirUnidad` dejaba toda la suite en verde).
+        expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
         const insertExtra = managerMock.query.mock.calls.find(
           (c: unknown[]) =>
             typeof c[0] === 'string' &&
@@ -1134,20 +1187,21 @@ describe('ItemsService', () => {
         managerMock.query
           .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
           .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
+          // UNA query para los dos componentes, no una por componente
           .mockResolvedValueOnce([
             {
+              item_id: PROD_ID,
               nombre: 'Producto base',
               tipo: 'producto',
               costo_actual: '500',
             },
-          ]) // lookup PROD_ID
-          .mockResolvedValueOnce([
             {
+              item_id: RECETA_ID,
               nombre: 'Receta base',
               tipo: 'receta',
               costo_actual: '1200',
             },
-          ]) // lookup RECETA_ID
+          ]) // lookup batch de componentes
           .mockResolvedValueOnce([]) // INSERT item_combo
           .mockResolvedValueOnce([]) // INSERT combo_componentes PROD_ID
           .mockResolvedValueOnce([]); // INSERT combo_componentes RECETA_ID
@@ -1184,11 +1238,12 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
           .mockResolvedValueOnce([
             {
+              item_id: OTRO_COMBO_ID,
               nombre: 'Otro combo',
               tipo: 'combo',
               costo_actual: '5000',
             },
-          ]); // lookup OTRO_COMBO_ID
+          ]); // lookup batch de componentes
 
         await expect(service.create(TENANT, 'user-uuid', dto)).rejects.toThrow(
           /componente.*producto.*receta.*servicio/i,
@@ -1578,12 +1633,14 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
         .mockResolvedValueOnce([
           {
+            item_id: 'ingrediente-queso',
+            nombre: 'Queso',
             tipo: 'ingrediente',
             modo_inventario: 'cantidad',
             unidad_medida: 'kg',
             costo_actual: '6000',
           },
-        ]) // queso
+        ]) // lookup batch de ingredientes
         .mockResolvedValueOnce([]) // soft-delete receta_ingredientes
         .mockResolvedValueOnce([]) // INSERT receta_ingredientes queso
         .mockResolvedValueOnce([]); // UPDATE item_receta costo_actual
@@ -1623,12 +1680,13 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
         .mockResolvedValueOnce([
           {
+            item_id: 'ingrediente-queso',
             tipo: 'ingrediente',
             nombre: 'Queso',
             modo_inventario: 'cantidad',
             unidad_medida: 'kg',
           },
-        ])
+        ]) // lookup batch de extras
         .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos
         .mockResolvedValueOnce([]); // INSERT receta_extras_permitidos
 
@@ -1722,11 +1780,12 @@ describe('ItemsService', () => {
           .mockResolvedValueOnce([{ item_id: COMBO_ID, tipo: 'combo' }]) // SELECT existing
           .mockResolvedValueOnce([
             {
+              item_id: PROD_ID,
               nombre: 'Producto base',
               tipo: 'producto',
               costo_actual: '500',
             },
-          ]) // lookup PROD_ID
+          ]) // lookup batch de componentes
           .mockResolvedValueOnce([]) // soft-delete combo_componentes
           .mockResolvedValueOnce([]) // INSERT combo_componentes
           .mockResolvedValueOnce([]) // UPDATE item_combo
@@ -3815,13 +3874,6 @@ describe('ItemsService', () => {
           costo_actual: i.costoActual,
         })),
       );
-      for (const i of opts.ingredientes) {
-        catalogServiceMock.convertirUnidad.mockResolvedValueOnce(
-          i.unidadCodigo === i.unidadBase
-            ? new Decimal(i.cantidad).toDecimalPlaces(4).toString()
-            : new Decimal(i.cantidad).div(1000).toDecimalPlaces(4).toString(),
-        );
-      }
     }
 
     it('listarDesfases incluye receta cuando propuesto ≠ cacheado', async () => {
@@ -3955,6 +4007,7 @@ describe('ItemsService', () => {
           ])
           .mockResolvedValueOnce([
             {
+              receta_item_id: RECETA_ID,
               cantidad: '1',
               unidad_codigo: 'kg',
               unidad_base: 'kg',
@@ -3963,7 +4016,6 @@ describe('ItemsService', () => {
           ])
           .mockResolvedValueOnce([])
           .mockResolvedValueOnce([]);
-        catalogServiceMock.convertirUnidad.mockResolvedValue('1');
 
         const result = await service.aplicarDesfases(TENANT, [
           {
@@ -3990,6 +4042,7 @@ describe('ItemsService', () => {
           ])
           .mockResolvedValueOnce([
             {
+              receta_item_id: RECETA_ID,
               cantidad: '1',
               unidad_codigo: 'kg',
               unidad_base: 'kg',
@@ -3997,7 +4050,6 @@ describe('ItemsService', () => {
             },
           ])
           .mockResolvedValueOnce([]);
-        catalogServiceMock.convertirUnidad.mockResolvedValue('1');
 
         await service.aplicarDesfases(TENANT, [
           { recetaItemId: RECETA_ID, actualizarPrecio: false },
@@ -4024,9 +4076,12 @@ describe('ItemsService', () => {
 
       it('descartar setea costo_propuesto_omitido al propuesto actual', async () => {
         managerMock.query
-          .mockResolvedValueOnce([{ tipo: 'receta' }])
+          .mockResolvedValueOnce([
+            { receta_item_id: RECETA_ID, tipo: 'receta' },
+          ])
           .mockResolvedValueOnce([
             {
+              receta_item_id: RECETA_ID,
               cantidad: '1',
               unidad_codigo: 'kg',
               unidad_base: 'kg',
@@ -4034,7 +4089,6 @@ describe('ItemsService', () => {
             },
           ])
           .mockResolvedValueOnce([]);
-        catalogServiceMock.convertirUnidad.mockResolvedValue('1');
 
         const result = await service.descartarDesfases(TENANT, [RECETA_ID]);
         expect(result.descartados).toBe(1);
@@ -4044,9 +4098,53 @@ describe('ItemsService', () => {
         );
       });
 
+      it('aplicar sobre N recetas hace lecturas CONSTANTES, no por receta', async () => {
+        const IDS = ['receta-a', 'receta-b', 'receta-c'];
+        managerMock.query
+          .mockResolvedValueOnce(
+            IDS.map((id) => ({ receta_item_id: id, tipo: 'receta' })),
+          )
+          .mockResolvedValueOnce(
+            IDS.map((id) => ({
+              receta_item_id: id,
+              cantidad: '1',
+              unidad_codigo: 'kg',
+              unidad_base: 'kg',
+              costo_actual: '200',
+            })),
+          )
+          .mockResolvedValue([]); // los UPDATE
+
+        const result = await service.aplicarDesfases(
+          TENANT,
+          IDS.map((id) => ({ recetaItemId: id })),
+        );
+
+        expect(result.aplicados).toBe(3);
+        const sqls = managerMock.query.mock.calls.map(
+          (c: unknown[]) => c[0] as string,
+        );
+        // 2 lecturas para el lote entero + 1 UPDATE por receta (esas son
+        // escrituras de N filas, no un N+1). Si alguien vuelve a leer por
+        // receta, los SELECT pasan de 2 a 6.
+        expect(sqls.filter((s) => s.trim().startsWith('SELECT'))).toHaveLength(
+          2,
+        );
+        expect(
+          sqls.filter((s) => s.includes('UPDATE item_receta')),
+        ).toHaveLength(3);
+        // Y una sola carga del catálogo de unidades para los 3 ingredientes:
+        // el conversor se crea una vez por lote y convierte en memoria, sin
+        // una query por ingrediente.
+        expect(catalogServiceMock.crearConversor).toHaveBeenCalledTimes(1);
+        expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
+      });
+
       it('descartar sin ingredientes vivos lanza BadRequest', async () => {
         managerMock.query
-          .mockResolvedValueOnce([{ tipo: 'receta' }])
+          .mockResolvedValueOnce([
+            { receta_item_id: RECETA_ID, tipo: 'receta' },
+          ])
           .mockResolvedValueOnce([]);
 
         await expect(
@@ -4088,8 +4186,13 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([{ '?column?': 1 }]) // validarMoneda
         .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }]) // INSERT items
         .mockResolvedValueOnce([
-          { nombre: 'Producto base', tipo: 'producto', costo_actual: '500' },
-        ]) // lookup PROD_ID
+          {
+            item_id: PROD_ID,
+            nombre: 'Producto base',
+            tipo: 'producto',
+            costo_actual: '500',
+          },
+        ]) // lookup batch de componentes
         .mockResolvedValueOnce([]) // INSERT item_combo
         .mockResolvedValueOnce([]) // INSERT combo_componentes
         .mockResolvedValueOnce([]) // SELECT asociaciones vivas (ninguna)

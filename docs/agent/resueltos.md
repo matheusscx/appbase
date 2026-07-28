@@ -596,3 +596,54 @@ siguen diferidos están en `pendientes.md`.
   Postgres — distinto del caso de los extras, donde la query era nueva y hubo que probarla.
   ⚠️ **Hueco de cobertura preexistente, que este fix no cierra:** ningún e2e toca el
   checkout online. Lo cubierto acá es unit.
+
+### Media / Baja — los tres N+1 restantes de la pasada
+
+- [x] ~~**`findOne` de una receta con 5 grupos son 6 queries**~~ — cerrado 2026-07-28: los
+  grupos del propio ítem salen de `cargarGruposPorItem`, la función batcheada que ya vivía
+  en el mismo archivo y que `findOne` **ya usaba** para los componentes de un combo. 2
+  queries fijas en vez de 1 + N, y ~60 líneas menos de duplicación. La discriminación quedó
+  demostrada al revés y sirve igual: la aserción que fijaba los parámetros de la query por
+  grupo (`['grupo-1', TENANT, 'item-grupo-1']`) **falló** contra la implementación nueva
+  (`[['item-grupo-1'], TENANT]`). El test ahora fija esos params batcheados y el total de
+  queries.
+- [x] ~~**`aplicarDesfases`/`descartarDesfases` hacen 3-4 queries por receta**~~ — cerrado
+  2026-07-28. Resultó **peor que lo reportado**: además de las 2 lecturas por receta, el
+  costo propuesto llamaba `convertirUnidad` **una vez por ingrediente** — un N+1 anidado, y
+  con `convertirUnidades` ya escrito al lado para exactamente esto. Ahora son 2 lecturas
+  para todo el lote + 1 carga de unidades para todos los ingredientes de todas las recetas.
+  **Beneficia también al camino de lectura**: `listarDesfases` compartía el mismo helper y
+  tenía el mismo N+1 anidado. Los `UPDATE` siguen siendo N — son escrituras de N filas, no
+  un N+1.
+  **El loop por receta se conservó a propósito**, para que el orden en que fallan las
+  validaciones no cambie: si la receta B no existe y la A no tiene ingredientes, sigue
+  ganando el error de A. Es la precedencia 400↔404 que la revisión independiente ya había
+  marcado dos veces ese día. ⚠️ **La primera versión no lo lograba y la revisión lo
+  bloqueó:** el cálculo del costo corría *antes* del loop y **también lanza** (unidad no
+  reconocida, magnitudes incompatibles), así que adelantaba ese 400 por encima del 404.
+  Cerrado con `CatalogService.crearConversor()`: el catálogo se carga una vez —una lectura
+  que no lanza— y la conversión vuelve a ocurrir dentro del loop, en su punto original.
+  Mutante verificado: crear el conversor dentro del loop en vez de afuera sube
+  `crearConversor` de 1 a N.
+- [x] ~~**Las tres `validarY…` hacen un `SELECT` por fila del payload**~~ — cerrado
+  2026-07-28 con `filasValidacionPorIds`: una query para todos los ids del payload,
+  compartida por ingredientes, componentes y extras. Los tres loops quedan intactos, así que
+  ninguna validación cambia de orden (la carga no lanza).
+  ⚠️ **Lo que el fix destapó en los tests:** al pasar a un lookup por id, varios tests de
+  **rechazo** empezaron a pasar por la razón equivocada — su fila mockeada no traía
+  `item_id`, así que el lookup no la encontraba y el error saltaba antes de evaluar el tipo
+  o el modo de inventario. Se corrigieron esos mocks además de los que fallaban.
+  Dos mutantes, cada uno en el nivel que le corresponde: cargar por fila hace que el unit
+  cuente 2 SELECT en vez de 1; truncar el lote al primer id no lo ve el unit (el mock ignora
+  los parámetros) pero **rompe 6 tests de `recetas`/`combos` e2e** contra Postgres real.
+  ⚠️ **Segundo bloqueo de la revisión, también correcto:** la primera versión dejaba el
+  `convertirUnidad` por fila de `validarYCostearIngredientes` y `validarExtrasPermitidos`,
+  argumentando que batchearlo cambiaría el orden en que fallan dos 400 distintos. Era una
+  excusa: ese argumento solo refuta la variante de resolver todas las conversiones antes
+  del loop. La tercera variante —cargar el catálogo una vez y convertir en memoria **en el
+  mismo punto del loop**— no mueve ningún error, y la pieza pura para hacerlo
+  (`convertirConMapa`) ya existía sin exponer. Se agregó `CatalogService.crearConversor()`
+  y los dos loops quedaron sin query por iteración.
+  El costo por fila **no se había eliminado, se había cambiado de tabla**: el pendiente
+  hablaba de 15 `SELECT` para 15 ingredientes, y tras el primer intento eran 1 batch + 15
+  lecturas de `unidades_medida`.

@@ -74,6 +74,15 @@ identificamos con ubicación concreta.
   filtro. Cierre: un `useEstadoVenta()` con ambos mapas, consumido por los cuatro.
   **Lección del incidente:** al sacar un valor de un enum compartido, grepear el repo
   entero — el grep acotado a la carpeta del módulo fue exactamente lo que falló.
+- [ ] **El e2e da fallos masivos falsos si se corre justo después de editar un fuente**
+  (harness) — visto **dos veces el 2026-07-28**, con la misma firma: 42 y 46 fallos
+  repartidos por media suite, y verde inmediato al repetir. La causa probable —hipótesis,
+  no verificada— es que `docker-compose up` corre el backend en **watch mode**: al tocar un
+  archivo recompila, re-arranca y **vuelve a correr el seeder**, encima de la suite que ya
+  está andando. `reset-db.sh` espera el `Seed complete` de ese arranque, no del siguiente.
+  Mitigación que funcionó las dos veces: correr `reset-db.sh` **inmediatamente antes** del
+  e2e, sin lint/typecheck/unit en el medio. Cierre posible: que el script espere a que el
+  backend quede estable, o correr el e2e contra un stack sin watch.
 - [ ] **Tres suites e2e dejan la caja abierta al terminar** (backend, `test/combos`,
   `grupos-modificadores`, `grupos-modificadores-overrides` y `recetas.e2e-spec.ts`)
   — ✅ `liquidacion-propinas` corregida 2026-07-27: al agregarle un test cambió el orden en
@@ -334,11 +343,6 @@ Ver [`resueltos.md`](resueltos.md).
   resto del hallazgo de recargos sin ejercer, cuya mitad de `calculo-precios` se cerró el
   2026-07-28 ([`resueltos.md`](resueltos.md)). Acá la venta real con recargos sigue sin
   ejercerse en unit; el e2e sí la cubre de punta a punta.
-- [ ] **`findOne` de una receta con 5 grupos son 6 queries** (backend,
-  `items.service.ts:552`) — un `SELECT` de opciones por cada grupo, con la versión batcheada
-  (`cargarGruposPorItem:274`) ya escrita en el mismo archivo y usada dos líneas más arriba
-  para los componentes de un combo.
-
 ### Baja
 
 - [ ] **`remove()` chequea uso sin filtrar por tenant** (backend, `items.service.ts:1514`,
@@ -355,19 +359,30 @@ Ver [`resueltos.md`](resueltos.md).
   `calculo-precios.service.ts:188`) — **hallazgo del refutador, ninguna lente lo vio**: el
   `.toFixed(4)` ignora `escalaCalculo` y `modoRedondeo` del tenant, y ocurre justo antes de
   entregarle el precio al motor que sí los respeta. Un paso de redondeo fuera de la config.
-- [ ] **`aplicarDesfases`/`descartarDesfases` hacen 3-4 queries por receta** (backend,
-  `items.service.ts:3122` y `:3208`) — en un endpoint que la UI usa con "Seleccionar todas"
-  (`RecetasDesfasesPanel.vue`) y cuyo DTO solo exige `@ArrayMinSize(1)`, sin tope superior.
-- [ ] **Las tres `validarY…` hacen un `SELECT` por fila del payload** (backend,
-  `items.service.ts:2717`, `:2813`, `:2880`) — crear una receta con 15 ingredientes son 15
-  `SELECT` secuenciales. Son lecturas de validación, no el `INSERT` de N filas que está al
-  lado (ese está bien).
 - [ ] **Ingrediente o extra duplicado en una receta devuelve 500, no 400** (backend,
   `items.service.ts:2695` y `:2860`) — `validarYCostearComponentes` rechaza duplicados con un
   `Set` (`:2796`); sus dos funciones gemelas no. El payload pasa la validación y revienta
   contra el índice único parcial. Bajado de media: la transacción revierte y el índice
   sostiene el dato, lo único malo es la calidad del error. Asimetría entre gemelas, no
   decisión consciente.
+
+- [ ] **Quedan CUATRO `convertirUnidad` dentro de loops, dos de ellos en el camino de una
+  venta** (backend, `items.service.ts`) — una query a `unidades_medida` por iteración.
+  Misma familia que los tres N+1 cerrados el 2026-07-28 y **ya tienen la herramienta**:
+  `CatalogService.crearConversor()` carga el catálogo una vez y convierte en memoria sin
+  mover ningún error de lugar.
+  - `:2267` **`venderIngredientesReceta`** — el peor: está **anidado**, porque
+    `venderComponentesCombo` lo llama dentro de su propio loop de componentes (`:2399`).
+    Vender un combo con N componentes-receta de M ingredientes dispara **N×M** queries.
+  - `:2554` **`venderOpcionesGrupos`** — también camino de venta, por opción de grupo.
+  - `:2627` `calcularDisponibleReceta` — lectura; se llama por cada componente receta al
+    vender un combo.
+  - `:3695` `upsertOverridesDeGrupo` — escritura de catálogo, el más barato.
+  No entraron en aquel commit por alcance: ninguno estaba en los hallazgos de la auditoría.
+  ⚠️ La primera versión de esta entrada decía "dos" y omitía justo las dos del camino de
+  venta; lo cazó la revisión independiente contando por profundidad de llaves en vez de a
+  ojo.
+
 
 ### Decidido por el owner (pendiente de respuesta)
 

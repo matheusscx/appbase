@@ -611,76 +611,15 @@ export class ItemsService {
       }));
     }
 
-    const grupos: GrupoDetalle[] = [];
-    if (rows[0].tipo === 'combo' || rows[0].tipo === 'receta') {
-      const grupoRows: {
-        grupo_modificador_id: string;
-        item_grupo_id: string;
-        nombre: string;
-        min: number;
-        max: number;
-        orden: number;
-      }[] = await this.dataSource.query(
-        `SELECT igm.grupo_modificador_id, igm.item_grupo_id, g.nombre, igm.min, igm.max, igm.orden
-         FROM item_grupos_modificadores igm
-         JOIN grupos_modificadores g ON g.grupo_modificador_id = igm.grupo_modificador_id
-           AND g.eliminado_el IS NULL
-         WHERE igm.item_id = $1 AND igm.tenant_id = $2 AND igm.eliminado_el IS NULL
-         ORDER BY igm.orden ASC`,
-        [itemId, tenantId],
-      );
-      for (const gr of grupoRows) {
-        const opRows: {
-          grupo_opcion_id: string;
-          item_id: string;
-          item_nombre: string;
-          tipo: string;
-          cantidad_efectiva: string | null;
-          cantidad_default: string | null;
-          unidad_codigo: string | null;
-          precio_extra: string;
-          orden: number;
-          stock: string | null;
-        }[] = await this.dataSource.query(
-          `SELECT o.grupo_opcion_id, o.item_id, i.nombre AS item_nombre, i.tipo,
-                  COALESCE(ovr.cantidad, o.cantidad) AS cantidad_efectiva,
-                  o.cantidad AS cantidad_default,
-                  COALESCE(ovr.unidad_codigo, o.unidad_codigo) AS unidad_codigo,
-                  COALESCE(ovr.precio_extra, o.precio_extra) AS precio_extra,
-                  o.orden, ip.stock
-           FROM grupo_modificador_opciones o
-           JOIN items i ON i.item_id = o.item_id AND i.eliminado_el IS NULL
-           LEFT JOIN item_producto ip ON ip.item_id = o.item_id
-           LEFT JOIN item_grupo_modificador_opciones ovr
-             ON ovr.grupo_opcion_id = o.grupo_opcion_id
-            AND ovr.item_grupo_id = $3
-            AND ovr.eliminado_el IS NULL
-           WHERE o.grupo_modificador_id = $1 AND o.tenant_id = $2 AND o.eliminado_el IS NULL
-           ORDER BY o.orden ASC`,
-          [gr.grupo_modificador_id, tenantId, gr.item_grupo_id],
-        );
-        grupos.push({
-          grupoModificadorId: gr.grupo_modificador_id,
-          nombre: gr.nombre,
-          min: gr.min,
-          max: gr.max,
-          orden: gr.orden,
-          opciones: opRows.map((r) => ({
-            grupoOpcionId: r.grupo_opcion_id,
-            itemId: r.item_id,
-            itemNombre: r.item_nombre,
-            tipo: r.tipo,
-            cantidad: r.cantidad_efectiva,
-            cantidadDefault: r.cantidad_default,
-            unidadCodigo: r.unidad_codigo,
-            precioExtra: r.precio_extra,
-            orden: r.orden,
-            stock: r.stock,
-            esPendiente: r.cantidad_efectiva == null,
-          })),
-        });
-      }
-    }
+    // Los grupos del propio ítem salen de la misma función batcheada que ya se
+    // usa arriba para los componentes de un combo: 2 queries fijas en vez de 1
+    // por los grupos + 1 de opciones POR CADA grupo. Con `[]` no consulta nada,
+    // así que un ítem sin grupos sigue costando cero.
+    const grupos: GrupoDetalle[] =
+      rows[0].tipo === 'combo' || rows[0].tipo === 'receta'
+        ? ((await this.cargarGruposPorItem(tenantId, [itemId])).get(itemId) ??
+          [])
+        : [];
 
     return {
       ...this.mapRow(rows[0]),
@@ -2808,6 +2747,54 @@ export class ItemsService {
   }
 
   /**
+   * Filas base de varios ítems para las validaciones de receta/combo, en UNA
+   * query. Las tres `validar*` de abajo consultaban ítem por ítem sobre el
+   * array que mandó el cliente; ahora precargan y el loop solo valida, así que
+   * **el orden en que fallan las validaciones no cambia** (la carga no lanza).
+   *
+   * `costo_actual` sale de `COALESCE(item_producto, item_receta)`: para un
+   * ingrediente la segunda es NULL, así que sirve a los tres llamadores.
+   */
+  private async filasValidacionPorIds(
+    manager: EntityManager,
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<
+    Map<
+      string,
+      {
+        tipo: string;
+        nombre: string;
+        modo_inventario: string | null;
+        unidad_medida: string | null;
+        costo_actual: string | null;
+      }
+    >
+  > {
+    const unicos = [...new Set(itemIds)];
+    if (!unicos.length) return new Map();
+
+    const rows: {
+      item_id: string;
+      tipo: string;
+      nombre: string;
+      modo_inventario: string | null;
+      unidad_medida: string | null;
+      costo_actual: string | null;
+    }[] = await manager.query(
+      `SELECT i.item_id, i.tipo, i.nombre, ip.modo_inventario, ip.unidad_medida,
+              COALESCE(ip.costo_actual, ir.costo_actual) AS costo_actual
+         FROM items i
+         LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+         LEFT JOIN item_receta ir ON ir.item_id = i.item_id
+        WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+          AND i.eliminado_el IS NULL`,
+      [unicos, tenantId],
+    );
+    return new Map(rows.map((r) => [r.item_id, r]));
+  }
+
+  /**
    * Valida cada ingrediente (existe, es producto, modo 'cantidad', unidad
    * compatible) y devuelve el costo total de la receta convirtiendo cada
    * cantidad a la unidad base del ingrediente antes de multiplicar por su
@@ -2835,6 +2822,14 @@ export class ItemsService {
       unidadCodigo: string;
       bloqueante: boolean;
     }[] = [];
+    const filas = await this.filasValidacionPorIds(
+      manager,
+      tenantId,
+      ingredientes.map((i) => i.ingredienteItemId),
+    );
+    // Catálogo de unidades cargado una vez: la conversión sigue ocurriendo
+    // dentro del loop, en el mismo punto, así que ningún error cambia de orden.
+    const convertir = await this.catalogService.crearConversor();
     for (const ing of ingredientes) {
       let cantidad: Decimal;
       try {
@@ -2849,39 +2844,27 @@ export class ItemsService {
           'La cantidad del ingrediente debe ser mayor a 0',
         );
       }
-      const rows: {
-        tipo: string;
-        nombre: string;
-        modo_inventario: string | null;
-        unidad_medida: string | null;
-        costo_actual: string | null;
-      }[] = await manager.query(
-        `SELECT i.tipo, i.nombre, ip.modo_inventario, ip.unidad_medida, ip.costo_actual
-         FROM items i
-         LEFT JOIN item_producto ip ON ip.item_id = i.item_id
-         WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-        [ing.ingredienteItemId, tenantId],
-      );
-      if (!rows.length || rows[0].tipo !== 'ingrediente') {
+      const fila = filas.get(ing.ingredienteItemId);
+      if (!fila || fila.tipo !== 'ingrediente') {
         throw new BadRequestException(
           `El ingrediente ${ing.ingredienteItemId} no es un item de tipo ingrediente válido`,
         );
       }
-      if (rows[0].modo_inventario !== 'cantidad') {
+      if (fila.modo_inventario !== 'cantidad') {
         throw new BadRequestException(
           'Los insumos de receta solo admiten modo de inventario "cantidad"',
         );
       }
-      const cantidadBase = await this.catalogService.convertirUnidad(
+      const cantidadBase = convertir(
         ing.cantidad,
         ing.unidadCodigo,
-        rows[0].unidad_medida!,
+        fila.unidad_medida!,
       );
-      const costoUnitario = new Decimal(rows[0].costo_actual ?? '0');
+      const costoUnitario = new Decimal(fila.costo_actual ?? '0');
       costoTotal = costoTotal.plus(costoUnitario.mul(cantidadBase));
       detalle.push({
         ingredienteItemId: ing.ingredienteItemId,
-        ingredienteNombre: rows[0].nombre,
+        ingredienteNombre: fila.nombre,
         cantidad: ing.cantidad,
         unidadCodigo: ing.unidadCodigo,
         bloqueante: ing.bloqueante ?? true,
@@ -2931,26 +2914,19 @@ export class ItemsService {
       cantidad: string;
       bloqueante: boolean;
     }[] = [];
+    const filas = await this.filasValidacionPorIds(
+      manager,
+      tenantId,
+      componentes.map((c) => c.componenteItemId),
+    );
     for (const c of componentes) {
-      const rows: {
-        nombre: string;
-        tipo: string;
-        costo_actual: string | null;
-      }[] = await manager.query(
-        `SELECT i.nombre, i.tipo,
-                  COALESCE(ip.costo_actual, ir.costo_actual) AS costo_actual
-           FROM items i
-           LEFT JOIN item_producto ip ON ip.item_id = i.item_id
-           LEFT JOIN item_receta ir ON ir.item_id = i.item_id
-           WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-        [c.componenteItemId, tenantId],
-      );
-      if (!rows.length) {
+      const fila = filas.get(c.componenteItemId);
+      if (!fila) {
         throw new BadRequestException(
           `Componente no encontrado: ${c.componenteItemId}`,
         );
       }
-      const { nombre, tipo, costo_actual } = rows[0];
+      const { nombre, tipo, costo_actual } = fila;
       if (!['producto', 'receta', 'servicio'].includes(tipo)) {
         throw new BadRequestException(
           `Un componente de combo debe ser producto, receta o servicio (recibido: ${tipo})`,
@@ -2998,6 +2974,12 @@ export class ItemsService {
       unidadCodigo: string;
       precioExtra: string;
     }[] = [];
+    const filas = await this.filasValidacionPorIds(
+      manager,
+      tenantId,
+      extras.map((e) => e.ingredienteItemId),
+    );
+    const convertir = await this.catalogService.crearConversor();
     for (const extra of extras) {
       let cantidad: Decimal;
       try {
@@ -3025,36 +3007,22 @@ export class ItemsService {
           'El precio extra debe ser mayor o igual a 0',
         );
       }
-      const rows: {
-        tipo: string;
-        nombre: string;
-        modo_inventario: string | null;
-        unidad_medida: string | null;
-      }[] = await manager.query(
-        `SELECT i.tipo, i.nombre, ip.modo_inventario, ip.unidad_medida
-         FROM items i
-         LEFT JOIN item_producto ip ON ip.item_id = i.item_id
-         WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-        [extra.ingredienteItemId, tenantId],
-      );
-      if (!rows.length || rows[0].tipo !== 'ingrediente') {
+      const fila = filas.get(extra.ingredienteItemId);
+      if (!fila || fila.tipo !== 'ingrediente') {
         throw new BadRequestException(
           `El extra ${extra.ingredienteItemId} no es un item de tipo ingrediente válido`,
         );
       }
-      if (rows[0].modo_inventario !== 'cantidad') {
+      if (fila.modo_inventario !== 'cantidad') {
         throw new BadRequestException(
           'Los extras permitidos solo admiten modo de inventario "cantidad"',
         );
       }
-      await this.catalogService.convertirUnidad(
-        extra.cantidad,
-        extra.unidadCodigo,
-        rows[0].unidad_medida!,
-      );
+      // Solo valida compatibilidad de unidades; el resultado no se usa.
+      convertir(extra.cantidad, extra.unidadCodigo, fila.unidad_medida!);
       detalle.push({
         ingredienteItemId: extra.ingredienteItemId,
-        ingredienteNombre: rows[0].nombre,
+        ingredienteNombre: fila.nombre,
         cantidad: extra.cantidad,
         unidadCodigo: extra.unidadCodigo,
         precioExtra: extra.precioExtra,
@@ -3094,27 +3062,102 @@ export class ItemsService {
       .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
   }
 
+  /** `item_id → tipo` de las recetas pedidas, en una query. Ausente = no existe. */
+  private async cabecerasReceta(
+    manager: EntityManager,
+    tenantId: string,
+    recetaItemIds: string[],
+  ): Promise<Map<string, string>> {
+    if (!recetaItemIds.length) return new Map();
+    const rows: { receta_item_id: string; tipo: string }[] =
+      await manager.query(
+        `SELECT i.item_id AS receta_item_id, i.tipo
+           FROM items i
+           JOIN item_receta ir ON ir.item_id = i.item_id
+          WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+            AND i.eliminado_el IS NULL`,
+        [recetaItemIds, tenantId],
+      );
+    return new Map(rows.map((r) => [r.receta_item_id, r.tipo]));
+  }
+
+  /** Ingredientes vivos de varias recetas, agrupados por receta, en una query. */
+  private async ingredientesPorReceta(
+    manager: EntityManager,
+    tenantId: string,
+    recetaItemIds: string[],
+  ): Promise<
+    Map<
+      string,
+      {
+        cantidad: string;
+        unidad_codigo: string;
+        unidad_base: string;
+        costo_actual: string | null;
+      }[]
+    >
+  > {
+    const out = new Map<
+      string,
+      {
+        cantidad: string;
+        unidad_codigo: string;
+        unidad_base: string;
+        costo_actual: string | null;
+      }[]
+    >();
+    if (!recetaItemIds.length) return out;
+
+    const rows: {
+      receta_item_id: string;
+      cantidad: string;
+      unidad_codigo: string;
+      unidad_base: string;
+      costo_actual: string | null;
+    }[] = await manager.query(
+      `SELECT ri.receta_item_id, ri.cantidad, ri.unidad_codigo,
+              ip.unidad_medida AS unidad_base, ip.costo_actual
+         FROM receta_ingredientes ri
+         JOIN items ing ON ing.item_id = ri.ingrediente_item_id
+          AND ing.eliminado_el IS NULL
+         JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
+        WHERE ri.receta_item_id = ANY($1::uuid[]) AND ri.tenant_id = $2
+          AND ri.eliminado_el IS NULL`,
+      [recetaItemIds, tenantId],
+    );
+    for (const r of rows) {
+      const arr = out.get(r.receta_item_id) ?? [];
+      arr.push(r);
+      out.set(r.receta_item_id, arr);
+    }
+    return out;
+  }
+
   /**
-   * Calcula costo propuesto de una receta ya persistida (ingredientes vivos).
-   * Misma aritmética que validarYCostearIngredientes: convierte a unidad base × costo_actual.
+   * Costo propuesto de una receta ya persistida (ingredientes vivos). Misma
+   * aritmética que `validarYCostearIngredientes`: convierte a unidad base ×
+   * costo_actual.
+   *
+   * Recibe el conversor ya cargado (`CatalogService.crearConversor`) en vez de
+   * consultar: así el catálogo de unidades se lee UNA vez por request y la
+   * conversión —que puede lanzar— sigue ocurriendo dentro del loop del llamador,
+   * sin adelantar sus errores por encima de las otras validaciones.
    */
-  private async calcularCostoPropuestoDesdeFilas(
+  private costoPropuesto(
+    convertir: (cantidad: string, desde: string, hacia: string) => string,
     ings: {
       cantidad: string;
       unidad_codigo: string;
       unidad_base: string;
       costo_actual: string | null;
     }[],
-  ): Promise<string> {
+  ): string {
     let total = new Decimal(0);
     for (const ing of ings) {
-      const cantidadBase = await this.catalogService.convertirUnidad(
-        ing.cantidad,
-        ing.unidad_codigo,
-        ing.unidad_base,
-      );
       total = total.plus(
-        new Decimal(ing.costo_actual ?? '0').mul(cantidadBase),
+        new Decimal(ing.costo_actual ?? '0').mul(
+          convertir(ing.cantidad, ing.unidad_codigo, ing.unidad_base),
+        ),
       );
     }
     return total.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4);
@@ -3178,11 +3221,13 @@ export class ItemsService {
       byReceta.set(row.receta_item_id, list);
     }
 
+    const convertir = await this.catalogService.crearConversor();
+
     const out: DesfaseRecetaDto[] = [];
     for (const cab of cabeceras) {
       const lista = byReceta.get(cab.receta_item_id) ?? [];
       if (!lista.length) continue;
-      const propuesto = await this.calcularCostoPropuestoDesdeFilas(lista);
+      const propuesto = this.costoPropuesto(convertir, lista);
       const cacheado = new Decimal(cab.costo_actual ?? '0').toFixed(4);
       if (this.eq4(propuesto, cacheado)) continue;
       if (
@@ -3265,44 +3310,36 @@ export class ItemsService {
     }
 
     return this.dataSource.transaction(async (manager) => {
+      // Cabeceras e ingredientes de TODAS las recetas del lote en 2 queries.
+      // El loop de abajo se conserva —y con él el orden exacto en que fallan
+      // las validaciones— pero ya no consulta: antes eran 2 lecturas por receta
+      // más una por ingrediente adentro del cálculo del costo.
+      const ids = [...new Set(items.map((i) => i.recetaItemId))];
+      const cabPorId = await this.cabecerasReceta(manager, tenantId, ids);
+      const ingsPorReceta = await this.ingredientesPorReceta(
+        manager,
+        tenantId,
+        ids,
+      );
+      const convertir = await this.catalogService.crearConversor();
+
       let aplicados = 0;
       for (const it of items) {
-        const cab: {
-          receta_item_id: string;
-          tipo: string;
-        }[] = await manager.query(
-          `SELECT i.item_id AS receta_item_id, i.tipo
-           FROM items i
-           JOIN item_receta ir ON ir.item_id = i.item_id
-           WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-          [it.recetaItemId, tenantId],
-        );
-        if (!cab.length || cab[0].tipo !== 'receta') {
+        if (cabPorId.get(it.recetaItemId) !== 'receta') {
           throw new NotFoundException(
             `Receta ${it.recetaItemId} no encontrada`,
           );
         }
-
-        const ings: {
-          cantidad: string;
-          unidad_codigo: string;
-          unidad_base: string;
-          costo_actual: string | null;
-        }[] = await manager.query(
-          `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
-           FROM receta_ingredientes ri
-           JOIN items ing ON ing.item_id = ri.ingrediente_item_id AND ing.eliminado_el IS NULL
-           JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
-           WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
-          [it.recetaItemId, tenantId],
-        );
-        if (!ings.length) {
+        if (!ingsPorReceta.get(it.recetaItemId)?.length) {
           throw new BadRequestException(
             `La receta ${it.recetaItemId} no tiene ingredientes`,
           );
         }
 
-        const propuesto = await this.calcularCostoPropuestoDesdeFilas(ings);
+        const propuesto = this.costoPropuesto(
+          convertir,
+          ingsPorReceta.get(it.recetaItemId)!,
+        );
         await manager.query(
           `UPDATE item_receta
            SET costo_actual = $1, costo_propuesto_omitido = NULL
@@ -3331,36 +3368,31 @@ export class ItemsService {
     recetaItemIds: string[],
   ): Promise<{ descartados: number }> {
     return this.dataSource.transaction(async (manager) => {
+      // Mismo batch que `aplicarDesfases`: 2 lecturas para todo el lote, loop
+      // conservado para no alterar el orden de las validaciones.
+      const ids = [...new Set(recetaItemIds)];
+      const cabPorId = await this.cabecerasReceta(manager, tenantId, ids);
+      const ingsPorReceta = await this.ingredientesPorReceta(
+        manager,
+        tenantId,
+        ids,
+      );
+      const convertir = await this.catalogService.crearConversor();
+
       let descartados = 0;
       for (const recetaItemId of recetaItemIds) {
-        const cab: { tipo: string }[] = await manager.query(
-          `SELECT i.tipo FROM items i
-           JOIN item_receta ir ON ir.item_id = i.item_id
-           WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-          [recetaItemId, tenantId],
-        );
-        if (!cab.length || cab[0].tipo !== 'receta') {
+        if (cabPorId.get(recetaItemId) !== 'receta') {
           throw new NotFoundException(`Receta ${recetaItemId} no encontrada`);
         }
-        const ings: {
-          cantidad: string;
-          unidad_codigo: string;
-          unidad_base: string;
-          costo_actual: string | null;
-        }[] = await manager.query(
-          `SELECT ri.cantidad, ri.unidad_codigo, ip.unidad_medida AS unidad_base, ip.costo_actual
-           FROM receta_ingredientes ri
-           JOIN items ing ON ing.item_id = ri.ingrediente_item_id AND ing.eliminado_el IS NULL
-           JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
-           WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
-          [recetaItemId, tenantId],
-        );
-        if (!ings.length) {
+        if (!ingsPorReceta.get(recetaItemId)?.length) {
           throw new BadRequestException(
             `La receta ${recetaItemId} no tiene ingredientes`,
           );
         }
-        const propuesto = await this.calcularCostoPropuestoDesdeFilas(ings);
+        const propuesto = this.costoPropuesto(
+          convertir,
+          ingsPorReceta.get(recetaItemId)!,
+        );
         await manager.query(
           `UPDATE item_receta SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
           [propuesto, recetaItemId],

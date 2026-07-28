@@ -89,6 +89,26 @@ export class CatalogService {
     );
   }
 
+  /**
+   * Devuelve un conversor con el catálogo **ya cargado**: una query, y después
+   * conversiones en memoria con la misma semántica de error que
+   * `convertirUnidad`.
+   *
+   * Existe para los loops que validan fila por fila: `convertirUnidades` obliga
+   * a resolver todas las conversiones **antes** del loop, lo que adelanta sus
+   * errores por encima de las validaciones estructurales y cambia cuál de dos
+   * 400 gana. Con el conversor, la conversión sigue ocurriendo en el mismo punto
+   * del loop —mismo orden de errores— sin una query por iteración.
+   */
+  async crearConversor(): Promise<
+    (cantidad: string, desde: string, hacia: string) => string
+  > {
+    const unidades = await this.unidadMedidaRepo.find();
+    const mapa = new Map(unidades.map((u) => [u.codigo, u]));
+    return (cantidad, desde, hacia) =>
+      this.convertirConMapa(cantidad, desde, hacia, mapa);
+  }
+
   /** Cálculo puro de conversión sobre un mapa de unidades ya cargado. */
   private convertirConMapa(
     cantidad: string,
