@@ -276,25 +276,9 @@ inusualmente rigurosa — trae la derivación aritmética comentada, así que ma
   no trae `impuestosIds`/`descuentosIds`/`recargosIds`, que es justo lo que el motor necesita.
   Corre en los tres llamadores reales: `ventas.service.ts`, `suscripciones.service.ts` y
   `online.service.ts`.
-- [ ] **Los grupos de un componente-combo se descuentan aunque el componente se haya
-  omitido por falta de stock** (backend, `items.service.ts:2418-2436`) — si un componente
-  `receta` no bloqueante no tiene stock, el pre-chequeo hace `continue` y no escribe nada
-  por él (cero movimientos, correcto). Pero después del loop `gruposComponentes` se arma
-  con **todo** `snapshot.componentes`, sin filtrar los omitidos, y se venden igual.
-  Escenario: combo con una hamburguesa no bloqueante y grupo "Proteína"; falta el pan, la
-  hamburguesa se omite con advertencia, y la chuleta elegida **se descuenta igual**.
-  Lo que lo vuelve alto: el comentario de `:2320-2329` dice explícitamente que el
-  pre-chequeo existe para evitar "deriva silenciosa de inventario" — y la deriva se cuela
-  por la puerta de al lado. El seed usa `bloqueante: true`, así que no se ve en el demo.
-- [ ] **Vender un extra cuyo catálogo cambió tras congelar el snapshot descuenta 1000× de
-  más** (backend, `items.service.ts:2201-2202`) — `ingredienteUnidadMedida:
-  cat?.ingredienteUnidadMedida ?? extra.unidadCodigo`. Si el extra ya no está en
-  `receta_extras_permitidos` al cobrar (un `PATCH` reemplaza la lista completa), el fallback
-  sustituye la unidad **de stock** por la unidad **de la porción**, y `convertirUnidad`
-  termina convirtiendo una unidad a sí misma. 20 g de queso pasan a descontarse como 20 kg.
-  Con stock bajo salta "Stock insuficiente" y queda en advertencia; con stock alto el
-  descuento silencioso ocurre. El `?? 'Extra'` de la línea de al lado muestra que el caso
-  "no está en el catálogo" se anticipó: el default elegido para la unidad es el equivocado.
+
+Los otros dos hallazgos de esta sección —los dos de inventario— se cerraron el 2026-07-28.
+Ver [`resueltos.md`](resueltos.md).
 
 ### Media
 

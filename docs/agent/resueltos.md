@@ -497,3 +497,50 @@ siguen diferidos están en `pendientes.md`.
   conciliación que el dueño ya congeló, nunca inicia el conteo de una caja ajena) — ese
   ítem sigue diferido en [`pendientes.md`](pendientes.md). Detalle:
   [`docs/features/gestion-cajas.md` § Cierre en dos fases](../features/gestion-cajas.md#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
+
+## Auditoría `items` + `calculo-precios` (2026-07-28)
+
+### Alta
+
+- [x] ~~**Los grupos de un componente-combo se descuentan aunque el componente se haya
+  omitido por falta de stock**~~ — cerrado 2026-07-28 (`items.service.ts`). Si un componente
+  `receta` no bloqueante no alcanzaba el stock, el pre-chequeo hacía `continue` y lograba
+  "cero escrituras" por él, pero después del loop `gruposComponentes` se armaba con **todo**
+  `snapshot.componentes`: el combo se vendía sin la hamburguesa y la chuleta elegida para
+  esa hamburguesa se descontaba igual. Ahora los componentes omitidos se registran en un
+  `Set` y se filtran antes de llamar a `venderOpcionesGrupos`. **La regla la fijó el owner**
+  ("se descuenta lo que se sirvió"), y el fix no la inventa: hace consistente una decisión
+  que el código ya tomaba dos líneas antes. Cubierto por
+  *"componente omitido por falta de stock → tampoco descuenta sus grupos de modificadores"*;
+  mutante verificado (sin el filtro, `venderOpcionesGrupos` se llama 2 veces en vez de 1).
+- [x] ~~**Vender un extra cuyo catálogo cambió tras congelar el snapshot descuenta 1000× de
+  más**~~ — cerrado 2026-07-28 (`items.service.ts`). El fallback
+  `cat?.ingredienteUnidadMedida ?? extra.unidadCodigo` sustituía la unidad **de stock** por
+  la de la **porción** cuando el extra ya no estaba en `receta_extras_permitidos`, y
+  `convertirUnidad` terminaba convirtiendo una unidad a sí misma: 20 g de queso descontados
+  como 20 kg. La unidad de stock ahora se resuelve por id contra `items`+`item_producto`,
+  que es donde vive, en vez de contra la lista de extras de la receta — eso saca la causa,
+  no el síntoma. Si el ingrediente ya no existe en el catálogo, **no se descuenta y se
+  advierte** — no se mueve stock de un ítem borrado, mismo criterio que ya usaba
+  `venderOpcionesGrupos` con una opción borrada, más la advertencia que aquel no emite.
+  **Lo que cubre cada test, sin inflar el recibo** (corregido por la revisión independiente,
+  que refutó la primera versión de este párrafo): los **dos unit** son los que discriminan
+  fix de pre-fix — uno fija que la búsqueda va por id de ingrediente y tenant en vez de por
+  la receta, el otro cubre la rama del ingrediente ausente; los dos con mutante verificado.
+  El **e2e nuevo** (`recetas.e2e-spec.ts` §7) **no** distingue el fix del código anterior:
+  su extra sigue en la carta, así que la búsqueda vieja también encontraba `kg` y el
+  resultado era idéntico. Lo que aporta es real pero es otra cosa: ejecuta el SQL nuevo
+  contra Postgres —ningún e2e tocaba `extras`, así que la query no se había ejecutado nunca—
+  y deja fija la conversión g→kg.
+  **Y el escenario del hallazgo original no es alcanzable hoy.** La auditoría supuso que el
+  flujo de Salones cobraba con el snapshot congelado; no lo hace: `cerrarCuenta`
+  (`salones.service.ts:653-720`) lo mapea de vuelta a **solo ids** y `ventas.service.ts`
+  lo **re-resuelve** contra el catálogo vivo en la misma transacción que descuenta, así que
+  un extra fuera de carta muere en el mismo `400` que por `POST /ventas`
+  (`items.service.ts:1834`). O sea que este fix es **corrección y defensa en profundidad**,
+  no el cierre de un agujero explotable.
+  **La invariante que en realidad sostiene esto —y que no estaba escrita en ningún lado—**
+  es que *todo snapshot se re-resuelve en la misma transacción que descuenta stock*. El día
+  que alguien persista un snapshot y lo reutilice sin re-resolver (que es, conceptualmente,
+  para lo que un snapshot existe), este bug y su hermano del combo se vuelven reales. Queda
+  registrada acá porque es el supuesto del que cuelgan los dos fixes.

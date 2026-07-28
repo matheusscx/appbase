@@ -153,6 +153,10 @@ Request (fragmento):
 
 Backend: valida omitidos ⊆ ingredientes; extras ∈ `receta_extras_permitidos`; `unidades` entero ≥ 1 (default 1); congela snapshot; recalcula precio (× unidades); `venderIngredientesReceta` con base − omitidos + extras (porción × unidades).
 
+**El snapshot persistido no es lo que se cobra: se re-resuelve.** Aunque la línea de cuenta guarda un snapshot completo, `cerrarCuenta` (`salones.service.ts`) lo mapea de vuelta a **solo ids** (`ingredienteItemId` + `unidades`) y `ventas.service.ts` lo vuelve a resolver contra la carta viva, en la misma transacción que descuenta stock. Porción, unidad y `precioExtra` se releen de `receta_extras_permitidos`; lo único que sobrevive del congelado es **qué** eligió el comensal, no **cuánto** era en ese momento. Consecuencia práctica: un extra sacado de la carta entre la comanda y el cobro hace fallar el cobro con `400 'Extra no permitido para esta receta'`, no se cobra a un precio viejo.
+
+**De dónde sale la unidad de stock.** La unidad en la que vive el stock del ingrediente se resuelve desde `item_producto.unidad_medida`, por id, porque es propiedad del ingrediente y no de la carta — nunca desde la lista de extras de la receta. Antes se resolvía desde ahí y traía un fallback a la unidad de la **porción**: bastaba con que el ingrediente no apareciera en esa lista para que `convertirUnidad` hiciera g→g y 20 g de queso se descontaran como 20 kg. Hoy ese camino está tapado aguas arriba por la re-resolución de arriba, así que la corrección (2026-07-28, auditoría de `items`) es defensa en profundidad: saca la dependencia entre unidad de stock y carta. Si el ingrediente ya no está en el catálogo, **no se descuenta y se emite advertencia** — mismo criterio que `venderOpcionesGrupos` para una opción borrada.
+
 ### POST /cuentas/:id/lineas — `personalizacion`
 
 ```

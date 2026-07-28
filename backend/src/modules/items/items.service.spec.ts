@@ -2838,15 +2838,10 @@ describe('ItemsService', () => {
             bloqueante: false,
           },
         ])
+        // Unidad de stock del extra: se resuelve por id contra items+item_producto,
+        // no contra la lista de extras permitidos de la receta.
         .mockResolvedValueOnce([
-          {
-            ingrediente_item_id: 'queso',
-            ingrediente_nombre: 'Queso',
-            ingrediente_unidad_medida: 'kg',
-            cantidad: '30',
-            unidad_codigo: 'g',
-            precio_extra: '500.0000',
-          },
+          { item_id: 'queso', nombre: 'Queso', unidad_medida: 'kg' },
         ]);
       catalogServiceMock.convertirUnidad
         .mockResolvedValueOnce('2') // pan
@@ -2895,14 +2890,7 @@ describe('ItemsService', () => {
       managerMock.query
         .mockResolvedValueOnce([]) // sin ingredientes base
         .mockResolvedValueOnce([
-          {
-            ingrediente_item_id: 'queso',
-            ingrediente_nombre: 'Queso',
-            ingrediente_unidad_medida: 'kg',
-            cantidad: '30',
-            unidad_codigo: 'g',
-            precio_extra: '500.0000',
-          },
+          { item_id: 'queso', nombre: 'Queso', unidad_medida: 'kg' },
         ]);
       catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.12');
 
@@ -2930,6 +2918,81 @@ describe('ItemsService', () => {
         'g',
         'kg',
       );
+    });
+
+    it('descuenta bien un extra que ya no está en los extras permitidos de la receta', async () => {
+      // El admin sacó el queso de la carta después de congelar el snapshot. La
+      // unidad de STOCK sale del ingrediente, no de la lista de extras: si
+      // saliera de ahí, caería a la unidad de la PORCIÓN ('g'), convertirUnidad
+      // convertiría g→g y se descontarían 60 kg en vez de 0.06.
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin ingredientes base
+        .mockResolvedValueOnce([
+          { item_id: 'queso', nombre: 'Queso', unidad_medida: 'kg' },
+        ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.06');
+
+      await service.venderIngredientesReceta(managerMock as any, {
+        ...PARAMS,
+        snapshot: {
+          omitidos: [],
+          extras: [
+            {
+              ingredienteItemId: 'queso',
+              cantidad: '30',
+              unidadCodigo: 'g',
+              precioExtra: '500.0000',
+            },
+          ],
+        },
+      });
+
+      // La búsqueda es por id de ingrediente y tenant, no por la receta: es lo
+      // que la vuelve inmune a que el extra siga o no en la carta.
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('item_producto'),
+        [['queso'], TENANT],
+      );
+      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith(
+        '60',
+        'g',
+        'kg',
+      );
+      expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
+        managerMock,
+        expect.objectContaining({ itemId: 'queso', cantidad: '0.06' }),
+      );
+    });
+
+    it('no descuenta un extra cuyo ingrediente ya no existe: advierte en vez de descontar mal', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([]) // sin ingredientes base
+        .mockResolvedValueOnce([]); // el ingrediente del extra fue borrado
+
+      const advertencias = await service.venderIngredientesReceta(
+        managerMock as any,
+        {
+          ...PARAMS,
+          snapshot: {
+            omitidos: [],
+            extras: [
+              {
+                ingredienteItemId: 'queso',
+                cantidad: '30',
+                unidadCodigo: 'g',
+                precioExtra: '500.0000',
+              },
+            ],
+          },
+        },
+      );
+
+      expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+      expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
+      expect(advertencias).toEqual([
+        'Hamburguesa: no se pudo descontar un extra porque su ingrediente ya no está en el catálogo',
+      ]);
     });
 
     it('descuenta también las opciones de grupo del snapshot (siempre bloqueante)', async () => {
@@ -3134,6 +3197,80 @@ describe('ItemsService', () => {
       // ingredientes) NUNCA se llama: cero escrituras para esta receta.
       expect(spyReceta).not.toHaveBeenCalled();
       expect(inventarioServiceMock.registrarMovimiento).not.toHaveBeenCalled();
+      expect(advertencias).toEqual([
+        'Combo: no había stock suficiente de Hamburguesa, se vendió sin ese componente',
+      ]);
+    });
+
+    it('componente omitido por falta de stock → tampoco descuenta sus grupos de modificadores', async () => {
+      // El combo se vende sin la hamburguesa: la proteína que el cliente había
+      // elegido PARA esa hamburguesa tampoco salió de la cocina. Sin el filtro,
+      // el pre-chequeo lograba "cero escrituras" por el componente y la deriva
+      // de inventario se colaba igual por sus modificadores.
+      managerMock.query.mockResolvedValueOnce([
+        {
+          componente_item_id: 'receta-uuid',
+          componente_nombre: 'Hamburguesa',
+          tipo: 'receta',
+          cantidad: '1',
+          bloqueante: false,
+        },
+      ]);
+      jest
+        .spyOn(service as any, 'calcularDisponibleReceta')
+        .mockResolvedValueOnce(0);
+      jest.spyOn(service, 'venderIngredientesReceta').mockResolvedValue([]);
+      const spyOpciones = jest
+        .spyOn(service as any, 'venderOpcionesGrupos')
+        .mockResolvedValue(undefined);
+
+      const grupoDeLaHamburguesa = {
+        grupoId: 'proteina-uuid',
+        grupoNombre: 'Proteína',
+        opciones: [
+          {
+            itemId: 'chuleta-uuid',
+            nombre: 'Chuleta',
+            cantidad: '150',
+            unidadCodigo: 'g',
+            precioExtra: '1500',
+            unidades: '1',
+          },
+        ],
+      };
+
+      const advertencias = await service.venderComponentesCombo(
+        managerMock as any,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          comboItemId: COMBO_NO_BLOQ_ID,
+          comboNombre: 'Combo',
+          cantidadVendida: '2',
+          snapshot: {
+            omitidos: [],
+            extras: [],
+            componentes: [
+              {
+                componenteItemId: 'receta-uuid',
+                componenteNombre: 'Hamburguesa',
+                unidad: 1,
+                grupos: [grupoDeLaHamburguesa],
+              },
+            ],
+          },
+        },
+      );
+
+      // Una sola llamada: la de los grupos del combo en sí (snapshot.grupos).
+      // Sin el filtro habría una segunda con los grupos del componente omitido.
+      expect(spyOpciones).toHaveBeenCalledTimes(1);
+      expect(spyOpciones).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        [grupoDeLaHamburguesa],
+      );
       expect(advertencias).toEqual([
         'Combo: no había stock suficiente de Hamburguesa, se vendió sin ese componente',
       ]);

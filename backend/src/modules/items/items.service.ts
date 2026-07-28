@@ -2179,37 +2179,67 @@ export class ItemsService {
       (ing) => !omitidos.has(ing.ingredienteItemId),
     );
 
-    const extrasCat = params.snapshot?.extras.length
-      ? await this.obtenerExtrasPermitidos(
-          manager,
-          params.tenantId,
-          params.recetaItemId,
+    // La unidad de STOCK de un extra es propiedad del ingrediente
+    // (`item_producto.unidad_medida`), no de la lista de extras de la receta.
+    // Resolverla desde el catálogo de extras la ataba a que el extra siguiera
+    // en la carta, con un fallback a la unidad de la PORCIÓN que hacía que
+    // `convertirUnidad` convirtiera una unidad a sí misma (20 g de queso
+    // descontados como 20 kg). Hoy ese fallback no se alcanza —todo snapshot se
+    // re-resuelve contra la carta viva en esta misma transacción, así que un
+    // extra fuera de carta ya falló con 400 más arriba—, pero la dependencia
+    // entre unidad de stock y carta no tenía por qué existir.
+    const idsExtras = [
+      ...new Set(params.snapshot?.extras.map((e) => e.ingredienteItemId) ?? []),
+    ];
+    const extrasCatRows: {
+      item_id: string;
+      nombre: string;
+      unidad_medida: string;
+    }[] = idsExtras.length
+      ? await manager.query(
+          `SELECT i.item_id, i.nombre, ip.unidad_medida
+             FROM items i
+             JOIN item_producto ip ON ip.item_id = i.item_id
+            WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2
+              AND i.eliminado_el IS NULL`,
+          [idsExtras, params.tenantId],
         )
       : [];
+    const extrasCat = new Map(extrasCatRows.map((r) => [r.item_id, r]));
 
-    const extrasIngredientes =
-      params.snapshot?.extras.map((extra) => {
-        const cat = extrasCat.find(
-          (x) => x.ingredienteItemId === extra.ingredienteItemId,
-        );
+    const advertencias: string[] = [];
+
+    const extrasIngredientes = (params.snapshot?.extras ?? []).flatMap(
+      (extra) => {
+        const cat = extrasCat.get(extra.ingredienteItemId);
+        if (!cat) {
+          // Ingrediente borrado del catálogo: no se mueve stock de un ítem que
+          // ya no existe. Mismo criterio que `venderOpcionesGrupos` con una
+          // opción borrada, más la advertencia que aquel no emite.
+          advertencias.push(
+            `${params.recetaNombre}: no se pudo descontar un extra porque su ingrediente ya no está en el catálogo`,
+          );
+          return [];
+        }
         // Porción del extra × cuántas veces se agregó (unidades). Snapshots
         // antiguos sin `unidades` equivalen a 1.
         const cantidad = new Decimal(extra.cantidad)
           .mul(extra.unidades ?? '1')
           .toString();
-        return {
-          ingredienteItemId: extra.ingredienteItemId,
-          ingredienteNombre: cat?.ingredienteNombre ?? 'Extra',
-          ingredienteUnidadMedida:
-            cat?.ingredienteUnidadMedida ?? extra.unidadCodigo,
-          cantidad,
-          unidadCodigo: extra.unidadCodigo,
-          bloqueante: false,
-        };
-      }) ?? [];
+        return [
+          {
+            ingredienteItemId: extra.ingredienteItemId,
+            ingredienteNombre: cat.nombre,
+            ingredienteUnidadMedida: cat.unidad_medida,
+            cantidad,
+            unidadCodigo: extra.unidadCodigo,
+            bloqueante: false,
+          },
+        ];
+      },
+    );
 
     const todosIngredientes = [...ingredientes, ...extrasIngredientes];
-    const advertencias: string[] = [];
 
     for (const ing of todosIngredientes) {
       const cantidadPorReceta = new Decimal(ing.cantidad)
@@ -2308,6 +2338,9 @@ export class ItemsService {
     );
 
     const advertencias: string[] = [];
+    // Componentes que no se sirvieron: sus grupos de modificadores tampoco
+    // deben descontarse (ver el filtro de `gruposComponentes` más abajo).
+    const componentesOmitidos = new Set<string>();
 
     for (const comp of componentes) {
       const cantidadTotal = new Decimal(comp.cantidad)
@@ -2339,6 +2372,7 @@ export class ItemsService {
             advertencias.push(
               `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
             );
+            componentesOmitidos.add(comp.componente_item_id);
             continue;
           }
         }
@@ -2361,6 +2395,7 @@ export class ItemsService {
             advertencias.push(
               `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
             );
+            componentesOmitidos.add(comp.componente_item_id);
           } else {
             throw error;
           }
@@ -2398,6 +2433,7 @@ export class ItemsService {
           advertencias.push(
             `${params.comboNombre}: no había stock suficiente de ${comp.componente_nombre}, se vendió sin ese componente`,
           );
+          componentesOmitidos.add(comp.componente_item_id);
         } else {
           throw error;
         }
@@ -2419,9 +2455,14 @@ export class ItemsService {
     // snapshot). Cada entrada es UNA unidad → venderOpcionesGrupos ya
     // multiplica por cantidadVendida; no multiplicar por la cantidad del
     // componente (ya está enumerada como unidades separadas).
-    const gruposComponentes = (params.snapshot?.componentes ?? []).flatMap(
-      (c) => c.grupos,
-    );
+    // Se excluyen los componentes que no se sirvieron: si el combo se vendió
+    // sin la hamburguesa, la proteína que el cliente había elegido para ella
+    // tampoco salió de la cocina. Sin este filtro el pre-chequeo de arriba
+    // lograba "cero escrituras" por el componente y la deriva de inventario
+    // se colaba igual por sus modificadores.
+    const gruposComponentes = (params.snapshot?.componentes ?? [])
+      .filter((c) => !componentesOmitidos.has(c.componenteItemId))
+      .flatMap((c) => c.grupos);
     if (gruposComponentes.length) {
       await this.venderOpcionesGrupos(
         manager,

@@ -21,6 +21,7 @@ interface ItemResponse {
   id: string;
   costoActual: string | null;
   disponible: number | null;
+  stock: string | null;
 }
 interface VentaResponse {
   id: string;
@@ -300,5 +301,83 @@ describe('Recetas — flujo completo (e2e)', () => {
       .delete(`/api/items/${panId}`)
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(400);
+  });
+
+  it('7. descuenta un extra convirtiendo a la unidad de STOCK del ingrediente', async () => {
+    const paltaId = await crearIngrediente(
+      app,
+      token,
+      'Palta E2E',
+      'kg',
+      '5',
+      '4000',
+    );
+    const panLocalId = await crearIngrediente(
+      app,
+      token,
+      'Pan extras E2E',
+      'unidad',
+      '10',
+      '500',
+    );
+
+    const resReceta = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Hamburguesa extras E2E ${Date.now()}`,
+        precioBase: '4000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: panLocalId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        extrasPermitidos: [
+          {
+            ingredienteItemId: paltaId,
+            cantidad: '20',
+            unidadCodigo: 'g',
+            precioExtra: '500',
+          },
+        ],
+      });
+    expect(resReceta.status).toBe(201);
+    const recetaId = (resReceta.body as ItemResponse).id;
+
+    const resVenta = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [
+          {
+            itemId: recetaId,
+            cantidad: '1',
+            personalizacion: { extras: [{ ingredienteItemId: paltaId }] },
+          },
+        ],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4500' }],
+      });
+    expect(resVenta.status).toBe(201);
+    expect((resVenta.body as VentaResponse).advertenciasReceta ?? []).toEqual(
+      [],
+    );
+
+    // La porción del extra está en g y el stock de la palta en kg: 5 - 0.02.
+    // Si la unidad de stock saliera de la PORCIÓN en vez del ingrediente,
+    // convertirUnidad haría g→g y se habrían descontado 20 kg.
+    // Alcance real de este test: fija la propiedad (la unidad de stock sale del
+    // ingrediente) y ejecuta la query nueva contra Postgres — ningún e2e tocaba
+    // `extras`. NO discrimina el fix del código anterior: acá el extra sigue en
+    // la carta, así que la búsqueda vieja también resolvía 'kg'. Lo que cubre la
+    // regresión son los dos unit de `items.service.spec.ts`. Ver `resueltos.md`.
+    const resPalta = await request(app.getHttpServer())
+      .get(`/api/items/${paltaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect((resPalta.body as ItemResponse).stock).toBe('4.9800');
   });
 });

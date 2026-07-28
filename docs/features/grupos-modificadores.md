@@ -342,6 +342,15 @@ salida; receta → expande a sus ingredientes fijos; servicio → nada), por cad
 — descuenta la opción elegida (ej. la proteína), siempre bloqueante, dentro de
 la misma transacción de la venta.
 
+**Solo se descuenta lo que se sirvió.** Si un componente **no bloqueante** se
+omite por falta de stock (el combo se vendió sin la hamburguesa), sus grupos
+**tampoco** se descuentan: la proteína elegida para esa hamburguesa no salió de
+la cocina. Corregido 2026-07-28 tras la auditoría de `items`: antes el
+pre-chequeo lograba "cero escrituras" por el componente y la deriva de
+inventario se colaba igual por sus modificadores. El caso vive en
+`items.service.spec.ts` → *"componente omitido por falta de stock → tampoco
+descuenta sus grupos de modificadores"*.
+
 **Merge en Salones.** La clave de merge de línea incluye componente/unidad/
 opción — dos combos idénticos con proteínas distintas por unidad no se
 mergean en una sola línea.
