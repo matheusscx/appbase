@@ -1889,8 +1889,12 @@ describe('ItemsService', () => {
 
       await service.remove(TENANT, ITEM_ID);
 
-      expect(managerMock.query).toHaveBeenCalledWith(
-        expect.stringContaining('eliminado_el = NOW()'),
+      // Llamada 3: la UNION de uso es la 1, el soft-delete de extras es la 2
+      // — ambas comparten firma `[ITEM_ID, TENANT]` con esta, así que hay que
+      // aislar la del `UPDATE items` puntual para no matchear cualquiera.
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        3,
+        expect.stringContaining('UPDATE items'),
         [ITEM_ID, TENANT],
       );
     });
