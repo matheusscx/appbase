@@ -468,28 +468,62 @@ auditoría produce información, no diffs. Orden = severidad.
 
 ### Huecos de test (el gate verde no los ve)
 
-- [ ] **El guard de estado de la caja no lo ejercita ningún test real** (test,
+- [x] ~~**El guard de estado de la caja no lo ejercita ningún test real**~~ — cerrado
+  2026-07-27 con tres e2e: una caja **cerrada** y una **en conciliación** rechazan el
+  movimiento, y una nota de crédito con devolución no puede sacar plata de una caja en
+  conciliación.
+  ⚠️ **El detalle que importa:** `registrarMovimiento` chequea el estado **dos veces** (el
+  lock y un `findOne` posterior), así que relajar solo `bloquearCajaAbierta` queda tapado
+  por el otro — lo comprobé y el mutante sobrevivía. El camino de la **nota de crédito** es
+  donde ese lock está solo, y ahí el mutante de una sola capa sí mata el test. Es defensa en
+  profundidad real, no debilidad del test, pero conviene saber cuál es el que discrimina.
+  Detalle original: (test,
   `caja/caja.service.spec.ts:209`, `:460`, `:827`) — los tres mockean
   `managerMock.query.mockResolvedValueOnce([])` sin relación con el SQL emitido: el
   resultado lo decide el mock, no el `WHERE estado='abierta'`. Y `test/caja.e2e-spec.ts`
   nunca intenta escribir contra una caja `cerrada`/`en_conciliacion`. Relajar el filtro a
   `estado IN ('abierta','en_conciliacion')` no rompe nada. Es justamente la defensa que dos
   lentes dieron por buena leyendo el código.
-- [ ] **El criterio `MANUAL` (`PESOS` y `MONTOS`) no tiene ningún test de reparto** (test) —
+- [x] ~~**El criterio `MANUAL` (`PESOS` y `MONTOS`) no tiene ningún test de reparto**~~ —
+  cerrado 2026-07-27: `MANUAL/PESOS` reparte 3:1 por el peso configurado, y `MANUAL/MONTOS`
+  se cubre por donde de verdad importa —**recalcular** una liquidación existente no pisa los
+  montos fijados a mano—, no por el preview, donde los ajustes escriben el monto **después**
+  del reparto y la rama es irrelevante.
+  ⚠️ **La rama `MANUAL+MONTOS` de `repartirGrupo` es código muerto CONFIRMADO, y sigue sin
+  test que la discrimine** — a propósito, porque no se puede escribir uno honesto. Está
+  muerta por dos caminos: `redistribuirGrupo` tiene su **propio** chequeo de
+  `MANUAL+MONTOS` que la saltea antes de llegar, y el único call site que sí la alcanza
+  (`buildParticipantesData`) produce el mismo `'0.0000'` que daría el retorno temprano de
+  "suma de pesos cero". Borrarla no cambia ningún resultado observable.
+  Escribí un test que decía cubrirla y **no la cubría**: pasaba por el mecanismo genérico de
+  `ajustes.montosManuales`, que pisa el monto para cualquier criterio después del reparto.
+  Lo saqué en vez de dejarlo dando una falsa sensación de cobertura. **Cierre correcto:**
+  eliminar la rama, no testearla. Detalle original: (test) —
   el único `criterio` ejercido en `liquidacion-propinas.service.spec.ts` y en el e2e es
   `PARTES_IGUALES`/`VENTAS_NETAS`. `validarManualMontos` se puede borrar entera sin que
   falle nada. (`propina-distribucion.service.spec.ts` sí prueba `MANUAL`, pero solo a nivel
   **config**, no de reparto.)
-- [ ] **El test de partes iguales no discrimina `PARTES_IGUALES` de `CANTIDAD_CUENTAS`**
+- [x] ~~**El test de partes iguales no discrimina `PARTES_IGUALES` de `CANTIDAD_CUENTAS`**~~
+  — cerrado 2026-07-27 con un fixture **asimétrico** (un garzón cierra dos cuentas y el otro
+  una), que es lo que separa las dos fórmulas: 75/75 contra 100/50. Tres mutantes cruzados
+  verificados —que partes iguales devuelva cuentas, que cuentas devuelva 1, y que el peso
+  manual se ignore— y cada uno mata su propio test. Detalle original:
   (test, `propinas/liquidacion-propinas.service.spec.ts:151-186`) — el fixture da
   exactamente 1 tip a cada garzón, así que `cuentas = 1` para ambos y las dos fórmulas dan
   `75.0000`/`75.0000`. `CANTIDAD_CUENTAS` no aparece en ningún test. Es el mismo error del
   test del vuelto (ver [`anti-patterns.md`](anti-patterns.md)): el escenario tiene que
   descartar las implementaciones incorrectas, no coincidir con ellas.
-- [ ] **`actualizarConfig` no assertea `result.participantes`** (test,
+- [x] ~~**`actualizarConfig` no assertea `result.participantes`**~~ — cerrado 2026-07-27
+  junto con el fix de conservación: su fixture tenía pool 150 y **cero tips**, un estado
+  imposible, y ahora ejerce el reparto de verdad (VENTAS_NETAS sobre bases 1000 y 500 → 100
+  y 50; con el criterio viejo daría 75/75). Detalle original: (test,
   `propinas/liquidacion-propinas.service.spec.ts:348-389`) — si `crearParticipantes`
   devolviera siempre `[]` el test sigue verde, porque el fixture monta `tips = []`.
-- [ ] **El e2e de historial por `cajonId` no discrimina** (test,
+- [x] ~~**El e2e de historial por `cajonId` no discrimina**~~ — cerrado 2026-07-27: ahora
+  abre la caja el **cajero** y consulta el **supervisor**, que es para lo que existe la rama
+  `cajonId && tieneVerTodas`. Antes consultaba el mismo usuario que había abierto, así que
+  el filtro "solo mis cajas" daba idéntico resultado y borrar la rama no rompía nada.
+  Detalle original: (test,
   `test/caja.e2e-spec.ts:331-339`) — quien consulta es el mismo usuario que abrió la caja,
   así que borrar la rama `cajonId && tieneVerTodas` (`caja/caja.service.ts:949`) sigue dando
   200 con array no vacío. Solo assertea `status` y `Array.isArray`.

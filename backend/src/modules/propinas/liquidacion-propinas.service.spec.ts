@@ -6,6 +6,7 @@ import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { BaseVentasGrupo } from './enums/base-ventas-grupo.enum';
 import { CriterioDistribucion } from './enums/criterio-distribucion.enum';
 import { EstadoLiquidacion } from './enums/estado-liquidacion.enum';
+import { ManualModo } from './enums/manual-modo.enum';
 import { OrigenParticipante } from './enums/origen-participante.enum';
 import { TipoEventoLiquidacion } from './enums/tipo-evento-liquidacion.enum';
 import { LiquidacionPropinas } from './entities/liquidacion-propinas.entity';
@@ -53,10 +54,10 @@ describe('LiquidacionPropinasService', () => {
         porcentaje: '1.000000',
         criterio: CriterioDistribucion.PARTES_IGUALES,
         baseVentas: BaseVentasGrupo.TOTAL_FINAL,
-        manualModo: null,
+        manualModo: null as ManualModo | null,
         activo: true,
         orden: 0,
-        pesos: [],
+        pesos: [] as { garzonId: string; peso: string }[],
       },
     ],
   };
@@ -369,6 +370,112 @@ describe('LiquidacionPropinasService', () => {
 
       expect(result.poolTotal).toBe('0.0000');
       expect(result.grupos.every((g) => g.montoGrupo === '0.0000')).toBe(true);
+    });
+  });
+
+  // De los cinco criterios, el spec solo ejercía PARTES_IGUALES y VENTAS_NETAS.
+  // Peor: el fixture compartido le da UN tip a cada garzón, así que `cuentas`
+  // vale 1 para ambos y PARTES_IGUALES y CANTIDAD_CUENTAS dan lo mismo — el test
+  // de partes iguales no descartaba la otra fórmula.
+  describe('criterios de distribución que no se ejercían', () => {
+    // Tips asimétricos: garzon-1 cierra DOS cuentas y garzon-2 una. Con esto las
+    // dos fórmulas se separan (75/75 vs 100/50) y cada test descarta a la otra.
+    const tipsAsimetricos = [
+      { ...tips[0], venta_propina_id: 'a1', monto_pagado: '50.0000' },
+      { ...tips[0], venta_propina_id: 'a2', monto_pagado: '50.0000' },
+      { ...tips[1], venta_propina_id: 'a3', monto_pagado: '50.0000' },
+    ];
+
+    function mockea(
+      grupos: (typeof config)['grupos'],
+      filas = tipsAsimetricos,
+    ) {
+      distribucion.obtener.mockResolvedValue({ ...config, grupos });
+      manager.query
+        .mockReset()
+        .mockResolvedValueOnce(monedaRows)
+        .mockResolvedValueOnce(filas)
+        .mockResolvedValueOnce([]);
+    }
+
+    const crear = () =>
+      service.crear(TENANT, USER, {
+        fechaDesde: '2026-07-17T00:00:00.000Z',
+        fechaHasta: '2026-07-18T00:00:00.000Z',
+        turnoIds: ['turno-1'],
+      });
+
+    const montos = (r: {
+      participantes: { garzonId: string; monto: string }[];
+    }) => Object.fromEntries(r.participantes.map((p) => [p.garzonId, p.monto]));
+
+    it('PARTES_IGUALES ignora cuántas cuentas cerró cada uno', async () => {
+      mockea([{ ...config.grupos[0] }]);
+      expect(montos(await crear())).toEqual({
+        'garzon-1': '75.0000',
+        'garzon-2': '75.0000',
+      });
+    });
+
+    it('CANTIDAD_CUENTAS reparte por cuentas cerradas (2:1), no en partes iguales', async () => {
+      mockea([
+        {
+          ...config.grupos[0],
+          criterio: CriterioDistribucion.CANTIDAD_CUENTAS,
+        },
+      ]);
+      expect(montos(await crear())).toEqual({
+        'garzon-1': '100.0000',
+        'garzon-2': '50.0000',
+      });
+    });
+
+    // Donde la rama de MANUAL+MONTOS importa de verdad no es el preview —ahí los
+    // ajustes pisan el monto DESPUÉS del reparto— sino al recalcular una
+    // liquidación existente: sin ella, recalcular pone en cero los montos que
+    // alguien fijó a mano.
+    it('recalcular NO pisa los montos manuales de un grupo MANUAL+MONTOS', async () => {
+      const grupoManual = {
+        ...grupoBase(),
+        criterio: CriterioDistribucion.MANUAL,
+        manualModo: ManualModo.MONTOS,
+      };
+      manager.findOne.mockResolvedValueOnce(liquidacionBase());
+      manager.find
+        .mockResolvedValueOnce([grupoManual])
+        .mockResolvedValueOnce([
+          participanteBase('garzon-1', '120.0000'),
+          participanteBase('garzon-2', '30.0000'),
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      const r = await service.actualizar(TENANT, USER, 'liq-1', {});
+
+      expect(montos(r)).toEqual({
+        'garzon-1': '120.0000',
+        'garzon-2': '30.0000',
+      });
+    });
+
+    it('MANUAL + PESOS reparte por el peso configurado (3:1)', async () => {
+      mockea([
+        {
+          ...config.grupos[0],
+          criterio: CriterioDistribucion.MANUAL,
+          manualModo: ManualModo.PESOS,
+          pesos: [
+            { garzonId: 'garzon-1', peso: '3' },
+            { garzonId: 'garzon-2', peso: '1' },
+          ],
+        },
+      ]);
+      const r = await crear();
+      const m = montos(r);
+      // 150 en 3:1 con moneda sin decimales: mayores restos desempata por id.
+      expect(Number(m['garzon-1']) + Number(m['garzon-2'])).toBe(150);
+      expect(Number(m['garzon-1'])).toBeGreaterThan(Number(m['garzon-2']));
+      expect(Number(m['garzon-1'])).toBe(113);
     });
   });
 

@@ -355,14 +355,32 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       expect(limpiar.status).toBe(200);
     });
 
-    it('el historial filtrado por cajonId responde 200 y devuelve una lista', async () => {
+    // Antes este test consultaba con el MISMO usuario que había abierto la caja,
+    // así que borrar la rama `cajonId && tieneVerTodas` de `buildHistorialFilters`
+    // —que quita la restricción por usuario— seguía devolviendo 200 con filas: el
+    // filtro "solo mis cajas" daba el mismo resultado. La rama existe para ver
+    // cajas AJENAS por cajón, así que el que abre y el que consulta tienen que ser
+    // personas distintas.
+    it('el historial por cajonId muestra la caja de OTRO usuario (supervisión)', async () => {
+      const abrir = await request(app.getHttpServer())
+        .post('/api/caja/abrir')
+        .set('Authorization', `Bearer ${tokenCajero}`)
+        .send({ cajonId, saldoInicial: '10000.0000' });
+      expect(abrir.status).toBe(201);
+      const cajaDelCajero = (abrir.body as CajaResponse).id;
+
       const r = await request(app.getHttpServer())
         .get(`/api/caja?cajonId=${cajonId}`)
         .set('Authorization', `Bearer ${tokenSupervisor}`);
       expect(r.status).toBe(200);
-      const data = (r.body as { data: Array<{ cajonNombre: string | null }> })
-        .data;
-      expect(Array.isArray(data)).toBe(true);
+      const data = (r.body as { data: Array<{ id: string }> }).data;
+      // Sin la rama de supervisión, el filtro por usuario propio dejaría fuera
+      // esta caja y el array vendría vacío.
+      expect(data.map((c) => c.id)).toContain(cajaDelCajero);
+
+      await cerrarEnDosFases(app, cajaDelCajero, tokenCajero, [
+        { metodoPagoId: null, montoContado: '10000.0000' },
+      ]);
     });
   });
 
@@ -921,6 +939,148 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
           ],
         });
       expect([200, 201]).toContain(cerrarOk.status);
+    });
+  });
+
+  // `bloquearCajaAbierta` filtra `estado = 'abierta'`, pero los tres unit que
+  // dicen cubrirlo mockean la query con `mockResolvedValueOnce([])`, que ignora
+  // el SQL: el resultado lo decide el mock, no el WHERE. Relajar el filtro a
+  // `IN ('abierta','en_conciliacion')` no rompía nada. Esto lo ejerce de verdad,
+  // contra los DOS estados que no deben aceptar escritura.
+  describe('escribir contra una caja que no está abierta', () => {
+    const FALTA_EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440291';
+    const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+    const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+    let cajonEstadoId: string;
+    let itemEstadoId: string;
+
+    beforeAll(async () => {
+      const r = await request(app.getHttpServer())
+        .post('/api/cajones')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ nombre: `E2E Estado ${Date.now()}` });
+      cajonEstadoId = (r.body as CajonResponse).id;
+
+      // Servicio (sin stock): no compite por el stock del producto demo.
+      const item = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          nombre: `E2E Estado Servicio ${Date.now()}`,
+          precioBase: '5000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        });
+      itemEstadoId = (item.body as { id: string }).id;
+    });
+
+    afterAll(async () => {
+      if (itemEstadoId) {
+        await request(app.getHttpServer())
+          .delete(`/api/items/${itemEstadoId}`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+      }
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonEstadoId}`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`);
+    });
+
+    // `abrirOReusarCaja` y no un POST directo: tolera el 409 por un residuo de
+    // una corrida local abortada, que es la fuga que este archivo ya sufrió.
+    const abrir = () => abrirOReusarCaja(app, tokenSupervisor, cajonEstadoId);
+
+    function movimiento(cajaId: string) {
+      return request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/movimientos`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ tipo: 'entrada', concepto: 'no debería entrar', monto: '100' });
+    }
+
+    it('una caja CERRADA rechaza el movimiento', async () => {
+      const cajaId = await abrir();
+      // Cuadra → la fase 1 auto-cierra.
+      const cierre = await cerrarEnDosFases(app, cajaId, tokenSupervisor, [
+        { metodoPagoId: null, montoContado: '10000.0000' },
+      ]);
+      expect((cierre.body as { estado?: string }).estado).toBe('cerrada');
+
+      const r = await movimiento(cajaId);
+      expect(r.status).toBe(403);
+    });
+
+    it('una caja EN CONCILIACIÓN también lo rechaza', async () => {
+      const cajaId = await abrir();
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '9000.0000' }] });
+      expect((conteo.body as { estado: string }).estado).toBe(
+        'en_conciliacion',
+      );
+
+      // Es el caso que distingue: una caja en conciliación sigue "ocupando",
+      // pero ya congeló su arqueo y no puede recibir plata nueva.
+      const r = await movimiento(cajaId);
+      expect(r.status).toBe(403);
+
+      // Higiene: liberar el cajón.
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          lineas: [
+            { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
+          ],
+        });
+      expect([200, 201]).toContain(cerrar.status);
+    });
+
+    // Los dos tests de arriba NO discriminan una regresión de una sola capa:
+    // `registrarMovimiento` chequea el estado dos veces (el lock y un `findOne`),
+    // así que relajar solo `bloquearCajaAbierta` queda tapado por el otro.
+    // La devolución de una nota de crédito es el camino donde ese lock está
+    // SOLO: si se relaja, se saca plata de una caja que ya congeló su arqueo.
+    it('la devolución de una NC no puede sacar plata de una caja en conciliación', async () => {
+      const cajaId = await abrir();
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          lineas: [{ itemId: itemEstadoId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '5950.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      const ventaId = (venta.body as { id: string }).id;
+
+      // La caja pasa a conciliación: su arqueo quedó congelado.
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/conteo`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '1000.0000' }] });
+      expect((conteo.body as { estado: string }).estado).toBe(
+        'en_conciliacion',
+      );
+
+      const nc = await request(app.getHttpServer())
+        .post(`/api/ventas/${ventaId}/notas-credito`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          monto: '5000.0000',
+          comentario: 'devolución e2e',
+          devolverDinero: true,
+        });
+      expect(nc.status).toBe(403);
+
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          lineas: [
+            { metodoPagoId: null, motivoDiferenciaId: FALTA_EFECTIVO_ID },
+          ],
+        });
+      expect([200, 201]).toContain(cerrar.status);
     });
   });
 
