@@ -31,6 +31,23 @@ const CLP: MonedaTenantApi = {
   valorDelDia: null,
 }
 
+// decimales > 0 para ejercitar la rama de `buildMask` con fracción y separadorDecimal,
+// que con CLP (decimales: 0) nunca corre.
+const USD: MonedaTenantApi = {
+  monedaId: 'usd-1',
+  nombre: 'Dólar',
+  codigoIso: 'USD',
+  simbolo: 'US$',
+  decimales: 2,
+  separadorDecimal: '.',
+  separadorMiles: ',',
+  locale: 'en-US',
+  habilitada: true,
+  esDefault: false,
+  esOficial: false,
+  valorDelDia: null,
+}
+
 // UInput (Nuxt UI) no monta sin contexto Nuxt real (ver AdvertenciasPrecio.spec.ts).
 // Acá además `MoneyInput` lo usa como input controlado (`:model-value`,
 // `:disabled`), así que el stub necesita un `<input>` real para que
@@ -45,7 +62,7 @@ const stubs = {
 describe('MoneyInput', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    useMonedasStore().hydrate([CLP], 'tenant-1')
+    useMonedasStore().hydrate([CLP, USD], 'tenant-1')
   })
 
   it('muestra el monto formateado según la moneda', () => {
@@ -75,5 +92,34 @@ describe('MoneyInput', () => {
     })
 
     expect(wrapper.find('input').element.disabled).toBe(true)
+  })
+
+  // `syncFromMaska` (MoneyInput.vue) es lo que persiste: emite `update:modelValue` con
+  // `detail.unmasked`, el monto sin separadores de miles ni prefijo. La directiva
+  // `v-maska` real queda adosada al `<input>` del stub de `UInput` (su root es el
+  // elemento nativo), así que escribir en él la dispara de verdad — no hace falta
+  // simular su callback a mano.
+  it('al escribir emite el monto sin máscara, no el texto formateado', async () => {
+    const wrapper = mount(MoneyInput, {
+      props: { modelValue: '', monedaId: 'clp-1' },
+      global: { stubs },
+    })
+
+    await wrapper.find('input').setValue('1500000')
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['1500000']])
+  })
+
+  // Con decimales > 0 la máscara incluye el separador decimal (`buildMask` toma la
+  // rama de fracción); el emit debe seguir siendo el monto sin máscara.
+  it('con una moneda de decimales > 0 el emit conserva el separador decimal', async () => {
+    const wrapper = mount(MoneyInput, {
+      props: { modelValue: '', monedaId: 'usd-1' },
+      global: { stubs },
+    })
+
+    await wrapper.find('input').setValue('1500.5')
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([['1500.5']])
   })
 })
