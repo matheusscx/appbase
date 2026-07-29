@@ -418,9 +418,13 @@ Spec al lado del fuente: `app/components/Foo.spec.ts` junto a `app/components/Fo
 Corre con `npm test`, que ya está en CI.
 
 **Cómo se monta:** `mount` plano de `@vue/test-utils` con `global.stubs` explícitos para los
-componentes `U*`. **No** sirve `mountSuspended` con entorno `nuxt`: se probó y falla igual.
-La causa medida es que los componentes de Nuxt UI llaman `useNuxtApp()`/`useAppConfig()` en
-su propio `setup()`, así que revientan antes de renderizar nada, sin que importe el entorno.
+componentes `U*`. Con `mount` plano el error medido es `[nuxt] instance unavailable`: los
+componentes de Nuxt UI llaman `useNuxtApp()`/`useAppConfig()` en su propio `setup()` y
+revientan antes de renderizar nada. Con `mountSuspended` y entorno `nuxt` el contexto Nuxt sí
+queda disponible —ese error desaparece— pero la falla persiste con otra causa: `UTooltip`
+necesita además un `TooltipProviderContext`, que en la app real lo provee `UApp` en la raíz.
+Envolver el montaje en `UApp` **no se probó**; se descartó por costo/beneficio frente al stub
+explícito, no por imposibilidad medida.
 
 Dos formas de stub, según lo que el test necesite inspeccionar:
 - `UIcon: true` y similares cuando alcanza con que el componente esté presente — VTU los
@@ -450,7 +454,10 @@ reloj.
 
 - **clases de estilo** (`text-warning`, `truncate`, `size-3.5`). Es afirmar la
   implementación, y happy-dom no calcula layout, así que el assert no valida nada. El
-  truncado roto en hijos flex lo cubre `scripts/check-design-tokens.mjs`;
+  truncado roto en hijos flex lo cubre `scripts/check-design-tokens.mjs`, pero solo cuando
+  el hijo lleva `flex-1`/`flex-auto`/`basis-*` explícito — cualquier otro hijo directo de un
+  `.flex` es ítem flex igual (min-width:auto por default) y sufre el mismo bug sin que la
+  regla lo detecte;
 - **snapshots**. Congelan markup y se aprueban a ciegas cuando cambian.
 
 **Un test no cuenta hasta fallar contra su estado previo o su mutación.** Romper la línea
