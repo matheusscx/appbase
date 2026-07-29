@@ -32,7 +32,10 @@ const EXCLUDE = 'app/components/caja/'
 // default, así que sin min-w-0 el `truncate` no entra en efecto y el texto desborda.
 // El patrón correcto cuando min-w-0 va en un wrapper ancestro NO dispara acá.
 // Límite conocido: mira el `class` estático de una línea. No ve `:class` dinámico ni
-// clases que ponga un componente padre. Es un cedazo barato, no una garantía.
+// clases que ponga un componente padre. Y el hueco principal: solo dispara si el elemento
+// lleva `flex-1`/`flex-auto`/`basis-*` explícito, pero en CSS cualquier hijo directo de un
+// `.flex` ya es ítem flex (min-width:auto por default) y sufre el mismo bug aunque no
+// declare ninguna de esas clases. Es un cedazo barato, no una garantía.
 const FLEX_CHILD = /\b(flex-1|flex-auto|basis-[\w./[\]-]+)\b/
 const LAYOUT_HINT = 'agregá min-w-0: un ítem flex tiene min-width:auto y sin eso truncate no corta'
 

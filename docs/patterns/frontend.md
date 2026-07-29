@@ -405,3 +405,73 @@ Puntos de choque (resueltos por ese orden):
   custom va en componente propio con `<style scoped>`, nunca selectores globales
   (revisar `.nuxt/ui/<component>.ts` antes de escribir CSS custom).
 - **Orden de invocación entre skills:** el flujo de 3 pasos de arriba.
+
+---
+
+## 15. Tests de render de componentes
+
+Los helpers puros van a composables y se testean ahí (§10). Lo que **no** se puede extraer
+—qué renderiza el template, qué llega por props, qué sale por eventos— se cubre montando el
+componente.
+
+Spec al lado del fuente: `app/components/Foo.spec.ts` junto a `app/components/Foo.vue`.
+Corre con `npm test`, que ya está en CI.
+
+**Cómo se monta:** `mount` plano de `@vue/test-utils` con `global.stubs` explícitos para los
+componentes `U*`. **No** sirve `mountSuspended` con entorno `nuxt`: se probó y falla igual.
+La causa medida es que los componentes de Nuxt UI llaman `useNuxtApp()`/`useAppConfig()` en
+su propio `setup()`, así que revientan antes de renderizar nada, sin que importe el entorno.
+
+Dos formas de stub, según lo que el test necesite inspeccionar:
+- `UIcon: true` y similares cuando alcanza con que el componente esté presente — VTU los
+  renderiza como `u-icon-stub`, `u-button-stub`.
+- stub con template propio cuando hay que inspeccionar un elemento real, p. ej. `UInput`
+  renderizando un `<input>` de verdad para poder leer su `value`. Está en `MoneyInput.spec.ts`.
+
+**La convención que importa: las aserciones se atan al tag renderizado del stub** (o al
+elemento real que el stub renderiza), **nunca a un selector de atributo genérico**. Es lo
+único que hace fallar el test cuando el tag del componente está mal escrito (`<UIconn>` por
+`<UIcon>`). Está medido que `vue-tsc --noEmit` **no** caza ese typo: salida vacía, exit 0.
+
+Costo de la capa: `npm test` pasó de 275 tests en 24 archivos a 291 en 28, de 3.7 s a ~4 s de
+reloj.
+
+**Qué afirma un test de render:**
+
+- lo que ve el usuario: texto renderizado, cuántos elementos aparecen;
+- el caso vacío — que **no renderice nada**;
+- `aria-label` y texto accesible;
+- eventos emitidos;
+- **fallthrough de atributos**: que la `class` que pasa el padre aterrice en el root. Un
+  componente cuyo único nodo raíz es un `v-for` compila a `Fragment` y Vue **descarta el
+  `class` en silencio** — ese bug es invisible para build, typecheck y lint.
+
+**Qué NO afirma:**
+
+- **clases de estilo** (`text-warning`, `truncate`, `size-3.5`). Es afirmar la
+  implementación, y happy-dom no calcula layout, así que el assert no valida nada. El
+  truncado roto en hijos flex lo cubre `scripts/check-design-tokens.mjs`;
+- **snapshots**. Congelan markup y se aprueban a ciegas cuando cambian.
+
+**Un test no cuenta hasta fallar contra su estado previo o su mutación.** Romper la línea
+nueva solo prueba que el test la toca; hay que revertir al comportamiento anterior y ver el
+rojo. Si un mutante deja todo en verde, eso **es** el hallazgo: ese código no está cubierto.
+
+**Store de Pinia:** `setActivePinia(createPinia())` en un `beforeEach` y sembrar con el
+método de hidratación del store —`useMonedasStore().hydrate(list, tenantId)`—, que es el
+patrón de `app/stores/monedas.spec.ts`. Sin `@pinia/testing`. Además hace falta
+`vi.mock('#app/nuxt', ...)` para `useRuntimeConfig`, porque el store lo llama en su cuerpo.
+El patrón completo está en `app/stores/monedas.spec.ts` y en `MoneyInput.spec.ts`.
+
+**Límites conocidos:**
+
+- happy-dom **no calcula layout**: no hay anchos ni overflow. Nada de lo que dependa de
+  medir se puede afirmar acá.
+- Un componente `U*` que llama `useAppConfig()`/`useNuxtApp()` en su `setup()` no monta sin
+  contexto Nuxt, **aunque sea el root del componente bajo test**. La salida es stubearlo con
+  template propio: así se cubrió `AppDrawer`, cuyo root es `UDrawer`. El diagnóstico
+  inicial —que la causa era el teleport— **era incorrecto**: la falla ocurre en `setup()`,
+  antes de cualquier render o teleport.
+- Riesgo del propio patrón: un stub con template propio puede volverse tan permisivo que el
+  test pase por construcción. La contraprueba es la mutación — si romper el componente bajo
+  test no pone nada en rojo, el test está afirmando el stub y no el componente.

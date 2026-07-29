@@ -100,6 +100,18 @@ identificamos con ubicación concreta.
   diagnosticarlo. `ventas.e2e-spec.ts` ya está corregido (commit `c8e3abe`): copiar ese
   helper `cerrarCaja`, que además **asevera** el cierre en vez de tragarse el error.
   El patrón bueno de referencia es `cerrarEnDosFases` en `caja.e2e-spec.ts:105`.
+- [ ] **Cuatro hijos directos de un `.flex` que truncan sin `min-w-0` en ningún
+  ancestro — candidatos a verificar, no bugs confirmados** (frontend) — la revisión
+  de la tarea de tests de render encontró estos cuatro al mirar `check-design-tokens.mjs`
+  de cerca: la regla solo dispara con `flex-1`/`flex-auto`/`basis-*` explícito, pero
+  cualquier hijo directo de un contenedor `.flex` ya es ítem flex (`min-width:auto` por
+  default) y puede sufrir el mismo desborde sin declarar ninguna de esas clases. Nadie
+  los vio desbordar todavía y happy-dom no mide layout, así que ningún test de render
+  puede confirmarlo — hace falta mirarlos en el navegador con contenido largo:
+  - `app/components/caja/CajaAperturaGrid.vue:95`
+  - `app/components/caja/CajaCajonesGrid.vue:56` y `:71`
+  - `app/layouts/dashboard.vue:184`
+  Fuera de alcance de esta entrega: no se tocan, solo se dejan anotados.
 
 ---
 
