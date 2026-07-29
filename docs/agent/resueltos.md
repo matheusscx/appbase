@@ -723,3 +723,22 @@ siguen diferidos están en `pendientes.md`.
   está cerrado y documentado en su propia entrada, arriba en esta misma sección de
   auditoría ("Vender un extra cuyo catálogo cambió tras congelar el snapshot descuenta
   1000× de más").
+- [x] ~~**`advertenciasReceta` de la venta ya no son solo de receta**~~ — cerrado
+  2026-07-28, rename mecánico sin cambio de forma (sigue siendo `string[]` plano).
+  `ventas.service.ts` renombra la variable local y la propiedad de la respuesta a
+  `advertencias`; tocó las 21 referencias esperadas en 7 archivos (`ventas.service.ts`,
+  `ventas.service.spec.ts`, las cuatro suites e2e de `combos`/`recetas`/
+  `grupos-modificadores`/`grupos-modificadores-overrides`, y `pos.vue`).
+  El rename destapó un shadowing que no estaba en el plan: dentro del `for` de
+  movimientos de inventario, los bloques `receta` y `combo` ya declaraban su propio
+  `const advertencias` local antes de acumular al array externo — con el externo
+  renombrado igual, `advertencias.push(...advertencias)` habría hecho que el array se
+  duplicara a sí mismo en vez de sumar los avisos de receta/combo, silencioso porque
+  compila y tipa igual. Se renombraron esos dos locales a `advertenciasIngrediente` y
+  `advertenciasComponente` para que el externo pueda ocupar `advertencias` sin
+  colisión; misma lógica, ningún cambio de comportamiento.
+  El riesgo real de un rename de campo no es el gate en rojo: es que el frontend siga
+  leyendo el nombre viejo, reciba `undefined`, y el `?? []` de `pos.vue` lo convierta en
+  lista vacía sin que ningún test lo note — se verificó con grep de cero resultados
+  sobre todo el repo (backend, frontend, docs) después del cambio, no solo con las
+  cuatro suites e2e en verde.

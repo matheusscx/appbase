@@ -88,7 +88,7 @@ Columnas:
 | Drawer — opcional / extra sin stock | Visible con warning; toggle/checkbox deshabilitado |
 | Drawer — bloqueante sin stock | Receta atenuada en catálogo (`disponible === 0`); reglas existentes |
 | Venta — bloqueante restante sin stock | Aborta transacción (igual que recetas base) |
-| Venta — extra sin stock (carrera) | Tratado como no bloqueante: omitir descuento + `advertenciasReceta` |
+| Venta — extra sin stock (carrera) | Tratado como no bloqueante: omitir descuento + `advertencias` |
 
 ---
 

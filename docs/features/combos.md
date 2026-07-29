@@ -36,7 +36,7 @@ de 5), reutilizando el costeo y la venta de productos/recetas ya existentes.
   'receta' | 'servicio'` (nunca otro combo — sin combos anidados), cantidad > 0.
 - Venta: descuento de stock por componente vía `ItemsService.venderComponentesCombo`,
   reutilizando `venderIngredientesReceta` para componentes tipo receta; respuesta
-  con `advertenciasReceta`.
+  con `advertencias`.
 - `disponible` calculado al vuelo en el listado (mínimo entre componentes fijos
   **bloqueantes**; conservador — ver Notes).
 - Bloqueo de soft-delete de un item usado como componente vivo de un combo.
@@ -156,7 +156,7 @@ aplica el efecto según su tipo:
 
 Bloqueante sin stock → aborta la transacción completa de la venta. No
 bloqueante sin stock: se captura el error, se agrega un mensaje a
-`advertenciasReceta` en la respuesta y la venta continúa sin ese componente
+`advertencias` en la respuesta y la venta continúa sin ese componente
 (mismo criterio "warn, don't block" que recetas).
 
 ---

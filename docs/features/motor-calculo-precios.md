@@ -154,8 +154,8 @@ precisiones que hacen a la regla:
   revisión independiente porque el primer test usaba una línea pelada, el único
   caso donde las dos magnitudes coinciden.
 - **No frena la venta**: emite una advertencia, igual que un ingrediente no
-  bloqueante sin stock. Viaja en `advertencias` del cálculo y en
-  `advertenciasReceta` de la venta, que el POS muestra como toast. ⚠️ Hoy el
+  bloqueante sin stock. Viaja en `advertencias`, tanto del cálculo como de la
+  respuesta de la venta, que el POS muestra como toast. ⚠️ Hoy el
   aviso llega **después** de crear la venta: la previsualización del carrito no
   lo expone todavía, y los caminos de tienda online y suscripciones lo descartan
   (ver `docs/agent/pendientes.md`).

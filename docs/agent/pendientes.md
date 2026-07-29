@@ -420,13 +420,6 @@ Ver [`resueltos.md`](resueltos.md).
   cupones). El owner se inclina por prioridad explícita por ser lo más flexible para una
   pasarela/cobranza. **Encararlo es brainstorm → spec → plan:** agrega un campo a las reglas,
   toca el motor y necesita decidir qué pasa con las reglas existentes sin prioridad.
-- [ ] **`advertenciasReceta` de la venta ya no son solo de receta** (backend,
-  `ventas.service.ts`, + `pos.vue` y 4 e2e) — desde el piso en cero (2026-07-28) el campo
-  también transporta avisos del motor de precios. El POS las renderiza como toasts sueltos
-  y cada mensaje se explica solo, así que **funciona**; lo que quedó corto es el nombre.
-  Renombrarlo a `advertencias` toca 21 referencias en 7 archivos (incluidas 4 suites e2e),
-  por eso no entró en ese commit. Cierre: renombrar de una, no ir agregando campos nuevos
-  por tipo de aviso.
 - [ ] **¿Un descuento debe topearse aunque un recargo posterior levante el total?**
   (backend, `calculo-precios.engine.ts`) — el piso en cero (2026-07-28) topea **regla por
   regla** contra el acumulado en ese punto de la fórmula. Con fórmula `descuentos →
@@ -444,7 +437,7 @@ Ver [`resueltos.md`](resueltos.md).
   Para un sistema con ambición fiscal/auditable el **hecho** del tope debería quedar en la
   transacción. Cierre posible: una columna o flag en el detalle de venta.
 - [ ] **Las advertencias del motor de precios llegan a un solo consumidor** (backend +
-  frontend) — `ventas.service.ts` las inyecta en `advertenciasReceta` y el POS las muestra,
+  frontend) — `ventas.service.ts` las inyecta en `advertencias` y el POS las muestra,
   pero `online.service.ts` y `suscripciones.service.ts` descartan `resultado.advertencias`,
   y `pasarela.vue` no lee el campo. Peor: `useCalculoPrecios.ts` no incorporó
   `advertencias` al tipo, así que **la previsualización del carrito muestra un total ya

@@ -206,12 +206,12 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     const resultadoVenta = resultado.value
     const lineasVenta = [...lineas.value]
 
-    const venta = await useApiFetch<{ estado: string; advertenciasReceta?: string[] }>(`${apiUrl}/ventas`, {
+    const venta = await useApiFetch<{ estado: string; advertencias?: string[] }>(`${apiUrl}/ventas`, {
       method: 'POST',
       body,
     })
     toast.add({ title: estadoToastTitle[venta.estado] ?? 'Venta registrada', color: 'success' })
-    for (const advertencia of venta.advertenciasReceta ?? []) {
+    for (const advertencia of venta.advertencias ?? []) {
       toast.add({ title: advertencia, color: 'warning' })
     }
     cobroOpen.value = false

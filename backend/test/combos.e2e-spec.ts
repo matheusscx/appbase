@@ -27,7 +27,7 @@ interface VentaResponse {
   id: string;
   estado: string;
   totalFinal: string;
-  advertenciasReceta?: string[];
+  advertencias?: string[];
 }
 interface MovimientoInventario {
   tipo: string;
@@ -246,7 +246,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
-    expect(venta.advertenciasReceta ?? []).toEqual([]);
+    expect(venta.advertencias ?? []).toEqual([]);
     // 6. Total cobrado = precio del combo
     expect(venta.totalFinal).toBe('4000.0000');
 
@@ -346,7 +346,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
-    expect(venta.advertenciasReceta ?? []).toEqual([]);
+    expect(venta.advertencias ?? []).toEqual([]);
     // Total = precioBase del Combo Especial (4300) + precioExtra de la chuleta (1500)
     expect(venta.totalFinal).toBe('5800.0000');
 
@@ -503,7 +503,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
-    expect(venta.advertenciasReceta ?? []).toEqual([]);
+    expect(venta.advertencias ?? []).toEqual([]);
     // Total = precioBase del combo doble (5000) + precioExtra chuleta (1500)
     // + precioExtra carne molida (0)
     expect(venta.totalFinal).toBe('6500.0000');

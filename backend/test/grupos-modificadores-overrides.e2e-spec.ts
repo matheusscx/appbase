@@ -49,7 +49,7 @@ interface VentaResponse {
   id: string;
   estado: string;
   totalFinal: string;
-  advertenciasReceta?: string[];
+  advertencias?: string[];
 }
 interface MovimientoInventario {
   tipo: string;
@@ -295,7 +295,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
-    expect(venta.advertenciasReceta ?? []).toEqual([]);
+    expect(venta.advertencias ?? []).toEqual([]);
     expect(venta.totalFinal).toBe('3500.0000');
 
     const movs: MovimientoInventario[] = await ds.query(
@@ -334,7 +334,7 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
-    expect(venta.advertenciasReceta ?? []).toEqual([]);
+    expect(venta.advertencias ?? []).toEqual([]);
 
     const movs: MovimientoInventario[] = await ds.query(
       `SELECT tipo, motivo, item_id, cantidad FROM movimientos_inventario

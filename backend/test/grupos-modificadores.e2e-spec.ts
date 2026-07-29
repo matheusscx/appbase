@@ -30,7 +30,7 @@ interface VentaResponse {
   id: string;
   estado: string;
   totalFinal: string;
-  advertenciasReceta?: string[];
+  advertencias?: string[];
 }
 interface MovimientoInventario {
   tipo: string;
@@ -219,7 +219,7 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
-    expect(venta.advertenciasReceta ?? []).toEqual([]);
+    expect(venta.advertencias ?? []).toEqual([]);
     // 7. Total = precioBase del combo (3000) + precioExtra de la opción elegida (800)
     expect(venta.totalFinal).toBe('3800.0000');
 

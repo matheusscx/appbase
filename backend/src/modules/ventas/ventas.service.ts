@@ -455,9 +455,8 @@ export class VentasService {
     // explicación. Un orden global fijo hace el deadlock imposible.
     // Arranca con lo que avisó el motor de precios (hoy: descuentos topeados por
     // el piso en cero) y se le suma lo de recetas/combos más abajo. El POS las
-    // renderiza como toasts sueltos, cada mensaje se explica solo — el nombre
-    // del campo quedó más angosto que su contenido (ver `pendientes.md`).
-    const advertenciasReceta: string[] = [...resultado.advertencias];
+    // renderiza como toasts sueltos, cada mensaje se explica solo.
+    const advertencias: string[] = [...resultado.advertencias];
     const ordenLocks = lineasConversion
       .map((_, idx) => idx)
       .sort((a, b) => {
@@ -482,9 +481,8 @@ export class VentasService {
           loteId: linea.loteId,
         });
       } else if (item.tipo === 'receta') {
-        const advertencias = await this.itemsService.venderIngredientesReceta(
-          manager,
-          {
+        const advertenciasIngrediente =
+          await this.itemsService.venderIngredientesReceta(manager, {
             tenantId,
             usuarioId,
             ventaId: venta.id,
@@ -492,13 +490,11 @@ export class VentasService {
             recetaNombre: item.nombre,
             cantidadVendida: cantidadCanonica,
             snapshot: personalizacion ?? undefined,
-          },
-        );
-        advertenciasReceta.push(...advertencias);
+          });
+        advertencias.push(...advertenciasIngrediente);
       } else if (item.tipo === 'combo') {
-        const advertencias = await this.itemsService.venderComponentesCombo(
-          manager,
-          {
+        const advertenciasComponente =
+          await this.itemsService.venderComponentesCombo(manager, {
             tenantId,
             usuarioId,
             ventaId: venta.id,
@@ -506,9 +502,8 @@ export class VentasService {
             comboNombre: item.nombre,
             cantidadVendida: cantidadCanonica,
             snapshot: personalizacion ?? undefined,
-          },
-        );
-        advertenciasReceta.push(...advertencias);
+          });
+        advertencias.push(...advertenciasComponente);
       }
     }
 
@@ -612,7 +607,7 @@ export class VentasService {
       venta.estado = estadoFinal;
     }
 
-    return { ...venta, detalles, advertenciasReceta };
+    return { ...venta, detalles, advertencias };
   }
 
   /**

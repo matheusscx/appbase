@@ -27,7 +27,7 @@ interface ItemResponse {
 interface VentaResponse {
   id: string;
   estado: string;
-  advertenciasReceta?: string[];
+  advertencias?: string[];
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -275,17 +275,13 @@ describe('Recetas — flujo completo (e2e)', () => {
     // sin advertencias. Esta es venta #1 de las 6 que la carne permite.
     const resVenta1 = await venderUna();
     expect(resVenta1.status).toBe(201);
-    expect((resVenta1.body as VentaResponse).advertenciasReceta ?? []).toEqual(
-      [],
-    );
+    expect((resVenta1.body as VentaResponse).advertencias ?? []).toEqual([]);
 
     // 4. Venta #2: queso quedó en 10 g (30-20), no alcanza para los 20 g
     // requeridos → no bloqueante, se omite con advertencia; pan y carne sí se descuentan.
     const resVenta2 = await venderUna();
     expect(resVenta2.status).toBe(201);
-    expect((resVenta2.body as VentaResponse).advertenciasReceta?.length).toBe(
-      1,
-    );
+    expect((resVenta2.body as VentaResponse).advertencias?.length).toBe(1);
 
     // Ventas #3-#6: la carne todavía alcanza (2 de las 6 ya se usaron).
     for (let i = 0; i < 4; i++) {
@@ -366,9 +362,7 @@ describe('Recetas — flujo completo (e2e)', () => {
         pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4500' }],
       });
     expect(resVenta.status).toBe(201);
-    expect((resVenta.body as VentaResponse).advertenciasReceta ?? []).toEqual(
-      [],
-    );
+    expect((resVenta.body as VentaResponse).advertencias ?? []).toEqual([]);
 
     // La porción del extra está en g y el stock de la palta en kg: 5 - 0.02.
     // Si la unidad de stock saliera de la PORCIÓN en vez del ingrediente,

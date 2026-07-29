@@ -625,7 +625,7 @@ describe('VentasService', () => {
       expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
     });
 
-    it('agrega advertenciasReceta a la respuesta cuando hay advertencias', async () => {
+    it('agrega advertencias a la respuesta cuando hay advertencias', async () => {
       itemsService.cargarBasePorIds.mockImplementationOnce(mapaDe(mockReceta));
       (
         itemsService.venderIngredientesReceta as jest.Mock
@@ -635,7 +635,7 @@ describe('VentasService', () => {
 
       const result = await service.crear(TENANT_ID, USUARIO_ID, dtoReceta);
 
-      expect(result.advertenciasReceta).toEqual([
+      expect(result.advertencias).toEqual([
         'Hamburguesa: no había stock suficiente de Queso, se vendió sin ese insumo',
       ]);
     });

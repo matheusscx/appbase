@@ -21,7 +21,7 @@ Food-service vende composiciones (hamburguesa = pan + carne + queso). Sin receta
 **Included:**
 - `items.tipo = 'receta'` + extensión `item_receta` (`costo_actual` cacheado) + `receta_ingredientes` (N ingredientes, soft delete).
 - Alta/edición con validación (solo items `tipo='ingrediente'` con `modo_inventario='cantidad'`, cantidad > 0, unidad convertible).
-- Venta: expansión a un `salida`/`venta` por ingrediente vía `ItemsService.venderIngredientesReceta`; respuesta con `advertenciasReceta`.
+- Venta: expansión a un `salida`/`venta` por ingrediente vía `ItemsService.venderIngredientesReceta`; respuesta con `advertencias`.
 - `disponible` calculado al vuelo en el listado (mínimo entre bloqueantes).
 - Bloqueo de soft-delete de un producto usado como ingrediente vivo.
 - UI: editor de ingredientes en Configuración → Items; POS lista recetas con disponibilidad y toasts de advertencia.
@@ -123,7 +123,7 @@ receta en vez del ingrediente.
 
 ### POST /ventas (línea con item tipo receta)
 
-Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad convertida). Bloqueante sin stock → error `'Stock insuficiente para la salida'` aborta la transacción. No bloqueante: se captura solo ese mensaje y se agrega a `advertenciasReceta` en la respuesta (sin pre-chequeo racey).
+Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad convertida). Bloqueante sin stock → error `'Stock insuficiente para la salida'` aborta la transacción. No bloqueante: se captura solo ese mensaje y se agrega a `advertencias` en la respuesta (sin pre-chequeo racey).
 
 ---
 
@@ -147,7 +147,7 @@ Por cada unidad vendida, un movimiento de salida por ingrediente (cantidad conve
 ## Frontend
 
 - `pages/configuracion/items.vue` — tipo Receta + editor de filas (ingrediente, cantidad, unidad por magnitud, bloqueante); selector de insumos vía `GET /items?tipo=ingrediente`; costo de solo lectura al editar. Al pedir borrar un item, consulta `GET /items/:id/uso` antes de abrir el modal de confirmación: con `bloqueos` muestra "No se puede eliminar" + motivos y solo el botón "Entendido"; con solo `advertencias` nombra las recetas donde deja de ofrecerse como extra y deja confirmar; sin usos, el texto genérico de siempre.
-- `pages/ventas/pos.vue` — fetch paralelo `tipo=producto` y `tipo=receta`; toasts `warning` por cada `advertenciasReceta`.
+- `pages/ventas/pos.vue` — fetch paralelo `tipo=producto` y `tipo=receta`; toasts `warning` por cada `advertencias`.
 - `components/ventas/CatalogoGrid.vue` — receta nunca bloquea el click; se atenúa si `disponible === 0`; badge "Disponibles: N".
 - `composables/useVenta.ts` — `ItemCatalogo.disponible?: number | null`.
 
