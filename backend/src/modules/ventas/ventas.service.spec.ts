@@ -85,6 +85,7 @@ const mockResultadoVenta = {
   },
   trazasVenta: { descuentos: [], recargos: [] },
   advertencias: [],
+  advertenciasVenta: [],
 };
 
 const MONEDA_ROWS = [

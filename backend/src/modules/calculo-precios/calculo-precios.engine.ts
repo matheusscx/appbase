@@ -112,6 +112,13 @@ export interface ResultadoVenta {
    * cero. Vacío en el caso normal.
    */
   advertencias: string[];
+  /**
+   * Solo las advertencias de los descuentos a nivel venta — las que no
+   * pertenecen a ninguna línea. `advertencias` las incluye junto con las de
+   * línea; este campo existe para que el carrito pueda mostrar cada aviso
+   * donde corresponde sin tener que restar strings.
+   */
+  advertenciasVenta: string[];
 }
 
 // ── Constantes de estrategia ────────────────────────────────────────────────
@@ -481,5 +488,6 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
       ...lineas.flatMap((l) => l.advertencias),
       ...dv.advertencias,
     ],
+    advertenciasVenta: dv.advertencias,
   };
 }

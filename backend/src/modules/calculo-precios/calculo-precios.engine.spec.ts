@@ -475,6 +475,39 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.advertencias).toEqual([]);
     });
 
+    it('advertenciasVenta trae solo las de venta; advertencias sigue trayendo todo', () => {
+      // Línea de 1000 con un descuento fijo de 5000 → se topea y avisa.
+      // Descuento de venta fijo de 9000 sobre lo que quedó → se topea y avisa.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              descuentos: [
+                regla({
+                  nombre: 'Fijo 5000',
+                  modo: 'monto_fijo',
+                  valor: '5000',
+                }),
+              ],
+            }),
+          ],
+          descuentosVenta: [
+            regla({ nombre: 'Venta 9000', modo: 'monto_fijo', valor: '9000' }),
+          ],
+        }),
+      );
+
+      // El campo nuevo aísla las de venta: la de línea NO puede estar acá.
+      expect(r.advertenciasVenta).toHaveLength(1);
+      expect(r.advertenciasVenta[0]).toContain('Venta 9000');
+
+      // El campo viejo sigue trayendo las dos, que es lo que consume ventas.service.
+      expect(r.advertencias).toHaveLength(2);
+      expect(r.advertencias.some((a) => a.includes('Fijo 5000'))).toBe(true);
+      expect(r.advertencias.some((a) => a.includes('Venta 9000'))).toBe(true);
+    });
+
     it('el piso también aplica a los descuentos a nivel VENTA', () => {
       const r = calcularVenta(
         venta({
