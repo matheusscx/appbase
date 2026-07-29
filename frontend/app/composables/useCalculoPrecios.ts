@@ -45,6 +45,8 @@ export interface ResultadoLinea {
     recargos: TrazaRegla[]
     impuestos: TrazaImpuesto[]
   }
+  /** Descuentos topeados por el piso en cero en esta línea. */
+  advertencias: string[]
 }
 
 export interface ResultadoVenta {
@@ -60,6 +62,10 @@ export interface ResultadoVenta {
     descuentos: TrazaRegla[]
     recargos: TrazaRegla[]
   }
+  /** Aplanado: las de cada línea más las de venta. */
+  advertencias: string[]
+  /** Solo las de los descuentos a nivel venta. */
+  advertenciasVenta: string[]
 }
 
 /**

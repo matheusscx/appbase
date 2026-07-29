@@ -1115,7 +1115,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                 </div>
                 <div v-else class="divide-y divide-default">
                   <div
-                    v-for="linea in activeCuenta.lineas"
+                    v-for="(linea, index) in activeCuenta.lineas"
                     :key="linea.id"
                     class="flex items-center gap-2 py-2"
                   >
@@ -1125,6 +1125,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                         {{ linea.personalizacionTexto }}
                       </p>
                       <p class="text-xs text-muted">{{ formatMonto(lineaSubtotal(linea), linea.monedaId) }}</p>
+                      <AdvertenciasPrecio :advertencias="resultado?.lineas[index]?.advertencias ?? []" />
                     </div>
                     <AppCantidadInput
                       :model-value="presentacionLinea(linea)"
@@ -1144,6 +1145,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
               </div>
 
               <div class="shrink-0 border-t border-default pt-3">
+                <AdvertenciasPrecio :advertencias="resultado?.advertenciasVenta ?? []" class="mb-2" />
                 <div class="mb-3 flex justify-between text-base font-semibold text-default">
                   <span>Total</span>
                   <span>{{ formatMonto(totalFinal) }}</span>

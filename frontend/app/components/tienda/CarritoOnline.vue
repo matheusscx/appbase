@@ -58,6 +58,7 @@ function presentacionLinea(linea: CarritoLinea): string {
             <p class="text-xs text-muted font-mono">
               {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
+            <AdvertenciasPrecio :advertencias="resultado?.lineas[index]?.advertencias ?? []" />
           </div>
           <AppCantidadInput
             :model-value="presentacionLinea(linea)"
@@ -91,6 +92,7 @@ function presentacionLinea(linea: CarritoLinea): string {
           <div class="flex justify-between text-muted">
             <span>Impuestos</span><span>+{{ formatMonto(resultado.totales.totalImpuestos) }}</span>
           </div>
+          <AdvertenciasPrecio :advertencias="resultado.advertenciasVenta" class="mb-1" />
           <div class="flex justify-between items-center font-semibold text-default text-base pt-1 border-t border-default">
             <span class="flex items-center gap-1">
               Total
