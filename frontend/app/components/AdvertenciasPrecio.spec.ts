@@ -4,7 +4,7 @@ import AdvertenciasPrecio from './AdvertenciasPrecio.vue'
 
 // UTooltip/UIcon/UButton (Nuxt UI) requieren un TooltipProvider/AppConfig que solo
 // existe dentro de una app Nuxt real. Ni `mount` plano ni `mountSuspended` los
-// resuelven sin ese contexto (ver evidencia en task-1-report.md), así que se
+// resuelven sin ese contexto (ver docs/patterns/frontend.md §15), así que se
 // stubean explícitamente. UTooltip necesita template propio para proyectar su
 // slot y que el UButton exista en el DOM; los otros dos alcanzan con `true`,
 // que preserva los atributos (incluido el aria-label).

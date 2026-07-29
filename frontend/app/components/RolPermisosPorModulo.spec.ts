@@ -27,7 +27,7 @@ const MODULOS: ModuloDisponible[] = [
 // AdvertenciasPrecio.spec.ts). UInput necesita un <input> real porque el test de
 // búsqueda escribe en él con setValue. UAccordion necesita template propio que
 // proyecte los slots #trailing y #body por cada item para poder verificar el
-// conteo y el listado de permisos, que es lo que hace el componente real con
+// conteo por módulo, que es lo que hace el componente real con
 // `:unmount-on-hide="false"`. UCheckbox alcanza con `true`.
 const stubs = {
   UInput: {
