@@ -39,6 +39,9 @@ describe('AdvertenciasPrecio', () => {
     expect(wrapper.findAll('p')).toHaveLength(2)
     expect(wrapper.text()).toContain('Descuento "Promo fija $5.000"')
     expect(wrapper.text()).toContain('Descuento "Segunda promo"')
+    // Ata la aserción al tag del stub (no a la clase CSS): si <UIcon> queda mal
+    // escrito, Vue no lo resuelve al stub y este find deja de encontrarlo.
+    expect(wrapper.findAll('u-icon-stub')).toHaveLength(2)
   })
 
   // Este es el test que la versión con root Fragment no pasa: Vue descartaba en
@@ -60,6 +63,10 @@ describe('AdvertenciasPrecio', () => {
     })
 
     expect(wrapper.text()).not.toContain('no se aplicó completo')
-    expect(wrapper.find('[aria-label="Detalle: no se aplicó completo"]').exists()).toBe(true)
+    // Atadas al tag del stub, no a un selector de atributo genérico: si
+    // <UTooltip> o <UButton> quedan mal escritos, Vue no los resuelve al stub
+    // y estos find dejan de encontrarlos.
+    expect(wrapper.find('p > div').exists()).toBe(true)
+    expect(wrapper.find('u-button-stub[aria-label="Detalle: no se aplicó completo"]').exists()).toBe(true)
   })
 })
