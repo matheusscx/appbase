@@ -456,7 +456,9 @@ export class VentasService {
     // Arranca con lo que avisó el motor de precios (hoy: descuentos topeados por
     // el piso en cero) y se le suma lo de recetas/combos más abajo. El POS las
     // renderiza como toasts sueltos, cada mensaje se explica solo.
-    const advertencias: string[] = [...resultado.advertencias];
+    const advertencias: string[] = resultado.advertencias.map(
+      (a) => `${a.titulo}: ${a.detalle}`,
+    );
     const ordenLocks = lineasConversion
       .map((_, idx) => idx)
       .sort((a, b) => {

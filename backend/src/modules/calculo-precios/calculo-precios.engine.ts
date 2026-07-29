@@ -76,6 +76,18 @@ export interface TrazaImpuesto extends TrazaRegla {
   tasa: string;
 }
 
+/**
+ * Una advertencia del cálculo. Va partida porque el carrito muestra el título
+ * en la línea —que es angosta— y deja el detalle en un tooltip; la respuesta de
+ * la venta las junta de nuevo en una frase para los toasts del POS.
+ */
+export interface AdvertenciaPrecio {
+  /** Qué la produjo. Ej: `Descuento "Promo fija $5.000"`. */
+  titulo: string;
+  /** Qué pasó, sin repetir el título. Ej: `no se aplicó completo porque superaba el monto disponible`. */
+  detalle: string;
+}
+
 export interface ResultadoLinea {
   itemId: string;
   cantidad: string;
@@ -91,7 +103,7 @@ export interface ResultadoLinea {
     impuestos: TrazaImpuesto[];
   };
   /** Descuentos topeados por el piso en cero en esta línea. */
-  advertencias: string[];
+  advertencias: AdvertenciaPrecio[];
 }
 
 export interface ResultadoVenta {
@@ -111,14 +123,14 @@ export interface ResultadoVenta {
    * Avisos que no frenan el cálculo. Hoy: descuentos topeados por el piso en
    * cero. Vacío en el caso normal.
    */
-  advertencias: string[];
+  advertencias: AdvertenciaPrecio[];
   /**
    * Solo las advertencias de los descuentos a nivel venta — las que no
    * pertenecen a ninguna línea. `advertencias` las incluye junto con las de
    * línea; este campo existe para que el carrito pueda mostrar cada aviso
    * donde corresponde sin tener que restar strings.
    */
-  advertenciasVenta: string[];
+  advertenciasVenta: AdvertenciaPrecio[];
 }
 
 // ── Constantes de estrategia ────────────────────────────────────────────────
@@ -218,7 +230,7 @@ interface ResultadoPaso {
   acc: Decimal;
   total: Decimal;
   trazas: TrazaRegla[];
-  advertencias: string[];
+  advertencias: AdvertenciaPrecio[];
 }
 
 /**
@@ -260,7 +272,7 @@ function procesarReglas(
   let disponible = params.disponible ?? params.acc;
   let total = ZERO;
   const trazas: TrazaRegla[] = [];
-  const advertencias: string[] = [];
+  const advertencias: AdvertenciaPrecio[] = [];
 
   for (const regla of reglas) {
     const base = params.modoCalculo === 'compuesto' ? acc : params.neto;
@@ -284,9 +296,10 @@ function procesarReglas(
     if (params.signo === -1) {
       const tope = Decimal.max(disponible, ZERO);
       if (monto.greaterThan(tope)) {
-        advertencias.push(
-          `Descuento "${regla.nombre}": no se aplicó completo porque superaba el monto disponible`,
-        );
+        advertencias.push({
+          titulo: `Descuento "${regla.nombre}"`,
+          detalle: 'no se aplicó completo porque superaba el monto disponible',
+        });
         monto = tope;
       }
     }
@@ -329,7 +342,7 @@ function calcularLinea(
   let descuentoAplicado = ZERO;
   let recargoAplicado = ZERO;
   let impuestoAplicado = ZERO;
-  const advertencias: string[] = [];
+  const advertencias: AdvertenciaPrecio[] = [];
   const trazas = {
     descuentos: [] as TrazaRegla[],
     recargos: [] as TrazaRegla[],

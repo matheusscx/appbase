@@ -389,7 +389,10 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.lineas[0].trazas.descuentos[0].monto).toBe('100.000000');
       expect(r.totales.totalFinal).toBe('0.000000');
       expect(r.advertencias).toEqual([
-        'Descuento "Fijo 500": no se aplicó completo porque superaba el monto disponible',
+        {
+          titulo: 'Descuento "Fijo 500"',
+          detalle: 'no se aplicó completo porque superaba el monto disponible',
+        },
       ]);
     });
 
@@ -450,7 +453,9 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       );
 
       expect(r.totales.totalFinal).toBe('0.000000');
-      expect(r.advertencias.some((a) => a.includes('Venta 500'))).toBe(true);
+      expect(r.advertencias.some((a) => a.titulo.includes('Venta 500'))).toBe(
+        true,
+      );
     });
 
     it('el piso de venta no recorta un descuento que el total sí aguanta', () => {
@@ -500,12 +505,16 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
 
       // El campo nuevo aísla las de venta: la de línea NO puede estar acá.
       expect(r.advertenciasVenta).toHaveLength(1);
-      expect(r.advertenciasVenta[0]).toContain('Venta 9000');
+      expect(r.advertenciasVenta[0].titulo).toContain('Venta 9000');
 
       // El campo viejo sigue trayendo las dos, que es lo que consume ventas.service.
       expect(r.advertencias).toHaveLength(2);
-      expect(r.advertencias.some((a) => a.includes('Fijo 5000'))).toBe(true);
-      expect(r.advertencias.some((a) => a.includes('Venta 9000'))).toBe(true);
+      expect(r.advertencias.some((a) => a.titulo.includes('Fijo 5000'))).toBe(
+        true,
+      );
+      expect(r.advertencias.some((a) => a.titulo.includes('Venta 9000'))).toBe(
+        true,
+      );
     });
 
     it('el piso también aplica a los descuentos a nivel VENTA', () => {
@@ -518,7 +527,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       );
       expect(r.totales.totalFinal).toBe('0.000000');
       expect(r.totales.totalDescuentos).toBe('100.000000');
-      expect(r.advertencias[0]).toContain('Venta 999');
+      expect(r.advertencias[0].titulo).toContain('Venta 999');
     });
 
     it('un recargo no tiene tope superior: puede subir el total libremente', () => {

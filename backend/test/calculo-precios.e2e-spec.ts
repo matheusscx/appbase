@@ -17,14 +17,19 @@ interface TokenResponse {
   access_token: string;
 }
 
+interface AdvertenciaResponse {
+  titulo: string;
+  detalle: string;
+}
+
 interface ResultadoLineaResponse {
-  advertencias: string[];
+  advertencias: AdvertenciaResponse[];
 }
 
 interface ResultadoVentaResponse {
   lineas: ResultadoLineaResponse[];
-  advertencias: string[];
-  advertenciasVenta: string[];
+  advertencias: AdvertenciaResponse[];
+  advertenciasVenta: AdvertenciaResponse[];
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -78,7 +83,9 @@ describe('Cálculo de precios (e2e)', () => {
     const body = res.body as ResultadoVentaResponse;
 
     expect(body.lineas[0].advertencias).toHaveLength(1);
-    expect(body.lineas[0].advertencias[0]).toContain('Promo fija $5.000');
+    expect(body.lineas[0].advertencias[0].titulo).toContain(
+      'Promo fija $5.000',
+    );
     expect(body.advertenciasVenta).toHaveLength(0);
     expect(body.advertencias).toHaveLength(1);
   });
@@ -101,7 +108,7 @@ describe('Cálculo de precios (e2e)', () => {
     const body = res.body as ResultadoVentaResponse;
 
     expect(body.advertenciasVenta).toHaveLength(1);
-    expect(body.advertenciasVenta[0]).toContain('Promo fija $5.000');
+    expect(body.advertenciasVenta[0].titulo).toContain('Promo fija $5.000');
     expect(body.lineas[0].advertencias).toHaveLength(0);
     expect(body.advertencias).toHaveLength(1);
   });

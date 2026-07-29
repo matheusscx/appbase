@@ -67,28 +67,38 @@ Response (201):
       "recargos":   [...],
       "impuestos":  [{ "id", "nombre", "tasa", "monto" }]
     },
-    "advertencias": ["Descuento \"X\": no se aplicó completo porque superaba el monto disponible"]
+    "advertencias": [{ "titulo": "Descuento \"X\"", "detalle": "no se aplicó completo porque superaba el monto disponible" }]
   }],
   "totales": {
     "subtotalNeto", "totalDescuentos", "totalRecargos",
     "totalImpuestos", "totalFinal"
   },
   "trazasVenta": { "descuentos": [...], "recargos": [...] },
-  "advertenciasVenta": ["…"],
-  "advertencias": ["…"]
+  "advertenciasVenta": [{ "titulo": "…", "detalle": "…" }],
+  "advertencias": [{ "titulo": "…", "detalle": "…" }]
 }
 ```
 
 **Advertencias.** El motor emite avisos que **no frenan el cálculo**: hoy, cuando un
-descuento supera el monto disponible, se topea y se avisa sin nombrar montos (el
-aplicado ya viaja en la traza de la línea, que el front formatea). El resultado los
-expone en dos granularidades porque se muestran en
+descuento supera el monto disponible, se topea y se avisa. Cada advertencia viaja
+partida en `{ titulo, detalle }` (`AdvertenciaPrecio` en el motor) en vez de una
+frase única: el carrito es angosto y una sola línea de texto con todo el mensaje
+ocupaba varios renglones, así que `titulo` (ej. `Descuento "X"`) se muestra en la
+línea y `detalle` (ej. `no se aplicó completo porque superaba el monto disponible`,
+sin nombrar montos: el aplicado ya viaja en la traza, que el front formatea) queda
+en un tooltip. El resultado los expone en dos granularidades porque se muestran en
 lugares distintos: `ResultadoLinea.advertencias` va bajo la línea que lo produjo, y
 `advertenciasVenta` —solo los descuentos a nivel venta, que no pertenecen a ninguna
-línea— va junto al total. `advertencias` es el aplanado de ambos y es lo que consume la
-venta al persistirse. La razón de separarlos en vez de que el consumidor reste strings:
-restar strings se rompe cuando dos advertencias tienen el mismo texto, y ese caso es
-alcanzable (dos descuentos distintos topeados al mismo monto producen el mismo mensaje).
+línea— va junto al total. `advertencias` es el aplanado de ambos. La razón de
+separarlos en vez de que el consumidor reste por igualdad: dos advertencias con el
+mismo `titulo`+`detalle` son alcanzables (dos descuentos distintos topeados al mismo
+monto producen el mismo mensaje).
+
+Al persistir la venta, `ventas.service.ts` vuelve a componer cada advertencia en una
+sola frase (`` `${titulo}: ${detalle}` ``) para el campo `advertencias: string[]` de
+la respuesta de la venta —el mismo formato de siempre, que consumen los toasts del
+POS—. Ese contrato no cambia; la partición en `titulo`/`detalle` solo viaja por el
+motor y la previsualización del carrito.
 
 Todos los montos son strings con `escala_calculo` decimales.
 
@@ -190,17 +200,21 @@ que el piso resuelve— pero sí el piso en cero de arriba: un recargo nunca res
 ## Frontend
 
 - **Composable**: `app/composables/useCalculoPrecios.ts` — `calcular(input)` con
-  `useApiFetch` a `POST /calculo-precios/calcular`. El tipo `ResultadoLinea`
-  incluye `advertencias` y el tipo `ResultadoVenta` incluye `advertencias` +
-  `advertenciasVenta`.
+  `useApiFetch` a `POST /calculo-precios/calcular`. El tipo `AdvertenciaPrecio`
+  (`{ titulo, detalle }`) espeja al del motor; el tipo `ResultadoLinea` incluye
+  `advertencias: AdvertenciaPrecio[]` y el tipo `ResultadoVenta` incluye
+  `advertencias` + `advertenciasVenta`, ambos `AdvertenciaPrecio[]`.
 - **Previsualización del carrito** (POS `components/ventas/CarritoPanel.vue`,
   Salones `pages/salones/index.vue`, Tienda `components/tienda/CarritoOnline.vue`)
   — los tres renderizan el componente compartido `components/AdvertenciasPrecio.vue`:
   por línea con `resultado.lineas[index].advertencias`, junto al total con
-  `resultado.advertenciasVenta`. **El cruce línea↔resultado es por índice, nunca
-  por `itemId`**: el mismo ítem puede aparecer en dos líneas del carrito con
-  personalizaciones distintas (por ejemplo, dos porciones de la misma receta con
-  extras diferentes), y el `itemId` no las distingue.
+  `resultado.advertenciasVenta`. Por cada advertencia el componente muestra el
+  ícono de warning + el `titulo` en una sola línea, con un ícono informativo cuyo
+  tooltip (alcanzable con teclado, no solo con hover) revela el `detalle`. **El
+  cruce línea↔resultado es por índice, nunca por `itemId`**: el mismo ítem puede
+  aparecer en dos líneas del carrito con personalizaciones distintas (por
+  ejemplo, dos porciones de la misma receta con extras diferentes), y el
+  `itemId` no las distingue.
 - ⚠️ **`advertenciasVenta` hoy no se puede ver por la UI.** El render junto al
   total está construido y correcto, pero está inerte: depende de que el request
   mande `descuentosVentaIds`/`recargosVentaIds`, y ningún archivo de

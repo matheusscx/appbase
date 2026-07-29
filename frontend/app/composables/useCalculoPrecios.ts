@@ -31,6 +31,17 @@ export interface TrazaImpuesto extends TrazaRegla {
   tasa: string
 }
 
+/**
+ * Una advertencia del cálculo. Va partida porque el carrito muestra el título
+ * en la línea —que es angosta— y deja el detalle en un tooltip.
+ */
+export interface AdvertenciaPrecio {
+  /** Qué la produjo. Ej: `Descuento "Promo fija $5.000"`. */
+  titulo: string
+  /** Qué pasó, sin repetir el título. Ej: `no se aplicó completo porque superaba el monto disponible`. */
+  detalle: string
+}
+
 export interface ResultadoLinea {
   itemId: string
   cantidad: string
@@ -46,7 +57,7 @@ export interface ResultadoLinea {
     impuestos: TrazaImpuesto[]
   }
   /** Descuentos topeados por el piso en cero en esta línea. */
-  advertencias: string[]
+  advertencias: AdvertenciaPrecio[]
 }
 
 export interface ResultadoVenta {
@@ -63,9 +74,9 @@ export interface ResultadoVenta {
     recargos: TrazaRegla[]
   }
   /** Aplanado: las de cada línea más las de venta. */
-  advertencias: string[]
+  advertencias: AdvertenciaPrecio[]
   /** Solo las de los descuentos a nivel venta. */
-  advertenciasVenta: string[]
+  advertenciasVenta: AdvertenciaPrecio[]
 }
 
 /**
