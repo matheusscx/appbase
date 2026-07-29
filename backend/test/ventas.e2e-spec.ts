@@ -10,6 +10,10 @@ const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116'; // Smartphone (stock = 10)
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
+// "Papas fritas" — producto, precio_base 1500, precio_incluye_impuesto = false.
+const PAPAS_FRITAS_ID = '550e8400-e29b-41d4-a716-446655440281';
+// "Promo fija $5.000" — descuento monto_fijo sin condiciones (seedDescuentos()).
+const DESCUENTO_FIJO_ID = '550e8400-e29b-41d4-a716-446655440338';
 
 // Credentials seeded in dev (seed password: 'admin')
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
@@ -29,6 +33,7 @@ interface VentaResponse {
   detalles: unknown[];
   pagos: unknown[];
   customer: unknown;
+  advertencias?: string[];
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -293,6 +298,30 @@ describe('Ventas (e2e)', () => {
         .send({});
 
       expect(res.status).toBe(400);
+    });
+
+    // El motor topea "Promo fija $5.000" (monto_fijo, sin condición) contra el
+    // disponible de una sola línea de Papas fritas ($1.500 + IVA): avisa, y
+    // ventas.service.ts recompone `{ titulo, detalle }` a un string plano. Es
+    // la única venta de toda la suite que dispara un descuento topeado al
+    // crear — sin ella, un `map` roto que devuelva solo el título o solo el
+    // detalle no lo cacha nada (ver Task 7).
+    it('descuento de venta topeado devuelve la advertencia recompuesta completa', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: PAPAS_FRITAS_ID, cantidad: '1' }],
+          descuentosVentaIds: [DESCUENTO_FIJO_ID],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000.0000' }],
+        });
+
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaResponse;
+      expect(venta.advertencias).toHaveLength(1);
+      const advertencia = venta.advertencias?.[0] ?? '';
+      expect(advertencia).toContain('Promo fija $5.000');
+      expect(advertencia).toContain('no se aplicó completo');
     });
   });
 
