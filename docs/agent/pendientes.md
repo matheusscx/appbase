@@ -118,6 +118,32 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
 - [ ] Integrar `@smoke` al CI cuando haya masa crítica (hoy el CI no levanta el stack
   de navegador).
 
+## Detector de desborde de layout (`e2e/layout/desborde.spec.ts`, 2026-07-29)
+
+- [ ] **El detector solo ve el mecanismo min-content dentro de un contexto flex/grid**
+  (frontend, `e2e/layout/desborde.spec.ts`) — sube desde un bloque truncado hasta su ítem
+  flex/grid ancestro más cercano; fuera de ese contexto el mismo mecanismo (min-content =
+  ancho completo del texto cuando hay `white-space: nowrap`) puede desbordar igual y el
+  detector no lo ve:
+  - Celda de `<table>` con `table-layout: auto`, `inline-block`, `float`,
+    `position: absolute`, `width: fit-content` — todos dimensionan por min-content igual
+    que un ítem flex, así que un truncado adentro desborda por el mismo mecanismo y el
+    detector devuelve `[]`.
+  - `white-space: nowrap` **sin** `overflow: hidden` (p. ej. solo `whitespace-nowrap`) es
+    el caso **peor** — mismo min-content de texto completo y encima sin recorte visual —
+    pero el criterio exige `overflow-x: hidden`, así que lo descarta. No es regresión (el
+    detector anterior, por clase `.truncate`, tampoco lo veía), pero matiza la afirmación
+    del comentario del spec de que se detecta "el efecto" de `truncate`: en rigor exige
+    `nowrap` **y** `hidden` a la vez, no cualquiera de los dos solo.
+  - `overflow: clip` (Tailwind `overflow-clip`) computa `overflowX: 'clip'`, no
+    `'hidden'`, y tampoco pasa el filtro.
+  **Dato accionable:** `/inventario` está en las 4 rutas del spec justo como arquetipo
+  "tabla de muchas columnas" (`UTable` de Nuxt UI) y nadie verificó qué `table-layout`
+  usa esa tabla. Si es `auto`, hay cobertura real perdida en una ruta que el spec ya
+  barre. Punto de partida si se retoma: leer `getComputedStyle(celda).tableLayout` en
+  `/inventario` antes de decidir si hace falta ampliar el detector o si alcanza con el
+  `overflow-x: auto` que ya envuelve a `UTable`.
+
 ## Propinas en POS (notas de la revisión final, severidad baja — no bloqueantes)
 
 - [ ] **`propinaDirecta`/`propinaCierreMesa` no se restringen al canal `fisico`**

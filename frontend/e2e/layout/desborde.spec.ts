@@ -6,15 +6,21 @@ import { test, expect, type Page } from '@playwright/test'
 // min-content de ese bloque es el ancho COMPLETO del texto; si el ítem ancestro no tiene
 // `overflow` distinto de `visible` (p. ej. `min-w-0`), se niega a encoger y desborda él
 // (y arrastra a la fila). La forma inversa — `truncate` en el propio ítem flex/grid — es
-// segura por construcción (su `overflow: hidden` ya fija el mínimo en 0, medido en
-// docs/patterns/frontend.md §16) y no hace falta vigilarla.
+// segura por construcción (su `overflow: hidden` ya fija el mínimo en 0): **medido** en
+// flex (docs/patterns/frontend.md §16, casos A/A2/A3); en grid no se midió esa forma
+// segura, se infiere de la misma regla de mínimo automático (CSS Grid §6.6 replica
+// Flexbox §4.5) — igual que el propio §16 distingue medición de inferencia, no
+// asumirlo sin medir si algún día importa.
 //
 // El detector NO busca la clase `.truncate` (implementación de Tailwind, puede cambiar)
-// sino su EFECTO computado (`white-space: nowrap` + `overflow-x: hidden`), y solo mira el
-// ítem flex/grid ancestro MÁS CERCANO de cada bloque truncado — el elemento cuyo propio
-// padre es flex/grid, sea o no el mismo elemento que trunca. Si ese ítem ya no tiene
-// `overflow-x: visible`, el bloque truncado no puede ser causa de ningún desborde y se
-// descarta sin mirar más arriba en el árbol. Esto importa: un chequeo que marcara
+// sino el criterio exacto que hace inevitable el desborde: `white-space: nowrap` **y**
+// `overflow-x: hidden` computados a la vez (no "su efecto" en general — `nowrap` sin
+// `hidden`, o un `overflow-x: clip`, no matchean este filtro; ver hueco de cobertura en
+// `docs/agent/pendientes.md`), y solo mira el ítem flex/grid ancestro MÁS CERCANO de cada
+// bloque truncado — el elemento cuyo propio padre es flex/grid, sea o no el mismo
+// elemento que trunca. Si ese ítem ya no tiene `overflow-x: visible`, el bloque truncado
+// no puede ser causa de ningún desborde y se descarta sin mirar más arriba en el árbol.
+// Esto importa: un chequeo que marcara
 // cualquier ancestro que simplemente CONTENGA un `.truncate` en algún lado (sin esta
 // relación de ítem/descendiente) puede confundir un desborde de layout ajeno —p. ej. un
 // contenedor de terceros con ancho fraccionario— con este bug, solo porque ese contenedor
