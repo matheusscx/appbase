@@ -194,6 +194,17 @@ cd backend && npm test            # incluye los specs del motor y del servicio
 - `calculo-precios.service.spec.ts` — resolución de reglas asociadas vs override,
   errores (regla inexistente, cantidad ≤ 0).
 
+### E2E (Backend)
+
+```bash
+./scripts/reset-db.sh && cd backend && npx jest --config test/jest-e2e.json test/calculo-precios.e2e-spec.ts
+```
+
+- `calculo-precios.e2e-spec.ts` — descuento `monto_fijo` que supera el monto
+  disponible ("Promo fija $5.000", seed): confirma que la advertencia de tope
+  aparece en `lineas[].advertencias` cuando el descuento va por línea y en
+  `advertenciasVenta` cuando va a nivel venta, sin mezclarse entre sí.
+
 ### Manual (Swagger)
 
 1. `docker-compose up` → http://localhost:3000/api/docs

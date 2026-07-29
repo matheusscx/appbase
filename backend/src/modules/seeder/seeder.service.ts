@@ -2170,6 +2170,15 @@ export class SeederService implements OnApplicationBootstrap {
           'Recargo condicionado al medio de pago. Se suma solo cuando el cliente paga con alguno de los métodos seleccionados (ej. tarjeta de crédito).',
         activo: true,
       },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440337',
+        clase: 'descuento',
+        codigo: 'directo',
+        nombre: 'Descuento directo',
+        descripcion:
+          'Descuento de propósito general. Resta un porcentaje o monto fijo del total, sin condiciones especiales.',
+        activo: true,
+      },
     ];
 
     for (const data of tipos) {
@@ -2403,6 +2412,7 @@ export class SeederService implements OnApplicationBootstrap {
     const TIPO_METODO_PAGO = '550e8400-e29b-41d4-a716-446655440118';
     const TIPO_POR_MONTO_VENTA = '550e8400-e29b-41d4-a716-446655440119';
     const TIPO_PROMOCIONAL = '550e8400-e29b-41d4-a716-446655440121';
+    const TIPO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
     const descuentos: Partial<Descuento>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440114',
@@ -2456,6 +2466,16 @@ export class SeederService implements OnApplicationBootstrap {
         condicionTipo: CondicionTipo.FECHA,
         fechaInicio: '2026-12-01',
         fechaFin: '2027-01-31',
+        activo: true,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440338',
+        tenantId: PARIS,
+        tipoReglaId: TIPO_DIRECTO,
+        nombre: 'Promo fija $5.000',
+        modo: ModoRegla.MONTO_FIJO,
+        valor: '5000',
+        condicionTipo: CondicionTipo.NINGUNA,
         activo: true,
       },
     ];
