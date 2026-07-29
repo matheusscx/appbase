@@ -11,7 +11,7 @@ defineProps<{ advertencias: AdvertenciaPrecio[] }>()
     class="flex items-center gap-1 text-xs text-warning"
   >
     <UIcon name="i-lucide-triangle-alert" class="size-3.5 shrink-0" />
-    <span class="truncate">{{ advertencia.titulo }}</span>
+    <span class="min-w-0 flex-1 truncate">{{ advertencia.titulo }}</span>
     <UTooltip :text="advertencia.detalle">
       <UButton
         icon="i-lucide-info"
@@ -19,6 +19,7 @@ defineProps<{ advertencias: AdvertenciaPrecio[] }>()
         color="neutral"
         size="xs"
         square
+        class="shrink-0"
         :aria-label="`Detalle: ${advertencia.detalle}`"
       />
     </UTooltip>
