@@ -489,6 +489,56 @@ Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` 
   cuesta poco y cierra una ambigüedad real si el usuario tiene el modal abierto y
   duda de sobre cuál fila estaba parado.
 
+## Revisión final `advertencias-previsualizacion` (2026-07-29)
+
+Hallazgos de la revisión que cerró las advertencias del motor de precios en los tres
+carritos. Ninguno bloqueaba; el veredicto fue limpio. Se difieren por alcance.
+
+- [ ] **`resultado` y `lineas` se desfasan: el aviso puede quedar bajo la línea
+  equivocada** (frontend, los tres carritos) — el cruce línea↔resultado es por índice,
+  que es lo correcto, pero **nadie invalida `resultado` cuando cambia el carrito**.
+  Es el modo de falla que la regla "nunca cruzar por `itemId`" busca evitar, entrando por
+  la puerta de atrás: el índice es estable, lo que no lo es es la pareja. **Preexistente**
+  — ya afectaba a `resultado.totales`, que se muestra hace rato; la feature solo lo hizo
+  visible porque ahora hay algo atribuido a una línea concreta.
+  - POS y Tienda (`useVenta.ts:384-406`, `useTiendaCarrito.ts:45-67`): el `watch` recalcula
+    con 300 ms de debounce y `resultado` conserva la respuesta anterior. Reproducción:
+    carrito `[A con descuento topeado, B]`, borrar A → el template rinde `[B]` de inmediato
+    pero `resultado.lineas[0]` sigue siendo el de A, así que **el aviso de A se dibuja bajo
+    B** durante el debounce más el round-trip. Misma ventana al cambiar cantidades.
+  - Salones (`salones/index.vue:361-373`): `recalcular()` **no secuencia requests** y se
+    dispara desde `syncCuenta` y `patchLineaOptimista`. Reproducción: dos cambios rápidos de
+    cantidad generan dos `calcular` solapados; si el viejo resuelve último, `resultado` queda
+    apuntando a un set de líneas anterior **hasta la próxima mutación** — ahí la mala
+    atribución deja de ser transitoria.
+
+  Encararlo es invalidación + secuenciación en los tres carritos (descartar respuestas
+  obsoletas por token de request, y limpiar `resultado` al cambiar de cuenta), no un parche
+  en el componente de advertencias.
+
+- [ ] **El e2e de ventas consume stock sembrado compartido** (backend,
+  `test/ventas.e2e-spec.ts:309-325`) — el test que cubre la recomposición de la advertencia
+  persiste una venta real de 1 unidad de "Papas fritas", el mismo ítem que
+  `combos.e2e-spec.ts` consume como componente. Con BD fresca es inocuo y el gate está
+  verde; en corridas locales repetidas sin `./scripts/reset-db.sh` acelera el agotamiento y
+  aflora como un fallo opaco en una suite que no tiene nada que ver. Mismo patrón que
+  [[e2e-cumulative-stock-pollution]].
+
+- [ ] **El seed reusa el UUID `…440281` para dos filas sin relación** (backend,
+  `seeder.service.ts`) — el ítem "Papas fritas" (vía `uuid(281)` en `seedPapasFritas`) y el
+  garzón "Mostrador" (`:1542`). No es colisión de PK real —son tablas distintas— y no rompe
+  nada hoy, pero contradice la convención de tomar el siguiente número libre y **ya confundió
+  a dos revisores independientes**. Efecto visible: `test/ventas.e2e-spec.ts` declara dos
+  constantes con el mismo literal (`PAPAS_FRITAS_ID` y `MOSTRADOR_ID`) en el mismo archivo.
+  Corregirlo es reasignar uno de los dos y actualizar sus referencias; el proyecto no tiene
+  datos productivos ([[proyecto-sin-datos-productivos]]), así que se cambia y se resiembra.
+
+- [ ] **`select-tenant.vue` tiene el mismo bug de truncado que se corrigió acá** (frontend,
+  `pages/select-tenant.vue:84`) — `flex-1 truncate` sin `min-w-0`. Por la regla default
+  `min-width: auto` de los ítems flex, `truncate` no entra en efecto y el texto desborda en
+  vez de cortarse. Es el defecto que `31893f7` arregló en `AdvertenciasPrecio.vue`, en un
+  archivo que esta feature no tocó. Reproducción: un tenant con nombre largo.
+
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
 El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado
