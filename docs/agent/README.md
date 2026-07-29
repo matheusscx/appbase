@@ -135,9 +135,12 @@ primero, por definición, nunca mira lo que ya está.
 ## Pendiente
 
 - **Suite E2E de navegador (Playwright).** [x] **Fundación lista** (`frontend/playwright.config.ts`,
-  `e2e/auth.setup.ts` con login vía `storageState`, `e2e/smoke/*.smoke.spec.ts`, scripts
-  `e2e`/`e2e:smoke`). Corre contra el stack real (`docker-compose up`). El `test:e2e` del
-  backend es Jest + supertest, no navegador — no confundir. [ ] **Flujos por escribir**
+  `e2e/auth.setup.ts` con login vía `storageState`, `e2e/smoke/*.smoke.spec.ts`,
+  `e2e/layout/desborde.spec.ts`, scripts `e2e`/`e2e:smoke`). En local corre contra el
+  stack real (`docker-compose up`); en CI no hay compose, así que `webServer` en
+  `playwright.config.ts` levanta backend y frontend (`node dist/main` / `node
+  .output/server/index.mjs`) antes de correr los tests. El `test:e2e` del backend es Jest
+  + supertest, no navegador — no confundir. [ ] **Flujos por escribir**
   (ver `docs/agent/pendientes.md`): venta completa hasta documento, pago mixto, nota de
   crédito, apertura/cierre de caja, descuento de stock, y cambio de tenant sin fuga de
   datos (este último no lo detecta ninguna prueba unitaria). Restricciones: reloj
@@ -147,8 +150,10 @@ primero, por definición, nunca mira lo que ya está.
   Riesgo a cubrir: un agente al que se le pide "escribe tests" escribe tests que
   describen lo que el código hace hoy. Las aserciones de montos, impuestos y stock se
   derivan de `docs/features/`, nunca de ejecutar el código y copiar el resultado.
-- [ ] **E2E en CI** — el workflow actual no levanta el stack completo para navegador.
-  Integrar `@smoke` cuando la suite tenga masa crítica.
+- [x] **E2E en CI** — cerrado: el job `e2e-navegador` de `.github/workflows/ci.yml` corre
+  el `webServer` de arriba y la suite completa (`npm run e2e`) contra Postgres real en
+  cada push a `main`. Integrar `@smoke` como subconjunto rápido si la suite completa deja
+  de caber en el presupuesto del job sigue pendiente.
 - [ ] **Sección E2E de `anti-patterns.md`**, a poblar cuando aparezcan errores reales
   (candidato ya visto: tipear antes de la hidratación de Nuxt deja el `v-model` sin
   capturar → el fix es esperar la condición, `networkidle` + `toBeEnabled`, no un sleep).

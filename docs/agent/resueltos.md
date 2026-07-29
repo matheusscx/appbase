@@ -53,8 +53,7 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
   `31893f7` "arregló" en `AdvertenciasPrecio.vue`, y se agregó un gate estático
   (`scripts/check-design-tokens.mjs`) que marcaba el elemento hijo flex (`flex-1`,
   `flex-auto`, `basis-*`) **y** trunca en sí mismo, sin `min-w-0`.
-  Medido después en navegador real (Chromium, ver
-  `.superpowers/sdd/2026-07-29-playwright-en-ci/investigacion-truncado-report.md`): la
+  Medido después en navegador real (Chromium): la
   premisa era falsa. Por la spec de Flexbox §4.5, el mínimo automático de un ítem flex es
   **cero** cuando su propio `overflow` computado no es `visible` — y `truncate` incluye
   `overflow: hidden`. Un elemento que **es** el ítem flex y **lleva** `truncate` encima ya
@@ -71,15 +70,14 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
   puede ver una relación ancestro/descendiente entre líneas distintas del template, solo
   detecta la forma segura). El `min-w-0` de `select-tenant.vue:84` se dejó — es inocuo,
   sacarlo es churn sin ganancia — pero **no era necesario**. La regla real (cuándo
-  `min-w-0` hace falta y cuándo es ruido) quedó documentada en
-  `docs/patterns/frontend.md`.
+  `min-w-0` hace falta y cuándo es ruido, con los números de la medición) quedó
+  documentada en `docs/patterns/frontend.md` §16.
 
 - [x] ~~**Cuatro hijos directos de un `.flex` que truncan sin `min-w-0` en ningún
   ancestro — candidatos a verificar, no bugs confirmados**~~ — cerrado 2026-07-29: los
   cuatro son **falsos positivos**. Medido en navegador real pisando el `textContent` con
   texto forzado (46 a 109 caracteres, según candidato) y leyendo `scrollWidth`/`clientWidth`
-  del elemento, si el padre desbordó y si la página ganó scroll horizontal
-  (`.superpowers/sdd/2026-07-29-playwright-en-ci/task-1-report.md`, líneas 354-430):
+  del elemento, si el padre desbordó y si la página ganó scroll horizontal:
   - `app/components/caja/CajaAperturaGrid.vue:95` y `CajaCajonesGrid.vue:56` — el span
     que trunca recortó correctamente (`elScrollW`/`elClientW` 356/265 y 356/252); el padre
     no desbordó. Misma forma que `select-tenant.vue:84`: el elemento que trunca **es** el

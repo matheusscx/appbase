@@ -32,8 +32,12 @@ qué hace el carrito cuando no cabe junto al catálogo). Eso es un proyecto de p
 no un ajuste de este documento.
 
 Vigilancia: `frontend/e2e/layout/desborde.spec.ts` corre en CI contra los dos anchos
-soportados y falla si algún elemento desborda a su ancestro o si la página gana scroll
-horizontal. Detalle de la regla CSS que vigila: `docs/patterns/frontend.md` §16.
+soportados, en 4 rutas representativas de cada arquetipo de layout de la app. Falla si la
+página gana scroll horizontal, o si un texto truncado (`white-space: nowrap` +
+`overflow: hidden` computados) fuerza a su ítem flex/grid ancestro a desbordar su propio
+contenedor — la forma de bug concreta documentada en `docs/patterns/frontend.md` §16, no
+"cualquier elemento que desborde por cualquier razón": una tabla con scroll horizontal
+propio (`overflow-x: auto`), por ejemplo, es intencional y el spec no la marca.
 
 ---
 

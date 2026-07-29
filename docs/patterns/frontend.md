@@ -486,23 +486,41 @@ El patrón completo está en `app/stores/monedas.spec.ts` y en `MoneyInput.spec.
 
 ## 16. `truncate` + `min-w-0`: cuándo hace falta y cuándo es ruido
 
-Medido en navegador real, no regla folk (detalle y mediciones crudas:
-`.superpowers/sdd/2026-07-29-playwright-en-ci/investigacion-truncado-report.md`). Por
-Flexbox §4.5, el mínimo automático de un ítem flex/grid es **cero** cuando su propio
-`overflow` computado no es `visible` — y `truncate` de Tailwind incluye `overflow: hidden`.
+Medido en navegador real (Chromium/Playwright, jul-2026), no regla folk. Por Flexbox
+§4.5, el mínimo automático de un ítem flex/grid es **cero** cuando su propio `overflow`
+computado no es `visible` — y `truncate` de Tailwind incluye `overflow: hidden`.
 
-- **El elemento que lleva `truncate` es él mismo el ítem flex/grid (hijo directo)** → ya
+- **El elemento que lleva `truncate` es él mismo el ítem flex (hijo directo)** → ya
   encoge solo, su propio `overflow: hidden` fija el mínimo en cero. `min-w-0` ahí **no
-  aporta nada** — es ruido, no hace falta agregarlo ni mantenerlo.
+  aporta nada** — es ruido, no hace falta agregarlo ni mantenerlo. **Medido en flex**: un
+  `<span class="truncate">` (con o sin `flex-1`, con o sin `min-w-0` de más) dentro de un
+  host de 300px con texto de 650px renderizados — las tres variantes truncan idéntico
+  (contenedor 300px, `scrollWidth` 300, el propio elemento a 280px). En **grid** no se
+  midió esta forma (solo se midió la rota y su fix, abajo) — no asumir que se comporta
+  igual sin medir.
 - **`truncate` está en un descendiente de un ítem flex/grid** (p. ej. un `<p>` dentro de un
-  `<div class="flex-1">`) → ahí sí hace falta `min-w-0` en el ítem ancestro — **medido**
-  (Medición 3, caso B vs. C del informe). `truncate` implica `white-space: nowrap`, así
-  que el min-content de ese bloque es el ancho **completo** del texto; sin `min-w-0` el
-  ítem se niega a encoger y desborda él y toda la fila. Cualquier otro `overflow` distinto
-  de `visible` **debería** funcionar igual por la spec de Flexbox §4.5 (el mínimo
-  automático es cero cuando el `overflow` propio del ítem no es `visible`) — pero eso es
-  **inferencia, no medición**: solo se midió `min-w-0`. Usar `min-w-0`, que es lo
-  verificado; no sustituirlo por otro `overflow` sin medir primero.
+  `<div class="flex-1">`) → ahí sí hace falta `min-w-0` en el ítem ancestro — **medido, en
+  flex y en grid**. `truncate` implica `white-space: nowrap`, así que el min-content de
+  ese bloque es el ancho **completo** del texto; sin `min-w-0` el ítem se niega a encoger
+  y desborda él y toda la fila:
+  - **Flex, sin `min-w-0`** (`<div class="flex-1"><p class="truncate">`, host de 300px,
+    texto de 650px): el host **desborda** — `scrollWidth` 670 > `clientWidth` 300; el
+    `<p>` mide 650px de ancho.
+  - **Flex, con `min-w-0`** (`<div class="flex-1 min-w-0"><p class="truncate">` — el
+    patrón real del repo): trunca — `scrollWidth` 300 == `clientWidth` 300.
+  - **Grid, sin `min-w-0`** (columna `1fr auto`, ítem sin `min-w-0`, `truncate` en el
+    hijo): **desborda** — `scrollWidth` 650 > `clientWidth` 300.
+  - **Grid, con `min-w-0`**: trunca — `scrollWidth` 300 == `clientWidth` 300.
+  - `flex-1` en el wrapper es irrelevante para el bug: un wrapper pelado (`<div>` sin
+    `flex-1` ni `min-w-0`, simple hijo directo de un contenedor flex) rompe igual —
+    `scrollWidth` 670 > `clientWidth` 300 — porque ser "ítem flex" lo determina el
+    `display` del padre, no las clases del propio elemento.
+
+  Cualquier otro `overflow` distinto de `visible` **debería** funcionar igual que
+  `min-w-0` por la spec de Flexbox §4.5 (el mínimo automático es cero cuando el
+  `overflow` propio del ítem no es `visible`) — pero eso es **inferencia, no medición**:
+  solo se midió `min-w-0`. Usar `min-w-0`, que es lo verificado; no sustituirlo por otro
+  `overflow` sin medir primero.
 
 ```vue
 <!-- ✅ min-w-0 hace falta: el div (ítem flex) es ANCESTRO del <p> que trunca -->
@@ -519,6 +537,21 @@ del template, y un chequeo línea-a-línea no puede verla (por eso se borró el 
 hubo en `check-design-tokens.mjs` — ver `docs/agent/resueltos.md`). Ante la duda, medir en
 navegador con contenido largo, no aplicar la regla por reflejo.
 
-Quién vigila esto en CI: `frontend/e2e/layout/desborde.spec.ts` — corre el mismo detector
-de la Medición 4 sobre rutas reales a 1280/768px, y prueba con un caso sintético inyectado
-que el detector efectivamente marca la forma B (descendiente sin `min-w-0`).
+**Barrido pre-fix vs. post-fix (por qué el patrón seguro no necesita vigilancia):**
+angostando el contenedor real del carrito de 360px a 50px, con y sin `min-w-0`/`shrink-0`
+en el markup de `AdvertenciasPrecio`, las dos versiones dieron **fila por fila el mismo
+resultado**: el título nunca desbordó por encima de ~90px de contenedor en ninguna de las
+dos, y el botón del tooltip se sale por debajo de 90px **en ambas versiones por igual**
+(lo congela su propio min-content de 24px al resolver la violación de mínimos de
+Flexbox, no `shrink-0`). Confirma que el patrón "truncate es el propio ítem flex" no
+necesita `min-w-0` ni `shrink-0` para comportarse bien.
+
+Quién vigila esto en CI: `frontend/e2e/layout/desborde.spec.ts`. El detector no busca la
+clase `.truncate` (implementación de Tailwind, puede cambiar) sino el **efecto**
+(`white-space: nowrap` + `overflow-x: hidden` computados); ubica su ítem flex/grid
+ancestro más cercano (el elemento inmediato cuyo *padre* es flex/grid — sea o no el
+propio elemento que trunca) y falla solo si ese ítem tiene `overflow-x: visible` **y**
+algún ancestro suyo desborda de verdad (`scrollWidth > clientWidth`). Así ignora los
+`.truncate` ya seguros (item = él mismo) y no confunde un desborde de layout ajeno
+(p. ej. un contenedor con ancho fraccionario de una librería de terceros) con el bug de
+esta regla, aunque ese contenedor también tenga descendientes truncados en algún lado.
