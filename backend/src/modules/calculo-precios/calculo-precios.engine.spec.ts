@@ -389,7 +389,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.lineas[0].trazas.descuentos[0].monto).toBe('100.000000');
       expect(r.totales.totalFinal).toBe('0.000000');
       expect(r.advertencias).toEqual([
-        'Descuento "Fijo 500": se aplicó 100.000000 en vez de 500.000000 porque superaba el monto disponible',
+        'Descuento "Fijo 500": no se aplicó completo porque superaba el monto disponible',
       ]);
     });
 

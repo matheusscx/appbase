@@ -285,7 +285,7 @@ function procesarReglas(
       const tope = Decimal.max(disponible, ZERO);
       if (monto.greaterThan(tope)) {
         advertencias.push(
-          `Descuento "${regla.nombre}": se aplicó ${fmt(tope, params.cfg)} en vez de ${fmt(monto, params.cfg)} porque superaba el monto disponible`,
+          `Descuento "${regla.nombre}": no se aplicó completo porque superaba el monto disponible`,
         );
         monto = tope;
       }

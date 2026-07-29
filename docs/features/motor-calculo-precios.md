@@ -67,7 +67,7 @@ Response (201):
       "recargos":   [...],
       "impuestos":  [{ "id", "nombre", "tasa", "monto" }]
     },
-    "advertencias": ["Descuento \"X\": se aplicó … en vez de … porque superaba el monto disponible"]
+    "advertencias": ["Descuento \"X\": no se aplicó completo porque superaba el monto disponible"]
   }],
   "totales": {
     "subtotalNeto", "totalDescuentos", "totalRecargos",
@@ -80,8 +80,9 @@ Response (201):
 ```
 
 **Advertencias.** El motor emite avisos que **no frenan el cálculo**: hoy, cuando un
-descuento supera el monto disponible, se topea y se avisa con cuánto se aplicó y cuánto
-valía la regla. El resultado los expone en dos granularidades porque se muestran en
+descuento supera el monto disponible, se topea y se avisa sin nombrar montos (el
+aplicado ya viaja en la traza de la línea, que el front formatea). El resultado los
+expone en dos granularidades porque se muestran en
 lugares distintos: `ResultadoLinea.advertencias` va bajo la línea que lo produjo, y
 `advertenciasVenta` —solo los descuentos a nivel venta, que no pertenecen a ninguna
 línea— va junto al total. `advertencias` es el aplanado de ambos y es lo que consume la
