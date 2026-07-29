@@ -31,8 +31,8 @@ const CLP: MonedaTenantApi = {
   valorDelDia: null,
 }
 
-// decimales > 0 para ejercitar la rama de `buildMask` con fracción y separadorDecimal,
-// que con CLP (decimales: 0) nunca corre.
+// Segunda moneda con decimales > 0, locale y separadores invertidos respecto de CLP: cubre
+// el emit para una config distinta, no solo la del peso chileno.
 const USD: MonedaTenantApi = {
   monedaId: 'usd-1',
   nombre: 'Dólar',
@@ -110,8 +110,10 @@ describe('MoneyInput', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([['1500000']])
   })
 
-  // Con decimales > 0 la máscara incluye el separador decimal (`buildMask` toma la
-  // rama de fracción); el emit debe seguir siendo el monto sin máscara.
+  // El emit sigue siendo el monto sin máscara con otro locale y otros separadores.
+  // Lo que este test NO fija es `buildMask`: con la opción `number` activa —la que usa el
+  // componente siempre que hay moneda— maska formatea vía Intl.NumberFormat desde
+  // `number.fraction` e ignora la cadena `mask`, así que mutar esa rama no rompe nada.
   it('con una moneda de decimales > 0 el emit conserva el separador decimal', async () => {
     const wrapper = mount(MoneyInput, {
       props: { modelValue: '', monedaId: 'usd-1' },
