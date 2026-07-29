@@ -113,3 +113,84 @@ jobs:
       - name: frontend · design tokens
         working-directory: frontend
         run: npm run design:check
+
+  # Suite E2E de navegador (Playwright). Job separado a propósito: GitHub crea los
+  # `services` por job, así que este Postgres nace virgen y el bootstrap del backend lo
+  # siembra — la misma garantía que `scripts/reset-db.sh` da en local. Correrlo dentro de
+  # `gate` lo dejaría sobre la base que `backend · e2e` acaba de mutar (cajas abiertas,
+  # stock consumido) y las aserciones de UI dejarían de ser deterministas.
+  e2e-navegador:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: appuser
+          POSTGRES_PASSWORD: apppass
+          POSTGRES_DB: appdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U appuser -d appdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://appuser:apppass@localhost:5432/appdb
+      NODE_ENV: test
+      API_PREFIX: api
+      PORT: '3000'
+      JWT_SECRET: ci-only-not-a-real-secret
+      JWT_REFRESH_SECRET: ci-only-not-a-real-refresh-secret
+      JWT_EXPIRATION: 15m
+      JWT_REFRESH_EXPIRATION: 7d
+      VITE_API_URL: http://localhost:3000/api
+      PASARELA_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: backend · install
+        working-directory: backend
+        run: npm ci
+
+      - name: backend · build
+        working-directory: backend
+        run: npm run build
+
+      - name: frontend · install
+        working-directory: frontend
+        run: npm ci
+
+      - name: frontend · build
+        working-directory: frontend
+        run: npm run build
+
+      - name: playwright · chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # `webServer` de la config arranca backend y frontend y espera a que respondan.
+      - name: frontend · e2e navegador
+        working-directory: frontend
+        run: npm run e2e
+
+      # Sin esto, `trace: 'on-first-retry'` y `screenshot: 'only-on-failure'` no sirven
+      # de nada: un CI rojo quedaría sin forma de diagnosticarse.
+      - name: reporte de Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

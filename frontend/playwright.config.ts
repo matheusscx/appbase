@@ -1,8 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
-// E2E de navegador contra el STACK REAL. Requiere `docker-compose up` corriendo:
+// E2E de navegador contra el STACK REAL. En local requiere `docker-compose up` corriendo:
 // front en :5173, back en :3000, con el seed de dev cargado (estado determinista,
-// UUIDs fijos). No levanta servidores: apunta al stack ya arriba.
+// UUIDs fijos). En CI no hay compose: `webServer` levanta los dos servidores.
 //
 // Aserciones de montos/impuestos/stock se derivan de docs/features/, NUNCA del output
 // del código (ver docs/agent/README.md → riesgo de tests que describen el bug).
@@ -26,4 +26,30 @@ export default defineConfig({
       dependencies: ['setup'],
     },
   ],
+  // En CI no hay compose: Playwright arranca los dos servidores y espera a que respondan.
+  // El backend siembra la base en `OnApplicationBootstrap`, y Nest corre ese hook ANTES
+  // de abrir el puerto, así que "responde" ya implica "seed terminado" — sin esperas fijas.
+  // En local no se define nada: sigue apuntando al `docker-compose up` que ya corre el dev.
+  webServer: process.env.CI
+    ? [
+        {
+          command: 'node dist/main',
+          cwd: '../backend',
+          url: 'http://localhost:3000/api/docs',
+          timeout: 120_000,
+          reuseExistingServer: false,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+        {
+          command: 'node .output/server/index.mjs',
+          url: 'http://localhost:5173',
+          env: { PORT: '5173' },
+          timeout: 120_000,
+          reuseExistingServer: false,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      ]
+    : undefined,
 })
