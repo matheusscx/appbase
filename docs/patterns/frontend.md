@@ -453,11 +453,10 @@ reloj.
 **Qué NO afirma:**
 
 - **clases de estilo** (`text-warning`, `truncate`, `size-3.5`). Es afirmar la
-  implementación, y happy-dom no calcula layout, así que el assert no valida nada. El
-  truncado roto en hijos flex lo cubre `scripts/check-design-tokens.mjs`, pero solo cuando
-  el hijo lleva `flex-1`/`flex-auto`/`basis-*` explícito — cualquier otro hijo directo de un
-  `.flex` es ítem flex igual (min-width:auto por default) y sufre el mismo bug sin que la
-  regla lo detecte;
+  implementación, y happy-dom no calcula layout, así que el assert no valida nada. No hay
+  gate estático para el truncado: la relación ancestro/descendiente que decide si rompe
+  (ver §16) no se puede ver mirando una sola línea del template — solo se detecta midiendo
+  layout real en navegador;
 - **snapshots**. Congelan markup y se aprueban a ciegas cuando cambian.
 
 **Un test no cuenta hasta fallar contra su estado previo o su mutación.** Romper la línea
@@ -482,3 +481,36 @@ El patrón completo está en `app/stores/monedas.spec.ts` y en `MoneyInput.spec.
 - Riesgo del propio patrón: un stub con template propio puede volverse tan permisivo que el
   test pase por construcción. La contraprueba es la mutación — si romper el componente bajo
   test no pone nada en rojo, el test está afirmando el stub y no el componente.
+
+---
+
+## 16. `truncate` + `min-w-0`: cuándo hace falta y cuándo es ruido
+
+Medido en navegador real, no regla folk (detalle y mediciones crudas:
+`.superpowers/sdd/2026-07-29-playwright-en-ci/investigacion-truncado-report.md`). Por
+Flexbox §4.5, el mínimo automático de un ítem flex/grid es **cero** cuando su propio
+`overflow` computado no es `visible` — y `truncate` de Tailwind incluye `overflow: hidden`.
+
+- **El elemento que lleva `truncate` es él mismo el ítem flex/grid (hijo directo)** → ya
+  encoge solo, su propio `overflow: hidden` fija el mínimo en cero. `min-w-0` ahí **no
+  aporta nada** — es ruido, no hace falta agregarlo ni mantenerlo.
+- **`truncate` está en un descendiente de un ítem flex/grid** (p. ej. un `<p>` dentro de un
+  `<div class="flex-1">`) → ahí sí hace falta `min-w-0` (o cualquier `overflow` distinto de
+  `visible`) en el ítem ancestro. `truncate` implica `white-space: nowrap`, así que el
+  min-content de ese bloque es el ancho **completo** del texto; sin `min-w-0` el ítem se
+  niega a encoger y desborda él y toda la fila.
+
+```vue
+<!-- ✅ min-w-0 hace falta: el div (ítem flex) es ANCESTRO del <p> que trunca -->
+<div class="flex-1 min-w-0">
+  <p class="truncate">{{ nombre }}</p>
+</div>
+
+<!-- ✅ min-w-0 es ruido: el propio span que trunca YA es el ítem flex -->
+<span class="flex-1 truncate">{{ nombre }}</span>
+```
+
+No hay gate estático para esto: la relación ancestro/descendiente cruza líneas distintas
+del template, y un chequeo línea-a-línea no puede verla (por eso se borró el intento que
+hubo en `check-design-tokens.mjs` — ver `docs/agent/resueltos.md`). Ante la duda, medir en
+navegador con contenido largo, no aplicar la regla por reflejo.

@@ -48,15 +48,52 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
   para las tres suites que siguen sin cerrarla.
 
 - [x] ~~**`select-tenant.vue` tiene el mismo bug de truncado que se corrigió acá**~~ —
-  cerrado 2026-07-29: `pages/select-tenant.vue:84` tenía `flex-1 truncate` sin `min-w-0`, el
-  mismo defecto que `31893f7` arregló en `AdvertenciasPrecio.vue`. Se agregó el `min-w-0`.
-  Lo que cambia respecto de un fix suelto es que **ahora lo caza un gate**:
-  `scripts/check-design-tokens.mjs` chequea el elemento que es hijo flex (`flex-1`,
+  cerrado 2026-07-29, **reabierto y refutado el mismo día**. Se creyó que
+  `pages/select-tenant.vue:84` (`flex-1 truncate` sin `min-w-0`) tenía el mismo defecto que
+  `31893f7` "arregló" en `AdvertenciasPrecio.vue`, y se agregó un gate estático
+  (`scripts/check-design-tokens.mjs`) que marcaba el elemento hijo flex (`flex-1`,
   `flex-auto`, `basis-*`) **y** trunca en sí mismo, sin `min-w-0`.
-  La regla intuitiva —"todo `truncate` necesita `min-w-0`"— es falsa en este repo: 28 de los
-  29 usos no lo tienen y están bien, porque el patrón correcto es `min-w-0` en el wrapper y
-  `truncate` en el descendiente. La regla acotada da un solo hit en los 126 `.vue`, que era
-  justamente este bug. Corre en `design:check` (CI) y en el pre-commit sobre `.vue` staged.
+  Medido después en navegador real (Chromium, ver
+  `.superpowers/sdd/2026-07-29-playwright-en-ci/investigacion-truncado-report.md`): la
+  premisa era falsa. Por la spec de Flexbox §4.5, el mínimo automático de un ítem flex es
+  **cero** cuando su propio `overflow` computado no es `visible` — y `truncate` incluye
+  `overflow: hidden`. Un elemento que **es** el ítem flex y **lleva** `truncate` encima ya
+  encoge solo; `min-w-0` ahí es redundante. Barrido pre-fix vs. post-fix de `31893f7`,
+  idéntico fila por fila en 9 anchos de contenedor (360px→50px): el commit fue un no-op.
+  El defecto real que motivó `31893f7` era *wrapping* vertical a cinco renglones, ya
+  resuelto por el commit anterior (`ceba35f`) al introducir `truncate`.
+  La forma que **sí** rompe es la opuesta a la que el gate vigilaba: `truncate` en un
+  **descendiente** de un ítem flex/grid cuyo propio `overflow` es `visible` (`truncate`
+  implica `white-space: nowrap`, así que el min-content del bloque es el ancho completo del
+  texto, y el ítem se niega a encoger). Medido: desborda 370px sobre un contenedor de
+  300px, con o sin `flex-1` en el wrapper.
+  **Qué quedó en su lugar:** el gate estático se borró de `check-design-tokens.mjs` (no
+  puede ver una relación ancestro/descendiente entre líneas distintas del template, solo
+  detecta la forma segura). El `min-w-0` de `select-tenant.vue:84` se dejó — es inocuo,
+  sacarlo es churn sin ganancia — pero **no era necesario**. La regla real (cuándo
+  `min-w-0` hace falta y cuándo es ruido) quedó documentada en
+  `docs/patterns/frontend.md`.
+
+- [x] ~~**Cuatro hijos directos de un `.flex` que truncan sin `min-w-0` en ningún
+  ancestro — candidatos a verificar, no bugs confirmados**~~ — cerrado 2026-07-29: los
+  cuatro son **falsos positivos**. Medido en navegador real pisando el `textContent` con
+  texto forzado (46 a 109 caracteres, según candidato) y leyendo `scrollWidth`/`clientWidth`
+  del elemento, si el padre desbordó y si la página ganó scroll horizontal
+  (`.superpowers/sdd/2026-07-29-playwright-en-ci/task-1-report.md`, líneas 354-430):
+  - `app/components/caja/CajaAperturaGrid.vue:95` y `CajaCajonesGrid.vue:56` — el span
+    que trunca recortó correctamente (`elScrollW`/`elClientW` 356/265 y 356/252); el padre
+    no desbordó. Misma forma que `select-tenant.vue:84`: el elemento que trunca **es** el
+    ítem flex, así que su propio `overflow: hidden` (parte de `truncate`) ya fija el
+    mínimo automático en cero (Flexbox §4.5) — `min-w-0` ahí no aporta nada.
+  - `CajaCajonesGrid.vue:71` — reproducción sintética fiel (mismo `[data-slot="body"]`
+    real de la `UCard`) con texto de 109 caracteres: recortó (817/232), misma forma segura.
+  - `app/layouts/dashboard.vue:184` — con texto de 82 caracteres no truncó porque **no
+    tuvo que hacerlo**: el contenedor creció de 439px a 626px en vez de recortar. Ningún
+    criterio pedido (recorte, desborde del padre, scroll horizontal de página) indica
+    bug; mecanismo distinto a los otros tres (crecimiento del contenedor, no
+    truncado-que-falla), anotado como nota aparte, no como bug.
+  Ninguno se toca: no había nada que corregir. La regla real —cuándo `min-w-0` hace
+  falta— quedó en `docs/patterns/frontend.md`.
 
 ---
 
