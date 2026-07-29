@@ -5,7 +5,9 @@
 **Alcance:** que los tres carritos —POS, Salones y Tienda online— muestren las advertencias
 del motor de precios **antes** de crear la venta, atribuidas a la línea que las produjo.
 Agrega un campo al resultado del motor para separar las advertencias de venta de las de
-línea; el resto es frontend. Backend (solo forma del resultado) + frontend.
+línea; el resto es frontend. Incluye además el rename de `advertenciasReceta` a
+`advertencias` en la respuesta de la venta (§6). Backend (solo forma del resultado) +
+frontend.
 **Origen:** pendiente abierto en [`docs/agent/pendientes.md`](../../agent/pendientes.md),
 surgido del piso en cero del descuento (commit `32c1452`).
 
@@ -163,21 +165,58 @@ dibuja nada.
 
 ---
 
-## 6. Documentación
+## 6. Rename: `advertenciasReceta` → `advertencias`
+
+Trabajo **independiente** del resto de este spec: no comparte un solo archivo con las
+secciones 3 a 5. Va al final por eso — si se complica, la feature ya está entregada.
+
+`ventas.service.ts:615` devuelve la venta con un campo `advertenciasReceta` que **hace rato
+dejó de ser solo de receta**: desde el piso en cero (`32c1452`) también transporta avisos
+del motor de precios (`ventas.service.ts:460` lo inicializa con `resultado.advertencias`).
+El POS las renderiza como toasts sueltos y cada mensaje se explica solo, así que
+**funciona**; lo que quedó mal es el nombre.
+
+Se renombra a `advertencias`. Sin colisión: la respuesta de la venta es
+`{ ...venta, detalles, advertenciasReceta }` y no tiene ningún otro campo con ese nombre.
+
+**Alcance medido: 21 referencias en 7 archivos.**
+
+| Archivo | |
+|---|---|
+| `backend/src/modules/ventas/ventas.service.ts` | produce el campo |
+| `backend/src/modules/ventas/ventas.service.spec.ts` | unit |
+| `backend/test/combos.e2e-spec.ts` | afirma el nombre |
+| `backend/test/recetas.e2e-spec.ts` | afirma el nombre |
+| `backend/test/grupos-modificadores.e2e-spec.ts` | afirma el nombre |
+| `backend/test/grupos-modificadores-overrides.e2e-spec.ts` | afirma el nombre |
+| `frontend/app/pages/ventas/pos.vue` | consume el campo |
+
+**El cierre es hacerlo de una vez**, no ir agregando un campo nuevo por cada tipo de aviso.
+
+Que las cuatro suites e2e afirmen el nombre es la red: si queda una referencia sin
+renombrar, fallan. El riesgo real no es romper, es **renombrar a medias** — el frontend
+leyendo un campo que el backend ya no manda devuelve `undefined`, y el `?? []` de
+`pos.vue:214` lo convierte en silencio. Verificación explícita: que el POS **siga mostrando
+los toasts** después del rename, no solo que compile.
+
+---
+
+## 7. Documentación
 
 | Archivo | Qué |
 |---|---|
 | `docs/features/motor-calculo-precios.md` | El campo nuevo y qué distingue de `advertencias` |
 | `docs/ESTADO.md` | Fila de la funcionalidad |
-| `docs/agent/pendientes.md` | Cerrar el ítem de la previsualización; **dejar abiertos** los otros dos |
+| `docs/agent/pendientes.md` | Cerrar **dos** ítems (previsualización y rename); dejar abierto el del checkout online |
 
 ---
 
-## 7. Fuera de alcance
+## 8. Fuera de alcance
 
 - **`online.service.ts` y `suscripciones.service.ts` siguen descartando las advertencias**
   al *crear* el pedido y la suscripción, y `pasarela.vue` sigue sin leerlas. Es un problema
-  hermano —el equivalente a `advertenciasReceta` en ventas—, no el de la previsualización.
-- **El rename de `advertenciasReceta` a `advertencias`** (21 referencias, 7 archivos, 4
-  suites e2e) no entra.
+  hermano —el mismo que el rename de §6 corrige en el nombre, pero en otros dos módulos—,
+  no el de la previsualización. Queda abierto en `pendientes.md`.
 - **No se agregan tipos de advertencia nuevos.** Hoy el motor produce uno solo y así queda.
+- **El campo renombrado no cambia de forma.** Sigue siendo `string[]` plano en la respuesta
+  de la venta; no se le agrega atribución por línea como la que §4 usa en el carrito.
