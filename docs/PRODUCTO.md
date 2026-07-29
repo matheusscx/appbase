@@ -19,6 +19,24 @@ en la BD como `NUMERIC(18,4)` y se operan como `Decimal` en la capa de negocio.
 
 ---
 
+## Alcance de interfaz — anchos soportados
+
+**Escritorio (1280px) y tablet (768px) soportados.** Móvil (~375px) está **fuera de
+alcance declarado**, no es deuda pendiente.
+
+Por qué: a 375px este sistema no tiene un problema de layout — es otra interfaz. Las
+tablas de muchas columnas, el drawer lateral y la grilla de ítems compitiendo con el
+carrito no se resuelven angostando CSS; requieren un rediseño de navegación e
+interacción propio (colapsar columnas, reemplazar el drawer por otra jerarquía, decidir
+qué hace el carrito cuando no cabe junto al catálogo). Eso es un proyecto de producto,
+no un ajuste de este documento.
+
+Vigilancia: `frontend/e2e/layout/desborde.spec.ts` corre en CI contra los dos anchos
+soportados y falla si algún elemento desborda a su ancestro o si la página gana scroll
+horizontal. Detalle de la regla CSS que vigila: `docs/patterns/frontend.md` §16.
+
+---
+
 ## Modelo de datos central
 
 Tres entidades que no deben confundirse:

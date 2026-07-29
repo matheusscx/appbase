@@ -495,10 +495,14 @@ Flexbox §4.5, el mínimo automático de un ítem flex/grid es **cero** cuando s
   encoge solo, su propio `overflow: hidden` fija el mínimo en cero. `min-w-0` ahí **no
   aporta nada** — es ruido, no hace falta agregarlo ni mantenerlo.
 - **`truncate` está en un descendiente de un ítem flex/grid** (p. ej. un `<p>` dentro de un
-  `<div class="flex-1">`) → ahí sí hace falta `min-w-0` (o cualquier `overflow` distinto de
-  `visible`) en el ítem ancestro. `truncate` implica `white-space: nowrap`, así que el
-  min-content de ese bloque es el ancho **completo** del texto; sin `min-w-0` el ítem se
-  niega a encoger y desborda él y toda la fila.
+  `<div class="flex-1">`) → ahí sí hace falta `min-w-0` en el ítem ancestro — **medido**
+  (Medición 3, caso B vs. C del informe). `truncate` implica `white-space: nowrap`, así
+  que el min-content de ese bloque es el ancho **completo** del texto; sin `min-w-0` el
+  ítem se niega a encoger y desborda él y toda la fila. Cualquier otro `overflow` distinto
+  de `visible` **debería** funcionar igual por la spec de Flexbox §4.5 (el mínimo
+  automático es cero cuando el `overflow` propio del ítem no es `visible`) — pero eso es
+  **inferencia, no medición**: solo se midió `min-w-0`. Usar `min-w-0`, que es lo
+  verificado; no sustituirlo por otro `overflow` sin medir primero.
 
 ```vue
 <!-- ✅ min-w-0 hace falta: el div (ítem flex) es ANCESTRO del <p> que trunca -->
@@ -514,3 +518,7 @@ No hay gate estático para esto: la relación ancestro/descendiente cruza línea
 del template, y un chequeo línea-a-línea no puede verla (por eso se borró el intento que
 hubo en `check-design-tokens.mjs` — ver `docs/agent/resueltos.md`). Ante la duda, medir en
 navegador con contenido largo, no aplicar la regla por reflejo.
+
+Quién vigila esto en CI: `frontend/e2e/layout/desborde.spec.ts` — corre el mismo detector
+de la Medición 4 sobre rutas reales a 1280/768px, y prueba con un caso sintético inyectado
+que el detector efectivamente marca la forma B (descendiente sin `min-w-0`).
