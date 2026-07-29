@@ -70,7 +70,7 @@ fi
 staged_vue=$(git diff --cached --name-only --diff-filter=ACM -- 'frontend/**/*.vue')
 if [ -n "$staged_vue" ]; then
   if ! ( cd frontend && node scripts/check-design-tokens.mjs --staged ) ; then
-    red "✗ Clases Tailwind neutrales hardcodeadas en .vue staged (ver arriba)."
+    red "✗ Tokens de diseño o layout flex en .vue staged (ver arriba)."
     fail=1
   fi
 fi

@@ -533,12 +533,6 @@ carritos. Ninguno bloqueaba; el veredicto fue limpio. Se difieren por alcance.
   Corregirlo es reasignar uno de los dos y actualizar sus referencias; el proyecto no tiene
   datos productivos ([[proyecto-sin-datos-productivos]]), así que se cambia y se resiembra.
 
-- [ ] **`select-tenant.vue` tiene el mismo bug de truncado que se corrigió acá** (frontend,
-  `pages/select-tenant.vue:84`) — `flex-1 truncate` sin `min-w-0`. Por la regla default
-  `min-width: auto` de los ítems flex, `truncate` no entra en efecto y el texto desborda en
-  vez de cortarse. Es el defecto que `31893f7` arregló en `AdvertenciasPrecio.vue`, en un
-  archivo que esta feature no tocó. Reproducción: un tenant con nombre largo.
-
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
 El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado

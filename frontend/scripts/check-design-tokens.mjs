@@ -28,6 +28,14 @@ const RULES = [
 ]
 const EXCLUDE = 'app/components/caja/'
 
+// Hijo flex que trunca en el MISMO elemento: los ítems flex tienen min-width:auto por
+// default, así que sin min-w-0 el `truncate` no entra en efecto y el texto desborda.
+// El patrón correcto cuando min-w-0 va en un wrapper ancestro NO dispara acá.
+// Límite conocido: mira el `class` estático de una línea. No ve `:class` dinámico ni
+// clases que ponga un componente padre. Es un cedazo barato, no una garantía.
+const FLEX_CHILD = /\b(flex-1|flex-auto|basis-[\w./[\]-]+)\b/
+const LAYOUT_HINT = 'agregá min-w-0: un ítem flex tiene min-width:auto y sin eso truncate no corta'
+
 function allVueFiles(dir) {
   const out = []
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -44,17 +52,34 @@ function stagedVueFiles() {
     .map((f) => join(root, f.startsWith('frontend/') ? f.slice('frontend/'.length) : f))
 }
 
-const files = (staged ? stagedVueFiles() : allVueFiles(join(root, 'app')))
-  .filter((f) => !relative(root, f).replace(/\\/g, '/').includes(EXCLUDE))
+const allFiles = staged ? stagedVueFiles() : allVueFiles(join(root, 'app'))
+// La excepción de app/components/caja/ es SOLO para los colores financieros. El chequeo
+// de layout corre sobre TODOS los .vue: heredar ese filtro dejaría 13 componentes sin
+// revisar en silencio.
+const tokenFiles = allFiles.filter((f) => !relative(root, f).replace(/\\/g, '/').includes(EXCLUDE))
+const tokenSet = new Set(tokenFiles)
 
 const violations = []
-for (const file of files) {
+const layoutViolations = []
+for (const file of allFiles) {
   let content
   try { content = readFileSync(file, 'utf8') } catch { continue }
+  const revisarTokens = tokenSet.has(file)
   content.split('\n').forEach((line, i) => {
-    for (const rule of RULES) {
-      const m = rule.re.exec(line)
-      if (m) violations.push({ file: relative(root, file), line: i + 1, cls: m[0], hint: rule.hint })
+    if (revisarTokens) {
+      for (const rule of RULES) {
+        const m = rule.re.exec(line)
+        if (m) violations.push({ file: relative(root, file), line: i + 1, cls: m[0], hint: rule.hint })
+      }
+    }
+    const flex = FLEX_CHILD.exec(line)
+    if (flex && line.includes('truncate') && !line.includes('min-w-0')) {
+      layoutViolations.push({
+        file: relative(root, file),
+        line: i + 1,
+        cls: `${flex[0]} + truncate`,
+        hint: LAYOUT_HINT,
+      })
     }
   })
 }
@@ -65,7 +90,16 @@ if (violations.length) {
     console.error(`  ${v.file}:${v.line}  «${v.cls}»  → ${v.hint}`)
   }
   console.error('\nExcepción única: colores financieros en app/components/caja/.')
-  process.exit(1)
 }
-console.log(`✓ Design tokens OK (${files.length} .vue revisados, 0 neutrales hardcodeados).`)
+
+if (layoutViolations.length) {
+  console.error('✗ Hijo flex que trunca sin min-w-0 (el texto desborda en vez de cortarse):')
+  for (const v of layoutViolations) {
+    console.error(`  ${v.file}:${v.line}  «${v.cls}»  → ${v.hint}`)
+  }
+}
+
+if (violations.length || layoutViolations.length) process.exit(1)
+
+console.log(`✓ Design tokens (${tokenFiles.length} .vue) y layout flex (${allFiles.length} .vue) OK.`)
 process.exit(0)

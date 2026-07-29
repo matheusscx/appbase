@@ -81,7 +81,7 @@ const gridClass = computed(() =>
               class="absolute inset-0 m-auto w-5 h-5 animate-spin text-highlighted"
             />
           </div>
-          <span class="font-medium text-default text-sm flex-1 truncate">
+          <span class="min-w-0 font-medium text-default text-sm flex-1 truncate">
             {{ tenant.nombre }}
           </span>
           <UIcon

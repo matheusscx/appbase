@@ -47,6 +47,17 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
   sobre **la misma base** pasa. Es el patrón que [`pendientes.md`](pendientes.md) predice
   para las tres suites que siguen sin cerrarla.
 
+- [x] ~~**`select-tenant.vue` tiene el mismo bug de truncado que se corrigió acá**~~ —
+  cerrado 2026-07-29: `pages/select-tenant.vue:84` tenía `flex-1 truncate` sin `min-w-0`, el
+  mismo defecto que `31893f7` arregló en `AdvertenciasPrecio.vue`. Se agregó el `min-w-0`.
+  Lo que cambia respecto de un fix suelto es que **ahora lo caza un gate**:
+  `scripts/check-design-tokens.mjs` chequea el elemento que es hijo flex (`flex-1`,
+  `flex-auto`, `basis-*`) **y** trunca en sí mismo, sin `min-w-0`.
+  La regla intuitiva —"todo `truncate` necesita `min-w-0`"— es falsa en este repo: 28 de los
+  29 usos no lo tienen y están bien, porque el patrón correcto es `min-w-0` en el wrapper y
+  `truncate` en el descendiente. La regla acotada da un solo hit en los 126 `.vue`, que era
+  justamente este bug. Corre en `design:check` (CI) y en el pre-commit sobre `.vue` staged.
+
 ---
 
 ## Harness / tooling (CodeGraph)
