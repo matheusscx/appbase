@@ -102,8 +102,12 @@ Hay dos formas de montar y la diferencia importa por una sola clase de bug:
 cumplen las tres:
 
 1. el entorno `nuxt` bootea en este repo sin configuración extra;
-2. un archivo de spec corre en tiempo tolerable (referencia: que `npm test` no pase de
-   ~2× su duración actual);
+2. el costo queda acotado. **Baseline medido 2026-07-29: 275 tests en 24 archivos, 1.68 s**
+   (3.7 s de reloj). El entorno `nuxt` se activa **por archivo** con el docblock
+   `// @vitest-environment nuxt`, así que las 24 specs puras siguen en happy-dom y solo las
+   de render pagan el boot. Umbral: **`npm test` completo bajo 60 s**. Un múltiplo del
+   baseline no sirve como criterio —1.68 s es tan bajo que cualquier boot lo excede— y el
+   costo que importa es el absoluto en CI;
 3. un tag deliberadamente mal escrito (`<AdvertenciasPrecioo>`) **hace fallar el test** —
    si no falla, la ventaja no existe y no hay razón para pagar el boot.
 
