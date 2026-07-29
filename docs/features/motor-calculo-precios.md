@@ -66,16 +66,28 @@ Response (201):
       "descuentos": [{ "id", "nombre", "monto" }],
       "recargos":   [...],
       "impuestos":  [{ "id", "nombre", "tasa", "monto" }]
-    }
+    },
+    "advertencias": ["Descuento \"X\": se aplicó … en vez de … porque superaba el monto disponible"]
   }],
   "totales": {
     "subtotalNeto", "totalDescuentos", "totalRecargos",
     "totalImpuestos", "totalFinal"
   },
   "trazasVenta": { "descuentos": [...], "recargos": [...] },
-  "advertencias": ["Descuento \"X\": se aplicó … en vez de … porque superaba el monto disponible"]
+  "advertenciasVenta": ["…"],
+  "advertencias": ["…"]
 }
 ```
+
+**Advertencias.** El motor emite avisos que **no frenan el cálculo**: hoy, cuando un
+descuento supera el monto disponible, se topea y se avisa con cuánto se aplicó y cuánto
+valía la regla. El resultado los expone en dos granularidades porque se muestran en
+lugares distintos: `ResultadoLinea.advertencias` va bajo la línea que lo produjo, y
+`advertenciasVenta` —solo los descuentos a nivel venta, que no pertenecen a ninguna
+línea— va junto al total. `advertencias` es el aplanado de ambos y es lo que consume la
+venta al persistirse. La razón de separarlos en vez de que el consumidor reste strings:
+restar strings se rompe cuando dos advertencias tienen el mismo texto, y ese caso es
+alcanzable (dos descuentos distintos topeados al mismo monto producen el mismo mensaje).
 
 Todos los montos son strings con `escala_calculo` decimales.
 
@@ -154,11 +166,12 @@ precisiones que hacen a la regla:
   revisión independiente porque el primer test usaba una línea pelada, el único
   caso donde las dos magnitudes coinciden.
 - **No frena la venta**: emite una advertencia, igual que un ingrediente no
-  bloqueante sin stock. Viaja en `advertencias`, tanto del cálculo como de la
-  respuesta de la venta, que el POS muestra como toast. ⚠️ Hoy el
-  aviso llega **después** de crear la venta: la previsualización del carrito no
-  lo expone todavía, y los caminos de tienda online y suscripciones lo descartan
-  (ver `docs/agent/pendientes.md`).
+  bloqueante sin stock. Viaja en `advertencias`/`advertenciasVenta`, tanto del
+  cálculo como de la respuesta de la venta. La previsualización del carrito
+  (POS, Salones, Tienda) ya la muestra **antes** de cobrar — ver "Frontend"
+  más abajo. Los caminos de tienda online y suscripciones siguen
+  descartándola al crear el pedido/la suscripción (ver
+  `docs/agent/pendientes.md`).
 
 - **Ninguna regla aporta una magnitud negativa.** El signo lo pone el tipo de
   regla, nunca el valor calculado. Hace falta porque el acumulado que sirve de
@@ -176,8 +189,23 @@ que el piso resuelve— pero sí el piso en cero de arriba: un recargo nunca res
 ## Frontend
 
 - **Composable**: `app/composables/useCalculoPrecios.ts` — `calcular(input)` con
-  `useApiFetch` a `POST /calculo-precios/calcular`. Sin páginas todavía; la
-  integración visual va con el módulo de ventas.
+  `useApiFetch` a `POST /calculo-precios/calcular`. El tipo `ResultadoLinea`
+  incluye `advertencias` y el tipo `ResultadoVenta` incluye `advertencias` +
+  `advertenciasVenta`.
+- **Previsualización del carrito** (POS `components/ventas/CarritoPanel.vue`,
+  Salones `pages/salones/index.vue`, Tienda `components/tienda/CarritoOnline.vue`)
+  — los tres renderizan el componente compartido `components/AdvertenciasPrecio.vue`:
+  por línea con `resultado.lineas[index].advertencias`, junto al total con
+  `resultado.advertenciasVenta`. **El cruce línea↔resultado es por índice, nunca
+  por `itemId`**: el mismo ítem puede aparecer en dos líneas del carrito con
+  personalizaciones distintas (por ejemplo, dos porciones de la misma receta con
+  extras diferentes), y el `itemId` no las distingue.
+- ⚠️ **`advertenciasVenta` hoy no se puede ver por la UI.** El render junto al
+  total está construido y correcto, pero está inerte: depende de que el request
+  mande `descuentosVentaIds`/`recargosVentaIds`, y ningún archivo de
+  `frontend/app` los arma ni los ofrece al usuario — los descuentos/recargos a
+  nivel venta son superficie de API sin pantalla. No es un defecto, es una
+  limitación conocida hasta que exista esa UI (ver `docs/agent/pendientes.md`).
 
 ---
 

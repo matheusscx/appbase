@@ -742,3 +742,24 @@ siguen diferidos están en `pendientes.md`.
   lista vacía sin que ningún test lo note — se verificó con grep de cero resultados
   sobre todo el repo (backend, frontend, docs) después del cambio, no solo con las
   cuatro suites e2e en verde.
+- [x] ~~**Las advertencias del motor de precios llegan a un solo consumidor**~~ —
+  cerrado **parcialmente** 2026-07-28: el motor gana `ResultadoVenta.advertenciasVenta`
+  (solo las advertencias de descuentos a nivel venta, que no pertenecen a ninguna línea),
+  sin tocar `advertencias`, que sigue siendo el aplanado de línea + venta. Los tres
+  carritos (POS `CarritoPanel.vue`, Salones `salones/index.vue`, Tienda
+  `CarritoOnline.vue`) dibujan ambas granularidades con el componente compartido nuevo
+  `components/AdvertenciasPrecio.vue`: por línea con `resultado.lineas[index].advertencias`
+  (cruce por índice, nunca por `itemId` — el mismo ítem puede repetirse en dos líneas con
+  personalizaciones distintas) y junto al total con `resultado.advertenciasVenta`.
+  `useCalculoPrecios.ts` incorpora los dos campos al tipo. El seed suma el tipo de regla
+  `directo` ("Descuento directo") y el descuento `monto_fijo` "Promo fija $5.000" —ningún
+  descuento sembrado antes ejercitaba la rama plana del motor—, más el primer e2e de
+  `POST /calculo-precios/calcular`, que confirma que las dos granularidades no se
+  mezclan entre sí.
+  ⚠️ **Lo que sigue abierto, a propósito no cerrado acá:** `online.service.ts` y
+  `suscripciones.service.ts` siguen descartando `resultado.advertencias` al crear el
+  pedido/la suscripción, y `pasarela.vue` no lee el campo — ver la entrada viva en
+  [`pendientes.md`](pendientes.md). Y `advertenciasVenta` es hoy superficie sin UI: ningún
+  archivo de `frontend/app` arma `descuentosVentaIds`/`recargosVentaIds`, así que el render
+  junto al total está construido y correcto pero queda inerte hasta que exista esa pantalla
+  — detalle en [`motor-calculo-precios.md`](../features/motor-calculo-precios.md).

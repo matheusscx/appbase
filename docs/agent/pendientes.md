@@ -436,13 +436,17 @@ Ver [`resueltos.md`](resueltos.md).
   de que la regla valía 500; el motivo vive solo en un toast que el cajero puede no leer.
   Para un sistema con ambición fiscal/auditable el **hecho** del tope debería quedar en la
   transacción. Cierre posible: una columna o flag en el detalle de venta.
-- [ ] **Las advertencias del motor de precios llegan a un solo consumidor** (backend +
-  frontend) — `ventas.service.ts` las inyecta en `advertencias` y el POS las muestra,
-  pero `online.service.ts` y `suscripciones.service.ts` descartan `resultado.advertencias`,
-  y `pasarela.vue` no lee el campo. Peor: `useCalculoPrecios.ts` no incorporó
-  `advertencias` al tipo, así que **la previsualización del carrito muestra un total ya
-  topeado sin decir por qué** — el aviso aparece recién después de crear la venta, cuando ya
-  es irreversible. Es el consumidor que más lo necesita.
+- [ ] **`online.service.ts` y `suscripciones.service.ts` siguen descartando las
+  advertencias del motor de precios** (backend + frontend) — resto de "Las
+  advertencias del motor de precios llegan a un solo consumidor", cerrado
+  **parcialmente** el 2026-07-28 (ver [`resueltos.md`](resueltos.md)): la
+  previsualización de los tres carritos (POS, Salones, Tienda) ya muestra
+  `resultado.lineas[].advertencias` y `resultado.advertenciasVenta` antes de
+  cobrar. Lo que sigue abierto es la otra mitad de la cadena: `online.service.ts`
+  y `suscripciones.service.ts` descartan `resultado.advertencias` al crear el
+  pedido/la suscripción (no la persisten ni la devuelven), y `pasarela.vue` no
+  lee el campo. Mismo consumidor que el resto de la entrada original: el que más
+  lo necesita, porque ahí el cobro ya es irreversible.
 
 ## Revisión final `borrado-ingrediente-extra` (2026-07-28)
 
