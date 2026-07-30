@@ -1,8 +1,14 @@
 <script setup lang="ts">
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Cajas:Leer',
+  layout: 'dashboard',
+})
 
 const route = useRoute()
 const cajaStore = useCajaStore()
+// Justificar la diferencia de arqueo es del admin del tenant, no un permiso del
+// módulo: por eso queda el store y no `usePermisosCrud`.
 const perms = usePermissionsStore()
 const toast = useToast()
 const loading = ref(true)
@@ -15,15 +21,6 @@ const historialCajonUrl = computed(() => {
 })
 
 onMounted(async () => {
-  if (!perms.loading && perms.permisos.length === 0) {
-    await perms.fetchPermisos()
-  }
-  if (!perms.esAdmin && !perms.can('Cajas', 'Leer')) {
-    toast.add({ title: 'No tenés acceso al módulo Cajas', color: 'warning' })
-    await navigateTo('/ventas')
-    return
-  }
-
   loading.value = true
   try {
     await cajaStore.cargarDetalle(cajaId.value)

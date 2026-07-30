@@ -1,17 +1,8 @@
 <script setup lang="ts">
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
-
-const perms = usePermissionsStore()
-const toast = useToast()
-
-onMounted(async () => {
-  if (!perms.loading && perms.permisos.length === 0) {
-    await perms.fetchPermisos()
-  }
-  if (!perms.esAdmin && !perms.can('Cajas', 'Leer')) {
-    toast.add({ title: 'No tenés acceso al módulo Cajas', color: 'warning' })
-    await navigateTo('/ventas')
-  }
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Cajas:Leer',
+  layout: 'dashboard',
 })
 </script>
 

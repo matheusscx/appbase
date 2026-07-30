@@ -14,6 +14,27 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **Los middlewares de permisos rompen la hidratación del menú lateral** (frontend,
+  `app/middleware/{admin,permiso}.ts` + `app/layouts/dashboard.vue`) — ambos esperan
+  `ensureCargado()` antes de decidir, así que en una carga dura el cliente llega a hidratar
+  con el store **ya poblado** mientras el servidor renderizó el sidebar con el store vacío:
+  el menú tiene distinta cantidad de ítems de un lado y del otro. Vue reporta
+  `Hydration node mismatch` + `Hydration completed but contains mismatches` y re-renderiza
+  el subárbol.
+  **Verificado en navegador** (jul-2026, stack real): `/cajas/historial` y
+  `/configuracion/impuestos` lo tiran; `/inventario` —misma layout, sin middleware de
+  permisos— no, porque ahí el store también está vacío al hidratar y los dos lados
+  coinciden por casualidad.
+  No rompe la pantalla y no es un hueco de permisos, pero ensucia la consola y tapa
+  mismatches reales. Lo introdujo el barrido de permisos de jul-2026 al mover los guards
+  de `onMounted` a middleware de ruta — el trade correcto (el guard viejo dejaba ver la
+  pantalla antes de rebotar), pero con este costo.
+  **La causa de fondo no es el middleware:** estas rutas se sirven con SSR y el servidor
+  no tiene cómo autenticarse (el token vive en el cliente), así que renderiza un menú que
+  nunca va a ser el correcto. Las salidas son de arquitectura y las decide el owner:
+  `ssr: false` para la app —es un SaaS detrás de login, el SSR no le aporta SEO— o
+  `routeRules` por ruta. No inventar una tercera acá.
+
 - [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
   (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
   (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue

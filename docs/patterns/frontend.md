@@ -97,30 +97,49 @@ doble-click abre el editor (`PATCH /mesas/:id`). Se gatea la prop que habilita l
 interacción (`:editable="puedeActualizar"`), no un botón. Antes de dar una pantalla
 por gateada, listar sus escrituras desde el controller y tacharlas una por una.
 
-### 1.2 Pantalla admin-only: middleware de ruta, no `v-if` por botón
+### 1.2 Pantalla entera detrás de un permiso: middleware de ruta, no `v-if` por botón
 
-Cuando **toda** la escritura de la pantalla exige `TenantAdminGuard`, el gate va
-en la ruta y no control por control:
+Cuando **toda** la pantalla exige lo mismo —no controles sueltos— el gate va en
+la ruta. Hay dos middlewares, uno por cada corte:
 
 ```typescript
-// app/pages/configuracion/<feature>.vue
+// Toda la escritura exige `TenantAdminGuard` → ¿es admin del tenant?
 definePageMeta({ middleware: 'admin' })
+
+// La pantalla entera exige un permiso de módulo → ¿tiene este permiso?
+definePageMeta({ middleware: ['auth', 'permiso'], permiso: 'Cajas:Leer' })
+// `permisoLabel` solo si el módulo se llama distinto en pantalla:
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'MiCaja:Leer',
+  permisoLabel: 'Mi caja',
+})
 ```
 
-`app/middleware/admin.ts` redirige a `/configuracion` si no es admin. Tres
-razones para preferirlo al `v-if`:
+`admin` redirige a `/configuracion`; `permiso` a `/ventas`, avisando por toast
+cuál es el módulo que falta. Tres razones para preferirlos al `v-if`:
 
 - **Cubre la URL escrita a mano**, que el `v-if` no cubre: esconderla del menú
   no impide navegar, la lectura de esos endpoints es abierta y la tabla carga
   igual.
 - Un mecanismo en vez de ~60 `v-if` sueltos que hay que mantener sincronizados.
-- Se testea como función pura, sin entorno nuxt.
+- Corre **antes** de montar. El guard escrito en un `onMounted` —el patrón que
+  `permiso` vino a reemplazar en las seis pantallas de caja— deja ver la pantalla
+  y recién después rebota.
 
 ⚠️ El middleware **espera** `permissionsStore.ensureCargado()` antes de decidir.
 La navegación corre **antes** del `onMounted` que puebla el store, así que sin
 esa espera un admin entrando por URL directa o F5 se lee como no-admin y queda
 expulsado de su propia pantalla. Es un modo de falla que nadie reporta como bug
 de permisos: se ve como "la pantalla me tira al índice a veces".
+
+⚠️ Esa misma espera **rompe la hidratación del menú lateral** en las rutas que
+llevan middleware de permisos: el servidor renderiza el sidebar con el store
+vacío y el cliente ya lo tiene poblado al hidratar. Verificado en navegador en
+`/cajas/historial` y en `/configuracion/impuestos`. No rompe la pantalla (Vue
+re-renderiza el subárbol), pero ensucia la consola y la causa de fondo es que
+estas rutas se sirven con SSR sin poder autenticarse. Está en
+[`pendientes.md`](../agent/pendientes.md).
 
 ```typescript
 const { puedeCrear: puedeContar } = usePermisosCrud('Inventario')

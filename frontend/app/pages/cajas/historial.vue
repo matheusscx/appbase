@@ -1,9 +1,11 @@
 <script setup lang="ts">
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Cajas:Leer',
+  layout: 'dashboard',
+})
 
 const route = useRoute()
-const perms = usePermissionsStore()
-const toast = useToast()
 
 const usuarioIdFromQuery = computed(() => {
   const id = route.query.usuarioId
@@ -13,16 +15,6 @@ const usuarioIdFromQuery = computed(() => {
 const cajonIdFromQuery = computed(() => {
   const id = route.query.cajonId
   return typeof id === 'string' && id ? id : undefined
-})
-
-onMounted(async () => {
-  if (!perms.loading && perms.permisos.length === 0) {
-    await perms.fetchPermisos()
-  }
-  if (!perms.esAdmin && !perms.can('Cajas', 'Leer')) {
-    toast.add({ title: 'No tenés acceso al módulo Cajas', color: 'warning' })
-    await navigateTo('/ventas')
-  }
 })
 </script>
 
