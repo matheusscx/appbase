@@ -85,6 +85,71 @@ identificamos con ubicación concreta.
   backend quede estable, o correr el e2e contra un stack sin watch.
 ---
 
+## IVA automático según clasificación tributaria (decidido por el owner 2026-07-29)
+
+- [ ] **Un ítem `afecto` debe llevar el IVA sí o sí; uno `exento`, no** (backend + frontend,
+  toca impuestos → **brainstorm → spec antes de escribir código**, no "un rato").
+  **Regla que fijó el owner:** al crear un ítem `afecto` se le asocia el IVA
+  automáticamente y **no se puede quitar**; al marcarlo `exento`, el IVA se le quita.
+  ⛔ **Alcance, reforzado por el owner — la trampa de esta tarea:** `afecto`/`exento` habla
+  **solo del IVA**. Un ítem puede tener **varios impuestos**, y ser exento de IVA **no** lo
+  deja sin impuestos: puede seguir teniendo uno o más `tipo='otro'`. Y al revés, `afecto`
+  significa IVA sí o sí. Entonces el automatismo actúa **sobre la fila de IVA y nada más**:
+  el resto de las asociaciones se agregan y quitan libremente en las dos clasificaciones.
+  Implementar "exento → limpiar `impuestosIds`" o "afecto → dejar solo el IVA" sería romper
+  la regla, no cumplirla. Es la semántica que el motor ya respeta
+  (`calculo-precios.service.ts:184-190` filtra por `tipo`, no la lista entera) y la que ADR-011
+  fijó al separar `'iva'` de `'otro'`.
+  **Estado real hoy, medido —una mitad ya está y la otra es un hueco fiscal:**
+  - ⛔ **El hueco:** el default es `afecto` (`items.service.ts:789`, `items.vue:449`) y
+    `impuestosIds` arranca vacío (`items.vue:450`), y los impuestos por ítem salen
+    **solo** de `item_impuestos` (`items.service.ts:492`, agregado en `BASE_QUERY`). O sea
+    que el camino por default **crea un ítem declarado afecto que se vende sin IVA** — el
+    estado que ADR-010/ADR-011 quieren imposibilitar, entrando por la puerta de atrás: el
+    modelo se cuidó de que "exento" no fuera "sin impuesto", pero nada impide un "afecto
+    sin impuesto".
+  - ✅ **Lo que ya funciona:** el motor filtra los `tipo='iva'` de las líneas exentas antes
+    del paso de impuestos (`calculo-precios.service.ts:184-190`), y los `tipo='otro'` siguen
+    aplicando (DL 825 / IndExe). Así que "el exento no paga IVA" **ya se cumple en el
+    cálculo** aunque la fila siga asociada; lo que falta ahí es la coherencia del dato y de
+    la UI, no la plata.
+  - ✅ **No hace falta ningún campo nuevo para saber cuál es "el IVA":** `impuestos.tipo`
+    ya es `'iva' | 'otro'` y el IVA del país es fila del sistema (`tenant_id IS NULL` +
+    `pais_id`; Chile = `…440280`, `0.19`). El seeder incluso remapea los duplicados de IVA
+    por tenant hacia esa fila oficial (`remapImpuestosOficialesDuplicados`).
+  - ⛔ **Nada valida la coherencia en el backend:** `PATCH /items/:id` acepta hoy
+    `{ clasificacionTributaria: 'exento', impuestosIds: [IVA] }` sin chistar. La invariante
+    pide enforcement real en el backend — bloquear el chip en la UI no alcanza.
+
+  **Preguntas a responder en la spec, antes de tocar código:**
+  1. **¿Derivar o materializar?** Auto-asociar el IVA en `item_impuestos` deja **dos fuentes
+     de verdad** (la clasificación y la fila puente) que pueden divergir; derivarlo en lectura
+     (el motor agrega el IVA del país cuando la línea es `afecto`) no puede divergir, pero
+     cambia el significado de `item_impuestos` y hay que revisar sus tres lectores.
+  2. ¿Qué IVA se toma si el tenant ve **más de una** fila `tipo='iva'` (la del país más una
+     propia)? ¿Se prohíbe crear impuestos `tipo='iva'` por tenant?
+  3. "No se puede quitar": si el payload de un ítem `afecto` llega **sin** el IVA en
+     `impuestosIds`, ¿es 400 o se re-agrega en silencio? (Ídem `exento` **con** IVA.) Ojo que
+     la validación tiene que mirar **solo las filas `tipo='iva'`** de la lista: un
+     `impuestosIds` sin IVA pero con dos `'otro'` es perfectamente válido en un ítem exento.
+     En la UI, el chip del IVA queda fijo/no removible mientras el resto sigue editable —no
+     se bloquea el selector entero.
+  4. Al pasar `afecto → exento` se desasocia el IVA y al volver a `afecto` se re-asocia:
+     ¿queda rastro de ese ida y vuelta, o se pierde? Las ventas ya congeladas no se tocan
+     (`venta_detalles.clasificacion_tributaria` es snapshot).
+  5. ¿Aplica a **todos** los tipos de ítem —incluido `ingrediente`, que ni se vende— o solo
+     a los vendibles?
+
+  Ítems existentes: **no hay backfill que diseñar**, se cambia el esquema/seeder y se
+  resiembra ([[proyecto-sin-datos-productivos]]). Al implementarlo hay que actualizar
+  `docs/features/impuestos.md` (§ motor y § tablas), `docs/PRODUCTO.md`, y decidir si el
+  cambio de modelo merece nota en **ADR-011**.
+  ℹ️ Precisar de paso una línea que puede desorientar a quien tome esto:
+  `docs/features/impuestos.md:173` dice que "los impuestos del sistema entran
+  automáticamente al cálculo porque `ImpuestosService.findAll` ya los incluye en la unión"
+  — es cierto en el sentido de que quedan **disponibles en el mapa** de reglas, pero se lee
+  como que se aplican sin estar asociados al ítem, que es justamente lo que no pasa.
+
 ## Suite E2E de navegador (fundación lista, flujos por escribir)
 
 Scaffold Playwright ya funciona (`frontend/e2e/`, auth vía storageState, 1 smoke verde).
