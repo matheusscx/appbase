@@ -351,13 +351,22 @@ Ver [`resueltos.md`](resueltos.md).
   - Las ventas ya emitidas **no se tocan**: el hecho fiscal está congelado en
     `ventas_descuentos` / `ventas_recargos` / `ventas_impuestos`.
   ⛔ Toca el motor de cálculo de precios: va con spec antes de código.
-- [ ] **Tres carreras del mismo molde: leer para validar, escribir sin lock** (backend,
-  `items.service.ts`) — (a) `remove():1508` no es transaccional, así que su chequeo de uso
-  puede quedar obsoleto antes del `UPDATE`; (b) el guard de `modo_inventario` lee
-  `item_producto` **sin `FOR UPDATE`** (`:1166`) mientras `registrarMovimiento` sí lo toma,
-  así que no colisionan y el modo puede cambiar con un movimiento recién escrito; (c)
-  `item_receta.costo_actual` se puede pisar entre editar ingredientes y aplicar desfases.
-  Las tres bajadas de alta a media: ventana angosta, consecuencia silenciosa.
+- [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
+  `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
+  dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).
+  ⚠️ **La entrada original decía que `remove()` "no es transaccional" y eso era falso**: abre
+  `this.dataSource.transaction()` y `obtenerUsoItem` corre adentro. Lo que sí es cierto es
+  otra cosa: ese `SELECT` **no toma lock**, así que entre el chequeo y el commit otra
+  transacción puede insertar una fila que referencie al ítem. Es un phantom, no falta de
+  atomicidad — y por eso el arreglo no es "envolver en transacción".
+  Consecuencia real: el ítem queda borrado blando y con una `receta_ingredientes` viva
+  apuntándolo. Como las lecturas filtran por el JOIN a `items`, el ingrediente **desaparece
+  en silencio de la receta** y su costo cambia sin que nadie lo pida.
+  Por qué no se cerró junto con las otras dos: no hay una fila única que bloquear —el guard
+  lee cuatro tablas hijas—. El arreglo es bloquear la fila de `items` referenciada, y hacerlo
+  **en `remove()` y en cada camino que crea una referencia** (asociar ingrediente, componente
+  de combo, opción de grupo, extra permitido). Eso es varios sitios de escritura y su propio
+  análisis de orden de locks: es una tarea, no un `FOR UPDATE` más.
 ### Baja
 
 - [ ] **`convertirAMonedaOficial` redondea a 4 fijo** (backend,

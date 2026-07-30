@@ -166,6 +166,28 @@ porque el deadlock aborta la transacción entera —Postgres revierte todo antes
 el error—, así que no hay nada que deduplicar. Solo `40P01`: reintentar un error de
 negocio lo convierte en tres intentos silenciosos.
 
+**Variante: el ciclo no es entre filas de una tabla, sino entre dos tablas.** Ordenar por
+id no lo cubre — no hay un id que comparar. Pasó al cerrar la carrera de
+`item_receta.costo_actual` (jul-2026): el `FOR UPDATE` se puso pegado a la lectura que
+protege, sin mirar que en `update()` esa lectura ocurre **después** del `UPDATE items`.
+
+```ts
+// MAL — cada método toma los dos locks en el orden que le queda cómodo
+update():          UPDATE items …            → SELECT item_receta FOR UPDATE
+aplicarDesfases(): SELECT item_receta FOR UPDATE → UPDATE items SET precio_base
+// BIEN — un orden entre tablas, igual en los dos caminos
+update():          SELECT item_receta FOR UPDATE → UPDATE items …
+```
+
+Se dispara con un uso normal (un PATCH de receta con nombre + ingredientes contra un
+"aplicar desfase con actualizar precio"), y no lo caza ningún test: los unit corren con un
+solo manager mockeado y el e2e es secuencial. Lo cazó la revisión independiente.
+
+**Regla:** agregar un `FOR UPDATE` **no es un cambio local**. Antes de ponerlo, listar qué
+otros locks toma ese método —incluidos los implícitos de cada `UPDATE`— y en qué orden, y
+cruzarlo con los demás métodos que tocan esas mismas tablas. La pregunta no es "¿qué
+protege esta línea?" sino "¿en qué orden quedan **todos** los locks de este camino?".
+
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 
 `item_producto.costo_actual` y `item_producto.stock` son valores derivados del kardex

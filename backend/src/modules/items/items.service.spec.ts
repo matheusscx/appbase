@@ -1561,6 +1561,30 @@ describe('ItemsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('lee `item_producto` con FOR UPDATE antes de decidir sobre el kardex', async () => {
+      // El guard de "no cambiar `modo_inventario` con movimientos existentes"
+      // decide sobre `movimientos_inventario`, que `registrarMovimiento`
+      // escribe tomando `FOR UPDATE` sobre esta misma fila de `item_producto`
+      // (`inventario.service.ts`). Sin el lock acá los dos leen a la vez, no se
+      // serializan, y el modo cambia con un movimiento recién escrito debajo.
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }])
+        .mockResolvedValueOnce([
+          { modo_inventario: 'cantidad', unidad_medida: 'kg' },
+        ])
+        .mockResolvedValueOnce([{ cnt: '0' }])
+        .mockResolvedValue(undefined);
+
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        modoInventario: 'lote',
+      });
+
+      const lectura = managerMock.query.mock.calls
+        .map((c: unknown[]) => c[0] as string)
+        .find((sql) => sql.includes('FROM item_producto WHERE item_id'));
+      expect(lectura).toContain('FOR UPDATE');
+    });
+
     it('permite reenviar el mismo modoInventario con movimientos al actualizar costo', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
@@ -1673,6 +1697,7 @@ describe('ItemsService', () => {
     it('receta: reemplaza los ingredientes y recalcula costoActual', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }]) // SELECT existente
+        .mockResolvedValueOnce([]) // SELECT item_receta FOR UPDATE
         .mockResolvedValueOnce([
           {
             item_id: 'ingrediente-queso',
@@ -1700,9 +1725,19 @@ describe('ItemsService', () => {
         ],
       });
 
+      // El lock sobre `item_receta` va ANTES de costear: si se tomara después
+      // de leer los ingredientes, otra transacción alcanza a cambiarlos entre
+      // la lectura y el lock y el costo sale de una receta que ya no existe.
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining(
+          'FROM item_receta WHERE item_id = $1 FOR UPDATE',
+        ),
+        [ITEM_ID],
+      );
       // soft-delete de la lista anterior (nunca hard DELETE)
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        3,
+        4,
         expect.stringContaining('SET eliminado_el = NOW()'),
         [ITEM_ID],
       );
@@ -1715,6 +1750,51 @@ describe('ItemsService', () => {
       );
       expect(updateReceta?.[0]).toContain('costo_propuesto_omitido = NULL');
       expect(updateReceta?.[1]).toEqual(['120', ITEM_ID]);
+    });
+
+    it('toma `item_receta` ANTES del UPDATE items — orden de locks contra aplicarDesfases', async () => {
+      // Deadlock real, no teórico: `aplicarDesfases` bloquea `item_receta` y
+      // después `items` (para el precio). Si `update()` los toma al revés
+      // —`UPDATE items` primero y la receta después— las dos se abrazan y
+      // Postgres mata una con 40P01, que acá nadie reintenta. Se dispara con un
+      // PATCH normal de receta: nombre + ingredientes en el mismo payload.
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'receta' }])
+        .mockResolvedValue([
+          {
+            item_id: 'ingrediente-queso',
+            nombre: 'Queso',
+            tipo: 'ingrediente',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'kg',
+            costo_actual: '6000',
+          },
+        ]);
+      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('1');
+
+      await service.update(TENANT, USUARIO, ITEM_ID, {
+        nombre: 'Receta renombrada',
+        ingredientes: [
+          {
+            ingredienteItemId: 'ingrediente-queso',
+            cantidad: '1',
+            unidadCodigo: 'kg',
+          },
+        ],
+      });
+
+      const sqls = managerMock.query.mock.calls.map(
+        (c: unknown[]) => c[0] as string,
+      );
+      const lockReceta = sqls.findIndex((sql) =>
+        sql.includes('FROM item_receta WHERE item_id = $1 FOR UPDATE'),
+      );
+      const updateItems = sqls.findIndex((sql) =>
+        sql.includes('UPDATE items SET'),
+      );
+      expect(lockReceta).toBeGreaterThan(-1);
+      expect(updateItems).toBeGreaterThan(-1);
+      expect(lockReceta).toBeLessThan(updateItems);
     });
 
     it('extrasPermitidos: update soft-deletea extras previos e inserta nuevos', async () => {
@@ -4288,6 +4368,7 @@ describe('ItemsService', () => {
     describe('aplicarDesfases / descartarDesfases', () => {
       it('aplicar recomputa costo, limpia omitido y actualiza precio si checkbox', async () => {
         managerMock.query
+          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce([
             {
               receta_item_id: RECETA_ID,
@@ -4326,6 +4407,7 @@ describe('ItemsService', () => {
 
       it('aplicar sin checkbox no toca precio_base', async () => {
         managerMock.query
+          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce([
             { receta_item_id: RECETA_ID, tipo: 'receta' },
           ])
@@ -4390,6 +4472,7 @@ describe('ItemsService', () => {
       it('aplicar sobre N recetas hace lecturas CONSTANTES, no por receta', async () => {
         const IDS = ['receta-a', 'receta-b', 'receta-c'];
         managerMock.query
+          .mockResolvedValueOnce([]) // SELECT item_receta ... ORDER BY item_id FOR UPDATE
           .mockResolvedValueOnce(
             IDS.map((id) => ({ receta_item_id: id, tipo: 'receta' })),
           )
@@ -4413,12 +4496,18 @@ describe('ItemsService', () => {
         const sqls = managerMock.query.mock.calls.map(
           (c: unknown[]) => c[0] as string,
         );
-        // 2 lecturas para el lote entero + 1 UPDATE por receta (esas son
-        // escrituras de N filas, no un N+1). Si alguien vuelve a leer por
-        // receta, los SELECT pasan de 2 a 6.
+        // 3 lecturas para el lote entero —el lock, las cabeceras y los
+        // ingredientes— + 1 UPDATE por receta (esas son escrituras de N filas,
+        // no un N+1). El número es fijo a propósito: con 3 recetas, si alguien
+        // vuelve a leer o a bloquear POR RECETA, los SELECT pasan de 3 a 9.
         expect(sqls.filter((s) => s.trim().startsWith('SELECT'))).toHaveLength(
-          2,
+          3,
         );
+        // El lock es uno solo para el lote y ordenado: dos lotes con recetas en
+        // común tienen que tomarlas en el mismo orden o se abrazan.
+        const locks = sqls.filter((s) => s.includes('FOR UPDATE'));
+        expect(locks).toHaveLength(1);
+        expect(locks[0]).toContain('ORDER BY item_id');
         expect(
           sqls.filter((s) => s.includes('UPDATE item_receta')),
         ).toHaveLength(3);

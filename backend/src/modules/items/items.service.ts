@@ -1223,6 +1223,21 @@ export class ItemsService {
         patch.clasificacionTributaria = dto.clasificacionTributaria;
       }
 
+      // El lock de la receta va acá y no junto al costeo de más abajo, aunque
+      // sea ahí donde se usa: el `UPDATE items` que sigue toma lock sobre
+      // `items`, y `aplicarDesfases` bloquea al revés —primero `item_receta`,
+      // después `items` para el precio—. Tomarlos en orden inverso cierra el
+      // ciclo A→B / B→A y las dos transacciones se abrazan (`40P01`), con un
+      // PATCH de receta normal —nombre + ingredientes— corriendo contra un
+      // "aplicar desfase con actualizar precio". Los dos caminos tienen que
+      // tomar `item_receta` antes que `items`.
+      if (tipo === 'receta' && dto.ingredientes !== undefined) {
+        await manager.query(
+          `SELECT item_id FROM item_receta WHERE item_id = $1 FOR UPDATE`,
+          [itemId],
+        );
+      }
+
       if (setClauses.length) {
         setClauses.push(`actualizado_el = NOW()`);
         params.push(itemId, tenantId);
@@ -1259,8 +1274,14 @@ export class ItemsService {
             unidad_medida: string;
             costo_actual: string | null;
           }[] = await manager.query(
+            // `FOR UPDATE` para serializar con `registrarMovimiento`, que toma
+            // el mismo lock sobre esta fila (`inventario.service.ts`). Sin él
+            // los dos leen a la vez y el guard de "no cambiar `modo_inventario`
+            // con movimientos existentes" decide sobre un kardex que otra
+            // transacción está escribiendo: el modo cambia y el movimiento
+            // recién escrito queda bajo un modo que nunca lo admitió.
             `SELECT modo_inventario, unidad_medida, costo_actual
-               FROM item_producto WHERE item_id = $1`,
+               FROM item_producto WHERE item_id = $1 FOR UPDATE`,
             [itemId],
           );
 
@@ -1412,6 +1433,12 @@ export class ItemsService {
               'Las recetas requieren al menos un ingrediente',
             );
           }
+          // El lock de `item_receta` ya se tomó arriba, antes del `UPDATE
+          // items` — ver el comentario ahí para por qué no puede vivir acá.
+          // Lo que importa para el costeo es que está tomado ANTES de esta
+          // lectura: el mismo `costo_actual` lo escribe `aplicarDesfases`
+          // partiendo de los mismos ingredientes, y sin el lock los dos leen la
+          // lista vieja y el que commitea segundo pisa el costo del otro.
           const costeo = await this.validarYCostearIngredientes(
             manager,
             tenantId,
@@ -3524,6 +3551,19 @@ export class ItemsService {
       // las validaciones— pero ya no consulta: antes eran 2 lecturas por receta
       // más una por ingrediente adentro del cálculo del costo.
       const ids = [...new Set(items.map((i) => i.recetaItemId))];
+      // Los locks van ANTES de leer los ingredientes, no antes de escribir: si
+      // se toman después, otra transacción alcanza a cambiar la receta entre la
+      // lectura y el lock y el costo se calcula sobre ingredientes viejos.
+      //
+      // `ORDER BY` no es cosmético: sin él, el orden de bloqueo lo decide el
+      // plan, y dos lotes con recetas en común se toman las filas en órdenes
+      // distintos y se abrazan. El orden del lote lo pone el cliente — es
+      // exactamente el caso que hay que neutralizar.
+      await manager.query(
+        `SELECT item_id FROM item_receta
+          WHERE item_id = ANY($1) ORDER BY item_id FOR UPDATE`,
+        [ids],
+      );
       const cabPorId = await this.cabecerasReceta(manager, tenantId, ids);
       const ingsPorReceta = await this.ingredientesPorReceta(
         manager,

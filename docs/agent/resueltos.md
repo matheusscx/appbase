@@ -14,6 +14,44 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ## Deuda de código (harness)
 
+- [x] ~~**Dos de las tres carreras "leer para validar, escribir sin lock"**~~ (backend,
+  `items.service.ts`) — cerradas 2026-07-30. La tercera (`remove()`) sigue abierta en
+  [`pendientes.md`](pendientes.md), re-diagnosticada: la entrada original decía que
+  `remove()` "no es transaccional" y **era falso** —abre `dataSource.transaction()` y el
+  chequeo corre adentro—; lo real es que ese `SELECT` no toma lock, así que es un phantom
+  y el arreglo no es envolver en transacción sino bloquear el ítem referenciado en
+  `remove()` **y** en cada camino que crea una referencia. Es una tarea propia.
+  Las dos cerradas:
+  - **El guard de `modo_inventario` leía `item_producto` sin `FOR UPDATE`** mientras
+    `registrarMovimiento` sí lo toma sobre la misma fila (`inventario.service.ts`). No se
+    serializaban: el modo podía cambiar con un movimiento recién escrito debajo, quedando
+    bajo un modo que nunca lo admitió. Ahora la lectura toma el mismo lock.
+  - **`item_receta.costo_actual` tiene dos escritores** —`update()` al reemplazar
+    ingredientes y `aplicarDesfases()`— y ninguno bloqueaba. Los dos parten de los mismos
+    ingredientes, así que el que commiteaba segundo pisaba el costo del otro con uno
+    calculado sobre una lista que ya no era la de la receta.
+    El lock va **antes de leer los ingredientes**, no antes de escribir: tomarlo después
+    deja la misma ventana entre la lectura y el lock.
+    ⚠️ **El primer intento introdujo un deadlock, y lo cazó la revisión independiente, no el
+    gate.** El lock estaba puesto junto al costeo, que en `update()` corre **después** del
+    `UPDATE items`: quedaba `items → item_receta`, mientras `aplicarDesfases` toma
+    `item_receta → items` (el `UPDATE` del precio). Ciclo A→B / B→A alcanzable con un PATCH
+    de receta normal —nombre + ingredientes en el mismo payload— contra un "aplicar desfase
+    con actualizar precio", y en `items.service.ts` nadie reintenta el `40P01`. El lock se
+    movió arriba del `UPDATE items`, así que los dos caminos toman `item_receta` primero.
+    **Lección:** agregar un `FOR UPDATE` no es local — hay que mirar qué otros locks toma el
+    método **antes**, no solo qué protege la línea nueva.
+    En `aplicarDesfases` se toma **uno solo para todo el lote y con `ORDER BY item_id`** —el
+    orden lo ponía el cliente, que es exactamente el caso a neutralizar: dos lotes con
+    recetas en común se tomarían las filas en órdenes distintos y se abrazarían. Es la misma
+    lección del deadlock de ventas cerrado el mismo día.
+  Fijan el cierre 3 tests nuevos o ampliados en `items.service.spec.ts`, incluido el
+  anti-N+1 de desfases, que pasó de exigir 2 lecturas a 3 **conservando lo que protege**: el
+  número sigue siendo fijo con N=3 recetas, así que un lock por receta lo pondría en 9.
+  **5 mutantes revirtiendo cada decisión al código anterior** —sacar cada uno de los tres
+  `FOR UPDATE`, sacarle el `ORDER BY` al del lote, y devolver el lock de la receta a la
+  posición que causaba el deadlock—: los 5 en rojo.
+
 - [x] ~~**Los middlewares de permisos rompen la hidratación del menú lateral**~~ (frontend,
   `nuxt.config.ts`) — cerrado 2026-07-30, el mismo día que se abrió. Decisión del owner:
   **`ssr: false`**, la app es una SPA. Razonamiento completo en
