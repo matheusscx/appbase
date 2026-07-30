@@ -14,20 +14,6 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **Cuatro pantallas más sin gatear sus controles de escritura** (frontend,
-  `configuracion/garzones.vue`, `impresoras.vue`, `salones.vue`, `turnos.vue`) — resto del
-  barrido de permisos cerrado el 2026-07-30 ([`resueltos.md`](resueltos.md)), encontrado por
-  la revisión independiente al cruzar **las 28 páginas** de `configuracion/` en vez de las 19
-  que enumeraba la entrada original. Ninguna es admin-only: sus escrituras van con
-  `@RequiresPermiso` (`Salones:*`, `Impresoras:*`), así que el cierre es gate por control con
-  el permiso de su endpoint, no el middleware `admin`.
-  No es hueco de seguridad (el backend enforcea) y **no es una regresión** de aquel barrido:
-  no estaban en la lista. Ejemplo concreto para arrancar: `turnos.vue:157` ("Nuevo") y
-  `:199` ("Eliminar"), los dos sin `v-if`.
-  El andamiaje ya está resuelto: los component tests con `// @vitest-environment nuxt`
-  quedaron adoptados, con su patrón y sus dos trampas documentadas
-  (`docs/patterns/frontend.md` §1.1-1.2).
-
 - [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
   (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
   (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue

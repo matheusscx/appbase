@@ -2,6 +2,23 @@
 import type { SalonConMesas, MesaResumen, FormaMesa, TamanoMesa } from '~/composables/useSalones'
 import { FORMA_MESA_OPTIONS, TAMANO_MESA_OPTIONS } from '~/composables/useSalones'
 
+// La lectura es abierta (`Salones:Leer`), pero cada escritura pega a un endpoint
+// con su propio `@RequiresPermiso`. Salón y mesa comparten los tres permisos del
+// módulo. `Salones:Operar` no entra acá: es de la operación (cuentas, comandas),
+// no de esta pantalla de configuración.
+// Tres permisos separados y no un `puedeEscribir` único: el backend los separa a
+// propósito y colapsarlos escondería el editar a quien solo tiene `Actualizar`.
+const permissionsStore = usePermissionsStore()
+const puedeCrear = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Crear'),
+)
+const puedeActualizar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Actualizar'),
+)
+const puedeEliminar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Eliminar'),
+)
+
 const toast = useToast()
 const salonesApi = useSalones()
 
@@ -280,7 +297,7 @@ async function eliminarMesa() {
       description="Configura los salones del local y la distribución de sus mesas."
     >
       <template #actions>
-        <UButton icon="i-lucide-plus" @click="abrirCrearSalon">
+        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrearSalon">
           Nuevo salón
         </UButton>
       </template>
@@ -303,15 +320,21 @@ async function eliminarMesa() {
           class="w-56"
         />
         <UButton
+          v-if="puedeActualizar"
           icon="i-lucide-square-pen"
           color="neutral"
           variant="ghost"
+          title="Editar salón"
+          aria-label="Editar salón"
           @click="abrirEditarSalon"
         />
         <UButton
+          v-if="puedeEliminar"
           icon="i-lucide-trash-2"
           color="error"
           variant="ghost"
+          title="Eliminar salón"
+          aria-label="Eliminar salón"
           @click="() => { deleteSalonOpen = true }"
         />
       </div>
@@ -320,7 +343,9 @@ async function eliminarMesa() {
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-1.5">
             <span class="text-sm text-muted">Distribución del salón</span>
-            <AppInfoButton title="Cómo editar el plano">
+            <!-- Explica arrastrar y doble-click: sin `editable` no hay ninguna
+                 de las dos, y dejarla haría que la pantalla mienta. -->
+            <AppInfoButton v-if="puedeActualizar" title="Cómo editar el plano">
               <ul class="space-y-3">
                 <li class="flex items-start gap-2">
                   <UIcon name="i-lucide-move" class="mt-0.5 h-4 w-4 shrink-0 text-muted" />
@@ -339,6 +364,7 @@ async function eliminarMesa() {
               Guardando…
             </span>
             <UButton
+              v-if="puedeCrear"
               icon="i-lucide-plus"
               size="sm"
               variant="soft"
@@ -349,9 +375,14 @@ async function eliminarMesa() {
           </div>
         </div>
 
+        <!--
+          `editable` habilita arrastrar (guarda `PATCH :id/layout`) y el
+          doble-click que abre el drawer de la mesa (`PATCH /mesas/:id`): las dos
+          escrituras son `Salones:Actualizar`, así que van con el mismo gate.
+        -->
         <SalonesSalonPlano
           :mesas="localMesas"
-          editable
+          :editable="puedeActualizar"
           @move="onMove"
           @edit="abrirEditarMesa"
           @dragend="guardarDistribucion"
@@ -408,8 +439,13 @@ async function eliminarMesa() {
         </UForm>
       </template>
       <template #actions>
+        <!--
+          `DELETE /mesas/:id` pide `Eliminar`, no `Actualizar`: quien solo puede
+          editar la mesa no ve la papelera. (Al revés no aplica: la única puerta
+          a este drawer es el doble-click del plano, que ya exige `Actualizar`.)
+        -->
         <UButton
-          v-if="mesaEditingId"
+          v-if="mesaEditingId && puedeEliminar"
           color="error"
           variant="soft"
           icon="i-lucide-trash-2"

@@ -14,6 +14,45 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ## Deuda de código (harness)
 
+- [x] ~~**Cuatro pantallas más sin gatear sus controles de escritura**~~ (frontend,
+  `configuracion/garzones.vue`, `impresoras.vue`, `salones.vue`, `turnos.vue`) — cerrado
+  2026-07-30, resto del barrido de permisos. Cada control quedó con el permiso de **su**
+  endpoint, leído del controller ruta por ruta y no de esta entrada.
+  Lo que el mapeo real corrigió respecto de lo que la entrada daba por sabido: **garzones,
+  salones y turnos no tienen módulo propio** —sus rutas piden `Salones:*`—, y
+  **`Salones:Operar` no toca ninguna de las cuatro**: es de la operación (cuentas, comandas,
+  `garzones/identificar`, sesiones-garzón), no de estas pantallas. Ningún endpoint apareció
+  sin guard: no hubo hallazgo de seguridad.
+  Tres controles no eran deducibles mirando la pantalla y salieron del controller:
+  **Regenerar PIN** es `PATCH /garzones/:id/pin` → `Actualizar`, no un permiso aparte;
+  **Agregar mesa** es `POST /salones/:id/mesas` → `Crear`, aunque viva dentro del editor del
+  plano; y el **plano arrastrable es una escritura** —soltar una mesa guarda
+  `PATCH :id/layout` y el doble-click abre el drawer de la mesa (`PATCH /mesas/:id`)—, las
+  dos `Actualizar`, así que se gatea la prop que habilita la interacción
+  (`:editable="puedeActualizar"`) y no un botón. Sin eso el usuario arrastra mesas y descubre
+  el 403 recién al soltar. El switch de `activo` de impresoras se **deshabilita** en vez de
+  esconderse (además muestra estado), sumando el permiso a la condición `toggling` que ya
+  existía.
+  Queda una asimetría que es **de la UI y es preexistente, no del gate**: borrar una mesa
+  solo se ofrece dentro del drawer de edición, al que únicamente se llega por el doble-click
+  que exige `Actualizar`; quien tenga `Eliminar` sin `Actualizar` no puede borrar mesas por
+  pantalla. El botón igual se gatea con `Eliminar`, que es el sentido que sí ocurre.
+  **Salió del alcance pedido, pero sin esto el gate no servía:** el menú de
+  `configuracion.vue` publicaba esas cuatro entradas con `…:Crear` —el resto del menú pide
+  `Leer`—, así que quien tenía `Actualizar` o `Eliminar` nunca llegaba a la pantalla donde
+  sí podía trabajar, y el botón de editar recién gateado era código muerto para él. Es el
+  mismo colapso de permisos, una capa más arriba. Corregido a `Leer` en los dos bloques.
+  Fija el cierre `app/pages/configuracion/permisos-escritura.nuxt.spec.ts` (29 tests). Un
+  solo archivo tabla-driven para las cuatro porque el modo de falla es uno y es el mismo:
+  colapsar los tres permisos, o gatear unos controles y olvidar otros; cuatro specs casi
+  idénticos lo esconderían en la duplicación. **19 mutantes, todos revirtiendo al código
+  previo al gate** —quitar el `v-if`, devolver `editable` fijo, sacar `|| !puedeActualizar`
+  del switch, dejar el borrar-mesa en `v-if="mesaEditingId"`, devolver el menú a `Crear`—:
+  los 19 en rojo. La revisión independiente cazó que uno de los tests del menú pasaba igual
+  con el gate roto (sin ningún permiso del módulo, `Leer` y `Crear` dan `false` los dos):
+  se agregó el caso que sí discrimina —el rol real del bug, `Leer` + `Actualizar` sin
+  `Crear`— y el que no discrimina quedó con su razón escrita al lado.
+
 - [x] ~~**Cuatro suites e2e dejan la caja abierta al terminar**~~ (backend, `test/combos`,
   `grupos-modificadores`, `grupos-modificadores-overrides` y `recetas.e2e-spec.ts`) —
   cerrado 2026-07-29. Las cuatro tenían el **mismo** helper `cerrarCaja` de 10 líneas:

@@ -99,7 +99,11 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     )
   }
 
-  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Crear')) {
+  // `Leer`, no `Crear`, como el resto de las entradas: lo que la pantalla pide
+  // para abrirse es el permiso de lectura. Con `Crear` el link quedaba escondido
+  // para quien solo tiene `Actualizar` o `Eliminar` —que sí puede trabajar ahí—,
+  // el mismo colapso de permisos que los gates por control vienen a evitar.
+  if (permissionsStore.esAdmin || permissionsStore.can('Salones', 'Leer')) {
     items.push({
       label: 'Salones',
       icon: 'i-lucide-utensils',
@@ -117,7 +121,7 @@ const navItems = computed<NavigationMenuItem[]>(() => {
     })
   }
 
-  if (permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Crear')) {
+  if (permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Leer')) {
     items.push({
       label: 'Impresoras',
       icon: 'i-lucide-printer',

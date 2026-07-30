@@ -2,6 +2,22 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { Turno } from '~/composables/useTurnos'
 
+// La lectura es abierta (`Salones:Leer`), pero cada escritura pega a un endpoint
+// con su propio `@RequiresPermiso`. Turnos NO tiene módulo propio: sus rutas
+// piden permisos de **Salones**. Tres permisos separados y no un `puedeEscribir`
+// único: el backend los separa a propósito y colapsarlos escondería el editar a
+// quien solo tiene `Actualizar`.
+const permissionsStore = usePermissionsStore()
+const puedeCrear = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Crear'),
+)
+const puedeActualizar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Actualizar'),
+)
+const puedeEliminar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Eliminar'),
+)
+
 const toast = useToast()
 const turnosApi = useTurnos()
 
@@ -154,7 +170,7 @@ const columns: TableColumn<Turno>[] = [
       description="Define los turnos del local (horario de inicio y fin) para asociarlos a las sesiones de garzón."
     >
       <template #actions>
-        <UButton icon="i-lucide-plus" @click="abrirCrear">
+        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
           Nuevo turno
         </UButton>
       </template>
@@ -186,16 +202,20 @@ const columns: TableColumn<Turno>[] = [
       <template #acciones-cell="{ row }">
         <div class="flex items-center justify-end gap-1">
           <UButton
+            v-if="puedeActualizar"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
+            title="Editar"
             aria-label="Editar"
             @click="abrirEditar(row.original)"
           />
           <UButton
+            v-if="puedeEliminar"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
+            title="Eliminar"
             aria-label="Eliminar"
             @click="confirmarEliminar(row.original)"
           />

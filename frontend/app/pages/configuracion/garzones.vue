@@ -12,6 +12,23 @@ function labelTipo(tipo: TipoGarzon): string {
   return TIPO_GARZON_OPTIONS.find(o => o.value === tipo)?.label ?? tipo
 }
 
+// La lectura es abierta (`Salones:Leer`), pero cada escritura pega a un endpoint
+// con su propio `@RequiresPermiso`. Garzones NO tiene módulo propio: sus rutas
+// piden permisos de **Salones**. `Salones:Operar` no entra acá — es de la
+// operación (`garzones/identificar`, cuentas), no de esta pantalla.
+// Tres permisos separados y no un `puedeEscribir` único: el backend los separa
+// a propósito y colapsarlos escondería el editar a quien solo tiene `Actualizar`.
+const permissionsStore = usePermissionsStore()
+const puedeCrear = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Crear'),
+)
+const puedeActualizar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Actualizar'),
+)
+const puedeEliminar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Eliminar'),
+)
+
 const toast = useToast()
 const garzonesApi = useGarzones()
 
@@ -190,7 +207,7 @@ const columns: TableColumn<Garzon>[] = [
       description="Registra los garzones del local con un PIN de 6 dígitos para identificarlos al abrir y cerrar cuentas en dispositivos compartidos."
     >
       <template #actions>
-        <UButton icon="i-lucide-plus" @click="abrirCrear">
+        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
           Nuevo garzón
         </UButton>
       </template>
@@ -219,24 +236,31 @@ const columns: TableColumn<Garzon>[] = [
 
       <template #acciones-cell="{ row }">
         <div class="flex items-center justify-end gap-1">
+          <!-- Regenerar PIN es `PATCH :id/pin`: mismo permiso que editar. -->
           <UButton
+            v-if="puedeActualizar"
             icon="i-lucide-key-round"
             color="neutral"
             variant="ghost"
+            title="Regenerar PIN"
             aria-label="Regenerar PIN"
             @click="abrirRegenerar(row.original)"
           />
           <UButton
+            v-if="puedeActualizar"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
+            title="Editar"
             aria-label="Editar"
             @click="abrirEditar(row.original)"
           />
           <UButton
+            v-if="puedeEliminar"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
+            title="Eliminar"
             aria-label="Eliminar"
             @click="confirmarEliminar(row.original)"
           />

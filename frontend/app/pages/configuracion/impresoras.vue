@@ -2,6 +2,21 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { Impresora, RolImpresora, TipoConexionImpresora } from '~/composables/useImpresoras'
 
+// La lectura es abierta (`Impresoras:Leer`), pero cada escritura pega a un
+// endpoint con su propio `@RequiresPermiso`. Tres permisos separados y no un
+// `puedeEscribir` único: el backend los separa a propósito y colapsarlos
+// escondería el editar a quien solo tiene `Actualizar`.
+const permissionsStore = usePermissionsStore()
+const puedeCrear = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Crear'),
+)
+const puedeActualizar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Actualizar'),
+)
+const puedeEliminar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Eliminar'),
+)
+
 const toast = useToast()
 const impresorasApi = useImpresoras()
 
@@ -189,7 +204,7 @@ const columns: TableColumn<Impresora>[] = [
       description="Configura las impresoras térmicas para comandas de cocina/barra y para boletas/precuenta."
     >
       <template #actions>
-        <UButton icon="i-lucide-plus" @click="abrirCrear">
+        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
           Nueva impresora
         </UButton>
       </template>
@@ -213,9 +228,14 @@ const columns: TableColumn<Impresora>[] = [
 
       <template #activo-cell="{ row }">
         <div class="flex justify-end">
+          <!--
+            Deshabilitado, no escondido: este switch además MUESTRA si la
+            impresora está activa. Esconderlo le borraría el dato a quien puede
+            leerlo. El permiso se suma a la condición que ya existía.
+          -->
           <USwitch
             :model-value="row.original.activo"
-            :disabled="toggling.has(row.original.id)"
+            :disabled="toggling.has(row.original.id) || !puedeActualizar"
             aria-label="Activar o desactivar impresora"
             @update:model-value="toggleActivo(row.original)"
           />
@@ -225,16 +245,20 @@ const columns: TableColumn<Impresora>[] = [
       <template #acciones-cell="{ row }">
         <div class="flex justify-end gap-1">
           <UButton
+            v-if="puedeActualizar"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
+            title="Editar"
             aria-label="Editar"
             @click="abrirEditar(row.original)"
           />
           <UButton
+            v-if="puedeEliminar"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
+            title="Eliminar"
             aria-label="Eliminar"
             @click="confirmarEliminar(row.original)"
           />

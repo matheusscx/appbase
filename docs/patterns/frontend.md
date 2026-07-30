@@ -59,12 +59,29 @@ El corte, a jul-2026 (la fuente de verdad es el controller, no esta lista):
 
 | Clase | Pantallas | Gate |
 |---|---|---|
-| Catálogos y config del tenant | las 15 de `configuracion/` menos `items` | `TenantAdminGuard` → middleware `admin` |
-| Features operativas | `items`, `terceros`, POS, `recetas-desfases`, inventario, recuentos, mermas… | `@RequiresPermiso` → gate por control |
+| Catálogos y config del tenant | 15 de `configuracion/` (categorías, impuestos, monedas, roles, usuarios…) | `TenantAdminGuard` → middleware `admin` |
+| Features operativas | `items`, `terceros`, POS, `recetas-desfases`, inventario, recuentos, mermas… y, dentro de `configuracion/`, `garzones`, `impresoras`, `salones` y `turnos` | `@RequiresPermiso` → gate por control |
 
 **Y no colapsar permisos distintos en un `puedeEscribir` único.** Si el backend
 separa `Crear`, `Actualizar` y `Eliminar`, la pantalla los separa: hay roles con
 uno solo, y un gate único le esconde a un editor el botón de editar.
+
+**El módulo del permiso no se deduce del nombre de la pantalla.** `garzones`,
+`salones` y `turnos` no tienen módulo propio: sus rutas piden `Salones:*`. Y que
+el módulo tenga un permiso más —`Salones:Operar`— no significa que aplique acá:
+`Operar` es de la operación (cuentas, comandas, identificar garzón), no de la
+pantalla de configuración. Se lee el `@RequiresPermiso` de **esa** ruta.
+
+**Y el link del menú se gatea con `Leer`, no con la escritura.** Si la entrada de
+navegación pide `Crear`, el gate por control queda muerto para quien solo tiene
+`Actualizar` o `Eliminar`: nunca llega a la pantalla. El menú pregunta "¿puede
+abrir esto?", no "¿puede escribir acá?".
+
+**No todo control de escritura es un botón.** En `salones` la escritura más fácil
+de pasar por alto es el plano: arrastrar una mesa guarda (`PATCH :id/layout`) y el
+doble-click abre el editor (`PATCH /mesas/:id`). Se gatea la prop que habilita la
+interacción (`:editable="puedeActualizar"`), no un botón. Antes de dar una pantalla
+por gateada, listar sus escrituras desde el controller y tacharlas una por una.
 
 ### 1.2 Pantalla admin-only: middleware de ruta, no `v-if` por botón
 
