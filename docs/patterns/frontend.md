@@ -133,13 +133,11 @@ esa espera un admin entrando por URL directa o F5 se lee como no-admin y queda
 expulsado de su propia pantalla. Es un modo de falla que nadie reporta como bug
 de permisos: se ve como "la pantalla me tira al índice a veces".
 
-⚠️ Esa misma espera **rompe la hidratación del menú lateral** en las rutas que
-llevan middleware de permisos: el servidor renderiza el sidebar con el store
-vacío y el cliente ya lo tiene poblado al hidratar. Verificado en navegador en
-`/cajas/historial` y en `/configuracion/impuestos`. No rompe la pantalla (Vue
-re-renderiza el subárbol), pero ensucia la consola y la causa de fondo es que
-estas rutas se sirven con SSR sin poder autenticarse. Está en
-[`pendientes.md`](../agent/pendientes.md).
+ℹ️ Esa espera **rompía la hidratación del menú lateral** mientras hubo SSR: el
+servidor renderizaba el sidebar con el store vacío y el cliente llegaba a hidratar
+con él ya poblado. Dejó de poder pasar con `ssr: false`
+([ADR-017](../adr/017-spa-sin-ssr.md)) — vale conocerlo porque es la razón por la
+que la app es SPA, y porque volvería si alguien reactivara el SSR.
 
 ```typescript
 const { puedeCrear: puedeContar } = usePermisosCrud('Inventario')

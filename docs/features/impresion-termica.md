@@ -153,7 +153,10 @@ cada impresión hasta que el usuario marca "recordar". Firmar la app con certifi
 pagado (evita el diálogo) queda como mejora futura opcional.
 
 `qz-tray` se carga de forma **perezosa** (`await import('qz-tray')` dentro de la
-función) para no romper el SSR: es una librería solo-navegador. Los tickets se arman
+función) porque es una librería solo-navegador — así no entra al bundle de quien
+nunca imprime. El motivo original era no romper el SSR; desde
+[ADR-017](../adr/017-spa-sin-ssr.md) la app es SPA y ese motivo ya no aplica, pero
+el lazy-load se mantiene por el otro. Los tickets se arman
 como `string[]` de líneas lógicas y el composable las une con `\n` antes de enviarlas.
 
 **Acentos / encoding:** el transporte usa `encoding: 'Cp850'` en `qz.configs.create`

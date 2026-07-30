@@ -28,6 +28,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [014](./014-cantidades-consumo-por-item.md) | Cantidades de consumo por item: modelo híbrido default+override sobre grupos de modificadores (cantidad/precioExtra por receta), llave del override por UUIDs preservados, cero migración | Accepted | 2026-07-21 |
 | [015](./015-grupos-anidados-combo-un-nivel.md) | Grupos anidados en combos: automático, por unidad, un nivel, cero tablas nuevas (reuso de `resolverGruposDeItem`/`venderOpcionesGrupos`); cambio global de selector en vez de radio buttons | Accepted | 2026-07-22 |
 | [016](./016-costeo-promedio-ponderado-movil.md) | Costeo por promedio ponderado móvil (CPP), método fijo, de gestión — no FIFO, no elegible por tenant, no tributario | Accepted | 2026-07-26 |
+| [017](./017-spa-sin-ssr.md) | La app es una SPA (`ssr: false`): toda ruta está detrás de `auth` y el servidor no puede autenticarse, así que el SSR renderizaba un menú vacío y rompía la hidratación | Accepted | 2026-07-30 |
 
 ## Creating a New ADR
 

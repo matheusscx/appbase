@@ -14,26 +14,25 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **Los middlewares de permisos rompen la hidratación del menú lateral** (frontend,
-  `app/middleware/{admin,permiso}.ts` + `app/layouts/dashboard.vue`) — ambos esperan
-  `ensureCargado()` antes de decidir, así que en una carga dura el cliente llega a hidratar
-  con el store **ya poblado** mientras el servidor renderizó el sidebar con el store vacío:
-  el menú tiene distinta cantidad de ítems de un lado y del otro. Vue reporta
-  `Hydration node mismatch` + `Hydration completed but contains mismatches` y re-renderiza
-  el subárbol.
-  **Verificado en navegador** (jul-2026, stack real): `/cajas/historial` y
-  `/configuracion/impuestos` lo tiran; `/inventario` —misma layout, sin middleware de
-  permisos— no, porque ahí el store también está vacío al hidratar y los dos lados
-  coinciden por casualidad.
-  No rompe la pantalla y no es un hueco de permisos, pero ensucia la consola y tapa
-  mismatches reales. Lo introdujo el barrido de permisos de jul-2026 al mover los guards
-  de `onMounted` a middleware de ruta — el trade correcto (el guard viejo dejaba ver la
-  pantalla antes de rebotar), pero con este costo.
-  **La causa de fondo no es el middleware:** estas rutas se sirven con SSR y el servidor
-  no tiene cómo autenticarse (el token vive en el cliente), así que renderiza un menú que
-  nunca va a ser el correcto. Las salidas son de arquitectura y las decide el owner:
-  `ssr: false` para la app —es un SaaS detrás de login, el SSR no le aporta SEO— o
-  `routeRules` por ruta. No inventar una tercera acá.
+- [ ] **Código SSR inalcanzable en `auth.ts` y `tenant.ts` — requiere decisión del owner**
+  (frontend, `app/stores/auth.ts:18-20,97-113`, `app/stores/tenant.ts:10-15`) — con
+  `ssr: false` ([ADR-017](../adr/017-spa-sin-ssr.md)) `import.meta.server` nunca es
+  verdadero, así que quedan inalcanzables: el par `serverApiUrl`/`resolvedApiUrl` de las dos
+  stores —que además leen una `runtimeConfig.apiUrl` privada **que ya no existe**, y compila
+  solo porque está casteada a `Record<string, unknown>`— y la rama SSR entera de
+  `tryRefresh()`, que reenvía la cookie entrante con `useRequestHeaders` y propaga el
+  `Set-Cookie` con `appendResponseHeader`.
+  ⛔ **Por qué no se limpió en el commit de ADR-017:** `tryRefresh` es el flujo de refresh
+  token, y la **invariante 4** dice que el sistema de tokens JWT no se modifica sin
+  confirmación. `tenant.ts` no es JWT y se podría limpiar sola, pero su comentario dice
+  "mismo patrón que `auth.ts`": limpiar una y dejar la otra parte el par y deja el comentario
+  mintiendo. Van juntas o no van.
+  No hay bug hoy —las dos tienen fallback a `config.public.apiUrl`— pero es código muerto
+  que describe una topología de red que ya no puede ocurrir, y el próximo que lea `auth.ts`
+  va a creer que el refresh tiene un camino SSR vivo.
+  Cierre: confirmación del owner para tocar `auth.ts`, y borrar las dos ramas junto con sus
+  comentarios. Si en cambio se quisiera preservar la capacidad de volver a SSR, la decisión
+  es la inversa —restaurar la `runtimeConfig` privada— y hay que decirlo en ADR-017.
 
 - [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
   (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró

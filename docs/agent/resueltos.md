@@ -14,6 +14,32 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ## Deuda de código (harness)
 
+- [x] ~~**Los middlewares de permisos rompen la hidratación del menú lateral**~~ (frontend,
+  `nuxt.config.ts`) — cerrado 2026-07-30, el mismo día que se abrió. Decisión del owner:
+  **`ssr: false`**, la app es una SPA. Razonamiento completo en
+  [ADR-017](../adr/017-spa-sin-ssr.md).
+  El mismatch era el síntoma; la causa era que **el servidor no puede renderizar nada real**:
+  toda ruta está detrás de `auth` y el token vive en el cliente, así que el SSR pintaba un
+  menú vacío. Eso pasaba desapercibido porque el cliente también hidrataba vacío —los dos
+  lados coincidían *por casualidad*— y el barrido de permisos rompió la casualidad al hacer
+  que los middlewares esperaran `ensureCargado()`.
+  Se descartó `routeRules` por ruta: habría que mantener a mano la lista de rutas con
+  middleware de permisos y el default seguiría siendo el equivocado, así que la próxima
+  pantalla con guard nacería rota.
+  Cayeron con la decisión: la `runtimeConfig.apiUrl` privada y su `API_INTERNAL_URL` en
+  `docker-compose.yml` y `Dockerfile.prod` (existían para el fetching server-side; las
+  leían `stores/auth.ts` y `stores/tenant.ts`, pero **solo** detrás de `import.meta.server`
+  y con fallback a la pública, así que ningún camino alcanzable cambia). Se agregó
+  `app/spa-loading-template.html` porque sin SSR la carga dura arranca en blanco. De yapa,
+  el resumen de build de Nitro bajó de **11,5 MB a 2,1 MB**.
+  **Queda abierto** lo que no se puede tocar acá: las ramas `import.meta.server` de
+  `auth.ts`/`tenant.ts` son inalcanzables pero viven en el sistema de tokens JWT
+  (invariante 4). Entrada propia en [`pendientes.md`](pendientes.md).
+  **Verificado en navegador** sobre el stack real, no deducido: las mismas rutas que tiraban
+  `Hydration node mismatch` (`/cajas/historial`, `/configuracion/impuestos`) quedaron con la
+  consola limpia, y la suite de navegador completa (`npm run e2e`) pasa en verde — que era
+  el riesgo real del cambio, porque altera cuándo aparece el contenido.
+
 - [x] ~~**Cuatro pantallas más sin gatear sus controles de escritura**~~ (frontend,
   `configuracion/garzones.vue`, `impresoras.vue`, `salones.vue`, `turnos.vue`) — cerrado
   2026-07-30, resto del barrido de permisos. Cada control quedó con el permiso de **su**

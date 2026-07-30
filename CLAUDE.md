@@ -89,7 +89,7 @@ Monorepo full-stack **Docker-first** (`docker-compose up` levanta todo; no requi
 Node.js/PostgreSQL local):
 
 - **backend/** — NestJS (TypeScript), API REST puerto 3000 (Swagger en `3000/api/docs`)
-- **frontend/** — Nuxt 4 (Vue 3), SPA/SSR puerto 5173
+- **frontend/** — Nuxt 4 (Vue 3), SPA (`ssr: false`, ADR-017), puerto 5173
 - **PostgreSQL 15** — puerto 5432
 
 Estructura de directorios, mapa de módulos y flujo de requests: `docs/ARCHITECTURE.md`.
