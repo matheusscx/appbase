@@ -140,17 +140,15 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 
 Pasada de 7 lentes según `docs/agent/auditoria-codigo.md`: 20 hallazgos crudos → 15
-confirmados tras refutación. **Los 14 que ya se cerraron están en
-[`resueltos.md`](resueltos.md)** con el detalle de cada fix; acá quedan los tres que no.
+confirmados tras refutación. El detalle de cada fix está en
+[`resueltos.md`](resueltos.md); acá quedan **3 entradas abiertas** (contadas, no estimadas).
 
-- [ ] **Otros tres `LEFT JOIN garzones` sin filtro de `tenant_id`** (backend,
-  `turnos/sesiones-garzon.service.ts:181` y `:239`, `salones/cuenta-asignaciones.service.ts:131`
-  y `:133`) — mismo patrón que el JOIN de `garzones` de ventas ya cerrado
-  ([`resueltos.md`](resueltos.md)): la tabla principal filtra por tenant
-  y la unida solo por `eliminado_el`. Hoy **no son explotables por sí solos** (el
-  `garzon_id` de esas filas se escribe por caminos tenant-scoped), pero son la misma
-  defensa faltante y quedan a un bug de distancia de convertirse en fuga. Fuera del
-  alcance auditado (`ventas`+`pagos`); entran cuando se audite `turnos` y `salones`.
+ℹ️ Los números de arriba **no cuadran** con la suma de entradas y no se fuerzan para que
+cuadren: `resueltos.md` acumula 18 cerradas de esta pasada contra "15 confirmados", porque
+varias se cerraron en mitades (una cerrada, una diferida como entrada nueva) y algunas
+decisiones de owner entraron después de la pasada. La lista de entradas es la fuente de
+verdad; el conteo del encabezado describe la auditoría original.
+
 - [~] **N+1 al resolver personalización de recetas/combos** — parcialmente cerrado
   2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
   `resolverGruposDeItem` disparaba una query **por cada grupo de modificadores** del ítem.
@@ -321,11 +319,6 @@ Ver [`resueltos.md`](resueltos.md).
   así que no colisionan y el modo puede cambiar con un movimiento recién escrito; (c)
   `item_receta.costo_actual` se puede pisar entre editar ingredientes y aplicar desfases.
   Las tres bajadas de alta a media: ventana angosta, consecuencia silenciosa.
-- [ ] **No se puede vaciar `descripcion` ni `categoriaId` al editar un ítem** (frontend,
-  `configuracion/items.vue:816` y `:818`) — el backend distingue bien `undefined` ("no tocar")
-  de `''`/`null` ("borrar"), pero el front colapsa todo lo falsy con `|| undefined` y el campo
-  ni viaja. El usuario borra el texto, ve "Item actualizado", y el valor sigue ahí. Mismo bug
-  en `duracionEstimada` (`:866`), donde además tapa el `0` legítimo.
 - [ ] **`unidadBase`/`forzarConteo` divergen entre venta y checkout online** (backend,
   `online.service.ts:239-253` vs `ventas.service.ts:169-180`) — la venta trata
   `'receta' || 'combo'` como conteo; el checkout online, solo `'receta'`. Es la misma
@@ -341,16 +334,6 @@ Ver [`resueltos.md`](resueltos.md).
   ejercerse en unit; el e2e sí la cubre de punta a punta.
 ### Baja
 
-- [ ] **`remove()` chequea uso sin filtrar por tenant** (backend, `items.service.ts:1514`,
-  `:1528`, `:1542`) — defensa en profundidad faltante, misma clase que los `LEFT JOIN
-  garzones` de `turnos`/`salones`. No explotable: el ítem ya se validó contra el tenant y
-  ningún camino de escritura permite que otro tenant lo referencie. Si la invariante se
-  rompiera, el fallo **no sería silencioso sino una fuga de nombres** — el mensaje de error
-  interpola el `nombre` de las recetas/combos/grupos encontrados.
-- [ ] **`precioUnitario` negativo en `/calculo-precios/calcular`** (backend,
-  `dto/calcular.dto.ts:27`) — `cantidad` se valida con `<= 0` en `resolverLinea:140` y
-  `precioUnitario` no. Bajado de media: el endpoint no persiste nada y el camino real de
-  venta ya exige `@IsDecimalNoNegativo`.
 - [ ] **`convertirAMonedaOficial` redondea a 4 fijo** (backend,
   `calculo-precios.service.ts:188`) — **hallazgo del refutador, ninguna lente lo vio**: el
   `.toFixed(4)` ignora `escalaCalculo` y `modoRedondeo` del tenant, y ocurre justo antes de
@@ -488,22 +471,17 @@ carritos. Ninguno bloqueaba; el veredicto fue limpio. Se difieren por alcance.
   obsoletas por token de request, y limpiar `resultado` al cambiar de cuenta), no un parche
   en el componente de advertencias.
 
-- [ ] **El e2e de ventas consume stock sembrado compartido** (backend,
-  `test/ventas.e2e-spec.ts:309-325`) — el test que cubre la recomposición de la advertencia
-  persiste una venta real de 1 unidad de "Papas fritas", el mismo ítem que
-  `combos.e2e-spec.ts` consume como componente. Con BD fresca es inocuo y el gate está
-  verde; en corridas locales repetidas sin `./scripts/reset-db.sh` acelera el agotamiento y
-  aflora como un fallo opaco en una suite que no tiene nada que ver. Mismo patrón que
-  [[e2e-cumulative-stock-pollution]].
-
 - [ ] **El seed reusa el UUID `…440281` para dos filas sin relación** (backend,
   `seeder.service.ts`) — el ítem "Papas fritas" (vía `uuid(281)` en `seedPapasFritas`) y el
   garzón "Mostrador" (`:1542`). No es colisión de PK real —son tablas distintas— y no rompe
   nada hoy, pero contradice la convención de tomar el siguiente número libre y **ya confundió
-  a dos revisores independientes**. Efecto visible: `test/ventas.e2e-spec.ts` declara dos
-  constantes con el mismo literal (`PAPAS_FRITAS_ID` y `MOSTRADOR_ID`) en el mismo archivo.
-  Corregirlo es reasignar uno de los dos y actualizar sus referencias; el proyecto no tiene
-  datos productivos ([[proyecto-sin-datos-productivos]]), así que se cambia y se resiembra.
+  a dos revisores independientes**. Corregirlo es reasignar uno de los dos y actualizar sus
+  referencias; el proyecto no tiene datos productivos
+  ([[proyecto-sin-datos-productivos]]), así que se cambia y se resiembra.
+  ℹ️ El efecto visible que citaba esta entrada —dos constantes con el mismo literal en
+  `test/ventas.e2e-spec.ts`— **ya no existe** (2026-07-29): `PAPAS_FRITAS_ID` se borró al
+  sacarle a ese test el consumo de stock compartido. El literal duplicado sigue en el
+  seeder, que es la causa.
 
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 

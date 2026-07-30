@@ -354,6 +354,13 @@ describe('CuentaAsignacionesService', () => {
       expect(sql).toMatch(/ca\.tenant_id\s*=\s*\$1/i);
       expect(sql).toMatch(/ca\.cuenta_id\s*=\s*\$2/i);
       expect(sql).toMatch(/ca\.eliminado_el\s+IS\s+NULL/i);
+      // Los dos JOIN a `garzones` acotaban solo por `eliminado_el`: la tabla
+      // principal filtra por tenant y la unida no. Se asevera sobre el SQL porque
+      // el escenario no se puede montar por API —exigiría dos tenants
+      // compartiendo un `garzon_id`, que es la PK—, así que no hay test de
+      // comportamiento posible: o se lee la query, o no se cubre.
+      expect(sql).toMatch(/LEFT JOIN\s+garzones\s+g\b[\s\S]*?g\.tenant_id/i);
+      expect(sql).toMatch(/LEFT JOIN\s+garzones\s+go\b[\s\S]*?go\.tenant_id/i);
       expect(params).toEqual([TENANT, CUENTA]);
     });
   });

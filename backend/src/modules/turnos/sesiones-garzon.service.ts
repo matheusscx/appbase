@@ -178,7 +178,8 @@ export class SesionesGarzonService {
               s.origen_cierre,
               s.cerrada_por_usuario_id
        FROM sesiones_garzon s
-       LEFT JOIN garzones g ON g.garzon_id = s.garzon_id AND g.eliminado_el IS NULL
+       LEFT JOIN garzones g ON g.garzon_id = s.garzon_id
+         AND g.tenant_id = $1 AND g.eliminado_el IS NULL
        LEFT JOIN turnos t ON t.turno_id = s.turno_id AND t.eliminado_el IS NULL
        WHERE s.tenant_id = $1
          AND s.estado = 'abierta'
@@ -236,7 +237,8 @@ export class SesionesGarzonService {
               s.origen_cierre,
               s.cerrada_por_usuario_id
        FROM sesiones_garzon s
-       LEFT JOIN garzones g ON g.garzon_id = s.garzon_id AND g.eliminado_el IS NULL
+       LEFT JOIN garzones g ON g.garzon_id = s.garzon_id
+         AND g.tenant_id = $1 AND g.eliminado_el IS NULL
        LEFT JOIN turnos t ON t.turno_id = s.turno_id AND t.eliminado_el IS NULL
        WHERE s.tenant_id = $1
          AND s.eliminado_el IS NULL

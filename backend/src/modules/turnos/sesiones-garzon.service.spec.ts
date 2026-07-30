@@ -309,6 +309,33 @@ describe('SesionesGarzonService', () => {
     expect(result[0].turnoNombre).toBe('');
   });
 
+  // El JOIN a `garzones` de los dos listados acotaba solo por `eliminado_el`,
+  // mientras `sesiones_garzon` sí filtra por tenant. No es explotable hoy —el
+  // `garzon_id` de esas filas se escribe por caminos tenant-scoped— pero es la
+  // misma defensa que ya faltó en el JOIN de garzones de ventas. Se asevera sobre
+  // el SQL porque el escenario no se puede montar por API: exigiría dos tenants
+  // compartiendo un `garzon_id`, que es la PK.
+  it('los dos listados acotan el JOIN de garzones por tenant', async () => {
+    dataSource.query.mockResolvedValueOnce([]);
+    await service.listarAbiertas(TENANT);
+    const sqlAbiertas = (
+      dataSource.query.mock.calls[0] as [string, ...unknown[]]
+    )[0];
+
+    dataSource.query.mockReset();
+    dataSource.query
+      .mockResolvedValueOnce([{ total: 0 }])
+      .mockResolvedValueOnce([]);
+    await service.historial(TENANT, {});
+    const sqlHistorial = (
+      dataSource.query.mock.calls[1] as [string, ...unknown[]]
+    )[0];
+
+    for (const sql of [sqlAbiertas, sqlHistorial]) {
+      expect(sql).toMatch(/LEFT JOIN\s+garzones\s+g\b[\s\S]*?g\.tenant_id/i);
+    }
+  });
+
   it('historial incluye sesión aunque el turno esté soft-deleted', async () => {
     dataSource.query
       .mockResolvedValueOnce([{ total: 1 }])

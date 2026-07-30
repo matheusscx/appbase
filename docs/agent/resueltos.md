@@ -135,6 +135,24 @@ confirmados tras refutación (3 eran el mismo bug visto por lentes distintas, 3 
 decisión de owner, abajo). **Ninguno se corrigió en la pasada**: la auditoría produce
 información, no diffs. Orden = severidad.
 
+- [x] ~~**Otros tres `LEFT JOIN garzones` sin filtro de `tenant_id`**~~ (backend,
+  `turnos/sesiones-garzon.service.ts`, `salones/cuenta-asignaciones.service.ts`) — cerrado
+  2026-07-29. **Eran cuatro, no tres**: dos en `sesiones-garzon` (`listarAbiertas` e
+  `historial`) y dos en `cuenta-asignaciones` (`g` y `go`, el garzón y el de origen del
+  tramo). Los cuatro llevan ahora `tenant_id = $1`, que ya estaba en scope en las dos
+  queries. Defensa en profundidad: no eran explotables por sí solos, el `garzon_id` de esas
+  filas se escribe por caminos tenant-scoped.
+  **La cobertura es del SQL, no del comportamiento, y es a propósito:** el escenario que
+  discriminaría el filtro exige dos tenants compartiendo un `garzon_id`, que es la PK —
+  imposible de montar por API o por SQL. Así que el test asevera que la query lleva el
+  filtro, en el mismo estilo que las aserciones de `LEFT JOIN` que ese spec ya tenía por el
+  bug de soft-delete. Ambos RED verificados antes del fix.
+  ⚠️ **Queda a la vista un vecino con el mismo defecto, fuera de alcance:** el
+  `LEFT JOIN turnos t` de esas dos mismas queries tampoco filtra por tenant, y `turnos` sí
+  tiene la columna (verificado contra la BD). El `LEFT JOIN usuarios u` de
+  `cuenta-asignaciones` **no** corresponde filtrarlo: `usuarios` no tiene `tenant_id` porque
+  un usuario pertenece a varios tenants.
+
 - [x] ~~**El vuelto se asigna íntegro a un pago sin acotarlo a su propio monto**~~ —
   cerrado 2026-07-27: el excedente se reparte entre los pagos con `permite_vuelto`,
   acotado al monto de cada uno y en orden determinista por `metodoPagoId`; si supera lo
@@ -731,6 +749,42 @@ siguen diferidos están en `pendientes.md`.
 
 ### Media / Baja — cerrados el 2026-07-29
 
+- [x] ~~**`remove()` chequea uso sin filtrar por tenant**~~ (backend, `items.service.ts`) —
+  **la entrada estaba vieja: ya no aplicaba** (verificado 2026-07-29). Sus tres líneas
+  citadas (`:1514`, `:1528`, `:1542`) no existen más; hoy `remove()` delega en
+  `obtenerUsoItem`, que filtra por `tenant_id` en las **cuatro** ramas del `UNION` —vía la
+  entidad padre de cada una (`items`, `grupos_modificadores`)— y sus `UPDATE` llevan
+  `tenant_id = $2`. Lo cerró de paso la oleada de `GET /items/:id/uso`, sin que nadie sacara
+  la entrada. Cero cambios de código en este cierre.
+- [x] ~~**`precioUnitario` negativo en `/calculo-precios/calcular`**~~ (backend,
+  `dto/calcular.dto.ts`) — cerrado 2026-07-29 con `@IsDecimalNoNegativo()`, el mismo
+  decorador que ya exige el camino real de venta. RED verificado: antes devolvía **201** con
+  `precioUnitario: '-100'` (y `totalFinal: -100`), ahora 400. El `0` sigue siendo válido a
+  propósito: prohibirlo es la decisión de owner que sigue abierta para `LineaVentaDto`, y
+  este cierre no la adelanta.
+- [x] ~~**No se puede vaciar `descripcion` ni `categoriaId` al editar un ítem**~~ (frontend,
+  `configuracion/items.vue`) — cerrado 2026-07-29. Tres cosas, no una:
+  - El `|| undefined` de `descripcion`/`categoriaId` colapsaba lo falsy y el campo no
+    viajaba. Ahora en **edición** se manda `''` y `null` respectivamente; en creación se
+    sigue omitiendo, para no escribir `''` donde antes quedaba NULL.
+  - `duracionEstimada` pasó a `typeof === 'number'`: el `|| undefined` tapaba el `0`, que el
+    DTO acepta (`@IsInt() @Min(0)`).
+  - **Faltaba la mitad que la entrada no mencionaba:** sin una opción explícita
+    "Sin categoría", un ítem que ya tiene categoría **no se puede desasociar desde la UI** —
+    `USelectMenu` no tiene `clearable` en esta versión y el placeholder solo se ve con el
+    valor vacío. Sin eso, el `null` del payload era código inalcanzable.
+  El contrato del backend se verificó **contra la API andando** antes de tocar el front
+  (`PATCH` con `descripcion: ''` + `categoriaId: null` → 200 y los dos campos vacíos; el
+  `null` pasa porque `@IsOptional()` corta los validadores antes del `@IsUUID()`), y el
+  flujo completo en navegador: elegir "Sin categoría" → el `PATCH` capturado lleva
+  `categoriaId: null` → la BD queda en `NULL`.
+  ⛔ **Regresión propia, cazada en el navegador y corregida:** la primera versión de la
+  opción usaba `value: ''`, y reka-ui descarta el ítem con valor vacío — el select de
+  Categoría abría con **0 opciones** (el de Moneda, al lado en el mismo drawer, abría con 3),
+  o sea el usuario quedaba sin poder elegir **ninguna** categoría. Peor que el bug original,
+  invisible para `build`, `typecheck`, `design:check` y los 293 unit. El valor es ahora un
+  centinela (`__sin_categoria__`) que `guardar` traduce a `null`.
+
 - [x] ~~**Un `itemId` en mayúsculas devuelve 404 desde que se batchea**~~ (backend,
   `items.service.ts`) — cerrado 2026-07-29 en un solo lugar, como decía la entrada, pero
   **el alcance que proponía era insuficiente y habría dejado algo peor que el 404**:
@@ -906,3 +960,20 @@ siguen diferidos están en `pendientes.md`.
   reentrancia es el que sostiene la invariante; el `disabled` global era redundante.
   Técnica, por si hay que repetirlo: `navigate_page` con un `initScript` que envuelve
   `window.fetch` y demora las URLs que matchean `/uso`.
+
+## Revisión final `advertencias-previsualizacion` (2026-07-29)
+
+- [x] ~~**El e2e de ventas consume stock sembrado compartido**~~ (backend,
+  `test/ventas.e2e-spec.ts`) — cerrado 2026-07-29: el test de la advertencia recompuesta usa
+  ahora un **servicio** que crea él mismo, no "Papas fritas". Un servicio no tiene
+  inventario, así que la venta no consume stock de nadie —antes le gastaba 1 unidad al ítem
+  que `combos.e2e-spec.ts` usa como componente, acelerando su agotamiento en corridas
+  locales repetidas y aflorando como un fallo opaco en una suite ajena
+  ([[e2e-cumulative-stock-pollution]])—.
+  **La economía es idéntica**, verificada contra `/calculo-precios/calcular` antes de tocar
+  el test: subtotal 1500, "Promo fija $5.000" topeada a 1500, `totalFinal` 0 con los dos
+  ítems (ninguno tiene IVA asociado), así que las aserciones no cambiaron.
+  Medido, no supuesto: el stock de "Papas fritas" queda en **38.0000 antes y después** de
+  correr la suite; antes bajaba 1 por corrida. Efecto lateral: se fue `PAPAS_FRITAS_ID`, una
+  de las dos constantes con el mismo literal que confundía a los revisores (la causa sigue
+  en el seeder, ver [`pendientes.md`](pendientes.md)).

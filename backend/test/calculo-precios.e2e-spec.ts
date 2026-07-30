@@ -126,6 +126,24 @@ describe('Cálculo de precios (e2e)', () => {
   });
 
   /**
+   * `cantidad` se valida con `<= 0` en `resolverLinea`, `precioUnitario` no: con
+   * `@IsNumberString()` a secas un `-100` pasaba y el endpoint devolvía
+   * `totalFinal: -100`. Se alinea con el camino real de venta, que ya exige
+   * `IsDecimalNoNegativo` — rechaza el negativo y deja pasar el `0`, cuya
+   * legitimidad es una decisión de owner abierta y no se toca acá.
+   */
+  it('rechaza un precioUnitario negativo', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [{ itemId: ITEM_ID, cantidad: '1', precioUnitario: '-100' }],
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  /**
    * `@IsUUID('4')` acepta el UUID en mayúsculas y Postgres castea igual, pero la
    * BD lo devuelve en su forma canónica minúscula: los mapas por id que arma
    * `ItemsService` quedaban indexados en minúsculas mientras el chequeo y las

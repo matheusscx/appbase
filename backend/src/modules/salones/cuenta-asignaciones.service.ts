@@ -129,9 +129,11 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
               u.nombre AS actor_usuario_nombre
          FROM cuenta_asignaciones ca
          LEFT JOIN garzones g
-           ON g.garzon_id = ca.garzon_id AND g.eliminado_el IS NULL
+           ON g.garzon_id = ca.garzon_id
+          AND g.tenant_id = $1 AND g.eliminado_el IS NULL
          LEFT JOIN garzones go
-           ON go.garzon_id = ca.origen_garzon_id AND go.eliminado_el IS NULL
+           ON go.garzon_id = ca.origen_garzon_id
+          AND go.tenant_id = $1 AND go.eliminado_el IS NULL
          LEFT JOIN usuarios u
            ON u.usuario_id = ca.actor_usuario_id AND u.eliminado_el IS NULL
         WHERE ca.tenant_id = $1

@@ -10,8 +10,7 @@ const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116'; // Smartphone (stock = 10)
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
-// "Papas fritas" — producto, precio_base 1500, precio_incluye_impuesto = false.
-const PAPAS_FRITAS_ID = '550e8400-e29b-41d4-a716-446655440281';
+const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 // "Promo fija $5.000" — descuento monto_fijo sin condiciones (seedDescuentos()).
 const DESCUENTO_FIJO_ID = '550e8400-e29b-41d4-a716-446655440338';
 
@@ -301,17 +300,37 @@ describe('Ventas (e2e)', () => {
     });
 
     // El motor topea "Promo fija $5.000" (monto_fijo, sin condición) contra el
-    // disponible de una sola línea de Papas fritas ($1.500 + IVA): avisa, y
-    // ventas.service.ts recompone `{ titulo, detalle }` a un string plano. Es
-    // la única venta de toda la suite que dispara un descuento topeado al
-    // crear — sin ella, un `map` roto que devuelva solo el título o solo el
-    // detalle no lo cacha nada (ver Task 7).
+    // disponible de una sola línea de $1.500: avisa, y ventas.service.ts
+    // recompone `{ titulo, detalle }` a un string plano. Es la única venta de
+    // toda la suite que dispara un descuento topeado al crear — sin ella, un
+    // `map` roto que devuelva solo el título o solo el detalle no lo cacha nada
+    // (ver Task 7).
+    // El ítem es un SERVICIO que crea el propio test, no "Papas fritas": ese lo
+    // consume `combos.e2e-spec.ts` como componente, y gastarle una unidad desde
+    // acá aceleraba su agotamiento y afloraba como un fallo opaco en una suite
+    // que no tiene nada que ver. Un servicio no tiene inventario, así que esta
+    // venta no consume stock de nadie. La economía es idéntica a la de antes
+    // —verificado contra `/calculo-precios/calcular`: subtotal 1500, descuento
+    // topeado a 1500, `totalFinal` 0 en los dos casos—, así que las aserciones
+    // no cambian.
     it('descuento de venta topeado devuelve la advertencia recompuesta completa', async () => {
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio advertencia E2E ${Date.now()}`,
+          precioBase: '1500',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        });
+      expect(resItem.status).toBe(201);
+      const servicioId = (resItem.body as { id: string }).id;
+
       const res = await request(app.getHttpServer())
         .post('/api/ventas')
         .set('Authorization', `Bearer ${token}`)
         .send({
-          lineas: [{ itemId: PAPAS_FRITAS_ID, cantidad: '1' }],
+          lineas: [{ itemId: servicioId, cantidad: '1' }],
           descuentosVentaIds: [DESCUENTO_FIJO_ID],
           pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000.0000' }],
         });

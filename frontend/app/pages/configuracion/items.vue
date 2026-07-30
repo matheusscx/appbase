@@ -254,6 +254,12 @@ const lotes = ref<Lote[]>([])
 const unidadesDisponibles = ref<Unidad[]>([])
 
 // Catálogos
+// Valor de la opción "Sin categoría". Es un centinela y no un `''` por una razón
+// concreta: reka-ui descarta el ítem con `value` vacío y la lista queda sin
+// opciones (ver el comentario en `categoriasOpts`). `''` sigue siendo el estado
+// "no elegido" del form, que es lo que muestra el placeholder.
+const SIN_CATEGORIA = '__sin_categoria__'
+
 const monedasOpts = ref<Opt[]>([])
 const categoriasOpts = ref<Opt[]>([])
 const impuestosOpts = ref<Opt[]>([])
@@ -729,9 +735,22 @@ async function cargarCatalogos() {
       form.value.monedaId = defaultMoneda.monedaId
     }
 
-    categoriasOpts.value = categorias
-      .filter((c) => c.activo)
-      .map((c) => ({ label: c.nombre, value: c.id }))
+    // "Sin categoría" es una opción real, no solo el placeholder: `USelectMenu`
+    // no tiene `clearable` en esta versión, así que sin ella un ítem que YA tiene
+    // categoría no se puede desasociar desde la UI —el placeholder solo se ve
+    // cuando el valor está vacío—. `guardar` traduce el centinela a `null`, que
+    // es lo que el backend interpreta como "borrar".
+    // ⛔ El centinela NO puede ser `''`: reka-ui rechaza un ítem con `value`
+    // vacío y la lista queda SIN NINGUNA opción renderizada — probado en
+    // navegador, el select de Categoría abría con 0 opciones mientras el de
+    // Moneda, al lado, abría con 3. Eso deja al usuario sin poder elegir
+    // categoría: peor que el bug que esto viene a arreglar.
+    categoriasOpts.value = [
+      { label: 'Sin categoría', value: SIN_CATEGORIA },
+      ...categorias
+        .filter((c) => c.activo)
+        .map((c) => ({ label: c.nombre, value: c.id })),
+    ]
 
     impuestosOpts.value = impuestos
       .filter((i) => i.activo)
@@ -862,11 +881,24 @@ function onAplicarDesfases(aplicados: AplicarDesfaseItem[]) {
 async function guardar() {
   saving.value = true
   try {
+    // `|| undefined` colapsaba todo lo falsy y el campo NO viajaba: el usuario
+    // borraba la descripción o la categoría, veía "Item actualizado", y el valor
+    // seguía ahí. El backend sí distingue "no tocar" (campo ausente) de "borrar"
+    // —verificado contra la API andando: `descripcion: ''` y `categoriaId: null`
+    // devuelven 200 y dejan los dos campos vacíos; el `null` pasa porque
+    // `@IsOptional()` corta los validadores antes del `@IsUUID()`—.
+    // En creación se sigue omitiendo, para no escribir `''` donde antes quedaba
+    // NULL: el bug era de edición y el alcance del fix también.
     const payload: Record<string, unknown> = {
       nombre: form.value.nombre,
-      descripcion: form.value.descripcion || undefined,
+      descripcion: form.value.descripcion || (editingId.value ? '' : undefined),
       monedaId: form.value.monedaId,
-      categoriaId: form.value.categoriaId || undefined,
+      categoriaId:
+        form.value.categoriaId && form.value.categoriaId !== SIN_CATEGORIA
+          ? form.value.categoriaId
+          : editingId.value
+            ? null
+            : undefined,
       activo: form.value.activo,
     }
 
@@ -914,7 +946,14 @@ async function guardar() {
         payload.stock = form.value.stock || '0'
       }
     } else if (form.value.tipo === 'servicio') {
-      payload.duracionEstimada = form.value.duracionEstimada || undefined
+      // Mismo `|| undefined`, con un agravante: tapaba el `0`, que es una
+      // duración válida (`@IsInt() @Min(0)` en el DTO). Se manda cualquier
+      // número; el campo vacío —`null`, o el `''` que puede llegar de un input
+      // numérico borrado— sigue siendo "no tocar".
+      payload.duracionEstimada =
+        typeof form.value.duracionEstimada === 'number'
+          ? form.value.duracionEstimada
+          : undefined
       payload.requiereCita = form.value.requiereCita
     } else if (form.value.tipo === 'receta') {
       payload.ingredientes = form.value.ingredientes
