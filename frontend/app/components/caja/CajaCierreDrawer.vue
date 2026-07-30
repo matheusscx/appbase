@@ -132,7 +132,7 @@ async function enviarConteo() {
     await finalizarExito(res.arqueo)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al registrar el conteo'
+    const msg = apiErrorMsg(e, 'Error al registrar el conteo')
     toast.add({ title: msg, color: 'error' })
   }
   finally {
@@ -178,7 +178,7 @@ async function confirmarCierre() {
     await finalizarExito(res.arqueo)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al confirmar el cierre'
+    const msg = apiErrorMsg(e, 'Error al confirmar el cierre')
     toast.add({ title: msg, color: 'error' })
   }
   finally {

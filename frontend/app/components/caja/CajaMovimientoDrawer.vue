@@ -50,7 +50,7 @@ async function guardar() {
     open.value = false
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al registrar movimiento'
+    const msg = apiErrorMsg(e, 'Error al registrar movimiento')
     toast.add({ title: msg, color: 'error' })
   }
   finally {

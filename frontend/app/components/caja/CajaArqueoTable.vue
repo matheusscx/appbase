@@ -88,7 +88,7 @@ async function guardar() {
     toast.add({ title: 'Diferencias justificadas', color: 'success' })
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al guardar las justificaciones'
+    const msg = apiErrorMsg(e, 'Error al guardar las justificaciones')
     toast.add({ title: msg, color: 'error' })
   }
   finally {

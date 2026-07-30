@@ -62,7 +62,9 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = data.user
       return true
     } catch (e: unknown) {
-      error.value = (e as { data?: { message?: string } })?.data?.message ?? 'Error al iniciar sesión'
+      // `detalleLocal: false`: es una pantalla pública, y el `message` de un error
+      // de red de ofetch trae la URL del backend. Ver `apiErrorMsg`.
+      error.value = apiErrorMsg(e, 'Error al iniciar sesión', { detalleLocal: false })
       return false
     } finally {
       loading.value = false
@@ -81,8 +83,8 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = data.user
       return true
     } catch (e: unknown) {
-      const msg = (e as { data?: { message?: string | string[] } })?.data?.message
-      error.value = Array.isArray(msg) ? msg.join(', ') : (msg ?? 'Error al registrarse')
+      // Misma razón que en `login`: pantalla sin sesión.
+      error.value = apiErrorMsg(e, 'Error al registrarse', { detalleLocal: false })
       return false
     } finally {
       loading.value = false

@@ -25,7 +25,7 @@ async function guardar() {
     form.contrasenaNueva = ''
     form.confirmarContrasena = ''
   } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al cambiar contraseña'
+    const msg = apiErrorMsg(e, 'Error al cambiar contraseña')
     toast.add({ title: msg, color: 'error' })
   } finally {
     loading.value = false

@@ -309,13 +309,13 @@ describe('SesionesGarzonService', () => {
     expect(result[0].turnoNombre).toBe('');
   });
 
-  // El JOIN a `garzones` de los dos listados acotaba solo por `eliminado_el`,
-  // mientras `sesiones_garzon` sí filtra por tenant. No es explotable hoy —el
-  // `garzon_id` de esas filas se escribe por caminos tenant-scoped— pero es la
-  // misma defensa que ya faltó en el JOIN de garzones de ventas. Se asevera sobre
-  // el SQL porque el escenario no se puede montar por API: exigiría dos tenants
-  // compartiendo un `garzon_id`, que es la PK.
-  it('los dos listados acotan el JOIN de garzones por tenant', async () => {
+  // Los JOIN a `garzones` y `turnos` de los dos listados acotaban solo por
+  // `eliminado_el`, mientras `sesiones_garzon` sí filtra por tenant. No son
+  // explotables hoy —el `garzon_id` y el `turno_id` de esas filas se escriben por
+  // caminos tenant-scoped— pero es la misma defensa que ya faltó en el JOIN de
+  // garzones de ventas. Se asevera sobre el SQL porque el escenario no se puede
+  // montar por API: exigiría dos tenants compartiendo una PK.
+  it('los dos listados acotan los JOIN de garzones y turnos por tenant', async () => {
     dataSource.query.mockResolvedValueOnce([]);
     await service.listarAbiertas(TENANT);
     const sqlAbiertas = (
@@ -333,6 +333,7 @@ describe('SesionesGarzonService', () => {
 
     for (const sql of [sqlAbiertas, sqlHistorial]) {
       expect(sql).toMatch(/LEFT JOIN\s+garzones\s+g\b[\s\S]*?g\.tenant_id/i);
+      expect(sql).toMatch(/LEFT JOIN\s+turnos\s+t\b[\s\S]*?t\.tenant_id/i);
     }
   });
 

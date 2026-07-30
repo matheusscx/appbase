@@ -49,8 +49,8 @@ export function useUserPreferences() {
       })
     }
     catch (e: unknown) {
-      const msg = (e as { data?: { message?: string } })?.data?.message
-      toast.add({ title: msg ?? 'Error al guardar preferencias', color: 'error' })
+      const msg = apiErrorMsg(e, 'Error al guardar preferencias')
+      toast.add({ title: msg, color: 'error' })
       throw e
     }
   }

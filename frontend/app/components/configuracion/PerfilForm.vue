@@ -20,7 +20,7 @@ async function guardar() {
     authStore.updateUser({ nombre: updated.nombre, apellido: updated.apellido, telefono: updated.telefono })
     toast.add({ title: 'Perfil actualizado', color: 'success' })
   } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al guardar'
+    const msg = apiErrorMsg(e, 'Error al guardar')
     toast.add({ title: msg, color: 'error' })
   } finally {
     loading.value = false

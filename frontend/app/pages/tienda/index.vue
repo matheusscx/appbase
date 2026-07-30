@@ -26,8 +26,8 @@ async function cargar() {
     )
     items.value = res.data
   } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar el catálogo', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar el catálogo')
+    toast.add({ title: msg, color: 'error' })
   } finally {
     loadingCatalogo.value = false
   }
@@ -60,8 +60,8 @@ async function irAPagar() {
     }
     await navigateTo(res.checkoutUrl)
   } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al iniciar el pago', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al iniciar el pago')
+    toast.add({ title: msg, color: 'error' })
     pagando.value = false
   }
 }

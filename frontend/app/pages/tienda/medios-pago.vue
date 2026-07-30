@@ -29,10 +29,6 @@ const eliminarMensaje = computed(() => {
   return `¿Estás seguro? ${base}`
 })
 
-function apiErrorMsg(e: unknown, fallback: string): string {
-  return (e as { data?: { message?: string } })?.data?.message ?? fallback
-}
-
 onMounted(async () => {
   // Retorno de Webpay: /tienda/medios-pago?inscripcionId=...&estado=activa|fallida
   const estado = route.query.estado

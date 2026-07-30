@@ -33,7 +33,7 @@ export const useTenantStore = defineStore('tenant', () => {
       )
     }
     catch (e: unknown) {
-      error.value = (e as { data?: { message?: string } })?.data?.message ?? 'Error al cargar tenants'
+      error.value = apiErrorMsg(e, 'Error al cargar tenants')
     }
     finally {
       loading.value = false
@@ -56,8 +56,7 @@ export const useTenantStore = defineStore('tenant', () => {
       await navigateTo('/')
     }
     catch (e: unknown) {
-      const msg = (e as { data?: { message?: string } })?.data?.message
-      error.value = msg ?? 'Error al cambiar de tenant'
+      error.value = apiErrorMsg(e, 'Error al cambiar de tenant')
     }
     finally {
       loading.value = false

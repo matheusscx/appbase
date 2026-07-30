@@ -21,8 +21,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
       esAdmin.value = admin.esAdmin
     }
     catch (e: unknown) {
-      const msg = (e as { data?: { message?: string } })?.data?.message
-      error.value = msg ?? 'Error al cargar permisos'
+      error.value = apiErrorMsg(e, 'Error al cargar permisos')
     }
     finally {
       loading.value = false

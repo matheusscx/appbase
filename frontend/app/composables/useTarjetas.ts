@@ -54,8 +54,8 @@ export function useTarjetas() {
         suscripcionesActivas: m.suscripcionesActivas ?? 0,
       }))
     } catch (e: unknown) {
-      const msg = (e as { data?: { message?: string } })?.data?.message
-      toast.add({ title: msg ?? 'Error al cargar los medios de pago', color: 'error' })
+      const msg = apiErrorMsg(e, 'Error al cargar los medios de pago')
+      toast.add({ title: msg, color: 'error' })
     } finally {
       loading.value = false
     }

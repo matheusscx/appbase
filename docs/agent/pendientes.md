@@ -163,15 +163,6 @@ verdad; el conteo del encabezado describe la auditoría original.
   **Es decisión de owner si se encara**, con este número sobre la mesa: un carrito de 5
   líneas de receta pasó de 5×(3+G) queries a 15 fijas; batchear entre líneas lo llevaría
   a ~3.
-- [ ] **Otros 14 `.vue`/composables arman el mensaje de error a mano** (frontend,
-  `components/caja/*` ×5, `components/configuracion/*` ×2, `composables/usePaginatedList`,
-  `useTarjetas`, `useUserPreferences`, `pages/tienda/*` ×3, `pages/ventas/index.vue`,
-  `pages/pagos/index.vue`) — mismo patrón que se acaba de cerrar en ventas/pagos: tipan
-  `data.message` como `string` y el `ValidationPipe` global devuelve `string[]` en errores
-  de validación, así que el toast muestra el array interpolado. Degrada, no rompe. Quedan
-  fuera porque no son del alcance auditado (`ventas`+`pagos`); es un barrido de una línea
-  por archivo usando `apiErrorMsg`, que ya existe y está testeado.
-
 ### Decidido por el owner tras investigación de mercado (2026-07-27)
 
 Cuatro decisiones de owner sobre reglas de negocio no documentadas; tres ya se

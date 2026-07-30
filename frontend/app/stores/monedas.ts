@@ -72,8 +72,7 @@ export const useMonedasStore = defineStore('monedas', () => {
       hydrate(data, tenantId)
     }
     catch (e: unknown) {
-      error.value = (e as { data?: { message?: string } })?.data?.message
-        ?? 'Error al cargar monedas'
+      error.value = apiErrorMsg(e, 'Error al cargar monedas')
     }
     finally {
       loading.value = false

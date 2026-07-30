@@ -50,7 +50,7 @@ async function abrir() {
     emit('opened', caja.id)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message ?? 'Error al abrir la caja'
+    const msg = apiErrorMsg(e, 'Error al abrir la caja')
     toast.add({ title: msg, color: 'error' })
   }
   finally {

@@ -209,8 +209,26 @@ describe('useTenantStore — fetchMyTenants', () => {
 
     await store.fetchMyTenants()
 
-    expect(store.error).toBe('Error al cargar tenants')
+    // `apiErrorMsg` conserva el motivo real del error local detrás del fallback de
+    // contexto, en vez de tragárselo. Antes acá se veía solo el genérico.
+    expect(store.error).toBe('Error al cargar tenants: Network error')
     expect(store.loading).toBe(false)
+  })
+
+  // El `ValidationPipe` global del backend devuelve `message` como **array** en
+  // los errores de validación. El cast a `{ message?: string }` que había acá era
+  // una mentira de tipos: el array entraba tal cual a un ref de string y se
+  // renderizaba interpolado ("a,b"). `apiErrorMsg` lo junta con ", ".
+  it('junta el array de mensajes de validación en un solo string', async () => {
+    const store = useTenantStore()
+    mockApiFetch.mockRejectedValue({
+      data: { message: ['tenantId debe ser un UUID', 'nombre no puede estar vacío'] },
+    })
+
+    await store.fetchMyTenants()
+
+    expect(store.error).toBe('tenantId debe ser un UUID, nombre no puede estar vacío')
+    expect(typeof store.error).toBe('string')
   })
 })
 
@@ -282,9 +300,12 @@ describe('useTenantStore — switchTenant', () => {
     const store = useTenantStore()
     mockApiFetch.mockRejectedValue(new Error('Unknown'))
 
+    // Igual que en `fetchMyTenants`: el fallback de contexto se conserva y el
+    // motivo del error local se agrega detrás, en vez de perderse.
+    expect(store.error).toBeNull()
     await store.switchTenant('tenant-bbb')
 
-    expect(store.error).toBe('Error al cambiar de tenant')
+    expect(store.error).toBe('Error al cambiar de tenant: Unknown')
   })
 
   it('loading es true durante la llamada y false al terminar', async () => {

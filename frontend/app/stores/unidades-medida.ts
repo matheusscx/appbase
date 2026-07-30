@@ -68,8 +68,7 @@ export const useUnidadesMedidaStore = defineStore('unidadesMedida', () => {
       )
     }
     catch (e: unknown) {
-      error.value = (e as { data?: { message?: string } })?.data?.message
-        ?? 'Error al cargar unidades de medida'
+      error.value = apiErrorMsg(e, 'Error al cargar unidades de medida')
     }
     finally {
       loading.value = false

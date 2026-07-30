@@ -63,8 +63,8 @@ export function usePaginatedList<T>(options: UsePaginatedListOptions) {
       meta.value = res.meta
     }
     catch (e: unknown) {
-      const msg = (e as { data?: { message?: string } })?.data?.message
-      toast.add({ title: msg ?? 'Error al cargar datos', color: 'error' })
+      const msg = apiErrorMsg(e, 'Error al cargar datos')
+      toast.add({ title: msg, color: 'error' })
     }
     finally {
       loading.value = false

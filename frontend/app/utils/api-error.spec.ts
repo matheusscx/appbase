@@ -30,4 +30,23 @@ describe('apiErrorMsg', () => {
   it('sin data ni Error devuelve el fallback', () => {
     expect(apiErrorMsg({}, 'Algo falló')).toBe('Algo falló')
   })
+
+  // Para pantallas SIN sesión (login/registro): el `message` de un `Error` de red
+  // de ofetch trae el método y la URL completa del backend, y eso no puede
+  // llegarle a un visitante anónimo. El mensaje HTTP del backend sí se conserva.
+  it('con detalleLocal: false descarta el message del Error local', () => {
+    expect(
+      apiErrorMsg(
+        new Error('[POST] "http://backend-interno:3000/api/auth/login": <no response> fetch failed'),
+        'Error al iniciar sesión',
+        { detalleLocal: false },
+      ),
+    ).toBe('Error al iniciar sesión')
+  })
+
+  it('detalleLocal: false no afecta al mensaje HTTP del backend', () => {
+    expect(
+      apiErrorMsg({ data: { message: ['a', 'b'] } }, 'fallback', { detalleLocal: false }),
+    ).toBe('a, b')
+  })
 })

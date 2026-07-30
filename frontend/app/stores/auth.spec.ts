@@ -80,6 +80,66 @@ describe('useAuthStore — computed claims', () => {
   })
 })
 
+describe('useAuthStore — mensajes de error del login público', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    $fetchMock.mockReset()
+  })
+
+  // `login`/`register` son las ÚNICAS pantallas sin sesión del barrido de
+  // `apiErrorMsg`. Cuando el backend no responde, `ofetch` lanza un `Error` cuyo
+  // `message` trae el método y la URL completa —`[POST] "http://host:3000/api/
+  // auth/login": <no response> fetch failed`—, así que propagarlo le muestra la
+  // topología interna a un visitante anónimo. Acá el mensaje técnico se descarta
+  // y queda el genérico; las credenciales inválidas siguen llegando con
+  // `data.message` del backend y se muestran igual que siempre.
+  it('un fallo de red en login no filtra la URL del backend', async () => {
+    const store = useAuthStore()
+    $fetchMock.mockRejectedValueOnce(
+      new Error('[POST] "http://backend-interno:3000/api/auth/login": <no response> fetch failed'),
+    )
+
+    const ok = await store.login('a@b.com', 'secreta')
+
+    expect(ok).toBe(false)
+    expect(store.error).toBe('Error al iniciar sesión')
+    expect(store.error).not.toContain('http')
+  })
+
+  it('un fallo de red en registro tampoco filtra la URL del backend', async () => {
+    const store = useAuthStore()
+    $fetchMock.mockRejectedValueOnce(
+      new Error('[POST] "http://backend-interno:3000/api/auth/register": <no response> fetch failed'),
+    )
+
+    const ok = await store.register('Ana', 'a@b.com', 'secreta')
+
+    expect(ok).toBe(false)
+    expect(store.error).toBe('Error al registrarse')
+    expect(store.error).not.toContain('http')
+  })
+
+  it('sigue mostrando el mensaje del backend cuando responde con error', async () => {
+    const store = useAuthStore()
+    $fetchMock.mockRejectedValueOnce({ data: { message: 'Credenciales inválidas' } })
+
+    await store.login('a@b.com', 'mala')
+
+    expect(store.error).toBe('Credenciales inválidas')
+  })
+
+  it('junta el array de validación del registro', async () => {
+    const store = useAuthStore()
+    $fetchMock.mockRejectedValueOnce({
+      data: { message: ['email debe ser un correo', 'password es muy corta'] },
+    })
+
+    await store.register('Ana', 'mal', '1')
+
+    expect(store.error).toBe('email debe ser un correo, password es muy corta')
+  })
+})
+
 describe('useAuthStore — restauración de sesión', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

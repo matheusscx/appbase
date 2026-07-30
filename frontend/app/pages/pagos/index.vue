@@ -126,8 +126,8 @@ async function cargarResumen() {
     resumen.value = await useApiFetch<PagosResumen>(`${apiUrl}/pagos/resumen`)
   }
   catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'Error al cargar resumen', color: 'error' })
+    const msg = apiErrorMsg(e, 'Error al cargar resumen')
+    toast.add({ title: msg, color: 'error' })
   }
   finally {
     loadingResumen.value = false

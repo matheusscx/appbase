@@ -73,8 +73,8 @@ async function aprobar() {
     limpiar()
     estado.value = 'aprobada'
   } catch (e: unknown) {
-    const msg = (e as { data?: { message?: string } })?.data?.message
-    toast.add({ title: msg ?? 'El pago fue rechazado', color: 'error' })
+    const msg = apiErrorMsg(e, 'El pago fue rechazado')
+    toast.add({ title: msg, color: 'error' })
     estado.value = 'rechazada'
   }
 }

@@ -135,6 +135,58 @@ confirmados tras refutación (3 eran el mismo bug visto por lentes distintas, 3 
 decisión de owner, abajo). **Ninguno se corrigió en la pasada**: la auditoría produce
 información, no diffs. Orden = severidad.
 
+- [x] ~~**Otros 14 `.vue`/composables arman el mensaje de error a mano**~~ (frontend) —
+  cerrado 2026-07-29. **Eran 20 archivos, no 14**: los 15 que listaba la entrada (toasts en
+  `components/caja/*` ×5, `components/configuracion/*` ×2, los 3 composables, `tienda/*` ×3,
+  `ventas/index.vue`, `pagos/index.vue`) **más 5 stores** que no estaban anotados
+  (`auth`, `tenant`, `permissions`, `monedas`, `unidades-medida`), donde el array no iba a un
+  toast sino directo a `error.value`. 24 sitios en total, todos con el mismo cast mentiroso
+  (`{ message?: string }` sobre algo que el `ValidationPipe` devuelve como `string[]`).
+  Cero restos: el grep del cast a mano queda vacío.
+  Dos cosas que el barrido destapó:
+  - `pages/tienda/medios-pago.vue` tenía su **propia copia local** de `apiErrorMsg`, con el
+    bug adentro, sombreando al util compartido. Se borró; el nombre resuelve ahora al
+    auto-import.
+  - `stores/auth.ts` (registro) ya juntaba el array a mano con `Array.isArray(...).join`.
+    Quedó reemplazado por el util: mismo resultado, una lógica menos duplicada.
+  ⚠️ **Cambio de comportamiento visible, deliberado:** `apiErrorMsg` **conserva** el motivo
+  de un error local detrás del fallback (`"Error al cargar tenants: Network error"`) en vez
+  de tragárselo. Antes esos casos mostraban solo el genérico. Es el diseño del util
+  compartido —el mismo que ya usan ventas, pagos, órdenes y suscripciones— y por eso el
+  barrido lo adopta en vez de replicar el `?? fallback`. Rompió 2 tests que aseveraban el
+  genérico exacto; se actualizaron con el porqué al lado, no se aflojaron.
+  Lo fija un test RED verificado en `stores/tenant.spec.ts`: con `message: ['a','b']` el
+  `error.value` **era el array** (`expected [ 'tenantId debe ser un UUID', …(1) ]`) y ahora es
+  el string unido. La resolución del auto-import en los 20 archivos la garantiza `vue-tsc`:
+  un `apiErrorMsg` no resuelto sería un error de tipos, y el ratchet quedó en 0.
+  ⛔ **Segunda regresión propia del mismo barrido, encontrada por la revisión independiente y
+  corregida antes de commitear:** `login` y `register` de `stores/auth.ts` son los **únicos
+  dos sitios sin sesión** de los 24, y ahí ese "conservar el motivo local" filtraba
+  infraestructura a un visitante anónimo — cuando el backend no responde, el `message` del
+  `Error` de ofetch trae el método y la URL completa
+  (`[POST] "http://host:3000/api/auth/login": <no response> fetch failed`), así que el toast
+  del login pasaba a mostrarla. `apiErrorMsg` acepta ahora `{ detalleLocal: false }`, que
+  descarta el mensaje del error local **sin** tocar el del backend (incluido el array de
+  validación), y los dos sitios de `auth.ts` lo usan.
+  Lo fijan 4 tests en `stores/auth.spec.ts` con los 2 RED verificados
+  (`expected 'Error al iniciar sesión: [POST] "http…' to be 'Error al iniciar sesión'`), que
+  aseveran las dos mitades: el genérico sin `http` en el fallo de red, y el mensaje del
+  backend intacto en credenciales inválidas y en el array de validación del registro.
+
+- [x] ~~**El `LEFT JOIN turnos` tampoco filtra por tenant**~~ (backend,
+  `turnos/sesiones-garzon.service.ts`) — cerrado 2026-07-29, el vecino que quedó a la vista
+  al cerrar los de `garzones` el mismo día. Los dos JOIN de `turnos` (`listarAbiertas` e
+  `historial`) llevan `t.tenant_id = $1`; `turnos` tiene la columna (verificado contra la BD).
+  ⚠️ **Hueco de cobertura que esto destapó, y que el gate no ve:** **ningún e2e** toca
+  `GET /sesiones-garzon/abiertas` ni `GET /sesiones-garzon` (historial) ni
+  `GET /cuentas/:id/asignaciones`, así que un SQL malformado en esas tres queries pasaría
+  todo el gate en verde — el unit solo asevera el texto de la query. Se ejercitaron a mano
+  contra Postgres real: las tres devuelven **200**, la del historial también con filtros
+  dinámicos (`?estado=cerrada&page=1&pageSize=5`), que es donde un `$1` mal numerado
+  reventaría. Y lo que importa del filtro: los nombres unidos siguen llegando
+  (`garzonNombre: "Ana Torres"`, `turnoNombre: "Mañana"`), o sea el JOIN no quedó sin
+  matchear. Vale como e2e futuro.
+
 - [x] ~~**Otros tres `LEFT JOIN garzones` sin filtro de `tenant_id`**~~ (backend,
   `turnos/sesiones-garzon.service.ts`, `salones/cuenta-asignaciones.service.ts`) — cerrado
   2026-07-29. **Eran cuatro, no tres**: dos en `sesiones-garzon` (`listarAbiertas` e
