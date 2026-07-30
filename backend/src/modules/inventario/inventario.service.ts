@@ -263,10 +263,10 @@ export class InventarioService {
     costoAnterior: string | null;
     costoNuevo: string;
   }> {
+    // El signo lo valida `AjusteCostoDto` (`@IsDecimalPositivo`), y
+    // `registrarMovimiento` lo vuelve a exigir sobre el costo ya redondeado a 4
+    // decimales, que es el que entra al kardex.
     const costoNuevo = new Decimal(dto.costoNuevo);
-    if (costoNuevo.isNaN() || costoNuevo.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('El costo nuevo debe ser mayor a 0');
-    }
 
     return this.dataSource.transaction(async (manager) => {
       const rows: { tipo: string; costo_actual: string | null }[] =

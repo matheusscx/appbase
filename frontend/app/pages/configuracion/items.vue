@@ -159,6 +159,10 @@ const verificandoEliminarId = ref<string | null>(null)
 // El backend garantiza la partición: 'extra' siempre cae en `advertencias` y
 // nunca en `bloqueos`. Tipar cada lado con lo que realmente puede contener deja
 // que `vue-tsc` valide el acceso a ETIQUETA_USO en el template.
+// ⚠️ Copia a mano de `UsoItemTipo` (backend `items.service.ts`), sin enlace de
+// compilación: si el backend agrega una clase de uso y acá no se agrega, la
+// viñeta se renderiza con la etiqueta vacía en vez de fallar el build. Al tocar
+// una punta, tocar la otra.
 type UsoItemTipoBloqueante = 'ingrediente' | 'combo' | 'opcion'
 
 interface UsoItem {

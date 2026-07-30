@@ -104,10 +104,19 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: 10,
+        cantidad: '10',
         costoUnitario: '4500',
       });
     expect(resCompra.status).toBe(200);
+
+    // `cantidad` es string + Decimal.js, no `number` nativo: la columna es
+    // NUMERIC(18,4) y un double no aguanta sus 18 dígitos. Un número JSON se
+    // rechaza — sin esta aserción, volver al `@Type(() => Number)` pasa el gate.
+    const resCantidadNumero = await request(app.getHttpServer())
+      .patch(`/api/items/${itemId}/stock`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'entrada', motivo: 'ajuste_manual', cantidad: 10 });
+    expect(resCantidadNumero.status).toBe(400);
 
     const resGet2 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
@@ -148,6 +157,17 @@ describe('Inventario — flujo de costo (e2e)', () => {
     expect(ajuste.costoAnterior).toBe('4500.0000');
     expect(ajuste.costoNuevo).toBe('4300.0000');
 
+    // El signo lo corta el DTO (`@IsDecimalPositivo`), no el service: un costo
+    // negativo o cero no existe, y sin esta aserción el decorador se puede
+    // borrar sin que falle nada.
+    for (const costoNuevo of ['-4300', '0']) {
+      const resSigno = await request(app.getHttpServer())
+        .post('/api/inventario/ajustes-costo')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ itemId, costoNuevo, comentario: 'Costo inválido E2E' });
+      expect(resSigno.status).toBe(400);
+    }
+
     const resGet3 = await request(app.getHttpServer())
       .get(`/api/items/${itemId}`)
       .set('Authorization', `Bearer ${token}`);
@@ -171,7 +191,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'salida',
         motivo: 'merma',
-        cantidad: 1,
+        cantidad: '1',
       });
     expect(resMerma.status).toBe(400);
 
@@ -204,7 +224,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: 500,
+        cantidad: '500',
         unidadCodigo: 'g',
       });
     expect(resCompra.status).toBe(200);
@@ -221,7 +241,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'salida',
         motivo: 'ajuste_manual',
-        cantidad: 250,
+        cantidad: '250',
         unidadCodigo: 'g',
       });
     expect(resSalida.status).toBe(200);
@@ -229,7 +249,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
     const resMermaRechazada = await request(app.getHttpServer())
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'salida', motivo: 'merma', cantidad: 1 });
+      .send({ tipo: 'salida', motivo: 'merma', cantidad: '1' });
     expect(resMermaRechazada.status).toBe(400);
 
     const resGet2 = await request(app.getHttpServer())
@@ -244,7 +264,7 @@ describe('Inventario — flujo de costo (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: 1,
+        cantidad: '1',
         unidadCodigo: 'l',
       });
     expect(resCross.status).toBe(400);

@@ -2011,7 +2011,7 @@ describe('ItemsService', () => {
       });
 
       const res = await service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
-        cantidad: 5,
+        cantidad: '5',
         tipo: 'entrada',
         motivo: 'compra',
       });
@@ -2035,7 +2035,7 @@ describe('ItemsService', () => {
 
       await expect(
         service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
-          cantidad: 5,
+          cantidad: '5',
           tipo: 'entrada',
           motivo: 'compra',
         }),
@@ -2064,7 +2064,7 @@ describe('ItemsService', () => {
 
       await expect(
         service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
-          cantidad: 5,
+          cantidad: '5',
           tipo: 'entrada',
           motivo: 'compra',
         }),
@@ -2081,7 +2081,7 @@ describe('ItemsService', () => {
       managerMock.query.mockResolvedValueOnce([{ tipo: 'producto' }]); // SELECT tipo
 
       await service.ajustarStock(TENANT, 'user-uuid', ITEM_ID, {
-        cantidad: 5,
+        cantidad: '5',
         tipo: 'entrada',
         motivo: 'compra',
         costoUnitario: '4500',

@@ -465,7 +465,7 @@ describe('Ventas (e2e)', () => {
   });
 
   describe('POST /ventas con propina directa (POS)', () => {
-    const MOSTRADOR_ID = '550e8400-e29b-41d4-a716-446655440281';
+    const MOSTRADOR_ID = '550e8400-e29b-41d4-a716-446655440339';
 
     it('crea venta_propina en el Mostrador con atribución neutra', async () => {
       const res = await request(app.getHttpServer())

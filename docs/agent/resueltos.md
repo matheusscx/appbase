@@ -128,6 +128,26 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Propinas en POS (notas de la revisión final)
+
+- [x] ~~**`propinaDirecta`/`propinaCierreMesa` no se restringen al canal `fisico`**~~
+  (backend, `ventas.service.ts`) — cerrado 2026-07-30. Las dos propinas son del canal
+  presencial (el POS y el cierre de mesa de salones), pero el gate miraba solo
+  `habilitadoPos`/`habilitadoSalones`: una venta `online` podía enviarlas y quedaban
+  persistidas como `venta_propina`.
+  **Se ignora, no se rechaza** — es la semántica que la feature ya tenía documentada para un
+  canal apagado (`docs/features/pagos.md#propina-en-el-pos`), y meter un 400 acá habría hecho
+  convivir dos comportamientos para la misma clase de propina inválida. El gate quedó en un
+  solo booleano (`traePropina`), que además evita consultar `PropinaConfiguracion` en las
+  ventas online.
+  **Mutante verificado revirtiendo** ([[mutante-debe-revertir-no-solo-romper]]): sacando
+  `canal !== 'online'` el e2e nuevo de `liquidacion-propinas` falla (encuentra la fila de
+  propina); con el gate, la venta online se crea con 0 propinas y los dos flags encendidos,
+  o sea lo único que la cortó fue el canal. Es el primer e2e del repo que crea una venta
+  `canal: 'online'`.
+
+---
+
 ## Auditoría `ventas` + `pagos` (2026-07-27)
 
 Pasada de 7 lentes según `docs/agent/auditoria-codigo.md`. 20 hallazgos crudos → 15
@@ -885,6 +905,35 @@ siguen diferidos están en `pendientes.md`.
   síntoma exacto de "consultó la BD"), y el del gemelo de combos sigue verde a través del
   helper compartido.
 
+### Media / Baja — cerrados el 2026-07-30
+
+- [x] ~~**`AjusteStockDto.cantidad` es `number` nativo**~~ (backend,
+  `dto/ajuste-stock.dto.ts`) — cerrado 2026-07-30: pasa a `string` + `@IsNumberString()` +
+  `@IsDecimalPositivo()`, como los otros cinco campos de cantidad del módulo, y se va el
+  `@Type(() => Number)`. El service no cambió una línea: ya hacía
+  `new Decimal(dto.cantidad).toString()`, que trata igual al string.
+  **Es un endurecimiento del contrato, no un cambio interno:** un `cantidad: 10` (número
+  JSON) ahora devuelve 400. Se puede hacer sin plan de migración porque el único cliente
+  —`configuracion/items.vue`— ya mandaba string en los tres modos (`cantidad`, `serie` con
+  `String(series.length)`, `lote`), y el proyecto no tiene datos ni clientes productivos
+  ([[proyecto-sin-datos-productivos]]). Quien sí mandaba números era la propia suite e2e:
+  **15 llamadas** a `PATCH /items/:id/stock` repartidas en `costeo-cpp`, `inventario`,
+  `mermas` y `recuentos`, más 4 en el unit de `items.service.spec.ts` (esas las cazó
+  `tsc --noEmit`; las de e2e, no — `.send()` es `any`, así que hubo que contarlas a mano).
+  Lo fija un e2e en `inventario.e2e-spec.ts` que manda `cantidad: 10` como número y espera
+  400: sin él, volver al `@Type(() => Number)` pasa el gate entero.
+
+- [x] ~~**`ventas.service.spec.ts` fija `recargosIds: []` en sus tres fixtures**~~ (backend) —
+  cerrado 2026-07-30 con un test que hace lo que la entrada pedía y **un poco más preciso**:
+  el hueco real no era el `recargosIds` del item —la venta ni lo lee, pasa
+  `linea.recargoIds` del DTO al motor—, sino que `trazas.recargos` y `trazasVenta.recargos`
+  llegaban **siempre vacíos** al service, así que los dos loops que persisten `VentaRecargo`
+  (7c por línea y 7d a nivel venta) no los ejercía ningún unit.
+  El test nuevo devuelve un resultado con un recargo de línea y uno de venta, y afirma las
+  dos filas creadas con su `aplicadoEn` (`'detalle'` y `'venta'`).
+  **Mutante verificado revirtiendo, no rompiendo** ([[mutante-debe-revertir-no-solo-romper]]):
+  con los dos loops neutralizados el test falla con `Array []`; con el código real, pasa.
+
 ### Decidido por el owner y ya implementado
 
 - [x] ~~**¿El descuento debe tener piso en cero?**~~ — **sí**, decidido por el owner el
@@ -1032,6 +1081,17 @@ siguen diferidos están en `pendientes.md`.
   Técnica, por si hay que repetirlo: `navigate_page` con un `initScript` que envuelve
   `window.fetch` y demora las URLs que matchean `/uso`.
 
+- [x] ~~**`UsoItemTipo` está duplicado a mano**~~ (backend `items.service.ts` + frontend
+  `configuracion/items.vue`) — cerrado 2026-07-30 con la **mitigación mínima que la propia
+  entrada pedía**, no con el enlace de compilación: un docblock cruzado en las dos puntas
+  (`UsoItemTipo` ↔ `UsoItemTipoBloqueante` + `ETIQUETA_USO`) que dice qué pasa si se toca una
+  sola —la viñeta se renderiza con la etiqueta vacía en vez de romper el build— y que la
+  partición `'extra'` → `advertencias` es parte del contrato.
+  **No cierra el problema de raíz** y no pretende hacerlo: el enlace real es el workspace
+  compartido del monorepo, que sigue siendo tema propio por decisión del owner
+  ([[workspace-compartido-monorepo-pendiente]]). Acá el patrón acordado para ese caso es
+  exactamente este: la copia vive de cada lado y ambos docblocks se referencian.
+
 ## Revisión final `advertencias-previsualizacion` (2026-07-29)
 
 - [x] ~~**El e2e de ventas consume stock sembrado compartido**~~ (backend,
@@ -1048,6 +1108,21 @@ siguen diferidos están en `pendientes.md`.
   correr la suite; antes bajaba 1 por corrida. Efecto lateral: se fue `PAPAS_FRITAS_ID`, una
   de las dos constantes con el mismo literal que confundía a los revisores (la causa sigue
   en el seeder, ver [`pendientes.md`](pendientes.md)).
+
+- [x] ~~**El seed reusa el UUID `…440281` para dos filas sin relación**~~ (backend,
+  `seeder.service.ts`) — cerrado 2026-07-30. El que se movió es el **garzón "Mostrador"**, no
+  el ítem: `…440281` pertenece al bloque 281-289 que `seedPapasFritas` usa de corrido (papas,
+  su movimiento, pollo, chuleta), mientras que el garzón lo tomó fuera de su propio rango
+  (los garzones de Paris van en 238-240). Ahora es `…440339`, el siguiente número libre
+  medido sobre el repo entero (338 era el máximo; 400/500/600/999 ya estaban tomados más
+  arriba). Referencias vivas actualizadas: el seeder y las dos constantes `MOSTRADOR_ID` de
+  `ventas.e2e-spec.ts` y `liquidacion-propinas.e2e-spec.ts`. Los planes y specs de
+  `docs/superpowers/` **no se tocaron**: son artefactos fechados que describen lo que se hizo
+  ese día, no la fuente de verdad del seed.
+  El id nuevo lleva un comentario que dice de quién es `…440281`, para que la próxima persona
+  no lo reasigne de vuelta. Verificado con la e2e completa sobre BD reseteada (172 verdes):
+  si el garzón placeholder no existiera con ese id, la propina de POS del `liquidacion-propinas`
+  no repartiría.
 
 ## Revisión final `precio-base-negativo` (2026-07-29)
 
@@ -1087,3 +1162,27 @@ siguen diferidos están en `pendientes.md`.
   módulos vecinos eran candidatos del mismo molde. Medidos uno por uno, **ninguno es agujero
   funcional** — ver la entrada que quedó abierta en [`pendientes.md`](pendientes.md), que ya
   cita el `lessThanOrEqualTo(0)` de cada service.
+
+- [x] ~~**Tres campos de la familia `costo` validan el signo en el service, no en el DTO**~~
+  (backend) — cerrado 2026-07-30 con `@IsDecimalPositivo()` en los tres
+  (`items/dto/ajuste-stock.dto.ts` `costoUnitario`, `inventario/dto/ajuste-costo.dto.ts`
+  `costoNuevo`, `mermas/dto/create-merma.dto.ts` `costoUnitario`). Era consistencia, no un
+  hueco: los tres services ya rechazaban el `<= 0`.
+  **Un dato de la entrada no aguantó al medirlo.** Decía que el de mermas necesitaba
+  `@ValidateIf(o => o.costoUnitario !== '')` porque el vacío significa "valorizar con el costo
+  actual". Falso hoy: `@IsNumberString()` **ya rechaza la cadena vacía** —`@IsOptional()` solo
+  saltea `null`/`undefined`—, así que ese camino ya devolvía 400 antes de este cambio, y
+  `mermas.vue:219` nunca manda `''` (solo setea el campo si `.trim()` da algo). Agregar el
+  `ValidateIf` habría **aflojado** la validación en vez de preservar un camino vivo: el `''`
+  habría empezado a pasar el DTO y a llegar al service. El camino "sin costo" es omitir el
+  campo, y así quedó documentado en el DTO.
+  **Solo uno de los tres borró la validación del service**, y por una razón concreta:
+  `registrarAjusteCosto` tiene un único llamador (su controller), así que el `> 0` vive ahora
+  en el DTO y el backstop lo pone `registrarMovimiento` sobre el costo ya redondeado a 4
+  decimales. Los otros dos **conservan** el chequeo: el de `registrarMovimiento` es un punto
+  de entrada compartido por mermas, ventas y recuentos —no todos pasan por un DTO— y el de
+  mermas está entrelazado con la conversión de unidad. Ahí el decorador es fail-fast en el
+  borde y documentación en Swagger, no el único candado.
+  Lo fija un e2e en `inventario.e2e-spec.ts` que manda `costoNuevo` `-4300` y `0` contra
+  `POST /inventario/ajustes-costo` y espera 400 en ambos — sin esa aserción, el decorador que
+  reemplazó al chequeo del service se podía borrar sin que fallara nada.

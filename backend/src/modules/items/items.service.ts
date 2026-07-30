@@ -100,6 +100,16 @@ export interface DesfaseRecetaDto {
   ingredientesAfectados: DesfaseIngredienteDto[];
 }
 
+/**
+ * Clases de uso que devuelve `GET /items/:id/uso`.
+ *
+ * ⚠️ Duplicado a mano en el frontend (`pages/configuracion/items.vue`, tipo
+ * `UsoItemTipoBloqueante` + el mapa `ETIQUETA_USO`), sin enlace de compilación
+ * entre los dos lados: agregar una clase acá y no allá renderiza la viñeta con
+ * la etiqueta vacía en vez de romper el build. Al tocar esta unión, tocar
+ * también el `.vue`. La partición es parte del contrato: `'extra'` siempre cae
+ * en `advertencias` y nunca en `bloqueos`.
+ */
 export type UsoItemTipo = 'ingrediente' | 'combo' | 'opcion' | 'extra';
 
 export interface UsoItemRef {

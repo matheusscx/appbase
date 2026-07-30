@@ -185,22 +185,22 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
     `nowrap` **y** `hidden` a la vez, no cualquiera de los dos solo.
   - `overflow: clip` (Tailwind `overflow-clip`) computa `overflowX: 'clip'`, no
     `'hidden'`, y tampoco pasa el filtro.
-  **Dato accionable:** `/inventario` está en las 4 rutas del spec justo como arquetipo
-  "tabla de muchas columnas" (`UTable` de Nuxt UI) y nadie verificó qué `table-layout`
-  usa esa tabla. Si es `auto`, hay cobertura real perdida en una ruta que el spec ya
-  barre. Punto de partida si se retoma: leer `getComputedStyle(celda).tableLayout` en
-  `/inventario` antes de decidir si hace falta ampliar el detector o si alcanza con el
-  `overflow-x: auto` que ya envuelve a `UTable`.
-
-## Propinas en POS (notas de la revisión final, severidad baja — no bloqueantes)
-
-- [ ] **`propinaDirecta`/`propinaCierreMesa` no se restringen al canal `fisico`**
-  (backend) — `ventas.service.ts` solo gatea la propina con `habilitadoPos`/
-  `habilitadoSalones`, no con `canal`; una venta `online` podría en teoría enviar
-  `propinaDirecta`/`propinaCierreMesa`. El signo ya no es el problema (barrido de
-  positividad jul-2026, ambos DTOs ahora exigen `>= 0` vía `IsDecimalNoNegativo` —
-  ver `backend/src/common/decorators/decimal-signo.decorator.ts`): queda solo la
-  restricción de canal, sin regresión respecto al comportamiento previo.
+  **Medido el 2026-07-30 (el spike que esta entrada pedía, resuelto):** el tema resuelto de
+  `UTable` (`.nuxt/ui/table.ts`, sin override en `app.config.ts` ni `:ui` en
+  `CrudTable.vue`) da los **tres** casos ciegos a la vez, así que el detector no ve **nada**
+  adentro de ninguna tabla del proyecto:
+  - `base` (el `<table>`) es `min-w-full overflow-clip` → **sin `table-fixed`, o sea
+    `table-layout: auto`**, y encima `overflow-clip` computa `'clip'`, no `'hidden'`.
+  - `td` es `whitespace-nowrap` **sin** `overflow: hidden` → el caso peor del criterio.
+  - No hay contexto flex/grid: el ancestro es el `<table>`.
+  **Pero el arquetipo resultó ser el lugar equivocado para buscar**, que es el hallazgo útil:
+  el slot `root` es `relative overflow-auto`, así que una tabla ancha **scrollea dentro de su
+  propio contenedor** en vez de empujar la página — exactamente lo que el desborde sería. Lo
+  que sí puede desbordar es contenido dentro de una celda que a su vez esté en un contexto
+  flex, y **eso el detector ya lo ve**. Conclusión: la cobertura perdida en `/inventario` es
+  menor de lo que esta entrada suponía; ampliar el detector a `table-layout: auto` no es la
+  prioridad, y si se retoma conviene apuntar a los otros mecanismos de la lista
+  (`inline-block`, `float`, `absolute`, `fit-content`), no a las tablas.
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 
@@ -333,20 +333,31 @@ Ver [`resueltos.md`](resueltos.md).
 
 ### Media
 
-- [ ] **Un descuento, recargo o impuesto desactivado sigue aplicándose** (backend,
-  `calculo-precios.service.ts:50-62` + `items.service.ts:408-419`) — `descuentos.findAll` e
-  `impuestos.findAll` no filtran `activo`, `indexarReglas` ni siquiera mapea el campo, y al
-  desactivar la regla nadie toca `item_descuentos`. **Refutada la mitad peor del hallazgo:**
-  las entidades usan `@DeleteDateColumn`, así que una regla **borrada** sí queda excluida por
-  TypeORM — es solo `activo`. Lo que lo vuelve bug y no decisión: `items.vue:685` ya filtra
-  por `activo` al ofrecer asociaciones nuevas, así que el front la esconde y el back la
-  sigue cobrando.
-- [ ] **`AjusteStockDto.cantidad` es `number` nativo** (backend, `dto/ajuste-stock.dto.ts:51`)
-  — único en el módulo; los otros cinco campos de cantidad son string + `@IsNumberString()`.
-  **Escenario del buscador descartado** (exigía que el cliente ya mandara el número roto).
-  El sólido: la columna es `NUMERIC(18,4)` —18 dígitos significativos— y un double aguanta
-  15-17, así que una cantidad grande con decimales se corrompe al pasar por
-  `@Type(() => Number)`, y de ahí entra a `convertirCostoUnitario`, que es dinero.
+- [ ] **Un descuento, recargo o impuesto desactivado sigue aplicándose** (backend +
+  frontend, `calculo-precios.service.ts:50-62` + `items.service.ts:408-419`) —
+  `descuentos.findAll` e `impuestos.findAll` no filtran `activo`, `indexarReglas` ni
+  siquiera mapea el campo, y al desactivar la regla nadie toca `item_descuentos`.
+  **Refutada la mitad peor del hallazgo:** las entidades usan `@DeleteDateColumn`, así que
+  una regla **borrada** sí queda excluida por TypeORM — es solo `activo`. Lo que lo vuelve
+  bug y no decisión: `items.vue:685` ya filtra por `activo` al ofrecer asociaciones nuevas,
+  así que el front la esconde y el back la sigue cobrando.
+  **Forma decidida por el owner (2026-07-30):** desactivar la regla **advierte** —diciendo a
+  cuántos ítems está asociada— y, **al confirmar, limpia las asociaciones**. O sea el cierre
+  no es filtrar `activo` en la lectura del motor: es que desactivar sea una operación con
+  efecto sobre `item_descuentos` / `item_recargos` / `item_impuestos`, y que el motor deje de
+  verla porque la fila puente ya no está. Mismo patrón de UX que el borrado de ítem
+  (`GET /items/:id/uso` → modal con el impacto → confirmar), en espejo.
+  Lo que la implementación tiene que resolver antes de escribir código:
+  - **Contar el impacto** exige la consulta inversa a la de `obtenerUsoItem`: dada una regla,
+    qué ítems la usan. Hoy no existe.
+  - **Reactivar no revierte**: si el admin vuelve a activar la regla, las asociaciones
+    borradas no vuelven solas. Hay que decirlo en la advertencia, no descubrirlo después.
+  - **Alcance**: además de las tres puentes por ítem, están las reglas a nivel venta
+    (`descuentosVentaIds` / `recargosVentaIds`, que llegan por DTO y no tienen fila puente) y
+    el IVA por clasificación tributaria — que es la entrada de arriba y se cruza con esta.
+  - Las ventas ya emitidas **no se tocan**: el hecho fiscal está congelado en
+    `ventas_descuentos` / `ventas_recargos` / `ventas_impuestos`.
+  ⛔ Toca el motor de cálculo de precios: va con spec antes de código.
 - [ ] **Deadlock en la expansión de recetas y combos** (backend,
   `items.service.ts:1726-1735` y `:2301-2308`) — ninguna de las dos queries lleva `ORDER BY`:
   iteran en orden físico y toman `FOR UPDATE` en ese orden. Es el mismo bug ya cerrado un
@@ -370,10 +381,6 @@ Ver [`resueltos.md`](resueltos.md).
   por presentación da distinto por POS que por la tienda online. Preexistente, detectado
   por la revisión independiente del 2026-07-28 al mirar el archivo de al lado. Cierre:
   una sola función compartida, o al menos igualar la condición.
-- [ ] **`ventas.service.spec.ts` fija `recargosIds: []` en sus tres fixtures** (backend) —
-  resto del hallazgo de recargos sin ejercer, cuya mitad de `calculo-precios` se cerró el
-  2026-07-28 ([`resueltos.md`](resueltos.md)). Acá la venta real con recargos sigue sin
-  ejercerse en unit; el e2e sí la cubre de punta a punta.
 ### Baja
 
 - [ ] **`convertirAMonedaOficial` redondea a 4 fijo** (backend,
@@ -397,7 +404,6 @@ Ver [`resueltos.md`](resueltos.md).
   ⚠️ La primera versión de esta entrada decía "dos" y omitía justo las dos del camino de
   venta; lo cazó la revisión independiente contando por profundidad de llaves en vez de a
   ojo.
-
 
 ### Decidido por el owner (pendiente de respuesta)
 
@@ -467,12 +473,6 @@ Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` 
   posterior sobre otra fila) está verificado solo a mano; el proyecto no testea
   páginas. Escenario de reproducción: demorar la respuesta de `/uso` de un item y
   clickear "Eliminar" en otra fila antes de que llegue.
-- [ ] **`UsoItemTipo` está duplicado a mano** (backend `items.service.ts` +
-  frontend `configuracion/items.vue`, tipo `UsoItemTipoBloqueante`) — sin enlace de
-  compilación entre ambos. Si el backend agrega un quinto tipo de uso a la
-  clasificación, el modal renderiza la viñeta con etiqueta vacía en vez de fallar el
-  build. Referencia cruzada en ambos lados como mitigación mínima mientras no se
-  cierre esto de raíz.
 - [ ] **Asimetría de guard entre rutas hermanas** (backend) — `GET /items/:id/uso`
   exige `Items:Eliminar`; la ruta hermana `GET /items/:id/recetas-afectadas`
   (`items.controller.ts:36`) exige solo `Items:Leer`. Es una decisión deliberada (solo
@@ -512,18 +512,6 @@ carritos. Ninguno bloqueaba; el veredicto fue limpio. Se difieren por alcance.
   Encararlo es invalidación + secuenciación en los tres carritos (descartar respuestas
   obsoletas por token de request, y limpiar `resultado` al cambiar de cuenta), no un parche
   en el componente de advertencias.
-
-- [ ] **El seed reusa el UUID `…440281` para dos filas sin relación** (backend,
-  `seeder.service.ts`) — el ítem "Papas fritas" (vía `uuid(281)` en `seedPapasFritas`) y el
-  garzón "Mostrador" (`:1542`). No es colisión de PK real —son tablas distintas— y no rompe
-  nada hoy, pero contradice la convención de tomar el siguiente número libre y **ya confundió
-  a dos revisores independientes**. Corregirlo es reasignar uno de los dos y actualizar sus
-  referencias; el proyecto no tiene datos productivos
-  ([[proyecto-sin-datos-productivos]]), así que se cambia y se resiembra.
-  ℹ️ El efecto visible que citaba esta entrada —dos constantes con el mismo literal en
-  `test/ventas.e2e-spec.ts`— **ya no existe** (2026-07-29): `PAPAS_FRITAS_ID` se borró al
-  sacarle a ese test el consumo de stock compartido. El literal duplicado sigue en el
-  seeder, que es la causa.
 
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
@@ -680,23 +668,3 @@ tres en la sección de auditorías de arriba.
   Cerrar cuando aparezca la necesidad real: hoy el caso que motiva el recuento es food-service,
   donde insumos e ingredientes son todos `cantidad`.
 
-## Revisión final `precio-base-negativo` (2026-07-29)
-
-- [ ] **Tres campos de la familia `costo` validan el signo en el service, no en el DTO**
-  (backend) — resto del barrido de signo del catálogo, cerrado el 2026-07-29 en seis campos
-  ([`resueltos.md`](resueltos.md)). **Ninguno de estos tres es agujero funcional**, verificado
-  leyendo cada service —no inferido del DTO, que es lo que habría hecho parecer que lo eran—:
-  - `items/dto/ajuste-stock.dto.ts:76` `costoUnitario` → lo rechaza
-    `inventario.service.ts:140-150` (`registrarMovimiento`, `lessThanOrEqualTo(0)`), que es por
-    donde pasa cualquier ajuste. La conversión de unidad previa
-    (`items.service.ts:1750`) preserva el signo, así que no hay camino que la esquive.
-  - `inventario/dto/ajuste-costo.dto.ts:9` `costoNuevo` → `inventario.service.ts:266-268`,
-    **incondicional**. Es el único de los tres donde el decorador sería un reemplazo limpio:
-    `IsDecimalPositivo` (`> 0`, no `>= 0`).
-  - `mermas/dto/create-merma.dto.ts:23` `costoUnitario` → `mermas.service.ts:142-149`, pero
-    **condicional a `!= null && !== ''`**: el vacío es "valorizar con el costo actual". Un
-    `IsDecimalPositivo` pelado rompería ese camino; necesita el mismo
-    `@ValidateIf(o => o.costoUnitario !== '')` que llevan los overrides de `precioExtra`.
-  Queda entonces como **consistencia, no como bug**: mover el `> 0` de tres services al
-  decorador que el barrido dejó como patrón del área. Prioridad baja — el valor es que la
-  regla viva en un solo lugar y aparezca en Swagger, no cerrar un hueco.

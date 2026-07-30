@@ -92,7 +92,7 @@ describe('Costeo CPP (e2e)', () => {
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
       .send({
-        cantidad: 10,
+        cantidad: '10',
         tipo: 'entrada',
         motivo: 'compra',
         costoUnitario: '100',
@@ -104,7 +104,7 @@ describe('Costeo CPP (e2e)', () => {
       .patch(`/api/items/${itemId}/stock`)
       .set('Authorization', `Bearer ${token}`)
       .send({
-        cantidad: 10,
+        cantidad: '10',
         tipo: 'entrada',
         motivo: 'compra',
         costoUnitario: '200',
@@ -141,7 +141,7 @@ describe('Costeo CPP (e2e)', () => {
       .patch(`/api/items/${itemUnidadId}/stock`)
       .set('Authorization', `Bearer ${token}`)
       .send({
-        cantidad: 2,
+        cantidad: '2',
         tipo: 'entrada',
         motivo: 'compra',
         unidadCodigo: 'kg',

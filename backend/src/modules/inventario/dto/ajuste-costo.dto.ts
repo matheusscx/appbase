@@ -1,11 +1,14 @@
 import { IsUUID, IsNumberString, IsString, IsNotEmpty } from 'class-validator';
+import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 
 export class AjusteCostoDto {
   @IsUUID()
   itemId: string;
 
-  // Costo nuevo del producto. Pisa el promedio ponderado vigente.
+  // Costo nuevo del producto. Pisa el promedio ponderado vigente. Un costo de 0
+  // o negativo no existe: el ajuste corrige el promedio ponderado, no lo anula.
   @IsNumberString()
+  @IsDecimalPositivo()
   costoNuevo: string;
 
   // Obligatorio: un ajuste de costo es una corrección y tiene que quedar

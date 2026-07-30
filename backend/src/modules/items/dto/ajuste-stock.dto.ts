@@ -1,7 +1,5 @@
 import {
   IsIn,
-  IsNumber,
-  IsPositive,
   IsOptional,
   IsString,
   IsArray,
@@ -12,6 +10,7 @@ import {
   IsNumberString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 
 const MOTIVOS = ['compra', 'devolucion', 'ajuste_manual', 'inventario_inicial'];
 
@@ -48,10 +47,14 @@ export class LoteAjusteInputDto {
 }
 
 export class AjusteStockDto {
-  @IsNumber()
-  @IsPositive()
-  @Type(() => Number)
-  cantidad: number;
+  // String + Decimal.js como los otros campos de cantidad del módulo, no
+  // `number` nativo: la columna es NUMERIC(18,4) —18 dígitos significativos— y
+  // un double aguanta 15-17, así que una cantidad grande con decimales se
+  // corrompe al deserializarse. Encima alimenta `convertirCostoUnitario`, que
+  // es dinero.
+  @IsNumberString()
+  @IsDecimalPositivo()
+  cantidad: string;
 
   @IsIn(['entrada', 'salida'])
   tipo: 'entrada' | 'salida';
@@ -71,8 +74,9 @@ export class AjusteStockDto {
   unidadCodigo?: string;
 
   // Costo pagado en la entrada por compra (actualiza costo_actual + congela en el kardex)
-  @IsNumberString()
   @IsOptional()
+  @IsNumberString()
+  @IsDecimalPositivo()
   costoUnitario?: string;
 
   // Modo 'serie' — entrada: series a registrar

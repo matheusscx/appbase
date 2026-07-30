@@ -279,6 +279,9 @@ igual, solo que sin fila `venta_propina`.
 - Tenant sin fila de config aún (nunca abrió la pantalla de configuración): ambos
   canales se tratan como habilitados (`?? true`), preservando el comportamiento previo
   a este flag.
+- **Venta `canal = 'online'`**: las dos propinas son del canal presencial (el POS y el
+  cierre de mesa), así que una venta online que las mande se trata igual que un canal
+  apagado — se ignoran aunque los dos flags estén encendidos. La config ni se consulta.
 
 ---
 

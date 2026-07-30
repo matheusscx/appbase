@@ -155,7 +155,7 @@ describe('Mermas — causas, registro y rechazo en ajuste (e2e)', () => {
       .send({
         tipo: 'salida',
         motivo: 'merma',
-        cantidad: 1,
+        cantidad: '1',
       });
 
     expect(res.status).toBe(400);

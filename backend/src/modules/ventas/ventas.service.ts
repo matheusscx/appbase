@@ -519,14 +519,19 @@ export class VentasService {
     // crea sin propina). La config solo se consulta si la venta trae propina,
     // para no pegarle a la BD en cada venta sin propina (camino caliente del
     // POS). Ver docs/features/liquidacion-propinas-config.md.
-    const propinaConfig =
-      dto.propinaCierreMesa || dto.propinaDirecta
-        ? await manager.findOne(PropinaConfiguracion, {
-            where: { tenantId, eliminadoEl: IsNull() },
-          })
-        : null;
-    const habilitadoPos = propinaConfig?.habilitadoPos ?? true;
-    const habilitadoSalones = propinaConfig?.habilitadoSalones ?? true;
+    // Ambas propinas son del canal presencial —el POS y el cierre de mesa de
+    // salones—, así que una venta `online` que las mande se trata igual que un
+    // canal apagado: se ignora, no se rechaza.
+    const traePropina =
+      canal !== 'online' && !!(dto.propinaCierreMesa || dto.propinaDirecta);
+    const propinaConfig = traePropina
+      ? await manager.findOne(PropinaConfiguracion, {
+          where: { tenantId, eliminadoEl: IsNull() },
+        })
+      : null;
+    const habilitadoPos = traePropina && (propinaConfig?.habilitadoPos ?? true);
+    const habilitadoSalones =
+      traePropina && (propinaConfig?.habilitadoSalones ?? true);
     let ventaPropinaId: string | null = null;
     let propinaMonto = '0';
     let estrategiaPropina = EstrategiaAsignacionPropina.NO_VUELTO;

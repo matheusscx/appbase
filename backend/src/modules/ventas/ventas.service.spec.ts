@@ -16,6 +16,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { GarzonesService } from '../garzones/garzones.service';
 import { EstadoVenta, Venta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
+import { VentaRecargo } from './entities/venta-recargo.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -368,6 +369,71 @@ describe('VentasService', () => {
           baseVentasSinImpuestos: '10000.0000',
         }),
       );
+    });
+
+    it('persiste los recargos aplicados: el de línea y el de venta, cada uno con su aplicadoEn', async () => {
+      // Los fixtures de esta suite traen `trazas.recargos: []` y
+      // `trazasVenta.recargos: []`, así que los dos loops de persistencia de
+      // recargos (7c y 7d) no los ejercía ningún unit: borrarlos enteros no
+      // rompía nada acá. El e2e sí los cubre de punta a punta.
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: [
+          {
+            ...mockResultadoVenta.lineas[0],
+            recargoAplicado: '5.0000',
+            totalLinea: '105.0000',
+            trazas: {
+              descuentos: [],
+              recargos: [
+                {
+                  id: 'recargo-linea-001',
+                  nombre: 'Servicio',
+                  monto: '5.0000',
+                },
+              ],
+              impuestos: [],
+            },
+          },
+        ],
+        totales: {
+          subtotalNeto: '100.0000',
+          totalDescuentos: '0.0000',
+          totalRecargos: '8.0000',
+          totalImpuestos: '0.0000',
+          totalFinal: '108.0000',
+        },
+        trazasVenta: {
+          descuentos: [],
+          recargos: [
+            { id: 'recargo-venta-001', nombre: 'Delivery', monto: '3.0000' },
+          ],
+        },
+      });
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      const recargos = manager.create.mock.calls
+        .filter((call) => call[0] === VentaRecargo)
+        .map((call) => call[1]);
+      expect(recargos).toEqual([
+        expect.objectContaining({
+          ventaId: 'venta-uuid-001',
+          recargoId: 'recargo-linea-001',
+          valorAplicado: '5.0000',
+          aplicadoEn: 'detalle',
+        }),
+        expect.objectContaining({
+          ventaId: 'venta-uuid-001',
+          recargoId: 'recargo-venta-001',
+          valorAplicado: '3.0000',
+          aplicadoEn: 'venta',
+        }),
+      ]);
     });
 
     it('congela la clasificación tributaria del item en el detalle', async () => {

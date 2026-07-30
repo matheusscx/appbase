@@ -1539,7 +1539,10 @@ export class SeederService implements OnApplicationBootstrap {
       },
       {
         // Placeholder "Mostrador": receptor neutro de la propina del POS.
-        id: '550e8400-e29b-41d4-a716-446655440281',
+        // El id NO es `…440281`: ese lo tiene el ítem "Papas fritas"
+        // (`seedPapasFritas`), y compartir literal entre dos filas sin relación
+        // ya confundió a dos revisores independientes.
+        id: '550e8400-e29b-41d4-a716-446655440339',
         tenantId: PARIS,
         nombre: 'Mostrador',
         pinHash: '!', // inutilizable: no es bcrypt válido → nunca matchea un PIN

@@ -18,7 +18,7 @@ const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116'; // Producto demo (unidad · CLP, stock 50)
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105'; // permite_vuelto = true
-const MOSTRADOR_ID = '550e8400-e29b-41d4-a716-446655440281';
+const MOSTRADOR_ID = '550e8400-e29b-41d4-a716-446655440339';
 const ANA_ID = '550e8400-e29b-41d4-a716-446655440238';
 const BRUNO_ID = '550e8400-e29b-41d4-a716-446655440239';
 const CARLA_ID = '550e8400-e29b-41d4-a716-446655440240';
@@ -605,6 +605,29 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
       const ventaId = (res.body as { id: string }).id;
       expect(await contarPropinasDeVenta(ventaId)).toBe(1);
+    });
+
+    // La propina es del canal presencial: el POS y el cierre de mesa. Con ambos
+    // flags encendidos, lo único que la corta acá es el canal.
+    it('canal online: la propina se ignora aunque los dos flags estén encendidos', async () => {
+      await putDistribucion(DISTRIBUCION_DEFAULT, '0.10', {
+        habilitadoPos: true,
+        habilitadoSalones: true,
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          canal: 'online',
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000000.0000' }],
+          propinaDirecta: { montoPagado: '5000', porcentajeSugerido: '0.10' },
+        })
+        .expect(201);
+
+      const ventaId = (res.body as { id: string }).id;
+      expect(await contarPropinasDeVenta(ventaId)).toBe(0);
     });
   });
 });

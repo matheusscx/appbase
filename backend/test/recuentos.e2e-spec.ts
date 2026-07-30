@@ -241,7 +241,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: 10,
+        cantidad: '10',
         costoUnitario: '1000',
       });
     expect(resStock.status).toBe(200);
@@ -341,7 +341,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
         .send({
           tipo: 'entrada',
           motivo: 'compra',
-          cantidad: stock,
+          cantidad: String(stock),
           costoUnitario: '1000',
         });
       return id;
@@ -473,7 +473,7 @@ describe('Recuentos — cargar conteos, editar la sesión y cancelar (e2e)', () 
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: stock,
+        cantidad: String(stock),
         costoUnitario: '1000',
       });
     return id;
@@ -774,7 +774,7 @@ describe('Recuentos — aplicar (e2e)', () => {
       .send({
         tipo: 'entrada',
         motivo: 'compra',
-        cantidad: stock,
+        cantidad: String(stock),
         costoUnitario: '1000',
       });
     return id;
@@ -913,7 +913,7 @@ describe('Recuentos — aplicar (e2e)', () => {
     await request(app.getHttpServer())
       .patch(`/api/items/${id}/stock`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'salida', motivo: 'ajuste_manual', cantidad: 200 })
+      .send({ tipo: 'salida', motivo: 'ajuste_manual', cantidad: '200' })
       .expect(200);
 
     // 4. Aplicar. Esperado: 800 - 100 = 700 (si seteara el absoluto daría 900).
