@@ -14,45 +14,20 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **Component tests del gateo de permisos — medido y viable, falta decidir si se adopta**
-  (frontend) — el bug de jul-2026 que dejó al rol aprobador sin el botón "Aplicar" fue de
-  **anidamiento en el template**: los computeds eran correctos por separado, así que
-  ningún unit test de la lógica lo habría visto. Solo lo caza algo que renderice.
-  **Medido con un spike, no estimado:**
-  - El entorno se activa **por archivo** con el docblock `// @vitest-environment nuxt` —
-    cero cambios de config y cero riesgo para los 275 tests existentes (mi afirmación
-    previa de que "toca los 275" era falsa).
-  - **Caza el bug real**: monté `recuentos/[id].vue` como el rol aprobador; con el bug
-    reintroducido el test **falla**, con el código arreglado **pasa**. Verificado en las
-    dos direcciones.
-  - Costo de correr: 275 tests en 2,98s → 277 (2 archivos nuxt) en 6,23s, ~1,5s por
-    archivo. Costo de escribir: ~30 líneas de andamiaje y 3 iteraciones.
-  - **Trampa que va a volver a morder:** Nuxt instala su propia instancia de Pinia, así
-    que espiar un store creado con `setActivePinia` no funciona — hay que mockear el
-    auto-import con `mockNuxtImport('usePermissionsStore', …)`.
-  Contras reales: los mocks se desincronizan del contrato (prueba el render, no la
-  respuesta real) y las aserciones por texto se rompen con el copy. **Decisión abierta:**
-  adoptarlo acotado a las pantallas que gatean escrituras por permiso (4 hoy, 23 al
-  cerrar el barrido de abajo), o esperar a cerrar ese barrido y hacerlo de una. No sirve
-  como política general de "testear componentes".
-- [ ] **Barrido de botones de escritura sin gatear por permiso (19 pantallas)**
-  (frontend) — un control de escritura que se renderiza sin el permiso que exige su
-  endpoint deja al usuario llenar el formulario para recibir un 403. No es hueco de
-  seguridad (el backend enforcea), es un callejón sin salida de UX. La convención está
-  en `docs/patterns/frontend.md` §1.1; ya se aplicó a inventario, recuentos y
-  `mermas.vue` (jul-2026). Falta el resto, en dos grupos:
-  - **16 de `configuracion/*`** (`categorias`, `causas-merma`, `descuentos`, `empresa`,
-    `grupos-modificadores`, `impuestos`, `items`, `metodos-pago`, `monedas`,
-    `motivos-diferencia-inventario`, `motivos-diferencia`, `preferencias-financieras`,
-    `razones-sociales`, `recargos`, `roles/index`, `usuarios/index`) — sus escrituras
-    van con `TenantAdminGuard` y la lectura es abierta, así que un usuario no-admin
-    carga la lista y ve botones que siempre fallan. El gate es uniforme:
-    `permissionsStore.esAdmin`.
-  - **3 con permiso de módulo** (`ventas/pos.vue` → `Ventas/Crear`, `terceros.vue`,
-    `recetas-desfases.vue`) — cada una con el permiso de su endpoint, no un
-    `esAdmin` genérico.
-  Se difiere porque son 19 archivos: merece su propia pasada con verificación, no
-  colgarse de un fix de inventario.
+- [ ] **Cuatro pantallas más sin gatear sus controles de escritura** (frontend,
+  `configuracion/garzones.vue`, `impresoras.vue`, `salones.vue`, `turnos.vue`) — resto del
+  barrido de permisos cerrado el 2026-07-30 ([`resueltos.md`](resueltos.md)), encontrado por
+  la revisión independiente al cruzar **las 28 páginas** de `configuracion/` en vez de las 19
+  que enumeraba la entrada original. Ninguna es admin-only: sus escrituras van con
+  `@RequiresPermiso` (`Salones:*`, `Impresoras:*`), así que el cierre es gate por control con
+  el permiso de su endpoint, no el middleware `admin`.
+  No es hueco de seguridad (el backend enforcea) y **no es una regresión** de aquel barrido:
+  no estaban en la lista. Ejemplo concreto para arrancar: `turnos.vue:157` ("Nuevo") y
+  `:199` ("Eliminar"), los dos sin `v-if`.
+  El andamiaje ya está resuelto: los component tests con `// @vitest-environment nuxt`
+  quedaron adoptados, con su patrón y sus dos trampas documentadas
+  (`docs/patterns/frontend.md` §1.1-1.2).
+
 - [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
   (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
   (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue

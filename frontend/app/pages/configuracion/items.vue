@@ -10,6 +10,22 @@ import Decimal from 'decimal.js'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
+// ⚠️ Esta pantalla NO es admin-only, a diferencia del resto de
+// `configuracion/*`: el catálogo de items va con `@RequiresPermiso('Items', …)`
+// y la lectura es legítima para cualquiera que tenga `Items:Leer`. Gatearla con
+// `esAdmin` —como sus vecinas— le escondería los botones a quien sí puede
+// escribir. Tres permisos separados porque el backend los separa.
+const permissionsStore = usePermissionsStore()
+const puedeCrear = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Items', 'Crear'),
+)
+const puedeActualizar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Items', 'Actualizar'),
+)
+const puedeEliminar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Items', 'Eliminar'),
+)
+
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha, formatMonto, formatStock } = useFormatters()
@@ -645,13 +661,18 @@ function menuAcciones(item: Item) {
   const grupos: any[][] = []
 
   if (item.tipo === 'producto' || item.tipo === 'ingrediente') {
-    const inventario: any[] = [
-      {
-        label: 'Ajustar stock',
-        icon: 'i-lucide-arrow-up-down',
-        onSelect: () => abrirAjusteStock(item),
-      },
-    ]
+    // "Ajustar stock" escribe (`PATCH /items/:id/stock`); "ver unidades" e
+    // "historial" solo leen y quedan disponibles con `Items:Leer`. Por eso el
+    // permiso va por entrada y no envolviendo el grupo entero.
+    const inventario: any[] = puedeActualizar.value
+      ? [
+          {
+            label: 'Ajustar stock',
+            icon: 'i-lucide-arrow-up-down',
+            onSelect: () => abrirAjusteStock(item),
+          },
+        ]
+      : []
     if (item.tipo === 'producto' && (item.modoInventario === 'serie' || item.modoInventario === 'lote')) {
       inventario.push({
         label: item.modoInventario === 'serie' ? 'Ver unidades' : 'Ver lotes',
@@ -667,14 +688,16 @@ function menuAcciones(item: Item) {
     grupos.push(inventario)
   }
 
-  grupos.push([
-    {
-      label: 'Eliminar',
-      icon: 'i-lucide-trash-2',
-      color: 'error',
-      onSelect: () => confirmarEliminar(item),
-    },
-  ])
+  if (puedeEliminar.value) {
+    grupos.push([
+      {
+        label: 'Eliminar',
+        icon: 'i-lucide-trash-2',
+        color: 'error',
+        onSelect: () => confirmarEliminar(item),
+      },
+    ])
+  }
 
   return grupos
 }
@@ -1250,7 +1273,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       description="Productos, ingredientes, servicios y suscripciones del catálogo"
     >
       <template #actions>
-        <UButton icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
+        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
       </template>
     </CrudPageHeader>
 
@@ -1337,11 +1360,12 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           <div class="flex items-center justify-end gap-1">
             <USwitch
               :model-value="row.original.activo"
-              :disabled="toggling.has(row.original.id)"
+              :disabled="toggling.has(row.original.id) || !puedeActualizar"
               size="sm"
               @update:model-value="toggleActivo(row.original)"
             />
             <UButton
+              v-if="puedeActualizar"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
@@ -1349,7 +1373,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               title="Editar"
               @click="abrirEditar(row.original)"
             />
-            <UDropdownMenu :items="menuAcciones(row.original)">
+            <!-- Sin permisos de escritura el menú puede quedar sin ninguna
+                 entrada (un servicio solo ofrecía "Eliminar"): abrir un popover
+                 vacío es peor que no tener el botón. -->
+            <UDropdownMenu
+              v-if="menuAcciones(row.original).length > 0"
+              :items="menuAcciones(row.original)"
+            >
               <UButton
                 icon="i-lucide-ellipsis-vertical"
                 color="neutral"

@@ -3,6 +3,22 @@ import type { TableColumn } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
+// La lectura es abierta (`Terceros:Leer`), pero cada escritura pega a un
+// endpoint con su propio `@RequiresPermiso`. Sin gatear, el usuario llena el
+// drawer entero para recibir un 403. Tres permisos distintos y NO un único
+// `puedeEscribir`: el backend los separa a propósito, y colapsarlos acá
+// escondería el botón de editar a quien solo tiene `Actualizar`.
+const permissionsStore = usePermissionsStore()
+const puedeCrear = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Terceros', 'Crear'),
+)
+const puedeActualizar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Terceros', 'Actualizar'),
+)
+const puedeEliminar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Terceros', 'Eliminar'),
+)
+
 interface Tercero {
   id: string
   tipo: string
@@ -220,6 +236,7 @@ const columns: TableColumn<Tercero>[] = [
         >
           <template #actions>
             <UButton
+              v-if="puedeCrear"
               icon="i-lucide-plus"
               @click="abrirCrear"
             >
@@ -248,7 +265,7 @@ const columns: TableColumn<Tercero>[] = [
             <div class="flex justify-end">
               <USwitch
                 :model-value="row.original.activo"
-                :disabled="toggling.has(row.original.id)"
+                :disabled="toggling.has(row.original.id) || !puedeActualizar"
                 @update:model-value="toggleActivo(row.original)"
               />
             </div>
@@ -257,15 +274,19 @@ const columns: TableColumn<Tercero>[] = [
           <template #acciones-cell="{ row }">
             <div class="flex justify-end gap-2">
               <UButton
+                v-if="puedeActualizar"
                 icon="i-lucide-square-pen"
                 color="neutral"
                 variant="ghost"
+                title="Editar"
                 @click="abrirEditar(row.original)"
               />
               <UButton
+                v-if="puedeEliminar"
                 icon="i-lucide-trash-2"
                 color="error"
                 variant="ghost"
+                title="Eliminar"
                 @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
               />
             </div>

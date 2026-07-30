@@ -1,4 +1,10 @@
 <script setup lang="ts">
+// Pantalla admin-only: sus escrituras van con `TenantAdminGuard` en el
+// backend. El menú ya la esconde a los no-admin, pero sin guard de ruta la URL
+// escrita a mano la abría igual (la lectura es abierta, así que la tabla
+// cargaba) y el 403 llegaba recién al guardar.
+definePageMeta({ middleware: 'admin' })
+
 const config = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = config.public.apiUrl

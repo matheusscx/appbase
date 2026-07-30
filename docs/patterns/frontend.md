@@ -49,6 +49,48 @@ entero para recibir un 403: un callejón sin salida.
 permiso que exige su endpoint. El guard del backend es el que manda —
 esconder el botón es UX, nunca seguridad (invariante 6).
 
+**Primero preguntar qué exige el endpoint, no de qué carpeta es la pantalla.**
+En `configuracion/` conviven las dos clases: 15 pantallas son admin-only
+(`TenantAdminGuard`) y `items` va con `@RequiresPermiso('Items', …)`. Gatear
+`items` con `esAdmin` porque sus vecinas lo son le escondería los botones a
+quien **sí** puede escribir — el bug inverso al que este gate viene a evitar.
+
+El corte, a jul-2026 (la fuente de verdad es el controller, no esta lista):
+
+| Clase | Pantallas | Gate |
+|---|---|---|
+| Catálogos y config del tenant | las 15 de `configuracion/` menos `items` | `TenantAdminGuard` → middleware `admin` |
+| Features operativas | `items`, `terceros`, POS, `recetas-desfases`, inventario, recuentos, mermas… | `@RequiresPermiso` → gate por control |
+
+**Y no colapsar permisos distintos en un `puedeEscribir` único.** Si el backend
+separa `Crear`, `Actualizar` y `Eliminar`, la pantalla los separa: hay roles con
+uno solo, y un gate único le esconde a un editor el botón de editar.
+
+### 1.2 Pantalla admin-only: middleware de ruta, no `v-if` por botón
+
+Cuando **toda** la escritura de la pantalla exige `TenantAdminGuard`, el gate va
+en la ruta y no control por control:
+
+```typescript
+// app/pages/configuracion/<feature>.vue
+definePageMeta({ middleware: 'admin' })
+```
+
+`app/middleware/admin.ts` redirige a `/configuracion` si no es admin. Tres
+razones para preferirlo al `v-if`:
+
+- **Cubre la URL escrita a mano**, que el `v-if` no cubre: esconderla del menú
+  no impide navegar, la lectura de esos endpoints es abierta y la tabla carga
+  igual.
+- Un mecanismo en vez de ~60 `v-if` sueltos que hay que mantener sincronizados.
+- Se testea como función pura, sin entorno nuxt.
+
+⚠️ El middleware **espera** `permissionsStore.ensureCargado()` antes de decidir.
+La navegación corre **antes** del `onMounted` que puebla el store, así que sin
+esa espera un admin entrando por URL directa o F5 se lee como no-admin y queda
+expulsado de su propia pantalla. Es un modo de falla que nadie reporta como bug
+de permisos: se ve como "la pantalla me tira al índice a veces".
+
 ```typescript
 const permissionsStore = usePermissionsStore()
 const puedeContar = computed(() =>

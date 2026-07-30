@@ -356,6 +356,13 @@ export function tieneCustomerData(customer: CustomerForm): boolean {
 }
 
 export function puedeCobrar(args: {
+  /**
+   * Permiso `Ventas:Crear`, el que exige `POST /ventas`. Va acá y no en un
+   * `v-if` aparte porque el cobro ya estaba condicionado por estado: un solo
+   * lugar decide si el botón se puede apretar. Opcional para no romper a los
+   * llamadores que ya validaban solo estado.
+   */
+  puedeVender?: boolean
   tieneCaja: boolean
   lineas: CarritoLinea[]
   customerRequerido: boolean
@@ -363,6 +370,7 @@ export function puedeCobrar(args: {
   customerNombre: string
   tipoDocumentoId: string | undefined
 }): boolean {
+  if (args.puedeVender === false) return false
   if (!args.tieneCaja) return false
   if (args.lineas.length === 0) return false
   if (!args.tipoDocumentoId) return false

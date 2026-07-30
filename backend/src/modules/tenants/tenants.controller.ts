@@ -95,12 +95,18 @@ export class TenantsController {
     return this.tenantsService.findMembers(user.tenantId);
   }
 
+  // Alta y baja de miembros son administración del tenant, como todo lo que
+  // toca `roles` y como `PATCH me` acá al lado: sin este guard bastaba con
+  // estar autenticado y pertenecer al tenant. Un cajero podía sumar cuentas
+  // y, peor, **eliminar al admin de su propio tenant** con un DELETE.
+  @UseGuards(TenantAdminGuard)
   @Post('members')
   addMember(@Req() req: Request, @Body() dto: AddMemberDto) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.addMember(user.tenantId, dto.usuarioId);
   }
 
+  @UseGuards(TenantAdminGuard)
   @Delete('members/:userId')
   @HttpCode(HttpStatus.NO_CONTENT)
   removeMember(@Req() req: Request, @Param('userId') userId: string) {

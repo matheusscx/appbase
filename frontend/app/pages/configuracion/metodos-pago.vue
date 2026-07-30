@@ -9,7 +9,9 @@ interface MetodoPago {
   permiteVuelto: boolean
 }
 
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
+// `admin`: pantalla admin-only (backend con `TenantAdminGuard`). Sin guard de
+// ruta la URL escrita a mano la abría igual y el 403 llegaba al guardar.
+definePageMeta({ middleware: ['auth', 'admin'], layout: 'dashboard' })
 
 const config = useRuntimeConfig()
 const toast = useToast()

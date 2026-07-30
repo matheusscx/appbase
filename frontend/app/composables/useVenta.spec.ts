@@ -644,6 +644,19 @@ describe('puedeCobrar (gate)', () => {
     expect(puedeCobrar({ tieneCaja: false, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
   })
 
+  it('false sin permiso Ventas:Crear, aunque el resto esté perfecto', () => {
+    // Sin esto el cajero arma el carrito entero y recibe el 403 al cobrar.
+    expect(puedeCobrar({ puedeVender: false, tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
+  })
+
+  it('true con permiso y el resto en orden', () => {
+    expect(puedeCobrar({ puedeVender: true, tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+  })
+
+  it('omitir `puedeVender` no bloquea: los llamadores que solo validan estado siguen igual', () => {
+    expect(puedeCobrar({ tieneCaja: true, lineas, customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(true)
+  })
+
   it('false con carrito vacío', () => {
     expect(puedeCobrar({ tieneCaja: true, lineas: [], customerRequerido: false, customerExpandido: false, customerNombre: '', tipoDocumentoId: docId })).toBe(false)
   })

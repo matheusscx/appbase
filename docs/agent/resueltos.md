@@ -45,6 +45,71 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Barrido de permisos en el frontend (2026-07-30)
+
+- [x] ~~**Barrido de botones de escritura sin gatear por permiso (19 pantallas)**~~ y
+  ~~**Component tests del gateo de permisos — falta decidir si se adopta**~~ (frontend +
+  backend) — cerradas juntas el 2026-07-30. La entrada pedía `v-if` en 19 archivos; lo que
+  se hizo es distinto, y **la mitad de lo que la entrada afirmaba no resistió medirlo**:
+  - ⛔ **Apareció un hueco de autorización real, no de UX.** `POST /tenants/members` y
+    `DELETE /tenants/members/:userId` no tenían `TenantAdminGuard`: colgaban solo de
+    `JwtAuthGuard + TenantGuard`, siendo las **únicas** dos rutas del controller sin él (con
+    `PATCH me` al lado que sí lo tenía, y el controller hermano de `roles` guardando todo).
+    Cualquier miembro autenticado podía sumar cuentas al tenant y **eliminar al admin del
+    suyo**. Se cerró acá, y no en una entrada aparte, por una razón concreta: **el barrido
+    tal como estaba planteado lo habría tapado** — esconder botones deja la UI con aspecto
+    de permiso resuelto mientras el endpoint sigue abierto a `curl`. Lo fija
+    `test/tenants-members.e2e-spec.ts`; el mutante que saca los dos guards **borró un
+    miembro de verdad**, que es la demostración práctica de la severidad.
+  - **`items` NO es admin-only**, aunque la entrada lo listaba entre las 16: va con
+    `@RequiresPermiso('Items', …)`. Gatearlo con `esAdmin` como sus vecinas le habría
+    escondido los botones a quien sí puede escribir — el bug **inverso** al que el barrido
+    venía a arreglar.
+  - **15 de las 16 ya estaban escondidas del menú** bajo `esAdmin` (`configuracion.vue:22`),
+    así que el "callejón sin salida" exigía escribir la URL a mano. Real, pero no el
+    tropiezo cotidiano que la entrada describía. Y eso habilitó una salida mejor.
+  - **`configuracion/recetas-desfases.vue` es un stub de redirección de 6 líneas**; la
+    pantalla real vive en `/recetas-desfases`. La entrada apuntaba al archivo equivocado.
+  **Lo que se hizo, decidido por el owner con los números arriba de la mesa:**
+  - **Middleware `admin`** (`app/middleware/admin.ts`) + `definePageMeta` en las 15
+    admin-only, en vez de ~60 `v-if`. Un mecanismo en lugar de quince, **cubre la URL
+    escrita a mano** —que el `v-if` no cubre— y se testea como función pura.
+    ⚠️ Lo que casi lo rompe: los permisos se cargan en `onMounted`, o sea **después** de la
+    navegación. Sin esperar, un admin entrando por URL directa o F5 se lee como no-admin y
+    queda expulsado de su propia pantalla. Por eso el store ganó `ensureCargado()`, que
+    además dedupe el request en vuelo (middleware y layout montaban a la vez).
+  - **Gate por permiso en las 4 que no son admin-only** (`items`, `terceros`, POS,
+    `recetas-desfases`), cada control con el permiso de **su** endpoint y sin colapsarlos en
+    un `puedeEscribir` único: hay roles con `Actualizar` y sin `Crear`.
+    En el POS el permiso se sumó a `puedeCobrar`, que ya era una función pura con spec —la
+    convención de "sumar a la condición existente en vez de un `v-if` paralelo"—. En el
+    panel de desfases el gate vive en el componente y no en sus tres páginas, para que no se
+    desincronice entre call sites.
+  - Dos excepciones deliberadas al "esconder": los `USwitch` de `activo` se **deshabilitan**
+    en vez de ocultarse, porque además de escribir muestran estado — esconderlos borraría
+    información de la tabla.
+  **Los component tests se adoptan, acotados a esto** (era la decisión abierta de la otra
+  entrada). Confirmado el costo del spike: 3 archivos con `// @vitest-environment nuxt`
+  llevan la suite de 3,3s a 6,3s. Y confirmada la trampa que la entrada anticipaba: Nuxt
+  instala su propia Pinia, así que hay que mockear el auto-import con `mockNuxtImport`.
+  Trampa nueva, no anticipada: **no consultar por la clase del icono** — `UIcon` lo renderiza
+  en un hijo y en el entorno de test no siempre resuelve. Se consulta por `title`, lo que de
+  paso agregó accesibilidad que faltaba en los botones de fila de `terceros`.
+  ➕ **Un modo de falla que encontró la revisión independiente y se cerró en el mismo
+  commit:** si `fetchPermisos` fallaba (red, hipo de token), el `catch` solo seteaba `error`
+  y el `finally` marcaba `cargado = true` igual — así que `ensureCargado` resolvía con
+  `esAdmin` en su default `false` y el middleware **expulsaba a un admin real**. El docblock
+  que yo había escrito decía resolver el caso de timing y no cubría el de error. Ahora
+  `cargado` solo se marca si de verdad se pobló (la próxima navegación reintenta) y el
+  middleware **no redirige cuando no pudo determinar**: se deja pasar, porque esto es UX y el
+  candado real es el guard del backend. Redirigir ante la duda se ve como "a veces me tira al
+  índice" y nadie lo reporta como bug de permisos.
+  **Seis mutantes verificados revirtiendo** ([[mutante-debe-revertir-no-solo-romper]]):
+  gatear `items` con `esAdmin` (cae el test del no-admin con `Items:Crear` — el bug que la
+  entrada me habría hecho cometer); sacar el `v-if` de "Nuevo item"; colapsar los tres
+  permisos de `terceros` en uno; sacar el `v-if` del panel; sacar el `await ensureCargado`
+  del middleware; y sacarle la salida temprana del caso "no se pudo determinar".
+
 ## Limpiezas menores
 
 - [x] ~~**Falta usuario semilla "supervisor `Cajas:Leer` no-admin" para e2e del ciego**~~ —

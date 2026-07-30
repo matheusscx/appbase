@@ -44,6 +44,16 @@ const emit = defineEmits<{
   cerrar: []
 }>()
 
+// Aplicar y descartar pegan a `POST /recetas/desfases/*`, que exige
+// `Items:Actualizar`. El gate vive acá y no en cada página porque el panel lo
+// usan tres (`recetas-desfases`, `configuracion/items`, `inventario`) y las
+// tres necesitan el mismo permiso: repetirlo en cada una es una copia que se
+// desincroniza. "Después" no escribe, así que no se gatea.
+const permissionsStore = usePermissionsStore()
+const puedeAplicar = computed(
+  () => permissionsStore.esAdmin || permissionsStore.can('Items', 'Actualizar'),
+)
+
 const { formatMonto, formatPorcentaje } = useFormatters()
 
 interface RowState {
@@ -233,6 +243,7 @@ function onDescartar() {
         Después
       </UButton>
       <UButton
+        v-if="puedeAplicar"
         color="neutral"
         variant="outline"
         :disabled="!someSelected || loading"
@@ -241,6 +252,7 @@ function onDescartar() {
         Descartar seleccionadas
       </UButton>
       <UButton
+        v-if="puedeAplicar"
         color="primary"
         :disabled="!someSelected || loading"
         @click="onAplicar"
