@@ -133,6 +133,39 @@ jul-2026 en el camino caliente del POS, corregidas en la auditoría de `ventas`+
    `expect(crearConversor).toHaveBeenCalledTimes(1)`. Sin él, el arreglo se revierte sin
    que falle nada — el resultado de la venta es idéntico, solo cambia cuántas queries hizo.
 
+### ❌ Tomar `FOR UPDATE` en un orden que decide el cliente (o el heap)
+
+Dos transacciones que bloquean las mismas filas en orden distinto se esperan en cruz y
+Postgres mata a una: la venta se cae con un error opaco, sin corrupción pero sin
+explicación. El orden de bloqueo tiene que ser **una propiedad del sistema, no del
+payload**.
+
+```ts
+// MAL — el orden lo pone el cliente al armar el carrito
+for (const linea of dto.lineas) await registrarMovimiento(linea.itemId)
+// MAL — el orden lo pone el heap de Postgres, y cambia solo con cada UPDATE
+`SELECT ingrediente_item_id FROM receta_ingredientes WHERE receta_item_id = $1`
+// BIEN — orden fijo por id, en la query y en memoria
+`… WHERE receta_item_id = $1 ORDER BY ingrediente_item_id`
+opciones.sort((a, b) => a.itemId.localeCompare(b.itemId))
+```
+
+**Este reapareció cuatro veces en el mismo camino de venta** (jul-2026), y ahí está la
+lección: se arregló en `ventas.service.ts` (`ordenLocks`, orden de las líneas) y quedó
+vivo **un nivel adentro**, en los ids expandidos que ese fix no ve — ingredientes de la
+receta, componentes del combo, opciones de grupo (orden del snapshot) y extras del
+snapshot concatenados detrás de una lista ya ordenada. Al arreglar un orden de bloqueo,
+preguntar **qué se bloquea después de eso**: casi siempre hay una expansión más abajo.
+
+Ordenar cada nivel **no cierra el ciclo global**: el orden resultante es *(orden de
+línea) × (orden dentro de la línea)*, que no es ascendente global. Contraejemplo: A vende
+`RecetaX(ing3, ing5)` → bloquea 3→5; B vende `[RecetaY(ing5), RecetaZ(ing3)]` → bloquea
+5→3. Por eso el cierre real es **reintentar ante `40P01`**, que además cubre los ciclos
+que nadie enumeró; el orden determinista reduce la frecuencia. Reintentar es seguro
+porque el deadlock aborta la transacción entera —Postgres revierte todo antes de devolver
+el error—, así que no hay nada que deduplicar. Solo `40P01`: reintentar un error de
+negocio lo convierte en tres intentos silenciosos.
+
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 
 `item_producto.costo_actual` y `item_producto.stock` son valores derivados del kardex

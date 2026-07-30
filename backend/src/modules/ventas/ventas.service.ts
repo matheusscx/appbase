@@ -37,6 +37,26 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 
+/**
+ * Reintentos ante deadlock. Dos son suficientes: el deadlock exige que dos
+ * ventas se crucen en el mismo instante, y Postgres mata a una de las dos —
+ * la que sobrevive libera sus locks al commitear, así que el reintento entra
+ * a una BD ya despejada. Un número alto solo alargaría el tiempo hasta
+ * devolverle el error a un cajero que está esperando.
+ */
+const MAX_REINTENTOS_DEADLOCK = 2;
+
+/**
+ * `40P01` = `deadlock_detected`. TypeORM envuelve el error del driver en
+ * `QueryFailedError`, que copia el `code` del driver pero también lo deja en
+ * `driverError`: se miran los dos porque cuál de las dos formas llega depende
+ * de dónde se lance, y confundirse acá significa no reintentar nunca.
+ */
+function esDeadlock(error: unknown): boolean {
+  const e = error as { code?: string; driverError?: { code?: string } };
+  return e?.code === '40P01' || e?.driverError?.code === '40P01';
+}
+
 /** Ítem/cantidad a devolver a stock en un reembolso (solo modo 'cantidad'). */
 export interface DevolucionReembolso {
   itemId: string;
@@ -84,10 +104,38 @@ export class VentasService {
     private readonly garzonesService: GarzonesService,
   ) {}
 
+  /**
+   * Reintenta la venta completa ante un deadlock de Postgres (`40P01`).
+   *
+   * Los `FOR UPDATE` de inventario se toman en un orden que depende de la
+   * expansión de cada línea (ingredientes de una receta, componentes de un
+   * combo, opciones de grupo). Cada expansión ordena por id, pero el orden
+   * GLOBAL de una venta es *(orden de línea) × (orden dentro de la línea)*, y
+   * eso no es un orden ascendente global: A vendiendo `RecetaX(ing3, ing5)`
+   * bloquea 3→5, mientras que B vendiendo `[RecetaY(ing5), RecetaZ(ing3)]`
+   * bloquea 5→3. Ciclo, y Postgres aborta una de las dos.
+   *
+   * Reintentar es seguro **porque el deadlock aborta la transacción entera**:
+   * Postgres revierte todo lo escrito antes de devolver el error, así que no
+   * hay venta, ni movimientos, ni pagos, ni movimiento de caja a medio hacer.
+   * No es idempotencia —eso es otro tema, ver `pendientes.md`—: acá no hay
+   * nada que deduplicar porque no quedó nada.
+   *
+   * Cubre además los ciclos que no vienen de la expansión (series, lotes,
+   * caja). Solo `40P01`: cualquier otro error se propaga sin reintentar, para
+   * no convertir un fallo de negocio en tres intentos silenciosos.
+   */
   async crear(tenantId: string, usuarioId: string, dto: CreateVentaDto) {
-    return this.dataSource.transaction((manager) =>
-      this.crearEnTransaccion(manager, tenantId, usuarioId, dto),
-    );
+    for (let intento = 0; ; intento++) {
+      try {
+        return await this.dataSource.transaction((manager) =>
+          this.crearEnTransaccion(manager, tenantId, usuarioId, dto),
+        );
+      } catch (error) {
+        if (intento >= MAX_REINTENTOS_DEADLOCK || !esDeadlock(error))
+          throw error;
+      }
+    }
   }
 
   async crearEnTransaccion(

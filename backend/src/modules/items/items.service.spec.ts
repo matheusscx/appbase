@@ -2883,6 +2883,72 @@ describe('ItemsService', () => {
       cantidadVendida: '2',
     };
 
+    it('los extras del snapshot NO se bloquean al final: entran al orden por id', async () => {
+      // `ingredientes` viene ordenado de la query, pero los extras salen del
+      // snapshot —el orden en que el cliente los agregó al carrito—, así que
+      // concatenarlos devolvía el orden del cliente a la mitad del bloqueo.
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({} as any);
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            ingrediente_item_id: 'b',
+            ingrediente_nombre: 'B',
+            ingrediente_unidad_medida: 'unidad',
+            cantidad: '1',
+            unidad_codigo: 'unidad',
+            bloqueante: true,
+          },
+        ])
+        .mockResolvedValueOnce([
+          { item_id: 'a', nombre: 'A', unidad_medida: 'unidad' },
+          { item_id: 'c', nombre: 'C', unidad_medida: 'unidad' },
+        ]);
+
+      await service.venderIngredientesReceta(managerMock as any, {
+        ...PARAMS,
+        snapshot: {
+          omitidos: [],
+          // El cliente los agregó al revés: c y después a.
+          extras: [
+            {
+              ingredienteItemId: 'c',
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioExtra: '0',
+            },
+            {
+              ingredienteItemId: 'a',
+              cantidad: '1',
+              unidadCodigo: 'unidad',
+              precioExtra: '0',
+            },
+          ],
+        },
+      });
+
+      expect(
+        spyMov.mock.calls.map((c) => (c[1] as { itemId: string }).itemId),
+      ).toEqual(['a', 'b', 'c']);
+    });
+
+    it('pide los ingredientes ordenados por id: ese es el orden de bloqueo', async () => {
+      // Aserción sobre el SQL, no sobre el resultado, porque el orden lo aplica
+      // Postgres — un mock devuelve lo que se le pida. Sin `ORDER BY` el orden
+      // es el físico del heap, que cambia solo con cada UPDATE de la tabla, así
+      // que dos ventas de la MISMA receta pueden bloquear en orden distinto.
+      managerMock.query.mockResolvedValueOnce([]);
+
+      await service.venderIngredientesReceta(managerMock as any, PARAMS);
+
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringMatching(/ORDER BY\s+ri\.ingrediente_item_id/),
+        ['receta-uuid', TENANT],
+      );
+    });
+
     it('genera un movimiento de salida por cada ingrediente con la cantidad convertida', async () => {
       managerMock.query.mockResolvedValueOnce([
         {
@@ -2915,12 +2981,17 @@ describe('ItemsService', () => {
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledTimes(
         2,
       );
+      // `carne` primero aunque el mock devuelva `pan` primero: el orden de los
+      // movimientos es el de bloqueo, por id ascendente. En producción la query
+      // ya viene ordenada y el `.sort()` no mueve nada; acá el mock devuelve el
+      // orden crudo, así que se ve el efecto del sort — que es justamente el
+      // backstop si alguien borra el `ORDER BY`.
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenNthCalledWith(
         1,
         managerMock,
         expect.objectContaining({
-          itemId: 'pan',
-          cantidad: '2',
+          itemId: 'carne',
+          cantidad: '0.3',
           motivo: 'venta',
         }),
       );
@@ -2928,8 +2999,8 @@ describe('ItemsService', () => {
         2,
         managerMock,
         expect.objectContaining({
-          itemId: 'carne',
-          cantidad: '0.3',
+          itemId: 'pan',
+          cantidad: '2',
           motivo: 'venta',
         }),
       );
@@ -3217,6 +3288,27 @@ describe('ItemsService', () => {
     const VENTA_ID = 'venta-uuid';
     const COMBO_NO_BLOQ_ID = 'combo-no-bloq-uuid';
     const COMBO_BLOQ_ID = 'combo-bloq-uuid';
+
+    it('pide los componentes ordenados por id: ese es el orden de bloqueo', async () => {
+      // Mismo criterio que su gemelo de `venderIngredientesReceta`: el orden lo
+      // aplica Postgres, así que lo que se puede afirmar acá es el SQL.
+      managerMock.query.mockResolvedValueOnce([]);
+
+      await service.venderComponentesCombo(managerMock as any, {
+        tenantId: TENANT,
+        usuarioId: USUARIO_ID,
+        ventaId: VENTA_ID,
+        comboItemId: COMBO_ID,
+        comboNombre: 'Combo',
+        cantidadVendida: '1',
+      });
+
+      expect(managerMock.query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringMatching(/ORDER BY\s+cc\.componente_item_id/),
+        [COMBO_ID, TENANT],
+      );
+    });
 
     it('producto → salida; receta → venderIngredientesReceta; servicio → nada', async () => {
       managerMock.query.mockResolvedValueOnce([
@@ -3744,6 +3836,58 @@ describe('ItemsService', () => {
     const PROD_ID = 'bebida-uuid';
     const ING_ID = 'carne-uuid';
     const RECETA_ID = 'salsa-uuid';
+
+    it('bloquea las opciones por itemId ascendente, no en el orden del snapshot', async () => {
+      // Este loop toma FOR UPDATE por opción: si el orden lo pone el snapshot,
+      // lo pone el cliente al armar el carrito, y dos ventas con las mismas
+      // opciones en orden distinto se bloquean en cruz. El orden tiene que ser
+      // global ENTRE grupos, no determinista dentro de cada uno — por eso se
+      // aplanan antes de ordenar.
+      const spyMov = jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({} as any);
+      managerMock.query.mockResolvedValue([
+        { tipo: 'producto', unidad_medida: 'unidad' },
+      ]);
+
+      const opcion = (itemId: string) => ({
+        itemId,
+        nombre: itemId,
+        cantidad: '1',
+        unidadCodigo: null,
+        precioExtra: '0',
+        unidades: '1',
+      });
+
+      await (service as any).venderOpcionesGrupos(
+        managerMock,
+        {
+          tenantId: TENANT,
+          usuarioId: USUARIO_ID,
+          ventaId: VENTA_ID,
+          cantidadVendida: '1',
+          convertir: conversorMock,
+        },
+        // Dos grupos, con los ids cruzados a propósito: el orden del snapshot
+        // es d, b | c, a.
+        [
+          {
+            grupoId: 'G1',
+            grupoNombre: 'Uno',
+            opciones: [opcion('d'), opcion('b')],
+          },
+          {
+            grupoId: 'G2',
+            grupoNombre: 'Dos',
+            opciones: [opcion('c'), opcion('a')],
+          },
+        ],
+      );
+
+      expect(
+        spyMov.mock.calls.map((c) => (c[1] as { itemId: string }).itemId),
+      ).toEqual(['a', 'b', 'c', 'd']);
+    });
 
     it('producto → salida; ingrediente → salida con conversión; receta → venderIngredientesReceta; servicio → nada', async () => {
       const spyMov = jest

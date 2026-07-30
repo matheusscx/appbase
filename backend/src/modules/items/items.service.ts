@@ -1893,7 +1893,8 @@ export class ItemsService {
        FROM receta_ingredientes ri
        JOIN items i ON i.item_id = ri.ingrediente_item_id AND i.eliminado_el IS NULL
        JOIN item_producto ip ON ip.item_id = ri.ingrediente_item_id
-       WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL`,
+       WHERE ri.receta_item_id = $1 AND ri.tenant_id = $2 AND ri.eliminado_el IS NULL
+       ORDER BY ri.ingrediente_item_id`,
       [recetaItemId, tenantId],
     );
     return rows.map((r) => ({
@@ -2410,7 +2411,16 @@ export class ItemsService {
       },
     );
 
-    const todosIngredientes = [...ingredientes, ...extrasIngredientes];
+    // Ordenado por id, no concatenado: `ingredientes` viene ordenado de la
+    // query, pero `extrasIngredientes` sale del snapshot —o sea del orden en
+    // que el cliente agregó los extras al carrito—, así que pegarlos uno detrás
+    // del otro devolvía el orden del cliente a la mitad del bloqueo. Es el
+    // mismo defecto que en `venderOpcionesGrupos`, un nivel adentro.
+    // Efecto lateral aceptado: el orden de las advertencias de stock ahora es
+    // por id y no el del snapshot. Determinista, que es lo que se busca.
+    const todosIngredientes = [...ingredientes, ...extrasIngredientes].sort(
+      (a, b) => a.ingredienteItemId.localeCompare(b.ingredienteItemId),
+    );
 
     for (const ing of todosIngredientes) {
       const cantidadPorReceta = new Decimal(ing.cantidad)
@@ -2512,7 +2522,8 @@ export class ItemsService {
               cc.cantidad, cc.bloqueante
        FROM combo_componentes cc
        JOIN items i ON i.item_id = cc.componente_item_id AND i.eliminado_el IS NULL
-       WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL`,
+       WHERE cc.combo_item_id = $1 AND cc.tenant_id = $2 AND cc.eliminado_el IS NULL
+       ORDER BY cc.componente_item_id`,
       [params.comboItemId, params.tenantId],
     );
 
@@ -2681,55 +2692,64 @@ export class ItemsService {
     },
     grupos: SnapshotGrupo[] | undefined,
   ): Promise<void> {
-    for (const grupo of grupos ?? []) {
-      for (const op of grupo.opciones) {
-        const rows: { tipo: string; unidad_medida: string | null }[] =
-          await manager.query(
-            `SELECT i.tipo, ip.unidad_medida
-             FROM items i
-             LEFT JOIN item_producto ip ON ip.item_id = i.item_id
-             WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
-            [op.itemId, params.tenantId],
-          );
-        if (!rows.length) continue;
-        const { tipo, unidad_medida } = rows[0];
-        if (tipo === 'servicio') continue;
+    // Este loop también toma `FOR UPDATE` por opción, y el orden del snapshot
+    // lo decide el cliente al armar el carrito — el mismo problema que el
+    // `ordenLocks` de `ventas.service.ts` vino a resolver un nivel más arriba.
+    // Se aplanan los grupos porque el orden tiene que ser global entre ellos,
+    // no determinista dentro de cada uno. Efecto lateral aceptado: si dos
+    // opciones fallan, ahora el error que gana es el de la de menor `itemId`
+    // y no el que el cliente puso primero — determinista, que es lo que se
+    // busca. Ningún paso del loop lee el grupo al que pertenece la opción.
+    const opciones = (grupos ?? [])
+      .flatMap((g) => g.opciones)
+      .sort((a, b) => a.itemId.localeCompare(b.itemId));
+    for (const op of opciones) {
+      const rows: { tipo: string; unidad_medida: string | null }[] =
+        await manager.query(
+          `SELECT i.tipo, ip.unidad_medida
+           FROM items i
+           LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+           WHERE i.item_id = $1 AND i.tenant_id = $2 AND i.eliminado_el IS NULL`,
+          [op.itemId, params.tenantId],
+        );
+      if (!rows.length) continue;
+      const { tipo, unidad_medida } = rows[0];
+      if (tipo === 'servicio') continue;
 
-        // cantidad total = cantidad de la opción × unidades elegidas × cantidad vendida del item
-        const cantidadTotal = new Decimal(op.cantidad)
-          .mul(op.unidades)
-          .mul(params.cantidadVendida)
-          .toString();
+      // cantidad total = cantidad de la opción × unidades elegidas × cantidad vendida del item
+      const cantidadTotal = new Decimal(op.cantidad)
+        .mul(op.unidades)
+        .mul(params.cantidadVendida)
+        .toString();
 
-        if (tipo === 'receta') {
-          // Para una opción receta, cantidadTotal son unidades enteras de la receta.
-          await this.venderIngredientesReceta(manager, {
-            tenantId: params.tenantId,
-            usuarioId: params.usuarioId,
-            ventaId: params.ventaId,
-            recetaItemId: op.itemId,
-            recetaNombre: op.nombre,
-            cantidadVendida: cantidadTotal,
-            convertir: params.convertir,
-          });
-          continue;
-        }
-
-        // producto o ingrediente → salida (siempre bloqueante: el error se propaga)
-        const cantidadSalida =
-          tipo === 'ingrediente' && op.unidadCodigo
-            ? params.convertir(cantidadTotal, op.unidadCodigo, unidad_medida!)
-            : cantidadTotal;
-        await this.inventarioService.registrarMovimiento(manager, {
+      if (tipo === 'receta') {
+        // Para una opción receta, cantidadTotal son unidades enteras de la receta.
+        await this.venderIngredientesReceta(manager, {
           tenantId: params.tenantId,
-          itemId: op.itemId,
-          tipo: 'salida',
-          motivo: 'venta',
-          cantidad: cantidadSalida,
           usuarioId: params.usuarioId,
           ventaId: params.ventaId,
+          recetaItemId: op.itemId,
+          recetaNombre: op.nombre,
+          cantidadVendida: cantidadTotal,
+          convertir: params.convertir,
         });
+        continue;
       }
+
+      // producto o ingrediente → salida (siempre bloqueante: el error se propaga)
+      const cantidadSalida =
+        tipo === 'ingrediente' && op.unidadCodigo
+          ? params.convertir(cantidadTotal, op.unidadCodigo, unidad_medida!)
+          : cantidadTotal;
+      await this.inventarioService.registrarMovimiento(manager, {
+        tenantId: params.tenantId,
+        itemId: op.itemId,
+        tipo: 'salida',
+        motivo: 'venta',
+        cantidad: cantidadSalida,
+        usuarioId: params.usuarioId,
+        ventaId: params.ventaId,
+      });
     }
   }
 

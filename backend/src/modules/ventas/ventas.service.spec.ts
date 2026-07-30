@@ -328,6 +328,106 @@ describe('VentasService', () => {
       expect(itemsService.findOne).not.toHaveBeenCalled();
     });
 
+    it('bloquea las líneas por itemId ascendente, no en el orden del carrito', async () => {
+      // El fix hermano del reintento de deadlock, puesto el 2026-07-23 y que
+      // hasta hoy no tenía NINGÚN test: `registrarMovimiento` toma FOR UPDATE
+      // por línea, así que sin el orden fijo lo decide el cliente y dos ventas
+      // con los mismos productos en orden inverso se bloquean en cruz.
+      const dtoInvertido = {
+        ...baseDto,
+        lineas: [
+          { itemId: 'zzz-item', cantidad: '1' },
+          { itemId: 'aaa-item', cantidad: '1' },
+        ],
+      };
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        (_tenantId: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(ids.map((id) => [id, { ...mockItem, id } as never])),
+          ),
+      );
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: dtoInvertido.lineas.map((l) => ({
+          ...mockResultadoVenta.lineas[0],
+          itemId: l.itemId,
+        })),
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, dtoInvertido);
+
+      expect(
+        inventarioService.registrarMovimiento.mock.calls.map(
+          (c) => (c[1] as { itemId: string }).itemId,
+        ),
+      ).toEqual(['aaa-item', 'zzz-item']);
+    });
+
+    describe('reintento ante deadlock (40P01)', () => {
+      // Los FOR UPDATE de inventario se toman en un orden que depende de la
+      // expansión de cada línea, y el orden global de una venta no es
+      // ascendente aunque cada expansión ordene por id. Postgres aborta una de
+      // las dos ventas cruzadas; reintentar es seguro porque el deadlock
+      // revierte la transacción ENTERA (no queda venta, ni movimientos, ni
+      // pagos a medio hacer).
+      const deadlock = Object.assign(new Error('deadlock detected'), {
+        code: '40P01',
+      });
+
+      it('reintenta y devuelve el resultado del segundo intento', async () => {
+        dataSourceMock.transaction
+          .mockRejectedValueOnce(deadlock)
+          .mockImplementationOnce((cb: (m: unknown) => unknown) =>
+            cb(buildManagerMock()),
+          );
+
+        const result = await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+        expect(result).toBeDefined();
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(2);
+      });
+
+      it('el error del driver también llega envuelto en `driverError`', async () => {
+        // TypeORM envuelve en QueryFailedError: según dónde se lance, el code
+        // viene arriba o adentro. Mirar solo una de las dos formas es no
+        // reintentar nunca, y el bug sería invisible (la venta falla igual que
+        // antes del fix).
+        dataSourceMock.transaction
+          .mockRejectedValueOnce({ driverError: { code: '40P01' } })
+          .mockImplementationOnce((cb: (m: unknown) => unknown) =>
+            cb(buildManagerMock()),
+          );
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, baseDto),
+        ).resolves.toBeDefined();
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(2);
+      });
+
+      it('NO reintenta un error que no es deadlock', async () => {
+        // Reintentar un fallo de negocio lo convertiría en tres intentos
+        // silenciosos: triple descuento de stock si alguno llegara a commitear.
+        dataSourceMock.transaction.mockRejectedValueOnce(
+          new BadRequestException('Stock insuficiente para la salida'),
+        );
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, baseDto),
+        ).rejects.toThrow('Stock insuficiente para la salida');
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(1);
+      });
+
+      it('se rinde tras los reintentos y propaga el deadlock', async () => {
+        dataSourceMock.transaction.mockRejectedValue(deadlock);
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, baseDto),
+        ).rejects.toThrow('deadlock detected');
+        // 1 intento + 2 reintentos: el cajero recibe el error, no un cuelgue.
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(3);
+      });
+    });
+
     it('carga el catálogo de unidades UNA vez para todo el carrito, no una por línea', async () => {
       // Adentro de una línea el catálogo ya se leía una sola vez (el conversor
       // baja por el árbol de expansión); lo que faltaba era compartirlo ENTRE

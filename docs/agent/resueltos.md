@@ -905,6 +905,65 @@ siguen diferidos están en `pendientes.md`.
   síntoma exacto de "consultó la BD"), y el del gemelo de combos sigue verde a través del
   helper compartido.
 
+### Media — cerrados el 2026-07-30 (tercera tanda)
+
+- [x] ~~**Deadlock en la expansión de recetas y combos**~~ (backend) — cerrado 2026-07-30
+  con **`ORDER BY` + reintento ante `40P01`**, decidido por el owner sobre la mesa después
+  de medirlo. La entrada proponía "ordenar globalmente los ids a bloquear"; se descartó por
+  una razón que la entrada no había considerado (ver abajo).
+  **Lo que la medición cambió respecto de lo que decía la entrada:**
+  - **El `ordenLocks` que ya existía protege mucho menos de lo que parecía.** Ordena las
+    **líneas** por `item.id`, pero los `FOR UPDATE` los toma `registrarMovimiento`
+    (`inventario.service.ts:91`) sobre los ids **expandidos** —ingredientes, componentes,
+    opciones de grupo—, que `ordenLocks` nunca ve. Sirve para un carrito de puros productos;
+    para recetas y combos, no.
+  - **Confirmado con contraejemplo que el `ORDER BY` solo no cierra el ciclo**, que era lo
+    que la entrada afirmaba sin demostrarlo: A vende `RecetaX(ing3, ing5)` → bloquea 3→5; B
+    vende `[RecetaY(ing5), RecetaZ(ing3)]` con `Y.id < Z.id` → bloquea 5→3. El orden global
+    es *(orden de línea) × (orden dentro de la línea)*, y eso no es ascendente global por
+    más `ORDER BY` que lleve cada query.
+  - **Había DOS puntos de bloqueo más que la entrada no nombraba, los dos con el orden
+    puesto por el cliente:** `venderOpcionesGrupos` recorría las opciones **en el orden del
+    snapshot** (ahora se aplanan los grupos y se ordenan por `itemId` — el orden tiene que ser
+    global **entre** grupos, no determinista dentro de cada uno), y `venderIngredientesReceta`
+    concatenaba los **extras del snapshot detrás** de la lista de ingredientes ya ordenada,
+    devolviendo el orden del cliente a la mitad del bloqueo. El cuarto lo encontró la revisión
+    independiente **después** de que yo diera el barrido por completo, mirando justo el patrón
+    que el diff decía haber barrido. Se cerró en el mismo commit.
+    En los dos casos el efecto lateral aceptado es el mismo: el orden de las advertencias de
+    stock pasa a ser por id y no el del snapshot. Determinista, que es lo que se busca.
+  **Por qué NO se hizo el pre-lock global**, que era lo que la entrada pedía: para ordenar
+  globalmente hay que conocer el conjunto completo antes de escribir, y eso obliga a
+  reconstruir el grafo de expansión (receta→ingredientes, combo→componentes→ingredientes,
+  grupos→opciones→ingredientes) **en un segundo lugar**. El día que alguien agregue un camino
+  de expansión y no toque el pre-lock, el deadlock vuelve en silencio. El reintento, en
+  cambio, cubre también los ciclos que nadie enumeró (series, lotes, caja).
+  **Reintentar es seguro porque el deadlock aborta la transacción entera**: Postgres revierte
+  todo antes de devolver el error, así que no hay venta, ni movimientos, ni pagos, ni
+  movimiento de caja a medio hacer. No es idempotencia —eso sigue en `pendientes.md`—: acá no
+  hay nada que deduplicar porque no quedó nada. Solo `40P01`; cualquier otro error se propaga
+  sin reintentar, para no convertir un fallo de negocio en tres intentos silenciosos.
+  ⚠️ El `code` de TypeORM llega **de dos formas** según dónde se lance (`error.code` y
+  `error.driverError.code`) y se miran las dos: mirar una sola es no reintentar nunca, con un
+  bug invisible —la venta falla igual que antes del fix—. Hay un test por cada forma.
+  **Seis mutantes verificados revirtiendo** ([[mutante-debe-revertir-no-solo-romper]]):
+  sacar cada uno de los dos `ORDER BY` cae su test; sacar el `.sort()` de las opciones de
+  grupo y el de los extras devuelve el orden del snapshot y caen; sacar el reintento cae 3 de
+  los 4 tests de deadlock (el que sigue verde es, correctamente, "NO reintenta un error que
+  no es deadlock"); y revertir `ordenLocks` al orden del carrito cae el test nuevo.
+  El patrón quedó documentado como anti-patrón propio en
+  [`anti-patterns.md`](anti-patterns.md) — es el criterio de `CLAUDE.md` para un bug que se
+  repite, y este se repitió cuatro veces en el mismo camino.
+  ℹ️ **Los dos tests de `ORDER BY` afirman sobre el SQL, no sobre el resultado**, y es a
+  propósito: el orden lo aplica Postgres y un mock devuelve lo que se le pida. Es la frontera
+  honesta de lo que un unit puede probar acá.
+  ➕ **Deuda que este cierre destapó, y se cerró en el mismo commit:** el `ordenLocks` de
+  `ventas.service.ts` —el fix hermano del 2026-07-23— **no tenía ningún test**. Ahora sí:
+  un carrito con las líneas al revés (`zzz`, `aaa`) tiene que bloquear `aaa` primero.
+  Mutante verificado revirtiendo al código anterior a aquel fix (`ordenLocks` = orden del
+  carrito): el test cae. Una semana de "está arreglado" apoyada en un `.sort()` que ningún
+  test vigilaba.
+
 ### Media / Baja — cerrados el 2026-07-30 (segunda tanda)
 
 - [x] ~~**`unidadBase`/`forzarConteo` divergen entre venta y checkout online**~~ (backend) —

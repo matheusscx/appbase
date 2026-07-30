@@ -358,13 +358,6 @@ Ver [`resueltos.md`](resueltos.md).
   - Las ventas ya emitidas **no se tocan**: el hecho fiscal está congelado en
     `ventas_descuentos` / `ventas_recargos` / `ventas_impuestos`.
   ⛔ Toca el motor de cálculo de precios: va con spec antes de código.
-- [ ] **Deadlock en la expansión de recetas y combos** (backend,
-  `items.service.ts:1726-1735` y `:2301-2308`) — ninguna de las dos queries lleva `ORDER BY`:
-  iteran en orden físico y toman `FOR UPDATE` en ese orden. Es el mismo bug ya cerrado un
-  nivel más arriba, reaparecido adentro. **Corrección al hallazgo: no alcanza con agregar
-  `ORDER BY` a las dos queries** — un carrito que mezcla una línea de receta y una de combo
-  sigue tomando locks en orden de línea. El fix correcto es el de arriba: ordenar globalmente
-  los ids a bloquear.
 - [ ] **Tres carreras del mismo molde: leer para validar, escribir sin lock** (backend,
   `items.service.ts`) — (a) `remove():1508` no es transaccional, así que su chequeo de uso
   puede quedar obsoleto antes del `UPDATE`; (b) el guard de `modo_inventario` lee
