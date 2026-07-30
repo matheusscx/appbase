@@ -49,6 +49,42 @@ function validarCantidadConteo(cantidad: string): void {
   }
 }
 
+/**
+ * Los dos parámetros que `resolverCantidadDesdePresentacion` necesita del ítem:
+ * contra qué unidad se convierte la presentación y si esa cantidad tiene que
+ * ser un entero.
+ *
+ * `receta` y `combo` no tienen unidad de medida propia —solo `producto` e
+ * `ingrediente` tienen fila en `item_producto`, que es de donde sale
+ * `unidadMedida`—, así que se venden de a uno y en enteros: media receta o
+ * 1,5 combos no son cantidades vendibles.
+ *
+ * Existe porque los tres carritos (venta, checkout online y salones) derivaban
+ * esto por su cuenta y **habían divergido en el texto**: la venta contaba el
+ * `combo` como conteo y los otros dos no.
+ * ⚠️ Esa divergencia **no** cambiaba ningún resultado, verificado antes de
+ * unificar: un combo no tiene fila en `item_producto`, así que el
+ * `?? 'unidad'` daba la misma unidad base por el otro camino, y con base
+ * `'unidad'` el resolver ya exige que la presentación sea de magnitud `conteo`
+ * —es la única que matchea— y valida el entero igual, con `forzarConteo` o sin
+ * él. Era duplicación cuya equivalencia dependía de dos invariantes de otro
+ * archivo, no un bug con síntoma. Unificarla es lo que la vuelve verdad por
+ * construcción.
+ */
+export function resolverUnidadBaseDeItem(item: {
+  tipo: string;
+  unidadMedida?: string | null;
+}): { unidadBaseCodigo: string; forzarConteo: boolean } {
+  const seVendePorUnidadEntera =
+    item.tipo === 'receta' || item.tipo === 'combo';
+  return {
+    unidadBaseCodigo: seVendePorUnidadEntera
+      ? 'unidad'
+      : (item.unidadMedida ?? 'unidad'),
+    forzarConteo: seVendePorUnidadEntera,
+  };
+}
+
 export function resolverCantidadDesdePresentacion(params: {
   cantidadPresentacion: string;
   unidadCodigoPresentacion: string;

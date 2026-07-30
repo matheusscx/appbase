@@ -372,15 +372,6 @@ Ver [`resueltos.md`](resueltos.md).
   así que no colisionan y el modo puede cambiar con un movimiento recién escrito; (c)
   `item_receta.costo_actual` se puede pisar entre editar ingredientes y aplicar desfases.
   Las tres bajadas de alta a media: ventana angosta, consecuencia silenciosa.
-- [ ] **`unidadBase`/`forzarConteo` divergen entre venta y checkout online** (backend,
-  `online.service.ts:239-253` vs `ventas.service.ts:169-180`) — la venta trata
-  `'receta' || 'combo'` como conteo; el checkout online, solo `'receta'`. Es la misma
-  función escrita dos veces y desincronizada. **`unidadBase` coincide por accidente** (un
-  combo no tiene fila en `item_producto`, así que `unidadMedida` viene `NULL` y el
-  `?? 'unidad'` tapa la diferencia), pero **`forzarConteo` sí difiere**: vender un combo
-  por presentación da distinto por POS que por la tienda online. Preexistente, detectado
-  por la revisión independiente del 2026-07-28 al mirar el archivo de al lado. Cierre:
-  una sola función compartida, o al menos igualar la condición.
 ### Baja
 
 - [ ] **`convertirAMonedaOficial` redondea a 4 fijo** (backend,
@@ -388,22 +379,18 @@ Ver [`resueltos.md`](resueltos.md).
   `.toFixed(4)` ignora `escalaCalculo` y `modoRedondeo` del tenant, y ocurre justo antes de
   entregarle el precio al motor que sí los respeta. Un paso de redondeo fuera de la config.
 
-- [ ] **Quedan CUATRO `convertirUnidad` dentro de loops, dos de ellos en el camino de una
-  venta** (backend, `items.service.ts`) — una query a `unidades_medida` por iteración.
-  Misma familia que los tres N+1 cerrados el 2026-07-28 y **ya tienen la herramienta**:
-  `CatalogService.crearConversor()` carga el catálogo una vez y convierte en memoria sin
-  mover ningún error de lugar.
-  - `:2267` **`venderIngredientesReceta`** — el peor: está **anidado**, porque
-    `venderComponentesCombo` lo llama dentro de su propio loop de componentes (`:2399`).
-    Vender un combo con N componentes-receta de M ingredientes dispara **N×M** queries.
-  - `:2554` **`venderOpcionesGrupos`** — también camino de venta, por opción de grupo.
-  - `:2627` `calcularDisponibleReceta` — lectura; se llama por cada componente receta al
-    vender un combo.
-  - `:3695` `upsertOverridesDeGrupo` — escritura de catálogo, el más barato.
-  No entraron en aquel commit por alcance: ninguno estaba en los hallazgos de la auditoría.
-  ⚠️ La primera versión de esta entrada decía "dos" y omitía justo las dos del camino de
-  venta; lo cazó la revisión independiente contando por profundidad de llaves en vez de a
-  ojo.
+- [ ] **El conversor de unidades no se comparte entre líneas de la misma venta** (backend,
+  `ventas.service.ts`) — resto del batch de conversiones cerrado el 2026-07-30
+  ([`resueltos.md`](resueltos.md)), detectado por la revisión independiente. Adentro de una
+  línea el catálogo ya se lee una sola vez, por profunda que sea la expansión del combo;
+  pero `ventas.service.ts` llama a `venderIngredientesReceta`/`venderComponentesCombo`
+  **dentro de su loop de líneas** y no les pasa `convertir`, así que cada una carga el suyo.
+  Un pedido de dos platos distintos lee `unidades_medida` dos veces.
+  El cierre es chico y el parámetro ya existe (es opcional justamente para esto): crear el
+  conversor una vez antes del loop de `ordenLocks` y pasarlo en los dos llamados. **No entró
+  con el batch** porque la entrada original listaba los cuatro loops internos de
+  `items.service.ts` y este es un nivel más arriba, en otro módulo y en el camino de la
+  venta. Prioridad baja: son N queries por venta contra una tabla global chica, no N×M.
 
 ### Decidido por el owner (pendiente de respuesta)
 

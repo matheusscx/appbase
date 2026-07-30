@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
+  resolverUnidadBaseDeItem,
 } from './cantidad-presentacion.util';
 
 const CAT = [
@@ -54,5 +55,41 @@ describe('cantidad-presentacion.util', () => {
       BadRequestException,
     );
     expect(() => assertPresentacionPareada(undefined, undefined)).not.toThrow();
+  });
+
+  describe('resolverUnidadBaseDeItem', () => {
+    // La razón de existir de esta función: los tres carritos derivaban esto por
+    // su cuenta y el `combo` había quedado distinto entre venta y checkout.
+    it('receta y combo se venden de a uno, en unidades enteras', () => {
+      for (const tipo of ['receta', 'combo']) {
+        expect(resolverUnidadBaseDeItem({ tipo })).toEqual({
+          unidadBaseCodigo: 'unidad',
+          forzarConteo: true,
+        });
+      }
+    });
+
+    it('receta y combo ignoran cualquier unidadMedida que traiga la fila', () => {
+      // Hoy siempre viene `null` (no tienen fila en `item_producto`), y es
+      // justamente eso lo que tapaba la divergencia entre los tres call sites:
+      // el `?? 'unidad'` del camino equivocado daba el mismo resultado. Fijar
+      // el caso no-null deja la unificación probada por sí misma, sin depender
+      // de un invariante de otro archivo.
+      expect(
+        resolverUnidadBaseDeItem({ tipo: 'combo', unidadMedida: 'kg' }),
+      ).toEqual({ unidadBaseCodigo: 'unidad', forzarConteo: true });
+    });
+
+    it('un producto usa su unidad de medida y no fuerza entero', () => {
+      expect(
+        resolverUnidadBaseDeItem({ tipo: 'producto', unidadMedida: 'kg' }),
+      ).toEqual({ unidadBaseCodigo: 'kg', forzarConteo: false });
+    });
+
+    it('un producto sin unidad cae en unidad', () => {
+      expect(
+        resolverUnidadBaseDeItem({ tipo: 'producto', unidadMedida: null }),
+      ).toEqual({ unidadBaseCodigo: 'unidad', forzarConteo: false });
+    });
   });
 });

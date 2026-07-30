@@ -15,6 +15,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
+  resolverUnidadBaseDeItem,
   type UnidadCat,
 } from '../../common/utils/cantidad-presentacion.util';
 
@@ -239,8 +240,7 @@ export class OnlineService {
 
     for (const linea of dto.lineas) {
       const item = itemsBase.get(linea.itemId)!;
-      const unidadBase =
-        item.tipo === 'receta' ? 'unidad' : (item.unidadMedida ?? 'unidad');
+      const { unidadBaseCodigo, forzarConteo } = resolverUnidadBaseDeItem(item);
 
       let cantidadCanonica = linea.cantidad;
       let cantidadPresentacion: string | undefined;
@@ -250,9 +250,9 @@ export class OnlineService {
         const res = resolverCantidadDesdePresentacion({
           cantidadPresentacion: linea.cantidadPresentacion,
           unidadCodigoPresentacion: linea.unidadCodigoPresentacion,
-          unidadBaseCodigo: unidadBase,
+          unidadBaseCodigo,
           catalogo,
-          forzarConteo: item.tipo === 'receta',
+          forzarConteo,
         });
         cantidadCanonica = res.cantidadCanonica;
         cantidadPresentacion = res.cantidadPresentacion;

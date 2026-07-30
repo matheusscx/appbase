@@ -34,6 +34,7 @@ describe('ItemsService', () => {
     convertirUnidades: jest.Mock;
     crearConversor: jest.Mock;
   };
+  let conversorMock: jest.Mock;
 
   beforeEach(async () => {
     managerMock = { query: jest.fn() };
@@ -47,6 +48,26 @@ describe('ItemsService', () => {
     itemRepo = { findOne: jest.fn() };
     itemServicioRepo = { findOne: jest.fn() };
     inventarioServiceMock = { registrarMovimiento: jest.fn() };
+    // El conversor que devuelve `crearConversor`, con el catálogo ya cargado.
+    // Su implementación por defecto reproduce la semántica real para las
+    // unidades que usan los tests, así el costo se calcula de verdad en vez de
+    // salir de un valor mockeado; los tests que necesitan un valor puntual (o
+    // que la conversión falle) lo pisan con `mockReturnValueOnce` /
+    // `mockImplementationOnce`. Es síncrono: el catálogo ya está en memoria.
+    conversorMock = jest.fn(
+      (cantidad: string, desde: string, hacia: string): string => {
+        if (desde === hacia) return cantidad;
+        const factor: Record<string, string> = {
+          g: '1',
+          kg: '1000',
+          unidad: '1',
+        };
+        return new Decimal(cantidad)
+          .mul(factor[desde] ?? '1')
+          .div(factor[hacia] ?? '1')
+          .toString();
+      },
+    );
     catalogServiceMock = {
       findAllUnidadesMedida: jest.fn().mockResolvedValue([
         { codigo: 'unidad', magnitud: 'conteo', factorBase: '1' },
@@ -55,23 +76,7 @@ describe('ItemsService', () => {
       ]),
       convertirUnidad: jest.fn(),
       convertirUnidades: jest.fn().mockResolvedValue([]),
-      // Conversor con el catálogo ya cargado (`crearConversor`): reproduce la
-      // semántica real para las unidades que usan los tests, así el costo se
-      // calcula de verdad en vez de salir de un valor mockeado.
-      crearConversor: jest
-        .fn()
-        .mockResolvedValue((cantidad: string, desde: string, hacia: string) => {
-          if (desde === hacia) return cantidad;
-          const factor: Record<string, string> = {
-            g: '1',
-            kg: '1000',
-            unidad: '1',
-          };
-          return new Decimal(cantidad)
-            .mul(factor[desde] ?? '1')
-            .div(factor[hacia] ?? '1')
-            .toString();
-        }),
+      crearConversor: jest.fn().mockResolvedValue(conversorMock),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -3076,8 +3081,6 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([
           { item_id: 'queso', nombre: 'Queso', unidad_medida: 'kg' },
         ]);
-      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.12');
-
       const snapshot = {
         omitidos: [],
         extras: [
@@ -3097,11 +3100,7 @@ describe('ItemsService', () => {
       });
 
       // porción 30 g × 2 unidades × 2 vendidas = 120 g
-      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith(
-        '120',
-        'g',
-        'kg',
-      );
+      expect(conversorMock).toHaveBeenCalledWith('120', 'g', 'kg');
     });
 
     it('descuenta bien un extra que ya no está en los extras permitidos de la receta', async () => {
@@ -3114,8 +3113,6 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([
           { item_id: 'queso', nombre: 'Queso', unidad_medida: 'kg' },
         ]);
-      catalogServiceMock.convertirUnidad.mockResolvedValueOnce('0.06');
-
       await service.venderIngredientesReceta(managerMock as any, {
         ...PARAMS,
         snapshot: {
@@ -3138,11 +3135,7 @@ describe('ItemsService', () => {
         expect.stringContaining('item_producto'),
         [['queso'], TENANT],
       );
-      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith(
-        '60',
-        'g',
-        'kg',
-      );
+      expect(conversorMock).toHaveBeenCalledWith('60', 'g', 'kg');
       expect(inventarioServiceMock.registrarMovimiento).toHaveBeenCalledWith(
         managerMock,
         expect.objectContaining({ itemId: 'queso', cantidad: '0.06' }),
@@ -3287,6 +3280,67 @@ describe('ItemsService', () => {
       );
     });
 
+    it('lee el catálogo de unidades UNA vez para todo el combo, no una por componente-receta', async () => {
+      // Guarda contra la regresión al N+1 anidado: `venderIngredientesReceta`
+      // convertía la unidad de cada ingrediente con una query, y el combo la
+      // llama una vez por componente → N componentes × M ingredientes. El
+      // conversor se carga arriba y baja por parámetro; si alguien saca ese
+      // parámetro, cada componente vuelve a leer el catálogo y este test cae.
+      managerMock.query
+        .mockResolvedValueOnce([
+          {
+            componente_item_id: 'receta-a',
+            componente_nombre: 'Hamburguesa',
+            tipo: 'receta',
+            cantidad: '1',
+            bloqueante: true,
+          },
+          {
+            componente_item_id: 'receta-b',
+            componente_nombre: 'Papas',
+            tipo: 'receta',
+            cantidad: '1',
+            bloqueante: true,
+          },
+        ])
+        // Ingredientes de cada receta (dos por receta, todos con conversión).
+        .mockResolvedValue([
+          {
+            ingrediente_item_id: 'ing-1',
+            ingrediente_nombre: 'Pan',
+            cantidad: '50',
+            unidad_codigo: 'g',
+            ingrediente_unidad_medida: 'kg',
+            bloqueante: true,
+          },
+          {
+            ingrediente_item_id: 'ing-2',
+            ingrediente_nombre: 'Carne',
+            cantidad: '120',
+            unidad_codigo: 'g',
+            ingrediente_unidad_medida: 'kg',
+            bloqueante: true,
+          },
+        ]);
+      jest
+        .spyOn(inventarioServiceMock, 'registrarMovimiento')
+        .mockResolvedValue({} as any);
+
+      await service.venderComponentesCombo(managerMock as any, {
+        tenantId: TENANT,
+        usuarioId: USUARIO_ID,
+        ventaId: VENTA_ID,
+        comboItemId: COMBO_ID,
+        comboNombre: 'Combo',
+        cantidadVendida: '2',
+      });
+
+      expect(catalogServiceMock.crearConversor).toHaveBeenCalledTimes(1);
+      // 4 conversiones (2 recetas × 2 ingredientes) con UNA sola carga.
+      expect(conversorMock).toHaveBeenCalledTimes(4);
+      expect(catalogServiceMock.convertirUnidad).not.toHaveBeenCalled();
+    });
+
     it('componente NO bloqueante sin stock → advertencia (no aborta)', async () => {
       managerMock.query.mockResolvedValueOnce([
         {
@@ -3376,7 +3430,13 @@ describe('ItemsService', () => {
         },
       );
 
-      expect(spyDisponible).toHaveBeenCalledWith(TENANT, 'receta-uuid');
+      // El tercer argumento es el conversor que el combo cargó UNA vez: el
+      // pre-chequeo lo recibe en vez de releer el catálogo por componente.
+      expect(spyDisponible).toHaveBeenCalledWith(
+        TENANT,
+        'receta-uuid',
+        conversorMock,
+      );
       // venderIngredientesReceta (y por ende registrarMovimiento para sus
       // ingredientes) NUNCA se llama: cero escrituras para esta receta.
       expect(spyReceta).not.toHaveBeenCalled();
@@ -3705,6 +3765,7 @@ describe('ItemsService', () => {
           usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           cantidadVendida: '2',
+          convertir: conversorMock,
         },
         [
           {
@@ -3757,6 +3818,7 @@ describe('ItemsService', () => {
           usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           cantidadVendida: '4',
+          convertir: conversorMock,
         },
         [
           {
@@ -3789,7 +3851,6 @@ describe('ItemsService', () => {
       jest
         .spyOn(inventarioServiceMock, 'registrarMovimiento')
         .mockResolvedValue({} as any);
-      catalogServiceMock.convertirUnidad.mockResolvedValue('600');
       managerMock.query.mockResolvedValueOnce([
         { tipo: 'ingrediente', unidad_medida: 'g' },
       ]);
@@ -3801,6 +3862,7 @@ describe('ItemsService', () => {
           usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           cantidadVendida: '2',
+          convertir: conversorMock,
         },
         [
           {
@@ -3820,12 +3882,8 @@ describe('ItemsService', () => {
         ],
       );
 
-      // cantidadTotal = 100 × 3 × 2 = 600 se pasa a convertirUnidad antes de la salida.
-      expect(catalogServiceMock.convertirUnidad).toHaveBeenCalledWith(
-        '600',
-        'g',
-        'g',
-      );
+      // cantidadTotal = 100 × 3 × 2 = 600 se convierte antes de la salida.
+      expect(conversorMock).toHaveBeenCalledWith('600', 'g', 'g');
     });
 
     it('opción sin stock → aborta (siempre bloqueante)', async () => {
@@ -3846,6 +3904,7 @@ describe('ItemsService', () => {
             usuarioId: USUARIO_ID,
             ventaId: VENTA_ID,
             cantidadVendida: '1',
+            convertir: conversorMock,
           },
           [
             {
@@ -3876,6 +3935,7 @@ describe('ItemsService', () => {
           usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           cantidadVendida: '1',
+          convertir: conversorMock,
         },
         undefined,
       );
@@ -3898,6 +3958,7 @@ describe('ItemsService', () => {
           usuarioId: USUARIO_ID,
           ventaId: VENTA_ID,
           cantidadVendida: '1',
+          convertir: conversorMock,
         },
         [
           {
@@ -4443,9 +4504,11 @@ describe('ItemsService', () => {
     });
 
     it('rechaza un override con unidad incompatible en opción ingrediente', async () => {
-      catalogServiceMock.convertirUnidad.mockRejectedValueOnce(
-        new Error('unidad incompatible'),
-      );
+      // La validación va por el conversor ya cargado, no por `convertirUnidad`:
+      // el catálogo se lee una vez para todos los grupos del item.
+      conversorMock.mockImplementationOnce(() => {
+        throw new Error('unidad incompatible');
+      });
       managerMock.query
         .mockResolvedValueOnce([]) // sin asociaciones vivas
         .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // grupo existe

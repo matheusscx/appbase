@@ -101,6 +101,19 @@ export interface DesfaseRecetaDto {
 }
 
 /**
+ * Conversor de unidades con el catálogo ya cargado
+ * (`CatalogService.crearConversor`). Se pasa por parámetro para que el catálogo
+ * se lea UNA vez por operación en vez de una por iteración; la conversión sigue
+ * ocurriendo en el mismo punto del loop, así que no mueve ningún error de lugar
+ * ni cambia cuál se lanza primero.
+ */
+export type ConvertirUnidad = (
+  cantidad: string,
+  desde: string,
+  hacia: string,
+) => string;
+
+/**
  * Clases de uso que devuelve `GET /items/:id/uso`.
  *
  * ⚠️ Duplicado a mano en el frontend (`pages/configuracion/items.vue`, tipo
@@ -2317,8 +2330,16 @@ export class ItemsService {
       recetaNombre: string;
       cantidadVendida: string;
       snapshot?: PersonalizacionRecetaSnapshot;
+      /**
+       * Conversor ya cargado. Lo pasa quien expande un combo o un grupo, que
+       * llama a esta función una vez por componente/opción: sin él, el catálogo
+       * de unidades se releía por cada uno.
+       */
+      convertir?: ConvertirUnidad;
     },
   ): Promise<string[]> {
+    const convertir =
+      params.convertir ?? (await this.catalogService.crearConversor());
     const ingredientesBase = await this.obtenerIngredientesReceta(
       manager,
       params.tenantId,
@@ -2395,7 +2416,7 @@ export class ItemsService {
       const cantidadPorReceta = new Decimal(ing.cantidad)
         .mul(params.cantidadVendida)
         .toString();
-      const cantidadConvertida = await this.catalogService.convertirUnidad(
+      const cantidadConvertida = convertir(
         cantidadPorReceta,
         ing.unidadCodigo,
         ing.ingredienteUnidadMedida,
@@ -2445,6 +2466,7 @@ export class ItemsService {
         usuarioId: params.usuarioId,
         ventaId: params.ventaId,
         cantidadVendida: params.cantidadVendida,
+        convertir,
       },
       params.snapshot?.grupos,
     );
@@ -2470,8 +2492,15 @@ export class ItemsService {
       comboNombre: string;
       cantidadVendida: string;
       snapshot?: PersonalizacionRecetaSnapshot;
+      /** Ver `venderIngredientesReceta`. */
+      convertir?: ConvertirUnidad;
     },
   ): Promise<string[]> {
+    // Una sola lectura del catálogo para TODO el combo: es el peor caso de la
+    // familia, porque cada componente-receta vuelve a expandir sus propios
+    // ingredientes (N componentes × M ingredientes).
+    const convertir =
+      params.convertir ?? (await this.catalogService.crearConversor());
     const componentes: {
       componente_item_id: string;
       componente_nombre: string;
@@ -2514,6 +2543,7 @@ export class ItemsService {
           const disponible = await this.calcularDisponibleReceta(
             params.tenantId,
             comp.componente_item_id,
+            convertir,
           );
           if (
             disponible !== null &&
@@ -2534,6 +2564,7 @@ export class ItemsService {
             recetaItemId: comp.componente_item_id,
             recetaNombre: comp.componente_nombre,
             cantidadVendida: cantidadTotal,
+            convertir,
           });
           advertencias.push(...adv);
         } catch (error) {
@@ -2597,6 +2628,7 @@ export class ItemsService {
         usuarioId: params.usuarioId,
         ventaId: params.ventaId,
         cantidadVendida: params.cantidadVendida,
+        convertir,
       },
       params.snapshot?.grupos,
     );
@@ -2621,6 +2653,7 @@ export class ItemsService {
           usuarioId: params.usuarioId,
           ventaId: params.ventaId,
           cantidadVendida: params.cantidadVendida,
+          convertir,
         },
         gruposComponentes,
       );
@@ -2643,6 +2676,8 @@ export class ItemsService {
       usuarioId: string | null;
       ventaId: string;
       cantidadVendida: string;
+      /** Requerido: los dos llamadores ya lo tienen cargado. */
+      convertir: ConvertirUnidad;
     },
     grupos: SnapshotGrupo[] | undefined,
   ): Promise<void> {
@@ -2675,6 +2710,7 @@ export class ItemsService {
             recetaItemId: op.itemId,
             recetaNombre: op.nombre,
             cantidadVendida: cantidadTotal,
+            convertir: params.convertir,
           });
           continue;
         }
@@ -2682,11 +2718,7 @@ export class ItemsService {
         // producto o ingrediente → salida (siempre bloqueante: el error se propaga)
         const cantidadSalida =
           tipo === 'ingrediente' && op.unidadCodigo
-            ? await this.catalogService.convertirUnidad(
-                cantidadTotal,
-                op.unidadCodigo,
-                unidad_medida!,
-              )
+            ? params.convertir(cantidadTotal, op.unidadCodigo, unidad_medida!)
             : cantidadTotal;
         await this.inventarioService.registrarMovimiento(manager, {
           tenantId: params.tenantId,
@@ -2737,6 +2769,7 @@ export class ItemsService {
   private async calcularDisponibleReceta(
     tenantId: string,
     recetaItemId: string,
+    convertir: ConvertirUnidad,
   ): Promise<number | null> {
     const rows: {
       cantidad: string;
@@ -2755,7 +2788,7 @@ export class ItemsService {
 
     let minimo: Decimal | null = null;
     for (const r of rows) {
-      const cantidadBase = await this.catalogService.convertirUnidad(
+      const cantidadBase = convertir(
         r.cantidad,
         r.unidad_codigo,
         r.ingrediente_unidad_medida,
@@ -3689,6 +3722,7 @@ export class ItemsService {
 
     const vistos = new Set<string>();
     const gruposEntrantes = new Set<string>();
+    let convertir: ConvertirUnidad | undefined;
     let orden = 0;
     for (const g of grupos) {
       if (vistos.has(g.grupoModificadorId)) {
@@ -3739,12 +3773,16 @@ export class ItemsService {
       }
       orden++;
 
+      // `??=`: el catálogo se lee UNA vez para todos los grupos, y solo si hay
+      // al menos uno que asociar (un item sin grupos no paga la query).
+      convertir ??= await this.catalogService.crearConversor();
       await this.upsertOverridesDeGrupo(
         manager,
         tenantId,
         itemGrupoId,
         g.grupoModificadorId,
         g.opciones ?? [],
+        convertir,
       );
     }
 
@@ -3774,6 +3812,7 @@ export class ItemsService {
     itemGrupoId: string,
     grupoModificadorId: string,
     opciones: ItemGrupoOpcionOverrideInputDto[],
+    convertir: ConvertirUnidad,
   ): Promise<void> {
     const vivos: { item_grupo_opcion_id: string; grupo_opcion_id: string }[] =
       await manager.query(
@@ -3848,11 +3887,7 @@ export class ItemsService {
             'La opción ingrediente requiere unidad de medida para la cantidad configurada',
           );
         }
-        await this.catalogService.convertirUnidad(
-          efectivaCantidad,
-          efectivaUnidad,
-          pertenece.unidad_medida!,
-        );
+        convertir(efectivaCantidad, efectivaUnidad, pertenece.unidad_medida!);
       }
 
       const existente = overrideIdPorOpcion.get(o.grupoOpcionId);

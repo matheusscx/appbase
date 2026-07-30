@@ -33,6 +33,7 @@ import type { CuentaAsignacionDetalle } from './cuenta-asignaciones.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
+  resolverUnidadBaseDeItem,
   type UnidadCat,
 } from '../../common/utils/cantidad-presentacion.util';
 import type { PersonalizacionRecetaSnapshot } from '../../common/dto/personalizacion-receta.dto';
@@ -1127,16 +1128,15 @@ export class SalonesService {
     } = params;
     assertPresentacionPareada(cantidadPresentacion, unidadCodigoPresentacion);
 
-    const unidadBase =
-      item.tipo === 'receta' ? 'unidad' : (item.unidadMedida ?? 'unidad');
+    const { unidadBaseCodigo, forzarConteo } = resolverUnidadBaseDeItem(item);
 
     if (cantidadPresentacion && unidadCodigoPresentacion) {
       const res = resolverCantidadDesdePresentacion({
         cantidadPresentacion,
         unidadCodigoPresentacion,
-        unidadBaseCodigo: unidadBase,
+        unidadBaseCodigo,
         catalogo,
-        forzarConteo: item.tipo === 'receta',
+        forzarConteo,
       });
       return {
         cantidadCanonica: res.cantidadCanonica,
@@ -1149,7 +1149,7 @@ export class SalonesService {
       return {
         cantidadCanonica: cantidad,
         cantidadPresentacion: cantidad,
-        unidadCodigoPresentacion: unidadBase,
+        unidadCodigoPresentacion: unidadBaseCodigo,
       };
     }
 

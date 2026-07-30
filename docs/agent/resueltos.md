@@ -905,6 +905,67 @@ siguen diferidos están en `pendientes.md`.
   síntoma exacto de "consultó la BD"), y el del gemelo de combos sigue verde a través del
   helper compartido.
 
+### Media / Baja — cerrados el 2026-07-30 (segunda tanda)
+
+- [x] ~~**`unidadBase`/`forzarConteo` divergen entre venta y checkout online**~~ (backend) —
+  cerrado 2026-07-30 con `resolverUnidadBaseDeItem()` en
+  `common/utils/cantidad-presentacion.util.ts`, consumida por los **tres** carritos.
+  **La entrada tenía tres cosas mal, medidas antes de tocar código:**
+  1. **Eran tres call sites, no dos.** `salones.service.ts` tenía la misma derivación y la
+     entrada no la nombraba — apareció al grepear `resolverCantidadDesdePresentacion` en vez
+     de abrir los dos archivos que citaba. Cerrar solo venta↔online habría dejado la
+     divergencia viva en el tercero.
+  2. **`forzarConteo` tampoco difería en efecto.** La entrada decía que `unidadBase`
+     "coincide por accidente" pero que `forzarConteo` "sí difiere". No: con la unidad base
+     resuelta a `'unidad'`, el resolver ya exige que la presentación sea de la **misma
+     magnitud** (`conteo`), y `'unidad'` es la única unidad `conteo` del catálogo — así que
+     `validarCantidadConteo` corría igual, con la bandera o sin ella. Las dos mitades
+     estaban tapadas por el mismo mecanismo, una capa más abajo.
+  3. Por lo tanto **no era un bug con síntoma**: vender un combo por presentación daba
+     idéntico por POS y por la tienda. Era duplicación cuya equivalencia dependía de dos
+     invariantes de otro archivo (que `receta`/`combo` no tienen fila en `item_producto`, y
+     el chequeo de magnitud del resolver).
+  Se cierra igual, y por eso: unificarlo convierte esa equivalencia frágil en verdad por
+  construcción. Lo fijan 4 casos nuevos en `cantidad-presentacion.util.spec.ts`, uno de
+  ellos con `unidadMedida: 'kg'` en un combo — el caso imposible hoy, que es justo el que
+  prueba la unificación sin apoyarse en el invariante que la tapaba.
+
+- [x] ~~**Quedan CUATRO `convertirUnidad` dentro de loops, dos en el camino de una venta**~~
+  (backend, `items.service.ts`) — cerrado 2026-07-30. Los cuatro (`venderIngredientesReceta`,
+  `venderOpcionesGrupos`, `calcularDisponibleReceta`, `upsertOverridesDeGrupo`) pasan a
+  recibir el conversor de `CatalogService.crearConversor()` por parámetro, con el tipo
+  `ConvertirUnidad` exportado.
+  **No alcanzaba con crear el conversor arriba de cada función**, que es como se lee la
+  entrada: el clúster `vender*` es mutuamente recursivo —el combo llama a la receta, la
+  receta al grupo, el grupo de vuelta a la receta—, así que un `crearConversor()` por
+  función seguía dando una lectura del catálogo por componente. El conversor se crea en los
+  dos puntos de entrada públicos (`venderIngredientesReceta` y `venderComponentesCombo`, con
+  `?? await crearConversor()` para el llamador externo) y **baja por parámetro** por todo el
+  árbol. Las dos privadas lo reciben como requerido: así no hay forma de que una rama nueva
+  se olvide y vuelva a leer.
+  `upsertOverridesDeGrupo` va aparte, con `convertir ??= await …` dentro del loop de grupos:
+  se lee una vez para todos, y un item **sin** grupos no paga ninguna query (antes tampoco).
+  ⚠️ **Lo que este cambio empeora, para no venderlo mejor de lo que es** (lo midió la
+  revisión independiente): la carga pasa a ser *eager*, así que hay casos que antes hacían
+  **cero** queries y ahora hacen **una**. Un item con grupos pero sin ninguna opción
+  `ingrediente` con cantidad, y una receta cuyos ingredientes ya vienen en su unidad base
+  (`desde === hacia`, que `convertirUnidad` cortocircuitaba sin consultar). Se acepta: es
+  **una** query fija contra una tabla global chica, contra un costo que antes escalaba con
+  el tamaño del loop. Vale saber que el intercambio existe.
+  ℹ️ **El alcance real de "una vez"**: una vez por **línea** de venta, no por venta.
+  `ventas.service.ts` llama a estas dos funciones dentro de su loop de líneas y no pasa el
+  conversor —ese nivel no estaba en la entrada, que listaba los cuatro loops internos de
+  `items.service.ts`—, así que un pedido con dos platos distintos sigue cargando el catálogo
+  dos veces. Queda anotado en [`pendientes.md`](pendientes.md).
+  **Mutante verificado revirtiendo** ([[mutante-debe-revertir-no-solo-romper]]): sacando el
+  `convertir` que el combo le pasa a la receta, el test nuevo pasa de **1 a 3** cargas del
+  catálogo y falla. El test vende un combo de 2 componentes-receta de 2 ingredientes cada uno
+  y afirma `crearConversor` 1 vez, 4 conversiones, y `convertirUnidad` nunca.
+  Efecto colateral en el spec: `crearConversor` ahora devuelve un `conversorMock` espiable
+  (con la aritmética real por defecto) en vez de una función anónima, así los tests que
+  pisaban `convertirUnidad` pasaron a pisar el conversor. Es lo que hace observable la
+  cantidad de cargas.
+
 ### Media / Baja — cerrados el 2026-07-30
 
 - [x] ~~**`AjusteStockDto.cantidad` es `number` nativo**~~ (backend,

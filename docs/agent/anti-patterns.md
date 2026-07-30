@@ -106,8 +106,8 @@ igual a `Promise.all` sobre queries: sigue siendo N round-trips.
 `calcularDisponibleReceta`/`Combo` por fila. Difícil de detectar por lint → se revisa en
 el cierre con el sub-agente independiente de `verify-feature`.*
 
-**Dos variantes que cuestan más que el N+1 de manual** (ambas encontradas en jul-2026 en
-el camino caliente del POS, corregidas en la auditoría de `ventas`+`pagos`):
+**Tres variantes que cuestan más que el N+1 de manual** (las dos primeras encontradas en
+jul-2026 en el camino caliente del POS, corregidas en la auditoría de `ventas`+`pagos`):
 
 1. **Traer de más y descartarlo.** `crearEnTransaccion` llamaba `itemsService.findOne` por
    línea del carrito. Cada `findOne` abre 4-8 queries construyendo impuestos, recargos,
@@ -121,6 +121,17 @@ el camino caliente del POS, corregidas en la auditoría de `ventas`+`pagos`):
    cerrarlo antes de decidir si vale batchear el externo. Cuando el batch necesita un par
    de claves (acá `grupo ↔ item_grupo`, por el override), `= ANY($1)` sobre una sola trae
    filas cruzadas: van dos arrays paralelos con `unnest($1::uuid[], $2::uuid[])`.
+3. **Cargar el catálogo "una vez por función" en un clúster que se llama entre sí.** El
+   arreglo obvio —`const convertir = await crearConversor()` arriba de cada función que
+   convertía dentro de un loop— no cierra nada si esas funciones se invocan mutuamente:
+   `venderComponentesCombo` → `venderIngredientesReceta` → `venderOpcionesGrupos` → de
+   vuelta a la receta. "Una vez por función" seguía siendo una lectura del catálogo **por
+   componente**. El recurso cargado se crea en los **puntos de entrada** y **baja por
+   parámetro** por todo el árbol; en las privadas va como parámetro **requerido**, para que
+   una rama nueva no pueda olvidarse y volver a leer (jul-2026, `items.service.ts`).
+   Se fija con un test que cuenta las cargas, no las conversiones:
+   `expect(crearConversor).toHaveBeenCalledTimes(1)`. Sin él, el arreglo se revierte sin
+   que falle nada — el resultado de la venta es idéntico, solo cambia cuántas queries hizo.
 
 ### ❌ Campo que escribe estado derivado sin pasar por su choke point
 

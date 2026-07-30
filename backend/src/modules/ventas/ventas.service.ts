@@ -20,6 +20,7 @@ import { GarzonesService } from '../garzones/garzones.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
+  resolverUnidadBaseDeItem,
 } from '../../common/utils/cantidad-presentacion.util';
 import type { CreateVentaDto } from './dto/create-venta.dto';
 import type { QueryVentasDto } from './dto/query-ventas.dto';
@@ -166,17 +167,14 @@ export class VentasService {
         };
       }
 
-      const unidadBase =
-        item.tipo === 'receta' || item.tipo === 'combo'
-          ? 'unidad'
-          : (item.unidadMedida ?? 'unidad');
+      const { unidadBaseCodigo, forzarConteo } = resolverUnidadBaseDeItem(item);
 
       const res = resolverCantidadDesdePresentacion({
         cantidadPresentacion: linea.cantidadPresentacion,
         unidadCodigoPresentacion: linea.unidadCodigoPresentacion,
-        unidadBaseCodigo: unidadBase,
+        unidadBaseCodigo,
         catalogo,
-        forzarConteo: item.tipo === 'receta' || item.tipo === 'combo',
+        forzarConteo,
       });
 
       return {
