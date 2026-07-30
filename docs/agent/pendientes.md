@@ -333,6 +333,18 @@ Ver [`resueltos.md`](resueltos.md).
     qué ítems la usan. Hoy no existe.
   - **Reactivar no revierte**: si el admin vuelve a activar la regla, las asociaciones
     borradas no vuelven solas. Hay que decirlo en la advertencia, no descubrirlo después.
+  - ⛔ **Bloqueado por una decisión más grande (owner, 2026-07-30):** ¿el "limpiar" es
+    `DELETE` físico o soft delete? Medido: las tres puentes (`item_descuentos`,
+    `item_recargos`, `item_impuestos`) son puras —2 columnas, PK compuesta, sin
+    `eliminado_el`, sin `tenant_id`— y hoy el código ya las borra duro y reinserta
+    (`items.service.ts:1559,1571,1583`), a diferencia de sus cuatro hermanas con datos
+    propios, que sí tienen `eliminado_el`. El owner **difirió la decisión** porque quiere
+    resolverla dentro de un **log de cambios reversible** (entrada propia en "Features
+    diferidas"), en vez de comprometerse tabla por tabla. Hasta que eso se decida, esta
+    entrada no se puede implementar.
+    Detalle a no olvidar cuando se retome: si se agrega `eliminado_el`, la PK
+    `(item_id, regla_id)` hace que una fila borrada blando **bloquee reinsertar el mismo
+    par** — el patrón actual "borro todo y reinserto" tiene que pasar a revivir o upsert.
   - **Alcance**: además de las tres puentes por ítem, están las reglas a nivel venta
     (`descuentosVentaIds` / `recargosVentaIds`, que llegan por DTO y no tienen fila puente) y
     el IVA por clasificación tributaria — que es la entrada de arriba y se cruza con esta.
@@ -600,6 +612,30 @@ Los otros tres temas de esta clase viven donde los dejó su procedencia, porque 
 de dónde salieron es parte del enunciado: **saldo en contra por propina ya liquidada**,
 **una persona cobrando en dos grupos** y **devolución por medio de pago con plazos**, los
 tres en la sección de auditorías de arriba.
+
+- [ ] **Log de cambios reversible ("deshacer") — dirección del owner, sin diseñar**
+  (transversal) — planteado por el owner el 2026-07-30, con el caso de uso concreto: *"siempre
+  hay usuarios que borran las cosas y después están llorando para que se las repongan"*. La
+  idea es un registro de cambios que permita **revertir**, no solo auditar.
+  **Por qué está acá y no como deuda:** es una decisión de arquitectura transversal, y ya
+  bloquea al menos una tarea concreta (ver la entrada de la regla desactivada). Sin ella, cada
+  feature decide por su cuenta si borra blando o duro, y termina habiendo tres criterios.
+  Preguntas a responder antes de diseñar, ninguna respondida:
+  - **¿Revertir qué?** ¿Solo borrados, o también ediciones (volver un precio a su valor
+    anterior)? Lo primero es un cementerio de filas; lo segundo es versionado y es otro
+    problema.
+  - **¿Quién revierte y hasta cuándo?** ¿El admin del tenant, con ventana de tiempo? ¿Se
+    puede revertir algo que ya afectó una venta emitida? (Ahí choca con el hecho fiscal
+    congelado — ADR-010: lo emitido no se recalcula.)
+  - **¿Se apoya en el soft delete que ya existe o es una tabla de log aparte?** Hoy conviven
+    los dos criterios: las puentes con datos propios (`receta_ingredientes`,
+    `combo_componentes`, `grupo_modificador_opciones`, `receta_extras_permitidos`) tienen
+    `eliminado_el`; las puentes puras de reglas de precio (`item_descuentos`, `item_recargos`,
+    `item_impuestos`) no, y hoy se borran con `DELETE` físico
+    (`items.service.ts:1559,1571,1583`). Un log transversal podría hacer innecesario
+    uniformarlas — o exigirlo.
+  - **¿Alcanza a `movimientos_inventario`?** Ahí la respuesta ya está tomada y es "no se
+    revierte, se compensa" (ADR-007, el kardex es inmutable). El log tiene que respetarlo.
 
 - [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
   (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los
