@@ -1170,6 +1170,38 @@ describe('ItemsService', () => {
           } as any),
         ).rejects.toThrow(BadRequestException);
       });
+
+      // Mismo chequeo que ya tenía `validarYCostearComponentes` para combos: sin
+      // él el payload pasaba la validación y reventaba contra el índice único
+      // parcial de la tabla, o sea 500 en vez de 400. El dato quedaba a salvo
+      // (la transacción revierte); lo que fallaba era la calidad del error.
+      it('rechaza extras duplicados (mismo ingredienteItemId dos veces) sin consultar la BD', async () => {
+        await expect(
+          (service as any).validarExtrasPermitidos(managerMock, TENANT, [
+            extraQueso,
+            { ...extraQueso, cantidad: '40' },
+          ]),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Un ingrediente no puede aparecer más de una vez como extra permitido',
+          ),
+        );
+        expect(managerMock.query).not.toHaveBeenCalled();
+      });
+
+      it('rechaza ingredientes duplicados (mismo ingredienteItemId dos veces) sin consultar la BD', async () => {
+        await expect(
+          (service as any).validarYCostearIngredientes(managerMock, TENANT, [
+            ingredientePan,
+            { ...ingredientePan, cantidad: '3' },
+          ]),
+        ).rejects.toThrow(
+          new BadRequestException(
+            'Un ingrediente no puede aparecer más de una vez en la receta',
+          ),
+        );
+        expect(managerMock.query).not.toHaveBeenCalled();
+      });
     });
 
     describe('create combo', () => {

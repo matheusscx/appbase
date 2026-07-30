@@ -89,15 +89,49 @@ async function abrirCaja(
   return (res.body as CajaResponse).id;
 }
 
+/**
+ * Cierra la caja por las DOS fases reales: `POST /:id/conteo` congela el arqueo y
+ * auto-cierra si cuadra; si alguna línea descuadra pasa a `en_conciliacion` y hay
+ * que finalizar con `POST /:id/cerrar` + un motivo por línea descuadrada.
+ * Antes esto llamaba SOLO a la fase 2 sobre una caja `abierta` e ignoraba el
+ * status: no cerraba nada, el cajón quedaba ocupado y la fuga reaparecía como un
+ * `409` críptico al abrir en otra suite. Por eso asevera las dos fases.
+ * Patrón de referencia: `cerrarEnDosFases` en `caja.e2e-spec.ts`.
+ */
 async function cerrarCaja(
   app: INestApplication<App>,
   token: string,
   cajaId: string,
 ): Promise<void> {
-  await request(app.getHttpServer())
-    .post(`/api/caja/${cajaId}/cerrar`)
+  const conteo = await request(app.getHttpServer())
+    .post(`/api/caja/${cajaId}/conteo`)
     .set('Authorization', `Bearer ${token}`)
     .send({ lineas: [{ metodoPagoId: null, montoContado: '100000' }] });
+  expect([200, 201]).toContain(conteo.status);
+
+  if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
+    // El conteo declara un monto fijo, así que las ventas en efectivo de esta
+    // suite descuadran. La fase 2 exige motivo por línea descuadrada: mandar
+    // `lineas: []` da 400 y deja el cajón ocupado. El comentario va siempre para
+    // no depender de si el primer motivo activo pide `requiereComentario`.
+    const motivos = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia?soloActivas=true')
+      .set('Authorization', `Bearer ${token}`);
+    const motivoId = (motivos.body as { id: string }[])[0]?.id;
+    const cierre = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/cerrar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [
+          {
+            metodoPagoId: null,
+            motivoDiferenciaId: motivoId,
+            comentarioDiferencia: 'Cierre de la suite e2e',
+          },
+        ],
+      });
+    expect([200, 201]).toContain(cierre.status);
+  }
 }
 
 async function crearIngrediente(

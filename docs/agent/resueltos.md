@@ -14,6 +14,28 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ## Deuda de código (harness)
 
+- [x] ~~**Cuatro suites e2e dejan la caja abierta al terminar**~~ (backend, `test/combos`,
+  `grupos-modificadores`, `grupos-modificadores-overrides` y `recetas.e2e-spec.ts`) —
+  cerrado 2026-07-29. Las cuatro tenían el **mismo** helper `cerrarCaja` de 10 líneas:
+  llamaba solo a la fase 2 (`POST /:id/cerrar`) sobre una caja `abierta` —que el service
+  rechaza, porque exige `en_conciliacion`— y **no miraba el status**, así que no cerraba
+  nada y el cajón quedaba ocupado. La suite pasaba porque sobraban cajones; al agregar
+  tests cambia el orden en que jest ordena las suites y la fuga reaparecía como un `409`
+  críptico en `caja.e2e-spec.ts`, a varios archivos de la causa (ya pasó en jul-2026 con
+  `liquidacion-propinas`: 11 fallos con 409, media hora de diagnóstico).
+  Ahora las cuatro cierran por las dos fases reales, con el patrón de `ventas.e2e-spec.ts`
+  (commit `c8e3abe`) y **aseverando** las dos: `expect` sobre el status del conteo —que el
+  original de ventas no tiene, y sin el cual un 400 en fase 1 volvería a ser silencioso— y
+  sobre el de la finalización. La justificación manda **siempre** un comentario, para no
+  depender de que el primer motivo activo del tenant no exija `requiereComentario`.
+  **Contrafactual medido, no deducido** (es una fuga de estado: que la suite pase no prueba
+  nada). Sobre BD reseteada, corriendo solo `combos`: con el helper viejo restaurado quedan
+  **1 caja física en `abierta`**; con el nuevo, **0**. Tras la e2e completa (**16 de 17
+  suites, 170 tests verdes**; la 17ª es `pasarela-oneclick`, que se saltea sola salvo
+  `RUN_TRANSBANK_E2E=1`, y son sus 2 tests los que aparecen como skipped) las únicas cajas
+  abiertas son las **2 virtuales** del seed —una por tenant, abiertas por diseño— y las 28
+  físicas quedaron `cerrada`.
+
 - [x] **Burndown de typecheck del frontend — COMPLETO (0 errores)** (frontend) — jul-2026
   Los 84 errores de vue-tsc estricto se quemaron por tandas. `typecheck-baseline.json`
   quedó vacío: el `typecheck:ratchet` ahora es un gate totalmente estricto (cualquier
@@ -405,6 +427,19 @@ auditoría produce información, no diffs. Orden = severidad.
 
 ### Huecos de test (el gate verde no los ve)
 
+- [x] ~~**Eliminar la rama muerta `MANUAL`+`MONTOS` de `repartirGrupo`**~~ (backend,
+  `propinas/liquidacion-propinas.service.ts`) — cerrado 2026-07-29: se borró. Los dos
+  caminos se **verificaron leyendo el código antes de tocarlo**, no se tomaron de esta
+  entrada: `redistribuirGrupo:1069` chequea el par por su cuenta y se queda con `delGrupo`
+  sin llamar a `repartirGrupo`; y por `buildParticipantesData:1458` los borradores entran
+  con `monto: '0.0000'` (fijado en `crearParticipanteData:1611`), así que devolverlos tal
+  cual daba lo mismo que el camino normal —`pesoParticipante` no puntúa ese par, `sumaPesos`
+  queda en 0 y el retorno temprano produce el mismo `'0.0000'`—.
+  **Sin test, a propósito y documentado en el código:** la rama era inobservable, así que
+  ningún test podía discriminarla; lo que sostiene el cambio son las 76 pruebas de
+  `propinas` en verde y un comentario en el lugar donde estaba, para que no la reintroduzca
+  quien lea el `if` de `redistribuirGrupo` y lo crea faltante acá.
+
 - [x] ~~**El guard de estado de la caja no lo ejercita ningún test real**~~ — cerrado
   2026-07-27 con tres e2e: una caja **cerrada** y una **en conciliación** rechazan el
   movimiento, y una nota de crédito con devolución no puede sacar plata de una caja en
@@ -694,6 +729,37 @@ siguen diferidos están en `pendientes.md`.
   hablaba de 15 `SELECT` para 15 ingredientes, y tras el primer intento eran 1 batch + 15
   lecturas de `unidades_medida`.
 
+### Media / Baja — cerrados el 2026-07-29
+
+- [x] ~~**Un `itemId` en mayúsculas devuelve 404 desde que se batchea**~~ (backend,
+  `items.service.ts`) — cerrado 2026-07-29 en un solo lugar, como decía la entrada, pero
+  **el alcance que proponía era insuficiente y habría dejado algo peor que el 404**:
+  normalizar solo `cargarBasePorIds` encuentra la fila base y deja pasar la línea, pero
+  `cargarReglasPorIds` sigue sin match y sus llamadores hacen `?? []` — o sea el ítem se
+  cobra **sin sus impuestos ni descuentos, en silencio**. El alias se aplica a los dos mapas
+  (`aliasarCasingDeIds`): se consulta y compara en minúsculas, y el mapa queda indexado
+  también por la forma que mandó el cliente, así que el `get(linea.itemId)` de los tres
+  llamadores (venta, `/calculo-precios/calcular`, checkout online) sigue sirviendo con
+  cualquier casing sin normalizar en cada uno.
+  Lo fija un e2e que **compara el cálculo en mayúsculas contra el mismo en minúsculas** en
+  vez de contra números escritos a mano, con `totalImpuestos > 0` como diente: sin eso, dos
+  cálculos igualmente vacíos pasarían el `toEqual`. RED verificado (404 antes del fix) y
+  **mutante del segundo mapa verificado**: sin el alias en `cargarReglasPorIds` el mismo
+  ítem da `5000` en vez de `5950` —el IVA perdido—, que es exactamente el modo de falla que
+  el fix a medias habría introducido.
+- [x] ~~**Ingrediente o extra duplicado en una receta devuelve 500, no 400**~~ (backend,
+  `items.service.ts`) — cerrado 2026-07-29. El chequeo con `Set` que solo tenía
+  `validarYCostearComponentes` pasó a un `assertSinIdsRepetidos` compartido por las tres
+  (componentes de combo, ingredientes y extras de receta), que es el **tercer** uso y por eso
+  se extrajo en vez de duplicar. Va antes de la primera query en las tres.
+  ℹ️ **Cambio de precedencia, deliberado:** el chequeo es en memoria y ahora precede a las
+  validaciones por fila, así que un payload con un duplicado **y** una cantidad inválida
+  reporta el duplicado. Los dos son 400 accionables, y es la precedencia que el gemelo de
+  combos ya tenía.
+  Dos tests RED verificados: antes del fix ambos llegaban a `filasValidacionPorIds` (el
+  síntoma exacto de "consultó la BD"), y el del gemelo de combos sigue verde a través del
+  helper compartido.
+
 ### Decidido por el owner y ya implementado
 
 - [x] ~~**¿El descuento debe tener piso en cero?**~~ — **sí**, decidido por el owner el
@@ -809,3 +875,34 @@ siguen diferidos están en `pendientes.md`.
   archivo de `frontend/app` arma `descuentosVentaIds`/`recargosVentaIds`, así que el render
   junto al total está construido y correcto pero queda inerte hasta que exista esa pantalla
   — detalle en [`motor-calculo-precios.md`](../features/motor-calculo-precios.md).
+
+## Revisión final `borrado-ingrediente-extra` (2026-07-28)
+
+- [x] ~~**El modal de confirmación nunca nombra el item que se va a borrar**~~ (frontend,
+  `configuracion/items.vue`) — cerrado 2026-07-29: los tres mensajes nombran el item
+  (bloqueado, con extras y confirmación normal). El nombre se fija y se limpia **siempre
+  junto con `confirmDeleteId`** en vez de buscarse en la lista por id: así no puede quedar
+  mostrando otra fila si la lista se refiltra o se pagina con el modal abierto.
+  `confirmarEliminar` pasó a recibir el `Item` completo en lugar del id, que es lo que
+  `menuAcciones` ya tenía a mano.
+  Verificado en navegador real (el proyecto no testea páginas, así que build/typecheck no
+  ven esto): rama bloqueada → `El item "Papas fritas" está en uso y no se puede eliminar:`
+  con su viñeta "Es componente de Combo Especial"; rama normal → `¿Estás seguro de que
+  deseas eliminar "Producto demo (unidad · CLP)"?`.
+- [x] ~~**`:disabled="!!verificandoEliminarId"` es global en `items.vue`**~~ (frontend) —
+  cerrado 2026-07-29: el `disabled` quedó acotado a la fila en verificación
+  (`verificandoEliminarId === row.original.id`), la misma condición que su `:loading`.
+  Antes, verificar el uso de un item deshabilitaba el menú de **todas** las demás filas,
+  incluidas acciones que no tienen nada que ver (ajustar stock, historial).
+  ℹ️ **Lo que esto deja como contrapartida chica:** durante la verificación en vuelo, un
+  click en "Eliminar" de otra fila es ahora un no-op silencioso (el guard de reentrancia de
+  `confirmarEliminar` lo corta) en vez de un botón visiblemente deshabilitado. Se acepta: la
+  ventana es la de un request y el precio anterior era bloquear toda la tabla.
+  ⚠️ **Este cambio afloja una de las dos capas que cubrían la carrera de "se borra el item
+  equivocado"**, así que se verificó con el escenario obligatorio de dos entidades solapadas
+  (el que un smoke de un item por vez no ve): con la respuesta de `/uso` demorada 5 s a
+  propósito, click en "Eliminar" de la fila A y después en la de B **con A en vuelo**. Se
+  disparó **un solo** request —el de A— y el modal abrió nombrando **A**, no B. El guard de
+  reentrancia es el que sostiene la invariante; el `disabled` global era redundante.
+  Técnica, por si hay que repetirlo: `navigate_page` con un `initScript` que envuelve
+  `window.fetch` y demora las URLs que matchean `/uso`.

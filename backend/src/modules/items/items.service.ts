@@ -394,7 +394,7 @@ export class ItemsService {
     tenantId: string,
     itemIds: string[],
   ): Promise<Map<string, ReturnType<ItemsService['mapRow']>>> {
-    const unicos = [...new Set(itemIds)];
+    const unicos = [...new Set(itemIds.map((id) => id.toLowerCase()))];
     if (unicos.length === 0) return new Map();
 
     const rows: ItemRow[] = await this.dataSource.query(
@@ -406,7 +406,44 @@ export class ItemsService {
     const porId = new Map(rows.map((r) => [r.item_id, this.mapRow(r)]));
     const faltante = unicos.find((id) => !porId.has(id));
     if (faltante) throw new NotFoundException('Item no encontrado');
-    return porId;
+    return this.aliasarCasingDeIds(porId, itemIds);
+  }
+
+  /**
+   * Alias de casing para los mapas indexados por `itemId`.
+   *
+   * `@IsUUID('4')` acepta el UUID en mayúsculas y Postgres castea igual, pero la
+   * BD lo devuelve en su forma canónica minúscula. Los mapas se arman con lo que
+   * devuelve la BD, así que un id en mayúsculas no los encontraba: daba
+   * `404 Item no encontrado` en los tres call sites que batchean (venta,
+   * `/calculo-precios/calcular` y checkout online).
+   *
+   * ⛔ Arreglar solo el 404 de `cargarBasePorIds` habría dejado algo PEOR que el
+   * 404: con la fila base encontrada, `cargarReglasPorIds` seguía sin match y sus
+   * llamadores hacen `?? []`, así que el ítem se cobraba **sin sus impuestos ni
+   * descuentos**, en silencio. Por eso el alias se aplica a los dos mapas.
+   *
+   * Se indexa por la forma canónica y se agrega el alias con la forma que mandó
+   * el cliente, para que el `get(linea.itemId)` de los llamadores siga sirviendo
+   * con cualquier casing sin tener que normalizar en cada uno.
+   *
+   * ⚠️ El precio de eso: cuando el cliente manda mayúsculas, el mapa queda con
+   * DOS claves para la misma fila. Estos mapas son **solo para `.get()`** — hoy
+   * los tres llamadores hacen exactamente eso. No cuentes ni recorras: `.size`,
+   * `for…of`, `.values()` u `Object.fromEntries` verían la fila duplicada. Si
+   * hace falta iterarlos, filtrá por la forma canónica.
+   */
+  private aliasarCasingDeIds<T>(
+    mapa: Map<string, T>,
+    itemIds: string[],
+  ): Map<string, T> {
+    for (const id of itemIds) {
+      const canonico = id.toLowerCase();
+      if (id === canonico) continue;
+      const entrada = mapa.get(canonico);
+      if (entrada !== undefined) mapa.set(id, entrada);
+    }
+    return mapa;
   }
 
   /**
@@ -442,7 +479,7 @@ export class ItemsService {
       { impuestosIds: string[]; descuentosIds: string[]; recargosIds: string[] }
     >
   > {
-    const unicos = [...new Set(itemIds)];
+    const unicos = [...new Set(itemIds.map((id) => id.toLowerCase()))];
     if (unicos.length === 0) return new Map();
 
     // El JOIN a `items` acota por tenant además de por id: el llamador ya
@@ -486,7 +523,7 @@ export class ItemsService {
       else if (r.clase === 'descuento') entrada.descuentosIds.push(r.regla_id);
       else entrada.recargosIds.push(r.regla_id);
     }
-    return porId;
+    return this.aliasarCasingDeIds(porId, itemIds);
   }
 
   async findOne(tenantId: string, itemId: string) {
@@ -2879,6 +2916,25 @@ export class ItemsService {
   }
 
   /**
+   * Corta con 400 un id repetido en la lista de componentes de una receta o
+   * combo. Los tres destinos (componentes de combo, ingredientes y extras de
+   * receta) tienen un índice único parcial detrás, así que sin este chequeo el
+   * duplicado pasa la validación y revienta contra el índice: 500 en vez de 400.
+   * El dato queda a salvo igual —la transacción revierte—, lo que fallaba era la
+   * calidad del error.
+   *
+   * Va SIEMPRE antes de la primera query: el chequeo es en memoria y ahorra el
+   * viaje. Eso lo vuelve más temprano que las validaciones por fila (cantidad,
+   * tipo, unidad), así que un payload con un duplicado **y** una cantidad
+   * inválida ahora reporta el duplicado. Los dos son 400 accionables.
+   */
+  private assertSinIdsRepetidos(ids: string[], mensaje: string): void {
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException(mensaje);
+    }
+  }
+
+  /**
    * Valida cada ingrediente (existe, es producto, modo 'cantidad', unidad
    * compatible) y devuelve el costo total de la receta convirtiendo cada
    * cantidad a la unidad base del ingrediente antes de multiplicar por su
@@ -2906,6 +2962,10 @@ export class ItemsService {
       unidadCodigo: string;
       bloqueante: boolean;
     }[] = [];
+    this.assertSinIdsRepetidos(
+      ingredientes.map((i) => i.ingredienteItemId),
+      'Un ingrediente no puede aparecer más de una vez en la receta',
+    );
     const filas = await this.filasValidacionPorIds(
       manager,
       tenantId,
@@ -2981,15 +3041,10 @@ export class ItemsService {
         'Los combos requieren al menos un componente',
       );
     }
-    const idsVistos = new Set<string>();
-    for (const c of componentes) {
-      if (idsVistos.has(c.componenteItemId)) {
-        throw new BadRequestException(
-          'Un item no puede aparecer más de una vez como componente del combo',
-        );
-      }
-      idsVistos.add(c.componenteItemId);
-    }
+    this.assertSinIdsRepetidos(
+      componentes.map((c) => c.componenteItemId),
+      'Un item no puede aparecer más de una vez como componente del combo',
+    );
     let costoTotal = new Decimal(0);
     const detalle: {
       componenteItemId: string;
@@ -3058,6 +3113,13 @@ export class ItemsService {
       unidadCodigo: string;
       precioExtra: string;
     }[] = [];
+    // Duplicados antes de tocar la BD, igual que `validarYCostearComponentes`:
+    // sin esto el payload pasaba la validación y reventaba contra el índice
+    // único parcial de `receta_extras_permitidos` (500 en vez de 400).
+    this.assertSinIdsRepetidos(
+      extras.map((e) => e.ingredienteItemId),
+      'Un ingrediente no puede aparecer más de una vez como extra permitido',
+    );
     const filas = await this.filasValidacionPorIds(
       manager,
       tenantId,

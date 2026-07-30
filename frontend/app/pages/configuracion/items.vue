@@ -144,6 +144,11 @@ const confirmModalOpen = ref(false)
 const stockModalOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
+// Nombre del item que el modal de confirmación va a nombrar. Se fija y se limpia
+// SIEMPRE junto con `confirmDeleteId`, en vez de buscarlo en la lista por id: así
+// no puede quedar mostrando otra fila si la lista se refiltra o se pagina con el
+// modal abierto.
+const confirmDeleteNombre = ref<string | null>(null)
 
 // Id del item cuya verificación de uso (GET /items/:id/uso) está en vuelo, o
 // null si no hay ninguna. `confirmarEliminar` la usa como guard: mientras haya
@@ -178,12 +183,17 @@ const eliminarTitulo = computed(() =>
 )
 
 const eliminarMensaje = computed(() => {
-  if (eliminarBloqueado.value) return 'Este item está en uso y no se puede eliminar:'
+  // Nombrar el item cierra la ambigüedad real de tener el modal abierto y dudar
+  // de sobre qué fila se estaba parado. El fallback cubre solo el imposible
+  // teórico: el modal se abre después de fijar el nombre.
+  const nombre = confirmDeleteNombre.value
+  const item = nombre ? `"${nombre}"` : 'este item'
+  if (eliminarBloqueado.value) return `El item ${item} está en uso y no se puede eliminar:`
   const extras = usoItem.value?.advertencias ?? []
   if (extras.length) {
-    return `Se ofrece como extra en ${extras.map((a) => a.nombre).join(', ')}. Si lo eliminás dejará de estar disponible en esas recetas.`
+    return `${nombre ? `El item ${item}` : 'Este item'} se ofrece como extra en ${extras.map((a) => a.nombre).join(', ')}. Si lo eliminás dejará de estar disponible en esas recetas.`
   }
-  return '¿Estás seguro de que deseas eliminar este item? Esta acción no se puede deshacer.'
+  return `¿Estás seguro de que deseas eliminar ${item}? Esta acción no se puede deshacer.`
 })
 
 // Simulador de impacto de costos en recetas: se dispara tras una compra
@@ -652,7 +662,7 @@ function menuAcciones(item: Item) {
       label: 'Eliminar',
       icon: 'i-lucide-trash-2',
       color: 'error',
-      onSelect: () => confirmarEliminar(item.id),
+      onSelect: () => confirmarEliminar(item),
     },
   ])
 
@@ -961,16 +971,18 @@ async function guardar() {
   }
 }
 
-async function confirmarEliminar(id: string) {
+async function confirmarEliminar(item: Item) {
   if (verificandoEliminarId.value) return
-  verificandoEliminarId.value = id
+  verificandoEliminarId.value = item.id
   try {
-    usoItem.value = await useApiFetch<UsoItem>(`${apiUrl}/items/${id}/uso`)
-    confirmDeleteId.value = id
+    usoItem.value = await useApiFetch<UsoItem>(`${apiUrl}/items/${item.id}/uso`)
+    confirmDeleteId.value = item.id
+    confirmDeleteNombre.value = item.nombre
     confirmModalOpen.value = true
   } catch (e) {
     usoItem.value = null
     confirmDeleteId.value = null
+    confirmDeleteNombre.value = null
     toast.add({
       title: apiErrorMsg(e, 'Error al verificar el uso del item'),
       color: 'error',
@@ -1302,7 +1314,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 size="sm"
                 title="Más acciones"
                 :loading="verificandoEliminarId === row.original.id"
-                :disabled="!!verificandoEliminarId"
+                :disabled="verificandoEliminarId === row.original.id"
               />
             </UDropdownMenu>
           </div>

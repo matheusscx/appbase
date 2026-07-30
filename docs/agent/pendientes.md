@@ -83,23 +83,6 @@ identificamos con ubicación concreta.
   Mitigación que funcionó las dos veces: correr `reset-db.sh` **inmediatamente antes** del
   e2e, sin lint/typecheck/unit en el medio. Cierre posible: que el script espere a que el
   backend quede estable, o correr el e2e contra un stack sin watch.
-- [ ] **Tres suites e2e dejan la caja abierta al terminar** (backend, `test/combos`,
-  `grupos-modificadores`, `grupos-modificadores-overrides` y `recetas.e2e-spec.ts`)
-  — ✅ `liquidacion-propinas` corregida 2026-07-27: al agregarle un test cambió el orden en
-  que jest ordena los archivos, pasó a correr antes que `caja.e2e-spec.ts` y su fuga
-  apareció como **11 fallos con 409 al abrir**, exactamente el escenario que esta entrada
-  predecía. `ventas.e2e-spec.ts` también quedó corregida el mismo día (su `cerrar` mandaba
-  `lineas: []` sobre una caja que siempre descuadra). El cierre de caja es en **dos fases**
-  (`POST /:id/conteo`
-  congela el arqueo y auto-cierra si cuadra; si descuadra pasa a `en_conciliacion` y hay
-  que resolver con `POST /:id/cerrar`). Las que quedan llaman solo a la segunda **e ignoran el
-  status**, así que no cierran nada y el cajón queda ocupado. Hoy la suite pasa porque
-  sobran cajones, no porque esté bien: al agregar tests cambia el orden en que jest
-  ordena las suites y la fuga aparece como un `409` críptico en `caja.e2e-spec.ts`, a
-  varios archivos de distancia de la causa. Ya pasó (jul-2026) y costó media hora
-  diagnosticarlo. `ventas.e2e-spec.ts` ya está corregido (commit `c8e3abe`): copiar ese
-  helper `cerrarCaja`, que además **asevera** el cierre en vez de tragarse el error.
-  El patrón bueno de referencia es `cerrarEnDosFases` en `caja.e2e-spec.ts:105`.
 ---
 
 ## Suite E2E de navegador (fundación lista, flujos por escribir)
@@ -223,16 +206,6 @@ independiente, y las ramas que ningún test toca.
 
 ### Huecos de test
 
-- [ ] **Eliminar la rama muerta `MANUAL`+`MONTOS` de `repartirGrupo`** (backend,
-  `propinas/liquidacion-propinas.service.ts`) — código muerto **confirmado por dos
-  caminos**: `redistribuirGrupo` tiene su propio chequeo de `MANUAL`+`MONTOS` que la
-  saltea antes de llegar, y el único call site que sí la alcanza (`buildParticipantesData`)
-  produce el mismo `'0.0000'` que daría el retorno temprano de "suma de pesos cero".
-  Borrarla no cambia ningún resultado observable, y por eso **no se puede escribir un test
-  honesto que la discrimine**: el cierre correcto es sacarla, no cubrirla. Quedó fuera del
-  batch de huecos de test del 2026-07-27 porque es un cambio de producción, no de tests
-  (contexto completo en [`resueltos.md`](resueltos.md)).
-
 **Ramas sin cobertura alguna**, para decidir si entran: `HORAS_TRABAJADAS`;
 `advertenciasSesionesAbiertas` con `fin_el = null`; las guardas `fechaHasta <= fechaDesde`,
 `gruposConfig.length === 0` y moneda oficial ausente; `aplicarCambioParticipante` (alta
@@ -353,15 +326,6 @@ Ver [`resueltos.md`](resueltos.md).
   de `''`/`null` ("borrar"), pero el front colapsa todo lo falsy con `|| undefined` y el campo
   ni viaja. El usuario borra el texto, ve "Item actualizado", y el valor sigue ahí. Mismo bug
   en `duracionEstimada` (`:866`), donde además tapa el `0` legítimo.
-- [ ] **Un `itemId` en mayúsculas devuelve 404 desde que se batchea** (backend,
-  `items.service.ts` → `cargarBasePorIds`) — `@IsUUID('4')` acepta mayúsculas y Postgres
-  castea sin problema, pero el mapa se arma con el UUID canónico en minúsculas que devuelve
-  la BD y el chequeo de faltantes compara contra el string tal cual lo mandó el cliente.
-  Con `findOne` funcionaba. Es un defecto heredado que ya afectaba a ventas y que ahora
-  llega también al **endpoint de precios** y al **checkout online**
-  (`online.service.ts:232`), los dos call sites que migraron a `cargarBasePorIds` el
-  2026-07-28. Cierre: normalizar a minúsculas antes de comparar, en `cargarBasePorIds`
-  —un solo lugar arregla los tres.
 - [ ] **`unidadBase`/`forzarConteo` divergen entre venta y checkout online** (backend,
   `online.service.ts:239-253` vs `ventas.service.ts:169-180`) — la venta trata
   `'receta' || 'combo'` como conteo; el checkout online, solo `'receta'`. Es la misma
@@ -391,12 +355,6 @@ Ver [`resueltos.md`](resueltos.md).
   `calculo-precios.service.ts:188`) — **hallazgo del refutador, ninguna lente lo vio**: el
   `.toFixed(4)` ignora `escalaCalculo` y `modoRedondeo` del tenant, y ocurre justo antes de
   entregarle el precio al motor que sí los respeta. Un paso de redondeo fuera de la config.
-- [ ] **Ingrediente o extra duplicado en una receta devuelve 500, no 400** (backend,
-  `items.service.ts:2695` y `:2860`) — `validarYCostearComponentes` rechaza duplicados con un
-  `Set` (`:2796`); sus dos funciones gemelas no. El payload pasa la validación y revienta
-  contra el índice único parcial. Bajado de media: la transacción revierte y el índice
-  sostiene el dato, lo único malo es la calidad del error. Asimetría entre gemelas, no
-  decisión consciente.
 
 - [ ] **Quedan CUATRO `convertirUnidad` dentro de loops, dos de ellos en el camino de una
   venta** (backend, `items.service.ts`) — una query a `unidades_medida` por iteración.
@@ -502,17 +460,6 @@ Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` 
   fila de `receta_extras_permitidos` deja una fila viva apuntando a un item ya
   muerto. Ventana de milisegundos entre dos escrituras de admin; es la misma clase de
   carrera que ya tienen los tres bloqueos preexistentes (ingrediente, combo, opción).
-- [ ] **`:disabled="!!verificandoEliminarId"` es global en `items.vue`** (frontend)
-  — mientras se verifica el uso de un item, el menú de acciones de **todas** las
-  demás filas queda deshabilitado, no solo el de esa fila. El guard de función
-  (`verificandoEliminarId` como lock de reentrancia) ya cubre la carrera real, así
-  que el `disabled` global es cinturón sobre tirantes; podría acotarse a la fila que
-  está en verificación.
-- [ ] **El modal de confirmación nunca nombra el item que se va a borrar**
-  (frontend, `configuracion/items.vue`) — preexistente al fix de `/uso`. Ahora que el
-  mensaje ya es dinámico según `bloqueos`/`advertencias`, incluir el nombre del item
-  cuesta poco y cierra una ambigüedad real si el usuario tiene el modal abierto y
-  duda de sobre cuál fila estaba parado.
 
 ## Revisión final `advertencias-previsualizacion` (2026-07-29)
 

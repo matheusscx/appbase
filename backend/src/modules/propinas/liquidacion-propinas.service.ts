@@ -1626,13 +1626,13 @@ export class LiquidacionPropinasService {
     'id' | 'creadoEl' | 'actualizadoEl' | 'eliminadoEl'
   >[] {
     if (participantes.length === 0) return [];
-    if (
-      grupo.criterio === CriterioDistribucion.MANUAL &&
-      grupo.manualModo === ManualModo.MONTOS
-    ) {
-      return participantes;
-    }
-
+    // Sin atajo para `MANUAL`+`MONTOS`: el que había era código muerto por los
+    // dos caminos. `redistribuirGrupo` tiene su propio chequeo del par y no llega
+    // acá; y por `buildParticipantesData` los borradores entran con
+    // `monto: '0.0000'`, así que devolverlos tal cual daba lo mismo que el camino
+    // normal —`pesoParticipante` no puntúa ese par, `sumaPesos` queda en 0 y el
+    // retorno temprano de abajo produce el mismo `'0.0000'`—. Por eso no se podía
+    // escribir un test que discriminara la rama: se saca, no se cubre.
     const pesos = participantes.map((p) => ({
       id: p.garzonId,
       peso: this.pesoParticipante(p, grupo.criterio, config.manualModo),
