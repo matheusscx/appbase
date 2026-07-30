@@ -620,6 +620,34 @@ tres en la sección de auditorías de arriba.
   **Por qué está acá y no como deuda:** es una decisión de arquitectura transversal, y ya
   bloquea al menos una tarea concreta (ver la entrada de la regla desactivada). Sin ella, cada
   feature decide por su cuenta si borra blando o duro, y termina habiendo tres criterios.
+
+  ⚠️ **Antes de diseñar, partir el problema — el enunciado pide más de lo que el caso de uso
+  necesita.** El caso que lo motivó ("borré algo, reponelo") no es el mismo problema que
+  "volvé esto a como estaba el martes", y se resuelven distinto:
+
+  | Necesidad | Qué la resuelve | Costo |
+  |---|---|---|
+  | "Me equivoqué recién" | **Deshacer** en el toast de la acción, ventana de segundos | Bajo, sin esquema |
+  | "Borré algo la semana pasada" | **Papelera + restaurar** sobre el soft delete que ya existe | Bajo-medio, casi todo UI |
+  | "¿Quién cambió este precio?" | **Bitácora** append-only, que no revierte nada | Medio |
+  | "Volvé esto a como estaba el martes" | **Versionado** de la entidad | Alto |
+
+  **La observación que abarata todo:** la invariante 3 obliga a soft delete, así que para casi
+  toda entidad **el dato borrado ya está en la base**. Para la segunda fila no falta dónde
+  guardarlo: falta un endpoint de restaurar y una pantalla. Las puentes de reglas de precio son
+  la excepción, no la regla — arreglar la excepción sale más barato que construir la pieza
+  general.
+
+  **Límite que ningún diseño cambia:** hay dos lugares donde el proyecto ya decidió que no se
+  revierte — el kardex es inmutable y se compensa con un movimiento contrario (ADR-007), y el
+  hecho fiscal de una venta emitida se congela (ADR-010). Un "revertir cualquier cosa" uniforme
+  no es alcanzable: parte del sistema seguirá siendo compensar, no deshacer.
+
+  ℹ️ El mercado ya resolvió esto (Toast, Square, Lightspeed tienen papelera, undo y bitácora,
+  y las diferencias entre ellos son informativas). El owner **todavía no pidió** la pasada de
+  investigación: ofrecida el 2026-07-30, queda a su decisión
+  (`docs/agent/investigacion-mercado.md`).
+
   Preguntas a responder antes de diseñar, ninguna respondida:
   - **¿Revertir qué?** ¿Solo borrados, o también ediciones (volver un precio a su valor
     anterior)? Lo primero es un cementerio de filas; lo segundo es versionado y es otro
