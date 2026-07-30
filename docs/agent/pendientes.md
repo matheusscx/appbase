@@ -379,19 +379,6 @@ Ver [`resueltos.md`](resueltos.md).
   `.toFixed(4)` ignora `escalaCalculo` y `modoRedondeo` del tenant, y ocurre justo antes de
   entregarle el precio al motor que sí los respeta. Un paso de redondeo fuera de la config.
 
-- [ ] **El conversor de unidades no se comparte entre líneas de la misma venta** (backend,
-  `ventas.service.ts`) — resto del batch de conversiones cerrado el 2026-07-30
-  ([`resueltos.md`](resueltos.md)), detectado por la revisión independiente. Adentro de una
-  línea el catálogo ya se lee una sola vez, por profunda que sea la expansión del combo;
-  pero `ventas.service.ts` llama a `venderIngredientesReceta`/`venderComponentesCombo`
-  **dentro de su loop de líneas** y no les pasa `convertir`, así que cada una carga el suyo.
-  Un pedido de dos platos distintos lee `unidades_medida` dos veces.
-  El cierre es chico y el parámetro ya existe (es opcional justamente para esto): crear el
-  conversor una vez antes del loop de `ordenLocks` y pasarlo en los dos llamados. **No entró
-  con el batch** porque la entrada original listaba los cuatro loops internos de
-  `items.service.ts` y este es un nivel más arriba, en otro módulo y en el camino de la
-  venta. Prioridad baja: son N queries por venta contra una tabla global chica, no N×M.
-
 ### Decidido por el owner (pendiente de respuesta)
 
 - [ ] **¿Con qué criterio se ordenan los descuentos de un ítem?** (backend,

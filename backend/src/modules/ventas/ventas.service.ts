@@ -10,7 +10,7 @@ import Decimal from 'decimal.js';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
-import { ItemsService } from '../items/items.service';
+import { ItemsService, type ConvertirUnidad } from '../items/items.service';
 import { PagosService, calcularEstadoVenta } from '../pagos/pagos.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { EstrategiaAsignacionPropina } from '../propinas/enums/estrategia-asignacion-propina.enum';
@@ -465,6 +465,13 @@ export class VentasService {
         );
         return cmp !== 0 ? cmp : a - b;
       });
+    // Conversor de unidades compartido por TODAS las líneas del carrito.
+    // `??=`: se carga en la primera línea que expanda una receta o un combo y
+    // se reusa en las siguientes; un carrito de puros productos no paga la
+    // query. Sin esto, cada línea cargaba el catálogo de nuevo — adentro de la
+    // línea ya se leía una sola vez, pero un pedido de dos platos distintos lo
+    // leía dos veces.
+    let convertir: ConvertirUnidad | undefined;
     for (const i of ordenLocks) {
       const { item, linea, personalizacion, cantidadCanonica } =
         lineasConversion[i];
@@ -481,6 +488,7 @@ export class VentasService {
           loteId: linea.loteId,
         });
       } else if (item.tipo === 'receta') {
+        convertir ??= await this.catalogService.crearConversor();
         const advertenciasIngrediente =
           await this.itemsService.venderIngredientesReceta(manager, {
             tenantId,
@@ -490,9 +498,11 @@ export class VentasService {
             recetaNombre: item.nombre,
             cantidadVendida: cantidadCanonica,
             snapshot: personalizacion ?? undefined,
+            convertir,
           });
         advertencias.push(...advertenciasIngrediente);
       } else if (item.tipo === 'combo') {
+        convertir ??= await this.catalogService.crearConversor();
         const advertenciasComponente =
           await this.itemsService.venderComponentesCombo(manager, {
             tenantId,
@@ -502,6 +512,7 @@ export class VentasService {
             comboNombre: item.nombre,
             cantidadVendida: cantidadCanonica,
             snapshot: personalizacion ?? undefined,
+            convertir,
           });
         advertencias.push(...advertenciasComponente);
       }

@@ -228,6 +228,10 @@ describe('VentasService', () => {
             findAllUnidadesMedida: jest
               .fn()
               .mockResolvedValue(UNIDADES_CATALOGO),
+            // Conversor con el catálogo ya cargado, compartido por las líneas
+            // del carrito. La venta no lo invoca: solo lo crea y lo baja a
+            // items.service, que es quien convierte.
+            crearConversor: jest.fn().mockResolvedValue(jest.fn()),
           },
         },
         {
@@ -322,6 +326,98 @@ describe('VentasService', () => {
         'item-c',
       ]);
       expect(itemsService.findOne).not.toHaveBeenCalled();
+    });
+
+    it('carga el catálogo de unidades UNA vez para todo el carrito, no una por línea', async () => {
+      // Adentro de una línea el catálogo ya se leía una sola vez (el conversor
+      // baja por el árbol de expansión); lo que faltaba era compartirlo ENTRE
+      // líneas. Un pedido de dos platos distintos lo leía dos veces.
+      const dtoDosRecetas = {
+        ...baseDto,
+        lineas: [
+          { itemId: 'receta-a', cantidad: '1' },
+          { itemId: 'receta-b', cantidad: '1' },
+        ],
+      };
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        mapaDe({ ...mockItem, tipo: 'receta' }),
+      );
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: dtoDosRecetas.lineas.map((l) => ({
+          ...mockResultadoVenta.lineas[0],
+          itemId: l.itemId,
+        })),
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, dtoDosRecetas);
+
+      expect(catalogService.crearConversor).toHaveBeenCalledTimes(1);
+      // Y es el MISMO conversor el que reciben las dos líneas: contar las
+      // cargas sin esto dejaría pasar un segundo conversor creado en otro lado.
+      const conversor =
+        await catalogService.crearConversor.mock.results[0].value;
+      const recibidos = (
+        itemsService.venderIngredientesReceta as jest.Mock
+      ).mock.calls.map((c) => (c[1] as { convertir: unknown }).convertir);
+      expect(recibidos).toEqual([conversor, conversor]);
+    });
+
+    it('carrito mixto: la receta y el combo comparten el mismo conversor', async () => {
+      // Las dos ramas del `if/else` leen la misma variable, así que compartir
+      // entre tipos distintos sale gratis — pero eso es una propiedad del
+      // código, no algo que los otros dos tests (dos líneas del MISMO tipo)
+      // ejerzan. Acá se afirma.
+      const dtoMixto = {
+        ...baseDto,
+        lineas: [
+          { itemId: 'receta-a', cantidad: '1' },
+          { itemId: 'combo-b', cantidad: '1' },
+        ],
+      };
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        (_tenantId: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id) => [
+                id,
+                {
+                  ...mockItem,
+                  id,
+                  tipo: id.startsWith('receta') ? 'receta' : 'combo',
+                } as never,
+              ]),
+            ),
+          ),
+      );
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: dtoMixto.lineas.map((l) => ({
+          ...mockResultadoVenta.lineas[0],
+          itemId: l.itemId,
+        })),
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, dtoMixto);
+
+      expect(catalogService.crearConversor).toHaveBeenCalledTimes(1);
+      const conversor =
+        await catalogService.crearConversor.mock.results[0].value;
+      const recetaArgs = (itemsService.venderIngredientesReceta as jest.Mock)
+        .mock.calls[0][1] as { convertir: unknown };
+      const comboArgs = (itemsService.venderComponentesCombo as jest.Mock).mock
+        .calls[0][1] as { convertir: unknown };
+      expect(recetaArgs.convertir).toBe(conversor);
+      expect(comboArgs.convertir).toBe(conversor);
+    });
+
+    it('un carrito de puros productos no carga el catálogo de unidades', async () => {
+      // La carga es perezosa: la paga la primera línea que expanda una receta o
+      // un combo. Sin esto, la venta más común del POS pagaría una query que no
+      // usa — es el intercambio que este batch tenía que evitar.
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      expect(catalogService.crearConversor).not.toHaveBeenCalled();
     });
 
     it('bloquea la caja física dentro de la transacción antes de escribir', async () => {

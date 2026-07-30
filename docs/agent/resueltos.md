@@ -952,11 +952,9 @@ siguen diferidos están en `pendientes.md`.
   (`desde === hacia`, que `convertirUnidad` cortocircuitaba sin consultar). Se acepta: es
   **una** query fija contra una tabla global chica, contra un costo que antes escalaba con
   el tamaño del loop. Vale saber que el intercambio existe.
-  ℹ️ **El alcance real de "una vez"**: una vez por **línea** de venta, no por venta.
-  `ventas.service.ts` llama a estas dos funciones dentro de su loop de líneas y no pasa el
-  conversor —ese nivel no estaba en la entrada, que listaba los cuatro loops internos de
-  `items.service.ts`—, así que un pedido con dos platos distintos sigue cargando el catálogo
-  dos veces. Queda anotado en [`pendientes.md`](pendientes.md).
+  ℹ️ **El alcance de "una vez" era por línea, no por venta** — `ventas.service.ts` llamaba a
+  estas dos funciones dentro de su loop de líneas sin pasar el conversor. **Cerrado el mismo
+  día**, ver la entrada de abajo.
   **Mutante verificado revirtiendo** ([[mutante-debe-revertir-no-solo-romper]]): sacando el
   `convertir` que el combo le pasa a la receta, el test nuevo pasa de **1 a 3** cargas del
   catálogo y falla. El test vende un combo de 2 componentes-receta de 2 ingredientes cada uno
@@ -965,6 +963,33 @@ siguen diferidos están en `pendientes.md`.
   (con la aritmética real por defecto) en vez de una función anónima, así los tests que
   pisaban `convertirUnidad` pasaron a pisar el conversor. Es lo que hace observable la
   cantidad de cargas.
+
+- [x] ~~**El conversor de unidades no se comparte entre líneas de la misma venta**~~
+  (backend, `ventas.service.ts`) — abierto y cerrado el 2026-07-30. Lo detectó la revisión
+  independiente del batch de arriba, al notar que el texto de cierre afirmaba "una vez por
+  operación" cuando el loop de líneas de la venta seguía creando uno por línea.
+  El cierre es `let convertir` antes del loop de `ordenLocks` + `convertir ??= await
+  crearConversor()` en las ramas de receta y de combo, aprovechando que el parámetro ya
+  estaba puesto como opcional exactamente para esto. `salones.service.ts` entra por
+  `crearEnTransaccion`, así que el cierre de cuenta queda cubierto por el mismo loop.
+  **El `??=` no es cosmético: es lo que evita repetir el intercambio que el batch anterior
+  sí pagó.** Con carga *eager* antes del loop, la venta más común del POS —un carrito de
+  puros productos— habría empezado a pagar una query que no usa. Perezosa, la paga la
+  primera línea que expande una receta o un combo, y las demás la reusan.
+  **Dos mutantes verificados, uno por cada mitad de la regla:** volver a `convertir =` (sin
+  `??`) lleva las cargas de 1 a 2 con dos líneas de receta y cae el primer test; cargarlo
+  eager antes del loop lleva de 0 a 1 en el carrito de productos y cae el segundo. El primer
+  test además afirma que las dos líneas reciben **el mismo** conversor, no solo que se cargó
+  una vez: contar cargas sin eso dejaría pasar un segundo conversor creado en otro lado.
+  El hueco que marcó la revisión —los dos tests usaban líneas del **mismo** tipo, así que
+  compartir *entre* ramas no estaba ejercido— se cerró con un tercer test de carrito mixto
+  (receta + combo) que afirma que las dos ramas reciben la misma instancia.
+  ⚠️ **Al mutarlo apareció algo que conviene saber para el próximo test de este loop:**
+  mutar la rama del combo **no** rompe nada, porque `ordenLocks` ordena por `item.id` y
+  `combo-b` corre antes que `receta-a` — la primera rama que corre setea la variable igual
+  con `=` que con `??=`. El mutante válido es sobre la rama que corre **segunda**, y ahí sí
+  las cargas van de 1 a 2. Un mutante sobre este loop que "no rompe nada" puede estar
+  midiendo el orden de `ordenLocks`, no la lógica.
 
 ### Media / Baja — cerrados el 2026-07-30
 
