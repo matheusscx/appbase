@@ -276,20 +276,6 @@ Ver [`resueltos.md`](resueltos.md).
   TypeORM — es solo `activo`. Lo que lo vuelve bug y no decisión: `items.vue:685` ya filtra
   por `activo` al ofrecer asociaciones nuevas, así que el front la esconde y el back la
   sigue cobrando.
-- [ ] **`precio_base` se puede crear o editar en negativo** (backend,
-  `dto/create-item.dto.ts:147`, `dto/update-item.dto.ts:59`) — solo `@IsNumberString()`, sin
-  `CHECK` en la tabla (`startup-pos.sql:503`) y sin validación en `create`/`update`. El dato
-  que importa para priorizarlo: el barrido de positividad de jul-2026 dejó
-  `@IsDecimalNoNegativo` en `ventas`, `caja` y `propinas` — **los tres módulos que se
-  auditaron**. Se detuvo en el borde del alcance y el catálogo quedó afuera. El propio
-  módulo sabe hacerlo: `aplicarDesfases:3138` exige `precioBase > 0`.
-  ℹ️ **Dato para quien cierre esto:** desde el piso en cero (2026-07-28) el motor **ya
-  reacciona** a un neto negativo, y conviene saber cómo antes de endurecer el DTO: los
-  descuentos de esa línea quedan en 0 (el disponible da 0), con advertencia si eran
-  `monto_fijo` y **sin** advertencia si eran porcentaje —ahí el monto sale negativo y lo
-  neutraliza la invariante de "ninguna regla aporta magnitud negativa", sin llegar al tope—.
-  Lo que el motor **no** evita es que el total quede negativo por el precio en sí:
-  `precioUnitario: '-100'` sin reglas da `totalFinal: -100`.
 - [ ] **`AjusteStockDto.cantidad` es `number` nativo** (backend, `dto/ajuste-stock.dto.ts:51`)
   — único en el módulo; los otros cinco campos de cantidad son string + `@IsNumberString()`.
   **Escenario del buscador descartado** (exigía que el cliente ya mandara el número roto).
@@ -628,3 +614,25 @@ tres en la sección de auditorías de arriba.
 
   Cerrar cuando aparezca la necesidad real: hoy el caso que motiva el recuento es food-service,
   donde insumos e ingredientes son todos `cantidad`.
+
+## Revisión final `precio-base-negativo` (2026-07-29)
+
+- [ ] **Tres hermanos de dinero del módulo `items` siguen sin validación de signo**
+  (backend) — los dejó a la vista el cierre de `precio_base` negativo
+  ([`resueltos.md`](resueltos.md)), que se acotó al campo que nombraba la entrada. Los
+  encontró la revisión independiente y están **verificados uno por uno**:
+  - `dto/create-item.dto.ts:206` — **`costo`**, con `@IsNumberString()` y nada más. Es el
+    único de los tres que es un agujero limpio. En `update` no aplica: ahí el campo está
+    bloqueado por `CostoNoEditableConstraint` (`dto/update-item.dto.ts:126`), que rechaza
+    cualquier valor, así que el signo es irrelevante.
+  - `dto/create-item.dto.ts:79` (`RecetaExtraInputDto.precioExtra`) y `:112`
+    (`ItemGrupoOpcionOverrideInputDto.precioExtra`, que `update-item.dto.ts` también reusa vía
+    `gruposModificadores`) — dinero, `@IsNumberString()` sin signo.
+  - `dto/aplicar-desfases.dto.ts:22` (`AplicarDesfaseItemDto.precioBase`) — **no es agujero
+    funcional**: `items.service.ts` ya rechaza `<= 0` a mano con un 400 antes de escribir. Lo
+    que queda es la inconsistencia: lógica duplicada en vez del decorador que este mismo
+    cierre estableció como patrón del módulo. Ojo con el criterio si se toca: ahí es
+    `> 0` (positivo estricto), no `>= 0`.
+  Cerrarlo es el mismo movimiento ya hecho dos veces (decorador + spec de DTO con los RED
+  verificados), pero **el criterio se decide por campo**: `costo` y `precioExtra` admiten `0`
+  (un extra gratis es legítimo), `aplicarDesfases` no.

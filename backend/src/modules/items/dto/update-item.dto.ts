@@ -23,6 +23,7 @@ import {
   ComboComponenteInputDto,
   ItemGrupoModificadorInputDto,
 } from './create-item.dto';
+import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 
 @ValidatorConstraint({ name: 'costoNoEditable', async: false })
 export class CostoNoEditableConstraint implements ValidatorConstraintInterface {
@@ -56,7 +57,9 @@ export class UpdateItemDto {
   @IsOptional()
   descripcion?: string;
 
+  // Mismo criterio que en `CreateItemDto`: no negativo, con el `0` válido.
   @IsNumberString()
+  @IsDecimalNoNegativo()
   @IsOptional()
   precioBase?: string;
 

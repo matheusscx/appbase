@@ -14,6 +14,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 
 export class SerieInputDto {
   @IsString()
@@ -144,7 +145,12 @@ export class CreateItemDto {
   @IsOptional()
   descripcion?: string;
 
+  // Dinero, y la columna no tiene `CHECK` (`startup-pos.sql`): el DTO es la única
+  // barrera. `>= 0` y no `> 0`: el `0` es legítimo —el service lo fuerza para los
+  // ingredientes— y el negativo no tiene lectura posible (llega a `totalFinal`
+  // negativo sin que ninguna regla lo neutralice).
   @IsNumberString()
+  @IsDecimalNoNegativo()
   precioBase: string;
 
   @IsUUID()

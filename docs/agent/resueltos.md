@@ -801,6 +801,24 @@ siguen diferidos están en `pendientes.md`.
 
 ### Media / Baja — cerrados el 2026-07-29
 
+- [x] ~~**`precio_base` se puede crear o editar en negativo**~~ (backend,
+  `dto/create-item.dto.ts`, `dto/update-item.dto.ts`) — cerrado 2026-07-29 con
+  `@IsDecimalNoNegativo()` en los dos DTOs, que es donde estaba el agujero: la columna no
+  tiene `CHECK` (`startup-pos.sql`), así que el DTO era la única barrera y solo pedía
+  `@IsNumberString()`. Completa el barrido de positividad de jul-2026, que se había detenido
+  en el borde de los tres módulos auditados (ventas, caja, propinas) y dejó el catálogo
+  afuera.
+  **El criterio es `>= 0`, no `> 0`, y no es una preferencia:** el `0` lo genera el sistema
+  solo —`items.service.ts` fuerza `'0'` para `tipo === 'ingrediente'` en create y en
+  update—, así que exigir positivo estricto tumbaría un caso propio. Lo que no tiene lectura
+  posible es el negativo: `precioUnitario: '-100'` sin reglas da `totalFinal: -100` y ninguna
+  invariante del motor lo neutraliza (ver la nota de la entrada original).
+  Lo fija `dto/precio-base.dto.spec.ts` con 6 casos y **los 2 RED verificados** (los de
+  negativo fallaban contra el código anterior; los 4 de aceptación ya pasaban antes, que es
+  lo que prueba que el payload es válido y los RED no fallaban por otra razón): 0 y decimales
+  aceptados en create, ausencia y 0 aceptados en update —el `@IsOptional()` sigue
+  funcionando—, y `-100` / `-0.01` rechazados en cada uno.
+
 - [x] ~~**`remove()` chequea uso sin filtrar por tenant**~~ (backend, `items.service.ts`) —
   **la entrada estaba vieja: ya no aplicaba** (verificado 2026-07-29). Sus tres líneas
   citadas (`:1514`, `:1528`, `:1542`) no existen más; hoy `remove()` delega en
