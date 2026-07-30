@@ -4,19 +4,8 @@ import type { Turno } from '~/composables/useTurnos'
 
 // La lectura es abierta (`Salones:Leer`), pero cada escritura pega a un endpoint
 // con su propio `@RequiresPermiso`. Turnos NO tiene módulo propio: sus rutas
-// piden permisos de **Salones**. Tres permisos separados y no un `puedeEscribir`
-// único: el backend los separa a propósito y colapsarlos escondería el editar a
-// quien solo tiene `Actualizar`.
-const permissionsStore = usePermissionsStore()
-const puedeCrear = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Crear'),
-)
-const puedeActualizar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Actualizar'),
-)
-const puedeEliminar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Eliminar'),
-)
+// piden permisos de **Salones**.
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones')
 
 const toast = useToast()
 const turnosApi = useTurnos()

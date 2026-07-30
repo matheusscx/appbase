@@ -9,14 +9,11 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 const toast = useToast()
 const { formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
-const permissionsStore = usePermissionsStore()
 const sesionesApi = useSesionesGarzon()
 const garzonesApi = useGarzones()
 const turnosApi = useTurnos()
 
-const puedeForzarCierre = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Actualizar'),
-)
+const { puedeActualizar: puedeForzarCierre } = usePermisosCrud('Salones')
 
 const abiertas = ref<SesionGarzon[]>([])
 const loadingAbiertas = ref(false)

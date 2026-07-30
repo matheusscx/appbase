@@ -49,10 +49,7 @@ const emit = defineEmits<{
 // usan tres (`recetas-desfases`, `configuracion/items`, `inventario`) y las
 // tres necesitan el mismo permiso: repetirlo en cada una es una copia que se
 // desincroniza. "Después" no escribe, así que no se gatea.
-const permissionsStore = usePermissionsStore()
-const puedeAplicar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Items', 'Actualizar'),
-)
+const { puedeActualizar: puedeAplicar } = usePermisosCrud('Items')
 
 const { formatMonto, formatPorcentaje } = useFormatters()
 

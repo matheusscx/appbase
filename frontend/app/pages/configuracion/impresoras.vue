@@ -3,19 +3,8 @@ import type { TableColumn } from '@nuxt/ui'
 import type { Impresora, RolImpresora, TipoConexionImpresora } from '~/composables/useImpresoras'
 
 // La lectura es abierta (`Impresoras:Leer`), pero cada escritura pega a un
-// endpoint con su propio `@RequiresPermiso`. Tres permisos separados y no un
-// `puedeEscribir` único: el backend los separa a propósito y colapsarlos
-// escondería el editar a quien solo tiene `Actualizar`.
-const permissionsStore = usePermissionsStore()
-const puedeCrear = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Crear'),
-)
-const puedeActualizar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Actualizar'),
-)
-const puedeEliminar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Impresoras', 'Eliminar'),
-)
+// endpoint con su propio `@RequiresPermiso`.
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Impresoras')
 
 const toast = useToast()
 const impresorasApi = useImpresoras()

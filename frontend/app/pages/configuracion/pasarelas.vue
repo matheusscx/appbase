@@ -36,7 +36,9 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const toast = useToast()
 const { formatFecha } = useFormatters()
-const permissionsStore = usePermissionsStore()
+// Cada control con el permiso de SU endpoint; el `esAdmin ||` vive en el
+// composable para no volver a copiarlo mal.
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Pasarelas')
 
 const tab = ref('config')
 const tabs = [
@@ -298,7 +300,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
     <template v-if="tab === 'config'">
       <div class="flex justify-end">
         <UButton
-          v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Crear')"
+          v-if="puedeCrear"
           icon="i-lucide-plus"
           label="Agregar pasarela"
           @click="abrirCrear"
@@ -327,7 +329,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UButton
-              v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Actualizar')"
+              v-if="puedeActualizar"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
@@ -335,7 +337,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
               @click="abrirEditar(row.original)"
             />
             <UButton
-              v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Eliminar')"
+              v-if="puedeEliminar"
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
@@ -357,7 +359,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
     <template v-else-if="tab === 'keys'">
       <div class="flex justify-end">
         <UButton
-          v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Crear')"
+          v-if="puedeCrear"
           icon="i-lucide-plus"
           label="Nueva API key"
           @click="() => { crearKeyOpen = true }"
@@ -391,7 +393,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UButton
-              v-if="!row.original.revocadaEl && (permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Eliminar'))"
+              v-if="!row.original.revocadaEl && puedeEliminar"
               icon="i-lucide-ban"
               color="error"
               variant="ghost"

@@ -6,18 +6,7 @@ import { FORMA_MESA_OPTIONS, TAMANO_MESA_OPTIONS } from '~/composables/useSalone
 // con su propio `@RequiresPermiso`. Salón y mesa comparten los tres permisos del
 // módulo. `Salones:Operar` no entra acá: es de la operación (cuentas, comandas),
 // no de esta pantalla de configuración.
-// Tres permisos separados y no un `puedeEscribir` único: el backend los separa a
-// propósito y colapsarlos escondería el editar a quien solo tiene `Actualizar`.
-const permissionsStore = usePermissionsStore()
-const puedeCrear = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Crear'),
-)
-const puedeActualizar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Actualizar'),
-)
-const puedeEliminar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Eliminar'),
-)
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones')
 
 const toast = useToast()
 const salonesApi = useSalones()

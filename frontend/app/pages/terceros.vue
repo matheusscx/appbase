@@ -5,19 +5,8 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 // La lectura es abierta (`Terceros:Leer`), pero cada escritura pega a un
 // endpoint con su propio `@RequiresPermiso`. Sin gatear, el usuario llena el
-// drawer entero para recibir un 403. Tres permisos distintos y NO un único
-// `puedeEscribir`: el backend los separa a propósito, y colapsarlos acá
-// escondería el botón de editar a quien solo tiene `Actualizar`.
-const permissionsStore = usePermissionsStore()
-const puedeCrear = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Terceros', 'Crear'),
-)
-const puedeActualizar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Terceros', 'Actualizar'),
-)
-const puedeEliminar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Terceros', 'Eliminar'),
-)
+// drawer entero para recibir un 403.
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Terceros')
 
 interface Tercero {
   id: string

@@ -47,7 +47,6 @@ const recuentoId = computed(() => route.params.id as string)
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha, formatStock } = useFormatters()
-const permissionsStore = usePermissionsStore()
 
 const loading = ref(true)
 const notFound = ref(false)
@@ -61,19 +60,16 @@ const motivos = ref<MotivoOpt[]>([])
 // Inventario/Crear — el mismo permiso que exigen los PATCH de línea, el PATCH
 // de sesión y el cancelar. Sin esto los campos se ven editables y cada blur
 // vuelve con un 403.
-const puedeContar = computed(() =>
-  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Crear'),
-)
+const {
+  puedeCrear: puedeContar,
+  puedeActualizar: puedeAplicar,
+} = usePermisosCrud('Inventario')
 
 const esBorrador = computed(() => detalle.value?.estado === 'borrador')
 
 // readOnly gatea SOLO la carga del conteo (los campos), que es Inventario/Crear.
 // Las acciones de la cabecera llevan su propio permiso — ver el template.
 const readOnly = computed(() => !esBorrador.value || !puedeContar.value)
-
-const puedeAplicar = computed(() =>
-  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Actualizar'),
-)
 
 // Sentinel no-vacío: un value:'' en los items de USelectMenu choca con cómo
 // Reka UI trata la cadena vacía como "sin selección" y rompe el Combobox al

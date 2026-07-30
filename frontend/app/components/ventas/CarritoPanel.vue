@@ -39,10 +39,7 @@ const hasCustomerData = computed(() => tieneCustomerData(customer.value))
 // `POST /ventas` exige `Ventas:Crear`. Se suma a la condición que ya existía
 // en vez de agregar un `v-if` paralelo: así hay un solo lugar que decide si el
 // botón de cobrar está habilitado.
-const permissionsStore = usePermissionsStore()
-const puedeVender = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Ventas', 'Crear'),
-)
+const { puedeCrear: puedeVender } = usePermisosCrud('Ventas')
 
 const habilitarCobro = computed(() =>
   puedeCobrar({

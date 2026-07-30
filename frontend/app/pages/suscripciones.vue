@@ -4,17 +4,11 @@ import type { SuscripcionAdmin } from '~/composables/useSuscripcionesAdmin'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
-const permissionsStore = usePermissionsStore()
-
-const puedeVer = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Suscripciones', 'Leer'),
-)
-const puedeActualizar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Suscripciones', 'Actualizar'),
-)
-const puedeEliminar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Suscripciones', 'Eliminar'),
-)
+const {
+  puedeLeer: puedeVer,
+  puedeActualizar,
+  puedeEliminar,
+} = usePermisosCrud('Suscripciones')
 
 if (import.meta.client && !puedeVer.value) {
   await navigateTo('/')

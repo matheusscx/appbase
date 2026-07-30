@@ -16,18 +16,7 @@ function labelTipo(tipo: TipoGarzon): string {
 // con su propio `@RequiresPermiso`. Garzones NO tiene módulo propio: sus rutas
 // piden permisos de **Salones**. `Salones:Operar` no entra acá — es de la
 // operación (`garzones/identificar`, cuentas), no de esta pantalla.
-// Tres permisos separados y no un `puedeEscribir` único: el backend los separa
-// a propósito y colapsarlos escondería el editar a quien solo tiene `Actualizar`.
-const permissionsStore = usePermissionsStore()
-const puedeCrear = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Crear'),
-)
-const puedeActualizar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Actualizar'),
-)
-const puedeEliminar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Salones', 'Eliminar'),
-)
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones')
 
 const toast = useToast()
 const garzonesApi = useGarzones()

@@ -39,7 +39,6 @@ const salonesApi = useSalones()
 const garzonesApi = useGarzones()
 const turnosApi = useTurnos()
 const sesionesApi = useSesionesGarzon()
-const permissionsStore = usePermissionsStore()
 const unidadesStore = useUnidadesMedidaStore()
 const { calcular } = useCalculoPrecios()
 const { formatMonto, formatFecha } = useFormatters()
@@ -88,10 +87,7 @@ const propinaHabilitada = ref(true)
 const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
-const puedeTransferirAdmin = computed(
-  () => permissionsStore.esAdmin
-    || permissionsStore.can('Salones', 'Actualizar'),
-)
+const { puedeActualizar: puedeTransferirAdmin } = usePermisosCrud('Salones')
 
 const transferAdminOpen = ref(false)
 const transferAdminGarzonId = ref<string | undefined>()

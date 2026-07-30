@@ -7,14 +7,11 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 const toast = useToast()
 const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
-const permissionsStore = usePermissionsStore()
 
 // El nav abre esta página con Inventario/Leer, pero POST /inventario/ajustes-costo
 // exige Inventario/Actualizar: sin este gate el usuario llena el formulario
 // entero para recibir un 403.
-const puedeAjustarCosto = computed(() =>
-  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Actualizar'),
-)
+const { puedeActualizar: puedeAjustarCosto } = usePermisosCrud('Inventario')
 
 interface Movimiento {
   id: string

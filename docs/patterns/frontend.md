@@ -49,6 +49,20 @@ entero para recibir un 403: un callejón sin salida.
 permiso que exige su endpoint. El guard del backend es el que manda —
 esconder el botón es UX, nunca seguridad (invariante 6).
 
+Los permisos salen de **`usePermisosCrud(modulo)`**, nunca escritos a mano:
+
+```ts
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones')
+// Un permiso suelto conserva su nombre de dominio con un alias:
+const { puedeActualizar: puedeAplicar } = usePermisosCrud('Items')
+```
+
+Devuelve `computed`s, así que se puede llamar en el setup aunque los permisos
+lleguen después por fetch. El composable existe por el `esAdmin ||`, no por el
+`can`: la regla estaba copiada en 18 pantallas y componentes, y olvidar el bypass deja
+al admin de ese tenant con una pantalla de solo lectura — el usuario con más
+motivos para no reportarlo como bug de permisos, porque asume que es así.
+
 **Primero preguntar qué exige el endpoint, no de qué carpeta es la pantalla.**
 En `configuracion/` conviven las dos clases: 15 pantallas son admin-only
 (`TenantAdminGuard`) y `items` va con `@RequiresPermiso('Items', …)`. Gatear
@@ -109,10 +123,7 @@ expulsado de su propia pantalla. Es un modo de falla que nadie reporta como bug
 de permisos: se ve como "la pantalla me tira al índice a veces".
 
 ```typescript
-const permissionsStore = usePermissionsStore()
-const puedeContar = computed(() =>
-  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Crear'),
-)
+const { puedeCrear: puedeContar } = usePermisosCrud('Inventario')
 ```
 
 Cuando la escritura ya está condicionada por estado, sumar el permiso a esa

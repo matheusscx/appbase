@@ -14,17 +14,8 @@ definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 // `configuracion/*`: el catálogo de items va con `@RequiresPermiso('Items', …)`
 // y la lectura es legítima para cualquiera que tenga `Items:Leer`. Gatearla con
 // `esAdmin` —como sus vecinas— le escondería los botones a quien sí puede
-// escribir. Tres permisos separados porque el backend los separa.
-const permissionsStore = usePermissionsStore()
-const puedeCrear = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Items', 'Crear'),
-)
-const puedeActualizar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Items', 'Actualizar'),
-)
-const puedeEliminar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Items', 'Eliminar'),
-)
+// escribir.
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Items')
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()

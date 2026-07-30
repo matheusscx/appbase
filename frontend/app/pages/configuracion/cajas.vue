@@ -46,9 +46,8 @@ const drawerTitle = computed(() => (editingId.value ? 'Editar caja' : 'Nueva caj
 const submitLabel = computed(() => (editingId.value ? 'Guardar' : 'Crear'))
 
 // Gateo de UX (el backend igual enforcea con @RequiresPermiso)
-const puedeCrear = computed(() => perms.esAdmin || perms.can('Cajas', 'Crear'))
-const puedeActualizar = computed(() => perms.esAdmin || perms.can('Cajas', 'Actualizar'))
-const puedeEliminar = computed(() => perms.esAdmin || perms.can('Cajas', 'Eliminar'))
+const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Cajas')
+// No es un permiso del módulo: el arqueo ciego es del admin del tenant y de nadie más.
 const puedeConfigCiego = computed(() => perms.esAdmin)
 
 function resetDrawer() {

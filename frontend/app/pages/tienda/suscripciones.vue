@@ -9,7 +9,6 @@ const apiUrl = config.public.apiUrl
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
-const permissionsStore = usePermissionsStore()
 
 const { suscripciones, loading, pausar, reanudar, cancelar, cambiarTarjeta, crear } =
   useSuscripciones()
@@ -21,9 +20,7 @@ const {
 } = useTarjetas()
 const { formatMonto, formatFecha } = useFormatters()
 
-const puedeCrear = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Tienda Online', 'Crear'),
-)
+const { puedeCrear } = usePermisosCrud('Tienda Online')
 
 // Clave de localStorage: intención de alta que sobrevive el redirect a Transbank
 // cuando el usuario inscribe una tarjeta nueva desde el drawer (useState no

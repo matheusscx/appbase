@@ -28,12 +28,9 @@ const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
-const permissionsStore = usePermissionsStore()
 
 // Crear la sesión exige Inventario/Crear; el nav abre esta página con Leer.
-const puedeContar = computed(() =>
-  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Crear'),
-)
+const { puedeCrear: puedeContar } = usePermisosCrud('Inventario')
 
 const filtroEstado = ref<string>('todos')
 

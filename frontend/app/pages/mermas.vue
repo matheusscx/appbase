@@ -40,13 +40,10 @@ const { formatFecha, formatMonto, formatStock } = useFormatters()
 const { pageSize } = useUserPreferences()
 const unidadesMedidaStore = useUnidadesMedidaStore()
 const { convertirCosto } = useUnidadConversion()
-const permissionsStore = usePermissionsStore()
 
 // El nav abre esta página con Inventario/Leer, pero POST /mermas exige
 // Inventario/Crear (ver docs/patterns/frontend.md §1.1).
-const puedeRegistrar = computed(() =>
-  permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Crear'),
-)
+const { puedeCrear: puedeRegistrar } = usePermisosCrud('Inventario')
 
 const productos = ref<ProductoOpt[]>([])
 const causas = ref<CausaOpt[]>([])
