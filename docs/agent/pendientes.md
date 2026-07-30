@@ -617,22 +617,21 @@ tres en la sección de auditorías de arriba.
 
 ## Revisión final `precio-base-negativo` (2026-07-29)
 
-- [ ] **Tres hermanos de dinero del módulo `items` siguen sin validación de signo**
-  (backend) — los dejó a la vista el cierre de `precio_base` negativo
-  ([`resueltos.md`](resueltos.md)), que se acotó al campo que nombraba la entrada. Los
-  encontró la revisión independiente y están **verificados uno por uno**:
-  - `dto/create-item.dto.ts:206` — **`costo`**, con `@IsNumberString()` y nada más. Es el
-    único de los tres que es un agujero limpio. En `update` no aplica: ahí el campo está
-    bloqueado por `CostoNoEditableConstraint` (`dto/update-item.dto.ts:126`), que rechaza
-    cualquier valor, así que el signo es irrelevante.
-  - `dto/create-item.dto.ts:79` (`RecetaExtraInputDto.precioExtra`) y `:112`
-    (`ItemGrupoOpcionOverrideInputDto.precioExtra`, que `update-item.dto.ts` también reusa vía
-    `gruposModificadores`) — dinero, `@IsNumberString()` sin signo.
-  - `dto/aplicar-desfases.dto.ts:22` (`AplicarDesfaseItemDto.precioBase`) — **no es agujero
-    funcional**: `items.service.ts` ya rechaza `<= 0` a mano con un 400 antes de escribir. Lo
-    que queda es la inconsistencia: lógica duplicada en vez del decorador que este mismo
-    cierre estableció como patrón del módulo. Ojo con el criterio si se toca: ahí es
-    `> 0` (positivo estricto), no `>= 0`.
-  Cerrarlo es el mismo movimiento ya hecho dos veces (decorador + spec de DTO con los RED
-  verificados), pero **el criterio se decide por campo**: `costo` y `precioExtra` admiten `0`
-  (un extra gratis es legítimo), `aplicarDesfases` no.
+- [ ] **Tres campos de la familia `costo` validan el signo en el service, no en el DTO**
+  (backend) — resto del barrido de signo del catálogo, cerrado el 2026-07-29 en seis campos
+  ([`resueltos.md`](resueltos.md)). **Ninguno de estos tres es agujero funcional**, verificado
+  leyendo cada service —no inferido del DTO, que es lo que habría hecho parecer que lo eran—:
+  - `items/dto/ajuste-stock.dto.ts:76` `costoUnitario` → lo rechaza
+    `inventario.service.ts:140-150` (`registrarMovimiento`, `lessThanOrEqualTo(0)`), que es por
+    donde pasa cualquier ajuste. La conversión de unidad previa
+    (`items.service.ts:1750`) preserva el signo, así que no hay camino que la esquive.
+  - `inventario/dto/ajuste-costo.dto.ts:9` `costoNuevo` → `inventario.service.ts:266-268`,
+    **incondicional**. Es el único de los tres donde el decorador sería un reemplazo limpio:
+    `IsDecimalPositivo` (`> 0`, no `>= 0`).
+  - `mermas/dto/create-merma.dto.ts:23` `costoUnitario` → `mermas.service.ts:142-149`, pero
+    **condicional a `!= null && !== ''`**: el vacío es "valorizar con el costo actual". Un
+    `IsDecimalPositivo` pelado rompería ese camino; necesita el mismo
+    `@ValidateIf(o => o.costoUnitario !== '')` que llevan los overrides de `precioExtra`.
+  Queda entonces como **consistencia, no como bug**: mover el `> 0` de tres services al
+  decorador que el barrido dejó como patrón del área. Prioridad baja — el valor es que la
+  regla viva en un solo lugar y aparezca en Swagger, no cerrar un hueco.

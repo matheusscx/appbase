@@ -75,7 +75,9 @@ export class RecetaExtraInputDto {
   @IsNotEmpty()
   unidadCodigo: string;
 
+  // Dinero: se suma al precio de la línea. `>= 0` — un extra gratis es legítimo.
   @IsNumberString()
+  @IsDecimalNoNegativo()
   precioExtra: string;
 }
 
@@ -106,9 +108,12 @@ export class ItemGrupoOpcionOverrideInputDto {
   @IsNotEmpty()
   unidadCodigo?: string;
 
+  // Mismo criterio que el `precioExtra` de arriba. El `@ValidateIf` sigue mandando:
+  // el string vacío es "no tocar este override" y saltea todos los validadores.
   @ValidateIf((o: ItemGrupoOpcionOverrideInputDto) => o.precioExtra !== '')
   @IsOptional()
   @IsNumberString()
+  @IsDecimalNoNegativo()
   precioExtra?: string;
 }
 
@@ -203,7 +208,11 @@ export class CreateItemDto {
   @IsOptional()
   fechaVencimiento?: string;
 
+  // Dinero: entra a `costo_actual`, base del costeo (CPP) y del margen. `>= 0` —
+  // mercadería de donación o muestra tiene costo 0 de verdad. En `UpdateItemDto` no
+  // hace falta: ahí el campo lo rechaza entero `CostoNoEditableConstraint`.
   @IsNumberString()
+  @IsDecimalNoNegativo()
   @IsOptional()
   costo?: string;
 

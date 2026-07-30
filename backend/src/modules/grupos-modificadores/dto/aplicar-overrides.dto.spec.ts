@@ -47,4 +47,17 @@ describe('AplicarOverridesDto', () => {
     const errores = await validar({ ...base, precioExtra: 'gratis' });
     expect(errores.length).toBeGreaterThan(0);
   });
+
+  // Signo: mismo criterio que el `precioExtra` de `items` (no negativo, con el `0`
+  // válido — una opción sin recargo es lo más común). Ver
+  // `items/dto/dinero-signo.dto.spec.ts` para el porqué de cada campo.
+  it('acepta precioExtra en 0 (override a "sin recargo")', async () => {
+    const errores = await validar({ ...base, precioExtra: '0' });
+    expect(errores).toHaveLength(0);
+  });
+
+  it('rechaza precioExtra negativo', async () => {
+    const errores = await validar({ ...base, precioExtra: '-100' });
+    expect(errores.some((e) => e.property === 'precioExtra')).toBe(true);
+  });
 });

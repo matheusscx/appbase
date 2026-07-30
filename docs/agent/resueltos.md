@@ -813,7 +813,8 @@ siguen diferidos están en `pendientes.md`.
   update—, así que exigir positivo estricto tumbaría un caso propio. Lo que no tiene lectura
   posible es el negativo: `precioUnitario: '-100'` sin reglas da `totalFinal: -100` y ninguna
   invariante del motor lo neutraliza (ver la nota de la entrada original).
-  Lo fija `dto/precio-base.dto.spec.ts` con 6 casos y **los 2 RED verificados** (los de
+  Lo fija `dto/dinero-signo.dto.spec.ts` (creado como `precio-base.dto.spec.ts`, renombrado
+  al extenderse a los demás campos de dinero del módulo) con 6 casos y **los 2 RED verificados** (los de
   negativo fallaban contra el código anterior; los 4 de aceptación ya pasaban antes, que es
   lo que prueba que el payload es válido y los RED no fallaban por otra razón): 0 y decimales
   aceptados en create, ausencia y 0 aceptados en update —el `@IsOptional()` sigue
@@ -1047,3 +1048,42 @@ siguen diferidos están en `pendientes.md`.
   correr la suite; antes bajaba 1 por corrida. Efecto lateral: se fue `PAPAS_FRITAS_ID`, una
   de las dos constantes con el mismo literal que confundía a los revisores (la causa sigue
   en el seeder, ver [`pendientes.md`](pendientes.md)).
+
+## Revisión final `precio-base-negativo` (2026-07-29)
+
+- [x] ~~**Tres hermanos de dinero del módulo `items` sin validación de signo**~~ (backend) —
+  cerrado 2026-07-29 con `@IsDecimalNoNegativo()` en **seis** campos, no en los tres que
+  nombraba la entrada ni en los cuatro que se planificaron:
+  - `items/dto/create-item.dto.ts` — `costo` (carga inicial; entra a `costo_actual`, base del
+    CPP y del margen), `RecetaExtraInputDto.precioExtra` y
+    `ItemGrupoOpcionOverrideInputDto.precioExtra` (este último lo reusa `UpdateItemDto` vía
+    `gruposModificadores`, así que el PATCH queda cubierto sin tocar el otro archivo).
+  - `items/dto/aplicar-desfases.dto.ts` — `AplicarDesfaseItemDto.precioBase`.
+  - **Los dos gemelos que la entrada no veía**, aparecidos al grepear el repo entero en vez
+    de la carpeta del módulo —el grep acotado es exactamente el que ya falló con el enum de
+    estados—: `grupos-modificadores/dto/create-grupo-modificador.dto.ts`
+    (`GrupoOpcionInputDto.precioExtra`, mismo dinero y misma columna que el de `items`; lo
+    reusa `UpdateGrupoModificadorDto`) y `grupos-modificadores/dto/aplicar-overrides.dto.ts`
+    (`precioExtra`, gemelo exacto hasta el `@ValidateIf(!== '')`). Cerrar `precioExtra` solo
+    del lado de `items` habría dejado el mismo campo validado a medias en el repo.
+  **El criterio es `>= 0` en los seis, y en dos casos no por preferencia sino por contrato:**
+  un extra u opción **gratis** es legítimo (el propio e2e manda `precioExtra: '0'` en
+  `grupos-modificadores-overrides.e2e-spec.ts`), y en `aplicarDesfases` el `> 0` que exige el
+  service **es condicional a `actualizarPrecio`** (`items.service.ts:3443-3455`), así que un
+  decorador de campo —que no ve el otro campo— pedir positivo estricto habría empezado a
+  rechazar `{ precioBase: '0', actualizarPrecio: false }`, hoy aceptado e ignorado. Ahí el
+  decorador mata el negativo y el `> 0` sigue viviendo en el service.
+  Lo fijan **16 casos nuevos** en `items/dto/dinero-signo.dto.spec.ts` (renombrado desde
+  `precio-base.dto.spec.ts`, que ya no describía su contenido),
+  `grupos-modificadores/dto/create-grupo-modificador.dto.spec.ts` y los 2 agregados a
+  `aplicar-overrides.dto.spec.ts`, con **los 8 RED verificados**: fallaban los 8 de rechazo y
+  **pasaban todos los de aceptación** contra el código anterior, que es lo que prueba que los
+  payloads eran válidos por lo demás y los RED no fallaban por un fixture roto.
+  Dos regresiones que los tests cubren a propósito: el `precioExtra: ''` de los overrides
+  (`@ValidateIf` saltea todos los validadores; es el "no tocar este override" que manda el
+  frontend) y el negativo entrando por `UpdateItemDto`/`UpdateGrupoModificadorDto`, que reusan
+  los DTO anidados.
+  **Lo que la entrada afirmaba de más:** decía que los tres campos de la familia `costo` de
+  módulos vecinos eran candidatos del mismo molde. Medidos uno por uno, **ninguno es agujero
+  funcional** — ver la entrada que quedó abierta en [`pendientes.md`](pendientes.md), que ya
+  cita el `lessThanOrEqualTo(0)` de cada service.

@@ -11,6 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 
 export class GrupoOpcionInputDto {
   @IsUUID()
@@ -26,7 +27,10 @@ export class GrupoOpcionInputDto {
   @IsNotEmpty()
   unidadCodigo?: string;
 
+  // Dinero: se suma al precio de la línea al elegir la opción. `>= 0` — una opción
+  // sin recargo es el caso más común. `UpdateGrupoModificadorDto` reusa este DTO.
   @IsNumberString()
+  @IsDecimalNoNegativo()
   precioExtra: string;
 
   @IsOptional()

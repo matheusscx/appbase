@@ -8,6 +8,7 @@ import {
   IsUUID,
   ValidateIf,
 } from 'class-validator';
+import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
 
 export class AplicarOverridesDto {
   @IsArray()
@@ -29,8 +30,11 @@ export class AplicarOverridesDto {
   @IsNotEmpty()
   unidadCodigo?: string;
 
+  // Dinero, mismo criterio que su gemelo de `items` (`>= 0`). El `@ValidateIf` sigue
+  // mandando: vacío es "no aplicar este override" y saltea todos los validadores.
   @ValidateIf((o: AplicarOverridesDto) => o.precioExtra !== '')
   @IsOptional()
   @IsNumberString()
+  @IsDecimalNoNegativo()
   precioExtra?: string;
 }
