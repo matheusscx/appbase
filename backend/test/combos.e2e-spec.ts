@@ -653,7 +653,9 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         pin: ANA_PIN,
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4300.0000' }],
+        // Combo Especial afecto (default): 4300 + 19% IVA = 5117 (Task 1,
+        // ADR-018; carne molida precioExtra 0).
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '5117.0000' }],
       });
     expect(resCerrar.status).toBe(201);
     const cierre = resCerrar.body as {
@@ -662,6 +664,17 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     };
     expect(cierre.cuenta.estado).toBe('cerrada');
     expect(cierre.ventaId).toBeTruthy();
+
+    // "Cierra Y COBRA": el nombre del test promete las dos cosas, pero hasta
+    // acá solo se verificaba el cierre de la cuenta. Un pago insuficiente
+    // deja la cuenta "cerrada" igual (el cierre no exige saldo cero), así que
+    // sin esta aserción un monto desactualizado (p.ej. el pretax de antes del
+    // fix de IVA) pasa en silencio con la venta en `pagada_parcial`.
+    const ventaRows: { estado: string }[] = await ds.query(
+      `SELECT estado FROM ventas WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [cierre.ventaId],
+    );
+    expect(ventaRows[0]?.estado).toBe('pagada');
 
     // El snapshot congelado en la venta conserva la elección por componente.
     const detalleRows: {
