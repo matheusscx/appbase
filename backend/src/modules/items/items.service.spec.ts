@@ -1512,7 +1512,7 @@ describe('ItemsService', () => {
     it('valida impuestos aceptando los del catálogo del sistema (pais_id)', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
-        .mockResolvedValueOnce([{ cnt: '1' }]) // validarImpuestos
+        .mockResolvedValueOnce([{ impuesto_id: 'iva-sistema', tipo: 'otro' }]) // validarImpuestos
         .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
         .mockResolvedValue([]); // extensión + item_impuestos
       inventarioServiceMock.registrarMovimiento.mockResolvedValue({
@@ -1583,7 +1583,7 @@ describe('ItemsService', () => {
     it('reemplaza impuestosIds cuando se proveen (reemplazo total)', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
-        .mockResolvedValueOnce([{ cnt: '1' }]) // validarReglas impuestos
+        .mockResolvedValueOnce([{ impuesto_id: 'imp-nuevo', tipo: 'otro' }]) // validarImpuestos
         .mockResolvedValueOnce([]) // DELETE item_impuestos
         .mockResolvedValueOnce([]); // INSERT item_impuestos
 

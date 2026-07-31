@@ -71,6 +71,31 @@ identificamos con ubicación concreta.
   que más IVA implica) — mismo espíritu que el `BadRequestException` que ya usa
   `calculo-precios.service.ts:212` cuando un ítem afecto no encuentra IVA del país
   configurado.
+- [ ] **Un impuesto `tipo='otro'` desactivado se sigue cobrando si quedó asociado a un
+  ítem** (backend, `impuestos/impuestos.service.ts` `findAll` y
+  `calculo-precios/calculo-precios.service.ts`) — ni `ImpuestosService.findAll` ni el
+  motor filtran por `activo`: una vez que un impuesto adicional está en
+  `item_impuestos`, el motor lo sigue aplicando aunque se lo haya desactivado desde
+  `/configuracion/impuestos`, mientras el frontend sí lo esconde del selector de altas
+  nuevas (`impuestosOpts` filtra `i.activo`). Es "cobrar de más" real: el tenant cree
+  que lo apagó y el POS lo sigue sumando. Preexistente — no lo introdujo el trabajo de
+  IVA derivado (ADR-018) y no afecta al IVA en sí (que ni siquiera pasa por
+  `item_impuestos`), pero es la misma familia de bug. Cierre: decidir si `activo` debe
+  gatear la aplicación (no solo la selección) para impuestos/descuentos/recargos, y si
+  es así, filtrar en el motor — es una decisión de negocio del owner, no algo a inferir
+  (afecta a los tres tipos de regla, no solo impuestos).
+- [ ] **`seeder.service.ts` — el JOIN de detección de duplicados de IVA no filtra
+  `eliminado_el`** (backend, `seeder/seeder.service.ts:2393-2394`,
+  `remapImpuestosOficialesDuplicados`) — los `JOIN tenants t ON t.tenant_id =
+  i.tenant_id` y `JOIN provincia p ON p.provincia_id = t.provincia_id` no agregan
+  `AND t.eliminado_el IS NULL` / `AND p.eliminado_el IS NULL`, a diferencia del resto
+  de los JOINs `tenants → provincia` del repo (ver la entrada de arriba sobre las 11
+  queries del país del tenant, que sí filtran). Roza la invariante 3 (soft delete). Hoy
+  esta query es la defensa contra la doble tributación del 38% (soft-deletea el
+  impuesto `tipo='otro'` duplicado que colisionaría con el IVA derivado, ver ADR-018),
+  así que un tenant o provincia soft-eliminados podrían dejar pasar un duplicado sin
+  desactivar. Cierre: agregar los dos filtros, mismo patrón que las demás resoluciones
+  de país.
 
 ## Suite E2E de navegador (fundación lista, flujos por escribir)
 

@@ -64,8 +64,13 @@ export class CalculoPreciosService {
     // El IVA del país del tenant. Hay a lo sumo uno visible: `impuestos.tipo`
     // tiene default 'otro' y no está expuesto en CreateImpuestoDto ni en
     // UpdateImpuestoDto, así que un tenant no puede crear otra fila 'iva'.
-    // Se busca una vez por cálculo, no por línea. Ver ADR-018.
-    const ivaDelPais = impuestos.find((i) => i.tipo === 'iva') ?? null;
+    // Se busca una vez por cálculo, no por línea. Se toma de `impuestoMap` (no
+    // de `impuestos` directo) para que la fila que termina en la traza de la
+    // línea tenga la misma forma recortada que los demás impuestos de la
+    // lista ({id, nombre, porcentaje, tipo}), no la entidad completa
+    // (tenantId, paisId, creadoEl…). Ver ADR-018.
+    const ivaDelPais =
+      [...impuestoMap.values()].find((i) => i.tipo === 'iva') ?? null;
     const descuentoMap = this.indexarReglas(descuentos);
     const recargoMap = this.indexarReglas(recargos);
 

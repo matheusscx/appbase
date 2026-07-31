@@ -22,7 +22,9 @@ export class Impuesto {
   paisId: string | null;
 
   @Column({ type: 'text', default: 'otro' })
-  tipo: string; // 'iva' (suprimido en líneas exentas) | 'otro'
+  tipo: string; // 'iva' (se descarta SIEMPRE de la lista resuelta y se agrega
+  // solo cuando el ítem es 'afecto' — se deriva, no se lee de item_impuestos,
+  // ver ADR-018) | 'otro'
 
   @Column({ type: 'text' })
   nombre: string;

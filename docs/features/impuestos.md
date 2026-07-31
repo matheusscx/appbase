@@ -141,7 +141,7 @@ No existe endpoint para crear impuestos del sistema — se siembran solo vía
 **Personalizado**: `(tenant_id set, pais_id NULL)`.
 
 **Tabla `items`** — columna en la base (todos los tipos: producto, servicio,
-suscripción, ingrediente):
+suscripción, receta, combo, ingrediente):
 
 | Columna | Tipo | Constraints | Notas |
 |---|---|---|---|
@@ -321,6 +321,23 @@ fuera de alcance (llegará con la emisión fiscal, ver ADR-010).
   ↓
 [venta_detalles.clasificacion_tributaria = 'exento' (congelado, no cambia aunque el item cambie después)]
 ```
+
+### Combos y recetas — la clasificación del padre es la única palanca
+
+Un combo o una receta se vende como **una sola línea**: `VentasService` resuelve la
+personalización (`resolverPersonalizacionReceta`/`resolverPersonalizacionCombo`) a un
+único `precioExtraTotal` (componentes + opciones de grupo elegidas) que se suma al
+`precioBase` del ítem padre, y esa suma es el `precioUnitario` de la línea que entra al
+motor. El motor nunca ve los componentes ni las opciones por separado — solo
+`item.clasificacionTributaria` del padre (combo o receta), que es lo único que decide si
+la línea entera lleva IVA.
+
+Consecuencia: un combo/receta tributa **todo o nada** según su propia clasificación, sin
+importar la de sus componentes — un combo `exento` con componentes `afecto` (o al revés)
+no prorratea ni desagrega, y los `precioExtra` de los grupos de modificadores heredan la
+clasificación del padre, no la del ítem que representa cada opción. Es la única palanca
+fiscal disponible en combos/recetas hoy: no hay forma de que un componente individual
+lleve su propio IVA dentro de la línea.
 
 ---
 

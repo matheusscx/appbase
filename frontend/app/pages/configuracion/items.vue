@@ -792,7 +792,12 @@ async function cargarCatalogos() {
         .map((c) => ({ label: c.nombre, value: c.id })),
     ]
 
-    ivaDelPais.value = impuestos.find((i) => i.tipo === 'iva' && i.activo) ?? null
+    // Sin `&& i.activo`: el motor (`calculo-precios.service.ts`) tampoco filtra
+    // por `activo` al derivar el IVA — igual que con descuentos/recargos/impuestos
+    // adicionales, `activo` gobierna qué se puede asociar desde el selector, no
+    // qué se cobra una vez asociado. El chip debe reflejar lo que el motor va a
+    // cobrar, no un filtro más estricto que lo esconda mientras igual se cobra.
+    ivaDelPais.value = impuestos.find((i) => i.tipo === 'iva') ?? null
 
     impuestosOpts.value = impuestos
       .filter((i) => i.activo && i.tipo !== 'iva')

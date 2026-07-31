@@ -112,6 +112,15 @@ manual y sin tocar `ventas_impuestos` histórico — un snapshot de venta ya con
 porcentaje y valor, y la fila del impuesto sigue existiendo (soft delete, no
 borrado físico).
 
+> **Superado por [ADR-018](./018-iva-derivado-de-la-clasificacion.md).** El
+> párrafo de arriba describe el remapeo original; ya no existe. Con el IVA
+> derivado, `item_impuestos` no asocia el IVA de ningún ítem, así que no hay
+> ninguna referencia que remapear — `remapImpuestosOficialesDuplicados()` hoy
+> solo hace `DELETE` de la asociación del duplicado + soft delete de la fila,
+> sin el paso de remapeo. Este ADR queda como registro histórico de la decisión
+> original; el comportamiento actual está en ADR-018 y en
+> `docs/features/impuestos.md`.
+
 ## Consequences
 
 ### Positive

@@ -48,7 +48,11 @@ Request:
     { "itemId": "uuid", "cantidad": "2",
       "precioUnitario": "100",            // opcional (override de precio_base)
       "descuentoIds": ["uuid"],           // opcional (reemplaza los del ítem)
-      "recargoIds": [], "impuestoIds": [] // opcionales
+      "recargoIds": [],                   // opcional (reemplaza los del ítem)
+      "impuestoIds": []                   // opcional (reemplaza los ADICIONALES del
+                                           // ítem, tipo='otro'; el IVA no se puede
+                                           // pisar ni quitar — 400 si trae un id
+                                           // tipo='iva', ver ADR-018)
     }
   ],
   "metodoPagoId": "uuid",                 // opcional (habilita reglas metodo_pago)
@@ -156,7 +160,12 @@ se aplican sobre el neto agregado.
 
 **Decisiones**: `monto_fijo` se aplica por línea (no por unidad); las reglas
 diferidas (`promocional`, `mora`, `pronto_pago`) devuelven monto 0; los ids de
-regla en la línea **reemplazan** a los asociados al ítem (override).
+descuento/recargo/impuesto en la línea **reemplazan** a los asociados al ítem
+(override) — con una excepción: para impuestos, el override solo alcanza a los
+**adicionales** (`tipo='otro'`). El IVA nunca sale de `impuestoIds`, ni del ítem
+ni de la línea — lo deriva el motor de `clasificacion_tributaria` y no se puede
+pisar ni quitar por payload (400 si llega un id `tipo='iva'` explícito, ver
+[ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
 
 **Piso en cero del descuento** (decisión del owner, 2026-07-28). **Ninguna regla
 puede dejar el total bajo cero** — un `precio_base` negativo sí puede, y eso es

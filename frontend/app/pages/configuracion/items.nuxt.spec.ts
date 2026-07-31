@@ -189,6 +189,10 @@ describe('configuracion/items — chip fijo del IVA', () => {
     itemDetalleMock = { ...ITEM_PRODUCTO, clasificacionTributaria: 'exento' }
     const wrapper = await abrirEditarPrimerItem()
 
+    // Ancla positiva: sin esto, un `abrirEditar` que no abre el drawer también
+    // pasaría (el negativo de abajo es vacuamente cierto si el drawer nunca
+    // se montó).
+    expect(document.body.textContent).toContain('Clasificación tributaria')
     expect(document.body.textContent).not.toContain('IVA 19%')
 
     wrapper.unmount()

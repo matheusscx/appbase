@@ -272,7 +272,7 @@ const columns: TableColumn<Impuesto>[] = [
           <UFormField label="Nombre" required>
             <UInput
               v-model="form.nombre"
-              placeholder="IVA"
+              placeholder="Impuesto verde"
               autofocus
             />
           </UFormField>
@@ -280,7 +280,7 @@ const columns: TableColumn<Impuesto>[] = [
             <UInput
               v-model="form.porcentaje"
               inputmode="decimal"
-              placeholder="0.19"
+              placeholder="0.05"
             />
           </UFormField>
           <UFormField label="Activo">
