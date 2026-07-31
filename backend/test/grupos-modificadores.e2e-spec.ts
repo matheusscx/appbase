@@ -247,15 +247,17 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
             },
           },
         ],
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '3800.0000' }],
+        // Combo afecto (default): (3000 + 800) + 19% IVA = 4522 (Task 1, ADR-018).
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4522.0000' }],
       });
 
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
     expect(venta.advertencias ?? []).toEqual([]);
-    // 7. Total = precioBase del combo (3000) + precioExtra de la opción elegida (800)
-    expect(venta.totalFinal).toBe('3800.0000');
+    // 7. Total = (precioBase del combo (3000) + precioExtra de la opción
+    // elegida (800)) + 19% IVA (afecto por default)
+    expect(venta.totalFinal).toBe('4522.0000');
 
     // 6. Movimientos de inventario: salida del componente fijo Y de la opción de grupo (Bebida)
     const movs: MovimientoInventario[] = await ds.query(

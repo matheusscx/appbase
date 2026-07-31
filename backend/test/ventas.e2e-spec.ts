@@ -13,6 +13,8 @@ const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 // "Promo fija $5.000" — descuento monto_fijo sin condiciones (seedDescuentos()).
 const DESCUENTO_FIJO_ID = '550e8400-e29b-41d4-a716-446655440338';
+// IVA (sistema, Chile) — seedImpuestos(): tipo='iva', porcentaje '0.19'.
+const IVA_CL_ID = '550e8400-e29b-41d4-a716-446655440280';
 
 // Credentials seeded in dev (seed password: 'admin')
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
@@ -341,6 +343,54 @@ describe('Ventas (e2e)', () => {
       const advertencia = venta.advertencias?.[0] ?? '';
       expect(advertencia).toContain('Promo fija $5.000');
       expect(advertencia).toContain('no se aplicó completo');
+    });
+
+    // El bug de punta a punta (Task 1, ADR-018): un ítem afecto sin
+    // `impuestosIds` en item_impuestos —el camino por default de /items,
+    // sin mandar `impuestoIds` en la línea de venta tampoco— tiene que
+    // seguir cobrando el IVA del país porque lo deriva de la clasificación
+    // tributaria, no de la lista de impuestos asociados.
+    it('un ítem afecto sin impuestosIds igual cobra el IVA del país', async () => {
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio afecto sin impuestos E2E ${Date.now()}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'afecto',
+        });
+      expect(resItem.status).toBe(201);
+      const servicioId = (resItem.body as { id: string }).id;
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: servicioId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1190.0000' }],
+        });
+
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaResponse & { totalFinal: string };
+      expect(venta.estado).toBe('pagada');
+      expect(Number(venta.totalFinal)).toBeCloseTo(1190, 4); // 1000 + 19% IVA
+
+      const impuestos: {
+        impuesto_id: string;
+        porcentaje_aplicado: string;
+        valor_aplicado: string;
+      }[] = await ds.query(
+        `SELECT impuesto_id, porcentaje_aplicado, valor_aplicado
+           FROM ventas_impuestos
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [venta.id],
+      );
+      expect(impuestos).toHaveLength(1);
+      expect(impuestos[0].impuesto_id).toBe(IVA_CL_ID);
+      expect(Number(impuestos[0].porcentaje_aplicado)).toBeCloseTo(0.19, 4);
+      expect(Number(impuestos[0].valor_aplicado)).toBeCloseTo(190, 4);
     });
   });
 

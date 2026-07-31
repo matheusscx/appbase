@@ -61,6 +61,11 @@ export class CalculoPreciosService {
         { id: i.id, nombre: i.nombre, porcentaje: i.porcentaje, tipo: i.tipo },
       ]),
     );
+    // El IVA del país del tenant. Hay a lo sumo uno visible: `impuestos.tipo`
+    // tiene default 'otro' y no está expuesto en CreateImpuestoDto ni en
+    // UpdateImpuestoDto, así que un tenant no puede crear otra fila 'iva'.
+    // Se busca una vez por cálculo, no por línea. Ver ADR-018.
+    const ivaDelPais = impuestos.find((i) => i.tipo === 'iva') ?? null;
     const descuentoMap = this.indexarReglas(descuentos);
     const recargoMap = this.indexarReglas(recargos);
 
@@ -99,6 +104,7 @@ export class CalculoPreciosService {
         itemsBase,
         reglasPorItem,
         impuestoMap,
+        ivaDelPais,
         descuentoMap,
         recargoMap,
         tasaMap,
@@ -157,6 +163,7 @@ export class CalculoPreciosService {
     itemsBase: ItemsBaseMap,
     reglasPorItem: ItemsReglasMap,
     impuestoMap: Map<string, ImpuestoResuelto & { tipo: string }>,
+    ivaDelPais: (ImpuestoResuelto & { tipo: string }) | null,
     descuentoMap: Map<string, ReglaResuelta>,
     recargoMap: Map<string, ReglaResuelta>,
     tasaMap: Map<string, string>,
@@ -176,19 +183,34 @@ export class CalculoPreciosService {
         ? linea.precioUnitario
         : this.convertirAMonedaOficial(item.precioBase, item.monedaId, tasaMap);
 
+    // El IVA de una línea lo decide la clasificación tributaria, NUNCA la lista
+    // de impuestos: se saca cualquier 'iva' que venga —del ítem o pisado por la
+    // línea— y se agrega el del país solo si es afecto. El mismo código cubre
+    // las dos direcciones y no puede duplicar. Los 'otro' aplican siempre, en
+    // afectos y exentos (DL 825 / IndExe del DTE).
+    //
+    // ⚠️ La condición es POSITIVA a propósito. `clasificacion_tributaria` es
+    // nullable (los ingredientes no tienen tratamiento fiscal): un `!== 'exento'`
+    // dejaría pasar el null y le cobraría IVA a un ingrediente.
+    const impuestosLinea = impuestoIds
+      .map((id) => this.requerir(impuestoMap, id, 'impuesto'))
+      .filter((imp) => imp.tipo !== 'iva');
+
+    if (item.clasificacionTributaria === 'afecto') {
+      if (!ivaDelPais) {
+        throw new BadRequestException(
+          `El ítem "${item.nombre}" es afecto a IVA, pero el país del tenant no tiene un impuesto tipo 'iva' configurado`,
+        );
+      }
+      impuestosLinea.push(ivaDelPais);
+    }
+
     return {
       itemId: item.id,
       cantidad: linea.cantidad,
       precioUnitario,
       precioIncluyeImpuesto: item.precioIncluyeImpuesto,
-      // Exento = exento de IVA: se suprimen solo los impuestos tipo 'iva';
-      // los adicionales ('otro') aplican siempre (DL 825 / IndExe del DTE).
-      impuestos: impuestoIds
-        .map((id) => this.requerir(impuestoMap, id, 'impuesto'))
-        .filter(
-          (imp) =>
-            item.clasificacionTributaria !== 'exento' || imp.tipo !== 'iva',
-        ),
+      impuestos: impuestosLinea,
       descuentos: this.resolverReglas(descuentoIds, descuentoMap, 'descuento'),
       recargos: this.resolverReglas(recargoIds, recargoMap, 'recargo'),
     };

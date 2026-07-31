@@ -260,8 +260,10 @@ describe('CalculoPreciosService', () => {
         metodoPagoIds: [],
       },
     ]);
+    // Ítem exento: aísla la resolución de recargos sin que la derivación de
+    // IVA (Task 1, ADR-018) contamine el total esperado.
     mockItems(
-      {},
+      { clasificacionTributaria: 'exento' },
       { impuestosIds: [], descuentosIds: [], recargosIds: ['rec-1'] },
     );
 
@@ -274,5 +276,94 @@ describe('CalculoPreciosService', () => {
       expect.objectContaining({ id: 'rec-1', nombre: 'Recargo 5%' }),
     );
     expect(r.lineas[0].totalLinea).toBe('105.000000');
+  });
+
+  describe('el IVA se deriva de la clasificación tributaria', () => {
+    // imp-1 ('IVA', tipo iva) e imp-2 ('Adicional', tipo otro) ya están en el
+    // catálogo mockeado en el beforeEach de arriba.
+    it('un ítem afecto sin impuestos asociados igual lleva el IVA', async () => {
+      mockItems({}, { impuestosIds: [], descuentosIds: [], recargosIds: [] });
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+      expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual(['imp-1']);
+    });
+
+    it('un ítem afecto con adicionales lleva los adicionales MÁS el IVA', async () => {
+      mockItems(
+        {},
+        { impuestosIds: ['imp-2'], descuentosIds: [], recargosIds: [] },
+      );
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+      expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual([
+        'imp-2',
+        'imp-1',
+      ]);
+    });
+
+    it('un ítem exento con adicionales lleva los adicionales SIN IVA', async () => {
+      mockItems(
+        { clasificacionTributaria: 'exento' },
+        { impuestosIds: ['imp-2'], descuentosIds: [], recargosIds: [] },
+      );
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+      expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual(['imp-2']);
+    });
+
+    it('una línea que pisa los impuestos con [] igual lleva el IVA si el ítem es afecto', async () => {
+      mockItems({}, { impuestosIds: [], descuentosIds: [], recargosIds: [] });
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1', impuestoIds: [] }],
+      });
+      expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual(['imp-1']);
+    });
+
+    it('una clasificación null no deriva IVA', async () => {
+      // Un ingrediente: no tiene tratamiento fiscal. Fija el `=== 'afecto'`
+      // contra el `!== 'exento'`, que con null derivaría IVA.
+      mockItems(
+        { clasificacionTributaria: null },
+        { impuestosIds: [], descuentosIds: [], recargosIds: [] },
+      );
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+      expect(r.lineas[0].trazas.impuestos).toEqual([]);
+    });
+
+    it('un ítem afecto sin IVA en el país revienta en vez de vender sin IVA', async () => {
+      impuestosService.findAll.mockResolvedValue([
+        { id: 'imp-2', nombre: 'Adicional', porcentaje: '0.10', tipo: 'otro' },
+      ]);
+      mockItems({}, { impuestosIds: [], descuentosIds: [], recargosIds: [] });
+      await expect(
+        service.calcular(TENANT, {
+          lineas: [{ itemId: 'item-1', cantidad: '1' }],
+        }),
+      ).rejects.toThrow(/afecto a IVA/);
+    });
+
+    it('un item_impuestos con el IVA viejo no lo cobra dos veces', async () => {
+      // Defensa contra datos previos a este cambio: item_impuestos = [IVA, OTRO]
+      mockItems(
+        {},
+        {
+          impuestosIds: ['imp-1', 'imp-2'],
+          descuentosIds: [],
+          recargosIds: [],
+        },
+      );
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+      expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual([
+        'imp-2',
+        'imp-1',
+      ]);
+    });
   });
 });

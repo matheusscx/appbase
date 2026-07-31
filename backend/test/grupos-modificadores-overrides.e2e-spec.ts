@@ -323,14 +323,15 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
             },
           },
         ],
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '3500.0000' }],
+        // Receta afecta (default): 3500 + 19% IVA = 4165 (Task 1, ADR-018).
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4165.0000' }],
       });
 
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
     expect(venta.advertencias ?? []).toEqual([]);
-    expect(venta.totalFinal).toBe('3500.0000');
+    expect(venta.totalFinal).toBe('4165.0000');
 
     const movs: MovimientoInventario[] = await ds.query(
       `SELECT tipo, motivo, item_id, cantidad FROM movimientos_inventario
@@ -362,7 +363,8 @@ describe('Grupos de modificadores — override de consumo por receta (e2e)', () 
             },
           },
         ],
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '3500.0000' }],
+        // Receta afecta (default): 3500 + 19% IVA = 4165 (Task 1, ADR-018).
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4165.0000' }],
       });
 
     expect(resVenta.status).toBe(201);

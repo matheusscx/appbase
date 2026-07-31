@@ -274,15 +274,16 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         lineas: [{ itemId: comboId, cantidad: '1' }],
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4000.0000' }],
+        // Combo afecto (default): 4000 + 19% IVA = 4760 (Task 1, ADR-018).
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '4760.0000' }],
       });
 
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
     expect(venta.advertencias ?? []).toEqual([]);
-    // 6. Total cobrado = precio del combo
-    expect(venta.totalFinal).toBe('4000.0000');
+    // 6. Total cobrado = precio del combo + 19% IVA (afecto por default)
+    expect(venta.totalFinal).toBe('4760.0000');
 
     // 5. Movimientos de inventario: salida del producto directo (papas) y
     // salida del ingrediente de la receta (pan), ambos motivo 'venta'.
@@ -374,15 +375,17 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
             },
           },
         ],
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '5800.0000' }],
+        // Combo afecto (default): (4300 + 1500) + 19% IVA = 6902 (Task 1, ADR-018).
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '6902.0000' }],
       });
 
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
     expect(venta.advertencias ?? []).toEqual([]);
-    // Total = precioBase del Combo Especial (4300) + precioExtra de la chuleta (1500)
-    expect(venta.totalFinal).toBe('5800.0000');
+    // Total = (precioBase del Combo Especial (4300) + precioExtra de la
+    // chuleta (1500)) + 19% IVA (afecto por default)
+    expect(venta.totalFinal).toBe('6902.0000');
 
     // Movimiento de salida de la proteína elegida (chuleta), 150 g — default
     // del grupo "Proteína" para "Hamburguesa Especial" (sin override, a
@@ -531,16 +534,17 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
             },
           },
         ],
-        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '6500.0000' }],
+        // Combo afecto (default): (5000 + 1500 + 0) + 19% IVA = 7735 (Task 1, ADR-018).
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '7735.0000' }],
       });
 
     expect(resVenta.status).toBe(201);
     const venta = resVenta.body as VentaResponse;
     expect(venta.estado).toBe('pagada');
     expect(venta.advertencias ?? []).toEqual([]);
-    // Total = precioBase del combo doble (5000) + precioExtra chuleta (1500)
-    // + precioExtra carne molida (0)
-    expect(venta.totalFinal).toBe('6500.0000');
+    // Total = (precioBase del combo doble (5000) + precioExtra chuleta (1500)
+    // + precioExtra carne molida (0)) + 19% IVA (afecto por default)
+    expect(venta.totalFinal).toBe('7735.0000');
 
     // Snapshot congelado persistido por unidad: `componentes` debe tener DOS
     // entradas (unidad 1 y unidad 2), cada una con la proteína elegida en
