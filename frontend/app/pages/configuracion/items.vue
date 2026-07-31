@@ -821,8 +821,17 @@ async function cargarCatalogos() {
   }
 }
 
+// `cargarCatalogos` tiene DOS saltos secuenciales (monedas/unidades → recién
+// después impuestos/categorías/descuentos/recargos), mientras que la tabla de
+// items (`usePaginatedList`) resuelve en uno solo y dispara su propio fetch
+// en paralelo desde otro `onMounted`. Sin guardar esta promesa, "Editar"
+// queda clickeable antes de que `ivaDelPais` esté listo bajo latencia normal
+// de red, no solo en un click extraordinariamente rápido — ver su uso en
+// `abrirEditar`.
+let catalogosListos: Promise<void> | null = null
+
 onMounted(() => {
-  cargarCatalogos()
+  catalogosListos = cargarCatalogos()
   cargarItemsVendibles()
   cargarGruposCatalogo()
 })
@@ -838,6 +847,11 @@ async function abrirEditar(item: Item) {
   resetDrawer()
   try {
     const detalle = await useApiFetch<Item>(`${apiUrl}/items/${item.id}`)
+    // `ivaDelPais` (usado abajo para descartar una fila vieja de IVA) sale de
+    // `cargarCatalogos`, disparado en paralelo al montar: sin este await el
+    // filtro puede correr antes de que llegue y volverse un no-op. Ver el
+    // comentario junto a `catalogosListos`.
+    await catalogosListos
     editingId.value = item.id
     form.value = {
       nombre: detalle.nombre,

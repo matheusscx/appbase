@@ -59,13 +59,19 @@ const IMPUESTO_OTRO = {
 let impuestosMock: typeof IMPUESTO_IVA[] = [IMPUESTO_IVA, IMPUESTO_OTRO]
 let itemDetalleMock: typeof ITEM_PRODUCTO = ITEM_PRODUCTO
 
+// Para reproducir la carrera entre `cargarCatalogos()` (dos saltos) y la
+// tabla de items (un salto, `usePaginatedList`, `onMounted` en paralelo): con
+// esto seteado, `/impuestos` NO resuelve hasta que el test llame a la función
+// guardada acá, en vez de resolver "sincrónicamente" como el resto del mock.
+let impuestosPromiseOverride: Promise<typeof IMPUESTO_IVA[]> | null = null
+
 // La página dispara varias cargas al montar (catálogos, vendibles, grupos) y
 // cada una espera una forma distinta. Se responde por URL: lo que importa es
 // que la tabla tenga UNA fila para que se rendericen los controles de fila.
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url === 'string' && url.includes('/impuestos'))
-      return Promise.resolve(impuestosMock)
+      return impuestosPromiseOverride ?? Promise.resolve(impuestosMock)
     // Detalle de un item puntual (`abrirEditar`): sin query string y sin
     // segmento después del id, a diferencia de `/items/:id/unidades` o del
     // listado paginado `/items?page=...`.
@@ -156,6 +162,7 @@ describe('configuracion/items — chip fijo del IVA', () => {
     esAdmin = true
     permisos = []
     impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
+    impuestosPromiseOverride = null
   })
 
   // El drawer lo teletransporta `AppDrawer`/`UDrawer` fuera del wrapper: hay
@@ -226,5 +233,45 @@ describe('configuracion/items — chip fijo del IVA', () => {
     expect(selectMenu!.props('modelValue')).toEqual([IMPUESTO_OTRO.id])
 
     wrapper.unmount()
+  })
+
+  it('si "Editar" se abre antes de que resuelva /impuestos, igual descarta la fila vieja de IVA', async () => {
+    // `cargarCatalogos` tiene DOS saltos secuenciales (monedas/unidades →
+    // recién después impuestos), mientras la tabla que habilita "Editar"
+    // resuelve en uno solo (`usePaginatedList`, otro `onMounted` en
+    // paralelo). Bajo latencia normal la tabla puede estar lista y el click
+    // puede llegar ANTES de que `/impuestos` resuelva — no hace falta un
+    // click extraordinariamente rápido. Se reproduce acá reteniendo
+    // `/impuestos` con una promesa que el test controla a mano.
+    let resolverImpuestos: (v: typeof IMPUESTO_IVA[]) => void = () => {}
+    impuestosPromiseOverride = new Promise((resolve) => {
+      resolverImpuestos = resolve
+    })
+    itemDetalleMock = {
+      ...ITEM_PRODUCTO,
+      clasificacionTributaria: 'afecto',
+      impuestosIds: [IMPUESTO_IVA.id, IMPUESTO_OTRO.id],
+    }
+
+    const wrapper = await montar()
+    // No se espera este trigger: dispara `abrirEditar`, que sí resuelve el
+    // detalle (`/items/item-1`, no diferido) y llega a esperar el catálogo,
+    // que todavía no resolvió.
+    wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 10))
+
+    // Recién ahora resuelve `/impuestos` — si el código arma `form.value`
+    // antes de esperar esto, ya quedó armado con `ivaDelPais` en `null`.
+    resolverImpuestos(impuestosMock)
+    await new Promise(r => setTimeout(r, 50))
+
+    const selectMenu = wrapper
+      .findAllComponents({ name: 'USelectMenu' })
+      .find(c => c.props('placeholder') === 'Sin impuestos adicionales')
+    expect(selectMenu).toBeTruthy()
+    expect(selectMenu!.props('modelValue')).toEqual([IMPUESTO_OTRO.id])
+
+    wrapper.unmount()
+    impuestosPromiseOverride = null
   })
 })
