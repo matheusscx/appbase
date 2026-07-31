@@ -148,6 +148,20 @@ resetea.
 
 `type: 'uuid'` explícito en la entity (ADR-004, ya lo fuerza un test + CI).
 
+**Dos familias de borrado conviven hoy, y el plan tiene que respetarlas** (medido):
+
+- **`softDelete()` de TypeORM** — `categorias`, `descuentos`, `recargos`, `impuestos`,
+  `terceros`, `cajones`, `garzones`, `turnos`, `impresoras`, `salones`, `mesas`. 82
+  entities declaran `@DeleteDateColumn`, así que las lecturas ya excluyen lo borrado
+  sola, `withDeleted: true` lo incluye y **`restore()` existe nativo**.
+- **SQL crudo `eliminado_el = NOW()`** — `items`, `grupos_modificadores`,
+  `causas_merma`, `motivo_diferencia_caja`, `motivo_diferencia_inventario`.
+
+`softDelete()` no puede escribir `eliminado_por` en la misma sentencia. En esa familia el
+borrado pasa a ser un `UPDATE` que setea las dos columnas juntas, o un `update()` previo
+seguido del `softDelete()` dentro de la misma transacción — nunca dos escrituras sueltas
+que puedan quedar a medias.
+
 ### API
 
 Por cada recurso del alcance:
@@ -163,22 +177,36 @@ Por cada recurso del alcance:
 
 ### Conducta
 
-**a) Restaurar deja la entidad inactiva** (donde exista la columna `activo`).
+**a) Restaurar deja inactivo SOLO a `items`.**
 
-`remove()` hoy hace `activo = false` junto con `eliminado_el = NOW()`, así que el valor
-previo de `activo` se perdió. Restaurar como activo haría que algo vuelva a venderse por
-sorpresa; restaurar como inactivo obliga a un segundo gesto deliberado. Es la misma
-cautela que Toast, donde restaurar un ítem no lo devuelve al menú.
+> Corregido el 2026-07-31 al medir para el plan. La versión anterior decía "donde exista
+> la columna `activo`", y era de más.
+
+`items.remove()` es el **único** de los 16 que hace `activo = false` junto con
+`eliminado_el = NOW()` (`items.service.ts:1774`). Ahí el valor previo de `activo` se
+perdió de verdad, y restaurar como activo haría que algo vuelva a venderse por sorpresa:
+se restaura inactivo, y reactivarlo es un segundo gesto deliberado. Misma cautela que
+Toast, donde restaurar un ítem no lo devuelve al menú.
+
+En los otros 15, `remove()` **no toca `activo`**. El valor previo sobrevive intacto, así
+que restaurar no lo modifica — forzarlo a `false` destruiría información que el borrado
+no había destruido.
 
 **b) Restaurar deshace exactamente lo que ese borrado se llevó, ni más ni menos.**
 
-`items.remove()` también soft-deletea las filas de `receta_extras_permitidos` en las dos
-direcciones (como ingrediente y como receta). Son colaterales del borrado, no decisión
-del usuario: restaurar el ítem las revive.
+Dos de los 16 borran colaterales, y son los dos que necesitan esta regla:
 
-**Acotado por `eliminado_el` idéntico al del ítem.** Al correr en la misma transacción,
-`NOW()` es el mismo valor para todas. Lo que se hubiera borrado antes por otro motivo
-tiene otro timestamp y **no** revive.
+- **`items.remove()`** soft-deletea las filas de `receta_extras_permitidos` en las dos
+  direcciones (como ingrediente y como receta).
+- **`salones.remove()`** soft-deletea todas las `mesas` del salón
+  (`salones.service.ts:231`) antes de borrar el salón.
+
+Son colaterales del borrado, no decisión del usuario: restaurar el padre las revive.
+
+**Acotado por `eliminado_el` idéntico al del padre.** Al correr en la misma transacción,
+`NOW()` es el mismo valor para todas las filas que ese borrado tocó. Lo que se hubiera
+borrado antes por otro motivo tiene otro timestamp y **no** revive — una mesa que ya
+estaba borrada antes de borrar el salón sigue borrada después de restaurarlo.
 
 **c) Huérfano tolerado, sin cascada.**
 
