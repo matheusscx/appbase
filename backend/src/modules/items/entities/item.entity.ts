@@ -42,7 +42,22 @@ export class Item {
   // Nullable a propósito: `tipo='ingrediente'` no tiene tratamiento fiscal
   // porque no se vende. NO es "afecto por defecto" — ver ADR-018 y el
   // `=== 'afecto'` de calculo-precios.service.ts.
-  @Column({ name: 'clasificacion_tributaria', type: 'text', nullable: true })
+  //
+  // El DEFAULT se conserva a propósito, junto con `nullable`: son dos
+  // protecciones distintas, no una redundancia. `nullable` + el `=== 'afecto'`
+  // positivo del motor de precios protegen la LECTURA (un NULL existente
+  // nunca deriva IVA). El DEFAULT protege la ESCRITURA: sin él, cualquier
+  // INSERT crudo que omita la columna (seed, scripts, futuras migraciones)
+  // produce un NULL "por accidente" en vez de 'afecto' — el seeder de esta
+  // misma tarea lo probó: 4 de sus 6 INSERT de items dejaban de especificar
+  // la columna y confiaban en el default. Sacarlo no tapa ningún agujero que
+  // no tape ya `nullable`, y sí abre uno nuevo.
+  @Column({
+    name: 'clasificacion_tributaria',
+    type: 'text',
+    nullable: true,
+    default: 'afecto',
+  })
   clasificacionTributaria: string | null; // 'afecto' | 'exento' | null
 
   @CreateDateColumn({ name: 'creado_el' })

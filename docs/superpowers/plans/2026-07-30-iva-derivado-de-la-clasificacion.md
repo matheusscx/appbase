@@ -453,13 +453,36 @@ cd backend && npx jest items.service.spec --verbose
 
 - [ ] **Paso 3: La columna pasa a nullable**
 
+**Corregido por el owner en la ronda de fix 1/5 de Task 3 (2026-07-31): esta versión
+original pedía sacar el `DEFAULT 'afecto'` junto con agregar `nullable`. Estaba mal — el
+`DEFAULT` y `nullable` protegen cosas distintas y no se reemplazan entre sí.** `nullable` +
+la condición positiva `=== 'afecto'` del motor de precios protegen la LECTURA (un `NULL`
+existente nunca deriva IVA). El `DEFAULT 'afecto'` protege la ESCRITURA: sin él, cualquier
+`INSERT` crudo que omita la columna (seed, scripts, futuras migraciones) produce un `NULL`
+por accidente en vez de `'afecto'`. La implementación real lo probó: 4 de los 6 `INSERT
+INTO items` del seeder no especificaban la columna y confiaban en el default; al sacarlo,
+2 de esos 4 rompieron e2e ajenos con montos exactos (los otros 2 no tenían ningún test que
+los cazara — se habrían quedado corrompidos en silencio). La columna va **nullable
+conservando el default**:
+
 En `item.entity.ts:42-43`:
 
 ```ts
   // Nullable a propósito: `tipo='ingrediente'` no tiene tratamiento fiscal
   // porque no se vende. NO es "afecto por defecto" — ver ADR-018 y el
   // `=== 'afecto'` de calculo-precios.service.ts.
-  @Column({ name: 'clasificacion_tributaria', type: 'text', nullable: true })
+  //
+  // El DEFAULT se conserva a propósito, junto con `nullable`: son dos
+  // protecciones distintas, no una redundancia (ver el porqué arriba en el
+  // plan). Un ingrediente se inserta con NULL **explícito** (gana sobre el
+  // default); el resto de los tipos sigue confiando en el default cuando el
+  // payload no manda `clasificacionTributaria`.
+  @Column({
+    name: 'clasificacion_tributaria',
+    type: 'text',
+    nullable: true,
+    default: 'afecto',
+  })
   clasificacionTributaria: string | null; // 'afecto' | 'exento' | null
 ```
 

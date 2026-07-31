@@ -79,7 +79,16 @@ export class UpdateItemDto {
   @IsOptional()
   activo?: boolean;
 
-  @IsOptional()
+  // @ValidateIf (no @IsOptional): mismo motivo que `costo`/`stock` arriba —
+  // @IsOptional() también saltea la validación cuando el valor es `null`
+  // explícito, no solo cuando la propiedad falta. Eso dejaría pasar
+  // `{ "clasificacionTributaria": null }` con 200 y, sin el `NOT NULL` que
+  // tenía la columna antes de que se volviera nullable, el `UPDATE` lo
+  // persistiría en silencio — un producto sin IVA sin que nadie lo pida
+  // explícitamente. @ValidateIf solo saltea cuando la propiedad falta
+  // (undefined); un `null` explícito sigue cayendo en `@IsIn`, que lo rechaza
+  // porque `null` no es `'afecto'` ni `'exento'`.
+  @ValidateIf((o: UpdateItemDto) => o.clasificacionTributaria !== undefined)
   @IsIn(['afecto', 'exento'])
   clasificacionTributaria?: string;
 

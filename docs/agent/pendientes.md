@@ -110,6 +110,31 @@ identificamos con ubicación concreta.
   — es cierto en el sentido de que quedan **disponibles en el mapa** de reglas, pero se lee
   como que se aplican sin estar asociados al ítem, que es justamente lo que no pasa.
 
+- [ ] **`VentasService` rellena el snapshot fiscal con `'afecto'` cuando falta la
+  clasificación tributaria, en vez de rechazar** (backend, `ventas/ventas.service.ts:396`
+  y `:889`) — `clasificacionTributaria: item.clasificacionTributaria ?? 'afecto'` (y su
+  gemelo con `linea.` en vez de `item.`). Encontrado en la revisión independiente de la
+  Task 3 del plan de IVA derivado (columna `items.clasificacion_tributaria` nullable desde
+  esa tarea). **El problema:** si algún día `item.clasificacionTributaria` llega `null` a
+  este punto, la línea de venta queda con `clasificacion_tributaria = 'afecto'` en el
+  snapshot fiscal (`venta_detalles`, que es `NOT NULL`) mientras el motor de precios —que
+  ya decidió el IVA **antes**, con la condición positiva `=== 'afecto'`— no le cobró IVA
+  por haber visto el `null`. El detalle persistido queda **mintiendo**: dice "afecto" y
+  cobró IVA cero, lo que es indetectable por auditoría (no hay excepción, no hay log, el
+  dato guardado es coherente consigo mismo pero no con lo que realmente pasó).
+  **Hoy es inalcanzable, no un bug activo:** el único `tipo` con `clasificacionTributaria`
+  nullable es `'ingrediente'`, y `ventas.service.ts:191` ya rechaza vender un ingrediente
+  directamente (`'Los ingredientes no se pueden vender directamente'`) antes de llegar a
+  las líneas 396/889. Ningún otro tipo de ítem puede tener `null` hoy. El owner decidió
+  **no tocarlo ahora** (2026-07-31) — queda registrado para no reintroducirlo por
+  descuido si en el futuro se agrega otro tipo de ítem no vendible con `clasificacionTributaria`
+  nullable, o si el guard de la línea 191 se relaja.
+  **Corrección propuesta cuando se retome:** reemplazar el `?? 'afecto'` silencioso por un
+  `throw` (el snapshot fiscal no debe rellenar un dato que no tiene, y menos con el valor
+  que más IVA implica) — mismo espíritu que el `BadRequestException` que ya usa
+  `calculo-precios.service.ts:212` cuando un ítem afecto no encuentra IVA del país
+  configurado.
+
 ## Suite E2E de navegador (fundación lista, flujos por escribir)
 
 Scaffold Playwright ya funciona (`frontend/e2e/`, auth vía storageState, 1 smoke verde).

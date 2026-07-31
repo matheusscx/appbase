@@ -2686,9 +2686,13 @@ export class SeederService implements OnApplicationBootstrap {
     const MOV_CARNE_ID = uuid(264);
     const MOV_QUESO_ID = uuid(265);
 
-    // Migración soft: DBs ya sembradas con tipo=producto
+    // Migración soft: DBs ya sembradas con tipo=producto. clasificacion_tributaria
+    // también se fuerza a NULL acá: sin esto, una BD que ya corrió esta
+    // migración antes de que la columna existiera queda con
+    // tipo='ingrediente' + clasificacion_tributaria='afecto' (el default),
+    // violando la regla de que un ingrediente no tiene tratamiento fiscal.
     await this.dataSource.query(
-      `UPDATE items SET tipo = 'ingrediente', precio_base = '0', actualizado_el = NOW()
+      `UPDATE items SET tipo = 'ingrediente', precio_base = '0', clasificacion_tributaria = NULL, actualizado_el = NOW()
        WHERE item_id = ANY($1::uuid[]) AND eliminado_el IS NULL`,
       [[PAN_ID, CARNE_ID, QUESO_ID]],
     );
@@ -2732,8 +2736,12 @@ export class SeederService implements OnApplicationBootstrap {
 
     for (const ing of ingredientes) {
       await this.dataSource.query(
-        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
-         VALUES ($1,$2,$3,$4,'0',$5,$6,'ingrediente')`,
+        // clasificacion_tributaria NULL explícito: el ítem no se vende, no
+        // tiene tratamiento fiscal. La columna tiene DEFAULT 'afecto' para
+        // protegerse de un INSERT que la omita por accidente — acá el NULL
+        // es intencional, así que se manda explícito (gana sobre el default).
+        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+         VALUES ($1,$2,$3,$4,'0',$5,$6,'ingrediente',NULL)`,
         [ing.id, PARIS, CLP, ing.nombre, false, true],
       );
       await this.dataSource.query(
@@ -2867,8 +2875,10 @@ export class SeederService implements OnApplicationBootstrap {
     ];
     for (const ing of nuevosIngredientes) {
       await this.dataSource.query(
-        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
-         VALUES ($1,$2,$3,$4,'0',$5,$6,'ingrediente')`,
+        // clasificacion_tributaria NULL explícito — ver el comentario del
+        // mismo patrón en seedIngredientesBase().
+        `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+         VALUES ($1,$2,$3,$4,'0',$5,$6,'ingrediente',NULL)`,
         [ing.id, PARIS, CLP, ing.nombre, false, true],
       );
       await this.dataSource.query(
