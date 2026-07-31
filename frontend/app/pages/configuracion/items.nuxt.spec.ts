@@ -5,7 +5,7 @@
 // un usuario con el permiso ve sus controles aunque no sea admin — y que las
 // entradas del menú de acciones se arman por permiso: "Ajustar stock" escribe,
 // "Historial" solo lee, y quedaron en el mismo dropdown.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Items from './items.vue'
 
@@ -31,16 +31,46 @@ const ITEM_PRODUCTO = {
   unidadMedida: 'unidad',
   categoriaId: null,
   clasificacionTributaria: 'afecto',
-  impuestosIds: [],
+  impuestosIds: [] as string[],
   descuentosIds: [],
   recargosIds: [],
 }
+
+const IMPUESTO_IVA = {
+  id: 'iva-1',
+  nombre: 'IVA',
+  porcentaje: '0.19',
+  tipo: 'iva',
+  activo: true,
+  origen: 'sistema',
+}
+const IMPUESTO_OTRO = {
+  id: 'otro-1',
+  nombre: 'Impuesto Adicional',
+  porcentaje: '0.05',
+  tipo: 'otro',
+  activo: true,
+  origen: 'sistema',
+}
+
+// `/impuestos` y el detalle de `/items/:id` son configurables por test: el
+// chip fijo del IVA depende de la clasificación tributaria que traiga el
+// detalle, y la separación del selector depende de qué trae `/impuestos`.
+let impuestosMock: typeof IMPUESTO_IVA[] = [IMPUESTO_IVA, IMPUESTO_OTRO]
+let itemDetalleMock: typeof ITEM_PRODUCTO = ITEM_PRODUCTO
 
 // La página dispara varias cargas al montar (catálogos, vendibles, grupos) y
 // cada una espera una forma distinta. Se responde por URL: lo que importa es
 // que la tabla tenga UNA fila para que se rendericen los controles de fila.
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
+    if (typeof url === 'string' && url.includes('/impuestos'))
+      return Promise.resolve(impuestosMock)
+    // Detalle de un item puntual (`abrirEditar`): sin query string y sin
+    // segmento después del id, a diferencia de `/items/:id/unidades` o del
+    // listado paginado `/items?page=...`.
+    if (typeof url === 'string' && /\/items\/[^/?]+$/.test(url))
+      return Promise.resolve(itemDetalleMock)
     if (typeof url === 'string' && url.includes('/items'))
       return Promise.resolve({ data: [ITEM_PRODUCTO], meta: { total: 1, page: 1, limit: 20, totalPages: 1 } })
     return Promise.resolve([])
@@ -115,5 +145,86 @@ describe('configuracion/items — permisos de módulo, no esAdmin', () => {
 
     expect(tieneTexto(wrapper, 'Nuevo item')).toBe(true)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
+  })
+})
+
+// El IVA no se administra por ítem (ADR-018): sale de la clasificación
+// tributaria. El chip fijo es la señal visual de eso; el candado real es el
+// 400 que tira el backend si `impuestosIds` trae un id `tipo: 'iva'`.
+describe('configuracion/items — chip fijo del IVA', () => {
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
+  })
+
+  // El drawer lo teletransporta `AppDrawer`/`UDrawer` fuera del wrapper: hay
+  // que abrirlo por el camino real (click en "Editar", que dispara
+  // `abrirEditar` → `GET /items/:id`) y mirar el `body`, mismo patrón que
+  // `configuracion/permisos-escritura.nuxt.spec.ts`.
+  async function abrirEditarPrimerItem() {
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    return wrapper
+  }
+
+  it('con clasificación afecto, el chip fijo del IVA aparece', async () => {
+    itemDetalleMock = { ...ITEM_PRODUCTO, clasificacionTributaria: 'afecto' }
+    const wrapper = await abrirEditarPrimerItem()
+
+    expect(document.body.textContent).toContain('IVA 19%')
+
+    wrapper.unmount()
+  })
+
+  it('con clasificación exento, el chip fijo del IVA no aparece', async () => {
+    itemDetalleMock = { ...ITEM_PRODUCTO, clasificacionTributaria: 'exento' }
+    const wrapper = await abrirEditarPrimerItem()
+
+    expect(document.body.textContent).not.toContain('IVA 19%')
+
+    wrapper.unmount()
+  })
+
+  it('el selector de impuestos adicionales nunca ofrece el IVA como opción', async () => {
+    // Mutante mínimo: sacar el `&& i.tipo !== 'iva'` del filtro de
+    // `impuestosOpts` en items.vue. El IVA vuelve a aparecer acá y esta
+    // aserción se pone en rojo.
+    itemDetalleMock = { ...ITEM_PRODUCTO, clasificacionTributaria: 'afecto' }
+    const wrapper = await abrirEditarPrimerItem()
+
+    const selectMenu = wrapper
+      .findAllComponents({ name: 'USelectMenu' })
+      .find(c => c.props('placeholder') === 'Sin impuestos adicionales')
+    expect(selectMenu).toBeTruthy()
+
+    const opciones = selectMenu!.props('items') as { label: string; value: string }[]
+    expect(opciones.some(o => o.value === IMPUESTO_IVA.id)).toBe(false)
+    expect(opciones.some(o => o.value === IMPUESTO_OTRO.id)).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('al editar un item con una fila de IVA vieja en item_impuestos, no la carga en el form', async () => {
+    // Riesgo cubierto además del pedido por el brief: `GET /items/:id` lee
+    // `item_impuestos` tal cual, sin filtrar tipo. Si quedó una fila vieja
+    // (dato previo a este cambio o una BD sin resembrar), sin este filtro al
+    // cargar el ítem se reenviaría en el guardado y el backend respondería
+    // 400 — al usuario se le rompería el guardado de un ítem que no tocó.
+    itemDetalleMock = {
+      ...ITEM_PRODUCTO,
+      clasificacionTributaria: 'afecto',
+      impuestosIds: [IMPUESTO_IVA.id, IMPUESTO_OTRO.id],
+    }
+    const wrapper = await abrirEditarPrimerItem()
+
+    const selectMenu = wrapper
+      .findAllComponents({ name: 'USelectMenu' })
+      .find(c => c.props('placeholder') === 'Sin impuestos adicionales')
+    expect(selectMenu).toBeTruthy()
+    expect(selectMenu!.props('modelValue')).toEqual([IMPUESTO_OTRO.id])
+
+    wrapper.unmount()
   })
 })

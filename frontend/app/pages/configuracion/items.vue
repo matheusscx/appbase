@@ -127,6 +127,15 @@ interface Lote {
 
 interface Opt { label: string; value: string }
 
+interface ImpuestoApi {
+  id: string
+  nombre: string
+  porcentaje: string
+  tipo: 'iva' | 'otro'
+  activo: boolean
+  origen: 'sistema' | 'personalizado'
+}
+
 interface Movimiento {
   id: string
   itemNombre: string
@@ -276,6 +285,11 @@ const categoriasOpts = ref<Opt[]>([])
 const impuestosOpts = ref<Opt[]>([])
 const descuentosOpts = ref<Opt[]>([])
 const recargosOpts = ref<Opt[]>([])
+
+// El IVA no se administra por ítem: sale de la clasificación tributaria
+// (ADR-018), y el backend rechaza con 400 que venga en `impuestosIds`. Se
+// aparta del selector para que no pueda entrar ahí ni por accidente.
+const ivaDelPais = ref<ImpuestoApi | null>(null)
 
 	const productosIngrediente = ref<{
 	  id: string
@@ -520,6 +534,14 @@ const submitLabel = computed(() =>
   editingId.value ? 'Guardar cambios' : 'Crear item',
 )
 
+// El porcentaje viaja en decimal ('0.19'): se rotula con Decimal, nunca con
+// `number` nativo (invariante del proyecto).
+const ivaLabel = computed(() =>
+  ivaDelPais.value
+    ? `${ivaDelPais.value.nombre} ${new Decimal(ivaDelPais.value.porcentaje).times(100)}%`
+    : '',
+)
+
 function resetDrawer() {
   editingId.value = null
   form.value = emptyForm()
@@ -739,7 +761,7 @@ async function cargarCatalogos() {
     const [categorias, impuestos, descuentos, recargos, productos] =
       await Promise.all([
         useApiFetch<any[]>(`${apiUrl}/categorias`),
-        useApiFetch<any[]>(`${apiUrl}/impuestos`),
+        useApiFetch<ImpuestoApi[]>(`${apiUrl}/impuestos`),
         useApiFetch<any[]>(`${apiUrl}/descuentos`),
         useApiFetch<any[]>(`${apiUrl}/recargos`),
         useApiFetch<PaginatedResponse<Item>>(`${apiUrl}/items?tipo=ingrediente&pageSize=100`),
@@ -770,8 +792,10 @@ async function cargarCatalogos() {
         .map((c) => ({ label: c.nombre, value: c.id })),
     ]
 
+    ivaDelPais.value = impuestos.find((i) => i.tipo === 'iva' && i.activo) ?? null
+
     impuestosOpts.value = impuestos
-      .filter((i) => i.activo)
+      .filter((i) => i.activo && i.tipo !== 'iva')
       .map((i) => ({
         label: i.origen === 'sistema' ? `${i.nombre} (Sistema)` : i.nombre,
         value: i.id,
@@ -871,7 +895,14 @@ async function abrirEditar(item: Item) {
         })),
       })),
       clasificacionTributaria: detalle.clasificacionTributaria ?? 'afecto',
-      impuestosIds: detalle.impuestosIds ?? [],
+      // `GET /items/:id` lee `item_impuestos` tal cual, sin filtrar el IVA: si
+      // quedó una fila vieja asociada (dato previo a este cambio, o una BD sin
+      // resembrar), el backend rechaza el guardado de un ítem que el usuario
+      // no tocó. Se descarta acá, al cargar, no solo en las opciones del
+      // selector.
+      impuestosIds: (detalle.impuestosIds ?? []).filter(
+        (id) => id !== ivaDelPais.value?.id,
+      ),
       recargosIds: detalle.recargosIds ?? [],
       descuentosIds: detalle.descuentosIds ?? [],
     }
@@ -2002,14 +2033,25 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             </UFormField>
 
             <UFormField label="Impuestos">
-              <USelectMenu
-                v-model="form.impuestosIds"
-                :items="impuestosOpts"
-                value-key="value"
-                multiple
-                placeholder="Sin impuestos"
-                class="w-full"
-              />
+              <div class="flex flex-wrap items-center gap-2">
+                <!-- Sale de la clasificación, no de `impuestosIds`: por eso no
+                     puede desincronizarse de lo que va a cobrar el motor. Sin
+                     × a propósito — un ítem afecto lleva IVA sí o sí. -->
+                <UBadge
+                  v-if="form.clasificacionTributaria === 'afecto' && ivaDelPais"
+                  :label="ivaLabel"
+                  color="primary"
+                  variant="subtle"
+                />
+                <USelectMenu
+                  v-model="form.impuestosIds"
+                  :items="impuestosOpts"
+                  value-key="value"
+                  multiple
+                  placeholder="Sin impuestos adicionales"
+                  class="flex-1 min-w-0"
+                />
+              </div>
             </UFormField>
 
             <UFormField label="Descuentos">
