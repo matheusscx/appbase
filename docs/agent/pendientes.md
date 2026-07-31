@@ -22,6 +22,18 @@ identificamos con ubicación concreta.
   vaciar el `totalFinal` de una línea sin tocar el resto). Decidir `>= 0` (estado
   actual) vs `> 0` (`IsDecimalPositivo`) es una regla de negocio del owner, no algo a
   inferir. Requiere confirmación antes de endurecer más.
+- [ ] **El país del tenant se deriva con el mismo JOIN en 11 queries** (backend, ocho
+  módulos: `impuestos`, `monedas` ×2, `metodos-pago` ×2, `ventas`, `items` ×2, `propinas`
+  ×2, `seeder`) — todas hacen `tenants.provincia_id → provincia.pais_id`. **Idea del owner
+  (2026-07-30):** una columna `tenants.pais_id` para buscarlo directo. **Evaluada y
+  descartada por ahora**, con dos hechos medidos: (a) `provinciaId` es **mutable**
+  (`update-my-tenant.dto.ts:21`), así que la columna copiada se desincroniza en cuanto
+  alguien cambie de provincia y olvide actualizarla — y desincroniza justo el país que
+  determina el IVA, que es el trade que la spec del IVA derivado rechaza explícitamente;
+  (b) **los once JOIN filtran `eliminado_el` de `provincia`**, o sea que el boilerplate es
+  correcto: molesta a la vista, no está produciendo bugs. Se reabre si aparece evidencia
+  de que duele (una query caliente, o un módulo nuevo que olvide el filtro); el cierre sin
+  divergencia sería una **vista `tenant_pais`**, no una columna.
 - [ ] **El e2e da fallos masivos falsos si se corre justo después de editar un fuente**
   (harness) — visto **dos veces el 2026-07-28**, con la misma firma: 42 y 46 fallos
   repartidos por media suite, y verde inmediato al repetir. La causa probable —hipótesis,
