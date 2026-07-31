@@ -69,32 +69,8 @@ const { items: pagos, meta, page, loading } =
 const resumen = ref<PagosResumen | null>(null)
 const loadingResumen = ref(false)
 
-function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
-  const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
-    pendiente: 'warning',
-    pagada_parcial: 'info',
-    pagada: 'success',
-    cancelada: 'error',
-  }
-  return map[estado] ?? 'neutral'
-}
-
-function estadoLabel(estado: string): string {
-  const map: Record<string, string> = {
-    pendiente: 'Pendiente',
-    pagada_parcial: 'Parcial',
-    pagada: 'Pagada',
-    cancelada: 'Cancelada',
-  }
-  return map[estado] ?? estado
-}
-
-const estadoOptions = [
-  { label: estadoLabel('pendiente'), value: 'pendiente' },
-  { label: estadoLabel('pagada_parcial'), value: 'pagada_parcial' },
-  { label: estadoLabel('pagada'), value: 'pagada' },
-  { label: estadoLabel('cancelada'), value: 'cancelada' },
-]
+// Los pagos muestran y filtran el estado de la VENTA asociada, no uno propio.
+const { estadoColor, estadoLabel, estadoOptions } = useEstadoVenta()
 
 const metodosPago = ref<MetodoPago[]>([])
 const metodoOptions = computed(() =>

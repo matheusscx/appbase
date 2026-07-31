@@ -14,6 +14,31 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ## Deuda de código (harness)
 
+- [x] ~~**Los mapas de estado de venta están duplicados en 4 `.vue`**~~ (frontend) —
+  cerrado 2026-07-30 con [`useEstadoVenta()`](../../frontend/app/composables/useEstadoVenta.ts),
+  consumido por `pages/ventas/index.vue`, `components/ventas/VentaDetalleDrawer.vue`,
+  `pages/pagos/index.vue` y `components/pagos/PagoDetalleDrawer.vue` (−84 líneas). Las
+  cuatro copias de `estadoColor`/`estadoLabel` eran **byte-idénticas**: no había drift que
+  reconciliar, la extracción fue mecánica.
+  **Lo que arregla de verdad no es la duplicación, es que las opciones del filtro dejaron
+  de escribirse a mano.** Ventas y pagos armaban su `estadoOptions` repitiendo la lista de
+  estados, y esa lista viaja al backend, donde `@IsEnum(EstadoVenta)` la valida: una opción
+  de más no falla al escribirla, falla con un 400 al elegirla en producción —fue lo que
+  pasó con `borrador`—. Ahora `estadoOptions` se **deriva** del mapa de etiquetas, así que
+  no puede ofrecer un estado que no esté mapeado; y los mapas son `Record<EstadoVenta, …>`
+  completos, así que sumar un estado a la unión no compila hasta darle color y etiqueta.
+  Verificado contra el backend: las 4 claves son exactamente el enum `EstadoVenta`, y
+  `/pagos` filtra por `ventaEstado` validado contra **ese mismo** enum — por eso es un solo
+  concepto y el composable se llama `useEstadoVenta`, no `useEstadoPago`.
+  **Fuera de alcance a propósito:** órdenes, propinas y suscripciones tienen funciones con
+  el mismo nombre en sus pantallas, pero son enums distintos (`creada/en_proceso/…`,
+  `borrador/confirmada/anulada`, `activa/pausada/cancelada`), no copias de este.
+  Lo fijan 6 tests con **tres mutantes muertos**: (a) volver `estadoOptions` a la lista
+  escrita a mano con `borrador` —el bug histórico— pone en rojo el test de opciones;
+  (b) rotular las opciones a mano hasta que deriven de las etiquetas (`'Pagada parcial'`
+  vs `'Parcial'`) pone en rojo el de consistencia badge↔filtro; (c) colapsar el color de
+  `pagada_parcial` al fallback `'neutral'` pone en rojo el de colores —chequeado a
+  propósito, porque un test que afirma el valor por defecto queda verde con el bug adentro.
 - [x] ~~**Código SSR inalcanzable en `auth.ts` y `tenant.ts`**~~ (frontend) — cerrado
   2026-07-30 **con confirmación explícita del owner**, que hacía falta porque `tryRefresh`
   es el flujo de refresh token y la invariante 4 dice que el sistema JWT no se modifica sin

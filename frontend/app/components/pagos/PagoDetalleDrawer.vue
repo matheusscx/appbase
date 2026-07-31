@@ -26,25 +26,8 @@ const open = defineModel<boolean>('open', { default: false })
 
 const { formatMonto, formatFecha, formatTipoPago } = useFormatters()
 
-function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
-  const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
-    pendiente: 'warning',
-    pagada_parcial: 'info',
-    pagada: 'success',
-    cancelada: 'error',
-  }
-  return map[estado] ?? 'neutral'
-}
-
-function estadoLabel(estado: string): string {
-  const map: Record<string, string> = {
-    pendiente: 'Pendiente',
-    pagada_parcial: 'Parcial',
-    pagada: 'Pagada',
-    cancelada: 'Cancelada',
-  }
-  return map[estado] ?? estado
-}
+// El badge de este drawer es el estado de la VENTA del pago (`pago.ventaEstado`).
+const { estadoColor, estadoLabel } = useEstadoVenta()
 </script>
 
 <template>

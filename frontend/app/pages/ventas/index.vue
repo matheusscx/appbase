@@ -55,25 +55,7 @@ const loadingResumen = ref(false)
 const drawerOpen = ref(false)
 const ventaSeleccionadaId = ref<string | null>(null)
 
-function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
-  const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
-    pendiente: 'warning',
-    pagada_parcial: 'info',
-    pagada: 'success',
-    cancelada: 'error',
-  }
-  return map[estado] ?? 'neutral'
-}
-
-function estadoLabel(estado: string): string {
-  const map: Record<string, string> = {
-    pendiente: 'Pendiente',
-    pagada_parcial: 'Parcial',
-    pagada: 'Pagada',
-    cancelada: 'Cancelada',
-  }
-  return map[estado] ?? estado
-}
+const { estadoColor, estadoLabel, estadoOptions } = useEstadoVenta()
 
 function canalColor(canal: string): 'primary' | 'neutral' {
   return canal === 'online' ? 'primary' : 'neutral'
@@ -95,13 +77,6 @@ function canalLabel(canal: string): string {
   }
   return map[canal] ?? canal
 }
-
-const estadoOptions = [
-  { label: estadoLabel('pendiente'), value: 'pendiente' },
-  { label: estadoLabel('pagada_parcial'), value: 'pagada_parcial' },
-  { label: estadoLabel('pagada'), value: 'pagada' },
-  { label: estadoLabel('cancelada'), value: 'cancelada' },
-]
 
 const canalOptions = [
   { label: 'Físico', value: 'fisico' },

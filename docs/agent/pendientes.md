@@ -22,19 +22,6 @@ identificamos con ubicación concreta.
   vaciar el `totalFinal` de una línea sin tocar el resto). Decidir `>= 0` (estado
   actual) vs `> 0` (`IsDecimalPositivo`) es una regla de negocio del owner, no algo a
   inferir. Requiere confirmación antes de endurecer más.
-- [ ] **Los mapas de estado de venta están duplicados en 4 `.vue`** (frontend,
-  `pages/ventas/index.vue`, `components/ventas/VentaDetalleDrawer.vue`,
-  `pages/pagos/index.vue`, `components/pagos/PagoDetalleDrawer.vue`) — cada uno con su
-  copia de `estadoColor`/`estadoLabel`, contra la convención de `CLAUDE.md` ("utilidades
-  de presentación en composables de `app/composables/`, nunca locales a un `.vue`").
-  **Ya causó una regresión real** (jul-2026): al sacar `borrador` del enum se limpiaron
-  las dos copias de ventas y no las de pagos, y el filtro de `/pagos` quedó ofreciendo un
-  estado que el backend ahora rechaza con 400 vía `@IsEnum(EstadoVenta)` — la tabla
-  dejaba de cargar. Lo cazó la revisión independiente, no el gate: build, typecheck,
-  design y 275 unit pasaron con la regresión adentro, porque ningún test renderiza ese
-  filtro. Cierre: un `useEstadoVenta()` con ambos mapas, consumido por los cuatro.
-  **Lección del incidente:** al sacar un valor de un enum compartido, grepear el repo
-  entero — el grep acotado a la carpeta del módulo fue exactamente lo que falló.
 - [ ] **El e2e da fallos masivos falsos si se corre justo después de editar un fuente**
   (harness) — visto **dos veces el 2026-07-28**, con la misma firma: 42 y 46 fallos
   repartidos por media suite, y verde inmediato al repetir. La causa probable —hipótesis,

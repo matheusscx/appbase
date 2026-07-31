@@ -203,31 +203,13 @@ function reembolsoColor(estado: string): 'success' | 'error' | 'warning' | 'neut
   return map[estado] ?? 'neutral'
 }
 
-function estadoColor(estado: string): 'warning' | 'success' | 'error' | 'neutral' | 'info' {
-  const map: Record<string, 'warning' | 'success' | 'error' | 'neutral' | 'info'> = {
-    pendiente: 'warning',
-    pagada_parcial: 'info',
-    pagada: 'success',
-    cancelada: 'error',
-  }
-  return map[estado] ?? 'neutral'
-}
+const { estadoColor, estadoLabel } = useEstadoVenta()
 
 function cantidadDetalleLabel(det: Detalle): string {
   if (det.cantidadPresentacion && det.unidadCodigoPresentacion) {
     return formatCantidadTicket(det.cantidadPresentacion, det.unidadCodigoPresentacion, unidadesStore.esFraccionaria(det.unidadCodigoPresentacion))
   }
   return det.cantidad
-}
-
-function estadoLabel(estado: string): string {
-  const map: Record<string, string> = {
-    pendiente: 'Pendiente',
-    pagada_parcial: 'Parcial',
-    pagada: 'Pagada',
-    cancelada: 'Cancelada',
-  }
-  return map[estado] ?? estado
 }
 
 const detalleColumns: TableColumn<Detalle>[] = [
