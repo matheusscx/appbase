@@ -10,7 +10,11 @@ para copiar/adaptar.
 
 > Convenciones transversales obligatorias (no repetidas en cada sección):
 > - **Soft delete en todo**: `@DeleteDateColumn({ name: 'eliminado_el' })`; toda
->   lectura filtra `eliminado_el IS NULL` (o `eliminadoEl: IsNull()`).
+>   lectura filtra `eliminado_el IS NULL` (o `eliminadoEl: IsNull()`). **Excepción
+>   deliberada:** el JOIN a `usuarios` de la papelera para mostrar quién borró un
+>   registro no filtra el `eliminado_el` de `usuarios` — el autor de un borrado es
+>   un hecho histórico que no debe desaparecer solo porque ese usuario se dio de
+>   baja después. Ver `categorias.service.ts → findAll`.
 > - **`type: 'uuid'` explícito** en toda columna PK/FK de UUID ([ADR-004](../adr/004-uuid-column-types.md)).
 > - **`tenant_id` siempre del token** (`req.user.tenantId`), nunca del body.
 > - **Decimal.js / `numeric`** para dinero y porcentajes; nunca `number` nativo.

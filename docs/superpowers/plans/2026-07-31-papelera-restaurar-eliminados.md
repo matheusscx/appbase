@@ -202,6 +202,10 @@ La entidad de referencia: familia TypeORM, sin nombre único, sin colaterales. L
   - `findAll(tenantId: string, incluirEliminados?: boolean): Promise<CategoriaConAuditoria[]>`
   - `QueryIncluirEliminadosDto` con la propiedad `incluirEliminados?: boolean`.
 
+  `eliminadoPorNombre` es **opcional** en el tipo de retorno, no requerido: la ruta sin
+  el flag devuelve el array de `find()` tal cual, sin tocarlo, para que ninguna pantalla
+  actual cambie de comportamiento ni de identidad de referencia.
+
 - [ ] **Step 1: Crear el DTO compartido del query param**
 
 ```ts
@@ -251,8 +255,21 @@ En `categorias.service.spec.ts` (crear el archivo si no existe, siguiendo el pat
     expect(restaurada.activo).toBe(false);
   });
 
-  it('restaurar() algo que no está en la papelera es 404', async () => {
+  it('restaurar() algo que no existe es 404', async () => {
     repo.findOne.mockResolvedValueOnce(null);
+
+    await expect(service.restaurar(TENANT_ID, CATEGORIA_ID)).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(repo.restore).not.toHaveBeenCalled();
+  });
+
+  it('restaurar() una categoría VIVA (no eliminada) es 404', async () => {
+    repo.findOne.mockResolvedValueOnce({
+      id: CATEGORIA_ID,
+      tenantId: TENANT_ID,
+      eliminadoEl: null,
+    });
 
     await expect(service.restaurar(TENANT_ID, CATEGORIA_ID)).rejects.toThrow(
       NotFoundException,
@@ -269,7 +286,7 @@ En `categorias.service.spec.ts` (crear el archivo si no existe, siguiendo el pat
   });
 ```
 
-El tercer test cubre los dos casos —no existe, o existe y está vivo— con la misma aserción: la búsqueda es una sola y no distingue.
+**Los dos últimos tests parecen el mismo y no lo son** — corregido el 2026-07-31 después de que la Task 2 lo descubriera. La versión original de este plan tenía solo el de `findOne → null`, y **no cazaba su propio mutante**: con `findOne` devolviendo `null`, el `|| !categoria.eliminadoEl` nunca se ejecuta, así que sacarlo no rompía nada y el test pasaba igual. El caso de la fila **viva** es el único que ejercita esa rama. Copiarlos los dos a los recursos de la Task 6, no uno.
 
 - [ ] **Step 3: Correr los tests y verificar que fallan**
 
@@ -291,14 +308,21 @@ Expected: FAIL — `restaurar is not a function`, y `remove` recibe 2 args, no 3
     }
     // El nombre de quien borró sale por JOIN en la misma query: una consulta
     // por fila sería N+1 sobre un listado que puede tener cientos.
-    return this.categoriaRepo
+    // `getMany()` descarta los `addSelect` que no mapean a una columna de la
+    // entity, así que hay que usar `getRawAndEntities()` y fusionar a mano.
+    const { entities, raw } = await this.categoriaRepo
       .createQueryBuilder('c')
       .leftJoin('usuarios', 'u', 'u.usuario_id = c.eliminado_por')
       .addSelect('u.nombre_usuario', 'c_eliminado_por_nombre')
       .where('c.tenant_id = :tenantId', { tenantId })
       .withDeleted()
       .orderBy('c.nombre', 'ASC')
-      .getMany();
+      .getRawAndEntities<{ c_eliminado_por_nombre: string | null }>();
+
+    return entities.map((categoria, i) => ({
+      ...categoria,
+      eliminadoPorNombre: raw[i].c_eliminado_por_nombre,
+    }));
   }
 
   async remove(

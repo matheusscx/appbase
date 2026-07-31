@@ -7,15 +7,20 @@ import { Categoria } from './entities/categoria.entity';
 const TENANT = 'tenant-uuid';
 const CAT = 'categoria-uuid';
 const IMPRESORA = 'impresora-uuid';
+const USUARIO_ID = 'usuario-uuid';
 
 describe('CategoriasService', () => {
   let service: CategoriasService;
   let repo: {
     find: jest.Mock;
     findOne: jest.Mock;
+    findOneOrFail: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    update: jest.Mock;
+    restore: jest.Mock;
     softDelete: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let dataSource: { query: jest.Mock };
 
@@ -23,9 +28,13 @@ describe('CategoriasService', () => {
     repo = {
       find: jest.fn(),
       findOne: jest.fn(),
+      findOneOrFail: jest.fn(),
       create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
+      update: jest.fn(() => Promise.resolve({ affected: 1 })),
+      restore: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+      createQueryBuilder: jest.fn(),
     };
     dataSource = {
       query: jest.fn().mockResolvedValue([{ impresora_id: IMPRESORA }]),
@@ -137,20 +146,126 @@ describe('CategoriasService', () => {
     it('lanza NotFound al eliminar categoría de otro tenant', async () => {
       repo.findOne.mockResolvedValue(null);
 
-      await expect(service.remove(TENANT, CAT)).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO_ID, CAT)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.softDelete).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
-    it('hace soft delete de la categoría del tenant', async () => {
+    it('remove() registra quién borró y cuándo, en una sola escritura', async () => {
       repo.findOne.mockResolvedValue({ id: CAT, tenantId: TENANT });
 
-      await service.remove(TENANT, CAT);
+      await service.remove(TENANT, USUARIO_ID, CAT);
 
-      expect(repo.softDelete).toHaveBeenCalledWith({
+      // Objeto exacto (no `objectContaining`): si `eliminadoEl` faltara del
+      // payload, esta aserción debe fallar — es el corazón del soft delete,
+      // no un detalle opcional de `eliminadoPor`.
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: CAT, tenantId: TENANT },
+        { eliminadoPor: USUARIO_ID, eliminadoEl: expect.any(Date) },
+      );
+    });
+  });
+
+  describe('restaurar', () => {
+    it('restaurar() devuelve la categoría RE-CONSULTADA tras el restore, y no toca `activo`', async () => {
+      // `categorias.remove()` nunca pisó `activo`, así que el valor previo
+      // sobrevivió: forzarlo destruiría información que el borrado respetó.
+      // El pre-restore (`findOne`) y el post-restore (`findOneOrFail`) se
+      // dejan deliberadamente DISTINTOS en `eliminadoEl`/`nombre` — si el
+      // service devolviera el objeto viejo en vez de re-consultar tras
+      // `restore()`, estas dos aserciones deben delatarlo aunque `activo`
+      // sea igual en ambos.
+      repo.findOne.mockResolvedValue({
         id: CAT,
         tenantId: TENANT,
+        nombre: 'Bebidas (en la papelera)',
+        activo: false,
+        eliminadoEl: new Date(),
+      });
+      repo.findOneOrFail.mockResolvedValue({
+        id: CAT,
+        tenantId: TENANT,
+        nombre: 'Bebidas',
+        activo: false,
+        eliminadoEl: null,
+      });
+
+      const restaurada = await service.restaurar(TENANT, CAT);
+
+      expect(repo.restore).toHaveBeenCalledWith({
+        id: CAT,
+        tenantId: TENANT,
+      });
+      expect(repo.findOneOrFail).toHaveBeenCalledWith({
+        where: { id: CAT, tenantId: TENANT },
+      });
+      expect(restaurada.activo).toBe(false);
+      expect(restaurada.eliminadoEl).toBeNull();
+      expect(restaurada.nombre).toBe('Bebidas');
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      repo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.restaurar(TENANT, CAT)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() una categoría viva (no eliminada) es 404', async () => {
+      repo.findOne.mockResolvedValueOnce({
+        id: CAT,
+        tenantId: TENANT,
+        eliminadoEl: null,
+      });
+
+      await expect(service.restaurar(TENANT, CAT)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findAll con incluirEliminados', () => {
+    it('sin el flag no devuelve eliminados', async () => {
+      await service.findAll(TENANT);
+
+      expect(repo.find).toHaveBeenCalledWith(
+        expect.not.objectContaining({ withDeleted: true }),
+      );
+    });
+
+    it('con el flag trae eliminados con el nombre de quien borró (vía getRawAndEntities)', async () => {
+      const categoriaEliminada = {
+        id: CAT,
+        tenantId: TENANT,
+        nombre: 'Bebidas',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      };
+      const qbMock = {
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawAndEntities: jest.fn().mockResolvedValue({
+          entities: [categoriaEliminada],
+          raw: [{ c_eliminado_por_nombre: 'admin.paris' }],
+        }),
+      };
+      repo.createQueryBuilder.mockReturnValue(qbMock);
+
+      const result = await service.findAll(TENANT, true);
+
+      // getMany() descarta los addSelect que no mapean a una columna de la
+      // entity: el service debe usar getRawAndEntities() y fusionar a mano.
+      expect(qbMock.getRawAndEntities).toHaveBeenCalled();
+      expect(result[0]).toMatchObject({
+        id: CAT,
+        eliminadoPorNombre: 'admin.paris',
       });
     });
   });
