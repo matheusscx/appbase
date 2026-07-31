@@ -2360,11 +2360,21 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   /**
-   * Migra impuestos personalizados que duplican un impuesto oficial del país del
-   * tenant (mismo porcentaje y nombre con "IVA"): remapea item_impuestos al del
-   * sistema y soft-deletea el duplicado. Idempotente: los duplicados quedan
-   * soft-deleteados y no vuelven a matchear. Los snapshots de ventas_impuestos
-   * NO se tocan (ya congelaron porcentaje y valor).
+   * Desasocia impuestos personalizados que duplican un impuesto oficial del país
+   * del tenant (mismo porcentaje y nombre con "IVA"): borra sus asociaciones
+   * item_impuestos y soft-deletea el duplicado.
+   *
+   * Lo que evita la doble tributación es el **soft delete del duplicado**, no el
+   * borrado de la asociación: el duplicado es un impuesto del tenant, y como
+   * `tipo` no se expone en la API de escritura, entra como `'otro'` — que el
+   * motor NO filtra, así que se sumaría al IVA derivado (38%).
+   *
+   * El paso que se quitó era el remapeo hacia el impuesto oficial. Ese sí es
+   * inofensivo —la fila oficial es `tipo='iva'` y el motor la descarta antes de
+   * derivar—, pero quedó sin sentido: el IVA sale de
+   * `items.clasificacion_tributaria`, no de `item_impuestos`. Idempotente:
+   * los duplicados quedan soft-deleteados y no vuelven a matchear. Los snapshots
+   * de ventas_impuestos NO se tocan (ya congelaron porcentaje y valor).
    */
   private async remapImpuestosOficialesDuplicados(): Promise<void> {
     const sistemas: {
@@ -2390,12 +2400,6 @@ export class SeederService implements OnApplicationBootstrap {
       );
 
       for (const dup of duplicados) {
-        await this.dataSource.query(
-          `INSERT INTO item_impuestos (item_id, impuesto_id)
-           SELECT item_id, $1 FROM item_impuestos WHERE impuesto_id = $2
-           ON CONFLICT DO NOTHING`,
-          [sys.impuesto_id, dup.impuesto_id],
-        );
         await this.dataSource.query(
           `DELETE FROM item_impuestos WHERE impuesto_id = $1`,
           [dup.impuesto_id],
@@ -3019,14 +3023,14 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   /**
-   * Producto demo unidad·CLP con IVA 19% — base de los tests E2E de ventas.
+   * Producto demo unidad·CLP, `afecto` — el motor le deriva el IVA 19% del país
+   * (no se asocia por `item_impuestos`). Base de los tests E2E de ventas.
    * IDs 116 (item) / 120 (movimiento) reservados para esos tests.
    */
   private async seedProductoDemoVentas(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const CLP = '550e8400-e29b-41d4-a716-446655440003';
     const ELECTRONICA = '550e8400-e29b-41d4-a716-446655440110';
-    const IVA_19 = '550e8400-e29b-41d4-a716-446655440280'; // IVA sistema Chile
     const ITEM_ID = '550e8400-e29b-41d4-a716-446655440116';
     const MOV_ID = '550e8400-e29b-41d4-a716-446655440120';
     const STOCK = '50';
@@ -3049,10 +3053,6 @@ export class SeederService implements OnApplicationBootstrap {
       `INSERT INTO item_producto (item_id, stock, unidad_medida, modo_inventario)
        VALUES ($1,'0','unidad','cantidad')`,
       [ITEM_ID],
-    );
-    await this.dataSource.query(
-      `INSERT INTO item_impuestos (item_id, impuesto_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-      [ITEM_ID, IVA_19],
     );
     await this.dataSource.query(
       `UPDATE item_producto SET stock = $1 WHERE item_id = $2`,

@@ -392,6 +392,31 @@ describe('Ventas (e2e)', () => {
       expect(Number(impuestos[0].porcentaje_aplicado)).toBeCloseTo(0.19, 4);
       expect(Number(impuestos[0].valor_aplicado)).toBeCloseTo(190, 4);
     });
+
+    // Task 4 (ADR-018): el seeder dejó de asociar el IVA al ítem demo vía
+    // item_impuestos —antes tenía esa fila—; el motor lo deriva de
+    // `clasificacion_tributaria = 'afecto'`. Sin esta prueba, un seeder que
+    // reintroduce el INSERT en item_impuestos pasaría desapercibido.
+    it('el ítem demo sembrado no tiene item_impuestos asociado y el IVA se deriva igual', async () => {
+      const asociaciones = await ds.query(
+        `SELECT 1 FROM item_impuestos WHERE item_id = $1`,
+        [ITEM_ID],
+      );
+      expect(asociaciones).toHaveLength(0);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '5950.0000' }],
+        });
+
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaResponse & { totalFinal: string };
+      expect(venta.estado).toBe('pagada');
+      expect(Number(venta.totalFinal)).toBeCloseTo(5950, 4); // 5000 + 19% IVA
+    });
   });
 
   describe('GET /tipos-documento', () => {

@@ -12,10 +12,10 @@ const ADMIN_PASS = 'admin';
 const DESCUENTO_FIJO_ID = '550e8400-e29b-41d4-a716-446655440338';
 // "Papas fritas" — producto, precio_base 1500, precio_incluye_impuesto = false.
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440281';
-// "Producto demo (unidad · CLP)" — el ÚNICO ítem del tenant con impuesto
-// asociado (`item_impuestos`). Se usa para el caso de casing: un total sin
-// impuesto delata que se perdieron las reglas del ítem, que es la mitad del bug
-// que un simple 201 no probaría.
+// "Producto demo (unidad · CLP)" — `clasificacion_tributaria = 'afecto'`, el
+// motor le deriva el IVA del país (ya no hay `item_impuestos` asociado). Se usa
+// para el caso de casing: un total sin impuesto delata que se perdieron las
+// reglas del ítem, que es la mitad del bug que un simple 201 no probaría.
 const ITEM_CON_IMPUESTO_ID = '550e8400-e29b-41d4-a716-446655440116';
 
 interface TokenResponse {
