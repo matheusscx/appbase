@@ -71,19 +71,6 @@ identificamos con ubicación concreta.
   que más IVA implica) — mismo espíritu que el `BadRequestException` que ya usa
   `calculo-precios.service.ts:212` cuando un ítem afecto no encuentra IVA del país
   configurado.
-- [ ] **Un impuesto `tipo='otro'` desactivado se sigue cobrando si quedó asociado a un
-  ítem** (backend, `impuestos/impuestos.service.ts` `findAll` y
-  `calculo-precios/calculo-precios.service.ts`) — ni `ImpuestosService.findAll` ni el
-  motor filtran por `activo`: una vez que un impuesto adicional está en
-  `item_impuestos`, el motor lo sigue aplicando aunque se lo haya desactivado desde
-  `/configuracion/impuestos`, mientras el frontend sí lo esconde del selector de altas
-  nuevas (`impuestosOpts` filtra `i.activo`). Es "cobrar de más" real: el tenant cree
-  que lo apagó y el POS lo sigue sumando. Preexistente — no lo introdujo el trabajo de
-  IVA derivado (ADR-018) y no afecta al IVA en sí (que ni siquiera pasa por
-  `item_impuestos`), pero es la misma familia de bug. Cierre: decidir si `activo` debe
-  gatear la aplicación (no solo la selección) para impuestos/descuentos/recargos, y si
-  es así, filtrar en el motor — es una decisión de negocio del owner, no algo a inferir
-  (afecta a los tres tipos de regla, no solo impuestos).
 - [ ] **Un impuesto propio llamado "IVA" se suma al IVA derivado: 38%** (backend +
   frontend) — un admin puede crear un impuesto personalizado con nombre "IVA" y `0.19`;
   como `tipo` no está expuesto en `CreateImpuestoDto`, entra como `'otro'`, y el motor
@@ -306,6 +293,11 @@ Ver [`resueltos.md`](resueltos.md).
   una regla **borrada** sí queda excluida por TypeORM — es solo `activo`. Lo que lo vuelve
   bug y no decisión: `items.vue:685` ya filtra por `activo` al ofrecer asociaciones nuevas,
   así que el front la esconde y el back la sigue cobrando.
+  ℹ️ **Alcance confirmado el 2026-07-31** (revisión final de ADR-018): también aplica a
+  `item_impuestos`. El IVA **no** está afectado —desde ADR-018 ya no pasa por esa tabla,
+  se deriva de `clasificacion_tributaria`—, pero los `tipo='otro'` sí: el tenant los
+  desactiva desde `/configuracion/impuestos`, el front los esconde del selector y el
+  motor los sigue cobrando.
   **Forma decidida por el owner (2026-07-30):** desactivar la regla **advierte** —diciendo a
   cuántos ítems está asociada— y, **al confirmar, limpia las asociaciones**. O sea el cierre
   no es filtrar `activo` en la lectura del motor: es que desactivar sea una operación con
