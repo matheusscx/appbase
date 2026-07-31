@@ -84,6 +84,24 @@ identificamos con ubicación concreta.
   gatear la aplicación (no solo la selección) para impuestos/descuentos/recargos, y si
   es así, filtrar en el motor — es una decisión de negocio del owner, no algo a inferir
   (afecta a los tres tipos de regla, no solo impuestos).
+- [ ] **Un impuesto propio llamado "IVA" se suma al IVA derivado: 38%** (backend +
+  frontend) — un admin puede crear un impuesto personalizado con nombre "IVA" y `0.19`;
+  como `tipo` no está expuesto en `CreateImpuestoDto`, entra como `'otro'`, y el motor
+  **no** filtra los `'otro'` (por diseño: aplican en afectos y exentos). Resultado: se
+  suma al IVA derivado. **ADR-018 lo declara como consecuencia negativa asumida.**
+  **Decisión del owner (2026-07-31), tomada con la revisión final sobre la mesa:** por
+  ahora **solo se cambiaron los placeholders** del formulario (`impuestos.vue` sugería
+  literalmente `"IVA"` y `"0.19"`, o sea que la UI guiaba al error). **No** se bloquea la
+  creación. Las otras dos opciones se evaluaron y se descartaron por ahora: un 400 por
+  heurística de nombre en `ImpuestosService.create` (le prohíbe al tenant nombrar como
+  quiera y tiene falsos positivos), y exponer `tipo` para que el tenant declare su propio
+  IVA (es una feature nueva: rompe el supuesto de "un solo IVA por país" en el que se
+  apoya todo ADR-018, y hay que rediseñar antes de tocar nada).
+  **Lo que queda vivo, medido:** la única defensa es el heurístico del seeder
+  (`nombre ILIKE '%iva%'` + porcentaje idéntico), que (a) corre **solo al arrancar el
+  backend** —un impuesto creado a las 10:00 cobra doble hasta el próximo reinicio— y
+  (b) no matchea variantes como `"I.V.A. 19"` o `"Impuesto al Valor Agregado"`.
+  Reabrir si aparece un caso real o antes de salir a producción.
 - [ ] **`seeder.service.ts` — el JOIN de detección de duplicados de IVA no filtra
   `eliminado_el`** (backend, `seeder/seeder.service.ts:2393-2394`,
   `remapImpuestosOficialesDuplicados`) — los `JOIN tenants t ON t.tenant_id =
