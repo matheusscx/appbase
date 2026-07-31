@@ -167,11 +167,13 @@ Cada tenant define sus propias reglas reutilizables:
 
 **Categorías** — agrupan items (`aplica_a`: productos, servicios o ambos)
 
-**Impuestos** — nombre + porcentaje (decimal) + activo + `tipo` (`iva` | `otro`). Dos orígenes conviven en el mismo catálogo:
+**Impuestos** — nombre + porcentaje (decimal) + activo + `tipo` (`iva` | `otro`, no expuesto en la API de escritura). Dos orígenes conviven en el mismo catálogo:
 - **Oficiales por país** (`origen: 'sistema'`) — ej. IVA Chile 19%, compartido por todos los tenants de ese país. **No editables por el tenant** (solo lectura en la UI); se administran únicamente vía seeder — agregar un país nuevo es agregar su catálogo al seed, sin CRUD superadmin.
 - **Personalizados por tenant** (`origen: 'personalizado'`) — el tenant puede crear/editar/eliminar los suyos, siempre con `tipo = 'otro'` (forzado en backend; `tipo = 'iva'` es exclusivo de las filas del sistema, para evitar que un tenant recree duplicados de IVA).
 
-**Regla "exento" (clasificación tributaria del item):** un item puede marcarse `afecto` (default) o `exento`. `exento` suprime **únicamente** los impuestos `tipo = 'iva'` de esa línea; los impuestos `tipo = 'otro'` (adicionales) siempre se aplican, esté o no exento. La clasificación se **congela por línea de venta** (`venta_detalles.clasificacion_tributaria`) en el momento de vender — no se recalcula si el item cambia de clasificación después, y una nota de crédito hereda la clasificación congelada de la línea original, no la del item vigente. Ver [ADR-011](./adr/011-catalogo-impuestos-sistema.md) y [features/impuestos.md](./features/impuestos.md).
+**Regla "exento" (clasificación tributaria del item):** un item puede marcarse `afecto` (default) o `exento`. `exento` suprime **únicamente** el IVA de esa línea; los impuestos adicionales (`item_impuestos`, siempre `tipo = 'otro'`) siempre se aplican, esté o no exento. La clasificación se **congela por línea de venta** (`venta_detalles.clasificacion_tributaria`) en el momento de vender — no se recalcula si el item cambia de clasificación después, y una nota de crédito hereda la clasificación congelada de la línea original, no la del item vigente.
+
+**El IVA se deriva, nunca se asigna.** Un item `afecto` lleva el IVA del país sí o sí y no se le puede quitar; uno `exento` no lo lleva. `item_impuestos` guarda solo los impuestos **adicionales** que el usuario asoció — el IVA nunca es una fila ahí, lo agrega el motor de precios al resolver cada línea a partir de la clasificación. Mandarlo por payload (item o línea de venta) es 400 en cualquier endpoint. `tipo='ingrediente'` no tiene clasificación tributaria (`NULL`: no se vende, no aplica). Ver [ADR-018](./adr/018-iva-derivado-de-la-clasificacion.md), [ADR-011](./adr/011-catalogo-impuestos-sistema.md) y [features/impuestos.md](./features/impuestos.md).
 
 **Descuentos y Recargos** — comparten estructura:
 - `modo`: `porcentaje` | `monto_fijo`
@@ -191,7 +193,7 @@ implementada.
 
 Modelo: **tabla base + extensiones por tipo** — escala limpiamente cuando se agreguen nuevos tipos (combos, suscripciones, modificadores, etc.).
 
-**`items` (base):** campos comunes a todos los tipos — tenant, nombre, descripción, precio base, moneda, categoría, activo, tipo, **clasificación tributaria** (`afecto` default | `exento` — ver regla en sección 7).
+**`items` (base):** campos comunes a todos los tipos — tenant, nombre, descripción, precio base, moneda, categoría, activo, tipo, **clasificación tributaria** (`afecto` default | `exento` | `NULL` en `ingrediente` — ver regla en sección 7).
 
 Extensiones actuales:
 - **`item_producto`** — stock, unidad de medida, fecha elaboración, fecha vencimiento
@@ -201,7 +203,7 @@ Extensiones actuales:
 - **`item_combo`** — paquete con precio propio fijo, sin stock propio; descuenta stock de sus componentes fijos al venderse (ver 8c).
 
 Cada item:
-- Puede tener N impuestos, N descuentos, N recargos asociados
+- Puede tener N impuestos **adicionales** (nunca el IVA, que se deriva — ver sección 7), N descuentos, N recargos asociados
 - El stock se descuenta **automáticamente** al procesar una venta, generando un movimiento de inventario (ver 8b) — **solo aplica a `producto`**; `servicio` y `suscripcion` no participan del tracking de inventario. `receta` y `combo` no tienen stock propio: descuentan el de sus ingredientes/componentes (ver 8c).
 
 Extensiones futuras contempladas: combos con grupos de modificadores (elección, ej. "elige tu bebida"), items digitales.

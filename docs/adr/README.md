@@ -29,6 +29,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [015](./015-grupos-anidados-combo-un-nivel.md) | Grupos anidados en combos: automático, por unidad, un nivel, cero tablas nuevas (reuso de `resolverGruposDeItem`/`venderOpcionesGrupos`); cambio global de selector en vez de radio buttons | Accepted | 2026-07-22 |
 | [016](./016-costeo-promedio-ponderado-movil.md) | Costeo por promedio ponderado móvil (CPP), método fijo, de gestión — no FIFO, no elegible por tenant, no tributario | Accepted | 2026-07-26 |
 | [017](./017-spa-sin-ssr.md) | La app es una SPA (`ssr: false`): toda ruta está detrás de `auth` y el servidor no puede autenticarse, así que el SSR renderizaba un menú vacío y rompía la hidratación | Accepted | 2026-07-30 |
+| [018](./018-iva-derivado-de-la-clasificacion.md) | El IVA se deriva de `clasificacion_tributaria` en el motor de precios, nunca se materializa en `item_impuestos` | Accepted | 2026-07-31 |
 
 ## Creating a New ADR
 

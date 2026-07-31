@@ -1550,3 +1550,76 @@ siguen diferidos están en `pendientes.md`.
   Lo fija un e2e en `inventario.e2e-spec.ts` que manda `costoNuevo` `-4300` y `0` contra
   `POST /inventario/ajustes-costo` y espera 400 en ambos — sin esa aserción, el decorador que
   reemplazó al chequeo del service se podía borrar sin que fallara nada.
+
+## IVA derivado de la clasificación tributaria (ADR-018)
+
+- [x] ~~**Un ítem `afecto` debe llevar el IVA sí o sí; uno `exento`, no**~~ (backend +
+  frontend) — cerrado 2026-07-31 con [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)
+  y spec propia (`docs/superpowers/specs/2026-07-30-iva-automatico-clasificacion-tributaria-design.md`).
+  **Qué se hizo:** el IVA dejó de asociarse en `item_impuestos` y pasa a **derivarse** en
+  `CalculoPreciosService.resolverLinea` a partir de `items.clasificacion_tributaria`: sobre
+  la lista de impuestos ya resuelta de la línea —del ítem o pisada por el payload— se saca
+  cualquier `tipo='iva'` (defensa contra datos viejos) y se agrega el IVA del país solo si
+  `clasificacionTributaria === 'afecto'` (condición **positiva**, no la negación del filtro
+  de exento, porque la columna quedó nullable). `item_impuestos` cambió de significado: ahora
+  son solo los impuestos **adicionales** (`tipo='otro'`) que el usuario asoció. El IVA no se
+  acepta nunca por payload —ítem ni línea de venta, en ningún endpoint— y eso es 400, no
+  normalización silenciosa. `tipo='ingrediente'` quedó sin clasificación tributaria: la
+  columna se hizo nullable y el ítem se guarda con `NULL` explícito.
+  **Por qué derivar y no materializar:** auto-asociar el IVA al crear/editar el ítem dejaba
+  dos fuentes de verdad (la clasificación y la fila puente en `item_impuestos`) que
+  sincronizar en cada camino de escritura, presente y futuro. Lo que decidió no fue la
+  elegancia sino el modo de fallar: materializando, el olvido queda en la **escritura** y
+  produce un ítem que se vende sin IVA, en silencio — plata mal cobrada. Derivando, el olvido
+  queda en la **lectura** y produce, como mucho, un formulario que muestra de menos: visible,
+  y no toca la plata. Derivar además cierra sola la segunda puerta del agujero original —la
+  línea de venta que pisaba los impuestos del ítem con `impuestoIds: []`—, que materializar
+  no cerraba.
+  **`items.clasificacion_tributaria` quedó nullable pero conservando `DEFAULT 'afecto'`.**
+  Son protecciones complementarias, no alternativas: la condición positiva de lectura
+  (`=== 'afecto'`) protege que un `NULL` ya existente no derive IVA por accidente; el
+  `DEFAULT` protege que omitir la columna en un `INSERT` no produzca un `NULL` sin querer.
+  Sacar el default habría invertido el modo de fallar de vuelta a la escritura silenciosa.
+  **Corrección sobre el propósito del remapeo de duplicados.** El seeder solo necesitaba
+  dejar de **remapear** la asociación del duplicado hacia el impuesto oficial —eso era
+  inofensivo (esa fila es `tipo='iva'` y el motor la descarta antes de derivar) pero quedó
+  sin sentido, porque el IVA ya no se asocia—, pero **sigue soft-deleteando el duplicado**,
+  porque eso es lo que evita la doble tributación (el duplicado es `tipo='otro'`, el motor no
+  lo filtra, y sumado al IVA derivado da 38%). El comentario de
+  `seeder.service.ts:remapImpuestosOficialesDuplicados` documenta la distinción.
+  **Cómo quedó cada pregunta abierta de la entrada original:**
+  1. ¿Derivar o materializar? → **Derivar.** Ver arriba.
+  2. ¿Qué IVA se toma si hay más de una fila `tipo='iva'` visible? → **Se resolvió sola, no
+     hizo falta decidirla:** no puede haber más de una, porque `impuestos.tipo` no está
+     expuesto en `CreateImpuestoDto`/`UpdateImpuestoDto` — un tenant no puede crear un
+     impuesto `tipo='iva'` por API, y la única fila la siembra el seeder, una por país. Esta
+     decisión se **apoya** en esa invariante: si `tipo` se expone alguna vez en la API de
+     escritura, ADR-018 se revisa primero.
+  3. "No se puede quitar": ¿400 o re-agrega en silencio si falta el IVA en `impuestosIds`? →
+     **No aplica: el IVA nunca es parte de `impuestosIds`.** No hay nada que "quitar" porque
+     nunca se asigna; omitirlo es el camino normal, y solo es 400 si el payload lo **incluye**
+     explícitamente (contradicción, no omisión).
+  4. ¿Queda rastro del ida y vuelta `afecto → exento → afecto`? → **No aplica por la misma
+     razón:** no hay asociación que crear o destruir en cada cambio de clasificación, así que
+     no hay nada que perder ni que registrar. Las ventas ya congeladas siguen sin tocarse
+     (`venta_detalles.clasificacion_tributaria` es snapshot).
+  5. ¿Aplica a todos los tipos de ítem, incluido `ingrediente`? → **No.** `ingrediente` quedó
+     con `clasificacion_tributaria = NULL` explícito ("no aplica", no "afecto"), y la
+     condición positiva `=== 'afecto'` del motor es justamente lo que evita derivarle IVA a un
+     ingrediente si alguna vez llega a una línea.
+  **Qué lo fija:** en `calculo-precios.service.spec.ts`, seis casos con mutante verificado
+  revirtiendo al código anterior (no un `throw` agregado): afecto sin impuestos igual lleva
+  IVA; afecto con adicionales lleva adicionales **más** IVA; exento con adicionales lleva
+  adicionales **sin** IVA; una línea que pisa impuestos con `impuestoIds: []` sobre un ítem
+  afecto igual lleva el IVA (la segunda puerta); `clasificacionTributaria: null` no deriva
+  nada (fija el `===` contra el `!==`); afecto en un país sin fila `'iva'` revienta nombrando
+  el país. En `items.service.spec.ts`: `tipo='iva'` en `impuestosIds` es 400,
+  `clasificacionTributaria` junto a `tipo: 'ingrediente'` es 400, un ingrediente se guarda con
+  `NULL`. Y un e2e de extremo a extremo: crear un ítem afecto sin tocar impuestos y venderlo
+  cobra el 19% igual, con traza en `ventas_impuestos` — el bug de la entrada, por el camino
+  por default.
+  **Lo que quedó fuera y sigue en `pendientes.md`:** el `?? 'afecto'` de
+  `VentasService` al congelar el snapshot fiscal (`ventas.service.ts:396` y `:889`) sigue sin
+  tocarse — el owner decidió no endurecerlo ahora porque hoy es inalcanzable (ningún ítem
+  vendible puede llegar con `clasificacionTributaria: null`); queda documentado para no
+  reintroducirlo por descuido si eso cambia.

@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-19
+**Last Updated**: 2026-07-31
 
 ---
 
@@ -19,6 +19,12 @@ Catálogo de impuestos con dos orígenes que conviven en la misma tabla:
 Además, cada item lleva una **clasificación tributaria** explícita (`afecto` |
 `exento`) que se congela por línea al vender, y que el motor de precios usa para
 decidir qué impuestos aplicar en esa línea.
+
+**El IVA se deriva de esa clasificación, nunca se asocia al item.** `item_impuestos`
+guarda solo los **impuestos adicionales** (`tipo='otro'`) que el usuario eligió para
+ese item; un item `afecto` lleva el IVA del país sí o sí, agregado por el motor al
+resolver la línea, y un item `exento` no lo lleva nunca — ver
+[ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md).
 
 ### Why does it exist?
 
@@ -37,12 +43,13 @@ Ver el razonamiento completo (alternativas descartadas, base legal) en
 
 - **Incluido**: catálogo de impuestos del sistema por país (hoy: IVA Chile);
   convivencia con impuestos personalizados por tenant; campo `tipo` (`'iva'` |
-  `'otro'`) en todo impuesto; clasificación tributaria `afecto`/`exento` en todos
-  los tipos de item; congelamiento de la clasificación en `venta_detalles` al
-  vender (venta normal y nota de crédito); motor de precios suprime impuestos
-  `tipo='iva'` en líneas exentas (los `tipo='otro'` siempre aplican); migración
-  automática e idempotente de duplicados de IVA por tenant hacia el impuesto del
-  sistema.
+  `'otro'`), no expuesto en la API de escritura de impuestos; clasificación
+  tributaria `afecto`/`exento`/`NULL` (`NULL` solo en `tipo='ingrediente'`, que no
+  se vende); congelamiento de la clasificación en `venta_detalles` al vender (venta
+  normal y nota de crédito); el motor **deriva** el IVA del país en líneas `afecto`
+  y lo excluye en `exento`/`NULL` — nunca se acepta por payload, en ítem ni en línea
+  (400); soft delete idempotente de duplicados de IVA por tenant que colisionarían
+  con el derivado (ver [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
 - **NO incluido (futuro)**: CRUD superadmin para administrar el catálogo del
   sistema (agregar un país nuevo = agregar su catálogo al seed); impuestos
   adicionales chilenos concretos (ILA, bebidas analcohólicas, suntuarios) en el
@@ -133,12 +140,20 @@ No existe endpoint para crear impuestos del sistema — se siembran solo vía
 `550e8400-e29b-41d4-a716-446655440280`, `tipo='iva'`, `porcentaje='0.19'`.
 **Personalizado**: `(tenant_id set, pais_id NULL)`.
 
-**Tabla `items`** — nueva columna en la base (todos los tipos: producto,
-servicio, suscripción, ingrediente):
+**Tabla `items`** — columna en la base (todos los tipos: producto, servicio,
+suscripción, ingrediente):
 
 | Columna | Tipo | Constraints | Notas |
 |---|---|---|---|
-| `clasificacion_tributaria` | TEXT | default `'afecto'` | `'afecto'` \| `'exento'` |
+| `clasificacion_tributaria` | TEXT | nullable, default `'afecto'` | `'afecto'` \| `'exento'` \| `NULL` |
+
+`NULL` significa **"no aplica"**, no "afecto" — es el valor de `tipo='ingrediente'`
+(no se vende, no tiene tratamiento fiscal) y el motor lo trata como tal (ver
+[ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md): la condición que agrega el
+IVA es `=== 'afecto'`, positiva, para que un `NULL` no derive IVA por accidente). El
+`DEFAULT 'afecto'` sigue existiendo para todos los demás tipos: protege la escritura
+(un `INSERT` que omita la columna no cae en `NULL`), mientras la condición positiva del
+motor protege la lectura — son complementarios, no alternativas.
 
 **Tabla `venta_detalles`** — snapshot congelado al vender:
 
@@ -146,7 +161,11 @@ servicio, suscripción, ingrediente):
 |---|---|---|---|
 | `clasificacion_tributaria` | TEXT | default `'afecto'` | copiado del item al crear el detalle; ventas históricas quedan `'afecto'` |
 
-Sin cambios en `item_impuestos` ni `ventas_impuestos` (mismas FKs de siempre).
+`item_impuestos` no cambió de forma (mismas FKs de siempre), pero sí de **significado**:
+guarda solo los impuestos **adicionales** (`tipo='otro'`) que el usuario asoció al item.
+El IVA nunca vive ahí — se deriva en el motor a partir de `clasificacion_tributaria`. Un
+lector que asuma "acá está todo lo que se le cobra al item" muestra de menos.
+`ventas_impuestos` (snapshot de lo efectivamente cobrado por venta) sin cambios.
 
 ### DTOs
 
@@ -165,20 +184,42 @@ Sin cambios en `item_impuestos` ni `ventas_impuestos` (mismas FKs de siempre).
   filas del sistema (`tenant_id NULL`) nunca matchean ese filtro, así que
   cualquier intento de mutarlas devuelve 404 sin necesidad de un guard adicional.
 
-### Motor de precios (`CalculoPreciosService`)
+### Motor de precios (`CalculoPreciosService`) — el IVA se deriva, no se lee de una lista
 
-Cada línea lleva la `clasificacionTributaria` del item. Si es `'exento'`, se
-filtran de esa línea los impuestos con `tipo === 'iva'` **antes** del paso de
-impuestos de la fórmula; los `tipo === 'otro'` se aplican siempre, exento o no.
-Los impuestos del sistema entran automáticamente al cálculo porque
-`ImpuestosService.findAll` ya los incluye en la unión.
+`ImpuestosService.findAll` deja el catálogo completo del tenant (sistema + personalizado,
+IVA incluido) **disponible en el mapa** de reglas que arma el service. Eso no es lo mismo
+que aplicarse: quedar en el mapa solo lo hace resoluble por id, no lo suma a ninguna
+línea. Lo que decide si el IVA se cobra es exclusivamente `resolverLinea`
+(`calculo-precios.service.ts`, ver [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)):
+
+1. Sobre la lista de impuestos ya resuelta de la línea —venga del ítem o pisada por el
+   payload— **se saca** cualquier `tipo='iva'` (defensa contra `item_impuestos` viejo; la
+   API ya rechaza con 400 que llegue uno explícito, ver más abajo).
+2. Si `item.clasificacionTributaria === 'afecto'` (condición **positiva**, no
+   `!== 'exento'`: la columna es nullable y un `NULL` no debe derivar IVA), se agrega el
+   IVA del país del tenant.
+3. Si ese país no tiene fila `tipo='iva'`, revienta con un error nombrando el país en vez
+   de vender sin IVA en silencio.
 
 ```ts
-// calculo-precios.service.ts (resumen)
-impuestosLinea.filter(
-  (imp) => item.clasificacionTributaria !== 'exento' || imp.tipo !== 'iva',
-);
+// calculo-precios.service.ts — resolverLinea() (resumen)
+const impuestosLinea = impuestoIds
+  .map((id) => this.requerir(impuestoMap, id, 'impuesto'))
+  .filter((imp) => imp.tipo !== 'iva');
+
+if (item.clasificacionTributaria === 'afecto') {
+  if (!ivaDelPais) throw new BadRequestException(/* nombra el país */);
+  impuestosLinea.push(ivaDelPais);
+}
 ```
+
+**El IVA no se acepta nunca por payload.** Un `tipo='iva'` en `impuestosIds` (`POST`/
+`PATCH /items`) o en `impuestoIds` por línea (`POST /calculo-precios/calcular`,
+`POST /ventas`) es 400: "El IVA no se asigna por ítem ni por línea: sale de la
+clasificación tributaria." Omitirlo es el camino normal — con la derivación no queda nada
+que normalizar, porque el IVA ya no se guarda. Del mismo modo, mandar
+`clasificacionTributaria` junto a `tipo: 'ingrediente'` es 400: lo que no aplica no se
+acepta en silencio.
 
 ### `VentasService`
 
@@ -195,14 +236,19 @@ clasificación después.
 1. **Catálogo del sistema**: siembra IVA de Chile con id fijo
    `550e8400-e29b-41d4-a716-446655440280`, `paisId` = Chile, `tipo='iva'`,
    `porcentaje='0.19'` (si no existe ya).
-2. **Remapeo idempotente** (`remapImpuestosOficialesDuplicados`): detecta
-   impuestos personalizados por tenant cuyo `porcentaje` coincide con el IVA
+2. **Desasociación idempotente de duplicados** (`remapImpuestosOficialesDuplicados`):
+   detecta impuestos personalizados por tenant cuyo `porcentaje` coincide con el IVA
    oficial del país del tenant y cuyo `nombre` contiene "IVA" (case-insensitive);
-   remapea `item_impuestos.impuesto_id` hacia el del sistema (insert + delete de
-   la fila vieja del join) y soft-deletea el impuesto duplicado. Corre en cada
-   arranque del backend; correrlo dos veces no produce cambios nuevos.
+   borra sus asociaciones en `item_impuestos` y soft-deletea el impuesto duplicado.
+   Corre en cada arranque del backend; correrlo dos veces no produce cambios nuevos.
    `ventas_impuestos` histórico no se toca (el snapshot ya congeló porcentaje y
    valor; la fila soft-deleteada sigue existiendo).
+   Con el IVA derivado (ADR-018) ese duplicado es un `tipo='otro'` —porque `tipo` no
+   se expone en la API de escritura— y el motor no filtra los `'otro'`, así que se
+   sumaría al IVA derivado (doble tributación, 38%). Lo que evita eso es el **soft
+   delete del duplicado**, no un remapeo: reapuntar la asociación hacia la fila
+   oficial sería inofensivo (esa fila es `tipo='iva'` y el motor la descarta antes de
+   derivar) pero ya no tiene sentido, porque el IVA no se asocia.
 
 ---
 
@@ -221,11 +267,20 @@ clasificación después.
 
 ### `configuracion/items.vue`
 
-- Selector de impuestos: cada opción muestra `"${nombre} (Sistema)"` cuando
-  `origen === 'sistema'`, sin sufijo para personalizados.
+- Selector de impuestos: **solo adicionales** (`tipo='otro'`); el IVA no puede
+  seleccionarse ni forma parte de `form.impuestosIds`. Cada opción muestra
+  `"${nombre} (Sistema)"` cuando `origen === 'sistema'`, sin sufijo para
+  personalizados.
+- Delante del selector, un **chip fijo** (sin `×`, no removible) muestra el IVA del
+  país con su porcentaje cuando la clasificación es `afecto`; desaparece solo al
+  pasar a `exento`. El chip sale de la clasificación en memoria, no de un dato
+  guardado, así que no puede quedar desincronizado con lo que va a cobrar el motor.
 - Campo **Clasificación tributaria** (`Afecto` default | `Exento`), visible para
-  todos los tipos de item, con ayuda: "Exento: no se aplica IVA (los demás
-  impuestos sí). Se congela en cada venta."
+  todos los tipos de item **excepto `ingrediente`** (se esconde: un ingrediente no
+  se vende y no tiene tratamiento fiscal), con ayuda: "Exento: no se aplica IVA (los
+  demás impuestos sí). Se congela en cada venta."
+- **Esto es UX, no enforcement** (invariante 6): el candado real es el 400 del
+  backend (`validarImpuestos`, ver arriba).
 
 ### POS / tienda / salones
 
@@ -237,15 +292,30 @@ fuera de alcance (llegará con la emisión fiscal, ver ADR-010).
 
 ## Data Flow
 
+### Ejemplo: vender un item afecto (el IVA nunca está en `item_impuestos`)
+
+```
+[Item catálogo: clasificacionTributaria='afecto', impuestos asociados = [] (sin IVA)]
+  ↓
+[POS agrega la línea al carrito]
+  ↓ POST /calculo-precios/calcular
+[CalculoPreciosService.resolverLinea: item.clasificacionTributaria === 'afecto' → agrega el IVA del país]
+  ↓
+[POST /ventas: VentasService copia clasificacionTributaria del item al venta_detalle]
+  ↓
+[venta_detalles.clasificacion_tributaria = 'afecto' (congelado); ventas_impuestos registra el IVA cobrado]
+```
+
 ### Ejemplo: vender un item exento con un impuesto adicional (`tipo='otro'`)
 
 ```
 [Item catálogo: clasificacionTributaria='exento',
- impuestos asociados = [IVA (sistema, tipo='iva'), Impuesto verde (tenant, tipo='otro')]]
+ impuestos asociados = [Impuesto verde (tenant, tipo='otro')] — nunca IVA]
   ↓
 [POS agrega la línea al carrito]
   ↓ POST /calculo-precios/calcular
-[CalculoPreciosService: línea exenta → filtra impuestos tipo='iva' → solo aplica "Impuesto verde"]
+[CalculoPreciosService.resolverLinea: item.clasificacionTributaria !== 'afecto' → no agrega IVA;
+ el 'otro' asociado igual aplica]
   ↓
 [POST /ventas: VentasService copia clasificacionTributaria del item al venta_detalle]
   ↓
@@ -261,32 +331,50 @@ fuera de alcance (llegará con la emisión fiscal, ver ADR-010).
 ```bash
 cd backend && npm test -- modules/impuestos/impuestos.service.spec.ts
 cd backend && npm test -- modules/calculo-precios/calculo-precios.service.spec.ts
+cd backend && npm test -- modules/items/items.service.spec.ts
 cd backend && npm test -- modules/ventas/ventas.service.spec.ts
+cd backend && npm run test:e2e
 ```
 
 - `impuestos.service.spec`: `findAll` devuelve la unión sistema+tenant con
   `origen` correcto; `create`/`update`/`remove` no alcanzan filas del sistema
   (404); `create()` persiste `tipo='otro'` aunque el caller intente forzar
   `'iva'` (DTO no lo declara — enforcement en backend).
-- `calculo-precios.service.spec`: línea exenta omite impuestos `tipo='iva'` y
-  conserva `tipo='otro'`; línea afecta sin cambios de comportamiento.
-- `ventas.service.spec`: `clasificacion_tributaria` congelada en el detalle
-  (venta normal y nota de crédito, usando el valor original de la venta
-  referenciada).
+- `calculo-precios.service.spec` (ADR-018, mutante = revertir al filtro
+  `!== 'exento'` o al código previo a la derivación): item `afecto` sin impuestos
+  asociados igual lleva el IVA; `afecto` con adicionales lleva los adicionales
+  **más** el IVA; `exento` con adicionales lleva los adicionales **sin** IVA; una
+  línea que pisa impuestos con `impuestoIds: []` sobre un item `afecto` igual lleva
+  el IVA (segunda puerta); `clasificacionTributaria: null` no deriva nada (fija el
+  `===` contra el `!==`); `afecto` en un país sin fila `'iva'` revienta nombrando el
+  país en vez de vender sin IVA.
+- `items.service.spec`: un `tipo='iva'` en `impuestosIds` es 400;
+  `clasificacionTributaria` junto a `tipo: 'ingrediente'` es 400; un ingrediente se
+  guarda con `clasificacion_tributaria = NULL`.
+- `ventas.service.spec`: `clasificacion_tributaria` congelada en el detalle (venta
+  normal y nota de crédito, usando el valor original de la venta referenciada). El
+  400 de `impuestoIds` por línea no se duplica acá: `VentasService` calcula a
+  través de `CalculoPreciosService.calcular`, que es donde vive y se testea (arriba).
+- **E2E, el camino por default** (el bug de entrada de ADR-018): crear un item
+  `afecto` sin tocar impuestos y venderlo — cobra el 19% de IVA y deja la traza en
+  `ventas_impuestos`, sin haber asociado nada en `item_impuestos`.
 
 ### Manual
 
 1. `docker-compose down -v && docker-compose up -d --build` (seed desde cero).
 2. `/configuracion/impuestos` → IVA aparece con badge "Sistema", solo lectura.
-3. POS: vender un item `afecto` con IVA asociado → suma IVA; vender un item
-   `exento` → no suma IVA pero sí impuestos `tipo='otro'` que tenga asociados.
+3. POS: vender un item `afecto` (sin asociar nada) → suma el IVA igual, derivado;
+   vender un item `exento` → no suma IVA pero sí impuestos `tipo='otro'` que tenga
+   asociados.
 4. Segundo arranque del backend sin `down -v` → sin cambios nuevos en
-   `impuestos` (verifica idempotencia del remapeo).
+   `impuestos` (verifica idempotencia de la desasociación de duplicados).
 
 ---
 
 ## Related Features
 
+- [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md) — el IVA se deriva de
+  `clasificacion_tributaria` en el motor, nunca se materializa en `item_impuestos`.
 - [ADR-011](../adr/011-catalogo-impuestos-sistema.md) — decisión completa: modelado, semántica de exento, alternativas descartadas.
 - [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) — regla transversal: capturar/congelar el hecho fiscal ahora, diferir DTE.
 - [motor-calculo-precios.md](./motor-calculo-precios.md) — motor que consume estos impuestos.
