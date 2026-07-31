@@ -64,6 +64,7 @@ function garzon(over: Partial<Garzon> & { pin?: string }): Garzon {
     creadoEl: new Date(),
     actualizadoEl: new Date(),
     eliminadoEl: null,
+    eliminadoPor: null,
     ...rest,
   };
 }

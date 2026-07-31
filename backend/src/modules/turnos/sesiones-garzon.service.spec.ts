@@ -51,6 +51,7 @@ function garzon(over: Partial<Garzon> = {}): Garzon {
     creadoEl: new Date('2026-01-01T00:00:00Z'),
     actualizadoEl: new Date('2026-01-01T00:00:00Z'),
     eliminadoEl: null,
+    eliminadoPor: null,
     ...over,
   };
 }
@@ -66,6 +67,7 @@ function turno(over: Partial<Turno> = {}): Turno {
     creadoEl: new Date('2026-01-01T00:00:00Z'),
     actualizadoEl: new Date('2026-01-01T00:00:00Z'),
     eliminadoEl: null,
+    eliminadoPor: null,
     ...over,
   };
 }

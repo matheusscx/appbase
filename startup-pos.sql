@@ -224,7 +224,8 @@ CREATE TABLE "terceros" (
   "activo"         BOOLEAN     NOT NULL DEFAULT true,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID          REFERENCES usuarios("usuario_id")
 );
 
 -- Sub-tenants: funcionalidad futura (tabla reservada, no usar aún)
@@ -376,7 +377,8 @@ CREATE TABLE "categorias" (
   "activo"         BOOLEAN NOT NULL DEFAULT true,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID          REFERENCES usuarios("usuario_id")
 );
 
 -- Impuestos: del sistema (tenant_id NULL + pais_id, sembrados por seeder, no editables
@@ -392,6 +394,7 @@ CREATE TABLE "impuestos" (
   "creado_el"      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID          REFERENCES usuarios("usuario_id"),
   CONSTRAINT "CHK_impuestos_scope" CHECK (("tenant_id" IS NULL) <> ("pais_id" IS NULL))
 );
 
@@ -424,7 +427,8 @@ CREATE TABLE "descuentos" (
   "activo"          BOOLEAN       NOT NULL DEFAULT true,
   "creado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"  TIMESTAMPTZ,
-  "eliminado_el"    TIMESTAMPTZ
+  "eliminado_el"    TIMESTAMPTZ,
+  "eliminado_por"   UUID          REFERENCES usuarios("usuario_id")
 );
 
 CREATE TABLE "recargos" (
@@ -441,7 +445,8 @@ CREATE TABLE "recargos" (
   "activo"          BOOLEAN       NOT NULL DEFAULT true,
   "creado_el"       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"  TIMESTAMPTZ,
-  "eliminado_el"    TIMESTAMPTZ
+  "eliminado_el"    TIMESTAMPTZ,
+  "eliminado_por"   UUID          REFERENCES usuarios("usuario_id")
 );
 
 -- Tramos de descuento (para tipos que usan escalonado por cantidad o monto)
@@ -507,7 +512,8 @@ CREATE TABLE "items" (
   "clasificacion_tributaria" TEXT         DEFAULT 'afecto',  -- 'afecto' | 'exento' | NULL ('ingrediente': no se vende, sin tratamiento fiscal — se inserta NULL explícito, el default no alcanza a los demás tipos por accidente)
   "creado_el"               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"          TIMESTAMPTZ,
-  "eliminado_el"            TIMESTAMPTZ
+  "eliminado_el"            TIMESTAMPTZ,
+  "eliminado_por"           UUID          REFERENCES usuarios("usuario_id")
 );
 
 -- Extensión 1:1 para tipo 'producto'
@@ -617,7 +623,8 @@ CREATE TABLE "grupos_modificadores" (
   "nombre"              TEXT        NOT NULL,
   "creado_el"           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"      TIMESTAMPTZ,
-  "eliminado_el"        TIMESTAMPTZ
+  "eliminado_el"        TIMESTAMPTZ,
+  "eliminado_por"       UUID        REFERENCES usuarios("usuario_id")
 );
 CREATE UNIQUE INDEX "uq_grupo_modificador_nombre_vivo"
   ON "grupos_modificadores" ("tenant_id", LOWER("nombre"))
@@ -716,7 +723,8 @@ CREATE TABLE "causas_merma" (
   "es_fijo"        BOOLEAN NOT NULL DEFAULT false,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID REFERENCES usuarios("usuario_id")
 );
 CREATE UNIQUE INDEX "uq_causas_merma_tenant_nombre"
   ON "causas_merma" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
@@ -732,7 +740,8 @@ CREATE TABLE "motivo_diferencia_inventario" (
   "es_fijo"        BOOLEAN NOT NULL DEFAULT false,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID REFERENCES usuarios("usuario_id")
 );
 CREATE UNIQUE INDEX "uq_motivo_dif_inv_tenant_nombre"
   ON "motivo_diferencia_inventario" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
@@ -932,7 +941,8 @@ CREATE TABLE "motivo_diferencia_caja" (
   "es_fijo"               BOOLEAN NOT NULL DEFAULT false,
   "creado_el"             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"        TIMESTAMPTZ,
-  "eliminado_el"          TIMESTAMPTZ
+  "eliminado_el"          TIMESTAMPTZ,
+  "eliminado_por"         UUID    REFERENCES usuarios("usuario_id")
 );
 CREATE UNIQUE INDEX "uq_motivo_diferencia_caja_tenant_nombre"
   ON "motivo_diferencia_caja" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
@@ -977,7 +987,8 @@ CREATE TABLE "cajones" (
   "activo"         BOOLEAN       NOT NULL DEFAULT TRUE,
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  "eliminado_el"   TIMESTAMPTZ
+  "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID          REFERENCES usuarios("usuario_id")
 );
 
 CREATE UNIQUE INDEX "ux_cajones_tenant_nombre"
@@ -1362,7 +1373,8 @@ CREATE TABLE salones (
     nombre TEXT NOT NULL,
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el TIMESTAMPTZ
+    eliminado_el TIMESTAMPTZ,
+    eliminado_por UUID REFERENCES usuarios(usuario_id)
 );
 
 -- Mesa: posicionada en el plano del salón. pos_x/pos_y son fracción 0..1 del
@@ -1379,7 +1391,8 @@ CREATE TABLE mesas (
     tamano TEXT NOT NULL DEFAULT 'mediano', -- pequeno | mediano | grande | extra_grande
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el TIMESTAMPTZ
+    eliminado_el TIMESTAMPTZ,
+    eliminado_por UUID REFERENCES usuarios(usuario_id)
 );
 CREATE INDEX idx_mesas_salon ON mesas (salon_id);
 
@@ -1402,6 +1415,7 @@ CREATE TABLE garzones (
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     eliminado_el TIMESTAMPTZ,
+    eliminado_por UUID REFERENCES usuarios(usuario_id),
     CONSTRAINT chk_garzones_tipo CHECK (tipo IN ('garzon', 'cocina', 'barra'))
 );
 CREATE INDEX idx_garzones_tenant ON garzones (tenant_id);
@@ -1672,7 +1686,8 @@ CREATE TABLE turnos (
     activo BOOLEAN NOT NULL DEFAULT TRUE,
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el TIMESTAMPTZ
+    eliminado_el TIMESTAMPTZ,
+    eliminado_por UUID REFERENCES usuarios(usuario_id)
 );
 CREATE INDEX idx_turnos_tenant ON turnos (tenant_id);
 
@@ -1831,7 +1846,8 @@ CREATE TABLE impresoras (
     activo        BOOLEAN NOT NULL DEFAULT true,
     creado_el     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el  TIMESTAMPTZ
+    eliminado_el  TIMESTAMPTZ,
+    eliminado_por UUID REFERENCES usuarios(usuario_id)
 );
 CREATE INDEX idx_impresoras_tenant ON impresoras (tenant_id);
 

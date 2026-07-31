@@ -67,4 +67,7 @@ export class Mesa {
 
   @DeleteDateColumn({ name: 'eliminado_el' })
   eliminadoEl: Date | null;
+
+  @Column({ name: 'eliminado_por', type: 'uuid', nullable: true })
+  eliminadoPor: string | null;
 }

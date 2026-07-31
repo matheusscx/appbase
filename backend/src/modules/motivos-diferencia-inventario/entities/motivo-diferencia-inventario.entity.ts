@@ -40,4 +40,7 @@ export class MotivoDiferenciaInventario {
     nullable: true,
   })
   eliminadoEl: Date | null;
+
+  @Column({ name: 'eliminado_por', type: 'uuid', nullable: true })
+  eliminadoPor: string | null;
 }
