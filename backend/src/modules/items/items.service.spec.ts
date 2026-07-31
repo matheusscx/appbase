@@ -1499,6 +1499,44 @@ describe('ItemsService', () => {
       expect(valCall[0]).toContain('pais_id');
       expect(valCall[1]).toEqual([['iva-sistema'], TENANT]);
     });
+
+    it('rechaza el IVA en impuestosIds al crear un ítem', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+        .mockResolvedValueOnce([{ impuesto_id: 'iva-cl', tipo: 'iva' }]); // validarImpuestos
+
+      await expect(
+        service.create(TENANT, 'user-uuid', {
+          ...baseDtoProducto,
+          impuestosIds: ['iva-cl'],
+        }),
+      ).rejects.toThrow(
+        'El IVA no se asigna por ítem ni por línea: sale de la clasificación tributaria',
+      );
+    });
+
+    it('sigue aceptando impuestos adicionales (tipo distinto de iva)', async () => {
+      // El rechazo mira SOLO las filas tipo='iva': una lista de 'otro' es
+      // válida en cualquier clasificación, y eso es la regla de negocio, no
+      // un detalle.
+      managerMock.query
+        .mockResolvedValueOnce([{ '?column?': 1 }]) // moneda ok
+        .mockResolvedValueOnce([{ impuesto_id: 'otro-1', tipo: 'otro' }]) // validarImpuestos
+        .mockResolvedValueOnce([{ item_id: ITEM_ID }]) // INSERT items RETURNING
+        .mockResolvedValue([]); // extensión + item_impuestos
+      inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+        movimientoId: 'mov-0',
+        stockAnterior: '0',
+        stockResultante: '5',
+      });
+
+      await expect(
+        service.create(TENANT, 'user-uuid', {
+          ...baseDtoProducto,
+          impuestosIds: ['otro-1'],
+        }),
+      ).resolves.toBeDefined();
+    });
   });
 
   // ── update ─────────────────────────────────────────────────────────────────
@@ -1531,6 +1569,20 @@ describe('ItemsService', () => {
       expect(
         calls.some((sql) => sql.includes('INSERT INTO item_impuestos')),
       ).toBe(true);
+    });
+
+    it('rechaza el IVA en impuestosIds al editar un ítem', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, tipo: 'producto' }]) // SELECT existing
+        .mockResolvedValueOnce([{ impuesto_id: 'iva-cl', tipo: 'iva' }]); // validarImpuestos
+
+      await expect(
+        service.update(TENANT, USUARIO, ITEM_ID, {
+          impuestosIds: ['iva-cl'],
+        }),
+      ).rejects.toThrow(
+        'El IVA no se asigna por ítem ni por línea: sale de la clasificación tributaria',
+      );
     });
 
     it('no toca impuestosIds cuando no se proveen en el DTO', async () => {

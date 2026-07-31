@@ -92,6 +92,17 @@ export class CalculoPreciosService {
       }
     }
 
+    // El IVA no entra por payload, mismo contrato que POST/PATCH /items. El
+    // strip de `resolverLinea` es defensa contra `item_impuestos` viejo, no
+    // contrato de la API: si el cliente lo manda explícito, se le dice.
+    for (const l of dto.lineas) {
+      if (l.impuestoIds?.some((id) => impuestoMap.get(id)?.tipo === 'iva')) {
+        throw new BadRequestException(
+          'El IVA no se asigna por ítem ni por línea: sale de la clasificación tributaria',
+        );
+      }
+    }
+
     const itemIds = dto.lineas.map((l) => l.itemId);
     const [itemsBase, reglasPorItem] = await Promise.all([
       this.itemsService.cargarBasePorIds(tenantId, itemIds),

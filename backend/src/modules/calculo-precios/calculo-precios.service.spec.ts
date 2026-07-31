@@ -391,5 +391,18 @@ describe('CalculoPreciosService', () => {
         expect.objectContaining({ id: 'imp-1', tasa: '0.19' }),
       ]);
     });
+
+    it('rechaza el IVA mandado explícito en una línea', async () => {
+      // El IVA no entra por payload, mismo contrato que POST/PATCH /items
+      // (`validarImpuestos`, ADR-018): imp-1 es tipo 'iva' en el catálogo
+      // mockeado del beforeEach.
+      await expect(
+        service.calcular(TENANT, {
+          lineas: [{ itemId: 'item-1', cantidad: '1', impuestoIds: ['imp-1'] }],
+        }),
+      ).rejects.toThrow(
+        'El IVA no se asigna por ítem ni por línea: sale de la clasificación tributaria',
+      );
+    });
   });
 });

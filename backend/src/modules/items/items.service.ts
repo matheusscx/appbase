@@ -3709,14 +3709,18 @@ export class ItemsService {
     }
   }
 
-  /** Impuestos válidos: personalizados del tenant o del catálogo del sistema del país del tenant. */
+  /**
+   * Impuestos válidos: personalizados del tenant o del catálogo del sistema del
+   * país del tenant. Y **nunca el IVA**: se deriva de `clasificacion_tributaria`,
+   * no se asigna por ítem (ADR-018).
+   */
   private async validarImpuestos(
     manager: EntityManager,
     tenantId: string,
     ids: string[],
   ): Promise<void> {
-    const rows: { cnt: string }[] = await manager.query(
-      `SELECT COUNT(*) AS cnt FROM impuestos i
+    const rows: { impuesto_id: string; tipo: string }[] = await manager.query(
+      `SELECT i.impuesto_id, i.tipo FROM impuestos i
         WHERE i.impuesto_id = ANY($1::uuid[]) AND i.eliminado_el IS NULL
           AND (i.tenant_id = $2
                OR i.pais_id = (SELECT p.pais_id
@@ -3725,9 +3729,14 @@ export class ItemsService {
                                 WHERE t.tenant_id = $2 AND t.eliminado_el IS NULL))`,
       [ids, tenantId],
     );
-    if (parseInt(rows[0].cnt) !== ids.length) {
+    if (rows.length !== ids.length) {
       throw new BadRequestException(
         'Uno o más impuestos no están disponibles para este tenant',
+      );
+    }
+    if (rows.some((r) => r.tipo === 'iva')) {
+      throw new BadRequestException(
+        'El IVA no se asigna por ítem ni por línea: sale de la clasificación tributaria',
       );
     }
   }
