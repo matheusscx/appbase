@@ -14,6 +14,32 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ## Deuda de código (harness)
 
+- [x] ~~**Código SSR inalcanzable en `auth.ts` y `tenant.ts`**~~ (frontend) — cerrado
+  2026-07-30 **con confirmación explícita del owner**, que hacía falta porque `tryRefresh`
+  es el flujo de refresh token y la invariante 4 dice que el sistema JWT no se modifica sin
+  ella. Con `ssr: false` ([ADR-017](../adr/017-spa-sin-ssr.md)) `import.meta.server` nunca
+  es verdadero, así que se fueron: el par `serverApiUrl`/`resolvedApiUrl` de las dos stores
+  —que además leían una `runtimeConfig.apiUrl` privada que ya no existe— y la rama SSR de
+  `tryRefresh()`, con su reenvío de cookie (`useRequestHeaders`) y su propagación de
+  `Set-Cookie` (`appendResponseHeader`). `resolvedApiUrl` pasó a llamarse `apiUrl`: el
+  "resolved" nombraba una resolución entre dos candidatos que ya no existe.
+  **Lo único que había que conservar del borrado era `credentials: 'include'`** —sin él el
+  navegador no manda la cookie httpOnly del refresh y la sesión muere con un 401 sin
+  explicación—, y no lo fijaba ningún test: `$fetch` está mockeado y los options se
+  ignoraban. Ahora sí, con mutante (sacarlo pone el test en rojo).
+  ⚠️ **El borrado rompió dos tests que no tocaban el tema, y eso destapó algo peor.** Al
+  reemplazar `const config = useRuntimeConfig()` quedaron huérfanas cuatro referencias a
+  `config` en `login`, `register` y `logout`: el `ReferenceError` caía en el `catch` y
+  devolvía el mensaje genérico. Los dos tests que fallaron esperaban el mensaje del
+  backend; los dos que verifican "no filtrar la URL del backend" **siguieron pasando por la
+  razón equivocada**, porque el genérico es justo lo que esperan. Lección: un test verde
+  después de un refactor no prueba que el camino siga vivo si su aserción es "sale el
+  mensaje por defecto".
+  **Verificado en navegador contra el stack real**, que es lo único que prueba de verdad un
+  cambio en el refresh: con la cookie `access_token` borrada a mano, navegar a `/cajas`
+  restauró la sesión —token nuevo en la cookie— y la pantalla cargó sin rebotar a `/login`.
+
+
 - [x] ~~**Dos de las tres carreras "leer para validar, escribir sin lock"**~~ (backend,
   `items.service.ts`) — cerradas 2026-07-30. La tercera (`remove()`) sigue abierta en
   [`pendientes.md`](pendientes.md), re-diagnosticada: la entrada original decía que

@@ -15,9 +15,7 @@ export interface User {
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const config = useRuntimeConfig()
-  const serverApiUrl = import.meta.server ? (config as Record<string, unknown>).apiUrl as string | undefined : undefined
-  const resolvedApiUrl = import.meta.server ? (serverApiUrl ?? config.public.apiUrl) : config.public.apiUrl
+  const apiUrl = useRuntimeConfig().public.apiUrl
 
   const token = useCookie<string | null>('access_token', {
     maxAge: 60 * 15,
@@ -55,7 +53,7 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
     try {
       const data = await $fetch<{ access_token: string; user: User }>(
-        `${config.public.apiUrl}/auth/login`,
+        `${apiUrl}/auth/login`,
         { method: 'POST', body: { email, password }, credentials: 'include' },
       )
       setToken(data.access_token)
@@ -76,7 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
     try {
       const data = await $fetch<{ access_token: string; user: User }>(
-        `${config.public.apiUrl}/auth/register`,
+        `${apiUrl}/auth/register`,
         { method: 'POST', body: { nombre, correo, contrasena }, credentials: 'include' },
       )
       setToken(data.access_token)
@@ -91,34 +89,17 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // Intenta restaurar la sesión usando el refresh token (cookie httpOnly).
-  // En SSR hay que reenviar la cookie entrante y propagar el Set-Cookie de
-  // vuelta al navegador, porque el backend rota el refresh token en cada uso.
+  // Intenta restaurar la sesión usando el refresh token, que viaja en una
+  // cookie httpOnly: `credentials: 'include'` no es opcional — sin él el
+  // navegador no la manda y el refresh falla con 401 sin explicación.
   async function tryRefresh(): Promise<boolean> {
     try {
-      let accessToken: string | undefined
-      if (import.meta.server) {
-        const res = await $fetch.raw<{ access_token: string }>(
-          `${resolvedApiUrl}/auth/refresh`,
-          { method: 'POST', headers: useRequestHeaders(['cookie']) },
-        )
-        const event = useRequestEvent()
-        const setCookies = res.headers.getSetCookie?.() ?? []
-        if (event) {
-          for (const cookie of setCookies) {
-            appendResponseHeader(event, 'set-cookie', cookie)
-          }
-        }
-        accessToken = res._data?.access_token
-      } else {
-        const data = await $fetch<{ access_token: string }>(
-          `${resolvedApiUrl}/auth/refresh`,
-          { method: 'POST', credentials: 'include' },
-        )
-        accessToken = data.access_token
-      }
-      if (!accessToken) return false
-      setToken(accessToken)
+      const data = await $fetch<{ access_token: string }>(
+        `${apiUrl}/auth/refresh`,
+        { method: 'POST', credentials: 'include' },
+      )
+      if (!data.access_token) return false
+      setToken(data.access_token)
       return true
     } catch {
       return false
@@ -128,14 +109,14 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchMe(): Promise<void> {
     if (!token.value) return
     try {
-      user.value = await $fetch<User>(`${resolvedApiUrl}/auth/me`, {
+      user.value = await $fetch<User>(`${apiUrl}/auth/me`, {
         headers: { Authorization: `Bearer ${token.value}` },
       })
     } catch {
       // Access token vencido: intentar refrescar y reintentar una sola vez.
       if (await tryRefresh()) {
         try {
-          user.value = await $fetch<User>(`${resolvedApiUrl}/auth/me`, {
+          user.value = await $fetch<User>(`${apiUrl}/auth/me`, {
             headers: { Authorization: `Bearer ${token.value}` },
           })
           return
@@ -163,13 +144,13 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function loginWithGoogle() {
-    const apiBase = config.public.apiUrl.replace('/api', '')
+    const apiBase = apiUrl.replace('/api', '')
     window.location.href = `${apiBase}/api/auth/google`
   }
 
   async function logout() {
     try {
-      await $fetch(`${config.public.apiUrl}/auth/logout`, {
+      await $fetch(`${apiUrl}/auth/logout`, {
         method: 'POST',
         credentials: 'include',
       })

@@ -6,7 +6,6 @@ import { ref } from 'vue'
 vi.mock('#app/nuxt', () => ({
   useNuxtApp: vi.fn(),
   useRuntimeConfig: vi.fn(() => ({
-    apiUrl: undefined,
     public: { apiUrl: 'http://localhost:3000/api' },
   })),
   defineNuxtPlugin: vi.fn(),

@@ -14,26 +14,6 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **Código SSR inalcanzable en `auth.ts` y `tenant.ts` — requiere decisión del owner**
-  (frontend, `app/stores/auth.ts:18-20,97-113`, `app/stores/tenant.ts:10-15`) — con
-  `ssr: false` ([ADR-017](../adr/017-spa-sin-ssr.md)) `import.meta.server` nunca es
-  verdadero, así que quedan inalcanzables: el par `serverApiUrl`/`resolvedApiUrl` de las dos
-  stores —que además leen una `runtimeConfig.apiUrl` privada **que ya no existe**, y compila
-  solo porque está casteada a `Record<string, unknown>`— y la rama SSR entera de
-  `tryRefresh()`, que reenvía la cookie entrante con `useRequestHeaders` y propaga el
-  `Set-Cookie` con `appendResponseHeader`.
-  ⛔ **Por qué no se limpió en el commit de ADR-017:** `tryRefresh` es el flujo de refresh
-  token, y la **invariante 4** dice que el sistema de tokens JWT no se modifica sin
-  confirmación. `tenant.ts` no es JWT y se podría limpiar sola, pero su comentario dice
-  "mismo patrón que `auth.ts`": limpiar una y dejar la otra parte el par y deja el comentario
-  mintiendo. Van juntas o no van.
-  No hay bug hoy —las dos tienen fallback a `config.public.apiUrl`— pero es código muerto
-  que describe una topología de red que ya no puede ocurrir, y el próximo que lea `auth.ts`
-  va a creer que el refresh tiene un camino SSR vivo.
-  Cierre: confirmación del owner para tocar `auth.ts`, y borrar las dos ramas junto con sus
-  comentarios. Si en cambio se quisiera preservar la capacidad de volver a SSR, la decisión
-  es la inversa —restaurar la `runtimeConfig` privada— y hay que decirlo en ADR-017.
-
 - [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
   (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
   (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue

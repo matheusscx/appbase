@@ -8,7 +8,6 @@ import { ref } from 'vue'
 vi.mock('#app/nuxt', () => ({
   useNuxtApp: vi.fn(),
   useRuntimeConfig: vi.fn(() => ({
-    apiUrl: undefined,
     public: { apiUrl: 'http://localhost:3000/api' },
   })),
   defineNuxtPlugin: vi.fn(),
@@ -154,6 +153,23 @@ describe('useAuthStore — restauración de sesión', () => {
     expect(ok).toBe(true)
     expect(store.token).toBe(fresh)
     expect(store.activeTenantId).toBe('abc-123')
+  })
+
+  it('tryRefresh manda `credentials: include` — sin eso la cookie no viaja', async () => {
+    // El refresh token vive en una cookie httpOnly: el navegador solo la manda
+    // con `credentials: 'include'`. Perderlo no rompe ningún test —`$fetch`
+    // está mockeado y los options se ignoran— pero deja el refresh muerto en
+    // producción, con un 401 sin explicación. Se fija acá porque al sacar la
+    // rama SSR de `tryRefresh` esta opción era lo único que había que conservar.
+    const store = useAuthStore()
+    const fresh = makeToken({ sub: 'u1', email: 'a@b.com', tenant_id: 't1', es_superadmin: false, iat: 0, exp: 9999 })
+    $fetchMock.mockResolvedValueOnce({ access_token: fresh })
+
+    await store.tryRefresh()
+
+    const [url, opts] = $fetchMock.mock.calls[0] as [string, Record<string, unknown>]
+    expect(url).toContain('/auth/refresh')
+    expect(opts).toMatchObject({ method: 'POST', credentials: 'include' })
   })
 
   it('tryRefresh fallido devuelve false y no setea token', async () => {
