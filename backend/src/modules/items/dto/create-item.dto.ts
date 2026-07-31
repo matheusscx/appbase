@@ -183,7 +183,15 @@ export class CreateItemDto {
   @IsOptional()
   activo?: boolean;
 
-  @IsOptional()
+  // @ValidateIf (no @IsOptional): mismo motivo que en `UpdateItemDto` —
+  // @IsOptional() también saltea la validación cuando el valor es `null`
+  // explícito, no solo cuando la propiedad falta. El `INSERT` de `create()`
+  // (`items.service.ts`) lista `clasificacion_tributaria` explícitamente en
+  // sus columnas, así que el `DEFAULT 'afecto'` de la tabla NUNCA se activa
+  // por este camino — la única barrera contra un `null` persistido es el
+  // DTO. `@ValidateIf` solo saltea cuando la propiedad falta (undefined); un
+  // `null` explícito sigue cayendo en `@IsIn`, que lo rechaza.
+  @ValidateIf((o: CreateItemDto) => o.clasificacionTributaria !== undefined)
   @IsIn(['afecto', 'exento'])
   clasificacionTributaria?: string;
 

@@ -814,6 +814,17 @@ export class ItemsService {
           dto.precioIncluyeImpuesto ?? false,
           dto.activo ?? true,
           dto.tipo,
+          // El `?? 'afecto'` NO es redundante con el `DEFAULT 'afecto'` de la
+          // columna, aunque lo parezca: este `INSERT` lista
+          // `clasificacion_tributaria` explícitamente en sus columnas, así
+          // que el `DEFAULT` de Postgres nunca se activa por este camino —
+          // si se omitiera el `?? 'afecto'` y `dto.clasificacionTributaria`
+          // llegara `undefined`, se insertaría `NULL` de verdad. El DTO
+          // (`create-item.dto.ts`, `@ValidateIf`) ya rechaza un `null`
+          // explícito en el payload; este `??` es lo que cubre el caso
+          // legítimo de "no lo mandaron" para los tipos que sí se venden.
+          // No borrar esta línea "limpiando" el default de la columna: son
+          // dos protecciones de caminos distintos.
           dto.tipo === 'ingrediente'
             ? null
             : (dto.clasificacionTributaria ?? 'afecto'),
@@ -1075,6 +1086,9 @@ export class ItemsService {
         activo: dto.activo ?? true,
         precioBase: precioBasePersistido,
         precioIncluyeImpuesto: dto.precioIncluyeImpuesto ?? false,
+        // Mismo valor que se persistió en el INSERT de arriba — ver el
+        // comentario ahí sobre por qué el `?? 'afecto'` no es redundante con
+        // el DEFAULT de la columna.
         clasificacionTributaria:
           dto.tipo === 'ingrediente'
             ? null
