@@ -1,11 +1,12 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CausasMermaService } from './causas-merma.service';
 import { CausaMerma } from './entities/causa-merma.entity';
 
 const TENANT = 'tenant-uuid';
 const CAUSA = 'causa-uuid';
+const USUARIO_ID = 'usuario-uuid';
 
 describe('CausasMermaService', () => {
   let service: CausasMermaService;
@@ -89,7 +90,7 @@ describe('CausasMermaService', () => {
         },
       ]);
 
-      await expect(service.remove(TENANT, CAUSA)).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO_ID, CAUSA)).rejects.toThrow(
         'No se puede eliminar una causa fija del sistema',
       );
     });
@@ -106,7 +107,7 @@ describe('CausasMermaService', () => {
         ])
         .mockResolvedValueOnce([{ cnt: '2' }]);
 
-      await expect(service.remove(TENANT, CAUSA)).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO_ID, CAUSA)).rejects.toThrow(
         'No se puede eliminar: la causa está en uso en movimientos de merma',
       );
     });
@@ -124,13 +125,140 @@ describe('CausasMermaService', () => {
         .mockResolvedValueOnce([{ cnt: '0' }])
         .mockResolvedValueOnce([]);
 
-      await service.remove(TENANT, CAUSA);
+      await service.remove(TENANT, USUARIO_ID, CAUSA);
 
       expect(queryMock).toHaveBeenNthCalledWith(
         3,
         expect.stringContaining('eliminado_el = NOW()'),
+        [CAUSA, TENANT, USUARIO_ID],
+      );
+    });
+
+    it('remove() registra quién borró en la misma sentencia', async () => {
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            causa_merma_id: CAUSA,
+            nombre: 'Rotura',
+            activo: true,
+            es_fijo: false,
+          },
+        ])
+        .mockResolvedValueOnce([{ cnt: '0' }])
+        .mockResolvedValueOnce([]);
+
+      await service.remove(TENANT, USUARIO_ID, CAUSA);
+
+      const sql = queryMock.mock.calls.at(-1)![0] as string;
+      expect(sql).toMatch(/eliminado_por\s*=\s*\$/);
+      expect(sql).toMatch(/eliminado_el\s*=\s*NOW\(\)/);
+    });
+  });
+
+  describe('restaurar', () => {
+    it('restaurar() devuelve la causa RE-ACTIVADA (eliminadoEl null) tras el UPDATE', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          causa_merma_id: CAUSA,
+          nombre: 'Vencimiento',
+          activo: true,
+          es_fijo: false,
+          eliminado_el: null,
+          eliminado_por: USUARIO_ID,
+        },
+      ]);
+
+      const restaurada = await service.restaurar(TENANT, CAUSA);
+
+      expect(queryMock).toHaveBeenCalledWith(
+        expect.stringMatching(/eliminado_el\s*=\s*NULL/),
         [CAUSA, TENANT],
       );
+      expect(restaurada).toEqual({
+        id: CAUSA,
+        nombre: 'Vencimiento',
+        activo: true,
+        esFijo: false,
+        eliminadoEl: null,
+        eliminadoPor: USUARIO_ID,
+      });
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      queryMock.mockResolvedValueOnce([]);
+
+      await expect(service.restaurar(TENANT, CAUSA)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('restaurar() con el nombre ya ocupado devuelve 400 y no toca ninguna fila', async () => {
+      // El índice único es parcial (WHERE eliminado_el IS NULL): mientras la
+      // causa estaba borrada nadie chocaba con ella, pero al revivirla vuelve
+      // a competir por el nombre.
+      queryMock.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+
+      await expect(service.restaurar(TENANT, CAUSA)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {
+      queryMock.mockRejectedValueOnce(
+        Object.assign(new Error('connection lost'), { code: '57P01' }),
+      );
+
+      await expect(service.restaurar(TENANT, CAUSA)).rejects.toThrow(
+        'connection lost',
+      );
+    });
+  });
+
+  describe('findAll con incluirEliminados', () => {
+    it('sin el flag no trae la columna eliminado_el ni hace JOIN con usuarios', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          causa_merma_id: CAUSA,
+          nombre: 'Rotura',
+          activo: true,
+          es_fijo: false,
+        },
+      ]);
+
+      const result = await service.findAll(TENANT);
+
+      const sql = queryMock.mock.calls[0][0] as string;
+      expect(sql).not.toContain('LEFT JOIN usuarios');
+      expect(sql).toContain('eliminado_el IS NULL');
+      expect(result[0].eliminadoPorNombre).toBeUndefined();
+    });
+
+    it('con el flag trae eliminados con el nombre de quien borró, resuelto por JOIN', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          causa_merma_id: CAUSA,
+          nombre: 'Vencimiento',
+          activo: true,
+          es_fijo: false,
+          eliminado_el: new Date(),
+          eliminado_por: USUARIO_ID,
+          eliminado_por_nombre: 'admin.paris',
+        },
+      ]);
+
+      const result = await service.findAll(TENANT, false, true);
+
+      // Una sola query: si el nombre saliera con una consulta por fila
+      // (N+1), esta aserción de una sola llamada lo delataría.
+      expect(queryMock).toHaveBeenCalledTimes(1);
+      const sql = queryMock.mock.calls[0][0] as string;
+      expect(sql).toContain('LEFT JOIN usuarios');
+      expect(result[0]).toMatchObject({
+        id: CAUSA,
+        eliminadoPorNombre: 'admin.paris',
+      });
     });
   });
 });

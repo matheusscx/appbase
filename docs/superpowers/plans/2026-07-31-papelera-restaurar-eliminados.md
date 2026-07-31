@@ -424,6 +424,20 @@ Segunda referencia: escribe `eliminado_por` en SQL, y tiene nombre único por te
 - Consumes: `QueryIncluirEliminadosDto` y el contrato de Task 2.
 - Produces: el manejo de `23505` que replican las otras tres con nombre único.
 
+**Todo recurso lleva las tres piezas, siempre**: `remove()` con `usuarioId`, `restaurar()`,
+y `findAll()` con el flag. Sin la tercera no hay forma de *ver* lo borrado, así que
+restaurarlo es inalcanzable desde la UI y el e2e no puede verificarlo. Los steps de abajo
+detallan las dos primeras porque son las que cambian entre familias; `findAll()` se calca
+de Task 2 —incluido el JOIN a `usuarios` sin filtro de `eliminado_el`, con su comentario—
+y aplica igual acá y en los 11 recursos de la Task 6.
+
+⚠️ **Si el `findAll` del recurso ya recibe otros query params**, no agregues
+`@Query() dto: QueryIncluirEliminadosDto` al lado de los que había: el repo combina
+filtros en **un solo DTO** (`FindMermasDto`, `QueryItemsDto`, `QuerySesionesDto`), y
+mezclar una clave suelta con un DTO completo es un patrón que no existe en ningún
+controller. Extendé `QueryIncluirEliminadosDto` en un DTO del módulo. Y no le agregues
+campos del módulo al DTO compartido: lo consumen los 16.
+
 - [ ] **Step 1: Escribir los tests que fallan**
 
 ```ts
@@ -473,13 +487,19 @@ Expected: FAIL
 
   async restaurar(tenantId: string, id: string): Promise<CausaMerma> {
     try {
-      const rows: { causa_merma_id: string }[] = await this.dataSource.query(
-        `UPDATE causas_merma
-            SET eliminado_el = NULL, actualizado_el = NOW()
-          WHERE causa_merma_id = $1 AND tenant_id = $2
-            AND eliminado_el IS NOT NULL
-        RETURNING causa_merma_id`,
-        [id, tenantId],
+      // `unwrap()` NO es opcional: un `RETURNING` crudo puede volver como
+      // `[rows, rowCount]` en vez de `rows`, y `pg-returning.util.ts` existe
+      // porque ese bug ya apareció dos veces en este repo. Este mismo archivo
+      // ya lo usa en `create()` y `update()`.
+      const rows = unwrap<{ causa_merma_id: string }>(
+        await this.dataSource.query(
+          `UPDATE causas_merma
+              SET eliminado_el = NULL, actualizado_el = NOW()
+            WHERE causa_merma_id = $1 AND tenant_id = $2
+              AND eliminado_el IS NOT NULL
+          RETURNING causa_merma_id`,
+          [id, tenantId],
+        ),
       );
       if (!rows.length) {
         throw new NotFoundException(`Causa ${id} no está en la papelera`);

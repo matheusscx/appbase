@@ -9,11 +9,17 @@ import { unwrap } from '../../common/utils/pg-returning.util';
 import { CreateCausaMermaDto } from './dto/create-causa-merma.dto';
 import { UpdateCausaMermaDto } from './dto/update-causa-merma.dto';
 
+// `eliminadoEl`/`eliminadoPor`/`eliminadoPorNombre` solo se completan cuando
+// se pide `incluirEliminados` (o tras `restaurar`): el listado normal no trae
+// esas columnas, sin el JOIN, N+1 si lo forzáramos ahí.
 export interface CausaMermaListItem {
   id: string;
   nombre: string;
   activo: boolean;
   esFijo: boolean;
+  eliminadoEl?: string | null;
+  eliminadoPor?: string | null;
+  eliminadoPorNombre?: string | null;
 }
 
 interface CausaMermaRow {
@@ -21,6 +27,12 @@ interface CausaMermaRow {
   nombre: string;
   activo: boolean;
   es_fijo: boolean;
+}
+
+interface CausaMermaRowConEliminado extends CausaMermaRow {
+  eliminado_el: string | null;
+  eliminado_por: string | null;
+  eliminado_por_nombre: string | null;
 }
 
 @Injectable()
@@ -33,13 +45,39 @@ export class CausasMermaService {
   async findAll(
     tenantId: string,
     soloActivas = false,
+    incluirEliminados = false,
   ): Promise<CausaMermaListItem[]> {
-    const rows: CausaMermaRow[] = await this.dataSource.query(
-      `SELECT causa_merma_id, nombre, activo, es_fijo
-       FROM causas_merma
-       WHERE tenant_id = $1 AND eliminado_el IS NULL
-         ${soloActivas ? 'AND activo = true' : ''}
-       ORDER BY es_fijo DESC, nombre ASC`,
+    if (!incluirEliminados) {
+      const rows: CausaMermaRow[] = await this.dataSource.query(
+        `SELECT causa_merma_id, nombre, activo, es_fijo
+         FROM causas_merma
+         WHERE tenant_id = $1 AND eliminado_el IS NULL
+           ${soloActivas ? 'AND activo = true' : ''}
+         ORDER BY es_fijo DESC, nombre ASC`,
+        [tenantId],
+      );
+      return rows.map((r) => ({
+        id: r.causa_merma_id,
+        nombre: r.nombre,
+        activo: r.activo,
+        esFijo: r.es_fijo,
+      }));
+    }
+
+    // Papelera: incluye las borradas y el nombre de quien borró, resuelto por
+    // JOIN en la misma query (una por fila sería N+1). Sin filtrar el
+    // `eliminado_el` de `usuarios` a propósito: el autor de un borrado es un
+    // hecho histórico (docs/patterns/backend.md, ver categorias.service.ts →
+    // findAll).
+    const rows: CausaMermaRowConEliminado[] = await this.dataSource.query(
+      `SELECT cm.causa_merma_id, cm.nombre, cm.activo, cm.es_fijo,
+              cm.eliminado_el, cm.eliminado_por,
+              u.nombre_usuario AS eliminado_por_nombre
+         FROM causas_merma cm
+         LEFT JOIN usuarios u ON u.usuario_id = cm.eliminado_por
+        WHERE cm.tenant_id = $1
+          ${soloActivas ? 'AND cm.activo = true' : ''}
+        ORDER BY cm.es_fijo DESC, cm.nombre ASC`,
       [tenantId],
     );
     return rows.map((r) => ({
@@ -47,6 +85,9 @@ export class CausasMermaService {
       nombre: r.nombre,
       activo: r.activo,
       esFijo: r.es_fijo,
+      eliminadoEl: r.eliminado_el,
+      eliminadoPor: r.eliminado_por,
+      eliminadoPorNombre: r.eliminado_por_nombre,
     }));
   }
 
@@ -120,7 +161,7 @@ export class CausasMermaService {
     };
   }
 
-  async remove(tenantId: string, id: string): Promise<void> {
+  async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
     const causa = await this.findOneOrFail(tenantId, id);
     if (causa.esFijo) {
       throw new BadRequestException(
@@ -137,11 +178,58 @@ export class CausasMermaService {
         'No se puede eliminar: la causa está en uso en movimientos de merma',
       );
     }
+    // Una sola escritura en vez de dos sentencias sueltas: no puede quedar
+    // una fila borrada sin autor.
     await this.dataSource.query(
-      `UPDATE causas_merma SET eliminado_el = NOW(), actualizado_el = NOW()
-       WHERE causa_merma_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
-      [id, tenantId],
+      `UPDATE causas_merma
+          SET eliminado_el = NOW(), eliminado_por = $3, actualizado_el = NOW()
+        WHERE causa_merma_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [id, tenantId, usuarioId],
     );
+  }
+
+  async restaurar(tenantId: string, id: string): Promise<CausaMermaListItem> {
+    try {
+      // `UPDATE … WHERE eliminado_el IS NOT NULL … RETURNING` resuelve
+      // búsqueda y escritura en una sentencia: no hay ventana entre leer y
+      // escribir.
+      const rows = unwrap<CausaMermaRowConEliminado>(
+        await this.dataSource.query(
+          `UPDATE causas_merma
+              SET eliminado_el = NULL, actualizado_el = NOW()
+            WHERE causa_merma_id = $1 AND tenant_id = $2
+              AND eliminado_el IS NOT NULL
+          RETURNING causa_merma_id, nombre, activo, es_fijo,
+                    eliminado_el, eliminado_por`,
+          [id, tenantId],
+        ),
+      );
+      if (!rows.length) {
+        throw new NotFoundException(
+          `Causa de merma ${id} no está en la papelera`,
+        );
+      }
+      return {
+        id: rows[0].causa_merma_id,
+        nombre: rows[0].nombre,
+        activo: rows[0].activo,
+        esFijo: rows[0].es_fijo,
+        eliminadoEl: rows[0].eliminado_el,
+        eliminadoPor: rows[0].eliminado_por,
+      };
+    } catch (e) {
+      // 23505 = unique_violation. El índice único de nombre es parcial
+      // (WHERE eliminado_el IS NULL): mientras la causa estaba borrada nadie
+      // competía por el nombre, pero al revivirla vuelve a competir. Se
+      // capta el código de Postgres —no una lista de índices a mano— para
+      // que valga también donde no lo enumeramos.
+      if ((e as { code?: string }).code === '23505') {
+        throw new BadRequestException(
+          'Ya existe una causa de merma activa con ese nombre. Renombrá la actual o la restaurada antes de continuar.',
+        );
+      }
+      throw e;
+    }
   }
 
   async assertCausaActiva(

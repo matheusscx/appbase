@@ -16,9 +16,11 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { CausasMermaService } from './causas-merma.service';
 import { CreateCausaMermaDto } from './dto/create-causa-merma.dto';
 import { UpdateCausaMermaDto } from './dto/update-causa-merma.dto';
+import { QueryCausasMermaDto } from './dto/query-causas-merma.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
 @Controller('causas-merma')
@@ -26,9 +28,13 @@ export class CausasMermaController {
   constructor(private readonly service: CausasMermaService) {}
 
   @Get()
-  findAll(@Req() req: Request, @Query('soloActivas') soloActivas?: string) {
+  findAll(@Req() req: Request, @Query() query: QueryCausasMermaDto) {
     const user = req.user as { tenantId: string };
-    return this.service.findAll(user.tenantId, soloActivas === 'true');
+    return this.service.findAll(
+      user.tenantId,
+      query.soloActivas ?? false,
+      query.incluirEliminados,
+    );
   }
 
   @UseGuards(TenantAdminGuard)
@@ -53,7 +59,14 @@ export class CausasMermaController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as { tenantId: string };
-    return this.service.remove(user.tenantId, id);
+    const user = req.user as JwtUser;
+    return this.service.remove(user.tenantId!, user.id, id);
+  }
+
+  @UseGuards(TenantAdminGuard)
+  @Post(':id/restaurar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.service.restaurar(user.tenantId!, id);
   }
 }
