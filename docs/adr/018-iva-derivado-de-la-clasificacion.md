@@ -90,6 +90,13 @@ derivación deja de tener un único candidato sin ambigüedad.
   derivado (doble tributación). Lo evita el seeder con soft delete de esos duplicados por
   nombre+porcentaje (`remapImpuestosOficialesDuplicados`) — solo cubre los que matchean
   ese heurístico, no un "I.V.A. 19" con otra grafía.
+  **No se bloquea por código y es deliberado** (owner, 2026-07-31): el tenant es dueño de
+  su catálogo de impuestos, y una heurística de nombre en `ImpuestosService.create` le
+  prohibiría nombrar como quiera con falsos positivos garantizados. La defensa es que
+  sepa que el IVA ya se aplica solo: los placeholders del formulario dejaron de sugerir
+  `"IVA"`/`"0.19"`, y hay un `AppInfoButton` en el campo Nombre de
+  `configuracion/impuestos.vue` —donde se comete el error— y otro en Clasificación
+  tributaria de `configuracion/items.vue`. Explicar, no bloquear.
 
 ### Neutral
 

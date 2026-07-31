@@ -102,6 +102,17 @@ Si alguna línea referencia un item `tipo='ingrediente'`:
 400 Bad Request — "Los ingredientes no se pueden vender directamente"
 ```
 
+En el mismo loop de validación, y por si alguna vez otro tipo no vendible queda con
+`clasificacion_tributaria` NULL (hoy solo la tiene el ingrediente):
+
+```
+400 Bad Request — El ítem "<nombre>" no tiene clasificación tributaria: no se puede vender
+```
+
+Rechaza en vez de rellenar el snapshot fiscal con `'afecto'`: el motor ya cobró IVA
+cero al ver el NULL, así que ese relleno guardaría una línea que miente
+([ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
+
 ### POST /mermas
 
 Acepta `itemId` de tipo `producto` o `ingrediente` (modo cantidad). Mensaje si otro tipo:

@@ -2375,6 +2375,12 @@ export class SeederService implements OnApplicationBootstrap {
    * `items.clasificacion_tributaria`, no de `item_impuestos`. Idempotente:
    * los duplicados quedan soft-deleteados y no vuelven a matchear. Los snapshots
    * de ventas_impuestos NO se tocan (ya congelaron porcentaje y valor).
+   *
+   * Los JOIN filtran `eliminado_el` (invariante 3) para NO mutar el catálogo de
+   * un tenant que ya no existe: el barrido soft-deletea impuestos ajenos, y
+   * hacerlo sobre una empresa eliminada es destruir datos que nadie pidió tocar.
+   * No pierde cobertura: un tenant eliminado no vende, y si se restaura el
+   * próximo arranque vuelve a alcanzarlo.
    */
   private async remapImpuestosOficialesDuplicados(): Promise<void> {
     const sistemas: {
@@ -2390,8 +2396,9 @@ export class SeederService implements OnApplicationBootstrap {
       const duplicados: { impuesto_id: string }[] = await this.dataSource.query(
         `SELECT i.impuesto_id
            FROM impuestos i
-           JOIN tenants t ON t.tenant_id = i.tenant_id
+           JOIN tenants t ON t.tenant_id = i.tenant_id AND t.eliminado_el IS NULL
            JOIN provincia p ON p.provincia_id = t.provincia_id
+                AND p.eliminado_el IS NULL
           WHERE p.pais_id = $1
             AND i.eliminado_el IS NULL
             AND i.porcentaje = $2::numeric

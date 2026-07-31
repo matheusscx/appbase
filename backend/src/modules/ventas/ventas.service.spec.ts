@@ -749,6 +749,32 @@ describe('VentasService', () => {
       );
     });
 
+    // Hoy inalcanzable por API: el único tipo con `clasificacion_tributaria`
+    // nullable es 'ingrediente', y el guard de arriba lo rechaza antes. El test
+    // fija la conducta para cuando deje de serlo (otro tipo no vendible, o el
+    // guard relajado): `venta_detalles.clasificacion_tributaria` es NOT NULL, y
+    // rellenarlo con 'afecto' guardaría una línea que dice "afecto" mientras el
+    // motor —condición positiva `=== 'afecto'`— ya cobró IVA cero por el NULL.
+    it('rechaza línea con item sin clasificación tributaria, en vez de rellenar el snapshot fiscal', async () => {
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        mapaDe({
+          ...mockItem,
+          clasificacionTributaria: null,
+        }),
+      );
+
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, baseDto),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'El ítem "Smartphone" no tiene clasificación tributaria: no se puede vender',
+        ),
+      );
+      // Falla antes de calcular y de escribir: el rechazo no debe depender del
+      // rollback de la transacción.
+      expect(calculoPreciosService.calcular).not.toHaveBeenCalled();
+    });
+
     it('llama a pagosService.registrar con los params correctos cuando hay pagos', async () => {
       // pago de 150 cuando total es 100 → PagosService calcula el vuelto internamente
       const dtoConExcedente = {

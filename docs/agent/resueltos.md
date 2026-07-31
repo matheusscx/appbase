@@ -1618,8 +1618,75 @@ siguen diferidos están en `pendientes.md`.
   `NULL`. Y un e2e de extremo a extremo: crear un ítem afecto sin tocar impuestos y venderlo
   cobra el 19% igual, con traza en `ventas_impuestos` — el bug de la entrada, por el camino
   por default.
-  **Lo que quedó fuera y sigue en `pendientes.md`:** el `?? 'afecto'` de
-  `VentasService` al congelar el snapshot fiscal (`ventas.service.ts:396` y `:889`) sigue sin
-  tocarse — el owner decidió no endurecerlo ahora porque hoy es inalcanzable (ningún ítem
-  vendible puede llegar con `clasificacionTributaria: null`); queda documentado para no
-  reintroducirlo por descuido si eso cambia.
+  **Lo que quedó fuera en su momento:** el `?? 'afecto'` de `VentasService` al congelar el
+  snapshot fiscal (`ventas.service.ts:396` y `:889`), diferido por el owner el 2026-07-31 por
+  ser inalcanzable. Se cerró igual ese mismo día — ver la entrada de acá abajo.
+
+- [x] ~~**`VentasService` rellena el snapshot fiscal con `'afecto'` cuando falta la
+  clasificación tributaria, en vez de rechazar**~~ (backend) — cerrado 2026-07-31.
+  **Lo que se midió antes de tocar nada: la entrada sobreafirmaba.** Daba `:396` y `:889`
+  como el mismo problema y no lo son. En `:396` el dato viene de `items`, donde la columna
+  **es** nullable (`string | null`), así que el riesgo era real aunque hoy inalcanzable. En
+  `:889` —la nota de crédito— viene de `venta_detalles`, que es `NOT NULL` en el esquema y
+  cuyo tipo de retorno en `validarDevolucionesReembolso` ya declara `string`: ahí el
+  `?? 'afecto'` era **código muerto**, no un relleno peligroso. Poner un `throw` en `:889`
+  habría sido una rama inalcanzable e intesteable.
+  **Qué se hizo:** en `:396`, un guard temprano en el mismo loop que ya rechaza
+  `tipo='ingrediente'` (paso 2 de `crear()`, antes de calcular precios y antes de escribir
+  nada): si `clasificacionTributaria === null`, `BadRequestException`. El write site usa
+  `!`, con el guard citado en el comentario. En `:889` se borró el `??` a secas.
+  **Por qué rechazar y no rellenar:** el motor decide el IVA **antes**, con la condición
+  positiva `=== 'afecto'`, así que un `null` ya cobró IVA cero; escribir `'afecto'` en
+  `venta_detalles` deja una línea coherente consigo misma pero falsa respecto de lo que pasó
+  — sin excepción ni log, indetectable por auditoría. Y el guard va arriba para que el
+  rechazo no dependa del rollback de la transacción.
+  **Mutante verificado:** revertido a `?? 'afecto'` (guard borrado), el test nuevo de
+  `ventas.service.spec.ts` falla y la salida de Jest muestra el bug literal —
+  `"clasificacionTributaria": "afecto"` en el detalle de un ítem cuya clasificación era
+  `null`—. El test también asegura `calculoPreciosService.calcular` no llamado, así que
+  distingue el guard temprano de un `throw` tardío en el write site.
+  **Sigue inalcanzable por API** (el único tipo con clasificación nullable es `'ingrediente'`
+  y `ventas.service.ts:191` lo rechaza antes): el test fija la conducta para cuando aparezca
+  otro tipo no vendible o se relaje ese guard, y está anotado como tal.
+
+- [x] ~~**Un impuesto propio llamado "IVA" se suma al IVA derivado: 38%**~~ (frontend) —
+  cerrado 2026-07-31. **Decisión del owner:** no se puede impedir por código —el tenant es
+  dueño de su catálogo de impuestos y una heurística de nombre en `ImpuestosService.create`
+  le prohibiría nombrar como quiera, con falsos positivos garantizados—, así que la defensa
+  es **explicar, no bloquear**.
+  **Qué se hizo:** dos `AppInfoButton` (el patrón de "i" informativa que ya existía en
+  `UserPreferencesForm` y `salones.vue`). Uno en el campo **Nombre** de
+  `configuracion/impuestos.vue` — ahí es donde se comete el error, no al clasificar el ítem —
+  diciendo que el IVA no se crea en esa pantalla y que uno llamado «IVA» se **suma** al
+  automático. Otro en **Clasificación tributaria** de `configuracion/items.vue`, que explica
+  que `Afecto` ya trae el IVA del país (con el porcentaje real, interpolado desde `ivaLabel`,
+  no hardcodeado) y que congela en la venta. Junto con los placeholders que ya se habían
+  cambiado (`"IVA"`/`"0.19"` → `"Impuesto verde"`/`"0.05"`), la UI dejó de guiar al error.
+  **Lo que NO se tocó, a propósito:** el heurístico del seeder
+  (`nombre ILIKE '%iva%'` + porcentaje idéntico). Se evaluó ampliarlo para agarrar
+  `"I.V.A. 19"` o `"Impuesto al Valor Agregado"` y se descartó: más cobertura a cambio de más
+  falsos positivos sobre impuestos legítimos, en un barrido que igual solo corre al arrancar
+  el backend. Con la "i" en la UI, el heurístico dejó de ser la única defensa.
+  **Sin test:** son textos. Verificado en navegador (drawer abierto, modal abierto, `ivaLabel`
+  interpolando "IVA 19%", consola limpia) porque build y typecheck no ven nada de lo que pasa
+  dentro de un drawer.
+
+- [x] ~~**`seeder.service.ts` — el JOIN de detección de duplicados de IVA no filtra
+  `eliminado_el`**~~ (backend) — cerrado 2026-07-31 agregando `AND t.eliminado_el IS NULL` y
+  `AND p.eliminado_el IS NULL` a los JOIN de `remapImpuestosOficialesDuplicados`, con el
+  mismo patrón que `impuestos.service.ts:41-44`.
+  **La razón que daba la entrada estaba invertida y se corrigió acá.** Decía que sin los
+  filtros "un tenant o provincia soft-eliminados podrían dejar pasar un duplicado sin
+  desactivar". Es al revés: un `JOIN` sin filtro matchea **más** filas, así que sacar el
+  filtro amplía el barrido, no lo reduce. La razón real para filtrar es la contraria — el
+  barrido **soft-deletea impuestos ajenos**, y hacerlo sobre el catálogo de una empresa que
+  ya no existe es destruir datos que nadie pidió tocar (invariante 3).
+  **Y no pierde cobertura:** un tenant eliminado no vende, y si se restaura, el próximo
+  arranque vuelve a alcanzarlo — la ventana es la misma que la ya documentada para cualquier
+  duplicado nuevo ("creado a las 10:00, cobra doble hasta el próximo reinicio").
+  **Sin test, y dicho de frente:** el seeder no tiene harness de tests, corre en
+  `onApplicationBootstrap` y sus métodos son privados; el estado que el cambio distingue
+  (tenant o provincia soft-eliminados con impuestos vivos) no se alcanza por API. Se evaluó
+  un invariant spec que escanee el SQL del repo —al estilo de
+  `uuid-columns.invariant.spec.ts`— y se descartó: distinguir `i.eliminado_el` de
+  `t.eliminado_el` pide parsear alias, o sea maquinaria nueva y frágil para una query.

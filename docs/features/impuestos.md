@@ -264,6 +264,12 @@ clasificación después.
 - Form de alta/edición (solo aplica a personalizados): sin campo de tipo — todo
   impuesto creado por el tenant queda `tipo='otro'` (forzado en backend);
   `tipo='iva'` es exclusivo de las filas del sistema.
+- **`AppInfoButton` en el campo Nombre**: avisa que el IVA no se crea acá y que uno
+  llamado "IVA" se **suma** al automático (38%). Va en esta pantalla porque es donde
+  se comete el error, no en la del ítem. Placeholders `"Impuesto verde"` / `"0.05"`,
+  nunca `"IVA"` / `"0.19"` — la UI no debe guiar al duplicado.
+  **No se bloquea la creación a propósito** (owner, 2026-07-31): el tenant es dueño de
+  su catálogo y una heurística de nombre tendría falsos positivos. Ver ADR-018.
 
 ### `configuracion/items.vue`
 
@@ -278,7 +284,9 @@ clasificación después.
 - Campo **Clasificación tributaria** (`Afecto` default | `Exento`), visible para
   todos los tipos de item **excepto `ingrediente`** (se esconde: un ingrediente no
   se vende y no tiene tratamiento fiscal), con ayuda: "Exento: no se aplica IVA (los
-  demás impuestos sí). Se congela en cada venta."
+  demás impuestos sí). Se congela en cada venta." Un `AppInfoButton` en el label
+  explica que `Afecto` ya trae el IVA del país —con el porcentaje real, interpolado
+  desde `ivaLabel`, no escrito a mano— y que no hay que agregarlo como impuesto.
 - **Esto es UX, no enforcement** (invariante 6): el candado real es el 400 del
   backend (`validarImpuestos`, ver arriba).
 

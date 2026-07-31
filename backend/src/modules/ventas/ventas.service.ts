@@ -191,6 +191,18 @@ export class VentasService {
           'Los ingredientes no se pueden vender directamente',
         );
       }
+      // `clasificacion_tributaria` es nullable desde ADR-018 (los ingredientes
+      // van NULL: no se venden, no tienen tratamiento fiscal). Rellenar el
+      // snapshot con 'afecto' haría que `venta_detalles` mienta: el motor ya
+      // decidió el IVA con la condición positiva `=== 'afecto'`, así que un
+      // NULL cobró IVA cero mientras la línea guardada diría "afecto" — sin
+      // excepción ni log, indetectable por auditoría. Se rechaza en vez de
+      // inventar el dato, y acá arriba para no escribir nada antes de fallar.
+      if (item.clasificacionTributaria === null) {
+        throw new BadRequestException(
+          `El ítem "${item.nombre}" no tiene clasificación tributaria: no se puede vender`,
+        );
+      }
     }
 
     const unidades = await this.catalogService.findAllUnidadesMedida();
@@ -393,7 +405,9 @@ export class VentasService {
             tasaCambio: tasa,
             precioUnitario: precioConvertido,
             descripcion: item.nombre,
-            clasificacionTributaria: item.clasificacionTributaria ?? 'afecto',
+            // Non-null garantizado por el guard del paso 2, que rechaza la venta
+            // antes de escribir si algún ítem no tiene clasificación.
+            clasificacionTributaria: item.clasificacionTributaria!,
             cantidad: rLinea.cantidad,
             cantidadPresentacion,
             unidadCodigoPresentacion,
@@ -886,7 +900,7 @@ export class VentasService {
             tasaCambio: linea.tasaCambio,
             precioUnitario: linea.precioUnitario,
             descripcion: linea.descripcion,
-            clasificacionTributaria: linea.clasificacionTributaria ?? 'afecto',
+            clasificacionTributaria: linea.clasificacionTributaria,
             cantidad: linea.cantidad,
             subtotal: totalLinea,
             totalLinea,

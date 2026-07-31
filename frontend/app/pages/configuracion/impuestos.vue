@@ -269,7 +269,34 @@ const columns: TableColumn<Impuesto>[] = [
           class="space-y-4"
           @submit="guardar"
         >
-          <UFormField label="Nombre" required>
+          <!-- El error caro se comete acá, no en el ítem: nombrar "IVA" a un
+               impuesto propio lo suma al IVA automático (38%). No se bloquea la
+               creación —el tenant es dueño de su catálogo y la heurística de
+               nombre tiene falsos positivos—, se avisa. Ver ADR-018. -->
+          <UFormField required>
+            <template #label>
+              <span class="inline-flex items-center gap-1">
+                Nombre
+                <AppInfoButton title="El IVA no se crea acá">
+                  <div class="space-y-3">
+                    <p>
+                      El IVA sale de la clasificación tributaria de cada ítem
+                      (Afecto / Exento) y el sistema lo aplica solo.
+                    </p>
+                    <p>
+                      Si creás acá un impuesto llamado «IVA», se va a
+                      <span class="font-medium text-default">sumar</span> al
+                      automático y vas a cobrar de más.
+                    </p>
+                    <p>
+                      Esta pantalla es para los demás impuestos —verde, específicos,
+                      municipales—, que sí se aplican tanto a ítems afectos como
+                      exentos.
+                    </p>
+                  </div>
+                </AppInfoButton>
+              </span>
+            </template>
             <UInput
               v-model="form.nombre"
               placeholder="Impuesto verde"

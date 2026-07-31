@@ -45,63 +45,6 @@ identificamos con ubicación concreta.
   backend quede estable, o correr el e2e contra un stack sin watch.
 ---
 
-## IVA automático según clasificación tributaria (decidido por el owner 2026-07-29)
-
-- [ ] **`VentasService` rellena el snapshot fiscal con `'afecto'` cuando falta la
-  clasificación tributaria, en vez de rechazar** (backend, `ventas/ventas.service.ts:396`
-  y `:889`) — `clasificacionTributaria: item.clasificacionTributaria ?? 'afecto'` (y su
-  gemelo con `linea.` en vez de `item.`). Encontrado en la revisión independiente de la
-  Task 3 del plan de IVA derivado (columna `items.clasificacion_tributaria` nullable desde
-  esa tarea). **El problema:** si algún día `item.clasificacionTributaria` llega `null` a
-  este punto, la línea de venta queda con `clasificacion_tributaria = 'afecto'` en el
-  snapshot fiscal (`venta_detalles`, que es `NOT NULL`) mientras el motor de precios —que
-  ya decidió el IVA **antes**, con la condición positiva `=== 'afecto'`— no le cobró IVA
-  por haber visto el `null`. El detalle persistido queda **mintiendo**: dice "afecto" y
-  cobró IVA cero, lo que es indetectable por auditoría (no hay excepción, no hay log, el
-  dato guardado es coherente consigo mismo pero no con lo que realmente pasó).
-  **Hoy es inalcanzable, no un bug activo:** el único `tipo` con `clasificacionTributaria`
-  nullable es `'ingrediente'`, y `ventas.service.ts:191` ya rechaza vender un ingrediente
-  directamente (`'Los ingredientes no se pueden vender directamente'`) antes de llegar a
-  las líneas 396/889. Ningún otro tipo de ítem puede tener `null` hoy. El owner decidió
-  **no tocarlo ahora** (2026-07-31) — queda registrado para no reintroducirlo por
-  descuido si en el futuro se agrega otro tipo de ítem no vendible con `clasificacionTributaria`
-  nullable, o si el guard de la línea 191 se relaja.
-  **Corrección propuesta cuando se retome:** reemplazar el `?? 'afecto'` silencioso por un
-  `throw` (el snapshot fiscal no debe rellenar un dato que no tiene, y menos con el valor
-  que más IVA implica) — mismo espíritu que el `BadRequestException` que ya usa
-  `calculo-precios.service.ts:212` cuando un ítem afecto no encuentra IVA del país
-  configurado.
-- [ ] **Un impuesto propio llamado "IVA" se suma al IVA derivado: 38%** (backend +
-  frontend) — un admin puede crear un impuesto personalizado con nombre "IVA" y `0.19`;
-  como `tipo` no está expuesto en `CreateImpuestoDto`, entra como `'otro'`, y el motor
-  **no** filtra los `'otro'` (por diseño: aplican en afectos y exentos). Resultado: se
-  suma al IVA derivado. **ADR-018 lo declara como consecuencia negativa asumida.**
-  **Decisión del owner (2026-07-31), tomada con la revisión final sobre la mesa:** por
-  ahora **solo se cambiaron los placeholders** del formulario (`impuestos.vue` sugería
-  literalmente `"IVA"` y `"0.19"`, o sea que la UI guiaba al error). **No** se bloquea la
-  creación. Las otras dos opciones se evaluaron y se descartaron por ahora: un 400 por
-  heurística de nombre en `ImpuestosService.create` (le prohíbe al tenant nombrar como
-  quiera y tiene falsos positivos), y exponer `tipo` para que el tenant declare su propio
-  IVA (es una feature nueva: rompe el supuesto de "un solo IVA por país" en el que se
-  apoya todo ADR-018, y hay que rediseñar antes de tocar nada).
-  **Lo que queda vivo, medido:** la única defensa es el heurístico del seeder
-  (`nombre ILIKE '%iva%'` + porcentaje idéntico), que (a) corre **solo al arrancar el
-  backend** —un impuesto creado a las 10:00 cobra doble hasta el próximo reinicio— y
-  (b) no matchea variantes como `"I.V.A. 19"` o `"Impuesto al Valor Agregado"`.
-  Reabrir si aparece un caso real o antes de salir a producción.
-- [ ] **`seeder.service.ts` — el JOIN de detección de duplicados de IVA no filtra
-  `eliminado_el`** (backend, `seeder/seeder.service.ts:2393-2394`,
-  `remapImpuestosOficialesDuplicados`) — los `JOIN tenants t ON t.tenant_id =
-  i.tenant_id` y `JOIN provincia p ON p.provincia_id = t.provincia_id` no agregan
-  `AND t.eliminado_el IS NULL` / `AND p.eliminado_el IS NULL`, a diferencia del resto
-  de los JOINs `tenants → provincia` del repo (ver la entrada de arriba sobre las 11
-  queries del país del tenant, que sí filtran). Roza la invariante 3 (soft delete). Hoy
-  esta query es la defensa contra la doble tributación del 38% (soft-deletea el
-  impuesto `tipo='otro'` duplicado que colisionaría con el IVA derivado, ver ADR-018),
-  así que un tenant o provincia soft-eliminados podrían dejar pasar un duplicado sin
-  desactivar. Cierre: agregar los dos filtros, mismo patrón que las demás resoluciones
-  de país.
-
 ## Suite E2E de navegador (fundación lista, flujos por escribir)
 
 Scaffold Playwright ya funciona (`frontend/e2e/`, auth vía storageState, 1 smoke verde).
@@ -322,8 +265,9 @@ Ver [`resueltos.md`](resueltos.md).
     `(item_id, regla_id)` hace que una fila borrada blando **bloquee reinsertar el mismo
     par** — el patrón actual "borro todo y reinserto" tiene que pasar a revivir o upsert.
   - **Alcance**: además de las tres puentes por ítem, están las reglas a nivel venta
-    (`descuentosVentaIds` / `recargosVentaIds`, que llegan por DTO y no tienen fila puente) y
-    el IVA por clasificación tributaria — que es la entrada de arriba y se cruza con esta.
+    (`descuentosVentaIds` / `recargosVentaIds`, que llegan por DTO y no tienen fila puente).
+    El IVA queda **fuera**: se deriva de `clasificacion_tributaria` y no tiene fila puente
+    que limpiar ([ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
   - Las ventas ya emitidas **no se tocan**: el hecho fiscal está congelado en
     `ventas_descuentos` / `ventas_recargos` / `ventas_impuestos`.
   ⛔ Toca el motor de cálculo de precios: va con spec antes de código.

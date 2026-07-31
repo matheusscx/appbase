@@ -2038,9 +2038,37 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <p class="text-sm font-medium text-muted">Reglas asociadas</p>
 
             <UFormField
-              label="Clasificación tributaria"
               help="Exento: no se aplica IVA (los demás impuestos sí). Se congela en cada venta."
             >
+              <!-- La "i" explica de dónde sale el IVA. No hay forma de impedir por
+                   código que el tenant cree un impuesto propio llamado "IVA" —es
+                   dueño de su catálogo—, así que la defensa contra la doble
+                   tributación es que sepa que ya se aplica solo. Ver ADR-018. -->
+              <template #label>
+                <span class="inline-flex items-center gap-1">
+                  Clasificación tributaria
+                  <AppInfoButton title="Clasificación tributaria">
+                    <div class="space-y-3">
+                      <p>
+                        <span class="font-medium text-default">Afecto</span>: el sistema
+                        aplica solo el IVA del país<template v-if="ivaLabel">
+                          ({{ ivaLabel }})</template>. No hay que agregarlo como
+                        impuesto: si creás uno llamado «IVA» en Configuración →
+                        Impuestos, se suma al automático y cobrás de más.
+                      </p>
+                      <p>
+                        <span class="font-medium text-default">Exento</span>: no se
+                        aplica IVA. Los demás impuestos del ítem sí se aplican.
+                      </p>
+                      <p>
+                        La clasificación queda congelada en cada venta: lo que se
+                        vendió hoy conserva su tratamiento fiscal aunque el ítem
+                        cambie mañana.
+                      </p>
+                    </div>
+                  </AppInfoButton>
+                </span>
+              </template>
               <USelect
                 v-model="form.clasificacionTributaria"
                 :items="[
