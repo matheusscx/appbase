@@ -2778,8 +2778,8 @@ export class SeederService implements OnApplicationBootstrap {
     const PAPAS_COSTO = '800';
     const PAPAS_STOCK = '40';
     await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,'Papas fritas','1500',false,true,'producto')`,
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+       VALUES ($1,$2,$3,'Papas fritas','1500',false,true,'producto','afecto')`,
       [PAPAS_ID, PARIS, CLP],
     );
     await this.dataSource.query(
@@ -2921,8 +2921,8 @@ export class SeederService implements OnApplicationBootstrap {
     // opción elegida.
     // costo_actual = costo pan (500×1) + costo queso (6000×0.02) = 620.
     await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,'Hamburguesa Especial','Pan y queso fijos; elige tu proteína','3900',false,true,'receta')`,
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+       VALUES ($1,$2,$3,'Hamburguesa Especial','Pan y queso fijos; elige tu proteína','3900',false,true,'receta','afecto')`,
       [HAMBURGUESA_ESPECIAL_ID, PARIS, CLP],
     );
     await this.dataSource.query(
@@ -2983,8 +2983,8 @@ export class SeederService implements OnApplicationBootstrap {
     }
 
     await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,'Combo Especial','Hamburguesa Especial (elige tu proteína) + Papas fritas','4300',false,true,'combo')`,
+      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+       VALUES ($1,$2,$3,'Combo Especial','Hamburguesa Especial (elige tu proteína) + Papas fritas','4300',false,true,'combo','afecto')`,
       [COMBO_ESPECIAL_ID, PARIS, CLP],
     );
     await this.dataSource.query(
@@ -3031,8 +3031,8 @@ export class SeederService implements OnApplicationBootstrap {
 
     await this.dataSource.query(
       `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion,
-                          precio_base, precio_incluye_impuesto, activo, tipo)
-       VALUES ($1,$2,$3,$4,'Producto demo (unidad · CLP)','Item de desarrollo: Unidad, precio en CLP','5000',false,true,'producto')`,
+                          precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+       VALUES ($1,$2,$3,$4,'Producto demo (unidad · CLP)','Item de desarrollo: Unidad, precio en CLP','5000',false,true,'producto','afecto')`,
       [ITEM_ID, PARIS, CLP, ELECTRONICA],
     );
     await this.dataSource.query(

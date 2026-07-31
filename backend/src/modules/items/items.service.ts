@@ -40,7 +40,7 @@ interface ItemRow {
   descripcion: string | null;
   tipo: string;
   activo: boolean;
-  clasificacion_tributaria: string;
+  clasificacion_tributaria: string | null;
   precio_base: string;
   precio_incluye_impuesto: boolean;
   moneda_id: string;
@@ -735,6 +735,11 @@ export class ItemsService {
       );
     }
     if (dto.tipo === 'ingrediente') {
+      if (dto.clasificacionTributaria !== undefined) {
+        throw new BadRequestException(
+          'Un ingrediente no tiene clasificación tributaria: no se vende',
+        );
+      }
       if (
         dto.impuestosIds?.length ||
         dto.recargosIds?.length ||
@@ -809,7 +814,9 @@ export class ItemsService {
           dto.precioIncluyeImpuesto ?? false,
           dto.activo ?? true,
           dto.tipo,
-          dto.clasificacionTributaria ?? 'afecto',
+          dto.tipo === 'ingrediente'
+            ? null
+            : (dto.clasificacionTributaria ?? 'afecto'),
         ],
       );
       const itemId = itemRows[0].item_id;
@@ -1068,7 +1075,10 @@ export class ItemsService {
         activo: dto.activo ?? true,
         precioBase: precioBasePersistido,
         precioIncluyeImpuesto: dto.precioIncluyeImpuesto ?? false,
-        clasificacionTributaria: dto.clasificacionTributaria ?? 'afecto',
+        clasificacionTributaria:
+          dto.tipo === 'ingrediente'
+            ? null
+            : (dto.clasificacionTributaria ?? 'afecto'),
         monedaId: dto.monedaId,
         monedaCodigo: moneda.codigo,
         monedaSimbolo: moneda.simbolo,
@@ -1218,6 +1228,11 @@ export class ItemsService {
         patch.activo = dto.activo;
       }
       if (dto.clasificacionTributaria !== undefined) {
+        if (tipo === 'ingrediente') {
+          throw new BadRequestException(
+            'Un ingrediente no tiene clasificación tributaria: no se vende',
+          );
+        }
         setClauses.push(`clasificacion_tributaria = $${idx++}`);
         params.push(dto.clasificacionTributaria);
         patch.clasificacionTributaria = dto.clasificacionTributaria;

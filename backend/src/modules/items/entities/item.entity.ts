@@ -39,8 +39,11 @@ export class Item {
   @Column({ type: 'text' })
   tipo: string;
 
-  @Column({ name: 'clasificacion_tributaria', type: 'text', default: 'afecto' })
-  clasificacionTributaria: string; // 'afecto' | 'exento' — tratamiento fiscal (IVA)
+  // Nullable a propósito: `tipo='ingrediente'` no tiene tratamiento fiscal
+  // porque no se vende. NO es "afecto por defecto" — ver ADR-018 y el
+  // `=== 'afecto'` de calculo-precios.service.ts.
+  @Column({ name: 'clasificacion_tributaria', type: 'text', nullable: true })
+  clasificacionTributaria: string | null; // 'afecto' | 'exento' | null
 
   @CreateDateColumn({ name: 'creado_el' })
   creadoEl: Date;

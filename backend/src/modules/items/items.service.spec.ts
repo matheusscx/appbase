@@ -1361,6 +1361,37 @@ describe('ItemsService', () => {
           } as any),
         ).rejects.toThrow(BadRequestException);
       });
+
+      it('un ingrediente se guarda sin clasificación tributaria (NULL)', async () => {
+        managerMock.query
+          .mockResolvedValueOnce([{ codigo_iso: 'CLP', simbolo: '$' }]) // moneda
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, creado_el: new Date() }])
+          .mockResolvedValueOnce(undefined); // INSERT item_producto
+        inventarioServiceMock.registrarMovimiento.mockResolvedValue({
+          movimientoId: 'mov-ing',
+          stockAnterior: '0',
+          stockResultante: '10',
+        });
+
+        const result = await service.create(TENANT, 'user-uuid', dtoIng);
+
+        const insertItemsCall = managerMock.query.mock.calls.find(
+          (c: unknown[]) => String(c[0]).includes('INSERT INTO items'),
+        );
+        expect(insertItemsCall[1][9]).toBeNull(); // clasificacion_tributaria
+        expect(result).toMatchObject({ clasificacionTributaria: null });
+      });
+
+      it('rechaza mandar clasificación tributaria en un ingrediente', async () => {
+        await expect(
+          service.create(TENANT, 'user-uuid', {
+            ...dtoIng,
+            clasificacionTributaria: 'afecto',
+          } as any),
+        ).rejects.toThrow(
+          'Un ingrediente no tiene clasificación tributaria: no se vende',
+        );
+      });
     });
 
     it('lanza BadRequestException cuando tipo suscripcion no trae frecuencia', async () => {
@@ -1919,6 +1950,22 @@ describe('ItemsService', () => {
       await expect(
         service.update(TENANT, USUARIO, ITEM_ID, { [field]: value } as any),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rechaza editar la clasificación tributaria de un ingrediente', async () => {
+      // El tipo es inmutable (update-item.dto.ts no lo expone), así que se
+      // compara contra el tipo guardado, no contra el DTO.
+      managerMock.query.mockResolvedValueOnce([
+        { item_id: ITEM_ID, tipo: 'ingrediente' },
+      ]);
+
+      await expect(
+        service.update(TENANT, USUARIO, ITEM_ID, {
+          clasificacionTributaria: 'exento',
+        }),
+      ).rejects.toThrow(
+        'Un ingrediente no tiene clasificación tributaria: no se vende',
+      );
     });
 
     it('rechaza modoInventario distinto de cantidad en ingrediente', async () => {
