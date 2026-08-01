@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -14,6 +15,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { GarzonesService } from './garzones.service';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
@@ -31,9 +34,9 @@ export class GarzonesController {
 
   @Get()
   @RequiresPermiso('Salones', 'Leer')
-  listar(@Req() req: Request) {
+  listar(@Req() req: Request, @Query() query: QueryIncluirEliminadosDto) {
     const user = req.user as { tenantId: string };
-    return this.garzonesService.listar(user.tenantId);
+    return this.garzonesService.listar(user.tenantId, query.incluirEliminados);
   }
 
   @Post()
@@ -65,8 +68,15 @@ export class GarzonesController {
   @Delete(':id')
   @RequiresPermiso('Salones', 'Eliminar')
   eliminar(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as { tenantId: string };
-    return this.garzonesService.eliminar(user.tenantId, id);
+    const user = req.user as JwtUser;
+    return this.garzonesService.eliminar(user.tenantId!, user.id, id);
+  }
+
+  @Post(':id/restaurar')
+  @RequiresPermiso('Salones', 'Eliminar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.garzonesService.restaurar(user.tenantId!, id);
   }
 
   /** Identifica al garzón por su PIN (para feedback en la UI del garzón). */

@@ -823,3 +823,177 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
     expect(resRestaurarOtraVez.status).toBe(404);
   });
 });
+
+// Task 6a: los 8 recursos de la familia `softDelete()` de TypeORM —
+// descuentos, recargos, impuestos, terceros, cajones, garzones, turnos,
+// impresoras. Ninguno tiene colateral en cascada ni nombre único con
+// restricción parcial que dispare un 400 al restaurar (a diferencia de
+// causas-merma), así que un solo spec parametrizado sobre la lista basta:
+// once copias del mismo cuerpo no agregarían cobertura.
+interface RecursoConAuditoria {
+  id: string;
+  eliminadoEl?: string | null;
+  eliminadoPorNombre?: string | null;
+}
+
+describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuestos, terceros, cajones, garzones, turnos, impresoras', () => {
+  let app: INestApplication<App>;
+  let tokenAdmin: string;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+  }, 60000);
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  // 'directo' (descuento) y 'general' (recargo): los únicos tipos de regla
+  // del seed que no exigen tramos/metodoPagoIds/fechas — solo `valor` en el
+  // caso de 'general'. Minimizan el payload de creación de este spec.
+  const DESCUENTO_DIRECTO_TIPO_ID = '550e8400-e29b-41d4-a716-446655440337';
+  const RECARGO_GENERAL_TIPO_ID = '550e8400-e29b-41d4-a716-446655440122';
+
+  const recursos: {
+    nombre: string;
+    path: string;
+    crearBody: () => Record<string, unknown>;
+  }[] = [
+    {
+      nombre: 'descuentos',
+      path: 'descuentos',
+      crearBody: () => ({
+        nombre: `Descuento papelera E2E ${Date.now()}`,
+        tipoReglaId: DESCUENTO_DIRECTO_TIPO_ID,
+        modo: 'porcentaje',
+      }),
+    },
+    {
+      nombre: 'recargos',
+      path: 'recargos',
+      crearBody: () => ({
+        nombre: `Recargo papelera E2E ${Date.now()}`,
+        tipoReglaId: RECARGO_GENERAL_TIPO_ID,
+        valor: '0.05',
+        modo: 'porcentaje',
+      }),
+    },
+    {
+      nombre: 'impuestos',
+      path: 'impuestos',
+      crearBody: () => ({
+        nombre: `Impuesto papelera E2E ${Date.now()}`,
+        porcentaje: '0.05',
+      }),
+    },
+    {
+      nombre: 'terceros',
+      path: 'terceros',
+      crearBody: () => ({
+        tipo: 'proveedor',
+        nombre: `Tercero papelera E2E ${Date.now()}`,
+      }),
+    },
+    {
+      nombre: 'cajones',
+      path: 'cajones',
+      crearBody: () => ({ nombre: `Cajón papelera E2E ${Date.now()}` }),
+    },
+    {
+      nombre: 'garzones',
+      path: 'garzones',
+      crearBody: () => ({ nombre: `Garzón papelera E2E ${Date.now()}` }),
+    },
+    {
+      nombre: 'turnos',
+      path: 'turnos',
+      crearBody: () => ({
+        nombre: `Turno papelera E2E ${Date.now()}`,
+        horaInicio: '12:00',
+        horaFin: '14:00',
+      }),
+    },
+    {
+      nombre: 'impresoras',
+      path: 'impresoras',
+      crearBody: () => ({
+        nombre: `Impresora papelera E2E ${Date.now()}`,
+        rol: 'boleta',
+        tipoConexion: 'sistema',
+        nombreCola: `COLA_E2E_${Date.now()}`,
+      }),
+    },
+  ];
+
+  for (const recurso of recursos) {
+    it(`${recurso.nombre}: crear → borrar → listar con el flag → restaurar → verificar`, async () => {
+      const resCrear = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send(recurso.crearBody());
+      expect(resCrear.status).toBe(201);
+      const id = (resCrear.body as RecursoConAuditoria).id;
+      expect(id).toBeDefined();
+
+      const resBorrar = await request(app.getHttpServer())
+        .delete(`/api/${recurso.path}/${id}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resBorrar.status).toBe(200);
+
+      const resListarNormal = await request(app.getHttpServer())
+        .get(`/api/${recurso.path}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resListarNormal.status).toBe(200);
+      expect(
+        (resListarNormal.body as RecursoConAuditoria[]).find(
+          (r) => r.id === id,
+        ),
+      ).toBeUndefined();
+
+      const resListarPapelera = await request(app.getHttpServer())
+        .get(`/api/${recurso.path}?incluirEliminados=true`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resListarPapelera.status).toBe(200);
+      const borrado = (resListarPapelera.body as RecursoConAuditoria[]).find(
+        (r) => r.id === id,
+      );
+      expect(borrado).toBeDefined();
+      expect(borrado?.eliminadoEl).not.toBeNull();
+      expect(borrado?.eliminadoPorNombre).toBe('admin.paris');
+
+      const resRestaurar = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${id}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurar.status).toBe(201);
+      expect(
+        (resRestaurar.body as RecursoConAuditoria).eliminadoEl,
+      ).toBeFalsy();
+
+      const resListarDespues = await request(app.getHttpServer())
+        .get(`/api/${recurso.path}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(
+        (resListarDespues.body as RecursoConAuditoria[]).find(
+          (r) => r.id === id,
+        ),
+      ).toBeDefined();
+
+      // Restaurar de nuevo (ya no está en la papelera) → 404.
+      const resRestaurarOtraVez = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${id}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurarOtraVez.status).toBe(404);
+    });
+  }
+});

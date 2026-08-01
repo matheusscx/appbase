@@ -9,6 +9,12 @@ import { Impresora, RolImpresora } from './entities/impresora.entity';
 import { CreateImpresoraDto } from './dto/create-impresora.dto';
 import { UpdateImpresoraDto } from './dto/update-impresora.dto';
 
+// `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
+// devolviendo `Impresora[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
+export type ImpresoraConAuditoria = Impresora & {
+  eliminadoPorNombre?: string | null;
+};
+
 @Injectable()
 export class ImpresorasService {
   constructor(
@@ -16,11 +22,39 @@ export class ImpresorasService {
     private readonly impresoraRepo: Repository<Impresora>,
   ) {}
 
-  listar(tenantId: string, rol?: RolImpresora): Promise<Impresora[]> {
-    return this.impresoraRepo.find({
-      where: rol ? { tenantId, rol } : { tenantId },
-      order: { nombre: 'ASC' },
-    });
+  async listar(
+    tenantId: string,
+    rol?: RolImpresora,
+    incluirEliminados = false,
+  ): Promise<ImpresoraConAuditoria[]> {
+    if (!incluirEliminados) {
+      return this.impresoraRepo.find({
+        where: rol ? { tenantId, rol } : { tenantId },
+        order: { nombre: 'ASC' },
+      });
+    }
+    // Mismo patrón que categorias.service.ts → findAll: `getMany()` descarta
+    // los `addSelect` que no mapean a una columna de la entity, así que hay
+    // que usar `getRawAndEntities()` y fusionar a mano. El JOIN a `usuarios`
+    // no filtra `eliminado_el` (docs/patterns/backend.md, excepción
+    // documentada: el autor de un borrado es un hecho histórico).
+    const qb = this.impresoraRepo
+      .createQueryBuilder('i')
+      .leftJoin('usuarios', 'u', 'u.usuario_id = i.eliminado_por')
+      .addSelect('u.nombre_usuario', 'i_eliminado_por_nombre')
+      .where('i.tenant_id = :tenantId', { tenantId })
+      .withDeleted()
+      .orderBy('i.nombre', 'ASC');
+    if (rol) {
+      qb.andWhere('i.rol = :rol', { rol });
+    }
+    const { entities, raw } = await qb.getRawAndEntities<{
+      i_eliminado_por_nombre: string | null;
+    }>();
+    return entities.map((impresora, i) => ({
+      ...impresora,
+      eliminadoPorNombre: raw[i].i_eliminado_por_nombre,
+    }));
   }
 
   async crear(tenantId: string, dto: CreateImpresoraDto): Promise<Impresora> {
@@ -56,9 +90,32 @@ export class ImpresorasService {
     return this.impresoraRepo.save(impresora);
   }
 
-  async eliminar(tenantId: string, id: string): Promise<void> {
+  async eliminar(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<void> {
     await this.getOrThrow(tenantId, id);
-    await this.impresoraRepo.softDelete({ id, tenantId });
+    // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
+    // pueden quedar a medias y dejar una fila borrada sin autor.
+    await this.impresoraRepo.update(
+      { id, tenantId },
+      { eliminadoPor: usuarioId, eliminadoEl: new Date() },
+    );
+  }
+
+  async restaurar(tenantId: string, id: string): Promise<Impresora> {
+    // Una sola regla para los dos casos —no existe, o existe y está viva—:
+    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    const impresora = await this.impresoraRepo.findOne({
+      where: { id, tenantId },
+      withDeleted: true,
+    });
+    if (!impresora || !impresora.eliminadoEl) {
+      throw new NotFoundException(`Impresora ${id} no está en la papelera`);
+    }
+    await this.impresoraRepo.restore({ id, tenantId });
+    return this.impresoraRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
   private validarConexion(dto: CreateImpresoraDto): void {

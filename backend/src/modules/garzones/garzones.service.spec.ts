@@ -21,13 +21,18 @@ jest.mock('crypto', () => {
 });
 
 const TENANT = 'tenant-uuid';
+const USUARIO_ID = 'usuario-uuid';
 
 type Repo = {
   find: jest.Mock;
   findOne: jest.Mock;
+  findOneOrFail: jest.Mock;
   create: jest.Mock;
   save: jest.Mock;
+  update: jest.Mock;
+  restore: jest.Mock;
   softDelete: jest.Mock;
+  createQueryBuilder: jest.Mock;
 };
 
 type SesionRepo = {
@@ -38,9 +43,13 @@ function makeRepo(): Repo {
   return {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn(),
+    findOneOrFail: jest.fn(),
     create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
+    update: jest.fn(() => Promise.resolve({ affected: 1 })),
+    restore: jest.fn(() => Promise.resolve({ affected: 1 })),
     softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+    createQueryBuilder: jest.fn(),
   };
 }
 
@@ -212,10 +221,10 @@ describe('GarzonesService', () => {
       repo.findOne.mockResolvedValue(garzon({ id: 'g1' }));
       sesionRepo.count.mockResolvedValue(1);
 
-      await expect(service.eliminar(TENANT, 'g1')).rejects.toThrow(
+      await expect(service.eliminar(TENANT, USUARIO_ID, 'g1')).rejects.toThrow(
         BadRequestException,
       );
-      await expect(service.eliminar(TENANT, 'g1')).rejects.toThrow(
+      await expect(service.eliminar(TENANT, USUARIO_ID, 'g1')).rejects.toThrow(
         'No se puede eliminar un garzón con una sesión abierta',
       );
       expect(sesionRepo.count).toHaveBeenCalledWith({
@@ -225,19 +234,110 @@ describe('GarzonesService', () => {
           estado: EstadoSesionGarzon.ABIERTA,
         },
       });
-      expect(repo.softDelete).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
-    it('soft-deletea si no hay sesión abierta', async () => {
+    it('eliminar() registra quién borró y cuándo, en una sola escritura', async () => {
       repo.findOne.mockResolvedValue(garzon({ id: 'g1' }));
       sesionRepo.count.mockResolvedValue(0);
 
-      await service.eliminar(TENANT, 'g1');
+      await service.eliminar(TENANT, USUARIO_ID, 'g1');
 
-      expect(repo.softDelete).toHaveBeenCalledWith({
-        id: 'g1',
-        tenantId: TENANT,
+      // Objeto exacto (no `objectContaining`): si `eliminadoEl` faltara del
+      // payload, esta aserción debe fallar — es el corazón del soft delete,
+      // no un detalle opcional de `eliminadoPor`.
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 'g1', tenantId: TENANT },
+        { eliminadoPor: USUARIO_ID, eliminadoEl: expect.any(Date) },
+      );
+    });
+  });
+
+  describe('restaurar', () => {
+    it('restaurar() devuelve el garzón RE-CONSULTADO tras el restore', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({
+          id: 'g1',
+          nombre: 'Ana (en la papelera)',
+          eliminadoEl: new Date(),
+        }),
+      );
+      repo.findOneOrFail.mockResolvedValue(
+        garzon({ id: 'g1', nombre: 'Ana', eliminadoEl: null }),
+      );
+
+      const restaurado = await service.restaurar(TENANT, 'g1');
+
+      expect(repo.restore).toHaveBeenCalledWith({ id: 'g1', tenantId: TENANT });
+      expect(repo.findOneOrFail).toHaveBeenCalledWith({
+        where: { id: 'g1', tenantId: TENANT },
       });
+      expect(restaurado.eliminadoEl).toBeNull();
+      expect(restaurado.nombre).toBe('Ana');
+      expect(restaurado).not.toHaveProperty('pinHash');
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      repo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.restaurar(TENANT, 'g1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() un garzón vivo (no eliminado) es 404', async () => {
+      repo.findOne.mockResolvedValueOnce(
+        garzon({ id: 'g1', eliminadoEl: null }),
+      );
+
+      await expect(service.restaurar(TENANT, 'g1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listar con incluirEliminados', () => {
+    it('sin el flag no devuelve eliminados y excluye el placeholder', async () => {
+      await service.listar(TENANT);
+
+      expect(repo.find).toHaveBeenCalledWith({
+        where: { tenantId: TENANT, esPlaceholder: false },
+        order: { nombre: 'ASC' },
+      });
+    });
+
+    it('con el flag trae eliminados con el nombre de quien borró (vía getRawAndEntities)', async () => {
+      const garzonEliminado = garzon({
+        id: 'g1',
+        nombre: 'Ana',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      const qbMock = {
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawAndEntities: jest.fn().mockResolvedValue({
+          entities: [garzonEliminado],
+          raw: [{ g_eliminado_por_nombre: 'admin.paris' }],
+        }),
+      };
+      repo.createQueryBuilder.mockReturnValue(qbMock);
+
+      const result = await service.listar(TENANT, true);
+
+      // getMany() descarta los addSelect que no mapean a una columna de la
+      // entity: el service debe usar getRawAndEntities() y fusionar a mano.
+      expect(qbMock.getRawAndEntities).toHaveBeenCalled();
+      expect(result[0]).toMatchObject({
+        id: 'g1',
+        eliminadoPorNombre: 'admin.paris',
+      });
+      expect(result[0]).not.toHaveProperty('pinHash');
     });
   });
 });

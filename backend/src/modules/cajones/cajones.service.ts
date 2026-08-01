@@ -13,6 +13,12 @@ import { Caja } from '../caja/entities/caja.entity';
 import { CreateCajonDto } from './dto/create-cajon.dto';
 import { UpdateCajonDto } from './dto/update-cajon.dto';
 
+// `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
+// devolviendo `Cajon[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
+export type CajonConAuditoria = Cajon & {
+  eliminadoPorNombre?: string | null;
+};
+
 @Injectable()
 export class CajonesService {
   constructor(
@@ -28,11 +34,34 @@ export class CajonesService {
     private readonly dataSource: DataSource,
   ) {}
 
-  findAll(tenantId: string): Promise<Cajon[]> {
-    return this.cajonRepo.find({
-      where: { tenantId },
-      order: { nombre: 'ASC' },
-    });
+  async findAll(
+    tenantId: string,
+    incluirEliminados = false,
+  ): Promise<CajonConAuditoria[]> {
+    if (!incluirEliminados) {
+      return this.cajonRepo.find({
+        where: { tenantId },
+        order: { nombre: 'ASC' },
+      });
+    }
+    // Mismo patrón que categorias.service.ts → findAll: `getMany()` descarta
+    // los `addSelect` que no mapean a una columna de la entity, así que hay
+    // que usar `getRawAndEntities()` y fusionar a mano. El JOIN a `usuarios`
+    // no filtra `eliminado_el` (docs/patterns/backend.md, excepción
+    // documentada: el autor de un borrado es un hecho histórico).
+    const { entities, raw } = await this.cajonRepo
+      .createQueryBuilder('c')
+      .leftJoin('usuarios', 'u', 'u.usuario_id = c.eliminado_por')
+      .addSelect('u.nombre_usuario', 'c_eliminado_por_nombre')
+      .where('c.tenant_id = :tenantId', { tenantId })
+      .withDeleted()
+      .orderBy('c.nombre', 'ASC')
+      .getRawAndEntities<{ c_eliminado_por_nombre: string | null }>();
+
+    return entities.map((cajon, i) => ({
+      ...cajon,
+      eliminadoPorNombre: raw[i].c_eliminado_por_nombre,
+    }));
   }
 
   async create(tenantId: string, dto: CreateCajonDto): Promise<Cajon> {
@@ -61,11 +90,30 @@ export class CajonesService {
     return this.cajonRepo.save(cajon);
   }
 
-  async remove(tenantId: string, id: string): Promise<void> {
+  async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
     const cajon = await this.cajonRepo.findOne({ where: { id, tenantId } });
     if (!cajon) throw new NotFoundException(`Cajón ${id} no encontrado`);
     await this.asegurarSinSesionAbierta(tenantId, id, 'eliminar');
-    await this.cajonRepo.softDelete({ id, tenantId });
+    // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
+    // pueden quedar a medias y dejar una fila borrada sin autor.
+    await this.cajonRepo.update(
+      { id, tenantId },
+      { eliminadoPor: usuarioId, eliminadoEl: new Date() },
+    );
+  }
+
+  async restaurar(tenantId: string, id: string): Promise<Cajon> {
+    // Una sola regla para los dos casos —no existe, o existe y está viva—:
+    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    const cajon = await this.cajonRepo.findOne({
+      where: { id, tenantId },
+      withDeleted: true,
+    });
+    if (!cajon || !cajon.eliminadoEl) {
+      throw new NotFoundException(`Cajón ${id} no está en la papelera`);
+    }
+    await this.cajonRepo.restore({ id, tenantId });
+    return this.cajonRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
   async getUsuarios(tenantId: string, cajonId: string): Promise<string[]> {

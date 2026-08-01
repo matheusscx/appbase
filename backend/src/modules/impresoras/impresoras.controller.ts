@@ -15,12 +15,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { ImpresorasService } from './impresoras.service';
 import { QzFirmaService } from './qz-firma.service';
 import { CreateImpresoraDto } from './dto/create-impresora.dto';
 import { UpdateImpresoraDto } from './dto/update-impresora.dto';
 import { FirmarQzDto } from './dto/firmar-qz.dto';
-import type { RolImpresora } from './entities/impresora.entity';
+import { QueryImpresorasDto } from './dto/query-impresoras.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('impresoras')
@@ -44,9 +45,13 @@ export class ImpresorasController {
 
   @Get()
   @RequiresPermiso('Impresoras', 'Leer')
-  listar(@Req() req: Request, @Query('rol') rol?: RolImpresora) {
+  listar(@Req() req: Request, @Query() query: QueryImpresorasDto) {
     const user = req.user as { tenantId: string };
-    return this.impresorasService.listar(user.tenantId, rol);
+    return this.impresorasService.listar(
+      user.tenantId,
+      query.rol,
+      query.incluirEliminados,
+    );
   }
 
   @Post()
@@ -70,7 +75,14 @@ export class ImpresorasController {
   @Delete(':id')
   @RequiresPermiso('Impresoras', 'Eliminar')
   eliminar(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as { tenantId: string };
-    return this.impresorasService.eliminar(user.tenantId, id);
+    const user = req.user as JwtUser;
+    return this.impresorasService.eliminar(user.tenantId!, user.id, id);
+  }
+
+  @Post(':id/restaurar')
+  @RequiresPermiso('Impresoras', 'Eliminar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.impresorasService.restaurar(user.tenantId!, id);
   }
 }

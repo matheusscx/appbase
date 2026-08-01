@@ -12,6 +12,7 @@ import { UpdateImpuestoDto } from './dto/update-impuesto.dto';
 
 export type ImpuestoConOrigen = Impuesto & {
   origen: 'sistema' | 'personalizado';
+  eliminadoPorNombre?: string | null;
 };
 
 @Injectable()
@@ -47,12 +48,45 @@ export class ImpuestosService {
     return rows[0]?.pais_id ?? null;
   }
 
-  async findAll(tenantId: string): Promise<ImpuestoConOrigen[]> {
+  async findAll(
+    tenantId: string,
+    incluirEliminados = false,
+  ): Promise<ImpuestoConOrigen[]> {
     const paisId = await this.paisIdDeTenant(tenantId);
-    const impuestos = await this.impuestoRepo.find({
-      where: paisId ? [{ tenantId }, { paisId }] : { tenantId },
-      order: { nombre: 'ASC' },
-    });
+    let impuestos: (Impuesto & { eliminadoPorNombre?: string | null })[];
+    if (!incluirEliminados) {
+      impuestos = await this.impuestoRepo.find({
+        where: paisId ? [{ tenantId }, { paisId }] : { tenantId },
+        order: { nombre: 'ASC' },
+      });
+    } else {
+      // Mismo patrón que categorias.service.ts → findAll: `getMany()` descarta
+      // los `addSelect` que no mapean a una columna de la entity, así que hay
+      // que usar `getRawAndEntities()` y fusionar a mano. El JOIN a `usuarios`
+      // no filtra `eliminado_el` (docs/patterns/backend.md, excepción
+      // documentada: el autor de un borrado es un hecho histórico).
+      const qb = this.impuestoRepo
+        .createQueryBuilder('i')
+        .leftJoin('usuarios', 'u', 'u.usuario_id = i.eliminado_por')
+        .addSelect('u.nombre_usuario', 'i_eliminado_por_nombre')
+        .withDeleted()
+        .orderBy('i.nombre', 'ASC');
+      if (paisId) {
+        qb.where('i.tenant_id = :tenantId OR i.pais_id = :paisId', {
+          tenantId,
+          paisId,
+        });
+      } else {
+        qb.where('i.tenant_id = :tenantId', { tenantId });
+      }
+      const { entities, raw } = await qb.getRawAndEntities<{
+        i_eliminado_por_nombre: string | null;
+      }>();
+      impuestos = entities.map((i, idx) => ({
+        ...i,
+        eliminadoPorNombre: raw[idx].i_eliminado_por_nombre,
+      }));
+    }
     return impuestos.map((i) => ({
       ...i,
       origen: i.tenantId ? ('personalizado' as const) : ('sistema' as const),
@@ -89,13 +123,32 @@ export class ImpuestosService {
     return this.impuestoRepo.save(impuesto);
   }
 
-  async remove(tenantId: string, id: string): Promise<void> {
+  async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
     const impuesto = await this.impuestoRepo.findOne({
       where: { id, tenantId },
     });
     if (!impuesto) {
       throw new NotFoundException(`Impuesto ${id} no encontrado`);
     }
-    await this.impuestoRepo.softDelete({ id, tenantId });
+    // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
+    // pueden quedar a medias y dejar una fila borrada sin autor.
+    await this.impuestoRepo.update(
+      { id, tenantId },
+      { eliminadoPor: usuarioId, eliminadoEl: new Date() },
+    );
+  }
+
+  async restaurar(tenantId: string, id: string): Promise<Impuesto> {
+    // Una sola regla para los dos casos —no existe, o existe y está viva—:
+    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    const impuesto = await this.impuestoRepo.findOne({
+      where: { id, tenantId },
+      withDeleted: true,
+    });
+    if (!impuesto || !impuesto.eliminadoEl) {
+      throw new NotFoundException(`Impuesto ${id} no está en la papelera`);
+    }
+    await this.impuestoRepo.restore({ id, tenantId });
+    return this.impuestoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 }

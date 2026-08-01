@@ -9,6 +9,7 @@ import { TipoRegla } from '../tipos-regla/entities/tipo-regla.entity';
 import { CondicionTipo } from '../../common/enums/reglas.enums';
 
 const TENANT = 'tenant-uuid';
+const USUARIO_ID = 'usuario-uuid';
 
 function makeTipo(codigo: string, clase: string = 'recargo') {
   return { id: `tipo-${codigo}`, codigo, clase, nombre: `Tipo ${codigo}` };
@@ -16,7 +17,16 @@ function makeTipo(codigo: string, clase: string = 'recargo') {
 
 describe('RecargosService', () => {
   let service: RecargosService;
-  let qbMock: { where: jest.Mock; andWhere: jest.Mock; getCount: jest.Mock };
+  let qbMock: {
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    getCount: jest.Mock;
+    leftJoin: jest.Mock;
+    addSelect: jest.Mock;
+    withDeleted: jest.Mock;
+    orderBy: jest.Mock;
+    getRawAndEntities: jest.Mock;
+  };
   let managerMock: {
     create: jest.Mock;
     save: jest.Mock;
@@ -28,8 +38,11 @@ describe('RecargosService', () => {
   let recargoRepoMock: {
     find: jest.Mock;
     findOne: jest.Mock;
+    findOneOrFail: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    update: jest.Mock;
+    restore: jest.Mock;
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -42,6 +55,11 @@ describe('RecargosService', () => {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getCount: jest.fn().mockResolvedValue(0),
+      leftJoin: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      withDeleted: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getRawAndEntities: jest.fn().mockResolvedValue({ entities: [], raw: [] }),
     };
 
     managerMock = {
@@ -61,8 +79,11 @@ describe('RecargosService', () => {
     recargoRepoMock = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
+      findOneOrFail: jest.fn(),
       create: jest.fn((data: Record<string, unknown>) => data),
       save: jest.fn((e: unknown) => Promise.resolve(e)),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      restore: jest.fn().mockResolvedValue({ affected: 1 }),
       softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
       createQueryBuilder: jest.fn(() => qbMock),
     };
@@ -330,17 +351,111 @@ describe('RecargosService', () => {
   describe('remove', () => {
     it('throws NotFoundException when recargo not found', async () => {
       recargoRepoMock.findOne.mockResolvedValue(null);
-      await expect(service.remove(TENANT, 'x')).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO_ID, 'x')).rejects.toThrow(
         NotFoundException,
+      );
+      expect(recargoRepoMock.update).not.toHaveBeenCalled();
+    });
+
+    it('remove() registra quién borró y cuándo, en una sola escritura', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({ id: 'r1', tenantId: TENANT });
+      await service.remove(TENANT, USUARIO_ID, 'r1');
+      // Objeto exacto (no `objectContaining`): si `eliminadoEl` faltara del
+      // payload, esta aserción debe fallar — es el corazón del soft delete,
+      // no un detalle opcional de `eliminadoPor`.
+      expect(recargoRepoMock.update).toHaveBeenCalledWith(
+        { id: 'r1', tenantId: TENANT },
+        { eliminadoPor: USUARIO_ID, eliminadoEl: expect.any(Date) },
+      );
+    });
+  });
+
+  // ─── restaurar ──────────────────────────────────────────────────────────
+
+  describe('restaurar', () => {
+    it('restaurar() devuelve el recargo RE-CONSULTADO tras el restore', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Rec (en la papelera)',
+        eliminadoEl: new Date(),
+      });
+      recargoRepoMock.findOneOrFail.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Rec',
+        eliminadoEl: null,
+      });
+
+      const restaurado = await service.restaurar(TENANT, 'r1');
+
+      expect(recargoRepoMock.restore).toHaveBeenCalledWith({
+        id: 'r1',
+        tenantId: TENANT,
+      });
+      expect(recargoRepoMock.findOneOrFail).toHaveBeenCalledWith({
+        where: { id: 'r1', tenantId: TENANT },
+      });
+      expect(restaurado.eliminadoEl).toBeNull();
+      expect(restaurado.nombre).toBe('Rec');
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      recargoRepoMock.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.restaurar(TENANT, 'r1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(recargoRepoMock.restore).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() un recargo vivo (no eliminado) es 404', async () => {
+      recargoRepoMock.findOne.mockResolvedValueOnce({
+        id: 'r1',
+        tenantId: TENANT,
+        eliminadoEl: null,
+      });
+
+      await expect(service.restaurar(TENANT, 'r1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(recargoRepoMock.restore).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── findAll con incluirEliminados ────────────────────────────────────────
+
+  describe('findAll con incluirEliminados', () => {
+    it('sin el flag no devuelve eliminados', async () => {
+      await service.findAll(TENANT);
+
+      expect(recargoRepoMock.find).toHaveBeenCalledWith(
+        expect.not.objectContaining({ withDeleted: true }),
       );
     });
 
-    it('soft-deletes when recargo belongs to tenant', async () => {
-      recargoRepoMock.findOne.mockResolvedValue({ id: 'r1', tenantId: TENANT });
-      await service.remove(TENANT, 'r1');
-      expect(recargoRepoMock.softDelete).toHaveBeenCalledWith({
+    it('con el flag trae eliminados con el nombre de quien borró (vía getRawAndEntities)', async () => {
+      const recargoEliminado = {
         id: 'r1',
         tenantId: TENANT,
+        nombre: 'Rec',
+        tipoReglaId: 'tipo-x',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      };
+      qbMock.getRawAndEntities.mockResolvedValue({
+        entities: [recargoEliminado],
+        raw: [{ r_eliminado_por_nombre: 'admin.paris' }],
+      });
+
+      const result = await service.findAll(TENANT, true);
+
+      // getMany() descarta los addSelect que no mapean a una columna de la
+      // entity: el service debe usar getRawAndEntities() y fusionar a mano.
+      expect(qbMock.getRawAndEntities).toHaveBeenCalled();
+      expect(result[0]).toMatchObject({
+        id: 'r1',
+        eliminadoPorNombre: 'admin.paris',
       });
     });
   });

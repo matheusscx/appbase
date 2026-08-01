@@ -10,13 +10,18 @@ import { Turno } from './entities/turno.entity';
 import { SesionGarzon } from './entities/sesion-garzon.entity';
 
 const TENANT = 'tenant-uuid';
+const USUARIO_ID = 'usuario-uuid';
 
 type Repo = {
   find: jest.Mock;
   findOne: jest.Mock;
+  findOneOrFail: jest.Mock;
   create: jest.Mock;
   save: jest.Mock;
+  update: jest.Mock;
+  restore: jest.Mock;
   softDelete: jest.Mock;
+  createQueryBuilder: jest.Mock;
 };
 
 type SesionRepo = {
@@ -27,9 +32,13 @@ function makeRepo(): Repo {
   return {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn(),
+    findOneOrFail: jest.fn(),
     create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
+    update: jest.fn(() => Promise.resolve({ affected: 1 })),
+    restore: jest.fn(() => Promise.resolve({ affected: 1 })),
     softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+    createQueryBuilder: jest.fn(),
   };
 }
 
@@ -104,9 +113,11 @@ describe('TurnosService', () => {
       activo: true,
       creadoEl: saved.creadoEl,
       actualizadoEl: saved.actualizadoEl,
+      // `eliminadoEl` viaja siempre (null en un turno vivo): lo necesita la
+      // papelera para distinguir "vivo" de "borrado" sin otra consulta.
+      eliminadoEl: null,
     });
     expect(result).not.toHaveProperty('tenantId');
-    expect(result).not.toHaveProperty('eliminadoEl');
   });
 
   it('rechaza nombre duplicado en el tenant', async () => {
@@ -129,7 +140,7 @@ describe('TurnosService', () => {
     ).rejects.toThrow('Ya existe un turno con ese nombre');
   });
 
-  it('listar ordena por nombre ASC y no expone eliminados (repo soft-delete)', async () => {
+  it('listar ordena por nombre ASC (repo ya filtra soft-delete sin el flag)', async () => {
     const rows = [
       turno({ id: 't1', nombre: 'Almuerzo' }),
       turno({ id: 't2', nombre: 'Cena' }),
@@ -143,7 +154,7 @@ describe('TurnosService', () => {
       order: { nombre: 'ASC' },
     });
     expect(result.map((t) => t.nombre)).toEqual(['Almuerzo', 'Cena']);
-    expect(result[0]).not.toHaveProperty('eliminadoEl');
+    expect(result[0].eliminadoEl).toBeNull();
   });
 
   it('actualizar cambia nombre/activo/horarios', async () => {
@@ -172,15 +183,18 @@ describe('TurnosService', () => {
     expect(result.activo).toBe(false);
   });
 
-  it('eliminar hace softDelete', async () => {
+  it('eliminar() registra quién borró y cuándo, en una sola escritura', async () => {
     repo.findOne.mockResolvedValue(turno());
 
-    await service.eliminar(TENANT, 't1');
+    await service.eliminar(TENANT, USUARIO_ID, 't1');
 
-    expect(repo.softDelete).toHaveBeenCalledWith({
-      id: 't1',
-      tenantId: TENANT,
-    });
+    // Objeto exacto (no `objectContaining`): si `eliminadoEl` faltara del
+    // payload, esta aserción debe fallar — es el corazón del soft delete, no
+    // un detalle opcional de `eliminadoPor`.
+    expect(repo.update).toHaveBeenCalledWith(
+      { id: 't1', tenantId: TENANT },
+      { eliminadoPor: USUARIO_ID, eliminadoEl: expect.any(Date) },
+    );
   });
 
   it('getActivoOrThrow lanza 400 si inactivo o inexistente', async () => {
@@ -213,9 +227,10 @@ describe('TurnosService', () => {
 
   it('eliminar lanza NotFound si no existe', async () => {
     repo.findOne.mockResolvedValue(null);
-    await expect(service.eliminar(TENANT, 'missing')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.eliminar(TENANT, USUARIO_ID, 'missing'),
+    ).rejects.toThrow(NotFoundException);
+    expect(repo.update).not.toHaveBeenCalled();
   });
 
   it('actualizar rechaza desactivar turno con sesiones abiertas', async () => {
@@ -237,13 +252,82 @@ describe('TurnosService', () => {
     repo.findOne.mockResolvedValue(turno());
     sesionRepo.count.mockResolvedValue(1);
 
-    await expect(service.eliminar(TENANT, 't1')).rejects.toThrow(
+    await expect(service.eliminar(TENANT, USUARIO_ID, 't1')).rejects.toThrow(
       BadRequestException,
     );
-    await expect(service.eliminar(TENANT, 't1')).rejects.toThrow(
+    await expect(service.eliminar(TENANT, USUARIO_ID, 't1')).rejects.toThrow(
       'No se puede modificar un turno con sesiones abiertas',
     );
 
-    expect(repo.softDelete).not.toHaveBeenCalled();
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  describe('restaurar', () => {
+    it('restaurar() devuelve el turno RE-CONSULTADO tras el restore', async () => {
+      repo.findOne.mockResolvedValue(
+        turno({ nombre: 'Almuerzo (en la papelera)', eliminadoEl: new Date() }),
+      );
+      repo.findOneOrFail.mockResolvedValue(
+        turno({ nombre: 'Almuerzo', eliminadoEl: null }),
+      );
+
+      const restaurado = await service.restaurar(TENANT, 't1');
+
+      expect(repo.restore).toHaveBeenCalledWith({ id: 't1', tenantId: TENANT });
+      expect(repo.findOneOrFail).toHaveBeenCalledWith({
+        where: { id: 't1', tenantId: TENANT },
+      });
+      expect(restaurado.eliminadoEl).toBeNull();
+      expect(restaurado.nombre).toBe('Almuerzo');
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      repo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.restaurar(TENANT, 't1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() un turno vivo (no eliminado) es 404', async () => {
+      repo.findOne.mockResolvedValueOnce(turno({ eliminadoEl: null }));
+
+      await expect(service.restaurar(TENANT, 't1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listar con incluirEliminados', () => {
+    it('con el flag trae eliminados con el nombre de quien borró (vía getRawAndEntities)', async () => {
+      const turnoEliminado = turno({
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      const qbMock = {
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawAndEntities: jest.fn().mockResolvedValue({
+          entities: [turnoEliminado],
+          raw: [{ t_eliminado_por_nombre: 'admin.paris' }],
+        }),
+      };
+      repo.createQueryBuilder.mockReturnValue(qbMock);
+
+      const result = await service.listar(TENANT, true);
+
+      // getMany() descarta los addSelect que no mapean a una columna de la
+      // entity: el service debe usar getRawAndEntities() y fusionar a mano.
+      expect(qbMock.getRawAndEntities).toHaveBeenCalled();
+      expect(result[0]).toMatchObject({
+        id: 't1',
+        eliminadoPorNombre: 'admin.paris',
+      });
+    });
   });
 });

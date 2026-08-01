@@ -23,6 +23,10 @@ export interface TurnoPublico {
   activo: boolean;
   creadoEl: Date;
   actualizadoEl: Date;
+  eliminadoEl?: Date | null;
+  // Opcional: el listado sin `incluirEliminados` no hace el JOIN a `usuarios`
+  // (N+1 si lo forzáramos ahí).
+  eliminadoPorNombre?: string | null;
 }
 
 @Injectable()
@@ -34,7 +38,10 @@ export class TurnosService {
     private readonly sesionRepo: Repository<SesionGarzon>,
   ) {}
 
-  private toPublico(t: Turno): TurnoPublico {
+  private toPublico(
+    t: Turno,
+    eliminadoPorNombre?: string | null,
+  ): TurnoPublico {
     return {
       id: t.id,
       nombre: t.nombre,
@@ -43,15 +50,39 @@ export class TurnosService {
       activo: t.activo,
       creadoEl: t.creadoEl,
       actualizadoEl: t.actualizadoEl,
+      eliminadoEl: t.eliminadoEl,
+      ...(eliminadoPorNombre !== undefined ? { eliminadoPorNombre } : {}),
     };
   }
 
-  async listar(tenantId: string): Promise<TurnoPublico[]> {
-    const turnos = await this.turnoRepo.find({
-      where: { tenantId },
-      order: { nombre: 'ASC' },
-    });
-    return turnos.map((t) => this.toPublico(t));
+  async listar(
+    tenantId: string,
+    incluirEliminados = false,
+  ): Promise<TurnoPublico[]> {
+    if (!incluirEliminados) {
+      const turnos = await this.turnoRepo.find({
+        where: { tenantId },
+        order: { nombre: 'ASC' },
+      });
+      return turnos.map((t) => this.toPublico(t));
+    }
+    // Mismo patrón que categorias.service.ts → findAll: `getMany()` descarta
+    // los `addSelect` que no mapean a una columna de la entity, así que hay
+    // que usar `getRawAndEntities()` y fusionar a mano. El JOIN a `usuarios`
+    // no filtra `eliminado_el` (docs/patterns/backend.md, excepción
+    // documentada: el autor de un borrado es un hecho histórico).
+    const { entities, raw } = await this.turnoRepo
+      .createQueryBuilder('t')
+      .leftJoin('usuarios', 'u', 'u.usuario_id = t.eliminado_por')
+      .addSelect('u.nombre_usuario', 't_eliminado_por_nombre')
+      .where('t.tenant_id = :tenantId', { tenantId })
+      .withDeleted()
+      .orderBy('t.nombre', 'ASC')
+      .getRawAndEntities<{ t_eliminado_por_nombre: string | null }>();
+
+    return entities.map((t, i) =>
+      this.toPublico(t, raw[i].t_eliminado_por_nombre),
+    );
   }
 
   async crear(tenantId: string, dto: CreateTurnoDto): Promise<TurnoPublico> {
@@ -88,10 +119,36 @@ export class TurnosService {
     return this.toPublico(await this.turnoRepo.save(turno));
   }
 
-  async eliminar(tenantId: string, id: string): Promise<void> {
+  async eliminar(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<void> {
     await this.getOrThrow(tenantId, id);
     await this.assertSinSesionesAbiertas(tenantId, id);
-    await this.turnoRepo.softDelete({ id, tenantId });
+    // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
+    // pueden quedar a medias y dejar una fila borrada sin autor.
+    await this.turnoRepo.update(
+      { id, tenantId },
+      { eliminadoPor: usuarioId, eliminadoEl: new Date() },
+    );
+  }
+
+  async restaurar(tenantId: string, id: string): Promise<TurnoPublico> {
+    // Una sola regla para los dos casos —no existe, o existe y está viva—:
+    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    const turno = await this.turnoRepo.findOne({
+      where: { id, tenantId },
+      withDeleted: true,
+    });
+    if (!turno || !turno.eliminadoEl) {
+      throw new NotFoundException(`Turno ${id} no está en la papelera`);
+    }
+    await this.turnoRepo.restore({ id, tenantId });
+    const restaurado = await this.turnoRepo.findOneOrFail({
+      where: { id, tenantId },
+    });
+    return this.toPublico(restaurado);
   }
 
   /**

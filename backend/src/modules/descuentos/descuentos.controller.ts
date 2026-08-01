@@ -14,6 +14,8 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
+import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { DescuentosService } from './descuentos.service';
 import { CreateDescuentoDto } from './dto/create-descuento.dto';
 import { UpdateDescuentoDto } from './dto/update-descuento.dto';
@@ -24,9 +26,12 @@ export class DescuentosController {
   constructor(private readonly descuentosService: DescuentosService) {}
 
   @Get()
-  findAll(@Req() req: Request) {
+  findAll(@Req() req: Request, @Query() query: QueryIncluirEliminadosDto) {
     const user = req.user as { tenantId: string };
-    return this.descuentosService.findAll(user.tenantId);
+    return this.descuentosService.findAll(
+      user.tenantId,
+      query.incluirEliminados,
+    );
   }
 
   // Must be registered BEFORE :id to avoid NestJS resolving 'nombre-disponible' as an id param
@@ -65,7 +70,14 @@ export class DescuentosController {
   @UseGuards(TenantAdminGuard)
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as { tenantId: string };
-    return this.descuentosService.remove(user.tenantId, id);
+    const user = req.user as JwtUser;
+    return this.descuentosService.remove(user.tenantId!, user.id, id);
+  }
+
+  @UseGuards(TenantAdminGuard)
+  @Post(':id/restaurar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.descuentosService.restaurar(user.tenantId!, id);
   }
 }

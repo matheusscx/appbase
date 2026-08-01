@@ -30,6 +30,10 @@ export interface GarzonPublico {
   tipo: TipoGarzon;
   creadoEl: Date;
   actualizadoEl: Date;
+  eliminadoEl?: Date | null;
+  // Opcional: el listado sin `incluirEliminados` no hace el JOIN a `usuarios`
+  // (N+1 si lo forzáramos ahí).
+  eliminadoPorNombre?: string | null;
 }
 
 /**
@@ -49,7 +53,10 @@ export class GarzonesService {
     private readonly sesionRepo: Repository<SesionGarzon>,
   ) {}
 
-  private toPublico(g: Garzon): GarzonPublico {
+  private toPublico(
+    g: Garzon,
+    eliminadoPorNombre?: string | null,
+  ): GarzonPublico {
     return {
       id: g.id,
       nombre: g.nombre,
@@ -57,15 +64,41 @@ export class GarzonesService {
       tipo: g.tipo ?? TipoGarzon.GARZON,
       creadoEl: g.creadoEl,
       actualizadoEl: g.actualizadoEl,
+      eliminadoEl: g.eliminadoEl,
+      ...(eliminadoPorNombre !== undefined ? { eliminadoPorNombre } : {}),
     };
   }
 
-  async listar(tenantId: string): Promise<GarzonPublico[]> {
-    const garzones = await this.garzonRepo.find({
-      where: { tenantId, esPlaceholder: false },
-      order: { nombre: 'ASC' },
-    });
-    return garzones.map((g) => this.toPublico(g));
+  async listar(
+    tenantId: string,
+    incluirEliminados = false,
+  ): Promise<GarzonPublico[]> {
+    if (!incluirEliminados) {
+      const garzones = await this.garzonRepo.find({
+        where: { tenantId, esPlaceholder: false },
+        order: { nombre: 'ASC' },
+      });
+      return garzones.map((g) => this.toPublico(g));
+    }
+    // Mismo patrón que categorias.service.ts → findAll: `getMany()` descarta
+    // los `addSelect` que no mapean a una columna de la entity, así que hay
+    // que usar `getRawAndEntities()` y fusionar a mano. El JOIN a `usuarios`
+    // no filtra `eliminado_el` (docs/patterns/backend.md, excepción
+    // documentada: el autor de un borrado es un hecho histórico).
+    const { entities, raw } = await this.garzonRepo
+      .createQueryBuilder('g')
+      .leftJoin('usuarios', 'u', 'u.usuario_id = g.eliminado_por')
+      .addSelect('u.nombre_usuario', 'g_eliminado_por_nombre')
+      .where('g.tenant_id = :tenantId AND g.es_placeholder = false', {
+        tenantId,
+      })
+      .withDeleted()
+      .orderBy('g.nombre', 'ASC')
+      .getRawAndEntities<{ g_eliminado_por_nombre: string | null }>();
+
+    return entities.map((g, i) =>
+      this.toPublico(g, raw[i].g_eliminado_por_nombre),
+    );
   }
 
   async crear(tenantId: string, dto: CreateGarzonDto): Promise<GarzonConPin> {
@@ -105,7 +138,11 @@ export class GarzonesService {
     return { ...this.toPublico(guardado), pin };
   }
 
-  async eliminar(tenantId: string, id: string): Promise<void> {
+  async eliminar(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<void> {
     await this.getOrThrow(tenantId, id);
     const abiertas = await this.sesionRepo.count({
       where: {
@@ -119,7 +156,29 @@ export class GarzonesService {
         'No se puede eliminar un garzón con una sesión abierta',
       );
     }
-    await this.garzonRepo.softDelete({ id, tenantId });
+    // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
+    // pueden quedar a medias y dejar una fila borrada sin autor.
+    await this.garzonRepo.update(
+      { id, tenantId },
+      { eliminadoPor: usuarioId, eliminadoEl: new Date() },
+    );
+  }
+
+  async restaurar(tenantId: string, id: string): Promise<GarzonPublico> {
+    // Una sola regla para los dos casos —no existe, o existe y está viva—:
+    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    const garzon = await this.garzonRepo.findOne({
+      where: { id, tenantId },
+      withDeleted: true,
+    });
+    if (!garzon || !garzon.eliminadoEl) {
+      throw new NotFoundException(`Garzón ${id} no está en la papelera`);
+    }
+    await this.garzonRepo.restore({ id, tenantId });
+    const restaurado = await this.garzonRepo.findOneOrFail({
+      where: { id, tenantId },
+    });
+    return this.toPublico(restaurado);
   }
 
   /**

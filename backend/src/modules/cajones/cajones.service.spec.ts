@@ -12,16 +12,21 @@ import { UsuarioTenant } from '../tenants/entities/usuario-tenant.entity';
 import { Caja } from '../caja/entities/caja.entity';
 
 const TENANT = 'tenant-uuid';
+const USUARIO_ID = 'usuario-uuid';
 
 describe('CajonesService', () => {
   let service: CajonesService;
   let repo: {
     find: jest.Mock;
     findOne: jest.Mock;
+    findOneOrFail: jest.Mock;
     count: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    update: jest.Mock;
+    restore: jest.Mock;
     softDelete: jest.Mock;
+    createQueryBuilder: jest.Mock;
   };
   let cuRepo: {
     find: jest.Mock;
@@ -41,10 +46,14 @@ describe('CajonesService', () => {
     repo = {
       find: jest.fn(),
       findOne: jest.fn(),
+      findOneOrFail: jest.fn(),
       count: jest.fn(),
       create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
+      update: jest.fn(() => Promise.resolve({ affected: 1 })),
+      restore: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+      createQueryBuilder: jest.fn(),
     };
     cuRepo = { find: jest.fn() };
     utRepo = { count: jest.fn() };
@@ -120,17 +129,116 @@ describe('CajonesService', () => {
     expect(res).toMatchObject({ nombre: 'Nuevo', activo: false });
   });
 
-  it('remove hace soft delete', async () => {
+  it('remove() registra quién borró y cuándo, en una sola escritura', async () => {
     repo.findOne.mockResolvedValue({ id: 'x', tenantId: TENANT });
-    await service.remove(TENANT, 'x');
-    expect(repo.softDelete).toHaveBeenCalledWith({ id: 'x', tenantId: TENANT });
+    cajaRepo.count.mockResolvedValue(0);
+    await service.remove(TENANT, USUARIO_ID, 'x');
+    // Objeto exacto (no `objectContaining`): si `eliminadoEl` faltara del
+    // payload, esta aserción debe fallar — es el corazón del soft delete, no
+    // un detalle opcional de `eliminadoPor`.
+    expect(repo.update).toHaveBeenCalledWith(
+      { id: 'x', tenantId: TENANT },
+      { eliminadoPor: USUARIO_ID, eliminadoEl: expect.any(Date) },
+    );
   });
 
   it('remove lanza 404 si no existe', async () => {
     repo.findOne.mockResolvedValue(null);
-    await expect(service.remove(TENANT, 'x')).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      service.remove(TENANT, USUARIO_ID, 'x'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  describe('restaurar', () => {
+    it('restaurar() devuelve el cajón RE-CONSULTADO tras el restore', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador (en la papelera)',
+        eliminadoEl: new Date(),
+      });
+      repo.findOneOrFail.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador',
+        eliminadoEl: null,
+      });
+
+      const restaurado = await service.restaurar(TENANT, 'x');
+
+      expect(repo.restore).toHaveBeenCalledWith({ id: 'x', tenantId: TENANT });
+      expect(repo.findOneOrFail).toHaveBeenCalledWith({
+        where: { id: 'x', tenantId: TENANT },
+      });
+      expect(restaurado.eliminadoEl).toBeNull();
+      expect(restaurado.nombre).toBe('Mostrador');
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      repo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.restaurar(TENANT, 'x')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() un cajón vivo (no eliminado) es 404', async () => {
+      repo.findOne.mockResolvedValueOnce({
+        id: 'x',
+        tenantId: TENANT,
+        eliminadoEl: null,
+      });
+
+      await expect(service.restaurar(TENANT, 'x')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findAll con incluirEliminados', () => {
+    it('sin el flag no devuelve eliminados', async () => {
+      repo.find.mockResolvedValue([]);
+      await service.findAll(TENANT);
+
+      expect(repo.find).toHaveBeenCalledWith(
+        expect.not.objectContaining({ withDeleted: true }),
+      );
+    });
+
+    it('con el flag trae eliminados con el nombre de quien borró (vía getRawAndEntities)', async () => {
+      const cajonEliminado = {
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      };
+      const qbMock = {
+        leftJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        withDeleted: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawAndEntities: jest.fn().mockResolvedValue({
+          entities: [cajonEliminado],
+          raw: [{ c_eliminado_por_nombre: 'admin.paris' }],
+        }),
+      };
+      repo.createQueryBuilder.mockReturnValue(qbMock);
+
+      const result = await service.findAll(TENANT, true);
+
+      // getMany() descarta los addSelect que no mapean a una columna de la
+      // entity: el service debe usar getRawAndEntities() y fusionar a mano.
+      expect(qbMock.getRawAndEntities).toHaveBeenCalled();
+      expect(result[0]).toMatchObject({
+        id: 'x',
+        eliminadoPorNombre: 'admin.paris',
+      });
+    });
   });
 
   describe('allow-list de usuarios', () => {
@@ -221,17 +329,17 @@ describe('CajonesService', () => {
     it('remove rechaza si el cajón tiene una caja abierta (409)', async () => {
       repo.findOne.mockResolvedValue({ id: 'x', tenantId: TENANT });
       cajaRepo.count.mockResolvedValue(1);
-      await expect(service.remove(TENANT, 'x')).rejects.toBeInstanceOf(
-        ConflictException,
-      );
-      expect(repo.softDelete).not.toHaveBeenCalled();
+      await expect(
+        service.remove(TENANT, USUARIO_ID, 'x'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('remove borra si no hay caja abierta', async () => {
       repo.findOne.mockResolvedValue({ id: 'x', tenantId: TENANT });
       cajaRepo.count.mockResolvedValue(0);
-      await service.remove(TENANT, 'x');
-      expect(repo.softDelete).toHaveBeenCalled();
+      await service.remove(TENANT, USUARIO_ID, 'x');
+      expect(repo.update).toHaveBeenCalled();
     });
 
     it('update rechaza desactivar un cajón con caja abierta (409)', async () => {

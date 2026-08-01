@@ -15,6 +15,12 @@ import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 
 const CLASE = 'descuento';
 
+// `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
+// devolviendo `Descuento[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
+export type DescuentoConAuditoria = Descuento & {
+  eliminadoPorNombre?: string | null;
+};
+
 @Injectable()
 export class DescuentosService {
   constructor(
@@ -30,11 +36,32 @@ export class DescuentosService {
     private readonly metodoPagoRepo: Repository<DescuentoMetodoPago>,
   ) {}
 
-  async findAll(tenantId: string) {
-    const reglas = await this.descuentoRepo.find({
-      where: { tenantId },
-      order: { nombre: 'ASC' },
-    });
+  async findAll(tenantId: string, incluirEliminados = false) {
+    let reglas: DescuentoConAuditoria[];
+    if (!incluirEliminados) {
+      reglas = await this.descuentoRepo.find({
+        where: { tenantId },
+        order: { nombre: 'ASC' },
+      });
+    } else {
+      // Mismo patrón que categorias.service.ts → findAll: `getMany()` descarta
+      // los `addSelect` que no mapean a una columna de la entity, así que hay
+      // que usar `getRawAndEntities()` y fusionar a mano. El JOIN a `usuarios`
+      // no filtra `eliminado_el` (docs/patterns/backend.md, excepción
+      // documentada: el autor de un borrado es un hecho histórico).
+      const { entities, raw } = await this.descuentoRepo
+        .createQueryBuilder('d')
+        .leftJoin('usuarios', 'u', 'u.usuario_id = d.eliminado_por')
+        .addSelect('u.nombre_usuario', 'd_eliminado_por_nombre')
+        .where('d.tenant_id = :tenantId', { tenantId })
+        .withDeleted()
+        .orderBy('d.nombre', 'ASC')
+        .getRawAndEntities<{ d_eliminado_por_nombre: string | null }>();
+      reglas = entities.map((d, i) => ({
+        ...d,
+        eliminadoPorNombre: raw[i].d_eliminado_por_nombre,
+      }));
+    }
     const ids = reglas.map((r) => r.id);
 
     const tramos = ids.length
@@ -231,13 +258,32 @@ export class DescuentosService {
     });
   }
 
-  async remove(tenantId: string, id: string): Promise<void> {
+  async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
     const descuento = await this.descuentoRepo.findOne({
       where: { id, tenantId },
     });
     if (!descuento)
       throw new NotFoundException(`Descuento ${id} no encontrado`);
-    await this.descuentoRepo.softDelete({ id, tenantId });
+    // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
+    // pueden quedar a medias y dejar una fila borrada sin autor.
+    await this.descuentoRepo.update(
+      { id, tenantId },
+      { eliminadoPor: usuarioId, eliminadoEl: new Date() },
+    );
+  }
+
+  async restaurar(tenantId: string, id: string): Promise<Descuento> {
+    // Una sola regla para los dos casos —no existe, o existe y está viva—:
+    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    const descuento = await this.descuentoRepo.findOne({
+      where: { id, tenantId },
+      withDeleted: true,
+    });
+    if (!descuento || !descuento.eliminadoEl) {
+      throw new NotFoundException(`Descuento ${id} no está en la papelera`);
+    }
+    await this.descuentoRepo.restore({ id, tenantId });
+    return this.descuentoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
   async nombreDisponible(

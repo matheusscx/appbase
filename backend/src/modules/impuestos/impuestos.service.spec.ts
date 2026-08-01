@@ -8,25 +8,52 @@ import type { CreateImpuestoDto } from './dto/create-impuesto.dto';
 const TENANT = 'tenant-uuid';
 const IMP = 'impuesto-uuid';
 const PAIS = 'pais-uuid';
+const USUARIO_ID = 'usuario-uuid';
 
 describe('ImpuestosService', () => {
   let service: ImpuestosService;
   let repo: {
     find: jest.Mock;
     findOne: jest.Mock;
+    findOneOrFail: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    update: jest.Mock;
+    restore: jest.Mock;
     softDelete: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
+  let qbMock: {
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    leftJoin: jest.Mock;
+    addSelect: jest.Mock;
+    withDeleted: jest.Mock;
+    orderBy: jest.Mock;
+    getRawAndEntities: jest.Mock;
   };
   let dataSource: { query: jest.Mock };
 
   beforeEach(async () => {
+    qbMock = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      leftJoin: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      withDeleted: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getRawAndEntities: jest.fn().mockResolvedValue({ entities: [], raw: [] }),
+    };
     repo = {
       find: jest.fn(),
       findOne: jest.fn(),
+      findOneOrFail: jest.fn(),
       create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
+      update: jest.fn(() => Promise.resolve({ affected: 1 })),
+      restore: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
+      createQueryBuilder: jest.fn(() => qbMock),
     };
     dataSource = {
       query: jest.fn().mockResolvedValue([{ pais_id: PAIS }]),
@@ -184,20 +211,112 @@ describe('ImpuestosService', () => {
     it('lanza NotFound al eliminar impuesto de otro tenant', async () => {
       repo.findOne.mockResolvedValue(null);
 
-      await expect(service.remove(TENANT, IMP)).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO_ID, IMP)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.softDelete).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
-    it('hace soft delete del impuesto del tenant', async () => {
+    it('remove() registra quién borró y cuándo, en una sola escritura', async () => {
       repo.findOne.mockResolvedValue({ id: IMP, tenantId: TENANT });
 
-      await service.remove(TENANT, IMP);
+      await service.remove(TENANT, USUARIO_ID, IMP);
 
-      expect(repo.softDelete).toHaveBeenCalledWith({
+      // Objeto exacto (no `objectContaining`): si `eliminadoEl` faltara del
+      // payload, esta aserción debe fallar — es el corazón del soft delete,
+      // no un detalle opcional de `eliminadoPor`.
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: IMP, tenantId: TENANT },
+        { eliminadoPor: USUARIO_ID, eliminadoEl: expect.any(Date) },
+      );
+    });
+  });
+
+  describe('restaurar', () => {
+    it('restaurar() devuelve el impuesto RE-CONSULTADO tras el restore', async () => {
+      repo.findOne.mockResolvedValue({
         id: IMP,
         tenantId: TENANT,
+        nombre: 'IVA (en la papelera)',
+        eliminadoEl: new Date(),
+      });
+      repo.findOneOrFail.mockResolvedValue({
+        id: IMP,
+        tenantId: TENANT,
+        nombre: 'IVA',
+        eliminadoEl: null,
+      });
+
+      const restaurado = await service.restaurar(TENANT, IMP);
+
+      expect(repo.restore).toHaveBeenCalledWith({
+        id: IMP,
+        tenantId: TENANT,
+      });
+      expect(repo.findOneOrFail).toHaveBeenCalledWith({
+        where: { id: IMP, tenantId: TENANT },
+      });
+      expect(restaurado.eliminadoEl).toBeNull();
+      expect(restaurado.nombre).toBe('IVA');
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      repo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.restaurar(TENANT, IMP)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() un impuesto vivo (no eliminado) es 404', async () => {
+      repo.findOne.mockResolvedValueOnce({
+        id: IMP,
+        tenantId: TENANT,
+        eliminadoEl: null,
+      });
+
+      await expect(service.restaurar(TENANT, IMP)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findAll con incluirEliminados', () => {
+    it('sin el flag no devuelve eliminados', async () => {
+      repo.find.mockResolvedValue([]);
+      await service.findAll(TENANT);
+
+      expect(repo.find).toHaveBeenCalledWith(
+        expect.not.objectContaining({ withDeleted: true }),
+      );
+    });
+
+    it('con el flag trae eliminados con el nombre de quien borró (vía getRawAndEntities)', async () => {
+      const impuestoEliminado = {
+        id: IMP,
+        tenantId: TENANT,
+        paisId: null,
+        nombre: 'Propina',
+        tipo: 'otro',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      };
+      qbMock.getRawAndEntities.mockResolvedValue({
+        entities: [impuestoEliminado],
+        raw: [{ i_eliminado_por_nombre: 'admin.paris' }],
+      });
+
+      const result = await service.findAll(TENANT, true);
+
+      // getMany() descarta los addSelect que no mapean a una columna de la
+      // entity: el service debe usar getRawAndEntities() y fusionar a mano.
+      expect(qbMock.getRawAndEntities).toHaveBeenCalled();
+      expect(result[0]).toMatchObject({
+        id: IMP,
+        eliminadoPorNombre: 'admin.paris',
+        origen: 'personalizado',
       });
     });
   });

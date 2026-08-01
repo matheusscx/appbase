@@ -15,6 +15,12 @@ import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 
 const CLASE = 'recargo';
 
+// `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
+// devolviendo `Recargo[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
+export type RecargoConAuditoria = Recargo & {
+  eliminadoPorNombre?: string | null;
+};
+
 @Injectable()
 export class RecargosService {
   constructor(
@@ -30,11 +36,32 @@ export class RecargosService {
     private readonly metodoPagoRepo: Repository<RecargoMetodoPago>,
   ) {}
 
-  async findAll(tenantId: string) {
-    const reglas = await this.recargoRepo.find({
-      where: { tenantId },
-      order: { nombre: 'ASC' },
-    });
+  async findAll(tenantId: string, incluirEliminados = false) {
+    let reglas: RecargoConAuditoria[];
+    if (!incluirEliminados) {
+      reglas = await this.recargoRepo.find({
+        where: { tenantId },
+        order: { nombre: 'ASC' },
+      });
+    } else {
+      // Mismo patrón que categorias.service.ts → findAll: `getMany()` descarta
+      // los `addSelect` que no mapean a una columna de la entity, así que hay
+      // que usar `getRawAndEntities()` y fusionar a mano. El JOIN a `usuarios`
+      // no filtra `eliminado_el` (docs/patterns/backend.md, excepción
+      // documentada: el autor de un borrado es un hecho histórico).
+      const { entities, raw } = await this.recargoRepo
+        .createQueryBuilder('r')
+        .leftJoin('usuarios', 'u', 'u.usuario_id = r.eliminado_por')
+        .addSelect('u.nombre_usuario', 'r_eliminado_por_nombre')
+        .where('r.tenant_id = :tenantId', { tenantId })
+        .withDeleted()
+        .orderBy('r.nombre', 'ASC')
+        .getRawAndEntities<{ r_eliminado_por_nombre: string | null }>();
+      reglas = entities.map((r, i) => ({
+        ...r,
+        eliminadoPorNombre: raw[i].r_eliminado_por_nombre,
+      }));
+    }
     const ids = reglas.map((r) => r.id);
 
     const tramos = ids.length
@@ -228,10 +255,29 @@ export class RecargosService {
     });
   }
 
-  async remove(tenantId: string, id: string): Promise<void> {
+  async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {
     const recargo = await this.recargoRepo.findOne({ where: { id, tenantId } });
     if (!recargo) throw new NotFoundException(`Recargo ${id} no encontrado`);
-    await this.recargoRepo.softDelete({ id, tenantId });
+    // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
+    // pueden quedar a medias y dejar una fila borrada sin autor.
+    await this.recargoRepo.update(
+      { id, tenantId },
+      { eliminadoPor: usuarioId, eliminadoEl: new Date() },
+    );
+  }
+
+  async restaurar(tenantId: string, id: string): Promise<Recargo> {
+    // Una sola regla para los dos casos —no existe, o existe y está viva—:
+    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    const recargo = await this.recargoRepo.findOne({
+      where: { id, tenantId },
+      withDeleted: true,
+    });
+    if (!recargo || !recargo.eliminadoEl) {
+      throw new NotFoundException(`Recargo ${id} no está en la papelera`);
+    }
+    await this.recargoRepo.restore({ id, tenantId });
+    return this.recargoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
   async nombreDisponible(

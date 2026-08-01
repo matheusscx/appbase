@@ -14,6 +14,8 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
+import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { RecargosService } from './recargos.service';
 import { CreateRecargoDto } from './dto/create-recargo.dto';
 import { UpdateRecargoDto } from './dto/update-recargo.dto';
@@ -24,9 +26,9 @@ export class RecargosController {
   constructor(private readonly recargosService: RecargosService) {}
 
   @Get()
-  findAll(@Req() req: Request) {
+  findAll(@Req() req: Request, @Query() query: QueryIncluirEliminadosDto) {
     const user = req.user as { tenantId: string };
-    return this.recargosService.findAll(user.tenantId);
+    return this.recargosService.findAll(user.tenantId, query.incluirEliminados);
   }
 
   // Must be registered BEFORE :id to avoid NestJS resolving 'nombre-disponible' as an id param
@@ -65,7 +67,14 @@ export class RecargosController {
   @UseGuards(TenantAdminGuard)
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as { tenantId: string };
-    return this.recargosService.remove(user.tenantId, id);
+    const user = req.user as JwtUser;
+    return this.recargosService.remove(user.tenantId!, user.id, id);
+  }
+
+  @UseGuards(TenantAdminGuard)
+  @Post(':id/restaurar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.recargosService.restaurar(user.tenantId!, id);
   }
 }
