@@ -107,25 +107,6 @@ Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`]
 corriendo sobre los **16** recursos en vez de sobre 2. Se levanta el ⛔ que impedía
 cablear la pantalla de impuestos. Detalle y mutantes: [`resueltos.md`](resueltos.md).
 
-- [ ] **`pendientes.md` clasifica mal a `grupos-modificadores.vue` para el fix de la
-  carrera** (doc, la entrada de las 13 pantallas, más abajo) — dice que es la única
-  pendiente que usa `usePaginatedList` y que por eso "ya hereda el fix, nada que hacer".
-  **No usa el composable**: solo importa el tipo `PaginatedResponse` y tiene su propio
-  `cargar()` sin `cargaEnCurso`. Con esa instrucción, el próximo implementador salta justo
-  la pantalla que necesita el arreglo. El conteo de consumidores del composable también
-  está mal (dice 14, son 10 call sites, 2 de ellos componentes) — mismo error en el
-  comentario de `usePaginatedList.ts:52`.
-
-- [ ] **Dos afirmaciones sueltas en `docs/features/papelera.md`** (doc) — el bloque de
-  contrato de la API (`:102-106`) sigue diciendo que el 400 de colisión sale "en las 5
-  entidades con nombre único y también en `garzones`", sin sumar `descuentos`, `recargos`
-  y `turnos`, que se agregaron en la ola de fixes final; contradice la sección "Colisión al
-  restaurar" 60 líneas más abajo. Y ninguna doc menciona el riesgo aceptado del PIN de
-  `garzones`: `generarPinUnico` promete unicidad "para que la identificación solo por PIN
-  no sea ambigua", pero los PIN son bcrypt y no se pueden comparar en `restaurar()`, así
-  que restaurar un garzón puede romper esa garantía (1 en 10⁶). Se descartó arreglarlo con
-  buen criterio; falta que esté escrito donde alguien lo lea.
-
 Y dos hallazgos que la feature dejó medidos y no son suyos:
 
 - [ ] **El esquema mezcla `TIMESTAMPTZ` y `TIMESTAMP` sin zona en la misma columna
@@ -200,20 +181,28 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   la tenía resuelta con una cola serial local (`cargaEnCurso` en `cargar()`);
   `items.vue` NO la tenía — el refetch lo dispara el `watch` de filtros de
   `usePaginatedList`, sin ninguna protección. El fix quedó en el composable
-  (`usePaginatedList.ts` → `fetch()`, misma cola serial), porque ahí lo
-  hereda cualquier pantalla que ya use `usePaginatedList` (`grupos-modificadores.vue`
-  es la única de las 13 restantes que lo usa hoy) sin nada que replicar. **Las
-  pantallas que NO usan `usePaginatedList`** (`descuentos`, `recargos`,
-  `impuestos`, `terceros`, `cajones`, `garzones`, `turnos`, `salones`,
-  `impresoras`, `causas-merma`, `motivos-diferencia`,
-  `motivos-diferencia-inventario` — todas con su propio `cargar()` local, como
-  `categorias.vue`) necesitan la MISMA cola serial local que `categorias.vue`
-  ya tiene (`cargaEnCurso`), no el fix del composable: copiar ese patrón, no
-  reinventar uno nuevo. Test determinístico por pantalla: promesas
-  controladas que resuelven en orden inverso al de los dos toggles, como
-  `categorias.nuxt.spec.ts` → "papelera: la carrera de `cargar()` bajo
-  toggles rápidos" (o `items.nuxt.spec.ts` → "papelera: la carrera del toggle
-  vía usePaginatedList" para las que sí usan el composable).
+  (`usePaginatedList.ts` → `fetch()`, misma cola serial), porque ahí lo hereda
+  cualquier pantalla que ya lo use, sin nada que replicar.
+  ⚠️ **Corregido el 2026-08-01, y es el dato que decide el trabajo:** la
+  versión anterior de esta entrada decía que `grupos-modificadores.vue` era la
+  única de las 13 que usa `usePaginatedList` y que por eso "ya hereda el fix,
+  nada que hacer". **Es falso, y de la peor forma**: mandaba a saltear justo la
+  pantalla que necesita el arreglo. Medido —`grep` de las llamadas, no del
+  import—: `grupos-modificadores.vue` **solo importa el tipo**
+  `PaginatedResponse` y tiene su propio `cargar()` (`:309`) sin `cargaEnCurso`.
+  **Ninguna de las 13 pendientes usa el composable**, así que **las 13**
+  necesitan la cola serial local. Los 10 consumidores reales de
+  `usePaginatedList` (8 páginas + 2 componentes: `CajaHistorial`,
+  `CajaMovimientosTable`, `sesiones-garzon`, `mermas`, `ordenes`,
+  `ventas/index`, `configuracion/items`, `pagos/index`, `inventario/index`,
+  `inventario/recuentos/index`) no son ninguna de ellas.
+  **Las 13 necesitan la MISMA cola serial local que `categorias.vue` ya tiene**
+  (`cargaEnCurso` en su `cargar()`): copiar ese patrón, no reinventar uno nuevo.
+  Test determinístico por pantalla: promesas controladas que resuelven en orden
+  inverso al de los dos toggles, como `categorias.nuxt.spec.ts` → "papelera: la
+  carrera de `cargar()` bajo toggles rápidos". El equivalente de `items.vue`
+  ("la carrera del toggle vía usePaginatedList") **no** sirve de molde acá: ese
+  ejercita el `watch` del composable, que ninguna de las 13 tiene.
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 

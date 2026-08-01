@@ -48,8 +48,10 @@ export function usePaginatedList<T>(options: UsePaginatedListOptions) {
   // la primera respuesta llegue). Sin esto gana el que responda último, no
   // el que se disparó último. Va ACÁ y no en cada pantalla consumidora
   // porque el refetch lo dispara el composable mismo — blindar solo un
-  // consumidor (p.ej. `configuracion/items.vue`) dejaría a los otros 13
-  // expuestos a la misma carrera. Mismo patrón que
+  // consumidor (p.ej. `configuracion/items.vue`) dejaría a los otros 9
+  // expuestos a la misma carrera (10 call sites: 8 páginas + 2 componentes,
+  // medido por la llamada y no por el import — varias pantallas importan solo
+  // el tipo `PaginatedResponse` y tienen su propio `cargar()`). Mismo patrón que
   // `configuracion/categorias.vue` → `cargar()` (`cargaEnCurso`): cada
   // llamada espera a la anterior antes de pisar `items`/`meta`, así que
   // quedan en orden de invocación y la última en llamarse es la última en

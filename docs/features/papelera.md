@@ -99,11 +99,13 @@ Response (404): "<recurso> no está en la papelera" — no existe, existe y
                   Una sola regla (WHERE ... AND eliminado_el IS NOT NULL AND
                   eliminado_por IS NOT NULL), sin rama que distinga los tres
                   casos.
-Response (400): en las 5 entidades con nombre único por tenant
+Response (400): en 9 de los 16 — las 5 con índice único parcial de nombre
                   (grupos-modificadores, causas-merma, motivos-diferencia,
-                  motivos-diferencia-inventario, cajones) y también en
-                  `garzones`, por una restricción distinta (no nombre único) —
-                  ver "Colisión al restaurar" abajo.
+                  motivos-diferencia-inventario, cajones), las 3 que enforcean
+                  la unicidad solo por código (descuentos, recargos, turnos), y
+                  `garzones`, por una restricción distinta que no es de nombre.
+                  El reparto completo y por qué no se deduce de la familia de
+                  borrado: "Colisión al restaurar" abajo.
 ```
 
 `salones` tiene además `mesas` bajo `@Controller('mesas')`, con su propio
@@ -203,6 +205,23 @@ de TypeORM) en vez de por la propiedad que importa —tener un índice único
 parcial—, y `cajones`/`garzones` (familia `softDelete()`) quedaron sin el `catch`
 del `23505`: devolvían 500 donde esta doc prometía 400. Ya corregido; los dos
 capturan el error igual que los otros cuatro.
+
+**Riesgo aceptado: restaurar un garzón puede duplicar un PIN.** Es la otra
+unicidad de `garzones`, y esta **no** se protege al restaurar. `generarPinUnico()`
+compara el PIN candidato contra los garzones **no eliminados** del tenant
+(`pinYaUsado()` usa un `find` que TypeORM ya filtra por `@DeleteDateColumn`), y lo
+hace así a propósito: los PIN se guardan con bcrypt, o sea que la única forma de
+saber si uno está tomado es compararlo contra cada fila, y ampliar esa comparación
+a los borrados haría que la papelera reserve PINs de gente que ya no trabaja.
+La consecuencia: mientras un garzón está en la papelera su PIN queda libre, otro
+puede recibirlo, y al restaurar el viejo quedan **dos garzones vivos con el mismo
+PIN** — justo lo que `generarPinUnico` existe para evitar ("que la identificación
+solo por PIN no sea ambigua", `garzones.service.ts`). No se arregla porque
+`restaurar()` **no puede** comparar: no tiene el PIN en claro, solo su hash. La
+probabilidad es 1 en 10⁶ por creación, y la salida —regenerar el PIN del
+restaurado, cambiándoselo sin avisar— es peor que el problema. Si alguna vez
+molesta, el cierre es que `restaurar()` devuelva una advertencia y deje que un
+humano decida, no que reasigne en silencio.
 
 ### Solo lo que borró una persona
 

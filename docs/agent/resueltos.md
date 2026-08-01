@@ -1799,6 +1799,38 @@ siguen diferidos están en `pendientes.md`.
   asertaban — `impuestos`, mutado en el commit anterior, e `items`, que venía de antes y
   se mutó acá para no afirmar los 16 sin haberlo comprobado.
 
+- [x] ~~**`pendientes.md` clasifica mal a `grupos-modificadores.vue` para el fix de la
+  carrera**~~ (doc) — cerrado 2026-08-01. La entrada de las 13 pantallas decía que
+  `grupos-modificadores.vue` era la única que usa `usePaginatedList` y que por eso "ya
+  hereda el fix, nada que hacer". **Falso, y de la peor forma para una instrucción**:
+  mandaba a saltear justo la pantalla que necesita el arreglo. Solo importa el **tipo**
+  `PaginatedResponse` y tiene su propio `cargar()` sin `cargaEnCurso`. Corregido a lo
+  medido: **ninguna de las 13 pendientes usa el composable**, así que las 13 necesitan la
+  cola serial local de `categorias.vue`, y el molde de test de `items.vue` —que ejercita
+  el `watch` del composable— no les sirve.
+  **La causa del error se puede nombrar, y es la misma de la semana:** el conteo se había
+  hecho grepeando el **import**, no la **llamada**. Varias pantallas importan el tipo sin
+  usar el composable. Por eso también el "14 consumidores" estaba mal: son **10 call
+  sites** (8 páginas + 2 componentes), medidos por la llamada. Mismo número corregido en
+  el comentario de `usePaginatedList.ts`.
+
+- [x] ~~**Dos afirmaciones sueltas en `docs/features/papelera.md`**~~ (doc) — cerrado
+  2026-08-01.
+  - El bloque de contrato de la API decía que el 400 de colisión sale "en las 5 entidades
+    con nombre único y también en `garzones`", contradiciendo la sección "Colisión al
+    restaurar" 60 líneas más abajo. Medido contando los `restaurar()` que lanzan
+    `BadRequestException`: son **9 de 16** — las 5 con índice único parcial, las **3 que
+    enforcean por código** (`descuentos`, `recargos`, `turnos`, agregadas en la ola de
+    fixes final y nunca reflejadas arriba), más `garzones`.
+  - El **riesgo aceptado del PIN de `garzones`** no estaba escrito en ninguna doc. Ahora
+    sí: `generarPinUnico()` compara contra los garzones **no eliminados**, así que un PIN
+    queda libre mientras su dueño está en la papelera y restaurarlo puede dejar dos
+    garzones vivos con el mismo PIN — justo lo que esa función existe para evitar. No se
+    arregla porque `restaurar()` no puede compararlo: los PIN son bcrypt y no tiene el
+    valor en claro. 1 en 10⁶ por creación, y regenerarle el PIN al restaurado sin avisar
+    es peor que el problema. Queda escrito con el cierre posible (advertir y que decida un
+    humano) para que la próxima persona no lo re-descubra ni lo "arregle" en silencio.
+
 ## Features diferidas
 
 - [x] ~~**Log de cambios reversible ("deshacer") — dirección del owner, sin
