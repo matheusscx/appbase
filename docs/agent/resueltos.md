@@ -61,6 +61,53 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Descuentos y recargos — todo expresa su monto (2026-08-01)
+
+- [x] **Decisión del owner: un descuento sin valor no sirve para nada.**
+  *"O es un valor en porcentaje o monto fijo"*. Al implementarla aparecieron
+  **cuatro** puertas al mismo estado, las cuatro verificadas ABIERTAS contra la
+  API real (curl con token de tenant) antes de tocar código:
+  1. **`create()` no exigía valor a `directo`** —el tipo de propósito general—
+     porque no estaba en ninguna lista del validador. Devolvía 201 con
+     `valor: null`. Era el hueco que la entrada de backlog describía.
+  2. **`update()` dejaba VACIARLO por `PATCH`**, y esto NO era exclusivo de
+     `directo` ni de descuentos: un `{ "valor": null }` respondía **200** y
+     dejaba sin monto una promoción del 15% y sin tasa un interés del 5% —
+     entrada directa del motor de precios. El validador de update solo miraba
+     la forma del valor cuando venía truthy, así que el `null` pasaba de largo.
+  3. **Cambiar el `tipoReglaId` por `PATCH` a un tipo que exige valor**, sobre
+     una fila que no lo tiene (un `por_mayor` guarda el monto en `tramos` y su
+     `valor` es nulo): 200, y quedaba un `directo` sin importe.
+  4. **El mismo camino al revés**: cambiar a un tipo por tramos sin mandarlos
+     dejaba un `por_mayor` con CERO tramos. También 200.
+
+  La segunda no estaba en el backlog: apareció al preguntarse "¿por dónde más
+  se llega a este estado?". La tercera la encontró la revisión independiente, y
+  es la que más enseña: **el primer fix tapaba las puertas una por una, y esta
+  pasaba igual** porque el guard solo miraba `dto.valor` y ese camino no lo
+  manda. La cuarta salió al reproducir la tercera y probar la simétrica.
+  **La lección vale más que el fix:** validar EL CAMPO QUE LLEGA es la
+  abstracción equivocada. Cambiar el tipo cambia qué campos hacen falta, así que
+  hay tantas puertas como pares (tipo viejo, tipo nuevo) — taparlas de a una no
+  termina nunca. Lo que se valida ahora es **el estado con el que la fila
+  queda** (`validarEstadoResultante`), y con eso las cuatro se cierran de una.
+  **Alcance:** la regla del owner era sobre descuentos; en `recargos` se aplicó
+  la que ese módulo **ya tenía en `create()`** (los 5 tipos exigen valor), no
+  una nueva — era su propio `update()` el que la contradecía.
+  Cerrado con las listas a nivel módulo (`TIPOS_CON_VALOR_UNICO`,
+  `TIPOS_CON_TRAMOS`, `TIPOS_CON_METODOS`) compartidas por los dos validadores,
+  para que no puedan volver a discrepar. Lo fijan 7 unit tests con sus mutantes
+  (sacar `directo` de la lista; sacar la llamada a `validarEstadoResultante`,
+  que pone rojos 3) y `test/reglas-valor.e2e-spec.ts`, el único que ejercita el
+  `ValidationPipe` real — que es justo por donde entraba el `null`.
+  Las cuentas de tramos/métodos solo se consultan cuando el tipo resultante las
+  exige y el `PATCH` no las trae: una query puntual, nunca una por fila.
+  **Lo destapó el e2e existente:** al exigir valor, 6 tests de `papelera`
+  empezaron a fallar porque sus fixtures creaban `directo` sin importe. Eso es
+  la prueba de que el cambio muerde.
+
+---
+
 ## Deuda de código (harness)
 
 - [x] ~~**Los mapas de estado de venta están duplicados en 4 `.vue`**~~ (frontend) —

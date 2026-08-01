@@ -181,6 +181,27 @@ Cada tenant define sus propias reglas reutilizables:
 - `condicion_tipo`: `ninguna` | `customer` | `producto` | `categoria` | `fecha` | `metodo_pago` | `vencimiento`
 - `condicion_valor`, `fecha_inicio`, `fecha_fin`
 
+**El tipo y el modo son ejes independientes.** El *tipo* (`tipos_regla.codigo`)
+dice **cuándo** se aplica la regla: `pronto_pago` (si paga antes), `metodo_pago`
+(según el medio), `por_mayor` / `por_monto_venta` (por tramos), `promocional`
+(dentro de un rango de fechas), y `directo` — **el que no tiene condición: se
+aplica siempre**. El *modo* dice **cómo** se expresa el importe: porcentaje o
+monto fijo. Cualquier tipo puede ir en cualquiera de los dos modos, salvo
+`pronto_pago`, `interes_simple` e `interes_compuesto`, que el backend fuerza a
+porcentaje. Que `directo` sea el más usado con monto fijo es un accidente del
+catálogo de ejemplo, no la definición.
+
+**Toda regla expresa su monto** (decisión del owner, 2026-08-01): un descuento
+o recargo sin importe no descuenta ni recarga nada, así que no se puede guardar.
+Se cumple de dos formas según el tipo — con un `valor` único, o con `tramos`
+(`por_mayor`, `por_monto_venta`, donde cada tramo trae el suyo)—, y **la
+validación mira el estado con el que la fila queda, no los campos que llegan en
+el `PATCH`**. Esa distinción no es teórica: cambiar el *tipo* cambia qué campos
+hacen falta, así que un `PATCH` que solo manda `tipoReglaId` puede dejar un
+descuento sin importe sin haber tocado ningún campo de importe. Detalle de las
+cuatro formas en que se llegaba a ese estado, todas verificadas abiertas contra
+la API antes de cerrarlas: [`docs/agent/resueltos.md`](./agent/resueltos.md).
+
 **[ PENDIENTE ]** ¿Se implementa la evaluación de condiciones (`condicion_tipo`, vigencia,
 modo escalonado)? En el sistema original estas columnas existen pero la lógica no está
 implementada.

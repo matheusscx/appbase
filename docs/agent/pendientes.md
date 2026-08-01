@@ -97,6 +97,16 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
   prioridad, y si se retoma conviene apuntar a los otros mecanismos de la lista
   (`inline-block`, `float`, `absolute`, `fit-content`), no a las tablas.
 
+- [ ] **`recargos` valida contra dos códigos que no existen** (backend,
+  `recargos.service.ts` → `validarSegunTipoCreate`) — la lista local
+  `tiposConTramos = ['por_mayor', 'por_monto_venta']` es de códigos de
+  **descuento**: ningún tipo de recargo usa tramos, así que ese `if` no puede
+  matchear nunca. Quedó de un copy-paste entre los dos módulos gemelos.
+  Confirmado en la revisión del 2026-08-01; no se tocó porque estaba fuera del
+  alcance de esa tarea. Es código muerto, no un bug: la limpieza es borrar la
+  lista y su `if`. Al hacerlo, verificar que `RECARGO_CONFIG` (frontend)
+  tampoco declare `campoTramos: true` en ningún tipo — hoy no lo hace.
+
 ## Papelera — restaurar eliminados (2026-07-31)
 
 Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`](../features/papelera.md).
@@ -274,17 +284,6 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   revés, decisión del owner. Mientras tanto la sugerencia de la papelera usa la
   regla estricta (`ignorarMayusculas: true`), documentado en
   `grupos-modificadores.service.ts` → `restaurar()`.
-
-- [ ] **`directo` no exige valor en el backend** (backend,
-  `descuentos.service.ts` → `validarSegunTipoCreate`) — medido el 2026-08-01:
-  el código `directo` no está en `tiposConValorUnico` ni en ninguna otra lista
-  del validador, así que **se puede crear un descuento directo sin importe**, y
-  ese descuento no descuenta nada. El formulario ya pide el valor desde el fix
-  de `DESCUENTO_CONFIG`, así que la UI es más estricta que la API — sin bug
-  visible, pero la API queda abierta. Si el valor debe ser obligatorio es una
-  regla de negocio del owner (podría existir un descuento directo de 0 con
-  algún propósito), así que no se endureció por cuenta propia.
-
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 

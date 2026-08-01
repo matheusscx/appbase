@@ -16,6 +16,31 @@ import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 
 const CLASE = 'descuento';
 
+/**
+ * Tipos que expresan su monto con un `valor` único. Los que faltan lo expresan
+ * con `tramos` (`por_mayor`, `por_monto_venta`), que tienen su propia
+ * validación: entre las dos listas quedan cubiertos los 6 códigos que siembra
+ * el backend, o sea que **ningún descuento puede quedar sin forma de decir
+ * cuánto descuenta** (decisión del owner, 2026-08-01).
+ *
+ * `directo` faltaba acá: se podían crear descuentos directos sin importe, que
+ * no descuentan nada. Vive a nivel módulo —y no dentro del validador de
+ * `create()`— porque `update()` necesita la MISMA lista para no dejar vaciar
+ * por `PATCH` un valor que `create()` exigió.
+ */
+const TIPOS_CON_VALOR_UNICO = [
+  'directo',
+  'metodo_pago',
+  'pronto_pago',
+  'promocional',
+];
+
+/** Tipos que expresan su monto con `tramos` en vez de con un `valor` único. */
+const TIPOS_CON_TRAMOS = ['por_mayor', 'por_monto_venta'];
+
+/** Tipos que además exigen al menos un método de pago asociado. */
+const TIPOS_CON_METODOS = ['metodo_pago'];
+
 // `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
 // devolviendo `Descuento[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
 export type DescuentoConAuditoria = Descuento & {
@@ -188,6 +213,7 @@ export class DescuentosService {
 
     await this.validarNombreUnico(tenantId, dto.nombre ?? descuento.nombre, id);
     this.validarSegunTipoUpdate(tipoRegla.codigo, dto);
+    await this.validarEstadoResultante(tipoRegla.codigo, descuento, dto);
 
     return this.dataSource.transaction(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
@@ -412,18 +438,15 @@ export class DescuentosService {
     codigo: string,
     dto: CreateDescuentoDto,
   ): void {
-    const tiposConTramos = ['por_mayor', 'por_monto_venta'];
-    const tiposConMetodos = ['metodo_pago'];
     const tiposFijoPorcentaje = [
       'pronto_pago',
       'interes_simple',
       'interes_compuesto',
     ];
-    const tiposConValorUnico = ['metodo_pago', 'pronto_pago', 'promocional'];
 
-    if (tiposConTramos.includes(codigo) && !dto.tramos?.length)
+    if (TIPOS_CON_TRAMOS.includes(codigo) && !dto.tramos?.length)
       throw new BadRequestException('Este tipo requiere al menos un tramo');
-    if (tiposConMetodos.includes(codigo) && !dto.metodoPagoIds?.length)
+    if (TIPOS_CON_METODOS.includes(codigo) && !dto.metodoPagoIds?.length)
       throw new BadRequestException('Selecciona al menos un método de pago');
     if (
       tiposFijoPorcentaje.includes(codigo) &&
@@ -431,7 +454,7 @@ export class DescuentosService {
       dto.modo !== 'porcentaje'
     )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
-    if (tiposConValorUnico.includes(codigo)) {
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo)) {
       if (!dto.valor)
         throw new BadRequestException('El valor es requerido para este tipo');
       this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
@@ -463,6 +486,57 @@ export class DescuentosService {
   }
 
   // Called from update() — only validate fields explicitly present in the DTO
+  /**
+   * Valida el estado CON EL QUE VA A QUEDAR la fila, no los campos que vinieron
+   * en el `PATCH`.
+   *
+   * `validarSegunTipoUpdate` mira solo lo que llega, y por eso dejaba pasar dos
+   * caminos —los dos verificados en vivo contra la API antes de cerrarlos, los
+   * dos con 200— en los que la fila terminaba sin poder expresar su monto:
+   *
+   *   - `PATCH { tipoReglaId: directo }` sobre un `por_mayor` (que guarda el
+   *     monto en `tramos` y tiene `valor` nulo) → un `directo` sin valor.
+   *   - `PATCH { tipoReglaId: por_mayor }` sobre un `directo` → un descuento
+   *     por tramos con CERO tramos.
+   *
+   * Tapar cada camino por separado no alcanzaba: el problema no es qué campo
+   * viene, es que cambiar el tipo cambia QUÉ campos hacen falta. Por eso se
+   * valida el resultado.
+   *
+   * Las cuentas de `tramos`/`metodoPagoIds` solo se consultan cuando el tipo
+   * resultante las exige y el `PATCH` no las trae — una query puntual, nunca
+   * una por fila.
+   */
+  private async validarEstadoResultante(
+    codigo: string,
+    actual: Descuento,
+    dto: UpdateDescuentoDto,
+  ): Promise<void> {
+    const valorFinal = dto.valor !== undefined ? dto.valor : actual.valor;
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !valorFinal)
+      throw new BadRequestException('El valor es requerido para este tipo');
+
+    if (TIPOS_CON_TRAMOS.includes(codigo)) {
+      const cantidad =
+        dto.tramos !== undefined
+          ? dto.tramos.length
+          : await this.tramoRepo.count({ where: { descuentoId: actual.id } });
+      if (!cantidad)
+        throw new BadRequestException('Este tipo requiere al menos un tramo');
+    }
+
+    if (TIPOS_CON_METODOS.includes(codigo)) {
+      const cantidad =
+        dto.metodoPagoIds !== undefined
+          ? dto.metodoPagoIds.length
+          : await this.metodoPagoRepo.count({
+              where: { descuentoId: actual.id },
+            });
+      if (!cantidad)
+        throw new BadRequestException('Selecciona al menos un método de pago');
+    }
+  }
+
   private validarSegunTipoUpdate(
     codigo: string,
     dto: UpdateDescuentoDto,

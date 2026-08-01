@@ -16,6 +16,29 @@ import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 
 const CLASE = 'recargo';
 
+/**
+ * Los 5 tipos de recargo expresan su monto con un `valor` único — ninguno usa
+ * tramos. `create()` ya los exigía todos; la lista sube a nivel módulo para
+ * que `update()` use la MISMA y no deje vaciar por `PATCH` lo que `create()`
+ * exigió (un interés sin tasa es entrada del motor de precios).
+ */
+const TIPOS_CON_VALOR_UNICO = [
+  'general',
+  'mora',
+  'recargo_metodo_pago',
+  'interes_simple',
+  'interes_compuesto',
+];
+
+/** Tipos que además exigen al menos un método de pago asociado. */
+const TIPOS_CON_METODOS = ['recargo_metodo_pago'];
+
+// ⚠️ No hay `TIPOS_CON_TRAMOS` acá a propósito: **ningún código de recargo usa
+// tramos**. La lista local de `validarSegunTipoCreate` menciona `por_mayor` y
+// `por_monto_venta`, que son códigos de DESCUENTO — quedó de un copy-paste y no
+// puede matchear nunca. Se deja como está (fuera del alcance de este cambio),
+// pero no se propaga.
+
 // `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
 // devolviendo `Recargo[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
 export type RecargoConAuditoria = Recargo & {
@@ -185,6 +208,7 @@ export class RecargosService {
 
     await this.validarNombreUnico(tenantId, dto.nombre ?? recargo.nombre, id);
     this.validarSegunTipoUpdate(tipoRegla.codigo, dto);
+    await this.validarEstadoResultante(tipoRegla.codigo, recargo, dto);
 
     return this.dataSource.transaction(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
@@ -405,13 +429,6 @@ export class RecargosService {
     const tiposConTramos = ['por_mayor', 'por_monto_venta'];
     const tiposConMetodos = ['recargo_metodo_pago'];
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
-    const tiposConValorUnico = [
-      'general',
-      'mora',
-      'recargo_metodo_pago',
-      'interes_simple',
-      'interes_compuesto',
-    ];
 
     if (tiposConTramos.includes(codigo) && !dto.tramos?.length)
       throw new BadRequestException('Este tipo requiere al menos un tramo');
@@ -423,7 +440,7 @@ export class RecargosService {
       dto.modo !== 'porcentaje'
     )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
-    if (tiposConValorUnico.includes(codigo)) {
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo)) {
       if (!dto.valor)
         throw new BadRequestException('El valor es requerido para este tipo');
       this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
@@ -441,6 +458,35 @@ export class RecargosService {
   }
 
   // Called from update() — only validate fields explicitly present in the DTO
+  /**
+   * Valida el estado CON EL QUE VA A QUEDAR la fila, no los campos que vinieron
+   * en el `PATCH`. Mismo problema que en `descuentos.service.ts` (ver el
+   * docblock de allá): mirar solo lo que llega deja pasar un cambio de
+   * `tipoReglaId` que vuelve obligatorio un campo que la fila no tiene.
+   *
+   * Acá no hay chequeo de tramos porque ningún tipo de recargo los usa.
+   */
+  private async validarEstadoResultante(
+    codigo: string,
+    actual: Recargo,
+    dto: UpdateRecargoDto,
+  ): Promise<void> {
+    const valorFinal = dto.valor !== undefined ? dto.valor : actual.valor;
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !valorFinal)
+      throw new BadRequestException('El valor es requerido para este tipo');
+
+    if (TIPOS_CON_METODOS.includes(codigo)) {
+      const cantidad =
+        dto.metodoPagoIds !== undefined
+          ? dto.metodoPagoIds.length
+          : await this.metodoPagoRepo.count({
+              where: { recargoId: actual.id },
+            });
+      if (!cantidad)
+        throw new BadRequestException('Selecciona al menos un método de pago');
+    }
+  }
+
   private validarSegunTipoUpdate(codigo: string, dto: UpdateRecargoDto): void {
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
 

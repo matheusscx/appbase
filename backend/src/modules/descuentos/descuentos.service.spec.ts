@@ -48,8 +48,8 @@ describe('DescuentosService', () => {
     createQueryBuilder: jest.Mock;
   };
   let tipoReglaRepoMock: { findOne: jest.Mock; find: jest.Mock };
-  let tramoRepoMock: { find: jest.Mock };
-  let metodoPagoRepoMock: { find: jest.Mock };
+  let tramoRepoMock: { find: jest.Mock; count: jest.Mock };
+  let metodoPagoRepoMock: { find: jest.Mock; count: jest.Mock };
 
   beforeEach(async () => {
     qbMock = {
@@ -95,8 +95,18 @@ describe('DescuentosService', () => {
       find: jest.fn().mockResolvedValue([]),
     };
 
-    tramoRepoMock = { find: jest.fn().mockResolvedValue([]) };
-    metodoPagoRepoMock = { find: jest.fn().mockResolvedValue([]) };
+    tramoRepoMock = {
+      find: jest.fn().mockResolvedValue([]),
+      // `validarEstadoResultante` cuenta tramos/métodos cuando el PATCH no los
+      // trae: sin esto, cualquier test que cambie de tipo explota con TypeError.
+      count: jest.fn().mockResolvedValue(0),
+    };
+    metodoPagoRepoMock = {
+      find: jest.fn().mockResolvedValue([]),
+      // `validarEstadoResultante` cuenta tramos/métodos cuando el PATCH no los
+      // trae: sin esto, cualquier test que cambie de tipo explota con TypeError.
+      count: jest.fn().mockResolvedValue(0),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -361,8 +371,13 @@ describe('DescuentosService', () => {
         tipoReglaId: 'tipo-metodo_pago',
         condicionValor: null,
         modo: 'porcentaje',
+        // Una fila `metodo_pago` VÁLIDA tiene valor y al menos un método: sin
+        // esto la fixture representa un estado que el sistema ya no permite, y
+        // el PATCH parcial falla por la fixture, no por lo que prueba.
+        valor: '0.10',
       };
       descuentoRepoMock.findOne.mockResolvedValue(existing);
+      metodoPagoRepoMock.count.mockResolvedValue(1);
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('metodo_pago'));
 
       await service.update(TENANT, 'd-3', { activo: false });
@@ -624,6 +639,124 @@ describe('DescuentosService', () => {
         expect.stringContaining('descuento_id'),
         expect.objectContaining({ excludeId: 'some-id' }),
       );
+    });
+  });
+
+  // ─── Todo descuento tiene que decir cuánto descuenta ───────────────────────
+  // Decisión del owner (2026-08-01): "los descuentos tienen que tener valor,
+  // no se me ocurre para qué puede servir uno sin valor". Se cerraron las DOS
+  // puertas al mismo estado, las dos verificadas contra la API real antes de
+  // tocar nada:
+  //   1. `create()` no exigía valor a `directo` — el tipo de propósito general.
+  //   2. `update()` dejaba VACIARLO por PATCH, en cualquier tipo: un
+  //      `{ "valor": null }` respondía 200 y dejaba una promoción sin monto.
+  describe('todo descuento expresa su monto', () => {
+    it('rechaza crear un `directo` sin valor', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Directo sin importe',
+          tipoReglaId: 'tipo-directo',
+          modo: 'porcentaje',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('acepta crear un `directo` CON valor (ancla positiva)', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      await service.create(TENANT, {
+        nombre: 'Directo 10%',
+        tipoReglaId: 'tipo-directo',
+        modo: 'porcentaje',
+        valor: '0.10',
+      });
+
+      expect(managerMock.save).toHaveBeenCalled();
+    });
+
+    // Las dos puertas que faltaban, encontradas en la revisión y reproducidas
+    // en vivo contra la API (las dos devolvían 200). No alcanzaba con mirar el
+    // campo que llega: cambiar el TIPO cambia qué campos hacen falta, así que
+    // se valida el estado con el que la fila queda.
+    it('cambiar el tipo a uno que exige valor, sin mandarlo, es 400', async () => {
+      // Un `por_mayor` guarda el monto en tramos y tiene `valor` nulo.
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Por tramos',
+        tipoReglaId: 'tipo-por_mayor',
+        valor: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      await expect(
+        service.update(TENANT, 'd1', { tipoReglaId: 'tipo-directo' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('cambiar el tipo a uno por tramos, sin mandarlos, es 400', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Directo',
+        tipoReglaId: 'tipo-directo',
+        valor: '0.10',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+      tramoRepoMock.count.mockResolvedValue(0);
+
+      await expect(
+        service.update(TENANT, 'd1', { tipoReglaId: 'tipo-por_mayor' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('cambiar el tipo MANDANDO lo que el nuevo tipo exige sí funciona (ancla positiva)', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Por tramos',
+        tipoReglaId: 'tipo-por_mayor',
+        valor: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      await expect(
+        service.update(TENANT, 'd1', {
+          tipoReglaId: 'tipo-directo',
+          valor: '0.10',
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('rechaza vaciar el valor por PATCH', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-promocional',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('promocional'));
+
+      await expect(
+        service.update(TENANT, 'd1', { valor: null }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('un PATCH que no toca el valor sigue funcionando (ancla positiva)', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Promo',
+        tipoReglaId: 'tipo-promocional',
+        valor: '0.15',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('promocional'));
+
+      await expect(
+        service.update(TENANT, 'd1', { nombre: 'Promo renombrada' }),
+      ).resolves.toBeDefined();
     });
   });
 });

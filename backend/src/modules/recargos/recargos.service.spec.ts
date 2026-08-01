@@ -48,8 +48,8 @@ describe('RecargosService', () => {
     createQueryBuilder: jest.Mock;
   };
   let tipoReglaRepoMock: { findOne: jest.Mock; find: jest.Mock };
-  let tramoRepoMock: { find: jest.Mock };
-  let metodoPagoRepoMock: { find: jest.Mock };
+  let tramoRepoMock: { find: jest.Mock; count: jest.Mock };
+  let metodoPagoRepoMock: { find: jest.Mock; count: jest.Mock };
 
   beforeEach(async () => {
     qbMock = {
@@ -95,8 +95,18 @@ describe('RecargosService', () => {
       find: jest.fn().mockResolvedValue([]),
     };
 
-    tramoRepoMock = { find: jest.fn().mockResolvedValue([]) };
-    metodoPagoRepoMock = { find: jest.fn().mockResolvedValue([]) };
+    tramoRepoMock = {
+      find: jest.fn().mockResolvedValue([]),
+      // `validarEstadoResultante` cuenta tramos/métodos cuando el PATCH no los
+      // trae: sin esto, cualquier test que cambie de tipo explota con TypeError.
+      count: jest.fn().mockResolvedValue(0),
+    };
+    metodoPagoRepoMock = {
+      find: jest.fn().mockResolvedValue([]),
+      // `validarEstadoResultante` cuenta tramos/métodos cuando el PATCH no los
+      // trae: sin esto, cualquier test que cambie de tipo explota con TypeError.
+      count: jest.fn().mockResolvedValue(0),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -337,6 +347,9 @@ describe('RecargosService', () => {
         tipoReglaId: 'tipo-general',
         condicionValor: null,
         modo: 'porcentaje',
+        // Un recargo `general` VÁLIDO tiene valor: sin esto la fixture
+        // representa un estado que el sistema ya no permite.
+        valor: '0.05',
       };
       recargoRepoMock.findOne.mockResolvedValue(existing);
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
@@ -590,6 +603,43 @@ describe('RecargosService', () => {
         expect.stringContaining('recargo_id'),
         expect.objectContaining({ excludeId: 'some-id' }),
       );
+    });
+  });
+
+  // ─── Todo recargo expresa su monto ────────────────────────────────────────
+  // `create()` ya exigía valor en los 5 tipos, pero `update()` dejaba vaciarlo
+  // por PATCH: un `{ "valor": null }` respondía 200 y dejaba un interés sin
+  // tasa — entrada directa del motor de precios. Verificado contra la API real.
+  // La regla del owner era sobre descuentos; acá se aplica la que este módulo
+  // YA tenía en `create()`, no una nueva.
+  describe('todo recargo expresa su monto', () => {
+    it('rechaza vaciar el valor por PATCH', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Interés',
+        tipoReglaId: 'tipo-interes_simple',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('interes_simple'));
+
+      await expect(
+        service.update(TENANT, 'r1', { valor: null }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('un PATCH que no toca el valor sigue funcionando (ancla positiva)', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Interés',
+        tipoReglaId: 'tipo-interes_simple',
+        valor: '0.05',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('interes_simple'));
+
+      await expect(
+        service.update(TENANT, 'r1', { nombre: 'Interés renombrado' }),
+      ).resolves.toBeDefined();
     });
   });
 });
