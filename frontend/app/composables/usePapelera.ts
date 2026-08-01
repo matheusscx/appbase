@@ -25,11 +25,17 @@ export function usePapelera(recurso: string) {
    * `POST /<recurso>/:id/restaurar`. Deja que el error del backend suba tal
    * cual (404 "no está en la papelera", 400 de colisión de nombre con el
    * mensaje de qué renombrar): la pantalla lo muestra en el toast sin
-   * reemplazarlo por un genérico.
+   * reemplazarlo por un genérico, o lo lee con `nombreSugeridoDe`.
+   *
+   * `nombre` solo se manda cuando el usuario resolvió una colisión desde el
+   * modal. **Sin él el body no viaja**, que es el caso de las pantallas sin
+   * unicidad de nombre y de todas las llamadas que ya existían: el backend
+   * restaura con el nombre que la fila ya tenía.
    */
-  async function restaurar(id: string): Promise<void> {
+  async function restaurar(id: string, nombre?: string): Promise<void> {
     await useApiFetch(`${apiUrl}/${recurso}/${id}/restaurar`, {
       method: 'POST',
+      ...(nombre ? { body: { nombre } } : {}),
     })
   }
 

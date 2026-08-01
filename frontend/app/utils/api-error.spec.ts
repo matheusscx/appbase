@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { apiErrorMsg } from './api-error'
+import { apiErrorMsg, nombreSugeridoDe } from './api-error'
 
 describe('apiErrorMsg', () => {
   it('prioriza el mensaje HTTP del backend', () => {
@@ -48,5 +48,44 @@ describe('apiErrorMsg', () => {
     expect(
       apiErrorMsg({ data: { message: ['a', 'b'] } }, 'fallback', { detalleLocal: false }),
     ).toBe('a, b')
+  })
+})
+
+// Lo que separa "no se pudo, avisale" de "no se pudo TODAVÍA, ofrecele un
+// nombre libre" al restaurar de la papelera. Devolver algo distinto de `null`
+// para un error común haría que la pantalla abriera el modal de colisión con
+// el campo vacío ante cualquier 404 o caída de red.
+describe('nombreSugeridoDe', () => {
+  it('devuelve la sugerencia del 400 de colisión', () => {
+    expect(
+      nombreSugeridoDe({
+        data: {
+          message: 'Ya existe un descuento activo con el nombre "Black Friday".',
+          nombreSugerido: 'Black Friday 2',
+        },
+      }),
+    ).toBe('Black Friday 2')
+  })
+
+  it('devuelve null para un error común del backend (404 sin sugerencia)', () => {
+    expect(
+      nombreSugeridoDe({ data: { message: 'Descuento x no está en la papelera' } }),
+    ).toBeNull()
+  })
+
+  it('devuelve null para un Error local sin cuerpo de API', () => {
+    expect(nombreSugeridoDe(new Error('fetch failed'))).toBeNull()
+  })
+
+  it('devuelve null si la sugerencia viene vacía o no es string', () => {
+    // Sería un bug del backend, no una salida usable: con string vacío el
+    // modal se abriría con el campo en blanco y el botón deshabilitado.
+    expect(nombreSugeridoDe({ data: { nombreSugerido: '' } })).toBeNull()
+    expect(nombreSugeridoDe({ data: { nombreSugerido: 42 } })).toBeNull()
+  })
+
+  it('no explota con null ni undefined', () => {
+    expect(nombreSugeridoDe(null)).toBeNull()
+    expect(nombreSugeridoDe(undefined)).toBeNull()
   })
 })

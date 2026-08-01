@@ -21,11 +21,13 @@ describe('DescuentosService', () => {
     where: jest.Mock;
     andWhere: jest.Mock;
     getCount: jest.Mock;
+    select: jest.Mock;
     leftJoin: jest.Mock;
     addSelect: jest.Mock;
     withDeleted: jest.Mock;
     orderBy: jest.Mock;
     getRawAndEntities: jest.Mock;
+    getRawMany: jest.Mock;
   };
   let managerMock: {
     create: jest.Mock;
@@ -54,11 +56,13 @@ describe('DescuentosService', () => {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getCount: jest.fn().mockResolvedValue(0),
+      select: jest.fn().mockReturnThis(),
       leftJoin: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       withDeleted: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       getRawAndEntities: jest.fn().mockResolvedValue({ entities: [], raw: [] }),
+      getRawMany: jest.fn().mockResolvedValue([]),
     };
 
     managerMock = {
@@ -463,11 +467,89 @@ describe('DescuentosService', () => {
         eliminadoPor: USUARIO_ID,
       });
       qbMock.getCount.mockResolvedValueOnce(1);
+      // Los nombres vivos que compiten, que es lo que lee `errorDeColision`.
+      qbMock.getRawMany.mockResolvedValueOnce([
+        { nombre: 'Black Friday' },
+        { nombre: 'Black Friday 2' },
+      ]);
 
       await expect(service.restaurar(TENANT, 'd1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
       expect(descuentoRepoMock.update).not.toHaveBeenCalled();
+    });
+
+    // El 400 no puede ser solo un "no se pudo": la pantalla precarga
+    // `nombreSugerido` en el campo del modal, así que si el backend deja de
+    // mandarlo el usuario vuelve a quedar adivinando qué nombre está libre.
+    it('el 400 de colisión trae un nombre libre ya calculado, salteando los tomados', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Black Friday',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      qbMock.getCount.mockResolvedValueOnce(1);
+      qbMock.getRawMany.mockResolvedValueOnce([
+        { nombre: 'Black Friday' },
+        { nombre: 'Black Friday 2' },
+        { nombre: 'Black Friday 3' },
+      ]);
+
+      await expect(service.restaurar(TENANT, 'd1')).rejects.toMatchObject({
+        response: {
+          message:
+            'Ya existe un descuento activo con el nombre "Black Friday".',
+          nombreSugerido: 'Black Friday 4',
+        },
+      });
+    });
+
+    it('con `nombreNuevo` libre, restaura Y renombra en la misma escritura', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Black Friday',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      descuentoRepoMock.findOneOrFail.mockResolvedValue({ id: 'd1' });
+
+      await service.restaurar(TENANT, 'd1', 'Black Friday 2');
+
+      // Una sola escritura con las tres columnas: revivir y renombrar en dos
+      // sentencias podría dejar la fila viva con el nombre que colisiona.
+      expect(descuentoRepoMock.update).toHaveBeenCalledWith(
+        { id: 'd1', tenantId: TENANT },
+        {
+          eliminadoEl: null,
+          eliminadoPor: null,
+          nombre: 'Black Friday 2',
+        },
+      );
+      // Y la unicidad se chequea contra el nombre NUEVO, no contra el viejo.
+      expect(qbMock.andWhere).toHaveBeenCalledWith('d.nombre = :nombre', {
+        nombre: 'Black Friday 2',
+      });
+    });
+
+    it('sin `nombreNuevo` no toca el nombre (comportamiento de siempre)', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Black Friday',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      descuentoRepoMock.findOneOrFail.mockResolvedValue({ id: 'd1' });
+
+      await service.restaurar(TENANT, 'd1');
+
+      expect(descuentoRepoMock.update).toHaveBeenCalledWith(
+        { id: 'd1', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
     });
   });
 

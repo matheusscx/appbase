@@ -225,13 +225,18 @@ async function restaurarImpuesto(id: string) {
   // `pedirEliminar`.
   const imp = impuestos.value.find(i => i.id === id)
   if (!imp || imp.origen === 'sistema') return
-  // El de reentrancia, en cambio, SÍ es alcanzable y por eso sí tiene test: el
-  // modal no se cierra solo al confirmar (lo cierra el `finally` de acá), así
-  // que mientras el POST viaja el botón sigue clickeable. Sin esto, el segundo
-  // click manda un segundo `POST /restaurar` sobre una fila que el primero ya
-  // revivió, el backend contesta 404 "no está en la papelera" y el usuario ve
-  // un toast de ERROR inmediatamente después de un restore exitoso. Mismo
-  // patrón que `toggleActivo` con su set `toggling`.
+  // El de reentrancia, en cambio, SÍ tiene test, porque la conducta que fija
+  // es alcanzable: el modal no se cierra solo al confirmar (lo cierra el
+  // `finally` de acá), así que mientras el POST viaja el segundo click manda
+  // un segundo `POST /restaurar` sobre una fila que el primero ya revivió, el
+  // backend contesta 404 "no está en la papelera" y el usuario ve un toast de
+  // ERROR inmediatamente después de un restore exitoso.
+  //
+  // ⚠️ Corrección de lo que decía antes acá: este guard NO es lo único que lo
+  // impide. Medido con mutantes sobre `descuentos.vue` (mismo molde): el
+  // `:loading="restaurando"` del modal ya deshabilita el botón, así que sacar
+  // cualquiera de los dos por separado deja el test en verde. El test fija la
+  // conducta —un solo POST—, no cuál de las dos capas la sostiene.
   if (restaurando.value) return
   restaurando.value = true
   try {

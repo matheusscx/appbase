@@ -23,11 +23,15 @@ interface Regla {
   fechaInicio: string | null
   fechaFin: string | null
   activo: boolean
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 const runtimeConfig = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = runtimeConfig.public.apiUrl
+
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('descuentos')
 
 const descuentos = ref<Regla[]>([])
 const tipos = ref<{ label: string; value: string; codigo: string; descripcion: string | null }[]>([])
@@ -38,6 +42,15 @@ const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
+// Segundo paso del restaurar, solo cuando el backend contesta 400 de colisión:
+// el mensaje que explica cuál nombre está tomado y el nombre libre —editable—
+// con el que se reintenta.
+const colisionModalOpen = ref(false)
+const colisionMensaje = ref('')
+const nombrePropuesto = ref('')
 const toggling = reactive(new Set<string>())
 const nombreError = ref<string | null>(null)
 
@@ -97,19 +110,36 @@ function onTipoChange(value: string) {
   form.value.modo = config.value?.modo === 'porcentaje' ? 'porcentaje' : 'monto_fijo'
 }
 
+// Cola serial, mismo patrón que `configuracion/impuestos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `descuentos.value` sin
+// importar cuál toggle la originó — el listado queda desincronizado del
+// switch. Esta pantalla NO usa `usePaginatedList`, así que no hereda la cola
+// que vive ahí: va local.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    descuentos.value = await useApiFetch<Regla[]>(`${apiUrl}/descuentos`)
-  }
-  catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al cargar descuentos')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      const query = verEliminados.value ? '?incluirEliminados=true' : ''
+      descuentos.value = await useApiFetch<Regla[]>(`${apiUrl}/descuentos${query}`)
+    }
+    catch (e: unknown) {
+      const msg = apiErrorMsg(e, 'Error al cargar descuentos')
+      toast.add({ title: msg, color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Regla) {
   const idx = descuentos.value.findIndex(d => d.id === saved.id)
@@ -168,6 +198,7 @@ function abrirCrear() {
 }
 
 function abrirEditar(d: Regla) {
+  if (d.eliminadoEl) return
   resetDrawer()
   editingId.value = d.id
   form.value = {
@@ -243,6 +274,7 @@ async function guardar() {
 }
 
 async function toggleActivo(d: Regla) {
+  if (d.eliminadoEl) return
   if (toggling.has(d.id)) return
   toggling.add(d.id)
   const prev = d.activo
@@ -264,12 +296,27 @@ async function toggleActivo(d: Regla) {
   }
 }
 
+function pedirEliminar(d: Regla) {
+  if (d.eliminadoEl) return
+  confirmDeleteId.value = d.id
+  confirmModalOpen.value = true
+}
+
 async function eliminar(id: string) {
   try {
     await useApiFetch(`${apiUrl}/descuentos/${id}`, {
       method: 'DELETE',
     })
-    removeLocal(id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
     toast.add({ title: 'Descuento eliminado', color: 'success' })
   }
   catch (e: unknown) {
@@ -280,6 +327,86 @@ async function eliminar(id: string) {
     confirmDeleteId.value = null
     confirmModalOpen.value = false
   }
+}
+
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+  colisionModalOpen.value = false
+  colisionMensaje.value = ''
+  nombrePropuesto.value = ''
+}
+
+/**
+ * Restaura una fila de la papelera. `nombreNuevo` solo llega en el reintento
+ * desde el modal de colisión.
+ *
+ * A diferencia de `impuestos.vue`, el catch NO cierra todo y tira un toast
+ * rojo: un 400 de colisión no es un error terminal sino una pregunta —qué
+ * nombre querés usar—, así que abre el segundo modal con la sugerencia del
+ * backend. Solo los errores de verdad (404 "no está en la papelera", red)
+ * terminan en toast.
+ */
+async function restaurarDescuento(id: string, nombreNuevo?: string) {
+  // El modal no se cierra solo al confirmar (lo cierran las funciones de acá),
+  // así que mientras el POST viaja el segundo click manda un segundo
+  // `POST .../restaurar` sobre una fila que el primero ya revivió: el backend
+  // contesta 404 "no está en la papelera" y el usuario ve un toast de ERROR
+  // inmediatamente después de un restore exitoso.
+  //
+  // ⚠️ Medido con mutantes: este guard y el `:loading="restaurando"` de los dos
+  // modales se tapan MUTUAMENTE — `loading` deshabilita el botón, así que sacar
+  // cualquiera de los dos por separado deja el test en verde y solo sacando los
+  // dos se rompe. No es redundancia muerta: `loading` es de un botón concreto
+  // del template y este guard cubre la función, que también entra por
+  // `confirmarColision` (otro botón, otro modal). El test fija la CONDUCTA —un
+  // solo POST—, no cuál de las dos capas la sostiene.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id, nombreNuevo)
+    const d = descuentos.value.find(x => x.id === id)
+    if (d) {
+      d.eliminadoEl = null
+      d.eliminadoPorNombre = null
+      if (nombreNuevo) {
+        // El backend solo devuelve 2xx si aplicó ESE nombre, así que el patch
+        // local no adivina. Reordenar hace falta porque el listado viene
+        // ordenado por nombre y el renombre lo puede mover de lugar.
+        d.nombre = nombreNuevo
+        descuentos.value = [...descuentos.value].sort((a, b) =>
+          a.nombre.localeCompare(b.nombre, 'es'),
+        )
+      }
+    }
+    toast.add({ title: 'Descuento restaurado', color: 'success' })
+    cerrarRestaurar()
+  }
+  catch (e: unknown) {
+    const sugerido = nombreSugeridoDe(e)
+    if (sugerido) {
+      // Se reabre con la sugerencia NUEVA: si el usuario editó a un nombre que
+      // también estaba tomado, el backend ya calculó el siguiente libre.
+      colisionMensaje.value = apiErrorMsg(e, 'Ese nombre ya está en uso.')
+      nombrePropuesto.value = sugerido
+      confirmRestaurarModalOpen.value = false
+      colisionModalOpen.value = true
+    }
+    else {
+      toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+      cerrarRestaurar()
+    }
+  }
+  finally {
+    restaurando.value = false
+  }
+}
+
+function confirmarColision() {
+  const id = confirmRestaurarId.value
+  const nombre = nombrePropuesto.value.trim()
+  if (!id || !nombre) return
+  restaurarDescuento(id, nombre)
 }
 
 function agregarTramo() {
@@ -310,20 +437,34 @@ const columns: TableColumn<Regla>[] = [
       description="Reglas de descuento aplicables en el cálculo de precios."
     >
       <template #actions>
-        <UButton
-          icon="i-lucide-plus"
-          @click="abrirCrear"
-        >
-          Nuevo descuento
-        </UButton>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton
+            icon="i-lucide-plus"
+            @click="abrirCrear"
+          >
+            Nuevo descuento
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable :data="descuentos" :columns="columns" :loading="loading">
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
-            <p class="font-medium truncate">
-              {{ row.original.nombre }}
+            <div class="flex items-center gap-2">
+              <p class="font-medium truncate">
+                {{ row.original.nombre }}
+              </p>
+              <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+                Eliminado
+              </UBadge>
+            </div>
+            <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+              {{ formatearBorradoPor(row.original) }}
             </p>
             <p class="text-sm text-muted">
               <template v-if="row.original.tramos?.length">
@@ -347,25 +488,37 @@ const columns: TableColumn<Regla>[] = [
           <div class="flex justify-end">
             <USwitch
               :model-value="row.original.activo"
-              :disabled="toggling.has(row.original.id)"
+              :disabled="toggling.has(row.original.id) || !!row.original.eliminadoEl"
               @update:model-value="toggleActivo(row.original)"
             />
           </div>
         </template>
 
         <template #acciones-cell="{ row }">
-          <div class="flex justify-end gap-2">
+          <div v-if="row.original.eliminadoEl" class="flex justify-end">
+            <UButton
+              icon="i-lucide-rotate-ccw"
+              color="neutral"
+              variant="ghost"
+              @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+            >
+              Restaurar
+            </UButton>
+          </div>
+          <div v-else class="flex justify-end gap-2">
             <UButton
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
+              title="Editar"
               @click="abrirEditar(row.original)"
             />
             <UButton
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
-              @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+              title="Eliminar"
+              @click="pedirEliminar(row.original)"
             />
           </div>
         </template>
@@ -547,9 +700,45 @@ const columns: TableColumn<Regla>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar descuento"
-      message="¿Estás seguro de que quieres eliminar este descuento? Esta acción no se puede deshacer."
+      message="¿Eliminar este descuento? Podés recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar descuento"
+      message="¿Restaurar este descuento? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmRestaurarId && restaurarDescuento(confirmRestaurarId)"
+    />
+
+    <!-- Segundo paso, solo si el backend rechazó por nombre tomado. El campo
+         viene precargado con la sugerencia pero es editable: el usuario
+         confirma o escribe el suyo (decisión del owner). -->
+    <CrudModal
+      v-model:open="colisionModalOpen"
+      title="No se puede restaurar con ese nombre"
+      :message="colisionMensaje"
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      :confirm-disabled="!nombrePropuesto.trim()"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmarColision"
+    >
+      <template #detalle>
+        <UFormField label="Restaurar como" class="mt-4">
+          <UInput
+            v-model="nombrePropuesto"
+            aria-label="Restaurar como"
+            autofocus
+          />
+        </UFormField>
+      </template>
+    </CrudModal>
   </div>
 </template>

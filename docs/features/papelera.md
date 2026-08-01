@@ -1,6 +1,6 @@
 # Feature: Papelera (restaurar eliminados)
 
-**Status**: Backend completo, frontend parcial (3/15 pantallas)
+**Status**: Backend completo, frontend parcial (4/15 pantallas)
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-08-01
 
@@ -89,6 +89,12 @@ vivas. Ninguna pantalla existente cambia sin pedirlo.
 POST /<recurso>/:id/restaurar
 
 Authorization: Bearer <token>   (mismo guard que el DELETE de ese recurso)
+Body (opcional):  { "nombre": "Black Friday 2" }
+                  Solo en los recursos con unicidad de nombre, y solo cuando
+                  el usuario resolvió una colisión desde el modal. SIN body el
+                  comportamiento es el de siempre: revive con el nombre que la
+                  fila ya tenía. Hoy lo acepta `descuentos`; los otros 7 con
+                  colisión quedan por replicar (docs/agent/pendientes.md).
 
 Response (201): la entidad restaurada. (No hay `@HttpCode(200)` en ninguno
                   de los 16 — Nest devuelve 201 por default en un POST, y
@@ -106,6 +112,9 @@ Response (400): en 9 de los 16 — las 5 con índice único parcial de nombre
                   `garzones`, por una restricción distinta que no es de nombre.
                   El reparto completo y por qué no se deduce de la familia de
                   borrado: "Colisión al restaurar" abajo.
+                  En `descuentos` el cuerpo del 400 trae además
+                  `nombreSugerido` — un nombre libre para reintentar, ver
+                  "Salida de la colisión" abajo.
 ```
 
 `salones` tiene además `mesas` bajo `@Controller('mesas')`, con su propio
@@ -223,6 +232,39 @@ restaurado, cambiándoselo sin avisar— es peor que el problema. Si alguna vez
 molesta, el cierre es que `restaurar()` devuelva una advertencia y deje que un
 humano decida, no que reasigne en silencio.
 
+### Salida de la colisión — nombre sugerido (decisión del owner, 2026-08-01)
+
+El 400 dice qué pasa pero no da salida: para restaurar, el usuario tenía que ir a
+renombrar **a mano** la fila viva que le ocupa el nombre. Decisión del owner: el
+backend propone un nombre libre y la pantalla lo ofrece **editable** —sugerir y
+dejar editar, no renombrar solo—, con el número al final empezando en 2
+(«Black Friday 2»), porque el "1" implícito es la fila viva.
+
+El cuerpo del 400 pasa a ser `{ message, nombreSugerido }`. El cálculo vive en
+`backend/src/common/utils/nombre-sugerido.util.ts` (compartido por los 8 recursos
+con unicidad de nombre: en los 8 la aritmética es la misma aunque la query no lo
+sea) y trae **una sola query** con todos los nombres que compiten — no un `SELECT`
+por candidato, que sería un N+1 disfrazado de bucle.
+
+**La regla no es "sacar el número final".** Hay nombres donde el número es parte
+del nombre ("Descuento 50", "Turno 2"): numerar sobre la base pelada daría
+"Descuento 2", que pierde el significado y además compite contra otra familia de
+nombres. El número final se trata como sufijo **solo si existe una fila viva
+llamada exactamente como la base pelada** — la única señal de que ese sufijo lo
+pusimos nosotros, porque no podríamos haber generado "X 2" sin un "X". Lo encontró
+el e2e contra Postgres real, no el diseño: la fixture terminaba en un timestamp y
+la primera versión le arrancó los dígitos.
+
+**El reintento también valida.** Si el usuario edita el campo y manda un nombre
+que también está tomado, vuelve el 400 con la sugerencia **siguiente** (nunca
+encadena "… 2 2"). La alternativa —que el frontend confíe en que la sugerencia
+sigue libre cuando la manda— apuesta a que nada pasó entre que la vio y confirmó.
+
+Implementado hoy solo en `descuentos` (molde end-to-end: backend + pantalla +
+tests, revisado antes de replicar). Los otros 7 quedan en
+[`docs/agent/pendientes.md`](../agent/pendientes.md). ⛔ `garzones` queda **fuera**
+por diseño: su colisión es el placeholder Mostrador, y renombrar no la resuelve.
+
 ### Solo lo que borró una persona
 
 > ✅ **Implementada entera y verificada contra Postgres el 2026-08-01**, en las dos
@@ -282,20 +324,32 @@ identificable a quien devolverle el "click" de restaurar.
 
 ## Frontend
 
-**Estado real: 3 de 15 pantallas cableadas** (`configuracion/items.vue`,
-`configuracion/categorias.vue`, `configuracion/impuestos.vue`). 16 recursos
-backend, pero **15 páginas**: `mesas` no tiene página propia, vive dentro de
-`configuracion/salones.vue`. Las otras 12 (`descuentos`, `recargos`,
-`grupos-modificadores`, `terceros`, `cajones`, `garzones`, `turnos`, `salones`
-[con sus `mesas`], `impresoras`, `causas-merma`, `motivos-diferencia`,
-`motivos-diferencia-inventario`) todavía **no** tienen el toggle "ver eliminados"
-ni el botón restaurar — el backend ya soporta los 16 recursos, el molde de
-pantalla está probado en las tres hechas, pero replicarlo a las 12 restantes
-queda pendiente. Backlog: [`docs/agent/pendientes.md`](../agent/pendientes.md).
+**Estado real: 4 de 15 pantallas cableadas** (`configuracion/items.vue`,
+`configuracion/categorias.vue`, `configuracion/impuestos.vue`,
+`configuracion/descuentos.vue`). 16 recursos backend, pero **15 páginas**:
+`mesas` no tiene página propia, vive dentro de `configuracion/salones.vue`. Las
+otras 11 (`recargos`, `grupos-modificadores`, `terceros`, `cajones`, `garzones`,
+`turnos`, `salones` [con sus `mesas`], `impresoras`, `causas-merma`,
+`motivos-diferencia`, `motivos-diferencia-inventario`) todavía **no** tienen el
+toggle "ver eliminados" ni el botón restaurar — el backend ya soporta los 16
+recursos, el molde de pantalla está probado en las cuatro hechas, pero replicarlo
+a las 11 restantes queda pendiente. Backlog:
+[`docs/agent/pendientes.md`](../agent/pendientes.md).
 
 El composable `usePapelera(recurso)` (`app/composables/usePapelera.ts`) encapsula lo
-común a cada pantalla: el toggle `verEliminados`, `restaurar(id)` (`POST
+común a cada pantalla: el toggle `verEliminados`, `restaurar(id, nombre?)` (`POST
 .../:id/restaurar`) y `formatearBorradoPor(fila)` ("Eliminado por X el fecha").
+El `nombre` es opcional y solo viaja al resolver una colisión — sin él el body no
+se manda, así que las pantallas sin unicidad de nombre no cambian en nada.
+
+**La colisión es un segundo modal, no un toast rojo.** `descuentos.vue` es el
+molde: el `catch` de `restaurar()` distingue con `nombreSugeridoDe(e)`
+(`app/utils/api-error.ts`) entre un error terminal —404, red: toast y cerrar— y
+un 400 de colisión, que abre un modal con el mensaje del backend y el nombre
+libre **precargado y editable**. Confirmar reintenta con ese nombre; si también
+está tomado, el modal se queda abierto con la sugerencia siguiente. Al restaurar
+renombrando, la fila local se parchea con ese nombre y el listado se reordena
+(viene ordenado por nombre).
 
 Un detalle que **no** es obvio del composable y hay que repetir en cada pantalla: al
 `DELETE` con `verEliminados` activo, la fila no debe borrarse localmente del
@@ -308,7 +362,7 @@ en vuelo, y sin protección gana el que responda último, no el último click. L
 pantallas con `cargar()` propio (como `categorias.vue`) necesitan su propia cola
 serial local (`cargaEnCurso`); las que usan `usePaginatedList` (como `items.vue`)
 ya la heredan del composable (`usePaginatedList.ts` → `fetch()`), sin nada que
-replicar. Backlog de las 13 pantallas restantes con el detalle de cuál de las dos
+replicar. Backlog de las 11 pantallas restantes con el detalle de cuál de las dos
 formas les toca: [`docs/agent/pendientes.md`](../agent/pendientes.md).
 
 ---
@@ -325,6 +379,12 @@ formas les toca: [`docs/agent/pendientes.md`](../agent/pendientes.md).
   (`grupos-modificadores`, `causas-merma`, `motivos-diferencia`,
   `motivos-diferencia-inventario`, `cajones`, `garzones`) y solo por código
   (`descuentos`, `recargos`, `turnos`).
+- **Salida de la colisión** (solo `descuentos` por ahora): el 400 trae un
+  `nombreSugerido` libre y restaurar con él revive y renombra en una sola
+  escritura; reintentar con un nombre también tomado da la sugerencia siguiente
+  sin encadenar sufijos. La aritmética del sufijo tiene su unit propio
+  (`nombre-sugerido.util.spec.ts`), incluido el caso que el e2e destapó: un
+  número que es parte del nombre no se pela.
 - **Solo lo que borró una persona**: una fila con `eliminado_el` seteado pero
   `eliminado_por` nulo (simulando un borrado del sistema) no aparece en
   `GET ...?incluirEliminados=true` ni se puede restaurar (404). Probado contra

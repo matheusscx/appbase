@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
+import { RestaurarDto } from '../../common/dto/restaurar.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { DescuentosService } from './descuentos.service';
 import { CreateDescuentoDto } from './dto/create-descuento.dto';
@@ -76,8 +77,12 @@ export class DescuentosController {
 
   @UseGuards(TenantAdminGuard)
   @Post(':id/restaurar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: RestaurarDto,
+  ) {
     const user = req.user as JwtUser;
-    return this.descuentosService.restaurar(user.tenantId!, id);
+    return this.descuentosService.restaurar(user.tenantId!, id, dto.nombre);
   }
 }

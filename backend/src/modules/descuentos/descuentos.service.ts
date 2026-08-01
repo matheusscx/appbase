@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
+import {
+  baseSinSufijo,
+  patronLikeNombre,
+  sugerirNombreLibre,
+} from '../../common/utils/nombre-sugerido.util';
 import { Descuento } from './entities/descuento.entity';
 import { DescuentoTramo } from './entities/descuento-tramo.entity';
 import { DescuentoMetodoPago } from './entities/descuento-metodo-pago.entity';
@@ -276,7 +281,16 @@ export class DescuentosService {
     );
   }
 
-  async restaurar(tenantId: string, id: string): Promise<Descuento> {
+  /**
+   * Papelera. `nombreNuevo` solo llega cuando el usuario resolvió una colisión
+   * desde el modal; sin él se restaura con el nombre que la fila ya tenía, que
+   * es el comportamiento de siempre.
+   */
+  async restaurar(
+    tenantId: string,
+    id: string,
+    nombreNuevo?: string,
+  ): Promise<Descuento> {
     // Una sola regla para los tres casos —no existe, existe y está viva, o
     // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
     // lo que borró una persona (decisión del owner, docs/features/papelera.md).
@@ -287,6 +301,7 @@ export class DescuentosService {
     if (!descuento || !descuento.eliminadoEl || !descuento.eliminadoPor) {
       throw new NotFoundException(`Descuento ${id} no está en la papelera`);
     }
+    const nombre = nombreNuevo ?? descuento.nombre;
     // `descuentos` no tiene índice único de nombre (medido: no hay `CREATE
     // UNIQUE INDEX` sobre la tabla) — la unicidad la garantiza `create()`/
     // `update()` en código vía `validarNombreUnico`, que filtra
@@ -295,14 +310,10 @@ export class DescuentosService {
     // "Black Friday", crear otro "Black Friday", y restaurar el viejo
     // dejaría dos vivos con el mismo nombre (reusa `nombreDisponible`, no
     // una validación nueva).
-    const { disponible } = await this.nombreDisponible(
-      tenantId,
-      descuento.nombre,
-      id,
-    );
+    const { disponible } = await this.nombreDisponible(tenantId, nombre, id);
     if (!disponible) {
       throw new BadRequestException(
-        `Ya existe un descuento activo con el nombre "${descuento.nombre}". Renombrá el actual o el restaurado antes de continuar.`,
+        await this.errorDeColision('descuento', tenantId, nombre),
       );
     }
     // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
@@ -310,9 +321,46 @@ export class DescuentosService {
     // borrado de persona (ver categorias.service.ts → restaurar()).
     await this.descuentoRepo.update(
       { id, tenantId },
-      { eliminadoEl: null, eliminadoPor: null },
+      {
+        eliminadoEl: null,
+        eliminadoPor: null,
+        ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
+      },
     );
     return this.descuentoRepo.findOneOrFail({ where: { id, tenantId } });
+  }
+
+  /**
+   * Cuerpo del 400 de colisión, con un nombre libre ya calculado para que la
+   * pantalla lo ofrezca precargado en vez de mandar al usuario a adivinar.
+   *
+   * `nombreSugerido` sale de UNA query (todos los nombres vivos que compiten)
+   * más aritmética en memoria — nunca un `SELECT` por candidato, que sería un
+   * N+1 disfrazado de bucle de reintentos.
+   */
+  private async errorDeColision(
+    etiqueta: string,
+    tenantId: string,
+    nombre: string,
+  ): Promise<{ message: string; nombreSugerido: string }> {
+    const base = baseSinSufijo(nombre);
+    const filas = await this.descuentoRepo
+      .createQueryBuilder('d')
+      .select('d.nombre', 'nombre')
+      .where('d.tenant_id = :tenantId', { tenantId })
+      .andWhere('d.eliminado_el IS NULL')
+      .andWhere("(d.nombre = :base OR d.nombre LIKE :patron ESCAPE '\\')", {
+        base,
+        patron: patronLikeNombre(base),
+      })
+      .getRawMany<{ nombre: string }>();
+    return {
+      message: `Ya existe un ${etiqueta} activo con el nombre "${nombre}".`,
+      nombreSugerido: sugerirNombreLibre(
+        nombre,
+        filas.map((f) => f.nombre),
+      ),
+    };
   }
 
   async nombreDisponible(

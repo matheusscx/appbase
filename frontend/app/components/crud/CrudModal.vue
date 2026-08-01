@@ -9,12 +9,16 @@ withDefaults(
     confirmColor?: 'error' | 'primary' | 'neutral'
     loading?: boolean
     soloCerrar?: boolean
+    /** Para los modales cuyo `#detalle` pide un dato: sin él, confirmar sería
+     * un click que no hace nada (ver el modal de colisión de `descuentos`). */
+    confirmDisabled?: boolean
   }>(),
   {
     confirmLabel: 'Eliminar',
     confirmColor: 'error',
     loading: false,
     soloCerrar: false,
+    confirmDisabled: false,
   },
 )
 
@@ -53,6 +57,7 @@ function cancelar() {
           <UButton
             :color="confirmColor"
             :loading="loading"
+            :disabled="confirmDisabled"
             @click="emit('confirm')"
           >
             {{ confirmLabel }}
