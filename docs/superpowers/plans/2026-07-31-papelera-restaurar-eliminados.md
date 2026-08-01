@@ -630,7 +630,21 @@ Expected: FAIL — `restaurar is not a function`
   }
 ```
 
-**Nota para quien implemente:** el `RETURNING` de arriba necesita leer `eliminado_el` **antes** de pisarlo. Si el subquery no lo resuelve como se espera, la alternativa es un `SELECT … FOR UPDATE` del ítem dentro de la misma transacción antes del `UPDATE`, guardando el valor. Elegir la que funcione y dejar el porqué en un comentario; lo que no se puede es leer el timestamp **después** de haberlo puesto en `NULL`.
+> ⛔ **El snippet de arriba está mal, y se corrigió el 2026-07-31 al implementarlo.** Se
+> deja porque el error es el punto: **el timestamp no puede hacer el viaje de ida y vuelta
+> por JavaScript.** `timestamptz` de Postgres tiene precisión de microsegundos y el mapeo
+> a `Date` de `pg` sólo llega a milisegundos, así que un `WHERE eliminado_el = $N` con el
+> valor leído **nunca matchea**: el revivir de colaterales afecta 0 filas — sin error, sin
+> log y sin test rojo. Los unit tests mockeados no lo ven; lo cazó únicamente el e2e
+> contra Postgres real.
+>
+> **La forma correcta es un solo statement con CTEs encadenadas**, para que el timestamp
+> nunca salga de la base. La CTE de los colaterales lee el `eliminado_el` anterior del
+> ítem porque, dentro de un mismo statement, las CTEs ven el snapshot previo al `UPDATE` —
+> eso es deliberado y va comentado en el código.
+>
+> **Vale igual para la Task 5:** cualquier acotamiento por timestamp se resuelve dentro de
+> Postgres, nunca comparando un valor que pasó por JS.
 
 - [ ] **Step 4: Correr los tests y verificar que pasan**
 
@@ -693,7 +707,14 @@ Expected: FAIL
 
 - [ ] **Step 3: Implementar**
 
-Mismo patrón que Task 4: leer el `eliminado_el` del salón dentro de la transacción **antes** de limpiarlo, restaurar el salón, y restaurar solo las `mesas` con `salonId` y ese mismo timestamp. Restaurar una mesa suelta (`mesas/:id/restaurar`) no toca el salón: si el salón sigue borrado, la mesa queda huérfana y visible en el listado con eliminados — huérfano tolerado, decisión (c) de la spec.
+Mismo patrón que Task 4, **con su corrección incluida**: un solo statement con CTEs
+encadenadas, para que el `eliminado_el` del salón nunca salga de Postgres. Restaurar el
+salón y, en la misma sentencia, las `mesas` con ese `salonId` y ese mismo timestamp.
+
+⚠️ **No leas el timestamp a JS para pasarlo de vuelta como parámetro.** Falla en silencio:
+`timestamptz` tiene microsegundos, el `Date` de `pg` milisegundos, el `WHERE` no matchea
+y el `UPDATE` afecta 0 filas sin error. Lo descubrió el e2e real de la Task 4; los tests
+mockeados lo daban por bueno. Copiá la forma de `items.service.ts → restaurar()`. Restaurar una mesa suelta (`mesas/:id/restaurar`) no toca el salón: si el salón sigue borrado, la mesa queda huérfana y visible en el listado con eliminados — huérfano tolerado, decisión (c) de la spec.
 
 - [ ] **Step 4: Correr y verificar que pasan**
 

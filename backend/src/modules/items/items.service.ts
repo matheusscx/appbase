@@ -27,6 +27,7 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import { convertirCostoUnitario } from '../../common/utils/costo-conversion-unidad.util';
+import { unwrap } from '../../common/utils/pg-returning.util';
 import {
   PersonalizacionRecetaDto,
   PersonalizacionGrupoInputDto,
@@ -205,7 +206,12 @@ export class ItemsService {
   ): { where: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let idx = 2;
-    let where = ` WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL`;
+    // Papelera: `incluirEliminados` trae vivos Y borrados en el mismo
+    // listado (igual que categorías/causas de merma); sin el flag, el
+    // filtro de siempre.
+    let where = query.incluirEliminados
+      ? ` WHERE i.tenant_id = $1`
+      : ` WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL`;
 
     if (query.tipo) {
       where += ` AND i.tipo = $${idx++}`;
@@ -229,7 +235,15 @@ export class ItemsService {
     query: QueryItemsDto,
   ): Promise<
     PaginatedResponse<
-      ReturnType<typeof this.mapRow> & { disponible: number | null }
+      ReturnType<typeof this.mapRow> & {
+        disponible: number | null;
+        // Solo se completan con `incluirEliminados`: el listado normal no
+        // trae estas columnas, así que el tipo las deja opcionales en vez de
+        // forzar `null` en cada fila de la ruta de siempre.
+        eliminadoEl?: string | null;
+        eliminadoPor?: string | null;
+        eliminadoPorNombre?: string | null;
+      }
     >
   > {
     const { page, pageSize, offset } = resolvePagination(query);
@@ -284,6 +298,36 @@ export class ItemsService {
       comboIds,
     );
 
+    // Papelera: nombre de quien borró por JOIN en UNA query batch acotada a
+    // los ids de esta página (no N+1). Sin filtrar el `eliminado_el` de
+    // `usuarios` a propósito: el autor de un borrado es un hecho histórico
+    // que no debe desaparecer solo porque ese usuario se dio de baja después
+    // (docs/patterns/backend.md, mismo criterio que categorias.service.ts).
+    let auditoriaPorId = new Map<
+      string,
+      {
+        eliminado_el: string | null;
+        eliminado_por: string | null;
+        eliminado_por_nombre: string | null;
+      }
+    >();
+    if (query.incluirEliminados && rows.length) {
+      const auditRows: {
+        item_id: string;
+        eliminado_el: string | null;
+        eliminado_por: string | null;
+        eliminado_por_nombre: string | null;
+      }[] = await this.dataSource.query(
+        `SELECT i.item_id, i.eliminado_el, i.eliminado_por,
+                u.nombre_usuario AS eliminado_por_nombre
+           FROM items i
+           LEFT JOIN usuarios u ON u.usuario_id = i.eliminado_por
+          WHERE i.item_id = ANY($1) AND i.tenant_id = $2`,
+        [rows.map((r) => r.item_id), tenantId],
+      );
+      auditoriaPorId = new Map(auditRows.map((a) => [a.item_id, a]));
+    }
+
     const data = rows.map((r) => {
       const base = this.mapRow(r);
       const disponible =
@@ -292,7 +336,18 @@ export class ItemsService {
           : null;
       const disponibleCondicional =
         base.tipo === 'combo' && comboIdsConGrupos.has(base.id);
-      return { ...base, disponible, disponibleCondicional };
+      if (!query.incluirEliminados) {
+        return { ...base, disponible, disponibleCondicional };
+      }
+      const audit = auditoriaPorId.get(r.item_id);
+      return {
+        ...base,
+        disponible,
+        disponibleCondicional,
+        eliminadoEl: audit?.eliminado_el ?? null,
+        eliminadoPor: audit?.eliminado_por ?? null,
+        eliminadoPorNombre: audit?.eliminado_por_nombre ?? null,
+      };
     });
 
     return {
@@ -1720,7 +1775,11 @@ export class ItemsService {
     return this.obtenerUsoItem(this.dataSource.manager, tenantId, itemId);
   }
 
-  async remove(tenantId: string, itemId: string): Promise<void> {
+  async remove(
+    tenantId: string,
+    usuarioId: string,
+    itemId: string,
+  ): Promise<void> {
     const item = await this.itemRepo.findOne({
       where: { id: itemId, tenantId },
     });
@@ -1770,12 +1829,138 @@ export class ItemsService {
         [itemId, tenantId],
       );
 
+      // `items` es el único de los 16 recursos de la papelera que pisa
+      // `activo` al borrar: por eso es también el único que se restaura
+      // inactivo (ver `restaurar()`, más abajo).
+      //
+      // `eliminado_el` se escribe con `NOW() AT TIME ZONE 'UTC'`, no `NOW()`
+      // a secas: `items.eliminado_el` es `timestamp` SIN zona (default de
+      // `@DeleteDateColumn()` en el driver de Postgres de TypeORM, sin
+      // `type` explícito), mientras que `receta_extras_permitidos.eliminado_el`
+      // es `timestamptz`. Escribir con `NOW()` a secas deja que Postgres
+      // castee implícitamente usando el `TimeZone` de la SESIÓN que corre
+      // este `UPDATE` — y `restaurar()` compara esta columna contra la de
+      // `receta_extras_permitidos` en otra sentencia/conexión. Si esa otra
+      // conexión tiene un `TimeZone` de sesión distinto (un pooler, un
+      // `SET TimeZone` de otra feature, un deploy con default no-UTC), la
+      // comparación no matchea NUNCA — mismo fallo silencioso que el de
+      // `restaurar()` (ver el comentario ahí), un nivel más abajo. Con
+      // `AT TIME ZONE 'UTC'` explícito acá Y al leer en `restaurar()`, el
+      // valor guardado son los dígitos de reloj UTC del instante, sin
+      // depender del `TimeZone` de NINGUNA sesión en ningún momento.
+      // Verificado contra Postgres real con `SET TimeZone` a `UTC` y a
+      // `America/Santiago` en sesiones separadas para escribir y leer: sin
+      // este cast, matchea solo por coincidencia cuando las dos sesiones
+      // comparten `TimeZone` (hoy siempre UTC, nada lo garantiza); con el
+      // cast, matchea en las dos combinaciones.
       await manager.query(
-        `UPDATE items SET activo = false, eliminado_el = NOW(), actualizado_el = NOW()
-         WHERE item_id = $1 AND tenant_id = $2`,
-        [itemId, tenantId],
+        `UPDATE items
+            SET activo = false, eliminado_el = (NOW() AT TIME ZONE 'UTC'),
+                eliminado_por = $3, actualizado_el = NOW()
+          WHERE item_id = $1 AND tenant_id = $2`,
+        [itemId, tenantId, usuarioId],
       );
     });
+  }
+
+  /**
+   * Papelera: revierte el soft delete de `remove()`. El ítem vuelve
+   * **inactivo** (nunca `activo: true`): `remove()` pisó `activo = false` y
+   * el valor previo no sobrevivió en ninguna columna, así que reactivarlo es
+   * un segundo gesto deliberado del usuario, no algo que `restaurar()` pueda
+   * inferir.
+   */
+  async restaurar(tenantId: string, itemId: string) {
+    // Una sola sentencia (CTEs encadenadas), y no dos `manager.query()`
+    // pasando el timestamp por JS de por medio. Se probaron las dos formas
+    // contra Postgres real:
+    //
+    // 1) Leer `eliminado_el` con un `RETURNING (SELECT …)` (el subquery SÍ
+    //    ve el valor previo al UPDATE, por las reglas de visibilidad de
+    //    Postgres: verificado con una transacción de prueba + ROLLBACK) y
+    //    después usarlo como parámetro del segundo `UPDATE`. Esto se rompió
+    //    en el e2e real: `timestamptz` en Postgres tiene precisión de
+    //    microsegundos, pero el driver `pg` lo mapea a un `Date` de JS —que
+    //    solo tiene milisegundos—, así que el valor que vuelve a entrar como
+    //    parámetro ya perdió precisión y el `WHERE eliminado_el = $N` no
+    //    matchea NUNCA con el valor real guardado. El colateral no revivía
+    //    ni una fila.
+    // 2) La de abajo: la CTE `extras` referencia `eliminado_el_previo` de la
+    //    CTE `restaurado` con un subquery **dentro del mismo SQL**, así que
+    //    el timestamp nunca sale de Postgres ni pierde precisión. Verificado
+    //    contra Postgres real (e2e con receta + extra + un borrado previo de
+    //    otro motivo): revive solo la fila del borrado actual.
+    //
+    // Un segundo fallo silencioso, un nivel más abajo (encontrado en
+    // revisión, verificado igual contra Postgres real): `items.eliminado_el`
+    // es `timestamp` SIN zona (default de `@DeleteDateColumn()` sin `type`
+    // explícito) y `receta_extras_permitidos.eliminado_el` es `timestamptz`.
+    // Compararlos sin cast deja que Postgres castee el valor `timestamp`
+    // usando el `TimeZone` de la SESIÓN que corre la comparación — que
+    // puede no ser el mismo `TimeZone` que estaba activo cuando `remove()`
+    // escribió el valor (otra conexión del pool, otro deploy, un `SET
+    // TimeZone` de otra feature). Hoy nunca falla porque nada en esta app
+    // cambia el `TimeZone` de sesión y el default del server es UTC, pero es
+    // la MISMA clase de bug que el de arriba: revive 0 filas sin error y sin
+    // test rojo si eso cambia. Por eso `remove()` escribe
+    // `eliminado_el = (NOW() AT TIME ZONE 'UTC')` (ver el comentario ahí) en
+    // vez de `NOW()` a secas, y acá se lee con el mismo
+    // `AT TIME ZONE 'UTC'` explícito: los dos lados quedan anclados a UTC
+    // por afuera de cualquier `TimeZone` de sesión, en vez de depender de
+    // que las sesiones de escritura y lectura coincidan por casualidad.
+    // Medido contra Postgres real con `SET TimeZone` en sesiones separadas
+    // para escribir y leer (UTC↔UTC, Santiago↔UTC, Santiago↔Santiago): sin
+    // el cast, matchea 1/3 combinaciones (solo cuando ambas sesiones
+    // comparten `TimeZone`); con el cast en los dos lados, matchea las 3.
+    //
+    // La CTE `extras` de abajo revive solo las filas de
+    // `receta_extras_permitidos` que ESTE mismo borrado se llevó, acotando
+    // por el timestamp exacto que `remove()` les puso: una fila borrada
+    // antes por otro motivo tiene otro `eliminado_el` y no revive. Si
+    // `restaurado` viene vacío (ítem que no estaba en la papelera), el
+    // subquery da NULL y `eliminado_el = NULL` no matchea nada — no-op
+    // seguro. `AT TIME ZONE 'UTC'` convierte el `timestamp` sin zona de
+    // `items` a `timestamptz` anclado a UTC, sin depender del `TimeZone` de
+    // la sesión que corre esta comparación (ver arriba).
+    //
+    // Este comentario vive ACÁ, en TypeScript, y no como `--` dentro del SQL
+    // de la CTE: si viajara dentro del string, un test que busca la
+    // subcadena `AT TIME ZONE 'UTC'` en el SQL enviado matchearía contra el
+    // comentario aunque alguien borrara el cast funcional del `WHERE` —
+    // exactamente el escenario que un mutante tiene que cazar y no cazaba
+    // (ver el test de `restaurar()` en items.service.spec.ts).
+    const rows = unwrap<{ item_id: string }>(
+      await this.dataSource.query(
+        `WITH restaurado AS (
+           UPDATE items
+              SET eliminado_el = NULL, actualizado_el = NOW()
+            WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
+           RETURNING item_id,
+                     (SELECT eliminado_el FROM items
+                        WHERE item_id = $1 AND tenant_id = $2) AS eliminado_el_previo
+         ),
+         extras AS (
+           UPDATE receta_extras_permitidos
+              SET eliminado_el = NULL, actualizado_el = NOW()
+            WHERE tenant_id = $2
+              AND eliminado_el = (
+                (SELECT eliminado_el_previo FROM restaurado) AT TIME ZONE 'UTC'
+              )
+              AND (ingrediente_item_id = $1 OR receta_item_id = $1)
+           RETURNING 1
+         )
+         SELECT item_id FROM restaurado`,
+        [itemId, tenantId],
+      ),
+    );
+    if (!rows.length) {
+      throw new NotFoundException(`Item ${itemId} no está en la papelera`);
+    }
+
+    // Una sola sentencia ya commiteada (sin transacción explícita) antes de
+    // llegar acá: `findOne` ve el estado final sin ventanas de visibilidad
+    // entre conexiones.
+    return this.findOne(tenantId, itemId);
   }
 
   async ajustarStock(

@@ -1,4 +1,11 @@
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
@@ -31,4 +38,14 @@ export class QueryItemsDto extends PaginationQueryDto {
     typeof value === 'string' ? value.trim() : value,
   )
   search?: string;
+
+  // Mismo campo que `QueryIncluirEliminadosDto` (nombre y coerción del
+  // booleano), duplicado en vez de `extends`: TS solo permite una herencia y
+  // esta clase ya extiende `PaginationQueryDto` para la paginación. El
+  // nombre del query param sigue siendo el contrato único de los 16 recursos
+  // de la papelera.
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsOptional()
+  @IsBoolean()
+  incluirEliminados?: boolean;
 }

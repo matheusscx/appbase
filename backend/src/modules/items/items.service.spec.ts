@@ -245,6 +245,73 @@ describe('ItemsService', () => {
       const result = await service.findAll(TENANT, {});
       expect(result.data[0].disponible).toBeNull();
     });
+
+    it('sin incluirEliminados filtra eliminado_el IS NULL y no trae auditoría', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 0 }])
+        .mockResolvedValueOnce([]);
+
+      await service.findAll(TENANT, {});
+
+      expect(dataSource.query.mock.calls[0][0]).toContain(
+        'eliminado_el IS NULL',
+      );
+      // Sin filas, la query batch de auditoría ni se dispara.
+      expect(dataSource.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('incluirEliminados=true no filtra eliminado_el y trae quién borró (batch, no N+1)', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }]) // count
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_ID,
+            nombre: 'Smartphone',
+            descripcion: null,
+            tipo: 'producto',
+            activo: false,
+            precio_base: '100000',
+            precio_incluye_impuesto: false,
+            moneda_id: MONEDA_ID,
+            moneda_codigo: 'CLP',
+            moneda_simbolo: '$',
+            categoria_id: null,
+            categoria_nombre: null,
+            creado_el: new Date(),
+            stock: '10',
+            unidad_medida: 'unidad',
+            fecha_elaboracion: null,
+            fecha_vencimiento: null,
+            modo_inventario: 'cantidad',
+            costo_actual: null,
+            duracion_estimada: null,
+            requiere_cita: null,
+            frecuencia: null,
+          },
+        ]) // filas
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_ID,
+            eliminado_el: '2026-07-31T12:00:00.000Z',
+            eliminado_por: USUARIO,
+            eliminado_por_nombre: 'admin',
+          },
+        ]); // auditoría batch
+
+      const result = await service.findAll(TENANT, {
+        incluirEliminados: true,
+      });
+
+      expect(dataSource.query.mock.calls[0][0]).not.toContain(
+        'eliminado_el IS NULL',
+      );
+      // 3 llamadas totales (count + filas + UNA de auditoría): la de
+      // auditoría es batch por página, no una por fila.
+      expect(dataSource.query).toHaveBeenCalledTimes(3);
+      expect(result.data[0].eliminadoEl).toBe('2026-07-31T12:00:00.000Z');
+      expect(result.data[0].eliminadoPor).toBe(USUARIO);
+      expect(result.data[0].eliminadoPorNombre).toBe('admin');
+    });
   });
 
   // ── disponible de combo ────────────────────────────────────────────────────
@@ -2082,7 +2149,7 @@ describe('ItemsService', () => {
           { clase: 'combo', nombre: 'Combo Clásico' },
         ]);
 
-        await expect(service.remove(TENANT, PROD_ID)).rejects.toThrow(
+        await expect(service.remove(TENANT, USUARIO, PROD_ID)).rejects.toThrow(
           /No se puede eliminar.*componente de/i,
         );
       });
@@ -2094,7 +2161,7 @@ describe('ItemsService', () => {
   describe('remove', () => {
     it('lanza NotFoundException cuando el item no pertenece al tenant', async () => {
       itemRepo.findOne.mockResolvedValue(null);
-      await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO, ITEM_ID)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -2103,7 +2170,7 @@ describe('ItemsService', () => {
       itemRepo.findOne.mockResolvedValue({ id: ITEM_ID, tenantId: TENANT });
       managerMock.query.mockResolvedValue([]);
 
-      await service.remove(TENANT, ITEM_ID);
+      await service.remove(TENANT, USUARIO, ITEM_ID);
 
       // Llamada 4: la UNION de uso es la 1, los dos soft-delete de
       // `receta_extras_permitidos` (por ingrediente y por receta) son la 2 y la 3
@@ -2112,8 +2179,23 @@ describe('ItemsService', () => {
       expect(managerMock.query).toHaveBeenNthCalledWith(
         4,
         expect.stringContaining('UPDATE items'),
-        [ITEM_ID, TENANT],
+        [ITEM_ID, TENANT, USUARIO],
       );
+    });
+
+    it('registra quién borró en la misma sentencia', async () => {
+      itemRepo.findOne.mockResolvedValue({ id: ITEM_ID, tenantId: TENANT });
+      managerMock.query.mockResolvedValue([]);
+
+      await service.remove(TENANT, USUARIO, ITEM_ID);
+
+      const sql = managerMock.query.mock.calls[3][0] as string;
+      expect(sql).toMatch(/eliminado_por\s*=\s*\$3/);
+      expect(managerMock.query.mock.calls[3][1]).toEqual([
+        ITEM_ID,
+        TENANT,
+        USUARIO,
+      ]);
     });
 
     it('bloquea el borrado si el item es ingrediente de una receta activa', async () => {
@@ -2122,7 +2204,7 @@ describe('ItemsService', () => {
         { clase: 'ingrediente', nombre: 'Hamburguesa Clásica' },
       ]);
 
-      await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO, ITEM_ID)).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -2135,7 +2217,9 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (receta_item_id)
         .mockResolvedValueOnce([]); // UPDATE items (soft delete)
 
-      await expect(service.remove(TENANT, ITEM_ID)).resolves.toBeUndefined();
+      await expect(
+        service.remove(TENANT, USUARIO, ITEM_ID),
+      ).resolves.toBeUndefined();
     });
 
     it('limpia primero las filas donde el item borrado es el ingrediente ofrecido como extra', async () => {
@@ -2146,7 +2230,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (receta_item_id)
         .mockResolvedValueOnce([]); // UPDATE items (soft delete)
 
-      await service.remove(TENANT, ITEM_ID);
+      await service.remove(TENANT, USUARIO, ITEM_ID);
 
       // Llamada 2 (índice 1): limpia por `ingrediente_item_id`, no por
       // `receta_item_id` — aislada por índice de llamada porque las llamadas 2
@@ -2168,7 +2252,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([]) // soft-delete receta_extras_permitidos (receta_item_id)
         .mockResolvedValueOnce([]); // UPDATE items (soft delete)
 
-      await service.remove(TENANT, ITEM_ID);
+      await service.remove(TENANT, USUARIO, ITEM_ID);
 
       // Llamada 3 (índice 2): limpia por `receta_item_id`, no por
       // `ingrediente_item_id` — aislada por índice de llamada porque las
@@ -2178,6 +2262,115 @@ describe('ItemsService', () => {
         expect.stringContaining('WHERE receta_item_id = $1 AND tenant_id = $2'),
       );
       expect(managerMock.query.mock.calls[2][1]).toEqual([ITEM_ID, TENANT]);
+    });
+  });
+
+  // ── restaurar ──────────────────────────────────────────────────────────────
+
+  describe('restaurar', () => {
+    // Una sola sentencia (CTEs encadenadas) por `dataSource.query`, no una
+    // transacción con `manager.query`: la primera versión pasaba el
+    // timestamp de `eliminado_el` por JS entre dos queries, y el e2e real
+    // (Postgres de verdad, no mocks) mostró que eso pierde precisión — ver
+    // el comentario en `restaurar()`. Por eso estos tests miran UNA sola
+    // llamada a `dataSource.query` para la escritura.
+    function mockFindOneServicio() {
+      dataSource.query
+        .mockResolvedValueOnce([
+          {
+            item_id: ITEM_ID,
+            nombre: 'Servicio restaurado',
+            descripcion: null,
+            tipo: 'servicio',
+            activo: false,
+            precio_base: '5000',
+            precio_incluye_impuesto: false,
+            moneda_id: MONEDA_ID,
+            moneda_codigo: 'CLP',
+            moneda_simbolo: '$',
+            categoria_id: null,
+            categoria_nombre: null,
+            creado_el: new Date(),
+            stock: null,
+            unidad_medida: null,
+            fecha_elaboracion: null,
+            fecha_vencimiento: null,
+            duracion_estimada: null,
+            requiere_cita: null,
+          },
+        ]) // BASE_QUERY
+        .mockResolvedValueOnce([]) // impuestos
+        .mockResolvedValueOnce([]) // recargos
+        .mockResolvedValueOnce([]); // descuentos
+    }
+
+    it('deja el item inactivo: la sentencia no toca `activo`', async () => {
+      dataSource.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]); // CTE de restaurar
+      mockFindOneServicio();
+
+      await service.restaurar(TENANT, ITEM_ID);
+
+      // `items.remove()` es el único de los 16 que pisa `activo = false`, y
+      // el valor previo se perdió: si la sentencia mencionara `activo` (por
+      // ejemplo para "reactivar" junto con restaurar), el ítem volvería a
+      // la venta sin que nadie lo pidiera. Es la única aserción que prueba
+      // algo acá: `restaurar()` delega el valor de retorno enteramente en
+      // `findOne`, que este test mockea con `activo: false` fijo — afirmar
+      // `item.activo === false` sobre esa respuesta sería tautológico (pasa
+      // sin importar lo que haga el código real). Que el ítem *de verdad*
+      // vuelva inactivo lo prueba el e2e (`papelera.e2e-spec.ts`, contra
+      // Postgres real, sin mocks).
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).not.toMatch(/activo/i);
+    });
+
+    it('revive los extras que ESTE mismo borrado se llevó, acotando por el timestamp dentro del mismo SQL', async () => {
+      dataSource.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
+      mockFindOneServicio();
+
+      await service.restaurar(TENANT, ITEM_ID);
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).toContain('receta_extras_permitidos');
+      expect(sql).toMatch(/eliminado_el\s*=\s*NULL/);
+      // Acotado al timestamp que le puso `remove()`, leído por una subquery
+      // a la CTE `restaurado` — nunca por un parámetro que haya pasado por
+      // JS (por eso pierde precisión de microsegundos). Una fila borrada
+      // antes por otro motivo tiene otro `eliminado_el` y no debe revivir
+      // solo por compartir el `item_id`. Este es el mutante importante:
+      // cambiar esta condición por `eliminado_el IS NOT NULL` revivería
+      // cualquier fila borrada, no solo la de este borrado.
+      expect(sql).toMatch(
+        /eliminado_el\s*=\s*\(\s*\(SELECT eliminado_el_previo FROM restaurado\)/,
+      );
+      // `items.eliminado_el` es `timestamp` SIN zona;
+      // `receta_extras_permitidos.eliminado_el` es `timestamptz`. Sin este
+      // cast explícito, Postgres castea con el `TimeZone` de la sesión que
+      // corre la comparación — que puede no ser el mismo que estaba activo
+      // cuando `remove()` escribió el valor — y la comparación deja de
+      // matchear en silencio (medido contra Postgres real).
+      expect(sql).toContain("AT TIME ZONE 'UTC'");
+    });
+
+    it('revive en las dos direcciones: como ingrediente y como receta', async () => {
+      dataSource.query.mockResolvedValueOnce([{ item_id: ITEM_ID }]);
+      mockFindOneServicio();
+
+      await service.restaurar(TENANT, ITEM_ID);
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).toContain('ingrediente_item_id = $1');
+      expect(sql).toContain('receta_item_id = $1');
+    });
+
+    it('item que no está en la papelera (no existe o sigue vivo) → 404, sin llamar a findOne', async () => {
+      dataSource.query.mockResolvedValueOnce([]); // CTE sin match
+
+      await expect(service.restaurar(TENANT, ITEM_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      // `findOne` no corrió: una sola llamada, la de la sentencia de arriba.
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -4887,9 +5080,9 @@ describe('ItemsService', () => {
         { clase: 'opcion', nombre: 'Proteína' },
       ]);
 
-      await expect(service.remove(TENANT, ITEM_OPCION_ID)).rejects.toThrow(
-        /No se puede eliminar.*opción de/i,
-      );
+      await expect(
+        service.remove(TENANT, USUARIO, ITEM_OPCION_ID),
+      ).rejects.toThrow(/No se puede eliminar.*opción de/i);
     });
   });
 
@@ -4905,7 +5098,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
 
-      await service.remove(TENANT, ITEM_ID);
+      await service.remove(TENANT, USUARIO, ITEM_ID);
 
       const sqls = managerMock.query.mock.calls.map((c) => c[0] as string);
       expect(sqls).toHaveLength(4);
@@ -4922,7 +5115,7 @@ describe('ItemsService', () => {
         { clase: 'extra', nombre: 'Hamburguesa' },
       ]);
 
-      await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO, ITEM_ID)).rejects.toThrow(
         'No se puede eliminar: es componente de Menú del día',
       );
     });
@@ -4933,7 +5126,7 @@ describe('ItemsService', () => {
         { clase: 'ingrediente', nombre: 'Pizza' },
       ]);
 
-      await expect(service.remove(TENANT, ITEM_ID)).rejects.toThrow(
+      await expect(service.remove(TENANT, USUARIO, ITEM_ID)).rejects.toThrow(
         'No se puede eliminar: es ingrediente de Pizza',
       );
     });
@@ -4945,7 +5138,7 @@ describe('ItemsService', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
 
-      await service.remove(TENANT, ITEM_ID);
+      await service.remove(TENANT, USUARIO, ITEM_ID);
 
       expect(managerMock.query.mock.calls[0][1]).toEqual([ITEM_ID, TENANT]);
 

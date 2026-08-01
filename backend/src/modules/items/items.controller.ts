@@ -81,8 +81,22 @@ export class ItemsController {
   @Delete(':id')
   @RequiresPermiso('Items', 'Eliminar')
   remove(@Req() req: Request, @Param('id') id: string) {
+    const { tenantId, id: usuarioId } = req.user as {
+      tenantId: string;
+      id: string;
+    };
+    return this.itemsService.remove(tenantId, usuarioId, id);
+  }
+
+  // Papelera: mismo guard que el DELETE, heredado del `@Controller`
+  // (JwtAuthGuard, TenantGuard, PermisosGuard) más el mismo permiso puntual
+  // — restaurar es la otra cara del mismo borrado, no una operación de
+  // lectura.
+  @Post(':id/restaurar')
+  @RequiresPermiso('Items', 'Eliminar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.itemsService.remove(tenantId, id);
+    return this.itemsService.restaurar(tenantId, id);
   }
 
   @Patch(':id/stock')
