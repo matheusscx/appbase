@@ -431,7 +431,7 @@ describe('GruposModificadoresService', () => {
       expect(dataSourceMock.query).toHaveBeenNthCalledWith(
         1,
         expect.stringMatching(/eliminado_el\s*=\s*NULL/),
-        [GRUPO_ID, TENANT_ID],
+        [GRUPO_ID, TENANT_ID, null],
       );
       expect(res).toMatchObject({
         grupoModificadorId: GRUPO_ID,
@@ -454,10 +454,61 @@ describe('GruposModificadoresService', () => {
       dataSourceMock.query.mockRejectedValueOnce(
         Object.assign(new Error('duplicate key'), { code: '23505' }),
       );
+      // El `catch` pregunta dos cosas más: el nombre guardado del grupo (la
+      // CTE no lo lee antes de escribir) y los nombres vivos que compiten,
+      // para calcular la sugerencia.
+      dataSourceMock.query.mockResolvedValueOnce([{ nombre: 'Bebida' }]);
+      dataSourceMock.query.mockResolvedValueOnce([{ nombre: 'Bebida' }]);
 
       await expect(service.restaurar(TENANT_ID, GRUPO_ID)).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    it('el 400 de colisión de NOMBRE trae un nombre libre ya calculado', async () => {
+      dataSourceMock.query.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+      dataSourceMock.query.mockResolvedValueOnce([{ nombre: 'Bebida' }]);
+      dataSourceMock.query.mockResolvedValueOnce([
+        { nombre: 'Bebida' },
+        { nombre: 'Bebida 2' },
+      ]);
+
+      await expect(
+        service.restaurar(TENANT_ID, GRUPO_ID),
+      ).rejects.toMatchObject({
+        response: {
+          message:
+            'Ya existe un grupo de modificadores activo con el nombre "Bebida".',
+          nombreSugerido: 'Bebida 3',
+        },
+      });
+    });
+
+    // ⚠️ El otro 23505 de esta misma sentencia NO es de nombre:
+    // `uq_grupo_opcion_item_vivo` salta al revivir las opciones bajo un item
+    // que ya tiene otra opción viva. Renombrar el grupo no lo resuelve, así
+    // que ese camino NO debe ofrecer una sugerencia — sería mandar al usuario
+    // a arreglar algo que no es la causa. Mismo criterio que `garzones`.
+    it('la colisión de OPCIÓN no ofrece sugerencia de nombre', async () => {
+      dataSourceMock.query.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), {
+          code: '23505',
+          constraint: 'uq_grupo_opcion_item_vivo',
+        }),
+      );
+
+      const error: unknown = await service
+        .restaurar(TENANT_ID, GRUPO_ID)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      const respuesta = (error as BadRequestException).getResponse();
+      // Ancla positiva: el mensaje SÍ está y habla de la opción, así que la
+      // ausencia de `nombreSugerido` no es una respuesta vacía.
+      expect(JSON.stringify(respuesta)).toContain('opción viva');
+      expect(respuesta).not.toHaveProperty('nombreSugerido');
     });
 
     it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {

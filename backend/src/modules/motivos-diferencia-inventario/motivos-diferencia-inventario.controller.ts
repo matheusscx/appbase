@@ -21,6 +21,7 @@ import { MotivosDiferenciaInventarioService } from './motivos-diferencia-inventa
 import { CreateMotivoDiferenciaInventarioDto } from './dto/create-motivo-diferencia-inventario.dto';
 import { UpdateMotivoDiferenciaInventarioDto } from './dto/update-motivo-diferencia-inventario.dto';
 import { QueryMotivosDiferenciaInventarioDto } from './dto/query-motivos-diferencia-inventario.dto';
+import { RestaurarDto } from '../../common/dto/restaurar.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
 @Controller('motivos-diferencia-inventario')
@@ -70,9 +71,15 @@ export class MotivosDiferenciaInventarioController {
   }
 
   @UseGuards(TenantAdminGuard)
+  // `RestaurarDto` es 100% opcional: sin body se restaura con el nombre
+  // que la fila ya tenía, que es como llaman las pantallas sin colisión.
   @Post(':id/restaurar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: RestaurarDto,
+  ) {
     const user = req.user as JwtUser;
-    return this.service.restaurar(user.tenantId!, id);
+    return this.service.restaurar(user.tenantId!, id, dto.nombre);
   }
 }

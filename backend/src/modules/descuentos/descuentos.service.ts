@@ -312,7 +312,7 @@ export class DescuentosService {
         await errorDeColisionNombre(
           this.descuentoRepo,
           'd',
-          'descuento',
+          'un descuento activo',
           tenantId,
           nombre,
         ),

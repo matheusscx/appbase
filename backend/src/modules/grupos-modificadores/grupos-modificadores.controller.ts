@@ -21,6 +21,7 @@ import { GruposModificadoresService } from './grupos-modificadores.service';
 import { CreateGrupoModificadorDto } from './dto/create-grupo-modificador.dto';
 import { UpdateGrupoModificadorDto } from './dto/update-grupo-modificador.dto';
 import { AplicarOverridesDto } from './dto/aplicar-overrides.dto';
+import { RestaurarDto } from '../../common/dto/restaurar.dto';
 
 @Controller('grupos-modificadores')
 @UseGuards(JwtAuthGuard, TenantGuard)
@@ -82,10 +83,16 @@ export class GruposModificadoresController {
     return this.service.remove(user.tenantId!, user.id, id);
   }
 
+  // `RestaurarDto` es 100% opcional: sin body se restaura con el nombre
+  // que la fila ya tenía, que es como llaman las pantallas sin colisión.
   @Post(':id/restaurar')
   @UseGuards(TenantAdminGuard)
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: RestaurarDto,
+  ) {
     const user = req.user as JwtUser;
-    return this.service.restaurar(user.tenantId!, id);
+    return this.service.restaurar(user.tenantId!, id, dto.nombre);
   }
 }

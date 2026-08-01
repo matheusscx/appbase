@@ -6,6 +6,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { unwrap } from '../../common/utils/pg-returning.util';
+import { errorDeColisionNombreSQL } from '../../common/utils/nombre-sugerido.util';
 import { CreateMotivoDiferenciaDto } from './dto/create-motivo-diferencia.dto';
 import { UpdateMotivoDiferenciaDto } from './dto/update-motivo-diferencia.dto';
 
@@ -193,6 +194,7 @@ export class MotivosDiferenciaService {
   async restaurar(
     tenantId: string,
     id: string,
+    nombreNuevo?: string,
   ): Promise<MotivoDiferenciaListItem> {
     try {
       // `UPDATE … WHERE eliminado_el IS NOT NULL … RETURNING` resuelve
@@ -202,11 +204,12 @@ export class MotivosDiferenciaService {
         await this.dataSource.query(
           `UPDATE motivo_diferencia_caja
               SET eliminado_el = NULL, eliminado_por = NULL,
+                  nombre = COALESCE($3, nombre),
                   actualizado_el = NOW()
             WHERE motivo_diferencia_id = $1 AND tenant_id = $2
               AND eliminado_el IS NOT NULL AND eliminado_por IS NOT NULL
           RETURNING ${COLS}, eliminado_el, eliminado_por`,
-          [id, tenantId],
+          [id, tenantId, nombreNuevo ?? null],
         ),
       );
       if (!rows.length) {
@@ -222,8 +225,26 @@ export class MotivosDiferenciaService {
       // Se capta el código de Postgres —no una lista de índices a mano—
       // para que valga también donde no lo enumeramos.
       if ((e as { code?: string }).code === '23505') {
+        // La sugerencia se calcula ACÁ y no antes del `UPDATE` a propósito:
+        // con índice único el `catch` hace falta igual —entre consultar y
+        // escribir otra transacción puede tomar el nombre—, así que
+        // pre-consultar agregaría una query en TODOS los restaurar sin poder
+        // sacar este bloque. El `UPDATE` corre en autocommit, así que su fallo
+        // no deja una transacción abortada y estas queries funcionan.
+        //
+        // `ignorarMayusculas: true` porque el índice de esta tabla es sobre
+        // `lower(nombre)` (medido con `pg_indexes`, 2026-08-01): sin eso la
+        // sugerencia podría devolver un nombre que la base considera tomado y
+        // el usuario recibiría el mismo 400 tras confirmar el modal.
         throw new BadRequestException(
-          'Ya existe un motivo activo con ese nombre. Renombrá el actual o el restaurado antes de continuar.',
+          await errorDeColisionNombreSQL(
+            this.dataSource,
+            'motivo_diferencia_caja',
+            'un motivo activo',
+            tenantId,
+            nombreNuevo ?? (await this.nombreActual(tenantId, id)),
+            { ignorarMayusculas: true },
+          ),
         );
       }
       throw e;
@@ -301,5 +322,19 @@ export class MotivosDiferenciaService {
         `Ya existe un motivo con el nombre "${nombre}"`,
       );
     }
+  }
+  /**
+   * El nombre guardado de una fila de la papelera. Hace falta SOLO en el
+   * `catch` del 23505: el `UPDATE … RETURNING` de arriba no lee la fila antes
+   * de escribir (a propósito: así no hay ventana entre leer y escribir), así
+   * que cuando choca no tenemos el nombre con el que chocó. Una query más,
+   * únicamente en el camino de error.
+   */
+  private async nombreActual(tenantId: string, id: string): Promise<string> {
+    const filas: { nombre: string }[] = await this.dataSource.query(
+      `SELECT nombre FROM motivo_diferencia_caja WHERE motivo_diferencia_id = $1 AND tenant_id = $2`,
+      [id, tenantId],
+    );
+    return filas[0]?.nombre ?? '';
   }
 }

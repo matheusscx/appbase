@@ -12,6 +12,55 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Papelera — salida de la colisión al restaurar (2026-08-01)
+
+- [x] **Los 8 recursos con unicidad de nombre proponen un nombre libre.** El 400
+  decía qué pasaba pero no daba salida: para restaurar, el usuario tenía que ir a
+  renombrar a mano la fila viva que le ocupaba el nombre. Decisión del owner:
+  el backend sugiere y la pantalla lo ofrece **editable**, con el número al final
+  empezando en 2. Cerrado en dos formas según cómo la tabla enforcea la unicidad:
+  - **Los 3 sin índice** (`descuentos`, `recargos`, `turnos`) consultan los
+    nombres tomados antes de intentar.
+  - **Los 5 con índice único parcial** (`cajones`, `causas-merma`,
+    `motivos-diferencia`, `motivos-diferencia-inventario`,
+    `grupos-modificadores`) la calculan **dentro del `catch` del `23505`**. La
+    entrada de backlog planteaba esto como una decisión abierta ("consultar antes
+    vs calcular en el catch") y **resultó no serlo**: con un índice el `catch`
+    hace falta igual —entre consultar y escribir otra transacción puede tomar el
+    nombre—, así que pre-consultar agrega una query en todos los restaurar y no
+    permite sacar el bloque. Queda dominada. Se verificó además que ninguno de
+    los 5 envuelve el restaurar en una transacción explícita, o sea que el fallo
+    no deja una transacción abortada y las queries del `catch` funcionan.
+  **Lo que casi se copia mal:** 3 de las 5 tablas indexan por `lower(nombre)` y
+  no por `nombre` (medido con `pg_indexes`, no asumido). Sin eso la sugerencia
+  habría devuelto un nombre que la base considera tomado, y el usuario habría
+  recibido **el mismo 400 después de confirmar el modal**. Lo fija un e2e contra
+  Postgres real (`causas-merma: la sugerencia respeta que el índice es
+  case-insensitive`), que es el único lugar donde el `ILIKE` se prueba de verdad:
+  los unit tests usan mocks sin índices.
+  **Y dos colisiones quedaron SIN sugerencia a propósito**, porque renombrar no
+  las resuelve: `garzones` (placeholder Mostrador) y la rama
+  `uq_grupo_opcion_item_vivo` de `grupos-modificadores`. Esta última tiene test
+  propio con ancla positiva: el mensaje habla de la opción y el cuerpo **no**
+  trae `nombreSugerido`.
+
+- [x] **`DESCUENTO_CONFIG` no tenía entrada para `directo`** (frontend) — el tipo
+  de descuento más básico no mostraba ni modo ni valor en el drawer: `config`
+  quedaba `null` y los campos simplemente no se renderizaban. No lo veía nada —
+  el mapa es un `Record<string, …>`, así que la clave faltante no es error de
+  tipos, y el consumidor la traga con `?? null`. Se encontró **a mano**, haciendo
+  el smoke de la papelera de descuentos. Cerrado con la entrada y con
+  `reglas-form-config.spec.ts`, que compara las claves de los dos mapas contra la
+  lista de códigos del seed; el mutante (borrar la entrada `directo`) lo pone
+  rojo. ⚠️ El guard es un **espejo a mano**: caza que se borre una clave, no que
+  el seeder gane un código nuevo — backend y frontend son proyectos separados y
+  un test de uno no lee archivos del otro. Por eso el seeder lleva ahora un
+  comentario que lo recuerda. **Medido de paso: `RECARGO_CONFIG` no tenía el
+  mismo hueco** (cubre los 5 códigos de recargo), así que la sospecha que la
+  entrada dejaba abierta se cierra en negativo.
+
+---
+
 ## Deuda de código (harness)
 
 - [x] ~~**Los mapas de estado de venta están duplicados en 4 `.vue`**~~ (frontend) —

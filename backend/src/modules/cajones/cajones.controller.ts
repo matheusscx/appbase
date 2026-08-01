@@ -19,6 +19,7 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { CajonesService } from './cajones.service';
+import { RestaurarDto } from '../../common/dto/restaurar.dto';
 import { CreateCajonDto } from './dto/create-cajon.dto';
 import { UpdateCajonDto } from './dto/update-cajon.dto';
 import { SetCajonUsuariosDto } from './dto/set-cajon-usuarios.dto';
@@ -60,11 +61,17 @@ export class CajonesController {
     return this.cajonesService.remove(user.tenantId!, user.id, id);
   }
 
+  // `RestaurarDto` es 100% opcional: sin body se restaura con el nombre que la
+  // fila ya tenía, que es como llaman las pantallas sin colisión.
   @RequiresPermiso('Cajas', 'Eliminar')
   @Post(':id/restaurar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: RestaurarDto,
+  ) {
     const user = req.user as JwtUser;
-    return this.cajonesService.restaurar(user.tenantId!, id);
+    return this.cajonesService.restaurar(user.tenantId!, id, dto.nombre);
   }
 
   @RequiresPermiso('Cajas', 'Leer')

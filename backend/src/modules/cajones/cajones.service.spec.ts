@@ -27,6 +27,12 @@ describe('CajonesService', () => {
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
+  let qb: {
+    select: jest.Mock;
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    getRawMany: jest.Mock;
+  };
   let cuRepo: {
     find: jest.Mock;
   };
@@ -42,6 +48,12 @@ describe('CajonesService', () => {
   let dataSource: { transaction: jest.Mock };
 
   beforeEach(async () => {
+    qb = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
     repo = {
       find: jest.fn(),
       findOne: jest.fn(),
@@ -51,7 +63,11 @@ describe('CajonesService', () => {
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       update: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
-      createQueryBuilder: jest.fn(),
+      // `errorDeColisionNombre` (el helper compartido del 400 de colisión)
+      // arma su propia query, así que `createQueryBuilder` tiene que devolver
+      // algo encadenable o cualquier test que llegue al 400 explota con un
+      // TypeError en vez de con la excepción que está probando.
+      createQueryBuilder: jest.fn(() => qb),
     };
     cuRepo = { find: jest.fn() };
     utRepo = { count: jest.fn() };
@@ -220,6 +236,101 @@ describe('CajonesService', () => {
       );
       // No debe intentar releer la fila si el restore falló.
       expect(repo.findOneOrFail).not.toHaveBeenCalled();
+    });
+
+    // El 400 no puede ser solo un "no se pudo": la pantalla precarga
+    // `nombreSugerido` en el campo del modal. Acá se calcula DENTRO del catch
+    // del 23505 —no antes del UPDATE— porque con índice único el catch hace
+    // falta igual (otra transacción puede tomar el nombre entre consultar y
+    // escribir), así que pre-consultar sería una query extra en todos los
+    // restaurar sin poder sacar este bloque.
+    it('el 400 de colisión trae un nombre libre ya calculado, salteando los tomados', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      repo.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
+      qb.getRawMany.mockResolvedValueOnce([
+        { nombre: 'Mostrador' },
+        { nombre: 'Mostrador 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, 'x')).rejects.toMatchObject({
+        response: {
+          message: 'Ya existe un cajón activo con el nombre "Mostrador".',
+          nombreSugerido: 'Mostrador 3',
+        },
+      });
+    });
+
+    it('con `nombreNuevo` libre, restaura Y renombra en la misma escritura', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      repo.findOneOrFail.mockResolvedValue({ id: 'x', nombre: 'Mostrador 2' });
+
+      await service.restaurar(TENANT, 'x', 'Mostrador 2');
+
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 'x', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null, nombre: 'Mostrador 2' },
+      );
+    });
+
+    it('sin `nombreNuevo` no toca el nombre (comportamiento de siempre)', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      repo.findOneOrFail.mockResolvedValue({ id: 'x' });
+
+      await service.restaurar(TENANT, 'x');
+
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 'x', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
+    });
+
+    // El nombre que se sugiere es el que el usuario INTENTÓ, no el que la fila
+    // tenía guardado: si mandó uno nuevo y ese también chocó, sugerir sobre el
+    // viejo lo mandaría a una familia de nombres que ya descartó.
+    it('el 400 del reintento sugiere sobre el nombre NUEVO, no sobre el guardado', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      repo.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
+      qb.getRawMany.mockResolvedValueOnce([
+        { nombre: 'Caja chica' },
+        { nombre: 'Caja chica 2' },
+      ]);
+
+      await expect(
+        service.restaurar(TENANT, 'x', 'Caja chica'),
+      ).rejects.toMatchObject({
+        response: {
+          message: 'Ya existe un cajón activo con el nombre "Caja chica".',
+          nombreSugerido: 'Caja chica 3',
+        },
+      });
     });
 
     it('restaurar() propaga cualquier otro error de Postgres tal cual (no lo traduce a 400)', async () => {

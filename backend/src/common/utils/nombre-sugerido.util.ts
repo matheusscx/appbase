@@ -1,4 +1,4 @@
-import type { ObjectLiteral, Repository } from 'typeorm';
+import type { DataSource, ObjectLiteral, Repository } from 'typeorm';
 
 /**
  * Sufijo numérico para proponer un nombre libre cuando restaurar una fila de
@@ -45,10 +45,12 @@ export function baseSinSufijo(nombre: string): string {
 export function baseParaSugerir(
   nombreIntentado: string,
   tomados: string[],
+  ignorarMayusculas = false,
 ): string {
   const pelado = baseSinSufijo(nombreIntentado);
   if (pelado === nombreIntentado) return nombreIntentado;
-  return tomados.includes(pelado) ? pelado : nombreIntentado;
+  const clave = (s: string) => (ignorarMayusculas ? s.toLowerCase() : s);
+  return tomados.map(clave).includes(clave(pelado)) ? pelado : nombreIntentado;
 }
 
 /**
@@ -57,19 +59,30 @@ export function baseParaSugerir(
  *
  * `tomados` son los nombres VIVOS del tenant que compiten (los que empiezan
  * con la base pelada, que es un superconjunto de los que empiezan con la base
- * final); la comparación es exacta, así que quien llame debe pasarlos tal cual
- * están en la base de datos. Devuelve siempre un nombre distinto de los
- * tomados — si `base 2` … `base N` están todos ocupados, sigue subiendo.
+ * final); quien llame debe pasarlos tal cual están en la base de datos.
+ * Devuelve siempre un nombre distinto de los tomados — si `base 2` … `base N`
+ * están todos ocupados, sigue subiendo.
+ *
+ * `ignorarMayusculas` tiene que reflejar **cómo enforcea la unicidad la tabla
+ * de destino**, no una preferencia: 3 de los 5 recursos con índice único la
+ * indexan por `lower(nombre)` (`causas_merma`, `motivo_diferencia_caja`,
+ * `motivo_diferencia_inventario` — medido con `pg_indexes` el 2026-08-01) y los
+ * otros por `nombre` pelado. Con el default en `false` sobre una tabla
+ * case-insensitive, sugerir "Merma 2" habiendo un "merma 2" vivo daría un
+ * nombre que **vuelve a chocar**: el usuario confirma el modal y recibe el
+ * mismo 400.
  */
 export function sugerirNombreLibre(
   nombreIntentado: string,
   tomados: string[],
+  ignorarMayusculas = false,
 ): string {
-  const base = baseParaSugerir(nombreIntentado, tomados);
-  const ocupados = new Set(tomados);
+  const clave = (s: string) => (ignorarMayusculas ? s.toLowerCase() : s);
+  const base = baseParaSugerir(nombreIntentado, tomados, ignorarMayusculas);
+  const ocupados = new Set(tomados.map(clave));
   for (let n = 2; ; n++) {
     const candidato = `${base} ${n}`;
-    if (!ocupados.has(candidato)) return candidato;
+    if (!ocupados.has(clave(candidato))) return candidato;
   }
 }
 
@@ -110,26 +123,89 @@ export function patronLikeNombre(base: string): string {
 export async function errorDeColisionNombre<T extends ObjectLiteral>(
   repo: Repository<T>,
   alias: string,
-  etiqueta: string,
+  sujeto: string,
   tenantId: string,
   nombre: string,
+  opciones: { ignorarMayusculas?: boolean } = {},
 ): Promise<{ message: string; nombreSugerido: string }> {
+  const { ignorarMayusculas = false } = opciones;
   const base = baseSinSufijo(nombre);
+  // El `WHERE` tiene que comparar como compara el ÍNDICE de la tabla, o la
+  // sugerencia ignora filas que sí compiten: `ILIKE`/`lower()` donde el índice
+  // es sobre `lower(nombre)`, comparación exacta donde es sobre `nombre`.
+  const comparacion = ignorarMayusculas
+    ? `(lower(${alias}.nombre) = lower(:base) OR ${alias}.nombre ILIKE :patron ESCAPE '\\')`
+    : `(${alias}.nombre = :base OR ${alias}.nombre LIKE :patron ESCAPE '\\')`;
   const filas = await repo
     .createQueryBuilder(alias)
     .select(`${alias}.nombre`, 'nombre')
     .where(`${alias}.tenant_id = :tenantId`, { tenantId })
     .andWhere(`${alias}.eliminado_el IS NULL`)
-    .andWhere(
-      `(${alias}.nombre = :base OR ${alias}.nombre LIKE :patron ESCAPE '\\')`,
-      { base, patron: patronLikeNombre(base) },
-    )
+    .andWhere(comparacion, { base, patron: patronLikeNombre(base) })
     .getRawMany<{ nombre: string }>();
+  return armarError(
+    sujeto,
+    nombre,
+    filas.map((f) => f.nombre),
+    ignorarMayusculas,
+  );
+}
+
+/**
+ * Igual que `errorDeColisionNombre` pero para los services que hablan SQL
+ * cruda y **no tienen repositorio** (`causas-merma`, `motivos-diferencia`,
+ * `motivos-diferencia-inventario`, `grupos-modificadores`: los cuatro
+ * resuelven el restaurar con un `UPDATE … RETURNING` sobre `dataSource`).
+ *
+ * Existe como gemela y no como parámetro opcional de la otra porque lo que
+ * cambia es el motor de la query, no un detalle: `Repository.createQueryBuilder`
+ * y `DataSource.query` no se sustituyen entre sí. El cálculo lo comparten.
+ *
+ * `tabla` se interpola en el SQL: **constante del código, nunca dato de
+ * request**. Los valores van parametrizados (`$1`, `$2`).
+ */
+export async function errorDeColisionNombreSQL(
+  ds: DataSource,
+  tabla: string,
+  sujeto: string,
+  tenantId: string,
+  nombre: string,
+  opciones: { ignorarMayusculas?: boolean } = {},
+): Promise<{ message: string; nombreSugerido: string }> {
+  const { ignorarMayusculas = false } = opciones;
+  const base = baseSinSufijo(nombre);
+  const comparacion = ignorarMayusculas
+    ? `(lower(nombre) = lower($2) OR nombre ILIKE $3 ESCAPE '\\')`
+    : `(nombre = $2 OR nombre LIKE $3 ESCAPE '\\')`;
+  const filas: { nombre: string }[] = await ds.query(
+    `SELECT nombre FROM ${tabla}
+      WHERE tenant_id = $1 AND eliminado_el IS NULL AND ${comparacion}`,
+    [tenantId, base, patronLikeNombre(base)],
+  );
+  return armarError(
+    sujeto,
+    nombre,
+    filas.map((f) => f.nombre),
+    ignorarMayusculas,
+  );
+}
+
+/**
+ * `sujeto` es la frase nominal COMPLETA, con artículo y adjetivo ya
+ * concordados ("un descuento activo", "una causa de merma activa"). Antes era
+ * solo el sustantivo y el template ponía "un … activo" fijo, que producía
+ * "Ya existe un causa de merma activo" en cuanto la etiqueta era femenina —
+ * y el bug volvía con cada recurso nuevo de género femenino. Con la frase
+ * armada por quien llama, la concordancia no puede quedar mal desde acá.
+ */
+function armarError(
+  sujeto: string,
+  nombre: string,
+  tomados: string[],
+  ignorarMayusculas: boolean,
+): { message: string; nombreSugerido: string } {
   return {
-    message: `Ya existe un ${etiqueta} activo con el nombre "${nombre}".`,
-    nombreSugerido: sugerirNombreLibre(
-      nombre,
-      filas.map((f) => f.nombre),
-    ),
+    message: `Ya existe ${sujeto} con el nombre "${nombre}".`,
+    nombreSugerido: sugerirNombreLibre(nombre, tomados, ignorarMayusculas),
   };
 }

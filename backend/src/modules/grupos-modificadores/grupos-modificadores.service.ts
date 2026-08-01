@@ -7,6 +7,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
+import { errorDeColisionNombreSQL } from '../../common/utils/nombre-sugerido.util';
 import {
   CreateGrupoModificadorDto,
   GrupoOpcionInputDto,
@@ -597,13 +598,14 @@ export class GruposModificadoresService {
    * Una opción borrada ANTES que el grupo (otro motivo, otro `eliminado_el`)
    * no matchea esta comparación y sigue borrada.
    */
-  async restaurar(tenantId: string, grupoId: string) {
+  async restaurar(tenantId: string, grupoId: string, nombreNuevo?: string) {
     try {
       const rows = unwrap<{ grupo_modificador_id: string }>(
         await this.dataSource.query(
           `WITH restaurado AS (
              UPDATE grupos_modificadores
                 SET eliminado_el = NULL, eliminado_por = NULL,
+                    nombre = COALESCE($3, nombre),
                     actualizado_el = NOW()
               WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
                 AND eliminado_por IS NOT NULL
@@ -619,7 +621,7 @@ export class GruposModificadoresService {
              RETURNING grupo_opcion_id
            )
            SELECT grupo_modificador_id FROM restaurado`,
-          [grupoId, tenantId],
+          [grupoId, tenantId, nombreNuevo ?? null],
         ),
       );
       if (!rows.length) {
@@ -652,8 +654,32 @@ export class GruposModificadoresService {
         );
       }
       if ((e as { code?: string }).code === '23505') {
+        // La sugerencia se calcula ACÁ y no antes del `UPDATE`: con índice
+        // único el `catch` hace falta igual (otra transacción puede tomar el
+        // nombre entre consultar y escribir), así que pre-consultar sería una
+        // query extra en todos los restaurar sin poder sacar este bloque. La
+        // sentencia corre en autocommit: su fallo no deja una transacción
+        // abortada y estas queries funcionan.
+        //
+        // ⚠️ Acá el índice y el código NO coinciden, y gana el código:
+        // `uq_grupo_modificador_nombre_vivo` es sobre `nombre` PELADO (medido
+        // con `pg_indexes`), pero `assertNombreLibre` —la que corre en
+        // `create()`/`update()`— compara con `LOWER(...)`. O sea que la regla
+        // que el usuario percibe es la case-insensitive, la más estricta.
+        // Sugerir con la del índice devolvería "Extras 2" habiendo un
+        // "extras 2" vivo: el restore pasaría (el índice no se queja) y
+        // quedaría un par de nombres que `create()` habría rechazado. Por eso
+        // `ignorarMayusculas: true` aunque el índice no lo pida.
+        // El desacuerdo en sí está anotado en `docs/agent/pendientes.md`.
         throw new BadRequestException(
-          'Ya existe un grupo de modificadores activo con ese nombre. Renombrá el actual o el restaurado antes de continuar.',
+          await errorDeColisionNombreSQL(
+            this.dataSource,
+            'grupos_modificadores',
+            'un grupo de modificadores activo',
+            tenantId,
+            nombreNuevo ?? (await this.nombreActualGrupo(tenantId, grupoId)),
+            { ignorarMayusculas: true },
+          ),
         );
       }
       throw e;
@@ -872,5 +898,23 @@ export class GruposModificadoresService {
       }
       return { actualizados };
     });
+  }
+  /**
+   * El nombre guardado de un grupo de la papelera. Solo se usa en el `catch`
+   * del 23505: el `UPDATE … RETURNING` no lee la fila antes de escribir —a
+   * propósito, para no dejar ventana entre leer y escribir—, así que cuando
+   * choca no tenemos el nombre con el que chocó. Una query más, únicamente en
+   * el camino de error.
+   */
+  private async nombreActualGrupo(
+    tenantId: string,
+    grupoId: string,
+  ): Promise<string> {
+    const filas: { nombre: string }[] = await this.dataSource.query(
+      `SELECT nombre FROM grupos_modificadores
+        WHERE grupo_modificador_id = $1 AND tenant_id = $2`,
+      [grupoId, tenantId],
+    );
+    return filas[0]?.nombre ?? '';
   }
 }

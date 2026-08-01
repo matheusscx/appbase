@@ -177,7 +177,7 @@ export class TurnosService {
           await errorDeColisionNombre(
             this.turnoRepo,
             't',
-            'turno',
+            'un turno activo',
             tenantId,
             nombre,
           ),

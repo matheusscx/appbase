@@ -303,7 +303,7 @@ export class RecargosService {
         await errorDeColisionNombre(
           this.recargoRepo,
           'r',
-          'recargo',
+          'un recargo activo',
           tenantId,
           nombre,
         ),

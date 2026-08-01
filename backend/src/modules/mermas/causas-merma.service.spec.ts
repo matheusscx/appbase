@@ -172,7 +172,7 @@ describe('CausasMermaService', () => {
 
       expect(queryMock).toHaveBeenCalledWith(
         expect.stringMatching(/eliminado_el\s*=\s*NULL/),
-        [CAUSA, TENANT],
+        [CAUSA, TENANT, null],
       );
       expect(restaurada).toEqual({
         id: CAUSA,
@@ -199,10 +199,63 @@ describe('CausasMermaService', () => {
       queryMock.mockRejectedValueOnce(
         Object.assign(new Error('duplicate key'), { code: '23505' }),
       );
+      // El `catch` pregunta dos cosas más: el nombre guardado de la fila (el
+      // `UPDATE … RETURNING` no la lee antes de escribir) y los nombres vivos
+      // que compiten, para calcular la sugerencia.
+      queryMock.mockResolvedValueOnce([{ nombre: 'Vencimiento' }]);
+      queryMock.mockResolvedValueOnce([{ nombre: 'Vencimiento' }]);
 
       await expect(service.restaurar(TENANT, CAUSA)).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    // El 400 no puede ser solo un "no se pudo": la pantalla precarga
+    // `nombreSugerido` en el campo del modal. Se calcula DENTRO del catch —no
+    // antes del UPDATE— porque con índice único el catch hace falta igual
+    // (otra transacción puede tomar el nombre entre consultar y escribir), así
+    // que pre-consultar sería una query extra en TODOS los restaurar sin poder
+    // sacar este bloque.
+    it('el 400 de colisión trae un nombre libre ya calculado', async () => {
+      queryMock.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+      queryMock.mockResolvedValueOnce([{ nombre: 'Vencimiento' }]);
+      queryMock.mockResolvedValueOnce([
+        { nombre: 'Vencimiento' },
+        { nombre: 'Vencimiento 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, CAUSA)).rejects.toMatchObject({
+        response: {
+          message:
+            // Concordancia femenina: este spec fijaba antes "un causa de
+            // merma activo" —el template del helper armaba "un … activo"
+            // fijo— y pasaba en verde, o sea que el test estaba certificando
+            // el bug. Ahora la frase nominal la arma quien llama.
+            'Ya existe una causa de merma activa con el nombre "Vencimiento".',
+          nombreSugerido: 'Vencimiento 3',
+        },
+      });
+    });
+
+    // Esta tabla indexa por `lower(nombre)` (medido con `pg_indexes`), así que
+    // la sugerencia tiene que saltear un tomado que solo difiere en
+    // mayúsculas: si devolviera "Vencimiento 2" habiendo un "vencimiento 2"
+    // vivo, el usuario confirmaría el modal y recibiría el mismo 400.
+    it('la sugerencia respeta que el índice es case-insensitive', async () => {
+      queryMock.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+      queryMock.mockResolvedValueOnce([{ nombre: 'Vencimiento' }]);
+      queryMock.mockResolvedValueOnce([
+        { nombre: 'vencimiento' },
+        { nombre: 'VENCIMIENTO 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, CAUSA)).rejects.toMatchObject({
+        response: { nombreSugerido: 'Vencimiento 3' },
+      });
     });
 
     it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {

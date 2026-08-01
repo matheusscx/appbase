@@ -2081,6 +2081,20 @@ export class SeederService implements OnApplicationBootstrap {
     );
   }
 
+  /**
+   * ⚠️ **Agregar un `codigo` acá obliga a agregarlo también en
+   * `frontend/app/utils/reglas-form-config.ts`** (`DESCUENTO_CONFIG` /
+   * `RECARGO_CONFIG`) y en la lista espejo de su spec.
+   *
+   * Sin entrada allá, el drawer de descuentos/recargos **no renderiza modo ni
+   * valor** para ese tipo y el usuario crea la regla sin importe. No lo ve
+   * nada: el mapa es un `Record<string, …>`, así que la clave faltante no es
+   * un error de tipos, y el consumidor la traga con `?? null`. Ya pasó con
+   * `directo` (2026-08-01), que estuvo mudo hasta que se encontró a mano.
+   *
+   * El espejo es a mano porque backend y frontend son proyectos separados por
+   * decisión del owner: un test de allá no lee archivos de acá.
+   */
   private async seedTiposRegla(): Promise<void> {
     const tipos: Partial<TipoRegla>[] = [
       {

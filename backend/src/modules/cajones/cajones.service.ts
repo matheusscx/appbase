@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Not, Repository } from 'typeorm';
+import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
 import { Cajon } from './entities/cajon.entity';
 import { CajonUsuario } from './entities/cajon-usuario.entity';
 import { UsuarioTenant } from '../tenants/entities/usuario-tenant.entity';
@@ -106,7 +107,11 @@ export class CajonesService {
     );
   }
 
-  async restaurar(tenantId: string, id: string): Promise<Cajon> {
+  async restaurar(
+    tenantId: string,
+    id: string,
+    nombreNuevo?: string,
+  ): Promise<Cajon> {
     // Una sola regla para los tres casos —no existe, existe y está viva, o
     // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
     // lo que borró una persona (decisión del owner, docs/features/papelera.md).
@@ -123,7 +128,13 @@ export class CajonesService {
       // como borrado de persona (ver categorias.service.ts → restaurar()).
       await this.cajonRepo.update(
         { id, tenantId },
-        { eliminadoEl: null, eliminadoPor: null },
+        {
+          eliminadoEl: null,
+          eliminadoPor: null,
+          // Revivir y renombrar en la MISMA escritura: dos sentencias dejarían
+          // una ventana con la fila viva y el nombre en colisión.
+          ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
+        },
       );
     } catch (e) {
       // 23505 = unique_violation. `ux_cajones_tenant_nombre` es parcial
@@ -133,8 +144,24 @@ export class CajonesService {
       // también donde no lo enumeramos. Mismo patrón que
       // causas-merma.service.ts → restaurar().
       if ((e as { code?: string }).code === '23505') {
+        // La sugerencia se calcula ACÁ y no antes del `UPDATE` a propósito:
+        // con un índice único el `catch` hace falta igual —entre consultar y
+        // escribir otra transacción puede tomar el nombre—, así que
+        // pre-consultar agregaría una query en TODOS los restaurar sin poder
+        // sacar este bloque. El `UPDATE` corre en autocommit, así que su
+        // fallo no deja una transacción abortada y esta query funciona.
+        //
+        // `ux_cajones_tenant_nombre` es sobre `nombre` PELADO (medido con
+        // `pg_indexes`), no sobre `lower(nombre)` como en causas-merma y los
+        // dos motivos: por eso acá NO va `ignorarMayusculas`.
         throw new BadRequestException(
-          'Ya existe un cajón activo con ese nombre. Renombrá el actual o el restaurado antes de continuar.',
+          await errorDeColisionNombre(
+            this.cajonRepo,
+            'c',
+            'un cajón activo',
+            tenantId,
+            nombreNuevo ?? cajon.nombre,
+          ),
         );
       }
       throw e;

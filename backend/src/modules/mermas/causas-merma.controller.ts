@@ -21,6 +21,7 @@ import { CausasMermaService } from './causas-merma.service';
 import { CreateCausaMermaDto } from './dto/create-causa-merma.dto';
 import { UpdateCausaMermaDto } from './dto/update-causa-merma.dto';
 import { QueryCausasMermaDto } from './dto/query-causas-merma.dto';
+import { RestaurarDto } from '../../common/dto/restaurar.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
 @Controller('causas-merma')
@@ -64,9 +65,15 @@ export class CausasMermaController {
   }
 
   @UseGuards(TenantAdminGuard)
+  // `RestaurarDto` es 100% opcional: sin body se restaura con el nombre
+  // que la fila ya tenía, que es como llaman las pantallas sin colisión.
   @Post(':id/restaurar')
-  restaurar(@Req() req: Request, @Param('id') id: string) {
+  restaurar(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: RestaurarDto,
+  ) {
     const user = req.user as JwtUser;
-    return this.service.restaurar(user.tenantId!, id);
+    return this.service.restaurar(user.tenantId!, id, dto.nombre);
   }
 }

@@ -89,6 +89,42 @@ describe('nombre-sugerido.util', () => {
       const tomados = ['X', 'X 2', 'X 3', 'X 4', 'X 5'];
       expect(tomados).not.toContain(sugerirNombreLibre('X', tomados));
     });
+
+    // 3 de los 5 recursos con índice único lo tienen sobre `lower(nombre)`
+    // (`causas_merma`, `motivo_diferencia_caja`,
+    // `motivo_diferencia_inventario` — medido con `pg_indexes`). Sin este
+    // modo, la sugerencia devolvería un nombre que la BASE considera tomado y
+    // el usuario recibiría el mismo 400 después de confirmar el modal.
+    describe('ignorarMayusculas (tablas indexadas por lower(nombre))', () => {
+      it('saltea un tomado que solo difiere en mayúsculas', () => {
+        expect(sugerirNombreLibre('Merma', ['merma', 'MERMA 2'], true)).toBe(
+          'Merma 3',
+        );
+      });
+
+      it('sin el flag ese mismo caso devolvería un nombre que choca', () => {
+        // Documenta por qué el flag existe: es el comportamiento correcto para
+        // una tabla indexada por `nombre` pelado, y el incorrecto para las tres
+        // indexadas por `lower(nombre)`.
+        expect(sugerirNombreLibre('Merma', ['merma', 'MERMA 2'], false)).toBe(
+          'Merma 2',
+        );
+      });
+
+      it('pela el sufijo comparando sin mayúsculas', () => {
+        // "Merma 2" con un "MERMA" vivo: el 2 es sufijo nuestro, así que
+        // numera sobre "Merma" y no sobre "Merma 2".
+        expect(sugerirNombreLibre('Merma 2', ['MERMA', 'merma 2'], true)).toBe(
+          'Merma 3',
+        );
+      });
+
+      it('con el flag no devuelve nada que colisione ignorando mayúsculas', () => {
+        const tomados = ['x', 'X 2', 'x 3'];
+        const sugerido = sugerirNombreLibre('X', tomados, true).toLowerCase();
+        expect(tomados.map((t) => t.toLowerCase())).not.toContain(sugerido);
+      });
+    });
   });
 
   describe('patronLikeNombre', () => {

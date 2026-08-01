@@ -154,7 +154,7 @@ describe('MotivosDiferenciaService', () => {
 
       expect(query).toHaveBeenCalledWith(
         expect.stringMatching(/eliminado_el\s*=\s*NULL/),
-        [MOTIVO_ID, TENANT],
+        [MOTIVO_ID, TENANT, null],
       );
       expect(restaurado).toMatchObject({
         id: MOTIVO_ID,
@@ -176,10 +176,58 @@ describe('MotivosDiferenciaService', () => {
       query.mockRejectedValueOnce(
         Object.assign(new Error('duplicate key'), { code: '23505' }),
       );
+      // El `catch` pregunta dos cosas más: el nombre guardado de la fila (el
+      // `UPDATE … RETURNING` no la lee antes de escribir) y los nombres vivos
+      // que compiten, para calcular la sugerencia.
+      query.mockResolvedValueOnce([{ nombre: 'Faltante' }]);
+      query.mockResolvedValueOnce([{ nombre: 'Faltante' }]);
 
       await expect(service.restaurar(TENANT, MOTIVO_ID)).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    // El 400 no puede ser solo un "no se pudo": la pantalla precarga
+    // `nombreSugerido` en el campo del modal. Se calcula DENTRO del catch —no
+    // antes del UPDATE— porque con índice único el catch hace falta igual
+    // (otra transacción puede tomar el nombre entre consultar y escribir), así
+    // que pre-consultar sería una query extra en TODOS los restaurar sin poder
+    // sacar este bloque.
+    it('el 400 de colisión trae un nombre libre ya calculado', async () => {
+      query.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+      query.mockResolvedValueOnce([{ nombre: 'Faltante' }]);
+      query.mockResolvedValueOnce([
+        { nombre: 'Faltante' },
+        { nombre: 'Faltante 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, MOTIVO_ID)).rejects.toMatchObject({
+        response: {
+          message: 'Ya existe un motivo activo con el nombre "Faltante".',
+          nombreSugerido: 'Faltante 3',
+        },
+      });
+    });
+
+    // Esta tabla indexa por `lower(nombre)` (medido con `pg_indexes`), así que
+    // la sugerencia tiene que saltear un tomado que solo difiere en
+    // mayúsculas: devolver "Faltante 2" habiendo un "faltante 2" vivo
+    // haría que el usuario confirme el modal y reciba el mismo 400.
+    it('la sugerencia respeta que el índice es case-insensitive', async () => {
+      query.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+      query.mockResolvedValueOnce([{ nombre: 'Faltante' }]);
+      query.mockResolvedValueOnce([
+        { nombre: 'faltante' },
+        { nombre: 'FALTANTE 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, MOTIVO_ID)).rejects.toMatchObject({
+        response: { nombreSugerido: 'Faltante 3' },
+      });
     });
 
     it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {

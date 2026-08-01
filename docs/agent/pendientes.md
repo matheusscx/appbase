@@ -258,45 +258,33 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   ("la carrera del toggle vía usePaginatedList") **no** sirve de molde acá: ese
   ejercita el `watch` del composable, que ninguna de las 9 tiene.
 
-- [ ] **Salida de la colisión: faltan los 5 recursos con índice único parcial**
-  (backend) — ⛔ **NO es réplica mecánica: hay una decisión de diseño abierta que
-  es del owner.** El 400 al restaurar dice qué pasa pero, salvo en `descuentos`,
-  `recargos` y `turnos`, no da salida: el usuario tiene que ir a renombrar a mano
-  la fila viva. La decisión del owner (2026-08-01, documentada en
-  [`papelera.md`](../features/papelera.md) → "Salida de la colisión") es que el
-  backend proponga un nombre libre y la pantalla lo ofrezca editable.
-  **La familia fácil está cerrada.** Los 3 hechos (`descuentos`, `recargos`,
-  `turnos`) garantizan la unicidad **solo por código**, así que pueden consultar
-  los nombres tomados ANTES de intentar. Los 5 que faltan (`cajones`,
-  `causas-merma`, `motivos-diferencia`, `motivos-diferencia-inventario`,
-  `grupos-modificadores`) la garantizan por **índice único parcial** y hoy
-  detectan la colisión capturando el `23505` de Postgres — o sea que **recién
-  sabrían el nombre después de fallar el INSERT**. Las dos salidas:
-  (a) consultar antes de intentar, que agrega una query SIEMPRE, también en el
-  caso feliz; (b) calcular la sugerencia dentro del `catch`, gratis mientras no
-  hay colisión pero mete I/O en un camino de error. **Preguntar antes de
-  escribir.**
-  Lo que sí se replica sin pensar, una vez elegida la salida:
-  `restaurar(tenantId, id, nombreNuevo?)` con `@Body() dto: RestaurarDto` en el
-  controller, y el helper compartido `errorDeColisionNombre(repo, alias,
-  etiqueta, tenantId, nombre)` de `common/utils/nombre-sugerido.util.ts` —
-  extraído el 2026-08-01 al aparecer el tercer consumidor, y válido para los 8
-  porque las 8 tablas comparten exactamente `tenant_id`, `nombre` y
-  `eliminado_el` (verificado contra `information_schema`).
-  ⛔ **`garzones` queda fuera**: su colisión es `uq_garzones_mostrador_tenant`
-  (un solo placeholder "Mostrador" vivo por tenant), y renombrar no la resuelve.
+- [ ] **`grupos_modificadores`: el índice y el código no se ponen de acuerdo
+  sobre mayúsculas** (backend) — medido el 2026-08-01 con `pg_indexes` y
+  leyendo el service: `uq_grupo_modificador_nombre_vivo` es sobre `nombre`
+  PELADO (case-sensitive), pero `assertNombreLibre` —la que corre en
+  `create()`/`update()`— compara con `LOWER(...)`. O sea que "Extras" y
+  "extras" son duplicados para el código y no para la base. Hoy no produce un
+  bug visible porque toda alta pasa por el código, pero deja dos reglas donde
+  debería haber una, y cualquier camino que escriba sin pasar por
+  `assertNombreLibre` (como el `restaurar()` de la papelera) queda con la regla
+  laxa. Los otros 3 recursos case-insensitive (`causas_merma`,
+  `motivo_diferencia_caja`, `motivo_diferencia_inventario`) sí tienen el índice
+  sobre `lower(nombre)`, o sea que el patrón consistente ya existe en el repo.
+  Cierre: alinear el índice con el código (índice sobre `lower(nombre)`) o al
+  revés, decisión del owner. Mientras tanto la sugerencia de la papelera usa la
+  regla estricta (`ignorarMayusculas: true`), documentado en
+  `grupos-modificadores.service.ts` → `restaurar()`.
 
-- [ ] **`DESCUENTO_CONFIG` no tiene entrada para `directo`** (frontend) — el tipo
-  de descuento más básico ("Descuento directo", `codigo: 'directo'` en el seeder)
-  no está en el mapa de `app/utils/reglas-form-config.ts`, que solo cubre
-  `metodo_pago`, `pronto_pago`, `por_mayor`, `por_monto_venta` y `promocional`.
-  Consecuencia: al elegir ese tipo en el drawer de `configuracion/descuentos.vue`,
-  `config` queda `null` y **no se renderiza ni modo ni valor** — el form deja
-  crear el descuento sin importe, o falla en el backend sin que el usuario vea
-  por qué. Encontrado el 2026-08-01 haciendo el smoke de la papelera, no por un
-  test: `config` es `null` sin error, así que ni el build ni el typecheck lo ven.
-  Fuera del alcance de esa tarea, no se tocó. Verificar de paso si `RECARGO_CONFIG`
-  tiene el mismo hueco (sus claves son otras: `general`, `mora`, etc.).
+- [ ] **`directo` no exige valor en el backend** (backend,
+  `descuentos.service.ts` → `validarSegunTipoCreate`) — medido el 2026-08-01:
+  el código `directo` no está en `tiposConValorUnico` ni en ninguna otra lista
+  del validador, así que **se puede crear un descuento directo sin importe**, y
+  ese descuento no descuenta nada. El formulario ya pide el valor desde el fix
+  de `DESCUENTO_CONFIG`, así que la UI es más estricta que la API — sin bug
+  visible, pero la API queda abierta. Si el valor debe ser obligatorio es una
+  regla de negocio del owner (podría existir un descuento directo de 0 con
+  algún propósito), así que no se endureció por cuenta propia.
+
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 

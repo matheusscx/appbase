@@ -1971,6 +1971,100 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     expect(nombres).toEqual([nombre, `${nombre} 2`, `${nombre} 3`].sort());
   });
 
+  // ─── Los 5 con índice único parcial ────────────────────────────────────────
+  // Estos NO calculan la sugerencia antes de intentar como descuentos/recargos/
+  // turnos: capturan el 23505 de Postgres y la calculan DENTRO del catch. El
+  // unit test no puede probar que eso funcione —el mock no tiene índices ni
+  // sabe de `ILIKE`—, así que el e2e contra Postgres real es el único lugar
+  // donde estas dos afirmaciones se verifican.
+
+  it('cajones: el 400 de colisión (vía 23505) trae un nombre libre, y restaurar con él funciona', async () => {
+    const nombre = `Cajón sugerencia E2E ${Date.now()}`;
+    const crear = async (n: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/cajones')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ nombre: n });
+      expect(res.status).toBe(201);
+      return (res.body as RecursoConAuditoria).id;
+    };
+
+    const originalId = await crear(nombre);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${originalId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+      ).status,
+    ).toBe(200);
+
+    await crear(nombre);
+    await crear(`${nombre} 2`);
+
+    const resColision = await request(app.getHttpServer())
+      .post(`/api/cajones/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resColision.status).toBe(400);
+    const cuerpo = resColision.body as { nombreSugerido: string };
+    expect(cuerpo.nombreSugerido).toBe(`${nombre} 3`);
+
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/cajones/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: cuerpo.nombreSugerido });
+    expect(resRestaurar.status).toBe(201);
+    expect((resRestaurar.body as { nombre: string }).nombre).toBe(
+      `${nombre} 3`,
+    );
+  });
+
+  // `uq_causas_merma_tenant_nombre` es sobre `lower(nombre)` (medido con
+  // `pg_indexes`): si la sugerencia comparara exacto devolvería un nombre que
+  // la BASE considera tomado, y el usuario recibiría el mismo 400 después de
+  // confirmar el modal. Este test monta justo ese caso — el competidor está en
+  // minúscula y el nombre intentado en mayúscula.
+  it('causas-merma: la sugerencia respeta que el índice es case-insensitive', async () => {
+    const base = `Causa CI E2E ${Date.now()}`;
+    const crear = async (n: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/causas-merma')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ nombre: n });
+      expect(res.status).toBe(201);
+      return (res.body as RecursoConAuditoria).id;
+    };
+
+    const originalId = await crear(base);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .delete(`/api/causas-merma/${originalId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+      ).status,
+      // 204, no 200: el DELETE de causas-merma no devuelve cuerpo.
+    ).toBe(204);
+
+    // El que ocupa el nombre y el que ocupa el sufijo 2 van en minúscula.
+    await crear(base.toLowerCase());
+    await crear(`${base.toLowerCase()} 2`);
+
+    const resColision = await request(app.getHttpServer())
+      .post(`/api/causas-merma/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resColision.status).toBe(400);
+    const cuerpo = resColision.body as { nombreSugerido: string };
+    // Sin `ignorarMayusculas` esto habría dado "… 2", que choca contra el
+    // "… 2" en minúscula por el índice sobre lower(nombre).
+    expect(cuerpo.nombreSugerido).toBe(`${base} 3`);
+
+    // Y la sugerencia sirve de verdad contra el índice real.
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/causas-merma/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: cuerpo.nombreSugerido });
+    expect(resRestaurar.status).toBe(201);
+  });
+
   it('turnos: restaurar con un nombre que TAMBIÉN está tomado vuelve a dar 400, con la sugerencia siguiente', async () => {
     const nombre = `Turno reintento E2E ${Date.now()}`;
     const crear = async (n: string) => {

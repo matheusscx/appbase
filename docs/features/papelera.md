@@ -93,9 +93,8 @@ Body (opcional):  { "nombre": "Black Friday 2" }
                   Solo en los recursos con unicidad de nombre, y solo cuando
                   el usuario resolvió una colisión desde el modal. SIN body el
                   comportamiento es el de siempre: revive con el nombre que la
-                  fila ya tenía. Hoy lo aceptan `descuentos`, `recargos` y
-                  `turnos`; los otros 5 con colisión quedan por replicar
-                  (docs/agent/pendientes.md).
+                  fila ya tenía. Lo aceptan los 8 recursos con unicidad de
+                  nombre. `garzones` NO: su colisión no es de nombre.
 
 Response (201): la entidad restaurada. (No hay `@HttpCode(200)` en ninguno
                   de los 16 — Nest devuelve 201 por default en un POST, y
@@ -113,9 +112,11 @@ Response (400): en 9 de los 16 — las 5 con índice único parcial de nombre
                   `garzones`, por una restricción distinta que no es de nombre.
                   El reparto completo y por qué no se deduce de la familia de
                   borrado: "Colisión al restaurar" abajo.
-                  En `descuentos`, `recargos` y `turnos` el 400 trae además
+                  En los 8 con unicidad de nombre el 400 trae además
                   `nombreSugerido` — un nombre libre para reintentar, ver
-                  "Salida de la colisión" abajo.
+                  "Salida de la colisión" abajo. En `garzones` no, y en la
+                  colisión de OPCIÓN de `grupos-modificadores` tampoco:
+                  renombrar no resuelve ninguna de las dos.
 ```
 
 `salones` tiene además `mesas` bajo `@Controller('mesas')`, con su propio
@@ -261,20 +262,46 @@ que también está tomado, vuelve el 400 con la sugerencia **siguiente** (nunca
 encadena "… 2 2"). La alternativa —que el frontend confíe en que la sugerencia
 sigue libre cuando la manda— apuesta a que nada pasó entre que la vio y confirmó.
 
-Implementado en los **3 recursos que garantizan la unicidad solo por código**,
-sin índice en la base, y por eso pueden consultar los nombres tomados ANTES de
-intentar: `descuentos` (molde end-to-end, revisado antes de replicar), `recargos`
-y `turnos`. La query compartida vive en `errorDeColisionNombre()`
-(`common/utils/nombre-sugerido.util.ts`), extraída al aparecer el tercer
-consumidor; sirve para cualquiera de los 8 porque las 8 tablas comparten
-exactamente `tenant_id`, `nombre` y `eliminado_el` (verificado contra
-`information_schema`, no asumido).
+**Implementado en los 8**, en dos formas distintas según cómo la tabla enforcea
+la unicidad — y la diferencia no es de estilo:
 
-Los 5 que faltan **no son un copiar-pegar**: detectan la colisión capturando el
-`23505` de Postgres, o sea que se enteran DESPUÉS de que falla el INSERT.
-Backlog: [`docs/agent/pendientes.md`](../agent/pendientes.md).
-⛔ `garzones` queda **fuera** por diseño: su colisión es el placeholder
-Mostrador, y renombrar no la resuelve.
+- **Los 3 sin índice** (`descuentos`, `recargos`, `turnos`): la unicidad vive
+  solo en código, así que `restaurar()` consulta los nombres tomados ANTES de
+  intentar y arma el 400 sin haber escrito nada.
+- **Los 5 con índice único parcial** (`cajones`, `causas-merma`,
+  `motivos-diferencia`, `motivos-diferencia-inventario`,
+  `grupos-modificadores`): la sugerencia se calcula **dentro del `catch` del
+  `23505`**. Se evaluó consultar antes y se descartó con un argumento, no por
+  gusto: con un índice el `catch` hace falta igual —entre consultar y escribir,
+  otra transacción puede tomar el nombre—, así que pre-consultar agrega una
+  query en TODOS los restaurar y no permite sacar el bloque. Queda dominada.
+  El `UPDATE` corre en autocommit, así que su fallo no deja una transacción
+  abortada y las queries del `catch` funcionan (verificado: ninguno de los 5
+  envuelve el restaurar en una transacción explícita).
+
+La query compartida vive en `errorDeColisionNombre()` (por repositorio) y
+`errorDeColisionNombreSQL()` (por `DataSource`, para los cuatro services que
+hablan SQL cruda y no tienen repo), en
+`common/utils/nombre-sugerido.util.ts`. Sirve para los 8 porque las 8 tablas
+comparten exactamente `tenant_id`, `nombre` y `eliminado_el` (verificado contra
+`information_schema`, no asumido por parecido de nombre).
+
+**⚠️ Cuatro comparan sin mayúsculas y cuatro no**, y eso cambia la sugerencia:
+`causas_merma`, `motivo_diferencia_caja` y `motivo_diferencia_inventario`
+indexan por `lower(nombre)`; `grupos_modificadores` indexa por `nombre` pelado
+pero su `assertNombreLibre` de `create()`/`update()` compara con `LOWER`, así
+que la regla que el usuario percibe es la case-insensitive (la más estricta) —
+ver la entrada de ese desacuerdo en
+[`docs/agent/pendientes.md`](../agent/pendientes.md). En esos cuatro la
+sugerencia usa `ignorarMayusculas`, porque si no devolvería un nombre que la
+base considera tomado y el usuario recibiría **el mismo 400 después de
+confirmar el modal**.
+
+⛔ **Dos colisiones NO llevan sugerencia**, porque renombrar no las resuelve:
+`garzones` (su índice único es el del placeholder Mostrador, no de nombre) y la
+rama `uq_grupo_opcion_item_vivo` de `grupos-modificadores` (una opción viva bajo
+el mismo item). En las dos, ofrecer un nombre mandaría al usuario a arreglar
+algo que no es la causa.
 
 ### Solo lo que borró una persona
 
@@ -391,7 +418,7 @@ formas les toca: [`docs/agent/pendientes.md`](../agent/pendientes.md).
   (`grupos-modificadores`, `causas-merma`, `motivos-diferencia`,
   `motivos-diferencia-inventario`, `cajones`, `garzones`) y solo por código
   (`descuentos`, `recargos`, `turnos`).
-- **Salida de la colisión** (`descuentos`, `recargos`, `turnos`): el 400 trae un
+- **Salida de la colisión** (los 8 con unicidad de nombre): el 400 trae un
   `nombreSugerido` libre y restaurar con él revive y renombra en una sola
   escritura; reintentar con un nombre también tomado da la sugerencia siguiente
   sin encadenar sufijos. La aritmética del sufijo tiene su unit propio

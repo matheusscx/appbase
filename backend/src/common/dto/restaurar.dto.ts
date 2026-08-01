@@ -5,13 +5,13 @@ import { Transform } from 'class-transformer';
  * Body opcional de `POST /<recurso>/:id/restaurar` en los recursos con
  * unicidad de nombre por tenant.
  *
- * ⚠️ **Hoy lo usa UN solo controller: `descuentos`.** Vive en `common/` por la
- * misma razón que
+ * Lo usan los **8 controllers** de recursos con unicidad de nombre por tenant
+ * (`descuentos`, `recargos`, `turnos`, `cajones`, `causas-merma`,
+ * `motivos-diferencia`, `motivos-diferencia-inventario`,
+ * `grupos-modificadores`). Vive en `common/` por la misma razón que
  * [`QueryIncluirEliminadosDto`](./query-incluir-eliminados.dto.ts): el nombre
- * del campo va a ser contrato entre los 8 recursos con unicidad de nombre y la
- * pantalla que los llama, y si cada módulo lo escribiera por su cuenta, dos
- * podrían discrepar sin error visible. Los otros 7 quedan en
- * `docs/agent/pendientes.md`.
+ * del campo es contrato entre esos 8 y las pantallas que los llaman, y si cada
+ * módulo lo escribiera por su cuenta, dos podrían discrepar sin error visible.
  *
  * **Sin body, o sin `nombre`, el comportamiento es el de siempre**: se
  * restaura con el nombre que la fila ya tenía. `nombre` solo se manda cuando
