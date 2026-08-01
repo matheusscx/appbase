@@ -421,7 +421,7 @@ const columns: TableColumn<Categoria>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar categoría"
-      message="¿Estás seguro de que quieres eliminar esta categoría? Esta acción no se puede deshacer."
+      message="¿Eliminar esta categoría? Podés recuperarla desde «Ver eliminadas»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />

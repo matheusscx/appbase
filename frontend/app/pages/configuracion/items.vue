@@ -216,7 +216,7 @@ const eliminarMensaje = computed(() => {
   if (extras.length) {
     return `${nombre ? `El item ${item}` : 'Este item'} se ofrece como extra en ${extras.map((a) => a.nombre).join(', ')}. Si lo eliminás dejará de estar disponible en esas recetas.`
   }
-  return `¿Estás seguro de que deseas eliminar ${item}? Esta acción no se puede deshacer.`
+  return `¿Eliminar ${item}? Podés recuperarlo desde «Ver eliminados».`
 })
 
 // Simulador de impacto de costos en recetas: se dispara tras una compra

@@ -13,11 +13,15 @@ interface Impuesto {
   porcentaje: string
   activo: boolean
   origen: 'sistema' | 'personalizado'
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 const config = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = config.public.apiUrl
+
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('impuestos')
 
 const impuestos = ref<Impuesto[]>([])
 const loading = ref(false)
@@ -26,6 +30,9 @@ const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
 const toggling = reactive(new Set<string>())
 
 const emptyForm = () => ({
@@ -52,19 +59,36 @@ watch(drawerOpen, (open) => {
   if (!open) resetDrawer()
 })
 
+// Cola serial, mismo patrón que `configuracion/categorias.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `impuestos.value` sin
+// importar cuál toggle la originó — el listado queda desincronizado del
+// switch. Esta pantalla NO usa `usePaginatedList`, así que no hereda la cola
+// que vive ahí: va local, como en categorías.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    impuestos.value = await useApiFetch<Impuesto[]>(`${apiUrl}/impuestos`)
-  }
-  catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al cargar impuestos')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      const query = verEliminados.value ? '?incluirEliminados=true' : ''
+      impuestos.value = await useApiFetch<Impuesto[]>(`${apiUrl}/impuestos${query}`)
+    }
+    catch (e: unknown) {
+      const msg = apiErrorMsg(e, 'Error al cargar impuestos')
+      toast.add({ title: msg, color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Impuesto) {
   const idx = impuestos.value.findIndex(i => i.id === saved.id)
@@ -89,7 +113,7 @@ function abrirCrear() {
 }
 
 function abrirEditar(imp: Impuesto) {
-  if (imp.origen === 'sistema') return
+  if (imp.origen === 'sistema' || imp.eliminadoEl) return
   resetDrawer()
   editingId.value = imp.id
   form.value = {
@@ -132,7 +156,7 @@ async function guardar() {
 }
 
 async function toggleActivo(imp: Impuesto) {
-  if (imp.origen === 'sistema') return
+  if (imp.origen === 'sistema' || imp.eliminadoEl) return
   if (toggling.has(imp.id)) return
   toggling.add(imp.id)
   const prev = imp.activo
@@ -155,7 +179,7 @@ async function toggleActivo(imp: Impuesto) {
 }
 
 function pedirEliminar(imp: Impuesto) {
-  if (imp.origen === 'sistema') return
+  if (imp.origen === 'sistema' || imp.eliminadoEl) return
   confirmDeleteId.value = imp.id
   confirmModalOpen.value = true
 }
@@ -165,7 +189,16 @@ async function eliminar(id: string) {
     await useApiFetch(`${apiUrl}/impuestos/${id}`, {
       method: 'DELETE',
     })
-    removeLocal(id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminado" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
     toast.add({ title: 'Impuesto eliminado', color: 'success' })
   }
   catch (e: unknown) {
@@ -175,6 +208,48 @@ async function eliminar(id: string) {
   finally {
     confirmDeleteId.value = null
     confirmModalOpen.value = false
+  }
+}
+
+async function restaurarImpuesto(id: string) {
+  // Mismo guard de `origen` que editar/eliminar/togglear: el catálogo oficial
+  // del país no es del tenant, y el listado de la papelera SÍ devuelve esas
+  // filas (vienen por la rama `pais_id` del `OR`), así que sin el guard la UI
+  // ofrecería un botón que el backend rechaza con 404 por diseño.
+  //
+  // ⚠️ Este guard de `origen` es INALCANZABLE desde el template de hoy —la
+  // rama de "Restaurar" ya exige `origen === 'personalizado'`—, y por eso NO
+  // tiene test propio: cualquiera que se escriba pasaría sin poder fallar. Se
+  // deja igual, como la capa que sobrevive si alguien afloja la condición del
+  // template. Mismo criterio en los guards de `abrirEditar`, `toggleActivo` y
+  // `pedirEliminar`.
+  const imp = impuestos.value.find(i => i.id === id)
+  if (!imp || imp.origen === 'sistema') return
+  // El de reentrancia, en cambio, SÍ es alcanzable y por eso sí tiene test: el
+  // modal no se cierra solo al confirmar (lo cierra el `finally` de acá), así
+  // que mientras el POST viaja el botón sigue clickeable. Sin esto, el segundo
+  // click manda un segundo `POST /restaurar` sobre una fila que el primero ya
+  // revivió, el backend contesta 404 "no está en la papelera" y el usuario ve
+  // un toast de ERROR inmediatamente después de un restore exitoso. Mismo
+  // patrón que `toggleActivo` con su set `toggling`.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id)
+    imp.eliminadoEl = null
+    imp.eliminadoPorNombre = null
+    toast.add({ title: 'Impuesto restaurado', color: 'success' })
+  }
+  catch (e: unknown) {
+    // El error del backend sube tal cual (404 "no está en la papelera"): trae
+    // más información que un genérico.
+    const msg = apiErrorMsg(e, 'Error al restaurar')
+    toast.add({ title: msg, color: 'error' })
+  }
+  finally {
+    restaurando.value = false
+    confirmRestaurarId.value = null
+    confirmRestaurarModalOpen.value = false
   }
 }
 
@@ -194,28 +269,42 @@ const columns: TableColumn<Impuesto>[] = [
       description="Impuestos oficiales del país (Sistema) e impuestos propios del tenant (en decimal: 0.19 = 19%)."
     >
       <template #actions>
-        <UButton
-          icon="i-lucide-plus"
-          @click="abrirCrear"
-        >
-          Nuevo impuesto
-        </UButton>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton
+            icon="i-lucide-plus"
+            @click="abrirCrear"
+          >
+            Nuevo impuesto
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable :data="impuestos" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
-        <div class="flex items-center gap-2">
-          <CrudListItem
-            :title="row.original.nombre"
-            :subtitle="`Porcentaje: ${row.original.porcentaje}`"
-          />
-          <UBadge
-            :label="row.original.origen === 'sistema' ? 'Sistema' : 'Personalizado'"
-            :color="row.original.origen === 'sistema' ? 'info' : 'neutral'"
-            variant="soft"
-            size="sm"
-          />
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <CrudListItem
+              :title="row.original.nombre"
+              :subtitle="`Porcentaje: ${row.original.porcentaje}`"
+            />
+            <UBadge
+              :label="row.original.origen === 'sistema' ? 'Sistema' : 'Personalizado'"
+              :color="row.original.origen === 'sistema' ? 'info' : 'neutral'"
+              variant="soft"
+              size="sm"
+            />
+            <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+              Eliminado
+            </UBadge>
+          </div>
+          <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+            {{ formatearBorradoPor(row.original) }}
+          </p>
         </div>
       </template>
 
@@ -224,25 +313,44 @@ const columns: TableColumn<Impuesto>[] = [
             <USwitch
               v-if="row.original.origen === 'personalizado'"
               :model-value="row.original.activo"
-              :disabled="toggling.has(row.original.id)"
+              :disabled="toggling.has(row.original.id) || !!row.original.eliminadoEl"
               @update:model-value="toggleActivo(row.original)"
             />
           </div>
         </template>
 
         <template #acciones-cell="{ row }">
-          <div class="flex justify-end gap-2">
+          <!-- `&& origen === 'personalizado'`: el catálogo oficial del país
+               aparece en el listado de la papelera pero no se restaura (ver
+               `restaurarImpuesto`). Sin esta condición la fila cae acá y no en
+               la rama de abajo, o sea perdería también su "Catálogo oficial". -->
+          <div
+            v-if="row.original.eliminadoEl && row.original.origen === 'personalizado'"
+            class="flex justify-end"
+          >
+            <UButton
+              icon="i-lucide-rotate-ccw"
+              color="neutral"
+              variant="ghost"
+              @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+            >
+              Restaurar
+            </UButton>
+          </div>
+          <div v-else class="flex justify-end gap-2">
             <template v-if="row.original.origen === 'personalizado'">
               <UButton
                 icon="i-lucide-square-pen"
                 color="neutral"
                 variant="ghost"
+                title="Editar"
                 @click="abrirEditar(row.original)"
               />
               <UButton
                 icon="i-lucide-trash-2"
                 color="error"
                 variant="ghost"
+                title="Eliminar"
                 @click="pedirEliminar(row.original)"
               />
             </template>
@@ -337,9 +445,20 @@ const columns: TableColumn<Impuesto>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar impuesto"
-      message="¿Estás seguro de que quieres eliminar este impuesto? Esta acción no se puede deshacer."
+      message="¿Eliminar este impuesto? Podés recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
+    />
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar impuesto"
+      message="¿Restaurar este impuesto? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      @cancel="confirmRestaurarId = null"
+      @confirm="confirmRestaurarId && restaurarImpuesto(confirmRestaurarId)"
     />
   </div>
 </template>

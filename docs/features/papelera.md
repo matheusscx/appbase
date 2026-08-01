@@ -1,6 +1,6 @@
 # Feature: Papelera (restaurar eliminados)
 
-**Status**: Backend completo, frontend parcial (2/15 pantallas)
+**Status**: Backend completo, frontend parcial (3/15 pantallas)
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-08-01
 
@@ -282,15 +282,15 @@ identificable a quien devolverle el "click" de restaurar.
 
 ## Frontend
 
-**Estado real: 2 de 15 pantallas cableadas** (`configuracion/items.vue`,
-`configuracion/categorias.vue`). 16 recursos backend, pero **15 páginas**:
-`mesas` no tiene página propia, vive dentro de `configuracion/salones.vue`. Las
-otras 13 (`descuentos`, `recargos`, `impuestos`, `grupos-modificadores`,
-`terceros`, `cajones`, `garzones`, `turnos`, `salones` [con sus `mesas`],
-`impresoras`, `causas-merma`, `motivos-diferencia`,
+**Estado real: 3 de 15 pantallas cableadas** (`configuracion/items.vue`,
+`configuracion/categorias.vue`, `configuracion/impuestos.vue`). 16 recursos
+backend, pero **15 páginas**: `mesas` no tiene página propia, vive dentro de
+`configuracion/salones.vue`. Las otras 12 (`descuentos`, `recargos`,
+`grupos-modificadores`, `terceros`, `cajones`, `garzones`, `turnos`, `salones`
+[con sus `mesas`], `impresoras`, `causas-merma`, `motivos-diferencia`,
 `motivos-diferencia-inventario`) todavía **no** tienen el toggle "ver eliminados"
 ni el botón restaurar — el backend ya soporta los 16 recursos, el molde de
-pantalla está probado en las dos hechas, pero replicarlo a las 13 restantes
+pantalla está probado en las tres hechas, pero replicarlo a las 12 restantes
 queda pendiente. Backlog: [`docs/agent/pendientes.md`](../agent/pendientes.md).
 
 El composable `usePapelera(recurso)` (`app/composables/usePapelera.ts`) encapsula lo

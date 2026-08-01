@@ -149,17 +149,56 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   es "comparar timestamps entre tablas" en general — es comparar timestamps **de
   tipos distintos**, que hoy solo pasa en el par `items`/`receta_extras_permitidos`
   de los tres recursos con colateral.
-- [ ] **13 de 15 pantallas de la papelera sin cablear en el frontend** (frontend) —
+- [ ] **12 de 15 pantallas de la papelera sin cablear en el frontend** (frontend) —
   ⚠️ **Corregido (Ronda de fixes 1):** son 16 recursos backend, pero **15
   pantallas** — `mesas` no tiene página propia, vive dentro de
-  `configuracion/salones.vue`, así que no cuenta aparte. Solo
-  `configuracion/items.vue` y `configuracion/categorias.vue` tienen el toggle
-  "ver eliminados" y el botón restaurar; las otras 13 (`descuentos`, `recargos`,
-  `impuestos`, `grupos-modificadores`, `terceros`, `cajones`, `garzones`, `turnos`,
+  `configuracion/salones.vue`, así que no cuenta aparte.
+  `configuracion/items.vue`, `configuracion/categorias.vue` y
+  —desde el 2026-08-01— `configuracion/impuestos.vue` tienen el toggle
+  "ver eliminados" y el botón restaurar; las otras 12 (`descuentos`, `recargos`,
+  `grupos-modificadores`, `terceros`, `cajones`, `garzones`, `turnos`,
   `salones` [con sus `mesas`], `impresoras`, `causas-merma`, `motivos-diferencia`,
   `motivos-diferencia-inventario`) quedan sin UI. El molde ya está probado en las
-  dos pantallas hechas: `usePapelera(recurso)` (`app/composables/usePapelera.ts`)
+  tres pantallas hechas: `usePapelera(recurso)` (`app/composables/usePapelera.ts`)
   da el toggle, `restaurar(id)` y `formatearBorradoPor(fila)`.
+  📐 **Usar `configuracion/impuestos.vue` + `impuestos.nuxt.spec.ts` como molde**,
+  no `categorias.vue`: es el más reciente y el que pasó por dos rondas de
+  revisión. Lo que esas rondas corrigieron, y que conviene no volver a romper:
+  - **Guard de reentrancia en `restaurar`, y aplica a las 12.** El `CrudModal`
+    no se cierra solo al confirmar —lo cierra el `finally` de la página—, así
+    que mientras el `POST` viaja el botón sigue clickeable. Sin guard, el
+    segundo click manda un segundo `POST .../restaurar` sobre una fila que el
+    primero ya revivió, el backend contesta 404 y el usuario ve un toast de
+    **error inmediatamente después de un restore exitoso**. Reproducido en la
+    re-revisión. El molde lo cierra con un `ref` (`restaurando`) + `:loading`
+    en el modal; el `ref` es la protección, el `:loading` solo el feedback.
+  - **El fixture del test tiene que estar ELIMINADO** para que una aserción
+    negativa (`not.toContain('Restaurar')`, etc.) pruebe algo. Con todas las
+    filas vivas esa rama no se renderiza para ninguna y la aserción pasa por
+    construcción — pasó en la primera versión de este spec. Regla general:
+    toda aserción negativa necesita un ancla positiva al lado.
+  - **El badge "Eliminado" se asserta por elemento, no por subcadena.** Un
+    `toContain('Eliminado')` sobre el texto de la página queda subsumido por
+    "Eliminado por &lt;autor&gt;" y no caza que borren el badge. En
+    `categorias.vue` esa línea funciona solo por el género ("Eliminada" vs
+    "Eliminado por"): **no copiarla a las pantallas masculinas**, que son casi
+    todas las que faltan. ℹ️ `items.nuxt.spec.ts` ya tiene una de esas
+    subsumidas, preexistente: cerrarla cuando se toque ese spec.
+  ⛔ **Lo que NO hay que copiar de `impuestos`: el guard de `origen`.** Esa
+  pantalla tiene filas que el listado de la papelera devuelve pero que **no se
+  pueden restaurar** (el catálogo oficial del país). **Medido el 2026-08-01: el
+  caso es exclusivo de `impuestos`** y no se repite en ningún otro de los 16 —
+  es el único listado que devuelve filas ajenas al tenant (entran por la rama
+  `pais_id` del `OR`, `impuestos.service.ts`, mientras `restaurar()` busca por
+  `{ id, tenantId }`).
+  ⚠️ **Una versión anterior de esta entrada decía lo contrario** —que el caso se
+  repetía "en cada recurso con filas `es_fijo`", nombrando `causas-merma`,
+  `motivos-diferencia` y `motivos-diferencia-inventario`—. **Es falso**: los tres
+  tienen `es_fijo`, pero su `remove()` rechaza la fila fija con 400 antes de
+  borrarla, así que **una fila fija nunca puede entrar a la papelera**. Copiar el
+  guard ahí produce una condición muerta en el template y un test que no puede
+  fallar. La afirmación se había generalizado desde un solo ejemplo sin contar
+  los casos, que es el error que esta misma entrada advierte más arriba.
   **Cada pantalla nueva necesita el mismo fix que `items.vue` ya tiene en su
   `eliminar()`:** con el toggle "ver eliminados" activo, el `DELETE` no puede
   quitar la fila del array local — tiene que **recargar el listado**, porque el
