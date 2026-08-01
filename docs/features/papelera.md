@@ -1,6 +1,6 @@
 # Feature: Papelera (restaurar eliminados)
 
-**Status**: Backend completo, frontend parcial (4/15 pantallas)
+**Status**: Backend completo, frontend parcial (5/15 pantallas)
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-08-01
 
@@ -93,8 +93,9 @@ Body (opcional):  { "nombre": "Black Friday 2" }
                   Solo en los recursos con unicidad de nombre, y solo cuando
                   el usuario resolvió una colisión desde el modal. SIN body el
                   comportamiento es el de siempre: revive con el nombre que la
-                  fila ya tenía. Hoy lo acepta `descuentos`; los otros 7 con
-                  colisión quedan por replicar (docs/agent/pendientes.md).
+                  fila ya tenía. Hoy lo aceptan `descuentos` y `recargos`;
+                  los otros 6 con colisión quedan por replicar
+                  (docs/agent/pendientes.md).
 
 Response (201): la entidad restaurada. (No hay `@HttpCode(200)` en ninguno
                   de los 16 — Nest devuelve 201 por default en un POST, y
@@ -112,7 +113,7 @@ Response (400): en 9 de los 16 — las 5 con índice único parcial de nombre
                   `garzones`, por una restricción distinta que no es de nombre.
                   El reparto completo y por qué no se deduce de la familia de
                   borrado: "Colisión al restaurar" abajo.
-                  En `descuentos` el cuerpo del 400 trae además
+                  En `descuentos` y `recargos` el cuerpo del 400 trae además
                   `nombreSugerido` — un nombre libre para reintentar, ver
                   "Salida de la colisión" abajo.
 ```
@@ -260,10 +261,14 @@ que también está tomado, vuelve el 400 con la sugerencia **siguiente** (nunca
 encadena "… 2 2"). La alternativa —que el frontend confíe en que la sugerencia
 sigue libre cuando la manda— apuesta a que nada pasó entre que la vio y confirmó.
 
-Implementado hoy solo en `descuentos` (molde end-to-end: backend + pantalla +
-tests, revisado antes de replicar). Los otros 7 quedan en
-[`docs/agent/pendientes.md`](../agent/pendientes.md). ⛔ `garzones` queda **fuera**
-por diseño: su colisión es el placeholder Mostrador, y renombrar no la resuelve.
+Implementado en `descuentos` (molde end-to-end, revisado antes de replicar) y en
+`recargos`, su gemelo: **los dos garantizan la unicidad solo por código**, sin
+índice en la base, así que pueden consultar los nombres tomados ANTES de
+intentar. Los 6 que faltan **no son un copiar-pegar**: 5 detectan la colisión
+capturando el `23505` de Postgres, o sea que se enteran DESPUÉS de que falla el
+INSERT. Backlog: [`docs/agent/pendientes.md`](../agent/pendientes.md).
+⛔ `garzones` queda **fuera** por diseño: su colisión es el placeholder
+Mostrador, y renombrar no la resuelve.
 
 ### Solo lo que borró una persona
 
@@ -324,16 +329,16 @@ identificable a quien devolverle el "click" de restaurar.
 
 ## Frontend
 
-**Estado real: 4 de 15 pantallas cableadas** (`configuracion/items.vue`,
+**Estado real: 5 de 15 pantallas cableadas** (`configuracion/items.vue`,
 `configuracion/categorias.vue`, `configuracion/impuestos.vue`,
-`configuracion/descuentos.vue`). 16 recursos backend, pero **15 páginas**:
+`configuracion/descuentos.vue`, `configuracion/recargos.vue`). 16 recursos backend, pero **15 páginas**:
 `mesas` no tiene página propia, vive dentro de `configuracion/salones.vue`. Las
-otras 11 (`recargos`, `grupos-modificadores`, `terceros`, `cajones`, `garzones`,
-`turnos`, `salones` [con sus `mesas`], `impresoras`, `causas-merma`,
+otras 10 (`grupos-modificadores`, `terceros`, `cajones`, `garzones`, `turnos`,
+`salones` [con sus `mesas`], `impresoras`, `causas-merma`,
 `motivos-diferencia`, `motivos-diferencia-inventario`) todavía **no** tienen el
 toggle "ver eliminados" ni el botón restaurar — el backend ya soporta los 16
-recursos, el molde de pantalla está probado en las cuatro hechas, pero replicarlo
-a las 11 restantes queda pendiente. Backlog:
+recursos, el molde de pantalla está probado en las cinco hechas, pero replicarlo
+a las 10 restantes queda pendiente. Backlog:
 [`docs/agent/pendientes.md`](../agent/pendientes.md).
 
 El composable `usePapelera(recurso)` (`app/composables/usePapelera.ts`) encapsula lo
@@ -362,7 +367,7 @@ en vuelo, y sin protección gana el que responda último, no el último click. L
 pantallas con `cargar()` propio (como `categorias.vue`) necesitan su propia cola
 serial local (`cargaEnCurso`); las que usan `usePaginatedList` (como `items.vue`)
 ya la heredan del composable (`usePaginatedList.ts` → `fetch()`), sin nada que
-replicar. Backlog de las 11 pantallas restantes con el detalle de cuál de las dos
+replicar. Backlog de las 10 pantallas restantes con el detalle de cuál de las dos
 formas les toca: [`docs/agent/pendientes.md`](../agent/pendientes.md).
 
 ---
@@ -379,7 +384,7 @@ formas les toca: [`docs/agent/pendientes.md`](../agent/pendientes.md).
   (`grupos-modificadores`, `causas-merma`, `motivos-diferencia`,
   `motivos-diferencia-inventario`, `cajones`, `garzones`) y solo por código
   (`descuentos`, `recargos`, `turnos`).
-- **Salida de la colisión** (solo `descuentos` por ahora): el 400 trae un
+- **Salida de la colisión** (`descuentos` y `recargos`): el 400 trae un
   `nombreSugerido` libre y restaurar con él revive y renombra en una sola
   escritura; reintentar con un nombre también tomado da la sugerencia siguiente
   sin encadenar sufijos. La aritmética del sufijo tiene su unit propio

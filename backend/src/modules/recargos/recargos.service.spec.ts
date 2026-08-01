@@ -22,10 +22,12 @@ describe('RecargosService', () => {
     andWhere: jest.Mock;
     getCount: jest.Mock;
     leftJoin: jest.Mock;
+    select: jest.Mock;
     addSelect: jest.Mock;
     withDeleted: jest.Mock;
     orderBy: jest.Mock;
     getRawAndEntities: jest.Mock;
+    getRawMany: jest.Mock;
   };
   let managerMock: {
     create: jest.Mock;
@@ -55,10 +57,12 @@ describe('RecargosService', () => {
       andWhere: jest.fn().mockReturnThis(),
       getCount: jest.fn().mockResolvedValue(0),
       leftJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
       withDeleted: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       getRawAndEntities: jest.fn().mockResolvedValue({ entities: [], raw: [] }),
+      getRawMany: jest.fn().mockResolvedValue([]),
     };
 
     managerMock = {
@@ -441,6 +445,77 @@ describe('RecargosService', () => {
         BadRequestException,
       );
       expect(recargoRepoMock.update).not.toHaveBeenCalled();
+    });
+
+    // El 400 no puede ser solo un "no se pudo": la pantalla precarga
+    // `nombreSugerido` en el campo del modal, así que si el backend deja de
+    // mandarlo el usuario vuelve a quedar adivinando qué nombre está libre.
+    it('el 400 de colisión trae un nombre libre ya calculado, salteando los tomados', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Recargo finde',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      qbMock.getCount.mockResolvedValueOnce(1);
+      qbMock.getRawMany.mockResolvedValueOnce([
+        { nombre: 'Recargo finde' },
+        { nombre: 'Recargo finde 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, 'r1')).rejects.toMatchObject({
+        response: {
+          message: 'Ya existe un recargo activo con el nombre "Recargo finde".',
+          nombreSugerido: 'Recargo finde 3',
+        },
+      });
+    });
+
+    it('con `nombreNuevo` libre, restaura Y renombra en la misma escritura', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Recargo finde',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      recargoRepoMock.findOneOrFail.mockResolvedValue({ id: 'r1' });
+
+      await service.restaurar(TENANT, 'r1', 'Recargo finde 2');
+
+      // Una sola escritura con las tres columnas: revivir y renombrar en dos
+      // sentencias podría dejar la fila viva con el nombre que colisiona.
+      expect(recargoRepoMock.update).toHaveBeenCalledWith(
+        { id: 'r1', tenantId: TENANT },
+        {
+          eliminadoEl: null,
+          eliminadoPor: null,
+          nombre: 'Recargo finde 2',
+        },
+      );
+      // Y la unicidad se chequea contra el nombre NUEVO, no contra el viejo.
+      expect(qbMock.andWhere).toHaveBeenCalledWith('r.nombre = :nombre', {
+        nombre: 'Recargo finde 2',
+      });
+    });
+
+    it('sin `nombreNuevo` no toca el nombre (comportamiento de siempre)', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Recargo finde',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      recargoRepoMock.findOneOrFail.mockResolvedValue({ id: 'r1' });
+
+      await service.restaurar(TENANT, 'r1');
+
+      expect(recargoRepoMock.update).toHaveBeenCalledWith(
+        { id: 'r1', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
     });
   });
 

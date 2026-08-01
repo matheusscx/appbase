@@ -1762,6 +1762,107 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     expect(resRestaurarOk.status).toBe(201);
   });
 
+  it('recargos: el 400 de colisión trae un nombre libre, y restaurar con ese nombre funciona', async () => {
+    const nombre = `Recargo sugerencia E2E ${Date.now()}`;
+    const bodyBase = {
+      nombre,
+      tipoReglaId: RECARGO_GENERAL_TIPO_ID,
+      valor: '0.05',
+      modo: 'porcentaje',
+    };
+    const crear = async (n: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/recargos')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ ...bodyBase, nombre: n });
+      expect(res.status).toBe(201);
+      return (res.body as RecursoConAuditoria).id;
+    };
+
+    const originalId = await crear(nombre);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .delete(`/api/recargos/${originalId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+      ).status,
+    ).toBe(200);
+
+    // Con el original en la papelera, el nombre queda libre: se crea otro con
+    // ese nombre Y otro con el sufijo 2, para que la sugerencia tenga que
+    // saltear un ocupado en vez de devolver el primer número.
+    const otroId = await crear(nombre);
+    const otro2Id = await crear(`${nombre} 2`);
+
+    const resColision = await request(app.getHttpServer())
+      .post(`/api/recargos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resColision.status).toBe(400);
+    const cuerpo = resColision.body as {
+      message: string;
+      nombreSugerido: string;
+    };
+    expect(cuerpo.message).toContain(nombre);
+    expect(cuerpo.nombreSugerido).toBe(`${nombre} 3`);
+
+    // Y ese nombre sirve de verdad: restaurar con él revive y renombra.
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/recargos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: cuerpo.nombreSugerido });
+    expect(resRestaurar.status).toBe(201);
+    expect((resRestaurar.body as { nombre: string }).nombre).toBe(
+      `${nombre} 3`,
+    );
+
+    // Los tres conviven vivos, que es el punto de la salida: nadie tuvo que
+    // renombrar a mano ni perder el que ya estaba.
+    const listado = await request(app.getHttpServer())
+      .get('/api/recargos')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const nombres = (listado.body as { id: string; nombre: string }[])
+      .filter((r) => [originalId, otroId, otro2Id].includes(r.id))
+      .map((r) => r.nombre)
+      .sort();
+    expect(nombres).toEqual([nombre, `${nombre} 2`, `${nombre} 3`].sort());
+  });
+
+  it('recargos: restaurar con un nombre que TAMBIÉN está tomado vuelve a dar 400, con la sugerencia siguiente', async () => {
+    const nombre = `Recargo reintento E2E ${Date.now()}`;
+    const bodyBase = {
+      nombre,
+      tipoReglaId: RECARGO_GENERAL_TIPO_ID,
+      valor: '0.05',
+      modo: 'porcentaje',
+    };
+    const crear = async (n: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/recargos')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ ...bodyBase, nombre: n });
+      expect(res.status).toBe(201);
+      return (res.body as RecursoConAuditoria).id;
+    };
+
+    const originalId = await crear(nombre);
+    await request(app.getHttpServer())
+      .delete(`/api/recargos/${originalId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    await crear(nombre);
+    await crear(`${nombre} 2`);
+
+    // El usuario edita el campo y manda uno que también está ocupado: el
+    // backend no encadena sufijos ("... 2 2"), sugiere el siguiente libre.
+    const res = await request(app.getHttpServer())
+      .post(`/api/recargos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: `${nombre} 2` });
+    expect(res.status).toBe(400);
+    expect((res.body as { nombreSugerido: string }).nombreSugerido).toBe(
+      `${nombre} 3`,
+    );
+  });
+
   it('turnos: colisión de nombre garantizada por código (sin índice único) — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
     const nombre = `Turno papelera E2E colisión ${Date.now()}`;
     const bodyBase = { nombre, horaInicio: '12:00', horaFin: '14:00' };
