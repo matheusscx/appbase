@@ -108,6 +108,47 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## `grupos_modificadores` — el índice de dev enforzaba otra regla (2026-08-01)
+
+- [x] **Mal diagnosticado primero, y esa es la parte que vale.** La entrada de
+  backlog decía que "el índice y el código no se ponen de acuerdo": el índice
+  case-sensitive, `assertNombreLibre` con `LOWER(...)`. **Falso.**
+  `startup-pos.sql:629` ya declaraba el índice sobre `LOWER("nombre")`, de
+  acuerdo con el código. Lo que yo había medido con `pg_indexes` era el índice
+  **de dev**, que creaba `synchronize` a partir del `@Index` de la entity — y
+  TypeORM no sabe expresar una función en `@Index`. La propia entity lo decía
+  en un comentario anterior a esta sesión, calificándolo de "discrepancia
+  dev/prod menor y aceptada".
+  No era menor: **el `restaurar()` de la papelera no pasa por
+  `assertNombreLibre`**, así que en dev el único guard del lado del motor era el
+  equivocado. Restaurar "Extras" con un "extras" vivo pasaba — verificado con el
+  mutante, que pone rojos los dos tests nuevos.
+  Cerrado sacando el `@Index` de la entity y creando el índice en el seeder con
+  SQL cruda, **mismo patrón que `causas_merma` y los dos `motivos_diferencia`**,
+  cuyas entities tampoco lo declaran por esta misma razón. El `DROP` es
+  condicional (solo si el existente no es el de `lower()`), así que en una base
+  ya correcta no hay churn.
+  Lo fijan dos e2e: la **forma** del índice (`pg_indexes`, patrón ya usado en
+  `caja.e2e-spec.ts`) y la **conducta** que depende de él (restaurar con
+  colisión que solo difiere en mayúsculas → 400 con `nombreSugerido`).
+  ⚠️ Dato para el próximo que toque esto: **el seeder es auto-reparador**.
+  Volver a poner el `@Index` NO reintroduce el bug, porque `synchronize` corre
+  antes que el seeder y el `DROP` condicional lo corrige. La pieza que sostiene
+  la regla es el bloque del seeder, no la ausencia del decorador — el primer
+  mutante que probé (devolver el `@Index` solo) pasó en verde y por eso hubo que
+  buscar el mutante real.
+  **Y una lección de método:** la primera medición de "cuáles comparan sin
+  mayúsculas" grepeaba `lower(nombre)` sobre el archivo entero y matcheó
+  **comentarios** —incluido uno mío—, dando que `cajones` era case-insensitive
+  cuando no lo es. Medir el mecanismo en vez de la conducta, otra vez.
+  **Contrapartida asumida:** sin el `@Index`, en dev `synchronize` puede dejar
+  la tabla sin índice hasta que el seeder lo recree, así que la red del
+  constraint pasa a ser que el seeder corra y no falle. Mismo perfil que ya
+  tienen los otros tres recursos case-insensitive; no es riesgo nuevo, pero
+  ahora aplica a un caso más.
+
+---
+
 ## Deuda de código (harness)
 
 - [x] ~~**Los mapas de estado de venta están duplicados en 4 `.vue`**~~ (frontend) —

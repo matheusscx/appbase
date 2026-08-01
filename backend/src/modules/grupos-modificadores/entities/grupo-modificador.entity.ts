@@ -1,15 +1,19 @@
-import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
-// Nota: el índice único parcial de producción (startup-pos.sql) usa
-// LOWER("nombre") para ser case-insensitive. TypeORM @Index no soporta
-// expresiones tipo LOWER() en las columnas listadas, así que este índice
-// (el que synchronize:true crea en dev) es case-sensitive — discrepancia
-// dev/prod menor y aceptada, no bloqueante.
+// ⚠️ `uq_grupo_modificador_nombre_vivo` NO se declara acá a propósito.
+//
+// El índice tiene que ser sobre `LOWER("nombre")` —así lo declara
+// `startup-pos.sql` y así compara `assertNombreLibre`—, y **TypeORM no sabe
+// expresar una función en `@Index`**. Mientras estuvo declarado acá,
+// `synchronize` creaba en dev un índice sobre `nombre` PELADO: la regla del
+// producto era una sola, pero la base de dev enforzaba otra, y el único guard
+// que quedaba del lado del motor era el equivocado (el `restaurar()` de la
+// papelera no pasa por `assertNombreLibre`).
+//
+// Lo crea `seeder.service.ts` → `seedGruposModificadores()` con SQL cruda,
+// mismo patrón que `causas_merma` y los dos `motivos_diferencia`, cuyas
+// entities tampoco lo declaran por la misma razón.
 @Entity('grupos_modificadores')
-@Index('uq_grupo_modificador_nombre_vivo', ['tenantId', 'nombre'], {
-  unique: true,
-  where: '"eliminado_el" IS NULL',
-})
 export class GrupoModificador {
   @PrimaryGeneratedColumn('uuid', { name: 'grupo_modificador_id' })
   grupoModificadorId: string;

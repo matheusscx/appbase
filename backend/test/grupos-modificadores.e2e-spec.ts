@@ -299,4 +299,71 @@ describe('Grupos de modificadores — venta descuenta stock de opciones elegidas
 
     expect(res.status).toBe(400);
   });
+
+  // ─── El índice de nombre único es CASE-INSENSITIVE ────────────────────────
+  // No es un detalle de esquema: es la única defensa del lado del motor, y hay
+  // un camino que NO pasa por `assertNombreLibre` — el `restaurar()` de la
+  // papelera. Mientras la entity declaraba el índice con `@Index`, TypeORM lo
+  // creaba en dev sobre `nombre` PELADO (no sabe expresar `LOWER()`), así que
+  // dev enforzaba una regla distinta de la de `startup-pos.sql`. Ahora lo crea
+  // el seeder con SQL cruda, igual que `causas_merma`.
+
+  it('el índice único de nombre existe y es sobre lower(nombre)', async () => {
+    const rows: { indexdef: string }[] = await ds.query(
+      `SELECT indexdef FROM pg_indexes
+        WHERE tablename = 'grupos_modificadores'
+          AND indexname = 'uq_grupo_modificador_nombre_vivo'`,
+    );
+    expect(rows).toHaveLength(1);
+    const def = rows[0].indexdef;
+    expect(def).toContain('UNIQUE');
+    expect(def).toContain('tenant_id');
+    // Lo que este test existe para fijar: `lower(...)`, no `nombre` pelado.
+    // Volver a poner el `@Index` en la entity lo pone rojo.
+    expect(def).toMatch(/lower\(/i);
+    // Parcial: sin esto bloquearía recrear un grupo tras un borrado legítimo.
+    expect(def).toContain('eliminado_el');
+  });
+
+  it('restaurar un grupo cuyo nombre lo tomó otro que solo difiere en mayúsculas es 400', async () => {
+    // Este camino NO pasa por `assertNombreLibre` (el `restaurar()` de la
+    // papelera escribe directo), así que lo único que lo frena es el índice.
+    const base = `Extras CI E2E ${Date.now()}`;
+    const crear = async (nombre: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/grupos-modificadores')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre,
+          opciones: [{ itemId: bebidaId, cantidad: '1', precioExtra: '800' }],
+        });
+      expect(res.status).toBe(201);
+      return (res.body as GrupoModificadorResponse).grupoModificadorId;
+    };
+
+    const originalId = await crear(base);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .delete(`/api/grupos-modificadores/${originalId}`)
+          .set('Authorization', `Bearer ${token}`)
+      ).status,
+      // 204, no 200: este DELETE no devuelve cuerpo.
+    ).toBe(204);
+
+    // Con el original en la papelera el nombre queda libre, así que otro lo
+    // toma — en MINÚSCULA, que es el caso que un índice case-sensitive dejaría
+    // pasar.
+    await crear(base.toLowerCase());
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/grupos-modificadores/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+    // Y trae la salida: un nombre libre para reintentar.
+    expect((res.body as { nombreSugerido?: string }).nombreSugerido).toBe(
+      `${base} 2`,
+    );
+  });
 });

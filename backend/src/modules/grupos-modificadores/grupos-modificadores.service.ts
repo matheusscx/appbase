@@ -661,16 +661,17 @@ export class GruposModificadoresService {
         // sentencia corre en autocommit: su fallo no deja una transacción
         // abortada y estas queries funcionan.
         //
-        // ⚠️ Acá el índice y el código NO coinciden, y gana el código:
-        // `uq_grupo_modificador_nombre_vivo` es sobre `nombre` PELADO (medido
-        // con `pg_indexes`), pero `assertNombreLibre` —la que corre en
-        // `create()`/`update()`— compara con `LOWER(...)`. O sea que la regla
-        // que el usuario percibe es la case-insensitive, la más estricta.
-        // Sugerir con la del índice devolvería "Extras 2" habiendo un
-        // "extras 2" vivo: el restore pasaría (el índice no se queja) y
-        // quedaría un par de nombres que `create()` habría rechazado. Por eso
-        // `ignorarMayusculas: true` aunque el índice no lo pida.
-        // El desacuerdo en sí está anotado en `docs/agent/pendientes.md`.
+        // `ignorarMayusculas: true` porque la unicidad de este recurso es
+        // case-insensitive de punta a punta: `assertNombreLibre` compara con
+        // `LOWER(...)` y el índice `uq_grupo_modificador_nombre_vivo` es sobre
+        // `LOWER("nombre")` (`startup-pos.sql`, y lo crea el seeder).
+        //
+        // ⚠️ Corrección de lo que decía antes acá: este comentario afirmaba que
+        // el índice era case-sensitive y que el código "ganaba". Era medir el
+        // índice de DEV — el que `synchronize` creaba desde un `@Index` de la
+        // entity, que no puede expresar `LOWER()`. Esa discrepancia dev/prod ya
+        // no existe (la entity dejó de declararlo). La conclusión era correcta;
+        // el motivo, no.
         throw new BadRequestException(
           await errorDeColisionNombreSQL(
             this.dataSource,

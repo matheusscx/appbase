@@ -2843,6 +2843,47 @@ export class SeederService implements OnApplicationBootstrap {
    * Idempotente: guarda por la existencia del grupo "Proteína".
    */
   private async seedGruposModificadores(): Promise<void> {
+    // El índice de nombre único vivo va acá y NO en `@Index` de la entity:
+    // `assertNombreLibre` compara con `LOWER(...)` y `startup-pos.sql` declara
+    // el índice sobre `LOWER("nombre")`, pero **TypeORM no sabe expresar una
+    // función en `@Index`**, así que `synchronize` creaba uno sobre `nombre`
+    // pelado — case-sensitive. Resultado: la regla existía una sola vez, pero
+    // dev la reproducía distinto de producción, y el único guard que quedaba
+    // del lado de la base era el equivocado.
+    //
+    // Mismo patrón que `seedCausasMerma()` (y los dos de motivos-diferencia),
+    // que ya resolvían esto así: la entity no declara el índice y el seeder lo
+    // crea con SQL cruda.
+    //
+    // El `DROP` condicional limpia el índice case-sensitive que quedó en las
+    // bases de dev creadas antes de este cambio. Solo dispara si el que existe
+    // NO es el de `lower()`, así que en una base ya correcta no hay churn.
+    //
+    // ⚠️ Contrapartida de sacar el `@Index`: en dev, `synchronize` puede dejar
+    // la tabla SIN el índice hasta que este seeder lo recree, o sea que la
+    // única red del constraint pasa a ser que el seeder corra y no falle. Es
+    // el mismo perfil de riesgo que ya tienen `causas_merma` y los dos
+    // `motivos_diferencia` —que nunca declararon su índice en la entity—, no
+    // uno nuevo; queda dicho porque ahora aplica a un caso más.
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_indexes
+           WHERE schemaname = 'public'
+             AND indexname = 'uq_grupo_modificador_nombre_vivo'
+             AND indexdef NOT ILIKE '%lower%'
+        ) THEN
+          EXECUTE 'DROP INDEX uq_grupo_modificador_nombre_vivo';
+        END IF;
+      END $$;
+    `);
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_grupo_modificador_nombre_vivo
+      ON grupos_modificadores (tenant_id, lower(nombre))
+      WHERE eliminado_el IS NULL
+    `);
+
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const CLP = '550e8400-e29b-41d4-a716-446655440003';
     const uuid = (suffix: number): string =>

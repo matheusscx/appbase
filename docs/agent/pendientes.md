@@ -268,22 +268,24 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   ("la carrera del toggle vía usePaginatedList") **no** sirve de molde acá: ese
   ejercita el `watch` del composable, que ninguna de las 9 tiene.
 
-- [ ] **`grupos_modificadores`: el índice y el código no se ponen de acuerdo
-  sobre mayúsculas** (backend) — medido el 2026-08-01 con `pg_indexes` y
-  leyendo el service: `uq_grupo_modificador_nombre_vivo` es sobre `nombre`
-  PELADO (case-sensitive), pero `assertNombreLibre` —la que corre en
-  `create()`/`update()`— compara con `LOWER(...)`. O sea que "Extras" y
-  "extras" son duplicados para el código y no para la base. Hoy no produce un
-  bug visible porque toda alta pasa por el código, pero deja dos reglas donde
-  debería haber una, y cualquier camino que escriba sin pasar por
-  `assertNombreLibre` (como el `restaurar()` de la papelera) queda con la regla
-  laxa. Los otros 3 recursos case-insensitive (`causas_merma`,
-  `motivo_diferencia_caja`, `motivo_diferencia_inventario`) sí tienen el índice
-  sobre `lower(nombre)`, o sea que el patrón consistente ya existe en el repo.
-  Cierre: alinear el índice con el código (índice sobre `lower(nombre)`) o al
-  revés, decisión del owner. Mientras tanto la sugerencia de la papelera usa la
-  regla estricta (`ignorarMayusculas: true`), documentado en
-  `grupos-modificadores.service.ts` → `restaurar()`.
+- [ ] **La unicidad de nombre está partida 4 y 3 en el proyecto, sin que nadie
+  lo haya decidido** (backend, transversal) — medido el 2026-08-01 sobre el
+  código de comparación de los 8 recursos con nombre único por tenant (leyendo
+  la cláusula real, no grepeando `lower`, que matchea comentarios):
+  - **Case-sensitive** (`"Extras"` y `"extras"` son dos nombres distintos):
+    `descuentos`, `recargos`, `turnos` (los tres sin índice, solo por código) y
+    `cajones` (índice sobre `nombre` + comparación exacta).
+  - **Case-insensitive** (son el mismo nombre): `causas_merma`,
+    `motivo_diferencia_caja`, `motivo_diferencia_inventario` y
+    `grupos_modificadores`, los cuatro con índice sobre `lower(nombre)`.
+  No hay una regla del proyecto: se fue dando. Para el usuario esto es visible
+  —en un catálogo, poder crear "Extras" y "extras" es confuso en unos módulos y
+  no en otros—, así que **unificar cambia conducta y es decisión del owner**,
+  no una limpieza. Si se unifica hacia case-insensitive, el patrón ya existe y
+  es barato: índice sobre `lower(nombre)` creado por el seeder (los 4 CI lo
+  hacen así) + comparación con `LOWER` en el código. Hacia case-sensitive es
+  aflojar una regla, y habría que revisar qué pasa con los nombres ya
+  sembrados.
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 
