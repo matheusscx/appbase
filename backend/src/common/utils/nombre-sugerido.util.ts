@@ -1,17 +1,16 @@
+import type { ObjectLiteral, Repository } from 'typeorm';
+
 /**
  * Sufijo numérico para proponer un nombre libre cuando restaurar una fila de
  * la papelera choca con una viva que ya tomó ese nombre.
  *
- * ⚠️ **Hoy lo consume UN solo recurso: `descuentos`.** Vive en `common/` y no en
- * su service porque el molde está pensado para los 8 con unicidad de nombre por
- * tenant (`descuentos`, `recargos`, `turnos`, `cajones`, `causas-merma`,
- * `motivos-diferencia`, `motivos-diferencia-inventario`,
- * `grupos-modificadores`) — en los 8 la ARITMÉTICA es la misma aunque la query
- * no lo sea: cada uno lee de su tabla y le pasa acá los nombres ya tomados.
- * Pero los otros 7 **todavía no están** (backlog: `docs/agent/pendientes.md`), y
- * no son un copiar-pegar: 5 detectan la colisión capturando el `23505` de
- * Postgres, o sea recién DESPUÉS de fallar el INSERT, mientras `descuentos`
- * —sin índice— puede consultar antes.
+ * Lo consumen los recursos con unicidad de nombre por tenant (`descuentos`,
+ * `recargos`, `turnos`, `cajones`, `causas-merma`, `motivos-diferencia`,
+ * `motivos-diferencia-inventario`, `grupos-modificadores`). Hoy están los 3
+ * primeros; los 5 restantes quedan en `docs/agent/pendientes.md` y **no son un
+ * copiar-pegar**: detectan la colisión capturando el `23505` de Postgres, o sea
+ * recién DESPUÉS de fallar el INSERT, mientras estos 3 —que garantizan la
+ * unicidad solo por código, sin índice— pueden consultar antes.
  *
  * ⚠️ `garzones` NO usa esto: también devuelve 400 al restaurar, pero su
  * colisión no es de nombre (`uq_garzones_mostrador_tenant` permite un solo
@@ -84,4 +83,53 @@ export function sugerirNombreLibre(
 export function patronLikeNombre(base: string): string {
   const escapado = base.replace(/[\\%_]/g, (c) => `\\${c}`);
   return `${escapado} %`;
+}
+
+/**
+ * Cuerpo del 400 de colisión al restaurar: el mensaje y un nombre libre para
+ * reintentar. Es lo que la pantalla precarga en el campo editable del modal.
+ *
+ * Trae en UNA query todos los nombres VIVOS que compiten con la base (el propio
+ * `base` y cualquier `"<base> …"`); numerar es después aritmética en memoria.
+ * Un `SELECT` por candidato sería un N+1 disfrazado de bucle.
+ *
+ * Sirve para cualquier recurso de la papelera porque las 8 tablas con unicidad
+ * de nombre comparten exactamente las tres columnas que toca —`tenant_id`,
+ * `nombre`, `eliminado_el`— **verificado contra `information_schema` el
+ * 2026-08-01**, no asumido por parecido de nombre.
+ *
+ * Extraído acá al aparecer el TERCER consumidor (`turnos`), que es la regla del
+ * proyecto (`CLAUDE.md` → Convenciones → Archivos: duplicar dos veces es
+ * aceptable, se extrae a la tercera). Antes vivía duplicado en
+ * `descuentos.service.ts` y `recargos.service.ts`.
+ *
+ * `alias` se interpola en el SQL, así que **tiene que ser una constante del
+ * código** (`'d'`, `'r'`, `'t'`) y nunca un dato de request. Los valores sí van
+ * parametrizados.
+ */
+export async function errorDeColisionNombre<T extends ObjectLiteral>(
+  repo: Repository<T>,
+  alias: string,
+  etiqueta: string,
+  tenantId: string,
+  nombre: string,
+): Promise<{ message: string; nombreSugerido: string }> {
+  const base = baseSinSufijo(nombre);
+  const filas = await repo
+    .createQueryBuilder(alias)
+    .select(`${alias}.nombre`, 'nombre')
+    .where(`${alias}.tenant_id = :tenantId`, { tenantId })
+    .andWhere(`${alias}.eliminado_el IS NULL`)
+    .andWhere(
+      `(${alias}.nombre = :base OR ${alias}.nombre LIKE :patron ESCAPE '\\')`,
+      { base, patron: patronLikeNombre(base) },
+    )
+    .getRawMany<{ nombre: string }>();
+  return {
+    message: `Ya existe un ${etiqueta} activo con el nombre "${nombre}".`,
+    nombreSugerido: sugerirNombreLibre(
+      nombre,
+      filas.map((f) => f.nombre),
+    ),
+  };
 }

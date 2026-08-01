@@ -10,13 +10,21 @@ export interface Turno {
   activo: boolean
   creadoEl: string
   actualizadoEl: string
+  // Solo llegan con `listar(true)`; el resto de las pantallas que usan turnos
+  // (sesiones-garzón, propinas, salones) nunca los piden.
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 export function useTurnos() {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
-  const listar = () =>
-    useApiFetch<Turno[]>(`${apiUrl}/turnos`)
+  /** `incluirEliminados` es opcional y por default `false`: las otras tres
+   *  pantallas que llaman `listar()` siguen recibiendo solo turnos vivos. */
+  const listar = (incluirEliminados = false) =>
+    useApiFetch<Turno[]>(
+      `${apiUrl}/turnos${incluirEliminados ? '?incluirEliminados=true' : ''}`,
+    )
 
   const crear = (body: {
     nombre: string

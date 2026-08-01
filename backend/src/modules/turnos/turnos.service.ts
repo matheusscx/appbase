@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
 import { Turno } from './entities/turno.entity';
 import {
   EstadoSesionGarzon,
@@ -138,7 +139,11 @@ export class TurnosService {
     );
   }
 
-  async restaurar(tenantId: string, id: string): Promise<TurnoPublico> {
+  async restaurar(
+    tenantId: string,
+    id: string,
+    nombreNuevo?: string,
+  ): Promise<TurnoPublico> {
     // Una sola regla para los tres casos —no existe, existe y está viva, o
     // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
     // lo que borró una persona (decisión del owner, docs/features/papelera.md).
@@ -159,12 +164,23 @@ export class TurnosService {
     // (409) porque así lo esperan `crear()`/`actualizar()` ya probados; acá
     // se traduce a 400, el mismo status accionable que dan los recursos con
     // índice único al restaurar.
+    //
+    // Se valida el nombre CON EL QUE VA A QUEDAR, no el que tenía guardado: si
+    // el usuario resolvió la colisión desde el modal, lo que compite es el
+    // nombre nuevo.
+    const nombre = nombreNuevo ?? turno.nombre;
     try {
-      await this.assertNombreUnico(tenantId, turno.nombre, id);
+      await this.assertNombreUnico(tenantId, nombre, id);
     } catch (e) {
       if (e instanceof ConflictException) {
         throw new BadRequestException(
-          `Ya existe un turno activo con el nombre "${turno.nombre}". Renombrá el actual o el restaurado antes de continuar.`,
+          await errorDeColisionNombre(
+            this.turnoRepo,
+            't',
+            'turno',
+            tenantId,
+            nombre,
+          ),
         );
       }
       throw e;
@@ -172,9 +188,15 @@ export class TurnosService {
     // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
     // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
     // borrado de persona (ver categorias.service.ts → restaurar()).
+    // Revivir y renombrar van en la MISMA escritura: un `update` + un `save`
+    // dejarían una ventana donde la fila está viva con el nombre en colisión.
     await this.turnoRepo.update(
       { id, tenantId },
-      { eliminadoEl: null, eliminadoPor: null },
+      {
+        eliminadoEl: null,
+        eliminadoPor: null,
+        ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
+      },
     );
     const restaurado = await this.turnoRepo.findOneOrFail({
       where: { id, tenantId },

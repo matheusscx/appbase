@@ -5,11 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
-import {
-  baseSinSufijo,
-  patronLikeNombre,
-  sugerirNombreLibre,
-} from '../../common/utils/nombre-sugerido.util';
+import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
 import { Descuento } from './entities/descuento.entity';
 import { DescuentoTramo } from './entities/descuento-tramo.entity';
 import { DescuentoMetodoPago } from './entities/descuento-metodo-pago.entity';
@@ -313,7 +309,13 @@ export class DescuentosService {
     const { disponible } = await this.nombreDisponible(tenantId, nombre, id);
     if (!disponible) {
       throw new BadRequestException(
-        await this.errorDeColision('descuento', tenantId, nombre),
+        await errorDeColisionNombre(
+          this.descuentoRepo,
+          'd',
+          'descuento',
+          tenantId,
+          nombre,
+        ),
       );
     }
     // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
@@ -328,39 +330,6 @@ export class DescuentosService {
       },
     );
     return this.descuentoRepo.findOneOrFail({ where: { id, tenantId } });
-  }
-
-  /**
-   * Cuerpo del 400 de colisión, con un nombre libre ya calculado para que la
-   * pantalla lo ofrezca precargado en vez de mandar al usuario a adivinar.
-   *
-   * `nombreSugerido` sale de UNA query (todos los nombres vivos que compiten)
-   * más aritmética en memoria — nunca un `SELECT` por candidato, que sería un
-   * N+1 disfrazado de bucle de reintentos.
-   */
-  private async errorDeColision(
-    etiqueta: string,
-    tenantId: string,
-    nombre: string,
-  ): Promise<{ message: string; nombreSugerido: string }> {
-    const base = baseSinSufijo(nombre);
-    const filas = await this.descuentoRepo
-      .createQueryBuilder('d')
-      .select('d.nombre', 'nombre')
-      .where('d.tenant_id = :tenantId', { tenantId })
-      .andWhere('d.eliminado_el IS NULL')
-      .andWhere("(d.nombre = :base OR d.nombre LIKE :patron ESCAPE '\\')", {
-        base,
-        patron: patronLikeNombre(base),
-      })
-      .getRawMany<{ nombre: string }>();
-    return {
-      message: `Ya existe un ${etiqueta} activo con el nombre "${nombre}".`,
-      nombreSugerido: sugerirNombreLibre(
-        nombre,
-        filas.map((f) => f.nombre),
-      ),
-    };
   }
 
   async nombreDisponible(

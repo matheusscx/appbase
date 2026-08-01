@@ -10,21 +10,37 @@ const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones'
 const toast = useToast()
 const turnosApi = useTurnos()
 
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('turnos')
+
 const turnos = ref<Turno[]>([])
 const loading = ref(false)
 
+// Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `turnos.value` sin
+// importar cuál toggle la originó — el listado queda desincronizado del switch.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    turnos.value = await turnosApi.listar()
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar turnos'), color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      turnos.value = await turnosApi.listar(verEliminados.value)
+    }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar turnos'), color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Turno) {
   const idx = turnos.value.findIndex(t => t.id === saved.id)
@@ -78,6 +94,7 @@ function abrirCrear() {
 }
 
 function abrirEditar(turno: Turno) {
+  if (turno.eliminadoEl) return
   editingId.value = turno.id
   form.value = {
     nombre: turno.nombre,
@@ -122,6 +139,7 @@ const deleteOpen = ref(false)
 const toDelete = ref<Turno | null>(null)
 
 function confirmarEliminar(turno: Turno) {
+  if (turno.eliminadoEl) return
   toDelete.value = turno
   deleteOpen.value = true
 }
@@ -131,7 +149,16 @@ async function eliminar() {
   try {
     const id = toDelete.value.id
     await turnosApi.eliminar(id)
-    removeLocal(id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
     toast.add({ title: 'Turno eliminado', color: 'success' })
   }
   catch (e: unknown) {
@@ -141,6 +168,88 @@ async function eliminar() {
     deleteOpen.value = false
     toDelete.value = null
   }
+}
+
+// ── Restaurar ────────────────────────────────────────────────────────────────
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
+// Segundo paso del restaurar, solo cuando el backend contesta 400 de colisión:
+// el mensaje que explica cuál nombre está tomado y el nombre libre —editable—
+// con el que se reintenta.
+const colisionModalOpen = ref(false)
+const colisionMensaje = ref('')
+const nombrePropuesto = ref('')
+
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+  colisionModalOpen.value = false
+  colisionMensaje.value = ''
+  nombrePropuesto.value = ''
+}
+
+/**
+ * Restaura un turno de la papelera. `nombreNuevo` solo llega en el reintento
+ * desde el modal de colisión.
+ *
+ * El catch NO cierra todo y tira un toast rojo: un 400 de colisión no es un
+ * error terminal sino una pregunta —qué nombre querés usar—, así que abre el
+ * segundo modal con la sugerencia del backend. Molde:
+ * `configuracion/descuentos.vue`.
+ */
+async function restaurarTurno(id: string, nombreNuevo?: string) {
+  // Guard de reentrancia: el modal no se cierra solo al confirmar, así que
+  // mientras el POST viaja un segundo click mandaría otro `POST .../restaurar`
+  // sobre una fila ya revivida → 404 → toast de ERROR encima de un éxito.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id, nombreNuevo)
+    const t = turnos.value.find(x => x.id === id)
+    if (t) {
+      t.eliminadoEl = null
+      t.eliminadoPorNombre = null
+      // El backend solo devuelve 2xx si aplicó ESE nombre, así que el patch
+      // local no adivina. Reordenar hace falta porque el nombre es el segundo
+      // criterio del orden (el primero, `horaInicio`, no cambia acá): entre
+      // turnos que empiezan a la misma hora, el renombre los reacomoda.
+      if (nombreNuevo) {
+        t.nombre = nombreNuevo
+        turnos.value = [...turnos.value].sort((a, b) =>
+          a.horaInicio.localeCompare(b.horaInicio)
+            || a.nombre.localeCompare(b.nombre, 'es'),
+        )
+      }
+    }
+    toast.add({ title: 'Turno restaurado', color: 'success' })
+    cerrarRestaurar()
+  }
+  catch (e: unknown) {
+    const sugerido = nombreSugeridoDe(e)
+    if (sugerido) {
+      // Se reabre con la sugerencia NUEVA: si el usuario editó a un nombre que
+      // también estaba tomado, el backend ya calculó el siguiente libre.
+      colisionMensaje.value = apiErrorMsg(e, 'Ese nombre ya está en uso.')
+      nombrePropuesto.value = sugerido
+      confirmRestaurarModalOpen.value = false
+      colisionModalOpen.value = true
+    }
+    else {
+      toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+      cerrarRestaurar()
+    }
+  }
+  finally {
+    restaurando.value = false
+  }
+}
+
+function confirmarColision() {
+  const id = confirmRestaurarId.value
+  const nombre = nombrePropuesto.value.trim()
+  if (!id || !nombre) return
+  restaurarTurno(id, nombre)
 }
 
 const columns: TableColumn<Turno>[] = [
@@ -159,15 +268,34 @@ const columns: TableColumn<Turno>[] = [
       description="Define los turnos del local (horario de inicio y fin) para asociarlos a las sesiones de garzón."
     >
       <template #actions>
-        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
-          Nuevo turno
-        </UButton>
+        <div class="flex items-center gap-4">
+          <!-- El toggle solo si puede restaurar: sin `Salones:Eliminar` el
+               backend rechaza el restaurar, así que mostrar la papelera sería
+               ofrecer una acción que termina en 403. -->
+          <div v-if="puedeEliminar" class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
+            Nuevo turno
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable :data="turnos" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
-        <span class="font-medium text-default">{{ row.original.nombre }}</span>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <span class="font-medium text-default">{{ row.original.nombre }}</span>
+            <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+              Eliminado
+            </UBadge>
+          </div>
+          <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+            {{ formatearBorradoPor(row.original) }}
+          </p>
+        </div>
       </template>
 
       <template #horaInicio-cell="{ row }">
@@ -189,7 +317,18 @@ const columns: TableColumn<Turno>[] = [
       </template>
 
       <template #acciones-cell="{ row }">
-        <div class="flex items-center justify-end gap-1">
+        <div v-if="row.original.eliminadoEl" class="flex justify-end">
+          <UButton
+            v-if="puedeEliminar"
+            icon="i-lucide-rotate-ccw"
+            color="neutral"
+            variant="ghost"
+            @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+          >
+            Restaurar
+          </UButton>
+        </div>
+        <div v-else class="flex items-center justify-end gap-1">
           <UButton
             v-if="puedeActualizar"
             icon="i-lucide-square-pen"
@@ -252,9 +391,45 @@ const columns: TableColumn<Turno>[] = [
     <CrudModal
       v-model:open="deleteOpen"
       title="Eliminar turno"
-      message="Se eliminará el turno. Las sesiones ya registradas conservan su trazabilidad."
+      message="Se eliminará el turno. Las sesiones ya registradas conservan su trazabilidad, y podés recuperarlo desde «Ver eliminados»."
       @cancel="toDelete = null"
       @confirm="eliminar"
     />
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar turno"
+      message="¿Restaurar este turno? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmRestaurarId && restaurarTurno(confirmRestaurarId)"
+    />
+
+    <!-- Segundo paso, solo si el backend rechazó por nombre tomado. El campo
+         viene precargado con la sugerencia pero es editable: el usuario
+         confirma o escribe el suyo (decisión del owner). -->
+    <CrudModal
+      v-model:open="colisionModalOpen"
+      title="No se puede restaurar con ese nombre"
+      :message="colisionMensaje"
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      :confirm-disabled="!nombrePropuesto.trim()"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmarColision"
+    >
+      <template #detalle>
+        <UFormField label="Restaurar como" class="mt-4">
+          <UInput
+            v-model="nombrePropuesto"
+            aria-label="Restaurar como"
+            autofocus
+          />
+        </UFormField>
+      </template>
+    </CrudModal>
   </div>
 </template>

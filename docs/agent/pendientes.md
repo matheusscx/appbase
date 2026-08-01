@@ -149,17 +149,17 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   es "comparar timestamps entre tablas" en general — es comparar timestamps **de
   tipos distintos**, que hoy solo pasa en el par `items`/`receta_extras_permitidos`
   de los tres recursos con colateral.
-- [ ] **10 de 15 pantallas de la papelera sin cablear en el frontend** (frontend) —
+- [ ] **9 de 15 pantallas de la papelera sin cablear en el frontend** (frontend) —
   ⚠️ **Corregido (Ronda de fixes 1):** son 16 recursos backend, pero **15
   pantallas** — `mesas` no tiene página propia, vive dentro de
   `configuracion/salones.vue`, así que no cuenta aparte.
   `configuracion/items.vue`, `configuracion/categorias.vue` y —desde el
   2026-08-01— `configuracion/impuestos.vue`, `configuracion/descuentos.vue` y
-  `configuracion/recargos.vue` tienen el toggle "ver eliminados" y el botón
-  restaurar; las otras 10 (`grupos-modificadores`, `terceros`, `cajones`,
-  `garzones`, `turnos`, `salones` [con sus `mesas`], `impresoras`,
+  `configuracion/recargos.vue` y `configuracion/turnos.vue` tienen el toggle
+  "ver eliminados" y el botón restaurar; las otras 9 (`grupos-modificadores`,
+  `terceros`, `cajones`, `garzones`, `salones` [con sus `mesas`], `impresoras`,
   `causas-merma`, `motivos-diferencia`, `motivos-diferencia-inventario`) quedan
-  sin UI. El molde ya está probado en las cinco pantallas hechas:
+  sin UI. El molde ya está probado en las seis pantallas hechas:
   `usePapelera(recurso)`
   (`app/composables/usePapelera.ts`) da el toggle, `restaurar(id, nombre?)` y
   `formatearBorradoPor(fila)`.
@@ -171,7 +171,7 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   qué no al replicarlo (spoiler: solo los nombres). Para una pantalla SIN
   unicidad de nombre, copiar todo menos el modal de colisión y sus 4 tests. Lo que las rondas de
   revisión corrigieron, y que conviene no volver a romper:
-  - **Guard de reentrancia en `restaurar`, y aplica a las 10.** El `CrudModal`
+  - **Guard de reentrancia en `restaurar`, y aplica a las 9.** El `CrudModal`
     no se cierra solo al confirmar —lo cierran las funciones de la página—, así
     que mientras el `POST` viaja el segundo click manda un segundo
     `POST .../restaurar` sobre una fila que el primero ya revivió, el backend
@@ -243,45 +243,46 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   import—: `grupos-modificadores.vue` **solo importa el tipo**
   `PaginatedResponse` y tiene su propio `cargar()` (`:309`) sin `cargaEnCurso`.
   **Ninguna de las pendientes usa el composable** (eran 13 cuando se midió; hoy
-  quedan 10, las mismas menos `impuestos`, `descuentos` y `recargos`, que ya la
-  tienen), así
+  quedan 9, las mismas menos `impuestos`, `descuentos`, `recargos` y `turnos`,
+  que ya la tienen), así
   que **todas** necesitan la cola serial local. Los 10 consumidores reales de
   `usePaginatedList` (8 páginas + 2 componentes: `CajaHistorial`,
   `CajaMovimientosTable`, `sesiones-garzon`, `mermas`, `ordenes`,
   `ventas/index`, `configuracion/items`, `pagos/index`, `inventario/index`,
   `inventario/recuentos/index`) no son ninguna de ellas.
-  **Las 10 necesitan la MISMA cola serial local que `categorias.vue` ya tiene**
+  **Las 9 necesitan la MISMA cola serial local que `categorias.vue` ya tiene**
   (`cargaEnCurso` en su `cargar()`): copiar ese patrón, no reinventar uno nuevo.
   Test determinístico por pantalla: promesas controladas que resuelven en orden
   inverso al de los dos toggles, como `descuentos.nuxt.spec.ts` → "papelera: la
   carrera de `cargar()` bajo toggles rápidos". El equivalente de `items.vue`
   ("la carrera del toggle vía usePaginatedList") **no** sirve de molde acá: ese
-  ejercita el `watch` del composable, que ninguna de las 10 tiene.
+  ejercita el `watch` del composable, que ninguna de las 9 tiene.
 
-- [ ] **Salida de la colisión: falta replicarla a 6 recursos** (backend) — el 400
-  al restaurar dice qué pasa pero, salvo en `descuentos` y `recargos`, no da
-  salida: el usuario tiene que ir a renombrar a mano la fila viva. La decisión del
-  owner (2026-08-01, documentada en [`papelera.md`](../features/papelera.md) →
-  "Salida de la colisión") es que el backend proponga un nombre libre y la
-  pantalla lo ofrezca editable. Implementado end-to-end en **`descuentos` y
-  `recargos`**; faltan `turnos`, `cajones`, `causas-merma`,
-  `motivos-diferencia`, `motivos-diferencia-inventario`, `grupos-modificadores`.
-  Lo que se replica: `restaurar(tenantId, id, nombreNuevo?)` con
-  `@Body() dto: RestaurarDto` en el controller, y un `errorDeColision()` que
-  devuelve `{ message, nombreSugerido }`. La aritmética del sufijo **no** se
-  reescribe: está en `common/utils/nombre-sugerido.util.ts` y los 8 la comparten.
-  ⚠️ **El próximo recurso EXTRAE el helper.** `errorDeColision()` está hoy
-  duplicado en `descuentos.service.ts` y `recargos.service.ts`, idéntico salvo el
-  repo y el alias — la segunda copia que `CLAUDE.md` acepta. La tercera
-  no: se extrae.
-  ⚠️ **Y `turnos` es el último fácil.** Los 3 hechos o triviales (`descuentos`,
-  `recargos`, `turnos`) garantizan la unicidad **solo por código**, así que pueden
-  consultar los nombres tomados ANTES de intentar. Los 5 con índice único parcial
-  (`cajones`, `causas-merma`, `motivos-diferencia`,
-  `motivos-diferencia-inventario`, `grupos-modificadores`) detectan la colisión
-  capturando el `23505`, o sea que **recién sabrían el nombre después de fallar el
-  INSERT** — hay que decidir si se consulta antes o se calcula la sugerencia
-  dentro del `catch`. Es una decisión de diseño, no una réplica mecánica.
+- [ ] **Salida de la colisión: faltan los 5 recursos con índice único parcial**
+  (backend) — ⛔ **NO es réplica mecánica: hay una decisión de diseño abierta que
+  es del owner.** El 400 al restaurar dice qué pasa pero, salvo en `descuentos`,
+  `recargos` y `turnos`, no da salida: el usuario tiene que ir a renombrar a mano
+  la fila viva. La decisión del owner (2026-08-01, documentada en
+  [`papelera.md`](../features/papelera.md) → "Salida de la colisión") es que el
+  backend proponga un nombre libre y la pantalla lo ofrezca editable.
+  **La familia fácil está cerrada.** Los 3 hechos (`descuentos`, `recargos`,
+  `turnos`) garantizan la unicidad **solo por código**, así que pueden consultar
+  los nombres tomados ANTES de intentar. Los 5 que faltan (`cajones`,
+  `causas-merma`, `motivos-diferencia`, `motivos-diferencia-inventario`,
+  `grupos-modificadores`) la garantizan por **índice único parcial** y hoy
+  detectan la colisión capturando el `23505` de Postgres — o sea que **recién
+  sabrían el nombre después de fallar el INSERT**. Las dos salidas:
+  (a) consultar antes de intentar, que agrega una query SIEMPRE, también en el
+  caso feliz; (b) calcular la sugerencia dentro del `catch`, gratis mientras no
+  hay colisión pero mete I/O en un camino de error. **Preguntar antes de
+  escribir.**
+  Lo que sí se replica sin pensar, una vez elegida la salida:
+  `restaurar(tenantId, id, nombreNuevo?)` con `@Body() dto: RestaurarDto` en el
+  controller, y el helper compartido `errorDeColisionNombre(repo, alias,
+  etiqueta, tenantId, nombre)` de `common/utils/nombre-sugerido.util.ts` —
+  extraído el 2026-08-01 al aparecer el tercer consumidor, y válido para los 8
+  porque las 8 tablas comparten exactamente `tenant_id`, `nombre` y
+  `eliminado_el` (verificado contra `information_schema`).
   ⛔ **`garzones` queda fuera**: su colisión es `uq_garzones_mostrador_tenant`
   (un solo placeholder "Mostrador" vivo por tenant), y renombrar no la resuelve.
 

@@ -5,11 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
-import {
-  baseSinSufijo,
-  patronLikeNombre,
-  sugerirNombreLibre,
-} from '../../common/utils/nombre-sugerido.util';
+import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
 import { Recargo } from './entities/recargo.entity';
 import { RecargoTramo } from './entities/recargo-tramo.entity';
 import { RecargoMetodoPago } from './entities/recargo-metodo-pago.entity';
@@ -304,7 +300,13 @@ export class RecargosService {
     const { disponible } = await this.nombreDisponible(tenantId, nombre, id);
     if (!disponible) {
       throw new BadRequestException(
-        await this.errorDeColision('recargo', tenantId, nombre),
+        await errorDeColisionNombre(
+          this.recargoRepo,
+          'r',
+          'recargo',
+          tenantId,
+          nombre,
+        ),
       );
     }
     // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
@@ -321,47 +323,6 @@ export class RecargosService {
       },
     );
     return this.recargoRepo.findOneOrFail({ where: { id, tenantId } });
-  }
-
-  /**
-   * Cuerpo del 400 de colisión: el mensaje y un nombre libre para reintentar.
-   *
-   * Trae en UNA query todos los nombres vivos que compiten con la base (el
-   * propio `base` y cualquier `"<base> …"`); numerar es después aritmética en
-   * memoria. Un `SELECT` por candidato sería un N+1 disfrazado de bucle.
-   *
-   * ⚠️ Gemelo exacto de `descuentos.service.ts` → `errorDeColision()` salvo el
-   * repo y el alias. Es la SEGUNDA copia, que la convención del proyecto acepta
-   * (`CLAUDE.md` → Convenciones → Archivos: duplicar dos veces es aceptable, se
-   * extrae a la tercera). **El tercer recurso que necesite esto extrae el
-   * helper** — y ojo,
-   * los 5 que faltan con índice único parcial detectan la colisión capturando
-   * el `23505`, o sea que se enteran DESPUÉS de fallar el INSERT: ahí la firma
-   * puede no ser esta.
-   */
-  private async errorDeColision(
-    etiqueta: string,
-    tenantId: string,
-    nombre: string,
-  ): Promise<{ message: string; nombreSugerido: string }> {
-    const base = baseSinSufijo(nombre);
-    const filas = await this.recargoRepo
-      .createQueryBuilder('r')
-      .select('r.nombre', 'nombre')
-      .where('r.tenant_id = :tenantId', { tenantId })
-      .andWhere('r.eliminado_el IS NULL')
-      .andWhere("(r.nombre = :base OR r.nombre LIKE :patron ESCAPE '\\')", {
-        base,
-        patron: patronLikeNombre(base),
-      })
-      .getRawMany<{ nombre: string }>();
-    return {
-      message: `Ya existe un ${etiqueta} activo con el nombre "${nombre}".`,
-      nombreSugerido: sugerirNombreLibre(
-        nombre,
-        filas.map((f) => f.nombre),
-      ),
-    };
   }
 
   async nombreDisponible(

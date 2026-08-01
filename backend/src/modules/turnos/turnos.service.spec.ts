@@ -21,6 +21,13 @@ type Repo = {
   update: jest.Mock;
   softDelete: jest.Mock;
   createQueryBuilder: jest.Mock;
+  /** El query builder que `createQueryBuilder()` devuelve por default. */
+  qb: {
+    select: jest.Mock;
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    getRawMany: jest.Mock;
+  };
 };
 
 type SesionRepo = {
@@ -28,6 +35,16 @@ type SesionRepo = {
 };
 
 function makeRepo(): Repo {
+  // `errorDeColisionNombre` (el helper compartido del 400 de colisión) arma su
+  // propia query, así que `createQueryBuilder` tiene que devolver algo
+  // encadenable por default o cualquier test que llegue al 400 explota con un
+  // TypeError en vez de con la excepción que está probando.
+  const qb = {
+    select: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getRawMany: jest.fn().mockResolvedValue([]),
+  };
   return {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn(),
@@ -36,7 +53,8 @@ function makeRepo(): Repo {
     save: jest.fn((row: unknown) => Promise.resolve(row)),
     update: jest.fn(() => Promise.resolve({ affected: 1 })),
     softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
-    createQueryBuilder: jest.fn(),
+    createQueryBuilder: jest.fn(() => qb),
+    qb,
   };
 }
 
@@ -328,6 +346,88 @@ describe('TurnosService', () => {
         BadRequestException,
       );
       expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    // El 400 no puede ser solo un "no se pudo": la pantalla precarga
+    // `nombreSugerido` en el campo del modal, así que si el backend deja de
+    // mandarlo el usuario vuelve a quedar adivinando qué nombre está libre.
+    it('el 400 de colisión trae un nombre libre ya calculado, salteando los tomados', async () => {
+      repo.findOne
+        .mockResolvedValueOnce(
+          turno({
+            id: 't1',
+            nombre: 'Almuerzo',
+            eliminadoEl: new Date(),
+            eliminadoPor: USUARIO_ID,
+          }),
+        )
+        .mockResolvedValueOnce(
+          turno({ id: 't2', nombre: 'Almuerzo', eliminadoEl: null }),
+        );
+      repo.qb.getRawMany.mockResolvedValueOnce([
+        { nombre: 'Almuerzo' },
+        { nombre: 'Almuerzo 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, 't1')).rejects.toMatchObject({
+        response: {
+          message: 'Ya existe un turno activo con el nombre "Almuerzo".',
+          nombreSugerido: 'Almuerzo 3',
+        },
+      });
+    });
+
+    it('con `nombreNuevo` libre, restaura Y renombra en la misma escritura', async () => {
+      repo.findOne
+        .mockResolvedValueOnce(
+          turno({
+            id: 't1',
+            nombre: 'Almuerzo',
+            eliminadoEl: new Date(),
+            eliminadoPor: USUARIO_ID,
+          }),
+        )
+        // `assertNombreUnico` no encuentra a nadie con el nombre NUEVO.
+        .mockResolvedValueOnce(null);
+      repo.findOneOrFail.mockResolvedValue(
+        turno({ id: 't1', nombre: 'Almuerzo 2', eliminadoEl: null }),
+      );
+
+      await service.restaurar(TENANT, 't1', 'Almuerzo 2');
+
+      // Una sola escritura con las tres columnas: revivir y renombrar en dos
+      // sentencias podría dejar la fila viva con el nombre que colisiona.
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 't1', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null, nombre: 'Almuerzo 2' },
+      );
+      // Y la unicidad se chequea contra el nombre NUEVO, no contra el viejo.
+      expect(repo.findOne).toHaveBeenLastCalledWith({
+        where: { tenantId: TENANT, nombre: 'Almuerzo 2' },
+      });
+    });
+
+    it('sin `nombreNuevo` no toca el nombre (comportamiento de siempre)', async () => {
+      repo.findOne
+        .mockResolvedValueOnce(
+          turno({
+            id: 't1',
+            nombre: 'Almuerzo',
+            eliminadoEl: new Date(),
+            eliminadoPor: USUARIO_ID,
+          }),
+        )
+        .mockResolvedValueOnce(null);
+      repo.findOneOrFail.mockResolvedValue(
+        turno({ id: 't1', eliminadoEl: null }),
+      );
+
+      await service.restaurar(TENANT, 't1');
+
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 't1', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
     });
   });
 
