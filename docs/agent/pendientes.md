@@ -107,35 +107,6 @@ Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`]
 corriendo sobre los **16** recursos en vez de sobre 2. Se levanta el ⛔ que impedía
 cablear la pantalla de impuestos. Detalle y mutantes: [`resueltos.md`](resueltos.md).
 
-- [ ] **Los unit tests del listado con `incluirEliminados` no prueban nada** (backend,
-  14 de los 16 recursos) — los mocks agregados son `andWhere: jest.fn().mockReturnThis()`
-  **sin ninguna aserción sobre el argumento**. Medido: borrando el `.andWhere(...)` de
-  `categorias.service.ts:53` la suite unitaria **sigue 100% verde**; solo cae el e2e.
-  **Por eso el gate dio verde con los dos agujeros de arriba adentro** — es el octavo test
-  de esta feature que pasa sin probar lo que su nombre dice.
-  ⚠️ **Números corregidos el 2026-08-01** (la entrada original decía "12 `qbMock`" y "11
-  restantes", los dos mal — el conteo se había hecho por tipo de mock, no por recurso).
-  Medido con `grep -l 'eliminado_por IS NOT NULL' **/*.spec.ts`: **solo 2 de los 16
-  specs asertan el filtro** (`impuestos`, desde hoy, e `items`, que ya lo hacía). Los
-  **14 restantes** se parten en dos familias, y **no comparten la técnica**:
-  - **8 con `qbMock` de TypeORM** (`categorias`, `descuentos`, `recargos`, `terceros`,
-    `cajones`, `garzones`, `turnos`, `impresoras`): se cierran asertando el argumento de
-    `where`/`andWhere` **y el orden entre ellos** — `where()` resetea
-    `expressionMap.wheres`, así que un `andWhere` que quede arriba se descarta entero y
-    `toHaveBeenCalledWith`, que es agnóstico al orden, no lo ve. Ver el bloque
-    `findAll con incluirEliminados` de `impuestos.service.spec.ts` como molde.
-  - **6 con SQL cruda** (`causas-merma`, `motivos-diferencia`,
-    `motivos-diferencia-inventario`, `grupos-modificadores`, `salones` y sus `mesas`):
-    se cierran asertando la subcadena en el SQL que se le pasa al `dataSource.query`
-    mockeado, como ya hace `items.service.spec.ts`. ⚠️ Cuidado con el modo de falla ya
-    conocido: un `toContain` puede matchear un **comentario** `--` del mismo template en
-    vez de la cláusula funcional (pasó en la Task 4 de esta feature) — el mutante va
-    acotado a la cláusula, no al archivo.
-  ℹ️ **Mitad cerrada el 2026-08-01:** la otra vía —parametrizar el e2e de "borrado del
-  sistema" sobre los 16— ya está hecha, así que hoy la conducta **sí** está cubierta de
-  punta a punta en los 16. Lo que sigue abierto es la red barata: sin aserción unitaria,
-  un `andWhere` borrado no se ve hasta levantar Postgres.
-
 - [ ] **`pendientes.md` clasifica mal a `grupos-modificadores.vue` para el fix de la
   carrera** (doc, la entrada de las 13 pantallas, más abajo) — dice que es la única
   pendiente que usa `usePaginatedList` y que por eso "ya hereda el fix, nada que hacer".

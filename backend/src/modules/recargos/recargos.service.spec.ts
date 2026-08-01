@@ -474,6 +474,18 @@ describe('RecargosService', () => {
       // getMany() descarta los addSelect que no mapean a una columna de la
       // entity: el service debe usar getRawAndEntities() y fusionar a mano.
       expect(qbMock.getRawAndEntities).toHaveBeenCalled();
+      // Sin esta aserción el test no probaba nada de lo que su nombre dice:
+      // borrando el `.andWhere(...)` del service la suite unitaria seguía
+      // 100% verde y el agujero solo aparecía al levantar Postgres.
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        '(r.eliminado_el IS NULL OR r.eliminado_por IS NOT NULL)',
+      );
+      // Y el ORDEN, que `toHaveBeenCalledWith` no mira: `where()` resetea
+      // `expressionMap.wheres`, así que un `andWhere` que quede arriba se
+      // descarta entero y el listado se queda sin filtro.
+      expect(qbMock.andWhere.mock.invocationCallOrder[0]).toBeGreaterThan(
+        qbMock.where.mock.invocationCallOrder[0],
+      );
       expect(result[0]).toMatchObject({
         id: 'r1',
         eliminadoPorNombre: 'admin.paris',

@@ -257,6 +257,15 @@ describe('MotivosDiferenciaInventarioService', () => {
       expect(queryMock).toHaveBeenCalledTimes(1);
       const sql = queryMock.mock.calls[0][0] as string;
       expect(sql).toContain('LEFT JOIN usuarios');
+      // Sin esta aserción el test no probaba nada de lo que su nombre dice:
+      // borrando el filtro del SQL la suite unitaria seguía 100% verde y el
+      // agujero solo aparecía al levantar Postgres. Se asserta la CLÁUSULA
+      // exacta con su alias, no un `eliminado_por` suelto: una subcadena
+      // ancha puede matchear otra parte del mismo template (el `SELECT`, o un
+      // comentario `--` si algún día se agrega uno) y volver a no probar nada.
+      expect(sql).toContain(
+        '(m.eliminado_el IS NULL OR m.eliminado_por IS NOT NULL)',
+      );
       expect(result[0]).toMatchObject({
         id: MOTIVO_ID,
         eliminadoPorNombre: 'admin.paris',

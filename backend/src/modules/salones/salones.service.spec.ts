@@ -1250,6 +1250,59 @@ describe('SalonesService', () => {
     });
   });
 
+  // `listarSalones` no tenía ningún test unitario, así que el filtro de la
+  // papelera dependía enteramente del e2e (o sea, de levantar Postgres). Es
+  // el único de los 16 recursos que aplica la regla en DOS lugares de la
+  // misma query, y por eso el que más fácil se rompe a medias.
+  describe('listarSalones con incluirEliminados', () => {
+    /**
+     * El tramo del SQL que va del `LEFT JOIN mesas` al siguiente `LEFT JOIN`
+     * o al `WHERE`. Sin acotar así, un `toContain` sobre el SQL entero da por
+     * bueno el filtro de mesas puesto en CUALQUIER otro lado —medido: movido
+     * al `ON` del JOIN a `usuarios` deja de filtrar mesas y el test seguía
+     * verde—, que es justo la posición que estos tests dicen fijar.
+     */
+    const tramoJoinMesas = (sql: string) =>
+      /LEFT JOIN mesas m\b[\s\S]*?(?=LEFT JOIN|\bWHERE\b)/.exec(sql)?.[0] ?? '';
+
+    it('sin el flag no trae columnas de borrado ni hace JOIN con usuarios', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.listarSalones(TENANT);
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).not.toContain('LEFT JOIN usuarios');
+      expect(sql).toContain('s.eliminado_el IS NULL');
+      // La compañera, que es la que se olvida: el listado normal filtra el
+      // borrado de la mesa en el JOIN, no solo el del salón. Sin esta
+      // aserción, borrar ese filtro deja el test verde y el salón vuelve con
+      // sus mesas borradas adentro (invariante 3: toda lectura filtra
+      // `eliminado_el`, en CADA tabla del JOIN, no solo en la principal).
+      expect(tramoJoinMesas(sql)).toContain('m.eliminado_el IS NULL');
+    });
+
+    it('con el flag aplica el filtro de borrado-del-sistema al salón Y a la mesa, por separado', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.listarSalones(TENANT, true);
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).toContain('LEFT JOIN usuarios');
+      // Las DOS cláusulas, con su alias. Un solo filtro no alcanza y no son
+      // intercambiables: el del salón va en el `WHERE`, pero el de la mesa
+      // tiene que ir en el `JOIN` — puesto en el `WHERE` haría desaparecer el
+      // salón entero cuando alguna de sus mesas la borró el sistema, en vez
+      // de esconder solo esa mesa. Por eso el de la mesa se busca dentro de
+      // SU tramo del JOIN y no en el SQL entero.
+      expect(sql).toContain(
+        '(s.eliminado_el IS NULL OR s.eliminado_por IS NOT NULL)',
+      );
+      expect(tramoJoinMesas(sql)).toContain(
+        '(m.eliminado_el IS NULL OR m.eliminado_por IS NOT NULL)',
+      );
+    });
+  });
+
   describe('restaurarSalon', () => {
     const SALON = 'salon-uuid';
 

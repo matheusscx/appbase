@@ -589,6 +589,15 @@ describe('GruposModificadoresService', () => {
       expect(dataSourceMock.query).toHaveBeenCalledTimes(3);
       const sql = dataSourceMock.query.mock.calls[0][0] as string;
       expect(sql).toContain('LEFT JOIN usuarios');
+      // Sin esta aserción el test no probaba nada de lo que su nombre dice:
+      // borrando el filtro del SQL la suite unitaria seguía 100% verde y el
+      // agujero solo aparecía al levantar Postgres. Se asserta la CLÁUSULA
+      // exacta con su alias, no un `eliminado_por` suelto: una subcadena
+      // ancha puede matchear otra parte del mismo template (el `SELECT`, o un
+      // comentario `--` si algún día se agrega uno) y volver a no probar nada.
+      expect(sql).toContain(
+        '(g.eliminado_el IS NULL OR g.eliminado_por IS NOT NULL)',
+      );
       expect(res[0]).toMatchObject({
         grupoModificadorId: GRUPO_ID,
         eliminadoPorNombre: 'admin.paris',

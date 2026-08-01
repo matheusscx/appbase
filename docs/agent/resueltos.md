@@ -1758,6 +1758,47 @@ siguen diferidos están en `pendientes.md`.
   (`items.vue`, `categorias.vue`); ese parche optimista pasó de divergir del backend a
   coincidir con él.
 
+- [x] ~~**Los unit tests del listado con `incluirEliminados` no prueban nada**~~
+  (backend, 14 de los 16 recursos) — cerrado 2026-08-01. **Los 16 recursos** (15 archivos
+  de spec; `salones` cubre salones y mesas) ahora asertan el filtro de borrado-del-sistema
+  en su listado. Era el test que faltaba: por esto el gate dio verde con los dos agujeros
+  de arriba adentro, y es el octavo test de esta feature que pasaba sin probar lo que su
+  nombre decía.
+  ⚠️ **Los números de la entrada original estaban mal, los dos.** Decía "12 `qbMock`" y
+  "11 restantes"; el conteo se había hecho **por tipo de mock y no por recurso**. Medido
+  con `grep -l` sobre la cláusula: eran **14 de 16** sin aserción (`items` e `impuestos`
+  ya la tenían). Es el mismo error que la entrada del `OR` — contar por el mecanismo en
+  vez de por la conducta.
+  **Dos técnicas, porque las dos familias no comparten forma:**
+  - **8 con `qbMock` de TypeORM** (`categorias`, `descuentos`, `recargos`, `terceros`,
+    `cajones`, `garzones`, `turnos`, `impresoras`): se asserta el argumento de `andWhere`
+    **y el orden contra `where`** vía `mock.invocationCallOrder`. El orden no es
+    ceremonia: `where()` resetea `expressionMap.wheres`, así que un `andWhere` que quede
+    arriba se descarta entero, y `toHaveBeenCalledWith` —agnóstico al orden— no lo ve.
+  - **6 con SQL cruda** (`causas-merma`, `motivos-diferencia`,
+    `motivos-diferencia-inventario`, `grupos-modificadores`, `salones` + sus `mesas`): se
+    asserta la **cláusula exacta con su alias** en el SQL que recibe el `dataSource.query`
+    mockeado — no un `eliminado_por` suelto, que puede matchear el `SELECT` del mismo
+    template o un comentario `--` (el modo de falla que ya costó una ronda en la Task 4).
+  **`salones` no tenía NINGÚN test unitario de `listarSalones`**, así que se escribió: es
+  el único de los 16 que aplica la regla en **dos** lugares de la misma query, y el filtro
+  de la mesa va en el `JOIN` y no en el `WHERE` a propósito —puesto en el `WHERE` haría
+  desaparecer el salón entero cuando alguna de sus mesas la borró el sistema—, así que el
+  test fija también esa posición. Fijar posición pide **acotar el tramo** del SQL: un
+  `toContain` sobre la query entera daba por bueno el filtro puesto en cualquier otro
+  `ON` (medido: movido al JOIN de `usuarios` deja de filtrar mesas y el test seguía
+  verde). Se acota al tramo `LEFT JOIN mesas` → siguiente `JOIN`/`WHERE`, y con eso
+  mueren los dos desplazamientos, hacia el `WHERE` y hacia otro `ON`. De paso, la rama
+  **sin** flag asserta el `m.eliminado_el IS NULL` del mismo JOIN, que tampoco tenía
+  nadie: borrarlo devolvía el salón con sus mesas borradas adentro.
+  **Mutantes verificados uno por uno, borrando el filtro del service.** Los **16**
+  recursos mueren, y ninguno arrastra a otro —lo que importa porque tres alias colisionan
+  entre recursos (`c`, `m`, `t`)—. El reparto exacto, que la primera redacción de esta
+  entrada sumó mal (decía "7 + 8", que son 15): **8 `andWhere`** y **6 cláusulas de SQL
+  cruda** (salón y mesa por separado) son los 14 que este cierre agregó; los otros 2 ya
+  asertaban — `impuestos`, mutado en el commit anterior, e `items`, que venía de antes y
+  se mutó acá para no afirmar los 16 sin haberlo comprobado.
+
 ## Features diferidas
 
 - [x] ~~**Log de cambios reversible ("deshacer") — dirección del owner, sin
