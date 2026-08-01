@@ -741,6 +741,13 @@ Se hace **después** de las cuatro anteriores a propósito: el riesgo de esta fe
 - Consumes: el contrato completo de Task 2 (`remove` con `usuarioId`, `restaurar`, `findAll` con el flag, `QueryIncluirEliminadosDto`) y el manejo de `23505` de Task 3.
 - Produces: nada nuevo. Si un recurso necesita inventar algo que no está en Tasks 2-3, **parar y reportar** en vez de resolverlo por su cuenta: significa que el patrón no cubría un caso y hay que decidirlo, no improvisarlo.
 
+⚠️ **Copiar el patrón no exime de auditar cada `remove()`.** La Task 5 encontró un bug
+latente preexistente en `salones.eliminarSalon()`: su cascada a `mesas` no filtraba
+`eliminado_el IS NULL`, así que borrar el padre **pisaba el timestamp de un hijo ya
+borrado** — destruyendo justo el dato del que depende el acotamiento. Por cada uno de los
+11: leer su `remove()` entero y preguntarse qué más toca y con qué filtros, antes de
+escribir el `restaurar()`.
+
 Por cada uno de los 11:
 
 - [ ] **Step 1:** Escribir los tests del recurso, calcados de Task 2 (o Task 3 si tiene nombre único), con sus nombres y tabla.

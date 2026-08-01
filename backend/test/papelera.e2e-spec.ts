@@ -589,3 +589,237 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
     );
   });
 });
+
+// Task 5: salones — la segunda entidad con colateral (`salones.remove()`
+// soft-deletea todas sus `mesas`), distinta forma que items:
+// `manager.softDelete()`/`update()` en vez de SQL crudo, y sin nombre único
+// (ni salones ni mesas lo tienen — a diferencia de causas de merma), así que
+// no hay 400 de colisión que probar acá.
+//
+// Guard igual que items: `PermisosGuard` + `@RequiresPermiso('Salones',
+// 'Eliminar')` (heredado del `@Controller`, mismo guard que el `DELETE` de
+// cada controller — `SalonesController` y `MesasController`, dos
+// `@Controller` distintos en el mismo archivo). vendedor@paris.cl no está
+// asociado al módulo Salones de Paris en absoluto (seedVendedorPermisosCaja
+// no lo incluye), así que el guard lo rechaza tanto en `DELETE` como en
+// `restaurar`.
+interface MesaListItem {
+  id: string;
+  nombre: string;
+  eliminadoEl?: string | null;
+  eliminadoPorNombre?: string | null;
+}
+interface SalonListItem {
+  id: string;
+  nombre: string;
+  mesas: MesaListItem[];
+  eliminadoEl?: string | null;
+  eliminadoPorNombre?: string | null;
+}
+
+describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por timestamp', () => {
+  let app: INestApplication<App>;
+  let tokenAdmin: string;
+  let tokenSinPermiso: string;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+    tokenSinPermiso = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
+  }, 60000);
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('EL MUTANTE OBLIGATORIO: restaurar el salón revive solo las mesas que ESE borrado se llevó', async () => {
+    const resSalon = await request(app.getHttpServer())
+      .post('/api/salones')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: `Salón papelera E2E ${Date.now()}` });
+    expect(resSalon.status).toBe(201);
+    const salonId = (resSalon.body as SalonListItem).id;
+
+    const resMesaVieja = await request(app.getHttpServer())
+      .post(`/api/salones/${salonId}/mesas`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: 'Mesa 3' });
+    expect(resMesaVieja.status).toBe(201);
+    const mesaViejaId = (resMesaVieja.body as MesaListItem).id;
+
+    const resMesaCascada = await request(app.getHttpServer())
+      .post(`/api/salones/${salonId}/mesas`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: 'Mesa 5' });
+    expect(resMesaCascada.status).toBe(201);
+    const mesaCascadaId = (resMesaCascada.body as MesaListItem).id;
+
+    // "El martes": la mesa 3 se borra SOLA, con SU propio motivo/timestamp —
+    // el salón sigue vivo.
+    const resDeleteMesaSinPermiso = await request(app.getHttpServer())
+      .delete(`/api/mesas/${mesaViejaId}`)
+      .set('Authorization', `Bearer ${tokenSinPermiso}`);
+    expect(resDeleteMesaSinPermiso.status).toBe(403);
+
+    const resDeleteMesaVieja = await request(app.getHttpServer())
+      .delete(`/api/mesas/${mesaViejaId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resDeleteMesaVieja.status).toBe(200);
+
+    // "El viernes": se borra el salón entero. La cascada de
+    // `eliminarSalon()` solo debe tocar la mesa 5 (la única viva); la mesa 3
+    // ya estaba borrada y conserva SU `eliminado_el` del martes.
+    const resDeleteSalonSinPermiso = await request(app.getHttpServer())
+      .delete(`/api/salones/${salonId}`)
+      .set('Authorization', `Bearer ${tokenSinPermiso}`);
+    expect(resDeleteSalonSinPermiso.status).toBe(403);
+
+    const resDeleteSalon = await request(app.getHttpServer())
+      .delete(`/api/salones/${salonId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resDeleteSalon.status).toBe(200);
+
+    // El listado normal ya no muestra el salón borrado.
+    const resListarNormal = await request(app.getHttpServer())
+      .get('/api/salones')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resListarNormal.status).toBe(200);
+    expect(
+      (resListarNormal.body as SalonListItem[]).find((s) => s.id === salonId),
+    ).toBeUndefined();
+
+    // Con `incluirEliminados`, el salón aparece con las DOS mesas borradas
+    // (huérfano tolerado en la misma foto) y el nombre de quien borró.
+    const resListarPapelera = await request(app.getHttpServer())
+      .get('/api/salones?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resListarPapelera.status).toBe(200);
+    const salonEnPapelera = (resListarPapelera.body as SalonListItem[]).find(
+      (s) => s.id === salonId,
+    );
+    expect(salonEnPapelera?.eliminadoEl).toBeTruthy();
+    expect(salonEnPapelera?.eliminadoPorNombre).toBeTruthy();
+    expect(
+      salonEnPapelera?.mesas.find((m) => m.id === mesaViejaId)?.eliminadoEl,
+    ).toBeTruthy();
+    expect(
+      salonEnPapelera?.mesas.find((m) => m.id === mesaCascadaId)?.eliminadoEl,
+    ).toBeTruthy();
+
+    const resRestaurarSinPermiso = await request(app.getHttpServer())
+      .post(`/api/salones/${salonId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenSinPermiso}`);
+    expect(resRestaurarSinPermiso.status).toBe(403);
+
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/salones/${salonId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(201);
+
+    // El corazón de la task: la mesa 5 (cascada del viernes) revive; la
+    // mesa 3 (borrada el martes, otro motivo, otro `eliminado_el`) NO — si
+    // el acotamiento por timestamp se rompiera (p.ej. acotando solo por
+    // `salonId` sin comparar `eliminado_el`), esta aserción es la que lo
+    // cazaría.
+    const resListarDespues = await request(app.getHttpServer())
+      .get('/api/salones?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const salonDespues = (resListarDespues.body as SalonListItem[]).find(
+      (s) => s.id === salonId,
+    );
+    expect(salonDespues?.eliminadoEl).toBeFalsy();
+    expect(
+      salonDespues?.mesas.find((m) => m.id === mesaCascadaId)?.eliminadoEl,
+    ).toBeFalsy();
+    expect(
+      salonDespues?.mesas.find((m) => m.id === mesaViejaId)?.eliminadoEl,
+    ).toBeTruthy();
+
+    // El listado normal (sin el flag) confirma lo mismo: el salón vuelve
+    // con solo la mesa 5, la mesa 3 sigue oculta.
+    const resListarNormalDespues = await request(app.getHttpServer())
+      .get('/api/salones')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const salonNormalDespues = (
+      resListarNormalDespues.body as SalonListItem[]
+    ).find((s) => s.id === salonId);
+    expect(salonNormalDespues?.mesas.map((m) => m.id)).toEqual([mesaCascadaId]);
+
+    // Restaurar de nuevo (ya no está en la papelera) → 404.
+    const resRestaurarOtraVez = await request(app.getHttpServer())
+      .post(`/api/salones/${salonId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurarOtraVez.status).toBe(404);
+  });
+
+  it('restaurar una mesa suelta no toca el salón — huérfano tolerado', async () => {
+    const resSalon = await request(app.getHttpServer())
+      .post('/api/salones')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: `Salón huérfano E2E ${Date.now()}` });
+    expect(resSalon.status).toBe(201);
+    const salonId = (resSalon.body as SalonListItem).id;
+
+    const resMesa = await request(app.getHttpServer())
+      .post(`/api/salones/${salonId}/mesas`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: 'Mesa huérfana' });
+    expect(resMesa.status).toBe(201);
+    const mesaId = (resMesa.body as MesaListItem).id;
+
+    // La mesa se borra SOLA, mientras el salón sigue vivo.
+    const resDeleteMesa = await request(app.getHttpServer())
+      .delete(`/api/mesas/${mesaId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resDeleteMesa.status).toBe(200);
+
+    // Y DESPUÉS se borra el salón — como la mesa ya estaba borrada, la
+    // cascada de `eliminarSalon()` no la toca (filtra `eliminado_el IS
+    // NULL`), así que sigue con su propio `eliminado_el` de más arriba.
+    const resDeleteSalon = await request(app.getHttpServer())
+      .delete(`/api/salones/${salonId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resDeleteSalon.status).toBe(200);
+
+    const resRestaurarMesaSinPermiso = await request(app.getHttpServer())
+      .post(`/api/mesas/${mesaId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenSinPermiso}`);
+    expect(resRestaurarMesaSinPermiso.status).toBe(403);
+
+    // Restaurar SOLO la mesa: no bloquea porque el salón siga borrado (no
+    // hay cascada hacia arriba), y no lo revive de paso.
+    const resRestaurarMesa = await request(app.getHttpServer())
+      .post(`/api/mesas/${mesaId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurarMesa.status).toBe(201);
+
+    const resListar = await request(app.getHttpServer())
+      .get('/api/salones?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const salon = (resListar.body as SalonListItem[]).find(
+      (s) => s.id === salonId,
+    );
+    // El salón sigue en la papelera...
+    expect(salon?.eliminadoEl).toBeTruthy();
+    // ...pero la mesa ya no: huérfana y visible solo porque el listado pidió
+    // `incluirEliminados` (su salón sigue borrado), no porque algo la
+    // bloqueara o el restaurar del salón la hubiera arrastrado.
+    expect(salon?.mesas.find((m) => m.id === mesaId)?.eliminadoEl).toBeFalsy();
+
+    // Restaurar la mesa de nuevo (ya no está en la papelera) → 404.
+    const resRestaurarOtraVez = await request(app.getHttpServer())
+      .post(`/api/mesas/${mesaId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurarOtraVez.status).toBe(404);
+  });
+});

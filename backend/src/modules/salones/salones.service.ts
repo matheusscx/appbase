@@ -4,8 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Repository } from 'typeorm';
 import Decimal from 'decimal.js';
+import { unwrap } from '../../common/utils/pg-returning.util';
 import { Salon } from './entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from './entities/mesa.entity';
 import { Cuenta, EstadoCuenta } from './entities/cuenta.entity';
@@ -44,6 +45,9 @@ import {
   type PersonalizacionDetalleLinea,
 } from '../../common/utils/personalizacion-receta.util';
 
+// `eliminadoEl`/`eliminadoPorNombre` solo se completan cuando se pide
+// `incluirEliminados`: el listado normal sigue devolviendo la forma de
+// siempre, sin esas columnas (ver categorias.service.ts → findAll).
 export interface MesaResumen {
   id: string;
   nombre: string;
@@ -53,12 +57,35 @@ export interface MesaResumen {
   tamano: TamanoMesa;
   cuentasAbiertas: number;
   ocupada: boolean;
+  eliminadoEl?: string | null;
+  eliminadoPorNombre?: string | null;
 }
 
 export interface SalonConMesas {
   id: string;
   nombre: string;
   mesas: MesaResumen[];
+  eliminadoEl?: string | null;
+  eliminadoPorNombre?: string | null;
+}
+
+// Fila cruda de `listarSalones`. Los campos `*_eliminado_*` solo vienen
+// seleccionados cuando `incluirEliminados` es true — `undefined` (no `null`)
+// distingue "no se pidió la papelera" de "esta fila no está borrada".
+interface SalonMesaRow {
+  salon_id: string;
+  salon_nombre: string;
+  salon_eliminado_el?: string | null;
+  salon_eliminado_por_nombre?: string | null;
+  mesa_id: string | null;
+  mesa_nombre: string | null;
+  pos_x: string | null;
+  pos_y: string | null;
+  forma: string | null;
+  tamano: string | null;
+  mesa_eliminado_el?: string | null;
+  mesa_eliminado_por_nombre?: string | null;
+  cuentas_abiertas: string;
 }
 
 export interface CuentaLineaDetalle {
@@ -123,32 +150,59 @@ export class SalonesService {
   // ── Administración: salones ──────────────────────────────────────────────
 
   /** Salones del tenant con sus mesas (para la vista de administración). */
-  async listarSalones(tenantId: string): Promise<SalonConMesas[]> {
-    const rows: {
-      salon_id: string;
-      salon_nombre: string;
-      mesa_id: string | null;
-      mesa_nombre: string | null;
-      pos_x: string | null;
-      pos_y: string | null;
-      forma: string | null;
-      tamano: string | null;
-      cuentas_abiertas: string;
-    }[] = await this.dataSource.query(
+  async listarSalones(
+    tenantId: string,
+    incluirEliminados = false,
+  ): Promise<SalonConMesas[]> {
+    if (!incluirEliminados) {
+      const rows: SalonMesaRow[] = await this.dataSource.query(
+        `SELECT s.salon_id, s.nombre AS salon_nombre,
+                m.mesa_id, m.nombre AS mesa_nombre, m.pos_x, m.pos_y,
+                m.forma, m.tamano,
+                COALESCE(c.abiertas, 0) AS cuentas_abiertas
+           FROM salones s
+           LEFT JOIN mesas m
+             ON m.salon_id = s.salon_id AND m.eliminado_el IS NULL
+           LEFT JOIN (
+             SELECT mesa_id, COUNT(*) AS abiertas
+               FROM cuentas
+              WHERE tenant_id = $1 AND estado = 'abierta' AND eliminado_el IS NULL
+              GROUP BY mesa_id
+           ) c ON c.mesa_id = m.mesa_id
+          WHERE s.tenant_id = $1 AND s.eliminado_el IS NULL
+          ORDER BY s.nombre ASC, m.nombre ASC`,
+        [tenantId],
+      );
+      return this.agruparSalones(rows);
+    }
+
+    // Papelera: incluye salones y mesas borrados (sin filtrar sus
+    // eliminado_el) y el nombre de quien borró cada uno, resuelto por JOIN
+    // en la misma query — una por fila sería N+1 sobre un listado que puede
+    // tener decenas de salones. El JOIN a `usuarios` no filtra su propio
+    // `eliminado_el` a propósito: el autor de un borrado es un hecho
+    // histórico (docs/patterns/backend.md, ver categorias.service.ts →
+    // findAll).
+    const rows: SalonMesaRow[] = await this.dataSource.query(
       `SELECT s.salon_id, s.nombre AS salon_nombre,
+              s.eliminado_el AS salon_eliminado_el,
+              us.nombre_usuario AS salon_eliminado_por_nombre,
               m.mesa_id, m.nombre AS mesa_nombre, m.pos_x, m.pos_y,
               m.forma, m.tamano,
+              m.eliminado_el AS mesa_eliminado_el,
+              um.nombre_usuario AS mesa_eliminado_por_nombre,
               COALESCE(c.abiertas, 0) AS cuentas_abiertas
          FROM salones s
-         LEFT JOIN mesas m
-           ON m.salon_id = s.salon_id AND m.eliminado_el IS NULL
+         LEFT JOIN mesas m ON m.salon_id = s.salon_id
+         LEFT JOIN usuarios us ON us.usuario_id = s.eliminado_por
+         LEFT JOIN usuarios um ON um.usuario_id = m.eliminado_por
          LEFT JOIN (
            SELECT mesa_id, COUNT(*) AS abiertas
              FROM cuentas
             WHERE tenant_id = $1 AND estado = 'abierta' AND eliminado_el IS NULL
             GROUP BY mesa_id
          ) c ON c.mesa_id = m.mesa_id
-        WHERE s.tenant_id = $1 AND s.eliminado_el IS NULL
+        WHERE s.tenant_id = $1
         ORDER BY s.nombre ASC, m.nombre ASC`,
       [tenantId],
     );
@@ -160,29 +214,21 @@ export class SalonesService {
     return this.listarSalones(tenantId);
   }
 
-  private agruparSalones(
-    rows: {
-      salon_id: string;
-      salon_nombre: string;
-      mesa_id: string | null;
-      mesa_nombre: string | null;
-      pos_x: string | null;
-      pos_y: string | null;
-      forma: string | null;
-      tamano: string | null;
-      cuentas_abiertas: string;
-    }[],
-  ): SalonConMesas[] {
+  private agruparSalones(rows: SalonMesaRow[]): SalonConMesas[] {
     const map = new Map<string, SalonConMesas>();
     for (const r of rows) {
       let salon = map.get(r.salon_id);
       if (!salon) {
         salon = { id: r.salon_id, nombre: r.salon_nombre, mesas: [] };
+        if (r.salon_eliminado_el !== undefined) {
+          salon.eliminadoEl = r.salon_eliminado_el;
+          salon.eliminadoPorNombre = r.salon_eliminado_por_nombre ?? null;
+        }
         map.set(r.salon_id, salon);
       }
       if (r.mesa_id) {
         const abiertas = Number(r.cuentas_abiertas);
-        salon.mesas.push({
+        const mesa: MesaResumen = {
           id: r.mesa_id,
           nombre: r.mesa_nombre ?? '',
           posX: r.pos_x ?? '0',
@@ -191,7 +237,12 @@ export class SalonesService {
           tamano: (r.tamano as TamanoMesa) ?? TamanoMesa.MEDIANO,
           cuentasAbiertas: abiertas,
           ocupada: abiertas > 0,
-        });
+        };
+        if (r.mesa_eliminado_el !== undefined) {
+          mesa.eliminadoEl = r.mesa_eliminado_el;
+          mesa.eliminadoPorNombre = r.mesa_eliminado_por_nombre ?? null;
+        }
+        salon.mesas.push(mesa);
       }
     }
     return [...map.values()];
@@ -213,7 +264,11 @@ export class SalonesService {
     return this.salonRepo.save(salon);
   }
 
-  async eliminarSalon(tenantId: string, id: string): Promise<void> {
+  async eliminarSalon(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<void> {
     const salon = await this.salonRepo.findOne({ where: { id, tenantId } });
     if (!salon) throw new NotFoundException(`Salón ${id} no encontrado`);
     const abiertas = await this.cuentaRepo
@@ -227,10 +282,76 @@ export class SalonesService {
         'No se puede eliminar un salón con cuentas abiertas',
       );
     }
+    // Un solo `ahora` compartido entre las dos escrituras: las mesas
+    // colaterales quedan con el MISMO `eliminado_el` que el salón, para que
+    // `restaurarSalon` pueda acotar por ese valor exacto más adelante (ver
+    // el comentario ahí). `manager.softDelete()` (que usaba antes) escribe
+    // `CURRENT_TIMESTAMP` en SQL —estable dentro de una misma transacción,
+    // así que ya hubiera coincidido— pero no puede escribir `eliminado_por`
+    // en la misma sentencia, así que de todas formas hace falta este
+    // `update()` explícito (mismo cambio que categorias.service.ts →
+    // remove()). El filtro `eliminadoEl: IsNull()` en las mesas es lo que
+    // evita pisar el `eliminado_el` de una mesa que ya estaba borrada por
+    // otro motivo: sin él, este borrado le robaría su timestamp original y
+    // `restaurarSalon` la revivería por error.
+    const ahora = new Date();
     await this.dataSource.transaction(async (manager) => {
-      await manager.softDelete(Mesa, { salonId: id, tenantId });
-      await manager.softDelete(Salon, { id, tenantId });
+      await manager.update(
+        Mesa,
+        { salonId: id, tenantId, eliminadoEl: IsNull() },
+        { eliminadoEl: ahora, eliminadoPor: usuarioId },
+      );
+      await manager.update(
+        Salon,
+        { id, tenantId },
+        { eliminadoEl: ahora, eliminadoPor: usuarioId },
+      );
     });
+  }
+
+  /**
+   * Papelera: revierte `eliminarSalon()`. Revive el salón y, en la misma
+   * sentencia, las mesas que ESE borrado se llevó — acotado por el
+   * `eliminado_el` exacto que dejó, nunca por un valor leído a JS y pasado
+   * de vuelta como parámetro (pierde precisión de microsegundos entre el
+   * `Date` de `pg` y `timestamptz`/`timestamp`; ver el comentario largo en
+   * `items.service.ts → restaurar()`, que documenta el fallo silencioso
+   * medido contra Postgres real). Acá no hace falta el cast
+   * `AT TIME ZONE 'UTC'` que sí necesita items: tanto `salones.eliminado_el`
+   * como `mesas.eliminado_el` son `timestamp` SIN zona (verificado contra
+   * Postgres real), así que comparar uno contra el otro no depende del
+   * `TimeZone` de ninguna sesión.
+   *
+   * Una mesa borrada ANTES que el salón (otro motivo, otro `eliminado_el`)
+   * NO matchea esta comparación y sigue borrada — es el "acotamiento por
+   * timestamp" que motiva esta task.
+   */
+  async restaurarSalon(tenantId: string, id: string): Promise<Salon> {
+    const rows = unwrap<{ salon_id: string }>(
+      await this.dataSource.query(
+        `WITH restaurado AS (
+           UPDATE salones
+              SET eliminado_el = NULL, actualizado_el = NOW()
+            WHERE salon_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
+           RETURNING salon_id,
+                     (SELECT eliminado_el FROM salones
+                        WHERE salon_id = $1 AND tenant_id = $2) AS eliminado_el_previo
+         ),
+         mesas_restauradas AS (
+           UPDATE mesas
+              SET eliminado_el = NULL, actualizado_el = NOW()
+            WHERE salon_id = $1 AND tenant_id = $2
+              AND eliminado_el = (SELECT eliminado_el_previo FROM restaurado)
+           RETURNING mesa_id
+         )
+         SELECT salon_id FROM restaurado`,
+        [id, tenantId],
+      ),
+    );
+    if (!rows.length) {
+      throw new NotFoundException(`Salón ${id} no está en la papelera`);
+    }
+    return this.salonRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
   // ── Administración: mesas ────────────────────────────────────────────────
@@ -268,7 +389,11 @@ export class SalonesService {
     return this.mesaRepo.save(mesa);
   }
 
-  async eliminarMesa(tenantId: string, id: string): Promise<void> {
+  async eliminarMesa(
+    tenantId: string,
+    usuarioId: string,
+    id: string,
+  ): Promise<void> {
     const mesa = await this.mesaRepo.findOne({ where: { id, tenantId } });
     if (!mesa) throw new NotFoundException(`Mesa ${id} no encontrada`);
     const abiertas = await this.cuentaRepo.count({
@@ -279,7 +404,36 @@ export class SalonesService {
         'No se puede eliminar una mesa con cuentas abiertas',
       );
     }
-    await this.mesaRepo.softDelete({ id, tenantId });
+    // Una sola escritura en vez de `softDelete()` + `update()`: dos
+    // sentencias sueltas pueden quedar a medias y dejar una fila borrada
+    // sin autor (mismo cambio que categorias.service.ts → remove()).
+    await this.mesaRepo.update(
+      { id, tenantId },
+      { eliminadoEl: new Date(), eliminadoPor: usuarioId },
+    );
+  }
+
+  /**
+   * Papelera: revierte `eliminarMesa()`. NO toca el salón: si sigue
+   * borrado, la mesa queda huérfana y visible solo en el listado con
+   * `incluirEliminados` — "huérfano tolerado", igual que restaurar un ítem
+   * cuya categoría sigue borrada. Cascada hacia arriba (revivir el salón
+   * porque se restauró una mesa) no es la conducta que pide la spec.
+   */
+  async restaurarMesa(tenantId: string, id: string): Promise<Mesa> {
+    const rows = unwrap<{ mesa_id: string }>(
+      await this.dataSource.query(
+        `UPDATE mesas
+            SET eliminado_el = NULL, actualizado_el = NOW()
+          WHERE mesa_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
+          RETURNING mesa_id`,
+        [id, tenantId],
+      ),
+    );
+    if (!rows.length) {
+      throw new NotFoundException(`Mesa ${id} no está en la papelera`);
+    }
+    return this.mesaRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
   /** Persiste las posiciones (drag & drop) de varias mesas de un salón. */

@@ -78,6 +78,7 @@ const SNAPSHOT_EXTRA = {
 type Repo = {
   find: jest.Mock;
   findOne: jest.Mock;
+  findOneOrFail: jest.Mock;
   count: jest.Mock;
   create: jest.Mock;
   save: jest.Mock;
@@ -90,6 +91,7 @@ function makeRepo(): Repo {
   return {
     find: jest.fn(),
     findOne: jest.fn(),
+    findOneOrFail: jest.fn(),
     count: jest.fn(),
     create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
@@ -1147,19 +1149,182 @@ describe('SalonesService', () => {
   describe('eliminarMesa', () => {
     it('lanza NotFound al eliminar una mesa de otro tenant', async () => {
       mesaRepo.findOne.mockResolvedValue(null);
-      await expect(service.eliminarMesa(TENANT, MESA)).rejects.toThrow(
+      await expect(service.eliminarMesa(TENANT, USUARIO, MESA)).rejects.toThrow(
         NotFoundException,
       );
-      expect(mesaRepo.softDelete).not.toHaveBeenCalled();
+      expect(mesaRepo.update).not.toHaveBeenCalled();
     });
 
     it('no elimina una mesa con cuentas abiertas', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
       cuentaRepo.count.mockResolvedValue(1);
-      await expect(service.eliminarMesa(TENANT, MESA)).rejects.toThrow(
+      await expect(service.eliminarMesa(TENANT, USUARIO, MESA)).rejects.toThrow(
         BadRequestException,
       );
-      expect(mesaRepo.softDelete).not.toHaveBeenCalled();
+      expect(mesaRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('registra quién borró y cuándo, en una sola escritura', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.count.mockResolvedValue(0);
+
+      await service.eliminarMesa(TENANT, USUARIO, MESA);
+
+      expect(mesaRepo.update).toHaveBeenCalledWith(
+        { id: MESA, tenantId: TENANT },
+        { eliminadoEl: expect.any(Date), eliminadoPor: USUARIO },
+      );
+    });
+  });
+
+  describe('eliminarSalon', () => {
+    const SALON = 'salon-uuid';
+
+    beforeEach(() => {
+      salonRepo.findOne.mockResolvedValue({ id: SALON, tenantId: TENANT });
+      cuentaRepo.createQueryBuilder.mockReturnValue({
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(0),
+      });
+    });
+
+    it('lanza NotFound al eliminar un salón de otro tenant', async () => {
+      salonRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.eliminarSalon(TENANT, USUARIO, SALON),
+      ).rejects.toThrow(NotFoundException);
+      expect(manager.update).not.toHaveBeenCalled();
+    });
+
+    it('no elimina un salón con cuentas abiertas', async () => {
+      cuentaRepo.createQueryBuilder.mockReturnValue({
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+      });
+      await expect(
+        service.eliminarSalon(TENANT, USUARIO, SALON),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.update).not.toHaveBeenCalled();
+    });
+
+    it('registra quién borró, con el MISMO eliminado_el que las mesas colaterales', async () => {
+      await service.eliminarSalon(TENANT, USUARIO, SALON);
+
+      // Las dos escrituras (mesas y salón) comparten el mismo objeto `Date`
+      // de JS: si usaran `new Date()` cada una por separado, dos milisegundos
+      // distintos entre las dos harían que `restaurarSalon` no pueda acotar
+      // las mesas por el `eliminado_el` exacto del salón.
+      const mesasCall = manager.update.mock.calls.find(
+        (c) => c[0] === Mesa,
+      ) as unknown[];
+      const salonCall = manager.update.mock.calls.find(
+        (c) => c[0] === Salon,
+      ) as unknown[];
+      expect(mesasCall).toBeDefined();
+      expect(salonCall).toBeDefined();
+      const eliminadoElMesas = (mesasCall[2] as { eliminadoEl: Date })
+        .eliminadoEl;
+      const eliminadoElSalon = (salonCall[2] as { eliminadoEl: Date })
+        .eliminadoEl;
+      expect(eliminadoElMesas).toBe(eliminadoElSalon);
+      expect(mesasCall[2]).toMatchObject({ eliminadoPor: USUARIO });
+      expect(salonCall[2]).toMatchObject({ eliminadoPor: USUARIO });
+    });
+
+    it('solo cascadea a las mesas que siguen vivas: filtra eliminadoEl IsNull', async () => {
+      await service.eliminarSalon(TENANT, USUARIO, SALON);
+
+      const mesasCall = manager.update.mock.calls.find(
+        (c) => c[0] === Mesa,
+      ) as unknown[];
+      const criterio = mesasCall[1] as { eliminadoEl: unknown };
+      // `IsNull()` de TypeORM es un `FindOperator` — no un valor plano — así
+      // que si el criterio no filtrara nada, una mesa borrada por otro
+      // motivo antes de este borrado perdería su timestamp original y
+      // `restaurarSalon` la revivería por error.
+      expect(criterio.eliminadoEl).toBeDefined();
+    });
+  });
+
+  describe('restaurarSalon', () => {
+    const SALON = 'salon-uuid';
+
+    it('salón que no está en la papelera → 404', async () => {
+      dataSource.query.mockResolvedValueOnce([]); // CTE sin match
+
+      await expect(service.restaurarSalon(TENANT, SALON)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('restaura el salón y las mesas que ESE borrado se llevó, en un solo statement', async () => {
+      dataSource.query.mockResolvedValueOnce([{ salon_id: SALON }]); // CTE
+      salonRepo.findOneOrFail.mockResolvedValue({
+        id: SALON,
+        tenantId: TENANT,
+        nombre: 'Salón restaurado',
+      });
+
+      const result = await service.restaurarSalon(TENANT, SALON);
+
+      expect(result).toEqual({
+        id: SALON,
+        tenantId: TENANT,
+        nombre: 'Salón restaurado',
+      });
+      // Una sola sentencia por `dataSource.query` (CTEs encadenadas), nunca
+      // una transacción con dos `manager.query` sueltos pasando el
+      // timestamp de por medio (ver items.service.ts → restaurar()): el e2e
+      // real es el que cazó ese bug la primera vez, los unit tests mockeados
+      // lo daban por bueno.
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).toContain('UPDATE salones');
+      expect(sql).toContain('UPDATE mesas');
+      // El mutante importante: acotar las mesas por
+      // `eliminado_el IS NOT NULL` (o sin condición alguna) revive
+      // CUALQUIER mesa borrada del salón, no solo la de este borrado. Acotar
+      // por el valor exacto que dejó restaurado (vía subquery a la misma
+      // CTE, nunca un parámetro que pasó por JS) es lo único que distingue
+      // "la mesa 3, borrada el martes" de "las mesas de este borrado, el
+      // viernes".
+      expect(sql).toMatch(
+        /mesas[\s\S]*eliminado_el\s*=\s*\(SELECT eliminado_el_previo FROM restaurado\)/,
+      );
+    });
+  });
+
+  describe('restaurarMesa', () => {
+    const MESA_ID = 'mesa-restaurar-uuid';
+
+    it('mesa que no está en la papelera → 404', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await expect(service.restaurarMesa(TENANT, MESA_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('restaura la mesa sin tocar el salón', async () => {
+      dataSource.query.mockResolvedValueOnce([{ mesa_id: MESA_ID }]);
+      mesaRepo.findOneOrFail.mockResolvedValue({
+        id: MESA_ID,
+        tenantId: TENANT,
+        salonId: 'salon-huerfano',
+      });
+
+      await service.restaurarMesa(TENANT, MESA_ID);
+
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      // Huérfano tolerado (decisión (c) de la spec): la sentencia toca SOLO
+      // `mesas`, nunca `salones`.
+      expect(sql).toContain('UPDATE mesas');
+      expect(sql).not.toMatch(/UPDATE salones/i);
     });
   });
 

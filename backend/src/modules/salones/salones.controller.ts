@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +16,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
+import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { SalonesService } from './salones.service';
 import { CreateSalonDto } from './dto/create-salon.dto';
@@ -51,9 +53,12 @@ export class SalonesController {
   // ── Administración: salones ────────────────────────────────────────────
   @Get()
   @RequiresPermiso('Salones', 'Leer')
-  listar(@Req() req: Request) {
+  listar(@Req() req: Request, @Query() query: QueryIncluirEliminadosDto) {
     const u = req.user as JwtUser;
-    return this.salonesService.listarSalones(u.tenantId ?? '');
+    return this.salonesService.listarSalones(
+      u.tenantId ?? '',
+      query.incluirEliminados,
+    );
   }
 
   @Post()
@@ -78,7 +83,14 @@ export class SalonesController {
   @RequiresPermiso('Salones', 'Eliminar')
   eliminar(@Req() req: Request, @Param('id') id: string) {
     const u = req.user as JwtUser;
-    return this.salonesService.eliminarSalon(u.tenantId ?? '', id);
+    return this.salonesService.eliminarSalon(u.tenantId ?? '', u.id, id);
+  }
+
+  @Post(':id/restaurar')
+  @RequiresPermiso('Salones', 'Eliminar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const u = req.user as JwtUser;
+    return this.salonesService.restaurarSalon(u.tenantId ?? '', id);
   }
 
   // ── Administración: mesas ──────────────────────────────────────────────
@@ -127,7 +139,14 @@ export class MesasController {
   @RequiresPermiso('Salones', 'Eliminar')
   eliminar(@Req() req: Request, @Param('id') id: string) {
     const u = req.user as JwtUser;
-    return this.salonesService.eliminarMesa(u.tenantId ?? '', id);
+    return this.salonesService.eliminarMesa(u.tenantId ?? '', u.id, id);
+  }
+
+  @Post(':id/restaurar')
+  @RequiresPermiso('Salones', 'Eliminar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const u = req.user as JwtUser;
+    return this.salonesService.restaurarMesa(u.tenantId ?? '', id);
   }
 
   @Get(':id/cuentas')
