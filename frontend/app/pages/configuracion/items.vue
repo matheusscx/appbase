@@ -48,6 +48,9 @@ interface Item {
   duracionEstimada: number | null
   requiereCita: boolean | null
   frecuencia?: string | null
+  // Solo llegan con `incluirEliminados=true` (papelera).
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
   impuestosIds?: string[]
   recargosIds?: string[]
   descuentosIds?: string[]
@@ -232,6 +235,9 @@ const toggling = reactive(new Set<string>())
 const filtroTipo = ref('todos')
 const busqueda = ref('')
 const busquedaActiva = ref('')
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('items')
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
 
 let busquedaTimer: ReturnType<typeof setTimeout> | null = null
 watch(busqueda, (value) => {
@@ -244,6 +250,7 @@ watch(busqueda, (value) => {
 const listFilters = computed(() => ({
   tipo: filtroTipo.value === 'todos' ? undefined : filtroTipo.value,
   search: busquedaActiva.value || undefined,
+  incluirEliminados: verEliminados.value ? 'true' : undefined,
 }))
 
 const hayFiltrosActivos = computed(
@@ -1106,12 +1113,42 @@ async function eliminar() {
     await useApiFetch(`${apiUrl}/items/${id}`, {
       method: 'DELETE',
     })
-    removeItemLocal(id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos (solo el backend los
+    // sabe), así que acá sí hace falta recargar en vez del patch local de siempre.
+    if (verEliminados.value) {
+      await fetchItems()
+    }
+    else {
+      removeItemLocal(id)
+    }
     toast.add({ title: 'Item eliminado', color: 'success' })
     confirmModalOpen.value = false
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al eliminar')
     toast.add({ title: msg, color: 'error' })
+  }
+}
+
+// ── Papelera: restaurar ─────────────────────────────────────────────────────
+
+async function restaurarItem(id: string) {
+  try {
+    await restaurar(id)
+    const item = items.value.find((i) => i.id === id)
+    if (item) {
+      item.eliminadoEl = null
+      item.eliminadoPorNombre = null
+    }
+    toast.add({ title: 'Item restaurado', color: 'success' })
+  } catch (e) {
+    // El 400 de colisión de nombre trae el detalle de qué renombrar: se
+    // muestra tal cual, sin reemplazarlo por el fallback genérico.
+    const msg = apiErrorMsg(e, 'Error al restaurar')
+    toast.add({ title: msg, color: 'error' })
+  } finally {
+    confirmRestaurarId.value = null
+    confirmRestaurarModalOpen.value = false
   }
 }
 
@@ -1247,6 +1284,9 @@ async function ejecutarAjusteStock() {
 // ── Tablas (UTable) ────────────────────────────────────────────────────────
 
 function onSelectItem(_e: Event, row: Row<Item>) {
+  // Un item eliminado no se edita: el PATCH lo busca sin `withDeleted` y
+  // devolvería 404. La fila de la papelera solo ofrece Restaurar.
+  if (row.original.eliminadoEl) return
   abrirEditar(row.original)
 }
 
@@ -1314,7 +1354,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       description="Productos, ingredientes, servicios y suscripciones del catálogo"
     >
       <template #actions>
-        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
@@ -1363,7 +1409,15 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
-            <span class="font-medium truncate block">{{ row.original.nombre }}</span>
+            <div class="flex items-center gap-2">
+              <span class="font-medium truncate block">{{ row.original.nombre }}</span>
+              <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+                Eliminado
+              </UBadge>
+            </div>
+            <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+              {{ formatearBorradoPor(row.original) }}
+            </p>
             <div class="text-sm text-muted mt-0.5 flex flex-wrap items-center gap-3">
               <span class="font-mono">{{
                 row.original.tipo === 'ingrediente'
@@ -1398,7 +1452,29 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         </template>
 
         <template #controles-cell="{ row }">
-          <div class="flex items-center justify-end gap-1">
+          <div v-if="row.original.eliminadoEl" class="flex items-center justify-end gap-1">
+            <!-- Visible pero deshabilitado, no escondido: mismo criterio que
+                 el switch de `activo` en el resto de la app (ver
+                 `impresoras.vue` — "el switch se deshabilita, no se
+                 esconde") — sigue mostrando el estado aunque no se pueda
+                 tocar sobre una fila eliminada. -->
+            <USwitch
+              :model-value="row.original.activo"
+              disabled
+              size="sm"
+            />
+            <UButton
+              v-if="puedeEliminar"
+              icon="i-lucide-rotate-ccw"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+            >
+              Restaurar
+            </UButton>
+          </div>
+          <div v-else class="flex items-center justify-end gap-1">
             <USwitch
               :model-value="row.original.activo"
               :disabled="toggling.has(row.original.id) || !puedeActualizar"
@@ -2163,6 +2239,16 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         </ul>
       </template>
     </CrudModal>
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar item"
+      message="¿Restaurar este item? Volverá al catálogo, pero inactivo: reactivarlo es un paso aparte."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      @cancel="confirmRestaurarId = null"
+      @confirm="confirmRestaurarId && restaurarItem(confirmRestaurarId)"
+    />
 
     <!-- Modal ajuste de stock -->
     <UModal v-model:open="stockModalOpen" title="Ajustar stock" :ui="{ content: 'max-w-2xl' }">

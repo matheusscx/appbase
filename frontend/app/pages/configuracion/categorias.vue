@@ -14,6 +14,8 @@ interface Categoria {
   aplicaA: string
   activo: boolean
   impresoraId: string | null
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 const config = useRuntimeConfig()
@@ -23,6 +25,9 @@ const apiUrl = config.public.apiUrl
 const categorias = ref<Categoria[]>([])
 const impresorasComanda = ref<Impresora[]>([])
 const impresorasApi = useImpresoras()
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('categorias')
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
 
 const impresoraOptions = computed(() => [
   { label: 'Sin ruta de comanda', value: null as string | null },
@@ -71,19 +76,45 @@ function aplicaALabel(value: string) {
   return aplicaAOptions.find(o => o.value === value)?.label ?? value
 }
 
+// `watch(verEliminados, cargar)` dispara `cargar()` por cada toggle del
+// switch: dos clicks rápidos (prender/apagar "Ver eliminadas") disparan dos
+// llamadas en paralelo, y sin serializar la respuesta que llega segunda pisa
+// `categorias.value` sin importar cuál toggle la originó — el listado queda
+// desincronizado del estado visible del switch.
+//
+// Esto NO es el patrón de a82bf72 (`items.vue` → `catalogosListos`): ese caso
+// memoiza UN solo disparo (`cargarCatalogos()` corre una vez en `onMounted`)
+// para que un consumidor tardío espere esa misma promesa — "no dispares dos
+// veces". Acá `cargar()` se invoca N veces (una por toggle) y hace falta lo
+// contrario: una cola serial donde cada invocación nueva encadena sobre la
+// promesa de la anterior antes de arrancar la propia, así el orden de
+// escritura en `categorias.value` queda atado al orden de los toggles —no a
+// qué respuesta de red llega primero— sin que dos fetches lleguen a estar en
+// vuelo a la vez.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    categorias.value = await useApiFetch<Categoria[]>(`${apiUrl}/categorias`)
-  }
-  catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al cargar categorías')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      const query = verEliminados.value ? '?incluirEliminados=true' : ''
+      categorias.value = await useApiFetch<Categoria[]>(`${apiUrl}/categorias${query}`)
+    }
+    catch (e: unknown) {
+      const msg = apiErrorMsg(e, 'Error al cargar categorías')
+      toast.add({ title: msg, color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Categoria) {
   const idx = categorias.value.findIndex(c => c.id === saved.id)
@@ -177,7 +208,15 @@ async function eliminar(id: string) {
     await useApiFetch(`${apiUrl}/categorias/${id}`, {
       method: 'DELETE',
     })
-    removeLocal(id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos (solo el backend los
+    // sabe), así que acá sí hace falta recargar en vez del patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
     toast.add({ title: 'Categoría eliminada', color: 'success' })
   }
   catch (e: unknown) {
@@ -187,6 +226,28 @@ async function eliminar(id: string) {
   finally {
     confirmDeleteId.value = null
     confirmModalOpen.value = false
+  }
+}
+
+async function restaurarCategoria(id: string) {
+  try {
+    await restaurar(id)
+    const cat = categorias.value.find(c => c.id === id)
+    if (cat) {
+      cat.eliminadoEl = null
+      cat.eliminadoPorNombre = null
+    }
+    toast.add({ title: 'Categoría restaurada', color: 'success' })
+  }
+  catch (e: unknown) {
+    // El 400 de colisión de nombre trae el detalle de qué renombrar: se
+    // muestra tal cual, sin reemplazarlo por el fallback genérico.
+    const msg = apiErrorMsg(e, 'Error al restaurar')
+    toast.add({ title: msg, color: 'error' })
+  }
+  finally {
+    confirmRestaurarId.value = null
+    confirmRestaurarModalOpen.value = false
   }
 }
 
@@ -218,45 +279,73 @@ const columns: TableColumn<Categoria>[] = [
       description="Clasifica productos y servicios del catálogo."
     >
       <template #actions>
-        <UButton
-          icon="i-lucide-plus"
-          @click="abrirCrear"
-        >
-          Nueva categoría
-        </UButton>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminadas" />
+            <span class="text-sm text-muted">Ver eliminadas</span>
+          </div>
+          <UButton
+            icon="i-lucide-plus"
+            @click="abrirCrear"
+          >
+            Nueva categoría
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable :data="categorias" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
-        <CrudListItem
-          :title="row.original.nombre"
-          :subtitle="`Aplica a: ${aplicaALabel(row.original.aplicaA)}${row.original.impresoraId ? ' · ' + (impresorasComanda.find(i => i.id === row.original.impresoraId)?.nombre ?? '') : ''}`"
-        />
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <CrudListItem
+              :title="row.original.nombre"
+              :subtitle="`Aplica a: ${aplicaALabel(row.original.aplicaA)}${row.original.impresoraId ? ' · ' + (impresorasComanda.find(i => i.id === row.original.impresoraId)?.nombre ?? '') : ''}`"
+            />
+            <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+              Eliminada
+            </UBadge>
+          </div>
+          <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+            {{ formatearBorradoPor(row.original) }}
+          </p>
+        </div>
       </template>
 
         <template #activo-cell="{ row }">
           <div class="flex justify-end">
             <USwitch
               :model-value="row.original.activo"
-              :disabled="toggling.has(row.original.id)"
+              :disabled="toggling.has(row.original.id) || !!row.original.eliminadoEl"
               @update:model-value="toggleActivo(row.original)"
             />
           </div>
         </template>
 
         <template #acciones-cell="{ row }">
-          <div class="flex justify-end gap-2">
+          <div v-if="row.original.eliminadoEl" class="flex justify-end">
+            <UButton
+              icon="i-lucide-rotate-ccw"
+              color="neutral"
+              variant="ghost"
+              @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+            >
+              Restaurar
+            </UButton>
+          </div>
+          <div v-else class="flex justify-end gap-2">
             <UButton
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
+              title="Editar"
               @click="abrirEditar(row.original)"
             />
             <UButton
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
+              title="Eliminar"
               @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
             />
           </div>
@@ -335,6 +424,16 @@ const columns: TableColumn<Categoria>[] = [
       message="¿Estás seguro de que quieres eliminar esta categoría? Esta acción no se puede deshacer."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
+    />
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar categoría"
+      message="¿Restaurar esta categoría? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      @cancel="confirmRestaurarId = null"
+      @confirm="confirmRestaurarId && restaurarCategoria(confirmRestaurarId)"
     />
   </div>
 </template>

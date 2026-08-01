@@ -5,7 +5,7 @@
 // un usuario con el permiso ve sus controles aunque no sea admin — y que las
 // entradas del menú de acciones se arman por permiso: "Ajustar stock" escribe,
 // "Historial" solo lee, y quedaron en el mismo dropdown.
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Items from './items.vue'
 
@@ -65,18 +65,56 @@ let itemDetalleMock: typeof ITEM_PRODUCTO = ITEM_PRODUCTO
 // guardada acá, en vez de resolver "sincrónicamente" como el resto del mock.
 let impuestosPromiseOverride: Promise<typeof IMPUESTO_IVA[]> | null = null
 
+// Estado SOLO para el describe de la papelera (abajo): un item vivo cuyo
+// `DELETE` lo muta, para que un `GET` posterior con `incluirEliminados` lo
+// traiga marcado. `null` en el resto de los tests — no interfiere con el
+// mock de arriba, que sigue devolviendo `ITEM_PRODUCTO` como siempre.
+interface ItemPapelera {
+  id: string
+  nombre: string
+  tipo: string
+  activo: boolean
+  precioBase: string
+  monedaId: string
+  eliminadoEl: string | null
+  eliminadoPorNombre: string | null
+}
+let itemPapeleraBackend: ItemPapelera | null = null
+
 // La página dispara varias cargas al montar (catálogos, vendibles, grupos) y
 // cada una espera una forma distinta. Se responde por URL: lo que importa es
 // que la tabla tenga UNA fila para que se rendericen los controles de fila.
 mockNuxtImport('useApiFetch', () => {
-  return (url: string) => {
+  return (url: string, opts?: { method?: string }) => {
     if (typeof url === 'string' && url.includes('/impuestos'))
       return impuestosPromiseOverride ?? Promise.resolve(impuestosMock)
+    if (itemPapeleraBackend && typeof url === 'string' && url.includes(`/items/${itemPapeleraBackend.id}/uso`))
+      return Promise.resolve({ bloqueos: [], advertencias: [] })
+    if (
+      itemPapeleraBackend
+      && typeof url === 'string'
+      && url.includes(`/items/${itemPapeleraBackend.id}`)
+      && (opts?.method ?? 'GET') === 'DELETE'
+    ) {
+      itemPapeleraBackend.eliminadoEl = '2026-07-31T21:00:00.000Z'
+      itemPapeleraBackend.eliminadoPorNombre = 'admin.paris'
+      return Promise.resolve(undefined)
+    }
     // Detalle de un item puntual (`abrirEditar`): sin query string y sin
     // segmento después del id, a diferencia de `/items/:id/unidades` o del
     // listado paginado `/items?page=...`.
     if (typeof url === 'string' && /\/items\/[^/?]+$/.test(url))
       return Promise.resolve(itemDetalleMock)
+    if (itemPapeleraBackend && typeof url === 'string' && url.includes('/items')) {
+      const incluirEliminados = url.includes('incluirEliminados=true')
+      const data = incluirEliminados
+        ? [itemPapeleraBackend]
+        : (itemPapeleraBackend.eliminadoEl ? [] : [itemPapeleraBackend])
+      return Promise.resolve({
+        data: data.map(i => ({ ...i })),
+        meta: { total: data.length, page: 1, pageSize: 15, totalPages: 1 },
+      })
+    }
     if (typeof url === 'string' && url.includes('/items'))
       return Promise.resolve({ data: [ITEM_PRODUCTO], meta: { total: 1, page: 1, limit: 20, totalPages: 1 } })
     return Promise.resolve([])
@@ -277,5 +315,86 @@ describe('configuracion/items — chip fijo del IVA', () => {
 
     wrapper.unmount()
     impuestosPromiseOverride = null
+  })
+})
+
+// Mismo caso que `categorias.nuxt.spec.ts` ("papelera: eliminar respeta el
+// toggle"), adaptado a la versión paginada (`usePaginatedList`) de esta
+// página: `eliminar()` recargaba (o no) según `verEliminados`, y acá el
+// refetch lo dispara el `watch` de filtros que ya tenía `usePaginatedList`
+// (no se tocó), sumando `incluirEliminados` a `listFilters`.
+describe('configuracion/items — papelera: eliminar respeta el toggle', () => {
+  const ITEM_PAPELERA_ID = 'item-papelera-1'
+
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
+    impuestosPromiseOverride = null
+    itemPapeleraBackend = {
+      id: ITEM_PAPELERA_ID,
+      nombre: 'Item Papelera Test',
+      tipo: 'servicio',
+      activo: true,
+      precioBase: '1000.0000',
+      monedaId: 'clp',
+      eliminadoEl: null,
+      eliminadoPorNombre: null,
+    }
+  })
+
+  afterEach(() => {
+    itemPapeleraBackend = null
+  })
+
+  /** El menú "Más acciones" y el modal de confirmación los teletransporta
+   * Reka UI fuera del wrapper — mismo camino que `abrirDrawerDeMesa()` en
+   * `permisos-escritura.nuxt.spec.ts`: hay que abrirlos por el evento real y
+   * mirar `document.body`. */
+  async function eliminarPorMenu(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.find('[title="Más acciones"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    const itemEliminar = [...document.body.querySelectorAll('[role="menuitem"]')]
+      .find(el => el.textContent?.trim() === 'Eliminar')
+    expect(itemEliminar, 'entrada "Eliminar" del menú').toBeTruthy()
+    ;(itemEliminar as HTMLElement).click()
+    await new Promise(r => setTimeout(r, 20))
+
+    const confirmar = [...document.body.querySelectorAll('button')]
+      .find(b => b.textContent?.trim() === 'Eliminar')
+    expect(confirmar, 'botón "Eliminar" del modal de confirmación').toBeTruthy()
+    confirmar!.click()
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  it('con "Ver eliminados" activo, borrar deja la fila visible como eliminada (no la saca de la lista)', async () => {
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Item Papelera Test')
+
+    await wrapper.find('[aria-label="Ver eliminados"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    await eliminarPorMenu(wrapper)
+
+    // Ancla positiva primero: si `eliminar()` nunca llegó a pegarle al
+    // backend, la aserción negativa de abajo pasaría vacuamente.
+    expect(itemPapeleraBackend!.eliminadoEl).toBeTruthy()
+    expect(wrapper.text()).toContain('Item Papelera Test')
+    expect(wrapper.text()).toContain('Eliminado')
+    expect(wrapper.text()).toContain('Eliminado por admin.paris')
+
+    wrapper.unmount()
+  })
+
+  it('con el toggle apagado, borrar SÍ saca la fila de la lista (comportamiento de siempre)', async () => {
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Item Papelera Test')
+
+    await eliminarPorMenu(wrapper)
+
+    expect(wrapper.text()).not.toContain('Item Papelera Test')
+
+    wrapper.unmount()
   })
 })
