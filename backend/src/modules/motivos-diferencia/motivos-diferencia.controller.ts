@@ -16,9 +16,11 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { MotivosDiferenciaService } from './motivos-diferencia.service';
 import { CreateMotivoDiferenciaDto } from './dto/create-motivo-diferencia.dto';
 import { UpdateMotivoDiferenciaDto } from './dto/update-motivo-diferencia.dto';
+import { QueryMotivosDiferenciaDto } from './dto/query-motivos-diferencia.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
 @Controller('motivos-diferencia')
@@ -26,9 +28,13 @@ export class MotivosDiferenciaController {
   constructor(private readonly service: MotivosDiferenciaService) {}
 
   @Get()
-  findAll(@Req() req: Request, @Query('soloActivas') soloActivas?: string) {
+  findAll(@Req() req: Request, @Query() query: QueryMotivosDiferenciaDto) {
     const user = req.user as { tenantId: string };
-    return this.service.findAll(user.tenantId, soloActivas === 'true');
+    return this.service.findAll(
+      user.tenantId,
+      query.soloActivas ?? false,
+      query.incluirEliminados,
+    );
   }
 
   @UseGuards(TenantAdminGuard)
@@ -53,7 +59,14 @@ export class MotivosDiferenciaController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as { tenantId: string };
-    return this.service.remove(user.tenantId, id);
+    const user = req.user as JwtUser;
+    return this.service.remove(user.tenantId!, user.id, id);
+  }
+
+  @UseGuards(TenantAdminGuard)
+  @Post(':id/restaurar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.service.restaurar(user.tenantId!, id);
   }
 }

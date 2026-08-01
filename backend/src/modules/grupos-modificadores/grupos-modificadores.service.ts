@@ -6,6 +6,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
+import { unwrap } from '../../common/utils/pg-returning.util';
 import {
   CreateGrupoModificadorDto,
   GrupoOpcionInputDto,
@@ -309,16 +310,41 @@ export class GruposModificadoresService {
 
   /**
    * Lista los grupos del tenant con opciones y conteo de uso. Batchea las
-   * opciones y los conteos en una sola query cada uno (3 queries totales,
+   * opciones y los conteos en una sola query cada uno (3-4 queries totales,
    * no N+1 por grupo).
+   *
+   * `incluirEliminados`: papelera — incluye los grupos borrados y el nombre
+   * de quien borró, resuelto por JOIN en la misma query (una por fila sería
+   * N+1). El JOIN a `usuarios` no filtra su propio `eliminado_el` a
+   * propósito: el autor de un borrado es un hecho histórico
+   * (docs/patterns/backend.md, ver categorias.service.ts → findAll). Las
+   * opciones batcheadas siguen filtrando por su propio `eliminado_el IS
+   * NULL`: `remove()` las soft-borra junto con el grupo (mismo timestamp de
+   * transacción), así que un grupo en la papelera aparece con `opciones: []`
+   * hasta que se restaura.
    */
-  async findAll(tenantId: string) {
-    const grupoRows: { grupo_modificador_id: string; nombre: string }[] =
-      await this.dataSource.query(
-        `SELECT grupo_modificador_id, nombre FROM grupos_modificadores
-         WHERE tenant_id = $1 AND eliminado_el IS NULL ORDER BY nombre ASC`,
-        [tenantId],
-      );
+  async findAll(tenantId: string, incluirEliminados = false) {
+    const grupoRows: {
+      grupo_modificador_id: string;
+      nombre: string;
+      eliminado_el?: string | null;
+      eliminado_por?: string | null;
+      eliminado_por_nombre?: string | null;
+    }[] = incluirEliminados
+      ? await this.dataSource.query(
+          `SELECT g.grupo_modificador_id, g.nombre, g.eliminado_el, g.eliminado_por,
+                  u.nombre_usuario AS eliminado_por_nombre
+             FROM grupos_modificadores g
+             LEFT JOIN usuarios u ON u.usuario_id = g.eliminado_por
+            WHERE g.tenant_id = $1
+            ORDER BY g.nombre ASC`,
+          [tenantId],
+        )
+      : await this.dataSource.query(
+          `SELECT grupo_modificador_id, nombre FROM grupos_modificadores
+           WHERE tenant_id = $1 AND eliminado_el IS NULL ORDER BY nombre ASC`,
+          [tenantId],
+        );
     if (!grupoRows.length) return [];
     const ids = grupoRows.map((g) => g.grupo_modificador_id);
 
@@ -364,6 +390,13 @@ export class GruposModificadoresService {
         familia: ops.length ? this.familiaDeTipo(ops[0].tipo) : null,
         opciones: ops.map((r) => this.mapOpcionRow(r)),
         itemsUsandoCount: usoPorGrupo.get(g.grupo_modificador_id) ?? 0,
+        ...(incluirEliminados
+          ? {
+              eliminadoEl: g.eliminado_el,
+              eliminadoPor: g.eliminado_por,
+              eliminadoPorNombre: g.eliminado_por_nombre,
+            }
+          : {}),
       };
     });
   }
@@ -497,9 +530,16 @@ export class GruposModificadoresService {
   /**
    * Borra (soft-delete) un grupo y sus opciones, bloqueando si hay items
    * vivos que lo usan. Todo dentro de una única transacción para que el
-   * chequeo de uso y el borrado sean atómicos.
+   * chequeo de uso y el borrado sean atómicos. Las dos escrituras comparten
+   * el `NOW()` de la transacción (estable dentro de ella), así que
+   * `restaurar()` puede acotar la reversión de las opciones por ese mismo
+   * timestamp exacto.
    */
-  async remove(tenantId: string, grupoId: string): Promise<void> {
+  async remove(
+    tenantId: string,
+    usuarioId: string,
+    grupoId: string,
+  ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `SELECT grupo_modificador_id FROM grupos_modificadores
@@ -527,12 +567,77 @@ export class GruposModificadoresService {
          WHERE grupo_modificador_id = $1 AND eliminado_el IS NULL`,
         [grupoId],
       );
+      // Una sola escritura para el grupo (no dos sentencias sueltas): no
+      // puede quedar una fila borrada sin autor.
       await manager.query(
-        `UPDATE grupos_modificadores SET eliminado_el = NOW(), actualizado_el = NOW()
-         WHERE grupo_modificador_id = $1`,
-        [grupoId],
+        `UPDATE grupos_modificadores
+            SET eliminado_el = NOW(), eliminado_por = $3, actualizado_el = NOW()
+          WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [grupoId, tenantId, usuarioId],
       );
     });
+  }
+
+  /**
+   * Papelera: revierte `remove()`. Revive el grupo y, en la misma sentencia,
+   * las opciones que ESE borrado se llevó — acotado por el `eliminado_el`
+   * exacto que dejó (nunca leído a JS y pasado de vuelta como parámetro:
+   * pierde precisión de microsegundos entre el `Date` de `pg` y
+   * `timestamptz`; ver el comentario largo en `items.service.ts →
+   * restaurar()`). No hace falta el cast `AT TIME ZONE 'UTC'` que sí
+   * necesita items: tanto `grupos_modificadores.eliminado_el` como
+   * `grupo_modificador_opciones.eliminado_el` son `timestamptz` (verificado
+   * contra el esquema), así que comparar uno contra el otro no depende del
+   * `TimeZone` de ninguna sesión.
+   *
+   * Una opción borrada ANTES que el grupo (otro motivo, otro `eliminado_el`)
+   * no matchea esta comparación y sigue borrada.
+   */
+  async restaurar(tenantId: string, grupoId: string) {
+    try {
+      const rows = unwrap<{ grupo_modificador_id: string }>(
+        await this.dataSource.query(
+          `WITH restaurado AS (
+             UPDATE grupos_modificadores
+                SET eliminado_el = NULL, actualizado_el = NOW()
+              WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
+             RETURNING grupo_modificador_id,
+                       (SELECT eliminado_el FROM grupos_modificadores
+                          WHERE grupo_modificador_id = $1 AND tenant_id = $2) AS eliminado_el_previo
+           ),
+           opciones_restauradas AS (
+             UPDATE grupo_modificador_opciones
+                SET eliminado_el = NULL, actualizado_el = NOW()
+              WHERE grupo_modificador_id = $1 AND tenant_id = $2
+                AND eliminado_el = (SELECT eliminado_el_previo FROM restaurado)
+             RETURNING grupo_opcion_id
+           )
+           SELECT grupo_modificador_id FROM restaurado`,
+          [grupoId, tenantId],
+        ),
+      );
+      if (!rows.length) {
+        throw new NotFoundException(
+          'Grupo de modificadores no está en la papelera',
+        );
+      }
+      // El UPDATE ya commiteó: cargarGrupo ve el estado final, sin ventana
+      // de visibilidad entre conexiones. El grupo se acaba de confirmar
+      // vivo arriba, así que no puede devolver null.
+      return (await this.cargarGrupo(this.dataSource, tenantId, grupoId))!;
+    } catch (e) {
+      // 23505 = unique_violation. El índice único de nombre es parcial
+      // (WHERE eliminado_el IS NULL): mientras el grupo estaba borrado nadie
+      // competía por el nombre, pero al revivirlo vuelve a competir. Se
+      // capta el código de Postgres —no una lista de índices a mano— para
+      // que valga también donde no lo enumeramos.
+      if ((e as { code?: string }).code === '23505') {
+        throw new BadRequestException(
+          'Ya existe un grupo de modificadores activo con ese nombre. Renombrá el actual o el restaurado antes de continuar.',
+        );
+      }
+      throw e;
+    }
   }
 
   /**

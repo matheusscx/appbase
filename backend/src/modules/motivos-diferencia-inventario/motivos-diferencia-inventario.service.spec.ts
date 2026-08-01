@@ -1,10 +1,12 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { MotivosDiferenciaInventarioService } from './motivos-diferencia-inventario.service';
 import { MotivoDiferenciaInventario } from './entities/motivo-diferencia-inventario.entity';
 
 const TENANT_ID = 'tenant-uuid';
 const MOTIVO_ID = 'motivo-uuid';
+const USUARIO_ID = 'usuario-uuid';
 
 describe('MotivosDiferenciaInventarioService', () => {
   let service: MotivosDiferenciaInventarioService;
@@ -74,9 +76,9 @@ describe('MotivosDiferenciaInventarioService', () => {
       },
     ]);
 
-    await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
-      'No se puede eliminar un motivo fijo del sistema',
-    );
+    await expect(
+      service.remove(TENANT_ID, USUARIO_ID, MOTIVO_ID),
+    ).rejects.toThrow('No se puede eliminar un motivo fijo del sistema');
   });
 
   it('rechaza eliminar un motivo en uso en movimientos', async () => {
@@ -91,7 +93,9 @@ describe('MotivosDiferenciaInventarioService', () => {
       ])
       .mockResolvedValueOnce([{ existe: true }]);
 
-    await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
+    await expect(
+      service.remove(TENANT_ID, USUARIO_ID, MOTIVO_ID),
+    ).rejects.toThrow(
       'No se puede eliminar: el motivo está en uso en movimientos o recuentos de inventario',
     );
   });
@@ -113,7 +117,9 @@ describe('MotivosDiferenciaInventarioService', () => {
       ])
       .mockResolvedValueOnce([{ existe: true }]);
 
-    await expect(service.remove(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
+    await expect(
+      service.remove(TENANT_ID, USUARIO_ID, MOTIVO_ID),
+    ).rejects.toThrow(
       'No se puede eliminar: el motivo está en uso en movimientos o recuentos de inventario',
     );
 
@@ -129,6 +135,133 @@ describe('MotivosDiferenciaInventarioService', () => {
         String(c[0]).includes('eliminado_el = NOW()'),
       ),
     ).toBe(false);
+  });
+
+  it('remove() registra quién borró en la misma sentencia', async () => {
+    queryMock
+      .mockResolvedValueOnce([
+        {
+          motivo_diferencia_inventario_id: MOTIVO_ID,
+          nombre: 'Robo',
+          activo: true,
+          es_fijo: false,
+        },
+      ])
+      .mockResolvedValueOnce([{ existe: false }])
+      .mockResolvedValueOnce([]); // UPDATE
+
+    await service.remove(TENANT_ID, USUARIO_ID, MOTIVO_ID);
+
+    const sql = queryMock.mock.calls.at(-1)![0] as string;
+    expect(sql).toMatch(/eliminado_por\s*=\s*\$/);
+    expect(sql).toMatch(/eliminado_el\s*=\s*NOW\(\)/);
+    expect(queryMock.mock.calls.at(-1)![1]).toEqual([
+      MOTIVO_ID,
+      TENANT_ID,
+      USUARIO_ID,
+    ]);
+  });
+
+  describe('restaurar', () => {
+    it('restaurar() devuelve el motivo RE-ACTIVADO (eliminadoEl null) tras el UPDATE', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          motivo_diferencia_inventario_id: MOTIVO_ID,
+          nombre: 'Robo',
+          activo: true,
+          es_fijo: false,
+          eliminado_el: null,
+          eliminado_por: USUARIO_ID,
+        },
+      ]);
+
+      const restaurado = await service.restaurar(TENANT_ID, MOTIVO_ID);
+
+      expect(queryMock).toHaveBeenCalledWith(
+        expect.stringMatching(/eliminado_el\s*=\s*NULL/),
+        [MOTIVO_ID, TENANT_ID],
+      );
+      expect(restaurado).toMatchObject({
+        id: MOTIVO_ID,
+        nombre: 'Robo',
+        eliminadoEl: null,
+        eliminadoPor: USUARIO_ID,
+      });
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      queryMock.mockResolvedValueOnce([]);
+
+      await expect(service.restaurar(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('restaurar() con el nombre ya ocupado devuelve 400 y no toca ninguna fila', async () => {
+      queryMock.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+
+      await expect(service.restaurar(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {
+      queryMock.mockRejectedValueOnce(
+        Object.assign(new Error('connection lost'), { code: '57P01' }),
+      );
+
+      await expect(service.restaurar(TENANT_ID, MOTIVO_ID)).rejects.toThrow(
+        'connection lost',
+      );
+    });
+  });
+
+  describe('findAll con incluirEliminados', () => {
+    it('sin el flag no trae eliminado_el ni hace JOIN con usuarios', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          motivo_diferencia_inventario_id: MOTIVO_ID,
+          nombre: 'Robo',
+          activo: true,
+          es_fijo: false,
+        },
+      ]);
+
+      const result = await service.findAll(TENANT_ID);
+
+      const sql = queryMock.mock.calls[0][0] as string;
+      expect(sql).not.toContain('LEFT JOIN usuarios');
+      expect(sql).toContain('eliminado_el IS NULL');
+      expect(result[0].eliminadoPorNombre).toBeUndefined();
+    });
+
+    it('con el flag trae eliminados con el nombre de quien borró, resuelto por JOIN', async () => {
+      queryMock.mockResolvedValueOnce([
+        {
+          motivo_diferencia_inventario_id: MOTIVO_ID,
+          nombre: 'Robo',
+          activo: true,
+          es_fijo: false,
+          eliminado_el: new Date(),
+          eliminado_por: USUARIO_ID,
+          eliminado_por_nombre: 'admin.paris',
+        },
+      ]);
+
+      const result = await service.findAll(TENANT_ID, false, true);
+
+      // Una sola query: si el nombre saliera con una consulta por fila
+      // (N+1), esta aserción de una sola llamada lo delataría.
+      expect(queryMock).toHaveBeenCalledTimes(1);
+      const sql = queryMock.mock.calls[0][0] as string;
+      expect(sql).toContain('LEFT JOIN usuarios');
+      expect(result[0]).toMatchObject({
+        id: MOTIVO_ID,
+        eliminadoPorNombre: 'admin.paris',
+      });
+    });
   });
 
   it('assertMotivoActivo rechaza un motivo inactivo o de otro tenant', async () => {

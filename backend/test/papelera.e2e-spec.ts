@@ -997,3 +997,311 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     });
   }
 });
+
+// Task 6b: los 3 últimos recursos de la familia SQL cruda — grupos
+// de modificadores y los dos motivos de diferencia (caja e inventario). Los
+// tres tienen nombre único por tenant (índice parcial WHERE eliminado_el IS
+// NULL), así que —a diferencia de la familia softDelete() de Task 6a—
+// agregan el 400 de colisión real de Postgres al restaurar (mismo patrón que
+// causas-merma, Task 3), y por eso van en su propio bloque parametrizado en
+// vez de sumarse al de Task 6a.
+//
+// `grupos_modificadores` tiene un hijo (`grupo_modificador_opciones`), y es
+// el único de los 16 con esa forma: `remove()`/`restaurar()` cascadean esa
+// tabla dentro de la misma transacción/sentencia, acotando por el
+// `eliminado_el` exacto que dejó `remove()`. El flujo
+// crear→borrar→listar→restaurar del loop de abajo NO ejercita ese
+// acotamiento (solo tiene una opción, así que nunca hay una segunda fila
+// borrada antes por otro motivo con la que confundirse). Por eso, igual que
+// `items` (línea ~484) y `salones` (línea ~645), tiene su PROPIO test
+// dedicado contra Postgres real más abajo — no alcanza con el mock de
+// `grupos-modificadores.service.spec.ts`, que no prueba que Postgres
+// realmente distinga los dos timestamps.
+interface RecursoSqlCrudoItem {
+  id?: string;
+  grupoModificadorId?: string;
+  nombre: string;
+  eliminadoEl?: string | null;
+  eliminadoPorNombre?: string | null;
+}
+
+describe('Papelera (e2e) — familia SQL cruda con nombre único: grupos-modificadores, motivos-diferencia, motivos-diferencia-inventario', () => {
+  let app: INestApplication<App>;
+  let tokenAdmin: string;
+  let tokenNoAdmin: string;
+  let itemOpcionId: string;
+
+  const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+    tokenNoAdmin = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
+
+    // `grupos-modificadores` exige al menos una opción válida: un producto
+    // vivo del catálogo.
+    const resItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        nombre: `Opción papelera E2E ${Date.now()}`,
+        precioBase: '500',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '10',
+        costo: '500',
+      });
+    expect(resItem.status).toBe(201);
+    itemOpcionId = (resItem.body as { id: string }).id;
+  }, 60000);
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const recursos: {
+    nombre: string;
+    path: string;
+    idField: 'id' | 'grupoModificadorId';
+    crearBody: (nombre: string) => Record<string, unknown>;
+  }[] = [
+    {
+      nombre: 'grupos-modificadores',
+      path: 'grupos-modificadores',
+      idField: 'grupoModificadorId',
+      crearBody: (nombre) => ({
+        nombre,
+        opciones: [{ itemId: itemOpcionId, precioExtra: '0' }],
+      }),
+    },
+    {
+      nombre: 'motivos-diferencia',
+      path: 'motivos-diferencia',
+      idField: 'id',
+      crearBody: (nombre) => ({ nombre }),
+    },
+    {
+      nombre: 'motivos-diferencia-inventario',
+      path: 'motivos-diferencia-inventario',
+      idField: 'id',
+      crearBody: (nombre) => ({ nombre }),
+    },
+  ];
+
+  for (const recurso of recursos) {
+    it(`${recurso.nombre}: crear → borrar → listar con el flag → restaurar → verificar`, async () => {
+      const nombre = `${recurso.nombre} papelera E2E ${Date.now()}`;
+      const resCrear = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send(recurso.crearBody(nombre));
+      expect(resCrear.status).toBe(201);
+      const id = (resCrear.body as RecursoSqlCrudoItem)[
+        recurso.idField
+      ] as string;
+      expect(id).toBeDefined();
+
+      const resDeleteSinPermiso = await request(app.getHttpServer())
+        .delete(`/api/${recurso.path}/${id}`)
+        .set('Authorization', `Bearer ${tokenNoAdmin}`);
+      expect(resDeleteSinPermiso.status).toBe(403);
+
+      const resBorrar = await request(app.getHttpServer())
+        .delete(`/api/${recurso.path}/${id}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resBorrar.status).toBe(204);
+
+      const resListarNormal = await request(app.getHttpServer())
+        .get(`/api/${recurso.path}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resListarNormal.status).toBe(200);
+      expect(
+        (resListarNormal.body as RecursoSqlCrudoItem[]).find(
+          (r) => r[recurso.idField] === id,
+        ),
+      ).toBeUndefined();
+
+      const resListarPapelera = await request(app.getHttpServer())
+        .get(`/api/${recurso.path}?incluirEliminados=true`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resListarPapelera.status).toBe(200);
+      const borrado = (resListarPapelera.body as RecursoSqlCrudoItem[]).find(
+        (r) => r[recurso.idField] === id,
+      );
+      expect(borrado).toBeDefined();
+      expect(borrado?.eliminadoEl).not.toBeNull();
+      expect(borrado?.eliminadoPorNombre).toBe('admin.paris');
+
+      const resRestaurarSinPermiso = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${id}/restaurar`)
+        .set('Authorization', `Bearer ${tokenNoAdmin}`);
+      expect(resRestaurarSinPermiso.status).toBe(403);
+
+      const resRestaurar = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${id}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurar.status).toBe(201);
+      expect(
+        (resRestaurar.body as RecursoSqlCrudoItem).eliminadoEl,
+      ).toBeFalsy();
+
+      const resListarDespues = await request(app.getHttpServer())
+        .get(`/api/${recurso.path}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(
+        (resListarDespues.body as RecursoSqlCrudoItem[]).find(
+          (r) => r[recurso.idField] === id,
+        ),
+      ).toBeDefined();
+
+      // Restaurar de nuevo (ya no está en la papelera) → 404.
+      const resRestaurarOtraVez = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${id}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurarOtraVez.status).toBe(404);
+    });
+
+    it(`${recurso.nombre}: colisión real de Postgres — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia`, async () => {
+      const nombre = `${recurso.nombre} papelera E2E colisión ${Date.now()}`;
+      const resOriginal = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send(recurso.crearBody(nombre));
+      expect(resOriginal.status).toBe(201);
+      const originalId = (resOriginal.body as RecursoSqlCrudoItem)[
+        recurso.idField
+      ] as string;
+
+      const resBorrar = await request(app.getHttpServer())
+        .delete(`/api/${recurso.path}/${originalId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resBorrar.status).toBe(204);
+
+      // Mientras `originalId` estaba borrado, nadie competía por su nombre:
+      // se puede crear otro recurso vivo con el mismo nombre.
+      const resOtra = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send(recurso.crearBody(nombre));
+      expect(resOtra.status).toBe(201);
+      const otraId = (resOtra.body as RecursoSqlCrudoItem)[
+        recurso.idField
+      ] as string;
+
+      // El 23505 lo tira Postgres de verdad (índice único parcial), no un mock.
+      const resRestaurar = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${originalId}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurar.status).toBe(400);
+
+      const listado = await request(app.getHttpServer())
+        .get(`/api/${recurso.path}?incluirEliminados=true`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      const items = listado.body as RecursoSqlCrudoItem[];
+      const viva = items.find((r) => r[recurso.idField] === otraId);
+      const borrada = items.find((r) => r[recurso.idField] === originalId);
+      expect(viva?.eliminadoEl).toBeFalsy();
+      expect(borrada?.eliminadoEl).toBeTruthy();
+
+      // Limpieza: sin la otra viva que ocupa el nombre, restaurar sí puede.
+      const resBorrarOtra = await request(app.getHttpServer())
+        .delete(`/api/${recurso.path}/${otraId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resBorrarOtra.status).toBe(204);
+
+      const resRestaurarOk = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${originalId}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurarOk.status).toBe(201);
+    });
+  }
+
+  it('EL MUTANTE OBLIGATORIO: restaurar el grupo revive solo la opción que ESE borrado se llevó', async () => {
+    const crearOpcion = async (nombre: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          nombre: `${nombre} ${Date.now()}`,
+          precioBase: '500',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+          stock: '10',
+          costo: '500',
+        });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+
+    const opcionViejaItemId = await crearOpcion('Opción vieja GM E2E');
+    const opcionCascadaItemId = await crearOpcion('Opción cascada GM E2E');
+
+    const resGrupo = await request(app.getHttpServer())
+      .post('/api/grupos-modificadores')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        nombre: `Grupo colateral E2E ${Date.now()}`,
+        opciones: [
+          { itemId: opcionViejaItemId, precioExtra: '0' },
+          { itemId: opcionCascadaItemId, precioExtra: '0' },
+        ],
+      });
+    expect(resGrupo.status).toBe(201);
+    const grupoId = (resGrupo.body as { grupoModificadorId: string })
+      .grupoModificadorId;
+
+    // "El martes": se quita la opción vieja del grupo (PATCH con la lista sin
+    // ella) — `update()` la soft-borra SOLA, con SU propio `eliminado_el`; el
+    // grupo sigue vivo.
+    const resPatch = await request(app.getHttpServer())
+      .patch(`/api/grupos-modificadores/${grupoId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        opciones: [{ itemId: opcionCascadaItemId, precioExtra: '0' }],
+      });
+    expect(resPatch.status).toBe(200);
+    expect(
+      (resPatch.body as { opciones: { itemId: string }[] }).opciones.map(
+        (o) => o.itemId,
+      ),
+    ).toEqual([opcionCascadaItemId]);
+
+    // "El viernes": se borra el grupo entero. La cascada de `remove()` solo
+    // debe tocar la opción "cascada" (la única viva); la opción "vieja" ya
+    // estaba borrada y conserva SU `eliminado_el` del martes.
+    const resDeleteGrupo = await request(app.getHttpServer())
+      .delete(`/api/grupos-modificadores/${grupoId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resDeleteGrupo.status).toBe(204);
+
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/grupos-modificadores/${grupoId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(201);
+
+    // El corazón de la task: la opción cascada revive; la opción vieja
+    // (borrada el martes, otro motivo, otro `eliminado_el`) NO — si el
+    // acotamiento por timestamp se rompiera (p. ej. acotando solo por
+    // `grupo_modificador_id` sin comparar `eliminado_el`), esta aserción es
+    // la que lo cazaría.
+    const resGet = await request(app.getHttpServer())
+      .get(`/api/grupos-modificadores/${grupoId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resGet.status).toBe(200);
+    const opciones = (resGet.body as { opciones: { itemId: string }[] })
+      .opciones;
+    expect(opciones.map((o) => o.itemId)).toEqual([opcionCascadaItemId]);
+  });
+});

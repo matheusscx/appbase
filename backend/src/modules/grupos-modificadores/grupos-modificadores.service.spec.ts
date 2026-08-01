@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { GruposModificadoresService } from './grupos-modificadores.service';
 import { CatalogService } from '../catalog/catalog.service';
 
@@ -10,6 +10,8 @@ const ITEM_ING_B = '550e8400-e29b-41d4-a716-4466554400a2';
 const ITEM_PROD = '550e8400-e29b-41d4-a716-4466554400b1';
 const ITEM_PROD_2 = '550e8400-e29b-41d4-a716-4466554400b2';
 const OPCION_ID = '550e8400-e29b-41d4-a716-4466554400c1';
+const USUARIO_ID = '550e8400-e29b-41d4-a716-4466554400d1';
+const GRUPO_ID = '550e8400-e29b-41d4-a716-4466554400e1';
 
 describe('GruposModificadoresService', () => {
   let service: GruposModificadoresService;
@@ -379,9 +381,9 @@ describe('GruposModificadoresService', () => {
 
     it('remove lanza 404 si el grupo no existe', async () => {
       managerMock.query.mockResolvedValueOnce([]); // SELECT grupo vivo → vacío
-      await expect(service.remove(TENANT_ID, 'inexistente')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.remove(TENANT_ID, USUARIO_ID, 'inexistente'),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('bloquea borrar un grupo asociado a items vivos', async () => {
@@ -390,8 +392,81 @@ describe('GruposModificadoresService', () => {
           { grupo_modificador_id: 'G1', nombre: 'Bebida' },
         ]) // SELECT grupo
         .mockResolvedValueOnce([{ nombre: 'Combo Clásico' }]); // items asociados vivos
-      await expect(service.remove(TENANT_ID, 'G1')).rejects.toThrow(
+      await expect(service.remove(TENANT_ID, USUARIO_ID, 'G1')).rejects.toThrow(
         /No se puede eliminar.*Combo Clásico/i,
+      );
+    });
+
+    it('remove() registra quién borró en la misma sentencia', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'G1' }]) // SELECT grupo vivo
+        .mockResolvedValueOnce([]) // sin items asociados
+        .mockResolvedValueOnce([]) // soft-delete opciones
+        .mockResolvedValueOnce([]); // soft-delete grupo
+      await service.remove(TENANT_ID, USUARIO_ID, 'G1');
+
+      const sql = managerMock.query.mock.calls.at(-1)![0] as string;
+      expect(sql).toMatch(/eliminado_por\s*=\s*\$/);
+      expect(sql).toMatch(/eliminado_el\s*=\s*NOW\(\)/);
+      expect(managerMock.query.mock.calls.at(-1)![1]).toEqual([
+        'G1',
+        TENANT_ID,
+        USUARIO_ID,
+      ]);
+    });
+  });
+
+  describe('restaurar', () => {
+    it('restaurar() revive el grupo y devuelve el shape completo (findOne)', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([{ grupo_modificador_id: GRUPO_ID }]) // WITH restaurado ... RETURNING
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: GRUPO_ID, nombre: 'Bebida' },
+        ]) // cargarGrupo: SELECT grupo
+        .mockResolvedValueOnce([]) // cargarGrupo: SELECT opciones
+        .mockResolvedValueOnce([{ total: 0 }]); // cargarGrupo: COUNT uso
+
+      const res = await service.restaurar(TENANT_ID, GRUPO_ID);
+
+      expect(dataSourceMock.query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringMatching(/eliminado_el\s*=\s*NULL/),
+        [GRUPO_ID, TENANT_ID],
+      );
+      expect(res).toMatchObject({
+        grupoModificadorId: GRUPO_ID,
+        nombre: 'Bebida',
+      });
+    });
+
+    it('restaurar() algo que no está en la papelera es 404', async () => {
+      dataSourceMock.query.mockResolvedValueOnce([]);
+
+      await expect(service.restaurar(TENANT_ID, GRUPO_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('restaurar() con el nombre ya ocupado devuelve 400 y no toca ninguna fila', async () => {
+      // El índice único es parcial (WHERE eliminado_el IS NULL): mientras el
+      // grupo estaba borrado nadie chocaba con él, pero al revivirlo vuelve
+      // a competir por el nombre.
+      dataSourceMock.query.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+
+      await expect(service.restaurar(TENANT_ID, GRUPO_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {
+      dataSourceMock.query.mockRejectedValueOnce(
+        Object.assign(new Error('connection lost'), { code: '57P01' }),
+      );
+
+      await expect(service.restaurar(TENANT_ID, GRUPO_ID)).rejects.toThrow(
+        'connection lost',
       );
     });
   });
@@ -446,6 +521,50 @@ describe('GruposModificadoresService', () => {
         grupoModificadorId: 'G2',
         familia: 'ingrediente',
         itemsUsandoCount: 0, // no aparece en usoRows → 0 por defecto
+      });
+    });
+
+    it('sin el flag no trae eliminado_el ni hace JOIN con usuarios', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      const res = await service.findAll(TENANT_ID);
+
+      const sql = dataSourceMock.query.mock.calls[0][0] as string;
+      expect(sql).not.toContain('LEFT JOIN usuarios');
+      expect(sql).toContain('eliminado_el IS NULL');
+      expect(res[0]).not.toHaveProperty('eliminadoPorNombre');
+    });
+
+    it('con el flag trae grupos borrados con el nombre de quien borró, resuelto por JOIN', async () => {
+      dataSourceMock.query
+        .mockResolvedValueOnce([
+          {
+            grupo_modificador_id: GRUPO_ID,
+            nombre: 'Bebida',
+            eliminado_el: new Date(),
+            eliminado_por: USUARIO_ID,
+            eliminado_por_nombre: 'admin.paris',
+          },
+        ]) // SELECT grupos (incluyendo borrados)
+        .mockResolvedValueOnce([]) // opciones batcheadas
+        .mockResolvedValueOnce([]); // conteos
+
+      const res = await service.findAll(TENANT_ID, true);
+
+      // Una sola query para los grupos: si el nombre saliera con una
+      // consulta por fila (N+1), esta aserción de 3 llamadas totales lo
+      // delataría (no una tanda extra por grupo).
+      expect(dataSourceMock.query).toHaveBeenCalledTimes(3);
+      const sql = dataSourceMock.query.mock.calls[0][0] as string;
+      expect(sql).toContain('LEFT JOIN usuarios');
+      expect(res[0]).toMatchObject({
+        grupoModificadorId: GRUPO_ID,
+        eliminadoPorNombre: 'admin.paris',
       });
     });
 

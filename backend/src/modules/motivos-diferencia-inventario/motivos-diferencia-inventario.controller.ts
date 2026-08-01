@@ -16,9 +16,11 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { MotivosDiferenciaInventarioService } from './motivos-diferencia-inventario.service';
 import { CreateMotivoDiferenciaInventarioDto } from './dto/create-motivo-diferencia-inventario.dto';
 import { UpdateMotivoDiferenciaInventarioDto } from './dto/update-motivo-diferencia-inventario.dto';
+import { QueryMotivosDiferenciaInventarioDto } from './dto/query-motivos-diferencia-inventario.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
 @Controller('motivos-diferencia-inventario')
@@ -26,9 +28,16 @@ export class MotivosDiferenciaInventarioController {
   constructor(private readonly service: MotivosDiferenciaInventarioService) {}
 
   @Get()
-  findAll(@Req() req: Request, @Query('soloActivas') soloActivas?: string) {
+  findAll(
+    @Req() req: Request,
+    @Query() query: QueryMotivosDiferenciaInventarioDto,
+  ) {
     const user = req.user as { tenantId: string };
-    return this.service.findAll(user.tenantId, soloActivas === 'true');
+    return this.service.findAll(
+      user.tenantId,
+      query.soloActivas ?? false,
+      query.incluirEliminados,
+    );
   }
 
   @UseGuards(TenantAdminGuard)
@@ -56,7 +65,14 @@ export class MotivosDiferenciaInventarioController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as { tenantId: string };
-    return this.service.remove(user.tenantId, id);
+    const user = req.user as JwtUser;
+    return this.service.remove(user.tenantId!, user.id, id);
+  }
+
+  @UseGuards(TenantAdminGuard)
+  @Post(':id/restaurar')
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.service.restaurar(user.tenantId!, id);
   }
 }

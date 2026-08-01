@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -14,6 +15,8 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
+import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
+import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { GruposModificadoresService } from './grupos-modificadores.service';
 import { CreateGrupoModificadorDto } from './dto/create-grupo-modificador.dto';
 import { UpdateGrupoModificadorDto } from './dto/update-grupo-modificador.dto';
@@ -32,9 +35,9 @@ export class GruposModificadoresController {
   }
 
   @Get()
-  findAll(@Req() req: Request) {
+  findAll(@Req() req: Request, @Query() query: QueryIncluirEliminadosDto) {
     const { tenantId } = req.user as { tenantId: string };
-    return this.service.findAll(tenantId);
+    return this.service.findAll(tenantId, query.incluirEliminados);
   }
 
   @Get(':id')
@@ -75,7 +78,14 @@ export class GruposModificadoresController {
   @UseGuards(TenantAdminGuard)
   @HttpCode(204)
   remove(@Req() req: Request, @Param('id') id: string) {
-    const { tenantId } = req.user as { tenantId: string };
-    return this.service.remove(tenantId, id);
+    const user = req.user as JwtUser;
+    return this.service.remove(user.tenantId!, user.id, id);
+  }
+
+  @Post(':id/restaurar')
+  @UseGuards(TenantAdminGuard)
+  restaurar(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.service.restaurar(user.tenantId!, id);
   }
 }
