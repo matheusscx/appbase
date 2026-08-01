@@ -17,7 +17,6 @@ describe('TercerosService', () => {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
-    restore: jest.Mock;
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -30,7 +29,6 @@ describe('TercerosService', () => {
       create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       update: jest.fn(() => Promise.resolve({ affected: 1 })),
-      restore: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
       createQueryBuilder: jest.fn(),
     };
@@ -156,10 +154,10 @@ describe('TercerosService', () => {
 
       const restaurado = await service.restaurar(TENANT, TERCERO);
 
-      expect(repo.restore).toHaveBeenCalledWith({
-        id: TERCERO,
-        tenantId: TENANT,
-      });
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: TERCERO, tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(repo.findOneOrFail).toHaveBeenCalledWith({
         where: { id: TERCERO, tenantId: TENANT },
       });
@@ -173,7 +171,7 @@ describe('TercerosService', () => {
       await expect(service.restaurar(TENANT, TERCERO)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() un tercero vivo (no eliminado) es 404', async () => {
@@ -186,7 +184,7 @@ describe('TercerosService', () => {
       await expect(service.restaurar(TENANT, TERCERO)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
   });
 

@@ -30,7 +30,6 @@ type Repo = {
   create: jest.Mock;
   save: jest.Mock;
   update: jest.Mock;
-  restore: jest.Mock;
   softDelete: jest.Mock;
   createQueryBuilder: jest.Mock;
 };
@@ -47,7 +46,6 @@ function makeRepo(): Repo {
     create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
     update: jest.fn(() => Promise.resolve({ affected: 1 })),
-    restore: jest.fn(() => Promise.resolve({ affected: 1 })),
     softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
     createQueryBuilder: jest.fn(),
   };
@@ -269,7 +267,10 @@ describe('GarzonesService', () => {
 
       const restaurado = await service.restaurar(TENANT, 'g1');
 
-      expect(repo.restore).toHaveBeenCalledWith({ id: 'g1', tenantId: TENANT });
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 'g1', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(repo.findOneOrFail).toHaveBeenCalledWith({
         where: { id: 'g1', tenantId: TENANT },
       });
@@ -284,7 +285,7 @@ describe('GarzonesService', () => {
       await expect(service.restaurar(TENANT, 'g1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() un garzón vivo (no eliminado) es 404', async () => {
@@ -295,7 +296,7 @@ describe('GarzonesService', () => {
       await expect(service.restaurar(TENANT, 'g1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() el placeholder Mostrador cuando ya hay otro vivo es 400, no 500', async () => {
@@ -313,7 +314,7 @@ describe('GarzonesService', () => {
           eliminadoPor: USUARIO_ID,
         }),
       );
-      repo.restore.mockRejectedValueOnce(
+      repo.update.mockRejectedValueOnce(
         Object.assign(new Error('duplicate key value'), { code: '23505' }),
       );
 
@@ -335,7 +336,7 @@ describe('GarzonesService', () => {
       const otroError = Object.assign(new Error('conexión perdida'), {
         code: '08006',
       });
-      repo.restore.mockRejectedValueOnce(otroError);
+      repo.update.mockRejectedValueOnce(otroError);
 
       await expect(service.restaurar(TENANT, 'g1')).rejects.toBe(otroError);
     });

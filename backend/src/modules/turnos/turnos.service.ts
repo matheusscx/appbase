@@ -169,7 +169,13 @@ export class TurnosService {
       }
       throw e;
     }
-    await this.turnoRepo.restore({ id, tenantId });
+    // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+    // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
+    // borrado de persona (ver categorias.service.ts → restaurar()).
+    await this.turnoRepo.update(
+      { id, tenantId },
+      { eliminadoEl: null, eliminadoPor: null },
+    );
     const restaurado = await this.turnoRepo.findOneOrFail({
       where: { id, tenantId },
     });

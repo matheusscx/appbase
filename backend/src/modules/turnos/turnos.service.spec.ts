@@ -19,7 +19,6 @@ type Repo = {
   create: jest.Mock;
   save: jest.Mock;
   update: jest.Mock;
-  restore: jest.Mock;
   softDelete: jest.Mock;
   createQueryBuilder: jest.Mock;
 };
@@ -36,7 +35,6 @@ function makeRepo(): Repo {
     create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
     update: jest.fn(() => Promise.resolve({ affected: 1 })),
-    restore: jest.fn(() => Promise.resolve({ affected: 1 })),
     softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
     createQueryBuilder: jest.fn(),
   };
@@ -277,7 +275,10 @@ describe('TurnosService', () => {
 
       const restaurado = await service.restaurar(TENANT, 't1');
 
-      expect(repo.restore).toHaveBeenCalledWith({ id: 't1', tenantId: TENANT });
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 't1', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(repo.findOneOrFail).toHaveBeenCalledWith({
         where: { id: 't1', tenantId: TENANT },
       });
@@ -291,7 +292,7 @@ describe('TurnosService', () => {
       await expect(service.restaurar(TENANT, 't1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() un turno vivo (no eliminado) es 404', async () => {
@@ -300,7 +301,7 @@ describe('TurnosService', () => {
       await expect(service.restaurar(TENANT, 't1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     // Revisión final: `turnos` no tiene índice único de nombre en la base
@@ -326,7 +327,7 @@ describe('TurnosService', () => {
       await expect(service.restaurar(TENANT, 't1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
   });
 

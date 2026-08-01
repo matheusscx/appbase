@@ -119,7 +119,15 @@ export class CategoriasService {
     if (!categoria || !categoria.eliminadoEl || !categoria.eliminadoPor) {
       throw new NotFoundException(`Categoría ${id} no está en la papelera`);
     }
-    await this.categoriaRepo.restore({ id, tenantId });
+    // `restore()` NO sirve acá: solo limpia la `@DeleteDateColumn`, y dejar
+    // el `eliminado_por` viejo disfraza un borrado del sistema posterior
+    // como borrado de persona — o sea reabre por API justo lo que la regla
+    // del owner cierra (docs/features/papelera.md). Un solo `update()` con
+    // las dos columnas, no dos sentencias que puedan quedar a medias.
+    await this.categoriaRepo.update(
+      { id, tenantId },
+      { eliminadoEl: null, eliminadoPor: null },
+    );
     return this.categoriaRepo.findOneOrFail({ where: { id, tenantId } });
   }
 

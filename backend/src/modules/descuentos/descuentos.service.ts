@@ -305,7 +305,13 @@ export class DescuentosService {
         `Ya existe un descuento activo con el nombre "${descuento.nombre}". Renombrá el actual o el restaurado antes de continuar.`,
       );
     }
-    await this.descuentoRepo.restore({ id, tenantId });
+    // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+    // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
+    // borrado de persona (ver categorias.service.ts → restaurar()).
+    await this.descuentoRepo.update(
+      { id, tenantId },
+      { eliminadoEl: null, eliminadoPor: null },
+    );
     return this.descuentoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 

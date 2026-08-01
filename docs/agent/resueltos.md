@@ -1691,6 +1691,73 @@ siguen diferidos están en `pendientes.md`.
   `uuid-columns.invariant.spec.ts`— y se descartó: distinguir `i.eliminado_el` de
   `t.eliminado_el` pide parsear alias, o sea maquinaria nueva y frágil para una query.
 
+## Papelera — restaurar eliminados (2026-07-31)
+
+- [x] ~~**El listado de `impuestos` no filtra los borrados del sistema — el `OR` sin
+  parentizar**~~ (backend, `impuestos.service.ts`) — cerrado 2026-08-01. El `where` del
+  listado con `incluirEliminados` ahora va parentizado
+  (`'(i.tenant_id = :tenantId OR i.pais_id = :paisId)'`), así que el `andWhere` del filtro
+  de borrado-del-sistema alcanza a las dos ramas. Se descartó `isolateWhereStatements`:
+  es un flag global de la conexión y habría cambiado el SQL de todos los query builders
+  del repo para arreglar una query.
+  **Lo que realmente cerró el agujero no fue el paréntesis, fue el test.** El bloque e2e
+  "solo lo que borró una persona" cubría **2 de los 16 recursos** —`categorias` e
+  `items`— y esa muestra estaba elegida por **familia de borrado** (softDelete de TypeORM
+  vs SQL cruda), que es cómo borran, no por la forma del `WHERE`, que es dónde puede
+  fallar el filtro. `impuestos` es el **único** listado de los 16 con un `WHERE` de dos
+  ramas, y era el único roto. Ahora el bloque está parametrizado sobre los **16**
+  (`test/papelera.e2e-spec.ts`), con un guard de cobertura **derivado del esquema**: el
+  test cruza la lista contra las tablas que tienen `eliminado_por` en
+  `information_schema`, que es la columna que define la regla. Un conteo o una lista de
+  nombres escrita al lado solo se compara consigo misma —agregar el recurso 17 sin tocar
+  el spec pasaría en silencio—; contra la BD, agregar la columna a una tabla nueva rompe
+  el test hasta que alguien decida conscientemente si va a la papelera.
+  **Mutantes verificados, los dos:** (a) sacar los paréntesis con el e2e parametrizado
+  puesto → rojo **solo en `impuestos`**, verde en los otros 15 (que es la prueba de que
+  el diagnóstico era precedencia y no otra cosa); (b) el mismo mutante contra el unit
+  spec nuevo (`impuestos.service.spec.ts` → "el filtro de borrado-del-sistema se aplica a
+  las DOS ramas del OR") → rojo. Antes de ese unit test, el mutante pasaba en verde toda
+  la suite unitaria.
+  **Barrido para no repetir el error de medir un solo mecanismo:** los 10 fragmentos con
+  ` OR ` en `where`/`andWhere` del repo quedan parentizados, `orWhere()` no se usa en
+  ningún archivo, y `isolateWhereStatements` no está seteado en ninguna parte — o sea el
+  15/16 que reportaba la entrada era correcto y no quedan gemelos.
+
+- [x] ~~**`restaurar()` no limpia `eliminado_por`, y eso permite burlar la regla por
+  API**~~ (backend, los 16 recursos) — cerrado 2026-08-01. Los 16 `restaurar()` ahora
+  ponen las **dos** columnas en `NULL`. Dos técnicas, según la familia:
+  - **7 de SQL cruda** (`items`, `causas-merma`, `motivos-diferencia`,
+    `motivos-diferencia-inventario`, `grupos-modificadores`, `salones` —incluida la
+    cascada a `mesas`— y `mesas` suelta): `SET eliminado_el = NULL, eliminado_por = NULL`
+    en la sentencia que ya existía. `receta_extras_permitidos` y
+    `grupo_modificador_opciones` **no** llevan el cambio: verificado contra
+    `startup-pos.sql`, esas dos tablas no tienen columna `eliminado_por`. `mesas` sí la
+    tiene, y por eso la cascada de `restaurarSalon()` también la limpia.
+  - **9 de la familia `.restore()` de TypeORM** (`categorias`, `descuentos`, `recargos`,
+    `impuestos`, `terceros`, `cajones`, `garzones`, `turnos`, `impresoras`): `restore()`
+    **no servía** —solo nulea la `@DeleteDateColumn`—, así que pasaron a un
+    `update({ id, tenantId }, { eliminadoEl: null, eliminadoPor: null })`: una sola
+    sentencia con las dos columnas, no dos que puedan quedar a medias.
+  **Verificado contra la fuente antes de elegir el diseño, no supuesto:** TypeORM inyecta
+  el `eliminado_el IS NULL` de soft delete **solo** cuando
+  `expressionMap.queryType === 'select'` (`node_modules/typeorm/query-builder/QueryBuilder.js`,
+  `createWhereExpression()`), así que un `update()` sí alcanza una fila borrada. Si no
+  fuera así, el `update()` habría afectado 0 filas **en silencio** — la misma clase de
+  fallo mudo que costó una ronda entera en la Task 4.
+  **Test y mutantes:** el bloque e2e de la regla suma un segundo `it` por recurso —los
+  16— que corre la secuencia completa del backlog: crear → `DELETE` → `restaurar` →
+  **asertar contra la BD** que las dos columnas quedaron en `NULL` → borrado del sistema
+  sobre la misma fila → no aparece en la papelera y `restaurar` da 404. La aserción va
+  contra Postgres y no contra el JSON de la respuesta a propósito: varios de los 16 no
+  devuelven `eliminadoPor`, así que un test que mirara solo el cuerpo pasaría con la
+  columna sucia. Mutante verificado en **las dos** familias por separado —volver
+  `categorias` a `restore()` y sacarle `eliminado_por = NULL` a `causas-merma`—: rojo en
+  los dos, verde en los otros 14.
+  **Efecto lateral bueno:** las dos pantallas ya cableadas parchean
+  `eliminadoEl`/`eliminadoPorNombre` a `null` en local tras restaurar
+  (`items.vue`, `categorias.vue`); ese parche optimista pasó de divergir del backend a
+  coincidir con él.
+
 ## Features diferidas
 
 - [x] ~~**Log de cambios reversible ("deshacer") — dirección del owner, sin

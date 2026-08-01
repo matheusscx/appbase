@@ -340,7 +340,8 @@ export class SalonesService {
       await this.dataSource.query(
         `WITH restaurado AS (
            UPDATE salones
-              SET eliminado_el = NULL, actualizado_el = NOW()
+              SET eliminado_el = NULL, eliminado_por = NULL,
+                  actualizado_el = NOW()
             WHERE salon_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
               AND eliminado_por IS NOT NULL
            RETURNING salon_id,
@@ -349,7 +350,8 @@ export class SalonesService {
          ),
          mesas_restauradas AS (
            UPDATE mesas
-              SET eliminado_el = NULL, actualizado_el = NOW()
+              SET eliminado_el = NULL, eliminado_por = NULL,
+                  actualizado_el = NOW()
             WHERE salon_id = $1 AND tenant_id = $2
               AND eliminado_el = (SELECT eliminado_el_previo FROM restaurado)
            RETURNING mesa_id
@@ -436,7 +438,8 @@ export class SalonesService {
     const rows = unwrap<{ mesa_id: string }>(
       await this.dataSource.query(
         `UPDATE mesas
-            SET eliminado_el = NULL, actualizado_el = NOW()
+            SET eliminado_el = NULL, eliminado_por = NULL,
+                actualizado_el = NOW()
           WHERE mesa_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
             AND eliminado_por IS NOT NULL
           RETURNING mesa_id`,

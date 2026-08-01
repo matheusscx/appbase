@@ -101,54 +101,40 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
 
 Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`](../features/papelera.md).
 
-⛔ **La decisión del owner "solo lo que borró una persona" está implementada A MEDIAS.**
-Las dos primeras entradas de abajo son los agujeros, verificados contra Postgres real el
-2026-08-01 por la re-revisión de la ola de fixes final. **La pantalla de impuestos no debe
-cablearse hasta cerrarlas**: la segunda reabre la doble tributación de
-[ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md).
+✅ **La decisión del owner "solo lo que borró una persona" quedó implementada entera el
+2026-08-01.** Los dos agujeros —el `OR` sin parentizar del listado de `impuestos` y el
+`eliminado_por` que `restaurar()` no limpiaba— están cerrados, con el e2e de la regla
+corriendo sobre los **16** recursos en vez de sobre 2. Se levanta el ⛔ que impedía
+cablear la pantalla de impuestos. Detalle y mutantes: [`resueltos.md`](resueltos.md).
 
-El owner decidió el 2026-08-01 cerrar la feature acá y dejarlas anotadas.
-
-- [ ] **El listado de `impuestos` no filtra los borrados del sistema — el `OR` sin
-  parentizar** (backend, `impuestos.service.ts:76-90`) — la query arma
-  `qb.where('i.tenant_id = :tenantId OR i.pais_id = :paisId')` y después
-  `qb.andWhere('(i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)')`. **TypeORM no
-  parentiza los `where`/`andWhere`** salvo con `isolateWhereStatements`, que no está
-  seteado, así que el SQL emitido es `WHERE tenant_id = $1 OR pais_id = $2 AND (...)` y
-  `AND` liga más fuerte: **las filas del tenant se saltan el filtro entero**.
-  **Reproducido dos veces, la segunda sobre BD recién sembrada:** crear un impuesto por
-  API, marcarle `eliminado_el` sin `eliminado_por` (imitando al seeder), y
-  `GET /impuestos?incluirEliminados=true` lo devuelve. Prueba de que es precedencia y no
-  otra cosa: el mismo escenario sobre un impuesto de **país** (la otra rama del `OR`) sí
-  lo esconde. Los otros 15 recursos se verificaron uno por uno por API: **15/16 correctos,
-  solo `impuestos` falla**, y es justo el que motivó la decisión.
-  **Cierre:** parentizar la condición del `OR`, o `isolateWhereStatements`, o mover el
-  filtro dentro de cada rama.
-
-- [ ] **`restaurar()` no limpia `eliminado_por`, y eso permite burlar la regla por API**
-  (backend, los 16 recursos — `items.service.ts:1943`, `salones.service.ts:343`,
-  `categorias.service.ts:121` vía `.restore()`, y los demás) — ninguno pone
-  `eliminado_por = NULL` al revivir. Como `remapImpuestosOficialesDuplicados`
-  (`seeder.service.ts:2414`) solo escribe `eliminado_el`, un `eliminado_por` viejo
-  sobrevive y **disfraza el borrado del sistema como borrado de persona**.
-  **Secuencia ejecutada de punta a punta sobre el caso que motivó la decisión:**
-  `POST /impuestos` ("IVA casero 19", 0.19) → `DELETE` (queda `eliminado_por = admin.paris`)
-  → `POST /restaurar` (201; limpia `eliminado_el`, **deja `eliminado_por`**) → reiniciar el
-  backend, el seeder soft-deletea el duplicado → `GET ?incluirEliminados=true` lo muestra
-  → `POST /restaurar` **201, restaurado**. El duplicado vuelve a la vida, y sin sus
-  `item_impuestos` —que el seeder borró con `DELETE` físico—, o sea reabre el 38% de
-  ADR-018 con tres llamadas públicas y un reinicio.
-  **Cierre:** `SET eliminado_el = NULL, eliminado_por = NULL` en los 16 `restaurar()`.
-
-- [ ] **Los unit tests del listado con `incluirEliminados` no prueban nada** (backend, 12
-  `qbMock` de la familia TypeORM) — los mocks agregados son
-  `andWhere: jest.fn().mockReturnThis()` **sin ninguna aserción sobre el argumento**.
-  Medido: borrando el `.andWhere(...)` de `categorias.service.ts:53` la suite unitaria
-  **sigue 100% verde**; solo cae el e2e. Y el e2e de esta regla cubre 2 de 16
-  (`categorias` e `items`). **Por eso el gate dio verde con las dos entradas de arriba
-  adentro** — es el octavo test de esta feature que pasa sin probar lo que su nombre dice.
-  **Cierre:** asertar los argumentos de `andWhere` en los unit tests de la familia, o
-  parametrizar el e2e de "borrado del sistema" sobre los 16 (es el mismo test repetido).
+- [ ] **Los unit tests del listado con `incluirEliminados` no prueban nada** (backend,
+  14 de los 16 recursos) — los mocks agregados son `andWhere: jest.fn().mockReturnThis()`
+  **sin ninguna aserción sobre el argumento**. Medido: borrando el `.andWhere(...)` de
+  `categorias.service.ts:53` la suite unitaria **sigue 100% verde**; solo cae el e2e.
+  **Por eso el gate dio verde con los dos agujeros de arriba adentro** — es el octavo test
+  de esta feature que pasa sin probar lo que su nombre dice.
+  ⚠️ **Números corregidos el 2026-08-01** (la entrada original decía "12 `qbMock`" y "11
+  restantes", los dos mal — el conteo se había hecho por tipo de mock, no por recurso).
+  Medido con `grep -l 'eliminado_por IS NOT NULL' **/*.spec.ts`: **solo 2 de los 16
+  specs asertan el filtro** (`impuestos`, desde hoy, e `items`, que ya lo hacía). Los
+  **14 restantes** se parten en dos familias, y **no comparten la técnica**:
+  - **8 con `qbMock` de TypeORM** (`categorias`, `descuentos`, `recargos`, `terceros`,
+    `cajones`, `garzones`, `turnos`, `impresoras`): se cierran asertando el argumento de
+    `where`/`andWhere` **y el orden entre ellos** — `where()` resetea
+    `expressionMap.wheres`, así que un `andWhere` que quede arriba se descarta entero y
+    `toHaveBeenCalledWith`, que es agnóstico al orden, no lo ve. Ver el bloque
+    `findAll con incluirEliminados` de `impuestos.service.spec.ts` como molde.
+  - **6 con SQL cruda** (`causas-merma`, `motivos-diferencia`,
+    `motivos-diferencia-inventario`, `grupos-modificadores`, `salones` y sus `mesas`):
+    se cierran asertando la subcadena en el SQL que se le pasa al `dataSource.query`
+    mockeado, como ya hace `items.service.spec.ts`. ⚠️ Cuidado con el modo de falla ya
+    conocido: un `toContain` puede matchear un **comentario** `--` del mismo template en
+    vez de la cláusula funcional (pasó en la Task 4 de esta feature) — el mutante va
+    acotado a la cláusula, no al archivo.
+  ℹ️ **Mitad cerrada el 2026-08-01:** la otra vía —parametrizar el e2e de "borrado del
+  sistema" sobre los 16— ya está hecha, así que hoy la conducta **sí** está cubierta de
+  punta a punta en los 16. Lo que sigue abierto es la red barata: sin aserción unitaria,
+  un `andWhere` borrado no se ve hasta levantar Postgres.
 
 - [ ] **`pendientes.md` clasifica mal a `grupos-modificadores.vue` para el fix de la
   carrera** (doc, la entrada de las 13 pantallas, más abajo) — dice que es la única

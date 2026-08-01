@@ -206,20 +206,20 @@ capturan el error igual que los otros cuatro.
 
 ### Solo lo que borró una persona
 
-> ⚠️ **La regla de abajo está implementada a medias. No confíes en ella todavía.**
-> Verificado contra Postgres el 2026-08-01, con dos agujeros abiertos:
+> ✅ **Implementada entera y verificada contra Postgres el 2026-08-01**, en las dos
+> puertas y en los 16 recursos. Se llegó acá cerrando dos agujeros que la primera
+> entrega dejó abiertos, los dos anotados por si vuelven a aparecer en código nuevo:
 >
-> 1. **El listado de `impuestos` no filtra** — el `OR` de tenant/país no está
->    parentizado y `AND` liga más fuerte, así que las filas del tenant se saltan la
->    condición entera. Es el recurso que motivó la decisión.
-> 2. **`restaurar()` no limpia `eliminado_por` en ninguno de los 16**, así que
->    borrar → restaurar → que el sistema lo borre deja un `eliminado_por` viejo que
->    disfraza el borrado del sistema como borrado de persona.
+> 1. **El listado de `impuestos` no filtraba** — el `OR` de tenant/país no estaba
+>    parentizado y `AND` liga más fuerte, así que las filas del tenant se saltaban
+>    la condición entera. TypeORM no parentiza los `where`/`andWhere` por su cuenta.
+> 2. **`restaurar()` dejaba el `eliminado_por` viejo** — con la fila ya viva, ese
+>    autor sobreviviente disfrazaba el siguiente borrado del sistema como borrado de
+>    persona, y volvía a hacerlo restaurable. En `impuestos` eso reabría la doble
+>    tributación de [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md).
 >
-> Los dos están en [`pendientes.md`](../agent/pendientes.md) con la evidencia y la
-> secuencia para reproducirlos. **La pantalla de impuestos no debe cablearse hasta
-> que se cierren**, porque el segundo camino reabre la doble tributación de
-> [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md).
+> El e2e de esta regla pasó de cubrir 2 recursos a cubrir los **16**, con un test
+> que falla si la lista deja de nombrarlos a todos.
 
 **Decisión del owner (2026-08):** la papelera solo expone y restaura filas con
 `eliminado_por` **no nulo**. Aplica a los 16 recursos, en las dos puertas —el
@@ -233,6 +233,13 @@ especiales por recurso:
   NOT NULL AND eliminado_por IS NOT NULL`. Si falta cualquiera de los dos, es el
   mismo 404 "no está en la papelera" que da un id inexistente — una sola regla,
   sin rama que distinga "no existe" de "lo borró el sistema".
+- **`restaurar()` limpia las DOS columnas**, no solo `eliminado_el`. Es la mitad
+  que se olvida: como la regla se decide mirando `eliminado_por`, un autor que
+  sobreviva al restore hace que el **siguiente** borrado del sistema sobre esa
+  misma fila parezca borrado de persona, y vuelva a ser visible y restaurable.
+  Por eso ninguno de los 9 recursos de la familia TypeORM usa `restore()`, que
+  solo nulea la `@DeleteDateColumn`: todos hacen
+  `update({ id, tenantId }, { eliminadoEl: null, eliminadoPor: null })`.
 
 **Por qué:** el seeder soft-deletea filas como corrección del sistema —
 `remapImpuestosOficialesDuplicados` (`seeder.service.ts`) borra impuestos

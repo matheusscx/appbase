@@ -603,7 +603,8 @@ export class GruposModificadoresService {
         await this.dataSource.query(
           `WITH restaurado AS (
              UPDATE grupos_modificadores
-                SET eliminado_el = NULL, actualizado_el = NOW()
+                SET eliminado_el = NULL, eliminado_por = NULL,
+                    actualizado_el = NOW()
               WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
                 AND eliminado_por IS NOT NULL
              RETURNING grupo_modificador_id,

@@ -19,7 +19,6 @@ describe('ImpuestosService', () => {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
-    restore: jest.Mock;
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -51,7 +50,6 @@ describe('ImpuestosService', () => {
       create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       update: jest.fn(() => Promise.resolve({ affected: 1 })),
-      restore: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
       createQueryBuilder: jest.fn(() => qbMock),
     };
@@ -250,10 +248,14 @@ describe('ImpuestosService', () => {
 
       const restaurado = await service.restaurar(TENANT, IMP);
 
-      expect(repo.restore).toHaveBeenCalledWith({
-        id: IMP,
-        tenantId: TENANT,
-      });
+      // Las DOS columnas: si `eliminadoPor` sobrevive al restore, el próximo
+      // borrado del seeder (`remapImpuestosOficialesDuplicados`) queda
+      // disfrazado de borrado de persona y el duplicado de IVA se puede
+      // restaurar por API — la doble tributación de ADR-018 otra vez.
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: IMP, tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(repo.findOneOrFail).toHaveBeenCalledWith({
         where: { id: IMP, tenantId: TENANT },
       });
@@ -267,7 +269,7 @@ describe('ImpuestosService', () => {
       await expect(service.restaurar(TENANT, IMP)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() un impuesto vivo (no eliminado) es 404', async () => {
@@ -280,7 +282,7 @@ describe('ImpuestosService', () => {
       await expect(service.restaurar(TENANT, IMP)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
   });
 
@@ -319,6 +321,61 @@ describe('ImpuestosService', () => {
         eliminadoPorNombre: 'admin.paris',
         origen: 'personalizado',
       });
+    });
+
+    // El bug real que este bloque no veía: los mocks de `where`/`andWhere`
+    // eran `mockReturnThis()` sin aserción sobre el argumento, así que el
+    // listado podía emitir cualquier WHERE y la suite seguía verde.
+    //
+    // Este WHERE tiene DOS formas de perder el filtro, y las dos son
+    // refactors que alguien haría de buena fe:
+    //  1. sacarle los paréntesis al `OR` (el bug que existía) — `AND` liga
+    //     más fuerte, así que quedaría
+    //     `tenant_id = $1 OR (pais_id = $2 AND <filtro>)` y las filas del
+    //     tenant se saltarían el filtro entero;
+    //  2. subir el `andWhere` arriba del `if (paisId)` para "agrupar la
+    //     construcción del where" — `SelectQueryBuilder.where()` resetea
+    //     `expressionMap.wheres`, así que descartaría el filtro completo.
+    // Se asertan las dos: el argumento Y el orden.
+    it('el filtro de borrado-del-sistema se aplica a las DOS ramas del OR', async () => {
+      await service.findAll(TENANT, true);
+
+      expect(qbMock.where).toHaveBeenCalledWith(
+        '(i.tenant_id = :tenantId OR i.pais_id = :paisId)',
+        { tenantId: TENANT, paisId: PAIS },
+      );
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        '(i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)',
+      );
+      // Mutante 2: `where()` borra lo acumulado, así que el filtro tiene que
+      // aplicarse DESPUÉS. Sin esta aserción, moverlo arriba deja el listado
+      // sin filtro y los dos `toHaveBeenCalledWith` de arriba —que son
+      // agnósticos al orden— siguen en verde.
+      expect(qbMock.andWhere.mock.invocationCallOrder[0]).toBeGreaterThan(
+        qbMock.where.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('sin país (tenant sin provincia) el filtro se sigue aplicando sobre la rama única', async () => {
+      dataSource.query.mockResolvedValue([]);
+
+      await service.findAll(TENANT, true);
+
+      // Subcadena, no igualdad: parentizar una rama única es SQL idéntico, y
+      // un test que se pone rojo sin que cambie la conducta entrena a
+      // ignorarlo. Pero el scoping por tenant SÍ se asserta —no alcanza con
+      // `expect.any(String)`—: un `where('1=1', { tenantId })` pasaría esa
+      // versión laxa en verde y sería una fuga multi-tenant.
+      expect(qbMock.where).toHaveBeenCalledWith(
+        expect.stringContaining('i.tenant_id = :tenantId'),
+        { tenantId: TENANT },
+      );
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        '(i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)',
+      );
+      expect(qbMock.andWhere.mock.invocationCallOrder[0]).toBeGreaterThan(
+        qbMock.where.mock.invocationCallOrder[0],
+      );
     });
   });
 });

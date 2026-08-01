@@ -42,7 +42,6 @@ describe('RecargosService', () => {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
-    restore: jest.Mock;
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -83,7 +82,6 @@ describe('RecargosService', () => {
       create: jest.fn((data: Record<string, unknown>) => data),
       save: jest.fn((e: unknown) => Promise.resolve(e)),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
-      restore: jest.fn().mockResolvedValue({ affected: 1 }),
       softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
       createQueryBuilder: jest.fn(() => qbMock),
     };
@@ -390,10 +388,10 @@ describe('RecargosService', () => {
 
       const restaurado = await service.restaurar(TENANT, 'r1');
 
-      expect(recargoRepoMock.restore).toHaveBeenCalledWith({
-        id: 'r1',
-        tenantId: TENANT,
-      });
+      expect(recargoRepoMock.update).toHaveBeenCalledWith(
+        { id: 'r1', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(recargoRepoMock.findOneOrFail).toHaveBeenCalledWith({
         where: { id: 'r1', tenantId: TENANT },
       });
@@ -407,7 +405,7 @@ describe('RecargosService', () => {
       await expect(service.restaurar(TENANT, 'r1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(recargoRepoMock.restore).not.toHaveBeenCalled();
+      expect(recargoRepoMock.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() un recargo vivo (no eliminado) es 404', async () => {
@@ -420,7 +418,7 @@ describe('RecargosService', () => {
       await expect(service.restaurar(TENANT, 'r1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(recargoRepoMock.restore).not.toHaveBeenCalled();
+      expect(recargoRepoMock.update).not.toHaveBeenCalled();
     });
 
     // Revisión final: `recargos` no tiene índice único de nombre en la base
@@ -442,7 +440,7 @@ describe('RecargosService', () => {
       await expect(service.restaurar(TENANT, 'r1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(recargoRepoMock.restore).not.toHaveBeenCalled();
+      expect(recargoRepoMock.update).not.toHaveBeenCalled();
     });
   });
 

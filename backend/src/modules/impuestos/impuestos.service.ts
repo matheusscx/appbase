@@ -71,8 +71,15 @@ export class ImpuestosService {
         .addSelect('u.nombre_usuario', 'i_eliminado_por_nombre')
         .withDeleted()
         .orderBy('i.nombre', 'ASC');
+      // ⚠️ Los paréntesis de este `OR` NO son cosméticos. TypeORM concatena
+      // `where`/`andWhere` con `AND` **sin parentizar cada uno** (salvo con
+      // `isolateWhereStatements`, que no está activado), así que sin ellos el
+      // SQL emitido es `WHERE tenant_id = $1 OR pais_id = $2 AND (...)` y el
+      // `AND` liga más fuerte: las filas del tenant se saltaban el filtro de
+      // abajo entero. Este es el único listado de los 16 recursos de la
+      // papelera con un WHERE de dos ramas, y fue el único que falló.
       if (paisId) {
-        qb.where('i.tenant_id = :tenantId OR i.pais_id = :paisId', {
+        qb.where('(i.tenant_id = :tenantId OR i.pais_id = :paisId)', {
           tenantId,
           paisId,
         });
@@ -160,7 +167,17 @@ export class ImpuestosService {
     if (!impuesto || !impuesto.eliminadoEl || !impuesto.eliminadoPor) {
       throw new NotFoundException(`Impuesto ${id} no está en la papelera`);
     }
-    await this.impuestoRepo.restore({ id, tenantId });
+    // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+    // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
+    // borrado de persona (ver categorias.service.ts → restaurar()). Acá es lo
+    // más caro de todos los recursos: el borrado del sistema que se
+    // disfrazaría es el de `remapImpuestosOficialesDuplicados`, o sea
+    // restaurar el duplicado de IVA reabre la doble tributación del 38%
+    // (ADR-018).
+    await this.impuestoRepo.update(
+      { id, tenantId },
+      { eliminadoEl: null, eliminadoPor: null },
+    );
     return this.impuestoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 }

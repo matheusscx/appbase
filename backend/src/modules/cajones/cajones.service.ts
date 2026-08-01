@@ -118,7 +118,13 @@ export class CajonesService {
       throw new NotFoundException(`Cajón ${id} no está en la papelera`);
     }
     try {
-      await this.cajonRepo.restore({ id, tenantId });
+      // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+      // viejo sobreviviría y disfrazaría un borrado del sistema posterior
+      // como borrado de persona (ver categorias.service.ts → restaurar()).
+      await this.cajonRepo.update(
+        { id, tenantId },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
     } catch (e) {
       // 23505 = unique_violation. `ux_cajones_tenant_nombre` es parcial
       // (WHERE eliminado_el IS NULL): mientras el cajón estaba borrado nadie

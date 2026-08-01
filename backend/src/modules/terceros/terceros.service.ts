@@ -109,7 +109,13 @@ export class TercerosService {
     if (!tercero || !tercero.eliminadoEl || !tercero.eliminadoPor) {
       throw new NotFoundException(`Tercero ${id} no está en la papelera`);
     }
-    await this.terceroRepo.restore({ id, tenantId });
+    // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+    // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
+    // borrado de persona (ver categorias.service.ts → restaurar()).
+    await this.terceroRepo.update(
+      { id, tenantId },
+      { eliminadoEl: null, eliminadoPor: null },
+    );
     return this.terceroRepo.findOneOrFail({ where: { id, tenantId } });
   }
 }

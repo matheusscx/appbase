@@ -18,7 +18,6 @@ describe('CategoriasService', () => {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
-    restore: jest.Mock;
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -32,7 +31,6 @@ describe('CategoriasService', () => {
       create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       update: jest.fn(() => Promise.resolve({ affected: 1 })),
-      restore: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
       createQueryBuilder: jest.fn(),
     };
@@ -194,10 +192,13 @@ describe('CategoriasService', () => {
 
       const restaurada = await service.restaurar(TENANT, CAT);
 
-      expect(repo.restore).toHaveBeenCalledWith({
-        id: CAT,
-        tenantId: TENANT,
-      });
+      // Las DOS columnas: dejar `eliminadoPor` con el valor viejo hace que un
+      // borrado del sistema posterior parezca borrado de persona, y eso
+      // reabre por API lo que la regla del owner cierra.
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: CAT, tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(repo.findOneOrFail).toHaveBeenCalledWith({
         where: { id: CAT, tenantId: TENANT },
       });
@@ -212,7 +213,7 @@ describe('CategoriasService', () => {
       await expect(service.restaurar(TENANT, CAT)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() una categoría viva (no eliminada) es 404', async () => {
@@ -225,7 +226,7 @@ describe('CategoriasService', () => {
       await expect(service.restaurar(TENANT, CAT)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
   });
 

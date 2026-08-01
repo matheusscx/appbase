@@ -235,7 +235,8 @@ export class MotivosDiferenciaInventarioService {
       const rows = unwrap<MotivoDiferenciaInventarioRowConEliminado>(
         await this.dataSource.query(
           `UPDATE motivo_diferencia_inventario
-              SET eliminado_el = NULL, actualizado_el = NOW()
+              SET eliminado_el = NULL, eliminado_por = NULL,
+                  actualizado_el = NOW()
             WHERE motivo_diferencia_inventario_id = $1 AND tenant_id = $2
               AND eliminado_el IS NOT NULL AND eliminado_por IS NOT NULL
           RETURNING motivo_diferencia_inventario_id, nombre, activo, es_fijo,

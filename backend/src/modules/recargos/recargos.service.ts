@@ -297,7 +297,13 @@ export class RecargosService {
         `Ya existe un recargo activo con el nombre "${recargo.nombre}". Renombrá el actual o el restaurado antes de continuar.`,
       );
     }
-    await this.recargoRepo.restore({ id, tenantId });
+    // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+    // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
+    // borrado de persona (ver categorias.service.ts → restaurar()).
+    await this.recargoRepo.update(
+      { id, tenantId },
+      { eliminadoEl: null, eliminadoPor: null },
+    );
     return this.recargoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 

@@ -1941,7 +1941,8 @@ export class ItemsService {
       await this.dataSource.query(
         `WITH restaurado AS (
            UPDATE items
-              SET eliminado_el = NULL, actualizado_el = NOW()
+              SET eliminado_el = NULL, eliminado_por = NULL,
+                  actualizado_el = NOW()
             WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
               AND eliminado_por IS NOT NULL
            RETURNING item_id,

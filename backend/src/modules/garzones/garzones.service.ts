@@ -180,7 +180,13 @@ export class GarzonesService {
       throw new NotFoundException(`Garzón ${id} no está en la papelera`);
     }
     try {
-      await this.garzonRepo.restore({ id, tenantId });
+      // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+      // viejo sobreviviría y disfrazaría un borrado del sistema posterior
+      // como borrado de persona (ver categorias.service.ts → restaurar()).
+      await this.garzonRepo.update(
+        { id, tenantId },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
     } catch (e) {
       // 23505 = unique_violation. `uq_garzones_mostrador_tenant` es parcial
       // (WHERE es_placeholder = true AND eliminado_el IS NULL): un solo

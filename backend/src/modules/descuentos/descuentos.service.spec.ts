@@ -42,7 +42,6 @@ describe('DescuentosService', () => {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
-    restore: jest.Mock;
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -83,7 +82,6 @@ describe('DescuentosService', () => {
       create: jest.fn((data: Record<string, unknown>) => data),
       save: jest.fn((e: unknown) => Promise.resolve(e)),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
-      restore: jest.fn().mockResolvedValue({ affected: 1 }),
       softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
       createQueryBuilder: jest.fn(() => qbMock),
     };
@@ -417,10 +415,10 @@ describe('DescuentosService', () => {
 
       const restaurado = await service.restaurar(TENANT, 'd1');
 
-      expect(descuentoRepoMock.restore).toHaveBeenCalledWith({
-        id: 'd1',
-        tenantId: TENANT,
-      });
+      expect(descuentoRepoMock.update).toHaveBeenCalledWith(
+        { id: 'd1', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(descuentoRepoMock.findOneOrFail).toHaveBeenCalledWith({
         where: { id: 'd1', tenantId: TENANT },
       });
@@ -434,7 +432,7 @@ describe('DescuentosService', () => {
       await expect(service.restaurar(TENANT, 'd1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(descuentoRepoMock.restore).not.toHaveBeenCalled();
+      expect(descuentoRepoMock.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() un descuento vivo (no eliminado) es 404', async () => {
@@ -447,7 +445,7 @@ describe('DescuentosService', () => {
       await expect(service.restaurar(TENANT, 'd1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(descuentoRepoMock.restore).not.toHaveBeenCalled();
+      expect(descuentoRepoMock.update).not.toHaveBeenCalled();
     });
 
     // Revisión final: `descuentos` no tiene índice único de nombre en la
@@ -469,7 +467,7 @@ describe('DescuentosService', () => {
       await expect(service.restaurar(TENANT, 'd1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(descuentoRepoMock.restore).not.toHaveBeenCalled();
+      expect(descuentoRepoMock.update).not.toHaveBeenCalled();
     });
   });
 

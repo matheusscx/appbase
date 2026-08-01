@@ -4,6 +4,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { unwrap } from '../src/common/utils/pg-returning.util';
 
 // Task 2 de la feature "papelera": categorías es la entidad de referencia —
 // familia TypeORM, sin nombre único, sin colaterales. Este spec es el patrón
@@ -20,6 +21,14 @@ const ADMIN_PASS = 'admin';
 // DELETE como en restaurar.
 const VENDEDOR_EMAIL = 'vendedor@paris.cl';
 const VENDEDOR_PASS = 'admin';
+
+// Fixtures del seed compartidas por varios describes de este archivo.
+const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+// 'directo' (descuento) y 'general' (recargo): los únicos tipos de regla del
+// seed que no exigen tramos/metodoPagoIds/fechas — solo `valor` en el caso de
+// 'general'. Minimizan el payload de creación.
+const DESCUENTO_DIRECTO_TIPO_ID = '550e8400-e29b-41d4-a716-446655440337';
+const RECARGO_GENERAL_TIPO_ID = '550e8400-e29b-41d4-a716-446655440122';
 
 interface TokenResponse {
   access_token: string;
@@ -184,12 +193,21 @@ describe('Papelera (e2e) — categorías, patrón de referencia', () => {
 // `UPDATE` directo (sin pasar por `DELETE /api/...`, que siempre setea
 // `eliminado_por` al usuario autenticado) para no depender de que el seed
 // produzca un duplicado de IVA real en el momento exacto de correr el test.
-// Dos familias, mismo criterio, código distinto: `categorias` (softDelete()
-// de TypeORM) e `items` (SQL crudo).
+//
+// ⚠️ **Corregido el 2026-08-01.** Este bloque cubría 2 de los 16 recursos
+// —`categorias` e `items`, una por familia de borrado— y esa muestra fue
+// exactamente el agujero: el criterio para elegirlos fue la familia (cómo
+// borran), no la forma del `WHERE` (dónde puede fallar el filtro). El único
+// recurso cuyo listado arma un `WHERE` de **dos ramas** es `impuestos`
+// (tenant OR país), y era el único que se saltaba el filtro entero — sin
+// ningún test que lo viera. Ahora corre sobre los 16: la familia no es la
+// propiedad que decide quién puede fallar.
 describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona', () => {
   let app: INestApplication<App>;
   let ds: DataSource;
   let tokenAdmin: string;
+  let salonParaMesaId: string;
+  let itemParaOpcionId: string;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -205,69 +223,405 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
 
     ds = app.get(DataSource);
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+
+    // `mesas` no tiene endpoint de creación propio ni listado propio: cuelga
+    // de un salón, que tiene que quedar VIVO para que el listado de la
+    // papelera llegue hasta la mesa.
+    salonParaMesaId = await crearPorApi('salones', {
+      nombre: `Salón contenedor borrado-sistema E2E ${Date.now()}`,
+    });
+    // `grupos-modificadores` exige al menos una opción válida: un producto
+    // vivo del catálogo.
+    itemParaOpcionId = await crearPorApi('items', {
+      nombre: `Opción borrado-sistema E2E ${Date.now()}`,
+      precioBase: '500',
+      monedaId: CLP_MONEDA_ID,
+      tipo: 'producto',
+      unidadMedida: 'unidad',
+      stock: '10',
+      costo: '500',
+    });
   }, 60000);
 
   afterAll(async () => {
     await app.close();
   });
 
-  it('categorías (familia softDelete): una fila borrada sin eliminado_por no aparece en la papelera ni se puede restaurar', async () => {
-    const resCrear = await request(app.getHttpServer())
-      .post('/api/categorias')
+  async function crearPorApi(
+    path: string,
+    body: Record<string, unknown>,
+    idField = 'id',
+  ): Promise<string> {
+    const res = await request(app.getHttpServer())
+      .post(`/api/${path}`)
       .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({ nombre: `Categoría borrado-sistema E2E ${Date.now()}` });
-    expect(resCrear.status).toBe(201);
-    const id = (resCrear.body as CategoriaItem).id;
+      .send(body);
+    expect(res.status).toBe(201);
+    const id = (res.body as Record<string, string>)[idField];
+    expect(id).toBeDefined();
+    return id;
+  }
 
-    await ds.query(
-      `UPDATE categorias SET eliminado_el = NOW() WHERE categoria_id = $1`,
-      [id],
+  /** ¿El id aparece en un listado plano (la forma de 14 de los 16)? */
+  async function enListadoPlano(
+    path: string,
+    id: string,
+    idField = 'id',
+  ): Promise<boolean> {
+    const res = await request(app.getHttpServer())
+      .get(`/api/${path}?incluirEliminados=true`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+    return (res.body as Record<string, string>[]).some(
+      (f) => f[idField] === id,
     );
+  }
 
-    const listado = await request(app.getHttpServer())
-      .get('/api/categorias?incluirEliminados=true')
-      .set('Authorization', `Bearer ${tokenAdmin}`);
-    expect(listado.status).toBe(200);
-    expect(
-      (listado.body as CategoriaItem[]).find((c) => c.id === id),
-    ).toBeUndefined();
+  interface RecursoPapelera {
+    nombre: string;
+    /** Prefijo de `POST /api/<path>/:id/restaurar`. */
+    path: string;
+    tabla: string;
+    pk: string;
+    /** Devuelve el id Y el nombre único: `items` necesita el nombre para
+     *  buscar en un listado paginado (ver su `enPapelera`). */
+    crear: () => Promise<{ id: string; nombreFila: string }>;
+    /** Default: listado plano de `path` buscando por `id`. */
+    enPapelera?: (id: string, nombreFila: string) => Promise<boolean>;
+  }
 
-    const resRestaurar = await request(app.getHttpServer())
-      .post(`/api/categorias/${id}/restaurar`)
-      .set('Authorization', `Bearer ${tokenAdmin}`);
-    expect(resRestaurar.status).toBe(404);
+  const sufijo = () =>
+    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  /**
+   * Crea la fila con un nombre único y devuelve id + nombre. El nombre se
+   * genera acá y no dentro de cada `crearBody` para que la fila sepa con qué
+   * nombre quedó: sin eso, un listado paginado solo se puede consultar por
+   * página y una aserción de ausencia se cumple sola al pasar de página 1.
+   */
+  async function crearFila(
+    path: string,
+    etiqueta: string,
+    body: (nombre: string) => Record<string, unknown>,
+    idField = 'id',
+  ): Promise<{ id: string; nombreFila: string }> {
+    const nombreFila = `${etiqueta} borrado-sistema E2E ${sufijo()}`;
+    const id = await crearPorApi(path, body(nombreFila), idField);
+    return { id, nombreFila };
+  }
+
+  const recursos: RecursoPapelera[] = [
+    {
+      nombre: 'categorias',
+      path: 'categorias',
+      tabla: 'categorias',
+      pk: 'categoria_id',
+      crear: () => crearFila('categorias', 'Categoría', (n) => ({ nombre: n })),
+    },
+    {
+      nombre: 'items',
+      path: 'items',
+      tabla: 'items',
+      pk: 'item_id',
+      crear: () =>
+        crearFila('items', 'Item', (n) => ({
+          nombre: n,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+        })),
+      // El único listado paginado de los 16, y por eso el único que NO puede
+      // asertar ausencia sobre una página: ordena por nombre con LIMIT, así
+      // que en cuanto el tenant pase de 100 ítems —y cada corrida local crea
+      // ítems— el buscado cae fuera de la página 1 y la aserción se cumple
+      // sola. Se filtra por su nombre único para que el conjunto sea de 1.
+      enPapelera: async (id, nombreFila) => {
+        const res = await request(app.getHttpServer())
+          .get(
+            `/api/items?incluirEliminados=true&search=${encodeURIComponent(nombreFila)}`,
+          )
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+        expect(res.status).toBe(200);
+        return (res.body as { data: { id: string }[] }).data.some(
+          (i) => i.id === id,
+        );
+      },
+    },
+    {
+      nombre: 'causas-merma',
+      path: 'causas-merma',
+      tabla: 'causas_merma',
+      pk: 'causa_merma_id',
+      crear: () => crearFila('causas-merma', 'Causa', (n) => ({ nombre: n })),
+    },
+    {
+      nombre: 'descuentos',
+      path: 'descuentos',
+      tabla: 'descuentos',
+      pk: 'descuento_id',
+      crear: () =>
+        crearFila('descuentos', 'Descuento', (n) => ({
+          nombre: n,
+          tipoReglaId: DESCUENTO_DIRECTO_TIPO_ID,
+          modo: 'porcentaje',
+        })),
+    },
+    {
+      nombre: 'recargos',
+      path: 'recargos',
+      tabla: 'recargos',
+      pk: 'recargo_id',
+      crear: () =>
+        crearFila('recargos', 'Recargo', (n) => ({
+          nombre: n,
+          tipoReglaId: RECARGO_GENERAL_TIPO_ID,
+          valor: '0.05',
+          modo: 'porcentaje',
+        })),
+    },
+    {
+      // EL QUE MOTIVÓ ESTA PARAMETRIZACIÓN: único listado con `OR` de dos
+      // ramas (impuestos del tenant + impuestos oficiales del país).
+      nombre: 'impuestos',
+      path: 'impuestos',
+      tabla: 'impuestos',
+      pk: 'impuesto_id',
+      crear: () =>
+        crearFila('impuestos', 'Impuesto', (n) => ({
+          nombre: n,
+          porcentaje: '0.05',
+        })),
+    },
+    {
+      nombre: 'terceros',
+      path: 'terceros',
+      tabla: 'terceros',
+      pk: 'tercero_id',
+      crear: () =>
+        crearFila('terceros', 'Tercero', (n) => ({
+          tipo: 'proveedor',
+          nombre: n,
+        })),
+    },
+    {
+      nombre: 'cajones',
+      path: 'cajones',
+      tabla: 'cajones',
+      pk: 'cajon_id',
+      crear: () => crearFila('cajones', 'Cajón', (n) => ({ nombre: n })),
+    },
+    {
+      nombre: 'garzones',
+      path: 'garzones',
+      tabla: 'garzones',
+      pk: 'garzon_id',
+      crear: () => crearFila('garzones', 'Garzón', (n) => ({ nombre: n })),
+    },
+    {
+      nombre: 'turnos',
+      path: 'turnos',
+      tabla: 'turnos',
+      pk: 'turno_id',
+      crear: () =>
+        crearFila('turnos', 'Turno', (n) => ({
+          nombre: n,
+          horaInicio: '12:00',
+          horaFin: '14:00',
+        })),
+    },
+    {
+      nombre: 'impresoras',
+      path: 'impresoras',
+      tabla: 'impresoras',
+      pk: 'impresora_id',
+      crear: () =>
+        crearFila('impresoras', 'Impresora', (n) => ({
+          nombre: n,
+          rol: 'boleta',
+          tipoConexion: 'sistema',
+          nombreCola: `COLA_SIST_E2E_${sufijo()}`,
+        })),
+    },
+    {
+      nombre: 'salones',
+      path: 'salones',
+      tabla: 'salones',
+      pk: 'salon_id',
+      crear: () => crearFila('salones', 'Salón', (n) => ({ nombre: n })),
+    },
+    {
+      nombre: 'mesas',
+      path: 'mesas',
+      tabla: 'mesas',
+      pk: 'mesa_id',
+      crear: () =>
+        crearFila(`salones/${salonParaMesaId}/mesas`, 'Mesa', (n) => ({
+          nombre: n,
+        })),
+      // Las mesas no tienen listado propio: viajan anidadas en el de salones.
+      enPapelera: async (id) => {
+        const res = await request(app.getHttpServer())
+          .get('/api/salones?incluirEliminados=true')
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+        expect(res.status).toBe(200);
+        return (res.body as { mesas: { id: string }[] }[]).some((s) =>
+          s.mesas.some((m) => m.id === id),
+        );
+      },
+    },
+    {
+      nombre: 'grupos-modificadores',
+      path: 'grupos-modificadores',
+      tabla: 'grupos_modificadores',
+      pk: 'grupo_modificador_id',
+      crear: () =>
+        crearFila(
+          'grupos-modificadores',
+          'Grupo',
+          (n) => ({
+            nombre: n,
+            opciones: [{ itemId: itemParaOpcionId, precioExtra: '0' }],
+          }),
+          'grupoModificadorId',
+        ),
+      enPapelera: (id) =>
+        enListadoPlano('grupos-modificadores', id, 'grupoModificadorId'),
+    },
+    {
+      nombre: 'motivos-diferencia',
+      path: 'motivos-diferencia',
+      tabla: 'motivo_diferencia_caja',
+      pk: 'motivo_diferencia_id',
+      crear: () =>
+        crearFila('motivos-diferencia', 'Motivo', (n) => ({ nombre: n })),
+    },
+    {
+      nombre: 'motivos-diferencia-inventario',
+      path: 'motivos-diferencia-inventario',
+      tabla: 'motivo_diferencia_inventario',
+      pk: 'motivo_diferencia_inventario_id',
+      crear: () =>
+        crearFila('motivos-diferencia-inventario', 'Motivo inv', (n) => ({
+          nombre: n,
+        })),
+    },
+  ];
+
+  // El guard de cobertura, derivado del ESQUEMA y no de sí mismo. Un
+  // `toHaveLength(16)` —o una lista de nombres escrita acá al lado— solo
+  // comprueba que el array coincida consigo mismo: agregar el recurso 17 en
+  // el backend sin tocar este spec pasaría en silencio, que es justo el
+  // agujero que el guard dice cerrar.
+  //
+  // `eliminado_por` es la columna que define la regla del owner ("solo lo que
+  // borró una persona"), así que cualquier tabla que la tenga es, por
+  // construcción, candidata a papelera. Contrastar contra
+  // `information_schema` hace que el test lo diga la BD: agregar la columna a
+  // una tabla nueva rompe acá hasta que alguien decida —conscientemente— si
+  // va a la lista o no.
+  it('la lista cubre TODAS las tablas con `eliminado_por` del esquema', async () => {
+    const tablas = unwrap<{ table_name: string }>(
+      await ds.query(
+        `SELECT table_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND column_name = 'eliminado_por'
+          ORDER BY table_name`,
+      ),
+    ).map((r) => r.table_name);
+
+    expect(tablas).toHaveLength(16);
+    expect([...recursos.map((r) => r.tabla)].sort()).toEqual(tablas);
   });
 
-  it('items (familia SQL cruda): un item borrado sin eliminado_por no aparece en la papelera ni se puede restaurar', async () => {
-    const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
-    const resCrear = await request(app.getHttpServer())
-      .post('/api/items')
-      .set('Authorization', `Bearer ${tokenAdmin}`)
-      .send({
-        nombre: `Item borrado-sistema E2E ${Date.now()}`,
-        precioBase: '1000',
-        monedaId: CLP_MONEDA_ID,
-        tipo: 'servicio',
-      });
-    expect(resCrear.status).toBe(201);
-    const id = (resCrear.body as { id: string }).id;
+  for (const recurso of recursos) {
+    it(`${recurso.nombre}: una fila borrada sin eliminado_por no aparece en la papelera ni se puede restaurar`, async () => {
+      const { id, nombreFila } = await recurso.crear();
 
-    await ds.query(`UPDATE items SET eliminado_el = NOW() WHERE item_id = $1`, [
-      id,
-    ]);
+      // El borrado del sistema: `eliminado_el` sin `eliminado_por`, igual que
+      // lo deja el seeder. No pasa por `DELETE /api/...` a propósito.
+      // Lo que cubre el `RETURNING` NO es un nombre de tabla o de PK
+      // inexistente —eso lo tira Postgres solo, con o sin RETURNING—: cubre el
+      // par VÁLIDO PERO CRUZADO, o sea tabla y PK que existen pero cuyo id no
+      // es el que devolvió la API (el caso de `grupoModificadorId`). Sin la
+      // aserción, ese cruce afecta 0 filas y el test pasa en verde sin haber
+      // borrado nada.
+      const borradas = unwrap<{ pk: string }>(
+        await ds.query(
+          `UPDATE ${recurso.tabla} SET eliminado_el = NOW()
+            WHERE ${recurso.pk} = $1 RETURNING ${recurso.pk} AS pk`,
+          [id],
+        ),
+      );
+      expect(borradas).toHaveLength(1);
 
-    const listado = await request(app.getHttpServer())
-      .get('/api/items?incluirEliminados=true&pageSize=100')
-      .set('Authorization', `Bearer ${tokenAdmin}`);
-    expect(listado.status).toBe(200);
-    const data = (listado.body as { data: { id: string }[] }).data;
-    expect(data.find((i) => i.id === id)).toBeUndefined();
+      const visible = recurso.enPapelera
+        ? await recurso.enPapelera(id, nombreFila)
+        : await enListadoPlano(recurso.path, id);
+      expect(visible).toBe(false);
 
-    const resRestaurar = await request(app.getHttpServer())
-      .post(`/api/items/${id}/restaurar`)
-      .set('Authorization', `Bearer ${tokenAdmin}`);
-    expect(resRestaurar.status).toBe(404);
-  });
+      const resRestaurar = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${id}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurar.status).toBe(404);
+    });
+
+    // El segundo camino, el que no se veía: la regla mira `eliminado_por`,
+    // así que restaurar tiene que DEJARLO EN NULL. Si sobrevive al restore,
+    // el próximo borrado del sistema sobre esa misma fila queda disfrazado de
+    // borrado de persona y vuelve a ser restaurable por API. En `impuestos`
+    // eso significa revivir un duplicado de IVA que
+    // `remapImpuestosOficialesDuplicados` borró — la doble tributación del
+    // 38% de ADR-018, con tres llamadas públicas y un reinicio.
+    it(`${recurso.nombre}: restaurar deja eliminado_por en NULL, así que un borrado del sistema posterior sigue invisible`, async () => {
+      const { id, nombreFila } = await recurso.crear();
+
+      // 1. Borrado de persona por API: deja `eliminado_por` = admin.paris.
+      const resBorrar = await request(app.getHttpServer())
+        .delete(`/api/${recurso.path}/${id}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect([200, 204]).toContain(resBorrar.status);
+
+      // 2. Restaurar: revive la fila Y limpia el autor del borrado revertido.
+      const resRestaurar = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${id}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurar.status).toBe(201);
+
+      // La aserción directa contra la BD, no contra el cuerpo de la
+      // respuesta: varios de los 16 no devuelven `eliminadoPor`, así que un
+      // test que solo mirara el JSON pasaría con la columna sucia.
+      const [fila] = unwrap<{
+        eliminado_el: Date | null;
+        eliminado_por: string | null;
+      }>(
+        await ds.query(
+          `SELECT eliminado_el, eliminado_por FROM ${recurso.tabla}
+            WHERE ${recurso.pk} = $1`,
+          [id],
+        ),
+      );
+      expect(fila).toBeDefined();
+      expect(fila.eliminado_el).toBeNull();
+      expect(fila.eliminado_por).toBeNull();
+
+      // 3. Ahora el borrado del sistema sobre la MISMA fila: sin el paso 2
+      //    correcto, el `eliminado_por` viejo la haría visible y restaurable.
+      await ds.query(
+        `UPDATE ${recurso.tabla} SET eliminado_el = NOW()
+          WHERE ${recurso.pk} = $1`,
+        [id],
+      );
+
+      const visible = recurso.enPapelera
+        ? await recurso.enPapelera(id, nombreFila)
+        : await enListadoPlano(recurso.path, id);
+      expect(visible).toBe(false);
+
+      const resRestaurarOtraVez = await request(app.getHttpServer())
+        .post(`/api/${recurso.path}/${id}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurarOtraVez.status).toBe(404);
+    });
+  }
 });
 
 // Task 3: causas de merma — segunda referencia. Familia SQL cruda (no
@@ -432,7 +786,6 @@ describe('Papelera (e2e) — items, restaurar INACTIVO + colateral acotado por t
   let tokenSinPermiso: string;
   let itemId: string;
 
-  const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
   // Descuento "Promo fija $5.000" y recargo "Interés cuotas 5%": los dos con
   // `condicionTipo: NINGUNA` en el seed de Paris — se asocian al ítem sin
   // depender de ninguna condición de venta.
@@ -716,6 +1069,7 @@ interface SalonListItem {
 
 describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por timestamp', () => {
   let app: INestApplication<App>;
+  let ds: DataSource;
   let tokenAdmin: string;
   let tokenSinPermiso: string;
 
@@ -731,6 +1085,7 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
     );
     await app.init();
 
+    ds = app.get(DataSource);
     tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
     tokenSinPermiso = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
   }, 60000);
@@ -851,6 +1206,34 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
       resListarNormalDespues.body as SalonListItem[]
     ).find((s) => s.id === salonId);
     expect(salonNormalDespues?.mesas.map((m) => m.id)).toEqual([mesaCascadaId]);
+
+    // La mesa revivida POR CASCADA también tiene que quedar sin autor de
+    // borrado. Es la única de las 16 escrituras de `eliminado_por = NULL` que
+    // ningún otro test alcanza: el bloque parametrizado de "solo lo que borró
+    // una persona" borra un salón SIN mesas, así que su CTE `mesas_restauradas`
+    // corre sobre 0 filas, y su caso `mesas` va por `restaurarMesa()`, que es
+    // otra sentencia. Sin esta aserción, sacarle `eliminado_por = NULL` a la
+    // cascada (salones.service.ts → restaurarSalon) deja los 75 tests en
+    // verde, y toda mesa revivida así queda con el agujero original: el autor
+    // sobreviviente disfraza el próximo borrado del sistema.
+    // Va contra la BD y no contra el JSON porque el listado expone
+    // `eliminadoPorNombre`, no `eliminadoPor`, y tras revivir el JOIN a
+    // `usuarios` ya no matchea — o sea el nombre da null aunque la columna
+    // siga sucia.
+    const [mesaRevivida] = unwrap<{ eliminado_por: string | null }>(
+      await ds.query(`SELECT eliminado_por FROM mesas WHERE mesa_id = $1`, [
+        mesaCascadaId,
+      ]),
+    );
+    expect(mesaRevivida.eliminado_por).toBeNull();
+    // Y la mesa 3, que ESE borrado no se llevó, conserva el suyo: la cascada
+    // no puede limpiar de más.
+    const [mesaVieja] = unwrap<{ eliminado_por: string | null }>(
+      await ds.query(`SELECT eliminado_por FROM mesas WHERE mesa_id = $1`, [
+        mesaViejaId,
+      ]),
+    );
+    expect(mesaVieja.eliminado_por).not.toBeNull();
 
     // Restaurar de nuevo (ya no está en la papelera) → 404.
     const resRestaurarOtraVez = await request(app.getHttpServer())
@@ -973,12 +1356,6 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
   afterAll(async () => {
     await app.close();
   });
-
-  // 'directo' (descuento) y 'general' (recargo): los únicos tipos de regla
-  // del seed que no exigen tramos/metodoPagoIds/fechas — solo `valor` en el
-  // caso de 'general'. Minimizan el payload de creación de este spec.
-  const DESCUENTO_DIRECTO_TIPO_ID = '550e8400-e29b-41d4-a716-446655440337';
-  const RECARGO_GENERAL_TIPO_ID = '550e8400-e29b-41d4-a716-446655440122';
 
   const recursos: {
     nombre: string;
@@ -1379,7 +1756,6 @@ describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrad
   const ADMIN_FALABELLA_EMAIL = 'admin@sistema.com';
   const ADMIN_FALABELLA_PASS = 'admin';
   const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
-  const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
   async function loginFalabella(): Promise<string> {
     const resLogin = await request(app.getHttpServer())
@@ -1590,8 +1966,6 @@ describe('Papelera (e2e) — familia SQL cruda con nombre único: grupos-modific
   let tokenAdmin: string;
   let tokenNoAdmin: string;
   let itemOpcionId: string;
-
-  const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({

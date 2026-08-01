@@ -24,7 +24,6 @@ describe('CajonesService', () => {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
-    restore: jest.Mock;
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -51,7 +50,6 @@ describe('CajonesService', () => {
       create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       update: jest.fn(() => Promise.resolve({ affected: 1 })),
-      restore: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
       createQueryBuilder: jest.fn(),
     };
@@ -168,7 +166,10 @@ describe('CajonesService', () => {
 
       const restaurado = await service.restaurar(TENANT, 'x');
 
-      expect(repo.restore).toHaveBeenCalledWith({ id: 'x', tenantId: TENANT });
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 'x', tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(repo.findOneOrFail).toHaveBeenCalledWith({
         where: { id: 'x', tenantId: TENANT },
       });
@@ -182,7 +183,7 @@ describe('CajonesService', () => {
       await expect(service.restaurar(TENANT, 'x')).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() un cajón vivo (no eliminado) es 404', async () => {
@@ -195,7 +196,7 @@ describe('CajonesService', () => {
       await expect(service.restaurar(TENANT, 'x')).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() con el nombre ya ocupado por un cajón vivo es 400, no 500', async () => {
@@ -210,7 +211,7 @@ describe('CajonesService', () => {
         eliminadoEl: new Date(),
         eliminadoPor: USUARIO_ID,
       });
-      repo.restore.mockRejectedValueOnce(
+      repo.update.mockRejectedValueOnce(
         Object.assign(new Error('duplicate key value'), { code: '23505' }),
       );
 
@@ -232,7 +233,7 @@ describe('CajonesService', () => {
       const otroError = Object.assign(new Error('conexión perdida'), {
         code: '08006',
       });
-      repo.restore.mockRejectedValueOnce(otroError);
+      repo.update.mockRejectedValueOnce(otroError);
 
       await expect(service.restaurar(TENANT, 'x')).rejects.toBe(otroError);
     });

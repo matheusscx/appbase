@@ -17,7 +17,6 @@ describe('ImpresorasService', () => {
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
-    restore: jest.Mock;
     softDelete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
@@ -30,7 +29,6 @@ describe('ImpresorasService', () => {
       create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       update: jest.fn(() => Promise.resolve({ affected: 1 })),
-      restore: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
       createQueryBuilder: jest.fn(),
     };
@@ -173,10 +171,10 @@ describe('ImpresorasService', () => {
 
       const restaurada = await service.restaurar(TENANT, IMPRESORA);
 
-      expect(repo.restore).toHaveBeenCalledWith({
-        id: IMPRESORA,
-        tenantId: TENANT,
-      });
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: IMPRESORA, tenantId: TENANT },
+        { eliminadoEl: null, eliminadoPor: null },
+      );
       expect(repo.findOneOrFail).toHaveBeenCalledWith({
         where: { id: IMPRESORA, tenantId: TENANT },
       });
@@ -190,7 +188,7 @@ describe('ImpresorasService', () => {
       await expect(service.restaurar(TENANT, IMPRESORA)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
 
     it('restaurar() una impresora viva (no eliminada) es 404', async () => {
@@ -203,7 +201,7 @@ describe('ImpresorasService', () => {
       await expect(service.restaurar(TENANT, IMPRESORA)).rejects.toThrow(
         NotFoundException,
       );
-      expect(repo.restore).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
     });
   });
 
