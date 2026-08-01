@@ -572,3 +572,11 @@ Ver `startup-pos.sql`. Toda tabla incluye:
 - `creado_el TIMESTAMPTZ`
 - `actualizado_el TIMESTAMPTZ`
 - `eliminado_el TIMESTAMPTZ` — **soft delete**; toda lectura filtra `eliminado_el IS NULL`
+
+En 16 tablas de catálogo del negocio y config operativa, además:
+- `eliminado_por UUID` (nullable) — quién borró la fila.
+
+Esas 16 tienen **papelera**: se puede volver a listarlas con `incluirEliminados=true`
+y revertir el borrado con `POST .../:id/restaurar`. No aplica a seguridad/acceso,
+suscripciones/pasarela, medios de pago tokenizados, transaccional (`cuentas`) ni al
+kardex (inmutable por diseño). Detalle: [`docs/features/papelera.md`](./features/papelera.md).

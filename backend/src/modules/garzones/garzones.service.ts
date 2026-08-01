@@ -174,7 +174,25 @@ export class GarzonesService {
     if (!garzon || !garzon.eliminadoEl) {
       throw new NotFoundException(`Garzón ${id} no está en la papelera`);
     }
-    await this.garzonRepo.restore({ id, tenantId });
+    try {
+      await this.garzonRepo.restore({ id, tenantId });
+    } catch (e) {
+      // 23505 = unique_violation. `uq_garzones_mostrador_tenant` es parcial
+      // (WHERE es_placeholder = true AND eliminado_el IS NULL): un solo
+      // "Mostrador" vivo por tenant. Si el placeholder borrado sigue siendo
+      // el que `restaurar()` intenta revivir mientras `asegurarMostrador()`
+      // ya creó uno nuevo (find-or-create disparado por otra venta en el
+      // medio), restaurar el viejo colisiona. `nombre` no tiene índice único
+      // en `garzones` — este es el único choque posible acá, así que el
+      // mensaje es específico al placeholder, no genérico de "nombre". Mismo
+      // patrón que causas-merma.service.ts → restaurar().
+      if ((e as { code?: string }).code === '23505') {
+        throw new BadRequestException(
+          'Ya existe un garzón "Mostrador" activo para este tenant (se crea automáticamente, uno por tenant). No se puede restaurar el placeholder anterior mientras el nuevo siga vivo.',
+        );
+      }
+      throw e;
+    }
     const restaurado = await this.garzonRepo.findOneOrFail({
       where: { id, tenantId },
     });

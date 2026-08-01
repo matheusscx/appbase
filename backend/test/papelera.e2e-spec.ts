@@ -2,6 +2,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 
 // Task 2 de la feature "papelera": categorías es la entidad de referencia —
@@ -826,10 +827,28 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
 
 // Task 6a: los 8 recursos de la familia `softDelete()` de TypeORM —
 // descuentos, recargos, impuestos, terceros, cajones, garzones, turnos,
-// impresoras. Ninguno tiene colateral en cascada ni nombre único con
-// restricción parcial que dispare un 400 al restaurar (a diferencia de
-// causas-merma), así que un solo spec parametrizado sobre la lista basta:
-// once copias del mismo cuerpo no agregarían cobertura.
+// impresoras. Seis de los ocho no tienen colateral en cascada ni restricción
+// única que dispare un 400 al restaurar, así que un solo spec parametrizado
+// sobre esos seis basta.
+//
+// ⚠️ **Corregido en la "Ronda de fixes 1"**: la entrada original decía que
+// NINGUNO de los 8 tenía nombre único con restricción parcial. Era falso — la
+// colisión se había asignado por FAMILIA de borrado (softDelete vs SQL cruda)
+// en vez de por la propiedad que importa (tener índice único parcial), y dos
+// recursos de ESTA familia sí lo tienen y quedaron en la grieta:
+// - **`cajones`** tiene `ux_cajones_tenant_nombre` (`(tenant_id, nombre) WHERE
+//   eliminado_el IS NULL`), igual que causas-merma/grupos-modificadores/
+//   motivos-diferencia — mismo test de colisión, ver más abajo.
+// - **`garzones`** tiene `uq_garzones_mostrador_tenant` (`(tenant_id) WHERE
+//   es_placeholder = true AND eliminado_el IS NULL`): NO es "nombre único"
+//   (garzones no tiene esa columna indexada), es más angosto — un solo
+//   placeholder "Mostrador" vivo por tenant. Colisiona por un camino distinto
+//   (borrar el Mostrador seedeado + que `asegurarMostrador()` cree otro), así
+//   que tiene su PROPIO describe más abajo, no el molde de "crear otro con el
+//   mismo nombre" que usan los recursos con nombre único.
+// Antes del fix, ambos devolvían 500 (QueryFailedError sin capturar) donde la
+// doc prometía 400 — el `restaurar()` de los dos ahora captura `23505` igual
+// que `causas-merma.service.ts`.
 interface RecursoConAuditoria {
   id: string;
   eliminadoEl?: string | null;
@@ -996,6 +1015,287 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
       expect(resRestaurarOtraVez.status).toBe(404);
     });
   }
+
+  // Ronda de fixes 1: `cajones` tiene `ux_cajones_tenant_nombre` (nombre único
+  // por tenant, índice parcial), igual que causas-merma/grupos-modificadores/
+  // motivos-diferencia — mismo molde de colisión que esos, no el genérico de
+  // arriba (que no crea un duplicado a propósito).
+  it('cajones: colisión real de Postgres — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+    const nombre = `Cajón papelera E2E colisión ${Date.now()}`;
+    const resOriginal = await request(app.getHttpServer())
+      .post('/api/cajones')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre });
+    expect(resOriginal.status).toBe(201);
+    const originalId = (resOriginal.body as RecursoConAuditoria).id;
+
+    const resBorrar = await request(app.getHttpServer())
+      .delete(`/api/cajones/${originalId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrar.status).toBe(200);
+
+    // Mientras `originalId` estaba borrado, nadie competía por su nombre: se
+    // puede crear un cajón nuevo y vivo con el mismo nombre.
+    const resOtro = await request(app.getHttpServer())
+      .post('/api/cajones')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre });
+    expect(resOtro.status).toBe(201);
+    const otroId = (resOtro.body as RecursoConAuditoria).id;
+
+    // El 23505 lo tira Postgres de verdad (índice único parcial), no un mock.
+    // Antes del fix esto era 500 (QueryFailedError sin capturar en
+    // `cajones.service.ts` → `restaurar()`).
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/cajones/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(400);
+
+    const listado = await request(app.getHttpServer())
+      .get('/api/cajones?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const cajones = listado.body as RecursoConAuditoria[];
+    expect(cajones.find((c) => c.id === otroId)?.eliminadoEl).toBeFalsy();
+    expect(cajones.find((c) => c.id === originalId)?.eliminadoEl).toBeTruthy();
+
+    // Limpieza: sin el cajón activo que ocupa el nombre, restaurar sí puede.
+    const resBorrarOtro = await request(app.getHttpServer())
+      .delete(`/api/cajones/${otroId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrarOtro.status).toBe(200);
+
+    const resRestaurarOk = await request(app.getHttpServer())
+      .post(`/api/cajones/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurarOk.status).toBe(201);
+  });
+});
+
+// `garzones` también tiene una restricción única parcial —
+// `uq_garzones_mostrador_tenant`, `(tenant_id) WHERE es_placeholder = true AND
+// eliminado_el IS NULL`— pero NO es "nombre único" como los otros 6 recursos
+// con colisión: garzones no indexa `nombre`. Es más angosta — un solo garzón
+// placeholder "Mostrador" vivo por tenant, creado por `asegurarMostrador()`
+// (find-or-create dentro de la transacción de una venta con `propinaDirecta`,
+// ver `docs/features/pagos.md`). La colisión no se dispara creando "otro con
+// el mismo nombre" (eso no colisiona en absoluto acá: probado en el test
+// genérico de la familia softDelete de arriba, que crea un garzón normal sin
+// tocar el placeholder), sino borrando un Mostrador vivo y dejando que otra
+// venta con propina cree uno nuevo mientras el viejo sigue en la papelera.
+// Antes del fix esto era 500; el `restaurar()` de `garzones.service.ts` ahora
+// captura `23505` igual que `cajones`/`causas-merma`.
+//
+// ⚠️ **Reescrito en la "Ronda de fixes 2"**: la primera versión montaba el
+// escenario borrando el Mostrador SEMBRADO de Paris (id fijo
+// `550e8400-e29b-41d4-a716-446655440339`), que `ventas.e2e-spec.ts:543` y
+// `liquidacion-propinas.e2e-spec.ts:21` asumen vivo con ese id exacto. Su
+// limpieza corría al final del `it()` sin `try/finally`: si cualquier
+// `expect()` intermedio fallaba, el test cortaba ahí y el Mostrador del seed
+// quedaba borrado con un huérfano vivo en su lugar — rompiendo esas otras dos
+// suites en la corrida siguiente (`maxWorkers: 1`, sin reset entre archivos).
+// **La corrección no fue solo agregar `try/finally`: fue no tocar el id del
+// seed en absoluto.** Falabella (a diferencia de Paris) no tiene Mostrador
+// sembrado — `seeder.service.ts → seedGarzones()` solo crea uno, para Paris—,
+// así que corriendo el mismo escenario en Falabella el "Mostrador viejo" lo
+// crea ESTE test (id random, recién generado), no el seed: ninguna otra suite
+// depende de ese id, así que aunque la limpieza no corriera, no hay id
+// compartido que romper. La limpieza igual quedó en `try/finally` —por
+// higiene, para que reruns locales sin `reset-db.sh` no acumulen Mostradores
+// huérfanos de Falabella— pero ya no es la única red de seguridad. Verificado
+// forzando una falla intermedia a propósito (un `expect` imposible entre el
+// `DELETE` y el segundo `POST /ventas`): el `finally` corrió igual, dejó
+// Falabella con un solo Mostrador vivo (detalle completo en el reporte de la
+// task, "Ronda de fixes 2" → punto 3).
+describe('Papelera (e2e) — garzones: colisión angosta del placeholder Mostrador', () => {
+  let app: INestApplication<App>;
+  let ds: DataSource;
+  let tokenAdmin: string;
+  let cajaId: string;
+  let itemId: string;
+
+  // Falabella, NO Paris: a propósito, para no depender de ningún id sembrado
+  // (ver el comentario del describe).
+  const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
+  const ADMIN_FALABELLA_EMAIL = 'admin@sistema.com';
+  const ADMIN_FALABELLA_PASS = 'admin';
+  const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+  const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+
+  async function loginFalabella(): Promise<string> {
+    const resLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: ADMIN_FALABELLA_EMAIL, password: ADMIN_FALABELLA_PASS });
+    const initialToken = (resLogin.body as TokenResponse).access_token;
+    const resTenant = await request(app.getHttpServer())
+      .post('/api/auth/switch-tenant')
+      .set('Authorization', `Bearer ${initialToken}`)
+      .send({ tenantId: FALABELLA_TENANT_ID });
+    return (resTenant.body as TokenResponse).access_token;
+  }
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    ds = app.get(DataSource);
+    tokenAdmin = await loginFalabella();
+
+    // Item propio de tipo `servicio` (sin stock): el foco del test es la
+    // propina, no la venta — no depende del stock de seed ni interfiere con
+    // el de otras suites.
+    const resItem = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        nombre: `Servicio Mostrador Falabella E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+      });
+    expect(resItem.status).toBe(201);
+    itemId = (resItem.body as { id: string }).id;
+
+    // `propinaDirecta` solo dispara `asegurarMostrador()` en canal físico
+    // (`ventas.service.ts`: `canal !== 'online'`), que exige caja abierta.
+    // Falabella tiene su propio cajón "Mostrador" sembrado
+    // (`seeder.service.ts → seedCajones()`, id `…440287`), distinto del
+    // garzón placeholder del mismo nombre — homónimos, tablas distintas.
+    const disp = await request(app.getHttpServer())
+      .get('/api/caja/cajones-disponibles')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const cajonId = (disp.body as { cajonId: string }[])[0]?.cajonId;
+    const resCaja = await request(app.getHttpServer())
+      .post('/api/caja/abrir')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        cajonId,
+        saldoInicial: '10000.0000',
+        comentario: 'Apertura E2E papelera — colisión Mostrador Falabella',
+      });
+    cajaId = (resCaja.body as { id: string }).id;
+  }, 60000);
+
+  afterAll(async () => {
+    // Deja la caja cerrada para no bloquear el cajón/usuario en otras suites
+    // (mismo patrón defensivo que `ventas.e2e-spec.ts` → `cerrarCaja`).
+    const conteo = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/conteo`)
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+    if ((conteo.body as { estado?: string }).estado === 'en_conciliacion') {
+      const motivos = await request(app.getHttpServer())
+        .get('/api/motivos-diferencia?soloActivas=true')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      const motivoId = (motivos.body as { id: string }[])[0]?.id;
+      await request(app.getHttpServer())
+        .post(`/api/caja/${cajaId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          lineas: [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+        });
+    }
+    await app.close();
+  });
+
+  it('colisión real de Postgres — crear el primer Mostrador de Falabella, borrarlo, que asegurarMostrador() cree otro, restaurar el viejo → 400, nada cambia; limpieza en try/finally', async () => {
+    // Falabella NO tiene Mostrador sembrado: la primera venta con propina
+    // directa lo crea desde cero (id random, no un id fijo del seed).
+    const resVenta1 = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        lineas: [{ itemId, cantidad: '1' }],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '6000.0000' }],
+        propinaDirecta: { montoPagado: '5000', porcentajeSugerido: '0.10' },
+      });
+    expect(resVenta1.status).toBe(201);
+    const venta1Id = (resVenta1.body as { id: string }).id;
+
+    const rows1: { garzon_id: string }[] = await ds.query(
+      `SELECT garzon_id FROM venta_propina
+        WHERE venta_id = $1 AND eliminado_el IS NULL`,
+      [venta1Id],
+    );
+    expect(rows1).toHaveLength(1);
+    const mostradorOriginalId = rows1[0].garzon_id;
+
+    // A partir de acá el test EMPIEZA A MUTAR estado compartido de Falabella
+    // (borra el Mostrador recién creado): todo lo que sigue va en
+    // `try/finally` para que la limpieza corra pase lo que pase, no solo en
+    // el camino feliz.
+    let mostradorNuevoId: string | null = null;
+    try {
+      const resBorrar = await request(app.getHttpServer())
+        .delete(`/api/garzones/${mostradorOriginalId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resBorrar.status).toBe(200);
+
+      const resVenta2 = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          lineas: [{ itemId, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '6000.0000' }],
+          propinaDirecta: { montoPagado: '5000', porcentajeSugerido: '0.10' },
+        });
+      expect(resVenta2.status).toBe(201);
+      const venta2Id = (resVenta2.body as { id: string }).id;
+
+      const rows2: { garzon_id: string }[] = await ds.query(
+        `SELECT garzon_id FROM venta_propina
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [venta2Id],
+      );
+      expect(rows2).toHaveLength(1);
+      mostradorNuevoId = rows2[0].garzon_id;
+      // `asegurarMostrador()` creó uno NUEVO (id random): el original estaba
+      // borrado, así que el find-or-create no lo encontró.
+      expect(mostradorNuevoId).not.toBe(mostradorOriginalId);
+
+      // El 23505 lo tira Postgres de verdad (índice único parcial
+      // `uq_garzones_mostrador_tenant`), no un mock: ya hay un "Mostrador"
+      // vivo (el nuevo), así que revivir el original colisiona.
+      const resRestaurar = await request(app.getHttpServer())
+        .post(`/api/garzones/${mostradorOriginalId}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(resRestaurar.status).toBe(400);
+
+      // Nada cambió: el original sigue borrado, el nuevo sigue vivo.
+      const estadoOriginal: { eliminado_el: string | null }[] = await ds.query(
+        `SELECT eliminado_el FROM garzones WHERE garzon_id = $1`,
+        [mostradorOriginalId],
+      );
+      expect(estadoOriginal[0]?.eliminado_el).not.toBeNull();
+      const estadoNuevo: { eliminado_el: string | null }[] = await ds.query(
+        `SELECT eliminado_el FROM garzones WHERE garzon_id = $1`,
+        [mostradorNuevoId],
+      );
+      expect(estadoNuevo[0]?.eliminado_el).toBeNull();
+    } finally {
+      // Corre SIEMPRE, incluso si un `expect()` de arriba cortó el test a la
+      // mitad: sin esto, un fallo intermedio deja Falabella con el Mostrador
+      // original borrado y el nuevo huérfano vivo — mismo modo de falla que
+      // tenía la versión con el id de Paris, solo que acá no rompe ninguna
+      // otra suite (nada más referencia estos ids random), pero igual
+      // ensuciaría reruns locales sin `reset-db.sh`.
+      if (mostradorNuevoId) {
+        await request(app.getHttpServer())
+          .delete(`/api/garzones/${mostradorNuevoId}`)
+          .set('Authorization', `Bearer ${tokenAdmin}`);
+      }
+      await request(app.getHttpServer())
+        .post(`/api/garzones/${mostradorOriginalId}/restaurar`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+    }
+  });
 });
 
 // Task 6b: los 3 últimos recursos de la familia SQL cruda — grupos

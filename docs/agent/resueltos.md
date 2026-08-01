@@ -1690,3 +1690,48 @@ siguen diferidos están en `pendientes.md`.
   un invariant spec que escanee el SQL del repo —al estilo de
   `uuid-columns.invariant.spec.ts`— y se descartó: distinguir `i.eliminado_el` de
   `t.eliminado_el` pide parsear alias, o sea maquinaria nueva y frágil para una query.
+
+## Features diferidas
+
+- [x] ~~**Log de cambios reversible ("deshacer") — dirección del owner, sin
+  diseñar**~~ (transversal) — cerrado 2026-07-31 como **papelera + restaurar**, la
+  segunda fila de la tabla de necesidades que planteaba la entrada original ("Borré
+  algo la semana pasada"). Diseño completo:
+  [`docs/superpowers/specs/2026-07-31-papelera-restaurar-eliminados-design.md`](../superpowers/specs/2026-07-31-papelera-restaurar-eliminados-design.md);
+  doc operativa: [`docs/features/papelera.md`](../features/papelera.md).
+  **Qué se construyó:** `eliminado_por` en las 16 tablas de catálogo del negocio y
+  config operativa; `GET ...?incluirEliminados=true` en cada listado (mismo guard
+  que ya protegía el `GET`); `POST /<recurso>/:id/restaurar` (mismo guard que el
+  `DELETE`); colateral acotado por el `eliminado_el` exacto del borrado padre en 3
+  recursos (`items`↔`receta_extras_permitidos`, `salones`↔`mesas`,
+  `grupos-modificadores`↔`grupo_modificador_opciones`); huérfano tolerado sin
+  cascada hacia arriba; 400 de colisión en las 5 entidades con nombre único por
+  tenant más `garzones` (restricción propia sobre el placeholder "Mostrador", no
+  nombre único). Confirma la observación que abarataba todo: para 16 de las tablas
+  del alcance el dato borrado **ya estaba en la base** por la invariante 3 — faltaba
+  el endpoint y la pantalla, no un modelo nuevo.
+  **Qué se decidió NO construir, y por qué:**
+  - **Revertir ediciones (volver un precio a su valor anterior).** La investigación
+    de mercado (`docs/agent/investigacion-mercado.md`, corrida 2026-07-31) no
+    encontró ni un solo POS que lo haga; el único ejemplo real de versionado con
+    revert (Salesforce Field History Tracking) es view-only y de otro rubro.
+  - **Bitácora de "quién cambió qué" (auditar ediciones).** `eliminado_por` cubre
+    el borrado, que es lo que el caso de uso del owner pedía; auditar ediciones es
+    otra feature, sin caso de uso concreto sobre la mesa.
+  - **Cascada al restaurar.** El mercado es unánime en el sentido contrario:
+    restaurar un ítem en Toast no lo devuelve a su menú, y en Square/Clover borrar
+    una categoría deja los productos huérfanos sin bloquear nada. Se adoptó
+    "huérfano tolerado + reasignación manual" en vez de intentar reconstruir el
+    árbol de relaciones al momento del borrado.
+  - **Ventana de retención y purga automática.** Ningún producto relevado (5,
+    internacionales y chilenos) la documenta, y el soft delete del proyecto ya es
+    permanente — agregar una ventana habría sido inventar una regla que nadie
+    pidió.
+  **Límite que se mantuvo, sin cambios:** el kardex sigue inmutable (ADR-007, se
+  compensa con movimiento contrario) y el hecho fiscal de una venta emitida sigue
+  congelado (ADR-010) — ninguno de los dos entra a la papelera. Un "revertir
+  cualquier cosa" uniforme seguía sin ser alcanzable, y la papelera no lo intentó.
+  **Consecuencia sobre otra entrada de este archivo:** desbloqueó "Un descuento,
+  recargo o impuesto desactivado sigue aplicándose" (`pendientes.md`, auditoría
+  `items` + `calculo-precios`), que esperaba esta decisión antes de poder
+  encararse — ver esa entrada para el detalle de lo que sí quedó abierto ahí.

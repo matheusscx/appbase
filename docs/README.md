@@ -66,6 +66,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [combos.md](./features/combos.md) | Combos (paquetes con precio propio): componentes fijos producto/receta/servicio, una línea de venta, disponibilidad conservadora |
 | [grupos-modificadores.md](./features/grupos-modificadores.md) | Grupos de modificadores reutilizables (ej. "elige tu bebida/proteína"): asociables a combos y recetas, familia derivada, min/max en unidades, snapshot congelado en la venta |
 | [recuento-inventario.md](./features/recuento-inventario.md) | Recuento de inventario (conteo físico): sesión con ciclo de vida, diferencia como delta, catálogo propio de causas, permisos separados entre contar y aplicar |
+| [papelera.md](./features/papelera.md) | Papelera (restaurar eliminados): `incluirEliminados` + `POST .../:id/restaurar` en 16 recursos de catálogo/config; frontend cableado solo en items y categorías |
 
 ## Otros
 

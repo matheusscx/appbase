@@ -97,6 +97,76 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
   prioridad, y si se retoma conviene apuntar a los otros mecanismos de la lista
   (`inline-block`, `float`, `absolute`, `fit-content`), no a las tablas.
 
+## Papelera — restaurar eliminados (2026-07-31)
+
+Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`](../features/papelera.md).
+Quedan dos hallazgos que la feature dejó medidos, ninguno bloqueante para el cierre:
+
+- [ ] **El esquema mezcla `TIMESTAMPTZ` y `TIMESTAMP` sin zona en la misma columna
+  lógica, y compararlas depende del `TimeZone` de sesión** (backend, transversal) —
+  medido con `information_schema.columns` sobre Postgres real: de las 87 tablas que
+  tienen `eliminado_el`, **22 la tienen como `timestamptz` y 65 como `timestamp` sin
+  zona** (default de `@DeleteDateColumn()` de TypeORM cuando la entity no fija `type`
+  explícito; `receta_extras_permitidos` y sus hermanas con datos propios sí lo fijan y
+  quedaron en `timestamptz`). No es un detalle cosmético: un `WHERE` que compara una
+  columna de cada tipo sin cast deja que Postgres castee el `timestamp` sin zona
+  usando el **`TimeZone` de la sesión que corre la comparación**, no el que estaba
+  activo cuando se escribió el valor.
+  **Le costó una ronda de revisión a `items.restaurar()`** (`items.service.ts`): la
+  primera versión comparaba `items.eliminado_el` (`timestamp` sin zona) contra
+  `receta_extras_permitidos.eliminado_el` (`timestamptz`) sin cast. Verificado contra
+  Postgres real con `SET TimeZone` en sesiones separadas de escritura y lectura —
+  combinaciones UTC↔UTC, `America/Santiago`↔UTC, `America/Santiago`↔`America/Santiago`—:
+  **matchea 1 de 3 combinaciones** (solo cuando ambas sesiones comparten `TimeZone`,
+  que hoy es siempre porque nada en la app cambia el `TimeZone` de sesión y el default
+  del server es UTC). El fix fue anclar los dos lados a UTC explícito
+  (`NOW() AT TIME ZONE 'UTC'` al escribir, `... AT TIME ZONE 'UTC'` al leer) en vez de
+  confiar en que las sesiones coincidan por casualidad — ver el comentario largo en
+  `items.service.ts` (`remove()` y `restaurar()`) para el detalle completo, incluida la
+  otra mitad del mismo bug con `timestamptz` de microsegundos perdiendo precisión al
+  pasar por un `Date` de JS.
+  **Cierre posible:** una migración que uniforme las 65 a `timestamptz` (fuera de
+  alcance de esta feature — el proyecto no tiene datos productivos, así que es cambiar
+  el esquema y resetear, no un backfill), o dejar el patrón "cast explícito a UTC en
+  cualquier comparación cross-tabla" documentado como regla y confiar en revisión.
+  ⚠️ **Corregido (Ronda de fixes 1):** la entrada original decía "ningún otro de los
+  16 recursos compara timestamps entre tablas" — falso. `salones.restaurar()`
+  (`salones↔mesas`) y `grupos-modificadores.restaurar()`
+  (`grupos_modificadores↔grupo_modificador_opciones`) también comparan un
+  `eliminado_el` contra otro para acotar su colateral. **La razón correcta de por qué
+  no sufren el bug no es "no comparan", es que en cada uno de esos dos pares los DOS
+  lados comparten tipo** (verificado con `information_schema.columns`): `salones` y
+  `mesas` son las dos `timestamp` sin zona; `grupos_modificadores` y
+  `grupo_modificador_opciones` son las dos `timestamptz` (así lo documenta el
+  comentario de `grupos-modificadores.service.ts` → `restaurar()`). El riesgo real no
+  es "comparar timestamps entre tablas" en general — es comparar timestamps **de
+  tipos distintos**, que hoy solo pasa en el par `items`/`receta_extras_permitidos`
+  de los tres recursos con colateral.
+- [ ] **13 de 15 pantallas de la papelera sin cablear en el frontend** (frontend) —
+  ⚠️ **Corregido (Ronda de fixes 1):** son 16 recursos backend, pero **15
+  pantallas** — `mesas` no tiene página propia, vive dentro de
+  `configuracion/salones.vue`, así que no cuenta aparte. Solo
+  `configuracion/items.vue` y `configuracion/categorias.vue` tienen el toggle
+  "ver eliminados" y el botón restaurar; las otras 13 (`descuentos`, `recargos`,
+  `impuestos`, `grupos-modificadores`, `terceros`, `cajones`, `garzones`, `turnos`,
+  `salones` [con sus `mesas`], `impresoras`, `causas-merma`, `motivos-diferencia`,
+  `motivos-diferencia-inventario`) quedan sin UI. El molde ya está probado en las
+  dos pantallas hechas: `usePapelera(recurso)` (`app/composables/usePapelera.ts`)
+  da el toggle, `restaurar(id)` y `formatearBorradoPor(fila)`.
+  **Cada pantalla nueva necesita el mismo fix que `items.vue` ya tiene en su
+  `eliminar()`:** con el toggle "ver eliminados" activo, el `DELETE` no puede
+  quitar la fila del array local — tiene que **recargar el listado**, porque el
+  `DELETE` no devuelve `eliminadoEl`/`eliminadoPorNombre` (esos datos solo llegan en
+  el próximo `GET ...?incluirEliminados=true`). Sin el fix, la fila desaparece en vez
+  de pasar a "eliminada" y el usuario no puede restaurarla sin refrescar la página a
+  mano. Ni el build ni el typecheck ven este bug — es un comportamiento de runtime
+  del composable `eliminar()` de cada página, no un error de tipos.
+  **Y cada pantalla necesita su propio test de página** (el proyecto no testea
+  páginas por default, pero el bug de arriba es exactamente la clase de regresión que
+  solo un test de página cazaría — build/typecheck/reviews no lo ven, como ya pasó
+  una vez con el guard de reentrancia de `items.vue`, ver "Revisión final
+  `borrado-ingrediente-extra`" más abajo).
+
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 
 Pasada de 7 lentes según `docs/agent/auditoria-codigo.md`: 20 hallazgos crudos → 15
@@ -252,15 +322,21 @@ Ver [`resueltos.md`](resueltos.md).
     qué ítems la usan. Hoy no existe.
   - **Reactivar no revierte**: si el admin vuelve a activar la regla, las asociaciones
     borradas no vuelven solas. Hay que decirlo en la advertencia, no descubrirlo después.
-  - ⛔ **Bloqueado por una decisión más grande (owner, 2026-07-30):** ¿el "limpiar" es
-    `DELETE` físico o soft delete? Medido: las tres puentes (`item_descuentos`,
-    `item_recargos`, `item_impuestos`) son puras —2 columnas, PK compuesta, sin
-    `eliminado_el`, sin `tenant_id`— y hoy el código ya las borra duro y reinserta
-    (`items.service.ts:1559,1571,1583`), a diferencia de sus cuatro hermanas con datos
-    propios, que sí tienen `eliminado_el`. El owner **difirió la decisión** porque quiere
-    resolverla dentro de un **log de cambios reversible** (entrada propia en "Features
-    diferidas"), en vez de comprometerse tabla por tabla. Hasta que eso se decida, esta
-    entrada no se puede implementar.
+  - ℹ️ **Ya no bloqueado.** La entrada esperaba la decisión transversal del "log de cambios
+    reversible" (owner, 2026-07-30) para no comprometerse tabla por tabla. Esa decisión se
+    cerró 2026-07-31 como **papelera + restaurar** (ver
+    [`resueltos.md`](resueltos.md) § Features diferidas) con alcance acotado a
+    **borrados**, y midió que `items.remove()` **no toca**
+    `item_descuentos`/`item_recargos`/`item_impuestos` — por eso la papelera no necesitó
+    uniformar estas tres puentes. Esta entrada no es un borrado de `items`, es **desactivar
+    una regla**, así que la papelera no la resuelve por transitividad, pero sí destraba
+    encararla sin esperar nada más grande.
+    Lo único que sigue abierto acá, y sigue siendo decisión del owner: ¿el "limpiar" que
+    dispara desactivar es `DELETE` físico o soft delete? Medido: las tres puentes
+    (`item_descuentos`, `item_recargos`, `item_impuestos`) son puras —2 columnas, PK
+    compuesta, sin `eliminado_el`, sin `tenant_id`— y hoy el código ya las borra duro y
+    reinserta (`items.service.ts:1670,1682,1694`), a diferencia de sus cuatro hermanas con
+    datos propios, que sí tienen `eliminado_el`.
     Detalle a no olvidar cuando se retome: si se agrega `eliminado_el`, la PK
     `(item_id, regla_id)` hace que una fila borrada blando **bloquee reinsertar el mismo
     par** — el patrón actual "borro todo y reinserto" tiene que pasar a revivir o upsert.
@@ -541,58 +617,6 @@ Los otros tres temas de esta clase viven donde los dejó su procedencia, porque 
 de dónde salieron es parte del enunciado: **saldo en contra por propina ya liquidada**,
 **una persona cobrando en dos grupos** y **devolución por medio de pago con plazos**, los
 tres en la sección de auditorías de arriba.
-
-- [ ] **Log de cambios reversible ("deshacer") — dirección del owner, sin diseñar**
-  (transversal) — planteado por el owner el 2026-07-30, con el caso de uso concreto: *"siempre
-  hay usuarios que borran las cosas y después están llorando para que se las repongan"*. La
-  idea es un registro de cambios que permita **revertir**, no solo auditar.
-  **Por qué está acá y no como deuda:** es una decisión de arquitectura transversal, y ya
-  bloquea al menos una tarea concreta (ver la entrada de la regla desactivada). Sin ella, cada
-  feature decide por su cuenta si borra blando o duro, y termina habiendo tres criterios.
-
-  ⚠️ **Antes de diseñar, partir el problema — el enunciado pide más de lo que el caso de uso
-  necesita.** El caso que lo motivó ("borré algo, reponelo") no es el mismo problema que
-  "volvé esto a como estaba el martes", y se resuelven distinto:
-
-  | Necesidad | Qué la resuelve | Costo |
-  |---|---|---|
-  | "Me equivoqué recién" | **Deshacer** en el toast de la acción, ventana de segundos | Bajo, sin esquema |
-  | "Borré algo la semana pasada" | **Papelera + restaurar** sobre el soft delete que ya existe | Bajo-medio, casi todo UI |
-  | "¿Quién cambió este precio?" | **Bitácora** append-only, que no revierte nada | Medio |
-  | "Volvé esto a como estaba el martes" | **Versionado** de la entidad | Alto |
-
-  **La observación que abarata todo:** la invariante 3 obliga a soft delete, así que para casi
-  toda entidad **el dato borrado ya está en la base**. Para la segunda fila no falta dónde
-  guardarlo: falta un endpoint de restaurar y una pantalla. Las puentes de reglas de precio son
-  la excepción, no la regla — arreglar la excepción sale más barato que construir la pieza
-  general.
-
-  **Límite que ningún diseño cambia:** hay dos lugares donde el proyecto ya decidió que no se
-  revierte — el kardex es inmutable y se compensa con un movimiento contrario (ADR-007), y el
-  hecho fiscal de una venta emitida se congela (ADR-010). Un "revertir cualquier cosa" uniforme
-  no es alcanzable: parte del sistema seguirá siendo compensar, no deshacer.
-
-  ℹ️ El mercado ya resolvió esto (Toast, Square, Lightspeed tienen papelera, undo y bitácora,
-  y las diferencias entre ellos son informativas). El owner **todavía no pidió** la pasada de
-  investigación: ofrecida el 2026-07-30, queda a su decisión
-  (`docs/agent/investigacion-mercado.md`).
-
-  Preguntas a responder antes de diseñar, ninguna respondida:
-  - **¿Revertir qué?** ¿Solo borrados, o también ediciones (volver un precio a su valor
-    anterior)? Lo primero es un cementerio de filas; lo segundo es versionado y es otro
-    problema.
-  - **¿Quién revierte y hasta cuándo?** ¿El admin del tenant, con ventana de tiempo? ¿Se
-    puede revertir algo que ya afectó una venta emitida? (Ahí choca con el hecho fiscal
-    congelado — ADR-010: lo emitido no se recalcula.)
-  - **¿Se apoya en el soft delete que ya existe o es una tabla de log aparte?** Hoy conviven
-    los dos criterios: las puentes con datos propios (`receta_ingredientes`,
-    `combo_componentes`, `grupo_modificador_opciones`, `receta_extras_permitidos`) tienen
-    `eliminado_el`; las puentes puras de reglas de precio (`item_descuentos`, `item_recargos`,
-    `item_impuestos`) no, y hoy se borran con `DELETE` físico
-    (`items.service.ts:1559,1571,1583`). Un log transversal podría hacer innecesario
-    uniformarlas — o exigirlo.
-  - **¿Alcanza a `movimientos_inventario`?** Ahí la respuesta ya está tomada y es "no se
-    revierte, se compensa" (ADR-007, el kardex es inmutable). El log tiene que respetarlo.
 
 - [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
   (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los

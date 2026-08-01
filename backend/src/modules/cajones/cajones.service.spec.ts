@@ -196,6 +196,43 @@ describe('CajonesService', () => {
       );
       expect(repo.restore).not.toHaveBeenCalled();
     });
+
+    it('restaurar() con el nombre ya ocupado por un cajón vivo es 400, no 500', async () => {
+      // `ux_cajones_tenant_nombre` es parcial (WHERE eliminado_el IS NULL):
+      // mientras el cajón estaba borrado, otro pudo tomar su nombre. El
+      // `restore()` de TypeORM dispara el UPDATE que revive la fila, y
+      // Postgres responde 23505 (unique_violation).
+      repo.findOne.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador',
+        eliminadoEl: new Date(),
+      });
+      repo.restore.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
+
+      await expect(service.restaurar(TENANT, 'x')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      // No debe intentar releer la fila si el restore falló.
+      expect(repo.findOneOrFail).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() propaga cualquier otro error de Postgres tal cual (no lo traduce a 400)', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 'x',
+        tenantId: TENANT,
+        nombre: 'Mostrador',
+        eliminadoEl: new Date(),
+      });
+      const otroError = Object.assign(new Error('conexión perdida'), {
+        code: '08006',
+      });
+      repo.restore.mockRejectedValueOnce(otroError);
+
+      await expect(service.restaurar(TENANT, 'x')).rejects.toBe(otroError);
+    });
   });
 
   describe('findAll con incluirEliminados', () => {

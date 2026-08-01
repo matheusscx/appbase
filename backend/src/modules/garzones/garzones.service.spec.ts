@@ -296,6 +296,42 @@ describe('GarzonesService', () => {
       );
       expect(repo.restore).not.toHaveBeenCalled();
     });
+
+    it('restaurar() el placeholder Mostrador cuando ya hay otro vivo es 400, no 500', async () => {
+      // `uq_garzones_mostrador_tenant` es parcial (WHERE es_placeholder = true
+      // AND eliminado_el IS NULL): un solo "Mostrador" vivo por tenant. Si
+      // `asegurarMostrador()` ya creó uno nuevo mientras el viejo seguía en
+      // la papelera, `restore()` dispara 23505 al revivirlo.
+      repo.findOne.mockResolvedValue(
+        garzon({
+          id: 'g1',
+          nombre: 'Mostrador',
+          esPlaceholder: true,
+          activo: false,
+          eliminadoEl: new Date(),
+        }),
+      );
+      repo.restore.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
+
+      await expect(service.restaurar(TENANT, 'g1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(repo.findOneOrFail).not.toHaveBeenCalled();
+    });
+
+    it('restaurar() propaga cualquier otro error de Postgres tal cual (no lo traduce a 400)', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', nombre: 'Ana', eliminadoEl: new Date() }),
+      );
+      const otroError = Object.assign(new Error('conexión perdida'), {
+        code: '08006',
+      });
+      repo.restore.mockRejectedValueOnce(otroError);
+
+      await expect(service.restaurar(TENANT, 'g1')).rejects.toBe(otroError);
+    });
   });
 
   describe('listar con incluirEliminados', () => {

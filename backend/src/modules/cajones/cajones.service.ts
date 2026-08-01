@@ -112,7 +112,22 @@ export class CajonesService {
     if (!cajon || !cajon.eliminadoEl) {
       throw new NotFoundException(`Cajón ${id} no está en la papelera`);
     }
-    await this.cajonRepo.restore({ id, tenantId });
+    try {
+      await this.cajonRepo.restore({ id, tenantId });
+    } catch (e) {
+      // 23505 = unique_violation. `ux_cajones_tenant_nombre` es parcial
+      // (WHERE eliminado_el IS NULL): mientras el cajón estaba borrado nadie
+      // competía por el nombre, pero al revivirlo vuelve a competir. Se capta
+      // el código de Postgres —no una lista de índices a mano— para que valga
+      // también donde no lo enumeramos. Mismo patrón que
+      // causas-merma.service.ts → restaurar().
+      if ((e as { code?: string }).code === '23505') {
+        throw new BadRequestException(
+          'Ya existe un cajón activo con ese nombre. Renombrá el actual o el restaurado antes de continuar.',
+        );
+      }
+      throw e;
+    }
     return this.cajonRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
