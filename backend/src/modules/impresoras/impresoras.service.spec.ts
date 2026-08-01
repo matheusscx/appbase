@@ -162,6 +162,7 @@ describe('ImpresorasService', () => {
         tenantId: TENANT,
         nombre: 'Cocina (en la papelera)',
         eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
       });
       repo.findOneOrFail.mockResolvedValue({
         id: IMPRESORA,

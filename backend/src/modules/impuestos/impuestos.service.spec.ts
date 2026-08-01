@@ -239,6 +239,7 @@ describe('ImpuestosService', () => {
         tenantId: TENANT,
         nombre: 'IVA (en la papelera)',
         eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
       });
       repo.findOneOrFail.mockResolvedValue({
         id: IMP,

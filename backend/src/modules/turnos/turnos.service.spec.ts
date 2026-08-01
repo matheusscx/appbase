@@ -265,7 +265,11 @@ describe('TurnosService', () => {
   describe('restaurar', () => {
     it('restaurar() devuelve el turno RE-CONSULTADO tras el restore', async () => {
       repo.findOne.mockResolvedValue(
-        turno({ nombre: 'Almuerzo (en la papelera)', eliminadoEl: new Date() }),
+        turno({
+          nombre: 'Almuerzo (en la papelera)',
+          eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
+        }),
       );
       repo.findOneOrFail.mockResolvedValue(
         turno({ nombre: 'Almuerzo', eliminadoEl: null }),
@@ -298,6 +302,32 @@ describe('TurnosService', () => {
       );
       expect(repo.restore).not.toHaveBeenCalled();
     });
+
+    // Revisión final: `turnos` no tiene índice único de nombre en la base
+    // (medido: no hay `CREATE UNIQUE INDEX` sobre la tabla) — la unicidad la
+    // garantiza `crear()`/`actualizar()` SOLO en código (`assertNombreUnico`).
+    // `restaurar()` no la reusaba: se podía crear "Almuerzo", borrarlo, crear
+    // OTRO "Almuerzo", y restaurar el viejo dejaba dos turnos vivos con el
+    // mismo nombre.
+    it('restaurar() con el nombre ya ocupado por un turno vivo es 400, no revive nada', async () => {
+      repo.findOne
+        .mockResolvedValueOnce(
+          turno({
+            id: 't1',
+            nombre: 'Almuerzo',
+            eliminadoEl: new Date(),
+            eliminadoPor: USUARIO_ID,
+          }),
+        )
+        .mockResolvedValueOnce(
+          turno({ id: 't2', nombre: 'Almuerzo', eliminadoEl: null }),
+        );
+
+      await expect(service.restaurar(TENANT, 't1')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
   });
 
   describe('listar con incluirEliminados', () => {
@@ -310,6 +340,7 @@ describe('TurnosService', () => {
         leftJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         withDeleted: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getRawAndEntities: jest.fn().mockResolvedValue({

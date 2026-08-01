@@ -379,6 +379,7 @@ describe('RecargosService', () => {
         tenantId: TENANT,
         nombre: 'Rec (en la papelera)',
         eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
       });
       recargoRepoMock.findOneOrFail.mockResolvedValue({
         id: 'r1',
@@ -418,6 +419,28 @@ describe('RecargosService', () => {
 
       await expect(service.restaurar(TENANT, 'r1')).rejects.toThrow(
         NotFoundException,
+      );
+      expect(recargoRepoMock.restore).not.toHaveBeenCalled();
+    });
+
+    // Revisión final: `recargos` no tiene índice único de nombre en la base
+    // (medido: no hay `CREATE UNIQUE INDEX` sobre la tabla) — la unicidad la
+    // garantiza `create()`/`update()` SOLO en código (`validarNombreUnico`).
+    // `restaurar()` no la reusaba: se podía crear "Black Friday", borrarlo,
+    // crear OTRO "Black Friday", y restaurar el viejo dejaba dos recargos
+    // vivos con el mismo nombre.
+    it('restaurar() con el nombre ya ocupado por un recargo vivo es 400, no revive nada', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Black Friday',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      qbMock.getCount.mockResolvedValueOnce(1);
+
+      await expect(service.restaurar(TENANT, 'r1')).rejects.toBeInstanceOf(
+        BadRequestException,
       );
       expect(recargoRepoMock.restore).not.toHaveBeenCalled();
     });

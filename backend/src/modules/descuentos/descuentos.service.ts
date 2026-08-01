@@ -54,6 +54,10 @@ export class DescuentosService {
         .leftJoin('usuarios', 'u', 'u.usuario_id = d.eliminado_por')
         .addSelect('u.nombre_usuario', 'd_eliminado_por_nombre')
         .where('d.tenant_id = :tenantId', { tenantId })
+        // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+        // borrado del sistema (seeder, `remapImpuestosOficialesDuplicados`),
+        // no restaurable ni visible — decisión del owner, docs/features/papelera.md.
+        .andWhere('(d.eliminado_el IS NULL OR d.eliminado_por IS NOT NULL)')
         .withDeleted()
         .orderBy('d.nombre', 'ASC')
         .getRawAndEntities<{ d_eliminado_por_nombre: string | null }>();
@@ -273,14 +277,33 @@ export class DescuentosService {
   }
 
   async restaurar(tenantId: string, id: string): Promise<Descuento> {
-    // Una sola regla para los dos casos —no existe, o existe y está viva—:
-    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    // Una sola regla para los tres casos —no existe, existe y está viva, o
+    // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
+    // lo que borró una persona (decisión del owner, docs/features/papelera.md).
     const descuento = await this.descuentoRepo.findOne({
       where: { id, tenantId },
       withDeleted: true,
     });
-    if (!descuento || !descuento.eliminadoEl) {
+    if (!descuento || !descuento.eliminadoEl || !descuento.eliminadoPor) {
       throw new NotFoundException(`Descuento ${id} no está en la papelera`);
+    }
+    // `descuentos` no tiene índice único de nombre (medido: no hay `CREATE
+    // UNIQUE INDEX` sobre la tabla) — la unicidad la garantiza `create()`/
+    // `update()` en código vía `validarNombreUnico`, que filtra
+    // `eliminado_el IS NULL`. Sin este chequeo acá, restaurar reabre
+    // exactamente el hueco que esa validación existe para cerrar: borrar
+    // "Black Friday", crear otro "Black Friday", y restaurar el viejo
+    // dejaría dos vivos con el mismo nombre (reusa `nombreDisponible`, no
+    // una validación nueva).
+    const { disponible } = await this.nombreDisponible(
+      tenantId,
+      descuento.nombre,
+      id,
+    );
+    if (!disponible) {
+      throw new BadRequestException(
+        `Ya existe un descuento activo con el nombre "${descuento.nombre}". Renombrá el actual o el restaurado antes de continuar.`,
+      );
     }
     await this.descuentoRepo.restore({ id, tenantId });
     return this.descuentoRepo.findOneOrFail({ where: { id, tenantId } });

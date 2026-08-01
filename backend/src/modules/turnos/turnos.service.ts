@@ -76,6 +76,10 @@ export class TurnosService {
       .leftJoin('usuarios', 'u', 'u.usuario_id = t.eliminado_por')
       .addSelect('u.nombre_usuario', 't_eliminado_por_nombre')
       .where('t.tenant_id = :tenantId', { tenantId })
+      // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+      // borrado del sistema (seeder, `remapImpuestosOficialesDuplicados`),
+      // no restaurable ni visible — decisión del owner, docs/features/papelera.md.
+      .andWhere('(t.eliminado_el IS NULL OR t.eliminado_por IS NOT NULL)')
       .withDeleted()
       .orderBy('t.nombre', 'ASC')
       .getRawAndEntities<{ t_eliminado_por_nombre: string | null }>();
@@ -135,14 +139,35 @@ export class TurnosService {
   }
 
   async restaurar(tenantId: string, id: string): Promise<TurnoPublico> {
-    // Una sola regla para los dos casos —no existe, o existe y está viva—:
-    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    // Una sola regla para los tres casos —no existe, existe y está viva, o
+    // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
+    // lo que borró una persona (decisión del owner, docs/features/papelera.md).
     const turno = await this.turnoRepo.findOne({
       where: { id, tenantId },
       withDeleted: true,
     });
-    if (!turno || !turno.eliminadoEl) {
+    if (!turno || !turno.eliminadoEl || !turno.eliminadoPor) {
       throw new NotFoundException(`Turno ${id} no está en la papelera`);
+    }
+    // `turnos` no tiene índice único de nombre (medido: no hay `CREATE
+    // UNIQUE INDEX` sobre la tabla) — la unicidad la garantiza `crear()`/
+    // `actualizar()` en código vía `assertNombreUnico`, que excluye
+    // borrados (`findOne` con `@DeleteDateColumn` los filtra solo). Sin
+    // este chequeo acá, restaurar reabre exactamente el hueco que esa
+    // validación existe para cerrar (reusa `assertNombreUnico`, no una
+    // validación nueva). `assertNombreUnico` lanza `ConflictException`
+    // (409) porque así lo esperan `crear()`/`actualizar()` ya probados; acá
+    // se traduce a 400, el mismo status accionable que dan los recursos con
+    // índice único al restaurar.
+    try {
+      await this.assertNombreUnico(tenantId, turno.nombre, id);
+    } catch (e) {
+      if (e instanceof ConflictException) {
+        throw new BadRequestException(
+          `Ya existe un turno activo con el nombre "${turno.nombre}". Renombrá el actual o el restaurado antes de continuar.`,
+        );
+      }
+      throw e;
     }
     await this.turnoRepo.restore({ id, tenantId });
     const restaurado = await this.turnoRepo.findOneOrFail({

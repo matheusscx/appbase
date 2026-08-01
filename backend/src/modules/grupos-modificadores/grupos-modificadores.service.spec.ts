@@ -469,6 +469,33 @@ describe('GruposModificadoresService', () => {
         'connection lost',
       );
     });
+
+    // Revisión final: un mismo `catch(23505)` envolvía TODO `restaurar()`, y
+    // la CTE también revive `grupo_modificador_opciones` (su propio índice
+    // único: `uq_grupo_opcion_item_vivo`). Antes de este fix, cualquier 23505
+    // salía con el mensaje de "ya existe un grupo con ese nombre" — honesto
+    // solo para `uq_grupo_modificador_nombre_vivo`, no para el de las
+    // opciones. Se distingue por `e.constraint`, no por asumir que todo
+    // 23505 es la colisión de nombre.
+    it('restaurar() con 23505 de uq_grupo_opcion_item_vivo da un mensaje distinto al de colisión de nombre', async () => {
+      dataSourceMock.query.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), {
+          code: '23505',
+          constraint: 'uq_grupo_opcion_item_vivo',
+        }),
+      );
+
+      let error: unknown;
+      try {
+        await service.restaurar(TENANT_ID, GRUPO_ID);
+      } catch (e) {
+        error = e;
+      }
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).not.toContain('ese nombre');
+      expect((error as Error).message).toContain('opción viva');
+    });
   });
 
   describe('findAll', () => {

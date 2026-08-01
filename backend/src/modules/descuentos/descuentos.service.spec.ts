@@ -406,6 +406,7 @@ describe('DescuentosService', () => {
         tenantId: TENANT,
         nombre: 'Desc (en la papelera)',
         eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
       });
       descuentoRepoMock.findOneOrFail.mockResolvedValue({
         id: 'd1',
@@ -445,6 +446,28 @@ describe('DescuentosService', () => {
 
       await expect(service.restaurar(TENANT, 'd1')).rejects.toThrow(
         NotFoundException,
+      );
+      expect(descuentoRepoMock.restore).not.toHaveBeenCalled();
+    });
+
+    // Revisión final: `descuentos` no tiene índice único de nombre en la
+    // base (medido: no hay `CREATE UNIQUE INDEX` sobre la tabla) — la
+    // unicidad la garantiza `create()`/`update()` SOLO en código
+    // (`validarNombreUnico`). `restaurar()` no la reusaba: se podía crear
+    // "Black Friday", borrarlo, crear OTRO "Black Friday", y restaurar el
+    // viejo dejaba dos descuentos vivos con el mismo nombre.
+    it('restaurar() con el nombre ya ocupado por un descuento vivo es 400, no revive nada', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Black Friday',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      qbMock.getCount.mockResolvedValueOnce(1);
+
+      await expect(service.restaurar(TENANT, 'd1')).rejects.toBeInstanceOf(
+        BadRequestException,
       );
       expect(descuentoRepoMock.restore).not.toHaveBeenCalled();
     });

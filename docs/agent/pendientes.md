@@ -100,7 +100,76 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
 ## Papelera — restaurar eliminados (2026-07-31)
 
 Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`](../features/papelera.md).
-Quedan dos hallazgos que la feature dejó medidos, ninguno bloqueante para el cierre:
+
+⛔ **La decisión del owner "solo lo que borró una persona" está implementada A MEDIAS.**
+Las dos primeras entradas de abajo son los agujeros, verificados contra Postgres real el
+2026-08-01 por la re-revisión de la ola de fixes final. **La pantalla de impuestos no debe
+cablearse hasta cerrarlas**: la segunda reabre la doble tributación de
+[ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md).
+
+El owner decidió el 2026-08-01 cerrar la feature acá y dejarlas anotadas.
+
+- [ ] **El listado de `impuestos` no filtra los borrados del sistema — el `OR` sin
+  parentizar** (backend, `impuestos.service.ts:76-90`) — la query arma
+  `qb.where('i.tenant_id = :tenantId OR i.pais_id = :paisId')` y después
+  `qb.andWhere('(i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)')`. **TypeORM no
+  parentiza los `where`/`andWhere`** salvo con `isolateWhereStatements`, que no está
+  seteado, así que el SQL emitido es `WHERE tenant_id = $1 OR pais_id = $2 AND (...)` y
+  `AND` liga más fuerte: **las filas del tenant se saltan el filtro entero**.
+  **Reproducido dos veces, la segunda sobre BD recién sembrada:** crear un impuesto por
+  API, marcarle `eliminado_el` sin `eliminado_por` (imitando al seeder), y
+  `GET /impuestos?incluirEliminados=true` lo devuelve. Prueba de que es precedencia y no
+  otra cosa: el mismo escenario sobre un impuesto de **país** (la otra rama del `OR`) sí
+  lo esconde. Los otros 15 recursos se verificaron uno por uno por API: **15/16 correctos,
+  solo `impuestos` falla**, y es justo el que motivó la decisión.
+  **Cierre:** parentizar la condición del `OR`, o `isolateWhereStatements`, o mover el
+  filtro dentro de cada rama.
+
+- [ ] **`restaurar()` no limpia `eliminado_por`, y eso permite burlar la regla por API**
+  (backend, los 16 recursos — `items.service.ts:1943`, `salones.service.ts:343`,
+  `categorias.service.ts:121` vía `.restore()`, y los demás) — ninguno pone
+  `eliminado_por = NULL` al revivir. Como `remapImpuestosOficialesDuplicados`
+  (`seeder.service.ts:2414`) solo escribe `eliminado_el`, un `eliminado_por` viejo
+  sobrevive y **disfraza el borrado del sistema como borrado de persona**.
+  **Secuencia ejecutada de punta a punta sobre el caso que motivó la decisión:**
+  `POST /impuestos` ("IVA casero 19", 0.19) → `DELETE` (queda `eliminado_por = admin.paris`)
+  → `POST /restaurar` (201; limpia `eliminado_el`, **deja `eliminado_por`**) → reiniciar el
+  backend, el seeder soft-deletea el duplicado → `GET ?incluirEliminados=true` lo muestra
+  → `POST /restaurar` **201, restaurado**. El duplicado vuelve a la vida, y sin sus
+  `item_impuestos` —que el seeder borró con `DELETE` físico—, o sea reabre el 38% de
+  ADR-018 con tres llamadas públicas y un reinicio.
+  **Cierre:** `SET eliminado_el = NULL, eliminado_por = NULL` en los 16 `restaurar()`.
+
+- [ ] **Los unit tests del listado con `incluirEliminados` no prueban nada** (backend, 12
+  `qbMock` de la familia TypeORM) — los mocks agregados son
+  `andWhere: jest.fn().mockReturnThis()` **sin ninguna aserción sobre el argumento**.
+  Medido: borrando el `.andWhere(...)` de `categorias.service.ts:53` la suite unitaria
+  **sigue 100% verde**; solo cae el e2e. Y el e2e de esta regla cubre 2 de 16
+  (`categorias` e `items`). **Por eso el gate dio verde con las dos entradas de arriba
+  adentro** — es el octavo test de esta feature que pasa sin probar lo que su nombre dice.
+  **Cierre:** asertar los argumentos de `andWhere` en los unit tests de la familia, o
+  parametrizar el e2e de "borrado del sistema" sobre los 16 (es el mismo test repetido).
+
+- [ ] **`pendientes.md` clasifica mal a `grupos-modificadores.vue` para el fix de la
+  carrera** (doc, la entrada de las 13 pantallas, más abajo) — dice que es la única
+  pendiente que usa `usePaginatedList` y que por eso "ya hereda el fix, nada que hacer".
+  **No usa el composable**: solo importa el tipo `PaginatedResponse` y tiene su propio
+  `cargar()` sin `cargaEnCurso`. Con esa instrucción, el próximo implementador salta justo
+  la pantalla que necesita el arreglo. El conteo de consumidores del composable también
+  está mal (dice 14, son 10 call sites, 2 de ellos componentes) — mismo error en el
+  comentario de `usePaginatedList.ts:52`.
+
+- [ ] **Dos afirmaciones sueltas en `docs/features/papelera.md`** (doc) — el bloque de
+  contrato de la API (`:102-106`) sigue diciendo que el 400 de colisión sale "en las 5
+  entidades con nombre único y también en `garzones`", sin sumar `descuentos`, `recargos`
+  y `turnos`, que se agregaron en la ola de fixes final; contradice la sección "Colisión al
+  restaurar" 60 líneas más abajo. Y ninguna doc menciona el riesgo aceptado del PIN de
+  `garzones`: `generarPinUnico` promete unicidad "para que la identificación solo por PIN
+  no sea ambigua", pero los PIN son bcrypt y no se pueden comparar en `restaurar()`, así
+  que restaurar un garzón puede romper esa garantía (1 en 10⁶). Se descartó arreglarlo con
+  buen criterio; falta que esté escrito donde alguien lo lea.
+
+Y dos hallazgos que la feature dejó medidos y no son suyos:
 
 - [ ] **El esquema mezcla `TIMESTAMPTZ` y `TIMESTAMP` sin zona en la misma columna
   lógica, y compararlas depende del `TimeZone` de sesión** (backend, transversal) —
@@ -166,6 +235,28 @@ Quedan dos hallazgos que la feature dejó medidos, ninguno bloqueante para el ci
   solo un test de página cazaría — build/typecheck/reviews no lo ven, como ya pasó
   una vez con el guard de reentrancia de `items.vue`, ver "Revisión final
   `borrado-ingrediente-extra`" más abajo).
+  ⚠️ **Corregido (revisión final `papelera-restaurar-eliminados`):** falta un
+  segundo fix, aparte del de `eliminar()` — la **carrera del toggle**. Dos
+  toggles rápidos de "ver eliminados" disparan dos `GET` en vuelo; sin
+  protección, gana el que responda último y no el que se disparó último (el
+  listado final puede quedar desincronizado del switch). `categorias.vue` ya
+  la tenía resuelta con una cola serial local (`cargaEnCurso` en `cargar()`);
+  `items.vue` NO la tenía — el refetch lo dispara el `watch` de filtros de
+  `usePaginatedList`, sin ninguna protección. El fix quedó en el composable
+  (`usePaginatedList.ts` → `fetch()`, misma cola serial), porque ahí lo
+  hereda cualquier pantalla que ya use `usePaginatedList` (`grupos-modificadores.vue`
+  es la única de las 13 restantes que lo usa hoy) sin nada que replicar. **Las
+  pantallas que NO usan `usePaginatedList`** (`descuentos`, `recargos`,
+  `impuestos`, `terceros`, `cajones`, `garzones`, `turnos`, `salones`,
+  `impresoras`, `causas-merma`, `motivos-diferencia`,
+  `motivos-diferencia-inventario` — todas con su propio `cargar()` local, como
+  `categorias.vue`) necesitan la MISMA cola serial local que `categorias.vue`
+  ya tiene (`cargaEnCurso`), no el fix del composable: copiar ese patrón, no
+  reinventar uno nuevo. Test determinístico por pantalla: promesas
+  controladas que resuelven en orden inverso al de los dos toggles, como
+  `categorias.nuxt.spec.ts` → "papelera: la carrera de `cargar()` bajo
+  toggles rápidos" (o `items.nuxt.spec.ts` → "papelera: la carrera del toggle
+  vía usePaginatedList" para las que sí usan el composable).
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 

@@ -208,9 +208,12 @@ export class ItemsService {
     let idx = 2;
     // Papelera: `incluirEliminados` trae vivos Y borrados en el mismo
     // listado (igual que categorías/causas de merma); sin el flag, el
-    // filtro de siempre.
+    // filtro de siempre. Entre los borrados, solo los que borró una
+    // persona: `eliminado_por IS NULL` es un borrado del sistema (seeder,
+    // `remapImpuestosOficialesDuplicados`), no restaurable ni visible —
+    // decisión del owner, ver docs/features/papelera.md.
     let where = query.incluirEliminados
-      ? ` WHERE i.tenant_id = $1`
+      ? ` WHERE i.tenant_id = $1 AND (i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)`
       : ` WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL`;
 
     if (query.tipo) {
@@ -1929,12 +1932,18 @@ export class ItemsService {
     // comentario aunque alguien borrara el cast funcional del `WHERE` —
     // exactamente el escenario que un mutante tiene que cazar y no cazaba
     // (ver el test de `restaurar()` en items.service.spec.ts).
+    //
+    // `AND eliminado_por IS NOT NULL`: decisión del owner — la papelera solo
+    // restaura lo que borró una persona. Un ítem borrado por el sistema
+    // (`eliminado_por IS NULL`) da el mismo 404 "no está en la papelera" que
+    // uno que nunca existió, sin rama especial (docs/features/papelera.md).
     const rows = unwrap<{ item_id: string }>(
       await this.dataSource.query(
         `WITH restaurado AS (
            UPDATE items
               SET eliminado_el = NULL, actualizado_el = NOW()
             WHERE item_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
+              AND eliminado_por IS NOT NULL
            RETURNING item_id,
                      (SELECT eliminado_el FROM items
                         WHERE item_id = $1 AND tenant_id = $2) AS eliminado_el_previo

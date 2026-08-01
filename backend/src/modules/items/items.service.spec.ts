@@ -260,7 +260,7 @@ describe('ItemsService', () => {
       expect(dataSource.query).toHaveBeenCalledTimes(2);
     });
 
-    it('incluirEliminados=true no filtra eliminado_el y trae quién borró (batch, no N+1)', async () => {
+    it('incluirEliminados=true no EXCLUYE lo borrado por una persona y trae quién borró (batch, no N+1)', async () => {
       dataSource.query
         .mockResolvedValueOnce([{ total: 1 }]) // count
         .mockResolvedValueOnce([
@@ -302,8 +302,18 @@ describe('ItemsService', () => {
         incluirEliminados: true,
       });
 
+      // Revisión final: `incluirEliminados` ya NO es "sin filtro alguno" —
+      // decisión del owner, la papelera solo expone lo que borró una
+      // persona. La query SÍ contiene `eliminado_el IS NULL` (rama de los
+      // vivos), pero como parte de un OR con `eliminado_por IS NOT NULL`,
+      // nunca como un AND que excluya lo borrado sin más (eso es lo que el
+      // test original cazaba: que no hubiera un filtro duro de "solo
+      // vivos").
+      expect(dataSource.query.mock.calls[0][0]).toContain(
+        '(i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)',
+      );
       expect(dataSource.query.mock.calls[0][0]).not.toContain(
-        'eliminado_el IS NULL',
+        'AND i.eliminado_el IS NULL',
       );
       // 3 llamadas totales (count + filas + UNA de auditoría): la de
       // auditoría es batch por página, no una por fila.

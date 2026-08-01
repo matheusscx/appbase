@@ -69,6 +69,9 @@ export class CausasMermaService {
     // `eliminado_el` de `usuarios` a propósito: el autor de un borrado es un
     // hecho histórico (docs/patterns/backend.md, ver categorias.service.ts →
     // findAll).
+    // Solo lo que borró una persona: `eliminado_por IS NULL` es un borrado
+    // del sistema, no restaurable ni visible — decisión del owner,
+    // docs/features/papelera.md.
     const rows: CausaMermaRowConEliminado[] = await this.dataSource.query(
       `SELECT cm.causa_merma_id, cm.nombre, cm.activo, cm.es_fijo,
               cm.eliminado_el, cm.eliminado_por,
@@ -76,6 +79,7 @@ export class CausasMermaService {
          FROM causas_merma cm
          LEFT JOIN usuarios u ON u.usuario_id = cm.eliminado_por
         WHERE cm.tenant_id = $1
+          AND (cm.eliminado_el IS NULL OR cm.eliminado_por IS NOT NULL)
           ${soloActivas ? 'AND cm.activo = true' : ''}
         ORDER BY cm.es_fijo DESC, cm.nombre ASC`,
       [tenantId],
@@ -198,13 +202,15 @@ export class CausasMermaService {
           `UPDATE causas_merma
               SET eliminado_el = NULL, actualizado_el = NOW()
             WHERE causa_merma_id = $1 AND tenant_id = $2
-              AND eliminado_el IS NOT NULL
+              AND eliminado_el IS NOT NULL AND eliminado_por IS NOT NULL
           RETURNING causa_merma_id, nombre, activo, es_fijo,
                     eliminado_el, eliminado_por`,
           [id, tenantId],
         ),
       );
       if (!rows.length) {
+        // `AND eliminado_por IS NOT NULL` arriba: decisión del owner — la
+        // papelera solo restaura lo que borró una persona (docs/features/papelera.md).
         throw new NotFoundException(
           `Causa de merma ${id} no está en la papelera`,
         );

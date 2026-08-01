@@ -183,6 +183,13 @@ export class SalonesService {
     // `eliminado_el` a propósito: el autor de un borrado es un hecho
     // histórico (docs/patterns/backend.md, ver categorias.service.ts →
     // findAll).
+    // Solo lo que borró una persona: `eliminado_por IS NULL` es un borrado
+    // del sistema, no restaurable ni visible — decisión del owner,
+    // docs/features/papelera.md. Se aplica por separado a salón y mesa: una
+    // mesa borrada por el sistema bajo un salón borrado por una persona no
+    // debe colarse (y viceversa), así que el filtro de la mesa va en el
+    // JOIN (para no perder el salón cuando la mesa queda afuera) y el del
+    // salón en el WHERE.
     const rows: SalonMesaRow[] = await this.dataSource.query(
       `SELECT s.salon_id, s.nombre AS salon_nombre,
               s.eliminado_el AS salon_eliminado_el,
@@ -194,6 +201,7 @@ export class SalonesService {
               COALESCE(c.abiertas, 0) AS cuentas_abiertas
          FROM salones s
          LEFT JOIN mesas m ON m.salon_id = s.salon_id
+              AND (m.eliminado_el IS NULL OR m.eliminado_por IS NOT NULL)
          LEFT JOIN usuarios us ON us.usuario_id = s.eliminado_por
          LEFT JOIN usuarios um ON um.usuario_id = m.eliminado_por
          LEFT JOIN (
@@ -203,6 +211,7 @@ export class SalonesService {
             GROUP BY mesa_id
          ) c ON c.mesa_id = m.mesa_id
         WHERE s.tenant_id = $1
+          AND (s.eliminado_el IS NULL OR s.eliminado_por IS NOT NULL)
         ORDER BY s.nombre ASC, m.nombre ASC`,
       [tenantId],
     );
@@ -333,6 +342,7 @@ export class SalonesService {
            UPDATE salones
               SET eliminado_el = NULL, actualizado_el = NOW()
             WHERE salon_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
+              AND eliminado_por IS NOT NULL
            RETURNING salon_id,
                      (SELECT eliminado_el FROM salones
                         WHERE salon_id = $1 AND tenant_id = $2) AS eliminado_el_previo
@@ -349,6 +359,8 @@ export class SalonesService {
       ),
     );
     if (!rows.length) {
+      // `AND eliminado_por IS NOT NULL` arriba: decisión del owner — la
+      // papelera solo restaura lo que borró una persona (docs/features/papelera.md).
       throw new NotFoundException(`Salón ${id} no está en la papelera`);
     }
     return this.salonRepo.findOneOrFail({ where: { id, tenantId } });
@@ -426,11 +438,14 @@ export class SalonesService {
         `UPDATE mesas
             SET eliminado_el = NULL, actualizado_el = NOW()
           WHERE mesa_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
+            AND eliminado_por IS NOT NULL
           RETURNING mesa_id`,
         [id, tenantId],
       ),
     );
     if (!rows.length) {
+      // `AND eliminado_por IS NOT NULL` arriba: decisión del owner — la
+      // papelera solo restaura lo que borró una persona (docs/features/papelera.md).
       throw new NotFoundException(`Mesa ${id} no está en la papelera`);
     }
     return this.mesaRepo.findOneOrFail({ where: { id, tenantId } });

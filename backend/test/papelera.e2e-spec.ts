@@ -174,6 +174,102 @@ describe('Papelera (e2e) — categorías, patrón de referencia', () => {
   });
 });
 
+// Revisión final de la feature: decisión del owner — la papelera solo
+// expone y restaura lo que borró UNA PERSONA. El seeder soft-deletea filas
+// como corrección del sistema (`remapImpuestosOficialesDuplicados`,
+// ADR-018) sin `eliminado_por`; esas filas quedan invisibles e
+// irrestaurables, igual que cualquier fila borrada ANTES de esta feature
+// (también sin `eliminado_por` — indistinguible de un borrado del sistema,
+// ver docs/features/papelera.md). Se simula el borrado del sistema con un
+// `UPDATE` directo (sin pasar por `DELETE /api/...`, que siempre setea
+// `eliminado_por` al usuario autenticado) para no depender de que el seed
+// produzca un duplicado de IVA real en el momento exacto de correr el test.
+// Dos familias, mismo criterio, código distinto: `categorias` (softDelete()
+// de TypeORM) e `items` (SQL crudo).
+describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona', () => {
+  let app: INestApplication<App>;
+  let ds: DataSource;
+  let tokenAdmin: string;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    ds = app.get(DataSource);
+    tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+  }, 60000);
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('categorías (familia softDelete): una fila borrada sin eliminado_por no aparece en la papelera ni se puede restaurar', async () => {
+    const resCrear = await request(app.getHttpServer())
+      .post('/api/categorias')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: `Categoría borrado-sistema E2E ${Date.now()}` });
+    expect(resCrear.status).toBe(201);
+    const id = (resCrear.body as CategoriaItem).id;
+
+    await ds.query(
+      `UPDATE categorias SET eliminado_el = NOW() WHERE categoria_id = $1`,
+      [id],
+    );
+
+    const listado = await request(app.getHttpServer())
+      .get('/api/categorias?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
+    expect(
+      (listado.body as CategoriaItem[]).find((c) => c.id === id),
+    ).toBeUndefined();
+
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/categorias/${id}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(404);
+  });
+
+  it('items (familia SQL cruda): un item borrado sin eliminado_por no aparece en la papelera ni se puede restaurar', async () => {
+    const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
+    const resCrear = await request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({
+        nombre: `Item borrado-sistema E2E ${Date.now()}`,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'servicio',
+      });
+    expect(resCrear.status).toBe(201);
+    const id = (resCrear.body as { id: string }).id;
+
+    await ds.query(`UPDATE items SET eliminado_el = NOW() WHERE item_id = $1`, [
+      id,
+    ]);
+
+    const listado = await request(app.getHttpServer())
+      .get('/api/items?incluirEliminados=true&pageSize=100')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
+    const data = (listado.body as { data: { id: string }[] }).data;
+    expect(data.find((i) => i.id === id)).toBeUndefined();
+
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/items/${id}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(404);
+  });
+});
+
 // Task 3: causas de merma — segunda referencia. Familia SQL cruda (no
 // softDelete() de TypeORM) y con nombre único por tenant, así que agrega el
 // 400 de colisión al restaurar: el índice único es parcial (WHERE
@@ -1066,6 +1162,170 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
 
     const resRestaurarOk = await request(app.getHttpServer())
       .post(`/api/cajones/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurarOk.status).toBe(201);
+  });
+
+  // Revisión final: `descuentos`/`recargos`/`turnos` NO tienen índice único
+  // de nombre en la base (medido: no hay `CREATE UNIQUE INDEX` sobre esas
+  // tablas en startup-pos.sql) — la unicidad la garantizan `create()`/
+  // `update()` SOLO en código (`validarNombreUnico`/`assertNombreUnico`, que
+  // filtran `eliminado_el IS NULL`). `restaurar()` no reusaba esa validación:
+  // se podía crear "Black Friday", borrarlo, crear OTRO "Black Friday", y
+  // restaurar el viejo — quedando dos vivos con el mismo nombre, un estado
+  // que `create()`/`update()` nunca dejan alcanzar. Estos tres tests montan
+  // esa secuencia real contra Postgres, igual que el de `cajones` de arriba
+  // pero SIN índice único de por medio: si `restaurar()` volviera a saltarse
+  // la validación, esto daría 201 en vez de 400 y dejaría el duplicado vivo.
+  it('descuentos: colisión de nombre garantizada por código (sin índice único) — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+    const nombre = `Descuento papelera E2E colisión ${Date.now()}`;
+    const bodyBase = {
+      nombre,
+      tipoReglaId: DESCUENTO_DIRECTO_TIPO_ID,
+      modo: 'porcentaje',
+    };
+    const resOriginal = await request(app.getHttpServer())
+      .post('/api/descuentos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(bodyBase);
+    expect(resOriginal.status).toBe(201);
+    const originalId = (resOriginal.body as RecursoConAuditoria).id;
+
+    const resBorrar = await request(app.getHttpServer())
+      .delete(`/api/descuentos/${originalId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrar.status).toBe(200);
+
+    // Mientras `originalId` estaba borrado, `validarNombreUnico` (que filtra
+    // `eliminado_el IS NULL`) dejó el nombre libre.
+    const resOtro = await request(app.getHttpServer())
+      .post('/api/descuentos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(bodyBase);
+    expect(resOtro.status).toBe(201);
+    const otroId = (resOtro.body as RecursoConAuditoria).id;
+
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/descuentos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(400);
+
+    const listado = await request(app.getHttpServer())
+      .get('/api/descuentos?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const descuentos = listado.body as RecursoConAuditoria[];
+    expect(descuentos.find((d) => d.id === otroId)?.eliminadoEl).toBeFalsy();
+    expect(
+      descuentos.find((d) => d.id === originalId)?.eliminadoEl,
+    ).toBeTruthy();
+
+    // Limpieza: sin el descuento activo que ocupa el nombre, restaurar sí puede.
+    const resBorrarOtro = await request(app.getHttpServer())
+      .delete(`/api/descuentos/${otroId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrarOtro.status).toBe(200);
+
+    const resRestaurarOk = await request(app.getHttpServer())
+      .post(`/api/descuentos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurarOk.status).toBe(201);
+  });
+
+  it('recargos: colisión de nombre garantizada por código (sin índice único) — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+    const nombre = `Recargo papelera E2E colisión ${Date.now()}`;
+    const bodyBase = {
+      nombre,
+      tipoReglaId: RECARGO_GENERAL_TIPO_ID,
+      valor: '0.05',
+      modo: 'porcentaje',
+    };
+    const resOriginal = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(bodyBase);
+    expect(resOriginal.status).toBe(201);
+    const originalId = (resOriginal.body as RecursoConAuditoria).id;
+
+    const resBorrar = await request(app.getHttpServer())
+      .delete(`/api/recargos/${originalId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrar.status).toBe(200);
+
+    const resOtro = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(bodyBase);
+    expect(resOtro.status).toBe(201);
+    const otroId = (resOtro.body as RecursoConAuditoria).id;
+
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/recargos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(400);
+
+    const listado = await request(app.getHttpServer())
+      .get('/api/recargos?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const recargos = listado.body as RecursoConAuditoria[];
+    expect(recargos.find((r) => r.id === otroId)?.eliminadoEl).toBeFalsy();
+    expect(recargos.find((r) => r.id === originalId)?.eliminadoEl).toBeTruthy();
+
+    const resBorrarOtro = await request(app.getHttpServer())
+      .delete(`/api/recargos/${otroId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrarOtro.status).toBe(200);
+
+    const resRestaurarOk = await request(app.getHttpServer())
+      .post(`/api/recargos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurarOk.status).toBe(201);
+  });
+
+  it('turnos: colisión de nombre garantizada por código (sin índice único) — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+    const nombre = `Turno papelera E2E colisión ${Date.now()}`;
+    const bodyBase = { nombre, horaInicio: '12:00', horaFin: '14:00' };
+    const resOriginal = await request(app.getHttpServer())
+      .post('/api/turnos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(bodyBase);
+    expect(resOriginal.status).toBe(201);
+    const originalId = (resOriginal.body as RecursoConAuditoria).id;
+
+    const resBorrar = await request(app.getHttpServer())
+      .delete(`/api/turnos/${originalId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrar.status).toBe(200);
+
+    const resOtro = await request(app.getHttpServer())
+      .post('/api/turnos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(bodyBase);
+    expect(resOtro.status).toBe(201);
+    const otroId = (resOtro.body as RecursoConAuditoria).id;
+
+    // `assertNombreUnico` de turnos lanza `ConflictException` (409) en
+    // `crear()`/`actualizar()` — se mantiene así, sin tocar. `restaurar()`
+    // traduce esa misma validación a 400, el mismo status accionable que dan
+    // los recursos con índice único.
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/turnos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(400);
+
+    const listado = await request(app.getHttpServer())
+      .get('/api/turnos?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    const turnos = listado.body as RecursoConAuditoria[];
+    expect(turnos.find((t) => t.id === otroId)?.eliminadoEl).toBeFalsy();
+    expect(turnos.find((t) => t.id === originalId)?.eliminadoEl).toBeTruthy();
+
+    const resBorrarOtro = await request(app.getHttpServer())
+      .delete(`/api/turnos/${otroId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrarOtro.status).toBe(200);
+
+    const resRestaurarOk = await request(app.getHttpServer())
+      .post(`/api/turnos/${originalId}/restaurar`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(resRestaurarOk.status).toBe(201);
   });

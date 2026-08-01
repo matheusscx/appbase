@@ -43,6 +43,10 @@ export class ImpresorasService {
       .leftJoin('usuarios', 'u', 'u.usuario_id = i.eliminado_por')
       .addSelect('u.nombre_usuario', 'i_eliminado_por_nombre')
       .where('i.tenant_id = :tenantId', { tenantId })
+      // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+      // borrado del sistema, no restaurable ni visible — decisión del
+      // owner, docs/features/papelera.md.
+      .andWhere('(i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)')
       .withDeleted()
       .orderBy('i.nombre', 'ASC');
     if (rol) {
@@ -105,13 +109,14 @@ export class ImpresorasService {
   }
 
   async restaurar(tenantId: string, id: string): Promise<Impresora> {
-    // Una sola regla para los dos casos —no existe, o existe y está viva—:
-    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    // Una sola regla para los tres casos —no existe, existe y está viva, o
+    // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
+    // lo que borró una persona (decisión del owner, docs/features/papelera.md).
     const impresora = await this.impresoraRepo.findOne({
       where: { id, tenantId },
       withDeleted: true,
     });
-    if (!impresora || !impresora.eliminadoEl) {
+    if (!impresora || !impresora.eliminadoEl || !impresora.eliminadoPor) {
       throw new NotFoundException(`Impresora ${id} no está en la papelera`);
     }
     await this.impresoraRepo.restore({ id, tenantId });

@@ -90,10 +90,15 @@ POST /<recurso>/:id/restaurar
 
 Authorization: Bearer <token>   (mismo guard que el DELETE de ese recurso)
 
-Response (200): la entidad restaurada.
-Response (404): "<recurso> no está en la papelera" — no existe, o existe y
-                  está vivo. Una sola regla (WHERE ... AND eliminado_el IS
-                  NOT NULL), sin rama que distinga los dos casos.
+Response (201): la entidad restaurada. (No hay `@HttpCode(200)` en ninguno
+                  de los 16 — Nest devuelve 201 por default en un POST, y
+                  ninguno lo pisa.)
+Response (404): "<recurso> no está en la papelera" — no existe, existe y
+                  está vivo, o existe borrada pero por el SISTEMA (no por
+                  una persona: ver "Solo lo que borró una persona" abajo).
+                  Una sola regla (WHERE ... AND eliminado_el IS NOT NULL AND
+                  eliminado_por IS NOT NULL), sin rama que distinga los tres
+                  casos.
 Response (400): en las 5 entidades con nombre único por tenant
                   (grupos-modificadores, causas-merma, motivos-diferencia,
                   motivos-diferencia-inventario, cajones) y también en
@@ -137,7 +142,7 @@ esta regla:
 
 - `items.remove()` soft-deletea `receta_extras_permitidos` en las dos direcciones
   (como ingrediente y como receta que ofrece el extra).
-- `salones.remove()` soft-deletea todas las `mesas` del salón antes de borrarlo.
+- `salones.eliminarSalon()` soft-deletea todas las `mesas` del salón antes de borrarlo.
 - `grupos-modificadores.remove()` soft-deletea las `grupo_modificador_opciones` del
   grupo antes de borrarlo.
 
@@ -152,15 +157,34 @@ ni se bloquea la operación. Mismo patrón que Square, Toast y Clover.
 
 ### Colisión al restaurar → 400
 
-Cinco de los 16 recursos tienen **nombre único por tenant** vía índice parcial
-(`WHERE eliminado_el IS NULL`): `grupos-modificadores`, `causas-merma`,
-`motivos-diferencia`, `motivos-diferencia-inventario`, `cajones`. Si alguien ocupó
-el nombre mientras la fila estaba en la papelera, `restaurar()` capta el
-`23505` (unique_violation) de Postgres y responde 400 pidiendo renombrar el vivo o
-el restaurado — no sobrescribe en silencio ni intenta un nombre alternativo. De las
-7 entidades de catálogo del negocio, **seis** (`items`, `categorias`, `descuentos`,
-`recargos`, `impuestos`, `terceros`) no tienen esa unicidad; la séptima,
-`grupos-modificadores`, sí (ya está en la lista de arriba) — medido, no supuesto.
+La unicidad de nombre por tenant no es una propiedad de familia de borrado (SQL
+cruda vs. `softDelete()`): hay que medirla recurso por recurso, por índice **o**
+por código. Medido para los 16:
+
+- **Por índice único parcial** (`WHERE eliminado_el IS NULL`) — cinco recursos:
+  `grupos-modificadores`, `causas-merma`, `motivos-diferencia`,
+  `motivos-diferencia-inventario`, `cajones`. Si alguien ocupó el nombre mientras
+  la fila estaba en la papelera, `restaurar()` capta el `23505` (unique_violation)
+  de Postgres y responde 400 pidiendo renombrar el vivo o el restaurado — no
+  sobrescribe en silencio ni intenta un nombre alternativo.
+- **Solo por código** (sin índice en la base) — tres recursos: `descuentos`
+  (`validarNombreUnico`), `recargos` (`validarNombreUnico`), `turnos`
+  (`assertNombreUnico`). Los tres reusan en `create()`/`update()` una función que
+  filtra `eliminado_el IS NULL` (o, en `turnos`, un `findOne` que TypeORM ya
+  filtra solo por el `@DeleteDateColumn`) — sin índice de por medio, Postgres no
+  tira `23505`, así que `restaurar()` llama a esa MISMA función antes de revivir
+  la fila y traduce el resultado al mismo 400 accionable. Antes de esta
+  corrección, ninguno de los tres la llamaba: se podía crear "Black Friday",
+  borrarlo, crear otro "Black Friday", y restaurar el viejo dejaba dos vivos con
+  el mismo nombre — un estado que `create()`/`update()` nunca dejan alcanzar.
+- **Sin unicidad de ningún tipo** — siete recursos: `items`, `categorias`,
+  `impuestos`, `terceros` (catálogo del negocio), `salones`, `mesas`, `impresoras`
+  (config operativa). Ahí la colisión no puede ocurrir porque no hay regla que
+  colisionar.
+
+Total: 5 (índice) + 3 (código) + 7 (sin unicidad) = 15. El recurso 16,
+`garzones`, tiene índice único parcial pero NO de nombre — es un caso aparte,
+documentado abajo.
 
 **`garzones` tiene una restricción única parcial distinta — no es nombre único.**
 `uq_garzones_mostrador_tenant` (`(tenant_id) WHERE es_placeholder = true AND
@@ -179,6 +203,54 @@ de TypeORM) en vez de por la propiedad que importa —tener un índice único
 parcial—, y `cajones`/`garzones` (familia `softDelete()`) quedaron sin el `catch`
 del `23505`: devolvían 500 donde esta doc prometía 400. Ya corregido; los dos
 capturan el error igual que los otros cuatro.
+
+### Solo lo que borró una persona
+
+> ⚠️ **La regla de abajo está implementada a medias. No confíes en ella todavía.**
+> Verificado contra Postgres el 2026-08-01, con dos agujeros abiertos:
+>
+> 1. **El listado de `impuestos` no filtra** — el `OR` de tenant/país no está
+>    parentizado y `AND` liga más fuerte, así que las filas del tenant se saltan la
+>    condición entera. Es el recurso que motivó la decisión.
+> 2. **`restaurar()` no limpia `eliminado_por` en ninguno de los 16**, así que
+>    borrar → restaurar → que el sistema lo borre deja un `eliminado_por` viejo que
+>    disfraza el borrado del sistema como borrado de persona.
+>
+> Los dos están en [`pendientes.md`](../agent/pendientes.md) con la evidencia y la
+> secuencia para reproducirlos. **La pantalla de impuestos no debe cablearse hasta
+> que se cierren**, porque el segundo camino reabre la doble tributación de
+> [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md).
+
+**Decisión del owner (2026-08):** la papelera solo expone y restaura filas con
+`eliminado_por` **no nulo**. Aplica a los 16 recursos, en las dos puertas —el
+listado con `incluirEliminados` y `restaurar()`— con una sola regla, sin casos
+especiales por recurso:
+
+- **Listado**: una fila aparece si está viva (`eliminado_el IS NULL`) **o** si la
+  borró una persona (`eliminado_por IS NOT NULL`). Nunca si está borrada y
+  `eliminado_por` es nulo.
+- **`restaurar()`**: el `WHERE` de "está en la papelera" exige `eliminado_el IS
+  NOT NULL AND eliminado_por IS NOT NULL`. Si falta cualquiera de los dos, es el
+  mismo 404 "no está en la papelera" que da un id inexistente — una sola regla,
+  sin rama que distinga "no existe" de "lo borró el sistema".
+
+**Por qué:** el seeder soft-deletea filas como corrección del sistema —
+`remapImpuestosOficialesDuplicados` (`seeder.service.ts`) borra impuestos
+duplicados de IVA para evitar la doble tributación del 38% (ver
+[ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md))— sin
+`eliminado_por`. Antes de esta corrección esas filas eran visibles y
+restaurables desde la papelera, lo que reabría el agujero fiscal que
+`remapImpuestosOficialesDuplicados` existe para cerrar; y se restauraban
+**incompletas**, porque el seeder además borra sus asociaciones (`item_impuestos`)
+con `DELETE` físico, que la papelera no revive.
+
+**Consecuencia medida, no un efecto colateral que se descubrió después:** las
+filas borradas **antes** de que existiera esta feature tampoco tienen
+`eliminado_por` (la columna es nueva y nullable — no hubo backfill, ver
+"Esquema" arriba), así que **tampoco aparecen** en la papelera. Es coherente con
+la decisión del owner: una fila borrada antes de esta feature es indistinguible
+de una borrada por el sistema — en ninguno de los dos casos hay una persona
+identificable a quien devolverle el "click" de restaurar.
 
 ---
 
@@ -205,15 +277,33 @@ array — tiene que **recargar la lista** (`fetchItems()`/equivalente), porque e
 `DELETE` no devuelve `eliminadoEl`/`eliminadoPorNombre` (solo el próximo `GET` los
 trae). Ver `eliminar()` en `configuracion/items.vue`.
 
+Otro detalle no obvio: dos toggles rápidos de "ver eliminados" disparan dos `GET`
+en vuelo, y sin protección gana el que responda último, no el último click. Las
+pantallas con `cargar()` propio (como `categorias.vue`) necesitan su propia cola
+serial local (`cargaEnCurso`); las que usan `usePaginatedList` (como `items.vue`)
+ya la heredan del composable (`usePaginatedList.ts` → `fetch()`), sin nada que
+replicar. Backlog de las 13 pantallas restantes con el detalle de cuál de las dos
+formas les toca: [`docs/agent/pendientes.md`](../agent/pendientes.md).
+
 ---
 
 ## Testing
 
 - **Unit por service**: `restaurar()` devuelve la entidad y (solo en `items`) deja
   `activo: false`. Restaurar algo que no está en la papelera es 404 con el mismo
-  mensaje sin importar si no existe o si existe y está vivo.
+  mensaje sin importar si no existe, si existe y está vivo, o si existe borrada
+  pero sin `eliminado_por` (la borró el sistema).
 - **Colisión**: con un vivo ocupando el nombre (o, en `garzones`, con el Mostrador
   nuevo ya creado), `restaurar()` da 400 y no modifica ninguna de las dos filas.
+  Cubre las dos formas de garantizar unicidad — índice único parcial
+  (`grupos-modificadores`, `causas-merma`, `motivos-diferencia`,
+  `motivos-diferencia-inventario`, `cajones`, `garzones`) y solo por código
+  (`descuentos`, `recargos`, `turnos`).
+- **Solo lo que borró una persona**: una fila con `eliminado_el` seteado pero
+  `eliminado_por` nulo (simulando un borrado del sistema) no aparece en
+  `GET ...?incluirEliminados=true` ni se puede restaurar (404). Probado contra
+  las dos familias de borrado (`categorias`: softDelete() de TypeORM; `items`:
+  SQL crudo) en `test/papelera.e2e-spec.ts`.
 - **Colateral acotado**: borrar `items`/`salones`/`grupos-modificadores` revive
   solo lo que ESE borrado se llevó; una fila borrada antes por otro motivo sigue
   borrada después de restaurar.
@@ -228,6 +318,10 @@ trae). Ver `eliminar()` en `configuracion/items.vue`.
   (inmutable, se compensa, nunca se revierte).
 - [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md) — por qué lo fiscal
   (razones sociales) queda fuera.
+- [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md) — por qué el seeder
+  soft-deletea impuestos duplicados sin `eliminado_por`, y por qué esas filas no
+  deben ser visibles ni restaurables desde la papelera (ver "Solo lo que borró
+  una persona" arriba).
 - [`docs/patterns/backend.md`](../patterns/backend.md) — excepción del JOIN a
   `usuarios` sin filtrar `eliminado_el`.
 

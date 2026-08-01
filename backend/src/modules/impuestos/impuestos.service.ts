@@ -79,6 +79,15 @@ export class ImpuestosService {
       } else {
         qb.where('i.tenant_id = :tenantId', { tenantId });
       }
+      // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+      // borrado del sistema (seeder, `remapImpuestosOficialesDuplicados` —
+      // justo lo que este listado NO debe reabrir: son los IVA duplicados
+      // que evitan la doble tributación del 38%, ver ADR-018), no
+      // restaurable ni visible — decisión del owner, docs/features/papelera.md.
+      // Va DESPUÉS de los `.where()` de arriba: `.where()` en TypeORM
+      // reemplaza el WHERE entero, así que un `.andWhere()` antes se
+      // perdería.
+      qb.andWhere('(i.eliminado_el IS NULL OR i.eliminado_por IS NOT NULL)');
       const { entities, raw } = await qb.getRawAndEntities<{
         i_eliminado_por_nombre: string | null;
       }>();
@@ -139,13 +148,16 @@ export class ImpuestosService {
   }
 
   async restaurar(tenantId: string, id: string): Promise<Impuesto> {
-    // Una sola regla para los dos casos —no existe, o existe y está viva—:
-    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    // Una sola regla para los tres casos —no existe, existe y está viva, o
+    // la borró el sistema (`eliminadoPor` nulo, p.ej. un duplicado de IVA
+    // que remapImpuestosOficialesDuplicados soft-deleteó — ver ADR-018)—:
+    // la papelera solo restaura lo que borró una persona (decisión del
+    // owner, docs/features/papelera.md).
     const impuesto = await this.impuestoRepo.findOne({
       where: { id, tenantId },
       withDeleted: true,
     });
-    if (!impuesto || !impuesto.eliminadoEl) {
+    if (!impuesto || !impuesto.eliminadoEl || !impuesto.eliminadoPor) {
       throw new NotFoundException(`Impuesto ${id} no está en la papelera`);
     }
     await this.impuestoRepo.restore({ id, tenantId });

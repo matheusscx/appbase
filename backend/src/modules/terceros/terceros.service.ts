@@ -38,6 +38,10 @@ export class TercerosService {
       .leftJoin('usuarios', 'u', 'u.usuario_id = t.eliminado_por')
       .addSelect('u.nombre_usuario', 't_eliminado_por_nombre')
       .where('t.tenant_id = :tenantId', { tenantId })
+      // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+      // borrado del sistema, no restaurable ni visible — decisión del
+      // owner, docs/features/papelera.md.
+      .andWhere('(t.eliminado_el IS NULL OR t.eliminado_por IS NOT NULL)')
       .withDeleted()
       .orderBy('t.nombre', 'ASC')
       .getRawAndEntities<{ t_eliminado_por_nombre: string | null }>();
@@ -95,13 +99,14 @@ export class TercerosService {
   }
 
   async restaurar(tenantId: string, id: string): Promise<Tercero> {
-    // Una sola regla para los dos casos —no existe, o existe y está viva—:
-    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    // Una sola regla para los tres casos —no existe, existe y está viva, o
+    // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
+    // lo que borró una persona (decisión del owner, docs/features/papelera.md).
     const tercero = await this.terceroRepo.findOne({
       where: { id, tenantId },
       withDeleted: true,
     });
-    if (!tercero || !tercero.eliminadoEl) {
+    if (!tercero || !tercero.eliminadoEl || !tercero.eliminadoPor) {
       throw new NotFoundException(`Tercero ${id} no está en la papelera`);
     }
     await this.terceroRepo.restore({ id, tenantId });

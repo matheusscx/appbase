@@ -89,6 +89,9 @@ export class MotivosDiferenciaService {
     // `eliminado_el` de `usuarios` a propósito: el autor de un borrado es un
     // hecho histórico (docs/patterns/backend.md, ver categorias.service.ts →
     // findAll).
+    // Solo lo que borró una persona: `eliminado_por IS NULL` es un borrado
+    // del sistema, no restaurable ni visible — decisión del owner,
+    // docs/features/papelera.md.
     const rows: RowConEliminado[] = await this.dataSource.query(
       `SELECT m.motivo_diferencia_id, m.nombre, m.activo, m.requiere_comentario, m.es_fijo,
               m.eliminado_el, m.eliminado_por,
@@ -96,6 +99,7 @@ export class MotivosDiferenciaService {
          FROM motivo_diferencia_caja m
          LEFT JOIN usuarios u ON u.usuario_id = m.eliminado_por
         WHERE m.tenant_id = $1
+          AND (m.eliminado_el IS NULL OR m.eliminado_por IS NOT NULL)
           ${soloActivas ? 'AND m.activo = true' : ''}
         ORDER BY m.es_fijo DESC, m.nombre ASC`,
       [tenantId],
@@ -199,12 +203,14 @@ export class MotivosDiferenciaService {
           `UPDATE motivo_diferencia_caja
               SET eliminado_el = NULL, actualizado_el = NOW()
             WHERE motivo_diferencia_id = $1 AND tenant_id = $2
-              AND eliminado_el IS NOT NULL
+              AND eliminado_el IS NOT NULL AND eliminado_por IS NOT NULL
           RETURNING ${COLS}, eliminado_el, eliminado_por`,
           [id, tenantId],
         ),
       );
       if (!rows.length) {
+        // `AND eliminado_por IS NOT NULL` arriba: decisión del owner — la
+        // papelera solo restaura lo que borró una persona (docs/features/papelera.md).
         throw new NotFoundException(`Motivo ${id} no está en la papelera`);
       }
       return toItemConEliminado(rows[0]);

@@ -81,6 +81,20 @@ interface ItemPapelera {
 }
 let itemPapeleraBackend: ItemPapelera | null = null
 
+// Solo para el describe de la carrera (abajo): un segundo item, ya
+// eliminado, para que la respuesta "con eliminados" traiga algo que la
+// respuesta "sin eliminados" no trae — las dos distinguibles en el DOM.
+// `null` en el resto de los tests, no interfiere con nada de arriba.
+let itemPapeleraExtra: ItemPapelera | null = null
+
+// Retienen la respuesta del GET a `/items` (paginado) según traiga o no
+// `incluirEliminados=true` — mismo mecanismo que
+// `overrideConEliminados`/`overrideSinEliminados` en
+// `categorias.nuxt.spec.ts`, para forzar a mano el orden en que "llegan"
+// dos respuestas en vuelo. `null` = comportamiento normal.
+let overrideItemsConEliminados: Promise<unknown> | null = null
+let overrideItemsSinEliminados: Promise<unknown> | null = null
+
 // La página dispara varias cargas al montar (catálogos, vendibles, grupos) y
 // cada una espera una forma distinta. Se responde por URL: lo que importa es
 // que la tabla tenga UNA fila para que se rendericen los controles de fila.
@@ -107,9 +121,13 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve(itemDetalleMock)
     if (itemPapeleraBackend && typeof url === 'string' && url.includes('/items')) {
       const incluirEliminados = url.includes('incluirEliminados=true')
+      if (incluirEliminados && overrideItemsConEliminados) return overrideItemsConEliminados
+      if (!incluirEliminados && overrideItemsSinEliminados) return overrideItemsSinEliminados
+      const base = [itemPapeleraBackend, itemPapeleraExtra]
+        .filter((i): i is ItemPapelera => !!i)
       const data = incluirEliminados
-        ? [itemPapeleraBackend]
-        : (itemPapeleraBackend.eliminadoEl ? [] : [itemPapeleraBackend])
+        ? base
+        : base.filter(i => !i.eliminadoEl)
       return Promise.resolve({
         data: data.map(i => ({ ...i })),
         meta: { total: data.length, page: 1, pageSize: 15, totalPages: 1 },
@@ -394,6 +412,99 @@ describe('configuracion/items — papelera: eliminar respeta el toggle', () => {
     await eliminarPorMenu(wrapper)
 
     expect(wrapper.text()).not.toContain('Item Papelera Test')
+
+    wrapper.unmount()
+  })
+})
+
+// Regresión: `usePaginatedList` dispara el refetch de `/items` desde su
+// propio `watch` de filtros (`incluirEliminados` es uno más de
+// `listFilters`), sin ninguna protección — a diferencia de
+// `configuracion/categorias.vue`, que serializa `cargar()` a mano
+// (`cargaEnCurso`). El fix va en el composable (`usePaginatedList.ts` →
+// `fetch()`), no acá: lo comparten 14 pantallas y el mismo `watch` puede
+// disparar dos GET en vuelo por cualquiera de sus filtros, no solo por este
+// toggle. Mismo caso que "papelera: la carrera de `cargar()` bajo toggles
+// rápidos" en `categorias.nuxt.spec.ts`, adaptado a la respuesta paginada.
+describe('configuracion/items — papelera: la carrera del toggle vía usePaginatedList', () => {
+  const ITEM_VIVO_ID = 'item-carrera-vivo'
+  const ITEM_BORRADO_ID = 'item-carrera-borrado'
+
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
+    impuestosPromiseOverride = null
+    itemPapeleraBackend = {
+      id: ITEM_VIVO_ID,
+      nombre: 'Item Vivo',
+      tipo: 'servicio',
+      activo: true,
+      precioBase: '1000.0000',
+      monedaId: 'clp',
+      eliminadoEl: null,
+      eliminadoPorNombre: null,
+    }
+    itemPapeleraExtra = {
+      id: ITEM_BORRADO_ID,
+      nombre: 'Item Ya Borrado',
+      tipo: 'servicio',
+      activo: true,
+      precioBase: '1000.0000',
+      monedaId: 'clp',
+      eliminadoEl: '2026-07-30T12:00:00.000Z',
+      eliminadoPorNombre: 'admin.paris',
+    }
+    overrideItemsConEliminados = null
+    overrideItemsSinEliminados = null
+  })
+
+  afterEach(() => {
+    itemPapeleraBackend = null
+    itemPapeleraExtra = null
+    overrideItemsConEliminados = null
+    overrideItemsSinEliminados = null
+  })
+
+  it('si la respuesta del primer toggle llega DESPUÉS que la del segundo, el listado final igual corresponde al último toggle', async () => {
+    const wrapper = await montar()
+
+    // 1) Prender "Ver eliminados": dispara el `watch` de `usePaginatedList`
+    //    con `incluirEliminados=true`. Se retiene la respuesta — no
+    //    resuelve todavía.
+    let resolverConEliminados: (v: unknown) => void = () => {}
+    overrideItemsConEliminados = new Promise((resolve) => { resolverConEliminados = resolve })
+    await wrapper.find('[aria-label="Ver eliminados"]').trigger('click')
+    await new Promise(r => setTimeout(r, 10))
+
+    // 2) Apagar "Ver eliminados" MIENTRAS la respuesta anterior sigue
+    //    pendiente: dispara un segundo fetch. Se retiene también su
+    //    respuesta, para controlar a mano en qué orden "llegan" las dos.
+    let resolverSinEliminados: (v: unknown) => void = () => {}
+    overrideItemsSinEliminados = new Promise((resolve) => { resolverSinEliminados = resolve })
+    await wrapper.find('[aria-label="Ver eliminados"]').trigger('click')
+    await new Promise(r => setTimeout(r, 10))
+
+    // 3) Resolver en el orden INVERSO al que se dispararon: la del segundo
+    //    toggle (sin eliminados) responde primero; la del primero (con
+    //    eliminados) responde después — el caso que la serialización tiene
+    //    que blindar.
+    resolverSinEliminados({
+      data: [{ ...itemPapeleraBackend }],
+      meta: { total: 1, page: 1, pageSize: 15, totalPages: 1 },
+    })
+    await new Promise(r => setTimeout(r, 20))
+    resolverConEliminados({
+      data: [{ ...itemPapeleraBackend }, { ...itemPapeleraExtra }],
+      meta: { total: 2, page: 1, pageSize: 15, totalPages: 1 },
+    })
+    await new Promise(r => setTimeout(r, 50))
+
+    // El toggle terminó APAGADO: el listado final tiene que reflejar ESE
+    // estado (solo el item vivo), sin importar que la respuesta "con
+    // eliminados" haya llegado después y en teoría pisara el estado.
+    expect(wrapper.text()).toContain('Item Vivo')
+    expect(wrapper.text()).not.toContain('Item Ya Borrado')
 
     wrapper.unmount()
   })

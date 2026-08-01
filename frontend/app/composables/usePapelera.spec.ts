@@ -88,6 +88,11 @@ describe('usePapelera', () => {
   })
 
   it('formatearBorradoPor usa un fallback si no hay nombre de autor', () => {
+    // Defensivo por tipado (`eliminadoPorNombre` sigue siendo opcional): ya
+    // no es alcanzable en la práctica, porque el backend solo expone lo que
+    // borró una persona y los usuarios nunca se borran físicamente (ver el
+    // comentario de `formatearBorradoPor`). Por eso el fallback ya no dice
+    // "usuario eliminado" — sería una causa concreta que no puede ocurrir.
     const { formatearBorradoPor } = usePapelera('items')
 
     const texto = formatearBorradoPor({
@@ -95,7 +100,7 @@ describe('usePapelera', () => {
       eliminadoPorNombre: null,
     })
 
-    expect(texto).toBe('Eliminado por usuario eliminado el FECHA(2026-07-30T12:00:00Z)')
+    expect(texto).toBe('Eliminado por usuario desconocido el FECHA(2026-07-30T12:00:00Z)')
   })
 
   it('formatearBorradoPor devuelve vacío si la fila no está eliminada', () => {

@@ -54,6 +54,10 @@ export class RecargosService {
         .leftJoin('usuarios', 'u', 'u.usuario_id = r.eliminado_por')
         .addSelect('u.nombre_usuario', 'r_eliminado_por_nombre')
         .where('r.tenant_id = :tenantId', { tenantId })
+        // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+        // borrado del sistema (seeder, `remapImpuestosOficialesDuplicados`),
+        // no restaurable ni visible — decisión del owner, docs/features/papelera.md.
+        .andWhere('(r.eliminado_el IS NULL OR r.eliminado_por IS NOT NULL)')
         .withDeleted()
         .orderBy('r.nombre', 'ASC')
         .getRawAndEntities<{ r_eliminado_por_nombre: string | null }>();
@@ -267,14 +271,31 @@ export class RecargosService {
   }
 
   async restaurar(tenantId: string, id: string): Promise<Recargo> {
-    // Una sola regla para los dos casos —no existe, o existe y está viva—:
-    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    // Una sola regla para los tres casos —no existe, existe y está viva, o
+    // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
+    // lo que borró una persona (decisión del owner, docs/features/papelera.md).
     const recargo = await this.recargoRepo.findOne({
       where: { id, tenantId },
       withDeleted: true,
     });
-    if (!recargo || !recargo.eliminadoEl) {
+    if (!recargo || !recargo.eliminadoEl || !recargo.eliminadoPor) {
       throw new NotFoundException(`Recargo ${id} no está en la papelera`);
+    }
+    // `recargos` no tiene índice único de nombre (medido: no hay `CREATE
+    // UNIQUE INDEX` sobre la tabla) — la unicidad la garantiza `create()`/
+    // `update()` en código vía `validarNombreUnico`, que filtra
+    // `eliminado_el IS NULL`. Sin este chequeo acá, restaurar reabre
+    // exactamente el hueco que esa validación existe para cerrar (reusa
+    // `nombreDisponible`, no una validación nueva).
+    const { disponible } = await this.nombreDisponible(
+      tenantId,
+      recargo.nombre,
+      id,
+    );
+    if (!disponible) {
+      throw new BadRequestException(
+        `Ya existe un recargo activo con el nombre "${recargo.nombre}". Renombrá el actual o el restaurado antes de continuar.`,
+      );
     }
     await this.recargoRepo.restore({ id, tenantId });
     return this.recargoRepo.findOneOrFail({ where: { id, tenantId } });

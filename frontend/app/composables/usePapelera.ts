@@ -33,10 +33,21 @@ export function usePapelera(recurso: string) {
     })
   }
 
-  /** "Eliminado por <nombre> el <fecha>". Vacío si la fila no está eliminada. */
+  /**
+   * "Eliminado por <nombre> el <fecha>". Vacío si la fila no está eliminada.
+   *
+   * El fallback ya NO puede leerse como "el usuario que borró fue dado de
+   * baja": el backend solo expone lo que borró una persona (`eliminado_por`
+   * no nulo — decisión del owner, docs/features/papelera.md) y los usuarios
+   * nunca se borran físicamente (invariante 3), así que el JOIN a `usuarios`
+   * siempre resuelve un nombre para cualquier fila que llegue hasta acá. Se
+   * mantiene por tipado defensivo (`eliminadoPorNombre` sigue siendo opcional
+   * en la interfaz) con un texto que no afirma una causa específica, no
+   * porque el caso "sin nombre" siga siendo alcanzable.
+   */
   function formatearBorradoPor(fila: FilaPapelera): string {
     if (!fila.eliminadoEl) return ''
-    const autor = fila.eliminadoPorNombre ?? 'usuario eliminado'
+    const autor = fila.eliminadoPorNombre ?? 'usuario desconocido'
     return `Eliminado por ${autor} el ${formatFecha(fila.eliminadoEl)}`
   }
 

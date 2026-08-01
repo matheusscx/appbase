@@ -260,6 +260,7 @@ describe('GarzonesService', () => {
           id: 'g1',
           nombre: 'Ana (en la papelera)',
           eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
         }),
       );
       repo.findOneOrFail.mockResolvedValue(
@@ -309,6 +310,7 @@ describe('GarzonesService', () => {
           esPlaceholder: true,
           activo: false,
           eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
         }),
       );
       repo.restore.mockRejectedValueOnce(
@@ -323,7 +325,12 @@ describe('GarzonesService', () => {
 
     it('restaurar() propaga cualquier otro error de Postgres tal cual (no lo traduce a 400)', async () => {
       repo.findOne.mockResolvedValue(
-        garzon({ id: 'g1', nombre: 'Ana', eliminadoEl: new Date() }),
+        garzon({
+          id: 'g1',
+          nombre: 'Ana',
+          eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
+        }),
       );
       const otroError = Object.assign(new Error('conexión perdida'), {
         code: '08006',
@@ -355,6 +362,7 @@ describe('GarzonesService', () => {
         leftJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         withDeleted: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getRawAndEntities: jest.fn().mockResolvedValue({

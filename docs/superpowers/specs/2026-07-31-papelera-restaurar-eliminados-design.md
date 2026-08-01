@@ -166,8 +166,10 @@ que puedan quedar a medias.
 
 Por cada recurso del alcance:
 
-- `POST /<recurso>/:id/restaurar` → 200 con la entidad restaurada. **Mismo guard que el
-  `DELETE` del mismo recurso** — no abre permisos nuevos ni inventa un permiso propio.
+- `POST /<recurso>/:id/restaurar` → 201 con la entidad restaurada (default de Nest
+  para un `POST`; ninguno de los 16 lo pisa con `@HttpCode(200)`). **Mismo guard
+  que el `DELETE` del mismo recurso** — no abre permisos nuevos ni inventa un
+  permiso propio.
 - El `GET` de listado existente acepta un query param booleano para incluir los
   eliminados — no un endpoint nuevo, para que filtros, orden y paginación no se
   dupliquen. Por default sigue devolviendo solo los vivos: ninguna pantalla actual cambia
@@ -198,8 +200,8 @@ Dos de los 16 borran colaterales, y son los dos que necesitan esta regla:
 
 - **`items.remove()`** soft-deletea las filas de `receta_extras_permitidos` en las dos
   direcciones (como ingrediente y como receta).
-- **`salones.remove()`** soft-deletea todas las `mesas` del salón
-  (`salones.service.ts:231`) antes de borrar el salón.
+- **`salones.eliminarSalon()`** soft-deletea todas las `mesas` del salón
+  antes de borrar el salón.
 
 Son colaterales del borrado, no decisión del usuario: restaurar el padre las revive.
 
@@ -216,14 +218,32 @@ sin excepción.
 
 **d) Colisión de nombre → 400, no sobrescritura silenciosa.**
 
-Cinco entidades del alcance tienen nombre único por tenant vía índice parcial:
-`grupos_modificadores`, `causas_merma`, `motivo_diferencia_caja`,
-`motivo_diferencia_inventario`, `cajones`. Si alguien ocupó el nombre mientras tanto,
-restaurar devuelve 400 explicando que hay que renombrar el vivo o el restaurado.
+> Corregido el 2026-08-01 tras la revisión final: la versión original de este
+> punto afirmaba que `descuentos`/`recargos` (y por extensión `turnos`, sumado
+> después) "no tienen unicidad por nombre". Es falso — la garantizan en código,
+> no en la base. La unicidad de nombre no es una propiedad de familia de
+> borrado (SQL cruda vs. `softDelete()`): hay que medirla recurso por recurso,
+> por índice **o** por código.
 
-Las siete del catálogo del negocio (`items`, `categorias`, `descuentos`, `recargos`,
-`impuestos`, `terceros`) **no tienen unicidad por nombre**: ahí la colisión no puede
-ocurrir. Medido, no supuesto.
+Cinco entidades del alcance tienen nombre único por tenant vía **índice único
+parcial** (`WHERE eliminado_el IS NULL`): `grupos_modificadores`, `causas_merma`,
+`motivo_diferencia_caja`, `motivo_diferencia_inventario`, `cajones`. Si alguien
+ocupó el nombre mientras tanto, `restaurar()` capta el `23505` de Postgres y
+devuelve 400 explicando que hay que renombrar el vivo o el restaurado.
+
+Tres entidades garantizan la unicidad **solo en código**, sin índice en la base:
+`descuentos` y `recargos` (`validarNombreUnico`, reusado por `create()`/`update()`,
+filtra `eliminado_el IS NULL`) y `turnos` (`assertNombreUnico`, un `findOne` que
+TypeORM ya filtra solo por el `@DeleteDateColumn`). `restaurar()` tiene que llamar
+a esa misma función antes de revivir la fila — sin eso, el hueco es idéntico al de
+las cinco de arriba, solo que sin Postgres de por medio para avisar con un
+`23505`: se puede crear "Black Friday", borrarlo, crear otro "Black Friday", y
+restaurar el viejo deja dos vivos con el mismo nombre.
+
+Las siete restantes (`items`, `categorias`, `impuestos`, `terceros` del catálogo
+del negocio; `salones`, `mesas`, `impresoras` de config operativa) **no tienen
+unicidad por nombre de ningún tipo**: ahí la colisión no puede ocurrir. Medido,
+no supuesto.
 
 ### Frontend
 

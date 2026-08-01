@@ -157,6 +157,7 @@ describe('CajonesService', () => {
         tenantId: TENANT,
         nombre: 'Mostrador (en la papelera)',
         eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
       });
       repo.findOneOrFail.mockResolvedValue({
         id: 'x',
@@ -207,6 +208,7 @@ describe('CajonesService', () => {
         tenantId: TENANT,
         nombre: 'Mostrador',
         eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
       });
       repo.restore.mockRejectedValueOnce(
         Object.assign(new Error('duplicate key value'), { code: '23505' }),
@@ -225,6 +227,7 @@ describe('CajonesService', () => {
         tenantId: TENANT,
         nombre: 'Mostrador',
         eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
       });
       const otroError = Object.assign(new Error('conexión perdida'), {
         code: '08006',
@@ -257,6 +260,7 @@ describe('CajonesService', () => {
         leftJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
         withDeleted: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getRawAndEntities: jest.fn().mockResolvedValue({

@@ -54,6 +54,10 @@ export class CajonesService {
       .leftJoin('usuarios', 'u', 'u.usuario_id = c.eliminado_por')
       .addSelect('u.nombre_usuario', 'c_eliminado_por_nombre')
       .where('c.tenant_id = :tenantId', { tenantId })
+      // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+      // borrado del sistema, no restaurable ni visible — decisión del
+      // owner, docs/features/papelera.md.
+      .andWhere('(c.eliminado_el IS NULL OR c.eliminado_por IS NOT NULL)')
       .withDeleted()
       .orderBy('c.nombre', 'ASC')
       .getRawAndEntities<{ c_eliminado_por_nombre: string | null }>();
@@ -103,13 +107,14 @@ export class CajonesService {
   }
 
   async restaurar(tenantId: string, id: string): Promise<Cajon> {
-    // Una sola regla para los dos casos —no existe, o existe y está viva—:
-    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    // Una sola regla para los tres casos —no existe, existe y está viva, o
+    // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
+    // lo que borró una persona (decisión del owner, docs/features/papelera.md).
     const cajon = await this.cajonRepo.findOne({
       where: { id, tenantId },
       withDeleted: true,
     });
-    if (!cajon || !cajon.eliminadoEl) {
+    if (!cajon || !cajon.eliminadoEl || !cajon.eliminadoPor) {
       throw new NotFoundException(`Cajón ${id} no está en la papelera`);
     }
     try {

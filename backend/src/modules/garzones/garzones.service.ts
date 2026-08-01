@@ -92,6 +92,10 @@ export class GarzonesService {
       .where('g.tenant_id = :tenantId AND g.es_placeholder = false', {
         tenantId,
       })
+      // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+      // borrado del sistema, no restaurable ni visible — decisión del
+      // owner, docs/features/papelera.md.
+      .andWhere('(g.eliminado_el IS NULL OR g.eliminado_por IS NOT NULL)')
       .withDeleted()
       .orderBy('g.nombre', 'ASC')
       .getRawAndEntities<{ g_eliminado_por_nombre: string | null }>();
@@ -165,13 +169,14 @@ export class GarzonesService {
   }
 
   async restaurar(tenantId: string, id: string): Promise<GarzonPublico> {
-    // Una sola regla para los dos casos —no existe, o existe y está viva—:
-    // `eliminadoEl` no nulo es lo que define "está en la papelera".
+    // Una sola regla para los tres casos —no existe, existe y está viva, o
+    // la borró el sistema (`eliminadoPor` nulo)—: la papelera solo restaura
+    // lo que borró una persona (decisión del owner, docs/features/papelera.md).
     const garzon = await this.garzonRepo.findOne({
       where: { id, tenantId },
       withDeleted: true,
     });
-    if (!garzon || !garzon.eliminadoEl) {
+    if (!garzon || !garzon.eliminadoEl || !garzon.eliminadoPor) {
       throw new NotFoundException(`Garzón ${id} no está en la papelera`);
     }
     try {

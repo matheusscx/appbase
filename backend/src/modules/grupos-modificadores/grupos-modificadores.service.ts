@@ -332,11 +332,15 @@ export class GruposModificadoresService {
       eliminado_por_nombre?: string | null;
     }[] = incluirEliminados
       ? await this.dataSource.query(
+          // Solo lo que borró una persona: `eliminado_por IS NULL` es un
+          // borrado del sistema, no restaurable ni visible — decisión del
+          // owner, docs/features/papelera.md.
           `SELECT g.grupo_modificador_id, g.nombre, g.eliminado_el, g.eliminado_por,
                   u.nombre_usuario AS eliminado_por_nombre
              FROM grupos_modificadores g
              LEFT JOIN usuarios u ON u.usuario_id = g.eliminado_por
             WHERE g.tenant_id = $1
+              AND (g.eliminado_el IS NULL OR g.eliminado_por IS NOT NULL)
             ORDER BY g.nombre ASC`,
           [tenantId],
         )
@@ -601,6 +605,7 @@ export class GruposModificadoresService {
              UPDATE grupos_modificadores
                 SET eliminado_el = NULL, actualizado_el = NOW()
               WHERE grupo_modificador_id = $1 AND tenant_id = $2 AND eliminado_el IS NOT NULL
+                AND eliminado_por IS NOT NULL
              RETURNING grupo_modificador_id,
                        (SELECT eliminado_el FROM grupos_modificadores
                           WHERE grupo_modificador_id = $1 AND tenant_id = $2) AS eliminado_el_previo
@@ -617,6 +622,10 @@ export class GruposModificadoresService {
         ),
       );
       if (!rows.length) {
+        // `AND eliminado_por IS NOT NULL` arriba: decisión del owner — la
+        // papelera solo restaura lo que borró una persona. Un grupo borrado
+        // por el sistema da el mismo 404 que uno que no existe, sin rama
+        // especial (docs/features/papelera.md).
         throw new NotFoundException(
           'Grupo de modificadores no está en la papelera',
         );
@@ -626,11 +635,21 @@ export class GruposModificadoresService {
       // vivo arriba, así que no puede devolver null.
       return (await this.cargarGrupo(this.dataSource, tenantId, grupoId))!;
     } catch (e) {
-      // 23505 = unique_violation. El índice único de nombre es parcial
-      // (WHERE eliminado_el IS NULL): mientras el grupo estaba borrado nadie
-      // competía por el nombre, pero al revivirlo vuelve a competir. Se
-      // capta el código de Postgres —no una lista de índices a mano— para
-      // que valga también donde no lo enumeramos.
+      // 23505 = unique_violation, pero de DOS índices únicos distintos
+      // conviven en esta única sentencia: `uq_grupo_modificador_nombre_vivo`
+      // (nombre del grupo) y `uq_grupo_opcion_item_vivo` (grupo_modificador_id +
+      // item_id, al revivir las opciones en la misma CTE). Distinguir por
+      // `constraint` del error de Postgres, no asumir que todo 23505 es la
+      // colisión de nombre: el mensaje de "renombrá el grupo" mandaría a
+      // renombrar algo que no es la causa real si el choque viene de una
+      // opción reinsertada bajo el mismo item mientras el grupo estaba en
+      // la papelera.
+      const constraint = (e as { constraint?: string }).constraint;
+      if (constraint === 'uq_grupo_opcion_item_vivo') {
+        throw new BadRequestException(
+          'No se puede restaurar: ya existe una opción viva con ese item en este grupo. Revisá las opciones del grupo antes de reintentar.',
+        );
+      }
       if ((e as { code?: string }).code === '23505') {
         throw new BadRequestException(
           'Ya existe un grupo de modificadores activo con ese nombre. Renombrá el actual o el restaurado antes de continuar.',
