@@ -743,13 +743,19 @@ async function enviarComanda() {
 function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
   // Mismo orden que cuentaToCalcularInput (índice 1:1); find por itemId falla
   // si hay dos líneas del mismo ítem con distinta personalización.
+  // La línea de cuenta no lleva `tipo`/`unidadMedida`, así que la unidad base
+  // sale del catálogo ya cargado. Map una vez, no un `find` por línea.
+  const porItemId = new Map(items.value.map(it => [it.id, it]))
   return res.lineas.map((l, i) => {
     const cl = cuenta.lineas[i]
+    const itemCl = cl ? porItemId.get(cl.itemId) : undefined
+    const unidadBase = itemCl ? unidadBaseItem(itemCl) : null
     const cantidadTicket = formatCantidadLinea(
       l.cantidad,
       cl?.cantidadPresentacion,
       cl?.unidadCodigoPresentacion,
-      unidadesStore.esFraccionaria(cl?.unidadCodigoPresentacion),
+      unidadesStore.esFraccionaria(cl?.unidadCodigoPresentacion ?? unidadBase),
+      unidadBase,
     )
     return {
       nombre: cl?.nombre ?? '',

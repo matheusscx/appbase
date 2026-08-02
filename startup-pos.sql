@@ -1076,6 +1076,7 @@ CREATE TABLE "venta_detalles" (
   "descripcion"            TEXT,
   "clasificacion_tributaria" TEXT        NOT NULL DEFAULT 'afecto',  -- snapshot fiscal por línea
   "cantidad"               NUMERIC(18,4) NOT NULL,
+  "unidad_codigo_base"     TEXT          NOT NULL,  -- en qué unidad está `cantidad`, congelada al vender
   "subtotal"               NUMERIC(18,4) NOT NULL DEFAULT 0,
   "descuento_aplicado"     NUMERIC(18,4) NOT NULL DEFAULT 0,
   "recargo_aplicado"       NUMERIC(18,4) NOT NULL DEFAULT 0,

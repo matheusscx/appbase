@@ -90,6 +90,21 @@ describe('cantidad-presentacion', () => {
       expect(formatCantidadLinea('2.5000', null, null, false)).toBe('2,5')
     })
 
+    it('usa la unidad base congelada cuando no hay presentación', () => {
+      // La unidad viene de la venta, no del catálogo: si el ítem cambia de
+      // unidad después, la venta vieja sigue diciendo kg.
+      expect(formatCantidadLinea('2.5000', null, null, true, 'kg')).toBe('2,5 kg')
+    })
+
+    it('una unidad base de conteo no agrega sufijo', () => {
+      expect(formatCantidadLinea('3.0000', null, null, false, 'unidad')).toBe('3')
+    })
+
+    it('la presentación gana sobre la unidad base', () => {
+      // Se muestra como la pidió el cliente ("2 cajas"), no la canónica.
+      expect(formatCantidadLinea('24.0000', '2', 'caja', true, 'unidad')).toBe('2 caja')
+    })
+
     it('ignora una presentación a medias: sin unidad no se puede formatear', () => {
       // `cantidadPresentacion` sin `unidadCodigoPresentacion` no dice en qué
       // unidad está, así que gana la canónica.

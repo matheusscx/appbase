@@ -204,6 +204,23 @@ Retorna la venta con sus relaciones expandidas: `detalles`, `descuentos`, `recar
 
 Todas con soft delete (`eliminado_el`) y triada de auditoría. PKs UUID con `type: 'uuid'` (ADR-004).
 
+**La línea es un snapshot, no un puntero al catálogo.** `venta_detalles` congela
+`descripcion`, `clasificacion_tributaria`, `precio_unitario`, `tasa_cambio` y —desde el
+2026-08-02— **`unidad_codigo_base`**: en qué unidad está `cantidad`. Sin ella el número no
+tiene magnitud (`2` no dice si son 2 unidades o 2 kg) y había que leer `items` para saberlo.
+Es `NOT NULL`; para servicios, recetas y combos vale `'unidad'`.
+
+Distinta de `unidad_codigo_presentacion`, que es nullable y solo existe cuando la línea se
+vendió por presentación ("2 cajas"): describe **cómo se pidió**, no en qué unidad está el
+número con el que calculó el motor.
+
+⚠️ Hoy esa unidad **no puede derivar**: `items.service.ts` bloquea cambiarla en un producto
+con movimientos no-`ajuste`, vender siempre registra uno y nada soft-borra movimientos
+(medido 2026-08-02). Congelarla es **defensa en profundidad** —que la línea no dependa de un
+guard de otro módulo— y sobre todo hace que el dato **exista en la venta**, que es lo que el
+detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelado de reglas en
+[`motor-calculo-precios.md`](motor-calculo-precios.md).
+
 ### Flujo transaccional (`crear`)
 
 1. Verificar caja abierta (`cajaService.findActiva`)

@@ -4,7 +4,7 @@ import { useVenta, descontarStockCatalogo, tieneCustomerData, toVentaLineasBody,
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { PaginatedResponse } from '~/composables/usePaginatedList'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
-import { formatCantidadLinea } from '~/utils/cantidad-presentacion'
+import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
 import { agregarImpuestosVenta, type PersonalizacionDetalleLinea } from '~/utils/ticket-builder'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { fetchPorcentajeSugeridoVenta, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
@@ -236,7 +236,10 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
                 l.cantidad,
                 ln?.cantidadPresentacion,
                 ln?.unidadCodigoPresentacion,
-                unidadesStore.esFraccionaria(ln?.unidadCodigoPresentacion),
+                unidadesStore.esFraccionaria(
+                  ln?.unidadCodigoPresentacion ?? (ln ? unidadBaseItem(ln.item) : null),
+                ),
+                ln ? unidadBaseItem(ln.item) : null,
               ),
               precioUnitario: l.precioUnitario,
               totalLinea: l.totalLinea,

@@ -44,6 +44,8 @@ interface Detalle {
   cantidadPresentacion?: string | null
   unidadCodigoPresentacion?: string | null
   precioUnitario: string
+  /** Unidad en la que está `cantidad`, congelada al vender. */
+  unidadCodigoBase: string
   /** Neto de la línea: el punto de partida del que salen las reglas. */
   subtotal: string
   totalLinea: string
@@ -241,11 +243,17 @@ function reembolsoColor(estado: string): 'success' | 'error' | 'warning' | 'neut
 const { estadoColor, estadoLabel } = useEstadoVenta()
 
 function cantidadDetalleLabel(det: Detalle): string {
+  // La unidad que se va a mostrar decide si lleva sufijo: la de presentación si
+  // la línea se vendió así, si no la base congelada en el detalle.
+  const unidadMostrada = det.cantidadPresentacion && det.unidadCodigoPresentacion
+    ? det.unidadCodigoPresentacion
+    : det.unidadCodigoBase
   return formatCantidadLinea(
     det.cantidad,
     det.cantidadPresentacion,
     det.unidadCodigoPresentacion,
-    unidadesStore.esFraccionaria(det.unidadCodigoPresentacion),
+    unidadesStore.esFraccionaria(unidadMostrada),
+    det.unidadCodigoBase,
   )
 }
 

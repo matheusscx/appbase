@@ -223,15 +223,18 @@ export class VentasService {
         linea.unidadCodigoPresentacion,
       );
 
+      // Se resuelve para TODA línea, no solo las que vienen por presentación:
+      // es la unidad en la que queda `cantidad`, y se congela en el detalle.
+      const { unidadBaseCodigo, forzarConteo } = resolverUnidadBaseDeItem(item);
+
       if (!linea.cantidadPresentacion || !linea.unidadCodigoPresentacion) {
         return {
           cantidadCanonica: linea.cantidad,
           cantidadPresentacion: null as string | null,
           unidadCodigoPresentacion: null as string | null,
+          unidadBaseCodigo,
         };
       }
-
-      const { unidadBaseCodigo, forzarConteo } = resolverUnidadBaseDeItem(item);
 
       const res = resolverCantidadDesdePresentacion({
         cantidadPresentacion: linea.cantidadPresentacion,
@@ -245,6 +248,7 @@ export class VentasService {
         cantidadCanonica: res.cantidadCanonica,
         cantidadPresentacion: res.cantidadPresentacion,
         unidadCodigoPresentacion: res.unidadCodigoPresentacion,
+        unidadBaseCodigo,
       };
     });
 
@@ -303,6 +307,7 @@ export class VentasService {
         cantidadCanonica,
         cantidadPresentacion,
         unidadCodigoPresentacion,
+        unidadBaseCodigo,
       } = cantidadesResueltas[i];
       const tasa = new Decimal(tasaMap.get(item.monedaId) ?? '1');
       const precioOrigen =
@@ -316,6 +321,7 @@ export class VentasService {
         cantidadCanonica,
         cantidadPresentacion,
         unidadCodigoPresentacion,
+        unidadBaseCodigo,
         precioOrigen,
         tasa: tasa.toFixed(6),
         precioConvertido,
@@ -404,6 +410,7 @@ export class VentasService {
           personalizacion,
           cantidadPresentacion,
           unidadCodigoPresentacion,
+          unidadBaseCodigo,
         } = lineasConversion[i];
         return manager.create(VentaDetalle, {
           ventaId: venta.id,
@@ -419,6 +426,9 @@ export class VentasService {
           cantidad: rLinea.cantidad,
           cantidadPresentacion,
           unidadCodigoPresentacion,
+          // La unidad en la que quedó `cantidad`: sin ella el número no tiene
+          // magnitud y leerla del ítem daría la de hoy, no la de la venta.
+          unidadCodigoBase: unidadBaseCodigo,
           subtotal: rLinea.subtotalNeto,
           descuentoAplicado: rLinea.descuentoAplicado,
           recargoAplicado: rLinea.recargoAplicado,
@@ -950,6 +960,7 @@ export class VentasService {
             precioUnitario: linea.precioUnitario,
             descripcion: linea.descripcion,
             clasificacionTributaria: linea.clasificacionTributaria,
+            unidadCodigoBase: linea.unidadCodigoBase,
             cantidad: linea.cantidad,
             subtotal: totalLinea,
             totalLinea,
@@ -1170,6 +1181,7 @@ export class VentasService {
       monedaIdOrigen: string;
       descripcion: string | null;
       clasificacionTributaria: string;
+      unidadCodigoBase: string;
     }[]
   > {
     if (!devoluciones.length) return [];
@@ -1183,10 +1195,12 @@ export class VentasService {
       moneda_id_origen: string;
       descripcion: string | null;
       clasificacion_tributaria: string;
+      unidad_codigo_base: string;
       modo_inventario: string | null;
     }[] = await manager.query(
       `SELECT d.item_id, d.cantidad, d.precio_unitario, d.precio_unitario_origen,
               d.tasa_cambio, d.moneda_id_origen, d.descripcion, d.clasificacion_tributaria,
+              d.unidad_codigo_base,
               ip.modo_inventario
        FROM venta_detalles d
        LEFT JOIN item_producto ip ON ip.item_id = d.item_id
@@ -1249,6 +1263,9 @@ export class VentasService {
         monedaIdOrigen: detalle.moneda_id_origen,
         descripcion: detalle.descripcion,
         clasificacionTributaria: detalle.clasificacion_tributaria,
+        // Se copia de la línea original: la NC devuelve lo mismo que se vendió,
+        // en la misma unidad, aunque el ítem haya cambiado de unidad después.
+        unidadCodigoBase: detalle.unidad_codigo_base,
       };
     });
   }
@@ -1469,6 +1486,7 @@ export class VentasService {
               d.precio_unitario_origen, d.tasa_cambio, d.moneda_id_origen,
               d.subtotal, d.descuento_aplicado, d.recargo_aplicado, d.impuesto_aplicado,
               d.total_linea, d.cantidad_presentacion, d.unidad_codigo_presentacion,
+              d.unidad_codigo_base,
               ip.modo_inventario
        FROM venta_detalles d
        LEFT JOIN item_producto ip ON ip.item_id = d.item_id
@@ -1651,6 +1669,7 @@ export class VentasService {
         cantidad: d['cantidad'],
         cantidadPresentacion: d['cantidad_presentacion'] ?? null,
         unidadCodigoPresentacion: d['unidad_codigo_presentacion'] ?? null,
+        unidadCodigoBase: d['unidad_codigo_base'],
         precioUnitario: d['precio_unitario'],
         precioUnitarioOrigen: d['precio_unitario_origen'],
         tasaCambio: d['tasa_cambio'],

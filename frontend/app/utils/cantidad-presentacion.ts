@@ -104,15 +104,20 @@ export function formatCantidadTicket(
  * al string crudo en el caso sin presentación, que es el más común: se veía
  * `1.0000`.
  *
- * ⚠️ Sin presentación la cantidad va **sin unidad**: `venta_detalles` guarda
- * `unidad_codigo_presentacion` pero NO la unidad base del ítem, y leerla del
- * catálogo vivo mostraría la unidad de hoy sobre una venta vieja.
+ * Se muestra la **presentación** si la línea se vendió así ("2 cajas"), porque
+ * es como la pidió el cliente; si no, la cantidad canónica con su unidad base.
+ * Las dos unidades vienen **congeladas en la venta**: leerlas del catálogo vivo
+ * mostraría la unidad de hoy sobre una venta vieja.
+ *
+ * `esFraccionaria` la resuelve el caller contra el store, para la unidad que
+ * vaya a mostrarse — quien llama sabe cuál de las dos es.
  */
 export function formatCantidadLinea(
   cantidad: string,
   cantidadPresentacion: string | null | undefined,
   unidadCodigoPresentacion: string | null | undefined,
   esFraccionaria: boolean,
+  unidadCodigoBase?: string | null,
 ): string {
   if (cantidadPresentacion && unidadCodigoPresentacion) {
     return formatCantidadTicket(
@@ -121,7 +126,7 @@ export function formatCantidadLinea(
       esFraccionaria,
     )
   }
-  return formatCantidadTicket(cantidad, null, esFraccionaria)
+  return formatCantidadTicket(cantidad, unidadCodigoBase ?? null, esFraccionaria)
 }
 
 export function unidadBaseItem(item: { tipo: string, unidadMedida?: string | null }): string {

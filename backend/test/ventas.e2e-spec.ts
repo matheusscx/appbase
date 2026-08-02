@@ -1041,6 +1041,110 @@ describe('Ventas (e2e)', () => {
       expect(filas[0].aplicado_en).toBe('venta');
     });
 
+    /**
+     * ⚠️ Este test NO prueba que la venta resista un cambio de unidad, porque
+     * **hoy ese cambio es imposible**: `items.service.ts` bloquea editar
+     * `unidad_medida` de un producto con movimientos no-`ajuste`, vender
+     * siempre registra uno, y nada soft-borra movimientos (medido 2026-08-02).
+     * Un servicio no tiene unidad —vive en `item_producto`— y receta/combo la
+     * fuerzan a `'unidad'`.
+     *
+     * O sea que congelarla es **defensa en profundidad**, no la corrección de
+     * una deriva observable: hace que la línea no dependa de un guard de otro
+     * módulo, igual que el resto del snapshot (`descripcion`,
+     * `clasificacion_tributaria`, `precio_unitario`). Lo que sí prueba: que se
+     * persiste la unidad correcta y que viaja por la API, que es lo que la
+     * pantalla necesita para mostrar "2 kg" en vez de "2".
+     */
+    it('congela la unidad base del ítem en la línea y la expone en la API', async () => {
+      const sufijo = `E2E ${Date.now()}`;
+      // Producto y no servicio: `unidad_medida` vive en `item_producto`, así
+      // que un servicio no tiene unidad que congelar ni que cambiar.
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Granel ${sufijo}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          clasificacionTributaria: 'exento',
+          modoInventario: 'cantidad',
+          unidadMedida: 'kg',
+          stock: '50',
+        });
+      expect(resItem.status).toBe(201);
+      const itemId = (resItem.body as { id: string }).id;
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId, cantidad: '2' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      const ventaId = (venta.body as VentaResponse).id;
+
+      // La línea guarda en qué unidad está `cantidad`: 2 son 2 kg.
+      const detalle = await request(app.getHttpServer())
+        .get(`/api/ventas/${ventaId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(detalle.status).toBe(200);
+      const [linea] = (
+        detalle.body as { detalles: { unidadCodigoBase: string }[] }
+      ).detalles;
+      expect(linea.unidadCodigoBase).toBe('kg');
+
+      // Ancla del porqué: el catálogo NO deja cambiarla una vez que hubo
+      // movimientos. Si algún día se relaja, la venta ya no se entera — que es
+      // exactamente para lo que se congeló.
+      const patch = await request(app.getHttpServer())
+        .patch(`/api/items/${itemId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ unidadMedida: 'g' });
+      expect(patch.status).toBe(400);
+      expect((patch.body as { message: string }).message).toMatch(
+        /unidad de medida/,
+      );
+    });
+
+    it('un ítem sin unidad propia congela `unidad`', async () => {
+      // Un servicio no tiene `unidad_medida` —vive en `item_producto`—, así que
+      // `resolverUnidadBaseDeItem` cae al default. La columna es NOT NULL: no
+      // puede quedar vacía por no saber.
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio sin unidad E2E ${Date.now()}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'exento',
+        });
+      expect(resItem.status).toBe(201);
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            { itemId: (resItem.body as { id: string }).id, cantidad: '1' },
+          ],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+
+      const detalle = await request(app.getHttpServer())
+        .get(`/api/ventas/${(venta.body as VentaResponse).id}`)
+        .set('Authorization', `Bearer ${token}`);
+      const [linea] = (
+        detalle.body as { detalles: { unidadCodigoBase: string }[] }
+      ).detalles;
+      expect(linea.unidadCodigoBase).toBe('unidad');
+    });
+
     it('congela la config del cálculo con la que se cobró', async () => {
       const venta = await request(app.getHttpServer())
         .post('/api/ventas')
