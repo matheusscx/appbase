@@ -97,15 +97,18 @@ Inerte: las columnas existen y nada las puebla todavía. Separada porque es mec�
 
 ### Task 4: Poblar el congelado
 
-- [ ] Escribir `modo`, `nombre_regla`, `porcentaje_aplicado` y `valor_solicitado` desde la traza, en las tres familias según la tabla.
-- [ ] `porcentaje_aplicado` se puebla solo en reglas `porcentaje`; en `monto_fijo` queda `null` **explícito** — que no se cuele un `0` que después se lea como "0%".
-- [ ] `detalle_id`: mapear línea↔detalle **por índice** contra `resultado.lineas`, **nunca por `itemId`** — el mismo ítem puede aparecer en dos líneas con personalizaciones distintas. Mismo criterio que ya usa el frontend para cruzar advertencias.
-- [ ] `config_calculo` desde la `ConfigCalculo` con la que se calculó.
-- [ ] Agregar los campos nuevos al `SELECT` del detalle de venta (`ventas.service.ts:1463-1476`) y al armado de la respuesta (`:1625-1639`), para que viajen solos a quien ya consume ese endpoint.
-- [ ] e2e **el que importa**: crear una venta con una regla de 10%, **editar la regla a 20%**, y verificar que la venta sigue diciendo 10%. Y su gemelo con la regla **borrada**.
-- [ ] e2e de `detalle_id`: una venta con la **misma regla en dos líneas** distintas, verificando que las filas quedan atribuidas a líneas distintas. Es el caso que hoy produce filas indistinguibles.
-- [ ] e2e del tope: `valor_solicitado` ≠ `valor_aplicado`, con el caso ya reproducido a mano (regla fija $5.000 sobre línea de $1.500 → aplicado $1.500, solicitado $5.000).
-- [ ] **Mutante:** quitar `detalle_id` del insert y confirmar que cae el test de las dos líneas.
+- [x] Escribir `modo`, `nombre_regla`, `porcentaje_aplicado` y `valor_solicitado` desde la traza, en las tres familias según la tabla.
+- [x] `porcentaje_aplicado` se puebla solo en reglas `porcentaje`; en `monto_fijo` queda `null` **explícito** — que no se cuele un `0` que después se lea como "0%".
+- [x] `detalle_id`: mapear línea↔detalle **por índice** contra `resultado.lineas`, **nunca por `itemId`** — el mismo ítem puede aparecer en dos líneas con personalizaciones distintas.
+- [x] `config_calculo` desde la `ConfigCalculo` con la que se calculó. **Requirió un cambio no previsto:** `calcular()` armaba la config y no la devolvía, así que `ResultadoVenta` gana `config` y el motor la echa de vuelta. La alternativa —releer las preferencias del tenant en `ventas.service`— era una query extra y una segunda fuente de verdad.
+- [x] Agregar los campos nuevos al `SELECT` del detalle de venta y al armado de la respuesta.
+- [x] e2e **el que importa**: venta con una regla de 10% → editar la regla a 20% → la venta sigue diciendo 10%. Y su gemelo con la regla **borrada**.
+- [x] e2e de `detalle_id`: misma regla en dos líneas, filas atribuidas a líneas distintas y a detalles de *esa* venta.
+- [x] e2e del tope: aplicado $2.000 / solicitado $5.000, con `porcentaje_aplicado` null y `detalle_id` null por ser regla de venta.
+- [x] e2e de `config_calculo` en la cabecera.
+- [x] **Mutantes:** (a) revertir al código anterior sin `detalle_id` → cae el test de las dos líneas, en unit y en e2e; (b) atribuir todo a `detalles[0]` → cae también. El mock de `save` pasó a dar un id **distinto por posición**: con el id compartido que tenía, un bug de atribución era invisible.
+
+**`NOT NULL` decidido acá** (quedó pendiente de Task 3): `nombre_regla`, `modo` y `valor_solicitado` van `NOT NULL`. Medido antes: `crearEnTransaccion` es el **único** camino de escritura de las tres tablas en todo el repo, y el seeder no crea ventas, así que la BD fresca lo acepta limpio. Es lo que convierte el congelado en invariante de esquema en vez de convención — un segundo camino de escritura que se olvide de poblarlas falla al insertar, y ningún test de `crearEnTransaccion` lo cazaría. `detalle_id` y `porcentaje_aplicado` siguen nullable: los dos tienen un `null` con significado.
 
 ### Task 5: Documentación
 

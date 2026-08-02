@@ -845,6 +845,234 @@ describe('Ventas (e2e)', () => {
     });
   });
 
+  // El objetivo entero de la feature: la venta tiene que poder decir "este
+  // descuento era 10%" aunque hoy el catálogo diga otra cosa, o ya no diga nada.
+  describe('la venta congela la regla aplicada', () => {
+    // "Directo" — regla de valor plano sin condiciones (seedTiposRegla()).
+    const TIPO_DIRECTO_ID = '550e8400-e29b-41d4-a716-446655440337';
+
+    const crearDescuento = async (nombre: string, valor: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/descuentos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre,
+          tipoReglaId: TIPO_DIRECTO_ID,
+          modo: 'porcentaje',
+          valor,
+          activo: true,
+        });
+      expect(res.status).toBe(201);
+      return (res.body as { id: string }).id;
+    };
+
+    const filasDescuento = (ventaId: string) =>
+      ds.query<
+        {
+          descuento_id: string;
+          detalle_id: string | null;
+          nombre_regla: string | null;
+          modo: string | null;
+          valor_aplicado: string;
+          valor_solicitado: string | null;
+          porcentaje_aplicado: string | null;
+          aplicado_en: string;
+        }[]
+      >(
+        `SELECT descuento_id, detalle_id, nombre_regla, modo, valor_aplicado,
+                valor_solicitado, porcentaje_aplicado, aplicado_en
+           FROM ventas_descuentos
+          WHERE venta_id = $1 AND eliminado_el IS NULL
+          ORDER BY aplicado_en, detalle_id NULLS LAST`,
+        [ventaId],
+      );
+
+    it('sigue diciendo 10% después de que el descuento pase a 20%', async () => {
+      // Sufijo único también en el nombre nuevo: renombrar a un literal fijo
+      // choca con la unicidad de nombre en la segunda corrida sobre la misma BD.
+      const sufijo = `E2E ${Date.now()}`;
+      const descuentoId = await crearDescuento(`Socio 10% ${sufijo}`, '0.10');
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            { itemId: ITEM_ID, cantidad: '1', descuentoIds: [descuentoId] },
+          ],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      const ventaId = (venta.body as VentaResponse).id;
+
+      // El catálogo cambia DESPUÉS de la venta.
+      const patch = await request(app.getHttpServer())
+        .patch(`/api/descuentos/${descuentoId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: `Socio 20% ${sufijo}`, valor: '0.20' });
+      expect(patch.status).toBe(200);
+
+      // Sin esto el test pasaría igual con un PATCH que no hiciera nada: hay
+      // que probar que el catálogo SÍ cambió para que "la venta no se enteró"
+      // signifique algo.
+      const catalogo = await request(app.getHttpServer())
+        .get('/api/descuentos')
+        .set('Authorization', `Bearer ${token}`);
+      expect(catalogo.status).toBe(200);
+      const enCatalogo = (
+        catalogo.body as { id: string; nombre: string; valor: string }[]
+      ).find((d) => d.id === descuentoId);
+      expect(Number(enCatalogo?.valor)).toBeCloseTo(0.2, 4);
+      expect(enCatalogo?.nombre).toBe(`Socio 20% ${sufijo}`);
+
+      const filas = await filasDescuento(ventaId);
+      expect(filas).toHaveLength(1);
+      // Lo que importa: la venta vieja no se enteró del cambio.
+      expect(Number(filas[0].porcentaje_aplicado)).toBeCloseTo(0.1, 4);
+      expect(filas[0].nombre_regla).toContain('Socio 10%');
+      expect(filas[0].modo).toBe('porcentaje');
+    });
+
+    it('sigue siendo legible después de que el descuento se borre', async () => {
+      const descuentoId = await crearDescuento(
+        `Efímero 15% E2E ${Date.now()}`,
+        '0.15',
+      );
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            { itemId: ITEM_ID, cantidad: '1', descuentoIds: [descuentoId] },
+          ],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      const ventaId = (venta.body as VentaResponse).id;
+
+      const del = await request(app.getHttpServer())
+        .delete(`/api/descuentos/${descuentoId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(del.status).toBe(200);
+
+      // Sin `nombre_regla` congelado habría que ir al catálogo, donde la regla
+      // ya está borrada: la fila tiene que bastarse sola.
+      const filas = await filasDescuento(ventaId);
+      expect(filas).toHaveLength(1);
+      expect(filas[0].nombre_regla).toContain('Efímero 15%');
+      expect(Number(filas[0].porcentaje_aplicado)).toBeCloseTo(0.15, 4);
+    });
+
+    it('atribuye a líneas distintas la MISMA regla aplicada dos veces', async () => {
+      const descuentoId = await crearDescuento(
+        `Doble línea E2E ${Date.now()}`,
+        '0.05',
+      );
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            { itemId: ITEM_ID, cantidad: '1', descuentoIds: [descuentoId] },
+            { itemId: ITEM_ID, cantidad: '2', descuentoIds: [descuentoId] },
+          ],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      const ventaId = (venta.body as VentaResponse).id;
+
+      const filas = await filasDescuento(ventaId);
+      expect(filas).toHaveLength(2);
+      // El caso que antes producía dos filas indistinguibles.
+      expect(filas[0].detalle_id).not.toBeNull();
+      expect(filas[1].detalle_id).not.toBeNull();
+      expect(filas[0].detalle_id).not.toBe(filas[1].detalle_id);
+
+      // Y cada detalle_id es de ESTA venta, no de cualquier otra.
+      const detalles = await ds.query<{ detalle_id: string }[]>(
+        `SELECT detalle_id FROM venta_detalles
+          WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [ventaId],
+      );
+      const idsDeLaVenta = detalles.map((d) => d.detalle_id);
+      expect(idsDeLaVenta).toContain(filas[0].detalle_id);
+      expect(idsDeLaVenta).toContain(filas[1].detalle_id);
+    });
+
+    it('guarda lo que el descuento pedía cuando el piso en cero lo recortó', async () => {
+      // "Promo fija $5.000" a nivel venta sobre un servicio de $2.000: se topea.
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Servicio topeado E2E ${Date.now()}`,
+          precioBase: '2000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'servicio',
+          clasificacionTributaria: 'exento',
+        });
+      expect(resItem.status).toBe(201);
+      const servicioId = (resItem.body as { id: string }).id;
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: servicioId, cantidad: '1' }],
+          descuentosVentaIds: [DESCUENTO_FIJO_ID],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '2000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      const ventaId = (venta.body as VentaResponse).id;
+
+      const filas = await filasDescuento(ventaId);
+      expect(filas).toHaveLength(1);
+      // Aplicó 2.000 —todo lo que había— pero valía 5.000. Sin esta columna
+      // los dos casos son indistinguibles.
+      expect(Number(filas[0].valor_aplicado)).toBeCloseTo(2000, 4);
+      expect(Number(filas[0].valor_solicitado)).toBeCloseTo(5000, 4);
+      expect(filas[0].modo).toBe('monto_fijo');
+      // Monto fijo: no hay porcentaje que congelar.
+      expect(filas[0].porcentaje_aplicado).toBeNull();
+      // Regla de venta: no pertenece a ninguna línea.
+      expect(filas[0].detalle_id).toBeNull();
+      expect(filas[0].aplicado_en).toBe('venta');
+    });
+
+    it('congela la config del cálculo con la que se cobró', async () => {
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+
+      const [fila] = await ds.query<
+        {
+          config_calculo: {
+            formula: string[];
+            calculoDescuentos: string;
+            modoRedondeo: string;
+          } | null;
+        }[]
+      >(`SELECT config_calculo FROM ventas WHERE venta_id = $1`, [
+        (venta.body as VentaResponse).id,
+      ]);
+      // Sin esto un 10% congelado no dice cuánto descontó: depende del orden
+      // de la fórmula y de base|cascada, editables desde Preferencias.
+      expect(fila.config_calculo).not.toBeNull();
+      expect(fila.config_calculo?.formula).toEqual(
+        expect.arrayContaining(['descuentos', 'recargos', 'impuestos']),
+      );
+      expect(typeof fila.config_calculo?.calculoDescuentos).toBe('string');
+      expect(typeof fila.config_calculo?.modoRedondeo).toBe('string');
+    });
+  });
+
   describe('GET /propinas/porcentaje-sugerido-venta', () => {
     it('devuelve el porcentaje sugerido del tenant', async () => {
       const res = await request(app.getHttpServer())

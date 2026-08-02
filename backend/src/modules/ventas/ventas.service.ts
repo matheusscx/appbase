@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull } from 'typeorm';
 import Decimal from 'decimal.js';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
+import type { TrazaRegla } from '../calculo-precios/calculo-precios.engine';
 import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService, type ConvertirUnidad } from '../items/items.service';
@@ -380,6 +381,9 @@ export class VentasService {
         baseVentasTotalFinal: totalFinal,
         baseVentasSinImpuestos,
         comentario: dto.comentario ?? null,
+        // La config con la que se calculó, congelada: sin ella las reglas
+        // congeladas más abajo no son interpretables.
+        configCalculo: resultado.config,
       }),
     );
 
@@ -431,14 +435,29 @@ export class VentasService {
     const filasRecargo: VentaRecargo[] = [];
     const filasImpuesto: VentaImpuesto[] = [];
 
-    for (const rLinea of resultado.lineas) {
+    // Un `porcentaje_aplicado` solo tiene sentido si la regla ERA un
+    // porcentaje. En una de monto fijo va `null` explícito: un `0` se leería
+    // después como "valía 0%", que es una regla distinta.
+    const porcentajeDe = (traza: TrazaRegla) =>
+      traza.modo === 'porcentaje' ? traza.valorEfectivo : null;
+
+    resultado.lineas.forEach((rLinea, i) => {
+      // Por índice, nunca por `itemId`: el mismo ítem puede aparecer en dos
+      // líneas con personalizaciones distintas, y buscarlo por ítem atribuiría
+      // las dos reglas a la misma.
+      const detalleId = detalles[i].id;
+
       for (const traza of rLinea.trazas.descuentos) {
         filasDescuento.push(
           manager.create(VentaDescuento, {
             ventaId: venta.id,
             descuentoId: traza.id,
+            detalleId,
+            nombreRegla: traza.nombre,
+            modo: traza.modo,
             valorAplicado: traza.monto,
-            porcentajeAplicado: null,
+            valorSolicitado: traza.valorSolicitado,
+            porcentajeAplicado: porcentajeDe(traza),
             aplicadoEn: 'detalle',
           }),
         );
@@ -448,8 +467,11 @@ export class VentasService {
           manager.create(VentaRecargo, {
             ventaId: venta.id,
             recargoId: traza.id,
+            detalleId,
+            nombreRegla: traza.nombre,
+            modo: traza.modo,
             valorAplicado: traza.monto,
-            porcentajeAplicado: null,
+            porcentajeAplicado: porcentajeDe(traza),
             aplicadoEn: 'detalle',
           }),
         );
@@ -459,21 +481,28 @@ export class VentasService {
           manager.create(VentaImpuesto, {
             ventaId: venta.id,
             impuestoId: traza.id,
+            detalleId,
+            nombreRegla: traza.nombre,
             valorAplicado: traza.monto,
             porcentajeAplicado: traza.tasa,
             aplicadoEn: 'detalle',
           }),
         );
       }
-    }
+    });
 
+    // Las de nivel venta no pertenecen a ninguna línea: `detalleId` queda null.
     for (const traza of resultado.trazasVenta.descuentos) {
       filasDescuento.push(
         manager.create(VentaDescuento, {
           ventaId: venta.id,
           descuentoId: traza.id,
+          detalleId: null,
+          nombreRegla: traza.nombre,
+          modo: traza.modo,
           valorAplicado: traza.monto,
-          porcentajeAplicado: null,
+          valorSolicitado: traza.valorSolicitado,
+          porcentajeAplicado: porcentajeDe(traza),
           aplicadoEn: 'venta',
         }),
       );
@@ -483,8 +512,11 @@ export class VentasService {
         manager.create(VentaRecargo, {
           ventaId: venta.id,
           recargoId: traza.id,
+          detalleId: null,
+          nombreRegla: traza.nombre,
+          modo: traza.modo,
           valorAplicado: traza.monto,
-          porcentajeAplicado: null,
+          porcentajeAplicado: porcentajeDe(traza),
           aplicadoEn: 'venta',
         }),
       );
@@ -1473,18 +1505,24 @@ export class VentasService {
        ORDER BY creado_el ASC`,
       [ventaId, tenantId],
     );
+    // Las tres traen lo congelado (`nombre_regla`, `modo`, `valor_solicitado`)
+    // además del monto: el catálogo vivo pudo cambiar o desaparecer desde que
+    // se cobró, así que la fila tiene que bastarse sola.
     const descuentos: Row[] = await this.dataSource.query(
-      `SELECT venta_descuento_id, descuento_id, valor_aplicado, porcentaje_aplicado, aplicado_en
+      `SELECT venta_descuento_id, descuento_id, detalle_id, nombre_regla, modo,
+              valor_aplicado, valor_solicitado, porcentaje_aplicado, aplicado_en
        FROM ventas_descuentos WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
     const recargos: Row[] = await this.dataSource.query(
-      `SELECT venta_recargo_id, recargo_id, valor_aplicado, porcentaje_aplicado, aplicado_en
+      `SELECT venta_recargo_id, recargo_id, detalle_id, nombre_regla, modo,
+              valor_aplicado, porcentaje_aplicado, aplicado_en
        FROM ventas_recargos WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
     const impuestos: Row[] = await this.dataSource.query(
-      `SELECT venta_impuesto_id, impuesto_id, valor_aplicado, porcentaje_aplicado, aplicado_en
+      `SELECT venta_impuesto_id, impuesto_id, detalle_id, nombre_regla,
+              valor_aplicado, porcentaje_aplicado, aplicado_en
        FROM ventas_impuestos WHERE venta_id = $1 AND eliminado_el IS NULL`,
       [ventaId],
     );
@@ -1635,13 +1673,20 @@ export class VentasService {
       descuentos: descuentos.map((d) => ({
         id: d['venta_descuento_id'],
         descuentoId: d['descuento_id'],
+        detalleId: d['detalle_id'],
+        nombreRegla: d['nombre_regla'],
+        modo: d['modo'],
         valorAplicado: d['valor_aplicado'],
+        valorSolicitado: d['valor_solicitado'],
         porcentajeAplicado: d['porcentaje_aplicado'],
         aplicadoEn: d['aplicado_en'],
       })),
       recargos: recargos.map((r) => ({
         id: r['venta_recargo_id'],
         recargoId: r['recargo_id'],
+        detalleId: r['detalle_id'],
+        nombreRegla: r['nombre_regla'],
+        modo: r['modo'],
         valorAplicado: r['valor_aplicado'],
         porcentajeAplicado: r['porcentaje_aplicado'],
         aplicadoEn: r['aplicado_en'],
@@ -1649,6 +1694,8 @@ export class VentasService {
       impuestos: impuestos.map((imp) => ({
         id: imp['venta_impuesto_id'],
         impuestoId: imp['impuesto_id'],
+        detalleId: imp['detalle_id'],
+        nombreRegla: imp['nombre_regla'],
         valorAplicado: imp['valor_aplicado'],
         porcentajeAplicado: imp['porcentaje_aplicado'],
         aplicadoEn: imp['aplicado_en'],

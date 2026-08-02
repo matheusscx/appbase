@@ -89,6 +89,13 @@ const mockResultadoVenta = {
   trazasVenta: { descuentos: [], recargos: [] },
   advertencias: [],
   advertenciasVenta: [],
+  config: {
+    formula: ['descuentos', 'recargos', 'impuestos'],
+    calculoDescuentos: 'base',
+    calculoRecargos: 'base',
+    escalaCalculo: 4,
+    modoRedondeo: 'HALF_UP',
+  },
 };
 
 const MONEDA_ROWS = [
@@ -97,7 +104,9 @@ const MONEDA_ROWS = [
 
 function buildManagerMock() {
   const venta = { id: 'venta-uuid-001' };
-  const detalle = { id: 'detalle-uuid-001' };
+  // Cada detalle recibe un id DISTINTO por posición: con un id compartido, un
+  // bug que atribuyera todas las reglas a la misma línea sería invisible.
+  const idDetalle = (i: number) => `detalle-uuid-00${i + 1}`;
   return {
     create: jest
       .fn()
@@ -114,14 +123,14 @@ function buildManagerMock() {
           _entity: unknown,
           data: Record<string, unknown> | Record<string, unknown>[],
         ): Promise<unknown> => {
-          const guardar = (fila: Record<string, unknown>) => {
+          const guardar = (fila: Record<string, unknown>, i: number) => {
             if (fila['totalFinal'] !== undefined) return { ...venta, ...fila };
             if (fila['ventaId'] !== undefined && fila['cantidad'] !== undefined)
-              return { ...detalle, ...fila };
+              return { id: idDetalle(i), ...fila };
             return { ...fila };
           };
           return Promise.resolve(
-            Array.isArray(data) ? data.map(guardar) : guardar(data),
+            Array.isArray(data) ? data.map(guardar) : guardar(data, 0),
           );
         },
       ),
@@ -742,6 +751,147 @@ describe('VentasService', () => {
           porcentajeAplicado: '0.19',
         }),
       ]);
+    });
+
+    it('congela la regla y la atribuye a SU línea, no a la primera', async () => {
+      // La misma regla en dos líneas producía dos filas indistinguibles.
+      const traza = (over: Record<string, unknown> = {}) => ({
+        id: 'desc-001',
+        nombre: 'Promo socio',
+        monto: '10.0000',
+        modo: 'porcentaje' as const,
+        valorEfectivo: '0.10',
+        valorSolicitado: '10.0000',
+        ...over,
+      });
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: [
+          {
+            ...mockResultadoVenta.lineas[0],
+            trazas: {
+              descuentos: [traza()],
+              recargos: [],
+              impuestos: [],
+            },
+          },
+          {
+            ...mockResultadoVenta.lineas[0],
+            trazas: {
+              // Monto fijo: `porcentaje_aplicado` tiene que quedar null, no 0.
+              descuentos: [
+                traza({
+                  modo: 'monto_fijo',
+                  valorEfectivo: '3',
+                  monto: '3.0000',
+                  valorSolicitado: '3.0000',
+                }),
+              ],
+              recargos: [],
+              impuestos: [],
+            },
+          },
+        ],
+      });
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        lineas: [
+          { itemId: ITEM_ID, cantidad: '1' },
+          { itemId: ITEM_ID, cantidad: '1' },
+        ],
+      });
+
+      const filas = manager.save.mock.calls.find(
+        (call) => call[0] === VentaDescuento,
+      )?.[1] as Record<string, unknown>[];
+
+      expect(filas).toEqual([
+        expect.objectContaining({
+          detalleId: 'detalle-uuid-001',
+          nombreRegla: 'Promo socio',
+          modo: 'porcentaje',
+          porcentajeAplicado: '0.10',
+          valorSolicitado: '10.0000',
+        }),
+        expect.objectContaining({
+          // La segunda línea, no la primera: es el bug que este test caza.
+          detalleId: 'detalle-uuid-002',
+          modo: 'monto_fijo',
+          // Null explícito: un 0 se leería después como "valía 0%".
+          porcentajeAplicado: null,
+        }),
+      ]);
+    });
+
+    it('congela lo que la regla pedía cuando el piso en cero la recortó', async () => {
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: [
+          {
+            ...mockResultadoVenta.lineas[0],
+            trazas: {
+              descuentos: [
+                {
+                  id: 'desc-fijo',
+                  nombre: 'Cupón 5000',
+                  modo: 'monto_fijo' as const,
+                  valorEfectivo: '5000',
+                  // Pedía 5000 sobre una línea de 1500: se topeó.
+                  monto: '1500.0000',
+                  valorSolicitado: '5000.0000',
+                },
+              ],
+              recargos: [],
+              impuestos: [],
+            },
+          },
+        ],
+      });
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      const filas = manager.save.mock.calls.find(
+        (call) => call[0] === VentaDescuento,
+      )?.[1] as Record<string, unknown>[];
+      expect(filas[0]).toEqual(
+        expect.objectContaining({
+          valorAplicado: '1500.0000',
+          valorSolicitado: '5000.0000',
+        }),
+      );
+    });
+
+    it('congela la config del cálculo en la cabecera de la venta', async () => {
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      const ventaCreate = manager.create.mock.calls.find(
+        (call) => call[0] === Venta,
+      );
+      // Sin esto el congelado de las reglas no es interpretable: el mismo 10%
+      // da distinto según el orden de la fórmula y según base|cascada.
+      expect(ventaCreate?.[1]).toEqual(
+        expect.objectContaining({
+          configCalculo: expect.objectContaining({
+            formula: ['descuentos', 'recargos', 'impuestos'],
+            calculoDescuentos: 'base',
+            modoRedondeo: 'HALF_UP',
+          }),
+        }),
+      );
     });
 
     it('no gasta un round-trip por familia cuando la venta no tiene reglas', async () => {

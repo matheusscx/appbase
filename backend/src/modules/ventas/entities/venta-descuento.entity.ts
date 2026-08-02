@@ -26,13 +26,16 @@ export class VentaDescuento {
   @Column({ name: 'detalle_id', type: 'uuid', nullable: true })
   detalleId: string | null;
 
-  /** Nombre de la regla al momento de la venta; puede cambiar después. */
-  @Column({ name: 'nombre_regla', type: 'text', nullable: true })
-  nombreRegla: string | null;
+  /**
+   * Nombre de la regla al momento de la venta; el del catálogo puede cambiar
+   * después, o la regla puede no existir más.
+   */
+  @Column({ name: 'nombre_regla', type: 'text' })
+  nombreRegla: string;
 
   /** `'porcentaje' | 'monto_fijo'` al momento de la venta. */
-  @Column({ name: 'modo', type: 'text', nullable: true })
-  modo: string | null;
+  @Column({ name: 'modo', type: 'text' })
+  modo: string;
 
   @Column({ name: 'valor_aplicado', type: 'decimal', precision: 18, scale: 4 })
   valorAplicado: string;
@@ -48,9 +51,8 @@ export class VentaDescuento {
     type: 'decimal',
     precision: 18,
     scale: 4,
-    nullable: true,
   })
-  valorSolicitado: string | null;
+  valorSolicitado: string;
 
   @Column({
     name: 'porcentaje_aplicado',

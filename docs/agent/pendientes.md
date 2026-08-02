@@ -14,6 +14,29 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **El valor de un tramo nunca se valida: un "50%" cargado como `50` pasa** (backend,
+  medido 2026-08-02 al congelar las reglas en la venta) — `validarValor()` exige que un
+  porcentaje sea `< 1` y `> 0` (`descuentos.service.ts:612-623`, gemelo en
+  `recargos.service.ts:526`), pero **solo se invoca para `TIPOS_CON_VALOR_UNICO`**
+  (`:474` en `create`, `:575` en `update`). Los tipos por tramos —`por_mayor`,
+  `por_monto_venta`— pasan por otra rama (`:461-462`, `:533-540`) que solo verifica que
+  **haya** al menos un tramo; el `valor` de cada uno lo tipa `TramoDto` con un
+  `@IsNumberString()` pelado. Resultado: la misma regla de negocio se enforza o no según
+  el tipo, y un tramo `modo='porcentaje'` con `valor: '50'` —el typo natural de quien
+  piensa "50%"— entra y produce un descuento del **5000%** sobre la línea.
+  **Qué lo hace visible ahora:** hasta este cambio `porcentaje_aplicado` se escribía
+  hardcodeada en `null` para descuentos y recargos, así que el valor del tramo no salía de
+  la memoria. Desde el congelado se persiste en `ventas_descuentos.porcentaje_aplicado`,
+  `NUMERIC(7,4)`. ⚠️ **El desborde no es el problema principal**: esa columna aguanta hasta
+  `999.9999`, así que un `50` cabe sin error — el daño es el descuento del 5000%, que el
+  piso en cero convierte en una línea gratis con advertencia. Un tramo `≥ 1000` sí haría
+  fallar el `INSERT` y con él toda la venta, pero eso ya es un dato absurdo.
+  **Se cierra** extrayendo la validación a un solo lugar y aplicándola también a cada tramo,
+  en los dos services. Es el patrón de
+  [buscar por conducta, no por mecanismo](../../CLAUDE.md): la regla existía, se enforzaba
+  por un camino y no por el otro. **No se corrigió en el momento** porque vive en dos
+  módulos ajenos a la tarea y no bloquea el congelado.
+
 - [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
   frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
   total `$0` el cobro se cae por los **dos** caminos, no solo por Webpay: la rama webpay

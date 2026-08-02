@@ -1096,10 +1096,10 @@ CREATE TABLE "ventas_descuentos" (
   "venta_id"            UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
   "descuento_id"        UUID          NOT NULL REFERENCES "descuentos" ("descuento_id"),
   "detalle_id"          UUID          REFERENCES "venta_detalles" ("detalle_id"),
-  "nombre_regla"        TEXT,
-  "modo"                TEXT,            -- 'porcentaje' | 'monto_fijo'
+  "nombre_regla"        TEXT          NOT NULL,
+  "modo"                TEXT          NOT NULL,   -- 'porcentaje' | 'monto_fijo'
   "valor_aplicado"      NUMERIC(18,4) NOT NULL,
-  "valor_solicitado"    NUMERIC(18,4),   -- lo que pedía antes del piso en cero
+  "valor_solicitado"    NUMERIC(18,4) NOT NULL,   -- lo que pedía antes del piso en cero
   "porcentaje_aplicado" NUMERIC(7,4),    -- NULL si modo = 'monto_fijo'
   "aplicado_en"         TEXT          NOT NULL DEFAULT 'venta',
   "creado_el"           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
@@ -1113,10 +1113,10 @@ CREATE TABLE "ventas_recargos" (
   "venta_id"            UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
   "recargo_id"          UUID          NOT NULL REFERENCES "recargos" ("recargo_id"),
   "detalle_id"          UUID          REFERENCES "venta_detalles" ("detalle_id"),
-  "nombre_regla"        TEXT,
-  "modo"                TEXT,            -- 'porcentaje' | 'monto_fijo'
+  "nombre_regla"        TEXT          NOT NULL,
+  "modo"                TEXT          NOT NULL,   -- 'porcentaje' | 'monto_fijo'
   "valor_aplicado"      NUMERIC(18,4) NOT NULL,
-  "porcentaje_aplicado" NUMERIC(7,4),    -- NULL si modo = 'monto_fijo'
+  "porcentaje_aplicado" NUMERIC(7,4),             -- NULL si modo = 'monto_fijo'
   "aplicado_en"         TEXT          NOT NULL DEFAULT 'venta',
   "creado_el"           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"      TIMESTAMPTZ,
@@ -1130,7 +1130,7 @@ CREATE TABLE "ventas_impuestos" (
   "venta_id"            UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
   "impuesto_id"         UUID          NOT NULL REFERENCES "impuestos" ("impuesto_id"),
   "detalle_id"          UUID          REFERENCES "venta_detalles" ("detalle_id"),
-  "nombre_regla"        TEXT,
+  "nombre_regla"        TEXT          NOT NULL,
   "valor_aplicado"      NUMERIC(18,4) NOT NULL,
   "porcentaje_aplicado" NUMERIC(7,4),
   "aplicado_en"         TEXT          NOT NULL DEFAULT 'venta',

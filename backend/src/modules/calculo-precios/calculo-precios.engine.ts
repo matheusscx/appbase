@@ -157,6 +157,12 @@ export interface ResultadoVenta {
    * donde corresponde sin tener que restar strings.
    */
   advertenciasVenta: AdvertenciaPrecio[];
+  /**
+   * La config con la que se calculó, devuelta tal cual. La venta la congela:
+   * sin ella las reglas congeladas no son interpretables, porque el mismo 10%
+   * da distinto según el orden de la fórmula y según base|cascada.
+   */
+  config: ConfigCalculo;
 }
 
 // ── Constantes de estrategia ────────────────────────────────────────────────
@@ -564,5 +570,6 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
       ...dv.advertencias,
     ],
     advertenciasVenta: dv.advertencias,
+    config: cfg,
   };
 }
