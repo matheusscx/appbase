@@ -12,11 +12,15 @@ interface MotivoDiferenciaInventario {
   nombre: string
   activo: boolean
   esFijo: boolean
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 const config = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = config.public.apiUrl
+
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('motivos-diferencia-inventario')
 
 const motivos = ref<MotivoDiferenciaInventario[]>([])
 const loading = ref(false)
@@ -25,6 +29,15 @@ const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
+// Segundo paso del restaurar, solo cuando el backend contesta 400 de colisión:
+// el mensaje que explica cuál nombre está tomado y el nombre libre —editable—
+// con el que se reintenta.
+const colisionModalOpen = ref(false)
+const colisionMensaje = ref('')
+const nombrePropuesto = ref('')
 const toggling = reactive(new Set<string>())
 
 const emptyForm = () => ({
@@ -34,7 +47,7 @@ const emptyForm = () => ({
 const form = ref(emptyForm())
 
 const drawerTitle = computed(() =>
-  editingId.value ? 'Editar causa' : 'Nueva causa',
+  editingId.value ? 'Editar motivo' : 'Nuevo motivo',
 )
 
 const submitLabel = computed(() =>
@@ -55,20 +68,37 @@ watch(drawerOpen, (open) => {
   if (!open) resetDrawer()
 })
 
+// Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `motivos.value` sin
+// importar cuál toggle la originó — el listado queda desincronizado del
+// switch. Esta pantalla NO usa `usePaginatedList`, así que no hereda la cola
+// que vive ahí: va local.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    motivos.value = await useApiFetch<MotivoDiferenciaInventario[]>(
-      `${apiUrl}/motivos-diferencia-inventario`,
-    )
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar causas'), color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      const query = verEliminados.value ? '?incluirEliminados=true' : ''
+      motivos.value = await useApiFetch<MotivoDiferenciaInventario[]>(
+        `${apiUrl}/motivos-diferencia-inventario${query}`,
+      )
+    }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar causas'), color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: MotivoDiferenciaInventario) {
   const idx = motivos.value.findIndex(m => m.id === saved.id)
@@ -78,10 +108,7 @@ function upsertLocal(saved: MotivoDiferenciaInventario) {
   else {
     motivos.value.push(saved)
   }
-  motivos.value = [...motivos.value].sort((a, b) => {
-    if (a.esFijo !== b.esFijo) return a.esFijo ? -1 : 1
-    return a.nombre.localeCompare(b.nombre, 'es')
-  })
+  motivos.value = ordenarFijosPrimero(motivos.value)
 }
 
 function removeLocal(id: string) {
@@ -94,7 +121,7 @@ function abrirCrear() {
 }
 
 function abrirEditar(motivo: MotivoDiferenciaInventario) {
-  if (motivo.esFijo) return
+  if (motivo.esFijo || motivo.eliminadoEl) return
   resetDrawer()
   editingId.value = motivo.id
   form.value = {
@@ -122,7 +149,7 @@ async function guardar() {
           { method: 'PATCH', body },
         )
     upsertLocal(saved)
-    toast.add({ title: isNew ? 'Causa creada' : 'Causa actualizada', color: 'success' })
+    toast.add({ title: isNew ? 'Motivo creado' : 'Motivo actualizado', color: 'success' })
     drawerOpen.value = false
   }
   catch (e: unknown) {
@@ -134,7 +161,7 @@ async function guardar() {
 }
 
 async function toggleActivo(motivo: MotivoDiferenciaInventario) {
-  if (motivo.esFijo || toggling.has(motivo.id)) return
+  if (motivo.esFijo || motivo.eliminadoEl || toggling.has(motivo.id)) return
   toggling.add(motivo.id)
   const prev = motivo.activo
   motivo.activo = !prev
@@ -144,7 +171,7 @@ async function toggleActivo(motivo: MotivoDiferenciaInventario) {
       body: { activo: motivo.activo },
     })
     toast.add({
-      title: motivo.activo ? 'Causa activada' : 'Causa desactivada',
+      title: motivo.activo ? 'Motivo activado' : 'Motivo desactivado',
       color: 'success',
     })
   }
@@ -157,11 +184,26 @@ async function toggleActivo(motivo: MotivoDiferenciaInventario) {
   }
 }
 
+function pedirEliminar(motivo: MotivoDiferenciaInventario) {
+  if (motivo.eliminadoEl) return
+  confirmDeleteId.value = motivo.id
+  confirmModalOpen.value = true
+}
+
 async function eliminar(id: string) {
   try {
     await useApiFetch(`${apiUrl}/motivos-diferencia-inventario/${id}`, { method: 'DELETE' })
-    removeLocal(id)
-    toast.add({ title: 'Causa eliminada', color: 'success' })
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
+    toast.add({ title: 'Motivo eliminado', color: 'success' })
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al eliminar'), color: 'error' })
@@ -170,6 +212,76 @@ async function eliminar(id: string) {
     confirmDeleteId.value = null
     confirmModalOpen.value = false
   }
+}
+
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+  colisionModalOpen.value = false
+  colisionMensaje.value = ''
+  nombrePropuesto.value = ''
+}
+
+/**
+ * Restaura una fila de la papelera. `nombreNuevo` solo llega en el reintento
+ * desde el modal de colisión.
+ *
+ * A diferencia de un catch genérico, NO cierra todo y tira un toast rojo: un
+ * 400 de colisión no es un error terminal sino una pregunta —qué nombre
+ * querés usar—, así que abre el segundo modal con la sugerencia del backend.
+ * Solo los errores de verdad (404 "no está en la papelera", red) terminan en
+ * toast.
+ */
+async function restaurarMotivo(id: string, nombreNuevo?: string) {
+  // El modal no se cierra solo al confirmar (lo cierran las funciones de acá),
+  // así que mientras el POST viaja el segundo click manda un segundo
+  // `POST .../restaurar` sobre una fila que el primero ya revivió: el backend
+  // contesta 404 "no está en la papelera" y el usuario ve un toast de ERROR
+  // inmediatamente después de un restore exitoso.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id, nombreNuevo)
+    const m = motivos.value.find(x => x.id === id)
+    if (m) {
+      m.eliminadoEl = null
+      m.eliminadoPorNombre = null
+      if (nombreNuevo) {
+        // El backend solo devuelve 2xx si aplicó ESE nombre, así que el patch
+        // local no adivina. Reordenar hace falta porque el listado viene
+        // ordenado por nombre y el renombre lo puede mover de lugar.
+        m.nombre = nombreNuevo
+        motivos.value = ordenarFijosPrimero(motivos.value)
+      }
+    }
+    toast.add({ title: 'Motivo restaurado', color: 'success' })
+    cerrarRestaurar()
+  }
+  catch (e: unknown) {
+    const sugerido = nombreSugeridoDe(e)
+    if (sugerido) {
+      // Se reabre con la sugerencia NUEVA: si el usuario editó a un nombre que
+      // también estaba tomado, el backend ya calculó el siguiente libre.
+      colisionMensaje.value = apiErrorMsg(e, 'Ese nombre ya está en uso.')
+      nombrePropuesto.value = sugerido
+      confirmRestaurarModalOpen.value = false
+      colisionModalOpen.value = true
+    }
+    else {
+      toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+      cerrarRestaurar()
+    }
+  }
+  finally {
+    restaurando.value = false
+  }
+}
+
+function confirmarColision() {
+  const id = confirmRestaurarId.value
+  const nombre = nombrePropuesto.value.trim()
+  if (!id || !nombre) return
+  restaurarMotivo(id, nombre)
 }
 
 onMounted(cargar)
@@ -185,15 +297,21 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
   <div class="space-y-6">
     <CrudPageHeader
       title="Motivos de diferencia (inventario)"
-      description="Tipifica por qué un recuento descuadra contra el stock del sistema. Las causas fijas del sistema no se editan."
+      description="Tipifica por qué un recuento descuadra contra el stock del sistema. Los motivos fijos del sistema no se editan."
     >
       <template #actions>
-        <UButton
-          icon="i-lucide-plus"
-          @click="abrirCrear"
-        >
-          Nueva causa
-        </UButton>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton
+            icon="i-lucide-plus"
+            @click="abrirCrear"
+          >
+            Nuevo motivo
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
@@ -203,15 +321,23 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
       :loading="loading"
     >
       <template #nombre-cell="{ row }">
-        <div class="flex items-center gap-2">
-          <span class="font-medium text-default">{{ row.original.nombre }}</span>
-          <UBadge
-            v-if="row.original.esFijo"
-            label="Fija"
-            color="neutral"
-            variant="subtle"
-            size="xs"
-          />
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="font-medium text-default truncate">{{ row.original.nombre }}</span>
+            <UBadge
+              v-if="row.original.esFijo"
+              label="Fija"
+              color="neutral"
+              variant="subtle"
+              size="xs"
+            />
+            <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+              Eliminado
+            </UBadge>
+          </div>
+          <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+            {{ formatearBorradoPor(row.original) }}
+          </p>
         </div>
       </template>
 
@@ -219,18 +345,29 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
         <div class="flex justify-end">
           <USwitch
             :model-value="row.original.activo"
-            :disabled="row.original.esFijo || toggling.has(row.original.id)"
+            :disabled="row.original.esFijo || toggling.has(row.original.id) || !!row.original.eliminadoEl"
             @update:model-value="toggleActivo(row.original)"
           />
         </div>
       </template>
 
       <template #acciones-cell="{ row }">
-        <div class="flex justify-end gap-2">
+        <div v-if="row.original.eliminadoEl" class="flex justify-end">
+          <UButton
+            icon="i-lucide-rotate-ccw"
+            color="neutral"
+            variant="ghost"
+            @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+          >
+            Restaurar
+          </UButton>
+        </div>
+        <div v-else class="flex justify-end gap-2">
           <UButton
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
+            title="Editar"
             :disabled="row.original.esFijo"
             @click="abrirEditar(row.original)"
           />
@@ -238,8 +375,9 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
+            title="Eliminar"
             :disabled="row.original.esFijo"
-            @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+            @click="pedirEliminar(row.original)"
           />
         </div>
       </template>
@@ -250,7 +388,7 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
             name="i-lucide-clipboard-check"
             class="w-8 h-8 mx-auto mb-2 opacity-40"
           />
-          No hay causas de diferencia de inventario.
+          No hay motivos de diferencia de inventario.
         </div>
       </template>
     </CrudTable>
@@ -290,7 +428,7 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
               :disabled="editingEsFijo"
             />
           </UFormField>
-          <UFormField label="Activa">
+          <UFormField label="Activo">
             <USwitch
               v-model="form.activo"
               :disabled="editingEsFijo"
@@ -320,10 +458,46 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
 
     <CrudModal
       v-model:open="confirmModalOpen"
-      title="Eliminar causa"
-      message="¿Eliminar esta causa de diferencia? No se puede si ya está usada en un movimiento de recuento."
+      title="Eliminar motivo"
+      message="¿Eliminar este motivo de diferencia? Podés recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar motivo"
+      message="¿Restaurar este motivo de diferencia? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmRestaurarId && restaurarMotivo(confirmRestaurarId)"
+    />
+
+    <!-- Segundo paso, solo si el backend rechazó por nombre tomado. El campo
+         viene precargado con la sugerencia pero es editable: el usuario
+         confirma o escribe el suyo (decisión del owner). -->
+    <CrudModal
+      v-model:open="colisionModalOpen"
+      title="No se puede restaurar con ese nombre"
+      :message="colisionMensaje"
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      :confirm-disabled="!nombrePropuesto.trim()"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmarColision"
+    >
+      <template #detalle>
+        <UFormField label="Restaurar como" class="mt-4">
+          <UInput
+            v-model="nombrePropuesto"
+            aria-label="Restaurar como"
+            autofocus
+          />
+        </UFormField>
+      </template>
+    </CrudModal>
   </div>
 </template>

@@ -45,6 +45,10 @@ export interface Impresora {
   puerto: number | null
   nombreCola: string | null
   activo: boolean
+  // Solo llegan con `listar(rol, true)`; los caminos de impresión
+  // (`imprimirComanda`, `obtenerImpresoraBoleta`) nunca los piden.
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 export interface ImpresoraFormBody {
@@ -158,8 +162,21 @@ async function imprimirEn(
 export function useImpresoras() {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
-  const listar = (rol?: RolImpresora) =>
-    useApiFetch<Impresora[]>(`${apiUrl}/impresoras${rol ? `?rol=${rol}` : ''}`)
+  /**
+   * `incluirEliminados` es opcional y por default `false`: esta misma función
+   * la usan los caminos de impresión —`imprimirComanda` → `listar('comanda')`,
+   * `obtenerImpresoraBoleta` → `listar('boleta')`— y NUNCA deben ver
+   * impresoras borradas, o el sistema intentaría imprimir en una que ya no
+   * existe. Solo la pantalla de papelera (`configuracion/impresoras.vue`) lo
+   * prende explícitamente.
+   */
+  const listar = (rol?: RolImpresora, incluirEliminados = false) => {
+    const params = new URLSearchParams()
+    if (rol) params.set('rol', rol)
+    if (incluirEliminados) params.set('incluirEliminados', 'true')
+    const qs = params.toString()
+    return useApiFetch<Impresora[]>(`${apiUrl}/impresoras${qs ? `?${qs}` : ''}`)
+  }
 
   const crear = (body: ImpresoraFormBody) =>
     useApiFetch<Impresora>(`${apiUrl}/impresoras`, { method: 'POST', body })

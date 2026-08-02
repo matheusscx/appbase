@@ -5,6 +5,8 @@ interface Cajon {
   id: string
   nombre: string
   activo: boolean
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 interface Member {
@@ -18,6 +20,8 @@ const toast = useToast()
 const perms = usePermissionsStore()
 const apiUrl = runtimeConfig.public.apiUrl
 
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('cajones')
+
 const cajones = ref<Cajon[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -29,6 +33,15 @@ const toggling = reactive(new Set<string>())
 const arqueoCiego = ref(false)
 const savingArqueoCiego = ref(false)
 const cajaStore = useCajaStore()
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
+// Segundo paso del restaurar, solo cuando el backend contesta 400 de colisión:
+// el mensaje que explica cuál nombre está tomado y el nombre libre —editable—
+// con el que se reintenta. Molde: `configuracion/descuentos.vue`.
+const colisionModalOpen = ref(false)
+const colisionMensaje = ref('')
+const nombrePropuesto = ref('')
 
 const usuariosDrawerOpen = ref(false)
 const usuariosCajonId = ref<string | null>(null)
@@ -59,18 +72,35 @@ watch(drawerOpen, (open) => {
   if (!open) resetDrawer()
 })
 
+// Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `cajones.value` sin
+// importar cuál toggle la originó — el listado queda desincronizado del
+// switch. Esta pantalla NO usa `usePaginatedList`, así que no hereda la cola
+// que vive ahí: va local.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    cajones.value = await useApiFetch<Cajon[]>(`${apiUrl}/cajones`)
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar cajas'), color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      const query = verEliminados.value ? '?incluirEliminados=true' : ''
+      cajones.value = await useApiFetch<Cajon[]>(`${apiUrl}/cajones${query}`)
+    }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar cajas'), color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Cajon) {
   const idx = cajones.value.findIndex(c => c.id === saved.id)
@@ -79,12 +109,17 @@ function upsertLocal(saved: Cajon) {
   cajones.value = [...cajones.value].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
 }
 
+function removeLocal(id: string) {
+  cajones.value = cajones.value.filter(c => c.id !== id)
+}
+
 function abrirCrear() {
   resetDrawer()
   drawerOpen.value = true
 }
 
 function abrirEditar(c: Cajon) {
+  if (c.eliminadoEl) return
   resetDrawer()
   editingId.value = c.id
   form.value = { nombre: c.nombre, activo: c.activo }
@@ -112,6 +147,7 @@ async function guardar() {
 }
 
 async function toggleActivo(c: Cajon) {
+  if (c.eliminadoEl) return
   if (toggling.has(c.id)) return
   toggling.add(c.id)
   const prev = c.activo
@@ -129,10 +165,25 @@ async function toggleActivo(c: Cajon) {
   }
 }
 
+function pedirEliminar(c: Cajon) {
+  if (c.eliminadoEl) return
+  confirmDeleteId.value = c.id
+  confirmModalOpen.value = true
+}
+
 async function eliminar(id: string) {
   try {
     await useApiFetch(`${apiUrl}/cajones/${id}`, { method: 'DELETE' })
-    cajones.value = cajones.value.filter(c => c.id !== id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
     toast.add({ title: 'Caja eliminada', color: 'success' })
   }
   catch (e: unknown) {
@@ -142,6 +193,72 @@ async function eliminar(id: string) {
     confirmDeleteId.value = null
     confirmModalOpen.value = false
   }
+}
+
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+  colisionModalOpen.value = false
+  colisionMensaje.value = ''
+  nombrePropuesto.value = ''
+}
+
+/**
+ * Restaura una caja de la papelera. `nombreNuevo` solo llega en el reintento
+ * desde el modal de colisión.
+ *
+ * El catch NO cierra todo y tira un toast rojo: un 400 de colisión no es un
+ * error terminal sino una pregunta —qué nombre querés usar—, así que abre el
+ * segundo modal con la sugerencia del backend. Molde: `configuracion/descuentos.vue`.
+ */
+async function restaurarCajon(id: string, nombreNuevo?: string) {
+  // Guard de reentrancia: el modal no se cierra solo al confirmar, así que
+  // mientras el POST viaja un segundo click mandaría otro `POST .../restaurar`
+  // sobre una fila ya revivida → 404 → toast de ERROR encima de un éxito.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id, nombreNuevo)
+    const c = cajones.value.find(x => x.id === id)
+    if (c) {
+      c.eliminadoEl = null
+      c.eliminadoPorNombre = null
+      // El backend solo devuelve 2xx si aplicó ESE nombre, así que el patch
+      // local no adivina. Reordenar hace falta porque el listado viene
+      // ordenado por nombre y el renombre lo puede mover de lugar.
+      if (nombreNuevo) {
+        c.nombre = nombreNuevo
+        cajones.value = [...cajones.value].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+      }
+    }
+    toast.add({ title: 'Caja restaurada', color: 'success' })
+    cerrarRestaurar()
+  }
+  catch (e: unknown) {
+    const sugerido = nombreSugeridoDe(e)
+    if (sugerido) {
+      // Se reabre con la sugerencia NUEVA: si el usuario editó a un nombre que
+      // también estaba tomado, el backend ya calculó el siguiente libre.
+      colisionMensaje.value = apiErrorMsg(e, 'Ese nombre ya está en uso.')
+      nombrePropuesto.value = sugerido
+      confirmRestaurarModalOpen.value = false
+      colisionModalOpen.value = true
+    }
+    else {
+      toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+      cerrarRestaurar()
+    }
+  }
+  finally {
+    restaurando.value = false
+  }
+}
+
+function confirmarColision() {
+  const id = confirmRestaurarId.value
+  const nombre = nombrePropuesto.value.trim()
+  if (!id || !nombre) return
+  restaurarCajon(id, nombre)
 }
 
 function toggleSeleccion(usuarioId: string, marcado: boolean) {
@@ -239,36 +356,67 @@ const columns: TableColumn<Cajon>[] = [
       description="Cajones físicos del local (Mostrador, Delivery, Barra…)."
     >
       <template #actions>
-        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
-          Nueva caja
-        </UButton>
+        <div class="flex items-center gap-4">
+          <!-- El toggle solo si puede restaurar: sin `Cajas:Eliminar` el
+               backend rechaza el restaurar, así que mostrar la papelera sería
+               ofrecer una acción que termina en 403. -->
+          <div v-if="puedeEliminar" class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
+            Nueva caja
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable :data="cajones" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
-        <p class="font-medium truncate">
-          {{ row.original.nombre }}
-        </p>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <p class="font-medium truncate">
+              {{ row.original.nombre }}
+            </p>
+            <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+              Eliminado
+            </UBadge>
+          </div>
+          <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+            {{ formatearBorradoPor(row.original) }}
+          </p>
+        </div>
       </template>
 
       <template #activo-cell="{ row }">
         <div class="flex justify-end">
           <USwitch
             :model-value="row.original.activo"
-            :disabled="toggling.has(row.original.id) || !puedeActualizar"
+            :disabled="toggling.has(row.original.id) || !puedeActualizar || !!row.original.eliminadoEl"
             @update:model-value="toggleActivo(row.original)"
           />
         </div>
       </template>
 
       <template #acciones-cell="{ row }">
-        <div class="flex justify-end gap-2">
+        <div v-if="row.original.eliminadoEl" class="flex justify-end">
+          <UButton
+            v-if="puedeEliminar"
+            icon="i-lucide-rotate-ccw"
+            color="neutral"
+            variant="ghost"
+            @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+          >
+            Restaurar
+          </UButton>
+        </div>
+        <div v-else class="flex justify-end gap-2">
           <UButton
             v-if="puedeActualizar"
             icon="i-lucide-users"
             color="neutral"
             variant="ghost"
+            title="Usuarios"
             @click="abrirUsuarios(row.original)"
           />
           <UButton
@@ -276,6 +424,7 @@ const columns: TableColumn<Cajon>[] = [
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
+            title="Editar"
             @click="abrirEditar(row.original)"
           />
           <UButton
@@ -283,7 +432,8 @@ const columns: TableColumn<Cajon>[] = [
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
-            @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+            title="Eliminar"
+            @click="pedirEliminar(row.original)"
           />
         </div>
       </template>
@@ -386,9 +536,45 @@ const columns: TableColumn<Cajon>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar caja"
-      message="¿Estás seguro de que quieres eliminar esta caja? Esta acción no se puede deshacer."
+      message="¿Eliminar esta caja? Podés recuperarla desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar caja"
+      message="¿Restaurar esta caja? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmRestaurarId && restaurarCajon(confirmRestaurarId)"
+    />
+
+    <!-- Segundo paso, solo si el backend rechazó por nombre tomado. El campo
+         viene precargado con la sugerencia pero es editable: el usuario
+         confirma o escribe el suyo (decisión del owner). -->
+    <CrudModal
+      v-model:open="colisionModalOpen"
+      title="No se puede restaurar con ese nombre"
+      :message="colisionMensaje"
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      :confirm-disabled="!nombrePropuesto.trim()"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmarColision"
+    >
+      <template #detalle>
+        <UFormField label="Restaurar como" class="mt-4">
+          <UInput
+            v-model="nombrePropuesto"
+            aria-label="Restaurar como"
+            autofocus
+          />
+        </UFormField>
+      </template>
+    </CrudModal>
   </div>
 </template>

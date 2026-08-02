@@ -19,11 +19,15 @@ interface Tercero {
   telefono: string | null
   direccion: string | null
   activo: boolean
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 const config = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = config.public.apiUrl
+
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('terceros')
 
 const terceros = ref<Tercero[]>([])
 const loading = ref(false)
@@ -32,6 +36,9 @@ const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
 const toggling = reactive(new Set<string>())
 
 const tipoOptions = [
@@ -74,19 +81,36 @@ function tipoLabel(value: string) {
   return tipoOptions.find(o => o.value === value)?.label ?? value
 }
 
+// Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `terceros.value` sin
+// importar cuál toggle la originó — el listado queda desincronizado del
+// switch. Esta pantalla no usa `usePaginatedList`, así que no hereda la cola
+// que vive ahí: va local.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    terceros.value = await useApiFetch<Tercero[]>(`${apiUrl}/terceros`)
-  }
-  catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al cargar terceros')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      const query = verEliminados.value ? '?incluirEliminados=true' : ''
+      terceros.value = await useApiFetch<Tercero[]>(`${apiUrl}/terceros${query}`)
+    }
+    catch (e: unknown) {
+      const msg = apiErrorMsg(e, 'Error al cargar terceros')
+      toast.add({ title: msg, color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Tercero) {
   const idx = terceros.value.findIndex(t => t.id === saved.id)
@@ -111,6 +135,7 @@ function abrirCrear() {
 }
 
 function abrirEditar(tercero: Tercero) {
+  if (tercero.eliminadoEl) return
   resetDrawer()
   editingId.value = tercero.id
   form.value = {
@@ -162,6 +187,7 @@ async function guardar() {
 }
 
 async function toggleActivo(tercero: Tercero) {
+  if (tercero.eliminadoEl) return
   if (toggling.has(tercero.id)) return
   toggling.add(tercero.id)
   const prev = tercero.activo
@@ -183,12 +209,27 @@ async function toggleActivo(tercero: Tercero) {
   }
 }
 
+function pedirEliminar(tercero: Tercero) {
+  if (tercero.eliminadoEl) return
+  confirmDeleteId.value = tercero.id
+  confirmModalOpen.value = true
+}
+
 async function eliminar(id: string) {
   try {
     await useApiFetch(`${apiUrl}/terceros/${id}`, {
       method: 'DELETE',
     })
-    removeLocal(id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
     toast.add({ title: 'Tercero eliminado', color: 'success' })
   }
   catch (e: unknown) {
@@ -198,6 +239,42 @@ async function eliminar(id: string) {
   finally {
     confirmDeleteId.value = null
     confirmModalOpen.value = false
+  }
+}
+
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+}
+
+/**
+ * Restaura un tercero de la papelera. A diferencia de `descuentos.vue`, acá no
+ * hay colisión que resolver: `terceros` no tiene unicidad de nombre y
+ * `POST /terceros/:id/restaurar` ni siquiera acepta body — el catch solo tiene
+ * la rama de error terminal (toast), no hay segundo modal que abrir.
+ */
+async function restaurarTercero(id: string) {
+  // Guard de reentrancia: el modal no se cierra solo al confirmar, así que
+  // mientras el POST viaja un segundo click mandaría otro `POST .../restaurar`
+  // sobre una fila ya revivida → 404 → toast de ERROR encima de un éxito.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id)
+    const t = terceros.value.find(x => x.id === id)
+    if (t) {
+      t.eliminadoEl = null
+      t.eliminadoPorNombre = null
+    }
+    toast.add({ title: 'Tercero restaurado', color: 'success' })
+    cerrarRestaurar()
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+    cerrarRestaurar()
+  }
+  finally {
+    restaurando.value = false
   }
 }
 
@@ -224,22 +301,41 @@ const columns: TableColumn<Tercero>[] = [
           description="Directorio de proveedores, empresas y personas naturales recurrentes."
         >
           <template #actions>
-            <UButton
-              v-if="puedeCrear"
-              icon="i-lucide-plus"
-              @click="abrirCrear"
-            >
-              Nuevo tercero
-            </UButton>
+            <div class="flex items-center gap-4">
+              <!-- El toggle solo si puede restaurar: sin `Terceros:Eliminar`
+                   el backend rechaza el restaurar, así que mostrar la
+                   papelera sería ofrecer una acción que termina en 403. -->
+              <div v-if="puedeEliminar" class="flex items-center gap-2">
+                <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+                <span class="text-sm text-muted">Ver eliminados</span>
+              </div>
+              <UButton
+                v-if="puedeCrear"
+                icon="i-lucide-plus"
+                @click="abrirCrear"
+              >
+                Nuevo tercero
+              </UButton>
+            </div>
           </template>
         </CrudPageHeader>
 
         <CrudTable :data="terceros" :columns="columns" :loading="loading">
           <template #nombre-cell="{ row }">
-            <CrudListItem
-              :title="row.original.nombre"
-              :subtitle="`${tipoLabel(row.original.tipo)}${row.original.rut ? ' · ' + row.original.rut : ''}`"
-            />
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <CrudListItem
+                  :title="row.original.nombre"
+                  :subtitle="tipoLabel(row.original.tipo) + (row.original.rut ? ' · ' + row.original.rut : '')"
+                />
+                <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+                  Eliminado
+                </UBadge>
+              </div>
+              <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+                {{ formatearBorradoPor(row.original) }}
+              </p>
+            </div>
           </template>
 
           <template #contacto-cell="{ row }">
@@ -254,14 +350,25 @@ const columns: TableColumn<Tercero>[] = [
             <div class="flex justify-end">
               <USwitch
                 :model-value="row.original.activo"
-                :disabled="toggling.has(row.original.id) || !puedeActualizar"
+                :disabled="toggling.has(row.original.id) || !puedeActualizar || !!row.original.eliminadoEl"
                 @update:model-value="toggleActivo(row.original)"
               />
             </div>
           </template>
 
           <template #acciones-cell="{ row }">
-            <div class="flex justify-end gap-2">
+            <div v-if="row.original.eliminadoEl" class="flex justify-end">
+              <UButton
+                v-if="puedeEliminar"
+                icon="i-lucide-rotate-ccw"
+                color="neutral"
+                variant="ghost"
+                @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+              >
+                Restaurar
+              </UButton>
+            </div>
+            <div v-else class="flex justify-end gap-2">
               <UButton
                 v-if="puedeActualizar"
                 icon="i-lucide-square-pen"
@@ -276,7 +383,7 @@ const columns: TableColumn<Tercero>[] = [
                 color="error"
                 variant="ghost"
                 title="Eliminar"
-                @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+                @click="pedirEliminar(row.original)"
               />
             </div>
           </template>
@@ -359,9 +466,20 @@ const columns: TableColumn<Tercero>[] = [
         <CrudModal
           v-model:open="confirmModalOpen"
           title="Eliminar tercero"
-          message="¿Estás seguro de que quieres eliminar este tercero? Esta acción no se puede deshacer."
+          message="¿Eliminar este tercero? Podés recuperarlo desde «Ver eliminados»."
           @cancel="confirmDeleteId = null"
           @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
+        />
+
+        <CrudModal
+          v-model:open="confirmRestaurarModalOpen"
+          title="Restaurar tercero"
+          message="¿Restaurar este tercero? Volverá a aparecer en el listado y podrá usarse de nuevo."
+          confirm-label="Restaurar"
+          confirm-color="neutral"
+          :loading="restaurando"
+          @cancel="cerrarRestaurar"
+          @confirm="confirmRestaurarId && restaurarTercero(confirmRestaurarId)"
         />
       </div>
     </template>

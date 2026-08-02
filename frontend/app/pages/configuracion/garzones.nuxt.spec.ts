@@ -1,57 +1,50 @@
 // @vitest-environment nuxt
 //
-// Ver `RecetasDesfasesPanel.nuxt.spec.ts` para por qué el entorno va por
-// archivo. Este spec cubre DOS cosas separadas:
-//   1. Los tres permisos de `terceros` son SEPARADOS en el backend, y el modo
-//      de falla es colapsarlos —esconderle el botón de editar a quien solo
-//      tiene `Actualizar`, por ejemplo—. Eso no lo ve ningún test de lógica:
-//      hay que renderizar.
-//   2. La papelera (`docs/features/papelera.md`), molde `configuracion/
-//      descuentos.vue` vía la variante gateada por permisos de
-//      `configuracion/turnos.vue`. `terceros` NO tiene unicidad de nombre —
-//      `POST /terceros/:id/restaurar` ni siquiera acepta body—, así que a
-//      diferencia de `descuentos`/`turnos` acá NO hay modal de colisión: un
-//      error al restaurar es siempre terminal (toast).
+// Papelera de `garzones`, molde `configuracion/descuentos.vue` vía la variante
+// gateada por permisos de `configuracion/turnos.vue` (mismo módulo RBAC,
+// `Salones`: garzones no tiene módulo propio). Caso más parecido, ya resuelto:
+// `terceros.vue` — SIN modal de colisión.
+//
+// `garzones` SÍ puede devolver 400 al restaurar, pero su colisión NO es de
+// nombre: `uq_garzones_mostrador_tenant` permite un solo placeholder
+// "Mostrador" vivo por tenant, y renombrar no la resuelve. Por eso ese 400 se
+// muestra como error simple (toast), igual que `terceros` — nunca como modal
+// de renombrado. `docs/features/papelera.md` § "garzones tiene una
+// restricción única parcial distinta".
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
-import Terceros from './terceros.vue'
+import Garzones from './garzones.vue'
 
-const TERCERO_ID = 't-1'
+const GARZON_ID = 'garzon-1'
 const BORRADO_EL = '2026-08-01T21:00:00.000Z'
 
-interface TerceroFake {
+interface GarzonFake {
   id: string
-  tipo: string
   nombre: string
-  rut: string | null
-  nombreLegal: string | null
-  rutFiscal: string | null
-  correo: string | null
-  telefono: string | null
   activo: boolean
+  tipo: string
+  creadoEl: string
+  actualizadoEl: string
   eliminadoEl: string | null
   eliminadoPorNombre: string | null
 }
 
-function tercero(over: Partial<TerceroFake> = {}): TerceroFake {
+function garzon(over: Partial<GarzonFake> = {}): GarzonFake {
   return {
-    id: TERCERO_ID,
-    tipo: 'proveedor',
-    nombre: 'Distribuidora Sur',
-    rut: null,
-    nombreLegal: null,
-    rutFiscal: null,
-    correo: null,
-    telefono: null,
+    id: GARZON_ID,
+    nombre: 'Ana Torres',
     activo: true,
+    tipo: 'garzon',
+    creadoEl: '2026-07-01T10:00:00.000Z',
+    actualizadoEl: '2026-07-01T10:00:00.000Z',
     eliminadoEl: null,
     eliminadoPorNombre: null,
     ...over,
   }
 }
 
-function eliminado(over: Partial<TerceroFake> = {}): TerceroFake {
-  return tercero({
+function eliminado(over: Partial<GarzonFake> = {}): GarzonFake {
+  return garzon({
     eliminadoEl: BORRADO_EL,
     eliminadoPorNombre: 'admin.paris',
     ...over,
@@ -60,8 +53,8 @@ function eliminado(over: Partial<TerceroFake> = {}): TerceroFake {
 
 /**
  * Error con la forma que le llega a la pantalla desde ofetch: `message` para
- * el toast. `terceros` no tiene `nombreSugerido` porque no hay colisión
- * posible (sin unicidad de nombre, sin body en el restaurar).
+ * el toast. `garzones` no tiene `nombreSugerido` porque su colisión no es de
+ * nombre (el Mostrador) y el `POST .../restaurar` ni acepta body.
  */
 function errorApi(message: string) {
   const e = new Error(message) as Error & { data?: unknown }
@@ -81,7 +74,7 @@ mockNuxtImport('usePermissionsStore', () => {
   })
 })
 
-let tercerosBackend: TerceroFake[] = []
+let garzonesBackend: GarzonFake[] = []
 // Para el test de la carrera: retiene la respuesta de cada variante del `GET`
 // en una promesa que el test resuelve a mano, en el orden que quiera.
 let overrideConEliminados: Promise<unknown[]> | null = null
@@ -90,34 +83,44 @@ let overrideSinEliminados: Promise<unknown[]> | null = null
 let postsRestaurar: string[] = []
 /** Retiene la respuesta del restaurar para dejar el POST "en vuelo". */
 let restaurarRetenido: Promise<unknown> | null = null
+/**
+ * Fuerza el `POST .../restaurar` a rechazar con ESTE mensaje puntual, sin
+ * tocar `garzonesBackend`. Existe solo para el caso propio de `garzones`: el
+ * 400 real es la colisión del placeholder "Mostrador", no un nombre duplicado
+ * — el mensaje del backend real, para que el test no lo invente.
+ */
+let restaurarErrorForzado: string | null = null
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string }) => {
-    if (typeof url !== 'string' || !url.includes('/terceros')) {
+    if (typeof url !== 'string' || !url.includes('/garzones')) {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
     if (method === 'DELETE') {
       const id = url.split('/').pop()
-      const t = tercerosBackend.find(x => x.id === id)
-      if (t) {
-        t.eliminadoEl = BORRADO_EL
-        t.eliminadoPorNombre = 'admin.paris'
+      const g = garzonesBackend.find(x => x.id === id)
+      if (g) {
+        g.eliminadoEl = BORRADO_EL
+        g.eliminadoPorNombre = 'admin.paris'
       }
       return Promise.resolve(undefined)
     }
     if (method === 'POST' && url.endsWith('/restaurar')) {
       const id = url.split('/').slice(-2)[0] ?? ''
       postsRestaurar.push(id)
-      const t = tercerosBackend.find(x => x.id === id)
+      if (restaurarErrorForzado) {
+        return Promise.reject(errorApi(restaurarErrorForzado))
+      }
+      const g = garzonesBackend.find(x => x.id === id)
       // El backend real da 404 si la fila ya no está en la papelera: un
       // segundo POST sobre la misma fila NO es inocuo, es el toast de error
       // que el guard de reentrancia existe para evitar.
-      if (!t?.eliminadoEl) {
-        return Promise.reject(errorApi(`Tercero ${id} no está en la papelera`))
+      if (!g?.eliminadoEl) {
+        return Promise.reject(errorApi(`Garzón ${id} no está en la papelera`))
       }
-      t.eliminadoEl = null
-      t.eliminadoPorNombre = null
+      g.eliminadoEl = null
+      g.eliminadoPorNombre = null
       if (restaurarRetenido) return restaurarRetenido
       return Promise.resolve(undefined)
     }
@@ -125,33 +128,16 @@ mockNuxtImport('useApiFetch', () => {
     if (incluirEliminados && overrideConEliminados) return overrideConEliminados
     if (!incluirEliminados && overrideSinEliminados) return overrideSinEliminados
     const data = incluirEliminados
-      ? tercerosBackend
-      : tercerosBackend.filter(t => !t.eliminadoEl)
-    return Promise.resolve(data.map(t => ({ ...t })))
+      ? garzonesBackend
+      : garzonesBackend.filter(g => !g.eliminadoEl)
+    return Promise.resolve(data.map(g => ({ ...g })))
   }
 })
 
-/** Los botones de fila son solo icono: se identifican por su `title`/icono. */
 async function montar() {
-  const wrapper = await mountSuspended(Terceros)
+  const wrapper = await mountSuspended(Garzones)
   await new Promise(r => setTimeout(r, 0))
   return wrapper
-}
-
-function tieneBoton(wrapper: Awaited<ReturnType<typeof montar>>, texto: string) {
-  return wrapper.findAll('button').some(b => b.text().includes(texto))
-}
-
-/**
- * Por `title`, no por la clase del icono: el icono lo renderiza `UIcon` en un
- * hijo y en el entorno de test no siempre resuelve, así que consultarlo ataría
- * el test al bundle de iconos en vez de al control.
- */
-function cuentaPorTitulo(
-  wrapper: Awaited<ReturnType<typeof montar>>,
-  title: string,
-) {
-  return wrapper.findAll(`[title="${title}"]`).length
 }
 
 async function activarVerEliminados(wrapper: Awaited<ReturnType<typeof montar>>) {
@@ -209,77 +195,12 @@ function reset() {
   overrideSinEliminados = null
   postsRestaurar = []
   restaurarRetenido = null
+  restaurarErrorForzado = null
 }
 
-describe('terceros — cada control con el permiso de SU endpoint', () => {
+describe('garzones — papelera: eliminar respeta el toggle', () => {
   beforeEach(() => {
-    tercerosBackend = [tercero()]
-    reset()
-  })
-
-  it('solo lectura: ni crear, ni editar, ni eliminar', async () => {
-    esAdmin = false
-    permisos = ['Terceros:Leer']
-
-    const wrapper = await montar()
-
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(false)
-    expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
-    expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
-    // La tabla sigue cargando: el gate es de escritura, no de lectura.
-    expect(wrapper.text()).toContain('Distribuidora Sur')
-  })
-
-  it('solo `Crear`: aparece el alta y NADA más', async () => {
-    esAdmin = false
-    permisos = ['Terceros:Leer', 'Terceros:Crear']
-
-    const wrapper = await montar()
-
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(true)
-    expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
-    expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
-  })
-
-  it('solo `Actualizar`: aparece editar SIN aparecer crear ni eliminar', async () => {
-    // El caso que un `puedeEscribir` único se comería: los tres permisos son
-    // distintos en el backend y hay roles que tienen uno solo.
-    esAdmin = false
-    permisos = ['Terceros:Leer', 'Terceros:Actualizar']
-
-    const wrapper = await montar()
-
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(false)
-    expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
-    expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
-  })
-
-  it('solo `Eliminar`: aparece la papelera y nada más', async () => {
-    esAdmin = false
-    permisos = ['Terceros:Leer', 'Terceros:Eliminar']
-
-    const wrapper = await montar()
-
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(false)
-    expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
-    expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
-  })
-
-  it('el admin del tenant ve los tres sin permisos listados', async () => {
-    esAdmin = true
-    permisos = []
-
-    const wrapper = await montar()
-
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(true)
-    expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
-    expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
-  })
-})
-
-describe('terceros — papelera: eliminar respeta el toggle', () => {
-  beforeEach(() => {
-    tercerosBackend = [tercero()]
+    garzonesBackend = [garzon()]
     reset()
     esAdmin = true
   })
@@ -287,7 +208,7 @@ describe('terceros — papelera: eliminar respeta el toggle', () => {
   it('con "Ver eliminados" activo, borrar deja la fila visible como eliminada (no la saca de la lista)', async () => {
     const wrapper = await montar()
     await activarVerEliminados(wrapper)
-    expect(wrapper.text()).toContain('Distribuidora Sur')
+    expect(wrapper.text()).toContain('Ana Torres')
 
     await wrapper.find('[title="Eliminar"]').trigger('click')
     await new Promise(r => setTimeout(r, 0))
@@ -295,8 +216,8 @@ describe('terceros — papelera: eliminar respeta el toggle', () => {
 
     // Ancla positiva primero: si `eliminar()` nunca llegó a pegarle al
     // backend, las aserciones de abajo pasarían vacuamente.
-    expect(tercerosBackend[0]!.eliminadoEl).toBeTruthy()
-    expect(wrapper.text()).toContain('Distribuidora Sur')
+    expect(garzonesBackend[0]!.eliminadoEl).toBeTruthy()
+    expect(wrapper.text()).toContain('Ana Torres')
     expect(wrapper.text()).toContain('Eliminado por admin.paris')
     expect(badges(wrapper)).toContain('Eliminado')
 
@@ -305,45 +226,45 @@ describe('terceros — papelera: eliminar respeta el toggle', () => {
 
   it('con el toggle apagado, borrar SÍ saca la fila de la lista (comportamiento de siempre)', async () => {
     const wrapper = await montar()
-    expect(wrapper.text()).toContain('Distribuidora Sur')
+    expect(wrapper.text()).toContain('Ana Torres')
 
     await wrapper.find('[title="Eliminar"]').trigger('click')
     await new Promise(r => setTimeout(r, 0))
     await confirmarEnModal('Eliminar')
 
-    expect(wrapper.text()).not.toContain('Distribuidora Sur')
+    expect(wrapper.text()).not.toContain('Ana Torres')
 
     wrapper.unmount()
   })
 })
 
 // El toggle "ver eliminados" y el botón "Restaurar" van los dos detrás de
-// `Terceros:Eliminar`: sin ese permiso el backend rechaza el restaurar, así
-// que ofrecer la papelera sería prometer una acción que termina en 403.
-describe('terceros — papelera: gateada por `Terceros:Eliminar`', () => {
+// `Salones:Eliminar`: sin ese permiso el backend rechaza el restaurar, así que
+// ofrecer la papelera sería prometer una acción que termina en 403.
+describe('garzones — papelera: gateada por `Salones:Eliminar`', () => {
   beforeEach(() => {
-    tercerosBackend = [eliminado()]
+    garzonesBackend = [eliminado()]
     reset()
   })
 
-  it('sin `Terceros:Eliminar` no hay toggle "Ver eliminados"', async () => {
+  it('sin `Salones:Eliminar` no hay toggle "Ver eliminados"', async () => {
     esAdmin = false
-    permisos = ['Terceros:Leer', 'Terceros:Crear', 'Terceros:Actualizar']
+    permisos = ['Salones:Leer', 'Salones:Crear', 'Salones:Actualizar']
 
     const wrapper = await montar()
 
     // Ancla positiva: la pantalla SÍ cargó y muestra sus otros controles, así
     // que la ausencia del toggle es un gate y no una pantalla vacía.
-    expect(wrapper.text()).toContain('Terceros')
-    expect(wrapper.findAll('button').some(b => b.text().includes('Nuevo tercero'))).toBe(true)
+    expect(wrapper.text()).toContain('Garzones')
+    expect(wrapper.findAll('button').some(b => b.text().includes('Nuevo garzón'))).toBe(true)
     expect(wrapper.find('[aria-label="Ver eliminados"]').exists()).toBe(false)
 
     wrapper.unmount()
   })
 
-  it('con `Terceros:Eliminar` sí aparece el toggle, y la fila eliminada ofrece Restaurar', async () => {
+  it('con `Salones:Eliminar` sí aparece el toggle, y la fila eliminada ofrece Restaurar', async () => {
     esAdmin = false
-    permisos = ['Terceros:Leer', 'Terceros:Eliminar']
+    permisos = ['Salones:Leer', 'Salones:Eliminar']
 
     const wrapper = await montar()
     expect(wrapper.find('[aria-label="Ver eliminados"]').exists()).toBe(true)
@@ -358,9 +279,9 @@ describe('terceros — papelera: gateada por `Terceros:Eliminar`', () => {
   })
 })
 
-describe('terceros — papelera: restaurar', () => {
+describe('garzones — papelera: restaurar', () => {
   beforeEach(() => {
-    tercerosBackend = [eliminado()]
+    garzonesBackend = [eliminado()]
     reset()
     esAdmin = true
   })
@@ -373,8 +294,8 @@ describe('terceros — papelera: restaurar', () => {
     await abrirRestaurarDeLaFila(wrapper)
     await confirmarEnModal('Restaurar')
 
-    expect(tercerosBackend[0]!.eliminadoEl).toBeNull()
-    expect(wrapper.text()).toContain('Distribuidora Sur')
+    expect(garzonesBackend[0]!.eliminadoEl).toBeNull()
+    expect(wrapper.text()).toContain('Ana Torres')
     expect(wrapper.text()).not.toContain('Eliminado por admin.paris')
 
     wrapper.unmount()
@@ -406,21 +327,21 @@ describe('terceros — papelera: restaurar', () => {
     soltarRestaurar()
     await new Promise(r => setTimeout(r, 60))
 
-    expect(postsRestaurar).toEqual([TERCERO_ID])
+    expect(postsRestaurar).toEqual([GARZON_ID])
 
     wrapper.unmount()
     restaurarRetenido = null
   })
 
-  // `terceros` no tiene modal de colisión (sin unicidad de nombre, el POST ni
-  // acepta body): cualquier error al restaurar es siempre terminal — cierra
-  // el modal y avisa por toast, nunca abre una segunda pantalla.
+  // `garzones` no tiene modal de colisión (su índice único no es de nombre, el
+  // POST ni acepta body): cualquier error al restaurar es siempre terminal —
+  // cierra el modal y avisa por toast, nunca abre una segunda pantalla.
   it('un error al restaurar cierra el modal y avisa (no hay pantalla de colisión que abrir)', async () => {
     // Fila viva en el backend pero eliminada en la vista: el POST encuentra la
     // fila ya restaurada y contesta 404, igual que el backend real.
     const wrapper = await montar()
     await activarVerEliminados(wrapper)
-    tercerosBackend[0]!.eliminadoEl = null
+    garzonesBackend[0]!.eliminadoEl = null
 
     await abrirRestaurarDeLaFila(wrapper)
     await confirmarEnModal('Restaurar')
@@ -430,16 +351,48 @@ describe('terceros — papelera: restaurar', () => {
 
     wrapper.unmount()
   })
+
+  // El caso PROPIO de `garzones`: el 400 real de este recurso es la colisión
+  // del placeholder "Mostrador" (índice único parcial `uq_garzones_mostrador_
+  // tenant`), no un nombre duplicado. Aun con ese mensaje puntual, la pantalla
+  // lo muestra como toast — nunca abre un modal de renombrado, porque
+  // renombrar no resuelve esta colisión.
+  it('el 400 de colisión con el Mostrador se muestra como toast, no como modal de renombrado', async () => {
+    // El Mostrador viejo sigue en la papelera; una propina directa ya generó
+    // uno nuevo mientras tanto, así que restaurar el viejo choca. Mensaje real
+    // del backend (`garzones.service.ts` → `restaurar()`).
+    garzonesBackend = [eliminado({ nombre: 'Mostrador' })]
+    restaurarErrorForzado
+      = 'Ya existe un garzón "Mostrador" activo para este tenant (se crea automáticamente, uno por tenant). '
+        + 'No se puede restaurar el placeholder anterior mientras el nuevo siga vivo.'
+
+    const wrapper = await montar()
+    await activarVerEliminados(wrapper)
+
+    await abrirRestaurarDeLaFila(wrapper)
+    await confirmarEnModal('Restaurar')
+
+    // Nunca se abrió una segunda pantalla (ni modal de colisión, ni el campo
+    // "Restaurar como" que sí existe en `descuentos`/`turnos`).
+    expect(dialogo()).toBeNull()
+    expect(document.body.textContent).not.toContain('No se puede restaurar con ese nombre')
+    expect(document.body.querySelector('input[aria-label="Restaurar como"]')).toBeNull()
+    expect(postsRestaurar).toEqual([GARZON_ID])
+    // Y la fila sigue en la papelera: el restaurar no aplicó.
+    expect(garzonesBackend[0]!.eliminadoEl).toBeTruthy()
+
+    wrapper.unmount()
+  })
 })
 
-describe('terceros — papelera: la carrera de `cargar()` bajo toggles rápidos', () => {
+describe('garzones — papelera: la carrera de `cargar()` bajo toggles rápidos', () => {
   beforeEach(() => {
     // Uno vivo y otro ya eliminado: así el `GET` con el flag trae algo
-    // (Tercero viejo) que el `GET` sin el flag no trae, y las dos respuestas
+    // (garzón viejo) que el `GET` sin el flag no trae, y las dos respuestas
     // son distinguibles en el DOM.
-    tercerosBackend = [
-      tercero(),
-      eliminado({ id: 'tercero-2', nombre: 'Tercero viejo' }),
+    garzonesBackend = [
+      garzon(),
+      eliminado({ id: 'garzon-2', nombre: 'Garzón viejo' }),
     ]
     reset()
     esAdmin = true
@@ -467,17 +420,17 @@ describe('terceros — papelera: la carrera de `cargar()` bajo toggles rápidos'
     //    toggle responde primero, la del primero después — el caso que la cola
     //    serial tiene que blindar.
     resolverSinEliminados(
-      tercerosBackend.filter(t => !t.eliminadoEl).map(t => ({ ...t })),
+      garzonesBackend.filter(g => !g.eliminadoEl).map(g => ({ ...g })),
     )
     await new Promise(r => setTimeout(r, 20))
-    resolverConEliminados(tercerosBackend.map(t => ({ ...t })))
+    resolverConEliminados(garzonesBackend.map(g => ({ ...g })))
     await new Promise(r => setTimeout(r, 50))
 
     // El toggle terminó APAGADO: el listado final tiene que reflejar ESE
     // estado, sin importar que la respuesta "con eliminados" haya llegado
     // después y en teoría pisara el estado.
-    expect(wrapper.text()).toContain('Distribuidora Sur')
-    expect(wrapper.text()).not.toContain('Tercero viejo')
+    expect(wrapper.text()).toContain('Ana Torres')
+    expect(wrapper.text()).not.toContain('Garzón viejo')
 
     wrapper.unmount()
   })

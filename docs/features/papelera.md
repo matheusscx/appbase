@@ -1,8 +1,8 @@
 # Feature: Papelera (restaurar eliminados)
 
-**Status**: Backend completo, frontend parcial (6/15 pantallas)
+**Status**: Completo — backend en los 16 recursos, frontend en las 15 pantallas
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-08-01
+**Last Updated**: 2026-08-02
 
 ---
 
@@ -346,18 +346,36 @@ identificable a quien devolverle el "click" de restaurar.
 
 ## Frontend
 
-**Estado real: 6 de 15 pantallas cableadas** (`configuracion/items.vue`,
-`configuracion/categorias.vue`, `configuracion/impuestos.vue`,
-`configuracion/descuentos.vue`, `configuracion/recargos.vue`,
-`configuracion/turnos.vue`). 16 recursos backend, pero **15 páginas**:
-`mesas` no tiene página propia, vive dentro de `configuracion/salones.vue`. Las
-otras 9 (`grupos-modificadores`, `terceros`, `cajones`, `garzones`,
-`salones` [con sus `mesas`], `impresoras`, `causas-merma`,
-`motivos-diferencia`, `motivos-diferencia-inventario`) todavía **no** tienen el
-toggle "ver eliminados" ni el botón restaurar — el backend ya soporta los 16
-recursos, el molde de pantalla está probado en las seis hechas, pero replicarlo
-a las 9 restantes queda pendiente. Backlog:
-[`docs/agent/pendientes.md`](../agent/pendientes.md).
+**Estado real: 15 de 15 pantallas cableadas** (2026-08-02). 16 recursos backend
+pero **15 páginas**: `mesas` no tiene página propia, vive dentro de
+`configuracion/salones.vue`.
+
+Las 9 últimas se replicaron en paralelo desde el molde de `descuentos.vue`, y de
+ahí salieron tres formas que conviene distinguir antes de cablear una pantalla
+nueva:
+
+- **Con modal de colisión** — las 5 con unicidad de nombre que faltaban:
+  `causas-merma`, `motivos-diferencia`, `motivos-diferencia-inventario`,
+  `grupos-modificadores`, `cajas` (cajones). Molde completo.
+- **Sin modal de colisión** — `terceros`, `impresoras`, `garzones`,
+  `salones`/`mesas`: su endpoint de restaurar **no acepta body**, así que no hay
+  nombre que negociar. Copiar el molde MENOS el modal. `garzones` sí puede dar
+  400 (el placeholder Mostrador), pero se muestra como toast: renombrar no lo
+  resuelve.
+- **Por composable propio** — `impresoras`, `garzones` y `salones` no llaman a
+  la API desde la página sino desde `useImpresoras`/`useGarzones`/`useSalones`.
+  Ahí el `incluirEliminados` va en el composable, **opcional y con default
+  `false`**: `useImpresoras.listar()` la comparten los caminos de impresión
+  (`imprimirComanda`, `obtenerImpresoraBoleta`) y un default distinto los haría
+  imprimir en impresoras borradas. Lo fija `useImpresoras.nuxt.spec.ts`.
+
+`salones` es la única con UI que no salió del molde, porque su listado es un
+plano de arrastrar y soltar y no una tabla: las mesas eliminadas **no** se
+dibujan en el plano (es para operar, no para auditar) sino en una sección "Mesas
+eliminadas" debajo, cada una con su Restaurar. Y restaurar un salón hace refetch
+completo en vez de parchear la fila: el endpoint revive el salón y sus mesas en
+cascada pero solo devuelve el salón, y replicar del lado del cliente qué mesas
+revivió sería duplicar regla de negocio del backend.
 
 El composable `usePapelera(recurso)` (`app/composables/usePapelera.ts`) encapsula lo
 común a cada pantalla: el toggle `verEliminados`, `restaurar(id, nombre?)` (`POST
@@ -385,8 +403,10 @@ en vuelo, y sin protección gana el que responda último, no el último click. L
 pantallas con `cargar()` propio (como `categorias.vue`) necesitan su propia cola
 serial local (`cargaEnCurso`); las que usan `usePaginatedList` (como `items.vue`)
 ya la heredan del composable (`usePaginatedList.ts` → `fetch()`), sin nada que
-replicar. Backlog de las 9 pantallas restantes con el detalle de cuál de las dos
-formas les toca: [`docs/agent/pendientes.md`](../agent/pendientes.md).
+replicar. **De las 15, solo `items.vue` la hereda**: las otras 14 tienen su
+`cargar()` propio y su cola local. Al cablear una pantalla nueva, medí cómo carga
+de verdad en vez de grepear `usePaginatedList` — el import del TIPO
+`PaginatedResponse` para otra cosa hace que el grep mienta, y ya pasó una vez.
 
 ---
 

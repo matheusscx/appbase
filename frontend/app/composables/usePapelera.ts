@@ -10,6 +10,33 @@ export interface FilaPapelera {
   eliminadoPorNombre?: string | null
 }
 
+/** Catálogo con filas fijas del sistema: la forma mínima que ordena `ordenarFijosPrimero`. */
+export interface FilaCatalogoFijo {
+  esFijo: boolean
+  nombre: string
+}
+
+/**
+ * Ordena un catálogo dejando los fijos del sistema arriba y el resto alfabético.
+ *
+ * Vive acá y no en cada pantalla porque restaurar con un nombre nuevo obliga a
+ * reordenar la fila en el lugar (si no, queda donde estaba con el nombre
+ * cambiado), así que las tres pantallas de catálogo con `esFijo` —`causas-merma`
+ * y los dos `motivos-diferencia`— la necesitan igual. Se extrajo al aparecer la
+ * TERCERA copia, que es la regla del proyecto (`CLAUDE.md` → Convenciones →
+ * Archivos: duplicar dos veces es aceptable, se extrae a la tercera); las tres
+ * copias nacieron idénticas porque las escribieron agentes en paralelo sin
+ * verse entre sí.
+ *
+ * Devuelve una copia: no muta la lista que recibe.
+ */
+export function ordenarFijosPrimero<T extends FilaCatalogoFijo>(lista: T[]): T[] {
+  return [...lista].sort((a, b) => {
+    if (a.esFijo !== b.esFijo) return a.esFijo ? -1 : 1
+    return a.nombre.localeCompare(b.nombre, 'es')
+  })
+}
+
 /**
  * Estado y acciones de la papelera para UN listado (`recurso` = el path del
  * backend: `items`, `categorias`, etc.). Se instancia una vez por pantalla —

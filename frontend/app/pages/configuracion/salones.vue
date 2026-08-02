@@ -11,11 +11,23 @@ const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones'
 const toast = useToast()
 const salonesApi = useSalones()
 
+// Dos recursos, dos endpoints de restaurar (`docs/features/papelera.md`):
+// `POST /salones/:id/restaurar` vive en `SalonesController`, `POST
+// /mesas/:id/restaurar` en `MesasController` — son clases distintas del mismo
+// archivo backend. Confundirlos manda el POST equivocado. Ninguno de los dos
+// tiene unicidad de nombre, así que a diferencia de `turnos`/`descuentos` acá
+// NO hay modal de colisión: un error al restaurar es siempre terminal (toast).
+const { verEliminados, restaurar: restaurarSalonApi, formatearBorradoPor } = usePapelera('salones')
+const { restaurar: restaurarMesaApi } = usePapelera('mesas')
+
 const salones = ref<SalonConMesas[]>([])
 const loading = ref(false)
 const selectedSalonId = ref<string | undefined>(undefined)
 
-// Copia local editable de las mesas del salón seleccionado (posiciones drag).
+// Copia local editable de las mesas VIVAS del salón seleccionado (posiciones
+// drag). Las mesas eliminadas quedan afuera a propósito: el plano es para
+// operar (arrastrar, doble-click para editar), no para auditar — decisión
+// tomada acá, no un recorte del backend. Se listan aparte, más abajo.
 const localMesas = ref<MesaResumen[]>([])
 const savingLayout = ref(false)
 
@@ -24,43 +36,76 @@ const selectedSalon = computed(() =>
 )
 
 const salonItems = computed(() =>
-  salones.value.map(s => ({ label: s.nombre, value: s.id })),
+  salones.value.map(s => ({
+    label: s.eliminadoEl ? `${s.nombre} (Eliminado)` : s.nombre,
+    value: s.id,
+  })),
+)
+
+/** Mesas eliminadas del salón seleccionado: huérfanas de un borrado individual
+ * de mesa, o colaterales del borrado del salón (mismo `eliminadoEl` que él).
+ * Se listan y restauran una por una — no hay forma de saber desde acá cuáles
+ * volverían solas si se restaura el salón sin reimplementar en el frontend la
+ * comparación de timestamps que ya vive en el backend. */
+const mesasEliminadas = computed(() =>
+  (selectedSalon.value?.mesas ?? []).filter(m => m.eliminadoEl),
 )
 
 function syncLocalMesas() {
-  localMesas.value = (selectedSalon.value?.mesas ?? []).map(m => ({ ...m }))
+  localMesas.value = (selectedSalon.value?.mesas ?? [])
+    .filter(m => !m.eliminadoEl)
+    .map(m => ({ ...m }))
 }
 
-function patchSalonMesas(salonId: string, mesas: MesaResumen[]) {
+function patchSalonMesas(salonId: string, mesasVivas: MesaResumen[]) {
   const salon = salones.value.find(s => s.id === salonId)
   if (!salon) return
-  salon.mesas = mesas.map(m => ({ ...m }))
+  // `mesasVivas` viene de `localMesas`, que ya excluye las eliminadas: si se
+  // pisara `salon.mesas` entero se perderían del estado local hasta el
+  // próximo `cargar()`.
+  const eliminadas = salon.mesas.filter(m => m.eliminadoEl)
+  salon.mesas = [...mesasVivas.map(m => ({ ...m })), ...eliminadas]
   if (selectedSalonId.value === salonId) syncLocalMesas()
 }
 
+// Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `salones.value` sin
+// importar cuál toggle la originó. Esta pantalla no usa `usePaginatedList`,
+// así que no hereda la cola que vive ahí: va local.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    salones.value = await salonesApi.listarSalones()
-    if (!selectedSalonId.value || !selectedSalon.value) {
-      selectedSalonId.value = salones.value[0]?.id ?? undefined
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      salones.value = await salonesApi.listarSalones(verEliminados.value)
+      if (!selectedSalonId.value || !selectedSalon.value) {
+        selectedSalonId.value = salones.value[0]?.id ?? undefined
+      }
+      syncLocalMesas()
     }
-    syncLocalMesas()
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar salones'), color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar salones'), color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
 
+watch(verEliminados, cargar)
 watch(selectedSalonId, syncLocalMesas)
 
 onMounted(cargar)
 
 // ── Drag & drop de posiciones ──────────────────────────────────────────────
 function onMove(mesaId: string, posX: number, posY: number) {
+  if (selectedSalon.value?.eliminadoEl) return
   const mesa = localMesas.value.find(m => m.id === mesaId)
   if (!mesa) return
   mesa.posX = posX.toFixed(5)
@@ -68,7 +113,7 @@ function onMove(mesaId: string, posX: number, posY: number) {
 }
 
 async function guardarDistribucion() {
-  if (!selectedSalonId.value) return
+  if (!selectedSalonId.value || selectedSalon.value?.eliminadoEl) return
   savingLayout.value = true
   try {
     await salonesApi.guardarLayout(
@@ -108,7 +153,7 @@ function abrirCrearSalon() {
 }
 
 function abrirEditarSalon() {
-  if (!selectedSalon.value) return
+  if (!selectedSalon.value || selectedSalon.value.eliminadoEl) return
   salonEditingId.value = selectedSalon.value.id
   salonForm.value = { nombre: selectedSalon.value.nombre }
   salonDrawerOpen.value = true
@@ -147,13 +192,22 @@ async function guardarSalon() {
 }
 
 async function eliminarSalon() {
-  if (!selectedSalonId.value) return
+  if (!selectedSalonId.value || selectedSalon.value?.eliminadoEl) return
   try {
     const id = selectedSalonId.value
     await salonesApi.eliminarSalon(id)
-    salones.value = salones.value.filter(s => s.id !== id)
-    selectedSalonId.value = salones.value[0]?.id
-    syncLocalMesas()
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      salones.value = salones.value.filter(s => s.id !== id)
+      selectedSalonId.value = salones.value[0]?.id
+      syncLocalMesas()
+    }
     toast.add({ title: 'Salón eliminado', color: 'success' })
   }
   catch (e: unknown) {
@@ -161,6 +215,47 @@ async function eliminarSalon() {
   }
   finally {
     deleteSalonOpen.value = false
+  }
+}
+
+// ── Restaurar salón ──────────────────────────────────────────────────────────
+const confirmRestaurarSalonOpen = ref(false)
+const restaurandoSalon = ref(false)
+
+function abrirRestaurarSalon() {
+  if (!selectedSalon.value?.eliminadoEl) return
+  confirmRestaurarSalonOpen.value = true
+}
+
+/**
+ * `POST /salones/:id/restaurar` revive el salón y, en la MISMA sentencia, las
+ * mesas que ESE borrado se llevó (docs/features/papelera.md → "Colateral
+ * acotado" / "Restaurar el padre revive esas filas"). La respuesta solo trae
+ * el salón, no las mesas revividas: reconstruir esa comparación de timestamps
+ * en el frontend duplicaría lógica de negocio que ya vive en el backend. Por
+ * eso, a diferencia del patch local de `restaurarMesaSeleccionada` (y de
+ * `terceros`/`turnos`, que no tienen cascada), acá se recarga el listado
+ * entero con `cargar()` — decisión tomada en esta tarea.
+ */
+async function restaurarSalonSeleccionado() {
+  if (!selectedSalonId.value) return
+  // Guard de reentrancia: el modal no se cierra solo al confirmar, así que
+  // mientras el POST viaja un segundo click mandaría otro `POST .../restaurar`
+  // sobre una fila ya revivida → 404 → toast de ERROR encima de un éxito.
+  if (restaurandoSalon.value) return
+  restaurandoSalon.value = true
+  try {
+    await restaurarSalonApi(selectedSalonId.value)
+    await cargar()
+    toast.add({ title: 'Salón restaurado', color: 'success' })
+    confirmRestaurarSalonOpen.value = false
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+    confirmRestaurarSalonOpen.value = false
+  }
+  finally {
+    restaurandoSalon.value = false
   }
 }
 
@@ -181,12 +276,14 @@ const mesaDrawerTitle = computed(() =>
 )
 
 function abrirCrearMesa() {
+  if (!selectedSalon.value || selectedSalon.value.eliminadoEl) return
   mesaEditingId.value = null
   mesaForm.value = { nombre: '', forma: 'cuadrada', tamano: 'mediano' }
   mesaDrawerOpen.value = true
 }
 
 function abrirEditarMesa(mesa: MesaResumen) {
+  if (mesa.eliminadoEl) return
   mesaEditingId.value = mesa.id
   mesaForm.value = { nombre: mesa.nombre, forma: mesa.forma, tamano: mesa.tamano }
   mesaToDelete.value = mesa
@@ -262,10 +359,18 @@ async function eliminarMesa() {
   try {
     const mesaId = mesaToDelete.value.id
     await salonesApi.eliminarMesa(mesaId)
-    const salon = salones.value.find(s => s.id === selectedSalonId.value)
-    if (salon) {
-      salon.mesas = salon.mesas.filter(m => m.id !== mesaId)
-      syncLocalMesas()
+    // Mismo motivo que `eliminarSalon`: con la papelera abierta hay que
+    // recargar para traer `eliminadoEl`/`eliminadoPorNombre`, que el DELETE
+    // no devuelve.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      const salon = salones.value.find(s => s.id === selectedSalonId.value)
+      if (salon) {
+        salon.mesas = salon.mesas.filter(m => m.id !== mesaId)
+        syncLocalMesas()
+      }
     }
     toast.add({ title: 'Mesa eliminada', color: 'success' })
   }
@@ -277,6 +382,53 @@ async function eliminarMesa() {
     mesaToDelete.value = null
   }
 }
+
+// ── Restaurar mesa ────────────────────────────────────────────────────────────
+const confirmRestaurarMesaId = ref<string | null>(null)
+const confirmRestaurarMesaOpen = ref(false)
+const restaurandoMesa = ref(false)
+
+function abrirRestaurarMesa(mesa: MesaResumen) {
+  if (!mesa.eliminadoEl) return
+  confirmRestaurarMesaId.value = mesa.id
+  confirmRestaurarMesaOpen.value = true
+}
+
+function cerrarRestaurarMesa() {
+  confirmRestaurarMesaId.value = null
+  confirmRestaurarMesaOpen.value = false
+}
+
+/**
+ * `POST /mesas/:id/restaurar` — endpoint DISTINTO del de salón, vive en
+ * `MesasController` (`docs/features/papelera.md`). Sin cascada que
+ * reconstruir, así que acá sí alcanza el patch local, como en
+ * `terceros`/`turnos`.
+ */
+async function restaurarMesaSeleccionada(id: string) {
+  // Mismo guard de reentrancia que `restaurarSalonSeleccionado`.
+  if (restaurandoMesa.value) return
+  restaurandoMesa.value = true
+  try {
+    await restaurarMesaApi(id)
+    const salon = salones.value.find(s => s.mesas.some(m => m.id === id))
+    const mesa = salon?.mesas.find(m => m.id === id)
+    if (mesa) {
+      mesa.eliminadoEl = null
+      mesa.eliminadoPorNombre = null
+    }
+    syncLocalMesas()
+    toast.add({ title: 'Mesa restaurada', color: 'success' })
+    cerrarRestaurarMesa()
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+    cerrarRestaurarMesa()
+  }
+  finally {
+    restaurandoMesa.value = false
+  }
+}
 </script>
 
 <template>
@@ -286,9 +438,18 @@ async function eliminarMesa() {
       description="Configura los salones del local y la distribución de sus mesas."
     >
       <template #actions>
-        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrearSalon">
-          Nuevo salón
-        </UButton>
+        <div class="flex items-center gap-4">
+          <!-- El toggle solo si puede restaurar: sin `Salones:Eliminar` el
+               backend rechaza los dos restaurar (salón y mesa), así que
+               mostrar la papelera sería ofrecer una acción que termina en 403. -->
+          <div v-if="puedeEliminar" class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrearSalon">
+            Nuevo salón
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
@@ -308,8 +469,11 @@ async function eliminarMesa() {
           value-key="value"
           class="w-56"
         />
+        <UBadge v-if="selectedSalon?.eliminadoEl" color="neutral" variant="subtle">
+          Eliminado
+        </UBadge>
         <UButton
-          v-if="puedeActualizar"
+          v-if="puedeActualizar && !selectedSalon?.eliminadoEl"
           icon="i-lucide-square-pen"
           color="neutral"
           variant="ghost"
@@ -318,7 +482,7 @@ async function eliminarMesa() {
           @click="abrirEditarSalon"
         />
         <UButton
-          v-if="puedeEliminar"
+          v-if="puedeEliminar && !selectedSalon?.eliminadoEl"
           icon="i-lucide-trash-2"
           color="error"
           variant="ghost"
@@ -326,9 +490,22 @@ async function eliminarMesa() {
           aria-label="Eliminar salón"
           @click="() => { deleteSalonOpen = true }"
         />
+        <UButton
+          v-if="puedeEliminar && selectedSalon?.eliminadoEl"
+          icon="i-lucide-rotate-ccw"
+          color="neutral"
+          variant="ghost"
+          title="Restaurar salón"
+          @click="abrirRestaurarSalon"
+        >
+          Restaurar
+        </UButton>
       </div>
+      <p v-if="selectedSalon?.eliminadoEl" class="text-xs text-muted">
+        {{ formatearBorradoPor(selectedSalon) }}
+      </p>
 
-      <div v-if="selectedSalon" class="space-y-3">
+      <div v-if="selectedSalon && !selectedSalon.eliminadoEl" class="space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center gap-1.5">
             <span class="text-sm text-muted">Distribución del salón</span>
@@ -376,6 +553,36 @@ async function eliminarMesa() {
           @edit="abrirEditarMesa"
           @dragend="guardarDistribucion"
         />
+      </div>
+
+      <!-- Mesas eliminadas del salón seleccionado: fuera del plano a propósito
+           (el plano es para operar, no para auditar). Cada una se restaura
+           por separado con su propio endpoint (`POST /mesas/:id/restaurar`). -->
+      <div v-if="puedeEliminar && mesasEliminadas.length > 0" class="space-y-2">
+        <span class="text-sm text-muted">Mesas eliminadas</span>
+        <ul class="space-y-2">
+          <li
+            v-for="mesa in mesasEliminadas"
+            :key="mesa.id"
+            class="flex items-center justify-between gap-3 rounded-lg border border-default p-3"
+          >
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <p class="font-medium truncate">{{ mesa.nombre }}</p>
+                <UBadge color="neutral" variant="subtle">Eliminado</UBadge>
+              </div>
+              <p class="text-xs text-muted">{{ formatearBorradoPor(mesa) }}</p>
+            </div>
+            <UButton
+              icon="i-lucide-rotate-ccw"
+              color="neutral"
+              variant="ghost"
+              @click="abrirRestaurarMesa(mesa)"
+            >
+              Restaurar
+            </UButton>
+          </li>
+        </ul>
       </div>
     </template>
 
@@ -455,15 +662,36 @@ async function eliminarMesa() {
     <CrudModal
       v-model:open="deleteSalonOpen"
       title="Eliminar salón"
-      message="Se eliminará el salón y sus mesas. Esta acción no se puede deshacer."
+      message="Se eliminará el salón junto con sus mesas activas. Podés recuperarlo desde «Ver eliminados» (las mesas que se lleve este borrado vuelven con él)."
       @confirm="eliminarSalon"
     />
     <CrudModal
       v-model:open="deleteMesaOpen"
       title="Eliminar mesa"
-      message="¿Eliminar esta mesa? Esta acción no se puede deshacer."
+      message="¿Eliminar esta mesa? Podés recuperarla desde «Ver eliminados»."
       @cancel="mesaToDelete = null"
       @confirm="eliminarMesa"
+    />
+
+    <CrudModal
+      v-model:open="confirmRestaurarSalonOpen"
+      title="Restaurar salón"
+      message="¿Restaurar este salón? Volverá a aparecer en el listado, junto con las mesas que este borrado se llevó."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurandoSalon"
+      @cancel="confirmRestaurarSalonOpen = false"
+      @confirm="restaurarSalonSeleccionado"
+    />
+    <CrudModal
+      v-model:open="confirmRestaurarMesaOpen"
+      title="Restaurar mesa"
+      message="¿Restaurar esta mesa? Volverá a aparecer en el plano del salón."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurandoMesa"
+      @cancel="cerrarRestaurarMesa"
+      @confirm="confirmRestaurarMesaId && restaurarMesaSeleccionada(confirmRestaurarMesaId)"
     />
   </div>
 </template>

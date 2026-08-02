@@ -37,6 +37,8 @@ interface Grupo {
   familia: Familia | null
   opciones: OpcionResuelta[]
   itemsUsandoCount: number
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 interface ItemCatalogo {
@@ -71,6 +73,8 @@ const { formatMonto } = useFormatters()
 const apiUrl = config.public.apiUrl
 const unidadesMedidaStore = useUnidadesMedidaStore()
 
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('grupos-modificadores')
+
 const tipoLabels: Record<string, string> = {
   ingrediente: 'Ingrediente',
   producto: 'Producto',
@@ -86,6 +90,15 @@ const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
+// Segundo paso del restaurar, solo cuando el backend contesta 400 de colisión:
+// el mensaje que explica cuál nombre está tomado y el nombre libre —editable—
+// con el que se reintenta. Molde: configuracion/descuentos.vue.
+const colisionModalOpen = ref(false)
+const colisionMensaje = ref('')
+const nombrePropuesto = ref('')
 
 // ── Drawer "usado en recetas" ────────────────────────────────────────────
 const recetasDrawerOpen = ref(false)
@@ -306,23 +319,43 @@ async function cargarItemsCatalogo() {
   )
 }
 
+// Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `grupos.value` sin
+// importar cuál toggle la originó. Esta pantalla NO usa `usePaginatedList`,
+// así que no hereda ninguna cola que viva ahí: va local. Encierra las TRES
+// cargas del `Promise.all` (grupos, catálogo de items, unidades de medida) y
+// no solo la de grupos: comparten el mismo `loading`, y encadenar solo la de
+// grupos dejaría `loading` desincronizado si un toggle rápido reordena las
+// respuestas de las otras dos.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    const [gruposData] = await Promise.all([
-      useApiFetch<Grupo[]>(`${apiUrl}/grupos-modificadores`),
-      cargarItemsCatalogo(),
-      unidadesMedidaStore.ensureLoaded(),
-    ])
-    grupos.value = gruposData
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar grupos de modificadores'), color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      const query = verEliminados.value ? '?incluirEliminados=true' : ''
+      const [gruposData] = await Promise.all([
+        useApiFetch<Grupo[]>(`${apiUrl}/grupos-modificadores${query}`),
+        cargarItemsCatalogo(),
+        unidadesMedidaStore.ensureLoaded(),
+      ])
+      grupos.value = gruposData
+    }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar grupos de modificadores'), color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Grupo) {
   // El create() del backend no incluye itemsUsandoCount (un grupo recién creado
@@ -344,6 +377,7 @@ function abrirCrear() {
 }
 
 function abrirEditar(grupo: Grupo) {
+  if (grupo.eliminadoEl) return
   resetDrawer()
   editingId.value = grupo.grupoModificadorId
   form.value = {
@@ -418,10 +452,25 @@ async function guardar() {
   }
 }
 
+function pedirEliminar(grupo: Grupo) {
+  if (grupo.eliminadoEl) return
+  confirmDeleteId.value = grupo.grupoModificadorId
+  confirmModalOpen.value = true
+}
+
 async function eliminar(id: string) {
   try {
     await useApiFetch(`${apiUrl}/grupos-modificadores/${id}`, { method: 'DELETE' })
-    grupos.value = grupos.value.filter(g => g.grupoModificadorId !== id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      grupos.value = grupos.value.filter(g => g.grupoModificadorId !== id)
+    }
     toast.add({ title: 'Grupo eliminado', color: 'success' })
   }
   catch (e: unknown) {
@@ -431,6 +480,75 @@ async function eliminar(id: string) {
     confirmDeleteId.value = null
     confirmModalOpen.value = false
   }
+}
+
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+  colisionModalOpen.value = false
+  colisionMensaje.value = ''
+  nombrePropuesto.value = ''
+}
+
+/**
+ * Restaura un grupo de la papelera. `nombreNuevo` solo llega en el reintento
+ * desde el modal de colisión. Molde: `descuentos.vue` → `restaurarDescuento()`.
+ *
+ * El catch NO cierra todo y tira un toast rojo: un 400 de colisión no es un
+ * error terminal sino una pregunta —qué nombre querés usar—, así que abre el
+ * segundo modal con la sugerencia del backend. Solo los errores de verdad
+ * (404 "no está en la papelera", red) terminan en toast.
+ */
+async function restaurarGrupo(id: string, nombreNuevo?: string) {
+  // El modal no se cierra solo al confirmar (lo cierran las funciones de acá),
+  // así que mientras el POST viaja el segundo click manda un segundo
+  // `POST .../restaurar` sobre una fila que el primero ya revivió: el backend
+  // contesta 404 "no está en la papelera" y el usuario ve un toast de ERROR
+  // inmediatamente después de un restore exitoso.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id, nombreNuevo)
+    const g = grupos.value.find(x => x.grupoModificadorId === id)
+    if (g) {
+      g.eliminadoEl = null
+      g.eliminadoPorNombre = null
+      if (nombreNuevo) {
+        // El backend solo devuelve 2xx si aplicó ESE nombre, así que el patch
+        // local no adivina. Reordenar hace falta porque el listado viene
+        // ordenado por nombre y el renombre lo puede mover de lugar.
+        g.nombre = nombreNuevo
+        grupos.value = [...grupos.value].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+      }
+    }
+    toast.add({ title: 'Grupo restaurado', color: 'success' })
+    cerrarRestaurar()
+  }
+  catch (e: unknown) {
+    const sugerido = nombreSugeridoDe(e)
+    if (sugerido) {
+      // Se reabre con la sugerencia NUEVA: si el usuario editó a un nombre que
+      // también estaba tomado, el backend ya calculó el siguiente libre.
+      colisionMensaje.value = apiErrorMsg(e, 'Ese nombre ya está en uso.')
+      nombrePropuesto.value = sugerido
+      confirmRestaurarModalOpen.value = false
+      colisionModalOpen.value = true
+    }
+    else {
+      toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+      cerrarRestaurar()
+    }
+  }
+  finally {
+    restaurando.value = false
+  }
+}
+
+function confirmarColision() {
+  const id = confirmRestaurarId.value
+  const nombre = nombrePropuesto.value.trim()
+  if (!id || !nombre) return
+  restaurarGrupo(id, nombre)
 }
 
 onMounted(cargar)
@@ -458,16 +576,38 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
       description="Grupos reutilizables de opciones (ingredientes o vendibles) para armar combos."
     >
       <template #actions>
-        <UButton
-          icon="i-lucide-plus"
-          @click="abrirCrear"
-        >
-          Nuevo grupo
-        </UButton>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton
+            icon="i-lucide-plus"
+            @click="abrirCrear"
+          >
+            Nuevo grupo
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable :data="grupos" :columns="columns" :loading="loading">
+      <template #nombre-cell="{ row }">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <p class="font-medium truncate">
+              {{ row.original.nombre }}
+            </p>
+            <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+              Eliminado
+            </UBadge>
+          </div>
+          <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+            {{ formatearBorradoPor(row.original) }}
+          </p>
+        </div>
+      </template>
+
       <template #familia-cell="{ row }">
         <UBadge
           v-if="row.original.familia"
@@ -497,18 +637,30 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
       </template>
 
       <template #acciones-cell="{ row }">
-        <div class="flex justify-end gap-2">
+        <div v-if="row.original.eliminadoEl" class="flex justify-end">
+          <UButton
+            icon="i-lucide-rotate-ccw"
+            color="neutral"
+            variant="ghost"
+            @click="() => { confirmRestaurarId = row.original.grupoModificadorId; confirmRestaurarModalOpen = true }"
+          >
+            Restaurar
+          </UButton>
+        </div>
+        <div v-else class="flex justify-end gap-2">
           <UButton
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
+            title="Editar"
             @click="abrirEditar(row.original)"
           />
           <UButton
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
-            @click="() => { confirmDeleteId = row.original.grupoModificadorId; confirmModalOpen = true }"
+            title="Eliminar"
+            @click="pedirEliminar(row.original)"
           />
         </div>
       </template>
@@ -748,9 +900,45 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar grupo de modificadores"
-      message="¿Estás seguro de que quieres eliminar este grupo? Esta acción no se puede deshacer."
+      message="¿Eliminar este grupo? Podés recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar grupo de modificadores"
+      message="¿Restaurar este grupo? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmRestaurarId && restaurarGrupo(confirmRestaurarId)"
+    />
+
+    <!-- Segundo paso, solo si el backend rechazó por nombre tomado. El campo
+         viene precargado con la sugerencia pero es editable: el usuario
+         confirma o escribe el suyo (decisión del owner). -->
+    <CrudModal
+      v-model:open="colisionModalOpen"
+      title="No se puede restaurar con ese nombre"
+      :message="colisionMensaje"
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      :confirm-disabled="!nombrePropuesto.trim()"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmarColision"
+    >
+      <template #detalle>
+        <UFormField label="Restaurar como" class="mt-4">
+          <UInput
+            v-model="nombrePropuesto"
+            aria-label="Restaurar como"
+            autofocus
+          />
+        </UFormField>
+      </template>
+    </CrudModal>
   </div>
 </template>

@@ -130,6 +130,7 @@ function onDblClick(mesa: MesaResumen) {
       :key="mesa.id"
       class="absolute -translate-x-1/2 -translate-y-1/2 touch-none"
       :style="{ left: `${Number(mesa.posX) * 100}%`, top: `${Number(mesa.posY) * 100}%` }"
+      :data-qa="`mesa-${mesa.id}`"
       @pointerdown="onPointerDown($event, mesa)"
       @click="onSelect(mesa)"
       @dblclick="onDblClick(mesa)"

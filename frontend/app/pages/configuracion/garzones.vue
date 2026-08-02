@@ -21,21 +21,42 @@ const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones'
 const toast = useToast()
 const garzonesApi = useGarzones()
 
+// El toggle "ver eliminados" y el restaurar van los dos detrás de
+// `Salones:Eliminar`: `POST /garzones/:id/restaurar` exige ese permiso, así
+// que ofrecer la papelera sin él sería prometer una acción que termina en 403.
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('garzones')
+
 const garzones = ref<Garzon[]>([])
 const loading = ref(false)
 
+// Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `garzones.value` sin
+// importar cuál toggle la originó — el listado queda desincronizado del
+// switch. Esta pantalla no usa `usePaginatedList`, así que no hereda la cola
+// que vive ahí: va local.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    garzones.value = await garzonesApi.listar()
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar garzones'), color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      garzones.value = await garzonesApi.listar(verEliminados.value)
+    }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar garzones'), color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Garzon) {
   const idx = garzones.value.findIndex(g => g.id === saved.id)
@@ -77,6 +98,7 @@ function abrirCrear() {
 }
 
 function abrirEditar(garzon: Garzon) {
+  if (garzon.eliminadoEl) return
   editingId.value = garzon.id
   form.value = {
     nombre: garzon.nombre,
@@ -126,6 +148,7 @@ const regenerarTarget = ref<Garzon | null>(null)
 const regenerando = ref(false)
 
 function abrirRegenerar(garzon: Garzon) {
+  if (garzon.eliminadoEl) return
   regenerarTarget.value = garzon
   regenerarOpen.value = true
 }
@@ -160,6 +183,7 @@ const deleteOpen = ref(false)
 const toDelete = ref<Garzon | null>(null)
 
 function confirmarEliminar(garzon: Garzon) {
+  if (garzon.eliminadoEl) return
   toDelete.value = garzon
   deleteOpen.value = true
 }
@@ -169,7 +193,16 @@ async function eliminar() {
   try {
     const id = toDelete.value.id
     await garzonesApi.eliminar(id)
-    removeLocal(id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
     toast.add({ title: 'Garzón eliminado', color: 'success' })
   }
   catch (e: unknown) {
@@ -178,6 +211,48 @@ async function eliminar() {
   finally {
     deleteOpen.value = false
     toDelete.value = null
+  }
+}
+
+// ── Restaurar ────────────────────────────────────────────────────────────────
+// SIN modal de colisión: la única colisión posible de `garzones` es el
+// placeholder "Mostrador" (índice único parcial, no de nombre) y renombrar no
+// la resuelve — un 400 acá es siempre terminal (toast), nunca una pregunta.
+// `docs/features/papelera.md` § "garzones tiene una restricción única parcial
+// distinta". Tampoco se arregla el riesgo aceptado de PIN duplicado al
+// restaurar: documentado en la misma sección, `restaurar()` no puede
+// compararlo porque el PIN solo existe hasheado.
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
+
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+}
+
+async function restaurarGarzon(id: string) {
+  // Guard de reentrancia: el modal no se cierra solo al confirmar, así que
+  // mientras el POST viaja un segundo click mandaría otro `POST .../restaurar`
+  // sobre una fila ya revivida → 404 → toast de ERROR encima de un éxito.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id)
+    const g = garzones.value.find(x => x.id === id)
+    if (g) {
+      g.eliminadoEl = null
+      g.eliminadoPorNombre = null
+    }
+    toast.add({ title: 'Garzón restaurado', color: 'success' })
+    cerrarRestaurar()
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+    cerrarRestaurar()
+  }
+  finally {
+    restaurando.value = false
   }
 }
 
@@ -196,15 +271,34 @@ const columns: TableColumn<Garzon>[] = [
       description="Registra los garzones del local con un PIN de 6 dígitos para identificarlos al abrir y cerrar cuentas en dispositivos compartidos."
     >
       <template #actions>
-        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
-          Nuevo garzón
-        </UButton>
+        <div class="flex items-center gap-4">
+          <!-- El toggle solo si puede restaurar: sin `Salones:Eliminar` el
+               backend rechaza el restaurar, así que mostrar la papelera sería
+               ofrecer una acción que termina en 403. -->
+          <div v-if="puedeEliminar" class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
+            Nuevo garzón
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable :data="garzones" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
-        <span class="font-medium text-default">{{ row.original.nombre }}</span>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <span class="font-medium text-default">{{ row.original.nombre }}</span>
+            <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+              Eliminado
+            </UBadge>
+          </div>
+          <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+            {{ formatearBorradoPor(row.original) }}
+          </p>
+        </div>
       </template>
 
       <template #tipo-cell="{ row }">
@@ -224,7 +318,18 @@ const columns: TableColumn<Garzon>[] = [
       </template>
 
       <template #acciones-cell="{ row }">
-        <div class="flex items-center justify-end gap-1">
+        <div v-if="row.original.eliminadoEl" class="flex justify-end">
+          <UButton
+            v-if="puedeEliminar"
+            icon="i-lucide-rotate-ccw"
+            color="neutral"
+            variant="ghost"
+            @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+          >
+            Restaurar
+          </UButton>
+        </div>
+        <div v-else class="flex items-center justify-end gap-1">
           <!-- Regenerar PIN es `PATCH :id/pin`: mismo permiso que editar. -->
           <UButton
             v-if="puedeActualizar"
@@ -343,6 +448,19 @@ const columns: TableColumn<Garzon>[] = [
       message="Se eliminará el garzón. Las cuentas ya registradas conservan su trazabilidad."
       @cancel="toDelete = null"
       @confirm="eliminar"
+    />
+
+    <!-- Restaurar: SIN modal de colisión, ver el comentario junto a
+         `restaurarGarzon`. Cualquier error es terminal y se avisa por toast. -->
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar garzón"
+      message="¿Restaurar este garzón? Volverá a aparecer en el listado y podrá identificarse con su PIN de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmRestaurarId && restaurarGarzon(confirmRestaurarId)"
     />
   </div>
 </template>

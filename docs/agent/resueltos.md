@@ -12,6 +12,159 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Papelera — las 15 pantallas del frontend (2026-08-02)
+
+- [x] **Las 15 pantallas de la papelera cableadas** (frontend, cerrado 2026-08-02) —
+  ⚠️ **Corregido (Ronda de fixes 1):** son 16 recursos backend, pero **15
+  pantallas** — `mesas` no tiene página propia, vive dentro de
+  `configuracion/salones.vue`, así que no cuenta aparte.
+  `configuracion/items.vue`, `configuracion/categorias.vue` y —desde el
+  2026-08-01— `configuracion/impuestos.vue`, `configuracion/descuentos.vue` y
+  `configuracion/recargos.vue` y `configuracion/turnos.vue` tienen el toggle
+  "ver eliminados" y el botón restaurar; las otras 9 (`grupos-modificadores`,
+  `terceros`, `cajones`, `garzones`, `salones` [con sus `mesas`], `impresoras`,
+  `causas-merma`, `motivos-diferencia`, `motivos-diferencia-inventario`) quedan
+  sin UI. El molde ya está probado en las seis pantallas hechas:
+  `usePapelera(recurso)`
+  (`app/composables/usePapelera.ts`) da el toggle, `restaurar(id, nombre?)` y
+  `formatearBorradoPor(fila)`.
+  📐 **Usar `configuracion/descuentos.vue` + `descuentos.nuxt.spec.ts` como
+  molde** (antes era `impuestos`): es el que tiene la salida de colisión y el
+  primero cuyos 11 tests se verificaron uno por uno contra el mutante que cada
+  uno debería cazar. `recargos.vue` + `recargos.nuxt.spec.ts` son la copia de ese
+  molde, también con los mutantes corridos — sirve de referencia de qué cambia y
+  qué no al replicarlo (spoiler: solo los nombres). Para una pantalla SIN
+  unicidad de nombre, copiar todo menos el modal de colisión y sus 4 tests. Lo que las rondas de
+  revisión corrigieron, y que conviene no volver a romper:
+  - **Guard de reentrancia en `restaurar`, y aplica a las 9.** El `CrudModal`
+    no se cierra solo al confirmar —lo cierran las funciones de la página—, así
+    que mientras el `POST` viaja el segundo click manda un segundo
+    `POST .../restaurar` sobre una fila que el primero ya revivió, el backend
+    contesta 404 y el usuario ve un toast de **error inmediatamente después de
+    un restore exitoso**. Reproducido en la re-revisión.
+    ⚠️ **Corregido el 2026-08-01 (medido con mutantes sobre `descuentos`):** una
+    versión anterior de esta entrada decía "el `ref` es la protección, el
+    `:loading` solo el feedback". **Es falso**: `:loading` deshabilita el botón,
+    así que las dos capas se tapan mutuamente y sacar cualquiera por separado
+    deja el test en verde — solo sacando las dos se rompe. No es motivo para
+    borrar ninguna (el `ref` cubre la función, que en `descuentos` entra también
+    por el botón del modal de colisión), pero sí para no creerle a un test que
+    "prueba el guard": prueba la conducta, un solo POST.
+  - **El fixture del test tiene que estar ELIMINADO** para que una aserción
+    negativa (`not.toContain('Restaurar')`, etc.) pruebe algo. Con todas las
+    filas vivas esa rama no se renderiza para ninguna y la aserción pasa por
+    construcción — pasó en la primera versión de este spec. Regla general:
+    toda aserción negativa necesita un ancla positiva al lado.
+  - **El badge "Eliminado" se asserta por elemento, no por subcadena.** Un
+    `toContain('Eliminado')` sobre el texto de la página queda subsumido por
+    "Eliminado por &lt;autor&gt;" y no caza que borren el badge. En
+    `categorias.vue` esa línea funciona solo por el género ("Eliminada" vs
+    "Eliminado por"): **no copiarla a las pantallas masculinas**, que son casi
+    todas las que faltan. ℹ️ `items.nuxt.spec.ts` ya tiene una de esas
+    subsumidas, preexistente: cerrarla cuando se toque ese spec.
+  ⛔ **Lo que NO hay que copiar de `impuestos`: el guard de `origen`.** Esa
+  pantalla tiene filas que el listado de la papelera devuelve pero que **no se
+  pueden restaurar** (el catálogo oficial del país). **Medido el 2026-08-01: el
+  caso es exclusivo de `impuestos`** y no se repite en ningún otro de los 16 —
+  es el único listado que devuelve filas ajenas al tenant (entran por la rama
+  `pais_id` del `OR`, `impuestos.service.ts`, mientras `restaurar()` busca por
+  `{ id, tenantId }`).
+  ⚠️ **Una versión anterior de esta entrada decía lo contrario** —que el caso se
+  repetía "en cada recurso con filas `es_fijo`", nombrando `causas-merma`,
+  `motivos-diferencia` y `motivos-diferencia-inventario`—. **Es falso**: los tres
+  tienen `es_fijo`, pero su `remove()` rechaza la fila fija con 400 antes de
+  borrarla, así que **una fila fija nunca puede entrar a la papelera**. Copiar el
+  guard ahí produce una condición muerta en el template y un test que no puede
+  fallar. La afirmación se había generalizado desde un solo ejemplo sin contar
+  los casos, que es el error que esta misma entrada advierte más arriba.
+  **Cada pantalla nueva necesita el mismo fix que `items.vue` ya tiene en su
+  `eliminar()`:** con el toggle "ver eliminados" activo, el `DELETE` no puede
+  quitar la fila del array local — tiene que **recargar el listado**, porque el
+  `DELETE` no devuelve `eliminadoEl`/`eliminadoPorNombre` (esos datos solo llegan en
+  el próximo `GET ...?incluirEliminados=true`). Sin el fix, la fila desaparece en vez
+  de pasar a "eliminada" y el usuario no puede restaurarla sin refrescar la página a
+  mano. Ni el build ni el typecheck ven este bug — es un comportamiento de runtime
+  del composable `eliminar()` de cada página, no un error de tipos.
+  **Y cada pantalla necesita su propio test de página** (el proyecto no testea
+  páginas por default, pero el bug de arriba es exactamente la clase de regresión que
+  solo un test de página cazaría — build/typecheck/reviews no lo ven, como ya pasó
+  una vez con el guard de reentrancia de `items.vue`, ver "Revisión final
+  `borrado-ingrediente-extra`" más abajo).
+  ⚠️ **Corregido (revisión final `papelera-restaurar-eliminados`):** falta un
+  segundo fix, aparte del de `eliminar()` — la **carrera del toggle**. Dos
+  toggles rápidos de "ver eliminados" disparan dos `GET` en vuelo; sin
+  protección, gana el que responda último y no el que se disparó último (el
+  listado final puede quedar desincronizado del switch). `categorias.vue` ya
+  la tenía resuelta con una cola serial local (`cargaEnCurso` en `cargar()`);
+  `items.vue` NO la tenía — el refetch lo dispara el `watch` de filtros de
+  `usePaginatedList`, sin ninguna protección. El fix quedó en el composable
+  (`usePaginatedList.ts` → `fetch()`, misma cola serial), porque ahí lo hereda
+  cualquier pantalla que ya lo use, sin nada que replicar.
+  ⚠️ **Corregido el 2026-08-01, y es el dato que decide el trabajo:** la
+  versión anterior de esta entrada decía que `grupos-modificadores.vue` era la
+  única de las 13 que usa `usePaginatedList` y que por eso "ya hereda el fix,
+  nada que hacer". **Es falso, y de la peor forma**: mandaba a saltear justo la
+  pantalla que necesita el arreglo. Medido —`grep` de las llamadas, no del
+  import—: `grupos-modificadores.vue` **solo importa el tipo**
+  `PaginatedResponse` y tiene su propio `cargar()` (`:309`) sin `cargaEnCurso`.
+  **Ninguna de las pendientes usa el composable** (eran 13 cuando se midió; hoy
+  quedan 9, las mismas menos `impuestos`, `descuentos`, `recargos` y `turnos`,
+  que ya la tienen), así
+  que **todas** necesitan la cola serial local. Los 10 consumidores reales de
+  `usePaginatedList` (8 páginas + 2 componentes: `CajaHistorial`,
+  `CajaMovimientosTable`, `sesiones-garzon`, `mermas`, `ordenes`,
+  `ventas/index`, `configuracion/items`, `pagos/index`, `inventario/index`,
+  `inventario/recuentos/index`) no son ninguna de ellas.
+  **Las 9 necesitan la MISMA cola serial local que `categorias.vue` ya tiene**
+  (`cargaEnCurso` en su `cargar()`): copiar ese patrón, no reinventar uno nuevo.
+  Test determinístico por pantalla: promesas controladas que resuelven en orden
+  inverso al de los dos toggles, como `descuentos.nuxt.spec.ts` → "papelera: la
+  carrera de `cargar()` bajo toggles rápidos". El equivalente de `items.vue`
+  ("la carrera del toggle vía usePaginatedList") **no** sirve de molde acá: ese
+  ejercita el `watch` del composable, que ninguna de las 9 tiene.
+
+  ---
+
+  **CÓMO SE CERRÓ (2026-08-02).** Las 9 pantallas restantes se replicaron en
+  paralelo, una por agente, cada uno con el molde y los hechos de SU pantalla
+  medidos de antemano y con la instrucción de **parar y reportar BLOCKED si un
+  dato del brief no cerraba contra el código**. Ese freno se usó dos veces y las
+  dos el brief estaba mal, no el código:
+
+  - `grupos-modificadores`: el brief decía que usaba `usePaginatedList` y que por
+    eso heredaba la cola serial. **Falso**: el grep matcheó el import del TIPO
+    `PaginatedResponse`, que la pantalla usa para el catálogo de `/items`; los
+    grupos cargan con `useApiFetch<Grupo[]>`. De las 15, **solo `items.vue`**
+    hereda la cola.
+  - `garzones`: el brief pedía agregar un `restaurar(id)` a `useGarzones`. El
+    agente no lo hizo porque `usePapelera(recurso)` ya lo provee y duplicarlo
+    habría sido código muerto. Tenía razón: `turnos.vue`, que también tiene
+    composable propio, hace exactamente eso.
+
+  Los mutantes de esta entrada (A/C/E/F/G, +P donde hay permisos) se corrieron en
+  las 9. Dos pantallas las escribió Haiku y sus mutantes se re-corrieron a mano
+  antes de creerles — pero con `causas-merma` ya resuelta y validada como molde a
+  un paso de distancia, no con el molde original.
+
+  **Mutantes nuevos que salieron de este trabajo y no estaban en la lista:**
+  - **I** (`impresoras`): `useImpresoras.listar()` la comparten los caminos de
+    impresión (`imprimirComanda`, `obtenerImpresoraBoleta`). Un `incluirEliminados`
+    con el default cambiado haría imprimir en impresoras borradas. Lo fija
+    `useImpresoras.nuxt.spec.ts` sobre la cadena real, no sobre `listar()` aislada.
+  - **M** (`garzones`): que el 400 del placeholder Mostrador se muestre como toast
+    y no como modal de renombrado — renombrar no resuelve esa colisión.
+  - **S** (`salones`): que el Restaurar de una MESA no pegue al endpoint del
+    SALÓN. Son dos controllers distintos y es el error más fácil de cometer ahí.
+
+  **Deriva que dejó el paralelismo, y que hubo que limpiar después:** tres copias
+  idénticas de la misma función de orden (`esFijo` primero, después alfabético),
+  extraída a `usePapelera.ts` → `ordenarFijosPrimero`; y `terceros` había perdido
+  su uso de `CrudListItem` reemplazándolo por markup a mano, contra el precedente
+  ya commiteado de `categorias.vue`. Ninguna de las dos la habría visto un agente
+  mirando solo su pantalla: las encontró la revisión del diff completo.
+
+---
+
 ## Unicidad de nombre — unificada (2026-08-01)
 
 - [x] **La unicidad de nombre estaba partida 4 y 4, sin que nadie lo hubiera

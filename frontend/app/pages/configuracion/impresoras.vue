@@ -9,6 +9,8 @@ const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Impresor
 const toast = useToast()
 const impresorasApi = useImpresoras()
 
+const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('impresoras')
+
 const impresoras = ref<Impresora[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -50,18 +52,34 @@ function rolLabel(rol: RolImpresora) {
   return rolOptions.find(o => o.value === rol)?.label ?? rol
 }
 
+// Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
+// `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
+// sin encadenarlas la respuesta que llega segunda pisa `impresoras.value` sin
+// importar cuál toggle la originó — el listado queda desincronizado del
+// switch. Esta pantalla no usa `usePaginatedList`, así que no hereda la cola
+// que vive ahí: va local.
+let cargaEnCurso: Promise<void> | null = null
+
 async function cargar() {
-  loading.value = true
-  try {
-    impresoras.value = await impresorasApi.listar()
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar impresoras'), color: 'error' })
-  }
-  finally {
-    loading.value = false
-  }
+  const previa = cargaEnCurso
+  const actual = (async () => {
+    await previa
+    loading.value = true
+    try {
+      impresoras.value = await impresorasApi.listar(undefined, verEliminados.value)
+    }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Error al cargar impresoras'), color: 'error' })
+    }
+    finally {
+      loading.value = false
+    }
+  })()
+  cargaEnCurso = actual
+  await actual
 }
+
+watch(verEliminados, cargar)
 
 function upsertLocal(saved: Impresora) {
   const idx = impresoras.value.findIndex(i => i.id === saved.id)
@@ -86,6 +104,7 @@ function abrirCrear() {
 }
 
 function abrirEditar(imp: Impresora) {
+  if (imp.eliminadoEl) return
   resetDrawer()
   editingId.value = imp.id
   form.value = {
@@ -133,6 +152,7 @@ const deleteOpen = ref(false)
 const toDelete = ref<Impresora | null>(null)
 
 function confirmarEliminar(imp: Impresora) {
+  if (imp.eliminadoEl) return
   toDelete.value = imp
   deleteOpen.value = true
 }
@@ -142,7 +162,16 @@ async function eliminar() {
   try {
     const id = toDelete.value.id
     await impresorasApi.eliminar(id)
-    removeLocal(id)
+    // Con la papelera abierta la fila no desaparece: pasa a "eliminada" con su
+    // autor y fecha. El DELETE no devuelve esos datos —solo llegan en el
+    // próximo GET con el flag—, así que acá hace falta recargar en vez del
+    // patch local de siempre.
+    if (verEliminados.value) {
+      await cargar()
+    }
+    else {
+      removeLocal(id)
+    }
     toast.add({ title: 'Impresora eliminada', color: 'success' })
   }
   catch (e: unknown) {
@@ -155,6 +184,7 @@ async function eliminar() {
 }
 
 async function toggleActivo(imp: Impresora) {
+  if (imp.eliminadoEl) return
   if (toggling.has(imp.id)) return
   toggling.add(imp.id)
   const prev = imp.activo
@@ -176,6 +206,48 @@ async function toggleActivo(imp: Impresora) {
   }
 }
 
+// ── Restaurar ────────────────────────────────────────────────────────────────
+const confirmRestaurarId = ref<string | null>(null)
+const confirmRestaurarModalOpen = ref(false)
+const restaurando = ref(false)
+
+function cerrarRestaurar() {
+  confirmRestaurarId.value = null
+  confirmRestaurarModalOpen.value = false
+}
+
+/**
+ * Restaura una impresora de la papelera. A diferencia de `configuracion/
+ * turnos.vue`, acá no hay colisión que resolver: `impresoras` no tiene
+ * unicidad de nombre y `POST /impresoras/:id/restaurar` ni siquiera acepta
+ * body — el catch solo tiene la rama de error terminal (toast), no hay
+ * segundo modal que abrir.
+ */
+async function restaurarImpresora(id: string) {
+  // Guard de reentrancia: el modal no se cierra solo al confirmar, así que
+  // mientras el POST viaja un segundo click mandaría otro `POST .../restaurar`
+  // sobre una fila ya revivida → 404 → toast de ERROR encima de un éxito.
+  if (restaurando.value) return
+  restaurando.value = true
+  try {
+    await restaurar(id)
+    const imp = impresoras.value.find(x => x.id === id)
+    if (imp) {
+      imp.eliminadoEl = null
+      imp.eliminadoPorNombre = null
+    }
+    toast.add({ title: 'Impresora restaurada', color: 'success' })
+    cerrarRestaurar()
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al restaurar'), color: 'error' })
+    cerrarRestaurar()
+  }
+  finally {
+    restaurando.value = false
+  }
+}
+
 onMounted(cargar)
 
 const columns: TableColumn<Impresora>[] = [
@@ -193,15 +265,34 @@ const columns: TableColumn<Impresora>[] = [
       description="Configura las impresoras térmicas para comandas de cocina/barra y para boletas/precuenta."
     >
       <template #actions>
-        <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
-          Nueva impresora
-        </UButton>
+        <div class="flex items-center gap-4">
+          <!-- El toggle solo si puede restaurar: sin `Impresoras:Eliminar`
+               el backend rechaza el restaurar, así que mostrar la papelera
+               sería ofrecer una acción que termina en 403. -->
+          <div v-if="puedeEliminar" class="flex items-center gap-2">
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <span class="text-sm text-muted">Ver eliminados</span>
+          </div>
+          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
+            Nueva impresora
+          </UButton>
+        </div>
       </template>
     </CrudPageHeader>
 
     <CrudTable :data="impresoras" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
-        <CrudListItem :title="row.original.nombre" :subtitle="rolLabel(row.original.rol)" />
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <CrudListItem :title="row.original.nombre" :subtitle="rolLabel(row.original.rol)" />
+            <UBadge v-if="row.original.eliminadoEl" color="neutral" variant="subtle">
+              Eliminado
+            </UBadge>
+          </div>
+          <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
+            {{ formatearBorradoPor(row.original) }}
+          </p>
+        </div>
       </template>
 
       <template #conexion-cell="{ row }">
@@ -224,7 +315,7 @@ const columns: TableColumn<Impresora>[] = [
           -->
           <USwitch
             :model-value="row.original.activo"
-            :disabled="toggling.has(row.original.id) || !puedeActualizar"
+            :disabled="toggling.has(row.original.id) || !puedeActualizar || !!row.original.eliminadoEl"
             aria-label="Activar o desactivar impresora"
             @update:model-value="toggleActivo(row.original)"
           />
@@ -232,7 +323,18 @@ const columns: TableColumn<Impresora>[] = [
       </template>
 
       <template #acciones-cell="{ row }">
-        <div class="flex justify-end gap-1">
+        <div v-if="row.original.eliminadoEl" class="flex justify-end">
+          <UButton
+            v-if="puedeEliminar"
+            icon="i-lucide-rotate-ccw"
+            color="neutral"
+            variant="ghost"
+            @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
+          >
+            Restaurar
+          </UButton>
+        </div>
+        <div v-else class="flex justify-end gap-1">
           <UButton
             v-if="puedeActualizar"
             icon="i-lucide-square-pen"
@@ -311,9 +413,20 @@ const columns: TableColumn<Impresora>[] = [
     <CrudModal
       v-model:open="deleteOpen"
       title="Eliminar impresora"
-      message="¿Estás seguro de que quieres eliminar esta impresora? Las categorías que la usan quedarán sin ruta de comanda."
+      message="¿Estás seguro de que quieres eliminar esta impresora? Las categorías que la usan quedarán sin ruta de comanda. Podés recuperarla desde «Ver eliminados»."
       @cancel="toDelete = null"
       @confirm="eliminar"
+    />
+
+    <CrudModal
+      v-model:open="confirmRestaurarModalOpen"
+      title="Restaurar impresora"
+      message="¿Restaurar esta impresora? Volverá a aparecer en el listado y podrá usarse de nuevo."
+      confirm-label="Restaurar"
+      confirm-color="neutral"
+      :loading="restaurando"
+      @cancel="cerrarRestaurar"
+      @confirm="confirmRestaurarId && restaurarImpresora(confirmRestaurarId)"
     />
   </div>
 </template>

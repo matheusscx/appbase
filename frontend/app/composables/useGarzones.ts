@@ -11,6 +11,10 @@ export interface Garzon {
   tipo: TipoGarzon
   creadoEl: string
   actualizadoEl: string
+  // Solo llegan con `listar(true)`; el resto de las pantallas que llaman
+  // `listar()` (POS, identificación por PIN) nunca los piden.
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 export interface GarzonIdentificado {
@@ -26,8 +30,13 @@ export interface GarzonConPin extends Garzon {
 export function useGarzones() {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
-  const listar = () =>
-    useApiFetch<Garzon[]>(`${apiUrl}/garzones`)
+  /** `incluirEliminados` es opcional y por default `false`: el POS y la
+   *  identificación por PIN también llaman `listar()` y no deben empezar a
+   *  ver garzones borrados. */
+  const listar = (incluirEliminados = false) =>
+    useApiFetch<Garzon[]>(
+      `${apiUrl}/garzones${incluirEliminados ? '?incluirEliminados=true' : ''}`,
+    )
 
   /** Crea el garzón; el backend genera el PIN y lo devuelve una sola vez. */
   const crear = (body: { nombre: string, activo?: boolean, tipo?: TipoGarzon }) =>

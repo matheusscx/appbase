@@ -60,12 +60,18 @@ export interface MesaResumen {
   tamano: TamanoMesa
   cuentasAbiertas: number
   ocupada: boolean
+  // Solo llegan con `listarSalones(true)` — la papelera (docs/features/papelera.md).
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 export interface SalonConMesas {
   id: string
   nombre: string
   mesas: MesaResumen[]
+  // Solo llegan con `listarSalones(true)` — la papelera (docs/features/papelera.md).
+  eliminadoEl?: string | null
+  eliminadoPorNombre?: string | null
 }
 
 export interface CuentaLineaDetalle {
@@ -183,8 +189,13 @@ export function useSalones() {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
   // Administración: salones
-  const listarSalones = () =>
-    useApiFetch<SalonConMesas[]>(`${apiUrl}/salones`)
+  /** `incluirEliminados` es opcional y por default `false`: `salones/index.vue`
+   *  (operación del garzón) sigue llamando `listarOperacion()`, que no toca
+   *  este flag, así que ninguna otra pantalla ve borrados sin pedirlo. */
+  const listarSalones = (incluirEliminados = false) =>
+    useApiFetch<SalonConMesas[]>(
+      `${apiUrl}/salones${incluirEliminados ? '?incluirEliminados=true' : ''}`,
+    )
 
   const crearSalon = (nombre: string) =>
     useApiFetch<{ id: string, nombre: string }>(`${apiUrl}/salones`, {
