@@ -33,9 +33,32 @@ identificamos con ubicación concreta.
   no distingue. (c) el desglose por línea usa `detalleId`, que es `null` en las reglas de
   nivel venta — la pantalla tiene que mostrar esas aparte, no colgarlas de una línea
   cualquiera.
-  ⚠️ **Las notas de crédito no tienen desglose propio**: `crearNotaCredito` no escribe filas
-  en las tres tablas (medido). Se llega al detalle por la venta que referencian, pero la NC
-  en sí no dice qué descuentos revierte. Decidir si entra en el mismo alcance.
+  Las notas de crédito no tienen desglose propio y eso es **tema aparte** — ver la entrada
+  de abajo, que es más grande de lo que parecía.
+
+- [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
+  (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —
+  **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse
+  ante impuestos y documentos tributarios; ver **ADR-010**).
+  **Lo medido, sin interpretar:** la NC construye su fila de `ventas` **directo**, no por
+  `crearEnTransaccion`, y hardcodea `totalDescuentos: '0'`, `totalRecargos: '0'` y
+  `totalImpuestos: '0'`, con `totalBruto = totalFinal = params.monto`. Consecuencias
+  encadenadas: (a) cero filas en `ventas_descuentos`/`ventas_recargos`/`ventas_impuestos`,
+  así que la NC no dice qué reglas revierte —se llega por la venta que referencia—;
+  (b) `config_calculo` queda `null` en toda NC; (c) `base_ventas_sin_impuestos` se queda en
+  el default de la columna, y ese campo lo consume `liquidacion-propinas.service.ts`.
+  Los dos puntos de entrada (`crearNotaCreditoDesdeVenta`) desembocan en el mismo método.
+  Lo que la NC **sí** congela es `descripcion` y `clasificacion_tributaria` por línea en
+  `venta_detalles`, copiadas de la línea original.
+  **La pregunta para el owner, que NO me corresponde responder:** una NC sobre una venta con
+  IVA 19%, ¿tiene que declarar su propio IVA? Un DTE 61 lleva `MntNeto`/`IVA`/`MntTotal`
+  propios, y ADR-010 dice congelar el **hecho fiscal** en la transacción y diferir solo lo
+  que transmite o formatea — el corte neto/impuesto de una NC parece hecho fiscal, no
+  formato. Si lo es, hoy falta y no es solo un tema de auditoría.
+  **Contraargumento honesto a considerar:** la NC se emite **por monto** (`params.monto`,
+  con devoluciones de línea opcionales y sueltas del monto), así que "descomponer" exige
+  primero definir contra qué —¿prorrateo sobre el total original? ¿solo sobre las líneas
+  devueltas?—, y eso es regla de negocio, no implementación.
 
 - [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
   frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
