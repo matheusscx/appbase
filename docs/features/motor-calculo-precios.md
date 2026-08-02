@@ -254,11 +254,17 @@ decisión de columnas del resto.
 congelado es invariante de esquema y no convención. Un segundo camino que se
 olvide de poblarlas falla al insertar.
 
-La feature es de **auditoría, no de operación diaria**: las columnas viajan en
-`GET /ventas/:id` pero todavía no hay pantalla que las muestre —
-`VentaDetalleDrawer.vue` sigue mostrando solo los totales agregados. Diferido
-por decisión del owner (2026-08-02); las decisiones pendientes de esa pantalla
-están en [`docs/agent/pendientes.md`](../agent/pendientes.md).
+**Dónde se ve** (2026-08-02): `VentaDetalleDrawer.vue` → tarjeta **"Reglas
+aplicadas"**, entre las líneas de venta y los totales. Las tres familias van en
+**una sola tabla** con un badge de tipo, porque responden una sola pregunta
+—"¿qué se le aplicó a esta venta?"— y separadas quedaban tres tablas casi
+vacías. Cada fila dice con qué valor aplicó la regla (`10,00%` o `Monto fijo`),
+a qué línea o si fue a toda la venta, y cuánta plata. Dos casos con nombre
+propio: un descuento topeado muestra **`pedía $5.000`** bajo el monto, y una
+regla que se evaluó sin aportar nada dice **`No aplicó`** en vez de un guion
+—que hacía dudar de si el dato se había perdido— con la fila atenuada.
+
+`config_calculo` todavía no tiene consumidor visual: ver `docs/agent/pendientes.md`.
 
 ---
 

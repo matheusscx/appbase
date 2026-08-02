@@ -49,6 +49,25 @@ interface Detalle {
   cantidadDevuelta: string
 }
 
+/**
+ * Una regla tal como quedó CONGELADA en la venta. El nombre, el modo y el valor
+ * son los del momento del cobro: el catálogo pudo cambiarlos o borrar la regla.
+ * No consultar `descuentos`/`recargos`/`impuestos` para mostrar esto.
+ */
+interface ReglaCongelada {
+  id: string
+  detalleId: string | null
+  nombreRegla: string
+  /** `'porcentaje' | 'monto_fijo'`. Ausente en impuestos: siempre son porcentaje. */
+  modo?: string
+  valorAplicado: string
+  /** Solo descuentos: lo que la regla pedía antes del piso en cero. */
+  valorSolicitado?: string
+  /** Decimal (0.19 = 19%). `null` cuando la regla era de monto fijo. */
+  porcentajeAplicado: string | null
+  aplicadoEn: string
+}
+
 interface Reembolso {
   id: string
   monto: string
@@ -83,6 +102,9 @@ interface VentaDetalle {
   reembolsos: Reembolso[]
   notasCredito: NotaCredito[]
   detalles: Detalle[]
+  descuentos: ReglaCongelada[]
+  recargos: ReglaCongelada[]
+  impuestos: ReglaCongelada[]
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
   propina: PropinaVenta | null
@@ -113,7 +135,7 @@ const config = useRuntimeConfig()
 const toast = useToast()
 const cajaStore = useCajaStore()
 const unidadesStore = useUnidadesMedidaStore()
-const { formatMonto, formatFecha } = useFormatters()
+const { formatMonto, formatFecha, formatPorcentaje } = useFormatters()
 const apiUrl = config.public.apiUrl
 
 const venta = ref<VentaDetalle | null>(null)
@@ -218,6 +240,80 @@ const detalleColumns: TableColumn<Detalle>[] = [
   { accessorKey: 'precioUnitario', header: 'Precio unit.', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'totalLinea', header: 'Total línea', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
+
+/**
+ * Las tres familias aplanadas en una sola tabla. Van juntas y no en tres
+ * tarjetas porque la pregunta que responden es una sola —"¿qué se le aplicó a
+ * esta venta?"— y separadas quedan tres tablas casi vacías.
+ */
+interface ReglaAplicadaFila {
+  tipo: string
+  nombre: string
+  /** Con qué valor aplicó: "10,00%" o "Monto fijo". */
+  expresion: string
+  /** A qué línea, o a la venta entera. */
+  alcance: string
+  monto: string
+  /** Presente solo si el piso en cero recortó la regla. */
+  recorte: string | null
+  /** La regla se evaluó y no aportó nada. Se muestra, atenuada. */
+  sinEfecto: boolean
+}
+
+function filaDeRegla(tipo: string, r: ReglaCongelada, lineas: Map<string, string>): ReglaAplicadaFila {
+  // Un `porcentaje_aplicado` null puede ser "era monto fijo" o "era porcentaje
+  // y no llegó a aplicar"; `modo` es lo que los distingue. El segundo caso se
+  // nombra: un guion al lado de una regla llamada "Solo transferencia 5%" hace
+  // dudar de si el dato se perdió, cuando lo que pasó es que no corrió.
+  const expresion = r.porcentajeAplicado !== null
+    ? formatPorcentaje(r.porcentajeAplicado)
+    : r.modo === 'monto_fijo' ? 'Monto fijo' : 'No aplicó'
+
+  // Solo los descuentos los topea el piso en cero, y solo cuando pedían más de
+  // lo que había disponible.
+  const pedido = r.valorSolicitado
+  const recorte = pedido && new Decimal(pedido).greaterThan(r.valorAplicado)
+    ? `pedía ${formatMonto(pedido)}`
+    : null
+
+  return {
+    tipo,
+    nombre: r.nombreRegla,
+    expresion,
+    // El `?? '—'` es guarda de tipos, no un estado real: nada soft-borra un
+    // `venta_detalles`, así que un `detalleId` siempre está entre los detalles
+    // de su propia venta. No poner ahí un texto que describa un caso imposible.
+    alcance: r.detalleId ? (lineas.get(r.detalleId) ?? '—') : 'Toda la venta',
+    monto: r.valorAplicado,
+    recorte,
+    sinEfecto: new Decimal(r.valorAplicado).isZero(),
+  }
+}
+
+const reglasAplicadas = computed<ReglaAplicadaFila[]>(() => {
+  const v = venta.value
+  if (!v) return []
+  const lineas = new Map(v.detalles.map(d => [d.id, d.descripcion]))
+  return [
+    ...v.descuentos.map(r => filaDeRegla('Descuento', r, lineas)),
+    ...v.recargos.map(r => filaDeRegla('Recargo', r, lineas)),
+    ...v.impuestos.map(r => filaDeRegla('Impuesto', r, lineas)),
+  ]
+})
+
+const reglaColumns: TableColumn<ReglaAplicadaFila>[] = [
+  { accessorKey: 'tipo', header: 'Tipo' },
+  { accessorKey: 'nombre', header: 'Regla' },
+  { accessorKey: 'expresion', header: 'Valor', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'alcance', header: 'Se aplicó a' },
+  { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
+
+function tipoReglaColor(tipo: string): 'success' | 'warning' | 'neutral' {
+  if (tipo === 'Descuento') return 'success'
+  if (tipo === 'Recargo') return 'warning'
+  return 'neutral'
+}
 
 async function cargar(id: string) {
   loading.value = true
@@ -410,6 +506,55 @@ function onNcSuccess(payload: {
               <div class="py-10 text-center text-sm text-muted">
                 <UIcon name="i-lucide-inbox" class="mx-auto mb-2 h-8 w-8 opacity-40" />
                 Sin líneas de venta.
+              </div>
+            </template>
+          </UTable>
+        </UCard>
+
+        <UCard v-if="reglasAplicadas.length">
+          <template #header>
+            <div class="flex items-center justify-between gap-2">
+              <h2 class="text-base font-semibold">
+                Reglas aplicadas
+              </h2>
+              <span class="text-xs text-muted">
+                Valores del momento del cobro
+              </span>
+            </div>
+          </template>
+          <UTable :data="reglasAplicadas" :columns="reglaColumns">
+            <template #tipo-cell="{ row }">
+              <UBadge
+                :color="tipoReglaColor(row.original.tipo)"
+                variant="subtle"
+                size="sm"
+              >
+                {{ row.original.tipo }}
+              </UBadge>
+            </template>
+            <template #nombre-cell="{ row }">
+              <span :class="row.original.sinEfecto ? 'text-muted' : ''">
+                {{ row.original.nombre }}
+              </span>
+            </template>
+            <template #expresion-cell="{ row }">
+              <span class="font-mono" :class="row.original.sinEfecto ? 'text-muted' : ''">
+                {{ row.original.expresion }}
+              </span>
+            </template>
+            <template #alcance-cell="{ row }">
+              <span class="text-sm" :class="row.original.sinEfecto ? 'text-muted' : ''">
+                {{ row.original.alcance }}
+              </span>
+            </template>
+            <template #monto-cell="{ row }">
+              <div class="flex flex-col items-end">
+                <span class="font-mono" :class="row.original.sinEfecto ? 'text-muted' : ''">
+                  {{ formatMonto(row.original.monto) }}
+                </span>
+                <span v-if="row.original.recorte" class="text-xs text-warning">
+                  {{ row.original.recorte }}
+                </span>
               </div>
             </template>
           </UTable>

@@ -33,7 +33,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Simulador de impacto de costos (desfase recetas, aplicar/descartar) | ✅ Implementado (2026-07-15) |
 | Motor de cálculo de precios | ✅ Implementado (2026-06-28) |
 | Advertencias del motor de precios en la previsualización del carrito (POS, Salones, Tienda) y en la confirmación de la Tienda | ✅ Implementado (2026-07-28, confirmación 2026-08-02) |
-| Congelado de las reglas aplicadas en la venta (nombre, modo, valor y config del cálculo) | ✅ Backend (2026-08-02) — viaja en `GET /ventas/:id`; **pantalla diferida** por decisión del owner, ver `docs/agent/pendientes.md` |
+| Congelado de las reglas aplicadas en la venta (nombre, modo, valor y config del cálculo) + desglose en el detalle de venta | ✅ Implementado (2026-08-02) — falta mostrar `config_calculo`, ver `docs/agent/pendientes.md` |
 | Procesamiento de ventas (canal físico, pagos inline, vuelto) | ✅ Implementado (2026-06-29) |
 | Gestión de cajas | ✅ Implementado |
 | Registro de pagos | ✅ Implementado (inline con ventas, 2026-06-29) |

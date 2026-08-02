@@ -14,27 +14,16 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **El congelado de las reglas no tiene pantalla: el dato existe y nadie lo ve**
-  (frontend, diferido por decisión del owner 2026-08-02) — desde
-  [el congelado](resueltos.md) cada venta guarda qué descuentos, recargos e impuestos se
-  aplicaron, con qué nombre, modo y valor, sobre qué línea y bajo qué config de cálculo. Ya
-  **viaja por la API**: `GET /api/ventas/:id` (`ventas.controller.ts:89`,
-  `@RequiresPermiso('Ventas','Leer')`) devuelve `descuentos[]`, `recargos[]` e `impuestos[]`
-  con `nombreRegla`, `modo`, `porcentajeAplicado`, `valorSolicitado` y `detalleId`, más
-  `configCalculo` en la cabecera.
-  **Lo que falta es el consumidor.** `VentaDetalleDrawer.vue` —la única UI de detalle de
-  venta, porque `/ventas/:id` solo redirige a `/ventas?venta=:id`— muestra los **totales**
-  agregados (`totalDescuentos`, `totalRecargos`, `totalImpuestos`) y **ninguna de las tres
-  listas**. O sea que hoy la pregunta "¿qué descuento se aplicó en esta venta y de cuánto
-  era?" solo se responde por SQL o por Swagger.
-  **Tres decisiones antes de escribirla:** (a) ¿va dentro del drawer que ya existe, o es una
-  vista de auditoría aparte? El owner mencionó una vista propia; el drawer es donde el
-  usuario ya está. (b) ¿la ve cualquiera con `Ventas:Leer`, o es admin-only? Hoy el endpoint
-  no distingue. (c) el desglose por línea usa `detalleId`, que es `null` en las reglas de
-  nivel venta — la pantalla tiene que mostrar esas aparte, no colgarlas de una línea
-  cualquiera.
-  Las notas de crédito no tienen desglose propio y eso es **tema aparte** — ver la entrada
-  de abajo, que es más grande de lo que parecía.
+- [ ] **`configCalculo` no se muestra en ninguna parte** (frontend, 2026-08-02) — el
+  desglose de reglas ya vive en `VentaDetalleDrawer.vue` → "Reglas aplicadas", pero
+  `ventas.config_calculo` —el orden de la fórmula, base|cascada, escala y redondeo con los
+  que se calculó— sigue sin consumidor. Sin eso, dos ventas con el mismo 10% congelado y
+  totales distintos no tienen explicación visible. Es el dato menos accionable de los
+  congelados, por eso quedó fuera del primer corte. Cierre posible: una línea plegable en la
+  tarjeta de Totales, o un tooltip en el título del desglose.
+  ⚠️ Va con una decisión de permisos: hoy el desglose lo ve **cualquiera con `Ventas:Leer`**
+  (`ventas.controller.ts:89`), que es el mismo permiso del resto del drawer. Si la config del
+  tenant se considera información de administración, hay que separar el guard.
 
 - [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
   (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —
