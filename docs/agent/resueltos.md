@@ -27,9 +27,12 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
   legítima, imposible desde la API. Las dos son *validar el campo que llegó en vez del
   estado que queda*, que es la lección que este archivo ya tenía escrita de la oleada
   anterior (`validarEstadoResultante`).
-  **Cómo se cerró:** un `validarMontos(modo, valor, tramos)` por service valida el `valor`
-  plano y el de **cada tramo** con el **mismo** modo — el modo con el que la fila queda, no
-  el que llegó. En `update` los tramos se leen de la BD cuando el `PATCH` no los trae, para
+  **Cómo se cerró:** `validarMontosDeRegla(modo, valor, tramos)` en
+  `common/utils/monto-regla.util.ts` valida el `valor` plano y el de **cada tramo** con el
+  **mismo** modo — el modo con el que la fila queda, no el que llegó. Se extrajo a `common/`
+  (decisión del owner) en vez de duplicarla en los dos services: el costo de la duplicación
+  anterior no fue que las copias divergieran, sino que nadie podía ver de un vistazo si
+  todos los caminos la usaban — y en dos de cuatro no. En `update` los tramos se leen de la BD cuando el `PATCH` no los trae, para
   que cambiar solo el `modo` no reinterprete valores ya guardados (un tramo de `5000`
   legítimo como monto fijo pasaría a ser 500.000%). El mismo fix en `recargos`, donde ningún
   tipo pide tramos pero la plomería es alcanzable por API y el motor los evalúa mirando

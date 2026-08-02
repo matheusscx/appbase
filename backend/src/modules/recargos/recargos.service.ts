@@ -6,6 +6,7 @@ import {
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
+import { validarMontosDeRegla } from '../../common/utils/monto-regla.util';
 import { Recargo } from './entities/recargo.entity';
 import { RecargoTramo } from './entities/recargo-tramo.entity';
 import { RecargoMetodoPago } from './entities/recargo-metodo-pago.entity';
@@ -445,7 +446,7 @@ export class RecargosService {
       throw new BadRequestException('El valor es requerido para este tipo');
     // Con el modo con el que la fila VA A QUEDAR, que no siempre es el que
     // llegó: dos tipos lo fuerzan a porcentaje.
-    this.validarMontos(
+    validarMontosDeRegla(
       tiposFijoPorcentaje.includes(codigo)
         ? 'porcentaje'
         : (dto.modo ?? 'porcentaje'),
@@ -493,7 +494,7 @@ export class RecargosService {
         : await this.tramoRepo.find({ where: { recargoId: actual.id } });
 
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
-    this.validarMontos(
+    validarMontosDeRegla(
       tiposFijoPorcentaje.includes(codigo)
         ? 'porcentaje'
         : (dto.modo ?? actual.modo),
@@ -547,33 +548,5 @@ export class RecargosService {
       mora: CondicionTipo.VENCIMIENTO,
     };
     return map[codigo] ?? CondicionTipo.NINGUNA;
-  }
-
-  /**
-   * Toda expresión de monto de la regla —el `valor` plano y el de **cada
-   * tramo**— se valida con el **mismo** modo. Gemelo del de
-   * `descuentos.service.ts`, donde está el detalle de por qué los tramos
-   * quedaban afuera.
-   */
-  private validarMontos(
-    modo: string,
-    valor: string | null | undefined,
-    tramos?: { valor: string | null }[],
-  ): void {
-    this.validarValor(modo, valor);
-    for (const tramo of tramos ?? []) this.validarValor(modo, tramo.valor);
-  }
-
-  private validarValor(modo: string, valor: string | null | undefined): void {
-    if (!valor) return;
-    const numero = Number(valor);
-    if (!Number.isFinite(numero) || numero <= 0) {
-      throw new BadRequestException('El valor debe ser un número mayor a 0');
-    }
-    if (modo === 'porcentaje' && numero >= 1) {
-      throw new BadRequestException(
-        'El porcentaje debe expresarse en decimal (0.10 = 10%) y ser menor a 1',
-      );
-    }
   }
 }

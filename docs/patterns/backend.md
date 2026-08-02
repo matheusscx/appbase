@@ -132,6 +132,14 @@ se pasa al service. Ejemplo completo: `monedas.controller.ts`.
   `findOne` después del write. Create → entidad para insertar en lista; update →
   patch mergeable (`{ id, ...camposTocados }`). El front hace
   `{ ...prev, ...saved }` sin otro GET.
+- **Una regla de negocio que vale para dos módulos gemelos va a `common/utils/`,
+  no copiada en los dos.** Descuentos y recargos son gemelos y tenían la
+  validación del monto duplicada: la copia se mantuvo sincronizada, pero la
+  decisión de **cuándo invocarla** vivía repetida en cuatro lugares (`create` y
+  `update` × dos services) y en dos se omitió, dejando entrar tramos con un
+  "50%" cargado como `50` (ago-2026, `3de96d28`). El costo de la duplicación no
+  fue que las copias divergieran, sino que *nadie podía ver de un vistazo si
+  todos los caminos la usaban*. Hoy: `common/utils/monto-regla.util.ts`.
 - **`RETURNING` con `dataSource.query` siempre pasa por `unwrap()`:** TypeORM +
   pg devuelve `INSERT/UPDATE ... RETURNING` como `[rows, rowCount]`, no como
   `rows` — tipar el resultado directo compila pero trae la forma equivocada en
