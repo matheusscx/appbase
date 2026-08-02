@@ -1051,6 +1051,10 @@ CREATE TABLE "ventas" (
   "base_ventas_sin_impuestos" NUMERIC(18,4) NOT NULL DEFAULT 0,
   "venta_referencia_id"   UUID          REFERENCES "ventas" ("venta_id"),  -- para notas de crédito
   "comentario"            TEXT,
+  -- Config financiera del tenant con la que se calculó: formula, calculoDescuentos,
+  -- calculoRecargos, escalaCalculo, modoRedondeo. Sin ella el congelado de las
+  -- reglas no es interpretable (el mismo 10% da distinto según orden y base|cascada).
+  "config_calculo"        JSONB,
   -- Anulación (estado 'cancelada'). Solo aplica a ventas 'pendiente' sin pagos y
   -- sin documento tributario; el resto se revierte con nota de crédito.
   "cancelada_el"              TIMESTAMPTZ,
@@ -1083,34 +1087,50 @@ CREATE TABLE "venta_detalles" (
 );
 
 -- "aplicado_en": 'detalle' (por línea) | 'venta' (global a toda la venta)
+-- Las tres tablas congelan la regla tal como estaba al cobrar: si mañana el
+-- descuento pasa de 10% a 20% —o lo borran—, la venta vieja sigue diciendo 10%.
+-- `detalle_id` es NULL en las filas `aplicado_en = 'venta'`, que no pertenecen
+-- a ninguna línea. Las asimetrías entre las tres son intencionales.
 CREATE TABLE "ventas_descuentos" (
   "venta_descuento_id"  UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "venta_id"            UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
   "descuento_id"        UUID          NOT NULL REFERENCES "descuentos" ("descuento_id"),
+  "detalle_id"          UUID          REFERENCES "venta_detalles" ("detalle_id"),
+  "nombre_regla"        TEXT,
+  "modo"                TEXT,            -- 'porcentaje' | 'monto_fijo'
   "valor_aplicado"      NUMERIC(18,4) NOT NULL,
-  "porcentaje_aplicado" NUMERIC(7,4),
+  "valor_solicitado"    NUMERIC(18,4),   -- lo que pedía antes del piso en cero
+  "porcentaje_aplicado" NUMERIC(7,4),    -- NULL si modo = 'monto_fijo'
   "aplicado_en"         TEXT          NOT NULL DEFAULT 'venta',
   "creado_el"           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"      TIMESTAMPTZ,
   "eliminado_el"        TIMESTAMPTZ
 );
 
+-- Sin `valor_solicitado`: el piso en cero solo topea descuentos.
 CREATE TABLE "ventas_recargos" (
   "venta_recargo_id"    UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "venta_id"            UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
   "recargo_id"          UUID          NOT NULL REFERENCES "recargos" ("recargo_id"),
+  "detalle_id"          UUID          REFERENCES "venta_detalles" ("detalle_id"),
+  "nombre_regla"        TEXT,
+  "modo"                TEXT,            -- 'porcentaje' | 'monto_fijo'
   "valor_aplicado"      NUMERIC(18,4) NOT NULL,
-  "porcentaje_aplicado" NUMERIC(7,4),
+  "porcentaje_aplicado" NUMERIC(7,4),    -- NULL si modo = 'monto_fijo'
   "aplicado_en"         TEXT          NOT NULL DEFAULT 'venta',
   "creado_el"           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"      TIMESTAMPTZ,
   "eliminado_el"        TIMESTAMPTZ
 );
 
+-- Sin `modo` ni `valor_solicitado`: un impuesto es siempre un porcentaje —ya
+-- congelado en `porcentaje_aplicado`— y el piso en cero no lo topea.
 CREATE TABLE "ventas_impuestos" (
   "venta_impuesto_id"   UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "venta_id"            UUID          NOT NULL REFERENCES "ventas" ("venta_id"),
   "impuesto_id"         UUID          NOT NULL REFERENCES "impuestos" ("impuesto_id"),
+  "detalle_id"          UUID          REFERENCES "venta_detalles" ("detalle_id"),
+  "nombre_regla"        TEXT,
   "valor_aplicado"      NUMERIC(18,4) NOT NULL,
   "porcentaje_aplicado" NUMERIC(7,4),
   "aplicado_en"         TEXT          NOT NULL DEFAULT 'venta',

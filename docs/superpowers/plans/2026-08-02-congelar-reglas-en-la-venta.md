@@ -87,10 +87,13 @@ El test nuevo usa `toEqual` sobre el array completo, que compara **posición por
 
 Inerte: las columnas existen y nada las puebla todavía. Separada porque es mecánica y un reviewer la aprueba o rechaza entera.
 
-- [ ] Columnas nuevas en las tres entities, según la tabla de arriba. `detalle_id` con `type: 'uuid'` explícito y **nullable**.
-- [ ] `config_calculo jsonb` en `Venta`.
-- [ ] `startup-pos.sql` actualizado.
-- [ ] Verificar que `uuid-columns.invariant.spec.ts` siga en verde con las FK nuevas.
+- [x] Columnas nuevas en las tres entities, según la tabla de arriba. `detalle_id` con `type: 'uuid'` explícito y **nullable**.
+- [x] `config_calculo jsonb` en `Venta`.
+- [x] `startup-pos.sql` actualizado.
+- [x] Verificar que `uuid-columns.invariant.spec.ts` siga en verde con las FK nuevas.
+- [x] Verificado en Postgres real (tras `reset-db.sh`) que `synchronize` creó las 10 columnas con el tipo y la nulabilidad esperados — el spec de UUID solo mira metadata de TypeORM, no la BD.
+
+**Todas nullable, y no es descuido:** Task 3 es inerte por definición —las columnas existen y nada las puebla— así que un `NOT NULL` acá rompería toda venta hasta que cierre Task 4. **A evaluar en Task 4:** apretar a `NOT NULL` las que siempre se pueblan, revisando antes *todos* los caminos de escritura de estas tablas (no solo `crearEnTransaccion`).
 
 ### Task 4: Poblar el congelado
 

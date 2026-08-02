@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
+import type { ConfigCalculo } from '../../calculo-precios/calculo-precios.engine';
 
 /**
  * No hay `borrador`: la venta en construcción vive en `cuenta`/`cuenta_lineas`
@@ -118,6 +119,20 @@ export class Venta {
 
   @Column({ type: 'text', nullable: true })
   comentario: string | null;
+
+  /**
+   * La configuración financiera del tenant con la que se calculó esta venta.
+   * Va en `jsonb` y no en columnas por una razón de forma: `formula` es un
+   * array, y el objeto se lee entero o no se lee.
+   *
+   * Sin ella el congelado de las reglas no es interpretable: el mismo 10% da
+   * un total distinto según el orden de la fórmula y según base|cascada, y las
+   * dos cosas se editan desde Preferencias.
+   *
+   * Ver `ConfigCalculo` en `calculo-precios.engine.ts`.
+   */
+  @Column({ name: 'config_calculo', type: 'jsonb', nullable: true })
+  configCalculo: ConfigCalculo | null;
 
   /** Auditoría de la anulación. Ver `VentasService.cancelar`. */
   @Column({ name: 'cancelada_el', type: 'timestamptz', nullable: true })

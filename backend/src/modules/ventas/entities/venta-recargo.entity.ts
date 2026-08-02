@@ -18,6 +18,24 @@ export class VentaRecargo {
   @Column({ name: 'recargo_id', type: 'uuid' })
   recargoId: string;
 
+  /**
+   * A qué línea pertenece la regla. `null` en las filas `aplicado_en = 'venta'`,
+   * que no pertenecen a ninguna.
+   */
+  @Column({ name: 'detalle_id', type: 'uuid', nullable: true })
+  detalleId: string | null;
+
+  /** Nombre de la regla al momento de la venta; puede cambiar después. */
+  @Column({ name: 'nombre_regla', type: 'text', nullable: true })
+  nombreRegla: string | null;
+
+  /** `'porcentaje' | 'monto_fijo'` al momento de la venta. */
+  @Column({ name: 'modo', type: 'text', nullable: true })
+  modo: string | null;
+
+  // Sin `valor_solicitado`: el piso en cero solo topea descuentos, así que un
+  // recargo siempre aplica lo que pide.
+
   @Column({ name: 'valor_aplicado', type: 'decimal', precision: 18, scale: 4 })
   valorAplicado: string;
 
