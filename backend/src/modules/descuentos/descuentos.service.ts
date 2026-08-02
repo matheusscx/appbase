@@ -324,37 +324,46 @@ export class DescuentosService {
       throw new NotFoundException(`Descuento ${id} no está en la papelera`);
     }
     const nombre = nombreNuevo ?? descuento.nombre;
-    // `descuentos` no tiene índice único de nombre (medido: no hay `CREATE
-    // UNIQUE INDEX` sobre la tabla) — la unicidad la garantiza `create()`/
-    // `update()` en código vía `validarNombreUnico`, que filtra
-    // `eliminado_el IS NULL`. Sin este chequeo acá, restaurar reabre
-    // exactamente el hueco que esa validación existe para cerrar: borrar
-    // "Black Friday", crear otro "Black Friday", y restaurar el viejo
-    // dejaría dos vivos con el mismo nombre (reusa `nombreDisponible`, no
-    // una validación nueva).
-    const { disponible } = await this.nombreDisponible(tenantId, nombre, id);
-    if (!disponible) {
-      throw new BadRequestException(
-        await errorDeColisionNombre(
-          this.descuentoRepo,
-          'd',
-          'un descuento activo',
-          tenantId,
-          nombre,
-        ),
+    try {
+      // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+      // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
+      // borrado de persona (ver categorias.service.ts → restaurar()).
+      // Revivir y renombrar van en la MISMA escritura: dos sentencias dejarían
+      // una ventana con la fila viva y el nombre en colisión.
+      await this.descuentoRepo.update(
+        { id, tenantId },
+        {
+          eliminadoEl: null,
+          eliminadoPor: null,
+          ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
+        },
       );
+    } catch (e) {
+      // 23505 = unique_violation. `uq_descuentos_tenant_nombre_vivo` es parcial
+      // (WHERE eliminado_el IS NULL): mientras el descuento estaba borrado nadie
+      // competía por el nombre, pero al revivirlo vuelve a competir. Se capta el
+      // código de Postgres —no una lista de índices a mano— para que valga
+      // también donde no lo enumeramos. Mismo patrón que cajones y causas-merma.
+      if ((e as { code?: string }).code === '23505') {
+        // La sugerencia se calcula ACÁ y no antes del `UPDATE` a propósito: con
+        // índice único el `catch` hace falta igual —entre consultar y escribir
+        // otra transacción puede tomar el nombre—, así que pre-consultar
+        // agregaría una query en TODOS los restaurar sin poder sacar este
+        // bloque. El `UPDATE` corre en autocommit, así que su fallo no deja una
+        // transacción abortada y esta query funciona.
+        throw new BadRequestException(
+          await errorDeColisionNombre(
+            this.descuentoRepo,
+            'd',
+            'un descuento activo',
+            tenantId,
+            nombre,
+            { ignorarMayusculas: true },
+          ),
+        );
+      }
+      throw e;
     }
-    // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
-    // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
-    // borrado de persona (ver categorias.service.ts → restaurar()).
-    await this.descuentoRepo.update(
-      { id, tenantId },
-      {
-        eliminadoEl: null,
-        eliminadoPor: null,
-        ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
-      },
-    );
     return this.descuentoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
@@ -366,7 +375,12 @@ export class DescuentosService {
     const qb = this.descuentoRepo
       .createQueryBuilder('d')
       .where('d.tenant_id = :tenantId', { tenantId })
-      .andWhere('d.nombre = :nombre', { nombre })
+      // Case-insensitive: "Black Friday" y "black friday" son el mismo nombre
+      // (docs/PRODUCTO.md). Tiene que coincidir con el índice
+      // `uq_descuentos_tenant_nombre_vivo`, que es sobre `lower(nombre)`; si
+      // esta comparación fuera exacta, el endpoint público de disponibilidad
+      // diría "libre" y el guardado fallaría con 23505.
+      .andWhere('LOWER(d.nombre) = LOWER(:nombre)', { nombre })
       .andWhere('d.eliminado_el IS NULL');
     if (excludeId) {
       qb.andWhere('d.descuento_id != :excludeId', { excludeId });

@@ -97,16 +97,6 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
   prioridad, y si se retoma conviene apuntar a los otros mecanismos de la lista
   (`inline-block`, `float`, `absolute`, `fit-content`), no a las tablas.
 
-- [ ] **`recargos` valida contra dos códigos que no existen** (backend,
-  `recargos.service.ts` → `validarSegunTipoCreate`) — la lista local
-  `tiposConTramos = ['por_mayor', 'por_monto_venta']` es de códigos de
-  **descuento**: ningún tipo de recargo usa tramos, así que ese `if` no puede
-  matchear nunca. Quedó de un copy-paste entre los dos módulos gemelos.
-  Confirmado en la revisión del 2026-08-01; no se tocó porque estaba fuera del
-  alcance de esa tarea. Es código muerto, no un bug: la limpieza es borrar la
-  lista y su `if`. Al hacerlo, verificar que `RECARGO_CONFIG` (frontend)
-  tampoco declare `campoTramos: true` en ningún tipo — hoy no lo hace.
-
 ## Papelera — restaurar eliminados (2026-07-31)
 
 Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`](../features/papelera.md).
@@ -268,24 +258,36 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   ("la carrera del toggle vía usePaginatedList") **no** sirve de molde acá: ese
   ejercita el `watch` del composable, que ninguna de las 9 tiene.
 
-- [ ] **La unicidad de nombre está partida 4 y 3 en el proyecto, sin que nadie
-  lo haya decidido** (backend, transversal) — medido el 2026-08-01 sobre el
-  código de comparación de los 8 recursos con nombre único por tenant (leyendo
-  la cláusula real, no grepeando `lower`, que matchea comentarios):
-  - **Case-sensitive** (`"Extras"` y `"extras"` son dos nombres distintos):
-    `descuentos`, `recargos`, `turnos` (los tres sin índice, solo por código) y
-    `cajones` (índice sobre `nombre` + comparación exacta).
-  - **Case-insensitive** (son el mismo nombre): `causas_merma`,
-    `motivo_diferencia_caja`, `motivo_diferencia_inventario` y
-    `grupos_modificadores`, los cuatro con índice sobre `lower(nombre)`.
-  No hay una regla del proyecto: se fue dando. Para el usuario esto es visible
-  —en un catálogo, poder crear "Extras" y "extras" es confuso en unos módulos y
-  no en otros—, así que **unificar cambia conducta y es decisión del owner**,
-  no una limpieza. Si se unifica hacia case-insensitive, el patrón ya existe y
-  es barato: índice sobre `lower(nombre)` creado por el seeder (los 4 CI lo
-  hacen así) + comparación con `LOWER` en el código. Hacia case-sensitive es
-  aflojar una regla, y habría que revisar qué pasa con los nombres ya
-  sembrados.
+- [ ] **`create()`/`update()` de los 8 con nombre único devuelven 500 si pierden
+  la carrera** (backend, transversal) — los 8 pre-consultan el nombre y después
+  escriben; entre esas dos sentencias otra transacción puede tomarlo, y ahí el
+  índice único rechaza con `23505` que nadie traduce. El índice hace su trabajo
+  —**nunca quedan dos filas vivas con el mismo nombre**, que es lo que importa—,
+  pero el usuario que pierde la carrera ve un 500 en vez del 409/400 amable.
+  `restaurar()` sí lo traduce en los 8 (ver `docs/features/papelera.md`); el fix
+  es el mismo `catch` en las otras dos puertas, ×8 módulos. No se hizo con la
+  unificación de unicidad (2026-08-01) porque es scope aparte: aquel cambio cerró
+  el agujero de corrección, este es de presentación de error. Ventana angosta y
+  ningún dato productivo.
+
+- [ ] **`uq_motivo_diferencia_caja_tenant_nombre` se llama distinto en el seeder**
+  (backend) — `startup-pos.sql` lo declara con ese nombre y el seeder lo crea
+  como `uq_motivo_diferencia_tenant_nombre`. **La definición es idéntica**, así
+  que la conducta es la misma en las dos bases; lo que cambia es el nombre, y
+  ninguna base tiene los dos (dev arma el esquema por `synchronize` + seeder, no
+  corriendo el `.sql`). Molesta cuando alguien busca el índice por nombre.
+  Unificar hacia el nombre de `startup-pos.sql` exige `DROP` del viejo en las
+  bases de dev, igual que el `DROP` condicional de `seedCajones()`.
+
+- [ ] **La plomería de tramos en `recargos` es alcanzable y no significa nada**
+  (backend) — `create()`/`update()` persisten `dto.tramos` y
+  `validarSegunTipoUpdate` valida que no venga vacío, pero **ningún código de
+  recargo usa tramos**: `RECARGO_CONFIG` (frontend) no declara `campoTramos: true`
+  en ninguno de los 5, así que la UI nunca los manda. La lista muerta de
+  `validarSegunTipoCreate` —que comparaba contra `por_mayor`/`por_monto_venta`,
+  códigos de DESCUENTO— ya se sacó (2026-08-01); esto es el resto. Sacarlo toca
+  persistencia, así que va aparte: hay que confirmar primero que no haya filas en
+  `recargo_tramos` y decidir si la tabla se va con él.
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 

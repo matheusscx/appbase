@@ -431,6 +431,11 @@ CREATE TABLE "descuentos" (
   "eliminado_por"   UUID          REFERENCES usuarios("usuario_id")
 );
 
+-- Ver la nota de `uq_recargos_tenant_nombre_vivo` más abajo: misma regla.
+CREATE UNIQUE INDEX "uq_descuentos_tenant_nombre_vivo"
+  ON "descuentos" ("tenant_id", LOWER("nombre"))
+  WHERE "eliminado_el" IS NULL;
+
 CREATE TABLE "recargos" (
   "recargo_id"      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"       UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
@@ -448,6 +453,17 @@ CREATE TABLE "recargos" (
   "eliminado_el"    TIMESTAMPTZ,
   "eliminado_por"   UUID          REFERENCES usuarios("usuario_id")
 );
+
+-- Unicidad de nombre por tenant, case-insensitive y solo entre los vivos.
+-- Case-insensitive porque "Interés" e "interés" son el mismo recargo para quien
+-- lo elige de una lista (decisión del owner, docs/PRODUCTO.md). Parcial
+-- (WHERE eliminado_el IS NULL) para que borrar y volver a crear con el mismo
+-- nombre funcione; es justo eso lo que hace que RESTAURAR pueda colisionar, y
+-- por eso `restaurar()` capta el 23505 y ofrece un nombre libre.
+-- TypeORM no sabe expresar LOWER() en @Index: lo crea el seeder con SQL cruda.
+CREATE UNIQUE INDEX "uq_recargos_tenant_nombre_vivo"
+  ON "recargos" ("tenant_id", LOWER("nombre"))
+  WHERE "eliminado_el" IS NULL;
 
 -- Tramos de descuento (para tipos que usan escalonado por cantidad o monto)
 CREATE TABLE "descuento_tramos" (
@@ -991,8 +1007,9 @@ CREATE TABLE "cajones" (
   "eliminado_por"  UUID          REFERENCES usuarios("usuario_id")
 );
 
+-- Ver la nota de `uq_recargos_tenant_nombre_vivo`: misma regla.
 CREATE UNIQUE INDEX "ux_cajones_tenant_nombre"
-  ON "cajones" ("tenant_id", "nombre")
+  ON "cajones" ("tenant_id", LOWER("nombre"))
   WHERE "eliminado_el" IS NULL;
 
 -- Allow-list cajón↔usuario: qué usuarios están autorizados a abrir cada cajón.
@@ -1690,6 +1707,10 @@ CREATE TABLE turnos (
     eliminado_por UUID REFERENCES usuarios(usuario_id)
 );
 CREATE INDEX idx_turnos_tenant ON turnos (tenant_id);
+-- Ver la nota de `uq_recargos_tenant_nombre_vivo`: misma regla.
+CREATE UNIQUE INDEX uq_turnos_tenant_nombre_vivo
+  ON turnos (tenant_id, LOWER(nombre))
+  WHERE eliminado_el IS NULL;
 
 CREATE TABLE sesiones_garzon (
     sesion_garzon_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

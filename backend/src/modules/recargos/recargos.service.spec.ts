@@ -438,13 +438,11 @@ describe('RecargosService', () => {
       expect(recargoRepoMock.update).not.toHaveBeenCalled();
     });
 
-    // Revisión final: `recargos` no tiene índice único de nombre en la base
-    // (medido: no hay `CREATE UNIQUE INDEX` sobre la tabla) — la unicidad la
-    // garantiza `create()`/`update()` SOLO en código (`validarNombreUnico`).
-    // `restaurar()` no la reusaba: se podía crear "Black Friday", borrarlo,
-    // crear OTRO "Black Friday", y restaurar el viejo dejaba dos recargos
-    // vivos con el mismo nombre.
-    it('restaurar() con el nombre ya ocupado por un recargo vivo es 400, no revive nada', async () => {
+    // `uq_recargos_tenant_nombre_vivo` es parcial (WHERE eliminado_el IS NULL):
+    // mientras el recargo estaba borrado, otro pudo tomar su nombre. El UPDATE
+    // que lo revive vuelve a hacerlo competir y Postgres responde 23505. Sin
+    // traducirlo, el usuario recibe un 500.
+    it('restaurar() con el nombre ya ocupado por un recargo vivo es 400, no 500', async () => {
       recargoRepoMock.findOne.mockResolvedValue({
         id: 'r1',
         tenantId: TENANT,
@@ -452,12 +450,32 @@ describe('RecargosService', () => {
         eliminadoEl: new Date(),
         eliminadoPor: USUARIO_ID,
       });
-      qbMock.getCount.mockResolvedValueOnce(1);
+      recargoRepoMock.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
 
       await expect(service.restaurar(TENANT, 'r1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(recargoRepoMock.update).not.toHaveBeenCalled();
+      // No debe intentar releer la fila si el restore falló.
+      expect(recargoRepoMock.findOneOrFail).not.toHaveBeenCalled();
+    });
+
+    it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Black Friday',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      recargoRepoMock.update.mockRejectedValueOnce(
+        Object.assign(new Error('deadlock detected'), { code: '40P01' }),
+      );
+
+      await expect(service.restaurar(TENANT, 'r1')).rejects.toThrow(
+        'deadlock detected',
+      );
     });
 
     // El 400 no puede ser solo un "no se pudo": la pantalla precarga
@@ -471,7 +489,9 @@ describe('RecargosService', () => {
         eliminadoEl: new Date(),
         eliminadoPor: USUARIO_ID,
       });
-      qbMock.getCount.mockResolvedValueOnce(1);
+      recargoRepoMock.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
       qbMock.getRawMany.mockResolvedValueOnce([
         { nombre: 'Recargo finde' },
         { nombre: 'Recargo finde 2' },
@@ -482,6 +502,30 @@ describe('RecargosService', () => {
           message: 'Ya existe un recargo activo con el nombre "Recargo finde".',
           nombreSugerido: 'Recargo finde 3',
         },
+      });
+    });
+
+    // La sugerencia tiene que ignorar mayúsculas porque el índice es sobre
+    // `lower(nombre)`: si propusiera un nombre que la base considera tomado, el
+    // usuario confirmaría el modal y recibiría el mismo 400.
+    it('la sugerencia saltea los tomados sin importar mayúsculas', async () => {
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r1',
+        tenantId: TENANT,
+        nombre: 'Recargo finde',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      recargoRepoMock.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
+      qbMock.getRawMany.mockResolvedValueOnce([
+        { nombre: 'RECARGO FINDE' },
+        { nombre: 'recargo finde 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, 'r1')).rejects.toMatchObject({
+        response: { nombreSugerido: 'Recargo finde 3' },
       });
     });
 
@@ -507,10 +551,6 @@ describe('RecargosService', () => {
           nombre: 'Recargo finde 2',
         },
       );
-      // Y la unicidad se chequea contra el nombre NUEVO, no contra el viejo.
-      expect(qbMock.andWhere).toHaveBeenCalledWith('r.nombre = :nombre', {
-        nombre: 'Recargo finde 2',
-      });
     });
 
     it('sin `nombreNuevo` no toca el nombre (comportamiento de siempre)', async () => {
@@ -594,6 +634,18 @@ describe('RecargosService', () => {
       qbMock.getCount.mockResolvedValue(1);
       const result = await service.nombreDisponible(TENANT, 'Existente');
       expect(result).toEqual({ disponible: false });
+    });
+
+    // Ver descuentos.service.spec.ts: mismo motivo. Este endpoint es público y
+    // si comparara exacto diría "libre" donde el índice sobre `lower(nombre)`
+    // va a rechazar.
+    it('compara el nombre ignorando mayúsculas, igual que el índice', async () => {
+      qbMock.getCount.mockResolvedValue(0);
+      await service.nombreDisponible(TENANT, 'Recargo finde');
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        'LOWER(r.nombre) = LOWER(:nombre)',
+        { nombre: 'Recargo finde' },
+      );
     });
 
     it('adds excludeId condition when provided', async () => {

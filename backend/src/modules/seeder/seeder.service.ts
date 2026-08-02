@@ -1179,6 +1179,31 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedCajones(): Promise<void> {
+    // Ver `seedDescuentos()`: mismo motivo para crearlo acá y no en la entity.
+    //
+    // El `DROP` condicional limpia el índice case-sensitive que quedó en las
+    // bases de dev creadas antes de este cambio —`cajon.entity.ts` lo declaraba
+    // con `@Index` y `synchronize` lo creaba sobre `nombre` pelado—. Solo
+    // dispara si el que existe NO es el de `lower()`, así que en una base ya
+    // correcta no hay churn. Mismo patrón que `seedGruposModificadores()`.
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_indexes
+           WHERE schemaname = 'public'
+             AND indexname = 'ux_cajones_tenant_nombre'
+             AND indexdef NOT ILIKE '%lower%'
+        ) THEN
+          EXECUTE 'DROP INDEX ux_cajones_tenant_nombre';
+        END IF;
+      END $$;
+    `);
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_cajones_tenant_nombre
+      ON cajones (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
     const cajones: Array<{ id: string; tenantId: string; nombre: string }> = [
       {
         id: '550e8400-e29b-41d4-a716-446655440286',
@@ -1571,6 +1596,12 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedTurnos(): Promise<void> {
+    // Ver `seedDescuentos()`: mismo motivo para crearlo acá y no en la entity.
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_turnos_tenant_nombre_vivo
+      ON turnos (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const turnos: Partial<Turno>[] = [
       {
@@ -2434,6 +2465,14 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedDescuentos(): Promise<void> {
+    // Ver la nota de `seedGruposModificadores()`: el índice va sobre
+    // `lower(nombre)` y TypeORM no puede expresarlo en `@Index`, así que la
+    // entity no lo declara y lo crea acá con SQL cruda.
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_descuentos_tenant_nombre_vivo
+      ON descuentos (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const TIPO_PRONTO_PAGO = '550e8400-e29b-41d4-a716-446655440100';
     const TIPO_POR_MAYOR = '550e8400-e29b-41d4-a716-446655440101';
@@ -2591,6 +2630,12 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedRecargos(): Promise<void> {
+    // Ver `seedDescuentos()`: mismo motivo para crearlo acá y no en la entity.
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_recargos_tenant_nombre_vivo
+      ON recargos (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
+    `);
+
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const TIPO_INTERES_SIMPLE = '550e8400-e29b-41d4-a716-446655440103';
     const TIPO_INTERES_COMPUESTO = '550e8400-e29b-41d4-a716-446655440104';

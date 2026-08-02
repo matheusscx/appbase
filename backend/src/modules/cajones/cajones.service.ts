@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Not, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
 import { Cajon } from './entities/cajon.entity';
 import { CajonUsuario } from './entities/cajon-usuario.entity';
@@ -150,10 +150,6 @@ export class CajonesService {
         // pre-consultar agregaría una query en TODOS los restaurar sin poder
         // sacar este bloque. El `UPDATE` corre en autocommit, así que su
         // fallo no deja una transacción abortada y esta query funciona.
-        //
-        // `ux_cajones_tenant_nombre` es sobre `nombre` PELADO (medido con
-        // `pg_indexes`), no sobre `lower(nombre)` como en causas-merma y los
-        // dos motivos: por eso acá NO va `ignorarMayusculas`.
         throw new BadRequestException(
           await errorDeColisionNombre(
             this.cajonRepo,
@@ -161,6 +157,7 @@ export class CajonesService {
             'un cajón activo',
             tenantId,
             nombreNuevo ?? cajon.nombre,
+            { ignorarMayusculas: true },
           ),
         );
       }
@@ -228,12 +225,19 @@ export class CajonesService {
     nombre: string,
     excludeId?: string,
   ): Promise<void> {
-    const count = await this.cajonRepo.count({
-      where: excludeId
-        ? { tenantId, nombre, id: Not(excludeId) }
-        : { tenantId, nombre },
-    });
-    if (count > 0) {
+    // Case-insensitive: "Mostrador" y "mostrador" son el mismo cajón
+    // (docs/PRODUCTO.md). Tiene que coincidir con `ux_cajones_tenant_nombre`,
+    // que es sobre `lower(nombre)`; si esta comparación fuera exacta, el
+    // servicio diría "libre" y el `save` fallaría con 23505.
+    // El QueryBuilder aplica solo el filtro de la `@DeleteDateColumn`.
+    const qb = this.cajonRepo
+      .createQueryBuilder('c')
+      .where('c.tenant_id = :tenantId', { tenantId })
+      .andWhere('LOWER(c.nombre) = LOWER(:nombre)', { nombre });
+    if (excludeId) {
+      qb.andWhere('c.cajon_id != :excludeId', { excludeId });
+    }
+    if (await qb.getExists()) {
       throw new ConflictException(
         `Ya existe un cajón con el nombre "${nombre}"`,
       );

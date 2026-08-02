@@ -4,13 +4,13 @@ import type { DataSource, ObjectLiteral, Repository } from 'typeorm';
  * Sufijo numérico para proponer un nombre libre cuando restaurar una fila de
  * la papelera choca con una viva que ya tomó ese nombre.
  *
- * Lo consumen los recursos con unicidad de nombre por tenant (`descuentos`,
+ * Lo consumen los 8 recursos con unicidad de nombre por tenant (`descuentos`,
  * `recargos`, `turnos`, `cajones`, `causas-merma`, `motivos-diferencia`,
- * `motivos-diferencia-inventario`, `grupos-modificadores`). Hoy están los 3
- * primeros; los 5 restantes quedan en `docs/agent/pendientes.md` y **no son un
- * copiar-pegar**: detectan la colisión capturando el `23505` de Postgres, o sea
- * recién DESPUÉS de fallar el INSERT, mientras estos 3 —que garantizan la
- * unicidad solo por código, sin índice— pueden consultar antes.
+ * `motivos-diferencia-inventario`, `grupos-modificadores`), y los 8 la detectan
+ * igual: capturando el `23505` de Postgres, o sea recién DESPUÉS de que falla
+ * el UPDATE que revive la fila. Pre-consultar sería una query extra en TODOS
+ * los restaurar sin poder sacar el `catch` —entre consultar y escribir, otra
+ * transacción puede tomar el nombre—, así que es una opción dominada.
  *
  * ⚠️ `garzones` NO usa esto: también devuelve 400 al restaurar, pero su
  * colisión no es de nombre (`uq_garzones_mostrador_tenant` permite un solo
@@ -64,13 +64,14 @@ export function baseParaSugerir(
  * están todos ocupados, sigue subiendo.
  *
  * `ignorarMayusculas` tiene que reflejar **cómo enforcea la unicidad la tabla
- * de destino**, no una preferencia: 3 de los 5 recursos con índice único la
- * indexan por `lower(nombre)` (`causas_merma`, `motivo_diferencia_caja`,
- * `motivo_diferencia_inventario` — medido con `pg_indexes` el 2026-08-01) y los
- * otros por `nombre` pelado. Con el default en `false` sobre una tabla
- * case-insensitive, sugerir "Merma 2" habiendo un "merma 2" vivo daría un
- * nombre que **vuelve a chocar**: el usuario confirma el modal y recibe el
- * mismo 400.
+ * de destino**, no una preferencia. Desde el 2026-08-01 las 8 la indexan por
+ * `lower(nombre)` (decisión del owner: "Extras" y "extras" son el mismo
+ * nombre), así que las 8 llamadas lo pasan en `true` — pero el parámetro sigue
+ * existiendo porque es la tabla la que manda, no una convención: si mañana
+ * alguna se indexa distinto, el default en `false` sobre una tabla
+ * case-insensitive haría sugerir "Merma 2" habiendo un "merma 2" vivo, un
+ * nombre que **vuelve a chocar** y el usuario recibe el mismo 400 tras
+ * confirmar el modal.
  */
 export function sugerirNombreLibre(
   nombreIntentado: string,
@@ -117,8 +118,8 @@ export function patronLikeNombre(base: string): string {
  * `descuentos.service.ts` y `recargos.service.ts`.
  *
  * `alias` se interpola en el SQL, así que **tiene que ser una constante del
- * código** (`'d'`, `'r'`, `'t'`) y nunca un dato de request. Los valores sí van
- * parametrizados.
+ * código** (`'d'`, `'r'`, `'t'`, `'c'`) y nunca un dato de request. Los valores
+ * sí van parametrizados.
  */
 export async function errorDeColisionNombre<T extends ObjectLiteral>(
   repo: Repository<T>,

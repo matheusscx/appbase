@@ -12,6 +12,65 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Unicidad de nombre — unificada (2026-08-01)
+
+- [x] **La unicidad de nombre estaba partida 4 y 4, sin que nadie lo hubiera
+  decidido.** Medido leyendo la cláusula de comparación real y los índices del
+  esquema (no grepeando `lower`, que matchea comentarios): `descuentos`,
+  `recargos`, `turnos` y `cajones` comparaban case-**sensitive**; `causas_merma`,
+  `motivo_diferencia_caja`, `motivo_diferencia_inventario` y
+  `grupos_modificadores`, case-**insensitive**. Encima los tres primeros no tenían
+  índice ninguno: la unicidad vivía solo en el código, con una ventana de carrera
+  entre el `SELECT` y el `INSERT` por la que sí podían quedar dos filas vivas con
+  el mismo nombre.
+
+  **Decisión del owner: case-insensitive en los ocho** —"Extras" y "extras" son el
+  mismo nombre, porque en una lista que alguien elige a ojo dos entradas que solo
+  difieren en mayúsculas son un error de tipeo—, **y con índice en los tres que no
+  tenían**. Queda en `docs/PRODUCTO.md` como regla de producto, no como detalle de
+  esquema.
+
+  Cerrado con: índice único parcial sobre `(tenant_id, lower(nombre))` con
+  `WHERE eliminado_el IS NULL` en `descuentos`, `recargos` y `turnos`; el de
+  `cajones` pasó de `nombre` pelado a `lower(nombre)`; comparación con `LOWER` en
+  los cuatro services; `{ ignorarMayusculas: true }` en las cuatro llamadas al
+  helper de sugerencia; y `restaurar()` de los tres que pre-consultaban pasó a la
+  forma del `catch` del `23505`, que ahora es la única de las ocho.
+
+  `cajon.entity.ts` perdió su `@Index`: TypeORM no sabe expresar `LOWER()`, así
+  que mientras estuvo declarado ahí `synchronize` creaba en dev un índice
+  case-sensitive y la base enforzaba otra regla que el código —exactamente el bug
+  que se había corregido en `grupos_modificadores` el mismo día—. Lo crea el
+  seeder con SQL cruda, con el mismo `DROP` condicional que repara las bases de
+  dev viejas (verificado en vivo: índice CS a mano → restart → queda el de
+  `lower()`).
+
+  **Lo fija `test/unicidad-nombre.e2e-spec.ts`** (16 tests): forma del índice de
+  las 8 tablas —consultado por tabla, no por nombre de índice, que no es la
+  regla— y conducta por las dos puertas, crear y restaurar. Mutantes corridos:
+  revertir el `LOWER` de `descuentos` deja el crear en **500** (el índice rechaza
+  lo que el código aceptó); hacer que el seeder cree el índice sin `lower()` pone
+  en rojo la forma **y** la conducta de restaurar. El de índice-shape **no** se
+  cae borrando el índice a mano: el propio e2e arranca el seeder, que lo recrea —
+  por eso el mutante válido es sobre el seeder, no sobre la base.
+
+  ⚠️ Efecto de borde a saber: en una base que ya tenga nombres que colisionan solo
+  por mayúsculas, el `CREATE INDEX` del seeder **falla y el backend no arranca**.
+  Se comprobó (lo provocó un mutante) y no se mitiga: no hay datos productivos, el
+  seed sembrado no tiene colisiones —verificado antes de tocar nada— y la salida es
+  resetear.
+
+- [x] **`recargos` validaba contra dos códigos que no existen.** La lista local
+  `tiposConTramos = ['por_mayor', 'por_monto_venta']` de `validarSegunTipoCreate`
+  era de códigos de **descuento**: ningún tipo de recargo usa tramos, así que ese
+  `if` no podía matchear nunca. Copy-paste entre los módulos gemelos. Borrada la
+  lista y su `if`; verificado que `RECARGO_CONFIG` (frontend) no declara
+  `campoTramos: true` en ninguno de los 5 tipos, así que la UI nunca los manda.
+  **La plomería que persiste tramos en `create()`/`update()` sigue en pie** y
+  quedó como entrada propia en `pendientes.md`: sacarla toca persistencia.
+
+---
+
 ## Papelera — salida de la colisión al restaurar (2026-08-01)
 
 - [x] **Los 8 recursos con unicidad de nombre proponen un nombre libre.** El 400

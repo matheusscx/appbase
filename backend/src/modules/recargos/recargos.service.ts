@@ -34,10 +34,12 @@ const TIPOS_CON_VALOR_UNICO = [
 const TIPOS_CON_METODOS = ['recargo_metodo_pago'];
 
 // ⚠️ No hay `TIPOS_CON_TRAMOS` acá a propósito: **ningún código de recargo usa
-// tramos**. La lista local de `validarSegunTipoCreate` menciona `por_mayor` y
-// `por_monto_venta`, que son códigos de DESCUENTO — quedó de un copy-paste y no
-// puede matchear nunca. Se deja como está (fuera del alcance de este cambio),
-// pero no se propaga.
+// tramos**. `validarSegunTipoCreate` tenía una lista local con `por_mayor` y
+// `por_monto_venta` —códigos de DESCUENTO, copy-paste del módulo gemelo, que no
+// podían matchear nunca—; ya no está. Lo que sigue en pie es la plomería de
+// tramos en `create()`/`update()` y el chequeo de `validarSegunTipoUpdate`:
+// alcanzables por API pero sin sentido de negocio, porque ningún tipo de
+// recargo los pide. Sacarla es tema propio, anotado en docs/agent/pendientes.md.
 
 // `eliminadoPorNombre` es opcional: el listado sin `incluirEliminados` sigue
 // devolviendo `Recargo[]` tal cual (sin el JOIN, N+1 si lo forzáramos acá).
@@ -310,42 +312,42 @@ export class RecargosService {
     if (!recargo || !recargo.eliminadoEl || !recargo.eliminadoPor) {
       throw new NotFoundException(`Recargo ${id} no está en la papelera`);
     }
-    // `recargos` no tiene índice único de nombre (medido: no hay `CREATE
-    // UNIQUE INDEX` sobre la tabla) — la unicidad la garantiza `create()`/
-    // `update()` en código vía `validarNombreUnico`, que filtra
-    // `eliminado_el IS NULL`. Sin este chequeo acá, restaurar reabre
-    // exactamente el hueco que esa validación existe para cerrar (reusa
-    // `nombreDisponible`, no una validación nueva).
-    //
-    // Se valida el nombre CON EL QUE VA A QUEDAR, no el que tenía guardado: si
-    // el usuario resolvió la colisión desde el modal, lo que compite es el
-    // nombre nuevo.
+    // Se resuelve con el nombre CON EL QUE VA A QUEDAR, no el que tenía
+    // guardado: si el usuario resolvió la colisión desde el modal, lo que
+    // compite es el nombre nuevo.
     const nombre = nombreNuevo ?? recargo.nombre;
-    const { disponible } = await this.nombreDisponible(tenantId, nombre, id);
-    if (!disponible) {
-      throw new BadRequestException(
-        await errorDeColisionNombre(
-          this.recargoRepo,
-          'r',
-          'un recargo activo',
-          tenantId,
-          nombre,
-        ),
+    try {
+      // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+      // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
+      // borrado de persona (ver categorias.service.ts → restaurar()).
+      // Revivir y renombrar van en la MISMA escritura: un `update` + un `save`
+      // dejarían una ventana donde la fila está viva con el nombre en colisión.
+      await this.recargoRepo.update(
+        { id, tenantId },
+        {
+          eliminadoEl: null,
+          eliminadoPor: null,
+          ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
+        },
       );
+    } catch (e) {
+      // 23505 = unique_violation. Ver descuentos.service.ts → restaurar() para
+      // el porqué de captar el código de Postgres y de calcular la sugerencia
+      // ACÁ y no antes del `UPDATE`.
+      if ((e as { code?: string }).code === '23505') {
+        throw new BadRequestException(
+          await errorDeColisionNombre(
+            this.recargoRepo,
+            'r',
+            'un recargo activo',
+            tenantId,
+            nombre,
+            { ignorarMayusculas: true },
+          ),
+        );
+      }
+      throw e;
     }
-    // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
-    // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
-    // borrado de persona (ver categorias.service.ts → restaurar()).
-    // Revivir y renombrar van en la MISMA escritura: un `update` + un `save`
-    // dejarían una ventana donde la fila está viva con el nombre en colisión.
-    await this.recargoRepo.update(
-      { id, tenantId },
-      {
-        eliminadoEl: null,
-        eliminadoPor: null,
-        ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
-      },
-    );
     return this.recargoRepo.findOneOrFail({ where: { id, tenantId } });
   }
 
@@ -357,7 +359,9 @@ export class RecargosService {
     const qb = this.recargoRepo
       .createQueryBuilder('r')
       .where('r.tenant_id = :tenantId', { tenantId })
-      .andWhere('r.nombre = :nombre', { nombre })
+      // Case-insensitive, igual que descuentos: ver el comentario en
+      // descuentos.service.ts → nombreDisponible().
+      .andWhere('LOWER(r.nombre) = LOWER(:nombre)', { nombre })
       .andWhere('r.eliminado_el IS NULL');
     if (excludeId) {
       qb.andWhere('r.recargo_id != :excludeId', { excludeId });
@@ -426,12 +430,9 @@ export class RecargosService {
 
   // Called from create() — all required fields must be present
   private validarSegunTipoCreate(codigo: string, dto: CreateRecargoDto): void {
-    const tiposConTramos = ['por_mayor', 'por_monto_venta'];
     const tiposConMetodos = ['recargo_metodo_pago'];
     const tiposFijoPorcentaje = ['interes_simple', 'interes_compuesto'];
 
-    if (tiposConTramos.includes(codigo) && !dto.tramos?.length)
-      throw new BadRequestException('Este tipo requiere al menos un tramo');
     if (tiposConMetodos.includes(codigo) && !dto.metodoPagoIds?.length)
       throw new BadRequestException('Selecciona al menos un método de pago');
     if (

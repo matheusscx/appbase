@@ -53,6 +53,25 @@ Tres entidades que no deben confundirse:
 
 Casi toda tabla de negocio tiene `tenant_id` como parte de su clave o como FK obligatoria.
 
+### Unicidad de nombre — case-insensitive (decisión del owner, 2026-08-01)
+
+Donde un catálogo exige nombre único por tenant, **"Extras" y "extras" son el
+mismo nombre**. La razón es de uso, no de esquema: en una lista que alguien elige
+a ojo —un cajero, un mesero— dos entradas que solo difieren en mayúsculas son un
+error de tipeo, no dos cosas distintas.
+
+Aplica a los ocho catálogos que hoy tienen la regla: `descuentos`, `recargos`,
+`turnos`, `cajones`, `causas_merma`, `motivo_diferencia_caja`,
+`motivo_diferencia_inventario`, `grupos_modificadores`. Los ocho la enforcean
+igual: índice único parcial sobre `(tenant_id, lower(nombre))` con
+`WHERE eliminado_el IS NULL` —parcial para que borrar y volver a crear con el
+mismo nombre funcione—, más una validación en código que compara igual y da el
+mensaje amable. Un catálogo nuevo con nombre único sigue esa forma.
+
+Nada obliga a que un catálogo tenga la regla: siete recursos (`items`,
+`categorias`, `impuestos`, `terceros`, `salones`, `mesas`, `impresoras`) admiten
+nombres repetidos a propósito.
+
 ---
 
 ## Funcionalidades

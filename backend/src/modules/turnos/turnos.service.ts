@@ -154,25 +154,31 @@ export class TurnosService {
     if (!turno || !turno.eliminadoEl || !turno.eliminadoPor) {
       throw new NotFoundException(`Turno ${id} no está en la papelera`);
     }
-    // `turnos` no tiene índice único de nombre (medido: no hay `CREATE
-    // UNIQUE INDEX` sobre la tabla) — la unicidad la garantiza `crear()`/
-    // `actualizar()` en código vía `assertNombreUnico`, que excluye
-    // borrados (`findOne` con `@DeleteDateColumn` los filtra solo). Sin
-    // este chequeo acá, restaurar reabre exactamente el hueco que esa
-    // validación existe para cerrar (reusa `assertNombreUnico`, no una
-    // validación nueva). `assertNombreUnico` lanza `ConflictException`
-    // (409) porque así lo esperan `crear()`/`actualizar()` ya probados; acá
-    // se traduce a 400, el mismo status accionable que dan los recursos con
-    // índice único al restaurar.
-    //
-    // Se valida el nombre CON EL QUE VA A QUEDAR, no el que tenía guardado: si
-    // el usuario resolvió la colisión desde el modal, lo que compite es el
-    // nombre nuevo.
+    // Se resuelve con el nombre CON EL QUE VA A QUEDAR, no el que tenía
+    // guardado: si el usuario resolvió la colisión desde el modal, lo que
+    // compite es el nombre nuevo.
     const nombre = nombreNuevo ?? turno.nombre;
     try {
-      await this.assertNombreUnico(tenantId, nombre, id);
+      // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
+      // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
+      // borrado de persona (ver categorias.service.ts → restaurar()).
+      // Revivir y renombrar van en la MISMA escritura: un `update` + un `save`
+      // dejarían una ventana donde la fila está viva con el nombre en colisión.
+      await this.turnoRepo.update(
+        { id, tenantId },
+        {
+          eliminadoEl: null,
+          eliminadoPor: null,
+          ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
+        },
+      );
     } catch (e) {
-      if (e instanceof ConflictException) {
+      // 23505 = unique_violation. Ver descuentos.service.ts → restaurar() para
+      // el porqué de captar el código de Postgres y de calcular la sugerencia
+      // ACÁ y no antes del `UPDATE`. Se traduce a 400 —no al 409 que dan
+      // `crear()`/`actualizar()`— porque es el status accionable que el modal
+      // de colisión espera en los 8 recursos.
+      if ((e as { code?: string }).code === '23505') {
         throw new BadRequestException(
           await errorDeColisionNombre(
             this.turnoRepo,
@@ -180,24 +186,12 @@ export class TurnosService {
             'un turno activo',
             tenantId,
             nombre,
+            { ignorarMayusculas: true },
           ),
         );
       }
       throw e;
     }
-    // `restore()` solo limpia la `@DeleteDateColumn`; el `eliminado_por`
-    // viejo sobreviviría y disfrazaría un borrado del sistema posterior como
-    // borrado de persona (ver categorias.service.ts → restaurar()).
-    // Revivir y renombrar van en la MISMA escritura: un `update` + un `save`
-    // dejarían una ventana donde la fila está viva con el nombre en colisión.
-    await this.turnoRepo.update(
-      { id, tenantId },
-      {
-        eliminadoEl: null,
-        eliminadoPor: null,
-        ...(nombreNuevo ? { nombre: nombreNuevo } : {}),
-      },
-    );
     const restaurado = await this.turnoRepo.findOneOrFail({
       where: { id, tenantId },
     });
@@ -249,10 +243,19 @@ export class TurnosService {
     nombre: string,
     exceptId?: string,
   ): Promise<void> {
-    const existente = await this.turnoRepo.findOne({
-      where: { tenantId, nombre },
-    });
-    if (existente && existente.id !== exceptId) {
+    // Case-insensitive: "Mañana" y "mañana" son el mismo turno
+    // (docs/PRODUCTO.md). Tiene que coincidir con `uq_turnos_tenant_nombre_vivo`,
+    // que es sobre `lower(nombre)`; si esta comparación fuera exacta, el
+    // servicio diría "libre" y el `save` fallaría con 23505.
+    // El QueryBuilder aplica solo el filtro de la `@DeleteDateColumn`.
+    const qb = this.turnoRepo
+      .createQueryBuilder('t')
+      .where('t.tenant_id = :tenantId', { tenantId })
+      .andWhere('LOWER(t.nombre) = LOWER(:nombre)', { nombre });
+    if (exceptId) {
+      qb.andWhere('t.turno_id != :exceptId', { exceptId });
+    }
+    if (await qb.getExists()) {
       throw new ConflictException('Ya existe un turno con ese nombre');
     }
   }

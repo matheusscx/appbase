@@ -467,13 +467,11 @@ describe('DescuentosService', () => {
       expect(descuentoRepoMock.update).not.toHaveBeenCalled();
     });
 
-    // Revisión final: `descuentos` no tiene índice único de nombre en la
-    // base (medido: no hay `CREATE UNIQUE INDEX` sobre la tabla) — la
-    // unicidad la garantiza `create()`/`update()` SOLO en código
-    // (`validarNombreUnico`). `restaurar()` no la reusaba: se podía crear
-    // "Black Friday", borrarlo, crear OTRO "Black Friday", y restaurar el
-    // viejo dejaba dos descuentos vivos con el mismo nombre.
-    it('restaurar() con el nombre ya ocupado por un descuento vivo es 400, no revive nada', async () => {
+    // `uq_descuentos_tenant_nombre_vivo` es parcial (WHERE eliminado_el IS
+    // NULL): mientras el descuento estaba borrado, otro pudo tomar su nombre.
+    // El UPDATE que lo revive vuelve a hacerlo competir y Postgres responde
+    // 23505 (unique_violation). Sin traducirlo, el usuario recibe un 500.
+    it('restaurar() con el nombre ya ocupado por un descuento vivo es 400, no 500', async () => {
       descuentoRepoMock.findOne.mockResolvedValue({
         id: 'd1',
         tenantId: TENANT,
@@ -481,7 +479,9 @@ describe('DescuentosService', () => {
         eliminadoEl: new Date(),
         eliminadoPor: USUARIO_ID,
       });
-      qbMock.getCount.mockResolvedValueOnce(1);
+      descuentoRepoMock.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
       // Los nombres vivos que compiten, que es lo que lee `errorDeColision`.
       qbMock.getRawMany.mockResolvedValueOnce([
         { nombre: 'Black Friday' },
@@ -491,7 +491,25 @@ describe('DescuentosService', () => {
       await expect(service.restaurar(TENANT, 'd1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(descuentoRepoMock.update).not.toHaveBeenCalled();
+      // No debe intentar releer la fila si el restore falló.
+      expect(descuentoRepoMock.findOneOrFail).not.toHaveBeenCalled();
+    });
+
+    it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Black Friday',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      descuentoRepoMock.update.mockRejectedValueOnce(
+        Object.assign(new Error('deadlock detected'), { code: '40P01' }),
+      );
+
+      await expect(service.restaurar(TENANT, 'd1')).rejects.toThrow(
+        'deadlock detected',
+      );
     });
 
     // El 400 no puede ser solo un "no se pudo": la pantalla precarga
@@ -505,7 +523,9 @@ describe('DescuentosService', () => {
         eliminadoEl: new Date(),
         eliminadoPor: USUARIO_ID,
       });
-      qbMock.getCount.mockResolvedValueOnce(1);
+      descuentoRepoMock.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
       qbMock.getRawMany.mockResolvedValueOnce([
         { nombre: 'Black Friday' },
         { nombre: 'Black Friday 2' },
@@ -518,6 +538,30 @@ describe('DescuentosService', () => {
             'Ya existe un descuento activo con el nombre "Black Friday".',
           nombreSugerido: 'Black Friday 4',
         },
+      });
+    });
+
+    // La sugerencia tiene que ignorar mayúsculas porque el índice es sobre
+    // `lower(nombre)`: si propusiera "Black Friday 2" teniendo vivo un "black
+    // friday 2", el usuario confirmaría el modal y recibiría el mismo 400.
+    it('la sugerencia saltea los tomados sin importar mayúsculas', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Black Friday',
+        eliminadoEl: new Date(),
+        eliminadoPor: USUARIO_ID,
+      });
+      descuentoRepoMock.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
+      qbMock.getRawMany.mockResolvedValueOnce([
+        { nombre: 'BLACK FRIDAY' },
+        { nombre: 'black friday 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, 'd1')).rejects.toMatchObject({
+        response: { nombreSugerido: 'Black Friday 3' },
       });
     });
 
@@ -543,10 +587,6 @@ describe('DescuentosService', () => {
           nombre: 'Black Friday 2',
         },
       );
-      // Y la unicidad se chequea contra el nombre NUEVO, no contra el viejo.
-      expect(qbMock.andWhere).toHaveBeenCalledWith('d.nombre = :nombre', {
-        nombre: 'Black Friday 2',
-      });
     });
 
     it('sin `nombreNuevo` no toca el nombre (comportamiento de siempre)', async () => {
@@ -638,6 +678,20 @@ describe('DescuentosService', () => {
       expect(qbMock.andWhere).toHaveBeenCalledWith(
         expect.stringContaining('descuento_id'),
         expect.objectContaining({ excludeId: 'some-id' }),
+      );
+    });
+
+    // Decisión del owner (2026-08-01): la unicidad de nombre es
+    // case-insensitive en los 8 recursos que la tienen (docs/PRODUCTO.md). Este
+    // endpoint es público —la pantalla lo consulta mientras el usuario tipea—,
+    // así que si comparara exacto diría "libre" y el guardado moriría con el
+    // 23505 de `uq_descuentos_tenant_nombre_vivo`, que es sobre `lower(nombre)`.
+    it('compara el nombre ignorando mayúsculas, igual que el índice', async () => {
+      qbMock.getCount.mockResolvedValue(0);
+      await service.nombreDisponible(TENANT, 'Black Friday');
+      expect(qbMock.andWhere).toHaveBeenCalledWith(
+        'LOWER(d.nombre) = LOWER(:nombre)',
+        { nombre: 'Black Friday' },
       );
     });
   });

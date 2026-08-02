@@ -105,10 +105,9 @@ Response (404): "<recurso> no está en la papelera" — no existe, existe y
                   Una sola regla (WHERE ... AND eliminado_el IS NOT NULL AND
                   eliminado_por IS NOT NULL), sin rama que distinga los tres
                   casos.
-Response (400): en 9 de los 16 — las 5 con índice único parcial de nombre
-                  (grupos-modificadores, causas-merma, motivos-diferencia,
-                  motivos-diferencia-inventario, cajones), las 3 que enforcean
-                  la unicidad solo por código (descuentos, recargos, turnos), y
+Response (400): en 9 de los 16 — los 8 con unicidad de nombre (descuentos,
+                  recargos, turnos, cajones, causas-merma, motivos-diferencia,
+                  motivos-diferencia-inventario, grupos-modificadores) y
                   `garzones`, por una restricción distinta que no es de nombre.
                   El reparto completo y por qué no se deduce de la familia de
                   borrado: "Colisión al restaurar" abajo.
@@ -171,33 +170,31 @@ ni se bloquea la operación. Mismo patrón que Square, Toast y Clover.
 ### Colisión al restaurar → 400
 
 La unicidad de nombre por tenant no es una propiedad de familia de borrado (SQL
-cruda vs. `softDelete()`): hay que medirla recurso por recurso, por índice **o**
-por código. Medido para los 16:
+cruda vs. `softDelete()`): hay que medirla recurso por recurso. Medido para los 16:
 
-- **Por índice único parcial** (`WHERE eliminado_el IS NULL`) — cinco recursos:
-  `grupos-modificadores`, `causas-merma`, `motivos-diferencia`,
-  `motivos-diferencia-inventario`, `cajones`. Si alguien ocupó el nombre mientras
-  la fila estaba en la papelera, `restaurar()` capta el `23505` (unique_violation)
-  de Postgres y responde 400 pidiendo renombrar el vivo o el restaurado — no
-  sobrescribe en silencio ni intenta un nombre alternativo.
-- **Solo por código** (sin índice en la base) — tres recursos: `descuentos`
-  (`validarNombreUnico`), `recargos` (`validarNombreUnico`), `turnos`
-  (`assertNombreUnico`). Los tres reusan en `create()`/`update()` una función que
-  filtra `eliminado_el IS NULL` (o, en `turnos`, un `findOne` que TypeORM ya
-  filtra solo por el `@DeleteDateColumn`) — sin índice de por medio, Postgres no
-  tira `23505`, así que `restaurar()` llama a esa MISMA función antes de revivir
-  la fila y traduce el resultado al mismo 400 accionable. Antes de esta
-  corrección, ninguno de los tres la llamaba: se podía crear "Black Friday",
-  borrarlo, crear otro "Black Friday", y restaurar el viejo dejaba dos vivos con
-  el mismo nombre — un estado que `create()`/`update()` nunca dejan alcanzar.
+- **Con unicidad de nombre** — ocho recursos: `descuentos`, `recargos`, `turnos`,
+  `cajones`, `causas-merma`, `motivos-diferencia`, `motivos-diferencia-inventario`,
+  `grupos-modificadores`. Los ocho la enforcean igual: **índice único parcial**
+  (`WHERE eliminado_el IS NULL`) sobre `(tenant_id, lower(nombre))`, más una
+  validación en código que compara igual y da el mensaje amable. Si alguien ocupó
+  el nombre mientras la fila estaba en la papelera, `restaurar()` capta el `23505`
+  (unique_violation) de Postgres y responde 400 pidiendo renombrar el vivo o el
+  restaurado — no sobrescribe en silencio ni intenta un nombre alternativo.
 - **Sin unicidad de ningún tipo** — siete recursos: `items`, `categorias`,
   `impuestos`, `terceros` (catálogo del negocio), `salones`, `mesas`, `impresoras`
   (config operativa). Ahí la colisión no puede ocurrir porque no hay regla que
   colisionar.
 
-Total: 5 (índice) + 3 (código) + 7 (sin unicidad) = 15. El recurso 16,
+Total: 8 (unicidad de nombre) + 7 (sin unicidad) = 15. El recurso 16,
 `garzones`, tiene índice único parcial pero NO de nombre — es un caso aparte,
 documentado abajo.
+
+Hasta el 2026-08-01 esto estaba partido: tres de los ocho (`descuentos`,
+`recargos`, `turnos`) no tenían índice y garantizaban la unicidad **solo por
+código**, con una ventana de carrera entre el `SELECT` y el `INSERT`; su
+`restaurar()` pre-consultaba en vez de captar el `23505`. Y la comparación estaba
+partida 4 y 4 entre case-sensitive y case-insensitive sin que nadie lo hubiera
+decidido. El owner unificó las dos cosas (ver abajo).
 
 **`garzones` tiene una restricción única parcial distinta — no es nombre único.**
 `uq_garzones_mostrador_tenant` (`(tenant_id) WHERE es_placeholder = true AND
@@ -205,7 +202,7 @@ eliminado_el IS NULL`) permite un solo garzón placeholder "Mostrador" vivo por
 tenant (lo crea `asegurarMostrador()` al procesar la primera propina directa del
 POS de cada tenant; ver `docs/features/pagos.md`). `garzones` no indexa `nombre` —
 dos garzones con el mismo nombre conviven sin problema —, así que esto no es el
-mismo caso que los cinco de arriba. Colisiona por un camino angosto: si el
+mismo caso que los ocho de arriba. Colisiona por un camino angosto: si el
 Mostrador se borra y otra venta con propina directa crea uno nuevo mientras el
 viejo sigue en la papelera, restaurar el viejo choca contra el nuevo — mismo 400,
 capturando el mismo `23505`.
@@ -262,22 +259,14 @@ que también está tomado, vuelve el 400 con la sugerencia **siguiente** (nunca
 encadena "… 2 2"). La alternativa —que el frontend confíe en que la sugerencia
 sigue libre cuando la manda— apuesta a que nada pasó entre que la vio y confirmó.
 
-**Implementado en los 8**, en dos formas distintas según cómo la tabla enforcea
-la unicidad — y la diferencia no es de estilo:
-
-- **Los 3 sin índice** (`descuentos`, `recargos`, `turnos`): la unicidad vive
-  solo en código, así que `restaurar()` consulta los nombres tomados ANTES de
-  intentar y arma el 400 sin haber escrito nada.
-- **Los 5 con índice único parcial** (`cajones`, `causas-merma`,
-  `motivos-diferencia`, `motivos-diferencia-inventario`,
-  `grupos-modificadores`): la sugerencia se calcula **dentro del `catch` del
-  `23505`**. Se evaluó consultar antes y se descartó con un argumento, no por
-  gusto: con un índice el `catch` hace falta igual —entre consultar y escribir,
-  otra transacción puede tomar el nombre—, así que pre-consultar agrega una
-  query en TODOS los restaurar y no permite sacar el bloque. Queda dominada.
-  El `UPDATE` corre en autocommit, así que su fallo no deja una transacción
-  abortada y las queries del `catch` funcionan (verificado: ninguno de los 5
-  envuelve el restaurar en una transacción explícita).
+**Implementado en los 8, con una sola forma**: la sugerencia se calcula **dentro
+del `catch` del `23505`**. Se evaluó consultar antes y se descartó con un
+argumento, no por gusto: con un índice el `catch` hace falta igual —entre
+consultar y escribir, otra transacción puede tomar el nombre—, así que
+pre-consultar agrega una query en TODOS los restaurar y no permite sacar el
+bloque. Queda dominada. El `UPDATE` corre en autocommit, así que su fallo no deja
+una transacción abortada y las queries del `catch` funcionan (verificado:
+ninguno de los 8 envuelve el restaurar en una transacción explícita).
 
 La query compartida vive en `errorDeColisionNombre()` (por repositorio) y
 `errorDeColisionNombreSQL()` (por `DataSource`, para los cuatro services que
@@ -286,16 +275,11 @@ hablan SQL cruda y no tienen repo), en
 comparten exactamente `tenant_id`, `nombre` y `eliminado_el` (verificado contra
 `information_schema`, no asumido por parecido de nombre).
 
-**⚠️ Cuatro comparan sin mayúsculas y cuatro no**, y eso cambia la sugerencia:
-`causas_merma`, `motivo_diferencia_caja` y `motivo_diferencia_inventario`
-indexan por `lower(nombre)`; `grupos_modificadores` indexa por `nombre` pelado
-pero su `assertNombreLibre` de `create()`/`update()` compara con `LOWER`, así
-que la regla que el usuario percibe es la case-insensitive (la más estricta) —
-ver la entrada de ese desacuerdo en
-[`docs/agent/pendientes.md`](../agent/pendientes.md). En esos cuatro la
-sugerencia usa `ignorarMayusculas`, porque si no devolvería un nombre que la
+**Las 8 comparan sin mayúsculas**, y eso importa para la sugerencia: las 8
+llamadas pasan `ignorarMayusculas`, porque si no devolverían un nombre que la
 base considera tomado y el usuario recibiría **el mismo 400 después de
-confirmar el modal**.
+confirmar el modal**. El parámetro sigue existiendo aunque hoy todas lo pasen en
+`true`: lo que manda es cómo indexa la tabla, no una convención.
 
 ⛔ **Dos colisiones NO llevan sugerencia**, porque renombrar no las resuelve:
 `garzones` (su índice único es el del placeholder Mostrador, no de nombre) y la
@@ -414,10 +398,14 @@ formas les toca: [`docs/agent/pendientes.md`](../agent/pendientes.md).
   pero sin `eliminado_por` (la borró el sistema).
 - **Colisión**: con un vivo ocupando el nombre (o, en `garzones`, con el Mostrador
   nuevo ya creado), `restaurar()` da 400 y no modifica ninguna de las dos filas.
-  Cubre las dos formas de garantizar unicidad — índice único parcial
-  (`grupos-modificadores`, `causas-merma`, `motivos-diferencia`,
-  `motivos-diferencia-inventario`, `cajones`, `garzones`) y solo por código
-  (`descuentos`, `recargos`, `turnos`).
+  Cubre los 8 con unicidad de nombre más `garzones`, cuyo índice único es de otra
+  cosa.
+- **Que la unicidad sea case-insensitive se prueba contra Postgres**
+  (`test/unicidad-nombre.e2e-spec.ts`): la forma del índice de las 8 tablas —por
+  tabla, no por nombre de índice, que no es la regla— y la conducta por el camino
+  de `restaurar()`, que es el único que escribe sin pasar por la validación de
+  código. Un unit con el repositorio mockeado no ve la base, que es justo lo que
+  acá se está fijando.
 - **Salida de la colisión** (los 8 con unicidad de nombre): el 400 trae un
   `nombreSugerido` libre y restaurar con él revive y renombra en una sola
   escritura; reintentar con un nombre también tomado da la sugerencia siguiente

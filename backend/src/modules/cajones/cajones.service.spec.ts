@@ -32,6 +32,7 @@ describe('CajonesService', () => {
     where: jest.Mock;
     andWhere: jest.Mock;
     getRawMany: jest.Mock;
+    getExists: jest.Mock;
   };
   let cuRepo: {
     find: jest.Mock;
@@ -53,6 +54,9 @@ describe('CajonesService', () => {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getRawMany: jest.fn().mockResolvedValue([]),
+      // `validarNombreUnico` compara con `LOWER(...)`, así que necesita el
+      // QueryBuilder: por default el nombre está libre.
+      getExists: jest.fn().mockResolvedValue(false),
     };
     repo = {
       find: jest.fn(),
@@ -107,7 +111,7 @@ describe('CajonesService', () => {
   });
 
   it('create rechaza nombre duplicado con 409', async () => {
-    repo.count.mockResolvedValue(1);
+    qb.getExists.mockResolvedValue(true);
     await expect(
       service.create(TENANT, { nombre: 'Mostrador' }),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -115,10 +119,26 @@ describe('CajonesService', () => {
   });
 
   it('create guarda cuando el nombre es único', async () => {
-    repo.count.mockResolvedValue(0);
     const res = await service.create(TENANT, { nombre: 'Mostrador' });
     expect(repo.save).toHaveBeenCalled();
     expect(res).toMatchObject({ tenantId: TENANT, nombre: 'Mostrador' });
+  });
+
+  // Decisión del owner (2026-08-01): la unicidad de nombre es case-insensitive
+  // en los 8 recursos que la tienen (docs/PRODUCTO.md). Tiene que coincidir con
+  // `ux_cajones_tenant_nombre`, que es sobre `lower(nombre)`: si comparara
+  // exacto, el service aceptaría y el `save` moriría con un 23505.
+  it('la unicidad de nombre ignora mayúsculas, igual que el índice', async () => {
+    qb.getExists.mockResolvedValue(true);
+    await expect(
+      service.create(TENANT, { nombre: 'MOSTRADOR' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      'LOWER(c.nombre) = LOWER(:nombre)',
+      {
+        nombre: 'MOSTRADOR',
+      },
+    );
   });
 
   it('update lanza 404 si el cajón no existe', async () => {
@@ -135,7 +155,6 @@ describe('CajonesService', () => {
       nombre: 'Viejo',
       activo: true,
     });
-    repo.count.mockResolvedValue(0);
     const res = await service.update(TENANT, 'x', {
       nombre: 'Nuevo',
       activo: false,

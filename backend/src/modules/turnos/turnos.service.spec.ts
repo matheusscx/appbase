@@ -27,6 +27,7 @@ type Repo = {
     where: jest.Mock;
     andWhere: jest.Mock;
     getRawMany: jest.Mock;
+    getExists: jest.Mock;
   };
 };
 
@@ -44,6 +45,9 @@ function makeRepo(): Repo {
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     getRawMany: jest.fn().mockResolvedValue([]),
+    // `assertNombreUnico` compara con `LOWER(...)`, así que necesita el
+    // QueryBuilder: por default el nombre está libre.
+    getExists: jest.fn().mockResolvedValue(false),
   };
   return {
     find: jest.fn().mockResolvedValue([]),
@@ -137,7 +141,7 @@ describe('TurnosService', () => {
   });
 
   it('rechaza nombre duplicado en el tenant', async () => {
-    repo.findOne.mockResolvedValue(turno({ nombre: 'Almuerzo' }));
+    repo.qb.getExists.mockResolvedValue(true);
 
     await expect(
       service.crear(TENANT, {
@@ -175,9 +179,7 @@ describe('TurnosService', () => {
 
   it('actualizar cambia nombre/activo/horarios', async () => {
     const existing = turno();
-    repo.findOne
-      .mockResolvedValueOnce(existing) // getOrThrow
-      .mockResolvedValueOnce(null); // check duplicado nombre
+    repo.findOne.mockResolvedValueOnce(existing); // getOrThrow
     const updated = turno({
       nombre: 'Brunch',
       horaInicio: '10:00',
@@ -232,13 +234,37 @@ describe('TurnosService', () => {
   });
 
   it('actualizar rechaza nombre duplicado de otro turno', async () => {
-    repo.findOne
-      .mockResolvedValueOnce(turno({ id: 't1', nombre: 'Almuerzo' }))
-      .mockResolvedValueOnce(turno({ id: 't2', nombre: 'Cena' }));
+    repo.findOne.mockResolvedValueOnce(turno({ id: 't1', nombre: 'Almuerzo' }));
+    repo.qb.getExists.mockResolvedValue(true);
 
     await expect(
       service.actualizar(TENANT, 't1', { nombre: 'Cena' }),
     ).rejects.toThrow('Ya existe un turno con ese nombre');
+    // El turno que se está editando queda excluido: si no, renombrarlo a lo que
+    // ya se llama sería un falso duplicado contra sí mismo.
+    expect(repo.qb.andWhere).toHaveBeenCalledWith('t.turno_id != :exceptId', {
+      exceptId: 't1',
+    });
+  });
+
+  // Decisión del owner (2026-08-01): la unicidad de nombre es case-insensitive
+  // en los 8 recursos que la tienen (docs/PRODUCTO.md). Tiene que coincidir con
+  // `uq_turnos_tenant_nombre_vivo`, que es sobre `lower(nombre)`: si comparara
+  // exacto, el service aceptaría y el `save` moriría con un 23505.
+  it('la unicidad de nombre ignora mayúsculas, igual que el índice', async () => {
+    repo.qb.getExists.mockResolvedValue(true);
+
+    await expect(
+      service.crear(TENANT, {
+        nombre: 'MAÑANA',
+        horaInicio: '08:00',
+        horaFin: '15:00',
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(repo.qb.andWhere).toHaveBeenCalledWith(
+      'LOWER(t.nombre) = LOWER(:nombre)',
+      { nombre: 'MAÑANA' },
+    );
   });
 
   it('eliminar lanza NotFound si no existe', async () => {
@@ -322,48 +348,63 @@ describe('TurnosService', () => {
       expect(repo.update).not.toHaveBeenCalled();
     });
 
-    // Revisión final: `turnos` no tiene índice único de nombre en la base
-    // (medido: no hay `CREATE UNIQUE INDEX` sobre la tabla) — la unicidad la
-    // garantiza `crear()`/`actualizar()` SOLO en código (`assertNombreUnico`).
-    // `restaurar()` no la reusaba: se podía crear "Almuerzo", borrarlo, crear
-    // OTRO "Almuerzo", y restaurar el viejo dejaba dos turnos vivos con el
-    // mismo nombre.
-    it('restaurar() con el nombre ya ocupado por un turno vivo es 400, no revive nada', async () => {
-      repo.findOne
-        .mockResolvedValueOnce(
-          turno({
-            id: 't1',
-            nombre: 'Almuerzo',
-            eliminadoEl: new Date(),
-            eliminadoPor: USUARIO_ID,
-          }),
-        )
-        .mockResolvedValueOnce(
-          turno({ id: 't2', nombre: 'Almuerzo', eliminadoEl: null }),
-        );
+    // `uq_turnos_tenant_nombre_vivo` es parcial (WHERE eliminado_el IS NULL):
+    // mientras el turno estaba borrado, otro pudo tomar su nombre. El UPDATE que
+    // lo revive vuelve a hacerlo competir y Postgres responde 23505. Sin
+    // traducirlo, el usuario recibe un 500.
+    it('restaurar() con el nombre ya ocupado por un turno vivo es 400, no 500', async () => {
+      repo.findOne.mockResolvedValueOnce(
+        turno({
+          id: 't1',
+          nombre: 'Almuerzo',
+          eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
+        }),
+      );
+      repo.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
 
       await expect(service.restaurar(TENANT, 't1')).rejects.toBeInstanceOf(
         BadRequestException,
       );
-      expect(repo.update).not.toHaveBeenCalled();
+      // No debe intentar releer la fila si el restore falló.
+      expect(repo.findOneOrFail).not.toHaveBeenCalled();
+    });
+
+    it('propaga un error de Postgres que no es 23505 sin traducirlo a 400', async () => {
+      repo.findOne.mockResolvedValueOnce(
+        turno({
+          id: 't1',
+          nombre: 'Almuerzo',
+          eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
+        }),
+      );
+      repo.update.mockRejectedValueOnce(
+        Object.assign(new Error('deadlock detected'), { code: '40P01' }),
+      );
+
+      await expect(service.restaurar(TENANT, 't1')).rejects.toThrow(
+        'deadlock detected',
+      );
     });
 
     // El 400 no puede ser solo un "no se pudo": la pantalla precarga
     // `nombreSugerido` en el campo del modal, así que si el backend deja de
     // mandarlo el usuario vuelve a quedar adivinando qué nombre está libre.
     it('el 400 de colisión trae un nombre libre ya calculado, salteando los tomados', async () => {
-      repo.findOne
-        .mockResolvedValueOnce(
-          turno({
-            id: 't1',
-            nombre: 'Almuerzo',
-            eliminadoEl: new Date(),
-            eliminadoPor: USUARIO_ID,
-          }),
-        )
-        .mockResolvedValueOnce(
-          turno({ id: 't2', nombre: 'Almuerzo', eliminadoEl: null }),
-        );
+      repo.findOne.mockResolvedValueOnce(
+        turno({
+          id: 't1',
+          nombre: 'Almuerzo',
+          eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
+        }),
+      );
+      repo.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
       repo.qb.getRawMany.mockResolvedValueOnce([
         { nombre: 'Almuerzo' },
         { nombre: 'Almuerzo 2' },
@@ -377,18 +418,40 @@ describe('TurnosService', () => {
       });
     });
 
+    // La sugerencia tiene que ignorar mayúsculas porque el índice es sobre
+    // `lower(nombre)`: si propusiera un nombre que la base considera tomado, el
+    // usuario confirmaría el modal y recibiría el mismo 400.
+    it('la sugerencia saltea los tomados sin importar mayúsculas', async () => {
+      repo.findOne.mockResolvedValueOnce(
+        turno({
+          id: 't1',
+          nombre: 'Almuerzo',
+          eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
+        }),
+      );
+      repo.update.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key value'), { code: '23505' }),
+      );
+      repo.qb.getRawMany.mockResolvedValueOnce([
+        { nombre: 'ALMUERZO' },
+        { nombre: 'almuerzo 2' },
+      ]);
+
+      await expect(service.restaurar(TENANT, 't1')).rejects.toMatchObject({
+        response: { nombreSugerido: 'Almuerzo 3' },
+      });
+    });
+
     it('con `nombreNuevo` libre, restaura Y renombra en la misma escritura', async () => {
-      repo.findOne
-        .mockResolvedValueOnce(
-          turno({
-            id: 't1',
-            nombre: 'Almuerzo',
-            eliminadoEl: new Date(),
-            eliminadoPor: USUARIO_ID,
-          }),
-        )
-        // `assertNombreUnico` no encuentra a nadie con el nombre NUEVO.
-        .mockResolvedValueOnce(null);
+      repo.findOne.mockResolvedValueOnce(
+        turno({
+          id: 't1',
+          nombre: 'Almuerzo',
+          eliminadoEl: new Date(),
+          eliminadoPor: USUARIO_ID,
+        }),
+      );
       repo.findOneOrFail.mockResolvedValue(
         turno({ id: 't1', nombre: 'Almuerzo 2', eliminadoEl: null }),
       );
@@ -401,10 +464,6 @@ describe('TurnosService', () => {
         { id: 't1', tenantId: TENANT },
         { eliminadoEl: null, eliminadoPor: null, nombre: 'Almuerzo 2' },
       );
-      // Y la unicidad se chequea contra el nombre NUEVO, no contra el viejo.
-      expect(repo.findOne).toHaveBeenLastCalledWith({
-        where: { tenantId: TENANT, nombre: 'Almuerzo 2' },
-      });
     });
 
     it('sin `nombreNuevo` no toca el nombre (comportamiento de siempre)', async () => {
