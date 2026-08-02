@@ -254,16 +254,59 @@ decisión de columnas del resto.
 congelado es invariante de esquema y no convención. Un segundo camino que se
 olvide de poblarlas falla al insertar.
 
-**Dónde se ve** (2026-08-02): `VentaDetalleDrawer.vue` → tarjeta **"Reglas
-aplicadas"**, entre las líneas de venta y los totales.
+**Dónde se ve** (2026-08-02): `VentaDetalleDrawer.vue` → tarjeta **"Líneas de
+venta"**. Las reglas **no tienen tarjeta propia**: cuelgan de su ítem, en la
+misma tabla, y cada línea se lee como la derivación que es —neto, los pasos con
+su signo, total de línea:
 
-**Se agrupa por línea, y dentro de cada una sigue el orden de la fórmula**,
-porque es como el motor lo aplicó: sobre el neto de la línea se encadenan los
-pasos y cada uno opera sobre el acumulado del anterior. La primera versión
-listaba por familia —todos los descuentos, después todos los recargos— y eso
-describe la venta pero **no el cálculo**: deja al lector reconstruyendo de
-memoria a qué ítem pertenecía cada fila. Corregido el mismo día tras verlo con
-dos ítems y reglas distintas en cada uno.
+El desglose viene **plegado**: una venta de 10 líneas no puede abrirse en 40
+filas para responder "¿qué se vendió?". Se expande por línea, y solo las que
+tienen reglas ofrecen el toggle.
+
+```
+Concepto                    Cantidad    Valor      Monto
+› Producto demo               1.0000   $5.000     $5.653     ← plegado
+                                                    total
+
+⌄ Producto demo               1.0000   $5.000     $5.653     ← expandido
+    Neto                                          $5.000
+    Descuento  Socio 10%               10,00%      -$500
+    Recargo    Delivery 5%              5,00%      +$250
+    Impuesto   IVA                     19,00%      +$903
+```
+
+⛔ **El monto de la fila del ítem va rotulado `total` en la propia celda. Es lo
+que hace honesta la tabla, y costó tres intentos.** Sin rótulo, esa plata al
+lado de `Cantidad` y `Valor` invita a leer una multiplicación que **no cierra**:
+
+- Con el **neto** ahí falla cuando `precio_incluye_impuesto`: el motor desbrutea,
+  así que el neto es `precio / (1 + tasas) × cantidad`. Un ítem de $5.950 con IVA
+  incluido tiene neto $5.000, y `1 × 5.950` no da `5.000`. *(Ningún ítem
+  **vendible** del seeder tiene la marca —solo ingredientes, que no se venden—;
+  se reprodujo creando uno por API.)*
+- Con el **total** ahí falla en el caso **normal**: el IVA se suma sobre el
+  precio, así que una línea de `1 × $1.500` termina en `$1.785`. Esto alcanza a
+  todos los ítems del seed, no a un borde.
+- Y en cualquiera de los dos, una **venta por presentación** muestra en Cantidad
+  la presentación ("2 cajas") mientras el motor multiplicó por la cantidad
+  **canónica** (24 unidades).
+
+El rótulo va **en la celda y no en la cabecera** porque esa columna sirve a dos
+cosas: totales de línea y montos de regla. La versión que quitó los rótulos
+viejos (`Precio unit.` / `Total línea`) para poner cabeceras genéricas fue
+justamente la que se rechazó. **No sacar el rótulo `total`.**
+
+El bloque expandido empieza en `Neto` —el punto de partida del que salen las
+reglas— y no repite el total al cerrar: ya está arriba, en la fila del ítem.
+Una línea sin reglas no ofrece toggle: no hay nada que derivar.
+
+La otra versión descartada, por si alguien la reintenta: listar **por familia**
+(todos los descuentos, después todos los recargos) describe la venta pero no el
+cálculo, y deja al lector reconstruyendo a qué ítem pertenecía cada fila.
+
+El signo lo pone la familia, no el monto: el motor nunca guarda magnitudes
+negativas, así que sin él un descuento y un recargo del mismo valor se ven
+idénticos salvo por el color del badge.
 
 El orden sale de `configCalculo.formula` de **esa** venta, no de un orden fijo
 del frontend: dos ventas del mismo tenant pueden tener órdenes distintos si

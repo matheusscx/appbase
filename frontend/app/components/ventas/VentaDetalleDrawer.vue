@@ -44,6 +44,8 @@ interface Detalle {
   cantidadPresentacion?: string | null
   unidadCodigoPresentacion?: string | null
   precioUnitario: string
+  /** Neto de la línea: el punto de partida del que salen las reglas. */
+  subtotal: string
   totalLinea: string
   modoInventario: string | null
   cantidadDevuelta: string
@@ -245,39 +247,46 @@ function cantidadDetalleLabel(det: Detalle): string {
   return det.cantidad
 }
 
-const detalleColumns: TableColumn<Detalle>[] = [
-  { accessorKey: 'descripcion', header: 'Descripción' },
-  { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'precioUnitario', header: 'Precio unit.', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'totalLinea', header: 'Total línea', meta: { class: { th: 'text-right', td: 'text-right' } } },
-]
-
 /**
- * El desglose se agrupa **por línea** y dentro de cada una sigue el orden de la
- * fórmula del tenant, porque es como el motor lo aplicó: sobre el neto de la
- * línea se encadenan los pasos y cada uno opera sobre el acumulado del
- * anterior. Listarlo por familia —todos los descuentos, después todos los
- * recargos— describe la venta pero no el cálculo, y deja al lector armando de
- * memoria a qué ítem pertenecía cada fila.
+ * Líneas y reglas comparten UNA tabla: cada ítem con su total, y colgando de
+ * él, el neto del que partió y las reglas que lo movieron hasta ese total.
+ * Estaban en dos tarjetas y eso repetía el nombre del ítem y su total, además
+ * de separar las reglas de la línea que explican.
+ *
+ * El desglose viene **plegado**: una venta de 10 líneas no puede abrirse en 40
+ * filas para responder "¿qué se vendió?". Se expande por línea, y solo las que
+ * tienen reglas ofrecen el toggle.
+ *
+ * ⛔ **El monto de la fila del ítem va rotulado `total` en la propia celda.**
+ * Sin rótulo, ese número al lado de `Cantidad` y `Valor` invita a leer una
+ * multiplicación que **no cierra en el caso normal** —el IVA se suma sobre el
+ * precio, así que 1 × $1.500 termina en $1.785—, y con el neto ahí fallaba por
+ * desbruteo. Dos versiones de esta tabla murieron por eso, la segunda
+ * justamente por haber quitado los rótulos `Precio unit.`/`Total línea` que
+ * desambiguaban. El rótulo va en la celda y no en la cabecera porque la columna
+ * sirve a dos cosas: totales de línea y montos de regla.
  */
-interface ReglaAplicadaFila {
-  tipo: string
-  nombre: string
-  /** Con qué valor aplicó: "10,00%" o "Monto fijo". */
-  expresion: string
-  monto: string
+type TipoFila = 'linea' | 'neto' | 'regla' | 'venta'
+
+interface FilaDetalle {
+  clave: string
+  tipoFila: TipoFila
+  /** Nombre del ítem, o de la regla cuando cuelga de uno. */
+  concepto: string
+  /** Familia de la regla; `null` en las filas de ítem. */
+  familia: string | null
+  cantidad: string | null
+  /** Precio unitario en un ítem; con qué valor aplicó en una regla. */
+  valor: string | null
+  monto: string | null
+  /** Rótulo EN LÍNEA con el monto. Hoy: `Total` en la fila del ítem. */
+  rotuloMonto: string | null
+  /** `-` en descuentos, `+` en recargos e impuestos, vacío en ítems. */
+  signo: string
   /** Presente solo si el piso en cero recortó la regla. */
   recorte: string | null
   /** La regla se evaluó y no aportó nada. Se muestra, atenuada. */
   sinEfecto: boolean
-}
-
-interface GrupoReglas {
-  clave: string
-  titulo: string
-  /** El total de la línea, para cerrar la cuenta de su propio bloque. */
-  total: string | null
-  filas: ReglaAplicadaFila[]
 }
 
 /**
@@ -293,12 +302,12 @@ const PASO_A_TIPO: Record<string, string> = {
   impuestos: 'Impuesto',
 }
 
-function filaDeRegla(tipo: string, r: ReglaCongelada): ReglaAplicadaFila {
+function filaDeRegla(familia: string, r: ReglaCongelada): FilaDetalle {
   // Un `porcentaje_aplicado` null puede ser "era monto fijo" o "era porcentaje
   // y no llegó a aplicar"; `modo` es lo que los distingue. El segundo caso se
   // nombra: un guion al lado de una regla llamada "Solo transferencia 5%" hace
   // dudar de si el dato se perdió, cuando lo que pasó es que no corrió.
-  const expresion = r.porcentajeAplicado !== null
+  const valor = r.porcentajeAplicado !== null
     ? formatPorcentaje(r.porcentajeAplicado)
     : r.modo === 'monto_fijo' ? 'Monto fijo' : 'No aplicó'
 
@@ -310,14 +319,45 @@ function filaDeRegla(tipo: string, r: ReglaCongelada): ReglaAplicadaFila {
     : null
 
   return {
-    tipo,
-    nombre: r.nombreRegla,
-    expresion,
+    clave: r.id,
+    tipoFila: 'regla',
+    concepto: r.nombreRegla,
+    familia,
+    cantidad: null,
+    valor,
     monto: r.valorAplicado,
+    rotuloMonto: null,
+    // El signo lo pone la familia, no el monto: el motor nunca guarda
+    // magnitudes negativas. Sin él, un descuento y un recargo del mismo valor
+    // se ven idénticos salvo por el color del badge.
+    signo: familia === 'Descuento' ? '-' : '+',
     recorte,
     sinEfecto: new Decimal(r.valorAplicado).isZero(),
   }
 }
+
+/**
+ * Qué líneas tienen el desglose abierto. Se vacía al cargar otra venta: dejarlo
+ * con ids de la venta anterior abriría filas que ya no existen.
+ */
+const expandidas = ref(new Set<string>())
+
+function alternarDesglose(detalleId: string) {
+  const abiertas = new Set(expandidas.value)
+  if (!abiertas.delete(detalleId)) abiertas.add(detalleId)
+  expandidas.value = abiertas
+}
+
+/** Una línea sin reglas no tiene nada que desplegar. */
+const lineasConReglas = computed<Set<string>>(() => {
+  const v = venta.value
+  if (!v) return new Set()
+  return new Set(
+    [...v.descuentos, ...v.recargos, ...v.impuestos]
+      .map(r => r.detalleId)
+      .filter((id): id is string => id !== null),
+  )
+})
 
 /** El orden real de los pasos en esta venta, con nombres presentables. */
 const formulaVenta = computed<string[]>(
@@ -348,17 +388,16 @@ const ordenPasos = computed(() =>
 )
 
 /**
- * Un bloque por línea —en el orden en que se vendieron— y uno final para las
- * reglas de nivel venta, que no pertenecen a ninguna línea (`detalleId` null).
- * Los bloques sin reglas no se dibujan.
+ * La tabla entera: cada ítem seguido de sus reglas, y al final las de nivel
+ * venta, que no cuelgan de ninguna línea (`detalleId` null).
  *
- * ⚠️ Agrupar así **descarta** cualquier regla cuyo `detalleId` no esté entre los
+ * ⚠️ Armarla así **descarta** cualquier regla cuyo `detalleId` no esté entre los
  * detalles de la venta: desaparecería de la pantalla sin aviso. Se apoya en que
  * nada soft-borra un `venta_detalles` y en que las tres queries de reglas están
  * scopeadas por `venta_id`, así que ese estado no existe. Si algún día se
  * borran detalles, hay que decidir qué pasa con sus reglas antes que esto.
  */
-const gruposDeReglas = computed<GrupoReglas[]>(() => {
+const filasDetalle = computed<FilaDetalle[]>(() => {
   const v = venta.value
   if (!v) return []
 
@@ -369,49 +408,94 @@ const gruposDeReglas = computed<GrupoReglas[]>(() => {
   }
 
   // Recorre los pasos en el orden de la fórmula y se queda con las reglas de
-  // un `detalleId` dado: así cada bloque queda en el orden en que se aplicó.
-  const filasDe = (detalleId: string | null): ReglaAplicadaFila[] =>
+  // un `detalleId` dado: así cada ítem las lleva en el orden en que corrieron.
+  const reglasDe = (detalleId: string | null): FilaDetalle[] =>
     formulaVenta.value.flatMap((paso) => {
-      const tipo = PASO_A_TIPO[paso]
-      if (!tipo) return []
+      const familia = PASO_A_TIPO[paso]
+      if (!familia) return []
       return (porPaso[paso] ?? [])
         .filter(r => r.detalleId === detalleId)
-        .map(r => filaDeRegla(tipo, r))
+        .map(r => filaDeRegla(familia, r))
     })
 
-  const grupos: GrupoReglas[] = v.detalles.map(d => ({
-    clave: d.id,
-    titulo: d.descripcion,
-    total: d.totalLinea,
-    filas: filasDe(d.id),
-  }))
-
-  grupos.push({
-    clave: 'venta',
-    titulo: 'Toda la venta',
-    total: null,
-    filas: filasDe(null),
+  const filas = v.detalles.flatMap<FilaDetalle>((d) => {
+    const reglas = reglasDe(d.id)
+    const linea: FilaDetalle = {
+      clave: d.id,
+      tipoFila: 'linea',
+      concepto: d.descripcion,
+      familia: null,
+      cantidad: cantidadDetalleLabel(d),
+      valor: d.precioUnitario,
+      monto: d.totalLinea,
+      rotuloMonto: 'Total',
+      signo: '',
+      recorte: null,
+      sinEfecto: false,
+    }
+    // Sin reglas no hay nada que expandir: el neto ya es el total.
+    if (!reglas.length || !expandidas.value.has(d.id)) return [linea]
+    return [
+      linea,
+      {
+        clave: `${d.id}-neto`,
+        tipoFila: 'neto',
+        concepto: 'Neto',
+        familia: null,
+        cantidad: null,
+        valor: null,
+        monto: d.subtotal,
+        rotuloMonto: null,
+        signo: '',
+        recorte: null,
+        sinEfecto: false,
+      },
+      ...reglas,
+    ]
   })
 
-  return grupos.filter(g => g.filas.length > 0)
+  const deVenta = reglasDe(null)
+  if (deVenta.length) {
+    filas.push({
+      clave: 'venta',
+      tipoFila: 'venta',
+      concepto: 'Toda la venta',
+      familia: null,
+      cantidad: null,
+      valor: null,
+      // Sin monto: estas reglas no cierran contra una línea, cierran contra
+      // los totales de abajo. Inventar un subtotal acá sería un número nuevo.
+      monto: null,
+      rotuloMonto: null,
+      signo: '',
+      recorte: null,
+      sinEfecto: false,
+    })
+    filas.push(...deVenta)
+  }
+
+  return filas
 })
 
-const reglaColumns: TableColumn<ReglaAplicadaFila>[] = [
-  { accessorKey: 'tipo', header: 'Tipo' },
-  { accessorKey: 'nombre', header: 'Regla' },
-  { accessorKey: 'expresion', header: 'Valor', meta: { class: { th: 'text-right', td: 'text-right' } } },
+const detalleColumns: TableColumn<FilaDetalle>[] = [
+  { accessorKey: 'concepto', header: 'Concepto' },
+  { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  // "Valor" cubre las dos magnitudes que van en esta columna: el precio
+  // unitario de un ítem y el `10,00%` con el que aplicó una regla.
+  { accessorKey: 'valor', header: 'Valor', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
-function tipoReglaColor(tipo: string): 'success' | 'warning' | 'neutral' {
-  if (tipo === 'Descuento') return 'success'
-  if (tipo === 'Recargo') return 'warning'
+function familiaColor(familia: string | null): 'success' | 'warning' | 'neutral' {
+  if (familia === 'Descuento') return 'success'
+  if (familia === 'Recargo') return 'warning'
   return 'neutral'
 }
 
 async function cargar(id: string) {
   loading.value = true
   venta.value = null
+  expandidas.value = new Set()
   try {
     const [ventaData, metodosData] = await Promise.all([
       useApiFetch<VentaDetalle>(`${apiUrl}/ventas/${id}`),
@@ -582,19 +666,93 @@ function onNcSuccess(payload: {
 
         <UCard>
           <template #header>
-            <h2 class="text-base font-semibold">
-              Líneas de venta
-            </h2>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h2 class="text-base font-semibold">
+                Líneas de venta
+              </h2>
+              <span v-if="filasDetalle.some(f => f.tipoFila === 'regla')" class="text-xs text-muted">
+                Reglas del momento del cobro · orden: {{ ordenPasos.join(' → ') }}
+              </span>
+            </div>
           </template>
-          <UTable :data="venta.detalles" :columns="detalleColumns">
+          <UTable :data="filasDetalle" :columns="detalleColumns">
+            <template #concepto-cell="{ row }">
+              <!-- Las reglas y el cierre cuelgan de su ítem: la sangría es la
+                   jerarquía, y el ítem es lo único a la izquierda del todo. -->
+              <div
+                class="flex items-center gap-2"
+                :class="row.original.tipoFila === 'linea' || row.original.tipoFila === 'venta' ? '' : 'pl-6'"
+              >
+                <UButton
+                  v-if="row.original.tipoFila === 'linea' && lineasConReglas.has(row.original.clave)"
+                  :icon="expandidas.has(row.original.clave) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+                  :aria-label="expandidas.has(row.original.clave) ? `Ocultar el desglose de ${row.original.concepto}` : `Ver el desglose de ${row.original.concepto}`"
+                  :aria-expanded="expandidas.has(row.original.clave)"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  @click="alternarDesglose(row.original.clave)"
+                />
+                <UBadge
+                  v-if="row.original.familia"
+                  :color="familiaColor(row.original.familia)"
+                  variant="subtle"
+                  size="sm"
+                >
+                  {{ row.original.familia }}
+                </UBadge>
+                <span
+                  :class="[
+                    row.original.tipoFila === 'linea' ? 'font-medium' : 'text-sm',
+                    row.original.tipoFila === 'neto' ? 'text-muted' : '',
+                    row.original.tipoFila === 'venta' ? 'font-medium text-muted' : '',
+                    row.original.sinEfecto ? 'text-muted' : '',
+                  ]"
+                >
+                  {{ row.original.concepto }}
+                </span>
+              </div>
+            </template>
             <template #cantidad-cell="{ row }">
-              <span class="font-mono">{{ cantidadDetalleLabel(row.original) }}</span>
+              <span v-if="row.original.cantidad" class="font-mono">{{ row.original.cantidad }}</span>
             </template>
-            <template #precioUnitario-cell="{ row }">
-              <span class="font-mono">{{ formatMonto(row.original.precioUnitario) }}</span>
+            <template #valor-cell="{ row }">
+              <span
+                v-if="row.original.valor"
+                class="font-mono text-sm"
+                :class="row.original.sinEfecto ? 'text-muted' : ''"
+              >
+                {{ row.original.tipoFila === 'linea' ? formatMonto(row.original.valor) : row.original.valor }}
+              </span>
             </template>
-            <template #totalLinea-cell="{ row }">
-              <span class="font-mono">{{ formatMonto(row.original.totalLinea) }}</span>
+            <template #monto-cell="{ row }">
+              <div v-if="row.original.monto !== null" class="flex flex-col items-end">
+                <span class="flex items-baseline gap-1.5">
+                  <!-- El rótulo va EN LÍNEA con el número y a su mismo tamaño:
+                       es lo único que impide leerlo como el producto de
+                       Cantidad × Valor (ver el ⛔ del script). Debajo y en
+                       `text-xs text-muted` era más débil que el encabezado
+                       `Total línea` que reemplazó, en tamaño, peso y color. -->
+                  <!-- `text-highlighted` explícito: el `td` de UTable impone
+                       `text-muted` por herencia, así que un span sin color se
+                       renderiza atenuado aunque el código no lo diga. -->
+                  <span v-if="row.original.rotuloMonto" class="text-sm font-semibold text-highlighted">
+                    {{ row.original.rotuloMonto }}
+                  </span>
+                  <span
+                    class="font-mono"
+                    :class="[
+                      row.original.tipoFila === 'regla' ? 'text-sm' : 'font-medium',
+                      row.original.sinEfecto ? 'text-muted' : '',
+                    ]"
+                  >
+                    {{ row.original.signo }}{{ formatMonto(row.original.monto) }}
+                  </span>
+                </span>
+                <span v-if="row.original.recorte" class="text-xs text-warning">
+                  {{ row.original.recorte }}
+                </span>
+              </div>
             </template>
             <template #empty>
               <div class="py-10 text-center text-sm text-muted">
@@ -603,63 +761,6 @@ function onNcSuccess(payload: {
               </div>
             </template>
           </UTable>
-        </UCard>
-
-        <UCard v-if="gruposDeReglas.length">
-          <template #header>
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <h2 class="text-base font-semibold">
-                Reglas aplicadas
-              </h2>
-              <span class="text-xs text-muted">
-                Valores del momento del cobro · orden: {{ ordenPasos.join(' → ') }}
-              </span>
-            </div>
-          </template>
-
-          <div class="space-y-6">
-            <section v-for="grupo in gruposDeReglas" :key="grupo.clave">
-              <div class="mb-1 flex items-baseline justify-between gap-2 border-b border-default pb-1">
-                <h3 class="text-sm font-medium">
-                  {{ grupo.titulo }}
-                </h3>
-                <span v-if="grupo.total" class="font-mono text-sm text-muted">
-                  {{ formatMonto(grupo.total) }}
-                </span>
-              </div>
-              <UTable :data="grupo.filas" :columns="reglaColumns">
-                <template #tipo-cell="{ row }">
-                  <UBadge
-                    :color="tipoReglaColor(row.original.tipo)"
-                    variant="subtle"
-                    size="sm"
-                  >
-                    {{ row.original.tipo }}
-                  </UBadge>
-                </template>
-                <template #nombre-cell="{ row }">
-                  <span :class="row.original.sinEfecto ? 'text-muted' : ''">
-                    {{ row.original.nombre }}
-                  </span>
-                </template>
-                <template #expresion-cell="{ row }">
-                  <span class="font-mono" :class="row.original.sinEfecto ? 'text-muted' : ''">
-                    {{ row.original.expresion }}
-                  </span>
-                </template>
-                <template #monto-cell="{ row }">
-                  <div class="flex flex-col items-end">
-                    <span class="font-mono" :class="row.original.sinEfecto ? 'text-muted' : ''">
-                      {{ formatMonto(row.original.monto) }}
-                    </span>
-                    <span v-if="row.original.recorte" class="text-xs text-warning">
-                      {{ row.original.recorte }}
-                    </span>
-                  </div>
-                </template>
-              </UTable>
-            </section>
-          </div>
         </UCard>
 
         <div class="grid gap-4 md:grid-cols-2">

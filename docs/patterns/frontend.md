@@ -307,6 +307,17 @@ revert). Archivo CRUD clásico con toggle: `razones-sociales.vue`.
 Estados de carga/vacío: bloques `v-if="loading"` / `v-else-if="!items.length"` con
 texto centrado gris antes de la lista.
 
+**Dentro de una celda de `UTable`, un `<span>` sin clase de color se renderiza
+atenuado.** El `td` del tema trae `text-muted` y `color` es una propiedad
+heredada, así que "no le puse color" significa "queda gris", no "queda en el
+color por defecto". Cuando un texto dentro de una celda tiene que **destacar**
+—un rótulo que desambigua una cifra, por ejemplo— hay que declararle
+`text-highlighted` explícito. La clase directa gana sobre la herencia sin
+depender de especificidad ni del orden de las utilidades.
+Costó un ciclo de revisión en ago-2026: el código decía "sin color atenuado" y
+el render decía lo contrario. **Verificar el token efectivo, no la ausencia de
+clase.**
+
 ---
 
 ## 7. Campos decimales / monetarios → string de punta a punta
