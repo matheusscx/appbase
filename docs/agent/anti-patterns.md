@@ -133,6 +133,25 @@ jul-2026 en el camino caliente del POS, corregidas en la auditoría de `ventas`+
    `expect(crearConversor).toHaveBeenCalledTimes(1)`. Sin él, el arreglo se revierte sin
    que falle nada — el resultado de la venta es idéntico, solo cambia cuántas queries hizo.
 
+**No todo bucle con `await` es un N+1.** Son tres cosas distintas y confundirlas costó dos
+falsos positivos en la auditoría de jul-2026. Antes de tocar un bucle, clasificarlo:
+
+| Forma | Qué es | Qué se hace |
+|---|---|---|
+| Una **query por fila** para derivar un dato | El N+1 de arriba | Sale siempre: `JOIN`, agregación o `= ANY($1)` |
+| **N filas que hay que escribir** | No es un defecto de diseño: son N filas | Se batchea — un `save` con el array, no un `await` por fila |
+| Escrituras con **orden de lock deliberado** | El orden ES la protección | **No se toca** sin analizar dónde se decide el lock (ver abajo) |
+
+La segunda no es la misma falta que la primera, pero vale arreglarla igual: en
+`crearEnTransaccion` las tres tablas de reglas se escribían con un `await save()` por traza
+**en serie**, sobre un resultado que ya estaba entero en memoria (ago-2026, `a149e621`). La
+tercera es el bucle de movimientos de inventario de esa misma función, y batchearlo
+cambiaría la semántica de deadlock.
+
+Un batch de escrituras **no puede mover ningún número**: mismas filas, mismos montos, misma
+atribución, mismo orden. Se fija con un test que afirma sobre el array que recibe el `save`,
+no sobre el resultado de la venta — que es idéntico antes y después.
+
 ### ❌ Tomar `FOR UPDATE` en un orden que decide el cliente (o el heap)
 
 Dos transacciones que bloquean las mismas filas en orden distinto se esperan en cruz y

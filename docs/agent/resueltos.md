@@ -12,6 +12,29 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Congelado de las reglas aplicadas en la venta (2026-08-02)
+
+- [x] **El recorte de un descuento no queda auditado en ninguna parte** (backend, cerrado
+  2026-08-02) — cuando el piso topea un descuento de 500 a 100, en BD quedaba un descuento
+  de 100 sin ningún rastro de que la regla valía 500; el motivo vivía solo en un toast que
+  el cajero puede no leer.
+  **Cómo se cerró:** la entrada proponía "una columna o flag en el detalle de venta", y al
+  medir resultó ser la punta de un hueco más grande: la venta tampoco guardaba **con qué
+  valor** aplicó ninguna regla, así que editar un descuento de 10% a 20% reescribía el
+  pasado. Se resolvieron juntos. `ventas_descuentos.valor_solicitado` guarda lo que la regla
+  pedía —separado de `valor_aplicado`, que sigue siendo lo que entró en el total para que el
+  comprobante cuadre—, y las tres tablas congelan además `nombre_regla`, `modo`,
+  `porcentaje_aplicado` y `detalle_id`. No es un flag: guardar el **monto pedido** dice
+  cuánto se recortó, mientras que un booleano solo diría que algo se recortó.
+  **Qué lo fija:** `ventas.e2e-spec.ts` → "guarda lo que el descuento pedía cuando el piso
+  en cero lo recortó" (aplicado $2.000 / solicitado $5.000) y el unit gemelo en
+  `ventas.service.spec.ts`. Mutantes verificados: revertir al código sin `detalle_id` y
+  atribuir todo a `detalles[0]` — los dos matan el test de las dos líneas, en unit y en e2e.
+  Detalle completo en `docs/features/motor-calculo-precios.md` → "La venta congela la regla
+  que aplicó". Plan: `docs/superpowers/plans/2026-08-02-congelar-reglas-en-la-venta.md`.
+
+---
+
 ## Papelera — las 15 pantallas del frontend (2026-08-02)
 
 - [x] **Las 15 pantallas de la papelera cableadas** (frontend, cerrado 2026-08-02) —

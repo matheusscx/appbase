@@ -1,5 +1,9 @@
 # Congelar las reglas aplicadas en la venta: plan de implementación
 
+> **Status: completado (2026-08-02).** Commits `536febef` (motor), `a149e621` (batch),
+> `c2d797ce` (esquema), `5dc90b9d` (congelado) y el de documentación. Las cinco tareas
+> cerraron con gate completo en verde y revisión independiente LIMPIA cada una.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Poder decir "este descuento era 10% cuando se hizo la venta, aunque hoy sea 20%", y lo mismo para recargos e impuestos. Auditoría, no operación diaria.
@@ -112,10 +116,18 @@ Inerte: las columnas existen y nada las puebla todavía. Separada porque es mec�
 
 ### Task 5: Documentación
 
-- [ ] `docs/features/motor-calculo-precios.md`: qué congela la venta y por qué, con la tabla por familia y la asimetría explicada.
-- [ ] `docs/ESTADO.md`: fila de la funcionalidad.
-- [ ] Cerrar en `docs/agent/pendientes.md` la entrada del recorte de descuentos, y mover el detalle a `resueltos.md`.
-- [ ] Evaluar si el batch de Task 2 merece entrada en `docs/patterns/backend.md` — el repo ya prohíbe el N+1 de lectura, pero no dice nada sobre escrituras de N filas, y la distinción ya causó dos falsos positivos en auditoría.
+- [x] `docs/features/motor-calculo-precios.md`: qué congela la venta y por qué, con la tabla por familia y la asimetría explicada. Más las dos secciones de testing.
+- [x] `docs/ESTADO.md`: fila de la funcionalidad.
+- [x] Cerrar en `docs/agent/pendientes.md` la entrada del recorte de descuentos, y mover el detalle a `resueltos.md`.
+- [x] El batch de Task 2 sí merecía entrada, pero en **`docs/agent/anti-patterns.md`** y no en `patterns/backend.md`: ahí es donde vive el material de N+1, pegado a la entrada de orden de lock que es la otra mitad de la distinción. Quedó como tabla de tres formas.
+
+**Salió en la revisión de Task 4 y se anotó en `pendientes.md`:** el `valor` de un tramo
+nunca se valida. `validarValor()` exige que un porcentaje sea `< 1`, pero solo corre para
+`TIPOS_CON_VALOR_UNICO`; un tramo `modo='porcentaje'` con `valor: '50'` entra y produce un
+descuento del 5000%. Preexistente y en dos módulos ajenos, así que no se corrigió acá.
+⚠️ El revisor lo reportó como riesgo de *overflow* de `NUMERIC(7,4)`; eso está mal —esa
+columna aguanta hasta `999.9999`, un `50` cabe. El daño es el descuento absurdo, no el
+desborde.
 
 ---
 

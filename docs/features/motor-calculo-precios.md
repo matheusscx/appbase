@@ -204,6 +204,59 @@ precisiones que hacen a la regla:
 Los recargos **no tienen tope superior** —subir el total no tiene el problema
 que el piso resuelve— pero sí el piso en cero de arriba: un recargo nunca resta.
 
+### La venta congela la regla que aplicó (2026-08-02)
+
+**El problema:** las tablas `ventas_descuentos` / `ventas_recargos` /
+`ventas_impuestos` guardaban el monto y un puntero al catálogo vivo. Editar un
+descuento de 10% a 20% —o borrarlo— reescribía el pasado: la venta ya no podía
+decir cuánto valía la regla cuando se cobró.
+
+**La regla ahora:** la fila se basta sola. No se consulta el catálogo para leer
+una venta vieja. Es la misma idea de [ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)
+—congelar el hecho fiscal en la transacción— extendida a las tres familias, y el
+mismo idioma que `venta_detalles`, que ya congela `descripcion` y
+`clasificacion_tributaria` del ítem.
+
+Qué congela cada familia. **Las asimetrías son intencionales:**
+
+| Columna | `ventas_descuentos` | `ventas_recargos` | `ventas_impuestos` | Por qué |
+|---|:--:|:--:|:--:|---|
+| `nombre_regla` | ✅ | ✅ | ✅ | El catálogo puede renombrarla o borrarla |
+| `modo` | ✅ | ✅ | — | Un impuesto es siempre porcentaje |
+| `porcentaje_aplicado` | ✅ | ✅ | ✅ | Ya existía; solo impuestos la poblaba |
+| `valor_solicitado` | ✅ | — | — | Solo a los descuentos los topea el piso |
+| `detalle_id` | ✅ | ✅ | ✅ | Nullable: las de nivel venta no son de ninguna línea |
+
+Tres decisiones que no se deducen de la tabla:
+
+- **`porcentaje_aplicado` va `null` explícito en las reglas de monto fijo.** Un
+  `0` se leería después como "valía 0%", que es una regla distinta. El otro
+  `null` posible —una regla de porcentaje que no llegó a aplicar (diferida,
+  método de pago que no coincide, sin tramo)— lo desambigua `modo`.
+- **`valor_solicitado` separa lo que la regla pedía de lo que el piso dejó
+  aplicar.** `valor_aplicado` sigue siendo lo que entró en el total, para que el
+  comprobante cuadre. Sin la columna, un cupón de $5.000 topeado a $2.000 es
+  indistinguible de uno que valía $2.000.
+- **`detalle_id` se cruza por índice** contra `resultado.lineas`, **nunca por
+  `itemId`**: el mismo ítem puede aparecer en dos líneas con personalizaciones
+  distintas, y buscar por ítem atribuiría las dos reglas a la misma.
+
+**`ventas.config_calculo` (`jsonb`)** guarda la config con la que se calculó
+(`formula`, `calculoDescuentos`, `calculoRecargos`, `escalaCalculo`,
+`modoRedondeo`). Sin ella el congelado no es interpretable: el mismo 10% da un
+total distinto según el orden de la fórmula y según base|cascada, las dos cosas
+editables desde Preferencias. Va en `jsonb` y no en columnas por una razón de
+forma —`formula` es un array y el objeto se lee entero—, no por contradecir la
+decisión de columnas del resto.
+
+`nombre_regla`, `modo` y `valor_solicitado` son **`NOT NULL`**:
+`crearEnTransaccion` es el único camino de escritura de estas tablas, así que el
+congelado es invariante de esquema y no convención. Un segundo camino que se
+olvide de poblarlas falla al insertar.
+
+La feature es de **auditoría, no de operación diaria**: las columnas viajan en
+el detalle de venta pero todavía no hay pantalla que las muestre.
+
 ---
 
 ## Frontend
@@ -258,7 +311,9 @@ cd backend && npm test            # incluye los specs del motor y del servicio
 ```
 
 - `calculo-precios.engine.spec.ts` — neto/desbruteo, base vs compuesto, orden de
-  fórmula, tramos, método de pago, reglas diferidas, redondeo, nivel venta.
+  fórmula, tramos, método de pago, reglas diferidas, redondeo, nivel venta, y el
+  congelado en la traza (`modo`, `valorEfectivo` incluido el de una regla por
+  tramos, `valorSolicitado` de un descuento topeado).
 - `calculo-precios.service.spec.ts` — resolución de reglas asociadas vs override,
   errores (regla inexistente, cantidad ≤ 0).
 
@@ -272,6 +327,12 @@ cd backend && npm test            # incluye los specs del motor y del servicio
   disponible ("Promo fija $5.000", seed): confirma que la advertencia de tope
   aparece en `lineas[].advertencias` cuando el descuento va por línea y en
   `advertenciasVenta` cuando va a nivel venta, sin mezclarse entre sí.
+- `ventas.e2e-spec.ts` → "la venta congela la regla aplicada" — el que prueba el
+  objetivo: crea una venta con un descuento del 10%, **edita la regla a 20%** (y
+  verifica contra el catálogo que el cambio ocurrió) y confirma que la venta
+  sigue diciendo 10%. Su gemelo con la regla **borrada**, la misma regla en dos
+  líneas atribuida a `detalle_id` distintos, el descuento topeado
+  (`valor_solicitado` ≠ `valor_aplicado`) y `config_calculo` en la cabecera.
 
 ### Manual (Swagger)
 

@@ -484,11 +484,6 @@ Ver [`resueltos.md`](resueltos.md).
   Lo detectó la revisión independiente con un fuzz de 20.000 ventas. Es raro (exige un
   descuento fijo mayor al neto **y** un recargo posterior que lo levante), por eso no se
   resolvió sobre la marcha.
-- [ ] **El recorte de un descuento no queda auditado en ninguna parte** (backend) — cuando
-  el piso topea un descuento de 500 a 100, en BD queda un descuento de 100 sin ningún rastro
-  de que la regla valía 500; el motivo vive solo en un toast que el cajero puede no leer.
-  Para un sistema con ambición fiscal/auditable el **hecho** del tope debería quedar en la
-  transacción. Cierre posible: una columna o flag en el detalle de venta.
 
 ## Revisión final `borrado-ingrediente-extra` (2026-07-28)
 
