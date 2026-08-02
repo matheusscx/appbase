@@ -255,16 +255,34 @@ congelado es invariante de esquema y no convención. Un segundo camino que se
 olvide de poblarlas falla al insertar.
 
 **Dónde se ve** (2026-08-02): `VentaDetalleDrawer.vue` → tarjeta **"Reglas
-aplicadas"**, entre las líneas de venta y los totales. Las tres familias van en
-**una sola tabla** con un badge de tipo, porque responden una sola pregunta
-—"¿qué se le aplicó a esta venta?"— y separadas quedaban tres tablas casi
-vacías. Cada fila dice con qué valor aplicó la regla (`10,00%` o `Monto fijo`),
-a qué línea o si fue a toda la venta, y cuánta plata. Dos casos con nombre
-propio: un descuento topeado muestra **`pedía $5.000`** bajo el monto, y una
-regla que se evaluó sin aportar nada dice **`No aplicó`** en vez de un guion
-—que hacía dudar de si el dato se había perdido— con la fila atenuada.
+aplicadas"**, entre las líneas de venta y los totales.
 
-`config_calculo` todavía no tiene consumidor visual: ver `docs/agent/pendientes.md`.
+**Se agrupa por línea, y dentro de cada una sigue el orden de la fórmula**,
+porque es como el motor lo aplicó: sobre el neto de la línea se encadenan los
+pasos y cada uno opera sobre el acumulado del anterior. La primera versión
+listaba por familia —todos los descuentos, después todos los recargos— y eso
+describe la venta pero **no el cálculo**: deja al lector reconstruyendo de
+memoria a qué ítem pertenecía cada fila. Corregido el mismo día tras verlo con
+dos ítems y reglas distintas en cada uno.
+
+El orden sale de `configCalculo.formula` de **esa** venta, no de un orden fijo
+del frontend: dos ventas del mismo tenant pueden tener órdenes distintos si
+alguien editó Preferencias entre una y otra. Se muestra en la cabecera de la
+tarjeta (`orden: Recargo → Descuento → Impuesto`). Para ventas sin
+`config_calculo` —las anteriores al congelado y las notas de crédito— cae al
+orden por defecto.
+
+Las reglas de nivel venta van en un bloque final, "Toda la venta", porque no
+pertenecen a ninguna línea. Cada fila dice con qué valor aplicó la regla
+(`10,00%` o `Monto fijo`) y cuánta plata. Dos casos con nombre propio: un
+descuento topeado muestra **`pedía $5.000`** bajo el monto, y una regla que se
+evaluó sin aportar nada dice **`No aplicó`** en vez de un guion —que hacía
+dudar de si el dato se había perdido— con la fila atenuada.
+
+⚠️ `config_calculo` se escribió durante meses sin que **nadie lo leyera**: el
+`SELECT` de `findOne` no lo traía. Lo destapó necesitar el orden para esta
+pantalla. El e2e de "congela la config del cálculo" ahora verifica las dos
+mitades —que se persista y que viaje por la API—, no solo la primera.
 
 ---
 

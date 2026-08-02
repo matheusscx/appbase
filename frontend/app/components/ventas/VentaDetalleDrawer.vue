@@ -105,6 +105,12 @@ interface VentaDetalle {
   descuentos: ReglaCongelada[]
   recargos: ReglaCongelada[]
   impuestos: ReglaCongelada[]
+  /**
+   * La config con la que se calculó, congelada. `formula` es el orden en que se
+   * aplicaron los pasos y es lo que ordena el desglose. `null` en las ventas
+   * anteriores al congelado y en las notas de crédito.
+   */
+  configCalculo: { formula: string[] } | null
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
   propina: PropinaVenta | null
@@ -242,17 +248,18 @@ const detalleColumns: TableColumn<Detalle>[] = [
 ]
 
 /**
- * Las tres familias aplanadas en una sola tabla. Van juntas y no en tres
- * tarjetas porque la pregunta que responden es una sola —"¿qué se le aplicó a
- * esta venta?"— y separadas quedan tres tablas casi vacías.
+ * El desglose se agrupa **por línea** y dentro de cada una sigue el orden de la
+ * fórmula del tenant, porque es como el motor lo aplicó: sobre el neto de la
+ * línea se encadenan los pasos y cada uno opera sobre el acumulado del
+ * anterior. Listarlo por familia —todos los descuentos, después todos los
+ * recargos— describe la venta pero no el cálculo, y deja al lector armando de
+ * memoria a qué ítem pertenecía cada fila.
  */
 interface ReglaAplicadaFila {
   tipo: string
   nombre: string
   /** Con qué valor aplicó: "10,00%" o "Monto fijo". */
   expresion: string
-  /** A qué línea, o a la venta entera. */
-  alcance: string
   monto: string
   /** Presente solo si el piso en cero recortó la regla. */
   recorte: string | null
@@ -260,7 +267,28 @@ interface ReglaAplicadaFila {
   sinEfecto: boolean
 }
 
-function filaDeRegla(tipo: string, r: ReglaCongelada, lineas: Map<string, string>): ReglaAplicadaFila {
+interface GrupoReglas {
+  clave: string
+  titulo: string
+  /** El total de la línea, para cerrar la cuenta de su propio bloque. */
+  total: string | null
+  filas: ReglaAplicadaFila[]
+}
+
+/**
+ * Orden por defecto para ventas sin `configCalculo`: las anteriores al
+ * congelado. Las notas de crédito también lo tienen null, pero ahí es
+ * decorativo — no escriben filas de reglas, así que no hay nada que ordenar.
+ */
+const FORMULA_DEFAULT = ['descuentos', 'recargos', 'impuestos']
+
+const PASO_A_TIPO: Record<string, string> = {
+  descuentos: 'Descuento',
+  recargos: 'Recargo',
+  impuestos: 'Impuesto',
+}
+
+function filaDeRegla(tipo: string, r: ReglaCongelada): ReglaAplicadaFila {
   // Un `porcentaje_aplicado` null puede ser "era monto fijo" o "era porcentaje
   // y no llegó a aplicar"; `modo` es lo que los distingue. El segundo caso se
   // nombra: un guion al lado de una regla llamada "Solo transferencia 5%" hace
@@ -280,32 +308,72 @@ function filaDeRegla(tipo: string, r: ReglaCongelada, lineas: Map<string, string
     tipo,
     nombre: r.nombreRegla,
     expresion,
-    // El `?? '—'` es guarda de tipos, no un estado real: nada soft-borra un
-    // `venta_detalles`, así que un `detalleId` siempre está entre los detalles
-    // de su propia venta. No poner ahí un texto que describa un caso imposible.
-    alcance: r.detalleId ? (lineas.get(r.detalleId) ?? '—') : 'Toda la venta',
     monto: r.valorAplicado,
     recorte,
     sinEfecto: new Decimal(r.valorAplicado).isZero(),
   }
 }
 
-const reglasAplicadas = computed<ReglaAplicadaFila[]>(() => {
+/** El orden real de los pasos en esta venta, con nombres presentables. */
+const formulaVenta = computed<string[]>(
+  () => venta.value?.configCalculo?.formula ?? FORMULA_DEFAULT,
+)
+
+const ordenPasos = computed(() => formulaVenta.value.map(p => PASO_A_TIPO[p] ?? p))
+
+/**
+ * Un bloque por línea —en el orden en que se vendieron— y uno final para las
+ * reglas de nivel venta, que no pertenecen a ninguna línea (`detalleId` null).
+ * Los bloques sin reglas no se dibujan.
+ *
+ * ⚠️ Agrupar así **descarta** cualquier regla cuyo `detalleId` no esté entre los
+ * detalles de la venta: desaparecería de la pantalla sin aviso. Se apoya en que
+ * nada soft-borra un `venta_detalles` y en que las tres queries de reglas están
+ * scopeadas por `venta_id`, así que ese estado no existe. Si algún día se
+ * borran detalles, hay que decidir qué pasa con sus reglas antes que esto.
+ */
+const gruposDeReglas = computed<GrupoReglas[]>(() => {
   const v = venta.value
   if (!v) return []
-  const lineas = new Map(v.detalles.map(d => [d.id, d.descripcion]))
-  return [
-    ...v.descuentos.map(r => filaDeRegla('Descuento', r, lineas)),
-    ...v.recargos.map(r => filaDeRegla('Recargo', r, lineas)),
-    ...v.impuestos.map(r => filaDeRegla('Impuesto', r, lineas)),
-  ]
+
+  const porPaso: Record<string, ReglaCongelada[]> = {
+    descuentos: v.descuentos,
+    recargos: v.recargos,
+    impuestos: v.impuestos,
+  }
+
+  // Recorre los pasos en el orden de la fórmula y se queda con las reglas de
+  // un `detalleId` dado: así cada bloque queda en el orden en que se aplicó.
+  const filasDe = (detalleId: string | null): ReglaAplicadaFila[] =>
+    formulaVenta.value.flatMap((paso) => {
+      const tipo = PASO_A_TIPO[paso]
+      if (!tipo) return []
+      return (porPaso[paso] ?? [])
+        .filter(r => r.detalleId === detalleId)
+        .map(r => filaDeRegla(tipo, r))
+    })
+
+  const grupos: GrupoReglas[] = v.detalles.map(d => ({
+    clave: d.id,
+    titulo: d.descripcion,
+    total: d.totalLinea,
+    filas: filasDe(d.id),
+  }))
+
+  grupos.push({
+    clave: 'venta',
+    titulo: 'Toda la venta',
+    total: null,
+    filas: filasDe(null),
+  })
+
+  return grupos.filter(g => g.filas.length > 0)
 })
 
 const reglaColumns: TableColumn<ReglaAplicadaFila>[] = [
   { accessorKey: 'tipo', header: 'Tipo' },
   { accessorKey: 'nombre', header: 'Regla' },
   { accessorKey: 'expresion', header: 'Valor', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'alcance', header: 'Se aplicó a' },
   { accessorKey: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
@@ -511,53 +579,61 @@ function onNcSuccess(payload: {
           </UTable>
         </UCard>
 
-        <UCard v-if="reglasAplicadas.length">
+        <UCard v-if="gruposDeReglas.length">
           <template #header>
-            <div class="flex items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <h2 class="text-base font-semibold">
                 Reglas aplicadas
               </h2>
               <span class="text-xs text-muted">
-                Valores del momento del cobro
+                Valores del momento del cobro · orden: {{ ordenPasos.join(' → ') }}
               </span>
             </div>
           </template>
-          <UTable :data="reglasAplicadas" :columns="reglaColumns">
-            <template #tipo-cell="{ row }">
-              <UBadge
-                :color="tipoReglaColor(row.original.tipo)"
-                variant="subtle"
-                size="sm"
-              >
-                {{ row.original.tipo }}
-              </UBadge>
-            </template>
-            <template #nombre-cell="{ row }">
-              <span :class="row.original.sinEfecto ? 'text-muted' : ''">
-                {{ row.original.nombre }}
-              </span>
-            </template>
-            <template #expresion-cell="{ row }">
-              <span class="font-mono" :class="row.original.sinEfecto ? 'text-muted' : ''">
-                {{ row.original.expresion }}
-              </span>
-            </template>
-            <template #alcance-cell="{ row }">
-              <span class="text-sm" :class="row.original.sinEfecto ? 'text-muted' : ''">
-                {{ row.original.alcance }}
-              </span>
-            </template>
-            <template #monto-cell="{ row }">
-              <div class="flex flex-col items-end">
-                <span class="font-mono" :class="row.original.sinEfecto ? 'text-muted' : ''">
-                  {{ formatMonto(row.original.monto) }}
-                </span>
-                <span v-if="row.original.recorte" class="text-xs text-warning">
-                  {{ row.original.recorte }}
+
+          <div class="space-y-6">
+            <section v-for="grupo in gruposDeReglas" :key="grupo.clave">
+              <div class="mb-1 flex items-baseline justify-between gap-2 border-b border-default pb-1">
+                <h3 class="text-sm font-medium">
+                  {{ grupo.titulo }}
+                </h3>
+                <span v-if="grupo.total" class="font-mono text-sm text-muted">
+                  {{ formatMonto(grupo.total) }}
                 </span>
               </div>
-            </template>
-          </UTable>
+              <UTable :data="grupo.filas" :columns="reglaColumns">
+                <template #tipo-cell="{ row }">
+                  <UBadge
+                    :color="tipoReglaColor(row.original.tipo)"
+                    variant="subtle"
+                    size="sm"
+                  >
+                    {{ row.original.tipo }}
+                  </UBadge>
+                </template>
+                <template #nombre-cell="{ row }">
+                  <span :class="row.original.sinEfecto ? 'text-muted' : ''">
+                    {{ row.original.nombre }}
+                  </span>
+                </template>
+                <template #expresion-cell="{ row }">
+                  <span class="font-mono" :class="row.original.sinEfecto ? 'text-muted' : ''">
+                    {{ row.original.expresion }}
+                  </span>
+                </template>
+                <template #monto-cell="{ row }">
+                  <div class="flex flex-col items-end">
+                    <span class="font-mono" :class="row.original.sinEfecto ? 'text-muted' : ''">
+                      {{ formatMonto(row.original.monto) }}
+                    </span>
+                    <span v-if="row.original.recorte" class="text-xs text-warning">
+                      {{ row.original.recorte }}
+                    </span>
+                  </div>
+                </template>
+              </UTable>
+            </section>
+          </div>
         </UCard>
 
         <div class="grid gap-4 md:grid-cols-2">

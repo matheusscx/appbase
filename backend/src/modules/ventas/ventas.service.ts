@@ -8,7 +8,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull } from 'typeorm';
 import Decimal from 'decimal.js';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
-import type { TrazaRegla } from '../calculo-precios/calculo-precios.engine';
+import type {
+  ConfigCalculo,
+  TrazaRegla,
+} from '../calculo-precios/calculo-precios.engine';
 import { CajaService } from '../caja/caja.service';
 import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService, type ConvertirUnidad } from '../items/items.service';
@@ -1436,6 +1439,7 @@ export class VentasService {
       total_final: string;
       base_ventas_total_final: string;
       base_ventas_sin_impuestos: string;
+      config_calculo: ConfigCalculo | null;
       comentario: string | null;
       fecha: Date;
       creado_el: Date;
@@ -1446,6 +1450,7 @@ export class VentasService {
       `SELECT v.venta_id, v.caja_id, v.moneda_id, v.tipo_documento_id, v.canal, v.estado,
               v.total_bruto, v.total_descuentos, v.total_recargos, v.total_impuestos, v.total_final,
               v.base_ventas_total_final, v.base_ventas_sin_impuestos,
+              v.config_calculo,
               v.comentario, v.fecha, v.creado_el, v.venta_referencia_id,
               td.codigo AS tipo_documento_codigo, td.nombre AS tipo_documento_nombre
        FROM ventas v
@@ -1616,6 +1621,10 @@ export class VentasService {
       totalFinal: v.total_final,
       baseVentasTotalFinal: v.base_ventas_total_final,
       baseVentasSinImpuestos: v.base_ventas_sin_impuestos,
+      // Sin esto el desglose congelado no se puede ORDENAR como se aplicó: el
+      // orden de los pasos es del tenant y editable. `null` en las ventas
+      // anteriores al congelado y en las notas de crédito.
+      configCalculo: v.config_calculo,
       comentario: v.comentario,
       fecha: v.fecha,
       creadoEl: v.creado_el,

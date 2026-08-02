@@ -14,13 +14,14 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
-- [ ] **`configCalculo` no se muestra en ninguna parte** (frontend, 2026-08-02) — el
-  desglose de reglas ya vive en `VentaDetalleDrawer.vue` → "Reglas aplicadas", pero
-  `ventas.config_calculo` —el orden de la fórmula, base|cascada, escala y redondeo con los
-  que se calculó— sigue sin consumidor. Sin eso, dos ventas con el mismo 10% congelado y
-  totales distintos no tienen explicación visible. Es el dato menos accionable de los
-  congelados, por eso quedó fuera del primer corte. Cierre posible: una línea plegable en la
-  tarjeta de Totales, o un tooltip en el título del desglose.
+- [ ] **De `configCalculo` solo se muestra la fórmula** (frontend, 2026-08-02) — el desglose
+  por línea ya usa `formula` para ordenarse y la muestra en la cabecera. Siguen sin
+  consumidor **`calculoDescuentos`/`calculoRecargos`** (base vs cascada), `escalaCalculo` y
+  `modoRedondeo`. Es lo que explica el caso que confunde: un recargo del 5% sobre una línea
+  con descuento da $200 en modo `base` (5% del neto) y $175 en `compuesto` (5% del
+  acumulado) — mismo porcentaje congelado, distinto monto, sin explicación en pantalla.
+  Cierre posible: una línea plegable en la tarjeta de Totales, o extender el `orden: …` de la
+  cabecera con el modo.
   ⚠️ Va con una decisión de permisos: hoy el desglose lo ve **cualquiera con `Ventas:Leer`**
   (`ventas.controller.ts:89`), que es el mismo permiso del resto del drawer. Si la config del
   tenant se considera información de administración, hay que separar el guard.

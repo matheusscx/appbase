@@ -1070,6 +1070,19 @@ describe('Ventas (e2e)', () => {
       );
       expect(typeof fila.config_calculo?.calculoDescuentos).toBe('string');
       expect(typeof fila.config_calculo?.modoRedondeo).toBe('string');
+
+      // Y viaja por la API: el detalle de venta lo necesita para ORDENAR el
+      // desglose como se aplicó. Estuvo escrito y sin leer hasta el 2026-08-02
+      // —el `SELECT` de `findOne` no lo traía—, así que la pantalla no tenía
+      // cómo saber el orden de la fórmula.
+      const detalle = await request(app.getHttpServer())
+        .get(`/api/ventas/${(venta.body as VentaResponse).id}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(detalle.status).toBe(200);
+      expect(
+        (detalle.body as { configCalculo: { formula: string[] } | null })
+          .configCalculo?.formula,
+      ).toEqual(fila.config_calculo?.formula);
     });
   });
 
