@@ -254,4 +254,97 @@ describe('Descuentos y recargos (e2e) — todo expresa su monto', () => {
     expect(res.status).toBe(200);
     expect((res.body as ReglaResponse).nombre).toBe(nuevoNombre);
   });
+
+  // ─── Puerta 3: el monto de un TRAMO ───────────────────────────────────────
+  // Tercera cara de la misma falla: la regla "un porcentaje se expresa en
+  // decimal" se enforzaba solo por el camino del `valor` único. Los dos casos
+  // de abajo se verificaron ABIERTOS contra esta API antes de cerrarlos (201 y
+  // 400 respectivamente, 2026-08-02).
+
+  it('crear un descuento por tramos con un tramo `50` en porcentaje es 400', async () => {
+    // El typo natural de quien piensa "50%". Entraba con 201 y producía un
+    // descuento del 5000% sobre la línea.
+    const res = await crearDescuento({
+      nombre: `Tramo 50 E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'porcentaje',
+      tramos: [{ minimo: '10', valor: '50' }],
+    });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(/decimal/);
+  });
+
+  it('el mismo `5000` en modo monto fijo sí entra (ancla positiva)', async () => {
+    // Lo que decide es el modo, no el número: sin esta ancla el test de arriba
+    // pasaría igual si los tramos estuvieran rotos para todo.
+    const res = await crearDescuento({
+      nombre: `Tramo fijo E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'monto_fijo',
+      tramos: [{ minimo: '10', valor: '5000' }],
+    });
+
+    expect(res.status).toBe(201);
+  });
+
+  it('cambiar SOLO el modo a porcentaje revalida los tramos ya guardados', async () => {
+    // El `PATCH` no trae tramos: mirar solo lo que llega deja pasar la
+    // reinterpretación de valores que ya estaban guardados.
+    const creado = await crearDescuento({
+      nombre: `Tramo remodo E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'monto_fijo',
+      tramos: [{ minimo: '10', valor: '5000' }],
+    });
+    expect(creado.status).toBe(201);
+    const id = (creado.body as ReglaResponse).id;
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ modo: 'porcentaje' });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(/decimal/);
+  });
+
+  it('un PATCH de valor sobre una regla monto_fijo no lo lee como porcentaje', async () => {
+    // La cara opuesta: la validación adivinaba `porcentaje` cuando el `PATCH`
+    // no reenviaba el modo, y rechazaba con 400 una edición legítima.
+    const creado = await crearDescuento({
+      nombre: `Cupón fijo E2E ${Date.now()}`,
+      tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+      modo: 'monto_fijo',
+      valor: '1000',
+    });
+    expect(creado.status).toBe(201);
+    const id = (creado.body as ReglaResponse).id;
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/descuentos/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ valor: '5000' });
+
+    expect(res.status).toBe(200);
+    expect((res.body as ReglaResponse).valor).toBe('5000');
+  });
+
+  it('un recargo con un tramo `50` en porcentaje también es 400', async () => {
+    // Ningún tipo de recargo pide tramos, pero la plomería es alcanzable por
+    // API y el motor los evalúa mirando `tramos.length` antes que el código.
+    const res = await request(app.getHttpServer())
+      .post('/api/recargos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Recargo tramo 50 E2E ${Date.now()}`,
+        tipoReglaId: TIPO_RECARGO_GENERAL,
+        modo: 'porcentaje',
+        valor: '0.05',
+        tramos: [{ minimo: '10', valor: '50' }],
+      });
+
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toMatch(/decimal/);
+  });
 });

@@ -14,6 +14,36 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ## Congelado de las reglas aplicadas en la venta (2026-08-02)
 
+- [x] **El valor de un tramo nunca se validaba: un "50%" cargado como `50` pasaba**
+  (backend, cerrado 2026-08-02) — `validarValor()` exigía que un porcentaje fuera `< 1`,
+  pero **solo se invocaba para `TIPOS_CON_VALOR_UNICO`**. Los tipos por tramos pasaban por
+  otra rama que solo verificaba que **hubiera** al menos un tramo; el `valor` de cada uno lo
+  tipaba `TramoDto` con un `@IsNumberString()` pelado. La misma regla de negocio se
+  enforzaba o no según el tipo, y un tramo `porcentaje` con `50` producía un descuento del
+  **5000%**.
+  **Al arreglarlo apareció la cara opuesta de la misma falla:** `validarSegunTipoUpdate`
+  resolvía el modo como `dto.modo ?? 'porcentaje'`, así que un `PATCH { valor: '5000' }`
+  sobre una regla `monto_fijo` que no reenviaba el modo se rechazaba con 400 — una edición
+  legítima, imposible desde la API. Las dos son *validar el campo que llegó en vez del
+  estado que queda*, que es la lección que este archivo ya tenía escrita de la oleada
+  anterior (`validarEstadoResultante`).
+  **Cómo se cerró:** un `validarMontos(modo, valor, tramos)` por service valida el `valor`
+  plano y el de **cada tramo** con el **mismo** modo — el modo con el que la fila queda, no
+  el que llegó. En `update` los tramos se leen de la BD cuando el `PATCH` no los trae, para
+  que cambiar solo el `modo` no reinterprete valores ya guardados (un tramo de `5000`
+  legítimo como monto fijo pasaría a ser 500.000%). El mismo fix en `recargos`, donde ningún
+  tipo pide tramos pero la plomería es alcanzable por API y el motor los evalúa mirando
+  `tramos.length` antes que el código del tipo.
+  **Qué lo fija:** `reglas-valor.e2e-spec.ts` gana cinco casos —tramo `50` en porcentaje
+  (400), el mismo `5000` en monto fijo (201, ancla positiva), `PATCH` de solo el modo que
+  revalida los tramos guardados, `PATCH` de valor sobre `monto_fijo` (200) y el gemelo de
+  recargos— más siete unit entre los dos services. Los dos bugs se verificaron **abiertos**
+  contra la API real antes de cerrarlos y **cerrados** después. Mutantes: quitar la
+  validación de tramos mata 4 tests; volver a `dto.modo ?? 'porcentaje'` mata 1.
+  ⚠️ La revisión que lo encontró lo reportó como riesgo de *overflow* de `NUMERIC(7,4)`;
+  eso estaba mal —esa columna aguanta hasta `999.9999`, un `50` cabe—. El daño era el
+  descuento absurdo, no el desborde.
+
 - [x] **El recorte de un descuento no queda auditado en ninguna parte** (backend, cerrado
   2026-08-02) — cuando el piso topea un descuento de 500 a 100, en BD quedaba un descuento
   de 100 sin ningún rastro de que la regla valía 500; el motivo vivía solo en un toast que

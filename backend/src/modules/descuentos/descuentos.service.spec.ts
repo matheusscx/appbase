@@ -248,6 +248,51 @@ describe('DescuentosService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    // El `valor` de un tramo no se validaba: `validarValor` solo corría para
+    // los tipos de valor único. Un tramo `porcentaje` con `50` entraba con 201
+    // y producía un descuento del 5000% (medido contra la API, 2026-08-02).
+    it('rechaza un tramo en porcentaje con valor >= 1', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Por mayor',
+          tipoReglaId: 'tipo-por_mayor',
+          modo: 'porcentaje',
+          // El typo natural de quien piensa "50%".
+          tramos: [{ minimo: '10', valor: '50' }],
+        }),
+      ).rejects.toThrow(/decimal/);
+    });
+
+    it('rechaza un tramo con valor 0 o negativo', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Por mayor',
+          tipoReglaId: 'tipo-por_mayor',
+          modo: 'porcentaje',
+          tramos: [
+            { minimo: '10', valor: '0.10' },
+            { minimo: '100', valor: '-0.05' },
+          ],
+        }),
+      ).rejects.toThrow(/mayor a 0/);
+    });
+
+    it('un tramo de 5000 en monto fijo sí es válido', async () => {
+      // El mismo número que se rechaza como porcentaje: lo que decide es el
+      // modo, no el número.
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Por mayor fijo',
+          tipoReglaId: 'tipo-por_mayor',
+          modo: 'monto_fijo',
+          tramos: [{ minimo: '10', valor: '5000' }],
+        }),
+      ).resolves.toBeDefined();
+    });
+
     it('creates por_monto_venta with tramos and optional dates', async () => {
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_monto_venta'));
       await service.create(TENANT, {
@@ -332,6 +377,67 @@ describe('DescuentosService', () => {
       expect(managerMock.softDelete).toHaveBeenCalledWith(DescuentoTramo, {
         descuentoId: 'd-1',
       });
+    });
+
+    // Los tres de acá abajo son la misma falla vista de tres lados: validar
+    // MIRANDO EL CAMPO QUE LLEGÓ en vez del estado que queda. El modo con el
+    // que se interpreta un monto puede no venir en el `PATCH`.
+    it('un PATCH de valor sobre una regla monto_fijo no lo lee como porcentaje', async () => {
+      // Rechazaba con 400 "el porcentaje debe ser < 1" una edición legítima,
+      // porque asumía `porcentaje` cuando el DTO no reenviaba el modo.
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-fijo',
+        tenantId: TENANT,
+        nombre: 'Cupón',
+        tipoReglaId: 'tipo-directo',
+        condicionValor: null,
+        modo: 'monto_fijo',
+        valor: '1000',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+
+      await expect(
+        service.update(TENANT, 'd-fijo', { valor: '5000' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('un PATCH que solo cambia el modo revalida los tramos ya guardados', async () => {
+      // Tramos de 5000 legítimos como monto fijo pasan a ser 500.000% si el
+      // modo cambia. El PATCH no trae tramos: hay que leerlos.
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-tramos',
+        tenantId: TENANT,
+        nombre: 'Por mayor',
+        tipoReglaId: 'tipo-por_mayor',
+        condicionValor: null,
+        modo: 'monto_fijo',
+        valor: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+      tramoRepoMock.find.mockResolvedValue([{ minimo: '10', valor: '5000' }]);
+
+      await expect(
+        service.update(TENANT, 'd-tramos', { modo: 'porcentaje' }),
+      ).rejects.toThrow(/decimal/);
+    });
+
+    it('rechaza un tramo en porcentaje con valor >= 1 también en el PATCH', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-tramos-2',
+        tenantId: TENANT,
+        nombre: 'Por mayor',
+        tipoReglaId: 'tipo-por_mayor',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valor: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('por_mayor'));
+
+      await expect(
+        service.update(TENANT, 'd-tramos-2', {
+          tramos: [{ minimo: '10', valor: '50' }],
+        }),
+      ).rejects.toThrow(/decimal/);
     });
 
     it('replaces metodoPagoIds on update via soft-stamp', async () => {

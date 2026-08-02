@@ -468,11 +468,17 @@ export class DescuentosService {
       dto.modo !== 'porcentaje'
     )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
-    if (TIPOS_CON_VALOR_UNICO.includes(codigo)) {
-      if (!dto.valor)
-        throw new BadRequestException('El valor es requerido para este tipo');
-      this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
-    }
+    if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !dto.valor)
+      throw new BadRequestException('El valor es requerido para este tipo');
+    // Con el modo con el que la fila VA A QUEDAR, que no siempre es el que
+    // llegó: tres tipos lo fuerzan a porcentaje.
+    this.validarMontos(
+      tiposFijoPorcentaje.includes(codigo)
+        ? 'porcentaje'
+        : (dto.modo ?? 'porcentaje'),
+      dto.valor,
+      dto.tramos,
+    );
     if (codigo === 'pronto_pago' && dto.diasVencimiento == null)
       throw new BadRequestException('Días antes del vencimiento requerido');
     if (codigo === 'mora' && dto.diasVencimiento == null)
@@ -530,14 +536,32 @@ export class DescuentosService {
     if (TIPOS_CON_VALOR_UNICO.includes(codigo) && !valorFinal)
       throw new BadRequestException('El valor es requerido para este tipo');
 
-    if (TIPOS_CON_TRAMOS.includes(codigo)) {
-      const cantidad =
-        dto.tramos !== undefined
-          ? dto.tramos.length
-          : await this.tramoRepo.count({ where: { descuentoId: actual.id } });
-      if (!cantidad)
-        throw new BadRequestException('Este tipo requiere al menos un tramo');
-    }
+    // Los tramos que QUEDAN, no los que llegaron: un `PATCH` que solo cambia el
+    // `modo` reinterpreta los valores ya guardados —un tramo de `5000` legítimo
+    // como monto fijo pasa a ser 500.000%—, y ese `PATCH` no trae tramos.
+    // Se leen siempre por eso, y porque un cambio de tipo puede dejar tramos
+    // huérfanos en una regla que ya no los pide: el motor igual los evalúa,
+    // porque mira `tramos.length` antes que el código del tipo.
+    const tramosFinales =
+      dto.tramos !== undefined
+        ? dto.tramos
+        : await this.tramoRepo.find({ where: { descuentoId: actual.id } });
+
+    if (TIPOS_CON_TRAMOS.includes(codigo) && !tramosFinales.length)
+      throw new BadRequestException('Este tipo requiere al menos un tramo');
+
+    const tiposFijoPorcentaje = [
+      'pronto_pago',
+      'interes_simple',
+      'interes_compuesto',
+    ];
+    this.validarMontos(
+      tiposFijoPorcentaje.includes(codigo)
+        ? 'porcentaje'
+        : (dto.modo ?? actual.modo),
+      valorFinal,
+      tramosFinales,
+    );
 
     if (TIPOS_CON_METODOS.includes(codigo)) {
       const cantidad =
@@ -571,8 +595,9 @@ export class DescuentosService {
       dto.modo !== 'porcentaje'
     )
       throw new BadRequestException('Este tipo solo admite modo porcentaje');
-    if (dto.valor !== undefined && dto.valor)
-      this.validarValor(dto.modo ?? 'porcentaje', dto.valor);
+    // El `valor` y los tramos NO se validan acá: dependen del modo con el que
+    // la fila queda, que un `PATCH` puede no traer. Lo hace
+    // `validarEstadoResultante`, que sí tiene la fila actual.
     if (
       dto.diasVencimiento !== undefined &&
       codigo === 'pronto_pago' &&
@@ -607,6 +632,23 @@ export class DescuentosService {
       mora: CondicionTipo.VENCIMIENTO,
     };
     return map[codigo] ?? CondicionTipo.NINGUNA;
+  }
+
+  /**
+   * Toda expresión de monto de la regla —el `valor` plano y el de **cada
+   * tramo**— se valida con el **mismo** modo. Los tramos quedaban afuera:
+   * `validarValor` solo corría para los tipos de valor único, así que un tramo
+   * `porcentaje` con `50` entraba con 201 y producía un descuento del 5000%
+   * (medido contra la API, 2026-08-02). La regla existía; se enforzaba por un
+   * camino y no por el otro.
+   */
+  private validarMontos(
+    modo: string,
+    valor: string | null | undefined,
+    tramos?: { valor: string | null }[],
+  ): void {
+    this.validarValor(modo, valor);
+    for (const tramo of tramos ?? []) this.validarValor(modo, tramo.valor);
   }
 
   private validarValor(modo: string, valor: string | null | undefined): void {

@@ -169,6 +169,19 @@ describe('RecargosService', () => {
       });
     });
 
+    it('rechaza un tramo en porcentaje con valor >= 1', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Recargo con tramo',
+          tipoReglaId: 'tipo-general',
+          valor: '0.05',
+          modo: 'porcentaje',
+          tramos: [{ minimo: '10', valor: '50' }],
+        }),
+      ).rejects.toThrow(/decimal/);
+    });
+
     it('rejects general without valor', async () => {
       tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
       await expect(
@@ -306,6 +319,46 @@ describe('RecargosService', () => {
       await expect(
         service.update(TENANT, 'x', { nombre: 'nuevo' }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('un PATCH de valor sobre una regla monto_fijo no lo lee como porcentaje', async () => {
+      // Gemelo del de descuentos: rechazaba con 400 una edición legítima por
+      // asumir `porcentaje` cuando el DTO no reenviaba el modo.
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r-fijo',
+        tenantId: TENANT,
+        nombre: 'Servicio',
+        tipoReglaId: 'tipo-general',
+        condicionValor: null,
+        modo: 'monto_fijo',
+        valor: '1000',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      await expect(
+        service.update(TENANT, 'r-fijo', { valor: '5000' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('valida los tramos aunque ningún tipo de recargo los pida', async () => {
+      // La plomería de tramos es alcanzable por API y el motor los evalúa
+      // mirando `tramos.length` antes que el código del tipo.
+      recargoRepoMock.findOne.mockResolvedValue({
+        id: 'r-tramos',
+        tenantId: TENANT,
+        nombre: 'Rec tramos',
+        tipoReglaId: 'tipo-general',
+        condicionValor: null,
+        modo: 'porcentaje',
+        valor: '0.10',
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('general'));
+
+      await expect(
+        service.update(TENANT, 'r-tramos', {
+          tramos: [{ minimo: '10', valor: '50' }],
+        }),
+      ).rejects.toThrow(/decimal/);
     });
 
     it('replaces metodoPagoIds on update via soft-stamp', async () => {
