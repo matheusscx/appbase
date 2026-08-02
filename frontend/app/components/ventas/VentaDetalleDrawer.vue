@@ -107,10 +107,15 @@ interface VentaDetalle {
   impuestos: ReglaCongelada[]
   /**
    * La config con la que se calculó, congelada. `formula` es el orden en que se
-   * aplicaron los pasos y es lo que ordena el desglose. `null` en las ventas
-   * anteriores al congelado y en las notas de crédito.
+   * aplicaron los pasos y es lo que ordena el desglose; los dos `calculo*` son
+   * `'base' | 'compuesto'` y explican por qué un mismo porcentaje da montos
+   * distintos. `null` en las ventas anteriores al congelado y en las NCs.
    */
-  configCalculo: { formula: string[] } | null
+  configCalculo: {
+    formula: string[]
+    calculoDescuentos: string
+    calculoRecargos: string
+  } | null
   pagos: Pago[]
   customer: { nombre: string; rut?: string } | null
   propina: PropinaVenta | null
@@ -319,7 +324,28 @@ const formulaVenta = computed<string[]>(
   () => venta.value?.configCalculo?.formula ?? FORMULA_DEFAULT,
 )
 
-const ordenPasos = computed(() => formulaVenta.value.map(p => PASO_A_TIPO[p] ?? p))
+/**
+ * El orden con el que se aplicó cada paso y sobre qué base. Mismo vocabulario
+ * que Preferencias financieras ("Sobre monto base" / "En cascada"), porque es
+ * ahí donde se configura y donde el lector lo va a reconocer.
+ *
+ * `base` y `cascada` no son decoración: un recargo del 5% sobre una línea ya
+ * descontada da distinto según cuál sea, y el porcentaje congelado es el mismo
+ * en los dos casos. Los impuestos no llevan modo —siempre van sobre el
+ * acumulado del paso— y una venta sin config no muestra ninguno, en vez de
+ * inventar el default.
+ */
+const ordenPasos = computed(() =>
+  formulaVenta.value.map((paso) => {
+    const cfg = venta.value?.configCalculo
+    const modo = paso === 'descuentos'
+      ? cfg?.calculoDescuentos
+      : paso === 'recargos' ? cfg?.calculoRecargos : null
+    const etiqueta = PASO_A_TIPO[paso] ?? paso
+    if (!modo) return etiqueta
+    return `${etiqueta} (${modo === 'compuesto' ? 'cascada' : 'base'})`
+  }),
+)
 
 /**
  * Un bloque por línea —en el orden en que se vendieron— y uno final para las

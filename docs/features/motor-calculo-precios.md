@@ -267,10 +267,18 @@ dos ítems y reglas distintas en cada uno.
 
 El orden sale de `configCalculo.formula` de **esa** venta, no de un orden fijo
 del frontend: dos ventas del mismo tenant pueden tener órdenes distintos si
-alguien editó Preferencias entre una y otra. Se muestra en la cabecera de la
-tarjeta (`orden: Recargo → Descuento → Impuesto`). Para ventas sin
-`config_calculo` —las anteriores al congelado y las notas de crédito— cae al
-orden por defecto.
+alguien editó Preferencias entre una y otra. Para ventas sin `config_calculo`
+—las anteriores al congelado— cae al orden por defecto.
+
+La cabecera muestra el orden **y sobre qué base calculó cada familia**:
+`orden: Descuento (base) → Recargo (cascada) → Impuesto`. Mismo vocabulario que
+Preferencias financieras, que es donde se configura. No es decoración: con un
+neto de $5.000 y un descuento del 10%, un recargo del **mismo** 5% da $250 en
+`base` (5% del neto) y **$225** en `cascada` (5% de los $4.500 ya descontados).
+El porcentaje congelado es idéntico en los dos casos, así que sin el modo el
+monto no se puede reconstruir. Los impuestos no llevan modo —van siempre sobre
+el acumulado del paso— y una venta sin config no muestra ninguno, en vez de
+inventar el default.
 
 Las reglas de nivel venta van en un bloque final, "Toda la venta", porque no
 pertenecen a ninguna línea. Cada fila dice con qué valor aplicó la regla
