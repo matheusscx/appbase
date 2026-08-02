@@ -383,8 +383,11 @@ export class VentasService {
       }),
     );
 
-    // 7b. Líneas / detalles
-    const detalles = await Promise.all(
+    // 7b. Líneas / detalles — un `save` con el array entero, no uno por línea.
+    // TypeORM devuelve las mismas instancias en el mismo orden, que es lo que
+    // permite cruzar `detalles[i]` con `resultado.lineas[i]` más abajo.
+    const detalles = await manager.save(
+      VentaDetalle,
       resultado.lineas.map((rLinea, i) => {
         const {
           item,
@@ -395,39 +398,42 @@ export class VentasService {
           cantidadPresentacion,
           unidadCodigoPresentacion,
         } = lineasConversion[i];
-        return manager.save(
-          VentaDetalle,
-          manager.create(VentaDetalle, {
-            ventaId: venta.id,
-            itemId: rLinea.itemId,
-            monedaIdOrigen: item.monedaId,
-            precioUnitarioOrigen: precioOrigen,
-            tasaCambio: tasa,
-            precioUnitario: precioConvertido,
-            descripcion: item.nombre,
-            // Non-null garantizado por el guard del paso 2, que rechaza la venta
-            // antes de escribir si algún ítem no tiene clasificación.
-            clasificacionTributaria: item.clasificacionTributaria!,
-            cantidad: rLinea.cantidad,
-            cantidadPresentacion,
-            unidadCodigoPresentacion,
-            subtotal: rLinea.subtotalNeto,
-            descuentoAplicado: rLinea.descuentoAplicado,
-            recargoAplicado: rLinea.recargoAplicado,
-            impuestoAplicado: rLinea.impuestoAplicado,
-            totalLinea: rLinea.totalLinea,
-            personalizacion,
-          }),
-        );
+        return manager.create(VentaDetalle, {
+          ventaId: venta.id,
+          itemId: rLinea.itemId,
+          monedaIdOrigen: item.monedaId,
+          precioUnitarioOrigen: precioOrigen,
+          tasaCambio: tasa,
+          precioUnitario: precioConvertido,
+          descripcion: item.nombre,
+          // Non-null garantizado por el guard del paso 2, que rechaza la venta
+          // antes de escribir si algún ítem no tiene clasificación.
+          clasificacionTributaria: item.clasificacionTributaria!,
+          cantidad: rLinea.cantidad,
+          cantidadPresentacion,
+          unidadCodigoPresentacion,
+          subtotal: rLinea.subtotalNeto,
+          descuentoAplicado: rLinea.descuentoAplicado,
+          recargoAplicado: rLinea.recargoAplicado,
+          impuestoAplicado: rLinea.impuestoAplicado,
+          totalLinea: rLinea.totalLinea,
+          personalizacion,
+        });
       }),
     );
 
-    // 7c. Reglas aplicadas — descuentos por línea
-    for (let i = 0; i < resultado.lineas.length; i++) {
-      const rLinea = resultado.lineas[i];
+    // 7c/7d. Reglas aplicadas. Se arman todas las filas en memoria y se
+    // escriben con un `save` por familia: eran N round-trips EN SERIE, uno por
+    // traza, sobre un resultado que ya estaba entero en memoria. El orden de
+    // armado es el de antes (por línea, y las de venta al final) porque es el
+    // orden en que quedan las filas.
+    const filasDescuento: VentaDescuento[] = [];
+    const filasRecargo: VentaRecargo[] = [];
+    const filasImpuesto: VentaImpuesto[] = [];
+
+    for (const rLinea of resultado.lineas) {
       for (const traza of rLinea.trazas.descuentos) {
-        await manager.save(
-          VentaDescuento,
+        filasDescuento.push(
           manager.create(VentaDescuento, {
             ventaId: venta.id,
             descuentoId: traza.id,
@@ -438,8 +444,7 @@ export class VentasService {
         );
       }
       for (const traza of rLinea.trazas.recargos) {
-        await manager.save(
-          VentaRecargo,
+        filasRecargo.push(
           manager.create(VentaRecargo, {
             ventaId: venta.id,
             recargoId: traza.id,
@@ -450,8 +455,7 @@ export class VentasService {
         );
       }
       for (const traza of rLinea.trazas.impuestos) {
-        await manager.save(
-          VentaImpuesto,
+        filasImpuesto.push(
           manager.create(VentaImpuesto, {
             ventaId: venta.id,
             impuestoId: traza.id,
@@ -463,10 +467,8 @@ export class VentasService {
       }
     }
 
-    // 7d. Reglas a nivel venta
     for (const traza of resultado.trazasVenta.descuentos) {
-      await manager.save(
-        VentaDescuento,
+      filasDescuento.push(
         manager.create(VentaDescuento, {
           ventaId: venta.id,
           descuentoId: traza.id,
@@ -477,8 +479,7 @@ export class VentasService {
       );
     }
     for (const traza of resultado.trazasVenta.recargos) {
-      await manager.save(
-        VentaRecargo,
+      filasRecargo.push(
         manager.create(VentaRecargo, {
           ventaId: venta.id,
           recargoId: traza.id,
@@ -487,6 +488,19 @@ export class VentasService {
           aplicadoEn: 'venta',
         }),
       );
+    }
+
+    // TypeORM ya cortocircuita un array vacío, pero el guard queda explícito:
+    // que una venta sin reglas no escriba nada no debería depender de un
+    // detalle interno de la librería.
+    if (filasDescuento.length > 0) {
+      await manager.save(VentaDescuento, filasDescuento);
+    }
+    if (filasRecargo.length > 0) {
+      await manager.save(VentaRecargo, filasRecargo);
+    }
+    if (filasImpuesto.length > 0) {
+      await manager.save(VentaImpuesto, filasImpuesto);
     }
 
     // 7e. Customer (opcional)

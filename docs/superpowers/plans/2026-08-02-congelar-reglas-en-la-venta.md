@@ -60,11 +60,13 @@ Y `config_calculo jsonb` en `ventas`: `formula`, `calculoDescuentos`, `calculoRe
 
 Es el spike que fija el contrato: **hasta que esta task no cierre, las siguientes llevan intención, no código exacto.** Sin persistencia todavía.
 
-- [ ] `TrazaRegla` gana `modo`, `valorEfectivo` y `valorSolicitado` (este último solo se puebla en descuentos; en recargos queda igual a `monto`).
-- [ ] `seleccionarTramo()` pasa a devolver **cuál** tramo eligió, no solo el valor aplicado. Es el cambio menos obvio del plan: hoy la función usa el tramo y lo tira, así que una regla por tramos no puede reportar "valía 10%".
-- [ ] `valorSolicitado` se captura **antes** del piso en cero (`calculo-precios.engine.ts:303`), no después.
-- [ ] Unit tests del motor: regla plana `porcentaje`, regla plana `monto_fijo`, regla por **tramos** (que el valor reportado sea el del tramo que aplicó, no `null` ni el primero), y descuento topeado (`valorSolicitado` ≠ `monto`).
-- [ ] **Mutante:** revertir la propagación del tramo y confirmar que cae el test de tramos. Si pasa igual, el test no lo está tocando.
+- [x] `TrazaRegla` gana `modo`, `valorEfectivo` y `valorSolicitado` (este último solo se puebla en descuentos; en recargos queda igual a `monto`).
+- [x] ~~`seleccionarTramo()` pasa a devolver **cuál** tramo eligió~~ → **corregido al medir:** `seleccionarTramo()` **ya devolvía** el tramo entero; quien lo tiraba era `evaluarRegla()`, que retornaba solo un `Decimal`. El cambio real es que `evaluarRegla()` pasa a devolver `{ monto, valorEfectivo }`. Mismo efecto, otro lugar.
+- [x] `valorSolicitado` se captura **antes** del tope al disponible, y después del guard de "ninguna regla aporta un monto negativo" (documentado en el tipo: una regla que evaluó negativo reporta `0` en los dos campos).
+- [x] Unit tests del motor: regla plana `porcentaje`, regla plana `monto_fijo`, regla por **tramos** (que el valor reportado sea el del tramo que aplicó, no `null` ni el primero), descuento topeado (`valorSolicitado` ≠ `monto`), y `valorEfectivo` `null` en los tres casos de "no aplicó".
+- [x] **Mutante:** revertida la propagación del tramo a `regla.valor` → cae exactamente el test de tramos (`Expected "0.10", Received null`). Restaurado.
+
+**Cerrada en `536febef`.** Gate completo en verde (incluye `test:e2e` sobre BD reseteada) y `domain-reviewer` LIMPIO. Un hallazgo cosmético del revisor aplicado antes del commit: el docstring de `valorSolicitado` nombraba solo el tope como fuente de divergencia y omitía el clamp de negativos. `TrazaImpuesto` dejó de extender `TrazaRegla` (misma forma exacta) para no arrastrar campos que a un impuesto no le aplican; verificado en el repo entero que nada dependía de esa herencia.
 
 ⚠️ Ningún total puede moverse en esta task. Si un test de cálculo existente cambia de resultado, hay un bug: detenerse.
 
@@ -72,10 +74,14 @@ Es el spike que fija el contrato: **hasta que esta task no cierre, las siguiente
 
 Refactor puro, **sin columnas nuevas**, para que el test de no-regresión sea limpio: si se batchea después de agregar columnas, no se puede distinguir qué rompió qué.
 
-- [ ] Las tres tablas de reglas (`ventas.service.ts:426-486`): acumular las filas y hacer un `save` por entidad con el array completo, en vez de un `await save()` por traza. Hoy son N round-trips **en serie**.
-- [ ] `venta_detalles` (`:387-423`): mismo tratamiento. Hoy es `Promise.all` + `save` por línea — N round-trips concurrentes. Se toca igual porque Task 4 necesita los ids generados.
-- [ ] **No tocar** el bucle de movimientos de inventario (`for (const i of ordenLocks)`): escribe en orden de lock determinista y batchear cambiaría la semántica de deadlock.
-- [ ] Test de no-regresión: una venta con varias líneas y varias reglas por línea produce **exactamente las mismas filas** que antes — misma cantidad, mismos montos, misma atribución. Es un cambio de rendimiento; si mueve un número, está mal.
+- [x] Las tres tablas de reglas (`ventas.service.ts:426-486`): acumular las filas y hacer un `save` por entidad con el array completo, en vez de un `await save()` por traza. Hoy son N round-trips **en serie**.
+- [x] `venta_detalles` (`:387-423`): mismo tratamiento. Hoy es `Promise.all` + `save` por línea — N round-trips concurrentes. Se toca igual porque Task 4 necesita los ids generados.
+- [x] **No tocar** el bucle de movimientos de inventario (`for (const i of ordenLocks)`): escribe en orden de lock determinista y batchear cambiaría la semántica de deadlock.
+- [x] Test de no-regresión: una venta con varias líneas y varias reglas por línea produce **exactamente las mismas filas** que antes — misma cantidad, mismos montos, misma atribución. Es un cambio de rendimiento; si mueve un número, está mal.
+
+**Verificado para Task 4:** `manager.save(Entity, array)` devuelve **las mismas instancias en el mismo orden** que recibió — confirmado contra el fuente de TypeORM instalado (`EntityManager.js` resuelve con `.then(() => entity)`, y el chunking solo agrupa las queries de escritura). El repo no tiene `@BeforeInsert`/`@AfterInsert`/subscribers que muten el array. Sobre eso se apoya el cruce `detalles[i]` ↔ `resultado.lineas[i]` de Task 4.
+
+El test nuevo usa `toEqual` sobre el array completo, que compara **posición por posición**: una permutación de las filas lo hace fallar, no solo una fila faltante. Mutante verificado: vaciar el push de las reglas a nivel venta → `-5 +0`.
 
 ### Task 3: El esquema
 
@@ -113,6 +119,6 @@ Inerte: las columnas existen y nada las puebla todavía. Separada porque es mec�
 - Columnas y no snapshot JSON (revirtiendo la decisión de JSON del mismo día, al medir que el patrón de columnas ya existe con consumidor).
 - Un N+1 se saca en el momento, no se difiere al backlog.
 
-**Abierto — confirmar antes de ejecutar Task 4:**
-- **¿El congelado aplica también a las reglas a nivel venta** (`aplicado_en = 'venta'`)? Tienen el mismo problema de valor, modo y nombre, aunque no el de `detalle_id`. **Asunción de trabajo del plan: sí entran.** Si la respuesta es no, se recorta Task 4 —no se rehace nada— y `detalle_id` deja de necesitar ser nullable.
-- **¿`nombre_regla` también para impuestos?** Es lo único que les falta; ya congelan la tasa. **Asunción: sí**, para dejar las tres familias parejas.
+**Resueltas por el owner (2026-08-02), confirmando las dos asunciones del plan:**
+- **Las reglas a nivel venta** (`aplicado_en = 'venta'`) **entran al congelado.** Por eso `detalle_id` va nullable: esas filas no pertenecen a ninguna línea.
+- **`nombre_regla` también para impuestos**, para dejar las tres familias parejas.

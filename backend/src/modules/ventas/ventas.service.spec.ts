@@ -16,7 +16,9 @@ import { CatalogService } from '../catalog/catalog.service';
 import { GarzonesService } from '../garzones/garzones.service';
 import { EstadoVenta, Venta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
+import { VentaDescuento } from './entities/venta-descuento.entity';
 import { VentaRecargo } from './entities/venta-recargo.entity';
+import { VentaImpuesto } from './entities/venta-impuesto.entity';
 import { TIPO_DOCUMENTO_NC_ID } from './entities/tipo-documento-tributario.entity';
 
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -102,15 +104,25 @@ function buildManagerMock() {
       .mockImplementation(
         (_entity: unknown, data: Record<string, unknown>) => ({ ...data }),
       ),
+    // `save` acepta una fila o un array (detalles y reglas se escriben en
+    // batch): devuelve lo mismo que recibió, para que el llamador pueda cruzar
+    // `detalles[i]` con su línea.
     save: jest
       .fn()
       .mockImplementation(
-        (_entity: unknown, data: Record<string, unknown>): Promise<unknown> => {
-          if (data['totalFinal'] !== undefined)
-            return Promise.resolve({ ...venta, ...data });
-          if (data['ventaId'] !== undefined && data['cantidad'] !== undefined)
-            return Promise.resolve({ ...detalle, ...data });
-          return Promise.resolve({ ...data });
+        (
+          _entity: unknown,
+          data: Record<string, unknown> | Record<string, unknown>[],
+        ): Promise<unknown> => {
+          const guardar = (fila: Record<string, unknown>) => {
+            if (fila['totalFinal'] !== undefined) return { ...venta, ...fila };
+            if (fila['ventaId'] !== undefined && fila['cantidad'] !== undefined)
+              return { ...detalle, ...fila };
+            return { ...fila };
+          };
+          return Promise.resolve(
+            Array.isArray(data) ? data.map(guardar) : guardar(data),
+          );
         },
       ),
     query: jest.fn().mockResolvedValue([]),
@@ -640,6 +652,110 @@ describe('VentasService', () => {
           aplicadoEn: 'venta',
         }),
       ]);
+    });
+
+    it('escribe las reglas en un batch por familia sin perder ni mover ninguna fila', async () => {
+      // Antes eran N `save` en serie, uno por traza. Este test fija las filas
+      // resultantes —cuántas, con qué monto y atribuidas a qué— para que
+      // batchearlas no pueda tragarse una en silencio.
+      const traza = (id: string, monto: string) => ({
+        id,
+        nombre: id,
+        monto,
+        modo: 'monto_fijo' as const,
+        valorEfectivo: monto,
+        valorSolicitado: monto,
+      });
+      const lineaCon = (sufijo: string) => ({
+        ...mockResultadoVenta.lineas[0],
+        trazas: {
+          descuentos: [traza(`desc-${sufijo}`, '1.0000')],
+          recargos: [traza(`rec-${sufijo}`, '2.0000')],
+          impuestos: [{ ...traza(`imp-${sufijo}`, '3.0000'), tasa: '0.19' }],
+        },
+      });
+      calculoPreciosService.calcular.mockResolvedValueOnce({
+        ...mockResultadoVenta,
+        lineas: [lineaCon('a'), lineaCon('b')],
+        trazasVenta: {
+          descuentos: [traza('desc-venta', '9.0000')],
+          recargos: [traza('rec-venta', '8.0000')],
+        },
+      });
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, {
+        ...baseDto,
+        lineas: [
+          { itemId: ITEM_ID, cantidad: '1' },
+          { itemId: ITEM_ID, cantidad: '1' },
+        ],
+      });
+
+      const savesDe = (entidad: unknown) =>
+        manager.save.mock.calls.filter((call) => call[0] === entidad);
+
+      // Un solo round-trip por familia, con TODAS sus filas adentro.
+      for (const entidad of [VentaDescuento, VentaRecargo, VentaImpuesto]) {
+        expect(savesDe(entidad)).toHaveLength(1);
+      }
+      expect(savesDe(VentaDetalle)).toHaveLength(1);
+
+      // Las filas: las de las dos líneas y después las de venta.
+      expect(savesDe(VentaDescuento)[0][1]).toEqual([
+        expect.objectContaining({
+          descuentoId: 'desc-a',
+          valorAplicado: '1.0000',
+          aplicadoEn: 'detalle',
+        }),
+        expect.objectContaining({
+          descuentoId: 'desc-b',
+          valorAplicado: '1.0000',
+          aplicadoEn: 'detalle',
+        }),
+        expect.objectContaining({
+          descuentoId: 'desc-venta',
+          valorAplicado: '9.0000',
+          aplicadoEn: 'venta',
+        }),
+      ]);
+      expect(savesDe(VentaRecargo)[0][1]).toEqual([
+        expect.objectContaining({ recargoId: 'rec-a', aplicadoEn: 'detalle' }),
+        expect.objectContaining({ recargoId: 'rec-b', aplicadoEn: 'detalle' }),
+        expect.objectContaining({
+          recargoId: 'rec-venta',
+          valorAplicado: '8.0000',
+          aplicadoEn: 'venta',
+        }),
+      ]);
+      // Los impuestos no tienen nivel venta: solo las dos filas de línea.
+      expect(savesDe(VentaImpuesto)[0][1]).toEqual([
+        expect.objectContaining({
+          impuestoId: 'imp-a',
+          porcentajeAplicado: '0.19',
+        }),
+        expect.objectContaining({
+          impuestoId: 'imp-b',
+          porcentajeAplicado: '0.19',
+        }),
+      ]);
+    });
+
+    it('no gasta un round-trip por familia cuando la venta no tiene reglas', async () => {
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      const entidadesGuardadas = manager.save.mock.calls.map((call) => call[0]);
+      expect(entidadesGuardadas).not.toContain(VentaDescuento);
+      expect(entidadesGuardadas).not.toContain(VentaRecargo);
+      expect(entidadesGuardadas).not.toContain(VentaImpuesto);
     });
 
     it('congela la clasificación tributaria del item en el detalle', async () => {
