@@ -14,6 +14,29 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **El congelado de las reglas no tiene pantalla: el dato existe y nadie lo ve**
+  (frontend, diferido por decisión del owner 2026-08-02) — desde
+  [el congelado](resueltos.md) cada venta guarda qué descuentos, recargos e impuestos se
+  aplicaron, con qué nombre, modo y valor, sobre qué línea y bajo qué config de cálculo. Ya
+  **viaja por la API**: `GET /api/ventas/:id` (`ventas.controller.ts:89`,
+  `@RequiresPermiso('Ventas','Leer')`) devuelve `descuentos[]`, `recargos[]` e `impuestos[]`
+  con `nombreRegla`, `modo`, `porcentajeAplicado`, `valorSolicitado` y `detalleId`, más
+  `configCalculo` en la cabecera.
+  **Lo que falta es el consumidor.** `VentaDetalleDrawer.vue` —la única UI de detalle de
+  venta, porque `/ventas/:id` solo redirige a `/ventas?venta=:id`— muestra los **totales**
+  agregados (`totalDescuentos`, `totalRecargos`, `totalImpuestos`) y **ninguna de las tres
+  listas**. O sea que hoy la pregunta "¿qué descuento se aplicó en esta venta y de cuánto
+  era?" solo se responde por SQL o por Swagger.
+  **Tres decisiones antes de escribirla:** (a) ¿va dentro del drawer que ya existe, o es una
+  vista de auditoría aparte? El owner mencionó una vista propia; el drawer es donde el
+  usuario ya está. (b) ¿la ve cualquiera con `Ventas:Leer`, o es admin-only? Hoy el endpoint
+  no distingue. (c) el desglose por línea usa `detalleId`, que es `null` en las reglas de
+  nivel venta — la pantalla tiene que mostrar esas aparte, no colgarlas de una línea
+  cualquiera.
+  ⚠️ **Las notas de crédito no tienen desglose propio**: `crearNotaCredito` no escribe filas
+  en las tres tablas (medido). Se llega al detalle por la venta que referencian, pero la NC
+  en sí no dice qué descuentos revierte. Decidir si entra en el mismo alcance.
+
 - [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
   frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
   total `$0` el cobro se cae por los **dos** caminos, no solo por Webpay: la rama webpay

@@ -255,7 +255,10 @@ congelado es invariante de esquema y no convención. Un segundo camino que se
 olvide de poblarlas falla al insertar.
 
 La feature es de **auditoría, no de operación diaria**: las columnas viajan en
-el detalle de venta pero todavía no hay pantalla que las muestre.
+`GET /ventas/:id` pero todavía no hay pantalla que las muestre —
+`VentaDetalleDrawer.vue` sigue mostrando solo los totales agregados. Diferido
+por decisión del owner (2026-08-02); las decisiones pendientes de esa pantalla
+están en [`docs/agent/pendientes.md`](../agent/pendientes.md).
 
 ---
 
