@@ -35,10 +35,21 @@ Reemplazar lo que está `{entre llaves}`. Borrar las preguntas que no apliquen.
 > no solo POS internacionales. Es donde opera el producto; lo internacional da el patrón,
 > Chile da la realidad que se aplica. La pregunta 6 de la plantilla es obligatoria.
 
+> ⚠️ **Qué esperar de la pata chilena (medido 2026-08-02).** Los POS locales publican
+> *cómo cargar el dato en la UI*, no la lógica de su motor de cálculo: de Bsale, Nubox y
+> Defontana sale documentación oficial de los campos, y de Toteat no salió nada público.
+> Así que en Chile la señal está en la **norma**, no en la competencia: el formato DTE del
+> SII y la ley. Y el SII estandariza los **campos** —`DescuentoPct`/`DescuentoMonto` y
+> `RecargoPct`/`RecargoMonto` por línea, `DscRcgGlobal` a nivel documento— pero **no el
+> algoritmo**: pide los montos resultantes, no audita cómo se llegó a ellos. Apuntá la
+> pregunta 6 ahí y no gastes la pasada esperando que un POS local explique su motor.
+> Los nombres van verificados: la versión anterior de esta plantilla pedía "GestioPolis"
+> —que no existe como producto— y "Rocket", que es una app de pagos, no un POS.
+
 > Soy fundador de un POS multi-tenant (restaurantes, minimarkets, retail). Estoy
 > diseñando **{FEATURE}**. No soy experto en el dominio. Explicame, con ejemplos
 > concretos de POS reales —internacionales (Toast, Square, Lightspeed, Clover) **y del
-> mercado chileno** (Bsale, Toteat, Defontana, Nubox, GestioPolis/Rocket)—, cómo
+> mercado chileno** (Bsale, Toteat, Defontana, Nubox)—, cómo
 > funciona:
 >
 > 1. **Modelo de datos / conceptos**: ¿cuáles son las entidades y cómo se relacionan?
