@@ -4,6 +4,7 @@ import {
   convertirPresentacion,
   desdeCantidadCanonica,
   esConteo,
+  formatCantidadLinea,
   formatCantidadTicket,
   opcionesMismaMagnitud,
   puedeDecrementar,
@@ -71,7 +72,29 @@ describe('cantidad-presentacion', () => {
     expect(formatCantidadTicket('2.00', 'unidad', false)).toBe('2')
   })
 
-  it('formatCantidadTicket sin unidadCodigo devuelve la cantidad tal cual', () => {
+  it('formatCantidadTicket sin unidadCodigo recorta igual, solo que sin sufijo', () => {
+    // Devolvía el string crudo, y por eso el detalle de venta mostraba
+    // `1.0000` en toda línea sin presentación —el caso más común—.
+    expect(formatCantidadTicket('1.0000', null, true)).toBe('1')
+    expect(formatCantidadTicket('2.5000', null, true)).toBe('2,5')
     expect(formatCantidadTicket('2', null, true)).toBe('2')
+  })
+
+  describe('formatCantidadLinea', () => {
+    it('usa la presentación cuando la línea se vendió por presentación', () => {
+      expect(formatCantidadLinea('2000', '2', 'kg', true)).toBe('2 kg')
+    })
+
+    it('cae a la cantidad canónica recortada cuando no hay presentación', () => {
+      expect(formatCantidadLinea('1.0000', null, null, false)).toBe('1')
+      expect(formatCantidadLinea('2.5000', null, null, false)).toBe('2,5')
+    })
+
+    it('ignora una presentación a medias: sin unidad no se puede formatear', () => {
+      // `cantidadPresentacion` sin `unidadCodigoPresentacion` no dice en qué
+      // unidad está, así que gana la canónica.
+      expect(formatCantidadLinea('24.0000', '2', null, true)).toBe('24')
+      expect(formatCantidadLinea('24.0000', null, 'caja', true)).toBe('24')
+    })
   })
 })

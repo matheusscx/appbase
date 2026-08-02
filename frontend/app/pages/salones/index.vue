@@ -17,7 +17,7 @@ import {
 import type { Garzon } from '~/composables/useGarzones'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { Turno } from '~/composables/useTurnos'
-import { formatCantidadTicket, unidadBaseItem } from '~/utils/cantidad-presentacion'
+import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
 import { agregarImpuestosVenta } from '~/utils/ticket-builder'
 import { shellUi } from '~/utils/ui-shell'
 
@@ -745,9 +745,12 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
   // si hay dos líneas del mismo ítem con distinta personalización.
   return res.lineas.map((l, i) => {
     const cl = cuenta.lineas[i]
-    const cantidadTicket = cl?.cantidadPresentacion && cl?.unidadCodigoPresentacion
-      ? formatCantidadTicket(cl.cantidadPresentacion, cl.unidadCodigoPresentacion, unidadesStore.esFraccionaria(cl.unidadCodigoPresentacion))
-      : l.cantidad
+    const cantidadTicket = formatCantidadLinea(
+      l.cantidad,
+      cl?.cantidadPresentacion,
+      cl?.unidadCodigoPresentacion,
+      unidadesStore.esFraccionaria(cl?.unidadCodigoPresentacion),
+    )
     return {
       nombre: cl?.nombre ?? '',
       cantidad: cantidadTicket,

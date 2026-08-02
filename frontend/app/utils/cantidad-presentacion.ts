@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import { formatStock } from './stock-format'
+import { formatStock, formatStockCantidad } from './stock-format'
 
 export type UnidadCat = { codigo: string, magnitud: string, factorBase: string }
 
@@ -88,8 +88,40 @@ export function formatCantidadTicket(
   unidadCodigo: string | null | undefined,
   esFraccionaria: boolean,
 ): string {
-  if (!unidadCodigo) return cantidad
+  // Sin unidad NO se devuelve el string crudo: `1.0000` no es una cantidad
+  // legible. Se recorta igual, solo que sin sufijo. `true` porque sin unidad no
+  // se puede saber si la magnitud es de conteo, y recortar ceros nunca inventa
+  // precisión —para un entero da lo mismo que redondear—.
+  if (!unidadCodigo) return formatStockCantidad(cantidad, true)
   return formatStock(cantidad, unidadCodigo, esFraccionaria)
+}
+
+/**
+ * La cantidad de una línea de venta, se haya vendido por presentación o no.
+ *
+ * Existe porque los tres lugares que muestran líneas —el detalle de venta, el
+ * ticket del POS y el de salones— repetían el mismo ternario y los tres caían
+ * al string crudo en el caso sin presentación, que es el más común: se veía
+ * `1.0000`.
+ *
+ * ⚠️ Sin presentación la cantidad va **sin unidad**: `venta_detalles` guarda
+ * `unidad_codigo_presentacion` pero NO la unidad base del ítem, y leerla del
+ * catálogo vivo mostraría la unidad de hoy sobre una venta vieja.
+ */
+export function formatCantidadLinea(
+  cantidad: string,
+  cantidadPresentacion: string | null | undefined,
+  unidadCodigoPresentacion: string | null | undefined,
+  esFraccionaria: boolean,
+): string {
+  if (cantidadPresentacion && unidadCodigoPresentacion) {
+    return formatCantidadTicket(
+      cantidadPresentacion,
+      unidadCodigoPresentacion,
+      esFraccionaria,
+    )
+  }
+  return formatCantidadTicket(cantidad, null, esFraccionaria)
 }
 
 export function unidadBaseItem(item: { tipo: string, unidadMedida?: string | null }): string {

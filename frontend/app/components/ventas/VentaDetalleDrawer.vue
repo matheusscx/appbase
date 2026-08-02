@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
-import { formatCantidadTicket } from '~/utils/cantidad-presentacion'
+import { formatCantidadLinea } from '~/utils/cantidad-presentacion'
 
 interface PagoAplicacion {
   tipo: string
@@ -241,10 +241,12 @@ function reembolsoColor(estado: string): 'success' | 'error' | 'warning' | 'neut
 const { estadoColor, estadoLabel } = useEstadoVenta()
 
 function cantidadDetalleLabel(det: Detalle): string {
-  if (det.cantidadPresentacion && det.unidadCodigoPresentacion) {
-    return formatCantidadTicket(det.cantidadPresentacion, det.unidadCodigoPresentacion, unidadesStore.esFraccionaria(det.unidadCodigoPresentacion))
-  }
-  return det.cantidad
+  return formatCantidadLinea(
+    det.cantidad,
+    det.cantidadPresentacion,
+    det.unidadCodigoPresentacion,
+    unidadesStore.esFraccionaria(det.unidadCodigoPresentacion),
+  )
 }
 
 /**
