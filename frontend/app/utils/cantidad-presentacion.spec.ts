@@ -8,6 +8,7 @@ import {
   formatCantidadTicket,
   opcionesMismaMagnitud,
   puedeDecrementar,
+  unidadBaseItem,
 } from './cantidad-presentacion'
 
 const CAT = [
@@ -110,6 +111,32 @@ describe('cantidad-presentacion', () => {
       // unidad está, así que gana la canónica.
       expect(formatCantidadLinea('24.0000', '2', null, true)).toBe('24')
       expect(formatCantidadLinea('24.0000', null, 'caja', true)).toBe('24')
+    })
+  })
+
+  describe('unidadBaseItem', () => {
+    // Gemela de `resolverUnidadBaseDeItem` del backend: los mismos casos, para
+    // que una divergencia futura falle acá en vez de derivar en silencio.
+    it('receta y combo se venden de a uno', () => {
+      for (const tipo of ['receta', 'combo']) {
+        expect(unidadBaseItem({ tipo })).toBe('unidad')
+      }
+    })
+
+    it('receta y combo ignoran cualquier unidadMedida que traiga la fila', () => {
+      // Hoy siempre viene `null` (no tienen fila en `item_producto`), y era
+      // justamente eso lo que tapaba que esta función no listara `combo`: el
+      // `?? 'unidad'` daba el mismo resultado por el camino equivocado. Fijar
+      // el caso no-null deja la regla probada por sí misma.
+      expect(unidadBaseItem({ tipo: 'combo', unidadMedida: 'kg' })).toBe('unidad')
+    })
+
+    it('un producto usa su unidad de medida', () => {
+      expect(unidadBaseItem({ tipo: 'producto', unidadMedida: 'kg' })).toBe('kg')
+    })
+
+    it('un producto sin unidad cae en unidad', () => {
+      expect(unidadBaseItem({ tipo: 'producto', unidadMedida: null })).toBe('unidad')
     })
   })
 })

@@ -129,6 +129,25 @@ export function formatCantidadLinea(
   return formatCantidadTicket(cantidad, unidadCodigoBase ?? null, esFraccionaria)
 }
 
+/**
+ * La unidad en la que se cuenta un ítem del catálogo, para el carrito.
+ *
+ * `receta` y `combo` no tienen unidad propia —solo `producto` e `ingrediente`
+ * tienen fila en `item_producto`, de donde sale `unidadMedida`—, así que se
+ * venden de a uno: media receta o 1,5 combos no son cantidades vendibles.
+ *
+ * ⚠️ Gemela de `resolverUnidadBaseDeItem` en
+ * `backend/src/common/utils/cantidad-presentacion.util.ts`: **la misma regla,
+ * duplicada** mientras backend y frontend no compartan workspace. Cambiar una
+ * sin la otra abre una deriva silenciosa — esta versión listaba solo `receta`
+ * y llegó al mismo resultado de casualidad, porque un combo tampoco trae
+ * `unidadMedida` y el `?? 'unidad'` lo tapaba.
+ *
+ * Devuelve solo el código, sin el `forzarConteo` de la gemela: acá nadie valida
+ * el entero —lo hace el backend al recibir la venta—, y un campo sin caller
+ * envejece sin que nada lo ejerza.
+ */
 export function unidadBaseItem(item: { tipo: string, unidadMedida?: string | null }): string {
-  return item.tipo === 'receta' ? 'unidad' : (item.unidadMedida ?? 'unidad')
+  const seVendePorUnidadEntera = item.tipo === 'receta' || item.tipo === 'combo'
+  return seVendePorUnidadEntera ? 'unidad' : (item.unidadMedida ?? 'unidad')
 }

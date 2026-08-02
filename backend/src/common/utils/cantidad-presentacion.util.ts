@@ -70,6 +70,11 @@ function validarCantidadConteo(cantidad: string): void {
  * él. Era duplicación cuya equivalencia dependía de dos invariantes de otro
  * archivo, no un bug con síntoma. Unificarla es lo que la vuelve verdad por
  * construcción.
+ *
+ * ⚠️ Gemela de `unidadBaseItem` en
+ * `frontend/app/utils/cantidad-presentacion.ts`, que decide la unidad del
+ * carrito: **la misma regla, duplicada** mientras backend y frontend no
+ * compartan workspace. Cambiar una sin la otra abre una deriva silenciosa.
  */
 export function resolverUnidadBaseDeItem(item: {
   tipo: string;
