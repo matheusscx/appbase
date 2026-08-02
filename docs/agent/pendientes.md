@@ -14,6 +14,44 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
+  frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
+  total `$0` el cobro se cae por los **dos** caminos, no solo por Webpay: la rama webpay
+  corta en `pagos-redirect.service.ts:86` ("El monto debe ser mayor a cero"), y el flujo
+  simulado tampoco puede porque `pasarela.vue:68` manda siempre
+  `monto: totales.totalFinal` y `PagoVentaDto.monto` lleva `@IsDecimalPositivo()`
+  (`create-venta.dto.ts:73-76`), así que `POST /ventas` lo rechaza más tarde.
+  ⚠️ **No hay asimetría con el POS** — la primera redacción de esta entrada decía que el
+  POS sí cerraba estas ventas "porque omite la línea de pago", y es falso:
+  `CobroModal.vue:99-101` exige `pagosValidos.length > 0` y el botón queda `:disabled`
+  (`:189`), así que con total `0` el POS tampoco confirma. El comentario de
+  `create-venta.dto.ts:73` ("el POS ya los omite al confirmar") habla de descartar las
+  líneas en `$0` dentro de un pago **dividido** que sí tiene alguna con monto
+  (`CobroModal.vue:95-97`), no de confirmar sin ninguna. **No hay un comportamiento del POS
+  que copiar.**
+  **Lo que la restricción realmente es:** de **UI en los dos lados**. La API sí acepta una
+  venta sin pagos —`CreateVentaDto.pagos` es `@IsOptional()` (`create-venta.dto.ts:130-134`),
+  por eso existen las ventas `pendiente`—, pero `ventas.service.ts:676` solo llama a
+  `calcularEstadoVenta` `if (saved.pagos.length > 0)`, así que una venta de `$0` sin pagos
+  quedaría **`pendiente` con saldo `$0`**, arrastrándose en los listados de deuda. O sea que
+  "crearla sin pago" tampoco es un modelo limpio: es una segunda decisión.
+  **La pregunta para el owner:** ¿una venta de total `$0` es una venta **pagada**, una venta
+  **pendiente**, o algo que se prohíbe antes de llegar al cobro? Es un caso real de
+  promociones, no un borde teórico. Relacionado con la entrada de `precioUnitario` de abajo:
+  es la misma pregunta de si el `0` es un monto válido, en otra capa.
+- [ ] **`/tienda/pasarela` es inalcanzable en el tenant principal del seed** (frontend,
+  medido 2026-08-02) — la pantalla solo existe en el fallback **simulado**: si el tenant
+  tiene Webpay Plus activa, `pagar()` toma la rama webpay y la SPA sale por redirect a
+  Transbank. El seed activa Webpay Plus **solo en `Demo Restaurante`**
+  (`seeder.service.ts:1742-1762`), que es donde entra todo el mundo; `Demo Bodega` no tiene
+  fila en `tenant_pasarela`, así que **según el seed** cae al flujo simulado y alcanzaría la
+  pantalla — derivado del código, no observado en una corrida, y sin verificar que ese tenant
+  tenga catálogo `tipo=producto` ni el módulo de tienda contratado. Consecuencia práctica: **nada
+  automático abre este archivo** —no tiene spec, y el e2e de layout no lo alcanza porque
+  la guarda de `checkoutRef` (`pasarela.vue:34`) lo hace inaccesible por `goto` pelado—,
+  así que el próximo que quiera verlo va a perder tiempo antes de descubrir que hay que
+  desactivar la pasarela o cambiar de tenant. Decidir si se cubre con e2e (sembrando el
+  `checkoutRef`) o si se documenta como pantalla de fallback y se deja sin cobertura.
 - [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
   (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
   (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue
@@ -428,17 +466,6 @@ Ver [`resueltos.md`](resueltos.md).
   de que la regla valía 500; el motivo vive solo en un toast que el cajero puede no leer.
   Para un sistema con ambición fiscal/auditable el **hecho** del tope debería quedar en la
   transacción. Cierre posible: una columna o flag en el detalle de venta.
-- [ ] **`online.service.ts` y `suscripciones.service.ts` siguen descartando las
-  advertencias del motor de precios** (backend + frontend) — resto de "Las
-  advertencias del motor de precios llegan a un solo consumidor", cerrado
-  **parcialmente** el 2026-07-28 (ver [`resueltos.md`](resueltos.md)): la
-  previsualización de los tres carritos (POS, Salones, Tienda) ya muestra
-  `resultado.lineas[].advertencias` y `resultado.advertenciasVenta` antes de
-  cobrar. Lo que sigue abierto es la otra mitad de la cadena: `online.service.ts`
-  y `suscripciones.service.ts` descartan `resultado.advertencias` al crear el
-  pedido/la suscripción (no la persisten ni la devuelven), y `pasarela.vue` no
-  lee el campo. Mismo consumidor que el resto de la entrada original: el que más
-  lo necesita, porque ahí el cobro ya es irreversible.
 
 ## Revisión final `borrado-ingrediente-extra` (2026-07-28)
 

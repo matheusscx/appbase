@@ -131,6 +131,10 @@ async function rechazar() {
               </div>
             </div>
 
+            <!-- Aplanado (línea + venta): esta pantalla no desglosa líneas, así que
+                 usar las dos granularidades por separado duplicaría las de venta. -->
+            <AdvertenciasPrecio :advertencias="resumen.resultado.advertencias" />
+
             <div class="border border-default rounded-lg p-3">
               <p class="text-xs text-muted mb-1">Medio de pago</p>
               <div v-if="tarjetaPreferida" class="flex items-center gap-2">

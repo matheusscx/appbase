@@ -224,6 +224,22 @@ que el piso resuelve— pero sí el piso en cero de arriba: un recargo nunca res
   aparecer en dos líneas del carrito con personalizaciones distintas (por
   ejemplo, dos porciones de la misma receta con extras diferentes), y el
   `itemId` no las distingue.
+- **Confirmación de la Tienda** (`pages/tienda/pasarela.vue`) — último paso antes de
+  "Aprobar pago". Usa `resultado.advertencias`, el **aplanado**, no las dos
+  granularidades: esa pantalla no desglosa líneas, así que renderizar
+  `lineas[].advertencias` y `advertenciasVenta` por separado duplicaría las de venta.
+- **Las suscripciones no previsualizan nada** (decisión del owner, 2026-08-02). El alta
+  (`pages/tienda/suscripciones.vue`, dos call sites: `confirmar()` en 229 y
+  `reanudarAltaPendiente()` en 260) llama a `crear()`, que cobra por Oneclick en el mismo
+  request, y las renovaciones son automáticas: no hay a quién avisarle.
+  ⚠️ **La decisión es del owner; la razón NO es que el caso sea imposible.**
+  `suscripciones.service.ts:88-91` corre **el mismo motor** y descarta `resultado.advertencias`,
+  y `cargarReglasPorIds` (`items.service.ts`) hace `JOIN items` solo para acotar por tenant,
+  id y no-borrado — **sin filtro por `tipo`**. O sea que nada impide hoy colgarle un descuento de monto
+  fijo a un ítem de suscripción, y ahí el piso en cero sí emitiría advertencia sobre un
+  cobro Oneclick irreversible. Lo que sostiene la decisión es un hecho de configuración
+  ("hoy ningún ítem de suscripción tiene descuentos"), no una propiedad del código: si eso
+  cambia, hay que rediscutirlo.
 - ⚠️ **`advertenciasVenta` hoy no se puede ver por la UI.** El render junto al
   total está construido y correcto, pero está inerte: depende de que el request
   mande `descuentosVentaIds`/`recargosVentaIds`, y ningún archivo de

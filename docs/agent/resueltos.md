@@ -1742,7 +1742,7 @@ siguen diferidos están en `pendientes.md`.
   sobre todo el repo (backend, frontend, docs) después del cambio, no solo con las
   cuatro suites e2e en verde.
 - [x] ~~**Las advertencias del motor de precios llegan a un solo consumidor**~~ —
-  cerrado **parcialmente** 2026-07-28: el motor gana `ResultadoVenta.advertenciasVenta`
+  cerrado en dos mitades, 2026-07-28 y 2026-08-02: el motor gana `ResultadoVenta.advertenciasVenta`
   (solo las advertencias de descuentos a nivel venta, que no pertenecen a ninguna línea),
   sin tocar `advertencias`, que sigue siendo el aplanado de línea + venta. Los tres
   carritos (POS `CarritoPanel.vue`, Salones `salones/index.vue`, Tienda
@@ -1755,10 +1755,37 @@ siguen diferidos están en `pendientes.md`.
   descuento sembrado antes ejercitaba la rama plana del motor—, más el primer e2e de
   `POST /calculo-precios/calcular`, que confirma que las dos granularidades no se
   mezclan entre sí.
-  ⚠️ **Lo que sigue abierto, a propósito no cerrado acá:** `online.service.ts` y
-  `suscripciones.service.ts` siguen descartando `resultado.advertencias` al crear el
-  pedido/la suscripción, y `pasarela.vue` no lee el campo — ver la entrada viva en
-  [`pendientes.md`](pendientes.md). Y `advertenciasVenta` es hoy superficie sin UI: ningún
+  ✅ **La otra mitad cerró el 2026-08-02** — con una corrección al diagnóstico: la entrada
+  decía que `online.service.ts` y `suscripciones.service.ts` "no las persisten ni las
+  devuelven", y eso era medio falso. `ventas.service.ts:688` **sí devuelve** `advertencias`
+  en todos los canales (por eso `pos.vue:214` las muestra como toast); lo que las pierde no
+  es la creación de la venta sino **quién la llama**: en online la invoca
+  `online-callback.handler.ts:87`, un callback de Transbank sin usuario adelante, y en
+  suscripciones la llamada de `suscripciones.service.ts:147` se queda solo con `venta.id`
+  (178 y 197).
+  Medido el alcance real, quedaban dos huecos y ninguno era el reportado:
+  **(1)** `pasarela.vue` no dibujaba nada antes de "Aprobar pago" pese a tener
+  `resumen.resultado` completo → cerrado con `<AdvertenciasPrecio>` sobre `advertencias`
+  (el aplanado línea+venta, porque esa pantalla no desglosa líneas y las dos granularidades
+  por separado duplicarían las de venta). Con eso online queda a la par de POS
+  (`CarritoPanel.vue:202,236`) y Salones (`salones/index.vue:1124,1144`), que ya las
+  dibujaban al agregar productos igual que la Tienda (`CarritoOnline.vue:61,95`).
+  **(2)** el drawer de suscripciones nunca previsualiza el precio —`suscripciones.vue`
+  llama a `crear()` en 229 y en 260, y `crear()` cobra por Oneclick en el mismo request— →
+  **decisión del owner (2026-08-02): no muestra nada, la suscripción se cobra
+  automáticamente.** ⚠️ La razón **no** es que el caso sea imposible: el motor corre igual
+  y `cargarReglasPorIds` no filtra por `tipo`, así que un ítem de suscripción sí puede
+  llevar descuentos. Lo que sostiene la decisión es la configuración de hoy, no el código
+  — detalle en [`motor-calculo-precios.md`](../features/motor-calculo-precios.md).
+  ℹ️ Residual consciente, en dos mitades y no una: en **webpay** el toast post-venta del POS
+  no existe porque la venta la crea el callback; en el flujo **simulado** —el único que llega
+  a `pasarela.vue`— la venta la crea la propia página (`pasarela.vue:63`), que tipa la
+  respuesta como `{ id, estado }` y descarta el `advertencias` que `POST /ventas` sí
+  devuelve. Ese array trae una clase que la previsualización de precios no tiene: las de
+  receta/combo (`ventas.service.ts:565,579`). Hoy es inocuo porque el catálogo de la tienda
+  es `?tipo=producto` (`pages/tienda/index.vue:25`) y esas clases son inalcanzables; deja de
+  serlo el día que la tienda venda recetas o combos.
+  Y `advertenciasVenta` es hoy superficie sin UI: ningún
   archivo de `frontend/app` arma `descuentosVentaIds`/`recargosVentaIds`, así que el render
   junto al total está construido y correcto pero queda inerte hasta que exista esa pantalla
   — detalle en [`motor-calculo-precios.md`](../features/motor-calculo-precios.md).
