@@ -617,11 +617,157 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.totales.totalDescuentos).toBe('10.000000');
       expect(r.totales.totalImpuestos).toBe('17.100000');
       expect(r.lineas[0].trazas.descuentos).toEqual([
-        { id: 'd1', nombre: 'Desc', monto: '10.000000' },
+        {
+          id: 'd1',
+          nombre: 'Desc',
+          monto: '10.000000',
+          modo: 'porcentaje',
+          valorEfectivo: '0.10',
+          valorSolicitado: '10.000000',
+        },
       ]);
       expect(r.lineas[0].trazas.impuestos).toEqual([
         { id: 't1', nombre: 'IVA', tasa: '0.19', monto: '17.100000' },
       ]);
+    });
+  });
+
+  // Lo que la traza lleva para que la venta pueda congelarlo: el monto solo no
+  // reconstruye la regla. Sin esto, un descuento editado de 10% a 20% deja la
+  // venta vieja sin forma de decir cuánto valía cuando se cobró.
+  describe('la traza congela con qué valor aplicó la regla', () => {
+    it('regla plana en porcentaje: reporta la tasa, no el monto', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [linea({ descuentos: [regla({ valor: '0.10' })] })],
+        }),
+      );
+      const t = r.lineas[0].trazas.descuentos[0];
+      expect(t.modo).toBe('porcentaje');
+      expect(t.valorEfectivo).toBe('0.10');
+      expect(t.monto).toBe('10.000000');
+    });
+
+    it('regla plana en monto fijo: mismo monto que un 10%, distinto modo', () => {
+      // Sobre un neto de 100, un 10% y un fijo de 10 dan el MISMO monto. `modo`
+      // es lo único que los distingue después.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              recargos: [regla({ modo: 'monto_fijo', valor: '10' })],
+            }),
+          ],
+        }),
+      );
+      const t = r.lineas[0].trazas.recargos[0];
+      expect(t.modo).toBe('monto_fijo');
+      expect(t.valorEfectivo).toBe('10');
+      expect(t.monto).toBe('10.000000');
+    });
+
+    it('regla por tramos: reporta el valor del tramo que aplicó', () => {
+      // El caso que obliga a propagar el tramo: `regla.valor` es null, así que
+      // sin el tramo la venta no tiene ningún valor que congelar.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              cantidad: '12',
+              descuentos: [
+                regla({
+                  codigo: 'por_mayor',
+                  valor: null,
+                  tramos: [
+                    { minimo: '1', valor: '0.05' },
+                    { minimo: '10', valor: '0.10' },
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+      const t = r.lineas[0].trazas.descuentos[0];
+      // El del tramo elegido: ni null, ni el primero de la lista.
+      expect(t.valorEfectivo).toBe('0.10');
+      expect(t.monto).toBe('120.000000');
+    });
+
+    it('descuento topeado: `valorSolicitado` guarda lo que la regla valía', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [
+                regla({ nombre: 'Fijo 500', modo: 'monto_fijo', valor: '500' }),
+              ],
+            }),
+          ],
+        }),
+      );
+      const t = r.lineas[0].trazas.descuentos[0];
+      // `monto` sigue siendo lo aplicado —el comprobante tiene que cuadrar—
+      // y lo pedido vive aparte.
+      expect(t.monto).toBe('100.000000');
+      expect(t.valorSolicitado).toBe('500.000000');
+    });
+
+    it('sin tope, `valorSolicitado` es igual al monto', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [linea({ descuentos: [regla({ valor: '0.10' })] })],
+        }),
+      );
+      const t = r.lineas[0].trazas.descuentos[0];
+      expect(t.valorSolicitado).toBe(t.monto);
+    });
+
+    it.each([
+      [
+        'diferida',
+        regla({ codigo: 'promocional', valor: '0.50' }),
+        null as string | null,
+      ],
+      [
+        'método de pago que no coincide',
+        regla({
+          codigo: 'metodo_pago',
+          valor: '0.05',
+          metodoPagoIds: ['otro'],
+        }),
+        null as string | null,
+      ],
+      [
+        'sin tramo aplicable',
+        regla({
+          codigo: 'por_monto_venta',
+          valor: null,
+          tramos: [{ minimo: '99999', valor: '0.10' }],
+        }),
+        null as string | null,
+      ],
+    ])(
+      'una regla que no aportó valor (%s) reporta null, no un 0',
+      (_caso, reglaSinValor, esperado) => {
+        const r = calcularVenta(
+          venta({ lineas: [linea({ descuentos: [reglaSinValor] })] }),
+        );
+        const t = r.lineas[0].trazas.descuentos[0];
+        // `null` = la regla no aplicó. Un `'0'` se leería como "valía 0%",
+        // que es una regla distinta.
+        expect(t.valorEfectivo).toBe(esperado);
+        expect(t.monto).toBe('0.000000');
+      },
+    );
+
+    it('las reglas a nivel venta congelan igual que las de línea', () => {
+      const r = calcularVenta(
+        venta({ descuentosVenta: [regla({ valor: '0.10' })] }),
+      );
+      const t = r.trazasVenta.descuentos[0];
+      expect(t.modo).toBe('porcentaje');
+      expect(t.valorEfectivo).toBe('0.10');
     });
   });
 });

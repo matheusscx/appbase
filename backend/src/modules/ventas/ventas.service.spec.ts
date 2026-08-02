@@ -586,6 +586,9 @@ describe('VentasService', () => {
                   id: 'recargo-linea-001',
                   nombre: 'Servicio',
                   monto: '5.0000',
+                  modo: 'monto_fijo' as const,
+                  valorEfectivo: '5',
+                  valorSolicitado: '5.0000',
                 },
               ],
               impuestos: [],
@@ -602,7 +605,14 @@ describe('VentasService', () => {
         trazasVenta: {
           descuentos: [],
           recargos: [
-            { id: 'recargo-venta-001', nombre: 'Delivery', monto: '3.0000' },
+            {
+              id: 'recargo-venta-001',
+              nombre: 'Delivery',
+              monto: '3.0000',
+              modo: 'monto_fijo' as const,
+              valorEfectivo: '3',
+              valorSolicitado: '3.0000',
+            },
           ],
         },
       });

@@ -71,8 +71,34 @@ export interface TrazaRegla {
   id: string;
   nombre: string;
   monto: string;
+  /** Cómo se expresaba la regla al aplicarse. */
+  modo: ModoRegla;
+  /**
+   * El valor de la regla que realmente se usó — el del **tramo elegido** cuando
+   * la regla es por tramos. Es lo que permite decir "este descuento era 10%"
+   * después de que alguien lo edite a 20%.
+   *
+   * `null` cuando la regla no aportó ningún valor: diferida, sin tramo
+   * aplicable, o método de pago que no coincide. Distinto de `'0'`, que sería
+   * una regla que sí aplicó y valía cero.
+   */
+  valorEfectivo: string | null;
+  /**
+   * Lo que la regla pidió antes del tope al monto disponible. Igual a `monto`
+   * salvo en un descuento topeado, donde `monto` es lo que entró en el total y
+   * esto es lo que la regla valía.
+   *
+   * Se captura después del guard de "ninguna regla aporta un monto negativo",
+   * así que una regla que evaluó negativo sobre una base negativa reporta `0`
+   * en los dos campos: acá tampoco hay montos negativos. Qué regla era sigue
+   * en `valorEfectivo`.
+   */
+  valorSolicitado: string;
 }
-export interface TrazaImpuesto extends TrazaRegla {
+export interface TrazaImpuesto {
+  id: string;
+  nombre: string;
+  monto: string;
   tasa: string;
 }
 
@@ -203,25 +229,53 @@ function seleccionarTramo(
   return elegido;
 }
 
-function evaluarRegla(regla: ReglaResuelta, ctx: ContextoRegla): Decimal {
+/**
+ * Resultado de evaluar una regla. Lleva el valor usado además del monto porque
+ * el monto solo no reconstruye la regla: 10 sobre 100 puede ser un 10% o un
+ * monto fijo de 10, y en una regla por tramos el valor sale del tramo elegido,
+ * no de `regla.valor` (que es `null`).
+ */
+interface EvaluacionRegla {
+  monto: Decimal;
+  valorEfectivo: string | null;
+}
+
+/** La regla no aportó valor: diferida, sin tramo, o método que no coincide. */
+const SIN_VALOR: EvaluacionRegla = { monto: ZERO, valorEfectivo: null };
+
+function evaluarRegla(
+  regla: ReglaResuelta,
+  ctx: ContextoRegla,
+): EvaluacionRegla {
   const codigo = regla.codigo ?? '';
-  if (DIFERIDAS.has(codigo)) return ZERO;
+  if (DIFERIDAS.has(codigo)) return SIN_VALOR;
 
   if (METODO_PAGO_CODIGOS.has(codigo)) {
     if (!ctx.metodoPagoId || !regla.metodoPagoIds.includes(ctx.metodoPagoId)) {
-      return ZERO;
+      return SIN_VALOR;
     }
-    return aplicarValor(regla.modo, regla.valor, ctx.base);
+    return {
+      monto: aplicarValor(regla.modo, regla.valor, ctx.base),
+      valorEfectivo: regla.valor,
+    };
   }
 
   if (regla.tramos.length > 0) {
     const magnitud = codigo === 'por_mayor' ? ctx.cantidad : ctx.monto;
     const tramo = seleccionarTramo(regla.tramos, magnitud);
-    if (!tramo) return ZERO;
-    return aplicarValor(regla.modo, tramo.valor, ctx.base);
+    if (!tramo) return SIN_VALOR;
+    // El tramo elegido ES el valor de la regla en esta venta. Propagarlo es lo
+    // único que permite reportarlo después: `regla.valor` es `null` acá.
+    return {
+      monto: aplicarValor(regla.modo, tramo.valor, ctx.base),
+      valorEfectivo: tramo.valor,
+    };
   }
 
-  return aplicarValor(regla.modo, regla.valor, ctx.base);
+  return {
+    monto: aplicarValor(regla.modo, regla.valor, ctx.base),
+    valorEfectivo: regla.valor,
+  };
 }
 
 // ── Procesamiento de un conjunto de descuentos/recargos ─────────────────────
@@ -276,13 +330,13 @@ function procesarReglas(
 
   for (const regla of reglas) {
     const base = params.modoCalculo === 'compuesto' ? acc : params.neto;
-    let monto = evaluarRegla(regla, {
+    const evaluacion = evaluarRegla(regla, {
       base,
       cantidad: params.cantidad,
       monto: params.neto,
       metodoPagoId: params.metodoPagoId,
     });
-    monto = redondear(monto, params.cfg);
+    let monto = redondear(evaluacion.monto, params.cfg);
 
     // Ninguna regla aporta una magnitud negativa: el signo lo pone el TIPO de
     // regla (descuento resta, recargo suma), nunca el valor calculado. Hace
@@ -292,6 +346,11 @@ function procesarReglas(
     // producía un "recargo" que restaba y un "descuento" que le cobraba al
     // cliente, ambos impresos así en la traza.
     monto = Decimal.max(monto, ZERO);
+
+    // Lo que la regla pidió, capturado ANTES del piso: abajo `monto` puede
+    // recortarse al disponible, y sin esta línea la traza pierde para siempre
+    // cuánto valía la regla que se topeó.
+    const solicitado = monto;
 
     if (params.signo === -1) {
       const tope = Decimal.max(disponible, ZERO);
@@ -311,6 +370,9 @@ function procesarReglas(
       id: regla.id,
       nombre: regla.nombre,
       monto: fmt(monto, params.cfg),
+      modo: regla.modo,
+      valorEfectivo: evaluacion.valorEfectivo,
+      valorSolicitado: fmt(solicitado, params.cfg),
     });
   }
 
