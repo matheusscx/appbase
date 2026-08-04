@@ -55,6 +55,35 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
   El filtro **no** se puso en `cargarBasePorIds`: lo comparten los tres canales y cada uno
   necesita algo distinto. Y la advertencia del ítem pausado vive en el service, no en el
   motor: el motor calcula plata y un ítem pausado no cambia ningún monto.
+- [x] **Refutado: editar un ítem NO borra la asociación de una regla pausada** (frontend,
+  verificado en navegador 2026-08-04) — la revisión de cierre sospechaba que el
+  `USelectMenu`, cuya lista de opciones excluye las pausadas, podía recortar del `v-model`
+  los ids que no estuvieran en esa lista: editar cualquier campo del ítem habría borrado la
+  asociación y la promesa del modal ("las asociaciones se conservan") habría dejado de ser
+  cierta. **Se probó por los dos caminos y sobrevive en ambos:** renombrando el ítem sin
+  tocar el selector, y abriendo el selector para agregar OTRO descuento —ahí el array quedó
+  con los dos, el pausado incluido—. El componente no recorta.
+- [x] **Pero el selector mostraba el UUID crudo de la regla pausada** (frontend,
+  `items.vue`, cerrado 2026-08-04) — hallazgo colateral de esa misma verificación, y este sí
+  era real: al excluir las pausadas de las opciones, el select no podía resolver id → nombre
+  para una regla YA asociada y pintaba `3a1a81a4-feeb-41d0-…` donde el admin esperaba un
+  nombre. Preexistente, pero casi inalcanzable hasta ahora: nadie pausaba porque pausar no
+  hacía nada. **Cierre:** las opciones incluyen también las pausadas **que el ítem ya tiene
+  asociadas**, con el sufijo `(en pausa)` —conservando el `(Sistema)` de los impuestos del
+  catálogo oficial, que la primera versión se comía—. No contradice "lo pausado no se
+  ofrece": aparece para explicar lo que ya está puesto, no para elegirlo de nuevo.
+  **Dos lecciones del molde de tests, las dos medidas con mutantes:**
+  1. **Un `USelectMenu` cerrado no renderiza sus opciones** —viven en el portal de reka-ui y
+     no llegan al `document.body` hasta que se abre—, así que un
+     `expect(document.body.textContent).not.toContain(...)` sobre una opción **no observa
+     opciones: observa selección**, y pasa con cualquier implementación. La primera versión
+     de estos tests afirmaba cubrir "la pausada no asociada no se ofrece" y no cubría nada:
+     el mutante que ofrecía TODAS las pausadas pasaba 15/15. Se corrigió afirmando sobre el
+     prop `items` de cada select. Hoy los tres mutantes caen: ofrecer todas, revertir el
+     arreglo, y revertir un solo gemelo.
+  2. El drawer se teletransporta a `document.body`, así que un `unmount()` que no corre por
+     una aserción fallida contamina tests **posteriores**. Sin el `finally`, el mutante hacía
+     caer además el test del chip de IVA y la señal apuntaba al lugar equivocado.
 - [x] **`metodos_pago.activo` era una columna muerta** (cerrado 2026-08-03) — existía en el
   esquema, la entidad y el seed, y no la leía ningún código. El interruptor real es
   `tenant_metodo_pago.habilitada`, que además es por tenant; `activo` habría sido global, y en

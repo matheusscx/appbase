@@ -293,6 +293,28 @@ const impuestosOpts = ref<Opt[]>([])
 const descuentosOpts = ref<Opt[]>([])
 const recargosOpts = ref<Opt[]>([])
 
+// Las reglas EN PAUSA, aparte. No entran en las listas de arriba porque una
+// regla pausada no se ofrece para asociar (decisión del owner). Pero si el ítem
+// YA la tiene asociada hace falta poder nombrarla: sin su opción, el select no
+// resuelve id → nombre y termina mostrando el UUID crudo al admin.
+const impuestosPausadosOpts = ref<Opt[]>([])
+const descuentosPausadosOpts = ref<Opt[]>([])
+const recargosPausadosOpts = ref<Opt[]>([])
+
+/**
+ * Las opciones activas más —solo si el ítem ya las tiene asociadas— las
+ * pausadas. Aparecen para explicar lo que hay puesto, no para elegirlas de
+ * nuevo: una pausada que nadie asoció sigue sin figurar en ninguna lista.
+ */
+function conPausadasAsociadas(
+  activas: Opt[],
+  pausadas: Opt[],
+  seleccionadas: string[],
+): Opt[] {
+  const asociadas = pausadas.filter((o) => seleccionadas.includes(o.value))
+  return asociadas.length ? [...activas, ...asociadas] : activas
+}
+
 // El IVA no se administra por ítem: sale de la clasificación tributaria
 // (ADR-018), y el backend rechaza con 400 que venga en `impuestosIds`. Se
 // aparta del selector para que no pueda entrar ahí ni por accidente.
@@ -815,13 +837,33 @@ async function cargarCatalogos() {
         value: i.id,
       }))
 
+    // Conserva el `(Sistema)` del catálogo oficial: la pausa se suma a la marca
+    // de origen, no la reemplaza. Perderla haría que un impuesto de sistema
+    // pasara a parecer personalizado justo cuando se pausa.
+    impuestosPausadosOpts.value = impuestos
+      .filter((i) => !i.activo && i.tipo !== 'iva')
+      .map((i) => ({
+        label: i.origen === 'sistema'
+          ? `${i.nombre} (Sistema) (en pausa)`
+          : `${i.nombre} (en pausa)`,
+        value: i.id,
+      }))
+
     descuentosOpts.value = descuentos
       .filter((d) => d.activo)
       .map((d) => ({ label: d.nombre, value: d.id }))
 
+    descuentosPausadosOpts.value = descuentos
+      .filter((d) => !d.activo)
+      .map((d) => ({ label: `${d.nombre} (en pausa)`, value: d.id }))
+
     recargosOpts.value = recargos
       .filter((r) => r.activo)
       .map((r) => ({ label: r.nombre, value: r.id }))
+
+    recargosPausadosOpts.value = recargos
+      .filter((r) => !r.activo)
+      .map((r) => ({ label: `${r.nombre} (en pausa)`, value: r.id }))
 
     productosIngrediente.value = productos.data
       .map(p => ({
@@ -2170,7 +2212,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 />
                 <USelectMenu
                   v-model="form.impuestosIds"
-                  :items="impuestosOpts"
+                  :items="conPausadasAsociadas(impuestosOpts, impuestosPausadosOpts, form.impuestosIds)"
                   value-key="value"
                   multiple
                   placeholder="Sin impuestos adicionales"
@@ -2182,7 +2224,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <UFormField label="Descuentos">
               <USelectMenu
                 v-model="form.descuentosIds"
-                :items="descuentosOpts"
+                :items="conPausadasAsociadas(descuentosOpts, descuentosPausadosOpts, form.descuentosIds)"
                 value-key="value"
                 multiple
                 placeholder="Sin descuentos"
@@ -2193,7 +2235,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <UFormField label="Recargos">
               <USelectMenu
                 v-model="form.recargosIds"
-                :items="recargosOpts"
+                :items="conPausadasAsociadas(recargosOpts, recargosPausadosOpts, form.recargosIds)"
                 value-key="value"
                 multiple
                 placeholder="Sin recargos"

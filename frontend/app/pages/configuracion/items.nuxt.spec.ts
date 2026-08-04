@@ -32,8 +32,8 @@ const ITEM_PRODUCTO = {
   categoriaId: null,
   clasificacionTributaria: 'afecto',
   impuestosIds: [] as string[],
-  descuentosIds: [],
-  recargosIds: [],
+  descuentosIds: [] as string[],
+  recargosIds: [] as string[],
 }
 
 const IMPUESTO_IVA = {
@@ -52,6 +52,25 @@ const IMPUESTO_OTRO = {
   activo: true,
   origen: 'sistema',
 }
+
+const IMPUESTO_OTRO_PAUSADO = {
+  id: 'otro-pausado',
+  nombre: 'Impuesto Verde',
+  porcentaje: '0.03',
+  tipo: 'otro',
+  activo: false,
+  origen: 'personalizado',
+}
+const RECARGO_ACTIVO = { id: 'rec-activo', nombre: 'Recargo tarjeta', activo: true }
+const RECARGO_PAUSADO = { id: 'rec-pausado', nombre: 'Recargo viejo', activo: false }
+let recargosMock: typeof RECARGO_ACTIVO[] = [RECARGO_ACTIVO, RECARGO_PAUSADO]
+
+const DESCUENTO_ACTIVO = { id: 'desc-activo', nombre: 'Promo verano', activo: true }
+// Una regla pausada que el ítem YA tiene asociada: el selector la excluye de
+// sus opciones (pausada = no se ofrece), y sin una opción que resuelva
+// id → nombre terminaba pintando el UUID crudo en la pantalla.
+const DESCUENTO_PAUSADO = { id: 'desc-pausado', nombre: 'Promo vieja', activo: false }
+let descuentosMock: typeof DESCUENTO_ACTIVO[] = [DESCUENTO_ACTIVO, DESCUENTO_PAUSADO]
 
 // `/impuestos` y el detalle de `/items/:id` son configurables por test: el
 // chip fijo del IVA depende de la clasificación tributaria que traiga el
@@ -102,6 +121,10 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string }) => {
     if (typeof url === 'string' && url.includes('/impuestos'))
       return impuestosPromiseOverride ?? Promise.resolve(impuestosMock)
+    if (typeof url === 'string' && url.includes('/descuentos'))
+      return Promise.resolve(descuentosMock)
+    if (typeof url === 'string' && url.includes('/recargos'))
+      return Promise.resolve(recargosMock)
     if (itemPapeleraBackend && typeof url === 'string' && url.includes(`/items/${itemPapeleraBackend.id}/uso`))
       return Promise.resolve({ bloqueos: [], advertencias: [] })
     if (
@@ -213,6 +236,86 @@ describe('configuracion/items — permisos de módulo, no esAdmin', () => {
 // El IVA no se administra por ítem (ADR-018): sale de la clasificación
 // tributaria. El chip fijo es la señal visual de eso; el candado real es el
 // 400 que tira el backend si `impuestosIds` trae un id `tipo: 'iva'`.
+describe('configuracion/items — una regla pausada ya asociada se nombra', () => {
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO, IMPUESTO_OTRO_PAUSADO]
+    impuestosPromiseOverride = null
+    descuentosMock = [DESCUENTO_ACTIVO, DESCUENTO_PAUSADO]
+    recargosMock = [RECARGO_ACTIVO, RECARGO_PAUSADO]
+  })
+
+  async function abrirEditar() {
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    return wrapper
+  }
+
+  /**
+   * Se afirma sobre las OPCIONES que recibe cada `USelectMenu`, no sobre el
+   * DOM. Un select cerrado solo pinta lo seleccionado —su lista vive en el
+   * portal de reka-ui y no llega al `document.body` hasta que se abre—, así que
+   * un `not.toContain(...)` sobre el body es vacuo: no observa opciones,
+   * observa selección, y pasa con CUALQUIER implementación. Medido con un
+   * mutante que ofrecía todas las pausadas: 15/15 en verde.
+   */
+  function opcionesPorSelect(wrapper: Awaited<ReturnType<typeof montar>>) {
+    return wrapper
+      .findAllComponents({ name: 'USelectMenu' })
+      .map(c => ((c.props('items') as { label: string }[] | undefined) ?? []).map(o => o.label))
+  }
+
+  function listaCon(listas: string[][], etiqueta: string) {
+    return listas.find(l => l.includes(etiqueta)) ?? []
+  }
+
+  it('las pausadas YA asociadas figuran con "(en pausa)" en los tres selectores', async () => {
+    itemDetalleMock = {
+      ...ITEM_PRODUCTO,
+      impuestosIds: [IMPUESTO_OTRO_PAUSADO.id],
+      descuentosIds: [DESCUENTO_PAUSADO.id],
+      recargosIds: [RECARGO_PAUSADO.id],
+    }
+    const wrapper = await abrirEditar()
+    try {
+      const listas = opcionesPorSelect(wrapper)
+      expect(listaCon(listas, 'Impuesto Adicional (Sistema)')).toContain('Impuesto Verde (en pausa)')
+      expect(listaCon(listas, 'Promo verano')).toContain('Promo vieja (en pausa)')
+      expect(listaCon(listas, 'Recargo tarjeta')).toContain('Recargo viejo (en pausa)')
+      // Y el UUID no se filtra a la pantalla, que es el bug que esto cierra.
+      expect(document.body.textContent).not.toContain(DESCUENTO_PAUSADO.id)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  // El control de la regla del owner: pausada = no se ofrece. Cae si alguien
+  // simplifica el filtro y mete TODAS las pausadas en la lista, que es la
+  // simplificación obvia si no se lee el docblock.
+  it('las pausadas que el ítem NO tiene asociadas no figuran en ningún selector', async () => {
+    itemDetalleMock = { ...ITEM_PRODUCTO, impuestosIds: [], descuentosIds: [], recargosIds: [] }
+    const wrapper = await abrirEditar()
+    try {
+      const listas = opcionesPorSelect(wrapper)
+      // Anclas positivas: sin ellas, un drawer que no montó pasaría los tres
+      // negativos por vacuidad.
+      expect(listaCon(listas, 'Promo verano')).toEqual(['Promo verano'])
+      expect(listaCon(listas, 'Recargo tarjeta')).toEqual(['Recargo tarjeta'])
+      expect(listaCon(listas, 'Impuesto Adicional (Sistema)')).toEqual(['Impuesto Adicional (Sistema)'])
+      expect(listas.flat().filter(l => l.includes('(en pausa)'))).toEqual([])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  // El drawer se teletransporta a `document.body`: un `unmount()` que no corre
+  // por una aserción fallida contamina tests POSTERIORES. Por eso los `finally`
+  // de arriba. Medido: sin ellos, romper el arreglo hacía caer además el test
+  // del chip de IVA y la señal apuntaba al lugar equivocado.
+})
+
 describe('configuracion/items — chip fijo del IVA', () => {
   beforeEach(() => {
     esAdmin = true

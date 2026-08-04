@@ -412,15 +412,6 @@ Ver [`resueltos.md`](resueltos.md).
   serlo en cuanto exista un productor.
   Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
   (línea vs venta), que hoy no distingue.
-- [ ] **La promesa del modal ("las asociaciones se conservan") puede romperla la pantalla de
-  ítems** (frontend, `items.vue:817-825` + `:935`, dudoso — medido como riesgo, no reproducido)
-  — el selector de reglas excluye las pausadas de sus opciones, mientras `form.descuentosIds`
-  conserva el id. Si al guardar el ítem el `v-model` del `USelectMenu` descarta los ids que no
-  están en su lista de opciones, editar **cualquier otro campo** del ítem borraría la
-  asociación de la regla pausada, y la reversibilidad que el modal promete dejaría de ser
-  cierta. El filtro es preexistente; lo que es nuevo es la promesa que depende de él.
-  **Cómo verificarlo:** pausar una regla asociada a un ítem → editar ese ítem cambiando otra
-  cosa → guardar → `GET /items/:id` y mirar si `descuentosIds` sigue trayendo el id.
 - [ ] **`suscripciones.service.ts:87-90` descarta `resultado.advertencias`** (backend, medido
   2026-08-03) — la justificación escrita ("hoy ningún ítem de suscripción tiene descuentos") es
   más angosta que la superficie nueva: ahora ese descarte también se traga los avisos de regla
