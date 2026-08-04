@@ -154,6 +154,39 @@ export class ImpuestosService {
     );
   }
 
+  /**
+   * Consulta inversa a `ItemsService.obtenerUso`: dado un impuesto, los
+   * ítems vivos que lo usan. Alimenta el modal de confirmación al pausar
+   * ("deja de aplicarse en N ítems"). Una sola query con JOIN — nunca una
+   * por fila —, acotada por tenant y `eliminado_el IS NULL` sobre `items`
+   * (la tabla puente `item_impuestos` no tiene `tenant_id` ni `eliminado_el`
+   * propios). El precheck por `{ id, tenantId }` sigue el mismo alcance que
+   * `update()`/`remove()`: un impuesto de sistema (`tenantId` null,
+   * compartido por país) no es de este tenant y no se puede pausar, así que
+   * tampoco expone su uso acá.
+   */
+  async obtenerUso(
+    tenantId: string,
+    id: string,
+  ): Promise<{ items: { id: string; nombre: string }[] }> {
+    const impuesto = await this.impuestoRepo.findOne({
+      where: { id, tenantId },
+    });
+    if (!impuesto) throw new NotFoundException(`Impuesto ${id} no encontrado`);
+
+    const items: { id: string; nombre: string }[] = await this.dataSource.query(
+      `SELECT i.item_id AS id, i.nombre
+         FROM item_impuestos ii
+         JOIN items i ON i.item_id = ii.item_id
+          AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+        WHERE ii.impuesto_id = $1
+        ORDER BY i.nombre ASC`,
+      [id, tenantId],
+    );
+
+    return { items };
+  }
+
   async restaurar(tenantId: string, id: string): Promise<Impuesto> {
     // Una sola regla para los tres casos —no existe, existe y está viva, o
     // la borró el sistema (`eliminadoPor` nulo, p.ej. un duplicado de IVA

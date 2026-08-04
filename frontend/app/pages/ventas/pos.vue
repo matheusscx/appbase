@@ -134,7 +134,10 @@ async function cargar() {
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
     ])
+    // Un ítem pausado (`activo = false`) deja de ofrecerse: conserva sus datos
+    // y sus asociaciones, pero no se puede vender hasta que lo reactiven.
     items.value = [...productosRes.data, ...recetasRes.data, ...combosRes.data]
+      .filter(i => i.activo)
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes
     tipoDocumentoId.value = tiposRes[0]?.id

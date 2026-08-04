@@ -390,6 +390,37 @@ export class DescuentosService {
     return { disponible: count === 0 };
   }
 
+  /**
+   * Consulta inversa a `ItemsService.obtenerUso`: dado un descuento, los
+   * ítems vivos que lo usan. Alimenta el modal de confirmación al pausar
+   * ("deja de aplicarse en N ítems"). Una sola query con JOIN — nunca una
+   * por fila —, acotada por tenant y `eliminado_el IS NULL` sobre `items`
+   * (la tabla puente `item_descuentos` no tiene `tenant_id` ni
+   * `eliminado_el` propios).
+   */
+  async obtenerUso(
+    tenantId: string,
+    id: string,
+  ): Promise<{ items: { id: string; nombre: string }[] }> {
+    const descuento = await this.descuentoRepo.findOne({
+      where: { id, tenantId },
+    });
+    if (!descuento)
+      throw new NotFoundException(`Descuento ${id} no encontrado`);
+
+    const items: { id: string; nombre: string }[] = await this.dataSource.query(
+      `SELECT i.item_id AS id, i.nombre
+         FROM item_descuentos idd
+         JOIN items i ON i.item_id = idd.item_id
+          AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+        WHERE idd.descuento_id = $1
+        ORDER BY i.nombre ASC`,
+      [id, tenantId],
+    );
+
+    return { items };
+  }
+
   private toListItem(
     descuento: Descuento,
     tipoRegla: TipoRegla,

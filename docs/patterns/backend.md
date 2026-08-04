@@ -49,6 +49,37 @@ Registrar en `app.module.ts`: entities en el array `entities` del
 - `numeric` (`type: 'numeric', precision, scale`) se mapea a **`string`** en JS —
   no operar con `+`/`*`, usar Decimal.js. Tipar la propiedad `string | null`.
 
+### Si la entidad lleva `activo`, hay que hacerlo cumplir (owner, 2026-08-03)
+
+> Cualquier cosa que se habilite y deshabilite: si está deshabilitada, **se ignora** y **no
+> sale en los selectores** que la aplican.
+
+Un `activo` que solo se escribe es peor que no tenerlo: el admin ve un interruptor, lo apaga,
+y el sistema sigue como si nada. Antes de agregar el campo, decidí quién lo lee — y escribí el
+test que lo fija.
+
+Dos significados según el rol de la entidad, y **no se aplanan**:
+
+| La entidad… | Pausada significa | Cómo se enforcea |
+|---|---|---|
+| **se aplica** a un cálculo (`descuentos`, `recargos`, `impuestos`) | no entra en el total, y avisa | descartar **al aplicar**, no al cargar |
+| **se referencia** (`categorias`, `terceros`, `items`) | no se puede elegir de nuevo | rechazar la **asignación nueva**; el vínculo existente no se rompe |
+
+Tres trampas ya pisadas, todas documentadas en
+[`resueltos.md`](../agent/resueltos.md) § *Lo que está en pausa no se aplica ni se ofrece*:
+
+1. **No filtres `activo` en el `findAll` del catálogo.** Lo comparte la pantalla de
+   administración, que necesita ver la fila pausada para poder reactivarla — si desaparece de
+   la lista, el toggle se va con ella.
+2. **No saques la fila del mapa que consume el motor.** `requerir()` tira 400 ante un id
+   ausente: cada ítem asociado se vuelve un error y el POS deja de vender.
+3. **Si el campo entra a un tipo del motor, va requerido, no opcional.** Un `activo?: boolean`
+   que alguien olvide mapear revive el bug en silencio; requerido, lo caza el typecheck.
+
+Pausar **no** es eliminar: nunca toca tablas puente ni borra asociaciones. Y una excepción
+fiscal a no olvidar: el **IVA no se pausa**, lo gobierna afecto/exento
+([impuestos.md](../features/impuestos.md)).
+
 ---
 
 ## 3. DTO

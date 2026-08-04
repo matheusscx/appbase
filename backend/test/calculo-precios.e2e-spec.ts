@@ -10,6 +10,10 @@ const ADMIN_PASS = 'admin';
 
 // "Promo fija $5.000" — descuento monto_fijo sin condiciones (seedDescuentos()).
 const DESCUENTO_FIJO_ID = '550e8400-e29b-41d4-a716-446655440338';
+// Tipo de regla `directo` y moneda CLP, ambos del seed. Se usan para crear una
+// regla y un ítem propios del test, sin depender del estado de los sembrados.
+const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
+const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 // "Papas fritas" — producto, precio_base 1500, precio_incluye_impuesto = false.
 const ITEM_ID = '550e8400-e29b-41d4-a716-446655440281';
 // "Producto demo (unidad · CLP)" — `clasificacion_tributaria = 'afecto'`, el
@@ -141,6 +145,107 @@ describe('Cálculo de precios (e2e)', () => {
       });
 
     expect(res.status).toBe(400);
+  });
+
+  /**
+   * Pausar una regla (`activo = false`) tiene que sacarla del total SIN tocar
+   * sus asociaciones, y sin romper la venta. La secuencia es el test: aplica →
+   * pausada no aplica → la asociación sigue viva → reactivada vuelve a aplicar.
+   *
+   * El `expect(201)` del caso pausado no es decorativo: la forma descartada de
+   * arreglar esto era filtrar `activo` al cargar el catálogo, y eso dejaba al
+   * motor con un id ausente del mapa, donde `requerir()` tira 400 y el POS deja
+   * de vender. Un test que solo mirara el total daría verde con esa forma rota.
+   */
+  describe('una regla pausada no se aplica y no rompe la venta', () => {
+    let descuentoId: string;
+    let itemPropioId: string;
+
+    beforeAll(async () => {
+      const resDesc = await request(app.getHttpServer())
+        .post('/api/descuentos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Pausable E2E ${Date.now()}`,
+          tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+          modo: 'porcentaje',
+          valor: '0.10',
+        });
+      expect(resDesc.status).toBe(201);
+      descuentoId = (resDesc.body as { id: string }).id;
+
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Item pausable E2E ${Date.now()}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+          stock: '10',
+          costo: '500',
+          descuentosIds: [descuentoId],
+        });
+      expect(resItem.status).toBe(201);
+      itemPropioId = (resItem.body as { id: string }).id;
+    });
+
+    const calcular = () =>
+      request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ itemId: itemPropioId, cantidad: '1' }] });
+
+    const setActivo = (activo: boolean) =>
+      request(app.getHttpServer())
+        .patch(`/api/descuentos/${descuentoId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ activo });
+
+    it('activa: el descuento asociado se aplica', async () => {
+      const res = await calcular();
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(body.totales.totalDescuentos).toBe('100.000000');
+      expect(body.lineas[0].advertencias).toHaveLength(0);
+    });
+
+    it('pausada: no descuenta, responde 201 y avisa', async () => {
+      expect((await setActivo(false)).status).toBe(200);
+
+      const res = await calcular();
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(body.totales.totalDescuentos).toBe('0.000000');
+      expect(body.lineas[0].advertencias).toHaveLength(1);
+      expect(body.lineas[0].advertencias[0].detalle).toBe(
+        'está en pausa y no se aplicó',
+      );
+    });
+
+    // Lo que el modal de la pantalla le promete al admin: "las asociaciones se
+    // conservan". Si alguna vez pausar vuelve a limpiar `item_descuentos`, este
+    // test cae y el modal deja de mentir.
+    it('pausada: la asociación con el ítem sigue intacta', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/items/${itemPropioId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect((res.body as { descuentosIds: string[] }).descuentosIds).toContain(
+        descuentoId,
+      );
+    });
+
+    it('reactivada: vuelve a aplicar sin haber tocado nada más', async () => {
+      expect((await setActivo(true)).status).toBe(200);
+
+      const res = await calcular();
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(body.totales.totalDescuentos).toBe('100.000000');
+      expect(body.lineas[0].advertencias).toHaveLength(0);
+    });
   });
 
   /**

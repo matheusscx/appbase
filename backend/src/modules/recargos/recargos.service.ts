@@ -371,6 +371,36 @@ export class RecargosService {
     return { disponible: count === 0 };
   }
 
+  /**
+   * Consulta inversa a `ItemsService.obtenerUso`: dado un recargo, los
+   * ítems vivos que lo usan. Alimenta el modal de confirmación al pausar
+   * ("deja de aplicarse en N ítems"). Una sola query con JOIN — nunca una
+   * por fila —, acotada por tenant y `eliminado_el IS NULL` sobre `items`
+   * (la tabla puente `item_recargos` no tiene `tenant_id` ni `eliminado_el`
+   * propios).
+   */
+  async obtenerUso(
+    tenantId: string,
+    id: string,
+  ): Promise<{ items: { id: string; nombre: string }[] }> {
+    const recargo = await this.recargoRepo.findOne({
+      where: { id, tenantId },
+    });
+    if (!recargo) throw new NotFoundException(`Recargo ${id} no encontrado`);
+
+    const items: { id: string; nombre: string }[] = await this.dataSource.query(
+      `SELECT i.item_id AS id, i.nombre
+         FROM item_recargos ir
+         JOIN items i ON i.item_id = ir.item_id
+          AND i.tenant_id = $2 AND i.eliminado_el IS NULL
+        WHERE ir.recargo_id = $1
+        ORDER BY i.nombre ASC`,
+      [id, tenantId],
+    );
+
+    return { items };
+  }
+
   private toListItem(
     recargo: Recargo,
     tipoRegla: TipoRegla,

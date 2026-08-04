@@ -799,11 +799,13 @@ async function cargarCatalogos() {
         .map((c) => ({ label: c.nombre, value: c.id })),
     ]
 
-    // Sin `&& i.activo`: el motor (`calculo-precios.service.ts`) tampoco filtra
-    // por `activo` al derivar el IVA — igual que con descuentos/recargos/impuestos
-    // adicionales, `activo` gobierna qué se puede asociar desde el selector, no
-    // qué se cobra una vez asociado. El chip debe reflejar lo que el motor va a
-    // cobrar, no un filtro más estricto que lo esconda mientras igual se cobra.
+    // Sin `&& i.activo`, y la razón cambió: hasta 2026-08-03 era que el motor
+    // tampoco filtraba por `activo`, así que esconder el IVA habría mostrado
+    // menos de lo que igual se cobraba. Ahora el motor SÍ descarta las reglas
+    // pausadas —descuentos, recargos e impuestos adicionales—, pero el IVA
+    // quedó fuera de ese interruptor a propósito: lo gobierna la clasificación
+    // tributaria del ítem (afecto/exento), nunca `activo` (ADR-018). El chip no
+    // filtra porque no hay nada que filtrar, no porque el motor sea permisivo.
     ivaDelPais.value = impuestos.find((i) => i.tipo === 'iva') ?? null
 
     impuestosOpts.value = impuestos

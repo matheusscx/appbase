@@ -34,6 +34,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Motor de cálculo de precios | ✅ Implementado (2026-06-28) |
 | Advertencias del motor de precios en la previsualización del carrito (POS, Salones, Tienda) y en la confirmación de la Tienda | ✅ Implementado (2026-07-28, confirmación 2026-08-02) |
 | Congelado de las reglas aplicadas en la venta (nombre, modo, valor y config del cálculo) + desglose en el detalle de venta | ✅ Implementado (2026-08-02) — falta mostrar `config_calculo`, ver `docs/agent/pendientes.md` |
+| Pausar (`activo = false`) deja de aplicarse y de ofrecerse: reglas de precio descartadas por el motor con advertencia y sin tocar sus asociaciones (pausar ≠ eliminar), modal de confirmación con el conteo de ítems afectados (`GET /:id/uso` en descuentos/recargos/impuestos), ítem pausado rechazado en el checkout de la tienda, advertido en el POS y cobrable en salones si ya estaba cargado, IVA explícitamente fuera del interruptor (lo gobierna afecto/exento) y `metodos_pago.activo` eliminado por muerto | ✅ Implementado (2026-08-03) — falta el e2e de salones (cobrar una cuenta con un ítem pausado después de cargarlo) y un test del filtro de catálogo en las 3 pantallas de venta, ver `docs/agent/pendientes.md` |
 | Procesamiento de ventas (canal físico, pagos inline, vuelto) | ✅ Implementado (2026-06-29) |
 | Gestión de cajas | ✅ Implementado |
 | Registro de pagos | ✅ Implementado (inline con ventas, 2026-06-29) |

@@ -311,6 +311,24 @@ independiente, y las ramas que ningún test toca.
 
 ### Huecos de test
 
+**De la feature de pausa (2026-08-03)**, dos que quedaron abiertos a conciencia y no por
+olvido:
+
+- **E2E de salones: cobrar una cuenta con un ítem que se pausó después de cargarlo.** El plan
+  lo pedía. No existe ningún `salones.e2e-spec.ts` del que partir, y montar mesa + cuenta +
+  cierre a ciegas —sin poder ejecutarlo en el momento— era escribir algo que parece cobertura
+  sin serlo. El comportamiento **no** se tocó (`getItemVendibleOrThrow` sigue igual), así que
+  el riesgo es de regresión futura, no de bug presente.
+- **No hay E2E de que una regla pausada no quede congelada en `ventas_descuentos`.** El plan
+  lo pedía. El comportamiento es correcto por construcción —el congelado sale de las trazas y
+  una regla pausada no deja traza—, pero eso lo sostiene un razonamiento, no un test.
+- **El filtro de ítems pausados en los tres catálogos de venta no tiene test.** `pos.vue`,
+  `tienda/index.vue` y `salones/index.vue` no tienen `.nuxt.spec.ts` y montarlas exige stores
+  de caja, unidades e impresoras. Es una línea por pantalla y hoy nada la sostiene.
+- ℹ️ **Caveat preexistente, no introducido por esa feature:** los tres catálogos piden
+  `pageSize=100` y el filtro corre **después**, así que un ítem pausado sigue ocupando un lugar
+  de esos 100. El tope ya truncaba antes; esto no lo empeora ni lo arregla.
+
 **Ramas sin cobertura alguna**, para decidir si entran: `HORAS_TRABAJADAS`;
 `advertenciasSesionesAbiertas` con `fin_el = null`; las guardas `fechaHasta <= fechaDesde`,
 `gruposConfig.length === 0` y moneda oficial ausente; `aplicarCambioParticipante` (alta
@@ -384,55 +402,67 @@ Ver [`resueltos.md`](resueltos.md).
 
 ### Media
 
-- [ ] **Un descuento, recargo o impuesto desactivado sigue aplicándose** (backend +
-  frontend, `calculo-precios.service.ts:50-62` + `items.service.ts:408-419`) —
-  `descuentos.findAll` e `impuestos.findAll` no filtran `activo`, `indexarReglas` ni
-  siquiera mapea el campo, y al desactivar la regla nadie toca `item_descuentos`.
-  **Refutada la mitad peor del hallazgo:** las entidades usan `@DeleteDateColumn`, así que
-  una regla **borrada** sí queda excluida por TypeORM — es solo `activo`. Lo que lo vuelve
-  bug y no decisión: `items.vue:685` ya filtra por `activo` al ofrecer asociaciones nuevas,
-  así que el front la esconde y el back la sigue cobrando.
-  ℹ️ **Alcance confirmado el 2026-07-31** (revisión final de ADR-018): también aplica a
-  `item_impuestos`. El IVA **no** está afectado —desde ADR-018 ya no pasa por esa tabla,
-  se deriva de `clasificacion_tributaria`—, pero los `tipo='otro'` sí: el tenant los
-  desactiva desde `/configuracion/impuestos`, el front los esconde del selector y el
-  motor los sigue cobrando.
-  **Forma decidida por el owner (2026-07-30):** desactivar la regla **advierte** —diciendo a
-  cuántos ítems está asociada— y, **al confirmar, limpia las asociaciones**. O sea el cierre
-  no es filtrar `activo` en la lectura del motor: es que desactivar sea una operación con
-  efecto sobre `item_descuentos` / `item_recargos` / `item_impuestos`, y que el motor deje de
-  verla porque la fila puente ya no está. Mismo patrón de UX que el borrado de ítem
-  (`GET /items/:id/uso` → modal con el impacto → confirmar), en espejo.
-  Lo que la implementación tiene que resolver antes de escribir código:
-  - **Contar el impacto** exige la consulta inversa a la de `obtenerUsoItem`: dada una regla,
-    qué ítems la usan. Hoy no existe.
-  - **Reactivar no revierte**: si el admin vuelve a activar la regla, las asociaciones
-    borradas no vuelven solas. Hay que decirlo en la advertencia, no descubrirlo después.
-  - ℹ️ **Ya no bloqueado.** La entrada esperaba la decisión transversal del "log de cambios
-    reversible" (owner, 2026-07-30) para no comprometerse tabla por tabla. Esa decisión se
-    cerró 2026-07-31 como **papelera + restaurar** (ver
-    [`resueltos.md`](resueltos.md) § Features diferidas) con alcance acotado a
-    **borrados**, y midió que `items.remove()` **no toca**
-    `item_descuentos`/`item_recargos`/`item_impuestos` — por eso la papelera no necesitó
-    uniformar estas tres puentes. Esta entrada no es un borrado de `items`, es **desactivar
-    una regla**, así que la papelera no la resuelve por transitividad, pero sí destraba
-    encararla sin esperar nada más grande.
-    Lo único que sigue abierto acá, y sigue siendo decisión del owner: ¿el "limpiar" que
-    dispara desactivar es `DELETE` físico o soft delete? Medido: las tres puentes
-    (`item_descuentos`, `item_recargos`, `item_impuestos`) son puras —2 columnas, PK
-    compuesta, sin `eliminado_el`, sin `tenant_id`— y hoy el código ya las borra duro y
-    reinserta (`items.service.ts:1670,1682,1694`), a diferencia de sus cuatro hermanas con
-    datos propios, que sí tienen `eliminado_el`.
-    Detalle a no olvidar cuando se retome: si se agrega `eliminado_el`, la PK
-    `(item_id, regla_id)` hace que una fila borrada blando **bloquee reinsertar el mismo
-    par** — el patrón actual "borro todo y reinserto" tiene que pasar a revivir o upsert.
-  - **Alcance**: además de las tres puentes por ítem, están las reglas a nivel venta
-    (`descuentosVentaIds` / `recargosVentaIds`, que llegan por DTO y no tienen fila puente).
-    El IVA queda **fuera**: se deriva de `clasificacion_tributaria` y no tiene fila puente
-    que limpiar ([ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
-  - Las ventas ya emitidas **no se tocan**: el hecho fiscal está congelado en
-    `ventas_descuentos` / `ventas_recargos` / `ventas_impuestos`.
-  ⛔ Toca el motor de cálculo de precios: va con spec antes de código.
+- [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
+  no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
+  `GET /:id/uso` cuenta filas de `item_descuentos`, pero las reglas que se aplican por
+  `descuentosVentaIds` / `recargosVentaIds` **no tienen tabla puente** (no hay columna `nivel`
+  en `descuentos`/`recargos`), así que devuelven `items: []` y la pantalla las pausa directo,
+  sin confirmación. El texto "Deja de aplicarse en N ítems" también queda incompleto ahí.
+  Hoy es teórico —ninguna pantalla manda esos campos, medido el 2026-08-03—, pero deja de
+  serlo en cuanto exista un productor.
+  Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
+  (línea vs venta), que hoy no distingue.
+- [ ] **⚠️ Toca plata: un ítem con `precio_incluye_impuesto` cuyo único impuesto se pausa deja
+  de desbrutearse** (backend, `calculo-precios.engine.ts`, medido 2026-08-03 en la revisión de
+  cierre) — el impuesto pausado sale de la lista antes del desbruteo (correcto: si no se cobra,
+  no puede inflar el divisor), pero eso significa que el cliente sigue pagando los mismos 119
+  de vitrina y los 19 desaparecen del desglose: **el neto del tenant se infla**. Es coherente
+  con el diseño —el precio de vitrina manda— pero esa decisión no está escrita en ningún lado
+  y ningún test la cubre. **Decisión del owner:** ¿el precio de vitrina manda, o pausar un
+  impuesto incluido debería bajar el precio final?
+- [ ] **La promesa del modal ("las asociaciones se conservan") puede romperla la pantalla de
+  ítems** (frontend, `items.vue:817-825` + `:935`, dudoso — medido como riesgo, no reproducido)
+  — el selector de reglas excluye las pausadas de sus opciones, mientras `form.descuentosIds`
+  conserva el id. Si al guardar el ítem el `v-model` del `USelectMenu` descarta los ids que no
+  están en su lista de opciones, editar **cualquier otro campo** del ítem borraría la
+  asociación de la regla pausada, y la reversibilidad que el modal promete dejaría de ser
+  cierta. El filtro es preexistente; lo que es nuevo es la promesa que depende de él.
+  **Cómo verificarlo:** pausar una regla asociada a un ítem → editar ese ítem cambiando otra
+  cosa → guardar → `GET /items/:id` y mirar si `descuentosIds` sigue trayendo el id.
+- [ ] **`suscripciones.service.ts:87-90` descarta `resultado.advertencias`** (backend, medido
+  2026-08-03) — la justificación escrita ("hoy ningún ítem de suscripción tiene descuentos") es
+  más angosta que la superficie nueva: ahora ese descarte también se traga los avisos de regla
+  o impuesto pausado sobre el primer período.
+- [ ] **El aviso de ítem pausado se emite por línea** (backend,
+  `calculo-precios.service.ts`, 2026-08-03) — el mismo ítem en 3 líneas (recetas
+  personalizadas, salones) da 3 toasts idénticos en el POS. Mismo ruido que el de impuestos de
+  la entrada de abajo.
+- [ ] **Una advertencia de impuesto pausado se repite por línea, y se emite aunque la fórmula
+  del tenant no incluya el paso `impuestos`** (backend, `calculo-precios.engine.ts`, medido
+  2026-08-03) — un carrito de 10 líneas con el mismo impuesto pausado produce 10 advertencias
+  idénticas, que el POS aplana a 10 toasts. Puede ser deliberado (las advertencias de línea
+  son por línea por naturaleza), pero para una regla global al catálogo el ruido es real. Lo
+  segundo sí es un borde claro: se arman antes del recorrido de la fórmula, así que un tenant
+  cuya fórmula no aplique impuestos igual ve el aviso.
+- [ ] **El bloque de pausa está triplicado verbatim en las tres pantallas de configuración**
+  (frontend, `descuentos.vue` / `recargos.vue` / `impuestos.vue`, 2026-08-03) — ~60 líneas
+  idénticas (interface, 4 refs, `aplicarActivo`, `toggleActivo`, `cerrarPausar`,
+  `confirmarPausar` y el `CrudModal`). La convención dice extraer a la tercera y esta es la
+  tercera. No se hizo en el momento porque hoy **no existe** un composable compartido entre
+  esas tres pantallas: extraerlo es introducir un patrón nuevo, no seguir uno existente, y eso
+  no entraba en el alcance de la tarea.
+- [ ] **`categorias` y `terceros` pausados: el front los esconde, el backend acepta la
+  asignación** (backend, medido 2026-08-03) — hermano menor de la entrada de reglas pausadas
+  que se cerró ese mismo día (ver [`resueltos.md`](resueltos.md)), pero sobre entidades que se
+  **referencian**, no que se aplican: no cambian ningún monto, por eso quedó fuera de aquel
+  alcance.
+  Medido: `ClienteForm.vue:34` filtra `terceros` por `activo` y `items.vue:798` filtra
+  `categorias`, pero ningún service del backend lee el campo, así que un POST/PATCH directo
+  puede asignar una categoría o un tercero pausado.
+  ⚠️ Acá "ignorar" **no** puede significar romper el vínculo existente: un ítem no pierde su
+  categoría porque la categoría se haya pausado. Lo que corresponde es **rechazar la
+  asignación nueva**, y dejar en paz las que ya existen.
+  Sin decidir: si el rechazo es 400 o si se ignora en silencio.
 - [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
   `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
   dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).

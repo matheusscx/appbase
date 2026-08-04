@@ -126,6 +126,7 @@ interface ItemSuscribible {
   precioBase: string
   monedaId: string
   frecuencia: 'semanal' | 'quincenal' | 'mensual'
+  activo: boolean
 }
 
 const drawerOpen = ref(false)
@@ -195,7 +196,11 @@ async function abrirCrear() {
       const res = await useApiFetch<{ data: ItemSuscribible[] }>(
         `${apiUrl}/items?tipo=suscripcion&pageSize=100`,
       )
-      itemsSuscribibles.value = res.data.filter((i) => i.frecuencia)
+      // Un ítem pausado (`activo = false`) deja de ofrecerse: conserva sus datos
+      // y sus asociaciones, pero no se puede vender hasta que lo reactiven. Es
+      // la cuarta superficie de venta, con el mismo filtro que POS, tienda y
+      // salones; el backend además lo rechaza en `suscripciones.service.ts`.
+      itemsSuscribibles.value = res.data.filter((i) => i.frecuencia && i.activo)
     } catch (e: unknown) {
       toast.add({ title: apiErrorMsg(e, 'Error al cargar items suscribibles'), color: 'error' })
     } finally {

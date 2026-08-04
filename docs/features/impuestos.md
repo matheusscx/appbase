@@ -133,12 +133,34 @@ No existe endpoint para crear impuestos del sistema — se siembran solo vía
 | `tipo` | TEXT | default `'otro'` | `'iva'` \| `'otro'` |
 | `nombre` | TEXT | | |
 | `porcentaje` | NUMERIC(7,4) | | decimal: `0.19` = 19% |
-| `activo` | BOOLEAN | default `true` | |
+| `activo` | BOOLEAN | default `true` | pausa. **No aplica al IVA** — ver abajo |
 | `creado_el`/`actualizado_el`/`eliminado_el` | TIMESTAMPTZ | | soft delete estándar |
 
 **Sistema**: `(tenant_id NULL, pais_id set)` — ej. IVA Chile, id fijo del seeder
 `550e8400-e29b-41d4-a716-446655440280`, `tipo='iva'`, `porcentaje='0.19'`.
 **Personalizado**: `(tenant_id set, pais_id NULL)`.
+
+### El IVA no se pausa: se es afecto o exento (2026-08-03)
+
+Desde 2026-08-03 el motor de precios **descarta los impuestos pausados** (`activo = false`) y
+emite una advertencia. Esa regla tiene una excepción explícita: **`tipo='iva'` se cobra
+siempre que el ítem sea afecto**, sin mirar `activo`.
+
+Lo que decide si se cobra IVA es la `clasificacion_tributaria` del ítem —afecto o exento— y
+nada más ([ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)). El interruptor no
+participa. `CalculoPreciosService` lo fuerza en un solo lugar, al derivar el IVA del país, y
+hay un test que lo fija: *un ítem afecto paga IVA aunque la fila del IVA esté en
+`activo = false`*.
+
+**Por qué se blindó:** una fila de IVA con `activo = false` —mal sembrada, o tocada por SQL
+directo— dejaría de cobrar IVA en silencio. Eso es un problema fiscal, no un descuento mal
+aplicado. En la práctica un tenant no puede llegar ahí (la fila del IVA es del país, su
+`update()` busca por `tenant_id` y devuelve 404, y `tipo` no está expuesto en los DTOs), pero
+el motor no depende de esas tres protecciones para hacer lo correcto.
+
+Los impuestos **personalizados** del tenant (`tipo='otro'`) sí se pausan con normalidad, con
+el mismo comportamiento que descuentos y recargos:
+[descuentos-recargos.md](./descuentos-recargos.md).
 
 **Tabla `items`** — columna en la base (todos los tipos: producto, servicio,
 suscripción, receta, combo, ingrediente):

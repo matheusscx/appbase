@@ -83,8 +83,13 @@ Response (201):
 }
 ```
 
-**Advertencias.** El motor emite avisos que **no frenan el cálculo**: hoy, cuando un
-descuento supera el monto disponible, se topea y se avisa. Cada advertencia viaja
+**Advertencias.** El motor emite avisos que **no frenan el cálculo**. Hoy son cuatro:
+un descuento que supera el monto disponible y se topea; una **regla pausada**
+(`activo = false`) que por eso no se aplica; un **impuesto pausado**, ídem; y un **ítem
+pausado**, que a diferencia de los anteriores **sí se cobra** —el aviso es que ya no se
+ofrece en el catálogo, no que no se aplicó— y por eso lo emite el service y no el motor
+(un ítem pausado no cambia ningún monto). Ver
+[descuentos-recargos.md](./descuentos-recargos.md). Cada advertencia viaja
 partida en `{ titulo, detalle }` (`AdvertenciaPrecio` en el motor) en vez de una
 frase única: el carrito es angosto y una sola línea de texto con todo el mensaje
 ocupaba varios renglones, así que `titulo` (ej. `Descuento "X"`) se muestra en la
@@ -92,8 +97,17 @@ línea y `detalle` (ej. `no se aplicó completo porque superaba el monto disponi
 sin nombrar montos: el aplicado ya viaja en la traza, que el front formatea) queda
 en un tooltip. El resultado los expone en dos granularidades porque se muestran en
 lugares distintos: `ResultadoLinea.advertencias` va bajo la línea que lo produjo, y
-`advertenciasVenta` —solo los descuentos a nivel venta, que no pertenecen a ninguna
-línea— va junto al total. `advertencias` es el aplanado de ambos. La razón de
+`advertenciasVenta` —las reglas a nivel venta, que no pertenecen a ninguna línea— va
+junto al total. `advertencias` es el aplanado de ambos.
+
+> ⚠️ `advertenciasVenta` son **descuentos Y recargos** de venta. Hasta 2026-08-03 decía
+> "solo los descuentos", y era cierto por accidente: la única advertencia que existía
+> —el tope— solo se emite en descuentos, así que el ensamblado leía `dv` e ignoraba `rv`
+> sin que se notara. Cuando las reglas pausadas hicieron que un recargo también pudiera
+> avisar, ese supuesto se volvió un bug: un recargo de venta pausado bajaba la plata
+> cobrada sin traza ni advertencia. Si tocás esta parte, las dos ramas van siempre.
+
+La razón de
 separarlos en vez de que el consumidor reste por igualdad: dos advertencias con el
 mismo `titulo`+`detalle` son alcanzables (dos descuentos distintos topeados al mismo
 monto producen el mismo mensaje).

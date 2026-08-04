@@ -9,6 +9,7 @@ import { MonedasService } from '../monedas/monedas.service';
 import { CalcularVentaDto, LineaDto } from './dto/calcular.dto';
 import {
   calcularVenta,
+  type AdvertenciaPrecio,
   type ConfigCalculo,
   type ImpuestoResuelto,
   type LineaResuelta,
@@ -58,7 +59,13 @@ export class CalculoPreciosService {
     const impuestoMap = new Map<string, ImpuestoResuelto & { tipo: string }>(
       impuestos.map((i) => [
         i.id,
-        { id: i.id, nombre: i.nombre, porcentaje: i.porcentaje, tipo: i.tipo },
+        {
+          id: i.id,
+          nombre: i.nombre,
+          porcentaje: i.porcentaje,
+          tipo: i.tipo,
+          activo: i.activo,
+        },
       ]),
     );
     // El IVA del país del tenant. Hay a lo sumo uno visible: `impuestos.tipo`
@@ -69,8 +76,16 @@ export class CalculoPreciosService {
     // línea tenga la misma forma recortada que los demás impuestos de la
     // lista ({id, nombre, porcentaje, tipo}), no la entidad completa
     // (tenantId, paisId, creadoEl…). Ver ADR-018.
-    const ivaDelPais =
-      [...impuestoMap.values()].find((i) => i.tipo === 'iva') ?? null;
+    const ivaDelPais = (() => {
+      const iva = [...impuestoMap.values()].find((i) => i.tipo === 'iva');
+      // ⚠️ El IVA NO se pausa: lo gobierna la clasificación tributaria del ítem
+      // —afecto o exento—, nunca el interruptor `activo` (ADR-018). Se fuerza
+      // `activo: true` para que una fila mal sembrada, o tocada por SQL directo,
+      // no deje de cobrar IVA en silencio. Eso sería un problema fiscal, no un
+      // descuento mal aplicado. Un tenant tampoco puede llegar acá: la fila del
+      // IVA es del país (`tenant_id` nulo) y su PATCH devuelve 404.
+      return iva ? { ...iva, activo: true } : null;
+    })();
     const descuentoMap = this.indexarReglas(descuentos);
     const recargoMap = this.indexarReglas(recargos);
 
@@ -127,7 +142,7 @@ export class CalculoPreciosService {
       ),
     );
 
-    return calcularVenta({
+    const resultado = calcularVenta({
       lineas,
       metodoPagoId: dto.metodoPagoId ?? null,
       descuentosVenta: this.resolverReglas(
@@ -142,6 +157,47 @@ export class CalculoPreciosService {
       ),
       config,
     });
+
+    this.advertirItemsPausados(dto, itemsBase, resultado);
+
+    return resultado;
+  }
+
+  /**
+   * Un ítem pausado (`activo = false`) SÍ se cobra en el POS —el producto puede
+   * estar ya en la mano del cliente— pero el cajero se entera. La tienda online,
+   * donde todavía no pasó nada, lo rechaza antes de llegar acá
+   * (`OnlineService.prepararLineasCheckout`); salones ya rechaza agregar líneas
+   * nuevas. Por eso el filtro no vive en `cargarBasePorIds`, que comparten los
+   * tres canales.
+   *
+   * Va en el servicio y NO en el motor a propósito: el motor calcula plata, y un
+   * ítem pausado no cambia ningún monto. El detalle dice "ya no se ofrece", no
+   * "no se aplicó": lo segundo sería mentira, la línea se cobra igual.
+   *
+   * `resultado.lineas` es 1:1 con `dto.lineas` y en el mismo orden, así que el
+   * índice sirve para las dos. La advertencia se empuja a las DOS listas que el
+   * motor mantiene —la de la línea y la agregada de la venta— porque
+   * `resultado.advertencias` se armó por copia antes de este paso: escribir solo
+   * en la línea la dejaría fuera de los toasts del POS (`ventas.service.ts` las
+   * aplana desde ahí). `advertenciasVenta` no se toca: es solo para las reglas a
+   * nivel venta, que no pertenecen a ninguna línea.
+   */
+  private advertirItemsPausados(
+    dto: CalcularVentaDto,
+    itemsBase: ItemsBaseMap,
+    resultado: ResultadoVenta,
+  ): void {
+    dto.lineas.forEach((linea, i) => {
+      const item = itemsBase.get(linea.itemId)!;
+      if (item.activo) return;
+      const advertencia: AdvertenciaPrecio = {
+        titulo: `Producto "${item.nombre}"`,
+        detalle: 'está en pausa y ya no se ofrece en el catálogo',
+      };
+      resultado.lineas[i].advertencias.push(advertencia);
+      resultado.advertencias.push(advertencia);
+    });
   }
 
   private indexarReglas(
@@ -153,6 +209,7 @@ export class CalculoPreciosService {
       tipoRegla: { codigo: string } | null;
       tramos: { minimo: string | null; valor: string | null }[];
       metodoPagoIds: string[];
+      activo: boolean;
     }[],
   ): Map<string, ReglaResuelta> {
     return new Map(
@@ -169,6 +226,11 @@ export class CalculoPreciosService {
             valor: t.valor ?? '0',
           })),
           metodoPagoIds: r.metodoPagoIds,
+          // El mapa conserva las reglas pausadas a propósito: sacarlas de acá
+          // haría que `requerir()` tirara 400 por id ausente en cada ítem que
+          // la tenga asociada, y el POS dejaría de vender. El descarte pasa al
+          // aplicarlas, en el motor.
+          activo: r.activo,
         },
       ]),
     );

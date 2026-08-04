@@ -81,6 +81,19 @@ Response (201):
 }
 ```
 
+**Ítem pausado (`activo = false`) → 400**, con el nombre del producto adentro:
+`El producto "<nombre>" ya no se encuentra disponible`. El carrito vive en el
+navegador (no hay tabla `carrito`), así que el ítem se puede pausar entre que el
+cliente lo agrega y que paga: el checkout es el único punto donde atajarlo. El
+mensaje nombra el producto porque un carrito de ocho líneas con un "no
+disponible" genérico deja al cliente adivinando cuál sacar.
+
+La regla es **por canal** — se bloquea donde todavía no pasó nada, no se bloquea
+donde el consumo ya ocurrió (owner, 2026-08-03): online falla, el POS solo emite
+una `AdvertenciaPrecio` y cobra igual, y una cuenta de salón con la línea ya
+cargada se paga normal (agregar líneas nuevas sí se sigue rechazando). Por eso el
+filtro **no** vive en `ItemsService.cargarBasePorIds`, que comparten los tres.
+
 ### Aprobar pago (crea la venta)
 
 ```

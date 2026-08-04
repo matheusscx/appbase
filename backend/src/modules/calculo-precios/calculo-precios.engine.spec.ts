@@ -1,6 +1,7 @@
 import {
   calcularVenta,
   type ConfigCalculo,
+  type ImpuestoResuelto,
   type LineaResuelta,
   type ReglaResuelta,
   type VentaResuelta,
@@ -27,6 +28,15 @@ const regla = (over: Partial<ReglaResuelta> = {}): ReglaResuelta => ({
   valor: '0.10',
   tramos: [],
   metodoPagoIds: [],
+  activo: true,
+  ...over,
+});
+
+const impuesto = (over: Partial<ImpuestoResuelto> = {}): ImpuestoResuelto => ({
+  id: 't1',
+  nombre: 'IVA',
+  porcentaje: '0.19',
+  activo: true,
   ...over,
 });
 
@@ -65,7 +75,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               cantidad: '2',
-              impuestos: [{ id: 't1', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto()],
             }),
           ],
         }),
@@ -82,7 +92,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               precioUnitario: '119',
               precioIncluyeImpuesto: true,
-              impuestos: [{ id: 't1', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto()],
             }),
           ],
         }),
@@ -100,8 +110,8 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
               precioUnitario: '130',
               precioIncluyeImpuesto: true,
               impuestos: [
-                { id: 't1', nombre: 'IVA', porcentaje: '0.19' },
-                { id: 't2', nombre: 'Extra', porcentaje: '0.11' },
+                impuesto(),
+                impuesto({ id: 't2', nombre: 'Extra', porcentaje: '0.11' }),
               ],
             }),
           ],
@@ -121,7 +131,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [regla({ valor: '0.10' })],
-              impuestos: [{ id: 't1', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto()],
             }),
           ],
         }),
@@ -189,7 +199,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [regla({ valor: '0.10' })],
-              impuestos: [{ id: 't1', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto()],
             }),
           ],
           config: config({
@@ -368,6 +378,149 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     });
   });
 
+  describe('reglas pausadas (activo = false)', () => {
+    it('un descuento pausado no descuenta nada y avisa', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [regla({ nombre: 'Promo vieja', activo: false })],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].descuentoAplicado).toBe('0.000000');
+      expect(r.lineas[0].totalLinea).toBe('100.000000');
+      expect(r.lineas[0].advertencias).toEqual([
+        {
+          titulo: 'Descuento "Promo vieja"',
+          detalle: 'está en pausa y no se aplicó',
+        },
+      ]);
+    });
+
+    // El control del test de arriba: sin esto, un motor que ignorara TODOS los
+    // descuentos también lo pasaría.
+    it('la misma regla activa sí descuenta', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              descuentos: [regla({ nombre: 'Promo vieja', activo: true })],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].descuentoAplicado).toBe('10.000000');
+      expect(r.lineas[0].advertencias).toEqual([]);
+    });
+
+    it('la regla pausada no deja traza: no es un "aplicó 0"', () => {
+      const r = calcularVenta(
+        venta({ lineas: [linea({ descuentos: [regla({ activo: false })] })] }),
+      );
+      expect(r.lineas[0].trazas.descuentos).toEqual([]);
+    });
+
+    it('un recargo pausado avisa como recargo, no como descuento', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              recargos: [regla({ nombre: 'Recargo tarjeta', activo: false })],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].recargoAplicado).toBe('0.000000');
+      expect(r.lineas[0].advertencias[0].titulo).toBe(
+        'Recargo "Recargo tarjeta"',
+      );
+    });
+
+    it('un impuesto pausado no se cobra y avisa', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              impuestos: [
+                impuesto({ nombre: 'Impuesto verde', activo: false }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].impuestoAplicado).toBe('0.000000');
+      expect(r.lineas[0].totalLinea).toBe('100.000000');
+      expect(r.lineas[0].advertencias[0].titulo).toBe(
+        'Impuesto "Impuesto verde"',
+      );
+    });
+
+    // El impuesto pausado tiene que salir de la lista ANTES de desbrutear: si
+    // se filtrara recién al aplicarlo, su tasa seguiría inflando el divisor y
+    // el neto quedaría mal aunque el impuesto no se cobre.
+    it('el desbruteo no usa la tasa del impuesto pausado', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '119',
+              precioIncluyeImpuesto: true,
+              impuestos: [
+                impuesto(),
+                impuesto({ id: 't2', porcentaje: '0.11', activo: false }),
+              ],
+            }),
+          ],
+        }),
+      );
+      expect(r.lineas[0].subtotalNeto).toBe('100.000000');
+      expect(r.lineas[0].impuestoAplicado).toBe('19.000000');
+      expect(r.lineas[0].totalLinea).toBe('119.000000');
+    });
+
+    it('una regla de venta pausada avisa en advertenciasVenta', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [linea({ precioUnitario: '100' })],
+          descuentosVenta: [regla({ nombre: 'Cupón viejo', activo: false })],
+        }),
+      );
+      expect(r.totales.totalFinal).toBe('100.000000');
+      expect(r.trazasVenta.descuentos).toEqual([]);
+      expect(r.advertenciasVenta).toEqual([
+        {
+          titulo: 'Descuento "Cupón viejo"',
+          detalle: 'está en pausa y no se aplicó',
+        },
+      ]);
+    });
+
+    // El gemelo del de arriba, y no es simetría decorativa: el ensamblado del
+    // resultado leía `dv.advertencias` (descuentos de venta) y descartaba
+    // `rv.advertencias`. Un recargo de venta pausado bajaba la plata cobrada sin
+    // traza, sin advertencia y sin nada en el comprobante — el mismo bug que
+    // esta feature vino a cerrar, en la única rama que había quedado sin cubrir.
+    it('un recargo de venta pausado también avisa en advertenciasVenta', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [linea({ precioUnitario: '100' })],
+          recargosVenta: [regla({ nombre: 'Recargo feriado', activo: false })],
+        }),
+      );
+      expect(r.totales.totalFinal).toBe('100.000000');
+      expect(r.trazasVenta.recargos).toEqual([]);
+      expect(r.advertenciasVenta).toEqual([
+        {
+          titulo: 'Recargo "Recargo feriado"',
+          detalle: 'está en pausa y no se aplicó',
+        },
+      ]);
+      expect(r.advertencias).toEqual(r.advertenciasVenta);
+    });
+  });
+
   describe('piso en cero del descuento', () => {
     it('topea un monto_fijo que supera el neto y deja el total en 0, con advertencia', () => {
       const r = calcularVenta(
@@ -443,7 +596,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
             linea({
               precioUnitario: '1000',
               descuentos: [regla({ nombre: 'Linea 90%', valor: '0.90' })],
-              impuestos: [{ id: 'iva', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto({ id: 'iva' })],
             }),
           ],
           descuentosVenta: [
@@ -467,7 +620,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               precioUnitario: '1000',
-              impuestos: [{ id: 'iva', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto({ id: 'iva' })],
             }),
           ],
           descuentosVenta: [
@@ -557,7 +710,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               precioUnitario: '1000',
-              impuestos: [{ id: 'iva', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto({ id: 'iva' })],
             }),
           ],
           descuentosVenta: [
@@ -579,7 +732,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               precioUnitario: '1000',
-              impuestos: [{ id: 'iva', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto({ id: 'iva' })],
             }),
           ],
           descuentosVenta: [
@@ -608,7 +761,7 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
           lineas: [
             linea({
               descuentos: [regla({ id: 'd1', nombre: 'Desc', valor: '0.10' })],
-              impuestos: [{ id: 't1', nombre: 'IVA', porcentaje: '0.19' }],
+              impuestos: [impuesto()],
             }),
           ],
         }),

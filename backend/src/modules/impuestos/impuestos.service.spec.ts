@@ -378,4 +378,57 @@ describe('ImpuestosService', () => {
       );
     });
   });
+
+  // ─── obtenerUso ─────────────────────────────────────────────────────────
+
+  describe('obtenerUso', () => {
+    it('lanza NotFound si el impuesto no pertenece al tenant', async () => {
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(service.obtenerUso(TENANT, IMP)).rejects.toThrow(
+        NotFoundException,
+      );
+      // El precheck corta ANTES del JOIN: es lo que impide que un id de otro
+      // tenant llegue a consultar la tabla puente. Sus dos gemelos ya lo fijan.
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('devuelve los ítems vivos que usan el impuesto', async () => {
+      repo.findOne.mockResolvedValue({
+        id: IMP,
+        tenantId: TENANT,
+        nombre: 'Propina',
+      });
+      dataSource.query.mockResolvedValue([
+        { id: 'item-1', nombre: 'Café' },
+        { id: 'item-2', nombre: 'Torta' },
+      ]);
+
+      const result = await service.obtenerUso(TENANT, IMP);
+
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('item_impuestos'),
+        [IMP, TENANT],
+      );
+      expect(result).toEqual({
+        items: [
+          { id: 'item-1', nombre: 'Café' },
+          { id: 'item-2', nombre: 'Torta' },
+        ],
+      });
+    });
+
+    it('devuelve lista vacía cuando nadie usa el impuesto', async () => {
+      repo.findOne.mockResolvedValue({
+        id: IMP,
+        tenantId: TENANT,
+        nombre: 'Sin uso',
+      });
+      dataSource.query.mockResolvedValue([]);
+
+      const result = await service.obtenerUso(TENANT, IMP);
+
+      expect(result).toEqual({ items: [] });
+    });
+  });
 });

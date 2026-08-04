@@ -71,12 +71,46 @@ let postsRestaurar: string[] = []
 /** Retiene la respuesta del restaurar para dejar el POST "en vuelo". */
 let restaurarRetenido: Promise<unknown> | null = null
 
+// ── Pausar ──────────────────────────────────────────────────────────────────
+/** Ítems que `GET /impuestos/:id/uso` devuelve por id. Ausente = ninguno. */
+let usoPorId: Record<string, { id: string, nombre: string }[]> = {}
+/** Hace fallar ese GET, para el caso "no se pausa a ciegas". */
+let usoFalla = false
+/** Cada `GET .../uso` recibido: el testigo de que reactivar NO consulta. */
+let getsUso: string[] = []
+/** Cada `PATCH /impuestos/:id` recibido, con el `activo` que viajó. */
+let patchesActivo: { id: string, activo: boolean }[] = []
+
+/** N ítems distintos, que es lo único que el modal mira (`items.length`). */
+function itemsUso(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `item-${i}`,
+    nombre: `Item ${i}`,
+  }))
+}
+
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string }) => {
+  return (url: string, opts?: { method?: string, body?: { activo?: boolean } }) => {
     if (typeof url !== 'string' || !url.includes('/impuestos')) {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
+    if (method === 'GET' && url.endsWith('/uso')) {
+      const id = url.split('/').slice(-2)[0] ?? ''
+      getsUso.push(id)
+      if (usoFalla) return Promise.reject(new Error('No se pudo verificar el uso'))
+      return Promise.resolve({ items: usoPorId[id] ?? [] })
+    }
+    if (method === 'PATCH') {
+      const id = url.split('/').pop() ?? ''
+      const activo = opts?.body?.activo
+      if (typeof activo === 'boolean') {
+        patchesActivo.push({ id, activo })
+        const imp = impuestosBackend.find(x => x.id === id)
+        if (imp) imp.activo = activo
+      }
+      return Promise.resolve({ ...impuestosBackend.find(x => x.id === id) })
+    }
     if (method === 'DELETE') {
       const id = url.split('/').pop()
       const imp = impuestosBackend.find(i => i.id === id)
@@ -161,6 +195,35 @@ async function abrirRestaurarDeLaFila(
   expect(boton, 'botón "Restaurar" en la fila').toBeTruthy()
   await boton!.trigger('click')
   await new Promise(r => setTimeout(r, 0))
+}
+
+function dialogo(): HTMLElement | null {
+  return document.body.querySelector('[role="dialog"]')
+}
+
+/** El switch de "activo" de la única fila del listado (el de la papelera vive
+ *  fuera del `tbody`). */
+function switchActivo(wrapper: Awaited<ReturnType<typeof montar>>) {
+  const sw = wrapper.find('tbody button[role="switch"]')
+  expect(sw.exists(), 'switch de activo en la fila').toBe(true)
+  return sw
+}
+
+async function clickSwitchActivo(wrapper: Awaited<ReturnType<typeof montar>>) {
+  await switchActivo(wrapper).trigger('click')
+  await new Promise(r => setTimeout(r, 50))
+}
+
+/** Lo que resetea cada `beforeEach` de los describes de pausar. */
+function resetPausar() {
+  overrideConEliminados = null
+  overrideSinEliminados = null
+  postsRestaurar = []
+  restaurarRetenido = null
+  usoPorId = {}
+  usoFalla = false
+  getsUso = []
+  patchesActivo = []
 }
 
 describe('configuracion/impuestos — papelera: eliminar respeta el toggle', () => {
@@ -401,6 +464,109 @@ describe('configuracion/impuestos — papelera: la carrera de `cargar()` bajo to
     // después y en teoría pisara el estado.
     expect(wrapper.text()).toContain('Impuesto verde')
     expect(wrapper.text()).not.toContain('Impuesto viejo')
+
+    wrapper.unmount()
+  })
+})
+
+// Pausar un impuesto no lo elimina —conserva sus asociaciones—, pero sí lo
+// saca de circulación. El diálogo existe para que el usuario sepa a cuánto
+// afecta ANTES de aceptar, y solo aparece cuando hay algo que decir: reactivar
+// y el caso de cero ítems pasan derecho, porque un diálogo que siempre aparece
+// es un diálogo que se acepta sin leer.
+describe('configuracion/impuestos — pausar: confirmación con el alcance', () => {
+  beforeEach(() => {
+    impuestosBackend = [impuestoPropio()]
+    resetPausar()
+  })
+
+  it('pausar un impuesto en uso abre el modal con el conteo REAL y recién al confirmar pausa', async () => {
+    usoPorId = { [IMPUESTO_ID]: itemsUso(34) }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(document.body.textContent).toContain('Pausar «Impuesto verde»')
+    expect(document.body.textContent).toContain('Deja de aplicarse en 34 ítems.')
+    expect(document.body.textContent).toContain(
+      'Las asociaciones se conservan: al reactivarlo vuelve como estaba.',
+    )
+    // Con el modal abierto todavía no viajó nada: el PATCH sale al confirmar.
+    expect(patchesActivo).toEqual([])
+    expect(impuestosBackend[0]!.activo).toBe(true)
+
+    await confirmarEnModal('Pausar')
+
+    expect(patchesActivo).toEqual([{ id: IMPUESTO_ID, activo: false }])
+    expect(impuestosBackend[0]!.activo).toBe(false)
+    expect(switchActivo(wrapper).attributes('aria-checked')).toBe('false')
+
+    wrapper.unmount()
+  })
+
+  it('el conteo sale de `items.length`, no de un número fijo', async () => {
+    usoPorId = { [IMPUESTO_ID]: itemsUso(1) }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(document.body.textContent).toContain('Deja de aplicarse en 1 ítem.')
+
+    wrapper.unmount()
+  })
+
+  it('cancelar deja el impuesto activo y NO manda el PATCH', async () => {
+    usoPorId = { [IMPUESTO_ID]: itemsUso(3) }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+    await confirmarEnModal('Cancelar')
+
+    expect(patchesActivo).toEqual([])
+    expect(impuestosBackend[0]!.activo).toBe(true)
+    expect(switchActivo(wrapper).attributes('aria-checked')).toBe('true')
+
+    wrapper.unmount()
+  })
+
+  it('sin ítems que lo usen, pausar es directo: no abre modal', async () => {
+    usoPorId = {}
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(dialogo()).toBeNull()
+    expect(patchesActivo).toEqual([{ id: IMPUESTO_ID, activo: false }])
+
+    wrapper.unmount()
+  })
+
+  it('reactivar no pregunta nada: ni consulta el uso ni abre modal', async () => {
+    impuestosBackend = [{ ...impuestoPropio(), activo: false }]
+    // Tendría 34 ítems para contar, pero reactivar no destruye nada.
+    usoPorId = { [IMPUESTO_ID]: itemsUso(34) }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(getsUso).toEqual([])
+    expect(dialogo()).toBeNull()
+    expect(patchesActivo).toEqual([{ id: IMPUESTO_ID, activo: true }])
+
+    wrapper.unmount()
+  })
+
+  it('si el GET de uso falla, el toggle no se mueve y no se pausa a ciegas', async () => {
+    usoFalla = true
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(getsUso).toEqual([IMPUESTO_ID])
+    expect(dialogo()).toBeNull()
+    expect(patchesActivo).toEqual([])
+    expect(impuestosBackend[0]!.activo).toBe(true)
+    expect(switchActivo(wrapper).attributes('aria-checked')).toBe('true')
 
     wrapper.unmount()
   })

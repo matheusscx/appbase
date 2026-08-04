@@ -51,15 +51,20 @@ describe('OnlineService', () => {
   const tenantPasarela = { resolverConfiguracionActiva: jest.fn() };
   const pagosRedirect = { iniciar: jest.fn(), obtenerResultado: jest.fn() };
   const config = { get: jest.fn().mockReturnValue('http://localhost:5173') };
+  /** Fila base como la devuelve `cargarBasePorIds` (BASE_QUERY trae `activo`). */
+  const itemBase = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    nombre: 'Producto demo',
+    tipo: 'producto',
+    unidadMedida: 'kg',
+    activo: true,
+    ...over,
+  });
   const items = {
     cargarBasePorIds: jest
       .fn()
       .mockImplementation((_t: string, ids: string[]) =>
-        Promise.resolve(
-          new Map(
-            ids.map((id) => [id, { id, tipo: 'producto', unidadMedida: 'kg' }]),
-          ),
-        ),
+        Promise.resolve(new Map(ids.map((id) => [id, itemBase(id)]))),
       ),
   };
   const catalog = {
@@ -96,6 +101,52 @@ describe('OnlineService', () => {
     expect(result.checkoutUrl).toBe(
       `/tienda/pasarela?ref=${result.checkoutRef}`,
     );
+  });
+
+  /**
+   * Online se bloquea porque el cliente todavía no recibió nada; el POS solo
+   * advierte. El mensaje nombra el producto: con ocho líneas en el carrito, un
+   * "no disponible" genérico deja al cliente adivinando cuál sacar.
+   */
+  describe('ítem pausado', () => {
+    const pausarSegundaLinea = () =>
+      items.cargarBasePorIds.mockImplementationOnce(
+        (_t: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id, i) => [
+                id,
+                itemBase(id, i === 1 ? { nombre: 'Torta', activo: false } : {}),
+              ]),
+            ),
+          ),
+      );
+
+    const dosLineas = {
+      lineas: [
+        { itemId: ITEM_ID, cantidad: '1' },
+        { itemId: '550e8400-e29b-41d4-a716-446655440117', cantidad: '1' },
+      ],
+    };
+
+    it('checkout: rechaza nombrando el producto y no calcula nada', async () => {
+      pausarSegundaLinea();
+      await expect(service.checkout(TENANT_ID, dosLineas)).rejects.toThrow(
+        'El producto "Torta" ya no se encuentra disponible',
+      );
+      expect(calculo.calcular).not.toHaveBeenCalled();
+    });
+
+    it('pagar con Webpay activo: no llega a crear la orden', async () => {
+      tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+      metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+      pausarSegundaLinea();
+
+      await expect(
+        service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dosLineas),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
   });
 
   it('pagar sin Webpay activo: cae a modo simulado', async () => {

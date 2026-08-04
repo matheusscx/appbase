@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
@@ -237,6 +237,27 @@ export class OnlineService {
       tenantId,
       dto.lineas.map((l) => l.itemId),
     );
+
+    // Un ítem pausado NO se vende online: acá todavía no pasó nada —el cliente
+    // no recibió el producto— y cobrar algo que se sacó de venta es la peor
+    // salida. El POS, en cambio, solo advierte (`CalculoPreciosService`): en el
+    // mostrador el producto puede estar ya en la mano del cliente.
+    //
+    // El carrito online vive en el navegador (no hay tabla `carrito`), así que
+    // el ítem se puede pausar entre que el cliente lo agrega y que paga: el
+    // checkout es el único punto donde atajarlo. El mensaje nombra el producto
+    // porque un carrito de ocho líneas con un "no disponible" genérico deja al
+    // cliente adivinando cuál sacar.
+    //
+    // Se corta ANTES de `pagosRedirect.iniciar`, así que no queda orden creada.
+    for (const linea of dto.lineas) {
+      const item = itemsBase.get(linea.itemId)!;
+      if (!item.activo) {
+        throw new BadRequestException(
+          `El producto "${item.nombre}" ya no se encuentra disponible`,
+        );
+      }
+    }
 
     for (const linea of dto.lineas) {
       const item = itemsBase.get(linea.itemId)!;

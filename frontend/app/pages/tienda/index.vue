@@ -24,7 +24,9 @@ async function cargar() {
     const res = await useApiFetch<PaginatedResponse<ItemCatalogo>>(
       `${apiUrl}/items?tipo=producto&pageSize=100`,
     )
-    items.value = res.data
+    // Un ítem pausado (`activo = false`) deja de ofrecerse: conserva sus datos
+    // y sus asociaciones, pero no se puede vender hasta que lo reactiven.
+    items.value = res.data.filter(i => i.activo)
   } catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cargar el catálogo')
     toast.add({ title: msg, color: 'error' })

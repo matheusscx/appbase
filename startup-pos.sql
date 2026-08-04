@@ -122,7 +122,6 @@ CREATE TABLE "metodos_pago" (
   "metodo_pago_id" UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   "nombre"         TEXT        NOT NULL,
   "abreviatura"    VARCHAR(5),
-  "activo"         BOOLEAN     NOT NULL DEFAULT true,
   -- Intrínseco al método (catálogo global, no lo decide el tenant): define qué entra a
   -- la línea de efectivo del arqueo (fondo + manuales + vueltos). Ver caja_arqueo_medio
   -- y docs/features/gestion-cajas.md § Arqueo de caja multi-medio.

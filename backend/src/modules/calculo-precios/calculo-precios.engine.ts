@@ -28,6 +28,12 @@ export interface ReglaResuelta {
   valor: string | null;
   tramos: { minimo: string; valor: string }[];
   metodoPagoIds: string[];
+  /**
+   * `false` = pausada: no se aplica y emite advertencia. Requerido a propósito:
+   * si fuera opcional, olvidarse de mapearlo en el service haría que la regla
+   * pausada volviera a cobrarse en silencio, que es justo el bug que esto cierra.
+   */
+  activo: boolean;
 }
 
 export interface ImpuestoResuelto {
@@ -35,6 +41,12 @@ export interface ImpuestoResuelto {
   nombre: string;
   /** Porcentaje en decimal (0.19 = 19%). */
   porcentaje: string;
+  /**
+   * `false` = pausado: no se cobra y emite advertencia. El IVA llega siempre en
+   * `true` — no se gobierna con este interruptor sino con la clasificación
+   * tributaria del ítem (afecto/exento). Lo fuerza el service, ver ADR-018.
+   */
+  activo: boolean;
 }
 
 export interface LineaResuelta {
@@ -146,15 +158,24 @@ export interface ResultadoVenta {
     recargos: TrazaRegla[];
   };
   /**
-   * Avisos que no frenan el cálculo. Hoy: descuentos topeados por el piso en
-   * cero. Vacío en el caso normal.
+   * Avisos que no frenan el cálculo. Cuatro fuentes: un descuento topeado por el
+   * piso en cero, una regla pausada (descuento o recargo), un impuesto pausado
+   * y —emitido por el service, no acá— un ítem pausado. Vacío en el caso normal.
    */
   advertencias: AdvertenciaPrecio[];
   /**
-   * Solo las advertencias de los descuentos a nivel venta — las que no
-   * pertenecen a ninguna línea. `advertencias` las incluye junto con las de
-   * línea; este campo existe para que el carrito pueda mostrar cada aviso
-   * donde corresponde sin tener que restar strings.
+   * Las advertencias de las reglas a nivel venta — las que no pertenecen a
+   * ninguna línea. `advertencias` las incluye junto con las de línea; este campo
+   * existe para que el carrito pueda mostrar cada aviso donde corresponde sin
+   * tener que restar strings.
+   *
+   * ⚠️ **Descuentos Y recargos.** Hasta 2026-08-03 este comentario decía "solo
+   * los descuentos", y era cierto por accidente: la única advertencia que
+   * existía —el tope— solo se emite en descuentos, así que el ensamblado leía
+   * `dv` e ignoraba `rv` sin que se notara. Cuando las reglas pausadas hicieron
+   * que un recargo también pudiera avisar, ese supuesto se volvió un bug: un
+   * recargo de venta pausado bajaba la plata cobrada sin traza ni advertencia.
+   * Las dos ramas van siempre.
    */
   advertenciasVenta: AdvertenciaPrecio[];
   /**
@@ -335,6 +356,16 @@ function procesarReglas(
   const advertencias: AdvertenciaPrecio[] = [];
 
   for (const regla of reglas) {
+    // Pausada: no aplica, no deja traza —no es un "aplicó 0"— y avisa. El
+    // `continue` va antes de evaluar para que ni siquiera se calcule el monto.
+    if (!regla.activo) {
+      advertencias.push({
+        titulo: `${params.signo === -1 ? 'Descuento' : 'Recargo'} "${regla.nombre}"`,
+        detalle: 'está en pausa y no se aplicó',
+      });
+      continue;
+    }
+
     const base = params.modoCalculo === 'compuesto' ? acc : params.neto;
     const evaluacion = evaluarRegla(regla, {
       base,
@@ -395,10 +426,15 @@ function calcularLinea(
   const cantidad = new Decimal(linea.cantidad);
   const bruto = new Decimal(linea.precioUnitario);
 
+  // Los impuestos pausados salen de la lista ACÁ, antes del desbruteo. Si se
+  // filtraran recién al aplicarlos, su tasa seguiría inflando el divisor de
+  // abajo y el neto quedaría mal aunque el impuesto no se cobrara.
+  const impuestosVigentes = linea.impuestos.filter((imp) => imp.activo);
+
   // Neto unitario: desbrutear si el precio ya incluye impuestos.
   let netoUnitario = bruto;
-  if (linea.precioIncluyeImpuesto && linea.impuestos.length > 0) {
-    const sumaTasas = linea.impuestos.reduce(
+  if (linea.precioIncluyeImpuesto && impuestosVigentes.length > 0) {
+    const sumaTasas = impuestosVigentes.reduce(
       (acc, imp) => acc.plus(imp.porcentaje),
       ZERO,
     );
@@ -410,7 +446,12 @@ function calcularLinea(
   let descuentoAplicado = ZERO;
   let recargoAplicado = ZERO;
   let impuestoAplicado = ZERO;
-  const advertencias: AdvertenciaPrecio[] = [];
+  const advertencias: AdvertenciaPrecio[] = linea.impuestos
+    .filter((imp) => !imp.activo)
+    .map((imp) => ({
+      titulo: `Impuesto "${imp.nombre}"`,
+      detalle: 'está en pausa y no se aplicó',
+    }));
   const trazas = {
     descuentos: [] as TrazaRegla[],
     recargos: [] as TrazaRegla[],
@@ -445,10 +486,14 @@ function calcularLinea(
       acc = r.acc;
       recargoAplicado = r.total;
       trazas.recargos = r.trazas;
+      // Hasta que existieron las reglas pausadas, un recargo no podía generar
+      // advertencias —el tope solo avisa en descuentos— y esta línea no hacía
+      // falta. Ahora sí: sin ella, el aviso del recargo pausado se perdía acá.
+      advertencias.push(...r.advertencias);
     } else if (paso === 'impuestos') {
       // Base imponible = acumulado al inicio del paso (no hay impuesto sobre impuesto).
       const baseImponible = acc;
-      for (const imp of linea.impuestos) {
+      for (const imp of impuestosVigentes) {
         const monto = redondear(baseImponible.times(imp.porcentaje), cfg);
         impuestoAplicado = impuestoAplicado.plus(monto);
         acc = acc.plus(monto);
@@ -565,11 +610,17 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
       totalFinal: fmt(totalFinal, cfg),
     },
     trazasVenta: { descuentos: dv.trazas, recargos: rv.trazas },
+    // `rv.advertencias` va junto a `dv.advertencias`, no en su lugar. Hasta que
+    // existieron las reglas pausadas, un recargo no podía avisar nada —el tope
+    // solo avisa en descuentos— y leer solo `dv` no perdía nada. Ahora sí: sin
+    // `rv`, un recargo de venta pausado bajaba la plata cobrada sin traza y sin
+    // advertencia. Mismo olvido que a nivel línea, en la otra punta.
     advertencias: [
       ...lineas.flatMap((l) => l.advertencias),
       ...dv.advertencias,
+      ...rv.advertencias,
     ],
-    advertenciasVenta: dv.advertencias,
+    advertenciasVenta: [...dv.advertencias, ...rv.advertencias],
     config: cfg,
   };
 }

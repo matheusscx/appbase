@@ -2072,26 +2072,22 @@ export class SeederService implements OnApplicationBootstrap {
         metodoPagoId: '550e8400-e29b-41d4-a716-446655440105',
         nombre: 'Efectivo',
         abreviatura: 'EFE',
-        activo: true,
         esEfectivo: true,
       },
       {
         metodoPagoId: '550e8400-e29b-41d4-a716-446655440106',
         nombre: 'Tarjeta de débito',
         abreviatura: 'TDB',
-        activo: true,
       },
       {
         metodoPagoId: '550e8400-e29b-41d4-a716-446655440107',
         nombre: 'Tarjeta de crédito',
         abreviatura: 'TDC',
-        activo: true,
       },
       {
         metodoPagoId: '550e8400-e29b-41d4-a716-446655440108',
         nombre: 'Transferencia bancaria',
         abreviatura: 'TRF',
-        activo: true,
       },
     ];
 

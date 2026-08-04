@@ -31,10 +31,14 @@ describe('CalculoPreciosService', () => {
 
   const base = (over: Record<string, unknown> = {}) => ({
     id: 'item-1',
+    nombre: 'Item 1',
     precioBase: '100',
     monedaId: 'moneda-clp',
     precioIncluyeImpuesto: false,
     clasificacionTributaria: 'afecto',
+    // `BASE_QUERY` siempre trae `i.activo`: el fixture lo refleja para que el
+    // caso normal no sea "ítem sin el campo" (que es un estado imposible).
+    activo: true,
     ...over,
   });
 
@@ -70,8 +74,20 @@ describe('CalculoPreciosService', () => {
     mockItems();
     impuestosService = {
       findAll: jest.fn().mockResolvedValue([
-        { id: 'imp-1', nombre: 'IVA', porcentaje: '0.19', tipo: 'iva' },
-        { id: 'imp-2', nombre: 'Adicional', porcentaje: '0.10', tipo: 'otro' },
+        {
+          id: 'imp-1',
+          nombre: 'IVA',
+          porcentaje: '0.19',
+          tipo: 'iva',
+          activo: true,
+        },
+        {
+          id: 'imp-2',
+          nombre: 'Adicional',
+          porcentaje: '0.10',
+          tipo: 'otro',
+          activo: true,
+        },
       ]),
     };
     descuentosService = {
@@ -84,6 +100,7 @@ describe('CalculoPreciosService', () => {
           tipoRegla: { codigo: 'general' },
           tramos: [],
           metodoPagoIds: [],
+          activo: true,
         },
         {
           id: 'desc-2',
@@ -93,6 +110,7 @@ describe('CalculoPreciosService', () => {
           tipoRegla: { codigo: 'general' },
           tramos: [],
           metodoPagoIds: [],
+          activo: true,
         },
       ]),
     };
@@ -258,6 +276,7 @@ describe('CalculoPreciosService', () => {
         tipoRegla: { codigo: 'general' },
         tramos: [],
         metodoPagoIds: [],
+        activo: true,
       },
     ]);
     // Ítem exento: aísla la resolución de recargos sin que la derivación de
@@ -276,6 +295,77 @@ describe('CalculoPreciosService', () => {
       expect.objectContaining({ id: 'rec-1', nombre: 'Recargo 5%' }),
     );
     expect(r.lineas[0].totalLinea).toBe('105.000000');
+  });
+
+  /**
+   * Un ítem pausado se COBRA igual en el POS (el producto puede estar ya en la
+   * mano del cliente) y solo se avisa. Por eso la advertencia vive acá y no en
+   * el motor: no cambia ningún monto. El caso del ítem activo es el control —
+   * sin él, un servicio que empujara la advertencia siempre también pasaría.
+   */
+  describe('un ítem pausado se cobra igual y avisa', () => {
+    const calcular = () =>
+      service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+
+    it('pausado: avisa en la línea y en la venta, sin tocar ningún total', async () => {
+      const activo = await calcular();
+      mockItems({ nombre: 'Papas fritas', activo: false });
+      const pausado = await calcular();
+
+      expect(pausado.lineas[0].advertencias).toEqual([
+        {
+          titulo: 'Producto "Papas fritas"',
+          detalle: 'está en pausa y ya no se ofrece en el catálogo',
+        },
+      ]);
+      // La misma advertencia también en la lista agregada, que es la que
+      // `ventas.service.ts` aplana a los toasts del POS.
+      expect(pausado.advertencias).toEqual(pausado.lineas[0].advertencias);
+      // Pausar no es una regla a nivel venta: no ensucia `advertenciasVenta`.
+      expect(pausado.advertenciasVenta).toEqual([]);
+      // Los montos son idénticos a los del mismo ítem activo: la línea se cobra.
+      expect(pausado.totales).toEqual(activo.totales);
+      expect(pausado.lineas[0].totalLinea).toBe('107.100000');
+    });
+
+    it('activo: no avisa nada', async () => {
+      const r = await calcular();
+      expect(r.lineas[0].advertencias).toEqual([]);
+      expect(r.advertencias).toEqual([]);
+    });
+
+    it('en un carrito mixto, el aviso va SOLO en la línea del ítem pausado', async () => {
+      // Fija la correspondencia 1:1 por índice entre `dto.lineas` y
+      // `resultado.lineas`: con un `forEach` mal indexado el aviso aterriza en
+      // la línea equivocada y el cajero saca de la venta el producto que sí se
+      // vendía.
+      itemsService.cargarBasePorIds.mockImplementation(
+        (_t: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids.map((id) => [
+                id,
+                base({ id, nombre: id, activo: id !== 'item-b' }),
+              ]),
+            ),
+          ),
+      );
+
+      const r = await service.calcular(TENANT, {
+        lineas: [
+          { itemId: 'item-a', cantidad: '1' },
+          { itemId: 'item-b', cantidad: '1' },
+          { itemId: 'item-c', cantidad: '1' },
+        ],
+      });
+
+      expect(r.lineas[0].advertencias).toEqual([]);
+      expect(r.lineas[1].advertencias[0].titulo).toBe('Producto "item-b"');
+      expect(r.lineas[2].advertencias).toEqual([]);
+      expect(r.advertencias).toHaveLength(1);
+    });
   });
 
   describe('el IVA se deriva de la clasificación tributaria', () => {
@@ -301,6 +391,66 @@ describe('CalculoPreciosService', () => {
         'imp-2',
         'imp-1',
       ]);
+    });
+
+    // El IVA no se pausa: lo gobierna afecto/exento. Este test existe para que
+    // una fila de IVA con `activo = false` —mal sembrada, o tocada por SQL
+    // directo— NO deje de cobrarse. Dejar de cobrar IVA en silencio es un
+    // problema fiscal, no un descuento mal aplicado.
+    it('un ítem afecto paga IVA aunque la fila del IVA esté en activo = false', async () => {
+      impuestosService.findAll.mockResolvedValue([
+        {
+          id: 'imp-1',
+          nombre: 'IVA',
+          porcentaje: '0.19',
+          tipo: 'iva',
+          activo: false,
+        },
+        {
+          id: 'imp-2',
+          nombre: 'Adicional',
+          porcentaje: '0.10',
+          tipo: 'otro',
+          activo: true,
+        },
+      ]);
+      mockItems({}, { impuestosIds: [], descuentosIds: [], recargosIds: [] });
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+      expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual(['imp-1']);
+      expect(r.lineas[0].impuestoAplicado).toBe('19.000000');
+      expect(r.lineas[0].advertencias).toEqual([]);
+    });
+
+    // El adicional del MISMO catálogo sí se pausa: prueba que el `activo: true`
+    // forzado es solo para el IVA y no un "todo activo" que anule la feature.
+    it('en cambio un adicional pausado del mismo catálogo no se cobra', async () => {
+      impuestosService.findAll.mockResolvedValue([
+        {
+          id: 'imp-1',
+          nombre: 'IVA',
+          porcentaje: '0.19',
+          tipo: 'iva',
+          activo: true,
+        },
+        {
+          id: 'imp-2',
+          nombre: 'Adicional',
+          porcentaje: '0.10',
+          tipo: 'otro',
+          activo: false,
+        },
+      ]);
+      mockItems(
+        {},
+        { impuestosIds: ['imp-2'], descuentosIds: [], recargosIds: [] },
+      );
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-1', cantidad: '1' }],
+      });
+      expect(r.lineas[0].trazas.impuestos.map((i) => i.id)).toEqual(['imp-1']);
+      expect(r.lineas[0].advertencias[0].titulo).toBe('Impuesto "Adicional"');
     });
 
     it('un ítem exento con adicionales lleva los adicionales SIN IVA', async () => {
@@ -337,7 +487,13 @@ describe('CalculoPreciosService', () => {
 
     it('un ítem afecto sin IVA en el país revienta en vez de vender sin IVA', async () => {
       impuestosService.findAll.mockResolvedValue([
-        { id: 'imp-2', nombre: 'Adicional', porcentaje: '0.10', tipo: 'otro' },
+        {
+          id: 'imp-2',
+          nombre: 'Adicional',
+          porcentaje: '0.10',
+          tipo: 'otro',
+          activo: true,
+        },
       ]);
       mockItems({}, { impuestosIds: [], descuentosIds: [], recargosIds: [] });
       await expect(

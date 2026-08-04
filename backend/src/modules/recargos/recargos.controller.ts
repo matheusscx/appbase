@@ -47,6 +47,16 @@ export class RecargosController {
     );
   }
 
+  // Consulta inversa a GET /items/:id/uso: alimenta el modal de confirmación
+  // al pausar ("deja de aplicarse en N ítems"). Admin-only porque respalda
+  // una acción admin-only (pausar, ya guardado detrás de TenantAdminGuard).
+  @UseGuards(TenantAdminGuard)
+  @Get(':id/uso')
+  obtenerUso(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as { tenantId: string };
+    return this.recargosService.obtenerUso(user.tenantId, id);
+  }
+
   @UseGuards(TenantAdminGuard)
   @Post()
   create(@Req() req: Request, @Body() dto: CreateRecargoDto) {

@@ -23,6 +23,8 @@ export interface ItemCatalogo {
   stock: string | null
   unidadMedida: string | null
   tipo: string
+  /** Un ítem pausado (`false`) no se ofrece en ningún catálogo de venta. */
+  activo: boolean
   disponible?: number | null
   /** Combos con al menos un grupo de modificadores asociado: la disponibilidad final depende de la opción elegida. */
   disponibleCondicional?: boolean

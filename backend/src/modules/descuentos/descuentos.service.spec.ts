@@ -36,7 +36,7 @@ describe('DescuentosService', () => {
     softDelete: jest.Mock;
     update: jest.Mock;
   };
-  let dataSourceMock: { transaction: jest.Mock };
+  let dataSourceMock: { transaction: jest.Mock; query: jest.Mock };
   let descuentoRepoMock: {
     find: jest.Mock;
     findOne: jest.Mock;
@@ -77,6 +77,7 @@ describe('DescuentosService', () => {
       transaction: jest.fn((cb: (m: typeof managerMock) => Promise<unknown>) =>
         cb(managerMock),
       ),
+      query: jest.fn().mockResolvedValue([]),
     };
 
     descuentoRepoMock = {
@@ -917,6 +918,57 @@ describe('DescuentosService', () => {
       await expect(
         service.update(TENANT, 'd1', { nombre: 'Promo renombrada' }),
       ).resolves.toBeDefined();
+    });
+  });
+
+  // ─── obtenerUso ─────────────────────────────────────────────────────────
+
+  describe('obtenerUso', () => {
+    it('lanza NotFound si el descuento no pertenece al tenant', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue(null);
+
+      await expect(service.obtenerUso(TENANT, 'd1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(dataSourceMock.query).not.toHaveBeenCalled();
+    });
+
+    it('devuelve los ítems vivos que usan el descuento', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Promo fija',
+      });
+      dataSourceMock.query.mockResolvedValue([
+        { id: 'item-1', nombre: 'Café' },
+        { id: 'item-2', nombre: 'Torta' },
+      ]);
+
+      const result = await service.obtenerUso(TENANT, 'd1');
+
+      expect(dataSourceMock.query).toHaveBeenCalledWith(
+        expect.stringContaining('item_descuentos'),
+        ['d1', TENANT],
+      );
+      expect(result).toEqual({
+        items: [
+          { id: 'item-1', nombre: 'Café' },
+          { id: 'item-2', nombre: 'Torta' },
+        ],
+      });
+    });
+
+    it('devuelve lista vacía cuando nadie usa el descuento', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd1',
+        tenantId: TENANT,
+        nombre: 'Sin uso',
+      });
+      dataSourceMock.query.mockResolvedValue([]);
+
+      const result = await service.obtenerUso(TENANT, 'd1');
+
+      expect(result).toEqual({ items: [] });
     });
   });
 });

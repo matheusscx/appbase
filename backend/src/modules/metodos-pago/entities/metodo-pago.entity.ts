@@ -18,9 +18,6 @@ export class MetodoPago {
   @Column({ type: 'varchar', length: 5, nullable: true })
   abreviatura: string | null;
 
-  @Column({ default: true })
-  activo: boolean;
-
   // Intrínseco al método (catálogo global): define qué entra a la línea de
   // efectivo del arqueo (fondo + manuales + vueltos). No confundir con
   // requiere_conteo (política por tenant). Ver spec arqueo-multimedio.

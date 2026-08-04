@@ -109,12 +109,49 @@ let postsRestaurar: { id: string, nombre?: string }[] = []
 /** Retiene la respuesta del restaurar para dejar el POST "en vuelo". */
 let restaurarRetenido: Promise<unknown> | null = null
 
+// ── Pausar ──────────────────────────────────────────────────────────────────
+/** Ítems que `GET /recargos/:id/uso` devuelve por id. Ausente = ninguno. */
+let usoPorId: Record<string, { id: string, nombre: string }[]> = {}
+/** Hace fallar ese GET, para el caso "no se pausa a ciegas". */
+let usoFalla = false
+/** Cada `GET .../uso` recibido: el testigo de que reactivar NO consulta. */
+let getsUso: string[] = []
+/** Cada `PATCH /recargos/:id` recibido, con el `activo` que viajó. */
+let patchesActivo: { id: string, activo: boolean }[] = []
+
+/** N ítems distintos, que es lo único que el modal mira (`items.length`). */
+function itemsUso(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `item-${i}`,
+    nombre: `Item ${i}`,
+  }))
+}
+
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string, body?: { nombre?: string } }) => {
+  return (
+    url: string,
+    opts?: { method?: string, body?: { nombre?: string, activo?: boolean } },
+  ) => {
     if (typeof url !== 'string' || !url.includes('/recargos')) {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
+    if (method === 'GET' && url.endsWith('/uso')) {
+      const id = url.split('/').slice(-2)[0] ?? ''
+      getsUso.push(id)
+      if (usoFalla) return Promise.reject(errorApi('No se pudo verificar el uso'))
+      return Promise.resolve({ items: usoPorId[id] ?? [] })
+    }
+    if (method === 'PATCH') {
+      const id = url.split('/').pop() ?? ''
+      const activo = opts?.body?.activo
+      if (typeof activo === 'boolean') {
+        patchesActivo.push({ id, activo })
+        const r = recargosBackend.find(x => x.id === id)
+        if (r) r.activo = activo
+      }
+      return Promise.resolve({ ...recargosBackend.find(x => x.id === id) })
+    }
     if (method === 'DELETE') {
       const id = url.split('/').pop()
       const d = recargosBackend.find(x => x.id === id)
@@ -237,11 +274,28 @@ async function escribirNombre(valor: string) {
   await new Promise(r => setTimeout(r, 10))
 }
 
+/** El switch de "activo" de la única fila del listado (el de la papelera vive
+ *  fuera del `tbody`). */
+function switchActivo(wrapper: Awaited<ReturnType<typeof montar>>) {
+  const sw = wrapper.find('tbody button[role="switch"]')
+  expect(sw.exists(), 'switch de activo en la fila').toBe(true)
+  return sw
+}
+
+async function clickSwitchActivo(wrapper: Awaited<ReturnType<typeof montar>>) {
+  await switchActivo(wrapper).trigger('click')
+  await new Promise(r => setTimeout(r, 50))
+}
+
 function reset() {
   overrideConEliminados = null
   overrideSinEliminados = null
   postsRestaurar = []
   restaurarRetenido = null
+  usoPorId = {}
+  usoFalla = false
+  getsUso = []
+  patchesActivo = []
 }
 
 describe('configuracion/recargos — papelera: eliminar respeta el toggle', () => {
@@ -514,6 +568,109 @@ describe('configuracion/recargos — papelera: la carrera de `cargar()` bajo tog
     // después y en teoría pisara el estado.
     expect(wrapper.text()).toContain('Recargo finde')
     expect(wrapper.text()).not.toContain('Recargo viejo')
+
+    wrapper.unmount()
+  })
+})
+
+// Pausar una regla no la elimina —conserva sus asociaciones—, pero sí la saca
+// de circulación. El diálogo existe para que el usuario sepa a cuánto afecta
+// ANTES de aceptar, y solo aparece cuando hay algo que decir: reactivar y el
+// caso de cero ítems pasan derecho, porque un diálogo que siempre aparece es
+// un diálogo que se acepta sin leer.
+describe('configuracion/recargos — pausar: confirmación con el alcance', () => {
+  beforeEach(() => {
+    recargosBackend = [recargo()]
+    reset()
+  })
+
+  it('pausar una regla en uso abre el modal con el conteo REAL y recién al confirmar pausa', async () => {
+    usoPorId = { [RECARGO_ID]: itemsUso(34) }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(document.body.textContent).toContain('Pausar «Recargo finde»')
+    expect(document.body.textContent).toContain('Deja de aplicarse en 34 ítems.')
+    expect(document.body.textContent).toContain(
+      'Las asociaciones se conservan: al reactivarlo vuelve como estaba.',
+    )
+    // Con el modal abierto todavía no viajó nada: el PATCH sale al confirmar.
+    expect(patchesActivo).toEqual([])
+    expect(recargosBackend[0]!.activo).toBe(true)
+
+    await confirmarEnModal('Pausar')
+
+    expect(patchesActivo).toEqual([{ id: RECARGO_ID, activo: false }])
+    expect(recargosBackend[0]!.activo).toBe(false)
+    expect(switchActivo(wrapper).attributes('aria-checked')).toBe('false')
+
+    wrapper.unmount()
+  })
+
+  it('el conteo sale de `items.length`, no de un número fijo', async () => {
+    usoPorId = { [RECARGO_ID]: itemsUso(1) }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(document.body.textContent).toContain('Deja de aplicarse en 1 ítem.')
+
+    wrapper.unmount()
+  })
+
+  it('cancelar deja la regla activa y NO manda el PATCH', async () => {
+    usoPorId = { [RECARGO_ID]: itemsUso(3) }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+    await confirmarEnModal('Cancelar')
+
+    expect(patchesActivo).toEqual([])
+    expect(recargosBackend[0]!.activo).toBe(true)
+    expect(switchActivo(wrapper).attributes('aria-checked')).toBe('true')
+
+    wrapper.unmount()
+  })
+
+  it('sin ítems que la usen, pausar es directo: no abre modal', async () => {
+    usoPorId = {}
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(dialogo()).toBeNull()
+    expect(patchesActivo).toEqual([{ id: RECARGO_ID, activo: false }])
+
+    wrapper.unmount()
+  })
+
+  it('reactivar no pregunta nada: ni consulta el uso ni abre modal', async () => {
+    recargosBackend = [recargo({ activo: false })]
+    // Tendría 34 ítems para contar, pero reactivar no destruye nada.
+    usoPorId = { [RECARGO_ID]: itemsUso(34) }
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(getsUso).toEqual([])
+    expect(dialogo()).toBeNull()
+    expect(patchesActivo).toEqual([{ id: RECARGO_ID, activo: true }])
+
+    wrapper.unmount()
+  })
+
+  it('si el GET de uso falla, el toggle no se mueve y no se pausa a ciegas', async () => {
+    usoFalla = true
+    const wrapper = await montar()
+
+    await clickSwitchActivo(wrapper)
+
+    expect(getsUso).toEqual([RECARGO_ID])
+    expect(dialogo()).toBeNull()
+    expect(patchesActivo).toEqual([])
+    expect(recargosBackend[0]!.activo).toBe(true)
+    expect(switchActivo(wrapper).attributes('aria-checked')).toBe('true')
 
     wrapper.unmount()
   })

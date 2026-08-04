@@ -35,6 +35,7 @@ const item = (id: string, precio = '100'): ItemCatalogo => ({
   stock: '10',
   unidadMedida: 'unidad',
   tipo: 'producto',
+  activo: true,
 })
 
 describe('carrito helpers', () => {

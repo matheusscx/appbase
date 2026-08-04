@@ -12,6 +12,56 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Lo que está en pausa no se aplica ni se ofrece (2026-08-03)
+
+- [x] **Un descuento, recargo o impuesto desactivado seguía aplicándose** (backend +
+  frontend, cerrado 2026-08-03) — `activo` se escribía y no lo leía nadie:
+  `indexarReglas` ni siquiera copiaba el campo al mapa del motor. El front escondía la regla
+  del selector y el back la seguía cobrando.
+  **La forma anotada el 2026-07-30 —desactivar limpia las asociaciones— quedó sustituida.**
+  El owner precisó el 2026-08-03 que *desactivar es pausar, no eliminar*: la regla deja de
+  aplicarse pero conserva sus asociaciones, y reactivarla la devuelve como estaba. Con eso se
+  cayeron el cambio de esquema en las tres tablas puente, el problema de la PK compuesta
+  bloqueando la reinserción, y el modal de restauración: nada de eso hizo falta.
+  **Cómo se cerró:** `ReglaResuelta` e `ImpuestoResuelto` llevan `activo` **requerido** —si
+  fuera opcional, olvidarse de mapearlo revive el bug en silencio—, y el descarte pasa al
+  **aplicar**, no al cargar: la regla sigue en el mapa, porque sacarla haría que `requerir()`
+  tirara 400 por id ausente en cada ítem asociado y el POS dejaría de vender. Cada descarte
+  emite una `AdvertenciaPrecio`, siguiendo el precedente del tope.
+  **Lo que fija cada cosa:** el mutante que revierte al comportamiento anterior (aplicar la
+  regla pausada) rompe los tests; el control —*la misma regla activa sí descuenta*— impide que
+  un motor que ignorara TODOS los descuentos pasara igual; y el test del desbruteo prueba que
+  el impuesto pausado sale de la lista **antes** de dividir, no al aplicarlo, que era donde el
+  neto se habría calculado mal sin que ningún total lo delatara.
+  **Efecto lateral atendido:** la rama de recargos descartaba `r.advertencias` porque el tope
+  solo avisa en descuentos y nunca había nada que perder. Con reglas pausadas sí lo hay.
+- [x] **El IVA quedó explícitamente fuera del interruptor** (cerrado 2026-08-03) — lo gobierna
+  la clasificación tributaria del ítem, nunca `activo` ([ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
+  `CalculoPreciosService` fuerza `activo: true` al derivar el IVA del país, con un test que lo
+  fija: *un ítem afecto paga IVA aunque la fila esté en `activo = false`*. Sin ese blindaje,
+  una fila mal sembrada dejaba de cobrar IVA en silencio — problema fiscal, no aritmética.
+  Su gemelo con dientes: *un adicional pausado del mismo catálogo sí se descarta*, para que el
+  forzado no degenere en un "todo activo" que anule la feature.
+- [x] **Un ítem pausado se vendía igual por POS y tienda online** (cerrado 2026-08-03) —
+  hallazgo que no estaba en el radar y pegaba más fuerte que el de las reglas: `salones` exigía
+  `AND i.activo = true` pero `cargarBasePorIds` —el camino del POS y de la tienda— solo
+  filtraba `eliminado_el IS NULL`, y ninguno de los tres catálogos del front lo escondía.
+  Cerrado con el comportamiento por canal que decidió el owner: **la tienda online rechaza el
+  checkout** nombrando el producto (el carrito vive en el navegador, así que el ítem se puede
+  pausar entre que se agrega y se paga, y ese es el único punto donde atajarlo); **el POS
+  advierte y deja cobrar**; **salones no se toca** —lo ya cargado se cobra, agregar más se
+  sigue rechazando—. La regla de fondo: se bloquea donde todavía no pasó nada, no se bloquea
+  donde el consumo ya ocurrió en el mundo físico.
+  El filtro **no** se puso en `cargarBasePorIds`: lo comparten los tres canales y cada uno
+  necesita algo distinto. Y la advertencia del ítem pausado vive en el service, no en el
+  motor: el motor calcula plata y un ítem pausado no cambia ningún monto.
+- [x] **`metodos_pago.activo` era una columna muerta** (cerrado 2026-08-03) — existía en el
+  esquema, la entidad y el seed, y no la leía ningún código. El interruptor real es
+  `tenant_metodo_pago.habilitada`, que además es por tenant; `activo` habría sido global, y en
+  multi-tenant lo global casi nunca es lo que se quiere. Se eliminó de los tres lugares.
+
+---
+
 ## Congelado de las reglas aplicadas en la venta (2026-08-02)
 
 - [x] **El valor de un tramo nunca se validaba: un "50%" cargado como `50` pasaba**

@@ -37,6 +37,39 @@ capture exactamente los datos que necesita para que el motor de precios pueda ev
 
 ---
 
+## Pausar no es eliminar (2026-08-03)
+
+`activo` es un interruptor de **pausa**, no un borrado. Son dos operaciones distintas y
+no hay que confundirlas:
+
+| | Qué significa | Cómo se deshace |
+|---|---|---|
+| **Pausar** (`activo = false`) | La regla deja de aplicarse pero sigue existiendo, **con todas sus asociaciones intactas** | Reactivar: vuelve exactamente como estaba |
+| **Eliminar** (`eliminado_el`) | La regla se va del catálogo | Restaurar desde la papelera |
+
+Reglas de la pausa:
+
+- **No se aplica y avisa.** El motor descarta la regla pausada al resolver la línea y emite
+  una `AdvertenciaPrecio` (`titulo: Descuento "X"`, `detalle: está en pausa y no se aplicó`).
+  La venta sale igual, con el monto correcto: sigue el precedente del tope de descuento, que
+  tampoco frena la venta.
+- **Vale igual si la piden a mano.** Da lo mismo que la regla venga heredada del ítem o
+  explícita en el request (`descuentosVentaIds`, `descuentoIds` de línea): pausada no aplica.
+- **Nunca se tocan las tablas puente.** `item_descuentos` / `item_recargos` / `item_impuestos`
+  quedan intactas. Borrar esas filas y no poder devolverlas sería *eliminar* las asociaciones
+  con otro nombre.
+- **La regla pausada sigue en el mapa del motor**, aunque no se aplique. Sacarla de la carga
+  haría que `requerir()` tirara 400 por id ausente en cada ítem asociado, y el POS dejaría de
+  vender.
+- **El selector no la ofrece**, pero la pantalla de administración sí la sigue mostrando: si
+  desapareciera de la lista, el toggle para reactivarla se iría con ella.
+
+En la UI, pausar abre un modal que dice a cuántos ítems afecta (`GET /api/descuentos/:id/uso`)
+y promete la reversibilidad. Con cero ítems asociados no hay modal. Reactivar no pregunta.
+
+**El IVA queda fuera de todo esto**: no se pausa, se es afecto o exento. Ver
+[impuestos.md](./impuestos.md).
+
 ## API Endpoints
 
 ### Descuentos
