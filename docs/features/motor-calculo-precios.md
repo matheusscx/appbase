@@ -165,6 +165,17 @@ una decisión de negocio abierta — ver
 
 ### Algoritmo (núcleo)
 
+**Desbruteo.** Si `precio_incluye_impuesto`, el neto sale de dividir por `1 + Σ tasas`
+de **todos** los impuestos vigentes de la línea, no solo el IVA: el precio de góndola de
+una botella con ILA ya trae los dos, y tratarlo como "IVA solamente" cobraría el ILA dos
+veces. Un impuesto **pausado sale de esa suma antes de dividir** (si no se cobra, no puede
+inflar el divisor), y eso tiene una consecuencia querida y decidida por el owner el
+2026-08-04: **la etiqueta manda**. El precio final no cambia y lo que se dejó de cobrar
+pasa a ser neto. La boleta reporta más neto y menos impuesto, que es exactamente lo que
+pasó. La alternativa —bajar el precio final para preservar el neto— se descartó porque
+dejaba lo cobrado sin coincidir con el precio impreso en góndola.
+Lo fija el test *"el desbruteo no usa la tasa del impuesto pausado"*.
+
 Por línea: neto unitario (desbruteo si incluye impuesto) × cantidad → recorrer la
 fórmula (`paso 1,2,3`) sobre un acumulador. Descuentos restan, recargos suman;
 el `%` se calcula sobre el neto (`base`) o sobre el acumulado (`compuesto`).

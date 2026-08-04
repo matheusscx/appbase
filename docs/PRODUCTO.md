@@ -452,7 +452,8 @@ Cálculo puro (sin persistencia). Opera con **Decimal.js** y porcentajes siempre
 
 ```
 [fijo]   precioNeto      = precioBase sin impuesto
-                           (si precio_incluye_impuesto → extraer: neto = base / (1 + tasa))
+                           (si precio_incluye_impuesto → extraer:
+                            neto = base / (1 + Σ tasas vigentes de la línea))
 [paso 1] → aplicar descuentos  ┐
 [paso 2] → aplicar recargos    ├ orden configurable por tenant
 [paso 3] → aplicar impuestos   ┘
@@ -468,7 +469,16 @@ Cada paso aplica sobre el resultado acumulado del paso anterior. El tenant puede
 - `calculo_descuentos`: `'base'` (todos sobre precioNeto) | `'compuesto'` (cada descuento sobre el resultado del anterior)
 
 **Configuración por item:**
-- `precio_incluye_impuesto: boolean` — si el precio ingresado ya incluye impuestos o no
+- `precio_incluye_impuesto: boolean` — si el precio ingresado ya incluye impuestos o no.
+  **Incluye TODOS los impuestos que apliquen al ítem, no solo el IVA** (decisión del owner,
+  2026-08-04): el precio de góndola de una botella con ILA ya trae IVA *e* ILA, y tratarlo
+  como "IVA solamente" agregaría el ILA encima de un precio que ya lo tenía. Por eso el
+  desbruteo divide por la **suma** de las tasas vigentes, no por una sola.
+  **Si un impuesto incluido se pausa, la etiqueta manda:** el precio final no se mueve y lo
+  que dejó de cobrarse pasa a ser neto. Es fiscalmente coherente —la boleta reporta más neto
+  y menos impuesto, que es exactamente lo que ocurrió— y evita que lo cobrado deje de
+  coincidir con el precio impreso en góndola. Ver
+  [motor-calculo-precios.md](features/motor-calculo-precios.md).
 
 **Conversión de moneda:**
 - Si la moneda del item ≠ moneda oficial → `totalConvertido = totalFinal × valor_del_dia`

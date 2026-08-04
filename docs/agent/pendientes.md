@@ -412,14 +412,6 @@ Ver [`resueltos.md`](resueltos.md).
   serlo en cuanto exista un productor.
   Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
   (línea vs venta), que hoy no distingue.
-- [ ] **⚠️ Toca plata: un ítem con `precio_incluye_impuesto` cuyo único impuesto se pausa deja
-  de desbrutearse** (backend, `calculo-precios.engine.ts`, medido 2026-08-03 en la revisión de
-  cierre) — el impuesto pausado sale de la lista antes del desbruteo (correcto: si no se cobra,
-  no puede inflar el divisor), pero eso significa que el cliente sigue pagando los mismos 119
-  de vitrina y los 19 desaparecen del desglose: **el neto del tenant se infla**. Es coherente
-  con el diseño —el precio de vitrina manda— pero esa decisión no está escrita en ningún lado
-  y ningún test la cubre. **Decisión del owner:** ¿el precio de vitrina manda, o pausar un
-  impuesto incluido debería bajar el precio final?
 - [ ] **La promesa del modal ("las asociaciones se conservan") puede romperla la pantalla de
   ítems** (frontend, `items.vue:817-825` + `:935`, dudoso — medido como riesgo, no reproducido)
   — el selector de reglas excluye las pausadas de sus opciones, mientras `form.descuentosIds`
