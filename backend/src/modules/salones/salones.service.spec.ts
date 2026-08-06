@@ -106,7 +106,6 @@ describe('SalonesService', () => {
   let salonRepo: Repo;
   let mesaRepo: Repo;
   let cuentaRepo: Repo;
-  let cuentaLineaRepo: Repo;
   let ventas: { crearEnTransaccion: jest.Mock };
   let garzones: { resolverGarzonPorPin: jest.Mock };
   let sesiones: {
@@ -143,7 +142,6 @@ describe('SalonesService', () => {
     salonRepo = makeRepo();
     mesaRepo = makeRepo();
     cuentaRepo = makeRepo();
-    cuentaLineaRepo = makeRepo();
     ventas = { crearEnTransaccion: jest.fn() };
     garzones = {
       resolverGarzonPorPin: jest.fn().mockResolvedValue({
@@ -200,7 +198,6 @@ describe('SalonesService', () => {
         { provide: getRepositoryToken(Salon), useValue: salonRepo },
         { provide: getRepositoryToken(Mesa), useValue: mesaRepo },
         { provide: getRepositoryToken(Cuenta), useValue: cuentaRepo },
-        { provide: getRepositoryToken(CuentaLinea), useValue: cuentaLineaRepo },
         { provide: getDataSourceToken(), useValue: dataSource },
         { provide: VentasService, useValue: ventas },
         { provide: GarzonesService, useValue: garzones },
@@ -544,7 +541,10 @@ describe('SalonesService', () => {
 
   describe('agregarLinea', () => {
     beforeEach(() => {
-      cuentaRepo.findOne.mockResolvedValue({
+      // La cuenta se lee por el manager de la transacción, no por el repo:
+      // las tres mutadoras de línea la lockean para no colarse en una cuenta
+      // que `cerrarCuenta` está cerrando.
+      manager.findOne.mockResolvedValue({
         id: CUENTA,
         tenantId: TENANT,
         estado: EstadoCuenta.ABIERTA,
@@ -556,30 +556,49 @@ describe('SalonesService', () => {
           ]);
         return Promise.resolve([]);
       });
-      dataSource.manager.query.mockResolvedValue([]);
+      manager.query.mockResolvedValue([]);
     });
 
-    it('crea una línea nueva cuando el ítem no está en la cuenta', async () => {
-      cuentaLineaRepo.find.mockResolvedValue([]);
+    it('lee la cuenta con FOR UPDATE dentro de la transacción', async () => {
+      manager.find.mockResolvedValue([]);
 
       await service.agregarLinea(TENANT, CUENTA, {
         itemId: ITEM,
         cantidad: '2',
       });
 
-      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+      expect(dataSource.transaction).toHaveBeenCalled();
+      expect(manager.findOne).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({
+          where: { id: CUENTA, tenantId: TENANT },
+          lock: { mode: 'pessimistic_write' },
+        }),
+      );
+    });
+
+    it('crea una línea nueva cuando el ítem no está en la cuenta', async () => {
+      manager.find.mockResolvedValue([]);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '2',
+      });
+
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLinea,
         expect.objectContaining({
           itemId: ITEM,
           cantidad: '2',
           cuentaId: CUENTA,
         }),
       );
-      expect(cuentaLineaRepo.save).toHaveBeenCalled();
+      expect(manager.save).toHaveBeenCalled();
     });
 
     it('500 g sobre item kg → cantidad BD 0.5; detalle expone presentación', async () => {
-      cuentaLineaRepo.find.mockResolvedValue([]);
-      dataSource.manager.query.mockResolvedValueOnce([
+      manager.find.mockResolvedValue([]);
+      manager.query.mockResolvedValueOnce([
         {
           cuenta_linea_id: 'linea-pres',
           item_id: ITEM,
@@ -600,7 +619,8 @@ describe('SalonesService', () => {
         unidadCodigoPresentacion: 'g',
       });
 
-      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLinea,
         expect.objectContaining({
           cantidad: '0.5',
           cantidadPresentacion: '500',
@@ -615,7 +635,7 @@ describe('SalonesService', () => {
     });
 
     it('suma la cantidad si el ítem ya está en la cuenta sin personalización', async () => {
-      cuentaLineaRepo.find.mockResolvedValue([
+      manager.find.mockResolvedValue([
         { id: 'linea-1', cantidad: '2', personalizacion: null },
       ]);
 
@@ -624,7 +644,8 @@ describe('SalonesService', () => {
         cantidad: '3',
       });
 
-      expect(cuentaLineaRepo.save).toHaveBeenCalledWith(
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
         expect.objectContaining({ cantidad: '5' }),
       );
     });
@@ -637,7 +658,7 @@ describe('SalonesService', () => {
           ]);
         return Promise.resolve([]);
       });
-      cuentaLineaRepo.find.mockResolvedValue([]);
+      manager.find.mockResolvedValue([]);
 
       await service.agregarLinea(TENANT, CUENTA, {
         itemId: RECETA,
@@ -646,7 +667,8 @@ describe('SalonesService', () => {
       });
 
       expect(items.resolverPersonalizacionReceta).toHaveBeenCalled();
-      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLinea,
         expect.objectContaining({ personalizacion: SNAPSHOT }),
       );
     });
@@ -659,7 +681,7 @@ describe('SalonesService', () => {
           ]);
         return Promise.resolve([]);
       });
-      cuentaLineaRepo.find.mockResolvedValue([]);
+      manager.find.mockResolvedValue([]);
 
       await service.agregarLinea(TENANT, CUENTA, {
         itemId: COMBO,
@@ -676,7 +698,8 @@ describe('SalonesService', () => {
 
       expect(items.resolverPersonalizacionCombo).toHaveBeenCalled();
       expect(items.resolverPersonalizacionReceta).not.toHaveBeenCalled();
-      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLinea,
         expect.objectContaining({ personalizacion: SNAPSHOT_COMBO }),
       );
     });
@@ -694,7 +717,7 @@ describe('SalonesService', () => {
         cantidad: '1',
         personalizacion: SNAPSHOT,
       };
-      cuentaLineaRepo.find.mockResolvedValue([lineaMisma]);
+      manager.find.mockResolvedValue([lineaMisma]);
 
       await service.agregarLinea(TENANT, CUENTA, {
         itemId: RECETA,
@@ -702,19 +725,20 @@ describe('SalonesService', () => {
         personalizacion: { omitidos: [ING], comentario: 'sin cebolla' },
       });
 
-      expect(cuentaLineaRepo.save).toHaveBeenCalledWith(
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
         expect.objectContaining({ cantidad: '3' }),
       );
-      expect(cuentaLineaRepo.create).not.toHaveBeenCalled();
+      expect(manager.create).not.toHaveBeenCalled();
 
-      cuentaLineaRepo.find.mockResolvedValue([
+      manager.find.mockResolvedValue([
         {
           id: 'linea-1',
           cantidad: '1',
           personalizacion: { omitidos: ['otro-ing'], extras: [] },
         },
       ]);
-      cuentaLineaRepo.create.mockClear();
+      manager.create.mockClear();
 
       await service.agregarLinea(TENANT, CUENTA, {
         itemId: RECETA,
@@ -722,7 +746,8 @@ describe('SalonesService', () => {
         personalizacion: { omitidos: [ING], comentario: 'sin cebolla' },
       });
 
-      expect(cuentaLineaRepo.create).toHaveBeenCalledWith(
+      expect(manager.create).toHaveBeenCalledWith(
+        CuentaLinea,
         expect.objectContaining({ personalizacion: SNAPSHOT }),
       );
     });
@@ -738,20 +763,246 @@ describe('SalonesService', () => {
     });
 
     it('rechaza cantidad menor o igual a cero', async () => {
-      cuentaLineaRepo.find.mockResolvedValue([]);
+      manager.find.mockResolvedValue([]);
       await expect(
         service.agregarLinea(TENANT, CUENTA, { itemId: ITEM, cantidad: '0' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('rechaza operar sobre una cuenta no abierta', async () => {
-      cuentaRepo.findOne.mockResolvedValue({
+      manager.findOne.mockResolvedValue({
         id: CUENTA,
         tenantId: TENANT,
         estado: EstadoCuenta.CERRADA,
       });
       await expect(
         service.agregarLinea(TENANT, CUENTA, { itemId: ITEM, cantidad: '1' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('actualizarLinea', () => {
+    beforeEach(() => {
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? { id: CUENTA, tenantId: TENANT, estado: EstadoCuenta.ABIERTA }
+            : {
+                id: 'linea-1',
+                tenantId: TENANT,
+                cuentaId: CUENTA,
+                itemId: ITEM,
+              },
+        ),
+      );
+      // El lookup del ítem va por el manager, no por la conexión global: pedir
+      // una segunda conexión con el `FOR UPDATE` tomado es un doble checkout.
+      manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT i.item_id'))
+          return Promise.resolve([
+            { item_id: ITEM, tipo: 'producto', unidad_medida: 'kg' },
+          ]);
+        if (sql.includes('cl.cuenta_linea_id'))
+          return Promise.resolve([
+            {
+              cuenta_linea_id: 'linea-1',
+              item_id: ITEM,
+              cantidad: '3',
+              cantidad_presentacion: '3',
+              unidad_codigo_presentacion: 'kg',
+              nombre: 'Harina',
+              precio_base: '1000',
+              moneda_id: 'moneda-1',
+              // Con personalización para que `armarDetalle` dispare también la
+              // query de nombres de ingredientes: es la tercera lectura que se
+              // escapaba por la conexión global.
+              personalizacion: { omitidos: [ING], extras: [] },
+            },
+          ]);
+        return Promise.resolve([]);
+      });
+    });
+
+    it('ninguna lectura sale por la conexión global con el lock tomado', async () => {
+      await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '3',
+      });
+
+      // Sostiene el fix del doble checkout: pedir una segunda conexión del pool
+      // mientras se sostiene el `FOR UPDATE` puede estancarse con el pool lleno.
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('lee la cuenta con FOR UPDATE dentro de la transacción', async () => {
+      await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '3',
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalled();
+      expect(manager.findOne).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
+      );
+    });
+
+    it('el detalle devuelto se arma dentro de la transacción', async () => {
+      // `dataSource.manager.query` está mockeado a `[]`: si `armarDetalle` se
+      // llamara sin el manager, leería por fuera y `lineas` vendría vacío.
+      const detalle = await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '3',
+      });
+
+      expect(detalle.lineas).toHaveLength(1);
+      expect(detalle.lineas[0]).toMatchObject({ cantidad: '3' });
+    });
+
+    it('sin presentación explícita sincroniza la presentación legado con la unidad base', async () => {
+      await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '3',
+      });
+
+      // Sin `syncPresentacionLegado: true` estos dos quedarían en null y la
+      // línea editada perdería la presentación que sí muestra la pantalla.
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({
+          cantidad: '3',
+          cantidadPresentacion: '3',
+          unidadCodigoPresentacion: 'kg',
+        }),
+      );
+    });
+
+    it('convierte la presentación explícita a la unidad base', async () => {
+      await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '999',
+        cantidadPresentacion: '500',
+        unidadCodigoPresentacion: 'g',
+      });
+
+      expect(manager.save).toHaveBeenCalledWith(
+        CuentaLinea,
+        expect.objectContaining({
+          cantidad: '0.5',
+          cantidadPresentacion: '500',
+          unidadCodigoPresentacion: 'g',
+        }),
+      );
+    });
+
+    it('rechaza cantidad menor o igual a cero', async () => {
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '0' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('404 si la línea no existe', async () => {
+      manager.findOne.mockImplementation((entidad: unknown) =>
+        Promise.resolve(
+          entidad === Cuenta
+            ? { id: CUENTA, tenantId: TENANT, estado: EstadoCuenta.ABIERTA }
+            : null,
+        ),
+      );
+
+      // Clase Y mensaje: afirmar solo una de las dos deja pasar el mutante que
+      // cambia la otra (un 400 con el mismo texto, o un 404 de la cuenta).
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '1' }),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '1' }),
+      ).rejects.toThrow(/Línea .* no encontrada/);
+    });
+
+    it('rechaza operar sobre una cuenta no abierta', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.CERRADA,
+      });
+
+      await expect(
+        service.actualizarLinea(TENANT, CUENTA, 'linea-1', { cantidad: '1' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('quitarLinea', () => {
+    beforeEach(() => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      manager.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('cl.cuenta_linea_id')
+            ? [
+                {
+                  cuenta_linea_id: 'linea-2',
+                  item_id: ITEM,
+                  cantidad: '1',
+                  cantidad_presentacion: null,
+                  unidad_codigo_presentacion: null,
+                  nombre: 'Harina',
+                  precio_base: '1000',
+                  moneda_id: 'moneda-1',
+                  personalizacion: null,
+                },
+              ]
+            : [],
+        ),
+      );
+    });
+
+    it('lee la cuenta con FOR UPDATE y borra la línea en la misma transacción', async () => {
+      await service.quitarLinea(TENANT, CUENTA, 'linea-1');
+
+      expect(dataSource.transaction).toHaveBeenCalled();
+      expect(manager.findOne).toHaveBeenCalledWith(
+        Cuenta,
+        expect.objectContaining({ lock: { mode: 'pessimistic_write' } }),
+      );
+      expect(manager.softDelete).toHaveBeenCalledWith(CuentaLinea, {
+        id: 'linea-1',
+        tenantId: TENANT,
+        cuentaId: CUENTA,
+      });
+    });
+
+    it('el detalle devuelto se arma dentro de la transacción', async () => {
+      const detalle = await service.quitarLinea(TENANT, CUENTA, 'linea-1');
+
+      expect(detalle.lineas).toHaveLength(1);
+      expect(detalle.lineas[0]).toMatchObject({ id: 'linea-2' });
+    });
+
+    it('404 si la línea no pertenece a la cuenta', async () => {
+      manager.softDelete.mockResolvedValue({ affected: 0 });
+
+      // Clase Y mensaje. El mensaje, porque la implementación vieja también
+      // tiraba 404 pero por "Cuenta no encontrada": afirmar solo la clase deja
+      // pasar cualquier mutante que corte antes del softDelete. Y la clase,
+      // porque `toThrow(regex)` NO la verifica: un 400 con el mismo texto
+      // pasaría igual.
+      await expect(
+        service.quitarLinea(TENANT, CUENTA, 'linea-1'),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        service.quitarLinea(TENANT, CUENTA, 'linea-1'),
+      ).rejects.toThrow(/Línea .* no encontrada/);
+    });
+
+    it('rechaza operar sobre una cuenta no abierta', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.CERRADA,
+      });
+
+      await expect(
+        service.quitarLinea(TENANT, CUENTA, 'linea-1'),
       ).rejects.toThrow(BadRequestException);
     });
   });

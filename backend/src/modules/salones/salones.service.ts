@@ -137,8 +137,6 @@ export class SalonesService {
     @InjectRepository(Salon) private readonly salonRepo: Repository<Salon>,
     @InjectRepository(Mesa) private readonly mesaRepo: Repository<Mesa>,
     @InjectRepository(Cuenta) private readonly cuentaRepo: Repository<Cuenta>,
-    @InjectRepository(CuentaLinea)
-    private readonly cuentaLineaRepo: Repository<CuentaLinea>,
     private readonly ventasService: VentasService,
     private readonly garzonesService: GarzonesService,
     private readonly sesionesGarzonService: SesionesGarzonService,
@@ -551,7 +549,9 @@ export class SalonesService {
     cuentaId: string,
     dto: AddLineaDto,
   ): Promise<CuentaDetalle> {
-    const cuenta = await this.getCuentaAbiertaOrThrow(tenantId, cuentaId);
+    // El catálogo y la personalización se resuelven ANTES de tomar el lock:
+    // son varias queries y no dependen del estado de la cuenta, así que no
+    // tienen por qué alargar el lock que serializa contra `cerrarCuenta`.
     const item = await this.getItemVendibleOrThrow(tenantId, dto.itemId);
     const catalogo = await this.loadCatalogoUnidades();
     const resuelta = this.resolverCantidadLinea({
@@ -590,31 +590,40 @@ export class SalonesService {
     }
 
     const hash = hashPersonalizacion(snapshot);
-    const existentes = await this.cuentaLineaRepo.find({
-      where: { tenantId, cuentaId, itemId: dto.itemId },
-    });
-    const match = existentes.find(
-      (l) => hashPersonalizacion(l.personalizacion) === hash,
-    );
-    if (match) {
-      match.cantidad = new Decimal(match.cantidad)
-        .plus(resuelta.cantidadCanonica)
-        .toString();
-      await this.cuentaLineaRepo.save(match);
-    } else {
-      await this.cuentaLineaRepo.save(
-        this.cuentaLineaRepo.create({
-          tenantId,
-          cuentaId,
-          itemId: dto.itemId,
-          cantidad: resuelta.cantidadCanonica,
-          cantidadPresentacion: resuelta.cantidadPresentacion,
-          unidadCodigoPresentacion: resuelta.unidadCodigoPresentacion,
-          personalizacion: snapshot,
-        }),
+
+    return this.dataSource.transaction(async (manager) => {
+      const cuenta = await this.getCuentaAbiertaConLock(
+        manager,
+        tenantId,
+        cuentaId,
       );
-    }
-    return this.armarDetalle(tenantId, cuenta);
+      const existentes = await manager.find(CuentaLinea, {
+        where: { tenantId, cuentaId, itemId: dto.itemId },
+      });
+      const match = existentes.find(
+        (l) => hashPersonalizacion(l.personalizacion) === hash,
+      );
+      if (match) {
+        match.cantidad = new Decimal(match.cantidad)
+          .plus(resuelta.cantidadCanonica)
+          .toString();
+        await manager.save(CuentaLinea, match);
+      } else {
+        await manager.save(
+          CuentaLinea,
+          manager.create(CuentaLinea, {
+            tenantId,
+            cuentaId,
+            itemId: dto.itemId,
+            cantidad: resuelta.cantidadCanonica,
+            cantidadPresentacion: resuelta.cantidadPresentacion,
+            unidadCodigoPresentacion: resuelta.unidadCodigoPresentacion,
+            personalizacion: snapshot,
+          }),
+        );
+      }
+      return this.armarDetalle(tenantId, cuenta, manager);
+    });
   }
 
   async actualizarLinea(
@@ -623,31 +632,46 @@ export class SalonesService {
     lineaId: string,
     dto: UpdateLineaDto,
   ): Promise<CuentaDetalle> {
-    const cuenta = await this.getCuentaAbiertaOrThrow(tenantId, cuentaId);
-    const linea = await this.cuentaLineaRepo.findOne({
-      where: { id: lineaId, tenantId, cuentaId },
-    });
-    if (!linea) throw new NotFoundException(`Línea ${lineaId} no encontrada`);
-
-    const item = await this.getItemVendibleOrThrow(tenantId, linea.itemId);
+    // El catálogo de unidades es global: no depende de la cuenta ni de la
+    // línea, así que se carga fuera del lock. El ítem no puede salir de acá
+    // —depende de `linea.itemId`, que se lee bajo lock— y por eso va con el
+    // manager de la transacción: pedir una segunda conexión del pool mientras
+    // se sostiene el `FOR UPDATE` es un doble checkout que puede estancarse.
     const catalogo = await this.loadCatalogoUnidades();
-    const resuelta = this.resolverCantidadLinea({
-      cantidad: dto.cantidad,
-      cantidadPresentacion: dto.cantidadPresentacion,
-      unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
-      item,
-      catalogo,
-      syncPresentacionLegado: true,
-    });
-    if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
-      throw new BadRequestException('La cantidad debe ser mayor a cero');
-    }
+    return this.dataSource.transaction(async (manager) => {
+      const cuenta = await this.getCuentaAbiertaConLock(
+        manager,
+        tenantId,
+        cuentaId,
+      );
+      const linea = await manager.findOne(CuentaLinea, {
+        where: { id: lineaId, tenantId, cuentaId },
+      });
+      if (!linea) throw new NotFoundException(`Línea ${lineaId} no encontrada`);
 
-    linea.cantidad = resuelta.cantidadCanonica;
-    linea.cantidadPresentacion = resuelta.cantidadPresentacion;
-    linea.unidadCodigoPresentacion = resuelta.unidadCodigoPresentacion;
-    await this.cuentaLineaRepo.save(linea);
-    return this.armarDetalle(tenantId, cuenta);
+      const item = await this.getItemVendibleOrThrow(
+        tenantId,
+        linea.itemId,
+        manager,
+      );
+      const resuelta = this.resolverCantidadLinea({
+        cantidad: dto.cantidad,
+        cantidadPresentacion: dto.cantidadPresentacion,
+        unidadCodigoPresentacion: dto.unidadCodigoPresentacion,
+        item,
+        catalogo,
+        syncPresentacionLegado: true,
+      });
+      if (new Decimal(resuelta.cantidadCanonica).lte(0)) {
+        throw new BadRequestException('La cantidad debe ser mayor a cero');
+      }
+
+      linea.cantidad = resuelta.cantidadCanonica;
+      linea.cantidadPresentacion = resuelta.cantidadPresentacion;
+      linea.unidadCodigoPresentacion = resuelta.unidadCodigoPresentacion;
+      await manager.save(CuentaLinea, linea);
+      return this.armarDetalle(tenantId, cuenta, manager);
+    });
   }
 
   async quitarLinea(
@@ -655,16 +679,22 @@ export class SalonesService {
     cuentaId: string,
     lineaId: string,
   ): Promise<CuentaDetalle> {
-    const cuenta = await this.getCuentaAbiertaOrThrow(tenantId, cuentaId);
-    const res = await this.cuentaLineaRepo.softDelete({
-      id: lineaId,
-      tenantId,
-      cuentaId,
+    return this.dataSource.transaction(async (manager) => {
+      const cuenta = await this.getCuentaAbiertaConLock(
+        manager,
+        tenantId,
+        cuentaId,
+      );
+      const res = await manager.softDelete(CuentaLinea, {
+        id: lineaId,
+        tenantId,
+        cuentaId,
+      });
+      if (!res.affected) {
+        throw new NotFoundException(`Línea ${lineaId} no encontrada`);
+      }
+      return this.armarDetalle(tenantId, cuenta, manager);
     });
-    if (!res.affected) {
-      throw new NotFoundException(`Línea ${lineaId} no encontrada`);
-    }
-    return this.armarDetalle(tenantId, cuenta);
   }
 
   async cancelarCuenta(
@@ -1158,6 +1188,7 @@ export class SalonesService {
     const nombres = await this.nombresIngredientesPersonalizacion(
       tenantId,
       lineas,
+      runner,
     );
     return {
       id: cuenta.id,
@@ -1211,6 +1242,7 @@ export class SalonesService {
   private async nombresIngredientesPersonalizacion(
     tenantId: string,
     rows: { personalizacion?: PersonalizacionRecetaSnapshot | null }[],
+    runner?: DataSource['manager'],
   ): Promise<Map<string, string>> {
     const ids = new Set<string>();
     for (const row of rows) {
@@ -1220,12 +1252,13 @@ export class SalonesService {
       for (const e of p.extras ?? []) ids.add(e.ingredienteItemId);
     }
     if (ids.size === 0) return new Map();
-    const nameRows: { item_id: string; nombre: string }[] =
-      await this.dataSource.query(
-        `SELECT item_id, nombre FROM items
+    const nameRows: { item_id: string; nombre: string }[] = await (
+      runner ?? this.dataSource
+    ).query(
+      `SELECT item_id, nombre FROM items
           WHERE item_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL`,
-        [[...ids], tenantId],
-      );
+      [[...ids], tenantId],
+    );
     return new Map(nameRows.map((r) => [r.item_id, r.nombre]));
   }
 
@@ -1258,11 +1291,24 @@ export class SalonesService {
     return mesa;
   }
 
-  private async getCuentaAbiertaOrThrow(
+  /**
+   * Lee la cuenta con `FOR UPDATE` y valida que siga abierta **dentro de la
+   * transacción que va a escribir**. Un `SELECT` plano no sirve acá: no espera
+   * al lock que toma `cerrarCuenta`, así que ve la cuenta como abierta durante
+   * todo el cierre —que incluye armar la venta entera— y la escritura se cuela
+   * en una cuenta que queda cerrada un instante después. Esa línea no se cobra
+   * (la venta ya se armó sin ella) y tampoco llega a cocina (`previewComanda` y
+   * `reclamarComanda` exigen ABIERTA): queda invisible para todos.
+   */
+  private async getCuentaAbiertaConLock(
+    manager: DataSource['manager'],
     tenantId: string,
     id: string,
   ): Promise<Cuenta> {
-    const cuenta = await this.cuentaRepo.findOne({ where: { id, tenantId } });
+    const cuenta = await manager.findOne(Cuenta, {
+      where: { id, tenantId },
+      lock: { mode: 'pessimistic_write' },
+    });
     if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
     if (cuenta.estado !== EstadoCuenta.ABIERTA) {
       throw new BadRequestException('La cuenta no está abierta');
@@ -1335,12 +1381,13 @@ export class SalonesService {
   private async getItemVendibleOrThrow(
     tenantId: string,
     itemId: string,
+    runner?: DataSource['manager'],
   ): Promise<{ itemId: string; tipo: string; unidadMedida: string | null }> {
     const rows: {
       item_id: string;
       tipo: string;
       unidad_medida: string | null;
-    }[] = await this.dataSource.query(
+    }[] = await (runner ?? this.dataSource).query(
       `SELECT i.item_id, i.tipo, ip.unidad_medida
          FROM items i
          LEFT JOIN item_producto ip ON ip.item_id = i.item_id
