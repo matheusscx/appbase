@@ -100,10 +100,17 @@ Si es receta, agrega `ingredientes: { ingredienteItemId, ingredienteNombre, cant
 
 ### GET /items/:id/uso
 
-Antes de confirmar un borrado, clasifica en una sola query (`UNION` sobre los cuatro
+Antes de confirmar un borrado, clasifica en una sola query (`UNION` sobre los cinco
 usos posibles) dónde se usa el item: `{ bloqueos: [{tipo, nombre}], advertencias:
-[{tipo, nombre}] }`, con `tipo` = `'ingrediente' | 'combo' | 'opcion'` en `bloqueos` y
-`'extra'` en `advertencias`. Guard `Items:Eliminar` (mismo permiso que el borrado).
+[{tipo, nombre}] }`, con `tipo` = `'cuenta' | 'ingrediente' | 'combo' | 'opcion'` en
+`bloqueos` y `'extra'` en `advertencias`. Guard `Items:Eliminar` (mismo permiso que el
+borrado).
+
+`'cuenta'` es el uso **operativo** —el ítem está pedido en una cuenta de salón abierta—
+y va **primero** en el mensaje: los otros tres son de catálogo y el admin los resuelve
+cuando quiera, pero una cuenta abierta tiene a alguien esperando en la mesa. Su rama
+acota por `estado = 'abierta'` y por los tres filtros de borrado (línea, cuenta y mesa):
+sin el filtro de estado, una cuenta ya cerrada volvería inborrable al ítem para siempre.
 
 ### DELETE /items/:id
 

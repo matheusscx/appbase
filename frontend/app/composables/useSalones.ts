@@ -92,6 +92,11 @@ export interface CuentaLineaDetalle {
   } | null
   personalizacionTexto?: string
   personalizacionDetalle?: PersonalizacionDetalleLinea[]
+  /** El ítem se eliminó del catálogo con la cuenta ya abierta: hay que quitar
+   *  la línea para poder cobrar. Gemelo de `CuentaLineaDetalle.itemEliminado`
+   *  del backend (`salones.service.ts`), copiado a mano como el resto de este
+   *  archivo: al tocar una punta, tocar la otra. */
+  itemEliminado?: true
 }
 
 export interface CuentaAsignacionDetalle {

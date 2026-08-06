@@ -182,7 +182,7 @@ const verificandoEliminarId = ref<string | null>(null)
 // compilación: si el backend agrega una clase de uso y acá no se agrega, la
 // viñeta se renderiza con la etiqueta vacía en vez de fallar el build. Al tocar
 // una punta, tocar la otra.
-type UsoItemTipoBloqueante = 'ingrediente' | 'combo' | 'opcion'
+type UsoItemTipoBloqueante = 'ingrediente' | 'combo' | 'opcion' | 'cuenta'
 
 interface UsoItem {
   bloqueos: { tipo: UsoItemTipoBloqueante; nombre: string }[]
@@ -192,6 +192,7 @@ interface UsoItem {
 const usoItem = ref<UsoItem | null>(null)
 
 const ETIQUETA_USO: Record<UsoItemTipoBloqueante, string> = {
+  cuenta: 'Está pedido en',
   ingrediente: 'Es ingrediente de',
   combo: 'Es componente de',
   opcion: 'Es opción de',

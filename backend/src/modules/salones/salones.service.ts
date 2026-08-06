@@ -100,6 +100,12 @@ export interface CuentaLineaDetalle {
   personalizacion?: PersonalizacionRecetaSnapshot | null;
   personalizacionTexto?: string;
   personalizacionDetalle?: PersonalizacionDetalleLinea[];
+  /**
+   * El ítem se eliminó del catálogo con la cuenta ya abierta. La línea se
+   * sigue mostrando —esconderla dejaba la cuenta imposible de cobrar y de
+   * corregir— para que el garzón pueda quitarla. `cerrarCuenta` la rechaza.
+   */
+  itemEliminado?: true;
 }
 
 export interface ComandaEstacion {
@@ -853,6 +859,25 @@ export class SalonesService {
         throw new BadRequestException('Propina inválida');
       }
 
+      // Va acá y no antes: las validaciones de arriba son gratis y este es el
+      // único chequeo que pega a la BD. `crearEnTransaccion` resolvería igual
+      // los ítems y explotaría con un "Item no encontrado" que no dice cuál ni
+      // deja hacer nada; con el nombre, el garzón sabe qué línea quitar (el
+      // detalle ahora se la muestra marcada en vez de esconderla).
+      const eliminados: { nombre: string }[] = await manager.query(
+        `SELECT nombre FROM items
+          WHERE item_id = ANY($1) AND tenant_id = $2
+            AND eliminado_el IS NOT NULL
+          ORDER BY nombre`,
+        [lineas.map((l) => l.itemId), tenantId],
+      );
+      if (eliminados.length > 0) {
+        throw new BadRequestException(
+          `No se puede cobrar: ${eliminados.map((e) => e.nombre).join(', ')} ` +
+            `se eliminó del catálogo. Quitá esa línea de la cuenta para cerrarla.`,
+        );
+      }
+
       const ventaDto: CreateVentaDto = {
         lineas: lineas.map((l) => ({
           itemId: l.itemId,
@@ -1033,10 +1058,15 @@ export class SalonesService {
   }
 
   private sqlLineasComanda(): string {
+    // Igual que `armarDetalle`: el JOIN a `items` NO filtra lo eliminado. Un
+    // plato ya pedido hay que cocinarlo, lo haya sacado o no el admin de la
+    // carta mientras tanto. Filtrándolo, la línea desaparecía del ticket sin
+    // ningún aviso —"Enviar a cocina" respondía OK y el plato no se cocinaba—
+    // y su `cantidad_enviada` no avanzaba nunca.
     return `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
               cl.personalizacion, i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
          FROM cuenta_lineas cl
-         JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
+         JOIN items i ON i.item_id = cl.item_id AND i.tenant_id = $2
          LEFT JOIN categorias c
            ON c.categoria_id = i.categoria_id AND c.eliminado_el IS NULL
          LEFT JOIN impresoras imp
@@ -1168,13 +1198,21 @@ export class SalonesService {
       precio_base: string;
       moneda_id: string;
       personalizacion: PersonalizacionRecetaSnapshot | null;
+      item_eliminado: boolean;
     }[] = await runner.query(
+      // El JOIN NO filtra `i.eliminado_el IS NULL`, y es a propósito: la fila
+      // de `items` sobrevive al soft delete, así que filtrarla hacía
+      // DESAPARECER la línea de la pantalla mientras `cerrarCuenta` —que lee
+      // las líneas crudas— seguía contándola. El garzón veía una cuenta
+      // incompleta que no podía cobrar ni corregir, porque no tenía el
+      // `lineaId` de algo que no se renderizaba. Ahora se muestra marcada.
       `SELECT cl.cuenta_linea_id, cl.item_id, cl.cantidad,
               cl.cantidad_presentacion, cl.unidad_codigo_presentacion,
               cl.personalizacion,
-              i.nombre, i.precio_base, i.moneda_id
+              i.nombre, i.precio_base, i.moneda_id,
+              i.eliminado_el IS NOT NULL AS item_eliminado
          FROM cuenta_lineas cl
-         JOIN items i ON i.item_id = cl.item_id AND i.eliminado_el IS NULL
+         JOIN items i ON i.item_id = cl.item_id AND i.tenant_id = $2
         WHERE cl.cuenta_id = $1 AND cl.tenant_id = $2 AND cl.eliminado_el IS NULL
         ORDER BY cl.creado_el ASC`,
       [cuenta.id, tenantId],
@@ -1234,6 +1272,7 @@ export class SalonesService {
           personalizacion: l.personalizacion,
           ...(personalizacionTexto ? { personalizacionTexto } : {}),
           ...(personalizacionDetalle.length ? { personalizacionDetalle } : {}),
+          ...(l.item_eliminado ? { itemEliminado: true as const } : {}),
         };
       }),
     };

@@ -197,7 +197,44 @@ Backfill al arrancar: cuentas existentes sin responsable reciben
 
 - Apertura de cuenta: `FOR UPDATE` de la mesa antes de calcular `MAX(numero)+1`.
 - Transferencia y cierre/cancelación: `FOR UPDATE` pesimista de la cuenta.
+- **Agregar, editar y quitar líneas: `FOR UPDATE` de la cuenta, en la misma
+  transacción que escribe.** No alcanza con leer el estado: un `SELECT` plano no
+  espera al lock del cierre, así que veía la cuenta abierta durante todo
+  `cerrarCuenta` —que arma la venta entera— y la línea se colaba en una cuenta que
+  quedaba cerrada un instante después. Esa línea no se cobraba (la venta ya estaba
+  armada sin ella) ni llegaba a cocina (`previewComanda`/`reclamarComanda` exigen
+  `abierta`): quedaba invisible. El catálogo de unidades y la personalización se
+  resuelven **fuera** del lock; lo que sí necesita leerse adentro va con el manager de
+  la transacción, porque pedir una segunda conexión del pool sosteniendo el
+  `FOR UPDATE` es un doble checkout que puede estancarse.
 - Un solo tramo vigente por cuenta: índice parcial único en `cuenta_asignaciones`.
+
+### Ítem eliminado con la cuenta abierta
+
+Borrar del catálogo un ítem que está pedido en una cuenta abierta **está bloqueado**
+(`GET /items/:id/uso` → clase `'cuenta'`, ver [recetas.md](./recetas.md)). Para los
+casos que ya existan, el detalle de la cuenta **muestra la línea marcada**
+(`itemEliminado: true`) en vez de esconderla: el `JOIN` a `items` de `armarDetalle` no
+filtra lo eliminado a propósito. Filtrarlo hacía desaparecer la línea de la pantalla
+mientras `cerrarCuenta` —que lee las líneas crudas— la seguía contando, así que el
+garzón veía una cuenta incompleta que no podía cobrar **ni corregir**, porque no tenía
+el `lineaId` de algo que no se renderizaba. `cerrarCuenta` corta con un `400` que
+nombra el ítem, en vez del `Item no encontrado` opaco que devolvía el motor de venta.
+
+**La comanda tampoco lo filtra** (`sqlLineasComanda`, que alimenta `previewComanda` y
+`reclamarComanda`). La regla es: **un plato ya pedido hay que cocinarlo**, lo haya
+sacado o no el admin de la carta mientras tanto. Con el filtro puesto la línea
+desaparecía del ticket de cocina sin ningún aviso —"Enviar a cocina" respondía OK y su
+`cantidad_enviada` no avanzaba nunca—, que es el mismo bug de la pantalla movido de
+lugar.
+
+En el frontend, una cuenta con una línea así **no se puede cotizar**: el motor de precios
+resuelve los ítems contra el catálogo vivo y devuelve `404`. En vez de mostrar un total
+de `$0` —que es peor que no mostrar nada—, el total aparece como `—`, un aviso explica
+por qué, y "Cerrar y cobrar" e "Imprimir precuenta" quedan deshabilitados hasta que se
+quite la línea. Las líneas **no** se filtran de la entrada del cálculo a propósito:
+`AdvertenciasPrecio` indexa `resultado.lineas[i]` contra las líneas de la pantalla, así
+que filtrar la entrada las desfasa.
 
 ---
 

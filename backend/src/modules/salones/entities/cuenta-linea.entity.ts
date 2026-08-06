@@ -1,5 +1,6 @@
 import {
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
@@ -8,6 +9,17 @@ import {
 } from 'typeorm';
 import type { PersonalizacionRecetaSnapshot } from '../../../common/dto/personalizacion-receta.dto';
 
+/**
+ * `idx_cuenta_lineas_item`: lo pide la rama `'cuenta'` de
+ * `ItemsService.obtenerUsoItem`, que busca por `item_id` para bloquear el
+ * borrado de un ítem pedido en una cuenta abierta. Corre en cada
+ * `DELETE /items/:id` y en cada `GET /items/:id/uso` —que el frontend dispara
+ * antes de abrir el modal de confirmación—, y `cuenta_lineas` crece con cada
+ * producto pedido en la historia del tenant, soft-deletes incluidos. Sin él es
+ * un seq scan que escala con el volumen transaccional. Postgres no indexa las
+ * FK por su cuenta.
+ */
+@Index('idx_cuenta_lineas_item', ['itemId'])
 @Entity('cuenta_lineas')
 export class CuentaLinea {
   @PrimaryGeneratedColumn('uuid', { name: 'cuenta_linea_id' })

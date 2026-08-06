@@ -5141,6 +5141,50 @@ describe('ItemsService', () => {
       );
     });
 
+    it('bloquea si está pedido en una cuenta abierta', async () => {
+      managerMock.query.mockResolvedValueOnce([
+        { clase: 'cuenta', nombre: 'Mesa 5 · cuenta 2' },
+      ]);
+
+      await expect(service.remove(TENANT, USUARIO, ITEM_ID)).rejects.toThrow(
+        'No se puede eliminar: está pedido en Mesa 5 · cuenta 2',
+      );
+    });
+
+    it('prioriza la cuenta abierta sobre los usos de catálogo', async () => {
+      // Los de catálogo se resuelven cuando el admin quiera; la cuenta abierta
+      // tiene a alguien esperando en la mesa.
+      managerMock.query.mockResolvedValueOnce([
+        { clase: 'ingrediente', nombre: 'Pizza' },
+        { clase: 'cuenta', nombre: 'Mesa 5 · cuenta 2' },
+      ]);
+
+      await expect(service.remove(TENANT, USUARIO, ITEM_ID)).rejects.toThrow(
+        'No se puede eliminar: está pedido en Mesa 5 · cuenta 2',
+      );
+    });
+
+    it('la rama de cuentas solo mira cuentas abiertas y no borradas', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await service.remove(TENANT, USUARIO, ITEM_ID);
+
+      const rama = (managerMock.query.mock.calls[0][0] as string)
+        .split(/\bUNION\b/)
+        .find((r) => r.includes('cuenta_lineas'));
+      // Sin `estado = 'abierta'` una cuenta cerrada hace inborrable al ítem
+      // para siempre; sin los filtros de borrado, una cuenta o una mesa en la
+      // papelera hacen lo mismo.
+      expect(rama).toMatch(/c\.estado = 'abierta'/);
+      expect(rama).toMatch(/c\.eliminado_el IS NULL/);
+      expect(rama).toMatch(/cl\.eliminado_el IS NULL/);
+      expect(rama).toMatch(/m\.eliminado_el IS NULL/);
+    });
+
     it('acota la consulta de uso por tenant', async () => {
       managerMock.query
         .mockResolvedValueOnce([])
@@ -5155,10 +5199,10 @@ describe('ItemsService', () => {
       // Afirmar sobre los params no alcanza: si alguien saca la condición de
       // tenant de UNA sola rama del UNION, los params ($1, $2) no cambian y una
       // aserción solo de parámetros seguiría en verde. Partir el SQL por `UNION`
-      // y exigir la condición de tenant en cada una de las cuatro ramas.
+      // y exigir la condición de tenant en cada una de las cinco ramas.
       const sql = managerMock.query.mock.calls[0][0] as string;
       const ramas = sql.split(/\bUNION\b/);
-      expect(ramas).toHaveLength(4);
+      expect(ramas).toHaveLength(5);
       for (const rama of ramas) {
         expect(rama).toMatch(/tenant_id = \$2/);
       }

@@ -1008,6 +1008,37 @@ describe('SalonesService', () => {
   });
 
   describe('cerrarCuenta', () => {
+    it('rechaza con el nombre del ítem eliminado, sin llegar a crear la venta', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 8,
+        estado: EstadoCuenta.ABIERTA,
+        ventaId: null,
+        garzonResponsableId: GARZON_RESPONSABLE,
+        cerradaEl: null as Date | null,
+      });
+      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      manager.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('eliminado_el IS NOT NULL')
+            ? [{ nombre: 'Pastel de choclo' }]
+            : [],
+        ),
+      );
+
+      // Sin este chequeo, `crearEnTransaccion` explota con "Item no encontrado"
+      // y el garzón no tiene cómo saber qué línea quitar.
+      await expect(
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          pin: PIN,
+          pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+        }),
+      ).rejects.toThrow(/No se puede cobrar: Pastel de choclo/);
+      expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
+    });
+
     it('genera la venta con crearEnTransaccion y cierra la cuenta', async () => {
       const cuenta = {
         id: CUENTA,
@@ -1395,6 +1426,95 @@ describe('SalonesService', () => {
       expect(detalle.garzonResponsableId).toBe(GARZON);
       expect(detalle.garzonResponsableNombre).toBe('Ana Torres');
     });
+
+    it('la línea de un ítem eliminado se muestra marcada, no se esconde', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue([
+        {
+          id: CUENTA,
+          numero: 1,
+          nombre: null,
+          estado: EstadoCuenta.ABIERTA,
+          mesaId: MESA,
+          ventaId: null,
+          garzonAperturaId: null,
+          garzonResponsableId: null,
+          garzonCierreId: null,
+        },
+      ]);
+      dataSource.manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM cuenta_lineas')) {
+          // El JOIN a `items` NO debe filtrar lo eliminado: filtrarlo hacía
+          // desaparecer la línea de la pantalla mientras `cerrarCuenta`, que
+          // lee las líneas crudas, seguía contándola.
+          expect(sql).not.toMatch(/i\.eliminado_el\s+IS\s+NULL/i);
+          return Promise.resolve([
+            {
+              cuenta_linea_id: 'linea-1',
+              item_id: ITEM,
+              cantidad: '1',
+              cantidad_presentacion: null,
+              unidad_codigo_presentacion: null,
+              nombre: 'Pastel de choclo',
+              precio_base: '8000',
+              moneda_id: 'moneda-1',
+              personalizacion: null,
+              item_eliminado: true,
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
+
+      const [detalle] = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalle.lineas).toHaveLength(1);
+      expect(detalle.lineas[0]).toMatchObject({
+        nombre: 'Pastel de choclo',
+        itemEliminado: true,
+      });
+    });
+
+    it('una línea normal no lleva la marca de eliminado', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue([
+        {
+          id: CUENTA,
+          numero: 1,
+          nombre: null,
+          estado: EstadoCuenta.ABIERTA,
+          mesaId: MESA,
+          ventaId: null,
+          garzonAperturaId: null,
+          garzonResponsableId: null,
+          garzonCierreId: null,
+        },
+      ]);
+      dataSource.manager.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('FROM cuenta_lineas')
+            ? [
+                {
+                  cuenta_linea_id: 'linea-1',
+                  item_id: ITEM,
+                  cantidad: '1',
+                  cantidad_presentacion: null,
+                  unidad_codigo_presentacion: null,
+                  nombre: 'Pizza',
+                  precio_base: '8000',
+                  moneda_id: 'moneda-1',
+                  personalizacion: null,
+                  item_eliminado: false,
+                },
+              ]
+            : [],
+        ),
+      );
+
+      const [detalle] = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalle.lineas[0]).not.toHaveProperty('itemEliminado');
+    });
   });
 
   describe('eliminarMesa', () => {
@@ -1633,6 +1753,40 @@ describe('SalonesService', () => {
   });
 
   describe('previewComanda', () => {
+    it('la comanda no esconde el ítem eliminado del catálogo', async () => {
+      cuentaRepo.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      let sqlLineas = '';
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT item_id, nombre FROM items'))
+          return Promise.resolve([]);
+        sqlLineas = sql;
+        return Promise.resolve([
+          {
+            cuenta_linea_id: 'linea-1',
+            cantidad: '1',
+            cantidad_enviada: '0',
+            nombre: 'Pastel de choclo',
+            impresora_id: 'impresora-cocina',
+            impresora_nombre: 'Cocina',
+            personalizacion: null,
+          },
+        ]);
+      });
+
+      const res = await service.previewComanda(TENANT, CUENTA);
+
+      // Un plato ya pedido hay que cocinarlo aunque el admin lo haya sacado de
+      // la carta. Con el filtro puesto, la línea desaparecía del ticket sin
+      // aviso: "Enviar a cocina" respondía OK y el plato no se cocinaba.
+      expect(sqlLineas).not.toMatch(/i\.eliminado_el\s+IS\s+NULL/i);
+      expect(sqlLineas).toMatch(/i\.tenant_id = \$2/);
+      expect(res.estaciones[0]?.items[0]?.nombre).toBe('Pastel de choclo');
+    });
+
     it('agrupa por impresora solo los ítems con diferencia pendiente, SIN persistir', async () => {
       cuentaRepo.findOne.mockResolvedValue({
         id: CUENTA,
@@ -1742,6 +1896,12 @@ describe('SalonesService', () => {
         expect.stringContaining('FOR UPDATE OF cl'),
         [CUENTA, TENANT],
       );
+      // El de `previewComanda` afirma sobre el string compartido; este afirma
+      // sobre el sitio que REALMENTE reclama y avanza `cantidad_enviada`, que
+      // concatena su propio SQL. Sin esta línea, inyectar el filtro solo acá
+      // deja la suite entera en verde y el plato no llega a cocina.
+      const sqlClaim = manager.query.mock.calls[0][0] as string;
+      expect(sqlClaim).not.toMatch(/i\.eliminado_el\s+IS\s+NULL/i);
       expect(manager.query).toHaveBeenNthCalledWith(
         2,
         expect.stringContaining('SET cantidad_enviada'),

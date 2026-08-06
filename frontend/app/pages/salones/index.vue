@@ -249,6 +249,13 @@ const salonItems = computed(() =>
 )
 const tieneCaja = computed(() => cajaStore.activa !== null)
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
+// Una línea cuyo ítem se borró del catálogo hace fallar el cálculo entero: el
+// motor resuelve los ítems contra el catálogo vivo y devuelve 404. Sin esto la
+// cabecera mostraba **Total $0** para una cuenta con productos, que es peor que
+// no mostrar nada. La cuenta no se puede cobrar hasta quitar esa línea.
+const cuentaConItemEliminado = computed(
+  () => activeCuenta.value?.lineas.some(l => l.itemEliminado) ?? false,
+)
 
 watch(cobroOpen, (v) => {
   if (v) {
@@ -1128,7 +1135,19 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                     class="flex items-center gap-2 py-2"
                   >
                     <div class="min-w-0 flex-1">
-                      <p class="truncate text-sm font-medium text-default">{{ linea.nombre }}</p>
+                      <div class="flex min-w-0 items-center gap-1.5">
+                        <p class="truncate text-sm font-medium text-default">{{ linea.nombre }}</p>
+                        <UBadge
+                          v-if="linea.itemEliminado"
+                          label="Eliminado del catálogo"
+                          color="error"
+                          variant="subtle"
+                          size="sm"
+                        />
+                      </div>
+                      <p v-if="linea.itemEliminado" class="text-xs text-error">
+                        Quitá esta línea para poder cobrar la cuenta.
+                      </p>
                       <p v-if="linea.personalizacionTexto" class="text-xs text-muted">
                         {{ linea.personalizacionTexto }}
                       </p>
@@ -1154,9 +1173,18 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
 
               <div class="shrink-0 border-t border-default pt-3">
                 <AdvertenciasPrecio :advertencias="resultado?.advertenciasVenta ?? []" class="mb-2" />
+                <UAlert
+                  v-if="cuentaConItemEliminado"
+                  color="error"
+                  variant="soft"
+                  icon="i-lucide-triangle-alert"
+                  title="Hay un ítem eliminado del catálogo"
+                  description="No se puede calcular ni cobrar esta cuenta hasta quitar esa línea."
+                  class="mb-3"
+                />
                 <div class="mb-3 flex justify-between text-base font-semibold text-default">
                   <span>Total</span>
-                  <span>{{ formatMonto(totalFinal) }}</span>
+                  <span>{{ cuentaConItemEliminado ? '—' : formatMonto(totalFinal) }}</span>
                 </div>
                 <UAlert
                   v-if="!tieneCaja"
@@ -1185,7 +1213,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                     class="flex-1 justify-center"
                     icon="i-lucide-receipt"
                     :loading="imprimiendoPrecuenta"
-                    :disabled="activeCuenta.lineas.length === 0"
+                    :disabled="activeCuenta.lineas.length === 0 || cuentaConItemEliminado"
                     @click="imprimirPrecuenta"
                   >
                     Imprimir precuenta
@@ -1203,7 +1231,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                   <UButton
                     color="primary"
                     class="flex-1 justify-center"
-                    :disabled="activeCuenta.lineas.length === 0 || !tieneCaja"
+                    :disabled="activeCuenta.lineas.length === 0 || !tieneCaja || cuentaConItemEliminado"
                     @click="() => { cobroOpen = true }"
                   >
                     Cerrar y cobrar

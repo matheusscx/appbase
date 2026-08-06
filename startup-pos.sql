@@ -1862,6 +1862,11 @@ CREATE TABLE cuenta_lineas (
     eliminado_el TIMESTAMPTZ
 );
 CREATE INDEX idx_cuenta_lineas_cuenta ON cuenta_lineas (cuenta_id);
+-- Lo usa la rama 'cuenta' de ItemsService.obtenerUsoItem, que busca por item_id
+-- para bloquear el borrado de un ítem pedido en una cuenta abierta. Corre en
+-- cada DELETE /items/:id y en cada GET /items/:id/uso; sin él es seq scan sobre
+-- una tabla que crece con cada producto pedido en la historia del tenant.
+CREATE INDEX idx_cuenta_lineas_item ON cuenta_lineas (item_id);
 
 -- cuenta_lineas.cantidad_enviada: cuánto de `cantidad` ya se imprimió en comanda.
 -- El diff (cantidad - cantidad_enviada) es lo que se envía en el próximo POST.

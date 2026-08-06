@@ -124,7 +124,12 @@ export type ConvertirUnidad = (
  * también el `.vue`. La partición es parte del contrato: `'extra'` siempre cae
  * en `advertencias` y nunca en `bloqueos`.
  */
-export type UsoItemTipo = 'ingrediente' | 'combo' | 'opcion' | 'extra';
+export type UsoItemTipo =
+  | 'ingrediente'
+  | 'combo'
+  | 'opcion'
+  | 'cuenta'
+  | 'extra';
 
 export interface UsoItemRef {
   tipo: UsoItemTipo;
@@ -1711,20 +1716,27 @@ export class ItemsService {
   }
 
   /**
-   * Los cuatro lugares donde un item puede estar en uso, en una sola query.
+   * Los cinco lugares donde un item puede estar en uso, en una sola query.
    * `UNION` y no `UNION ALL`: el dedupe es el mismo `DISTINCT` que hacía cada
    * query por separado. El `ORDER BY` es por determinismo — sin él el orden lo
    * decide el plan y el modal lista los motivos distinto entre llamadas.
+   *
+   * Cuatro son de **catálogo** y la quinta (`cuenta_lineas`) es **operativa**:
+   * el ítem está pedido en una cuenta de salón abierta. Esa se acota además por
+   * `estado = 'abierta'` y por el borrado de la línea, la cuenta y la mesa —sin
+   * el filtro de estado, una cuenta ya cerrada volvería el ítem inborrable para
+   * siempre—, y va primero en el mensaje de `remove()` porque es la única con
+   * alguien esperando en la mesa.
    *
    * El filtro por tenant va sobre la entidad padre de cada rama (`items`, o
    * `grupos_modificadores` en la de opciones), no sobre la tabla puente. A
    * diferencia de `cargarReglasPorIds` —donde el JOIN a `items` es la única
    * defensa posible porque sus tablas puente (`item_impuestos`, `item_descuentos`,
-   * `item_recargos`) no tienen `tenant_id` propio—, acá las cuatro tablas puente
+   * `item_recargos`) no tienen `tenant_id` propio—, acá las cinco tablas puente
    * (`receta_ingredientes`, `combo_componentes`, `grupo_modificador_opciones`,
-   * `receta_extras_permitidos`) sí lo tienen: el filtro por la entidad padre es
-   * una elección de estilo (queda igual de acotado ir por la puente), no la
-   * única defensa disponible.
+   * `receta_extras_permitidos`, `cuenta_lineas`) sí lo tienen. En la de cuentas
+   * se filtra por la puente **y** por los padres, que es lo que hace falta para
+   * no contar cuentas o mesas en la papelera.
    */
   private async obtenerUsoItem(
     manager: EntityManager,
@@ -1750,6 +1762,17 @@ export class ItemsService {
            ON g.grupo_modificador_id = o.grupo_modificador_id
           AND g.tenant_id = $2 AND g.eliminado_el IS NULL
         WHERE o.item_id = $1 AND o.eliminado_el IS NULL
+       UNION
+       SELECT 'cuenta',
+              m.nombre || ' · ' || COALESCE(c.nombre, 'cuenta ' || c.numero)
+         FROM cuenta_lineas cl
+         JOIN cuentas c ON c.cuenta_id = cl.cuenta_id
+          AND c.tenant_id = $2 AND c.eliminado_el IS NULL
+          AND c.estado = 'abierta'
+         JOIN mesas m ON m.mesa_id = c.mesa_id
+          AND m.tenant_id = $2 AND m.eliminado_el IS NULL
+        WHERE cl.item_id = $1 AND cl.tenant_id = $2
+          AND cl.eliminado_el IS NULL
        UNION
        SELECT 'extra', r.nombre
          FROM receta_extras_permitidos re
@@ -1794,7 +1817,11 @@ export class ItemsService {
       // Mismo orden de prioridad que las tres queries que esto reemplaza: la
       // primera clase con coincidencias es la que arma el mensaje, y los textos
       // son los de siempre porque hay e2e que los afirman.
+      // `cuenta` va primero a propósito: los otros tres son de catálogo y se
+      // resuelven cuando el admin quiera, pero una cuenta abierta tiene a
+      // alguien esperando en la mesa. Es el bloqueo accionable ahora.
       const etiquetas: [UsoItemTipo, string][] = [
+        ['cuenta', 'está pedido en'],
         ['ingrediente', 'es ingrediente de'],
         ['combo', 'es componente de'],
         ['opcion', 'es opción de'],

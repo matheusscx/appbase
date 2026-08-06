@@ -634,4 +634,112 @@ describe('Recetas — flujo completo (e2e)', () => {
 
     expect(res.status).toBe(403);
   });
+
+  // La rama `'cuenta'` del UNION de `obtenerUsoItem` solo se puede verificar
+  // ejecutándola: los unit tests parten el SQL y afirman literales, y eso mide
+  // presencia, no semántica. Dos mutantes medidos sobrevivían a los unit y
+  // mueren acá: quitar `cl.item_id = $1` (todo el catálogo del tenant queda
+  // inborrable) y `estado = 'abierta' OR TRUE` (una cuenta cerrada vuelve el
+  // ítem inborrable para siempre).
+  const MESA_4_ID = '550e8400-e29b-41d4-a716-446655440235';
+  const ANA_PIN = '111111';
+  const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
+
+  it('12. un ítem pedido en una cuenta abierta no se puede borrar, y vuelve a poder cuando la cuenta se cierra', async () => {
+    const enLaCuentaId = await crearIngrediente(
+      app,
+      token,
+      'Pastel de choclo E2E',
+      'unidad',
+      '10',
+      '8000',
+    );
+    const sueltoId = await crearIngrediente(
+      app,
+      token,
+      'Item sin cuenta E2E',
+      'unidad',
+      '10',
+      '1000',
+    );
+
+    // El cerrar previo deja la sesión idempotente ante corridas locales.
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pin: ANA_PIN });
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/iniciar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pin: ANA_PIN, turnoId: TURNO_MANANA_ID });
+
+    const resCuenta = await request(app.getHttpServer())
+      .post(`/api/mesas/${MESA_4_ID}/cuentas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pin: ANA_PIN });
+    expect(resCuenta.status).toBe(201);
+    const cuentaId = (resCuenta.body as { id: string }).id;
+
+    const resLinea = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemId: enLaCuentaId, cantidad: '1' });
+    expect(resLinea.status).toBe(201);
+
+    type Uso = { bloqueos: { tipo: string; nombre: string }[] };
+    const uso = async (id: string): Promise<Uso> => {
+      const r = await request(app.getHttpServer())
+        .get(`/api/items/${id}/uso`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(r.status).toBe(200);
+      return r.body as Uso;
+    };
+
+    // El que está en la cuenta: bloqueado y con la mesa en el nombre.
+    const usoEnCuenta = await uso(enLaCuentaId);
+    const bloqueoCuenta = usoEnCuenta.bloqueos.find((b) => b.tipo === 'cuenta');
+    expect(bloqueoCuenta).toBeDefined();
+    expect(bloqueoCuenta?.nombre).toContain('Mesa');
+
+    // El que NO está en ninguna cuenta: sin bloqueo. Es la mitad que mata al
+    // mutante de sacar `cl.item_id = $1`, que si no haría que una sola cuenta
+    // abierta bloqueara el borrado de todo el catálogo.
+    const usoSuelto = await uso(sueltoId);
+    expect(usoSuelto.bloqueos.some((b) => b.tipo === 'cuenta')).toBe(false);
+
+    const resDelete = await request(app.getHttpServer())
+      .delete(`/api/items/${enLaCuentaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDelete.status).toBe(400);
+    expect((resDelete.body as { message: string }).message).toContain(
+      'está pedido en',
+    );
+
+    // Con la cuenta cancelada el bloqueo desaparece: esta mitad mata al mutante
+    // que afloja `c.estado = 'abierta'` a `OR TRUE`.
+    // ⚠️ Alcance real: usa **cancelada** como proxy de "ya no está abierta".
+    // El caso que la doc describe es la cuenta **cerrada**, y montarlo exige
+    // caja abierta + pagos. Un mutante quirúrgico `OR c.estado = 'cerrada'`
+    // sobrevive a este test: mantiene el literal que afirma el unit y devuelve
+    // 0 filas tras el cancel.
+    const resCancelar = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaId}/cancelar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resCancelar.status).toBe(201);
+
+    const usoTrasCancelar = await uso(enLaCuentaId);
+    expect(usoTrasCancelar.bloqueos.some((b) => b.tipo === 'cuenta')).toBe(
+      false,
+    );
+
+    const resDeleteOk = await request(app.getHttpServer())
+      .delete(`/api/items/${enLaCuentaId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(resDeleteOk.status).toBe(200);
+
+    await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/cerrar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pin: ANA_PIN });
+  });
 });
