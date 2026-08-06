@@ -359,6 +359,57 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Colisión de nombre en `create()`/`update()` — ya no es un 500 (2026-08-06)
+
+- [x] **`create()`/`update()` de los 8 con nombre único devolvían 500 si perdían
+  la carrera** (backend, transversal) — los 8 pre-consultan el nombre y después
+  escriben; entre esas dos sentencias otra transacción puede tomarlo, y ahí el
+  índice único rechazaba con `23505` que nadie traducía. El índice hacía su trabajo
+  —**nunca quedan dos filas vivas con el mismo nombre**— pero quien perdía la
+  carrera veía un 500 en vez del 409/400 amable. `restaurar()` ya lo traducía en
+  los 8; esto es la misma red para las otras dos puertas.
+  **Verificado antes de tocar nada:** los 14 services que mencionan `23505` lo
+  traducen **solo** dentro de `restaurar()`. La entrada era exacta.
+  **Cómo se cerró:** `traducirColisionDeNombre` en
+  `common/utils/nombre-sugerido.util.ts` (16 sitios: la convención dice extraer a
+  la tercera), aplicado a create+update de los 8. Dos decisiones que no son
+  obvias:
+  - **Toma la escritura ya en vuelo, no un thunk.** Con thunk había que
+    re-indentar el cuerpo de cada transacción y el diff eran 16 reformateos que
+    esconden el cambio real. No hay ventana de unhandled rejection porque el
+    wrapper es la sentencia inmediatamente siguiente; si alguien mete un `await`
+    en el medio, sí la habría.
+  - **En el `catch` re-corre la validación que el módulo ya tiene**, en vez de
+    inventar un mensaje. Así el error es exactamente el que el usuario habría
+    visto sin la carrera —y cada módulo conserva su propio código: `turnos` tira
+    409 y los demás 400—. Si al revalidar el nombre está **libre** (el competidor
+    abortó, o el `23505` vino de otro índice único) se relanza el original en vez
+    de mandar a renombrar algo que no es la causa.
+  **Los 8 resultaron tener tres formas de escribir**, no una: transacción
+  (`descuentos`, `recargos`, `grupos-modificadores`, `motivos-diferencia-inventario`
+  en update), `repo.save()` (`turnos`, `cajones`) y SQL crudo con `RETURNING`
+  (`causas-merma`, `motivos-diferencia`, y el create de `motivos-diferencia-inventario`).
+  **Cobertura, decidida explícitamente:** la semántica del helper vive en
+  `nombre-sugerido.util.spec.ts` (qué se traduce y qué no), y el **cableado** se
+  fija con **una forma por test, no un test por módulo** — `descuentos`
+  (transacción), `turnos` (`repo.save`), `causas-merma` (SQL crudo). Las otras 5
+  puertas quedan verificadas por revisión, no por test: replicarlas sería 10 tests
+  de plomería que vuelven a probar el mismo helper.
+  **Mutantes medidos:** borrar el guard `code !== '23505'` mata 3; sacar la red de
+  un `update` mata 1; revalidar un nombre fijo mata 1; revalidar con el
+  `exceptoId` equivocado mata 1; sacar la red de un `create` de SQL crudo mata 1.
+  ⚠️ **Dos aserciones tuvieron que reescribirse porque no podían fallar:** el
+  pre-chequeo y la revalidación pasan por la MISMA query, así que
+  `toHaveBeenCalledWith({ nombre })` lo satisfacía el pre-chequeo solo y dejaba
+  pasar un mutante que revalidara otro nombre. Hay que leer los dos valores en
+  orden (`['Black Friday', 'Black Friday']`). Lo mismo con `exceptoId`.
+  ⚠️ **Y un test era un recibo falso:** "no toca los errores que no son 23505"
+  pasaba con el guard borrado, porque con el nombre libre igual salía el error
+  original. Lo delata forzar el nombre **tomado** al revalidar. Lo encontró la
+  revisión independiente midiendo el mutante, no la escritura del test.
+
+---
+
 ## Papelera — salida de la colisión al restaurar (2026-08-01)
 
 - [x] **Los 8 recursos con unicidad de nombre proponen un nombre libre.** El 400

@@ -131,6 +131,116 @@ describe('DescuentosService', () => {
 
   // ─── create ───────────────────────────────────────────────────────────────
 
+  describe('create — colisión de nombre perdida por carrera', () => {
+    // El pre-chequeo de nombre y la escritura son dos sentencias: entre medio
+    // otra transacción puede tomar el nombre. El índice único lo rechaza con
+    // 23505 y hasta ahora nadie lo traducía, así que quien perdía la carrera
+    // veía un 500 en vez del mismo 400 que ve todo el mundo.
+    const err23505 = Object.assign(new Error('duplicate key'), {
+      code: '23505',
+    });
+
+    // El pre-chequeo y la revalidación pasan por la MISMA query, así que
+    // `toHaveBeenCalledWith(nombre)` lo satisface el pre-chequeo solo y no
+    // mira la revalidación (medido: un mutante que revalide un literal fijo
+    // pasaba igual). Hay que leer los dos nombres, en orden.
+    const nombresConsultados = () =>
+      qbMock.andWhere.mock.calls
+        .filter(([sql]) => sql === 'LOWER(d.nombre) = LOWER(:nombre)')
+        .map(([, params]) => (params as { nombre: string }).nombre);
+
+    /** Mismo motivo que arriba: el `excludeId` del pre-chequeo tapaba al de la
+     *  revalidación (medido: pasarle otro id sobrevivía). */
+    const exceptoIdsConsultados = () =>
+      qbMock.andWhere.mock.calls
+        .filter(([sql]) => String(sql).includes('descuento_id'))
+        .map(([, params]) => (params as { excludeId: string }).excludeId);
+
+    it('traduce el 23505 al mismo 400 que da el pre-chequeo', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+      // Libre al pre-consultar, tomado al revalidar: esa es la carrera.
+      qbMock.getCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      dataSourceMock.transaction.mockRejectedValueOnce(err23505);
+
+      // La misma promesa se afirma dos veces a propósito: `toThrow(regex)` NO
+      // verifica la clase y `toThrow(Clase)` no verifica el mensaje. Repetir la
+      // llamada en cambio consumiría otro `mockRejectedValueOnce`.
+      const promesa = service.create(TENANT, {
+        nombre: 'Black Friday',
+        tipoReglaId: 'tipo-directo',
+        valor: '0.10',
+        modo: 'porcentaje',
+      });
+      await expect(promesa).rejects.toThrow(BadRequestException);
+      await expect(promesa).rejects.toThrow(
+        /Ya existe un descuento con el nombre/,
+      );
+      // Pre-chequeo y revalidación, los dos con el nombre que se quiso escribir.
+      expect(nombresConsultados()).toEqual(['Black Friday', 'Black Friday']);
+    });
+
+    it('update revalida el nombre del dto excluyéndose a sí mismo', async () => {
+      descuentoRepoMock.findOne.mockResolvedValue({
+        id: 'd-1',
+        tenantId: TENANT,
+        nombre: 'Viejo',
+        tipoReglaId: 'tipo-directo',
+        condicionValor: null,
+      });
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+      qbMock.getCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      dataSourceMock.transaction.mockRejectedValueOnce(err23505);
+
+      const promesa = service.update(TENANT, 'd-1', {
+        nombre: 'Black Friday',
+        valor: '0.10',
+      });
+      await expect(promesa).rejects.toThrow(BadRequestException);
+      await expect(promesa).rejects.toThrow(
+        /Ya existe un descuento con el nombre/,
+      );
+      expect(nombresConsultados()).toEqual(['Black Friday', 'Black Friday']);
+      expect(exceptoIdsConsultados()).toEqual(['d-1', 'd-1']);
+    });
+
+    it('relanza el 23505 si al revalidar el nombre está libre', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+      // El competidor abortó, o el 23505 vino de OTRO índice único: disfrazarlo
+      // de "nombre repetido" sería mentir sobre la causa.
+      qbMock.getCount.mockResolvedValue(0);
+      dataSourceMock.transaction.mockRejectedValueOnce(err23505);
+
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Black Friday',
+          tipoReglaId: 'tipo-directo',
+          valor: '0.10',
+          modo: 'porcentaje',
+        }),
+      ).rejects.toThrow('duplicate key');
+    });
+
+    it('no toca los errores que no son 23505', async () => {
+      tipoReglaRepoMock.findOne.mockResolvedValue(makeTipo('directo'));
+      // Libre al pre-consultar (si no, corta antes de escribir) y TOMADO al
+      // revalidar: ese orden es lo que le da filo. Con el nombre libre en las
+      // dos, el test pasaba con o sin el guard de `code !== '23505'`, porque
+      // igual salía el error original. Así, si el guard desaparece, sale un
+      // 400 y el test falla.
+      qbMock.getCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      dataSourceMock.transaction.mockRejectedValueOnce(new Error('db caída'));
+
+      await expect(
+        service.create(TENANT, {
+          nombre: 'Black Friday',
+          tipoReglaId: 'tipo-directo',
+          valor: '0.10',
+          modo: 'porcentaje',
+        }),
+      ).rejects.toThrow('db caída');
+    });
+  });
+
   describe('create', () => {
     it('rejects when tipoRegla does not exist', async () => {
       tipoReglaRepoMock.findOne.mockResolvedValue(null);

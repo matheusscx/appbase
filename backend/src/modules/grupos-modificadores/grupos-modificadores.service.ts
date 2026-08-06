@@ -7,7 +7,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import Decimal from 'decimal.js';
 import { unwrap } from '../../common/utils/pg-returning.util';
-import { errorDeColisionNombreSQL } from '../../common/utils/nombre-sugerido.util';
+import {
+  errorDeColisionNombreSQL,
+  traducirColisionDeNombre,
+} from '../../common/utils/nombre-sugerido.util';
 import {
   CreateGrupoModificadorDto,
   GrupoOpcionInputDto,
@@ -218,7 +221,7 @@ export class GruposModificadoresService {
   }
 
   async create(tenantId: string, dto: CreateGrupoModificadorDto) {
-    return this.dataSource.transaction(async (manager) => {
+    const escritura = this.dataSource.transaction(async (manager) => {
       await this.assertNombreLibre(manager, tenantId, dto.nombre);
       const grupoRows: { grupo_modificador_id: string }[] = await manager.query(
         `INSERT INTO grupos_modificadores (tenant_id, nombre)
@@ -260,6 +263,9 @@ export class GruposModificadoresService {
         itemsUsandoCount: 0,
       };
     });
+    return traducirColisionDeNombre(escritura, () =>
+      this.assertNombreLibre(this.dataSource.manager, tenantId, dto.nombre),
+    );
   }
 
   /**
@@ -428,7 +434,7 @@ export class GruposModificadoresService {
     grupoId: string,
     dto: UpdateGrupoModificadorDto,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const escritura = this.dataSource.transaction(async (manager) => {
       const grupoRows: { grupo_modificador_id: string; nombre: string }[] =
         await manager.query(
           `SELECT grupo_modificador_id, nombre FROM grupos_modificadores
@@ -529,6 +535,16 @@ export class GruposModificadoresService {
       }
 
       return (await this.cargarGrupo(manager, tenantId, grupoId))!;
+    });
+    return traducirColisionDeNombre(escritura, async () => {
+      if (dto.nombre !== undefined) {
+        await this.assertNombreLibre(
+          this.dataSource.manager,
+          tenantId,
+          dto.nombre,
+          grupoId,
+        );
+      }
     });
   }
 

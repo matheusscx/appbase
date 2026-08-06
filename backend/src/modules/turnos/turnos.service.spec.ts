@@ -304,6 +304,70 @@ describe('TurnosService', () => {
     expect(repo.update).not.toHaveBeenCalled();
   });
 
+  // `turnos` cubre la forma `repo.save()` de la red de colisión de nombre;
+  // `descuentos` cubre la de transacción y `causas-merma` la de SQL crudo. La
+  // semántica del helper vive en `nombre-sugerido.util.spec.ts`: acá se fija el
+  // CABLEADO —que el wrapper esté y revalide el nombre correcto—, que es lo
+  // único que puede romperse por módulo.
+  describe('colisión de nombre perdida por carrera', () => {
+    const err23505 = () =>
+      Object.assign(new Error('duplicate key'), { code: '23505' });
+
+    const nombresConsultados = (r: Repo) =>
+      r.qb.andWhere.mock.calls
+        .filter(([sql]) => String(sql).includes('LOWER(t.nombre)'))
+        .map(([, params]) => (params as { nombre: string }).nombre);
+
+    it('crear traduce el 23505 al 400 del pre-chequeo, con el mismo nombre', async () => {
+      // Libre al pre-consultar, tomado al revalidar: esa es la carrera.
+      repo.qb.getExists
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+      repo.save.mockRejectedValueOnce(err23505());
+
+      const promesa = service.crear(TENANT, {
+        nombre: 'Mañana',
+        horaInicio: '08:00',
+        horaFin: '15:00',
+      });
+      // 409, no 400: cada módulo conserva su propio código porque el helper
+      // reusa SU validador en vez de inventar un error nuevo.
+      await expect(promesa).rejects.toThrow(ConflictException);
+      await expect(promesa).rejects.toThrow(/Ya existe un turno/);
+      expect(nombresConsultados(repo)).toEqual(['Mañana', 'Mañana']);
+    });
+
+    it('actualizar revalida el nombre nuevo excluyéndose a sí mismo', async () => {
+      repo.findOne.mockResolvedValue(turno());
+      repo.qb.getExists
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+      repo.save.mockRejectedValueOnce(err23505());
+
+      const promesa = service.actualizar(TENANT, 't1', { nombre: 'Mañana' });
+      await expect(promesa).rejects.toThrow(/Ya existe un turno/);
+      expect(nombresConsultados(repo)).toEqual(['Mañana', 'Mañana']);
+      expect(
+        repo.qb.andWhere.mock.calls.filter(([sql]) =>
+          String(sql).includes('turno_id != :exceptId'),
+        ),
+      ).toHaveLength(2);
+    });
+
+    it('un error que no es 23505 sale tal cual', async () => {
+      repo.qb.getExists.mockResolvedValue(false);
+      repo.save.mockRejectedValueOnce(new Error('db caída'));
+
+      await expect(
+        service.crear(TENANT, {
+          nombre: 'Mañana',
+          horaInicio: '08:00',
+          horaFin: '15:00',
+        }),
+      ).rejects.toThrow('db caída');
+    });
+  });
+
   describe('restaurar', () => {
     it('restaurar() devuelve el turno RE-CONSULTADO tras el restore', async () => {
       repo.findOne.mockResolvedValue(

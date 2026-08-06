@@ -1,7 +1,9 @@
+import { BadRequestException } from '@nestjs/common';
 import {
   baseSinSufijo,
   sugerirNombreLibre,
   patronLikeNombre,
+  traducirColisionDeNombre,
 } from './nombre-sugerido.util';
 
 describe('nombre-sugerido.util', () => {
@@ -138,6 +140,66 @@ describe('nombre-sugerido.util', () => {
       // números que en realidad estaban libres.
       expect(patronLikeNombre('50%_off')).toBe('50\\%\\_off %');
       expect(patronLikeNombre('a\\b')).toBe('a\\\\b %');
+    });
+  });
+
+  // Estos tres viven acá y no en un service: son la SEMÁNTICA del helper, que
+  // decide qué error se traduce y cuál no. Probándola en un módulo concreto,
+  // el mock del módulo decide medio resultado; acá no hay dónde esconderse.
+  describe('traducirColisionDeNombre', () => {
+    const err23505 = () =>
+      Object.assign(new Error('duplicate key'), { code: '23505' });
+
+    it('devuelve el resultado cuando la escritura no falla', async () => {
+      const revalidar = jest.fn();
+      await expect(
+        traducirColisionDeNombre(Promise.resolve('ok'), revalidar),
+      ).resolves.toBe('ok');
+      expect(revalidar).not.toHaveBeenCalled();
+    });
+
+    it('con 23505 y el nombre tomado, sale el error de quien revalida', async () => {
+      await expect(
+        traducirColisionDeNombre(Promise.reject(err23505()), () =>
+          Promise.reject(new BadRequestException('Ya existe un descuento')),
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('con 23505 pero el nombre libre, relanza el original', async () => {
+      // El competidor abortó, o el 23505 vino de OTRO índice único: decir
+      // "nombre repetido" mandaría a renombrar algo que no es la causa.
+      const revalidar = jest.fn().mockResolvedValue(undefined);
+      await expect(
+        traducirColisionDeNombre(Promise.reject(err23505()), revalidar),
+      ).rejects.toThrow('duplicate key');
+      expect(revalidar).toHaveBeenCalled();
+    });
+
+    it('un error que no es 23505 ni siquiera pasa por revalidar', async () => {
+      // Es la mitad que un test de service NO puede fijar: si el guard de
+      // `code !== '23505'` desaparece, con el nombre libre igual sale el error
+      // original y el test de arriba pasa lo mismo. Lo que lo delata es que
+      // `revalidar` se llame — una query de más en CADA fallo de escritura.
+      const revalidar = jest.fn();
+      await expect(
+        traducirColisionDeNombre(
+          Promise.reject(new Error('db caída')),
+          revalidar,
+        ),
+      ).rejects.toThrow('db caída');
+      expect(revalidar).not.toHaveBeenCalled();
+    });
+
+    it('con el guard sacado, un no-23505 con el nombre tomado saldría como 400', async () => {
+      // El contraejemplo explícito del punto anterior: si el helper dejara de
+      // filtrar por código, este caso devolvería "Ya existe…" para una caída de
+      // BD. Acá se fija que NO pasa.
+      await expect(
+        traducirColisionDeNombre(Promise.reject(new Error('db caída')), () =>
+          Promise.reject(new BadRequestException('Ya existe un descuento')),
+        ),
+      ).rejects.toThrow('db caída');
     });
   });
 });

@@ -210,3 +210,37 @@ function armarError(
     nombreSugerido: sugerirNombreLibre(nombre, tomados, ignorarMayusculas),
   };
 }
+
+/**
+ * Traduce el `23505` de una colisión de nombre en `create()`/`update()`.
+ *
+ * Los 8 recursos con nombre único pre-consultan el nombre y después escriben.
+ * Entre esas dos sentencias otra transacción puede tomarlo: el índice único
+ * hace su trabajo —nunca quedan dos filas vivas con el mismo nombre— pero
+ * quien pierde la carrera veía un **500** en vez del 400 que ve todo el mundo
+ * cuando el nombre está tomado. `restaurar()` ya lo traducía en los 8; esto es
+ * la misma red para las otras dos puertas.
+ *
+ * `revalidar` es la validación de nombre que el propio módulo ya tiene, y se
+ * corre **fuera** de la transacción (que para cuando llega el error ya hizo
+ * rollback). Si vuelve a fallar, su mensaje es exactamente el que el usuario
+ * habría visto sin la carrera. Si NO falla —el competidor abortó, o el 23505
+ * vino de otro índice único— se relanza el error original en vez de disfrazar
+ * de "nombre repetido" algo que no lo es.
+ *
+ * Toma la escritura **ya en vuelo** y no un thunk: así el llamador no tiene que
+ * re-indentar el cuerpo de su transacción para envolverlo, y el diff de sumar
+ * esta red queda en dos líneas por método en vez de reformatear los 16.
+ */
+export async function traducirColisionDeNombre<T>(
+  escritura: Promise<T>,
+  revalidar: () => Promise<void>,
+): Promise<T> {
+  try {
+    return await escritura;
+  } catch (e) {
+    if ((e as { code?: string }).code !== '23505') throw e;
+    await revalidar();
+    throw e;
+  }
+}

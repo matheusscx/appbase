@@ -5,7 +5,10 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
-import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
+import {
+  errorDeColisionNombre,
+  traducirColisionDeNombre,
+} from '../../common/utils/nombre-sugerido.util';
 import { validarMontosDeRegla } from '../../common/utils/monto-regla.util';
 import { Recargo } from './entities/recargo.entity';
 import { RecargoTramo } from './entities/recargo-tramo.entity';
@@ -132,7 +135,7 @@ export class RecargosService {
     await this.validarNombreUnico(tenantId, dto.nombre);
     this.validarSegunTipoCreate(tipoRegla.codigo, dto);
 
-    return this.dataSource.transaction(async (manager) => {
+    const escritura = this.dataSource.transaction(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
       const condicionValor =
         dto.diasVencimiento != null ? String(dto.diasVencimiento) : null;
@@ -189,6 +192,9 @@ export class RecargosService {
         diasVencimiento: dto.diasVencimiento ?? null,
       });
     });
+    return traducirColisionDeNombre(escritura, () =>
+      this.validarNombreUnico(tenantId, dto.nombre),
+    );
   }
 
   async update(tenantId: string, id: string, dto: UpdateRecargoDto) {
@@ -213,7 +219,7 @@ export class RecargosService {
     this.validarSegunTipoUpdate(tipoRegla.codigo, dto);
     await this.validarEstadoResultante(tipoRegla.codigo, recargo, dto);
 
-    return this.dataSource.transaction(async (manager) => {
+    const escritura = this.dataSource.transaction(async (manager) => {
       const condicionTipo = this.derivarCondicionTipo(tipoRegla.codigo);
       const tiposConDias = ['pronto_pago', 'mora'];
       const condicionValor =
@@ -285,6 +291,9 @@ export class RecargosService {
               : null,
       });
     });
+    return traducirColisionDeNombre(escritura, () =>
+      this.validarNombreUnico(tenantId, dto.nombre ?? recargo.nombre, id),
+    );
   }
 
   async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {

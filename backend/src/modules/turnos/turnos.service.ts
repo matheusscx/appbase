@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
+import {
+  errorDeColisionNombre,
+  traducirColisionDeNombre,
+} from '../../common/utils/nombre-sugerido.util';
 import { Turno } from './entities/turno.entity';
 import {
   EstadoSesionGarzon,
@@ -99,7 +102,10 @@ export class TurnosService {
       horaFin: dto.horaFin,
       activo: dto.activo ?? true,
     });
-    const guardado = await this.turnoRepo.save(turno);
+    const guardado = await traducirColisionDeNombre(
+      this.turnoRepo.save(turno),
+      () => this.assertNombreUnico(tenantId, dto.nombre),
+    );
     return this.toPublico(guardado);
   }
 
@@ -121,7 +127,11 @@ export class TurnosService {
       }
       turno.activo = dto.activo;
     }
-    return this.toPublico(await this.turnoRepo.save(turno));
+    return this.toPublico(
+      await traducirColisionDeNombre(this.turnoRepo.save(turno), () =>
+        this.assertNombreUnico(tenantId, turno.nombre, id),
+      ),
+    );
   }
 
   async eliminar(

@@ -6,7 +6,10 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { unwrap } from '../../common/utils/pg-returning.util';
-import { errorDeColisionNombreSQL } from '../../common/utils/nombre-sugerido.util';
+import {
+  errorDeColisionNombreSQL,
+  traducirColisionDeNombre,
+} from '../../common/utils/nombre-sugerido.util';
 import { CreateCausaMermaDto } from './dto/create-causa-merma.dto';
 import { UpdateCausaMermaDto } from './dto/update-causa-merma.dto';
 
@@ -103,11 +106,14 @@ export class CausasMermaService {
     const nombre = dto.nombre.trim();
     await this.assertNombreUnico(tenantId, nombre);
     const rows = unwrap<CausaMermaRow>(
-      await this.dataSource.query(
-        `INSERT INTO causas_merma (tenant_id, nombre, activo, es_fijo)
+      await traducirColisionDeNombre(
+        this.dataSource.query(
+          `INSERT INTO causas_merma (tenant_id, nombre, activo, es_fijo)
          VALUES ($1, $2, $3, false)
          RETURNING causa_merma_id, nombre, activo, es_fijo`,
-        [tenantId, nombre, dto.activo ?? true],
+          [tenantId, nombre, dto.activo ?? true],
+        ),
+        () => this.assertNombreUnico(tenantId, nombre),
       ),
     );
     return {
@@ -148,11 +154,20 @@ export class CausasMermaService {
 
     params.push(id, tenantId);
     const rows = unwrap<CausaMermaRow>(
-      await this.dataSource.query(
-        `UPDATE causas_merma SET ${sets.join(', ')}
+      await traducirColisionDeNombre(
+        this.dataSource.query(
+          `UPDATE causas_merma SET ${sets.join(', ')}
          WHERE causa_merma_id = $${idx++} AND tenant_id = $${idx} AND eliminado_el IS NULL
          RETURNING causa_merma_id, nombre, activo, es_fijo`,
-        params,
+          params,
+        ),
+        async () => {
+          // Solo si el update tocaba el nombre: si no, este 23505 no es una
+          // colisión de nombre y hay que relanzarlo tal cual.
+          if (dto.nombre !== undefined) {
+            await this.assertNombreUnico(tenantId, dto.nombre.trim(), id);
+          }
+        },
       ),
     );
     if (!rows.length) {

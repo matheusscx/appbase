@@ -6,7 +6,10 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { unwrap } from '../../common/utils/pg-returning.util';
-import { errorDeColisionNombreSQL } from '../../common/utils/nombre-sugerido.util';
+import {
+  errorDeColisionNombreSQL,
+  traducirColisionDeNombre,
+} from '../../common/utils/nombre-sugerido.util';
 import { CreateMotivoDiferenciaDto } from './dto/create-motivo-diferencia.dto';
 import { UpdateMotivoDiferenciaDto } from './dto/update-motivo-diferencia.dto';
 
@@ -115,12 +118,20 @@ export class MotivosDiferenciaService {
     const nombre = dto.nombre.trim();
     await this.assertNombreUnico(tenantId, nombre);
     const rows = unwrap<Row>(
-      await this.dataSource.query(
-        `INSERT INTO motivo_diferencia_caja
+      await traducirColisionDeNombre(
+        this.dataSource.query(
+          `INSERT INTO motivo_diferencia_caja
            (tenant_id, nombre, activo, requiere_comentario, es_fijo)
          VALUES ($1, $2, $3, $4, false)
          RETURNING ${COLS}`,
-        [tenantId, nombre, dto.activo ?? true, dto.requiereComentario ?? false],
+          [
+            tenantId,
+            nombre,
+            dto.activo ?? true,
+            dto.requiereComentario ?? false,
+          ],
+        ),
+        () => this.assertNombreUnico(tenantId, nombre),
       ),
     );
     return toItem(rows[0]);
@@ -160,12 +171,21 @@ export class MotivosDiferenciaService {
 
     params.push(id, tenantId);
     const rows = unwrap<Row>(
-      await this.dataSource.query(
-        `UPDATE motivo_diferencia_caja SET ${sets.join(', ')}
+      await traducirColisionDeNombre(
+        this.dataSource.query(
+          `UPDATE motivo_diferencia_caja SET ${sets.join(', ')}
          WHERE motivo_diferencia_id = $${idx++} AND tenant_id = $${idx}
            AND eliminado_el IS NULL
          RETURNING ${COLS}`,
-        params,
+          params,
+        ),
+        async () => {
+          // Solo si el update tocaba el nombre: si no, este 23505 no es una
+          // colisión de nombre y hay que relanzarlo tal cual.
+          if (dto.nombre !== undefined) {
+            await this.assertNombreUnico(tenantId, dto.nombre.trim(), id);
+          }
+        },
       ),
     );
     if (!rows.length) {

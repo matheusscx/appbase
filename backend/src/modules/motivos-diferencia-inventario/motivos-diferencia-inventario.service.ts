@@ -6,7 +6,10 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { unwrap } from '../../common/utils/pg-returning.util';
-import { errorDeColisionNombreSQL } from '../../common/utils/nombre-sugerido.util';
+import {
+  errorDeColisionNombreSQL,
+  traducirColisionDeNombre,
+} from '../../common/utils/nombre-sugerido.util';
 import { CreateMotivoDiferenciaInventarioDto } from './dto/create-motivo-diferencia-inventario.dto';
 import { UpdateMotivoDiferenciaInventarioDto } from './dto/update-motivo-diferencia-inventario.dto';
 
@@ -109,11 +112,14 @@ export class MotivosDiferenciaInventarioService {
     const nombre = dto.nombre.trim();
     await this.assertNombreUnico(tenantId, nombre);
     const rows = unwrap<MotivoDiferenciaInventarioRow>(
-      await this.dataSource.query(
-        `INSERT INTO motivo_diferencia_inventario (tenant_id, nombre, activo, es_fijo)
+      await traducirColisionDeNombre(
+        this.dataSource.query(
+          `INSERT INTO motivo_diferencia_inventario (tenant_id, nombre, activo, es_fijo)
          VALUES ($1, $2, $3, false)
          RETURNING motivo_diferencia_inventario_id, nombre, activo, es_fijo`,
-        [tenantId, nombre, dto.activo ?? true],
+          [tenantId, nombre, dto.activo ?? true],
+        ),
+        () => this.assertNombreUnico(tenantId, nombre),
       ),
     );
     return {
@@ -132,7 +138,7 @@ export class MotivosDiferenciaInventarioService {
     id: string,
     dto: UpdateMotivoDiferenciaInventarioDto,
   ): Promise<MotivoDiferenciaInventarioListItem> {
-    return this.dataSource.transaction(async (manager) => {
+    const escritura = this.dataSource.transaction(async (manager) => {
       const motivo = await this.findOneOrFail(tenantId, id, manager, true);
       if (motivo.esFijo) {
         throw new BadRequestException(
@@ -174,6 +180,13 @@ export class MotivosDiferenciaInventarioService {
         activo: rows[0].activo,
         esFijo: rows[0].es_fijo,
       };
+    });
+    return traducirColisionDeNombre(escritura, async () => {
+      // Solo si el update tocaba el nombre: si no, este 23505 no es una
+      // colisión de nombre y hay que relanzarlo tal cual.
+      if (dto.nombre !== undefined) {
+        await this.assertNombreUnico(tenantId, dto.nombre.trim(), id);
+      }
     });
   }
 

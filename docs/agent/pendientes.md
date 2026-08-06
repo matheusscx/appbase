@@ -222,18 +222,6 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   es "comparar timestamps entre tablas" en general — es comparar timestamps **de
   tipos distintos**, que hoy solo pasa en el par `items`/`receta_extras_permitidos`
   de los tres recursos con colateral.
-- [ ] **`create()`/`update()` de los 8 con nombre único devuelven 500 si pierden
-  la carrera** (backend, transversal) — los 8 pre-consultan el nombre y después
-  escriben; entre esas dos sentencias otra transacción puede tomarlo, y ahí el
-  índice único rechaza con `23505` que nadie traduce. El índice hace su trabajo
-  —**nunca quedan dos filas vivas con el mismo nombre**, que es lo que importa—,
-  pero el usuario que pierde la carrera ve un 500 en vez del 409/400 amable.
-  `restaurar()` sí lo traduce en los 8 (ver `docs/features/papelera.md`); el fix
-  es el mismo `catch` en las otras dos puertas, ×8 módulos. No se hizo con la
-  unificación de unicidad (2026-08-01) porque es scope aparte: aquel cambio cerró
-  el agujero de corrección, este es de presentación de error. Ventana angosta y
-  ningún dato productivo.
-
 - [ ] **`uq_motivo_diferencia_caja_tenant_nombre` se llama distinto en el seeder**
   (backend) — `startup-pos.sql` lo declara con ese nombre y el seeder lo crea
   como `uq_motivo_diferencia_tenant_nombre`. **La definición es idéntica**, así

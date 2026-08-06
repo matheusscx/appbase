@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
-import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
+import {
+  errorDeColisionNombre,
+  traducirColisionDeNombre,
+} from '../../common/utils/nombre-sugerido.util';
 import { Cajon } from './entities/cajon.entity';
 import { CajonUsuario } from './entities/cajon-usuario.entity';
 import { UsuarioTenant } from '../tenants/entities/usuario-tenant.entity';
@@ -72,7 +75,9 @@ export class CajonesService {
   async create(tenantId: string, dto: CreateCajonDto): Promise<Cajon> {
     await this.validarNombreUnico(tenantId, dto.nombre);
     const cajon = this.cajonRepo.create({ tenantId, nombre: dto.nombre });
-    return this.cajonRepo.save(cajon);
+    return traducirColisionDeNombre(this.cajonRepo.save(cajon), () =>
+      this.validarNombreUnico(tenantId, dto.nombre),
+    );
   }
 
   async update(
@@ -92,7 +97,9 @@ export class CajonesService {
       }
       cajon.activo = dto.activo;
     }
-    return this.cajonRepo.save(cajon);
+    return traducirColisionDeNombre(this.cajonRepo.save(cajon), () =>
+      this.validarNombreUnico(tenantId, cajon.nombre, id),
+    );
   }
 
   async remove(tenantId: string, usuarioId: string, id: string): Promise<void> {

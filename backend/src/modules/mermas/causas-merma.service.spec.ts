@@ -26,6 +26,74 @@ describe('CausasMermaService', () => {
     service = module.get<CausasMermaService>(CausasMermaService);
   });
 
+  // Tercera y última forma de escritura de la red de colisión de nombre: SQL
+  // crudo. `descuentos` cubre la de transacción y `turnos` la de `repo.save()`.
+  // La semántica del helper vive en `nombre-sugerido.util.spec.ts`.
+  describe('colisión de nombre perdida por carrera', () => {
+    const err23505 = () =>
+      Object.assign(new Error('duplicate key'), { code: '23505' });
+
+    /** Los nombres con los que se consultó la unicidad, en orden: el del
+     *  pre-chequeo y el de la revalidación. Leerlos así y no con
+     *  `toHaveBeenCalledWith` es a propósito — el pre-chequeo satisface esa
+     *  aserción solo y deja pasar un mutante que revalide otro nombre. */
+    const nombresConsultados = () =>
+      queryMock.mock.calls
+        .filter(([sql]) => String(sql).includes('lower(nombre) = lower($2)'))
+        .map(([, params]) => (params as string[])[1]);
+
+    it('create traduce el 23505 al 400, revalidando el nombre trimeado', async () => {
+      queryMock
+        .mockResolvedValueOnce([]) // pre-chequeo: libre
+        .mockRejectedValueOnce(err23505()) // INSERT: perdió la carrera
+        .mockResolvedValueOnce([{ '?column?': 1 }]); // revalidación: tomado
+
+      const promesa = service.create(TENANT, { nombre: '  Rotura  ' });
+      await expect(promesa).rejects.toThrow(BadRequestException);
+      await expect(promesa).rejects.toThrow(/Ya existe una causa de merma/);
+      expect(nombresConsultados()).toEqual(['Rotura', 'Rotura']);
+    });
+
+    it('update traduce el 23505 revalidando el nombre nuevo, no otro', async () => {
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            causa_merma_id: CAUSA,
+            nombre: 'Vieja',
+            activo: true,
+            es_fijo: false,
+          },
+        ]) // findOneOrFail
+        .mockResolvedValueOnce([]) // pre-chequeo: libre
+        .mockRejectedValueOnce(err23505()) // UPDATE: perdió la carrera
+        .mockResolvedValueOnce([{ '?column?': 1 }]); // revalidación: tomado
+
+      const promesa = service.update(TENANT, CAUSA, { nombre: '  Rotura  ' });
+      await expect(promesa).rejects.toThrow(/Ya existe una causa de merma/);
+      expect(nombresConsultados()).toEqual(['Rotura', 'Rotura']);
+    });
+
+    it('update no revalida si el PATCH no tocaba el nombre', async () => {
+      // Sin nombre en el dto, un 23505 no puede ser colisión de nombre: se
+      // relanza tal cual en vez de disfrazarlo.
+      queryMock
+        .mockResolvedValueOnce([
+          {
+            causa_merma_id: CAUSA,
+            nombre: 'Rotura',
+            activo: true,
+            es_fijo: false,
+          },
+        ]) // findOneOrFail
+        .mockRejectedValueOnce(err23505()); // UPDATE
+
+      await expect(
+        service.update(TENANT, CAUSA, { activo: false }),
+      ).rejects.toThrow('duplicate key');
+      expect(nombresConsultados()).toEqual([]);
+    });
+  });
+
   describe('create', () => {
     it('inserta con es_fijo=false y nombre trim', async () => {
       queryMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
