@@ -498,6 +498,256 @@ Ver [`resueltos.md`](resueltos.md).
   descuento fijo mayor al neto **y** un recargo posterior que lo levante), por eso no se
   resolvió sobre la marcha.
 
+## Auditoría `turnos` + `salones` + `garzones` (2026-08-06) — hallazgos confirmados
+
+Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md): 24 hallazgos crudos
+→ **23 únicos** (dos lentes independientes cayeron por separado sobre el mismo bug de la
+línea que se cuela durante el cierre; se cuenta una vez) → **22 sobreviven**. El único que
+se cayó entero fue un deadlock en `fusionarCuentas` (ver "Refutados" abajo). El refutador
+sumó 1 hallazgo que ninguna lente vio —la comanda seguía escondiendo el ítem borrado— y
+que resultó ser la mitad que faltaba de un fix ya en curso.
+
+**Lo que salió limpio, que es lo que la pasada vino a producir:** los 4 controllers
+(incluidas las 3 clases dentro de `salones.controller.ts`) llevan
+`JwtAuthGuard + TenantGuard + PermisosGuard` con el permiso correcto por verbo; ningún DTO
+del alcance declara `tenantId`; los tres puntos donde un `:id` anidado podría ser IDOR
+—`guardarLayout`, `fusionarCuentas`, `transferirCuentaAdmin`— resuelven contra el tenant
+del token antes de usar el id; **0 violaciones de soft delete sobre ~65 queries** revisadas
+una por una; y ningún `DELETE` físico en el alcance.
+
+**Tres hallazgos se cerraron en la misma pasada** (los dos de severidad alta y el que sumó
+el refutador): ver [`resueltos.md`](resueltos.md).
+
+### El hilo que venía abierto: cerrado con matiz
+
+La pasada de `caja`+`propinas` (2026-07-27) dejó anotado que `tipo_garzon` se congela al
+abrir la sesión mientras `garzones.tipo` es editable. **Confirmado el congelado**
+(`sesiones-garzon.service.ts:87`, y ni `cerrarPorPin` ni `cerrarAdmin` lo vuelven a tocar)
+**y confirmado que `tipo` es editable sin gate** (`garzones.service.ts:121-131`). Pero el
+impacto ya está contenido río abajo: `liquidacion-propinas.service.ts:1275`
+(`assertGarzonEnUnSoloGrupo`) bloquea la liquidación con un 400 accionable si una persona
+generó tips con dos `tipo_garzon` distintos en el período. **La plata está a salvo.** Lo
+que falta es el aviso en el momento de editar — ver la entrada de `garzones.actualizar`.
+
+### Media
+
+- [ ] **N+1 al listar las cuentas de una mesa: 1 + 3N queries** (backend,
+  `salones.service.ts` → `listarCuentasDeMesa`) — hace `cuentaRepo.find(...)` y después
+  `cuentas.map((c) => this.armarDetalle(...))`. Cada `armarDetalle` dispara 3 queries
+  (líneas + `nombresGarzon` + `nombresIngredientesPersonalizacion`), así que una mesa con
+  3 cuentas abiertas cuesta 10 queries en vez de ~3 batcheadas. El `Promise.all`
+  paraleliza las promesas pero no reduce las queries al motor. Es un endpoint que el POS
+  llama cada vez que el garzón abre la mesa. El patrón batch (`WHERE … = ANY($1)`) ya lo
+  usa el propio archivo cuando esas dos funciones se llaman una sola vez.
+- [ ] **N+1 dentro de `fusionarCuentas`, sosteniendo el lock pesimista** (backend,
+  `salones.service.ts`) — por cada línea de cada cuenta de origen se ejecuta un
+  `manager.find(CuentaLinea, { … itemId })` para ver si el ítem ya está en el destino:
+  M×L queries. Fusionar 3 cuentas de ~15 ítems son 30 queries extra **dentro de la misma
+  transacción que sostiene `pessimistic_write`** sobre las cuentas, así que además alarga
+  el lock que bloquea agregar líneas y cerrar. Se resuelve trayendo las líneas del destino
+  una sola vez antes del loop e indexándolas por `itemId` en memoria.
+- [ ] **El filtro "Hasta" del historial de sesiones excluye las sesiones del propio día**
+  (backend + frontend, `sesiones-garzon.service.ts` → `buildHistorialFilters`, y
+  `pages/sesiones-garzon.vue`) — `AppDateInput` emite `YYYY-MM-DD` sin hora, el DTO lo
+  acepta con `@IsDateString()` y el service lo compara con `s.inicio_el <= $N` contra una
+  columna `timestamptz`. Postgres castea la fecha pura a **medianoche**, así que "Desde
+  hoy / Hasta hoy" no devuelve **ninguna** sesión del día. Es un bug vivo y visible, no
+  teórico. ⚠️ Vive en la misma función que la entrada de huecos de test de abajo: el
+  código que arma los filtros **nunca se ejecuta con ningún filtro puesto**, que es
+  exactamente por qué nadie lo vio.
+- [ ] **`garzones.actualizar()` no bloquea `activo:false` ni el cambio de `tipo` con una
+  sesión abierta, y `eliminar()` sí** (backend, `garzones.service.ts:121-131` vs
+  `:145-169`) — asimetría directa entre dos operaciones del mismo service, con el mismo
+  `sesionRepo` inyectado. Desactivar a alguien con sesión abierta lo deja sin poder
+  cerrarla ni operar (`resolverGarzonPorPin` filtra `activo: true`), y su sesión queda
+  `abierta` con `fin_el = null` hasta que un admin la fuerce; mientras tanto el turno
+  tampoco se puede desactivar. **La mitad de `activo` es mecánica** (copiar el chequeo que
+  `eliminar()` ya tiene). **La mitad de `tipo` es decisión** — ver el hilo de arriba: no
+  corrompe el reparto porque propinas lo bloquea, pero el admin no se entera hasta la
+  liquidación.
+- [ ] **`regenerarPin()` invalida el PIN sin avisar que hay una sesión abierta** (backend,
+  `garzones.service.ts:137-143`) — misma familia que la anterior por otra puerta. El PIN
+  viejo deja de funcionar de inmediato (documentado y deliberado), pero si el garzón está
+  en turno no puede marcar salida ni operar hasta que alguien le pase el nuevo. Es una
+  acción de seguridad rutinaria (PIN comprometido) con un efecto que nadie anticipa.
+- [ ] **El PIN de garzón amplifica la carga: cada intento fallido cuesta N bcrypt**
+  (backend, `garzones.service.ts` → `resolverGarzonPorPin`) — itera **todos** los garzones
+  activos del tenant comparando con bcrypt, porque el hash está salteado y no se puede
+  buscar por índice.
+  ⚠️ **La fuerza bruta que reportó la lente NO sobrevive, y se midió:** `bcryptjs` a coste
+  10 tarda **62,5 ms** por comparación, así que un intento con 20 garzones activos son
+  **1,3 s de CPU** y agotar el espacio de 10⁶ son **14 días de CPU saturada** por tenant.
+  No es un vector práctico y sería ensordecedor.
+  **Lo que sí sobrevive es otra cosa:** medido con 5 intentos concurrentes, **6,3 s** y
+  hasta **309 ms de lag del event loop**. Es un solo proceso Node: ese lag lo pagan todos
+  los tenants. Cualquiera con `Salones:Operar` puede provocarlo.
+  El fix **no es throttling** (la entrada de rate limiting de "Endurecimiento para
+  producción" está acotada a `/auth/*` y no cubre esto): es dejar de iterar, y eso exige
+  decidir cómo — seleccionar el garzón antes de pedir el PIN cambia la UX; un HMAC con
+  secreto de servidor en columna indexada permite buscar y conservar bcrypt para verificar.
+  **Decisión de owner sobre el mecanismo de una credencial.**
+- [ ] **Al fusionar dos líneas del mismo ítem se suma `cantidad` pero no
+  `cantidadPresentacion`** (backend, `salones.service.ts`, ramas `match` de `agregarLinea`
+  y `existente` de `fusionarCuentas`) — agregar 200 g y después 300 g del mismo ítem deja
+  `cantidad = 0.5` (correcto, y el motor cobra sobre eso) pero `cantidadPresentacion`
+  sigue en "200 g". El ticket y la pantalla muestran 200 g de algo que se cobra como 500 g:
+  el monto es correcto, lo que miente es lo que ve el cliente.
+- [ ] **`@MaxLength(100)` falta en `CreateGarzonDto`/`UpdateGarzonDto`** (backend +
+  frontend) — la columna es `VARCHAR(100)` y su DTO gemelo `CreateTurnoDto` sí lo tiene,
+  así que un nombre largo pasa la validación y muere en Postgres con un **500** genérico
+  en vez de un 400 accionable. El `<UInput>` de `configuracion/garzones.vue` tampoco pone
+  `maxlength`.
+
+### Baja
+
+- [ ] **`propinaSugerida` y `propinaPorcentajeSugerido` no validan signo al cerrar la
+  cuenta** (backend, `salones/dto/cerrar-cuenta.dto.ts`) — `propinaMonto` sí se valida
+  (`.lt(0)` → 400) pero estos dos solo llevan `@IsNumberString()`, que acepta el signo
+  menos. Un POST directo los persiste negativos en `venta_propina`. **No permite cobrar de
+  más** —`targetCobro` usa únicamente `propinaMonto`— pero corrompe los reportes de
+  propina con signos incoherentes, y el punto de entrada sin validar es de `salones`.
+- [ ] **`fusionarCuentas` lockea varias cuentas sin orden determinista** (backend,
+  `salones.service.ts`) — **refutado como deadlock, sobrevive como seguro barato**: un
+  único `SELECT … WHERE id IN (…) FOR UPDATE` lockea en el orden que devuelve el plan, que
+  es el mismo para dos transacciones concurrentes con la misma forma de query, así que el
+  ciclo ABBA clásico necesita **sentencias distintas**, no un array `In()` en otro orden.
+  La propia lente admitió que su caso concreto no cierra el ciclo. `ids.sort()` antes de
+  pedir el lock es una línea y no cuesta nada; no cierra un bug demostrado.
+- [ ] **"Nueva cuenta" no tiene guard de reentrancia, y sus tres hermanos sí**
+  (frontend, `pages/salones/index.vue`) — `fusionarSeleccionadas`, `transferirCuentaConPin`
+  y `cerrarCuentaConPin` usan un ref "en curso" y `:loading`; `nuevaCuenta`/
+  `abrirCuentaConPin` no. Además el modal de PIN cierra apenas emite `confirm`, antes de
+  que resuelva el POST, así que la UI vuelve a estar interactuable con la petición en
+  vuelo. Doble tap o lag de red crean dos cuentas en la mesa. El backend no puede
+  defenderlo: varias cuentas abiertas por mesa es comportamiento intencional.
+- [ ] **`crear`/`actualizar` de salón y mesa devuelven la entity cruda, con `tenantId`**
+  (backend, `salones.service.ts`) — `listarSalones` arma una vista curada y
+  `garzones`/`turnos` tienen su `toPublico()`, pero estos cuatro devuelven
+  `repo.save(...)` tal cual: el JSON incluye `tenantId` y, en mesa, los timestamps y
+  `eliminadoPor`. No es fuga cross-tenant (el usuario ya pertenece a ese tenant) ni el
+  frontend lo consume, pero es el único lugar del módulo que expone el interno.
+
+### Huecos de test (medidos, con el mutante que sobrevive)
+
+Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela
+([`resueltos.md`](resueltos.md)). Quedan:
+
+- [ ] **`guardarLayout` no tiene ningún test** (backend) — mutante que pasa: borrar el
+  `if (!res.affected) throw new NotFoundException(...)`. Mover por drag&drop una mesa que
+  no pertenece al salón pasaría a actualizar cero filas **en silencio**.
+- [ ] **`buildHistorialFilters` nunca corre con ningún filtro puesto y `activaPorPin` no
+  se invoca nunca** (backend, `sesiones-garzon.service.ts`) — los dos tests de `historial()`
+  llaman con `{}`. Mutante que pasa: cambiar `let paramIdx = 2` por `1`, que colisiona con
+  `$1` (tenantId) en cuanto se use un filtro. **Es la misma función donde vive el bug vivo
+  del filtro "Hasta"**, que es la demostración de por qué el hueco importa.
+- [ ] **`GarzonesService.actualizar` no tiene ningún test** (backend) — mutante que pasa:
+  borrar `if (dto.tipo !== undefined) garzon.tipo = dto.tipo;`. Es el único método que
+  cambia el `tipo` que después se congela en cada sesión y decide el grupo de reparto.
+- [ ] **La personalización de línea se verifica con `toHaveBeenCalled()` sin argumentos**
+  (backend, `salones.service.spec.ts`) — el mock devuelve un snapshot fijo sin mirar sus
+  argumentos. Mutante que pasa: llamar a `resolverPersonalizacionReceta` con `{}` en vez
+  de `dto.personalizacion`. Un bug que ignore lo que el mesero pidió pasa la suite entera.
+- [ ] **El agrupado por estación de la comanda no lo ejercita nada, y el seed no lo
+  permite** (backend) — descubierto al hacer el smoke del 2026-08-06: **ningún ítem del
+  seed tiene una categoría con impresora activa**, así que `agruparEstacionesComanda`
+  siempre devuelve `[]` y hubo que cablear una a mano por SQL para poder verificar la
+  comanda. Sin fixture no hay e2e posible del camino que manda a cocina.
+- [ ] **El computed `cuentaConItemEliminado` no tiene cobertura** (frontend,
+  `pages/salones/index.vue`) — mutante que pasa: `computed(() => false)`, con los 576 tests
+  del frontend en verde. Las páginas no tienen unit tests y `frontend/e2e` no cubre
+  salones. Verificado a mano en el navegador el 2026-08-06.
+
+### Lo que dejaron las revisiones independientes del cierre
+
+- [ ] **`reclamarComanda` pide una segunda conexión del pool con el `FOR UPDATE` tomado**
+  (backend, `salones.service.ts`) — `nombresIngredientesPersonalizacion` sale por
+  `this.dataSource` desde dentro de la transacción. **Preexistente**, verificado con
+  `git show HEAD`: no lo introdujo el fix del 2026-08-06, que sí lo cerró para
+  `armarDetalle` (y de paso para `cancelarCuenta`, `fusionarCuentas` y `cerrarCuenta`).
+  Ahora que el helper acepta un `runner`, cerrarlo es pasar `manager` como tercer
+  argumento: **una palabra**. `previewComanda` NO está en transacción, así que ahí la
+  llamada global es inofensiva.
+- [ ] **Si se borra el ítem *y* su categoría, la línea vuelve a desaparecer del ticket**
+  (backend, `salones.service.ts` → `agruparEstacionesComanda`) — el `LEFT JOIN categorias`
+  filtra `eliminado_el IS NULL`, así que `impresora_id` queda null y el agrupado hace
+  `continue` **en silencio**. Es indistinguible de "categoría sin impresora", que ya se
+  salteaba, pero es plausible que un mismo cleanup borre las dos cosas.
+- [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
+  el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
+  `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos
+  commitean. Ya no es catastrófico (la línea se muestra marcada, el cobro corta con un 400
+  que la nombra y la comanda la incluye), pero el estado se sigue produciendo hacia
+  adelante, no solo en datos viejos.
+- [ ] **Dos filtros de tenant y un `loadCatalogoUnidades` izado quedaron sin red**
+  (backend, `salones.service.ts`) — mutantes medidos que dejan la suite en verde: sacar
+  `i.tenant_id = $2` de la query de `armarDetalle`; sacar `AND tenant_id = $2` de la query
+  de ítems eliminados de `cerrarCuenta`; y devolver `loadCatalogoUnidades()` adentro del
+  callback de la transacción de `actualizarLinea`. Los dos primeros son defensa en
+  profundidad (las líneas ya vienen acotadas por `cl.tenant_id`), el tercero reintroduce
+  el doble checkout que el fix sacó.
+- [ ] **`grupos-modificadores` convive con un segundo índice único y la red nueva no los
+  distingue** (backend, `grupos-modificadores.service.ts`) — `traducirColisionDeNombre`
+  revalida **solo el nombre**, pero `uq_grupo_opcion_item_vivo` puede disparar en la misma
+  transacción de `create`/`update`. En una doble carrera (uno toma el nombre, otro inserta
+  una opción con el mismo `item_id`) el error diría "Ya existe un grupo con el nombre…",
+  mandando a renombrar algo que no es la causa. Nunca es peor que el 500 previo, pero el
+  propio archivo ya discrimina por `constraint` en `restaurar()`, y `caja.service.ts`
+  también: la red nueva introdujo un patrón distinto justo donde había uno.
+- [ ] **El docblock de `traducirColisionDeNombre` no advierte el filo de la promesa eager**
+  (backend, `common/utils/nombre-sugerido.util.ts`) — explica **por qué** toma la escritura
+  ya en vuelo (para no re-indentar 16 cuerpos) pero no que meter un `await` entre
+  `const escritura = …` y el wrapper deja la promesa rechazada sin handler, y Node ≥15
+  **mata el proceso** en vez de devolver un 500. Es una línea de comentario.
+
+### Decisión de owner (pendiente de implementar)
+
+- [ ] **Fin de turno con mesas abiertas: avisar y ofrecer transferir** (backend +
+  frontend) — **decidido el 2026-08-06, sin construir.** `cerrarCuenta` exige
+  `obtenerSesionAbierta(garzonResponsableId)`, que **tira 400**, y ni `cerrarPorPin` ni
+  `cerrarAdmin` miran si el garzón tiene cuentas abiertas. Un garzón que marca salida con
+  una mesa abierta la deja imposible de cobrar hasta que alguien la transfiera. **No hace
+  falta ninguna carrera: es el martes normal de un restaurante.** La forma elegida: el
+  cierre de sesión no se bloquea, devuelve las cuentas abiertas, y la UI ofrece
+  transferirlas a alguien con sesión activa. (La lente lo reportó como una carrera entre
+  `assertSesionAbierta` y la transacción de `abrirCuenta`; agrandarlo al caso sin carrera
+  fue del refutador.)
+- [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
+  el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`
+  sin mirar `cantidadEnviada`, y `actualizarLinea` reemplaza la cantidad por un valor
+  absoluto sin validar que no baje de lo ya enviado. Ninguno bloquea ni advierte, y el
+  frontend **ni siquiera conoce el campo** `cantidadEnviada` (cero ocurrencias en
+  `frontend/app`): el botón de tacho está siempre habilitado y sin confirmación. Se
+  sirvieron 2 platos, se cobra 1, y no queda rastro de que había comanda despachada.
+  Encararlo es definir la regla (¿motivo obligatorio? ¿qué rol aprueba? ¿queda registro?),
+  que es terreno donde el mercado ya tiene respuestas (Toast, Square, Lightspeed manejan
+  *voids* de ítems despachados) — con la regla del cruce de
+  [`investigacion-mercado.md`](investigacion-mercado.md).
+- [ ] **El layout de mesas no valida solapamiento** (backend,
+  `salones/dto/update-layout.dto.ts`) — dos mesas del mismo salón pueden guardarse en la
+  misma posición. No corrompe datos ni bloquea nada: cada mesa sigue siendo direccionable
+  por su id, solo queda un plano confuso. No está documentado como regla en
+  `docs/features/salones-mesas.md` ni en `docs/PRODUCTO.md`, y definirla exige decidir
+  tolerancia o tamaño de mesa. **Prioridad baja.**
+
+### Refutados (no entran al backlog, se anotan para no redescubrirlos)
+
+- **Fuerza bruta del PIN de garzón** — refutada por aritmética medida, no por un guard: 14
+  días de CPU saturada para agotar el espacio. Lo que sobrevive es la amplificación de
+  carga, que es otro bug y está arriba.
+- **Deadlock en `fusionarCuentas`** — refutado: un solo `SELECT … FOR UPDATE` lockea en
+  orden de plan, igual para las dos transacciones. Queda como "seguro gratis" en Baja.
+- **Colisión de PIN al restaurar de la papelera** — hallazgo propio del refutador que
+  resultó **ya documentado** como riesgo aceptado en [`resueltos.md`](resueltos.md), con
+  la misma cifra de 1 en 10⁶ y la misma razón para no arreglarlo (`restaurar()` no puede
+  comparar un bcrypt sin el valor en claro). La carrera TOCTOU de dos altas concurrentes
+  que reportó una lente es la misma puerta con otra llave, y es aún menos probable.
+- **Transferir una cuenta a otra mesa** — el brief le pidió a una lente probar esa
+  transición; no existe. `transferir*` solo reasigna el garzón responsable, y mover cuentas
+  entre mesas está explícitamente fuera de alcance en `docs/features/salones-mesas.md`.
+  La lente lo reportó como corrección del brief en vez de forzar un hallazgo.
+
+---
+
 ## Revisión final `borrado-ingrediente-extra` (2026-07-28)
 
 Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` +

@@ -20,11 +20,11 @@ cosas: lo que ningún gate mira porque nadie lo miró nunca como un cuerpo enter
 dos cosas.
 
 El motivo es empírico. Un agente al que le pedís bugs **encuentra bugs**, existan o no.
-Cuatro pasadas medidas en jul-2026: sobre 39 commits de código recién escrito, 13 hallazgos
+Cinco pasadas medidas: sobre 39 commits de código recién escrito, 13 hallazgos
 y 10 supervivientes (77%); sobre `ventas`+`pagos` —código maduro, con gates, e2e y
 revisiones encima— 20 hallazgos y 15 supervivientes (75%); sobre `caja`+`propinas`, 25
 hallazgos y 20 supervivientes (80%); sobre `items`+`calculo-precios` —el módulo más grande—
-21 y 21 (100%).
+21 y 21 (100%); sobre `turnos`+`salones`, 24 y 22 (92%).
 
 **El refutador filtra menos de lo que corrige, y esa es la razón de tenerlo.** En la tercera
 pasada solo 2 hallazgos se cayeron enteros y en la cuarta ninguno; el trabajo real fue
@@ -43,6 +43,20 @@ abrir el archivo entero mostró que eran dos cadenas `if/else` distintas.
 Si el refutador solo cuenta cuántos mató, va a creer que no hizo falta. **Una pasada con 100%
 de supervivencia no es una pasada sin refutación: es una donde la refutación se gastó
 entera en precisión.**
+
+**La quinta pasada agregó una forma de aporte que las cuatro anteriores no habían mostrado:
+el refutador encontró que un fix propio estaba a medias.** Las dos altas de
+`turnos`+`salones` se corrigieron sacando un filtro de `armarDetalle`, y la revisión
+independiente detectó que la MISMA consulta seguía filtrada en el camino de la comanda: el
+fix movía el bug de la pantalla al ticket de cocina en vez de matarlo. Ninguna lente lo
+vio, porque las lentes miran el código **antes** del fix. De ahí una regla operativa: la
+revisión del cierre no es un trámite sobre un diff ya correcto — es donde se descubre que
+la corrección cubrió una de dos mitades.
+
+Corolario del mismo caso: **un fix puede introducir su propia regresión**. El lock nuevo
+trajo un doble checkout de conexión que antes no existía (no había transacción), y hacer
+visible una línea escondida hizo que el frontend mostrara un total de `$0`. Las dos las
+encontró la revisión, no los gates.
 
 **La predicción de que el ruido subiría sobre código maduro no se cumplió**, y la razón
 importa: la precisión no vino de que los buscadores acertaran más, sino de tres cosas del
@@ -140,6 +154,7 @@ Qué se auditó, cuándo, y con qué resultado. Una fila por pasada.
 | `ventas` + `pagos` (backend completo + pantallas del módulo) | 2026-07-27 | 7 | 20 | 15 | **Soft delete salió limpio** (tabla por tabla, 0 hallazgos). 3 lentes independientes cayeron sobre el mismo bug del vuelto → se contó una vez. 3 hallazgos pasaron a decisión de owner por regla no documentada, no a la lista de bugs |
 | `caja` + `propinas` (backend completo + pantallas de los dos módulos) | 2026-07-27 | 8 | 25 | 20 | 3 hallazgos los vieron dos lentes cada uno → se contaron una vez. **La máquina de estados de caja salió limpia** (12 transiciones, las 11 inválidas bloqueadas), igual que la inmutabilidad del arqueo congelado y el anti-doble-pago de liquidaciones. Los 2 hilos que dejó la pasada de `ventas` cerraron: defendidos en el endpoint HTTP, **no** en el método compartido ni en ningún test |
 | `items` + `calculo-precios` (backend completo + las 2 pantallas del módulo) | 2026-07-28 | 8 | 21 | 21 | **Ninguno se cayó entero** — 6 bajaron de severidad, 3 perdieron la mitad de la afirmación, 2 se reclasificaron como decisión de owner, y el refutador sumó 1 que ninguna lente vio. **Soft delete limpio: 0 sobre 98 queries** revisadas una por una; multi-tenant limpio en los 63 JOIN (su único hallazgo es defensa en profundidad no explotable). El hilo que dejó la pasada de `ventas` cerró con un matiz: el N+1 de `findOne` sobrevivía **del lado del precio**, no del de la persistencia que `cargarBasePorIds` ya había resuelto |
+| `turnos` + `salones` + `garzones` (backend completo + las 6 pantallas) | 2026-08-06 | 8 | 24 | 22 | Dos lentes independientes cayeron sobre el mismo bug de la línea que se cuela → se contó una vez. **Multi-tenant limpio ruta por ruta** en los 4 controllers, y **soft delete limpio: 0 sobre ~65 queries**. Solo 1 se cayó entero (un deadlock refutado por cómo lockea un `SELECT … IN (…) FOR UPDATE`), y **una fuerza bruta se refutó midiendo, no argumentando**: 14 días de CPU saturada. El refutador sumó el hallazgo más caro de la pasada — el fix de las dos altas **estaba a medias** y movía el bug al ticket de cocina. El hilo de `tipo_garzon` cerró con matiz: propinas ya bloquea el reparto corrupto, falta el aviso al editar |
 
 ### Orden propuesto para lo que falta
 
@@ -150,10 +165,22 @@ Por riesgo, no por tamaño. Lo de arriba primero.
 | ~~1~~ | ~~`ventas` (+ `pagos`)~~ | ✅ Hecho 2026-07-27 |
 | ~~1~~ | ~~`caja` + `propinas`/liquidación~~ | ✅ Hecho 2026-07-27 |
 | ~~1~~ | ~~`items` (motor de precios)~~ | ✅ Hecho 2026-07-28 |
-| 2 | `turnos` + `salones` | La pasada de ventas dejó tres `LEFT JOIN garzones` sin filtro de `tenant_id` esperando acá, y la de propinas dejó dos: el `tipo_garzon` de la sesión se congela al abrir turno pero `garzones.tipo` es editable, y `sesiones_garzon` alimenta el reparto |
+| ~~2~~ | ~~`turnos` + `salones`~~ | ✅ Hecho 2026-08-06. ⚠️ **La razón que decía esta fila estaba vieja:** los cinco `LEFT JOIN garzones` ya llevaban `g.tenant_id` (con tests que lo asertan) desde una pasada intermedia; se verificó abriendo los archivos antes de lanzar. El hilo que sí seguía vivo era el de `tipo_garzon`, y cerró con matiz |
 | 3 | `inventario` fuera de lo ya auditado | Kardex, mermas, conversión de unidades |
 | 4 | RBAC, auth y tenants | La invariante más cara si se rompe, aunque cambia poco |
 | 5 | Catálogos y configuración | Bajo riesgo: CRUD admin-only con lectura abierta |
 
 Cerrar cada pasada actualizando **las dos tablas**: la de cobertura con lo hecho, y esta
 con lo que quede pendiente.
+
+### ⏸ Programa pausado (decisión del owner, 2026-08-06)
+
+**Las pasadas 3, 4 y 5 quedan suspendidas hasta bajar el backlog.** No es que dejaran de
+importar: es la regla de este mismo método aplicada a sí misma —*"40 bugs sin plan de
+corrección son ansiedad, no información"*—. La pasada de `turnos`+`salones` sumó **27
+entradas** a `pendientes.md`, que pasó de 53 a 80 abiertas. Auditar más código antes de
+corregir lo encontrado produce inventario, no confianza.
+
+Se reanuda cuando el backlog vuelva a un tamaño legible. El orden de arriba sigue siendo
+el correcto: `inventario` primero por riesgo, y **RBAC/auth/tenants es el único eje
+sensible que ninguna pasada tocó todavía**.

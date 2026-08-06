@@ -359,6 +359,119 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Auditoría `turnos` + `salones` + `garzones` (2026-08-06)
+
+Los tres hallazgos que se cerraron en la misma pasada. Los 22 restantes y lo refutado
+están en [`pendientes.md`](pendientes.md).
+
+- [x] **Una línea agregada durante el cierre no se cobraba ni llegaba a cocina**
+  (backend, `salones.service.ts`) — **severidad alta, y la vieron dos lentes
+  independientes** (dinero/Decimal y concurrencia) por separado, con intercalados
+  distintos. `agregarLinea`, `actualizarLinea` y `quitarLinea` validaban el estado de la
+  cuenta con un `SELECT` plano y escribían **fuera de toda transacción**. Un `SELECT` sin
+  lock no espera al `FOR UPDATE` de `cerrarCuenta`, así que veían la cuenta como abierta
+  durante **todo** el cierre —que incluye armar la venta entera, la operación más lenta
+  del sistema— y la línea se colaba en una cuenta que quedaba cerrada un instante después.
+  Esa línea **no se cobraba** (la venta ya estaba armada sin ella) **y tampoco llegaba a
+  cocina**, porque `previewComanda` y `reclamarComanda` exigen `abierta`: quedaba invisible
+  para todos.
+  **Cómo se cerró:** las tres leen la cuenta con `pessimistic_write` y escriben en la
+  misma transacción. `getCuentaAbiertaOrThrow` (sin lock) tenía exactamente esos 3
+  llamadores, así que se convirtió en `getCuentaAbiertaConLock` en vez de dejar el viejo
+  como código muerto. El catálogo de unidades y la personalización se resuelven **fuera**
+  del lock; lo que sí necesita leerse adentro va con el manager de la transacción.
+  **Mutantes medidos:** quitar el `lock` mata 3 tests; quitar el `, manager` de
+  `armarDetalle` mata 2; quitar `syncPresentacionLegado: true` mata 1; revertir el service
+  a `HEAD` mata 7.
+  **Cerró de paso dos huecos de test:** `actualizarLinea` y `quitarLinea` no tenían **un
+  solo test** —lo encontró la lente de tests con su mutante— y son justo los dos métodos
+  donde vive este bug.
+  ⚠️ **La revisión independiente bloqueó dos veces, y las dos tenía razón.** Primero: el
+  fix **introdujo** un double checkout de conexión —tres lecturas salían por
+  `this.dataSource` desde dentro de los callbacks, o sea pidiendo una segunda conexión del
+  pool con el `FOR UPDATE` tomado—. Antes no existía porque no había transacción. Se cerró
+  pasando el `runner`, y de yapa le sacó el mismo problema a `cancelarCuenta`,
+  `fusionarCuentas` y `cerrarCuenta`, que ya pasaban el manager a `armarDetalle`.
+  Segundo: un mutante sobreviviente medido —quitar `manager` de `armarDetalle` en dos de
+  las tres mutadoras dejaba **65/65 en verde**— porque los tests nuevos no afirmaban nada
+  sobre el detalle devuelto y el mock decidía el resultado.
+  ⚠️ **Y el propio ciclo de revisión produjo un autogol:** al pedir que el 404 afirmara el
+  mensaje, cambié `toThrow(NotFoundException)` por `toThrow(/regex/)` — y `toThrow(regex)`
+  **no verifica la clase**, así que dejé de comprobar que el 404 siguiera siendo 404. Lo
+  detectó el mismo revisor en la segunda vuelta y lo marcó como "lo introdujo el cambio
+  que yo pedí". Ahora los dos afirman clase **y** mensaje.
+  Commit `f504c194`.
+
+- [x] **Borrar un ítem del catálogo dejaba la mesa imposible de cobrar, con la línea
+  invisible** (backend + frontend, `salones` + `items`) — **severidad alta.**
+  `armarDetalle` filtraba `i.eliminado_el IS NULL` en su JOIN, así que la línea
+  **desaparecía de la pantalla**; pero `cerrarCuenta` lee las `cuenta_lineas` crudas y se
+  las mandaba a `crearEnTransaccion`, que explotaba con "Item no encontrado". El garzón no
+  podía cobrar **ni corregir**, porque no tenía el `lineaId` de algo que no se renderizaba.
+  Nada impedía el borrado: `obtenerUsoItem` miraba `receta_ingredientes`,
+  `combo_componentes`, `grupo_modificador_opciones` y `receta_extras_permitidos` — **nunca
+  `cuenta_lineas`**.
+  **Las dos mitades, decididas por el owner:** (1) `obtenerUsoItem` suma una rama
+  `'cuenta'` que bloquea el borrado y va **primero** en el mensaje, porque los otros cuatro
+  usos son de catálogo y el admin los resuelve cuando quiera, pero una cuenta abierta tiene
+  a alguien esperando en la mesa; acota por `estado = 'abierta'` —sin eso una cuenta ya
+  cerrada volvería el ítem inborrable para siempre— y por el borrado de la línea, la cuenta
+  y la mesa. (2) El detalle muestra la línea marcada (`itemEliminado`) y `cerrarCuenta`
+  corta con un 400 que **nombra** el ítem.
+  **En el frontend**, una cuenta así no se puede cotizar (el motor resuelve contra el
+  catálogo vivo y devuelve 404): el total muestra `—` en vez de un `$0` falso, un aviso lo
+  explica, y cobrar e imprimir precuenta quedan deshabilitados. ⚠️ Las líneas **no** se
+  filtran de la entrada del cálculo a propósito: `AdvertenciasPrecio` indexa
+  `resultado.lineas[i]` contra las líneas de la pantalla, así que filtrar la entrada las
+  desfasa — que es justo el desfase que ya está anotado en `pendientes.md`. El primer
+  intento de fix fue ese y se descartó por eso.
+  **Índice `idx_cuenta_lineas_item`:** la rama nueva corre en cada `DELETE /items/:id` y en
+  cada `GET /items/:id/uso` —que el frontend dispara antes de abrir el modal— sobre una
+  tabla que crece con cada producto pedido en la historia del tenant. Postgres no indexa
+  las FK por su cuenta.
+  ⚠️ **El test unitario de la rama nueva no probaba lo que decía.** Un `toMatch` sobre un
+  string de SQL mide **presencia de un literal, no semántica**, y la revisión midió dos
+  mutantes que sobrevivían: sacar `cl.item_id = $1` —que vuelve inborrable **todo** el
+  catálogo del tenant— y `estado = 'abierta' OR TRUE`. Se cerró con un **e2e** que monta
+  sesión de garzón + cuenta + línea contra Postgres real (`recetas.e2e-spec.ts`, test 12)
+  y mata los dos, medido con `reset-db.sh` antes de cada corrida. Ese e2e empieza a cerrar
+  el hueco de "no existe ningún e2e de salones".
+  ⚠️ **Alcance real del e2e, dicho en su propio comentario:** usa **cancelada** como proxy
+  de "ya no está abierta". El caso que la doc describe es la cuenta **cerrada**, que exige
+  caja abierta + pagos. Un mutante quirúrgico `OR c.estado = 'cerrada'` sobrevive.
+  Commit `853c16b3`.
+
+- [x] **La comanda seguía escondiendo el ítem borrado: el fix anterior estaba a medias**
+  (backend, `salones.service.ts` → `sqlLineasComanda`) — **lo encontró la revisión
+  independiente, ninguna lente lo vio**, y es el hallazgo más valioso de la pasada porque
+  demuestra que el fix de arriba **movía el bug de lugar en vez de matarlo**:
+  `armarDetalle` dejó de filtrar pero `sqlLineasComanda` —que alimenta `previewComanda` y
+  `reclamarComanda`— seguía con su `INNER JOIN` filtrado. La línea dejaba de ser invisible
+  en la pantalla y pasaba a serlo **en el ticket de cocina**: "Enviar a cocina" respondía
+  OK, `cantidad_enviada` no avanzaba nunca, y el plato no se cocinaba.
+  **La regla, ahora escrita en `docs/features/salones-mesas.md`: un plato ya pedido hay
+  que cocinarlo**, lo haya sacado o no el admin de la carta mientras tanto.
+  **Mutante medido:** volver a poner el filtro mata 1 test. Y un segundo mutante que la
+  revisión midió sobreviviendo —inyectar el filtro **solo** en el string concatenado de
+  `reclamarComanda`, que es el que realmente reclama y avanza `cantidad_enviada`— se cerró
+  con una aserción propia en el test de ese método.
+  ⚠️ **El smoke en navegador destapó algo que ningún test podía:** **ningún ítem del seed
+  tiene una categoría con impresora activa**, así que `agruparEstacionesComanda` devuelve
+  siempre `[]` y hubo que cablear una a mano por SQL para poder verificar. Queda anotado
+  como hueco en `pendientes.md`.
+  Commit `853c16b3`.
+
+### Lección de método que dejó esta pasada
+
+**Una medición de mutante puede dar señal falsa.** La primera vez que medí los mutantes del
+e2e obtuve "1 failed" con la mutación **no aplicada**: el `perl -pe` no matcheaba a través
+de saltos de línea, y lo que fallaba era un test que depende del stock acumulado del seed
+en corridas locales repetidas. Estuve a un paso de contar ruido como señal. Desde entonces,
+cada medición va con `reset-db.sh` antes y con `-t` acotado al test, y se verifica que la
+mutación se aplicó (contando ocurrencias) antes de leer el resultado.
+
+---
+
 ## Colisión de nombre en `create()`/`update()` — ya no es un 500 (2026-08-06)
 
 - [x] **`create()`/`update()` de los 8 con nombre único devolvían 500 si perdían
