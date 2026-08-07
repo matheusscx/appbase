@@ -61,6 +61,29 @@ export interface MesaResumen {
   eliminadoPorNombre?: string | null;
 }
 
+/**
+ * Lo que `crear`/`actualizar` devuelven de un salón y una mesa. Los cuatro
+ * métodos devolvían `repo.save(...)` crudo, con `tenantId`, timestamps y
+ * `eliminadoPor` adentro: no es fuga cross-tenant —el usuario ya pertenece a ese
+ * tenant— pero era el único lugar del módulo que exponía el interno, mientras
+ * `listarSalones` arma una vista curada y `garzones`/`turnos` tienen su
+ * `toPublico()`. Los campos son exactamente los que el frontend lee de esas
+ * cuatro respuestas.
+ */
+export interface SalonPublico {
+  id: string;
+  nombre: string;
+}
+
+export interface MesaPublica {
+  id: string;
+  nombre: string;
+  posX: string;
+  posY: string;
+  forma: FormaMesa;
+  tamano: TamanoMesa;
+}
+
 export interface SalonConMesas {
   id: string;
   nombre: string;
@@ -276,20 +299,38 @@ export class SalonesService {
     return [...map.values()];
   }
 
-  crearSalon(tenantId: string, dto: CreateSalonDto): Promise<Salon> {
+  async crearSalon(
+    tenantId: string,
+    dto: CreateSalonDto,
+  ): Promise<SalonPublico> {
     const salon = this.salonRepo.create({ tenantId, nombre: dto.nombre });
-    return this.salonRepo.save(salon);
+    return this.toSalonPublico(await this.salonRepo.save(salon));
   }
 
   async actualizarSalon(
     tenantId: string,
     id: string,
     dto: UpdateSalonDto,
-  ): Promise<Salon> {
+  ): Promise<SalonPublico> {
     const salon = await this.salonRepo.findOne({ where: { id, tenantId } });
     if (!salon) throw new NotFoundException(`Salón ${id} no encontrado`);
     Object.assign(salon, dto);
-    return this.salonRepo.save(salon);
+    return this.toSalonPublico(await this.salonRepo.save(salon));
+  }
+
+  private toSalonPublico(s: Salon): SalonPublico {
+    return { id: s.id, nombre: s.nombre };
+  }
+
+  private toMesaPublica(m: Mesa): MesaPublica {
+    return {
+      id: m.id,
+      nombre: m.nombre,
+      posX: m.posX,
+      posY: m.posY,
+      forma: m.forma,
+      tamano: m.tamano,
+    };
   }
 
   async eliminarSalon(
@@ -397,7 +438,7 @@ export class SalonesService {
     tenantId: string,
     salonId: string,
     dto: CreateMesaDto,
-  ): Promise<Mesa> {
+  ): Promise<MesaPublica> {
     await this.getSalonOrThrow(tenantId, salonId);
     const mesa = this.mesaRepo.create({
       tenantId,
@@ -408,14 +449,14 @@ export class SalonesService {
       forma: dto.forma ?? FormaMesa.CUADRADA,
       tamano: dto.tamano ?? TamanoMesa.MEDIANO,
     });
-    return this.mesaRepo.save(mesa);
+    return this.toMesaPublica(await this.mesaRepo.save(mesa));
   }
 
   async actualizarMesa(
     tenantId: string,
     id: string,
     dto: UpdateMesaDto,
-  ): Promise<Mesa> {
+  ): Promise<MesaPublica> {
     const mesa = await this.mesaRepo.findOne({ where: { id, tenantId } });
     if (!mesa) throw new NotFoundException(`Mesa ${id} no encontrada`);
     if (dto.nombre !== undefined) mesa.nombre = dto.nombre;
@@ -423,7 +464,7 @@ export class SalonesService {
     if (dto.posY !== undefined) mesa.posY = dto.posY.toString();
     if (dto.forma !== undefined) mesa.forma = dto.forma;
     if (dto.tamano !== undefined) mesa.tamano = dto.tamano;
-    return this.mesaRepo.save(mesa);
+    return this.toMesaPublica(await this.mesaRepo.save(mesa));
   }
 
   async eliminarMesa(
@@ -762,7 +803,11 @@ export class SalonesService {
     dto: FusionarCuentasDto,
   ): Promise<CuentaDetalle> {
     await this.getMesaOrThrow(tenantId, mesaId);
-    const ids = [...new Set(dto.cuentaIds)];
+    // Ordenado antes de pedir el lock. NO cierra un deadlock demostrado —un
+    // solo `SELECT … FOR UPDATE` lockea en orden de plan, igual para dos
+    // transacciones con la misma forma de query— pero cuesta una línea y saca
+    // del medio la pregunta la próxima vez que alguien lea esto.
+    const ids = [...new Set(dto.cuentaIds)].sort();
     if (ids.length < 2) {
       throw new BadRequestException(
         'Selecciona al menos dos cuentas para fusionar',
@@ -904,8 +949,17 @@ export class SalonesService {
         );
       }
 
+      // Los tres, no solo el que se cobra: `@IsNumberString()` acepta el signo
+      // menos, y aunque `targetCobro` use únicamente `propinaMonto` —así que un
+      // negativo en los otros dos no cobra de más—, se persisten en
+      // `venta_propina` y corrompen los reportes con signos incoherentes.
       const propinaMonto = dto.propinaMonto ?? '0';
-      if (new Decimal(propinaMonto).lt(0)) {
+      const negativa = [
+        propinaMonto,
+        dto.propinaSugerida,
+        dto.propinaPorcentajeSugerido,
+      ].some((v) => v !== undefined && new Decimal(v).lt(0));
+      if (negativa) {
         throw new BadRequestException('Propina inválida');
       }
 
@@ -1086,9 +1140,14 @@ export class SalonesService {
         [cuentaId, tenantId],
       );
 
+      // Con el `manager` de la transacción: salir por `this.dataSource` acá
+      // pide una segunda conexión del pool con el `FOR UPDATE` ya tomado.
+      // `previewComanda` no está en transacción, así que ahí la global es
+      // inofensiva.
       const nombres = await this.nombresIngredientesPersonalizacion(
         tenantId,
         rows,
+        manager,
       );
       const estaciones = this.agruparEstacionesComanda(rows, nombres);
 

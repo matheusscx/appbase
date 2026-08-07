@@ -678,6 +678,76 @@ describe('SalonesService', () => {
     });
   });
 
+  describe('crear/actualizar de salón y mesa — no devuelven el interno', () => {
+    // Los cuatro devolvían `repo.save(...)` crudo. No es fuga cross-tenant —el
+    // usuario ya pertenece a ese tenant— pero era el único lugar del módulo que
+    // exponía `tenantId`, timestamps y `eliminadoPor`.
+    const CRUDO = {
+      id: 'x-1',
+      tenantId: TENANT,
+      nombre: 'Terraza',
+      posX: '0.5',
+      posY: '0.5',
+      forma: 'cuadrada',
+      tamano: 'mediano',
+      salonId: 'salon-1',
+      creadoEl: new Date(),
+      actualizadoEl: new Date(),
+      eliminadoEl: null,
+      eliminadoPor: 'alguien',
+    };
+
+    it('crearSalon devuelve solo id y nombre', async () => {
+      salonRepo.save.mockResolvedValue(CRUDO);
+
+      const salon = await service.crearSalon(TENANT, { nombre: 'Terraza' });
+
+      expect(salon).toEqual({ id: 'x-1', nombre: 'Terraza' });
+    });
+
+    it('actualizarSalon tampoco', async () => {
+      salonRepo.findOne.mockResolvedValue({ ...CRUDO });
+      salonRepo.save.mockResolvedValue(CRUDO);
+
+      const salon = await service.actualizarSalon(TENANT, 'x-1', {
+        nombre: 'Terraza',
+      });
+
+      expect(salon).toEqual({ id: 'x-1', nombre: 'Terraza' });
+    });
+
+    it('crearMesa devuelve la forma que el frontend lee, sin el interno', async () => {
+      salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
+      mesaRepo.save.mockResolvedValue(CRUDO);
+
+      const mesa = await service.crearMesa(TENANT, 'salon-1', {
+        nombre: 'Mesa 1',
+      });
+
+      expect(mesa).toEqual({
+        id: 'x-1',
+        nombre: 'Terraza',
+        posX: '0.5',
+        posY: '0.5',
+        forma: 'cuadrada',
+        tamano: 'mediano',
+      });
+    });
+
+    it('actualizarMesa tampoco', async () => {
+      mesaRepo.findOne.mockResolvedValue({ ...CRUDO });
+      mesaRepo.save.mockResolvedValue(CRUDO);
+
+      const mesa = await service.actualizarMesa(TENANT, 'x-1', {
+        nombre: 'Mesa 1',
+      });
+
+      expect(mesa).not.toHaveProperty('tenantId');
+      expect(mesa).not.toHaveProperty('eliminadoPor');
+      expect(mesa).not.toHaveProperty('salonId');
+    });
+  });
+
   describe('guardarLayout', () => {
     it('mover una mesa que no es del salón corta con 404, no en silencio', async () => {
       // Sin el chequeo de `affected`, el drag&drop de una mesa ajena actualiza
@@ -1525,6 +1595,34 @@ describe('SalonesService', () => {
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ['propinaSugerida', { propinaSugerida: '-1' }],
+      ['propinaPorcentajeSugerido', { propinaPorcentajeSugerido: '-0.1' }],
+    ])('rechaza %s negativa', async (_campo, extra) => {
+      // `@IsNumberString()` acepta el signo menos, y estos dos no pasaban por
+      // ninguna otra validación: se persistían en `venta_propina` y ensuciaban
+      // los reportes con signos incoherentes. No cobran de más —`targetCobro`
+      // usa solo `propinaMonto`— pero el punto de entrada sin validar es este.
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: GARZON_RESPONSABLE,
+      });
+      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      // El camino feliz tiene que poder completarse: si explota en un undefined
+      // antes de llegar al final, el test muere por un TypeError y no por la
+      // propiedad que enuncia. Local, no en el harness: como default global
+      // apagaría los `if (!rows.length) throw` de todo el service.
+      manager.query.mockResolvedValue([]);
+      ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
+
+      await expect(
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN, ...extra }),
+      ).rejects.toThrow('Propina inválida');
+      expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
+    });
+
     it('rechaza cerrar sin garzón responsable', async () => {
       manager.findOne.mockResolvedValue({
         id: CUENTA,
@@ -2250,6 +2348,37 @@ describe('SalonesService', () => {
   });
 
   describe('reclamarComanda', () => {
+    it('resuelve los nombres de ingredientes por el manager, no por la conexión global', async () => {
+      // Con el `FOR UPDATE` tomado, salir por `this.dataSource` pide una segunda
+      // conexión del pool: el doble checkout que puede estancarse.
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            cuenta_linea_id: 'linea-1',
+            cantidad: '2',
+            cantidad_enviada: '0',
+            nombre: 'Lomo',
+            impresora_id: 'impresora-cocina',
+            impresora_nombre: 'Cocina',
+            // Con personalización: es lo que dispara la consulta de nombres.
+            personalizacion: SNAPSHOT,
+          },
+        ])
+        .mockResolvedValue([]);
+      // Igual que arriba: sin esto el mutante muere en un `.map` de undefined
+      // en vez de morir por la aserción de abajo.
+      dataSource.query.mockResolvedValue([]);
+
+      await service.reclamarComanda(TENANT, CUENTA);
+
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
     it('avanza cantidad_enviada y devuelve estaciones en un solo claim', async () => {
       manager.findOne.mockResolvedValue({
         id: CUENTA,

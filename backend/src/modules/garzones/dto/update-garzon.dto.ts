@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator';
 import { TipoGarzon } from '../enums/tipo-garzon.enum';
 
@@ -16,6 +17,7 @@ export class UpdateGarzonDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   nombre?: string;
 
   @IsOptional()

@@ -66,7 +66,8 @@ del garzón usa el permiso dedicado **`Operar`**.
 
 `POST /cuentas/:id/cerrar` body:
 `{ pin, pagos?, tipoDocumentoId?, customer?, propinaMonto?, propinaSugerida?, propinaPorcentajeSugerido? }`
-(reusa DTOs de ventas; `propina*` son `@IsNumberString` opcionales). Respuesta:
+(reusa DTOs de ventas; `propina*` son `@IsNumberString` opcionales, y **los tres se
+rechazan si vienen negativos** — `@IsNumberString` acepta el signo menos). Respuesta:
 `{ cuenta: CuentaDetalle, ventaId }`.
 
 **Propina en el cierre (subproyecto D):**

@@ -376,7 +376,12 @@ const columns: TableColumn<Garzon>[] = [
       <template #body>
         <UForm id="garzon-form" :state="form" class="space-y-4" @submit="guardar">
           <UFormField label="Nombre" required>
-            <UInput v-model="form.nombre" placeholder="Ana Torres" autofocus />
+            <UInput
+              v-model="form.nombre"
+              placeholder="Ana Torres"
+              :maxlength="100"
+              autofocus
+            />
           </UFormField>
           <UFormField label="Tipo" required>
             <USelect

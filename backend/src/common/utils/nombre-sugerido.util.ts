@@ -231,6 +231,12 @@ function armarError(
  * Toma la escritura **ya en vuelo** y no un thunk: así el llamador no tiene que
  * re-indentar el cuerpo de su transacción para envolverlo, y el diff de sumar
  * esta red queda en dos líneas por método en vez de reformatear los 16.
+ *
+ * ⚠️ **El filo de esa decisión:** entre `const escritura = …` y esta llamada no
+ * puede meterse un `await`. La promesa ya está corriendo, así que en esa ventana
+ * queda rechazada **sin handler**, y Node ≥15 no devuelve un 500: **mata el
+ * proceso** con `unhandledRejection`. Si hace falta trabajo intermedio, va antes
+ * de crear la promesa.
  */
 export async function traducirColisionDeNombre<T>(
   escritura: Promise<T>,

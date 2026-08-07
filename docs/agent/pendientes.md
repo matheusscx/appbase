@@ -233,6 +233,7 @@ verdad; el conteo del encabezado describe la auditoría original.
   **Es decisión de owner si se encara**, con este número sobre la mesa: un carrito de 5
   líneas de receta pasó de 5×(3+G) queries a 15 fijas; batchear entre líneas lo llevaría
   a ~3.
+
 ### Decidido por el owner tras investigación de mercado (2026-07-27)
 
 Cuatro decisiones de owner sobre reglas de negocio no documentadas; tres ya se
@@ -409,6 +410,7 @@ Ver [`resueltos.md`](resueltos.md).
   **en `remove()` y en cada camino que crea una referencia** (asociar ingrediente, componente
   de combo, opción de grupo, extra permitido). Eso es varios sitios de escritura y su propio
   análisis de orden de locks: es una tarea, no un `FOR UPDATE` más.
+
 ### Baja
 
 - [ ] **`convertirAMonedaOficial` redondea a 4 fijo** (backend,
@@ -538,27 +540,9 @@ que falta es el aviso en el momento de editar — ver la entrada de `garzones.ac
   `cantidad = 0.5` (correcto, y el motor cobra sobre eso) pero `cantidadPresentacion`
   sigue en "200 g". El ticket y la pantalla muestran 200 g de algo que se cobra como 500 g:
   el monto es correcto, lo que miente es lo que ve el cliente.
-- [ ] **`@MaxLength(100)` falta en `CreateGarzonDto`/`UpdateGarzonDto`** (backend +
-  frontend) — la columna es `VARCHAR(100)` y su DTO gemelo `CreateTurnoDto` sí lo tiene,
-  así que un nombre largo pasa la validación y muere en Postgres con un **500** genérico
-  en vez de un 400 accionable. El `<UInput>` de `configuracion/garzones.vue` tampoco pone
-  `maxlength`.
 
 ### Baja
 
-- [ ] **`propinaSugerida` y `propinaPorcentajeSugerido` no validan signo al cerrar la
-  cuenta** (backend, `salones/dto/cerrar-cuenta.dto.ts`) — `propinaMonto` sí se valida
-  (`.lt(0)` → 400) pero estos dos solo llevan `@IsNumberString()`, que acepta el signo
-  menos. Un POST directo los persiste negativos en `venta_propina`. **No permite cobrar de
-  más** —`targetCobro` usa únicamente `propinaMonto`— pero corrompe los reportes de
-  propina con signos incoherentes, y el punto de entrada sin validar es de `salones`.
-- [ ] **`fusionarCuentas` lockea varias cuentas sin orden determinista** (backend,
-  `salones.service.ts`) — **refutado como deadlock, sobrevive como seguro barato**: un
-  único `SELECT … WHERE id IN (…) FOR UPDATE` lockea en el orden que devuelve el plan, que
-  es el mismo para dos transacciones concurrentes con la misma forma de query, así que el
-  ciclo ABBA clásico necesita **sentencias distintas**, no un array `In()` en otro orden.
-  La propia lente admitió que su caso concreto no cierra el ciclo. `ids.sort()` antes de
-  pedir el lock es una línea y no cuesta nada; no cierra un bug demostrado.
 - [ ] **"Nueva cuenta" no tiene guard de reentrancia, y sus tres hermanos sí**
   (frontend, `pages/salones/index.vue`) — `fusionarSeleccionadas`, `transferirCuentaConPin`
   y `cerrarCuentaConPin` usan un ref "en curso" y `:loading`; `nuevaCuenta`/
@@ -566,12 +550,6 @@ que falta es el aviso en el momento de editar — ver la entrada de `garzones.ac
   que resuelva el POST, así que la UI vuelve a estar interactuable con la petición en
   vuelo. Doble tap o lag de red crean dos cuentas en la mesa. El backend no puede
   defenderlo: varias cuentas abiertas por mesa es comportamiento intencional.
-- [ ] **`crear`/`actualizar` de salón y mesa devuelven la entity cruda, con `tenantId`**
-  (backend, `salones.service.ts`) — `listarSalones` arma una vista curada y
-  `garzones`/`turnos` tienen su `toPublico()`, pero estos cuatro devuelven
-  `repo.save(...)` tal cual: el JSON incluye `tenantId` y, en mesa, los timestamps y
-  `eliminadoPor`. No es fuga cross-tenant (el usuario ya pertenece a ese tenant) ni el
-  frontend lo consume, pero es el único lugar del módulo que expone el interno.
 
 ### Huecos de test (medidos, con el mutante que sobrevive)
 
@@ -600,14 +578,6 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
 
 ### Lo que dejaron las revisiones independientes del cierre
 
-- [ ] **`reclamarComanda` pide una segunda conexión del pool con el `FOR UPDATE` tomado**
-  (backend, `salones.service.ts`) — `nombresIngredientesPersonalizacion` sale por
-  `this.dataSource` desde dentro de la transacción. **Preexistente**, verificado con
-  `git show HEAD`: no lo introdujo el fix del 2026-08-06, que sí lo cerró para
-  `armarDetalle` (y de paso para `cancelarCuenta`, `fusionarCuentas` y `cerrarCuenta`).
-  Ahora que el helper acepta un `runner`, cerrarlo es pasar `manager` como tercer
-  argumento: **una palabra**. `previewComanda` NO está en transacción, así que ahí la
-  llamada global es inofensiva.
 - [ ] **Si se borra el ítem *y* su categoría, la línea vuelve a desaparecer del ticket**
   (backend, `salones.service.ts` → `agruparEstacionesComanda`) — el `LEFT JOIN categorias`
   filtra `eliminado_el IS NULL`, así que `impresora_id` queda null y el agrupado hace
@@ -627,11 +597,6 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   mandando a renombrar algo que no es la causa. Nunca es peor que el 500 previo, pero el
   propio archivo ya discrimina por `constraint` en `restaurar()`, y `caja.service.ts`
   también: la red nueva introdujo un patrón distinto justo donde había uno.
-- [ ] **El docblock de `traducirColisionDeNombre` no advierte el filo de la promesa eager**
-  (backend, `common/utils/nombre-sugerido.util.ts`) — explica **por qué** toma la escritura
-  ya en vuelo (para no re-indentar 16 cuerpos) pero no que meter un `await` entre
-  `const escritura = …` y el wrapper deja la promesa rechazada sin handler, y Node ≥15
-  **mata el proceso** en vez de devolver un 500. Es una línea de comentario.
 
 ### Decisión de owner (pendiente de implementar)
 

@@ -598,6 +598,30 @@ expect(
 Dos tests con títulos distintos y setup idéntico son un solo test. Un branch de SQL
 (columna equivocada, `WHERE` que nunca matchea) solo lo prueba la base real.
 
+### ❌ Un mutante que muere por `TypeError` no prueba lo que el test dice
+
+```ts
+// El test dice "rechaza propina negativa". Con el mutante puesto pasa de largo,
+// sigue hasta `crearEnTransaccion` —que el mock deja en `undefined`— y muere en
+// `.id`. El test se pone rojo, sí: por la razón equivocada.
+//   Received message: "Cannot read properties of undefined (reading 'id')"
+// Lo que se busca es esto, que ES la propiedad:
+//   Received promise resolved instead of rejected
+```
+
+Un mutante que rompe la ejecución antes de llegar a la aserción **da un falso verde de
+cobertura**: el día que alguien complete ese mock, el test deja de discriminar sin que
+nada avise. Medir el mutante no alcanza — hay que leer **por qué** murió.
+
+El arreglo es que el camino feliz pueda completarse. Y va **local al test que lo
+necesita, no como default del harness**: eso último tiene un precio medido (ago-2026,
+`salones.service.spec.ts`). Con `manager.query` resolviendo `[]` por default, el mutante
+que borra `getMesaOrThrow` de `abrirCuenta` pasó de cazado a **sobreviviente** — sin el
+guard, la ejecución llega a un `if (!locked.length) throw` de más abajo que tira la misma
+excepción, y el test ya no distingue "corrió el chequeo de tenant" de "el lock volvió
+vacío". Un default de harness apaga como red incidental **todos** los `if (!rows.length)`
+del service (cinco, en ese archivo).
+
 ### ❌ Cambiar un vocabulario compartido y actualizar solo los consumidores del módulo que tenés delante
 
 Un valor de un enum, un motivo del kardex, un estado: viven en **más lugares que su

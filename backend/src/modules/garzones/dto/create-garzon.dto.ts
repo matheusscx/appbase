@@ -4,12 +4,14 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator';
 import { TipoGarzon } from '../enums/tipo-garzon.enum';
 
 export class CreateGarzonDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   nombre: string;
 
   // El PIN operativo se genera automáticamente en el backend (no lo elige el

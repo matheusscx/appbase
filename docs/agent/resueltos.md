@@ -527,6 +527,52 @@ Entradas de tandas anteriores que no necesitaban ninguna decisión de negocio.
 Los hallazgos que se cerraron. Los que quedan y lo refutado están en
 [`pendientes.md`](pendientes.md).
 
+- [x] ~~**Seis mecánicas de contrato y concurrencia**~~ (backend, cerradas 2026-08-07).
+  Ninguna necesitaba decisión: se agruparon por eso.
+  - **El signo de propina se validaba en uno de tres.** `propinaMonto` cortaba con 400 pero
+    `propinaSugerida` y `propinaPorcentajeSugerido` solo tenían `@IsNumberString()`, que
+    acepta el menos. No cobran de más —`targetCobro` usa solo el primero— pero se
+    persistían en `venta_propina`. Ahora los tres pasan por el mismo chequeo.
+  - **`@MaxLength(100)` en `Create`/`UpdateGarzonDto`.** La columna es `VARCHAR(100)` y el
+    gemelo `CreateTurnoDto` ya lo tenía: sin él, un nombre largo moría en Postgres con un
+    500 en vez de un 400 accionable.
+    El `:maxlength="100"` del input **también se puso**. La primera versión de este cierre
+    lo omitía argumentando que "ningún input de `configuracion/` lo usa": literal cierto,
+    pero la conclusión iba más lejos que el hecho — el repo **sí** tiene el patrón
+    (`components/ventas/ItemPersonalizacionDrawer.vue:460`), así que ponerlo es seguirlo,
+    no inventarlo. Y la entrada decía "backend + frontend": cerrar solo la mitad y borrar
+    el checkbox entero es cómo un pendiente se evapora.
+  - **`reclamarComanda` pedía una segunda conexión del pool** con el `FOR UPDATE` tomado.
+    Una palabra: pasarle el `manager`. `previewComanda` no está en transacción, así que ahí
+    la conexión global sigue siendo inofensiva.
+  - **`crear`/`actualizar` de salón y mesa devolvían la entity cruda**, con `tenantId`,
+    timestamps y `eliminadoPor`. Ahora tienen `toSalonPublico`/`toMesaPublica`, siguiendo lo
+    que `garzones` y `turnos` ya hacían.
+    ⚠️ **La entrada decía que "el frontend no lo consume" y es falso**: sí lo consume
+    (`configuracion/salones.vue` lee `saved.id`, `saved.nombre` y, en mesa, `posX`, `posY`,
+    `forma`, `tamano`). Los campos de la vista curada son exactamente esos, medidos antes de
+    tocar; ninguno de los que se sacaron se leía.
+  - **`ids.sort()` antes del lock de `fusionarCuentas`.** Seguro barato: **no cierra ningún
+    deadlock demostrado** —un solo `SELECT … FOR UPDATE` lockea en orden de plan, igual para
+    las dos transacciones— y por eso **no tiene mutante**: no hay conducta observable que
+    fijar. Se hizo porque cuesta una línea y saca la pregunta del medio.
+  - **El docblock de `traducirColisionDeNombre`** ahora advierte que meter un `await` entre
+    `const escritura = …` y el wrapper deja la promesa rechazada sin handler, y Node ≥15
+    **mata el proceso**. Es prosa: tampoco tiene mutante.
+
+  **Cuatro mutantes medidos** (los que tienen conducta observable): el signo validado solo
+  en `propinaMonto`, `reclamarComanda` por la conexión global, `crearMesa` devolviendo la
+  entity cruda, y `CreateGarzonDto` sin `@MaxLength`.
+  **Los cuatro mueren por la aserción que el test enuncia, no por un `TypeError`.** No era
+  así al principio: los dos primeros morían en un `.map`/`.length` de `undefined` porque el
+  mock no devolvía nada, o sea mataban por accidente. El primer arreglo fue poner defaults
+  resueltos en el harness, y la revisión midió su **precio**: con `manager.query → []`, el
+  mutante que borra `getMesaOrThrow` de `abrirCuenta` pasó de **cazado a sobreviviente**,
+  porque el `if (!locked.length) throw` de más abajo tira la misma excepción. Los defaults
+  se movieron a los dos tests que los necesitan: los mutantes siguen muriendo por su
+  aserción y el de `getMesaOrThrow` vuelve a caer. Quedó en
+  [`anti-patterns.md`](anti-patterns.md).
+
 - [x] ~~**Cinco huecos de cobertura del barrido de la auditoría**~~ (backend, cerrados
   2026-08-07). Solo tests: **ningún archivo de producción se tocó**. Los siete mutantes que
   las entradas anotaban pasaban de verdad —los medí antes de escribir una línea— y ahora
