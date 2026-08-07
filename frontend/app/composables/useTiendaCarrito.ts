@@ -7,7 +7,7 @@ import {
   type CarritoLinea,
   type ItemCatalogo,
 } from './useVenta'
-import { useCalculoPrecios, type ResultadoVenta } from './useCalculoPrecios'
+import { useResultadoCalculado, type ResultadoVenta } from './useCalculoPrecios'
 import { useApiFetch } from './useApiFetch'
 
 export interface CheckoutResponse {
@@ -32,39 +32,24 @@ export type PagarResponse =
  */
 export function useTiendaCarrito() {
   const lineas = useState<CarritoLinea[]>('tienda-carrito-lineas', () => [])
-  const resultado = useState<ResultadoVenta | null>('tienda-carrito-resultado', () => null)
-  const loadingCalculo = useState('tienda-carrito-loading', () => false)
   const checkout = useState<CheckoutResponse | null>('tienda-checkout', () => null)
 
-  const { calcular } = useCalculoPrecios()
+  // `persistKey` porque el carrito de la tienda sobrevive la navegación a
+  // /tienda/pasarela y de vuelta: el resultado tiene que volver con él, si no
+  // los totales quedan vacíos hasta que el comprador toque algo.
+  const {
+    resultado,
+    loading: loadingCalculo,
+    vigente,
+    asegurarVigente,
+    limpiar: limpiarResultado,
+  } = useResultadoCalculado(
+    () => toCalcularInput(lineas.value),
+    { debounceMs: 300, persistKey: 'tienda-carrito' },
+  )
+
   const unidadesStore = useUnidadesMedidaStore()
   const config = useRuntimeConfig()
-
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null
-
-  async function recalcular() {
-    if (lineas.value.length === 0) {
-      resultado.value = null
-      return
-    }
-    loadingCalculo.value = true
-    try {
-      resultado.value = await calcular(toCalcularInput(lineas.value))
-    } finally {
-      loadingCalculo.value = false
-    }
-  }
-
-  watch(
-    lineas,
-    () => {
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        void recalcular()
-      }, 300)
-    },
-    { deep: true },
-  )
 
   function catalogo() {
     return unidadesStore.unidades.map(u => ({
@@ -99,7 +84,7 @@ export function useTiendaCarrito() {
   }
   function limpiar() {
     lineas.value = []
-    resultado.value = null
+    limpiarResultado()
     checkout.value = null
   }
 
@@ -121,6 +106,8 @@ export function useTiendaCarrito() {
     lineas,
     resultado,
     loadingCalculo,
+    vigente,
+    asegurarVigente,
     checkout,
     add,
     quitar,

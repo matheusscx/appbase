@@ -380,6 +380,11 @@ mitades —que se persista y que viaje por la API—, no solo la primera.
   aparecer en dos líneas del carrito con personalizaciones distintas (por
   ejemplo, dos porciones de la misma receta con extras diferentes), y el
   `itemId` no las distingue.
+  El índice solo sirve mientras el resultado corresponda al carrito que se está
+  viendo: los tres carritos guardan ese estado en `useResultadoCalculado()` y
+  **solo dibujan advertencias cuando el cálculo está vigente**. Quien lee los
+  totales para mover plata (abrir el cobro, imprimir) llama antes
+  `asegurarVigente()`. Detalle: `docs/patterns/frontend.md` §10.1.
 - **Confirmación de la Tienda** (`pages/tienda/pasarela.vue`) — último paso antes de
   "Aprobar pago". Usa `resultado.advertencias`, el **aplanado**, no las dos
   granularidades: esa pantalla no desglosa líneas, así que renderizar

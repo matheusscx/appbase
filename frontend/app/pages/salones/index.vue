@@ -41,7 +41,6 @@ const garzonesApi = useGarzones()
 const turnosApi = useTurnos()
 const sesionesApi = useSesionesGarzon()
 const unidadesStore = useUnidadesMedidaStore()
-const { calcular } = useCalculoPrecios()
 const { formatMonto, formatFecha } = useFormatters()
 const impresorasApi = useImpresoras()
 const authStore = useAuthStore()
@@ -72,13 +71,29 @@ const itemsVisibles = computed(() => {
   )
   return descontarStockCatalogo(items.value, reservas)
 })
-const resultado = ref<ResultadoVenta | null>(null)
+// Sin `debounceMs`: acá el carrito no cambia tecla a tecla sino por request, y
+// la página ya sabe en qué punto la línea quedó firme (`recalcular()` explícito).
+const {
+  resultado,
+  vigente,
+  recalcular,
+  asegurarVigente,
+  limpiar: limpiarResultado,
+} = useResultadoCalculado(() =>
+  activeCuenta.value ? cuentaToCalcularInput(activeCuenta.value) : null,
+)
+
+// Las advertencias se atribuyen a una línea POR ÍNDICE: mientras el cálculo no
+// corresponda a la cuenta que se está viendo no se dibujan, porque el índice
+// apuntaría a otra línea. Los totales sí conservan el último valor conocido.
+const calculoVigente = computed(() => vigente.value ? resultado.value : null)
 
 const fusionMode = ref(false)
 const seleccionadasFusion = ref<string[]>([])
 const fusionando = ref(false)
 
 const cobroOpen = ref(false)
+const abriendoCobro = ref(false)
 const submitting = ref(false)
 const cancelOpen = ref(false)
 const propinaMonto = ref('0')
@@ -320,6 +335,22 @@ watch(cobroOpen, (v) => {
   }
 })
 
+/** El modal de cobro pide el `totalFinal` que sale de `resultado`: se abre recién
+ *  cuando ese total es el de esta cuenta, no el de la mutación anterior. */
+async function abrirCobro() {
+  abriendoCobro.value = true
+  try {
+    if (await asegurarVigente()) {
+      cobroOpen.value = true
+      return
+    }
+    toast.add({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' })
+  }
+  finally {
+    abriendoCobro.value = false
+  }
+}
+
 // En el detalle de cuenta cada columna scrollea internamente (catálogo / líneas),
 // así que el body del drawer no debe scrollear como unidad (evita el doble scroll).
 const drawerBodyUi = computed(() => ({
@@ -401,7 +432,7 @@ onMounted(async () => {
 async function onSelectMesa(mesa: MesaResumen) {
   selectedMesa.value = mesa
   activeCuenta.value = null
-  resultado.value = null
+  limpiarResultado()
   fusionMode.value = false
   seleccionadasFusion.value = []
   mesaDrawerOpen.value = true
@@ -418,20 +449,6 @@ async function cargarCuentas(mesaId: string) {
   }
   finally {
     loadingCuentas.value = false
-  }
-}
-
-async function recalcular() {
-  const cuenta = activeCuenta.value
-  if (!cuenta || cuenta.lineas.length === 0) {
-    resultado.value = null
-    return
-  }
-  try {
-    resultado.value = await calcular(cuentaToCalcularInput(cuenta))
-  }
-  catch {
-    resultado.value = null
   }
 }
 
@@ -468,7 +485,7 @@ function abrirCuenta(cuenta: CuentaDetalle) {
 
 function volverACuentas() {
   activeCuenta.value = null
-  resultado.value = null
+  limpiarResultado()
 }
 
 // ── Fusionar cuentas (ej. "1 y 3", "3 y 4" o todas) ────────────────────────
@@ -840,20 +857,28 @@ function itemsParaTicket(cuenta: CuentaDetalle, res: ResultadoVenta) {
 }
 
 async function imprimirPrecuenta() {
-  if (!activeCuenta.value || !selectedMesa.value || !resultado.value) return
+  if (!activeCuenta.value || !selectedMesa.value) return
   imprimiendoPrecuenta.value = true
   try {
+    // El ticket sale de `resultado`: si no corresponde a la cuenta actual imprime
+    // montos de un pedido anterior, así que primero se espera el cálculo al día.
+    const res = await asegurarVigente()
+    if (!res) {
+      toast.add({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' })
+      return
+    }
+    if (!activeCuenta.value || !selectedMesa.value) return
     await impresorasApi.imprimirPrecuenta({
       emisor: emisor.value,
       mesaNombre: selectedMesa.value.nombre,
       cuentaNumero: activeCuenta.value.numero,
-      items: itemsParaTicket(activeCuenta.value, resultado.value),
-      totales: resultado.value.totales,
-      impuestos: agregarImpuestosVenta(resultado.value.lineas),
+      items: itemsParaTicket(activeCuenta.value, res),
+      totales: res.totales,
+      impuestos: agregarImpuestosVenta(res.lineas),
       ...(propinaHabilitada.value && new Decimal(propinaPorcentaje.value || '0').gt(0)
         ? { propinaSugerida: {
             porcentaje: propinaPorcentaje.value,
-            monto: new Decimal(resultado.value.totales.totalFinal).times(propinaPorcentaje.value).toDecimalPlaces(0).toString(),
+            monto: new Decimal(res.totales.totalFinal).times(propinaPorcentaje.value).toDecimalPlaces(0).toString(),
           } }
         : {}),
       formatMonto: (v: string) => formatMonto(v),
@@ -902,10 +927,13 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
   if (!activeCuenta.value) return
   submitting.value = true
   const cuentaCerrada = activeCuenta.value
-  const resultadoCerrado = resultado.value
   const tipMonto = propinaMonto.value || '0'
   const tipSugerida = propinaSugerida.value || tipMonto
   try {
+    // La boleta y la proyección local de la caja salen de acá: se espera el
+    // cálculo de ESTA cuenta, no el que quedó de la mutación anterior. Dentro
+    // del `try` para que un fallo no deje el drawer trabado en `submitting`.
+    const resultadoCerrado = await asegurarVigente()
     await salonesApi.cerrarCuenta(cuentaCerrada.id, {
       pin,
       pagos,
@@ -945,6 +973,11 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
       catch (e: unknown) {
         toast.add({ title: apiErrorMsg(e, 'Venta generada, pero falló la impresión de la boleta'), color: 'warning' })
       }
+    }
+    else {
+      // Mismo criterio que el fallo de impresora: la cuenta ya se cerró, pero
+      // quedarse sin el cálculo del que sale el ticket no puede ser silencioso.
+      toast.add({ title: 'Venta generada, pero no se pudo generar la boleta', color: 'warning' })
     }
 
     cuentas.value = cuentas.value.filter(c => c.id !== cuentaCerrada.id)
@@ -1212,7 +1245,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                         {{ linea.personalizacionTexto }}
                       </p>
                       <p class="text-xs text-muted">{{ formatMonto(lineaSubtotal(linea), linea.monedaId) }}</p>
-                      <AdvertenciasPrecio :advertencias="resultado?.lineas[index]?.advertencias ?? []" />
+                      <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
                     </div>
                     <AppCantidadInput
                       :model-value="presentacionLinea(linea)"
@@ -1232,7 +1265,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
               </div>
 
               <div class="shrink-0 border-t border-default pt-3">
-                <AdvertenciasPrecio :advertencias="resultado?.advertenciasVenta ?? []" class="mb-2" />
+                <AdvertenciasPrecio :advertencias="calculoVigente?.advertenciasVenta ?? []" class="mb-2" />
                 <UAlert
                   v-if="cuentaConItemEliminado"
                   color="error"
@@ -1291,8 +1324,9 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
                   <UButton
                     color="primary"
                     class="flex-1 justify-center"
+                    :loading="abriendoCobro"
                     :disabled="activeCuenta.lineas.length === 0 || !tieneCaja || cuentaConItemEliminado"
-                    @click="() => { cobroOpen = true }"
+                    @click="abrirCobro"
                   >
                     Cerrar y cobrar
                   </UButton>

@@ -724,33 +724,6 @@ Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` 
   muerto. Ventana de milisegundos entre dos escrituras de admin; es la misma clase de
   carrera que ya tienen los tres bloqueos preexistentes (ingrediente, combo, opción).
 
-## Revisión final `advertencias-previsualizacion` (2026-07-29)
-
-Hallazgos de la revisión que cerró las advertencias del motor de precios en los tres
-carritos. Ninguno bloqueaba; el veredicto fue limpio. Se difieren por alcance.
-
-- [ ] **`resultado` y `lineas` se desfasan: el aviso puede quedar bajo la línea
-  equivocada** (frontend, los tres carritos) — el cruce línea↔resultado es por índice,
-  que es lo correcto, pero **nadie invalida `resultado` cuando cambia el carrito**.
-  Es el modo de falla que la regla "nunca cruzar por `itemId`" busca evitar, entrando por
-  la puerta de atrás: el índice es estable, lo que no lo es es la pareja. **Preexistente**
-  — ya afectaba a `resultado.totales`, que se muestra hace rato; la feature solo lo hizo
-  visible porque ahora hay algo atribuido a una línea concreta.
-  - POS y Tienda (`useVenta.ts:384-406`, `useTiendaCarrito.ts:45-67`): el `watch` recalcula
-    con 300 ms de debounce y `resultado` conserva la respuesta anterior. Reproducción:
-    carrito `[A con descuento topeado, B]`, borrar A → el template rinde `[B]` de inmediato
-    pero `resultado.lineas[0]` sigue siendo el de A, así que **el aviso de A se dibuja bajo
-    B** durante el debounce más el round-trip. Misma ventana al cambiar cantidades.
-  - Salones (`salones/index.vue:361-373`): `recalcular()` **no secuencia requests** y se
-    dispara desde `syncCuenta` y `patchLineaOptimista`. Reproducción: dos cambios rápidos de
-    cantidad generan dos `calcular` solapados; si el viejo resuelve último, `resultado` queda
-    apuntando a un set de líneas anterior **hasta la próxima mutación** — ahí la mala
-    atribución deja de ser transitoria.
-
-  Encararlo es invalidación + secuenciación en los tres carritos (descartar respuestas
-  obsoletas por token de request, y limpiar `resultado` al cambiar de cuenta), no un parche
-  en el componente de advertencias.
-
 ## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
 
 El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado

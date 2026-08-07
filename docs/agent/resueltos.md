@@ -2398,6 +2398,65 @@ siguen diferidos están en `pendientes.md`.
   si el garzón placeholder no existiera con ese id, la propina de POS del `liquidacion-propinas`
   no repartiría.
 
+- [x] ~~**`resultado` y `lineas` se desfasan: el aviso puede quedar bajo la línea
+  equivocada**~~ (frontend, los tres carritos) — cerrado 2026-08-07 con
+  `useResultadoCalculado()` en `app/composables/useCalculoPrecios.ts`, un solo lugar
+  donde vive el par carrito↔cálculo. Los tres carritos lo consumen; ninguno guarda
+  `resultado` por su cuenta.
+  **La entrada describía dos formas y había una tercera, más cara:** además del aviso
+  mal atribuido, el **modal de cobro pide su `:total` de `resultado`** (POS
+  `ventas/pos.vue`, salones `salones/index.vue`) y la precuenta/boleta de salones
+  imprime `totales` e `itemsParaTicket()` desde ahí. Agregar un ítem y hacer clic en
+  Cobrar dentro de la ventana del debounce abría el modal con el total del carrito
+  anterior: no era solo cosmética.
+  **Cómo se cerró**, dos mecanismos, uno por cada forma de desfase:
+  - **`vigente` es derivado**, no un flag: compara la clave del input actual contra la
+    del input que produjo el resultado guardado. Un booleano habría que bajarlo en
+    cada sitio que muta el carrito —cuatro en salones más los dos watchers con
+    debounce—, y el que se olvide reporta "al día" en silencio; la clave no se puede
+    desincronizar del input porque se calcula de él.
+  - **token de request**: dos `calcular` solapados no dejan que la vieja pise a la nueva.
+  - **un cálculo que falla no toca el resultado guardado.** El primer intento lo
+    borraba, y la revisión lo midió: bastaba un error de red para dejar el total en
+    cero **con el modal de cobro abierto** (`totalFinal` es un computed vivo, no un
+    snapshot), y de paso sin boleta. La vigencia ya dice si el guardado sirve.
+
+  Las advertencias se dibujan solo con `vigente` (los totales conservan el último valor
+  para que no parpadeen tecla a tecla); todo lo que mueve plata —abrir el cobro,
+  imprimir precuenta, cerrar la cuenta— pasa por `await asegurarVigente()`. Si devuelve
+  `null` no se sigue con **lo que dependía del cálculo** (no se abre el cobro, no se
+  imprime) y se avisa; lo ya cobrado se registra igual, porque el backend calcula su
+  propio total y el cliente ya pagó.
+  **Lo fijan 20 tests** —17 en `useResultadoCalculado.nuxt.spec.ts` y 3 de render en
+  `CarritoPanel.nuxt.spec.ts`, que son los únicos que ven el cruce índice↔advertencia
+  en el template— y **8 mutantes medidos**, cada uno revirtiendo a la conducta anterior
+  y verificado como aplicado.
+  **Cinco de esos tests salieron de la revisión independiente**, que bloqueó en la
+  primera ronda. Lo que encontró, y que el gate no veía:
+  - El `catch` que borraba el resultado era **una regresión**: si el cálculo que falla
+    es del mismo carrito, el guardado era el bueno.
+  - `asegurarVigente()` no cancelaba un debounce pendiente cuando el carrito ya estaba
+    vigente —agregar algo y sacarlo antes de los 300 ms— así que el timer sobrevivía y
+    recalculaba con el modal de cobro ya abierto. Ahora el callback revalida al
+    disparar, y el timer no sobrevive al unmount de la página (`onScopeDispose`).
+  - La **tienda** había quedado sin el guard y la **boleta del POS** leía el ref crudo,
+    mientras tres documentos afirmaban lo contrario.
+  - Con `persistKey` el token era local por instancia, así que el `limpiar()` de una
+    página no podía descartar la respuesta en vuelo de otra. Pasó a `useState`.
+
+  Dos hallazgos de la segunda ronda cambiaron decisiones, no solo código: gatear el
+  botón por `vigente` **dejaba la tienda trabada** tras un fallo de red (gris, sin
+  mensaje, sin reintento) —el POS no tenía el problema justamente porque no lo
+  gateaba—, y los cuatro `if (!x) return` mudos del camino del dinero ahora avisan.
+  También salió un early-return del watcher que **ningún mutante mataba**: se fue, por
+  la misma vara con la que se había ido el `clearTimeout` de `recalcular()`.
+  **Sobre el camino que quedó bloqueado en `853c16b3`** (filtrar las líneas de ítems
+  eliminados antes de calcular): esto lo acerca pero **no lo destraba solo**. Filtrar el
+  input hace que `resultado.lineas` sea más corto que las líneas visibles, y eso es un
+  desfase de longitud que la vigencia no resuelve —haría falta un mapeo explícito de
+  índices—. Lo que sí cambió es que ahora hay **un único lugar** donde el input se
+  arma (el getter que recibe el composable), que es donde ese mapeo iría.
+
 ## Revisión final `precio-base-negativo` (2026-07-29)
 
 - [x] ~~**Tres hermanos de dinero del módulo `items` sin validación de signo**~~ (backend) —

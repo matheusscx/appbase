@@ -319,6 +319,33 @@ El backend devuelve la entidad o un patch mergeable. Recargar duplica el round-t
 parpadea la UI y pierde el estado local (scroll, filtros, selección).
 Detalle: `docs/patterns/frontend.md`.
 
+### ❌ Leer una respuesta asíncrona sin comprobar que corresponde al estado actual
+
+```ts
+// MAL — el carrito cambió, la respuesta guardada es del carrito anterior
+watch(lineas, () => { setTimeout(() => { resultado.value = await calcular(...) }, 300) })
+// …y el template cruza por índice contra las líneas de AHORA
+<AdvertenciasPrecio :advertencias="resultado?.lineas[index]?.advertencias ?? []" />
+// …y el modal de cobro pide el total que salió de ahí
+@cobrar="cobroOpen = true"
+
+// BIEN — el resultado sabe a qué carrito pertenece
+const { resultado, vigente, asegurarVigente } = useResultadoCalculado(() => input())
+const calculoVigente = computed(() => vigente.value ? resultado.value : null)
+async function abrirCobro() { if (await asegurarVigente()) cobroOpen.value = true }
+```
+
+Apareció en los tres carritos a la vez. El bug no es el cruce por índice —ese es el
+correcto— sino que **nadie garantizaba que el par índice↔línea siguiera siendo el
+mismo**: borrar la primera línea dibujaba su advertencia bajo la segunda, y hacer clic
+en Cobrar dentro de la ventana del debounce abría el modal con el total anterior.
+
+La regla general: si un dato se guarda desde un `await` y se cruza con estado que
+pudo cambiar mientras tanto, guardar **junto al dato la identidad del estado que lo
+produjo**. Un booleano "cargando" no alcanza: hay que poder responder *¿este
+resultado es de esto que estoy mirando?*, no solo *¿hay algo en vuelo?*.
+Detalle: `docs/patterns/frontend.md` §10.1.
+
 ### ❌ Tailwind hardcoded en vez de tokens semánticos
 
 ```vue

@@ -303,7 +303,10 @@ Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobr
   - `resumenCobro` marca `excedenteSinVuelto` cuando los pagos con métodos sin vuelto superan el total (ese excedente no se puede devolver); el vuelto solo se acredita si proviene de métodos con vuelto
   - `toCalculoInput(carrito, metodoPago, descuentosVenta, recargosVenta)` — estructura payload para `/calculo-precios/calcular`
 
-- **Estado reactivo**: `ref` del carrito con recalculación debounced (100ms) cada vez que cambia cantidad o se agregan reglas.
+- **Estado reactivo**: `ref` del carrito; el resultado del cálculo lo maneja
+  `useResultadoCalculado()` (debounce 300 ms), que lo mantiene atado al carrito que lo
+  produjo — ver `docs/patterns/frontend.md` §10.1. El botón Cobrar espera un cálculo
+  vigente antes de abrir el modal: el `:total` que se cobra sale de ahí.
 
 ### Fricción por Documento
 

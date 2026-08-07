@@ -6,6 +6,8 @@ import { unidadBaseItem } from '~/utils/cantidad-presentacion'
 const props = defineProps<{
   lineas: CarritoLinea[]
   resultado: ResultadoVenta | null
+  /** ¿`resultado` corresponde a `lineas`? Ver `useResultadoCalculado`. */
+  vigente: boolean
   loadingCalculo?: boolean
   pagando?: boolean
 }>()
@@ -21,7 +23,16 @@ const emit = defineEmits<{
 const { formatMonto } = useFormatters()
 const { convertirAMonedaOficial } = useMonedaConversion()
 
+// Las advertencias se atribuyen a una línea POR ÍNDICE: mientras el cálculo no
+// corresponda al carrito actual no se dibujan, porque el índice apuntaría a otra
+// línea. Los totales sí conservan el último valor conocido.
+const calculoVigente = computed(() => props.vigente ? props.resultado : null)
+
 const monedaIdsEnCarrito = computed(() => props.lineas.map((l) => l.item.monedaId))
+// NO se gatea por `vigente`, a propósito: el clic espera `asegurarVigente()`, que
+// además reintenta si el cálculo había fallado. Gatear el botón dejaba la pantalla
+// trabada tras un fallo de red —botón gris, sin mensaje, y la única salida era
+// adivinar que había que mover una cantidad—. Misma decisión que el POS.
 const habilitarPago = computed(() => props.lineas.length > 0 && !props.loadingCalculo)
 
 function unidadPresLinea(linea: CarritoLinea): string {
@@ -58,7 +69,7 @@ function presentacionLinea(linea: CarritoLinea): string {
             <p class="text-xs text-muted font-mono">
               {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
-            <AdvertenciasPrecio :advertencias="resultado?.lineas[index]?.advertencias ?? []" />
+            <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
           </div>
           <AppCantidadInput
             :model-value="presentacionLinea(linea)"
@@ -92,7 +103,7 @@ function presentacionLinea(linea: CarritoLinea): string {
           <div class="flex justify-between text-muted">
             <span>Impuestos</span><span>+{{ formatMonto(resultado.totales.totalImpuestos) }}</span>
           </div>
-          <AdvertenciasPrecio :advertencias="resultado.advertenciasVenta" class="mb-1" />
+          <AdvertenciasPrecio :advertencias="calculoVigente?.advertenciasVenta ?? []" class="mb-1" />
           <div class="flex justify-between items-center font-semibold text-default text-base pt-1 border-t border-default">
             <span class="flex items-center gap-1">
               Total

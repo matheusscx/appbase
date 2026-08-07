@@ -442,6 +442,53 @@ Para pantallas complejas con múltiples paneles orquestados, ver
 reactivo que los envuelve con `computed`. Componentes pequeños (`CarritoPanel`,
 `CobroModal`, `ClienteForm`) que no contienen lógica sino que la consumen de arriba.
 
+### 10.1 El resultado del cálculo va atado al carrito que lo produjo
+
+Los tres carritos (POS, tienda, salones) muestran el desglose que devuelve
+`POST /calculo-precios/calcular` y lo cruzan con las líneas **por índice**. El
+índice es lo correcto —dos líneas del mismo ítem con distinta personalización no
+se distinguen por `itemId`— pero solo sirve mientras el resultado corresponda al
+carrito que se está viendo, y entre el cambio y la respuesta hay una ventana.
+
+`useResultadoCalculado()` (en `app/composables/useCalculoPrecios.ts`) es el único
+lugar donde vive ese estado. Recibe un **getter del input** y devuelve
+`{ resultado, loading, vigente, recalcular, asegurarVigente, limpiar }`:
+
+- **`vigente`** es derivado: compara la clave del input actual contra la del
+  input que produjo el resultado guardado. No es un flag que alguien tenga que
+  acordarse de bajar, así que no depende del orden de las llamadas.
+- **el token de request** descarta respuestas obsoletas: dos `calcular`
+  solapados no dejan que la vieja pise a la nueva.
+
+Cómo se consume:
+
+- **Advertencias** (atribuidas a una línea concreta) se dibujan solo con
+  `vigente`; los totales conservan el último valor conocido para que no
+  parpadeen en cada tecla.
+- **Todo lo que mueve plata** —abrir el modal de cobro, imprimir precuenta o
+  boleta, el Pagar de la tienda— llama `await asegurarVigente()`. Lo que se
+  **construye** con el cálculo (los ítems del ticket, los totales impresos, la
+  proyección local de la caja) usa **lo que devuelve**, no `resultado.value`
+  releído después. Si devuelve `null` no se sigue **con lo que dependía del
+  cálculo** —no se abre el cobro, no se imprime— **y se avisa**: quedarse sin el
+  cálculo en el camino del dinero no puede ser silencioso. Lo ya cobrado se
+  registra igual: la venta se emite y la cuenta se cierra aunque no salga el
+  ticket, porque el backend calcula su propio total y el cliente ya pagó.
+  El `:total` que muestra el modal de cobro sí sigue al ref, y es seguro porque
+  el modal solo se abre con el cálculo vigente y el carrito no cambia mientras
+  está abierto.
+- **El botón NO se gatea por `vigente`.** El clic ya espera `asegurarVigente()`,
+  que además reintenta si el cálculo había fallado. Gatearlo deja la pantalla
+  trabada tras un fallo de red: botón gris, sin mensaje y sin forma de reintentar.
+- **Un cálculo que falla no borra el resultado guardado.** La vigencia ya dice si
+  sirve; borrarlo deja el total en cero por un error de red, y `totalFinal` es un
+  computed vivo: puede pasar con el modal de cobro ya abierto.
+- **`debounceMs`** solo para los carritos que cambian tecla a tecla (POS,
+  tienda). Salones muta por request y llama `recalcular()` explícito.
+- **`persistKey`** solo para el carrito que sobrevive la navegación (tienda):
+  usa `useState` en vez de refs locales. El token de request va con él —el
+  composable se instancia en tres páginas y todas escriben el mismo estado.
+
 ---
 
 ## 12. Listados paginados (server-side)

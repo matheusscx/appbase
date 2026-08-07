@@ -9,7 +9,7 @@ const apiUrl = config.public.apiUrl
 const toast = useToast()
 const unidadesStore = useUnidadesMedidaStore()
 
-const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidadPresentacion, pagar } = useTiendaCarrito()
+const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar, cambiarCantidadPresentacion, pagar } = useTiendaCarrito()
 
 const items = ref<ItemCatalogo[]>([])
 const loadingCatalogo = ref(false)
@@ -54,6 +54,14 @@ function onCambiarCantidadPresentacion(
 async function irAPagar() {
   pagando.value = true
   try {
+    // El comprador aprieta Pagar sobre el total que está viendo: se espera a que
+    // ese total sea el de su carrito. El monto lo recalcula el backend igual,
+    // pero mostrar uno y cobrar otro no es una diferencia que le toque descubrir.
+    if (!await asegurarVigente()) {
+      toast.add({ title: 'No se pudo calcular el total. Intentá de nuevo.', color: 'error' })
+      pagando.value = false
+      return
+    }
     const res = await pagar()
     if (res.modo === 'webpay') {
       // Redirect real fuera de la SPA al formulario hosted de Webpay.
@@ -88,6 +96,7 @@ async function irAPagar() {
           <TiendaCarritoOnline
             :lineas="lineas"
             :resultado="resultado"
+            :vigente="vigente"
             :loading-calculo="loadingCalculo"
             :pagando="pagando"
             @cambiar-cantidad="onCambiarCantidadPresentacion"

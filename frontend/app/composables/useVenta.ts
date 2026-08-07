@@ -1,6 +1,6 @@
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import Decimal from 'decimal.js'
-import { useCalculoPrecios, type ResultadoVenta, type CalcularVentaInput } from './useCalculoPrecios'
+import { useResultadoCalculado, type CalcularVentaInput } from './useCalculoPrecios'
 import type { CustomerForm } from '~/components/ventas/ClienteForm.vue'
 import { personalizacionVacia, type PersonalizacionPayload } from './useRecetaPersonalizacion'
 import {
@@ -383,37 +383,16 @@ export function puedeCobrar(args: {
 // ── Composable reactivo con estado y recálculo ──────────────────────────────
 
 export function useVenta() {
-  const { calcular } = useCalculoPrecios()
   const unidadesStore = useUnidadesMedidaStore()
   const lineas = ref<CarritoLinea[]>([])
-  const resultado = ref<ResultadoVenta | null>(null)
-  const loadingCalculo = ref(false)
 
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null
-
-  async function recalcular() {
-    if (lineas.value.length === 0) {
-      resultado.value = null
-      return
-    }
-    loadingCalculo.value = true
-    try {
-      resultado.value = await calcular(toCalcularInput(lineas.value))
-    } finally {
-      loadingCalculo.value = false
-    }
-  }
-
-  watch(
-    lineas,
-    () => {
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        void recalcular()
-      }, 300)
-    },
-    { deep: true },
-  )
+  const {
+    resultado,
+    loading: loadingCalculo,
+    vigente,
+    asegurarVigente,
+    limpiar: limpiarResultado,
+  } = useResultadoCalculado(() => toCalcularInput(lineas.value), { debounceMs: 300 })
 
   function catalogo(): UnidadCat[] {
     return unidadesStore.unidades.map(u => ({
@@ -462,13 +441,15 @@ export function useVenta() {
   }
   function limpiar() {
     lineas.value = []
-    resultado.value = null
+    limpiarResultado()
   }
 
   return {
     lineas,
     resultado,
     loadingCalculo,
+    vigente,
+    asegurarVigente,
     add,
     quitar,
     cambiarCantidad,

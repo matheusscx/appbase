@@ -26,7 +26,7 @@ const cajaStore = useCajaStore()
 const authStore = useAuthStore()
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
-const { lineas, resultado, loadingCalculo, add, quitar, cambiarCantidadPresentacion, limpiar } = useVenta()
+const { lineas, resultado, loadingCalculo, vigente, asegurarVigente, add, quitar, cambiarCantidadPresentacion, limpiar } = useVenta()
 const unidadesStore = useUnidadesMedidaStore()
 const impresorasApi = useImpresoras()
 const { formatMonto } = useFormatters()
@@ -80,6 +80,18 @@ function abrirCierreDrawer() { cierreDrawerOpen.value = true }
 
 const tieneCaja = computed(() => cajaStore.activa !== null)
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
+
+/** El modal de cobro pide el `totalFinal` que sale de `resultado`, y entre el
+ *  último cambio del carrito y su cálculo hay una ventana (debounce + ida y
+ *  vuelta). Se abre recién cuando ese total es el del carrito que se está
+ *  viendo, no el del anterior. */
+async function abrirCobro() {
+  if (await asegurarVigente()) {
+    cobroOpen.value = true
+    return
+  }
+  toast.add({ title: 'No se pudo calcular el total. Intentá de nuevo.', color: 'error' })
+}
 
 const cajaMenuItems = computed<DropdownMenuItem[][]>(() => [
   [
@@ -206,7 +218,10 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         terceroId: customer.value.terceroId || undefined,
       }
     }
-    const resultadoVenta = resultado.value
+    // La boleta cruza `resultadoVenta.lineas[i]` con `lineasVenta[i]`: los dos
+    // se toman del mismo cálculo vigente, si no el ticket mezcla el nombre de
+    // una línea con el monto de otra.
+    const resultadoVenta = await asegurarVigente()
     const lineasVenta = [...lineas.value]
 
     const venta = await useApiFetch<{ estado: string; advertencias?: string[] }>(`${apiUrl}/ventas`, {
@@ -263,6 +278,12 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
       } catch (e: unknown) {
         toast.add({ title: apiErrorMsg(e, 'Venta registrada, pero falló la impresión de la boleta'), color: 'warning' })
       }
+    }
+    else {
+      // Un fallo de impresora avisa; quedarse sin el cálculo del que sale el
+      // ticket también tiene que avisar, si no la venta queda sin comprobante
+      // y sin que nadie se entere.
+      toast.add({ title: 'Venta registrada, pero no se pudo generar la boleta', color: 'warning' })
     }
 
     // Persiste la venta en el catálogo base; el carrito se limpia después.
@@ -324,12 +345,13 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
             v-model:customer-expandido="customerExpandido"
             :lineas="lineas"
             :resultado="resultado"
+            :vigente="vigente"
             :loading-calculo="loadingCalculo"
             :tipos-documento="tiposDocumento"
             :tiene-caja="tieneCaja"
             @cambiar-cantidad="onCambiarCantidadPresentacion"
             @quitar="quitar"
-            @cobrar="cobroOpen = true"
+            @cobrar="abrirCobro"
             @limpiar-todo="limpiar"
           />
         </div>
