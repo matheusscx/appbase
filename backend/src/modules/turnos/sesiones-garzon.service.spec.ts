@@ -201,9 +201,11 @@ describe('SesionesGarzonService', () => {
     sesionRepo.save.mockImplementation((row: SesionGarzon) =>
       Promise.resolve(row),
     );
-    dataSource.query.mockResolvedValue([
-      { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
-    ]);
+    dataSource.query
+      .mockResolvedValueOnce([
+        { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
+      ])
+      .mockResolvedValueOnce([]);
 
     const result = await service.cerrarPorPin(TENANT, PIN);
 
@@ -211,6 +213,7 @@ describe('SesionesGarzonService', () => {
     expect(result.origenCierre).toBe(OrigenCierreSesion.PIN);
     expect(result.finEl).toBeInstanceOf(Date);
     expect(result.cerradaPorUsuarioId).toBeNull();
+    expect(result.cuentasPendientes).toEqual([]);
   });
 
   it('cerrarPorPin sin sesión abierta → 400', async () => {
@@ -230,9 +233,11 @@ describe('SesionesGarzonService', () => {
     sesionRepo.save.mockImplementation((row: SesionGarzon) =>
       Promise.resolve(row),
     );
-    dataSource.query.mockResolvedValue([
-      { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
-    ]);
+    dataSource.query
+      .mockResolvedValueOnce([
+        { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
+      ])
+      .mockResolvedValueOnce([]);
 
     const result = await service.cerrarAdmin(TENANT, SESION_ID, USUARIO_ID);
 
@@ -240,6 +245,112 @@ describe('SesionesGarzonService', () => {
     expect(result.origenCierre).toBe(OrigenCierreSesion.ADMIN);
     expect(result.cerradaPorUsuarioId).toBe(USUARIO_ID);
     expect(result.finEl).toBeInstanceOf(Date);
+    expect(result.cuentasPendientes).toEqual([]);
+  });
+
+  // ── Mesas que quedan abiertas al cerrar la sesión ──────────────────────────
+  // Ninguno de los dos cierres se bloquea (decisión del owner, 2026-08-06): lo
+  // que devuelven es la lista para que la UI ofrezca transferirla. Sin ella el
+  // garzón se va y la mesa queda sin poder cobrarse, porque `cerrarCuenta`
+  // exige que el responsable esté en turno.
+
+  const filaPendiente = {
+    cuenta_id: 'cuenta-1',
+    numero: 3,
+    mesa_nombre: 'Mesa 4',
+    salon_nombre: 'Terraza',
+  };
+
+  it('cerrarPorPin devuelve las cuentas que quedaron a nombre del garzón', async () => {
+    sesionRepo.findOne.mockResolvedValue(sesion());
+    sesionRepo.save.mockImplementation((row: SesionGarzon) =>
+      Promise.resolve(row),
+    );
+    dataSource.query
+      .mockResolvedValueOnce([
+        { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
+      ])
+      .mockResolvedValueOnce([filaPendiente]);
+
+    const result = await service.cerrarPorPin(TENANT, PIN);
+
+    expect(result.cuentasPendientes).toEqual([
+      {
+        cuentaId: 'cuenta-1',
+        numero: 3,
+        mesaNombre: 'Mesa 4',
+        salonNombre: 'Terraza',
+      },
+    ]);
+    const sql = (dataSource.query.mock.calls[1] as [string, ...unknown[]])[0];
+    const params = (dataSource.query.mock.calls[1] as [string, unknown[]])[1];
+    expect(params).toEqual([TENANT, GARZON_ID]);
+    expect(sql).toMatch(/c\.tenant_id = \$1/);
+    expect(sql).toMatch(/c\.garzon_responsable_id = \$2/);
+    expect(sql).toMatch(/c\.estado = 'abierta'/);
+    expect(sql).toMatch(/c\.eliminado_el IS NULL/);
+  });
+
+  it('cerrarAdmin devuelve las mismas cuentas pendientes', async () => {
+    sesionRepo.findOne.mockResolvedValue(sesion());
+    sesionRepo.save.mockImplementation((row: SesionGarzon) =>
+      Promise.resolve(row),
+    );
+    dataSource.query
+      .mockResolvedValueOnce([
+        { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
+      ])
+      .mockResolvedValueOnce([filaPendiente]);
+
+    const result = await service.cerrarAdmin(TENANT, SESION_ID, USUARIO_ID);
+
+    expect(result.cuentasPendientes).toHaveLength(1);
+    expect(result.cuentasPendientes[0].cuentaId).toBe('cuenta-1');
+    const params = (dataSource.query.mock.calls[1] as [string, unknown[]])[1];
+    expect(params).toEqual([TENANT, GARZON_ID]);
+  });
+
+  // Una cuenta abierta sobre una mesa borrada es justo la que no hay que perder
+  // de vista: con `JOIN` desaparecería de la lista y nadie se enteraría de que
+  // quedó sin cobrar. Se asevera sobre el SQL porque el escenario exige borrar
+  // una mesa con cuentas abiertas, que la API bloquea.
+  it('la cuenta se lista aunque su mesa o su salón estén borrados', async () => {
+    sesionRepo.findOne.mockResolvedValue(sesion());
+    sesionRepo.save.mockImplementation((row: SesionGarzon) =>
+      Promise.resolve(row),
+    );
+    dataSource.query
+      .mockResolvedValueOnce([
+        { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
+      ])
+      .mockResolvedValueOnce([
+        { ...filaPendiente, mesa_nombre: null, salon_nombre: null },
+      ]);
+
+    const result = await service.cerrarPorPin(TENANT, PIN);
+
+    expect(result.cuentasPendientes).toHaveLength(1);
+    expect(result.cuentasPendientes[0].mesaNombre).toBe('');
+    expect(result.cuentasPendientes[0].salonNombre).toBe('');
+
+    const sql = (dataSource.query.mock.calls[1] as [string, ...unknown[]])[0];
+    expect(sql).toMatch(/LEFT JOIN\s+mesas\s+m\b[\s\S]*?m\.tenant_id/i);
+    expect(sql).toMatch(/LEFT JOIN\s+salones\s+sa\b[\s\S]*?sa\.tenant_id/i);
+    expect(sql).not.toMatch(/(?<!LEFT )JOIN\s+mesas/i);
+    expect(sql).not.toMatch(/(?<!LEFT )JOIN\s+salones/i);
+    // Y el soft delete de las DOS tablas nuevas, no solo el de `cuentas`: es la
+    // invariante que más reincide en este repo, y el diff que agregó los joins
+    // es exactamente donde faltaría el freno.
+    expect(sql).toMatch(/m\.eliminado_el IS NULL/);
+    expect(sql).toMatch(/sa\.eliminado_el IS NULL/);
+  });
+
+  it('buscarSesionAbierta devuelve null en vez de tirar 400', async () => {
+    sesionRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.buscarSesionAbierta(TENANT, GARZON_ID),
+    ).resolves.toBeNull();
   });
 
   it('assertSesionAbierta lanza 400 si no hay abierta', async () => {
@@ -260,23 +371,6 @@ describe('SesionesGarzonService', () => {
     await expect(
       service.assertSesionAbierta(TENANT, GARZON_ID),
     ).resolves.toBeUndefined();
-  });
-
-  it('obtenerSesionAbierta devuelve la sesión abierta', async () => {
-    const abierta = sesion();
-    sesionRepo.findOne.mockResolvedValue(abierta);
-
-    const result = await service.obtenerSesionAbierta(TENANT, GARZON_ID);
-
-    expect(result).toBe(abierta);
-  });
-
-  it('obtenerSesionAbierta lanza 400 si no hay abierta', async () => {
-    sesionRepo.findOne.mockResolvedValue(null);
-
-    await expect(
-      service.obtenerSesionAbierta(TENANT, GARZON_ID),
-    ).rejects.toThrow(BadRequestException);
   });
 
   it('listarAbiertas incluye sesión aunque garzón/turno estén soft-deleted', async () => {

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { SesionGarzon } from '~/composables/useSesionesGarzon'
+import { etiquetaCuentaPendiente, useTransferenciaPendientes, type SesionGarzon } from '~/composables/useSesionesGarzon'
 import type { Garzon } from '~/composables/useGarzones'
 import type { Turno } from '~/composables/useTurnos'
+import { shellUi } from '~/utils/ui-shell'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -10,6 +11,7 @@ const toast = useToast()
 const { formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
 const sesionesApi = useSesionesGarzon()
+const salonesApi = useSalones()
 const garzonesApi = useGarzones()
 const turnosApi = useTurnos()
 
@@ -56,9 +58,14 @@ async function forzarCierre() {
   cierreLoading.value = true
   try {
     const id = toCerrar.value.id
-    await sesionesApi.cerrarAdmin(id)
+    const sesion = await sesionesApi.cerrarAdmin(id)
     abiertas.value = abiertas.value.filter(s => s.id !== id)
     toast.add({ title: 'Sesión cerrada', color: 'success' })
+    // Forzar el cierre no bloquea, pero deja las mesas del garzón sin poder
+    // cobrarse hasta que alguien en turno las reciba. Ver
+    // `docs/features/turnos-garzones.md`.
+    pendientesDestinoId.value = destinoOptions.value[0]?.value
+    ofrecerTransferencia(sesion)
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al forzar el cierre'), color: 'error' })
@@ -68,6 +75,40 @@ async function forzarCierre() {
     cierreOpen.value = false
     toCerrar.value = null
   }
+}
+
+// ── Mesas que quedaron sin responsable en turno ──────────────────────────────
+const {
+  pendientes,
+  garzonNombre: pendientesGarzon,
+  abierto: pendientesOpen,
+  transfiriendo: transfiriendoPendientes,
+  ofrecer: ofrecerTransferencia,
+  transferirTodas,
+} = useTransferenciaPendientes()
+
+const pendientesDestinoId = ref<string | undefined>()
+
+// Los destinos salen de las sesiones que siguen abiertas —"alguien en turno"—,
+// no del catálogo de garzones: el backend rechaza transferir a quien no tiene
+// sesión, así que ofrecer a todos sería ofrecer opciones que fallan. Se
+// deduplica porque un garzón podría figurar más de una vez si algo dejó dos
+// sesiones abiertas.
+const destinoOptions = computed(() => {
+  const vistos = new Set<string>()
+  return abiertas.value.flatMap((s) => {
+    if (vistos.has(s.garzonId)) return []
+    vistos.add(s.garzonId)
+    return [{ label: `${s.garzonNombre} · ${s.turnoNombre}`, value: s.garzonId }]
+  })
+})
+
+function transferirPendientes() {
+  const garzonId = pendientesDestinoId.value
+  if (!garzonId) return
+  void transferirTodas(async (cuentaId) => {
+    await salonesApi.transferirCuentaAdmin(cuentaId, garzonId)
+  })
 }
 
 const columnsAbiertas: TableColumn<SesionGarzon>[] = [
@@ -316,6 +357,55 @@ onMounted(async () => {
             </CrudTable>
           </div>
         </template>
+
+        <UModal
+          v-model:open="pendientesOpen"
+          title="Quedaron mesas sin responsable"
+          :description="`${pendientesGarzon} salió de turno con cuentas abiertas a su nombre. Nadie puede cobrarlas hasta transferirlas a alguien en turno.`"
+          :ui="shellUi.modal"
+        >
+          <template #body>
+            <ul class="divide-y divide-default">
+              <li
+                v-for="pendiente in pendientes"
+                :key="pendiente.cuentaId"
+                class="flex items-center gap-2 py-2 text-sm text-default"
+              >
+                <UIcon name="i-lucide-utensils" class="size-4 shrink-0 text-muted" />
+                {{ etiquetaCuentaPendiente(pendiente) }}
+              </li>
+            </ul>
+
+            <p v-if="destinoOptions.length === 0" class="mt-4 text-sm text-muted">
+              No hay ningún garzón en turno para recibirlas. Quedan a nombre de
+              {{ pendientesGarzon }} hasta que alguien entre a turno y las tome.
+            </p>
+            <UFormField v-else label="Transferir a" required class="mt-4">
+              <USelectMenu
+                v-model="pendientesDestinoId"
+                :items="destinoOptions"
+                value-key="value"
+                class="w-full"
+              />
+            </UFormField>
+          </template>
+          <template #footer>
+            <AppModalFooter>
+              <UButton color="neutral" variant="ghost" @click="() => { pendientesOpen = false }">
+                {{ destinoOptions.length === 0 ? 'Entendido' : 'Ahora no' }}
+              </UButton>
+              <UButton
+                v-if="destinoOptions.length > 0"
+                icon="i-lucide-arrow-right-left"
+                :disabled="!pendientesDestinoId"
+                :loading="transfiriendoPendientes"
+                @click="transferirPendientes"
+              >
+                Transferir
+              </UButton>
+            </AppModalFooter>
+          </template>
+        </UModal>
 
         <CrudModal
           v-model:open="cierreOpen"

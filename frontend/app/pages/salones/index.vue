@@ -15,6 +15,7 @@ import {
   type MotivoCuentaAsignacion,
 } from '~/composables/useSalones'
 import type { Garzon } from '~/composables/useGarzones'
+import { etiquetaCuentaPendiente, useTransferenciaPendientes } from '~/composables/useSesionesGarzon'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { Turno } from '~/composables/useTurnos'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
@@ -118,6 +119,7 @@ const motivoAsignacionLabel: Record<MotivoCuentaAsignacion, string> = {
 const pinModalOpen = ref(false)
 const pinModalTitle = ref('Identifícate con tu PIN')
 let pinAction: ((pin: string, nombre: string) => void) | null = null
+let pinCancelado: (() => void) | null = null
 
 // Acción de garzón que falló por no tener sesión de trabajo abierta: se guarda como
 // closure (con su PIN ya capturado) para reintentarla apenas se inicia el turno.
@@ -126,17 +128,42 @@ let accionPendiente: (() => void) | null = null
 function solicitarPin(
   title: string,
   action: (pin: string, nombre: string) => void,
+  onCancelar?: () => void,
 ) {
   pinModalTitle.value = title
   pinAction = action
+  pinCancelado = onCancelar ?? null
   pinModalOpen.value = true
 }
 
 function onPinConfirmado(pin: string, nombre: string) {
   const action = pinAction
   pinAction = null
+  pinCancelado = null
   action?.(pin, nombre)
 }
+
+// El teclado de PIN solo avisa cuando el PIN es válido: si el garzón lo cierra,
+// el llamador no se entera. Sin esto, quien abría el teclado para transferir sus
+// mesas y lo cancelaba perdía la oferta sin forma de reabrirla.
+//
+// En el camino feliz este hook ya no existe: `GarzonPinModal` emite `confirm` y
+// se cierra en el MISMO bloque síncrono, y `onPinConfirmado` anula `pinCancelado`
+// ahí mismo, mientras el watcher (`flush: 'pre'`) recién corre en el microtask
+// siguiente. Por eso no depende del orden de esas dos líneas del componente.
+//
+// `pinAction` NO se toca acá a propósito: anularlo cambiaría la cancelación de
+// los otros cinco flujos que usan este teclado —tocar afuera con `identificar()`
+// en vuelo descartaría la acción en silencio—, y eso está fuera de esta tarea.
+// El precio, en esa misma ventana: la oferta reaparece y un instante después la
+// transferencia se ejecuta igual. Converge bien (el cierre lo hace el propio
+// bucle) y es la semántica que ya tenían los otros cinco.
+watch(pinModalOpen, (abierto) => {
+  if (abierto) return
+  const cancelado = pinCancelado
+  pinCancelado = null
+  cancelado?.()
+})
 
 // ── Entrar / salir de turno ──────────────────────────────────────────────────
 const turnoModalOpen = ref(false)
@@ -235,10 +262,40 @@ async function cerrarSesionConPin(pin: string) {
       title: `Sesión cerrada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
       color: 'success',
     })
+    // El cierre no se bloquea, pero lo que quedó a su nombre no lo puede cobrar
+    // nadie hasta transferirlo: se ofrece acá, con el garzón todavía frente al
+    // equipo. Ver `docs/features/turnos-garzones.md`.
+    ofrecerTransferencia(sesion)
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cerrar sesión'), color: 'error' })
   }
+}
+
+// ── Mesas que quedaron abiertas al salir de turno ────────────────────────────
+const {
+  pendientes,
+  garzonNombre: pendientesGarzon,
+  abierto: pendientesOpen,
+  transfiriendo: transfiriendoPendientes,
+  ofrecer: ofrecerTransferencia,
+  reabrirSiQuedan: reabrirPendientes,
+  transferirTodas,
+} = useTransferenciaPendientes()
+
+// El teclado de PIN es otro modal: este se cierra para dejarle lugar y vuelve si
+// el garzón lo cancela sin transferir.
+function pedirPinParaPendientes() {
+  pendientesOpen.value = false
+  solicitarPin(
+    'PIN del garzón que se hace cargo',
+    (pin) => {
+      void transferirTodas(async (cuentaId) => {
+        aplicarCuentaActualizada(await salonesApi.transferirCuenta(cuentaId, pin))
+      })
+    },
+    reabrirPendientes,
+  )
 }
 
 const selectedSalon = computed(() =>
@@ -650,8 +707,11 @@ function onCantidadChange(
 }
 
 async function flushPendientes() {
-  const pendientes = [...pendingByLinea.entries()]
-  for (const [lineaId, timer] of pendientes) {
+  // `lineasPendientes` y no `pendientes`: ese nombre ya es el ref de las cuentas
+  // que quedaron sin responsable, y sombrearlo acá deja dos cosas sin relación
+  // llamadas igual en el mismo archivo.
+  const lineasPendientes = [...pendingByLinea.entries()]
+  for (const [lineaId, timer] of lineasPendientes) {
     clearTimeout(timer)
     pendingByLinea.delete(lineaId)
     const linea = activeCuenta.value?.lineas.find(l => l.id === lineaId)
@@ -1301,6 +1361,40 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
               @click="confirmarEntrarTurno"
             >
               Continuar
+            </UButton>
+          </AppModalFooter>
+        </template>
+      </UModal>
+
+      <UModal
+        v-model:open="pendientesOpen"
+        title="Dejaste mesas abiertas"
+        :description="`Tu sesión se cerró, pero estas cuentas siguen a nombre de ${pendientesGarzon} y nadie puede cobrarlas hasta transferirlas.`"
+        :ui="shellUi.modal"
+      >
+        <template #body>
+          <ul class="divide-y divide-default">
+            <li
+              v-for="pendiente in pendientes"
+              :key="pendiente.cuentaId"
+              class="flex items-center gap-2 py-2 text-sm text-default"
+            >
+              <UIcon name="i-lucide-utensils" class="size-4 shrink-0 text-muted" />
+              {{ etiquetaCuentaPendiente(pendiente) }}
+            </li>
+          </ul>
+        </template>
+        <template #footer>
+          <AppModalFooter>
+            <UButton color="neutral" variant="ghost" @click="() => { pendientesOpen = false }">
+              Ahora no
+            </UButton>
+            <UButton
+              icon="i-lucide-arrow-right-left"
+              :loading="transfiriendoPendientes"
+              @click="pedirPinParaPendientes"
+            >
+              Transferir con PIN
             </UButton>
           </AppModalFooter>
         </template>

@@ -110,7 +110,7 @@ describe('SalonesService', () => {
   let garzones: { resolverGarzonPorPin: jest.Mock };
   let sesiones: {
     assertSesionAbierta: jest.Mock;
-    obtenerSesionAbierta: jest.Mock;
+    buscarSesionAbierta: jest.Mock;
   };
   let asignaciones: {
     registrarApertura: jest.Mock;
@@ -151,7 +151,7 @@ describe('SalonesService', () => {
     };
     sesiones = {
       assertSesionAbierta: jest.fn().mockResolvedValue(undefined),
-      obtenerSesionAbierta: jest.fn().mockResolvedValue({
+      buscarSesionAbierta: jest.fn().mockResolvedValue({
         id: SESION_RESPONSABLE,
         turnoId: TURNO,
         tipoGarzon: TipoGarzon.GARZON,
@@ -1098,7 +1098,7 @@ describe('SalonesService', () => {
           }),
         }),
       );
-      expect(sesiones.obtenerSesionAbierta).toHaveBeenCalledWith(
+      expect(sesiones.buscarSesionAbierta).toHaveBeenCalledWith(
         TENANT,
         GARZON_RESPONSABLE,
       );
@@ -1261,7 +1261,7 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
       manager.query.mockResolvedValue([]);
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-3' });
-      sesiones.obtenerSesionAbierta.mockResolvedValueOnce({
+      sesiones.buscarSesionAbierta.mockResolvedValueOnce({
         id: 's1',
         turnoId: 'tu1',
         tipoGarzon: TipoGarzon.COCINA,
@@ -1330,6 +1330,32 @@ describe('SalonesService', () => {
       await expect(
         service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
       ).rejects.toThrow(BadRequestException);
+      expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
+    });
+
+    // El cajero SÍ está en turno (`assertSesionAbierta` pasa); el que se fue es
+    // el responsable de la mesa. El mensaje tiene que decir eso y NO contener
+    // "sesión de trabajo": Salones lo usa como señal para abrir el modal de
+    // entrar a turno, y mandaría al cajero a iniciar un turno que ya tiene.
+    it('responsable fuera de turno → 400 que pide transferir, no "sesión de trabajo"', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: GARZON_RESPONSABLE,
+      });
+      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      sesiones.buscarSesionAbierta.mockResolvedValue(null);
+
+      const err = (await service
+        .cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN })
+        .catch((e: unknown) => e)) as Error;
+
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect(err.message).toContain('ya no está en turno');
+      expect(err.message).toContain('Transferí la cuenta');
+      expect(err.message).not.toContain('sesión de trabajo');
+      expect(sesiones.assertSesionAbierta).toHaveBeenCalledWith(TENANT, GARZON);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
 

@@ -36,6 +36,31 @@ export interface SesionPublica {
   cerradaPorUsuarioId: string | null;
 }
 
+/**
+ * Cuenta que quedó abierta a nombre del garzón cuando su sesión se cerró.
+ *
+ * Una cuenta solo se puede cobrar si su garzón responsable tiene sesión abierta
+ * (`cerrarCuenta` la necesita para atribuir la propina al turno). Si el garzón
+ * marca salida con mesas abiertas, esas mesas quedan sin poder cobrarse hasta
+ * que alguien las transfiera — y no hace falta ninguna carrera para llegar ahí:
+ * es el martes normal de un restaurante.
+ *
+ * Decisión del owner (2026-08-06): **el cierre de sesión no se bloquea.** El
+ * garzón que terminó su jornada se va; lo que devuelve el cierre es la lista de
+ * lo que dejó pendiente, para que la UI ofrezca transferirlo a alguien en turno.
+ */
+export interface CuentaPendienteGarzon {
+  cuentaId: string;
+  numero: number;
+  mesaNombre: string;
+  salonNombre: string;
+}
+
+/** Resultado de cerrar una sesión: la sesión + lo que quedó a su nombre. */
+export interface SesionCerrada extends SesionPublica {
+  cuentasPendientes: CuentaPendienteGarzon[];
+}
+
 /** Ítem de listado / historial con nombres. */
 export interface SesionListaItem {
   id: string;
@@ -103,7 +128,7 @@ export class SesionesGarzonService {
     }
   }
 
-  async cerrarPorPin(tenantId: string, pin: string): Promise<SesionPublica> {
+  async cerrarPorPin(tenantId: string, pin: string): Promise<SesionCerrada> {
     const garzon = await this.garzones.resolverGarzonPorPin(tenantId, pin);
     const abierta = await this.sesionRepo.findOne({
       where: {
@@ -122,12 +147,14 @@ export class SesionesGarzonService {
     abierta.cerradaPorUsuarioId = null;
     const guardada = await this.sesionRepo.save(abierta);
 
-    const { turnoNombre } = await this.cargarNombres(
-      tenantId,
-      guardada.garzonId,
-      guardada.turnoId,
-    );
-    return this.toPublico(guardada, garzon.nombre, turnoNombre);
+    const [{ turnoNombre }, cuentasPendientes] = await Promise.all([
+      this.cargarNombres(tenantId, guardada.garzonId, guardada.turnoId),
+      this.cuentasPendientes(tenantId, guardada.garzonId),
+    ]);
+    return {
+      ...this.toPublico(guardada, garzon.nombre, turnoNombre),
+      cuentasPendientes,
+    };
   }
 
   async activaPorPin(
@@ -260,7 +287,7 @@ export class SesionesGarzonService {
     tenantId: string,
     sesionId: string,
     usuarioId: string,
-  ): Promise<SesionPublica> {
+  ): Promise<SesionCerrada> {
     const sesion = await this.sesionRepo.findOne({
       where: { id: sesionId, tenantId },
     });
@@ -277,31 +304,85 @@ export class SesionesGarzonService {
     sesion.cerradaPorUsuarioId = usuarioId;
     const guardada = await this.sesionRepo.save(sesion);
 
-    const { garzonNombre, turnoNombre } = await this.cargarNombres(
-      tenantId,
-      guardada.garzonId,
-      guardada.turnoId,
-    );
-    return this.toPublico(guardada, garzonNombre, turnoNombre);
+    const [{ garzonNombre, turnoNombre }, cuentasPendientes] =
+      await Promise.all([
+        this.cargarNombres(tenantId, guardada.garzonId, guardada.turnoId),
+        this.cuentasPendientes(tenantId, guardada.garzonId),
+      ]);
+    return {
+      ...this.toPublico(guardada, garzonNombre, turnoNombre),
+      cuentasPendientes,
+    };
   }
 
+  /** Gate de Salones: el garzón que opera tiene que estar en turno. */
   async assertSesionAbierta(tenantId: string, garzonId: string): Promise<void> {
-    await this.obtenerSesionAbierta(tenantId, garzonId);
-  }
-
-  async obtenerSesionAbierta(
-    tenantId: string,
-    garzonId: string,
-  ): Promise<SesionGarzon> {
-    const abierta = await this.sesionRepo.findOne({
-      where: { tenantId, garzonId, estado: EstadoSesionGarzon.ABIERTA },
-    });
+    const abierta = await this.buscarSesionAbierta(tenantId, garzonId);
     if (!abierta) {
       throw new BadRequestException(
         'El garzón no tiene una sesión de trabajo abierta',
       );
     }
-    return abierta;
+  }
+
+  /**
+   * La sesión abierta, o `null`. No tira 400 a propósito: el mensaje de
+   * `assertSesionAbierta` habla del garzón que está operando, y hay llamadores
+   * que preguntan por OTRO —`cerrarCuenta`, por el responsable de la cuenta— y
+   * necesitan explicar de quién es la sesión que falta.
+   */
+  async buscarSesionAbierta(
+    tenantId: string,
+    garzonId: string,
+  ): Promise<SesionGarzon | null> {
+    return this.sesionRepo.findOne({
+      where: { tenantId, garzonId, estado: EstadoSesionGarzon.ABIERTA },
+    });
+  }
+
+  /**
+   * Cuentas abiertas a nombre del garzón. Una sola query con los nombres ya
+   * resueltos: la UI las lista tal cual para ofrecer la transferencia.
+   *
+   * Va por SQL y no por `SalonesService` porque la dependencia entre módulos
+   * corre al revés (`SalonesModule` importa `TurnosModule`, no al revés), y
+   * `cuenta-asignaciones` ya inyecta este service. Los JOIN son `LEFT` a
+   * propósito: una cuenta abierta sobre una mesa borrada es justo la que no hay
+   * que perder de vista, y un `JOIN` la escondería.
+   */
+  private async cuentasPendientes(
+    tenantId: string,
+    garzonId: string,
+  ): Promise<CuentaPendienteGarzon[]> {
+    const rows: {
+      cuenta_id: string;
+      numero: number;
+      mesa_nombre: string | null;
+      salon_nombre: string | null;
+    }[] = await this.dataSource.query(
+      `SELECT c.cuenta_id,
+              c.numero,
+              m.nombre AS mesa_nombre,
+              sa.nombre AS salon_nombre
+         FROM cuentas c
+         LEFT JOIN mesas m ON m.mesa_id = c.mesa_id
+           AND m.tenant_id = $1 AND m.eliminado_el IS NULL
+         LEFT JOIN salones sa ON sa.salon_id = m.salon_id
+           AND sa.tenant_id = $1 AND sa.eliminado_el IS NULL
+        WHERE c.tenant_id = $1
+          AND c.garzon_responsable_id = $2
+          AND c.estado = 'abierta'
+          AND c.eliminado_el IS NULL
+        ORDER BY sa.nombre ASC, m.nombre ASC, c.numero ASC`,
+      [tenantId, garzonId],
+    );
+
+    return rows.map((r) => ({
+      cuentaId: r.cuenta_id,
+      numero: r.numero,
+      mesaNombre: r.mesa_nombre ?? '',
+      salonNombre: r.salon_nombre ?? '',
+    }));
   }
 
   private toPublico(

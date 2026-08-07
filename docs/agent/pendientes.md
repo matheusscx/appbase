@@ -14,6 +14,12 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **El job de CI del frontend necesita timeout propio** (2026-08-06) — con
+  `hookTimeout` en 60s y `testTimeout` en 20s (ver [`resueltos.md`](resueltos.md)), un
+  entorno Nuxt realmente colgado tarda hasta un minuto por archivo en reportarse, y hay 22
+  `.nuxt.spec.ts`. Hoy no hay un `timeout-minutes` en `.github/workflows/ci.yml`. Prioridad
+  baja: es el peor caso de una falla que además sería visible por otros lados.
+
 - [ ] **De `configCalculo` faltan `escalaCalculo` y `modoRedondeo`** (frontend, 2026-08-02)
   — el desglose por línea ya usa `formula` para ordenarse y muestra el orden **con el modo
   de cada familia** (`Descuento (base) → Recargo (cascada) → Impuesto`), que es lo que
@@ -498,7 +504,9 @@ del token antes de usar el id; **0 violaciones de soft delete sobre ~65 queries*
 una por una; y ningún `DELETE` físico en el alcance.
 
 **Tres hallazgos se cerraron en la misma pasada** (los dos de severidad alta y el que sumó
-el refutador): ver [`resueltos.md`](resueltos.md).
+el refutador), y el 2026-08-06 se cerró además el **fin de turno con mesas abiertas**, la
+única decisión de owner que había quedado tomada sin construir: ver
+[`resueltos.md`](resueltos.md).
 
 ### El hilo que venía abierto: cerrado con matiz
 
@@ -683,16 +691,6 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
 
 ### Decisión de owner (pendiente de implementar)
 
-- [ ] **Fin de turno con mesas abiertas: avisar y ofrecer transferir** (backend +
-  frontend) — **decidido el 2026-08-06, sin construir.** `cerrarCuenta` exige
-  `obtenerSesionAbierta(garzonResponsableId)`, que **tira 400**, y ni `cerrarPorPin` ni
-  `cerrarAdmin` miran si el garzón tiene cuentas abiertas. Un garzón que marca salida con
-  una mesa abierta la deja imposible de cobrar hasta que alguien la transfiera. **No hace
-  falta ninguna carrera: es el martes normal de un restaurante.** La forma elegida: el
-  cierre de sesión no se bloquea, devuelve las cuentas abiertas, y la UI ofrece
-  transferirlas a alguien con sesión activa. (La lente lo reportó como una carrera entre
-  `assertSesionAbierta` y la transacción de `abrirCuenta`; agrandarlo al caso sin carrera
-  fue del refutador.)
 - [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
   el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`
   sin mirar `cantidadEnviada`, y `actualizarLinea` reemplaza la cantidad por un valor

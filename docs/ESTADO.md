@@ -56,7 +56,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Suscripciones — cobro Oneclick real en el alta (cobro del primer período con tarjeta tokenizada, suscripción amarrada a inscripción, alta reanudable tras inscribir tarjeta, cambio de tarjeta, cascada de cancelación al eliminar la tarjeta) | ✅ Implementado (2026-07-12) |
 | Salones y Mesas (restaurante): administración de salones/mesas con plano drag&drop (forma y tamaño de mesa), operación del garzón (cuentas por mesa, múltiples cuentas, cancelar), cierre de cuenta que genera venta real reusando el POS | ✅ Implementado (2026-07-12) |
 | Gestión de Garzones: registro de garzones con PIN de 6 dígitos (hasheado), identificación operativa por PIN en dispositivos compartidos, trazabilidad de quién abre/cierra cada cuenta | ✅ Implementado (2026-07-13) |
-| Turnos y sesiones de garzón: catálogo de turnos, marcar entrada/salida con PIN, cierre admin, sesión obligatoria para abrir/cerrar cuentas | ✅ Implementado (2026-07-16) |
+| Turnos y sesiones de garzón: catálogo de turnos, marcar entrada/salida con PIN, cierre admin, sesión obligatoria para abrir/cerrar cuentas; el fin de turno con mesas abiertas no se bloquea, las devuelve y ofrece transferirlas | ✅ Implementado (2026-07-16, fin de turno con mesas abiertas 2026-08-06) |
 | Responsable vigente de cuenta + transferencia por PIN/admin + historial auditable | ✅ Implementado (2026-07-16) |
 | Registro de propinas al cerrar cuenta de mesa (`venta_propina` + `pago_aplicaciones`, estrategia `NO_VUELTO`, UI salones) | ✅ Implementado (2026-07-17) |
 | Liquidación propinas E1 — modelo base (tipo garzón, tip+sesión, bases venta) | ✅ Implementado (2026-07-17) |

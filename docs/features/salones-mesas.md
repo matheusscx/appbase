@@ -76,6 +76,10 @@ del garzón usa el permiso dedicado **`Operar`**.
 - Al cerrar se congela en `venta_propina`: `sesion_garzon_id`, `turno_id` y
   `tipo_garzon` de la **sesión abierta del responsable** (paridad: las tres columnas
   van juntas o son null en legado). `liquidacion_id` queda `NULL` hasta E3.
+  Si el responsable ya no está en turno, el cierre falla con *"El garzón
+  responsable de la cuenta ya no está en turno. Transferí la cuenta a alguien en
+  turno para poder cobrarla."* — la salida es la transferencia, y el fin de turno
+  la ofrece solo ([turnos-garzones.md](./turnos-garzones.md)).
 - Cobro: Σ pagos == `total_final + propinaMonto`. El split tipado vive en
   `pago_aplicaciones` (`venta` | `propina`) con estrategia `NO_VUELTO` (tip primero
   a métodos sin vuelto).

@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-07-17 (snapshot `tipo_garzon` al iniciar sesión)
+**Last Updated**: 2026-08-06 (fin de turno con mesas abiertas: avisar y ofrecer transferir)
 
 ---
 
@@ -41,6 +41,16 @@ sesiones abiertas, forzar cierres y consultar historial.
 - Máximo **una sesión abierta** por garzón y tenant.
 - Errores de PIN o sesión son **`400 Bad Request`**, nunca `401`, para no
   gatillar refresh/logout del dispositivo compartido.
+- **El fin de turno no se bloquea aunque el garzón deje mesas abiertas**
+  (decisión del owner, 2026-08-06). Cobrar una cuenta exige que su **responsable**
+  esté en turno —la propina se atribuye a esa sesión—, así que un garzón que
+  marca salida con una mesa abierta la deja sin poder cobrarse hasta que alguien
+  la reciba. No hace falta ninguna carrera para llegar ahí: es el martes normal
+  de un restaurante. Bloquear el cierre sería peor (el garzón se va igual, y
+  ahora con la sesión abierta contando horas), así que los dos cierres —PIN y
+  admin— **devuelven las cuentas que quedaron a su nombre** y la UI ofrece
+  transferirlas a alguien en turno. Aceptar la oferta es opcional: el estado
+  "cuenta sin responsable en turno" es válido y reversible con una transferencia.
 - RBAC: módulo contratado `Salones` (`Leer` / `Crear` / `Actualizar` /
   `Eliminar` / `Operar`).
 
@@ -74,6 +84,11 @@ sesiones abiertas.
 | GET | `/sesiones-garzon` | `Leer` | Historial paginado (`garzonId`, `turnoId`, `estado`, `desde`, `hasta`) |
 | POST | `/sesiones-garzon/:id/cerrar` | `Actualizar` | Cierre admin (sin PIN); registra `cerrada_por_usuario_id` |
 
+Los **dos cierres** (PIN y admin) devuelven la sesión más
+`cuentasPendientes: { cuentaId, numero, mesaNombre, salonNombre }[]` — las
+cuentas abiertas que quedaron a nombre del garzón. Lista vacía en el caso normal.
+No es un error: el cierre ya ocurrió.
+
 Errores esperados (todos `400`):
 
 | Situación | Mensaje |
@@ -83,7 +98,13 @@ Errores esperados (todos `400`):
 | Turno inválido/inactivo | `Turno inválido o inactivo` |
 | Segunda sesión abierta | `El garzón ya tiene una sesión abierta` |
 | Cierre sin sesión | `El garzón no tiene una sesión abierta` |
-| Abrir/cerrar cuenta sin sesión | `El garzón no tiene una sesión de trabajo abierta` |
+| Abrir/cerrar cuenta sin sesión **propia** | `El garzón no tiene una sesión de trabajo abierta` |
+| Cobrar una cuenta cuyo **responsable** salió de turno | `El garzón responsable de la cuenta ya no está en turno. Transferí la cuenta a alguien en turno para poder cobrarla.` |
+
+Los dos últimos son distintos a propósito: Salones usa la frase *"sesión de
+trabajo"* como señal para abrir el modal de entrar a turno, y el segundo caso no
+es del que está operando —mandarlo a iniciar un turno que ya tiene es un callejón
+sin salida.
 
 ---
 
@@ -134,7 +155,16 @@ Restricción efectiva: una sola sesión `abierta` por `(tenant_id, garzon_id)`.
 - `SesionesGarzonService.iniciar` / `cerrarPorPin` / `activaPorPin` — operación
   diaria con PIN. Al iniciar congela `tipo_garzon` del garzón.
 - `SesionesGarzonService.cerrarAdmin` — cierre forzado; `origen_cierre = admin`.
-- `SesionesGarzonService.assertSesionAbierta` / `obtenerSesionAbierta` — gate de Salones.
+- `SesionesGarzonService.assertSesionAbierta` — gate de Salones: tira 400 si el
+  garzón que opera no está en turno.
+- `SesionesGarzonService.buscarSesionAbierta` — la misma consulta devolviendo
+  `null` en vez de tirar, para el llamador que necesita explicar **de quién** es
+  la sesión que falta (`cerrarCuenta`, por el responsable de la cuenta).
+- `SesionesGarzonService.cuentasPendientes` (privado) — una sola query con los
+  nombres ya resueltos. Va por SQL y no delegado a `SalonesService` porque la
+  dependencia entre módulos corre al revés (`SalonesModule` importa
+  `TurnosModule`). Los JOIN a `mesas`/`salones` son `LEFT`: una cuenta abierta
+  sobre una mesa borrada es la que más urge no perder de vista.
 
 ---
 
@@ -145,8 +175,17 @@ Restricción efectiva: una sola sesión `abierta` por `(tenant_id, garzon_id)`.
   upsert/remove sin re-fetch).
 - **Módulo → Sesiones**: `pages/sesiones-garzon.vue` — abiertas + forzar cierre +
   historial filtrado (tabs). Ruta antigua `/configuracion/sesiones-garzon` redirige.
+  Tras forzar un cierre con mesas abiertas ofrece transferirlas por admin.
 - **Salones**: `pages/salones/index.vue` — “Entrar a turno” / “Salir de turno”
-  con `GarzonPinModal`; toast si falta sesión al abrir/cerrar cuenta.
+  con `GarzonPinModal`; toast si falta sesión al abrir/cerrar cuenta. Al salir de
+  turno con mesas abiertas ofrece transferirlas por PIN.
+- `useTransferenciaPendientes()` y `etiquetaCuentaPendiente()` en
+  `useSesionesGarzon.ts` — el estado del modal, el bucle de transferencia y la
+  línea "Terraza · Mesa 4 — Cuenta 2" que comparten las dos pantallas. El bucle
+  vive en el composable y no duplicado en cada página porque lo delicado no es
+  el bucle sino su bookkeeping (cortar en el primer error, no perder lo que
+  faltaba, no pisar una oferta más nueva), y con las dos copias sueltas el
+  gemelo de Salones no tenía cómo testearse.
 
 ---
 
@@ -192,6 +231,25 @@ Ana=`111111`, Bruno=`222222`, Carla=`333333`.
   ↓ toast en Salones → ofrecer Entrar a turno
 ```
 
+### Salir de turno con mesas abiertas
+
+```
+[Salones → Salir de turno + PIN]        [Sesiones → Forzar cierre]
+  ↓                                       ↓
+[POST /sesiones-garzon/cerrar]          [POST /sesiones-garzon/:id/cerrar]
+  ↓ sesión CERRADA + cuentasPendientes[] ↓ ídem
+[Modal "Dejaste mesas abiertas"]        [Modal "Quedaron mesas sin responsable"]
+  ↓ PIN del que se hace cargo             ↓ select de garzones EN TURNO
+[POST /cuentas/:id/transferir]          [POST /cuentas/:id/transferir-admin]
+```
+
+En los dos, la transferencia va **cuenta por cuenta y corta en el primer error**:
+los errores de este flujo son del destinatario (PIN inválido, fuera de turno), no
+de una cuenta puntual, así que seguir solo repetiría el mismo mensaje. Lo que no
+alcanzó a transferirse queda en el modal para reintentar. En el cierre admin los
+destinos salen de las **sesiones abiertas**, no del catálogo de garzones: el
+backend rechaza transferir a quien no tiene sesión.
+
 ---
 
 ## Testing
@@ -212,6 +270,12 @@ iniciar/cerrar por PIN, cierre admin, y rechazo de Salones sin sesión.
 3. Salir turno → abrir cuenta falla con mensaje de sesión.
 4. Config → Sesiones: forzar cierre si quedó abierta.
 5. Intentar desactivar turno con sesión abierta → error.
+6. Con Ana y Bruno (`222222`) en turno: Ana abre una mesa con productos y sale de
+   turno → modal con la mesa → transferir con el PIN de Bruno → la cuenta ya
+   figura a nombre de Bruno y se puede cobrar.
+7. Lo mismo declinando la oferta ("Ahora no"): cobrar esa mesa devuelve *"El
+   garzón responsable de la cuenta ya no está en turno…"*, y **no** abre el modal
+   de entrar a turno.
 
 ---
 
@@ -223,6 +287,7 @@ iniciar/cerrar por PIN, cierre admin, y rechazo de Salones sin sesión.
 - [x] Sesión obligatoria al abrir/cerrar cuenta
 - [x] Horarios referenciales (sin validación de ventana)
 - [x] Errores operativos como `400`, no `401`
+- [x] Salir de turno con mesas abiertas: avisa y ofrece transferir (PIN y admin)
 - [x] Seed turnos (IDs 277/278/279)
 - [x] Docs vivas + SQL
 - [x] Unit tests

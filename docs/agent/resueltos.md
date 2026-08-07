@@ -470,8 +470,80 @@ Entradas de tandas anteriores que no necesitaban ninguna decisión de negocio.
 
 ## Auditoría `turnos` + `salones` + `garzones` (2026-08-06)
 
-Los tres hallazgos que se cerraron en la misma pasada. Los 22 restantes y lo refutado
-están en [`pendientes.md`](pendientes.md).
+Los hallazgos que se cerraron. Los que quedan y lo refutado están en
+[`pendientes.md`](pendientes.md).
+
+- [x] **Fin de turno con mesas abiertas: avisar y ofrecer transferir** (backend +
+  frontend, decidido y cerrado el 2026-08-06) — cobrar una cuenta exige que su
+  **responsable** tenga sesión abierta, porque la propina se atribuye a esa sesión. Ni
+  `cerrarPorPin` ni `cerrarAdmin` miraban si el garzón dejaba cuentas abiertas, así que
+  el que marcaba salida con una mesa abierta la dejaba imposible de cobrar hasta que
+  alguien la transfiriera. **No hace falta ninguna carrera: es el martes normal de un
+  restaurante.** (La lente lo reportó como una carrera entre `assertSesionAbierta` y la
+  transacción de `abrirCuenta`; agrandarlo al caso sin carrera fue del refutador.)
+  **Forma elegida por el owner:** el cierre **no** se bloquea —el garzón se va igual, y
+  bloquearlo solo dejaría la sesión abierta contando horas—; los dos cierres devuelven
+  `cuentasPendientes[]` y la UI ofrece transferirlas a alguien en turno. Aceptar es
+  opcional: "cuenta sin responsable en turno" es un estado válido y reversible.
+  **Cómo se cerró:** `SesionCerrada = SesionPublica + cuentasPendientes`, resuelto con
+  **una** query (`LEFT JOIN` a `mesas`/`salones`: una cuenta abierta sobre una mesa
+  borrada es la que más urge no perder de vista) que corre en paralelo con `cargarNombres`.
+  Va por SQL crudo dentro de `turnos` y no delegada a `SalonesService` porque la
+  dependencia entre módulos corre al revés. En el frontend, dos modales gemelos —PIN en
+  Salones, select de garzones **en turno** en el backoffice— sobre el composable
+  `useTransferenciaPendientes`, que transfiere cuenta por cuenta y **corta en el primer
+  error**: los errores de este flujo son del destinatario, no de una cuenta puntual, y
+  seguir solo repetiría el mismo mensaje N veces.
+  **Lo que salió de paso, y no era cosmético:** al declinar la oferta, cobrar esa mesa
+  daba *"El garzón no tiene una sesión de trabajo abierta"* — y Salones usa esa frase
+  como señal para abrir el modal de entrar a turno, así que mandaba al **cajero** (que sí
+  estaba en turno) a iniciar un turno que ya tenía, y el reintento fallaba igual: un
+  callejón sin salida. Ahora `cerrarCuenta` usa `buscarSesionAbierta` (devuelve `null` en
+  vez de tirar) y lanza su propio mensaje, que nombra al responsable y dice qué hacer.
+  **Lo que fija cada cosa:** el mutante que revierte el mensaje al genérico rompe el test
+  —que asevera las dos mitades: que dice "ya no está en turno" y que **no** dice "sesión
+  de trabajo"—; sacar `AND c.garzon_responsable_id = $2`, cambiar `LEFT JOIN` por `JOIN` y
+  sacar el `eliminado_el IS NULL` de un join matan un test cada uno. En el frontend, sobre
+  la pantalla del backoffice: no abrir el modal mata 4. Sobre el composable: no chequear la
+  identidad del lote, abrir siempre en `reabrirSiQuedan` y sacar el guard de reentrancia
+  matan uno cada uno.
+  **Un mutante también delató el propio spec:** dos tests fallaban de más porque los
+  modales se teletransportan al `body` y los toasts viven fuera del wrapper, así que
+  `dialogo()` podía devolver el modal del test anterior. Se limpia el `body` en cada
+  `beforeEach` — sin eso, un verde puede no estar probando nada.
+  **La revisión independiente encontró dos defectos de runtime que ningún test veía**, y
+  los dos eran del gemelo de Salones, el único sin spec: cancelar el teclado de PIN dejaba
+  las cuentas vivas en memoria con la oferta **imposible de reabrir** (un toque accidental
+  y el garzón se iba con las mesas a su nombre), y `pendientes.value = restantes` en el
+  `finally` podía pisar una oferta más nueva —con el modal cerrado durante el vuelo, la
+  pantalla queda operable y se puede cerrar otra sesión— dejando el nombre de un garzón
+  con la lista de otro. El arreglo de los dos fue **extraer el bucle al composable**: no
+  por deduplicar (dos copias son aceptables acá) sino porque dentro de una pantalla de
+  1.400 líneas con cinco stores no había forma de probarlos. `GarzonPinModal` solo avisa
+  cuando el PIN es válido, así que el `solicitarPin` de Salones ganó un hook de cancelación
+  —un `watch` sobre el cierre del modal, que en el camino feliz ya no encuentra hook porque
+  el componente emite `confirm` antes de cerrarse.
+  **El camino por PIN se verificó en el navegador** (no tiene spec de página): el modal
+  aparece con la cuenta bien etiquetada; transferir a alguien fuera de turno deja el toast
+  del backend, reabre la oferta y —esto es lo que se estaba arreglando— **no** abre el modal
+  de entrar a turno; y transferir a alguien en turno deja la cuenta a su nombre.
+- [x] **El gate del frontend era cara o cruz bajo carga** (cerrado 2026-08-06, salió al
+  agregar el spec de arriba) — montar un entorno Nuxt entero pasa de ~300ms a varios
+  segundos cuando la máquina está ocupada, y los dos timeouts default de vitest quedaban
+  cortos. Se manifestaba de dos formas distintas, y **la primera es la peligrosa**:
+  - **`beforeAll` (default 10s)**: al expirar, vitest reporta los tests de ese archivo como
+    *skipped*. La corrida sale roja (`Test Files 4 failed`, exit ≠ 0), pero **el contador
+    miente**: `566 passed | 25 skipped` con **0 failed**. Cuatro archivos evaporados sin un
+    solo test en rojo. Tres de los cuatro eran preexistentes (`useImpresoras`,
+    `usePermisosCrud`, `middleware/permiso`).
+  - **`testTimeout` (default 5s)**: `mountSuspended` de una página no alcanza a resolver.
+    Medido con el compose arriba: 15 tests de 11 archivos en `Test timed out in 5000ms`,
+    todos de pantallas que el diff no tocaba, y verdes al correr la suite sola.
+
+  `hookTimeout: 60_000` + `testTimeout: 20_000`. Tres corridas seguidas 591/591 bajo la
+  misma carga que antes las volteaba. **Por qué se arregló acá y no se anotó al backlog:**
+  un gate que depende de cuán ocupada está la máquina no sirve para decidir si una tarea
+  está terminada, que es exactamente para lo que se lo corre.
 
 - [x] **Una línea agregada durante el cierre no se cobraba ni llegaba a cocina**
   (backend, `salones.service.ts`) — **severidad alta, y la vieron dos lentes

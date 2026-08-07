@@ -848,11 +848,22 @@ export class SalonesService {
         );
       }
 
+      // El responsable, no el que cobra: la propina se atribuye a su turno. Si
+      // marcó salida con la mesa abierta, la cuenta no se puede cobrar hasta
+      // transferirla — el mensaje lo dice, porque el genérico de
+      // `assertSesionAbierta` habla del garzón que está operando y mandaba al
+      // cajero a "entrar a turno" cuando su turno no era el problema.
       const sesionResponsable =
-        await this.sesionesGarzonService.obtenerSesionAbierta(
+        await this.sesionesGarzonService.buscarSesionAbierta(
           tenantId,
           cuenta.garzonResponsableId,
         );
+      if (!sesionResponsable) {
+        throw new BadRequestException(
+          'El garzón responsable de la cuenta ya no está en turno. ' +
+            'Transferí la cuenta a alguien en turno para poder cobrarla.',
+        );
+      }
 
       const propinaMonto = dto.propinaMonto ?? '0';
       if (new Decimal(propinaMonto).lt(0)) {
