@@ -66,6 +66,10 @@ Reglas de la pausa:
 
 En la UI, pausar abre un modal que dice a cuántos ítems afecta (`GET /api/descuentos/:id/uso`)
 y promete la reversibilidad. Con cero ítems asociados no hay modal. Reactivar no pregunta.
+El flujo vive en `usePausaRegla()` + `CrudPausarModal.vue`, compartidos por las tres
+pantallas (descuentos, recargos, impuestos). Lo que **no** vive ahí es el guard del
+catálogo oficial de impuestos (`origen === 'sistema'`): es regla de impuestos, no de
+pausar, y se queda en su pantalla.
 
 **El IVA queda fuera de todo esto**: no se pausa, se es afecto o exento. Ver
 [impuestos.md](./impuestos.md).

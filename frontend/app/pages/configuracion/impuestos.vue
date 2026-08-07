@@ -33,27 +33,25 @@ const confirmModalOpen = ref(false)
 const confirmRestaurarId = ref<string | null>(null)
 const confirmRestaurarModalOpen = ref(false)
 const restaurando = ref(false)
-const toggling = reactive(new Set<string>())
 
 // ── Pausar: confirmación con el alcance ─────────────────────────────────────
-// Pausar NO es eliminar: el impuesto conserva todas sus asociaciones y
-// reactivarlo lo devuelve exactamente como estaba. Pero deja de aplicarse, así
-// que antes de pausar la pantalla pregunta a cuántos ítems afecta y lo dice.
-// Reactivar no pregunta (no destruye nada) y el caso de cero ítems tampoco: un
-// diálogo que dice "0 ítems" es ruido, y el ruido enseña a confirmar sin leer.
-interface UsoRegla { items: { id: string; nombre: string }[] }
+const {
+  toggling,
+  confirmPausarNombre,
+  confirmPausarItems,
+  confirmPausarModalOpen,
+  toggleActivo: pausarOReactivar,
+  cerrarPausar,
+  confirmarPausar,
+} = usePausaRegla('impuestos', 'Impuesto', impuestos)
 
-const confirmPausarId = ref<string | null>(null)
-// Nombre y conteo se fijan JUNTO al id en vez de buscarse en la lista al
-// renderizar: con el modal abierto el listado puede recargarse (toggle de la
-// papelera) y el diálogo quedaría nombrando otra fila.
-const confirmPausarNombre = ref('')
-const confirmPausarItems = ref(0)
-const confirmPausarModalOpen = ref(false)
-// Mientras una consulta de uso está en vuelo no se dispara otra: así una
-// respuesta obsoleta no puede pisar el modal de un click posterior sobre otra
-// fila. Mismo guard que `verificandoEliminarId` en `configuracion/items.vue`.
-const verificandoUsoId = ref<string | null>(null)
+// El catálogo oficial no se pausa: es regla de impuestos, no de pausar, así que
+// el guard vive acá y no en el composable. El switch ya no se rinde para esas
+// filas (`v-if` en la tabla); esto lo sostiene si alguien saca ese `v-if`.
+async function toggleActivo(imp: Impuesto) {
+  if (imp.origen === 'sistema') return
+  await pausarOReactivar(imp)
+}
 
 const emptyForm = () => ({
   nombre: '',
@@ -173,72 +171,6 @@ async function guardar() {
   finally {
     saving.value = false
   }
-}
-
-async function aplicarActivo(imp: Impuesto, activo: boolean) {
-  toggling.add(imp.id)
-  const prev = imp.activo
-  imp.activo = activo
-  try {
-    await useApiFetch(`${apiUrl}/impuestos/${imp.id}`, {
-      method: 'PATCH',
-      body: { activo: imp.activo },
-    })
-    toast.add({ title: imp.activo ? 'Impuesto activado' : 'Impuesto pausado', color: 'success' })
-  }
-  catch (e: unknown) {
-    imp.activo = prev
-    const msg = apiErrorMsg(e, 'Error al actualizar')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    toggling.delete(imp.id)
-  }
-}
-
-async function toggleActivo(imp: Impuesto) {
-  if (imp.origen === 'sistema' || imp.eliminadoEl) return
-  if (toggling.has(imp.id)) return
-  // Reactivar no pregunta nada: no destruye nada.
-  if (!imp.activo) {
-    await aplicarActivo(imp, true)
-    return
-  }
-  if (verificandoUsoId.value) return
-  verificandoUsoId.value = imp.id
-  try {
-    const uso = await useApiFetch<UsoRegla>(`${apiUrl}/impuestos/${imp.id}/uso`)
-    if (uso.items.length === 0) {
-      await aplicarActivo(imp, false)
-      return
-    }
-    confirmPausarId.value = imp.id
-    confirmPausarNombre.value = imp.nombre
-    confirmPausarItems.value = uso.items.length
-    confirmPausarModalOpen.value = true
-  }
-  catch (e: unknown) {
-    // El toggle NO se mueve: sin saber a cuántos ítems afecta, no se pausa a
-    // ciegas.
-    const msg = apiErrorMsg(e, 'Error al verificar el uso del impuesto')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    verificandoUsoId.value = null
-  }
-}
-
-function cerrarPausar() {
-  confirmPausarId.value = null
-  confirmPausarNombre.value = ''
-  confirmPausarItems.value = 0
-  confirmPausarModalOpen.value = false
-}
-
-async function confirmarPausar() {
-  const imp = impuestos.value.find(x => x.id === confirmPausarId.value)
-  cerrarPausar()
-  if (imp) await aplicarActivo(imp, false)
 }
 
 function pedirEliminar(imp: Impuesto) {
@@ -510,23 +442,13 @@ const columns: TableColumn<Impuesto>[] = [
       </template>
     </AppDrawer>
 
-    <!-- Pausar solo pregunta cuando hay algo que perder de vista: si el
-         impuesto no lo usa ningún ítem, `toggleActivo` pausa sin abrir esto. -->
-    <CrudModal
+    <CrudPausarModal
       v-model:open="confirmPausarModalOpen"
-      :title="`Pausar «${confirmPausarNombre}»`"
-      :message="`Deja de aplicarse en ${confirmPausarItems} ítem${confirmPausarItems === 1 ? '' : 's'}.`"
-      confirm-label="Pausar"
-      confirm-color="neutral"
+      :nombre="confirmPausarNombre"
+      :items="confirmPausarItems"
       @cancel="cerrarPausar"
       @confirm="confirmarPausar"
-    >
-      <template #detalle>
-        <p class="mt-2 text-sm">
-          Las asociaciones se conservan: al reactivarlo vuelve como estaba.
-        </p>
-      </template>
-    </CrudModal>
+    />
 
     <CrudModal
       v-model:open="confirmModalOpen"

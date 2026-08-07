@@ -381,13 +381,6 @@ Ver [`resueltos.md`](resueltos.md).
   son por línea por naturaleza), pero para una regla global al catálogo el ruido es real. Lo
   segundo sí es un borde claro: se arman antes del recorrido de la fórmula, así que un tenant
   cuya fórmula no aplique impuestos igual ve el aviso.
-- [ ] **El bloque de pausa está triplicado verbatim en las tres pantallas de configuración**
-  (frontend, `descuentos.vue` / `recargos.vue` / `impuestos.vue`, 2026-08-03) — ~60 líneas
-  idénticas (interface, 4 refs, `aplicarActivo`, `toggleActivo`, `cerrarPausar`,
-  `confirmarPausar` y el `CrudModal`). La convención dice extraer a la tercera y esta es la
-  tercera. No se hizo en el momento porque hoy **no existe** un composable compartido entre
-  esas tres pantallas: extraerlo es introducir un patrón nuevo, no seguir uno existente, y eso
-  no entraba en el alcance de la tarea.
 - [ ] **`categorias` y `terceros` pausados: el front los esconde, el backend acepta la
   asignación** (backend, medido 2026-08-03) — hermano menor de la entrada de reglas pausadas
   que se cerró ese mismo día (ver [`resueltos.md`](resueltos.md)), pero sobre entidades que se

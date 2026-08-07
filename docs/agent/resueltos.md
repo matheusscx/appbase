@@ -897,6 +897,35 @@ mutación se aplicó (contando ocurrencias) antes de leer el resultado.
 
 ## Deuda de código (harness)
 
+- [x] ~~**El bloque de pausa está triplicado verbatim en las tres pantallas de
+  configuración**~~ (frontend, cerrado 2026-08-07) — extraído a
+  [`usePausaRegla()`](../../frontend/app/composables/usePausaRegla.ts) y al componente
+  [`CrudPausarModal.vue`](../../frontend/app/components/crud/CrudPausarModal.vue).
+  `descuentos.vue` −86 líneas, `recargos.vue` −86, `impuestos.vue` −78; los dos archivos
+  nuevos suman 179.
+  **El bloqueo que anotaba la entrada ya no aplicaba.** Decía que no se hizo porque "hoy
+  no existe un composable compartido entre esas tres pantallas: extraerlo es introducir un
+  patrón nuevo". `useTransferenciaPendientes()` lo introdujo en `15bce45f` y pasó revisión,
+  así que esto fue **seguir** un patrón, no inventarlo.
+  **Dos cosas que la entrada decía mal**, medidas antes de tocar: son **5 refs** más el
+  `Set` de `toggling`, no "4 refs"; y el bloque **no es idéntico en las tres** — `impuestos`
+  tiene un guard propio (`origen === 'sistema'`) que descuentos y recargos no tienen. Ese
+  guard **se quedó en su pantalla**: es regla de impuestos, no de pausar. El composable no
+  lleva un hook `puedePausar` opcional justamente para que no exista la forma de olvidárselo
+  en silencio.
+  **La red ya existía**: 6 tests de pausa por pantalla, los mismos 18 en las tres, que
+  montan la página real. Tres mutantes sobre el composable —reactivar sin atajo, cero ítems
+  abriendo modal igual, pausar a ciegas cuando falla el uso— **matan en las tres a la vez**,
+  y cambiar el copy del modal compartido también.
+  **Un hueco que la extracción reveló y se cerró:** el revert del update optimista cuando
+  el `PATCH` falla **no lo cubría ningún test**, en ninguna de las tres. Con el código en un
+  solo lugar, cubrirlo costó un test en vez de tres — el cuarto mutante (borrar el revert)
+  lo mata **ese test y solo ese**, que vive en `descuentos`.
+  **Lo que sigue sin test, declarado:** el guard `origen === 'sistema'` de `impuestos`. El
+  switch no se rinde para esas filas (`v-if` en la tabla), así que la línea es inalcanzable
+  por UI — defensa en profundidad por si alguien saca ese `v-if`. Ya era así antes; sacarla
+  habría sido cambiar conducta fuera del alcance de un refactor.
+
 - [x] ~~**Los mapas de estado de venta están duplicados en 4 `.vue`**~~ (frontend) —
   cerrado 2026-07-30 con [`useEstadoVenta()`](../../frontend/app/composables/useEstadoVenta.ts),
   consumido por `pages/ventas/index.vue`, `components/ventas/VentaDetalleDrawer.vue`,

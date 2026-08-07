@@ -51,28 +51,18 @@ const restaurando = ref(false)
 const colisionModalOpen = ref(false)
 const colisionMensaje = ref('')
 const nombrePropuesto = ref('')
-const toggling = reactive(new Set<string>())
 const nombreError = ref<string | null>(null)
 
 // ── Pausar: confirmación con el alcance ─────────────────────────────────────
-// Pausar NO es eliminar: la regla conserva todas sus asociaciones y
-// reactivarla la devuelve exactamente como estaba. Pero deja de aplicarse, así
-// que antes de pausar la pantalla pregunta a cuántos ítems afecta y lo dice.
-// Reactivar no pregunta (no destruye nada) y el caso de cero ítems tampoco: un
-// diálogo que dice "0 ítems" es ruido, y el ruido enseña a confirmar sin leer.
-interface UsoRegla { items: { id: string; nombre: string }[] }
-
-const confirmPausarId = ref<string | null>(null)
-// Nombre y conteo se fijan JUNTO al id en vez de buscarse en la lista al
-// renderizar: con el modal abierto el listado puede recargarse (toggle de la
-// papelera) y el diálogo quedaría nombrando otra fila.
-const confirmPausarNombre = ref('')
-const confirmPausarItems = ref(0)
-const confirmPausarModalOpen = ref(false)
-// Mientras una consulta de uso está en vuelo no se dispara otra: así una
-// respuesta obsoleta no puede pisar el modal de un click posterior sobre otra
-// fila. Mismo guard que `verificandoEliminarId` en `configuracion/items.vue`.
-const verificandoUsoId = ref<string | null>(null)
+const {
+  toggling,
+  confirmPausarNombre,
+  confirmPausarItems,
+  confirmPausarModalOpen,
+  toggleActivo,
+  cerrarPausar,
+  confirmarPausar,
+} = usePausaRegla('recargos', 'Recargo', recargos)
 
 const modoOptions = [
   { label: 'Porcentaje', value: 'porcentaje' },
@@ -291,72 +281,6 @@ async function guardar() {
   finally {
     saving.value = false
   }
-}
-
-async function aplicarActivo(r: Regla, activo: boolean) {
-  toggling.add(r.id)
-  const prev = r.activo
-  r.activo = activo
-  try {
-    await useApiFetch(`${apiUrl}/recargos/${r.id}`, {
-      method: 'PATCH',
-      body: { activo: r.activo },
-    })
-    toast.add({ title: r.activo ? 'Recargo activado' : 'Recargo pausado', color: 'success' })
-  }
-  catch (e: unknown) {
-    r.activo = prev
-    const msg = apiErrorMsg(e, 'Error al actualizar')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    toggling.delete(r.id)
-  }
-}
-
-async function toggleActivo(r: Regla) {
-  if (r.eliminadoEl) return
-  if (toggling.has(r.id)) return
-  // Reactivar no pregunta nada: no destruye nada.
-  if (!r.activo) {
-    await aplicarActivo(r, true)
-    return
-  }
-  if (verificandoUsoId.value) return
-  verificandoUsoId.value = r.id
-  try {
-    const uso = await useApiFetch<UsoRegla>(`${apiUrl}/recargos/${r.id}/uso`)
-    if (uso.items.length === 0) {
-      await aplicarActivo(r, false)
-      return
-    }
-    confirmPausarId.value = r.id
-    confirmPausarNombre.value = r.nombre
-    confirmPausarItems.value = uso.items.length
-    confirmPausarModalOpen.value = true
-  }
-  catch (e: unknown) {
-    // El toggle NO se mueve: sin saber a cuántos ítems afecta, no se pausa a
-    // ciegas.
-    const msg = apiErrorMsg(e, 'Error al verificar el uso del recargo')
-    toast.add({ title: msg, color: 'error' })
-  }
-  finally {
-    verificandoUsoId.value = null
-  }
-}
-
-function cerrarPausar() {
-  confirmPausarId.value = null
-  confirmPausarNombre.value = ''
-  confirmPausarItems.value = 0
-  confirmPausarModalOpen.value = false
-}
-
-async function confirmarPausar() {
-  const r = recargos.value.find(x => x.id === confirmPausarId.value)
-  cerrarPausar()
-  if (r) await aplicarActivo(r, false)
 }
 
 function pedirEliminar(r: Regla) {
@@ -753,23 +677,13 @@ const columns: TableColumn<Regla>[] = [
       </template>
     </AppDrawer>
 
-    <!-- Pausar solo pregunta cuando hay algo que perder de vista: si la regla
-         no la usa ningún ítem, `toggleActivo` pausa sin abrir esto. -->
-    <CrudModal
+    <CrudPausarModal
       v-model:open="confirmPausarModalOpen"
-      :title="`Pausar «${confirmPausarNombre}»`"
-      :message="`Deja de aplicarse en ${confirmPausarItems} ítem${confirmPausarItems === 1 ? '' : 's'}.`"
-      confirm-label="Pausar"
-      confirm-color="neutral"
+      :nombre="confirmPausarNombre"
+      :items="confirmPausarItems"
       @cancel="cerrarPausar"
       @confirm="confirmarPausar"
-    >
-      <template #detalle>
-        <p class="mt-2 text-sm">
-          Las asociaciones se conservan: al reactivarlo vuelve como estaba.
-        </p>
-      </template>
-    </CrudModal>
+    />
 
     <!-- Modal confirmación eliminar -->
     <CrudModal

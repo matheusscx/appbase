@@ -217,6 +217,7 @@ Patrón extraído de `configuracion/categorias.vue`. Ubicación: `app/components
 | `CrudTable` | `UCard` + `UTable` con empty state por defecto y ancho completo (`w-full`) |
 | `CrudListItem` | Celda nombre: título + subtítulo muted |
 | `CrudModal` | Confirmación de eliminación (cancel + confirm) |
+| `CrudPausarModal` | Confirmación de **pausa** sobre `CrudModal`: dice a cuántos ítems afecta y promete la reversibilidad. Va con `usePausaRegla()` |
 
 ```vue
 <CrudPageHeader title="Categorías" description="…">

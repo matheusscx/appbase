@@ -107,6 +107,8 @@ let restaurarRetenido: Promise<unknown> | null = null
 let usoPorId: Record<string, { id: string, nombre: string }[]> = {}
 /** Hace fallar ese GET, para el caso "no se pausa a ciegas". */
 let usoFalla = false
+/** El PATCH de activo rechaza: sirve para ver si el switch vuelve a su lugar. */
+let patchActivoFalla = false
 /** Cada `GET .../uso` recibido: el testigo de que reactivar NO consulta. */
 let getsUso: string[] = []
 /** Cada `PATCH /descuentos/:id` recibido, con el `activo` que viajó. */
@@ -139,7 +141,11 @@ mockNuxtImport('useApiFetch', () => {
       const id = url.split('/').pop() ?? ''
       const activo = opts?.body?.activo
       if (typeof activo === 'boolean') {
+        // El rechazo va DESPUÉS de registrar el intento: si no, `patchesActivo`
+        // quedaría vacío y un test no podría distinguir "el backend lo rechazó"
+        // de "el flujo nunca llegó a mandarlo".
         patchesActivo.push({ id, activo })
+        if (patchActivoFalla) return Promise.reject(errorApi('No se pudo actualizar'))
         const d = descuentosBackend.find(x => x.id === id)
         if (d) d.activo = activo
       }
@@ -287,6 +293,7 @@ function reset() {
   restaurarRetenido = null
   usoPorId = {}
   usoFalla = false
+  patchActivoFalla = false
   getsUso = []
   patchesActivo = []
 }
@@ -649,6 +656,29 @@ describe('configuracion/descuentos — pausar: confirmación con el alcance', ()
     expect(getsUso).toEqual([])
     expect(dialogo()).toBeNull()
     expect(patchesActivo).toEqual([{ id: DESCUENTO_ID, activo: true }])
+
+    wrapper.unmount()
+  })
+
+  it('si el PATCH falla, el switch vuelve a su lugar en vez de mentir', async () => {
+    // El toggle es optimista: se mueve antes de que el backend conteste. Sin el
+    // revert, un PATCH rechazado deja el switch mostrando un estado que el
+    // backend nunca aceptó, y la regla se sigue aplicando a espaldas de quien
+    // la pausó. Vive en `usePausaRegla`, compartido por las tres pantallas.
+    usoPorId = {}
+    patchActivoFalla = true
+    const wrapper = await montar()
+
+    expect(switchActivo(wrapper).attributes('aria-checked')).toBe('true')
+    await clickSwitchActivo(wrapper)
+
+    // Testigo de que el flujo SÍ corrió: consultó el uso y mandó el PATCH. Sin
+    // esto, el test pasaría igual si el toggle nunca se hubiera disparado.
+    expect(getsUso).toEqual([DESCUENTO_ID])
+    expect(patchesActivo).toEqual([{ id: DESCUENTO_ID, activo: false }])
+    // Y el switch volvió a su lugar en vez de quedar mostrando lo que el
+    // backend rechazó.
+    expect(switchActivo(wrapper).attributes('aria-checked')).toBe('true')
 
     wrapper.unmount()
   })
