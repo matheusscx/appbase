@@ -1076,8 +1076,43 @@ export class SeederService implements OnApplicationBootstrap {
     const uuid = (n: number) =>
       `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
 
+    // El nombre correcto es el de `startup-pos.sql`. Este índice se llamaba
+    // `uq_motivo_diferencia_tenant_nombre` solo acá: la definición era idéntica
+    // y la conducta la misma en las dos bases, pero buscarlo por nombre no
+    // encontraba nada. Su gemelo de inventario (`uq_motivo_dif_inv_tenant_nombre`)
+    // sí coincidía en los dos lados; este era el único desalineado.
+    // Se **renombra**, no se recrea. `seedCajones()` hace `DROP` + `CREATE`
+    // porque allá la definición vieja era distinta (case-sensitive, sin
+    // `lower()`) y había que reconstruir el índice. Acá la definición es
+    // idéntica y solo cambia el nombre: `ALTER INDEX … RENAME` es atómico,
+    // mientras que `DROP` + `CREATE` en dos sentencias deja una ventana con la
+    // tabla **sin unicidad** —y si el arranque muere en el medio (cosa que
+    // pasa: el watcher reinicia el backend seguido), la deja sin índice.
+    // Condicional a los dos nombres, así que en una base nueva o ya migrada no
+    // hace nada.
     await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_diferencia_tenant_nombre
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_indexes
+           WHERE schemaname = 'public'
+             AND indexname = 'uq_motivo_diferencia_tenant_nombre'
+        ) THEN
+          IF EXISTS (
+            SELECT 1 FROM pg_indexes
+             WHERE schemaname = 'public'
+               AND indexname = 'uq_motivo_diferencia_caja_tenant_nombre'
+          ) THEN
+            EXECUTE 'DROP INDEX uq_motivo_diferencia_tenant_nombre';
+          ELSE
+            EXECUTE 'ALTER INDEX uq_motivo_diferencia_tenant_nombre'
+                 || ' RENAME TO uq_motivo_diferencia_caja_tenant_nombre';
+          END IF;
+        END IF;
+      END $$;
+    `);
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_diferencia_caja_tenant_nombre
       ON motivo_diferencia_caja (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
     `);
 

@@ -24,9 +24,11 @@ import { AppModule } from '../src/app.module';
  * camino dejaría dos filas vivas con nombres que el producto considera iguales.
  *
  * El chequeo de forma va POR TABLA y no por nombre de índice a propósito: el
- * nombre no es la regla. (Y de hecho hay drift: `motivo_diferencia_caja` se
- * llama distinto en `startup-pos.sql` que en el seeder — misma definición,
- * anotado en docs/agent/pendientes.md.)
+ * nombre no es la regla. (Hubo drift —`motivo_diferencia_caja` se llamaba
+ * distinto en `startup-pos.sql` que en el seeder, con la misma definición—;
+ * se unificó el 2026-08-06, ver `docs/agent/resueltos.md`. Este chequeo no lo
+ * habría cazado, y no es su trabajo: lo que sí caza es que queden **los dos**
+ * índices, porque exige exactamente uno por tabla.)
  */
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };

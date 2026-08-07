@@ -359,6 +359,115 @@ entrada afirma algo que después resultó falso, se corrige donde se descubre, n
 
 ---
 
+## Lote de pendientes mecánicos (2026-08-06)
+
+Entradas de tandas anteriores que no necesitaban ninguna decisión de negocio.
+
+- [x] **El e2e daba fallos masivos falsos si se corría después de editar un fuente**
+  (harness, `scripts/reset-db.sh`) — la entrada traía la causa como **hipótesis no
+  verificada**. Se verificó, y resultó **más amplia** de lo que decía: no es que
+  `reset-db.sh` espere el `Seed complete` equivocado, es que **cada cambio de un `.ts`
+  vuelve a sembrar**. Medido el 2026-08-06 sobre el stack real: crear un archivo `.ts`
+  llevó el contador de `Seed complete` de **1 a 2**, y borrarlo a **3**. La causa es el
+  compose: `command: npm run start:dev` con `./backend:/app` bind-mounteado. Un `touch`
+  (solo mtime) **no** alcanza — el watcher mira contenido —, lo que explica por qué el
+  síntoma parecía intermitente.
+  **Dato que reordena el problema:** el e2e **no usa el backend del contenedor**. Levanta
+  su propia app en proceso contra la misma BD, así que ese contenedor no le aporta nada a
+  la suite — solo puede contaminarla.
+  **Cómo se cerró, en dos mitades:** (1) el script espera a que el backend quede
+  **quieto** (log sin crecer 6s, con timeout propio de 60s) y recién ahí devuelve el
+  control, para que una recompilación en vuelo aterrice antes y no durante la suite;
+  re-asserta 1 seed después de esperar. (2) `./scripts/reset-db.sh --verificar`, que se
+  corre **después** del e2e y contesta la pregunta que un e2e con fallos raros deja
+  abierta: ¿la base se movió abajo de la suite? Sin eso, la respuesta costaba una sesión
+  de forense sobre fallos que no eran regresiones.
+  ⚠️ **La revisión independiente bloqueó con tres agujeros, los tres medidos, y uno era
+  exactamente el que hace que la herramienta sea peor que no tenerla:**
+  - **Verde falso ante un contenedor recreado.** `docker logs` es por **instancia**, no
+    por nombre: un `--force-recreate` (o un `--build`, o un cambio de `.env`) re-siembra
+    sobre el mismo volumen y deja el log en 1 → el comando decía "la corrida es válida"
+    justo en el caso que existe para detectar. Se cerró registrando el `docker inspect
+    -f '{{.Id}}'` del contenedor en `.git/reset-db.estado` durante el reset y exigiendo
+    que coincida al verificar. Medido: con el log en 1 tras recrear, ahora corta en rojo.
+  - **El bucle de quietud no tenía timeout.** El compose declara `restart:
+    unless-stopped`: un backend en crash-loop escribe log para siempre y el script
+    quedaba colgado **en silencio**, en el paso que el checklist manda correr antes de
+    cada e2e. Ahora corta a los 60s mostrando las últimas líneas.
+  - **Muerte muda con 0 seeds.** `grep -c` sale 1 sin match y `set -e` mataba el script
+    sin imprimir nada (contenedor caído, docker ausente, `NODE_ENV=production` donde el
+    seeder retorna antes de loguear). Ahora `seeds()` devuelve 0 y hay un diagnóstico.
+  - Y un cuarto, chico pero feo: **cualquier flag mal tipeado caía al camino
+    destructivo**. `--verify` en vez de `--verificar`, tipeado *después* del e2e para
+    peritar, hacía `down -v` y borraba la evidencia. Ahora hay validación de argumentos.
+
+  ⚠️ **Y la segunda vuelta de revisión encontró que el propio arreglo se apagaba solo en
+  un worktree.** `ESTADO=".git/reset-db.estado"` asume que `.git` es un directorio, y en
+  un **worktree enlazado es un archivo**: escribir ahí falla con "Not a directory" y, al
+  ser la última línea del reset, mataba el script **después** de haber hecho todo bien —
+  sin registrar el Id y sin imprimir el verde—. El `--verificar` siguiente caía en la rama
+  "no hay registro"… que salía **0**. O sea: dentro de un worktree, la detección de
+  recreación que motivó el bloqueo anterior quedaba desactivada en silencio. Y este repo
+  tiene un worktree vivo, en el directorio que el propio proyecto usa para verificar sin
+  `git stash`. Se cerró con `$(git rev-parse --git-common-dir)` —`--git-common-dir` y no
+  `--git-dir`, porque el contenedor es uno solo para todos los worktrees y el registro
+  tiene que ser compartido—, medido desde el worktree real.
+  De la misma vuelta salió el fail-open: **`--verificar` salía 0 cuando admitía no poder
+  responder**. Ahora sale **2** con un mensaje que distingue "no sé" de "sí". Es el mismo
+  principio que motivó todo el comando: un verde falso es peor que no tenerlo.
+  **Todo verificado midiendo cada rama**: verde legítimo (mismo contenedor, 1 seed),
+  contaminación por watcher (2 seeds → rojo), contenedor recreado (1 seed pero otro Id →
+  rojo), contenedor inexistente (diagnóstico, no terminal vacía), flag mal tipeado (no
+  resetea). `CLAUDE.md` documenta la regla —no tocar un `.ts` del backend con el e2e
+  corriendo— y el comando.
+  ℹ️ **Lo que `--verificar` NO mide**, dicho en el propio script: el estado que acumula la
+  suite. Correr el e2e dos veces seguidas deja cajas abiertas y stock agotado, y eso este
+  comando no lo ve.
+
+- [x] **`uq_motivo_diferencia_caja_tenant_nombre` se llamaba distinto en el seeder**
+  (backend) — verificado antes de tocar: `startup-pos.sql:962` lo declara con ese nombre,
+  el seeder lo creaba como `uq_motivo_diferencia_tenant_nombre`, la definición era
+  idéntica y en la BD real existía solo el del seeder. Su **gemelo de inventario**
+  (`uq_motivo_dif_inv_tenant_nombre`) sí coincidía en los dos lados: este era el único
+  desalineado de los dos.
+  Se unificó hacia el nombre de `startup-pos.sql`. ⚠️ **El primer intento copió el `DROP` +
+  `CREATE` de `seedCajones()` y la revisión mostró que ese patrón no encaja acá:** allá la
+  definición vieja era **distinta** (case-sensitive, sin `lower()`) y había que reconstruir
+  el índice; acá es idéntica y solo cambia el nombre. `DROP` + `CREATE` son dos sentencias
+  en dos transacciones implícitas, o sea una ventana con la tabla **sin unicidad** — y si
+  el arranque muere en el medio la deja sin índice, cosa nada hipotética porque el watcher
+  reinicia el backend seguido. Quedó como `ALTER INDEX … RENAME`, que es **atómico** y no
+  reconstruye nada, dentro de un `DO $$` condicional a los dos nombres.
+  **Los tres caminos verificados contra Postgres real:** base fresca → nombre nuevo; base
+  vieja (solo el nombre viejo) → renombrado; y el borde de que existan **los dos** → se
+  dropea el viejo y queda uno.
+  El e2e de unicidad no se rompe porque afirma la **forma** del índice (UNIQUE + tenant_id
+  + `lower(`), no su nombre.
+
+- [x] **El guard de reentrancia de `items.vue` ya tiene regresión automatizada**
+  (frontend, `items.nuxt.spec.ts`) — ⚠️ **la entrada decía "el proyecto no testea páginas"
+  y eso quedó viejo**: `items.nuxt.spec.ts` existe hace rato (614 líneas) y ya tenía dos
+  tests de carrera con promesas retenidas. El hueco era solo este guard.
+  **Lo que costó pensar fue qué afirmar.** El observable NO es a qué item apunta el modal
+  al final: sin el guard, la respuesta tardía del primero igual termina pisando al segundo,
+  así que los dos caminos aterrizan en el mismo item y una aserción sobre eso no falsea
+  nada. Lo que distingue es **cuántas verificaciones se disparan** — con el guard, una; sin
+  él, dos — y que el modal no llegue a abrirse con el item equivocado en el medio.
+  Se instrumentó el mock de `useApiFetch` para registrar cada `GET /items/:id/uso` y poder
+  retener la respuesta por id. Tres tests: la carrera; **que el guard se libere** al
+  terminar (un guard que no se libera deja la pantalla muerta después del primer borrado,
+  que sería peor que el bug original); y la **mitad visual** —que el menú de esa fila quede
+  deshabilitado mientras verifica—, que la revisión señaló como mutante sobreviviente: sin
+  ese feedback el guard se traga los clicks en silencio.
+  **Mutantes medidos:** borrar `if (verificandoEliminarId.value) return` mata 1; vaciar el
+  `finally` que libera el guard mata 1; borrar `:loading`/`:disabled` mata 1; y un guard
+  que igual abriera el modal con el item equivocado también mata 1.
+  ⚠️ La revisión encontró además un `if (cerrar)` **inerte** en uno de los tests: el click
+  condicional pasaba igual si el botón no existía, así que el test podía degradar en
+  silencio a una versión más débil. Ahora se afirma el botón.
+
+---
+
 ## Auditoría `turnos` + `salones` + `garzones` (2026-08-06)
 
 Los tres hallazgos que se cerraron en la misma pasada. Los 22 restantes y lo refutado

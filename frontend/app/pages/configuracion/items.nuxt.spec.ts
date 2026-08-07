@@ -117,6 +117,9 @@ let overrideItemsSinEliminados: Promise<unknown> | null = null
 // La página dispara varias cargas al montar (catálogos, vendibles, grupos) y
 // cada una espera una forma distinta. Se responde por URL: lo que importa es
 // que la tabla tenga UNA fila para que se rendericen los controles de fila.
+let usoCalls: string[] = []
+let usoOverride: Record<string, Promise<unknown>> = {}
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string }) => {
     if (typeof url === 'string' && url.includes('/impuestos'))
@@ -125,8 +128,13 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve(descuentosMock)
     if (typeof url === 'string' && url.includes('/recargos'))
       return Promise.resolve(recargosMock)
-    if (itemPapeleraBackend && typeof url === 'string' && url.includes(`/items/${itemPapeleraBackend.id}/uso`))
-      return Promise.resolve({ bloqueos: [], advertencias: [] })
+    // `/uso` de cualquier item: se registra la llamada y se permite retener la
+    // respuesta por id, para poder montar la carrera del guard de reentrancia.
+    const uso = typeof url === 'string' ? /\/items\/([^/]+)\/uso$/.exec(url) : null
+    if (uso) {
+      usoCalls.push(uso[1]!)
+      return usoOverride[uso[1]!] ?? Promise.resolve({ bloqueos: [], advertencias: [] })
+    }
     if (
       itemPapeleraBackend
       && typeof url === 'string'
@@ -608,6 +616,155 @@ describe('configuracion/items — papelera: la carrera del toggle vía usePagina
     // eliminados" haya llegado después y en teoría pisara el estado.
     expect(wrapper.text()).toContain('Item Vivo')
     expect(wrapper.text()).not.toContain('Item Ya Borrado')
+
+    wrapper.unmount()
+  })
+})
+
+// Regresión del guard de reentrancia de "Eliminar" (`verificandoEliminarId`).
+// El bug que arregló: `confirmarEliminar` pedía `GET /items/:id/uso` y con la
+// respuesta seteaba `usoItem`/`confirmDeleteId`. Si el usuario clickeaba
+// "Eliminar" en OTRA fila antes de que llegara la primera, la respuesta vieja
+// pisaba el estado del click nuevo — y el modal terminaba apuntando a un item
+// que no era el último que se pidió borrar.
+//
+// El observable que distingue NO es a qué item apunta el modal al final: sin
+// el guard, la respuesta tardía del primero igual termina pisando al segundo,
+// así que los dos caminos aterrizan en el mismo item. Lo que distingue es
+// **cuántas verificaciones se disparan**, y que el modal no llegue a abrirse
+// con el item equivocado en el medio.
+describe('configuracion/items — guard de reentrancia de "Eliminar"', () => {
+  const ITEM_A = 'item-guard-a'
+  const ITEM_B = 'item-guard-b'
+
+  beforeEach(() => {
+    esAdmin = true
+    permisos = []
+    impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
+    impuestosPromiseOverride = null
+    usoCalls = []
+    usoOverride = {}
+    itemPapeleraBackend = {
+      id: ITEM_A,
+      nombre: 'Aaa Item Guard',
+      tipo: 'servicio',
+      activo: true,
+      precioBase: '1000.0000',
+      monedaId: 'clp',
+      eliminadoEl: null,
+      eliminadoPorNombre: null,
+    }
+    itemPapeleraExtra = {
+      id: ITEM_B,
+      nombre: 'Bbb Item Guard',
+      tipo: 'servicio',
+      activo: true,
+      precioBase: '1000.0000',
+      monedaId: 'clp',
+      eliminadoEl: null,
+      eliminadoPorNombre: null,
+    }
+    overrideItemsConEliminados = null
+    overrideItemsSinEliminados = null
+  })
+
+  afterEach(() => {
+    itemPapeleraBackend = null
+    itemPapeleraExtra = null
+    usoCalls = []
+    usoOverride = {}
+  })
+
+  async function clickEliminarEnFila(
+    wrapper: Awaited<ReturnType<typeof montar>>,
+    indice: number,
+  ) {
+    const menus = wrapper.findAll('[title="Más acciones"]')
+    expect(menus.length, 'filas con menú de acciones').toBeGreaterThan(indice)
+    await menus[indice]!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const eliminar = [...document.body.querySelectorAll('[role="menuitem"]')]
+      .find(el => el.textContent?.trim() === 'Eliminar')
+    expect(eliminar, 'entrada "Eliminar" del menú').toBeTruthy()
+    ;(eliminar as HTMLElement).click()
+    await new Promise(r => setTimeout(r, 20))
+  }
+
+  it('un segundo "Eliminar" mientras /uso está en vuelo no dispara otra verificación', async () => {
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Aaa Item Guard')
+    expect(wrapper.text()).toContain('Bbb Item Guard')
+
+    // El /uso del PRIMERO queda retenido: es el que llega tarde.
+    let resolverUsoA: (v: unknown) => void = () => {}
+    usoOverride[ITEM_A] = new Promise((resolve) => { resolverUsoA = resolve })
+
+    await clickEliminarEnFila(wrapper, 0)
+    // Ancla positiva: si el primer click no llegó a pedir /uso, la aserción de
+    // abajo pasaría vacuamente con la lista vacía.
+    expect(usoCalls).toEqual([ITEM_A])
+
+    // Segundo click en la OTRA fila, con la primera verificación todavía en
+    // vuelo. Sin el guard, acá sale un segundo GET.
+    await clickEliminarEnFila(wrapper, 1)
+    expect(usoCalls).toEqual([ITEM_A])
+
+    // Y el modal no se abrió con el segundo item en el medio.
+    expect(document.body.textContent).not.toContain('Bbb Item Guard')
+
+    resolverUsoA({ bloqueos: [], advertencias: [] })
+    await new Promise(r => setTimeout(r, 30))
+
+    // Al llegar la respuesta retenida, el modal apunta al item que SÍ se estaba
+    // verificando.
+    expect(document.body.textContent).toContain('Aaa Item Guard')
+
+    wrapper.unmount()
+  })
+
+  it('mientras verifica, el menú de esa fila queda deshabilitado', async () => {
+    // La otra mitad del guard: sin el feedback visual, los clicks se los traga
+    // en silencio y el usuario no entiende por qué la fila no responde.
+    const wrapper = await montar()
+
+    let resolverUsoA: (v: unknown) => void = () => {}
+    usoOverride[ITEM_A] = new Promise((resolve) => { resolverUsoA = resolve })
+
+    const antes = wrapper.findAll('[title="Más acciones"]')
+      .filter(b => b.attributes('disabled') !== undefined).length
+    expect(antes).toBe(0)
+
+    await clickEliminarEnFila(wrapper, 0)
+
+    const deshabilitados = wrapper.findAll('[title="Más acciones"]')
+      .filter(b => b.attributes('disabled') !== undefined)
+    expect(deshabilitados).toHaveLength(1)
+
+    resolverUsoA({ bloqueos: [], advertencias: [] })
+    await new Promise(r => setTimeout(r, 30))
+
+    wrapper.unmount()
+  })
+
+  it('cuando la verificación termina, el guard se libera y el siguiente click funciona', async () => {
+    // La otra mitad: un guard que no se libera deja la pantalla muerta después
+    // del primer borrado, que sería peor que el bug original.
+    const wrapper = await montar()
+
+    await clickEliminarEnFila(wrapper, 0)
+    await new Promise(r => setTimeout(r, 20))
+    expect(usoCalls).toEqual([ITEM_A])
+
+    // Se afirma en vez de `if (cerrar)`: un click condicional degrada en
+    // silencio a una versión más débil del test si mañana cambia el label.
+    const cerrar = [...document.body.querySelectorAll('button')]
+      .find(b => b.textContent?.trim() === 'Cancelar')
+    expect(cerrar, 'botón "Cancelar" del modal').toBeTruthy()
+    cerrar!.click()
+    await new Promise(r => setTimeout(r, 20))
+
+    await clickEliminarEnFila(wrapper, 1)
+    expect(usoCalls).toEqual([ITEM_A, ITEM_B])
 
     wrapper.unmount()
   })

@@ -100,6 +100,7 @@ Estructura de directorios, mapa de módulos y flujo de requests: `docs/ARCHITECT
 docker-compose up            # Stack completo (preferido); --build reconstruye imágenes
 docker-compose down -v       # Detener y borrar el volumen de la BD
 ./scripts/reset-db.sh        # Reset + espera del seed, ANTES de cada test:e2e (~30s)
+./scripts/reset-db.sh --verificar   # DESPUÉS del e2e: ¿la base se movió abajo de la suite?
 
 cd backend
 npm run start:dev            # Watch mode
@@ -113,6 +114,13 @@ npm run e2e:smoke  # solo el subconjunto @smoke
 
 Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_URL`,
 `JWT_SECRET`, `PORT`, `API_PREFIX`; frontend lee `VITE_API_URL`.
+
+⚠️ **No toques un `.ts` del backend con el e2e corriendo.** El compose usa
+`start:dev` con el fuente bind-mounteado, así que cualquier cambio recompila,
+reinicia y **vuelve a sembrar** (medido: crear un `.ts` lleva el contador de
+`Seed complete` de 1 a 2). Si eso pasa a mitad de la suite, salen decenas de
+fallos repartidos que **no son regresiones**. Ante un e2e que falla raro, la
+primera pregunta la contesta `./scripts/reset-db.sh --verificar`.
 
 **Git hook (una vez por clone):** `git config core.hooksPath .githooks` activa el
 pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de

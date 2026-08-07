@@ -107,15 +107,6 @@ identificamos con ubicación concreta.
   correcto: molesta a la vista, no está produciendo bugs. Se reabre si aparece evidencia
   de que duele (una query caliente, o un módulo nuevo que olvide el filtro); el cierre sin
   divergencia sería una **vista `tenant_pais`**, no una columna.
-- [ ] **El e2e da fallos masivos falsos si se corre justo después de editar un fuente**
-  (harness) — visto **dos veces el 2026-07-28**, con la misma firma: 42 y 46 fallos
-  repartidos por media suite, y verde inmediato al repetir. La causa probable —hipótesis,
-  no verificada— es que `docker-compose up` corre el backend en **watch mode**: al tocar un
-  archivo recompila, re-arranca y **vuelve a correr el seeder**, encima de la suite que ya
-  está andando. `reset-db.sh` espera el `Seed complete` de ese arranque, no del siguiente.
-  Mitigación que funcionó las dos veces: correr `reset-db.sh` **inmediatamente antes** del
-  e2e, sin lint/typecheck/unit en el medio. Cierre posible: que el script espere a que el
-  backend quede estable, o correr el e2e contra un stack sin watch.
 ---
 
 ## Suite E2E de navegador (fundación lista, flujos por escribir)
@@ -222,15 +213,6 @@ Y dos hallazgos que la feature dejó medidos y no son suyos:
   es "comparar timestamps entre tablas" en general — es comparar timestamps **de
   tipos distintos**, que hoy solo pasa en el par `items`/`receta_extras_permitidos`
   de los tres recursos con colateral.
-- [ ] **`uq_motivo_diferencia_caja_tenant_nombre` se llama distinto en el seeder**
-  (backend) — `startup-pos.sql` lo declara con ese nombre y el seeder lo crea
-  como `uq_motivo_diferencia_tenant_nombre`. **La definición es idéntica**, así
-  que la conducta es la misma en las dos bases; lo que cambia es el nombre, y
-  ninguna base tiene los dos (dev arma el esquema por `synchronize` + seeder, no
-  corriendo el `.sql`). Molesta cuando alguien busca el índice por nombre.
-  Unificar hacia el nombre de `startup-pos.sql` exige `DROP` del viejo en las
-  bases de dev, igual que el `DROP` condicional de `seedCajones()`.
-
 - [ ] **La plomería de tramos en `recargos` es alcanzable y no significa nada**
   (backend) — `create()`/`update()` persisten `dto.tramos` y
   `validarSegunTipoUpdate` valida que no venga vacío, pero **ningún código de
@@ -753,12 +735,6 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
 Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` +
 `remove()`. Ninguno bloqueaba el cierre; se difieren por alcance acotado a esa oleada.
 
-- [ ] **El guard de reentrancia de `items.vue` no tiene regresión automatizada**
-  (frontend) — el fix de `verificandoEliminarId` ("se borra el item equivocado" si
-  una respuesta de `/uso` obsoleta pisa `usoItem`/`confirmDeleteId` de un click
-  posterior sobre otra fila) está verificado solo a mano; el proyecto no testea
-  páginas. Escenario de reproducción: demorar la respuesta de `/uso` de un item y
-  clickear "Eliminar" en otra fila antes de que llegue.
 - [ ] **Asimetría de guard entre rutas hermanas** (backend) — `GET /items/:id/uso`
   exige `Items:Eliminar`; la ruta hermana `GET /items/:id/recetas-afectadas`
   (`items.controller.ts:36`) exige solo `Items:Leer`. Es una decisión deliberada (solo
