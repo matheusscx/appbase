@@ -88,6 +88,21 @@ interface SalonMesaRow {
   cuentas_abiertas: string;
 }
 
+/** Fila cruda del JOIN `cuenta_lineas` × `items` que arma el detalle. */
+interface LineaDetalleRow {
+  cuenta_id: string;
+  cuenta_linea_id: string;
+  item_id: string;
+  cantidad: string;
+  cantidad_presentacion: string | null;
+  unidad_codigo_presentacion: string | null;
+  nombre: string;
+  precio_base: string;
+  moneda_id: string;
+  personalizacion: PersonalizacionRecetaSnapshot | null;
+  item_eliminado: boolean;
+}
+
 export interface CuentaLineaDetalle {
   id: string;
   itemId: string;
@@ -495,7 +510,7 @@ export class SalonesService {
       where: { tenantId, mesaId, estado: EstadoCuenta.ABIERTA },
       order: { numero: 'ASC' },
     });
-    return Promise.all(cuentas.map((c) => this.armarDetalle(tenantId, c)));
+    return this.armarDetalles(tenantId, cuentas);
   }
 
   async abrirCuenta(
@@ -768,18 +783,35 @@ export class SalonesService {
       cuentas.sort((a, b) => a.numero - b.numero);
       const [destino, ...origenes] = cuentas;
 
+      // Las dos lecturas van FUERA del loop: esto corre sosteniendo el
+      // `pessimistic_write` sobre todas las cuentas, así que cada query de más
+      // alarga el lock que bloquea agregar líneas y cerrar en esa mesa. Antes
+      // era una lectura por línea de cada origen.
+      const lineasOrigen = await manager.find(CuentaLinea, {
+        where: { tenantId, cuentaId: In(origenes.map((o) => o.id)) },
+      });
+      const porOrigen = new Map<string, CuentaLinea[]>();
+      for (const l of lineasOrigen) {
+        const acc = porOrigen.get(l.cuentaId);
+        if (acc) acc.push(l);
+        else porOrigen.set(l.cuentaId, [l]);
+      }
+
+      const claveFusion = (l: CuentaLinea) =>
+        `${l.itemId}|${hashPersonalizacion(l.personalizacion)}`;
+      const enDestino = new Map<string, CuentaLinea>();
+      for (const l of await manager.find(CuentaLinea, {
+        where: { tenantId, cuentaId: destino.id },
+      })) {
+        // Si el destino ya trajera dos líneas con la misma clave —estado que
+        // `agregarLinea` no produce, porque mergea— da igual sobre cuál se
+        // sume: el total de la cuenta es el mismo.
+        enDestino.set(claveFusion(l), l);
+      }
+
       for (const origen of origenes) {
-        const lineas = await manager.find(CuentaLinea, {
-          where: { tenantId, cuentaId: origen.id },
-        });
-        for (const linea of lineas) {
-          const existentes = await manager.find(CuentaLinea, {
-            where: { tenantId, cuentaId: destino.id, itemId: linea.itemId },
-          });
-          const hashOrigen = hashPersonalizacion(linea.personalizacion);
-          const existente = existentes.find(
-            (l) => hashPersonalizacion(l.personalizacion) === hashOrigen,
-          );
+        for (const linea of porOrigen.get(origen.id) ?? []) {
+          const existente = enDestino.get(claveFusion(linea));
           if (existente) {
             existente.cantidad = new Decimal(existente.cantidad)
               .plus(linea.cantidad)
@@ -795,6 +827,9 @@ export class SalonesService {
           } else {
             linea.cuentaId = destino.id;
             await manager.save(CuentaLinea, linea);
+            // El índice se mantiene al día: una línea igual que venga de un
+            // origen POSTERIOR tiene que sumarse sobre esta, no duplicarla.
+            enDestino.set(claveFusion(linea), linea);
           }
         }
         origen.estado = EstadoCuenta.CANCELADA;
@@ -1202,47 +1237,81 @@ export class SalonesService {
     cuenta: Cuenta,
     manager?: DataSource['manager'],
   ): Promise<CuentaDetalle> {
+    const [detalle] = await this.armarDetalles(tenantId, [cuenta], manager);
+    return detalle;
+  }
+
+  /**
+   * Detalle de N cuentas con un número FIJO de queries, no una tanda por cuenta.
+   * `listarCuentasDeMesa` es lo que el garzón golpea cada vez que abre una mesa,
+   * y con una tanda por cuenta el costo crecía con las cuentas abiertas.
+   *
+   * Las dos consultas auxiliares ya eran batch (`= ANY($1)`); lo único que faltaba
+   * era llamarlas una sola vez con las líneas de todas las cuentas juntas.
+   */
+  private async armarDetalles(
+    tenantId: string,
+    cuentas: Cuenta[],
+    manager?: DataSource['manager'],
+  ): Promise<CuentaDetalle[]> {
+    if (cuentas.length === 0) return [];
     const runner = manager ?? this.dataSource.manager;
-    const lineas: {
-      cuenta_linea_id: string;
-      item_id: string;
-      cantidad: string;
-      cantidad_presentacion: string | null;
-      unidad_codigo_presentacion: string | null;
-      nombre: string;
-      precio_base: string;
-      moneda_id: string;
-      personalizacion: PersonalizacionRecetaSnapshot | null;
-      item_eliminado: boolean;
-    }[] = await runner.query(
+    const lineas: LineaDetalleRow[] = await runner.query(
       // El JOIN NO filtra `i.eliminado_el IS NULL`, y es a propósito: la fila
       // de `items` sobrevive al soft delete, así que filtrarla hacía
       // DESAPARECER la línea de la pantalla mientras `cerrarCuenta` —que lee
       // las líneas crudas— seguía contándola. El garzón veía una cuenta
       // incompleta que no podía cobrar ni corregir, porque no tenía el
       // `lineaId` de algo que no se renderizaba. Ahora se muestra marcada.
-      `SELECT cl.cuenta_linea_id, cl.item_id, cl.cantidad,
+      `SELECT cl.cuenta_id, cl.cuenta_linea_id, cl.item_id, cl.cantidad,
               cl.cantidad_presentacion, cl.unidad_codigo_presentacion,
               cl.personalizacion,
               i.nombre, i.precio_base, i.moneda_id,
               i.eliminado_el IS NOT NULL AS item_eliminado
          FROM cuenta_lineas cl
          JOIN items i ON i.item_id = cl.item_id AND i.tenant_id = $2
-        WHERE cl.cuenta_id = $1 AND cl.tenant_id = $2 AND cl.eliminado_el IS NULL
+        WHERE cl.cuenta_id = ANY($1) AND cl.tenant_id = $2
+          AND cl.eliminado_el IS NULL
         ORDER BY cl.creado_el ASC`,
-      [cuenta.id, tenantId],
+      [cuentas.map((c) => c.id), tenantId],
     );
+    // El ORDER BY es global, pero agrupar respetando el orden de llegada deja
+    // cada cuenta con sus líneas en el mismo orden que tenían una por una.
+    const porCuenta = new Map<string, LineaDetalleRow[]>();
+    for (const l of lineas) {
+      const acc = porCuenta.get(l.cuenta_id);
+      if (acc) acc.push(l);
+      else porCuenta.set(l.cuenta_id, [l]);
+    }
     const nombresGarzon = await this.nombresGarzon(
       runner,
-      cuenta.garzonAperturaId,
-      cuenta.garzonCierreId,
-      cuenta.garzonResponsableId,
+      cuentas.flatMap((c) => [
+        c.garzonAperturaId,
+        c.garzonCierreId,
+        c.garzonResponsableId,
+      ]),
     );
     const nombres = await this.nombresIngredientesPersonalizacion(
       tenantId,
       lineas,
       runner,
     );
+    return cuentas.map((cuenta) =>
+      this.mapearDetalle(
+        cuenta,
+        porCuenta.get(cuenta.id) ?? [],
+        nombresGarzon,
+        nombres,
+      ),
+    );
+  }
+
+  private mapearDetalle(
+    cuenta: Cuenta,
+    lineas: LineaDetalleRow[],
+    nombresGarzon: Record<string, string>,
+    nombres: Map<string, string>,
+  ): CuentaDetalle {
     return {
       id: cuenta.id,
       numero: cuenta.numero,
@@ -1319,7 +1388,7 @@ export class SalonesService {
   /** Resuelve los nombres de los garzones de apertura/cierre en una query. */
   private async nombresGarzon(
     runner: DataSource['manager'],
-    ...ids: (string | null)[]
+    ids: (string | null)[],
   ): Promise<Record<string, string>> {
     const garzonIds = [...new Set(ids.filter((id): id is string => !!id))];
     if (garzonIds.length === 0) return {};

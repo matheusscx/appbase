@@ -492,21 +492,6 @@ que falta es el aviso en el momento de editar — ver la entrada de `garzones.ac
 
 ### Media
 
-- [ ] **N+1 al listar las cuentas de una mesa: 1 + 3N queries** (backend,
-  `salones.service.ts` → `listarCuentasDeMesa`) — hace `cuentaRepo.find(...)` y después
-  `cuentas.map((c) => this.armarDetalle(...))`. Cada `armarDetalle` dispara 3 queries
-  (líneas + `nombresGarzon` + `nombresIngredientesPersonalizacion`), así que una mesa con
-  3 cuentas abiertas cuesta 10 queries en vez de ~3 batcheadas. El `Promise.all`
-  paraleliza las promesas pero no reduce las queries al motor. Es un endpoint que el POS
-  llama cada vez que el garzón abre la mesa. El patrón batch (`WHERE … = ANY($1)`) ya lo
-  usa el propio archivo cuando esas dos funciones se llaman una sola vez.
-- [ ] **N+1 dentro de `fusionarCuentas`, sosteniendo el lock pesimista** (backend,
-  `salones.service.ts`) — por cada línea de cada cuenta de origen se ejecuta un
-  `manager.find(CuentaLinea, { … itemId })` para ver si el ítem ya está en el destino:
-  M×L queries. Fusionar 3 cuentas de ~15 ítems son 30 queries extra **dentro de la misma
-  transacción que sostiene `pessimistic_write`** sobre las cuentas, así que además alarga
-  el lock que bloquea agregar líneas y cerrar. Se resuelve trayendo las líneas del destino
-  una sola vez antes del loop e indexándolas por `itemId` en memoria.
 - [ ] **El filtro "Hasta" del historial de sesiones excluye las sesiones del propio día**
   (backend + frontend, `sesiones-garzon.service.ts` → `buildHistorialFilters`, y
   `pages/sesiones-garzon.vue`) — `AppDateInput` emite `YYYY-MM-DD` sin hora, el DTO lo

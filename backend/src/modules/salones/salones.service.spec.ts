@@ -324,6 +324,19 @@ describe('SalonesService', () => {
     const CUENTA_A = 'cuenta-a';
     const CUENTA_B = 'cuenta-b';
 
+    /**
+     * El servicio lee las líneas de los orígenes con `In([...])` y las del
+     * destino con el id pelado. El stub entiende las dos formas para no atarse
+     * a cuál usa cada consulta.
+     */
+    function idsDe(filtro: unknown): string[] {
+      if (filtro && typeof filtro === 'object' && '_value' in filtro) {
+        const v = filtro._value;
+        return Array.isArray(v) ? (v as string[]) : [v as string];
+      }
+      return filtro === undefined ? [] : [filtro as string];
+    }
+
     it('mueve las líneas de las cuentas de origen a la de menor número y las cancela', async () => {
       const cuentaA = {
         id: CUENTA_A,
@@ -382,23 +395,17 @@ describe('SalonesService', () => {
         },
       );
       manager.find.mockImplementation(
-        (
-          entity: unknown,
-          opts?: { where?: { cuentaId?: string; itemId?: string } },
-        ) => {
+        (entity: unknown, opts?: { where?: { cuentaId?: unknown } }) => {
           if (entity === Cuenta) return Promise.resolve([cuentaB, cuentaA]);
           if (entity === CuentaLinea) {
-            if (opts?.where?.cuentaId === CUENTA_B)
-              return Promise.resolve([
+            const ids = idsDe(opts?.where?.cuentaId);
+            return Promise.resolve(
+              [
+                lineaExistenteDestino,
                 lineaOrigenMismoItem,
                 lineaOrigenOtroItem,
-              ]);
-            if (
-              opts?.where?.cuentaId === CUENTA_A &&
-              opts?.where?.itemId === 'item-1'
-            )
-              return Promise.resolve([lineaExistenteDestino]);
-            return Promise.resolve([]);
+              ].filter((l) => ids.includes(l.cuentaId)),
+            );
           }
           return Promise.resolve([]);
         },
@@ -485,20 +492,15 @@ describe('SalonesService', () => {
 
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
       manager.find.mockImplementation(
-        (
-          entity: unknown,
-          opts?: { where?: { cuentaId?: string; itemId?: string } },
-        ) => {
+        (entity: unknown, opts?: { where?: { cuentaId?: unknown } }) => {
           if (entity === Cuenta) return Promise.resolve([cuentaA, cuentaB]);
           if (entity === CuentaLinea) {
-            if (opts?.where?.cuentaId === CUENTA_B)
-              return Promise.resolve([lineaOrigenConPerso]);
-            if (
-              opts?.where?.cuentaId === CUENTA_A &&
-              opts?.where?.itemId === 'item-1'
-            )
-              return Promise.resolve([lineaDestinoSinPerso]);
-            return Promise.resolve([]);
+            const ids = idsDe(opts?.where?.cuentaId);
+            return Promise.resolve(
+              [lineaDestinoSinPerso, lineaOrigenConPerso].filter((l) =>
+                ids.includes(l.cuentaId),
+              ),
+            );
           }
           return Promise.resolve([]);
         },
@@ -536,6 +538,145 @@ describe('SalonesService', () => {
           cuentaIds: [CUENTA_A, CUENTA_A],
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    /**
+     * Monta N cuentas de origen con L líneas cada una, todas de ítems distintos,
+     * y devuelve el contador de lecturas de `CuentaLinea`. La fusión corre
+     * DENTRO del lock pesimista: cada lectura de más alarga el tiempo que nadie
+     * puede agregar líneas ni cerrar en esa mesa.
+     */
+    function montarFusion(origenes: number, lineasPorOrigen: number) {
+      const cuentas = [
+        {
+          id: 'destino',
+          tenantId: TENANT,
+          mesaId: MESA,
+          numero: 1,
+          estado: EstadoCuenta.ABIERTA,
+        },
+        ...Array.from({ length: origenes }, (_, i) => ({
+          id: `origen-${i}`,
+          tenantId: TENANT,
+          mesaId: MESA,
+          numero: i + 2,
+          estado: EstadoCuenta.ABIERTA,
+          cerradaEl: null as Date | null,
+        })),
+      ];
+      const lineas = cuentas.slice(1).flatMap((c, i) =>
+        Array.from({ length: lineasPorOrigen }, (_, j) => ({
+          id: `l-${i}-${j}`,
+          tenantId: TENANT,
+          cuentaId: c.id,
+          itemId: `item-${i}-${j}`,
+          cantidad: '1',
+          cantidadEnviada: '0',
+          personalizacion: null,
+        })),
+      );
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockImplementation(
+        (entity: unknown, opts?: { where?: { cuentaId?: unknown } }) => {
+          if (entity === Cuenta) return Promise.resolve(cuentas);
+          const ids = idsDe(opts?.where?.cuentaId);
+          return Promise.resolve(
+            lineas.filter((l) => ids.includes(l.cuentaId)),
+          );
+        },
+      );
+      manager.query.mockResolvedValue([]);
+      return () =>
+        manager.find.mock.calls.filter(([e]) => e === CuentaLinea).length;
+    }
+
+    /** Corre una fusión de N orígenes × L líneas y devuelve cuántas veces se
+     *  leyó `CuentaLinea`. */
+    async function lecturasDe(origenes: number, lineasPorOrigen: number) {
+      jest.clearAllMocks();
+      const contar = montarFusion(origenes, lineasPorOrigen);
+      await service.fusionarCuentas(TENANT, MESA, {
+        cuentaIds: [
+          'destino',
+          ...Array.from({ length: origenes }, (_, i) => `origen-${i}`),
+        ],
+      });
+      return contar();
+    }
+
+    it('el costo en lecturas no crece ni con las líneas ni con los orígenes', async () => {
+      // Las dos dimensiones del N+1: era una lectura por línea DENTRO de una
+      // lectura por origen. Medir una sola deja viva a la otra.
+      const base = await lecturasDe(2, 1);
+
+      expect(await lecturasDe(2, 10)).toBe(base);
+      expect(await lecturasDe(5, 1)).toBe(base);
+      expect(await lecturasDe(5, 10)).toBe(base);
+    });
+
+    it('el mismo ítem en DOS orígenes se acumula en una sola línea del destino', async () => {
+      // La línea del primer origen se mueve al destino; la del segundo tiene que
+      // encontrarla YA movida y sumarse. Es lo que se pierde si el índice de
+      // líneas del destino se arma una vez y no se mantiene al día.
+      const destino = {
+        id: 'destino',
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 1,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      const origenes = [1, 2].map((n) => ({
+        id: `origen-${n}`,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: n + 1,
+        estado: EstadoCuenta.ABIERTA,
+        cerradaEl: null as Date | null,
+      }));
+      const lineas = [
+        {
+          id: 'l-1',
+          tenantId: TENANT,
+          cuentaId: 'origen-1',
+          itemId: ITEM,
+          cantidad: '2',
+          cantidadEnviada: '0',
+          personalizacion: null,
+        },
+        {
+          id: 'l-2',
+          tenantId: TENANT,
+          cuentaId: 'origen-2',
+          itemId: ITEM,
+          cantidad: '3',
+          cantidadEnviada: '1',
+          personalizacion: null,
+        },
+      ];
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockImplementation(
+        (entity: unknown, opts?: { where?: { cuentaId?: unknown } }) => {
+          if (entity === Cuenta) return Promise.resolve([destino, ...origenes]);
+          const ids = idsDe(opts?.where?.cuentaId);
+          return Promise.resolve(
+            lineas.filter((l) => ids.includes(l.cuentaId)),
+          );
+        },
+      );
+      manager.query.mockResolvedValue([]);
+
+      await service.fusionarCuentas(TENANT, MESA, {
+        cuentaIds: ['destino', 'origen-1', 'origen-2'],
+      });
+
+      // La primera se mudó al destino, la segunda se sumó y se borró.
+      expect(lineas[0].cuentaId).toBe('destino');
+      expect(lineas[0].cantidad).toBe('5');
+      expect(lineas[0].cantidadEnviada).toBe('1');
+      expect(manager.softDelete).toHaveBeenCalledWith(CuentaLinea, {
+        id: 'l-2',
+        tenantId: TENANT,
+      });
     });
   });
 
@@ -600,6 +741,7 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([]);
       manager.query.mockResolvedValueOnce([
         {
+          cuenta_id: CUENTA,
           cuenta_linea_id: 'linea-pres',
           item_id: ITEM,
           cantidad: '0.5',
@@ -805,6 +947,7 @@ describe('SalonesService', () => {
         if (sql.includes('cl.cuenta_linea_id'))
           return Promise.resolve([
             {
+              cuenta_id: CUENTA,
               cuenta_linea_id: 'linea-1',
               item_id: ITEM,
               cantidad: '3',
@@ -940,6 +1083,7 @@ describe('SalonesService', () => {
           sql.includes('cl.cuenta_linea_id')
             ? [
                 {
+                  cuenta_id: CUENTA,
                   cuenta_linea_id: 'linea-2',
                   item_id: ITEM,
                   cantidad: '1',
@@ -1422,6 +1566,82 @@ describe('SalonesService', () => {
     });
   });
 
+  describe('listarCuentasDeMesa — costo en queries', () => {
+    // El endpoint que el garzón golpea cada vez que abre una mesa. Con una
+    // query por cuenta, una mesa con 4 cuentas cuesta 4 veces lo que una con 1.
+    // Lo que se fija es que el costo NO crezca con la cantidad de cuentas.
+    function cuentaAbierta(n: number) {
+      return {
+        id: `cuenta-${n}`,
+        numero: n,
+        nombre: null,
+        estado: EstadoCuenta.ABIERTA,
+        mesaId: MESA,
+        ventaId: null,
+        garzonAperturaId: `garzon-${n}`,
+        garzonResponsableId: `garzon-${n}`,
+        garzonCierreId: null,
+      };
+    }
+
+    function contarQueries(cuentas: number) {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue(
+        Array.from({ length: cuentas }, (_, i) => cuentaAbierta(i + 1)),
+      );
+      dataSource.manager.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM cuenta_lineas')) {
+          // Una línea por cuenta, cada una con personalización: es el caso que
+          // dispara las tres consultas de `armarDetalle`.
+          return Promise.resolve(
+            Array.from({ length: cuentas }, (_, i) => ({
+              cuenta_linea_id: `linea-${i + 1}`,
+              cuenta_id: `cuenta-${i + 1}`,
+              item_id: ITEM,
+              cantidad: '1',
+              cantidad_presentacion: null,
+              unidad_codigo_presentacion: null,
+              nombre: 'Papas',
+              precio_base: '1000',
+              moneda_id: 'clp',
+              personalizacion: SNAPSHOT,
+              item_eliminado: false,
+            })),
+          );
+        }
+        return Promise.resolve([]);
+      });
+      return dataSource.manager.query;
+    }
+
+    it('el costo en queries no crece con la cantidad de cuentas de la mesa', async () => {
+      const query = contarQueries(1);
+      await service.listarCuentasDeMesa(TENANT, MESA);
+      const conUna = query.mock.calls.length;
+
+      jest.clearAllMocks();
+      contarQueries(4);
+      await service.listarCuentasDeMesa(TENANT, MESA);
+      const conCuatro = query.mock.calls.length;
+
+      expect(conCuatro).toBe(conUna);
+    });
+
+    it('cada cuenta recibe SOLO sus propias líneas', async () => {
+      // El batch trae las líneas de todas las cuentas en una query: si el
+      // agrupado por `cuenta_id` se cae, una mesa muestra los pedidos de otra.
+      contarQueries(3);
+      const detalles = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalles).toHaveLength(3);
+      expect(detalles.map((d) => d.lineas.map((l) => l.id))).toEqual([
+        ['linea-1'],
+        ['linea-2'],
+        ['linea-3'],
+      ]);
+    });
+  });
+
   describe('armarDetalle / responsable', () => {
     it('devuelve ID/nombre del responsable aunque el garzón esté soft-deleted', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
@@ -1476,6 +1696,7 @@ describe('SalonesService', () => {
           expect(sql).not.toMatch(/i\.eliminado_el\s+IS\s+NULL/i);
           return Promise.resolve([
             {
+              cuenta_id: CUENTA,
               cuenta_linea_id: 'linea-1',
               item_id: ITEM,
               cantidad: '1',
@@ -1521,6 +1742,7 @@ describe('SalonesService', () => {
           sql.includes('FROM cuenta_lineas')
             ? [
                 {
+                  cuenta_id: CUENTA,
                   cuenta_linea_id: 'linea-1',
                   item_id: ITEM,
                   cantidad: '1',

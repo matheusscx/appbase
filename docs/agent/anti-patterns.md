@@ -154,6 +154,23 @@ jul-2026 en el camino caliente del POS, corregidas en la auditoría de `ventas`+
    `expect(crearConversor).toHaveBeenCalledTimes(1)`. Sin él, el arreglo se revierte sin
    que falle nada — el resultado de la venta es idéntico, solo cambia cuántas queries hizo.
 
+4. **N+1 sosteniendo un lock pesimista.** `fusionarCuentas` leía las líneas del destino
+   una vez por línea de cada origen, **dentro de la transacción que ya tenía
+   `pessimistic_write` sobre todas las cuentas de la mesa**. Ahí el costo no es latencia:
+   es el tiempo que nadie más puede agregar líneas ni cerrar en esa mesa. Un N+1 en una
+   lectura suelta se paga en milisegundos propios; adentro de un lock se lo cobra a todos
+   los demás. Cuando el bucle vive dentro de una transacción con lock, la pregunta no es
+   "¿cuántas queries?" sino "¿cuánto dura el lock?" (ago-2026, `salones.service.ts`).
+   El batch necesita **mantener el índice al día**: la línea que se mueve al destino tiene
+   que poder recibir la suma de una igual que venga de un origen posterior. Armar el mapa
+   una vez y no actualizarlo duplica líneas en vez de acumularlas — es la conducta que la
+   consulta repetida daba gratis.
+
+**Medir el N+1 en las dos dimensiones, no en una.** Este tenía la forma "una lectura por
+línea, dentro de una lectura por origen". Un test que varía solo las líneas pasa en verde
+con el bucle por origen intacto: lo comprobamos midiendo el mutante, que sobrevivió. El
+test cuenta lecturas variando **cada** dimensión por separado y las dos juntas.
+
 **No todo bucle con `await` es un N+1.** Son tres cosas distintas y confundirlas costó dos
 falsos positivos en la auditoría de jul-2026. Antes de tocar un bucle, clasificarlo:
 

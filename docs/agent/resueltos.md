@@ -527,6 +527,34 @@ Entradas de tandas anteriores que no necesitaban ninguna decisión de negocio.
 Los hallazgos que se cerraron. Los que quedan y lo refutado están en
 [`pendientes.md`](pendientes.md).
 
+- [x] ~~**Los dos N+1 de `salones.service.ts`**~~ (backend, cerrados 2026-08-07 juntos, por
+  ser el mismo defecto en el mismo servicio).
+  **`listarCuentasDeMesa` — 1 + 3N.** `armarDetalle` disparaba tres consultas y se llamaba
+  una vez por cuenta. Ahora existe `armarDetalles(cuentas[])`, que hace las mismas tres para
+  N cuentas: las dos auxiliares ya eran batch (`= ANY($1)`), solo faltaba llamarlas una vez
+  con las líneas de todas juntas. `armarDetalle` quedó como el caso de una. Es el endpoint
+  que el garzón golpea cada vez que abre una mesa.
+  **`fusionarCuentas` — M×L, dentro del lock.** Por cada línea de cada origen se consultaba
+  el destino. Lo caro no era la latencia sino que corría **sosteniendo el
+  `pessimistic_write` sobre todas las cuentas de la mesa**: cada query de más alargaba el
+  tiempo en que nadie podía agregar líneas ni cerrar ahí. Ahora son dos lecturas fuera del
+  bucle, con el índice del destino **mantenido al día** — la línea que se mueve tiene que
+  poder recibir la suma de una igual que venga de un origen posterior; armar el mapa una
+  vez y no actualizarlo duplica en vez de acumular.
+  **Medido antes de tocar, no estimado:** con 2 orígenes de 1 línea, 4 lecturas de
+  `cuenta_lineas`; con 2 orígenes de 10 líneas, **22**. Después: constante en las dos
+  dimensiones.
+  **Cinco mutantes**, cada uno verificado como aplicado: volver a la tanda por cuenta,
+  romper el agrupado por `cuenta_id`, releer las líneas de origen en el bucle, reconsultar
+  el destino por línea, y no mantener el índice al día.
+  **Un error propio que el mutante encontró:** el primer test medía el costo variando solo
+  las líneas, y el mutante "leer las líneas de origen dentro del bucle" **sobrevivía** — el
+  N+1 tenía dos dimensiones y el test cubría una. Quedó en
+  [`anti-patterns.md`](anti-patterns.md).
+  **Una línea que se sacó a conciencia:** preservar "la primera gana" cuando el destino
+  trae dos líneas con la misma clave. Ningún mutante la mataba, el estado no lo produce
+  `agregarLinea` (mergea), y sumar sobre cualquiera de las dos da el mismo total de cuenta.
+
 - [x] **Fin de turno con mesas abiertas: avisar y ofrecer transferir** (backend +
   frontend, decidido y cerrado el 2026-08-06) — cobrar una cuenta exige que su
   **responsable** tenga sesión abierta, porque la propina se atribuye a esa sesión. Ni
