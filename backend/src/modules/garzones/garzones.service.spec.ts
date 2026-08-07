@@ -211,6 +211,56 @@ describe('GarzonesService', () => {
       await expect(service.regenerarPin(TENANT, 'inexistente')).rejects.toThrow(
         NotFoundException,
       );
+      expect(repo.findOne).toHaveBeenCalledWith({
+        where: { id: 'inexistente', tenantId: TENANT },
+      });
+    });
+  });
+
+  describe('actualizar', () => {
+    it('aplica el cambio de tipo, que decide el grupo de reparto de propinas', async () => {
+      // Es el ÚNICO método que mueve `tipo`, y ese valor se congela en cada
+      // sesión que se abre después. Sin esto, un cambio de garzón a cocina se
+      // guardaba en silencio como si nada y el reparto seguía yendo al grupo
+      // viejo hasta que alguien lo notara contando plata.
+      const g = garzon({ id: 'g1', tipo: TipoGarzon.GARZON });
+      repo.findOne.mockResolvedValue(g);
+
+      const result = await service.actualizar(TENANT, 'g1', {
+        tipo: TipoGarzon.COCINA,
+      });
+
+      expect(result.tipo).toBe(TipoGarzon.COCINA);
+      expect((repo.save.mock.calls[0] as [Garzon])[0].tipo).toBe(
+        TipoGarzon.COCINA,
+      );
+    });
+
+    it('cada campo se aplica solo si viene en el DTO', async () => {
+      const g = garzon({ id: 'g1', tipo: TipoGarzon.GARZON });
+      const nombreOriginal = g.nombre;
+      repo.findOne.mockResolvedValue(g);
+
+      await service.actualizar(TENANT, 'g1', { activo: false });
+
+      const saved = (repo.save.mock.calls[0] as [Garzon])[0];
+      expect(saved.activo).toBe(false);
+      expect(saved.nombre).toBe(nombreOriginal);
+      expect(saved.tipo).toBe(TipoGarzon.GARZON);
+    });
+
+    it('lanza NotFound si el garzón no existe en el tenant', async () => {
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.actualizar(TENANT, 'inexistente', { nombre: 'X' }),
+      ).rejects.toThrow(NotFoundException);
+      // El título dice "en el tenant": sin afirmar el `where`, el test pasaría
+      // igual con la búsqueda acotada solo por id, que es editar el garzón de
+      // otra empresa.
+      expect(repo.findOne).toHaveBeenCalledWith({
+        where: { id: 'inexistente', tenantId: TENANT },
+      });
     });
   });
 

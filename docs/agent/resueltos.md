@@ -527,6 +527,41 @@ Entradas de tandas anteriores que no necesitaban ninguna decisión de negocio.
 Los hallazgos que se cerraron. Los que quedan y lo refutado están en
 [`pendientes.md`](pendientes.md).
 
+- [x] ~~**Cinco huecos de cobertura del barrido de la auditoría**~~ (backend, cerrados
+  2026-08-07). Solo tests: **ningún archivo de producción se tocó**. Los siete mutantes que
+  las entradas anotaban pasaban de verdad —los medí antes de escribir una línea— y ahora
+  mueren:
+  - **`guardarLayout`** no tenía ningún test. Sin el `if (!res.affected) throw`, mover por
+    drag&drop una mesa de otro salón actualiza cero filas y la pantalla responde OK.
+  - **`GarzonesService.actualizar`** tampoco. Es el único método que mueve `tipo`, que se
+    congela en cada sesión y decide el grupo de reparto de propinas.
+  - **`buildHistorialFilters`** nunca corría con un filtro puesto: los dos tests llamaban
+    con `{}`. Los placeholders arrancan en `$2` porque `$1` es el tenant; con `paramIdx = 1`
+    el filtro pisa al tenant y nada explota. Es la misma función donde vive el bug abierto
+    del filtro "Hasta".
+  - **`activaPorPin`** no se invocaba nunca. Se cubrió además que un PIN inválido **propaga
+    el rechazo** en vez de devolver `null`: `null` significa "sin turno abierto", y
+    confundirlos hace que la UI ofrezca iniciar turno cuando el PIN está mal.
+  - **La personalización de línea** se verificaba con `toHaveBeenCalled()` **sin
+    argumentos**, y el mock devuelve un snapshot fijo sin mirarlos: mandar `{}` en vez de lo
+    que pidió el mesero pasaba la suite entera. Ahora se afirma con los argumentos.
+  - **Tres filtros más** de la entrada de las revisiones: el tenant en el JOIN a `items` del
+    detalle, el tenant en la query de ítems eliminados de `cerrarCuenta`, y que
+    `loadCatalogoUnidades()` se cargue **fuera** de la transacción (adentro pide una segunda
+    conexión del pool con el `FOR UPDATE` tomado).
+
+  **Un matiz que la entrada no distinguía:** hay dos JOIN gemelos a `items` con el mismo
+  filtro de tenant. El de la comanda **sí** estaba cubierto; solo el del detalle no. Medido
+  mutando cada uno por separado.
+  **Los tests sobre SQL van acotados a la cláusula**, no con un `toContain('tenant_id')`
+  suelto — ese matchearía el `cl.tenant_id` del `WHERE` y pasaría sin el filtro del JOIN.
+  **Un octavo hueco, que ninguna entrada anotaba**, lo encontró la revisión: un test decía
+  "lanza NotFound si el garzón no existe **en el tenant**" y solo mockeaba `findOne → null`,
+  sin afirmar el `where`. El aislamiento por tenant de `GarzonesService.getOrThrow` —lo que
+  decide si se puede editar el garzón de otra empresa— no tenía red. Mutante: `where: { id }`.
+  Es la misma clase de defecto que el `toHaveBeenCalled()` pelado: **un título que promete
+  más que su aserción**.
+
 - [x] ~~**Los dos N+1 de `salones.service.ts`**~~ (backend, cerrados 2026-08-07 juntos, por
   ser el mismo defecto en el mismo servicio).
   **`listarCuentasDeMesa` — 1 + 3N.** `armarDetalle` disparaba tres consultas y se llamaba

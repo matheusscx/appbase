@@ -123,6 +123,7 @@ describe('SalonesService', () => {
     resolverPersonalizacionReceta: jest.Mock;
     resolverPersonalizacionCombo: jest.Mock;
   };
+  let catalog: { findAllUnidadesMedida: jest.Mock };
   let manager: {
     query: jest.Mock;
     findOne: jest.Mock;
@@ -175,6 +176,10 @@ describe('SalonesService', () => {
       }),
     };
 
+    catalog = {
+      findAllUnidadesMedida: jest.fn().mockResolvedValue(UNIDADES_CATALOGO),
+    };
+
     manager = {
       query: jest.fn(),
       findOne: jest.fn(),
@@ -204,14 +209,7 @@ describe('SalonesService', () => {
         { provide: SesionesGarzonService, useValue: sesiones },
         { provide: CuentaAsignacionesService, useValue: asignaciones },
         { provide: ItemsService, useValue: items },
-        {
-          provide: CatalogService,
-          useValue: {
-            findAllUnidadesMedida: jest
-              .fn()
-              .mockResolvedValue(UNIDADES_CATALOGO),
-          },
-        },
+        { provide: CatalogService, useValue: catalog },
       ],
     }).compile();
 
@@ -680,6 +678,37 @@ describe('SalonesService', () => {
     });
   });
 
+  describe('guardarLayout', () => {
+    it('mover una mesa que no es del salón corta con 404, no en silencio', async () => {
+      // Sin el chequeo de `affected`, el drag&drop de una mesa ajena actualiza
+      // CERO filas y la pantalla responde OK: la mesa vuelve sola a su lugar y
+      // nadie se entera de por qué.
+      salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
+      manager.update.mockResolvedValue({ affected: 0 });
+
+      await expect(
+        service.guardarLayout(TENANT, 'salon-1', {
+          mesas: [{ mesaId: 'mesa-ajena', posX: 10, posY: 20 }],
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('acota el UPDATE por tenant y salón, no solo por el id de la mesa', async () => {
+      salonRepo.findOne.mockResolvedValue({ id: 'salon-1', tenantId: TENANT });
+      manager.update.mockResolvedValue({ affected: 1 });
+
+      await service.guardarLayout(TENANT, 'salon-1', {
+        mesas: [{ mesaId: MESA, posX: 10, posY: 20 }],
+      });
+
+      expect(manager.update).toHaveBeenCalledWith(
+        Mesa,
+        { id: MESA, tenantId: TENANT, salonId: 'salon-1' },
+        { posX: '10', posY: '20' },
+      );
+    });
+  });
+
   describe('agregarLinea', () => {
     beforeEach(() => {
       // La cuenta se lee por el manager de la transacción, no por el repo:
@@ -808,7 +837,17 @@ describe('SalonesService', () => {
         personalizacion: { omitidos: [ING], comentario: 'sin cebolla' },
       });
 
-      expect(items.resolverPersonalizacionReceta).toHaveBeenCalled();
+      // CON argumentos: el mock devuelve un snapshot fijo sin mirarlos, así que
+      // un `toHaveBeenCalled()` pelado pasa igual aunque se ignore lo que el
+      // mesero pidió y se mande `{}`.
+      expect(items.resolverPersonalizacionReceta).toHaveBeenCalledWith(
+        // El manager RAÍZ, no el de la transacción: resolver la personalización
+        // no debe pedir una segunda conexión con un `FOR UPDATE` tomado.
+        dataSource.manager,
+        TENANT,
+        RECETA,
+        { omitidos: [ING], comentario: 'sin cebolla' },
+      );
       expect(manager.create).toHaveBeenCalledWith(
         CuentaLinea,
         expect.objectContaining({ personalizacion: SNAPSHOT }),
@@ -838,7 +877,19 @@ describe('SalonesService', () => {
         },
       });
 
-      expect(items.resolverPersonalizacionCombo).toHaveBeenCalled();
+      expect(items.resolverPersonalizacionCombo).toHaveBeenCalledWith(
+        dataSource.manager,
+        TENANT,
+        COMBO,
+        {
+          grupos: [
+            {
+              grupoId: GRUPO,
+              opciones: [{ itemId: OPCION_ITEM, unidades: 1 }],
+            },
+          ],
+        },
+      );
       expect(items.resolverPersonalizacionReceta).not.toHaveBeenCalled();
       expect(manager.create).toHaveBeenCalledWith(
         CuentaLinea,
@@ -964,6 +1015,30 @@ describe('SalonesService', () => {
           ]);
         return Promise.resolve([]);
       });
+    });
+
+    it('el catálogo de unidades ya está cargado cuando arranca la transacción', async () => {
+      // Es global: no depende de la cuenta ni de la línea. Cargarlo adentro pide
+      // una segunda conexión del pool con el `FOR UPDATE` ya tomado —el doble
+      // checkout que puede estancarse—, y nada lo delataba.
+      const orden: string[] = [];
+      catalog.findAllUnidadesMedida.mockImplementation(() => {
+        orden.push('catalogo');
+        return Promise.resolve(UNIDADES_CATALOGO);
+      });
+      dataSource.transaction.mockImplementation(
+        (cb: (m: typeof manager) => unknown) => {
+          orden.push('transaccion');
+          return cb(manager);
+        },
+      );
+
+      await service.actualizarLinea(TENANT, CUENTA, 'linea-1', {
+        cantidad: '2',
+      });
+
+      expect(orden[0]).toBe('catalogo');
+      expect(orden).toContain('transaccion');
     });
 
     it('ninguna lectura sale por la conexión global con el lock tomado', async () => {
@@ -1639,6 +1714,65 @@ describe('SalonesService', () => {
         ['linea-2'],
         ['linea-3'],
       ]);
+    });
+  });
+
+  describe('aislamiento por tenant en las queries crudas', () => {
+    // Defensa en profundidad: las líneas ya vienen acotadas por `cl.tenant_id`,
+    // así que sacar el filtro del JOIN no rompe nada HOY. Se fija igual porque
+    // es la clase de filtro que se pierde en un refactor sin que nada avise, y
+    // el día que una query cambie de raíz, lo que quedaba era el JOIN.
+    it('el JOIN a items del detalle acota por tenant', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue([
+        { id: CUENTA, numero: 1, estado: EstadoCuenta.ABIERTA, mesaId: MESA },
+      ]);
+      const sqls: string[] = [];
+      dataSource.manager.query.mockImplementation((sql: string) => {
+        sqls.push(sql);
+        return Promise.resolve([]);
+      });
+
+      await service.listarCuentasDeMesa(TENANT, MESA);
+
+      const join = sqls.find((s) => s.includes('JOIN items i'));
+      expect(join).toBeDefined();
+      // Acotado a la cláusula del JOIN: un `toContain('tenant_id')` suelto
+      // matchearía el `cl.tenant_id` del WHERE y pasaría sin el filtro.
+      expect(join).toMatch(/JOIN items i ON[^\n]*i\.tenant_id = \$2/);
+    });
+
+    it('la query de ítems eliminados de cerrarCuenta acota por tenant', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        mesaId: MESA,
+        numero: 8,
+        estado: EstadoCuenta.ABIERTA,
+        ventaId: null,
+        garzonResponsableId: GARZON_RESPONSABLE,
+        cerradaEl: null as Date | null,
+      });
+      manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
+      const sqls: string[] = [];
+      manager.query.mockImplementation((sql: string) => {
+        sqls.push(sql);
+        return Promise.resolve(
+          sql.includes('eliminado_el IS NOT NULL')
+            ? [{ nombre: 'Pastel de choclo' }]
+            : [],
+        );
+      });
+
+      await expect(
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          pin: PIN,
+          pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      const sql = sqls.find((s) => s.includes('eliminado_el IS NOT NULL'));
+      expect(sql).toMatch(/item_id = ANY\(\$1\) AND tenant_id = \$2/);
     });
   });
 

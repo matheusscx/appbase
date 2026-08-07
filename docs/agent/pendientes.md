@@ -578,26 +578,21 @@ que falta es el aviso en el momento de editar — ver la entrada de `garzones.ac
 Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela
 ([`resueltos.md`](resueltos.md)). Quedan:
 
-- [ ] **`guardarLayout` no tiene ningún test** (backend) — mutante que pasa: borrar el
-  `if (!res.affected) throw new NotFoundException(...)`. Mover por drag&drop una mesa que
-  no pertenece al salón pasaría a actualizar cero filas **en silencio**.
-- [ ] **`buildHistorialFilters` nunca corre con ningún filtro puesto y `activaPorPin` no
-  se invoca nunca** (backend, `sesiones-garzon.service.ts`) — los dos tests de `historial()`
-  llaman con `{}`. Mutante que pasa: cambiar `let paramIdx = 2` por `1`, que colisiona con
-  `$1` (tenantId) en cuanto se use un filtro. **Es la misma función donde vive el bug vivo
-  del filtro "Hasta"**, que es la demostración de por qué el hueco importa.
-- [ ] **`GarzonesService.actualizar` no tiene ningún test** (backend) — mutante que pasa:
-  borrar `if (dto.tipo !== undefined) garzon.tipo = dto.tipo;`. Es el único método que
-  cambia el `tipo` que después se congela en cada sesión y decide el grupo de reparto.
-- [ ] **La personalización de línea se verifica con `toHaveBeenCalled()` sin argumentos**
-  (backend, `salones.service.spec.ts`) — el mock devuelve un snapshot fijo sin mirar sus
-  argumentos. Mutante que pasa: llamar a `resolverPersonalizacionReceta` con `{}` en vez
-  de `dto.personalizacion`. Un bug que ignore lo que el mesero pidió pasa la suite entera.
-- [ ] **El agrupado por estación de la comanda no lo ejercita nada, y el seed no lo
-  permite** (backend) — descubierto al hacer el smoke del 2026-08-06: **ningún ítem del
-  seed tiene una categoría con impresora activa**, así que `agruparEstacionesComanda`
-  siempre devuelve `[]` y hubo que cablear una a mano por SQL para poder verificar la
-  comanda. Sin fixture no hay e2e posible del camino que manda a cocina.
+- [ ] **El agrupado por estación de la comanda no lo ejercita ningún dato real, y el seed
+  no lo permite** (backend) — descubierto al hacer el smoke del 2026-08-06:
+  `agruparEstacionesComanda` siempre devuelve `[]` con el seed, así que hubo que cablear
+  una categoría a mano por SQL para poder verificar la comanda. Sin fixture no hay e2e
+  posible del camino que manda a cocina.
+  **Corregido el 2026-08-07 con lo medido contra la BD sembrada** (la entrada culpaba a la
+  causa equivocada): la categoría **sí existe y sí tiene impresora** — "Ropa y accesorios"
+  → impresora "Cocina", puesta a propósito en `seeder.service.ts` con ese comentario. Lo
+  que falta es que **algún ítem vendible esté en ella**: hoy tiene 0 ítems, y el único
+  ítem con categoría del seed está en "Electrónica", que no tiene impresora. El arreglo es
+  entonces asignar `categoriaId` a un ítem del seed, no crear categoría ni impresora.
+  Lo que hace valiosa la entrada es que **hoy no hay nada** cubriendo ese camino: los
+  únicos tests que afirman sobre `estaciones` son unitarios con el SQL mockeado
+  (`salones.service.spec.ts`), así que no ven el fixture. Medido: `grep` de `comanda` y
+  `estaciones` sobre `backend/test/` y `frontend/e2e/` no devuelve nada.
 - [ ] **El computed `cuentaConItemEliminado` no tiene cobertura** (frontend,
   `pages/salones/index.vue`) — mutante que pasa: `computed(() => false)`, con los 576 tests
   del frontend en verde. Las páginas no tienen unit tests y `frontend/e2e` no cubre
@@ -624,13 +619,6 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   commitean. Ya no es catastrófico (la línea se muestra marcada, el cobro corta con un 400
   que la nombra y la comanda la incluye), pero el estado se sigue produciendo hacia
   adelante, no solo en datos viejos.
-- [ ] **Dos filtros de tenant y un `loadCatalogoUnidades` izado quedaron sin red**
-  (backend, `salones.service.ts`) — mutantes medidos que dejan la suite en verde: sacar
-  `i.tenant_id = $2` de la query de `armarDetalle`; sacar `AND tenant_id = $2` de la query
-  de ítems eliminados de `cerrarCuenta`; y devolver `loadCatalogoUnidades()` adentro del
-  callback de la transacción de `actualizarLinea`. Los dos primeros son defensa en
-  profundidad (las líneas ya vienen acotadas por `cl.tenant_id`), el tercero reintroduce
-  el doble checkout que el fix sacó.
 - [ ] **`grupos-modificadores` convive con un segundo índice único y la red nueva no los
   distingue** (backend, `grupos-modificadores.service.ts`) — `traducirColisionDeNombre`
   revalida **solo el nombre**, pero `uq_grupo_opcion_item_vivo` puede disparar en la misma

@@ -433,6 +433,108 @@ describe('SesionesGarzonService', () => {
     }
   });
 
+  describe('activaPorPin', () => {
+    // Es lo que responde "¿este garzón está en turno?" cuando alguien teclea su
+    // PIN. No lo invocaba ningún test.
+    it('devuelve la sesión abierta del garzón que corresponde al PIN', async () => {
+      const abierta = sesion({ id: SESION_ID });
+      sesionRepo.findOne.mockResolvedValue(abierta);
+
+      const result = await service.activaPorPin(TENANT, PIN);
+
+      expect(garzones.resolverGarzonPorPin).toHaveBeenCalledWith(TENANT, PIN);
+      // Acotado al garzón del PIN y a su sesión ABIERTA: sin el filtro de
+      // estado devolvería una sesión ya cerrada como si siguiera en turno.
+      expect(sesionRepo.findOne).toHaveBeenCalledWith({
+        where: {
+          tenantId: TENANT,
+          garzonId: GARZON_ID,
+          estado: EstadoSesionGarzon.ABIERTA,
+        },
+      });
+      expect(result?.id).toBe(SESION_ID);
+    });
+
+    it('devuelve null si el garzón no tiene sesión abierta', async () => {
+      sesionRepo.findOne.mockResolvedValue(null);
+
+      expect(await service.activaPorPin(TENANT, PIN)).toBeNull();
+    });
+
+    it('un PIN inválido propaga el rechazo, no devuelve null', async () => {
+      // `null` significa "sin turno abierto". Si un PIN equivocado devolviera
+      // lo mismo, el llamador ofrecería iniciar turno en vez de decir que el
+      // PIN está mal.
+      garzones.resolverGarzonPorPin.mockRejectedValue(
+        new BadRequestException('PIN inválido'),
+      );
+
+      await expect(service.activaPorPin(TENANT, '000000')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  // Los otros dos tests de `historial()` llaman con `{}`, así que ningún filtro
+  // llegó nunca a construirse. El riesgo no es teórico: los placeholders
+  // arrancan en `$2` porque `$1` ya es el tenant, y una numeración corrida
+  // filtra por el tenant como si fuera un garzón —o mezcla tenants— sin que
+  // nada explote.
+  it('los filtros se numeran DESPUÉS del tenant, y sus valores viajan en orden', async () => {
+    dataSource.query
+      .mockResolvedValueOnce([{ total: 0 }])
+      .mockResolvedValueOnce([]);
+
+    await service.historial(TENANT, {
+      garzonId: GARZON_ID,
+      turnoId: TURNO_ID,
+      estado: EstadoSesionGarzon.CERRADA,
+      desde: '2026-08-01',
+      hasta: '2026-08-31',
+    });
+
+    const [countSql, countParams] = dataSource.query.mock.calls[0] as [
+      string,
+      unknown[],
+    ];
+    expect(countSql).toContain('s.garzon_id = $2');
+    expect(countSql).toContain('s.turno_id = $3');
+    expect(countSql).toContain('s.estado = $4');
+    expect(countSql).toContain('s.inicio_el >= $5');
+    expect(countSql).toContain('s.inicio_el <= $6');
+    expect(countParams).toEqual([
+      TENANT,
+      GARZON_ID,
+      TURNO_ID,
+      EstadoSesionGarzon.CERRADA,
+      '2026-08-01',
+      '2026-08-31',
+    ]);
+
+    // El listado agrega LIMIT/OFFSET después de los filtros: su numeración
+    // arranca donde terminaron ellos, no en un número fijo.
+    const [listSql, listParams] = dataSource.query.mock.calls[1] as [
+      string,
+      unknown[],
+    ];
+    expect(listSql).toContain('LIMIT $7');
+    expect(listSql).toContain('OFFSET $8');
+    expect(listParams).toHaveLength(8);
+  });
+
+  it('un filtro ausente no deja un hueco en la numeración', async () => {
+    dataSource.query
+      .mockResolvedValueOnce([{ total: 0 }])
+      .mockResolvedValueOnce([]);
+
+    await service.historial(TENANT, { estado: EstadoSesionGarzon.ABIERTA });
+
+    const [sql, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('s.estado = $2');
+    expect(sql).not.toContain('s.garzon_id');
+    expect(params).toEqual([TENANT, EstadoSesionGarzon.ABIERTA]);
+  });
+
   it('historial incluye sesión aunque el turno esté soft-deleted', async () => {
     dataSource.query
       .mockResolvedValueOnce([{ total: 1 }])
