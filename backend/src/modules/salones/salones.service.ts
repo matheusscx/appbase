@@ -1172,12 +1172,18 @@ export class SalonesService {
     // carta mientras tanto. Filtrándolo, la línea desaparecía del ticket sin
     // ningún aviso —"Enviar a cocina" respondía OK y el plato no se cocinaba—
     // y su `cantidad_enviada` no avanzaba nunca.
+    //
+    // `categorias` tampoco filtra lo eliminado, y por la MISMA razón: si un
+    // cleanup borra el ítem y su categoría, la línea perdía su `impresora_id` y
+    // el agrupado la salteaba en silencio, indistinguible de "categoría sin
+    // impresora". La categoría acá es ruteo, no un recurso que pueda faltar.
+    // `impresoras` sí filtra: a una impresora borrada o apagada no se imprime.
     return `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
               cl.personalizacion, i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
          FROM cuenta_lineas cl
          JOIN items i ON i.item_id = cl.item_id AND i.tenant_id = $2
          LEFT JOIN categorias c
-           ON c.categoria_id = i.categoria_id AND c.eliminado_el IS NULL
+           ON c.categoria_id = i.categoria_id
          LEFT JOIN impresoras imp
            ON imp.impresora_id = c.impresora_id AND imp.eliminado_el IS NULL
               AND imp.activo = true

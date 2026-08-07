@@ -84,6 +84,13 @@ sesiones abiertas.
 | GET | `/sesiones-garzon` | `Leer` | Historial paginado (`garzonId`, `turnoId`, `estado`, `desde`, `hasta`) |
 | POST | `/sesiones-garzon/:id/cerrar` | `Actualizar` | Cierre admin (sin PIN); registra `cerrada_por_usuario_id` |
 
+`desde`/`hasta` son **fechas puras** (`YYYY-MM-DD`) y se interpretan en la **zona horaria
+del tenant**, con `hasta` **inclusivo del día completo**: "Desde hoy / Hasta hoy" devuelve
+las sesiones de hoy. Sin el cast a la zona, un tenant en Chile perdía las que arrancan
+entre las 20:00 y la medianoche local — el grueso del servicio. Mismo patrón que
+`propina-reportes` (allá `hasta` es exclusivo, porque el rango lo arma un reporte y no un
+selector de fechas).
+
 Los **dos cierres** (PIN y admin) devuelven la sesión más
 `cuentasPendientes: { cuentaId, numero, mesaNombre, salonNombre }[]` — las
 cuentas abiertas que quedaron a nombre del garzón. Lista vacía en el caso normal.

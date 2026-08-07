@@ -2264,6 +2264,13 @@ describe('SalonesService', () => {
       // aviso: "Enviar a cocina" respondía OK y el plato no se cocinaba.
       expect(sqlLineas).not.toMatch(/i\.eliminado_el\s+IS\s+NULL/i);
       expect(sqlLineas).toMatch(/i\.tenant_id = \$2/);
+      // La categoría corre la misma suerte: si un cleanup borra el ítem Y su
+      // categoría, filtrarla dejaba `impresora_id` en null y el agrupado se
+      // salteaba la línea en silencio, indistinguible de "sin impresora".
+      expect(sqlLineas).not.toMatch(/c\.eliminado_el\s+IS\s+NULL/i);
+      // La impresora SÍ se filtra: a una borrada o apagada no se imprime.
+      expect(sqlLineas).toMatch(/imp\.eliminado_el\s+IS\s+NULL/i);
+      expect(sqlLineas).toMatch(/imp\.activo = true/);
       expect(res.estaciones[0]?.items[0]?.nombre).toBe('Pastel de choclo');
     });
 

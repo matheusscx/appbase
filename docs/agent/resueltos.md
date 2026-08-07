@@ -527,6 +527,92 @@ Entradas de tandas anteriores que no necesitaban ninguna decisión de negocio.
 Los hallazgos que se cerraron. Los que quedan y lo refutado están en
 [`pendientes.md`](pendientes.md).
 
+- [x] ~~**El filtro "Hasta" del historial de sesiones excluía las sesiones del propio
+  día**~~ (backend, cerrado 2026-08-07) — `AppDateInput` emite `YYYY-MM-DD`, `s.inicio_el`
+  es `timestamptz`, y comparar una contra otra castea la fecha a **medianoche**: "Desde hoy
+  / Hasta hoy" no devolvía **ninguna** sesión del día.
+  **Por qué la zona del tenant y no un simple `+ 1 día`.** Medido contra Postgres real con
+  una sesión que arranca 21:00 hora Chile del 7 de agosto:
+
+  | variante | sesiones |
+  |---|---|
+  | `<= '2026-08-07'` (el bug) | **0** |
+  | `< fecha + 1`, sin zona (el arreglo "mínimo") | **0** |
+  | `< fecha + 1` en zona del tenant | **1** |
+
+  El arreglo barato **no cerraba el bug**: medianoche UTC del 8 son las 20:00 del 7 en
+  Chile, o sea justo cuando trabaja un restaurante. No es una decisión nueva: el proyecto ya
+  la había tomado en `propina-reportes.service.ts`, que castea igual (`$N::date::timestamp
+  AT TIME ZONE $Z`). Lo que sí difiere de ese precedente es que allá `hasta` es
+  **exclusivo** y acá es **inclusivo del día completo** (`< hasta + 1`), porque un
+  `AppDateInput` rotulado "Hasta" promete incluir ese día.
+  **La entrada decía "backend + frontend" y el frontend no necesitó nada**: ya mandaba
+  `YYYY-MM-DD`, que es exactamente lo que el backend ahora interpreta bien.
+  **Efecto lateral asumido:** es la **doceava** copia del JOIN `tenants → provincia → pais`.
+  Se duplicó con su filtro `eliminado_el` —la condición que la entrada de ese JOIN pone para
+  reabrirse— y esa entrada quedó actualizada con el conteo real.
+
+- [x] ~~**`garzones.actualizar()` no bloqueaba `activo:false` con una sesión abierta, y
+  `eliminar()` sí**~~ (backend, cerrado 2026-08-07) — **solo la mitad `activo`**, que era la
+  mecánica. Desactivar a alguien en turno lo dejaba sin poder cerrar su sesión ni operar
+  (`resolverGarzonPorPin` filtra `activo: true`) y bloqueaba de rebote la desactivación del
+  turno. El chequeo que `eliminar()` ya tenía se extrajo a `assertSinSesionAbierta(tenantId,
+  id, accion)` y `actualizar()` lo llama cuando `dto.activo === false && garzon.activo`.
+  **La condición es esa y no `dto.activo !== undefined`** a propósito: reactivar a un garzón
+  y guardar solo el nombre no consultan sesiones. Los tres casos tienen test, y los mutantes
+  discriminan entre sí (ensanchar la condición mata el de reactivar; volverla incondicional
+  mata además el de "solo el nombre").
+  **La mitad de `tipo` sigue abierta** en [`pendientes.md`](pendientes.md): es decisión de
+  producto —bloquear o solo advertir— y no se cierra junto con la mecánica.
+  **Limitación heredada, no introducida:** entre el `count` y el `save` hay una ventana de
+  carrera que el índice parcial de `sesiones_garzon` no cubre. `eliminar()` ya tenía la
+  misma; el diff la copia tal cual.
+
+- [x] ~~**Si se borraba el ítem *y* su categoría, la línea desaparecía del ticket de
+  cocina**~~ (backend, cerrado 2026-08-07) — el `LEFT JOIN categorias` de `sqlLineasComanda`
+  filtraba `eliminado_el IS NULL`, así que `impresora_id` quedaba `NULL` y
+  `agruparEstacionesComanda` hacía `continue` **en silencio**: lo ya pedido no llegaba a
+  cocina. Se quitó ese filtro, con el mismo argumento que ya tenía el JOIN de `items`:
+  **lo que el cliente pidió se cocina aunque el catálogo lo haya borrado después.**
+  **Por qué es seguro:** `c` se usa exclusivamente para `c.impresora_id`, y el JOIN es contra
+  la PK, o sea a lo sumo una fila — no puede duplicar ni partir líneas. El filtro del JOIN de
+  `impresoras` **sí se conserva**: una impresora dada de baja no es un destino válido.
+  Efecto colateral asumido y correcto: esas líneas ahora también avanzan su `cantidad_enviada`.
+  Sigue sin cubrirse a nivel de dato por el hueco de fixture del seed que
+  [`pendientes.md`](pendientes.md) ya tiene anotado; el test afirma sobre el SQL.
+
+- [x] ~~**"Nueva cuenta" no tenía guard de reentrancia, y sus tres hermanos sí**~~
+  (frontend, cerrado 2026-08-07) — `nuevaCuenta`/`abrirCuentaConPin` no usaban el ref "en
+  curso" + `:loading` que ya usaban `fusionarSeleccionadas`, `transferirCuentaConPin` y
+  `cerrarCuentaConPin`. El modal de PIN cierra apenas emite `confirm`, antes de que resuelva
+  el POST, así que quedaba una ventana con la UI interactuable y la petición en vuelo: doble
+  tap o lag de red creaban dos cuentas en la mesa. El backend no puede defenderlo —varias
+  cuentas abiertas por mesa es intencional—, así que el guard va sí o sí en el cliente.
+  `abriendoCuenta.value = true` se setea **antes del primer `await`** y lo chequean los dos
+  puntos de entrada.
+  **Con regresión automatizada**, que es lo que faltaba: `pages/salones/index.nuxt.spec.ts`
+  —el primer spec de esta página— ejercita dos rondas completas de PIN con el POST retenido.
+  Dos mutantes medidos, y **cada uno mata exactamente un test**, que es lo que prueba que
+  ninguno de los dos es relleno: revertir el guard entero al código anterior hace fallar
+  solo el del doble submit, con **2 POST en vez de 1** (las dos cuentas del bug); sacar
+  únicamente el `finally` hace fallar solo el que verifica que el flag se libera. Ninguno
+  muere por `TypeError`.
+  Esa separación limpia costó una corrección: con el `unmount()` al final de cada `it`, el
+  primer mutante arrastraba también al segundo test —cascada, no señal: el test que falla
+  no llega a desmontar y deja su diálogo teletransportado vivo en el `document.body`
+  compartido—. Con el desmontaje en un `afterEach`, que corre pase o falle, desaparece. Ni `vue-tsc` ni `design:check` ven reentrancia, así que sin ese
+  test el cambio se apoyaba solo en lectura de código.
+  **Del harness, lo único que quedó verificado:** `AppDrawer` y `UModal` teletransportan su
+  contenido fuera del wrapper, así que la búsqueda va sobre `document.body` y **acotada a su
+  diálogo** — con dos diálogos vivos a la vez, buscar por texto en todo el body puede tomar
+  el botón equivocado y el test pasa igual. Es la misma trampa que ya documentaba el spec de
+  `configuracion/garzones`, no una nueva.
+  ⚠️ **Acá había una regla más ancha que decía que un `HTMLElement.click()` sobre un nodo
+  teletransportado no dispara el handler de Vue. Es falsa** — medido: dispara, y el spec
+  hermano ya lo venía haciendo. Salió de una observación con dos variables cambiadas a la
+  vez y se generalizó sin medir. Queda anotada porque el error no fue de código sino de
+  método, y este archivo es el de lo medido.
+
 - [x] ~~**Seis mecánicas de contrato y concurrencia**~~ (backend, cerradas 2026-08-07).
   Ninguna necesitaba decisión: se agruparon por eso.
   - **El signo de propina se validaba en uno de tres.** `propinaMonto` cortaba con 400 pero

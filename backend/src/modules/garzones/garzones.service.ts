@@ -124,6 +124,16 @@ export class GarzonesService {
     dto: UpdateGarzonDto,
   ): Promise<GarzonPublico> {
     const garzon = await this.getOrThrow(tenantId, id);
+    // Mismo chequeo que `eliminar()`, que ya lo tenía: desactivar a alguien con
+    // sesión abierta lo deja sin poder cerrarla ni operar —`resolverGarzonPorPin`
+    // filtra `activo: true`— y su sesión queda abierta con `fin_el = null` hasta
+    // que un admin la fuerce. Mientras tanto el turno tampoco se puede desactivar.
+    // El cambio de `tipo` con sesión abierta NO se bloquea acá: qué hacer con eso
+    // es decisión de producto (no corrompe el reparto, pero el admin no se entera
+    // hasta la liquidación).
+    if (dto.activo === false && garzon.activo) {
+      await this.assertSinSesionAbierta(tenantId, id, 'desactivar');
+    }
     if (dto.nombre !== undefined) garzon.nombre = dto.nombre;
     if (dto.activo !== undefined) garzon.activo = dto.activo;
     if (dto.tipo !== undefined) garzon.tipo = dto.tipo;
@@ -148,18 +158,7 @@ export class GarzonesService {
     id: string,
   ): Promise<void> {
     await this.getOrThrow(tenantId, id);
-    const abiertas = await this.sesionRepo.count({
-      where: {
-        tenantId,
-        garzonId: id,
-        estado: EstadoSesionGarzon.ABIERTA,
-      },
-    });
-    if (abiertas > 0) {
-      throw new BadRequestException(
-        'No se puede eliminar un garzón con una sesión abierta',
-      );
-    }
+    await this.assertSinSesionAbierta(tenantId, id, 'eliminar');
     // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
     // pueden quedar a medias y dejar una fila borrada sin autor.
     await this.garzonRepo.update(
@@ -268,6 +267,22 @@ export class GarzonesService {
         esPlaceholder: true,
       }),
     );
+  }
+
+  /** Las dos operaciones que sacan al garzón de circulación comparten la regla. */
+  private async assertSinSesionAbierta(
+    tenantId: string,
+    id: string,
+    accion: 'eliminar' | 'desactivar',
+  ): Promise<void> {
+    const abiertas = await this.sesionRepo.count({
+      where: { tenantId, garzonId: id, estado: EstadoSesionGarzon.ABIERTA },
+    });
+    if (abiertas > 0) {
+      throw new BadRequestException(
+        `No se puede ${accion} un garzón con una sesión abierta`,
+      );
+    }
   }
 
   private async getOrThrow(tenantId: string, id: string): Promise<Garzon> {

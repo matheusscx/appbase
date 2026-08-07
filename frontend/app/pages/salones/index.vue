@@ -91,6 +91,12 @@ const calculoVigente = computed(() => vigente.value ? resultado.value : null)
 const fusionMode = ref(false)
 const seleccionadasFusion = ref<string[]>([])
 const fusionando = ref(false)
+// Guard de reentrancia, igual que `fusionando`, `transfiriendo` y `submitting`
+// en sus tres hermanos. El teclado de PIN cierra apenas emite `confirm`, o sea
+// ANTES de que resuelva el POST: sin esto, un doble tap o un lag de red abren
+// dos cuentas en la mesa. El backend no puede defenderlo — varias cuentas
+// abiertas por mesa es intencional.
+const abriendoCuenta = ref(false)
 
 const cobroOpen = ref(false)
 const abriendoCobro = ref(false)
@@ -453,14 +459,15 @@ async function cargarCuentas(mesaId: string) {
 }
 
 function nuevaCuenta() {
-  if (!selectedMesa.value) return
+  if (!selectedMesa.value || abriendoCuenta.value) return
   solicitarPin('PIN del garzón para abrir la cuenta', (pin, nombre) => {
     void abrirCuentaConPin(pin, nombre)
   })
 }
 
 async function abrirCuentaConPin(pin: string, nombre: string) {
-  if (!selectedMesa.value) return
+  if (!selectedMesa.value || abriendoCuenta.value) return
+  abriendoCuenta.value = true
   try {
     const mesaId = selectedMesa.value.id
     const cuenta = await salonesApi.abrirCuenta(mesaId, pin)
@@ -471,6 +478,9 @@ async function abrirCuentaConPin(pin: string, nombre: string) {
   }
   catch (e: unknown) {
     toastErrorOperativo(e, 'Error al abrir la cuenta', () => { void abrirCuentaConPin(pin, nombre) })
+  }
+  finally {
+    abriendoCuenta.value = false
   }
 }
 
@@ -1113,7 +1123,11 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
               >
                 {{ fusionMode ? 'Cancelar fusión' : 'Fusionar cuentas' }}
               </UButton>
-              <UButton icon="i-lucide-plus" @click="nuevaCuenta">
+              <UButton
+                icon="i-lucide-plus"
+                :loading="abriendoCuenta"
+                @click="nuevaCuenta"
+              >
                 Nueva cuenta
               </UButton>
             </div>

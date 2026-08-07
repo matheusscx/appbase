@@ -249,6 +249,38 @@ describe('GarzonesService', () => {
       expect(saved.tipo).toBe(TipoGarzon.GARZON);
     });
 
+    it('no deja desactivar a un garzón con sesión abierta', async () => {
+      // `eliminar()` ya tenía este chequeo y `actualizar()` no: desactivar deja
+      // al garzón sin poder cerrar su propia sesión, porque
+      // `resolverGarzonPorPin` filtra `activo: true`.
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', activo: true }));
+      sesionRepo.count.mockResolvedValue(1);
+
+      await expect(
+        service.actualizar(TENANT, 'g1', { activo: false }),
+      ).rejects.toThrow(
+        'No se puede desactivar un garzón con una sesión abierta',
+      );
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('reactivar con sesión abierta no se bloquea: no saca a nadie de circulación', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', activo: false }));
+      sesionRepo.count.mockResolvedValue(1);
+
+      const result = await service.actualizar(TENANT, 'g1', { activo: true });
+
+      expect(result.activo).toBe(true);
+    });
+
+    it('cambiar solo el nombre no consulta sesiones', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', activo: true }));
+
+      await service.actualizar(TENANT, 'g1', { nombre: 'Ana María' });
+
+      expect(sesionRepo.count).not.toHaveBeenCalled();
+    });
+
     it('lanza NotFound si el garzón no existe en el tenant', async () => {
       repo.findOne.mockResolvedValue(null);
 

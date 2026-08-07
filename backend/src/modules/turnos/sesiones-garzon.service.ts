@@ -224,7 +224,15 @@ export class SesionesGarzonService {
     query: QuerySesionesDto,
   ): Promise<PaginatedResponse<SesionListaItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
-    const { filters, params } = this.buildHistorialFilters(tenantId, query);
+    // La zona solo se consulta si hay filtro de fecha: sin `desde`/`hasta` el
+    // historial no la necesita y sería una query de más en cada listado.
+    const zona =
+      query.desde || query.hasta ? await this.zonaHoraria(tenantId) : null;
+    const { filters, params } = this.buildHistorialFilters(
+      tenantId,
+      query,
+      zona,
+    );
 
     const countRows: { total: number }[] = await this.dataSource.query(
       `SELECT COUNT(*)::int AS total
@@ -457,9 +465,54 @@ export class SesionesGarzonService {
     };
   }
 
+  /**
+   * Zona horaria del tenant, derivada del país de su provincia.
+   *
+   * Duplica el JOIN de `propina-reportes.service.ts` (segunda copia; la
+   * convención del repo acepta duplicar dos veces). El filtro `eliminado_el` de
+   * `provincia` y `pais` NO es decorativo: es lo que hace correcto al
+   * boilerplate, y es justo lo que la entrada de backlog sobre este JOIN
+   * advierte que un módulo nuevo puede olvidar.
+   */
+  private async zonaHoraria(tenantId: string): Promise<string> {
+    const rows: { zona_horaria: string }[] = await this.dataSource.query(
+      `SELECT p.zona_horaria_principal AS zona_horaria
+         FROM tenants t
+         JOIN provincia pr
+           ON pr.provincia_id = t.provincia_id
+          AND pr.eliminado_el IS NULL
+         JOIN pais p
+           ON p.pais_id = pr.pais_id
+          AND p.eliminado_el IS NULL
+        WHERE t.tenant_id = $1
+          AND t.eliminado_el IS NULL`,
+      [tenantId],
+    );
+    if (!rows[0]?.zona_horaria) {
+      throw new NotFoundException('No se encontró la zona horaria del tenant');
+    }
+    return rows[0].zona_horaria;
+  }
+
+  /**
+   * `desde`/`hasta` llegan como fecha pura (`YYYY-MM-DD`, lo que emite
+   * `AppDateInput`) y `s.inicio_el` es `timestamptz`. Comparar una contra otra
+   * castea la fecha a **medianoche**, así que `<= hasta` excluía el día entero:
+   * "Desde hoy / Hasta hoy" no devolvía **ninguna** sesión.
+   *
+   * Se interpretan en la **zona del tenant** y `hasta` es inclusivo del día
+   * completo (`< hasta + 1 día`), siguiendo el patrón que `propina-reportes`
+   * ya usa para el mismo problema. La zona importa acá más que en un reporte
+   * de oficina: con el cast en UTC, un tenant en Chile perdía las sesiones
+   * entre las 20:00 y la medianoche local, que es cuando trabaja un
+   * restaurante.
+   *
+   * Si `zonaHoraria` es `null` es porque no hay filtro de fecha que resolver.
+   */
   private buildHistorialFilters(
     tenantId: string,
     query: QuerySesionesDto,
+    zonaHoraria: string | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let paramIdx = 2;
@@ -477,13 +530,27 @@ export class SesionesGarzonService {
       filters += ` AND s.estado = $${paramIdx++}`;
       params.push(query.estado);
     }
-    if (query.desde) {
-      filters += ` AND s.inicio_el >= $${paramIdx++}`;
-      params.push(query.desde);
-    }
-    if (query.hasta) {
-      filters += ` AND s.inicio_el <= $${paramIdx++}`;
-      params.push(query.hasta);
+    if (query.desde || query.hasta) {
+      if (zonaHoraria === null) {
+        // Fail-fast: con `null` los filtros se descartarían en silencio y el
+        // endpoint devolvería MÁS filas de las pedidas. Hoy `historial()` no
+        // puede llegar acá; el assert es para que un refactor tampoco pueda.
+        throw new Error(
+          'buildHistorialFilters: hay filtro de fecha sin zona horaria resuelta',
+        );
+      }
+      const zonaIdx = paramIdx++;
+      params.push(zonaHoraria);
+      if (query.desde) {
+        filters += ` AND s.inicio_el >= ($${paramIdx}::date::timestamp AT TIME ZONE $${zonaIdx})`;
+        params.push(query.desde);
+        paramIdx++;
+      }
+      if (query.hasta) {
+        filters += ` AND s.inicio_el < (($${paramIdx}::date + 1)::timestamp AT TIME ZONE $${zonaIdx})`;
+        params.push(query.hasta);
+        paramIdx++;
+      }
     }
 
     return { filters, params };

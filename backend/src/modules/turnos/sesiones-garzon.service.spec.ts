@@ -482,6 +482,7 @@ describe('SesionesGarzonService', () => {
   // nada explote.
   it('los filtros se numeran DESPUÉS del tenant, y sus valores viajan en orden', async () => {
     dataSource.query
+      .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
       .mockResolvedValueOnce([{ total: 0 }])
       .mockResolvedValueOnce([]);
 
@@ -493,33 +494,87 @@ describe('SesionesGarzonService', () => {
       hasta: '2026-08-31',
     });
 
-    const [countSql, countParams] = dataSource.query.mock.calls[0] as [
+    // La primera query es la de la zona horaria; después van count y listado.
+    const [countSql, countParams] = dataSource.query.mock.calls[1] as [
       string,
       unknown[],
     ];
     expect(countSql).toContain('s.garzon_id = $2');
     expect(countSql).toContain('s.turno_id = $3');
     expect(countSql).toContain('s.estado = $4');
-    expect(countSql).toContain('s.inicio_el >= $5');
-    expect(countSql).toContain('s.inicio_el <= $6');
+    // $5 es la zona; las fechas van después y se castean a día del tenant.
+    expect(countSql).toContain(
+      's.inicio_el >= ($6::date::timestamp AT TIME ZONE $5)',
+    );
+    expect(countSql).toContain(
+      's.inicio_el < (($7::date + 1)::timestamp AT TIME ZONE $5)',
+    );
     expect(countParams).toEqual([
       TENANT,
       GARZON_ID,
       TURNO_ID,
       EstadoSesionGarzon.CERRADA,
+      'America/Santiago',
       '2026-08-01',
       '2026-08-31',
     ]);
 
     // El listado agrega LIMIT/OFFSET después de los filtros: su numeración
     // arranca donde terminaron ellos, no en un número fijo.
-    const [listSql, listParams] = dataSource.query.mock.calls[1] as [
+    const [listSql, listParams] = dataSource.query.mock.calls[2] as [
       string,
       unknown[],
     ];
-    expect(listSql).toContain('LIMIT $7');
-    expect(listSql).toContain('OFFSET $8');
-    expect(listParams).toHaveLength(8);
+    expect(listSql).toContain('LIMIT $8');
+    expect(listSql).toContain('OFFSET $9');
+    expect(listParams).toHaveLength(9);
+  });
+
+  it('"Hasta hoy" incluye el día completo, no corta en medianoche', async () => {
+    // El bug: `<= '2026-08-07'` castea a medianoche y excluye TODO el día, así
+    // que "Desde hoy / Hasta hoy" devolvía la lista vacía.
+    dataSource.query
+      .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+      .mockResolvedValueOnce([{ total: 0 }])
+      .mockResolvedValueOnce([]);
+
+    await service.historial(TENANT, {
+      desde: '2026-08-07',
+      hasta: '2026-08-07',
+    });
+
+    const [sql] = dataSource.query.mock.calls[1] as [string, unknown[]];
+    expect(sql).toContain('+ 1)::timestamp AT TIME ZONE');
+    expect(sql).not.toMatch(/s\.inicio_el <= \$/);
+  });
+
+  it('la zona se busca acotada por tenant y sin filas eliminadas', async () => {
+    // El docblock afirma que estos filtros no son decorativos. Sin un test que
+    // los pinche, esa afirmación es más fuerte que su evidencia: el mutante que
+    // los borra pasaba la suite entera.
+    dataSource.query
+      .mockResolvedValueOnce([{ zona_horaria: 'America/Santiago' }])
+      .mockResolvedValueOnce([{ total: 0 }])
+      .mockResolvedValueOnce([]);
+
+    await service.historial(TENANT, { desde: '2026-08-01' });
+
+    const [sql, params] = dataSource.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/JOIN provincia pr[\s\S]*?pr\.eliminado_el IS NULL/);
+    expect(sql).toMatch(/JOIN pais p[\s\S]*?p\.eliminado_el IS NULL/);
+    expect(sql).toMatch(/t\.tenant_id = \$1[\s\S]*?t\.eliminado_el IS NULL/);
+    expect(params).toEqual([TENANT]);
+  });
+
+  it('sin filtro de fecha no sale a buscar la zona horaria', async () => {
+    dataSource.query
+      .mockResolvedValueOnce([{ total: 0 }])
+      .mockResolvedValueOnce([]);
+
+    await service.historial(TENANT, { estado: EstadoSesionGarzon.ABIERTA });
+
+    const sqls = dataSource.query.mock.calls.map(([s]) => s as string);
+    expect(sqls.some((s) => s.includes('zona_horaria_principal'))).toBe(false);
   });
 
   it('un filtro ausente no deja un hueco en la numeración', async () => {

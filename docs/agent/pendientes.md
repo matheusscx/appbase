@@ -117,9 +117,9 @@ identificamos con ubicación concreta.
   vaciar el `totalFinal` de una línea sin tocar el resto). Decidir `>= 0` (estado
   actual) vs `> 0` (`IsDecimalPositivo`) es una regla de negocio del owner, no algo a
   inferir. Requiere confirmación antes de endurecer más.
-- [ ] **El país del tenant se deriva con el mismo JOIN en 11 queries** (backend, ocho
+- [ ] **El país del tenant se deriva con el mismo JOIN en 12 queries** (backend, ocho
   módulos: `impuestos`, `monedas` ×2, `metodos-pago` ×2, `ventas`, `items` ×2, `propinas`
-  ×2, `seeder`) — todas hacen `tenants.provincia_id → provincia.pais_id`. **Idea del owner
+  ×2, `seeder`, `turnos`) — todas hacen `tenants.provincia_id → provincia.pais_id`. **Idea del owner
   (2026-07-30):** una columna `tenants.pais_id` para buscarlo directo. **Evaluada y
   descartada por ahora**, con dos hechos medidos: (a) `provinciaId` es **mutable**
   (`update-my-tenant.dto.ts:21`), así que la columna copiada se desincroniza en cuanto
@@ -129,6 +129,11 @@ identificamos con ubicación concreta.
   correcto: molesta a la vista, no está produciendo bugs. Se reabre si aparece evidencia
   de que duele (una query caliente, o un módulo nuevo que olvide el filtro); el cierre sin
   divergencia sería una **vista `tenant_pais`**, no una columna.
+  **2026-08-07: llegó la doceava** (`sesiones-garzon.service.ts` → `zonaHoraria`, para el
+  filtro de fecha del historial). Se duplicó a conciencia —es la segunda copia de ese
+  helper, y la convención acepta duplicar dos veces— **con** el filtro `eliminado_el`, que
+  es la condición de reapertura que esta entrada anota. Si aparece una tercera copia del
+  helper de zona, ahí sí conviene la vista.
 ---
 
 ## Suite E2E de navegador (fundación lista, flujos por escribir)
@@ -494,27 +499,18 @@ que falta es el aviso en el momento de editar — ver la entrada de `garzones.ac
 
 ### Media
 
-- [ ] **El filtro "Hasta" del historial de sesiones excluye las sesiones del propio día**
-  (backend + frontend, `sesiones-garzon.service.ts` → `buildHistorialFilters`, y
-  `pages/sesiones-garzon.vue`) — `AppDateInput` emite `YYYY-MM-DD` sin hora, el DTO lo
-  acepta con `@IsDateString()` y el service lo compara con `s.inicio_el <= $N` contra una
-  columna `timestamptz`. Postgres castea la fecha pura a **medianoche**, así que "Desde
-  hoy / Hasta hoy" no devuelve **ninguna** sesión del día. Es un bug vivo y visible, no
-  teórico. ⚠️ Vive en la misma función que la entrada de huecos de test de abajo: el
-  código que arma los filtros **nunca se ejecuta con ningún filtro puesto**, que es
-  exactamente por qué nadie lo vio.
-- [ ] **`garzones.actualizar()` no bloquea `activo:false` ni el cambio de `tipo` con una
-  sesión abierta, y `eliminar()` sí** (backend, `garzones.service.ts:121-131` vs
-  `:145-169`) — asimetría directa entre dos operaciones del mismo service, con el mismo
-  `sesionRepo` inyectado. Desactivar a alguien con sesión abierta lo deja sin poder
-  cerrarla ni operar (`resolverGarzonPorPin` filtra `activo: true`), y su sesión queda
-  `abierta` con `fin_el = null` hasta que un admin la fuerce; mientras tanto el turno
-  tampoco se puede desactivar. **La mitad de `activo` es mecánica** (copiar el chequeo que
-  `eliminar()` ya tiene). **La mitad de `tipo` es decisión** — ver el hilo de arriba: no
-  corrompe el reparto porque propinas lo bloquea, pero el admin no se entera hasta la
-  liquidación.
+- [ ] **`garzones.actualizar()` deja cambiar el `tipo` con una sesión abierta, sin avisar**
+  (backend, `garzones.service.ts:139` — el gate que sí existe está en `:134-136`, y solo
+  mira `activo`) — **la mitad `activo` de esta entrada se cerró el
+  2026-08-07** (ver [`resueltos.md`](resueltos.md)); esta es la mitad que sigue abierta
+  porque **es decisión de producto, no mecánica**. `sesion_garzon.tipo_garzon` se congela al
+  abrir la sesión, así que cambiar `garzones.tipo` a mitad de turno no corrompe el reparto
+  —`assertGarzonEnUnSoloGrupo` corta la liquidación con un 400 accionable— pero el admin no
+  se entera hasta ese momento. Lo que falta decidir es **qué hacer en el momento de editar**:
+  bloquear como hace `activo`, o solo advertir. No es simétrico con `activo`: desactivar
+  rompe la operación del garzón ahora mismo; cambiarle el tipo, no.
 - [ ] **`regenerarPin()` invalida el PIN sin avisar que hay una sesión abierta** (backend,
-  `garzones.service.ts:137-143`) — misma familia que la anterior por otra puerta. El PIN
+  `garzones.service.ts:147-153`) — misma familia que la anterior por otra puerta. El PIN
   viejo deja de funcionar de inmediato (documentado y deliberado), pero si el garzón está
   en turno no puede marcar salida ni operar hasta que alguien le pase el nuevo. Es una
   acción de seguridad rutinaria (PIN comprometido) con un efecto que nadie anticipa.
@@ -541,16 +537,6 @@ que falta es el aviso en el momento de editar — ver la entrada de `garzones.ac
   sigue en "200 g". El ticket y la pantalla muestran 200 g de algo que se cobra como 500 g:
   el monto es correcto, lo que miente es lo que ve el cliente.
 
-### Baja
-
-- [ ] **"Nueva cuenta" no tiene guard de reentrancia, y sus tres hermanos sí**
-  (frontend, `pages/salones/index.vue`) — `fusionarSeleccionadas`, `transferirCuentaConPin`
-  y `cerrarCuentaConPin` usan un ref "en curso" y `:loading`; `nuevaCuenta`/
-  `abrirCuentaConPin` no. Además el modal de PIN cierra apenas emite `confirm`, antes de
-  que resuelva el POST, así que la UI vuelve a estar interactuable con la petición en
-  vuelo. Doble tap o lag de red crean dos cuentas en la mesa. El backend no puede
-  defenderlo: varias cuentas abiertas por mesa es comportamiento intencional.
-
 ### Huecos de test (medidos, con el mutante que sobrevive)
 
 Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela
@@ -572,17 +558,42 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   (`salones.service.spec.ts`), así que no ven el fixture. Medido: `grep` de `comanda` y
   `estaciones` sobre `backend/test/` y `frontend/e2e/` no devuelve nada.
 - [ ] **El computed `cuentaConItemEliminado` no tiene cobertura** (frontend,
-  `pages/salones/index.vue`) — mutante que pasa: `computed(() => false)`, con los 576 tests
-  del frontend en verde. Las páginas no tienen unit tests y `frontend/e2e` no cubre
-  salones. Verificado a mano en el navegador el 2026-08-06.
+  `pages/salones/index.vue`) — mutante que pasa: `computed(() => false)`, con el frontend
+  entero en verde. Verificado a mano en el navegador el 2026-08-06.
+  **2026-08-07: la mitad cara de esta entrada ya no aplica.** Decía "las páginas no tienen
+  unit tests"; ahora existe `pages/salones/index.nuxt.spec.ts` (creado para el guard de
+  reentrancia), con el arnés de montaje ya resuelto —mock de `useApiFetch`, selección de
+  mesa, teclado de PIN real— así que cubrir esto es agregar un `it`, no montar la página.
+  Lo que sigue faltando y es propio de este computed: un fixture de cuenta **con una línea
+  de ítem eliminado**, que el mock actual no produce. `frontend/e2e` sigue sin cubrir
+  salones.
 
 ### Lo que dejaron las revisiones independientes del cierre
 
-- [ ] **Si se borra el ítem *y* su categoría, la línea vuelve a desaparecer del ticket**
-  (backend, `salones.service.ts` → `agruparEstacionesComanda`) — el `LEFT JOIN categorias`
-  filtra `eliminado_el IS NULL`, así que `impresora_id` queda null y el agrupado hace
-  `continue` **en silencio**. Es indistinguible de "categoría sin impresora", que ya se
-  salteaba, pero es plausible que un mismo cleanup borre las dos cosas.
+- [ ] **Los tres DTO de liquidación de propinas aceptan fechas que no existen, y el período
+  se corre en silencio** (backend, `propinas/dto/{liquidar,create-liquidacion,preview-liquidacion}.dto.ts`)
+  — usan `@IsISO8601()` sin `strict: true`, que valida la FORMA y no el calendario.
+  Medido con `validateSync` + `new Date`:
+
+  | valor | `@IsISO8601()` | con `strict: true` | `new Date(valor)` |
+  |---|---|---|---|
+  | `2026-02-31` | acepta | rechaza | **2026-03-03** |
+  | `2026-04-31` | acepta | rechaza | **2026-05-01** |
+
+  El hueco es **exactamente el día que se pasa de mes**: un mes fuera de rango
+  (`2026-13-01`) el laxo ya lo rechaza, así que nunca llega a `new Date`.
+  Y lo grave no es un error sino el **rollover silencioso**:
+  `liquidacion-propinas.service.ts:157` hace `new Date(dto.fechaDesde)` y JS convierte el 31
+  de febrero en el 3 de marzo sin avisar. La fecha corrida **llega hasta el SQL** —viaja como
+  `$2`/`$3` en el `vp.creado_el >= $2 AND vp.creado_el < $3` de `buscarTipsElegibles`
+  (`:1125-1155`)— y además **queda persistida** en la fila de la liquidación (`:814`). La
+  guarda `fechaHasta <= fechaDesde` (`:159`) no corta: compara dos `Date` ya corridos.
+  Es plata, y no falla: liquida sobre un período distinto al pedido.
+  Son **dos** puntos de entrada, no uno: `crear()` (`:157`) y el camino de confirmar
+  (`:578-609`), que repite el mismo `new Date` con la misma guarda.
+  El arreglo es una palabra (`{ strict: true }`) en seis decoradores. Sale de la revisión
+  del cierre del 2026-08-07, al endurecer el DTO gemelo de `turnos` — **queda fuera de ese
+  diff porque toca otro módulo**, no porque sea menor.
 - [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
   el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
   `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos
