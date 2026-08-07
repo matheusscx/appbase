@@ -468,6 +468,60 @@ Entradas de tandas anteriores que no necesitaban ninguna decisión de negocio.
 
 ---
 
+## El esquema uniformado a `timestamptz` (2026-08-06)
+
+- [x] **El esquema mezclaba `TIMESTAMPTZ` y `TIMESTAMP` sin zona en la misma columna
+  lógica** (backend, transversal) — el default de TypeORM cuando el decorador de fecha no
+  fija `type`. Medido sobre Postgres real antes de tocar nada: `eliminado_el` 65 sin zona
+  contra 22 con zona, y **el mismo split en las otras dos columnas de auditoría** que la
+  entrada original no había mirado: `creado_el` 66/22 y `actualizado_el` 64/22. O sea ~195
+  columnas partidas por accidente, no 65 — la entrada subestimaba el alcance 3×.
+  **Por qué no es cosmético:** comparar una columna de cada tipo sin cast deja que Postgres
+  castee la que no tiene zona usando el `TimeZone` de **la sesión que compara**, no el que
+  estaba activo al escribir. Verificado con `SET TimeZone` en sesiones separadas: matchea 1
+  de 3 combinaciones. Ya le había costado una ronda de revisión a `items.restaurar()`.
+  **Cómo se cerró:** codemod de 4 variantes literales sobre las entities (196 offenders
+  medidos, 196 explicados) + `refresh_tokens`, que es aparte (abajo). `startup-pos.sql` **no
+  se tocó: ya estaba entero en `TIMESTAMPTZ`** — la deriva era de las entities, y el archivo
+  además no lo ejecuta nadie (es referencia; la base la construye `synchronize` + seeder).
+  Sin migración incremental: sin datos productivos se cambia el esquema y se resetea.
+  **Resultado medido después del reset: CERO columnas `timestamp without time zone` en toda
+  la base**, no sólo en las tres de auditoría. Por eso el invariante que quedó escrito es el
+  fuerte —ninguna columna del esquema sin zona— en vez del acotado a las tres.
+  **Dos redes, porque una sola no alcanza:** un invariante unit
+  (`common/invariants/timestamptz-columns.invariant.spec.ts`, junto al de ADR-004) que mira
+  la **metadata de TypeORM** y no un grep, porque el grep mide el mecanismo (el decorador) y
+  la regla es sobre la conducta (el tipo): 5 entities declaran estas columnas con `@Column` a
+  secas y un grep de `@DeleteDateColumn` no las ve. Y un e2e (`test/esquema.e2e-spec.ts`)
+  contra `information_schema`, que cubre **todas** las columnas y no sólo las que el unit
+  reconoce como de auditoría. Revertir una sola entity mata las dos: el unit nombra la clase (`Turno.eliminado_el`), el e2e la tabla.
+  **El invariante encontró su propio límite:** `refresh_tokens.expires_at` estaba sin zona,
+  no la miraba ninguna red —no es columna de auditoría— y decide si un token sigue vivo. La
+  encontró una persona leyendo la tabla de al lado al migrar `created_at`. Es exactamente el
+  caso que justifica que el e2e vaya sobre el esquema entero.
+  **Invariante 4 (no tocar el sistema JWT):** `refresh_tokens` cae bajo ella, así que se
+  paró y se preguntó en vez de decidir. El owner autorizó migrar las dos columnas
+  (2026-08-06), con el radio ya medido: `created_at` no lo lee nadie y la comparación de
+  expiración vive en JS (`existing.expiresAt < new Date()`), nunca en SQL. Ninguna lógica de
+  tokens cambió.
+- [x] **El propio fix de `items.service.ts` se dio vuelta con la migración** (cerrado en la
+  misma tanda) — lo encontró el barrido, y es lo más caro que salió de todo esto.
+  `remove()` escribía `eliminado_el = NOW() AT TIME ZONE 'UTC'` y `restaurar()` leía con el
+  mismo cast, **puesto a propósito** porque `items.eliminado_el` era sin zona y
+  `receta_extras_permitidos.eliminado_el` con zona. Con las dos columnas ya en `timestamptz`
+  ese cast **reintroduce el bug que arreglaba**: convierte la columna a un `timestamp` sin
+  zona que Postgres re-castea con el `TimeZone` de sesión. **Medido contra Postgres real:
+  con la sesión en `America/Santiago`, el instante guardado quedaba 4 horas corrido.** Hoy
+  no explotaba porque la sesión es UTC — justo la coincidencia de la que ese código decía no
+  querer depender. Se sacaron los dos casts y se reescribieron los comentarios que
+  documentaban el razonamiento viejo. El test de `items.service.spec.ts` que **exigía** el
+  cast ahora asevera lo contrario: que no esté.
+  **La moraleja, que vale más que el fix:** un cast de zona horaria es una respuesta al TIPO
+  de la columna, no una verdad permanente. Si el tipo cambia, el cast se relee, no se
+  conserva. Y ningún test lo habría cazado: el mutante correcto era el propio esquema.
+
+---
+
 ## Auditoría `turnos` + `salones` + `garzones` (2026-08-06)
 
 Los hallazgos que se cerraron. Los que quedan y lo refutado están en

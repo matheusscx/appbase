@@ -2351,15 +2351,19 @@ describe('ItemsService', () => {
       // cambiar esta condición por `eliminado_el IS NOT NULL` revivería
       // cualquier fila borrada, no solo la de este borrado.
       expect(sql).toMatch(
-        /eliminado_el\s*=\s*\(\s*\(SELECT eliminado_el_previo FROM restaurado\)/,
+        /eliminado_el\s*=\s*\(SELECT eliminado_el_previo FROM restaurado\)/,
       );
-      // `items.eliminado_el` es `timestamp` SIN zona;
-      // `receta_extras_permitidos.eliminado_el` es `timestamptz`. Sin este
-      // cast explícito, Postgres castea con el `TimeZone` de la sesión que
-      // corre la comparación — que puede no ser el mismo que estaba activo
-      // cuando `remove()` escribió el valor — y la comparación deja de
-      // matchear en silencio (medido contra Postgres real).
-      expect(sql).toContain("AT TIME ZONE 'UTC'");
+      // Y la comparación va **sin** cast de zona horaria. Hasta el 2026-08-06
+      // acá se exigía `AT TIME ZONE 'UTC'`, porque `items.eliminado_el` era
+      // `timestamp` sin zona y el otro lado `timestamptz`: el cast anclaba los
+      // dos a UTC a mano. Con el esquema uniformado a `timestamptz`
+      // (`common/invariants/timestamptz-columns.invariant.spec.ts`) el cast se
+      // da vuelta y **reintroduce** el bug que arreglaba — convierte la columna
+      // a un `timestamp` sin zona que Postgres re-castea con el `TimeZone` de
+      // sesión. Medido: 4 horas de corrimiento con la sesión en
+      // `America/Santiago`. Por eso la aserción es negativa: que vuelva a
+      // aparecer el cast es hoy la regresión, no la ausencia.
+      expect(sql).not.toContain('AT TIME ZONE');
     });
 
     it('revive en las dos direcciones: como ingrediente y como receta', async () => {

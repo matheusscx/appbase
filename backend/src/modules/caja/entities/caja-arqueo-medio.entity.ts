@@ -47,9 +47,9 @@ export class CajaArqueoMedio {
   @Column({ name: 'comentario_diferencia', type: 'text', nullable: true })
   comentarioDiferencia: string | null;
 
-  @CreateDateColumn({ name: 'creado_el' })
+  @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 
-  @DeleteDateColumn({ name: 'eliminado_el' })
+  @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz' })
   eliminadoEl: Date | null;
 }

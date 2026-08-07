@@ -41,13 +41,13 @@ export class Garzon {
   @Column({ name: 'es_placeholder', type: 'boolean', default: false })
   esPlaceholder: boolean;
 
-  @CreateDateColumn({ name: 'creado_el' })
+  @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 
-  @UpdateDateColumn({ name: 'actualizado_el' })
+  @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })
   actualizadoEl: Date;
 
-  @DeleteDateColumn({ name: 'eliminado_el' })
+  @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz' })
   eliminadoEl: Date | null;
 
   @Column({ name: 'eliminado_por', type: 'uuid', nullable: true })

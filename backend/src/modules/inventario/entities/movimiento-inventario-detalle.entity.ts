@@ -22,5 +22,5 @@ export class MovimientoInventarioDetalle {
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   cantidad: string;
 
-  @CreateDateColumn({ name: 'creado_el' }) creadoEl: Date;
+  @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' }) creadoEl: Date;
 }

@@ -1863,29 +1863,29 @@ export class ItemsService {
       // `activo` al borrar: por eso es también el único que se restaura
       // inactivo (ver `restaurar()`, más abajo).
       //
-      // `eliminado_el` se escribe con `NOW() AT TIME ZONE 'UTC'`, no `NOW()`
-      // a secas: `items.eliminado_el` es `timestamp` SIN zona (default de
-      // `@DeleteDateColumn()` en el driver de Postgres de TypeORM, sin
-      // `type` explícito), mientras que `receta_extras_permitidos.eliminado_el`
-      // es `timestamptz`. Escribir con `NOW()` a secas deja que Postgres
-      // castee implícitamente usando el `TimeZone` de la SESIÓN que corre
-      // este `UPDATE` — y `restaurar()` compara esta columna contra la de
-      // `receta_extras_permitidos` en otra sentencia/conexión. Si esa otra
-      // conexión tiene un `TimeZone` de sesión distinto (un pooler, un
-      // `SET TimeZone` de otra feature, un deploy con default no-UTC), la
-      // comparación no matchea NUNCA — mismo fallo silencioso que el de
-      // `restaurar()` (ver el comentario ahí), un nivel más abajo. Con
-      // `AT TIME ZONE 'UTC'` explícito acá Y al leer en `restaurar()`, el
-      // valor guardado son los dígitos de reloj UTC del instante, sin
-      // depender del `TimeZone` de NINGUNA sesión en ningún momento.
-      // Verificado contra Postgres real con `SET TimeZone` a `UTC` y a
-      // `America/Santiago` en sesiones separadas para escribir y leer: sin
-      // este cast, matchea solo por coincidencia cuando las dos sesiones
-      // comparten `TimeZone` (hoy siempre UTC, nada lo garantiza); con el
-      // cast, matchea en las dos combinaciones.
+      // `eliminado_el` se escribe con `NOW()` a secas, y eso ES el arreglo.
+      //
+      // Hasta el 2026-08-06 acá decía `NOW() AT TIME ZONE 'UTC'`, con razón:
+      // `items.eliminado_el` era `timestamp` SIN zona y
+      // `receta_extras_permitidos.eliminado_el` era `timestamptz`, así que
+      // `restaurar()` comparaba tipos distintos y el cast anclaba los dos
+      // lados a UTC a mano. Cuando el esquema se uniformó a `timestamptz`
+      // (invariante en `common/invariants/timestamptz-columns.invariant.spec.ts`)
+      // ese mismo cast **se dio vuelta**: sobre una columna con zona,
+      // `NOW() AT TIME ZONE 'UTC'` devuelve un `timestamp` sin zona que
+      // Postgres vuelve a castear al escribir, usando el `TimeZone` de la
+      // sesión — el mecanismo exacto que el cast venía a evitar.
+      // Medido contra Postgres real: con la sesión en `America/Santiago`, el
+      // instante guardado quedaba **4 horas corrido** respecto de `NOW()`.
+      // Hoy no explota porque la sesión es UTC, que es justo la coincidencia
+      // de la que este código dice no querer depender.
+      //
+      // La moraleja para el próximo: un cast de zona horaria es una respuesta
+      // al TIPO de la columna, no una verdad permanente. Si el tipo cambia,
+      // el cast hay que releerlo, no conservarlo.
       await manager.query(
         `UPDATE items
-            SET activo = false, eliminado_el = (NOW() AT TIME ZONE 'UTC'),
+            SET activo = false, eliminado_el = NOW(),
                 eliminado_por = $3, actualizado_el = NOW()
           WHERE item_id = $1 AND tenant_id = $2`,
         [itemId, tenantId, usuarioId],
@@ -1921,27 +1921,26 @@ export class ItemsService {
     //    contra Postgres real (e2e con receta + extra + un borrado previo de
     //    otro motivo): revive solo la fila del borrado actual.
     //
-    // Un segundo fallo silencioso, un nivel más abajo (encontrado en
-    // revisión, verificado igual contra Postgres real): `items.eliminado_el`
-    // es `timestamp` SIN zona (default de `@DeleteDateColumn()` sin `type`
-    // explícito) y `receta_extras_permitidos.eliminado_el` es `timestamptz`.
-    // Compararlos sin cast deja que Postgres castee el valor `timestamp`
-    // usando el `TimeZone` de la SESIÓN que corre la comparación — que
-    // puede no ser el mismo `TimeZone` que estaba activo cuando `remove()`
-    // escribió el valor (otra conexión del pool, otro deploy, un `SET
-    // TimeZone` de otra feature). Hoy nunca falla porque nada en esta app
-    // cambia el `TimeZone` de sesión y el default del server es UTC, pero es
-    // la MISMA clase de bug que el de arriba: revive 0 filas sin error y sin
-    // test rojo si eso cambia. Por eso `remove()` escribe
-    // `eliminado_el = (NOW() AT TIME ZONE 'UTC')` (ver el comentario ahí) en
-    // vez de `NOW()` a secas, y acá se lee con el mismo
-    // `AT TIME ZONE 'UTC'` explícito: los dos lados quedan anclados a UTC
-    // por afuera de cualquier `TimeZone` de sesión, en vez de depender de
-    // que las sesiones de escritura y lectura coincidan por casualidad.
-    // Medido contra Postgres real con `SET TimeZone` en sesiones separadas
-    // para escribir y leer (UTC↔UTC, Santiago↔UTC, Santiago↔Santiago): sin
-    // el cast, matchea 1/3 combinaciones (solo cuando ambas sesiones
-    // comparten `TimeZone`); con el cast en los dos lados, matchea las 3.
+    // Hubo un segundo fallo silencioso acá, del mismo molde pero por zonas
+    // horarias, y **se cerró en la raíz el 2026-08-06**: `items.eliminado_el`
+    // era `timestamp` SIN zona (default de `@DeleteDateColumn()` sin `type`)
+    // y `receta_extras_permitidos.eliminado_el` era `timestamptz`, así que
+    // compararlos dejaba que Postgres casteara el lado sin zona usando el
+    // `TimeZone` de la SESIÓN que compara — no el que estaba activo al
+    // escribir. Medido con `SET TimeZone` en sesiones separadas: matcheaba
+    // 1 de 3 combinaciones. El parche era anclar los dos lados a UTC a mano
+    // (`AT TIME ZONE 'UTC'` acá y en `remove()`).
+    //
+    // Ese parche ya no está, y sacarlo fue el arreglo: con las dos columnas
+    // en `timestamptz` la comparación es entre iguales y no depende de
+    // ninguna sesión. Dejarlo habría sido peor que no haberlo puesto nunca —
+    // sobre una columna con zona, `AT TIME ZONE 'UTC'` la convierte a un
+    // `timestamp` sin zona que Postgres re-castea con el `TimeZone` de
+    // sesión. Medido: con la sesión en `America/Santiago`, 4 horas de
+    // corrimiento. El invariante que impide que el esquema vuelva a
+    // desalinearse vive en
+    // `common/invariants/timestamptz-columns.invariant.spec.ts` y en
+    // `test/esquema.e2e-spec.ts`.
     //
     // La CTE `extras` de abajo revive solo las filas de
     // `receta_extras_permitidos` que ESTE mismo borrado se llevó, acotando
@@ -1949,16 +1948,7 @@ export class ItemsService {
     // antes por otro motivo tiene otro `eliminado_el` y no revive. Si
     // `restaurado` viene vacío (ítem que no estaba en la papelera), el
     // subquery da NULL y `eliminado_el = NULL` no matchea nada — no-op
-    // seguro. `AT TIME ZONE 'UTC'` convierte el `timestamp` sin zona de
-    // `items` a `timestamptz` anclado a UTC, sin depender del `TimeZone` de
-    // la sesión que corre esta comparación (ver arriba).
-    //
-    // Este comentario vive ACÁ, en TypeScript, y no como `--` dentro del SQL
-    // de la CTE: si viajara dentro del string, un test que busca la
-    // subcadena `AT TIME ZONE 'UTC'` en el SQL enviado matchearía contra el
-    // comentario aunque alguien borrara el cast funcional del `WHERE` —
-    // exactamente el escenario que un mutante tiene que cazar y no cazaba
-    // (ver el test de `restaurar()` en items.service.spec.ts).
+    // seguro.
     //
     // `AND eliminado_por IS NOT NULL`: decisión del owner — la papelera solo
     // restaura lo que borró una persona. Un ítem borrado por el sistema
@@ -1980,9 +1970,7 @@ export class ItemsService {
            UPDATE receta_extras_permitidos
               SET eliminado_el = NULL, actualizado_el = NOW()
             WHERE tenant_id = $2
-              AND eliminado_el = (
-                (SELECT eliminado_el_previo FROM restaurado) AT TIME ZONE 'UTC'
-              )
+              AND eliminado_el = (SELECT eliminado_el_previo FROM restaurado)
               AND (ingrediente_item_id = $1 OR receta_item_id = $1)
            RETURNING 1
          )

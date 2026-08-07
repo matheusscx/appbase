@@ -605,11 +605,14 @@ export class GruposModificadoresService {
    * exacto que dejó (nunca leído a JS y pasado de vuelta como parámetro:
    * pierde precisión de microsegundos entre el `Date` de `pg` y
    * `timestamptz`; ver el comentario largo en `items.service.ts →
-   * restaurar()`). No hace falta el cast `AT TIME ZONE 'UTC'` que sí
-   * necesita items: tanto `grupos_modificadores.eliminado_el` como
-   * `grupo_modificador_opciones.eliminado_el` son `timestamptz` (verificado
-   * contra el esquema), así que comparar uno contra el otro no depende del
-   * `TimeZone` de ninguna sesión.
+   * restaurar()`). La comparación va sin cast de zona: `timestamptz` de los
+   * dos lados, así que no depende del `TimeZone` de ninguna sesión. Este par
+   * ya era del mismo tipo antes de que
+   * ADR-019 (docs/adr/019-timestamptz-en-toda-columna-de-fecha.md)
+   * uniformara el resto del esquema; de las tres comparaciones cross-tabla de
+   * `eliminado_el` que hay en el repo, `items` era la única que cruzaba tipos, y su
+   * cast `AT TIME ZONE 'UTC'` —al que este comentario solía referirse— se
+   * sacó el 2026-08-06 al desaparecer el mismatch que lo justificaba.
    *
    * Una opción borrada ANTES que el grupo (otro motivo, otro `eliminado_el`)
    * no matchea esta comparación y sigue borrada.

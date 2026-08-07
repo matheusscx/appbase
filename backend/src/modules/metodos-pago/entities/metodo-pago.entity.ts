@@ -24,12 +24,12 @@ export class MetodoPago {
   @Column({ name: 'es_efectivo', default: false })
   esEfectivo: boolean;
 
-  @CreateDateColumn({ name: 'creado_el' })
+  @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 
-  @UpdateDateColumn({ name: 'actualizado_el' })
+  @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })
   actualizadoEl: Date;
 
-  @DeleteDateColumn({ name: 'eliminado_el' })
+  @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz' })
   eliminadoEl: Date | null;
 }

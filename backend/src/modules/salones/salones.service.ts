@@ -327,13 +327,17 @@ export class SalonesService {
    * sentencia, las mesas que ESE borrado se llevó — acotado por el
    * `eliminado_el` exacto que dejó, nunca por un valor leído a JS y pasado
    * de vuelta como parámetro (pierde precisión de microsegundos entre el
-   * `Date` de `pg` y `timestamptz`/`timestamp`; ver el comentario largo en
+   * `Date` de `pg` y `timestamptz`; ver el comentario largo en
    * `items.service.ts → restaurar()`, que documenta el fallo silencioso
-   * medido contra Postgres real). Acá no hace falta el cast
-   * `AT TIME ZONE 'UTC'` que sí necesita items: tanto `salones.eliminado_el`
-   * como `mesas.eliminado_el` son `timestamp` SIN zona (verificado contra
-   * Postgres real), así que comparar uno contra el otro no depende del
-   * `TimeZone` de ninguna sesión.
+   * medido contra Postgres real). La comparación va sin cast de zona: desde
+   * ADR-019 (docs/adr/019-timestamptz-en-toda-columna-de-fecha.md)
+   * TODA columna de fecha del esquema es `timestamptz`, así que
+   * `salones.eliminado_el` y `mesas.eliminado_el` son del mismo tipo y
+   * comparar uno contra el otro no depende del `TimeZone` de ninguna sesión.
+   * (Hasta el 2026-08-06 acá decía que las dos eran `timestamp` SIN zona y
+   * que por eso no hacía falta el cast que sí usaba `items`. Las dos mitades
+   * quedaron obsoletas el mismo día: el esquema se uniformó y `items` perdió
+   * su cast, que con el tipo nuevo pasó a ser el bug en vez del arreglo.)
    *
    * Una mesa borrada ANTES que el salón (otro motivo, otro `eliminado_el`)
    * NO matchea esta comparación y sigue borrada — es el "acotamiento por

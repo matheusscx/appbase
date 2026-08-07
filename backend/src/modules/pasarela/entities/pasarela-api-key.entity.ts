@@ -32,7 +32,9 @@ export class PasarelaApiKey {
   @Column({ name: 'revocada_el', type: 'timestamptz', nullable: true })
   revocadaEl: Date | null;
 
-  @CreateDateColumn({ name: 'creado_el' }) creadoEl: Date;
-  @UpdateDateColumn({ name: 'actualizado_el' }) actualizadoEl: Date;
-  @DeleteDateColumn({ name: 'eliminado_el' }) eliminadoEl: Date | null;
+  @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' }) creadoEl: Date;
+  @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })
+  actualizadoEl: Date;
+  @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz' })
+  eliminadoEl: Date | null;
 }

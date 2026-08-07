@@ -14,6 +14,22 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **Tres filtros de rango por fecha pura quedaron dependiendo del `TimeZone` de sesión**
+  (backend, 2026-08-06) — efecto lateral medido de [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md).
+  `mermas.service.ts:268,272`, `inventario.service.ts:788,792` y
+  `pasarela/services/cobros.service.ts:593,597` (este último sobre `pasarela_ordenes`, alias `o`) filtran `creado_el >= $N` / `<= $N` con
+  valores que vienen de DTOs validados con `@IsDateString()`, **que acepta una fecha pura**
+  (`2026-08-01`) además de un timestamp completo. Con la columna sin zona, Postgres tomaba
+  los dígitos literales; con `timestamptz` interpreta esa fecha en el `TimeZone` de la
+  sesión antes de convertir. Hoy no cambia nada —`SHOW TimeZone` da `UTC`, medido— pero es
+  una dependencia que antes no existía, y el default del server no lo fija nadie
+  explícitamente (ni el compose ni la config del pool).
+  **Cierre posible:** el patrón ya resuelto está en `propina-reportes.service.ts:264-266`,
+  que castea explícito con la zona del tenant (`$2::date::timestamp AT TIME ZONE $4`). Son
+  tres servicios copiando ese molde. **No entró en ADR-019** porque cambiar la semántica de
+  un filtro de reportes es una decisión de producto (¿el "desde" es medianoche UTC o
+  medianoche del local?), no una migración de tipos.
+
 - [ ] **El job de CI del frontend necesita timeout propio** (2026-08-06) — con
   `hookTimeout` en 60s y `testTimeout` en 20s (ver [`resueltos.md`](resueltos.md)), un
   entorno Nuxt realmente colgado tarda hasta un minuto por archivo en reportarse, y hay 22
@@ -177,48 +193,10 @@ Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`]
 corriendo sobre los **16** recursos en vez de sobre 2. Se levanta el ⛔ que impedía
 cablear la pantalla de impuestos. Detalle y mutantes: [`resueltos.md`](resueltos.md).
 
-Y dos hallazgos que la feature dejó medidos y no son suyos:
+Y un hallazgo que la feature dejó medido y no es suyo (el otro, el del esquema partido
+entre `TIMESTAMPTZ` y `TIMESTAMP` sin zona, se cerró el 2026-08-06 — ver
+[`resueltos.md`](resueltos.md)):
 
-- [ ] **El esquema mezcla `TIMESTAMPTZ` y `TIMESTAMP` sin zona en la misma columna
-  lógica, y compararlas depende del `TimeZone` de sesión** (backend, transversal) —
-  medido con `information_schema.columns` sobre Postgres real: de las 87 tablas que
-  tienen `eliminado_el`, **22 la tienen como `timestamptz` y 65 como `timestamp` sin
-  zona** (default de `@DeleteDateColumn()` de TypeORM cuando la entity no fija `type`
-  explícito; `receta_extras_permitidos` y sus hermanas con datos propios sí lo fijan y
-  quedaron en `timestamptz`). No es un detalle cosmético: un `WHERE` que compara una
-  columna de cada tipo sin cast deja que Postgres castee el `timestamp` sin zona
-  usando el **`TimeZone` de la sesión que corre la comparación**, no el que estaba
-  activo cuando se escribió el valor.
-  **Le costó una ronda de revisión a `items.restaurar()`** (`items.service.ts`): la
-  primera versión comparaba `items.eliminado_el` (`timestamp` sin zona) contra
-  `receta_extras_permitidos.eliminado_el` (`timestamptz`) sin cast. Verificado contra
-  Postgres real con `SET TimeZone` en sesiones separadas de escritura y lectura —
-  combinaciones UTC↔UTC, `America/Santiago`↔UTC, `America/Santiago`↔`America/Santiago`—:
-  **matchea 1 de 3 combinaciones** (solo cuando ambas sesiones comparten `TimeZone`,
-  que hoy es siempre porque nada en la app cambia el `TimeZone` de sesión y el default
-  del server es UTC). El fix fue anclar los dos lados a UTC explícito
-  (`NOW() AT TIME ZONE 'UTC'` al escribir, `... AT TIME ZONE 'UTC'` al leer) en vez de
-  confiar en que las sesiones coincidan por casualidad — ver el comentario largo en
-  `items.service.ts` (`remove()` y `restaurar()`) para el detalle completo, incluida la
-  otra mitad del mismo bug con `timestamptz` de microsegundos perdiendo precisión al
-  pasar por un `Date` de JS.
-  **Cierre posible:** una migración que uniforme las 65 a `timestamptz` (fuera de
-  alcance de esta feature — el proyecto no tiene datos productivos, así que es cambiar
-  el esquema y resetear, no un backfill), o dejar el patrón "cast explícito a UTC en
-  cualquier comparación cross-tabla" documentado como regla y confiar en revisión.
-  ⚠️ **Corregido (Ronda de fixes 1):** la entrada original decía "ningún otro de los
-  16 recursos compara timestamps entre tablas" — falso. `salones.restaurar()`
-  (`salones↔mesas`) y `grupos-modificadores.restaurar()`
-  (`grupos_modificadores↔grupo_modificador_opciones`) también comparan un
-  `eliminado_el` contra otro para acotar su colateral. **La razón correcta de por qué
-  no sufren el bug no es "no comparan", es que en cada uno de esos dos pares los DOS
-  lados comparten tipo** (verificado con `information_schema.columns`): `salones` y
-  `mesas` son las dos `timestamp` sin zona; `grupos_modificadores` y
-  `grupo_modificador_opciones` son las dos `timestamptz` (así lo documenta el
-  comentario de `grupos-modificadores.service.ts` → `restaurar()`). El riesgo real no
-  es "comparar timestamps entre tablas" en general — es comparar timestamps **de
-  tipos distintos**, que hoy solo pasa en el par `items`/`receta_extras_permitidos`
-  de los tres recursos con colateral.
 - [ ] **La plomería de tramos en `recargos` es alcanzable y no significa nada**
   (backend) — `create()`/`update()` persisten `dto.tramos` y
   `validarSegunTipoUpdate` valida que no venga vacío, pero **ningún código de

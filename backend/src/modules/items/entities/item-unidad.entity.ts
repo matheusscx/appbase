@@ -36,7 +36,9 @@ export class ItemUnidad {
   @Column({ name: 'venta_id', type: 'uuid', nullable: true })
   ventaId: string | null;
 
-  @CreateDateColumn({ name: 'creado_el' }) creadoEl: Date;
-  @UpdateDateColumn({ name: 'actualizado_el' }) actualizadoEl: Date;
-  @DeleteDateColumn({ name: 'eliminado_el' }) eliminadoEl: Date | null;
+  @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' }) creadoEl: Date;
+  @UpdateDateColumn({ name: 'actualizado_el', type: 'timestamptz' })
+  actualizadoEl: Date;
+  @DeleteDateColumn({ name: 'eliminado_el', type: 'timestamptz' })
+  eliminadoEl: Date | null;
 }

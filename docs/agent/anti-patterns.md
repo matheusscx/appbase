@@ -25,6 +25,27 @@ entities y falla si una columna `*_id` no declara `type: 'uuid'` (con allowlist 
 externos como `google_id`). El porqué (JOINs raw fallan `varchar` vs `uuid`) vive en
 [ADR-004](../adr/004-uuid-column-types.md). Regla movida del `.md` al test.
 
+### ✅ Columna de fecha sin `type: 'timestamptz'` explícito — AUTOMATIZADO
+
+Mismo molde que el de arriba, misma causa: sin `type`, TypeORM elige por vos y para fechas
+elige `timestamp` **sin zona**. Llegó a 195 columnas partidas por accidente. Comparar una con
+zona contra una sin zona no da error — Postgres castea con el `TimeZone` de la sesión que
+compara, así que matchea 1 de 3 combinaciones y las otras 2 afectan 0 filas **en silencio**.
+
+Enforced por dos tests: `src/common/invariants/timestamptz-columns.invariant.spec.ts` (mira
+la metadata de TypeORM, no el texto — hay 5 entities que usan `@Column` a secas y un grep del
+decorador no las ve) y `test/esquema.e2e-spec.ts` (mira `information_schema`, y va sobre
+TODAS las columnas: `refresh_tokens.expires_at` se escapó del primero por no llamarse como
+una columna de auditoría). El porqué vive en
+[ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md).
+
+**El corolario que sí es nuevo, y no lo caza ningún test:** un cast de zona horaria es una
+respuesta al TIPO de la columna, no una verdad permanente. `items.service.ts` tenía
+`NOW() AT TIME ZONE 'UTC'` puesto a propósito para tapar el mismatch; con la columna ya en
+`timestamptz` ese mismo cast **reintroduce el bug que arreglaba** (medido: 4 horas de
+corrimiento con la sesión en `America/Santiago`). Si cambiás el tipo de una columna, releé
+los casts que la tocan en vez de conservarlos.
+
 ### ❌ `tenant_id` tomado del request
 
 ```ts
