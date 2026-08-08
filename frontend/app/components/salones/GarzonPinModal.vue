@@ -5,34 +5,71 @@ const props = withDefaults(
   defineProps<{
     title?: string
     description?: string
+    /**
+     * Cuál de las dos listas complementarias se ofrece.
+     * `false` → los que NO están en turno, para *entrar a turno*: quien ya
+     * tiene sesión abierta no puede abrir otra, así que ofrecerlo sería
+     * ofrecer un error. `true` → los que sí, para todo lo demás.
+     */
+    enTurno?: boolean
   }>(),
   {
     title: 'Identifícate con tu PIN',
     description: 'Ingresa tu PIN de 6 dígitos para continuar.',
+    enTurno: true,
   },
 )
 
 const emit = defineEmits<{
-  // Se emite con el PIN verificado y el nombre del garzón identificado.
-  confirm: [pin: string, nombre: string]
+  confirm: [garzonId: string, pin: string, nombre: string]
 }>()
 
 const garzonesApi = useGarzones()
 
+const garzones = ref<GarzonParaSelector[]>([])
+const cargando = ref(false)
+const elegido = ref<GarzonParaSelector | null>(null)
 const pin = ref('')
 const verificando = ref(false)
 const error = ref('')
 
 const teclas = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
 
-// Reinicia el estado cada vez que se abre el modal.
-watch(open, (isOpen) => {
-  if (isOpen) {
-    pin.value = ''
-    error.value = ''
-    verificando.value = false
+// Se elige primero a quién comparar y después se prueba: con el garzón ya
+// elegido, la verificación es UN bcrypt en vez de uno por garzón del local.
+watch(open, async (isOpen) => {
+  elegido.value = null
+  pin.value = ''
+  error.value = ''
+  verificando.value = false
+  if (!isOpen) return
+
+  cargando.value = true
+  try {
+    garzones.value = await garzonesApi.paraSelector(props.enTurno)
+  }
+  catch (e: unknown) {
+    error.value = apiErrorMsg(e, 'No se pudo cargar la lista de garzones')
+    garzones.value = []
+  }
+  finally {
+    cargando.value = false
   }
 })
+
+function elegir(garzon: GarzonParaSelector) {
+  elegido.value = garzon
+  pin.value = ''
+  error.value = ''
+}
+
+/** Volver atrás cambia de garzón sin cerrar el modal ni perder la acción. */
+function volver() {
+  if (verificando.value) return
+  elegido.value = null
+  pin.value = ''
+  error.value = ''
+}
 
 function pulsar(digito: string) {
   if (verificando.value || pin.value.length >= 6) return
@@ -47,11 +84,15 @@ function borrar() {
   pin.value = pin.value.slice(0, -1)
 }
 
+// Se verifica ANTES de emitir: así el PIN equivocado se corrige acá, sin
+// cerrar el modal ni descartar la acción que lo abrió.
 async function verificar() {
+  const garzon = elegido.value
+  if (!garzon) return
   verificando.value = true
   try {
-    const garzon = await garzonesApi.identificar(pin.value)
-    emit('confirm', pin.value, garzon.nombre)
+    await garzonesApi.verificarPin(garzon.garzonId, pin.value)
+    emit('confirm', garzon.garzonId, pin.value, garzon.nombre)
     open.value = false
   }
   catch (e: unknown) {
@@ -65,14 +106,59 @@ async function verificar() {
 </script>
 
 <template>
-  <UModal v-model:open="open" :title="props.title" :ui="shellUi.modal">
+  <UModal
+    v-model:open="open"
+    :title="elegido ? `PIN de ${elegido.nombre}` : props.title"
+    :ui="shellUi.modal"
+  >
     <template #body>
-      <div class="flex flex-col items-center gap-6 py-2">
+      <!-- Paso 1: elegir garzón -->
+      <div v-if="!elegido" class="flex flex-col gap-4 py-2">
+        <p class="text-center text-sm text-muted">
+          Elegí quién sos para continuar.
+        </p>
+
+        <div v-if="cargando" class="flex justify-center py-6 text-muted">
+          <UIcon name="i-lucide-loader" class="size-5 animate-spin" />
+        </div>
+
+        <!-- Lista vacía: sin esto el usuario ve un selector en blanco y no
+             tiene forma de saber que lo que falta es entrar a turno. -->
+        <UAlert
+          v-else-if="garzones.length === 0"
+          color="neutral"
+          variant="subtle"
+          icon="i-lucide-user-x"
+          :description="props.enTurno
+            ? 'No hay nadie en turno. Primero alguien tiene que entrar a turno.'
+            : 'No hay garzones disponibles: o ya están todos en turno, o no hay ninguno activo.'"
+        />
+
+        <div v-else class="grid max-h-80 grid-cols-1 gap-2 overflow-y-auto">
+          <UButton
+            v-for="garzon in garzones"
+            :key="garzon.garzonId"
+            :label="garzon.nombre"
+            color="neutral"
+            variant="soft"
+            size="xl"
+            block
+            class="justify-start"
+            @click="elegir(garzon)"
+          />
+        </div>
+
+        <p v-if="error" class="text-center text-sm text-error" role="alert">
+          {{ error }}
+        </p>
+      </div>
+
+      <!-- Paso 2: teclado -->
+      <div v-else class="flex flex-col items-center gap-6 py-2">
         <p class="text-center text-sm text-muted">
           {{ props.description }}
         </p>
 
-        <!-- Indicador de dígitos ingresados -->
         <div class="flex items-center gap-3" aria-hidden="true">
           <span
             v-for="i in 6"
@@ -100,7 +186,6 @@ async function verificar() {
         </p>
         <div v-else class="min-h-5" />
 
-        <!-- Teclado numérico -->
         <div class="grid w-full max-w-xs grid-cols-3 gap-3">
           <UButton
             v-for="tecla in teclas"
@@ -136,6 +221,15 @@ async function verificar() {
             @click="borrar"
           />
         </div>
+
+        <UButton
+          label="Cambiar de garzón"
+          icon="i-lucide-arrow-left"
+          color="neutral"
+          variant="ghost"
+          :disabled="verificando"
+          @click="volver"
+        />
       </div>
     </template>
   </UModal>

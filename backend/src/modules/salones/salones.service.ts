@@ -562,8 +562,9 @@ export class SalonesService {
   ): Promise<CuentaDetalle> {
     await this.getMesaOrThrow(tenantId, mesaId);
     // Identifica al garzón responsable por su PIN (lanza 400 si es inválido).
-    const garzon = await this.garzonesService.resolverGarzonPorPin(
+    const garzon = await this.garzonesService.verificarPin(
       tenantId,
+      dto.garzonId,
       dto.pin,
     );
     await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
@@ -970,8 +971,9 @@ export class SalonesService {
     dto: CerrarCuentaDto,
   ): Promise<{ cuenta: CuentaDetalle; ventaId: string }> {
     // Identifica al garzón que cierra la cuenta por su PIN (400 si inválido).
-    const garzon = await this.garzonesService.resolverGarzonPorPin(
+    const garzon = await this.garzonesService.verificarPin(
       tenantId,
+      dto.garzonId,
       dto.pin,
     );
     await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
@@ -1294,11 +1296,13 @@ export class SalonesService {
   async transferirCuentaPorPin(
     tenantId: string,
     cuentaId: string,
+    garzonId: string,
     pin: string,
   ): Promise<CuentaDetalle> {
     const cuenta = await this.cuentaAsignacionesService.transferirPorPin(
       tenantId,
       cuentaId,
+      garzonId,
       pin,
     );
     return this.armarDetalle(tenantId, cuenta);

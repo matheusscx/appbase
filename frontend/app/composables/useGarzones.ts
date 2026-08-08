@@ -17,7 +17,12 @@ export interface Garzon {
   eliminadoPorNombre?: string | null
 }
 
-export interface GarzonIdentificado {
+/**
+ * Lo mínimo para pintar el selector previo al teclado de PIN. El endpoint no
+ * devuelve nada más —ni PIN, ni `activo`, ni tipo—: es la única lectura de
+ * garzones que ve alguien con `Salones:Operar` y sin `Salones:Leer`.
+ */
+export interface GarzonParaSelector {
   garzonId: string
   nombre: string
 }
@@ -69,12 +74,37 @@ export function useGarzones() {
   const eliminar = (id: string) =>
     useApiFetch(`${apiUrl}/garzones/${id}`, { method: 'DELETE' })
 
-  /** Verifica un PIN y devuelve el garzón identificado (o lanza 400). */
-  const identificar = (pin: string) =>
-    useApiFetch<GarzonIdentificado>(`${apiUrl}/garzones/identificar`, {
+  /**
+   * Verifica el PIN **sin ejecutar nada**. El modal la llama antes de emitir
+   * para poder mostrar "PIN inválido" en línea: si el PIN se validara recién
+   * dentro de la acción, el modal ya estaría cerrado y el error saldría como
+   * toast, con la acción descartada.
+   */
+  const verificarPin = (garzonId: string, pin: string) =>
+    useApiFetch<GarzonParaSelector>(`${apiUrl}/garzones/verificar-pin`, {
       method: 'POST',
-      body: { pin },
+      body: { garzonId, pin },
     })
 
-  return { listar, crear, actualizar, regenerarPin, eliminar, identificar }
+  /**
+   * Los garzones del selector. Las dos variantes son **complementarias**:
+   * `enTurno: false` para *entrar a turno* (quien ya tiene sesión abierta no
+   * puede abrir otra), `true` para todo lo demás, que exige sesión abierta.
+   * Mandar la equivocada no da error: da la lista que no es, y **omitir el
+   * param da 400** — el DTO no tiene default, a propósito.
+   */
+  const paraSelector = (enTurno: boolean) =>
+    useApiFetch<GarzonParaSelector[]>(
+      `${apiUrl}/garzones/para-selector?enTurno=${enTurno}`,
+    )
+
+  return {
+    listar,
+    crear,
+    actualizar,
+    regenerarPin,
+    eliminar,
+    paraSelector,
+    verificarPin,
+  }
 }

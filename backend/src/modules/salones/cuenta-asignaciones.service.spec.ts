@@ -21,7 +21,7 @@ const PIN = '123456';
 describe('CuentaAsignacionesService', () => {
   let service: CuentaAsignacionesService;
   let garzones: {
-    resolverGarzonPorPin: jest.Mock;
+    verificarPin: jest.Mock;
     obtenerActivoPorId: jest.Mock;
   };
   let sesiones: { assertSesionAbierta: jest.Mock };
@@ -39,7 +39,7 @@ describe('CuentaAsignacionesService', () => {
 
   beforeEach(async () => {
     garzones = {
-      resolverGarzonPorPin: jest.fn(),
+      verificarPin: jest.fn(),
       obtenerActivoPorId: jest.fn(),
     };
     sesiones = {
@@ -73,7 +73,7 @@ describe('CuentaAsignacionesService', () => {
 
   describe('transferirPorPin', () => {
     it('transfiere por PIN cerrando el tramo anterior y creando el nuevo', async () => {
-      garzones.resolverGarzonPorPin.mockResolvedValue({
+      garzones.verificarPin.mockResolvedValue({
         id: DESTINO,
         activo: true,
       });
@@ -84,7 +84,12 @@ describe('CuentaAsignacionesService', () => {
         garzonResponsableId: ORIGEN,
       });
 
-      const result = await service.transferirPorPin(TENANT, CUENTA, PIN);
+      const result = await service.transferirPorPin(
+        TENANT,
+        CUENTA,
+        DESTINO,
+        PIN,
+      );
 
       expect(manager.findOne).toHaveBeenCalledWith(
         Cuenta,
@@ -118,19 +123,19 @@ describe('CuentaAsignacionesService', () => {
     });
 
     it('cuenta inexistente → NotFoundException', async () => {
-      garzones.resolverGarzonPorPin.mockResolvedValue({
+      garzones.verificarPin.mockResolvedValue({
         id: DESTINO,
         activo: true,
       });
       manager.findOne.mockResolvedValue(null);
 
       await expect(
-        service.transferirPorPin(TENANT, CUENTA, PIN),
+        service.transferirPorPin(TENANT, CUENTA, DESTINO, PIN),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('cuenta cerrada → BadRequestException', async () => {
-      garzones.resolverGarzonPorPin.mockResolvedValue({
+      garzones.verificarPin.mockResolvedValue({
         id: DESTINO,
         activo: true,
       });
@@ -142,15 +147,15 @@ describe('CuentaAsignacionesService', () => {
       });
 
       await expect(
-        service.transferirPorPin(TENANT, CUENTA, PIN),
+        service.transferirPorPin(TENANT, CUENTA, DESTINO, PIN),
       ).rejects.toThrow(BadRequestException);
       await expect(
-        service.transferirPorPin(TENANT, CUENTA, PIN),
+        service.transferirPorPin(TENANT, CUENTA, DESTINO, PIN),
       ).rejects.toThrow('La cuenta no está abierta');
     });
 
     it('destino igual a responsable → BadRequestException', async () => {
-      garzones.resolverGarzonPorPin.mockResolvedValue({
+      garzones.verificarPin.mockResolvedValue({
         id: ORIGEN,
         activo: true,
       });
@@ -162,15 +167,15 @@ describe('CuentaAsignacionesService', () => {
       });
 
       await expect(
-        service.transferirPorPin(TENANT, CUENTA, PIN),
+        service.transferirPorPin(TENANT, CUENTA, DESTINO, PIN),
       ).rejects.toThrow(BadRequestException);
       await expect(
-        service.transferirPorPin(TENANT, CUENTA, PIN),
+        service.transferirPorPin(TENANT, CUENTA, DESTINO, PIN),
       ).rejects.toThrow('El garzón ya es responsable de la cuenta');
     });
 
     it('destino sin sesión propaga 400', async () => {
-      garzones.resolverGarzonPorPin.mockResolvedValue({
+      garzones.verificarPin.mockResolvedValue({
         id: DESTINO,
         activo: true,
       });
@@ -181,7 +186,7 @@ describe('CuentaAsignacionesService', () => {
       );
 
       await expect(
-        service.transferirPorPin(TENANT, CUENTA, PIN),
+        service.transferirPorPin(TENANT, CUENTA, DESTINO, PIN),
       ).rejects.toThrow(BadRequestException);
       expect(manager.findOne).not.toHaveBeenCalled();
     });

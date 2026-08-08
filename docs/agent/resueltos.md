@@ -3286,3 +3286,68 @@ entrada afirmaba **de más o de menos** se anota en su bloque de cierre.
   ⚠️ **Y lo caro de la tanda: yo di el gate del frontend por verde grepeando la línea
   `Tests 619 passed` sin mirar el exit code.** Lo cazó la revisión independiente, no el
   gate. `npm test` puede terminar en 1 con todos los tests en verde.
+
+---
+
+## Selector de garzón antes del PIN (2026-08-08)
+
+- [x] **El PIN de garzón amplifica la carga: cada intento fallido cuesta N bcrypt**
+  (backend, `garzones.service.ts` → `resolverGarzonPorPin`) — itera **todos** los garzones
+  activos del tenant comparando con bcrypt, porque el hash está salteado y no se puede
+  buscar por índice.
+  ⚠️ **La fuerza bruta que reportó la lente NO sobrevive, y se midió:** `bcryptjs` a coste
+  10 tarda **62,5 ms** por comparación, así que un intento con 20 garzones activos son
+  **1,3 s de CPU** y agotar el espacio de 10⁶ son **14 días de CPU saturada** por tenant.
+  No es un vector práctico y sería ensordecedor.
+  **Lo que sí sobrevive es otra cosa:** medido con 5 intentos concurrentes, **6,3 s** y
+  hasta **309 ms de lag del event loop**. Es un solo proceso Node: ese lag lo pagan todos
+  los tenants. Cualquiera con `Salones:Operar` puede provocarlo.
+  El fix **no es throttling** (la entrada de rate limiting de "Endurecimiento para
+  producción" está acotada a `/auth/*` y no cubre esto): es dejar de iterar, y eso exige
+  decidir cómo — seleccionar el garzón antes de pedir el PIN cambia la UX; un HMAC con
+  secreto de servidor en columna indexada permite buscar y conservar bcrypt para verificar.
+  **Decisión de owner sobre el mecanismo de una credencial.**
+  **Cómo se cerró (2026-08-08): seleccionar el garzón antes de pedir el PIN.** Decisión del
+  owner. `resolverGarzonPorPin(tenantId, pin)` —que traía todos los activos y comparaba uno
+  por uno— pasó a `verificarPin(tenantId, garzonId, pin)`: **una fila, un bcrypt**. Migrados
+  los 7 llamadores y borrado el viejo, para que no vuelva por copiar-pegar.
+  **El HMAC quedó descartado** al tomar la decisión: no hace falta criptografía nueva ni
+  columna nueva si la pantalla ya sabe a quién comparar.
+  **Dos listas complementarias, no una** (`GET /garzones/para-selector?enTurno=`): los que
+  **no** están en turno para *entrar a turno* —quien ya tiene sesión abierta no puede abrir
+  otra— y los que **sí** para los otros cinco caminos. La lista **codifica la regla**: el 400
+  `El garzón ya tiene una sesión abierta` deja de **ofrecerse**. ⚠️ No de existir: la lista
+  se pide al abrir el modal y el mismo garzón puede entrar a turno en **otro tótem** antes
+  del submit. El guard sigue siendo el que manda.
+  ⚠️ **`enTurno` es obligatorio y sin default, a propósito.** Con default, el llamador que se
+  olvide recibe la lista equivocada **sin ningún error**.
+  ⚠️ **`Salones:Operar`, no `Leer`.** Medido sobre el modelo, no sobre el seed: los roles son
+  configurables por tenant, así que nada impide un rol que opere el salón sin poder leer el
+  catálogo — y es exactamente quien necesita el selector. Por eso no se reusó `GET /garzones`.
+  **Corrección sobre el plan:** decía eliminar `POST /identificar` porque "pierde su razón de
+  ser". Era falso y se detectó al implementar: tenía un segundo trabajo —verificar el PIN
+  **sin ejecutar la acción**, para que el modal muestre el error en línea y el usuario
+  reintente sin perder lo que estaba haciendo—. Se conservó como `POST /verificar-pin` con
+  `garzonId`: mismo trabajo, 1 bcrypt en vez de N.
+  **Lo que fija cada cosa:** revertir a la iteración mata el test de "una sola consulta"
+  —fixture con **dos** garzones, porque con uno solo iterar y no iterar dan el mismo número—;
+  invertir `EXISTS`/`NOT EXISTS` mata 2 tests del e2e; y hacer que el modal ignore la
+  elección y mande el primero mata el test de la pantalla, que por eso también tiene dos
+  garzones en el fixture.
+  ⚠️ **El e2e `garzones-selector` existe por una lección, no por completitud:** el unit
+  mockea el query builder, así que puede afirmar `EXISTS`/`NOT EXISTS` pero **no que el SQL
+  compile**. Es el mismo agujero por el que el 2026-08-07 se commiteó un `SELECT` con una
+  columna inexistente con el gate entero en verde.
+  ⚠️ **El fix cambió un número que esta misma entrada da por bueno más arriba.** El texto
+  mudado dice que agotar 10⁶ son *"14 días de CPU saturada"* y que "no es un vector
+  práctico" — cifra que suponía **N bcrypt por intento**. Con `verificarPin` es **1**:
+  10⁶ × 62,5 ms ≈ **17 h de CPU** contra un garzón concreto, 20× más barato. Matiz honesto:
+  comprometer a *alguno* cuesta casi lo mismo que antes, porque la iteración vieja probaba
+  cada intento contra los N a la vez. Pero `/garzones/verificar-pin` es un oráculo de PIN
+  **sin throttling** —el rate limiting sigue acotado a `/auth/*`— y la cifra vieja no debe
+  quedar como última palabra. Anotado en `pendientes.md`.
+  **Lo que NO se hizo, con fundamento** (detalle en el plan): el modo personal (Fase 2,
+  bloqueada por el alta de usuarios), el timeout del tótem con ticket de garzón (el ticket
+  cierra la falsificación pero no la presencia, y contra el atacante realista —el que está
+  parado al lado— el valor útil del timeout es 0), y cualquier configuración de "modo
+  estricto".

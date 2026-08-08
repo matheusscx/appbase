@@ -108,7 +108,7 @@ describe('SalonesService', () => {
   let mesaRepo: Repo;
   let cuentaRepo: Repo;
   let ventas: { crearEnTransaccion: jest.Mock };
-  let garzones: { resolverGarzonPorPin: jest.Mock };
+  let garzones: { verificarPin: jest.Mock };
   let sesiones: {
     assertSesionAbierta: jest.Mock;
     buscarSesionAbierta: jest.Mock;
@@ -146,7 +146,7 @@ describe('SalonesService', () => {
     cuentaRepo = makeRepo();
     ventas = { crearEnTransaccion: jest.fn() };
     garzones = {
-      resolverGarzonPorPin: jest.fn().mockResolvedValue({
+      verificarPin: jest.fn().mockResolvedValue({
         id: GARZON,
         nombre: 'Ana Torres',
       }),
@@ -224,7 +224,10 @@ describe('SalonesService', () => {
         .mockResolvedValueOnce([{ mesa_id: MESA }]) // FOR UPDATE mesa
         .mockResolvedValueOnce([{ next: '3' }]);
 
-      const result = await service.abrirCuenta(TENANT, MESA, { pin: PIN });
+      const result = await service.abrirCuenta(TENANT, MESA, {
+        garzonId: GARZON,
+        pin: PIN,
+      });
 
       expect(manager.query).toHaveBeenNthCalledWith(
         1,
@@ -257,19 +260,19 @@ describe('SalonesService', () => {
         ),
       );
       await expect(
-        service.abrirCuenta(TENANT, MESA, { pin: PIN }),
+        service.abrirCuenta(TENANT, MESA, { garzonId: GARZON, pin: PIN }),
       ).rejects.toThrow(BadRequestException);
       expect(manager.create).not.toHaveBeenCalled();
     });
 
     it('rechaza abrir la cuenta si el PIN del garzón es inválido', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
-      garzones.resolverGarzonPorPin.mockRejectedValue(
+      garzones.verificarPin.mockRejectedValue(
         new BadRequestException('PIN inválido'),
       );
 
       await expect(
-        service.abrirCuenta(TENANT, MESA, { pin: '000000' }),
+        service.abrirCuenta(TENANT, MESA, { garzonId: GARZON, pin: '000000' }),
       ).rejects.toThrow(BadRequestException);
       expect(manager.create).not.toHaveBeenCalled();
     });
@@ -280,7 +283,10 @@ describe('SalonesService', () => {
         .mockResolvedValueOnce([{ mesa_id: MESA }])
         .mockResolvedValueOnce([{ next: '1' }]);
 
-      const result = await service.abrirCuenta(TENANT, MESA, { pin: PIN });
+      const result = await service.abrirCuenta(TENANT, MESA, {
+        garzonId: GARZON,
+        pin: PIN,
+      });
 
       expect(result.numero).toBe(1);
     });
@@ -288,7 +294,7 @@ describe('SalonesService', () => {
     it('lanza NotFound si la mesa no pertenece al tenant', async () => {
       mesaRepo.findOne.mockResolvedValue(null);
       await expect(
-        service.abrirCuenta(TENANT, MESA, { pin: PIN }),
+        service.abrirCuenta(TENANT, MESA, { garzonId: GARZON, pin: PIN }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -302,7 +308,7 @@ describe('SalonesService', () => {
           Promise.resolve({ ...row, id: CUENTA }),
       );
 
-      await service.abrirCuenta(TENANT, MESA, { pin: PIN });
+      await service.abrirCuenta(TENANT, MESA, { garzonId: GARZON, pin: PIN });
 
       expect(manager.create).toHaveBeenCalledWith(
         Cuenta,
@@ -1491,6 +1497,7 @@ describe('SalonesService', () => {
       // y el garzón no tiene cómo saber qué línea quitar.
       await expect(
         service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          garzonId: GARZON,
           pin: PIN,
           pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
         }),
@@ -1517,6 +1524,7 @@ describe('SalonesService', () => {
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
       const result = await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        garzonId: GARZON,
         pin: PIN,
         pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
       });
@@ -1596,6 +1604,7 @@ describe('SalonesService', () => {
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
       await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        garzonId: GARZON,
         pin: PIN,
         pagos: [{ metodoPagoId: 'mp-1', monto: '1500' }],
       });
@@ -1642,6 +1651,7 @@ describe('SalonesService', () => {
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
       await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        garzonId: GARZON,
         pin: PIN,
         pagos: [{ metodoPagoId: 'mp-1', monto: '500' }],
       });
@@ -1679,6 +1689,7 @@ describe('SalonesService', () => {
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-2' });
 
       await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        garzonId: GARZON,
         pin: PIN,
         propinaMonto: '1500',
         propinaSugerida: '1200',
@@ -1727,6 +1738,7 @@ describe('SalonesService', () => {
       });
 
       await service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+        garzonId: GARZON,
         pin: PIN,
         propinaMonto: '500',
         pagos: [{ metodoPagoId: 'mp-1', monto: '4000' }],
@@ -1758,6 +1770,7 @@ describe('SalonesService', () => {
 
       await expect(
         service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          garzonId: GARZON,
           pin: PIN,
           propinaMonto: '-1',
         }),
@@ -1788,7 +1801,11 @@ describe('SalonesService', () => {
       ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN, ...extra }),
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          garzonId: GARZON,
+          pin: PIN,
+          ...extra,
+        }),
       ).rejects.toThrow('Propina inválida');
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -1803,7 +1820,10 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([{ itemId: ITEM, cantidad: '1' }]);
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          garzonId: GARZON,
+          pin: PIN,
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -1815,7 +1835,10 @@ describe('SalonesService', () => {
         ),
       );
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          garzonId: GARZON,
+          pin: PIN,
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -1835,7 +1858,7 @@ describe('SalonesService', () => {
       sesiones.buscarSesionAbierta.mockResolvedValue(null);
 
       const err = (await service
-        .cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN })
+        .cerrarCuenta(TENANT, USUARIO, CUENTA, { garzonId: GARZON, pin: PIN })
         .catch((e: unknown) => e)) as Error;
 
       expect(err).toBeInstanceOf(BadRequestException);
@@ -1855,7 +1878,10 @@ describe('SalonesService', () => {
       manager.find.mockResolvedValue([]);
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          garzonId: GARZON,
+          pin: PIN,
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -1868,7 +1894,10 @@ describe('SalonesService', () => {
       });
 
       await expect(
-        service.cerrarCuenta(TENANT, USUARIO, CUENTA, { pin: PIN }),
+        service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          garzonId: GARZON,
+          pin: PIN,
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
     });
@@ -2034,6 +2063,7 @@ describe('SalonesService', () => {
 
       await expect(
         service.cerrarCuenta(TENANT, USUARIO, CUENTA, {
+          garzonId: GARZON,
           pin: PIN,
           pagos: [{ metodoPagoId: 'mp-1', monto: '1000' }],
         }),
@@ -2647,11 +2677,17 @@ describe('SalonesService', () => {
         return Promise.resolve([]);
       });
 
-      const result = await service.transferirCuentaPorPin(TENANT, CUENTA, PIN);
+      const result = await service.transferirCuentaPorPin(
+        TENANT,
+        CUENTA,
+        GARZON,
+        PIN,
+      );
 
       expect(asignaciones.transferirPorPin).toHaveBeenCalledWith(
         TENANT,
         CUENTA,
+        GARZON,
         PIN,
       );
       expect(result.garzonResponsableId).toBe('garzon-nuevo');

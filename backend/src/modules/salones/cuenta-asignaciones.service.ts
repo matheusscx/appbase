@@ -58,9 +58,10 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
   async transferirPorPin(
     tenantId: string,
     cuentaId: string,
+    garzonId: string,
     pin: string,
   ): Promise<Cuenta> {
-    const destino = await this.garzones.resolverGarzonPorPin(tenantId, pin);
+    const destino = await this.garzones.verificarPin(tenantId, garzonId, pin);
     await this.sesiones.assertSesionAbierta(tenantId, destino.id);
     return this.transferir(
       tenantId,

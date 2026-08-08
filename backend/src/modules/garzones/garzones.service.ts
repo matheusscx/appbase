@@ -153,7 +153,7 @@ export class GarzonesService {
         : 0;
 
     // Mismo chequeo que `eliminar()`, que ya lo tenía: desactivar a alguien con
-    // sesión abierta lo deja sin poder cerrarla ni operar —`resolverGarzonPorPin`
+    // sesión abierta lo deja sin poder cerrarla ni operar —`verificarPin`
     // filtra `activo: true`— y su sesión queda abierta con `fin_el = null` hasta
     // que un admin la fuerce. Mientras tanto el turno tampoco se puede desactivar.
     if (desactiva) {
@@ -278,25 +278,87 @@ export class GarzonesService {
   }
 
   /**
-   * Identifica al garzón por su PIN dentro del tenant. Itera los garzones
-   * activos y compara con bcrypt (N pequeño por tenant). Lanza 400 si ningún
-   * PIN coincide. Uso interno (SalonesService) y endpoint /garzones/identificar.
+   * Verifica el PIN del garzón que la pantalla ya eligió. **Una** fila y **un**
+   * `bcrypt.compare`.
+   *
+   * Reemplazó a `resolverGarzonPorPin(tenantId, pin)`, que traía todos los
+   * garzones activos y comparaba uno por uno porque el hash está salteado y no
+   * se puede buscar por índice. Medido antes del cambio: bcryptjs a coste 10
+   * tarda 62,5 ms por comparación, así que 20 garzones eran 1,3 s de CPU **por
+   * intento**; con 5 intentos concurrentes, 6,3 s y hasta 309 ms de lag del
+   * event loop — que en un solo proceso Node lo pagan todos los tenants, y
+   * cualquiera con `Salones:Operar` podía provocarlo.
    *
    * Es un `BadRequestException` (no 401) a propósito: un PIN incorrecto es un
    * error operativo del garzón, no un fallo de autenticación de la sesión del
    * dispositivo. Un 401 haría que el interceptor de `useApiFetch` intente
    * refrescar el token y cierre la sesión del restaurante.
+   *
+   * El mensaje **no distingue** garzón inexistente de PIN incorrecto: son el
+   * mismo 400. Nombrar al garzón no filtraría nada —su nombre ya está en la
+   * pantalla, porque el usuario lo eligió de la lista— pero sí distinguiría
+   * "ese garzón no existe" de "ese PIN no es", que es información que no hace
+   * falta dar.
    */
-  async resolverGarzonPorPin(tenantId: string, pin: string): Promise<Garzon> {
-    const garzones = await this.garzonRepo.find({
-      where: { tenantId, activo: true },
+  async verificarPin(
+    tenantId: string,
+    garzonId: string,
+    pin: string,
+  ): Promise<Garzon> {
+    const garzon = await this.garzonRepo.findOne({
+      where: { id: garzonId, tenantId, activo: true },
     });
-    for (const garzon of garzones) {
-      if (await bcrypt.compare(pin, garzon.pinHash)) {
-        return garzon;
-      }
+    if (!garzon || !(await bcrypt.compare(pin, garzon.pinHash))) {
+      throw new BadRequestException('PIN inválido');
     }
-    throw new BadRequestException('PIN inválido');
+    return garzon;
+  }
+
+  /**
+   * La lista que alimenta el selector previo al teclado de PIN. Devuelve **solo
+   * id y nombre**: nada de PIN, `activo`, tipo ni fechas — es la única lectura
+   * de garzones que ve alguien con `Salones:Operar` y sin `Salones:Leer`.
+   *
+   * Las dos variantes son **complementarias y excluyentes**, y esa partición es
+   * la que hace que la lista codifique la regla en vez de dejarla para un 400:
+   * - `enTurno: false` → **entrar a turno**. Un garzón con sesión abierta no
+   *   puede abrir otra (`El garzón ya tiene una sesión abierta`), así que
+   *   ofrecerlo sería ofrecer un error.
+   * - `enTurno: true` → **todo lo demás** (salir de turno, abrir, cobrar, tomar
+   *   y transferir cuenta), que exigen sesión abierta río abajo.
+   *
+   * El placeholder `Mostrador` queda fuera: no es una persona y no tiene PIN
+   * usable (`pinHash = '!'`).
+   *
+   * Una sola query con `EXISTS`, no una por garzón: N es la cantidad de
+   * garzones del tenant y esto se llama en cada apertura y cada cobro.
+   */
+  async listarParaSelector(
+    tenantId: string,
+    enTurno: boolean,
+  ): Promise<{ garzonId: string; nombre: string }[]> {
+    const rows = await this.garzonRepo
+      .createQueryBuilder('g')
+      .select('g.garzon_id', 'garzon_id')
+      .addSelect('g.nombre', 'nombre')
+      .where('g.tenant_id = :tenantId', { tenantId })
+      .andWhere('g.activo = true')
+      .andWhere('g.es_placeholder = false')
+      .andWhere('g.eliminado_el IS NULL')
+      .andWhere(
+        `${enTurno ? 'EXISTS' : 'NOT EXISTS'} (
+           SELECT 1 FROM sesiones_garzon s
+            WHERE s.garzon_id = g.garzon_id
+              AND s.tenant_id = g.tenant_id
+              AND s.estado = :abierta
+              AND s.eliminado_el IS NULL
+         )`,
+        { abierta: EstadoSesionGarzon.ABIERTA },
+      )
+      .orderBy('g.nombre', 'ASC')
+      .getRawMany<{ garzon_id: string; nombre: string }>();
+
+    return rows.map((r) => ({ garzonId: r.garzon_id, nombre: r.nombre }));
   }
 
   async obtenerActivoPorId(tenantId: string, id: string): Promise<Garzon> {

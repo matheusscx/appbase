@@ -145,24 +145,108 @@ describe('GarzonesService', () => {
     });
   });
 
-  describe('resolverGarzonPorPin', () => {
-    it('devuelve el garzón activo cuyo PIN coincide', async () => {
+  describe('verificarPin', () => {
+    it('devuelve el garzón cuando el PIN coincide, buscándolo por id y tenant', async () => {
       const g = garzon({ id: 'g2', nombre: 'Bruno', pin: '654321' });
-      repo.find.mockResolvedValue([g]);
+      repo.findOne.mockResolvedValue(g);
 
-      const result = await service.resolverGarzonPorPin(TENANT, '654321');
+      const result = await service.verificarPin(TENANT, 'g2', '654321');
+
       expect(result.id).toBe('g2');
-      expect(repo.find).toHaveBeenCalledWith({
-        where: { tenantId: TENANT, activo: true },
+      // El `activo: true` va en el WHERE y no en un chequeo posterior: sin él,
+      // un garzón desactivado seguiría pudiendo operar con su PIN viejo.
+      expect(repo.findOne).toHaveBeenCalledWith({
+        where: { id: 'g2', tenantId: TENANT, activo: true },
       });
     });
 
-    it('lanza 400 si ningún PIN coincide', async () => {
-      repo.find.mockResolvedValue([garzon({ pin: '111111' })]);
+    // El motivo de todo el cambio. Con `find` + loop, N garzones eran N bcrypt
+    // por intento (62,5 ms cada uno, medido). El fixture necesita **dos**
+    // garzones: con uno solo, iterar y no iterar dan el mismo número y el test
+    // pasaría por construcción.
+    it('hace UNA sola consulta y no recorre a los demás garzones', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', pin: '111111' }));
+      repo.find.mockResolvedValue([
+        garzon({ id: 'g1', pin: '111111' }),
+        garzon({ id: 'g2', pin: '222222' }),
+      ]);
+
+      await service.verificarPin(TENANT, 'g1', '111111');
+
+      expect(repo.findOne).toHaveBeenCalledTimes(1);
+      expect(repo.find).not.toHaveBeenCalled();
+    });
+
+    it('lanza 400 si el PIN no coincide', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', pin: '111111' }));
 
       await expect(
-        service.resolverGarzonPorPin(TENANT, '999999'),
+        service.verificarPin(TENANT, 'g1', '999999'),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    // Mismo mensaje que el PIN incorrecto, a propósito: distinguirlos diría
+    // "ese garzón no existe", que es información que no hace falta dar.
+    it('lanza el MISMO 400 si el garzón no existe en el tenant', async () => {
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.verificarPin(TENANT, 'inexistente', '111111'),
+      ).rejects.toThrow('PIN inválido');
+    });
+  });
+
+  describe('listarParaSelector', () => {
+    function qb(rows: { garzon_id: string; nombre: string }[]) {
+      const mock = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(rows),
+      };
+      repo.createQueryBuilder.mockReturnValue(mock);
+      return mock;
+    }
+
+    it('devuelve SOLO id y nombre', async () => {
+      qb([{ garzon_id: 'g1', nombre: 'Ana' }]);
+
+      const result = await service.listarParaSelector(TENANT, true);
+
+      // Es la única lectura de garzones que ve alguien con `Salones:Operar` y
+      // sin `Salones:Leer`: cualquier campo de más se le filtra.
+      expect(result).toEqual([{ garzonId: 'g1', nombre: 'Ana' }]);
+    });
+
+    // Las dos variantes son complementarias, y confundirlas no da error: da la
+    // lista equivocada. Por eso se afirma el operador, no solo el resultado.
+    it.each([
+      [true, 'EXISTS'],
+      [false, 'NOT EXISTS'],
+    ])('enTurno=%s usa %s sobre las sesiones abiertas', async (enTurno, op) => {
+      const mock = qb([]);
+
+      await service.listarParaSelector(TENANT, enTurno);
+
+      const sql = mock.andWhere.mock.calls
+        .map((c) => String(c[0]))
+        .find((c) => c.includes('sesiones_garzon'));
+      expect(sql).toBeDefined();
+      expect(sql!.trimStart().startsWith(op)).toBe(true);
+      expect(sql).toContain('s.eliminado_el IS NULL');
+    });
+
+    it('excluye al placeholder Mostrador, que no es una persona', async () => {
+      const mock = qb([]);
+
+      await service.listarParaSelector(TENANT, true);
+
+      const condiciones = mock.andWhere.mock.calls.map((c) => String(c[0]));
+      expect(condiciones).toContain('g.es_placeholder = false');
+      expect(condiciones).toContain('g.activo = true');
+      expect(condiciones).toContain('g.eliminado_el IS NULL');
     });
   });
 
@@ -281,7 +365,7 @@ describe('GarzonesService', () => {
     it('no deja desactivar a un garzón con sesión abierta', async () => {
       // `eliminar()` ya tenía este chequeo y `actualizar()` no: desactivar deja
       // al garzón sin poder cerrar su propia sesión, porque
-      // `resolverGarzonPorPin` filtra `activo: true`.
+      // `verificarPin` filtra `activo: true`.
       repo.findOne.mockResolvedValue(garzon({ id: 'g1', activo: true }));
       sesionRepo.count.mockResolvedValue(1);
 

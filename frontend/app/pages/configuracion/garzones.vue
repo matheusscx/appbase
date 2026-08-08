@@ -15,7 +15,7 @@ function labelTipo(tipo: TipoGarzon): string {
 // La lectura es abierta (`Salones:Leer`), pero cada escritura pega a un endpoint
 // con su propio `@RequiresPermiso`. Garzones NO tiene módulo propio: sus rutas
 // piden permisos de **Salones**. `Salones:Operar` no entra acá — es de la
-// operación (`garzones/identificar`, cuentas), no de esta pantalla.
+// operación (`garzones/verificar-pin`, cuentas), no de esta pantalla.
 const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones')
 
 const toast = useToast()

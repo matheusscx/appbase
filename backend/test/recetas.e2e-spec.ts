@@ -643,6 +643,8 @@ describe('Recetas — flujo completo (e2e)', () => {
   // ítem inborrable para siempre).
   const MESA_4_ID = '550e8400-e29b-41d4-a716-446655440235';
   const ANA_PIN = '111111';
+  // Id fijo del seed: el selector manda a quién comparar, el PIN es la prueba.
+  const ANA_ID = '550e8400-e29b-41d4-a716-446655440238';
   const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
   it('12. un ítem pedido en una cuenta abierta no se puede borrar, y vuelve a poder cuando la cuenta se cierra', async () => {
@@ -667,16 +669,16 @@ describe('Recetas — flujo completo (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/sesiones-garzon/cerrar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ pin: ANA_PIN });
+      .send({ garzonId: ANA_ID, pin: ANA_PIN });
     await request(app.getHttpServer())
       .post('/api/sesiones-garzon/iniciar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ pin: ANA_PIN, turnoId: TURNO_MANANA_ID });
+      .send({ garzonId: ANA_ID, pin: ANA_PIN, turnoId: TURNO_MANANA_ID });
 
     const resCuenta = await request(app.getHttpServer())
       .post(`/api/mesas/${MESA_4_ID}/cuentas`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ pin: ANA_PIN });
+      .send({ garzonId: ANA_ID, pin: ANA_PIN });
     expect(resCuenta.status).toBe(201);
     const cuentaId = (resCuenta.body as { id: string }).id;
 
@@ -740,6 +742,6 @@ describe('Recetas — flujo completo (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/sesiones-garzon/cerrar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ pin: ANA_PIN });
+      .send({ garzonId: ANA_ID, pin: ANA_PIN });
   });
 });

@@ -6,6 +6,21 @@
 
 ---
 
+## Identificación del garzón en cada acción
+
+Abrir, cobrar, tomar y transferir una cuenta piden **elegir el garzón de una lista y
+después su PIN** (antes se tecleaba el PIN a secas). Son cuatro acciones sobre **tres
+rutas** —`POST /mesas/:id/cuentas`, `POST /cuentas/:id/cerrar` y
+`POST /cuentas/:id/transferir`, que sirve tanto a "tomar" como a "transferir"— y las tres
+llevan `garzonId` además de `pin` en el body. El motivo y la medición están en
+[`garzones.md`](./garzones.md).
+
+⚠️ **La transferencia es *pull*, no *push*:** el PIN lo teclea **quien se lleva** la cuenta,
+no quien la entrega — la pantalla dice *"PIN para tomar esta cuenta"*. El traspaso al cerrar
+turno usa **el mismo** mecanismo; lo único distinto es el dispositivo: el que se hace cargo
+teclea su PIN en la tablet del que se va. No es una excepción a la regla *pull*.
+
+
 ## Overview
 
 ### ¿Qué es?

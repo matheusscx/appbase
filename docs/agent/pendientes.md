@@ -452,6 +452,16 @@ Ver [`resueltos.md`](resueltos.md).
   cupones). El owner se inclina por prioridad explícita por ser lo más flexible para una
   pasarela/cobranza. **Encararlo es brainstorm → spec → plan:** agrega un campo a las reglas,
   toca el motor y necesita decidir qué pasa con las reglas existentes sin prioridad.
+  **Decisión del owner (2026-08-08): investigación de mercado ANTES de diseñar.** Cómo
+  resuelven el apilado de descuentos los POS maduros (Toast, Square, Lightspeed): si definen
+  un orden, si lo hacen configurable por comercio, o si directamente prohíben apilar. Es
+  **insumo para cruzar y adaptar, no verdad a copiar** — regla del cruce en
+  [`investigacion-mercado.md`](investigacion-mercado.md). Recién con eso sobre la mesa se
+  elige entre las tres formas que ya están sobre la mesa: columna `orden` en la tabla puente
+  con reordenamiento en la UI del ítem, regla fija en el motor (p. ej. porcentajes antes que
+  fijos), o dejarlo y documentar que el orden no significa nada.
+  ⛔ Sigue tocando el motor de precios: no se avanza sin volver a confirmar con el owner
+  después de la investigación.
 - [ ] **¿Un descuento debe topearse aunque un recargo posterior levante el total?**
   (backend, `calculo-precios.engine.ts`) — el piso en cero (2026-07-28) topea **regla por
   regla** contra el acumulado en ese punto de la fórmula. Con fórmula `descuentos →
@@ -503,22 +513,6 @@ queda cerrado.**
 
 ### Media
 
-- [ ] **El PIN de garzón amplifica la carga: cada intento fallido cuesta N bcrypt**
-  (backend, `garzones.service.ts` → `resolverGarzonPorPin`) — itera **todos** los garzones
-  activos del tenant comparando con bcrypt, porque el hash está salteado y no se puede
-  buscar por índice.
-  ⚠️ **La fuerza bruta que reportó la lente NO sobrevive, y se midió:** `bcryptjs` a coste
-  10 tarda **62,5 ms** por comparación, así que un intento con 20 garzones activos son
-  **1,3 s de CPU** y agotar el espacio de 10⁶ son **14 días de CPU saturada** por tenant.
-  No es un vector práctico y sería ensordecedor.
-  **Lo que sí sobrevive es otra cosa:** medido con 5 intentos concurrentes, **6,3 s** y
-  hasta **309 ms de lag del event loop**. Es un solo proceso Node: ese lag lo pagan todos
-  los tenants. Cualquiera con `Salones:Operar` puede provocarlo.
-  El fix **no es throttling** (la entrada de rate limiting de "Endurecimiento para
-  producción" está acotada a `/auth/*` y no cubre esto): es dejar de iterar, y eso exige
-  decidir cómo — seleccionar el garzón antes de pedir el PIN cambia la UX; un HMAC con
-  secreto de servidor en columna indexada permite buscar y conservar bcrypt para verificar.
-  **Decisión de owner sobre el mecanismo de una credencial.**
 
 ### Huecos de test (medidos, con el mutante que sobrevive)
 
@@ -563,6 +557,30 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
 
 ### Lo que dejaron las revisiones independientes del cierre
 
+- [ ] **`/garzones/verificar-pin` es un oráculo de PIN sin throttling, y el fix del selector
+  lo abarató 20×** (backend, `garzones.controller.ts`) — el endpoint dice si un PIN
+  pertenece a **un garzón concreto**, sin ejecutar nada y sin límite de intentos. Antes de
+  2026-08-08 un intento costaba N bcrypt y se probaba contra los N garzones a la vez; ahora
+  cuesta 1 y apunta a uno solo. Recalculado: agotar 10⁶ contra un garzón concreto pasa de
+  ~14 días de CPU a **~17 h**. Comprometer a *alguno* cuesta casi lo mismo que antes, así
+  que **no es una regresión**, pero la cifra de "no es un vector práctico" que quedó
+  archivada en [`resueltos.md`](resueltos.md) ya no aplica al caso dirigido. El rate
+  limiting existente está acotado a `/auth/*` y no cubre esto. Decidir si `Salones:Operar`
+  —que ya es un permiso de confianza— alcanza como barrera, o si hace falta límite por
+  garzón.
+
+- [ ] **Modo personal: el garzón con su propia tablet no debería teclear el PIN** (backend +
+  frontend) — **Fase 2 del plan `2026-08-08-elegir-garzon-antes-del-pin.md`, diseñada y
+  diferida el 2026-08-08.** El vínculo opcional `garzones.usuario_id` + `usuarios_tenants.
+  es_totem` como marcador **explícito** del modo (no inferido: una cuenta marcada como tótem
+  no puede volverse personal aunque alguien la vincule por error). Todo el diseño está en el
+  plan, incluidas las cuatro preguntas ya resueltas.
+  **Bloqueada por una feature que no existe:** el alta de usuarios del tenant por el admin.
+  Medido: `POST /tenants/members` recibe un `usuarioId` **que ya existe**, la pantalla de
+  usuarios solo asigna roles, y el único camino a una cuenta es `POST /auth/register`
+  **público**. Habilitar un garzón personal hoy cuesta 4 pasos en 3 pantallas y arranca con
+  un auto-registro. Por eso se difirió: sería un camino que casi nadie puede recorrer.
+
 - [ ] **`anti-patterns.md` pasó su propio tope de 20 entradas y nadie podó** (docs,
   `docs/agent/anti-patterns.md:14`) — la regla 3 del archivo dice *"Tope: 20 entradas. Si se
   llena, la más antigua sin reincidencia se elimina"*. Medido el 2026-08-07: **25** entradas
@@ -601,12 +619,34 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   que es terreno donde el mercado ya tiene respuestas (Toast, Square, Lightspeed manejan
   *voids* de ítems despachados) — con la regla del cruce de
   [`investigacion-mercado.md`](investigacion-mercado.md).
+  **Decisión del owner (2026-08-08): bloquear por debajo de lo ya enviado.** `quitarLinea`
+  rechaza si `cantidadEnviada > 0`; `actualizarLinea` no deja bajar la cantidad por debajo de
+  `cantidadEnviada`. El razonamiento: la comida ya se hizo, así que reducirla en el sistema
+  la regala **sin registro**. Para anular de verdad tiene que existir un camino con motivo
+  (merma o cortesía), no un borrado silencioso — ese camino es lo que falta diseñar, y ahí
+  sí entra la investigación de mercado. **No es simétrico con las advertencias de
+  `garzones`**: allá el costo era un aviso tardío, acá es plata que sale sin rastro.
 - [ ] **El layout de mesas no valida solapamiento** (backend,
   `salones/dto/update-layout.dto.ts`) — dos mesas del mismo salón pueden guardarse en la
   misma posición. No corrompe datos ni bloquea nada: cada mesa sigue siendo direccionable
   por su id, solo queda un plano confuso. No está documentado como regla en
   `docs/features/salones-mesas.md` ni en `docs/PRODUCTO.md`, y definirla exige decidir
   tolerancia o tamaño de mesa. **Prioridad baja.**
+  ⚠️ **Corrección al encuadre (medido 2026-08-08): el backend NO puede evaluarlo.** La
+  posición se guarda como fracción 0..1 de un contenedor responsivo
+  (`salones/entities/mesa.entity.ts` → `posX`/`posY`, `numeric(6,5)`), pero el tamaño se
+  dibuja en **píxeles fijos** en el front (`components/salones/MesaNode.vue` → `TAMANO_PX`:
+  64/80/96/112, ×1,5 de ancho si es rectangular). El servidor no tiene dimensiones, y el
+  solapamiento depende del ancho real del plano: dos mesas que no se pisan en 1920 px sí se
+  pisan en 1024. El alto además lo redimensiona el usuario y se persiste en `localStorage`.
+  Por eso la entrada apuntaba al DTO (`update-layout.dto.ts`), que es el único lugar donde
+  **no** se puede resolver.
+  **Decisión del owner (2026-08-08): validar en el frontend, al arrastrar.** Es el único
+  lugar donde los píxeles existen. Al soltar una mesa sobre otra, avisar o impedir. Sin
+  cambio de esquema ni de contrato. **Limitación asumida:** sigue dependiendo del tamaño de
+  pantalla de quien acomodó el plano. La alternativa que la sacaría —guardar el tamaño
+  también en fracciones del plano— se evaluó y se descartó por costo (toca esquema, render y
+  editor).
 
 ### Refutados (no entran al backlog, se anotan para no redescubrirlos)
 

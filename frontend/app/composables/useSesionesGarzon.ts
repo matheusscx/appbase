@@ -154,19 +154,19 @@ export function useTransferenciaPendientes() {
 export function useSesionesGarzon() {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
-  const iniciar = (body: { pin: string, turnoId: string }) =>
+  const iniciar = (body: { garzonId: string, pin: string, turnoId: string }) =>
     useApiFetch<SesionGarzon>(`${apiUrl}/sesiones-garzon/iniciar`, {
       method: 'POST',
       body,
     })
 
-  const cerrar = (body: { pin: string }) =>
+  const cerrar = (body: { garzonId: string, pin: string }) =>
     useApiFetch<SesionCerrada>(`${apiUrl}/sesiones-garzon/cerrar`, {
       method: 'POST',
       body,
     })
 
-  const activa = (body: { pin: string }) =>
+  const activa = (body: { garzonId: string, pin: string }) =>
     useApiFetch<SesionGarzon | null>(`${apiUrl}/sesiones-garzon/activa`, {
       method: 'POST',
       body,

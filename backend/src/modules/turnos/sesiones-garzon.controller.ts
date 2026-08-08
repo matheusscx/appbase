@@ -15,7 +15,7 @@ import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import { SesionesGarzonService } from './sesiones-garzon.service';
 import { IniciarSesionDto } from './dto/iniciar-sesion.dto';
-import { PinDto } from './dto/pin.dto';
+import { CredencialGarzonDto } from '../../common/dto/credencial-garzon.dto';
 import { QuerySesionesDto } from './dto/query-sesiones.dto';
 
 /**
@@ -36,16 +36,24 @@ export class SesionesGarzonController {
 
   @Post('cerrar')
   @RequiresPermiso('Salones', 'Operar')
-  cerrar(@Req() req: Request, @Body() dto: PinDto) {
+  cerrar(@Req() req: Request, @Body() dto: CredencialGarzonDto) {
     const user = req.user as { tenantId: string };
-    return this.sesionesService.cerrarPorPin(user.tenantId, dto.pin);
+    return this.sesionesService.cerrarPorPin(
+      user.tenantId,
+      dto.garzonId,
+      dto.pin,
+    );
   }
 
   @Post('activa')
   @RequiresPermiso('Salones', 'Operar')
-  activa(@Req() req: Request, @Body() dto: PinDto) {
+  activa(@Req() req: Request, @Body() dto: CredencialGarzonDto) {
     const user = req.user as { tenantId: string };
-    return this.sesionesService.activaPorPin(user.tenantId, dto.pin);
+    return this.sesionesService.activaPorPin(
+      user.tenantId,
+      dto.garzonId,
+      dto.pin,
+    );
   }
 
   @Get('abiertas')

@@ -9,6 +9,8 @@ import {
   Query,
   Req,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -20,7 +22,8 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { GarzonesService } from './garzones.service';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
-import { IdentificarDto } from './dto/identificar.dto';
+import { QuerySelectorGarzonesDto } from './dto/query-selector-garzones.dto';
+import { CredencialGarzonDto } from '../../common/dto/credencial-garzon.dto';
 
 /**
  * Gestión de garzones. Reutiliza el módulo RBAC `Salones`: el CRUD de
@@ -79,15 +82,45 @@ export class GarzonesController {
     return this.garzonesService.restaurar(user.tenantId!, id);
   }
 
-  /** Identifica al garzón por su PIN (para feedback en la UI del garzón). */
-  @Post('identificar')
+  /**
+   * Verifica el PIN **sin ejecutar ninguna acción**. Existe para que el modal
+   * muestre "PIN inválido" en línea y el usuario reintente sin perder lo que
+   * estaba haciendo: si el PIN se validara recién dentro de la acción, el modal
+   * ya se habría cerrado y el error saldría como toast, con la acción
+   * descartada.
+   *
+   * Reemplaza a `POST /identificar`, que hacía lo mismo **sin** `garzonId` y
+   * por eso costaba N bcrypt. Acá cuesta 1.
+   */
+  @Post('verificar-pin')
   @RequiresPermiso('Salones', 'Operar')
-  async identificar(@Req() req: Request, @Body() dto: IdentificarDto) {
-    const user = req.user as { tenantId: string };
-    const garzon = await this.garzonesService.resolverGarzonPorPin(
-      user.tenantId,
+  @HttpCode(HttpStatus.OK)
+  async verificarPin(@Req() req: Request, @Body() dto: CredencialGarzonDto) {
+    const user = req.user as JwtUser;
+    const garzon = await this.garzonesService.verificarPin(
+      user.tenantId!,
+      dto.garzonId,
       dto.pin,
     );
     return { garzonId: garzon.id, nombre: garzon.nombre };
+  }
+
+  /**
+   * La lista del selector previo al teclado de PIN. `Salones:Operar` y no
+   * `Leer`: los roles son configurables por tenant, así que nada impide un rol
+   * que opere el salón sin poder leer el catálogo de garzones — y es
+   * exactamente quien necesita esta lista.
+   */
+  @Get('para-selector')
+  @RequiresPermiso('Salones', 'Operar')
+  listarParaSelector(
+    @Req() req: Request,
+    @Query() query: QuerySelectorGarzonesDto,
+  ) {
+    const user = req.user as JwtUser;
+    return this.garzonesService.listarParaSelector(
+      user.tenantId!,
+      query.enTurno,
+    );
   }
 }

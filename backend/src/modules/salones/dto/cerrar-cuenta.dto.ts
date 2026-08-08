@@ -4,19 +4,15 @@ import {
   IsNumberString,
   IsOptional,
   IsUUID,
-  Matches,
   ValidateNested,
 } from 'class-validator';
 import {
   CustomerVentaDto,
   PagoVentaDto,
 } from '../../ventas/dto/create-venta.dto';
+import { CredencialGarzonDto } from '../../../common/dto/credencial-garzon.dto';
 
-export class CerrarCuentaDto {
-  // PIN del garzón que cierra la cuenta (identificación operativa).
-  @Matches(/^\d{6}$/, { message: 'El PIN debe tener exactamente 6 dígitos' })
-  pin: string;
-
+export class CerrarCuentaDto extends CredencialGarzonDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

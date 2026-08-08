@@ -14,7 +14,38 @@ Registro de **garzones** por tenant, cada uno con un **PIN secreto de 6 dígitos
 En un restaurante, uno o más dispositivos (tablet/tótem) son compartidos por todos
 los garzones. En vez de iniciar/cerrar sesión con usuario+contraseña en cada cambio
 de turno, el dispositivo permanece con la **sesión del restaurante** ya autenticada y
-el sistema pide el **PIN del garzón** al abrir o cerrar una cuenta.
+el sistema pide **elegir el garzón de una lista y después su PIN** al abrir o cerrar
+una cuenta.
+
+### Por qué se elige antes de teclear (2026-08-08)
+
+Antes se tecleaba el PIN a secas y el backend lo comparaba contra **todos** los
+garzones activos, porque el hash está salteado y no se puede buscar por índice.
+Medido: bcrypt a coste 10 tarda 62,5 ms por comparación, así que 20 garzones eran
+1,3 s de CPU **por intento**, y 5 intentos concurrentes daban 6,3 s con hasta 309 ms
+de lag del event loop — que en un solo proceso Node lo pagan **todos los tenants**.
+Con el garzón ya elegido, la verificación es **un** bcrypt.
+
+El selector ofrece **dos listas complementarias**, y la partición no es cosmética:
+
+| flujo | lista | por qué |
+|---|---|---|
+| Entrar a turno | los que **no** están en turno | quien ya tiene sesión abierta no puede abrir otra |
+| Salir de turno, abrir, cobrar, tomar y transferir cuenta | los que **sí** están en turno | los cinco exigen sesión abierta río abajo |
+
+Así **la lista codifica la regla**: el 400 *"El garzón ya tiene una sesión abierta"*
+deja de **ofrecerse**.
+⚠️ No deja de existir: la lista se pide al abrir el modal, y entre esa carga y el submit el
+mismo garzón puede entrar a turno **en otro tótem** —que es el despliegue normal de esta
+feature—. El guard del backend sigue siendo el que manda; la lista solo evita el camino
+previsible.
+
+⚠️ **La cuenta con la que se loguea el tótem es un usuario común del tenant** — no
+existe ningún concepto de "dispositivo" en el sistema. Debería tener un **rol
+mínimo**, solo lo que la operación del salón necesita: si se loguea con la cuenta del
+admin, queda un dispositivo compartido y desatendido con permisos de administración.
+Regla operativa, no enforcement: ningún garzón abre su cuenta en un tótem, y ningún
+garzón tiene el usuario y la contraseña del tótem.
 
 ### ¿Por qué existe?
 
@@ -30,7 +61,7 @@ el sistema de tokens.
 
 ### Scope
 
-- **Incluido**: CRUD de garzones, regeneración de PIN, identificación por PIN, y
+- **Incluido**: CRUD de garzones, regeneración de PIN, selector + verificación de PIN, y
   captura de auditoría al **abrir** (`garzon_apertura_id`) y **cerrar**
   (`garzon_cierre_id`) una cuenta. Al abrir también se setea el responsable
   vigente inicial (`garzon_responsable_id`); ese campo cambia con transferencias
@@ -73,10 +104,11 @@ Todos bajo `@UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)`; `tenant_id` d
 | PATCH | `/garzones/:id` | `Actualizar` | Actualiza `{ nombre?, activo?, tipo? }` |
 | PATCH | `/garzones/:id/pin` | `Actualizar` | Regenera el PIN (sin body) → devuelve el garzón + nuevo `pin` (una vez) |
 | DELETE | `/garzones/:id` | `Eliminar` | Soft delete |
-| POST | `/garzones/identificar` | `Operar` | `{ pin }` → `{ garzonId, nombre }` (o 400) |
+| GET | `/garzones/para-selector?enTurno=` | `Operar` | Las dos listas del selector → `{ garzonId, nombre }[]`. `enTurno` **obligatorio** |
+| POST | `/garzones/verificar-pin` | `Operar` | `{ garzonId, pin }` → `{ garzonId, nombre }` (o 400), **sin ejecutar nada** |
 
 Al **abrir** cuenta (`POST /mesas/:id/cuentas`) y **cerrar** cuenta
-(`POST /cuentas/:id/cerrar`) el body incluye `pin` (6 dígitos). El backend
+(`POST /cuentas/:id/cerrar`) el body incluye `garzonId` **y** `pin` (6 dígitos). El backend
 resuelve el garzón y persiste `garzon_apertura_id` / `garzon_cierre_id`
 (auditoría). Al abrir también setea `garzon_responsable_id` al mismo garzón
 (responsable vigente inicial). La transferencia de responsable vigente (claim por
@@ -113,12 +145,17 @@ transferencias — ver Salones).
 - `crear` / `regenerarPin` — generan un PIN **único** por tenant vía `generarPinUnico`
   (aleatorio con `crypto.randomInt`, comparado con bcrypt contra los existentes y
   reintentado ante colisión), lo hashean y devuelven el PIN en claro **una sola vez**.
-- `resolverGarzonPorPin(tenantId, pin)` — itera garzones **activos** del tenant y
-  compara con bcrypt; devuelve el garzón o lanza `400 PIN inválido`. Es un `400`
+- `verificarPin(tenantId, garzonId, pin)` — **una** fila (`id + tenant + activo`) y
+  **un** `bcrypt.compare`; devuelve el garzón o lanza `400 PIN inválido`. Es un `400`
   (no `401`) a propósito: un PIN incorrecto es un error operativo, no un fallo de
   autenticación de la sesión del dispositivo — un `401` haría que el frontend
   (`useApiFetch`) intente refrescar el token y cierre la sesión del restaurante.
-  Usado por el endpoint `identificar` y por `SalonesService` al abrir/cerrar.
+  El mensaje **no distingue** garzón inexistente de PIN incorrecto.
+  Reemplazó a `resolverGarzonPorPin(tenantId, pin)` (2026-08-08), que iteraba todos los
+  activos porque no había a quién comparar — ver arriba la medición del costo.
+- `listarParaSelector(tenantId, enTurno)` — las dos listas complementarias, en **una**
+  query con `EXISTS`/`NOT EXISTS`, devolviendo solo id y nombre. Excluye al placeholder
+  `Mostrador`.
 - `obtenerActivoPorId(tenantId, id)` — valida pertenencia al tenant + `activo`, o lanza
   `400 Garzón no encontrado o inactivo`. **Todo `garzonId` que llegue desde el body pasa
   por acá antes de persistirse.** Lo usa `VentasService` para `propinaCierreMesa`: sin esa
@@ -132,15 +169,18 @@ transferencias — ver Salones).
 ## Frontend
 
 - **Composable**: `app/composables/useGarzones.ts` (`listar/crear/actualizar/
-  regenerarPin/eliminar/identificar`).
+  regenerarPin/eliminar/paraSelector/verificarPin`).
+- **Modal de identificación**: `components/salones/GarzonPinModal.vue` — dos pasos
+  (elegir garzón, después teclado), con "Cambiar de garzón" para volver sin cerrar el
+  modal ni perder la acción que lo abrió. Verifica **antes** de emitir (vía
+  `verificar-pin`), así un PIN equivocado se corrige en línea. Lo reutilizan los 6
+  flujos de `pages/salones/index.vue` —entrar y salir de turno, abrir, cobrar, tomar y
+  transferir cuenta—, que muestra el responsable vigente (independiente de quién
+  abrió/cerró).
 - **Página admin**: `pages/configuracion/garzones.vue` — tabla con crear/editar,
   regenerar PIN y eliminar. Al crear o regenerar, el PIN generado se muestra en un
   **modal una sola vez** (con aviso de que no se volverá a mostrar).
   Entrada de nav bajo Configuración (gated `Salones/Crear`).
-- **Componente**: `components/salones/GarzonPinModal.vue` — teclado numérico de 6
-  dígitos que auto-verifica vía `identificar` y emite el PIN. Reutilizado al abrir,
-  cerrar y tomar (claim) cuentas en `pages/salones/index.vue`, que muestra el
-  responsable vigente (independiente de quién abrió/cerró).
 
 ---
 
@@ -153,9 +193,21 @@ cd backend && npx jest garzones salones
 ```
 
 Cubre: generación y unicidad del PIN (con reintento ante colisión),
-`resolverGarzonPorPin` (match / 400), regeneración de PIN, y que abrir/cerrar cuenta
-persisten `garzon_apertura_id`/`garzon_cierre_id` (auditoría) y al abrir también
-`garzon_responsable_id`.
+`verificarPin` (una consulta / match / 400), la forma de las dos listas del selector
+(`EXISTS`/`NOT EXISTS`, con el query builder **mockeado**), regeneración de PIN, y que
+abrir/cerrar cuenta persisten `garzon_apertura_id`/`garzon_cierre_id` (auditoría) y al
+abrir también `garzon_responsable_id`.
+
+### E2E (backend, Postgres real)
+
+```bash
+./scripts/reset-db.sh && cd backend && npm run test:e2e
+```
+
+⚠️ `test/garzones-selector.e2e-spec.ts` **no lo corre el comando unit de arriba** (config
+aparte), y es el único que ejercita cosas que el mock no puede ver: que el SQL del selector
+**compile**, y que la lista **no filtre garzones de otro tenant** — medido: borrar el
+`where` de tenant deja el gate unit entero en verde.
 
 ### Manual (frontend)
 

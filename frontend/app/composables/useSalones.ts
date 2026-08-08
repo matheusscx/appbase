@@ -135,6 +135,7 @@ export interface MesaPosicion {
 }
 
 export interface CerrarCuentaBody {
+  garzonId: string
   pin: string
   pagos?: { metodoPagoId: string, monto: string, referencia?: string }[]
   tipoDocumentoId?: string
@@ -260,10 +261,10 @@ export function useSalones() {
   const listarCuentas = (mesaId: string) =>
     useApiFetch<CuentaDetalle[]>(`${apiUrl}/mesas/${mesaId}/cuentas`)
 
-  const abrirCuenta = (mesaId: string, pin: string, nombre?: string) =>
+  const abrirCuenta = (mesaId: string, garzonId: string, pin: string, nombre?: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/mesas/${mesaId}/cuentas`, {
       method: 'POST',
-      body: { pin, nombre },
+      body: { garzonId, pin, nombre },
     })
 
   const fusionarCuentas = (mesaId: string, cuentaIds: string[]) =>
@@ -318,10 +319,10 @@ export function useSalones() {
       { method: 'POST', body },
     )
 
-  const transferirCuenta = (cuentaId: string, pin: string) =>
+  const transferirCuenta = (cuentaId: string, garzonId: string, pin: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/transferir`, {
       method: 'POST',
-      body: { pin },
+      body: { garzonId, pin },
     })
 
   const transferirCuentaAdmin = (cuentaId: string, garzonId: string) =>

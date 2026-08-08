@@ -139,7 +139,10 @@ const motivoAsignacionLabel: Record<MotivoCuentaAsignacion, string> = {
 // ── Identificación de garzón por PIN ───────────────────────────────────────
 const pinModalOpen = ref(false)
 const pinModalTitle = ref('Identifícate con tu PIN')
-let pinAction: ((pin: string, nombre: string) => void) | null = null
+// Cuál de las dos listas complementarias ofrece el selector. `false` solo para
+// entrar a turno: quien ya tiene sesión abierta no puede abrir otra.
+const pinModalEnTurno = ref(true)
+let pinAction: ((garzonId: string, pin: string, nombre: string) => void) | null = null
 let pinCancelado: (() => void) | null = null
 
 // Acción de garzón que falló por no tener sesión de trabajo abierta: se guarda como
@@ -148,20 +151,21 @@ let accionPendiente: (() => void) | null = null
 
 function solicitarPin(
   title: string,
-  action: (pin: string, nombre: string) => void,
-  onCancelar?: () => void,
+  action: (garzonId: string, pin: string, nombre: string) => void,
+  opciones?: { onCancelar?: () => void, enTurno?: boolean },
 ) {
   pinModalTitle.value = title
+  pinModalEnTurno.value = opciones?.enTurno ?? true
   pinAction = action
-  pinCancelado = onCancelar ?? null
+  pinCancelado = opciones?.onCancelar ?? null
   pinModalOpen.value = true
 }
 
-function onPinConfirmado(pin: string, nombre: string) {
+function onPinConfirmado(garzonId: string, pin: string, nombre: string) {
   const action = pinAction
   pinAction = null
   pinCancelado = null
-  action?.(pin, nombre)
+  action?.(garzonId, pin, nombre)
 }
 
 // El teclado de PIN solo avisa cuando el PIN es válido: si el garzón lo cierra,
@@ -248,14 +252,24 @@ function confirmarEntrarTurno() {
   const turnoId = turnoSeleccionadoId.value
   if (!turnoId) return
   turnoModalOpen.value = false
-  solicitarPin('PIN del garzón para entrar a turno', (pin) => {
-    void iniciarSesionConPin(pin, turnoId)
-  })
+  // El único que lista a los que NO están en turno: es justamente el que
+  // todavía no tiene sesión.
+  solicitarPin(
+    'PIN del garzón para entrar a turno',
+    (garzonId, pin) => {
+      void iniciarSesionConPin(garzonId, pin, turnoId)
+    },
+    { enTurno: false },
+  )
 }
 
-async function iniciarSesionConPin(pin: string, turnoId: string) {
+async function iniciarSesionConPin(
+  garzonId: string,
+  pin: string,
+  turnoId: string,
+) {
   try {
-    const sesion = await sesionesApi.iniciar({ pin, turnoId })
+    const sesion = await sesionesApi.iniciar({ garzonId, pin, turnoId })
     toast.add({
       title: `Sesión iniciada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
       color: 'success',
@@ -271,14 +285,14 @@ async function iniciarSesionConPin(pin: string, turnoId: string) {
 }
 
 function salirDeTurno() {
-  solicitarPin('PIN del garzón para salir de turno', (pin) => {
-    void cerrarSesionConPin(pin)
+  solicitarPin('PIN del garzón para salir de turno', (garzonId, pin) => {
+    void cerrarSesionConPin(garzonId, pin)
   })
 }
 
-async function cerrarSesionConPin(pin: string) {
+async function cerrarSesionConPin(garzonId: string, pin: string) {
   try {
-    const sesion = await sesionesApi.cerrar({ pin })
+    const sesion = await sesionesApi.cerrar({ garzonId, pin })
     toast.add({
       title: `Sesión cerrada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
       color: 'success',
@@ -310,12 +324,14 @@ function pedirPinParaPendientes() {
   pendientesOpen.value = false
   solicitarPin(
     'PIN del garzón que se hace cargo',
-    (pin) => {
+    (garzonId, pin) => {
       void transferirTodas(async (cuentaId) => {
-        aplicarCuentaActualizada(await salonesApi.transferirCuenta(cuentaId, pin))
+        aplicarCuentaActualizada(
+          await salonesApi.transferirCuenta(cuentaId, garzonId, pin),
+        )
       })
     },
-    reabrirPendientes,
+    { onCancelar: reabrirPendientes },
   )
 }
 
@@ -460,24 +476,31 @@ async function cargarCuentas(mesaId: string) {
 
 function nuevaCuenta() {
   if (!selectedMesa.value || abriendoCuenta.value) return
-  solicitarPin('PIN del garzón para abrir la cuenta', (pin, nombre) => {
-    void abrirCuentaConPin(pin, nombre)
-  })
+  solicitarPin(
+    'PIN del garzón para abrir la cuenta',
+    (garzonId, pin, nombre) => {
+      void abrirCuentaConPin(garzonId, pin, nombre)
+    },
+  )
 }
 
-async function abrirCuentaConPin(pin: string, nombre: string) {
+async function abrirCuentaConPin(
+  garzonId: string,
+  pin: string,
+  nombre: string,
+) {
   if (!selectedMesa.value || abriendoCuenta.value) return
   abriendoCuenta.value = true
   try {
     const mesaId = selectedMesa.value.id
-    const cuenta = await salonesApi.abrirCuenta(mesaId, pin)
+    const cuenta = await salonesApi.abrirCuenta(mesaId, garzonId, pin)
     cuentas.value.push(cuenta)
     patchMesaOcupacion(mesaId, 1)
     abrirCuenta(cuenta)
     toast.add({ title: `Cuenta abierta por ${nombre}`, color: 'success' })
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al abrir la cuenta', () => { void abrirCuentaConPin(pin, nombre) })
+    toastErrorOperativo(e, 'Error al abrir la cuenta', () => { void abrirCuentaConPin(garzonId, pin, nombre) })
   }
   finally {
     abriendoCuenta.value = false
@@ -560,17 +583,17 @@ function aplicarCuentaActualizada(actualizada: CuentaDetalle) {
 
 function tomarCuenta() {
   if (!activeCuenta.value) return
-  solicitarPin('PIN para tomar esta cuenta', (pin) => {
-    void transferirCuentaConPin(pin)
+  solicitarPin('PIN para tomar esta cuenta', (garzonId, pin) => {
+    void transferirCuentaConPin(garzonId, pin)
   })
 }
 
-async function transferirCuentaConPin(pin: string) {
+async function transferirCuentaConPin(garzonId: string, pin: string) {
   const cuenta = activeCuenta.value
   if (!cuenta || transfiriendo.value) return
   transfiriendo.value = true
   try {
-    const actualizada = await salonesApi.transferirCuenta(cuenta.id, pin)
+    const actualizada = await salonesApi.transferirCuenta(cuenta.id, garzonId, pin)
     aplicarCuentaActualizada(actualizada)
     toast.add({
       title: `Cuenta tomada por ${actualizada.garzonResponsableNombre ?? 'garzón'}`,
@@ -578,7 +601,7 @@ async function transferirCuentaConPin(pin: string) {
     })
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'No se pudo tomar la cuenta', () => { void transferirCuentaConPin(pin) })
+    toastErrorOperativo(e, 'No se pudo tomar la cuenta', () => { void transferirCuentaConPin(garzonId, pin) })
   }
   finally {
     transfiriendo.value = false
@@ -925,15 +948,20 @@ function confirmarCobro(pagos: PagoInput[], vuelto: string) {
   if (!activeCuenta.value) return
   // El cobro recolecta los pagos; el PIN identifica al garzón que cierra.
   cobroOpen.value = false
-  solicitarPin('PIN del garzón para cerrar la cuenta', (pin) => {
+  solicitarPin('PIN del garzón para cerrar la cuenta', (garzonId, pin) => {
     void (async () => {
       await flushPendientes()
-      await cerrarCuentaConPin(pagos, pin, vuelto)
+      await cerrarCuentaConPin(pagos, garzonId, pin, vuelto)
     })()
   })
 }
 
-async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: string) {
+async function cerrarCuentaConPin(
+  pagos: PagoInput[],
+  garzonId: string,
+  pin: string,
+  vuelto: string,
+) {
   if (!activeCuenta.value) return
   submitting.value = true
   const cuentaCerrada = activeCuenta.value
@@ -945,6 +973,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
     // del `try` para que un fallo no deje el drawer trabado en `submitting`.
     const resultadoCerrado = await asegurarVigente()
     await salonesApi.cerrarCuenta(cuentaCerrada.id, {
+      garzonId,
       pin,
       pagos,
       tipoDocumentoId: tiposDocumento.value[0]?.id,
@@ -1007,7 +1036,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
     volverACuentas()
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al cerrar la cuenta', () => { void cerrarCuentaConPin(pagos, pin, vuelto) })
+    toastErrorOperativo(e, 'Error al cerrar la cuenta', () => { void cerrarCuentaConPin(pagos, garzonId, pin, vuelto) })
   }
   finally {
     submitting.value = false
@@ -1380,6 +1409,7 @@ async function cerrarCuentaConPin(pagos: PagoInput[], pin: string, vuelto: strin
       <SalonesGarzonPinModal
         v-model:open="pinModalOpen"
         :title="pinModalTitle"
+        :en-turno="pinModalEnTurno"
         @confirm="onPinConfirmado"
       />
 

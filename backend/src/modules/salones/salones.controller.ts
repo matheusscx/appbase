@@ -279,6 +279,7 @@ export class CuentasController {
     return this.salonesService.transferirCuentaPorPin(
       u.tenantId ?? '',
       id,
+      dto.garzonId,
       dto.pin,
     );
   }

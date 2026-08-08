@@ -77,9 +77,11 @@ sesiones abiertas.
 
 | Método | Ruta | Permiso (`Salones`) | Descripción |
 |---|---|---|---|
-| POST | `/sesiones-garzon/iniciar` | `Operar` | `{ pin, turnoId }` → abre sesión |
-| POST | `/sesiones-garzon/cerrar` | `Operar` | `{ pin }` → cierra sesión abierta |
-| POST | `/sesiones-garzon/activa` | `Operar` | `{ pin }` → sesión abierta o `null` |
+| POST | `/sesiones-garzon/iniciar` | `Operar` | `{ garzonId, pin, turnoId }` → abre sesión |
+| POST | `/sesiones-garzon/cerrar` | `Operar` | `{ garzonId, pin }` → cierra sesión abierta |
+| POST | `/sesiones-garzon/activa` | `Operar` | `{ garzonId, pin }` → sesión abierta o `null` |
+| GET | `/garzones/para-selector?enTurno=` | `Operar` | Las dos listas del selector. `enTurno` **obligatorio** |
+| POST | `/garzones/verificar-pin` | `Operar` | `{ garzonId, pin }` → valida **sin ejecutar nada** |
 | GET | `/sesiones-garzon/abiertas` | `Leer` | Sesiones abiertas del tenant |
 | GET | `/sesiones-garzon` | `Leer` | Historial paginado (`garzonId`, `turnoId`, `estado`, `desde`, `hasta`) |
 | POST | `/sesiones-garzon/:id/cerrar` | `Actualizar` | Cierre admin (sin PIN); registra `cerrada_por_usuario_id` |
@@ -113,6 +115,16 @@ trabajo"* como señal para abrir el modal de entrar a turno, y el segundo caso n
 es del que está operando —mandarlo a iniciar un turno que ya tiene es un callejón
 sin salida.
 
+### El PIN ya no se teclea a ciegas
+
+Desde el 2026-08-08 todo flujo que pide PIN muestra **primero un selector de garzón**:
+con el garzón elegido la verificación cuesta **un** bcrypt en vez de uno por garzón del
+local. *Entrar a turno* lista a los que **no** están en turno; los demás flujos, a los que
+**sí**. Detalle y medición: [`garzones.md`](./garzones.md).
+
+`POST /garzones/verificar-pin` existe para que el modal muestre *"PIN inválido"* en línea:
+valida sin ejecutar la acción, así el usuario corrige sin perder lo que estaba haciendo.
+
 ### Editar un garzón con la sesión abierta: qué bloquea y qué solo advierte
 
 No todas las ediciones pesan igual, y la regla es **si rompe la operación del
@@ -121,7 +133,7 @@ garzón en este momento** (decisión del owner, 2026-08-07):
 | Acción con sesión abierta | Qué hace | Por qué |
 |---|---|---|
 | Eliminar | **Bloquea** (`400`) | Deja la sesión abierta con `fin_el = null` y sin nadie que pueda cerrarla |
-| Desactivar | **Bloquea** (`400`) | `resolverGarzonPorPin` filtra `activo: true`: el garzón no puede ni marcar salida |
+| Desactivar | **Bloquea** (`400`) | `verificarPin` filtra `activo: true`: el garzón no puede ni marcar salida |
 | Cambiar el `tipo` | **Advierte** | El reparto usa `sesion_garzon.tipo_garzon`, congelado al abrir: el turno en curso no se altera. Bloquear obligaría a cerrar el turno para corregir un tipo mal cargado |
 | Regenerar el PIN | **Advierte** | Rotar una credencial es la respuesta a una filtración; trabarla por un turno abierto sería la política al revés |
 

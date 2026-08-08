@@ -36,11 +36,25 @@ function mesa() {
 
 /** Cada `POST /mesas/:id/cuentas` recibido: el contador del doble submit. */
 let postsAbrirCuenta: string[] = []
+/** El body de cada uno: quién dijo la pantalla que abría la cuenta. */
+let bodiesAbrirCuenta: Record<string, unknown>[] = []
+/**
+ * Las URLs COMPLETAS pedidas al selector, con query string. Se guardan enteras a
+ * propósito: el mock antes cortaba en el `?`, así que `enTurno` era invisible
+ * para los tests y se podía borrar el param —lo que en producción hace que el
+ * endpoint responda 400 en toda llamada— con la suite entera en verde.
+ */
+let urlsSelector: string[] = []
+/** Fuerza al POST de abrir cuenta a rechazar con el error que abre el modal de turno. */
+let sinSesionDeTrabajo = false
 /** Retiene la respuesta del POST para dejarlo "en vuelo" el tiempo que el test quiera. */
 let abrirCuentaRetenido: Promise<unknown> | null = null
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string }) => {
+  return (
+    url: string,
+    opts?: { method?: string, body?: Record<string, unknown> },
+  ) => {
     if (typeof url !== 'string') return Promise.resolve([])
     const method = opts?.method ?? 'GET'
     const ruta = url.split('?')[0] ?? ''
@@ -48,6 +62,14 @@ mockNuxtImport('useApiFetch', () => {
     if (/\/mesas\/[^/]+\/cuentas$/.test(ruta)) {
       if (method === 'POST') {
         postsAbrirCuenta.push(ruta)
+        bodiesAbrirCuenta.push(opts?.body ?? {})
+        if (sinSesionDeTrabajo) {
+          const err = new Error('x') as Error & { data?: unknown }
+          err.data = {
+            message: 'El garzón no tiene una sesión de trabajo abierta',
+          }
+          return Promise.reject(err)
+        }
         const cuenta = {
           id: `cuenta-${postsAbrirCuenta.length}`,
           numero: postsAbrirCuenta.length,
@@ -74,8 +96,22 @@ mockNuxtImport('useApiFetch', () => {
 
     // El teclado de PIN resuelve al garzón contra el backend ANTES de emitir
     // `confirm`: sin esto el flujo nunca llega a abrir la cuenta.
-    if (ruta.endsWith('/garzones/identificar')) {
-      return Promise.resolve({ id: 'g1', nombre: 'Ana' })
+    if (ruta.endsWith('/turnos')) {
+      return Promise.resolve([
+        { id: 'turno-1', nombre: 'Mañana', activo: true },
+      ])
+    }
+    if (ruta.endsWith('/garzones/para-selector')) {
+      urlsSelector.push(url)
+      // Dos garzones a propósito: con uno solo, un selector que ignorara la
+      // elección y tomara siempre el primero pasaría igual.
+      return Promise.resolve([
+        { garzonId: 'g1', nombre: 'Ana' },
+        { garzonId: 'g2', nombre: 'Bruno' },
+      ])
+    }
+    if (ruta.endsWith('/garzones/verificar-pin')) {
+      return Promise.resolve({ garzonId: 'g1', nombre: 'Ana' })
     }
     if (ruta.endsWith('/salones/operacion')) {
       return Promise.resolve([{ id: 'salon-1', nombre: 'Principal', mesas: [mesa()] }])
@@ -134,12 +170,23 @@ function dialogos(): HTMLElement[] {
   return [...document.body.querySelectorAll<HTMLElement>('[role="dialog"]')]
 }
 
+/**
+ * El modal de identificación tiene DOS pasos con textos distintos —elegir
+ * garzón y teclear— así que discriminar por uno solo dejaría al drawer
+ * matcheando el otro. Los dos localizadores comparten este predicado para no
+ * poder desincronizarse.
+ */
+function esModalPin(d: HTMLElement): boolean {
+  const texto = d.textContent ?? ''
+  return texto.includes('Ingresa tu PIN') || texto.includes('Elegí quién sos')
+}
+
 function tecladoPin(): HTMLElement | undefined {
-  return dialogos().find(d => d.textContent?.includes('Ingresa tu PIN'))
+  return dialogos().find(esModalPin)
 }
 
 function drawerMesa(): HTMLElement | undefined {
-  return dialogos().find(d => !d.textContent?.includes('Ingresa tu PIN'))
+  return dialogos().find(d => !esModalPin(d))
 }
 
 function botonEn(contenedor: HTMLElement | undefined, texto: string) {
@@ -157,10 +204,15 @@ function botonEn(contenedor: HTMLElement | undefined, texto: string) {
  * igual que un usuario. Así los tests pueden afirmar sobre la ronda además de
  * sobre el contador de POST.
  */
-async function rondaDePin(): Promise<boolean> {
+async function rondaDePin(quien = 'Ana'): Promise<boolean> {
   const abrir = botonEn(drawerMesa(), 'Nueva cuenta')
   if (!abrir || abrir.disabled) return false
   abrir.click()
+  await esperar(10)
+  // Paso nuevo: el teclado no aparece hasta elegir de quién es el PIN.
+  const garzon = botonEn(tecladoPin(), quien)
+  if (!garzon) return false
+  garzon.click()
   await esperar(10)
   for (let i = 0; i < 6; i++) {
     const digito = botonEn(tecladoPin(), '1')
@@ -180,6 +232,9 @@ async function seleccionarMesa(wrapper: Awaited<ReturnType<typeof montar>>) {
 describe('salones — guard de reentrancia de "Nueva cuenta"', () => {
   beforeEach(() => {
     postsAbrirCuenta = []
+    bodiesAbrirCuenta = []
+    urlsSelector = []
+    sinSesionDeTrabajo = false
     abrirCuentaRetenido = null
   })
 
@@ -190,6 +245,55 @@ describe('salones — guard de reentrancia de "Nueva cuenta"', () => {
     expect(await rondaDePin()).toBe(true)
 
     expect(postsAbrirCuenta).toHaveLength(1)
+  })
+
+  // El fixture tiene DOS garzones a propósito: con uno solo, una pantalla que
+  // ignorara la elección y mandara siempre el primero pasaría igual.
+  it('manda el garzón que se eligió, no el primero de la lista', async () => {
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+
+    expect(await rondaDePin('Bruno')).toBe(true)
+
+    expect(bodiesAbrirCuenta).toHaveLength(1)
+    expect(bodiesAbrirCuenta[0]).toMatchObject({ garzonId: 'g2', pin: '111111' })
+    wrapper.unmount()
+  })
+
+  // Abrir una cuenta exige sesión abierta, así que el selector tiene que
+  // ofrecer a los que ESTÁN en turno. Y el param tiene que viajar: el DTO no
+  // tiene default a propósito, así que sin él el backend responde 400 y el
+  // selector no carga nunca.
+  it('pide la lista de los que están en turno, con el param explícito', async () => {
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+
+    expect(await rondaDePin()).toBe(true)
+
+    expect(urlsSelector).toHaveLength(1)
+    expect(urlsSelector[0]).toContain('enTurno=true')
+    wrapper.unmount()
+  })
+
+  // El ÚNICO flujo con la lista invertida, y por eso el único que puede cazar
+  // un `enTurno` cableado a `true`. Entrar a turno lista a los que NO están:
+  // ofrecer a alguien con sesión abierta sería ofrecerle un 400.
+  it('entrar a turno pide la lista de los que NO están en turno', async () => {
+    sinSesionDeTrabajo = true
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+
+    // Abrir cuenta falla por falta de sesión → la pantalla abre el modal de turno.
+    await rondaDePin()
+    const modalTurno = dialogos().find(d =>
+      d.textContent?.includes('Entrar a turno'),
+    )
+    expect(modalTurno, 'modal de entrar a turno').toBeTruthy()
+    botonEn(modalTurno, 'Continuar')?.click()
+    await esperar(30)
+
+    expect(urlsSelector.at(-1)).toContain('enTurno=false')
+    wrapper.unmount()
   })
 
   // El corazón de la entrada: doble tap o lag de red. Sin el guard, la segunda

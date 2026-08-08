@@ -598,6 +598,8 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
   // nunca ejercita esta ruta; solo el flujo de salones lo hace.
   const MESA_1_ID = '550e8400-e29b-41d4-a716-446655440232';
   const ANA_PIN = '111111';
+  // Id fijo del seed: el selector manda a quién comparar, el PIN es la prueba.
+  const ANA_ID = '550e8400-e29b-41d4-a716-446655440238';
   const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
   it('13. cierra una cuenta de mesa con "Combo Especial" (Proteína: carne molida, elegida por componente) → 201 y la venta persiste la elección en `componentes`', async () => {
@@ -606,18 +608,18 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/sesiones-garzon/cerrar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ pin: ANA_PIN });
+      .send({ garzonId: ANA_ID, pin: ANA_PIN });
     const resSesion = await request(app.getHttpServer())
       .post('/api/sesiones-garzon/iniciar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ pin: ANA_PIN, turnoId: TURNO_MANANA_ID });
+      .send({ garzonId: ANA_ID, pin: ANA_PIN, turnoId: TURNO_MANANA_ID });
     expect(resSesion.status).toBe(201);
 
     // Abre una cuenta en la mesa (Ana queda como garzón responsable).
     const resCuenta = await request(app.getHttpServer())
       .post(`/api/mesas/${MESA_1_ID}/cuentas`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ pin: ANA_PIN });
+      .send({ garzonId: ANA_ID, pin: ANA_PIN });
     expect(resCuenta.status).toBe(201);
     const cuentaId = (resCuenta.body as { id: string }).id;
 
@@ -652,6 +654,7 @@ describe('Combos — venta descuenta stock de componentes (e2e)', () => {
       .post(`/api/cuentas/${cuentaId}/cerrar`)
       .set('Authorization', `Bearer ${token}`)
       .send({
+        garzonId: ANA_ID,
         pin: ANA_PIN,
         // Combo Especial afecto (default): 4300 + 19% IVA = 5117 (Task 1,
         // ADR-018; carne molida precioExtra 0).
