@@ -316,7 +316,7 @@ multi-tenant de caja.
   dedicado del conflicto por el camino de `actualizarConfig` —hoy solo se ejerce por
   `crear`, aunque ambos comparten la misma función.
 - [ ] **`buscarTipsPorFuentes` no filtra la venta anulada** (backend,
-  `propinas/liquidacion-propinas.service.ts:1153`) — es la copia hermana de
+  `propinas/liquidacion-propinas.service.ts` → `buscarTipsPorFuentes`) — es la copia hermana de
   `buscarTipsElegibles` que usa `actualizarConfig` para recalcular pesos sobre las fuentes
   ya fijadas de un borrador. Si la venta se anula **con el borrador abierto**, un
   `actualizarConfig` posterior sigue usando sus datos para el peso (`VENTAS_NETAS`,

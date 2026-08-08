@@ -23,8 +23,8 @@ describe('LiquidacionPropinasController — el período del preview', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('convierte el período y lo delega con el tenant del JWT', () => {
-    controller.preview(request, {
+  it('convierte el período y lo delega con el tenant del JWT', async () => {
+    await controller.preview(request, {
       fechaDesde: '2026-07-17',
       fechaHasta: '2026-07-18T12:00:00Z',
       turnoIds: ['turno-1'],

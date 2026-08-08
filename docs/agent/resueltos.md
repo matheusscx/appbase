@@ -3194,8 +3194,9 @@ entrada afirmaba **de más o de menos** se anota en su bloque de cierre.
   completo es un límite de período legítimo y el regex habría roto a quien mande hora. Hay un
   test que lo fija.
   **Lo que fija cada cosa:** revertir `strict` en un solo DTO mata sus 3 casos de calendario y
-  deja vivos los de los otros dos; sacar el chequeo de `Invalid Date` mata los 2 de
-  `2026-W32-1`/`20260807`; y revertir `crear()` al `new Date` inline mata su test de cableado
+  deja vivos los de los otros dos; sacar el chequeo de `Invalid Date` mata **6**
+  —los dos casos `2026-W32-1`/`20260807` en cada uno de los tres archivos que lo ejercen:
+  el spec del util, el del controller y el del service—; y revertir `crear()` al `new Date` inline mata su test de cableado
   sin tocar el de `liquidar()`. Hay además un test que afirma el **hueco** —que el decorador
   acepta `2026-W32-1`— para que, si algún día `strict` empieza a rechazarlo, la defensa se
   mueva en vez de desaparecer.
