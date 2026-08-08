@@ -90,6 +90,84 @@ export function resolverUnidadBaseDeItem(item: {
   };
 }
 
+/**
+ * El camino inverso de `resolverCantidadDesdePresentacion`: canónica → unidad de
+ * presentación. Existe para **el merge de dos líneas del mismo ítem**, donde la
+ * suma se hace en canónica y después hay que reescribir lo que el cliente ve.
+ *
+ * La regla es del diseño de presentación (`docs/superpowers/specs/
+ * 2026-07-16-cantidad-unidad-presentacion-carrito-design.md`): se reescribe en
+ * **la unidad que esa línea ya está mostrando**, no en la de lo que entra. Una
+ * línea en `g` con 500 que recibe 1 kg queda en **1500 g**, no en "1,5 kg" ni en
+ * "500 g" — que es lo que pasaba antes de existir esta función: la canónica
+ * sumaba y la presentación quedaba congelada, así que el ticket mostraba 200 g
+ * de algo que se cobraba como 500 g.
+ *
+ * ⚠️ Gemela de `desdeCantidadCanonica` en
+ * `frontend/app/utils/cantidad-presentacion.ts`, que es donde la regla ya estaba
+ * bien: el carrito del POS reescribe la presentación al incrementar desde
+ * siempre, y **el backend era el que no lo hacía**. Misma regla duplicada
+ * mientras backend y frontend no compartan workspace; cambiar una sin la otra
+ * abre una deriva silenciosa.
+ *
+ * No valida contra cero ni contra conteo: quien llama ya sumó dos cantidades que
+ * pasaron esas validaciones al entrar, y la suma de dos positivas es positiva.
+ * Lo que sí puede pasar es que la conversión caiga bajo la precisión de 4
+ * decimales; en ese caso devuelve `null` y el llamador decide (para el merge:
+ * dejar la presentación como estaba antes que escribir un 0 que miente).
+ *
+ * ⚠️ **No valida el entero de magnitud `conteo`**, a diferencia de su inversa.
+ * Hoy es inalcanzable —el catálogo tiene una sola unidad de conteo, `unidad`,
+ * con factor 1, así que la conversión es la identidad—, pero el día que se
+ * siembre una `docena` esto puede escribir `1.0833` y la inversa lo rechazaría
+ * al recibirlo de vuelta.
+ */
+export function presentacionDesdeCanonica(params: {
+  cantidadCanonica: string;
+  unidadCodigoPresentacion: string;
+  unidadBaseCodigo: string;
+  catalogo: UnidadCat[];
+}): string | null {
+  const {
+    cantidadCanonica,
+    unidadCodigoPresentacion,
+    unidadBaseCodigo,
+    catalogo,
+  } = params;
+
+  if (unidadCodigoPresentacion === unidadBaseCodigo) return cantidadCanonica;
+
+  const hacia = buscarUnidad(catalogo, unidadCodigoPresentacion);
+  const desde = buscarUnidad(catalogo, unidadBaseCodigo);
+  if (!hacia || !desde || hacia.magnitud !== desde.magnitud) return null;
+
+  const factorDesde = new Decimal(desde.factorBase);
+  const factorHacia = new Decimal(hacia.factorBase);
+  if (
+    factorHacia.lessThanOrEqualTo(0) ||
+    factorDesde.lessThanOrEqualTo(0) ||
+    factorHacia.isNaN() ||
+    factorDesde.isNaN()
+  ) {
+    return null;
+  }
+
+  let canonica: Decimal;
+  try {
+    canonica = new Decimal(cantidadCanonica);
+  } catch {
+    return null;
+  }
+
+  const convertida = canonica
+    .mul(factorDesde)
+    .div(factorHacia)
+    .toDecimalPlaces(4, Decimal.ROUND_HALF_UP);
+
+  if (convertida.isZero() && canonica.greaterThan(0)) return null;
+  return convertida.toString();
+}
+
 export function resolverCantidadDesdePresentacion(params: {
   cantidadPresentacion: string;
   unidadCodigoPresentacion: string;

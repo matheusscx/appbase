@@ -49,6 +49,18 @@ export function aCantidadCanonica(
   return convertirPresentacion(presentacion, unidadPres, unidadBase, catalogo)
 }
 
+/**
+ * ⚠️ Gemela de `presentacionDesdeCanonica` en
+ * `backend/src/common/utils/cantidad-presentacion.util.ts`: **la misma regla,
+ * duplicada** mientras backend y frontend no compartan workspace. Las dos
+ * reescriben la presentación tras sumar en canónica, en la unidad que la línea
+ * ya mostraba. Difieren en cómo fracasan: acá lanza (el carrito es local y el
+ * error se ve al instante), allá devuelve `null` para no impedir una fusión por
+ * un problema de display. Y el redondeo a cero acá NO es fracaso —devuelve
+ * `"0"`— mientras que allá sí. Cambiar una sin la otra abre una deriva
+ * silenciosa: el backend estuvo **tres semanas** (desde el 2026-07-16) sin esta
+ * reescritura, y el ticket mostraba una cantidad distinta de la cobrada.
+ */
 export function desdeCantidadCanonica(
   canonica: string,
   unidadBase: string,

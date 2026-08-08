@@ -530,18 +530,22 @@ que falta es el aviso en el momento de editar — ver la entrada de `garzones.ac
   decidir cómo — seleccionar el garzón antes de pedir el PIN cambia la UX; un HMAC con
   secreto de servidor en columna indexada permite buscar y conservar bcrypt para verificar.
   **Decisión de owner sobre el mecanismo de una credencial.**
-- [ ] **Al fusionar dos líneas del mismo ítem se suma `cantidad` pero no
-  `cantidadPresentacion`** (backend, `salones.service.ts`, ramas `match` de `agregarLinea`
-  y `existente` de `fusionarCuentas`) — agregar 200 g y después 300 g del mismo ítem deja
-  `cantidad = 0.5` (correcto, y el motor cobra sobre eso) pero `cantidadPresentacion`
-  sigue en "200 g". El ticket y la pantalla muestran 200 g de algo que se cobra como 500 g:
-  el monto es correcto, lo que miente es lo que ve el cliente.
 
 ### Huecos de test (medidos, con el mutante que sobrevive)
 
 Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela
 ([`resueltos.md`](resueltos.md)). Quedan:
 
+- [ ] **`fusionarCuentas` no tiene NINGÚN e2e, y su SQL solo se ejercita mockeado**
+  (backend) — medido: `grep -rn "fusionar" backend/test/` no devuelve nada, y el único test
+  que recorre ese camino mockea `manager.query`, así que **no llega SQL a Postgres**.
+  No es teórico: el 2026-08-07 un `SELECT` nuevo de esa ruta filtraba `eliminado_el` sobre
+  `item_producto`, que no tiene esa columna. Habría reventado la fusión con un 500
+  sosteniendo el `pessimistic_write` de todas las cuentas de la mesa, y el gate entero
+  —1490 unit, 321 e2e, lint, typecheck— pasó en verde igual. Lo cazó la revisión
+  independiente corriendo la query contra la BD.
+  El caso mínimo: dos cuentas con líneas del mismo ítem, con presentación, fusionar y
+  verificar la cantidad y la presentación resultantes.
 - [ ] **El agrupado por estación de la comanda no lo ejercita ningún dato real, y el seed
   no lo permite** (backend) — descubierto al hacer el smoke del 2026-08-06:
   `agruparEstacionesComanda` siempre devuelve `[]` con el seed, así que hubo que cablear

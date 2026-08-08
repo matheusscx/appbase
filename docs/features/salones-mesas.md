@@ -64,6 +64,15 @@ del garzón usa el permiso dedicado **`Operar`**.
 | POST | `/cuentas/:id/transferir-admin` | Actualizar | Transferir responsable vigente (admin, sin PIN) |
 | GET | `/cuentas/:id/asignaciones` | Leer | Historial auditable de asignaciones de la cuenta |
 
+**Merge de líneas del mismo ítem** (misma personalización) — pasa en dos puertas, `POST
+/cuentas/:id/lineas` y la fusión de cuentas, y las dos siguen la misma regla: la cantidad
+**canónica se suma** y la de presentación se **reescribe en la unidad que esa línea ya
+venía mostrando**, nunca se suma. Sumarlas daría un número sin unidad: la línea puede estar
+en `g` y lo que entra venir en `kg`. Una línea en 200 g que recibe 0,3 kg queda en **500 g**,
+no en 0,5 ni en 200. Una línea sin presentación no gana una por mergear.
+Es la regla del diseño de presentación de carrito (2026-07-16), y la misma que el POS ya
+aplicaba en el carrito local.
+
 `POST /cuentas/:id/cerrar` body:
 `{ pin, pagos?, tipoDocumentoId?, customer?, propinaMonto?, propinaSugerida?, propinaPorcentajeSugerido? }`
 (reusa DTOs de ventas; `propina*` son `@IsNumberString` opcionales, y **los tres se

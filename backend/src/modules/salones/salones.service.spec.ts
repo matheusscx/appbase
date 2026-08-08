@@ -25,6 +25,7 @@ const USUARIO = 'usuario-uuid';
 const MESA = 'mesa-uuid';
 const CUENTA = 'cuenta-uuid';
 const ITEM = 'item-uuid';
+const ITEM_2 = 'item-2-uuid';
 const RECETA = 'receta-uuid';
 const COMBO = 'combo-uuid';
 const GRUPO = 'grupo-uuid';
@@ -517,6 +518,115 @@ describe('SalonesService', () => {
       );
     });
 
+    // Mismo bug que el merge de `agregarLinea`, por la otra puerta: fusionar
+    // dos cuentas sumaba la canónica y dejaba la presentación de la línea de
+    // destino como estaba.
+    it('al fusionar, la presentación de la línea de destino se reescribe', async () => {
+      const cuentaA = {
+        id: CUENTA_A,
+        numero: 1,
+        tenantId: TENANT,
+        mesaId: MESA,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      const cuentaB = {
+        id: CUENTA_B,
+        numero: 2,
+        tenantId: TENANT,
+        mesaId: MESA,
+        estado: EstadoCuenta.ABIERTA,
+      };
+      // DOS ítems distintos mergeando, y no uno: con uno solo, una query por
+      // línea también daría 1 y la aserción anti-N+1 no distinguiría nada.
+      const lineaDestino = {
+        id: 'linea-a1',
+        tenantId: TENANT,
+        cuentaId: CUENTA_A,
+        itemId: ITEM,
+        cantidad: '200',
+        cantidadEnviada: '0',
+        cantidadPresentacion: '200',
+        unidadCodigoPresentacion: 'g',
+        personalizacion: null,
+      };
+      const lineaDestino2 = {
+        id: 'linea-a2',
+        tenantId: TENANT,
+        cuentaId: CUENTA_A,
+        itemId: ITEM_2,
+        cantidad: '100',
+        cantidadEnviada: '0',
+        cantidadPresentacion: '100',
+        unidadCodigoPresentacion: 'g',
+        personalizacion: null,
+      };
+      const lineaOrigen = {
+        id: 'linea-b1',
+        tenantId: TENANT,
+        cuentaId: CUENTA_B,
+        itemId: ITEM,
+        cantidad: '300',
+        cantidadEnviada: '0',
+        cantidadPresentacion: '0.3',
+        unidadCodigoPresentacion: 'kg',
+        personalizacion: null,
+      };
+      const lineaOrigen2 = {
+        id: 'linea-b2',
+        tenantId: TENANT,
+        cuentaId: CUENTA_B,
+        itemId: ITEM_2,
+        cantidad: '400',
+        cantidadEnviada: '0',
+        cantidadPresentacion: '0.4',
+        unidadCodigoPresentacion: 'kg',
+        personalizacion: null,
+      };
+
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      manager.find.mockImplementation(
+        (entity: unknown, opts?: { where?: { cuentaId?: unknown } }) => {
+          if (entity === Cuenta) return Promise.resolve([cuentaA, cuentaB]);
+          if (entity === CuentaLinea) {
+            const ids = idsDe(opts?.where?.cuentaId);
+            return Promise.resolve(
+              [lineaDestino, lineaDestino2, lineaOrigen, lineaOrigen2].filter(
+                (l) => ids.includes(l.cuentaId),
+              ),
+            );
+          }
+          return Promise.resolve([]);
+        },
+      );
+      // La resolución de ítems va por `manager.query` DENTRO del lock: UNA
+      // query que trae los dos item_id distintos, no una por línea.
+      manager.query.mockImplementation((sql: string) =>
+        typeof sql === 'string' && sql.includes('FROM items i')
+          ? Promise.resolve([
+              { item_id: ITEM, tipo: 'producto', unidad_medida: 'g' },
+              { item_id: ITEM_2, tipo: 'producto', unidad_medida: 'g' },
+            ])
+          : Promise.resolve([]),
+      );
+
+      await service.fusionarCuentas(TENANT, MESA, {
+        cuentaIds: [CUENTA_A, CUENTA_B],
+      });
+
+      expect(lineaDestino.cantidad).toBe('500');
+      expect(lineaDestino.cantidadPresentacion).toBe('500');
+      expect(lineaDestino.unidadCodigoPresentacion).toBe('g');
+      expect(lineaDestino2.cantidadPresentacion).toBe('500');
+      // UNA sola query de items para los DOS ítems: el N+1 no vuelve por la
+      // puerta de atrás, y encima adentro del lock pesimista. Con dos ítems
+      // distintos, resolver por línea daría 2 y esto falla.
+      const queriesDeItems = manager.query.mock.calls.filter(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' && c[0].includes('FROM items i'),
+      );
+      expect(queriesDeItems).toHaveLength(1);
+    });
+
     it('lanza BadRequest si alguna cuenta no está abierta o no pertenece a la mesa', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
       manager.find.mockResolvedValue([{ id: CUENTA_A, numero: 1 }]);
@@ -815,6 +925,66 @@ describe('SalonesService', () => {
           lock: { mode: 'pessimistic_write' },
         }),
       );
+    });
+
+    // El caso de la entrada de backlog: agregar 200 g y después 0,3 kg dejaba
+    // `cantidad` en 0.5 (correcto, y el motor cobraba sobre eso) pero
+    // `cantidadPresentacion` congelada en "200 g". El ticket y la pantalla
+    // mostraban 200 g de algo que se cobraba como 500 g: el monto estaba bien,
+    // lo que mentía era lo que ve el cliente.
+    it('al mergear, la presentación se reescribe en la unidad que la línea ya mostraba', async () => {
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT i.item_id'))
+          return Promise.resolve([
+            { item_id: ITEM, tipo: 'producto', unidad_medida: 'g' },
+          ]);
+        return Promise.resolve([]);
+      });
+      const existente = {
+        id: 'linea-1',
+        cantidad: '200',
+        cantidadPresentacion: '200',
+        unidadCodigoPresentacion: 'g',
+        personalizacion: null,
+      };
+      manager.find.mockResolvedValue([existente]);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '0.3',
+        cantidadPresentacion: '0.3',
+        unidadCodigoPresentacion: 'kg',
+      });
+
+      // Canónica: 200 g + 0,3 kg = 500 g.
+      expect(existente.cantidad).toBe('500');
+      // Y la presentación acompaña, EN GRAMOS: la unidad de la línea manda
+      // sobre la de lo que entra, así que no queda "0.5" ni "200".
+      expect(existente.cantidadPresentacion).toBe('500');
+      expect(existente.unidadCodigoPresentacion).toBe('g');
+    });
+
+    // La otra mitad: una línea sin presentación no la gana por mergear. Sin
+    // esto, `sincronizarPresentacion` podría inventar una unidad para filas
+    // que nunca la tuvieron.
+    it('una línea sin presentación sigue sin presentación después del merge', async () => {
+      const existente = {
+        id: 'linea-1',
+        cantidad: '2',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        personalizacion: null,
+      };
+      manager.find.mockResolvedValue([existente]);
+
+      await service.agregarLinea(TENANT, CUENTA, {
+        itemId: ITEM,
+        cantidad: '3',
+      });
+
+      expect(existente.cantidad).toBe('5');
+      expect(existente.cantidadPresentacion).toBeNull();
+      expect(existente.unidadCodigoPresentacion).toBeNull();
     });
 
     it('crea una línea nueva cuando el ítem no está en la cuenta', async () => {

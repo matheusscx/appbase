@@ -33,6 +33,7 @@ import { CuentaAsignacionesService } from './cuenta-asignaciones.service';
 import type { CuentaAsignacionDetalle } from './cuenta-asignaciones.service';
 import {
   assertPresentacionPareada,
+  presentacionDesdeCanonica,
   resolverCantidadDesdePresentacion,
   resolverUnidadBaseDeItem,
   type UnidadCat,
@@ -673,6 +674,11 @@ export class SalonesService {
         match.cantidad = new Decimal(match.cantidad)
           .plus(resuelta.cantidadCanonica)
           .toString();
+        // La presentación se REESCRIBE, no se suma: la línea puede estar
+        // mostrando `g` y lo que entra venir en `kg`, así que sumar los dos
+        // números daría una unidad que no existe. Se recalcula desde la
+        // canónica ya sumada, en la unidad que esa línea ya mostraba.
+        this.sincronizarPresentacion(match, item, catalogo);
         await manager.save(CuentaLinea, match);
       } else {
         await manager.save(
@@ -854,6 +860,58 @@ export class SalonesService {
         enDestino.set(claveFusion(l), l);
       }
 
+      // Las dos lecturas que necesita reescribir la presentación al mergear, en
+      // BLOQUE y fuera del bucle: una por línea sería un N+1 sostenido encima
+      // del lock de la fusión, que es peor que uno de lectura suelta.
+      // Solo se piden si hay algo que reescribir: si ninguna línea de destino
+      // muestra presentación, no se emite ninguna de las dos.
+      const itemsFusion = new Map<
+        string,
+        { tipo: string; unidadMedida: string | null }
+      >();
+      let catalogo: UnidadCat[] = [];
+      // Incluye las líneas de ORIGEN y no solo las de destino: una línea que no
+      // matchea se muda al destino (rama `else`) y puede recibir después otra de
+      // un origen posterior, así que ahí también hay presentación que reescribir.
+      const idsAResolver = [
+        ...new Set(
+          [...lineasOrigen, ...enDestino.values()]
+            .filter((l) => l.unidadCodigoPresentacion)
+            .map((l) => l.itemId),
+        ),
+      ];
+      if (idsAResolver.length) {
+        catalogo = await this.loadCatalogoUnidades();
+        const filas: {
+          item_id: string;
+          tipo: string;
+          unidad_medida: string | null;
+        }[] = await manager.query(
+          // `item_producto` NO tiene columna de borrado (verificado contra el
+          // esquema y contra la BD viva): filtrarla ahí es un error de sintaxis,
+          // no una precaución.
+          //
+          // Y el JOIN de `items` NO filtra `eliminado_el`, con el mismo
+          // argumento que ya usa `armarDetalles` unas líneas más abajo: estas
+          // líneas YA están en la cuenta, y si el ítem se borró del catálogo
+          // después, filtrarlo dejaría su presentación sin reescribir — o sea
+          // el bug de esta misma entrada, reaparecido justo en el caso más
+          // difícil de notar. La lectura sigue acotada al tenant por
+          // `i.tenant_id`.
+          `SELECT i.item_id, i.tipo, ip.unidad_medida
+             FROM items i
+             LEFT JOIN item_producto ip ON ip.item_id = i.item_id
+            WHERE i.item_id = ANY($1::uuid[]) AND i.tenant_id = $2`,
+          [idsAResolver, tenantId],
+        );
+        for (const f of filas) {
+          itemsFusion.set(f.item_id, {
+            tipo: f.tipo,
+            unidadMedida: f.unidad_medida,
+          });
+        }
+      }
+
       for (const origen of origenes) {
         for (const linea of porOrigen.get(origen.id) ?? []) {
           const existente = enDestino.get(claveFusion(linea));
@@ -864,6 +922,14 @@ export class SalonesService {
             existente.cantidadEnviada = new Decimal(existente.cantidadEnviada)
               .plus(linea.cantidadEnviada)
               .toString();
+            // Mismo criterio que el merge de `agregarLinea`: la presentación se
+            // reescribe en la unidad de la línea de DESTINO, que es la que
+            // queda en pantalla. `itemsFusion` ya trae todo lo necesario: acá
+            // adentro no puede haber una query por línea.
+            const itemFusion = itemsFusion.get(existente.itemId);
+            if (itemFusion) {
+              this.sincronizarPresentacion(existente, itemFusion, catalogo);
+            }
             await manager.save(CuentaLinea, existente);
             await manager.softDelete(CuentaLinea, {
               id: linea.id,
@@ -1511,6 +1577,42 @@ export class SalonesService {
       magnitud: u.magnitud,
       factorBase: u.factorBase,
     }));
+  }
+
+  /**
+   * Reescribe `cantidadPresentacion` de una línea cuya canónica acaba de
+   * cambiar, **en la unidad que esa línea ya venía mostrando**. Es la regla de
+   * merge del diseño de presentación: una línea en `g` con 500 que recibe 1 kg
+   * queda en 1500 g.
+   *
+   * No hace nada si la línea no tiene presentación (fila legada, o ítem que
+   * nunca la usó): ahí no hay "unidad visible" que respetar, y el detalle cae
+   * en el mismo camino de siempre.
+   *
+   * Si la conversión no se puede hacer o cae bajo la precisión de 4 decimales,
+   * **deja la presentación como estaba**. La razón es de UX y no de integridad:
+   * esto corre dentro de una transacción, así que lanzar haría rollback limpio y
+   * no dejaría nada a medio escribir. Lo que se evita es que una unidad fuera de
+   * catálogo o un cruce de magnitudes —estados en los que esa fila ya estaba mal
+   * antes de este merge— impidan agregar una línea o fusionar una mesa.
+   * ⚠️ **El precio es que el fallo es mudo**: queda una presentación vieja, que
+   * es el bug de esta misma entrada en miniatura. Se acepta a sabiendas; no hay
+   * logger en este service y meter uno sería introducir un patrón nuevo.
+   */
+  private sincronizarPresentacion(
+    linea: CuentaLinea,
+    item: { tipo: string; unidadMedida: string | null },
+    catalogo: UnidadCat[],
+  ): void {
+    if (!linea.unidadCodigoPresentacion) return;
+    const { unidadBaseCodigo } = resolverUnidadBaseDeItem(item);
+    const nueva = presentacionDesdeCanonica({
+      cantidadCanonica: linea.cantidad,
+      unidadCodigoPresentacion: linea.unidadCodigoPresentacion,
+      unidadBaseCodigo,
+      catalogo,
+    });
+    if (nueva !== null) linea.cantidadPresentacion = nueva;
   }
 
   private resolverCantidadLinea(params: {

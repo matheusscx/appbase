@@ -613,6 +613,48 @@ Los hallazgos que se cerraron. Los que quedan y lo refutado están en
   vez y se generalizó sin medir. Queda anotada porque el error no fue de código sino de
   método, y este archivo es el de lo medido.
 
+- [x] ~~**Al fusionar dos líneas del mismo ítem se suma `cantidad` pero no
+  `cantidadPresentacion`** (backend, `salones.service.ts`, ramas `match` de `agregarLinea`
+  y `existente` de `fusionarCuentas`) — agregar 200 g y después 300 g del mismo ítem deja
+  `cantidad = 0.5` (correcto, y el motor cobra sobre eso) pero `cantidadPresentacion`
+  sigue en "200 g". El ticket y la pantalla muestran 200 g de algo que se cobra como 500 g:
+  el monto es correcto, lo que miente es lo que ve el cliente.~~
+  **Cerrado el 2026-08-07.** La regla NO se inventó acá: ya estaba escrita en el spec de
+  diseño de presentación (2026-07-16) — *"sumar en canónica y **reescribir** presentación en
+  la unidad actualmente visible de esa línea"*. Se implementó eso: la presentación se
+  reescribe, nunca se suma, porque la línea puede mostrar `g` y lo que entra venir en `kg`.
+  **El frontend ya lo hacía bien**: `desdeCantidadCanonica` (`app/utils/cantidad-presentacion.ts`)
+  reescribe al incrementar desde siempre. El desalineado era el backend, que no tenía la
+  función inversa. Ahora existe (`presentacionDesdeCanonica`) y las dos se referencian
+  mutuamente en sus docblocks, como ya hacía `resolverUnidadBaseDeItem` con su gemela.
+  **Difieren a propósito en el fracaso:** el frontend lanza (carrito local, error visible al
+  instante); el backend devuelve `null` y deja la presentación como estaba. La razón es **de
+  UX, no de integridad**: esto corre dentro de una transacción, así que lanzar haría rollback
+  limpio y no dejaría nada a medio escribir. Lo que se evita es que una unidad fuera de
+  catálogo o un cruce de magnitudes —estados en los que esa fila ya estaba mal— impidan
+  agregar una línea o fusionar una mesa. El precio, asumido: **el fallo es mudo**, queda una
+  presentación vieja, que es el bug de esta misma entrada en miniatura.
+  (La primera versión de este párrafo decía que abortar "dejaría la venta sin cerrar". Era
+  falso —hay transacción— y lo corrigió la revisión.)
+  **El N+1 que la fusión invitaba, evitado y con test:** `fusionarCuentas` no tenía los
+  ítems a mano, y resolverlos por línea habría sido una query por línea **sosteniendo el
+  lock pesimista de la fusión**. Se resuelven en bloque antes del bucle, y solo si alguna
+  línea muestra presentación. Mutantes medidos: sacar la reescritura hace que los tests
+  fallen mostrando `"200"` —el síntoma literal de la entrada— en las dos puertas; y
+  **reemplazar** el batch por una query por línea hace fallar la aserción de "una sola
+  query" con 2.
+  ⚠️ Dos correcciones de la revisión, las dos por errores de método ya conocidos acá:
+  el primer mutante del N+1 **agregaba** una query en vez de revertir al N+1, y el fixture
+  tenía **un solo ítem** mergeando —con uno, una query por línea también da 1 y la aserción
+  no distingue nada—. El fixture tiene ahora dos ítems distintos.
+  Y el `SELECT` que resuelve los ítems **no ejecutaba**: filtraba `eliminado_el` en
+  `item_producto`, que no tiene esa columna. Habría roto la fusión entera con un 500
+  sosteniendo el lock, en cuanto una línea tuviera presentación. No lo vio el gate porque
+  el test mockea `manager.query` y **no hay ningún e2e de `fusionarCuentas`** (anotado en
+  `pendientes.md`). Verificado contra la BD viva antes y después del arreglo.
+  Nota sobre el texto tachado: dice `cantidad = 0.5`, pero la canónica va en la unidad base
+  del ítem (`g`), o sea **500**. Se conserva verbatim y se corrige acá.
+
 - [x] ~~**`grupos-modificadores` convive con un segundo índice único y la red nueva no los
   distingue** (backend, `grupos-modificadores.service.ts`) — `traducirColisionDeNombre`
   revalida **solo el nombre**, pero `uq_grupo_opcion_item_vivo` puede disparar en la misma
