@@ -237,15 +237,30 @@ function armarError(
  * queda rechazada **sin handler**, y Node ≥15 no devuelve un 500: **mata el
  * proceso** con `unhandledRejection`. Si hace falta trabajo intermedio, va antes
  * de crear la promesa.
+ *
+ * `soloConstraint` es para quien tiene **más de un índice único en la misma
+ * sentencia** (hoy solo `grupos-modificadores`: el del nombre del grupo y el de
+ * `grupo_modificador_id + item_id` de las opciones). Sin él, un 23505 del OTRO
+ * índice igual dispara `revalidar`, y si el nombre además está tomado por una
+ * tercera transacción el usuario recibe "Ya existe un grupo con el nombre…" —
+ * mandándolo a renombrar algo que no es la causa. Los otros 7 recursos no lo
+ * pasan y su comportamiento no cambia.
+ *
+ * Cuando el error no trae `constraint` se revalida igual: preferir el mensaje
+ * accionable a un 500, que es el comportamiento que ya tenían los 8.
  */
 export async function traducirColisionDeNombre<T>(
   escritura: Promise<T>,
   revalidar: () => Promise<void>,
+  opciones: { soloConstraint?: string } = {},
 ): Promise<T> {
   try {
     return await escritura;
   } catch (e) {
     if ((e as { code?: string }).code !== '23505') throw e;
+    const constraint = (e as { constraint?: string }).constraint;
+    const { soloConstraint } = opciones;
+    if (soloConstraint && constraint && constraint !== soloConstraint) throw e;
     await revalidar();
     throw e;
   }

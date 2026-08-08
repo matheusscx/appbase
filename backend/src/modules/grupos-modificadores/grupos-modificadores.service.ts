@@ -536,15 +536,44 @@ export class GruposModificadoresService {
 
       return (await this.cargarGrupo(manager, tenantId, grupoId))!;
     });
-    return traducirColisionDeNombre(escritura, async () => {
-      if (dto.nombre !== undefined) {
-        await this.assertNombreLibre(
-          this.dataSource.manager,
-          tenantId,
-          dto.nombre,
-          grupoId,
+    // DOS índices únicos pueden saltar en esta transacción, y hay que
+    // distinguirlos —igual que ya hace `restaurar()`—:
+    //
+    //   `uq_grupo_modificador_nombre_vivo`  el nombre del grupo
+    //   `uq_grupo_opcion_item_vivo`         (grupo_modificador_id, item_id)
+    //
+    // El segundo es alcanzable acá y no en `create()`: las opciones vivas se
+    // leen SIN lock (`opcionIdPorItem`, arriba) y después se insertan, así que
+    // dos updates que agregan el mismo item al mismo grupo pasan los dos por el
+    // `else` y el índice frena al segundo. En `create()` el grupo recién nace,
+    // así que nadie más puede tener una opción bajo ese `grupo_modificador_id`.
+    //
+    // Sin discriminar, ese choque tenía dos finales y ninguno servía: 500 si el
+    // nombre estaba libre, y "Ya existe un grupo con el nombre…" si además otra
+    // transacción lo había tomado — mandando a renombrar algo que no es la causa.
+    return traducirColisionDeNombre(
+      escritura,
+      async () => {
+        if (dto.nombre !== undefined) {
+          await this.assertNombreLibre(
+            this.dataSource.manager,
+            tenantId,
+            dto.nombre,
+            grupoId,
+          );
+        }
+      },
+      { soloConstraint: 'uq_grupo_modificador_nombre_vivo' },
+    ).catch((e: unknown) => {
+      if (
+        (e as { constraint?: string }).constraint ===
+        'uq_grupo_opcion_item_vivo'
+      ) {
+        throw new BadRequestException(
+          'Ya existe una opción viva con ese item en este grupo. Revisá las opciones del grupo antes de reintentar.',
         );
       }
+      throw e;
     });
   }
 

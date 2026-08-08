@@ -622,6 +622,37 @@ excepción, y el test ya no distingue "corrió el chequeo de tenant" de "el lock
 vacío". Un default de harness apaga como red incidental **todos** los `if (!rows.length)`
 del service (cinco, en ese archivo).
 
+### ❌ Rotular "medido" algo que no se midió
+
+La familia de arriba trata mutantes que mueren mal. Esta es la anterior en la cadena:
+**la medición que nunca ocurrió y aun así se escribió como hecho.** Dos casos reales del
+mismo día (ago-2026), los dos cazados por la revisión independiente y ninguno por el gate:
+
+1. **Conclusión sacada de un experimento con dos variables cambiadas a la vez.** Un test
+   de página fallaba; cambié el método de click *y* una opción de montaje, funcionó, y le
+   atribuí el resultado al click. De ahí salió una regla general —"un `click()` nativo no
+   dispara el handler de Vue sobre nodos teletransportados"— que era **falsa**, y que
+   además contradecía a un spec del propio repo que venía haciendo exactamente eso.
+2. **Celda de una tabla completada de memoria porque el script murió antes de imprimirla.**
+   El probe crasheó con `RangeError` armando la línea de log del último caso; puse el
+   resultado "obvio" en la tabla. El validador hacía lo contrario.
+
+Por qué importa más que un comentario equivocado: en este repo esas afirmaciones migran.
+`pendientes.md` se copia a `resueltos.md` al cerrar, y `resueltos.md` es **el archivo de lo
+medido**; una regla falsa archivada ahí dirige mal el trabajo siguiente y pisa la
+advertencia verdadera —y más angosta— que ya existía.
+
+**Las tres reglas, en orden de lo barato que sale aplicarlas:**
+
+- Una variable por experimento. Si cambiaste dos cosas y funcionó, todavía no sabés cuál.
+- Si el script murió, la corrida **no vale**: ninguna línea, ni las que alcanzó a imprimir
+  antes. Arreglar el script y correrlo de nuevo cuesta menos que el bloqueo.
+- Antes de escribir una regla general, buscar el contraejemplo **dentro del repo**. En el
+  caso 1 estaba a un `grep` de distancia.
+
+Y cuando la afirmación falsa ya circuló: **anotarla como refutada, no borrarla en
+silencio** — el lector que la vio necesita el desmentido, no un hueco.
+
 ### ❌ Cambiar un vocabulario compartido y actualizar solo los consumidores del módulo que tenés delante
 
 Un valor de un enum, un motivo del kardex, un estado: viven en **más lugares que su

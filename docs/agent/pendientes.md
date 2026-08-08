@@ -600,14 +600,6 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   commitean. Ya no es catastrófico (la línea se muestra marcada, el cobro corta con un 400
   que la nombra y la comanda la incluye), pero el estado se sigue produciendo hacia
   adelante, no solo en datos viejos.
-- [ ] **`grupos-modificadores` convive con un segundo índice único y la red nueva no los
-  distingue** (backend, `grupos-modificadores.service.ts`) — `traducirColisionDeNombre`
-  revalida **solo el nombre**, pero `uq_grupo_opcion_item_vivo` puede disparar en la misma
-  transacción de `create`/`update`. En una doble carrera (uno toma el nombre, otro inserta
-  una opción con el mismo `item_id`) el error diría "Ya existe un grupo con el nombre…",
-  mandando a renombrar algo que no es la causa. Nunca es peor que el 500 previo, pero el
-  propio archivo ya discrimina por `constraint` en `restaurar()`, y `caja.service.ts`
-  también: la red nueva introdujo un patrón distinto justo donde había uno.
 
 ### Decisión de owner (pendiente de implementar)
 

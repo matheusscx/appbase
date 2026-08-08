@@ -201,5 +201,62 @@ describe('nombre-sugerido.util', () => {
         ),
       ).rejects.toThrow('db caída');
     });
+
+    // `soloConstraint` — para quien tiene dos índices únicos en la misma
+    // sentencia. Lo usa `grupos-modificadores`; los otros 7 no lo pasan.
+    describe('soloConstraint', () => {
+      const err = (constraint?: string) =>
+        Object.assign(new Error('duplicate key'), {
+          code: '23505',
+          constraint,
+        });
+
+      it('un 23505 de OTRO índice no pasa por revalidar', async () => {
+        // Lo que se evita: que el error del índice de opciones salga con el
+        // mensaje "Ya existe un grupo con el nombre…" solo porque una tercera
+        // transacción tomó el nombre en el medio.
+        const revalidar = jest.fn();
+        await expect(
+          traducirColisionDeNombre(
+            Promise.reject(err('uq_grupo_opcion_item_vivo')),
+            revalidar,
+            { soloConstraint: 'uq_grupo_modificador_nombre_vivo' },
+          ),
+        ).rejects.toThrow('duplicate key');
+        expect(revalidar).not.toHaveBeenCalled();
+      });
+
+      it('el índice nombrado sí revalida', async () => {
+        await expect(
+          traducirColisionDeNombre(
+            Promise.reject(err('uq_grupo_modificador_nombre_vivo')),
+            () => Promise.reject(new BadRequestException('Ya existe un grupo')),
+            { soloConstraint: 'uq_grupo_modificador_nombre_vivo' },
+          ),
+        ).rejects.toThrow('Ya existe un grupo');
+      });
+
+      it('sin `constraint` en el error se revalida igual, no se degrada a 500', async () => {
+        // Preferir el mensaje accionable a un 500 es el comportamiento que ya
+        // tenían los 8; el filtro nuevo no puede empeorarlo cuando el driver no
+        // informa el índice.
+        await expect(
+          traducirColisionDeNombre(
+            Promise.reject(err()),
+            () => Promise.reject(new BadRequestException('Ya existe un grupo')),
+            { soloConstraint: 'uq_grupo_modificador_nombre_vivo' },
+          ),
+        ).rejects.toThrow('Ya existe un grupo');
+      });
+
+      it('sin la opción, el filtro no se aplica (los otros 7 no cambian)', async () => {
+        await expect(
+          traducirColisionDeNombre(
+            Promise.reject(err('uq_cualquier_otro_indice')),
+            () => Promise.reject(new BadRequestException('Ya existe un turno')),
+          ),
+        ).rejects.toThrow('Ya existe un turno');
+      });
+    });
   });
 });

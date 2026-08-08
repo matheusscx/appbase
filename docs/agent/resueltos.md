@@ -613,6 +613,33 @@ Los hallazgos que se cerraron. Los que quedan y lo refutado están en
   vez y se generalizó sin medir. Queda anotada porque el error no fue de código sino de
   método, y este archivo es el de lo medido.
 
+- [x] ~~**`grupos-modificadores` convive con un segundo índice único y la red nueva no los
+  distingue** (backend, `grupos-modificadores.service.ts`) — `traducirColisionDeNombre`
+  revalida **solo el nombre**, pero `uq_grupo_opcion_item_vivo` puede disparar en la misma
+  transacción de `create`/`update`. En una doble carrera (uno toma el nombre, otro inserta
+  una opción con el mismo `item_id`) el error diría "Ya existe un grupo con el nombre…",
+  mandando a renombrar algo que no es la causa. Nunca es peor que el 500 previo, pero el
+  propio archivo ya discrimina por `constraint` en `restaurar()`, y `caja.service.ts`
+  también: la red nueva introdujo un patrón distinto justo donde había uno.~~
+  **Cerrado el 2026-08-07.** El fix es exactamente ese punto: replicar la discriminación por
+  `constraint` que `restaurar()` ya hacía, en vez de dejar dos patrones distintos en el
+  mismo archivo.
+  **Matiz sobre la entrada, razonando sobre el código (no medido con dos clientes reales):**
+  la doble carrera que describe necesita **tres** transacciones —una toma el nombre, otra
+  inserta la opción, la nuestra pierde contra las dos—, mientras que con el nombre libre
+  alcanzan **dos**: ahí `revalidar` no lanzaba y el 23505 se relanzaba tal cual, o sea un
+  **500**. El fix cubre los dos caminos; cuál ocurre más seguido en producción no lo sé.
+  **Dónde va la distinción, medido y no asumido:** solo en `update()`. Ahí las opciones
+  vivas se leen **sin lock** y después se insertan, así que dos updates que agregan el mismo
+  item al mismo grupo pasan los dos por el `INSERT`. En `create()` es **inalcanzable**: el
+  grupo recién nace y nadie más puede tener una opción bajo ese `grupo_modificador_id`; un
+  duplicado dentro del mismo request lo corta antes la validación del service. Ponerlo
+  también ahí habría sido código muerto con cara de red.
+  `traducirColisionDeNombre` ganó un `soloConstraint` opcional; los otros 7 recursos no lo
+  pasan y **su conducta no cambia**, con test propio que lo fija. Mutante medido: quitar la
+  distinción hace que el test del service falle mostrando el mensaje real del bug —
+  `"Ya existe un grupo con el nombre \"Bebida\""`— en vez del de la opción.
+
 - [x] ~~**Seis mecánicas de contrato y concurrencia**~~ (backend, cerradas 2026-08-07).
   Ninguna necesitaba decisión: se agruparon por eso.
   - **El signo de propina se validaba en uno de tres.** `propinaMonto` cortaba con 400 pero

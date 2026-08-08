@@ -161,6 +161,20 @@ tipo permitido → familia `vendible`).
 Índice único parcial: `(grupo_modificador_id, item_id) WHERE eliminado_el IS NULL`
 — un item no puede aparecer dos veces como opción del mismo grupo vivo.
 
+⚠️ **Es el segundo índice único del módulo, y hay que distinguirlo del otro por
+`constraint`, nunca por el código `23505` a secas.** Conviven en la misma
+transacción: `uq_grupo_modificador_nombre_vivo` (el nombre del grupo) y este.
+Confundirlos manda al usuario a renombrar el grupo cuando la causa real es una
+opción — y renombrar no la resuelve. `restaurar()` ya lo hacía; desde el
+2026-08-07 también `update()`, que es donde el choque se produce hacia adelante:
+las opciones vivas se leen **sin lock** y después se insertan, así que dos
+updates que agregan el mismo item al mismo grupo pasan los dos por el `INSERT`.
+Un duplicado dentro de un mismo request no llega hasta acá — lo corta antes la
+validación del propio service.
+
+`create()` **no** necesita la distinción: el grupo recién nace, así que nadie más
+puede tener una opción bajo ese `grupo_modificador_id`.
+
 ### `item_grupos_modificadores`
 
 | Column | Type | Notes |
@@ -407,6 +421,12 @@ Response (201):
   `item_grupo_modificador_opciones` — así una edición no huérfana overrides
   existentes de otras recetas. Ver `docs/patterns/backend.md` §14). Reusa la
   misma validación de homogeneidad que `create`.
+  Dos `400` distintos según **qué** índice único chocó, nunca según el `23505` a
+  secas: *"Ya existe un grupo con el nombre…"* y *"Ya existe una opción viva con
+  ese item en este grupo…"*. **Ninguno de los dos trae `nombreSugerido`** — la
+  sugerencia hoy la calcula solo `restaurar()` (`grupos-modificadores.service.ts`
+  → `errorDeColisionNombreSQL`), así que no hay contra qué armar acá el modal de
+  renombrado. Ver "Modelo de datos → `grupo_modificador_opciones`".
 - `DELETE /grupos-modificadores/:id` — `400` si el grupo está asociado a algún
   item vivo (`item_grupos_modificadores`).
 - `GET /grupos-modificadores/:id/items` — drawer de recetas: cada asociación

@@ -202,6 +202,60 @@ describe('GruposModificadoresService', () => {
   });
 
   describe('update/remove grupo', () => {
+    // Las opciones vivas se leen SIN lock y después se insertan, así que dos
+    // updates que agregan el mismo item al mismo grupo pasan los dos por el
+    // INSERT y el índice frena al segundo. Ese 23505 NO es de nombre, y
+    // renombrar el grupo no lo resuelve.
+    it('un 23505 del índice de OPCIONES no se disfraza de nombre repetido', async () => {
+      // `revalidar` corre FUERA de la transacción y usa `this.dataSource.manager`,
+      // que el harness no define. Sin esta línea el mutante moriría con
+      // `Cannot read properties of undefined (reading 'query')` en vez de por la
+      // aserción — el falso verde que documenta `anti-patterns.md`.
+      // Va local y no en el `beforeEach` por la regla del mismo archivo (un
+      // default de harness apaga redes incidentales en TODOS los tests); acá no
+      // medí que apague ninguna, pero el test que lo necesita es uno solo.
+      (dataSourceMock as unknown as { manager: unknown }).manager = managerMock;
+      managerMock.query
+        .mockResolvedValueOnce([
+          { grupo_modificador_id: 'G1', nombre: 'Bebida' },
+        ]) // SELECT grupo vivo (nombre igual → no se toca el nombre acá)
+        .mockResolvedValueOnce([]) // SELECT opciones vivas → ninguna, la entrante va por INSERT
+        .mockResolvedValueOnce([
+          {
+            tipo: 'producto',
+            nombre: 'Coca',
+            modo_inventario: 'cantidad',
+            unidad_medida: 'unidad',
+          },
+        ]) // item lookup
+        .mockRejectedValueOnce(
+          Object.assign(new Error('duplicate key'), {
+            code: '23505',
+            constraint: 'uq_grupo_opcion_item_vivo',
+          }),
+        ) // INSERT opción: perdió la carrera contra otra transacción
+        // ⚠️ La segunda mitad de la doble carrera: si `revalidar` llegara a
+        // correr, encontraría el nombre TOMADO por una tercera transacción y
+        // saldría "Ya existe un grupo con el nombre…". Es exactamente la
+        // salida equivocada que este test fija que no ocurre.
+        .mockResolvedValueOnce([{ grupo_modificador_id: 'OTRO' }]);
+
+      const error: unknown = await service
+        .update(TENANT_ID, 'G1', {
+          nombre: 'Bebida',
+          opciones: [{ itemId: ITEM_PROD, cantidad: '1', precioExtra: '800' }],
+        })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      const mensaje = JSON.stringify(
+        (error as BadRequestException).getResponse(),
+      );
+      // Ancla positiva y negativa: dice lo que pasó, y NO manda a renombrar.
+      expect(mensaje).toContain('opción viva');
+      expect(mensaje).not.toContain('nombre');
+    });
+
     it('reemplaza opciones manteniendo la familia y devuelve shape completo (itemsUsandoCount + stock)', async () => {
       // Upsert-preservando (Task 2): sin opciones vivas previas, la opción
       // entrante es nueva → INSERT (no hay reemplazo-total con delete-all).
