@@ -10,6 +10,11 @@ de jul-2026 se explican solas desde este archivo— sin competir con lo que falt
 Agrupadas por su procedencia en `pendientes.md`. El texto se muda **verbatim**: si una
 entrada afirma algo que después resultó falso, se corrige donde se descubre, no acá.
 
+Corolario de "verbatim": las **citas de línea de una entrada mudada quedan como estaban**,
+aunque el propio cierre las haya corrido — describen el código en el momento en que se
+midió el problema, que es lo que este archivo registra. En `pendientes.md`, que es texto
+vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige o se saca.
+
 ---
 
 ## Lo que está en pausa no se aplica ni se ofrece (2026-08-03)
@@ -3137,3 +3142,146 @@ siguen diferidos están en `pendientes.md`.
   recargo o impuesto desactivado sigue aplicándose" (`pendientes.md`, auditoría
   `items` + `calculo-precios`), que esperaba esta decisión antes de poder
   encararse — ver esa entrada para el detalle de lo que sí quedó abierto ahí.
+
+
+---
+
+## Ronda de decisiones del owner (2026-08-07)
+
+Las tres salieron de la misma tanda: el owner eligió **advertir** en las dos de garzones y
+dio el OK para tocar `propinas`. El texto de cada entrada se muda verbatim; lo que la
+entrada afirmaba **de más o de menos** se anota en su bloque de cierre.
+
+- [x] **Los tres DTO de liquidación de propinas aceptan fechas que no existen, y el período
+  se corre en silencio** (backend, `propinas/dto/{liquidar,create-liquidacion,preview-liquidacion}.dto.ts`)
+  — usan `@IsISO8601()` sin `strict: true`, que valida la FORMA y no el calendario.
+  Medido con `validateSync` + `new Date`:
+
+  | valor | `@IsISO8601()` | con `strict: true` | `new Date(valor)` |
+  |---|---|---|---|
+  | `2026-02-31` | acepta | rechaza | **2026-03-03** |
+  | `2026-04-31` | acepta | rechaza | **2026-05-01** |
+
+  El hueco es **exactamente el día que se pasa de mes**: un mes fuera de rango
+  (`2026-13-01`) el laxo ya lo rechaza, así que nunca llega a `new Date`.
+  Y lo grave no es un error sino el **rollover silencioso**:
+  `liquidacion-propinas.service.ts:157` hace `new Date(dto.fechaDesde)` y JS convierte el 31
+  de febrero en el 3 de marzo sin avisar. La fecha corrida **llega hasta el SQL** —viaja como
+  `$2`/`$3` en el `vp.creado_el >= $2 AND vp.creado_el < $3` de `buscarTipsElegibles`
+  (`:1125-1155`)— y además **queda persistida** en la fila de la liquidación (`:814`). La
+  guarda `fechaHasta <= fechaDesde` (`:159`) no corta: compara dos `Date` ya corridos.
+  Es plata, y no falla: liquida sobre un período distinto al pedido.
+  Son **dos** puntos de entrada, no uno: `crear()` (`:157`) y el camino de confirmar
+  (`:578-609`), que repite el mismo `new Date` con la misma guarda.
+  El arreglo es una palabra (`{ strict: true }`) en seis decoradores. Sale de la revisión
+  del cierre del 2026-08-07, al endurecer el DTO gemelo de `turnos` — **queda fuera de ese
+  diff porque toca otro módulo**, no porque sea menor.
+  **Cómo se cerró (2026-08-07).** Los seis `@IsISO8601({ strict: true })`, más un
+  normalizador `rangoLiquidacionDesde` (`propinas/utils/rango-liquidacion.ts`) en los
+  **tres** puntos donde se construye el `Date`: `crear()`, `liquidar()` y el `preview` del
+  controller — la entrada contaba dos y el del controller (`:45-46`) hacía el mismo
+  `new Date` sin ninguna guarda.
+  ⚠️ **"El arreglo es una palabra en seis decoradores" era incompleto, y se midió.** `strict`
+  cierra el rollover, pero **no** cierra `2026-W32-1` ni `20260807`: son ISO 8601 legítimas,
+  así que las acepta, y `new Date` devuelve `Invalid Date`. Ahí la guarda de orden tampoco
+  ayuda —compara `NaN <= NaN`, que es siempre `false`—, así que el `Date` inválido llegaba a
+  la query. Medido contra el Postgres del compose: `invalid input syntax for type timestamp
+  with time zone: "0NaN-NaN-NaNTNaN:NaN:NaN.NaN+NaN:NaN"`, o sea un **500**. Son dos modos de
+  falla distintos —el rollover corrompe en silencio, la ilegible revienta— y el decorador
+  solo tapa el primero.
+  **Lo que NO se copió de `turnos`:** el `@Matches(/^\d{4}-\d{2}-\d{2}$/)` que allá era
+  obligatorio (el SQL hace `::date`). Acá el service hace `new Date`, así que un timestamp
+  completo es un límite de período legítimo y el regex habría roto a quien mande hora. Hay un
+  test que lo fija.
+  **Lo que fija cada cosa:** revertir `strict` en un solo DTO mata sus 3 casos de calendario y
+  deja vivos los de los otros dos; sacar el chequeo de `Invalid Date` mata los 2 de
+  `2026-W32-1`/`20260807`; y revertir `crear()` al `new Date` inline mata su test de cableado
+  sin tocar el de `liquidar()`. Hay además un test que afirma el **hueco** —que el decorador
+  acepta `2026-W32-1`— para que, si algún día `strict` empieza a rechazarlo, la defensa se
+  mueva en vez de desaparecer.
+  **Refutado de la propia entrada:** decía que el hueco era "exactamente el día que se pasa de
+  mes". No: `2026-02-29` (año no bisiesto) también rueda, y `2028-02-29` —bisiesto real— tiene
+  que seguir pasando. Los dos están en el spec.
+  ⚠️ **`query-propina-reporte.dto.ts` NO se tocó, a propósito:** usa `@Matches` solo, la misma
+  forma que causó la regresión en `turnos`, pero `normalizarRangoReporte` ya hace el
+  round-trip `toISOString().slice(0,10) !== dto.desde`, que mata la fecha corrida con un 400.
+  Está protegido **por conducta, no por decorador**. Grepear el mecanismo habría "arreglado"
+  algo que ya funcionaba.
+- [x] **`garzones.actualizar()` deja cambiar el `tipo` con una sesión abierta, sin avisar**
+  (backend, `garzones.service.ts:139` — el gate que sí existe está en `:134-136`, y solo
+  mira `activo`) — **la mitad `activo` de esta entrada se cerró el
+  2026-08-07** (más arriba en este mismo archivo); esta es la mitad que sigue abierta
+  porque **es decisión de producto, no mecánica**. `sesion_garzon.tipo_garzon` se congela al
+  abrir la sesión, así que cambiar `garzones.tipo` a mitad de turno no corrompe el reparto
+  —`assertGarzonEnUnSoloGrupo` corta la liquidación con un 400 accionable— pero el admin no
+  se entera hasta ese momento. Lo que falta decidir es **qué hacer en el momento de editar**:
+  bloquear como hace `activo`, o solo advertir. No es simétrico con `activo`: desactivar
+  rompe la operación del garzón ahora mismo; cambiarle el tipo, no.
+  **Decisión del owner (2026-08-07): advertir, no bloquear.** Bloquear obligaría a cerrar el
+  turno para corregir un tipo mal cargado, y el cambio no rompe nada mientras el turno corre.
+  **Cómo se cerró:** `actualizar()` devuelve `advertencias: string[]` —la forma que ya usan
+  `ventas` e `items`, no el `{titulo, detalle}` que es exclusivo del motor de precios— con el
+  aviso de que el reparto de ese turno sigue usando el tipo congelado y de que el cambio rige
+  desde la próxima sesión. El mensaje nombra **los dos** tipos: sin el anterior, el admin no
+  sabe qué se sigue usando. La pantalla lo emite como toast `warning` **después** del de
+  éxito, porque el cambio sí se guardó.
+  **El caso que no estaba en la entrada:** los formularios mandan el objeto entero, así que
+  `tipo` viene aunque nadie lo haya tocado. Sin comparar contra el tipo actual, cada cambio de
+  nombre con un turno abierto habría disparado una advertencia falsa —y una consulta de
+  sesiones al pedo. Hay un test que lo fija, y el mutante que saca la comparación lo mata.
+  **Lo que trajo la revisión independiente:** (a) el mensaje decía solo que el cambio "rige
+  desde la próxima sesión", que suena inocuo — ahora nombra la consecuencia cara: si la
+  persona genera propinas con los dos tipos en un mismo período, la **regla 2b** corta la
+  liquidación de ese período con un 400 hasta partirlo en dos; (b) un `PATCH` que desactiva
+  **y** cambia el tipo corría la misma consulta de sesiones dos veces, porque el formulario
+  manda el objeto entero. Ahora el conteo se hace una sola vez y `assertSinSesionAbierta`
+  lo recibe ya hecho. Test propio, con mutante que revierte a las dos consultas.
+- [x] **`regenerarPin()` invalida el PIN sin avisar que hay una sesión abierta** (backend,
+  `garzones.service.ts:147-153`) — misma familia que la anterior por otra puerta. El PIN
+  viejo deja de funcionar de inmediato (documentado y deliberado), pero si el garzón está
+  en turno no puede marcar salida ni operar hasta que alguien le pase el nuevo. Es una
+  acción de seguridad rutinaria (PIN comprometido) con un efecto que nadie anticipa.
+  **Decisión del owner (2026-08-07): advertir, no bloquear.** Rotar una credencial es la
+  respuesta correcta a una filtración; trabarla porque hay un turno abierto sería la política
+  al revés.
+  **Cómo se cerró:** `regenerarPin()` devuelve `advertencias` igual que `actualizar()`, y la
+  pantalla las muestra **dentro del modal que revela el PIN**, no como toast: el modal tapa la
+  pantalla, el admin está mirando el PIN que tiene que entregar, y de eso habla el aviso. Un
+  toast detrás del modal se pierde. Hay un test que afirma esa ubicación y que el aviso **no**
+  se duplica como toast.
+  **Efecto lateral atendido:** `crear()` también devuelve `GarzonConPin`, así que manda
+  `advertencias: []`. Un garzón recién creado no puede tener sesión abierta, pero el array va
+  igual para que el que consume no tenga que distinguir este endpoint de los otros.
+  ⚠️ **Lo que costó de verdad fue el test de la pantalla, y no por el código de producción.**
+  Los dos casos que pasan por el drawer dejaban `vitest run` en **exit 1** con 4
+  *unhandled rejections* —2 por cada test que cierra el drawer, y los 13 igual "pasaban"— porque **cerrar** un `UDrawer` real bajo
+  happy-dom hace que la transición de salida de `usePresence` (reka-ui) lea `style.display`
+  de un nodo ya desprendido. Aislado con una variable: abrir el drawer y desmontar sale
+  limpio; abrir, guardar —que hace `drawerOpen = false`— y desmontar da 2 rejections. La
+  salida fue stubear `AppDrawer` en el `global.stubs` del propio mount, el mismo recurso que
+  `components/AppDrawer.spec.ts` usa un nivel más abajo con `UDrawer`
+  (`docs/patterns/frontend.md` §15).
+  ⚠️ **Primero lo resolví con `mockComponent` y lo justifiqué diciendo que `global.stubs` no
+  intercepta auto-imports. Es falso, y lo midió la cuarta revisión:** `global.stubs` sí los
+  intercepta bajo `mountSuspended`, tanto `AppDrawer` (directo) como `UDrawer` (anidado). O
+  sea que había elegido la herramienta de alcance de ARCHIVO —capaz de stubear el drawer de
+  otros `describe` en silencio— por una limitación inventada. Quedó en `global.stubs`,
+  acotado al mount. Lo otro que salió de ahí: el botón es
+  `type="submit" form="garzon-form"`, y esa asociación por id la resuelve el **documento**,
+  así que ese montaje necesita `attachTo: document.body` —con el `UDrawer` real no se notaba
+  porque teletransporta al body—. Sin `attachTo` el submit no dispara y los dos tests mueren.
+  ⚠️ **Acá me equivoqué y lo dejo anotado, no borrado.** Cuando los tests fallaban con la
+  lista de toasts vacía cambié **dos cosas a la vez** —`trigger('click')` por `.click()`
+  nativo, y después `attachTo`— y le atribuí el arreglo al click. Es falso: medido, con
+  `trigger('click')` los 13 pasan igual y el mutante que saca el toast de éxito sigue
+  matando los dos tests del drawer, o sea que el submit corre por los dos caminos. Lo único
+  que hacía falta era `attachTo`. Lo cazó la segunda ronda de revisión independiente —el
+  **mismo error, con las mismas dos variables**, que el caso 1 de
+  `anti-patterns.md` → *"Rotular «medido» algo que no se midió"* (método de click + opción
+  de montaje, atribuido al click). Esa entrada la agregó `f3f65c1c`, dos commits antes.
+  O sea: la regla ya estaba escrita, y aun así se repitió — lo que la vuelve a cazar es la
+  revisión independiente, no el recuerdo de haberla escrito. Que el stub no vuelva el test vacuo lo prueba el mutante que
+  saca el toast de éxito de `guardar()`: mata los dos casos del drawer.
+  ⚠️ **Y lo caro de la tanda: yo di el gate del frontend por verde grepeando la línea
+  `Tests 619 passed` sin mirar el exit code.** Lo cazó la revisión independiente, no el
+  gate. `npm test` puede terminar en 1 con todos los tests en verde.

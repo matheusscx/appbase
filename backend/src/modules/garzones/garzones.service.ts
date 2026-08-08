@@ -37,10 +37,25 @@ export interface GarzonPublico {
 }
 
 /**
+ * Respuesta de una mutación que puede tener un efecto que el admin no
+ * anticipa. `advertencias` viene siempre —vacío si no hay nada que decir—,
+ * igual que en ventas e items: el que consume no tiene que distinguir entre
+ * "sin advertencias" y "el endpoint no las manda".
+ *
+ * Decisión del owner (2026-08-07): estos dos casos **advierten, no bloquean**.
+ * Ninguno rompe la operación en el momento —a diferencia de desactivar o
+ * eliminar, que sí bloquean— pero los dos tienen una consecuencia que aparece
+ * más tarde y en otra pantalla.
+ */
+export interface GarzonConAdvertencias extends GarzonPublico {
+  advertencias: string[];
+}
+
+/**
  * Respuesta de creación / regeneración: incluye el PIN en claro **una sola
  * vez**. No se persiste en claro ni se puede volver a leer (solo queda el hash).
  */
-export interface GarzonConPin extends GarzonPublico {
+export interface GarzonConPin extends GarzonConAdvertencias {
   pin: string;
 }
 
@@ -115,41 +130,91 @@ export class GarzonesService {
       tipo: dto.tipo ?? TipoGarzon.GARZON,
     });
     const guardado = await this.garzonRepo.save(garzon);
-    return { ...this.toPublico(guardado), pin };
+    // Un garzón recién creado no puede tener sesión abierta: el array va vacío
+    // para que el que consume no tenga que distinguir este endpoint de los otros.
+    return { ...this.toPublico(guardado), pin, advertencias: [] };
   }
 
   async actualizar(
     tenantId: string,
     id: string,
     dto: UpdateGarzonDto,
-  ): Promise<GarzonPublico> {
+  ): Promise<GarzonConAdvertencias> {
     const garzon = await this.getOrThrow(tenantId, id);
+    const tipoAnterior = garzon.tipo ?? TipoGarzon.GARZON;
+    // Desactivar corta; cambiar el tipo advierte. Los dos preguntan lo mismo, así
+    // que la consulta se hace UNA vez: un PATCH del formulario manda el objeto
+    // entero, con lo cual las dos condiciones pueden darse en el mismo request.
+    const desactiva = dto.activo === false && garzon.activo;
+    const cambiaTipo = dto.tipo !== undefined && dto.tipo !== tipoAnterior;
+    const sesionesAbiertas =
+      desactiva || cambiaTipo
+        ? await this.contarSesionesAbiertas(tenantId, id)
+        : 0;
+
     // Mismo chequeo que `eliminar()`, que ya lo tenía: desactivar a alguien con
     // sesión abierta lo deja sin poder cerrarla ni operar —`resolverGarzonPorPin`
     // filtra `activo: true`— y su sesión queda abierta con `fin_el = null` hasta
     // que un admin la fuerce. Mientras tanto el turno tampoco se puede desactivar.
-    // El cambio de `tipo` con sesión abierta NO se bloquea acá: qué hacer con eso
-    // es decisión de producto (no corrompe el reparto, pero el admin no se entera
-    // hasta la liquidación).
-    if (dto.activo === false && garzon.activo) {
-      await this.assertSinSesionAbierta(tenantId, id, 'desactivar');
+    if (desactiva) {
+      this.assertSinSesionAbierta(sesionesAbiertas, 'desactivar');
     }
+
+    // El cambio de `tipo` advierte en vez de bloquear (decisión del owner,
+    // 2026-08-07). No es simétrico con desactivar: desactivar rompe la operación
+    // del garzón AHORA, mientras que el tipo no rompe nada en el turno en curso
+    // —`sesiones-garzon.service.ts` copia `garzon.tipo` a `sesion_garzon` al
+    // abrir, así que el reparto usa el congelado— pero deja al admin sin saber
+    // que su cambio no rige hasta el turno siguiente. Bloquear obligaría a
+    // cerrar el turno para corregir un tipo mal cargado.
+    const advertencias: string[] = [];
+    if (cambiaTipo && sesionesAbiertas > 0) {
+      // La segunda frase NO es adorno: si la persona genera propinas con los dos
+      // tipos dentro de un mismo período, `assertGarzonEnUnSoloGrupo` corta la
+      // liquidación entera con un 400 hasta que alguien parta el período. Sin
+      // decirlo, el aviso suena inocuo y el admin no se entera de que acaba de
+      // programar ese bloqueo.
+      advertencias.push(
+        `${garzon.nombre} tiene una sesión abierta: el reparto de propinas de ese turno ` +
+          `sigue usando el tipo con el que la abrió (${tipoAnterior}), y el cambio a ` +
+          `${dto.tipo} rige desde la próxima sesión. Si genera propinas con los dos tipos ` +
+          `en un mismo período, la liquidación de ese período no va a poder cerrarse hasta ` +
+          `partirlo en dos.`,
+      );
+    }
+
     if (dto.nombre !== undefined) garzon.nombre = dto.nombre;
     if (dto.activo !== undefined) garzon.activo = dto.activo;
     if (dto.tipo !== undefined) garzon.tipo = dto.tipo;
-    return this.toPublico(await this.garzonRepo.save(garzon));
+    return {
+      ...this.toPublico(await this.garzonRepo.save(garzon)),
+      advertencias,
+    };
   }
 
   /**
    * Genera un PIN nuevo para el garzón y lo devuelve **una sola vez**. El PIN
    * anterior deja de funcionar de inmediato (se reemplaza el hash).
+   *
+   * Con sesión abierta **advierte, no bloquea** (decisión del owner,
+   * 2026-08-07): rotar una credencial es la respuesta correcta a una filtración,
+   * y trabarla porque hay un turno abierto sería la política al revés. Lo que sí
+   * hace falta es que el admin vea en el momento que el garzón queda sin poder
+   * marcar salida ni operar hasta recibir el PIN nuevo.
    */
   async regenerarPin(tenantId: string, id: string): Promise<GarzonConPin> {
     const garzon = await this.getOrThrow(tenantId, id);
+    const advertencias: string[] = [];
+    if ((await this.contarSesionesAbiertas(tenantId, id)) > 0) {
+      advertencias.push(
+        `${garzon.nombre} está en turno: el PIN anterior deja de funcionar ya mismo, ` +
+          `así que no va a poder operar ni marcar salida hasta que reciba el nuevo.`,
+      );
+    }
     const pin = await this.generarPinUnico(tenantId, id);
     garzon.pinHash = await bcrypt.hash(pin, BCRYPT_COST);
     const guardado = await this.garzonRepo.save(garzon);
-    return { ...this.toPublico(guardado), pin };
+    return { ...this.toPublico(guardado), pin, advertencias };
   }
 
   async eliminar(
@@ -158,7 +223,10 @@ export class GarzonesService {
     id: string,
   ): Promise<void> {
     await this.getOrThrow(tenantId, id);
-    await this.assertSinSesionAbierta(tenantId, id, 'eliminar');
+    this.assertSinSesionAbierta(
+      await this.contarSesionesAbiertas(tenantId, id),
+      'eliminar',
+    );
     // Una sola escritura en vez de `softDelete`: dos sentencias sueltas
     // pueden quedar a medias y dejar una fila borrada sin autor.
     await this.garzonRepo.update(
@@ -269,15 +337,30 @@ export class GarzonesService {
     );
   }
 
-  /** Las dos operaciones que sacan al garzón de circulación comparten la regla. */
-  private async assertSinSesionAbierta(
+  /**
+   * Cuántas sesiones abiertas tiene el garzón. Cuatro operaciones preguntan lo
+   * mismo y difieren solo en qué hacen con la respuesta: eliminar y desactivar
+   * cortan, cambiar el tipo y regenerar el PIN advierten.
+   */
+  private async contarSesionesAbiertas(
     tenantId: string,
     id: string,
-    accion: 'eliminar' | 'desactivar',
-  ): Promise<void> {
-    const abiertas = await this.sesionRepo.count({
+  ): Promise<number> {
+    return this.sesionRepo.count({
       where: { tenantId, garzonId: id, estado: EstadoSesionGarzon.ABIERTA },
     });
+  }
+
+  /**
+   * Las dos operaciones que sacan al garzón de circulación comparten la regla.
+   * Recibe el conteo ya hecho en vez de hacerlo: `actualizar()` necesita el
+   * mismo número para decidir si además advierte por el cambio de tipo, y
+   * consultarlo dos veces en el mismo request sería una query al pedo.
+   */
+  private assertSinSesionAbierta(
+    abiertas: number,
+    accion: 'eliminar' | 'desactivar',
+  ): void {
     if (abiertas > 0) {
       throw new BadRequestException(
         `No se puede ${accion} un garzón con una sesión abierta`,

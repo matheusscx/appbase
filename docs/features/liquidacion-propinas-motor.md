@@ -155,6 +155,25 @@ Authorization: Bearer <token>
 Respuesta: `LiquidacionDetalle` con cabecera, grupos, participantes, fuentes,
 eventos y advertencias.
 
+#### Qué se acepta como fecha de período
+
+Fecha pura (`2026-07-17`) o timestamp completo: el SQL no hace `::date`, así que
+una hora es un límite de período legítimo. Lo que se rechaza con `400`, en los
+tres endpoints que reciben un período (`POST`, `preview` y `liquidar`):
+
+- **Fechas que no existen en el calendario** — `2026-02-31`, `2026-04-31`,
+  `2026-02-29`. Son ISO bien formadas, así que solo las ve `@IsISO8601` con
+  `strict: true`. Sin él, `new Date` las **rueda** al mes siguiente sin avisar y
+  la liquidación quedaba persistida sobre un período que nadie pidió. (Un 29 de
+  febrero de año bisiesto real, `2028-02-29`, sí se acepta.)
+- **Fechas ISO que `new Date` no sabe leer** — `2026-W32-1` (semana ISO),
+  `20260807` (básico sin guiones). Estas **pasan `strict`**, porque son ISO 8601
+  válidas, y producen `Invalid Date`. La guarda de orden no las detiene:
+  `NaN <= NaN` es `false`. Llegaban hasta Postgres, que cortaba con un `500`.
+
+Las corta `rangoLiquidacionDesde` (`propinas/utils/rango-liquidacion.ts`), que
+también aplica la guarda `fechaHasta > fechaDesde`.
+
 ### Preview del reparto (sin persistir)
 
 ```http

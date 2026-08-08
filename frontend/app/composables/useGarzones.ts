@@ -22,8 +22,23 @@ export interface GarzonIdentificado {
   nombre: string
 }
 
+/**
+ * Respuesta de una mutación que puede tener un efecto que el admin no anticipa.
+ * Viene siempre —vacío si no hay nada que decir— así que no hace falta
+ * distinguir "sin advertencias" de "el endpoint no las manda".
+ *
+ * Hoy son dos: cambiar el `tipo` de alguien con sesión abierta (el reparto de
+ * ese turno usa el tipo congelado al abrirla) y regenerar el PIN de alguien en
+ * turno (el PIN viejo muere ya, y hasta recibir el nuevo no puede ni marcar
+ * salida). Los dos advierten en vez de bloquear — decisión del owner del
+ * 2026-08-07, ver `docs/features/turnos-garzones.md`.
+ */
+export interface GarzonConAdvertencias extends Garzon {
+  advertencias: string[]
+}
+
 /** Respuesta de crear/regenerar: incluye el PIN en claro una sola vez. */
-export interface GarzonConPin extends Garzon {
+export interface GarzonConPin extends GarzonConAdvertencias {
   pin: string
 }
 
@@ -43,7 +58,7 @@ export function useGarzones() {
     useApiFetch<GarzonConPin>(`${apiUrl}/garzones`, { method: 'POST', body })
 
   const actualizar = (id: string, body: { nombre?: string, activo?: boolean, tipo?: TipoGarzon }) =>
-    useApiFetch<Garzon>(`${apiUrl}/garzones/${id}`, { method: 'PATCH', body })
+    useApiFetch<GarzonConAdvertencias>(`${apiUrl}/garzones/${id}`, { method: 'PATCH', body })
 
   /** Regenera el PIN del garzón; devuelve el nuevo PIN una sola vez. */
   const regenerarPin = (id: string) =>

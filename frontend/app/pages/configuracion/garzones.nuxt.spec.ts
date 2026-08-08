@@ -11,7 +11,7 @@
 // muestra como error simple (toast), igual que `terceros` — nunca como modal
 // de renombrado. `docs/features/papelera.md` § "garzones tiene una
 // restricción única parcial distinta".
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Garzones from './garzones.vue'
 
@@ -74,7 +74,24 @@ mockNuxtImport('usePermissionsStore', () => {
   })
 })
 
+/**
+ * Los toasts no se pueden leer del DOM sin montar `UApp`, así que se captura el
+ * composable. Es lo único que permite afirmar el COLOR: una advertencia que
+ * saliera como `success` se vería igual en un assert sobre el texto.
+ */
+let toasts: { title?: string, color?: string }[] = []
+
+mockNuxtImport('useToast', () => {
+  return () => ({
+    add: (t: { title?: string, color?: string }) => {
+      toasts.push(t)
+    },
+  })
+})
+
 let garzonesBackend: GarzonFake[] = []
+/** Lo que el backend adjunta a la respuesta del PATCH (garzón o PIN). */
+let advertenciasBackend: string[] = []
 // Para el test de la carrera: retiene la respuesta de cada variante del `GET`
 // en una promesa que el test resuelve a mano, en el orden que quiera.
 let overrideConEliminados: Promise<unknown[]> | null = null
@@ -92,11 +109,24 @@ let restaurarRetenido: Promise<unknown> | null = null
 let restaurarErrorForzado: string | null = null
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string }) => {
+  return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string' || !url.includes('/garzones')) {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
+    // El backend devuelve `advertencias` en los dos PATCH: el del garzón y el
+    // del PIN. Siempre presente, vacío cuando no hay nada que decir.
+    if (method === 'PATCH') {
+      const esPin = url.endsWith('/pin')
+      const id = esPin ? (url.split('/').slice(-2)[0] ?? '') : (url.split('/').pop() ?? '')
+      const g = garzonesBackend.find(x => x.id === id)
+      if (!g) return Promise.reject(errorApi(`Garzón ${id} no encontrado`))
+      if (esPin) {
+        return Promise.resolve({ ...g, pin: '424242', advertencias: advertenciasBackend })
+      }
+      Object.assign(g, opts?.body ?? {})
+      return Promise.resolve({ ...g, advertencias: advertenciasBackend })
+    }
     if (method === 'DELETE') {
       const id = url.split('/').pop()
       const g = garzonesBackend.find(x => x.id === id)
@@ -196,6 +226,8 @@ function reset() {
   postsRestaurar = []
   restaurarRetenido = null
   restaurarErrorForzado = null
+  advertenciasBackend = []
+  toasts = []
 }
 
 describe('garzones — papelera: eliminar respeta el toggle', () => {
@@ -433,5 +465,149 @@ describe('garzones — papelera: la carrera de `cargar()` bajo toggles rápidos'
     expect(wrapper.text()).not.toContain('Garzón viejo')
 
     wrapper.unmount()
+  })
+})
+
+// Decisión del owner (2026-08-07): cambiar el `tipo` con sesión abierta y
+// regenerar el PIN de alguien en turno ADVIERTEN, no bloquean. El backend
+// devuelve el aviso en `advertencias`; lo que se prueba acá es que llegue a los
+// ojos del admin — un aviso que el backend calcula y la pantalla descarta no
+// cambia nada respecto de no calcularlo.
+describe('garzones — advertencias del backend', () => {
+  // ⚠️ El desmontaje va acá y NO al final de cada test: estos casos leen
+  // `document.body` (los diálogos se teletransportan fuera del wrapper), así que
+  // un test que falla ANTES de su `unmount()` deja la pantalla montada y los
+  // siguientes encuentran diálogos viejos. Medido: con el unmount al final, un
+  // mutante que solo debía matar 1 test mataba los 4 — señal falsa.
+  let montado: Awaited<ReturnType<typeof montar>> | null = null
+
+  beforeEach(() => {
+    garzonesBackend = [garzon()]
+    reset()
+    esAdmin = true
+  })
+
+  afterEach(() => {
+    montado?.unmount()
+    montado = null
+  })
+
+  /**
+   * Dos cosas que este montaje necesita y no son obvias:
+   *
+   * 1. **`AppDrawer` stubeado.** Su root es `UDrawer` (reka-ui) y **cerrarlo**
+   *    revienta bajo happy-dom: la transición de salida de `usePresence` lee
+   *    `style.display` de un nodo ya desprendido y tira un unhandled rejection.
+   *    Los tests igual pasan, pero `vitest run` sale con exit 1. Medido aislando
+   *    UNA variable: abrir el drawer y desmontar da 0 rejections; abrir, guardar
+   *    —que hace `drawerOpen = false`— y desmontar da 2. Rompe el cierre, no el
+   *    montaje. El stub va en `global.stubs` y no en `mockComponent`: así queda
+   *    acotado a ESTE mount en vez de alcanzar a los `describe` de papelera.
+   * 2. **`attachTo: document.body`.** El botón es
+   *    `type="submit" form="garzon-form"`, y esa asociación por id la resuelve
+   *    el DOCUMENTO. Con el wrapper desprendido el submit no dispara y el test
+   *    pasaría sin haber guardado nada. Con el `UDrawer` real no se notaba
+   *    porque teletransporta al body.
+   *
+   * El stub no vuelve vacuos los tests: el `UForm` y el botón siguen siendo los
+   * de la página, y el mutante que saca el toast de éxito de `guardar()` mata
+   * los dos casos que pasan por acá.
+   */
+  async function pantalla() {
+    montado = await mountSuspended(Garzones, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          AppDrawer: {
+            name: 'AppDrawer',
+            props: ['open'],
+            template: `
+              <div v-if="open" role="dialog">
+                <slot name="header" />
+                <slot name="body" />
+                <slot name="actions" />
+              </div>
+            `,
+          },
+        },
+      },
+    })
+    await new Promise(r => setTimeout(r, 0))
+    return montado
+  }
+
+  /**
+   * Al confirmar la regeneración quedan DOS diálogos montados un instante: el
+   * de confirmación cerrándose y el del PIN abriéndose. Buscar "el primero"
+   * devolvería el equivocado, así que se busca por contenido.
+   */
+  function modalDelPin(): HTMLElement | undefined {
+    return [...document.body.querySelectorAll('[role="dialog"]')]
+      .find(d => d.textContent?.includes('424242')) as HTMLElement | undefined
+  }
+
+  async function regenerar(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.find('[aria-label="Regenerar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    await confirmarEnModal('Generar nuevo PIN')
+  }
+
+  /**
+   * El drawer stubeado NO se teletransporta —vive dentro del wrapper—, así que
+   * su botón se busca ahí y no en `document.body` como los de los modales.
+   */
+  async function editarYGuardar(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    const guardar = wrapper.findAll('button').find(b => b.text().trim() === 'Guardar')
+    expect(guardar, 'botón "Guardar" en el drawer').toBeTruthy()
+    await guardar!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  it('la advertencia del PIN va DENTRO del modal que muestra el PIN, no en un toast', async () => {
+    // Va ahí y no en un toast porque el modal tapa la pantalla: el admin está
+    // mirando el PIN que tiene que entregar, y de eso habla el aviso.
+    advertenciasBackend = [
+      'Ana Torres está en turno: el PIN anterior deja de funcionar ya mismo, '
+      + 'así que no va a poder operar ni marcar salida hasta que reciba el nuevo.',
+    ]
+
+    await regenerar(await pantalla())
+
+    const d = modalDelPin()
+    expect(d, 'modal del PIN revelado').toBeTruthy()
+    expect(d!.textContent).toContain('no va a poder operar ni marcar salida')
+    // Y no se duplicó como toast: el modal lo taparía.
+    expect(toasts).toEqual([])
+  })
+
+  it('sin advertencias el modal del PIN no inventa una alerta', async () => {
+    await regenerar(await pantalla())
+
+    const d = modalDelPin()
+    expect(d, 'modal del PIN revelado').toBeTruthy()
+    expect(d!.textContent).not.toContain('está en turno')
+  })
+
+  it('la advertencia del cambio de tipo sale como toast warning, después del de éxito', async () => {
+    advertenciasBackend = [
+      'Ana Torres tiene una sesión abierta: el reparto de propinas de ese turno '
+      + 'sigue usando el tipo con el que la abrió (garzon).',
+    ]
+
+    await editarYGuardar(await pantalla())
+
+    // El orden importa: el cambio SÍ se guardó. Si el aviso saliera primero o
+    // como `error`, se leería como que la edición falló.
+    expect(toasts.map(t => t.color)).toEqual(['success', 'warning'])
+    expect(toasts[0]?.title).toBe('Garzón actualizado')
+    expect(toasts[1]?.title).toContain('sigue usando el tipo con el que la abrió')
+  })
+
+  it('sin advertencias el guardado deja un solo toast', async () => {
+    await editarYGuardar(await pantalla())
+
+    expect(toasts.map(t => t.color)).toEqual(['success'])
   })
 })

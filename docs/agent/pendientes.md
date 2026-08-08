@@ -491,29 +491,18 @@ el refutador), y el 2026-08-06 se cerró además el **fin de turno con mesas abi
 La pasada de `caja`+`propinas` (2026-07-27) dejó anotado que `tipo_garzon` se congela al
 abrir la sesión mientras `garzones.tipo` es editable. **Confirmado el congelado**
 (`sesiones-garzon.service.ts:87`, y ni `cerrarPorPin` ni `cerrarAdmin` lo vuelven a tocar)
-**y confirmado que `tipo` es editable sin gate** (`garzones.service.ts:121-131`). Pero el
-impacto ya está contenido río abajo: `liquidacion-propinas.service.ts:1275`
-(`assertGarzonEnUnSoloGrupo`) bloquea la liquidación con un 400 accionable si una persona
-generó tips con dos `tipo_garzon` distintos en el período. **La plata está a salvo.** Lo
-que falta es el aviso en el momento de editar — ver la entrada de `garzones.actualizar`.
+**y confirmado que `tipo` es editable sin gate** (`garzones.service.ts` → `actualizar()`;
+la cita por número de línea se sacó porque el propio cierre las corrió). Pero el
+impacto ya está contenido río abajo: `assertGarzonEnUnSoloGrupo` bloquea la liquidación con
+un 400 accionable si una persona generó tips con dos `tipo_garzon` distintos en el período.
+**La plata está a salvo.** El aviso en el momento de editar —lo único que faltaba— se cerró
+el **2026-08-07**: el owner eligió advertir en vez de bloquear, y la advertencia nombra
+además el bloqueo de liquidación que el cambio puede programar. Ver
+[`resueltos.md`](resueltos.md) § "Ronda de decisiones del owner (2026-08-07)". **Este hilo
+queda cerrado.**
 
 ### Media
 
-- [ ] **`garzones.actualizar()` deja cambiar el `tipo` con una sesión abierta, sin avisar**
-  (backend, `garzones.service.ts:139` — el gate que sí existe está en `:134-136`, y solo
-  mira `activo`) — **la mitad `activo` de esta entrada se cerró el
-  2026-08-07** (ver [`resueltos.md`](resueltos.md)); esta es la mitad que sigue abierta
-  porque **es decisión de producto, no mecánica**. `sesion_garzon.tipo_garzon` se congela al
-  abrir la sesión, así que cambiar `garzones.tipo` a mitad de turno no corrompe el reparto
-  —`assertGarzonEnUnSoloGrupo` corta la liquidación con un 400 accionable— pero el admin no
-  se entera hasta ese momento. Lo que falta decidir es **qué hacer en el momento de editar**:
-  bloquear como hace `activo`, o solo advertir. No es simétrico con `activo`: desactivar
-  rompe la operación del garzón ahora mismo; cambiarle el tipo, no.
-- [ ] **`regenerarPin()` invalida el PIN sin avisar que hay una sesión abierta** (backend,
-  `garzones.service.ts:147-153`) — misma familia que la anterior por otra puerta. El PIN
-  viejo deja de funcionar de inmediato (documentado y deliberado), pero si el garzón está
-  en turno no puede marcar salida ni operar hasta que alguien le pase el nuevo. Es una
-  acción de seguridad rutinaria (PIN comprometido) con un efecto que nadie anticipa.
 - [ ] **El PIN de garzón amplifica la carga: cada intento fallido cuesta N bcrypt**
   (backend, `garzones.service.ts` → `resolverGarzonPorPin`) — itera **todos** los garzones
   activos del tenant comparando con bcrypt, porque el hash está salteado y no se puede
@@ -574,30 +563,24 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
 
 ### Lo que dejaron las revisiones independientes del cierre
 
-- [ ] **Los tres DTO de liquidación de propinas aceptan fechas que no existen, y el período
-  se corre en silencio** (backend, `propinas/dto/{liquidar,create-liquidacion,preview-liquidacion}.dto.ts`)
-  — usan `@IsISO8601()` sin `strict: true`, que valida la FORMA y no el calendario.
-  Medido con `validateSync` + `new Date`:
-
-  | valor | `@IsISO8601()` | con `strict: true` | `new Date(valor)` |
-  |---|---|---|---|
-  | `2026-02-31` | acepta | rechaza | **2026-03-03** |
-  | `2026-04-31` | acepta | rechaza | **2026-05-01** |
-
-  El hueco es **exactamente el día que se pasa de mes**: un mes fuera de rango
-  (`2026-13-01`) el laxo ya lo rechaza, así que nunca llega a `new Date`.
-  Y lo grave no es un error sino el **rollover silencioso**:
-  `liquidacion-propinas.service.ts:157` hace `new Date(dto.fechaDesde)` y JS convierte el 31
-  de febrero en el 3 de marzo sin avisar. La fecha corrida **llega hasta el SQL** —viaja como
-  `$2`/`$3` en el `vp.creado_el >= $2 AND vp.creado_el < $3` de `buscarTipsElegibles`
-  (`:1125-1155`)— y además **queda persistida** en la fila de la liquidación (`:814`). La
-  guarda `fechaHasta <= fechaDesde` (`:159`) no corta: compara dos `Date` ya corridos.
-  Es plata, y no falla: liquida sobre un período distinto al pedido.
-  Son **dos** puntos de entrada, no uno: `crear()` (`:157`) y el camino de confirmar
-  (`:578-609`), que repite el mismo `new Date` con la misma guarda.
-  El arreglo es una palabra (`{ strict: true }`) en seis decoradores. Sale de la revisión
-  del cierre del 2026-08-07, al endurecer el DTO gemelo de `turnos` — **queda fuera de ese
-  diff porque toca otro módulo**, no porque sea menor.
+- [ ] **`anti-patterns.md` pasó su propio tope de 20 entradas y nadie podó** (docs,
+  `docs/agent/anti-patterns.md:14`) — la regla 3 del archivo dice *"Tope: 20 entradas. Si se
+  llena, la más antigua sin reincidencia se elimina"*. Medido el 2026-08-07: **25** entradas
+  `### ❌`. Ya estaba en 23 antes de esa tanda, así que no lo rompió un commit puntual: el
+  tope nunca se aplicó. Decidir si se poda —y con qué criterio de "sin reincidencia", que
+  hoy no está registrado en ningún lado— o si la regla se cambia por otra cosa.
+- [ ] **Dos `describe` viejos de `garzones.nuxt.spec.ts` desmontan al final del test, no en
+  `afterEach`** (frontend, `app/pages/configuracion/garzones.nuxt.spec.ts`) — de los cuatro
+  preexistentes, *"papelera: eliminar respeta el toggle"* y *"papelera: restaurar"* leen
+  `document.body` (los diálogos se teletransportan), así que un test que falla antes de su
+  `unmount()` deja la pantalla montada y contamina al siguiente. Los otros dos solo
+  consultan el wrapper y no están afectados. Es exactamente el modo de falla que documenta
+  la entrada *"Sacar conclusiones de un mutante
+  sin aislar los tests entre sí"* de `anti-patterns.md`, medido el 2026-08-07: un mutante
+  que debía matar 1 test mató 2. El `describe` nuevo de advertencias ya usa `afterEach`; los
+  viejos quedaron sin convertir porque era refactor fuera del alcance de ese commit. Mientras
+  no se conviertan, **cualquier mutante que se corra sobre ese archivo puede dar una señal
+  inflada**.
 - [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
   el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
   `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos

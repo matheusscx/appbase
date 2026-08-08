@@ -722,6 +722,54 @@ las heurísticas alternativas que el fixture no descarta** —posición, orden d
 cantidad— y correr un mutante por cada una. Si con dos elementos alguna es indistinguible,
 el fixture necesita un tercero.
 
+### ❌ Leer el resultado de un test suite sin mirar el exit code
+
+**Qué pasó (2026-08-07).** Cerrando la ronda de decisiones reporté el gate del frontend en
+verde citando `Test Files 57 passed / Tests 619 passed`. El comando había salido con
+**exit 1**: 4 *unhandled rejections* que vitest cuenta aparte, bajo `Errors`, y que no
+aparecen en la línea de `Tests`. Grepear `"Tests "` filtraba justo la evidencia. Lo cazó la
+revisión independiente.
+
+```bash
+# ❌ la línea dice "passed" y el comando falló
+npm test 2>&1 | grep -E "Tests "
+
+# ✅ el exit code es el veredicto; la línea es un resumen
+npm test; echo "EXIT: $?"
+```
+
+**Por qué importa acá.** El gate de `CLAUDE.md` dice *"Ejecutar, no afirmar"*, y CI corre el
+mismo comando: un exit 1 rompe el push aunque ningún test esté en rojo. El resumen humano de
+una herramienta **no es** su valor de retorno.
+
+### ❌ Sacar conclusiones de un mutante sin aislar los tests entre sí
+
+**Qué pasó (2026-08-07).** Un mutante que solo debía matar 1 test mató **2**: el legítimo y
+uno sin relación con el código mutado. La causa no era cobertura: los tests hacían
+`wrapper.unmount()` **al final del test**, así que el primero en fallar dejaba el componente
+montado y el siguiente encontraba diálogos viejos en `document.body`. La señal del mutante
+era en parte cascada.
+
+Reproducible: mutar `revelarPin(res.nombre, res.pin, res.advertencias)` a
+`revelarPin(res.nombre, res.pin)` en `configuracion/garzones.vue` da **2** fallidos con el
+`unmount()` al final del test y **1** con `afterEach`.
+
+⚠️ La primera vez reporté **4**, que era la cuenta de una configuración distinta —sin el
+stub del drawer, donde los tests además emitían unhandled rejections— y que ya no se
+reproduce. Medir de nuevo antes de citar un número viejo.
+
+**La regla.** Si un test lee `document.body` —cualquier cosa teletransportada: modal,
+drawer, tooltip—, el desmontaje va en `afterEach`, nunca al final del cuerpo del test. Y si
+un mutante mata más tests de los que su alcance explica, **eso es el hallazgo**: primero se
+arregla el aislamiento, después se leen los mutantes.
+
+⚠️ La regla queda **contradicha en el archivo que la originó**: de los cuatro `describe`
+preexistentes de `configuracion/garzones.nuxt.spec.ts`, **dos** leen `document.body`
+—"eliminar respeta el toggle" y "restaurar"— y siguen con el `unmount()` al final del
+cuerpo. Los otros dos solo consultan el wrapper, así que la contaminación no los alcanza. Convertirlos era refactor fuera del alcance
+de ese commit, así que conservan el modo de falla descrito acá — anotado en
+`pendientes.md`, no resuelto.
+
 ## Pruebas E2E de navegador
 
 *(Sección a poblar cuando exista la suite. Entradas previstas según el diseño acordado:

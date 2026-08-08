@@ -205,6 +205,35 @@ describe('GarzonesService', () => {
       expect(await bcrypt.compare(result.pin, saved.pinHash)).toBe(true);
     });
 
+    // Decisión del owner (2026-08-07): advertir, no bloquear. Rotar una
+    // credencial es la respuesta correcta a una filtración; trabarla porque hay
+    // un turno abierto sería la política al revés. Pero el admin tiene que ver
+    // en el momento que deja al garzón sin poder marcar salida.
+    it('con sesión abierta regenera igual, y avisa que lo deja sin operar', async () => {
+      const g = garzon({ id: 'g1', nombre: 'Ana', pin: '111111' });
+      repo.findOne.mockResolvedValue(g);
+      repo.find.mockResolvedValue([g]);
+      sesionRepo.count.mockResolvedValue(1);
+
+      const result = await service.regenerarPin(TENANT, 'g1');
+
+      expect(result.pin).toMatch(/^\d{6}$/);
+      expect(repo.save).toHaveBeenCalled();
+      expect(result.advertencias).toHaveLength(1);
+      expect(result.advertencias[0]).toContain('Ana');
+      expect(result.advertencias[0]).toContain('marcar salida');
+    });
+
+    it('sin sesión abierta no inventa advertencias', async () => {
+      const g = garzon({ id: 'g1', pin: '111111' });
+      repo.findOne.mockResolvedValue(g);
+      repo.find.mockResolvedValue([g]);
+
+      expect((await service.regenerarPin(TENANT, 'g1')).advertencias).toEqual(
+        [],
+      );
+    });
+
     it('lanza NotFound si el garzón no existe en el tenant', async () => {
       repo.findOne.mockResolvedValue(null);
 
@@ -271,6 +300,79 @@ describe('GarzonesService', () => {
       const result = await service.actualizar(TENANT, 'g1', { activo: true });
 
       expect(result.activo).toBe(true);
+    });
+
+    // Decisión del owner (2026-08-07): el tipo advierte, NO bloquea como
+    // `activo`. Desactivar rompe la operación del garzón ahora mismo; cambiarle
+    // el tipo no rompe nada en el turno en curso, porque `sesion_garzon` se
+    // quedó con el tipo del momento de abrir. Bloquear obligaría a cerrar el
+    // turno para corregir un tipo mal cargado.
+    it('cambiar el tipo con sesión abierta guarda igual, y avisa desde cuándo rige', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', nombre: 'Ana', tipo: TipoGarzon.GARZON }),
+      );
+      sesionRepo.count.mockResolvedValue(1);
+
+      const result = await service.actualizar(TENANT, 'g1', {
+        tipo: TipoGarzon.COCINA,
+      });
+
+      expect(result.tipo).toBe(TipoGarzon.COCINA);
+      expect((repo.save.mock.calls[0] as [Garzon])[0].tipo).toBe(
+        TipoGarzon.COCINA,
+      );
+      expect(result.advertencias).toHaveLength(1);
+      // El mensaje nombra los dos tipos: sin el anterior, el admin no sabe qué
+      // se sigue usando en el turno abierto.
+      expect(result.advertencias[0]).toContain(TipoGarzon.GARZON);
+      expect(result.advertencias[0]).toContain(TipoGarzon.COCINA);
+    });
+
+    it('cambiar el tipo sin sesión abierta no advierte nada', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', tipo: TipoGarzon.GARZON }),
+      );
+
+      const result = await service.actualizar(TENANT, 'g1', {
+        tipo: TipoGarzon.COCINA,
+      });
+
+      expect(result.advertencias).toEqual([]);
+    });
+
+    // Los formularios mandan el objeto entero, así que `tipo` viene aunque el
+    // usuario no lo haya tocado. Sin comparar contra el actual, cada cambio de
+    // nombre con un turno abierto dispararía una advertencia falsa — y una
+    // consulta de sesiones al pedo.
+    it('mandar el mismo tipo no advierte ni consulta sesiones', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', tipo: TipoGarzon.COCINA }),
+      );
+      sesionRepo.count.mockResolvedValue(1);
+
+      const result = await service.actualizar(TENANT, 'g1', {
+        nombre: 'Ana María',
+        tipo: TipoGarzon.COCINA,
+      });
+
+      expect(result.advertencias).toEqual([]);
+      expect(sesionRepo.count).not.toHaveBeenCalled();
+    });
+
+    // Desactivar y cambiar el tipo preguntan lo mismo, y el formulario manda el
+    // objeto entero: sin compartir el conteo, un PATCH que hace las dos cosas
+    // corría la misma query dos veces.
+    it('desactivar y cambiar el tipo a la vez consulta las sesiones UNA vez', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', activo: true, tipo: TipoGarzon.GARZON }),
+      );
+
+      await service.actualizar(TENANT, 'g1', {
+        activo: false,
+        tipo: TipoGarzon.COCINA,
+      });
+
+      expect(sesionRepo.count).toHaveBeenCalledTimes(1);
     });
 
     it('cambiar solo el nombre no consulta sesiones', async () => {

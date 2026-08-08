@@ -29,6 +29,7 @@ import {
 } from './dto/update-liquidacion.dto';
 import { AnularLiquidacionDto } from './dto/anular-liquidacion.dto';
 import { LiquidarDto } from './dto/liquidar.dto';
+import { rangoLiquidacionDesde } from './utils/rango-liquidacion';
 import { GarzonesService } from '../garzones/garzones.service';
 import { horasInterseccionHoras } from './utils/horas-interseccion';
 import { repartirMayoresRestos } from './utils/mayores-restos';
@@ -154,13 +155,10 @@ export class LiquidacionPropinasService {
     usuarioId: string,
     dto: CreateLiquidacionDto,
   ): Promise<LiquidacionDetalle> {
-    const fechaDesde = new Date(dto.fechaDesde);
-    const fechaHasta = new Date(dto.fechaHasta);
-    if (fechaHasta <= fechaDesde) {
-      throw new BadRequestException(
-        'La fecha hasta debe ser posterior a desde',
-      );
-    }
+    const { fechaDesde, fechaHasta } = rangoLiquidacionDesde(
+      dto.fechaDesde,
+      dto.fechaHasta,
+    );
 
     const config = await this.distribucion.obtener(tenantId);
     const gruposConfig = config.grupos.filter((g) => g.activo);
@@ -575,13 +573,10 @@ export class LiquidacionPropinasService {
     usuarioId: string,
     dto: LiquidarDto,
   ): Promise<LiquidacionDetalle> {
-    const fechaDesde = new Date(dto.fechaDesde);
-    const fechaHasta = new Date(dto.fechaHasta);
-    if (fechaHasta <= fechaDesde) {
-      throw new BadRequestException(
-        'La fecha hasta debe ser posterior a desde',
-      );
-    }
+    const { fechaDesde, fechaHasta } = rangoLiquidacionDesde(
+      dto.fechaDesde,
+      dto.fechaHasta,
+    );
     const config = await this.distribucion.obtener(tenantId);
     const gruposConfig = config.grupos.filter((g) => g.activo);
     if (gruposConfig.length === 0) {

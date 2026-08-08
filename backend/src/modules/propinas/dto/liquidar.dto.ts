@@ -10,10 +10,12 @@ import { Type } from 'class-transformer';
 import { AjustesRepartoDto } from './ajustes-reparto.dto';
 
 export class LiquidarDto {
-  @IsISO8601()
+  // Ver `create-liquidacion.dto.ts`: `strict` cierra el rollover de calendario,
+  // `rangoLiquidacionDesde` cierra la fecha que `new Date` no sabe leer.
+  @IsISO8601({ strict: true })
   fechaDesde: string;
 
-  @IsISO8601()
+  @IsISO8601({ strict: true })
   fechaHasta: string;
 
   @IsOptional()

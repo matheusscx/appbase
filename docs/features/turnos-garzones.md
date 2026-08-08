@@ -113,6 +113,40 @@ trabajo"* como señal para abrir el modal de entrar a turno, y el segundo caso n
 es del que está operando —mandarlo a iniciar un turno que ya tiene es un callejón
 sin salida.
 
+### Editar un garzón con la sesión abierta: qué bloquea y qué solo advierte
+
+No todas las ediciones pesan igual, y la regla es **si rompe la operación del
+garzón en este momento** (decisión del owner, 2026-08-07):
+
+| Acción con sesión abierta | Qué hace | Por qué |
+|---|---|---|
+| Eliminar | **Bloquea** (`400`) | Deja la sesión abierta con `fin_el = null` y sin nadie que pueda cerrarla |
+| Desactivar | **Bloquea** (`400`) | `resolverGarzonPorPin` filtra `activo: true`: el garzón no puede ni marcar salida |
+| Cambiar el `tipo` | **Advierte** | El reparto usa `sesion_garzon.tipo_garzon`, congelado al abrir: el turno en curso no se altera. Bloquear obligaría a cerrar el turno para corregir un tipo mal cargado |
+| Regenerar el PIN | **Advierte** | Rotar una credencial es la respuesta a una filtración; trabarla por un turno abierto sería la política al revés |
+
+Las dos que advierten devuelven `advertencias: string[]` en la respuesta —siempre
+presente, vacío cuando no hay nada que decir, misma forma que `ventas` e
+`items`—. Dónde se muestran **no** es intercambiable: la del `tipo` sale como
+toast `warning` después del de éxito (el cambio se guardó), y la del PIN va
+**dentro del modal que revela el PIN**, porque habla de ese PIN y de la urgencia
+de entregarlo; un toast detrás del modal se pierde.
+
+⚠️ **"Advierte" no quiere decir "sin consecuencias".** El mensaje del `tipo` dice
+además que, si la persona genera propinas con los dos tipos dentro de un mismo
+período, la liquidación de ese período **no se va a poder cerrar** hasta partirlo
+en dos: es la regla 2b de
+[`liquidacion-propinas-motor.md`](./liquidacion-propinas-motor.md), que corta con
+un `400` nombrando a la persona, sus dos grupos y una fecha de corte sugerida.
+Sin esa segunda frase el aviso suena inocuo y el admin no se entera de que acaba
+de programar ese bloqueo.
+
+⚠️ La advertencia del `tipo` solo aparece si el valor **cambia**. Los formularios
+mandan el objeto entero, así que `tipo` viaja aunque nadie lo haya tocado:
+comparar contra el actual es lo que evita advertir de más en cada cambio de
+nombre —y es también lo que deja el `PATCH` en **una sola** consulta de sesiones
+cuando desactiva y cambia el tipo a la vez.
+
 ---
 
 ## Backend

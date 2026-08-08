@@ -213,6 +213,35 @@ describe('LiquidacionPropinasService', () => {
     );
   });
 
+  // El spec de `utils/rango-liquidacion` prueba el normalizador; esto prueba que
+  // `crear` y `liquidar` lo llamen, y que lo hagan ANTES de tocar la base: la
+  // fecha inválida sobrevivía a la guarda de orden (`NaN <= NaN` es `false`) y
+  // moría recién en Postgres, con un 500.
+  it.each([
+    [
+      'crear',
+      (dto: { fechaDesde: string; fechaHasta: string }) =>
+        service.crear(TENANT, USER, dto),
+    ],
+    [
+      'liquidar',
+      (dto: { fechaDesde: string; fechaHasta: string }) =>
+        service.liquidar(TENANT, USER, dto),
+    ],
+  ])(
+    '%s rechaza una fecha ilegible sin consultar la configuración',
+    async (_nombre, ejecutar) => {
+      await expect(
+        ejecutar({
+          fechaDesde: '2026-07-17T00:00:00.000Z',
+          fechaHasta: '2026-W32-1',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(distribucion.obtener).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it('usa el filtro de turnos al buscar tips elegibles', async () => {
     await service.crear(TENANT, USER, {
       fechaDesde: '2026-07-17T00:00:00.000Z',

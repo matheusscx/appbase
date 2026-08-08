@@ -112,13 +112,19 @@ async function guardar() {
   saving.value = true
   try {
     if (editingId.value) {
-      const saved = await garzonesApi.actualizar(editingId.value, {
+      const { advertencias, ...saved } = await garzonesApi.actualizar(editingId.value, {
         nombre: form.value.nombre,
         activo: form.value.activo,
         tipo: form.value.tipo,
       })
       upsertLocal(saved)
       toast.add({ title: 'Garzón actualizado', color: 'success' })
+      // El cambio se guardó; lo que la advertencia dice es que puede no regir
+      // todavía (sesión abierta con el tipo congelado). Mismo patrón que el POS
+      // con las advertencias de la venta: éxito primero, avisos después.
+      for (const advertencia of advertencias) {
+        toast.add({ title: advertencia, color: 'warning' })
+      }
       drawerOpen.value = false
     }
     else {
@@ -127,7 +133,7 @@ async function guardar() {
         activo: form.value.activo,
         tipo: form.value.tipo,
       })
-      const { pin, ...garzon } = creado
+      const { pin, advertencias: _sinAdvertencias, ...garzon } = creado
       upsertLocal(garzon)
       drawerOpen.value = false
       // El PIN se genera en el backend y se muestra una sola vez.
@@ -159,7 +165,7 @@ async function confirmarRegenerar() {
   try {
     const res = await garzonesApi.regenerarPin(regenerarTarget.value.id)
     regenerarOpen.value = false
-    revelarPin(res.nombre, res.pin)
+    revelarPin(res.nombre, res.pin, res.advertencias)
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al regenerar el PIN'), color: 'error' })
@@ -171,10 +177,17 @@ async function confirmarRegenerar() {
 
 // ── Revelado del PIN (una sola vez) ─────────────────────────────────────────
 const pinReveladoOpen = ref(false)
-const pinRevelado = ref<{ nombre: string, pin: string }>({ nombre: '', pin: '' })
+const pinRevelado = ref<{ nombre: string, pin: string, advertencias: string[] }>({
+  nombre: '',
+  pin: '',
+  advertencias: [],
+})
 
-function revelarPin(nombre: string, pin: string) {
-  pinRevelado.value = { nombre, pin }
+/** Las advertencias del backend van DENTRO de este modal, no en un toast: son
+ *  sobre el PIN que se está mostrando ("está en turno, pasáselo ya") y acá es
+ *  donde el admin está mirando. Un toast detrás del modal se pierde. */
+function revelarPin(nombre: string, pin: string, advertencias: string[] = []) {
+  pinRevelado.value = { nombre, pin, advertencias }
   pinReveladoOpen.value = true
 }
 
@@ -438,6 +451,17 @@ const columns: TableColumn<Garzon>[] = [
             Guárdalo ahora — <strong>no se volverá a mostrar</strong>. Si se
             pierde, genera uno nuevo.
           </p>
+          <!-- Del backend: hoy, que el garzón está en turno y el PIN viejo ya
+               dejó de funcionar. Va acá y no en un toast porque es sobre este
+               PIN y sobre la urgencia de entregarlo. -->
+          <UAlert
+            v-for="advertencia in pinRevelado.advertencias"
+            :key="advertencia"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-clock-alert"
+            :description="advertencia"
+          />
         </div>
       </template>
       <template #footer>

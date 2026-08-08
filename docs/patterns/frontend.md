@@ -627,6 +627,36 @@ El patrón completo está en `app/stores/monedas.spec.ts` y en `MoneyInput.spec.
   test pase por construcción. La contraprueba es la mutación — si romper el componente bajo
   test no pone nada en rojo, el test está afirmando el stub y no el componente.
 
+### Spec de PÁGINA que CIERRA un drawer
+
+Un spec de página (`mountSuspended`) que **cierra** un `AppDrawer` deja
+`vitest run` en **exit 1** aunque todos los tests pasen: la transición de salida
+de `usePresence` (reka-ui) lee `style.display` de un nodo ya desprendido y tira
+un *unhandled rejection*, que vitest cuenta aparte bajo `Errors` y no en la línea
+de `Tests`.
+
+Medido aislando una variable (2026-08-07, `configuracion/garzones`): abrir el
+drawer y desmontar → **0** rejections, exit 0. Abrir, guardar —que hace
+`drawerOpen = false`— y desmontar → **2** por test, exit 1. Rompe el cierre, no
+el montaje.
+
+La salida es stubear `AppDrawer` en **`global: { stubs: … }` del propio mount**.
+⚠️ Medido, porque acá había una creencia instalada al revés: `global.stubs` **sí**
+intercepta los componentes auto-importados de Nuxt bajo `mountSuspended` —tanto
+`AppDrawer`, usado directo por la página, como `UDrawer`, anidado dentro de él—.
+Por eso **no** hace falta `mockComponent`, que además alcanza a todo el archivo y
+puede stubear el drawer de otros `describe` sin avisar.
+
+Dos consecuencias del stub que cuestan un rato descubrir:
+
+- **El montaje necesita `attachTo: document.body`** si en el drawer hay un botón
+  `type="submit" form="…"`: esa asociación por id la resuelve el *documento*, y
+  con el wrapper desprendido el submit no dispara. Con el `UDrawer` real no se
+  nota porque teletransporta al body. Verificado por mutación: sacar `attachTo`
+  mata los tests.
+- **El contenido stubeado NO se teletransporta**, así que sus botones se buscan
+  en el wrapper y no en `document.body` como los de un `UModal`.
+
 ---
 
 ## 16. `truncate` + `min-w-0`: cuándo hace falta y cuándo es ruido
