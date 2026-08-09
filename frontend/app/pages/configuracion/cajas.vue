@@ -280,7 +280,10 @@ async function abrirUsuarios(c: Cajon) {
     const [mem, asignados] = await Promise.all([
       miembrosCargados.value
         ? Promise.resolve(miembros.value)
-        : useApiFetch<Member[]>(`${apiUrl}/tenants/members`),
+        // `para-selector` y no `members`: este drawer solo necesita nombres, y
+        // el roster completo —que es admin-only— trae además el correo y los
+        // roles de cada miembro.
+        : useApiFetch<Member[]>(`${apiUrl}/tenants/members/para-selector`),
       useApiFetch<string[]>(`${apiUrl}/cajones/${c.id}/usuarios`),
     ])
     if (usuariosCajonId.value !== targetId) return

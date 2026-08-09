@@ -91,10 +91,43 @@ export class TenantsController {
     return this.tenantsService.updateMine(user.tenantId, dto);
   }
 
+  /**
+   * El roster completo: correo y roles de cada miembro. **Admin-only**, como
+   * las tres escrituras de `members/*` que tiene al lado.
+   *
+   * Era la única ruta de `members/*` sin el guard, y hasta 2026-08-09 el hueco
+   * costaba armar la request a mano. Ese día `configuracion/garzones.vue` la
+   * empezó a llamar al montar para poblar un selector, y el roster entero
+   * —nombre, apellido y **correo** de cada miembro— pasó a renderizarse en un
+   * dropdown para cualquier miembro autenticado. Quien necesita nombres y no
+   * correos usa `members/para-selector`, acá abajo.
+   *
+   * La única pantalla que consume esto es `configuracion/usuarios`, que ya es
+   * admin-only por middleware.
+   */
+  @UseGuards(TenantAdminGuard)
   @Get('members')
   findMembers(@Req() req: Request) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.findMembers(user.tenantId);
+  }
+
+  /**
+   * Los nombres de las cuentas del tenant, sin correo ni roles. Lo consumen dos
+   * selectores: quién puede abrir un cajón (`Cajas`) y a qué cuenta se vincula
+   * un garzón (`Salones`).
+   *
+   * **Queda abierta a cualquier miembro autenticado del tenant, a propósito.**
+   * Los dos consumidores viven en módulos de permiso distintos, así que ningún
+   * `@RequiresPermiso` único los cubre; y lo que devuelve —los nombres de tus
+   * propios compañeros de trabajo— no es un secreto que la app pueda guardar:
+   * quien opera el salón los ve en el selector de garzones igual. Lo que sí es
+   * secreto son el correo y los roles, y por eso no salen de acá.
+   */
+  @Get('members/para-selector')
+  findMembersParaSelector(@Req() req: Request) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.findMembersParaSelector(user.tenantId);
   }
 
   // Alta y baja de miembros son administración del tenant, como todo lo que

@@ -19,6 +19,9 @@ interface TokenResponse {
 }
 interface Member {
   usuarioId: string;
+  nombre?: string;
+  correo?: string;
+  esTotem?: boolean;
 }
 
 async function login(
@@ -39,16 +42,20 @@ async function login(
 }
 
 /**
- * Alta y baja de miembros del tenant: administración, no operación.
+ * Los miembros del tenant son administración, no operación.
  *
- * Hasta jul-2026 estas dos rutas colgaban solo de `JwtAuthGuard + TenantGuard`
+ * Hasta jul-2026 el alta y la baja colgaban solo de `JwtAuthGuard + TenantGuard`
  * —las únicas del controller sin `TenantAdminGuard`, con `PATCH me` al lado que
  * sí lo tenía—, así que cualquier miembro autenticado podía sumar cuentas al
- * tenant y, sobre todo, **eliminar al admin del suyo**. El frontend no usa
- * estas rutas (escribe por `roles/:id/users`), así que el agujero solo se veía
- * llamando la API directo.
+ * tenant y, sobre todo, **eliminar al admin del suyo**.
+ *
+ * La **lectura** quedó abierta en aquella pasada y se cerró el 2026-08-09, con
+ * lo que la Fase 2 del garzón la convirtió en superficie de UI: una pantalla que
+ * no es admin-only empezó a llamarla al montar y el roster entero —con el correo
+ * de cada miembro— pasó a renderizarse en un dropdown. Lo que esos selectores
+ * necesitan son nombres, y para eso está `members/para-selector`.
  */
-describe('Tenants — miembros (e2e), alta y baja son admin-only', () => {
+describe('Tenants — miembros (e2e): el roster es admin-only', () => {
   let app: INestApplication<App>;
   let tokenAdmin: string;
   let tokenNoAdmin: string;
@@ -79,14 +86,47 @@ describe('Tenants — miembros (e2e), alta y baja son admin-only', () => {
     await app.close();
   });
 
-  it('la lectura sigue abierta a cualquier miembro del tenant', async () => {
-    // El guard va sobre las escrituras: si esto empezara a dar 403, el listado
-    // de usuarios de la pantalla de configuración dejaría de cargar.
+  it('GET /tenants/members sin ser admin → 403', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/tenants/members')
       .set('Authorization', `Bearer ${tokenNoAdmin}`);
 
+    expect(res.status).toBe(403);
+  });
+
+  it('GET /tenants/members con admin devuelve el correo de cada miembro', async () => {
+    // El contrapeso del test de arriba: un guard que rechazara a TODOS lo
+    // pasaría igual, y la pantalla de usuarios quedaría sin datos.
+    const res = await request(app.getHttpServer())
+      .get('/api/tenants/members')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+
     expect(res.status).toBe(200);
+    expect((res.body as Member[]).every((m) => !!m.correo)).toBe(true);
+  });
+
+  it('para-selector: cualquier miembro lo lee, y NO trae correo ni roles', async () => {
+    // Lo que hace que el selector de garzones —pantalla que no es admin-only—
+    // no reparta el correo de todo el tenant en un dropdown.
+    const res = await request(app.getHttpServer())
+      .get('/api/tenants/members/para-selector')
+      .set('Authorization', `Bearer ${tokenNoAdmin}`);
+
+    expect(res.status).toBe(200);
+    const miembros = res.body as Member[];
+    expect(miembros.length).toBeGreaterThan(0);
+    for (const m of miembros) {
+      expect(m.usuarioId).toBeTruthy();
+      expect(m.nombre).toBeTruthy();
+      // `esTotem` no es decorativo: es con lo que el selector de garzones
+      // descarta las cuentas de tótem. Sin esta línea, sacar `ut.es_totem` del
+      // SELECT deja la suite en verde —el tipo de `rows` es una aserción a mano
+      // sobre `dataSource.query`, no algo que TypeScript verifique— y la
+      // pantalla vuelve a ofrecer cuentas que el backend rechaza con un 400.
+      expect(typeof m.esTotem).toBe('boolean');
+      expect(m).not.toHaveProperty('correo');
+      expect(m).not.toHaveProperty('roles');
+    }
   });
 
   it('POST /tenants/members sin ser admin → 403', async () => {

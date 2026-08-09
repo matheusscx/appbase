@@ -80,12 +80,15 @@ onMounted(async () => {
 })
 
 async function cargarMiembros() {
-  // Con `catch` como su hermana `cargar()`: sin él, un fallo de `/tenants/members`
-  // deja el selector VACÍO y sin explicación, y el admin concluye que no hay
-  // cuentas vinculables cuando lo que falló fue la carga.
+  // Con `catch` como su hermana `cargar()`: sin él, un fallo de la carga deja el
+  // selector VACÍO y sin explicación, y el admin concluye que no hay cuentas
+  // vinculables cuando lo que falló fue la carga.
+  //
+  // `para-selector` y no `members`: esta pantalla no es admin-only, y el roster
+  // completo trae el correo de cada miembro. Acá solo hacen falta los nombres.
   try {
     miembros.value = await useApiFetch<typeof miembros.value>(
-      `${useRuntimeConfig().public.apiUrl}/tenants/members`,
+      `${useRuntimeConfig().public.apiUrl}/tenants/members/para-selector`,
     )
   }
   catch (e: unknown) {
@@ -117,7 +120,7 @@ const form = ref<{
  * Se cargan una vez al montar y no al abrir el drawer: son pocos y no cambian
  * mientras se edita un garzón.
  */
-const miembros = ref<{ usuarioId: string, nombre: string, apellido: string, correo: string, esTotem: boolean }[]>([])
+const miembros = ref<{ usuarioId: string, nombre: string, apellido: string, esTotem: boolean }[]>([])
 
 /**
  * Proxy entre el `undefined` que usa `USelectMenu` para "nada elegido" y el
@@ -152,7 +155,10 @@ const miembrosVinculables = computed(() => {
   return miembros.value
     .filter(m => !m.esTotem && !tomadas.has(m.usuarioId))
     .map(m => ({
-      label: `${m.nombre} ${m.apellido ?? ''}`.trim() || m.correo,
+      // El fallback era `|| m.correo`, y el correo dejó de venir. No se cae sin
+      // más: `@MinLength(1)` acepta un nombre en blanco, y una opción con label
+      // vacío no se puede elegir a ciegas.
+      label: `${m.nombre} ${m.apellido ?? ''}`.trim() || 'Sin nombre',
       value: m.usuarioId,
     }))
 })

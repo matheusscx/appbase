@@ -161,7 +161,8 @@ Las **mutaciones** agregan `TenantAdminGuard` (requiere rol `es_fijo = true` en 
 | PUT | `/roles/:id/modules/:moduloTenantId/permissions` | TenantAdmin | Setear permisos del rol en un módulo |
 | POST | `/roles/:id/users` | TenantAdmin | Asignar rol a un usuario |
 | DELETE | `/roles/:id/users/:userId` | TenantAdmin | Quitar rol a un usuario |
-| GET | `/tenants/members` | — | Miembros con nombre + roles asignados |
+| GET | `/tenants/members` | TenantAdmin | Miembros con correo + roles asignados |
+| GET | `/tenants/members/para-selector` | — | Solo nombres, para los selectores de cuenta |
 | GET/POST | `/auth/invitacion/:token` | público | Verifica el link / fija la contraseña y lo quema |
 | POST | `/auth/recuperar` | público | Pide el link de reset. **Misma respuesta exista o no el correo** |
 | GET/POST | `/auth/recuperar/:token` | público | Verifica el link / fija la contraseña y lo quema |
@@ -176,7 +177,10 @@ GET /roles/modulos-disponibles →
     permisos: [ { moduloAppPermisoId, permisoNombre } ] } ]
 
 GET /tenants/members →
-[ { usuarioId, nombre, apellido, correo, roles: [ { rolId, nombre } ] } ]
+[ { usuarioId, nombre, apellido, correo, esTotem, roles: [ { rolId, nombre } ] } ]
+
+GET /tenants/members/para-selector →
+[ { usuarioId, nombre, apellido, esTotem } ]     // sin correo y sin roles
 
 POST /tenants/usuarios
 body: { nombre, apellido?, correo, telefono?, rolIds: string[] }   // rolIds: al menos 1

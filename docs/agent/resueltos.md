@@ -17,6 +17,69 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `GET /tenants/members` repartía el roster con correos (2026-08-09)
+
+**La entrada, como estaba en `pendientes.md`:** *"`GET /tenants/members` es el único
+endpoint de `members/*` SIN `TenantAdminGuard`, y la Fase 2 del garzón lo convirtió en
+superficie de UI (backend, `tenants.controller.ts`) — el hueco es **preexistente**: la
+lectura estaba abierta a cualquier miembro autenticado del tenant mientras las tres
+escrituras van con `TenantAdminGuard`. Lo que cambió el 2026-08-09 es **quién lo alcanza
+sin querer**: antes había que armar la request a mano; ahora `configuracion/garzones.vue`
+lo llama al montar para poblar el selector de cuenta vinculable, y esa pantalla no tiene
+middleware de permiso propio. O sea que el roster completo —nombre, apellido y **correo**
+de cada miembro— se renderiza en un dropdown. **No es fuga multi-tenant**: la query está
+acotada a `user.tenantId`. Al arreglarlo hay que decidir si la lectura pasa a admin-only (y
+entonces el selector de garzones necesita otra fuente, porque quien administra garzones no
+es necesariamente admin) o si se expone una lista mínima `{ usuarioId, nombre }` sin
+correos, como se hizo con `garzones/para-selector`."*
+
+**Se hicieron las dos cosas, porque la disyuntiva era falsa.** `GET /tenants/members` pasó
+a `TenantAdminGuard` con su payload intacto —correo y roles incluidos— y la única pantalla
+que lo consume, `configuracion/usuarios`, ya era admin-only por middleware. Los otros dos
+consumidores no necesitaban nada de eso: se les dio
+**`GET /tenants/members/para-selector`**, que devuelve `{ usuarioId, nombre, apellido,
+esTotem }` y nada más.
+
+**Lo que decidió el corte fue medir qué usa cada consumidor**, no elegir entre dos formas:
+
+- `configuracion/usuarios` — admin-only, usa correo y roles. Queda con el roster completo.
+- `configuracion/cajas` — su interfaz local `Member` ya declaraba solo
+  `{ usuarioId, nombre, apellido }`: **nunca miró el correo**.
+- `configuracion/garzones` — usa `esTotem` para filtrar, y tenía el correo únicamente como
+  *fallback* del label (`` `${nombre} ${apellido}`.trim() || m.correo ``). `usuarios.nombre`
+  es `NOT NULL` —medido contra la base viva—, pero la validación del alta es `@MinLength(1)`
+  (`crear-usuario-tenant.dto.ts`), que **acepta un nombre en blanco**: el fallback no era
+  inalcanzable, solo improbable (0 filas así hoy). Se reemplazó por `'Sin nombre'`, que
+  cubre el mismo caso sin repartir el correo.
+
+**Por qué `para-selector` queda abierta a cualquier miembro autenticado, y es una decisión
+y no un olvido:** sus dos consumidores viven en módulos de permiso distintos (`Cajas` y
+`Salones`), así que ningún `@RequiresPermiso` único los cubre —y quien opera el salón ve los
+nombres de sus compañeros en el selector de garzones igual—. Lo que no puede repartirse es
+el correo (PII, y además el identificador de login) y la lista de roles (dice quién es
+admin, o sea a quién atacar); ninguno de los dos sale de ahí.
+
+**El mutante que lo fija:** hacer que `findMembersParaSelector` delegue en `findMembers`
+—el atajo obvio, y exactamente el comportamiento anterior— pone en rojo
+`para-selector: cualquier miembro lo lee, y NO trae correo ni roles`
+(`tenants-members.e2e-spec.ts`), que recorre la respuesta campo por campo. El test hermano
+del guard tiene su contrapeso: `GET /tenants/members` con admin **exige** que venga el
+correo, así que un guard que rechazara a todos no pasaría en verde.
+
+Nota de la migración de los e2e: las **12** llamadas GET a `/tenants/members` repartidas en
+**4** specs (`caja`, `cajones`, `garzon-modo-personal`, `alta-usuarios-tenant`) ya usaban
+token de admin —incluido `tokenSupervisor` de `caja.e2e-spec.ts`, que pese al nombre loguea
+con `ADMIN_EMAIL`, y `tokenFalabella`, que es admin de ese otro tenant—. El único test que
+había que reescribir era el que afirmaba que la lectura estaba abierta.
+
+Queda una decisión que **no** zanja este cierre y le corresponde al owner: `para-selector`
+cuelga solo de `JwtAuthGuard + TenantGuard`, mientras sus dos consumidores están detrás de
+`Cajas:Actualizar` y `Salones:Actualizar`, y el hermano que se cita como patrón
+(`garzones/para-selector`) sí lleva `@RequiresPermiso`. O sea que el alcance concedido es
+más ancho que la unión de sus consumidores. Se dejó así porque el decorador admite un solo
+par `(módulo, permiso)` y el neto sigue siendo una reducción de exposición, pero si el owner
+prefiere apretarlo, la salida es **dos rutas**, una por módulo.
+
 ## No había forma de mandar un mail, y eso bloqueaba tres cosas (2026-08-09)
 
 **Cerrado por el servicio de mail + invitación por link + reset.** Se resolvieron los

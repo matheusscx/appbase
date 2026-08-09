@@ -47,6 +47,20 @@ export interface TenantMember {
 }
 
 /**
+ * Lo mínimo para poblar un selector de cuentas: **sin correo y sin roles**.
+ *
+ * Existe porque esos dos campos son los que no se pueden repartir. El correo es
+ * PII y además el identificador de login; la lista de roles dice quién es admin,
+ * o sea a quién conviene atacar. Un selector no necesita ninguno de los dos.
+ */
+export interface TenantMemberSelector {
+  usuarioId: string;
+  nombre: string;
+  apellido: string;
+  esTotem: boolean;
+}
+
+/**
  * El cuerpo del mail de invitación. Texto plano: son dos mails y ninguno
  * necesita HTML.
  *
@@ -348,6 +362,42 @@ export class TenantsService {
     }
 
     return [...porUsuario.values()];
+  }
+
+  /**
+   * El roster mínimo para los selectores de cuenta (cajones y garzones).
+   *
+   * Es `findMembers` sin lo sensible y sin el JOIN a roles —que es el único
+   * motivo por el que aquella devuelve varias filas por usuario y necesita
+   * deduplicar—. Acá una fila es un miembro.
+   */
+  async findMembersParaSelector(
+    tenantId: string,
+  ): Promise<TenantMemberSelector[]> {
+    const rows: {
+      usuario_id: string;
+      nombre: string;
+      apellido: string;
+      es_totem: boolean;
+    }[] = await this.dataSource.query(
+      `SELECT u.usuario_id,
+              u.nombre,
+              u.apellido,
+              ut.es_totem
+       FROM usuarios_tenants ut
+       JOIN usuarios u ON u.usuario_id = ut.usuario_id AND u.eliminado_el IS NULL
+       WHERE ut.tenant_id = $1
+         AND ut.eliminado_el IS NULL
+       ORDER BY u.nombre, u.apellido`,
+      [tenantId],
+    );
+
+    return rows.map((r) => ({
+      usuarioId: r.usuario_id,
+      nombre: r.nombre,
+      apellido: r.apellido,
+      esTotem: r.es_totem,
+    }));
   }
 
   async addMember(tenantId: string, usuarioId: string): Promise<UsuarioTenant> {

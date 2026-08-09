@@ -80,7 +80,7 @@ mockNuxtImport('usePermissionsStore', () => {
 })
 
 // `cajas.vue` también consulta `useCajaStore` (arqueo ciego) y
-// `/tenants/members` (drawer de usuarios) — ninguno relevante para la
+// `/tenants/members/para-selector` (drawer de usuarios) — ninguno relevante para la
 // papelera. Se stubean con lo mínimo para que `onMounted` no reviente.
 mockNuxtImport('useCajaStore', () => {
   return () => ({
