@@ -146,6 +146,13 @@ pero **filtra si ese correo está registrado**, y a la persona le aparece un ten
 pidió. Anotado en `docs/agent/pendientes.md` junto con las otras dos cosas que la falta de
 mail bloquea (invitación por link y reset de contraseña, que **tampoco existe**).
 
+📌 **Todo lo de esta sección es transitorio y ya tiene reemplazo decidido** (owner,
+2026-08-08): cuando haya envío de mails, el alta manda un **link de invitación** y la
+persona elige su contraseña ahí. Con eso desaparecen la contraseña temporal,
+`debe_cambiar_contrasena`, el 403 de `switchTenant` y `/cambiar-contrasena` — no se
+suavizan, se borran: existen **solo** porque hoy hay una credencial que un tercero conoce.
+El detalle de la decisión y lo que se descartó está en `docs/agent/pendientes.md`.
+
 ## API Endpoints
 
 Todos bajo `JwtAuthGuard + TenantGuard`. Las **mutaciones** agregan `TenantAdminGuard`

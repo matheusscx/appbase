@@ -601,8 +601,9 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   2. **Invitación por link**, que es lo que reemplazaría a la contraseña temporal del alta
      (ver `docs/superpowers/plans/2026-08-08-alta-de-usuarios-del-tenant.md`). Con
      invitación, el admin deja de conocer una contraseña válida de otra persona.
-  3. **Reset de contraseña** ("olvidé la mía"), que **tampoco existe** hoy: el único camino
-     es que un admin la reponga.
+  3. **Reset de contraseña** ("olvidé la mía"), que **tampoco existe** hoy: no hay ningún
+     endpoint que reponga una contraseña. El único de contraseña es `PATCH /me/contrasena`,
+     que **exige la actual**.
      ⚠️ **Al implementarlo hay que mirar `debe_cambiar_contrasena` también en
      `AuthService.refresh()`.** Hoy el flag se controla solo en `switchTenant`, y alcanza
      porque únicamente lo llevan cuentas recién creadas, que nunca tuvieron token de tenant.
@@ -613,6 +614,37 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   **Antes de encararlo hace falta decisión de owner sobre la dependencia** (elegir proveedor
   y agregarla al stack, que el `CLAUDE.md` exige confirmar). Las tres se resuelven con la
   misma infraestructura, así que conviene decidirla una vez y no tres.
+
+  ### Lo que ya se decidió sobre esto (charla con el owner, 2026-08-08)
+
+  - **Se manda un link de invitación, NO la contraseña por mail.** La contraseña mandada por
+    correo queda en la casilla en texto plano para siempre, es reenviable y pasa por
+    servidores intermedios; el link se quema al usarse. Además, con invitación **nadie más
+    que la persona conoce jamás una credencial suya** —hoy el admin la dicta, o sea que hay
+    un momento en que otro ser humano sabe cómo entrar a esa cuenta— y la verificación de
+    correo sale gratis: si hizo clic, la dirección existe y es suya.
+  - **Con invitación desaparecen la temporal, `debe_cambiar_contrasena`, el 403 de
+    `switchTenant` y la pantalla `/cambiar-contrasena`.** No se suavizan: se borran. Todo
+    ese andamiaje existe **solo** porque hay una contraseña que un tercero conoce. El owner
+    propuso reemplazar el bloqueo por un modal que insista en cada login; se descartó
+    mientras la temporal la dicte el admin, porque un modal que se puede cerrar deja la
+    ventana de suplantación abierta indefinidamente en vez de acotarla a un login.
+  - **NO se va a construir "reposición por el admin".** Se evaluó como paso previo (cierra
+    el callejón de la temporal perdida sin necesitar mail) y **el owner la descartó**: con
+    self-service el reset llega siempre al correo de la persona, así que el admin no
+    necesita conocer ninguna credencial ajena. Construirla ahora sería trabajo que el mail
+    tira, y obligaría a decidir una regla que con mail ni se plantea (ver abajo).
+  - ⚠️ **La escalada entre tenants que evita el self-service, anotada para que no se
+    redescubra:** la contraseña es del **usuario**, no del tenant — una sola cuenta para
+    todos los tenants a los que pertenece. Si un admin del tenant A pudiera reponerla, se
+    quedaría con una credencial válida para entrar como esa persona **en el tenant B**. Hoy
+    el alta esquiva el problema no tocando nunca la contraseña de un correo que ya existe;
+    cualquier reposición por admin que se proponga en el futuro tiene que resolver esto
+    primero.
+  - **Callejón sin salida que existe mientras tanto, asumido:** la temporal se muestra una
+    sola vez. Si se pierde, la cuenta queda muerta —re-dar de alta responde 409, cambiarla
+    exige saberla, y no hay reset—. Se asume porque no hay datos productivos ni gente
+    usando el sistema: es riesgo de laboratorio, no de operación.
 
 - [ ] **`/garzones/verificar-pin` es un oráculo de PIN sin throttling, y el fix del selector
   lo abarató 20×** (backend, `garzones.controller.ts`) — el endpoint dice si un PIN
