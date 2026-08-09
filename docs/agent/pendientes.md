@@ -149,6 +149,9 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
 - [ ] Descuento de stock en una venta (movimiento + saldo materializado).
 - [ ] **Cambio de tenant sin fuga de datos** (el más valioso — ninguna prueba unitaria
   lo cubre; login como usuario multi-tenant, verificar aislamiento de catálogo/ventas).
+- [ ] **Salones de punta a punta** (mesa → cuenta → líneas → cobro). Lo que hay hoy es unit
+  con el HTTP mockeado (`pages/salones/index.nuxt.spec.ts`) y e2e de API
+  (`salones-fusion`, `salones-comanda`): nadie recorre la pantalla en un navegador real.
 - [ ] Integrar `@smoke` al CI cuando haya masa crítica (hoy el CI no levanta el stack
   de navegador).
 
@@ -516,9 +519,11 @@ queda cerrado.**
 
 ### Huecos de test (medidos, con el mutante que sobrevive)
 
-Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela, y
-el de `fusionarCuentas` el 2026-08-09 con `test/salones-fusion.e2e-spec.ts` — que además fue
-el primer e2e de esa ruta (los dos en [`resueltos.md`](resueltos.md)). Quedan:
+Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela; el
+de `fusionarCuentas` el 2026-08-09 con `test/salones-fusion.e2e-spec.ts` —que además fue el
+primer e2e de esa ruta—; y el del computed `cuentaConItemEliminado` el mismo día, con dos
+tests en `pages/salones/index.nuxt.spec.ts` (los tres en [`resueltos.md`](resueltos.md)).
+Quedan:
 
 - [ ] **Con el seed no se puede ver una comanda a mano** (backend, `seeder.service.ts`) —
   **la mitad de test de esta entrada se cerró el 2026-08-09**: el camino a cocina ya tiene
@@ -533,16 +538,6 @@ el primer e2e de esa ruta (los dos en [`resueltos.md`](resueltos.md)). Quedan:
   asignarle `categoriaId` a un ítem vendible del seed, no crear categoría ni impresora.
   ⚠️ Al hacerlo, verificar que ningún e2e afirme sobre la categoría de ese ítem: el seed es
   el escenario inicial de los 30 specs.
-- [ ] **El computed `cuentaConItemEliminado` no tiene cobertura** (frontend,
-  `pages/salones/index.vue`) — mutante que pasa: `computed(() => false)`, con el frontend
-  entero en verde. Verificado a mano en el navegador el 2026-08-06.
-  **2026-08-07: la mitad cara de esta entrada ya no aplica.** Decía "las páginas no tienen
-  unit tests"; ahora existe `pages/salones/index.nuxt.spec.ts` (creado para el guard de
-  reentrancia), con el arnés de montaje ya resuelto —mock de `useApiFetch`, selección de
-  mesa, teclado de PIN real— así que cubrir esto es agregar un `it`, no montar la página.
-  Lo que sigue faltando y es propio de este computed: un fixture de cuenta **con una línea
-  de ítem eliminado**, que el mock actual no produce. `frontend/e2e` sigue sin cubrir
-  salones.
 
 ### Lo que dejaron las revisiones independientes del cierre
 

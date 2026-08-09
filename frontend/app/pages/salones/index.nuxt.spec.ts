@@ -20,6 +20,31 @@ import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Salones from './index.vue'
 
 const MESA_ID = 'mesa-1'
+const CLP_ID = 'clp'
+
+/**
+ * La moneda del tenant, para que `formatMonto` rinda plata de verdad.
+ *
+ * No es decorado: con el store vacío `useCurrency().format` devuelve `'—'` para
+ * **cualquier** monto, así que un test que afirme sobre lo que muestra la
+ * cabecera de Totales no puede distinguir "$5.000" de "tapado". Lo cazó la
+ * revisión independiente: dos aserciones escritas así no podían fallar bajo
+ * ninguna mutación.
+ */
+const MONEDA_CLP = {
+  monedaId: CLP_ID,
+  nombre: 'Peso chileno',
+  codigoIso: 'CLP',
+  simbolo: '$',
+  decimales: 0,
+  separadorDecimal: ',',
+  separadorMiles: '.',
+  locale: 'es-CL',
+  habilitada: true,
+  esDefault: true,
+  esOficial: true,
+  valorDelDia: null,
+}
 
 function mesa() {
   return {
@@ -54,6 +79,17 @@ let vinculoPersonal: { garzonId: string, nombre: string } | null | unknown = nul
 let sinSesionDeTrabajo = false
 /** Retiene la respuesta del POST para dejarlo "en vuelo" el tiempo que el test quiera. */
 let abrirCuentaRetenido: Promise<unknown> | null = null
+/**
+ * Lo que devuelve `GET /mesas/:id/cuentas`. Vacío por defecto —la mesa recién
+ * abierta— y lo llena el `describe` del ítem eliminado.
+ */
+let cuentasDeLaMesa: unknown[] = []
+/**
+ * `POST /calculo-precios/calcular` falla. Es lo que hace el backend real cuando
+ * una línea apunta a un ítem borrado del catálogo: 404, porque el motor resuelve
+ * los ítems contra el catálogo vivo.
+ */
+let calculoFalla = false
 
 mockNuxtImport('useApiFetch', () => {
   return (
@@ -96,7 +132,50 @@ mockNuxtImport('useApiFetch', () => {
           ? abrirCuentaRetenido.then(() => cuenta)
           : Promise.resolve(cuenta)
       }
-      return Promise.resolve([])
+      return Promise.resolve(cuentasDeLaMesa)
+    }
+
+    if (ruta.endsWith('/calculo-precios/calcular')) {
+      // El backend responde 404 si una línea apunta a un ítem borrado: el motor
+      // resuelve los ítems contra el catálogo vivo (`items.service.ts` →
+      // `cargarBasePorIds` filtra `eliminado_el IS NULL`).
+      if (calculoFalla) return Promise.reject(new Error('Ítem no encontrado'))
+      // La forma completa de `ResultadoVenta`, no la que este test consume: una
+      // respuesta recortada le deja una trampa al próximo test que toque el
+      // cobro, que lee `lineas[].trazas.impuestos`.
+      const trazas = { descuentos: [], recargos: [], impuestos: [] }
+      return Promise.resolve({
+        lineas: [{
+          itemId: 'item-1',
+          cantidad: '1',
+          precioUnitario: '5000',
+          subtotalNeto: '5000',
+          descuentoAplicado: '0',
+          recargoAplicado: '0',
+          impuestoAplicado: '0',
+          totalLinea: '5000',
+          trazas,
+          advertencias: [],
+        }],
+        totales: {
+          subtotalNeto: '5000',
+          totalDescuentos: '0',
+          totalRecargos: '0',
+          totalImpuestos: '0',
+          totalFinal: '5000',
+        },
+        trazasVenta: { descuentos: [], recargos: [] },
+        advertencias: [],
+        advertenciasVenta: [],
+      })
+    }
+
+    // Caja abierta EXPLÍCITA. El catch-all devuelve `[]`, que es un objeto y por
+    // lo tanto el store lo toma como caja activa: el botón de cobro quedaría
+    // habilitado por accidente, que es la misma trampa del `{}` truthy que
+    // documenta el mock de `mi-vinculo`.
+    if (ruta.endsWith('/caja/activa')) {
+      return Promise.resolve({ id: 'caja-1', estado: 'abierta' })
     }
 
     // El teclado de PIN resuelve al garzón contra el backend ANTES de emitir
@@ -154,9 +233,32 @@ async function esperar(ms: number) {
  */
 let montado: { unmount: () => void } | null = null
 
+/**
+ * Reset del estado del **mock HTTP**. Compartido por los dos `describe`: dos
+ * listas paralelas se desincronizan en cuanto se agregue la próxima variable.
+ *
+ * El estado que vive fuera del mock —el store de monedas— lo limpia el
+ * `afterEach` de arriba, que corre pase o falle el test.
+ */
+function reiniciarMock() {
+  postsAbrirCuenta = []
+  bodiesAbrirCuenta = []
+  urlsSelector = []
+  sinSesionDeTrabajo = false
+  abrirCuentaRetenido = null
+  vinculoPersonal = null
+  cuentasDeLaMesa = []
+  calculoFalla = false
+}
+
 afterEach(() => {
   montado?.unmount()
   montado = null
+  // El Pinia se comparte entre los tests del archivo, así que la moneda que
+  // hidrata un test sobrevive al siguiente. Hoy no rompe nada —el primer
+  // `describe` no afirma sobre plata— pero es una dependencia de orden latente,
+  // justo la clase de fragilidad que este spec vino a sacar.
+  useMonedasStore().reset()
 })
 
 async function montar() {
@@ -241,14 +343,7 @@ async function seleccionarMesa(wrapper: Awaited<ReturnType<typeof montar>>) {
 }
 
 describe('salones — guard de reentrancia de "Nueva cuenta"', () => {
-  beforeEach(() => {
-    postsAbrirCuenta = []
-    bodiesAbrirCuenta = []
-    urlsSelector = []
-    sinSesionDeTrabajo = false
-    abrirCuentaRetenido = null
-    vinculoPersonal = null
-  })
+  beforeEach(reiniciarMock)
 
   it('una ronda de PIN abre UNA cuenta (el camino feliz sigue vivo)', async () => {
     const wrapper = await montar()
@@ -398,5 +493,113 @@ describe('salones — guard de reentrancia de "Nueva cuenta"', () => {
       expect(await rondaDePin()).toBe(true)
       expect(bodiesAbrirCuenta[0]).toHaveProperty('pin')
     })
+  })
+})
+
+/**
+ * Una línea cuyo ítem se borró del catálogo bloquea la cuenta entera.
+ *
+ * El motor de precios resuelve los ítems contra el catálogo vivo, así que el
+ * cálculo devuelve 404 y `resultado` se queda en `null` — o sea `totalFinal`
+ * vale `'0'`. Sin el aviso, la cabecera mostraba **Total $0** para una cuenta
+ * con productos, que es peor que no mostrar nada: invita a cobrar cero.
+ *
+ * Estaba anotado como hueco con el mutante medido: `computed(() => false)`
+ * dejaba el frontend entero en verde. Lo que faltaba era el fixture, no el
+ * arnés — una cuenta que ya venga con la línea marcada, que el mock del POST no
+ * produce porque abre cuentas vacías.
+ */
+describe('salones — cuenta con un ítem eliminado del catálogo', () => {
+  const LINEA_BASE = {
+    id: 'linea-1',
+    itemId: 'item-1',
+    nombre: 'Producto viejo',
+    precioBase: '5000',
+    monedaId: 'clp',
+    cantidad: '1',
+  }
+
+  function cuentaCon(linea: Record<string, unknown>) {
+    return {
+      id: 'cuenta-9',
+      numero: 9,
+      nombre: null,
+      estado: 'abierta',
+      mesaId: MESA_ID,
+      ventaId: null,
+      garzonAperturaId: 'g1',
+      garzonAperturaNombre: 'Ana',
+      garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana',
+      garzonCierreId: null,
+      garzonCierreNombre: null,
+      lineas: [linea],
+    }
+  }
+
+  beforeEach(reiniciarMock)
+
+  /**
+   * Monta con la moneda del tenant cargada.
+   *
+   * ⚠️ Sin esto `formatMonto` devuelve `'—'` para cualquier monto, así que la
+   * fila de Totales se ve **idéntica** con y sin el computed y toda aserción
+   * sobre ella es inerte. Se hidrata después de montar y antes de abrir el
+   * drawer: la fila se rinde recién al entrar a la cuenta.
+   */
+  async function montarConMoneda() {
+    const wrapper = await montar()
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    await esperar(0)
+    return wrapper
+  }
+
+  /** Selecciona la mesa y entra a la única cuenta que tiene. */
+  async function abrirLaCuenta(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await seleccionarMesa(wrapper)
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>('.cursor-pointer')
+    expect(tarjeta).toBeTruthy()
+    tarjeta!.click()
+    await esperar(20)
+  }
+
+  /**
+   * El valor de la fila "Total", no el `textContent` del drawer.
+   *
+   * Barrer el drawer entero no sirve: la cabecera rinde `— Cuenta 9` apenas hay
+   * cuenta activa, así que un `toContain('—')` da verde siempre.
+   */
+  function valorDelTotal(): string {
+    const spans = [...(drawerMesa()?.querySelectorAll('span') ?? [])]
+    const etiqueta = spans.find(s => s.textContent?.trim() === 'Total')
+    return etiqueta?.nextElementSibling?.textContent?.trim() ?? ''
+  }
+
+  it('avisa, tapa el total y deshabilita el cobro', async () => {
+    cuentasDeLaMesa = [cuentaCon({ ...LINEA_BASE, itemEliminado: true })]
+    calculoFalla = true
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    expect(drawerMesa()?.textContent).toContain('Hay un ítem eliminado del catálogo')
+    // Tapar el total es la mitad que importa: el cálculo falló, así que
+    // `totalFinal` cae a `'0'` y la cabecera mostraría **Total $0** para una
+    // cuenta con productos. Eso invita a cobrar cero.
+    expect(valorDelTotal()).toBe('—')
+    expect(botonEn(drawerMesa(), 'Cerrar y cobrar')?.disabled).toBe(true)
+  })
+
+  // El contraejemplo: sin él, un `computed(() => true)` —el mutante espejo—
+  // pasaría el test de arriba dejando toda cuenta sana imposible de cobrar.
+  it('la misma cuenta sin la marca cobra normal y muestra su total', async () => {
+    cuentasDeLaMesa = [cuentaCon(LINEA_BASE)]
+
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    expect(drawerMesa()?.textContent).not.toContain('Hay un ítem eliminado del catálogo')
+    expect(valorDelTotal()).toBe('$5.000')
+    expect(botonEn(drawerMesa(), 'Cerrar y cobrar')?.disabled).toBe(false)
   })
 })

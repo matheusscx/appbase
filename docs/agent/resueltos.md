@@ -17,6 +17,40 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El aviso de ítem eliminado se podía borrar sin que nada se pusiera rojo (2026-08-09)
+
+**La entrada:** el computed `cuentaConItemEliminado` (`pages/salones/index.vue`) no tenía
+cobertura, con el mutante medido: `computed(() => false)` dejaba el **frontend entero** en
+verde. Lo que faltaba no era el arnés —`pages/salones/index.nuxt.spec.ts` ya existía, creado
+para el guard de reentrancia— sino el **fixture**: una cuenta que ya venga con una línea
+marcada, que el mock del `POST` no produce porque abre cuentas vacías.
+
+**Cómo se cerró:** el mock de `GET /mesas/:id/cuentas` pasó a devolver una lista
+configurable (vacía por defecto, así los tests viejos no se enteran) y se agregó el de
+`POST /calculo-precios/calcular`, que en este escenario **falla** — que es lo que hace el
+backend real: el motor resuelve los ítems contra el catálogo vivo y devuelve 404.
+
+⚠️ **Y el arnés tuvo que aprender a rendir plata**, que fue el bloqueo de la revisión
+independiente sobre la primera versión: con el store de monedas vacío `formatMonto` devuelve
+`'—'` para **cualquier** monto, así que la fila de Totales se veía igual con y sin el
+computed y las dos aserciones que la miraban **no podían fallar bajo ninguna mutación**. El
+spec hidrata la moneda del tenant y la aserción de plata va sobre **la fila del Total**, no
+sobre el `textContent` del drawer —que rinde `— Cuenta 9` en la cabecera, y por eso un
+`toContain('—')` daba verde siempre—. (El cartel sí se busca en el texto del drawer: ahí no
+hay ambigüedad y mata los dos mutantes.) Mismo patrón que
+[`anti-patterns.md`](anti-patterns.md) registra para el SQL: una aserción que matchea otra
+cosa parece cobertura y no lo es.
+
+Dos tests, uno por cada mutante:
+
+- **avisa, tapa el total y deshabilita el cobro.** Mata `computed(() => false)`. Lo que
+  importa no es solo el cartel: con el mutante puesto la aserción del total falla con
+  `expected '$0' to be '—'`, o sea reproduce el síntoma exacto —una cuenta con productos
+  mostrando **Total $0**, que invita a cobrar cero— y no solo la ausencia del cartel.
+- **la misma cuenta sin la marca cobra normal.** Mata el mutante espejo,
+  `computed(() => true)`, que dejaría toda cuenta sana imposible de cobrar. Sin este, el
+  primero pasaría igual.
+
 ## El camino a cocina no lo tocaba ningún test (2026-08-09)
 
 **La entrada:** los únicos tests que afirmaban sobre `estaciones` eran unitarios con el SQL
