@@ -1,18 +1,9 @@
 // Rutas que no necesitan tenant activo (además de no necesitar auth o tenerla aparte)
-//
-// ⚠️ `/cambiar-contrasena` es exenta por definición: mientras la contraseña
-// temporal no se cambie, `switch-tenant` responde 403, así que NUNCA va a haber
-// tenant activo ahí. Sin la exención, `handlePostLogin` la desviaba a
-// `/select-tenant` cuando la persona tiene 2+ tenants y quedaba **encerrada sin
-// salida**: elegir tenant da 403, el 403 la manda acá, y acá el middleware la
-// manda a elegir tenant. Con 1 solo tenant el rebote era invisible pero gastaba
-// un switch-tenant fallido por visita.
 const TENANT_EXEMPT = [
   '/select-tenant',
   '/no-tenant',
   '/login',
   '/register',
-  '/cambiar-contrasena',
 ]
 
 export default defineNuxtRouteMiddleware(async (to) => {

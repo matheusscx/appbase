@@ -5,7 +5,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { ALFABETO_TEMPORAL, TenantsService } from './tenants.service';
+import { TenantsService } from './tenants.service';
 import { Tenant } from './entities/tenant.entity';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
 import { TenantModulo } from './entities/tenant-modulo.entity';
@@ -13,6 +13,9 @@ import { TenantFormulaPrecio } from './entities/tenant-formula-precio.entity';
 import { Caja } from '../caja/entities/caja.entity';
 import { RazonSocial } from './entities/razon-social.entity';
 import { GarzonesService } from '../garzones/garzones.service';
+import { TokensAccesoService } from '../auth/tokens-acceso.service';
+import { MailService } from '../mail/mail.service';
+import { ConfigService } from '@nestjs/config';
 import type { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 
 const mockTenant: Tenant = {
@@ -112,6 +115,14 @@ describe('TenantsService', () => {
           provide: GarzonesService,
           useValue: { asegurarMostrador: jest.fn() },
         },
+        {
+          provide: TokensAccesoService,
+          useValue: { emitir: jest.fn().mockResolvedValue('tok-invitacion') },
+        },
+        // ⚠️ Mockeado, no real: un unit que mandara mail de verdad sería
+        // exactamente lo que el fallback de `MailService` existe para evitar.
+        { provide: MailService, useValue: { enviar: jest.fn() } },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
       ],
     }).compile();
 
@@ -433,23 +444,6 @@ describe('TenantsService', () => {
         service.updatePreferenciasFinancieras('tenant-uuid', dto),
       ).rejects.toThrow(BadRequestException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
-    });
-  });
-
-  // Se afirma sobre el ALFABETO, no sobre una contraseña generada: una muestra
-  // de 12 caracteres sacada de un alfabeto que volviera a incluir los ambiguos
-  // no contiene ninguno ~15% de las veces, así que el test sería intermitente.
-  // La propiedad que importa es del conjunto.
-  describe('alfabeto de la contraseña temporal', () => {
-    it('no tiene ningún caracter que se confunda al dictarla o copiarla', () => {
-      const ambiguos = [...'0Oo1lIi5Ss'].filter((c) =>
-        ALFABETO_TEMPORAL.includes(c),
-      );
-      expect(ambiguos).toEqual([]);
-    });
-
-    it('no repite caracteres, que sesgaría el sorteo hacia ellos', () => {
-      expect(new Set(ALFABETO_TEMPORAL).size).toBe(ALFABETO_TEMPORAL.length);
     });
   });
 });

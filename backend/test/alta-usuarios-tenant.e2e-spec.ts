@@ -8,17 +8,14 @@ import { AppModule } from '../src/app.module';
  * Alta de usuarios del tenant, contra Postgres real.
  *
  * Lo que ningún unit puede probar acá: que el `INSERT ... ON CONFLICT` de roles
- * compile, que la transacción revierta de verdad, y sobre todo **el par que
- * define la feature** — un usuario con la contraseña temporal sin cambiar no
- * obtiene token de tenant, pero sí puede cambiarla.
+ * compile, que la transacción revierta de verdad, y que los tres caminos del
+ * alta se comporten distinto según si el correo ya existía.
  */
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
 
 const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
 const VENDEDOR_PARIS = { email: 'vendedor@paris.cl', pass: 'admin' };
-/** Sembrado con `debe_cambiar_contrasena = true` y **miembro de Paris**. */
-const TEMPORAL = { email: 'temporal@paris.cl', pass: 'admin' };
 
 interface TokenResponse {
   access_token: string;
@@ -26,7 +23,8 @@ interface TokenResponse {
 interface AltaResponse {
   usuarioId: string;
   correo: string;
-  contrasenaTemporal?: string;
+  /** `true` si se creó la cuenta y salió la invitación. */
+  invitado: boolean;
 }
 interface Member {
   usuarioId: string;
@@ -110,72 +108,19 @@ describe('Alta de usuarios del tenant (e2e)', () => {
     return `alta-${marca}-${Date.now()}@paris.cl`;
   }
 
-  describe('el par que define la feature', () => {
-    it('con la contraseña temporal sin cambiar NO se puede entrar a un tenant', async () => {
-      const suelto = await loginSuelto(app, TEMPORAL.email, TEMPORAL.pass);
-      expect(suelto).toBeTruthy(); // el login sí funciona
-
-      const res = await request(app.getHttpServer())
-        .post('/api/auth/switch-tenant')
-        .set('Authorization', `Bearer ${suelto}`)
-        .send({ tenantId: PARIS_TENANT_ID });
-
-      expect(res.status).toBe(403);
-      const body = res.body as { message: string; codigo: string };
-      // ⚠️ El mensaje importa: el usuario ES miembro de Paris, así que un 403 de
-      // "no perteneces a este tenant" significaría que el test pasa por la razón
-      // equivocada y el flag no lo está frenando nada.
-      expect(body.message).toContain('contraseña temporal');
-      // Y el `codigo` es contrato con el front, no decoración: el store mira
-      // este string exacto para desviar a `/cambiar-contrasena`, que es la única
-      // salida. Renombrarlo de un solo lado encierra a todo usuario nuevo.
-      expect(body.codigo).toBe('DEBE_CAMBIAR_CONTRASENA');
-    });
-
-    it('y SÍ puede cambiar su contraseña, que es la única salida', async () => {
-      const suelto = await loginSuelto(app, TEMPORAL.email, TEMPORAL.pass);
-
-      const res = await request(app.getHttpServer())
-        .patch('/api/me/contrasena')
-        .set('Authorization', `Bearer ${suelto}`)
-        .send({
-          contrasenaActual: TEMPORAL.pass,
-          contrasenaNueva: 'nueva-clave-123',
-          confirmarContrasena: 'nueva-clave-123',
-        });
-
-      expect(res.status).toBe(200);
-
-      // Y con eso el tenant se abre.
-      const conNueva = await loginSuelto(
-        app,
-        TEMPORAL.email,
-        'nueva-clave-123',
-      );
-      const switched = await request(app.getHttpServer())
-        .post('/api/auth/switch-tenant')
-        .set('Authorization', `Bearer ${conNueva}`)
-        .send({ tenantId: PARIS_TENANT_ID });
-
-      expect(switched.status).toBe(200);
-      expect((switched.body as TokenResponse).access_token).toBeTruthy();
-    });
-  });
-
   describe('los tres caminos del alta', () => {
-    it('correo nuevo: crea, asocia, asigna roles y devuelve la temporal una vez', async () => {
+    it('correo nuevo: crea la cuenta SIN contraseña, asocia, asigna roles e invita', async () => {
       const correo = correoNuevo('nuevo');
 
       const res = await alta({ nombre: 'Nuevo', correo, rolIds: [rolIdParis] });
 
       expect(res.status).toBe(201);
       const body = res.body as AltaResponse;
-      // Solo forma y largo. Que el alfabeto no tenga caracteres ambiguos se
-      // afirma sobre el alfabeto en `tenants.service.spec.ts`, no acá: una
-      // muestra de 12 caracteres no contiene ninguno ~15% de las veces aunque
-      // el alfabeto los tenga, y el test sería intermitente.
-      expect(body.contrasenaTemporal).toMatch(/^[A-Za-z0-9]{12}$/);
       expect(body.usuarioId).toBeTruthy();
+      // ⚠️ La respuesta NO trae ninguna credencial. Es el punto de la feature:
+      // el admin nunca conoce una contraseña ajena.
+      expect(body.invitado).toBe(true);
+      expect(body).not.toHaveProperty('contrasenaTemporal');
 
       // Quedó miembro y con el rol: crear sin rol sería crear algo roto.
       const members = await request(app.getHttpServer())
@@ -187,13 +132,12 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       expect(creado).toBeTruthy();
       expect(creado!.roles.map((r) => r.rolId)).toContain(rolIdParis);
 
-      // Y arranca frenado: la temporal no sirve para entrar a ningún tenant.
-      const suelto = await loginSuelto(app, correo, body.contrasenaTemporal!);
-      const switched = await request(app.getHttpServer())
-        .post('/api/auth/switch-tenant')
-        .set('Authorization', `Bearer ${suelto}`)
-        .send({ tenantId: PARIS_TENANT_ID });
-      expect(switched.status).toBe(403);
+      // Y la cuenta arranca SIN contraseña: hasta que use el link no hay con
+      // qué entrar.
+      const intento = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: correo, password: 'lo-que-sea-1234' });
+      expect(intento.status).toBe(401);
     });
 
     // La decisión central del owner —"si el correo ya existe, se asocia"— y el
@@ -208,7 +152,6 @@ describe('Alta de usuarios del tenant (e2e)', () => {
         rolIds: [rolIdParis],
       });
       expect(primera.status).toBe(201);
-      const { contrasenaTemporal } = primera.body as AltaResponse;
 
       const res = await request(app.getHttpServer())
         .post('/api/tenants/usuarios')
@@ -216,9 +159,10 @@ describe('Alta de usuarios del tenant (e2e)', () => {
         .send({ nombre: 'Compartido', correo, rolIds: [rolIdFalabella] });
 
       expect(res.status).toBe(201);
-      // Sin temporal: la cuenta es de esa persona, no del admin que la suma. Una
-      // temporal acá significaría que le pisaron la contraseña.
-      expect((res.body as AltaResponse).contrasenaTemporal).toBeUndefined();
+      // `invitado: false`: la cuenta es de esa persona, no del admin que la
+      // suma. Una invitación acá le mandaría un link para "elegir" una
+      // contraseña que ya tiene.
+      expect((res.body as AltaResponse).invitado).toBe(false);
 
       const miembrosFalabella = await request(app.getHttpServer())
         .get('/api/tenants/members')
@@ -239,13 +183,6 @@ describe('Alta de usuarios del tenant (e2e)', () => {
         (m) => m.correo === correo,
       );
       expect(enParis!.roles.map((r) => r.rolId)).toEqual([rolIdParis]);
-
-      // Y la contraseña que ya tenía sigue sirviendo: es la afirmación que el
-      // 201 por sí solo no hace.
-      const login = await request(app.getHttpServer())
-        .post('/api/auth/login')
-        .send({ email: correo, password: contrasenaTemporal });
-      expect(login.status).toBe(200);
     });
 
     it('correo que ya es miembro: 409, y NO le toca los roles', async () => {
@@ -325,7 +262,7 @@ describe('Alta de usuarios del tenant (e2e)', () => {
 
     // La unique de Postgres es case-sensitive: sin comparar en minúsculas, el
     // mismo correo con otra caja creaba una SEGUNDA cuenta para la misma
-    // persona, con contraseña temporal y todo.
+    // persona, con su propia invitación y todo.
     it('un correo que ya existe con otra caja de mayúsculas se asocia, no se duplica', async () => {
       const res = await alta({
         nombre: 'Vendedor',
@@ -336,15 +273,12 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       // Ya es miembro, así que el camino correcto es el 409 — no un 201 con
       // cuenta nueva, que es lo que pasaba antes.
       expect(res.status).toBe(409);
-      expect((res.body as AltaResponse).contrasenaTemporal).toBeUndefined();
     });
 
-    // La otra mitad del mismo problema, y la más cara: deduplicar en minúsculas
-    // pero **guardar tal cual se tipeó** dejaba una cuenta que solo entra con esa
-    // caja exacta. El admin tipea `Juan.Perez@…`, la persona tipea todo en
-    // minúsculas, y como la temporal se muestra una sola vez y no hay reset, no
-    // entra nunca. Se afirma sobre el login, no sobre el 201.
-    it('un alta tipeada con mayúsculas entra igual escribiendo el correo en minúsculas', async () => {
+    // La otra mitad del mismo problema: deduplicar en minúsculas pero **guardar
+    // tal cual se tipeó** dejaba dos formas del mismo correo dando vueltas —una
+    // en la base y otra en el mail de invitación—.
+    it('un alta tipeada con mayúsculas guarda el correo en minúsculas', async () => {
       const correo = correoNuevo('caja');
 
       const res = await alta({
@@ -354,23 +288,9 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       });
 
       expect(res.status).toBe(201);
-      const body = res.body as AltaResponse;
-      // La respuesta devuelve la forma canónica: es la que el admin le dicta.
-      expect(body.correo).toBe(correo);
-
-      const enMinusculas = await request(app.getHttpServer())
-        .post('/api/auth/login')
-        .send({ email: correo, password: body.contrasenaTemporal });
-      expect(enMinusculas.status).toBe(200);
-
-      // Y la caja original tampoco queda afuera: el login no distingue.
-      const comoLoTipeoElAdmin = await request(app.getHttpServer())
-        .post('/api/auth/login')
-        .send({
-          email: correo.toUpperCase(),
-          password: body.contrasenaTemporal,
-        });
-      expect(comoLoTipeoElAdmin.status).toBe(200);
+      // La forma canónica es la que va en el mail de invitación y la que la
+      // persona va a usar para entrar.
+      expect((res.body as AltaResponse).correo).toBe(correo);
     });
   });
 

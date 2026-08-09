@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MailModule } from './modules/mail/mail.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
@@ -13,6 +14,7 @@ import { RolesModule } from './modules/roles/roles.module';
 import { MeModule } from './modules/me/me.module';
 import { Usuario } from './modules/users/usuario.entity';
 import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
+import { TokenAcceso } from './modules/auth/entities/token-acceso.entity';
 import { Pais } from './modules/catalog/entities/pais.entity';
 import { Provincia } from './modules/catalog/entities/provincia.entity';
 import { Moneda } from './modules/catalog/entities/moneda.entity';
@@ -144,6 +146,7 @@ import { RecuentosModule } from './modules/recuentos/recuentos.module';
 
 @Module({
   imports: [
+    MailModule,
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -154,6 +157,7 @@ import { RecuentosModule } from './modules/recuentos/recuentos.module';
         entities: [
           Usuario,
           RefreshToken,
+          TokenAcceso,
           Pais,
           Provincia,
           Moneda,

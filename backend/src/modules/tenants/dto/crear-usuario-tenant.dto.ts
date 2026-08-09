@@ -13,9 +13,10 @@ import {
 /**
  * Alta de un usuario del tenant por su admin.
  *
- * **No lleva contraseña**: si la cuenta es nueva, el sistema **genera** una
- * temporal y la devuelve en claro una sola vez (mismo patrón que el PIN del
- * garzón). Que la elija el admin permitiría una débil, o la misma para todos.
+ * **No lleva contraseña**: si la cuenta es nueva, se crea sin contraseña y a la
+ * persona le llega un **link de invitación** para elegir la suya. Que la
+ * eligiera el admin permitiría una débil, o la misma para todos — y sobre todo
+ * lo dejaría conociendo una credencial ajena.
  *
  * **Los roles son obligatorios y múltiples.** Un usuario sin rol entra y no ve
  * nada: crear sin rol es crear algo roto. Y son varios porque así los modela ya

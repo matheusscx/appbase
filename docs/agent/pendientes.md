@@ -602,89 +602,20 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   **después** de crear el usuario; desde la API no es trivial, así que probablemente sea un
   unit con el manager mockeado.
 
-- [ ] **No hay forma de mandar un mail, y eso bloquea tres cosas a la vez** (backend) —
-  medido el 2026-08-08: cero rastros de `nodemailer`, `@nestjs-modules/mailer`, SMTP,
-  SendGrid o Resend en `package.json` ni en `backend/src`. **No es una feature faltante, es
-  infraestructura ausente**, y por eso bloquea:
-  1. **Verificación de correo** al dar de alta un usuario del tenant. Diferida
-     explícitamente por el owner (2026-08-08) *"porque no hay nada para enviar mail aún"*.
-     ⚠️ Mientras no exista, un admin puede sumar **cualquier correo registrado** a su tenant:
-     el daño está acotado —sumarte a mi restaurante no me da acceso a tus datos, te da
-     acceso a los míos— pero **filtra si ese correo está registrado** (enumeración), y a la
-     persona le aparece un tenant que no pidió.
-  2. **Invitación por link**, que es lo que reemplazaría a la contraseña temporal del alta
-     (ver `docs/superpowers/plans/2026-08-08-alta-de-usuarios-del-tenant.md`). Con
-     invitación, el admin deja de conocer una contraseña válida de otra persona.
-  3. **Reset de contraseña** ("olvidé la mía"), que **tampoco existe** hoy: no hay ningún
-     endpoint que reponga una contraseña. El único de contraseña es `PATCH /me/contrasena`,
-     que **exige la actual**.
-     ⚠️ **Al implementarlo hay que mirar `debe_cambiar_contrasena` también en
-     `AuthService.refresh()`.** Hoy el flag se controla solo en `switchTenant`, y alcanza
-     porque únicamente lo llevan cuentas recién creadas, que nunca tuvieron token de tenant.
-     Un reset se lo pone a alguien **con sesión viva**: sin el chequeo en `refresh`, esa
-     sesión se renueva sola con el tenant que ya tenía y se saltea el cambio. Se probó
-     agregarlo por adelantado y se sacó: era una rama inalcanzable y sin test dentro del
-     subsistema que la invariante 4 pide no tocar.
-  **La dependencia ya está decidida** (owner, 2026-08-08): **`nodemailer`** contra el
-  **SMTP propio del owner** (Gmail o corporativo). Las tres se resuelven con la misma
-  infraestructura, así que se hace una vez y no tres. Lo que falta es ejecutarlo — el owner
-  lo pospuso para después de cerrar la Fase 2 del garzón.
+- [ ] **Verificación de correo del auto-registro público** (backend) — lo único que
+  quedó abierto de la entrada de mail, que se cerró el 2026-08-09 (ver
+  `resueltos.md`). La invitación resuelve la verificación **del invitado**: si hizo
+  clic en el link, la dirección existe y alguien la lee. Falta el otro camino:
+  `POST /auth/register` sigue creando cuentas con un correo que nadie probó.
 
-  Lo decidido y lo que se descartó, con su porqué:
-
-  - **`nodemailer` es el cliente, no el proveedor.** Se escribe contra SMTP, así que el
-    proveedor real (Resend / SendGrid / SES / el que sea) entra por `.env` el día del
-    deploy **sin tocar código**. Es la decisión menos comprometedora disponible.
-  - **NO sumar `@nestjs-modules/mailer`.** Trae motor de plantillas y config propia para
-    resolver dos mails. `nodemailer` pelado alcanza.
-  - **Se descartó Mailpit** (capturador SMTP local en `docker-compose`) porque el fallback
-    de abajo da el mismo loop de desarrollo sin sumar un servicio.
-  - ⚠️ **Restricción de diseño, no opcional: los tests no pueden mandar mail de verdad.**
-    Se corren 342 e2e en cada cierre y en CI; mandando en serio, cada corrida dispara mails
-    reales, come el tope diario de Gmail (~500/día) y CI necesitaría las credenciales del
-    owner. Por eso el envío va detrás de una interfaz que **con `SMTP_HOST` vacío loguea el
-    mail en vez de mandarlo**. Beneficio lateral: el link de invitación aparece en el log
-    del backend, que es todo el loop de desarrollo que hace falta.
-  - **Credenciales:** claves `SMTP_*` **vacías** en `.env.example` (mismo patrón que
-    `GOOGLE_CLIENT_SECRET` y `QZ_PRIVATE_KEY`); el owner completa su `.env`, gitigno­rado.
-    Gmail exige 2FA + **App Password**, no la contraseña de la cuenta. Y reescribe el
-    remitente a la dirección de la cuenta: no se puede mandar como `no-reply@dominio`.
-
-  **Decisiones que faltan y que el plan tiene que poner sobre la mesa:** cuánto vive una
-  invitación y qué pasa al expirar; si invitación y reset comparten tabla de tokens (se
-  parecen mucho: token de un solo uso, con vencimiento, que termina en "elegí tu
-  contraseña"); y si la verificación de correo entra en la misma tanda.
-
-  ### Lo que ya se decidió sobre esto (charla con el owner, 2026-08-08)
-
-  - **Se manda un link de invitación, NO la contraseña por mail.** La contraseña mandada por
-    correo queda en la casilla en texto plano para siempre, es reenviable y pasa por
-    servidores intermedios; el link se quema al usarse. Además, con invitación **nadie más
-    que la persona conoce jamás una credencial suya** —hoy el admin la dicta, o sea que hay
-    un momento en que otro ser humano sabe cómo entrar a esa cuenta— y la verificación de
-    correo sale gratis: si hizo clic, la dirección existe y es suya.
-  - **Con invitación desaparecen la temporal, `debe_cambiar_contrasena`, el 403 de
-    `switchTenant` y la pantalla `/cambiar-contrasena`.** No se suavizan: se borran. Todo
-    ese andamiaje existe **solo** porque hay una contraseña que un tercero conoce. El owner
-    propuso reemplazar el bloqueo por un modal que insista en cada login; se descartó
-    mientras la temporal la dicte el admin, porque un modal que se puede cerrar deja la
-    ventana de suplantación abierta indefinidamente en vez de acotarla a un login.
-  - **NO se va a construir "reposición por el admin".** Se evaluó como paso previo (cierra
-    el callejón de la temporal perdida sin necesitar mail) y **el owner la descartó**: con
-    self-service el reset llega siempre al correo de la persona, así que el admin no
-    necesita conocer ninguna credencial ajena. Construirla ahora sería trabajo que el mail
-    tira, y obligaría a decidir una regla que con mail ni se plantea (ver abajo).
-  - ⚠️ **La escalada entre tenants que evita el self-service, anotada para que no se
-    redescubra:** la contraseña es del **usuario**, no del tenant — una sola cuenta para
-    todos los tenants a los que pertenece. Si un admin del tenant A pudiera reponerla, se
-    quedaría con una credencial válida para entrar como esa persona **en el tenant B**. Hoy
-    el alta esquiva el problema no tocando nunca la contraseña de un correo que ya existe;
-    cualquier reposición por admin que se proponga en el futuro tiene que resolver esto
-    primero.
-  - **Callejón sin salida que existe mientras tanto, asumido:** la temporal se muestra una
-    sola vez. Si se pierde, la cuenta queda muerta —re-dar de alta responde 409, cambiarla
-    exige saberla, y no hay reset—. Se asume porque no hay datos productivos ni gente
-    usando el sistema: es riesgo de laboratorio, no de operación.
+- [ ] **`POST /auth/recuperar` dispara un envío saliente a una dirección que elige
+  quien llama, sin auth ni throttle** (backend, `auth.controller.ts`) — superficie de
+  abuso **nueva**, que antes no existía: `login` también es público, pero no manda
+  nada afuera. Con un loop, cualquiera bombardea una casilla ajena y quema la
+  reputación del remitente. La respuesta es idéntica exista o no el correo, así que
+  no filtra cuentas; el problema es el volumen. **Cruzar con la entrada de
+  `/garzones/verificar-pin`**: las dos piden lo mismo —no hay throttler en el
+  proyecto— y conviene decidir la infraestructura una vez.
 
 - [ ] **`/garzones/verificar-pin` es un oráculo de PIN sin throttling, y el fix del selector
   lo abarató 20×** (backend, `garzones.controller.ts`) — el endpoint dice si un PIN

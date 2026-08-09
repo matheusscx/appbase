@@ -112,9 +112,9 @@ export class TenantsController {
    * Alta de un usuario del tenant. Mismo guard que `members` —es administración
    * del tenant— y por eso **no** lleva `@RequiresPermiso`.
    *
-   * Devuelve `contrasenaTemporal` **solo** cuando la cuenta se creó: si el
-   * correo ya existía, la cuenta es de esa persona y su contraseña no se toca.
-   * Es la única vez que se puede leer, igual que el PIN del garzón.
+   * Devuelve `invitado: true` **solo** cuando la cuenta se creó y salió el mail
+   * con el link. Si el correo ya existía, la cuenta es de esa persona: no se le
+   * toca la contraseña ni se le manda nada.
    */
   @UseGuards(TenantAdminGuard)
   @Post('usuarios')

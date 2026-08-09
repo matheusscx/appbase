@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -7,14 +8,30 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import { Usuario } from '../users/usuario.entity';
+import { TipoTokenAcceso } from './entities/token-acceso.entity';
+import { TokensAccesoService } from './tokens-acceso.service';
+import { MailService } from '../mail/mail.service';
 import { RefreshToken } from './entities/refresh-token.entity';
+
+/** Cuerpo del mail de reset. El link lleva el token en claro, la única vez que existe. */
+function mailDeReset(correo: string, token: string, base: string) {
+  return {
+    para: correo,
+    asunto: 'Elegí una contraseña nueva',
+    cuerpo:
+      `Pediste recuperar el acceso a tu cuenta.\n\n` +
+      `Elegí una contraseña nueva acá (el link vence en 1 hora):\n` +
+      `${base}/recuperar/${token}\n\n` +
+      `Si no lo pediste, ignorá este mail: tu contraseña actual sigue funcionando.`,
+  };
+}
 
 @Injectable()
 export class AuthService {
@@ -26,6 +43,8 @@ export class AuthService {
     private readonly refreshRepo: Repository<RefreshToken>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly tokens: TokensAccesoService,
+    private readonly mail: MailService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<Usuario | null> {
@@ -44,6 +63,109 @@ export class AuthService {
     const user = await this.usersService.create({ ...dto, contrasena: hashed });
     const { access_token, refresh_token } = await this.generateTokens(user);
     return { access_token, refresh_token, user };
+  }
+
+  /**
+   * Dice si un link sirve, **sin quemarlo**. La pantalla lo consulta al cargar
+   * para mostrar "este link venció" en vez de un formulario que va a fallar
+   * después de que la persona tipeó dos veces su contraseña.
+   *
+   * No quemarlo acá es deliberado: un prefetch del navegador o abrir el link
+   * dos veces inutilizaría la invitación antes de escribir nada.
+   */
+  async verificarToken(
+    token: string,
+    tipo: TipoTokenAcceso,
+  ): Promise<{ correo: string }> {
+    const fila = await this.tokens.buscarVigente(token, tipo);
+    if (!fila) {
+      throw new BadRequestException(
+        'Ese link ya no sirve: puede estar vencido o ya usado. Pedí uno nuevo.',
+      );
+    }
+    const user = await this.usersService.findById(fila.usuarioId);
+    if (!user) throw new BadRequestException('Ese link ya no sirve');
+    return { correo: user.correo };
+  }
+
+  /**
+   * Fija la contraseña desde un link y lo quema, **en una transacción**: si el
+   * quemado fallara después de guardar el hash, el link seguiría vivo y
+   * serviría de nuevo.
+   *
+   * Se quema PRIMERO. `quemar()` corta con un `UPDATE ... WHERE usado_el IS
+   * NULL`, así que de dos requests simultáneos con el mismo link solo uno
+   * sigue; el otro revienta antes de tocar la contraseña.
+   */
+  async elegirContrasena(
+    token: string,
+    tipo: TipoTokenAcceso,
+    contrasena: string,
+  ): Promise<{ message: string }> {
+    const fila = await this.tokens.buscarVigente(token, tipo);
+    if (!fila) {
+      throw new BadRequestException(
+        'Ese link ya no sirve: puede estar vencido o ya usado. Pedí uno nuevo.',
+      );
+    }
+    const hashed = await bcrypt.hash(contrasena, 10);
+    await this.dataSource.transaction(async (manager) => {
+      await this.tokens.quemar(fila.id, manager);
+      // Y se matan TODOS los links vivos de esa cuenta, no solo el usado. Un
+      // link de invitación vive 7 días: sin esto sobrevive al reset y quien
+      // tenga ese mail puede volver a fijar la contraseña y entrar. La cuenta
+      // ya tiene dueño; cualquier link pendiente es una llave de reentrada.
+      await this.tokens.invalidarTodos(fila.usuarioId, manager);
+      // Con `eliminadoEl IS NULL` en el criterio: sin eso, este camino escribe
+      // sobre una fila borrada. El `GET` hermano sí filtra (usa `findById`), y
+      // la incoherencia entre los dos se ve desde afuera.
+      const res = await manager.update(
+        Usuario,
+        { id: fila.usuarioId, eliminadoEl: IsNull() },
+        { contrasena: hashed },
+      );
+      if (!res.affected) {
+        throw new BadRequestException('Ese link ya no sirve');
+      }
+    });
+    // Se cierran las sesiones vivas: si el reset lo pidió alguien porque le
+    // tomaron la cuenta, dejar los refresh tokens del intruso vivos vaciaría
+    // el sentido del reset.
+    await this.refreshRepo.delete({ userId: fila.usuarioId });
+    return { message: 'Contraseña actualizada' };
+  }
+
+  /**
+   * Pide un reset.
+   *
+   * ⚠️ **Responde lo mismo exista o no el correo.** Si distinguiera, este
+   * endpoint —público y sin autenticación— sería un oráculo para averiguar qué
+   * direcciones tienen cuenta, o sea para enumerar la base de usuarios.
+   */
+  async recuperar(correo: string): Promise<{ message: string }> {
+    const user = await this.usersService.findByEmail(correo);
+    if (user) {
+      // Pedirlo dos veces deja UN link válido, el último: si no, quedan varios
+      // vivos repartidos por la casilla y cualquiera de ellos sirve.
+      await this.tokens.invalidarAnteriores(user.id, TipoTokenAcceso.RESET);
+      const token = await this.tokens.emitir(user.id, TipoTokenAcceso.RESET);
+      await this.mail.enviar(
+        mailDeReset(user.correo, token, this.frontendUrl()),
+      );
+    }
+    return {
+      message:
+        'Si ese correo tiene una cuenta, te llega un link para elegir una contraseña nueva.',
+    };
+  }
+
+  /**
+   * Base del link que va en los mails. Por `ConfigService` y no `process.env`:
+   * la clase ya lo inyecta para todo lo demás, y `process.env` no se puede
+   * mockear en un test.
+   */
+  private frontendUrl(): string {
+    return this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173';
   }
 
   async login(
@@ -156,20 +278,6 @@ export class AuthService {
       throw new ForbiddenException('No perteneces a este tenant');
     const user = await this.usersService.findById(userId);
     if (!user) throw new UnauthorizedException();
-    // Único punto de enforcement de la contraseña temporal. Va acá y no en un
-    // guard porque el token de tenant es la llave de todo lo operativo, y
-    // porque `/me` corre sin `TenantGuard`: la persona igual puede loguearse y
-    // llegar a `PATCH /me/contrasena` para cambiarla. Costo cero por request y
-    // sin tocar el payload del JWT (invariante 4).
-    if (user.debeCambiarContrasena) {
-      // Cuerpo con `codigo` y no solo mensaje: la pantalla tiene que mandar a
-      // cambiarla, y matchear el texto del mensaje se rompe al reescribirlo.
-      // Mismo recurso que el `nombreSugerido` de las colisiones de nombre.
-      throw new ForbiddenException({
-        message: 'Tenés que cambiar tu contraseña temporal antes de entrar.',
-        codigo: 'DEBE_CAMBIAR_CONTRASENA',
-      });
-    }
     // Revocar todos los refresh tokens anteriores del usuario
     await this.refreshRepo.delete({ userId });
     const access_token = this.generateAccessToken(user, tenantId);

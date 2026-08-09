@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { forwardRef } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Tenant } from './entities/tenant.entity';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
@@ -28,6 +30,9 @@ import {
       PropinaGrupoDistribucion,
     ]),
     GarzonesModule,
+    // Por `TokensAccesoService`: el alta emite la invitación dentro de su
+    // propia transacción. `MailService` no se importa — su módulo es `@Global`.
+    forwardRef(() => AuthModule),
   ],
   controllers: [AdminTenantsController, TenantsController],
   providers: [TenantsService],

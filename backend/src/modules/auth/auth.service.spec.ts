@@ -1,4 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
+import { TokensAccesoService } from './tokens-acceso.service';
+import { MailService } from '../mail/mail.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
@@ -18,7 +20,6 @@ const mockUser: Usuario = {
   telefono: null,
   googleId: null,
   esSuperadmin: false,
-  debeCambiarContrasena: false,
   preferencias: {},
   creadoEl: new Date(),
   actualizadoEl: new Date(),
@@ -42,6 +43,18 @@ describe('AuthService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: TokensAccesoService,
+          useValue: {
+            emitir: jest.fn().mockResolvedValue('tok'),
+            buscarVigente: jest.fn(),
+            quemar: jest.fn(),
+            invalidarAnteriores: jest.fn(),
+            invalidarTodos: jest.fn(),
+          },
+        },
+        // Mockeado: un unit no manda mail.
+        { provide: MailService, useValue: { enviar: jest.fn() } },
         AuthService,
         {
           provide: JwtService,

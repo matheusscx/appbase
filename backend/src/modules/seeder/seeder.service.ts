@@ -936,21 +936,6 @@ export class SeederService implements OnApplicationBootstrap {
         correo: 'admin.paris@paris.cl',
         esSuperadmin: false,
       },
-      {
-        // Cuenta creada por un admin con contraseña temporal y todavía sin
-        // cambiar. Existe para que el e2e ejerza el par que define la feature:
-        // NO puede obtener token de tenant, y SÍ puede cambiar su contraseña.
-        // Sin este fixture, el 403 de `switchTenant` no lo ejerce nada.
-        id: '550e8400-e29b-41d4-a716-446655440340',
-        nombreUsuario: 'temporal.paris',
-        contrasena: HASH,
-        nombre: 'Temporal',
-        apellido: 'Paris',
-        telefono: '987654399',
-        correo: 'temporal@paris.cl',
-        esSuperadmin: false,
-        debeCambiarContrasena: true,
-      },
       // Los dos lados del modo del dispositivo (Fase 2 del garzón). Sin estas
       // dos cuentas, ni el modo personal ni el override del tótem se pueden
       // ejercer: la resolución del garzón actuante sale de la cuenta con la que
@@ -1910,7 +1895,6 @@ export class SeederService implements OnApplicationBootstrap {
     const CONTADOR_PARIS = '550e8400-e29b-41d4-a716-446655440328';
     const APROBADOR_PARIS = '550e8400-e29b-41d4-a716-446655440329';
     const SUPERVISOR_PARIS = '550e8400-e29b-41d4-a716-446655440335';
-    const TEMPORAL_PARIS = '550e8400-e29b-41d4-a716-446655440340';
     const ANA_TORRES = '550e8400-e29b-41d4-a716-446655440341';
     const TOTEM_PARIS = '550e8400-e29b-41d4-a716-446655440342';
     const pairs = [
@@ -1921,10 +1905,6 @@ export class SeederService implements OnApplicationBootstrap {
       [CONTADOR_PARIS, PARIS], // cuenta recuentos, no los aplica → Paris
       [APROBADOR_PARIS, PARIS], // aplica recuentos, no cuenta → Paris
       [SUPERVISOR_PARIS, PARIS], // ve todas las cajas, no es admin → Paris
-      // ⚠️ Miembro A PROPÓSITO, aunque tenga la contraseña temporal sin cambiar:
-      // si no lo fuera, el 403 de `switchTenant` vendría de "no perteneces a
-      // este tenant" y el test del flag pasaría por la razón equivocada.
-      [TEMPORAL_PARIS, PARIS],
       [ANA_TORRES, PARIS], // tablet personal: vinculada al garzón Ana Torres
       [TOTEM_PARIS, PARIS], // dispositivo compartido: siempre pide PIN
     ];

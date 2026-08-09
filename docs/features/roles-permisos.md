@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-08-08 (alta de usuarios del tenant)
+**Last Updated**: 2026-08-09 (invitación por link y reset de contraseña)
 
 ---
 
@@ -96,15 +96,14 @@ al tenant y asignarle los roles.
 
 | caso | qué pasa |
 |---|---|
-| El correo **no existe** | Se crea con una contraseña temporal **generada por el sistema**, se asocia y se le asignan los roles. La temporal se devuelve en claro **una sola vez** |
-| Existe pero **no es miembro** de este tenant | Se asocia y le quedan **exactamente** los roles del alta **en este tenant** (los que tenga en otros no se tocan). **No se toca su contraseña ni su flag**: la cuenta es de esa persona, no del admin que la suma |
+| El correo **no existe** | Se crea **sin contraseña**, se asocia, se le asignan los roles y le llega una **invitación por mail** para que elija la suya |
+| Existe pero **no es miembro** de este tenant | Se asocia y le quedan **exactamente** los roles del alta **en este tenant** (los que tenga en otros no se tocan). **No se toca su contraseña**: la cuenta es de esa persona, no del admin que la suma, y no le llega invitación |
 | Existe **y ya es miembro** | `409`. **No es idempotente a propósito**, a diferencia de `addMember`: acá vienen roles, y un 200 en silencio tendría dos lecturas —no hice nada, o le pisé los roles que ya tenía— y la segunda le cambia los permisos a alguien sin que nadie lo pida |
 
 **El correo se guarda normalizado** (minúsculas, sin espacios al principio ni al final) y la respuesta devuelve esa
 forma canónica, que es la que el admin le dicta. La unique de Postgres **sí** distingue
 mayúsculas: comparando exacto, `Juan.Perez@x.cl` y `juan.perez@x.cl` eran dos personas
-distintas, y una cuenta creada con la primera no entraba tipeando la segunda — sin reset
-de contraseña y con la temporal ya consumida, eso es quedarse afuera para siempre. Por eso
+distintas, y una cuenta creada con la primera no entraba tipeando la segunda. Por eso
 `UsersService.findByEmail` —la búsqueda del login, del duplicado del registro y del vínculo
 con Google— también compara en minúsculas.
 
@@ -116,47 +115,40 @@ encima de los que el admin acababa de elegir. Un usuario sin rol entra y no ve n
 sin rol es crear algo roto. Y se validan contra **este** tenant — no hay roles globales,
 así que sin ese chequeo un admin podría asignar el rol de otra empresa pasando su id.
 
-### El cambio obligatorio de la contraseña temporal
+### La invitación por link
 
-La contraseña la **genera el sistema**, no el admin (decisión del owner): elegirla invita
-a una débil, o a la misma para todo el personal. Se muestra una vez y solo queda el hash,
-mismo patrón que el PIN del garzón.
+La contraseña **la elige la persona**, desde un link de un solo uso que le llega
+por mail. El admin no conoce nunca una credencial ajena — antes dictaba una
+temporal, y todo el andamiaje de "cambio obligatorio" (`debe_cambiar_contrasena`,
+el 403 de `switchTenant`, la pantalla de cambio forzado) existía **solo por eso**.
+Con invitación no se suaviza: se borra.
 
-`usuarios.debe_cambiar_contrasena` marca que todavía no la cambió, y el enforcement vive
-en **un solo lugar**: `switchTenant` responde `403` con
-`{ codigo: 'DEBE_CAMBIAR_CONTRASENA' }` mientras el flag esté puesto.
+La cuenta se crea **sin contraseña** (`usuarios.contrasena` es nullable), así que
+hasta que use el link no hay con qué entrar. El token vence a los **7 días**.
 
-Por qué ahí y no en un guard:
+De regalo resuelve la verificación de correo del invitado: si hizo clic, la
+dirección existe y es suya. Queda pendiente solo para el auto-registro público.
 
-- **`/me` corre con `JwtAuthGuard` solo, sin `TenantGuard`**, así que la persona **puede**
-  loguearse y llegar a `PATCH /me/contrasena` — que es su única salida — y **no puede**
-  operar ningún tenant.
-- El token de tenant es la llave de todo lo operativo: un solo punto alcanza.
-- **Costo cero por request** y **sin tocar el payload del JWT** (invariante 4). Un claim
-  nuevo habría sido lo obvio y es justo lo que la invariante prohíbe.
+⚠️ **Sigue sin haber confirmación de correo en el alta**: un admin puede mandar
+una invitación a cualquier dirección. El daño está acotado —sumarte a mi
+restaurante no me da acceso a tus datos— pero le llega un mail que no pidió.
 
-`PATCH /me/contrasena` baja el flag **en la misma escritura** que guarda el hash: con dos
-updates, uno podría quedar a medias y dejar a la persona con la contraseña nueva y sin
-poder entrar a ningún lado.
+### Reset de contraseña
 
-⚠️ **Sin confirmación de correo** (diferido: no hay cómo mandar mails). Consecuencia
-asumida: un admin puede sumar **cualquier correo registrado** a su tenant. El daño está
-acotado —sumarte a mi restaurante no me da acceso a tus datos, te da acceso a los míos—
-pero **filtra si ese correo está registrado**, y a la persona le aparece un tenant que no
-pidió. Anotado en `docs/agent/pendientes.md` junto con las otras dos cosas que la falta de
-mail bloquea (invitación por link y reset de contraseña, que **tampoco existe**).
+`POST /auth/recuperar` manda un link de **1 hora**. Es público, así que **responde
+lo mismo exista o no el correo**: distinguir lo convertiría en un enumerador de
+cuentas registradas. Pedirlo dos veces deja vivo **un solo** link, el último.
 
-📌 **Todo lo de esta sección es transitorio y ya tiene reemplazo decidido** (owner,
-2026-08-08): cuando haya envío de mails, el alta manda un **link de invitación** y la
-persona elige su contraseña ahí. Con eso desaparecen la contraseña temporal,
-`debe_cambiar_contrasena`, el 403 de `switchTenant` y `/cambiar-contrasena` — no se
-suavizan, se borran: existen **solo** porque hoy hay una credencial que un tercero conoce.
-El detalle de la decisión y lo que se descartó está en `docs/agent/pendientes.md`.
+Al fijar la contraseña se cierran todas las sesiones vivas de esa cuenta: si el
+reset lo pidió alguien porque le tomaron la cuenta, dejar los refresh tokens del
+intruso vivos vaciaría el sentido del reset.
 
 ## API Endpoints
 
-Todos bajo `JwtAuthGuard + TenantGuard`. Las **mutaciones** agregan `TenantAdminGuard`
-(requiere rol `es_fijo = true` en el tenant).
+Todos bajo `JwtAuthGuard + TenantGuard`, **salvo los marcados "público"**: esos son los
+links de invitación y reset, que los usa alguien que justamente no puede autenticarse
+todavía —o no puede más—. Ahí la prueba de identidad es el token del link, no un JWT.
+Las **mutaciones** agregan `TenantAdminGuard` (requiere rol `es_fijo = true` en el tenant).
 
 | Método | Ruta | Guard extra | Descripción |
 |---|---|---|---|
@@ -170,6 +162,9 @@ Todos bajo `JwtAuthGuard + TenantGuard`. Las **mutaciones** agregan `TenantAdmin
 | POST | `/roles/:id/users` | TenantAdmin | Asignar rol a un usuario |
 | DELETE | `/roles/:id/users/:userId` | TenantAdmin | Quitar rol a un usuario |
 | GET | `/tenants/members` | — | Miembros con nombre + roles asignados |
+| GET/POST | `/auth/invitacion/:token` | público | Verifica el link / fija la contraseña y lo quema |
+| POST | `/auth/recuperar` | público | Pide el link de reset. **Misma respuesta exista o no el correo** |
+| GET/POST | `/auth/recuperar/:token` | público | Verifica el link / fija la contraseña y lo quema |
 | POST | `/tenants/usuarios` | TenantAdmin | Alta: crea-o-asocia el usuario, lo suma al tenant y le asigna roles |
 | GET | `/rbac/es-admin` | — | `{ esAdmin: boolean }` para gating del frontend |
 
@@ -185,7 +180,7 @@ GET /tenants/members →
 
 POST /tenants/usuarios
 body: { nombre, apellido?, correo, telefono?, rolIds: string[] }   // rolIds: al menos 1
-→ { usuarioId, correo, contrasenaTemporal? }   // sin temporal = el correo ya existía
+→ { usuarioId, correo, invitado }   // invitado=false → el correo ya tenía cuenta
 
 PUT /roles/:id/modules/:moduloTenantId/permissions
 body: { moduloAppPermisoIds: string[] }

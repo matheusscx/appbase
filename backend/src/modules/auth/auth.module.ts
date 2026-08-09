@@ -10,12 +10,14 @@ import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { RefreshToken } from './entities/refresh-token.entity';
+import { TokenAcceso } from './entities/token-acceso.entity';
+import { TokensAccesoService } from './tokens-acceso.service';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
-    TypeOrmModule.forFeature([RefreshToken]),
+    TypeOrmModule.forFeature([RefreshToken, TokenAcceso]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -27,6 +29,15 @@ import { RefreshToken } from './entities/refresh-token.entity';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, LocalStrategy, JwtStrategy, GoogleStrategy],
+  providers: [
+    AuthService,
+    TokensAccesoService,
+    LocalStrategy,
+    JwtStrategy,
+    GoogleStrategy,
+  ],
+  // Lo exporta para `tenants`, que emite la invitación dentro de la transacción
+  // del alta.
+  exports: [TokensAccesoService],
 })
 export class AuthModule {}

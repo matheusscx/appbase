@@ -114,17 +114,6 @@ function abrirAlta() {
   altaOpen.value = true
 }
 
-/**
- * La temporal se muestra **una sola vez**: el backend la genera, devuelve el
- * claro en la respuesta del alta y guarda solo el hash. Mismo patrón que el PIN
- * del garzón.
- */
-const temporalOpen = ref(false)
-const temporal = ref<{ correo: string, contrasena: string }>({
-  correo: '',
-  contrasena: '',
-})
-
 async function crearUsuario() {
   if (creando.value) return
   creando.value = true
@@ -132,7 +121,7 @@ async function crearUsuario() {
     const res = await useApiFetch<{
       usuarioId: string
       correo: string
-      contrasenaTemporal?: string
+      invitado: boolean
     }>(`${apiUrl}/tenants/usuarios`, {
       method: 'POST',
       // `apellido` vacío se omite: `@IsOptional` no filtra el string vacío, así
@@ -143,19 +132,18 @@ async function crearUsuario() {
     altaOpen.value = false
     await cargar()
 
-    // Sin `contrasenaTemporal` el correo ya existía: se asoció a este tenant y
-    // su contraseña no se tocó, así que no hay nada que mostrar ni entregar.
-    if (res.contrasenaTemporal) {
-      temporal.value = { correo: res.correo, contrasena: res.contrasenaTemporal }
-      temporalOpen.value = true
-    }
-    else {
-      toast.add({
-        title: 'Usuario agregado al tenant',
-        description: 'Ya tenía cuenta: entra con su contraseña de siempre.',
-        color: 'success',
-      })
-    }
+    // El admin ya no ve ninguna credencial: la persona elige la suya desde el
+    // link. `invitado: false` significa que el correo ya tenía cuenta, así que
+    // no hay invitación que mandar.
+    toast.add({
+      title: res.invitado
+        ? `Invitación enviada a ${res.correo}`
+        : 'Usuario agregado al tenant',
+      description: res.invitado
+        ? 'Le llega un link para elegir su contraseña. Vence en 7 días.'
+        : 'Ya tenía cuenta: entra con su contraseña de siempre.',
+      color: 'success',
+    })
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al crear el usuario'), color: 'error' })
@@ -319,8 +307,8 @@ const columns: TableColumn<Member>[] = [
           <p class="text-sm text-muted">
             Si el correo ya tiene cuenta, se suma a este tenant conservando su
             contraseña, y le quedan <strong>los roles que elijas acá</strong>.
-            Si no, el sistema genera una contraseña temporal que vas a ver
-            <strong>una sola vez</strong>.
+            Si no, le llega un <strong>link por mail</strong> para que elija su
+            contraseña. Vos no la ves nunca.
           </p>
         </UForm>
       </template>
@@ -341,24 +329,6 @@ const columns: TableColumn<Member>[] = [
       </template>
     </UModal>
 
-    <UModal v-model:open="temporalOpen" :title="`Contraseña de ${temporal.correo}`">
-      <template #body>
-        <div class="space-y-4">
-          <code class="block rounded bg-elevated px-3 py-3 text-center text-2xl font-semibold tracking-widest">{{ temporal.contrasena }}</code>
-          <p class="text-sm text-warning">
-            <UIcon name="i-lucide-triangle-alert" class="size-4 align-text-bottom" />
-            Guardala ahora — <strong>no se vuelve a mostrar</strong>. Pasásela a
-            la persona: el sistema le va a pedir cambiarla antes de dejarla
-            entrar.
-          </p>
-        </div>
-      </template>
-      <template #footer>
-        <AppModalFooter>
-          <UButton label="Entendido" @click="() => { temporalOpen = false }" />
-        </AppModalFooter>
-      </template>
-    </UModal>
 
     <UModal
       v-model:open="modalOpen"

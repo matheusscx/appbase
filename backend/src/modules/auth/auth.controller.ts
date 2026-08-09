@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Req,
   Res,
@@ -16,6 +17,9 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
+import { ElegirContrasenaDto } from './dto/elegir-contrasena.dto';
+import { RecuperarContrasenaDto } from './dto/recuperar-contrasena.dto';
+import { TipoTokenAcceso } from './entities/token-acceso.entity';
 import { SwitchTenantDto } from './dto/switch-tenant.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
@@ -57,6 +61,55 @@ export class AuthController {
     const { refresh_token, ...response } = await this.authService.register(dto);
     res.cookie(REFRESH_COOKIE, refresh_token, refreshCookieOptions());
     return response;
+  }
+
+  /**
+   * Los endpoints de link son **públicos**: quien los usa justamente no puede
+   * autenticarse todavía —o no puede más—. La prueba de identidad es el token
+   * del link, no un JWT.
+   */
+  @Get('invitacion/:token')
+  verificarInvitacion(@Param('token') token: string) {
+    return this.authService.verificarToken(token, TipoTokenAcceso.INVITACION);
+  }
+
+  @Post('invitacion/:token')
+  @HttpCode(HttpStatus.OK)
+  aceptarInvitacion(
+    @Param('token') token: string,
+    @Body() dto: ElegirContrasenaDto,
+  ) {
+    return this.authService.elegirContrasena(
+      token,
+      TipoTokenAcceso.INVITACION,
+      dto.contrasena,
+    );
+  }
+
+  @Get('recuperar/:token')
+  verificarReset(@Param('token') token: string) {
+    return this.authService.verificarToken(token, TipoTokenAcceso.RESET);
+  }
+
+  /**
+   * ⚠️ Responde **lo mismo** exista o no el correo (ver `AuthService.recuperar`).
+   * El `200` fijo es parte del contrato: un 404 acá convertiría el endpoint en
+   * un enumerador público de cuentas.
+   */
+  @Post('recuperar')
+  @HttpCode(HttpStatus.OK)
+  recuperar(@Body() dto: RecuperarContrasenaDto) {
+    return this.authService.recuperar(dto.correo);
+  }
+
+  @Post('recuperar/:token')
+  @HttpCode(HttpStatus.OK)
+  restablecer(@Param('token') token: string, @Body() dto: ElegirContrasenaDto) {
+    return this.authService.elegirContrasena(
+      token,
+      TipoTokenAcceso.RESET,
+      dto.contrasena,
+    );
   }
 
   @UseGuards(LocalAuthGuard)

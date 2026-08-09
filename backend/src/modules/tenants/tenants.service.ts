@@ -4,11 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { randomUUID, randomInt } from 'crypto';
-import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 import { Usuario } from '../users/usuario.entity';
 import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { Tenant } from './entities/tenant.entity';
@@ -21,6 +21,9 @@ import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion
 import { PropinaGrupoDistribucion } from '../propinas/entities/propina-grupo-distribucion.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { GarzonesService } from '../garzones/garzones.service';
+import { TokensAccesoService } from '../auth/tokens-acceso.service';
+import { TipoTokenAcceso } from '../auth/entities/token-acceso.entity';
+import { MailService } from '../mail/mail.service';
 import { CriterioDistribucion } from '../propinas/enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from '../propinas/enums/base-ventas-grupo.enum';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -44,33 +47,23 @@ export interface TenantMember {
 }
 
 /**
- * Alfabeto sin caracteres ambiguos: fuera `0 O o`, `1 l I i` y `5 S s`. La
- * temporal la dicta o la copia una persona **una sola vez** —el admin se la
- * pasa al que la va a usar— así que un `l` que se lee `1` es un ticket de
- * soporte.
+ * El cuerpo del mail de invitación. Texto plano: son dos mails y ninguno
+ * necesita HTML.
  *
- * Exportado para que un test pueda afirmar sobre el alfabeto y no sobre una
- * muestra: con 12 caracteres, un alfabeto que vuelva a incluir los ambiguos
- * pasa desapercibido ~15% de las veces. La propiedad es del conjunto.
+ * El link lleva el token en claro, que es la **única** vez que existe fuera de
+ * la memoria del proceso: en la base solo queda su hash.
  */
-export const ALFABETO_TEMPORAL =
-  'ABCDEFGHJKLMNPQRTUVWXYZabcdefghjkmnpqrtuvwxyz2346789';
-const LARGO_TEMPORAL = 12;
-
-/**
- * Contraseña temporal generada por el sistema, no elegida por el admin
- * (decisión del owner, 2026-08-08): elegirla invita a una débil, o a la misma
- * para todo el personal. Mismo patrón que el PIN del garzón — se muestra una
- * vez y no se puede volver a leer, solo queda el hash.
- *
- * `randomInt` de `crypto` y no `Math.random`: es una credencial.
- */
-function generarContrasenaTemporal(): string {
-  let salida = '';
-  for (let i = 0; i < LARGO_TEMPORAL; i++) {
-    salida += ALFABETO_TEMPORAL[randomInt(ALFABETO_TEMPORAL.length)];
-  }
-  return salida;
+function mailDeInvitacion(correo: string, token: string, base: string) {
+  return {
+    para: correo,
+    asunto: 'Te sumaron a un equipo — elegí tu contraseña',
+    cuerpo:
+      `Te dieron de alta en un equipo del sistema.\n\n` +
+      `Elegí tu contraseña acá (el link vence en 7 días):\n` +
+      `${base}/invitacion/${token}\n\n` +
+      `Si no esperabas este mail, ignoralo: sin entrar a ese link no se puede ` +
+      `usar la cuenta.`,
+  };
 }
 
 @Injectable()
@@ -91,6 +84,10 @@ export class TenantsService {
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly garzonesService: GarzonesService,
+    private readonly tokensAcceso: TokensAccesoService,
+    private readonly mail: MailService,
+    // Por `ConfigService` y no `process.env`: `process.env` no se puede mockear.
+    private readonly config: ConfigService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -376,13 +373,13 @@ export class TenantsService {
    * Alta de un usuario del tenant por su admin. Tres caminos, uno solo escribe
    * una cuenta nueva:
    *
-   * 1. **El correo no existe** → se crea con una contraseña temporal
-   *    **generada** y `debe_cambiar_contrasena = true`, se asocia y se le
-   *    asignan los roles. La temporal se devuelve en claro **una sola vez**.
+   * 1. **El correo no existe** → se crea **sin contraseña**, se asocia, se le
+   *    asignan los roles y le llega una **invitación por link** para que elija
+   *    la suya. El admin no conoce nunca una credencial ajena.
    * 2. **Existe pero no es miembro de este tenant** → se asocia y le quedan
    *    **exactamente** los roles del alta *en este tenant*; los que tenga en
-   *    otros no se tocan. **No se toca su contraseña ni su flag**: la cuenta es
-   *    suya, no del admin que la suma.
+   *    otros no se tocan. **No se toca su contraseña y no se le manda
+   *    invitación**: la cuenta es suya, no del admin que la suma.
    * 3. **Existe y ya es miembro** → `409`. No es idempotente **a propósito**, a
    *    diferencia de `addMember`: acá vienen roles, y un 200 en silencio tendría
    *    dos lecturas —no hice nada, o le pisé los roles que ya tenía— y la
@@ -398,10 +395,11 @@ export class TenantsService {
    * el tenant. Si algún día esto gana un segundo llamador —seeder, import
    * masivo, otro service— el chequeo tiene que mudarse acá adentro.
    *
-   * ⚠️ **Sin confirmación de correo** (diferido por el owner, 2026-08-08: no hay
-   * cómo mandar mails). Consecuencia asumida: un admin puede sumar cualquier
-   * correo registrado, lo que **filtra si ese correo existe**. Ver la entrada de
-   * `docs/agent/pendientes.md`.
+   * ⚠️ **Sin confirmación de que el correo sea de quien el admin cree.** La
+   * invitación prueba que la dirección existe y que alguien la lee, pero un
+   * admin puede invitar a cualquier dirección: al dueño de esa casilla le llega
+   * un mail que no pidió. El daño está acotado —sumarte a mi restaurante no me
+   * da acceso a tus datos— y queda asumido.
    */
   async crearUsuario(
     tenantId: string,
@@ -409,9 +407,11 @@ export class TenantsService {
   ): Promise<{
     usuarioId: string;
     correo: string;
-    contrasenaTemporal?: string;
+    /** `true` si se creó la cuenta y salió el mail de invitación. */
+    invitado: boolean;
   }> {
-    return this.dataSource.transaction(async (manager) => {
+    let invitacion: string | undefined;
+    const resultado = await this.dataSource.transaction(async (manager) => {
       // Los roles se validan contra ESTE tenant: no hay roles globales
       // (verificado), así que sin este chequeo un admin podría asignar el rol de
       // otra empresa pasando su id.
@@ -430,10 +430,10 @@ export class TenantsService {
       // El correo se normaliza ANTES de buscar y de guardar, no solo al
       // comparar. Buscar en minúsculas y guardar como vino tapaba la mitad del
       // problema: no se duplicaba la cuenta, pero el admin que tipea
-      // `Juan.Perez@x.cl` creaba una cuenta que **solo** entra con esa caja
-      // exacta, y la temporal se muestra una sola vez. Con el login ya
+      // `Juan.Perez@x.cl` dejaba dos formas del mismo correo dando vueltas: una
+      // en la base y otra en el mail de invitación. Con el login ya
       // case-insensitive (`UsersService.findByEmail`), guardar normalizado deja
-      // una sola forma canónica en la base.
+      // una sola forma canónica.
       const correo = dto.correo.trim().toLowerCase();
 
       // Solo el id: el resto del `Usuario` —incluido el hash— no se usa.
@@ -444,7 +444,6 @@ export class TenantsService {
         .getOne();
 
       let usuarioId: string;
-      let contrasenaTemporal: string | undefined;
 
       if (usuarioPrevio) {
         // ⚠️ `withDeleted` es obligatorio: `UsuarioTenant` tiene
@@ -472,24 +471,11 @@ export class TenantsService {
           );
         }
       } else {
-        // 📌 ACÁ ENTRA EL MAIL, y esta rama entera se va cuando llegue.
-        //
-        // Decidido (owner, 2026-08-08): en vez de generar una temporal que el
-        // admin dicta, se manda un **link de invitación** y la persona elige su
-        // contraseña. Con eso desaparecen `contrasenaTemporal`,
-        // `debeCambiarContrasena`, el 403 de `switchTenant` y
-        // `/cambiar-contrasena`: todo ese andamiaje existe **solo** porque hoy
-        // hay una credencial que un tercero conoce.
-        //
-        // El envío va detrás de una interfaz que con `SMTP_HOST` vacío **loguea
-        // el mail en vez de mandarlo** — no es comodidad, es obligatorio: se
-        // corren 342 e2e por cierre y en CI, y mandando de verdad cada corrida
-        // dispara mails reales. Stack ya elegido: `nodemailer` contra el SMTP
-        // del owner. El detalle completo, en `docs/agent/pendientes.md`.
-        //
-        // No hay stub esperando acá a propósito: sin llamador sería código
-        // muerto, y para cuando llegue el mail estaría desactualizado.
-        contrasenaTemporal = generarContrasenaTemporal();
+        // La cuenta se crea **sin contraseña** (`contrasena` es nullable) y la
+        // persona la elige desde el link de invitación. Así nadie más que ella
+        // conoce jamás una credencial suya — antes el admin dictaba una
+        // temporal, y todo el andamiaje de "cambio obligatorio" existía solo
+        // por eso.
         const creado = await manager.save(
           Usuario,
           manager.create(Usuario, {
@@ -497,14 +483,20 @@ export class TenantsService {
             apellido: dto.apellido ?? null,
             correo,
             telefono: dto.telefono ?? null,
-            contrasena: await bcrypt.hash(contrasenaTemporal, 10),
-            debeCambiarContrasena: true,
+            contrasena: null,
           }),
         );
         usuarioId = creado.id;
         await manager.save(
           UsuarioTenant,
           manager.create(UsuarioTenant, { tenantId, usuarioId }),
+        );
+        // Dentro de la transacción: si el alta falla, no puede quedar una
+        // invitación viva apuntando a un usuario que no existe.
+        invitacion = await this.tokensAcceso.emitir(
+          usuarioId,
+          TipoTokenAcceso.INVITACION,
+          manager,
         );
       }
 
@@ -536,8 +528,23 @@ export class TenantsService {
 
       // Se devuelve el correo normalizado, no el tipeado: es el que la persona
       // tiene que usar para entrar.
-      return { usuarioId, correo, contrasenaTemporal };
+      return { usuarioId, correo };
     });
+
+    // El mail sale DESPUÉS de commitear, nunca adentro: mandar dentro de la
+    // transacción manda un link que apunta a filas que todavía pueden
+    // revertirse. `MailService` no lanza, así que un SMTP caído no rompe el
+    // alta — el token ya está emitido y el link se puede reenviar.
+    if (invitacion) {
+      await this.mail.enviar(
+        mailDeInvitacion(
+          resultado.correo,
+          invitacion,
+          this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173',
+        ),
+      );
+    }
+    return { ...resultado, invitado: invitacion !== undefined };
   }
 
   /**
