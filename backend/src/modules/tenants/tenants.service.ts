@@ -7,7 +7,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomInt } from 'crypto';
+import * as bcrypt from 'bcryptjs';
+import { Usuario } from '../users/usuario.entity';
+import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { Tenant } from './entities/tenant.entity';
 import { UsuarioTenant } from './entities/usuario-tenant.entity';
 import { TenantModulo } from './entities/tenant-modulo.entity';
@@ -36,6 +39,36 @@ export interface TenantMember {
   apellido: string;
   correo: string;
   roles: { rolId: string; nombre: string }[];
+}
+
+/**
+ * Alfabeto sin caracteres ambiguos: fuera `0 O o`, `1 l I i` y `5 S s`. La
+ * temporal la dicta o la copia una persona **una sola vez** —el admin se la
+ * pasa al que la va a usar— así que un `l` que se lee `1` es un ticket de
+ * soporte.
+ *
+ * Exportado para que un test pueda afirmar sobre el alfabeto y no sobre una
+ * muestra: con 12 caracteres, un alfabeto que vuelva a incluir los ambiguos
+ * pasa desapercibido ~15% de las veces. La propiedad es del conjunto.
+ */
+export const ALFABETO_TEMPORAL =
+  'ABCDEFGHJKLMNPQRTUVWXYZabcdefghjkmnpqrtuvwxyz2346789';
+const LARGO_TEMPORAL = 12;
+
+/**
+ * Contraseña temporal generada por el sistema, no elegida por el admin
+ * (decisión del owner, 2026-08-08): elegirla invita a una débil, o a la misma
+ * para todo el personal. Mismo patrón que el PIN del garzón — se muestra una
+ * vez y no se puede volver a leer, solo queda el hash.
+ *
+ * `randomInt` de `crypto` y no `Math.random`: es una credencial.
+ */
+function generarContrasenaTemporal(): string {
+  let salida = '';
+  for (let i = 0; i < LARGO_TEMPORAL; i++) {
+    salida += ALFABETO_TEMPORAL[randomInt(ALFABETO_TEMPORAL.length)];
+  }
+  return salida;
 }
 
 @Injectable()
@@ -332,6 +365,157 @@ export class TenantsService {
 
     const member = this.usuarioTenantRepo.create({ tenantId, usuarioId });
     return this.usuarioTenantRepo.save(member);
+  }
+
+  /**
+   * Alta de un usuario del tenant por su admin. Tres caminos, uno solo escribe
+   * una cuenta nueva:
+   *
+   * 1. **El correo no existe** → se crea con una contraseña temporal
+   *    **generada** y `debe_cambiar_contrasena = true`, se asocia y se le
+   *    asignan los roles. La temporal se devuelve en claro **una sola vez**.
+   * 2. **Existe pero no es miembro de este tenant** → se asocia y le quedan
+   *    **exactamente** los roles del alta *en este tenant*; los que tenga en
+   *    otros no se tocan. **No se toca su contraseña ni su flag**: la cuenta es
+   *    suya, no del admin que la suma.
+   * 3. **Existe y ya es miembro** → `409`. No es idempotente **a propósito**, a
+   *    diferencia de `addMember`: acá vienen roles, y un 200 en silencio tendría
+   *    dos lecturas —no hice nada, o le pisé los roles que ya tenía— y la
+   *    segunda le cambia los permisos a alguien sin que el admin lo pida.
+   *
+   * Todo en **una transacción**: si falla la asignación de roles no puede quedar
+   * un usuario creado y asociado sin poder hacer nada.
+   *
+   * ⚠️ **El único borde de `rolIds` es el DTO**, y este método tiene un solo
+   * llamador (el controller). La baja de los roles que no vinieron usa
+   * `rol_id <> ALL($3)`, que con un array vacío es TRUE para todos: sin
+   * `@ArrayMinSize(1)` sería un borrado de todos los permisos de esa persona en
+   * el tenant. Si algún día esto gana un segundo llamador —seeder, import
+   * masivo, otro service— el chequeo tiene que mudarse acá adentro.
+   *
+   * ⚠️ **Sin confirmación de correo** (diferido por el owner, 2026-08-08: no hay
+   * cómo mandar mails). Consecuencia asumida: un admin puede sumar cualquier
+   * correo registrado, lo que **filtra si ese correo existe**. Ver la entrada de
+   * `docs/agent/pendientes.md`.
+   */
+  async crearUsuario(
+    tenantId: string,
+    dto: CrearUsuarioTenantDto,
+  ): Promise<{
+    usuarioId: string;
+    correo: string;
+    contrasenaTemporal?: string;
+  }> {
+    return this.dataSource.transaction(async (manager) => {
+      // Los roles se validan contra ESTE tenant: no hay roles globales
+      // (verificado), así que sin este chequeo un admin podría asignar el rol de
+      // otra empresa pasando su id.
+      const rolesDelTenant = await manager.query<{ rol_id: string }[]>(
+        `SELECT rol_id FROM roles
+          WHERE rol_id = ANY($1::uuid[]) AND tenant_id = $2
+            AND eliminado_el IS NULL`,
+        [dto.rolIds, tenantId],
+      );
+      if (rolesDelTenant.length !== dto.rolIds.length) {
+        throw new BadRequestException(
+          'Alguno de los roles no existe en este tenant',
+        );
+      }
+
+      // El correo se normaliza ANTES de buscar y de guardar, no solo al
+      // comparar. Buscar en minúsculas y guardar como vino tapaba la mitad del
+      // problema: no se duplicaba la cuenta, pero el admin que tipea
+      // `Juan.Perez@x.cl` creaba una cuenta que **solo** entra con esa caja
+      // exacta, y la temporal se muestra una sola vez. Con el login ya
+      // case-insensitive (`UsersService.findByEmail`), guardar normalizado deja
+      // una sola forma canónica en la base.
+      const correo = dto.correo.trim().toLowerCase();
+
+      // Solo el id: el resto del `Usuario` —incluido el hash— no se usa.
+      const usuarioPrevio = await manager
+        .createQueryBuilder(Usuario, 'u')
+        .select('u.id')
+        .where('LOWER(u.correo) = :correo', { correo })
+        .getOne();
+
+      let usuarioId: string;
+      let contrasenaTemporal: string | undefined;
+
+      if (usuarioPrevio) {
+        // ⚠️ `withDeleted` es obligatorio: `UsuarioTenant` tiene
+        // `@DeleteDateColumn`, así que sin esto TypeORM filtra las borradas, la
+        // rama de revivir queda INALCANZABLE y volver a dar de alta a alguien
+        // que se eliminó del tenant respondía 201 sin asociarlo — el admin veía
+        // éxito y la persona seguía afuera. Mismo recurso que `addMember`.
+        const miembro = await manager.findOne(UsuarioTenant, {
+          where: { usuarioId: usuarioPrevio.id, tenantId },
+          withDeleted: true,
+        });
+        if (miembro && !miembro.eliminadoEl) {
+          throw new ConflictException(
+            'Ese correo ya es miembro de este tenant. Editá sus roles desde la tabla.',
+          );
+        }
+        usuarioId = usuarioPrevio.id;
+        if (miembro) {
+          miembro.eliminadoEl = null;
+          await manager.save(UsuarioTenant, miembro);
+        } else {
+          await manager.save(
+            UsuarioTenant,
+            manager.create(UsuarioTenant, { tenantId, usuarioId }),
+          );
+        }
+      } else {
+        contrasenaTemporal = generarContrasenaTemporal();
+        const creado = await manager.save(
+          Usuario,
+          manager.create(Usuario, {
+            nombre: dto.nombre,
+            apellido: dto.apellido ?? null,
+            correo,
+            telefono: dto.telefono ?? null,
+            contrasena: await bcrypt.hash(contrasenaTemporal, 10),
+            debeCambiarContrasena: true,
+          }),
+        );
+        usuarioId = creado.id;
+        await manager.save(
+          UsuarioTenant,
+          manager.create(UsuarioTenant, { tenantId, usuarioId }),
+        );
+      }
+
+      // Los roles se insertan en UNA sentencia, no una por rol: son pocos, pero
+      // un loop de inserts acá es el patrón que después se copia donde N no es
+      // chico.
+      await manager.query(
+        `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+         SELECT $1, $2, r, NOW(), NOW() FROM unnest($3::uuid[]) AS r
+         ON CONFLICT (usuario_id, tenant_id, rol_id)
+         DO UPDATE SET eliminado_el = NULL, actualizado_el = NOW()`,
+        [usuarioId, tenantId, dto.rolIds],
+      );
+
+      // ⚠️ Y se dan de baja los que NO vinieron en el alta. Sin esto, el alta
+      // solo suma: `removeMember` da de baja la membresía pero **deja vivas** las
+      // filas de `roles_usuarios`, así que re-dar de alta a alguien eliminado le
+      // restituía en silencio sus roles viejos —incluido `Administrador`— además
+      // de los que el admin acababa de elegir. Es justo lo que el 409 de más
+      // arriba existe para evitar: que un alta le cambie los permisos a alguien
+      // sin que nadie lo pida. Lo que el admin elige en el alta **es** el
+      // conjunto de roles, no un agregado. Una sola sentencia, no una por rol.
+      await manager.query(
+        `UPDATE roles_usuarios SET eliminado_el = NOW(), actualizado_el = NOW()
+          WHERE usuario_id = $1 AND tenant_id = $2
+            AND rol_id <> ALL($3::uuid[]) AND eliminado_el IS NULL`,
+        [usuarioId, tenantId, dto.rolIds],
+      );
+
+      // Se devuelve el correo normalizado, no el tipeado: es el que la persona
+      // tiene que usar para entrar.
+      return { usuarioId, correo, contrasenaTemporal };
+    });
   }
 
   async removeMember(tenantId: string, usuarioId: string): Promise<void> {

@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-07-25
+**Last Updated**: 2026-08-08 (alta de usuarios del tenant)
 
 ---
 
@@ -83,6 +83,69 @@ Ante una acción de esta zona gris, **decidir con el owner, no asumir** (regla d
 
 ---
 
+## Alta de usuarios del tenant (2026-08-08)
+
+Hasta acá el admin **no podía crear usuarios**: `POST /tenants/members` recibía un
+`usuarioId` que ya existía, y el único camino a una cuenta era `POST /auth/register`,
+público y de auto-registro. Sumar a alguien costaba 4 pasos en 3 pantallas y arrancaba
+con que la persona se registrara sola.
+
+`POST /tenants/usuarios` (`TenantAdminGuard`, como el resto de la administración del
+tenant) hace las tres cosas en **una transacción**: crear-o-asociar el usuario, sumarlo
+al tenant y asignarle los roles.
+
+| caso | qué pasa |
+|---|---|
+| El correo **no existe** | Se crea con una contraseña temporal **generada por el sistema**, se asocia y se le asignan los roles. La temporal se devuelve en claro **una sola vez** |
+| Existe pero **no es miembro** de este tenant | Se asocia y le quedan **exactamente** los roles del alta **en este tenant** (los que tenga en otros no se tocan). **No se toca su contraseña ni su flag**: la cuenta es de esa persona, no del admin que la suma |
+| Existe **y ya es miembro** | `409`. **No es idempotente a propósito**, a diferencia de `addMember`: acá vienen roles, y un 200 en silencio tendría dos lecturas —no hice nada, o le pisé los roles que ya tenía— y la segunda le cambia los permisos a alguien sin que nadie lo pida |
+
+**El correo se guarda normalizado** (minúsculas, sin espacios al principio ni al final) y la respuesta devuelve esa
+forma canónica, que es la que el admin le dicta. La unique de Postgres **sí** distingue
+mayúsculas: comparando exacto, `Juan.Perez@x.cl` y `juan.perez@x.cl` eran dos personas
+distintas, y una cuenta creada con la primera no entraba tipeando la segunda — sin reset
+de contraseña y con la temporal ya consumida, eso es quedarse afuera para siempre. Por eso
+`UsersService.findByEmail` —la búsqueda del login, del duplicado del registro y del vínculo
+con Google— también compara en minúsculas.
+
+**Los roles son obligatorios y múltiples, y lo elegido en el alta es el conjunto**, no un
+agregado a lo que hubiera. Importa porque `removeMember` da de baja la membresía pero deja
+vivas las filas de `roles_usuarios`: sin dar de baja las que no vinieron, re-dar de alta a
+alguien eliminado le restituía en silencio sus permisos viejos —`Administrador` incluido—
+encima de los que el admin acababa de elegir. Un usuario sin rol entra y no ve nada: crear
+sin rol es crear algo roto. Y se validan contra **este** tenant — no hay roles globales,
+así que sin ese chequeo un admin podría asignar el rol de otra empresa pasando su id.
+
+### El cambio obligatorio de la contraseña temporal
+
+La contraseña la **genera el sistema**, no el admin (decisión del owner): elegirla invita
+a una débil, o a la misma para todo el personal. Se muestra una vez y solo queda el hash,
+mismo patrón que el PIN del garzón.
+
+`usuarios.debe_cambiar_contrasena` marca que todavía no la cambió, y el enforcement vive
+en **un solo lugar**: `switchTenant` responde `403` con
+`{ codigo: 'DEBE_CAMBIAR_CONTRASENA' }` mientras el flag esté puesto.
+
+Por qué ahí y no en un guard:
+
+- **`/me` corre con `JwtAuthGuard` solo, sin `TenantGuard`**, así que la persona **puede**
+  loguearse y llegar a `PATCH /me/contrasena` — que es su única salida — y **no puede**
+  operar ningún tenant.
+- El token de tenant es la llave de todo lo operativo: un solo punto alcanza.
+- **Costo cero por request** y **sin tocar el payload del JWT** (invariante 4). Un claim
+  nuevo habría sido lo obvio y es justo lo que la invariante prohíbe.
+
+`PATCH /me/contrasena` baja el flag **en la misma escritura** que guarda el hash: con dos
+updates, uno podría quedar a medias y dejar a la persona con la contraseña nueva y sin
+poder entrar a ningún lado.
+
+⚠️ **Sin confirmación de correo** (diferido: no hay cómo mandar mails). Consecuencia
+asumida: un admin puede sumar **cualquier correo registrado** a su tenant. El daño está
+acotado —sumarte a mi restaurante no me da acceso a tus datos, te da acceso a los míos—
+pero **filtra si ese correo está registrado**, y a la persona le aparece un tenant que no
+pidió. Anotado en `docs/agent/pendientes.md` junto con las otras dos cosas que la falta de
+mail bloquea (invitación por link y reset de contraseña, que **tampoco existe**).
+
 ## API Endpoints
 
 Todos bajo `JwtAuthGuard + TenantGuard`. Las **mutaciones** agregan `TenantAdminGuard`
@@ -100,6 +163,7 @@ Todos bajo `JwtAuthGuard + TenantGuard`. Las **mutaciones** agregan `TenantAdmin
 | POST | `/roles/:id/users` | TenantAdmin | Asignar rol a un usuario |
 | DELETE | `/roles/:id/users/:userId` | TenantAdmin | Quitar rol a un usuario |
 | GET | `/tenants/members` | — | Miembros con nombre + roles asignados |
+| POST | `/tenants/usuarios` | TenantAdmin | Alta: crea-o-asocia el usuario, lo suma al tenant y le asigna roles |
 | GET | `/rbac/es-admin` | — | `{ esAdmin: boolean }` para gating del frontend |
 
 ### Formas relevantes
@@ -111,6 +175,10 @@ GET /roles/modulos-disponibles →
 
 GET /tenants/members →
 [ { usuarioId, nombre, apellido, correo, roles: [ { rolId, nombre } ] } ]
+
+POST /tenants/usuarios
+body: { nombre, apellido?, correo, telefono?, rolIds: string[] }   // rolIds: al menos 1
+→ { usuarioId, correo, contrasenaTemporal? }   // sin temporal = el correo ya existía
 
 PUT /roles/:id/modules/:moduloTenantId/permissions
 body: { moduloAppPermisoIds: string[] }

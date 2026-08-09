@@ -51,6 +51,15 @@ export const useTenantStore = defineStore('tenant', () => {
       await navigateTo('/')
     }
     catch (e: unknown) {
+      // Contraseña temporal sin cambiar: no es un error a mostrar, es un desvío.
+      // Con un solo tenant esto corre AUTOMÁTICO después del login, así que sin
+      // el desvío la persona quedaba en una pantalla de error sin salida.
+      // Se mira el `codigo` y no el mensaje: reescribir el texto no debe romper
+      // el flujo.
+      if ((e as { data?: { codigo?: string } })?.data?.codigo === 'DEBE_CAMBIAR_CONTRASENA') {
+        await navigateTo('/cambiar-contrasena')
+        return
+      }
       error.value = apiErrorMsg(e, 'Error al cambiar de tenant')
     }
     finally {

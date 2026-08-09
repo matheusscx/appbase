@@ -41,7 +41,13 @@ export class MeService {
     const valid = await bcrypt.compare(dto.contrasenaActual, user.contrasena);
     if (!valid) throw new UnauthorizedException('Contraseña actual incorrecta');
     const hashed = await bcrypt.hash(dto.contrasenaNueva, 10);
-    await this.repo.update(userId, { contrasena: hashed });
+    // Baja el flag en la MISMA escritura: si fueran dos updates, uno podría
+    // quedar a medias y dejar a la persona con la contraseña nueva y sin poder
+    // entrar a ningún tenant.
+    await this.repo.update(userId, {
+      contrasena: hashed,
+      debeCambiarContrasena: false,
+    });
     return { message: 'Contraseña actualizada' };
   }
 

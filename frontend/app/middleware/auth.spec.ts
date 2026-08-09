@@ -163,4 +163,29 @@ describe('middleware/auth', () => {
     expect(mockHandlePostLogin).not.toHaveBeenCalled()
     expect(mockNavigateTo).not.toHaveBeenCalled()
   })
+
+  // ⚠️ Sin la exención esto es un LOCKOUT, no una molestia: mientras la
+  // contraseña temporal no se cambie `switch-tenant` responde 403, así que en
+  // esta ruta NUNCA hay tenant activo. Con 2+ tenants el bucle se cierra:
+  // `handlePostLogin` manda a `/select-tenant`, elegir da 403, el 403 manda acá,
+  // y acá vuelve a mandar a elegir. Los dos tenants ilustran ese bucle, pero el
+  // test **no** los necesita para fallar: sin la exención `handlePostLogin` se
+  // llama igual con uno solo, y la primera aserción se pone roja lo mismo.
+  it('/cambiar-contrasena no rebota a elegir tenant, ni con 2 tenants', async () => {
+    mockToken = 'some.token.here'
+    mockUser = { id: '1', nombre: 'Test' }
+    mockActiveTenantId = null
+    mockTenants = [
+      { tenantId: 'tenant-a', nombre: 'Empresa A' },
+      { tenantId: 'tenant-b', nombre: 'Empresa B' },
+    ]
+
+    await authMiddleware(
+      makeContext('/cambiar-contrasena'),
+      makeContext('/cambiar-contrasena'),
+    )
+
+    expect(mockHandlePostLogin).not.toHaveBeenCalled()
+    expect(mockNavigateTo).not.toHaveBeenCalled()
+  })
 })

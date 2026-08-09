@@ -295,6 +295,29 @@ describe('useTenantStore — switchTenant', () => {
     expect(store.loading).toBe(false)
   })
 
+  // ⚠️ Esta rama es la ÚNICA salida del encierro de la contraseña temporal, y
+  // hasta acá no la tocaba ningún test: borrándola entera el frontend quedaba
+  // verde. El contrato es el string `DEBE_CAMBIAR_CONTRASENA`, que tiene que
+  // coincidir con el que emite `switchTenant` en el backend; renombrarlo de un
+  // solo lado deja a todo usuario nuevo en una pantalla de error sin salida.
+  it('un 403 con codigo DEBE_CAMBIAR_CONTRASENA desvía a cambiarla, no muestra error', async () => {
+    const store = useTenantStore()
+    mockApiFetch.mockRejectedValue({
+      data: {
+        codigo: 'DEBE_CAMBIAR_CONTRASENA',
+        message: 'Tenés que cambiar tu contraseña temporal antes de entrar.',
+      },
+    })
+
+    await store.switchTenant('tenant-aaa')
+
+    expect(mockNavigateTo).toHaveBeenCalledWith('/cambiar-contrasena')
+    // No es un error a mostrar sino un desvío: si además setea `error`, la
+    // pantalla de destino aparece con un cartel rojo que no corresponde.
+    expect(store.error).toBeNull()
+    expect(store.loading).toBe(false)
+  })
+
   it('usa mensaje genérico cuando el error no tiene data.message', async () => {
     const store = useTenantStore()
     mockApiFetch.mockRejectedValue(new Error('Unknown'))

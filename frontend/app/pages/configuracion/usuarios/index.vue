@@ -102,6 +102,67 @@ async function guardar() {
   }
 }
 
+// ── Alta de usuario ─────────────────────────────────────────────────────────
+const altaOpen = ref(false)
+const creando = ref(false)
+const alta = ref({ nombre: '', apellido: '', correo: '', rolIds: [] as string[] })
+
+function abrirAlta() {
+  alta.value = { nombre: '', apellido: '', correo: '', rolIds: [] }
+  altaOpen.value = true
+}
+
+/**
+ * La temporal se muestra **una sola vez**: el backend la genera, devuelve el
+ * claro en la respuesta del alta y guarda solo el hash. Mismo patrón que el PIN
+ * del garzón.
+ */
+const temporalOpen = ref(false)
+const temporal = ref<{ correo: string, contrasena: string }>({
+  correo: '',
+  contrasena: '',
+})
+
+async function crearUsuario() {
+  if (creando.value) return
+  creando.value = true
+  try {
+    const res = await useApiFetch<{
+      usuarioId: string
+      correo: string
+      contrasenaTemporal?: string
+    }>(`${apiUrl}/tenants/usuarios`, {
+      method: 'POST',
+      // `apellido` vacío se omite: `@IsOptional` no filtra el string vacío, así
+      // que mandarlo guardaría '' en vez de NULL.
+      body: { ...alta.value, apellido: alta.value.apellido || undefined },
+    })
+
+    altaOpen.value = false
+    await cargar()
+
+    // Sin `contrasenaTemporal` el correo ya existía: se asoció a este tenant y
+    // su contraseña no se tocó, así que no hay nada que mostrar ni entregar.
+    if (res.contrasenaTemporal) {
+      temporal.value = { correo: res.correo, contrasena: res.contrasenaTemporal }
+      temporalOpen.value = true
+    }
+    else {
+      toast.add({
+        title: 'Usuario agregado al tenant',
+        description: 'Ya tenía cuenta: entra con su contraseña de siempre.',
+        color: 'success',
+      })
+    }
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al crear el usuario'), color: 'error' })
+  }
+  finally {
+    creando.value = false
+  }
+}
+
 onMounted(cargar)
 
 const columns: TableColumn<Member>[] = [
@@ -115,8 +176,14 @@ const columns: TableColumn<Member>[] = [
   <div class="space-y-6">
     <CrudPageHeader
       title="Usuarios"
-      description="Asigna roles a los usuarios del tenant."
-    />
+      description="Da de alta usuarios del tenant y asigna sus roles."
+    >
+      <template #actions>
+        <UButton icon="i-lucide-plus" @click="abrirAlta">
+          Nuevo usuario
+        </UButton>
+      </template>
+    </CrudPageHeader>
 
     <CrudTable :data="members" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
@@ -163,6 +230,73 @@ const columns: TableColumn<Member>[] = [
         </div>
       </template>
     </CrudTable>
+
+    <UModal v-model:open="altaOpen" title="Nuevo usuario">
+      <template #body>
+        <UForm id="alta-usuario-form" :state="alta" class="space-y-4" @submit="crearUsuario">
+          <UFormField label="Nombre" required>
+            <UInput v-model="alta.nombre" :maxlength="100" autofocus class="w-full" />
+          </UFormField>
+          <UFormField label="Apellido">
+            <UInput v-model="alta.apellido" :maxlength="100" class="w-full" />
+          </UFormField>
+          <UFormField label="Correo" required>
+            <UInput v-model="alta.correo" type="email" :maxlength="100" class="w-full" />
+          </UFormField>
+          <!-- Obligatorio: un usuario sin rol entra y no ve nada. -->
+          <UFormField label="Roles" required>
+            <USelectMenu
+              v-model="alta.rolIds"
+              :items="roleItems"
+              multiple
+              value-key="value"
+              placeholder="Selecciona al menos un rol"
+              class="w-full"
+            />
+          </UFormField>
+          <p class="text-sm text-muted">
+            Si el correo ya tiene cuenta, se suma a este tenant conservando su
+            contraseña, y le quedan <strong>los roles que elijas acá</strong>.
+            Si no, el sistema genera una contraseña temporal que vas a ver
+            <strong>una sola vez</strong>.
+          </p>
+        </UForm>
+      </template>
+      <template #footer>
+        <AppModalFooter>
+          <UButton color="neutral" variant="ghost" @click="() => { altaOpen = false }">
+            Cancelar
+          </UButton>
+          <UButton
+            type="submit"
+            form="alta-usuario-form"
+            :loading="creando"
+            :disabled="!alta.nombre || !alta.correo || alta.rolIds.length === 0"
+          >
+            Crear
+          </UButton>
+        </AppModalFooter>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="temporalOpen" :title="`Contraseña de ${temporal.correo}`">
+      <template #body>
+        <div class="space-y-4">
+          <code class="block rounded bg-elevated px-3 py-3 text-center text-2xl font-semibold tracking-widest">{{ temporal.contrasena }}</code>
+          <p class="text-sm text-warning">
+            <UIcon name="i-lucide-triangle-alert" class="size-4 align-text-bottom" />
+            Guardala ahora — <strong>no se vuelve a mostrar</strong>. Pasásela a
+            la persona: el sistema le va a pedir cambiarla antes de dejarla
+            entrar.
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <AppModalFooter>
+          <UButton label="Entendido" @click="() => { temporalOpen = false }" />
+        </AppModalFooter>
+      </template>
+    </UModal>
 
     <UModal
       v-model:open="modalOpen"

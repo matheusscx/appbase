@@ -557,6 +557,63 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
 
 ### Lo que dejaron las revisiones independientes del cierre
 
+- [ ] **`addMember` devuelve roles viejos en silencio, y la asimetría con el alta es
+  deliberada** (backend, `tenants.service.ts` → `addMember`) — `removeMember` da de baja la
+  membresía pero **deja vivas** las filas de `roles_usuarios`, así que sacar a alguien para
+  revocarle el acceso y volver a sumarlo desde la tabla le devuelve sus permisos previos,
+  `Administrador` incluido. **`POST /tenants/usuarios` ya no hace esto**: ahí el admin
+  declara un conjunto de roles y lo que no viene se da de baja. En `addMember` no hay roles
+  en el body, así que no hay conjunto declarado y "restaurar lo que había" es una lectura
+  defendible — por eso se dejó como está y no se unificó. Se anota para que quien toque
+  `addMember` mañana sepa que la diferencia es una decisión y no un olvido; si algún día
+  recibe roles, tiene que dar de baja los que no vengan igual que el alta.
+
+- [ ] **Un correo de usuario soft-borrado hace explotar el alta con un 500** (backend,
+  `tenants.service.ts` → `crearUsuario`) — medido por la revisión del 2026-08-08 contra la
+  base viva: la búsqueda de `usuarioPrevio` corre con el filtro de soft delete, pero la
+  unique de `usuarios.correo` **no es parcial**, así que el `INSERT` choca y sale un
+  `500 Internal server error` en vez de un 409 o un 400 accionable. **Hoy es inalcanzable**:
+  nada en `backend/src` soft-borra un `Usuario` (`removeMember` solo da de baja la
+  membresía). Se anota y no se arregla porque el fix depende de una decisión que no está
+  tomada — si algún día se pueden dar de baja usuarios, ¿el alta los revive, los rechaza, o
+  el correo queda quemado?
+
+- [ ] **La transacción de `crearUsuario` no está protegida por ningún test** (backend,
+  `tenants.service.ts` → `crearUsuario`) — medido por la revisión del 2026-08-08:
+  reemplazar `this.dataSource.transaction(...)` por `this.dataSource.manager` deja los
+  unit y los e2e **en verde**. La transacción funciona (comprobado a mano: rompiendo
+  el `INSERT` de roles da 500 y no queda ni el usuario ni la membresía), pero una regresión
+  pasaría sin ruido. El test que parecía cubrirlo —"sin roles → 400"— lo corta el
+  `ValidationPipe` antes de que el service arranque. Para cubrirlo hace falta forzar un fallo
+  **después** de crear el usuario; desde la API no es trivial, así que probablemente sea un
+  unit con el manager mockeado.
+
+- [ ] **No hay forma de mandar un mail, y eso bloquea tres cosas a la vez** (backend) —
+  medido el 2026-08-08: cero rastros de `nodemailer`, `@nestjs-modules/mailer`, SMTP,
+  SendGrid o Resend en `package.json` ni en `backend/src`. **No es una feature faltante, es
+  infraestructura ausente**, y por eso bloquea:
+  1. **Verificación de correo** al dar de alta un usuario del tenant. Diferida
+     explícitamente por el owner (2026-08-08) *"porque no hay nada para enviar mail aún"*.
+     ⚠️ Mientras no exista, un admin puede sumar **cualquier correo registrado** a su tenant:
+     el daño está acotado —sumarte a mi restaurante no me da acceso a tus datos, te da
+     acceso a los míos— pero **filtra si ese correo está registrado** (enumeración), y a la
+     persona le aparece un tenant que no pidió.
+  2. **Invitación por link**, que es lo que reemplazaría a la contraseña temporal del alta
+     (ver `docs/superpowers/plans/2026-08-08-alta-de-usuarios-del-tenant.md`). Con
+     invitación, el admin deja de conocer una contraseña válida de otra persona.
+  3. **Reset de contraseña** ("olvidé la mía"), que **tampoco existe** hoy: el único camino
+     es que un admin la reponga.
+     ⚠️ **Al implementarlo hay que mirar `debe_cambiar_contrasena` también en
+     `AuthService.refresh()`.** Hoy el flag se controla solo en `switchTenant`, y alcanza
+     porque únicamente lo llevan cuentas recién creadas, que nunca tuvieron token de tenant.
+     Un reset se lo pone a alguien **con sesión viva**: sin el chequeo en `refresh`, esa
+     sesión se renueva sola con el tenant que ya tenía y se saltea el cambio. Se probó
+     agregarlo por adelantado y se sacó: era una rama inalcanzable y sin test dentro del
+     subsistema que la invariante 4 pide no tocar.
+  **Antes de encararlo hace falta decisión de owner sobre la dependencia** (elegir proveedor
+  y agregarla al stack, que el `CLAUDE.md` exige confirmar). Las tres se resuelven con la
+  misma infraestructura, así que conviene decidirla una vez y no tres.
+
 - [ ] **`/garzones/verificar-pin` es un oráculo de PIN sin throttling, y el fix del selector
   lo abarató 20×** (backend, `garzones.controller.ts`) — el endpoint dice si un PIN
   pertenece a **un garzón concreto**, sin ejecutar nada y sin límite de intentos. Antes de
@@ -575,11 +632,13 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   es_totem` como marcador **explícito** del modo (no inferido: una cuenta marcada como tótem
   no puede volverse personal aunque alguien la vincule por error). Todo el diseño está en el
   plan, incluidas las cuatro preguntas ya resueltas.
-  **Bloqueada por una feature que no existe:** el alta de usuarios del tenant por el admin.
-  Medido: `POST /tenants/members` recibe un `usuarioId` **que ya existe**, la pantalla de
-  usuarios solo asigna roles, y el único camino a una cuenta es `POST /auth/register`
-  **público**. Habilitar un garzón personal hoy cuesta 4 pasos en 3 pantallas y arranca con
-  un auto-registro. Por eso se difirió: sería un camino que casi nadie puede recorrer.
+  ⚠️ **DESBLOQUEADA el 2026-08-08.** Estaba frenada porque el alta de usuarios del tenant no
+  existía —`POST /tenants/members` recibía un `usuarioId` ya existente y el único camino a
+  una cuenta era el registro público—, así que habilitar un garzón personal costaba 4 pasos
+  en 3 pantallas. Ahora `POST /tenants/usuarios` lo hace en uno
+  (`docs/features/roles-permisos.md`). Lo que queda de esta entrada es el vínculo
+  `garzones.usuario_id` + `usuarios_tenants.es_totem` y la resolución del garzón actuante,
+  todo diseñado en el plan.
 
 - [ ] **`anti-patterns.md` pasó su propio tope de 20 entradas y nadie podó** (docs,
   `docs/agent/anti-patterns.md:14`) — la regla 3 del archivo dice *"Tope: 20 entradas. Si se

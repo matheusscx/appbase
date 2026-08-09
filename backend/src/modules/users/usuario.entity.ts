@@ -41,6 +41,19 @@ export class Usuario {
   @Column({ name: 'es_superadmin', default: false })
   esSuperadmin: boolean;
 
+  /**
+   * La cuenta la creó un admin de tenant con una contraseña **temporal
+   * generada por el sistema**, y la persona todavía no la cambió.
+   *
+   * Mientras esté en `true`, `switchTenant` no emite token de tenant: se puede
+   * loguear y llegar a `PATCH /me/contrasena` —que corre con `JwtAuthGuard`
+   * solo, sin `TenantGuard`— pero no operar nada. Ese es todo el enforcement:
+   * un solo lugar, sin costo por request y **sin tocar el payload del JWT**
+   * (invariante 4).
+   */
+  @Column({ name: 'debe_cambiar_contrasena', type: 'boolean', default: false })
+  debeCambiarContrasena: boolean;
+
   @Column({ type: 'jsonb', default: () => "'{}'" })
   preferencias: UsuarioPreferencias;
 

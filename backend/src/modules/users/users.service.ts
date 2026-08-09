@@ -11,8 +11,21 @@ export class UsersService {
     private readonly repo: Repository<Usuario>,
   ) {}
 
+  /**
+   * Case-insensitive a propósito. Es la búsqueda que usan el login, el chequeo
+   * de duplicado del registro y el vínculo con Google, y la unique de Postgres
+   * sobre `correo` **sí** distingue mayúsculas: comparando exacto, una cuenta
+   * dada de alta como `Juan.Perez@x.cl` no entraba tipeando `juan.perez@x.cl`
+   * —y no hay reset de contraseña— mientras el registro público dejaba crear
+   * las dos como personas distintas.
+   *
+   * El QueryBuilder mantiene el filtro de soft delete que aplicaba `findOne`.
+   */
   findByEmail(email: string): Promise<Usuario | null> {
-    return this.repo.findOne({ where: { correo: email } });
+    return this.repo
+      .createQueryBuilder('u')
+      .where('LOWER(u.correo) = LOWER(:email)', { email })
+      .getOne();
   }
 
   findById(id: string): Promise<Usuario | null> {

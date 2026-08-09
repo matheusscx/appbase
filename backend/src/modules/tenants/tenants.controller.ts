@@ -22,6 +22,7 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { AddMemberDto } from './dto/add-member.dto';
+import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { AddModuleDto } from './dto/add-module.dto';
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
@@ -104,6 +105,21 @@ export class TenantsController {
   addMember(@Req() req: Request, @Body() dto: AddMemberDto) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.addMember(user.tenantId, dto.usuarioId);
+  }
+
+  /**
+   * Alta de un usuario del tenant. Mismo guard que `members` —es administración
+   * del tenant— y por eso **no** lleva `@RequiresPermiso`.
+   *
+   * Devuelve `contrasenaTemporal` **solo** cuando la cuenta se creó: si el
+   * correo ya existía, la cuenta es de esa persona y su contraseña no se toca.
+   * Es la única vez que se puede leer, igual que el PIN del garzón.
+   */
+  @UseGuards(TenantAdminGuard)
+  @Post('usuarios')
+  crearUsuario(@Req() req: Request, @Body() dto: CrearUsuarioTenantDto) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.crearUsuario(user.tenantId, dto);
   }
 
   @UseGuards(TenantAdminGuard)

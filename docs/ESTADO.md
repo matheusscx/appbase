@@ -11,6 +11,7 @@ Cada feature ✅ tiene su doc operativa en [`features/`](./features/).
 | Configuración — perfil de usuario (nombre, teléfono, contraseña) | ✅ Implementado |
 | Perfil multi-tenant (pantallas de gestión) | 🔲 Por construir |
 | Configuración — Roles y Permisos (RBAC: roles, matriz de permisos, asignación a usuarios) | ✅ Implementado |
+| Configuración — Alta de usuarios del tenant (`POST /tenants/usuarios`, admin-only): crea-o-asocia + roles obligatorios en una transacción; contraseña temporal **generada por el sistema** y mostrada una sola vez, con cambio obligatorio antes de entrar a cualquier tenant (`switchTenant` corta con `DEBE_CAMBIAR_CONTRASENA`). Sin confirmación de correo — diferida, no hay envío de mails | ✅ Implementado (2026-08-08) |
 | RBAC — gestión de módulos contratados (superadmin) | 🔲 Por construir |
 | Gestión de tenants y razones sociales | ✅ Implementado |
 | Terceros (proveedores, empresas) + selector en el POS | ✅ Implementado (2026-07-04) |

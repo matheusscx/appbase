@@ -156,6 +156,20 @@ export class AuthService {
       throw new ForbiddenException('No perteneces a este tenant');
     const user = await this.usersService.findById(userId);
     if (!user) throw new UnauthorizedException();
+    // Único punto de enforcement de la contraseña temporal. Va acá y no en un
+    // guard porque el token de tenant es la llave de todo lo operativo, y
+    // porque `/me` corre sin `TenantGuard`: la persona igual puede loguearse y
+    // llegar a `PATCH /me/contrasena` para cambiarla. Costo cero por request y
+    // sin tocar el payload del JWT (invariante 4).
+    if (user.debeCambiarContrasena) {
+      // Cuerpo con `codigo` y no solo mensaje: la pantalla tiene que mandar a
+      // cambiarla, y matchear el texto del mensaje se rompe al reescribirlo.
+      // Mismo recurso que el `nombreSugerido` de las colisiones de nombre.
+      throw new ForbiddenException({
+        message: 'Tenés que cambiar tu contraseña temporal antes de entrar.',
+        codigo: 'DEBE_CAMBIAR_CONTRASENA',
+      });
+    }
     // Revocar todos los refresh tokens anteriores del usuario
     await this.refreshRepo.delete({ userId });
     const access_token = this.generateAccessToken(user, tenantId);
