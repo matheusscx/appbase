@@ -194,13 +194,13 @@ async function abrirCrear() {
     cargandoItems.value = true
     try {
       const res = await useApiFetch<{ data: ItemSuscribible[] }>(
-        `${apiUrl}/items?tipo=suscripcion&pageSize=100`,
+        `${apiUrl}/items?tipo=suscripcion&activo=true&pageSize=100`,
       )
-      // Un ítem pausado (`activo = false`) deja de ofrecerse: conserva sus datos
-      // y sus asociaciones, pero no se puede vender hasta que lo reactiven. Es
-      // la cuarta superficie de venta, con el mismo filtro que POS, tienda y
-      // salones; el backend además lo rechaza en `suscripciones.service.ts`.
-      itemsSuscribibles.value = res.data.filter((i) => i.frecuencia && i.activo)
+      // Los pausados no vienen: `activo=true` va en la query, igual que en las
+      // otras tres superficies de venta (el backend además lo rechaza en
+      // `suscripciones.service.ts`). Lo que sigue filtrándose acá es
+      // `frecuencia`, que no es un estado sino la condición de suscribible.
+      itemsSuscribibles.value = res.data.filter((i) => i.frecuencia)
     } catch (e: unknown) {
       toast.add({ title: apiErrorMsg(e, 'Error al cargar items suscribibles'), color: 'error' })
     } finally {

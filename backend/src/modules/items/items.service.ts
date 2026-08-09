@@ -234,6 +234,19 @@ export class ItemsService {
       params.push(`%${query.search}%`);
       idx++;
     }
+    // ⚠️ `!== undefined`, no un `if (query.activo)`: `false` es un filtro
+    // válido —"mostrame los pausados"— y con la forma corta sería
+    // indistinguible de no filtrar.
+    //
+    // Las cuatro pantallas de venta piden `activo=true`. Antes traían todo y
+    // descartaban los pausados en el cliente, lo que no era equivalente: el
+    // pausado igual ocupaba uno de los `pageSize` lugares pedidos, así que en
+    // un catálogo grande cada ítem pausado empujaba fuera del POS a uno
+    // vendible.
+    if (query.activo !== undefined) {
+      where += ` AND i.activo = $${idx++}`;
+      params.push(query.activo);
+    }
 
     return { where, params };
   }

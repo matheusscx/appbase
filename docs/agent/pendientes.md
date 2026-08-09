@@ -285,12 +285,20 @@ olvido:
 - **No hay E2E de que una regla pausada no quede congelada en `ventas_descuentos`.** El plan
   lo pedía. El comportamiento es correcto por construcción —el congelado sale de las trazas y
   una regla pausada no deja traza—, pero eso lo sostiene un razonamiento, no un test.
-- **El filtro de ítems pausados en los tres catálogos de venta no tiene test.** `pos.vue`,
-  `tienda/index.vue` y `salones/index.vue` no tienen `.nuxt.spec.ts` y montarlas exige stores
-  de caja, unidades e impresoras. Es una línea por pantalla y hoy nada la sostiene.
-- ℹ️ **Caveat preexistente, no introducido por esa feature:** los tres catálogos piden
-  `pageSize=100` y el filtro corre **después**, así que un ítem pausado sigue ocupando un lugar
-  de esos 100. El tope ya truncaba antes; esto no lo empeora ni lo arregla.
+- **`ventas/pos.vue`, `tienda/index.vue` y `tienda/suscripciones.vue` no tienen
+  `.nuxt.spec.ts`.** El filtro de pausados que vivía en esas tres pantallas se movió a la
+  query el 2026-08-09 (`activo=true`, ver [`resueltos.md`](resueltos.md)), y el endpoint sí
+  quedó cubierto por e2e; lo que **no** sostiene nada es que cada pantalla lo pida — borrar
+  `&activo=true` de una URL deja la suite en verde. En `salones/index.vue` eso ya tiene test,
+  porque ahí el spec existe. Montar las otras tres exige stores de caja, unidades e
+  impresoras: es el arnés, no el `it`.
+- ℹ️ **El tope de 100 sigue vivo, y ahora es el único truncamiento que queda** (frontend).
+  Las cuatro superficies de venta piden `pageSize=100` y no paginan, con
+  `MAX_PAGE_SIZE = 100` en `common/utils/pagination.util.ts`. Mover el filtro de pausados a
+  la query sacó una causa de pérdida —el pausado ya no le roba el lugar a un vendible— pero
+  un tenant con más de 100 ítems vendibles sigue sin verlos todos en el POS. Preexistente y
+  sin caso reportado; se anota para no perderlo, porque la nota anterior vivía pegada a la
+  entrada del filtro que se cerró.
 
 **Ramas sin cobertura alguna**, para decidir si entran: `HORAS_TRABAJADAS`;
 `advertenciasSesionesAbiertas` con `fin_el = null`; las guardas `fechaHasta <= fechaDesde`,

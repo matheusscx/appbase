@@ -23,6 +23,10 @@ interface AdvertenciaResponse {
   titulo: string;
   detalle: string;
 }
+interface CatalogoResponse {
+  data: { id: string; activo: boolean }[];
+  meta: { total: number };
+}
 interface ResultadoVentaResponse {
   lineas: { advertencias: AdvertenciaResponse[] }[];
   totales: { totalFinal: string };
@@ -144,6 +148,13 @@ describe('Ítem pausado según el canal (e2e)', () => {
   let itemId: string;
   let nombreItem: string;
   let totalActivo: string;
+  /** Cuántos productos vendibles había ANTES de pausar el ítem de este spec. */
+  let vendiblesAntes: number;
+
+  const listarProductos = (query: string) =>
+    request(app.getHttpServer())
+      .get(`/api/items?tipo=producto&pageSize=100${query}`)
+      .set('Authorization', `Bearer ${token}`);
 
   const calcular = () =>
     request(app.getHttpServer())
@@ -193,6 +204,10 @@ describe('Ítem pausado según el canal (e2e)', () => {
     const previo = await calcular();
     expect(previo.status).toBe(201);
     totalActivo = (previo.body as ResultadoVentaResponse).totales.totalFinal;
+
+    const catalogo = await listarProductos('&activo=true');
+    expect(catalogo.status).toBe(200);
+    vendiblesAntes = (catalogo.body as CatalogoResponse).meta.total;
   }, 60000);
 
   afterAll(async () => {
@@ -215,6 +230,69 @@ describe('Ítem pausado según el canal (e2e)', () => {
         .set('Authorization', `Bearer ${token}`)
         .send({ activo: false });
       expect(res.status).toBe(200);
+    });
+
+    /**
+     * El catálogo que piden las cuatro pantallas de venta (POS, salones,
+     * tienda y suscripciones).
+     *
+     * Hasta 2026-08-09 el backend mandaba los pausados igual y cada pantalla
+     * los descartaba en el cliente. **No era equivalente**: el pausado ocupaba
+     * uno de los `pageSize` lugares pedidos, así que en un catálogo de más de
+     * 100 ítems cada pausado empujaba fuera de la pantalla a uno vendible.
+     * Por eso lo que se afirma acá es el `total` de la paginación, no solo que
+     * el ítem no venga en `data`: es la diferencia entre las dos formas.
+     */
+    describe('el catálogo de venta', () => {
+      it('con `activo=true` no lo trae, y libera su lugar de la página', async () => {
+        const res = await listarProductos('&activo=true');
+
+        expect(res.status).toBe(200);
+        const body = res.body as CatalogoResponse;
+        expect(body.data.some((i) => i.id === itemId)).toBe(false);
+        expect(body.data.every((i) => i.activo)).toBe(true);
+        // La mitad que un filtro de cliente no puede dar.
+        expect(body.meta.total).toBe(vendiblesAntes - 1);
+      });
+
+      it('con `activo=false` trae solo los pausados, y el ítem está entre ellos', async () => {
+        const res = await listarProductos('&activo=false');
+
+        expect(res.status).toBe(200);
+        const body = res.body as CatalogoResponse;
+        expect(body.data.some((i) => i.id === itemId)).toBe(true);
+        expect(body.data.every((i) => !i.activo)).toBe(true);
+      });
+
+      it('sin el parámetro sigue trayendo todo: la pantalla de configuración depende de eso', async () => {
+        // El contrato viejo no se movió. Si esto empezara a filtrar, el admin
+        // dejaría de ver —y de poder reactivar— lo que él mismo pausó.
+        const [todos, vendibles, pausados] = await Promise.all([
+          listarProductos(''),
+          listarProductos('&activo=true'),
+          listarProductos('&activo=false'),
+        ]);
+
+        expect(todos.status).toBe(200);
+        const body = todos.body as CatalogoResponse;
+        expect(body.data.some((i) => i.id === itemId)).toBe(true);
+        // Sin filtrar = la suma exacta de las dos mitades. Comparar contra un
+        // número fijo no serviría: la base de dev arrastra pausados de otras
+        // corridas, y en CI arranca solo con los del seed.
+        expect(body.meta.total).toBe(
+          (vendibles.body as CatalogoResponse).meta.total +
+            (pausados.body as CatalogoResponse).meta.total,
+        );
+      });
+
+      it('un valor que no es booleano da 400, no "solo los pausados"', async () => {
+        // La coerción de `incluirEliminados` —`value === 'true'`— habría
+        // convertido esto en `false` en silencio, o sea en el catálogo
+        // invertido. Acá `activo` tiene TRES estados y el borde importa.
+        const res = await listarProductos('&activo=sí');
+
+        expect(res.status).toBe(400);
+      });
     });
 
     it('tienda online: el checkout falla nombrando el producto, sin tocar el stock', async () => {

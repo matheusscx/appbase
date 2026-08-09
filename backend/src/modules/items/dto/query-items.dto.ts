@@ -48,4 +48,26 @@ export class QueryItemsDto extends PaginationQueryDto {
   @IsOptional()
   @IsBoolean()
   incluirEliminados?: boolean;
+
+  /**
+   * Filtra por ítem pausado. **Tres estados, no dos**: ausente no filtra nada
+   * (el listado de configuración muestra pausados y activos juntos, con su
+   * badge), `true` deja solo los vendibles, `false` solo los pausados.
+   *
+   * Por eso la coerción no es la de `incluirEliminados`. **El ausente no es el
+   * problema** —`@Transform` no corre sobre una clave que no vino, medido— sino
+   * la basura: con `value === 'true'`, un `activo=TRUE` o `activo=1` cae a
+   * `false`, o sea al catálogo **invertido**, en silencio. Acá lo que no es
+   * `true`/`false` se deja pasar tal cual para que `@IsBoolean()` lo corte con
+   * un 400. En `incluirEliminados` el mismo error es inofensivo (mostrar de
+   * menos); acá muestra justo lo que no se pidió.
+   */
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  })
+  @IsOptional()
+  @IsBoolean()
+  activo?: boolean;
 }

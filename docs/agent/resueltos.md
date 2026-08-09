@@ -17,6 +17,53 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los ítems pausados dejan de viajar al cliente (2026-08-09)
+
+**Decisión del owner, y no era el trabajo que había anotado.** El backlog decía que "el
+filtro de ítems pausados en los tres catálogos de venta no tiene test". Al plantearlo, el
+owner enunció la regla directamente: *"no quiero filtro de ítems pausados en el POS ni en el
+salón ni en online, simplemente no salen"*. Medido contra el código, eso era **casi** lo que
+pasaba, con dos correcciones al enunciado del backlog:
+
+- Son **cuatro** superficies de venta, no tres: `ventas/pos.vue`, `salones/index.vue`,
+  `tienda/index.vue` y `tienda/suscripciones.vue`.
+- El pausado **sí salía del backend**; lo descartaba cada pantalla con
+  `.filter(i => i.activo)` después de pedir `pageSize=100`. Y eso **no es equivalente** a "no
+  salen": el pausado ocupaba uno de esos 100 lugares, así que en un catálogo de más de 100
+  ítems cada pausado empujaba fuera de la pantalla a uno vendible — un ítem desaparecía del
+  POS sin que nadie lo hubiera pausado. `GET /items` no tenía filtro por `activo`.
+
+**La forma fiel es que no vengan**, y es la que se implementó: `activo` como parámetro de
+`GET /items`, las cuatro pantallas piden `activo=true` y ninguna filtra más en el cliente.
+
+**Tres estados, no dos**: ausente no filtra (la pantalla de configuración muestra pausados y
+activos juntos, con su badge), `true` deja los vendibles, `false` deja los pausados. La
+coerción del booleano no es la de `incluirEliminados`, y la primera redacción de esta ficha
+justificaba eso mal —decía que `value === 'true'` convierte el ausente en `false`—. **Es
+falso y lo midió la revisión independiente**: `@Transform` no corre sobre una clave que no
+vino, así que con esa coerción el ausente sigue sin filtrar. Lo que sí cambia es la basura:
+`activo=TRUE` o `activo=1` caerían a `false`, o sea al catálogo **invertido**, en silencio.
+Acá dan 400 — medido junto con `activo=`, `?activo` sin valor y `activo=yes`.
+
+**Compatible hacia atrás:** sin el parámetro la respuesta es la de siempre, así que las cinco
+pantallas que listan ítems fuera de venta (configuración de ítems, grupos de modificadores,
+inventario, recuentos y mermas — siete *call sites*, porque la de ítems hace tres) no se
+enteran, y ahí un pausado **tiene** que verse.
+
+**Los mutantes, los tres medidos** en `items-pausados.e2e-spec.ts`:
+
+- **sin el filtro en la query** (o sea, el estado anterior): mueren 3 tests.
+- **`if (query.activo)` en vez de `!== undefined`**: mueren 2 — `activo=false` deja de
+  filtrar, que es el borde que la coerción de tres estados existe para proteger.
+- **sacar `&activo=true` de una URL de `salones/index.vue`**: muere el test nuevo de
+  `index.nuxt.spec.ts`, que captura las URLs **completas** con query string. Sin eso el
+  parámetro se puede borrar con la suite en verde, que es la misma trampa ya documentada
+  para `enTurno` en el selector de garzones.
+
+Lo que el e2e afirma y un filtro de cliente no puede dar: el **`total` de la paginación**
+baja al pausar. Esa es exactamente la diferencia entre las dos formas — que el pausado deje
+de ocupar un lugar de la página, no solo que no se dibuje.
+
 ## El aviso de ítem eliminado se podía borrar sin que nada se pusiera rojo (2026-08-09)
 
 **La entrada:** el computed `cuentaConItemEliminado` (`pages/salones/index.vue`) no tenía

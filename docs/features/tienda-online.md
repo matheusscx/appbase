@@ -81,6 +81,14 @@ Response (201):
 }
 ```
 
+Un ítem pausado **no llega al catálogo**: las cuatro superficies de venta piden
+`GET /items?...&activo=true` y el filtro se resuelve en la query, no en el cliente
+(2026-08-09). El parámetro tiene tres estados —ausente no filtra, `true` vendibles,
+`false` pausados— porque la pantalla de configuración necesita verlos a todos.
+
+Aun así el checkout lo revalida, y no es redundante: el carrito vive en el navegador,
+así que el ítem se puede pausar **después** de que el cliente lo agregó.
+
 **Ítem pausado (`activo = false`) → 400**, con el nombre del producto adentro:
 `El producto "<nombre>" ya no se encuentra disponible`. El carrito vive en el
 navegador (no hay tabla `carrito`), así que el ítem se puede pausar entre que el

@@ -135,21 +135,21 @@ async function cargar() {
   try {
     const [productosRes, recetasRes, combosRes, metodosRes, tiposRes] = await Promise.all([
       useApiFetch<PaginatedResponse<ItemCatalogo>>(
-        `${apiUrl}/items?tipo=producto&pageSize=100`,
+        `${apiUrl}/items?tipo=producto&activo=true&pageSize=100`,
       ),
       useApiFetch<PaginatedResponse<ItemCatalogo>>(
-        `${apiUrl}/items?tipo=receta&pageSize=100`,
+        `${apiUrl}/items?tipo=receta&activo=true&pageSize=100`,
       ),
       useApiFetch<PaginatedResponse<ItemCatalogo>>(
-        `${apiUrl}/items?tipo=combo&pageSize=100`,
+        `${apiUrl}/items?tipo=combo&activo=true&pageSize=100`,
       ),
       useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
       useApiFetch<TipoDoc[]>(`${apiUrl}/tipos-documento`),
     ])
-    // Un ítem pausado (`activo = false`) deja de ofrecerse: conserva sus datos
-    // y sus asociaciones, pero no se puede vender hasta que lo reactiven.
+    // Los pausados no vienen: `activo=true` va en la query. Filtrarlos acá no
+    // era equivalente —el pausado igual ocupaba uno de los 100 lugares pedidos,
+    // así que en un catálogo grande empujaba fuera del POS a uno vendible—.
     items.value = [...productosRes.data, ...recetasRes.data, ...combosRes.data]
-      .filter(i => i.activo)
     metodos.value = metodosRes
     tiposDocumento.value = tiposRes
     tipoDocumentoId.value = tiposRes[0]?.id

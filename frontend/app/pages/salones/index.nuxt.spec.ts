@@ -84,6 +84,8 @@ let abrirCuentaRetenido: Promise<unknown> | null = null
  * abierta— y lo llena el `describe` del ítem eliminado.
  */
 let cuentasDeLaMesa: unknown[] = []
+/** Las URLs completas del catálogo. Ver la rama `/items` del mock. */
+let urlsCatalogo: string[] = []
 /**
  * `POST /calculo-precios/calcular` falla. Es lo que hace el backend real cuando
  * una línea apunta a un ítem borrado del catálogo: 404, porque el motor resuelve
@@ -210,7 +212,11 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve({ porcentajeSugerido: '0.1', habilitado: true })
     }
     if (ruta.includes('/items')) {
-      return Promise.resolve({ data: [], total: 0, page: 1, pageSize: 100 })
+      // La URL ENTERA, con query string: el filtro de pausados vive ahí desde
+      // que dejó de hacerse en el cliente, y si el mock cortara en el `?` se
+      // podría borrar con la suite en verde. Mismo motivo que `urlsSelector`.
+      urlsCatalogo.push(url)
+      return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100 } })
     }
     // El resto del arranque (métodos de pago, tipos de documento, unidades,
     // caja, emisor) no interviene en este flujo.
@@ -244,6 +250,7 @@ function reiniciarMock() {
   postsAbrirCuenta = []
   bodiesAbrirCuenta = []
   urlsSelector = []
+  urlsCatalogo = []
   sinSesionDeTrabajo = false
   abrirCuentaRetenido = null
   vinculoPersonal = null
@@ -601,5 +608,34 @@ describe('salones — cuenta con un ítem eliminado del catálogo', () => {
     expect(drawerMesa()?.textContent).not.toContain('Hay un ítem eliminado del catálogo')
     expect(valorDelTotal()).toBe('$5.000')
     expect(botonEn(drawerMesa(), 'Cerrar y cobrar')?.disabled).toBe(false)
+  })
+})
+
+/**
+ * El catálogo del salón pide solo lo vendible.
+ *
+ * Hasta 2026-08-09 la pantalla traía todo y descartaba los pausados con un
+ * `.filter(i => i.activo)`. No era equivalente: el pausado igual ocupaba uno de
+ * los 100 lugares pedidos, así que con un catálogo grande cada ítem pausado
+ * empujaba fuera del salón a uno vendible. Ahora el filtro va en la query, y
+ * esto es lo único que lo sostiene del lado del cliente — borrar `activo=true`
+ * de la URL no rompe ninguna otra cosa.
+ */
+describe('salones — el catálogo pide solo ítems vendibles', () => {
+  beforeEach(reiniciarMock)
+
+  it('las tres consultas de catálogo llevan `activo=true`', async () => {
+    await montar()
+
+    // Producto, receta y combo: las tres, no "alguna".
+    expect(urlsCatalogo).toHaveLength(3)
+    for (const url of urlsCatalogo) {
+      expect(url).toContain('activo=true')
+    }
+    expect(urlsCatalogo.map(u => u.match(/tipo=(\w+)/)?.[1]).sort()).toEqual([
+      'combo',
+      'producto',
+      'receta',
+    ])
   })
 })
