@@ -89,6 +89,64 @@ describe('calcularAplicacionesNoVuelto', () => {
     });
   });
 
+  /**
+   * El **spillover**: la propina no cabe entera en el primer pago y se derrama
+   * al siguiente. Era la rama sin cobertura de este archivo, y es la que decide
+   * plata: sin ella, el algoritmo podría asignar de más al primer medio —o
+   * perder el resto— y los tests de arriba, todos con la propina cabiendo
+   * cómoda, seguirían verdes.
+   *
+   * Tarjeta (sin vuelto) va primero por regla, absorbe sus 3.000 completos, y
+   * los 2.000 que sobran caen sobre el efectivo. Del efectivo, entonces, solo
+   * 8.000 son venta.
+   */
+  it('la propina que no cabe en el primer medio se derrama al siguiente', () => {
+    const pagos: PagoNetoInput[] = [
+      {
+        pagoIdx: 0,
+        metodoPagoId: EFECTIVO,
+        permiteVuelto: true,
+        neto: '10000',
+      },
+      {
+        pagoIdx: 1,
+        metodoPagoId: TARJETA,
+        permiteVuelto: false,
+        neto: '3000',
+      },
+    ];
+
+    const apps = calcularAplicacionesNoVuelto(pagos, '5000');
+
+    expect(apps).toEqual([
+      { pagoIdx: 0, tipo: 'venta', monto: '8000.0000' },
+      { pagoIdx: 0, tipo: 'propina', monto: '2000.0000' },
+      // La tarjeta queda íntegra como propina: no le sobra nada para venta, y
+      // por eso NO emite aplicación de tipo 'venta'.
+      { pagoIdx: 1, tipo: 'propina', monto: '3000.0000' },
+    ]);
+    // Conservación: lo repartido es exactamente lo pagado, ni un peso de más.
+    const total = apps.reduce((acc, a) => acc + Number(a.monto), 0);
+    expect(total).toBe(13000);
+  });
+
+  // El borde del spillover: la propina supera la suma de TODOS los netos. No
+  // puede inventar plata que nadie pagó — el remanente simplemente no se asigna.
+  it('una propina mayor que todo lo pagado no crea aplicaciones de más', () => {
+    const pagos: PagoNetoInput[] = [
+      {
+        pagoIdx: 0,
+        metodoPagoId: TARJETA,
+        permiteVuelto: false,
+        neto: '1000',
+      },
+    ];
+
+    const apps = calcularAplicacionesNoVuelto(pagos, '99999');
+
+    expect(apps).toEqual([{ pagoIdx: 0, tipo: 'propina', monto: '1000.0000' }]);
+  });
+
   it('asigna tip a efectivo cuando es el único medio', () => {
     const pagos: PagoNetoInput[] = [
       {

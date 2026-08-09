@@ -293,14 +293,42 @@ no quede congelada en `ventas_descuentos`— **se cerraron el 2026-08-09**; ver
   sin caso reportado; se anota para no perderlo, porque la nota anterior vivía pegada a la
   entrada del filtro que se cerró.
 
-**Ramas sin cobertura alguna**, para decidir si entran: `HORAS_TRABAJADAS`;
-`advertenciasSesionesAbiertas` con `fin_el = null`; las guardas `fechaHasta <= fechaDesde`,
-`gruposConfig.length === 0` y moneda oficial ausente; `aplicarCambioParticipante` (alta
-manual); `actualizar` con `recalcular: false`; los endpoints HTTP `confirmar`/`anular`;
-el rechazo de `peso <= 0` en `MANUAL/PESOS`; el spillover de propina entre pagos en
-`asignacion-propina.ts`; toda la capa SQL de `propina-reportes` (cero e2e);
-`registrarMovimientoEnTransaccion`; el backstop 23505 de `abrir()`; y el aislamiento
-multi-tenant de caja.
+**Ramas sin cobertura alguna.** La lista se triageó el 2026-08-09 y se cubrieron **cuatro
+ramas nuevas**: el spillover de propina entre pagos, el aislamiento multi-tenant **de
+lectura** de caja, la capa SQL de `propina-reportes` y `HORAS_TRABAJADAS`; más el rechazo de
+`peso <= 0`. Se escribieron además dos tests de guardas (`fechaHasta <= fechaDesde` y Σ de
+porcentajes) que **no** agregan cobertura de rama: los mataban tests unitarios preexistentes.
+Detalle, mutantes y lo que quedó sin fijar en [`resueltos.md`](resueltos.md).
+
+Lo que la tanda dejó abierto y antes no estaba anotado:
+
+- [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
+  test** (backend) — el e2e nuevo prueba que la escritura ajena no prospera y que la caja
+  queda intacta, pero no aísla cuál de las tres defensas la frena
+  (`bloquearCajaAbierta` + `findOne` acotado + chequeo de dueño). Medido: sacando la de
+  tenant, la request del otro tenant llega al `FOR UPDATE` y la corrida **se cuelga**, así
+  que no hay aserción posible sobre el resultado. Encararlo probablemente pida un timeout
+  explícito en la query o mirar el lock, no un `expect` de status.
+- [ ] **El test del rango invertido no distingue cuál de las dos guardas gemelas está viva**
+  (backend) — hay una en `utils/rango-liquidacion.ts` y otra duplicada en `computarReparto`
+  con el mismo mensaje, así que apagar una sola deja el e2e en verde. O se deduplica la
+  guarda, o el test tiene que entrar por el camino que solo pasa por una.
+
+Lo que **no** entró, con el motivo, para no volver a evaluarlo de cero:
+
+- 🚫 **`gruposConfig.length === 0`** — se intentó y resultó **inalcanzable por la API**: el
+  PUT de distribución exige que los grupos activos sumen 100%, así que no se puede dejar al
+  tenant sin ninguno. Montarlo pediría SQL directo, o sea un test de un escenario que en
+  producción no existe. Lo que sí quedó cubierto es la puerta de entrada. La guarda del
+  servicio es defensa en profundidad, no código muerto.
+- ⏸️ **El backstop 23505 de `abrir()`** — es una carrera. Reproducirla exige montar el estado
+  por SQL; mismo criterio que arriba.
+- ⏸️ **`registrarMovimientoEnTransaccion`** — se ejercita indirectamente en cada venta que
+  mueve stock; cubrirlo aparte agrega poco.
+- ⏸️ **`advertenciasSesionesAbiertas` con `fin_el = null`**, **`aplicarCambioParticipante`**
+  (alta manual), **`actualizar` con `recalcular: false`**, los endpoints HTTP
+  **`confirmar`/`anular`** y la guarda de **moneda oficial ausente** — riesgo menor y ninguno
+  toca plata sin pasar antes por algo ya cubierto. Entran si aparece un caso real.
 
 ### Decidido por el owner (2026-07-27)
 

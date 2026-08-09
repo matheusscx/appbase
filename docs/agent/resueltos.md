@@ -17,6 +17,91 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Seis ramas sin cobertura, elegidas de una lista de catorce (2026-08-09)
+
+La entrada decía *"ramas sin cobertura alguna, **para decidir si entran**"*. Se decidió por
+riesgo, y el criterio para descartar fue el mismo en tres casos: si montar el escenario exige
+SQL directo, lo que se escribe es un test de un estado que en producción no existe. El detalle
+de lo que no entró queda en [`pendientes.md`](pendientes.md) para no reevaluarlo de cero.
+
+### Spillover de propina entre pagos (unit)
+
+La propina que no cabe en el primer medio se derrama al siguiente. Los seis tests que ya
+tenía `asignacion-propina.spec.ts` usaban propinas que caben cómodas, así que la rama del
+tope no la tocaba ninguno. Se sumaron dos: el derrame y el borde de una propina
+mayor que todo lo pagado, que no puede inventar plata que nadie puso. (La aserción de
+conservación que acompaña al primero es **redundante**: el `toEqual` de arriba ya fija el
+array elemento por elemento, así que no existe mutación que rompa una sin romper el otro. Se
+deja como documentación de la propiedad, no como cobertura.) **Mutante:** sacar el `Decimal.min(neto, …)` mata
+los dos.
+
+### Aislamiento multi-tenant de caja (e2e) — el más valioso de la tanda
+
+El eje cubierto era el de roles dentro de un tenant (cajero vs supervisor). Este es el otro:
+que la caja de Paris sea invisible con un token de Falabella. **Mutante:** sacar `tenantId`
+del `where` de `CajaService.findOne` devuelve **200 con la caja de otra empresa** donde el
+test espera 404.
+
+**La clave del arnés es que ataca la MISMA PERSONA**: `admin@sistema.com` es miembro de los
+dos tenants del seed, así que la caja se abre con su token de Paris y se ataca con el de
+Falabella. La primera versión usaba dos personas distintas y la revisión independiente midió
+que **sobrevivía a borrar el scoping por tenant de todo el camino**: lo que cortaba era el
+chequeo de dueño. Lo mismo con el listado, que hoy se pide con `?todas=true` porque sin el
+flag filtra además por `usuario_id` y ese filtro tapaba al de tenant.
+
+⚠️ **La mitad de escritura sigue fijando menos de lo que parece, y está escrito en el test.**
+No se pudo construir un mutante que aislara la defensa de tenant: sacándola, la request del
+otro tenant llega al `FOR UPDATE` de `bloquearCajaAbierta` y la corrida se cuelga, así que no
+hay aserción posible sobre el resultado. Lo que ese test fija es que la escritura **no
+prospera** y que la caja queda intacta. Queda anotado en [`pendientes.md`](pendientes.md).
+
+(La primera redacción de esta ficha decía que el rechazo venía del guard de permisos. Es
+falso y lo midió la revisión: sale de `bloquearCajaAbierta`, y el usuario es admin en los dos
+tenants, así que el guard ni interviene.)
+
+### La capa SQL de `propina-reportes` (e2e)
+
+Dos queries con CTEs, `generate_series` y agregaciones que solo se ejercitaban en unit con el
+`dataSource` mockeado — el mismo perfil que ya nos mordió en `fusionarCuentas`.
+
+Se afirma sobre el **delta** contra una fila recién sembrada, no sobre valores absolutos ni
+sobre "los totales son la suma de las filas": eso último sería **tautológico**, porque
+`totales` se calcula en JS recorriendo `data`. El delta prueba lo que importa — que la query
+ve la fila nueva, la suma y se la atribuye a quien corresponde. **Dos mutantes:** uno en la
+capa JS (`montoOriginado: '0'`) y otro en el SQL (`SUM(monto_pagado) FILTER (WHERE FALSE)`),
+cada uno mata su test.
+
+### `HORAS_TRABAJADAS` (e2e)
+
+Aporte igual al pool y horas 4:2:1 — si el reparto siguiera la plata en vez de las horas, el
+test no distinguiría nada. Las sesiones se siembran por SQL **cerradas**, por la misma razón
+que el archivo ya inserta los tips directo: no hay forma de que un test haga durar una sesión
+tres horas. **Mutante:** que `HORAS_TRABAJADAS` devuelva peso `1` —o sea partes iguales— lo
+mata.
+
+⚠️ **Y dejó una lección de orden de limpieza, medida dos veces.** El `afterAll` propio del
+test tiene que **drenar el pool antes** de borrar las sesiones: al revés, los tips quedan sin
+ningún participante con peso y el test siguiente corta con un 400 que no es suyo. Y borrarlas
+hay que borrarlas: si quedan vivas, Carla pertenece a "Garzones" por la sesión y a "Cocina"
+por su tip, y el test de dos grupos corta con **otro** 400 ajeno.
+
+### Las guardas de entrada: entró una rama, no tres
+
+Se escribieron tres tests, pero **solo uno cubre una rama que no estaba cubierta**: el
+rechazo de `peso <= 0` en `MANUAL/PESOS` (`propina-distribucion.service.ts`), que ningún unit
+mataba. Los otros dos —rango invertido y Σ de porcentajes— ya los mataban tests unitarios
+preexistentes (`utils/rango-liquidacion.spec.ts`, `query-propina-reporte.dto.spec.ts`,
+`propina-distribucion.service.spec.ts`); quedan como cobertura por HTTP, que no es lo mismo
+que cobertura nueva. Lo midió la revisión independiente apagando las cuatro guardas y viendo
+qué se ponía rojo.
+
+Peor todavía, y anotado para el próximo: el test del rango invertido **no distingue cuál de
+las dos guardas con el mismo mensaje está viva** —hay una en `rango-liquidacion.ts` y otra
+duplicada en `computarReparto`—, así que apagar una sola lo deja en verde.
+
+La tercera de la lista original, `gruposConfig.length === 0`, resultó inalcanzable; ver
+[`pendientes.md`](pendientes.md).
+
 ## Los dos E2E que la feature de pausa dejó abiertos (2026-08-09)
 
 Los dos estaban anotados desde el 2026-08-03 con la misma forma: *"el comportamiento es

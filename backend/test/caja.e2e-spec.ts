@@ -12,6 +12,11 @@ const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 
+const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
+// Miembro de los DOS tenants del seed: el arnés del aislamiento multi-tenant
+// necesita la misma persona a ambos lados. Ver el describe del final.
+const MULTI_TENANT = { email: 'admin@sistema.com', pass: 'admin' };
+
 // Supervisor de verdad: rol 'Cajas · Supervisión' (es_fijo=false) con
 // Cajas:Leer y NADA más. Ve todas las cajas y NO es admin del tenant — la
 // combinación exacta a la que el modo ciego sí le aplica.
@@ -1606,5 +1611,158 @@ describe('Caja (e2e) — el modo ciego SÍ aplica al supervisor no-admin', () =>
 
     // El apagado del ciego y el cierre de la caja los hace el `afterAll`, que
     // corre también cuando este test falla.
+  });
+});
+
+/**
+ * Aislamiento multi-tenant de caja, que no cubría **ningún** test.
+ *
+ * El eje que sí estaba cubierto es el de roles dentro de un tenant (cajero vs
+ * supervisor). Este es el otro: que la caja de un tenant sea invisible e
+ * intocable desde el otro.
+ *
+ * ⚠️ **La clave del arnés es que ataca la MISMA PERSONA.** `admin@sistema.com`
+ * es miembro de los dos tenants del seed, así que la caja se abre con su token
+ * de Paris y se ataca con su token de Falabella: mismo `usuario_id`, distinto
+ * `tenant_id`. Sin eso el test no prueba aislamiento — la primera versión usaba
+ * dos personas distintas y **sobrevivía a que se borrara el scoping por tenant
+ * de todo el camino de escritura**, porque lo que cortaba era el chequeo de
+ * dueño (`caja.usuarioId !== usuarioId`). Lo midió la revisión independiente.
+ * Y es admin en los dos lados, o sea que tampoco lo tapa el guard de permisos.
+ */
+describe('Caja (e2e) — aislamiento multi-tenant', () => {
+  let app: INestApplication<App>;
+  let tokenParis: string;
+  let tokenFalabella: string;
+  let cajaParisId: string;
+
+  async function loginEn(tenantId: string): Promise<string> {
+    const resLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: MULTI_TENANT.email, password: MULTI_TENANT.pass });
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/switch-tenant')
+      .set(
+        'Authorization',
+        `Bearer ${(resLogin.body as TokenResponse).access_token}`,
+      )
+      .send({ tenantId });
+    expect([200, 201]).toContain(res.status);
+    return (res.body as TokenResponse).access_token;
+  }
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    tokenParis = await loginEn(PARIS_TENANT_ID);
+    tokenFalabella = await loginEn(FALABELLA_TENANT_ID);
+
+    const disp = await request(app.getHttpServer())
+      .get('/api/caja/cajones-disponibles')
+      .set('Authorization', `Bearer ${tokenParis}`);
+    const cajonId = (disp.body as { cajonId: string }[])[0]?.cajonId;
+    const abrir = await request(app.getHttpServer())
+      .post('/api/caja/abrir')
+      .set('Authorization', `Bearer ${tokenParis}`)
+      .send({
+        cajonId,
+        saldoInicial: '50000.0000',
+        comentario: 'Apertura E2E aislamiento',
+      });
+    expect(abrir.status).toBe(201);
+    cajaParisId = (abrir.body as { id: string }).id;
+  }, 60000);
+
+  afterAll(async () => {
+    // El teardown **asevera** el cierre: si la caja queda abierta, el cajón
+    // queda ocupado y el spec siguiente se lleva un 409 críptico al abrir.
+    if (cajaParisId) {
+      const conteo = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaParisId}/conteo`)
+        .set('Authorization', `Bearer ${tokenParis}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '50000' }] });
+      expect([200, 201]).toContain(conteo.status);
+      expect((conteo.body as { estado: string }).estado).toBe('cerrada');
+    }
+    await app.close();
+  });
+
+  // Control: la caja existe y su propio tenant la ve. Sin esto, un 404 para el
+  // otro tenant podría venir de que la caja no exista.
+  it('control — el mismo usuario, en el tenant dueño, sí ve su caja', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaParisId}`)
+      .set('Authorization', `Bearer ${tokenParis}`);
+
+    expect(res.status).toBe(200);
+    expect((res.body as { id: string }).id).toBe(cajaParisId);
+  });
+
+  it('desde el otro tenant no se lee, ni por id ni en el listado', async () => {
+    const porId = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaParisId}`)
+      .set('Authorization', `Bearer ${tokenFalabella}`);
+    expect(porId.status).toBe(404);
+
+    // ⚠️ `todas=true` a propósito. Sin el flag, el listado filtra además por
+    // `usuario_id`, y como acá el usuario es EL MISMO en los dos tenants ese
+    // filtro no descarta nada… pero en la primera versión —dos personas
+    // distintas— tapaba al de tenant: se midió que borrar el scoping por
+    // tenant del historial dejaba el test en verde igual.
+    const listado = await request(app.getHttpServer())
+      .get('/api/caja?todas=true')
+      .set('Authorization', `Bearer ${tokenFalabella}`);
+    expect(listado.status).toBe(200);
+    const cajas = (listado.body as { data: { id: string }[] }).data;
+    expect(Array.isArray(cajas)).toBe(true);
+    expect(cajas.some((c) => c.id === cajaParisId)).toBe(false);
+  });
+
+  /**
+   * ⚠️ Este test NO fija el scoping por tenant del camino de escritura, y el
+   * matiz es medido, no una precaución.
+   *
+   * La escritura tiene tres defensas apiladas —`bloquearCajaAbierta` con
+   * `FOR UPDATE`, el `findOne` acotado y el chequeo de dueño— y no se pudo
+   * construir un mutante que aislara la del tenant: sacándola, la request del
+   * otro tenant llega al `FOR UPDATE` y la corrida se cuelga, o sea que no hay
+   * aserción posible sobre el resultado. Queda anotado en `pendientes.md`.
+   *
+   * Lo que sí fija, y es lo que importa: la escritura **no prospera** y la caja
+   * del otro tenant **queda intacta**. Un conteo ajeno le congelaría el arqueo
+   * y podría cerrarle la caja a otra empresa.
+   */
+  it('desde el otro tenant no se escribe, y la caja queda intacta', async () => {
+    const movimiento = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaParisId}/movimientos`)
+      .set('Authorization', `Bearer ${tokenFalabella}`)
+      // El body tiene que ser VÁLIDO: con `tipo: 'ingreso'` —que no existe— el
+      // 400 lo daba el `ValidationPipe` y el test no ejercitaba nada. Medido.
+      .send({ tipo: 'entrada', concepto: 'E2E ajeno', monto: '1000.0000' });
+    expect(movimiento.status).not.toBe(201);
+
+    // El conteo es el más caro: congela el arqueo y puede cerrarle la caja a
+    // otra empresa.
+    const conteo = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaParisId}/conteo`)
+      .set('Authorization', `Bearer ${tokenFalabella}`)
+      .send({ lineas: [{ metodoPagoId: null, montoContado: '1' }] });
+    expect([200, 201]).not.toContain(conteo.status);
+
+    const despues = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaParisId}`)
+      .set('Authorization', `Bearer ${tokenParis}`);
+    expect(despues.status).toBe(200);
+    const caja = despues.body as { estado: string; saldoInicial: string };
+    expect(caja.estado).toBe('abierta');
+    expect(Number(caja.saldoInicial)).toBe(50000);
   });
 });

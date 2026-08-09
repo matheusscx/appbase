@@ -33,6 +33,7 @@ interface Participante {
   tipoGarzon: string | null;
   incluido: boolean;
   ventasBase: string;
+  horas: string;
   monto: string;
 }
 interface GrupoPreview {
@@ -203,6 +204,37 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
        VALUES ($1,$2,$3,'0.100000',$4,$4,'manual','pagada',NULL,NULL,$5,NULL,NOW())`,
       [PARIS_TENANT_ID, ventaId, garzonId, monto, opts.tipoGarzon ?? 'garzon'],
     );
+  }
+
+  /**
+   * Una sesión de trabajo YA CERRADA, de `horas` horas, terminada hace un
+   * minuto — o sea dentro del rango de liquidación.
+   *
+   * Cerrada a propósito: una sesión abierta es única por garzón, y dejarla así
+   * le rompería el `iniciar` al spec que corra después (`jest-e2e.json` va con
+   * `maxWorkers: 1`, así que el estado se filtra hacia adelante).
+   */
+  /** Ids de las sesiones sembradas, para poder borrarlas después. */
+  const sesionesSembradas: string[] = [];
+
+  async function sembrarSesionCerrada(
+    garzonId: string,
+    horas: number,
+  ): Promise<void> {
+    const fin = new Date(Date.now() - 60_000);
+    const inicio = new Date(fin.getTime() - horas * 3_600_000);
+    const filas: { sesion_garzon_id: string }[] = await ds.query(
+      `INSERT INTO sesiones_garzon
+         (tenant_id, garzon_id, turno_id, tipo_garzon, inicio_el, fin_el,
+          estado, creado_el, actualizado_el)
+       SELECT $1, $2, t.turno_id, 'garzon', $3, $4, 'cerrada', NOW(), NOW()
+         FROM turnos t
+        WHERE t.tenant_id = $1 AND t.eliminado_el IS NULL
+        LIMIT 1
+       RETURNING sesion_garzon_id`,
+      [PARIS_TENANT_ID, garzonId, inicio.toISOString(), fin.toISOString()],
+    );
+    if (filas[0]) sesionesSembradas.push(filas[0].sesion_garzon_id);
   }
 
   async function preview(ajustes?: AjustesReparto): Promise<PreviewReparto> {
@@ -466,6 +498,88 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
       );
     });
 
+    /**
+     * `HORAS_TRABAJADAS`: el peso sale de las sesiones de trabajo que caen
+     * dentro del rango, no de la plata.
+     *
+     * Las sesiones se siembran por SQL —**cerradas**, con `fin_el`— por la
+     * misma razón que `sembrarTipGarzon` inserta el tip directo: no hay forma
+     * de que un test haga durar una sesión tres horas. Cerradas y no abiertas
+     * a propósito: una sesión abierta es única por garzón y le rompería el
+     * `iniciar` al spec que corra después.
+     */
+    /**
+     * En su propio `describe` por el `afterAll`: las sesiones sembradas son
+     * estado del tenant, no de la venta, y si quedaran vivas pondrían a Carla
+     * en dos grupos del período siguiente —`garzon` por la sesión, `cocina` por
+     * su tip— y el test de dos grupos cortaría con un 400 que no es suyo.
+     * Medido: así se cayó la primera versión.
+     */
+    describe('HORAS_TRABAJADAS', () => {
+      afterAll(async () => {
+        // ⚠️ El ORDEN importa, y las dos formas de equivocarse ya se midieron.
+        // Drenar el pool ANTES de borrar las sesiones: con este criterio el
+        // peso son las horas, así que borrarlas primero deja tips sin ningún
+        // participante que pueda recibirlos y el `resetPool` del test siguiente
+        // corta con un 400 que no es suyo. Y borrarlas hay que borrarlas: si
+        // quedan vivas, Carla pertenece a "Garzones" por la sesión y a "Cocina"
+        // por su tip, y el test de dos grupos corta con otro 400 ajeno.
+        await resetPool();
+        if (sesionesSembradas.length) {
+          await ds.query(
+            `DELETE FROM sesiones_garzon WHERE sesion_garzon_id = ANY($1::uuid[])`,
+            [sesionesSembradas],
+          );
+          sesionesSembradas.length = 0;
+        }
+      });
+
+      it('reparte proporcional a las horas de cada garzón', async () => {
+        await resetPool();
+        // Aporte IGUAL al pool: si el reparto saliera distinto por la plata y no
+        // por las horas, este test no distinguiría nada.
+        await sembrarTipGarzon(ANA_ID, '1000');
+        await sembrarTipGarzon(BRUNO_ID, '1000');
+        await sembrarTipGarzon(CARLA_ID, '1000');
+        // 4 h, 2 h y 1 h dentro del rango.
+        await sembrarSesionCerrada(ANA_ID, 4);
+        await sembrarSesionCerrada(BRUNO_ID, 2);
+        await sembrarSesionCerrada(CARLA_ID, 1);
+
+        await putDistribucion([
+          {
+            tipoGarzon: 'garzon',
+            nombre: 'Garzones',
+            porcentaje: '1',
+            criterio: 'HORAS_TRABAJADAS',
+            baseVentas: 'TOTAL_FINAL',
+            activo: true,
+            orden: 0,
+          },
+        ]);
+
+        const prev = await preview();
+        expect(prev.grupos[0].criterio).toBe('HORAS_TRABAJADAS');
+
+        const porId = (g: string): Participante =>
+          prev.participantes.find((p) => p.garzonId === g)!;
+        const [ana, bruno, carla] = [ANA_ID, BRUNO_ID, CARLA_ID].map(porId);
+
+        // Precondición del criterio: las horas quedaron 4:2:1.
+        expect(new Decimal(ana.horas).gt(bruno.horas)).toBe(true);
+        expect(new Decimal(bruno.horas).gt(carla.horas)).toBe(true);
+
+        // Y el reparto las sigue.
+        expect(new Decimal(ana.monto).gt(bruno.monto)).toBe(true);
+        expect(new Decimal(bruno.monto).gt(carla.monto)).toBe(true);
+
+        // Reconciliación: lo repartido iguala el pool.
+        expect(suma(incluidos(prev.participantes))).toBe(
+          new Decimal(prev.poolTotal).toFixed(4),
+        );
+      });
+    });
+
     it('dos grupos parten el pool por porcentaje y reparten internamente', async () => {
       await resetPool();
       // Ana y Bruno al grupo Garzones; Carla al grupo Cocina (por el tipo_garzon
@@ -628,6 +742,185 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
 
       const ventaId = (res.body as { id: string }).id;
       expect(await contarPropinasDeVenta(ventaId)).toBe(0);
+    });
+  });
+
+  /**
+   * La capa SQL de `propina-reportes`, que no tenía **ningún** e2e.
+   *
+   * Es el mismo perfil que ya nos mordió en `fusionarCuentas`: sus dos queries
+   * —con CTEs, `generate_series` y agregaciones— solo se ejercitaban en unit
+   * con el `dataSource` mockeado, así que ningún error de SQL llegaba a
+   * aparecer hasta producción. Lo que se afirma es el **delta** contra una fila
+   * recién sembrada; el porqué está en el docblock de cada test.
+   */
+  interface ResumenReporte {
+    periodo: { desde: string; hasta: string };
+    cobranza: { conPropina: number; montoCobrado: string };
+  }
+  interface TrabajadoresReporte {
+    data: { garzonId: string; origen: { monto: string } }[];
+    totales: { trabajadores: number; montoOriginado: string };
+  }
+
+  describe('reportes (la capa SQL, contra Postgres)', () => {
+    const dia = 24 * 60 * 60 * 1000;
+    const soloFecha = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+    const desde = soloFecha(Date.now() - dia);
+    const hasta = soloFecha(Date.now() + dia);
+
+    const pedir = (ruta: string) =>
+      request(app.getHttpServer())
+        .get(`/api/propinas/reportes/${ruta}?desde=${desde}&hasta=${hasta}`)
+        .set('Authorization', `Bearer ${token}`);
+
+    /**
+     * ⚠️ Se afirma sobre el **delta**, no sobre el valor absoluto, y tampoco
+     * sobre "los totales son la suma de las filas".
+     *
+     * Lo segundo sería tautológico: `totales` se calcula en JS recorriendo
+     * `data` (`propina-reportes.service.ts` → `sum(...)`), así que compararlos
+     * no dice nada del SQL. Y el valor absoluto depende de lo que dejaron los
+     * tests de arriba. El delta contra una fila recién sembrada sí prueba lo
+     * que importa: que la query la ve, la suma y se la atribuye a quien
+     * corresponde.
+     */
+    it('resumen: la propina recién sembrada entra en la cobranza', async () => {
+      const antes = (await pedir('resumen')).body as ResumenReporte;
+
+      await sembrarTipGarzon(ANA_ID, '1500');
+
+      const res = await pedir('resumen');
+      expect(res.status).toBe(200);
+      const despues = res.body as ResumenReporte;
+
+      expect(despues.periodo).toEqual({ desde, hasta });
+      expect(despues.cobranza.conPropina - antes.cobranza.conPropina).toBe(1);
+      expect(
+        new Decimal(despues.cobranza.montoCobrado)
+          .minus(antes.cobranza.montoCobrado)
+          .toFixed(4),
+      ).toBe('1500.0000');
+    });
+
+    it('trabajadores: la atribuye al garzón correcto y la suma al total', async () => {
+      const montoDe = (r: TrabajadoresReporte, garzonId: string) =>
+        new Decimal(
+          r.data.find((t) => t.garzonId === garzonId)?.origen.monto ?? '0',
+        );
+
+      const antes = (await pedir('trabajadores')).body as TrabajadoresReporte;
+
+      await sembrarTipGarzon(BRUNO_ID, '2500');
+
+      const res = await pedir('trabajadores');
+      expect(res.status).toBe(200);
+      const despues = res.body as TrabajadoresReporte;
+
+      // A Bruno, no a otro: un `GROUP BY` por la columna equivocada rompe acá.
+      expect(
+        montoDe(despues, BRUNO_ID).minus(montoDe(antes, BRUNO_ID)).toFixed(4),
+      ).toBe('2500.0000');
+      expect(
+        montoDe(despues, ANA_ID).minus(montoDe(antes, ANA_ID)).toFixed(4),
+      ).toBe('0.0000');
+      expect(
+        new Decimal(despues.totales.montoOriginado)
+          .minus(antes.totales.montoOriginado)
+          .toFixed(4),
+      ).toBe('2500.0000');
+    });
+
+    it('un rango invertido lo corta el DTO, no la base', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/propinas/reportes/resumen?desde=${hasta}&hasta=${desde}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(400);
+    });
+  });
+
+  /**
+   * Las tres guardas de entrada que no tocaba ningún test. Ninguna calcula
+   * plata: cortan antes, con un 400 accionable. Van al final del archivo a
+   * propósito — la del grupo inactivo deja al tenant sin distribución válida
+   * por un instante, y así no hay nadie después a quien romperle el escenario.
+   */
+  describe('guardas de entrada', () => {
+    afterAll(async () => {
+      await putDistribucion(DISTRIBUCION_DEFAULT);
+    });
+
+    it('un rango invertido corta antes de calcular nada', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/preview')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fechaDesde: fechaHasta, fechaHasta: fechaDesde });
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toBe(
+        'La fecha hasta debe ser posterior a desde',
+      );
+    });
+
+    it('un peso manual en cero se rechaza al guardar la config', async () => {
+      // El peso es un divisor: un cero convierte el reparto en una división por
+      // la suma de pesos que puede quedar en cero, y ahí no hay reparto que
+      // valga. Se corta en la config, no en el reparto.
+      const res = await request(app.getHttpServer())
+        .put('/api/propinas/distribucion')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          porcentajeSugerido: '0.10',
+          grupos: [
+            {
+              tipoGarzon: 'garzon',
+              nombre: 'Garzones',
+              porcentaje: '1',
+              criterio: 'MANUAL',
+              manualModo: 'PESOS',
+              baseVentas: 'TOTAL_FINAL',
+              activo: true,
+              orden: 0,
+              pesos: [{ garzonId: ANA_ID, peso: '0' }],
+            },
+          ],
+        });
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toBe(
+        'El peso debe ser mayor a cero',
+      );
+    });
+
+    /**
+     * ⚠️ Este test NO es el que la entrada del backlog pedía, y el cambio es el
+     * hallazgo.
+     *
+     * Se pedía cubrir la guarda `gruposConfig.length === 0` del servicio de
+     * liquidación ("No hay grupos activos para liquidar"). **Es inalcanzable
+     * por la API**, medido: guardar la config con todos los grupos apagados ya
+     * corta antes, porque los activos tienen que sumar 100% y cero grupos suman
+     * 0%. Montar ese estado exigiría SQL directo, o sea escribir un test de un
+     * escenario que en producción no existe.
+     *
+     * Lo que sí se puede afirmar —y es lo que protege al tenant— es que la
+     * puerta de entrada no lo deja sin grupos. La guarda del servicio queda
+     * como defensa en profundidad, no como código muerto.
+     */
+    it('la config no deja al tenant sin ningún grupo activo', async () => {
+      const res = await request(app.getHttpServer())
+        .put('/api/propinas/distribucion')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          porcentajeSugerido: '0.10',
+          grupos: [{ ...DISTRIBUCION_DEFAULT[0], activo: false }],
+        });
+
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain(
+        'La suma de porcentajes de grupos activos debe ser 100%',
+      );
     });
   });
 });
