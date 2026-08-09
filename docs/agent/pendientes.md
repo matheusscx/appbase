@@ -608,27 +608,6 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   clic en el link, la dirección existe y alguien la lee. Falta el otro camino:
   `POST /auth/register` sigue creando cuentas con un correo que nadie probó.
 
-- [ ] **`POST /auth/recuperar` dispara un envío saliente a una dirección que elige
-  quien llama, sin auth ni throttle** (backend, `auth.controller.ts`) — superficie de
-  abuso **nueva**, que antes no existía: `login` también es público, pero no manda
-  nada afuera. Con un loop, cualquiera bombardea una casilla ajena y quema la
-  reputación del remitente. La respuesta es idéntica exista o no el correo, así que
-  no filtra cuentas; el problema es el volumen. **Cruzar con la entrada de
-  `/garzones/verificar-pin`**: las dos piden lo mismo —no hay throttler en el
-  proyecto— y conviene decidir la infraestructura una vez.
-
-- [ ] **`/garzones/verificar-pin` es un oráculo de PIN sin throttling, y el fix del selector
-  lo abarató 20×** (backend, `garzones.controller.ts`) — el endpoint dice si un PIN
-  pertenece a **un garzón concreto**, sin ejecutar nada y sin límite de intentos. Antes de
-  2026-08-08 un intento costaba N bcrypt y se probaba contra los N garzones a la vez; ahora
-  cuesta 1 y apunta a uno solo. Recalculado: agotar 10⁶ contra un garzón concreto pasa de
-  ~14 días de CPU a **~17 h**. Comprometer a *alguno* cuesta casi lo mismo que antes, así
-  que **no es una regresión**, pero la cifra de "no es un vector práctico" que quedó
-  archivada en [`resueltos.md`](resueltos.md) ya no aplica al caso dirigido. El rate
-  limiting existente está acotado a `/auth/*` y no cubre esto. Decidir si `Salones:Operar`
-  —que ya es un permiso de confianza— alcanza como barrera, o si hace falta límite por
-  garzón.
-
 - [ ] **Modo personal: el garzón con su propia tablet no debería teclear el PIN** (backend +
   frontend) — **Fase 2 del plan `2026-08-08-elegir-garzon-antes-del-pin.md`, diseñada y
   diferida el 2026-08-08.** El vínculo opcional `garzones.usuario_id` + `usuarios_tenants.
@@ -819,12 +798,35 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   (2) reactivar PRs + `required status checks` sobre `main` (revierte la regla de dev
   "trabajar directo sobre `main`") → el código roto ni toca la rama que despliega. Cierra el
   agujero del post-mortem del 2026-07-23 (push a `main` con e2e rojo).
-- [ ] **Rate limiting** (backend) — hoy no hay throttling; los endpoints de auth
-  (`POST /auth/login`, `/auth/refresh`) son brute-forceables. Agregar `@nestjs/throttler`:
-  límite global por IP + límite estricto en auth. Cuidado multi-tenant: la key de rate limit
-  no debe filtrar entre tenants ni permitir que un tenant agote la cuota de otro. Considerar
-  store compartido (Redis) si corre en varias instancias — el límite en memoria no sirve tras
-  un load balancer.
+- [ ] 🚩 **Rate limiting — BLOQUEANTE PARA PRODUCCIÓN** (backend) — decisión del owner,
+  2026-08-09: no se construye ahora, pero **no se sale a producción sin esto**. Hoy el
+  proyecto **no tiene throttler de ningún tipo**; se anotó tres veces por separado y son el
+  mismo trabajo, así que van juntas para decidir la infraestructura **una vez**.
+
+  Los cuatro endpoints, ordenados por lo que cuesta el abuso:
+
+  1. **`POST /auth/recuperar`** — el peor, y el más nuevo (2026-08-09). Es público, sin
+     auth, y **dispara un envío saliente a una dirección que elige quien llama**. `login`
+     también es público pero no manda nada afuera. Con un loop, cualquiera bombardea una
+     casilla ajena y quema la reputación del remitente —que con SMTP propio es la cuenta
+     del owner—. La respuesta es idéntica exista o no el correo, así que no filtra cuentas:
+     el problema es el **volumen**.
+  2. **`POST /auth/login` y `/auth/refresh`** — brute-forceables sin límite de intentos.
+  3. **`POST /garzones/verificar-pin`** — oráculo de PIN: dice si un PIN pertenece a **un
+     garzón concreto**, sin ejecutar nada. El fix del selector (2026-08-08) lo abarató 20×:
+     agotar 10⁶ contra un garzón concreto pasó de ~14 días de CPU a **~17 h**. Comprometer a
+     *alguno* cuesta casi lo mismo que antes —no es una regresión— pero la cifra de "no es
+     un vector práctico" archivada en [`resueltos.md`](resueltos.md) **ya no aplica al caso
+     dirigido**. Decidir si `Salones:Operar` —que ya es un permiso de confianza— alcanza
+     como barrera, o si hace falta límite por garzón.
+  4. **`POST /auth/invitacion/:token` y `/auth/recuperar/:token`** — públicos por diseño.
+     Adivinar un token de 256 bits no es un vector, pero sin límite son superficie gratis.
+
+  **Al encararlo:** `@nestjs/throttler`, límite global por IP + límites estrictos por
+  endpoint. ⚠️ **La key no puede filtrar entre tenants** ni dejar que un tenant agote la
+  cuota de otro. Y con varias instancias detrás de un load balancer el límite en memoria no
+  sirve: hace falta store compartido (Redis) — que es dependencia nueva y necesita
+  confirmación del owner.
 - [ ] **Deploy seguro: rollback + feature flags + canary** (infra) — el portón de CI evita
   el error *conocido* (que los tests detectan), no el desconocido (bug que ningún test cubre y
   pasa en verde). Para acotar ese: rollback rápido a la versión anterior (deploy inmutable),
