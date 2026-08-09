@@ -933,6 +933,72 @@ describe('Ventas (e2e)', () => {
       expect(filas[0].modo).toBe('porcentaje');
     });
 
+    /**
+     * El caso NEGATIVO del congelado, que el plan de la pausa pedía y quedó
+     * sin escribir: una regla pausada no tiene que dejar fila.
+     *
+     * "Es correcto por construcción —el congelado sale de las trazas y una
+     * regla pausada no deja traza—" era el argumento; esto lo convierte en
+     * algo que se puede romper y se nota. Y no alcanza con mirar el total: una
+     * fila de descuento con `valor_aplicado = 0` daría el mismo total y
+     * mentiría en el detalle de la venta, diciendo que se aplicó una regla que
+     * el tenant tenía apagada.
+     */
+    it('una regla PAUSADA no deja fila, ni pedida por línea ni asociada al ítem', async () => {
+      const sufijo = `E2E ${Date.now()}`;
+      const descuentoId = await crearDescuento(`Pausado 25% ${sufijo}`, '0.25');
+
+      // Un ítem con la regla ASOCIADA: es el camino que la feature de pausa
+      // protege (el POS no manda `descuentoIds`, los hereda del ítem).
+      const resItem = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Item con regla pausada ${sufijo}`,
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+          unidadMedida: 'unidad',
+          stock: '10',
+          costo: '500',
+          descuentosIds: [descuentoId],
+        });
+      expect(resItem.status).toBe(201);
+      const itemConReglaId = (resItem.body as { id: string }).id;
+
+      const pausa = await request(app.getHttpServer())
+        .patch(`/api/descuentos/${descuentoId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ activo: false });
+      expect(pausa.status).toBe(200);
+
+      const venta = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            // Heredada por asociación…
+            { itemId: itemConReglaId, cantidad: '1' },
+            // …y pedida EXPLÍCITAMENTE, que es la forma más forzada de
+            // intentar aplicarla. Si alguna colara una fila, es esta.
+            { itemId: ITEM_ID, cantidad: '1', descuentoIds: [descuentoId] },
+          ],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000000.0000' }],
+        });
+      expect(venta.status).toBe(201);
+      const body = venta.body as VentaResponse & {
+        id: string;
+        totalFinal: string;
+        totalDescuentos: string;
+      };
+
+      // Ni una fila, por ninguno de los dos caminos.
+      expect(await filasDescuento(body.id)).toHaveLength(0);
+      // Y el total no la aplicó: sin esto, una regla que SÍ descontara pero no
+      // congelara pasaría el test.
+      expect(Number(body.totalDescuentos)).toBe(0);
+    });
+
     it('sigue siendo legible después de que el descuento se borre', async () => {
       const descuentoId = await crearDescuento(
         `Efímero 15% E2E ${Date.now()}`,

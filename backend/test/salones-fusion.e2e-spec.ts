@@ -151,12 +151,13 @@ describe('Salones — fusionar cuentas (e2e)', () => {
     expect(resItemOtro.status).toBe(201);
     itemOtroId = (resItemOtro.body as IdResponse).id;
 
-    // ⚠️ Garzón PROPIO, no el del seed. La sesión es única por garzón, así que
-    // dos specs que compartan a Ana —hoy son seis— se pisan entre sí cuando
-    // jest los corre en paralelo: abrirle o cerrarle la sesión le rompe el
-    // `iniciar` al otro con un 400 "ya tiene una sesión abierta". Medido:
-    // `garzon-modo-personal` se cayó así al sumarse el segundo spec de salones.
-    // Con garzón propio no hace falta ningún cierre defensivo previo.
+    // ⚠️ Garzón PROPIO, no el del seed. La sesión es única por garzón y hoy
+    // seis specs comparten a Ana, así que el estado se filtra de un spec al
+    // siguiente: `jest-e2e.json` corre con `maxWorkers: 1`, y el que deja su
+    // sesión abierta le rompe el `iniciar` al que viene con un 400 "ya tiene
+    // una sesión abierta". Medido: `garzon-modo-personal` se cayó así al
+    // sumarse el segundo spec de salones. Con garzón propio no hace falta
+    // ningún cierre defensivo previo.
     const resGarzon = await request(app.getHttpServer())
       .post('/api/garzones')
       .set('Authorization', `Bearer ${token}`)

@@ -186,11 +186,12 @@ describe('Salones — comanda a cocina (e2e)', () => {
     // Sin categoría: el caso que el ruteo tiene que **saltear**, no romper.
     sinRutaId = (await post<IdResponse>('/api/items', item('Sin ruta'))).id;
 
-    // ⚠️ Garzón PROPIO, no el del seed. La sesión es única por garzón, así que
-    // dos specs que compartan a Ana se pisan entre sí cuando jest los corre en
-    // paralelo: abrirle la sesión a Ana le rompe el `iniciar` al otro con un
-    // 400 "ya tiene una sesión abierta". Medido — así se cayó
-    // `garzon-modo-personal` la primera vez que este archivo entró a la suite.
+    // ⚠️ Garzón PROPIO, no el del seed. La sesión es única por garzón y el
+    // estado se filtra de un spec al siguiente (`jest-e2e.json` corre con
+    // `maxWorkers: 1`): el que deja la sesión de Ana abierta le rompe el
+    // `iniciar` al que viene, con un 400 "ya tiene una sesión abierta". Medido
+    // — así se cayó `garzon-modo-personal` la primera vez que este archivo
+    // entró a la suite.
     garzon = await post<GarzonCreado>('/api/garzones', {
       nombre: `Garzón comanda E2E ${marca}`,
     });

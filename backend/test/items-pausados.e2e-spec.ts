@@ -9,6 +9,10 @@ const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
+// Turno del seed. El garzón lo crea el spec: la sesión es única por garzón y
+// seis specs comparten a Ana, así que el estado se filtra de un spec al
+// siguiente (`jest-e2e.json` corre con `maxWorkers: 1`).
+const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
@@ -134,8 +138,10 @@ async function contarOrdenes(ds: DataSource): Promise<number> {
  *
  * - **Tienda online:** el checkout falla, con el nombre del producto adentro.
  * - **POS:** la venta sale igual y trae la advertencia.
- * - **Salones:** ya rechazaba agregar líneas nuevas (`getItemVendibleOrThrow`) y
- *   eso no se tocó.
+ * - **Salones:** rechaza agregar líneas nuevas (`getItemVendibleOrThrow`) pero
+ *   **sí deja cobrar** una cuenta que ya lo tenía cargado. Los dos casos están
+ *   cubiertos acá desde el 2026-08-09; hasta entonces era el único canal sin
+ *   test, porque no había arnés de mesa y cuenta del que partir.
  *
  * El control con el ítem ACTIVO está antes de pausar: sin él, un 400 del
  * checkout podría venir de cualquier otra cosa del ítem recién creado.
@@ -150,6 +156,9 @@ describe('Ítem pausado según el canal (e2e)', () => {
   let totalActivo: string;
   /** Cuántos productos vendibles había ANTES de pausar el ítem de este spec. */
   let vendiblesAntes: number;
+  /** Cuenta de salón con el ítem YA cargado, abierta mientras seguía activo. */
+  let cuentaSalonId: string;
+  let garzon: { id: string; pin: string };
 
   const listarProductos = (query: string) =>
     request(app.getHttpServer())
@@ -208,9 +217,62 @@ describe('Ítem pausado según el canal (e2e)', () => {
     const catalogo = await listarProductos('&activo=true');
     expect(catalogo.status).toBe(200);
     vendiblesAntes = (catalogo.body as CatalogoResponse).meta.total;
+
+    // ⚠️ La cuenta de salón se arma acá, con el ítem TODAVÍA ACTIVO: ese es el
+    // escenario entero. `getItemVendibleOrThrow` rechaza agregar la línea una
+    // vez pausado, así que montarla después probaría el otro caso —el que ya
+    // estaba cubierto— y no "se pausó después de cargarlo".
+    const resGarzon = await request(app.getHttpServer())
+      .post('/api/garzones')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: `Garzón pausados E2E ${Date.now()}` });
+    expect(resGarzon.status).toBe(201);
+    garzon = resGarzon.body as { id: string; pin: string };
+
+    const resSesion = await request(app.getHttpServer())
+      .post('/api/sesiones-garzon/iniciar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        garzonId: garzon.id,
+        pin: garzon.pin,
+        turnoId: TURNO_MANANA_ID,
+      });
+    expect(resSesion.status).toBe(201);
+
+    const resSalon = await request(app.getHttpServer())
+      .post('/api/salones')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: `Salón pausados E2E ${Date.now()}` });
+    expect(resSalon.status).toBe(201);
+    const resMesa = await request(app.getHttpServer())
+      .post(`/api/salones/${(resSalon.body as { id: string }).id}/mesas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'Mesa pausados' });
+    // Sin este `expect`, un salón que falla deja la URL siguiente en
+    // `/api/salones/undefined/mesas` y el error recién aparece dos pasos
+    // después, como un 404 sin relación aparente.
+    expect(resMesa.status).toBe(201);
+    const resCuenta = await request(app.getHttpServer())
+      .post(`/api/mesas/${(resMesa.body as { id: string }).id}/cuentas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ garzonId: garzon.id, pin: garzon.pin });
+    expect(resCuenta.status).toBe(201);
+    cuentaSalonId = (resCuenta.body as { id: string }).id;
+
+    const resLinea = await request(app.getHttpServer())
+      .post(`/api/cuentas/${cuentaSalonId}/lineas`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ itemId, cantidad: '1' });
+    expect(resLinea.status).toBe(201);
   }, 60000);
 
   afterAll(async () => {
+    if (garzon) {
+      await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/cerrar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ garzonId: garzon.id, pin: garzon.pin });
+    }
     if (cajaId) await cerrarCaja(app, token, cajaId);
     await app.close();
   });
@@ -358,6 +420,52 @@ describe('Ítem pausado según el canal (e2e)', () => {
         `Producto "${nombreItem}": está en pausa y ya no se ofrece en el catálogo`,
       );
       // La venta se cobró de verdad: el stock bajó.
+      expect(await getStock(ds, itemId)).toBe(stockAntes - 1);
+    });
+
+    /**
+     * El canal que faltaba, y el que la regla del owner deja del lado de "el
+     * consumo ya ocurrió": el plato ya está en la mesa. Que la cuenta no se
+     * pueda cobrar porque el admin pausó el ítem mientras el cliente comía
+     * sería dejar a la mesa sin forma de pagar.
+     *
+     * Va último porque cobra: descuenta stock y cierra la cuenta.
+     */
+    it('salones: una cuenta con el ítem cargado ANTES de pausarlo se cobra igual', async () => {
+      const stockAntes = await getStock(ds, itemId);
+
+      // Control del escenario: agregar el ítem AHORA sí se rechaza. Sin esto,
+      // un `getItemVendibleOrThrow` que dejara de mirar `activo` haría pasar el
+      // cobro de abajo por la razón equivocada.
+      const agregarAhora = await request(app.getHttpServer())
+        .post(`/api/cuentas/${cuentaSalonId}/lineas`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ itemId, cantidad: '1' });
+      expect(agregarAhora.status).toBe(404);
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/cuentas/${cuentaSalonId}/cerrar`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          garzonId: garzon.id,
+          pin: garzon.pin,
+          tipoDocumentoId: BOLETA_ID,
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: totalActivo }],
+        });
+
+      expect(res.status).toBe(201);
+      const cierre = res.body as {
+        cuenta: { estado: string };
+        ventaId: string;
+      };
+      expect(cierre.cuenta.estado).toBe('cerrada');
+
+      // Cobrada de verdad, no solo "cerrada": el cierre no exige saldo cero.
+      const ventaRows: { estado: string }[] = await ds.query(
+        `SELECT estado FROM ventas WHERE venta_id = $1 AND eliminado_el IS NULL`,
+        [cierre.ventaId],
+      );
+      expect(ventaRows[0]?.estado).toBe('pagada');
       expect(await getStock(ds, itemId)).toBe(stockAntes - 1);
     });
   });

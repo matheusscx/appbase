@@ -1,7 +1,7 @@
 # Plan: Lo que está en pausa no se aplica ni se ofrece
 
-**Status:** Implementado 2026-08-03 — dos E2E quedaron abiertos, ver los checkboxes sin marcar
-al final y `docs/agent/pendientes.md` § Huecos de test
+**Status:** Implementado 2026-08-03. Los dos E2E que habían quedado abiertos se cerraron el
+2026-08-09 — ver sus checkboxes más abajo y `docs/agent/resueltos.md`
 **Date:** 2026-08-03
 **Owner:** Cesar Matheus
 **Relacionado:** [`docs/agent/pendientes.md`](../../agent/pendientes.md) § Media —
@@ -286,10 +286,11 @@ y resetear: no hay migración incremental ni deprecación que diseñar.
 - [x] E2E de API (`backend/test/*.e2e-spec.ts` — el sufijo importa, `jest-e2e.json` matchea
       `.e2e-spec.ts$`): activa aplica; pausada da el total sin descuento **y no devuelve
       400**; reactivada vuelve a aplicar sin haber tocado ninguna asociación
-- [ ] E2E: `POST /ventas` con un ítem asociado a una regla pausada no la congela en
-      `ventas_descuentos` — **no hecho**. El comportamiento es correcto por construcción (el
-      congelado sale de las trazas y una regla pausada no deja traza), pero no hay test que lo
-      sostenga. Anotado en `pendientes.md`
+- [x] E2E: `POST /ventas` con un ítem asociado a una regla pausada no la congela en
+      `ventas_descuentos` — **hecho el 2026-08-09** (`ventas.e2e-spec.ts` § "la venta congela
+      la regla aplicada"). Cubre los dos caminos en una venta: heredada por asociación al ítem
+      y pedida explícita por línea. Mutante medido: borrar la guarda `!regla.activo` del motor
+      —o sea volver al comportamiento anterior— deja **2** filas donde el test espera 0
 
 ### Backend — la consulta de uso que alimenta el modal
 
@@ -313,10 +314,12 @@ y resetear: no hay migración incremental ni deprecación que diseñar.
       orden ni descuenta stock
 - [x] E2E: `POST /ventas` (POS) con un ítem pausado **sí** crea la venta, con la advertencia
       en la respuesta
-- [ ] E2E: una cuenta de salón con un ítem que se pausó después de cargarlo se cobra sin error
-      — **no hecho**: no existe `salones.e2e-spec.ts` del que partir y montar mesa + cuenta +
-      cierre a ciegas era cobertura aparente. El comportamiento no se tocó. Anotado en
-      `pendientes.md` § Huecos de test
+- [x] E2E: una cuenta de salón con un ítem que se pausó después de cargarlo se cobra sin error
+      — **hecho el 2026-08-09**, en `items-pausados.e2e-spec.ts`, que es el spec del ítem
+      pausado **por canal** y al que le faltaba justamente este. La cuenta se arma en el
+      `beforeAll` con el ítem todavía activo: montarla después probaría el otro caso. Lleva
+      además el control de que agregar la línea AHORA sí da 404, para que el cobro no pase por
+      la razón equivocada
 
 ### Backend — métodos de pago
 

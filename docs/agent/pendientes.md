@@ -274,17 +274,10 @@ independiente, y las ramas que ningún test toca.
 
 ### Huecos de test
 
-**De la feature de pausa (2026-08-03)**, dos que quedaron abiertos a conciencia y no por
-olvido:
-
-- **E2E de salones: cobrar una cuenta con un ítem que se pausó después de cargarlo.** El plan
-  lo pedía. No existe ningún `salones.e2e-spec.ts` del que partir, y montar mesa + cuenta +
-  cierre a ciegas —sin poder ejecutarlo en el momento— era escribir algo que parece cobertura
-  sin serlo. El comportamiento **no** se tocó (`getItemVendibleOrThrow` sigue igual), así que
-  el riesgo es de regresión futura, no de bug presente.
-- **No hay E2E de que una regla pausada no quede congelada en `ventas_descuentos`.** El plan
-  lo pedía. El comportamiento es correcto por construcción —el congelado sale de las trazas y
-  una regla pausada no deja traza—, pero eso lo sostiene un razonamiento, no un test.
+**De la feature de pausa (2026-08-03)**, los dos que habían quedado abiertos a conciencia
+—cobrar una cuenta de salón con un ítem pausado después de cargarlo, y que una regla pausada
+no quede congelada en `ventas_descuentos`— **se cerraron el 2026-08-09**; ver
+[`resueltos.md`](resueltos.md). Lo que sigue abierto de esa feature:
 - **`ventas/pos.vue`, `tienda/index.vue` y `tienda/suscripciones.vue` no tienen
   `.nuxt.spec.ts`.** El filtro de pausados que vivía en esas tres pantallas se movió a la
   query el 2026-08-09 (`activo=true`, ver [`resueltos.md`](resueltos.md)), y el endpoint sí

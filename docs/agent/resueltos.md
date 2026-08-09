@@ -17,6 +17,52 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos E2E que la feature de pausa dejó abiertos (2026-08-09)
+
+Los dos estaban anotados desde el 2026-08-03 con la misma forma: *"el comportamiento es
+correcto por construcción, pero eso lo sostiene un razonamiento, no un test"*. Los dos
+razonamientos resultaron ciertos —ningún bug— y ahora los sostiene algo que se puede romper.
+
+### Una regla pausada no queda congelada en `ventas_descuentos`
+
+Vive en `ventas.e2e-spec.ts` § *"la venta congela la regla aplicada"*, que es donde ya
+estaban el helper de descuentos y la query de las filas: es el **caso negativo** de ese
+describe.
+
+Una sola venta cubre los **dos** caminos por los que una regla llega a una línea: heredada
+por asociación al ítem (lo que hace el POS, que no manda `descuentoIds`) y pedida explícita
+por línea, que es la forma más forzada de intentar aplicarla.
+
+No alcanzaba con mirar el total: una fila con `valor_aplicado = 0` daría el mismo total y
+mentiría en el detalle, diciendo que se aplicó una regla que el tenant tenía apagada. Por eso
+se afirman las dos cosas — cero filas **y** `totalDescuentos` en cero.
+
+**Mutante:** borrar la guarda `if (!regla.activo)` del motor —o sea volver al comportamiento
+anterior a la feature— deja **2** filas donde el test espera 0. Que sean dos y no una es la
+prueba de que los dos caminos se ejercitan de verdad.
+
+### Una cuenta de salón con el ítem pausado después de cargarlo se cobra igual
+
+Vive en `items-pausados.e2e-spec.ts`, que es el spec del ítem pausado **por canal** y cuyo
+propio docblock listaba Salones como el canal sin cubrir. La razón por la que no se había
+escrito —"no existe `salones.e2e-spec.ts` del que partir"— ya no aplica: el arnés de mesa,
+cuenta y garzón se resolvió esta semana.
+
+La cuenta se arma en el `beforeAll`, con el ítem **todavía activo**: montarla después sería
+imposible —`getItemVendibleOrThrow` rechaza la línea— y probaría el otro caso, el que ya
+estaba cubierto. Por eso el test lleva además un **control**: agregar la línea AHORA da 404.
+Sin él, un `getItemVendibleOrThrow` que dejara de mirar `activo` haría pasar el cobro por la
+razón equivocada.
+
+**Dos mutantes, los dos medidos:** filtrar `i.activo = true` en `cargarBasePorIds` —el
+"arreglo" que alguien haría para que lo pausado no se venda— mata este test y otros cuatro
+del mismo archivo; y sacar `AND i.activo = true` de `getItemVendibleOrThrow` mata solo el
+control, con `Expected 404 / Received 201`.
+
+Es el lado de la regla del owner donde **el consumo ya ocurrió**: el plato está en la mesa.
+Que la cuenta no se pudiera cobrar porque el admin pausó el ítem mientras el cliente comía
+sería dejar a la mesa sin forma de pagar.
+
 ## Los ítems pausados dejan de viajar al cliente (2026-08-09)
 
 **Decisión del owner, y no era el trabajo que había anotado.** El backlog decía que "el
@@ -130,9 +176,11 @@ Dos tests, y los tres mutantes medidos:
 
 **Y un hallazgo que dejó la corrida completa, que vale para el próximo e2e de salones:** la
 primera versión usaba el garzón del seed (Ana) y volteó `garzon-modo-personal` con un
-`400 "El garzón ya tiene una sesión abierta"`. La sesión es **única por garzón** y jest corre
-las suites en paralelo, así que dos specs que compartan a Ana se pisan — y hoy **seis** la
-comparten. El spec pasaba aislado y la suite completa fallaba, que es el peor modo de falla.
+`400 "El garzón ya tiene una sesión abierta"`. La sesión es **única por garzón** y hoy
+**seis** specs comparten a Ana, así que el estado se filtra de un spec al siguiente
+—`jest-e2e.json` corre con `maxWorkers: 1`, o sea en serie: el que deja la sesión abierta le
+rompe el `iniciar` al que viene—. (La primera redacción de esta ficha decía "en paralelo", y
+es falso; lo corrigió la revisión independiente del 2026-08-09.) El spec pasaba aislado y la suite completa fallaba, que es el peor modo de falla.
 Los dos specs nuevos de salones crean su propio garzón (`POST /garzones` devuelve el PIN
 generado, una sola vez), lo que además hace innecesario el cierre defensivo previo que
 copiaban de `combos`. Medido después del cambio: tres corridas completas con base fresca,
