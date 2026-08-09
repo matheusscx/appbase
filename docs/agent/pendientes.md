@@ -147,8 +147,9 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
 - [ ] Nota de crédito (referencia a la venta original).
 - [ ] Apertura/cierre de caja (reloj congelado; `diferencia` calculada por el sistema).
 - [ ] Descuento de stock en una venta (movimiento + saldo materializado).
-- [ ] **Cambio de tenant sin fuga de datos** (el más valioso — ninguna prueba unitaria
-  lo cubre; login como usuario multi-tenant, verificar aislamiento de catálogo/ventas).
+- [x] **Cambio de tenant sin fuga de datos** — hecho el 2026-08-09,
+  `e2e/tenants/aislamiento.spec.ts`. Cubre el catálogo; **las ventas siguen sin cubrirse**
+  por ese eje.
 - [x] **Salones de punta a punta** (mesa → cuenta → línea → cobro) — hecho el 2026-08-09,
   `e2e/salones/cuenta-hasta-cobro.spec.ts`. **No lleva `@smoke`**: escribe en la base
   (abre caja, cobra una venta) y tarda ~20 s en frío, así que no es del subconjunto barato.
