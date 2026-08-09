@@ -142,14 +142,27 @@ Scaffold Playwright ya funciona (`frontend/e2e/`, auth vía storageState, 1 smok
 Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/features/`
 (NUNCA del output del código), `@smoke` en el subconjunto barato, cero esperas fijas:
 
-- [ ] Venta completa hasta documento (afecto + exento; total contra `docs/features/ventas.md`).
+- [x] **Venta completa hasta documento** (afecto + exento) — hecho el 2026-08-09,
+  `e2e/ventas/pos.spec.ts`. El exento es lo que le da filo: sin él, "hay IVA" no
+  distingue derivarlo de `clasificacion_tributaria` de derivarlo de "tiene impuestos
+  asignados". Se verifica el desglose por línea del lado del servidor, no solo el total.
+  **Solo cubre la Boleta** (el default): la Factura exige customer y es su propio flujo.
 - [ ] Pago mixto (múltiples métodos; vuelto solo si `permite_vuelto`).
 - [ ] Nota de crédito (referencia a la venta original).
 - [ ] Apertura/cierre de caja (reloj congelado; `diferencia` calculada por el sistema).
-- [ ] Descuento de stock en una venta (movimiento + saldo materializado).
+- [x] **Descuento de stock en una venta** (movimiento + saldo materializado) — hecho el
+  2026-08-09, `e2e/ventas/pos.spec.ts`. El `Stock: 8` que muestra el catálogo es
+  aritmética de cliente y **no prueba nada**: medido con un mutante en el backend
+  (`ventas.service.ts`, el `registrarMovimiento` de la venta, `cantidad: '1'` en vez de
+  `cantidadCanonica`), la pantalla sigue en verde y lo cazan el saldo (`9.0000`) y el
+  movimiento del servidor.
 - [x] **Cambio de tenant sin fuga de datos** — hecho el 2026-08-09,
   `e2e/tenants/aislamiento.spec.ts`. Cubre el catálogo; **las ventas siguen sin cubrirse**
-  por ese eje.
+  por ese eje. Y cubre **scoping**, no caché: que los stores de Pinia se reseteen al
+  cambiar de institución lo cubre `app/stores/tenant.spec.ts`. La primera versión de esa
+  spec reclamaba lo segundo y era falso —la segunda visita al catálogo iba por
+  `page.goto()`, o sea recarga dura, que borra el estado en memoria antes de aseverar—;
+  hoy va por el menú de la app.
 - [x] **Salones de punta a punta** (mesa → cuenta → línea → cobro) — hecho el 2026-08-09,
   `e2e/salones/cuenta-hasta-cobro.spec.ts`. **No lleva `@smoke`**: escribe en la base
   (abre caja, cobra una venta) y tarda ~20 s en frío, así que no es del subconjunto barato.

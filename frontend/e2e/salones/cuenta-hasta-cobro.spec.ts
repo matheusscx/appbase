@@ -58,6 +58,7 @@ const escenario: {
   salonNombre?: string
   mesaId?: string
   itemNombre?: string
+  itemId?: string
   cajaId?: string
 } = {}
 
@@ -140,7 +141,7 @@ test.beforeAll(async ({ request }) => {
   escenario.mesaId = mesa.id
 
   escenario.itemNombre = `Plato E2E ${marca}`
-  await api(request, 'post', '/items', {
+  const item = await api<{ id: string }>(request, 'post', '/items', {
     token,
     data: {
       nombre: escenario.itemNombre,
@@ -152,6 +153,7 @@ test.beforeAll(async ({ request }) => {
       costo: '400',
     },
   })
+  escenario.itemId = item.id
 
   // El cobro del salón es canal físico: exige caja abierta del usuario que
   // cobra, que acá es el mismo con el que está logueado el navegador.
@@ -178,9 +180,16 @@ test.beforeAll(async ({ request }) => {
 })
 
 test.afterAll(async ({ request }) => {
-  const { token, cajaId, garzon } = escenario
+  const { token, cajaId, garzon, itemId } = escenario
   if (!token) return
   const auth = { Authorization: `Bearer ${token}` }
+
+  // El ítem se da de baja (soft delete por API): el catálogo del tenant es
+  // compartido y varias pantallas lo cargan con un `pageSize=100` fijo, así que
+  // un producto por corrida termina empujando fuera de la pantalla a los reales.
+  // El salón y la mesa quedan: viven en su propia lista, que esta spec elige por
+  // nombre exacto.
+  if (itemId) await request.delete(`${API}/items/${itemId}`, { headers: auth })
 
   // Red de seguridad del camino de FALLO: si el test llegó al final, ya cerró la
   // caja y esto no hace nada. Si murió antes, la cierra igual — un cajón ocupado

@@ -81,6 +81,7 @@ function onAgregar(item: ItemCatalogo) {
           ]"
           :ui="{ body: 'h-full p-3 sm:p-4' }"
           :aria-disabled="!puedeAgregar(item)"
+          :data-qa="`item-catalogo-${item.id}`"
           @click="onAgregar(item)"
         >
           <div class="flex flex-col h-full gap-1">

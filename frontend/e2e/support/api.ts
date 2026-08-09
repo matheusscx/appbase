@@ -90,6 +90,41 @@ export async function crearProducto(
 }
 
 /**
+ * Da de baja los ítems que sembró un flujo. **No es cosmético.**
+ *
+ * El seed es compartido y estas specs no lo reparan solas: sin esto cada corrida
+ * dejaba un producto más en el catálogo del tenant, para siempre. Y varias
+ * pantallas de producción cargan "todo el catálogo" con un `pageSize=100` fijo
+ * —el POS entre ellas—, así que la basura acumulada termina empujando fuera de
+ * la pantalla a ítems reales. Medido: 14 productos de corridas viejas seguían
+ * vivos en `Demo Restaurante` antes de agregar esta limpieza.
+ *
+ * Es `DELETE` de la API, que es soft delete (`eliminado_el`), nunca SQL directo.
+ * Y no asevera a propósito: corre en `afterEach`, donde un ítem que nunca llegó
+ * a crearse tiene que ser un no-op y no tapar el fallo real del test.
+ */
+export async function limpiarItems(
+  request: APIRequestContext,
+  token: string,
+  ids: string[],
+): Promise<void> {
+  for (const id of ids) {
+    const res = await request.delete(`${API}/items/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    // No asevera, pero tampoco calla: un borrado que falla en silencio deja el
+    // ítem vivo en el catálogo sin rastro, que es exactamente cómo se llegó a
+    // los 14 acumulados. El aviso sale por consola para que la corrida lo
+    // muestre sin hacer fallar al test que se está limpiando.
+    if (!res.ok()) {
+      console.warn(
+        `[e2e] no se pudo dar de baja el ítem ${id}: ${res.status()} ${await res.text()}`,
+      )
+    }
+  }
+}
+
+/**
  * Abre caja para el usuario del token y devuelve un cierre que **asevera**.
  *
  * El cierre va en dos fases: `conteo` congela el arqueo y auto-cierra si cuadra;
@@ -129,6 +164,12 @@ export async function abrirCaja(
  * `'cerrada'` significa que el conteo cuadró con lo que el servidor calculó —o
  * sea que es una **verificación server-side de lo cobrado**, no un chequeo de
  * limpieza—. Los flujos que cobran la usan como aserción final.
+ *
+ * Devuelve `undefined` cuando el `conteo` rebota, y eso es parte del contrato,
+ * no un error tragado: el mismo helper corre como red de seguridad en el
+ * `afterEach`, donde la caja ya cerrada tiene que ser un no-op. El llamador que
+ * lo usa como aserción compara contra `'cerrada'`, así que un `undefined`
+ * inesperado falla igual.
  */
 export async function cerrarCaja(
   request: APIRequestContext,

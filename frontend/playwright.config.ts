@@ -11,7 +11,13 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Un solo worker, también en local (CI ya lo era). No es prudencia: los flujos
+  // de venta comparten un recurso físico que el dominio hace exclusivo — el
+  // tenant tiene UN cajón, y `abrir` rechaza con "Ya tienes una caja abierta" si
+  // el usuario ya tiene una. Dos specs de caja en paralelo se pisan siempre, y
+  // todas corren con el mismo `admin@sistema.com`. Con `workers: 1` la corrida
+  // local reproduce exactamente la de CI.
+  workers: 1,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
