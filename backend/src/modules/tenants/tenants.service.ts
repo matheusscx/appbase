@@ -467,6 +467,23 @@ export class TenantsService {
           );
         }
       } else {
+        // 📌 ACÁ ENTRA EL MAIL, y esta rama entera se va cuando llegue.
+        //
+        // Decidido (owner, 2026-08-08): en vez de generar una temporal que el
+        // admin dicta, se manda un **link de invitación** y la persona elige su
+        // contraseña. Con eso desaparecen `contrasenaTemporal`,
+        // `debeCambiarContrasena`, el 403 de `switchTenant` y
+        // `/cambiar-contrasena`: todo ese andamiaje existe **solo** porque hoy
+        // hay una credencial que un tercero conoce.
+        //
+        // El envío va detrás de una interfaz que con `SMTP_HOST` vacío **loguea
+        // el mail en vez de mandarlo** — no es comodidad, es obligatorio: se
+        // corren 342 e2e por cierre y en CI, y mandando de verdad cada corrida
+        // dispara mails reales. Stack ya elegido: `nodemailer` contra el SMTP
+        // del owner. El detalle completo, en `docs/agent/pendientes.md`.
+        //
+        // No hay stub esperando acá a propósito: sin llamador sería código
+        // muerto, y para cuando llegue el mail estaría desactualizado.
         contrasenaTemporal = generarContrasenaTemporal();
         const creado = await manager.save(
           Usuario,
