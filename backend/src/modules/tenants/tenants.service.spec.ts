@@ -57,7 +57,20 @@ describe('TenantsService', () => {
     create: jest.Mock;
     save: jest.Mock;
   };
-  let dataSource: { transaction: jest.Mock; query: jest.Mock };
+  let dataSource: {
+    transaction: jest.Mock;
+    query: jest.Mock;
+    /** El manager de FUERA de la transacción. Ver `crearUsuario — atomicidad`. */
+    manager: { query: jest.Mock; save: jest.Mock };
+  };
+  let usuarioTenantRepo: {
+    findOne: jest.Mock;
+    save: jest.Mock;
+    create: jest.Mock;
+    softDelete: jest.Mock;
+  };
+  let tokensAcceso: { emitir: jest.Mock };
+  let mail: { enviar: jest.Mock };
 
   beforeEach(async () => {
     tenantRepo = {
@@ -82,7 +95,16 @@ describe('TenantsService', () => {
     dataSource = {
       transaction: jest.fn(),
       query: jest.fn(),
+      manager: { query: jest.fn(), save: jest.fn() },
     };
+    usuarioTenantRepo = {
+      findOne: jest.fn(),
+      save: jest.fn(),
+      create: jest.fn(),
+      softDelete: jest.fn(),
+    };
+    tokensAcceso = { emitir: jest.fn().mockResolvedValue('tok-invitacion') };
+    mail = { enviar: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -90,12 +112,7 @@ describe('TenantsService', () => {
         { provide: getRepositoryToken(Tenant), useValue: tenantRepo },
         {
           provide: getRepositoryToken(UsuarioTenant),
-          useValue: {
-            findOne: jest.fn(),
-            save: jest.fn(),
-            create: jest.fn(),
-            softDelete: jest.fn(),
-          },
+          useValue: usuarioTenantRepo,
         },
         {
           provide: getRepositoryToken(TenantModulo),
@@ -115,13 +132,10 @@ describe('TenantsService', () => {
           provide: GarzonesService,
           useValue: { asegurarMostrador: jest.fn() },
         },
-        {
-          provide: TokensAccesoService,
-          useValue: { emitir: jest.fn().mockResolvedValue('tok-invitacion') },
-        },
+        { provide: TokensAccesoService, useValue: tokensAcceso },
         // ⚠️ Mockeado, no real: un unit que mandara mail de verdad sería
         // exactamente lo que el fallback de `MailService` existe para evitar.
-        { provide: MailService, useValue: { enviar: jest.fn() } },
+        { provide: MailService, useValue: mail },
         { provide: ConfigService, useValue: { get: jest.fn() } },
       ],
     }).compile();
@@ -444,6 +458,122 @@ describe('TenantsService', () => {
         service.updatePreferenciasFinancieras('tenant-uuid', dto),
       ).rejects.toThrow(BadRequestException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * La atomicidad del alta, que hasta 2026-08-09 no la sostenía ningún test.
+   *
+   * Medido entonces: reemplazar `this.dataSource.transaction(...)` por
+   * `this.dataSource.manager` dejaba los 1549 unit y los 367 e2e **en verde**.
+   * La transacción funcionaba —rompiendo el INSERT de roles a mano no quedaba ni
+   * el usuario ni la membresía— pero una regresión habría pasado sin ruido. El
+   * test que parecía cubrirlo ("sin roles → 400") lo corta el `ValidationPipe`
+   * antes de que el service arranque.
+   *
+   * Desde la API no es trivial forzar un fallo **después** de crear el usuario,
+   * así que va en unit: el manager de la transacción y el de fuera son dos
+   * objetos distintos, y lo que se afirma es cuál de los dos recibió cada
+   * escritura.
+   */
+  describe('crearUsuario — atomicidad', () => {
+    const DTO = {
+      nombre: 'Ana',
+      apellido: 'Torres',
+      correo: 'Ana.Torres@paris.cl',
+      rolIds: ['550e8400-e29b-41d4-a716-446655440001'],
+    };
+
+    /** Un manager con el mínimo que recorre el camino de "cuenta nueva". */
+    function managerFake() {
+      return {
+        query: jest.fn((sql: string) =>
+          Promise.resolve(
+            // La validación de roles compara longitudes: si esto devuelve
+            // vacío, el alta corta con 400 y el test no prueba nada.
+            sql.includes('FROM roles') ? [{ rol_id: DTO.rolIds[0] }] : [],
+          ),
+        ),
+        // `getOne()` en null = el correo no tiene cuenta todavía.
+        createQueryBuilder: jest.fn(() => ({
+          select: () => ({
+            where: () => ({ getOne: () => Promise.resolve(null) }),
+          }),
+        })),
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn((_entidad: unknown, fila: unknown) => fila),
+        save: jest.fn((_entidad: unknown, fila: object) =>
+          Promise.resolve({ id: 'usuario-nuevo', ...fila }),
+        ),
+      };
+    }
+
+    let managerTx: ReturnType<typeof managerFake>;
+
+    beforeEach(() => {
+      managerTx = managerFake();
+      // El manager de fuera de la transacción: si alguna escritura cae acá, el
+      // alta dejó de ser atómica.
+      dataSource.manager = managerFake();
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb(managerTx),
+      );
+    });
+
+    it('escribe TODO con el manager de la transacción, nunca con el de fuera', async () => {
+      const res = await service.crearUsuario('tenant-uuid', DTO);
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(managerTx.save).toHaveBeenCalled();
+      expect(managerTx.query).toHaveBeenCalled();
+      // Las dos mitades del mutante: sin `transaction` no hay rollback, y con
+      // `dataSource.manager` cada sentencia commitea sola.
+      expect(dataSource.manager.save).not.toHaveBeenCalled();
+      expect(dataSource.manager.query).not.toHaveBeenCalled();
+      // La otra puerta de la misma fuga, que no es el mutante medido: escribir
+      // con un repositorio inyectado en vez del manager commitea igual de
+      // suelto, y `managerTx.save` seguiría llamándose por las otras filas.
+      expect(usuarioTenantRepo.save).not.toHaveBeenCalled();
+      expect(tenantRepo.save).not.toHaveBeenCalled();
+      expect(dataSource.query).not.toHaveBeenCalled();
+      expect(res.invitado).toBe(true);
+    });
+
+    it('emite la invitación DENTRO de la transacción', async () => {
+      // Si se emitiera afuera y el alta fallara después, quedaría un link vivo
+      // apuntando a un usuario que no existe.
+      await service.crearUsuario('tenant-uuid', DTO);
+
+      expect(tokensAcceso.emitir).toHaveBeenCalledWith(
+        'usuario-nuevo',
+        'invitacion',
+        managerTx,
+      );
+    });
+
+    it('si falla la baja de roles, propaga y NO manda el mail', async () => {
+      // El fallo va en la ÚLTIMA sentencia: para entonces el usuario, la
+      // membresía y el token ya se escribieron, que es justo el estado que la
+      // transacción tiene que deshacer.
+      managerTx.query.mockImplementation((sql: string) => {
+        if (sql.includes('FROM roles')) {
+          return Promise.resolve([{ rol_id: DTO.rolIds[0] }]);
+        }
+        if (sql.includes('UPDATE roles_usuarios')) {
+          return Promise.reject(new Error('deadlock detected'));
+        }
+        return Promise.resolve([]);
+      });
+
+      // Lo que carga el peso es esto: que el fallo de la última sentencia
+      // **propague** en vez de quedar tragado.
+      await expect(service.crearUsuario('tenant-uuid', DTO)).rejects.toThrow(
+        'deadlock detected',
+      );
+      // Corolario, no aserción independiente: el envío está después del `await`
+      // de la transacción, así que cualquier throw ya lo saltea. Se afirma para
+      // que quede escrito que un alta sin commit no manda link.
+      expect(mail.enviar).not.toHaveBeenCalled();
     });
   });
 });

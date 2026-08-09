@@ -17,6 +17,69 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Dos huecos de test que el gate no veía (2026-08-09)
+
+Los dos venían de revisiones independientes, los dos traían el mutante ya medido, y ninguno
+se cerraba con "agregar un assert": había que construir el escenario que ningún test montaba.
+
+### La transacción de `crearUsuario` no estaba protegida por ningún test
+
+**La entrada:** reemplazar `this.dataSource.transaction(...)` por `this.dataSource.manager`
+dejaba los unit y los e2e **en verde**. La transacción funcionaba —comprobado a mano:
+rompiendo el `INSERT` de roles daba 500 y no quedaba ni el usuario ni la membresía— pero una
+regresión pasaba sin ruido. El test que parecía cubrirlo, *"sin roles → 400"*, lo corta el
+`ValidationPipe` antes de que el service arranque.
+
+**Cómo se cerró:** un `describe('crearUsuario — atomicidad')` en
+`tenants.service.spec.ts`. La clave del arnés es que el manager de la transacción y
+`dataSource.manager` son **dos objetos distintos**, y lo que se afirma es cuál de los dos
+recibió cada escritura — así el mutante falla por lo que hace, no por un `TypeError`.
+
+Tres tests, tres invariantes:
+
+1. **todo se escribe con el manager de la transacción** y `dataSource.manager` no recibe ni
+   un `save` ni un `query`;
+2. **la invitación se emite dentro** (`emitir(usuarioId, 'invitacion', managerTx)`): si se
+   emitiera afuera y el alta fallara después, quedaría un link vivo apuntando a un usuario
+   que no existe;
+3. **si falla la última sentencia** —la baja de los roles que no vinieron— la promesa
+   propaga y **el mail no sale**, porque el envío es post-commit.
+
+**Verificado:** con el mutante puesto (la lambda invocada contra `this.dataSource.manager`)
+caen los **tres**. Sin él, los 22 del archivo pasan.
+
+### `fusionarCuentas` no tenía NINGÚN e2e, y su SQL solo corría mockeado
+
+**La entrada:** `grep -rn "fusionar" backend/test/` no devolvía nada, y el único test que
+recorría ese camino mockeaba `manager.query`, así que **no llegaba SQL a Postgres**. No era
+teórico: el 2026-08-07 un `SELECT` nuevo de esa ruta filtraba `eliminado_el` sobre
+`item_producto`, que no tiene esa columna. Habría reventado la fusión con un 500 sosteniendo
+el `pessimistic_write` de todas las cuentas de la mesa, y el gate entero —1490 unit, 321
+e2e, lint, typecheck— pasó en verde igual.
+
+**Cómo se cerró:** `test/salones-fusion.e2e-spec.ts`, con el caso mínimo que pedía la
+entrada. Lo que lo hace ejercitar el SQL en cuestión es la **presentación**: ese `SELECT`
+solo se emite si alguna línea la tiene. Un producto con unidad base `kg` cargado en las dos
+cuentas con unidades distintas —1 kg en el destino, 500 g en el origen— más un segundo ítem
+que no matchea, y la fusión tiene que dejar **dos** líneas: la repetida sumada a 1,5 y
+reconvertida a la unidad del destino, y la otra mudada tal cual.
+
+**Los dos mutantes, los dos medidos:**
+
+- **el histórico** — reponer `AND ip.eliminado_el IS NULL` en el JOIN a `item_producto`:
+  `500` donde el test espera `201`. Es exactamente el bug que se escapó, y ahora se caza.
+- **el de comportamiento** — sacar la llamada a `sincronizarPresentacion` del merge:
+  `cantidadPresentacion` se queda en `1` mientras `cantidad` ya vale `1.5`, o sea la línea
+  diría "1 kg" pesando kilo y medio.
+
+**Los fixtures que la fusión consume son propios** —salón, mesa e ítems creados en el
+`beforeAll`— porque una fusión cancela cuentas y borra líneas, y el seeder no repara lo que
+una corrida previa dejó movido. Lo que **sí** sale del seed es el garzón (Ana), su PIN, el
+turno, el tenant y la moneda; y el spec toca estado global al abrir y cerrar la sesión de
+Ana, como ya hacen `combos`, `recetas` y `garzones-selector`. Por eso el `afterAll` la
+vuelve a cerrar: dejarla abierta le cambia el escenario inicial al spec que corra después.
+Medido: tres corridas seguidas sobre la misma base, verde las tres.
+
 ## `GET /tenants/members` repartía el roster con correos (2026-08-09)
 
 **La entrada, como estaba en `pendientes.md`:** *"`GET /tenants/members` es el único

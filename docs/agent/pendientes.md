@@ -516,19 +516,10 @@ queda cerrado.**
 
 ### Huecos de test (medidos, con el mutante que sobrevive)
 
-Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela
-([`resueltos.md`](resueltos.md)). Quedan:
+Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela, y
+el de `fusionarCuentas` el 2026-08-09 con `test/salones-fusion.e2e-spec.ts` — que además fue
+el primer e2e de esa ruta (los dos en [`resueltos.md`](resueltos.md)). Quedan:
 
-- [ ] **`fusionarCuentas` no tiene NINGÚN e2e, y su SQL solo se ejercita mockeado**
-  (backend) — medido: `grep -rn "fusionar" backend/test/` no devuelve nada, y el único test
-  que recorre ese camino mockea `manager.query`, así que **no llega SQL a Postgres**.
-  No es teórico: el 2026-08-07 un `SELECT` nuevo de esa ruta filtraba `eliminado_el` sobre
-  `item_producto`, que no tiene esa columna. Habría reventado la fusión con un 500
-  sosteniendo el `pessimistic_write` de todas las cuentas de la mesa, y el gate entero
-  —1490 unit, 321 e2e, lint, typecheck— pasó en verde igual. Lo cazó la revisión
-  independiente corriendo la query contra la BD.
-  El caso mínimo: dos cuentas con líneas del mismo ítem, con presentación, fusionar y
-  verificar la cantidad y la presentación resultantes.
 - [ ] **El agrupado por estación de la comanda no lo ejercita ningún dato real, y el seed
   no lo permite** (backend) — descubierto al hacer el smoke del 2026-08-06:
   `agruparEstacionesComanda` siempre devuelve `[]` con el seed, así que hubo que cablear
@@ -577,16 +568,6 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
   membresía). Se anota y no se arregla porque el fix depende de una decisión que no está
   tomada — si algún día se pueden dar de baja usuarios, ¿el alta los revive, los rechaza, o
   el correo queda quemado?
-
-- [ ] **La transacción de `crearUsuario` no está protegida por ningún test** (backend,
-  `tenants.service.ts` → `crearUsuario`) — medido por la revisión del 2026-08-08:
-  reemplazar `this.dataSource.transaction(...)` por `this.dataSource.manager` deja los
-  unit y los e2e **en verde**. La transacción funciona (comprobado a mano: rompiendo
-  el `INSERT` de roles da 500 y no queda ni el usuario ni la membresía), pero una regresión
-  pasaría sin ruido. El test que parecía cubrirlo —"sin roles → 400"— lo corta el
-  `ValidationPipe` antes de que el service arranque. Para cubrirlo hace falta forzar un fallo
-  **después** de crear el usuario; desde la API no es trivial, así que probablemente sea un
-  unit con el manager mockeado.
 
 - [ ] **Verificación de correo del auto-registro público** (backend) — lo único que
   quedó abierto de la entrada de mail, que se cerró el 2026-08-09 (ver
