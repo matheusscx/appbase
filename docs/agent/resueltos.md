@@ -135,13 +135,14 @@ token de admin —incluido `tokenSupervisor` de `caja.e2e-spec.ts`, que pese al 
 con `ADMIN_EMAIL`, y `tokenFalabella`, que es admin de ese otro tenant—. El único test que
 había que reescribir era el que afirmaba que la lectura estaba abierta.
 
-Queda una decisión que **no** zanja este cierre y le corresponde al owner: `para-selector`
-cuelga solo de `JwtAuthGuard + TenantGuard`, mientras sus dos consumidores están detrás de
-`Cajas:Actualizar` y `Salones:Actualizar`, y el hermano que se cita como patrón
-(`garzones/para-selector`) sí lleva `@RequiresPermiso`. O sea que el alcance concedido es
-más ancho que la unión de sus consumidores. Se dejó así porque el decorador admite un solo
-par `(módulo, permiso)` y el neto sigue siendo una reducción de exposición, pero si el owner
-prefiere apretarlo, la salida es **dos rutas**, una por módulo.
+**Decisión del owner (2026-08-09): `para-selector` queda abierta a cualquier miembro
+autenticado.** La revisión independiente marcó que el alcance concedido es más ancho que la
+unión de sus consumidores —están detrás de `Cajas:Actualizar` y `Salones:Actualizar`, y el
+hermano que se cita como patrón (`garzones/para-selector`) sí lleva `@RequiresPermiso`— y lo
+dejó a criterio del owner. Respuesta: *"que se vean los nombres de los compañeros, no es
+crítico"*. Lo que sí es crítico —correo y roles— ya no sale de ahí. Si algún día cambia, la
+salida es **dos rutas**, una por módulo, porque el decorador admite un solo par
+`(módulo, permiso)`.
 
 ## No había forma de mandar un mail, y eso bloqueaba tres cosas (2026-08-09)
 
