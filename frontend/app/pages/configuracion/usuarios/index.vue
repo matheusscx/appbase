@@ -17,6 +17,8 @@ interface Member {
   nombre: string
   apellido: string
   correo: string
+  /** La cuenta se usa como tótem compartido: en el salón siempre se pide PIN. */
+  esTotem: boolean
   roles: { rolId: string, nombre: string }[]
 }
 
@@ -165,6 +167,42 @@ async function crearUsuario() {
 
 onMounted(cargar)
 
+// ── Tótem compartido ────────────────────────────────────────────────────────
+const marcandoTotem = ref<string | null>(null)
+
+/**
+ * Marca o desmarca la cuenta como tótem del salón.
+ *
+ * Manda el estado **deseado**, no un "togglear": dos pestañas abiertas no
+ * pueden dejar el marcador en el valor contrario al que muestran las dos.
+ */
+async function alternarTotem(member: Member) {
+  if (marcandoTotem.value) return
+  marcandoTotem.value = member.usuarioId
+  const esTotem = !member.esTotem
+  try {
+    await useApiFetch(`${apiUrl}/tenants/members/${member.usuarioId}/totem`, {
+      method: 'PATCH',
+      body: { esTotem },
+    })
+    member.esTotem = esTotem
+    toast.add({
+      title: esTotem
+        ? 'Ahora es un tótem compartido: en el salón siempre va a pedir PIN'
+        : 'Ya no es un tótem compartido',
+      color: 'success',
+    })
+  }
+  catch (e: unknown) {
+    // El 409 de "está vinculada a un garzón" es accionable y hay que mostrarlo
+    // tal cual: dice a quién desvincular primero.
+    toast.add({ title: apiErrorMsg(e, 'No se pudo cambiar el modo'), color: 'error' })
+  }
+  finally {
+    marcandoTotem.value = null
+  }
+}
+
 const columns: TableColumn<Member>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
   { accessorKey: 'roles', header: 'Roles' },
@@ -187,10 +225,24 @@ const columns: TableColumn<Member>[] = [
 
     <CrudTable :data="members" :columns="columns" :loading="loading">
       <template #nombre-cell="{ row }">
-        <CrudListItem
-          :title="`${row.original.nombre} ${row.original.apellido}`"
-          :subtitle="row.original.correo"
-        />
+        <div class="flex items-center gap-2">
+          <CrudListItem
+            :title="`${row.original.nombre} ${row.original.apellido}`"
+            :subtitle="row.original.correo"
+          />
+          <!-- Se marca en la fila y no en un drawer aparte: es una propiedad de
+               la cuenta, y quien la administra tiene que poder VER de un vistazo
+               cuáles de sus cuentas son dispositivos compartidos. -->
+          <UBadge
+            v-if="row.original.esTotem"
+            color="warning"
+            variant="subtle"
+            size="xs"
+            icon="i-lucide-monitor"
+          >
+            Tótem
+          </UBadge>
+        </div>
       </template>
 
         <template #roles-cell="{ row }">
@@ -214,7 +266,17 @@ const columns: TableColumn<Member>[] = [
         </template>
 
         <template #acciones-cell="{ row }">
-          <div class="flex items-center justify-end">
+          <div class="flex items-center justify-end gap-1">
+            <UButton
+              :icon="row.original.esTotem ? 'i-lucide-monitor-off' : 'i-lucide-monitor'"
+              color="neutral"
+              variant="ghost"
+              :loading="marcandoTotem === row.original.usuarioId"
+              :title="row.original.esTotem
+                ? 'Dejar de usarla como tótem compartido'
+                : 'Usar esta cuenta como tótem compartido'"
+              @click="alternarTotem(row.original)"
+            />
             <UButton
               icon="i-lucide-square-pen"
               color="neutral"

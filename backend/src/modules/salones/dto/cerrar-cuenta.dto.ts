@@ -10,9 +10,9 @@ import {
   CustomerVentaDto,
   PagoVentaDto,
 } from '../../ventas/dto/create-venta.dto';
-import { CredencialGarzonDto } from '../../../common/dto/credencial-garzon.dto';
+import { CredencialGarzonOpcionalDto } from '../../../common/dto/credencial-garzon.dto';
 
-export class CerrarCuentaDto extends CredencialGarzonDto {
+export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

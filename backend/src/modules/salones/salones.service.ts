@@ -557,15 +557,18 @@ export class SalonesService {
 
   async abrirCuenta(
     tenantId: string,
+    usuarioId: string,
     mesaId: string,
     dto: CreateCuentaDto,
   ): Promise<CuentaDetalle> {
     await this.getMesaOrThrow(tenantId, mesaId);
-    // Identifica al garzón responsable por su PIN (lanza 400 si es inválido).
-    const garzon = await this.garzonesService.verificarPin(
+    // Quién es el garzón responsable: del JWT si opera desde su propia tablet,
+    // del PIN si el dispositivo es compartido (400 si no hay ni una cosa ni la
+    // otra).
+    const garzon = await this.garzonesService.resolverGarzonActuante(
       tenantId,
-      dto.garzonId,
-      dto.pin,
+      usuarioId,
+      dto,
     );
     await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
     const cuenta = await this.dataSource.transaction(async (manager) => {
@@ -970,11 +973,12 @@ export class SalonesService {
     cuentaId: string,
     dto: CerrarCuentaDto,
   ): Promise<{ cuenta: CuentaDetalle; ventaId: string }> {
-    // Identifica al garzón que cierra la cuenta por su PIN (400 si inválido).
-    const garzon = await this.garzonesService.verificarPin(
+    // Quién cierra: del JWT en tablet personal, del PIN en dispositivo
+    // compartido (400 si no hay ninguno de los dos).
+    const garzon = await this.garzonesService.resolverGarzonActuante(
       tenantId,
-      dto.garzonId,
-      dto.pin,
+      usuarioId,
+      dto,
     );
     await this.sesionesGarzonService.assertSesionAbierta(tenantId, garzon.id);
     return this.dataSource.transaction(async (manager) => {
@@ -1295,15 +1299,15 @@ export class SalonesService {
 
   async transferirCuentaPorPin(
     tenantId: string,
+    usuarioId: string,
     cuentaId: string,
-    garzonId: string,
-    pin: string,
+    credencial: { garzonId?: string; pin?: string },
   ): Promise<CuentaDetalle> {
     const cuenta = await this.cuentaAsignacionesService.transferirPorPin(
       tenantId,
+      usuarioId,
       cuentaId,
-      garzonId,
-      pin,
+      credencial,
     );
     return this.armarDetalle(tenantId, cuenta);
   }

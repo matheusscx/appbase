@@ -9,6 +9,8 @@ export interface Garzon {
   nombre: string
   activo: boolean
   tipo: TipoGarzon
+  /** Cuenta vinculada (modo personal), o `null` si se identifica por PIN. */
+  usuarioId: string | null
   creadoEl: string
   actualizadoEl: string
   // Solo llegan con `listar(true)`; el resto de las pantallas que llaman
@@ -62,7 +64,12 @@ export function useGarzones() {
   const crear = (body: { nombre: string, activo?: boolean, tipo?: TipoGarzon }) =>
     useApiFetch<GarzonConPin>(`${apiUrl}/garzones`, { method: 'POST', body })
 
-  const actualizar = (id: string, body: { nombre?: string, activo?: boolean, tipo?: TipoGarzon }) =>
+  const actualizar = (
+    id: string,
+    // `usuarioId` acepta `null` explícito: en el DTO, ausente es "no toques el
+    // vínculo" y `null` es "desvinculá".
+    body: { nombre?: string, activo?: boolean, tipo?: TipoGarzon, usuarioId?: string | null },
+  ) =>
     useApiFetch<GarzonConAdvertencias>(`${apiUrl}/garzones/${id}`, { method: 'PATCH', body })
 
   /** Regenera el PIN del garzón; devuelve el nuevo PIN una sola vez. */
@@ -73,6 +80,16 @@ export function useGarzones() {
 
   const eliminar = (id: string) =>
     useApiFetch(`${apiUrl}/garzones/${id}`, { method: 'DELETE' })
+
+  /**
+   * En qué modo está este dispositivo: el garzón vinculado a la cuenta
+   * logueada, o `null` si hay que pedir PIN.
+   *
+   * ⚠️ Es una conveniencia de UI, **no un control**: quien decide de verdad es
+   * el backend en cada acción. Mentir acá no habilita nada.
+   */
+  const miVinculo = () =>
+    useApiFetch<GarzonParaSelector | null>(`${apiUrl}/garzones/mi-vinculo`)
 
   /**
    * Verifica el PIN **sin ejecutar nada**. El modal la llama antes de emitir
@@ -105,6 +122,7 @@ export function useGarzones() {
     regenerarPin,
     eliminar,
     paraSelector,
+    miVinculo,
     verificarPin,
   }
 }

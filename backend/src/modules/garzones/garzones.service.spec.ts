@@ -32,6 +32,8 @@ type Repo = {
   update: jest.Mock;
   softDelete: jest.Mock;
   createQueryBuilder: jest.Mock;
+  // `resolverGarzonActuante` consulta por SQL crudo a través del manager.
+  manager: { query: jest.Mock };
 };
 
 type SesionRepo = {
@@ -48,6 +50,7 @@ function makeRepo(): Repo {
     update: jest.fn(() => Promise.resolve({ affected: 1 })),
     softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
     createQueryBuilder: jest.fn(),
+    manager: { query: jest.fn().mockResolvedValue([]) },
   };
 }
 
@@ -68,6 +71,7 @@ function garzon(over: Partial<Garzon> & { pin?: string }): Garzon {
     activo: true,
     tipo: TipoGarzon.GARZON,
     esPlaceholder: false,
+    usuarioId: null,
     creadoEl: new Date(),
     actualizadoEl: new Date(),
     eliminadoEl: null,
@@ -193,6 +197,118 @@ describe('GarzonesService', () => {
       await expect(
         service.verificarPin(TENANT, 'inexistente', '111111'),
       ).rejects.toThrow('PIN inválido');
+    });
+  });
+
+  describe('resolverGarzonActuante', () => {
+    const CREDENCIAL = { garzonId: 'g1', pin: '111111' };
+
+    /** Lo que devuelve el JOIN de `usuarios_tenants` con `garzones`. */
+    function fila(over: { es_totem?: boolean; garzon_id?: string | null }) {
+      return [{ es_totem: false, garzon_id: null, ...over }];
+    }
+
+    it('con la cuenta vinculada a un garzón, resuelve por JWT y NO toca el PIN', async () => {
+      repo.manager.query.mockResolvedValue(fila({ garzon_id: 'g-personal' }));
+      const vinculado = garzon({ id: 'g-personal', nombre: 'Ana' });
+      repo.findOneOrFail.mockResolvedValue(vinculado);
+
+      const result = await service.resolverGarzonActuante(
+        TENANT,
+        USUARIO_ID,
+        {},
+      );
+
+      expect(result).toBe(vinculado);
+      // El punto entero de la fase: sin bcrypt. `verificarPin` busca con
+      // `findOne`, así que si se hubiera llamado, esto no sería 0.
+      expect(repo.findOne).not.toHaveBeenCalled();
+    });
+
+    // Un tótem es un dispositivo compartido y desatendido: quién lo está usando
+    // no se puede presumir del JWT, y por eso el marcador gana sobre el vínculo.
+    it('con la cuenta marcada tótem pide PIN AUNQUE tenga un garzón vinculado', async () => {
+      repo.manager.query.mockResolvedValue(
+        fila({ es_totem: true, garzon_id: 'g-personal' }),
+      );
+      const g = garzon({ id: 'g1', pin: '111111' });
+      repo.findOne.mockResolvedValue(g);
+
+      const result = await service.resolverGarzonActuante(
+        TENANT,
+        USUARIO_ID,
+        CREDENCIAL,
+      );
+
+      // Resolvió por el PIN de la credencial, no por el vínculo.
+      expect(result.id).toBe('g1');
+      expect(repo.findOne).toHaveBeenCalled();
+    });
+
+    it('sin vínculo, verifica el PIN como siempre', async () => {
+      repo.manager.query.mockResolvedValue(fila({}));
+      const g = garzon({ id: 'g1', pin: '111111' });
+      repo.findOne.mockResolvedValue(g);
+
+      await expect(
+        service.resolverGarzonActuante(TENANT, USUARIO_ID, CREDENCIAL),
+      ).resolves.toBe(g);
+    });
+
+    // ⚠️ EL test de la fase. `garzonId` y `pin` son opcionales en el DTO porque
+    // en modo personal no se mandan, así que el `ValidationPipe` deja pasar un
+    // body vacío. Si esta rama se cae, cualquiera con `Salones:Operar` opera
+    // como cualquier garzón en los 6 lugares donde se pide PIN, sin teclearlo.
+    it('sin vínculo y SIN credencial corta con 400, no deja operar', async () => {
+      repo.manager.query.mockResolvedValue(fila({}));
+
+      await expect(
+        service.resolverGarzonActuante(TENANT, USUARIO_ID, {}),
+      ).rejects.toThrow('Elegí el garzón e ingresá su PIN');
+      expect(repo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('el PIN a medias tampoco pasa: garzón elegido sin PIN es 400', async () => {
+      repo.manager.query.mockResolvedValue(fila({}));
+
+      await expect(
+        service.resolverGarzonActuante(TENANT, USUARIO_ID, { garzonId: 'g1' }),
+      ).rejects.toThrow('Elegí el garzón e ingresá su PIN');
+    });
+
+    // Una cuenta que no es miembro del tenant no tiene fila: no puede caer en
+    // la rama personal por omisión.
+    it('sin fila de membresía exige credencial', async () => {
+      repo.manager.query.mockResolvedValue([]);
+
+      await expect(
+        service.resolverGarzonActuante(TENANT, USUARIO_ID, {}),
+      ).rejects.toThrow('Elegí el garzón e ingresá su PIN');
+    });
+
+    it('resuelve el modo en UNA sola consulta, no una por rama', async () => {
+      repo.manager.query.mockResolvedValue(fila({ garzon_id: 'g-personal' }));
+      repo.findOneOrFail.mockResolvedValue(garzon({ id: 'g-personal' }));
+
+      await service.resolverGarzonActuante(TENANT, USUARIO_ID, {});
+
+      // Corre en el camino caliente —~60 veces por turno de 30 mesas— así que
+      // un round trip de más se paga en cada apertura y cierre de cuenta.
+      expect(repo.manager.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('acota la consulta al tenant del token', async () => {
+      repo.manager.query.mockResolvedValue(fila({}));
+
+      await expect(
+        service.resolverGarzonActuante(TENANT, USUARIO_ID, {}),
+      ).rejects.toThrow('Elegí el garzón e ingresá su PIN');
+
+      const [, params] = repo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(params).toEqual([USUARIO_ID, TENANT]);
     });
   });
 

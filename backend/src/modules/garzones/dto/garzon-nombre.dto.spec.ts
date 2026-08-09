@@ -21,7 +21,15 @@ describe('CreateGarzonDto / UpdateGarzonDto — largo del nombre', () => {
   });
 
   it('rechaza 101 con un error de largo, no con un 500 de Postgres', async () => {
-    for (const Dto of [CreateGarzonDto, UpdateGarzonDto]) {
+    // El tipo se ensancha a mano: los dos DTO dejaron de ser estructuralmente
+    // compatibles cuando `UpdateGarzonDto` sumó `usuarioId`, y TS ya no puede
+    // elegir una sobrecarga de `plainToInstance` para la unión. El test recorre
+    // los dos a propósito — es su razón de ser.
+    const dtos: (typeof CreateGarzonDto | typeof UpdateGarzonDto)[] = [
+      CreateGarzonDto,
+      UpdateGarzonDto,
+    ];
+    for (const Dto of dtos as (new () => object)[]) {
       const errores = await validate(
         plainToInstance(Dto, { nombre: CIENTO_UNO }),
       );

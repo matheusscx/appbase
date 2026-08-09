@@ -1,4 +1,5 @@
 import { useApiFetch } from './useApiFetch'
+import { credencialGarzon } from './useSalones'
 import type { PaginatedResponse } from './usePaginatedList'
 
 // ── Tipos (espejo del contrato del backend sesiones-garzon) ──────────────────
@@ -154,22 +155,33 @@ export function useTransferenciaPendientes() {
 export function useSesionesGarzon() {
   const apiUrl = useRuntimeConfig().public.apiUrl
 
+  /**
+   * Los tres pasan la credencial por `credencialGarzon`, igual que las acciones
+   * de cuenta.
+   *
+   * ⚠️ No es cosmético: en **modo personal** la pantalla manda `pin: ''`, y el
+   * `@IsOptional()` de class-validator solo saltea `null`/`undefined`, **no el
+   * string vacío**. Un `''` llega al `@Matches(/^\d{6}$/)` y rebota con 400.
+   * Sin esta traducción, un garzón con tablet propia no puede entrar ni salir
+   * de turno — y sin sesión abierta tampoco puede abrir cuentas, así que el
+   * modo entero queda inoperable.
+   */
   const iniciar = (body: { garzonId: string, pin: string, turnoId: string }) =>
     useApiFetch<SesionGarzon>(`${apiUrl}/sesiones-garzon/iniciar`, {
       method: 'POST',
-      body,
+      body: { ...credencialGarzon(body.garzonId, body.pin), turnoId: body.turnoId },
     })
 
   const cerrar = (body: { garzonId: string, pin: string }) =>
     useApiFetch<SesionCerrada>(`${apiUrl}/sesiones-garzon/cerrar`, {
       method: 'POST',
-      body,
+      body: credencialGarzon(body.garzonId, body.pin),
     })
 
   const activa = (body: { garzonId: string, pin: string }) =>
     useApiFetch<SesionGarzon | null>(`${apiUrl}/sesiones-garzon/activa`, {
       method: 'POST',
-      body,
+      body: credencialGarzon(body.garzonId, body.pin),
     })
 
   const listarAbiertas = () =>

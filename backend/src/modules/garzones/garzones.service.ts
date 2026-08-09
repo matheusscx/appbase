@@ -28,6 +28,8 @@ export interface GarzonPublico {
   nombre: string;
   activo: boolean;
   tipo: TipoGarzon;
+  /** Cuenta vinculada (modo personal), o `null` si se identifica por PIN. */
+  usuarioId: string | null;
   creadoEl: Date;
   actualizadoEl: Date;
   eliminadoEl?: Date | null;
@@ -77,6 +79,7 @@ export class GarzonesService {
       nombre: g.nombre,
       activo: g.activo,
       tipo: g.tipo ?? TipoGarzon.GARZON,
+      usuarioId: g.usuarioId ?? null,
       creadoEl: g.creadoEl,
       actualizadoEl: g.actualizadoEl,
       eliminadoEl: g.eliminadoEl,
@@ -186,10 +189,77 @@ export class GarzonesService {
     if (dto.nombre !== undefined) garzon.nombre = dto.nombre;
     if (dto.activo !== undefined) garzon.activo = dto.activo;
     if (dto.tipo !== undefined) garzon.tipo = dto.tipo;
+    if (dto.usuarioId !== undefined) {
+      if (dto.usuarioId !== null) {
+        await this.assertVinculable(tenantId, dto.usuarioId, id);
+      }
+      garzon.usuarioId = dto.usuarioId;
+    }
     return {
       ...this.toPublico(await this.garzonRepo.save(garzon)),
       advertencias,
     };
+  }
+
+  /**
+   * Las **tres** condiciones para vincular una cuenta a un garzón, en una
+   * consulta.
+   *
+   * **Miembro vivo del tenant**: vincular una cuenta ajena no daría acceso
+   * —igual necesita token de este tenant para operar— pero dejaría el vínculo
+   * como basura silenciosa que nadie puede ejercer.
+   *
+   * **No marcada como tótem**: es la contradicción directa. El tótem existe
+   * porque en un dispositivo compartido la identidad no se puede presumir; si
+   * además tuviera un garzón vinculado, la configuración estaría diciendo dos
+   * cosas opuestas. `resolverGarzonActuante` ya resuelve el empate a favor del
+   * PIN, pero dejar crear la contradicción es dejar que el admin crea que
+   * configuró algo que no rige.
+   *
+   * **No vinculada ya a otro garzón**: lo garantiza `uq_garzones_usuario_tenant`,
+   * pero **la unique sola devuelve un 500**. Y es un camino que el selector
+   * ofrece: filtra los tótem, no los ya vinculados. El admin elegía una cuenta
+   * de la lista y comía un error genérico, mientras los otros dos casos
+   * inválidos sí le decían qué hacer. Mismo bug que cerró `f3f65c1c` con el
+   * 23505 de las opciones de modificadores.
+   */
+  private async assertVinculable(
+    tenantId: string,
+    usuarioId: string,
+    garzonId: string,
+  ): Promise<void> {
+    const [fila] = await this.garzonRepo.manager.query<
+      { es_totem: boolean; garzon_nombre: string | null }[]
+    >(
+      `SELECT ut.es_totem,
+              g.nombre AS garzon_nombre
+         FROM usuarios_tenants ut
+         LEFT JOIN garzones g
+           ON g.usuario_id = ut.usuario_id
+          AND g.tenant_id = ut.tenant_id
+          AND g.garzon_id <> $3
+          AND g.eliminado_el IS NULL
+        WHERE ut.usuario_id = $1 AND ut.tenant_id = $2
+          AND ut.eliminado_el IS NULL`,
+      [usuarioId, tenantId, garzonId],
+    );
+    if (!fila) {
+      throw new BadRequestException(
+        'Esa cuenta no es miembro de este tenant. Sumala desde Configuración → Usuarios.',
+      );
+    }
+    if (fila.es_totem) {
+      throw new BadRequestException(
+        'Esa cuenta está marcada como tótem compartido: en un tótem siempre se pide PIN, ' +
+          'así que vincularla no tendría efecto. Desmarcala primero.',
+      );
+    }
+    if (fila.garzon_nombre) {
+      throw new ConflictException(
+        `Esa cuenta ya está vinculada al garzón ${fila.garzon_nombre}. ` +
+          `Desvinculala de ${fila.garzon_nombre} antes de asignarla acá.`,
+      );
+    }
   }
 
   /**
@@ -255,16 +325,31 @@ export class GarzonesService {
         { eliminadoEl: null, eliminadoPor: null },
       );
     } catch (e) {
-      // 23505 = unique_violation. `uq_garzones_mostrador_tenant` es parcial
-      // (WHERE es_placeholder = true AND eliminado_el IS NULL): un solo
-      // "Mostrador" vivo por tenant. Si el placeholder borrado sigue siendo
-      // el que `restaurar()` intenta revivir mientras `asegurarMostrador()`
-      // ya creó uno nuevo (find-or-create disparado por otra venta en el
-      // medio), restaurar el viejo colisiona. `nombre` no tiene índice único
-      // en `garzones` — este es el único choque posible acá, así que el
-      // mensaje es específico al placeholder, no genérico de "nombre". Mismo
-      // patrón que causas-merma.service.ts → restaurar().
-      if ((e as { code?: string }).code === '23505') {
+      // 23505 = unique_violation. `garzones` tiene **dos** índices únicos
+      // parciales sobre `eliminado_el IS NULL`, así que restaurar puede chocar
+      // por dos motivos distintos y hay que mirar CUÁL:
+      //
+      // - `uq_garzones_mostrador_tenant`: un solo "Mostrador" vivo por tenant.
+      //   Pasa si `asegurarMostrador()` creó uno nuevo (find-or-create
+      //   disparado por otra venta) mientras el viejo estaba en la papelera.
+      // - `uq_garzones_usuario_tenant`: una cuenta = un garzón vivo. El
+      //   `usuario_id` **sobrevive al soft delete**, así que si alguien vinculó
+      //   esa cuenta a otro garzón mientras este estaba borrado, revivirlo
+      //   colisiona.
+      //
+      // ⚠️ Antes había un solo índice y el mensaje era específico al
+      // placeholder por eso. Con dos, un mensaje fijo le dice al admin que el
+      // problema es "Mostrador" cuando en realidad tiene que desvincular una
+      // cuenta de otro garzón — una explicación falsa que apunta a otra regla
+      // y a otro garzón. Mismo patrón que causas-merma.service.ts → restaurar().
+      const err = e as { code?: string; constraint?: string };
+      if (err.code === '23505') {
+        if (err.constraint === 'uq_garzones_usuario_tenant') {
+          throw new ConflictException(
+            `No se puede restaurar a ${garzon.nombre}: la cuenta que tenía vinculada ya la usa otro garzón. ` +
+              `Desvinculala de ese garzón y volvé a intentar.`,
+          );
+        }
         throw new BadRequestException(
           'Ya existe un garzón "Mostrador" activo para este tenant (se crea automáticamente, uno por tenant). No se puede restaurar el placeholder anterior mientras el nuevo siga vivo.',
         );
@@ -312,6 +397,104 @@ export class GarzonesService {
       throw new BadRequestException('PIN inválido');
     }
     return garzon;
+  }
+
+  /**
+   * El garzón que esta cuenta "es" en este tenant, o `null` si opera por PIN.
+   * Devuelve `null` cuando la cuenta está marcada tótem **aunque tenga vínculo**:
+   * ese es el override duro.
+   *
+   * Una sola consulta —el `LEFT JOIN` trae el marcador y el garzón juntos—
+   * porque corre en el camino caliente de abrir y cerrar cuenta, ~60 veces por
+   * turno de 30 mesas. Y **una sola definición**: la usan el resolver y el
+   * endpoint que le dice al front en qué modo está, que si divergieran darían
+   * una pantalla que no pide PIN contra un backend que lo exige.
+   */
+  private async garzonPersonalDe(
+    tenantId: string,
+    usuarioId: string,
+  ): Promise<string | null> {
+    const [fila] = await this.garzonRepo.manager.query<
+      { es_totem: boolean; garzon_id: string | null }[]
+    >(
+      `SELECT ut.es_totem,
+              g.garzon_id
+         FROM usuarios_tenants ut
+         LEFT JOIN garzones g
+           ON g.usuario_id = ut.usuario_id
+          AND g.tenant_id = ut.tenant_id
+          AND g.activo = true
+          AND g.eliminado_el IS NULL
+        WHERE ut.usuario_id = $1 AND ut.tenant_id = $2
+          AND ut.eliminado_el IS NULL`,
+      [usuarioId, tenantId],
+    );
+    if (!fila || fila.es_totem) return null;
+    return fila.garzon_id;
+  }
+
+  /**
+   * En qué modo está el dispositivo, para que la pantalla del salón sepa si
+   * tiene que pedir PIN. Devuelve el garzón vinculado o `null`.
+   *
+   * ⚠️ Es una **conveniencia de UI, no un control**: quien resuelve de verdad
+   * es `resolverGarzonActuante` en cada acción. Un cliente que mienta acá no
+   * consigue nada.
+   */
+  async miVinculo(
+    tenantId: string,
+    usuarioId: string,
+  ): Promise<{ garzonId: string; nombre: string } | null> {
+    const garzonId = await this.garzonPersonalDe(tenantId, usuarioId);
+    if (!garzonId) return null;
+    const garzon = await this.garzonRepo.findOneOrFail({
+      where: { id: garzonId, tenantId },
+    });
+    return { garzonId: garzon.id, nombre: garzon.nombre };
+  }
+
+  /**
+   * Quién está actuando, para los **6** puntos que antes llamaban `verificarPin`
+   * directo (abrir cuenta, cerrar cuenta, traspaso, e iniciar/cerrar/consultar
+   * sesión). Tres ramas:
+   *
+   * 1. La cuenta está marcada `es_totem` → **siempre** PIN. Es un override
+   *    duro: aunque alguien le vincule un garzón por error, no se vuelve
+   *    personal. Un tótem es un dispositivo compartido y desatendido; presumir
+   *    del JWT quién lo está usando es exactamente lo que no se puede hacer.
+   * 2. Hay un garzón vivo y activo vinculado a esa cuenta → **ese es**, sin PIN
+   *    y sin bcrypt. Su tablet es suya y el JWT ya probó quién es; pedirle el
+   *    PIN es re-probar lo ya probado.
+   * 3. Ninguna de las dos → PIN, como siempre.
+   *
+   * ⚠️ **La rama 3 es la que sostiene el PIN de todo el sistema.** `garzonId` y
+   * `pin` son opcionales en el DTO —tienen que serlo, porque en modo personal
+   * no se mandan—, así que sin este corte alguien los omite y opera como
+   * cualquiera en los 6 lugares donde hoy se pide PIN. No es una validación de
+   * forma: es el control de acceso.
+   */
+  async resolverGarzonActuante(
+    tenantId: string,
+    usuarioId: string,
+    credencial: { garzonId?: string; pin?: string },
+  ): Promise<Garzon> {
+    const garzonId = await this.garzonPersonalDe(tenantId, usuarioId);
+
+    if (garzonId) {
+      // Modo personal. El PIN que venga en el body se ignora: la identidad ya
+      // está probada por el JWT y no hay nada que agregar mandando un PIN
+      // ajeno.
+      return this.garzonRepo.findOneOrFail({
+        where: { id: garzonId, tenantId },
+      });
+    }
+
+    if (!credencial.garzonId || !credencial.pin) {
+      throw new BadRequestException(
+        'Elegí el garzón e ingresá su PIN para continuar',
+      );
+    }
+    return this.verificarPin(tenantId, credencial.garzonId, credencial.pin);
   }
 
   /**

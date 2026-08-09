@@ -55,13 +55,23 @@ export class CuentaAsignacionesService implements OnApplicationBootstrap {
     );
   }
 
+  /**
+   * El traspaso es **pull**: lo pide quien SE LLEVA la cuenta, probando que es
+   * él. En tablet personal esa prueba ya la dio el JWT; en el tótem la da el
+   * PIN. El motivo del movimiento sigue siendo `TRANSFERENCIA_PIN` porque
+   * describe el mecanismo —el garzón destino se identificó— y no el medio.
+   */
   async transferirPorPin(
     tenantId: string,
+    usuarioId: string,
     cuentaId: string,
-    garzonId: string,
-    pin: string,
+    credencial: { garzonId?: string; pin?: string },
   ): Promise<Cuenta> {
-    const destino = await this.garzones.verificarPin(tenantId, garzonId, pin);
+    const destino = await this.garzones.resolverGarzonActuante(
+      tenantId,
+      usuarioId,
+      credencial,
+    );
     await this.sesiones.assertSesionAbierta(tenantId, destino.id);
     return this.transferir(
       tenantId,

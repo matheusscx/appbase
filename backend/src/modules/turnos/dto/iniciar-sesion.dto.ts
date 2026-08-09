@@ -1,7 +1,7 @@
 import { IsUUID } from 'class-validator';
-import { CredencialGarzonDto } from '../../../common/dto/credencial-garzon.dto';
+import { CredencialGarzonOpcionalDto } from '../../../common/dto/credencial-garzon.dto';
 
-export class IniciarSesionDto extends CredencialGarzonDto {
+export class IniciarSesionDto extends CredencialGarzonOpcionalDto {
   @IsUUID()
   turnoId: string;
 }

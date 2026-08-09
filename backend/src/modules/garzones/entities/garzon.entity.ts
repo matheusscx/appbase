@@ -41,6 +41,20 @@ export class Garzon {
   @Column({ name: 'es_placeholder', type: 'boolean', default: false })
   esPlaceholder: boolean;
 
+  /**
+   * Vínculo **opcional** con una cuenta del sistema (modo personal: el garzón
+   * tiene su propia tablet, así que el JWT ya dice quién es y no se le pide
+   * PIN). Sin vínculo todo funciona como siempre — que es justamente lo que
+   * permite sumar personal temporal sin crearle una cuenta, el objetivo con el
+   * que nació el PIN.
+   *
+   * Único por tenant sobre filas vivas (`uq_garzones_usuario_tenant`): si una
+   * cuenta fuera dos garzones vivos, resolver el actuante por JWT elegiría uno
+   * al azar.
+   */
+  @Column({ name: 'usuario_id', type: 'uuid', nullable: true })
+  usuarioId: string | null;
+
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 

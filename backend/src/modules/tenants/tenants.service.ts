@@ -38,6 +38,8 @@ export interface TenantMember {
   nombre: string;
   apellido: string;
   correo: string;
+  /** La cuenta se usa como tótem compartido: en el salón siempre se pide PIN. */
+  esTotem: boolean;
   roles: { rolId: string; nombre: string }[];
 }
 
@@ -307,6 +309,7 @@ export class TenantsService {
       nombre: string;
       apellido: string;
       correo: string;
+      es_totem: boolean;
       rol_id: string | null;
       rol_nombre: string | null;
     }[] = await this.dataSource.query(
@@ -314,6 +317,7 @@ export class TenantsService {
               u.nombre,
               u.apellido,
               u.correo,
+              ut.es_totem,
               r.rol_id,
               r.nombre AS rol_nombre
        FROM usuarios_tenants ut
@@ -336,6 +340,7 @@ export class TenantsService {
           nombre: row.nombre,
           apellido: row.apellido,
           correo: row.correo,
+          esTotem: row.es_totem,
           roles: [],
         };
         porUsuario.set(row.usuario_id, member);
@@ -533,6 +538,46 @@ export class TenantsService {
       // tiene que usar para entrar.
       return { usuarioId, correo, contrasenaTemporal };
     });
+  }
+
+  /**
+   * Marca o desmarca una cuenta como tótem compartido de este tenant.
+   *
+   * **No se puede marcar una cuenta que tiene un garzón vinculado**: sería la
+   * contradicción directa —"esta persona es este garzón" contra "acá no se
+   * sabe quién opera"—. `resolverGarzonActuante` ya resuelve el empate a favor
+   * del PIN, pero dejar crear la contradicción es dejar que el admin crea que
+   * configuró algo que no rige. Desmarcar nunca se bloquea: es la salida.
+   */
+  async marcarTotem(
+    tenantId: string,
+    usuarioId: string,
+    esTotem: boolean,
+  ): Promise<{ usuarioId: string; esTotem: boolean }> {
+    const miembro = await this.usuarioTenantRepo.findOne({
+      where: { usuarioId, tenantId },
+    });
+    if (!miembro) {
+      throw new NotFoundException('Esa cuenta no es miembro de este tenant');
+    }
+
+    if (esTotem) {
+      const [vinculado] = await this.dataSource.query<{ nombre: string }[]>(
+        `SELECT nombre FROM garzones
+          WHERE usuario_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [usuarioId, tenantId],
+      );
+      if (vinculado) {
+        throw new ConflictException(
+          `Esa cuenta está vinculada al garzón ${vinculado.nombre}, que opera sin PIN desde ` +
+            `su propio dispositivo. Desvinculalo primero desde Garzones.`,
+        );
+      }
+    }
+
+    miembro.esTotem = esTotem;
+    await this.usuarioTenantRepo.save(miembro);
+    return { usuarioId, esTotem };
   }
 
   async removeMember(tenantId: string, usuarioId: string): Promise<void> {

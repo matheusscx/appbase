@@ -187,6 +187,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedVendedorPermisosCaja();
     await this.seedRolesInventario();
     await this.seedRolSupervisorCajas();
+    await this.seedRolSalon();
     await this.seedSalones();
     await this.seedMesas();
     await this.seedGarzones();
@@ -950,6 +951,30 @@ export class SeederService implements OnApplicationBootstrap {
         esSuperadmin: false,
         debeCambiarContrasena: true,
       },
+      // Los dos lados del modo del dispositivo (Fase 2 del garzón). Sin estas
+      // dos cuentas, ni el modo personal ni el override del tótem se pueden
+      // ejercer: la resolución del garzón actuante sale de la cuenta con la que
+      // se opera, no de un parámetro.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440341',
+        nombreUsuario: 'ana.torres',
+        contrasena: HASH,
+        nombre: 'Ana',
+        apellido: 'Torres',
+        telefono: '987654341',
+        correo: 'ana.torres@paris.cl',
+        esSuperadmin: false,
+      },
+      {
+        id: '550e8400-e29b-41d4-a716-446655440342',
+        nombreUsuario: 'totem.paris',
+        contrasena: HASH,
+        nombre: 'Tótem',
+        apellido: 'Salón',
+        telefono: '987654342',
+        correo: 'totem@paris.cl',
+        esSuperadmin: false,
+      },
       {
         id: '550e8400-e29b-41d4-a716-446655440045',
         nombreUsuario: 'vendedor.paris',
@@ -1589,6 +1614,17 @@ export class SeederService implements OnApplicationBootstrap {
       ON garzones (tenant_id) WHERE es_placeholder = true AND eliminado_el IS NULL
     `);
 
+    // Una cuenta no puede ser dos garzones vivos del mismo tenant: si lo fuera,
+    // `resolverGarzonActuante` elegiría uno al azar al resolver por JWT.
+    // Acá y no solo en `startup-pos.sql` porque los índices PARCIALES los crea
+    // el seeder: `synchronize` de TypeORM no los genera, y el .sql documenta el
+    // esquema pero no es lo que se aplica.
+    await this.dataSource.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_garzones_usuario_tenant
+      ON garzones (tenant_id, usuario_id)
+      WHERE usuario_id IS NOT NULL AND eliminado_el IS NULL
+    `);
+
     // pinHash = bcrypt(PIN, 10). PINs de dev: Ana=111111, Bruno=222222, Carla=333333.
     const garzones: Partial<Garzon>[] = [
       {
@@ -1597,6 +1633,10 @@ export class SeederService implements OnApplicationBootstrap {
         nombre: 'Ana Torres',
         pinHash: '$2b$10$9a9L1ya.PTvsPU9p1lXO5uT1W4VNkLa9SlXokegdgEkfAWFMAXAdS',
         activo: true,
+        // Modo personal: opera desde su propia tablet y no teclea PIN. Su PIN
+        // se mantiene igual —sigue apareciendo en el selector del tótem—
+        // porque un garzón vinculado puede usar cualquiera de los dos.
+        usuarioId: '550e8400-e29b-41d4-a716-446655440341',
       },
       {
         id: '550e8400-e29b-41d4-a716-446655440239',
@@ -1871,6 +1911,8 @@ export class SeederService implements OnApplicationBootstrap {
     const APROBADOR_PARIS = '550e8400-e29b-41d4-a716-446655440329';
     const SUPERVISOR_PARIS = '550e8400-e29b-41d4-a716-446655440335';
     const TEMPORAL_PARIS = '550e8400-e29b-41d4-a716-446655440340';
+    const ANA_TORRES = '550e8400-e29b-41d4-a716-446655440341';
+    const TOTEM_PARIS = '550e8400-e29b-41d4-a716-446655440342';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -1883,6 +1925,8 @@ export class SeederService implements OnApplicationBootstrap {
       // si no lo fuera, el 403 de `switchTenant` vendría de "no perteneces a
       // este tenant" y el test del flag pasaría por la razón equivocada.
       [TEMPORAL_PARIS, PARIS],
+      [ANA_TORRES, PARIS], // tablet personal: vinculada al garzón Ana Torres
+      [TOTEM_PARIS, PARIS], // dispositivo compartido: siempre pide PIN
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -1892,6 +1936,14 @@ export class SeederService implements OnApplicationBootstrap {
         [usuarioId, tenantId],
       );
     }
+
+    // El marcador va aparte del INSERT de arriba porque `ON CONFLICT DO NOTHING`
+    // no lo aplicaría en una base ya sembrada.
+    await this.dataSource.query(
+      `UPDATE usuarios_tenants SET es_totem = true
+        WHERE usuario_id = $1 AND tenant_id = $2`,
+      [TOTEM_PARIS, PARIS],
+    );
   }
 
   private async seedRolesUsuarios(): Promise<void> {
@@ -3300,6 +3352,55 @@ export class SeederService implements OnApplicationBootstrap {
       if (!exists) {
         await this.razonSocialRepo.save(this.razonSocialRepo.create(data));
       }
+    }
+  }
+
+  /**
+   * Rol **Salón**: lo mínimo para operar el salón, sin nada de administración.
+   *
+   * Existe por el modo del dispositivo (Fase 2 del garzón). La tablet personal
+   * y el tótem son cuentas comunes del tenant, y **la del tótem queda logueada
+   * en un dispositivo compartido y desatendido**: si se la loguea con la cuenta
+   * del admin, cualquiera que pase tiene permisos de administración. Este rol
+   * es la recomendación operativa de `docs/features/garzones.md`, hecha
+   * ejercitable.
+   *
+   * `Leer` además de `Operar` porque la pantalla del salón necesita el plano;
+   * el selector de garzones va por `Operar` justamente para no exigir `Leer`.
+   */
+  private async seedRolSalon(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const ROL_SALON = '550e8400-e29b-41d4-a716-446655440343';
+    const MODULO_TENANT_SALONES = '550e8400-e29b-41d4-a716-446655440228';
+    const SALONES_LEER = '550e8400-e29b-41d4-a716-446655440223';
+    const SALONES_OPERAR = '550e8400-e29b-41d4-a716-446655440227';
+    const ANA_TORRES = '550e8400-e29b-41d4-a716-446655440341';
+    const TOTEM_PARIS = '550e8400-e29b-41d4-a716-446655440342';
+
+    await this.dataSource.query(
+      `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+       VALUES ($1, $2, 'Salón', 'Operación del salón: mesas y cuentas', false, NOW(), NOW())
+       ON CONFLICT DO NOTHING`,
+      [ROL_SALON, PARIS],
+    );
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ROL_SALON, MODULO_TENANT_SALONES],
+    );
+    for (const permisoId of [SALONES_LEER, SALONES_OPERAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [ROL_SALON, MODULO_TENANT_SALONES, permisoId],
+      );
+    }
+    for (const usuarioId of [ANA_TORRES, TOTEM_PARIS]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+         VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+        [usuarioId, PARIS, ROL_SALON],
+      );
     }
   }
 

@@ -48,6 +48,7 @@ function garzon(over: Partial<Garzon> = {}): Garzon {
     activo: true,
     tipo: TipoGarzon.GARZON,
     esPlaceholder: false,
+    usuarioId: null,
     creadoEl: new Date('2026-01-01T00:00:00Z'),
     actualizadoEl: new Date('2026-01-01T00:00:00Z'),
     eliminadoEl: null,
@@ -94,14 +95,14 @@ function sesion(over: Partial<SesionGarzon> = {}): SesionGarzon {
 describe('SesionesGarzonService', () => {
   let service: SesionesGarzonService;
   let sesionRepo: SesionRepo;
-  let garzones: { verificarPin: jest.Mock };
+  let garzones: { resolverGarzonActuante: jest.Mock };
   let turnos: { getActivoOrThrow: jest.Mock };
   let dataSource: { query: jest.Mock };
 
   beforeEach(async () => {
     sesionRepo = makeSesionRepo();
     garzones = {
-      verificarPin: jest.fn().mockResolvedValue(garzon()),
+      resolverGarzonActuante: jest.fn().mockResolvedValue(garzon()),
     };
     turnos = {
       getActivoOrThrow: jest.fn().mockResolvedValue(turno()),
@@ -126,13 +127,19 @@ describe('SesionesGarzonService', () => {
     const saved = sesion({ id: 'sesion-new' });
     sesionRepo.save.mockResolvedValue(saved);
 
-    const result = await service.iniciar(TENANT, {
+    const result = await service.iniciar(TENANT, USUARIO_ID, {
       garzonId: GARZON_ID,
       pin: PIN,
       turnoId: TURNO_ID,
     });
 
-    expect(garzones.verificarPin).toHaveBeenCalledWith(TENANT, GARZON_ID, PIN);
+    // El usuario del JWT llega al resolver: es lo que le permite decidir si
+    // este dispositivo es personal o un tótem.
+    expect(garzones.resolverGarzonActuante).toHaveBeenCalledWith(
+      TENANT,
+      USUARIO_ID,
+      expect.objectContaining({ garzonId: GARZON_ID, pin: PIN }),
+    );
     expect(turnos.getActivoOrThrow).toHaveBeenCalledWith(TENANT, TURNO_ID);
     expect(sesionRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -151,7 +158,7 @@ describe('SesionesGarzonService', () => {
   });
 
   it('iniciar congela tipo_garzon del garzón', async () => {
-    garzones.verificarPin.mockResolvedValue(
+    garzones.resolverGarzonActuante.mockResolvedValue(
       garzon({ tipo: TipoGarzon.COCINA }),
     );
     sesionRepo.findOne.mockResolvedValue(null);
@@ -161,7 +168,7 @@ describe('SesionesGarzonService', () => {
     });
     sesionRepo.save.mockResolvedValue(saved);
 
-    const result = await service.iniciar(TENANT, {
+    const result = await service.iniciar(TENANT, USUARIO_ID, {
       garzonId: GARZON_ID,
       pin: PIN,
       turnoId: TURNO_ID,
@@ -177,7 +184,7 @@ describe('SesionesGarzonService', () => {
     sesionRepo.findOne.mockResolvedValue(sesion());
 
     await expect(
-      service.iniciar(TENANT, {
+      service.iniciar(TENANT, USUARIO_ID, {
         garzonId: GARZON_ID,
         pin: PIN,
         turnoId: TURNO_ID,
@@ -185,7 +192,7 @@ describe('SesionesGarzonService', () => {
     ).rejects.toThrow(BadRequestException);
 
     await expect(
-      service.iniciar(TENANT, {
+      service.iniciar(TENANT, USUARIO_ID, {
         garzonId: GARZON_ID,
         pin: PIN,
         turnoId: TURNO_ID,
@@ -201,7 +208,7 @@ describe('SesionesGarzonService', () => {
     );
 
     await expect(
-      service.iniciar(TENANT, {
+      service.iniciar(TENANT, USUARIO_ID, {
         garzonId: GARZON_ID,
         pin: PIN,
         turnoId: TURNO_ID,
@@ -209,7 +216,7 @@ describe('SesionesGarzonService', () => {
     ).rejects.toThrow('Turno inválido o inactivo');
   });
 
-  it('cerrarPorPin cierra y fija finEl', async () => {
+  it('cerrarPropia cierra y fija finEl', async () => {
     const abierta = sesion();
     sesionRepo.findOne.mockResolvedValue(abierta);
     sesionRepo.save.mockImplementation((row: SesionGarzon) =>
@@ -221,7 +228,10 @@ describe('SesionesGarzonService', () => {
       ])
       .mockResolvedValueOnce([]);
 
-    const result = await service.cerrarPorPin(TENANT, GARZON_ID, PIN);
+    const result = await service.cerrarPropia(TENANT, USUARIO_ID, {
+      garzonId: GARZON_ID,
+      pin: PIN,
+    });
 
     expect(result.estado).toBe(EstadoSesionGarzon.CERRADA);
     expect(result.origenCierre).toBe(OrigenCierreSesion.PIN);
@@ -230,15 +240,21 @@ describe('SesionesGarzonService', () => {
     expect(result.cuentasPendientes).toEqual([]);
   });
 
-  it('cerrarPorPin sin sesión abierta → 400', async () => {
+  it('cerrarPropia sin sesión abierta → 400', async () => {
     sesionRepo.findOne.mockResolvedValue(null);
 
-    await expect(service.cerrarPorPin(TENANT, GARZON_ID, PIN)).rejects.toThrow(
-      BadRequestException,
-    );
-    await expect(service.cerrarPorPin(TENANT, GARZON_ID, PIN)).rejects.toThrow(
-      'El garzón no tiene una sesión abierta',
-    );
+    await expect(
+      service.cerrarPropia(TENANT, USUARIO_ID, {
+        garzonId: GARZON_ID,
+        pin: PIN,
+      }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.cerrarPropia(TENANT, USUARIO_ID, {
+        garzonId: GARZON_ID,
+        pin: PIN,
+      }),
+    ).rejects.toThrow('El garzón no tiene una sesión abierta');
   });
 
   it('cerrarAdmin registra cerradaPorUsuarioId y origenCierre=admin', async () => {
@@ -275,7 +291,7 @@ describe('SesionesGarzonService', () => {
     salon_nombre: 'Terraza',
   };
 
-  it('cerrarPorPin devuelve las cuentas que quedaron a nombre del garzón', async () => {
+  it('cerrarPropia devuelve las cuentas que quedaron a nombre del garzón', async () => {
     sesionRepo.findOne.mockResolvedValue(sesion());
     sesionRepo.save.mockImplementation((row: SesionGarzon) =>
       Promise.resolve(row),
@@ -286,7 +302,10 @@ describe('SesionesGarzonService', () => {
       ])
       .mockResolvedValueOnce([filaPendiente]);
 
-    const result = await service.cerrarPorPin(TENANT, GARZON_ID, PIN);
+    const result = await service.cerrarPropia(TENANT, USUARIO_ID, {
+      garzonId: GARZON_ID,
+      pin: PIN,
+    });
 
     expect(result.cuentasPendientes).toEqual([
       {
@@ -341,7 +360,10 @@ describe('SesionesGarzonService', () => {
         { ...filaPendiente, mesa_nombre: null, salon_nombre: null },
       ]);
 
-    const result = await service.cerrarPorPin(TENANT, GARZON_ID, PIN);
+    const result = await service.cerrarPropia(TENANT, USUARIO_ID, {
+      garzonId: GARZON_ID,
+      pin: PIN,
+    });
 
     expect(result.cuentasPendientes).toHaveLength(1);
     expect(result.cuentasPendientes[0].mesaNombre).toBe('');
@@ -447,19 +469,22 @@ describe('SesionesGarzonService', () => {
     }
   });
 
-  describe('activaPorPin', () => {
+  describe('activaPropia', () => {
     // Es lo que responde "¿este garzón está en turno?" cuando alguien teclea su
     // PIN. No lo invocaba ningún test.
     it('devuelve la sesión abierta del garzón que corresponde al PIN', async () => {
       const abierta = sesion({ id: SESION_ID });
       sesionRepo.findOne.mockResolvedValue(abierta);
 
-      const result = await service.activaPorPin(TENANT, GARZON_ID, PIN);
+      const result = await service.activaPropia(TENANT, USUARIO_ID, {
+        garzonId: GARZON_ID,
+        pin: PIN,
+      });
 
-      expect(garzones.verificarPin).toHaveBeenCalledWith(
+      expect(garzones.resolverGarzonActuante).toHaveBeenCalledWith(
         TENANT,
-        GARZON_ID,
-        PIN,
+        USUARIO_ID,
+        expect.objectContaining({ garzonId: GARZON_ID, pin: PIN }),
       );
       // Acotado al garzón del PIN y a su sesión ABIERTA: sin el filtro de
       // estado devolvería una sesión ya cerrada como si siguiera en turno.
@@ -476,19 +501,27 @@ describe('SesionesGarzonService', () => {
     it('devuelve null si el garzón no tiene sesión abierta', async () => {
       sesionRepo.findOne.mockResolvedValue(null);
 
-      expect(await service.activaPorPin(TENANT, GARZON_ID, PIN)).toBeNull();
+      expect(
+        await service.activaPropia(TENANT, USUARIO_ID, {
+          garzonId: GARZON_ID,
+          pin: PIN,
+        }),
+      ).toBeNull();
     });
 
     it('un PIN inválido propaga el rechazo, no devuelve null', async () => {
       // `null` significa "sin turno abierto". Si un PIN equivocado devolviera
       // lo mismo, el llamador ofrecería iniciar turno en vez de decir que el
       // PIN está mal.
-      garzones.verificarPin.mockRejectedValue(
+      garzones.resolverGarzonActuante.mockRejectedValue(
         new BadRequestException('PIN inválido'),
       );
 
       await expect(
-        service.activaPorPin(TENANT, GARZON_ID, '000000'),
+        service.activaPropia(TENANT, USUARIO_ID, {
+          garzonId: GARZON_ID,
+          pin: '000000',
+        }),
       ).rejects.toThrow(BadRequestException);
     });
   });
@@ -653,7 +686,7 @@ describe('SesionesGarzonService', () => {
     sesionRepo.save.mockRejectedValue({ code: '23505' });
 
     await expect(
-      service.iniciar(TENANT, {
+      service.iniciar(TENANT, USUARIO_ID, {
         garzonId: GARZON_ID,
         pin: PIN,
         turnoId: TURNO_ID,
@@ -661,7 +694,7 @@ describe('SesionesGarzonService', () => {
     ).rejects.toThrow(BadRequestException);
 
     await expect(
-      service.iniciar(TENANT, {
+      service.iniciar(TENANT, USUARIO_ID, {
         garzonId: GARZON_ID,
         pin: PIN,
         turnoId: TURNO_ID,

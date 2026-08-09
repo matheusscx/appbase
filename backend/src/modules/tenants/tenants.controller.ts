@@ -23,6 +23,7 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { AddMemberDto } from './dto/add-member.dto';
 import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
+import { MarcarTotemDto } from './dto/marcar-totem.dto';
 import { AddModuleDto } from './dto/add-module.dto';
 import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
@@ -120,6 +121,24 @@ export class TenantsController {
   crearUsuario(@Req() req: Request, @Body() dto: CrearUsuarioTenantDto) {
     const user = req.user as { tenantId: string };
     return this.tenantsService.crearUsuario(user.tenantId, dto);
+  }
+
+  /**
+   * Marca (o desmarca) una cuenta como **tótem compartido** de este tenant:
+   * el dispositivo queda logueado y lo usan varias personas, así que la
+   * identidad de quien opera no se presume del JWT y siempre se pide PIN.
+   *
+   * Administración del tenant, mismo guard que el resto de esta pantalla.
+   */
+  @UseGuards(TenantAdminGuard)
+  @Patch('members/:userId/totem')
+  marcarTotem(
+    @Req() req: Request,
+    @Param('userId') userId: string,
+    @Body() dto: MarcarTotemDto,
+  ) {
+    const user = req.user as { tenantId: string };
+    return this.tenantsService.marcarTotem(user.tenantId, userId, dto.esTotem);
   }
 
   @UseGuards(TenantAdminGuard)

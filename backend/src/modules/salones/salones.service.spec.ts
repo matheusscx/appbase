@@ -31,6 +31,8 @@ const COMBO = 'combo-uuid';
 const GRUPO = 'grupo-uuid';
 const OPCION_ITEM = 'opcion-item-uuid';
 const ING = 'ing-uuid';
+/** Usuario logueado que ejecuta la acción (JWT). */
+const USUARIO_ACTOR = 'usuario-actor';
 const GARZON = 'garzon-uuid';
 const PIN = '111111';
 const SESION_RESPONSABLE = 'sesion-responsable';
@@ -108,7 +110,7 @@ describe('SalonesService', () => {
   let mesaRepo: Repo;
   let cuentaRepo: Repo;
   let ventas: { crearEnTransaccion: jest.Mock };
-  let garzones: { verificarPin: jest.Mock };
+  let garzones: { resolverGarzonActuante: jest.Mock };
   let sesiones: {
     assertSesionAbierta: jest.Mock;
     buscarSesionAbierta: jest.Mock;
@@ -146,7 +148,7 @@ describe('SalonesService', () => {
     cuentaRepo = makeRepo();
     ventas = { crearEnTransaccion: jest.fn() };
     garzones = {
-      verificarPin: jest.fn().mockResolvedValue({
+      resolverGarzonActuante: jest.fn().mockResolvedValue({
         id: GARZON,
         nombre: 'Ana Torres',
       }),
@@ -224,7 +226,7 @@ describe('SalonesService', () => {
         .mockResolvedValueOnce([{ mesa_id: MESA }]) // FOR UPDATE mesa
         .mockResolvedValueOnce([{ next: '3' }]);
 
-      const result = await service.abrirCuenta(TENANT, MESA, {
+      const result = await service.abrirCuenta(TENANT, USUARIO_ACTOR, MESA, {
         garzonId: GARZON,
         pin: PIN,
       });
@@ -260,19 +262,25 @@ describe('SalonesService', () => {
         ),
       );
       await expect(
-        service.abrirCuenta(TENANT, MESA, { garzonId: GARZON, pin: PIN }),
+        service.abrirCuenta(TENANT, USUARIO_ACTOR, MESA, {
+          garzonId: GARZON,
+          pin: PIN,
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(manager.create).not.toHaveBeenCalled();
     });
 
     it('rechaza abrir la cuenta si el PIN del garzón es inválido', async () => {
       mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
-      garzones.verificarPin.mockRejectedValue(
+      garzones.resolverGarzonActuante.mockRejectedValue(
         new BadRequestException('PIN inválido'),
       );
 
       await expect(
-        service.abrirCuenta(TENANT, MESA, { garzonId: GARZON, pin: '000000' }),
+        service.abrirCuenta(TENANT, USUARIO_ACTOR, MESA, {
+          garzonId: GARZON,
+          pin: '000000',
+        }),
       ).rejects.toThrow(BadRequestException);
       expect(manager.create).not.toHaveBeenCalled();
     });
@@ -283,7 +291,7 @@ describe('SalonesService', () => {
         .mockResolvedValueOnce([{ mesa_id: MESA }])
         .mockResolvedValueOnce([{ next: '1' }]);
 
-      const result = await service.abrirCuenta(TENANT, MESA, {
+      const result = await service.abrirCuenta(TENANT, USUARIO_ACTOR, MESA, {
         garzonId: GARZON,
         pin: PIN,
       });
@@ -294,7 +302,10 @@ describe('SalonesService', () => {
     it('lanza NotFound si la mesa no pertenece al tenant', async () => {
       mesaRepo.findOne.mockResolvedValue(null);
       await expect(
-        service.abrirCuenta(TENANT, MESA, { garzonId: GARZON, pin: PIN }),
+        service.abrirCuenta(TENANT, USUARIO_ACTOR, MESA, {
+          garzonId: GARZON,
+          pin: PIN,
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -308,7 +319,10 @@ describe('SalonesService', () => {
           Promise.resolve({ ...row, id: CUENTA }),
       );
 
-      await service.abrirCuenta(TENANT, MESA, { garzonId: GARZON, pin: PIN });
+      await service.abrirCuenta(TENANT, USUARIO_ACTOR, MESA, {
+        garzonId: GARZON,
+        pin: PIN,
+      });
 
       expect(manager.create).toHaveBeenCalledWith(
         Cuenta,
@@ -2679,16 +2693,16 @@ describe('SalonesService', () => {
 
       const result = await service.transferirCuentaPorPin(
         TENANT,
+        USUARIO_ACTOR,
         CUENTA,
-        GARZON,
-        PIN,
+        { garzonId: GARZON, pin: PIN },
       );
 
       expect(asignaciones.transferirPorPin).toHaveBeenCalledWith(
         TENANT,
+        USUARIO_ACTOR,
         CUENTA,
-        GARZON,
-        PIN,
+        expect.objectContaining({ garzonId: GARZON, pin: PIN }),
       );
       expect(result.garzonResponsableId).toBe('garzon-nuevo');
       expect(result.garzonResponsableNombre).toBe('Pedro López');

@@ -59,6 +59,51 @@ Un garzón **no es un usuario del sistema**: no tiene login ni JWT. El PIN es un
 **identificador operativo** dentro de la sesión del tenant ya autenticada — no toca
 el sistema de tokens.
 
+### Los dos modos del dispositivo (2026-08-09)
+
+Lo de arriba sigue siendo el caso base, pero **no es el único**. El owner separó
+dos flujos que antes se trataban igual, y la diferencia no es de comodidad:
+
+| | **Tótem compartido** | **Tablet personal** |
+|---|---|---|
+| Quién lo usa | muchos garzones, un dispositivo | una persona, su propio login |
+| Identidad | **no se puede presumir**: nada asegura que quien está frente a la pantalla sea el mismo de hace cinco minutos | el JWT ya dice quién es |
+| Cómo se identifica | lista de garzones + PIN, en los 6 puntos | sin PIN: sale del token |
+
+El modo es **explícito, no inferido**: `usuarios_tenants.es_totem` marca la
+cuenta como tótem, y `garzones.usuario_id` (nullable) la vincula a un garzón.
+El marcador **gana siempre**: una cuenta marcada tótem pide PIN aunque alguien
+le vincule un garzón por error.
+
+Que el vínculo sea **opcional** es lo que preserva el objetivo original: sin él
+nada cambia, y se puede seguir sumando personal temporal sin crearle una cuenta.
+Un garzón vinculado **conserva su PIN** y sigue apareciendo en el selector del
+tótem, así que puede operar por cualquiera de los dos caminos.
+
+⚠️ **La cuenta del tótem es un usuario común del tenant** — no existe ningún
+concepto de "dispositivo" en el sistema. Debe tener un **rol mínimo**, solo lo
+que la operación del salón necesita: si se la loguea con la cuenta del admin,
+queda un dispositivo compartido y desatendido con permisos de administración. El
+seed trae un rol `Salón` (`Salones:Leer` + `Salones:Operar`) como ejemplo
+ejercitable. Nada en el sistema lo impide todavía: es recomendación operativa.
+
+**Una cuenta = un garzón vivo por tenant** (`uq_garzones_usuario_tenant`, parcial sobre
+filas vivas). Si no, resolver el actuante por JWT elegiría uno al azar. El índice es la
+garantía, pero los dos caminos que pueden chocar con él devuelven un mensaje propio, no un
+500: vincular una cuenta tomada dice **de quién** desvincularla, y restaurar un garzón de la
+papelera cuya cuenta ya tomó otro dice eso —y no el mensaje del placeholder "Mostrador", que
+es la otra unique parcial de la misma tabla—.
+
+⚠️ El `usuario_id` **sobrevive al soft delete**, así que borrar un garzón libera su cuenta
+para otro, y restaurarlo después puede fallar. Es correcto que falle; lo que importa es que
+lo diga bien.
+
+La resolución vive en **un solo lugar** —`GarzonesService.resolverGarzonActuante`,
+una consulta— que reemplazó las 6 llamadas directas a `verificarPin`. Como
+`garzonId` y `pin` pasaron a ser **opcionales** en el DTO (en modo personal no se
+mandan), esa función es la que sostiene el PIN: sin su corte, un body vacío
+operaría como cualquier garzón en los 6 puntos a la vez.
+
 ### Scope
 
 - **Incluido**: CRUD de garzones, regeneración de PIN, selector + verificación de PIN, y

@@ -4,7 +4,9 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { TipoGarzon } from '../enums/tipo-garzon.enum';
 
@@ -27,4 +29,18 @@ export class UpdateGarzonDto {
   @IsOptional()
   @IsIn(Object.values(TipoGarzon))
   tipo?: TipoGarzon;
+
+  /**
+   * Vincula el garzón a una cuenta del tenant (**modo personal**: opera desde
+   * su propia tablet y no teclea PIN). `null` desvincula.
+   *
+   * `ValidateIf` y no `IsOptional`: `IsOptional` deja pasar **tanto** el campo
+   * ausente **como** el `null`, y acá los dos significan cosas distintas —
+   * ausente es "no toques el vínculo", `null` es "sacalo". Sin esa diferencia,
+   * un PATCH del formulario que no manda el campo desvincularía al garzón.
+   */
+  @ValidateIf((_, value) => value !== null)
+  @IsOptional()
+  @IsUUID('4', { message: 'usuarioId debe ser un UUID' })
+  usuarioId?: string | null;
 }

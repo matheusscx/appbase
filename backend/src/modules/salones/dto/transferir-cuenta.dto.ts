@@ -1,4 +1,4 @@
-import { CredencialGarzonDto } from '../../../common/dto/credencial-garzon.dto';
+import { CredencialGarzonOpcionalDto } from '../../../common/dto/credencial-garzon.dto';
 import { IsUUID } from 'class-validator';
 
 /**
@@ -6,7 +6,7 @@ import { IsUUID } from 'class-validator';
  * es *pull* y quien se identifica es quien opera. Ver
  * `docs/features/salones-mesas.md`.
  */
-export class TransferirCuentaDto extends CredencialGarzonDto {}
+export class TransferirCuentaDto extends CredencialGarzonOpcionalDto {}
 
 export class TransferirCuentaAdminDto {
   @IsUUID()

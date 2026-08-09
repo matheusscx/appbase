@@ -263,6 +263,14 @@ CREATE TABLE "usuarios" (
 CREATE TABLE "usuarios_tenants" (
   "usuario_id"     UUID NOT NULL REFERENCES "usuarios" ("usuario_id"),
   "tenant_id"      UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  -- Esta cuenta se usa como TÓTEM compartido en este tenant: el dispositivo
+  -- queda logueado y muchas personas lo usan, así que la identidad de quien
+  -- opera NO se puede presumir del JWT y siempre se pide PIN.
+  -- Va acá y no en `usuarios` a propósito: ser tótem es propiedad de cómo se
+  -- usa la cuenta EN ESTE TENANT, no de la persona. Y es explícito, no
+  -- inferido: una cuenta marcada así no se vuelve personal aunque alguien le
+  -- vincule un garzón por error. Ver docs/features/garzones.md.
+  "es_totem"       BOOLEAN NOT NULL DEFAULT false,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ,
@@ -1452,6 +1460,11 @@ CREATE TABLE garzones (
     activo BOOLEAN NOT NULL DEFAULT TRUE,
     tipo TEXT NOT NULL DEFAULT 'garzon',
     es_placeholder BOOLEAN NOT NULL DEFAULT false, -- garzón "Mostrador": recibe la propina del POS con atribución neutra
+    -- Vínculo OPCIONAL con una cuenta del sistema (modo personal: el garzón
+    -- tiene su propia tablet, el JWT ya dice quién es y no se le pide PIN).
+    -- Nullable a propósito: sin vínculo todo funciona como siempre, que es lo
+    -- que permite incorporar personal temporal sin crearle una cuenta.
+    usuario_id UUID REFERENCES usuarios(usuario_id),
     creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     eliminado_el TIMESTAMPTZ,
@@ -1463,6 +1476,12 @@ CREATE INDEX idx_garzones_tenant ON garzones (tenant_id);
 -- en asegurarMostrador, garzones.service.ts): un solo placeholder vivo por tenant.
 CREATE UNIQUE INDEX uq_garzones_mostrador_tenant
   ON garzones (tenant_id) WHERE es_placeholder = true AND eliminado_el IS NULL;
+-- Una cuenta no puede ser dos garzones vivos del mismo tenant: si lo fuera, la
+-- resolución del garzón actuante por JWT sería ambigua y elegiría uno al azar.
+-- Parcial sobre filas vivas para que borrar un garzón libere la cuenta.
+CREATE UNIQUE INDEX uq_garzones_usuario_tenant
+  ON garzones (tenant_id, usuario_id)
+  WHERE usuario_id IS NOT NULL AND eliminado_el IS NULL;
 
 -- Propina separada de la venta (SII): 1 fila por cierre de mesa (incluso tip $0).
 -- Depende de garzones + ventas; se declara aquí tras garzones.

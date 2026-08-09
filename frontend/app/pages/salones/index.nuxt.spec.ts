@@ -45,6 +45,11 @@ let bodiesAbrirCuenta: Record<string, unknown>[] = []
  * endpoint responda 400 en toda llamada— con la suite entera en verde.
  */
 let urlsSelector: string[] = []
+/**
+ * Qué devuelve `GET /garzones/mi-vinculo`. `null` es el dispositivo compartido
+ * (se pide PIN); un objeto con `garzonId` es la tablet personal del garzón.
+ */
+let vinculoPersonal: { garzonId: string, nombre: string } | null | unknown = null
 /** Fuerza al POST de abrir cuenta a rechazar con el error que abre el modal de turno. */
 let sinSesionDeTrabajo = false
 /** Retiene la respuesta del POST para dejarlo "en vuelo" el tiempo que el test quiera. */
@@ -109,6 +114,12 @@ mockNuxtImport('useApiFetch', () => {
         { garzonId: 'g1', nombre: 'Ana' },
         { garzonId: 'g2', nombre: 'Bruno' },
       ])
+    }
+    // El modo del dispositivo. `null` = compartido, se pide PIN: es lo que
+    // ejercitan los tests de más abajo, y lo que NO puede salir del catch-all
+    // —que devuelve `[]`, y un array vacío es **truthy**—.
+    if (ruta.endsWith('/garzones/mi-vinculo')) {
+      return Promise.resolve(vinculoPersonal)
     }
     if (ruta.endsWith('/garzones/verificar-pin')) {
       return Promise.resolve({ garzonId: 'g1', nombre: 'Ana' })
@@ -236,6 +247,7 @@ describe('salones — guard de reentrancia de "Nueva cuenta"', () => {
     urlsSelector = []
     sinSesionDeTrabajo = false
     abrirCuentaRetenido = null
+    vinculoPersonal = null
   })
 
   it('una ronda de PIN abre UNA cuenta (el camino feliz sigue vivo)', async () => {
@@ -335,5 +347,56 @@ describe('salones — guard de reentrancia de "Nueva cuenta"', () => {
     expect(await rondaDePin()).toBe(true)
 
     expect(postsAbrirCuenta).toHaveLength(2)
+  })
+
+  // ── Modo personal (tablet del garzón) ────────────────────────────────────
+  //
+  // El mismo embudo `solicitarPin` con la otra rama: acá no hay teclado, porque
+  // el JWT ya dice quién es. Lo que se afirma es la CONDUCTA de la pantalla —no
+  // aparece el modal y el POST igual sale— y sobre todo **qué manda en el body**.
+  describe('con la cuenta vinculada a un garzón', () => {
+    it('abre la cuenta sin mostrar el teclado de PIN', async () => {
+      vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+
+      const wrapper = await montar()
+      await seleccionarMesa(wrapper)
+      const boton = botonEn(drawerMesa(), 'Nueva cuenta')
+      expect(boton).toBeTruthy()
+      boton!.click()
+      await esperar(30)
+
+      // Sin teclado: el modal de PIN no llegó a existir.
+      expect(tecladoPin()).toBeUndefined()
+      expect(postsAbrirCuenta).toHaveLength(1)
+    })
+
+    // ⚠️ Lo que hace que esto NO sea un bypass. Mandar `pin: ''` rebota contra
+    // el `@Matches(/^\d{6}$/)` del DTO con un 400: la credencial se **omite**, y
+    // el backend resuelve la identidad del JWT por su cuenta.
+    it('no manda credencial en el body: ni garzonId ni pin', async () => {
+      vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+
+      const wrapper = await montar()
+      await seleccionarMesa(wrapper)
+      botonEn(drawerMesa(), 'Nueva cuenta')!.click()
+      await esperar(30)
+
+      expect(bodiesAbrirCuenta).toHaveLength(1)
+      expect(bodiesAbrirCuenta[0]).not.toHaveProperty('pin')
+      expect(bodiesAbrirCuenta[0]).not.toHaveProperty('garzonId')
+    })
+
+    // ⚠️ El caso que casi se cuela: un body vacío puede llegar como `{}` según
+    // cómo se serialice, y `{}` es **truthy**. Si el vínculo se evaluara por
+    // verdad y no por su `garzonId`, el PIN quedaría apagado para TODOS.
+    it('un objeto vacío NO es un vínculo: sigue pidiendo PIN', async () => {
+      vinculoPersonal = {}
+
+      const wrapper = await montar()
+      await seleccionarMesa(wrapper)
+
+      expect(await rondaDePin()).toBe(true)
+      expect(bodiesAbrirCuenta[0]).toHaveProperty('pin')
+    })
   })
 })

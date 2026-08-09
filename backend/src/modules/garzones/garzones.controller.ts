@@ -106,6 +106,21 @@ export class GarzonesController {
   }
 
   /**
+   * En qué modo está este dispositivo: devuelve el garzón vinculado a la cuenta
+   * logueada, o `null` si hay que pedir PIN. Lo consulta la pantalla del salón
+   * una vez, al cargar.
+   *
+   * `Salones:Operar` por el mismo motivo que `para-selector`: lo necesita quien
+   * opera, que puede no tener `Leer`.
+   */
+  @Get('mi-vinculo')
+  @RequiresPermiso('Salones', 'Operar')
+  miVinculo(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.garzonesService.miVinculo(user.tenantId!, user.id);
+  }
+
+  /**
    * La lista del selector previo al teclado de PIN. `Salones:Operar` y no
    * `Leer`: los roles son configurables por tenant, así que nada impide un rol
    * que opere el salón sin poder leer el catálogo de garzones — y es

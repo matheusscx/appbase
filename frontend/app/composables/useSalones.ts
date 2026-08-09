@@ -134,9 +134,21 @@ export interface MesaPosicion {
   posY: number
 }
 
+/**
+ * La credencial que viaja en el body de las acciones del salón.
+ *
+ * En **modo personal** el garzón opera desde su propia tablet: el backend lo
+ * resuelve del JWT y no hay PIN que mandar. Mandar `pin: ''` no es equivalente
+ * a no mandarlo — el DTO valida `^\d{6}$` sobre el valor presente y rebota con
+ * 400. Por eso el campo se **omite**, no se vacía.
+ */
+export function credencialGarzon(garzonId: string, pin: string) {
+  return pin ? { garzonId, pin } : {}
+}
+
 export interface CerrarCuentaBody {
-  garzonId: string
-  pin: string
+  garzonId?: string
+  pin?: string
   pagos?: { metodoPagoId: string, monto: string, referencia?: string }[]
   tipoDocumentoId?: string
   customer?: Record<string, unknown>
@@ -264,7 +276,7 @@ export function useSalones() {
   const abrirCuenta = (mesaId: string, garzonId: string, pin: string, nombre?: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/mesas/${mesaId}/cuentas`, {
       method: 'POST',
-      body: { garzonId, pin, nombre },
+      body: { ...credencialGarzon(garzonId, pin), nombre },
     })
 
   const fusionarCuentas = (mesaId: string, cuentaIds: string[]) =>
@@ -322,7 +334,7 @@ export function useSalones() {
   const transferirCuenta = (cuentaId: string, garzonId: string, pin: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/transferir`, {
       method: 'POST',
-      body: { garzonId, pin },
+      body: credencialGarzon(garzonId, pin),
     })
 
   const transferirCuentaAdmin = (cuentaId: string, garzonId: string) =>

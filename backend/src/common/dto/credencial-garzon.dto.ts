@@ -1,4 +1,4 @@
-import { IsUUID, Matches } from 'class-validator';
+import { IsOptional, IsUUID, Matches } from 'class-validator';
 
 /**
  * Las dos cosas que identifican a un garzón en un dispositivo compartido:
@@ -28,4 +28,29 @@ export class CredencialGarzonDto {
 
   @Matches(/^\d{6}$/, { message: 'El PIN debe tener exactamente 6 dígitos' })
   pin: string;
+}
+
+/**
+ * La misma credencial, **opcional**: la mandan las acciones del salón, donde el
+ * garzón puede estar operando desde **su propia tablet**. Ahí el JWT ya probó
+ * quién es y el PIN no se manda (modo personal, ver `resolverGarzonActuante`).
+ *
+ * ⚠️ **Que sean opcionales acá no las hace opcionales en el tótem.** El
+ * `ValidationPipe` deja pasar el body sin credencial; quien decide si eso es
+ * legítimo es `resolverGarzonActuante`, que sin vínculo personal **corta con
+ * 400**. Si esa rama se toca, el PIN se vuelve salteable en los 6 lugares donde
+ * se pide, a la vez. No es validación de forma: es control de acceso.
+ *
+ * Se declara aparte y no relajando la de arriba porque
+ * `POST /garzones/verificar-pin` —el endpoint que solo comprueba un PIN— sí las
+ * necesita obligatorias: sin garzón y sin PIN no hay nada que verificar.
+ */
+export class CredencialGarzonOpcionalDto {
+  @IsOptional()
+  @IsUUID('4', { message: 'garzonId debe ser un UUID' })
+  garzonId?: string;
+
+  @IsOptional()
+  @Matches(/^\d{6}$/, { message: 'El PIN debe tener exactamente 6 dígitos' })
+  pin?: string;
 }

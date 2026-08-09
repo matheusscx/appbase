@@ -164,7 +164,7 @@ export class MesasController {
     @Body() dto: CreateCuentaDto,
   ) {
     const u = req.user as JwtUser;
-    return this.salonesService.abrirCuenta(u.tenantId ?? '', id, dto);
+    return this.salonesService.abrirCuenta(u.tenantId ?? '', u.id, id, dto);
   }
 
   @Post(':id/cuentas/fusionar')
@@ -278,9 +278,9 @@ export class CuentasController {
     const u = req.user as JwtUser;
     return this.salonesService.transferirCuentaPorPin(
       u.tenantId ?? '',
+      u.id,
       id,
-      dto.garzonId,
-      dto.pin,
+      dto,
     );
   }
 

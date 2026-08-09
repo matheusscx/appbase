@@ -75,15 +75,86 @@ function removeLocal(id: string) {
   garzones.value = garzones.value.filter(g => g.id !== id)
 }
 
-onMounted(cargar)
+onMounted(async () => {
+  await Promise.all([cargar(), cargarMiembros()])
+})
+
+async function cargarMiembros() {
+  // Con `catch` como su hermana `cargar()`: sin él, un fallo de `/tenants/members`
+  // deja el selector VACÍO y sin explicación, y el admin concluye que no hay
+  // cuentas vinculables cuando lo que falló fue la carga.
+  try {
+    miembros.value = await useApiFetch<typeof miembros.value>(
+      `${useRuntimeConfig().public.apiUrl}/tenants/members`,
+    )
+  }
+  catch (e: unknown) {
+    toast.add({
+      title: apiErrorMsg(e, 'No se pudieron cargar las cuentas del tenant'),
+      color: 'error',
+    })
+  }
+}
 
 // ── Crear / editar garzón ──────────────────────────────────────────────────
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
-const form = ref<{ nombre: string, activo: boolean, tipo: TipoGarzon }>({
+const form = ref<{
+  nombre: string
+  activo: boolean
+  tipo: TipoGarzon
+  usuarioId: string | null
+}>({
   nombre: '',
   activo: true,
   tipo: 'garzon',
+  usuarioId: null,
+})
+
+/**
+ * Miembros del tenant, para el vínculo opcional del modo personal.
+ *
+ * Se cargan una vez al montar y no al abrir el drawer: son pocos y no cambian
+ * mientras se edita un garzón.
+ */
+const miembros = ref<{ usuarioId: string, nombre: string, apellido: string, correo: string, esTotem: boolean }[]>([])
+
+/**
+ * Proxy entre el `undefined` que usa `USelectMenu` para "nada elegido" y el
+ * `null` que el backend necesita para **desvincular**.
+ *
+ * No son sinónimos en el DTO: ausente significa "no toques el vínculo" y `null`
+ * es "sacalo". Sin esta traducción, vaciar el selector no desvincularía nada.
+ */
+const usuarioVinculado = computed<string | undefined>({
+  get: () => form.value.usuarioId ?? undefined,
+  set: (v) => { form.value.usuarioId = v ?? null },
+})
+
+/**
+ * Cuentas ofrecibles: ni marcadas tótem ni **ya vinculadas a otro garzón**. Las
+ * dos son error del backend, así que ofrecerlas sería hacerle descubrir la
+ * regla al admin chocándose — y la de "ya vinculada" era un 500 hasta que se le
+ * puso mensaje.
+ */
+const miembrosVinculables = computed(() => {
+  // Cuentas tomadas por OTRO garzón. La del garzón que se está editando no
+  // cuenta: si no, al abrir el drawer su propia cuenta desaparecería del
+  // selector y parecería desvinculada.
+  // Solo garzones VIVOS: el índice único es parcial sobre `eliminado_el IS
+  // NULL`, así que la cuenta de uno borrado está libre y el backend la acepta.
+  // Contarla acá dejaría el selector más restrictivo que la regla.
+  const tomadas = new Set(
+    garzones.value
+      .filter(g => g.usuarioId && !g.eliminadoEl && g.id !== editingId.value)
+      .map(g => g.usuarioId),
+  )
+  return miembros.value
+    .filter(m => !m.esTotem && !tomadas.has(m.usuarioId))
+    .map(m => ({
+      label: `${m.nombre} ${m.apellido ?? ''}`.trim() || m.correo,
+      value: m.usuarioId,
+    }))
 })
 const saving = ref(false)
 
@@ -93,7 +164,7 @@ const drawerTitle = computed(() =>
 
 function abrirCrear() {
   editingId.value = null
-  form.value = { nombre: '', activo: true, tipo: 'garzon' }
+  form.value = { nombre: '', activo: true, tipo: 'garzon', usuarioId: null }
   drawerOpen.value = true
 }
 
@@ -104,6 +175,7 @@ function abrirEditar(garzon: Garzon) {
     nombre: garzon.nombre,
     activo: garzon.activo,
     tipo: garzon.tipo ?? 'garzon',
+    usuarioId: garzon.usuarioId ?? null,
   }
   drawerOpen.value = true
 }
@@ -116,6 +188,10 @@ async function guardar() {
         nombre: form.value.nombre,
         activo: form.value.activo,
         tipo: form.value.tipo,
+        // Se manda siempre, incluido `null`: en el DTO, ausente significa "no
+        // toques el vínculo" y `null` es "desvinculá". Omitirlo cuando el
+        // selector se vacía dejaría el vínculo vivo.
+        usuarioId: form.value.usuarioId,
       })
       upsertLocal(saved)
       toast.add({ title: 'Garzón actualizado', color: 'success' })
@@ -410,6 +486,22 @@ const columns: TableColumn<Garzon>[] = [
           </p>
           <UFormField label="Activo">
             <USwitch v-model="form.activo" />
+          </UFormField>
+          <!-- El vínculo es opcional a propósito: sin él, el garzón sigue
+               operando por PIN, que es lo que permite sumar personal temporal
+               sin crearle una cuenta. -->
+          <UFormField
+            label="Cuenta vinculada"
+            hint="Opcional"
+            description="Si opera desde su propia tablet, entra con su cuenta y no teclea PIN. Sin vincular, se identifica con PIN como siempre."
+          >
+            <USelectMenu
+              v-model="usuarioVinculado"
+              :items="miembrosVinculables"
+              value-key="value"
+              placeholder="Sin vincular (usa PIN)"
+              class="w-full"
+            />
           </UFormField>
         </UForm>
       </template>

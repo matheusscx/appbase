@@ -557,6 +557,20 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
 
 ### Lo que dejaron las revisiones independientes del cierre
 
+- [ ] **`GET /tenants/members` es el único endpoint de `members/*` SIN `TenantAdminGuard`, y
+  la Fase 2 del garzón lo convirtió en superficie de UI** (backend,
+  `tenants.controller.ts`) — el hueco es **preexistente**: la lectura estaba abierta a
+  cualquier miembro autenticado del tenant mientras las tres escrituras van con
+  `TenantAdminGuard`. Lo que cambió el 2026-08-09 es **quién lo alcanza sin querer**: antes
+  había que armar la request a mano; ahora `configuracion/garzones.vue` lo llama al montar
+  para poblar el selector de cuenta vinculable, y esa pantalla no tiene middleware de
+  permiso propio. O sea que el roster completo —nombre, apellido y **correo** de cada
+  miembro— se renderiza en un dropdown. **No es fuga multi-tenant**: la query está acotada
+  a `user.tenantId`. Al arreglarlo hay que decidir si la lectura pasa a admin-only (y
+  entonces el selector de garzones necesita otra fuente, porque quien administra garzones
+  no es necesariamente admin) o si se expone una lista mínima `{ usuarioId, nombre }` sin
+  correos, como se hizo con `garzones/para-selector`.
+
 - [ ] **`addMember` devuelve roles viejos en silencio, y la asimetría con el alta es
   deliberada** (backend, `tenants.service.ts` → `addMember`) — `removeMember` da de baja la
   membresía pero **deja vivas** las filas de `roles_usuarios`, así que sacar a alguien para

@@ -149,11 +149,35 @@ let pinCancelado: (() => void) | null = null
 // closure (con su PIN ya capturado) para reintentarla apenas se inicia el turno.
 let accionPendiente: (() => void) | null = null
 
+/**
+ * El garzón de esta tablet, si la cuenta logueada está vinculada a uno (**modo
+ * personal**). `null` = dispositivo compartido, se pide PIN como siempre.
+ *
+ * Se consulta **una vez** al cargar: es propiedad de la cuenta y del tenant, no
+ * de la acción, así que preguntarlo en cada apertura de cuenta sería un round
+ * trip por operación en el camino caliente.
+ */
+const garzonPersonal = ref<{ garzonId: string, nombre: string } | null>(null)
+
+/**
+ * Embudo único de los 6 puntos que piden PIN. En modo personal **no abre el
+ * modal**: ejecuta la acción con el garzón vinculado y PIN vacío, que el helper
+ * `credencialGarzon` traduce a "no mandes credencial".
+ *
+ * Ese `pin` vacío es la razón de que el modo personal no sea un bypass: el
+ * backend no recibe una credencial en blanco que tenga que creer, recibe **nada**
+ * y resuelve la identidad del JWT por su cuenta.
+ */
 function solicitarPin(
   title: string,
   action: (garzonId: string, pin: string, nombre: string) => void,
   opciones?: { onCancelar?: () => void, enTurno?: boolean },
 ) {
+  if (garzonPersonal.value?.garzonId) {
+    const { garzonId, nombre } = garzonPersonal.value
+    action(garzonId, '', nombre)
+    return
+  }
   pinModalTitle.value = title
   pinModalEnTurno.value = opciones?.enTurno ?? true
   pinAction = action
@@ -438,14 +462,28 @@ async function cargarCatalogo() {
 }
 
 onMounted(async () => {
-  const [, , , , sugerido] = await Promise.all([
+  // El vínculo va en el mismo `Promise.all` y no en una llamada aparte: es una
+  // más de las cargas iniciales, y encadenarla sumaría un round trip antes de
+  // que la pantalla sirva.
+  const [, , , , sugerido, , vinculo] = await Promise.all([
     cajaStore.cargarActiva(),
     cargarSalones(),
     cargarCatalogo(),
     unidadesStore.ensureLoaded(),
     fetchPorcentajeSugerido(),
     cargarEmisor(),
+    // ⚠️ Con `catch` propio y no suelta en el `Promise.all`: la ruta pide
+    // `Salones:Operar`, y esta pantalla solo exige estar autenticado. A alguien
+    // con `Salones:Leer` el 403 le rechazaba el `Promise.all` entero y dejaba
+    // sin asignar el porcentaje de propina — o sea que una consulta accesoria
+    // rompía una pantalla que antes cargaba bien. Sin vínculo = se pide PIN,
+    // que es el camino correcto para quien no puede operar.
+    garzonesApi.miVinculo().catch(() => null),
   ])
+  // Se mira `garzonId`, no la verdad del objeto: "sin vínculo" puede llegar como
+  // `null`, `''` o `{}` según cómo se serialice un body vacío, y `{}` es
+  // **truthy**. Confiar en la truthiness apagaría el PIN para TODOS.
+  garzonPersonal.value = vinculo?.garzonId ? vinculo : null
   propinaPorcentaje.value = sugerido.porcentajeSugerido
   propinaHabilitada.value = sugerido.habilitado
 })
@@ -973,8 +1011,7 @@ async function cerrarCuentaConPin(
     // del `try` para que un fallo no deje el drawer trabado en `submitting`.
     const resultadoCerrado = await asegurarVigente()
     await salonesApi.cerrarCuenta(cuentaCerrada.id, {
-      garzonId,
-      pin,
+      ...credencialGarzon(garzonId, pin),
       pagos,
       tipoDocumentoId: tiposDocumento.value[0]?.id,
       propinaMonto: tipMonto,

@@ -89,12 +89,13 @@ export class SesionesGarzonService {
 
   async iniciar(
     tenantId: string,
+    usuarioId: string,
     dto: IniciarSesionDto,
   ): Promise<SesionPublica> {
-    const garzon = await this.garzones.verificarPin(
+    const garzon = await this.garzones.resolverGarzonActuante(
       tenantId,
-      dto.garzonId,
-      dto.pin,
+      usuarioId,
+      dto,
     );
     const turno = await this.turnos.getActivoOrThrow(tenantId, dto.turnoId);
 
@@ -132,12 +133,16 @@ export class SesionesGarzonService {
     }
   }
 
-  async cerrarPorPin(
+  async cerrarPropia(
     tenantId: string,
-    garzonId: string,
-    pin: string,
+    usuarioId: string,
+    credencial: { garzonId?: string; pin?: string },
   ): Promise<SesionCerrada> {
-    const garzon = await this.garzones.verificarPin(tenantId, garzonId, pin);
+    const garzon = await this.garzones.resolverGarzonActuante(
+      tenantId,
+      usuarioId,
+      credencial,
+    );
     const abierta = await this.sesionRepo.findOne({
       where: {
         tenantId,
@@ -165,12 +170,16 @@ export class SesionesGarzonService {
     };
   }
 
-  async activaPorPin(
+  async activaPropia(
     tenantId: string,
-    garzonId: string,
-    pin: string,
+    usuarioId: string,
+    credencial: { garzonId?: string; pin?: string },
   ): Promise<SesionPublica | null> {
-    const garzon = await this.garzones.verificarPin(tenantId, garzonId, pin);
+    const garzon = await this.garzones.resolverGarzonActuante(
+      tenantId,
+      usuarioId,
+      credencial,
+    );
     const abierta = await this.sesionRepo.findOne({
       where: {
         tenantId,

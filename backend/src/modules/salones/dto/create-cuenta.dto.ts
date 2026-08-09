@@ -1,7 +1,7 @@
 import { IsOptional, IsString } from 'class-validator';
-import { CredencialGarzonDto } from '../../../common/dto/credencial-garzon.dto';
+import { CredencialGarzonOpcionalDto } from '../../../common/dto/credencial-garzon.dto';
 
-export class CreateCuentaDto extends CredencialGarzonDto {
+export class CreateCuentaDto extends CredencialGarzonOpcionalDto {
   @IsOptional()
   @IsString()
   nombre?: string;
