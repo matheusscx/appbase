@@ -135,7 +135,12 @@ function confirmar() {
         </div>
 
         <div class="flex flex-col gap-2">
-          <div v-for="(pago, i) in pagos" :key="i" class="flex items-center gap-2">
+          <div
+            v-for="(pago, i) in pagos"
+            :key="i"
+            :data-qa="`pago-${i}`"
+            class="flex items-center gap-2"
+          >
             <USelectMenu
               v-model="pago.metodoPagoId"
               :items="metodoItems"

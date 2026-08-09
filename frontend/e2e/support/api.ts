@@ -170,6 +170,11 @@ export async function abrirCaja(
  * `afterEach`, donde la caja ya cerrada tiene que ser un no-op. El llamador que
  * lo usa como aserción compara contra `'cerrada'`, así que un `undefined`
  * inesperado falla igual.
+ *
+ * ⚠️ Cuando el conteo rebota igual intenta el `/cerrar`: un test que muere a
+ * mitad del cierre deja la caja en `en_conciliacion`, donde el conteo ya no se
+ * acepta pero el CAJÓN SIGUE OCUPADO. Sin este segundo intento, la corrida
+ * siguiente no podía ni abrir. Medido, dos veces.
  */
 export async function cerrarCaja(
   request: APIRequestContext,
@@ -182,9 +187,10 @@ export async function cerrarCaja(
     headers: auth,
     data: { lineas: [{ metodoPagoId: null, montoContado }] },
   })
-  if (!conteo.ok()) return undefined
-  const estado = ((await conteo.json()) as { estado?: string }).estado
-  if (estado === 'en_conciliacion') {
+  const estado = conteo.ok()
+    ? ((await conteo.json()) as { estado?: string }).estado
+    : undefined
+  if (estado === 'en_conciliacion' || estado === undefined) {
     const motivos = await request.get(
       `${API}/motivos-diferencia?soloActivas=true`,
       { headers: auth },

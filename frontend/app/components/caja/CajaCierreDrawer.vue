@@ -213,6 +213,7 @@ async function confirmarCierre() {
           <div
             v-for="l in obligatorias"
             :key="claveDe(l)"
+            :data-qa="`arqueo-${claveDe(l)}`"
             class="rounded-lg bg-muted p-3 space-y-2"
           >
             <div class="flex justify-between text-sm">
@@ -285,6 +286,7 @@ async function confirmarCierre() {
           <div
             v-for="l in cajaStore.arqueo"
             :key="claveDe(l)"
+            :data-qa="`arqueo-${claveDe(l)}`"
             class="rounded-lg p-3 space-y-2"
             :class="l.diferencia != null && !new Decimal(l.diferencia).isZero() ? 'bg-muted' : 'border border-default'"
           >

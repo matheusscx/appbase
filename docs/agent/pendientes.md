@@ -147,9 +147,17 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
   distingue derivarlo de `clasificacion_tributaria` de derivarlo de "tiene impuestos
   asignados". Se verifica el desglose por línea del lado del servidor, no solo el total.
   **Solo cubre la Boleta** (el default): la Factura exige customer y es su propio flujo.
-- [ ] Pago mixto (múltiples métodos; vuelto solo si `permite_vuelto`).
+- [x] **Pago mixto** (múltiples métodos; vuelto solo si `permite_vuelto`) — hecho el
+  2026-08-09, `e2e/ventas/pos.spec.ts`. Son dos tests: el reparto exacto entre dos
+  métodos —donde la caja espera solo el efectivo, no el total— y el vuelto, que cambia el
+  MÉTODO dejando fijo el sobrepago, para que la regla sea la única variable.
 - [ ] Nota de crédito (referencia a la venta original).
-- [ ] Apertura/cierre de caja (reloj congelado; `diferencia` calculada por el sistema).
+- [x] **Apertura/cierre de caja** (`diferencia` calculada por el sistema) — hecho el
+  2026-08-09, `e2e/caja/apertura-cierre.spec.ts`. Cruza las dos fases del cierre: la
+  "Diferencia" del conteo es aritmética de cliente y la de la conciliación viene del
+  arqueo del servidor. Mutante medido (invertir el signo en `caja.service.ts`): falla solo
+  la segunda, que es la prueba de que son independientes. El **reloj congelado** quedó
+  fuera: no hay nada que dependa de la hora en este flujo.
 - [x] **Descuento de stock en una venta** (movimiento + saldo materializado) — hecho el
   2026-08-09, `e2e/ventas/pos.spec.ts`. El `Stock: 8` que muestra el catálogo es
   aritmética de cliente y **no prueba nada**: medido con un mutante en el backend

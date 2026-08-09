@@ -296,3 +296,221 @@ test('vender descuenta el stock: queda el movimiento auditable y el saldo al dí
   expect(deVenta[0]?.stockAnterior).toBe(STOCK_INICIAL_API)
   expect(deVenta[0]?.stockResultante).toBe(STOCK_RESULTANTE_API)
 })
+
+/**
+ * Cobro de un solo producto afecto, que es la base de los dos flujos de pago:
+ * $1.000 + 19% = $1.190 de venta, más el 10% sugerido de propina ($119) = $1.309
+ * a pagar.
+ */
+const TOTAL_UN_AFECTO = '$1.190'
+const A_PAGAR_UN_AFECTO = '$1.309'
+/** El reparto del pago mixto: dos métodos que suman justo los $1.309. */
+const PAGO_TARJETA = '500'
+const PAGO_EFECTIVO = '809'
+/** Sobrepago de un solo método, para el vuelto: $2.000 − $1.309. */
+const SOBREPAGO = '2000'
+const VUELTO = '$691'
+const VUELTO_API = '691.0000'
+
+const TARJETA_CREDITO = 'Tarjeta de crédito'
+const EFECTIVO_NOMBRE = 'Efectivo'
+
+interface PagoServidor {
+  metodoPagoId: string
+  monto: string
+  vuelto: string
+}
+
+/** Una fila de pago del modal, por el hook de test del componente. */
+function filaDePago(cobro: Locator, indice: number) {
+  return cobro.locator(`[data-qa="pago-${indice}"]`)
+}
+
+/**
+ * El selector de método de una fila de pago.
+ *
+ * ⚠️ `Show popup` es el label que Reka UI le pone por defecto al trigger del
+ * `USelectMenu` — la pantalla no le da ninguno propio. Va acotado a la fila, así
+ * que no puede agarrar el de otro pago.
+ */
+function selectorDeMetodo(fila: Locator) {
+  return fila.getByRole('button', { name: 'Show popup' })
+}
+
+/**
+ * Cambia el método de una fila de pago.
+ *
+ * ⚠️ Espera a que el popup DESAPAREZCA, no solo a que el trigger muestre el
+ * nombre nuevo. Al cerrarse, Reka devuelve el foco al trigger, y ese salto le
+ * roba las teclas a lo que se esté escribiendo después: sin esta espera, el
+ * monto tecleado a continuación se perdía entero y el campo se quedaba con el
+ * valor anterior. Medido.
+ */
+async function elegirMetodo(fila: Locator, nombre: string) {
+  await selectorDeMetodo(fila).click()
+  await fila.page().getByRole('option', { name: nombre, exact: true }).click()
+  await expect(selectorDeMetodo(fila)).toContainText(nombre)
+  await expect(fila.page().getByRole('listbox')).toHaveCount(0)
+}
+
+/**
+ * Escribe un monto en el `MoneyInput` de una fila de pago.
+ *
+ * ⚠️ Tecla por tecla, no `fill()`: el input está enmascarado con maska, que
+ * reformatea a partir de los eventos de teclado. Con `fill()` el valor del DOM
+ * cambia pero el `v-model` se queda con el anterior — medido: el campo seguía
+ * mostrando $1.309 después de un `fill('2000')`.
+ */
+async function escribirMonto(fila: Locator, monto: string) {
+  const input = montoDePago(fila)
+  await input.selectText()
+  await input.pressSequentially(monto)
+}
+
+/**
+ * El input de monto de una fila de pago. Va por `inputmode="decimal"` —el que
+ * pone `MoneyInput`— y no por `input` a secas: el selector de método también
+ * tiene uno, y un `ControlOrMeta+a` con el foco puesto ahí selecciona la página
+ * entera en vez del monto. Medido.
+ */
+function montoDePago(fila: Locator) {
+  return fila.locator('input[inputmode="decimal"]')
+}
+
+/** Deja el carrito con un solo producto afecto y abre el modal de cobro. */
+async function carritoDeUnAfecto(
+  page: Page,
+  request: Parameters<typeof crearProducto>[0],
+  marca: string,
+): Promise<Locator> {
+  const producto = await sembrarProducto(request, {
+    nombre: `POS pago ${marca}`,
+    precioBase: PRECIO_AFECTO,
+  })
+  await page.goto('/ventas/pos')
+  await tarjetaDeCatalogo(page, producto.id).click()
+  await expect(valorDeFila(page, 'Total')).toHaveText(TOTAL_UN_AFECTO)
+
+  await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
+  const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+  await expect(valorDeFila(cobro, 'Total a pagar')).toHaveText(A_PAGAR_UN_AFECTO)
+  return cobro
+}
+
+test('pago mixto: dos métodos que suman justo, y la caja espera solo el efectivo', async ({
+  page,
+  request,
+}) => {
+  const token = escenario.token!
+  const cobro = await carritoDeUnAfecto(page, request, String(Date.now()))
+
+  // El modal precarga un solo pago con el total. Se parte en dos: tarjeta por
+  // $500 y el resto en efectivo. El segundo pago nace con el `restante`, así que
+  // no hace falta escribirlo — y que nazca con $809 ya es la aserción de que la
+  // pantalla hizo bien la resta.
+  //
+  // ⚠️ Que el método por defecto sea "Efectivo" no es una regla: es
+  // `metodosHabilitados[0]`, o sea el orden del catálogo del tenant. Si algún día
+  // cambia el orden del seed, este test se cae acá —en una aserción explícita— y
+  // no diez líneas después con un monto que no cuadra.
+  await elegirMetodo(filaDePago(cobro, 0), TARJETA_CREDITO)
+  await escribirMonto(filaDePago(cobro, 0), PAGO_TARJETA)
+  await cobro.getByRole('button', { name: 'Agregar pago' }).click()
+  await expect(selectorDeMetodo(filaDePago(cobro, 1))).toContainText(
+    EFECTIVO_NOMBRE,
+  )
+  await expect(montoDePago(filaDePago(cobro, 1))).toHaveValue(PAGO_EFECTIVO)
+
+  await expect(valorDeFila(cobro, 'Pagado')).toHaveText(A_PAGAR_UN_AFECTO)
+  await expect(valorDeFila(cobro, 'Restante')).toHaveText('$0')
+  await expect(valorDeFila(cobro, 'Vuelto')).toHaveText('$0')
+
+  const respuesta = page.waitForResponse(
+    (r) => r.url().endsWith('/ventas') && r.request().method() === 'POST',
+  )
+  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  const ventaId = ((await (await respuesta).json()) as { id: string }).id
+  await expect(page.getByText('Venta pagada').first()).toBeVisible({
+    timeout: 15_000,
+  })
+
+  // Los dos pagos quedaron separados del lado del servidor: un solo pago por el
+  // total —o uno de los dos con el monto del otro— pasaría cualquier aserción
+  // sobre el total de la venta.
+  const venta = await api<{ pagos: PagoServidor[] }>(
+    request,
+    'get',
+    `/ventas/${ventaId}`,
+    { token },
+  )
+  // Los ids salen del catálogo del tenant, no hardcodeados: lo que la prueba
+  // afirma es que cada monto quedó en el MÉTODO que se eligió en pantalla.
+  const metodos = await api<{ metodoPagoId: string; nombre: string }[]>(
+    request,
+    'get',
+    '/metodos-pago',
+    { token },
+  )
+  const idDe = (nombre: string) =>
+    metodos.find((m) => m.nombre === nombre)?.metodoPagoId
+  const porMetodo = new Map(venta.pagos.map((p) => [p.metodoPagoId, p.monto]))
+  expect(venta.pagos).toHaveLength(2)
+  expect(porMetodo.get(idDe(EFECTIVO_NOMBRE)!)).toBe('809.0000')
+  expect(porMetodo.get(idDe(TARJETA_CREDITO)!)).toBe('500.0000')
+
+  // Y la caja: el arqueo cuenta efectivo, así que espera los $809 y NO los
+  // $1.309 de la venta. Lo cobrado con tarjeta no está en el cajón.
+  expect(await cerrarCaja(request, token, escenario.cajaId!, PAGO_EFECTIVO))
+    .toBe('cerrada')
+})
+
+test('el vuelto depende del método: con tarjeta no se puede devolver, con efectivo sí', async ({
+  page,
+  request,
+}) => {
+  const token = escenario.token!
+  const cobro = await carritoDeUnAfecto(page, request, String(Date.now()))
+
+  // Mismo sobrepago, misma fila: lo único que cambia entre los dos casos es el
+  // método. Así el test no puede pasar por otra razón que la regla de
+  // `permite_vuelto` (`docs/features/pagos.md`).
+  await elegirMetodo(filaDePago(cobro, 0), TARJETA_CREDITO)
+  await escribirMonto(filaDePago(cobro, 0), SOBREPAGO)
+  await expect(
+    cobro.getByText(
+      'Los pagos con métodos sin vuelto superan el total: ese excedente no se puede devolver.',
+    ),
+  ).toBeVisible()
+  await expect(valorDeFila(cobro, 'Vuelto')).toHaveText('$0')
+  await expect(
+    cobro.getByRole('button', { name: 'Confirmar venta' }),
+  ).toBeDisabled()
+
+  await elegirMetodo(filaDePago(cobro, 0), EFECTIVO_NOMBRE)
+  await expect(valorDeFila(cobro, 'Vuelto')).toHaveText(VUELTO)
+
+  const respuesta = page.waitForResponse(
+    (r) => r.url().endsWith('/ventas') && r.request().method() === 'POST',
+  )
+  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  const ventaId = ((await (await respuesta).json()) as { id: string }).id
+  await expect(page.getByText('Venta pagada').first()).toBeVisible({
+    timeout: 15_000,
+  })
+
+  const venta = await api<{ pagos: PagoServidor[] }>(
+    request,
+    'get',
+    `/ventas/${ventaId}`,
+    { token },
+  )
+  expect(venta.pagos).toHaveLength(1)
+  expect(venta.pagos[0]?.monto).toBe('2000.0000')
+  expect(venta.pagos[0]?.vuelto).toBe(VUELTO_API)
+
+  // El cajón queda con lo entregado menos el vuelto, que es justo el total a
+  // pagar. Si el vuelto no se descontara, el arqueo esperaría $2.000.
+  expect(await cerrarCaja(request, token, escenario.cajaId!, '1309')).toBe(
+    'cerrada',
+  )
+})
