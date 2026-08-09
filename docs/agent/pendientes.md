@@ -611,9 +611,35 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
      sesión se renueva sola con el tenant que ya tenía y se saltea el cambio. Se probó
      agregarlo por adelantado y se sacó: era una rama inalcanzable y sin test dentro del
      subsistema que la invariante 4 pide no tocar.
-  **Antes de encararlo hace falta decisión de owner sobre la dependencia** (elegir proveedor
-  y agregarla al stack, que el `CLAUDE.md` exige confirmar). Las tres se resuelven con la
-  misma infraestructura, así que conviene decidirla una vez y no tres.
+  **La dependencia ya está decidida** (owner, 2026-08-08): **`nodemailer`** contra el
+  **SMTP propio del owner** (Gmail o corporativo). Las tres se resuelven con la misma
+  infraestructura, así que se hace una vez y no tres. Lo que falta es ejecutarlo — el owner
+  lo pospuso para después de cerrar la Fase 2 del garzón.
+
+  Lo decidido y lo que se descartó, con su porqué:
+
+  - **`nodemailer` es el cliente, no el proveedor.** Se escribe contra SMTP, así que el
+    proveedor real (Resend / SendGrid / SES / el que sea) entra por `.env` el día del
+    deploy **sin tocar código**. Es la decisión menos comprometedora disponible.
+  - **NO sumar `@nestjs-modules/mailer`.** Trae motor de plantillas y config propia para
+    resolver dos mails. `nodemailer` pelado alcanza.
+  - **Se descartó Mailpit** (capturador SMTP local en `docker-compose`) porque el fallback
+    de abajo da el mismo loop de desarrollo sin sumar un servicio.
+  - ⚠️ **Restricción de diseño, no opcional: los tests no pueden mandar mail de verdad.**
+    Se corren 342 e2e en cada cierre y en CI; mandando en serio, cada corrida dispara mails
+    reales, come el tope diario de Gmail (~500/día) y CI necesitaría las credenciales del
+    owner. Por eso el envío va detrás de una interfaz que **con `SMTP_HOST` vacío loguea el
+    mail en vez de mandarlo**. Beneficio lateral: el link de invitación aparece en el log
+    del backend, que es todo el loop de desarrollo que hace falta.
+  - **Credenciales:** claves `SMTP_*` **vacías** en `.env.example` (mismo patrón que
+    `GOOGLE_CLIENT_SECRET` y `QZ_PRIVATE_KEY`); el owner completa su `.env`, gitigno­rado.
+    Gmail exige 2FA + **App Password**, no la contraseña de la cuenta. Y reescribe el
+    remitente a la dirección de la cuenta: no se puede mandar como `no-reply@dominio`.
+
+  **Decisiones que faltan y que el plan tiene que poner sobre la mesa:** cuánto vive una
+  invitación y qué pasa al expirar; si invitación y reset comparten tabla de tokens (se
+  parecen mucho: token de un solo uso, con vencimiento, que termina en "elegí tu
+  contraseña"); y si la verificación de correo entra en la misma tanda.
 
   ### Lo que ya se decidió sobre esto (charla con el owner, 2026-08-08)
 
