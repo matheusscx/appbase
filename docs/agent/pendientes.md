@@ -309,10 +309,6 @@ Lo que la tanda dejó abierto y antes no estaba anotado:
   tenant, la request del otro tenant llega al `FOR UPDATE` y la corrida **se cuelga**, así
   que no hay aserción posible sobre el resultado. Encararlo probablemente pida un timeout
   explícito en la query o mirar el lock, no un `expect` de status.
-- [ ] **El test del rango invertido no distingue cuál de las dos guardas gemelas está viva**
-  (backend) — hay una en `utils/rango-liquidacion.ts` y otra duplicada en `computarReparto`
-  con el mismo mensaje, así que apagar una sola deja el e2e en verde. O se deduplica la
-  guarda, o el test tiene que entrar por el camino que solo pasa por una.
 
 Lo que **no** entró, con el motivo, para no volver a evaluarlo de cero:
 

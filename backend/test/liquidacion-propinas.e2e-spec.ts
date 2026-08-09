@@ -851,15 +851,50 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
       await putDistribucion(DISTRIBUCION_DEFAULT);
     });
 
-    it('un rango invertido corta antes de calcular nada', async () => {
+    /**
+     * ⚠️ Este test **no** valía lo que decía hasta el 2026-08-09: la guarda de
+     * orden estaba duplicada —una en `rangoLiquidacionDesde` y otra dentro de
+     * `computarReparto`, con el mismo mensaje— así que apagar cualquiera de las
+     * dos lo dejaba en verde y no se sabía cuál estaba viva. Lo midió la
+     * revisión independiente. La duplicada se borró (era inalcanzable: todos
+     * los llamadores normalizan antes), y ahora esto apunta a una sola.
+     *
+     * Se prueban los **tres** puntos de entrada del período, no solo el
+     * preview: son tres llamadas distintas a la misma función y nada garantiza
+     * que las tres sigan llamándola.
+     */
+    it.each([
+      ['preview', '/api/propinas/liquidaciones/preview'],
+      ['crear', '/api/propinas/liquidaciones'],
+      ['liquidar', '/api/propinas/liquidaciones/liquidar'],
+    ])(
+      '%s: un rango invertido corta antes de calcular nada',
+      async (_, ruta) => {
+        const res = await request(app.getHttpServer())
+          .post(ruta)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ fechaDesde: fechaHasta, fechaHasta: fechaDesde });
+
+        expect(res.status).toBe(400);
+        expect((res.body as { message: string }).message).toBe(
+          'La fecha hasta debe ser posterior a desde',
+        );
+      },
+    );
+
+    // El otro borde que solo cierra `rangoLiquidacionDesde`: una fecha ISO 8601
+    // legítima que `new Date` no sabe leer. La guarda de orden NO la frena
+    // —compara `NaN <= NaN`, siempre `false`— y antes llegaba a Postgres como
+    // un 500.
+    it('una fecha ISO que `new Date` no sabe leer da 400, no 500', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/propinas/liquidaciones/preview')
         .set('Authorization', `Bearer ${token}`)
-        .send({ fechaDesde: fechaHasta, fechaHasta: fechaDesde });
+        .send({ fechaDesde: '2026-W32-1', fechaHasta });
 
       expect(res.status).toBe(400);
       expect((res.body as { message: string }).message).toBe(
-        'La fecha hasta debe ser posterior a desde',
+        'Las fechas del período deben ser fechas ISO 8601 reales',
       );
     });
 

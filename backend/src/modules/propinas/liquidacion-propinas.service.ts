@@ -197,6 +197,20 @@ export class LiquidacionPropinasService {
     });
   }
 
+  /**
+   * Reparto sin persistir (el `preview` de la pantalla).
+   *
+   * ⚠️ **Recibe el período ya validado**: `fechaDesde`/`fechaHasta` son `Date`
+   * reales y en orden, porque su único llamador —el `preview` del controller—
+   * los construye con `rangoLiquidacionDesde`, que es donde vive la guarda de
+   * orden y la de "fecha ISO que `new Date` no sabe leer".
+   *
+   * Acá había una **segunda** guarda de orden, con el mismo mensaje. Se sacó el
+   * 2026-08-09: era inalcanzable —ningún llamador llega sin normalizar— y
+   * además hacía ambiguo al test que la cubría, que pasaba en verde con
+   * cualquiera de las dos viva. Si algún día aparece un llamador nuevo, que
+   * normalice como el que ya está; duplicar la guarda vuelve a romper la señal.
+   */
   async computarReparto(
     tenantId: string,
     fechaDesde: Date,
@@ -204,11 +218,6 @@ export class LiquidacionPropinasService {
     turnoIds: string[],
     ajustes?: AjustesReparto,
   ): Promise<PreviewReparto> {
-    if (fechaHasta <= fechaDesde) {
-      throw new BadRequestException(
-        'La fecha hasta debe ser posterior a desde',
-      );
-    }
     const config = await this.distribucion.obtener(tenantId);
     const gruposConfig = config.grupos.filter((g) => g.activo);
     if (gruposConfig.length === 0) {

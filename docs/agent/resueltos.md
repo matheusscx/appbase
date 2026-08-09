@@ -17,6 +17,30 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La guarda de rango estaba duplicada, y el test no sabía a cuál apuntaba (2026-08-09)
+
+**El hallazgo era de la revisión independiente del día anterior**, anotado al cierre de la
+tanda de ramas que está más abajo en este mismo archivo: el e2e del rango invertido pasaba en
+verde con cualquiera de las dos guardas viva —una en `rangoLiquidacionDesde`, otra
+dentro de `computarReparto`, con el mismo mensaje— así que no fijaba ninguna.
+
+**La duplicada era código muerto**, medido siguiendo los llamadores: el único que entra a
+`computarReparto` en producción es el `preview` del controller, y construye el período con
+`rangoLiquidacionDesde` justo antes de llamarlo. Se borró, y el docblock del método ahora dice que
+recibe el período **ya validado** y por qué duplicar la guarda vuelve a romper la señal.
+
+**El test pasó a cubrir los tres puntos de entrada** —`preview`, `crear` y `liquidar`— porque
+son tres llamadas distintas a la misma función y nada garantiza que las tres la sigan
+llamando. Y se sumó el otro borde que solo cierra ese util: una fecha ISO 8601 **legítima**
+que `new Date` no sabe leer (`2026-W32-1`). La guarda de orden no la frena —compara
+`NaN <= NaN`, siempre `false`— y antes llegaba a Postgres como un 500.
+
+**Los dos mutantes, medidos sobre la única guarda que queda:**
+
+- sacar la comparación de orden → mueren los **tres** tests de entrada;
+- sacar el chequeo de fecha ilegible → `Expected 400 / Received 500`, que es exactamente el
+  bug histórico que el docblock del util documenta.
+
 ## Seis ramas sin cobertura, elegidas de una lista de catorce (2026-08-09)
 
 La entrada decía *"ramas sin cobertura alguna, **para decidir si entran**"*. Se decidió por
