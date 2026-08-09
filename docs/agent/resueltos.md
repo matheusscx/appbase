@@ -17,6 +17,67 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Salones de punta a punta, en un navegador de verdad (2026-08-09)
+
+Primer flujo de la suite Playwright además del smoke: mesa → cuenta → línea → cobro. Es la
+capa que faltaba entre el unit con HTTP mockeado (`pages/salones/index.nuxt.spec.ts`) y los
+e2e de API (`salones-fusion`, `salones-comanda`): que la **pantalla encadene** las llamadas
+en el orden correcto y muestre lo que el backend devolvió.
+
+**Las precondiciones se montan por API, no clicando** —abrir caja, crear garzón y entrar a
+turno son tres flujos con pantalla propia; recorrerlos haría que un cambio en cualquiera de
+ellos rompa este test sin que salones tenga nada que ver—. Y los fixtures son propios:
+garzón, salón, mesa e ítem creados en el `beforeAll`.
+
+**El monto sale de la regla, no del output:** producto afecto de $1.000 + IVA 19% = **$1.190**
+(ADR-018), y el cobro suma la propina sugerida del 10% → **$1.309**. (El 10% es a la vez el
+default del cliente y el del tenant sembrado, así que el test **no** distingue uno del otro
+— medido por la revisión con un mutante que ignora la respuesta del backend.)
+
+**Lo que el navegador enseñó y ninguna de las otras capas mostraba** —cada uno costó una
+corrida y una captura de pantalla—:
+
+- **El PIN se pide DOS veces**, y la segunda **después** de "Confirmar venta", no antes:
+  quién cierra la cuenta es un dato del cierre y no se hereda de quien la abrió.
+- La mesa con posición por defecto `(0,0)` queda **recortada** contra el borde del plano y el
+  click cae fuera; el fixture la crea al centro.
+- El teclado del PIN va acotado al diálogo. (La primera redacción decía que chocaba con el
+  stepper de cantidad; la revisión lo midió y **es falso** — el fondo queda fuera del árbol de
+  accesibilidad con el modal abierto. El acotado queda igual, como defensa, pero sin inventarle
+  una medición.)
+- El trigger del `USelectMenu` no tiene label propio: Reka UI le pone `Show popup`. El test lo
+  usa **y verifica la selección** después, para que un cambio de ese label falle donde se
+  produce.
+- La primera corrida sobre un stack recién levantado tarda más de los 5 s de plazo por
+  defecto en volver al listado tras el cobro. La aserción final lleva plazo propio —no espera
+  fija: sigue resolviendo apenas aparece—.
+
+**La revisión independiente bloqueó la primera versión con tres hallazgos, los tres
+reproducidos:**
+
+1. La aserción del monto era `getByText('$1.190').first()`, sin anclar. El revisor la volvió
+   vacua creando **un ítem de catálogo de $1.190** —y este mismo test le agrega un ítem al
+   catálogo por corrida, así que la ambigüedad crecía sola—. Ahora apunta a la fila `Total`
+   del panel.
+2. El locator del garzón matcheaba **por prefijo** y el cleanup se salteaba si el montaje
+   fallaba a la mitad: una sola corrida interrumpida dejaba un garzón en turno y **toda**
+   corrida siguiente moría con un strict-mode, sin recuperarse sola. Ahora el nombre va exacto
+   y el escenario se llena de a poco para que el `afterAll` cierre lo que sí llegó a existir.
+3. **El `afterAll` se tragaba la única verificación server-side.** Con un mutante que cobra
+   sin propina, el test quedaba verde —el modal muestra $1.309 porque es matemática de
+   cliente, y el toast es un ternario local— mientras en la base quedaba
+   `venta_propina.monto_pagado = 0` y la caja descuadrada. Ahora el test **cierra la caja como
+   último paso y afirma `estado: 'cerrada'`**, que solo sale si el conteo cuadra con lo que el
+   servidor calculó.
+
+**Los tres mutantes, medidos sobre la versión final:** `cantidad: '2'` al agregar la línea →
+`Expected "$1.190" / Received "$2.380"`; cobrar con propina `'0'` →
+`Expected "cerrada" / Received "en_conciliacion"`; y `credencialGarzon` devolviendo `{}` —la
+regresión histórica del `pin: ''`— muere al agregar el producto.
+
+**No lleva `@smoke`**: escribe en la base y tarda ~20 s en frío, así que no entra al
+subconjunto barato que corre en cada tarea.
+
 ## La guarda de rango estaba duplicada, y el test no sabía a cuál apuntaba (2026-08-09)
 
 **El hallazgo era de la revisión independiente del día anterior**, anotado al cierre de la
