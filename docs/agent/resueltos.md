@@ -17,6 +17,50 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El camino a cocina no lo tocaba ningún test (2026-08-09)
+
+**La entrada:** los únicos tests que afirmaban sobre `estaciones` eran unitarios con el SQL
+mockeado, y un `grep` de `comanda` sobre `backend/test/` y `frontend/e2e/` no devolvía una
+línea. La razón por la que nunca se escribió estaba medida: con el seed
+`agruparEstacionesComanda` devuelve siempre `[]` —la categoría con impresora existe pero no
+tiene ningún ítem adentro—, así que ver una comanda exigía cablear datos por SQL.
+
+**Cómo se cerró:** `test/salones-comanda.e2e-spec.ts`, que **no espera nada del catálogo del
+seed**: crea por API dos impresoras, dos categorías y cuatro ítems. (Del seed sigue saliendo
+el escenario base —tenant, moneda, admin, el garzón y su turno—, como en todos los e2e.) Eso
+da el escenario que el seed no tiene: **dos** estaciones distintas, **dos** líneas en una
+misma estación, y una línea que no rutea a ninguna.
+
+Cada pieza del fixture existe por un mutante concreto, y esto salió de la revisión
+independiente, que **bloqueó** la primera versión: con una sola línea por impresora,
+"agrupar por impresora" y "emitir una estación por línea" son indistinguibles, y el mutante
+que manda tres papeles a cocina para una misma partida pasaba en verde.
+
+Dos tests, y los tres mutantes medidos:
+
+- **agrupa por impresora y saltea la línea sin ruta.** Mutante A: sacar
+  `|| !row.impresora_id` de la guarda → aparece una tercera "estación" con
+  `impresoraId: null` y nombre vacío, o sea un ticket dirigido a nadie. Mutante B: keyear el
+  mapa por `cuenta_linea_id` en vez de `impresora_id` → tres estaciones donde van dos.
+- **el claim avanza lo enviado.** Mutante: no ejecutar el `UPDATE` de `cantidad_enviada` →
+  el segundo `reclamar` devuelve otra vez lo mismo, que es cocinar dos veces cuando el
+  garzón toca "Enviar" de nuevo o el ticket no salió. El test también fija que lo agregado
+  **después** sale por la diferencia (1) y no por el total (3).
+
+**Y un hallazgo que dejó la corrida completa, que vale para el próximo e2e de salones:** la
+primera versión usaba el garzón del seed (Ana) y volteó `garzon-modo-personal` con un
+`400 "El garzón ya tiene una sesión abierta"`. La sesión es **única por garzón** y jest corre
+las suites en paralelo, así que dos specs que compartan a Ana se pisan — y hoy **seis** la
+comparten. El spec pasaba aislado y la suite completa fallaba, que es el peor modo de falla.
+Los dos specs nuevos de salones crean su propio garzón (`POST /garzones` devuelve el PIN
+generado, una sola vez), lo que además hace innecesario el cierre defensivo previo que
+copiaban de `combos`. Medido después del cambio: tres corridas completas con base fresca,
+371 verdes las tres.
+
+Queda abierta la mitad **de smoke manual** de la entrada original —el seed sigue sin permitir
+ver una comanda en pantalla sin tocar SQL—, con el arreglo ya identificado en
+[`pendientes.md`](pendientes.md).
+
 ## Dos huecos de test que el gate no veía (2026-08-09)
 
 Los dos venían de revisiones independientes, los dos traían el mutante ya medido, y ninguno
@@ -72,13 +116,10 @@ reconvertida a la unidad del destino, y la otra mudada tal cual.
   `cantidadPresentacion` se queda en `1` mientras `cantidad` ya vale `1.5`, o sea la línea
   diría "1 kg" pesando kilo y medio.
 
-**Los fixtures que la fusión consume son propios** —salón, mesa e ítems creados en el
-`beforeAll`— porque una fusión cancela cuentas y borra líneas, y el seeder no repara lo que
-una corrida previa dejó movido. Lo que **sí** sale del seed es el garzón (Ana), su PIN, el
-turno, el tenant y la moneda; y el spec toca estado global al abrir y cerrar la sesión de
-Ana, como ya hacen `combos`, `recetas` y `garzones-selector`. Por eso el `afterAll` la
-vuelve a cerrar: dejarla abierta le cambia el escenario inicial al spec que corra después.
-Medido: tres corridas seguidas sobre la misma base, verde las tres.
+**Los fixtures que la fusión consume son propios** —salón, mesa, ítems y **el garzón**,
+creados en el `beforeAll`— porque una fusión cancela cuentas y borra líneas, y el seeder no
+repara lo que una corrida previa dejó movido. Del seed salen el tenant, la moneda, el admin
+y el turno. Medido: tres corridas seguidas sobre la misma base, verde las tres.
 
 ## `GET /tenants/members` repartía el roster con correos (2026-08-09)
 

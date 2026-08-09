@@ -520,21 +520,19 @@ Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que
 el de `fusionarCuentas` el 2026-08-09 con `test/salones-fusion.e2e-spec.ts` — que además fue
 el primer e2e de esa ruta (los dos en [`resueltos.md`](resueltos.md)). Quedan:
 
-- [ ] **El agrupado por estación de la comanda no lo ejercita ningún dato real, y el seed
-  no lo permite** (backend) — descubierto al hacer el smoke del 2026-08-06:
-  `agruparEstacionesComanda` siempre devuelve `[]` con el seed, así que hubo que cablear
-  una categoría a mano por SQL para poder verificar la comanda. Sin fixture no hay e2e
-  posible del camino que manda a cocina.
-  **Corregido el 2026-08-07 con lo medido contra la BD sembrada** (la entrada culpaba a la
-  causa equivocada): la categoría **sí existe y sí tiene impresora** — "Ropa y accesorios"
-  → impresora "Cocina", puesta a propósito en `seeder.service.ts` con ese comentario. Lo
-  que falta es que **algún ítem vendible esté en ella**: hoy tiene 0 ítems, y el único
-  ítem con categoría del seed está en "Electrónica", que no tiene impresora. El arreglo es
-  entonces asignar `categoriaId` a un ítem del seed, no crear categoría ni impresora.
-  Lo que hace valiosa la entrada es que **hoy no hay nada** cubriendo ese camino: los
-  únicos tests que afirman sobre `estaciones` son unitarios con el SQL mockeado
-  (`salones.service.spec.ts`), así que no ven el fixture. Medido: `grep` de `comanda` y
-  `estaciones` sobre `backend/test/` y `frontend/e2e/` no devuelve nada.
+- [ ] **Con el seed no se puede ver una comanda a mano** (backend, `seeder.service.ts`) —
+  **la mitad de test de esta entrada se cerró el 2026-08-09**: el camino a cocina ya tiene
+  e2e (`test/salones-comanda.e2e-spec.ts`, ver [`resueltos.md`](resueltos.md)), que se monta
+  sus propias impresoras, categorías e ítems por API en vez de depender del seed.
+  Lo que queda es el **smoke manual**, que es de donde salió la entrada el 2026-08-06: con
+  el seed a secas `agruparEstacionesComanda` devuelve `[]`, así que hubo que cablear una
+  categoría por SQL para ver una comanda en pantalla. Medido contra la BD sembrada: la
+  categoría **existe y tiene impresora** —"Ropa y accesorios" → "Cocina", puesta a propósito
+  con ese comentario en el seeder—, pero **no tiene ningún ítem adentro**, y el único ítem
+  con categoría del seed está en "Electrónica", que no tiene impresora. El arreglo es
+  asignarle `categoriaId` a un ítem vendible del seed, no crear categoría ni impresora.
+  ⚠️ Al hacerlo, verificar que ningún e2e afirme sobre la categoría de ese ítem: el seed es
+  el escenario inicial de los 30 specs.
 - [ ] **El computed `cuentaConItemEliminado` no tiene cobertura** (frontend,
   `pages/salones/index.vue`) — mutante que pasa: `computed(() => false)`, con el frontend
   entero en verde. Verificado a mano en el navegador el 2026-08-06.

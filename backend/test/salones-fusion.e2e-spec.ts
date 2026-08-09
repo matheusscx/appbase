@@ -10,9 +10,8 @@ const CLP_MONEDA_ID = '550e8400-e29b-41d4-a716-446655440003';
 const ADMIN_EMAIL = 'admin.paris@paris.cl';
 const ADMIN_PASS = 'admin';
 
-// Garzón del seed + su turno: `abrirCuenta` exige sesión abierta.
-const ANA_ID = '550e8400-e29b-41d4-a716-446655440238';
-const ANA_PIN = '111111';
+// Turno del seed. El garzón, en cambio, lo crea el spec: ver el comentario del
+// `beforeAll`.
 const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
 interface TokenResponse {
@@ -20,6 +19,11 @@ interface TokenResponse {
 }
 interface IdResponse {
   id: string;
+}
+interface GarzonCreado {
+  id: string;
+  /** El PIN se genera en el backend y se devuelve **una sola vez**, acá. */
+  pin: string;
 }
 interface LineaDetalle {
   id: string;
@@ -60,12 +64,13 @@ describe('Salones — fusionar cuentas (e2e)', () => {
   let mesaId: string;
   let itemKgId: string;
   let itemOtroId: string;
+  let garzon: GarzonCreado;
 
   async function abrirCuenta(): Promise<CuentaDetalle> {
     const res = await request(app.getHttpServer())
       .post(`/api/mesas/${mesaId}/cuentas`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN });
+      .send({ garzonId: garzon.id, pin: garzon.pin });
     expect(res.status).toBe(201);
     return res.body as CuentaDetalle;
   }
@@ -146,26 +151,38 @@ describe('Salones — fusionar cuentas (e2e)', () => {
     expect(resItemOtro.status).toBe(201);
     itemOtroId = (resItemOtro.body as IdResponse).id;
 
-    // El cierre previo deja la apertura idempotente ante corridas locales que
-    // hayan dejado la sesión abierta (en CI, con base fresca, no hay ninguna).
-    await request(app.getHttpServer())
-      .post('/api/sesiones-garzon/cerrar')
+    // ⚠️ Garzón PROPIO, no el del seed. La sesión es única por garzón, así que
+    // dos specs que compartan a Ana —hoy son seis— se pisan entre sí cuando
+    // jest los corre en paralelo: abrirle o cerrarle la sesión le rompe el
+    // `iniciar` al otro con un 400 "ya tiene una sesión abierta". Medido:
+    // `garzon-modo-personal` se cayó así al sumarse el segundo spec de salones.
+    // Con garzón propio no hace falta ningún cierre defensivo previo.
+    const resGarzon = await request(app.getHttpServer())
+      .post('/api/garzones')
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN });
+      .send({ nombre: `Garzón fusión E2E ${Date.now()}` });
+    expect(resGarzon.status).toBe(201);
+    garzon = resGarzon.body as GarzonCreado;
+
     const resSesion = await request(app.getHttpServer())
       .post('/api/sesiones-garzon/iniciar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN, turnoId: TURNO_MANANA_ID });
+      .send({
+        garzonId: garzon.id,
+        pin: garzon.pin,
+        turnoId: TURNO_MANANA_ID,
+      });
     expect(resSesion.status).toBe(201);
   }, 60000);
 
   afterAll(async () => {
-    // La sesión de garzón es global al tenant: dejarla abierta le cambia el
-    // estado inicial al spec que corra después.
+    // El garzón es propio, así que dejar la sesión abierta no le cambiaría el
+    // escenario a nadie. Se cierra igual: una sesión abierta para siempre es
+    // ruido en el historial de turnos de la base de dev.
     await request(app.getHttpServer())
       .post('/api/sesiones-garzon/cerrar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN });
+      .send({ garzonId: garzon.id, pin: garzon.pin });
     await app.close();
   });
 
@@ -241,7 +258,7 @@ describe('Salones — fusionar cuentas (e2e)', () => {
     const resAjena = await request(app.getHttpServer())
       .post(`/api/mesas/${ajenaMesaId}/cuentas`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN });
+      .send({ garzonId: garzon.id, pin: garzon.pin });
     const ajena = resAjena.body as CuentaDetalle;
 
     const res = await request(app.getHttpServer())
