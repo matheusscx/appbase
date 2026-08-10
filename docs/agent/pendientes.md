@@ -136,11 +136,15 @@ identificamos con ubicación concreta.
   helper de zona, ahí sí conviene la vista.
 ---
 
-## Suite E2E de navegador (fundación lista, flujos por escribir)
+## Suite E2E de navegador (los cinco flujos críticos, escritos)
 
-Scaffold Playwright ya funciona (`frontend/e2e/`, auth vía storageState, 1 smoke verde).
-Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/features/`
-(NUNCA del output del código), `@smoke` en el subconjunto barato, cero esperas fijas:
+Playwright corre 19 tests en `frontend/e2e/` (auth vía storageState). Los cinco flujos
+que esta lista pedía están escritos; queda solo el ítem de CI, al final.
+
+Reglas que siguen valiendo para cualquier flujo nuevo: aserciones derivadas de
+`docs/features/` (NUNCA del output del código), `@smoke` solo en el subconjunto barato,
+cero esperas fijas. Y **`workers: 1`**: el tenant tiene un solo cajón y `abrir` rechaza si
+el usuario ya tiene caja abierta, así que dos specs de caja en paralelo se pisan siempre.
 
 - [x] **Venta completa hasta documento** (afecto + exento) — hecho el 2026-08-09,
   `e2e/ventas/pos.spec.ts`. El exento es lo que le da filo: sin él, "hay IVA" no
