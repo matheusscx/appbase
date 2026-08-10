@@ -5,6 +5,8 @@
     "dockerfilePath": "Dockerfile.prod"
   },
   "deploy": {
-    "restartPolicyType": "ON_FAILURE"
+    "restartPolicyType": "ON_FAILURE",
+    "healthcheckPath": "/api",
+    "healthcheckTimeout": 300
   }
 }

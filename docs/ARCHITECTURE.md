@@ -268,6 +268,27 @@ const data = await useApiFetch<ResponseType>(`${apiUrl}/endpoint`)
 - Variables de entorno: archivo `.env` en la raíz del repo, compartido entre servicios
 - En producción: reemplazar `synchronize: true` por migraciones TypeORM; endurecer CORS
 
+### Demo en Railway
+
+**Un `git push origin main` despliega el demo.** La conexión con el repo está hecha
+desde el dashboard de Railway, no hay workflow en `.github/` — así que el deploy no
+se ve en el código y corre **en paralelo** al CI, no después. Son dos semáforos
+distintos: el CI verifica el código contra una base virgen, Railway lo arranca
+contra la base vivida del demo.
+
+`healthcheckPath` en `backend/railway.json` y `frontend/railway.json` es lo que
+evita que un arranque roto reemplace a uno que funciona: hasta que la ruta no
+responda, Railway no promueve el deployment y sigue sirviendo el anterior. El
+backend usa `/api` con 300 s de plazo, que es lo que tarda `synchronize` más el
+seed sobre una base fría.
+
+⚠️ Lo que el healthcheck **no** cubre: prueba que el proceso levantó, no que la
+base esté enganchada. Y ningún semáforo cubre un cambio de esquema contra datos
+existentes, porque el CI siempre parte de una base virgen — hoy eso está tapado por
+`synchronize` + reset y por no tener datos productivos. El día que los haya, la
+respuesta son migraciones, no más semáforos. Para resincronizar la base del demo:
+skill `railway-sync-db`.
+
 ## Documentación
 
 - **ADRs** (`docs/adr/`) — decisiones arquitectónicas con contexto y consecuencias
