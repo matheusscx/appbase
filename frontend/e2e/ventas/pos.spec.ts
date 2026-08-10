@@ -8,6 +8,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
+import { elegirEnSelector, escribirMonto, valorDeFila } from '../support/ui'
 
 /**
  * El punto de venta de punta a punta, en un navegador de verdad: catálogo →
@@ -104,28 +105,6 @@ async function sembrarProducto(
   const item = await crearProducto(request, escenario.token!, datos)
   escenario.itemIds.push(item.id)
   return item
-}
-
-/**
- * El valor de una fila del desglose del carrito — la `<span>` que sigue a la
- * etiqueta, no cualquier monto de la pantalla.
- *
- * ⚠️ Sin anclar es **vacuo**: el catálogo comparte pantalla con el carrito y
- * basta un ítem de $1.690 para que un `getByText('$1.690')` pase con el carrito
- * equivocado. Y el locator es **estricto** (sin `.first()`): si algún día hay dos
- * etiquetas iguales, el test explota con un strict-mode violation en vez de
- * elegir una en silencio.
- *
- * `normalize-space(text())` mira solo los nodos de texto DIRECTOS: la fila
- * "Total" lleva adentro un `<VentasMonedaTasasInfo>`, así que un `hasText`
- * normal no la matchea. Y el xpath va **relativo** (`.//`): con `//` un locator
- * anidado igual busca en todo el documento, así que acotarlo al modal no
- * acotaría nada.
- */
-function valorDeFila(raiz: Page | Locator, etiqueta: string) {
-  return raiz
-    .locator(`xpath=.//span[normalize-space(text())="${etiqueta}"]`)
-    .locator('xpath=following-sibling::span[1]')
 }
 
 /** La tarjeta del catálogo, por el hook de test del componente. */
@@ -327,52 +306,16 @@ function filaDePago(cobro: Locator, indice: number) {
 }
 
 /**
- * El selector de método de una fila de pago.
+ * El selector de método de una fila de pago, para LEERLO.
  *
- * ⚠️ `Show popup` es el label que Reka UI le pone por defecto al trigger del
- * `USelectMenu` — la pantalla no le da ninguno propio. Va acotado a la fila, así
- * que no puede agarrar el de otro pago.
+ * No duplica a `elegirEnSelector`: ese hace el gesto de elegir, y esto asevera
+ * sobre una fila que nadie tocó —la que el modal creó sola al agregar un pago—.
  */
 function selectorDeMetodo(fila: Locator) {
   return fila.getByRole('button', { name: 'Show popup' })
 }
 
-/**
- * Cambia el método de una fila de pago.
- *
- * ⚠️ Espera a que el popup DESAPAREZCA, no solo a que el trigger muestre el
- * nombre nuevo. Al cerrarse, Reka devuelve el foco al trigger, y ese salto le
- * roba las teclas a lo que se esté escribiendo después: sin esta espera, el
- * monto tecleado a continuación se perdía entero y el campo se quedaba con el
- * valor anterior. Medido.
- */
-async function elegirMetodo(fila: Locator, nombre: string) {
-  await selectorDeMetodo(fila).click()
-  await fila.page().getByRole('option', { name: nombre, exact: true }).click()
-  await expect(selectorDeMetodo(fila)).toContainText(nombre)
-  await expect(fila.page().getByRole('listbox')).toHaveCount(0)
-}
-
-/**
- * Escribe un monto en el `MoneyInput` de una fila de pago.
- *
- * ⚠️ Tecla por tecla, no `fill()`: el input está enmascarado con maska, que
- * reformatea a partir de los eventos de teclado. Con `fill()` el valor del DOM
- * cambia pero el `v-model` se queda con el anterior — medido: el campo seguía
- * mostrando $1.309 después de un `fill('2000')`.
- */
-async function escribirMonto(fila: Locator, monto: string) {
-  const input = montoDePago(fila)
-  await input.selectText()
-  await input.pressSequentially(monto)
-}
-
-/**
- * El input de monto de una fila de pago. Va por `inputmode="decimal"` —el que
- * pone `MoneyInput`— y no por `input` a secas: el selector de método también
- * tiene uno, y un `ControlOrMeta+a` con el foco puesto ahí selecciona la página
- * entera en vez del monto. Medido.
- */
+/** El input de monto de una fila de pago. */
 function montoDePago(fila: Locator) {
   return fila.locator('input[inputmode="decimal"]')
 }
@@ -413,7 +356,7 @@ test('pago mixto: dos métodos que suman justo, y la caja espera solo el efectiv
   // `metodosHabilitados[0]`, o sea el orden del catálogo del tenant. Si algún día
   // cambia el orden del seed, este test se cae acá —en una aserción explícita— y
   // no diez líneas después con un monto que no cuadra.
-  await elegirMetodo(filaDePago(cobro, 0), TARJETA_CREDITO)
+  await elegirEnSelector(filaDePago(cobro, 0), TARJETA_CREDITO)
   await escribirMonto(filaDePago(cobro, 0), PAGO_TARJETA)
   await cobro.getByRole('button', { name: 'Agregar pago' }).click()
   await expect(selectorDeMetodo(filaDePago(cobro, 1))).toContainText(
@@ -474,7 +417,7 @@ test('el vuelto depende del método: con tarjeta no se puede devolver, con efect
   // Mismo sobrepago, misma fila: lo único que cambia entre los dos casos es el
   // método. Así el test no puede pasar por otra razón que la regla de
   // `permite_vuelto` (`docs/features/pagos.md`).
-  await elegirMetodo(filaDePago(cobro, 0), TARJETA_CREDITO)
+  await elegirEnSelector(filaDePago(cobro, 0), TARJETA_CREDITO)
   await escribirMonto(filaDePago(cobro, 0), SOBREPAGO)
   await expect(
     cobro.getByText(
@@ -486,7 +429,7 @@ test('el vuelto depende del método: con tarjeta no se puede devolver, con efect
     cobro.getByRole('button', { name: 'Confirmar venta' }),
   ).toBeDisabled()
 
-  await elegirMetodo(filaDePago(cobro, 0), EFECTIVO_NOMBRE)
+  await elegirEnSelector(filaDePago(cobro, 0), EFECTIVO_NOMBRE)
   await expect(valorDeFila(cobro, 'Vuelto')).toHaveText(VUELTO)
 
   const respuesta = page.waitForResponse(

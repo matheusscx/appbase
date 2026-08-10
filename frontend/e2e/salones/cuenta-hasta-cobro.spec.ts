@@ -4,6 +4,7 @@ import {
   type APIRequestContext,
   type Page,
 } from '@playwright/test'
+import { elegirEnSelector } from '../support/ui'
 
 /**
  * Salones de punta a punta, en un navegador de verdad:
@@ -279,16 +280,7 @@ test('abre una cuenta en una mesa, le carga un producto y la cobra', async ({
 
   // 1. Elegir el salón propio. Explícito aunque la pantalla preseleccione uno:
   //    cuál queda primero depende del orden de la lista.
-  //
-  //    ⚠️ `Show popup` es el label por defecto que Reka UI le pone al trigger
-  //    del `USelectMenu` — la pantalla no le da ninguno propio. Por eso abajo se
-  //    verifica la selección: si ese label cambia y el locator agarra otro
-  //    control, el test cae acá y no diez líneas después.
-  await page.getByRole('button', { name: 'Show popup' }).click()
-  await page.getByRole('option', { name: escenario.salonNombre! }).click()
-  await expect(page.getByRole('button', { name: 'Show popup' })).toContainText(
-    escenario.salonNombre!,
-  )
+  await elegirEnSelector(page, escenario.salonNombre!)
 
   // 2. La mesa del plano, por el hook de test que el componente ya expone.
   await page.locator(`[data-qa="mesa-${escenario.mesaId}"]`).click()

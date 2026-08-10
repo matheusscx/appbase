@@ -151,7 +151,11 @@ Escribir los flujos críticos, cada uno con aserciones derivadas de `docs/featur
   2026-08-09, `e2e/ventas/pos.spec.ts`. Son dos tests: el reparto exacto entre dos
   métodos —donde la caja espera solo el efectivo, no el total— y el vuelto, que cambia el
   MÉTODO dejando fijo el sobrepago, para que la regla sea la única variable.
-- [ ] Nota de crédito (referencia a la venta original).
+- [x] **Nota de crédito** (referencia a la venta original) — hecho el 2026-08-09,
+  `e2e/ventas/nota-credito.spec.ts`. Va **parcial** ($500 sobre $1.190) para que el monto
+  no pueda confundirse con el total de la venta, y verifica el vínculo desde los dos
+  lados: la NC apunta a la venta y la venta la reconoce como hija. Mutante medido
+  (`ventaReferenciaId: null` en `ventas.service.ts`): `Expected <uuid> / Received null`.
 - [x] **Apertura/cierre de caja** (`diferencia` calculada por el sistema) — hecho el
   2026-08-09, `e2e/caja/apertura-cierre.spec.ts`. Cruza las dos fases del cierre: la
   "Diferencia" del conteo es aritmética de cliente y la de la conciliación viene del

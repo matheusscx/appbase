@@ -1,5 +1,6 @@
-import { test, expect, type Locator, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import { api, cerrarCaja, tokenDe, TENANTS } from '../support/api'
+import { elegirEnSelector, escribirMonto, valorDeFila } from '../support/ui'
 
 /**
  * Abrir y cerrar la caja **por pantalla**, que es el único flujo del sistema
@@ -103,20 +104,6 @@ test.afterEach(async ({ request }) => {
   }
 })
 
-/** Escribe en un `MoneyInput`: tecla por tecla, porque está enmascarado. */
-async function escribirMonto(raiz: Locator, monto: string) {
-  const input = raiz.locator('input[inputmode="decimal"]')
-  await input.selectText()
-  await input.pressSequentially(monto)
-}
-
-/** El valor que sigue a una etiqueta, anclado a ella y no a la pantalla. */
-function valorDeFila(raiz: Page | Locator, etiqueta: string) {
-  return raiz
-    .locator(`xpath=.//span[normalize-space(text())="${etiqueta}"]`)
-    .locator('xpath=following-sibling::span[1]')
-}
-
 test('abre la caja, la cierra con un faltante, y la diferencia la pone el sistema', async ({
   page,
   request,
@@ -133,11 +120,7 @@ test('abre la caja, la cierra con un faltante, y la diferencia la pone el sistem
   ).toBeVisible()
 
   // 2. Elegir el cajón y el saldo con el que arranca el turno.
-  await page.getByRole('button', { name: 'Show popup' }).click()
-  await page
-    .getByRole('option', { name: escenario.cajonNombre!, exact: true })
-    .click()
-  await expect(page.getByRole('listbox')).toHaveCount(0)
+  await elegirEnSelector(apertura, escenario.cajonNombre!)
   await escribirMonto(apertura, SALDO_INICIAL)
   await page.getByRole('button', { name: 'Abrir caja', exact: true }).click()
 
