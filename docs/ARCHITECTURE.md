@@ -276,15 +276,31 @@ se ve en el código y corre **en paralelo** al CI, no después. Son dos semáfor
 distintos: el CI verifica el código contra una base virgen, Railway lo arranca
 contra la base vivida del demo.
 
-`healthcheckPath` en `backend/railway.json` y `frontend/railway.json` es lo que
-evita que un arranque roto reemplace a uno que funciona: hasta que la ruta no
-responda, Railway no promueve el deployment y sigue sirviendo el anterior. El
-backend usa `/api` con 300 s de plazo, que es lo que tarda `synchronize` más el
-seed sobre una base fría.
+`healthcheckPath` en `backend/railway.json` y `frontend/railway.json` existe para
+que un arranque roto no reemplace a uno que funciona: **según la documentación de
+Railway**, hasta que la ruta no responda no promueve el deployment y sigue
+sirviendo el anterior. Eso último **no está medido acá** —haría falta desplegar
+algo roto a propósito—; lo que sí se observó es el healthcheck corriendo
+(`Starting Healthcheck` / `[1/1] Healthcheck succeeded!` en el build de
+`e637c0a6`). El backend apunta a **`/api/health`** con 300 s de plazo, que es lo
+que tarda `synchronize` más el seed sobre una base fría.
 
-⚠️ Lo que el healthcheck **no** cubre: prueba que el proceso levantó, no que la
-base esté enganchada. Y ningún semáforo cubre un cambio de esquema contra datos
-existentes, porque el CI siempre parte de una base virgen — hoy eso está tapado por
+Esa ruta (`app.controller.ts` → `AppService.verificarSalud`) **consulta la base**
+y contesta 503 si no responde. La distinción no es teórica: medido el 2026-08-10
+con Postgres detenido, `/api` —el path anterior— seguía devolviendo `Hello World!`
+con un 200, o sea que el semáforo daba verde sobre una app inservible. Por eso la
+consulta va contra `usuarios` y no es un `SELECT 1` pelado: un `DATABASE_URL`
+apuntado a otro Postgres, vacío pero vivo, pasaría un `SELECT 1`.
+
+⚠️ Lo que el healthcheck **no** cubre: corre **una sola vez**, durante la
+promoción del deploy. Una base que se cae dos horas después no la ve nadie. Para
+eso está `./scripts/smoke-produccion.sh`, que verifica el deployment que está
+sirviendo ahora. Correrlo **después** de que el deployment diga `SUCCESS`, no
+justo tras el push: como Railway y el CI corren en paralelo, antes de eso estaría
+midiendo el deployment anterior.
+
+⚠️ Lo que **ningún** semáforo cubre: un cambio de esquema contra datos existentes,
+porque el CI siempre parte de una base virgen — hoy eso está tapado por
 `synchronize` + reset y por no tener datos productivos. El día que los haya, la
 respuesta son migraciones, no más semáforos. Para resincronizar la base del demo:
 skill `railway-sync-db`.

@@ -101,6 +101,7 @@ docker-compose up            # Stack completo (preferido); --build reconstruye i
 docker-compose down -v       # Detener y borrar el volumen de la BD
 ./scripts/reset-db.sh        # Reset + espera del seed, ANTES de cada test:e2e (~30s)
 ./scripts/reset-db.sh --verificar   # DESPUÉS del e2e: ¿la base se movió abajo de la suite?
+./scripts/smoke-produccion.sh       # El demo de Railway, ¿funciona? (correr con el deploy en SUCCESS)
 
 cd backend
 npm run start:dev            # Watch mode

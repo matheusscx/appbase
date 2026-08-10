@@ -9,4 +9,12 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
+
+  // Sin `@UseGuards`: el healthcheck de Railway pega sin credenciales. En este
+  // proyecto los guards se aplican por controlador, así que esto es explícito
+  // por omisión, no un olvido.
+  @Get('health')
+  verificarSalud(): Promise<{ estado: string; base: string }> {
+    return this.appService.verificarSalud();
+  }
 }
