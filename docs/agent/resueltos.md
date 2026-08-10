@@ -17,6 +17,63 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Suite E2E de navegador (los cinco flujos críticos, escritos)
+
+Playwright corre 19 tests en `frontend/e2e/` (auth vía storageState). Los cinco flujos
+que esta lista pedía están escritos; queda solo el ítem de CI, al final.
+
+Reglas que siguen valiendo para cualquier flujo nuevo: aserciones derivadas de
+`docs/features/` (NUNCA del output del código), `@smoke` solo en el subconjunto barato,
+cero esperas fijas. Y **`workers: 1`**: el tenant tiene un solo cajón y `abrir` rechaza si
+el usuario ya tiene caja abierta, así que dos specs de caja en paralelo se pisan siempre.
+
+- [x] **Venta completa hasta documento** (afecto + exento) — hecho el 2026-08-09,
+  `e2e/ventas/pos.spec.ts`. El exento es lo que le da filo: sin él, "hay IVA" no
+  distingue derivarlo de `clasificacion_tributaria` de derivarlo de "tiene impuestos
+  asignados". Se verifica el desglose por línea del lado del servidor, no solo el total.
+  **Solo cubre la Boleta** (el default): la Factura exige customer y es su propio flujo.
+- [x] **Pago mixto** (múltiples métodos; vuelto solo si `permite_vuelto`) — hecho el
+  2026-08-09, `e2e/ventas/pos.spec.ts`. Son dos tests: el reparto exacto entre dos
+  métodos —donde la caja espera solo el efectivo, no el total— y el vuelto, que cambia el
+  MÉTODO dejando fijo el sobrepago, para que la regla sea la única variable.
+- [x] **Nota de crédito** (referencia a la venta original) — hecho el 2026-08-09,
+  `e2e/ventas/nota-credito.spec.ts`. Va **parcial** ($500 sobre $1.190) para que el monto
+  no pueda confundirse con el total de la venta, y verifica el vínculo desde los dos
+  lados: la NC apunta a la venta y la venta la reconoce como hija. Mutante medido
+  (`ventaReferenciaId: null` en `ventas.service.ts`): `Expected <uuid> / Received null`.
+- [x] **Apertura/cierre de caja** (`diferencia` calculada por el sistema) — hecho el
+  2026-08-09, `e2e/caja/apertura-cierre.spec.ts`. Cruza las dos fases del cierre: la
+  "Diferencia" del conteo es aritmética de cliente y la de la conciliación viene del
+  arqueo del servidor. Mutante medido (invertir el signo en `caja.service.ts`): falla solo
+  la segunda, que es la prueba de que son independientes. El **reloj congelado** quedó
+  fuera: no hay nada que dependa de la hora en este flujo.
+- [x] **Descuento de stock en una venta** (movimiento + saldo materializado) — hecho el
+  2026-08-09, `e2e/ventas/pos.spec.ts`. El `Stock: 8` que muestra el catálogo es
+  aritmética de cliente y **no prueba nada**: medido con un mutante en el backend
+  (`ventas.service.ts`, el `registrarMovimiento` de la venta, `cantidad: '1'` en vez de
+  `cantidadCanonica`), la pantalla sigue en verde y lo cazan el saldo (`9.0000`) y el
+  movimiento del servidor.
+- [x] **Cambio de tenant sin fuga de datos** — hecho el 2026-08-09,
+  `e2e/tenants/aislamiento.spec.ts`. Cubre el catálogo; **las ventas siguen sin cubrirse**
+  por ese eje. Y cubre **scoping**, no caché: que los stores de Pinia se reseteen al
+  cambiar de institución lo cubre `app/stores/tenant.spec.ts`. La primera versión de esa
+  spec reclamaba lo segundo y era falso —la segunda visita al catálogo iba por
+  `page.goto()`, o sea recarga dura, que borra el estado en memoria antes de aseverar—;
+  hoy va por el menú de la app.
+- [x] **Salones de punta a punta** (mesa → cuenta → línea → cobro) — hecho el 2026-08-09,
+  `e2e/salones/cuenta-hasta-cobro.spec.ts`. **No lleva `@smoke`**: escribe en la base
+  (abre caja, cobra una venta) y tarda ~20 s en frío, así que no es del subconjunto barato.
+- [x] **Integrar `@smoke` al CI** — cerrado el 2026-08-10 **como decisión, sin
+  implementarlo**: la premisa de la entrada ("cuando haya masa crítica", "hoy el CI no
+  levanta el stack de navegador") dejó de ser cierta. El job `e2e-navegador` corre
+  `npm run e2e` —la suite **entera**— desde el 2026-08-09, y la última corrida sobre
+  `e637c0a6` midió **`19 passed (43.3s)`** con un worker. Un subconjunto barato ahorra
+  ~40 s sobre un job que ya paga varios minutos de `npm ci` + dos builds + la descarga de
+  Chromium: optimiza lo que no domina el costo, y a cambio abre la puerta a que el CI mida
+  menos de lo que corre en local. El tag `@smoke` **sigue vivo** para `npm run e2e:smoke`,
+  que es una herramienta local para no arrastrar las specs que escriben en la base; lo que
+  se descarta es que el CI use el subconjunto en vez del total.
+
 ## Salones de punta a punta, en un navegador de verdad (2026-08-09)
 
 Primer flujo de la suite Playwright además del smoke: mesa → cuenta → línea → cobro. Es la

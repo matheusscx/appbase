@@ -140,20 +140,20 @@ primero, por definición, nunca mira lo que ya está.
   stack real (`docker-compose up`); en CI no hay compose, así que `webServer` en
   `playwright.config.ts` levanta backend y frontend (`node dist/main` / `node
   .output/server/index.mjs`) antes de correr los tests. El `test:e2e` del backend es Jest
-  + supertest, no navegador — no confundir. [ ] **Flujos por escribir**
-  (ver `docs/agent/pendientes.md`): venta completa hasta documento, pago mixto, nota de
-  crédito, apertura/cierre de caja, descuento de stock, y cambio de tenant sin fuga de
-  datos (este último no lo detecta ninguna prueba unitaria). Restricciones: reloj
-  congelado (cierres de caja dependen de zona horaria por tenant), sin llamadas reales al
-  SII, cero esperas fijas (usar aserciones web-first, no `waitForTimeout`), etiqueta
-  `@smoke` para el subconjunto que corre en cada tarea.
+  + supertest, no navegador — no confundir. [x] **Flujos escritos** (2026-08-09, detalle
+  en [`resueltos.md`](resueltos.md)): venta completa hasta documento, pago mixto, nota de
+  crédito, apertura/cierre de caja, descuento de stock, cambio de tenant sin fuga de datos
+  y salones de punta a punta. Restricciones que siguen valiendo: sin llamadas reales al
+  SII y cero esperas fijas (aserciones web-first, no `waitForTimeout`). El **reloj
+  congelado** no hizo falta: ningún flujo escrito depende de la hora.
   Riesgo a cubrir: un agente al que se le pide "escribe tests" escribe tests que
   describen lo que el código hace hoy. Las aserciones de montos, impuestos y stock se
   derivan de `docs/features/`, nunca de ejecutar el código y copiar el resultado.
 - [x] **E2E en CI** — cerrado: el job `e2e-navegador` de `.github/workflows/ci.yml` corre
   el `webServer` de arriba y la suite completa (`npm run e2e`) contra Postgres real en
-  cada push a `main`. Integrar `@smoke` como subconjunto rápido si la suite completa deja
-  de caber en el presupuesto del job sigue pendiente.
+  cada push a `main` — `19 passed (43.3s)` en la corrida de `e637c0a6`. Usar `@smoke` como
+  subconjunto del job quedó **descartado** el 2026-08-10: los 43 s no dominan el costo
+  frente a `npm ci` + dos builds + Chromium, y el CI mediría menos que el local.
 - [ ] **Sección E2E de `anti-patterns.md`**, a poblar cuando aparezcan errores reales
   (candidato ya visto: tipear antes de la hidratación de Nuxt deja el `v-model` sin
   capturar → el fix es esperar la condición, `networkidle` + `toBeEnabled`, no un sleep).
