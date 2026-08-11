@@ -764,6 +764,37 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   (2) reactivar PRs + `required status checks` sobre `main` (revierte la regla de dev
   "trabajar directo sobre `main`") → el código roto ni toca la rama que despliega. Cierra el
   agujero del post-mortem del 2026-07-23 (push a `main` con e2e rojo).
+- [ ] **Smoke post-deploy automático en el CI** (harness/infra, anotado 2026-08-11) — hoy
+  `./scripts/smoke-produccion.sh` existe y funciona, pero **se corre a mano**, así que la
+  única red que corre sola tras un push es el `healthcheckPath`, y ése prueba el arranque,
+  no que el demo siga sirviendo. Es el escalón **barato y previo** al portón de arriba: no
+  impide el deploy roto —Railway ya promovió—, pero avisa en minutos en vez de cuando
+  alguien abre el demo.
+
+  **Lo que lo hace no trivial es la carrera:** Railway despliega en paralelo al CI (la
+  conexión vive en el dashboard, no en `.github/`), así que un job que pegue a producción
+  apenas arranca mide el deployment **anterior** y da un verde que no corresponde al commit
+  que se acaba de subir. El ancla que la mata está verificada: el JSON de
+  `railway deployment list --service backend --json` trae `meta.commitHash`. El job tiene
+  que **polear hasta que el deployment de `${{ github.sha }}` llegue a estado terminal** y
+  recién ahí correr el script.
+
+  **Forma:** job nuevo en `.github/workflows/ci.yml`, **sin `needs:`** —si el `gate` sale
+  rojo pero Railway desplegó igual, es justo cuando más importa saber si prod quedó en
+  pie—, con `timeout-minutes` holgado (el `healthcheckTimeout` del backend ya es de 300 s
+  sobre una base fría). Instala el CLI, polea por SHA, corre `./scripts/smoke-produccion.sh`.
+
+  ⛔ **Bloqueado por una acción del owner, no por trabajo de código:** hace falta un token
+  de Railway en los secrets del repo. Verificado con `--help`: `railway deployment list`
+  acepta `--project`/`--service`/`--environment`, así que **no** hace falta `railway link`
+  en CI. **Sin verificar** —confirmarlo al implementar, no asumirlo—: con qué variable se
+  autentica el CLI en un runner (token de proyecto vs. token de cuenta) y si un token de
+  proyecto alcanza para leer `deployment list`.
+
+  ⚠️ Y lo que este job **no** resuelve, para no venderlo de más: sigue siendo un detector
+  post-hoc. El deployment roto ya reemplazó al bueno cuando el smoke se pone rojo; lo que
+  evita que eso pase es el `healthcheckPath` (ya hecho) y, para el resto, el portón de
+  arriba.
 - [ ] 🚩 **Rate limiting — BLOQUEANTE PARA PRODUCCIÓN** (backend) — decisión del owner,
   2026-08-09: no se construye ahora, pero **no se sale a producción sin esto**. Hoy el
   proyecto **no tiene throttler de ningún tipo**; se anotó tres veces por separado y son el
