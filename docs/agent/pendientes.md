@@ -109,6 +109,23 @@ identificamos con ubicación concreta.
   así que el próximo que quiera verlo va a perder tiempo antes de descubrir que hay que
   desactivar la pasarela o cambiar de tenant. Decidir si se cubre con e2e (sembrando el
   `checkoutRef`) o si se documenta como pantalla de fallback y se deja sin cobertura.
+  ⚠️ **La pregunta de cobertura es la menor. Medido el 2026-08-11, mirando el código:**
+  1. **El tenant no elige nada.** `online.service.ts` → `pagar()` decide por **ausencia**:
+     `if (!tieneWebpay) return { modo: 'simulado' }`, con el comentario *"Fallback: sin
+     Webpay Plus activo, mantener la pasarela simulada actual"*. No hay configuración de
+     medios de pago online; hay una pasarela real y lo que sobra cuando falta.
+  2. **La pantalla simulada registra la venta como PAGADA sin que nadie cobre.**
+     `pasarela.vue` → `aprobar()` postea `POST /ventas` con `pagos: [...]` por el
+     `totalFinal`, y elige el método con `metodoTarjeta()`: busca uno cuyo nombre
+     contenga "crédito"/"credito" y **si no encuentra agarra `metodos[0]`**. Cualquier
+     tenant que entre sin pasarela conectada tiene una tienda online que entrega
+     mercadería y la anota cobrada. El estado `pendiente` —que el modelo ya soporta— es
+     donde debería quedar.
+  **Owner (2026-08-11): la salteó, con la función que quiere ya nombrada** — que el
+  tenant **configure** qué acepta online (tarjeta por pasarela, transferencia, pago al
+  retirar…), en vez de heredar el simulado por descarte. Eso es feature con spec propia:
+  toca configuración, tienda, registro de la venta y estado resultante. El punto 2 es un
+  defecto que existe igual, se configure o no.
 - [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
   (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
   (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue
@@ -117,6 +134,13 @@ identificamos con ubicación concreta.
   vaciar el `totalFinal` de una línea sin tocar el resto). Decidir `>= 0` (estado
   actual) vs `> 0` (`IsDecimalPositivo`) es una regla de negocio del owner, no algo a
   inferir. Requiere confirmación antes de endurecer más.
+  **Decisión del owner (2026-08-11): `> 0`.** Lo que la desatascó fue medir el campo en
+  vez de discutirlo: es **opcional** y no tiene ningún productor —cero ocurrencias de
+  `precioUnitario` en `frontend/app`, y `online.service.ts:39` lo omite a propósito—, así
+  que si no viene, el precio sale de `item.precioBase` (`ventas.service.ts:316`).
+  Prohibir el `0` **no** cierra ningún camino para regalar un ítem (precioBase 0,
+  descuento al 100%): cierra el override a cero, que es el único que vacía una línea sin
+  dejar rastro de quién la regaló.
 - [ ] **El país del tenant se deriva con el mismo JOIN en 12 queries** (backend, ocho
   módulos: `impuestos`, `monedas` ×2, `metodos-pago` ×2, `ventas`, `items` ×2, `propinas`
   ×2, `seeder`, `turnos`) — todas hacen `tenants.provincia_id → provincia.pais_id`. **Idea del owner
@@ -224,6 +248,26 @@ entre `TIMESTAMPTZ` y `TIMESTAMP` sin zona, se cerró el 2026-08-06 — ver
   códigos de DESCUENTO— ya se sacó (2026-08-01); esto es el resto. Sacarlo toca
   persistencia, así que va aparte: hay que confirmar primero que no haya filas en
   `recargo_tramos` y decidir si la tabla se va con él.
+  **Decisión del owner (2026-08-11): NO se borra — se construye.** Recargos por escalones
+  configurables, igual que los descuentos. Cambia el encuadre de la entrada: deja de ser
+  limpieza y pasa a ser feature a medias.
+  **Medido el 2026-08-11, y es menos de lo que decía la entrada:** el motor **ya los
+  aplica**. `evaluarRegla` (`calculo-precios.engine.ts:290`) ramifica por
+  `regla.tramos.length > 0` sin mirar si es descuento o recargo, y `procesarReglas` es
+  la misma función para ambos. Lo que falta es (a) un tipo de recargo con
+  `campoTramos: true` en `RECARGO_CONFIG` (`frontend/app/utils/reglas-form-config.ts`),
+  hoy ninguno de los 5 lo tiene; (b) el equivalente de `TIPOS_CON_TRAMOS` en
+  `recargos.service.ts`, que hoy no existe; (c) las filas del tipo nuevo en el seeder.
+  ⚠️ **Lo que hay que analizar antes de diseñar: la magnitud del escalón cambia por
+  tipo.** `calculo-precios.engine.ts:291` solo conoce dos —`codigo === 'por_mayor'` usa
+  cantidad, **cualquier otro cae a monto**—. Con los 5 tipos actuales a la vista,
+  `general` y `recargo_metodo_pago` escalonarían por monto (que sale sin tocar el motor),
+  pero `mora` pide **días de atraso** y `interes_simple`/`interes_compuesto` piden
+  **plazo**, magnitudes que el motor no tiene. O sea: no es un tipo nuevo, es una
+  pregunta por tipo. El análisis va primero y **es transversal, no de restaurante**: el
+  motor sirve a tenants de cualquier rubro.
+  ⛔ Si el análisis concluye que hace falta una magnitud nueva, eso **toca el motor de
+  precios**: se vuelve a confirmar con el owner antes de escribir.
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 
@@ -251,6 +295,12 @@ verdad; el conteo del encabezado describe la auditoría original.
   **Es decisión de owner si se encara**, con este número sobre la mesa: un carrito de 5
   líneas de receta pasó de 5×(3+G) queries a 15 fijas; batchear entre líneas lo llevaría
   a ~3.
+  **Decisión del owner (2026-08-11): medir antes de decidir.** El conteo de queries no es
+  tiempo: falta el número en milisegundos de un carrito cargado —el caso real es varias
+  cajas concurrentes, no una— y recién con eso se elige entre encararlo y cerrar la
+  entrada. La medición va primero **porque el arreglo toca `resolverPersonalizacion*` y
+  `resolverGruposDeItem`, con tres llamadores** (ventas, salones, combos): hoy tiene más
+  riesgo que ganancia demostrada.
 
 ### Decidido por el owner tras investigación de mercado (2026-07-27)
 
@@ -436,7 +486,10 @@ Ver [`resueltos.md`](resueltos.md).
   ⚠️ Acá "ignorar" **no** puede significar romper el vínculo existente: un ítem no pierde su
   categoría porque la categoría se haya pausado. Lo que corresponde es **rechazar la
   asignación nueva**, y dejar en paz las que ya existen.
-  Sin decidir: si el rechazo es 400 o si se ignora en silencio.
+  **Decisión del owner (2026-08-11): rechazar con 400.** Pausar significa "no se usa
+  más", no "las pantallas lo esconden": el enforcement va en el backend, coherente con lo
+  que ya se hace cuando se pausa una regla o un impuesto. Sigue en pie que los vínculos
+  **existentes** no se tocan — se rechaza la asignación nueva, nada más.
 - [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
   `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
   dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).
@@ -500,6 +553,9 @@ Ver [`resueltos.md`](resueltos.md).
   fijos), o dejarlo y documentar que el orden no significa nada.
   ⛔ Sigue tocando el motor de precios: no se avanza sin volver a confirmar con el owner
   después de la investigación.
+  **Owner (2026-08-11): la investigación se corre ahora.** Es lo único destrabado de esta
+  entrada; el diseño sigue esperando a que sus hallazgos estén sobre la mesa y a una
+  segunda confirmación.
 - [ ] **¿Un descuento debe topearse aunque un recargo posterior levante el total?**
   (backend, `calculo-precios.engine.ts`) — el piso en cero (2026-07-28) topea **regla por
   regla** contra el acumulado en ese punto de la fórmula. Con fórmula `descuentos →
@@ -511,6 +567,14 @@ Ver [`resueltos.md`](resueltos.md).
   Lo detectó la revisión independiente con un fuzz de 20.000 ventas. Es raro (exige un
   descuento fijo mayor al neto **y** un recargo posterior que lo levante), por eso no se
   resolvió sobre la marcha.
+  **Decisión del owner (2026-08-11): el sobrante se pierde — queda como está.** El tope
+  sigue siendo regla por regla, aun sabiendo que en este borde el cliente paga de más
+  ($2.000 contra $1.800 en el ejemplo). Gana la coherencia de la traza: cada paso del
+  cálculo se explica solo y el detalle que ve el cliente nunca muestra un intermedio
+  negativo. **No toca el motor.** Lo que queda es cerrarla como corresponde: dejar la
+  regla escrita en `docs/features/motor-calculo-precios.md` y fijarla con un test que use
+  este mismo caso, para que el próximo que lea el piso en cero no lo "arregle" creyendo
+  que es un descuido.
 
 ## Auditoría `turnos` + `salones` + `garzones` (2026-08-06) — hallazgos confirmados
 
@@ -596,6 +660,15 @@ Quedan:
   membresía). Se anota y no se arregla porque el fix depende de una decisión que no está
   tomada — si algún día se pueden dar de baja usuarios, ¿el alta los revive, los rechaza, o
   el correo queda quemado?
+  **Decisión del owner (2026-08-11): el alta REVIVE la cuenta, avisando.** La persona
+  vuelve con su historial —sus ventas, turnos y propinas siguen siendo suyas— y el alta
+  responde que está reactivando una cuenta, no creando una.
+  ⚠️ **Revivir la cuenta no es revivir los permisos.** El alta tiene que declarar los
+  roles de nuevo, igual que hace hoy `POST /tenants/usuarios`; heredar en silencio los
+  viejos es exactamente el agujero que la entrada de `addMember` de acá arriba describe.
+  Sigue sin implementarse por lo mismo de antes: **nada soft-borra un `Usuario`**, así que
+  el escenario es inalcanzable. Lo que la decisión fija es la forma del fix el día que
+  exista la baja — y que la unique de `usuarios.correo` va a tener que ser parcial.
 
 - [ ] **Verificación de correo del auto-registro público** (backend) — lo único que
   quedó abierto de la entrada de mail, que se cerró el 2026-08-09 (ver
@@ -623,6 +696,8 @@ Quedan:
   `### ❌`. Ya estaba en 23 antes de esa tanda, así que no lo rompió un commit puntual: el
   tope nunca se aplicó. Decidir si se poda —y con qué criterio de "sin reincidencia", que
   hoy no está registrado en ningún lado— o si la regla se cambia por otra cosa.
+  **Decisión del owner (2026-08-11): la delega en el agente.** Es herramienta del harness,
+  no producto. Se poda y se reporta en una línea qué salió.
 - [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
   el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
   `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos
