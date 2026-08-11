@@ -17,6 +17,39 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El cuaderno de anti-patrones vuelve a su tope, y sin borrar nada (2026-08-11)
+
+**Entrada original (verbatim):** *"`anti-patterns.md` pasó su propio tope de 20 entradas y
+nadie podó (docs, `docs/agent/anti-patterns.md:14`) — la regla 3 del archivo dice 'Tope: 20
+entradas. Si se llena, la más antigua sin reincidencia se elimina'. Medido el 2026-08-07:
+**25** entradas `### ❌`. Ya estaba en 23 antes de esa tanda, así que no lo rompió un commit
+puntual: el tope nunca se aplicó."*
+
+**El owner la delegó en el agente** (2026-08-11): es herramienta del harness, no producto.
+
+**Lo que se hizo, y por qué no fue podar.** La regla mandaba borrar 5 entradas, y borrar
+era la peor salida disponible: **cada entrada es un bug que ya se pagó**, y ninguna de las
+25 era relleno. Se llegó a 20 por otros dos caminos que no pierden nada:
+
+- **Fusión de 5 en 1.** Las cinco entradas de `vue-tsc` estricto (`@click` que devuelve
+  valor, índice sin guard, `string | null` contra Nuxt UI, mismatch con reka, tipado de los
+  unit tests) son **la misma lección con distinto código de error**: `vue-tsc` rechaza lo
+  que `nuxt build` acepta, y el fix es siempre solo-de-tipo. Quedaron como subsecciones
+  `####` de una entrada única, con todo el contenido intacto.
+- **Una pasó a `✅ AUTOMATIZADO`** (regla 2 del archivo, que ya existía y tampoco se venía
+  aplicando): la de Tailwind hardcodeado, que `check-design-tokens.mjs` enforcea en el gate
+  y en el pre-commit. Su propio texto ya decía "AUTOMATIZADO" adentro pero seguía contando
+  como entrada activa.
+
+Resultado: **20 exactas**, 3 stubs de automatizadas, 0 líneas de conocimiento perdidas.
+
+**La regla 3 se reescribió** para que la próxima vez no haya que reinventar el criterio:
+primero pasar a `✅` lo automatizado, después fusionar caras del mismo error, y **borrar
+recién al final**. Con la nota de que esta fue la primera vez que el tope se ejecutó desde
+que existe.
+
+---
+
 ## El orden de los descuentos deja de decidirlo el azar de una query (2026-08-11)
 
 **La entrada estaba abierta desde el 2026-07-28** y es la más vieja de las que se cerraron

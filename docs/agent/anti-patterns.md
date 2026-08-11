@@ -11,7 +11,13 @@ conocimiento que no se puede derivar leyendo el código correcto.
 2. **Cada entrada sale cuando se automatiza.** Si el patrón pasa a ser regla de ESLint
    o test, se borra de aquí y queda la referencia a la regla. Este archivo no crece
    indefinidamente.
-3. **Tope: 20 entradas.** Si se llena, la más antigua sin reincidencia se elimina.
+3. **Tope: 20 entradas `### ❌`.** Si se llena, hay tres salidas en este orden: pasar a
+   `### ✅` lo que ya esté automatizado (regla 2), **fusionar** entradas que sean caras del
+   mismo error, y recién entonces eliminar la más antigua sin reincidencia. Borrar es la
+   última porque cada entrada es un bug que ya se pagó.
+   *Aplicado el 2026-08-11, que fue la primera vez: el tope estaba en 25 y nunca se había
+   ejecutado. Se fusionaron las cinco de `vue-tsc` estricto en una, y la de Tailwind pasó a
+   `✅` porque `check-design-tokens.mjs` ya la enforcea. Quedó en 20 sin perder una línea.*
 4. Formato fijo: qué pasó → ❌ mal → ✅ bien → una línea de porqué.
 
 ---
@@ -363,7 +369,7 @@ produjo**. Un booleano "cargando" no alcanza: hay que poder responder *¿este
 resultado es de esto que estoy mirando?*, no solo *¿hay algo en vuelo?*.
 Detalle: `docs/patterns/frontend.md` §10.1.
 
-### ❌ Tailwind hardcoded en vez de tokens semánticos
+### ✅ Tailwind hardcoded en vez de tokens semánticos — AUTOMATIZADO
 
 ```vue
 <!-- MAL -->
@@ -394,7 +400,13 @@ Cada copia local diverge en separadores, decimales y moneda. El formato de monto
 depende de la moneda oficial del tenant, así que una copia local es un bug de datos,
 no de estilo.
 
-### ❌ `@click` con expresión que devuelve valor (TS2322)
+### ❌ Fricciones de `vue-tsc` estricto — cinco caras del mismo error
+
+Eran cinco entradas sueltas hasta el 2026-08-11. Se fusionaron porque son **la misma
+lección**: `vue-tsc` estricto rechaza cosas que `nuxt build` acepta, y **el fix es siempre
+solo-de-tipo, cero runtime**. Lo cazó `typecheck:ratchet`, nunca el build.
+
+#### `@click` con expresión que devuelve valor (TS2322)
 
 ```vue
 <!-- MAL — la expresión devuelve el array/boolean → handler no es void (vue-tsc estricto) -->
@@ -423,7 +435,7 @@ ya usado en el repo para handlers de varias sentencias.
 Fue el patrón dominante de los errores de tipo del frontend (jul-2026): `items.vue`
 solo tenía 38 (16 así + 22 del índice de abajo).
 
-### ❌ Acceso por índice sin guard en el template (TS2532)
+#### Acceso por índice sin guard en el template (TS2532)
 
 ```vue
 <!-- MAL — con noUncheckedIndexedAccess, form.series[idx] es T | undefined -->
@@ -458,7 +470,7 @@ Igual criterio para índice/destructuring ya guardado en `<script>`/`.ts` (TS253
 `entero!` del `split('.')` de un `toFixed`, o `v-model="map[k]!.campo"` bajo `v-if="map[k]"`.
 El `!` solo donde una guarda previa garantiza la existencia — nunca en el índice dudoso.
 
-### ❌ Estado `string | null` bindeado a prop/`v-model` de Nuxt UI (TS2322)
+#### Estado `string | null` bindeado a prop/`v-model` de Nuxt UI (TS2322)
 
 Los inputs de Nuxt UI aceptan `string | undefined`, no `null`. Un ref de error o un
 campo de form tipado `| null` no es asignable:
@@ -483,7 +495,7 @@ el campo solo se manda cuando `cfg` lo habilita, y ahí el valor siempre es un s
 así que la coerción es payload-neutral. Si el `null` sí llegara al body, es decisión de
 negocio (limpiar vs omitir) — preguntar.
 
-### ❌ Mismatch de tipos con handlers/props de Nuxt UI · reka (TS2322/2345/2459)
+#### Mismatch de tipos con handlers/props de Nuxt UI · reka (TS2322/2345/2459)
 
 Casos puntuales de vue-tsc estricto contra los tipos de `@nuxt/ui`/`reka-ui`. Todos con
 fix **solo-de-tipo, cero runtime**:
@@ -502,7 +514,7 @@ fix **solo-de-tipo, cero runtime**:
   declara `style` aunque reka lo reenvía en runtime. Castear a `DrawerProps['content']`
   (importado de `@nuxt/ui`, dep directa — nunca de `reka-ui` transitivo).
 
-### ❌ Tipado estricto en unit tests (vitest) — TS2321/2347/2532/2554
+#### Tipado estricto en unit tests (vitest) — TS2321/2347/2532/2554
 
 Al entrar los `.spec.ts` bajo vue-tsc estricto salieron cuatro fricciones, todas
 solo-de-tipo:

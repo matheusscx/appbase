@@ -746,14 +746,6 @@ Quedan:
   `garzones.usuario_id` + `usuarios_tenants.es_totem` y la resolución del garzón actuante,
   todo diseñado en el plan.
 
-- [ ] **`anti-patterns.md` pasó su propio tope de 20 entradas y nadie podó** (docs,
-  `docs/agent/anti-patterns.md:14`) — la regla 3 del archivo dice *"Tope: 20 entradas. Si se
-  llena, la más antigua sin reincidencia se elimina"*. Medido el 2026-08-07: **25** entradas
-  `### ❌`. Ya estaba en 23 antes de esa tanda, así que no lo rompió un commit puntual: el
-  tope nunca se aplicó. Decidir si se poda —y con qué criterio de "sin reincidencia", que
-  hoy no está registrado en ningún lado— o si la regla se cambia por otra cosa.
-  **Decisión del owner (2026-08-11): la delega en el agente.** Es herramienta del harness,
-  no producto. Se poda y se reporta en una línea qué salió.
 - [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
   el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
   `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos
