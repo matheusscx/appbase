@@ -84,7 +84,32 @@ export class SuscripcionesService {
         usuarioId,
       );
 
-    // 5. Total del primer período (mismo motor que usará la venta)
+    // 5. Total del primer período (mismo motor que usará la venta). Se necesita
+    //    ANTES del cobro: es el monto que se le autoriza a la tarjeta.
+    //
+    //    `resultado.advertencias` se descarta acá a propósito. Las que viajan al
+    //    cliente son las de la venta del paso 9, por una razón que no es de
+    //    contenido sino de autoridad: la venta es el cálculo que queda
+    //    persistido, así que sus advertencias explican la fila que existe. Las de
+    //    acá explican un cálculo intermedio que no sobrevive.
+    //
+    //    Hoy los dos conjuntos son idénticos: la venta llama a `calcular` con
+    //    argumentos equivalentes (mismo tenant, mismo ítem, cantidad 1, sin
+    //    `metodoPagoId` ni reglas a nivel venta en ninguno de los dos; la venta
+    //    manda además `precioUnitario`, que `resolverLinea` deriva igual cuando
+    //    falta), y las advertencias que la venta agrega por su cuenta son de
+    //    recetas y combos, inalcanzables acá porque el paso 1 rechaza todo lo que
+    //    no sea `tipo='suscripcion'`.
+    //    Que sean idénticos es una coincidencia del estado actual, no una
+    //    garantía: los dos caminos arman su mapa de tasas distinto. `ventas`
+    //    toma `tenant_moneda.valor_del_dia` crudo para **toda** moneda, la
+    //    oficial incluida; el motor pasa por `monedas.service.ts`, que **pisa**
+    //    con `'1'` la tasa de la oficial. Y "oficial" tampoco significa lo mismo
+    //    en los dos lados: ahí sale de `pais.moneda_oficial_id` y en `ventas` de
+    //    `tenant_moneda.es_default` (que ahí solo elige qué moneda se estampa en
+    //    la venta, no la tasa). Con datos sanos coinciden. Si dejaran de
+    //    coincidir, la buena sigue siendo la de la venta — que es justo por qué
+    //    se eligió esa.
     const resultado = await this.calculoPreciosService.calcular(tenantId, {
       lineas: [{ itemId: dto.itemId, cantidad: '1' }],
     });
@@ -141,6 +166,17 @@ export class SuscripcionesService {
       tarjetaLast4: string | null;
       ventaInicialId: string;
       creadoEl: Date;
+      /**
+       * Lo que el motor de precios tuvo que avisar sobre el primer período —
+       * descuento topeado en cero, regla o impuesto pausado, faltante de receta.
+       * Viene **siempre**, vacío si no hay nada que decir: sin eso el cliente no
+       * puede distinguir "sin advertencias" de "el endpoint no las manda" (misma
+       * convención que `garzones.service.ts`).
+       *
+       * Se devuelven aunque el cobro ya haya ocurrido: no son un freno, son la
+       * explicación de por qué el monto autorizado no es el precio de catálogo.
+       */
+      advertencias: string[];
     };
     try {
       salida = await this.dataSource.transaction(async (manager) => {
@@ -196,6 +232,7 @@ export class SuscripcionesService {
           tarjetaLast4: ultimos4,
           ventaInicialId: venta.id,
           creadoEl: suscripcion.creadoEl,
+          advertencias: venta.advertencias,
         };
       });
     } catch (e) {

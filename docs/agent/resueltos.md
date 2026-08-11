@@ -17,6 +17,56 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El alta de una suscripción cobraba y se callaba lo que el motor tenía para decir (2026-08-11)
+
+**Entrada original (verbatim):** *"**`suscripciones.service.ts:87-90` descarta
+`resultado.advertencias`** (backend, medido 2026-08-03) — la justificación escrita ("hoy
+ningún ítem de suscripción tiene descuentos") es más angosta que la superficie nueva: ahora
+ese descarte también se traga los avisos de regla o impuesto pausado sobre el primer
+período."*
+
+**La entrada apuntaba al descarte equivocado.** El alta llama al motor **dos veces**: en el
+paso 5 para saber cuánto autorizarle a la tarjeta, y otra vez adentro de la venta del paso 9.
+La entrada nombra el primero; el que perdía información era el segundo.
+
+El criterio para elegir no es de contenido sino de **autoridad**: la venta es el cálculo que
+queda persistido, así que sus advertencias explican la fila que existe; las del paso 5
+explican un intermedio que no sobrevive. Hoy los dos conjuntos son **idénticos** —argumentos
+equivalentes, y las advertencias que la venta agrega por su cuenta son de recetas y combos,
+inalcanzables acá porque el paso 1 rechaza todo lo que no sea `tipo='suscripcion'`—. La
+primera redacción de este cierre decía "superconjunto" y que la venta "le suma recetas y
+combos": **la revisión independiente lo refutó leyendo el código**, y el docblock quedó
+reescrito sobre la autoridad, que es el argumento que sí se sostiene si los dos conjuntos
+alguna vez divergen (los dos caminos arman su mapa de tasas por consultas distintas).
+
+**Qué se hizo.** `crear()` devuelve `advertencias: string[]` tomadas de `venta.advertencias`
+— siempre presente, vacío si no hay nada, misma convención que `garzones.service.ts` (sin eso
+el cliente no distingue "no hubo nada que avisar" de "este endpoint no avisa"). El composable
+`useSuscripciones` las separa del resto en vez de guardarlas en la fila: describen el cobro
+que acaba de ocurrir, no el estado de la suscripción. La página las emite como un toast por
+mensaje, igual que `ventas/pos.vue` con una venta. El descarte del paso 5 queda, ahora con el
+porqué escrito encima.
+
+**No frenan el alta**, y no es un descuido: para cuando existen, el cobro contra Transbank ya
+ocurrió. Son la explicación de por qué el monto autorizado puede no ser el precio de catálogo,
+no una confirmación previa. Que la tienda **no muestre un precio calculado antes de cobrar**
+es otra cosa, y más grande: quedó anotada aparte en [`pendientes.md`](pendientes.md).
+
+**Qué lo fija:** dos tests en `suscripciones.service.spec.ts`. El happy path exige
+`advertencias: []` —vacío, no ausente—; el segundo hace que **las dos** llamadas al motor
+avisen cosas distintas y afirma que sale la de la venta. Dos mutantes, los dos muertos:
+borrar la línea cae 2 tests; cablearla a `resultado.advertencias` del paso 5 cae **1**, el
+segundo.
+
+**Y eso último recién es cierto después de arreglar el mock.** La primera versión de este
+cierre afirmaba ese "cae 1" sin haberlo medido; la corrida real decía 2, porque el mock de
+`calcular` omitía `advertencias` y el mutante producía `undefined`, que el happy path
+rechazaba **por forma, no por procedencia**. Lo encontró la revisión independiente. El mock
+ahora devuelve `advertencias: []` como el motor real, y con eso cada test falla por lo suyo y
+el segundo es de verdad el único que sostiene la regla. La lección no es la frase mal
+contada: es que **un mock infiel le presta cobertura a un test que no la tiene**, y el
+recibo escrito acá la habría dado por buena.
+
 ## Con el seed a secas ya se puede ver una comanda (2026-08-11)
 
 **Entrada original (mitad restante, verbatim):** *"Con el seed a secas

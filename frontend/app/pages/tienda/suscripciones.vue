@@ -231,7 +231,7 @@ async function confirmar() {
   confirmando.value = true
   try {
     const { diaMes, diaSemana } = diasDePayload(item)
-    await crear({
+    const { advertencias } = await crear({
       itemId: item.id,
       diaMes: diaMes ?? undefined,
       diaSemana: diaSemana ?? undefined,
@@ -239,6 +239,13 @@ async function confirmar() {
     })
     drawerOpen.value = false
     toast.add({ title: 'Suscripción activada y primer cobro realizado', color: 'success' })
+    // Mismo trato que le da el POS a las advertencias de una venta
+    // (`ventas/pos.vue`): un toast por mensaje, cada uno se explica solo. Van
+    // después del éxito porque el cobro ya ocurrió — explican el monto, no lo
+    // frenan.
+    for (const advertencia of advertencias) {
+      toast.add({ title: advertencia, color: 'warning' })
+    }
   } catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'No se pudo activar la suscripción'), color: 'error' })
   } finally {
@@ -262,13 +269,20 @@ async function reanudarAltaPendiente(inscripcionId: string) {
   }
   procesandoAlta.value = true
   try {
-    await crear({
+    const { advertencias } = await crear({
       itemId: intent.itemId,
       diaMes: intent.diaMes ?? undefined,
       diaSemana: intent.diaSemana ?? undefined,
       inscripcionId,
     })
     toast.add({ title: 'Suscripción activada y primer cobro realizado', color: 'success' })
+    // Mismo trato que le da el POS a las advertencias de una venta
+    // (`ventas/pos.vue`): un toast por mensaje, cada uno se explica solo. Van
+    // después del éxito porque el cobro ya ocurrió — explican el monto, no lo
+    // frenan.
+    for (const advertencia of advertencias) {
+      toast.add({ title: advertencia, color: 'warning' })
+    }
   } catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'No se pudo activar la suscripción'), color: 'error' })
   } finally {

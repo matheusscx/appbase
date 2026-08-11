@@ -14,6 +14,25 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] 🚩 **El alta de una suscripción muestra un precio y cobra otro** (frontend + producto,
+  **medido** 2026-08-11 al cerrar el descarte de advertencias) — el drawer "Nueva
+  suscripción" (`tienda/suscripciones.vue`) rotula **"Precio del período"** con
+  `item.precioBase`, que es el precio **neto** del catálogo. El backend, en cambio, le
+  autoriza a la tarjeta `resultado.totales.totalFinal`, que sale del motor con impuestos,
+  descuentos y recargos aplicados.
+  **La medición, contra el stack real (tenant Paris, ítem de suscripción a $30.000):** el
+  drawer dice `30000` y a Transbank se le cobran **`35700`** — los $5.700 son el IVA al 19%
+  (`550e8400-…-440280`). El cliente confirma un número y se le cobra otro un 19% mayor, sin
+  ningún paso intermedio que se lo muestre.
+  Ojo con reproducirlo: **el seed no trae ningún ítem `tipo='suscripcion'`**, así que la
+  pantalla se ve vacía a menos que se cree uno (así se midió esto).
+  Por qué no se arregló junto con las advertencias: ahí lo que faltaba era devolver un campo;
+  esto es una **previsualización de precio antes de cobrar** —qué se muestra, si frena el
+  alta, si reusa `AdvertenciasPrecio` como ya hacen el carrito y la pasarela— y eso es
+  decisión de producto, no una corrección. Las advertencias que ahora sí llegan
+  (`POST /suscripciones` → `advertencias`) explican el monto **después** del cobro; no lo
+  reemplazan.
+
 - [ ] **`impuestos` no tiene índice único de nombre por tenant, y sus hermanas sí**
   (backend/BD, encontrado 2026-08-11 por la revisión del cierre de las advertencias
   repetidas) — `descuentos` y `recargos` tienen `uq_descuentos_tenant_nombre_vivo` y
@@ -277,6 +296,20 @@ identificamos con ubicación concreta.
   es **admin-only** desde el 2026-08-09 (`TenantAdminGuard`). El token que usa el test es
   el del admin, así que un 403 liso no es la explicación obvia — pero es justo la clase de
   hipótesis que la aserción de status confirmaría o descartaría de una.
+
+  🆕 **Segundo avistaje, y le da forma a la hipótesis (2026-08-11).** En una corrida de la
+  suite completa, `ventas.e2e-spec.ts` → *"anula, repone el stock y persiste quién y por
+  qué"* falló con **`401 Unauthorized` en `POST /ventas`**. Mismo patrón: un solo test, la
+  corrida siguiente (misma suite, mismo `reset-db.sh`) verde, y `--verificar` confirmó una
+  sola siembra. Es otro spec y otra ruta, así que **no es "el flaky de caja"**: es un
+  intermitente de **autenticación**, que es la familia a la que los dos pertenecen.
+
+  Por qué importa para el de caja: un `401` devuelve un **objeto** (`{statusCode, message}`),
+  no un array — que es exactamente `resMiembros.body.find is not a function`. Los dos
+  síntomas se explican con la misma causa. **Sigue siendo hipótesis, no medición**: nadie
+  vio todavía el status de la respuesta que rompió el de caja; eso lo va a decir la
+  aserción que se agregó el 2026-08-11 la próxima vez que ocurra. Lo que cambió es que ahora
+  hay dónde mirar primero: por qué un token válido a mitad de suite se rechaza.
 ---
 
 ## Detector de desborde de layout (`e2e/layout/desborde.spec.ts`, 2026-07-29)
@@ -602,10 +635,6 @@ Ver [`resueltos.md`](resueltos.md).
   serlo en cuanto exista un productor.
   Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
   (línea vs venta), que hoy no distingue.
-- [ ] **`suscripciones.service.ts:87-90` descarta `resultado.advertencias`** (backend, medido
-  2026-08-03) — la justificación escrita ("hoy ningún ítem de suscripción tiene descuentos") es
-  más angosta que la superficie nueva: ahora ese descarte también se traga los avisos de regla
-  o impuesto pausado sobre el primer período.
 - [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
   `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
   dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).

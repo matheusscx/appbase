@@ -134,8 +134,17 @@ Request:
 }
 
 Response (201):
-{ "id": "uuid", "ventaInicialId": "uuid", "proximoCobro": "2026-08-15", "estado": "activa" }
+{ "id": "uuid", "ventaInicialId": "uuid", "proximoCobro": "2026-08-15", "estado": "activa",
+  "advertencias": [] }
 ```
+
+`advertencias` viene **siempre** (vacío si no hay nada que decir) y son las de la
+venta del primer período, no las del cálculo previo al cobro: la venta es el
+cálculo que queda persistido, así que sus advertencias explican la fila que
+existe. Hoy los dos conjuntos coinciden. Explican por qué el monto
+autorizado puede no ser el precio de catálogo —descuento topeado en cero, regla o
+impuesto pausado—; no frenan el alta, porque para cuando existen el cobro ya
+ocurrió. La tienda las muestra como toasts, igual que el POS con una venta.
 
 El primer período se cobra de verdad contra Transbank vía Oneclick
 (`CobrosService.cobrar`, origen `interno`) con la tarjeta tokenizada de

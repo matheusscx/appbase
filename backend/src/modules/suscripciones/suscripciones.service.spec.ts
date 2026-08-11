@@ -77,12 +77,20 @@ describe('SuscripcionesService', () => {
       findOne: jest.fn().mockResolvedValue(mockItemSuscripcionMensual),
     };
     calculoPreciosServiceMock = {
-      calcular: jest
-        .fn()
-        .mockResolvedValue({ totales: { totalFinal: '30000.0000' } }),
+      // `advertencias: []` no es decorado: `calcularVenta` la devuelve **siempre**
+      // (`calculo-precios.engine.ts`), y un mock que la omite hace que un
+      // `advertencias: undefined` en el servicio se vea como un fallo de forma en
+      // cualquier test, tape cuál sea la causa. Fiel al motor, cada test falla por
+      // lo suyo.
+      calcular: jest.fn().mockResolvedValue({
+        totales: { totalFinal: '30000.0000' },
+        advertencias: [],
+      }),
     };
     ventasServiceMock = {
-      crearEnTransaccion: jest.fn().mockResolvedValue({ id: 'venta-1' }),
+      crearEnTransaccion: jest
+        .fn()
+        .mockResolvedValue({ id: 'venta-1', advertencias: [] }),
     };
     metodosPagoServiceMock = {
       resolverMetodoCredito: jest.fn().mockResolvedValue(METODO_PAGO_ID),
@@ -191,8 +199,43 @@ describe('SuscripcionesService', () => {
           id: SUSCRIPCION_ID,
           ventaInicialId: 'venta-1',
           estado: 'activa',
+          // Vacío, no ausente: el cliente tiene que poder distinguir "no hubo
+          // nada que avisar" de "este endpoint no avisa".
+          advertencias: [],
         }),
       );
+    });
+
+    // El alta cobra la tarjeta con el total del paso 5 y crea la venta en el
+    // paso 9. Las dos llamadas al motor avisan, y la que viaja al cliente tiene
+    // que ser la de la venta: es la del cálculo que quedó persistido.
+    //
+    // Este test fija **cuál de las dos**, y es el único que lo hace: medido con
+    // el mutante `advertencias: resultado.advertencias` (cablear al paso 5), la
+    // suite cae 1 test —este— y el happy path pasa. Eso depende de que el mock
+    // de `calcular` devuelva `advertencias: []` como el motor real; con un mock
+    // que la omitiera, el happy path también fallaría, pero por forma
+    // (`undefined`) y no por procedencia, y este test dejaría de ser el que
+    // sostiene la regla sin que nadie lo note.
+    it('devuelve las advertencias de la venta, no las del cálculo previo al cobro', async () => {
+      calculoPreciosServiceMock.calcular.mockResolvedValueOnce({
+        totales: { totalFinal: '30000.0000' },
+        advertencias: [{ titulo: 'Solo del paso 5', detalle: 'no debe salir' }],
+      });
+      ventasServiceMock.crearEnTransaccion.mockResolvedValueOnce({
+        id: 'venta-1',
+        advertencias: [
+          'Descuento "Promo": no se aplicó completo porque superaba el monto disponible',
+          'Impuesto "IVA": está pausado y no se aplicó',
+        ],
+      });
+
+      const result = await service.crear(TENANT_ID, USUARIO_ID, dto);
+
+      expect(result.advertencias).toEqual([
+        'Descuento "Promo": no se aplicó completo porque superaba el monto disponible',
+        'Impuesto "IVA": está pausado y no se aplicó',
+      ]);
     });
 
     it('cobro rechazado → BadRequestException y NO crea venta/suscripción', async () => {

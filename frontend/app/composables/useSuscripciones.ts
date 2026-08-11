@@ -90,18 +90,26 @@ export function useSuscripciones() {
     }
   }
 
+  /**
+   * El alta devuelve la suscripción **más** lo que el motor de precios avisó
+   * sobre el primer período (viene siempre, vacío si no hay nada). Se separa del
+   * resto en vez de guardarlo: `advertencias` describe el cobro que acaba de
+   * ocurrir, no el estado de la suscripción, y la fila de la tabla no lo muestra.
+   */
   async function crear(body: {
     itemId: string
     diaMes?: number
     diaSemana?: number
     inscripcionId: string
-  }): Promise<Suscripcion> {
-    const saved = await useApiFetch<Suscripcion>(`${apiUrl}/suscripciones`, {
+  }): Promise<{ suscripcion: Suscripcion, advertencias: string[] }> {
+    const { advertencias, ...suscripcion } = await useApiFetch<
+      Suscripcion & { advertencias: string[] }
+    >(`${apiUrl}/suscripciones`, {
       method: 'POST',
       body,
     })
-    upsertLocal(saved)
-    return saved
+    upsertLocal(suscripcion)
+    return { suscripcion, advertencias }
   }
 
   async function accion(id: string, tipo: keyof typeof ESTADO_TRAS_ACCION) {

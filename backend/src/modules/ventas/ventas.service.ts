@@ -575,9 +575,12 @@ export class VentasService {
     // mismos dos productos en orden inverso se bloqueaban en cruz y Postgres
     // abortaba una — venta caída con un error opaco, sin corrupción pero sin
     // explicación. Un orden global fijo hace el deadlock imposible.
-    // Arranca con lo que avisó el motor de precios (hoy: descuentos topeados por
-    // el piso en cero) y se le suma lo de recetas/combos más abajo. El POS las
-    // renderiza como toasts sueltos, cada mensaje se explica solo.
+    // Arranca con lo que avisó el motor de precios (descuento topeado por el piso
+    // en cero, regla pausada, impuesto pausado, ítem pausado) y se le suma lo de
+    // recetas/combos más abajo. Se renderizan
+    // como toasts sueltos, cada mensaje se explica solo — en el POS
+    // (`ventas/pos.vue`) y, desde el 2026-08-11, en el alta de suscripciones de
+    // la tienda, que devuelve estas mismas advertencias al cliente.
     const advertencias: string[] = resultado.advertencias.map(
       (a) => `${a.titulo}: ${a.detalle}`,
     );
