@@ -800,7 +800,7 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   proyecto **no tiene throttler de ningún tipo**; se anotó tres veces por separado y son el
   mismo trabajo, así que van juntas para decidir la infraestructura **una vez**.
 
-  Los cuatro endpoints, ordenados por lo que cuesta el abuso:
+  Los cinco, ordenados por lo que cuesta el abuso:
 
   1. **`POST /auth/recuperar`** — el peor, y el más nuevo (2026-08-09). Es público, sin
      auth, y **dispara un envío saliente a una dirección que elige quien llama**. `login`
@@ -818,6 +818,22 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
      como barrera, o si hace falta límite por garzón.
   4. **`POST /auth/invitacion/:token` y `/auth/recuperar/:token`** — públicos por diseño.
      Adivinar un token de 256 bits no es un vector, pero sin límite son superficie gratis.
+  5. **`pasarela/retorno/inscripcion` y `pasarela/retorno/pago`** (GET y POST cada uno:
+     Webpay vuelve por uno u otro según el desenlace) — agregado el 2026-08-11 al revisar
+     el healthcheck. Va último porque **el costo del abuso es de otra naturaleza**: no es
+     adivinar una credencial —el token de un solo uso de Transbank no se adivina— sino
+     **agotar el pool**. Son anónimos por diseño (la credencial es ese token, no un guard:
+     `pasarela-retorno.controller.ts` no tiene `@UseGuards`) y cada request va a la base
+     —`pagos-redirect.service.ts:152,255,279` hace `ordenRepo.findOne`, e
+     `inscripciones.service.ts` inyecta `DataSource` y repositorios—. Con el pool de `pg` en
+     su default (~10 conexiones, `app.module.ts` no lo sube) y sin throttler, un flood
+     anónimo compite con el tráfico autenticado real.
+     ⚠️ **Esta lista decía cuatro y estaba incompleta**: la revisión independiente del
+     healthcheck lo encontró porque yo había afirmado que `/api/health` era la única ruta
+     anónima que tocaba la base, y era falso. `/api/health` **no** entra en esta lista: se
+     defiende solo, con ventana de 2 s + single-flight (`app.service.ts`). Estos dos son la
+     misma forma sin esa defensa — y cuando se encare el throttler global, ese mecanismo
+     casero se puede tirar.
 
   **Al encararlo:** `@nestjs/throttler`, límite global por IP + límites estrictos por
   endpoint. ⚠️ **La key no puede filtrar entre tenants** ni dejar que un tenant agote la
