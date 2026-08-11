@@ -14,6 +14,21 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
+  criterios distintos para "esta personalización cambia el precio"** (frontend, medido
+  2026-08-11 al cerrar la entrada de `precioUnitario`) — `useVenta.ts:146` y `:197` deciden
+  si guardan y si mandan `precioUnitarioOverride` con `if (precioOverride)`. Es un
+  **string**, así que `'0'` es truthy y el cero viaja igual: el filtro no filtra lo único
+  que podría querer filtrar. Hoy no rompe nada —`calcular` acepta el 0 a propósito, ver
+  `calcular.dto.ts`— pero es la clase de chequeo que se cae sola cuando alguien endurece
+  el DTO, que es exactamente lo que casi pasa.
+  Al lado: **el POS y salones no coinciden en cuándo hay recargo.** `personalizacionVacia`
+  (`useRecetaPersonalizacion.ts:154`) es falso con solo `omitidos` —un "sin cebolla" ya
+  cuenta—, mientras que `tienePersonalizacionConRecargo` (`useSalones.ts:182`) exige
+  `extras`/`grupos`/`componentes` e ignora `omitidos`. Los dos alimentan el mismo
+  endpoint con el mismo campo. Ninguno de los dos es obviamente el correcto, y esa es la
+  entrada: decidir cuál es el criterio y dejar uno solo.
+
 - [ ] **Tres filtros de rango por fecha pura quedaron dependiendo del `TimeZone` de sesión**
   (backend, 2026-08-06) — efecto lateral medido de [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md).
   `mermas.service.ts:268,272`, `inventario.service.ts:788,792` y
@@ -126,21 +141,6 @@ identificamos con ubicación concreta.
   retirar…), en vez de heredar el simulado por descarte. Eso es feature con spec propia:
   toca configuración, tienda, registro de la venta y estado resultante. El punto 2 es un
   defecto que existe igual, se configure o no.
-- [ ] **`LineaVentaDto.precioUnitario` — ¿debe permitir `0`? (parcialmente cerrado)**
-  (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de negativos ya se cerró
-  (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`. Lo que sigue
-  abierto es si el `0` debería seguir siendo válido o si el owner quiere prohibirlo
-  también (podría representar un ítem promocional/gratis, o podría ser una laguna para
-  vaciar el `totalFinal` de una línea sin tocar el resto). Decidir `>= 0` (estado
-  actual) vs `> 0` (`IsDecimalPositivo`) es una regla de negocio del owner, no algo a
-  inferir. Requiere confirmación antes de endurecer más.
-  **Decisión del owner (2026-08-11): `> 0`.** Lo que la desatascó fue medir el campo en
-  vez de discutirlo: es **opcional** y no tiene ningún productor —cero ocurrencias de
-  `precioUnitario` en `frontend/app`, y `online.service.ts:39` lo omite a propósito—, así
-  que si no viene, el precio sale de `item.precioBase` (`ventas.service.ts:316`).
-  Prohibir el `0` **no** cierra ningún camino para regalar un ítem (precioBase 0,
-  descuento al 100%): cierra el override a cero, que es el único que vacía una línea sin
-  dejar rastro de quién la regaló.
 - [ ] **El país del tenant se deriva con el mismo JOIN en 12 queries** (backend, ocho
   módulos: `impuestos`, `monedas` ×2, `metodos-pago` ×2, `ventas`, `items` ×2, `propinas`
   ×2, `seeder`, `turnos`) — todas hacen `tenants.provincia_id → provincia.pais_id`. **Idea del owner

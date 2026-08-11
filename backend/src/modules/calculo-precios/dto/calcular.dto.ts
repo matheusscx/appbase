@@ -26,11 +26,25 @@ export class LineaDto {
   unidadCodigoPresentacion?: string;
 
   /**
-   * Override opcional del precio_base del ítem. Mismo signo que exige el camino
-   * de venta (`LineaVentaDto`): nunca negativo. Sin esto, `-100` pasaba —
-   * `cantidad` sí se valida en `resolverLinea` y este campo no— y el endpoint
-   * devolvía `totalFinal: -100`. El `0` sigue siendo válido: prohibirlo es la
-   * decisión de owner que sigue abierta para ventas, y no se adelanta acá.
+   * Override opcional del precio_base del ítem: nunca negativo. Sin esto, `-100`
+   * pasaba —`cantidad` sí se valida en `resolverLinea` y este campo no— y el
+   * endpoint devolvía `totalFinal: -100`.
+   *
+   * ⚠️ **El `0` sigue siendo válido acá, a diferencia de `LineaVentaDto`, que el
+   * 2026-08-11 pasó a exigir `> 0`.** La divergencia es deliberada y medida: este
+   * campo NO es el mismo canal en los dos endpoints. Al de venta no lo manda
+   * nadie (`toVentaLineasBody` no lo incluye), pero a este lo alimentan dos
+   * composables con el precio ya calculado de la línea —`useVenta.ts:197` y
+   * `useSalones.ts:200`—, y ese precio es `precioBase + extras`, que da `0`
+   * legítimamente cuando el ítem vale 0 (`create-item.dto.ts`: el `0` es
+   * legítimo) y la personalización no agrega nada pago.
+   *
+   * Rechazarlo acá rompía el cobro **en silencio**: `useCalculoPrecios` se traga
+   * el error a propósito, así que el carrito nunca vuelve a estar vigente y el
+   * modal de cobro no abre, sin un solo mensaje para el cajero. Y ni siquiera
+   * protegía nada: `ventas.service.ts` ignora el override cuando la línea tiene
+   * personalización —recalcula `precioBase + precioExtraTotal`—, o sea que el
+   * preview habría quedado más estricto que la venta.
    */
   @IsOptional()
   @IsNumberString()

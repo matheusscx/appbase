@@ -13,10 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-receta.dto';
-import {
-  IsDecimalNoNegativo,
-  IsDecimalPositivo,
-} from '../../../common/decorators/decimal-signo.decorator';
+import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
 
@@ -35,9 +32,18 @@ export class LineaVentaDto {
   @IsString()
   unidadCodigoPresentacion?: string;
 
+  /**
+   * Override opcional del `precio_base` del ítem. **Estrictamente positivo
+   * (decisión del owner, 2026-08-11):** el `0` era el único camino para dejar
+   * una línea en cero sin que quede rastro de quién la regaló.
+   *
+   * Prohibirlo no cierra ninguna venta gratis legítima: el campo es opcional y
+   * sin él el precio sale de `item.precioBase` (`ventas.service.ts`), que puede
+   * ser 0; y un regalo puntual se modela con un descuento, que sí deja traza.
+   */
   @IsOptional()
   @IsNumberString()
-  @IsDecimalNoNegativo()
+  @IsDecimalPositivo()
   precioUnitario?: string;
 
   @IsOptional()

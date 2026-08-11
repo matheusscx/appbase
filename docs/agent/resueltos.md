@@ -17,6 +17,68 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `precioUnitario` en `0` — la última laguna de la línea de venta (2026-08-11)
+
+**Entrada original (verbatim):** *"`LineaVentaDto.precioUnitario` — ¿debe permitir `0`?
+(parcialmente cerrado) (backend, `ventas/dto/create-venta.dto.ts`) — el rechazo de
+negativos ya se cerró (jul-2026): tiene `@IsDecimalNoNegativo()`, que además permite `0`.
+Lo que sigue abierto es si el `0` debería seguir siendo válido o si el owner quiere
+prohibirlo también (podría representar un ítem promocional/gratis, o podría ser una
+laguna para vaciar el `totalFinal` de una línea sin tocar el resto). Decidir `>= 0`
+(estado actual) vs `> 0` (`IsDecimalPositivo`) es una regla de negocio del owner, no algo
+a inferir. Requiere confirmación antes de endurecer más."*
+
+**Decisión del owner (2026-08-11): `> 0`.** El `0` era el único camino para vaciar una
+línea **sin rastro de quién la regaló**; un regalo modelado con descuento queda en la
+traza del cálculo con su regla y su monto. Y prohibirlo no cierra ningún camino para
+regalar: el campo es opcional, y omitirlo hace que el precio salga de `item.precioBase`,
+que sí puede ser 0.
+
+**Lo que se cambió:** `@IsDecimalNoNegativo()` → `@IsDecimalPositivo()` en `LineaVentaDto`
+(`ventas/dto/create-venta.dto.ts`), **y solo ahí**. Ningún productor manda el campo a ese
+endpoint: `toVentaLineasBody` no lo incluye y `online.service.ts:39` lo omite a propósito.
+
+**El mismo cambio en `calcular.dto.ts` se probó, se revisó y se revirtió** — vale más
+anotado que escondido, porque el razonamiento que lo justificaba era plausible y falso.
+La versión bloqueada endurecía también la previsualización "por simetría, es el mismo
+carrito". Lo que la revisión independiente encontró, y se verificó línea por línea:
+
+- **`frontend/app` SÍ manda `precioUnitario` a `calcular`**, desde `useVenta.ts:197` y
+  `useSalones.ts:200`. La afirmación contraria —que sostenía toda la decisión— salió de
+  un `grep` cuyo `head` se comió los resultados del frontend. El dato falso llegó hasta
+  la pregunta que se le hizo al owner.
+- Lo que mandan es el precio **ya calculado** de la línea (`precioBase + extras`), que da
+  `0` legítimamente cuando el ítem vale 0 —`create-item.dto.ts` documenta que ese 0 es
+  legítimo— y la personalización no agrega nada pago (alcanza con un "sin cebolla":
+  `personalizacionVacia` ya es falso con `omitidos`).
+- El filtro que decide si se manda es `if (precioOverride)` sobre un **string**, y `'0'`
+  es truthy en JS: el cero pasa el filtro y viaja.
+- El 400 resultante **no se ve**: `useCalculoPrecios` se traga el error a propósito, el
+  carrito nunca vuelve a estar vigente y el modal de cobro no abre. Sin toast.
+- Y no protegía nada: `ventas.service.ts:315` **ignora el override** cuando la línea tiene
+  personalización (recalcula `precioBase + precioExtraTotal`), o sea que el preview
+  quedaba **más estricto que la venta** — exactamente al revés del argumento usado.
+
+Queda un test que fija la divergencia en `test/calculo-precios.e2e-spec.ts` (`acepta un
+precioUnitario en 0`), para que el próximo que vea los dos DTOs distintos no los "empareje".
+
+**Un test afirmaba lo contrario y se invirtió, no se agregó:** `create-venta.dto.spec.ts`
+tenía *"acepta un precioUnitario en 0 (ítem de cortesía)"*. Ese giro es la señal de que el
+cambio llega hasta donde importa. Se sumó `acepta una línea sin precioUnitario`, que fija
+la premisa de la que cuelga toda la decisión (el campo es opcional), y en
+`test/calculo-precios.e2e-spec.ts` el caso `0` contra el endpoint real.
+
+**Mutante (revierte al código anterior, no rompe por romper):** `create-venta.dto.ts` →
+`@IsDecimalNoNegativo()` mató 1 de 7, `rechaza un precioUnitario en 0`. `acepta una línea
+sin precioUnitario` siguió verde, que es correcto: el mutante no toca la opcionalidad, y
+esa opcionalidad es la premisa de la que cuelga toda la decisión.
+
+**Gate:** backend 98 suites / 1562 unit, e2e 29 suites / 391 tests (reset previo, 1 seed),
+frontend build + test + `typecheck:ratchet` + `design:check`. Doc de la regla en
+`docs/features/ventas.md`.
+
+---
+
 ## Suite E2E de navegador (los cinco flujos críticos, escritos)
 
 Playwright corre 19 tests en `frontend/e2e/` (auth vía storageState). Los cinco flujos

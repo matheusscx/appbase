@@ -132,9 +132,8 @@ describe('Cálculo de precios (e2e)', () => {
   /**
    * `cantidad` se valida con `<= 0` en `resolverLinea`, `precioUnitario` no: con
    * `@IsNumberString()` a secas un `-100` pasaba y el endpoint devolvía
-   * `totalFinal: -100`. Se alinea con el camino real de venta, que ya exige
-   * `IsDecimalNoNegativo` — rechaza el negativo y deja pasar el `0`, cuya
-   * legitimidad es una decisión de owner abierta y no se toca acá.
+   * `totalFinal: -100`. Se alinea con el camino real de venta, que exige
+   * `IsDecimalPositivo`.
    */
   it('rechaza un precioUnitario negativo', async () => {
     const res = await request(app.getHttpServer())
@@ -145,6 +144,26 @@ describe('Cálculo de precios (e2e)', () => {
       });
 
     expect(res.status).toBe(400);
+  });
+
+  /**
+   * El contrario del de arriba, y no es simetría decorativa: `LineaVentaDto`
+   * pasó a exigir `> 0` el 2026-08-11 y este endpoint **no** lo siguió. Acá el
+   * `0` llega de dos composables que mandan el precio ya calculado de la línea
+   * (`useVenta.ts:197`, `useSalones.ts:200`), y vale 0 cuando el ítem vale 0 y
+   * la personalización no agrega nada pago. Este test fija esa divergencia:
+   * endurecerlo por simetría rompe el cobro en silencio — `useCalculoPrecios`
+   * se traga el error y el carrito nunca vuelve a estar vigente.
+   */
+  it('acepta un precioUnitario en 0 (ítem sin precio, personalización sin recargo)', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/calculo-precios/calcular')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [{ itemId: ITEM_ID, cantidad: '1', precioUnitario: '0' }],
+      });
+
+    expect(res.status).toBe(201);
   });
 
   /**
