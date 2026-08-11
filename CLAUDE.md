@@ -33,7 +33,12 @@ No asumir reglas de negocio. Detenerse y consultar al usuario si la tarea:
   ni en `docs/features/`;
 - rompe compatibilidad **multi-tenant**, **multi-moneda**, **fiscal (SII)** o de
   **auditoría**;
-- exige una **dependencia nueva** (verificar antes si el stack actual la resuelve).
+- exige una **dependencia nueva** (verificar antes si el stack actual la resuelve);
+- 🔴 abre alguno de los tres frentes de la **tanda propia** —**conexiones/deadlock,
+  rendimiento (N+1) o redondeo de plata**—, que son prioridad máxima y van **juntos y
+  aislados**, nunca de arrastre dentro de otra tarea (primera sección de
+  `docs/agent/pendientes.md`). Un N+1 **nuevo** que introduzca la tarea sí se saca en el
+  momento: lo que se consulta es abrir el frente, no arreglar lo que uno rompió.
 
 **Investigación de mercado (al detenerse por una regla de negocio no documentada):** si
 además el mercado ya resolvió el tema (POS maduros: Toast/Square/Lightspeed…) y el owner
@@ -273,7 +278,7 @@ Procedimiento completo: skill `verify-feature`.
 |---|---|
 | `docs/patterns/` | **Playbook backend/frontend — leer ANTES de planificar una feature** |
 | `docs/agent/anti-patterns.md` | Errores reales ya cometidos en el repo |
-| `docs/agent/pendientes.md` | Backlog de correcciones diferidas a corregir al cerrar el harness |
+| `docs/agent/pendientes.md` | Backlog de correcciones diferidas. **Su primera sección es 🔴 prioridad máxima** (conexiones + rendimiento + redondeo de plata): van juntas y aisladas, nunca de arrastre |
 | `docs/agent/resueltos.md` | Archivo de las entradas de `pendientes.md` ya cerradas, con el detalle de cada fix |
 | `docs/agent/README.md` | Por qué este setup está escrito así |
 | `docs/agent/investigacion-mercado.md` | Plantilla de investigación de mercado + regla del cruce |

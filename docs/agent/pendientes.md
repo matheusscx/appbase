@@ -4,6 +4,10 @@ Backlog de correcciones que se **difirieron a propósito** mientras trabajamos e
 harness, para no mezclar el meta-trabajo (reglas, gates, docs) con cambios de código de
 producto. Cada entrada dice qué, dónde, por qué se difirió y cómo se cierra.
 
+> 🔴 **Antes de tomar cualquier entrada de este archivo, leé la primera sección
+> ([🧱 tanda propia](#-prioridad-máxima--tanda-propia-conexiones-rendimiento-y-redondeo-de-plata)).**
+> Es prioridad máxima y agrupa tres temas que solo se pueden resolver juntos y aislados.
+
 Regla de este archivo: **acá solo vive lo que falta hacer.** Cuando una entrada se cierra,
 en el mismo commit se muda —con el texto de su cierre— a
 [`resueltos.md`](resueltos.md). Nada de `[x]` acumulándose: una lista de trabajo con más
@@ -12,10 +16,50 @@ identificamos con ubicación concreta.
 
 ---
 
+## 🧱🔴 PRIORIDAD MÁXIMA — tanda propia: conexiones, rendimiento y redondeo de plata
+
+> 🔴 **Lo más importante que hay abierto en este backlog.** Decisión del owner
+> (2026-08-11). Está primero en el archivo a propósito: **cuando se retome el backlog, esto
+> va antes que cualquier otra entrada**, incluidas las 🚩 de producción de más abajo. Una de
+> las tres —el deadlock de conexiones— es la única entrada del repo que puede dejar la API
+> muerta con diez operaciones simultáneas.
+
+**Estas tres NO se tocan de a pedazos ni de arrastre dentro de otra tarea. Van juntas, en
+una pasada dedicada, con el sistema quieto.**
+
+Qué agrupa:
+
+| Tema | Entrada |
+|---|---|
+| Conexiones / deadlock | 🚩 *"Diez ventas simultáneas cuelgan la API para siempre"* (más abajo) |
+| Rendimiento | *"N+1 al resolver personalización de recetas/combos"* `[~]`, y lo que aparezca al medir |
+| Redondeo de plata | *"Cuatro redondeos de plata más que siguen en HALF_UP fijo"* (abajo), con su sub-punto de `subtotal`/`total_linea` entrando a `NUMERIC(18,4)` |
+
+**Por qué juntas, y no cada una cuando toque.** Las tres viven en la misma superficie —el
+camino caliente de la venta y el motor de precios— y las tres se miden de la misma forma:
+con carga real, no leyendo código. El deadlock **se descubrió midiendo el N+1**, no
+buscándolo. Y decidir el redondeo de un total exige saber antes en qué orden y con qué
+escala se acumulan las líneas, que es la misma pregunta que responde el análisis de
+rendimiento.
+
+**Por qué en aislamiento, con evidencia de este mismo día:**
+- El arreglo del redondeo se hizo **por partes** y hubo que revertirlo: cubría el precio que
+  se muestra y no el que se guarda, y de paso abría una divergencia entre lo cobrado a la
+  tarjeta y lo persistido que antes no existía (ver [`resueltos.md`](resueltos.md)).
+- La tabla de sitios del deadlock quedó **stale dos veces en el mismo día**, las dos porque
+  una tarea de feature corrió las líneas de `ventas.service.ts` por encima.
+
+Mientras tanto: si una tarea de producto **necesita** tocar algo de esta lista, se anota acá
+y se consulta — no se resuelve de paso. Un N+1 nuevo que se introduzca sí se saca en el
+momento; lo que se difiere es abrir estos tres frentes.
+
+---
+
 ## Deuda de código (surgió durante el harness)
 
 - [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
-  (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**) —
+  (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**)
+  — 🧱 **parte de la tanda propia de arriba: no se toca suelta.**
   se abre esta entrada justo porque la que se cerró ese día, leída de más, los tapaba: el
   arreglo alcanzó la cuenta `precio × tasa` y **nada más**.
   - `inventario.service.ts` → **CPP** (`valorPrevio + valorEntrante` ÷ stock). Es una
@@ -80,10 +124,12 @@ identificamos con ubicación concreta.
   al IVA, que es del país y no del tenant (ADR-018).
 
 - [ ] 🚩 **Diez ventas simultáneas cuelgan la API para siempre** (backend, medido
-  2026-08-11) — **el hallazgo más grave abierto hoy.** No es lentitud: las requests no
-  vuelven nunca y el proceso queda envenenado (las siguientes también cuelgan, aunque el
-  cliente corte). Se descubrió midiendo otra cosa —el N+1 de recetas, la entrada de más
-  abajo— y no lo veía ningún test porque el e2e corre con `maxWorkers: 1`.
+  2026-08-11) — **el hallazgo más grave abierto hoy.**
+  🧱 Parte de la tanda propia del principio del archivo: va con rendimiento y redondeo.
+  No es lentitud: las requests no vuelven nunca y el proceso queda envenenado (las
+  siguientes también cuelgan, aunque el cliente corte). Se descubrió midiendo otra cosa
+  —el N+1 de recetas, la entrada de más abajo— y no lo veía ningún test porque el e2e
+  corre con `maxWorkers: 1`.
   **Causa, confirmada por experimento y no por lectura:** `crearEnTransaccion` abre la
   transacción y **adentro llama a servicios que piden una conexión NUEVA al pool** en vez
   de usar el `manager`. O sea que **cada venta necesita dos conexiones a la vez**. El pool
@@ -467,7 +513,8 @@ varias se cerraron en mitades (una cerrada, una diferida como entrada nueva) y a
 decisiones de owner entraron después de la pasada. La lista de entradas es la fuente de
 verdad; el conteo del encabezado describe la auditoría original.
 
-- [~] **N+1 al resolver personalización de recetas/combos** — parcialmente cerrado
+- [~] 🧱 **N+1 al resolver personalización de recetas/combos** (parte de la tanda propia del
+  principio del archivo) — parcialmente cerrado
   2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
   `resolverGruposDeItem` disparaba una query **por cada grupo de modificadores** del ítem.
   Ese se cerró (`unnest` de pares grupo↔item_grupo en una sola query) y beneficia a los
