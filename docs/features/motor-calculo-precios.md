@@ -140,23 +140,16 @@ Todos los montos son strings con `escala_calculo` decimales.
 - **Motor puro**: `calculo-precios.engine.ts` — `calcularVenta(VentaResuelta)`,
   sin BD ni NestJS; 100% testeable de forma aislada.
 
-**Orden de las reglas (decisión abierta).** En modo `compuesto` cada regla se
-aplica sobre el acumulado de la anterior, así que el orden dentro de la lista de
-un ítem **cambia el total** cuando se mezclan `monto_fijo` y porcentaje (entre
-porcentajes no conmuta el redondeo, pero la composición sí es multiplicativa).
-Ese orden nunca estuvo definido y la tabla puente no guarda cuándo se asoció cada
-regla.
+**Orden de las reglas — cerrado el 2026-08-11.** En modo `compuesto` cada regla se
+aplica sobre el acumulado de la anterior, así que el orden **cambia el total**
+cuando se mezclan `monto_fijo` y porcentaje. Ese orden no estuvo definido hasta
+esa fecha: entre 2026-07-28 y 2026-08-11 fue "determinista por id" (`ORDER BY` en
+`cargarReglasPorIds`) y nada más — determinismo sin criterio.
 
-Desde el batch de 2026-07-28 el orden es **determinista por id**
-(`ORDER BY` en `cargarReglasPorIds`). No es el mismo que antes: `EXPLAIN` sobre
-esas tablas da `Bitmap Heap Scan`, que reordena por página del heap, así que las
-queries por ítem devolvían **orden de inserción**. El cambio por lo tanto
-**puede** dar un total distinto en un tenant `compuesto` que mezcle modos en un
-mismo ítem — hoy no existe ninguno (ambos tenants del seed están en `base`,
-ningún ítem tiene dos reglas de la misma clase, y no hay datos productivos), pero
-la garantía es "determinista", no "idéntico a antes". Qué orden debería tener es
-una decisión de negocio abierta — ver
-[`docs/agent/pendientes.md`](../agent/pendientes.md).
+**Hoy lo decide el motor**, no la query: `ordenarReglas` pone los porcentajes antes
+que los montos fijos. La regla, su porqué y sus consecuencias están en
+**Algoritmo (núcleo)**, más abajo. El `ORDER BY` de `cargarReglasPorIds` quedó como
+desempate entre reglas del mismo modo, donde el orden no mueve el total.
 
 ### DTOs
 
@@ -191,6 +184,35 @@ descuento/recargo/impuesto en la línea **reemplazan** a los asociados al ítem
 ni de la línea — lo deriva el motor de `clasificacion_tributaria` y no se puede
 pisar ni quitar por payload (400 si llega un id `tipo='iva'` explícito, ver
 [ADR-018](../adr/018-iva-derivado-de-la-clasificacion.md)).
+
+**Orden de aplicación dentro de un paso: porcentajes antes que montos fijos**
+(decisión del owner, 2026-08-11). Cuando un ítem —o una venta— tiene varias reglas
+del mismo paso, el motor las ordena él mismo (`ordenarReglas`) antes de aplicarlas.
+Vale para descuentos **y** recargos.
+
+- **Por qué la pregunta se reduce a esto:** `aplicarValor` ignora la base cuando el
+  modo es `monto_fijo`, así que un fijo resta lo mismo vaya donde vaya. El único
+  que depende de la posición es el porcentaje, y lo que se elige es si mira el
+  precio original o el ya rebajado. Con 1000, un 20% y un fijo de 100: **700** con
+  el porcentaje primero, 720 al revés.
+- **Las tres razones:** "20% de descuento" significa 20% del precio, que es lo que
+  se le dijo al cliente; le conviene al cliente; y **el último es el que se recorta**
+  cuando entra el piso en cero — un fijo recortado se explica en el ticket ("el
+  descuento de 1200 aplicó 1000"), un porcentaje recortado no.
+- **Va en el motor y no en el `ORDER BY` de las queries** porque hay tres caminos
+  que arman listas de reglas (ventas, salones, combos): una regla que dependa de que
+  los tres se acuerden del mismo `ORDER BY` se rompe sola.
+- **Dentro de cada grupo el orden no se toca** (el sort es estable): entre reglas del
+  mismo modo el total no cambia, así que el desempate del llamador —hoy por id— es
+  arbitrario sin consecuencias. Con tres o más porcentajes puede mover el último
+  decimal por redondeo de paso; está anotado en `docs/agent/pendientes.md`.
+- **Efecto lateral bueno, medido:** un descuento fijo que se topeaba dejaba el
+  acumulado negativo y **evaporaba en silencio** al porcentaje que venía después
+  (el guard lo llevaba a 0). Con el orden nuevo eso no ocurre por construcción.
+- No se relevó ningún estándar de industria que copiar: Toast y Square fijan órdenes
+  **opuestos** y ninguno lo hace configurable. Detalle y fuentes:
+  [`investigaciones/2026-08-11-orden-de-descuentos.md`](../agent/investigaciones/2026-08-11-orden-de-descuentos.md).
+  **Config por tenant: no por ahora** — se evalúa si aparece un tenant que la pida.
 
 **Piso en cero del descuento** (decisión del owner, 2026-07-28). **Ninguna regla
 puede dejar el total bajo cero** — un `precio_base` negativo sí puede, y eso es

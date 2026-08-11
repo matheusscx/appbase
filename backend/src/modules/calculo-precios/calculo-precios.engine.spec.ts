@@ -192,6 +192,128 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     });
   });
 
+  /**
+   * Criterio propio del proyecto (owner, 2026-08-11): **porcentajes antes que
+   * montos fijos**, decidido tras la investigación de mercado —donde se vio que
+   * no hay estándar que copiar: Toast y Square fijan órdenes opuestos—.
+   *
+   * El motor lo impone él mismo (`ordenarReglas`) y no lo hereda del `ORDER BY`
+   * del llamador: así vale para los tres que arman listas de reglas (ventas,
+   * salones, combos) sin que ninguno tenga que acordarse.
+   */
+  describe('orden de aplicación: porcentajes antes que montos fijos', () => {
+    const pct = regla({ id: 'a', nombre: '20%', valor: '0.20' });
+    const fijo = regla({
+      id: 'b',
+      nombre: 'Fijo 100',
+      modo: 'monto_fijo',
+      valor: '100',
+    });
+
+    const totalCon = (descuentos: ReglaResuelta[], calculoDescuentos: string) =>
+      calcularVenta(
+        venta({
+          lineas: [linea({ precioUnitario: '1000', descuentos })],
+          config: config({ calculoDescuentos }),
+        }),
+      );
+
+    it('en `compuesto` el resultado NO depende de cómo venga la lista', () => {
+      // Antes de esta regla, la lista tal como la devolvía la query decidía el
+      // total: 700 en un orden y 720 en el otro. Ese es el bug que se cierra.
+      expect(totalCon([pct, fijo], 'compuesto').totales.totalFinal).toBe(
+        '700.000000',
+      );
+      expect(totalCon([fijo, pct], 'compuesto').totales.totalFinal).toBe(
+        '700.000000',
+      );
+    });
+
+    it('gana el 700 y no el 720: el porcentaje mira el precio sin descontar', () => {
+      const r = totalCon([fijo, pct], 'compuesto');
+      // 1000 × 20% = 200 (no 180, que sería sobre 900), y después el fijo.
+      expect(r.lineas[0].trazas.descuentos[0].nombre).toBe('20%');
+      expect(r.lineas[0].trazas.descuentos[0].monto).toBe('200.000000');
+      expect(r.lineas[0].trazas.descuentos[1].nombre).toBe('Fijo 100');
+      expect(r.lineas[0].trazas.descuentos[1].monto).toBe('100.000000');
+    });
+
+    it('en `base` el total ya era insensible al orden, y sigue igual', () => {
+      // Control: `aplicarValor` ignora la base en `monto_fijo`, así que acá la
+      // suma siempre fue conmutativa. Si este test se pusiera rojo, el orden
+      // nuevo estaría cambiando algo que no tenía que tocar.
+      expect(totalCon([pct, fijo], 'base').totales.totalFinal).toBe(
+        '700.000000',
+      );
+      expect(totalCon([fijo, pct], 'base').totales.totalFinal).toBe(
+        '700.000000',
+      );
+    });
+
+    it('la traza respeta el orden aplicado, no el de entrada', () => {
+      // El comprobante muestra las reglas en el orden en que se aplicaron: si
+      // la traza siguiera el orden de entrada, el ticket contaría una historia
+      // distinta de la del cálculo.
+      const r = totalCon([fijo, pct], 'base');
+      expect(r.lineas[0].trazas.descuentos.map((t) => t.nombre)).toEqual([
+        '20%',
+        'Fijo 100',
+      ]);
+    });
+
+    it('vale también para los recargos', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              recargos: [
+                regla({
+                  id: 'c',
+                  nombre: 'Fijo 100',
+                  modo: 'monto_fijo',
+                  valor: '100',
+                }),
+                regla({ id: 'd', nombre: '5%', valor: '0.05' }),
+              ],
+            }),
+          ],
+          config: config({ calculoRecargos: 'compuesto' }),
+        }),
+      );
+      // 5% sobre 1000 = 50 (no 55, que sería sobre 1100).
+      expect(r.lineas[0].trazas.recargos[0].nombre).toBe('5%');
+      expect(r.lineas[0].trazas.recargos[0].monto).toBe('50.000000');
+      expect(r.lineas[0].totalLinea).toBe('1150.000000');
+    });
+
+    it('entre reglas del mismo modo, el orden de entrada se preserva', () => {
+      // El sort es estable a propósito: el desempate sigue siendo el que trajo
+      // el llamador. Se verifica en la traza porque en el total no se nota —dos
+      // porcentajes componen multiplicativamente y dan lo mismo en cualquier
+      // orden—, que es justo la razón por la que el desempate puede ser
+      // arbitrario sin consecuencias.
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              descuentos: [
+                regla({ id: 'x', nombre: 'Primero', valor: '0.10' }),
+                regla({ id: 'y', nombre: 'Segundo', valor: '0.30' }),
+              ],
+            }),
+          ],
+          config: config({ calculoDescuentos: 'compuesto' }),
+        }),
+      );
+      expect(r.lineas[0].trazas.descuentos.map((t) => t.nombre)).toEqual([
+        'Primero',
+        'Segundo',
+      ]);
+    });
+  });
+
   describe('orden de fórmula configurable', () => {
     it('impuestos antes que descuentos cambia el resultado (compuesto)', () => {
       const r = calcularVenta(
@@ -790,7 +912,29 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.trazasVenta.recargos[0].monto).toBe('0.000000');
     });
 
-    it('un segundo descuento `compuesto` sobre base negativa no le cobra al cliente', () => {
+    /**
+     * ⚠️ **Este test afirmaba lo contrario hasta el 2026-08-11**, y el cambio de
+     * orden (porcentajes antes que fijos) lo dio vuelta. Vale la pena entender
+     * por qué, porque **el resultado nuevo es el correcto**:
+     *
+     * Antes, el cupón fijo entraba primero, dejaba el acumulado en -100, y el
+     * 10% de socio se calculaba sobre esa base negativa: el guard lo llevaba a
+     * 0 y **el descuento del socio se evaporaba en silencio**. El cliente pagaba
+     * 90. Eso no era una regla de negocio, era un artefacto del orden arbitrario
+     * con que la query devolvía las reglas.
+     *
+     * Ahora el 10% se aplica sobre 1000 (=100) y el cupón se topea al
+     * disponible que queda (1090 de 1100 pedidos, con su advertencia). Entre los
+     * dos consumen los 1190 de la cuenta y el cliente **paga 0**, que es lo que
+     * corresponde: tenía un cupón de 1100 y un 10% sobre una cuenta de 1190.
+     *
+     * El guard de `Decimal.max(monto, ZERO)` **sigue haciendo falta** y sigue
+     * cubierto por el test de arriba: un descuento fijo todavía puede dejar el
+     * acumulado negativo, y el paso de **recargos** —que corre después con ese
+     * acumulado— sí puede evaluar un porcentaje sobre él. Lo que dejó de ser
+     * alcanzable es este caso por el lado de los descuentos.
+     */
+    it('un descuento fijo que se topea ya no evapora al porcentaje que lo acompaña', () => {
       const r = calcularVenta(
         venta({
           lineas: [
@@ -812,9 +956,14 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
         }),
       );
 
-      // Sin el piso por regla, el segundo daba -10 y SUBÍA el total.
-      expect(r.trazasVenta.descuentos[1].monto).toBe('0.000000');
-      expect(r.totales.totalFinal).toBe('90.000000');
+      // El socio aplica de verdad, sobre el neto y no sobre un acumulado hundido.
+      expect(r.trazasVenta.descuentos[0].nombre).toBe('Socio 10%');
+      expect(r.trazasVenta.descuentos[0].monto).toBe('100.000000');
+      // El cupón se lleva lo que queda, y la traza guarda que pidió más.
+      expect(r.trazasVenta.descuentos[1].nombre).toBe('Cupón 1100');
+      expect(r.trazasVenta.descuentos[1].monto).toBe('1090.000000');
+      expect(r.trazasVenta.descuentos[1].valorSolicitado).toBe('1100.000000');
+      expect(r.totales.totalFinal).toBe('0.000000');
     });
   });
 

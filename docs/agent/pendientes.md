@@ -501,66 +501,9 @@ Ver [`resueltos.md`](resueltos.md).
 
 ### Decidido por el owner (pendiente de respuesta)
 
-- [ ] **¿Con qué criterio se ordenan los descuentos de un ítem?** (backend,
-  `items.service.ts` → `cargarReglasPorIds`, y `calculo-precios.engine.ts:239`) — en modo
-  `compuesto` cada regla se aplica sobre el acumulado de la anterior, así que el orden
-  cambia el total. Donde más se nota es al mezclar `monto_fijo` con porcentaje: un ítem de
-  1.000 con un 20% y un fijo de 100 da 700 si el % va primero y 720 si va primero el fijo.
-  Entre porcentajes la composición es multiplicativa (`acc × (1-v)`), así que con **dos**
-  reglas el resultado es idéntico; con **tres o más**, el redondeo por paso
-  (`calculo-precios.engine.ts:237`) puede mover el último decimal de `escala_calculo`
-  — verificado con contraejemplo, no deducido: neto `4869.7278` con `0.441 / 0.1205 /
-  0.3833` da `3393.252159` en un orden y `3393.252158` en otro. Es 1e-6, muy por debajo del
-  centavo, pero no es cero: no asumir que un carrito solo-porcentajes es insensible al orden. Hoy ese orden
-  no está definido en ninguna query y **la tabla puente no tiene timestamp** (solo la PK
-  compuesta), así que "el orden en que el usuario los agregó" no existe ni se puede
-  recuperar. El batch de 2026-07-28 fijó `ORDER BY` por id solo para que sea
-  **determinista**, no porque sea el criterio correcto — y verificado con `EXPLAIN`, ese
-  orden **no** es el que las queries por ítem devolvían antes (`Bitmap Heap Scan` → orden de
-  inserción). Hoy da igual porque ambos tenants del seed están en `base` y ningún ítem tiene
-  dos reglas de la misma clase; la decisión sigue pendiente.
-  **Insumo de mercado que aportó el owner (2026-07-28) — a cruzar, no a copiar** (regla en
-  [`investigacion-mercado.md`](investigacion-mercado.md)): los e-commerce suelen darle a
-  cada descuento una **prioridad configurable** y aplicarlo sobre el subtotal resultante del
-  anterior, con un escalonado típico de ítem → cliente (VIP, convenio) → cupón → medio de
-  pago → cashback/puntos. La alternativa "primero el menor" no aporta para porcentajes;
-  donde sí es regla de negocio es al separar por **tipo** (obligatorios → promociones →
-  cupones). El owner se inclina por prioridad explícita por ser lo más flexible para una
-  pasarela/cobranza. **Encararlo es brainstorm → spec → plan:** agrega un campo a las reglas,
-  toca el motor y necesita decidir qué pasa con las reglas existentes sin prioridad.
-  **Decisión del owner (2026-08-08): investigación de mercado ANTES de diseñar.** Cómo
-  resuelven el apilado de descuentos los POS maduros (Toast, Square, Lightspeed): si definen
-  un orden, si lo hacen configurable por comercio, o si directamente prohíben apilar. Es
-  **insumo para cruzar y adaptar, no verdad a copiar** — regla del cruce en
-  [`investigacion-mercado.md`](investigacion-mercado.md). Recién con eso sobre la mesa se
-  elige entre las tres formas que ya están sobre la mesa: columna `orden` en la tabla puente
-  con reordenamiento en la UI del ítem, regla fija en el motor (p. ej. porcentajes antes que
-  fijos), o dejarlo y documentar que el orden no significa nada.
-  ⛔ Sigue tocando el motor de precios: no se avanza sin volver a confirmar con el owner
-  después de la investigación.
-  **Owner (2026-08-11): la investigación se corre ahora.** ✅ **Corrida el 2026-08-11:**
-  [`investigaciones/2026-08-11-orden-de-descuentos.md`](investigaciones/2026-08-11-orden-de-descuentos.md).
-  Lo que cambia de esta entrada:
-  - **No hay estándar que copiar.** Los cuatro sistemas relevados fijan el orden en el
-    motor y **ninguno lo hace configurable**; Toast y Square además lo fijan **al revés uno
-    del otro** (Toast: fijo antes que porcentaje; Square: porcentaje antes que fijo).
-  - **La prioridad configurable —la forma que el owner prefería— no aparece en ningún POS**,
-    solo en e-commerce y apps de terceros. Sigue siendo una opción válida, pero deja de
-    tener el respaldo que el insumo original le atribuía.
-  - **Aparecieron dos salidas que no estaban sobre la mesa:** prohibir apilar (Lightspeed,
-    Toast por default, Bsale con cupones) y quedarse con el mayor cuando dos compiten
-    (Square). Las dos **disuelven** la pregunta en vez de responderla.
-  - **El problema es más chico de lo que decía esta entrada.** Medido: `aplicarValor`
-    (`calculo-precios.engine.ts:240`) ignora la base en `monto_fijo`, así que en modo
-    **`base` el orden no mueve el total** (700 en los dos órdenes del ejemplo; en
-    `compuesto` da 700 vs 720). `base` es el default de la columna y **los dos tenants del
-    seed lo usan**, o sea que hoy es inalcanzable. Donde el orden sí importa en `base` es
-    en la **traza**: cuál de las reglas aparece recortada por el piso en cero.
-  - **El SII no impone nada.** Estandariza los campos (`DescuentoPct`/`DescuentoMonto`,
-    `DscRcgGlobal`) y no el algoritmo; `NroLinDR` es numeración secuencial, no orden de
-    aplicación — verificado contra dos implementadores porque un buscador afirmó lo
-    contrario. La decisión es de producto, no fiscal.
-  ⛔ Sigue pendiente la decisión del owner entre las cuatro formas, y sigue tocando el motor.
+Vacía desde el 2026-08-11: las dos que tenía —el orden de los descuentos de un ítem y el
+tope del descuento contra un recargo posterior— se decidieron y se cerraron en la ronda de
+ese día (ver [`resueltos.md`](resueltos.md)).
 
 ## Auditoría `turnos` + `salones` + `garzones` (2026-08-06) — hallazgos confirmados
 

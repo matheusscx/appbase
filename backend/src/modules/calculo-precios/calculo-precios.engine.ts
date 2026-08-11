@@ -315,6 +315,49 @@ interface ResultadoPaso {
 }
 
 /**
+ * **Porcentajes antes que montos fijos** (decisión del owner, 2026-08-11, tras la
+ * investigación de mercado en
+ * `docs/agent/investigaciones/2026-08-11-orden-de-descuentos.md`).
+ *
+ * Por qué la pregunta se reduce a esto: `aplicarValor` ignora la base cuando el
+ * modo es `monto_fijo`, así que un fijo **pide** lo mismo vaya donde vaya. **El
+ * único cuyo monto depende de la posición es el porcentaje**, y lo que se está
+ * eligiendo es si mira el precio original o el ya rebajado.
+ *
+ * (Lo que un fijo sí puede cambiar según la posición es cuánto **aplica**: el
+ * tope contra `disponible` recorta al que llegue tarde. Eso no debilita el
+ * criterio — es la razón 3.)
+ *
+ * Tres razones, la tercera propia de este motor:
+ * 1. "20% de descuento" significa 20% del precio, que es lo que le dijimos al
+ *    cliente. Si va segundo, un 20% rinde menos de 20%.
+ * 2. Le conviene al cliente (700 contra 720 en 1000 con 20% + fijo 100).
+ * 3. **El último es el que se recorta** cuando el piso en cero entra: un fijo
+ *    recortado se explica en el ticket ("el descuento de 1200 aplicó 1000"), un
+ *    porcentaje recortado no.
+ *
+ * Vale también para **recargos**, y no por simetría cosmética: el mismo
+ * argumento 1 aplica ("5% de recargo" es 5% del precio), y el resultado también
+ * favorece al cliente.
+ *
+ * El orden dentro de cada grupo NO se toca: `Array.prototype.sort` es estable
+ * (garantizado por ES2019), así que se preserva el que trajo el llamador —hoy
+ * `ORDER BY … regla_id` en `items.service.ts`, determinista pero arbitrario—.
+ * Que ese desempate sea arbitrario es aceptable porque **entre reglas del mismo
+ * modo el orden no cambia el total**: dos porcentajes componen
+ * multiplicativamente y dos fijos suman. Con tres o más porcentajes puede mover
+ * el último decimal por redondeo de paso, y eso está anotado en el backlog.
+ *
+ * Se copia el array en vez de ordenarlo in-place: la lista es del llamador y
+ * reordenársela sería un efecto lateral invisible.
+ */
+function ordenarReglas(reglas: ReglaResuelta[]): ReglaResuelta[] {
+  return [...reglas].sort(
+    (a, b) => Number(a.modo === 'monto_fijo') - Number(b.modo === 'monto_fijo'),
+  );
+}
+
+/**
  * Aplica una lista de reglas (descuentos o recargos) sobre el acumulador.
  * `signo` = -1 para descuentos (restan), +1 para recargos (suman).
  * `modoCalculo` = 'base' (% sobre neto) | 'compuesto' (% sobre acumulado).
@@ -355,7 +398,7 @@ function procesarReglas(
   const trazas: TrazaRegla[] = [];
   const advertencias: AdvertenciaPrecio[] = [];
 
-  for (const regla of reglas) {
+  for (const regla of ordenarReglas(reglas)) {
     // Pausada: no aplica, no deja traza —no es un "aplicó 0"— y avisa. El
     // `continue` va antes de evaluar para que ni siquiera se calcule el monto.
     if (!regla.activo) {

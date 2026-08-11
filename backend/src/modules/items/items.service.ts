@@ -554,20 +554,18 @@ export class ItemsService {
    *
    * Un ítem sin reglas no aparece en el mapa (el llamador usa `?? []`).
    *
-   * **El orden de cada lista importa** cuando el tenant calcula en modo
-   * `compuesto`: cada regla se aplica sobre el acumulado de la anterior, y
-   * mezclar `monto_fijo` con porcentaje no conmuta.
+   * **El orden de esta lista ya no decide el total.** Desde el 2026-08-11 el
+   * criterio lo impone el motor —`ordenarReglas` en `calculo-precios.engine.ts`
+   * pone los porcentajes antes que los montos fijos, decisión del owner— y no
+   * el `ORDER BY` de acá. Se hizo ahí a propósito: esta query es uno de los
+   * tres caminos que arman listas de reglas, y una regla de negocio que dependa
+   * de que los tres se acuerden del mismo `ORDER BY` es una regla que se rompe
+   * sola.
    *
-   * El `ORDER BY` de abajo lo vuelve **determinista por id**. Ojo con lo que
-   * eso NO significa: el orden anterior **no** era el del índice. `EXPLAIN`
-   * sobre estas tablas da `Bitmap Heap Scan`, que reordena por página del
-   * heap, así que las queries por ítem devolvían orden de inserción. O sea que
-   * este `ORDER BY` **puede** dar un total distinto al de antes en un tenant
-   * `compuesto` que mezcle modos en un mismo ítem. Hoy no hay ninguno (los dos
-   * tenants del seed están en `base`, ningún ítem tiene dos reglas de la misma
-   * clase y no hay datos productivos), pero la garantía es esa y no otra.
-   * Qué orden *debería* tener es una decisión de negocio abierta
-   * (ver `docs/agent/pendientes.md` → prioridad de descuentos).
+   * El `ORDER BY` de abajo sigue valiendo como **desempate determinista** entre
+   * reglas del mismo modo, donde el orden no cambia el total (dos porcentajes
+   * componen multiplicativamente, dos fijos suman). El sort del motor es
+   * estable, así que lo preserva.
    */
   async cargarReglasPorIds(
     tenantId: string,

@@ -17,6 +17,76 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El orden de los descuentos deja de decidirlo el azar de una query (2026-08-11)
+
+**La entrada estaba abierta desde el 2026-07-28** y es la más vieja de las que se cerraron
+en la ronda. Preguntaba con qué criterio se ordenan los descuentos de un ítem: en modo
+`compuesto` cada regla se aplica sobre el acumulado de la anterior, así que el orden cambia
+el total —1000 con un 20% y un fijo de 100 da **700 o 720** según cuál vaya primero— y ese
+orden no estaba definido en ninguna parte. El batch del 2026-07-28 había puesto un
+`ORDER BY` por id **solo para que fuera determinista**, no porque fuera el criterio
+correcto, y la tabla puente no tiene timestamp: "el orden en que el usuario los agregó" no
+existe ni se puede recuperar.
+
+**Precondición que el owner puso el 2026-08-08:** investigación de mercado antes de
+diseñar. Corrida y registrada en
+[`investigaciones/2026-08-11-orden-de-descuentos.md`](investigaciones/2026-08-11-orden-de-descuentos.md).
+Lo que trajo, y que cambió la conversación:
+
+- **No hay estándar que copiar.** Los cuatro sistemas relevados fijan el orden en el motor
+  y ninguno lo hace configurable — y Toast y Square lo fijan **al revés uno del otro**.
+- **La prioridad configurable, que era la forma que el owner prefería, no la usa ningún
+  POS**: aparece en e-commerce y apps de terceros. El insumo original le atribuía un
+  respaldo que no tiene.
+- El SII no impone nada: estandariza campos, no algoritmo. La decisión es de producto.
+
+**Decisión del owner (2026-08-11): criterio propio y fijo — porcentajes antes que montos
+fijos.** Config por tenant queda **descartada por ahora**, a revisar si un tenant la pide.
+
+**El razonamiento que la sostiene, y que no salió del mercado sino de medir nuestro
+motor:** `aplicarValor` ignora la base cuando el modo es `monto_fijo`, así que **un fijo
+resta lo mismo vaya donde vaya**. El único que depende de la posición es el porcentaje, y
+lo que se está eligiendo es si mira el precio original o el ya rebajado. De ahí las tres
+razones: "20% de descuento" significa 20% del precio; le conviene al cliente; y **el último
+es el que se recorta** cuando entra el piso en cero — un fijo recortado se explica en el
+ticket, un porcentaje recortado no.
+
+**Lo que se cambió: 7 líneas.** Una función `ordenarReglas` en
+`calculo-precios.engine.ts` y el `for` que la usa. Va en el motor y no en el `ORDER BY` de
+las queries **porque hay tres caminos que arman listas de reglas** (ventas, salones,
+combos): una regla que dependa de que los tres se acuerden del mismo `ORDER BY` se rompe
+sola. El sort es estable, así que el desempate del llamador se preserva — y puede seguir
+siendo arbitrario porque entre reglas del mismo modo el total no cambia.
+
+**Un test existente se puso rojo, y el resultado nuevo es el correcto.** El caso: cuenta de
+1190 con IVA, un cupón fijo de 1100 y un 10% de socio, en `compuesto`.
+
+| | Antes | Ahora |
+|---|---|---|
+| Socio 10% | **se evaporaba** (base negativa → guard a 0) | aplica 100 |
+| Cupón 1100 | aplica 1100 | aplica 1090, con su advertencia |
+| El cliente paga | 90 | **0** |
+
+Los 90 no eran una regla de negocio: eran un artefacto del orden arbitrario. El cliente
+tenía un cupón de 1100 **y** un 10% sobre 1190; que pague 0 es lo que corresponde. El test
+se reescribió afirmando lo nuevo, con el porqué adentro para que el próximo que lo lea no
+crea que alguien aflojó una garantía.
+
+**Y se verificó que esa garantía siga cubierta:** el guard `Decimal.max(monto, ZERO)`
+quedaba con un test menos, así que se mutó a propósito. **Mató exactamente 1**: el del
+recargo sobre base negativa — que sigue siendo alcanzable, porque el paso de recargos corre
+con el acumulado que dejaron los descuentos. O sea que el guard sigue siendo carga
+estructural, ahora por un solo camino, y eso está escrito en el test.
+
+**Tests nuevos:** 6 en `calculo-precios.engine.spec.ts`, entre ellos el que prueba que el
+resultado **ya no depende de cómo venga la lista** (700 en los dos órdenes), el control de
+que en `base` nada se movió, que la traza refleja el orden aplicado y no el de entrada, y
+que la regla vale también para recargos.
+
+**Gate:** backend 98 suites / 1569 unit, e2e 29 suites / 398, frontend completo.
+
+---
+
 ## El sobrante de un descuento topeado se pierde, y ahora hay un test que lo dice (2026-08-11)
 
 **Entrada original (verbatim):** *"¿Un descuento debe topearse aunque un recargo posterior
