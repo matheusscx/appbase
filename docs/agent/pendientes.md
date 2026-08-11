@@ -119,12 +119,20 @@ identificamos con ubicación concreta.
   tres servicios copiando ese molde. **No entró en ADR-019** porque cambiar la semántica de
   un filtro de reportes es una decisión de producto (¿el "desde" es medianoche UTC o
   medianoche del local?), no una migración de tipos.
-
-- [ ] **El job de CI del frontend necesita timeout propio** (2026-08-06) — con
-  `hookTimeout` en 60s y `testTimeout` en 20s (ver [`resueltos.md`](resueltos.md)), un
-  entorno Nuxt realmente colgado tarda hasta un minuto por archivo en reportarse, y hay 22
-  `.nuxt.spec.ts`. Hoy no hay un `timeout-minutes` en `.github/workflows/ci.yml`. Prioridad
-  baja: es el peor caso de una falla que además sería visible por otros lados.
+  ⛔ **Corrección al "cierre posible" (2026-08-11): ese molde NO es copiable tal cual, y
+  copiarlo introduce un bug peor que el que arregla.** Medido en Postgres:
+  `'2026-08-01T15:30:00Z'::date` devuelve `2026-08-01` — **el `::date` descarta la hora en
+  silencio**. El molde funciona en `propina-reportes` porque ahí el rango llega ya
+  normalizado a fechas puras (`RangoReporteNormalizado`); estos tres DTOs validan con
+  `@IsDateString()`, que **acepta las dos formas**, así que un llamador que hoy manda
+  `?desde=2026-08-01T15:30:00Z` pasaría a filtrar desde la medianoche de ese día. Un
+  filtro que se ensancha sin avisar es peor que uno con la zona ambigua.
+  Lo que el cierre necesita entonces, además del cast: decidir si estos endpoints aceptan
+  timestamp o solo fecha pura, y si aceptan las dos, normalizar en el service —expandir la
+  fecha pura a medianoche del tenant y dejar pasar el timestamp tal cual— en vez de castear
+  en el SQL. Eso ya no son "tres servicios copiando un molde".
+  (Verificado también el lado bueno del molde: `'2026-08-01'::date::timestamp AT TIME ZONE
+  'America/Santiago'` da `2026-08-01 04:00:00+00`, que es la medianoche local correcta.)
 
 - [ ] **De `configCalculo` faltan `escalaCalculo` y `modoRedondeo`** (frontend, 2026-08-02)
   — el desglose por línea ya usa `formula` para ordenarse y muestra el orden **con el modo
@@ -246,17 +254,10 @@ identificamos con ubicación concreta.
   que tampoco es interferencia entre specs en paralelo. **Causa no determinada:** lo único
   medido es que el body no era un array.
 
-  **Lo que sí se puede cerrar sin saber la causa:** el helper `usuarioIdDe`
-  (`caja.e2e-spec.ts:145-151`) hace `(res.body as Member[]).find(...)` **sin mirar el
-  status**, así que cuando la respuesta no es la lista el test muere con un `TypeError`
-  sobre `.find` en vez de decir qué contestó el servidor. Eso convierte un diagnóstico de
-  un minuto en una sesión de forense. Agregarle una aserción de status **no arregla el
-  flaky: lo hace legible la próxima vez**, que es lo que falta para poder atacarlo.
-
-  ⚠️ **No es un caso aislado, se grepeó el repo:** el mismo casteo sin chequear status está
-  en `cajones.e2e-spec.ts:178` (`.map`) y en seis lugares de
-  `alta-usuarios-tenant.e2e-spec.ts` (`.get` en 127, 168, 180, 190, 205, 249). Van juntos o
-  el próximo flaky vuelve a salir mudo por otra puerta.
+  ✅ **La mitad legible se cerró el 2026-08-11** (ver [`resueltos.md`](resueltos.md)): las
+  lecturas de `/tenants/members` afirman el status antes de castear, así que la próxima vez
+  que esto pase el test va a decir qué contestó el servidor. **El flaky sigue abierto**: su
+  causa sigue sin determinarse, y lo que se cerró es la mudez, no el bug.
 
   Contexto que puede o no ser relevante, anotado para no perderlo: `GET /tenants/members`
   es **admin-only** desde el 2026-08-09 (`TenantAdminGuard`). El token que usa el test es

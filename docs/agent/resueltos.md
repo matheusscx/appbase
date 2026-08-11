@@ -17,6 +17,59 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los dos jobs de CI dejan de poder colgarse seis horas (2026-08-11)
+
+**Entrada original (verbatim):** *"El job de CI del frontend necesita timeout propio
+(2026-08-06) — con `hookTimeout` en 60s y `testTimeout` en 20s, un entorno Nuxt realmente
+colgado tarda hasta un minuto por archivo en reportarse, y hay 22 `.nuxt.spec.ts`. Hoy no
+hay un `timeout-minutes` en `.github/workflows/ci.yml`. Prioridad baja."*
+
+`timeout-minutes: 25` en `gate` **y también en `e2e-navegador`**, que la entrada no
+mencionaba y tiene el mismo agujero: un Playwright que no arranca tampoco puede quedarse
+seis horas —el default de GitHub— ocupando un runner.
+
+**El 25 no es al ojo:** las tres corridas más recientes tardaron **4 min 30 s** de punta a
+punta (medido con `gh run list`), así que deja ~5× de margen. Un job que toque ese número
+no está lento: está colgado, que es exactamente lo que el tope tiene que distinguir.
+
+---
+
+## Ocho lecturas que morían con un `TypeError` en vez de decir qué pasó (2026-08-11)
+
+Mitad de la entrada del flaky de caja, que sigue abierta por su otra mitad (la causa del
+flaky, todavía sin determinar).
+
+**El problema, verbatim de la entrada:** *"el helper `usuarioIdDe` hace
+`(res.body as Member[]).find(...)` **sin mirar el status**, así que cuando la respuesta no
+es la lista el test muere con un `TypeError` sobre `.find` en vez de decir qué contestó el
+servidor. Eso convierte un diagnóstico de un minuto en una sesión de forense."*
+
+**Lo que se hizo:** afirmar `status` y `Array.isArray` **antes** del casteo, en los tres
+archivos donde el grep encontró el molde. En `alta-usuarios-tenant.e2e-spec.ts` eran
+**ocho** repeticiones —la entrada decía seis, el grep del cierre encontró dos más—, así que
+ahí no se copió la aserción ocho veces: salió un helper `listarMiembros(app, token)`. En
+`caja.e2e-spec.ts` y `cajones.e2e-spec.ts` es un solo uso cada uno y quedó inline, según la
+convención del repo (duplicar dos veces se acepta, se extrae a la tercera).
+
+**Verificado que hace lo que promete, no solo que compila:** se apuntó el helper a una ruta
+inexistente y el fallo pasó a ser
+
+```
+expect(received).toBe(expected)
+Expected: 200
+Received: 404
+```
+
+en vez del `TypeError: .find is not a function` de antes. Después del revert, los 10 tests
+del spec en verde.
+
+⚠️ **Esto no arregla el flaky** y no pretende hacerlo: lo saca de mudo. La causa sigue
+abierta en [`pendientes.md`](pendientes.md).
+
+**Gate:** backend 1569 unit, e2e 29 suites / 398 tests.
+
+---
+
 ## El cuaderno de anti-patrones vuelve a su tope, y sin borrar nada (2026-08-11)
 
 **Entrada original (verbatim):** *"`anti-patterns.md` pasó su propio tope de 20 entradas y

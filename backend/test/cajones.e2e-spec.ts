@@ -175,6 +175,10 @@ describe('Cajones (e2e) — CRUD admin-only + aislamiento', () => {
       const resMiembros = await request(app.getHttpServer())
         .get('/api/tenants/members')
         .set('Authorization', `Bearer ${tokenAdmin}`);
+      // Status antes del casteo: si no es la lista, que lo diga el assert y no
+      // un `TypeError` sobre `.map` (mismo molde que `caja.e2e-spec.ts`).
+      expect(resMiembros.status).toBe(200);
+      expect(Array.isArray(resMiembros.body)).toBe(true);
       miembros = (resMiembros.body as Member[]).map((m) => m.usuarioId);
       expect(miembros.length).toBeGreaterThanOrEqual(2);
 

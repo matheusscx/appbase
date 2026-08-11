@@ -32,6 +32,27 @@ interface Member {
   roles: { rolId: string }[];
 }
 
+/**
+ * `GET /tenants/members` afirmando el status **antes** de castear el body.
+ *
+ * Existe porque el spec lo leía en ocho lugares casteando el body a secas: si
+ * la respuesta no es la lista, el test muere con un
+ * `TypeError: .find is not a function` que se lleva puesta la causa. Un flaky
+ * del 2026-08-11 en `caja.e2e-spec.ts` costó una sesión de forense por ese
+ * mismo molde, y el grep lo encontró acá ocho veces más.
+ */
+async function listarMiembros(
+  app: INestApplication<App>,
+  token: string,
+): Promise<Member[]> {
+  const res = await request(app.getHttpServer())
+    .get('/api/tenants/members')
+    .set('Authorization', `Bearer ${token}`);
+  expect(res.status).toBe(200);
+  expect(Array.isArray(res.body)).toBe(true);
+  return res.body as Member[];
+}
+
 /** Login sin elegir tenant: devuelve el token "suelto". */
 async function loginSuelto(
   app: INestApplication<App>,
@@ -123,12 +144,8 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       expect(body).not.toHaveProperty('contrasenaTemporal');
 
       // Quedó miembro y con el rol: crear sin rol sería crear algo roto.
-      const members = await request(app.getHttpServer())
-        .get('/api/tenants/members')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      const creado = (members.body as Member[]).find(
-        (m) => m.correo === correo,
-      );
+      const members = await listarMiembros(app, tokenAdmin);
+      const creado = members.find((m) => m.correo === correo);
       expect(creado).toBeTruthy();
       expect(creado!.roles.map((r) => r.rolId)).toContain(rolIdParis);
 
@@ -164,32 +181,22 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       // contraseña que ya tiene.
       expect((res.body as AltaResponse).invitado).toBe(false);
 
-      const miembrosFalabella = await request(app.getHttpServer())
-        .get('/api/tenants/members')
-        .set('Authorization', `Bearer ${tokenFalabella}`);
-      expect(
-        (miembrosFalabella.body as Member[]).some((m) => m.correo === correo),
-      ).toBe(true);
+      const miembrosFalabella = await listarMiembros(app, tokenFalabella);
+      expect(miembrosFalabella.some((m) => m.correo === correo)).toBe(true);
 
       // ⚠️ Y sus roles del OTRO tenant siguen vivos. El alta da de baja los roles
       // que no vinieron, pero acotado a `tenant_id`: sin ese scoping, dar de alta
       // a alguien en un tenant le borraría los permisos en todos los demás —una
       // empresa dejando sin acceso al personal de otra— y el resto de la suite no
       // lo notaría.
-      const miembrosParis = await request(app.getHttpServer())
-        .get('/api/tenants/members')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      const enParis = (miembrosParis.body as Member[]).find(
-        (m) => m.correo === correo,
-      );
+      const miembrosParis = await listarMiembros(app, tokenAdmin);
+      const enParis = miembrosParis.find((m) => m.correo === correo);
       expect(enParis!.roles.map((r) => r.rolId)).toEqual([rolIdParis]);
     });
 
     it('correo que ya es miembro: 409, y NO le toca los roles', async () => {
-      const antes = await request(app.getHttpServer())
-        .get('/api/tenants/members')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      const vendedorAntes = (antes.body as Member[]).find(
+      const antes = await listarMiembros(app, tokenAdmin);
+      const vendedorAntes = antes.find(
         (m) => m.correo === VENDEDOR_PARIS.email,
       );
 
@@ -201,10 +208,8 @@ describe('Alta de usuarios del tenant (e2e)', () => {
 
       expect(res.status).toBe(409);
 
-      const despues = await request(app.getHttpServer())
-        .get('/api/tenants/members')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      const vendedorDespues = (despues.body as Member[]).find(
+      const despues = await listarMiembros(app, tokenAdmin);
+      const vendedorDespues = despues.find(
         (m) => m.correo === VENDEDOR_PARIS.email,
       );
       // El motivo de que sea 409 y no idempotente: un 200 en silencio podría
@@ -245,12 +250,8 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       expect(segunda.status).toBe(201);
       // No alcanza con el 201: lo que fallaba era justamente que respondía OK
       // sin asociar. Se afirma la membresía real.
-      const members = await request(app.getHttpServer())
-        .get('/api/tenants/members')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      const vuelto = (members.body as Member[]).find(
-        (m) => m.correo === correo,
-      );
+      const members = await listarMiembros(app, tokenAdmin);
+      const vuelto = members.find((m) => m.correo === correo);
       expect(vuelto).toBeTruthy();
       // ⚠️ EXACTAMENTE los roles del alta, no la unión con los de antes.
       // `removeMember` da de baja la membresía pero deja vivas las filas de
@@ -330,12 +331,8 @@ describe('Alta de usuarios del tenant (e2e)', () => {
       const res = await alta({ nombre: 'Sin rol', correo, rolIds: [] });
 
       expect(res.status).toBe(400);
-      const members = await request(app.getHttpServer())
-        .get('/api/tenants/members')
-        .set('Authorization', `Bearer ${tokenAdmin}`);
-      expect((members.body as Member[]).some((m) => m.correo === correo)).toBe(
-        false,
-      );
+      const members = await listarMiembros(app, tokenAdmin);
+      expect(members.some((m) => m.correo === correo)).toBe(false);
     });
 
     it('un no-admin del tenant no puede dar de alta', async () => {

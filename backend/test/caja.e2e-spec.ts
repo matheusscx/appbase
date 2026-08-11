@@ -145,6 +145,12 @@ async function usuarioIdDe(
   const resMiembros = await request(app.getHttpServer())
     .get('/api/tenants/members')
     .set('Authorization', `Bearer ${token}`);
+  // El status va ANTES del casteo. Sin esto, una respuesta que no sea la lista
+  // muere con `TypeError: .find is not a function` y se lleva puesta la causa:
+  // el 2026-08-11 un flaky de este spec costó una sesión de forense por eso.
+  // No arregla el flaky — lo hace legible la próxima vez.
+  expect(resMiembros.status).toBe(200);
+  expect(Array.isArray(resMiembros.body)).toBe(true);
   const miembro = (resMiembros.body as Member[]).find(
     (m) => m.correo === email,
   );

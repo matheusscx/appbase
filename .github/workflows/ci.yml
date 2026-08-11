@@ -17,6 +17,12 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    # Tope propio, no el default de 6 horas de GitHub. El caso que lo justifica:
+    # un entorno Nuxt colgado tarda hasta un minuto por archivo en reportarse
+    # (`hookTimeout` 60s) y hay 22 `.nuxt.spec.ts`, así que un cuelgue general se
+    # arrastraría muchísimo antes de fallar. En verde el job corre bastante por
+    # debajo de este número; si lo toca, es que algo se colgó.
+    timeout-minutes: 25
 
     services:
       postgres:
@@ -121,6 +127,9 @@ jobs:
   # stock consumido) y las aserciones de UI dejarían de ser deterministas.
   e2e-navegador:
     runs-on: ubuntu-latest
+    # Mismo motivo que `gate`: un Playwright que no arranca no puede quedarse
+    # seis horas ocupando un runner.
+    timeout-minutes: 25
 
     services:
       postgres:
