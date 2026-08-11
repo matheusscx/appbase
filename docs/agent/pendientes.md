@@ -134,6 +134,35 @@ identificamos con ubicación concreta.
   helper, y la convención acepta duplicar dos veces— **con** el filtro `eliminado_el`, que
   es la condición de reapertura que esta entrada anota. Si aparece una tercera copia del
   helper de zona, ahí sí conviene la vista.
+
+- [ ] **Un flaky del e2e de caja, y seis lecturas de `/tenants/members` que esconden su
+  causa** (backend/tests, visto el 2026-08-11) — son dos cosas y la segunda es la que se
+  puede arreglar hoy.
+
+  **El flaky:** `caja.e2e-spec.ts` → *"un usuario fuera del allow-list del cajón recibe 403
+  al abrir"* falló con `TypeError: resMiembros.body.find is not a function`. La corrida
+  siguiente, verde. **Las dos** partieron de `reset-db.sh` y las dos pasaron
+  `reset-db.sh --verificar` (un solo `Seed complete`, mismo contenedor), así que no es la
+  contaminación acumulativa de siempre. Y `test/jest-e2e.json` tiene `maxWorkers: 1`, así
+  que tampoco es interferencia entre specs en paralelo. **Causa no determinada:** lo único
+  medido es que el body no era un array.
+
+  **Lo que sí se puede cerrar sin saber la causa:** el helper `usuarioIdDe`
+  (`caja.e2e-spec.ts:145-151`) hace `(res.body as Member[]).find(...)` **sin mirar el
+  status**, así que cuando la respuesta no es la lista el test muere con un `TypeError`
+  sobre `.find` en vez de decir qué contestó el servidor. Eso convierte un diagnóstico de
+  un minuto en una sesión de forense. Agregarle una aserción de status **no arregla el
+  flaky: lo hace legible la próxima vez**, que es lo que falta para poder atacarlo.
+
+  ⚠️ **No es un caso aislado, se grepeó el repo:** el mismo casteo sin chequear status está
+  en `cajones.e2e-spec.ts:178` (`.map`) y en seis lugares de
+  `alta-usuarios-tenant.e2e-spec.ts` (`.get` en 127, 168, 180, 190, 205, 249). Van juntos o
+  el próximo flaky vuelve a salir mudo por otra puerta.
+
+  Contexto que puede o no ser relevante, anotado para no perderlo: `GET /tenants/members`
+  es **admin-only** desde el 2026-08-09 (`TenantAdminGuard`). El token que usa el test es
+  el del admin, así que un 403 liso no es la explicación obvia — pero es justo la clase de
+  hipótesis que la aserción de status confirmaría o descartaría de una.
 ---
 
 ## Detector de desborde de layout (`e2e/layout/desborde.spec.ts`, 2026-07-29)
