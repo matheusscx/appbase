@@ -867,9 +867,12 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
 - [ ] **Backups automáticos + restore probado (Postgres)** (infra) — datos financieros
   multi-tenant: backups automáticos + point-in-time recovery, y **restore probado** (un backup
   que nunca se restauró no es un backup). Tópico aparte del deploy de la app.
-- [ ] **Health/readiness + graceful shutdown** (backend) — endpoint `/health` para el
-  orquestador (readiness real: chequea la BD), y cierre ordenado de conexiones al recibir
-  SIGTERM para no cortar requests en vuelo durante un deploy.
+- [ ] **Graceful shutdown** (backend) — cierre ordenado de conexiones al recibir SIGTERM,
+  para no cortar requests en vuelo durante un deploy. Verificado el 2026-08-11: `main.ts`
+  no llama a `enableShutdownHooks()` y no hay ningún `onApplicationShutdown` en el proyecto.
+  **La otra mitad de esta entrada ya está hecha** (`75b253d3`): el endpoint de readiness con
+  chequeo real de BD es `GET /api/health` (`app.service.ts`), y es el `healthcheckPath` del
+  backend en Railway. Queda solo el apagado.
 - [ ] **Escaneo de dependencias en CI** (harness) — `npm audit` / Dependabot como paso del
   gate, para no arrastrar CVEs conocidos a prod.
 - [ ] **Pre-push que corre el gate completo local (todas las suites)** (harness) — hoy
