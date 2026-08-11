@@ -34,10 +34,60 @@ identificamos con ubicación concreta.
   conexión— más 5 en `Lock: tuple`; (c) **se subió el pool a 20 y el umbral se movió a 19
   ok / 20 cuelga**, o sea que el número de conexiones ES la variable. El cambio de pool se
   revirtió.
-  ⚠️ **Subir el pool NO lo arregla**: solo mueve el umbral. El arreglo es pasar el
-  `manager` a esas llamadas — toca las firmas de cuatro services, así que es una tarea con
-  su propio alcance y no un parche.
+  ⚠️ **Subir el pool NO lo arregla**: solo mueve el umbral.
   ⚠️ **Batchear el N+1 tampoco lo arregla:** son conexiones, no queries.
+
+  **⚠️ No es un bug de ventas: el patrón está en 7 módulos.** Barrido del 2026-08-11 sobre
+  todo `backend/src`. Y como **el pool es uno solo para toda la app**, no hacen falta diez
+  ventas: diez operaciones cualesquiera de esta lista se traban igual entre sí —tres
+  ventas, dos mermas, un cobro y cuatro ediciones de ítem alcanzan—.
+
+  | Archivo | Línea | Llamada sin `manager` |
+  |---|---|---|
+  | `ventas.service.ts` | 156, 157 | `cajaService.findVirtual` / `findActiva` |
+  | `ventas.service.ts` | 186 | `itemsService.cargarBasePorIds` |
+  | `ventas.service.ts` | 212 | `catalogService.findAllUnidadesMedida` |
+  | `ventas.service.ts` | 260 | `this.dataSource.query` (directo) |
+  | `ventas.service.ts` | 349 | `calculoPreciosService.calcular` |
+  | `ventas.service.ts` | 615, 629 | `catalogService.crearConversor` |
+  | `ventas.service.ts` | 680 | `garzonesService.obtenerActivoPorId` |
+  | `ventas.service.ts` | 986 | `cajaService.findActiva` (otra transacción) |
+  | `items.service.ts` | 1477, 2044 | `catalogService.convertirUnidad` |
+  | `items.service.ts` | 3823, 3879, 4117 | `catalogService.crearConversor` |
+  | `salones.service.ts` | 1013 | `sesionesGarzonService.buscarSesionAbierta` |
+  | `pagos.service.ts` | 356 | `cajaService.findActiva` |
+  | `mermas.service.ts` | 124 | `catalogService.convertirUnidad` |
+  | `grupos-modificadores.service.ts` | 910 | `catalogService.convertirUnidad` |
+  | `cobros.service.ts` (pasarela) | 289 | `tenantPasarelaService.resolverPorId` — **pide dos** |
+
+  Los 20 se verificaron uno por uno contra el destino: todos terminan en un
+  `repo.findOne/find` o un `dataSource.query`. Ninguno es un service puro.
+
+  **Cómo se detectó, para poder repetirlo después del fix.** Un script recorre
+  `backend/src` y, dentro de cada bloque que corre en transacción —métodos con
+  `manager: EntityManager` en la firma, y callbacks de `.transaction(…)`—, marca tres
+  cosas: `this.dataSource.*`, `this.<x>Repo.*`, y `this.<x>Service.<m>(…)` **cuyos
+  argumentos no incluyan el manager**. Ese último chequeo tiene que mirar la lista
+  **completa** de argumentos: la primera versión miraba solo el primero y marcó como falso
+  positivo `cajaService.calcularEsperadoEfectivo(cajaId, manager)`, que recibe el manager
+  segundo y es correcto.
+
+  **Dos formas de arreglarlo, y no son excluyentes** (owner 2026-08-11: *"esto hay que
+  verlo con más calma"*, queda sin decidir):
+  1. **Pasar el `manager`** a las llamadas: cada service que hoy usa su repo pasa a aceptar
+     un `manager?: EntityManager` opcional y elige `manager.getRepository(X)` o el repo
+     propio. Uniforme para los 20, pero toca las firmas de ~6 services.
+  2. **Para el catálogo de unidades, cargarlo en memoria una sola vez** — cubre **7 de los
+     20** (`convertirUnidad` ×3, `crearConversor` ×3, `findAllUnidadesMedida`). Medido: la
+     tabla `unidad_medida` **solo la escribe el seeder al arrancar**, no hay ningún camino
+     de API que la modifique, así que no hay invalidación que diseñar. De paso saca una
+     query de cada venta, merma y edición de ítem — hoy se lee varias veces dentro de la
+     misma venta.
+
+  **Ningún test lo veía y hay que arreglar eso también:** el e2e corre con
+  `maxWorkers: 1` (`test/jest-e2e.json`), así que nunca hay dos transacciones a la vez. El
+  fix necesita un test de concurrencia que dispare N operaciones simultáneas con N ≥ tamaño
+  del pool — sin él, el bug vuelve sin que nadie se entere.
 
 - [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
   criterios distintos para "esta personalización cambia el precio"** (frontend, medido
