@@ -698,6 +698,70 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       expect(r.lineas[0].totalLinea).toBe('600.000000');
       expect(r.advertencias).toEqual([]);
     });
+
+    /**
+     * El borde que el fuzz de 20.000 ventas de la revisión independiente
+     * encontró y que el owner resolvió el 2026-08-11: **el sobrante del
+     * descuento se pierde**, no se guarda para compensar lo que venga después.
+     *
+     * Acá el cliente paga 2000 y no 1800, o sea 200 más en una venta que nunca
+     * fue negativa. Es más estricto que la regla original ("una venta nunca da
+     * negativo"), que habla del TOTAL y no del acumulado intermedio. Se eligió
+     * igual: topear recién al final dejaría la traza mostrando un descuento de
+     * 1200 sobre una línea que solo bajó 1000, y ahí el comprobante deja de
+     * cuadrar — que es justo lo que el piso por regla protege.
+     *
+     * Este test existe para que el próximo que lea el piso en cero **no lo
+     * "arregle"** creyendo que el borde es un descuido. Es raro por diseño:
+     * exige un descuento fijo mayor al neto Y un recargo posterior que lo
+     * levante.
+     */
+    it('el sobrante de un descuento topeado NO compensa un recargo posterior', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [
+            linea({
+              precioUnitario: '1000',
+              descuentos: [
+                regla({
+                  nombre: 'Fijo 1200',
+                  modo: 'monto_fijo',
+                  valor: '1200',
+                }),
+              ],
+              recargos: [
+                regla({
+                  id: 'r2',
+                  nombre: 'Fijo 2000',
+                  modo: 'monto_fijo',
+                  valor: '2000',
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
+
+      // Topeado al aplicarse: se descontaron 1000, no 1200. Los 200 sobrantes
+      // se pierden ahí y el recargo entra sobre un acumulado en cero.
+      expect(r.lineas[0].descuentoAplicado).toBe('1000.000000');
+      expect(r.lineas[0].trazas.descuentos[0].monto).toBe('1000.000000');
+      expect(r.lineas[0].totalLinea).toBe('2000.000000');
+      expect(r.totales.totalFinal).toBe('2000.000000');
+
+      // El comprobante cuadra, que es la razón de ser de la decisión:
+      // neto − descuentos + recargos = 1000 − 1000 + 2000.
+      expect(r.lineas[0].subtotalNeto).toBe('1000.000000');
+      expect(r.lineas[0].recargoAplicado).toBe('2000.000000');
+
+      // Y el cliente se entera de que el descuento no entró completo.
+      expect(r.advertencias).toEqual([
+        {
+          titulo: 'Descuento "Fijo 1200"',
+          detalle: 'no se aplicó completo porque superaba el monto disponible',
+        },
+      ]);
+    });
   });
 
   describe('ninguna regla aporta un monto negativo', () => {

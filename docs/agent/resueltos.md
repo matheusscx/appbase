@@ -17,6 +17,48 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El sobrante de un descuento topeado se pierde, y ahora hay un test que lo dice (2026-08-11)
+
+**Entrada original (verbatim):** *"¿Un descuento debe topearse aunque un recargo posterior
+levante el total? (backend, `calculo-precios.engine.ts`) — el piso en cero (2026-07-28)
+topea **regla por regla** contra el acumulado en ese punto de la fórmula. Con fórmula
+`descuentos → recargos`, neto 1000, descuento fijo 1200 y recargo fijo 2000: sin tope el
+total daba 1800 (positivo); con tope da 2000, o sea el cliente paga 200 más en una venta
+que nunca fue negativa. La regla que decidiste habla del **total**, no del acumulado
+intermedio, así que topear por regla es más estricto que lo pedido. La alternativa —topear
+recién al final— rompe la coherencia de la traza, que es lo que el diseño actual protege.
+Lo detectó la revisión independiente con un fuzz de 20.000 ventas. Es raro (exige un
+descuento fijo mayor al neto **y** un recargo posterior que lo levante), por eso no se
+resolvió sobre la marcha."*
+
+**Decisión del owner (2026-08-11): el sobrante se pierde.** El tope sigue siendo regla por
+regla, aun sabiendo que en ese borde el cliente paga de más. Gana la coherencia de la
+traza: cada paso del cálculo se explica solo y el comprobante cuadra.
+
+**Cero líneas de código de producción.** Es la clase de entrada que se cierra sin tocar
+nada y que igual valía la pena: el comportamiento ya era el correcto, lo que faltaba era
+que estuviera **elegido** en vez de heredado, y que algo lo defendiera. Sin eso, el
+próximo que lea el piso en cero ve un cliente pagando 200 de más y lo "arregla".
+
+**Lo que se agregó:** el test `el sobrante de un descuento topeado NO compensa un recargo
+posterior` (`calculo-precios.engine.spec.ts`, en el describe del piso en cero) con los
+números exactos de la entrada, y la quinta precisión de la regla en
+[`motor-calculo-precios.md`](../features/motor-calculo-precios.md).
+
+El test no se queda en el total: verifica que `descuentoAplicado` sea 1000 y no 1200 —o
+sea que el recorte quedó en la traza y no solo en el resultado—, que el comprobante cuadre
+(`1000 − 1000 + 2000`), y que la advertencia le llegue al cliente. Un test que solo mirara
+`totalFinal` daría verde con una implementación que descuenta 1200 y compensa después.
+
+**Mutante:** sacar `monto = tope` de `procesarReglas` —que es **exactamente la alternativa
+que el owner descartó**, topear al final en vez de por regla— dejó 6 tests en rojo, el
+nuevo entre ellos. Los otros 5 son los del piso que ya existían: el mutante confirma de
+paso que la regla es carga estructural y no un chequeo decorativo. Tras el revert, el
+motor quedó **byte-idéntico a `HEAD`** (`git diff --stat` vacío) y los 51 tests del engine
+en verde.
+
+---
+
 ## `categorias` y `terceros` pausados: el backend deja de aceptar la asignación (2026-08-11)
 
 **Entrada original (verbatim):** *"`categorias` y `terceros` pausados: el front los esconde,

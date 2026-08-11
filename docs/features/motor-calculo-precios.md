@@ -210,6 +210,17 @@ precisiones que hacen a la regla:
   sin advertencia **y** recortaba descuentos sanos cobrando de más; lo detectó la
   revisión independiente porque el primer test usaba una línea pelada, el único
   caso donde las dos magnitudes coinciden.
+- **El sobrante del descuento se pierde** (decisión del owner, 2026-08-11): no se
+  guarda para compensar un recargo posterior. Con neto 1000, descuento fijo 1200 y
+  después un recargo fijo de 2000, el cliente paga **2000**, no 1800 — 200 más en
+  una venta que nunca fue negativa. Es **más estricto que la regla original**, que
+  habla del total y no del acumulado intermedio, y se eligió igual: topear recién
+  al final dejaría la traza mostrando un descuento de 1200 sobre una línea que
+  bajó 1000, y ahí el comprobante deja de cuadrar. El borde es raro por diseño
+  —exige un descuento fijo mayor al neto **y** un recargo posterior que lo
+  levante— y lo encontró un fuzz de 20.000 ventas de la revisión independiente.
+  Lo fija el test `el sobrante de un descuento topeado NO compensa un recargo
+  posterior`, que está ahí para que nadie lo "arregle" creyéndolo un descuido.
 - **No frena la venta**: emite una advertencia, igual que un ingrediente no
   bloqueante sin stock. Viaja en `advertencias`/`advertenciasVenta`, tanto del
   cálculo como de la respuesta de la venta. La previsualización del carrito

@@ -541,25 +541,6 @@ Ver [`resueltos.md`](resueltos.md).
   **Owner (2026-08-11): la investigación se corre ahora.** Es lo único destrabado de esta
   entrada; el diseño sigue esperando a que sus hallazgos estén sobre la mesa y a una
   segunda confirmación.
-- [ ] **¿Un descuento debe topearse aunque un recargo posterior levante el total?**
-  (backend, `calculo-precios.engine.ts`) — el piso en cero (2026-07-28) topea **regla por
-  regla** contra el acumulado en ese punto de la fórmula. Con fórmula `descuentos →
-  recargos`, neto 1000, descuento fijo 1200 y recargo fijo 2000: sin tope el total daba
-  1800 (positivo); con tope da 2000, o sea el cliente paga 200 más en una venta que nunca
-  fue negativa. La regla que decidiste habla del **total**, no del acumulado intermedio, así
-  que topear por regla es más estricto que lo pedido. La alternativa —topear recién al
-  final— rompe la coherencia de la traza, que es lo que el diseño actual protege.
-  Lo detectó la revisión independiente con un fuzz de 20.000 ventas. Es raro (exige un
-  descuento fijo mayor al neto **y** un recargo posterior que lo levante), por eso no se
-  resolvió sobre la marcha.
-  **Decisión del owner (2026-08-11): el sobrante se pierde — queda como está.** El tope
-  sigue siendo regla por regla, aun sabiendo que en este borde el cliente paga de más
-  ($2.000 contra $1.800 en el ejemplo). Gana la coherencia de la traza: cada paso del
-  cálculo se explica solo y el detalle que ve el cliente nunca muestra un intermedio
-  negativo. **No toca el motor.** Lo que queda es cerrarla como corresponde: dejar la
-  regla escrita en `docs/features/motor-calculo-precios.md` y fijarla con un test que use
-  este mismo caso, para que el próximo que lea el piso en cero no lo "arregle" creyendo
-  que es un descuido.
 
 ## Auditoría `turnos` + `salones` + `garzones` (2026-08-06) — hallazgos confirmados
 
