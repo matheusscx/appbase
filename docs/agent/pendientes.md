@@ -538,9 +538,29 @@ Ver [`resueltos.md`](resueltos.md).
   fijos), o dejarlo y documentar que el orden no significa nada.
   ⛔ Sigue tocando el motor de precios: no se avanza sin volver a confirmar con el owner
   después de la investigación.
-  **Owner (2026-08-11): la investigación se corre ahora.** Es lo único destrabado de esta
-  entrada; el diseño sigue esperando a que sus hallazgos estén sobre la mesa y a una
-  segunda confirmación.
+  **Owner (2026-08-11): la investigación se corre ahora.** ✅ **Corrida el 2026-08-11:**
+  [`investigaciones/2026-08-11-orden-de-descuentos.md`](investigaciones/2026-08-11-orden-de-descuentos.md).
+  Lo que cambia de esta entrada:
+  - **No hay estándar que copiar.** Los cuatro sistemas relevados fijan el orden en el
+    motor y **ninguno lo hace configurable**; Toast y Square además lo fijan **al revés uno
+    del otro** (Toast: fijo antes que porcentaje; Square: porcentaje antes que fijo).
+  - **La prioridad configurable —la forma que el owner prefería— no aparece en ningún POS**,
+    solo en e-commerce y apps de terceros. Sigue siendo una opción válida, pero deja de
+    tener el respaldo que el insumo original le atribuía.
+  - **Aparecieron dos salidas que no estaban sobre la mesa:** prohibir apilar (Lightspeed,
+    Toast por default, Bsale con cupones) y quedarse con el mayor cuando dos compiten
+    (Square). Las dos **disuelven** la pregunta en vez de responderla.
+  - **El problema es más chico de lo que decía esta entrada.** Medido: `aplicarValor`
+    (`calculo-precios.engine.ts:240`) ignora la base en `monto_fijo`, así que en modo
+    **`base` el orden no mueve el total** (700 en los dos órdenes del ejemplo; en
+    `compuesto` da 700 vs 720). `base` es el default de la columna y **los dos tenants del
+    seed lo usan**, o sea que hoy es inalcanzable. Donde el orden sí importa en `base` es
+    en la **traza**: cuál de las reglas aparece recortada por el piso en cero.
+  - **El SII no impone nada.** Estandariza los campos (`DescuentoPct`/`DescuentoMonto`,
+    `DscRcgGlobal`) y no el algoritmo; `NroLinDR` es numeración secuencial, no orden de
+    aplicación — verificado contra dos implementadores porque un buscador afirmó lo
+    contrario. La decisión es de producto, no fiscal.
+  ⛔ Sigue pendiente la decisión del owner entre las cuatro formas, y sigue tocando el motor.
 
 ## Auditoría `turnos` + `salones` + `garzones` (2026-08-06) — hallazgos confirmados
 
