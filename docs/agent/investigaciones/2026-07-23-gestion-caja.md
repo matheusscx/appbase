@@ -482,6 +482,154 @@ Modelo acordado (§8.1 + brainstorming):
 
 ---
 
+## 10. Responsabilidad al contar la caja de otro (2026-08-11, 4ª pasada)
+
+Cuarta pasada, pedida por el owner al decidir el **cierre forzado**. El §6 ya había cubierto
+el **mecanismo** (quién puede cerrar, `cerrada_por`, aprobación por umbral, precedente
+chileno casi nulo); esta pasada busca lo que faltaba: **a quién le queda la diferencia**
+cuando el dueño de la caja no vio el conteo, el **testigo**, y el **sellar y contar después**.
+El brief excluyó explícitamente lo ya investigado.
+
+### 10.1 El hallazgo que reencuadra la pregunta
+
+La pregunta del owner era *"¿le toca confiar en el encargado?"*. El estándar **no responde
+eso**, porque no trata la atribución como una elección. La condiciona:
+
+> *"No employee shall be held responsible for cash shortages unless he/she has **sole
+> access** to the cash register and is given an **opportunity to be present and participate
+> in the cashing up** of his/her register."*
+> — cláusula estándar de convenios colectivos de retail (EE.UU.), recopilada en Law Insider
+
+Son **dos requisitos acumulativos**. Contar sin el dueño rompe el segundo, así que la
+diferencia **deja de ser imputable al cajero ausente**. No pasa a nombre de quien contó:
+*"la diferencia es del que contó"* **no existe como doctrina** (el investigador lo buscó
+explícitamente y no lo encontró). El nombre estándar del principio es **sole drawer
+accountability**.
+
+### 10.2 La custodia se transfiere con un acto explícito, no contando
+
+**Oracle Retail Xstore** es el único producto que lo modela: en modo *Till Accountability*
+el till sigue al cajero de terminal en terminal, y la cadena de estados es
+`ISSUED → ENDCOUNT → REMOVED → RETURNED → RECONCILED`, con el rol que ejecuta cada
+transición. Al marcar `RETURNED`: *"The manager has now accepted responsibility for the
+till."* La aceptación de custodia es **un evento propio**, no un efecto colateral del conteo.
+
+### 10.3 🇨🇱 La pata chilena — y acá la señal está en la norma laboral, no en la competencia
+
+**El hallazgo más consecuente para el diseño.** En Chile, atribuir un faltante a un cajero
+es casi declarativo: **no habilita a descontarlo**.
+
+- **Dirección del Trabajo, [ORD. N°4229](https://www.dt.gob.cl/legislacion/1624/w3-article-107035.html)
+  (19/08/2015)**, doctrina reiterada: con **asignación de pérdida de caja** pactada, el
+  empleador puede descontar *de ese beneficio*; **sin ella, "no resulta jurídicamente
+  procedente que el empleador descuente de la remuneración"**, y para ir más allá haría
+  falta **prueba judicial** de la responsabilidad del trabajador.
+- La asignación es de naturaleza **indemnizatoria** (por eso no es remuneración).
+- Por sobre la asignación: solo con **autorización escrita** y tope de **15%** de la
+  remuneración mensual (art. 58 inc. 3 CdT).
+- Línea sostenida: ORD. 3494/266 (1998), 3516/113 (2003), 1915/27 (2011).
+
+**Consecuencia:** la atribución vale como **prueba, no como cobro**. Eso baja la presión
+sobre "acertar el responsable" y la sube sobre **dejar trazable quién tuvo la custodia y
+quién contó** — que es exactamente lo que un juicio laboral pediría.
+
+### 10.4 Testigo / doble custodia
+
+Nombres estándar: **dual control**, **dual custody**, **four-eyes**, **two-person rule**.
+
+- **Banca: obligatorio.** [U.S. Bank](https://www.usbank.com/dam/en/documents/pdfs/business-banking/night-depository-service-standard-terms-and-conditions.pdf)
+  lo redacta como requisito duro para abrir una bolsa sin su dueño: *"the bank may forcibly
+  open the bags **in the presence of two bank employees**"*.
+- **Retail/restaurantes: recomendado, no obligatorio.** Y el argumento que se repite no es
+  antifraude: **protege al que cuenta de una acusación**.
+- **Cuando no hay segunda persona, la doctrina NO dice "no cuentes".** Dice **controles
+  compensatorios**: log nominado, **cámara**, reconciliación entre quienes tuvieron acceso, y
+  firma del custodio ([U. of Colorado, Cash Control](https://www.colorado.edu/controller/policies/cash-control/internal-policies)).
+  El control que se cae se **sustituye**, no se omite. Esto responde el caso "un solo
+  encargado a las 2 AM".
+
+### 10.5 Sellar y contar después — existe, está normado, y el software SMB no lo tiene
+
+- **Banca:** bolsas *hold-for-processing* de U.S. Bank — se guardan selladas hasta que el
+  dueño llegue; **lista itemizada** declarada antes de sellar; **plazo de 3 días hábiles**;
+  vencido, apertura **entre dos**.
+- **Retail enterprise:** Xstore `Remove Till` — *"remove the till to count it later"*. El
+  till pasa a `REMOVED` y **el terminal se libera sin conteo**.
+- **Requisito técnico del patrón:** que **el objeto contable (turno/till) sea separable del
+  recurso operativo (terminal)**, más un estado explícito de "conteo pendiente" y un plazo.
+- **Trade-off honesto:** durante la ventana, la diferencia es **desconocida**, no cero — los
+  reportes del día quedan provisorios.
+
+### 10.6 Gradación por umbral, también para el conteo de terceros
+
+U.S. Bank gradúa por monto: diferencia **≤ USD 50** → se ajusta sin avisar; **> USD 50** →
+**dos empleados reverifican** y se **contacta al dueño del dinero**. No es binario, y agrega
+una pieza que la decisión del umbral del owner no tenía: **avisarle al dueño de la plata**.
+
+### 10.7 Cruce contra nuestro código — la sorpresa buena
+
+**Ya tenemos la separación que el patrón de §10.5 exige.** `cajas.cajon_id` referencia
+`cajones`: el **cajón físico** es una entidad distinta de la **sesión de caja**. Lo que hoy
+impide sellar-y-contar-después no es el modelo, es una **regla**: una caja
+`en_conciliacion` **ocupa el cajón** (lo hace valer el service en `abrir`/`cajonesDisponibles`)
+**y también al cajero** (`ux_cajas_activa_por_usuario`, que incluye `en_conciliacion` a
+propósito). Liberar cajón y cajero con el conteo pendiente es **cambiar esa regla**, no
+construir una arquitectura nueva.
+
+**Y el cierre en dos fases ya existe** (`en_conciliacion`: fase 1 congela el arqueo, fase 2
+justifica). Eso da los cuatro ojos **sin exigir que los dos estén al mismo tiempo**: alcanza
+con que la fase 2 la haga alguien distinto de quien contó.
+
+### 10.8 Qué sobrevive al cruce
+
+| Hallazgo | Veredicto |
+|---|---|
+| La imputación se cae si el dueño no pudo estar en el conteo | ✅ **Adoptado** — decisión del owner 2026-08-11 |
+| "La diferencia es de quien contó" | ❌ No existe como doctrina; no se adopta |
+| En Chile no se puede descontar sin asignación pactada | ✅ Refuerza que el valor es probatorio; **validar con abogado** |
+| Custodia se transfiere con acto explícito (`RETURNED`) | 🔶 Encaja con nuestra fase 2; sin decidir |
+| Testigo obligatorio | ❌ Recrearía el bloqueo de las 2 AM |
+| Testigo opcional + controles compensatorios si no hay | 🔶 Sin decidir |
+| Sellar y contar después | 🔶 Sin decidir — el modelo lo soporta, la regla no |
+| Avisar al dueño de la plata sobre el umbral | 🔶 Sin decidir; complementa el umbral ya decidido |
+
+### 10.9 Lo que la investigación NO encontró
+
+Explícito, porque vale tanto como lo que sí:
+
+1. **Ningún POS de restaurante/retail SMB con estado "sellado, conteo pendiente".** Toast,
+   Square y Lightspeed dejan cerrar sin contar o cerrar el cajón de otro con override, pero
+   ninguno modela *"cerré sin contar porque quedó sellado"*. Solo Xstore, que es enterprise.
+2. **Ningún POS con campo de testigo o segunda firma en el cierre.** Vive en formularios de
+   papel y políticas, no en software. **Es un hueco del mercado, no algo resuelto.**
+3. **Ninguna norma chilena que exija doble custodia en retail privado.** Hay doctrina de
+   arqueo en el sector público, pero **los PDF chilenos no se pudieron abrir** (403 /
+   codificación ilegible), así que "el arqueo cierra con acta firmada ante testigo" **queda
+   sin verificar**.
+4. **Ningún umbral de referencia en CLP.** Todos los publicados son USD, de contextos
+   institucionales de EE.UU.
+5. **Nada sobre qué pasa si el cajero ausente nunca vuelve**, en retail. El único precedente
+   con plazo es bancario (3 días hábiles + apertura entre dos).
+6. **Los POS chilenos siguen sin documentar quién puede cerrar la caja de otro.** Defontana
+   documenta la jerarquía turno ⊂ caja pero **no los permisos por rol**; el help desk de
+   Bsale exige login. Confirma lo que ya sabíamos del §6.
+
+### 10.10 Fuentes de esta pasada
+
+- Law Insider — [Cash Shortages (cláusulas de convenios colectivos)](https://www.lawinsider.com/clause/cash-shortages)
+- Dirección del Trabajo (Chile) — [ORD. N°4229 (2015)](https://www.dt.gob.cl/legislacion/1624/w3-article-107035.html) ·
+  [descuentos y asignación de pérdida de caja](https://www.dt.gob.cl/portal/1628/w3-article-60219.html)
+- U.S. Bank — [Night Depository Service Standard Terms and Conditions](https://www.usbank.com/dam/en/documents/pdfs/business-banking/night-depository-service-standard-terms-and-conditions.pdf)
+- Oracle Retail Xstore — [Till Management](https://docs.oracle.com/en/industries/retail/retail-xstore-point-of-service/25.0/rpxmg/till-management.htm) ·
+  [Till Accountability Process](https://docs.oracle.com/en/industries/retail/retail-xstore-point-of-service/21.0/rpxmg/till-accountability-process.htm)
+- Toast — [Lock Down Cash Drawers](https://support.toasttab.com/en/article/Cash-Drawer-Lockdown)
+- Lightspeed K-Series — [Configuring cash drawers](https://k-series-support.lightspeedhq.com/hc/en-us/articles/1260804606710-Configuring-cash-drawers)
+- Defontana (Chile) — [Cierre de Turno y Caja](https://intercom.help/defontanaerp/es/articles/5318588-cierre-de-turno-y-caja)
+- University of Colorado — [Cash Control, Internal Policies](https://www.colorado.edu/controller/policies/cash-control/internal-policies)
+- AccountingTools — [Cash Over and Short account](https://www.accountingtools.com/articles/what-is-the-cash-over-and-short-account.html)
+
+---
+
 ## Fuentes
 
 - Toast — [Shift Review Overview](https://support.toasttab.com/en/article/Shift-Review-Overview) ·

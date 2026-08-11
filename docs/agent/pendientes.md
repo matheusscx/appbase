@@ -944,7 +944,18 @@ sigue son los poderes del encargado que se difirieron a propósito:
   campo el cierre mentiría sobre quién respondió por el efectivo. Rompe el owner-only del
   cierre bajo permiso `Cajas:Actualizar`. Mercado: la separación de funciones favorece que
   un segundo intervenga en el cuadre.
-  ✅ **Decidido por el owner (2026-08-11): sí, con `cerrada_por` registrado.**
+  ✅ **Decidido por el owner (2026-08-11): sí, con `cerrada_por` registrado, y la diferencia
+  queda como INCIDENTE, no como faltante del cajero.**
+  El criterio salió de la 4ª pasada de investigación (§10 de
+  [`investigaciones/2026-07-23-gestion-caja.md`](investigaciones/2026-07-23-gestion-caja.md)):
+  el estándar condiciona la responsabilidad del cajero a **dos** requisitos acumulativos
+  —acceso exclusivo **y** oportunidad de estar presente en el conteo—, así que contar sin él
+  **cae la imputación**. No pasa a nombre de quien contó: eso no existe como doctrina.
+  🇨🇱 Y pesa un dato legal: sin **asignación de pérdida de caja** pactada, en Chile **no se
+  puede descontar** un faltante del sueldo (DT, ORD. N°4229). La atribución vale como
+  **prueba, no como cobro** — lo que hay que asegurar es la trazabilidad, no el culpable.
+  ⚠️ **Validar con abogado antes de escribir la regla**: la fuente es doctrina de la DT
+  leída por un agente, no asesoría legal.
   Pesó una consecuencia operativa que no estaba escrita acá: como solo puede haber **una
   caja física abierta por tenant+usuario**, una caja que su dueño no vuelve a cerrar deja a
   esa persona **sin poder abrir caja nunca más**. Sin cierre forzado, ese bloqueo necesita
@@ -962,6 +973,10 @@ sigue son los poderes del encargado que se difirieron a propósito:
   caja de otro y esa diferencia supera el umbral, **¿quién aprueba?** Que se apruebe a sí
   mismo anula el control; que lo apruebe un tercero puede no haber a esa hora. Hay que
   contestarlo antes de escribir el flujo, no durante.
+  🔶 **Pieza que aportó la investigación (§10.6) y todavía no está decidida:** el precedente
+  bancario no es binario — bajo el umbral se ajusta sin avisar; **sobre** el umbral, dos
+  personas reverifican **y se le avisa al dueño de la plata**. Ese aviso al cajero no estaba
+  en la decisión del umbral y encaja con que la diferencia sea un incidente, no su faltante.
 - [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
   ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el conteo (la
   revelación es inmediata, vía el detalle), aunque la caja quede `en_conciliacion`. El
