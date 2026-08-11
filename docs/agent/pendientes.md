@@ -944,6 +944,11 @@ sigue son los poderes del encargado que se difirieron a propósito:
   campo el cierre mentiría sobre quién respondió por el efectivo. Rompe el owner-only del
   cierre bajo permiso `Cajas:Actualizar`. Mercado: la separación de funciones favorece que
   un segundo intervenga en el cuadre.
+  ✅ **Decidido por el owner (2026-08-11): sí, con `cerrada_por` registrado.**
+  Pesó una consecuencia operativa que no estaba escrita acá: como solo puede haber **una
+  caja física abierta por tenant+usuario**, una caja que su dueño no vuelve a cerrar deja a
+  esa persona **sin poder abrir caja nunca más**. Sin cierre forzado, ese bloqueo necesita
+  otra salida igual.
 - [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
   si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
   aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más
@@ -951,16 +956,37 @@ sigue son los poderes del encargado que se difirieron a propósito:
   **resuelto** por el sub-proyecto A) — el umbral se evaluaría sobre la
   diferencia de cada línea del arqueo multi-medio, ya no sobre un total mezclado que
   inflaba cualquier diferencia.
+  ✅ **Decidido por el owner (2026-08-11): sí, con umbral configurable por tenant, y el
+  cierre queda esperando aprobación.** Bloqueante, no aviso.
+  ⚠️ **Cruce sin resolver con el cierre forzado de acá arriba:** si el encargado cierra la
+  caja de otro y esa diferencia supera el umbral, **¿quién aprueba?** Que se apruebe a sí
+  mismo anula el control; que lo apruebe un tercero puede no haber a esa hora. Hay que
+  contestarlo antes de escribir el flujo, no durante.
 - [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
   ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el conteo (la
   revelación es inmediata, vía el detalle), aunque la caja quede `en_conciliacion`. El
   sub-proyecto C resolvió la conciliación operador→supervisor de §6, pero no
   condicionó la revelación a que solo el supervisor la vea de inmediato — sigue diferido.
+  ✅ **Decidido por el owner (2026-08-11): la diferencia la ve solo el supervisor.**
+  ⚠️ **No alcanza con tocar el detalle del arqueo.** El ocultamiento de hoy es **parcial**:
+  el **panel de resumen del turno sigue mostrando lo esperado**, así que un cajero que abra
+  esa pantalla deshace la decisión por otra puerta. Las dos superficies se cierran juntas o
+  la decisión no existe.
+  ⚠️ Costo aceptado explícitamente: un error de conteo de buena fe ya no se corrige en el
+  momento — hay que volver a llamar a la persona.
 - [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
   de diferencia de §5 quedaron **resueltos** por el sub-proyecto C; lo que sigue
   pendiente de §5 es exclusivamente el conteo por denominación de billetes/monedas, sin
   tracking más detallado que [`investigaciones/2026-07-23-gestion-caja.md
   §9`](investigaciones/2026-07-23-gestion-caja.md).
+  ✅ **Decidido por el owner (2026-08-11): configurable por tenant** — un negocio chico carga
+  un total, uno grande el desglose.
+  ⚠️ Lo que compra la config es lo que hay que sostener: **dos caminos en la pantalla de
+  arqueo**, y los dos tienen que producir el mismo dato para el umbral de arriba. Antes de
+  implementarlo hay que definir si el desglose se **persiste** (y entonces es una tabla
+  nueva) o si solo asiste la suma en pantalla y se guarda el total — no es lo mismo para
+  auditoría, y la decisión de arriba (revelación solo al supervisor) sugiere que el
+  desglose es evidencia, no una calculadora.
 
 ## Endurecimiento para producción (pre-lanzamiento — hoy no hay prod)
 
