@@ -1174,6 +1174,24 @@ Entradas de tandas anteriores que no necesitaban ninguna decisión de negocio.
 Los hallazgos que se cerraron. Los que quedan y lo refutado están en
 [`pendientes.md`](pendientes.md).
 
+- [x] ~~**Dos `describe` viejos de `garzones.nuxt.spec.ts` desmontan al final del test, no
+  en `afterEach`**~~ (frontend, cerrado 2026-08-11) — *"papelera: eliminar respeta el
+  toggle"* y *"papelera: restaurar"* pasaron al patrón que ya usaba el `describe` de
+  advertencias: `let montado` + `afterEach`, seis `wrapper.unmount()` menos.
+
+  **La entrada describía el mecanismo bien y el síntoma mal**, y eso cambió cómo se
+  verificó. Decía que un test que falla contamina al siguiente; forzar un fallo *después*
+  de cerrar el modal no reprodujo nada (1 test rojo, 12 verdes), porque el diálogo ya no
+  estaba abierto. Recién forzando el fallo **con el modal abierto** apareció, y no como
+  test rojo: una sonda al entrar al test siguiente midió **`dialogos=1`** en
+  `document.body`. Con el `afterEach`, la misma sonda mide **`dialogos=0`**.
+
+  Que no pintara rojo es lo peor del caso, no lo mejor: el test siguiente busca su modal
+  con `document.body.querySelector('[role="dialog"]')` —el **primero**—, así que agarraba
+  el huérfano del test anterior y **pasaba en verde clickeando la pantalla equivocada**.
+  La entrada advertía "cualquier mutante sobre este archivo puede dar señal inflada"; la
+  medición muestra que también puede dar señal *falsamente verde*, que no se nota nunca.
+
 - [x] ~~**El filtro "Hasta" del historial de sesiones excluía las sesiones del propio
   día**~~ (backend, cerrado 2026-08-07) — `AppDateInput` emite `YYYY-MM-DD`, `s.inicio_el`
   es `timestamptz`, y comparar una contra otra castea la fecha a **medianoche**: "Desde hoy

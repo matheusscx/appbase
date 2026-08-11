@@ -11,6 +11,14 @@
 // muestra como error simple (toast), igual que `terceros` — nunca como modal
 // de renombrado. `docs/features/papelera.md` § "garzones tiene una
 // restricción única parcial distinta".
+//
+// ⚠️ **Los tres `describe` desmontan en `afterEach`, no al final del test.** Los
+// diálogos de esta pantalla se teletransportan fuera del wrapper, así que los
+// casos que los inspeccionan leen `document.body`; si un test falla ANTES de su
+// `unmount()`, la pantalla queda montada y el siguiente encuentra diálogos
+// viejos. Y como `document.body.querySelector('[role="dialog"]')` devuelve el
+// PRIMERO, el test siguiente puede pasar en verde clickeando el modal del
+// anterior. Cada `describe` anota abajo la medición con la que se comprobó.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Garzones from './garzones.vue'
@@ -231,14 +239,24 @@ function reset() {
 }
 
 describe('garzones — papelera: eliminar respeta el toggle', () => {
+  // Desmontaje en `afterEach` por la razón del encabezado del archivo. Medido
+  // acá el 2026-08-11: con el `unmount()` al final del test, forzar un fallo
+  // con el modal abierto dejaba 1 diálogo huérfano en el test siguiente.
+  let montado: Awaited<ReturnType<typeof montar>> | null = null
+
   beforeEach(() => {
     garzonesBackend = [garzon()]
     reset()
     esAdmin = true
   })
 
+  afterEach(() => {
+    montado?.unmount()
+    montado = null
+  })
+
   it('con "Ver eliminados" activo, borrar deja la fila visible como eliminada (no la saca de la lista)', async () => {
-    const wrapper = await montar()
+    const wrapper = (montado = await montar())
     await activarVerEliminados(wrapper)
     expect(wrapper.text()).toContain('Ana Torres')
 
@@ -252,12 +270,10 @@ describe('garzones — papelera: eliminar respeta el toggle', () => {
     expect(wrapper.text()).toContain('Ana Torres')
     expect(wrapper.text()).toContain('Eliminado por admin.paris')
     expect(badges(wrapper)).toContain('Eliminado')
-
-    wrapper.unmount()
   })
 
   it('con el toggle apagado, borrar SÍ saca la fila de la lista (comportamiento de siempre)', async () => {
-    const wrapper = await montar()
+    const wrapper = (montado = await montar())
     expect(wrapper.text()).toContain('Ana Torres')
 
     await wrapper.find('[title="Eliminar"]').trigger('click')
@@ -265,8 +281,6 @@ describe('garzones — papelera: eliminar respeta el toggle', () => {
     await confirmarEnModal('Eliminar')
 
     expect(wrapper.text()).not.toContain('Ana Torres')
-
-    wrapper.unmount()
   })
 })
 
@@ -312,14 +326,24 @@ describe('garzones — papelera: gateada por `Salones:Eliminar`', () => {
 })
 
 describe('garzones — papelera: restaurar', () => {
+  // Desmontaje en `afterEach` por la razón del encabezado del archivo. Medido
+  // acá el 2026-08-11: con el `unmount()` al final del test, forzar un fallo
+  // con el modal abierto dejaba 1 diálogo huérfano en el test siguiente.
+  let montado: Awaited<ReturnType<typeof montar>> | null = null
+
   beforeEach(() => {
     garzonesBackend = [eliminado()]
     reset()
     esAdmin = true
   })
 
+  afterEach(() => {
+    montado?.unmount()
+    montado = null
+  })
+
   it('restaurar devuelve la fila al estado vivo sin recargar la página', async () => {
-    const wrapper = await montar()
+    const wrapper = (montado = await montar())
     await activarVerEliminados(wrapper)
     expect(wrapper.text()).toContain('Eliminado por admin.paris')
 
@@ -329,8 +353,6 @@ describe('garzones — papelera: restaurar', () => {
     expect(garzonesBackend[0]!.eliminadoEl).toBeNull()
     expect(wrapper.text()).toContain('Ana Torres')
     expect(wrapper.text()).not.toContain('Eliminado por admin.paris')
-
-    wrapper.unmount()
   })
 
   // El modal NO se cierra al confirmar (lo cierran las funciones de la
@@ -344,7 +366,7 @@ describe('garzones — papelera: restaurar', () => {
       soltarRestaurar = resolve
     })
 
-    const wrapper = await montar()
+    const wrapper = (montado = await montar())
     await activarVerEliminados(wrapper)
     await abrirRestaurarDeLaFila(wrapper)
 
@@ -360,8 +382,6 @@ describe('garzones — papelera: restaurar', () => {
     await new Promise(r => setTimeout(r, 60))
 
     expect(postsRestaurar).toEqual([GARZON_ID])
-
-    wrapper.unmount()
     restaurarRetenido = null
   })
 
@@ -371,7 +391,7 @@ describe('garzones — papelera: restaurar', () => {
   it('un error al restaurar cierra el modal y avisa (no hay pantalla de colisión que abrir)', async () => {
     // Fila viva en el backend pero eliminada en la vista: el POST encuentra la
     // fila ya restaurada y contesta 404, igual que el backend real.
-    const wrapper = await montar()
+    const wrapper = (montado = await montar())
     await activarVerEliminados(wrapper)
     garzonesBackend[0]!.eliminadoEl = null
 
@@ -380,8 +400,6 @@ describe('garzones — papelera: restaurar', () => {
 
     expect(postsRestaurar).toHaveLength(1)
     expect(dialogo()).toBeNull()
-
-    wrapper.unmount()
   })
 
   // El caso PROPIO de `garzones`: el 400 real de este recurso es la colisión
@@ -398,7 +416,7 @@ describe('garzones — papelera: restaurar', () => {
       = 'Ya existe un garzón "Mostrador" activo para este tenant (se crea automáticamente, uno por tenant). '
         + 'No se puede restaurar el placeholder anterior mientras el nuevo siga vivo.'
 
-    const wrapper = await montar()
+    const wrapper = (montado = await montar())
     await activarVerEliminados(wrapper)
 
     await abrirRestaurarDeLaFila(wrapper)
@@ -412,8 +430,6 @@ describe('garzones — papelera: restaurar', () => {
     expect(postsRestaurar).toEqual([GARZON_ID])
     // Y la fila sigue en la papelera: el restaurar no aplicó.
     expect(garzonesBackend[0]!.eliminadoEl).toBeTruthy()
-
-    wrapper.unmount()
   })
 })
 
@@ -474,11 +490,9 @@ describe('garzones — papelera: la carrera de `cargar()` bajo toggles rápidos'
 // ojos del admin — un aviso que el backend calcula y la pantalla descarta no
 // cambia nada respecto de no calcularlo.
 describe('garzones — advertencias del backend', () => {
-  // ⚠️ El desmontaje va acá y NO al final de cada test: estos casos leen
-  // `document.body` (los diálogos se teletransportan fuera del wrapper), así que
-  // un test que falla ANTES de su `unmount()` deja la pantalla montada y los
-  // siguientes encuentran diálogos viejos. Medido: con el unmount al final, un
-  // mutante que solo debía matar 1 test mataba los 4 — señal falsa.
+  // Desmontaje en `afterEach` por la razón del encabezado del archivo. Medido
+  // acá el 2026-08-07: con el `unmount()` al final del test, un mutante que solo
+  // debía matar 1 test mataba los 4 — señal falsa.
   let montado: Awaited<ReturnType<typeof montar>> | null = null
 
   beforeEach(() => {

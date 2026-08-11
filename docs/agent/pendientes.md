@@ -594,18 +594,6 @@ Quedan:
   `### ❌`. Ya estaba en 23 antes de esa tanda, así que no lo rompió un commit puntual: el
   tope nunca se aplicó. Decidir si se poda —y con qué criterio de "sin reincidencia", que
   hoy no está registrado en ningún lado— o si la regla se cambia por otra cosa.
-- [ ] **Dos `describe` viejos de `garzones.nuxt.spec.ts` desmontan al final del test, no en
-  `afterEach`** (frontend, `app/pages/configuracion/garzones.nuxt.spec.ts`) — de los cuatro
-  preexistentes, *"papelera: eliminar respeta el toggle"* y *"papelera: restaurar"* leen
-  `document.body` (los diálogos se teletransportan), así que un test que falla antes de su
-  `unmount()` deja la pantalla montada y contamina al siguiente. Los otros dos solo
-  consultan el wrapper y no están afectados. Es exactamente el modo de falla que documenta
-  la entrada *"Sacar conclusiones de un mutante
-  sin aislar los tests entre sí"* de `anti-patterns.md`, medido el 2026-08-07: un mutante
-  que debía matar 1 test mató 2. El `describe` nuevo de advertencias ya usa `afterEach`; los
-  viejos quedaron sin convertir porque era refactor fuera del alcance de ese commit. Mientras
-  no se conviertan, **cualquier mutante que se corra sobre ese archivo puede dar una señal
-  inflada**.
 - [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
   el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
   `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos
