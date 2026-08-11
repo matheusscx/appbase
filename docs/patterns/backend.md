@@ -65,6 +65,15 @@ Dos significados según el rol de la entidad, y **no se aplanan**:
 | **se aplica** a un cálculo (`descuentos`, `recargos`, `impuestos`) | no entra en el total, y avisa | descartar **al aplicar**, no al cargar |
 | **se referencia** (`categorias`, `terceros`, `items`) | no se puede elegir de nuevo | rechazar la **asignación nueva**; el vínculo existente no se rompe |
 
+La fila de "se referencia" describía la regla **desde el 2026-08-03 y el backend no la
+cumplía**: hasta el 2026-08-11 la sostenía solo el frontend (`items.vue` y
+`ClienteForm.vue` filtran las listas), así que un POST directo asignaba igual. El
+enforcement vive en un solo punto por entidad, que es donde hay que sumarse si aparece
+otro camino de asignación: `validarCategoria` (`items.service.ts`, la usan `create` y
+`update`) y `validarTercero` (`ventas.service.ts`). Los dos leen `activo` y lo evalúan
+aparte del `WHERE`, para que "no es de este tenant" y "está pausada" sean errores
+distintos.
+
 Tres trampas ya pisadas, todas documentadas en
 [`resueltos.md`](../agent/resueltos.md) § *Lo que está en pausa no se aplica ni se ofrece*:
 

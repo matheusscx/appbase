@@ -3926,18 +3926,38 @@ export class ItemsService {
     return { codigo: rows[0].codigo_iso, simbolo: rows[0].simbolo };
   }
 
+  /**
+   * Una categoría pausada (`activo = false`) no acepta asignaciones nuevas
+   * (decisión del owner, 2026-08-11): pausar significa "no se usa más", y hasta
+   * ahora eso lo sostenía solo el frontend —`items.vue` filtra la lista— así que
+   * un POST/PATCH directo la asignaba igual. Mismo criterio que
+   * `validarImpresoraComanda` en `categorias.service.ts`, que ya exigía `activo`.
+   *
+   * ⚠️ Lo que NO hace: tocar los vínculos existentes. Un ítem no pierde su
+   * categoría porque la categoría se pause — se rechaza la asignación nueva y
+   * nada más. Por eso el filtro va acá y no en las lecturas.
+   *
+   * El `activo` se lee y se evalúa en TypeScript en vez de sumarlo al `WHERE`:
+   * así "no es de este tenant" y "está pausada" son dos errores distintos, que
+   * es la diferencia entre un id equivocado y una decisión de negocio.
+   */
   private async validarCategoria(
     manager: EntityManager,
     tenantId: string,
     categoriaId: string,
   ): Promise<string> {
-    const rows: { nombre: string }[] = await manager.query(
-      `SELECT nombre FROM categorias
+    const rows: { nombre: string; activo: boolean }[] = await manager.query(
+      `SELECT nombre, activo FROM categorias
        WHERE categoria_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
       [categoriaId, tenantId],
     );
     if (!rows.length) {
       throw new BadRequestException('La categoría no pertenece a este tenant');
+    }
+    if (!rows[0].activo) {
+      throw new BadRequestException(
+        `La categoría "${rows[0].nombre}" está pausada y no admite asignaciones nuevas`,
+      );
     }
     return rows[0].nombre;
   }

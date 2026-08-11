@@ -550,6 +550,9 @@ export class VentasService {
 
     // 7e. Customer (opcional)
     if (dto.customer) {
+      if (dto.customer.terceroId) {
+        await this.validarTercero(manager, tenantId, dto.customer.terceroId);
+      }
       await manager.save(
         VentaCustomer,
         manager.create(VentaCustomer, {
@@ -1125,6 +1128,43 @@ export class VentasService {
         });
       }
     });
+  }
+
+  /**
+   * El `terceroId` del customer de una venta no se validaba en absoluto: el DTO
+   * solo exige formato UUID (`@IsUUID()`) y el service lo persistía tal cual. La
+   * FK de `venta_customer.tercero_id` (`startup-pos.sql`) referencia `terceros`
+   * sin tenant, así que garantizaba existencia y nada más.
+   *
+   * Dos cosas se cierran acá, y la primera vino con la segunda:
+   * - **El tercero tiene que ser de este tenant.** Sin esto, un POST con el id
+   *   de un tercero ajeno quedaba guardado en la venta. Hoy no filtra datos
+   *   —`venta_customer` denormaliza nombre/RUT y ninguna lectura hace JOIN a
+   *   `terceros`— pero es una FK cruzada entre tenants, que no es un estado que
+   *   convenga tener escrito esperando al primer JOIN que alguien agregue.
+   * - **Un tercero pausado no admite asignaciones nuevas** (decisión del owner,
+   *   2026-08-11). Igual que en `validarCategoria`: hasta ahora lo sostenía solo
+   *   `ClienteForm.vue`, que filtra por `activo`; el backend aceptaba el POST
+   *   directo. Los vínculos ya existentes no se tocan.
+   */
+  private async validarTercero(
+    manager: EntityManager,
+    tenantId: string,
+    terceroId: string,
+  ): Promise<void> {
+    const rows: { nombre: string; activo: boolean }[] = await manager.query(
+      `SELECT nombre, activo FROM terceros
+        WHERE tercero_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [terceroId, tenantId],
+    );
+    if (!rows.length) {
+      throw new BadRequestException('El tercero no pertenece a este tenant');
+    }
+    if (!rows[0].activo) {
+      throw new BadRequestException(
+        `El tercero "${rows[0].nombre}" está pausado y no admite asignaciones nuevas`,
+      );
+    }
   }
 
   /** Lock pesimista de la venta original: serializa NCs/devoluciones concurrentes. */

@@ -17,6 +17,78 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `categorias` y `terceros` pausados: el backend deja de aceptar la asignación (2026-08-11)
+
+**Entrada original (verbatim):** *"`categorias` y `terceros` pausados: el front los esconde,
+el backend acepta la asignación (backend, medido 2026-08-03) — hermano menor de la entrada
+de reglas pausadas que se cerró ese mismo día, pero sobre entidades que se **referencian**,
+no que se aplican: no cambian ningún monto, por eso quedó fuera de aquel alcance. Medido:
+`ClienteForm.vue:34` filtra `terceros` por `activo` y `items.vue:798` filtra `categorias`,
+pero ningún service del backend lee el campo, así que un POST/PATCH directo puede asignar
+una categoría o un tercero pausado. ⚠️ Acá "ignorar" **no** puede significar romper el
+vínculo existente: un ítem no pierde su categoría porque la categoría se haya pausado. Lo
+que corresponde es **rechazar la asignación nueva**, y dejar en paz las que ya existen.
+Sin decidir: si el rechazo es 400 o si se ignora en silencio."*
+
+**Decisión del owner (2026-08-11): 400.** Pausar significa "no se usa más", no "las
+pantallas lo esconden". Lo notable es que
+[`patterns/backend.md`](../patterns/backend.md) ya describía esta regla exacta desde el
+2026-08-03 —la fila "se referencia" de su tabla dice *rechazar la asignación nueva; el
+vínculo existente no se rompe*— y el código no la cumplía para estas dos entidades: la
+doc iba adelante del código.
+
+**Lo que se cambió**, un punto de enforcement por entidad, que es donde tiene que sumarse
+quien agregue otro camino de asignación:
+
+- `validarCategoria` (`items.service.ts`) — la usan `create` y `update`, así que los dos
+  caminos quedan cubiertos por un solo cambio. Precedente que ya existía al lado y marcó
+  la forma: `validarImpresoraComanda` (`categorias.service.ts`) ya exigía `activo = true`.
+- `validarTercero` (`ventas.service.ts`) — **nuevo**, ver abajo.
+
+En ambos el `activo` se lee y se evalúa en TypeScript en vez de sumarse al `WHERE`: así
+"no es de este tenant" y "está pausada" son dos errores distintos, que es la diferencia
+entre un id equivocado y una decisión de negocio.
+
+**Hallazgo que apareció al medir, y que era más grave que la entrada:** el `terceroId` del
+customer de una venta **no se validaba en absoluto**. El DTO solo exige formato
+(`@IsUUID()`), el service lo persistía tal cual, y la FK de `venta_customer.tercero_id`
+(`startup-pos.sql:1154`) referencia `terceros` **sin tenant**. O sea que el id de un
+tercero de otro tenant quedaba guardado en tu venta. Hoy no filtra datos —`venta_customer`
+denormaliza nombre y RUT, y ninguna lectura hace JOIN a `terceros`— pero es una FK cruzada
+entre tenants esperando al primer JOIN que alguien agregue. No se pudo separar del alcance:
+para mirar `activo` hay que cargar la fila, y cargarla sin filtrar por tenant habría sido
+escribir la mitad mala del arreglo.
+
+**Tests:** 7 en `test/items-pausados.e2e-spec.ts` (mismo archivo y no uno nuevo: es la misma
+regla sobre entidades que se referencian en vez de aplicarse). El control con ambos
+**activos** va antes de pausar, si no un 400 podría venir de cualquier otra cosa. El del
+tenant ajeno
+inserta el tercero por SQL a propósito: no existe camino de API para crear datos en un
+tenant al que no pertenecés, que es justo el punto.
+
+**Mutantes (los dos revierten al código anterior):**
+
+| Mutante | Qué murió |
+|---|---|
+| `validarCategoria` sin el chequeo de `activo` | 2 de 17: crear con categoría pausada, y mover un ítem existente a ella |
+| sin la llamada a `validarTercero` en `crear()` | 2 de 17: vender con tercero pausado, y el tercero de otro tenant |
+
+Ninguno de los dos tocó los tests del otro, que es lo que confirma que son dos caminos
+independientes y no un chequeo que tapa al otro.
+
+**Un test de los 7 no lo mata ningún mutante, y está a propósito:** el que verifica que el
+ítem conserva su categoría después de pausarla. Hoy pasa igual sin la feature —ninguna
+lectura filtra `activo`, y `categoriaId` sale de la columna de `items`, no del JOIN— así
+que no prueba este cambio: **custodia el siguiente**. El arreglo fácil y equivocado de
+"ignorar lo pausado" es filtrar en las lecturas, y el día que alguien lo intente el ítem
+perdería su categoría en silencio. Lo señaló la revisión independiente y el comentario del
+test se corrigió para no prometer más de lo que hace.
+
+**Gate:** backend 98 suites / 1562 unit, e2e 29 suites / **398** tests (eran 391), frontend
+build + test + `typecheck:ratchet` + `design:check`.
+
+---
+
 ## `precioUnitario` en `0` — la última laguna de la línea de venta (2026-08-11)
 
 **Entrada original (verbatim):** *"`LineaVentaDto.precioUnitario` — ¿debe permitir `0`?

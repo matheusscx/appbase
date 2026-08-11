@@ -475,21 +475,6 @@ Ver [`resueltos.md`](resueltos.md).
   son por línea por naturaleza), pero para una regla global al catálogo el ruido es real. Lo
   segundo sí es un borde claro: se arman antes del recorrido de la fórmula, así que un tenant
   cuya fórmula no aplique impuestos igual ve el aviso.
-- [ ] **`categorias` y `terceros` pausados: el front los esconde, el backend acepta la
-  asignación** (backend, medido 2026-08-03) — hermano menor de la entrada de reglas pausadas
-  que se cerró ese mismo día (ver [`resueltos.md`](resueltos.md)), pero sobre entidades que se
-  **referencian**, no que se aplican: no cambian ningún monto, por eso quedó fuera de aquel
-  alcance.
-  Medido: `ClienteForm.vue:34` filtra `terceros` por `activo` y `items.vue:798` filtra
-  `categorias`, pero ningún service del backend lee el campo, así que un POST/PATCH directo
-  puede asignar una categoría o un tercero pausado.
-  ⚠️ Acá "ignorar" **no** puede significar romper el vínculo existente: un ítem no pierde su
-  categoría porque la categoría se haya pausado. Lo que corresponde es **rechazar la
-  asignación nueva**, y dejar en paz las que ya existen.
-  **Decisión del owner (2026-08-11): rechazar con 400.** Pausar significa "no se usa
-  más", no "las pantallas lo esconden": el enforcement va en el backend, coherente con lo
-  que ya se hace cuando se pausa una regla o un impuesto. Sigue en pie que los vínculos
-  **existentes** no se tocan — se rechaza la asignación nueva, nada más.
 - [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
   `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
   dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).

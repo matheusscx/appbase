@@ -470,3 +470,212 @@ describe('Ítem pausado según el canal (e2e)', () => {
     });
   });
 });
+
+/**
+ * Hermano menor del describe de arriba, y por eso vive en el mismo archivo:
+ * misma regla ("lo pausado no admite uso nuevo") sobre entidades que se
+ * **referencian** en vez de aplicarse. No mueven ningún monto, que es la razón
+ * por la que quedaron fuera del alcance de la feature de pausa de 2026-08-03.
+ *
+ * Hasta 2026-08-11 la regla la sostenía solo el frontend —`items.vue` filtra
+ * las categorías, `ClienteForm.vue` filtra los terceros por `activo`— así que
+ * un POST directo asignaba igual. El backend ahora la enforcea.
+ *
+ * ⚠️ Lo que estos tests protegen tanto como el rechazo: que los vínculos YA
+ * existentes sobrevivan. Un ítem no pierde su categoría porque la categoría se
+ * pause; la alternativa —filtrar en las lecturas— habría sido el arreglo fácil
+ * y equivocado.
+ */
+describe('Categoría y tercero pausados: el backend rechaza la asignación nueva (e2e)', () => {
+  let app: INestApplication<App>;
+  let ds: DataSource;
+  let token: string;
+  let cajaId: string;
+  let categoriaId: string;
+  let itemPrevioId: string;
+  let terceroId: string;
+
+  const crearItem = (nombre: string, body: Record<string, unknown> = {}) =>
+    request(app.getHttpServer())
+      .post('/api/items')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        stock: '5',
+        costo: '400',
+        ...body,
+      });
+
+  const venderCon = (customer: Record<string, unknown>) =>
+    request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        canal: 'fisico',
+        tipoDocumentoId: BOLETA_ID,
+        lineas: [{ itemId: itemPrevioId, cantidad: '1' }],
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000' }],
+        customer,
+      });
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    ds = app.get(DataSource);
+    token = await login(app);
+    cajaId = await abrirCaja(app, token);
+
+    const resCat = await request(app.getHttpServer())
+      .post('/api/categorias')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: `Categoría pausable E2E ${Date.now()}` });
+    expect(resCat.status).toBe(201);
+    categoriaId = (resCat.body as { id: string }).id;
+
+    // El vínculo se crea con la categoría TODAVÍA activa: es la mitad del
+    // escenario que hay que proteger, y montarlo después sería imposible.
+    const resItem = await crearItem(`Item con categoría E2E ${Date.now()}`, {
+      categoriaId,
+    });
+    expect(resItem.status).toBe(201);
+    itemPrevioId = (resItem.body as { id: string }).id;
+
+    const resTercero = await request(app.getHttpServer())
+      .post('/api/terceros')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: `Tercero pausable E2E ${Date.now()}`,
+        tipo: 'persona_natural',
+      });
+    expect(resTercero.status).toBe(201);
+    terceroId = (resTercero.body as { id: string }).id;
+  }, 60000);
+
+  afterAll(async () => {
+    if (cajaId) await cerrarCaja(app, token, cajaId);
+    await app.close();
+  });
+
+  it('control — con la categoría y el tercero activos, ambos se asignan', async () => {
+    const res = await crearItem(`Item control categoría E2E ${Date.now()}`, {
+      categoriaId,
+    });
+    expect(res.status).toBe(201);
+
+    const venta = await venderCon({ nombre: 'Cliente activo', terceroId });
+    expect(venta.status).toBe(201);
+  });
+
+  describe('una vez pausados', () => {
+    beforeAll(async () => {
+      const cat = await request(app.getHttpServer())
+        .patch(`/api/categorias/${categoriaId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ activo: false });
+      expect(cat.status).toBe(200);
+
+      const ter = await request(app.getHttpServer())
+        .patch(`/api/terceros/${terceroId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ activo: false });
+      expect(ter.status).toBe(200);
+    });
+
+    it('crear un ítem con la categoría pausada devuelve 400 y la nombra', async () => {
+      const res = await crearItem(`Item rechazado E2E ${Date.now()}`, {
+        categoriaId,
+      });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain('pausada');
+    });
+
+    it('mover un ítem existente a la categoría pausada devuelve 400', async () => {
+      const otro = await crearItem(`Item sin categoría E2E ${Date.now()}`);
+      expect(otro.status).toBe(201);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/items/${(otro.body as { id: string }).id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ categoriaId });
+      expect(res.status).toBe(400);
+    });
+
+    /**
+     * ⚠️ **Este test no prueba el cambio: lo custodia.** Hoy pasa igual sin la
+     * feature —ninguna lectura filtra `activo`, y `categoriaId` sale de la
+     * columna de `items`, no del JOIN— así que ningún mutante de esta tanda lo
+     * mata. Está por lo que vendría después: el arreglo fácil y equivocado de
+     * "ignorar lo pausado" es filtrar en las lecturas, y ese día el ítem
+     * perdería su categoría en silencio. Acá se pone rojo.
+     */
+    it('el ítem que YA tenía la categoría la conserva', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/items/${itemPrevioId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect((res.body as { categoriaId: string | null }).categoriaId).toBe(
+        categoriaId,
+      );
+    });
+
+    it('vender con el tercero pausado devuelve 400 y lo nombra', async () => {
+      const res = await venderCon({ nombre: 'Cliente pausado', terceroId });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string }).message).toContain('pausado');
+    });
+
+    it('la venta sin terceroId sigue pasando: el customer suelto no se toca', async () => {
+      const res = await venderCon({ nombre: 'Cliente de mostrador' });
+      expect(res.status).toBe(201);
+    });
+  });
+
+  /**
+   * Este caso NO nace de la decisión de pausa: apareció al medirla. El
+   * `terceroId` no se validaba en absoluto —el DTO solo exige formato UUID— y
+   * la FK de `venta_customer` referencia `terceros` sin tenant, así que el id
+   * de un tercero ajeno se guardaba en la venta sin que nada chistara.
+   *
+   * El tercero se inserta por SQL a propósito: no hay ningún camino de API para
+   * crear datos en un tenant al que no pertenecés, que es justo el punto.
+   */
+  it('un tercero de OTRO tenant no se puede adjuntar a la venta', async () => {
+    const OTRO_TENANT = '550e8400-e29b-41d4-a716-446655440040'; // Demo Bodega
+    const filas: { tercero_id: string }[] = await ds.query(
+      `INSERT INTO terceros (tenant_id, nombre, tipo, activo)
+       VALUES ($1, $2, 'persona_natural', true)
+       RETURNING tercero_id`,
+      [OTRO_TENANT, `Tercero ajeno E2E ${Date.now()}`],
+    );
+    const ajenoId = filas[0].tercero_id;
+
+    const res = await venderCon({
+      nombre: 'Cliente ajeno',
+      terceroId: ajenoId,
+    });
+    expect(res.status).toBe(400);
+    expect((res.body as { message: string }).message).toContain(
+      'no pertenece a este tenant',
+    );
+
+    // Soft delete, no `DELETE`: la invariante del proyecto no tiene excepción
+    // para los tests, y dejar la fila viva ensucia el otro tenant del seed.
+    await ds.query(
+      `UPDATE terceros SET eliminado_el = NOW() WHERE tercero_id = $1`,
+      [ajenoId],
+    );
+  });
+});
