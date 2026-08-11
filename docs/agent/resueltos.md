@@ -17,6 +17,84 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Diez líneas con el mismo impuesto pausado daban diez toasts (2026-08-11)
+
+Dos entradas hermanas de la auditoría de `items` + `calculo-precios`, cerradas juntas
+porque son el mismo ruido por dos puertas.
+
+**Las entradas, verbatim:** *"El aviso de ítem pausado se emite por línea — el mismo ítem
+en 3 líneas (recetas personalizadas, salones) da 3 toasts idénticos en el POS."* y *"Una
+advertencia de impuesto pausado se repite por línea, y se emite aunque la fórmula del
+tenant no incluya el paso `impuestos` — un carrito de 10 líneas con el mismo impuesto
+pausado produce 10 advertencias idénticas. Puede ser deliberado (las advertencias de línea
+son por línea por naturaleza), pero para una regla global al catálogo el ruido es real."*
+
+**Medido antes de tocar nada**, que es lo que convirtió el "puede ser deliberado" en una
+pregunta contestable: 10 líneas → 10 avisos; y con la fórmula `['descuentos','recargos']`
+—sin el paso de impuestos— el aviso *"está en pausa y no se aplicó"* **igual salía**.
+
+**Decisión del owner (2026-08-11): uno por regla.** El aviso de algo pausado es información
+de **catálogo**, no de una línea; repetirla no agrega nada y tapa los avisos que sí son de
+una línea.
+
+**Lo que se cambió, y por qué en dos lugares y no en uno:**
+
+- `sinRepetidas` en `calculo-precios.engine.ts`, sobre el aplanado `advertencias`.
+- Un `Set` por `itemId` en `advertirItemsPausados` (`calculo-precios.service.ts`). **La
+  deduplicación del motor no lo alcanza**: esa advertencia se empuja *después* de que
+  `calcularVenta` devolvió. Si aparece una tercera fuente fuera del motor, va a necesitar
+  lo mismo — queda escrito en `motor-calculo-precios.md`.
+- El aviso de impuesto pausado ahora solo se emite si `cfg.formula.includes('impuestos')`.
+  Se armaba antes de recorrer la fórmula: en un tenant sin ese paso, *"no se aplicó"*
+  describía la fórmula y lo hacía pasar por consecuencia de la pausa.
+
+**Lo que NO se tocó, y tiene su propio test:** `ResultadoLinea.advertencias` y
+`advertenciasVenta`. Ahí la repetición es la que marca **cuáles** líneas están afectadas —
+si se dedujeran también, el aviso quedaría arriba sin decir a qué línea mirar. El test
+`pero cada línea conserva el suyo` existe para que nadie "termine el trabajo" por error.
+
+**Seis tests nuevos y tres mutantes, uno por cada mitad del cambio:**
+
+| Mutante | Qué murió |
+|---|---|
+| `sinRepetidas` → identidad | 1: `10 líneas … dan UN aviso` |
+| aviso de impuesto sin el guard de `formula` | 1: `sin el paso impuestos … NO avisa` |
+| `advertirItemsPausados` sin el `Set` | 1: `el mismo ítem pausado en 3 líneas avisa UNA vez` |
+
+Ninguno tocó los tests de los otros dos, que es lo que confirma que son tres caminos
+independientes. Y el control `dos reglas pausadas DISTINTAS siguen dando dos avisos` es el
+que evita que la deduplicación se pase de lista.
+
+**Lo que encontró la revisión independiente, y que era serio:**
+
+1. **Un byte NUL crudo dentro del código**, en la clave de deduplicación. El editor y
+   `git diff` lo mostraban como un espacio; `file` decía `data`, no texto. Y lo peor no era
+   cosmético: el pre-commit usa `git diff --cached | grep` para sus guards de `tenant_id`
+   y `DELETE` físico, y **sobre un archivo binario ese grep no devuelve nada**, así que el
+   archivo entero quedaba fuera de la única red mecánica del repo. Se reemplazó por
+   `JSON.stringify([titulo, detalle])`, que además no depende de ningún separador.
+2. **La deduplicación es más ancha que "lo pausado"**: también colapsa el aviso del tope,
+   que es por línea. Era un ensanche no declarado del pedido del owner. Se revisó y **se
+   mantiene** —dos textos idénticos no le dicen al lector que hubo dos eventos, y el
+   `detalle` no nombra montos ni líneas a propósito— pero ahora está escrito como decisión
+   y tiene su propio test, en vez de ser un efecto lateral.
+3. **La clave del `Set` de ítems iba con el casing crudo.** `@IsUUID('4')` acepta
+   mayúsculas y la BD devuelve minúsculas —por eso existe `aliasarCasingDeIds`—, así que el
+   mismo ítem con dos casings en el mismo carrito se contaba dos veces: exactamente el bug
+   que este cambio venía a cerrar. La clave ahora va en minúsculas.
+4. **`impuestos` no tiene índice único de nombre por tenant** y sus hermanas sí. Es lo
+   único que hace que el colapso pueda esconder algo. Quedó como entrada nueva en
+   [`pendientes.md`](pendientes.md), con las dos preguntas que hay que responder antes de
+   agregar el índice.
+
+**Sigue abierta la tercera hermana:** `suscripciones.service.ts` descarta
+`resultado.advertencias` enteras, así que sobre el primer período de una suscripción estos
+avisos no llegan igual. La deduplicación no cambia eso.
+
+**Gate:** backend 98 suites / 1574 unit, e2e 29 suites / 398, frontend completo.
+
+---
+
 ## Los dos jobs de CI dejan de poder colgarse seis horas (2026-08-11)
 
 **Entrada original (verbatim):** *"El job de CI del frontend necesita timeout propio

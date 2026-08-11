@@ -641,6 +641,109 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
       ]);
       expect(r.advertencias).toEqual(r.advertenciasVenta);
     });
+
+    /**
+     * Decisión del owner (2026-08-11): el aviso de algo pausado es información
+     * de **catálogo**, no de una línea. Diez líneas con el mismo impuesto
+     * pausado daban diez toasts idénticos en el POS.
+     */
+    describe('avisos repetidos: uno por regla, no uno por línea', () => {
+      const pausado = impuesto({ id: 'iva', activo: false });
+
+      it('10 líneas con el mismo impuesto pausado dan UN aviso', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: Array.from({ length: 10 }, () =>
+              linea({ impuestos: [pausado] }),
+            ),
+          }),
+        );
+        expect(r.advertencias).toEqual([
+          { titulo: 'Impuesto "IVA"', detalle: 'está en pausa y no se aplicó' },
+        ]);
+      });
+
+      it('pero cada línea conserva el suyo', () => {
+        // El aplanado se deduplica; lo que se muestra pegado a cada línea no.
+        // Si esto se pusiera rojo, el carrito dejaría de marcar las líneas
+        // afectadas y el aviso quedaría solo arriba, sin decir cuáles son.
+        const r = calcularVenta(
+          venta({
+            lineas: Array.from({ length: 3 }, () =>
+              linea({ impuestos: [pausado] }),
+            ),
+          }),
+        );
+        expect(r.lineas.map((l) => l.advertencias.length)).toEqual([1, 1, 1]);
+      });
+
+      /**
+       * El alcance de `sinRepetidas` es más ancho que "lo pausado" y eso es
+       * deliberado: **también colapsa el aviso del tope**, que sí es por línea.
+       * El criterio es el mismo — dos textos idénticos no dicen que hubo dos
+       * eventos, así que repetirlos no informa— y lo que distingue las líneas
+       * sigue siendo `ResultadoLinea.advertencias`, intacto.
+       *
+       * Está acá porque lo levantó la revisión independiente como posible
+       * colapso indebido: queda como decisión escrita y no como efecto lateral.
+       */
+      it('también colapsa el aviso del tope, que es por línea', () => {
+        const tope = regla({
+          nombre: 'Fijo 500',
+          modo: 'monto_fijo',
+          valor: '500',
+        });
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({ descuentos: [tope] }),
+              linea({ descuentos: [tope] }),
+            ],
+          }),
+        );
+        expect(r.advertencias).toHaveLength(1);
+        // Las dos líneas siguen marcadas, que es donde vive el "cuáles".
+        expect(r.lineas.map((l) => l.advertencias.length)).toEqual([1, 1]);
+      });
+
+      it('dos reglas pausadas DISTINTAS siguen dando dos avisos', () => {
+        // El control que evita que la deduplicación se pase de lista: colapsa
+        // mensajes iguales, no reglas distintas.
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                impuestos: [
+                  pausado,
+                  impuesto({
+                    id: 'otro',
+                    nombre: 'Impuesto verde',
+                    activo: false,
+                  }),
+                ],
+              }),
+            ],
+          }),
+        );
+        expect(r.advertencias).toHaveLength(2);
+      });
+    });
+
+    /**
+     * El aviso decía "no se aplicó" en tenants cuya fórmula **no aplica
+     * impuestos**, donde no se iba a aplicar de todos modos: describía la
+     * fórmula y lo hacía pasar por una consecuencia de la pausa.
+     */
+    it('sin el paso `impuestos` en la fórmula, el impuesto pausado NO avisa', () => {
+      const r = calcularVenta(
+        venta({
+          lineas: [linea({ impuestos: [impuesto({ activo: false })] })],
+          config: config({ formula: ['descuentos', 'recargos'] }),
+        }),
+      );
+      expect(r.advertencias).toEqual([]);
+      expect(r.lineas[0].advertencias).toEqual([]);
+    });
   });
 
   describe('piso en cero del descuento', () => {

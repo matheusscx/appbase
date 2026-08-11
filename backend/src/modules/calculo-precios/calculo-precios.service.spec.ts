@@ -330,6 +330,30 @@ describe('CalculoPreciosService', () => {
       expect(pausado.lineas[0].totalLinea).toBe('107.100000');
     });
 
+    /**
+     * Decisión del owner (2026-08-11): el aviso de un ítem pausado es
+     * información de catálogo, no de una línea. El mismo ítem en tres líneas
+     * —receta personalizada dos veces, salones— daba tres toasts idénticos.
+     *
+     * La deduplicación NO puede vivir en el motor: esta advertencia se empuja
+     * después de que `calcularVenta` devolvió, así que `sinRepetidas` ya corrió.
+     */
+    it('el mismo ítem pausado en 3 líneas avisa UNA vez, pero marca las 3', async () => {
+      mockItems({ nombre: 'Papas fritas', activo: false });
+      const r = await service.calcular(TENANT, {
+        lineas: [
+          { itemId: 'item-1', cantidad: '1' },
+          { itemId: 'item-1', cantidad: '2' },
+          { itemId: 'item-1', cantidad: '1' },
+        ],
+      });
+
+      expect(r.advertencias).toHaveLength(1);
+      // Las tres líneas siguen marcadas: sin esto el carrito no sabría cuáles
+      // son, que es justo lo que el aviso agregado no puede decir.
+      expect(r.lineas.map((l) => l.advertencias.length)).toEqual([1, 1, 1]);
+    });
+
     it('activo: no avisa nada', async () => {
       const r = await calcular();
       expect(r.lineas[0].advertencias).toEqual([]);

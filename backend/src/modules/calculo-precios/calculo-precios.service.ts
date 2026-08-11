@@ -188,6 +188,19 @@ export class CalculoPreciosService {
     itemsBase: ItemsBaseMap,
     resultado: ResultadoVenta,
   ): void {
+    // El mismo ítem en varias líneas —receta personalizada dos veces, salones—
+    // daba un toast por línea. Decisión del owner (2026-08-11): uno por regla.
+    // La deduplicación va acá y no alcanza con la del motor (`sinRepetidas`),
+    // porque esta advertencia se empuja DESPUÉS de que el motor devolvió.
+    // Se deduplica por `itemId` y no por el texto: dos ítems distintos pueden
+    // llamarse igual, y acá el id está a mano.
+    //
+    // ⚠️ En minúsculas. `@IsUUID('4')` acepta el UUID en mayúsculas y la BD lo
+    // devuelve en minúsculas, así que un carrito puede traer el MISMO ítem con
+    // dos casings —por eso existe `aliasarCasingDeIds` en `items.service.ts`—.
+    // Con la clave cruda, esas dos líneas se veían como ítems distintos y el
+    // aviso salía dos veces: justo el bug que esto viene a cerrar.
+    const yaAvisados = new Set<string>();
     dto.lineas.forEach((linea, i) => {
       const item = itemsBase.get(linea.itemId)!;
       if (item.activo) return;
@@ -195,7 +208,11 @@ export class CalculoPreciosService {
         titulo: `Producto "${item.nombre}"`,
         detalle: 'está en pausa y ya no se ofrece en el catálogo',
       };
+      // La de la línea va siempre: es la que marca CUÁL línea está afectada.
       resultado.lineas[i].advertencias.push(advertencia);
+      const clave = linea.itemId.toLowerCase();
+      if (yaAvisados.has(clave)) return;
+      yaAvisados.add(clave);
       resultado.advertencias.push(advertencia);
     });
   }

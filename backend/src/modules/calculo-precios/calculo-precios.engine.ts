@@ -315,6 +315,31 @@ interface ResultadoPaso {
 }
 
 /**
+ * Colapsa advertencias idénticas (decisión del owner, 2026-08-11). Un carrito de
+ * 10 líneas con el mismo impuesto pausado producía **10 avisos iguales**, que el
+ * POS aplana a 10 toasts; lo mismo con un ítem pausado cargado en varias líneas.
+ * Es información de **catálogo**, no de una línea en particular: repetirla no
+ * agrega nada y tapa los avisos que sí son de una línea.
+ *
+ * Solo se deduplica este campo, que es el aplanado para los toasts.
+ * `ResultadoLinea.advertencias` y `advertenciasVenta` quedan intactos: cada uno
+ * se muestra pegado a lo que lo produjo, y ahí la repetición es correcta.
+ *
+ * Deduplicar por `titulo`+`detalle` no pierde monto porque el `detalle` **no
+ * nombra montos** a propósito —el aplicado viaja en la traza de cada línea—, así
+ * que dos apariciones de la misma regla son literalmente el mismo mensaje.
+ */
+function sinRepetidas(avisos: AdvertenciaPrecio[]): AdvertenciaPrecio[] {
+  const vistas = new Set<string>();
+  return avisos.filter((a) => {
+    const clave = JSON.stringify([a.titulo, a.detalle]);
+    if (vistas.has(clave)) return false;
+    vistas.add(clave);
+    return true;
+  });
+}
+
+/**
  * **Porcentajes antes que montos fijos** (decisión del owner, 2026-08-11, tras la
  * investigación de mercado en
  * `docs/agent/investigaciones/2026-08-11-orden-de-descuentos.md`).
@@ -489,12 +514,19 @@ function calcularLinea(
   let descuentoAplicado = ZERO;
   let recargoAplicado = ZERO;
   let impuestoAplicado = ZERO;
-  const advertencias: AdvertenciaPrecio[] = linea.impuestos
-    .filter((imp) => !imp.activo)
-    .map((imp) => ({
-      titulo: `Impuesto "${imp.nombre}"`,
-      detalle: 'está en pausa y no se aplicó',
-    }));
+  // El aviso del impuesto pausado solo tiene sentido si la fórmula del tenant
+  // aplica impuestos: si el paso no está, ese impuesto no se iba a cobrar de
+  // todos modos y "no se aplicó" describe la fórmula, no la pausa. Se armaba
+  // antes del recorrido de `cfg.formula` y por eso salía siempre (medido
+  // 2026-08-11: fórmula `['descuentos','recargos']` igual emitía el aviso).
+  const advertencias: AdvertenciaPrecio[] = cfg.formula.includes('impuestos')
+    ? linea.impuestos
+        .filter((imp) => !imp.activo)
+        .map((imp) => ({
+          titulo: `Impuesto "${imp.nombre}"`,
+          detalle: 'está en pausa y no se aplicó',
+        }))
+    : [];
   const trazas = {
     descuentos: [] as TrazaRegla[],
     recargos: [] as TrazaRegla[],
@@ -658,11 +690,11 @@ export function calcularVenta(venta: VentaResuelta): ResultadoVenta {
     // solo avisa en descuentos— y leer solo `dv` no perdía nada. Ahora sí: sin
     // `rv`, un recargo de venta pausado bajaba la plata cobrada sin traza y sin
     // advertencia. Mismo olvido que a nivel línea, en la otra punta.
-    advertencias: [
+    advertencias: sinRepetidas([
       ...lineas.flatMap((l) => l.advertencias),
       ...dv.advertencias,
       ...rv.advertencias,
-    ],
+    ]),
     advertenciasVenta: [...dv.advertencias, ...rv.advertencias],
     config: cfg,
   };

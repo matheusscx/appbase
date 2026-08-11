@@ -112,6 +112,42 @@ separarlos en vez de que el consumidor reste por igualdad: dos advertencias con 
 mismo `titulo`+`detalle` son alcanzables (dos descuentos distintos topeados al mismo
 monto producen el mismo mensaje).
 
+**El aplanado se deduplica; las otras dos listas no** (decisión del owner, 2026-08-11).
+Un carrito de 10 líneas con el mismo impuesto pausado producía **10 avisos idénticos**,
+que el POS aplana a 10 toasts; igual con un ítem pausado cargado en varias líneas. Es
+información de **catálogo**, no de una línea, y repetirla tapa los avisos que sí son de
+una línea. `ResultadoLinea.advertencias` y `advertenciasVenta` quedan intactos: cada uno
+se muestra pegado a lo que lo produjo, y ahí la repetición es la que marca **cuáles**
+líneas están afectadas.
+
+**El alcance es más ancho que "lo pausado", a propósito.** `sinRepetidas` colapsa
+cualquier par de avisos con el mismo `titulo`+`detalle`, y eso **incluye el aviso del
+tope**, que sí es por línea: dos líneas cuyo descuento se topea producen el mismo texto.
+Se decidió colapsarlo igual, y el criterio es el mismo: **dos mensajes idénticos no le
+dicen al lector que hubo dos eventos** —el `detalle` no nombra montos ni líneas a
+propósito—, así que repetirlo no informa, solo tapa. Lo que sí distingue las dos líneas es
+`ResultadoLinea.advertencias`, que no se toca. El párrafo de arriba advierte que ese
+choque de textos es alcanzable: lo es, y por eso está contemplado en vez de asumido.
+
+⚠️ **Un borde donde el colapso sí esconde algo**, anotado en `docs/agent/pendientes.md`:
+`impuestos` **no tiene índice único de nombre por tenant**, a diferencia de `descuentos` y
+`recargos` (`uq_descuentos_tenant_nombre_vivo`, `uq_recargos_tenant_nombre_vivo`). Dos
+impuestos distintos con el mismo nombre, ambos pausados, dan un solo aviso. El lector no
+pierde nada accionable —los dos mensajes serían idénticos y tampoco podría distinguirlos—
+pero la causa de fondo es que falta esa unicidad, no la deduplicación.
+
+Va en **dos lugares y no en uno**: `sinRepetidas` en el motor, y un `Set` por `itemId` en
+`advertirItemsPausados`, porque esa advertencia se empuja **después** de que el motor
+devolvió y la del motor ya corrió. Si aparece una tercera fuente de advertencias fuera del
+motor, tiene que deduplicar también. La clave del `Set` va en minúsculas: `@IsUUID('4')`
+acepta mayúsculas y la BD devuelve minúsculas, así que el mismo ítem puede llegar con dos
+casings en el mismo carrito (es lo que resuelve `aliasarCasingDeIds`).
+
+**Un impuesto pausado ya no avisa si la fórmula del tenant no incluye el paso
+`impuestos`.** El aviso se armaba antes de recorrer `cfg.formula`, así que salía siempre;
+en un tenant sin ese paso el impuesto no se iba a cobrar de todos modos y el "no se
+aplicó" describía la fórmula, haciéndolo pasar por consecuencia de la pausa.
+
 Al persistir la venta, `ventas.service.ts` vuelve a componer cada advertencia en una
 sola frase (`` `${titulo}: ${detalle}` ``) para el campo `advertencias: string[]` de
 la respuesta de la venta —el mismo formato de siempre, que consumen los toasts del

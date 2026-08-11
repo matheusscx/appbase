@@ -14,6 +14,20 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **`impuestos` no tiene índice único de nombre por tenant, y sus hermanas sí**
+  (backend/BD, encontrado 2026-08-11 por la revisión del cierre de las advertencias
+  repetidas) — `descuentos` y `recargos` tienen `uq_descuentos_tenant_nombre_vivo` y
+  `uq_recargos_tenant_nombre_vivo` (`startup-pos.sql:442,471`), que además cubren las filas
+  pausadas porque solo excluyen `eliminado_el IS NULL`. `impuestos` no tiene el equivalente,
+  así que un tenant puede tener dos impuestos distintos con el mismo nombre.
+  **Consecuencia medida:** la deduplicación de advertencias (2026-08-11) los colapsa en un
+  solo aviso. No se pierde nada accionable —los dos mensajes serían idénticos y el lector
+  tampoco podría distinguirlos— pero el aviso deja de contar cuántos hay, y la causa de
+  fondo es la unicidad que falta, no la deduplicación.
+  Antes de agregar el índice hay que mirar dos cosas: si hay filas del catálogo del país
+  (`tenant_id` nulo) que romperían un índice por tenant, y si la unicidad debe incluir o no
+  al IVA, que es del país y no del tenant (ADR-018).
+
 - [ ] 🚩 **Diez ventas simultáneas cuelgan la API para siempre** (backend, medido
   2026-08-11) — **el hallazgo más grave abierto hoy.** No es lentitud: las requests no
   vuelven nunca y el proceso queda envenenado (las siguientes también cuelgan, aunque el
@@ -592,17 +606,6 @@ Ver [`resueltos.md`](resueltos.md).
   2026-08-03) — la justificación escrita ("hoy ningún ítem de suscripción tiene descuentos") es
   más angosta que la superficie nueva: ahora ese descarte también se traga los avisos de regla
   o impuesto pausado sobre el primer período.
-- [ ] **El aviso de ítem pausado se emite por línea** (backend,
-  `calculo-precios.service.ts`, 2026-08-03) — el mismo ítem en 3 líneas (recetas
-  personalizadas, salones) da 3 toasts idénticos en el POS. Mismo ruido que el de impuestos de
-  la entrada de abajo.
-- [ ] **Una advertencia de impuesto pausado se repite por línea, y se emite aunque la fórmula
-  del tenant no incluya el paso `impuestos`** (backend, `calculo-precios.engine.ts`, medido
-  2026-08-03) — un carrito de 10 líneas con el mismo impuesto pausado produce 10 advertencias
-  idénticas, que el POS aplana a 10 toasts. Puede ser deliberado (las advertencias de línea
-  son por línea por naturaleza), pero para una regla global al catálogo el ruido es real. Lo
-  segundo sí es un borde claro: se arman antes del recorrido de la fórmula, así que un tenant
-  cuya fórmula no aplique impuestos igual ve el aviso.
 - [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
   `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
   dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).
