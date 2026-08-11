@@ -3,6 +3,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import Decimal from 'decimal.js';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { VentasService } from './ventas.service';
@@ -64,6 +65,19 @@ const UNIDADES_CATALOGO = [
   { codigo: 'unidad', magnitud: 'conteo', factorBase: '1' },
 ];
 
+/**
+ * La config del tenant. Una sola fixture porque la venta la usa dos veces —para
+ * convertir a moneda oficial y para calcular— y si las dos copias derivaran, el
+ * test estaría probando un escenario que no existe.
+ */
+const mockConfigCalculo = {
+  formula: ['descuentos', 'recargos', 'impuestos'],
+  calculoDescuentos: 'base',
+  calculoRecargos: 'base',
+  escalaCalculo: 4,
+  modoRedondeo: 'HALF_UP',
+};
+
 const mockResultadoVenta = {
   lineas: [
     {
@@ -89,13 +103,7 @@ const mockResultadoVenta = {
   trazasVenta: { descuentos: [], recargos: [] },
   advertencias: [],
   advertenciasVenta: [],
-  config: {
-    formula: ['descuentos', 'recargos', 'impuestos'],
-    calculoDescuentos: 'base',
-    calculoRecargos: 'base',
-    escalaCalculo: 4,
-    modoRedondeo: 'HALF_UP',
-  },
+  config: mockConfigCalculo,
 };
 
 const MONEDA_ROWS = [
@@ -200,6 +208,23 @@ describe('VentasService', () => {
           provide: CalculoPreciosService,
           useValue: {
             calcular: jest.fn().mockResolvedValue(mockResultadoVenta),
+            cargarConfig: jest.fn().mockResolvedValue(mockConfigCalculo),
+            // Hace la multiplicación de verdad —no devuelve un fijo— porque
+            // varios tests de acá afirman sobre precios convertidos y un stub los
+            // dejaría pasar con cualquier número. Ignora el modo a propósito: el
+            // efecto del modo sobre el número está probado en el spec del propio
+            // `CalculoPreciosService`; lo que le toca probar a ventas es que se lo
+            // **pasa**, y eso se afirma sobre la llamada, no sobre el resultado.
+            convertirAMonedaOficial: jest.fn(
+              (
+                precio: string,
+                monedaId: string,
+                tasaMap: Map<string, string>,
+              ) =>
+                new Decimal(precio)
+                  .times(new Decimal(tasaMap.get(monedaId) ?? '1'))
+                  .toFixed(4),
+            ),
           },
         },
         {
@@ -281,6 +306,28 @@ describe('VentasService', () => {
   };
 
   describe('crear()', () => {
+    // El modo de redondeo del tenant tiene que llegar hasta el precio que se
+    // PERSISTE, no solo hasta el que se previsualiza. Hasta el 2026-08-11 esta
+    // conversión era un `.toFixed(4)` propio de ventas —HALF_UP fijo—, así que un
+    // tenant en 'FLOOR' veía un precio en el POS y la venta guardaba otro.
+    it('convierte el precio que persiste con el modo de redondeo del tenant', async () => {
+      calculoPreciosService.cargarConfig.mockResolvedValueOnce({
+        ...mockConfigCalculo,
+        modoRedondeo: 'FLOOR',
+      });
+
+      await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+      expect(
+        calculoPreciosService.convertirAMonedaOficial,
+      ).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.any(Map),
+        'FLOOR',
+      );
+    });
+
     it('lanza BadRequestException si no hay caja abierta', async () => {
       cajaService.findActiva.mockResolvedValueOnce(null);
       await expect(
@@ -985,6 +1032,9 @@ describe('VentasService', () => {
         expect.objectContaining({
           lineas: [expect.objectContaining({ cantidad: '0.5' })],
         }),
+        // Tercer argumento: la config YA cargada. Que viaje es lo que evita que
+        // la venta consulte las preferencias del tenant dos veces por venta.
+        mockConfigCalculo,
       );
       expect(inventarioService.registrarMovimiento).toHaveBeenCalledWith(
         expect.anything(),
@@ -1282,6 +1332,7 @@ describe('VentasService', () => {
             }),
           ],
         }),
+        mockConfigCalculo,
       );
       expect(result.detalles[0].precioUnitarioOrigen).toBe('4000.0000');
       expect(result.detalles[0].personalizacion).toEqual(snapshot);

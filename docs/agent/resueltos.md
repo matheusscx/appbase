@@ -17,6 +17,77 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El redondeo de la conversión de moneda: dos sitios, y el que importaba no era el anotado (2026-08-11)
+
+**Entrada original (verbatim):** *"**`convertirAMonedaOficial` redondea a 4 fijo** (backend,
+`calculo-precios.service.ts:188`) — **hallazgo del refutador, ninguna lente lo vio**: el
+`.toFixed(4)` ignora `escalaCalculo` y `modoRedondeo` del tenant, y ocurre justo antes de
+entregarle el precio al motor que sí los respeta. Un paso de redondeo fuera de la config."*
+
+Los dos hechos que afirma son ciertos. Lo que estaba mal era todo lo demás: **el sitio, y
+que fueran un solo problema.**
+
+**Primer intento, revisado y revertido sin commitear.** Se arregló el modo en
+`convertirAMonedaOficial` y se documentó el 4. La revisión independiente lo bloqueó midiendo
+lo que el docblock afirmaba: **la venta nunca pasa por esa función**. `ventas.service.ts`
+hacía su propia conversión (`precioOrigen × tasa`, `.toFixed(4)`) y la pasaba como
+`precioUnitario`, así que la rama del `??` nunca se tomaba — y ese era el número que se
+persiste en `venta_detalles.precio_unitario`. El arreglo cubría solo la previsualización.
+Peor: **creaba una divergencia que no existía**. En el alta de suscripciones el monto que se
+le autoriza a la tarjeta sale de `calcular` y el que se guarda lo reconvierte la venta; los
+dos eran HALF_UP y coincidían. Con medio arreglo, un tenant en `FLOOR` podía ver los dos
+números distintos. Se revirtió el código a HEAD y se reescribió la entrada con lo medido
+(commit `eb873e86`).
+
+**Después, con el owner decidiendo "los tres sitios juntos", se midió el tercero y no
+existía.** El `.toFixed(4)` de `precioBase + precioExtraTotal` **no puede redondear**:
+`precio_extra` es `NUMERIC(18,4)` y `items.service.ts` rechaza unidades fraccionarias en las
+dos ramas (extras: *"deben ser un entero mayor o igual a 1"*; grupos: *"Las unidades de la
+opción deben ser un entero ≥ 1"*). La revisión lo reforzó: `precioExtraTotal` llega **ya**
+con `toFixed(4)` desde los tres resolvers de `items.service.ts`, así que la suma es de dos
+strings de 4 decimales pase lo que pase. Son **dos** sitios reales, los dos `precio × tasa`.
+Queda un comentario para el día que las unidades admitan fracción — apuntando a
+`items.service.ts`, que es donde caería ese redondeo, y no a ventas.
+
+**Qué se hizo.** Los dos sitios pasaron a ser **uno**: `convertirAMonedaOficial` es pública y
+la llaman los dos caminos. Esa era la causa de fondo —dos copias de la misma cuenta pueden
+arreglarse por separado, y eso fue exactamente lo que casi pasa—. `modoToRounding` se exportó
+del motor en vez de duplicar el `switch`. Y `cargarConfig` es pública para que ventas cargue
+las preferencias una vez, convierta con ese modo y se las pase a `calcular` por
+`configPrecargada`: **no son consultas nuevas**, son las dos de siempre movidas unas líneas
+más arriba.
+
+**Lo que no se tocó, y por qué.** La escala sigue en 4. `escala_calculo` es, según el
+esquema, "decimales para cálculos intermedios"; este valor no es intermedio, se persiste en
+`NUMERIC(18,4)`. Subirlo no evitaría el recorte: lo movería al `INSERT`, donde lo hace
+Postgres con su propia regla, fuera de la config y sin que ningún test lo vea. **Cuidado con
+cómo se escribe esto**: la primera redacción decía "las otras 74 columnas de plata del
+esquema" y la revisión lo refutó —hay 75 `NUMERIC(18,4)` pero ~23 son cantidades y stock, y
+hay plata a 6 decimales (`monto_tolerancia`, los montos de la pasarela)—. La afirmación que
+se sostiene es acotada: *el libro mayor de ventas* va a 4.
+
+**Lo que este cierre NO cierra, anotado para que no se lea de más.** "Único redondeo de
+plata fuera del motor" era falso y la revisión lo refutó con contraejemplos: el CPP de
+inventario, el costo propuesto de una receta, el reparto de propinas y dos sitios de mermas
+siguen en HALF_UP fijo. Lo que sí se verificó es lo acotado: **un solo `.times(tasa)` en todo
+`backend/src`**. Los que quedan abrieron entrada propia en [`pendientes.md`](pendientes.md),
+porque la entrada que los habría alcanzado es justo la que este cierre borra.
+
+**Magnitud** (`19.99 × 950.123456 = 18992.96788544`): el modo mueve el precio unitario en
+`0.0001` (`FLOOR` → `18992.9678` en vez de `18992.9679`). No es plata que se pierda; es la
+configuración del tenant desobedecida, en el número que queda guardado.
+
+**Qué lo fija:** cuatro tests y **tres mutantes, cada uno muerto por el test que le toca**.
+En `calculo-precios.service.spec.ts`: el modo (`FLOOR → …9678`, `CEIL`/`HALF_UP → …9679`, con
+tasa de 6 decimales a propósito — con la tasa redonda del resto del spec los cuatro modos dan
+igual y el test no probaría nada), la escala persistida, y que `configPrecargada` evita la
+segunda consulta. En `ventas.service.spec.ts`: que el modo del tenant llega a la conversión
+**que se persiste** — el test que faltaba en el primer intento y que habría bloqueado el
+arreglo a medias solo. Los mutantes: volver al `.toFixed(4)` en `calculo-precios.service.ts` —el service, no el
+`engine`— cae el primero;
+devolverle a ventas su conversión propia cae el de ventas; subir `ESCALA_PERSISTIDA` a 6 cae
+dos. Ese último existe porque el arreglo **se ve** incompleto e invita a "terminarlo".
+
 ## El alta de una suscripción cobraba y se callaba lo que el motor tenía para decir (2026-08-11)
 
 **Entrada original (verbatim):** *"**`suscripciones.service.ts:87-90` descarta

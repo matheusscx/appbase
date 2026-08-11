@@ -14,6 +14,38 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
+  (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**) —
+  se abre esta entrada justo porque la que se cerró ese día, leída de más, los tapaba: el
+  arreglo alcanzó la cuenta `precio × tasa` y **nada más**.
+  - `inventario.service.ts` → **CPP** (`valorPrevio + valorEntrante` ÷ stock). Es una
+    **división**, así que redondea de verdad, y el resultado se persiste en
+    `item_producto.costo_actual`.
+  - `items.service.ts` → `costoPropuesto` de una receta (`ROUND_HALF_UP` explícito).
+  - `propinas/utils/mayores-restos.ts` → el reparto de propina entre garzones.
+  - `mermas.service.ts` (dos sitios) → costo × cantidad.
+
+  Antes de replicar el arreglo: **el criterio no es obvio y puede no ser el mismo**. El de
+  la conversión se decidió porque el valor se persiste en `NUMERIC(18,4)`; el reparto de
+  propinas usa mayores restos justamente para que la suma de las partes dé el total, y ahí
+  cambiar el modo puede romper esa propiedad. Cada uno pide su análisis.
+
+  ➕ **En la misma familia, y más incómodo:** `subtotal`, `descuento_aplicado`,
+  `total_linea` y los totales de cabecera llegan del motor con `escala_calculo` decimales
+  (6 por default) y entran a columnas `NUMERIC(18,4)`. **Hoy ese recorte lo hace Postgres**
+  — que es exactamente el escenario que el docblock de `convertirAMonedaOficial` describe
+  como "lo que hay que evitar". Que ahí sea así y en la conversión no, es una inconsistencia
+  real; no se tocó porque queda fuera de lo que el owner pidió ("las conversiones a moneda
+  oficial") y porque cambiarlo mueve importes ya persistidos de forma.
+
+- [ ] **Una venta con un ítem en moneda extranjera no está cubierta en ningún nivel**
+  (backend/tests, medido 2026-08-11) — `ventas.service.spec.ts` tiene una sola moneda con
+  `valor_del_dia = '1'`, así que multiplicar o dividir por la tasa da lo mismo y el test no
+  distingue; el e2e tampoco lo ejercita. **Ya era ciego antes** del arreglo del redondeo (con
+  la conversión inline pasaba igual), pero ahora esa ceguera es permanente desde ventas: el
+  spec mockea `convertirAMonedaOficial`, así que un fixture en moneda extranjera ejercitaría
+  el mock y no el código. La cobertura tiene que venir de un e2e con un ítem en otra moneda.
+
 - [ ] 🚩 **El alta de una suscripción muestra un precio y cobra otro** (frontend + producto,
   **medido** 2026-08-11 al cerrar el descarte de advertencias) — el drawer "Nueva
   suscripción" (`tienda/suscripciones.vue`) rotula **"Precio del período"** con
@@ -81,10 +113,11 @@ identificamos con ubicación concreta.
   | `ventas.service.ts` | 186 | `itemsService.cargarBasePorIds` |
   | `ventas.service.ts` | 212 | `catalogService.findAllUnidadesMedida` |
   | `ventas.service.ts` | 260 | `this.dataSource.query` (directo) |
-  | `ventas.service.ts` | 349 | `calculoPreciosService.calcular` |
-  | `ventas.service.ts` | 615, 629 | `catalogService.crearConversor` |
-  | `ventas.service.ts` | 680 | `garzonesService.obtenerActivoPorId` |
-  | `ventas.service.ts` | 986 | `cajaService.findActiva` (otra transacción) |
+  | `ventas.service.ts` | 310 | `calculoPreciosService.cargarConfig` |
+  | `ventas.service.ts` | 379 | `calculoPreciosService.calcular` |
+  | `ventas.service.ts` | 649, 663 | `catalogService.crearConversor` |
+  | `ventas.service.ts` | 714 | `garzonesService.obtenerActivoPorId` |
+  | `ventas.service.ts` | 1020 | `cajaService.findActiva` (otra transacción) |
   | `items.service.ts` | 1477, 2044 | `catalogService.convertirUnidad` |
   | `items.service.ts` | 3823, 3879, 4117 | `catalogService.crearConversor` |
   | `salones.service.ts` | 1013 | `sesionesGarzonService.buscarSesionAbierta` |
@@ -93,7 +126,15 @@ identificamos con ubicación concreta.
   | `grupos-modificadores.service.ts` | 910 | `catalogService.convertirUnidad` |
   | `cobros.service.ts` (pasarela) | 289 | `tenantPasarelaService.resolverPorId` — **pide dos** |
 
-  Los 20 se verificaron uno por uno contra el destino: todos terminan en un
+  ⚠️ **Las líneas de `ventas.service.ts` se corrigieron el 2026-08-11** (el arreglo del
+  redondeo de moneda las corrió) y se sumó `cargarConfig`, que es una toma más pero **no
+  sube el pico**: reemplaza a la que `calcular` hacía por dentro. Son 21 sitios.
+  Se corrigieron **dos veces ese mismo día**: la primera tanda quedó stale enseguida porque
+  el arreglo siguiente agregó comentarios encima. Si tocás `ventas.service.ts`, revisá esta
+  tabla al final, no al principio — una cita stale que además se anuncia como verificada es
+  peor que una stale a secas.
+
+  Los 21 se verificaron uno por uno contra el destino: todos terminan en un
   `repo.findOne/find` o un `dataSource.query`. Ninguno es un service puro.
 
   **Cómo se detectó, para poder repetirlo después del fix.** Un script recorre
@@ -651,62 +692,6 @@ Ver [`resueltos.md`](resueltos.md).
   **en `remove()` y en cada camino que crea una referencia** (asociar ingrediente, componente
   de combo, opción de grupo, extra permitido). Eso es varios sitios de escritura y su propio
   análisis de orden de locks: es una tarea, no un `FOR UPDATE` más.
-
-### Media
-
-- [ ] **El `modo_redondeo` del tenant se ignora en las tres conversiones a moneda oficial**
-  (backend, **reescrita y medida el 2026-08-11**; el owner ya decidió el criterio, falta
-  decidir cómo pagarlo).
-
-  **La entrada anterior estaba mal en lo que importa.** Decía: *"`convertirAMonedaOficial`
-  redondea a 4 fijo … ignora `escalaCalculo` y `modoRedondeo`"*, y mandaba a
-  `calculo-precios.service.ts`. Los dos hechos son ciertos, pero **ese sitio no es el que
-  mueve la plata** y las dos mitades no tienen la misma respuesta.
-
-  **Mitad 1 — la escala: no es un bug, es correcto.** El esquema define `escala_calculo`
-  (0-12, hoy 6) como *"decimales para cálculos intermedios"*; el precio convertido no es
-  intermedio: se persiste en `venta_detalles.precio_unitario`, `NUMERIC(18,4)`, como el
-  resto del libro mayor de ventas. Subirlo a `escalaCalculo` no evitaría el recorte: lo
-  movería al `INSERT`, donde lo hace Postgres con su propia regla, fuera de la config y sin
-  que ningún test lo vea. **No hay nada que arreglar acá — hace falta escribir el porqué**,
-  porque la línea parece un descuido y no lo es.
-  (Ojo al documentarlo: *"toda la plata del esquema va a 4"* es **falso** —
-  `tenants.monto_tolerancia`, `pasarela_ordenes.monto` y `pasarela_transacciones.monto`
-  son `NUMERIC(18,6)`—, y contar las columnas `NUMERIC(18,4)` como si todas fueran plata
-  también: muchas son cantidades y stock. La afirmación que sí se sostiene es acotada:
-  *el libro mayor de ventas* va a 4.)
-
-  **Mitad 2 — el modo: sí es un bug, y está en tres lugares, no en uno.** Los tres usan
-  `.toFixed(4)`, que redondea con el default de Decimal.js (HALF_UP) pase lo que pase. Un
-  tenant con `modo_redondeo = 'FLOOR'` eligió no redondear nunca hacia arriba:
-  - `calculo-precios.service.ts` → `convertirAMonedaOficial`. **Solo lo alcanza la
-    previsualización** (`POST /calculo-precios/calcular`: carrito del POS, tienda,
-    pasarela).
-  - `ventas.service.ts` → `precioConvertido` (`precioOrigen × tasa`). **Este es el que se
-    persiste**: viaja como `precioUnitario` en el `calcularDto`, así que la venta **nunca
-    pasa por `convertirAMonedaOficial`**, y es el valor que se escribe en
-    `venta_detalles.precio_unitario`.
-  - `ventas.service.ts` → `precioOrigen` cuando hay personalizaciones
-    (`precioBase + precioExtraTotal`), un `.toFixed(4)` más, también HALF_UP.
-
-  **⚠️ Arreglar solo el primero deja el sistema peor, medido.** Se implementó y se revirtió
-  el 2026-08-11 sin commitear, justamente por esto: el precio **mostrado** pasaría a usar
-  el modo del tenant y el **guardado** seguiría en HALF_UP. Y en el alta de suscripciones
-  abre una divergencia que hoy no existe: el monto que se le **autoriza a la tarjeta** sale
-  de `calcular` y el que se **guarda** lo reconvierte la venta — hoy los dos son HALF_UP y
-  coinciden; con medio arreglo, para un tenant en `FLOOR` podrían no coincidir. **Los tres
-  sitios se mueven juntos o no se mueve ninguno.**
-
-  **Lo que falta decidir (owner).** El criterio ya está decidido —el modo debe salir de la
-  config— pero `ventas.service.ts` **no tiene las preferencias del tenant** en ese punto:
-  las lee `calcular`, y la conversión ocurre antes. Cerrar esto es una consulta extra en el
-  camino caliente de la venta, o reordenar para leerlas una vez y pasarlas. Eso es el motor
-  de precios y el camino caliente: pide su propio análisis, no entra de arrastre.
-
-  **Magnitud, para dimensionar la prioridad** (`19.99 × 950.123456 = 18992.96788544`):
-  cambiar el modo mueve el precio unitario en `0.0001` (`FLOOR` da `18992.9678` en vez de
-  `18992.9679`). El subtotal de **una** unidad no cambia; la diferencia se acumula con la
-  cantidad. No es plata que se pierda: es la configuración del tenant desobedecida.
 
 ### Decidido por el owner (pendiente de respuesta)
 

@@ -195,7 +195,16 @@ const ZERO = new Decimal(0);
 
 // ── Helpers de redondeo ─────────────────────────────────────────────────────
 
-function modoToRounding(modo: string): Decimal.Rounding {
+/**
+ * Traduce el `modo_redondeo` del tenant al enum de Decimal.js.
+ *
+ * Exportada —el resto de los helpers de redondeo no lo está— porque la conversión
+ * a moneda oficial la necesita, y esa ocurre en la capa de servicio, antes de que
+ * el motor vea la línea. Vive acá igual para que agregar un modo nuevo se haga en
+ * un solo lugar: duplicado el `switch`, el modo nuevo andaría en el cálculo y se
+ * caería al default en la conversión.
+ */
+export function modoToRounding(modo: string): Decimal.Rounding {
   switch (modo) {
     case 'HALF_EVEN':
       return Decimal.ROUND_HALF_EVEN;

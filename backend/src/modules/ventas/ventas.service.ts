@@ -300,6 +300,15 @@ export class VentasService {
     );
 
     // 4. Construir DTO para el motor de precios con precios ya convertidos a moneda oficial
+    //
+    // La config del tenant se carga ACÁ y no dentro de `calcular` porque la
+    // conversión de abajo también redondea, y tiene que hacerlo con el mismo
+    // `modo_redondeo` que el motor. Se le pasa después por `configPrecargada`:
+    // son las mismas dos consultas de siempre, movidas unas líneas más arriba, no
+    // dos consultas nuevas.
+    const configCalculo =
+      await this.calculoPreciosService.cargarConfig(tenantId);
+
     const lineasConversion = dto.lineas.map((linea, i) => {
       const item = items[i];
       const pers = personalizaciones[i];
@@ -310,11 +319,32 @@ export class VentasService {
         unidadBaseCodigo,
       } = cantidadesResueltas[i];
       const tasa = new Decimal(tasaMap.get(item.monedaId) ?? '1');
+      // Este `.toFixed(4)` NO redondea nunca, y por eso no toma `modo_redondeo`:
+      // suma dos strings que ya vienen con 4 decimales exactos. `precio_base` es
+      // `NUMERIC(18,4)`, y `precioExtraTotal` sale ya redondeado de
+      // `items.service.ts` (`resolverPersonalizacionReceta`, `resolverGruposDeItem`
+      // y `resolverPersonalizacionCombo`, los tres con su propio `toFixed(4)`).
+      // Acá solo se formatea.
+      //
+      // Si algún día las unidades de un extra admiten fracción —hoy se rechazan—,
+      // el redondeo real va a ocurrir **en esos tres `toFixed` de
+      // `items.service.ts`**, no acá: esta línea va a seguir sin redondear. El
+      // modo hay que dárselo allá.
       const precioOrigen =
         pers != null
           ? new Decimal(item.precioBase).plus(pers.precioExtraTotal).toFixed(4)
           : (linea.precioUnitario ?? item.precioBase);
-      const precioConvertido = new Decimal(precioOrigen).times(tasa).toFixed(4);
+      // La conversión sí redondea, y es la que se persiste en
+      // `venta_detalles.precio_unitario`. Comparte función con la
+      // previsualización: si las dos no redondean igual, el POS muestra un precio
+      // y la venta guarda otro.
+      const precioConvertido =
+        this.calculoPreciosService.convertirAMonedaOficial(
+          precioOrigen,
+          item.monedaId,
+          tasaMap,
+          configCalculo.modoRedondeo,
+        );
       return {
         linea,
         item,
@@ -349,6 +379,7 @@ export class VentasService {
     const resultado = await this.calculoPreciosService.calcular(
       tenantId,
       calcularDto,
+      configCalculo,
     );
 
     // 6. Preparar pagos (puede ser vacío → cuenta por cobrar; online no admite cuenta por cobrar)

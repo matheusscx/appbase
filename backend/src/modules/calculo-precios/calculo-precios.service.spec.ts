@@ -28,6 +28,8 @@ describe('CalculoPreciosService', () => {
   let impuestosService: { findAll: jest.Mock };
   let descuentosService: { findAll: jest.Mock };
   let recargosService: { findAll: jest.Mock };
+  let tenantsService: { getPreferenciasFinancieras: jest.Mock };
+  let monedasService: { findMonedas: jest.Mock };
 
   const base = (over: Record<string, unknown> = {}) => ({
     id: 'item-1',
@@ -115,10 +117,10 @@ describe('CalculoPreciosService', () => {
       ]),
     };
     recargosService = { findAll: jest.fn().mockResolvedValue([]) };
-    const tenantsService = {
+    tenantsService = {
       getPreferenciasFinancieras: jest.fn().mockResolvedValue(prefs),
     };
-    const monedasService = {
+    monedasService = {
       findMonedas: jest.fn().mockResolvedValue([
         {
           monedaId: 'moneda-clp',
@@ -186,6 +188,68 @@ describe('CalculoPreciosService', () => {
     expect(r.lineas[0].impuestoAplicado).toBe('1805.000000');
     expect(r.lineas[0].totalLinea).toBe('11305.000000');
     expect(r.totales.totalFinal).toBe('11305.000000');
+  });
+
+  // La conversión a moneda oficial es el único lugar que hace la cuenta
+  // `precio × tasa`, y hasta el 2026-08-11 era un `.toFixed(4)` liso: 4 decimales —bien, es la
+  // escala del libro mayor de ventas— pero con el redondeo default de Decimal.js,
+  // HALF_UP, pasara lo que pasara. Un tenant en 'FLOOR' eligió no redondear nunca
+  // hacia arriba y este paso se lo desobedecía.
+  //
+  // La tasa lleva 6 decimales a propósito (`valor_del_dia` es `NUMERIC(18,6)`):
+  // 19.99 × 950.123456 = 18992.96788544, y el 5º decimal es justo lo que separa un
+  // modo del otro. Con la tasa redonda del resto del spec (950) los cuatro modos
+  // dan lo mismo y el test no probaría nada.
+  describe('conversión a moneda oficial', () => {
+    const conModo = async (modo: string) => {
+      monedasService.findMonedas.mockResolvedValue([
+        { monedaId: 'moneda-clp', valorDelDia: '1', esDefault: true },
+        { monedaId: 'moneda-usd', valorDelDia: '950.123456', esDefault: false },
+      ]);
+      mockItems({ precioBase: '19.99', monedaId: 'moneda-usd' });
+      tenantsService.getPreferenciasFinancieras.mockResolvedValue({
+        ...prefs,
+        modoRedondeo: modo,
+      });
+      const r = await service.calcular(TENANT, {
+        lineas: [{ itemId: 'item-usd', cantidad: '1', descuentoIds: [] }],
+      });
+      return r.lineas[0].precioUnitario;
+    };
+
+    it('redondea con el modo del tenant, no con HALF_UP fijo', async () => {
+      expect(await conModo('FLOOR')).toBe('18992.9678');
+      expect(await conModo('CEIL')).toBe('18992.9679');
+      expect(await conModo('HALF_UP')).toBe('18992.9679');
+    });
+
+    // El contrapeso del test de arriba: que el modo se respete NO habilita a
+    // cambiar la escala. Estos 4 decimales no son `escalaCalculo` (6 en `prefs`):
+    // son los de `venta_detalles.precio_unitario`, `NUMERIC(18,4)`. Si alguien
+    // "completa" el arreglo llevándolo a `escalaCalculo`, el recorte no
+    // desaparece —lo hace Postgres en el INSERT, sin config y sin test—. El
+    // arreglo a medias **se ve** incompleto, y por eso este test existe.
+    it('mantiene la escala persistida (4), no la de cálculo del tenant (6)', async () => {
+      expect(prefs.escalaCalculo).toBe(6);
+      expect((await conModo('HALF_UP')).split('.')[1]).toHaveLength(4);
+    });
+
+    // `cargarConfig` existe para que ventas pueda convertir con el mismo modo sin
+    // consultar dos veces. Si `calcular` ignorara la config precargada, la venta
+    // pagaría las dos consultas de nuevo y —peor— podría calcular con una config
+    // distinta de la que usó para convertir.
+    it('con config precargada no vuelve a consultar las preferencias', async () => {
+      const config = await service.cargarConfig(TENANT);
+      tenantsService.getPreferenciasFinancieras.mockClear();
+
+      await service.calcular(
+        TENANT,
+        { lineas: [{ itemId: 'item-1', cantidad: '1' }] },
+        config,
+      );
+
+      expect(tenantsService.getPreferenciasFinancieras).not.toHaveBeenCalled();
+    });
   });
 
   it('lanza BadRequest si una regla pedida no existe', async () => {

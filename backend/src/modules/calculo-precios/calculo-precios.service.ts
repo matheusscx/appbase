@@ -9,6 +9,7 @@ import { MonedasService } from '../monedas/monedas.service';
 import { CalcularVentaDto, LineaDto } from './dto/calcular.dto';
 import {
   calcularVenta,
+  modoToRounding,
   type AdvertenciaPrecio,
   type ConfigCalculo,
   type ImpuestoResuelto,
@@ -16,6 +17,18 @@ import {
   type ReglaResuelta,
   type ResultadoVenta,
 } from './calculo-precios.engine';
+
+/**
+ * Decimales con los que el libro mayor de ventas guarda plata: `precio_unitario`,
+ * `subtotal`, `descuento_aplicado`, `total_linea` y los totales de la cabecera son
+ * todos `NUMERIC(18,4)`.
+ *
+ * **No es `escalaCalculo`**, y la distinción es la que decide el redondeo de la
+ * conversión — el porqué está en `convertirAMonedaOficial`. (Tampoco es universal
+ * en el esquema: `tenants.monto_tolerancia` y los montos de la pasarela son
+ * `NUMERIC(18,6)`. La afirmación acotada al libro de ventas es la que se sostiene.)
+ */
+const ESCALA_PERSISTIDA = 4;
 
 type ItemsBaseMap = Awaited<ReturnType<ItemsService['cargarBasePorIds']>>;
 type ItemsReglasMap = Awaited<ReturnType<ItemsService['cargarReglasPorIds']>>;
@@ -36,19 +49,42 @@ export class CalculoPreciosService {
     private readonly monedasService: MonedasService,
   ) {}
 
-  async calcular(
-    tenantId: string,
-    dto: CalcularVentaDto,
-  ): Promise<ResultadoVenta> {
+  /**
+   * Las preferencias financieras del tenant, en la forma que consume el motor.
+   *
+   * Pública porque ventas la necesita **antes** de llamar a `calcular`: convierte
+   * los precios a moneda oficial por su cuenta y ese paso también redondea con
+   * `modo_redondeo`. Pasando después el mismo objeto por `configPrecargada`, la
+   * venta no paga las consultas dos veces — son las mismas dos de siempre, movidas
+   * un poco más arriba.
+   */
+  async cargarConfig(tenantId: string): Promise<ConfigCalculo> {
     const prefs =
       await this.tenantsService.getPreferenciasFinancieras(tenantId);
-    const config: ConfigCalculo = {
+    return {
       formula: prefs.formula,
       calculoDescuentos: prefs.calculoDescuentos,
       calculoRecargos: prefs.calculoRecargos,
       escalaCalculo: prefs.escalaCalculo,
       modoRedondeo: prefs.modoRedondeo,
     };
+  }
+
+  /**
+   * @param configPrecargada Tiene que ser la del **mismo `tenantId`**. No se
+   * valida —`ConfigCalculo` ni siquiera lleva el tenant, y agregárselo para poder
+   * chequear un caso que ningún llamador puede producir hoy sería cambiar un tipo
+   * del motor por una defensa hipotética—. Se anota porque la consecuencia es
+   * silenciosa: una config ajena calcularía sin error y quedaría **congelada** en
+   * `ventas.config_calculo`, que es el registro con el que después se audita esa
+   * venta.
+   */
+  async calcular(
+    tenantId: string,
+    dto: CalcularVentaDto,
+    configPrecargada?: ConfigCalculo,
+  ): Promise<ResultadoVenta> {
+    const config = configPrecargada ?? (await this.cargarConfig(tenantId));
 
     // Catálogos del tenant cargados una vez e indexados por id.
     const [impuestos, descuentos, recargos] = await Promise.all([
@@ -139,6 +175,7 @@ export class CalculoPreciosService {
         descuentoMap,
         recargoMap,
         tasaMap,
+        config.modoRedondeo,
       ),
     );
 
@@ -262,6 +299,7 @@ export class CalculoPreciosService {
     descuentoMap: Map<string, ReglaResuelta>,
     recargoMap: Map<string, ReglaResuelta>,
     tasaMap: Map<string, string>,
+    modoRedondeo: string,
   ): LineaResuelta {
     // La cantidad ya se validó en `calcular()`, antes de cargar nada.
     // `cargarBasePorIds` ya validó pertenencia al tenant (404 si falta), así
@@ -276,7 +314,12 @@ export class CalculoPreciosService {
     const precioUnitario =
       linea.precioUnitario !== undefined
         ? linea.precioUnitario
-        : this.convertirAMonedaOficial(item.precioBase, item.monedaId, tasaMap);
+        : this.convertirAMonedaOficial(
+            item.precioBase,
+            item.monedaId,
+            tasaMap,
+            modoRedondeo,
+          );
 
     // El IVA de una línea lo decide la clasificación tributaria, NUNCA la lista
     // de impuestos: se saca cualquier 'iva' que venga —del ítem o pisado por la
@@ -319,14 +362,46 @@ export class CalculoPreciosService {
     return ids.map((id) => this.requerir(mapa, id, label));
   }
 
-  /** Convierte precio de la moneda del ítem a moneda oficial (valor_del_dia). */
-  private convertirAMonedaOficial(
+  /**
+   * Convierte un precio de la moneda del ítem a la moneda oficial del tenant
+   * (`valor_del_dia`). **Único** lugar donde se hace esta cuenta: ventas la llama
+   * para el precio que persiste y este service para el que previsualiza. Estuvo
+   * duplicada hasta el 2026-08-11 y las dos copias derivaron —una arreglada y la
+   * otra no deja el precio mostrado y el guardado con criterios distintos—, así
+   * que vive acá y se comparte.
+   *
+   * Es el único lugar del backend donde se hace la cuenta `precio × tasa` (medido
+   * el 2026-08-11: un solo `.times(tasa)` en todo `backend/src`). **No** es el
+   * único redondeo de plata fuera del motor —el CPP de inventario, el costo
+   * propuesto de una receta y el reparto de propinas también redondean, y todos
+   * siguen en HALF_UP fijo; están anotados en `docs/agent/pendientes.md`—. Las dos
+   * decisiones que gobiernan esta parecen descuidos y solo una lo era:
+   *
+   * **La escala (4) es correcta, no un `escalaCalculo` olvidado.** El esquema
+   * define `escala_calculo` (0-12, hoy 6) como "decimales para cálculos
+   * intermedios": el borrador con el que el motor arrastra descuentos, recargos e
+   * impuestos sin acumular error. Este valor no es un intermedio — se persiste en
+   * `venta_detalles.precio_unitario`, `NUMERIC(18,4)`. Redondear a `escalaCalculo`
+   * no evitaría el recorte: lo movería al `INSERT`, donde lo hace Postgres con su
+   * propia regla, fuera de la config del tenant y sin que ningún test lo vea.
+   *
+   * **El modo sí sale de la config** (decisión del owner, 2026-08-11). Antes era
+   * un `.toFixed(4)`, que redondea con el default de Decimal.js —HALF_UP— pase lo
+   * que pase. Un tenant con `modo_redondeo = 'FLOOR'` eligió no redondear nunca
+   * hacia arriba, y esto se lo desobedecía: 18992.96788… daba `18992.9679` en vez
+   * de `18992.9678`.
+   */
+  convertirAMonedaOficial(
     precio: string,
     monedaId: string,
     tasaMap: Map<string, string>,
+    modoRedondeo: string,
   ): string {
     const tasa = new Decimal(tasaMap.get(monedaId) ?? '1');
-    return new Decimal(precio).times(tasa).toFixed(4);
+    return new Decimal(precio)
+      .times(tasa)
+      .toDecimalPlaces(ESCALA_PERSISTIDA, modoToRounding(modoRedondeo))
+      .toFixed(ESCALA_PERSISTIDA);
   }
 
   private requerir<T>(mapa: Map<string, T>, id: string, label: string): T {

@@ -212,6 +212,37 @@ Impuestos sobre la base ya descontada/recargada (sin impuesto sobre impuesto).
 Cada paso redondea con `escala_calculo` + `modo_redondeo`. Reglas a nivel venta
 se aplican sobre el neto agregado.
 
+**La conversión a moneda oficial: el único lugar que hace `precio × tasa`.**
+Cuando el ítem está en otra moneda, su precio se convierte antes de armar la línea.
+Vive en `CalculoPreciosService.convertirAMonedaOficial` y es **una sola función
+compartida**: la llaman la previsualización (`POST /calculo-precios/calcular`) y
+ventas, que convierte por su cuenta el precio que después persiste. Estuvieron
+duplicadas hasta el 2026-08-11 y esa duplicación era el bug: se podía arreglar una
+y dejar la otra, y entonces el POS mostraba un precio y la venta guardaba otro.
+Ventas carga la config con `cargarConfig` y se la pasa a `calcular` por
+`configPrecargada` — así convierte con el mismo `modo_redondeo` que el motor sin
+consultar las preferencias dos veces por venta.
+
+Dos decisiones, porque las dos parecen descuidos y solo una lo era:
+
+- **El modo sale de `modo_redondeo`** (desde el 2026-08-11; antes era el default de
+  Decimal.js, HALF_UP, y le desobedecía a un tenant en `FLOOR`).
+- **La escala son 4 decimales fijos, no `escala_calculo`, y es correcto.**
+  `escala_calculo` es el borrador de los cálculos intermedios; este valor no es
+  intermedio: se persiste en `venta_detalles.precio_unitario`, `NUMERIC(18,4)`.
+  Subirlo no evitaría el recorte, lo movería al `INSERT` —Postgres, su propia
+  regla, fuera de la config y sin test—. Hay un test que lo fija justamente porque
+  el arreglo **se ve** incompleto e invita a "completarlo".
+
+No es un tercer sitio: el `.toFixed(4)` de `precioBase + precioExtraTotal` en
+ventas nunca redondea —suma dos strings que ya vienen con 4 decimales exactos—, así
+que solo formatea. Si algún día las unidades de un extra admiten fracción, el
+redondeo real va a ocurrir en los tres `toFixed(4)` de `items.service.ts`, no ahí.
+
+⚠️ **"Único" es acotado a `precio × tasa`, no a "toda la plata fuera del motor":** el
+CPP de inventario, el costo propuesto de una receta y el reparto de propinas también
+redondean y siguen en HALF_UP fijo (`docs/agent/pendientes.md`).
+
 **Decisiones**: `monto_fijo` se aplica por línea (no por unidad); las reglas
 diferidas (`promocional`, `mora`, `pronto_pago`) devuelven monto 0; los ids de
 descuento/recargo/impuesto en la línea **reemplazan** a los asociados al ítem
