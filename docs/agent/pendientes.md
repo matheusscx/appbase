@@ -14,6 +14,31 @@ identificamos con ubicación concreta.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] 🚩 **Diez ventas simultáneas cuelgan la API para siempre** (backend, medido
+  2026-08-11) — **el hallazgo más grave abierto hoy.** No es lentitud: las requests no
+  vuelven nunca y el proceso queda envenenado (las siguientes también cuelgan, aunque el
+  cliente corte). Se descubrió midiendo otra cosa —el N+1 de recetas, la entrada de más
+  abajo— y no lo veía ningún test porque el e2e corre con `maxWorkers: 1`.
+  **Causa, confirmada por experimento y no por lectura:** `crearEnTransaccion` abre la
+  transacción y **adentro llama a servicios que piden una conexión NUEVA al pool** en vez
+  de usar el `manager`. O sea que **cada venta necesita dos conexiones a la vez**. El pool
+  de `pg` no está configurado (`app.module.ts`), así que son 10 — con N ventas simultáneas
+  y N = tamaño del pool, las N transacciones toman una conexión cada una y las N esperan
+  una segunda que no existe. Deadlock permanente, no un timeout.
+  Los cuatro llamadores sin `manager`, cualquiera de ellos suficiente:
+  `cajaService.findActiva`/`findVirtual` (paso 1), `itemsService.cargarBasePorIds`,
+  `catalogService.findAllUnidadesMedida` y `calculoPreciosService.calcular`.
+  **Cómo se probó** (no se dedujo): (a) umbral exacto en 9 ok / 10 cuelga con producto
+  simple, sin recetas; (b) `pg_stat_activity` durante el cuelgue muestra 4 conexiones
+  `idle in transaction` esperando `ClientRead` —transacción abierta y el JS esperando otra
+  conexión— más 5 en `Lock: tuple`; (c) **se subió el pool a 20 y el umbral se movió a 19
+  ok / 20 cuelga**, o sea que el número de conexiones ES la variable. El cambio de pool se
+  revirtió.
+  ⚠️ **Subir el pool NO lo arregla**: solo mueve el umbral. El arreglo es pasar el
+  `manager` a esas llamadas — toca las firmas de cuatro services, así que es una tarea con
+  su propio alcance y no un parche.
+  ⚠️ **Batchear el N+1 tampoco lo arregla:** son conexiones, no queries.
+
 - [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
   criterios distintos para "esta personalización cambia el precio"** (frontend, medido
   2026-08-11 al cerrar la entrada de `precioUnitario`) — `useVenta.ts:146` y `:197` deciden
@@ -301,6 +326,36 @@ verdad; el conteo del encabezado describe la auditoría original.
   entrada. La medición va primero **porque el arreglo toca `resolverPersonalizacion*` y
   `resolverGruposDeItem`, con tres llamadores** (ventas, salones, combos): hoy tiene más
   riesgo que ganancia demostrada.
+
+  ✅ **Medido el 2026-08-11** contra el stack de docker-compose con la base recién
+  sembrada, ingredientes propios con stock alto (los del seed se agotan y la medición se
+  vuelve una carrera contra el stock), 30 repeticiones tras 3 de calentamiento:
+
+  | Carrito (`POST /ventas`) | p50 | p95 |
+  |---|---|---|
+  | 1 producto simple | 10.7 ms | 12.7 ms |
+  | 5 productos simples | 12.1 ms | 15.7 ms |
+  | 1 receta | 11.2 ms | 13.0 ms |
+  | 3 recetas distintas | 15.0 ms | 16.6 ms |
+  | 5 recetas distintas | 19.2 ms | 34.7 ms |
+  | 8 recetas distintas | 23.6 ms | 37.3 ms |
+
+  **Lectura: ~1,8 ms por línea de receta.** Un carrito de 5 recetas cuesta 19,2 ms contra
+  12,1 ms de 5 productos simples: **~7 ms atribuibles** a resolver recetas, que es lo que
+  batchear recuperaría. Sobre una venta que el cajero dispara una vez, 19 ms contra 12 ms
+  no se percibe.
+  ⚠️ **Dos correcciones a la entrada original, medidas:**
+  - **El N+1 no está en `/calculo-precios/calcular`** —ahí el tiempo es plano entre 1 y 8
+    recetas— sino en `POST /ventas` (`ventas.service.ts:280`). La primera pasada de
+    medición apuntó al endpoint equivocado y dio 6 ms constantes.
+  - **Las llamadas por línea corren dentro de un `Promise.all`**, o sea **en paralelo**.
+    "15 queries" no son 15 viajes en serie, que es lo que la cifra sugería.
+  **Recomendación: no encararlo.** 7 ms de ganancia contra un refactor que toca tres
+  llamadores. Se reabre si aparece un carrito mucho más grande o si el endpoint sale en
+  una traza lenta.
+  ⛔ **Lo que sí salió de esta medición y hay que mirar es otra cosa:** ver la entrada del
+  deadlock de diez ventas simultáneas, al principio de "Deuda de código". Batchear no lo
+  arregla.
 
 ### Decidido por el owner tras investigación de mercado (2026-07-27)
 
