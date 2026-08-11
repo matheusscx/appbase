@@ -333,16 +333,38 @@ entre `TIMESTAMPTZ` y `TIMESTAMP` sin zona, se cerró el 2026-08-06 — ver
   `campoTramos: true` en `RECARGO_CONFIG` (`frontend/app/utils/reglas-form-config.ts`),
   hoy ninguno de los 5 lo tiene; (b) el equivalente de `TIPOS_CON_TRAMOS` en
   `recargos.service.ts`, que hoy no existe; (c) las filas del tipo nuevo en el seeder.
-  ⚠️ **Lo que hay que analizar antes de diseñar: la magnitud del escalón cambia por
-  tipo.** `calculo-precios.engine.ts:291` solo conoce dos —`codigo === 'por_mayor'` usa
-  cantidad, **cualquier otro cae a monto**—. Con los 5 tipos actuales a la vista,
-  `general` y `recargo_metodo_pago` escalonarían por monto (que sale sin tocar el motor),
-  pero `mora` pide **días de atraso** y `interes_simple`/`interes_compuesto` piden
-  **plazo**, magnitudes que el motor no tiene. O sea: no es un tipo nuevo, es una
-  pregunta por tipo. El análisis va primero y **es transversal, no de restaurante**: el
-  motor sirve a tenants de cualquier rubro.
-  ⛔ Si el análisis concluye que hace falta una magnitud nueva, eso **toca el motor de
-  precios**: se vuelve a confirmar con el owner antes de escribir.
+  ✅ **Análisis por tipo, hecho el 2026-08-11 — medido contra el motor, tipo por tipo, no
+  deducido del `if`.** Se corrió el mismo recargo con tramos por monto (3% desde 0, 7%
+  desde 500) sobre un neto de 1000, cambiando solo el `codigo`:
+
+  | Tipo | Resultado hoy | Por qué |
+  |---|---|---|
+  | `general` | ✅ **70** | cae al camino de tramos; magnitud = monto |
+  | `interes_simple` / `interes_compuesto` | ✅ **70** | mismo camino que `general` |
+  | `recargo_metodo_pago` | ⚠️ **0** | la rama de `METODO_PAGO_CODIGOS` retorna **antes** del `if` de tramos, y `valor` es null |
+  | `mora` | ⚠️ **0** | está en `DIFERIDAS`: el motor no la evalúa |
+
+  **Los dos ceros son trampas, no limitaciones:** no "ignoran" el tramo, **cobran cero en
+  silencio**. Habilitarles `campoTramos` sin tocar el motor produciría recargos que el
+  admin configura, la UI muestra y la venta no cobra.
+
+  **Conclusión — el trabajo se parte en dos, y la primera mitad es barata:**
+  1. **`general` (y los dos de interés) salen sin tocar el motor.** Solo falta
+     `campoTramos: true` en `RECARGO_CONFIG` (`frontend/app/utils/reglas-form-config.ts`),
+     el equivalente de `TIPOS_CON_TRAMOS` en `recargos.service.ts`, y las filas del seed.
+     Cubre el caso típico: **recargo por pedido chico o por envío que baja según el monto**.
+     A nivel venta la magnitud es el neto agregado (`subtotalNeto`, línea 616), que es
+     justo el que ese caso necesita.
+  2. **`mora` y `recargo_metodo_pago` NO salen sin motor**, y cada una por su razón
+     distinta: la primera hay que des-diferirla, la segunda necesita que la rama de método
+     de pago siga hasta los tramos en vez de retornar.
+  ⚠️ **La magnitud "días de atraso" o "plazo" no existe en el motor** (`línea 291`: o
+  cantidad si el código es `por_mayor`, o monto). Escalonar `mora` por días o los intereses
+  por plazo es una magnitud nueva, no un tipo nuevo. Y los intereses tienen un tema previo:
+  hoy el motor los aplica como **porcentaje plano de la base**, sin ninguna dimensión
+  temporal, aunque la UI los etiquete "Tasa mensual".
+  ⛔ La parte 2 **toca el motor de precios**: se vuelve a confirmar con el owner antes de
+  escribir. La parte 1 no lo toca.
 
 ## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
 
