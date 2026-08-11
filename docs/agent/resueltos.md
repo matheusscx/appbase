@@ -17,6 +17,28 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El e2e no fijaba `testTimeout`, así que cada spec tenía 5 segundos para arrancar (2026-08-11)
+
+**No venía del backlog: apareció en el gate.** Cerrando otra cosa, `garzon-modo-personal`
+se puso rojo con 14 tests caídos y un solo motivo: *"Exceeded timeout of 5000 ms for a
+hook"* en su `beforeAll`. La re-corrida sobre base fresca dio verde — flaky, no regresión.
+
+**La causa no era de ese spec.** `test/jest-e2e.json` no declaraba `testTimeout`, así que
+todos los hooks caían en el **default de Jest: 5 segundos**. Y el `beforeAll` de cada spec
+e2e compila el `AppModule` **entero**. Doce de los specs no tenían timeout propio —los
+otros lo habían parchado uno por uno con `}, 60000)`— o sea que estaban todos a un arranque
+lento del mismo fallo, y el que cayó fue cuestión de suerte.
+
+`"testTimeout": 30000` en la config, que en Jest aplica a tests **y** hooks. Seis veces el
+default, y sigue muy por debajo del tope de 25 min que el job de CI tiene desde hoy: un
+cuelgue real se sigue reportando, lo que deja de reportarse es un arranque lento.
+
+**Por qué se anota una config de tres palabras:** el flaky costó una re-corrida completa
+del gate para descartar que fuera una regresión del cambio que estaba cerrando, que es
+exactamente el impuesto que cobra un flaky.
+
+---
+
 ## Diez líneas con el mismo impuesto pausado daban diez toasts (2026-08-11)
 
 Dos entradas hermanas de la auditoría de `items` + `calculo-precios`, cerradas juntas
