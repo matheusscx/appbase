@@ -652,12 +652,61 @@ Ver [`resueltos.md`](resueltos.md).
   de combo, opción de grupo, extra permitido). Eso es varios sitios de escritura y su propio
   análisis de orden de locks: es una tarea, no un `FOR UPDATE` más.
 
-### Baja
+### Media
 
-- [ ] **`convertirAMonedaOficial` redondea a 4 fijo** (backend,
-  `calculo-precios.service.ts:188`) — **hallazgo del refutador, ninguna lente lo vio**: el
-  `.toFixed(4)` ignora `escalaCalculo` y `modoRedondeo` del tenant, y ocurre justo antes de
-  entregarle el precio al motor que sí los respeta. Un paso de redondeo fuera de la config.
+- [ ] **El `modo_redondeo` del tenant se ignora en las tres conversiones a moneda oficial**
+  (backend, **reescrita y medida el 2026-08-11**; el owner ya decidió el criterio, falta
+  decidir cómo pagarlo).
+
+  **La entrada anterior estaba mal en lo que importa.** Decía: *"`convertirAMonedaOficial`
+  redondea a 4 fijo … ignora `escalaCalculo` y `modoRedondeo`"*, y mandaba a
+  `calculo-precios.service.ts`. Los dos hechos son ciertos, pero **ese sitio no es el que
+  mueve la plata** y las dos mitades no tienen la misma respuesta.
+
+  **Mitad 1 — la escala: no es un bug, es correcto.** El esquema define `escala_calculo`
+  (0-12, hoy 6) como *"decimales para cálculos intermedios"*; el precio convertido no es
+  intermedio: se persiste en `venta_detalles.precio_unitario`, `NUMERIC(18,4)`, como el
+  resto del libro mayor de ventas. Subirlo a `escalaCalculo` no evitaría el recorte: lo
+  movería al `INSERT`, donde lo hace Postgres con su propia regla, fuera de la config y sin
+  que ningún test lo vea. **No hay nada que arreglar acá — hace falta escribir el porqué**,
+  porque la línea parece un descuido y no lo es.
+  (Ojo al documentarlo: *"toda la plata del esquema va a 4"* es **falso** —
+  `tenants.monto_tolerancia`, `pasarela_ordenes.monto` y `pasarela_transacciones.monto`
+  son `NUMERIC(18,6)`—, y contar las columnas `NUMERIC(18,4)` como si todas fueran plata
+  también: muchas son cantidades y stock. La afirmación que sí se sostiene es acotada:
+  *el libro mayor de ventas* va a 4.)
+
+  **Mitad 2 — el modo: sí es un bug, y está en tres lugares, no en uno.** Los tres usan
+  `.toFixed(4)`, que redondea con el default de Decimal.js (HALF_UP) pase lo que pase. Un
+  tenant con `modo_redondeo = 'FLOOR'` eligió no redondear nunca hacia arriba:
+  - `calculo-precios.service.ts` → `convertirAMonedaOficial`. **Solo lo alcanza la
+    previsualización** (`POST /calculo-precios/calcular`: carrito del POS, tienda,
+    pasarela).
+  - `ventas.service.ts` → `precioConvertido` (`precioOrigen × tasa`). **Este es el que se
+    persiste**: viaja como `precioUnitario` en el `calcularDto`, así que la venta **nunca
+    pasa por `convertirAMonedaOficial`**, y es el valor que se escribe en
+    `venta_detalles.precio_unitario`.
+  - `ventas.service.ts` → `precioOrigen` cuando hay personalizaciones
+    (`precioBase + precioExtraTotal`), un `.toFixed(4)` más, también HALF_UP.
+
+  **⚠️ Arreglar solo el primero deja el sistema peor, medido.** Se implementó y se revirtió
+  el 2026-08-11 sin commitear, justamente por esto: el precio **mostrado** pasaría a usar
+  el modo del tenant y el **guardado** seguiría en HALF_UP. Y en el alta de suscripciones
+  abre una divergencia que hoy no existe: el monto que se le **autoriza a la tarjeta** sale
+  de `calcular` y el que se **guarda** lo reconvierte la venta — hoy los dos son HALF_UP y
+  coinciden; con medio arreglo, para un tenant en `FLOOR` podrían no coincidir. **Los tres
+  sitios se mueven juntos o no se mueve ninguno.**
+
+  **Lo que falta decidir (owner).** El criterio ya está decidido —el modo debe salir de la
+  config— pero `ventas.service.ts` **no tiene las preferencias del tenant** en ese punto:
+  las lee `calcular`, y la conversión ocurre antes. Cerrar esto es una consulta extra en el
+  camino caliente de la venta, o reordenar para leerlas una vez y pasarlas. Eso es el motor
+  de precios y el camino caliente: pide su propio análisis, no entra de arrastre.
+
+  **Magnitud, para dimensionar la prioridad** (`19.99 × 950.123456 = 18992.96788544`):
+  cambiar el modo mueve el precio unitario en `0.0001` (`FLOOR` da `18992.9678` en vez de
+  `18992.9679`). El subtotal de **una** unidad no cambia; la diferencia se acumula con la
+  cantidad. No es plata que se pierda: es la configuración del tenant desobedecida.
 
 ### Decidido por el owner (pendiente de respuesta)
 
