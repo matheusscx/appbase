@@ -684,20 +684,6 @@ primer e2e de esa ruta—; y el del computed `cuentaConItemEliminado` el mismo d
 tests en `pages/salones/index.nuxt.spec.ts` (los tres en [`resueltos.md`](resueltos.md)).
 Quedan:
 
-- [ ] **Con el seed no se puede ver una comanda a mano** (backend, `seeder.service.ts`) —
-  **la mitad de test de esta entrada se cerró el 2026-08-09**: el camino a cocina ya tiene
-  e2e (`test/salones-comanda.e2e-spec.ts`, ver [`resueltos.md`](resueltos.md)), que se monta
-  sus propias impresoras, categorías e ítems por API en vez de depender del seed.
-  Lo que queda es el **smoke manual**, que es de donde salió la entrada el 2026-08-06: con
-  el seed a secas `agruparEstacionesComanda` devuelve `[]`, así que hubo que cablear una
-  categoría por SQL para ver una comanda en pantalla. Medido contra la BD sembrada: la
-  categoría **existe y tiene impresora** —"Ropa y accesorios" → "Cocina", puesta a propósito
-  con ese comentario en el seeder—, pero **no tiene ningún ítem adentro**, y el único ítem
-  con categoría del seed está en "Electrónica", que no tiene impresora. El arreglo es
-  asignarle `categoriaId` a un ítem vendible del seed, no crear categoría ni impresora.
-  ⚠️ Al hacerlo, verificar que ningún e2e afirme sobre la categoría de ese ítem: el seed es
-  el escenario inicial de los 30 specs.
-
 ### Lo que dejaron las revisiones independientes del cierre
 
 - [ ] **`addMember` devuelve roles viejos en silencio, y la asimetría con el alta es
@@ -823,12 +809,6 @@ Quedan:
 Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` +
 `remove()`. Ninguno bloqueaba el cierre; se difieren por alcance acotado a esa oleada.
 
-- [ ] **Asimetría de guard entre rutas hermanas** (backend) — `GET /items/:id/uso`
-  exige `Items:Eliminar`; la ruta hermana `GET /items/:id/recetas-afectadas`
-  (`items.controller.ts:36`) exige solo `Items:Leer`. Es una decisión deliberada (solo
-  quien puede borrar necesita ver el impacto del borrado), no un descuido — se anota
-  por si el frontend en algún momento quiere el dato de uso fuera del flujo de
-  borrado, donde el guard más estricto no aplicaría.
 - [ ] **Carrera teórica entre `PATCH /items/:id` y `DELETE`** (backend,
   `items.service.ts`) — bajo READ COMMITTED, un `DELETE` que commitea entre la
   validación de un ingrediente en `PATCH` (edición de receta) y el `INSERT` de su

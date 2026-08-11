@@ -71,6 +71,18 @@ export class ItemsController {
     return this.itemsService.update(tenantId, usuarioId, id, dto);
   }
 
+  /**
+   * `Items:Eliminar` y no `Items:Leer`, a diferencia de su ruta hermana
+   * `:id/recetas-afectadas`. **Es deliberado, no una asimetría olvidada:** este
+   * endpoint existe para mostrar el impacto de un borrado, así que lo pide quien
+   * puede borrar.
+   *
+   * Si algún día el frontend quiere el dato de uso **fuera** del flujo de
+   * borrado —por ejemplo en la ficha del ítem—, este guard no le va a alcanzar y
+   * hay que decidir ahí si se relaja o si se expone por otra ruta. Se anota acá y
+   * no en el backlog porque no hay nada pendiente que hacer: es el porqué de una
+   * línea que parece un error y no lo es.
+   */
   @Get(':id/uso')
   @RequiresPermiso('Items', 'Eliminar')
   obtenerUso(@Req() req: Request, @Param('id') id: string) {

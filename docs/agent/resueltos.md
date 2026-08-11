@@ -17,6 +17,59 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Con el seed a secas ya se puede ver una comanda (2026-08-11)
+
+**Entrada original (mitad restante, verbatim):** *"Con el seed a secas
+`agruparEstacionesComanda` devuelve `[]`, así que hubo que cablear una categoría por SQL
+para ver una comanda en pantalla. La categoría **existe y tiene impresora** —"Ropa y
+accesorios" → "Cocina", puesta a propósito con ese comentario en el seeder—, pero **no
+tiene ningún ítem adentro**. El arreglo es asignarle `categoriaId` a un ítem vendible del
+seed, no crear categoría ni impresora."* (La mitad de test se había cerrado el 2026-08-09.)
+
+**Un parámetro de más en un `INSERT`:** la receta "Hamburguesa Especial" ahora se siembra
+con `categoria_id`. La intención ya estaba escrita en el seeder desde la feature de
+impresión —*"Demo: rutea a Cocina para poder probar el flujo de comanda sin configurar
+nada manualmente"*— y nunca llegaba a ningún ítem: la categoría ruteada estaba vacía.
+
+**Verificado como pide la entrada —a mano, con el seed y nada más—**, no con un test que se
+monta sus fixtures (ese ya existía). Reset, y por API: garzón, turno, salón y mesa del
+seed, la hamburguesa a la cuenta, `GET /cuentas/:id/comanda/pendiente` →
+
+```
+estaciones: [{ nombre: "Cocina", items: [{ nombre: "Hamburguesa Especial", cantidad: "1" }] }]
+```
+
+Antes de esto, `estaciones: []`.
+
+**Se eligió la receta y no un producto** porque una comanda de cocina con una hamburguesa
+es el demo que alguien va a querer mirar. Y **no se renombró la categoría**, aunque
+"Hamburguesa Especial" bajo "Ropa y accesorios" queda raro: el nombre está referenciado en
+[`impresion-termica.md`](../features/impresion-termica.md) y en el plan de esa feature, así
+que renombrarlo se ramifica más de lo que la entrada pedía. En la comanda no se ve —agrupa
+por impresora, así que el ticket dice "Cocina"—; se ve en la pantalla de ítems.
+
+**El seed es el escenario inicial de los 30 specs**, que era el riesgo que la entrada
+marcaba: e2e completo en verde, 398 tests.
+
+---
+
+## Una asimetría de guard que no era un pendiente sino un porqué (2026-08-11)
+
+**Entrada original (verbatim):** *"Asimetría de guard entre rutas hermanas (backend) —
+`GET /items/:id/uso` exige `Items:Eliminar`; la ruta hermana
+`GET /items/:id/recetas-afectadas` exige solo `Items:Leer`. Es una decisión deliberada
+(solo quien puede borrar necesita ver el impacto del borrado), no un descuido — se anota
+por si el frontend en algún momento quiere el dato de uso fuera del flujo de borrado."*
+
+**No había nada que hacer, y por eso estaba mal ubicada.** `pendientes.md` es una lista de
+trabajo; esto es la explicación de una línea que **parece** un error y no lo es. Vivía
+donde nadie lo iba a leer en el momento en que importa: al mirar el guard.
+
+Se movió a un docblock sobre la ruta, con la condición que la reabriría —si el front quiere
+el dato de uso fuera del flujo de borrado, este guard no alcanza— escrita ahí mismo.
+
+---
+
 ## El e2e no fijaba `testTimeout`, así que cada spec tenía 5 segundos para arrancar (2026-08-11)
 
 **No venía del backlog: apareció en el gate.** Cerrando otra cosa, `garzon-modo-personal`

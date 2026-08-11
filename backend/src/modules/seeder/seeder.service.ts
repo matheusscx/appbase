@@ -3124,10 +3124,24 @@ export class SeederService implements OnApplicationBootstrap {
     // y su costo se realiza al vender, con el movimiento de inventario de la
     // opción elegida.
     // costo_actual = costo pan (500×1) + costo queso (6000×0.02) = 620.
+    //
+    // Va con `categoria_id`, y esa es la única razón por la que se le pone una:
+    // `agruparEstacionesComanda` agrupa por la impresora de la CATEGORÍA del
+    // ítem, así que un catálogo sin categorías ruteadas devuelve `[]` y **la
+    // comanda no se puede ver en pantalla con el seed a secas**. La categoría
+    // ya existía ruteada a "Cocina" a propósito (ver `seedCategorias`), pero
+    // estaba vacía: la intención estaba escrita y no llegaba a ningún ítem.
+    // Es la receta y no un producto porque una comanda de cocina con una
+    // hamburguesa es el demo que alguien va a querer mirar.
     await this.dataSource.query(
-      `INSERT INTO items (item_id, tenant_id, moneda_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
-       VALUES ($1,$2,$3,'Hamburguesa Especial','Pan y queso fijos; elige tu proteína','3900',false,true,'receta','afecto')`,
-      [HAMBURGUESA_ESPECIAL_ID, PARIS, CLP],
+      `INSERT INTO items (item_id, tenant_id, moneda_id, categoria_id, nombre, descripcion, precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
+       VALUES ($1,$2,$3,$4,'Hamburguesa Especial','Pan y queso fijos; elige tu proteína','3900',false,true,'receta','afecto')`,
+      [
+        HAMBURGUESA_ESPECIAL_ID,
+        PARIS,
+        CLP,
+        '550e8400-e29b-41d4-a716-446655440111',
+      ],
     );
     await this.dataSource.query(
       `INSERT INTO item_receta (item_id, costo_actual) VALUES ($1,'620.0000')`,

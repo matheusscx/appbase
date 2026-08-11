@@ -48,9 +48,15 @@ interface ComandaResponse {
  * `estaciones` son unitarios con el SQL mockeado (`salones.service.spec.ts`), y
  * un `grep` de `comanda` sobre `backend/test/` y `frontend/e2e/` no devolvía
  * una línea. La razón por la que nunca se escribió está medida: con el seed,
- * `agruparEstacionesComanda` devuelve siempre `[]` —la categoría con impresora
- * existe, pero no tiene ningún ítem vendible adentro—, así que hacía falta
+ * `agruparEstacionesComanda` devolvía siempre `[]` —la categoría con impresora
+ * existía, pero no tenía ningún ítem vendible adentro—, así que hacía falta
  * cablear datos a mano por SQL para ver una comanda.
+ *
+ * **Eso dejó de ser cierto el 2026-08-11**: la receta "Hamburguesa Especial" del
+ * seed ahora se siembra con esa categoría, así que la comanda se puede ver a
+ * mano sin tocar SQL. No cambia nada para este spec —que monta su propio
+ * catálogo justo para no depender del seed— pero el párrafo de arriba describe
+ * por qué el spec no existía, no el estado de hoy.
  *
  * Acá el **catálogo** lo crea el propio spec por API (dos impresoras, dos
  * categorías y cuatro ítems); del seed sale el escenario base que usan todos los
