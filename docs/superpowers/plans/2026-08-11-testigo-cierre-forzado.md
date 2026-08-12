@@ -488,14 +488,26 @@ it('rechaza pedirle fe a un garzón SIN sesión abierta', async () => {
   ).rejects.toBeInstanceOf(BadRequestException);
 });
 
-it('rechaza pedirle fe al garzón placeholder "Mostrador"', async () => {
+// ⚠️ CORREGIDO 2026-08-11 tras medirlo en la revisión de la Task 2: el
+// placeholder "Mostrador" **no puede** aparecer en `listarAbiertas`. Se crea
+// `activo: false` con `pinHash: '!'` (`garzones.service.ts`), y `verificarPin`
+// exige `activo: true`, así que no tiene ningún camino para abrir sesión.
+// El test de abajo montaba un escenario IMPOSIBLE por API — el molde de
+// "test de estado inalcanzable" que el repo ya tiene anotado.
+//
+// Lo que SÍ hay que fijar es la conducta observable: la exclusión existe
+// porque el garzón tiene que estar en turno, y el placeholder nunca lo está.
+// Un test que fuerce `esPlaceholder` por mock probaría una defensa que
+// ninguna entrada real puede ejercitar. **No escribir ese test.**
+// Si al implementar aparece un camino real por el que un placeholder tenga
+// sesión abierta, eso es un hallazgo: reportarlo, no taparlo con un guard.
+it('rechaza pedirle fe a un garzón que no está en la lista de sesiones abiertas', async () => {
   sesionesMock.listarAbiertas.mockResolvedValue([
-    { garzonId: MOSTRADOR_ID, sesionGarzonId: SESION_M },
+    { garzonId: GARZON_B, sesionGarzonId: SESION_B },
   ]);
-  garzonesMock.findOne.mockResolvedValue({ id: MOSTRADOR_ID, esPlaceholder: true });
 
   await expect(
-    service.solicitar(TENANT_ID, ADMIN_ID, CAJA_ID, [MOSTRADOR_ID]),
+    service.solicitar(TENANT_ID, ADMIN_ID, CAJA_ID, [GARZON_A]),
   ).rejects.toBeInstanceOf(BadRequestException);
 });
 
@@ -553,7 +565,10 @@ Puntos que el código tiene que respetar, cada uno con su test arriba:
 
 1. `solicitar` valida que la caja esté en `en_conciliacion` — **el conteo ya está congelado**. Es lo que hace que la firma valga: contra números que no pueden cambiar.
 2. Los garzones pedidos tienen que estar en `listarAbiertas(tenantId)`; de ahí sale además el `sesionGarzonId` (no se acepta del cliente).
-3. Se excluye `esPlaceholder`.
+3. La elegibilidad se resuelve **por estar en `listarAbiertas`**, no por una lista
+   de exclusiones. El placeholder queda afuera solo, porque no puede abrir sesión
+   (medido). No agregues un guard de `esPlaceholder` "por las dudas": sería una
+   defensa que ninguna entrada real puede ejercitar.
 4. `resolver` compara el PIN con `bcrypt.compare` contra `garzones.pin_hash` — **misma mecánica que `sesiones-garzon`**, reusar el helper que ya exista ahí en vez de duplicar el compare.
 5. Solo resuelve una fila `pendiente`; cualquier otro estado → 400.
 6. Una sola query para traer garzones (`WHERE garzon_id = ANY($1)`), nunca una por id.
