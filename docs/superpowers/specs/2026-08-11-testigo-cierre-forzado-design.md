@@ -251,7 +251,11 @@ decisión aparte.
    `testigos_disponibles` deja el dato para decidir con hechos si endurecerlo, en vez de
    suponerlo.
 2. **Un local sin garzones no puede tener testigo.** Un minimarket cierra siempre sin firma y
-   con comentario. Aceptado hoy; el disparador para reabrir es que un tenant así lo pida.
+   con comentario. Aceptado hoy — **y con salida ya identificada**: el modelo de `garzones` ya
+   es de *personal con PIN* (`tipo` admite `cocina` y `barra`, que no atienden mesas), así que
+   alcanza con una etiqueta configurable y un `tipo` nuevo; el rename completo a "staff" es
+   otro tema, anotado en [`pendientes.md`](../../agent/pendientes.md). **Esta spec no
+   depende de eso**: si el rename ocurre después, el testigo sigue funcionando igual.
 3. **El aviso pasivo depende de que el garzón mire.** Se resuelve de viva voz. Lo que **sí**
    queda garantizado es el acto deliberado, no la inmediatez.
 4. **La firma se pide después de contar.** Si el garzón se fue en el medio, no hay testigo

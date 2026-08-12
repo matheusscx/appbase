@@ -57,6 +57,31 @@ momento; lo que se difiere es abrir estos tres frentes.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
+  frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya
+  admite `tipo IN ('garzon','cocina','barra')`: gente que **no atiende mesas**, con PIN,
+  sesión de turno y reparto de propinas. O sea, "staff" **ya existe conceptualmente**; se
+  llama garzón por herencia del primer caso de uso. El disparador fue el testigo del cierre
+  de caja: un minimarket no tiene garzones, así que hoy no puede tener testigos.
+
+  **Costo medido:** ~2.974 menciones en **104 archivos** (columnas de BD, entidades,
+  endpoints, composables del front, tests) y toca la tabla de terminología de `CLAUDE.md`,
+  que es crítica. Lo que **no** cuesta: no hay datos productivos, así que no hay migración —
+  se cambia el esquema, se actualiza el seeder y se resetea (ver la sección *"Endurecimiento
+  para producción"* más abajo: hoy `main` no despliega y no hay nada en uso real). El costo
+  es el barrido, no el riesgo.
+
+  **Atajo que da el beneficio sin pagar el rename** (evaluado, no implementado): separar la
+  **etiqueta que ve el usuario** del nombre en el código —la pantalla dice "Personal", la
+  base sigue diciendo garzones— más un `tipo` nuevo para el personal que no es de salón. Con
+  eso un minimarket ya puede tener testigos y la limitación de la
+  [spec del testigo](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md)
+  desaparece.
+
+  ⚠️ **El día que se haga el rename completo, va solo.** Un rename es mecánico pero se
+  contamina fácil: mezclado con una feature, cualquier bug queda escondido entre 3.000 líneas
+  cambiadas y la revisión del diff deja de servir.
+
 - [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
   (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**)
   — 🧱 **parte de la tanda propia de arriba: no se toca suelta.**
