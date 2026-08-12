@@ -9,6 +9,9 @@
 3. [`PRODUCTO.md`](./PRODUCTO.md) — especificación funcional y reglas de negocio
 4. [`patterns/`](./patterns/) — **leer antes de planificar una feature**: patrones de-facto backend/frontend
 5. [`CONVENTIONS.md`](./CONVENTIONS.md) — cómo escribir y mantener esta documentación
+6. [`DIFERENCIADORES.md`](./DIFERENCIADORES.md) — dónde nos separamos del mercado, con la
+   evidencia. Materia prima para comunicar el producto; **tiene su propia regla de
+   honestidad**, leerla antes de usarlo
 
 ## Architecture Decision Records
 

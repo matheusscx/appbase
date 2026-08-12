@@ -90,6 +90,13 @@ Reemplazar lo que está `{entre llaves}`. Borrar las preguntas que no apliquen.
    - **Investigación que ya alimenta un diseño concreto** → sección "Investigación de
      mercado" dentro del `-analisis.md`/spec de ese tema.
 
+5. **Si la investigación encuentra que el mercado NO lo hace** —"ningún POS…", "nadie lo
+   documenta", "la decisión es nuestra"—, eso además va como entrada en
+   [`docs/DIFERENCIADORES.md`](../DIFERENCIADORES.md), **en el mismo commit**. Si no se
+   anota ahí en el momento, queda enterrado en un `.md` de 600 líneas y a los seis meses
+   nadie recuerda que era un diferenciador (fue exactamente lo que pasó, y por eso existe
+   ese archivo).
+
 **Ejemplos:** investigación pura → `docs/agent/investigaciones/2026-07-23-gestion-caja.md`
 (gestión de caja: el mercado y Chile endurecieron que la caja es solo efectivo, pero la
 decisión sigue abierta). Investigación embebida en diseño →
