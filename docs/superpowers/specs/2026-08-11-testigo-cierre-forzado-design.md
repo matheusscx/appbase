@@ -103,8 +103,16 @@ Una fila por solicitud. Cero, una o varias por caja.
 | `resuelta_el` | `TIMESTAMPTZ` | Cuándo firmó o rechazó |
 | `creado_el` / `actualizado_el` / `eliminado_el` | | Convención |
 
-**Índice único:** `(caja_id, garzon_id) WHERE eliminado_el IS NULL` — un garzón no firma dos
-veces la misma caja.
+**Índice único:** `(caja_id, garzon_id) WHERE estado IN ('pendiente','firmada') AND
+eliminado_el IS NULL`.
+
+**Decisión del owner 2026-08-11, corregida en la ejecución:** la primera versión decía
+`WHERE eliminado_el IS NULL` a secas, y la revisión de la Task 1 mostró que eso **bloquea
+para siempre volver a pedirle fe a un garzón que rechazó o cuya solicitud caducó** — y no con
+un mensaje de negocio, con un `23505` crudo. Lo que se quiere bloquear es que **firme dos
+veces**, no que se le vuelva a pedir. Con los dos estados vivos: no hay dos pendientes ni dos
+firmas del mismo garzón, pero `rechazada`/`cancelada`/`caducada` no estorban. Cubre el caso
+real de que el garzón cierre turno y después vuelva.
 
 **`sesion_garzon_id` y no solo `garzon_id`:** un `garzon_id` suelto dice quién es, no que
 estuviera ahí. La sesión ata la firma al turno concreto, que es lo que la hace prueba.

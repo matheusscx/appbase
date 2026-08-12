@@ -962,10 +962,15 @@ CREATE TABLE "caja_testigo" (
     CHECK ("estado" IN ('pendiente','firmada','rechazada','cancelada','caducada'))
 );
 CREATE INDEX "idx_caja_testigo_caja" ON "caja_testigo" ("caja_id");
--- Un garzón no firma dos veces la misma caja.
+-- Solo bloquea estados VIVOS ('pendiente', 'firmada'): no se puede tener dos
+-- solicitudes pendientes al mismo garzón por la misma caja, ni que firme dos
+-- veces. 'rechazada' | 'cancelada' | 'caducada' quedan afuera a propósito —
+-- el garzón puede cerrar turno y volver, y hay que poder volver a pedirle fe
+-- (decisión del owner, 2026-08-11). `"eliminado_el" IS NULL` a secas
+-- bloquearía ese caso real: no lo simplifiques a eso.
 CREATE UNIQUE INDEX "ux_caja_testigo_caja_garzon"
   ON "caja_testigo" ("caja_id", "garzon_id")
-  WHERE "eliminado_el" IS NULL;
+  WHERE "estado" IN ('pendiente','firmada') AND "eliminado_el" IS NULL;
 -- Búsqueda del garzón: "¿tengo algo pendiente?" en su pantalla.
 CREATE INDEX "idx_caja_testigo_pendiente"
   ON "caja_testigo" ("tenant_id", "garzon_id")
