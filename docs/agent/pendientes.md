@@ -57,6 +57,16 @@ momento; lo que se difiere es abrir estos tres frentes.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] **El cierre de caja pisa el comentario de la apertura** (backend,
+  `caja.service.ts:246` y `:737`, medido 2026-08-11 al planificar el testigo) — las dos
+  operaciones escriben la **misma** columna `cajas.comentario`: `abrir()` guarda el de la
+  apertura y `enviarConteo()` lo sobrescribe con el del cierre. Nadie lo notó porque el
+  comentario de apertura casi no se usa.
+  Sube de prioridad con el testigo del cierre forzado, que **vuelve obligatorio** el
+  comentario en más cierres: más cierres con comentario = más comentarios de apertura
+  perdidos. No se arregló ahí porque es preexistente y arreglarlo es decidir si el de
+  apertura merece columna propia — o si directamente no debería existir.
+
 - [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
   frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya
   admite `tipo IN ('garzon','cocina','barra')`: gente que **no atiende mesas**, con PIN,

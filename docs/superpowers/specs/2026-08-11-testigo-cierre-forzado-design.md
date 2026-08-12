@@ -57,19 +57,25 @@ justificación escrita sí, y no debe usarse en comunicación externa hasta vali
 
 ## Modelo de datos
 
-### `cajas` — tres columnas nuevas
+### `cajas` — dos columnas nuevas, y un campo existente que se reusa
 
 | Columna | Tipo | Por qué |
 |---|---|---|
 | `cerrada_por` | `UUID REFERENCES usuarios` | Quién ejecutó el cierre. **Se guarda siempre**, también en el cierre normal. |
 | `testigos_disponibles` | `SMALLINT` | Cuántos garzones tenían sesión abierta al **congelar el conteo** (paso 3). |
-| `comentario_cierre` | `TEXT` | Obligatorio cuando el cierre es forzado y sin testigo firmado. |
 
-⚠️ **`comentario_cierre` es una columna nueva y NO se reusa `cajas.comentario`**, aunque
-exista y tiente. Ese campo es el comentario **de la apertura** (`abrir()` lo escribe desde
-`dto.comentario`). Son dos hechos, en dos momentos, de dos personas distintas: pisarlo
-borraría lo que el cajero escribió al abrir su turno, justo en el registro que esta feature
-existe para hacer confiable.
+✅ **El comentario NO necesita columna nueva** — corregido el 2026-08-11 al leer el código
+para armar el plan. La primera versión de esta spec pedía un `comentario_cierre` nuevo
+argumentando que `cajas.comentario` era "el de la apertura". **Es falso a medias:** lo
+escriben los dos, `abrir()` (`caja.service.ts:246`) y `enviarConteo()` (`:737`), y el cierre
+**pisa** el de la apertura. O sea que `cajas.comentario` **ya es, de hecho, el comentario del
+cierre** — alcanza con volverlo obligatorio en el caso forzado-sin-firma. Una columna más
+habría duplicado un campo que ya existe.
+
+⚠️ **Efecto lateral preexistente que esto deja a la vista:** el cierre destruye el comentario
+de la apertura. No lo introduce esta feature y no se arregla acá, pero al volver obligatorio
+el comentario en más cierres, se van a perder más comentarios de apertura. Anotado en
+[`pendientes.md`](../../agent/pendientes.md).
 
 **`cerrada_por` se guarda siempre y "forzado" se deriva** (`cerrada_por <> usuario_id`), en
 vez de un flag `es_forzado`. Un flag puede terminar contradiciendo a los datos; una
