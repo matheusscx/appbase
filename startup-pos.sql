@@ -900,6 +900,14 @@ CREATE TABLE "cajas" (
   -- que la fase 2 (POST /caja/:id/cerrar) justifique las diferencias con un
   -- motivo y finalice a 'cerrada'.
   "comentario"     TEXT,
+  -- Quién EJECUTÓ el cierre, distinto de `usuario_id` (de quién es el turno).
+  -- Se guarda SIEMPRE, también en el cierre normal: "forzado" se deriva
+  -- (`cerrada_por <> usuario_id`) en vez de guardarse como flag, que podría
+  -- terminar contradiciendo a los datos.
+  "cerrada_por"    UUID          REFERENCES "usuarios" ("usuario_id"),
+  -- Cuántos garzones tenían sesión abierta al congelar el conteo. Es lo que
+  -- distingue "cerró solo porque no había nadie" de "cerró solo habiendo tres".
+  "testigos_disponibles" SMALLINT,
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
@@ -926,6 +934,42 @@ CREATE UNIQUE INDEX "ux_cajas_activa_por_usuario"
   WHERE "tipo" = 'fisica'
     AND "estado" IN ('abierta', 'en_conciliacion')
     AND "eliminado_el" IS NULL;
+
+-- Quién dio fe de un conteo. Una fila por solicitud; cero, una o varias por caja.
+-- Las filas NO se editan ni se borran: son hechos con hora.
+-- "garzon_id" y "sesion_garzon_id" se declaran sin REFERENCES inline porque
+-- "garzones" y "sesiones_garzon" se definen más abajo en este archivo; los FK
+-- se agregan con ALTER TABLE una vez creadas (mismo patrón que
+-- fk_venta_propina_sesion_garzon).
+CREATE TABLE "caja_testigo" (
+  "caja_testigo_id"  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"        UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "caja_id"          UUID        NOT NULL REFERENCES "cajas" ("caja_id"),
+  "garzon_id"        UUID        NOT NULL,
+  -- La sesión, y no solo el garzón: el garzón dice QUIÉN es, la sesión prueba
+  -- que ESTABA EN TURNO. Sin esto la firma no es evidencia.
+  "sesion_garzon_id" UUID        NOT NULL,
+  "solicitada_por"   UUID        NOT NULL REFERENCES "usuarios" ("usuario_id"),
+  "estado"           TEXT        NOT NULL DEFAULT 'pendiente',
+  -- pendiente | firmada | rechazada | cancelada | caducada
+  "comentario_garzon" TEXT,
+  "solicitada_el"    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "resuelta_el"      TIMESTAMPTZ,
+  "creado_el"        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"   TIMESTAMPTZ,
+  "eliminado_el"     TIMESTAMPTZ,
+  CONSTRAINT chk_caja_testigo_estado
+    CHECK ("estado" IN ('pendiente','firmada','rechazada','cancelada','caducada'))
+);
+CREATE INDEX "idx_caja_testigo_caja" ON "caja_testigo" ("caja_id");
+-- Un garzón no firma dos veces la misma caja.
+CREATE UNIQUE INDEX "ux_caja_testigo_caja_garzon"
+  ON "caja_testigo" ("caja_id", "garzon_id")
+  WHERE "eliminado_el" IS NULL;
+-- Búsqueda del garzón: "¿tengo algo pendiente?" en su pantalla.
+CREATE INDEX "idx_caja_testigo_pendiente"
+  ON "caja_testigo" ("tenant_id", "garzon_id")
+  WHERE "estado" = 'pendiente' AND "eliminado_el" IS NULL;
 
 CREATE TABLE "movimientos_caja" (
   "movimiento_id"  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1787,6 +1831,14 @@ ALTER TABLE venta_propina
   ADD CONSTRAINT fk_venta_propina_sesion_turno
   FOREIGN KEY (tenant_id, sesion_garzon_id, turno_id)
   REFERENCES sesiones_garzon (tenant_id, sesion_garzon_id, turno_id);
+
+ALTER TABLE "caja_testigo"
+  ADD CONSTRAINT fk_caja_testigo_garzon
+  FOREIGN KEY ("garzon_id") REFERENCES "garzones" ("garzon_id");
+
+ALTER TABLE "caja_testigo"
+  ADD CONSTRAINT fk_caja_testigo_sesion_garzon
+  FOREIGN KEY ("sesion_garzon_id") REFERENCES "sesiones_garzon" ("sesion_garzon_id");
 
 CREATE TABLE cuentas (
     cuenta_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

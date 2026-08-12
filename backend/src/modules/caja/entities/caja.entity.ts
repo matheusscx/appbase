@@ -88,6 +88,12 @@ export class Caja {
   @Column({ type: 'varchar', nullable: true })
   comentario: string | null;
 
+  @Column({ name: 'cerrada_por', type: 'uuid', nullable: true })
+  cerradaPor: string | null;
+
+  @Column({ name: 'testigos_disponibles', type: 'smallint', nullable: true })
+  testigosDisponibles: number | null;
+
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 
