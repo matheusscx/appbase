@@ -316,21 +316,43 @@ describe('CajaController', () => {
     });
   });
 
-  describe('enviarConteo', () => {
-    it('enviarConteo delega en cajaService.enviarConteo con tenant/usuario del token', () => {
+  describe('enviarConteo (cierre forzado: owner-o-admin)', () => {
+    it('computa esAdmin=false para un cajero sin rol admin y delega en cajaService.enviarConteo', async () => {
       const dto = {
         lineas: [{ metodoPagoId: null, montoContado: '900' }],
       } as any;
+      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(false);
       jest
         .spyOn(cajaService, 'enviarConteo')
         .mockResolvedValue({ estado: 'cerrada', arqueo: [] } as any);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
-      controller.enviarConteo(req, 'caja1', dto);
+      await controller.enviarConteo(req, 'caja1', dto);
+      expect(rbacService.userIsTenantAdmin).toHaveBeenCalledWith('u1', 't1');
       expect(cajaService.enviarConteo).toHaveBeenCalledWith(
         't1',
         'u1',
         'caja1',
         dto,
+        false,
+      );
+    });
+
+    it('computa esAdmin=true para un admin del tenant y delega en cajaService.enviarConteo', async () => {
+      const dto = {
+        lineas: [{ metodoPagoId: null, montoContado: '900' }],
+      } as any;
+      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(true);
+      jest
+        .spyOn(cajaService, 'enviarConteo')
+        .mockResolvedValue({ estado: 'en_conciliacion', arqueo: [] } as any);
+      const req = { user: { id: 'admin1', tenantId: 't1' } } as any;
+      await controller.enviarConteo(req, 'caja1', dto);
+      expect(cajaService.enviarConteo).toHaveBeenCalledWith(
+        't1',
+        'admin1',
+        'caja1',
+        dto,
+        true,
       );
     });
   });

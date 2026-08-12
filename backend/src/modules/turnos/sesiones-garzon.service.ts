@@ -21,6 +21,14 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 
+/**
+ * `DataSource` y `EntityManager` cumplen esta forma. Mismo patrón que
+ * `motivos-diferencia.service.ts` (`Runner`): permite que un caller con una
+ * transacción abierta pase su `manager` en vez de forzar una conexión nueva
+ * del pool.
+ */
+type Runner = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
+
 /** Vista pública de una sesión (inicio / cierre / activa). */
 export interface SesionPublica {
   id: string;
@@ -235,6 +243,29 @@ export class SesionesGarzonService {
     );
 
     return rows.map((r) => this.mapListaRow(r));
+  }
+
+  /**
+   * Cuenta de sesiones abiertas del tenant — corre sobre el `runner` que le
+   * pasen, típicamente el `EntityManager` de una transacción en curso (ver
+   * `CajaService.enviarConteo`). NO usa `this.dataSource` a propósito:
+   * `listarAbiertas` sale por `this.dataSource.query`, que abre otra conexión
+   * del pool — pedir una segunda conexión mientras la del caller retiene un
+   * `FOR UPDATE` es el patrón que `docs/agent/pendientes.md` marca como el
+   * hallazgo abierto más grave (agotamiento del pool bajo carga). Mismo
+   * filtro que `listarAbiertas`, sin los JOIN de nombres: acá solo importa
+   * el número.
+   */
+  async contarAbiertas(runner: Runner, tenantId: string): Promise<number> {
+    const rows = (await runner.query(
+      `SELECT COUNT(*)::int AS total
+         FROM sesiones_garzon
+        WHERE tenant_id = $1
+          AND estado = 'abierta'
+          AND eliminado_el IS NULL`,
+      [tenantId],
+    )) as { total: number }[];
+    return rows[0]?.total ?? 0;
   }
 
   async historial(

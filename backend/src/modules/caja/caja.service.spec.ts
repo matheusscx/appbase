@@ -16,6 +16,7 @@ import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferencia.service';
+import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 
 const TENANT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
 const USUARIO_ID = 'bbbbbbbb-0000-0000-0000-000000000002';
@@ -55,6 +56,9 @@ describe('CajaService', () => {
     assertMotivoValido: jest.fn(),
     hayMotivosActivos: jest.fn(),
   };
+  const sesionesGarzonServiceMock = {
+    contarAbiertas: jest.fn(),
+  };
 
   beforeEach(async () => {
     cajaRepo = {
@@ -81,6 +85,9 @@ describe('CajaService', () => {
 
     motivosService.assertMotivoValido.mockReset();
     motivosService.hayMotivosActivos.mockReset();
+    // Default: sin garzones en turno. Cada test que le importa el número lo
+    // sobreescribe explícitamente (ver describe('enviarConteo')).
+    sesionesGarzonServiceMock.contarAbiertas.mockReset().mockResolvedValue(0);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -93,6 +100,10 @@ describe('CajaService', () => {
         },
         { provide: getDataSourceToken(), useValue: dataSource },
         { provide: MotivosDiferenciaService, useValue: motivosService },
+        {
+          provide: SesionesGarzonService,
+          useValue: sesionesGarzonServiceMock,
+        },
       ],
     }).compile();
 
@@ -494,6 +505,147 @@ describe('CajaService', () => {
       expect(savedCaja.diferencia).toBe('-100.0000');
       expect(arqueo[0].motivoDiferenciaId).toBeUndefined();
       expect(arqueo[0].comentarioDiferencia).toBeUndefined();
+    });
+
+    // Cierre forzado (owner 2026-08-11): un admin del tenant puede cerrar la
+    // caja de otro cajero. `dtoConteo` cuadra exacto con el arqueo mockeado en
+    // el beforeEach (esperado '1000.0000' == montoContado '1000') a propósito:
+    // sirve tanto para los tests que no miran `estado` como para los que sí.
+    const dtoConteo: CerrarCajaDto = {
+      lineas: [{ metodoPagoId: null, montoContado: '1000' }],
+    };
+
+    it('cierre forzado: un admin no dueño puede enviar el conteo y queda registrado quién contó', async () => {
+      managerMock.findOne.mockResolvedValue({
+        ...mockCajaAbierta,
+        usuarioId: OTRO_USUARIO,
+      });
+
+      await service.enviarConteo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoConteo,
+        true,
+      );
+
+      expect(managerMock.save).toHaveBeenCalledWith(
+        Caja,
+        expect.objectContaining({ cerradaPor: USUARIO_ID }),
+      );
+    });
+
+    it('cierre normal: cerrada_por también se guarda, y es el dueño', async () => {
+      await service.enviarConteo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoConteo,
+        false,
+      );
+
+      expect(managerMock.save).toHaveBeenCalledWith(
+        Caja,
+        expect.objectContaining({ cerradaPor: USUARIO_ID }),
+      );
+    });
+
+    // Combinación más frecuente en un local chico: el admin-cajero cerrando su
+    // propio turno. `esAdmin=true` pero `esForzado` sigue en false porque el
+    // dueño de la caja es el mismo usuario del token — nada de esto pasa por
+    // conciliación forzada, se comporta como un cierre normal.
+    it('un admin que además es el dueño de la caja: NO es forzado, auto-cierra si cuadra', async () => {
+      const r = await service.enviarConteo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoConteo,
+        true,
+      );
+
+      expect(r.estado).toBe('cerrada');
+      expect(managerMock.save).toHaveBeenCalledWith(
+        Caja,
+        expect.objectContaining({ cerradaPor: USUARIO_ID }),
+      );
+    });
+
+    it('un NO admin que no es dueño sigue sin poder tocar la caja', async () => {
+      managerMock.findOne.mockResolvedValue({
+        ...mockCajaAbierta,
+        usuarioId: OTRO_USUARIO,
+      });
+
+      await expect(
+        service.enviarConteo(TENANT_ID, USUARIO_ID, CAJA_ID, dtoConteo, false),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    // El retoque al flujo existente: sin esta ventana no hay dónde poner la firma.
+    it('un cierre forzado que CUADRA igual queda en_conciliacion, no se auto-cierra', async () => {
+      managerMock.findOne.mockResolvedValue({
+        ...mockCajaAbierta,
+        usuarioId: OTRO_USUARIO,
+      });
+
+      const r = await service.enviarConteo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoConteo,
+        true,
+      );
+
+      expect(r.estado).toBe('en_conciliacion');
+    });
+
+    it('un cierre NORMAL que cuadra sigue auto-cerrándose', async () => {
+      const r = await service.enviarConteo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoConteo,
+        false,
+      );
+
+      expect(r.estado).toBe('cerrada');
+    });
+
+    it('congela cuántos garzones había en turno', async () => {
+      sesionesGarzonServiceMock.contarAbiertas.mockResolvedValue(3);
+
+      await service.enviarConteo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoConteo,
+        false,
+      );
+
+      expect(managerMock.save).toHaveBeenCalledWith(
+        Caja,
+        expect.objectContaining({ testigosDisponibles: 3 }),
+      );
+    });
+
+    // El lock `FOR UPDATE` de `bloquearCajaAbierta` sigue vivo durante toda la
+    // transacción: pedir el conteo con `dataSource.query` (otra conexión del
+    // pool) en vez del `manager` de esta transacción es el patrón de deadlock
+    // documentado en `docs/agent/pendientes.md`. Este test es la red para que
+    // no vuelva.
+    it('cuenta los garzones con el `manager` de la transacción, no con una conexión nueva del pool', async () => {
+      await service.enviarConteo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        dtoConteo,
+        false,
+      );
+
+      expect(sesionesGarzonServiceMock.contarAbiertas).toHaveBeenCalledWith(
+        managerMock,
+        TENANT_ID,
+      );
     });
   });
 
@@ -1681,6 +1833,10 @@ describe('CajaService.abrir', () => {
             assertMotivoValido: jest.fn(),
             hayMotivosActivos: jest.fn(),
           },
+        },
+        {
+          provide: SesionesGarzonService,
+          useValue: { contarAbiertas: jest.fn().mockResolvedValue(0) },
         },
       ],
     }).compile();

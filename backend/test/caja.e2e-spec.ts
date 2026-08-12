@@ -222,8 +222,38 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     });
   });
 
-  describe('POST /caja/:id/conteo — owner-only (fase 1)', () => {
-    it('un supervisor NO puede enviar el conteo de la caja abierta por el cajero', async () => {
+  describe('POST /caja/:id/conteo — cierre forzado (owner-o-admin, fase 1)', () => {
+    // `tokenSupervisor` en este describe es en realidad admin.paris (rol
+    // Administrador, es_fijo=true) — ver el comentario de `ADMIN_EMAIL` más
+    // arriba. Es justo el actor que la regla nueva habilita: antes de esta
+    // task este mismo request devolvía 403 ("owner-only"); ahora un admin
+    // puede forzar el cierre de la caja de otro cajero (decisión del owner
+    // 2026-08-11, `caja.service.ts` `enviarConteo`/`esForzado`).
+    let cajonDelAdminId: string;
+    let cajaDelAdminId: string;
+
+    beforeAll(async () => {
+      // Cajón propio para que el admin abra SU PROPIA caja (necesario para el
+      // segundo test: un no-admin-no-dueño solo se prueba de verdad contra una
+      // caja que no sea ni suya ni de un admin — así que el "dueño" acá es el
+      // admin, y quien intenta forzarla es el cajero, que sí tiene
+      // MiCaja:Actualizar pero no es admin ni dueño).
+      const r = await request(app.getHttpServer())
+        .post('/api/cajones')
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ nombre: `E2E Admin Owner ${Date.now()}` });
+      cajonDelAdminId = (r.body as CajonResponse).id;
+    });
+
+    afterAll(async () => {
+      if (cajonDelAdminId) {
+        await request(app.getHttpServer())
+          .delete(`/api/cajones/${cajonDelAdminId}`)
+          .set('Authorization', `Bearer ${tokenSupervisor}`);
+      }
+    });
+
+    it('un admin del tenant SÍ puede enviar el conteo de la caja abierta por el cajero (forzado)', async () => {
       cajaDelCajeroId = await abrirOReusarCaja(
         app,
         tokenCajero,
@@ -235,23 +265,43 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
 
+      expect(res.status).toBe(201);
+      // Forzado (usuario del token != dueño de la caja): pasa por
+      // conciliación AUNQUE CUADRE — ahí vive la firma del testigo.
+      expect((res.body as { estado: string }).estado).toBe('en_conciliacion');
+
+      // El mismo admin que forzó también puede finalizar la conciliación
+      // (fase 2, ya cubierto por 'admin finaliza una conciliación ajena' más
+      // abajo — acá solo se cierra para no dejar al cajero trabado).
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({ lineas: [] });
+      expect([200, 201]).toContain(cerrar.status);
+    });
+
+    it('un no-admin que no es dueño sigue sin poder tocar la caja', async () => {
+      cajaDelAdminId = await abrirOReusarCaja(
+        app,
+        tokenSupervisor,
+        cajonDelAdminId,
+      );
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaDelAdminId}/conteo`)
+        .set('Authorization', `Bearer ${tokenCajero}`)
+        .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+
       expect(res.status).toBe(403);
       expect((res.body as { message: string }).message).toBe(
         'No tienes acceso a esta caja',
       );
-    });
 
-    afterAll(async () => {
-      // Higiene de reruns locales: cerrar la caja abierta por el cajero
-      // (queda abierta a propósito durante el `it` de arriba, que verifica
-      // que el supervisor no puede enviar su conteo). Se cierra acá, antes de
-      // que otros describes intenten abrir una caja nueva para el cajero —
-      // solo puede tener una física abierta por (tenant, usuario) a la vez.
-      if (cajaDelCajeroId) {
-        await cerrarEnDosFases(app, cajaDelCajeroId, tokenCajero, [
-          { metodoPagoId: null, montoContado: '10000' },
-        ]);
-      }
+      // Higiene: el dueño real (admin) cierra su propia caja, sin forzado —
+      // cuadra exacto, auto-cierra en fase 1.
+      await cerrarEnDosFases(app, cajaDelAdminId, tokenSupervisor, [
+        { metodoPagoId: null, montoContado: '10000' },
+      ]);
     });
   });
 

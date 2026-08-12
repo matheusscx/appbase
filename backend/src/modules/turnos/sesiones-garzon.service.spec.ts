@@ -469,6 +469,33 @@ describe('SesionesGarzonService', () => {
     }
   });
 
+  describe('contarAbiertas', () => {
+    // El caller real (CajaService.enviarConteo) le pasa el `manager` de una
+    // transacción en curso, no `this.dataSource` — por eso el método toma un
+    // `runner` genérico en vez de usar el campo privado.
+    it('corre la query sobre el runner que le pasan, no sobre this.dataSource', async () => {
+      const runner = { query: jest.fn().mockResolvedValue([{ total: 3 }]) };
+
+      const result = await service.contarAbiertas(runner, TENANT);
+
+      expect(result).toBe(3);
+      expect(dataSource.query).not.toHaveBeenCalled();
+      const [sql, params] = runner.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/FROM\s+sesiones_garzon/i);
+      expect(sql).toMatch(/estado\s*=\s*'abierta'/i);
+      expect(sql).toMatch(/eliminado_el\s+IS\s+NULL/i);
+      expect(params).toEqual([TENANT]);
+    });
+
+    it('sin filas → 0, no undefined', async () => {
+      const runner = { query: jest.fn().mockResolvedValue([]) };
+
+      const result = await service.contarAbiertas(runner, TENANT);
+
+      expect(result).toBe(0);
+    });
+  });
+
   describe('activaPropia', () => {
     // Es lo que responde "¿este garzón está en turno?" cuando alguien teclea su
     // PIN. No lo invocaba ningún test.

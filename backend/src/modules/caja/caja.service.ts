@@ -20,6 +20,7 @@ import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
 import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferencia.service';
+import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
 import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
@@ -116,6 +117,7 @@ export class CajaService {
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly motivosService: MotivosDiferenciaService,
+    private readonly sesionesGarzonService: SesionesGarzonService,
   ) {}
 
   async findActiva(tenantId: string, usuarioId: string): Promise<Caja | null> {
@@ -645,18 +647,29 @@ export class CajaService {
 
   /**
    * Fase 1 del cierre en dos fases: congela el arqueo (esperado recomputado
-   * server-side + contado declarado + diferencia) exactamente igual que el
-   * cierre anterior, y bifurca según cuadre:
-   *   - Sin descuadre en ninguna línea → auto-cierre (`estado: 'cerrada'`,
+   * server-side + contado declarado + diferencia). Owner-o-admin (el
+   * controller resuelve `esAdmin`, mismo criterio que `cerrar`): el dueño
+   * siempre puede; un admin del tenant puede además forzar el cierre de la
+   * caja de OTRO cajero (`esForzado = caja.usuarioId !== usuarioId`) —
+   * decisión del owner 2026-08-11, para no dejar la caja de un cajero
+   * ausente abierta para siempre. Congela también quién contó
+   * (`cerradaPor = usuarioId`) y cuántos garzones había en turno en ese
+   * momento (`testigosDisponibles`).
+   *
+   * Bifurca según cuadre y forzado:
+   *   - Sin descuadre y SIN forzar → auto-cierre (`estado: 'cerrada'`,
    *     `fechaCierre` fijada). No requiere fase 2.
-   *   - Con descuadre en alguna línea → `estado: 'en_conciliacion'`, sin
-   *     `fechaCierre`. La fase 2 (Task 3, `cerrar`) resuelve la conciliación.
+   *   - Con descuadre, O forzado aunque cuadre → `estado: 'en_conciliacion'`,
+   *     sin `fechaCierre`. Un forzado pasa por acá SIEMPRE, cuadre o no: es
+   *     donde vive la solicitud de testigo. La fase 2 (`cerrar`) resuelve la
+   *     conciliación.
    */
   async enviarConteo(
     tenantId: string,
     usuarioId: string,
     cajaId: string,
     dto: CerrarCajaDto,
+    esAdmin = false,
   ): Promise<{ estado: 'cerrada' | 'en_conciliacion'; arqueo: LineaArqueo[] }> {
     return this.dataSource.transaction(async (manager) => {
       await this.bloquearCajaAbierta(manager, cajaId, tenantId);
@@ -672,7 +685,12 @@ export class CajaService {
       if (!caja) {
         throw new ForbiddenException('Caja no encontrada o no está abierta');
       }
-      if (caja.usuarioId !== usuarioId) {
+      // Cierre forzado (decisión del owner 2026-08-11): un admin del tenant puede
+      // cerrar la caja de otro. Sin esto, un cajero que se va deja su caja abierta
+      // para siempre y —por `ux_cajas_activa_por_usuario`— no puede volver a abrir
+      // ninguna. El dueño sigue siendo el único no-admin que puede.
+      const esForzado = caja.usuarioId !== usuarioId;
+      if (esForzado && !esAdmin) {
         throw new ForbiddenException('No tienes acceso a esta caja');
       }
 
@@ -736,12 +754,29 @@ export class CajaService {
       caja.diferencia = efectivo.diferencia;
       caja.comentario = dto.comentario ?? null;
 
-      // Bifurcación fase 1: cualquier línea descuadrada → conciliación
-      // pendiente (fase 2 la resuelve); todo cuadrado → auto-cierre.
+      // Se guarda SIEMPRE, no solo en el forzado: "forzado" se deriva de
+      // `cerrada_por <> usuario_id`. Un flag podría contradecir a los datos.
+      caja.cerradaPor = usuarioId;
+      // Congelado acá y no consultado después: más tarde daría otro número.
+      // Cuenta sesiones abiertas, que es lo único que el sistema sabe de "quién
+      // está en turno" (los usuarios no tienen sesión de turno). Corre con
+      // `manager` (la transacción en curso, con el `FOR UPDATE` de
+      // `bloquearCajaAbierta` todavía vivo) — NO con `listarAbiertas`, que sale
+      // por `this.dataSource.query` y pediría una segunda conexión del pool
+      // mientras esta retiene la suya (ver docblock de `contarAbiertas`).
+      caja.testigosDisponibles =
+        await this.sesionesGarzonService.contarAbiertas(manager, tenantId);
+
+      // Bifurcación fase 1: cualquier línea descuadrada, o un cierre forzado
+      // (aunque cuadre) → conciliación pendiente (fase 2 la resuelve); todo
+      // cuadrado en un cierre normal → auto-cierre.
       const hayDescuadre = lineasResueltas.some(
         (l) => l.diferencia !== null && !new Decimal(l.diferencia).isZero(),
       );
-      if (hayDescuadre) {
+      // Un cierre forzado pasa por la ventana de conciliación AUNQUE CUADRE: es
+      // donde viven las solicitudes de testigo. Sin esto, una caja forzada que
+      // cuadra se auto-cerraría y no habría dónde poner la firma.
+      if (hayDescuadre || esForzado) {
         caja.estado = 'en_conciliacion';
         caja.fechaCierre = null;
       } else {

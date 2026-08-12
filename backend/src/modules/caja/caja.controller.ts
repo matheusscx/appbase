@@ -180,15 +180,28 @@ export class CajaController {
     return this.cajaService.registrarMovimiento(u.tenantId!, u.id, cajaId, dto);
   }
 
+  /**
+   * Cierre forzado: NO lleva `TenantAdminGuard` (bloquearía al cajero dueño)
+   * por la misma razón que `cerrar` — el piso de permiso es
+   * `MiCaja:Actualizar` y `esAdmin` se computa aparte para permitir además a
+   * un admin no-dueño cerrar la caja de otro.
+   */
   @Post(':id/conteo')
   @RequiresPermiso('MiCaja', 'Actualizar')
-  enviarConteo(
+  async enviarConteo(
     @Req() req: Request,
     @Param('id') cajaId: string,
     @Body() dto: CerrarCajaDto,
   ) {
     const u = req.user as JwtUser;
-    return this.cajaService.enviarConteo(u.tenantId!, u.id, cajaId, dto);
+    const esAdmin = await this.rbacService.userIsTenantAdmin(u.id, u.tenantId!);
+    return this.cajaService.enviarConteo(
+      u.tenantId!,
+      u.id,
+      cajaId,
+      dto,
+      esAdmin,
+    );
   }
 
   /**
