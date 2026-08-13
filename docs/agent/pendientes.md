@@ -1071,6 +1071,34 @@ sigue son los poderes del encargado que se difirieron a propósito:
   Sigue sin migrar a `resueltos.md` por dos motivos: el ítem de abajo (aprobación por umbral)
   todavía referencia el cruce sin resolver contra este, y **falta la pantalla del garzón**
   (Task 7) — hasta que exista, la firma se puede pedir pero no completar desde la UI.
+- [ ] **El encargado que fuerza un cierre NO cuenta a ciegas** (decisión de alcance, no bug)
+  — lo levantó la revisión independiente de la Task 6 (2026-08-13). La spec del testigo dice
+  *"cuenta a ciegas: sin ver lo esperado"*, y hoy **no es así**: forzar el cierre exige ser
+  admin del tenant (`caja.service.ts` → `enviarConteo`, `esForzado && !esAdmin` → 403), y el
+  modo ciego **exime al admin por diseño previo** (§3.4: *"el dueño no es el objetivo del
+  anti-fraude"*). O sea: quien fuerza un cierre siempre ve el esperado mientras cuenta la
+  plata de otro. La contradicción es de la spec contra una decisión anterior, no de la
+  implementación contra la spec.
+
+  📏 **Medido antes de escribir esto, porque cambia qué se puede arreglar.** La exención del
+  ciego se aplica en **cuatro** superficies, todas con la misma condición `!esAdmin`:
+  `obtenerArqueo` (`caja.service.ts:464-466`), `cajonesEstado` (`:1204`, la grilla de
+  `/cajas`), `resumenMovimientos` (`:1332`) y el historial. Consecuencias:
+  - **Un supervisor (`Cajas:Leer`, no admin) SÍ queda a ciegas** en las cuatro. La intuición
+    de que "con permisos de Cajas igual lo vería" no se sostiene para ese rol — lo que lo
+    revela no es el permiso de módulo, es **ser admin del tenant**.
+  - **Para un admin, taparlo en una sola pantalla no sirve para nada**: si se lo ocultara en
+    el drawer del cierre, lo tiene igual en la grilla de cajones de la pantalla de al lado, en
+    el resumen del turno y en el arqueo. Cualquier arreglo tiene que atacar **quién está
+    exento**, no una vista.
+
+  ➡️ Opciones, cuando se retome: (a) dejarlo como está y **corregir la spec**, que es la que
+  promete algo que el producto no hace; (b) que el ciego aplique al admin **solo cuando cuenta
+  una caja ajena** —la caja propia sigue exenta—, lo que exige tocar las cuatro superficies a
+  la vez; (c) hacer configurable por tenant a quién exime el ciego.
+  🔗 Emparentado con el ítem ya conocido de que el ciego tapa el esperado en arqueo/drawer pero
+  **no** en el panel de resumen del turno: es el mismo problema de fondo —el ciego se definió
+  vista por vista y no como una propiedad de "quién puede ver qué"—.
 - [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
   si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
   aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más
