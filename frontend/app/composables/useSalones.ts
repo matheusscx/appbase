@@ -134,6 +134,26 @@ export interface MesaPosicion {
   posY: number
 }
 
+/** Una línea del arqueo, tal como la ve el garzón: nunca `esperado` — espejo de
+ *  `LineaTestigo` (`backend/src/modules/caja/caja-testigo.service.ts`). */
+export interface LineaTestigoContado {
+  metodoPagoId: string | null
+  nombre: string
+  esEfectivo: boolean
+  contado: string | null
+}
+
+/** Lo que el garzón ve al entrar a su pantalla, por cada solicitud pendiente —
+ *  espejo de `SolicitudPublica` del backend. */
+export interface SolicitudTestigo {
+  id: string
+  cajaId: string
+  solicitadaEl: string
+  /** `true` = se resuelve por cuenta vinculada, sin PIN; `false` = por PIN. */
+  garzonVinculado: boolean
+  lineas: LineaTestigoContado[]
+}
+
 /**
  * La credencial que viaja en el body de las acciones del salón.
  *
@@ -348,6 +368,33 @@ export function useSalones() {
       `${apiUrl}/cuentas/${cuentaId}/asignaciones`,
     )
 
+  // ── Testigo del cierre forzado (el garzón da fe) ──────────────────────────
+  /**
+   * Lo que el garzón ve al entrar a su pantalla. POST con la credencial en el
+   * body (nunca `garzonId` de ruta): el backend resuelve la identidad del JWT
+   * en modo personal, o exige `garzonId` + PIN en un tótem compartido — mismo
+   * contrato que el resto de esta pantalla (`credencialGarzon`).
+   */
+  const pendientesTestigo = (garzonId: string, pin: string) =>
+    useApiFetch<SolicitudTestigo[]>(`${apiUrl}/caja/testigos/pendientes`, {
+      method: 'POST',
+      body: credencialGarzon(garzonId, pin),
+    })
+
+  /**
+   * El garzón da fe (`firma: true`) o rechaza (`firma: false`) la SUYA. El PIN
+   * se omite cuando el garzón está vinculado a una cuenta: mandarlo no ayuda,
+   * esa vía queda rechazada para él en el backend (`CajaTestigoService.resolver`).
+   */
+  const resolverTestigo = (
+    testigoId: string,
+    body: { pin?: string, firma: boolean, comentario?: string },
+  ) =>
+    useApiFetch<{ id: string, estado: string }>(
+      `${apiUrl}/caja/testigos/${testigoId}/resolver`,
+      { method: 'POST', body },
+    )
+
   return {
     listarSalones,
     crearSalon,
@@ -369,5 +416,7 @@ export function useSalones() {
     transferirCuenta,
     transferirCuentaAdmin,
     listarAsignaciones,
+    pendientesTestigo,
+    resolverTestigo,
   }
 }

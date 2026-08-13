@@ -44,6 +44,19 @@ function resetEstadoLocal() {
   fase.value = 'conteo'
 }
 
+/**
+ * `immediate` porque el drawer puede **montarse con `open` ya en `true`**, y en
+ * ese caso un `watch` normal no corre nunca: se quedaba dibujando su estado
+ * inicial —fase 1, conteo en blanco— sobre una caja que ya no está `abierta`.
+ *
+ * Medido en el smoke de navegador del cierre forzado: al enviar el conteo, el
+ * store adelanta `detalle.estado` a `en_conciliacion` ANTES de recargar el
+ * detalle, así que por un tick la caja no es ni "ajena abierta" ni "forzada con
+ * panel" —`cerradaPor` todavía no llegó— y el `v-if` que monta este drawer se
+ * apaga y se vuelve a encender. El encargado quedaba mirando un formulario de
+ * conteo vacío para una caja ya contada, y "Enviar conteo" habría fallado.
+ * Cerrar y reabrir lo arreglaba, que es exactamente la firma de este problema.
+ */
 watch(open, async (isOpen) => {
   if (!isOpen) {
     resetEstadoLocal()
@@ -81,7 +94,7 @@ watch(open, async (isOpen) => {
   finally {
     loading.value = false
   }
-})
+}, { immediate: true })
 
 // --- Fase 1: conteo ---
 

@@ -57,6 +57,25 @@ const esIncidenteCerrada = computed(() =>
   props.caja.estado === 'cerrada' && esForzado.value,
 )
 
+/**
+ * ¿El cierre que se está haciendo en el drawer es forzado? Se **congela al
+ * abrirlo** y no se recalcula mientras está abierto.
+ *
+ * No puede ser un `computed` (medido en el smoke, 2026-08-13): al enviar el
+ * conteo, el store adelanta `detalle.estado` a `en_conciliacion` ANTES de que
+ * llegue `cerradaPor`, así que "es ajena y está abierta" ya es falso y "fue
+ * forzada" todavía no es verdad. Un `computed` valía `false` justo en ese
+ * instante y se llevaba puestas las dos cosas que dependen de él: la recarga
+ * del detalle (y con ella el panel de pedir firma) y el pedido de comentario
+ * obligatorio. Tampoco puede ser `true` fijo: un admin que solo finaliza la
+ * conciliación de una caja que su dueño ya contó **no** está forzando nada, y
+ * exigirle comentario sería ser más estricto que el backend.
+ */
+const forzadoDelCierre = ref(false)
+watch(drawerOpen, (abierto) => {
+  if (abierto) forzadoDelCierre.value = esAjenaAbierta.value || esForzado.value
+})
+
 const testigosVivos = computed(
   () =>
     new Set(
@@ -287,12 +306,20 @@ const ESTADO_LABEL: Record<string, string> = {
       </template>
     </UAlert>
 
+    <!--
+      El `v-if` NO se arma con `esAjenaAbierta || mostrarPanelFirma` (revisión
+      del smoke, 2026-08-13): las dos se apagan a la vez durante un tick al
+      enviar el conteo —el store adelanta `estado` a `en_conciliacion` antes de
+      que llegue `cerradaPor`—, y eso DESTRUÍA el drawer a mitad del flujo,
+      perdiendo lo tecleado. La condición de acá es estable: "esta caja es de
+      otro y todavía se puede actuar sobre ella".
+    -->
     <CajaCierreDrawer
-      v-if="esAjenaAbierta || mostrarPanelFirma"
+      v-if="puedeActualizar && caja.estado !== 'cerrada' && caja.usuarioId !== usuarioActualId"
       v-model:open="drawerOpen"
       :caja-id="caja.id"
       :resumir="caja.estado === 'en_conciliacion'"
-      forzado
+      :forzado="forzadoDelCierre"
       redirect-base="/cajas"
     />
   </div>

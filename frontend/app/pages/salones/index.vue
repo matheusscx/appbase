@@ -18,6 +18,7 @@ import type { Garzon } from '~/composables/useGarzones'
 import { etiquetaCuentaPendiente, useTransferenciaPendientes } from '~/composables/useSesionesGarzon'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { Turno } from '~/composables/useTurnos'
+import type { SolicitudTestigo } from '~/composables/useSalones'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
 import { agregarImpuestosVenta } from '~/utils/ticket-builder'
 import { shellUi } from '~/utils/ui-shell'
@@ -359,6 +360,72 @@ function pedirPinParaPendientes() {
   )
 }
 
+// ── Testigo del cierre forzado (el garzón da fe del conteo) ─────────────────
+const testigoModalOpen = ref(false)
+const testigoSolicitudes = ref<SolicitudTestigo[]>([])
+/** El PIN ya probado en el teclado enmascarado, retenido solo mientras el modal está abierto. */
+const testigoPin = ref('')
+const cargandoTestigos = ref(false)
+
+/**
+ * Trae las pendientes del garzón identificado por `garzonId`/`pin` y, si hay
+ * alguna, abre el modal. `silencioso` es para el aviso pasivo al montar (modo
+ * personal): sin él, cada carga de la pantalla sin nada pendiente mostraría un
+ * toast — ruido en el camino más común.
+ */
+async function cargarPendientesTestigo(
+  garzonId: string,
+  pin: string,
+  opciones?: { silencioso?: boolean },
+) {
+  cargandoTestigos.value = true
+  // El PIN que el garzón ya probó en el teclado enmascarado se retiene mientras
+  // dura el modal: `resolver` lo necesita y volver a pedirlo sería teclearlo dos
+  // veces (y, en el tótem, dejarlo a la vista). Vacío en modo personal.
+  testigoPin.value = pin
+  try {
+    const solicitudes = await salonesApi.pendientesTestigo(garzonId, pin)
+    testigoSolicitudes.value = solicitudes
+    if (solicitudes.length > 0) {
+      testigoModalOpen.value = true
+    }
+    else if (!opciones?.silencioso) {
+      toast.add({ title: 'No tenés ninguna firma pendiente', color: 'neutral' })
+    }
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo consultar la firma pendiente'), color: 'error' })
+  }
+  finally {
+    cargandoTestigos.value = false
+  }
+}
+
+/**
+ * El punto de entrada del tótem compartido: al montar la pantalla nadie sabe
+ * quién está parado adelante (a diferencia del modo personal, donde el JWT ya
+ * lo dice), así que acá no hay aviso automático — pedirle PIN a cada carga de
+ * la pantalla sería absurdo. Este botón es el único disparador en ese modo.
+ */
+function pedirFirmaTestigo() {
+  solicitarPin('PIN del garzón para ver tu firma pendiente', (garzonId, pin) => {
+    void cargarPendientesTestigo(garzonId, pin)
+  })
+}
+
+/** El modal resolvió una solicitud: sale de la lista local, sin re-fetch. */
+function onTestigoResuelto(testigoId: string) {
+  testigoSolicitudes.value = testigoSolicitudes.value.filter(s => s.id !== testigoId)
+  if (testigoSolicitudes.value.length === 0) {
+    testigoModalOpen.value = false
+  }
+}
+
+// El PIN no sobrevive al modal: en cuanto se cierra, se olvida.
+watch(testigoModalOpen, (abierto) => {
+  if (!abierto) testigoPin.value = ''
+})
+
 const selectedSalon = computed(() =>
   salones.value.find(s => s.id === selectedSalonId.value) ?? null,
 )
@@ -466,7 +533,17 @@ onMounted(async () => {
   // más de las cargas iniciales, y encadenarla sumaría un round trip antes de
   // que la pantalla sirva.
   const [, , , , sugerido, , vinculo] = await Promise.all([
-    cajaStore.cargarActiva(),
+    // ⚠️ Con `catch` propio, por el mismo motivo que `miVinculo` más abajo, y
+    // medido en el smoke de navegador del testigo (2026-08-13): `GET
+    // /caja/activa` pide `MiCaja:Leer`, y **un garzón no lo tiene**. Ese 403
+    // rechazaba el `Promise.all` entero, así que TODO lo que viene después
+    // —incluido `garzonPersonal`— no se asignaba nunca. Consecuencia: en la
+    // cuenta de un garzón real, el modo personal no se activaba y el aviso
+    // pasivo de la firma pendiente no aparecía jamás; con la cuenta de un admin
+    // (que sí tiene el permiso) funcionaba, que es por lo que no se veía.
+    // Una caja que no se puede leer no es un error de esta pantalla: el garzón
+    // no cobra desde acá.
+    cajaStore.cargarActiva().catch(() => null),
     cargarSalones(),
     cargarCatalogo(),
     unidadesStore.ensureLoaded(),
@@ -486,6 +563,16 @@ onMounted(async () => {
   garzonPersonal.value = vinculo?.garzonId ? vinculo : null
   propinaPorcentaje.value = sugerido.porcentajeSugerido
   propinaHabilitada.value = sugerido.habilitado
+
+  // Aviso pasivo al entrar (spec): solo posible en modo personal, porque el
+  // JWT ya dice quién es. En un tótem compartido nadie sabe todavía quién está
+  // parado adelante, así que acá no se puede disparar sin pedir PIN primero —
+  // ver `pedirFirmaTestigo` y el botón "¿Te pidieron firmar un cierre?" más
+  // abajo, el único punto de entrada de ese modo. No es un olvido: es el
+  // límite honesto del dispositivo compartido.
+  if (garzonPersonal.value) {
+    void cargarPendientesTestigo(garzonPersonal.value.garzonId, '', { silencioso: true })
+  }
 })
 
 // ── Selección de mesa ──────────────────────────────────────────────────────
@@ -1138,6 +1225,15 @@ async function cerrarCuentaConPin(
               >
                 Salir de turno
               </UButton>
+              <UButton
+                icon="i-lucide-shield-check"
+                color="neutral"
+                variant="ghost"
+                :loading="cargandoTestigos"
+                @click="pedirFirmaTestigo"
+              >
+                ¿Te pidieron firmar un cierre?
+              </UButton>
             </div>
           </div>
 
@@ -1448,6 +1544,14 @@ async function cerrarCuentaConPin(
         :title="pinModalTitle"
         :en-turno="pinModalEnTurno"
         @confirm="onPinConfirmado"
+      />
+
+      <SalonesTestigoModal
+        v-model:open="testigoModalOpen"
+        :solicitudes="testigoSolicitudes"
+        :pin="testigoPin"
+        :modo-personal="!!garzonPersonal?.garzonId"
+        @resuelto="onTestigoResuelto"
       />
 
       <UModal

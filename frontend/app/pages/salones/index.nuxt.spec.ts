@@ -92,6 +92,14 @@ let urlsCatalogo: string[] = []
  * los ítems contra el catálogo vivo.
  */
 let calculoFalla = false
+/** Lo que devuelve `POST /caja/testigos/pendientes`. */
+let pendientesTestigoMock: unknown[] = []
+/** Cada `POST /caja/testigos/pendientes` recibido, con su body (la credencial). */
+let bodiesPendientesTestigo: Record<string, unknown>[] = []
+/** Cada `POST /caja/testigos/:id/resolver` recibido: el id de la URL + su body. */
+let resolucionesTestigo: { testigoId: string, body: Record<string, unknown> }[] = []
+/** Fuerza el resolver a rechazar con el 403 "vinculado a una cuenta" del backend. */
+let resolverRechazaVinculo = false
 
 mockNuxtImport('useApiFetch', () => {
   return (
@@ -218,6 +226,27 @@ mockNuxtImport('useApiFetch', () => {
       urlsCatalogo.push(url)
       return Promise.resolve({ data: [], meta: { total: 0, page: 1, pageSize: 100 } })
     }
+    if (ruta.endsWith('/caja/testigos/pendientes')) {
+      bodiesPendientesTestigo.push(opts?.body ?? {})
+      return Promise.resolve(pendientesTestigoMock)
+    }
+    const resolverMatch = ruta.match(/\/caja\/testigos\/([^/]+)\/resolver$/)
+    if (resolverMatch) {
+      const testigoId = resolverMatch[1] ?? ''
+      const body = opts?.body ?? {}
+      resolucionesTestigo.push({ testigoId, body })
+      if (resolverRechazaVinculo) {
+        const err = new Error('x') as Error & { data?: unknown }
+        err.data = {
+          message: 'Este garzón está vinculado a una cuenta: la firma tiene que hacerse desde esa cuenta, no por PIN',
+        }
+        return Promise.reject(err)
+      }
+      return Promise.resolve({
+        id: testigoId,
+        estado: (body as { firma?: boolean }).firma ? 'firmada' : 'rechazada',
+      })
+    }
     // El resto del arranque (métodos de pago, tipos de documento, unidades,
     // caja, emisor) no interviene en este flujo.
     return Promise.resolve([])
@@ -256,6 +285,10 @@ function reiniciarMock() {
   vinculoPersonal = null
   cuentasDeLaMesa = []
   calculoFalla = false
+  pendientesTestigoMock = []
+  bodiesPendientesTestigo = []
+  resolucionesTestigo = []
+  resolverRechazaVinculo = false
 }
 
 afterEach(() => {
@@ -637,5 +670,290 @@ describe('salones — el catálogo pide solo ítems vendibles', () => {
       'producto',
       'receta',
     ])
+  })
+})
+
+/**
+ * El garzón da fe (o rechaza) el conteo de un cierre forzado desde su propia
+ * pantalla — la otra mitad de la feature (encargado: `stores/caja.ts` +
+ * `CajaCierreForzadoPanel.vue`; acá el garzón: `POST /caja/testigos/pendientes`
+ * + `POST /caja/testigos/:id/resolver`).
+ */
+describe('salones — testigo del cierre forzado (el garzón da fe)', () => {
+  beforeEach(reiniciarMock)
+
+  function solicitudTestigo(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'testigo-1',
+      cajaId: 'caja-1',
+      solicitadaEl: '2026-08-13T10:00:00.000Z',
+      garzonVinculado: false,
+      lineas: [
+        { metodoPagoId: null, nombre: 'Efectivo', esEfectivo: true, contado: '15000' },
+      ],
+      ...overrides,
+    }
+  }
+
+  /** El modal de testigo, distinguido de los demás por su título fijo. */
+  function modalTestigo(): HTMLElement | undefined {
+    return dialogos().find(d => d.textContent?.includes('dar fe de un cierre'))
+  }
+
+  function campoPin(modal: HTMLElement | undefined): HTMLInputElement | undefined {
+    return modal?.querySelector<HTMLInputElement>('input[aria-label="Tu PIN"]') ?? undefined
+  }
+
+  async function escribirPin(input: HTMLInputElement, valor: string) {
+    input.value = valor
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await esperar(10)
+  }
+
+  it('muestra la solicitud pendiente al entrar, en modo personal', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    pendientesTestigoMock = [solicitudTestigo({ garzonVinculado: true })]
+
+    await montar()
+    await esperar(20)
+
+    // Aviso pasivo: nadie clickeó nada, la consulta salió sola al montar.
+    expect(bodiesPendientesTestigo).toHaveLength(1)
+    // Modo personal: sin credencial en el body, el JWT ya dice quién es —
+    // mismo contrato que el resto de las acciones de esta pantalla.
+    expect(bodiesPendientesTestigo[0]).not.toHaveProperty('garzonId')
+    expect(bodiesPendientesTestigo[0]).not.toHaveProperty('pin')
+
+    const modal = modalTestigo()
+    expect(modal, 'modal de testigo').toBeTruthy()
+    expect(modal?.textContent).toContain('Efectivo')
+  })
+
+  // El guardián del cierre ciego: si mañana alguien agrega el esperado al
+  // render, este test tiene que morir.
+  it('muestra LO CONTADO y NUNCA lo esperado', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    pendientesTestigoMock = [solicitudTestigo({
+      garzonVinculado: true,
+      lineas: [
+        { metodoPagoId: null, nombre: 'Efectivo', esEfectivo: true, contado: '15000' },
+        { metodoPagoId: 'mp-1', nombre: 'Débito', esEfectivo: false, contado: '8000' },
+      ],
+    })]
+
+    await montar()
+    await esperar(20)
+
+    const texto = modalTestigo()?.textContent ?? ''
+    expect(texto).toContain('$15.000')
+    expect(texto).toContain('$8.000')
+    expect(texto.toLowerCase()).not.toContain('esperado')
+  })
+
+  it('con cuenta vinculada firma sin PIN; sin vínculo reusa el PIN ya tecleado, sin volver a pedirlo', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    pendientesTestigoMock = [solicitudTestigo({ id: 'testigo-vinculado', garzonVinculado: true })]
+
+    const wrapper = await montar()
+    await esperar(20)
+
+    const modalVinculado = modalTestigo()
+    expect(campoPin(modalVinculado), 'sin campo de PIN: vinculado').toBeUndefined()
+
+    botonEn(modalVinculado, 'Dar fe')!.click()
+    await esperar(20)
+
+    expect(resolucionesTestigo).toHaveLength(1)
+    expect(resolucionesTestigo[0]!.testigoId).toBe('testigo-vinculado')
+    expect(resolucionesTestigo[0]!.body).not.toHaveProperty('pin')
+    expect(resolucionesTestigo[0]!.body).toMatchObject({ firma: true })
+    wrapper.unmount()
+    montado = null
+
+    // Sin vínculo (tótem): el PIN se prueba UNA vez, en el teclado enmascarado
+    // del embudo `solicitarPin`, y de ahí lo reusa la firma. El modal NO puede
+    // tener su propio campo de PIN: sería teclearlo dos veces y, sobre todo,
+    // dejarlo a la vista en un dispositivo compartido.
+    resolucionesTestigo = []
+    vinculoPersonal = null
+    pendientesTestigoMock = [solicitudTestigo({ id: 'testigo-pin', garzonVinculado: false })]
+
+    const wrapper2 = await montar()
+    await esperar(20)
+
+    const boton = wrapper2.findAll('button')
+      .find(b => b.text().trim() === '¿Te pidieron firmar un cierre?')
+    await boton!.trigger('click')
+    await esperar(10)
+    botonEn(tecladoPin(), 'Ana')!.click()
+    await esperar(10)
+    for (let i = 0; i < 6; i++) {
+      botonEn(tecladoPin(), '1')!.click()
+      await esperar(1)
+    }
+    await esperar(20)
+
+    const modalPin = modalTestigo()
+    expect(campoPin(modalPin), 'el modal NO vuelve a pedir el PIN').toBeUndefined()
+
+    botonEn(modalPin, 'Dar fe')!.click()
+    await esperar(20)
+
+    expect(resolucionesTestigo).toHaveLength(1)
+    expect(resolucionesTestigo[0]!.testigoId).toBe('testigo-pin')
+    expect(resolucionesTestigo[0]!.body).toMatchObject({ firma: true, pin: '111111' })
+    wrapper2.unmount()
+  })
+
+  // Un garzón CON cuenta propia operando desde el tótem: la firma no vale desde
+  // ahí (`CajaTestigoService.resolver` ignora el PIN y exige el JWT de su
+  // cuenta). Se le avisa ANTES de intentar, con el dato que ya trae la
+  // solicitud, en vez de dejarlo chocar contra un 403.
+  it('vinculado desde el tótem: avisa antes de intentar y no deja firmar', async () => {
+    vinculoPersonal = null
+    pendientesTestigoMock = [solicitudTestigo({ id: 'testigo-vinc-totem', garzonVinculado: true })]
+
+    const wrapper = await montar()
+    await esperar(20)
+
+    const boton = wrapper.findAll('button')
+      .find(b => b.text().trim() === '¿Te pidieron firmar un cierre?')
+    await boton!.trigger('click')
+    await esperar(10)
+    botonEn(tecladoPin(), 'Ana')!.click()
+    await esperar(10)
+    for (let i = 0; i < 6; i++) {
+      botonEn(tecladoPin(), '1')!.click()
+      await esperar(1)
+    }
+    await esperar(20)
+
+    const modal = modalTestigo()
+    expect(modal?.textContent).toContain('firmar desde tu cuenta')
+    expect(botonEn(modal, 'Dar fe')?.disabled).toBe(true)
+
+    botonEn(modal, 'Dar fe')!.click()
+    await esperar(20)
+    expect(resolucionesTestigo, 'no manda nada al backend').toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('rechazar permite comentario y no cuenta como firma', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    pendientesTestigoMock = [solicitudTestigo({ id: 'testigo-rechazo', garzonVinculado: true })]
+
+    await montar()
+    await esperar(20)
+
+    const modal = modalTestigo()
+    botonEn(modal, 'Rechazar')!.click()
+    await esperar(10)
+
+    const comentarioInput = modal?.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Comentario del rechazo"]',
+    )
+    expect(comentarioInput, 'campo de comentario del rechazo').toBeTruthy()
+    comentarioInput!.value = 'No vi el conteo, estaba en la cocina'
+    comentarioInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await esperar(10)
+
+    botonEn(modal, 'Confirmar rechazo')!.click()
+    await esperar(20)
+
+    expect(resolucionesTestigo).toHaveLength(1)
+    expect(resolucionesTestigo[0]!.body).toMatchObject({
+      firma: false,
+      comentario: 'No vi el conteo, estaba en la cocina',
+    })
+  })
+
+  // Regresión (revisión independiente, 2026-08-13): abrir el rechazo, escribir,
+  // cancelar y después dar fe adjuntaba ese texto a la FIRMA. El detalle del
+  // cierre mostraba entonces un registro que se contradecía a sí mismo — el
+  // dato que esta feature existe para hacer confiable.
+  it('un comentario de rechazo cancelado NO viaja con la firma', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    pendientesTestigoMock = [solicitudTestigo({ id: 'testigo-cancelado', garzonVinculado: true })]
+
+    await montar()
+    await esperar(20)
+
+    const modal = modalTestigo()
+    botonEn(modal, 'Rechazar')!.click()
+    await esperar(10)
+
+    const comentarioInput = modal?.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Comentario del rechazo"]',
+    )
+    comentarioInput!.value = 'No vi el conteo'
+    comentarioInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await esperar(10)
+
+    botonEn(modal, 'Cancelar')!.click()
+    await esperar(10)
+
+    botonEn(modalTestigo(), 'Dar fe')!.click()
+    await esperar(20)
+
+    expect(resolucionesTestigo).toHaveLength(1)
+    expect(resolucionesTestigo[0]!.body).toMatchObject({ firma: true })
+    expect(resolucionesTestigo[0]!.body).not.toHaveProperty('comentario')
+  })
+
+  it('tótem compartido: no consulta sola al montar, y el botón dispara el PIN', async () => {
+    vinculoPersonal = null
+    pendientesTestigoMock = [solicitudTestigo({ garzonVinculado: false })]
+
+    const wrapper = await montar()
+    await esperar(20)
+
+    // Sin vínculo personal, nadie sabe quién está parado adelante: no hay
+    // consulta automática al montar.
+    expect(bodiesPendientesTestigo).toHaveLength(0)
+    expect(modalTestigo()).toBeUndefined()
+
+    // Botón de la barra de herramientas, no teletransportado: se busca en el
+    // wrapper (`findAll`), no en `document.body` como los diálogos.
+    const boton = wrapper.findAll('button')
+      .find(b => b.text().trim() === '¿Te pidieron firmar un cierre?')
+    expect(boton, 'botón de entrada del tótem').toBeTruthy()
+    await boton!.trigger('click')
+    await esperar(10)
+
+    // Se abre el teclado de PIN (el mismo embudo `solicitarPin` del resto de
+    // la pantalla): elegir garzón y teclear.
+    const teclado = tecladoPin()
+    expect(teclado, 'teclado de PIN').toBeTruthy()
+    botonEn(teclado, 'Ana')!.click()
+    await esperar(10)
+    for (let i = 0; i < 6; i++) {
+      botonEn(tecladoPin(), '1')!.click()
+      await esperar(1)
+    }
+    await esperar(20)
+
+    expect(bodiesPendientesTestigo).toHaveLength(1)
+    expect(bodiesPendientesTestigo[0]).toMatchObject({ garzonId: 'g1', pin: '111111' })
+    expect(modalTestigo()).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  // El 403 exacto de `CajaTestigoService.resolver`: no es un error genérico,
+  // es información para el garzón. Se muestra inline, nunca como toast rojo
+  // indistinguible de un PIN mal tecleado.
+  it('el 403 de "vinculado a una cuenta" se muestra como aviso, no como error genérico', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    pendientesTestigoMock = [solicitudTestigo({ id: 'testigo-vinculado', garzonVinculado: true })]
+    resolverRechazaVinculo = true
+
+    await montar()
+    await esperar(20)
+
+    const modal = modalTestigo()
+    botonEn(modal, 'Dar fe')!.click()
+    await esperar(20)
+
+    expect(modalTestigo()?.textContent).toContain('vinculado a una cuenta')
   })
 })
