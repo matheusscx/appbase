@@ -649,12 +649,16 @@ export class CajaService {
 
   /**
    * Fase 1 del cierre en dos fases: congela el arqueo (esperado recomputado
-   * server-side + contado declarado + diferencia). Owner-o-admin (el
-   * controller resuelve `esAdmin`, mismo criterio que `cerrar`): el dueño
-   * siempre puede; un admin del tenant puede además forzar el cierre de la
-   * caja de OTRO cajero (`esForzado = caja.usuarioId !== usuarioId`) —
-   * decisión del owner 2026-08-11, para no dejar la caja de un cajero
-   * ausente abierta para siempre. Congela también quién contó
+   * server-side + contado declarado + diferencia). Owner-o-encargado (el
+   * controller resuelve `puedeForzar` vía `resolverEscrituraCompartida`,
+   * mismo criterio que `cerrar`): el dueño siempre puede; quien tiene
+   * `Cajas:Actualizar` puede además forzar el cierre de la caja de OTRO
+   * cajero (`esForzado = caja.usuarioId !== usuarioId`) — decisión del owner
+   * 2026-08-11, para no dejar la caja de un cajero ausente abierta para
+   * siempre, ampliada el 2026-08-13: forzar dejó de exigir ser admin del
+   * tenant (era una incoherencia con pedir la firma, ya operativo desde la
+   * Task 6) y pasó a ser `Cajas:Actualizar` — el admin lo conserva por el
+   * short-circuit de rol fijo. Congela también quién contó
    * (`cerradaPor = usuarioId`) y cuántos garzones había en turno en ese
    * momento (`testigosDisponibles`).
    *
@@ -671,7 +675,7 @@ export class CajaService {
     usuarioId: string,
     cajaId: string,
     dto: CerrarCajaDto,
-    esAdmin = false,
+    puedeForzar = false,
   ): Promise<{ estado: 'cerrada' | 'en_conciliacion'; arqueo: LineaArqueo[] }> {
     return this.dataSource.transaction(async (manager) => {
       await this.bloquearCajaAbierta(manager, cajaId, tenantId);
@@ -687,12 +691,13 @@ export class CajaService {
       if (!caja) {
         throw new ForbiddenException('Caja no encontrada o no está abierta');
       }
-      // Cierre forzado (decisión del owner 2026-08-11): un admin del tenant puede
-      // cerrar la caja de otro. Sin esto, un cajero que se va deja su caja abierta
-      // para siempre y —por `ux_cajas_activa_por_usuario`— no puede volver a abrir
-      // ninguna. El dueño sigue siendo el único no-admin que puede.
+      // Cierre forzado (decisión del owner 2026-08-11, ampliada 2026-08-13): quien
+      // tiene `Cajas:Actualizar` puede cerrar la caja de otro. Sin esto, un cajero
+      // que se va deja su caja abierta para siempre y —por
+      // `ux_cajas_activa_por_usuario`— no puede volver a abrir ninguna. El dueño
+      // sigue siendo el único sin `Cajas:Actualizar` que puede.
       const esForzado = caja.usuarioId !== usuarioId;
-      if (esForzado && !esAdmin) {
+      if (esForzado && !puedeForzar) {
         throw new ForbiddenException('No tienes acceso a esta caja');
       }
 
@@ -799,19 +804,20 @@ export class CajaService {
 
   /**
    * Fase 2 del cierre en dos fases: finaliza una caja `en_conciliacion`.
-   * Owner-o-admin (el controller resuelve `esAdmin`). Aplica los motivos a las
-   * líneas descuadradas (mismo enforcement que el override, vía
-   * `aplicarMotivosADescuadres`) y solo entonces pasa a `cerrada` +
-   * `fechaCierre`. NO recalcula ni toca esperado/contado/diferencia: esas
-   * quedaron congeladas por `enviarConteo` (fase 1). Si falta un motivo, el
-   * helper lanza 400 y la transacción no finaliza — la caja sigue
-   * `en_conciliacion`.
+   * Owner-o-encargado (el controller resuelve `puedeForzar` vía
+   * `resolverEscrituraCompartida`, mismo criterio que `enviarConteo`). Aplica
+   * los motivos a las líneas descuadradas (mismo enforcement que el
+   * override, vía `aplicarMotivosADescuadres`) y solo entonces pasa a
+   * `cerrada` + `fechaCierre`. NO recalcula ni toca esperado/contado/
+   * diferencia: esas quedaron congeladas por `enviarConteo` (fase 1). Si
+   * falta un motivo, el helper lanza 400 y la transacción no finaliza — la
+   * caja sigue `en_conciliacion`.
    */
   async cerrar(
     tenantId: string,
     usuarioId: string,
     cajaId: string,
-    esAdmin: boolean,
+    puedeForzar: boolean,
     dto: FinalizarCierreDto,
   ): Promise<{ caja: Caja; arqueo: LineaArqueo[] }> {
     const caja = await this.dataSource.transaction(async (manager) => {
@@ -826,7 +832,7 @@ export class CajaService {
       });
       if (!caja)
         throw new BadRequestException('La caja no está en conciliación');
-      if (caja.usuarioId !== usuarioId && !esAdmin) {
+      if (caja.usuarioId !== usuarioId && !puedeForzar) {
         throw new ForbiddenException('No tienes acceso a esta caja');
       }
       await this.aplicarMotivosADescuadres(

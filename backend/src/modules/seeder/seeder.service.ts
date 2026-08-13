@@ -187,6 +187,7 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedVendedorPermisosCaja();
     await this.seedRolesInventario();
     await this.seedRolSupervisorCajas();
+    await this.seedRolEncargadoCajas();
     await this.seedRolSalon();
     await this.seedSalones();
     await this.seedMesas();
@@ -1005,6 +1006,22 @@ export class SeederService implements OnApplicationBootstrap {
         apellido: 'Cajas',
         telefono: '987654325',
         correo: 'supervisor@paris.cl',
+        esSuperadmin: false,
+      },
+      // El encargado que fuerza el cierre sin ser admin (decisión del owner
+      // 2026-08-13): `Cajas:Leer` + `Cajas:Actualizar`, y NO admin — la
+      // combinación exacta a la que el ciego sigue aplicando aun pudiendo
+      // forzar. No reusar `supervisor.paris` (solo `Cajas:Leer`, arnés de
+      // otros tests) ni `admin.paris` (short-circuita todo). Ver
+      // seedRolEncargadoCajas.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440344',
+        nombreUsuario: 'encargado.paris',
+        contrasena: HASH,
+        nombre: 'Encargado',
+        apellido: 'Cajas',
+        telefono: '987654344',
+        correo: 'encargado@paris.cl',
         esSuperadmin: false,
       },
     ];
@@ -1897,6 +1914,7 @@ export class SeederService implements OnApplicationBootstrap {
     const SUPERVISOR_PARIS = '550e8400-e29b-41d4-a716-446655440335';
     const ANA_TORRES = '550e8400-e29b-41d4-a716-446655440341';
     const TOTEM_PARIS = '550e8400-e29b-41d4-a716-446655440342';
+    const ENCARGADO_PARIS = '550e8400-e29b-41d4-a716-446655440344';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -1907,6 +1925,7 @@ export class SeederService implements OnApplicationBootstrap {
       [SUPERVISOR_PARIS, PARIS], // ve todas las cajas, no es admin → Paris
       [ANA_TORRES, PARIS], // tablet personal: vinculada al garzón Ana Torres
       [TOTEM_PARIS, PARIS], // dispositivo compartido: siempre pide PIN
+      [ENCARGADO_PARIS, PARIS], // fuerza cierres, Cajas:Actualizar, no admin → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -2150,6 +2169,65 @@ export class SeederService implements OnApplicationBootstrap {
       `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
        VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
       [SUPERVISOR, PARIS, rolId],
+    );
+  }
+
+  /**
+   * El encargado que fuerza el cierre de una caja ajena sin ser admin del
+   * tenant (decisión del owner 2026-08-13, `caja.controller.ts` →
+   * `resolverEscrituraCompartida`): `Cajas:Leer` + `Cajas:Actualizar`, y NO
+   * admin — es la combinación que el ciego (`!esAdmin`, sin tocar) sigue
+   * reteniendo aun pudiendo forzar. `supervisor.paris` (`seedRolSupervisorCajas`)
+   * no sirve para esto a propósito: solo tiene `Cajas:Leer` y es el arnés de
+   * otros tests que verifican el 403 de "no puede forzar sin `Actualizar`".
+   *
+   * ID 344/345: el máximo previo era 343 (`ROL_SALON` en `seedRolSalon`).
+   */
+  private async seedRolEncargadoCajas(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const ENCARGADO = '550e8400-e29b-41d4-a716-446655440344';
+    const ROL_ID = '550e8400-e29b-41d4-a716-446655440345';
+    const NOMBRE = 'Cajas · Encargado';
+    // moduloTenantId para Paris → Cajas (definido en seedTenantModulo)
+    const MODULO_TENANT_CAJAS = '550e8400-e29b-41d4-a716-446655440284';
+    // moduloAppPermiso Cajas/Leer y Cajas/Actualizar (definidos en seedModuloAppPermisos)
+    const CAJAS_LEER = '550e8400-e29b-41d4-a716-446655440283';
+    const CAJAS_ACTUALIZAR = '550e8400-e29b-41d4-a716-446655440289';
+
+    const existing: { rol_id: string }[] = await this.dataSource.query(
+      `SELECT rol_id FROM roles
+        WHERE tenant_id = $1 AND nombre = $2 AND eliminado_el IS NULL`,
+      [PARIS, NOMBRE],
+    );
+
+    if (existing.length === 0) {
+      await this.dataSource.query(
+        `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+         VALUES ($1, $2, $3, 'Ve todas las cajas del tenant y puede forzar el cierre de una ajena; no es admin', false, NOW(), NOW())`,
+        [ROL_ID, PARIS, NOMBRE],
+      );
+    }
+
+    const rolId = existing[0]?.rol_id ?? ROL_ID;
+
+    await this.dataSource.query(
+      `INSERT INTO modulos_roles (rol_id, modulo_tenant_id, creado_el, actualizado_el)
+       VALUES ($1, $2, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [rolId, MODULO_TENANT_CAJAS],
+    );
+
+    for (const permisoId of [CAJAS_LEER, CAJAS_ACTUALIZAR]) {
+      await this.dataSource.query(
+        `INSERT INTO roles_permisos_modulos (rol_id, modulo_tenant_id, modulo_app_permiso_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [rolId, MODULO_TENANT_CAJAS, permisoId],
+      );
+    }
+
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [ENCARGADO, PARIS, rolId],
     );
   }
 

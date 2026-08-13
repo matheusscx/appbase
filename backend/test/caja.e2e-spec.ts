@@ -30,6 +30,14 @@ const SUPERVISOR_PASS = 'admin';
 const VENDEDOR_EMAIL = 'vendedor@paris.cl';
 const VENDEDOR_PASS = 'admin';
 
+// El encargado que fuerza el cierre sin ser admin del tenant (decisión del
+// owner 2026-08-13): rol 'Cajas · Encargado' con Cajas:Leer + Cajas:Actualizar,
+// y NO admin — la combinación exacta a la que el modo ciego sigue aplicando
+// aun pudiendo forzar. Distinto de SUPERVISOR_EMAIL (solo Cajas:Leer, arnés
+// del 403 de "no puede forzar sin Actualizar").
+const ENCARGADO_EMAIL = 'encargado@paris.cl';
+const ENCARGADO_PASS = 'admin';
+
 interface TokenResponse {
   access_token: string;
 }
@@ -134,6 +142,88 @@ async function cerrarEnDosFases(
 }
 
 /**
+ * Higiene de `afterAll` para el cajero de un `describe`, tolerante a que la
+ * caja ya haya quedado `en_conciliacion` (no solo `abierta`) — a diferencia
+ * de `cerrarEnDosFases`, que asume que arranca desde `abierta` y no hace
+ * nada si el conteo (fase 1) falla porque la caja ya pasó ese estado.
+ *
+ * Medido con el mutante de Task 6b (`puedeForzar=true` sin mirar el
+ * permiso): un `it` que asevera 403 y en cambio recibe 201 dejó la caja del
+ * cajero forzada a `en_conciliacion` ANTES de que la aserción fallida
+ * abortara el resto del test — la higiene de ese `it` nunca corrió, y el
+ * `afterAll` de entonces tampoco la liberaba (esperaba `abierta`). El
+ * cajero quedaba atascado para la siguiente suite que use
+ * `vendedor@paris.cl`. Best-effort a propósito (sin afirmar el status): es
+ * una red de seguridad de `afterAll`, no una aserción del test.
+ */
+async function liberarCajeroSiQuedoOcupado(
+  app: INestApplication<App>,
+  tokenCajero: string,
+  tokenAdmin: string,
+): Promise<void> {
+  const activa = await request(app.getHttpServer())
+    .get('/api/caja/activa')
+    .set('Authorization', `Bearer ${tokenCajero}`);
+  const caja = activa.body as (CajaResponse & { estado?: string }) | null;
+  if (!caja?.id) return;
+
+  // El arqueo se lee con el ADMIN: el modo ciego le retiene el `esperado` al
+  // cajero (y al encargado, desde la task 6b), y sin el esperado esta higiene
+  // no puede contar exacto.
+  const leerArqueo = async () =>
+    (
+      await request(app.getHttpServer())
+        .get(`/api/caja/${caja.id}/arqueo`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+    ).body as { lineas: ArqueoLinea[] };
+
+  if (caja.estado === 'abierta') {
+    // Contar EXACTAMENTE el esperado de cada línea, no un monto fijo. Antes iba
+    // un `'10000'` de efectivo a ojo: cualquier caja con otro saldo quedaba
+    // descuadrada, la fase 2 con `lineas: []` moría con 400 ("Falta el motivo
+    // de la diferencia") y la higiene no liberaba nada — justo lo que promete
+    // hacer. Contando el esperado no hay descuadre que justificar.
+    const { lineas } = await leerArqueo();
+    await request(app.getHttpServer())
+      .post(`/api/caja/${caja.id}/conteo`)
+      .set('Authorization', `Bearer ${tokenCajero}`)
+      .send({
+        lineas: lineas.map((l) => ({
+          metodoPagoId: l.metodoPagoId,
+          montoContado: l.esperado ?? '0',
+        })),
+      });
+  }
+
+  // Si sigue ocupando (`en_conciliacion`, forzada o no), la fase 2 la cierra un
+  // admin. Las diferencias que ya venían congeladas de antes —esta higiene no
+  // las causó— se justifican con el primer motivo activo del tenant; si el
+  // tenant no tiene motivos, alcanza el comentario (`aplicarMotivosADescuadres`).
+  const { lineas } = await leerArqueo();
+  const descuadres = lineas.filter(
+    (l) => l.diferencia != null && Number(l.diferencia) !== 0,
+  );
+  let motivoId: string | undefined;
+  if (descuadres.length > 0) {
+    const resMotivos = await request(app.getHttpServer())
+      .get('/api/motivos-diferencia?soloActivas=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    motivoId = (resMotivos.body as { id: string }[])?.[0]?.id;
+  }
+  await request(app.getHttpServer())
+    .post(`/api/caja/${caja.id}/cerrar`)
+    .set('Authorization', `Bearer ${tokenAdmin}`)
+    .send({
+      lineas: descuadres.map((l) => ({
+        metodoPagoId: l.metodoPagoId,
+        ...(motivoId ? { motivoDiferenciaId: motivoId } : {}),
+        comentarioDiferencia: 'Higiene E2E: residuo de una corrida anterior',
+      })),
+      comentario: 'Higiene E2E: liberar caja atascada',
+    });
+}
+
+/**
  * Resuelve el usuarioId del dueño de `token` matcheando su correo en
  * GET /api/tenants/members (patrón de cajones.e2e-spec.ts).
  */
@@ -222,7 +312,7 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
     });
   });
 
-  describe('POST /caja/:id/conteo — cierre forzado (owner-o-admin, fase 1)', () => {
+  describe('POST /caja/:id/conteo — cierre forzado (dueño o `Cajas:Actualizar`, fase 1)', () => {
     // `tokenSupervisor` en este describe es en realidad admin.paris (rol
     // Administrador, es_fijo=true) — ver el comentario de `ADMIN_EMAIL` más
     // arriba. Es justo el actor que la regla nueva habilita: antes de esta
@@ -1833,5 +1923,256 @@ describe('Caja (e2e) — aislamiento multi-tenant', () => {
     const caja = despues.body as { estado: string; saldoInicial: string };
     expect(caja.estado).toBe('abierta');
     expect(Number(caja.saldoInicial)).toBe(50000);
+  });
+});
+
+/**
+ * Task 6b (insertada, `2026-08-11-testigo-cierre-forzado`): forzar el cierre
+ * deja de exigir ser admin del tenant y pasa a exigir `Cajas:Actualizar`
+ * (decisión del owner 2026-08-13) — la misma incoherencia que ya resolvía
+ * `POST /caja/:id/testigos` (`Cajas:Actualizar` desde la Task 6), ahora
+ * también en la puerta que abre el flujo.
+ */
+describe('Caja (e2e) — el encargado (Cajas:Actualizar, no admin) fuerza el cierre', () => {
+  let app: INestApplication<App>;
+  let tokenAdmin: string;
+  let tokenCajero: string;
+  let tokenEncargado: string;
+  let tokenSupervisor: string;
+  let cajonId: string;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+
+    tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+    tokenCajero = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
+    tokenEncargado = await login(app, ENCARGADO_EMAIL, ENCARGADO_PASS);
+    tokenSupervisor = await login(app, SUPERVISOR_EMAIL, SUPERVISOR_PASS);
+
+    const r = await request(app.getHttpServer())
+      .post('/api/cajones')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: `E2E Encargado ${Date.now()}` });
+    cajonId = (r.body as CajonResponse).id;
+  }, 60000);
+
+  afterAll(async () => {
+    // Higiene: liberar al cajero si algún `it` lo dejó ocupado (abierta O
+    // en_conciliacion — ver el docblock de `liberarCajeroSiQuedoOcupado`),
+    // para no arrastrar un 409 a la próxima suite que use `vendedor@paris.cl`.
+    await liberarCajeroSiQuedoOcupado(app, tokenCajero, tokenAdmin);
+    if (cajonId) {
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+    }
+    await app.close();
+  });
+
+  it('el encargado (no admin) fuerza el conteo de la caja del cajero → en_conciliacion, y cierra fase 2 con comentario', async () => {
+    const cajaId = await abrirOReusarCaja(app, tokenCajero, cajonId);
+
+    const conteo = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/conteo`)
+      .set('Authorization', `Bearer ${tokenEncargado}`)
+      .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+    expect(conteo.status).toBe(201);
+    // Forzado: pasa por conciliación AUNQUE CUADRE, igual que un admin.
+    expect((conteo.body as { estado: string }).estado).toBe('en_conciliacion');
+
+    const sinComentario = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/cerrar`)
+      .set('Authorization', `Bearer ${tokenEncargado}`)
+      .send({ lineas: [] });
+    expect(sinComentario.status).toBe(400);
+
+    const cerrar = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/cerrar`)
+      .set('Authorization', `Bearer ${tokenEncargado}`)
+      .send({
+        lineas: [],
+        comentario: 'Cajero se fue, cierro yo (encargado, no admin)',
+      });
+    expect([200, 201]).toContain(cerrar.status);
+
+    const detalle = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(detalle.status).toBe(200);
+    expect((detalle.body as { estado: string }).estado).toBe('cerrada');
+  });
+
+  it('alguien con Cajas:Leer a secas (supervisor) sigue sin poder forzar el cierre: 403', async () => {
+    const cajaId = await abrirOReusarCaja(app, tokenCajero, cajonId);
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/conteo`)
+      .set('Authorization', `Bearer ${tokenSupervisor}`)
+      .send({ lineas: [{ metodoPagoId: null, montoContado: '10000' }] });
+
+    expect(res.status).toBe(403);
+    // Cajas:Leer solo no alcanza ni para el piso de la ruta (ni MiCaja:Actualizar
+    // ni Cajas:Actualizar): `resolverEscrituraCompartida` rechaza antes de que el
+    // service llegue a mirar si la caja es ajena.
+    expect((res.body as { message: string }).message).toBe(
+      'No tienes permiso para esta acción',
+    );
+
+    // Higiene: el dueño real cierra su propia caja, sin forzado.
+    await cerrarEnDosFases(app, cajaId, tokenCajero, [
+      { metodoPagoId: null, montoContado: '10000' },
+    ]);
+  });
+});
+
+/**
+ * Task 6b — decisión 2: el encargado que fuerza cuenta A CIEGAS igual que
+ * cualquier no-admin (`!esAdmin` en `obtenerArqueo`/`cajonesEstado`/
+ * `resumenMovimientos`/historial, sin tocar). Antes de esta task, forzar
+ * exigía ser admin y el admin está exento del ciego — así que quien forzaba
+ * SIEMPRE veía el esperado. Ahora que forzar es operativo, existe por
+ * primera vez alguien que fuerza Y cuenta a ciegas: es la razón de ser del
+ * cambio (`docs/agent/pendientes.md`, entrada del encargado a ciegas).
+ */
+describe('Caja (e2e) — el modo ciego SÍ aplica al encargado que fuerza (no admin)', () => {
+  let app: INestApplication<App>;
+  let tokenCajero: string;
+  let tokenAdmin: string;
+  let tokenEncargado: string;
+  let cajonId: string;
+  let ds: DataSource;
+
+  beforeAll(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+    ds = app.get(DataSource);
+
+    tokenCajero = await login(app, VENDEDOR_EMAIL, VENDEDOR_PASS);
+    tokenAdmin = await login(app, ADMIN_EMAIL, ADMIN_PASS);
+    tokenEncargado = await login(app, ENCARGADO_EMAIL, ENCARGADO_PASS);
+    const r = await request(app.getHttpServer())
+      .post('/api/cajones')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send({ nombre: `E2E Ciego Encargado ${Date.now()}` });
+    cajonId = (r.body as CajonResponse).id;
+  }, 60000);
+
+  afterAll(async () => {
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = false WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+    const activa = await request(app.getHttpServer())
+      .get('/api/caja/activa')
+      .set('Authorization', `Bearer ${tokenCajero}`);
+    const abiertaId = (activa.body as CajaResponse | null)?.id;
+    if (abiertaId) {
+      const motivos = await request(app.getHttpServer())
+        .get('/api/motivos-diferencia?soloActivas=true')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      const motivoId = (motivos.body as { id: string }[])[0]?.id;
+      await cerrarEnDosFases(
+        app,
+        abiertaId,
+        tokenCajero,
+        [{ metodoPagoId: null, montoContado: '0' }],
+        [{ metodoPagoId: null, motivoDiferenciaId: motivoId }],
+      );
+    }
+    // Red de seguridad adicional: lo de arriba asume que la caja seguía
+    // `abierta` (el conteo con motivo la resuelve si descuadra). Si algún
+    // `it` la dejó ya `en_conciliacion` (p.ej. una aserción que aborta el
+    // test antes de llegar a cerrarla), esto la libera igual — ver
+    // `liberarCajeroSiQuedoOcupado`.
+    await liberarCajeroSiQuedoOcupado(app, tokenCajero, tokenAdmin);
+    if (cajonId) {
+      await request(app.getHttpServer())
+        .delete(`/api/cajones/${cajonId}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+    }
+    await app.close();
+  });
+
+  it('caja abierta ajena en tenant ciego: el encargado que puede forzar la ve sin el esperado; el admin sí lo ve; forzar el conteo no cambia eso', async () => {
+    const cajaId = await abrirOReusarCaja(app, tokenCajero, cajonId);
+    await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/movimientos`)
+      .set('Authorization', `Bearer ${tokenCajero}`)
+      .send({
+        tipo: 'entrada',
+        concepto: 'venta efectivo',
+        monto: '3000.0000',
+      });
+    await ds.query(
+      'UPDATE tenants SET arqueo_ciego = true WHERE tenant_id = $1',
+      [PARIS_TENANT_ID],
+    );
+
+    // El encargado LLEGA a la caja ajena (Cajas:Leer ⇒ verTodas) y PUEDE
+    // forzar su cierre (Cajas:Actualizar) — pero mientras la caja sigue
+    // `abierta`, el ciego le retiene igual el esperado: forzar es operativo,
+    // el ciego sigue siendo del admin únicamente.
+    const arqueoEncargado = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/arqueo`)
+      .set('Authorization', `Bearer ${tokenEncargado}`);
+    expect(arqueoEncargado.status).toBe(200);
+    const bodyEncargado = arqueoEncargado.body as {
+      ciego: boolean;
+      lineas: ArqueoLinea[];
+    };
+    expect(bodyEncargado.ciego).toBe(true);
+    expect(bodyEncargado.lineas.length).toBeGreaterThan(0);
+    for (const linea of bodyEncargado.lineas) {
+      expect(linea.esperado).toBeNull();
+    }
+
+    // Contraste: el admin sigue exento (decisión del owner, §3.4) — matando
+    // el mutante de "el controller ya no distingue admin vs encargado".
+    const arqueoAdmin = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/arqueo`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(arqueoAdmin.status).toBe(200);
+    const bodyAdmin = arqueoAdmin.body as {
+      ciego: boolean;
+      lineas: ArqueoLinea[];
+    };
+    expect(bodyAdmin.ciego).toBe(false);
+    expect(bodyAdmin.lineas.find((l) => l.esEfectivo)?.esperado).not.toBeNull();
+
+    // El encargado fuerza el conteo igual, a ciegas: no necesitó ver el
+    // esperado para poder cerrar la caja de otro.
+    const conteo = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/conteo`)
+      .set('Authorization', `Bearer ${tokenEncargado}`)
+      .send({ lineas: [{ metodoPagoId: null, montoContado: '13000' }] });
+    expect(conteo.status).toBe(201);
+    expect((conteo.body as { estado: string }).estado).toBe('en_conciliacion');
+
+    const cerrar = await request(app.getHttpServer())
+      .post(`/api/caja/${cajaId}/cerrar`)
+      .set('Authorization', `Bearer ${tokenEncargado}`)
+      .send({
+        lineas: [],
+        comentario: 'Cierro a ciegas, nadie firmó como testigo',
+      });
+    expect([200, 201]).toContain(cerrar.status);
+
+    // El apagado del ciego y el cierre de la caja los hace el `afterAll`
+    // como red de seguridad si algo falló antes; acá ya quedó cerrada.
   });
 });

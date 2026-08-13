@@ -67,13 +67,45 @@ export class CajaController {
    * ¿Al usuario NO le aplica el modo ciego? El admin del tenant y el superadmin
    * ven el esperado/movimientos en vivo aun en caja abierta (§3.4 del spec
    * header-caja-ciego): el dueño no es el objetivo del anti-fraude. El superadmin
-   * sale del token; el admin del tenant vía RBAC (mismo criterio que `cerrar`).
+   * sale del token; el admin del tenant vía RBAC. Esto NO decide quién puede
+   * forzar un cierre (ver `resolverEscrituraCompartida`) — son dos preguntas
+   * distintas desde la decisión del owner 2026-08-13: forzar es operativo
+   * (`Cajas:Actualizar`), el ciego sigue exento solo para el admin.
    */
   private async esAdminTenant(u: JwtUser): Promise<boolean> {
     return (
       u.esSuperadmin ||
       (await this.rbacService.userIsTenantAdmin(u.id, u.tenantId!))
     );
+  }
+
+  /**
+   * Escritura compartida entre el dueño del turno (`MiCaja:Actualizar`) y el
+   * encargado que fuerza el cierre de una caja ajena (`Cajas:Actualizar`) —
+   * decisión del owner 2026-08-13: forzar pasa a ser operativo, no exclusivo
+   * del admin del tenant. Mismo patrón que `resolverLecturaCompartida`: el
+   * piso de la ruta se afloja acá (sin `@RequiresPermiso` en el handler) y
+   * ESTE método es el que rechaza si no aplica ninguno de los dos — nunca lo
+   * borres sin reemplazarlo por este chequeo explícito.
+   *
+   * Devuelve si el llamador puede forzar (`Cajas:Actualizar`); el service
+   * decide con eso si la caja es ajena. El admin lo tiene igual, por el
+   * short-circuit de rol fijo en `userHasPermiso`.
+   */
+  private async resolverEscrituraCompartida(u: JwtUser): Promise<boolean> {
+    const [tieneMiCaja, tieneCajas] = await Promise.all([
+      this.rbacService.userHasPermiso(
+        u.id,
+        u.tenantId!,
+        'MiCaja',
+        'Actualizar',
+      ),
+      this.rbacService.userHasPermiso(u.id, u.tenantId!, 'Cajas', 'Actualizar'),
+    ]);
+    if (!tieneMiCaja && !tieneCajas) {
+      throw new ForbiddenException('No tienes permiso para esta acción');
+    }
+    return tieneCajas;
   }
 
   @Get()
@@ -186,46 +218,46 @@ export class CajaController {
   }
 
   /**
-   * Cierre forzado: NO lleva `TenantAdminGuard` (bloquearía al cajero dueño)
-   * por la misma razón que `cerrar` — el piso de permiso es
-   * `MiCaja:Actualizar` y `esAdmin` se computa aparte para permitir además a
-   * un admin no-dueño cerrar la caja de otro.
+   * Cierre forzado: NO lleva `@RequiresPermiso('MiCaja', 'Actualizar')` — un
+   * encargado que fuerza el cierre de otro puede no tener `MiCaja:Actualizar`
+   * (no opera caja propia), y ese decorador lo rechazaría antes de llegar acá.
+   * El piso lo resuelve `resolverEscrituraCompartida` a mano (dueño con
+   * `MiCaja:Actualizar` O cualquiera con `Cajas:Actualizar`) y `puedeForzar`
+   * es lo segundo — decisión del owner 2026-08-13: forzar es operativo, no
+   * exclusivo del admin del tenant.
    */
   @Post(':id/conteo')
-  @RequiresPermiso('MiCaja', 'Actualizar')
   async enviarConteo(
     @Req() req: Request,
     @Param('id') cajaId: string,
     @Body() dto: CerrarCajaDto,
   ) {
     const u = req.user as JwtUser;
-    const esAdmin = await this.rbacService.userIsTenantAdmin(u.id, u.tenantId!);
+    const puedeForzar = await this.resolverEscrituraCompartida(u);
     return this.cajaService.enviarConteo(
       u.tenantId!,
       u.id,
       cajaId,
       dto,
-      esAdmin,
+      puedeForzar,
     );
   }
 
   /**
-   * Fase 2 del cierre: finaliza una caja `en_conciliacion`. Owner-o-admin, por
-   * eso NO lleva `TenantAdminGuard` (bloquearía al cajero dueño) — el piso de
-   * permiso es `MiCaja:Actualizar` y `esAdmin` se computa aparte, con el mismo
-   * criterio que `TenantAdminGuard` (`rbacService.userIsTenantAdmin`), para
-   * permitir además a un admin no-dueño finalizar la conciliación.
+   * Fase 2 del cierre: finaliza una caja `en_conciliacion`. Mismo piso que
+   * `enviarConteo` — sin `@RequiresPermiso('MiCaja', 'Actualizar')`, resuelto
+   * a mano por `resolverEscrituraCompartida` para no bloquear a un encargado
+   * (`Cajas:Actualizar`) que no opera caja propia.
    */
   @Post(':id/cerrar')
-  @RequiresPermiso('MiCaja', 'Actualizar')
   async cerrar(
     @Req() req: Request,
     @Param('id') cajaId: string,
     @Body() dto: FinalizarCierreDto,
   ) {
     const u = req.user as JwtUser;
-    const esAdmin = await this.rbacService.userIsTenantAdmin(u.id, u.tenantId!);
-    return this.cajaService.cerrar(u.tenantId!, u.id, cajaId, esAdmin, dto);
+    const puedeForzar = await this.resolverEscrituraCompartida(u);
+    return this.cajaService.cerrar(u.tenantId!, u.id, cajaId, puedeForzar, dto);
   }
 
   /** El encargado pide la firma. Requiere `Cajas:Actualizar` — primera ruta que lo usa. */

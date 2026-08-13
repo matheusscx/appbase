@@ -2,14 +2,18 @@
 import type { Caja } from '~/stores/caja'
 
 /**
- * El encargado (admin del tenant) cierra la caja de un cajero que se fue, y
- * pide fe del conteo a los garzones en turno. Vive en `pages/cajas/[id].vue`
- * — la pantalla del encargado, no la del dueño (`/mi-caja`).
+ * El encargado cierra la caja de un cajero que se fue, y pide fe del conteo
+ * a los garzones en turno. Vive en `pages/cajas/[id].vue` — la pantalla del
+ * encargado, no la del dueño (`/mi-caja`).
  *
- * El gate es `perms.esAdmin` (admin del tenant), no un permiso del módulo
- * Cajas: `caja.controller.ts` computa `esAdmin` vía `rbacService.userIsTenantAdmin`
- * y `caja.service.ts` rechaza el cierre ajeno si `!esAdmin` — un supervisor con
- * `Cajas:Actualizar` que no sea admin no puede forzar el cierre.
+ * El gate es `usePermisosCrud('Cajas').puedeActualizar` (decisión del owner
+ * 2026-08-13: forzar pasa a ser operativo, no exclusivo del admin del
+ * tenant) — `caja.controller.ts` resuelve `puedeForzar` a mano
+ * (`resolverEscrituraCompartida`, sin `@RequiresPermiso` en la ruta) contra
+ * `Cajas:Actualizar`, y `caja.service.ts` rechaza el cierre ajeno si
+ * `!puedeForzar`. `puedeActualizar` ya incluye al admin por su primera
+ * condición (`esAdmin || can(...)`), así que no hace falta gatear los dos
+ * por separado.
  *
  * `usuarioActualId` llega como prop (no `useAuthStore()` acá adentro): así el
  * componente no depende del store de auth para decidir "¿es mi caja?", que es
@@ -18,7 +22,7 @@ import type { Caja } from '~/stores/caja'
 const props = defineProps<{ caja: Caja, usuarioActualId: string | undefined }>()
 
 const cajaStore = useCajaStore()
-const perms = usePermissionsStore()
+const { puedeActualizar } = usePermisosCrud('Cajas')
 const toast = useToast()
 const { formatFecha } = useFormatters()
 const { listarAbiertas } = useSesionesGarzon()
@@ -30,7 +34,7 @@ const cargandoGarzones = ref(false)
 const solicitando = ref(false)
 
 const esAjenaAbierta = computed(() =>
-  perms.esAdmin
+  puedeActualizar.value
   && props.caja.estado === 'abierta'
   && props.caja.usuarioId !== props.usuarioActualId,
 )
@@ -44,7 +48,7 @@ const esForzado = computed(() =>
 )
 
 const mostrarPanelFirma = computed(() =>
-  perms.esAdmin && props.caja.estado === 'en_conciliacion' && esForzado.value,
+  puedeActualizar.value && props.caja.estado === 'en_conciliacion' && esForzado.value,
 )
 
 // Presentación, no un campo nuevo: la diferencia de una caja que cerró OTRA

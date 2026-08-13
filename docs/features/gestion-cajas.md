@@ -34,8 +34,9 @@ cajero cuenta (`monto_contado`), generando el reporte de cuadre de caja.
   - Historial de sesiones de caja (propia + todas con permiso especial)
   - Caja virtual (creada automáticamente por tenant para ventas online — excluida de flujos manuales)
   - Permisos granulares vía `@RequiresPermiso` + `PermisosGuard`
-  - Cierre forzado de una caja ajena por el encargado (admin del tenant), con firma de
-    testigo opcional de un garzón en turno — plan `testigo-cierre-forzado`, ver [Modelo de
+  - Cierre forzado de una caja ajena por el encargado (`Cajas:Actualizar` — operativo, no
+    exclusivo del admin del tenant desde el 2026-08-13), con firma de testigo opcional de
+    un garzón en turno — plan `testigo-cierre-forzado`, ver [Modelo de
     acceso](#modelo-de-acceso-por-permiso). ⚠️ **Backend completo y pantalla del encargado
     lista; la pantalla del garzón (`/salones`) todavía NO existe** — hoy la firma se puede
     pedir por API y por UI, pero nadie la puede completar desde ninguna pantalla
@@ -72,23 +73,47 @@ en cuanto el tenant contrata el módulo `Cajas` (short-circuit de rol fijo).
 frontend. Lo único que cambió es el `@RequiresPermiso` de cada endpoint. Ver
 [endpoints](#api-endpoints) y [Backend](#backend).
 
-**Escrituras casi siempre owner-only, con una excepción — el admin puede forzar**: tener
-`Cajas:Leer` nunca habilita `POST /caja/:id/movimientos` sobre una caja ajena — esa
-validación vive en el service y no depende del módulo de permiso, y ahí sigue siendo
-estrictamente owner-only. `POST /caja/:id/conteo` (fase 1 del cierre) y `POST
-/caja/:id/cerrar` (fase 2) son **owner-o-admin**: el dueño del turno siempre puede: un
-admin del tenant (`RbacService.userIsTenantAdmin`, no `Cajas:Leer` — un supervisor
-no-admin sigue sin poder) puede además **forzar** el cierre completo de la caja de OTRO
-cajero, desde el conteo inicial, no solo finalizar una conciliación que el dueño ya
-congeló (decisión del owner 2026-08-11, plan `testigo-cierre-forzado`: sin esto, un cajero
-que se va deja su caja abierta para siempre y, por `ux_cajas_activa_por_usuario`, no puede
-volver a abrir ninguna). Un cierre forzado congela además quién contó
-(`cajas.cerrada_por`) y cuántos garzones había en turno en ese momento
-(`cajas.testigos_disponibles`), y pasa SIEMPRE por conciliación aunque cuadre — nunca
-auto-cierra —, porque ahí es donde vive la firma del testigo: el encargado le pide fe a
-un garzón en turno (`POST /caja/:id/testigos`) y ese garzón firma o rechaza desde su
-propia sesión (`POST /caja/testigos/:id/resolver`, cuenta vinculada o PIN). Sin firma
-alguna, la fase 2 (más abajo) exige un comentario que explique qué pasó.
+**Escrituras casi siempre owner-only, con una excepción — quien tiene `Cajas:Actualizar`
+puede forzar**: tener `Cajas:Leer` nunca habilita `POST /caja/:id/movimientos` sobre una
+caja ajena — esa validación vive en el service y no depende del módulo de permiso, y ahí
+sigue siendo estrictamente owner-only. `POST /caja/:id/conteo` (fase 1 del cierre) y `POST
+/caja/:id/cerrar` (fase 2) son **owner-o-encargado**: el dueño del turno siempre puede
+(`MiCaja:Actualizar`); quien tiene `Cajas:Actualizar` puede además **forzar** el cierre
+completo de la caja de OTRO cajero, desde el conteo inicial, no solo finalizar una
+conciliación que el dueño ya congeló (decisión del owner 2026-08-11, plan
+`testigo-cierre-forzado`: sin esto, un cajero que se va deja su caja abierta para siempre
+y, por `ux_cajas_activa_por_usuario`, no puede volver a abrir ninguna).
+
+**Forzar dejó de exigir ser admin del tenant (decisión del owner 2026-08-13).** Hasta
+entonces, `enviarConteo`/`cerrar` gateaban el forzado con `RbacService.userIsTenantAdmin`
+— una incoherencia con `POST /caja/:id/testigos` (pedir la firma), que ya exigía
+`Cajas:Actualizar` desde la Task 6: las dos mitades del mismo camino tenían puertas
+distintas, y la que lo abría era la más cerrada. Ahora las dos rutas resuelven el permiso a
+mano en el controller (`resolverEscrituraCompartida`, sin `@RequiresPermiso` en el
+handler — un encargado que no opera caja propia puede no tener `MiCaja:Actualizar`, y ese
+decorador lo habría rechazado antes de llegar al service): *(dueño con
+`MiCaja:Actualizar`)* **o** *(cualquiera con `Cajas:Actualizar`)*. El admin conserva la
+capacidad de forzar por el short-circuit de rol fijo en `userHasPermiso` — no por un
+chequeo aparte. Un supervisor con solo `Cajas:Leer` sigue sin poder forzar.
+
+**Pero forzar NO exime del modo ciego — esa es la exención del admin, y sigue intacta.**
+Antes de este cambio, quien forzaba siempre era admin, y el admin está exento del ciego
+(§3.4 más abajo): en la práctica, quien contaba la plata de otro SIEMPRE la veía. Ahora que
+forzar es operativo, existe por primera vez alguien que fuerza y cuenta **a ciegas**: el
+encargado no-admin ve `ciego:true`/`esperado:null` en la caja ajena mientras la cuenta,
+igual que cualquier no-admin — es la combinación que le da sentido a la promesa original
+del anti-fraude ("cuenta a ciegas"), que hasta ahora nadie podía ejercer porque forzar y
+estar exento del ciego eran la misma condición. El admin, si elige forzar, sigue viendo el
+esperado — es la misma exención de siempre, sin cambios, y no depende de si la caja es
+propia o ajena. Ver [Alcance del modo ciego](#alcance-del-modo-ciego-arqueo_ciego).
+
+Un cierre forzado congela además quién contó (`cajas.cerrada_por`) y cuántos garzones
+había en turno en ese momento (`cajas.testigos_disponibles`), y pasa SIEMPRE por
+conciliación aunque cuadre — nunca auto-cierra —, porque ahí es donde vive la firma del
+testigo: el encargado le pide fe a un garzón en turno (`POST /caja/:id/testigos`) y ese
+garzón firma o rechaza desde su propia sesión (`POST /caja/testigos/:id/resolver`, cuenta
+vinculada o PIN). Sin firma alguna, la fase 2 (más abajo) exige un comentario que explique
+qué pasó.
 
 ⚠️ **Estado real al 2026-08-13:** la parte del garzón existe en la API y está cubierta por
 e2e, pero **no tiene pantalla todavía** (`/salones` sin cablear). En la práctica, hoy todo
@@ -595,8 +620,9 @@ Igual que el `cerrar` del sub-proyecto A: recomputa el arqueo completo server-si
 efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia` (ver [Agregados de
 `cajas`](#agregados-de-cajas--línea-de-efectivo-backward-compat-del-historial)). A partir
 de acá **ninguna línea vuelve a recomputarse** — ni en la fase 2 ni en el override admin.
-Owner-o-admin (`MiCaja:Actualizar`; ver [Modelo de acceso](#modelo-de-acceso-por-permiso)):
-un admin puede forzar el conteo de la caja de otro cajero, y ahí también congela
+Owner-o-encargado ((dueño con `MiCaja:Actualizar`) o (cualquiera con `Cajas:Actualizar`);
+ver [Modelo de acceso](#modelo-de-acceso-por-permiso)): quien tiene `Cajas:Actualizar`
+puede forzar el conteo de la caja de otro cajero, y ahí también congela
 `cajas.cerrada_por` (quién contó) y `cajas.testigos_disponibles` (garzones en turno en ese
 momento).
 
@@ -605,18 +631,21 @@ Bifurca según el resultado:
 - **Ninguna línea descuadra Y el usuario del token es el dueño** → auto-cierre:
   `estado: 'cerrada'` + `fechaCierre` fijada. No hay fase 2 que resolver — el flujo termina
   acá, como antes del sub-proyecto C.
-- **Alguna línea descuadra, O el conteo lo envió un admin que no es el dueño (forzado)** →
-  `estado: 'en_conciliacion'`, sin `fechaCierre`. Un forzado pasa por acá SIEMPRE, cuadre o
-  no — es donde va a vivir la firma del testigo. La fase 2 (abajo) es la única forma de
-  sacarla de ese estado.
+- **Alguna línea descuadra, O el conteo lo envió alguien con `Cajas:Actualizar` que no es
+  el dueño (forzado)** → `estado: 'en_conciliacion'`, sin `fechaCierre`. Un forzado pasa
+  por acá SIEMPRE, cuadre o no — es donde va a vivir la firma del testigo. La fase 2 (abajo)
+  es la única forma de sacarla de ese estado.
 
 ```
 POST /caja/:id/conteo
-Permiso requerido: MiCaja / Actualizar — owner-o-admin (cierre forzado, ver Modelo de acceso)
+Permiso requerido: (dueño con MiCaja:Actualizar) o (cualquiera con Cajas:Actualizar) —
+                   owner-o-encargado, resuelto a mano en el controller (cierre forzado,
+                   ver Modelo de acceso)
 Request: { "lineas": [{ "metodoPagoId": null | string, "montoContado": string }, ...], "comentario"?: string }
 Response (200): { "estado": "cerrada" | "en_conciliacion", "arqueo": LineaArqueo[] }
 Error (400) si falta el conteo de una línea obligatoria o una línea no pertenece al arqueo.
-Error (403) si la caja no existe, no está 'abierta', o no es del usuario ni el usuario es admin.
+Error (403) si el usuario no tiene ni MiCaja:Actualizar ni Cajas:Actualizar, o si la caja
+      no existe, no está 'abierta', o no es del usuario ni el usuario tiene Cajas:Actualizar.
 ```
 
 ### `en_conciliacion` ocupa igual que `abierta`
@@ -641,7 +670,7 @@ El índice único parcial `ux_cajas_cajon_abierta` (BD) solo cubre `estado = 'ab
 la ocupación de `en_conciliacion` es una regla de aplicación (service), no un constraint
 de base de datos; ver el comentario en `startup-pos.sql`.
 
-### Fase 2 — `POST /caja/:id/cerrar`: justifica y finaliza (owner **o** admin)
+### Fase 2 — `POST /caja/:id/cerrar`: justifica y finaliza (owner **o** encargado)
 
 Recibe un motivo (y opcionalmente un comentario) por cada línea que descuadró en la fase
 1, los aplica sobre las filas ya congeladas de `caja_arqueo_medio` y recién entonces marca
@@ -679,29 +708,34 @@ docblock de `comentarioCierre` en la entidad para el detalle.
 
 ```
 POST /caja/:id/cerrar
-Permiso requerido: MiCaja / Actualizar — owner-o-admin (ver más abajo)
+Permiso requerido: (dueño con MiCaja:Actualizar) o (cualquiera con Cajas:Actualizar) —
+                   owner-o-encargado (ver más abajo)
 Request: { "lineas": [{ "metodoPagoId": null | string, "motivoDiferenciaId"?: string, "comentarioDiferencia"?: string }, ...], "comentario"?: string }
 Response (200): { "caja": Caja (estado 'cerrada'), "arqueo": LineaArqueo[] }
 Error (400) si falta el motivo (o el comentario que ese motivo exige) de una línea descuadrada.
 Error (400) si el cierre es forzado, nadie firmó como testigo, y no hay comentario de cierre (ni en esta fase ni el que ya haya dejado la fase 1).
-Error (403) si la caja no existe o no es del usuario ni el usuario es admin.
+Error (403) si el usuario no tiene ni MiCaja:Actualizar ni Cajas:Actualizar, o si la caja
+      no es del usuario ni el usuario tiene Cajas:Actualizar.
 Error (400) si la caja no está 'en_conciliacion'.
 ```
 
-**Owner-o-admin, no `TenantAdminGuard`.** El endpoint NO usa `TenantAdminGuard` (eso
-bloquearía al cajero dueño de completar su propio cierre); el piso de permiso sigue siendo
-`MiCaja:Actualizar` y el controller resuelve `esAdmin` aparte
-(`rbacService.userIsTenantAdmin`) con el mismo criterio que usaría `TenantAdminGuard`, para
-permitir *además* que un admin no-dueño finalice la conciliación. Antes del cierre forzado
-(ver [Modelo de acceso](#modelo-de-acceso-por-permiso)) esta fase 2 era la única escritura
-owner-o-admin del controller: un admin solo podía completar una conciliación que el dueño
-**ya había congelado** en la fase 1, nunca iniciar el conteo de una caja ajena. Eso ya no
-es así — un admin puede forzar también la fase 1 (`POST /caja/:id/conteo`), y ese forzado
-es justamente lo que deja la caja en `en_conciliacion` para que esta fase 2 la resuelva. Lo
-que esta fase 2 en sí **no** hace es tocar `cajas.cerrada_por`: ese campo se congela en la
-fase 1 (con el `usuarioId` de quien envió el conteo, dueño o admin forzando), y
-`cajas.usuario_id` sigue siendo siempre el dueño original del turno, sea quien sea quien
-complete esta fase 2.
+**Owner-o-encargado, no `TenantAdminGuard`.** El endpoint NO usa `TenantAdminGuard` (eso
+bloquearía al cajero dueño de completar su propio cierre, y desde el 2026-08-13 también
+bloquearía a un encargado no-admin); el piso de permiso lo resuelve el controller a mano
+(`resolverEscrituraCompartida`, sin `@RequiresPermiso` en la ruta): (dueño con
+`MiCaja:Actualizar`) o (cualquiera con `Cajas:Actualizar`), y el segundo (`puedeForzar`) es
+lo que permite *además* que alguien no-dueño finalice la conciliación de otro. Hasta el
+2026-08-11 esta fase 2 era la única escritura owner-o-admin del controller: un admin solo
+podía completar una conciliación que el dueño **ya había congelado** en la fase 1, nunca
+iniciar el conteo de una caja ajena. Desde entonces, quien puede forzar puede forzar
+también la fase 1 (`POST /caja/:id/conteo`), y ese forzado es justamente lo que deja la
+caja en `en_conciliacion` para que esta fase 2 la resuelva. Desde el 2026-08-13, además,
+"quien puede forzar" dejó de ser sinónimo de "admin del tenant" — pasó a ser
+`Cajas:Actualizar`, y el admin lo conserva por el short-circuit de rol fijo, no por un
+chequeo aparte. Lo que esta fase 2 en sí **no** hace es tocar `cajas.cerrada_por`: ese
+campo se congela en la fase 1 (con el `usuarioId` de quien envió el conteo, dueño o
+encargado forzando), y `cajas.usuario_id` sigue siendo siempre el dueño original del
+turno, sea quien sea quien complete esta fase 2.
 
 ### El conteo es inmutable desde la fase 1 (anti-fraude)
 
@@ -755,7 +789,7 @@ las líneas ya congeladas, nunca `esperado`/`contado`/`diferencia`.
 
 ```
 PATCH /caja/:id/arqueo/motivos
-Guard: TenantAdminGuard (admin-only, a diferencia de la fase 2 que es owner-o-admin)
+Guard: TenantAdminGuard (admin-only, a diferencia de la fase 2 que es owner-o-encargado)
 Request: { "lineas": [{ "metodoPagoId": null | string, "motivoDiferenciaId"?: string, "comentarioDiferencia"?: string }, ...] }
 Response (200): { "ciego": false, "lineas": LineaArqueo[] }
 Error (400) si la caja no está 'cerrada', o si falta el motivo/comentario de una línea descuadrada.
@@ -810,6 +844,22 @@ número porque es ciego" de "no ve el número porque no llega a la caja". Lo eje
 `caja.e2e-spec.ts` → *el modo ciego SÍ aplica al supervisor no-admin*, que assevera la
 sesión **no nula** con `saldoEsperado: null`, y contra el mismo cajón y la misma caja que
 el admin sí ve el número.
+
+**Segundo usuario del seed, agregado el 2026-08-13: `encargado@paris.cl`**, rol `Cajas ·
+Encargado` con `Cajas:Leer` + `Cajas:Actualizar`, tampoco admin del tenant.
+`supervisor@paris.cl` no sirve para probar el forzado (solo `Cajas:Leer`, y es a propósito
+el arnés del 403 de "no puede forzar sin `Actualizar`" — no agregarle `Actualizar`).
+`encargado@paris.cl` es la combinación nueva desde la decisión del owner 2026-08-13 (forzar
+pasa a ser `Cajas:Actualizar`, no admin-only, ver [Modelo de
+acceso](#modelo-de-acceso-por-permiso)): puede forzar el cierre de una caja ajena **y**
+sigue cayendo en el ciego mientras la cuenta — antes de este cambio esa combinación no
+existía, porque forzar y estar exento del ciego eran la misma condición (ser admin). Lo
+ejerce `caja.e2e-spec.ts` → *el modo ciego SÍ aplica al encargado que fuerza (no admin)*.
+
+**Ojo, no es todo el mundo el que fuerza el que queda ciego — es todo el mundo que NO es
+admin.** El admin conserva su exención (§3.4) forzando o no; lo que cambió es que ahora hay
+alguien MÁS —el encargado no-admin— para quien la pregunta "¿puede forzar?" antes
+significaba automáticamente "¿ve el esperado?" (porque solo el admin forzaba) y ahora no.
 
 **Configurar el modo ciego es admin-only** (`TenantAdminGuard` en `PUT /caja/arqueo-ciego`):
 es una política anti-fraude, no una acción operativa. El CRUD de cajones de la misma
@@ -1037,9 +1087,11 @@ Ver detalle de negocio en [Cierre ciego (modo anti-fraude)](#cierre-ciego-modo-a
 POST /caja/:id/conteo
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja / Actualizar — owner-o-admin (`Cajas:Leer` sin admin no habilita;
-                   un admin del tenant puede forzar el conteo de la caja de otro cajero,
-                   ver Modelo de acceso)
+Permiso requerido: (dueño con MiCaja:Actualizar) o (cualquiera con Cajas:Actualizar) —
+                   owner-o-encargado, resuelto a mano en el controller
+                   (`resolverEscrituraCompartida`, sin `@RequiresPermiso` en la ruta);
+                   `Cajas:Leer` sin `Actualizar` no habilita forzar (el admin lo tiene
+                   igual por el short-circuit de rol fijo) — ver Modelo de acceso
 
 Request:
 {
@@ -1075,13 +1127,14 @@ Response (200) — algo descuadró (pasa a conciliación):
 
 Error (400) si falta el conteo de una línea obligatoria (es_efectivo o requiere_conteo)
       o si una línea del body no pertenece al arqueo recomputado del servidor.
-Error (403) si la caja no existe, no está 'abierta', o no pertenece al usuario ni el
-      usuario es admin del tenant.
+Error (403) si el usuario no tiene ni MiCaja:Actualizar ni Cajas:Actualizar (piso de la
+      ruta), o si la caja no existe, no está 'abierta', o no pertenece al usuario ni el
+      usuario tiene Cajas:Actualizar.
 ```
 
-Un conteo **forzado** (usuario del token ≠ dueño de la caja, solo posible si es admin)
-siempre responde `estado: "en_conciliacion"`, aunque las líneas cuadren — ver [Modelo de
-acceso](#modelo-de-acceso-por-permiso).
+Un conteo **forzado** (usuario del token ≠ dueño de la caja, solo posible con
+`Cajas:Actualizar`) siempre responde `estado: "en_conciliacion"`, aunque las líneas
+cuadren — ver [Modelo de acceso](#modelo-de-acceso-por-permiso).
 
 `cajas.saldoFinal`/`montoContado`/`diferencia` quedan copiados de la línea de efectivo en
 ambos casos — ver Arqueo de caja multi-medio § Agregados de `cajas`. Detalle de negocio de
@@ -1093,9 +1146,10 @@ la bifurcación en [Cierre en dos fases](#cierre-en-dos-fases--motivos-de-difere
 POST /caja/:id/cerrar
 Authorization: Bearer <token>
 
-Permiso requerido: MiCaja / Actualizar — owner-o-admin (igual que la fase 1, `POST
-                   /caja/:id/conteo`; `registrarMovimiento` sigue siendo la única escritura
-                   estrictamente owner-only de este controller, ver Cierre en dos fases)
+Permiso requerido: (dueño con MiCaja:Actualizar) o (cualquiera con Cajas:Actualizar) —
+                   owner-o-encargado, igual que la fase 1 (`POST /caja/:id/conteo`);
+                   `registrarMovimiento` sigue siendo la única escritura estrictamente
+                   owner-only de este controller, ver Cierre en dos fases
 
 Request:
 {
@@ -1136,7 +1190,8 @@ Error (400) si falta el motivo (o el comentario que ese motivo exige) de una lí
       descuadrada.
 Error (400) si el cierre es forzado, nadie firmó como testigo, y no hay comentario
       (ni en esta fase ni el que ya haya dejado la fase 1).
-Error (403) si la caja no existe, no pertenece al usuario ni el usuario es admin.
+Error (403) si el usuario no tiene ni MiCaja:Actualizar ni Cajas:Actualizar (piso de la
+      ruta), o si la caja no pertenece al usuario ni el usuario tiene Cajas:Actualizar.
 Error (400) si la caja no está 'en_conciliacion'.
 ```
 
@@ -1382,8 +1437,8 @@ recalcula después de escrita)
 - `cajaService.calcularArqueo(cajaId, tenantId, manager)` — línea de efectivo + una línea por método no-efectivo con movimientos (dos queries, sin N+1)
 - `cajaService.obtenerArqueo(tenantId, usuarioId, cajaId, verTodas)` — `{ ciego, lineas }`; preview (`calcularArqueo` en vivo) si `abierta` — retenido (`esperado:null`, solo obligatorias) si el tenant tiene `arqueo_ciego`; filas completas de `caja_arqueo_medio` (con motivo/comentario si ya se justificó, `ciego:false` siempre) si `en_conciliacion` o `cerrada`
 - `cajaService.getArqueoCiego(tenantId)` / `setArqueoCiego(tenantId, valor)` — lee/escribe `tenants.arqueo_ciego`; query raw parametrizada, filtra `eliminado_el IS NULL`
-- `cajaService.enviarConteo(tenantId, usuarioId, cajaId, dto, esAdmin)` — **fase 1**, owner-o-admin; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, congela `cajas.cerradaPor` (siempre, no solo forzado) y `cajas.testigosDisponibles` (sesiones de garzón abiertas del tenant, vía `SesionesGarzonService.contarAbiertas` corrido con el mismo `manager` de la transacción), bifurca a `estado='cerrada'` (todo cuadró y `usuarioId` es el dueño) o `estado='en_conciliacion'` (algún descuadre, o forzado aunque cuadre) — sin cambios por el modo ciego, ver Cierre ciego
-- `cajaService.cerrar(tenantId, usuarioId, cajaId, esAdmin, dto)` — **fase 2**, owner-o-admin; lock de la caja `en_conciliacion`, aplica motivos vía `aplicarMotivosADescuadres` (`400` si falta alguno), y si el cierre es forzado (`cajas.cerradaPor !== cajas.usuarioId`, fail-closed ante `cerradaPor` ausente) y nadie firmó testigo (`CajaTestigoService.hayFirmaDe`) exige un comentario en `cajas.comentarioCierre` — el de esta fase o el que ya haya dejado la fase 1, sin tocar nunca `cajas.comentario` (el de la apertura, columna separada) — antes de marcar `estado='cerrada'`. Cancela las solicitudes de testigo pendientes (`CajaTestigoService.cancelarPendientes`) siempre, forzado o no. No recalcula nada del arqueo
+- `cajaService.enviarConteo(tenantId, usuarioId, cajaId, dto, puedeForzar)` — **fase 1**, owner-o-encargado; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, congela `cajas.cerradaPor` (siempre, no solo forzado) y `cajas.testigosDisponibles` (sesiones de garzón abiertas del tenant, vía `SesionesGarzonService.contarAbiertas` corrido con el mismo `manager` de la transacción), bifurca a `estado='cerrada'` (todo cuadró y `usuarioId` es el dueño) o `estado='en_conciliacion'` (algún descuadre, o forzado aunque cuadre) — sin cambios por el modo ciego, ver Cierre ciego. `puedeForzar` es el controller resolviendo `Cajas:Actualizar` (`resolverEscrituraCompartida`, decisión del owner 2026-08-13), no `esAdmin` — el parámetro se renombró porque cambió de significado
+- `cajaService.cerrar(tenantId, usuarioId, cajaId, puedeForzar, dto)` — **fase 2**, owner-o-encargado; lock de la caja `en_conciliacion`, aplica motivos vía `aplicarMotivosADescuadres` (`400` si falta alguno), y si el cierre es forzado (`cajas.cerradaPor !== cajas.usuarioId`, fail-closed ante `cerradaPor` ausente) y nadie firmó testigo (`CajaTestigoService.hayFirmaDe`) exige un comentario en `cajas.comentarioCierre` — el de esta fase o el que ya haya dejado la fase 1, sin tocar nunca `cajas.comentario` (el de la apertura, columna separada) — antes de marcar `estado='cerrada'`. Cancela las solicitudes de testigo pendientes (`CajaTestigoService.cancelarPendientes`) siempre, forzado o no. No recalcula nada del arqueo
 - `cajaService.justificarDiferencias(tenantId, cajaId, lineas)` — **override admin**, invocado desde el controller bajo `TenantAdminGuard`; misma validación que `cerrar` vía `aplicarMotivosADescuadres`, pero exige `estado='cerrada'` en vez de `en_conciliacion`
 - `cajaService.historial(tenantId, usuarioId, query, todas)` — historial; `todas=true` retorna todas las cajas del tenant
 - `cajaService.findOne(tenantId, usuarioId, cajaId, verTodas)` — detalle de la caja
@@ -1425,15 +1480,24 @@ alcance (propia vs. todas). Este patrón — permiso compuesto resuelto a mano e
 un solo `@RequiresPermiso` — es específico de este controller por tener dos módulos
 sirviendo las mismas rutas de lectura; no es el patrón por defecto del proyecto.
 
+**El cierre forzado (`POST /:id/conteo`, `POST /:id/cerrar`) sigue el mismo patrón desde
+el 2026-08-13**, con `resolverEscrituraCompartida(u)`: exige `MiCaja:Actualizar` **o**
+`Cajas:Actualizar` (403 si no tiene ninguno) y devuelve `puedeForzar = tieneCajas` para
+que el service decida si aplica el forzado. Ninguna de las dos rutas lleva
+`@RequiresPermiso('MiCaja', 'Actualizar')` — un encargado que no opera caja propia puede
+no tener `MiCaja:Actualizar`, y ese decorador lo habría rechazado antes de llegar al
+handler. El piso no desaparece: se afloja explícitamente, con el mismo chequeo que ya
+usaba `resolverLecturaCompartida` para su propio caso de lectura compuesta.
+
 Ver nota en `docs/patterns/backend.md §4` sobre cuándo usar `@RequiresPermiso` vs. `TenantAdminGuard`.
 
 **El override admin es la única excepción de método.** `PATCH /caja/:id/arqueo/motivos`
 agrega `@UseGuards(TenantAdminGuard)` a nivel de método (sub-proyecto C) — el único
 endpoint del controller que exige admin puro en vez de `@RequiresPermiso`. `POST
-/caja/:id/cerrar` (fase 2, owner-o-admin) en cambio **no** usa `TenantAdminGuard`: sigue
-con `@RequiresPermiso('MiCaja', 'Actualizar')` y el controller resuelve `esAdmin` aparte
-(`rbacService.userIsTenantAdmin`) para no bloquear al cajero dueño — ver [Cierre en dos
-fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
+/caja/:id/cerrar` (fase 2, owner-o-encargado) en cambio **no** usa `TenantAdminGuard` ni
+`@RequiresPermiso`: el piso lo resuelve `resolverEscrituraCompartida` (arriba) para no
+bloquear ni al cajero dueño ni al encargado no-dueño sin `MiCaja:Actualizar` — ver
+[Cierre en dos fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
 
 ---
 
@@ -1463,8 +1527,10 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
   el turno propio, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en
   modo read-only). Botón "Ver historial del cajón" (`?cajonId=` de esa caja) en el header
   de la tarjeta + back-link "Volver a cajas". 403/404 → redirect a `/cajas`. Excepción: si
-  la caja está `abierta` y es **ajena**, el admin del tenant ve el botón "Cerrar por el
-  cajero" (`CajaCierreForzadoPanel`, plan `testigo-cierre-forzado`, Task 6).
+  la caja está `abierta` y es **ajena**, quien tiene `Cajas:Actualizar` (el encargado, o el
+  admin del tenant por su bypass) ve el botón "Cerrar por el cajero"
+  (`CajaCierreForzadoPanel`, plan `testigo-cierre-forzado`, Task 6, permiso ampliado el
+  2026-08-13).
 - `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
   internos previos al refactor).
 - `pages/configuracion/motivos-diferencia.vue` — CRUD admin-only del catálogo de motivos
@@ -1509,9 +1575,11 @@ sin necesidad.
   exige un comentario para habilitar "Confirmar cierre" — replica en la UI el mismo gate
   que el backend (`CajaService.cerrar`) para no ser más estricta que él
 - `components/caja/CajaCierreForzadoPanel.vue` — Vive en `pages/cajas/[id].vue` (plan
-  `testigo-cierre-forzado`, Task 6). Gate `perms.esAdmin` (admin del tenant, no un permiso
-  del módulo `Cajas` — ver [Modelo de acceso](#modelo-de-acceso-por-permiso)). Caja
-  `abierta` ajena → tarjeta con dueño + fecha de apertura y botón "Cerrar por el cajero"
+  `testigo-cierre-forzado`, Task 6). Gate `usePermisosCrud('Cajas').puedeActualizar`
+  (decisión del owner 2026-08-13: forzar es operativo, no exclusivo del admin del tenant
+  — ver [Modelo de acceso](#modelo-de-acceso-por-permiso); `puedeActualizar` ya incluye al
+  admin por su primera condición, `esAdmin || can(...)`). Caja `abierta` ajena → tarjeta
+  con dueño + fecha de apertura y botón "Cerrar por el cajero"
   (abre `CajaCierreDrawer` con `forzado`). Caja `en_conciliacion` por un cierre forzado
   (`cerradaPor !== usuarioId`) → panel "Pedir firma" (garzones en turno vía
   `useSesionesGarzon().listarAbiertas()`, excluye a quien ya tiene una solicitud viva) +
@@ -1630,7 +1698,7 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
        ↓ Drawer pasa a fase='conciliacion' (sin cerrarse) → cajaStore.cargarMotivos(true)
        ↓ Usuario elige motivo (o comentario, si no hay motivos activos) por línea descuadrada
        ↓ cajaStore.cerrar(cajaId, { lineas: [{ metodoPagoId, motivoDiferenciaId?, comentarioDiferencia? }] })
-       [POST /caja/:id/cerrar — FASE 2, owner-o-admin]
+       [POST /caja/:id/cerrar — FASE 2, owner-o-encargado]
          ↓
        [Service: lock de la caja 'en_conciliacion' → aplica motivos sobre las líneas
         YA CONGELADAS (no recalcula nada) → 400 si falta un motivo/comentario → estado='cerrada' + fechaCierre]
@@ -1709,12 +1777,13 @@ existiendo como acción global para otros módulos — solo se dejó de asociar 
 **Owner-only (independientemente de `Cajas:Leer`), con una excepción:**
 `POST /caja/:id/movimientos` solo lo puede ejecutar el dueño de la caja (permiso
 `MiCaja`) — ahí `Cajas:Leer` no habilita nada, ni siquiera para un admin.
-`POST /caja/:id/conteo` (fase 1) y `POST /caja/:id/cerrar` (fase 2) son **owner-o-admin**:
-el dueño siempre puede, y un admin del tenant (`RbacService.userIsTenantAdmin`, no
-`Cajas:Leer`) puede además forzar el cierre completo de la caja de otro cajero **desde
-cero**, no solo finalizar una conciliación que el dueño ya congeló — ver [Modelo de
-acceso](#modelo-de-acceso-por-permiso) y [Cierre en dos
-fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
+`POST /caja/:id/conteo` (fase 1) y `POST /caja/:id/cerrar` (fase 2) son
+**owner-o-encargado**: el dueño siempre puede (`MiCaja:Actualizar`), y quien tiene
+`Cajas:Actualizar` (no `Cajas:Leer` — decisión del owner 2026-08-13, antes exigía ser
+admin del tenant vía `RbacService.userIsTenantAdmin`) puede además forzar el cierre
+completo de la caja de otro cajero **desde cero**, no solo finalizar una conciliación que
+el dueño ya congeló — ver [Modelo de acceso](#modelo-de-acceso-por-permiso) y [Cierre en
+dos fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c).
 
 ---
 
@@ -1814,10 +1883,11 @@ npm run test:e2e -- motivos-diferencia.e2e-spec.ts
 - [x] Módulo `MiCaja` (operar el propio turno) y módulo `Cajas` (supervisar, solo lectura) separados
 - [x] `GET /caja/cajones-estado` requiere `Cajas:Leer` y retorna todos los cajones activos del tenant con su estado (ocupado/libre)
 - [x] `GET /caja/:id/movimientos` permite lectura de caja ajena con `Cajas:Leer`; registrar
-      movimientos sigue owner-only bajo `MiCaja` (el conteo, fase 1, pasó a owner-o-admin
-      con el cierre forzado — ver [Modelo de acceso](#modelo-de-acceso-por-permiso))
+      movimientos sigue owner-only bajo `MiCaja` (el conteo, fase 1, pasó a owner-o-encargado
+      con el cierre forzado, `Cajas:Actualizar` desde el 2026-08-13 — ver [Modelo de
+      acceso](#modelo-de-acceso-por-permiso))
 - [x] `cajas.estado` admite `'en_conciliacion'`; `findActiva`/`abrir`/`cajonesDisponibles`/`cajonesEstado` la tratan como ocupada igual que `'abierta'`
-- [x] `POST /caja/:id/cerrar` (fase 2) es owner-o-admin, aplica motivos a las líneas descuadradas sin recalcular nada, `400` si falta un motivo/comentario obligatorio
+- [x] `POST /caja/:id/cerrar` (fase 2) es owner-o-encargado, aplica motivos a las líneas descuadradas sin recalcular nada, `400` si falta un motivo/comentario obligatorio
 - [x] `PATCH /caja/:id/arqueo/motivos` (`TenantAdminGuard`) corrige motivos de una caja ya cerrada, mismo enforcement que la fase 2
 - [x] Catálogo `motivo_diferencia_caja` (admin-only CRUD, `es_fijo` no renombrable/eliminable pero togglable en `activo`/`requiereComentario`); sin motivos activos, el comentario es obligatorio (red de seguridad)
 - [x] El conteo (`esperado`/`contado`/`diferencia` en `caja_arqueo_medio`) es inmutable desde la fase 1 — ni la fase 2 ni el override lo recalculan

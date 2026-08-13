@@ -4647,3 +4647,44 @@ entrada afirmaba **de más o de menos** se anota en su bloque de cierre.
   cierra la falsificación pero no la presencia, y contra el atacante realista —el que está
   parado al lado— el valor útil del timeout es 0), y cualquier configuración de "modo
   estricto".
+
+---
+
+## El encargado que fuerza un cierre NO cuenta a ciegas (cerrado 2026-08-13)
+
+**Cómo se cerró.**
+
+Decisión de alcance, no bug — lo levantó la revisión independiente de la Task 6 (2026-08-13); **resuelta en su mitad
+  operativa por decisión del owner el mismo día** (task 6b, plan `testigo-cierre-forzado`).
+  La spec del testigo dice *"cuenta a ciegas: sin ver lo esperado"*, y hasta acá **no era
+  así**: forzar el cierre exigía ser admin del tenant (`caja.service.ts` → `enviarConteo`,
+  `esForzado && !esAdmin` → 403), y el modo ciego **exime al admin por diseño previo** (§3.4:
+  *"el dueño no es el objetivo del anti-fraude"*). Como quien forzaba siempre era admin,
+  quien forzaba SIEMPRE veía el esperado mientras contaba la plata de otro — la contradicción
+  era de la spec contra una decisión anterior, no de la implementación contra la spec.
+
+  ✅ **Lo que resolvió la task 6b:** forzar dejó de exigir ser admin del tenant y pasó a
+  exigir `Cajas:Actualizar` (mismo permiso que ya exigía pedir la firma, `POST
+  /caja/:id/testigos` desde la Task 6 — la incoherencia entre las dos mitades del mismo
+  camino). Se sembró un usuario nuevo del rol para probarlo: `encargado@paris.cl`
+  (`Cajas:Leer` + `Cajas:Actualizar`, no admin). Con eso, **por primera vez existe alguien
+  que fuerza y cuenta a ciegas de verdad** — la promesa original de la spec, que hasta acá
+  nadie no-admin podía ejercer porque forzar y estar exento del ciego eran la misma
+  condición. Cubierto por `caja.e2e-spec.ts` → *el modo ciego SÍ aplica al encargado que
+  fuerza (no admin)*.
+
+  📌 **Lo que NO se tocó, por decisión explícita del owner (task 6b, decisión 2):** el admin
+  del tenant **sigue exento del ciego incluso forzando** — la misma exención de siempre
+  (§3.4), sin condicionarla a si la caja es propia o ajena. Las **cuatro** superficies que la
+  aplican (`obtenerArqueo` `caja.service.ts:464-466`, `cajonesEstado` `:1204`,
+  `resumenMovimientos` `:1332`, historial) no cambiaron una línea — la task 6b lo verificó
+  con test, no lo implementó. De las tres opciones que este ítem dejaba abiertas ((a) corregir
+  la spec, (b) eximir al admin solo en caja propia, (c) configurable por tenant), el owner
+  eligió en los hechos **(a)**: el producto sigue exceptuando al admin siempre, así que la
+  spec del testigo debería decir "cuenta a ciegas — salvo el admin del tenant, que nunca es
+  el objetivo del anti-fraude" en vez de una promesa sin excepciones. Ese ajuste de texto de
+  la spec queda afuera de esta entrada.
+  🔗 Emparentado con el ítem ya conocido de que el ciego tapa el esperado en arqueo/drawer pero
+  **no** en el panel de resumen del turno — ese ítem hermano sigue abierto, sin tocar acá: es
+  el mismo problema de fondo —el ciego se definió vista por vista y no como una propiedad de
+  "quién puede ver qué"—.

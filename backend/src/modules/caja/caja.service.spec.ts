@@ -570,8 +570,8 @@ describe('CajaService', () => {
     });
 
     // Combinación más frecuente en un local chico: el admin-cajero cerrando su
-    // propio turno. `esAdmin=true` pero `esForzado` sigue en false porque el
-    // dueño de la caja es el mismo usuario del token — nada de esto pasa por
+    // propio turno. `puedeForzar=true` pero `esForzado` sigue en false porque
+    // el dueño de la caja es el mismo usuario del token — nada de esto pasa por
     // conciliación forzada, se comporta como un cierre normal.
     it('un admin que además es el dueño de la caja: NO es forzado, auto-cierra si cuadra', async () => {
       const r = await service.enviarConteo(

@@ -868,6 +868,39 @@ git commit -m "feat(cajas): el encargado cierra la caja de un ausente y pide tes
 
 ---
 
+## Task 6b (INSERTADA 2026-08-13, no estaba en el plan original): forzar el cierre pasa a ser operativo
+
+**Por qué se insertó:** la revisión independiente de la Task 6 mostró que quien fuerza un
+cierre **siempre ve el esperado** —forzar exigía ser admin del tenant, y el modo ciego exime
+al admin—, así que el "cuenta a ciegas" de la spec no lo ejercía nadie. El owner decidió que
+la causa era el requisito, no el ciego: *"el administrador no siempre estará pendiente, hay que
+pasarlo a la operación, esto es parte de la operación"*.
+
+**Decisión 1:** forzar exige **`Cajas:Actualizar`** (el mismo permiso que ya exigía pedir la
+firma desde la Task 6 — las dos mitades del mismo camino tenían puertas distintas). El admin lo
+conserva por el short-circuit de su rol fijo.
+**Decisión 2:** el encargado cuenta a ciegas; el admin mantiene su exención (§3.4). **No hubo
+que implementarlo**: la exención ya estaba escrita como `!esAdmin`, así que sale sola en cuanto
+un no-admin puede forzar. Se verificó con e2e, no se tocó ninguna de las cuatro superficies.
+
+- [x] Autorización de `enviarConteo`/`cerrar`: `esAdmin` → `puedeForzar`, resuelto por
+  `resolverEscrituraCompartida` (dueño con `MiCaja:Actualizar` **o** cualquiera con
+  `Cajas:Actualizar`). Las dos rutas pierden el `@RequiresPermiso` y el piso se comprueba a
+  mano, explícito — nunca borrando el guard sin reemplazo.
+- [x] Seed: `encargado@paris.cl` + rol con `Cajas:Leer` + `Cajas:Actualizar` (no admin).
+  `supervisor@paris.cl` queda intacto: es el arnés del "no-admin al que el ciego sí le aplica".
+- [x] Frontend: el gate pasa de `perms.esAdmin` a `usePermisosCrud('Cajas').puedeActualizar`.
+- [x] E2E: el encargado puede forzar; con el tenant en ciego **no ve `esperado`** y el admin sí
+  sobre la misma caja; `Cajas:Leer` a secas sigue en 403.
+- [x] Mutante: `puedeForzar = true` sin mirar el permiso → muere el 403. Revertido y verificado.
+
+**Lo que dejó abierto** (`docs/agent/pendientes.md`): la spec sigue prometiendo un ciego sin
+excepciones y hay que corregir ese texto; y `Cajas:Actualizar` quedó siendo un permiso grueso
+—gobierna el CRUD de cajones, pedir la firma y forzar el cierre—, elegido a conciencia por el
+owner sobre crear uno nuevo.
+
+---
+
 ## Task 7: Frontend — el garzón, y el smoke en navegador
 
 **Files:**

@@ -294,16 +294,30 @@ describe('CajaController', () => {
     });
   });
 
-  describe('cerrar (fase 2: finalizar, owner-o-admin)', () => {
-    it('computa esAdmin=false para un cajero sin rol admin y delega en cajaService.cerrar', async () => {
+  describe('cerrar (fase 2: finalizar, owner-o-encargado)', () => {
+    it('lanza ForbiddenException si el usuario no tiene MiCaja:Actualizar ni Cajas:Actualizar', async () => {
+      const dto = { lineas: [] } as any;
+      jest.spyOn(rbacService, 'userHasPermiso').mockResolvedValue(false);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      await expect(controller.cerrar(req, 'caja1', dto)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(cajaService.cerrar).not.toHaveBeenCalled();
+    });
+
+    it('puedeForzar=false para el dueño (solo MiCaja:Actualizar) y delega en cajaService.cerrar', async () => {
       const dto = {
         lineas: [{ metodoPagoId: null, motivoDiferenciaId: 'm1' }],
       } as any;
-      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(false);
+      jest
+        .spyOn(rbacService, 'userHasPermiso')
+        .mockImplementation(
+          async (_u, _t, modulo, permiso) =>
+            modulo === 'MiCaja' && permiso === 'Actualizar',
+        );
       jest.spyOn(cajaService, 'cerrar').mockResolvedValue({} as any);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       await controller.cerrar(req, 'caja1', dto);
-      expect(rbacService.userIsTenantAdmin).toHaveBeenCalledWith('u1', 't1');
       expect(cajaService.cerrar).toHaveBeenCalledWith(
         't1',
         'u1',
@@ -313,15 +327,20 @@ describe('CajaController', () => {
       );
     });
 
-    it('computa esAdmin=true para un admin del tenant y delega en cajaService.cerrar', async () => {
+    it('puedeForzar=true para el encargado (Cajas:Actualizar) y delega en cajaService.cerrar', async () => {
       const dto = { lineas: [] } as any;
-      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(true);
+      jest
+        .spyOn(rbacService, 'userHasPermiso')
+        .mockImplementation(
+          async (_u, _t, modulo, permiso) =>
+            modulo === 'Cajas' && permiso === 'Actualizar',
+        );
       jest.spyOn(cajaService, 'cerrar').mockResolvedValue({} as any);
-      const req = { user: { id: 'admin1', tenantId: 't1' } } as any;
+      const req = { user: { id: 'encargado1', tenantId: 't1' } } as any;
       await controller.cerrar(req, 'caja1', dto);
       expect(cajaService.cerrar).toHaveBeenCalledWith(
         't1',
-        'admin1',
+        'encargado1',
         'caja1',
         true,
         dto,
@@ -329,18 +348,34 @@ describe('CajaController', () => {
     });
   });
 
-  describe('enviarConteo (cierre forzado: owner-o-admin)', () => {
-    it('computa esAdmin=false para un cajero sin rol admin y delega en cajaService.enviarConteo', async () => {
+  describe('enviarConteo (cierre forzado: owner-o-encargado)', () => {
+    it('lanza ForbiddenException si el usuario no tiene MiCaja:Actualizar ni Cajas:Actualizar', async () => {
       const dto = {
         lineas: [{ metodoPagoId: null, montoContado: '900' }],
       } as any;
-      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(false);
+      jest.spyOn(rbacService, 'userHasPermiso').mockResolvedValue(false);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      await expect(controller.enviarConteo(req, 'caja1', dto)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(cajaService.enviarConteo).not.toHaveBeenCalled();
+    });
+
+    it('puedeForzar=false para el dueño (solo MiCaja:Actualizar) y delega en cajaService.enviarConteo', async () => {
+      const dto = {
+        lineas: [{ metodoPagoId: null, montoContado: '900' }],
+      } as any;
+      jest
+        .spyOn(rbacService, 'userHasPermiso')
+        .mockImplementation(
+          async (_u, _t, modulo, permiso) =>
+            modulo === 'MiCaja' && permiso === 'Actualizar',
+        );
       jest
         .spyOn(cajaService, 'enviarConteo')
         .mockResolvedValue({ estado: 'cerrada', arqueo: [] } as any);
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       await controller.enviarConteo(req, 'caja1', dto);
-      expect(rbacService.userIsTenantAdmin).toHaveBeenCalledWith('u1', 't1');
       expect(cajaService.enviarConteo).toHaveBeenCalledWith(
         't1',
         'u1',
@@ -350,19 +385,24 @@ describe('CajaController', () => {
       );
     });
 
-    it('computa esAdmin=true para un admin del tenant y delega en cajaService.enviarConteo', async () => {
+    it('puedeForzar=true para el encargado (Cajas:Actualizar) y delega en cajaService.enviarConteo', async () => {
       const dto = {
         lineas: [{ metodoPagoId: null, montoContado: '900' }],
       } as any;
-      jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(true);
+      jest
+        .spyOn(rbacService, 'userHasPermiso')
+        .mockImplementation(
+          async (_u, _t, modulo, permiso) =>
+            modulo === 'Cajas' && permiso === 'Actualizar',
+        );
       jest
         .spyOn(cajaService, 'enviarConteo')
         .mockResolvedValue({ estado: 'en_conciliacion', arqueo: [] } as any);
-      const req = { user: { id: 'admin1', tenantId: 't1' } } as any;
+      const req = { user: { id: 'encargado1', tenantId: 't1' } } as any;
       await controller.enviarConteo(req, 'caja1', dto);
       expect(cajaService.enviarConteo).toHaveBeenCalledWith(
         't1',
-        'admin1',
+        'encargado1',
         'caja1',
         dto,
         true,

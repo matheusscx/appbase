@@ -1,10 +1,12 @@
 // @vitest-environment nuxt
 //
-// El gate del cierre forzado NO es "permiso sobre Cajas" — es admin del
-// tenant. `caja.controller.ts` computa `esAdmin` vía
-// `rbacService.userIsTenantAdmin` y `caja.service.ts` rechaza el cierre ajeno
-// si `!esAdmin`: un supervisor con `Cajas:Actualizar` que no sea admin no
-// puede forzar el cierre, así que el botón tampoco puede aparecerle.
+// El gate del cierre forzado es `Cajas:Actualizar` (decisión del owner
+// 2026-08-13: forzar pasa a ser operativo, no exclusivo del admin del
+// tenant) — `caja.controller.ts` resuelve `puedeForzar` a mano
+// (`resolverEscrituraCompartida`) contra `Cajas:Actualizar` y
+// `caja.service.ts` rechaza el cierre ajeno si `!puedeForzar`. El admin lo
+// conserva vía `usePermisosCrud` (`esAdmin || can(...)`), así que sigue
+// viendo el botón sin necesidad del permiso de módulo.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import CajaCierreForzadoPanel from './CajaCierreForzadoPanel.vue'
@@ -12,11 +14,15 @@ import type { Caja } from '~/stores/caja'
 
 const USUARIO_ACTUAL_ID = 'admin-1'
 
-let esAdmin = true
+let esAdmin = false
+let permisos: string[] = []
 let sesionesAbiertas: { garzonId: string, garzonNombre: string }[] = []
 
 mockNuxtImport('usePermissionsStore', () => {
-  return () => ({ get esAdmin() { return esAdmin } })
+  return () => ({
+    get esAdmin() { return esAdmin },
+    can: (modulo: string, permiso: string) => permisos.includes(`${modulo}:${permiso}`),
+  })
 })
 
 mockNuxtImport('useSesionesGarzon', () => {
@@ -65,7 +71,8 @@ function montar(caja: Caja) {
 }
 
 beforeEach(() => {
-  esAdmin = true
+  esAdmin = false
+  permisos = []
   sesionesAbiertas = []
   cajaStoreMock.testigos = []
   cajaStoreMock.cargarTestigos.mockClear()
@@ -73,7 +80,7 @@ beforeEach(() => {
 })
 
 describe('CajaCierreForzadoPanel — el botón de cerrar la caja de otro', () => {
-  it('la acción de cerrar la caja de otro aparece solo para el admin del tenant', async () => {
+  it('la acción de cerrar la caja de otro aparece para el admin del tenant', async () => {
     esAdmin = true
     const wrapper = await montar(cajaAjenaAbierta())
 
@@ -81,15 +88,34 @@ describe('CajaCierreForzadoPanel — el botón de cerrar la caja de otro', () =>
     expect(wrapper.text()).toContain('Bruno Cajero')
   })
 
-  it('sin ser admin del tenant, el botón no aparece aunque la caja esté abierta y sea ajena', async () => {
+  it('también aparece para un encargado no-admin con Cajas:Actualizar', async () => {
     esAdmin = false
+    permisos = ['Cajas:Actualizar']
+    const wrapper = await montar(cajaAjenaAbierta())
+
+    expect(wrapper.find('[data-qa="cerrar-caja-ajena"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Bruno Cajero')
+  })
+
+  it('con Cajas:Leer a secas (sin Actualizar) el botón NO aparece, aunque la caja esté abierta y sea ajena', async () => {
+    esAdmin = false
+    permisos = ['Cajas:Leer']
     const wrapper = await montar(cajaAjenaAbierta())
 
     expect(wrapper.find('[data-qa="cerrar-caja-ajena"]').exists()).toBe(false)
   })
 
-  it('si la caja es la propia (no ajena), el botón tampoco aparece aunque sea admin', async () => {
-    esAdmin = true
+  it('sin ningún permiso de Cajas ni ser admin, el botón no aparece aunque la caja esté abierta y sea ajena', async () => {
+    esAdmin = false
+    permisos = []
+    const wrapper = await montar(cajaAjenaAbierta())
+
+    expect(wrapper.find('[data-qa="cerrar-caja-ajena"]').exists()).toBe(false)
+  })
+
+  it('si la caja es la propia (no ajena), el botón tampoco aparece aunque tenga Cajas:Actualizar', async () => {
+    esAdmin = false
+    permisos = ['Cajas:Actualizar']
     const wrapper = await montar(cajaAjenaAbierta({ usuarioId: USUARIO_ACTUAL_ID }))
 
     expect(wrapper.find('[data-qa="cerrar-caja-ajena"]').exists()).toBe(false)
@@ -104,6 +130,13 @@ describe('CajaCierreForzadoPanel — pedir firma', () => {
       ...over,
     })
   }
+
+  // El panel de firma comparte el mismo gate que el botón de cerrar (`Cajas:Actualizar`):
+  // estos tests ejercitan lo que pasa DESPUÉS de que alguien ya forzó, así que el permiso
+  // de escritura tiene que estar puesto para que `mostrarPanelFirma` no lo tape.
+  beforeEach(() => {
+    permisos = ['Cajas:Actualizar']
+  })
 
   it('muestra cuántos garzones hay en turno, y avisa cuando no hay ninguno', async () => {
     sesionesAbiertas = []
