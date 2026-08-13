@@ -34,16 +34,17 @@ cajero cuenta (`monto_contado`), generando el reporte de cuadre de caja.
   - Historial de sesiones de caja (propia + todas con permiso especial)
   - Caja virtual (creada automáticamente por tenant para ventas online — excluida de flujos manuales)
   - Permisos granulares vía `@RequiresPermiso` + `PermisosGuard`
+  - Cierre forzado de una caja ajena por el encargado (admin del tenant), con firma de
+    testigo opcional de un garzón en turno — plan `testigo-cierre-forzado`, ver [Modelo de
+    acceso](#modelo-de-acceso-por-permiso). ⚠️ **Backend completo y pantalla del encargado
+    lista; la pantalla del garzón (`/salones`) todavía NO existe** — hoy la firma se puede
+    pedir por API y por UI, pero nadie la puede completar desde ninguna pantalla
 
 - NOT included (future):
   - Integración con pasarela de cobros
   - Cajas de múltiples bodegas / sucursales
   - Reimpresión de recibos de apertura/cierre
   - Conciliación automática con pagos electrónicos
-  - Firma de testigo del cierre forzado (el garzón que da fe de cuánta gente había en
-    turno) — el cierre forzado en sí ya existe, ver [Modelo de
-    acceso](#modelo-de-acceso-por-permiso); lo que falta es el flujo de solicitud/firma
-    (plan `testigo-cierre-forzado`, en curso)
   - Aprobación de cierre por umbral de diferencia (patrón Toast)
   - Reporte agregado de over/short por cajero/motivo/período
 
@@ -84,9 +85,14 @@ que se va deja su caja abierta para siempre y, por `ux_cajas_activa_por_usuario`
 volver a abrir ninguna). Un cierre forzado congela además quién contó
 (`cajas.cerrada_por`) y cuántos garzones había en turno en ese momento
 (`cajas.testigos_disponibles`), y pasa SIEMPRE por conciliación aunque cuadre — nunca
-auto-cierra —, porque ahí es donde va a vivir la firma del testigo. Ese flujo de
-solicitud/firma todavía no existe (sigue en `docs/agent/pendientes.md` / el plan en curso);
-lo que ya funciona hoy es el forzado en sí.
+auto-cierra —, porque ahí es donde vive la firma del testigo: el encargado le pide fe a
+un garzón en turno (`POST /caja/:id/testigos`) y ese garzón firma o rechaza desde su
+propia sesión (`POST /caja/testigos/:id/resolver`, cuenta vinculada o PIN). Sin firma
+alguna, la fase 2 (más abajo) exige un comentario que explique qué pasó.
+
+⚠️ **Estado real al 2026-08-13:** la parte del garzón existe en la API y está cubierta por
+e2e, pero **no tiene pantalla todavía** (`/salones` sin cablear). En la práctica, hoy todo
+cierre forzado termina por la vía del comentario. Ver `docs/ESTADO.md`.
 
 ---
 
@@ -544,9 +550,9 @@ Fuera de alcance de este sub-proyecto, siguen pendientes en
 [`docs/agent/pendientes.md`](../agent/pendientes.md) y documentados en la investigación
 [§6](../agent/investigaciones/2026-07-23-gestion-caja.md#6-poderes-del-encargado-sobre-la-caja-del-cajero-investigación-2026-07-23):
 
-- ~~**Cierre forzado de una caja ajena por el encargado**~~ — implementado, ver [Modelo de
-  acceso](#modelo-de-acceso-por-permiso). Falta la firma de testigo (plan
-  `testigo-cierre-forzado`, en curso).
+- ~~**Cierre forzado de una caja ajena por el encargado, con firma de testigo**~~ —
+  implementado (plan `testigo-cierre-forzado`), ver [Modelo de
+  acceso](#modelo-de-acceso-por-permiso). ⚠️ Falta la pantalla del garzón.
 - **Aprobación de cierre por umbral de diferencia** (patrón Toast: si el over/short supera
   un umbral configurable, requiere aprobación del supervisor).
 - **Ocultar el resultado *después* del cierre** al cajero — en el modo ciego de hoy, al
@@ -765,11 +771,11 @@ justificado, para poder corregir, no solo completar.
 Igual que en el sub-proyecto B, quedan fuera de alcance y registrados en
 [`docs/agent/pendientes.md`](../agent/pendientes.md):
 
-- ~~**Cierre forzado de una caja ajena por el encargado**~~ — implementado: un admin ya
-  puede iniciar el conteo (fase 1) de la caja de otro cajero, no solo finalizar una
-  conciliación que el dueño ya congeló. Ver [Modelo de
-  acceso](#modelo-de-acceso-por-permiso). Falta la firma de testigo (plan
-  `testigo-cierre-forzado`, en curso).
+- ~~**Cierre forzado de una caja ajena por el encargado, con firma de testigo**~~ —
+  implementado (plan `testigo-cierre-forzado`): un admin puede iniciar el conteo (fase 1)
+  de la caja de otro cajero, no solo finalizar una conciliación que el dueño ya congeló, y
+  pedirle fe del conteo a un garzón en turno. Ver [Modelo de
+  acceso](#modelo-de-acceso-por-permiso). ⚠️ Falta la pantalla del garzón.
 - **Aprobación de cierre por umbral de diferencia** (patrón Toast).
 - **Reporte de over/short** agregado (histórico de diferencias por cajero/motivo/período).
 
@@ -1139,6 +1145,36 @@ aplica motivos. Solo hay algo que enviar en `lineas` si el conteo dejó alguna d
 (caja `en_conciliacion`); una caja que se auto-cerró en la fase 1 nunca llega a este
 endpoint.
 
+### GET /caja/:id/testigos — Estado de las solicitudes de testigo
+
+```
+GET /caja/:id/testigos
+Authorization: Bearer <token>
+
+Permiso requerido: Cajas / Leer — lectura de supervisión, igual que `arqueo` /
+                   `cajones-estado`. Nunca `esperado` ni ningún monto: eso lo cubre
+                   `GET /caja/:id/arqueo`, esto es solo estado.
+
+Response (200):
+[
+  {
+    "id": "uuid-testigo",
+    "garzonId": "uuid-garzon",
+    "garzonNombre": "Ana",
+    "estado": "pendiente",
+    "solicitadaEl": "2026-08-13T20:00:00Z",
+    "resueltaEl": null,
+    "comentarioGarzon": null,
+    "viaFirma": null
+  }
+]
+
+"estado" ∈ pendiente | firmada | rechazada | cancelada | caducada. Lo que el encargado
+mira mientras espera la firma (plan `testigo-cierre-forzado`, Task 6): pedir la firma es
+`POST /caja/:id/testigos` (`Cajas:Actualizar`), resolverla es
+`POST /caja/testigos/:id/resolver` (`Salones:Operar`, desde la propia sesión del garzón).
+```
+
 ### PATCH /caja/:id/arqueo/motivos — Override admin sobre una caja cerrada
 
 ```
@@ -1224,7 +1260,11 @@ Authorization: Bearer <token>
 
 Permiso requerido: MiCaja:Leer (propia) o Cajas:Leer (ajena)
 
-Response (200): objeto caja completo con movimientos embebidos.
+Response (200): objeto `Caja` completo (sin movimientos — esos son
+`GET /caja/:id/movimientos`) más `cajonNombre` y `usuarioNombre`, resueltos en una sola
+query liviana a partir de `cajonId`/`usuarioId` (nunca un N+1: una fila por request, no
+una por caja de una lista). `usuarioNombre` es lo que el encargado necesita ver antes de
+forzar el cierre de una caja ajena (plan `testigo-cierre-forzado`, Task 6).
 Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 ```
 
@@ -1419,10 +1459,12 @@ Dos superficies, cada una gateada por su módulo (sidebar en `layouts/dashboard.
 - `pages/cajas/historial.vue` — Historial de **todos los cajeros** del tenant
   (`CajaHistorial` con `todas`; alcance fijo, sin toggle). Soporta `?usuarioId=` (por
   cajero) y `?cajonId=` (por cajón). El alcance "solo propias" vive en `/mi-caja/historial`.
-- `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de
-  operar, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en modo
-  read-only). Botón "Ver historial del cajón" (`?cajonId=` de esa caja) en el header de
-  la tarjeta + back-link "Volver a cajas". 403/404 → redirect a `/cajas`.
+- `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de operar
+  el turno propio, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en
+  modo read-only). Botón "Ver historial del cajón" (`?cajonId=` de esa caja) en el header
+  de la tarjeta + back-link "Volver a cajas". 403/404 → redirect a `/cajas`. Excepción: si
+  la caja está `abierta` y es **ajena**, el admin del tenant ve el botón "Cerrar por el
+  cajero" (`CajaCierreForzadoPanel`, plan `testigo-cierre-forzado`, Task 6).
 - `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
   internos previos al refactor).
 - `pages/configuracion/motivos-diferencia.vue` — CRUD admin-only del catálogo de motivos
@@ -1459,8 +1501,23 @@ sin necesidad.
   `cajaStore.activa?.estado`), arranca directo en fase conciliacion sin repetir el conteo.
   En modo ciego (`cajaStore.arqueoCiego`) oculta esperado/diferencia en vivo durante el
   conteo y, al confirmar (cualquiera de las dos fases), redirige al detalle en vez de solo
-  cerrar el drawer — ver [Cierre ciego](#cierre-ciego-modo-anti-fraude) y [Cierre en dos
-  fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c)
+  cerrar el drawer (prop `redirectBase`, por defecto `/mi-caja`; `/cajas` para el cierre
+  forzado) — ver [Cierre ciego](#cierre-ciego-modo-anti-fraude) y [Cierre en dos
+  fases](#cierre-en-dos-fases--motivos-de-diferencia-sub-proyecto-c). Prop `forzado` (plan
+  `testigo-cierre-forzado`, Task 6): en fase conciliacion, si nadie firmó como testigo
+  (`cajaStore.testigos`) y no hay comentario ya persistido en `caja.comentarioCierre`,
+  exige un comentario para habilitar "Confirmar cierre" — replica en la UI el mismo gate
+  que el backend (`CajaService.cerrar`) para no ser más estricta que él
+- `components/caja/CajaCierreForzadoPanel.vue` — Vive en `pages/cajas/[id].vue` (plan
+  `testigo-cierre-forzado`, Task 6). Gate `perms.esAdmin` (admin del tenant, no un permiso
+  del módulo `Cajas` — ver [Modelo de acceso](#modelo-de-acceso-por-permiso)). Caja
+  `abierta` ajena → tarjeta con dueño + fecha de apertura y botón "Cerrar por el cajero"
+  (abre `CajaCierreDrawer` con `forzado`). Caja `en_conciliacion` por un cierre forzado
+  (`cerradaPor !== usuarioId`) → panel "Pedir firma" (garzones en turno vía
+  `useSesionesGarzon().listarAbiertas()`, excluye a quien ya tiene una solicitud viva) +
+  lista de solicitudes con estado (`GET /caja/:id/testigos`, consultada al montar y tras
+  pedir, sin polling) + botón "Continuar conciliación". Caja `cerrada` por un cierre
+  forzado → nota de que la diferencia es un incidente del cierre, no del cajero
 - `components/caja/CajaArqueoTable.vue` — Tabla (método / esperado / contado / diferencia /
   motivo) para el desglose congelado; usada en el detalle de una caja `cerrada`
   (`/mi-caja/[id]`, `/cajas/[id]`), solo si `arqueo.length > 0` — una caja
@@ -1486,6 +1543,7 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 - `arqueo: ArqueoLinea[]` — líneas del arqueo (preview en vivo o congeladas), poblado por `cargarArqueo()`; se consume desde `CajaCierreDrawer` y `CajaArqueoTable`. `ArqueoLinea.esperado` es `string | null` (nullable desde el modo ciego); incluye `motivoDiferenciaId`/`motivoNombre`/`comentarioDiferencia` (sub-proyecto C)
 - `arqueoCiego: boolean` — `ciego` del último `cargarArqueo()`; consumida por `CajaCierreDrawer` para la rama ciega y por la config de Cajas para el toggle
 - `motivos: MotivoDiferencia[]` — catálogo de motivos de diferencia (sub-proyecto C), poblado por `cargarMotivos()`; consumido por `CajaCierreDrawer` (fase 2) y `CajaArqueoTable` (override admin)
+- `testigos: TestigoEstado[]` — solicitudes de firma de una caja (`GET /caja/:id/testigos`, plan `testigo-cierre-forzado`), poblado por `cargarTestigos()`; consumido por `CajaCierreForzadoPanel` (lista de estado) y `CajaCierreDrawer` (gate del comentario en fase 2, `hayFirmaAlguna`)
 - `loadingActiva` / `loadingResumenTurno: boolean`
 
 **Actions**:
@@ -1498,10 +1556,12 @@ Un único store sirve a ambas superficies — no se partió por módulo de permi
 - `cargarArqueo(cajaId)` — GET /caja/:id/arqueo → puebla `arqueo` y `arqueoCiego` (del `{ ciego, lineas }` de la respuesta)
 - `cargarMotivos(soloActivas?)` — GET /motivos-diferencia → puebla `motivos` (sub-proyecto C)
 - `enviarConteo(cajaId, { lineas, comentario? })` — **fase 1**: POST /caja/:id/conteo; devuelve `{ estado, arqueo }`; si `estado==='cerrada'` limpia `resumenTurno`/`activa`, si `'en_conciliacion'` avanza el `estado` local de `activa`/`detalle` para que el drawer detecte "retomar conciliación" sin recargar (sub-proyecto C)
-- `cerrar(cajaId, { lineas })` — **fase 2**: POST /caja/:id/cerrar; devuelve `{ caja, arqueo }`; limpia `resumenTurno`/`activa` (sub-proyecto C)
+- `cerrar(cajaId, { lineas, comentario? })` — **fase 2**: POST /caja/:id/cerrar; devuelve `{ caja, arqueo }`; solo limpia `resumenTurno`/`activa` si la caja cerrada **es la propia** (`activa.id === cajaId`) — un cierre forzado de la caja de OTRO no puede borrarle al admin su propia sesión de `/mi-caja`; si `detalle.id === cajaId`, lo reemplaza con la `caja` de la respuesta (sub-proyecto C; `comentario` y el guard por `activa.id`, plan `testigo-cierre-forzado`)
 - `justificarDiferencias(cajaId, lineas)` — **override admin**: PATCH /caja/:id/arqueo/motivos; devuelve `{ ciego, lineas }` (sub-proyecto C)
 - `cargarCajonesEstado()` — GET /caja/cajones-estado → puebla `cajonesEstado`
-- `cargarDetalle(id)` — GET /caja/:id → puebla `detalle`
+- `cargarDetalle(id)` — GET /caja/:id → puebla `detalle` (incluye `usuarioNombre`, resuelto en la misma query que `cajonNombre`)
+- `cargarTestigos(cajaId)` — GET /caja/:id/testigos → puebla `testigos` (plan `testigo-cierre-forzado`)
+- `solicitarTestigos(cajaId, garzonIds)` — POST /caja/:id/testigos; recarga `testigos` al terminar (plan `testigo-cierre-forzado`)
 
 ---
 

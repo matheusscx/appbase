@@ -22,8 +22,27 @@ export interface Caja {
   fechaApertura: string
   fechaCierre: string | null
   comentario: string | null
+  /** Comentario del CIERRE — lo escribe la fase 1 (`enviarConteo`) y, si llega uno nuevo, la fase 2 (`cerrar`). Columna separada de `comentario` (la apertura). */
+  comentarioCierre?: string | null
+  /** Quién contó (fase 1). Un cierre es forzado cuando difiere de `usuarioId` (el dueño de la caja). */
+  cerradaPor?: string | null
+  /** Garzones en turno al momento del conteo — congelado, no se recalcula después. */
+  testigosDisponibles?: number | null
   cajonId: string | null
   cajonNombre: string | null
+  /** Nombre del cajero dueño — solo lo resuelve `findOne` (detalle), no el resto de los endpoints. */
+  usuarioNombre?: string | null
+}
+
+export interface TestigoEstado {
+  id: string
+  garzonId: string
+  garzonNombre: string
+  estado: 'pendiente' | 'firmada' | 'rechazada' | 'cancelada' | 'caducada'
+  solicitadaEl: string
+  resueltaEl: string | null
+  comentarioGarzon: string | null
+  viaFirma: 'cuenta' | 'pin' | null
 }
 
 export interface MovimientoCaja {
@@ -108,6 +127,7 @@ export const useCajaStore = defineStore('caja', () => {
   const arqueo = ref<ArqueoLinea[]>([])
   const arqueoCiego = ref(false)
   const motivos = ref<MotivoDiferencia[]>([])
+  const testigos = ref<TestigoEstado[]>([])
   const loadingActiva = ref(false)
   const loadingResumenTurno = ref(false)
 
@@ -255,15 +275,64 @@ export const useCajaStore = defineStore('caja', () => {
 
   async function cerrar(
     cajaId: string,
-    payload: { lineas: { metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }[] },
+    payload: { lineas: { metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }[], comentario?: string },
   ): Promise<{ caja: Caja, arqueo: ArqueoLinea[] }> {
     const res = await useApiFetch<{ caja: Caja, arqueo: ArqueoLinea[] }>(
       `${config.public.apiUrl}/caja/${cajaId}/cerrar`,
       { method: 'POST', body: payload },
     )
-    resumenTurno.value = null
-    activa.value = null
+    // Solo se limpia el turno propio si la caja cerrada es la activa de quien
+    // llama: un admin del tenant puede cerrar la caja de OTRO cajero (cierre
+    // forzado, Task 6) desde /cajas sin que eso le borre su propia sesión de
+    // /mi-caja.
+    if (activa.value?.id === cajaId) {
+      resumenTurno.value = null
+      activa.value = null
+    }
+    if (detalle.value?.id === cajaId) {
+      // MERGE, no reemplazo (revisión independiente, hallazgo 1): `POST
+      // /caja/:id/cerrar` devuelve la ENTIDAD cruda, y `cajonNombre` /
+      // `usuarioNombre` los resuelve solo `findOne` (`GET /caja/:id`).
+      // Pisar el detalle con la entidad los dejaba `undefined` en runtime —
+      // el tipo los declara requeridos, así que `vue-tsc` no lo veía— y el
+      // header pasaba de "Barra" a "Caja" hasta un F5. Peor en el cierre
+      // forzado: el nombre del cajero, que es EL dato de esta feature,
+      // caía al texto de fallback justo al cerrar.
+      detalle.value = {
+        ...detalle.value,
+        ...res.caja,
+        cajonNombre: detalle.value.cajonNombre,
+        usuarioNombre: detalle.value.usuarioNombre,
+      }
+    }
     return res
+  }
+
+  /**
+   * Estado de las solicitudes de testigo de una caja (Task 6): lo que el
+   * encargado mira mientras espera la firma.
+   *
+   * Vacía ANTES de pedir (revisión independiente, hallazgo 4): el array es del
+   * store, no de una caja. Si la carga de la caja B fallaba, quedaban vivas las
+   * firmas de la caja A y `hayFirmaAlguna` daba `true` para B — el gate del
+   * comentario obligatorio se apagaba con datos de otra caja. Vaciar primero
+   * hace que un error degrade hacia el lado seguro: sin firmas conocidas, se
+   * exige la explicación.
+   */
+  async function cargarTestigos(cajaId: string): Promise<void> {
+    testigos.value = []
+    testigos.value = await useApiFetch<TestigoEstado[]>(
+      `${config.public.apiUrl}/caja/${cajaId}/testigos`,
+    )
+  }
+
+  /** El encargado pide fe a uno o varios garzones en turno. Recarga el estado tras pedir. */
+  async function solicitarTestigos(cajaId: string, garzonIds: string[]): Promise<void> {
+    await useApiFetch(`${config.public.apiUrl}/caja/${cajaId}/testigos`, {
+      method: 'POST',
+      body: { garzonIds },
+    })
+    await cargarTestigos(cajaId)
   }
 
   async function justificarDiferencias(
@@ -298,6 +367,7 @@ export const useCajaStore = defineStore('caja', () => {
     arqueo,
     arqueoCiego,
     motivos,
+    testigos,
     loadingActiva,
     loadingResumenTurno,
     cargarActiva,
@@ -308,6 +378,8 @@ export const useCajaStore = defineStore('caja', () => {
     registrarMovimiento,
     enviarConteo,
     cerrar,
+    cargarTestigos,
+    solicitarTestigos,
     justificarDiferencias,
     cargarCajonesEstado,
     cargarDetalle,

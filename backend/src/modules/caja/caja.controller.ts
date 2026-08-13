@@ -298,6 +298,19 @@ export class CajaController {
     return this.cajaTestigoService.pendientesDeGarzon(u.tenantId!, u.id, dto);
   }
 
+  /**
+   * Estado de las solicitudes de testigo de una caja (Task 6): lo que el
+   * encargado mira mientras espera la firma. `Cajas:Leer` — lectura de
+   * supervisión, igual que `arqueo`/`cajones-estado`. Nunca `esperado` ni
+   * monto: eso lo cubre `arqueo`, esto es solo estado.
+   */
+  @Get(':id/testigos')
+  @RequiresPermiso('Cajas', 'Leer')
+  listarTestigos(@Req() req: Request, @Param('id') cajaId: string) {
+    const u = req.user as JwtUser;
+    return this.cajaTestigoService.listar(u.tenantId!, cajaId);
+  }
+
   @Get(':id/movimientos/resumen')
   async resumenMovimientos(@Req() req: Request, @Param('id') cajaId: string) {
     const u = req.user as JwtUser;

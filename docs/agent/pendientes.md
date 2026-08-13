@@ -1043,13 +1043,15 @@ El refactor de IA/permisos y los sub-proyectos A (arqueo multi-medio), B (cierre
 C (cierre en dos fases) **ya se entregaron** — ver [`resueltos.md`](resueltos.md). Lo que
 sigue son los poderes del encargado que se difirieron a propósito:
 
-- [ ] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — habilitar que
-  un usuario con permiso `Cajas` cierre la caja de un cajero que dejó el turno abierto
-  (escenario: cajero que se fue de urgencia). Requiere agregar **`cerrada_por`** a la tabla
-  `cajas` (quién contó/cerró), distinto de `usuario_id` (de quién es el turno): sin ese
-  campo el cierre mentiría sobre quién respondió por el efectivo. Rompe el owner-only del
-  cierre bajo permiso `Cajas:Actualizar`. Mercado: la separación de funciones favorece que
-  un segundo intervenga en el cuadre.
+- [x] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — ✅ **completo**
+  (plan `testigo-cierre-forzado`, backend Tasks 1-5 + frontend Task 6, 2026-08-13): un admin
+  del tenant (no cualquiera con permiso `Cajas`) puede cerrar la caja de un cajero que dejó
+  el turno abierto. `cerrada_por` quedó registrado en `cajas` (quién contó/cerró, distinto
+  de `usuario_id`), rompiendo el owner-only del cierre para el admin del tenant
+  (`RbacService.userIsTenantAdmin`). Suma la firma de testigo: el encargado le pide fe a un
+  garzón en turno, que firma o rechaza desde su propia sesión (cuenta vinculada o PIN); sin
+  firma alguna, la fase 2 exige un comentario que explique qué pasó. Detalle completo:
+  [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#modelo-de-acceso-por-permiso).
   ✅ **Decidido por el owner (2026-08-11): sí, con `cerrada_por` registrado, y la diferencia
   queda como INCIDENTE, no como faltante del cajero.**
   El criterio salió de la 4ª pasada de investigación (§10 de
@@ -1066,6 +1068,9 @@ sigue son los poderes del encargado que se difirieron a propósito:
   caja física abierta por tenant+usuario**, una caja que su dueño no vuelve a cerrar deja a
   esa persona **sin poder abrir caja nunca más**. Sin cierre forzado, ese bloqueo necesita
   otra salida igual.
+  Sigue sin migrar a `resueltos.md` por dos motivos: el ítem de abajo (aprobación por umbral)
+  todavía referencia el cruce sin resolver contra este, y **falta la pantalla del garzón**
+  (Task 7) — hasta que exista, la firma se puede pedir pero no completar desde la UI.
 - [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
   si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
   aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más

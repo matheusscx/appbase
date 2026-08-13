@@ -10,6 +10,7 @@ const cajaStore = useCajaStore()
 // Justificar la diferencia de arqueo es del admin del tenant, no un permiso del
 // módulo: por eso queda el store y no `usePermisosCrud`.
 const perms = usePermissionsStore()
+const authStore = useAuthStore()
 const toast = useToast()
 const loading = ref(true)
 
@@ -74,6 +75,8 @@ onMounted(async () => {
             :historial-url="historialCajonUrl"
             historial-label="Ver historial"
           />
+
+          <CajaCierreForzadoPanel :caja="cajaStore.detalle" :usuario-actual-id="authStore.user?.id" />
 
           <UCard v-if="cajaStore.detalle.estado === 'cerrada' && cajaStore.arqueo.length > 0" class="w-full">
             <template #header>

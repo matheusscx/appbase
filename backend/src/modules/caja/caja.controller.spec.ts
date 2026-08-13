@@ -34,6 +34,7 @@ describe('CajaController', () => {
       solicitar: jest.fn(),
       resolver: jest.fn(),
       pendientesDeGarzon: jest.fn(),
+      listar: jest.fn(),
     } as unknown as CajaTestigoService;
 
     rbacService = {
@@ -559,6 +560,26 @@ describe('CajaController', () => {
         dto,
       );
       expect(res).toEqual([]);
+    });
+
+    it('listarTestigos delega en cajaTestigoService.listar con el tenant del token y el cajaId de la ruta', async () => {
+      jest
+        .spyOn(cajaTestigoService, 'listar')
+        .mockResolvedValue([{ id: 'testigo1', estado: 'pendiente' }] as any);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+
+      const res = await controller.listarTestigos(req, 'caja1');
+
+      expect(cajaTestigoService.listar).toHaveBeenCalledWith('t1', 'caja1');
+      expect(res).toEqual([{ id: 'testigo1', estado: 'pendiente' }]);
+    });
+
+    it('listarTestigos exige Cajas:Leer — lectura de supervisión, no de arqueo', () => {
+      const permiso = Reflect.getMetadata(
+        'requires_permiso',
+        CajaController.prototype.listarTestigos,
+      ) as { modulo: string; permiso: string } | undefined;
+      expect(permiso).toEqual({ modulo: 'Cajas', permiso: 'Leer' });
     });
   });
 });

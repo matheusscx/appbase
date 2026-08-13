@@ -1242,7 +1242,9 @@ export class CajaService {
     usuarioId: string,
     cajaId: string,
     tieneVerTodas: boolean,
-  ): Promise<Caja & { cajonNombre: string | null }> {
+  ): Promise<
+    Caja & { cajonNombre: string | null; usuarioNombre: string | null }
+  > {
     const caja = await this.cajaRepo.findOne({
       where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
     });
@@ -1252,19 +1254,36 @@ export class CajaService {
     if (caja.usuarioId !== usuarioId && !tieneVerTodas) {
       throw new ForbiddenException('No tienes acceso a esta caja');
     }
-    // El detalle expone el nombre del cajón (el header lo muestra). La entidad solo
-    // guarda `cajonId`; se resuelve el nombre con una query liviana (una sola por
-    // request, solo para cajas físicas). La virtual tiene cajonId null.
+    // El detalle expone el nombre del cajón (el header lo muestra) y el del
+    // cajero dueño — lo necesita el encargado antes de forzar el cierre de la
+    // caja de otro (Task 6, testigo-cierre-forzado): tiene que ver de quién es
+    // la caja y desde cuándo antes de tocar el conteo. La entidad solo guarda
+    // los IDs; una sola query liviana resuelve los dos (nunca un N+1: una fila
+    // por request, no una consulta por caja en una lista).
     let cajonNombre: string | null = null;
-    if (caja.cajonId) {
-      const rows: { nombre: string }[] = await this.dataSource.query(
-        `SELECT nombre FROM cajones
-          WHERE cajon_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
-        [caja.cajonId, tenantId],
+    let usuarioNombre: string | null = null;
+    if (caja.cajonId || caja.usuarioId) {
+      const rows: {
+        cajon_nombre: string | null;
+        usuario_nombre: string | null;
+        usuario_apellido: string | null;
+      }[] = await this.dataSource.query(
+        `SELECT cj.nombre AS cajon_nombre, u.nombre AS usuario_nombre, u.apellido AS usuario_apellido
+           FROM (SELECT $1::uuid AS cajon_id, $2::uuid AS usuario_id) x
+           LEFT JOIN cajones cj ON cj.cajon_id = x.cajon_id
+                  AND cj.tenant_id = $3 AND cj.eliminado_el IS NULL
+           LEFT JOIN usuarios u ON u.usuario_id = x.usuario_id
+                  AND u.eliminado_el IS NULL`,
+        [caja.cajonId, caja.usuarioId, tenantId],
       );
-      cajonNombre = rows[0]?.nombre ?? null;
+      cajonNombre = rows[0]?.cajon_nombre ?? null;
+      usuarioNombre =
+        [rows[0]?.usuario_nombre, rows[0]?.usuario_apellido]
+          .filter((p): p is string => Boolean(p))
+          .join(' ')
+          .trim() || null;
     }
-    return { ...caja, cajonNombre };
+    return { ...caja, cajonNombre, usuarioNombre };
   }
 
   async resumenMovimientos(

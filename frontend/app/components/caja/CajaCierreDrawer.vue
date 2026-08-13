@@ -2,7 +2,14 @@
 import Decimal from 'decimal.js'
 import type { ArqueoLinea } from '~/stores/caja'
 
-const props = defineProps<{ cajaId: string, resumir?: boolean }>()
+const props = defineProps<{
+  cajaId: string
+  resumir?: boolean
+  /** Cierre forzado (el encargado cierra la caja de OTRO cajero): la fase 2 exige firma o comentario. */
+  forzado?: boolean
+  /** Adónde navegar tras cerrar con éxito, sin la barra final. Por defecto `/mi-caja` (el dueño). */
+  redirectBase?: string
+}>()
 const open = defineModel<boolean>('open', { required: true })
 
 const cajaStore = useCajaStore()
@@ -49,10 +56,22 @@ watch(open, async (isOpen) => {
     const debeResumir = props.resumir ?? cajaStore.activa?.estado === 'en_conciliacion'
     if (debeResumir) {
       fase.value = 'conciliacion'
-      await Promise.all([
+      const cargas = [
         cajaStore.cargarArqueo(props.cajaId),
         cajaStore.cargarMotivos(true),
-      ])
+      ]
+      // Solo el cierre forzado exige firma o comentario (fase 2, más abajo):
+      // sin esto la primera apertura directa en conciliación vería `testigos`
+      // vacío del montaje anterior y gatearía con datos viejos.
+      //
+      // Si la carga de testigos falla, el drawer NO se cae: `cargarTestigos`
+      // ya vació el array, así que el gate degrada hacia el lado seguro —se
+      // pide la explicación— en vez de habilitar el cierre con datos que no
+      // se pudieron leer.
+      if (props.forzado) {
+        cargas.push(cajaStore.cargarTestigos(props.cajaId).catch(() => {}))
+      }
+      await Promise.all(cargas)
     }
     else {
       fase.value = 'conteo'
@@ -101,9 +120,10 @@ async function finalizarExito(arqueoResultante: ArqueoLinea[]) {
   open.value = false
   if (ciego.value) {
     // Revelación: el arqueo se muestra en el detalle. Desde POS, navigateTo
-    // remonta /mi-caja/[id] y su onMounted recarga todo; si ya se está ahí,
-    // es una navegación al mismo destino (no-op).
-    await navigateTo(`/mi-caja/${props.cajaId}`)
+    // remonta /mi-caja/[id] (o /cajas/[id] para el encargado, vía `redirectBase`)
+    // y su onMounted recarga todo; si ya se está ahí, es una navegación al
+    // mismo destino (no-op).
+    await navigateTo(`${props.redirectBase ?? '/mi-caja'}/${props.cajaId}`)
   }
 }
 
@@ -123,7 +143,15 @@ async function enviarConteo() {
     const res = await cajaStore.enviarConteo(props.cajaId, { lineas, comentario: comentario.value || undefined })
 
     if (res.estado === 'en_conciliacion') {
-      await cajaStore.cargarMotivos(true)
+      const cargas = [cajaStore.cargarMotivos(true)]
+      // El cierre forzado recién queda registrado en el backend acá (`cerradaPor`,
+      // `comentarioCierre`): recargar el detalle es lo único que trae esos campos
+      // a `cajaStore.detalle` dentro de la MISMA sesión del drawer, sin lo cual el
+      // panel de "pedir firma" (que depende de ellos) no aparecería hasta un F5.
+      if (props.forzado) {
+        cargas.push(cajaStore.cargarDetalle(props.cajaId), cajaStore.cargarTestigos(props.cajaId))
+      }
+      await Promise.all(cargas)
       fase.value = 'conciliacion'
       toast.add({ title: 'Conteo registrado: hay diferencias por conciliar', color: 'warning' })
       return
@@ -160,11 +188,39 @@ function lineaJustificada(l: ArqueoLinea): boolean {
   return true
 }
 
-const conciliacionCompleta = computed(() => descuadres.value.every(lineaJustificada))
+// ¿Alguien ya dio fe de este conteo? Solo importa en un cierre forzado.
+const hayFirmaAlguna = computed(() => cajaStore.testigos.some(t => t.estado === 'firmada'))
+
+// El comentario de la fase 1 ya cuenta como explicación (decisión del owner,
+// `caja.service.ts` → `cerrar`): si `enviarConteo` ya dejó uno persistido en
+// `caja.comentarioCierre`, no hay que pedirlo de nuevo. Sale de `cajaStore.detalle`
+// (no del `comentario` local, que se resetea al cerrar el drawer) porque es lo
+// único que sigue vivo si el encargado cierra el drawer y retoma más tarde.
+const comentarioPrevio = computed(() =>
+  cajaStore.detalle?.id === props.cajaId ? cajaStore.detalle.comentarioCierre : null,
+)
+
+// Cierre forzado + nadie firmó + sin comentario previo de fase 1: la fase 2
+// no se completa sin que ACÁ se explique qué pasó — el backend (`cerrar`) ya
+// lo exige con un 400; esto evita que el botón se habilite y el 400 sea la
+// única forma de enterarse.
+const requiereComentarioSinTestigo = computed(() =>
+  !!props.forzado && !hayFirmaAlguna.value && !comentarioPrevio.value?.trim(),
+)
+
+const conciliacionCompleta = computed(() =>
+  descuadres.value.every(lineaJustificada)
+  && (!requiereComentarioSinTestigo.value || !!comentario.value.trim()),
+)
 
 async function confirmarCierre() {
   if (!conciliacionCompleta.value) {
-    toast.add({ title: 'Completa el motivo (o comentario) de cada diferencia', color: 'warning' })
+    toast.add({
+      title: requiereComentarioSinTestigo.value && !comentario.value.trim()
+        ? 'Nadie firmó como testigo: explicá qué pasó para poder cerrar'
+        : 'Completa el motivo (o comentario) de cada diferencia',
+      color: 'warning',
+    })
     return
   }
   saving.value = true
@@ -174,7 +230,7 @@ async function confirmarCierre() {
       motivoDiferenciaId: motivoPorClave.value[claveDe(l)] || undefined,
       comentarioDiferencia: comentarioJustificacionPorClave.value[claveDe(l)]?.trim() || undefined,
     }))
-    const res = await cajaStore.cerrar(props.cajaId, { lineas })
+    const res = await cajaStore.cerrar(props.cajaId, { lineas, comentario: comentario.value.trim() || undefined })
     await finalizarExito(res.arqueo)
   }
   catch (e: unknown) {
@@ -278,9 +334,25 @@ async function confirmarCierre() {
         class="space-y-6"
         @submit="confirmarCierre"
       >
-        <p class="text-sm text-muted">
+        <p v-if="descuadres.length > 0" class="text-sm text-muted">
           El conteo no cuadró. Justificá cada diferencia para confirmar el cierre.
         </p>
+        <p v-else-if="props.forzado" class="text-sm text-muted">
+          El conteo cuadró. Es un cierre forzado: pedile firma a un garzón en turno o explicá qué pasó.
+        </p>
+
+        <template v-if="requiereComentarioSinTestigo">
+          <UAlert
+            color="warning"
+            variant="soft"
+            icon="i-lucide-shield-alert"
+            title="Nadie firmó como testigo"
+            description="Sin una firma, hace falta explicar qué pasó para poder cerrar."
+          />
+          <UFormField label="Comentario (obligatorio: nadie firmó)" data-qa="cierre-comentario-sin-testigo">
+            <UInput v-model="comentario" placeholder="¿Qué pasó con el testigo?" class="w-full" />
+          </UFormField>
+        </template>
 
         <div class="space-y-3">
           <div

@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import type { EntityManager } from 'typeorm';
+import { IsNull, type EntityManager } from 'typeorm';
 import { CajaTestigoService } from './caja-testigo.service';
 import { CajaTestigo } from './entities/caja-testigo.entity';
 import { Caja } from './entities/caja.entity';
@@ -227,6 +227,101 @@ describe('CajaTestigoService', () => {
         service.solicitar(TENANT_ID, ADMIN_ID, CAJA_ID, [GARZON_A]),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(sesionesGarzonServiceMock.listarAbiertas).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listar', () => {
+    it('devuelve el estado de cada solicitud, con el nombre del garzón, en una sola query', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        {
+          caja_testigo_id: TESTIGO_ID,
+          garzon_id: GARZON_A,
+          garzon_nombre: 'Garzón A',
+          estado: 'pendiente',
+          solicitada_el: new Date('2026-08-13T10:00:00Z'),
+          resuelta_el: null,
+          comentario_garzon: null,
+          via_firma: null,
+        },
+      ]);
+
+      const r = await service.listar(TENANT_ID, CAJA_ID);
+
+      expect(cajaRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CAJA_ID, tenantId: TENANT_ID, eliminadoEl: IsNull() },
+      });
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      expect(dataSource.query.mock.calls[0][1]).toEqual([CAJA_ID, TENANT_ID]);
+      expect(r).toEqual([
+        {
+          id: TESTIGO_ID,
+          garzonId: GARZON_A,
+          garzonNombre: 'Garzón A',
+          estado: 'pendiente',
+          solicitadaEl: new Date('2026-08-13T10:00:00Z'),
+          resueltaEl: null,
+          comentarioGarzon: null,
+          viaFirma: null,
+        },
+      ]);
+    });
+
+    it('nunca devuelve esperado ni ningún monto — es lectura de estado, no de arqueo', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        {
+          caja_testigo_id: TESTIGO_ID,
+          garzon_id: GARZON_A,
+          garzon_nombre: 'Garzón A',
+          estado: 'firmada',
+          solicitada_el: new Date('2026-08-13T10:00:00Z'),
+          resuelta_el: new Date('2026-08-13T10:05:00Z'),
+          comentario_garzon: null,
+          via_firma: 'pin',
+        },
+      ]);
+
+      const r = await service.listar(TENANT_ID, CAJA_ID);
+
+      expect(r[0]).not.toHaveProperty('esperado');
+      expect(r[0]).not.toHaveProperty('contado');
+      expect(r[0]).not.toHaveProperty('monto');
+
+      // Sobre la SQL y no solo sobre el mapper (revisión independiente,
+      // hallazgo 6): la fila del mock la construyo yo sin montos, así que el
+      // `not.toHaveProperty` de arriba solo cazaría un mapper que INVENTE una
+      // clave — nunca una columna de plata agregada al SELECT. Esto último es
+      // el riesgo real del cierre ciego.
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).not.toMatch(/\besperado\b/);
+      expect(sql).not.toMatch(/\bcontado\b/);
+      expect(sql).not.toMatch(/caja_arqueo_medio/);
+    });
+
+    // El filtro de borrado va en las DOS tablas: la propia y el JOIN de
+    // nombres. Sin el del JOIN, un garzón borrado dejaría la solicitud sin
+    // nombre; sin el de `caja_testigo`, aparecerían solicitudes borradas.
+    it('filtra eliminado_el en caja_testigo Y en el JOIN a garzones, y acota el garzón al tenant', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.listar(TENANT_ID, CAJA_ID);
+
+      const sql = (dataSource.query.mock.calls[0][0] as string).replace(
+        /\s+/g,
+        ' ',
+      );
+      expect(sql).toContain('g.eliminado_el IS NULL');
+      expect(sql).toContain('ct.eliminado_el IS NULL');
+      expect(sql).toContain('g.tenant_id = $2');
+      expect(sql).toContain('ct.tenant_id = $2');
+    });
+
+    it('rechaza pedir el estado de una caja que no existe (o de otro tenant)', async () => {
+      cajaRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.listar(TENANT_ID, CAJA_ID)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(dataSource.query).not.toHaveBeenCalled();
     });
   });
 

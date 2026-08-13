@@ -1606,6 +1606,11 @@ describe('CajaService', () => {
   describe('findOne', () => {
     it('(c) retorna la caja cuando es del usuario', async () => {
       cajaRepo.findOne.mockResolvedValue(mockCajaAbierta);
+      // Sin cajonId (mock) pero CON usuarioId: la query igual corre — resuelve
+      // el nombre del cajero — pero no encuentra ningún cajón que nombrar.
+      dataSource.query.mockResolvedValueOnce([
+        { cajon_nombre: null, usuario_nombre: null, usuario_apellido: null },
+      ]);
 
       const result = await service.findOne(
         TENANT_ID,
@@ -1617,17 +1622,26 @@ describe('CajaService', () => {
       expect(cajaRepo.findOne).toHaveBeenCalledWith({
         where: { id: CAJA_ID, tenantId: TENANT_ID, eliminadoEl: IsNull() },
       });
-      // Sin cajonId (mock) → no se consulta el nombre; cajonNombre queda null.
-      expect(result).toEqual({ ...mockCajaAbierta, cajonNombre: null });
-      expect(dataSource.query).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        ...mockCajaAbierta,
+        cajonNombre: null,
+        usuarioNombre: null,
+      });
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
     });
 
-    it('(c2) resuelve el nombre del cajón para una caja física', async () => {
+    it('(c2) resuelve el nombre del cajón y del cajero en una sola query', async () => {
       cajaRepo.findOne.mockResolvedValue({
         ...mockCajaAbierta,
         cajonId: 'cajon-1',
       });
-      dataSource.query.mockResolvedValueOnce([{ nombre: 'Barra' }]);
+      dataSource.query.mockResolvedValueOnce([
+        {
+          cajon_nombre: 'Barra',
+          usuario_nombre: 'Bruno',
+          usuario_apellido: 'Cajero',
+        },
+      ]);
 
       const result = await service.findOne(
         TENANT_ID,
@@ -1637,11 +1651,21 @@ describe('CajaService', () => {
       );
 
       expect(result.cajonNombre).toBe('Barra');
+      expect(result.usuarioNombre).toBe('Bruno Cajero');
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      expect(dataSource.query).toHaveBeenCalledWith(expect.any(String), [
+        'cajon-1',
+        USUARIO_ID,
+        TENANT_ID,
+      ]);
     });
 
     it('(d) retorna la caja cuando tieneVerTodas=true aunque sea de otro usuario', async () => {
       const cajaOtro = { ...mockCajaAbierta, usuarioId: OTRO_USUARIO };
       cajaRepo.findOne.mockResolvedValue(cajaOtro);
+      dataSource.query.mockResolvedValueOnce([
+        { cajon_nombre: null, usuario_nombre: null, usuario_apellido: null },
+      ]);
 
       const result = await service.findOne(
         TENANT_ID,
@@ -1650,7 +1674,11 @@ describe('CajaService', () => {
         true,
       );
 
-      expect(result).toEqual({ ...cajaOtro, cajonNombre: null });
+      expect(result).toEqual({
+        ...cajaOtro,
+        cajonNombre: null,
+        usuarioNombre: null,
+      });
     });
 
     it('(e) lanza ForbiddenException cuando no es del usuario y tieneVerTodas=false', async () => {

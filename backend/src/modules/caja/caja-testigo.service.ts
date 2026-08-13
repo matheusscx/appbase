@@ -15,7 +15,11 @@ import {
   Repository,
 } from 'typeorm';
 import Decimal from 'decimal.js';
-import { CajaTestigo, ViaFirma } from './entities/caja-testigo.entity';
+import {
+  CajaTestigo,
+  EstadoTestigo,
+  ViaFirma,
+} from './entities/caja-testigo.entity';
 import { Caja } from './entities/caja.entity';
 import { GarzonesService } from '../garzones/garzones.service';
 import type { Garzon } from '../garzones/entities/garzon.entity';
@@ -39,6 +43,22 @@ export interface SolicitudPublica {
   /** `garzones.usuario_id` seteado → esta solicitud se resuelve vía cuenta, sin PIN. */
   garzonVinculado: boolean;
   lineas: LineaTestigo[];
+}
+
+/**
+ * Lo que el ENCARGADO ve mientras espera la firma: estado de cada solicitud
+ * de una caja, nunca `esperado` ni ningún monto — es lectura de estado, no de
+ * arqueo (eso ya lo cubre `obtenerArqueo`/`CajaArqueoTable`).
+ */
+export interface TestigoEstado {
+  id: string;
+  garzonId: string;
+  garzonNombre: string;
+  estado: EstadoTestigo;
+  solicitadaEl: Date;
+  resueltaEl: Date | null;
+  comentarioGarzon: string | null;
+  viaFirma: ViaFirma | null;
 }
 
 /**
@@ -154,6 +174,60 @@ export class CajaTestigoService {
       }
     }
     return testigos;
+  }
+
+  /**
+   * Estado de las solicitudes de una caja, para el encargado que está
+   * esperando la firma (Task 6). Una sola query con JOIN a `garzones` para
+   * el nombre — nunca una por fila — y **sin `esperado` ni monto alguno**:
+   * es lectura de estado, no de arqueo.
+   */
+  async listar(tenantId: string, cajaId: string): Promise<TestigoEstado[]> {
+    const caja = await this.cajaRepo.findOne({
+      where: { id: cajaId, tenantId, eliminadoEl: IsNull() },
+    });
+    if (!caja) {
+      throw new NotFoundException('Caja no encontrada');
+    }
+
+    const rows: {
+      caja_testigo_id: string;
+      garzon_id: string;
+      garzon_nombre: string | null;
+      estado: EstadoTestigo;
+      solicitada_el: Date;
+      resuelta_el: Date | null;
+      comentario_garzon: string | null;
+      via_firma: ViaFirma | null;
+    }[] = await this.dataSource.query(
+      `SELECT ct.caja_testigo_id,
+              ct.garzon_id,
+              g.nombre AS garzon_nombre,
+              ct.estado,
+              ct.solicitada_el,
+              ct.resuelta_el,
+              ct.comentario_garzon,
+              ct.via_firma
+         FROM caja_testigo ct
+         LEFT JOIN garzones g ON g.garzon_id = ct.garzon_id
+                AND g.tenant_id = $2 AND g.eliminado_el IS NULL
+        WHERE ct.caja_id = $1
+          AND ct.tenant_id = $2
+          AND ct.eliminado_el IS NULL
+        ORDER BY ct.solicitada_el ASC`,
+      [cajaId, tenantId],
+    );
+
+    return rows.map((r) => ({
+      id: r.caja_testigo_id,
+      garzonId: r.garzon_id,
+      garzonNombre: r.garzon_nombre ?? 'Garzón',
+      estado: r.estado,
+      solicitadaEl: r.solicitada_el,
+      resueltaEl: r.resuelta_el,
+      comentarioGarzon: r.comentario_garzon,
+      viaFirma: r.via_firma,
+    }));
   }
 
   /**
