@@ -79,6 +79,18 @@ momento; lo que se difiere es abrir estos tres frentes.
   construir la doble vía y probablemente simplificarla más adelante. No es dinero perdido —el
   token propio sigue siendo más fuerte que un PIN tecleado en un tótem compartido— pero conviene
   decidirlo a ojos abiertos y no por inercia.
+  💡 **Refinamiento del owner (2026-08-12), que hace el arreglo mucho más chico:** si el garzón
+  **tiene cuenta**, fija su propio PIN **desde su cuenta**. La cuenta es el ancla de
+  autenticación, así que no hace falta inventar ningún mecanismo nuevo para dejarlo elegir un
+  secreto: ya está autenticado cuando lo hace.
+  Eso parte el problema en dos, y la primera mitad es barata:
+  - **Con cuenta** → el garzón fija su PIN, el encargado nunca lo ve. **Prueba.**
+  - **Sin cuenta** → el encargado sigue emitiéndolo. Identifica, no prueba.
+
+  El principio que queda, y conviene decirlo así en producto: **la fuerza del registro escala
+  con si la persona tiene cuenta.** No es una limitación escondida, es una elección del local —
+  y el escenario ideal, dicho por el owner, es que **los testigos tengan cuenta**.
+
   ✅ **Decidido (owner, 2026-08-12): primero se termina el testigo, después esto.** La doble vía
   no se tira aunque el PIN mejore: un token propio sigue siendo más fuerte que un PIN tecleado en
   un tótem compartido. Y este cambio toca sesiones, comandas y propinas — merece su propio

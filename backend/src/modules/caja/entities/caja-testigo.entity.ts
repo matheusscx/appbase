@@ -17,6 +17,15 @@ export type EstadoTestigo =
   | 'caducada';
 
 /**
+ * Cómo se probó la identidad al resolver. `cuenta` = el garzón está vinculado
+ * a una cuenta (`garzones.usuario_id`) y el JWT que llamó era esa cuenta —
+ * prueba fuerte, no se puede esquivar yendo al tótem. `pin` = identificación
+ * por PIN, como el resto del sistema — el tótem compartido no prueba de qué
+ * cuenta salió el request, solo que alguien tecleó el PIN correcto.
+ */
+export type ViaFirma = 'cuenta' | 'pin';
+
+/**
  * Quién dio fe de un conteo de caja. Las filas son **hechos con hora**: se
  * insertan y se resuelven una vez, nunca se editan ni se borran. El soft delete
  * está por convención del repo; ninguna operación de esta feature lo usa.
@@ -48,6 +57,7 @@ export type EstadoTestigo =
   'chk_caja_testigo_estado',
   `"estado" IN ('pendiente','firmada','rechazada','cancelada','caducada')`,
 )
+@Check('chk_caja_testigo_via_firma', `"via_firma" IN ('cuenta','pin')`)
 export class CajaTestigo {
   @PrimaryGeneratedColumn('uuid', { name: 'caja_testigo_id' })
   id: string;
@@ -83,6 +93,31 @@ export class CajaTestigo {
 
   @Column({ name: 'resuelta_el', type: 'timestamptz', nullable: true })
   resueltaEl: Date | null;
+
+  /**
+   * Qué cuenta envió la resolución — el hecho crudo. Con `via_firma: 'pin'`
+   * es la cuenta del dispositivo/tótem, NO la del garzón (el garzón no tiene
+   * login). Se guarda siempre, en las dos vías: es lo que permite auditar
+   * "quién tecleó esto" incluso cuando la identidad del garzón se probó por
+   * PIN y no por cuenta.
+   */
+  @Column({ name: 'resuelta_por_usuario_id', type: 'uuid', nullable: true })
+  resueltaPorUsuarioId: string | null;
+
+  /**
+   * Cómo se probó la identidad — decisión del owner (2026-08-12): se
+   * **guarda**, no se deriva, y es la única excepción documentada a la regla
+   * general de este módulo (derivar en vez de guardar conclusiones, ver
+   * `Caja.cerradaPor`). El motivo es que lo que habría que comparar para
+   * derivarlo — `garzones.usuario_id` — **puede vincularse y desvincularse
+   * después** de resuelta la firma. Si se derivara, una firma que hoy es
+   * prueba fuerte (vía cuenta) se leería como PIN débil el día que alguien
+   * desvincule esa cuenta, y viceversa. En un registro de auditoría el
+   * veredicto se congela junto con el hecho, no se recalcula contra un
+   * estado que cambia.
+   */
+  @Column({ name: 'via_firma', type: 'text', nullable: true })
+  viaFirma: ViaFirma | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

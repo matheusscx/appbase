@@ -144,6 +144,11 @@ registro de auditoría el veredicto se congela con el hecho.
 **Si el garzón está vinculado, la vía PIN se rechaza para él.** Si no, la vía fuerte sería
 esquivable con solo ir al tótem, y entonces no prueba nada.
 
+**La práctica recomendada, no solo la capacidad (owner, 2026-08-12): que los testigos tengan
+cuenta.** No es un detalle de implementación — es lo que decide si el registro prueba o solo
+identifica, y la pantalla del encargado debería empujar hacia ahí (por ejemplo, mostrando qué
+garzones en turno pueden firmar con prueba y cuáles no).
+
 ⚠️ **El arreglo de fondo queda afuera y anotado:** que el garzón **fije su propio PIN** y el
 encargado no lo vea. Eso no es esta feature — el PIN se usa en sesiones, comandas y propinas —
 y beneficia a todo el sistema, no solo al testigo. Está en [`pendientes.md`](../../agent/pendientes.md).

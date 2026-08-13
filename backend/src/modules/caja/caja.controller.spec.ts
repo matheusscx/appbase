@@ -2,12 +2,14 @@ import 'reflect-metadata';
 import { ForbiddenException } from '@nestjs/common';
 import { CajaController } from './caja.controller';
 import { type CajaService } from './caja.service';
+import { type CajaTestigoService } from './caja-testigo.service';
 import { type RbacService } from '../rbac/rbac.service';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 
 describe('CajaController', () => {
   let controller: CajaController;
   let cajaService: CajaService;
+  let cajaTestigoService: CajaTestigoService;
   let rbacService: RbacService;
 
   beforeEach(() => {
@@ -28,12 +30,22 @@ describe('CajaController', () => {
       cerrar: jest.fn(),
     } as unknown as CajaService;
 
+    cajaTestigoService = {
+      solicitar: jest.fn(),
+      resolver: jest.fn(),
+      pendientesDeGarzon: jest.fn(),
+    } as unknown as CajaTestigoService;
+
     rbacService = {
       userHasPermiso: jest.fn(),
       userIsTenantAdmin: jest.fn(),
     } as unknown as RbacService;
 
-    controller = new CajaController(cajaService, rbacService);
+    controller = new CajaController(
+      cajaService,
+      cajaTestigoService,
+      rbacService,
+    );
     // Por defecto no-admin: el gating de ciego (esAdminTenant) resuelve false salvo
     // que un test lo sobreescriba.
     jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(false);
@@ -467,6 +479,86 @@ describe('CajaController', () => {
         CajaController.prototype.setArqueoCiego,
       ) as unknown[];
       expect(guards).toContain(TenantAdminGuard);
+    });
+  });
+
+  describe('testigos del cierre forzado', () => {
+    it('solicitarTestigos delega en cajaTestigoService.solicitar con tenant, usuario y garzonIds del DTO', async () => {
+      jest
+        .spyOn(cajaTestigoService, 'solicitar')
+        .mockResolvedValue([{ id: 'testigo1' }] as any);
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      const res = await controller.solicitarTestigos(req, 'caja1', {
+        garzonIds: ['g1', 'g2'],
+      });
+      expect(cajaTestigoService.solicitar).toHaveBeenCalledWith(
+        't1',
+        'u1',
+        'caja1',
+        ['g1', 'g2'],
+      );
+      expect(res).toEqual([{ id: 'testigo1' }]);
+    });
+
+    it('resolverTestigo delega en cajaTestigoService.resolver pasando quién llama (u.id)', async () => {
+      jest
+        .spyOn(cajaTestigoService, 'resolver')
+        .mockResolvedValue({ id: 'testigo1', estado: 'firmada' } as any);
+      const dto = { pin: '111111', firma: true };
+      // El controller NO decide con `u.id` — solo lo pasa. Es `resolver`
+      // quien decide qué hacer con esa cuenta: si el garzón está vinculado,
+      // TIENE que coincidir (vía cuenta); si no, es solo el dato de qué
+      // cuenta tecleó el PIN (normalmente el tótem, no un garzón sin cuenta).
+      const req = {
+        user: { id: 'quien-sea-que-llame', tenantId: 't1' },
+      } as any;
+      const res = await controller.resolverTestigo(req, 'testigo1', dto);
+      expect(cajaTestigoService.resolver).toHaveBeenCalledWith(
+        't1',
+        'testigo1',
+        'quien-sea-que-llame',
+        dto,
+      );
+      expect(res).toEqual({ id: 'testigo1', estado: 'firmada' });
+    });
+
+    it('resolverTestigo NO tiene Cajas:Actualizar — el garzón no tiene permisos de caja', () => {
+      const permiso = Reflect.getMetadata(
+        'requires_permiso',
+        CajaController.prototype.resolverTestigo,
+      ) as { modulo: string; permiso: string } | undefined;
+      expect(permiso).not.toEqual({ modulo: 'Cajas', permiso: 'Actualizar' });
+    });
+
+    it('resolverTestigo SÍ tiene Salones:Operar — ronda 3, sin esto cualquier token del tenant llegaba al handler', () => {
+      const permiso = Reflect.getMetadata(
+        'requires_permiso',
+        CajaController.prototype.resolverTestigo,
+      ) as { modulo: string; permiso: string } | undefined;
+      expect(permiso).toEqual({ modulo: 'Salones', permiso: 'Operar' });
+    });
+
+    it('pendientesDeGarzon tiene Salones:Operar — ronda 3, sin esto exponía montos a cualquier usuario del tenant', () => {
+      const permiso = Reflect.getMetadata(
+        'requires_permiso',
+        CajaController.prototype.pendientesDeGarzon,
+      ) as { modulo: string; permiso: string } | undefined;
+      expect(permiso).toEqual({ modulo: 'Salones', permiso: 'Operar' });
+    });
+
+    it('pendientesDeGarzon delega en cajaTestigoService.pendientesDeGarzon con el tenant, quién llama y la credencial del body', async () => {
+      jest
+        .spyOn(cajaTestigoService, 'pendientesDeGarzon')
+        .mockResolvedValue([]);
+      const dto = { garzonId: 'garzon1', pin: '111111' };
+      const req = { user: { id: 'u1', tenantId: 't1' } } as any;
+      const res = await controller.pendientesDeGarzon(req, dto);
+      expect(cajaTestigoService.pendientesDeGarzon).toHaveBeenCalledWith(
+        't1',
+        'u1',
+        dto,
+      );
+      expect(res).toEqual([]);
     });
   });
 });

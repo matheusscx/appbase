@@ -955,11 +955,26 @@ CREATE TABLE "caja_testigo" (
   "comentario_garzon" TEXT,
   "solicitada_el"    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "resuelta_el"      TIMESTAMPTZ,
+  -- Qué cuenta ENVIÓ la resolución (el hecho crudo) — con "via_firma" = 'pin'
+  -- es la cuenta del dispositivo/tótem, NO la del garzón (no tiene login).
+  "resuelta_por_usuario_id" UUID REFERENCES "usuarios" ("usuario_id"),
+  -- Cómo se probó la identidad: 'cuenta' (el garzón está vinculado vía
+  -- garzones.usuario_id Y el JWT que llamó era esa cuenta — prueba fuerte,
+  -- no se esquiva yendo al tótem) | 'pin' (identificación por PIN, como el
+  -- resto del sistema). SE GUARDA, no se deriva —única excepción a la regla
+  -- general del módulo (ver cajas.cerrada_por)— porque garzones.usuario_id
+  -- puede vincularse/desvincularse DESPUÉS de resuelta la firma: derivarlo
+  -- haría que una firma que hoy es prueba fuerte se lea como PIN débil el
+  -- día que alguien desvincule esa cuenta. El veredicto se congela con el
+  -- hecho, decisión del owner 2026-08-12.
+  "via_firma"        TEXT,
   "creado_el"        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
   "eliminado_el"     TIMESTAMPTZ,
   CONSTRAINT chk_caja_testigo_estado
-    CHECK ("estado" IN ('pendiente','firmada','rechazada','cancelada','caducada'))
+    CHECK ("estado" IN ('pendiente','firmada','rechazada','cancelada','caducada')),
+  CONSTRAINT chk_caja_testigo_via_firma
+    CHECK ("via_firma" IN ('cuenta','pin'))
 );
 CREATE INDEX "idx_caja_testigo_caja" ON "caja_testigo" ("caja_id");
 -- Solo bloquea estados VIVOS ('pendiente', 'firmada'): no se puede tener dos
