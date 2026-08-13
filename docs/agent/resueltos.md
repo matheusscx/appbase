@@ -4688,3 +4688,64 @@ Decisión de alcance, no bug — lo levantó la revisión independiente de la Ta
   **no** en el panel de resumen del turno — ese ítem hermano sigue abierto, sin tocar acá: es
   el mismo problema de fondo —el ciego se definió vista por vista y no como una propiedad de
   "quién puede ver qué"—.
+
+---
+
+## Cierre forzado de caja ajena por el encargado, con firma de testigo (cerrado 2026-08-13)
+
+**Entregado completo** por el plan `testigo-cierre-forzado` (tasks 1-8 + la 6b insertada por
+decisión del owner). Ciclo de punta a punta, verificado en navegador contra el stack real:
+el encargado cierra la caja de un cajero ausente desde `/cajas/:id`, le pide fe a un garzón
+en turno, y el garzón firma o rechaza desde `/salones`.
+
+Lo que quedó, además de lo que pedía la entrada original:
+
+- **Forzar es operativo, no del admin del tenant** (`Cajas:Actualizar`) — el owner lo
+  corrigió el 2026-08-13: *"el administrador no siempre estará pendiente"*. Efecto que salió
+  gratis: como el modo ciego exime solo al admin, **el encargado cuenta a ciegas cuando el
+  tenant tiene el modo ciego activo** (`tenants.arqueo_ciego`, opt-in, default `false`) —
+  antes de esto, forzar y estar exento del ciego eran la misma condición, así que la promesa
+  del diseño no la podía cumplir nadie.
+- **Dos vías de firma**, congeladas en el registro (`via_firma`): por cuenta vinculada
+  (prueba fuerte) o por PIN (identifica al garzón, no prueba quién lo tecleó).
+- **Sin firma hay que explicar**, y el comentario de la fase 1 alcanza. `testigos_disponibles`
+  hace verificable el "no había a quién pedirle".
+- La solicitud solo se puede pedir con **el conteo ya congelado**, que es lo que hace que la
+  firma valga; cubierto por un mutante en e2e.
+
+Detalle funcional: [`gestion-cajas.md`](../features/gestion-cajas.md#ciclo-de-vida-de-una-solicitud-de-testigo).
+
+**Lo que NO cerró y sigue abierto en `pendientes.md`** (no se arrastra acá): la aprobación por
+umbral de diferencia, el texto de la spec que promete un ciego sin excepciones, y que
+`Cajas:Actualizar` quedó siendo un permiso grueso.
+
+### Texto original de la entrada
+
+- [x] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — ✅ **completo**
+  (plan `testigo-cierre-forzado`, backend Tasks 1-5 + frontend Task 6, 2026-08-13): un admin
+  del tenant (no cualquiera con permiso `Cajas`) puede cerrar la caja de un cajero que dejó
+  el turno abierto. `cerrada_por` quedó registrado en `cajas` (quién contó/cerró, distinto
+  de `usuario_id`), rompiendo el owner-only del cierre para el admin del tenant
+  (`RbacService.userIsTenantAdmin`). Suma la firma de testigo: el encargado le pide fe a un
+  garzón en turno, que firma o rechaza desde su propia sesión (cuenta vinculada o PIN); sin
+  firma alguna, la fase 2 exige un comentario que explique qué pasó. Detalle completo:
+  [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#modelo-de-acceso-por-permiso).
+  ✅ **Decidido por el owner (2026-08-11): sí, con `cerrada_por` registrado, y la diferencia
+  queda como INCIDENTE, no como faltante del cajero.**
+  El criterio salió de la 4ª pasada de investigación (§10 de
+  [`investigaciones/2026-07-23-gestion-caja.md`](investigaciones/2026-07-23-gestion-caja.md)):
+  el estándar condiciona la responsabilidad del cajero a **dos** requisitos acumulativos
+  —acceso exclusivo **y** oportunidad de estar presente en el conteo—, así que contar sin él
+  **cae la imputación**. No pasa a nombre de quien contó: eso no existe como doctrina.
+  🇨🇱 Y pesa un dato legal: sin **asignación de pérdida de caja** pactada, en Chile **no se
+  puede descontar** un faltante del sueldo (DT, ORD. N°4229). La atribución vale como
+  **prueba, no como cobro** — lo que hay que asegurar es la trazabilidad, no el culpable.
+  ⚠️ **Validar con abogado antes de escribir la regla**: la fuente es doctrina de la DT
+  leída por un agente, no asesoría legal.
+  Pesó una consecuencia operativa que no estaba escrita acá: como solo puede haber **una
+  caja física abierta por tenant+usuario**, una caja que su dueño no vuelve a cerrar deja a
+  esa persona **sin poder abrir caja nunca más**. Sin cierre forzado, ese bloqueo necesita
+  otra salida igual.
+  Sigue sin migrar a `resueltos.md` por dos motivos: el ítem de abajo (aprobación por umbral)
+  todavía referencia el cruce sin resolver contra este, y **falta la pantalla del garzón**
+  (Task 7) — hasta que exista, la firma se puede pedir pero no completar desde la UI.

@@ -32,6 +32,41 @@ en el resto de `docs/`, no más bajo.
 
 ## ✅ Construido
 
+### Testigo del cierre de caja — el que originó este archivo
+
+**Nosotros:** cuando un encargado cierra la caja de un cajero ausente, un garzón en turno
+puede **dar fe del conteo** desde su propia pantalla. Ve lo que se contó —nunca lo esperado,
+así no se rompe el cierre ciego—, y puede **rechazar**. Firma **desde su cuenta** si la
+tiene (la prueba fuerte: la identidad la da su sesión) o con su PIN si no. El registro
+guarda quién contó, quién dio fe, **por cuál de las dos vías**, a qué hora, **cuánta gente
+había disponible**, y si no hubo testigo, por qué.
+**El mercado:** **ninguno de los POS relevados documenta un campo de testigo ni una segunda
+firma en el cierre** — ni siquiera Oracle Xstore, que es enterprise. La doble firma existe
+hace décadas —en formularios de papel y en políticas de manejo de efectivo— pero **no está
+en el software**.
+⚠️ A diferencia de las otras entradas de este archivo, la investigación que lo respalda
+(§10.9.2) **no enumera el universo relevado** para esta afirmación puntual. Hasta que se
+enumere, comunicar "de los que relevamos", nunca "ninguno en el mundo" (regla 2).
+**Por qué le importa:** convierte "confiar o no en el encargado" en un dato auditable. Y en
+Chile, donde un faltante **no se le puede descontar al trabajador** sin asignación pactada,
+lo que vale es exactamente eso: la prueba.
+**Y hay precedente legal**, que es lo que lo hace defendible y no un capricho: el estándar
+condiciona la responsabilidad del cajero a **dos** requisitos —acceso exclusivo y
+oportunidad de estar presente en el conteo—, así que contar sin él **cae la imputación**.
+**Evidencia:** [investigación §10](agent/investigaciones/2026-07-23-gestion-caja.md) ·
+Law Insider (cláusulas de convenios colectivos) · DT Chile ORD. N°4229 · U.S. Bank
+(hold-for-processing) · Oracle Xstore (Till Accountability) ·
+[feature](features/gestion-cajas.md#ciclo-de-vida-de-una-solicitud-de-testigo).
+**Estado:** ✅ Implementado 2026-08-13 ([ESTADO](ESTADO.md)), verificado end-to-end en
+navegador.
+⚠️ La parte legal chilena **está sin validar por un abogado** — no comunicar el ángulo legal
+hasta que lo esté.
+⚠️ **Y una precisión que hay que respetar al comunicarlo:** la
+firma **por PIN identifica al garzón, no prueba quién lo tecleó** —el PIN lo emite el
+encargado y lo ve en claro—. Lo que sí es prueba fuerte es la firma **desde la cuenta** del
+garzón. Se puede decir "queda registrado quién dio fe y por qué vía"; **no** se puede decir
+"nadie puede firmar por otro" sin la aclaración, porque en la vía PIN sí podría.
+
 ### Costeo por promedio ponderado móvil, y no "último costo"
 
 **Nosotros:** el costo de un producto es el promedio ponderado móvil, recalculado en cada
@@ -72,28 +107,6 @@ regla que usamos. **La decisión es nuestra, no copiada.**
 ## 📐 Diseñado, todavía no construido
 
 > No usar en comunicación como si existiera.
-
-### Testigo del cierre de caja — el que originó este archivo
-
-**Nosotros:** cuando un encargado cierra la caja de un cajero ausente, un garzón en turno
-puede **dar fe del conteo** desde su propia pantalla y con su propio PIN. Ve lo que se
-contó —nunca lo esperado, así no se rompe el cierre ciego—, y puede **rechazar**. El
-registro guarda quién contó, quién dio fe y a qué hora, **cuánta gente había disponible**, y
-si no hubo testigo, por qué.
-**El mercado:** **ningún POS tiene campo de testigo ni segunda firma en el cierre.** La
-doble firma existe hace décadas —en formularios de papel y en políticas de manejo de
-efectivo— pero **no está en el software**. Ni siquiera Oracle Xstore, que es enterprise.
-**Por qué le importa:** convierte "confiar o no en el encargado" en un dato auditable. Y en
-Chile, donde un faltante **no se le puede descontar al trabajador** sin asignación pactada,
-lo que vale es exactamente eso: la prueba.
-**Y hay precedente legal**, que es lo que lo hace defendible y no un capricho: el estándar
-condiciona la responsabilidad del cajero a **dos** requisitos —acceso exclusivo y
-oportunidad de estar presente en el conteo—, así que contar sin él **cae la imputación**.
-**Evidencia:** [investigación §10](agent/investigaciones/2026-07-23-gestion-caja.md) ·
-Law Insider (cláusulas de convenios colectivos) · DT Chile ORD. N°4229 · U.S. Bank
-(hold-for-processing) · Oracle Xstore (Till Accountability).
-**Estado:** 📐 Diseñado 2026-08-11. ⚠️ La parte legal chilena **está sin validar por un
-abogado** — no comunicar el ángulo legal hasta que lo esté.
 
 ### Conteo por denominación, configurable por tenant
 

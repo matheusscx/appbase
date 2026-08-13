@@ -1043,34 +1043,15 @@ El refactor de IA/permisos y los sub-proyectos A (arqueo multi-medio), B (cierre
 C (cierre en dos fases) **ya se entregaron** — ver [`resueltos.md`](resueltos.md). Lo que
 sigue son los poderes del encargado que se difirieron a propósito:
 
-- [x] **Cierre forzado de caja ajena por el encargado** (backend + modelo) — ✅ **completo**
-  (plan `testigo-cierre-forzado`, backend Tasks 1-5 + frontend Task 6, 2026-08-13): un admin
-  del tenant (no cualquiera con permiso `Cajas`) puede cerrar la caja de un cajero que dejó
-  el turno abierto. `cerrada_por` quedó registrado en `cajas` (quién contó/cerró, distinto
-  de `usuario_id`), rompiendo el owner-only del cierre para el admin del tenant
-  (`RbacService.userIsTenantAdmin`). Suma la firma de testigo: el encargado le pide fe a un
-  garzón en turno, que firma o rechaza desde su propia sesión (cuenta vinculada o PIN); sin
-  firma alguna, la fase 2 exige un comentario que explique qué pasó. Detalle completo:
-  [`docs/features/gestion-cajas.md`](../features/gestion-cajas.md#modelo-de-acceso-por-permiso).
-  ✅ **Decidido por el owner (2026-08-11): sí, con `cerrada_por` registrado, y la diferencia
-  queda como INCIDENTE, no como faltante del cajero.**
-  El criterio salió de la 4ª pasada de investigación (§10 de
-  [`investigaciones/2026-07-23-gestion-caja.md`](investigaciones/2026-07-23-gestion-caja.md)):
-  el estándar condiciona la responsabilidad del cajero a **dos** requisitos acumulativos
-  —acceso exclusivo **y** oportunidad de estar presente en el conteo—, así que contar sin él
-  **cae la imputación**. No pasa a nombre de quien contó: eso no existe como doctrina.
-  🇨🇱 Y pesa un dato legal: sin **asignación de pérdida de caja** pactada, en Chile **no se
-  puede descontar** un faltante del sueldo (DT, ORD. N°4229). La atribución vale como
-  **prueba, no como cobro** — lo que hay que asegurar es la trazabilidad, no el culpable.
-  ⚠️ **Validar con abogado antes de escribir la regla**: la fuente es doctrina de la DT
-  leída por un agente, no asesoría legal.
-  Pesó una consecuencia operativa que no estaba escrita acá: como solo puede haber **una
-  caja física abierta por tenant+usuario**, una caja que su dueño no vuelve a cerrar deja a
-  esa persona **sin poder abrir caja nunca más**. Sin cierre forzado, ese bloqueo necesita
-  otra salida igual.
-  Sigue sin migrar a `resueltos.md` por dos motivos: el ítem de abajo (aprobación por umbral)
-  todavía referencia el cruce sin resolver contra este, y **falta la pantalla del garzón**
-  (Task 7) — hasta que exista, la firma se puede pedir pero no completar desde la UI.
+- [ ] 🇨🇱 **Validar con un abogado el ángulo legal chileno del testigo** — quedó huérfano al
+  cerrar la entrada del cierre forzado (2026-08-13): la fuente es doctrina de la DT **leída
+  por un agente**, no asesoría legal, y de ella salieron dos afirmaciones que el producto usa
+  como justificación: (a) que la responsabilidad del cajero exige acceso exclusivo **y**
+  oportunidad de estar presente en el conteo, así que contar sin él cae la imputación; (b)
+  que sin asignación de pérdida de caja pactada **no se puede descontar** un faltante del
+  sueldo (ORD. N°4229). `docs/DIFERENCIADORES.md` lo marca "sin validar por un abogado" y
+  **no se puede comunicar el ángulo legal hasta que lo esté** — esta entrada existe para que
+  esa validación tenga quién la reclame, ahora que la entrada que la contenía se archivó.
 - [ ] **La spec del testigo promete un conteo a ciegas sin excepciones, y el producto tiene una**
   — cola de la entrada cerrada por la task 6b (ver `resueltos.md`). El admin del tenant sigue
   exento del ciego incluso forzando el cierre de una caja ajena (decisión explícita del owner
@@ -1101,8 +1082,9 @@ sigue son los poderes del encargado que se difirieron a propósito:
   inflaba cualquier diferencia.
   ✅ **Decidido por el owner (2026-08-11): sí, con umbral configurable por tenant, y el
   cierre queda esperando aprobación.** Bloqueante, no aviso.
-  ⚠️ **Cruce sin resolver con el cierre forzado de acá arriba:** si el encargado cierra la
-  caja de otro y esa diferencia supera el umbral, **¿quién aprueba?** Que se apruebe a sí
+  ⚠️ **Cruce sin resolver con el cierre forzado**, que ya se entregó (2026-08-13, ver
+  [`resueltos.md`](resueltos.md)) — así que este cruce dejó de ser hipotético: si el encargado
+  cierra la caja de otro y esa diferencia supera el umbral, **¿quién aprueba?** Que se apruebe a sí
   mismo anula el control; que lo apruebe un tercero puede no haber a esa hora. Hay que
   contestarlo antes de escribir el flujo, no durante.
   🔶 **Pieza que aportó la investigación (§10.6) y todavía no está decidida:** el precedente

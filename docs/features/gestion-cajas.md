@@ -37,9 +37,9 @@ cajero cuenta (`monto_contado`), generando el reporte de cuadre de caja.
   - Cierre forzado de una caja ajena por el encargado (`Cajas:Actualizar` — operativo, no
     exclusivo del admin del tenant desde el 2026-08-13), con firma de testigo opcional de
     un garzón en turno — plan `testigo-cierre-forzado`, ver [Modelo de
-    acceso](#modelo-de-acceso-por-permiso). ⚠️ **Backend completo y pantalla del encargado
-    lista; la pantalla del garzón (`/salones`) todavía NO existe** — hoy la firma se puede
-    pedir por API y por UI, pero nadie la puede completar desde ninguna pantalla
+    acceso](#modelo-de-acceso-por-permiso) y [Ciclo de vida de una solicitud de
+    testigo](#ciclo-de-vida-de-una-solicitud-de-testigo). Ciclo completo: el encargado pide
+    desde `/cajas/:id` y el garzón firma o rechaza desde `/salones`
 
 - NOT included (future):
   - Integración con pasarela de cobros
@@ -61,7 +61,7 @@ en **dos módulos de permiso y dos superficies de navegación**:
 | Módulo | Permiso | Superficie (frontend) | Qué puede hacer |
 |---|---|---|---|
 | `MiCaja` | `Leer` / `Crear` / `Actualizar` | `/mi-caja*` | El cajero opera **su propio** turno: abrir, registrar movimientos, cerrar con cuadre, ver su propio historial. |
-| `Cajas` | `Leer` (única acción) | `/cajas*` | El encargado **supervisa** todos los cajones del tenant: grid de cajones con su estado, historial de todos (filtro por cajero o por cajón), detalle de cualquier caja — **siempre read-only**, sin botones de operar ni de abrir. |
+| `Cajas` | `Leer` / `Crear` / `Actualizar` / `Eliminar` | `/cajas*`, `/configuracion/cajas` | Con `Leer`, el encargado **supervisa** todos los cajones del tenant: grid con su estado, historial de todos (filtro por cajero o por cajón) y detalle de cualquier caja. `Crear`/`Actualizar`/`Eliminar` gobiernan el **CRUD de cajones** (desde 2026-07-23). Y desde el **2026-08-13**, `Actualizar` habilita además **operar sobre caja ajena**: forzar el cierre de la caja de un cajero ausente y pedirle fe a un garzón en turno (ver [Ciclo de vida](#ciclo-de-vida-de-una-solicitud-de-testigo)). Hasta esa fecha la **superficie `/cajas*` era read-only** —el módulo no, que ya administraba cajones—, y ese ensanche del significado de `Actualizar` está anotado como permiso grueso en [`pendientes.md`](../agent/pendientes.md). |
 
 Un usuario con ambos módulos ve las dos entradas de sidebar de forma independiente:
 "Mi caja" es su propio turno, "Cajas" es supervisión — sin lógica especial para el caso
@@ -114,10 +114,6 @@ testigo: el encargado le pide fe a un garzón en turno (`POST /caja/:id/testigos
 garzón firma o rechaza desde su propia sesión (`POST /caja/testigos/:id/resolver`, cuenta
 vinculada o PIN). Sin firma alguna, la fase 2 (más abajo) exige un comentario que explique
 qué pasó.
-
-⚠️ **Estado real al 2026-08-13:** la parte del garzón existe en la API y está cubierta por
-e2e, pero **no tiene pantalla todavía** (`/salones` sin cablear). En la práctica, hoy todo
-cierre forzado termina por la vía del comentario. Ver `docs/ESTADO.md`.
 
 ---
 
@@ -577,7 +573,7 @@ Fuera de alcance de este sub-proyecto, siguen pendientes en
 
 - ~~**Cierre forzado de una caja ajena por el encargado, con firma de testigo**~~ —
   implementado (plan `testigo-cierre-forzado`), ver [Modelo de
-  acceso](#modelo-de-acceso-por-permiso). ⚠️ Falta la pantalla del garzón.
+  acceso](#modelo-de-acceso-por-permiso).
 - **Aprobación de cierre por umbral de diferencia** (patrón Toast: si el over/short supera
   un umbral configurable, requiere aprobación del supervisor).
 - **Ocultar el resultado *después* del cierre** al cajero — en el modo ciego de hoy, al
@@ -806,10 +802,12 @@ Igual que en el sub-proyecto B, quedan fuera de alcance y registrados en
 [`docs/agent/pendientes.md`](../agent/pendientes.md):
 
 - ~~**Cierre forzado de una caja ajena por el encargado, con firma de testigo**~~ —
-  implementado (plan `testigo-cierre-forzado`): un admin puede iniciar el conteo (fase 1)
-  de la caja de otro cajero, no solo finalizar una conciliación que el dueño ya congeló, y
-  pedirle fe del conteo a un garzón en turno. Ver [Modelo de
-  acceso](#modelo-de-acceso-por-permiso). ⚠️ Falta la pantalla del garzón.
+  implementado (plan `testigo-cierre-forzado`): **el encargado** (`Cajas:Actualizar`, no el
+  admin del tenant — ver [Modelo de acceso](#modelo-de-acceso-por-permiso)) puede iniciar el
+  conteo (fase 1) de la caja de otro cajero, no solo finalizar una conciliación que el dueño
+  ya congeló, y
+  pedirle fe del conteo a un garzón en turno, que firma o rechaza desde `/salones`. Ver
+  [Modelo de acceso](#modelo-de-acceso-por-permiso).
 - **Aprobación de cierre por umbral de diferencia** (patrón Toast).
 - **Reporte de over/short** agregado (histórico de diferencias por cajero/motivo/período).
 
@@ -865,6 +863,71 @@ significaba automáticamente "¿ve el esperado?" (porque solo el admin forzaba) 
 es una política anti-fraude, no una acción operativa. El CRUD de cajones de la misma
 pantalla sigue delegable a `Cajas:Actualizar`. Criterio: `docs/features/roles-permisos.md`,
 sección "Admin-only vs permiso de módulo".
+
+---
+
+## Ciclo de vida de una solicitud de testigo
+
+Cuando el encargado cierra la caja de un cajero ausente, el cajero **no estuvo presente en
+el conteo de su propia plata**. La firma de un testigo existe para que eso quede probado y
+no dependa de la palabra de nadie: un garzón en turno mira lo que se contó y **da fe** o
+**rechaza**, desde su propia pantalla.
+
+### Por qué el conteo se congela ANTES de pedir la firma
+
+Es la regla que hace que la firma valga algo, y por eso `solicitar` **exige que la caja esté
+en `en_conciliacion`** (`CajaTestigoService.solicitar` → 400 si no lo está).
+
+Una firma es un testimonio sobre **números que ya no pueden cambiar**. Con la caja todavía
+`abierta` no hay ningún conteo que mirar: las líneas de `caja_arqueo_medio` las escribe
+únicamente `enviarConteo` (fase 1). O sea que pedir la firma antes no daría una firma sobre
+números provisorios — daría una firma **sobre nada**, y esa firma vale igual para el
+sistema: `hayFirmaDe` la cuenta y el cierre deja de exigir explicación. Es peor que no tener
+testigo: es una prueba vacía que además apaga el control que la reemplazaba. Un e2e cubre
+exactamente ese mutante (`caja-testigo.e2e-spec.ts`, *caso 9 — orden*): permitir pedir
+testigo sobre una caja `abierta` lo pone en rojo.
+
+Por eso también un cierre forzado pasa **siempre** por `en_conciliacion`, cuadre o no: sin
+esa ventana no habría dónde pedir la firma.
+
+### Los estados de una solicitud
+
+| Estado | Cómo se llega | Qué significa |
+|---|---|---|
+| `pendiente` | el encargado la crea (`POST /caja/:id/testigos`) | esperando al garzón |
+| `firmada` | el garzón da fe | **sirve** como testigo: la fase 2 ya no exige comentario |
+| `rechazada` | el garzón no da fe, con comentario opcional | rechazar **no es** firmar: el cierre sigue exigiendo explicación |
+| `cancelada` | **la caja se cerró** (fase 2), con o sin esperar la firma | firmar contra una caja cerrada no tiene sentido |
+| `caducada` | se cerró la sesión del garzón: por él mismo **o por un supervisor** (`cerrarAdmin`) | la firma se valida contra esa sesión; sin sesión no se puede honrar |
+
+Solo se le puede pedir fe a un garzón **con sesión abierta ahora**, y la sesión concreta se
+congela en la fila (`sesion_garzon_id`): es la prueba de que estaba en turno, no solo de
+quién es. Un índice único impide pedirle dos veces al mismo garzón por la misma caja
+mientras la solicitud esté viva.
+
+### Las dos vías de firma, y por qué no son equivalentes
+
+- **Vía cuenta** (`via_firma = 'cuenta'`) — el garzón tiene cuenta propia
+  (`garzones.usuario_id`, y esa cuenta **no** es un tótem). La firma **exige el JWT de esa
+  cuenta** y el PIN ni se mira. Es la prueba fuerte.
+- **Vía PIN** (`via_firma = 'pin'`) — sin cuenta propia. El PIN **identifica al garzón, no
+  prueba quién lo tecleó**: lo emite el encargado y lo ve en claro al crearlo o
+  regenerarlo. Es el mejor control disponible en un dispositivo compartido, y su límite está
+  documentado, no escondido.
+
+Cuál se usó queda **congelado en la fila**, junto con la cuenta que efectivamente mandó el
+request (`resuelta_por_usuario_id`). Un registro que dice "firmó por PIN desde el tótem" es
+honesto; uno que solo dijera "firmó" no lo sería.
+
+Consecuencia práctica: **si los testigos tienen cuenta propia, la firma prueba mucho más**.
+
+### Sin firma, hay que explicar
+
+La fase 2 de un cierre forzado exige **una firma o un comentario**. El comentario de la fase
+1 alcanza como explicación —es el mismo hecho, contado cuando ocurrió—, así que no se pide
+dos veces. Y la **fase 1** congela además **cuántos garzones había en turno**
+(`cajas.testigos_disponibles`, en `enviarConteo`): "no había a quién pedirle" es verificable,
+no una excusa — y se mide en el momento del conteo, no al cerrar.
 
 ---
 
@@ -1229,6 +1292,48 @@ mira mientras espera la firma (plan `testigo-cierre-forzado`, Task 6): pedir la 
 `POST /caja/:id/testigos` (`Cajas:Actualizar`), resolverla es
 `POST /caja/testigos/:id/resolver` (`Salones:Operar`, desde la propia sesión del garzón).
 ```
+
+### POST /caja/testigos/pendientes — Lo que el GARZÓN ve de sus solicitudes
+
+```
+POST /caja/testigos/pendientes
+Authorization: Bearer <token>
+
+Permiso requerido: Salones / Operar — el mismo piso que el resto de la pantalla del
+                   garzón. El permiso decide quién puede pisar la pantalla; la
+                   credencial de abajo decide de QUÉ garzón puede hablar.
+
+Body (CredencialGarzonOpcionalDto):
+{ "garzonId": "uuid-garzon", "pin": "111111" }   // tótem compartido
+{}                                                // tablet personal: lo dice el JWT
+
+Response (201):
+[
+  {
+    "id": "uuid-testigo",
+    "cajaId": "uuid-caja",
+    "solicitadaEl": "2026-08-13T20:00:00Z",
+    "garzonVinculado": true,
+    "lineas": [
+      { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true, "contado": "50000.0000" }
+    ]
+  }
+]
+```
+
+⚠️ **Es POST y no GET, y no lleva `garzonId` en la ruta, a propósito.** Con un `garzonId` de
+ruta, la cuenta del tótem —que tiene `Salones:Operar`— podía pedir las pendientes de
+**cualquier** garzón del selector, y con ellas los montos contados de cajas ajenas. Acá la
+identidad se prueba igual que en el resto del salón (`resolverGarzonActuante`): con vínculo
+personal la da el JWT y la credencial se ignora; sin vínculo **exige** `garzonId` + PIN
+verificado por `bcrypt`.
+
+⚠️ **`lineas` trae `contado` y nunca `esperado`** — es la puerta de atrás del cierre ciego:
+revelar el esperado acá se lo mostraría al garzón antes que al propio cajero. Un e2e lo
+afirma sobre las **claves exactas** del objeto, no sobre un valor.
+
+`garzonVinculado` le dice a la pantalla cuál de las dos vías de firma corresponde: con
+cuenta vinculada se firma desde esa cuenta y sin PIN; sin vínculo, con PIN.
 
 ### PATCH /caja/:id/arqueo/motivos — Override admin sobre una caja cerrada
 
@@ -1595,6 +1700,27 @@ sin necesidad.
   (sub-proyecto C, `PATCH /caja/:id/arqueo/motivos`), pre-cargado con lo ya justificado
   para poder corregir
 - `components/caja/CajaCajonesGrid.vue` — Grid de cards para la superficie `/cajas` (permiso `Cajas:Leer`): **todos los cajones activos** del tenant con su estado (ocupado/libre), ocupados primero (la propia arriba). Card ocupada → `/cajas/[id]`; card libre (badge "Libre") → `/cajas/historial?cajonId=…`. No permite abrir caja (eso vive en `/mi-caja`)
+
+#### La otra mitad: la pantalla del garzón (módulo Salones)
+
+El testigo tiene **dos superficies**, y la del garzón **no vive acá**: está en `/salones`,
+porque es la pantalla que el garzón ya tiene abierta. Se documenta en esta feature porque es
+donde vive la regla de negocio, pero el código es del módulo Salones.
+
+- `components/salones/SalonesTestigoModal.vue` — Lo que el garzón ve: **lo contado línea por
+  línea, nunca lo esperado** (sin totales ni diferencias, que lo revelarían por resta), y
+  para cada solicitud "Dar fe" o "Rechazar" (el rechazo abre un comentario opcional).
+  **No pide el PIN**: lo recibe ya probado del teclado enmascarado de la pantalla
+  (`solicitarPin`) — un campo de PIN propio sería teclearlo dos veces y dejarlo a la vista en
+  un dispositivo compartido. A un garzón **con cuenta** que opera desde el tótem se le avisa
+  **antes de intentar** que tiene que firmar desde su cuenta (con el dato `garzonVinculado`,
+  no esperando el 403).
+- `pages/salones/index.vue` — El cableado. **Aviso pasivo al entrar** solo en modo personal:
+  ahí el JWT ya dice quién es. En un **tótem compartido no puede haber aviso automático**
+  —nadie sabe quién está parado adelante sin pedir PIN, y pedirlo en cada carga sería
+  absurdo—, así que hay un botón *"¿Te pidieron firmar un cierre?"* como único disparador.
+  Es el límite honesto del dispositivo compartido, no un olvido. **Sin polling** (decisión
+  del owner): se consulta al montar y cuando el garzón lo pide.
 
 ### Pinia Store
 

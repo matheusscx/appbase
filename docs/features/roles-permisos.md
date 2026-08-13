@@ -39,7 +39,14 @@ todos los roles (`RbacService.getMisPermisos` / `userHasPermiso`).
 
 El módulo de permiso `Caja` se renombró a **`MiCaja`** (operar el propio turno; acciones
 `Leer`/`Crear`/`Actualizar`/`Eliminar`, mismo id de siempre) y se creó un módulo nuevo
-**`Cajas`** (supervisar todas, solo `Leer`). La acción global `Ver todas` **dejó de
+**`Cajas`** (supervisar todas). Nació con solo `Leer` y se extendió a
+`Crear`/`Actualizar`/`Eliminar` el 2026-07-23 para el **CRUD de cajones**. Desde el
+**2026-08-13**, `Cajas:Actualizar` habilita además **forzar el cierre de una caja ajena y
+pedir la firma de un testigo**: la misma acción que administra cajones pasó a operar sobre
+la plata de otro. Es un ensanche deliberado (el owner prefirió reusar el permiso a crear uno
+nuevo) y está anotado como **permiso grueso** en
+[`pendientes.md`](../agent/pendientes.md) — tenerlo en cuenta al armar un rol. Ver
+[`gestion-cajas.md`](gestion-cajas.md#modelo-de-acceso-por-permiso). La acción global `Ver todas` **dejó de
 asociarse a caja**: ya no existe `MiCaja:Ver todas`. El diferenciador "supervisor" pasó
 de ser una acción CRUD reutilizada a ser tener contratado el módulo `Cajas` — el patrón
 a seguir si otro módulo necesita separar "operar lo propio" de "supervisar todo", en vez
