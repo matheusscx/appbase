@@ -270,13 +270,26 @@ describe('Caja (e2e) — aislamiento cajero (MiCaja) vs supervisor (Cajas)', () 
       // conciliación AUNQUE CUADRE — ahí vive la firma del testigo.
       expect((res.body as { estado: string }).estado).toBe('en_conciliacion');
 
-      // El mismo admin que forzó también puede finalizar la conciliación
-      // (fase 2, ya cubierto por 'admin finaliza una conciliación ajena' más
-      // abajo — acá solo se cierra para no dejar al cajero trabado).
-      const cerrar = await request(app.getHttpServer())
+      // Nadie firmó como testigo: cerrar sin explicación tiene que
+      // rechazarse (Task 4, `caja.service.ts` `cerrar`/`esForzado`) — esto
+      // protege la regla nueva, no solo la tolera.
+      const sinComentario = await request(app.getHttpServer())
         .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
         .set('Authorization', `Bearer ${tokenSupervisor}`)
         .send({ lineas: [] });
+      expect(sinComentario.status).toBe(400);
+
+      // El mismo admin que forzó también puede finalizar la conciliación
+      // (fase 2, ya cubierto por 'admin finaliza una conciliación ajena' más
+      // abajo — acá solo se cierra, con el comentario que un forzado sin
+      // testigo exige, para no dejar al cajero trabado).
+      const cerrar = await request(app.getHttpServer())
+        .post(`/api/caja/${cajaDelCajeroId}/cerrar`)
+        .set('Authorization', `Bearer ${tokenSupervisor}`)
+        .send({
+          lineas: [],
+          comentario: 'nadie firmó, cierro para no dejar trabado al cajero',
+        });
       expect([200, 201]).toContain(cerrar.status);
     });
 

@@ -17,11 +17,13 @@ import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
 import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferencia.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
+import { CajaTestigoService } from './caja-testigo.service';
 
 const TENANT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
 const USUARIO_ID = 'bbbbbbbb-0000-0000-0000-000000000002';
 const OTRO_USUARIO = 'ffffffff-0000-0000-0000-000000000099';
 const CAJA_ID = 'cccccccc-0000-0000-0000-000000000003';
+const ADMIN_ID = 'eeeeeeee-0000-0000-0000-000000000005';
 
 const mockCajaAbierta: Partial<Caja> = {
   id: CAJA_ID,
@@ -31,6 +33,12 @@ const mockCajaAbierta: Partial<Caja> = {
   estado: 'abierta',
   saldoInicial: '1000',
   eliminadoEl: null,
+  // `null` explícito, no `undefined`: una caja recién abierta que TODAVÍA no
+  // pasó por `enviarConteo` (fase 1) es el único estado real donde
+  // `cerradaPor` no está seteado — `undefined` no es un valor que TypeORM
+  // devuelva (el `findOne` no lleva `select`). Cada test de `cerrar` que le
+  // importa quién contó lo sobreescribe explícitamente.
+  cerradaPor: null,
 };
 
 describe('CajaService', () => {
@@ -58,6 +66,10 @@ describe('CajaService', () => {
   };
   const sesionesGarzonServiceMock = {
     contarAbiertas: jest.fn(),
+  };
+  const cajaTestigoServiceMock = {
+    hayFirmaDe: jest.fn(),
+    cancelarPendientes: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -88,6 +100,12 @@ describe('CajaService', () => {
     // Default: sin garzones en turno. Cada test que le importa el número lo
     // sobreescribe explícitamente (ver describe('enviarConteo')).
     sesionesGarzonServiceMock.contarAbiertas.mockReset().mockResolvedValue(0);
+    // Default: nadie firmó y no hay pendientes que cancelar. Cada test de
+    // `cerrar` que le importa el resultado lo sobreescribe explícitamente.
+    cajaTestigoServiceMock.hayFirmaDe.mockReset().mockResolvedValue(false);
+    cajaTestigoServiceMock.cancelarPendientes
+      .mockReset()
+      .mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -104,6 +122,7 @@ describe('CajaService', () => {
           provide: SesionesGarzonService,
           useValue: sesionesGarzonServiceMock,
         },
+        { provide: CajaTestigoService, useValue: cajaTestigoServiceMock },
       ],
     }).compile();
 
@@ -1035,6 +1054,7 @@ describe('CajaService', () => {
         ...mockCajaAbierta,
         estado: 'en_conciliacion',
         usuarioId: USUARIO_ID,
+        cerradaPor: USUARIO_ID, // el propio dueño contó: no forzado
       });
       managerMock.query.mockResolvedValueOnce([
         { metodo_pago_id: null, diferencia: '-100.0000' },
@@ -1071,11 +1091,15 @@ describe('CajaService', () => {
         ...mockCajaAbierta,
         estado: 'en_conciliacion',
         usuarioId: OTRO_USUARIO,
+        // Sin descuadre (ver abajo), la única forma de llegar acá es forzado
+        // — alguien contó por OTRO_USUARIO. Con firma, no exige comentario.
+        cerradaPor: USUARIO_ID,
       });
       managerMock.query.mockResolvedValueOnce([
         { metodo_pago_id: null, diferencia: '0.0000' },
       ]); // sin descuadre → no exige motivo
       motivosService.hayMotivosActivos.mockResolvedValueOnce(true);
+      cajaTestigoServiceMock.hayFirmaDe.mockResolvedValueOnce(true);
       cajaRepo.findOne.mockResolvedValueOnce({
         ...mockCajaAbierta,
         estado: 'cerrada',
@@ -1099,6 +1123,11 @@ describe('CajaService', () => {
         ...mockCajaAbierta,
         estado: 'en_conciliacion',
         usuarioId: USUARIO_ID,
+        // No forzado: sin esto la caja "forzada por default" (cerradaPor:
+        // null del fixture) pasaría por el motivo equivocado — el 400 de
+        // este test tiene que salir de `aplicarMotivosADescuadres`, no del
+        // comentario obligatorio.
+        cerradaPor: USUARIO_ID,
       });
       managerMock.query.mockResolvedValueOnce([
         { metodo_pago_id: null, diferencia: '-1000.0000' },
@@ -1124,6 +1153,7 @@ describe('CajaService', () => {
         ...mockCajaAbierta,
         estado: 'en_conciliacion',
         usuarioId: USUARIO_ID,
+        cerradaPor: USUARIO_ID, // el propio dueño contó: no forzado
       });
       managerMock.query.mockResolvedValueOnce([
         { metodo_pago_id: null, diferencia: '-1000.0000' },
@@ -1191,6 +1221,7 @@ describe('CajaService', () => {
         ...mockCajaAbierta,
         estado: 'en_conciliacion',
         usuarioId: USUARIO_ID,
+        cerradaPor: USUARIO_ID, // no forzado: mismo motivo que el test anterior
       });
       managerMock.query.mockResolvedValueOnce([
         { metodo_pago_id: null, diferencia: '-1000.0000' },
@@ -1211,6 +1242,251 @@ describe('CajaService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
 
       expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    // "Forzado" se deriva de `cerradaPor !== usuarioId` (dueño de la caja), no
+    // de un flag aparte: `cerradaPor` lo llena SIEMPRE `enviarConteo`.
+    it('cierre forzado sin ninguna firma exige comentario', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: OTRO_USUARIO,
+        cerradaPor: ADMIN_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]); // sin descuadre → no exige motivo
+      cajaTestigoServiceMock.hayFirmaDe.mockResolvedValueOnce(false);
+
+      await expect(
+        service.cerrar(TENANT_ID, ADMIN_ID, CAJA_ID, true, {
+          lineas: [],
+        } as any),
+      ).rejects.toThrow(/comentario/i);
+
+      expect(cajaTestigoServiceMock.hayFirmaDe).toHaveBeenCalledWith(
+        managerMock,
+        TENANT_ID,
+        CAJA_ID,
+      );
+      // Y corta antes de tocar la caja: sigue en_conciliacion.
+      expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    it('cierre forzado CON firma no exige comentario', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: OTRO_USUARIO,
+        cerradaPor: ADMIN_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]);
+      cajaTestigoServiceMock.hayFirmaDe.mockResolvedValueOnce(true);
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: OTRO_USUARIO,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const res = await service.cerrar(TENANT_ID, ADMIN_ID, CAJA_ID, true, {
+        lineas: [],
+      });
+
+      expect(res.caja.estado).toBe('cerrada');
+    });
+
+    it('cierre NORMAL (sin forzar) sin comentario sigue funcionando', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: USUARIO_ID,
+        cerradaPor: USUARIO_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]);
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: USUARIO_ID,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const res = await service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+        lineas: [],
+      });
+
+      expect(res.caja.estado).toBe('cerrada');
+      expect(cajaTestigoServiceMock.hayFirmaDe).not.toHaveBeenCalled();
+    });
+
+    it('al cerrar, las solicitudes de testigo pendientes quedan canceladas', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: OTRO_USUARIO,
+        cerradaPor: ADMIN_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]);
+      cajaTestigoServiceMock.hayFirmaDe.mockResolvedValueOnce(true);
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: OTRO_USUARIO,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.cerrar(TENANT_ID, ADMIN_ID, CAJA_ID, true, {
+        lineas: [],
+      });
+
+      expect(cajaTestigoServiceMock.cancelarPendientes).toHaveBeenCalledWith(
+        managerMock,
+        TENANT_ID,
+        CAJA_ID,
+      );
+    });
+
+    // Fail-closed: `cerradaPor` ausente es hoy inalcanzable (`enviarConteo` lo
+    // llena siempre para llegar a `en_conciliacion`), pero si un `select`
+    // parcial futuro lo dejara afuera, el control tiene que exigir la
+    // explicación en vez de perdonarla en silencio.
+    it('cerradaPor ausente (defensivo) se trata como forzado: exige comentario', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: USUARIO_ID,
+        cerradaPor: null,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]);
+
+      await expect(
+        service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+          lineas: [],
+        } as any),
+      ).rejects.toThrow(/comentario/i);
+
+      expect(managerMock.save).not.toHaveBeenCalled();
+    });
+
+    // Decisión del owner 2026-08-12: el comentario que el encargado ya
+    // escribió en la fase 1 (`enviarConteo`, persistido en
+    // `caja.comentarioCierre` — columna separada de la apertura, ver abajo)
+    // alcanza como explicación — no hace falta uno NUEVO en esta fase.
+    it('el comentario de la fase 1 alcanza: no exige uno nuevo en el DTO', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: OTRO_USUARIO,
+        cerradaPor: ADMIN_ID,
+        comentarioCierre: 'conté solo, no había nadie en turno',
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]);
+      cajaTestigoServiceMock.hayFirmaDe.mockResolvedValueOnce(false);
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: OTRO_USUARIO,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const res = await service.cerrar(TENANT_ID, ADMIN_ID, CAJA_ID, true, {
+        lineas: [],
+      });
+
+      expect(res.caja.estado).toBe('cerrada');
+      const savedCaja = managerMock.save.mock.calls.at(-1)[1];
+      expect(savedCaja.comentarioCierre).toBe(
+        'conté solo, no había nadie en turno',
+      );
+    });
+
+    // Corrección de la revisión (ronda 3 → pivote del owner, ronda 4): la
+    // primera corrección concatenaba fase 1 y fase 2 en la MISMA columna
+    // (`caja.comentario`) — el owner señaló que eso era parchar la confusión,
+    // no arreglarla: el comentario de la APERTURA y el del CIERRE no tienen
+    // nada que ver entre sí y nunca deberían compartir columna. Con
+    // `comentarioCierre` separado de `comentario`, este es el mutante que de
+    // verdad importa: que el cierre NUNCA escriba en la columna de apertura,
+    // ni la pise ni la borre.
+    it('el comentario de la apertura y el del cierre se conservan por separado', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: OTRO_USUARIO,
+        cerradaPor: ADMIN_ID,
+        comentario: 'fondo de $50.000 para el turno de la tarde', // apertura
+        comentarioCierre: null, // fase 1 no dejó nada
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]);
+      cajaTestigoServiceMock.hayFirmaDe.mockResolvedValueOnce(false);
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: OTRO_USUARIO,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.cerrar(TENANT_ID, ADMIN_ID, CAJA_ID, true, {
+        lineas: [],
+        comentario: 'nadie firmó, cierro para no dejar trabado al cajero',
+      });
+
+      const savedCaja = managerMock.save.mock.calls.at(-1)[1];
+      expect(savedCaja.comentario).toBe(
+        'fondo de $50.000 para el turno de la tarde',
+      );
+      expect(savedCaja.comentarioCierre).toBe(
+        'nadie firmó, cierro para no dejar trabado al cajero',
+      );
+    });
+
+    // Minor de la revisión: el DTO acepta `comentario` en CUALQUIER cierre, no
+    // solo en el forzado sin firma — descartarlo en silencio en los demás
+    // casos perdería una explicación que el usuario sí escribió.
+    it('un cierre normal (no forzado) con comentario en el DTO lo guarda', async () => {
+      managerMock.query.mockResolvedValueOnce([{ caja_id: CAJA_ID }]); // lock ok
+      managerMock.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'en_conciliacion',
+        usuarioId: USUARIO_ID,
+        cerradaPor: USUARIO_ID,
+      });
+      managerMock.query.mockResolvedValueOnce([
+        { metodo_pago_id: null, diferencia: '0.0000' },
+      ]);
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'cerrada',
+        usuarioId: USUARIO_ID,
+      });
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.cerrar(TENANT_ID, USUARIO_ID, CAJA_ID, false, {
+        lineas: [],
+        comentario: 'todo ok, cerré rápido',
+      });
+
+      const savedCaja = managerMock.save.mock.calls.at(-1)[1];
+      expect(savedCaja.comentarioCierre).toBe('todo ok, cerré rápido');
     });
   });
 
@@ -1837,6 +2113,10 @@ describe('CajaService.abrir', () => {
         {
           provide: SesionesGarzonService,
           useValue: { contarAbiertas: jest.fn().mockResolvedValue(0) },
+        },
+        {
+          provide: CajaTestigoService,
+          useValue: { hayFirmaDe: jest.fn(), cancelarPendientes: jest.fn() },
         },
       ],
     }).compile();

@@ -85,8 +85,22 @@ export class Caja {
   @Column({ default: 'abierta' })
   estado: string; // 'abierta' | 'en_conciliacion' | 'cerrada'
 
+  // Comentario de la APERTURA (`abrir`) — nunca lo toca el cierre. Antes de
+  // Task 4 del plan `testigo-cierre-forzado`, `enviarConteo` (fase 1 del
+  // cierre) pisaba esta misma columna con el comentario del cierre, y el de
+  // apertura se perdía sin dejar rastro (`docs/agent/resueltos.md`, "El
+  // cierre de caja pisaba el comentario de la apertura"). Separado en
+  // `comentarioCierre` para que ninguno de los dos pise al otro: son hechos
+  // de dos momentos distintos.
   @Column({ type: 'varchar', nullable: true })
   comentario: string | null;
+
+  // Comentario del CIERRE — lo escribe `enviarConteo` (fase 1) y, si llega
+  // uno nuevo, `cerrar` (fase 2) lo actualiza; las dos fases son el mismo
+  // proceso de cierre, así que fase 2 SÍ puede refinar/reemplazar lo que dejó
+  // fase 1 acá. Lo que nunca toca es `comentario` (la apertura, arriba).
+  @Column({ name: 'comentario_cierre', type: 'varchar', nullable: true })
+  comentarioCierre: string | null;
 
   @Column({ name: 'cerrada_por', type: 'uuid', nullable: true })
   cerradaPor: string | null;

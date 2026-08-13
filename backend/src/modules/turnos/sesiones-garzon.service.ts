@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,6 +10,11 @@ import { DataSource, Repository } from 'typeorm';
 import { GarzonesService } from '../garzones/garzones.service';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import { TurnosService } from './turnos.service';
+// `CajaTestigoService` vive en `CajaModule`, que a su vez importa
+// `TurnosModule` (para `SesionesGarzonService`/`GarzonesService`, Task 2/3):
+// sin `forwardRef` acá y en `turnos.module.ts`/`caja.module.ts` los dos
+// módulos quedarían esperándose entre sí al arrancar Nest.
+import { CajaTestigoService } from '../caja/caja-testigo.service';
 import {
   EstadoSesionGarzon,
   OrigenCierreSesion,
@@ -93,6 +100,8 @@ export class SesionesGarzonService {
     private readonly turnos: TurnosService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    @Inject(forwardRef(() => CajaTestigoService))
+    private readonly cajaTestigoService: CajaTestigoService,
   ) {}
 
   async iniciar(
@@ -166,7 +175,18 @@ export class SesionesGarzonService {
     abierta.estado = EstadoSesionGarzon.CERRADA;
     abierta.origenCierre = OrigenCierreSesion.PIN;
     abierta.cerradaPorUsuarioId = null;
-    const guardada = await this.sesionRepo.save(abierta);
+    const guardada = await this.dataSource.transaction(async (manager) => {
+      const guardada = await manager.save(SesionGarzon, abierta);
+      // Una solicitud viva contra una sesión cerrada es un estado imposible
+      // de honrar: la firma se valida contra esa sesión. Mismo `manager` que
+      // el guardado de la sesión, para que las dos escrituras sean atómicas.
+      await this.cajaTestigoService.caducarPorSesion(
+        manager,
+        tenantId,
+        guardada.id,
+      );
+      return guardada;
+    });
 
     const [{ turnoNombre }, cuentasPendientes] = await Promise.all([
       this.cargarNombres(tenantId, guardada.garzonId, guardada.turnoId),
@@ -359,7 +379,18 @@ export class SesionesGarzonService {
     sesion.estado = EstadoSesionGarzon.CERRADA;
     sesion.origenCierre = OrigenCierreSesion.ADMIN;
     sesion.cerradaPorUsuarioId = usuarioId;
-    const guardada = await this.sesionRepo.save(sesion);
+    const guardada = await this.dataSource.transaction(async (manager) => {
+      const guardada = await manager.save(SesionGarzon, sesion);
+      // Mismo motivo que en `cerrarPropia`: las dos vías de cierre de sesión
+      // tienen que caducar las pendientes, o quedan vivas contra una sesión
+      // que ya no existe para validar la firma.
+      await this.cajaTestigoService.caducarPorSesion(
+        manager,
+        tenantId,
+        guardada.id,
+      );
+      return guardada;
+    });
 
     const [{ garzonNombre, turnoNombre }, cuentasPendientes] =
       await Promise.all([

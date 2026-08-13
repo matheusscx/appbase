@@ -10,6 +10,7 @@ import {
 } from './entities/sesion-garzon.entity';
 import { GarzonesService } from '../garzones/garzones.service';
 import { TurnosService } from './turnos.service';
+import { CajaTestigoService } from '../caja/caja-testigo.service';
 import type { Garzon } from '../garzones/entities/garzon.entity';
 import { TipoGarzon } from '../garzones/enums/tipo-garzon.enum';
 import type { Turno } from './entities/turno.entity';
@@ -97,7 +98,9 @@ describe('SesionesGarzonService', () => {
   let sesionRepo: SesionRepo;
   let garzones: { resolverGarzonActuante: jest.Mock };
   let turnos: { getActivoOrThrow: jest.Mock };
-  let dataSource: { query: jest.Mock };
+  let dataSource: { query: jest.Mock; transaction: jest.Mock };
+  let managerMock: { save: jest.Mock };
+  const cajaTestigoServiceMock = { caducarPorSesion: jest.fn() };
 
   beforeEach(async () => {
     sesionRepo = makeSesionRepo();
@@ -107,7 +110,20 @@ describe('SesionesGarzonService', () => {
     turnos = {
       getActivoOrThrow: jest.fn().mockResolvedValue(turno()),
     };
-    dataSource = { query: jest.fn().mockResolvedValue([]) };
+    managerMock = {
+      // Default: persiste tal cual, como hacía `sesionRepo.save` antes de
+      // Task 4 — cada test que le importa el resultado lo sobreescribe.
+      save: jest.fn((_entity: unknown, row: unknown) => Promise.resolve(row)),
+    };
+    dataSource = {
+      query: jest.fn().mockResolvedValue([]),
+      transaction: jest.fn((cb: (m: typeof managerMock) => Promise<unknown>) =>
+        cb(managerMock),
+      ),
+    };
+    cajaTestigoServiceMock.caducarPorSesion
+      .mockReset()
+      .mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -116,6 +132,7 @@ describe('SesionesGarzonService', () => {
         { provide: GarzonesService, useValue: garzones },
         { provide: TurnosService, useValue: turnos },
         { provide: DataSource, useValue: dataSource },
+        { provide: CajaTestigoService, useValue: cajaTestigoServiceMock },
       ],
     }).compile();
 
@@ -219,9 +236,6 @@ describe('SesionesGarzonService', () => {
   it('cerrarPropia cierra y fija finEl', async () => {
     const abierta = sesion();
     sesionRepo.findOne.mockResolvedValue(abierta);
-    sesionRepo.save.mockImplementation((row: SesionGarzon) =>
-      Promise.resolve(row),
-    );
     dataSource.query
       .mockResolvedValueOnce([
         { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
@@ -260,9 +274,6 @@ describe('SesionesGarzonService', () => {
   it('cerrarAdmin registra cerradaPorUsuarioId y origenCierre=admin', async () => {
     const abierta = sesion();
     sesionRepo.findOne.mockResolvedValue(abierta);
-    sesionRepo.save.mockImplementation((row: SesionGarzon) =>
-      Promise.resolve(row),
-    );
     dataSource.query
       .mockResolvedValueOnce([
         { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
@@ -276,6 +287,46 @@ describe('SesionesGarzonService', () => {
     expect(result.cerradaPorUsuarioId).toBe(USUARIO_ID);
     expect(result.finEl).toBeInstanceOf(Date);
     expect(result.cuentasPendientes).toEqual([]);
+  });
+
+  // Las dos vías de cierre de sesión tienen que caducar las pendientes: una
+  // solicitud viva contra una sesión cerrada es un estado imposible de
+  // honrar, porque la firma se valida contra esa sesión (Task 4).
+  it('cerrarPropia caduca las solicitudes de testigo pendientes', async () => {
+    sesionRepo.findOne.mockResolvedValue(sesion());
+    dataSource.query
+      .mockResolvedValueOnce([
+        { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await service.cerrarPropia(TENANT, USUARIO_ID, {
+      garzonId: GARZON_ID,
+      pin: PIN,
+    });
+
+    expect(cajaTestigoServiceMock.caducarPorSesion).toHaveBeenCalledWith(
+      managerMock,
+      TENANT,
+      SESION_ID,
+    );
+  });
+
+  it('cerrarAdmin también caduca las solicitudes de testigo pendientes', async () => {
+    sesionRepo.findOne.mockResolvedValue(sesion());
+    dataSource.query
+      .mockResolvedValueOnce([
+        { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await service.cerrarAdmin(TENANT, SESION_ID, USUARIO_ID);
+
+    expect(cajaTestigoServiceMock.caducarPorSesion).toHaveBeenCalledWith(
+      managerMock,
+      TENANT,
+      SESION_ID,
+    );
   });
 
   // ── Mesas que quedan abiertas al cerrar la sesión ──────────────────────────
@@ -293,9 +344,6 @@ describe('SesionesGarzonService', () => {
 
   it('cerrarPropia devuelve las cuentas que quedaron a nombre del garzón', async () => {
     sesionRepo.findOne.mockResolvedValue(sesion());
-    sesionRepo.save.mockImplementation((row: SesionGarzon) =>
-      Promise.resolve(row),
-    );
     dataSource.query
       .mockResolvedValueOnce([
         { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
@@ -326,9 +374,6 @@ describe('SesionesGarzonService', () => {
 
   it('cerrarAdmin devuelve las mismas cuentas pendientes', async () => {
     sesionRepo.findOne.mockResolvedValue(sesion());
-    sesionRepo.save.mockImplementation((row: SesionGarzon) =>
-      Promise.resolve(row),
-    );
     dataSource.query
       .mockResolvedValueOnce([
         { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },
@@ -349,9 +394,6 @@ describe('SesionesGarzonService', () => {
   // una mesa con cuentas abiertas, que la API bloquea.
   it('la cuenta se lista aunque su mesa o su salón estén borrados', async () => {
     sesionRepo.findOne.mockResolvedValue(sesion());
-    sesionRepo.save.mockImplementation((row: SesionGarzon) =>
-      Promise.resolve(row),
-    );
     dataSource.query
       .mockResolvedValueOnce([
         { garzon_nombre: 'Ana', turno_nombre: 'Almuerzo' },

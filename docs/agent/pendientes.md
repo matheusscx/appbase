@@ -100,16 +100,6 @@ momento; lo que se difiere es abrir estos tres frentes.
   ver [la spec](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md). Eso tapa el
   caso del testigo, **no el de propinas ni el de comandas**.
 
-- [ ] **El cierre de caja pisa el comentario de la apertura** (backend,
-  `caja.service.ts:246` y `:737`, medido 2026-08-11 al planificar el testigo) — las dos
-  operaciones escriben la **misma** columna `cajas.comentario`: `abrir()` guarda el de la
-  apertura y `enviarConteo()` lo sobrescribe con el del cierre. Nadie lo notó porque el
-  comentario de apertura casi no se usa.
-  Sube de prioridad con el testigo del cierre forzado, que **vuelve obligatorio** el
-  comentario en más cierres: más cierres con comentario = más comentarios de apertura
-  perdidos. No se arregló ahí porque es preexistente y arreglarlo es decidir si el de
-  apertura merece columna propia — o si directamente no debería existir.
-
 - [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
   frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya
   admite `tipo IN ('garzon','cocina','barra')`: gente que **no atiende mesas**, con PIN,
@@ -475,6 +465,34 @@ momento; lo que se difiere es abrir estos tres frentes.
   vio todavía el status de la respuesta que rompió el de caja; eso lo va a decir la
   aserción que se agregó el 2026-08-11 la próxima vez que ocurra. Lo que cambió es que ahora
   hay dónde mirar primero: por qué un token válido a mitad de suite se rechaza.
+
+  🆕 **Tercer avistaje (2026-08-12), y ya no puede ser casualidad.** `recetas.e2e-spec.ts` →
+  *"12. un ítem pedido en una cuenta abierta no se puede borrar…"* falló con **401** en
+  `GET /items/:id/uso`. Corrida siguiente, misma suite y mismo `reset-db.sh`: verde, 400/400.
+  **Son tres specs distintos, tres rutas distintas, y las tres veces un 401**
+  (`caja` → `TypeError` sobre un body que no era array, o sea un 401 disfrazado; `ventas` →
+  `POST /ventas`; `recetas` → `GET /items/:id/uso`). Un solo test por corrida, siempre
+  distinto, siempre auth.
+  Eso descarta que sea de un spec: es **un intermitente del camino de autenticación** bajo la
+  suite completa (que corre con `maxWorkers: 1`, así que tampoco es paralelismo). Sospechas a
+  medir, en este orden: expiración del access token a mitad de suite (¿cuánto dura?), y el
+  pool de conexiones bajo la consulta de sesión/permisos.
+  ⚠️ **Importa más de lo que parece:** hace que **cualquier** corrida de CI pueda fallar sin
+  regresión, y entrena a leer un rojo como ruido — que es exactamente cómo pasa desapercibida
+  una regresión real.
+
+  🔗 **Cuarto avistaje (2026-08-12) y la conexión que faltaba.** `garzon-modo-personal.e2e-spec.ts`
+  falló con **400** en `POST /sesiones-garzon/iniciar` — *"ya tiene una sesión abierta"*. No
+  reprodujo: solo pasa 14/14, y la suite completa siguiente dio 400/402 verde.
+  **No es un intermitente nuevo: es la CONSECUENCIA del 401.** Si el 401 pega sobre un `cerrar`
+  de limpieza —y las limpiezas de `afterAll` **no afirman su status**—, la sesión queda abierta
+  en silencio y el siguiente spec que use ese garzón recibe un 400 que no tiene nada que ver.
+  Por eso el síntoma cambia de spec en spec y parece aleatorio.
+  ➡️ **Acción concreta que se puede tomar YA, sin resolver la causa:** que **toda** limpieza de
+  `afterAll` afirme su status. No arregla el 401, pero convierte una cascada silenciosa en un
+  fallo que apunta a su origen. Es el mismo hallazgo que la revisión ya había marcado sobre
+  `caja.e2e-spec.ts` ("la higiene final no verifica status... contamina los describes siguientes
+  en silencio").
 ---
 
 ## Detector de desborde de layout (`e2e/layout/desborde.spec.ts`, 2026-07-29)

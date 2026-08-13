@@ -899,7 +899,15 @@ CREATE TABLE "cajas" (
   -- línea; la caja sigue "ocupada" (bloquea abrir otra, vender, mover) hasta
   -- que la fase 2 (POST /caja/:id/cerrar) justifique las diferencias con un
   -- motivo y finalice a 'cerrada'.
+  -- Comentario de la APERTURA (abrir()) — nunca lo toca el cierre. Antes se
+  -- compartía columna con el comentario del cierre y `enviarConteo` lo pisaba
+  -- sin dejar rastro (docs/agent/resueltos.md, "El cierre de caja pisaba el
+  -- comentario de la apertura"). Separado en comentario_cierre, abajo.
   "comentario"     TEXT,
+  -- Comentario del CIERRE: lo escribe la fase 1 (enviarConteo) y, si llega
+  -- uno nuevo, la fase 2 (cerrar) lo actualiza — mismo proceso de cierre en
+  -- dos pasos, nunca toca "comentario" (la apertura, arriba).
+  "comentario_cierre" TEXT,
   -- Quién EJECUTÓ el cierre, distinto de `usuario_id` (de quién es el turno).
   -- Se guarda SIEMPRE, también en el cierre normal: "forzado" se deriva
   -- (`cerrada_por <> usuario_id`) en vez de guardarse como flag, que podría

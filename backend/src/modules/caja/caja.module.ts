@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Caja } from './entities/caja.entity';
 import { MovimientoCaja } from './entities/movimiento-caja.entity';
@@ -20,7 +20,11 @@ import { GarzonesModule } from '../garzones/garzones.module';
       CajaTestigo,
     ]),
     MotivosDiferenciaModule,
-    TurnosModule,
+    // `forwardRef`: `TurnosModule` importa `CajaModule` de vuelta (Task 4,
+    // `SesionesGarzonService` necesita `CajaTestigoService` para caducar
+    // solicitudes al cerrar una sesión). Sin esto los dos módulos quedan
+    // esperándose entre sí al arrancar Nest.
+    forwardRef(() => TurnosModule),
     // El garzón da fe con su propio PIN: `CajaTestigoService` reusa
     // `GarzonesService.verificarPin` (mismo bcrypt.compare que el resto del
     // sistema de PIN) en vez de duplicarlo. `TurnosModule` no re-exporta

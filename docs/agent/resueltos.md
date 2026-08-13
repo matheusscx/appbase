@@ -2644,6 +2644,36 @@ mutación se aplicó (contando ocurrencias) antes de leer el resultado.
   `anti-patterns.md` (`@click`→arrow inline; spread/índice guardado→`!`; `string|null`→prop
   con `?? undefined`/tipar form; mismatches Nuxt UI·reka; tipado de unit tests vitest).
 
+- [x] **El cierre de caja pisaba el comentario de la apertura** (backend, cerrado
+  2026-08-12 con el plan `testigo-cierre-forzado`, Task 4). **Entrada original
+  (verbatim):** *"(backend, `caja.service.ts:246` y `:737`, medido 2026-08-11 al
+  planificar el testigo) — las dos operaciones escriben la **misma** columna
+  `cajas.comentario`: `abrir()` guarda el de la apertura y `enviarConteo()` lo sobrescribe
+  con el del cierre. Nadie lo notó porque el comentario de apertura casi no se usa. Sube de
+  prioridad con el testigo del cierre forzado, que **vuelve obligatorio** el comentario en
+  más cierres: más cierres con comentario = más comentarios de apertura perdidos. No se
+  arregló ahí porque es preexistente y arreglarlo es decidir si el de apertura merece
+  columna propia — o si directamente no debería existir."*
+  **Cómo se cerró:** columna propia — decisión del owner (2026-08-12), la que la entrada
+  original dejaba pendiente. `cajas.comentario_cierre` (TEXT, nullable) es del CIERRE;
+  `cajas.comentario` queda exclusivamente de la APERTURA. `enviarConteo` (fase 1) dejó de
+  tocar `comentario` y escribe `comentarioCierre`; `cerrar` (fase 2, Task 4 del mismo plan)
+  hace lo mismo si trae un comentario nuevo, sin tocar jamás la columna de apertura. La
+  regla del testigo (fase 2 exige comentario en el cierre forzado sin firma) mira solo
+  `comentarioCierre` — el de esa fase o el que ya haya dejado la fase 1 — así que un
+  comentario de apertura ya no puede satisfacerla, por diseño.
+  **Primer intento, revisado y corregido antes de cerrar la task.** La primera versión no
+  separaba columnas: dejaba `cerrar` escribir en la misma `cajas.comentario` que
+  `enviarConteo`, y para no perder la explicación de fase 1 los concatenaba
+  (`"Conteo: … | Cierre: …"`). La revisión lo bloqueó: concatenar era parchar la confusión
+  entre apertura y cierre, no resolverla — el comentario de apertura y el de cierre no
+  tienen nada que ver entre sí. Se descartó la concatenación y se separaron las columnas.
+  **Lo que fija el mutante que importa:** un test verifica que abrir una caja con
+  comentario y después cerrarla (forzado, sin firma, con un comentario nuevo en la fase 2)
+  conserva **los dos por separado** — `caja.comentario` intacto con el texto de la
+  apertura, `caja.comentarioCierre` con el del cierre. Revertir la escritura de `cerrar`
+  para que vuelva a caer en `caja.comentario` (el bug original) tira ese test.
+
 ---
 
 ## Barrido de permisos en el frontend (2026-07-30)

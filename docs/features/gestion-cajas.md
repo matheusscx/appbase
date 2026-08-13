@@ -652,12 +652,32 @@ el recorrido salía de `lineas`, mandar `{"lineas": []}` cerraba la caja dejando
 sin justificar para siempre (auditoría 2026-07-27). Las líneas que cuadran se ignoran, así
 que un cierre sin descuadres sigue aceptando `lineas: []`.
 
+**`comentario` — obligatorio solo en el cierre forzado sin testigo** (plan
+`testigo-cierre-forzado`, Task 4). "Forzado" se deriva de `cajas.cerrada_por !==
+cajas.usuario_id` (nunca de un flag aparte); si además nadie firmó como testigo
+(`CajaTestigoService.hayFirmaDe`), esta fase exige una explicación — pero el comentario que
+el encargado ya escribió en la fase 1 (`enviarConteo`, persistido en
+`cajas.comentario_cierre`) **alcanza**: es el mismo hecho, contado en el momento en que
+ocurrió, así que no hace falta uno nuevo. Si llega uno nuevo en esta fase, actualiza
+`comentario_cierre` (fase 1 y fase 2 son el mismo proceso de cierre, así que fase 2 puede
+refinar lo que dejó fase 1). Fuera del caso forzado-sin-firma, `comentario` es opcional pero
+se guarda igual si viene (mismo criterio de "no descartar en silencio").
+
+⚠️ **`cajas.comentario_cierre` es una columna DISTINTA de `cajas.comentario`.** La segunda es
+el comentario de la **apertura** (`POST /caja/abrir`) y ninguna fase del cierre la toca — son
+dos hechos de dos momentos que no tienen nada que ver entre sí. Antes de esto compartían
+columna: `enviarConteo` pisaba incondicionalmente lo que `abrir` hubiera guardado, y el
+comentario de apertura se perdía sin dejar rastro apenas la caja pasaba por su primer cierre
+(`docs/agent/resueltos.md`, "El cierre de caja pisaba el comentario de la apertura"). Ver el
+docblock de `comentarioCierre` en la entidad para el detalle.
+
 ```
 POST /caja/:id/cerrar
 Permiso requerido: MiCaja / Actualizar — owner-o-admin (ver más abajo)
-Request: { "lineas": [{ "metodoPagoId": null | string, "motivoDiferenciaId"?: string, "comentarioDiferencia"?: string }, ...] }
+Request: { "lineas": [{ "metodoPagoId": null | string, "motivoDiferenciaId"?: string, "comentarioDiferencia"?: string }, ...], "comentario"?: string }
 Response (200): { "caja": Caja (estado 'cerrada'), "arqueo": LineaArqueo[] }
 Error (400) si falta el motivo (o el comentario que ese motivo exige) de una línea descuadrada.
+Error (400) si el cierre es forzado, nadie firmó como testigo, y no hay comentario de cierre (ni en esta fase ni el que ya haya dejado la fase 1).
 Error (403) si la caja no existe o no es del usuario ni el usuario es admin.
 Error (400) si la caja no está 'en_conciliacion'.
 ```
@@ -1075,8 +1095,14 @@ Request:
 {
   "lineas": [
     { "metodoPagoId": null, "motivoDiferenciaId": "uuid-motivo", "comentarioDiferencia": "Faltó billete de 5" }
-  ]
+  ],
+  "comentario": "Nadie firmó como testigo, cierro para no dejar al cajero trabado"
 }
+
+"comentario" es opcional salvo en el cierre forzado sin testigo (ver arriba): ahí, si no
+hay uno acá NI uno ya guardado por la fase 1 en `comentario_cierre`, tira 400. Si hay uno
+en las dos fases, este (fase 2) actualiza `comentario_cierre` — nunca toca `comentario`
+(el de la apertura).
 
 Response (200):
 {
@@ -1088,7 +1114,8 @@ Response (200):
     "montoContado": "748.5000",
     "diferencia": "-1.5000",
     "fechaCierre": "2026-06-29T18:05:00Z",
-    "comentario": "Faltó billete de 5"
+    "comentario": "Fondo de $500 para el turno de la tarde",
+    "comentarioCierre": "Nadie firmó como testigo, cierro para no dejar al cajero trabado"
   },
   "arqueo": [
     { "metodoPagoId": null, "nombre": "Efectivo", "esEfectivo": true,
@@ -1101,6 +1128,8 @@ Response (200):
 
 Error (400) si falta el motivo (o el comentario que ese motivo exige) de una línea
       descuadrada.
+Error (400) si el cierre es forzado, nadie firmó como testigo, y no hay comentario
+      (ni en esta fase ni el que ya haya dejado la fase 1).
 Error (403) si la caja no existe, no pertenece al usuario ni el usuario es admin.
 Error (400) si la caja no está 'en_conciliacion'.
 ```
@@ -1225,7 +1254,10 @@ Error (403) si la caja pertenece a otro usuario y no tiene `Cajas:Leer`.
 | `saldo_final` | NUMERIC(18,4) | nullable | Congelado en la fase 1 del cierre (`POST /caja/:id/conteo`) = `esperado` de la línea de efectivo (`caja_arqueo_medio` con `metodo_pago_id IS NULL`), no el total mezclado — ver Arqueo de caja multi-medio |
 | `monto_contado` | NUMERIC(18,4) | nullable | Congelado en la fase 1 = `contado` de la línea de efectivo |
 | `diferencia` | NUMERIC(18,4) | nullable | Congelado en la fase 1 = `diferencia` de la línea de efectivo (`monto_contado − saldo_final`) |
-| `comentario` | TEXT | nullable | Al abrir; se sobrescribe con el comentario del conteo (fase 1) al enviarlo |
+| `comentario` | TEXT | nullable | Comentario de la APERTURA (`POST /caja/abrir`) — el cierre (fases 1 y 2) nunca lo toca |
+| `comentario_cierre` | TEXT | nullable | Comentario del CIERRE: lo escribe la fase 1 (`POST /caja/:id/conteo`) y, si llega uno nuevo, lo actualiza la fase 2 (`POST /caja/:id/cerrar`). Columna separada de `comentario` a propósito — antes compartían una y la fase 1 pisaba el de apertura sin dejar rastro (`docs/agent/resueltos.md`) |
+| `cerrada_por` | UUID | FK usuarios, nullable | Quién EJECUTÓ el cierre (fase 1); `NULL` mientras la caja sigue `'abierta'`. "Forzado" = `cerrada_por <> usuario_id` |
+| `testigos_disponibles` | SMALLINT | nullable | Sesiones de garzón abiertas al congelar el conteo (fase 1) |
 | `abierta_el` / `fecha_apertura` | TIMESTAMPTZ | NOT NULL | `@CreateDateColumn` |
 | `fecha_cierre` | TIMESTAMPTZ | nullable | Se setea al cerrar |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
@@ -1292,7 +1324,7 @@ recalcula después de escrita)
 - `MovimientoCajaDto` — `{ tipo, concepto, monto: string, referencia? }`
 - `CerrarCajaDto` — `{ lineas: LineaCierreDto[], comentario?: string }` — body de la fase 1 (`POST /caja/:id/conteo`), pese al nombre heredado del sub-proyecto A
 - `LineaCierreDto` — `{ metodoPagoId: string | null, montoContado: string }` (`metodoPagoId: null` = línea de efectivo; `@IsNumberString` sin `no_symbols` para admitir decimales)
-- `FinalizarCierreDto` — `{ lineas: LineaJustificacionDto[] }` — body de la fase 2 (`POST /caja/:id/cerrar`)
+- `FinalizarCierreDto` — `{ lineas: LineaJustificacionDto[], comentario?: string }` — body de la fase 2 (`POST /caja/:id/cerrar`); `comentario` es opcional a nivel DTO, la obligatoriedad (forzado + sin firma + sin comentario de fase 1) vive en el service
 - `JustificarDiferenciasDto` — `{ lineas: LineaJustificacionDto[] }` — body del override admin (`PATCH /caja/:id/arqueo/motivos`); mismo shape que `FinalizarCierreDto`, DTO propio porque son endpoints distintos
 - `LineaJustificacionDto` — `{ metodoPagoId: string | null, motivoDiferenciaId?: string, comentarioDiferencia?: string }` (`@IsUUID('4')` opcional en ambos campos; `metodoPagoId` acepta `null` vía `@ValidateIf`)
 - `SetArqueoCiegoDto` — `{ arqueoCiego: boolean }` (`@IsBoolean`) — body de `PUT /caja/arqueo-ciego`
@@ -1311,7 +1343,7 @@ recalcula después de escrita)
 - `cajaService.obtenerArqueo(tenantId, usuarioId, cajaId, verTodas)` — `{ ciego, lineas }`; preview (`calcularArqueo` en vivo) si `abierta` — retenido (`esperado:null`, solo obligatorias) si el tenant tiene `arqueo_ciego`; filas completas de `caja_arqueo_medio` (con motivo/comentario si ya se justificó, `ciego:false` siempre) si `en_conciliacion` o `cerrada`
 - `cajaService.getArqueoCiego(tenantId)` / `setArqueoCiego(tenantId, valor)` — lee/escribe `tenants.arqueo_ciego`; query raw parametrizada, filtra `eliminado_el IS NULL`
 - `cajaService.enviarConteo(tenantId, usuarioId, cajaId, dto, esAdmin)` — **fase 1**, owner-o-admin; recomputa y congela el arqueo (`calcularArqueo` + `caja_arqueo_medio`), valida obligatorias (`400`), copia la línea de efectivo a `cajas.saldoFinal`/`montoContado`/`diferencia`, congela `cajas.cerradaPor` (siempre, no solo forzado) y `cajas.testigosDisponibles` (sesiones de garzón abiertas del tenant, vía `SesionesGarzonService.contarAbiertas` corrido con el mismo `manager` de la transacción), bifurca a `estado='cerrada'` (todo cuadró y `usuarioId` es el dueño) o `estado='en_conciliacion'` (algún descuadre, o forzado aunque cuadre) — sin cambios por el modo ciego, ver Cierre ciego
-- `cajaService.cerrar(tenantId, usuarioId, cajaId, esAdmin, dto)` — **fase 2**, owner-o-admin; lock de la caja `en_conciliacion`, aplica motivos vía `aplicarMotivosADescuadres` (`400` si falta alguno) y marca `estado='cerrada'` — no recalcula nada
+- `cajaService.cerrar(tenantId, usuarioId, cajaId, esAdmin, dto)` — **fase 2**, owner-o-admin; lock de la caja `en_conciliacion`, aplica motivos vía `aplicarMotivosADescuadres` (`400` si falta alguno), y si el cierre es forzado (`cajas.cerradaPor !== cajas.usuarioId`, fail-closed ante `cerradaPor` ausente) y nadie firmó testigo (`CajaTestigoService.hayFirmaDe`) exige un comentario en `cajas.comentarioCierre` — el de esta fase o el que ya haya dejado la fase 1, sin tocar nunca `cajas.comentario` (el de la apertura, columna separada) — antes de marcar `estado='cerrada'`. Cancela las solicitudes de testigo pendientes (`CajaTestigoService.cancelarPendientes`) siempre, forzado o no. No recalcula nada del arqueo
 - `cajaService.justificarDiferencias(tenantId, cajaId, lineas)` — **override admin**, invocado desde el controller bajo `TenantAdminGuard`; misma validación que `cerrar` vía `aplicarMotivosADescuadres`, pero exige `estado='cerrada'` en vez de `en_conciliacion`
 - `cajaService.historial(tenantId, usuarioId, query, todas)` — historial; `todas=true` retorna todas las cajas del tenant
 - `cajaService.findOne(tenantId, usuarioId, cajaId, verTodas)` — detalle de la caja

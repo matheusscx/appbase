@@ -21,6 +21,7 @@ import { MovimientoCaja } from './entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from './entities/caja-arqueo-medio.entity';
 import { MotivosDiferenciaService } from '../motivos-diferencia/motivos-diferencia.service';
 import { SesionesGarzonService } from '../turnos/sesiones-garzon.service';
+import { CajaTestigoService } from './caja-testigo.service';
 import type { AbrirCajaDto } from './dto/abrir-caja.dto';
 import type { CrearMovimientoDto } from './dto/crear-movimiento.dto';
 import type { CerrarCajaDto } from './dto/cerrar-caja.dto';
@@ -118,6 +119,7 @@ export class CajaService {
     private readonly dataSource: DataSource,
     private readonly motivosService: MotivosDiferenciaService,
     private readonly sesionesGarzonService: SesionesGarzonService,
+    private readonly cajaTestigoService: CajaTestigoService,
   ) {}
 
   async findActiva(tenantId: string, usuarioId: string): Promise<Caja | null> {
@@ -752,7 +754,10 @@ export class CajaService {
       caja.saldoFinal = efectivo.esperado;
       caja.montoContado = contadoPorClave.get('EFECTIVO')!; // obligatoria → presente
       caja.diferencia = efectivo.diferencia;
-      caja.comentario = dto.comentario ?? null;
+      // Columna separada de `caja.comentario` (el de la APERTURA, `abrir`):
+      // esta fase nunca la toca. Ver el docblock de `comentarioCierre` en la
+      // entidad para el porqué de la separación.
+      caja.comentarioCierre = dto.comentario ?? null;
 
       // Se guarda SIEMPRE, no solo en el forzado: "forzado" se deriva de
       // `cerrada_por <> usuario_id`. Un flag podría contradecir a los datos.
@@ -830,6 +835,63 @@ export class CajaService {
         cajaId,
         dto.lineas,
       );
+
+      // El comentario se exige ACÁ y no en el conteo (fase 1) porque al
+      // congelar el conteo todavía no había firmas —se piden después—:
+      // "nadie firmó" solo se sabe al cerrar. `cerradaPor` se llena SIEMPRE
+      // en `enviarConteo` para cualquier caja que llegó a `en_conciliacion`,
+      // así que "forzado" se deriva comparándolo contra el dueño de la caja,
+      // en vez de un flag aparte que podría contradecir a los datos.
+      //
+      // La comparación es fail-closed a propósito: si `cerradaPor` viniera
+      // ausente (`null`/`undefined` — hoy inalcanzable, pero un `select`
+      // parcial que se agregue a futuro en este `findOne` podría producirlo
+      // sin que ningún test lo note), se trata como forzado. El objetivo del
+      // control es "exigí una explicación"; ante un dato que falta, el
+      // default seguro es exigirla, no perdonarla.
+      const esForzado =
+        caja.cerradaPor == null || caja.cerradaPor !== caja.usuarioId;
+      if (
+        esForzado &&
+        !(await this.cajaTestigoService.hayFirmaDe(manager, tenantId, cajaId))
+      ) {
+        // El comentario de la fase 1 (`enviarConteo`, ya persistido en
+        // `caja.comentarioCierre` — columna separada de `caja.comentario`,
+        // que es el de la APERTURA y esta fase nunca toca, ver el docblock
+        // de la entidad) alcanza como explicación: decisión del owner
+        // 2026-08-12, es el mismo hecho, contado en el momento en que
+        // ocurrió. Sin este fallback, un cierre forzado sin testigo no se
+        // podría completar desde la pantalla hasta que la fase 2 del
+        // frontend agregue el campo (Task 6) — y como el push a `main`
+        // despliega, quedaría roto en producción mientras tanto.
+        const explicacion =
+          dto.comentario?.trim() || caja.comentarioCierre?.trim();
+        if (!explicacion) {
+          throw new BadRequestException(
+            'Un cierre sin testigo requiere un comentario que explique qué pasó',
+          );
+        }
+      }
+      // Si esta fase trae comentario, actualiza `comentarioCierre` — las dos
+      // fases son el mismo proceso de cierre, así que fase 2 SÍ puede
+      // refinar/reemplazar lo que dejó fase 1 acá. Lo que nunca toca es
+      // `caja.comentario` (la apertura): antes de esto compartían columna y
+      // `enviarConteo` pisaba el de apertura sin dejar rastro
+      // (`docs/agent/resueltos.md`).
+      if (dto.comentario?.trim()) {
+        caja.comentarioCierre = dto.comentario.trim();
+      }
+
+      // Las solicitudes que quedaron con el conteo congelado se resuelven
+      // acá, no cuelgan para siempre: firmar o rechazar contra una caja ya
+      // cerrada no tiene sentido — la firma se pide sobre números que dejan
+      // de existir en cuanto la caja pasa a `cerrada`.
+      await this.cajaTestigoService.cancelarPendientes(
+        manager,
+        tenantId,
+        cajaId,
+      );
+
       caja.estado = 'cerrada';
       caja.fechaCierre = new Date();
       await manager.save(Caja, caja);

@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -60,6 +62,11 @@ export class CajaTestigoService {
     private readonly cajaRepo: Repository<Caja>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    // `forwardRef`: desde Task 4, `SesionesGarzonService` también inyecta
+    // `CajaTestigoService` (para `caducarPorSesion` al cerrar una sesión) —
+    // sin `forwardRef` en los dos extremos del ciclo, ninguno de los dos
+    // puede terminar de construirse primero.
+    @Inject(forwardRef(() => SesionesGarzonService))
     private readonly sesionesGarzonService: SesionesGarzonService,
     private readonly garzonesService: GarzonesService,
   ) {}
