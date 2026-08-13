@@ -493,6 +493,16 @@ momento; lo que se difiere es abrir estos tres frentes.
   fallo que apunta a su origen. Es el mismo hallazgo que la revisión ya había marcado sobre
   `caja.e2e-spec.ts` ("la higiene final no verifica status... contamina los describes siguientes
   en silencio").
+
+  ⚠️ **Precisión medida el 2026-08-13: "que afirme su status" es correcto pero incompleto, y
+  aplicado a secas hace daño.** Si el `expect` corre **antes** de `app.close()`, el primer fallo
+  de limpieza tira la excepción, la app de Nest queda viva con su pool abierto y **jest imprime
+  el resultado y no termina nunca** (medido: 7 minutos, 0% CPU, `pg_stat_activity` sin una sola
+  query). Un mutante que hace exactamente lo que debe se vuelve indistinguible de un entorno
+  colgado — costó el veredicto de un mutante entero.
+  ➡️ La forma correcta, ya aplicada en `caja-testigo.e2e-spec.ts`: **acumular** los fallos de
+  limpieza, cerrar la app en un `finally`, y afirmar **después**. Mismo diagnóstico, 4,4 s en
+  vez de colgarse. Los `afterAll` de los otros specs siguen con la forma vieja.
 ---
 
 ## Detector de desborde de layout (`e2e/layout/desborde.spec.ts`, 2026-07-29)
