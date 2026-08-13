@@ -114,6 +114,40 @@ veces**, no que se le vuelva a pedir. Con los dos estados vivos: no hay dos pend
 firmas del mismo garzón, pero `rechazada`/`cancelada`/`caducada` no estorban. Cubre el caso
 real de que el garzón cierre turno y después vuelva.
 
+### Dos vías de firma, y el registro dice cuál se usó (decisión del owner, 2026-08-12)
+
+**El problema, medido al implementar:** el PIN **no es un secreto entre el garzón y el
+sistema** — es un secreto que el encargado emite y **ve en claro**
+(`garzones.service.ts` lo devuelve al crear y al regenerar), y el garzón **nunca** puede
+fijarlo (no existe ningún flujo para cambiarlo). Un PIN así **identifica, pero no prueba**
+que actuó el garzón. Y bloquear "quien pidió no resuelve" no alcanza: en un local la pantalla
+del garzón es un **tótem compartido**, así que el encargado camina hasta ahí y teclea desde una
+cuenta que no es ni la suya ni la del garzón.
+
+**La salida, sin frenar la feature:** el vínculo `garzones.usuario_id` ya existe y es
+opcional. Un local que quiere firmas fuertes **vincula solo a quienes van a ser testigos**;
+esa persona firma con **su propio token** y ahí sí hay prueba. Quien no está vinculado firma
+con PIN. **Las dos vías conviven y el registro no miente sobre cuál fue.**
+
+En `caja_testigo` se guardan **dos campos**:
+
+| Campo | Qué es |
+|---|---|
+| `resuelta_por_usuario_id` | El **hecho crudo**: qué cuenta envió la resolución. Siempre presente (con PIN, es la del tótem) |
+| `via_firma` | `'cuenta'` \| `'pin'`, **congelado al resolver** |
+
+**Por qué `via_firma` se guarda en vez de derivarse**, contra la regla general de derivar: se
+derivaría comparando contra `garzones.usuario_id`, que **puede vincularse y desvincularse
+después**. Una firma que hoy es prueba pasaría a leerse como débil mañana, o al revés. En un
+registro de auditoría el veredicto se congela con el hecho.
+
+**Si el garzón está vinculado, la vía PIN se rechaza para él.** Si no, la vía fuerte sería
+esquivable con solo ir al tótem, y entonces no prueba nada.
+
+⚠️ **El arreglo de fondo queda afuera y anotado:** que el garzón **fije su propio PIN** y el
+encargado no lo vea. Eso no es esta feature — el PIN se usa en sesiones, comandas y propinas —
+y beneficia a todo el sistema, no solo al testigo. Está en [`pendientes.md`](../../agent/pendientes.md).
+
 **`sesion_garzon_id` y no solo `garzon_id`:** un `garzon_id` suelto dice quién es, no que
 estuviera ahí. La sesión ata la firma al turno concreto, que es lo que la hace prueba.
 

@@ -57,6 +57,37 @@ momento; lo que se difiere es abrir estos tres frentes.
 
 ## Deuda de código (surgió durante el harness)
 
+- [ ] 🔴 **El PIN del garzón no es suyo: lo emite el encargado y lo ve en claro** (backend,
+  **medido 2026-08-12 al implementar el testigo del cierre**) — `garzones.service.ts` devuelve
+  el PIN en texto plano al **crear** y al **regenerar** un garzón, y **no existe ningún flujo
+  para que el garzón lo cambie**. Consecuencia: el PIN **identifica pero no prueba** que actuó
+  esa persona — quien lo emitió puede tecleárselo, y en un local la pantalla del garzón es un
+  **tótem compartido**, así que ni siquiera hace falta usar la cuenta propia.
+  **Alcance:** no es un tema del testigo. El mismo PIN abre sesiones, manda comandas y atribuye
+  propinas — o sea que hoy **ninguna** de esas acciones prueba quién la hizo.
+  **El arreglo, como lo quiere el owner (2026-08-12):**
+  - **Lo teclea el garzón**, no se lo dan hecho. El encargado nunca lo ve.
+  - **En caso de olvido se puede emitir uno nuevo — pero con log.** Queda registrado quién lo
+    regeneró, para quién y cuándo. Sin eso, "olvidé mi PIN" es la puerta de atrás: el encargado
+    regenera, ve el nuevo, y vuelve al mismo problema sin dejar rastro.
+  - Sigue de eso que el flujo de olvido debería **obligar al garzón a fijar uno nuevo**, no
+    entregarle uno legible al encargado.
+
+  ⚠️ **Ojo con el orden respecto del testigo:** si esto se hace **antes**, la doble vía de firma
+  (cuenta vs PIN) puede volverse innecesaria — la vía PIN dejaría de ser "solo identifica",
+  porque el encargado ya no conocería el PIN por construcción. Hacerlo **después** significa
+  construir la doble vía y probablemente simplificarla más adelante. No es dinero perdido —el
+  token propio sigue siendo más fuerte que un PIN tecleado en un tótem compartido— pero conviene
+  decidirlo a ojos abiertos y no por inercia.
+  ✅ **Decidido (owner, 2026-08-12): primero se termina el testigo, después esto.** La doble vía
+  no se tira aunque el PIN mejore: un token propio sigue siendo más fuerte que un PIN tecleado en
+  un tótem compartido. Y este cambio toca sesiones, comandas y propinas — merece su propio
+  diseño, no entrar de arrastre en una feature de caja.
+  Se difirió a propósito: la feature del testigo lo esquiva con la **doble vía** (garzón
+  vinculado a una cuenta firma con su token = prueba; sin vincular firma con PIN = identifica),
+  ver [la spec](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md). Eso tapa el
+  caso del testigo, **no el de propinas ni el de comandas**.
+
 - [ ] **El cierre de caja pisa el comentario de la apertura** (backend,
   `caja.service.ts:246` y `:737`, medido 2026-08-11 al planificar el testigo) — las dos
   operaciones escriben la **misma** columna `cajas.comentario`: `abrir()` guarda el de la
