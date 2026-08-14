@@ -46,7 +46,34 @@ export interface GarzonConAdvertencias extends Garzon {
 
 /** Respuesta de crear/regenerar: incluye el PIN en claro una sola vez. */
 export interface GarzonConPin extends GarzonConAdvertencias {
-  pin: string
+  pin: string | null
+}
+
+/**
+ * Qué le pasó al PIN. Los dos de invalidación se distinguen porque dicen
+ * cosas distintas: `invalidado_por_vinculo` es "te di una cuenta, tu PIN
+ * viejo ya no hace falta"; `invalidado_por_encargado` es "te corté el PIN".
+ */
+export type TipoEventoPin =
+  | 'emitido_en_alta'
+  | 'regenerado_por_encargado'
+  | 'invalidado_por_encargado'
+  | 'invalidado_por_vinculo'
+  | 'fijado_por_garzon'
+
+/** Una línea de historia de PIN, lista para mostrar. Nunca incluye el PIN. */
+export interface EventoPin {
+  id: string
+  tipo: TipoEventoPin
+  /** Quién lo hizo. `null` si la cuenta ya no existe — el hecho igual vale. */
+  usuarioNombre: string | null
+  creadoEl: string
+}
+
+/** Mi propio estado de PIN, tal como lo ve el garzón dueño de la cuenta. */
+export interface MiPinEstado {
+  fijado: boolean
+  eventos: EventoPin[]
 }
 
 export function useGarzones() {
@@ -115,6 +142,20 @@ export function useGarzones() {
       `${apiUrl}/garzones/para-selector?enTurno=${enTurno}`,
     )
 
+  /** Mi propio estado e historia de PIN. 404 si esta cuenta no es garzón acá. */
+  const miPin = () => useApiFetch<MiPinEstado>(`${apiUrl}/garzones/mi-pin`)
+
+  /** Fijo mi PIN. No pide el anterior: la cuenta es el ancla. */
+  const fijarMiPin = (pin: string, confirmarPin: string) =>
+    useApiFetch<void>(`${apiUrl}/garzones/mi-pin`, {
+      method: 'PATCH',
+      body: { pin, confirmarPin },
+    })
+
+  /** La historia de PIN de un garzón, para la ficha. */
+  const listarEventosPin = (id: string) =>
+    useApiFetch<EventoPin[]>(`${apiUrl}/garzones/${id}/pin-eventos`)
+
   return {
     listar,
     crear,
@@ -124,5 +165,8 @@ export function useGarzones() {
     paraSelector,
     miVinculo,
     verificarPin,
+    miPin,
+    fijarMiPin,
+    listarEventosPin,
   }
 }

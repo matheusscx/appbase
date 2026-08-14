@@ -3,5 +3,6 @@
     <ConfiguracionPerfilForm />
     <ConfiguracionUserPreferencesForm />
     <ConfiguracionContrasenaForm />
+    <ConfiguracionMiPinForm />
   </div>
 </template>

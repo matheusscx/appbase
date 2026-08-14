@@ -259,16 +259,23 @@ async function confirmarRegenerar() {
 
 // ── Revelado del PIN (una sola vez) ─────────────────────────────────────────
 const pinReveladoOpen = ref(false)
-const pinRevelado = ref<{ nombre: string, pin: string, advertencias: string[] }>({
+const pinRevelado = ref<{ nombre: string, pin: string | null, advertencias: string[] }>({
   nombre: '',
   pin: '',
   advertencias: [],
 })
 
-/** Las advertencias del backend van DENTRO de este modal, no en un toast: son
- *  sobre el PIN que se está mostrando ("está en turno, pasáselo ya") y acá es
- *  donde el admin está mirando. Un toast detrás del modal se pierde. */
-function revelarPin(nombre: string, pin: string, advertencias: string[] = []) {
+/**
+ * Las advertencias del backend van DENTRO de este modal, no en un toast: son
+ * sobre el PIN que se está mostrando ("está en turno, pasáselo ya") y acá es
+ * donde el admin está mirando. Un toast detrás del modal se pierde.
+ *
+ * `pin` es `null` cuando el garzón tiene cuenta vinculada: el sistema no le
+ * emite PIN, lo fija él mismo desde su perfil (`ConfiguracionMiPinForm`). El
+ * modal igual se abre —hay advertencias que mostrar, como que pierde el
+ * tótem compartido— pero sin nada que revelar.
+ */
+function revelarPin(nombre: string, pin: string | null, advertencias: string[] = []) {
   pinRevelado.value = { nombre, pin, advertencias }
   pinReveladoOpen.value = true
 }
@@ -543,8 +550,12 @@ const columns: TableColumn<Garzon>[] = [
     >
       <template #body>
         <div class="space-y-4">
-          <code class="block text-center text-3xl font-semibold tracking-[0.4em] tabular-nums bg-elevated rounded px-3 py-3">{{ pinRevelado.pin }}</code>
-          <p class="text-sm text-warning">
+          <code v-if="pinRevelado.pin" class="block text-center text-3xl font-semibold tracking-[0.4em] tabular-nums bg-elevated rounded px-3 py-3">{{ pinRevelado.pin }}</code>
+          <p v-else class="text-sm text-muted">
+            Este garzón opera con su cuenta: fija su propio PIN desde su perfil,
+            no hay uno que mostrar acá.
+          </p>
+          <p v-if="pinRevelado.pin" class="text-sm text-warning">
             <UIcon name="i-lucide-triangle-alert" class="size-4 align-text-bottom" />
             Guárdalo ahora — <strong>no se volverá a mostrar</strong>. Si se
             pierde, genera uno nuevo.
