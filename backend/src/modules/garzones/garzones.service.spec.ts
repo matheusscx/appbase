@@ -1073,6 +1073,115 @@ describe('GarzonesService', () => {
     });
   });
 
+  describe('el garzón fija su propio PIN', () => {
+    const CUENTA = 'cuenta-de-ana';
+    const body = (pin: string) => ({ pin, confirmarPin: pin });
+
+    beforeEach(() => {
+      // `garzonPersonalDe` resuelve por SQL crudo: cuenta no-tótem con garzón vivo.
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_id: 'g1' },
+      ]);
+      repo.findOneOrFail.mockResolvedValue(
+        garzon({ id: 'g1', usuarioId: CUENTA, pin: undefined }),
+      );
+      // `miPin` delega en `listarEventosPin` (Task 3), que reconfirma el
+      // garzón vía `getOrThrow` → `repo.findOne` antes de la query cruda.
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', usuarioId: CUENTA }));
+    });
+
+    it('guarda el hash del PIN elegido y lo registra a nombre del garzón', async () => {
+      await service.fijarMiPin(TENANT, CUENTA, body('482915'));
+
+      const guardado = garzonGuardado();
+      expect(await bcrypt.compare('482915', guardado.pinHash)).toBe(true);
+      expect(eventos).toEqual([
+        expect.objectContaining({
+          tipo: 'fijado_por_garzon',
+          usuarioId: CUENTA,
+        }),
+      ]);
+    });
+
+    it('rechaza si la confirmación no coincide', async () => {
+      await expect(
+        service.fijarMiPin(TENANT, CUENTA, {
+          pin: '482915',
+          confirmarPin: '482916',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(eventos).toHaveLength(0);
+    });
+
+    it.each(['000000', '111111', '999999', '123456', '654321', '456789'])(
+      'rechaza el PIN obvio %s',
+      async (pin) => {
+        await expect(
+          service.fijarMiPin(TENANT, CUENTA, body(pin)),
+        ).rejects.toThrow(BadRequestException);
+      },
+    );
+
+    it('ACEPTA un PIN que ya usa otro garzón: la unicidad no aplica al elegido', async () => {
+      // `pinYaUsado` recorre garzones vivos; si se consultara, encontraría match.
+      repo.find.mockResolvedValue([garzon({ id: 'otro', pin: '482915' })]);
+
+      await service.fijarMiPin(TENANT, CUENTA, body('482915'));
+
+      expect(eventos).toHaveLength(1);
+    });
+
+    it('404 si la cuenta no es garzón en este tenant', async () => {
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_id: null },
+      ]);
+
+      await expect(
+        service.fijarMiPin(TENANT, CUENTA, body('482915')),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    // El override duro de `garzonPersonalDe`: un tótem es un dispositivo
+    // compartido y desatendido, así que aunque la cuenta tenga un garzón
+    // vinculado (`garzon_id: 'g1'`, no `null` — eso probaría el otro caso),
+    // `es_totem: true` gana y corta con 404. Sin este test, invertir el `if`
+    // de `garzonPersonalDe` dejaría que un tótem le fije el PIN a "su" garzón.
+    it('404 si la cuenta es tótem, AUNQUE tenga un garzón vinculado', async () => {
+      repo.manager.query.mockResolvedValue([
+        { es_totem: true, garzon_id: 'g1' },
+      ]);
+
+      await expect(
+        service.fijarMiPin(TENANT, CUENTA, body('482915')),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('miPin también da 404 si la cuenta es tótem con garzón vinculado', async () => {
+      repo.manager.query.mockResolvedValue([
+        { es_totem: true, garzon_id: 'g1' },
+      ]);
+
+      await expect(service.miPin(TENANT, CUENTA)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('miPin dice que NO está fijado cuando el hash es el centinela', async () => {
+      // `...rest` se esparce último en el helper `garzon()`, así que este
+      // `pinHash` gana sobre el default.
+      repo.findOneOrFail.mockResolvedValue(
+        garzon({ id: 'g1', usuarioId: CUENTA, pinHash: '!' }),
+      );
+      repo.manager.query
+        .mockResolvedValueOnce([{ es_totem: false, garzon_id: 'g1' }])
+        .mockResolvedValueOnce([]);
+
+      const res = await service.miPin(TENANT, CUENTA);
+
+      expect(res.fijado).toBe(false);
+    });
+  });
+
   describe('listar con incluirEliminados', () => {
     it('sin el flag no devuelve eliminados y excluye el placeholder', async () => {
       await service.listar(TENANT);

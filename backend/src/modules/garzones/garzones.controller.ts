@@ -22,6 +22,7 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { GarzonesService } from './garzones.service';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
+import { FijarPinDto } from './dto/fijar-pin.dto';
 import { QuerySelectorGarzonesDto } from './dto/query-selector-garzones.dto';
 import { CredencialGarzonDto } from '../../common/dto/credencial-garzon.dto';
 
@@ -34,6 +35,37 @@ import { CredencialGarzonDto } from '../../common/dto/credencial-garzon.dto';
 @Controller('garzones')
 export class GarzonesController {
   constructor(private readonly garzonesService: GarzonesService) {}
+
+  /**
+   * El garzón fija su propio PIN. **Sin `@RequiresPermiso`**: `PermisosGuard`
+   * es `return true` sin el decorador (`permisos.guard.ts:24`), así que quedan
+   * `JwtAuthGuard` + `TenantGuard`, que es exactamente lo que hace falta — un
+   * garzón puede no tener ningún permiso de módulo.
+   *
+   * Vive acá y no en `MeController` porque ese controller **no tiene
+   * `TenantGuard`**, y un garzón es por tenant: la misma persona puede ser
+   * garzón en dos locales con PIN distintos.
+   *
+   * ⚠️ Declarada ANTES de `@Patch(':id')`: Nest resuelve por orden de
+   * declaración, así que si `:id` fuera primero, `PATCH /garzones/mi-pin`
+   * entraría por `actualizar` con `id = 'mi-pin'` y moriría en un 404 confuso.
+   */
+  @Patch('mi-pin')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  fijarMiPin(@Req() req: Request, @Body() dto: FijarPinDto) {
+    const user = req.user as JwtUser;
+    return this.garzonesService.fijarMiPin(user.tenantId!, user.id, dto);
+  }
+
+  /**
+   * Su propio estado e historia de PIN. Mismo criterio de guards que el PATCH,
+   * y misma advertencia de orden respecto de cualquier `@Get(':id')` futuro.
+   */
+  @Get('mi-pin')
+  miPin(@Req() req: Request) {
+    const user = req.user as JwtUser;
+    return this.garzonesService.miPin(user.tenantId!, user.id);
+  }
 
   @Get()
   @RequiresPermiso('Salones', 'Leer')

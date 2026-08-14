@@ -15,6 +15,7 @@ import {
 } from './entities/garzon-pin-evento.entity';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
+import { FijarPinDto } from './dto/fijar-pin.dto';
 import { TipoGarzon } from './enums/tipo-garzon.enum';
 import {
   EstadoSesionGarzon,
@@ -34,6 +35,20 @@ const PIN_MAX_EXCLUSIVO = 1_000_000; // 000000..999999
  * que todavía no fijó el suyo.
  */
 export const PIN_INUTILIZABLE = '!';
+
+/**
+ * Los PIN que no protegen nada: 6 dígitos repetidos y las escaleras de 6 en el
+ * orden natural, para arriba y para abajo. Son 20 en total y son los primeros
+ * que prueba cualquiera que quiera hacerse pasar por otro.
+ *
+ * Se derivan por regla y no por diccionario para que la lista no se desactualice
+ * sola. Antes esto no hacía falta: el PIN lo sorteaba el sistema, así que nunca
+ * salía `123456`.
+ */
+function esPinObvio(pin: string): boolean {
+  if (/^(\d)\1{5}$/.test(pin)) return true;
+  return '0123456789'.includes(pin) || '9876543210'.includes(pin);
+}
 
 /** Vista pública de un garzón — nunca incluye el hash del PIN. */
 export interface GarzonPublico {
@@ -428,6 +443,66 @@ export class GarzonesService {
         ORDER BY e.creado_el DESC`,
       [tenantId, garzonId],
     );
+  }
+
+  /**
+   * El garzón elige su propio PIN. El encargado nunca lo ve — ese es el punto
+   * entero de la feature.
+   *
+   * **No se valida unicidad contra otros garzones**, a diferencia del PIN que
+   * genera el sistema. Siempre se elige a la persona antes de teclear
+   * (`verificarPin` recibe `garzonId`), así que dos PIN iguales no crean
+   * ambigüedad; y rechazar la colisión convertiría este formulario en un
+   * oráculo: probando PIN, un garzón descubriría el de otro.
+   *
+   * Resuelve por `garzonPersonalDe`, que es la definición canónica de "esta
+   * cuenta es este garzón" — incluye el override duro de `es_totem`. Una cuenta
+   * de tótem no puede tener garzón, así que acá da 404, que es lo correcto.
+   */
+  async fijarMiPin(
+    tenantId: string,
+    usuarioId: string,
+    dto: FijarPinDto,
+  ): Promise<void> {
+    if (dto.pin !== dto.confirmarPin) {
+      throw new BadRequestException('Los PIN no coinciden');
+    }
+    if (esPinObvio(dto.pin)) {
+      throw new BadRequestException(
+        'Ese PIN es demasiado previsible. Elegí uno que no sea todo el mismo ' +
+          'dígito ni una secuencia.',
+      );
+    }
+    const garzon = await this.miGarzonOrThrow(tenantId, usuarioId);
+    garzon.pinHash = await bcrypt.hash(dto.pin, BCRYPT_COST);
+    await this.guardarConEvento(garzon, {
+      tipo: 'fijado_por_garzon',
+      usuarioId,
+    });
+  }
+
+  /** Su propio estado e historia, para el bloque "Mi PIN" del perfil. */
+  async miPin(
+    tenantId: string,
+    usuarioId: string,
+  ): Promise<{ fijado: boolean; eventos: EventoPinPublico[] }> {
+    const garzon = await this.miGarzonOrThrow(tenantId, usuarioId);
+    return {
+      fijado: garzon.pinHash !== PIN_INUTILIZABLE,
+      eventos: await this.listarEventosPin(tenantId, garzon.id),
+    };
+  }
+
+  /** El garzón que es esta cuenta en este tenant, o 404. */
+  private async miGarzonOrThrow(
+    tenantId: string,
+    usuarioId: string,
+  ): Promise<Garzon> {
+    const garzonId = await this.garzonPersonalDe(tenantId, usuarioId);
+    if (!garzonId) {
+      throw new NotFoundException('Tu cuenta no es un garzón en este local');
+    }
+    return this.garzonRepo.findOneOrFail({ where: { id: garzonId, tenantId } });
   }
 
   async eliminar(
