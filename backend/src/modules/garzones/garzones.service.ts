@@ -76,6 +76,15 @@ export interface GarzonConPin extends GarzonConAdvertencias {
   pin: string | null;
 }
 
+/** Una línea de historia, lista para mostrar. Nunca incluye el PIN. */
+export interface EventoPinPublico {
+  id: string;
+  tipo: TipoEventoPin;
+  /** Quién lo hizo. `null` si la cuenta ya no existe — el hecho igual vale. */
+  usuarioNombre: string | null;
+  creadoEl: Date;
+}
+
 @Injectable()
 export class GarzonesService {
   constructor(
@@ -345,28 +354,80 @@ export class GarzonesService {
   }
 
   /**
-   * Genera un PIN nuevo para el garzón y lo devuelve **una sola vez**. El PIN
-   * anterior deja de funcionar de inmediato (se reemplaza el hash).
+   * El PIN del garzón, según quién puede probarlo.
+   *
+   * **Con cuenta → invalida y no muestra nada.** El garzón fija el suyo desde
+   * su perfil; devolverle un PIN legible al encargado sería volver al problema
+   * que esta feature existe para resolver.
+   * **Sin cuenta → genera y revela**, como siempre: sin cuenta no hay forma de
+   * que la persona elija un secreto que el encargado no vea, y eso es una
+   * elección del local, no un bug.
+   *
+   * Una sola ruta para los dos casos y no dos: manda el estado del garzón, así
+   * que el encargado no puede elegir mal.
    *
    * Con sesión abierta **advierte, no bloquea** (decisión del owner,
-   * 2026-08-07): rotar una credencial es la respuesta correcta a una filtración,
-   * y trabarla porque hay un turno abierto sería la política al revés. Lo que sí
-   * hace falta es que el admin vea en el momento que el garzón queda sin poder
-   * marcar salida ni operar hasta recibir el PIN nuevo.
+   * 2026-08-07): rotar una credencial es la respuesta correcta a una
+   * filtración.
    */
-  async regenerarPin(tenantId: string, id: string): Promise<GarzonConPin> {
+  async regenerarPin(
+    tenantId: string,
+    usuarioActorId: string,
+    id: string,
+  ): Promise<GarzonConPin> {
     const garzon = await this.getOrThrow(tenantId, id);
+    const tieneCuenta = garzon.usuarioId !== null;
     const advertencias: string[] = [];
     if ((await this.contarSesionesAbiertas(tenantId, id)) > 0) {
       advertencias.push(
-        `${garzon.nombre} está en turno: el PIN anterior deja de funcionar ya mismo, ` +
-          `así que no va a poder operar ni marcar salida hasta que reciba el nuevo.`,
+        tieneCuenta
+          ? `${garzon.nombre} está en turno, pero opera desde su cuenta: sigue trabajando ` +
+              `normal. Lo único que pierde hasta fijar un PIN nuevo es el tótem compartido.`
+          : `${garzon.nombre} está en turno: el PIN anterior deja de funcionar ya mismo, ` +
+              `así que no va a poder operar ni marcar salida hasta que reciba el nuevo.`,
       );
     }
-    const pin = await this.generarPinUnico(tenantId, id);
-    garzon.pinHash = await bcrypt.hash(pin, BCRYPT_COST);
-    const guardado = await this.garzonRepo.save(garzon);
+
+    const pin = tieneCuenta ? null : await this.generarPinUnico(tenantId, id);
+    garzon.pinHash = pin
+      ? await bcrypt.hash(pin, BCRYPT_COST)
+      : PIN_INUTILIZABLE;
+    const guardado = await this.guardarConEvento(garzon, {
+      tipo: tieneCuenta
+        ? 'invalidado_por_encargado'
+        : 'regenerado_por_encargado',
+      usuarioId: usuarioActorId,
+    });
     return { ...this.toPublico(guardado), pin, advertencias };
+  }
+
+  /**
+   * La historia de PIN de un garzón, más nueva primero.
+   *
+   * Una sola consulta con `JOIN` a `usuarios`: resolver el nombre del actor
+   * fila por fila sería un N+1 exacto. El `JOIN` **no** filtra `eliminado_el`
+   * de `usuarios` — misma excepción documentada que el autor de un borrado en
+   * `listar()`: quién hizo algo es un hecho histórico y no desaparece porque
+   * la cuenta se dé de baja.
+   */
+  async listarEventosPin(
+    tenantId: string,
+    garzonId: string,
+  ): Promise<EventoPinPublico[]> {
+    await this.getOrThrow(tenantId, garzonId);
+    return this.garzonRepo.manager.query<EventoPinPublico[]>(
+      `SELECT e.garzon_pin_evento_id AS id,
+              e.tipo,
+              u.nombre_usuario AS "usuarioNombre",
+              e.creado_el AS "creadoEl"
+         FROM garzon_pin_evento e
+         LEFT JOIN usuarios u ON u.usuario_id = e.usuario_id
+        WHERE e.tenant_id = $1
+          AND e.garzon_id = $2
+          AND e.eliminado_el IS NULL
+        ORDER BY e.creado_el DESC`,
+      [tenantId, garzonId],
+    );
   }
 
   async eliminar(

@@ -64,8 +64,19 @@ export class GarzonesController {
   @Patch(':id/pin')
   @RequiresPermiso('Salones', 'Actualizar')
   regenerarPin(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as { tenantId: string };
-    return this.garzonesService.regenerarPin(user.tenantId, id);
+    const user = req.user as JwtUser;
+    return this.garzonesService.regenerarPin(user.tenantId!, user.id, id);
+  }
+
+  /**
+   * La historia de PIN del garzón, para la ficha. `Salones:Leer` — el mismo
+   * permiso con el que se lee el resto de la ficha.
+   */
+  @Get(':id/pin-eventos')
+  @RequiresPermiso('Salones', 'Leer')
+  listarEventosPin(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as JwtUser;
+    return this.garzonesService.listarEventosPin(user.tenantId!, id);
   }
 
   @Delete(':id')

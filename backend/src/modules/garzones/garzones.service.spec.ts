@@ -144,6 +144,32 @@ describe('GarzonesService', () => {
     jest.restoreAllMocks();
   });
 
+  /**
+   * El garzón efectivamente guardado, sin importar si `guardarConEvento`
+   * tomó el `save` plano (`repo.save(garzon)`, 1 argumento — sin evento) o
+   * la transacción (`manager.save(Garzon, garzon)`, 2 argumentos — con
+   * evento). Cuál de los dos caminos corre es JUSTAMENTE lo que cambia si
+   * se rompe el guard `garzon.usuarioId === null` de `actualizar()` (o el
+   * `tieneCuenta` de `regenerarPin()`): indexar un solo camino a ciegas
+   * hace que el test se caiga con un `TypeError` bajo el mutante, en vez de
+   * fallar por la aserción que importa.
+   */
+  function garzonGuardado(): Garzon {
+    const plano = repo.save.mock.calls[0]?.[0] as Garzon | undefined;
+    const enTx = manager.save.mock.calls.find(
+      ([entity]: [unknown, unknown]) => entity === Garzon,
+    )?.[1] as Garzon | undefined;
+    const g = plano ?? enTx;
+    if (!g) {
+      throw new Error(
+        'garzonGuardado(): no se guardó ningún Garzon ni por repo.save ' +
+          'ni por la transacción de dataSource — ¿el test disparó una ' +
+          'excepción antes de llegar a guardarConEvento?',
+      );
+    }
+    return g;
+  }
+
   describe('crear', () => {
     it('genera un PIN de 6 dígitos, lo hashea y lo devuelve una sola vez', async () => {
       const result = await service.crear(TENANT, USUARIO_ID, { nombre: 'Ana' });
@@ -441,17 +467,19 @@ describe('GarzonesService', () => {
   });
 
   describe('regenerarPin', () => {
+    const ACTOR = 'encargado-uuid';
+
     it('genera un PIN nuevo, re-hashea y lo devuelve una sola vez', async () => {
-      const g = garzon({ id: 'g1', pin: '111111' });
+      const g = garzon({ id: 'g1', pin: '111111', usuarioId: null });
       repo.findOne.mockResolvedValue(g);
       repo.find.mockResolvedValue([g]);
 
-      const result = await service.regenerarPin(TENANT, 'g1');
+      const result = await service.regenerarPin(TENANT, ACTOR, 'g1');
 
       expect(result.pin).toMatch(/^\d{6}$/);
-      const saved = (repo.save.mock.calls[0] as [Garzon])[0];
-      // `regenerarPin` no toca el flujo de alta/vínculo: siempre devuelve un
-      // PIN, nunca `null`. El cast solo refleja eso, no relaja el chequeo.
+      const saved = garzonGuardado();
+      // `regenerarPin` SIN cuenta siempre devuelve un PIN, nunca `null`. El
+      // cast solo refleja eso, no relaja el chequeo.
       expect(await bcrypt.compare(result.pin as string, saved.pinHash)).toBe(
         true,
       );
@@ -462,39 +490,152 @@ describe('GarzonesService', () => {
     // un turno abierto sería la política al revés. Pero el admin tiene que ver
     // en el momento que deja al garzón sin poder marcar salida.
     it('con sesión abierta regenera igual, y avisa que lo deja sin operar', async () => {
-      const g = garzon({ id: 'g1', nombre: 'Ana', pin: '111111' });
+      const g = garzon({
+        id: 'g1',
+        nombre: 'Ana',
+        pin: '111111',
+        usuarioId: null,
+      });
       repo.findOne.mockResolvedValue(g);
       repo.find.mockResolvedValue([g]);
       sesionRepo.count.mockResolvedValue(1);
 
-      const result = await service.regenerarPin(TENANT, 'g1');
+      const result = await service.regenerarPin(TENANT, ACTOR, 'g1');
 
       expect(result.pin).toMatch(/^\d{6}$/);
-      expect(repo.save).toHaveBeenCalled();
+      // "regenera igual": la advertencia no basta, tiene que haber persistido
+      // el hash del PIN nuevo (no solo devuelto en la respuesta).
+      const saved = garzonGuardado();
+      expect(await bcrypt.compare(result.pin as string, saved.pinHash)).toBe(
+        true,
+      );
       expect(result.advertencias).toHaveLength(1);
       expect(result.advertencias[0]).toContain('Ana');
       expect(result.advertencias[0]).toContain('marcar salida');
     });
 
     it('sin sesión abierta no inventa advertencias', async () => {
-      const g = garzon({ id: 'g1', pin: '111111' });
+      const g = garzon({ id: 'g1', pin: '111111', usuarioId: null });
       repo.findOne.mockResolvedValue(g);
       repo.find.mockResolvedValue([g]);
 
-      expect((await service.regenerarPin(TENANT, 'g1')).advertencias).toEqual(
-        [],
-      );
+      expect(
+        (await service.regenerarPin(TENANT, ACTOR, 'g1')).advertencias,
+      ).toEqual([]);
     });
 
     it('lanza NotFound si el garzón no existe en el tenant', async () => {
       repo.findOne.mockResolvedValue(null);
 
-      await expect(service.regenerarPin(TENANT, 'inexistente')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.regenerarPin(TENANT, ACTOR, 'inexistente'),
+      ).rejects.toThrow(NotFoundException);
       expect(repo.findOne).toHaveBeenCalledWith({
         where: { id: 'inexistente', tenantId: TENANT },
       });
+    });
+  });
+
+  describe('regenerarPin se parte según el garzón', () => {
+    const ACTOR = 'encargado-uuid';
+
+    it('CON cuenta: invalida, no devuelve PIN, y lo registra', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', pin: '111111', usuarioId: 'cuenta-de-ana' }),
+      );
+
+      const res = await service.regenerarPin(TENANT, ACTOR, 'g1');
+
+      expect(res.pin).toBeNull();
+      expect(garzonGuardado().pinHash).toBe('!');
+      expect(eventos).toEqual([
+        expect.objectContaining({
+          tipo: 'invalidado_por_encargado',
+          usuarioId: ACTOR,
+        }),
+      ]);
+    });
+
+    it('SIN cuenta: genera y revela, como siempre', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', pin: '111111', usuarioId: null }),
+      );
+
+      const res = await service.regenerarPin(TENANT, ACTOR, 'g1');
+
+      expect(res.pin).toMatch(/^\d{6}$/);
+      expect(eventos).toEqual([
+        expect.objectContaining({
+          tipo: 'regenerado_por_encargado',
+          usuarioId: ACTOR,
+        }),
+      ]);
+    });
+
+    it('en turno CON cuenta, el aviso NO dice que no va a poder operar', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({
+          id: 'g1',
+          nombre: 'Ana',
+          pin: '111111',
+          usuarioId: 'cuenta-de-ana',
+        }),
+      );
+      sesionRepo.count.mockResolvedValue(1);
+
+      const res = await service.regenerarPin(TENANT, ACTOR, 'g1');
+
+      expect(res.advertencias).toHaveLength(1);
+      expect(res.advertencias[0]).toContain('tótem');
+      expect(res.advertencias[0]).not.toContain('marcar salida');
+    });
+
+    it('en turno SIN cuenta, el aviso sigue siendo el de siempre', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', nombre: 'Ana', pin: '111111', usuarioId: null }),
+      );
+      sesionRepo.count.mockResolvedValue(1);
+
+      const res = await service.regenerarPin(TENANT, ACTOR, 'g1');
+
+      expect(res.advertencias[0]).toContain('marcar salida');
+    });
+  });
+
+  describe('listarEventosPin', () => {
+    it('trae la historia con el nombre del actor en UNA consulta', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1' }));
+      const filas = [
+        {
+          id: 'ev1',
+          tipo: 'regenerado_por_encargado',
+          usuarioNombre: 'encargado.paris',
+          creadoEl: new Date(),
+        },
+      ];
+      repo.manager.query.mockResolvedValue(filas);
+
+      const result = await service.listarEventosPin(TENANT, 'g1');
+
+      expect(result).toEqual(filas);
+      expect(repo.manager.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = repo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('LEFT JOIN usuarios');
+      expect(sql).toContain('e.tenant_id = $1');
+      expect(sql).toContain('e.eliminado_el IS NULL');
+      expect(params).toEqual([TENANT, 'g1']);
+    });
+
+    it('lanza NotFound si el garzón no existe en el tenant', async () => {
+      repo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.listarEventosPin(TENANT, 'inexistente'),
+      ).rejects.toThrow(NotFoundException);
+      expect(repo.manager.query).not.toHaveBeenCalled();
     });
   });
 
@@ -658,32 +799,6 @@ describe('GarzonesService', () => {
 
   describe('el vínculo con una cuenta y el PIN', () => {
     const ACTOR = 'encargado-uuid';
-
-    /**
-     * El garzón efectivamente guardado, sin importar si `guardarConEvento`
-     * tomó el `save` plano (`repo.save(garzon)`, 1 argumento — sin evento) o
-     * la transacción (`manager.save(Garzon, garzon)`, 2 argumentos — con
-     * evento). Cuál de los dos caminos corre es JUSTAMENTE lo que cambia si
-     * se rompe el guard `garzon.usuarioId === null` de `actualizar()`:
-     * indexar un solo camino a ciegas hace que el test se caiga con un
-     * `TypeError` bajo el mutante, en vez de fallar por la aserción que
-     * importa (`pinHash` sin tocar, sin evento).
-     */
-    function garzonGuardado(): Garzon {
-      const plano = repo.save.mock.calls[0]?.[0] as Garzon | undefined;
-      const enTx = manager.save.mock.calls.find(
-        ([entity]: [unknown, unknown]) => entity === Garzon,
-      )?.[1] as Garzon | undefined;
-      const g = plano ?? enTx;
-      if (!g) {
-        throw new Error(
-          'garzonGuardado(): no se guardó ningún Garzon ni por repo.save ' +
-            'ni por la transacción de dataSource — ¿el test disparó una ' +
-            'excepción antes de llegar a guardarConEvento?',
-        );
-      }
-      return g;
-    }
 
     it('el alta CON cuenta no emite PIN y no escribe evento', async () => {
       repo.manager.query.mockResolvedValue([
