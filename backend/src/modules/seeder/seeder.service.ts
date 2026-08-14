@@ -31,6 +31,7 @@ import { ModoRegla, CondicionTipo } from '../../common/enums/reglas.enums';
 import { TipoDocumentoTributario } from '../ventas/entities/tipo-documento-tributario.entity';
 import { Tercero } from '../terceros/entities/tercero.entity';
 import { Garzon } from '../garzones/entities/garzon.entity';
+import { PIN_INUTILIZABLE } from '../garzones/garzones.service';
 import { Turno } from '../turnos/entities/turno.entity';
 import { Impresora } from '../impresoras/entities/impresora.entity';
 import { PropinaConfiguracion } from '../propinas/entities/propina-configuracion.entity';
@@ -1024,6 +1025,20 @@ export class SeederService implements OnApplicationBootstrap {
         correo: 'encargado@paris.cl',
         esSuperadmin: false,
       },
+      // Cuenta exclusiva del e2e `garzon-pin.e2e-spec.ts`: NO reusar a Ana,
+      // Bruno ni Carla, cuya sesión de garzón comparten seis specs. Este
+      // garzón nace vinculado y sin PIN usable (`PIN_INUTILIZABLE`), igual
+      // que en producción — ver seedGarzones.
+      {
+        id: '550e8400-e29b-41d4-a716-446655440346',
+        nombreUsuario: 'garzon.pin',
+        contrasena: HASH,
+        nombre: 'PIN',
+        apellido: 'Fixture',
+        telefono: '987654346',
+        correo: 'garzon.pin@paris.cl',
+        esSuperadmin: false,
+      },
     ];
 
     for (const data of usuarios) {
@@ -1662,7 +1677,7 @@ export class SeederService implements OnApplicationBootstrap {
         id: '550e8400-e29b-41d4-a716-446655440339',
         tenantId: PARIS,
         nombre: 'Mostrador',
-        pinHash: '!', // inutilizable: no es bcrypt válido → nunca matchea un PIN
+        pinHash: PIN_INUTILIZABLE,
         activo: false,
         esPlaceholder: true,
       },
@@ -1675,8 +1690,20 @@ export class SeederService implements OnApplicationBootstrap {
         id: '550e8400-e29b-41d4-a716-446655440332',
         tenantId: FALABELLA,
         nombre: 'Diego Soto (Falabella)',
-        pinHash: '!', // no opera por PIN: es fixture de aislamiento, no un garzón real
+        pinHash: PIN_INUTILIZABLE, // no opera por PIN: es fixture de aislamiento, no un garzón real
         activo: true,
+      },
+      {
+        // Fixture exclusiva de garzon-pin.e2e-spec.ts. Vinculado desde el
+        // seed (no por API) para que el e2e arranque directo en "vinculado,
+        // sin PIN fijado", el mismo estado que un garzón recién dado de alta
+        // con cuenta.
+        id: '550e8400-e29b-41d4-a716-446655440347',
+        tenantId: PARIS,
+        nombre: 'PIN Fixture',
+        pinHash: PIN_INUTILIZABLE, // nace sin PIN usable, igual que en producción
+        activo: true,
+        usuarioId: '550e8400-e29b-41d4-a716-446655440346',
       },
     ];
     for (const data of garzones) {
@@ -1915,6 +1942,7 @@ export class SeederService implements OnApplicationBootstrap {
     const ANA_TORRES = '550e8400-e29b-41d4-a716-446655440341';
     const TOTEM_PARIS = '550e8400-e29b-41d4-a716-446655440342';
     const ENCARGADO_PARIS = '550e8400-e29b-41d4-a716-446655440344';
+    const GARZON_PIN_PARIS = '550e8400-e29b-41d4-a716-446655440346';
     const pairs = [
       [ADMIN, PARIS], // superadmin → Paris
       [ADMIN, FALABELLA], // superadmin → Falabella
@@ -1926,6 +1954,7 @@ export class SeederService implements OnApplicationBootstrap {
       [ANA_TORRES, PARIS], // tablet personal: vinculada al garzón Ana Torres
       [TOTEM_PARIS, PARIS], // dispositivo compartido: siempre pide PIN
       [ENCARGADO_PARIS, PARIS], // fuerza cierres, Cajas:Actualizar, no admin → Paris
+      [GARZON_PIN_PARIS, PARIS], // fixture exclusiva de garzon-pin.e2e-spec.ts → Paris
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -3448,6 +3477,11 @@ export class SeederService implements OnApplicationBootstrap {
     const SALONES_OPERAR = '550e8400-e29b-41d4-a716-446655440227';
     const ANA_TORRES = '550e8400-e29b-41d4-a716-446655440341';
     const TOTEM_PARIS = '550e8400-e29b-41d4-a716-446655440342';
+    // Fixture exclusiva de garzon-pin.e2e-spec.ts: necesita Salones:Operar
+    // para resolver su vínculo con GET /garzones/mi-vinculo. Se suma al rol
+    // Salón ya existente (que también trae Salones:Leer, no solo Operar) en
+    // vez de crear un rol mínimo aparte — es la forma ya establecida acá.
+    const GARZON_PIN_PARIS = '550e8400-e29b-41d4-a716-446655440346';
 
     await this.dataSource.query(
       `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
@@ -3467,7 +3501,7 @@ export class SeederService implements OnApplicationBootstrap {
         [ROL_SALON, MODULO_TENANT_SALONES, permisoId],
       );
     }
-    for (const usuarioId of [ANA_TORRES, TOTEM_PARIS]) {
+    for (const usuarioId of [ANA_TORRES, TOTEM_PARIS, GARZON_PIN_PARIS]) {
       await this.dataSource.query(
         `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
          VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
