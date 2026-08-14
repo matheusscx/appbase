@@ -1552,6 +1552,26 @@ CREATE UNIQUE INDEX uq_garzones_usuario_tenant
   ON garzones (tenant_id, usuario_id)
   WHERE usuario_id IS NOT NULL AND eliminado_el IS NULL;
 
+-- Historia de los cambios de PIN de un garzón. Hechos con hora: se insertan y
+-- nunca se editan. NUNCA guarda el PIN, ni en claro ni hasheado — solo el hecho
+-- de que cambió. Lo que hace visible el abuso es la frecuencia.
+CREATE TABLE garzon_pin_evento (
+  garzon_pin_evento_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+  garzon_id UUID NOT NULL REFERENCES garzones(garzon_id),
+  tipo TEXT NOT NULL,
+  usuario_id UUID NOT NULL REFERENCES usuarios(usuario_id),
+  creado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  eliminado_el TIMESTAMPTZ,
+  CONSTRAINT chk_garzon_pin_evento_tipo CHECK (tipo IN (
+    'emitido_en_alta','regenerado_por_encargado','invalidado_por_encargado',
+    'invalidado_por_vinculo','fijado_por_garzon'
+  ))
+);
+CREATE INDEX idx_garzon_pin_evento_garzon
+  ON garzon_pin_evento (garzon_id, creado_el);
+
 -- Propina separada de la venta (SII): 1 fila por cierre de mesa (incluso tip $0).
 -- Depende de garzones + ventas; se declara aquí tras garzones.
 CREATE TABLE "venta_propina" (

@@ -130,6 +130,7 @@ import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
 import { CuentaAsignacion } from './modules/salones/entities/cuenta-asignacion.entity';
 import { GarzonesModule } from './modules/garzones/garzones.module';
 import { Garzon } from './modules/garzones/entities/garzon.entity';
+import { GarzonPinEvento } from './modules/garzones/entities/garzon-pin-evento.entity';
 import { TurnosModule } from './modules/turnos/turnos.module';
 import { Turno } from './modules/turnos/entities/turno.entity';
 import { SesionGarzon } from './modules/turnos/entities/sesion-garzon.entity';
@@ -248,6 +249,7 @@ import { RecuentosModule } from './modules/recuentos/recuentos.module';
           CuentaAsignacion,
           CuentaLinea,
           Garzon,
+          GarzonPinEvento,
           Turno,
           SesionGarzon,
           Impresora,

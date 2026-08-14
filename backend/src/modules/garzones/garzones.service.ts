@@ -22,6 +22,15 @@ const BCRYPT_COST = 10;
 const MAX_INTENTOS_PIN = 50;
 const PIN_MAX_EXCLUSIVO = 1_000_000; // 000000..999999
 
+/**
+ * PIN inutilizable. No es un bcrypt válido, así que `bcrypt.compare` contra él
+ * devuelve `false` **sin tirar** (medido con bcryptjs 3.0.3): un garzón sin PIN
+ * usable cae por el camino normal de "PIN inválido", sin rama especial.
+ * Ya lo usaba el placeholder `Mostrador`; ahora también el garzón con cuenta
+ * que todavía no fijó el suyo.
+ */
+export const PIN_INUTILIZABLE = '!';
+
 /** Vista pública de un garzón — nunca incluye el hash del PIN. */
 export interface GarzonPublico {
   id: string;
@@ -574,7 +583,7 @@ export class GarzonesService {
       manager.create(Garzon, {
         tenantId,
         nombre: 'Mostrador',
-        pinHash: '!',
+        pinHash: PIN_INUTILIZABLE,
         activo: false,
         tipo: TipoGarzon.GARZON,
         esPlaceholder: true,
