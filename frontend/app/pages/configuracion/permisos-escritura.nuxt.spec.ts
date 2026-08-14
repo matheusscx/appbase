@@ -38,6 +38,10 @@ const GARZON = {
   nombre: 'Ana Torres',
   activo: true,
   tipo: 'garzon',
+  // Sin cuenta vinculada: el control de PIN es "Generar PIN nuevo", no
+  // "Invalidar PIN" (`esInvalidar` en `garzones.vue`).
+  usuarioId: null,
+  pinFijado: true,
   creadoEl: '',
   actualizadoEl: '',
 }
@@ -132,8 +136,9 @@ const CASOS: Caso[] = [
     componente: Garzones,
     modulo: 'Salones',
     crear: ['Nuevo garzón'],
-    // Regenerar PIN es `PATCH :id/pin`, no un permiso aparte.
-    actualizar: ['Editar', 'Regenerar PIN'],
+    // El control de PIN es `PATCH :id/pin`, no un permiso aparte. El fixture
+    // no tiene cuenta vinculada, así que el rótulo es el de "generar".
+    actualizar: ['Editar', 'Generar PIN nuevo'],
     eliminar: ['Eliminar'],
   },
   {

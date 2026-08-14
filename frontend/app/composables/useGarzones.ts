@@ -11,6 +11,12 @@ export interface Garzon {
   tipo: TipoGarzon
   /** Cuenta vinculada (modo personal), o `null` si se identifica por PIN. */
   usuarioId: string | null
+  /**
+   * Si existe un PIN usable hoy. Con `usuarioId`, es el garzón quien lo fija
+   * desde su perfil — este campo es lo único que le dice al encargado si ya
+   * lo hizo, sin depender de leer su historial (que puede fallar o tardar).
+   */
+  pinFijado: boolean
   creadoEl: string
   actualizadoEl: string
   // Solo llegan con `listar(true)`; el resto de las pantallas que llaman
@@ -47,6 +53,17 @@ export interface GarzonConAdvertencias extends Garzon {
 /** Respuesta de crear/regenerar: incluye el PIN en claro una sola vez. */
 export interface GarzonConPin extends GarzonConAdvertencias {
   pin: string | null
+}
+
+/**
+ * Respuesta específica de `regenerarPin`: suma si HABÍA un PIN usable antes
+ * de este PATCH. El resultado de "invalidar" no puede depender de lo que la
+ * pantalla creía saber al abrir el modal —ese dato pudo quedar viejo
+ * mientras estuvo abierta sin recargar—, así que lo manda el backend, que lo
+ * sabe con certeza en el momento exacto en que pisa el hash.
+ */
+export interface GarzonPinRegenerado extends GarzonConPin {
+  habiaPin: boolean
 }
 
 /**
@@ -101,7 +118,7 @@ export function useGarzones() {
 
   /** Regenera el PIN del garzón; devuelve el nuevo PIN una sola vez. */
   const regenerarPin = (id: string) =>
-    useApiFetch<GarzonConPin>(`${apiUrl}/garzones/${id}/pin`, {
+    useApiFetch<GarzonPinRegenerado>(`${apiUrl}/garzones/${id}/pin`, {
       method: 'PATCH',
     })
 

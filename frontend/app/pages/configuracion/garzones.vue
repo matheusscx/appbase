@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { Garzon, TipoGarzon } from '~/composables/useGarzones'
+import type { EventoPin, Garzon, TipoGarzon } from '~/composables/useGarzones'
 
 const TIPO_GARZON_OPTIONS: { label: string, value: TipoGarzon }[] = [
   { label: 'Garzón', value: 'garzon' },
@@ -10,6 +10,26 @@ const TIPO_GARZON_OPTIONS: { label: string, value: TipoGarzon }[] = [
 
 function labelTipo(tipo: TipoGarzon): string {
   return TIPO_GARZON_OPTIONS.find(o => o.value === tipo)?.label ?? tipo
+}
+
+/**
+ * Con cuenta el encargado invalida y no ve nada: el garzón pone su propio PIN
+ * desde su perfil. Sin cuenta, el sistema es dueño del PIN y el encargado
+ * genera uno nuevo y lo revela. Un solo botón/flujo, no dos: manda el estado
+ * del garzón, así el encargado no puede elegir el que no corresponde.
+ */
+function esInvalidar(garzon: Garzon): boolean {
+  return garzon.usuarioId !== null
+}
+
+/**
+ * El MISMO texto en el botón de la fila, el título del modal y su botón de
+ * confirmar — antes eran tres rótulos distintos para la misma acción
+ * ("Generar PIN nuevo" / "Regenerar PIN" / "Generar nuevo PIN") y el
+ * encargado abría una cosa y leía otra.
+ */
+function regenerarLabel(garzon: Garzon): string {
+  return esInvalidar(garzon) ? 'Invalidar PIN' : 'Generar PIN nuevo'
 }
 
 // La lectura es abierta (`Salones:Leer`), pero cada escritura pega a un endpoint
@@ -168,9 +188,54 @@ const drawerTitle = computed(() =>
   editingId.value ? 'Editar garzón' : 'Nuevo garzón',
 )
 
+// ── Estado del PIN, para la ficha (edición de un garzón con cuenta) ────────
+// Se ata al garzón que la lista YA tiene (`garzonEnEdicion`), no al valor en
+// curso del selector del formulario: si el admin cambia el vínculo sin
+// guardar, el historial mostrado sigue siendo el de la cuenta que de verdad
+// tiene el PIN hoy, no el de una edición todavía no confirmada.
+const garzonEnEdicion = computed(() =>
+  editingId.value ? garzones.value.find(g => g.id === editingId.value) ?? null : null,
+)
+const eventosPin = ref<EventoPin[]>([])
+const cargandoEventosPin = ref(false)
+// Distingue "cargó y no hay eventos" (real: un garzón creado YA vinculado
+// por API —`crear()` con `usuarioId`— no emite PIN y por lo tanto no
+// registra ningún evento, `garzones.service.ts`: `guardarConEvento(garzon,
+// null)` cuando `pin` es `null`) de "no se pudo cargar". Sin esto, un fetch
+// fallido deja `eventosPin` en `[]` y la lista dice "Todavía no hubo cambios
+// de PIN" — que en ESE caso sería mentira, aunque en el del garzón recién
+// vinculado por API sea la verdad.
+const errorEventosPin = ref(false)
+
+/**
+ * Viene del backend (`GarzonPublico.pinFijado`, ya cargado por `listar()`),
+ * NO del historial: derivarlo de `eventosPin` lo dejaba a merced de un fetch
+ * que puede estar en curso o haber fallado, y con `eventosPin: []` en
+ * cualquiera de los dos casos el badge decía "Sin PIN todavía" con la misma
+ * cara que si el backend lo hubiera confirmado.
+ */
+const pinFijado = computed(() => garzonEnEdicion.value?.pinFijado ?? false)
+
+async function cargarEventosPin(id: string) {
+  cargandoEventosPin.value = true
+  errorEventosPin.value = false
+  try {
+    eventosPin.value = await garzonesApi.listarEventosPin(id)
+  }
+  catch (e: unknown) {
+    errorEventosPin.value = true
+    toast.add({ title: apiErrorMsg(e, 'No se pudo cargar el historial del PIN'), color: 'error' })
+  }
+  finally {
+    cargandoEventosPin.value = false
+  }
+}
+
 function abrirCrear() {
   editingId.value = null
   form.value = { nombre: '', activo: true, tipo: 'garzon', usuarioId: null }
+  eventosPin.value = []
+  errorEventosPin.value = false
   drawerOpen.value = true
 }
 
@@ -182,6 +247,14 @@ function abrirEditar(garzon: Garzon) {
     activo: garzon.activo,
     tipo: garzon.tipo ?? 'garzon',
     usuarioId: garzon.usuarioId ?? null,
+  }
+  eventosPin.value = []
+  errorEventosPin.value = false
+  // El historial es solo ilustrativo acá — `pinFijado` (arriba) NO depende de
+  // esta llamada. Se pide igual, y solo para garzones CON cuenta, para no
+  // pegarle a `/pin-eventos` por cada fila de la tabla (cero N+1).
+  if (garzon.usuarioId) {
+    cargarEventosPin(garzon.id)
   }
   drawerOpen.value = true
 }
@@ -218,8 +291,13 @@ async function guardar() {
       const { pin, advertencias: _sinAdvertencias, ...garzon } = creado
       upsertLocal(garzon)
       drawerOpen.value = false
-      // El PIN se genera en el backend y se muestra una sola vez.
-      revelarPin(creado.nombre, pin)
+      // El PIN se genera en el backend y se muestra una sola vez. Este
+      // formulario nunca vincula una cuenta al crear (no manda `usuarioId`),
+      // así que el backend siempre devuelve un PIN; el guard es solo defensa
+      // de tipos, no un caso real esperado.
+      if (pin !== null) {
+        revelarPin(creado.nombre, pin)
+      }
     }
   }
   catch (e: unknown) {
@@ -234,12 +312,93 @@ async function guardar() {
 const regenerarOpen = ref(false)
 const regenerarTarget = ref<Garzon | null>(null)
 const regenerando = ref(false)
+/** Id del garzón cuya fila está esperando el refresco de `abrirRegenerar`. */
+const abriendoRegenerarId = ref<string | null>(null)
 
-function abrirRegenerar(garzon: Garzon) {
+/**
+ * Refresca el listado ANTES de armar el modal: `garzones.value` no se
+ * repuebla solo (nada de polling, nada de refetch al volver a la pestaña),
+ * así que sin esto la ventana en la que `pinFijado` —y por lo tanto qué
+ * PREGUNTA hacer— puede quedar vieja no tiene límite mientras la pantalla
+ * siga abierta. Es una llamada disparada por una acción deliberada del
+ * usuario (un click), no polling ni N+1.
+ *
+ * Sigue quedando una carrera entre ESTE refresco y el click en "Confirmar"
+ * —inevitable, cualquier snapshot puede envejecer el instante después de
+ * leerlo— pero ya no importa: el RESULTADO que el encargado ve después de
+ * confirmar sale de `habiaPin`, que manda el backend en la respuesta del
+ * propio `PATCH` (`confirmarRegenerar`, más abajo), no de este dato. Acá
+ * solo se decide qué preguntar, nunca qué pasó.
+ */
+async function abrirRegenerar(garzon: Garzon) {
   if (garzon.eliminadoEl) return
-  regenerarTarget.value = garzon
+  abriendoRegenerarId.value = garzon.id
+  try {
+    await cargar()
+  }
+  finally {
+    abriendoRegenerarId.value = null
+  }
+  const fresco = garzones.value.find(g => g.id === garzon.id)
+  // Pudo haberse eliminado entre el click y que el refresco volviera. Sin el
+  // toast, el spinner del botón para y no pasa nada más — el encargado se
+  // queda sin saber por qué.
+  if (!fresco || fresco.eliminadoEl) {
+    toast.add({
+      title: `${garzon.nombre} ya no está disponible: se eliminó justo antes de que confirmaras`,
+      color: 'warning',
+    })
+    return
+  }
+  regenerarTarget.value = fresco
   regenerarOpen.value = true
 }
+
+/**
+ * Título y confirm-label: el mismo rótulo que el botón de la fila
+ * (`regenerarLabel`), así el encargado no abre "Generar PIN nuevo" y lee
+ * "Regenerar PIN" en el título.
+ */
+const regenerarTitle = computed(() =>
+  regenerarTarget.value ? regenerarLabel(regenerarTarget.value) : '',
+)
+/**
+ * Confirm-label: igual al título en los dos casos que de verdad son "la
+ * misma acción con un solo nombre" (generar / invalidar-que-destruye). El
+ * caso "con cuenta y sin PIN fijado" tiene el SUYO propio — "Invalidar PIN"
+ * ahí prometería lo que el mensaje explícitamente niega dos líneas arriba.
+ */
+const regenerarConfirmLabel = computed(() => {
+  const g = regenerarTarget.value
+  if (g && esInvalidar(g) && !g.pinFijado) return 'Registrar igual'
+  return regenerarTitle.value
+})
+
+/**
+ * El mensaje tiene TRES casos, no dos — el segundo hallazgo de la revisión
+ * anterior era exactamente esto: "invalidar" para un garzón CON cuenta que
+ * TODAVÍA no fijó su PIN no destruye nada (el backend ya lo dejó
+ * `pinHash = PIN_INUTILIZABLE` al vincularlo), así que prometerle "pierde el
+ * tótem compartido" es mentira. `pinFijado` (arriba, viene de
+ * `GarzonPublico`, no del historial) es lo que permite distinguir los dos
+ * casos "con cuenta".
+ */
+const regenerarMensaje = computed(() => {
+  const g = regenerarTarget.value
+  if (!g) return ''
+  if (!esInvalidar(g)) {
+    return `Se generará un PIN nuevo para ${g.nombre} y se mostrará una sola vez. El PIN anterior dejará de funcionar de inmediato.`
+  }
+  if (g.pinFijado) {
+    return `El PIN de ${g.nombre} deja de servir ahora. No vas a ver ningún número: ${g.nombre} pone el suyo desde su cuenta. Puede seguir trabajando desde su dispositivo; lo único que pierde hasta entonces es el tótem compartido.`
+  }
+  return `${g.nombre} todavía no puso su PIN, así que no hay ninguno que invalidar. Queda registrado que lo pediste.`
+})
+const regenerarConfirmColor = computed(() => {
+  const g = regenerarTarget.value
+  if (!g || !esInvalidar(g)) return 'primary'
+  return g.pinFijado ? 'error' : 'neutral'
+})
 
 async function confirmarRegenerar() {
   if (!regenerarTarget.value) return
@@ -247,7 +406,40 @@ async function confirmarRegenerar() {
   try {
     const res = await garzonesApi.regenerarPin(regenerarTarget.value.id)
     regenerarOpen.value = false
-    revelarPin(res.nombre, res.pin, res.advertencias)
+    // La respuesta trae el garzón COMPLETO y fresco (`GarzonPinRegenerado
+    // extends Garzon`), `pinFijado` incluido — invalidar SÍ desfija
+    // (`garzones.service.ts`: `pinHash = PIN_INUTILIZABLE`). Sincronizarlo
+    // acá deja el listado al día para la próxima vez que se abra este modal
+    // o la ficha de este garzón.
+    const { pin, advertencias, habiaPin, ...garzonActualizado } = res
+    upsertLocal(garzonActualizado)
+    // `pin: null` = no hay número que mostrar (se invalidó, o no había nada
+    // que invalidar). Abrir el modal de revelado con un hueco donde va el
+    // número sería peor que no abrirlo: se avisa por toast, que es lo que de
+    // verdad pasó.
+    if (pin !== null) {
+      revelarPin(res.nombre, pin, advertencias)
+    }
+    else if (habiaPin) {
+      // `habiaPin` sale del backend, NO del `pinFijado` que la pantalla tenía
+      // al abrir el modal: ese dato es una PREDICCIÓN —refrescada recién en
+      // `abrirRegenerar`, pero puede envejecer mientras el modal sigue
+      // abierto y el encargado decide—. El resultado que se le informa acá
+      // no puede depender de una predicción que pudo quedar vieja; tiene que
+      // salir de lo que el backend hizo de verdad en este mismo request.
+      toast.add({ title: `PIN de ${res.nombre} invalidado`, color: 'success' })
+      advertencias.forEach(a => toast.add({ title: a, color: 'warning' }))
+    }
+    else {
+      // No había credencial que destruir: no se le puede llamar "invalidado"
+      // a esto sin mentir. El evento igual queda en la auditoría (decisión
+      // del owner) — el toast lo refleja.
+      toast.add({
+        title: `${res.nombre} todavía no había puesto su PIN: no había nada que invalidar`,
+        color: 'neutral',
+      })
+      advertencias.forEach(a => toast.add({ title: a, color: 'warning' }))
+    }
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al regenerar el PIN'), color: 'error' })
@@ -259,7 +451,7 @@ async function confirmarRegenerar() {
 
 // ── Revelado del PIN (una sola vez) ─────────────────────────────────────────
 const pinReveladoOpen = ref(false)
-const pinRevelado = ref<{ nombre: string, pin: string | null, advertencias: string[] }>({
+const pinRevelado = ref<{ nombre: string, pin: string, advertencias: string[] }>({
   nombre: '',
   pin: '',
   advertencias: [],
@@ -270,12 +462,11 @@ const pinRevelado = ref<{ nombre: string, pin: string | null, advertencias: stri
  * sobre el PIN que se está mostrando ("está en turno, pasáselo ya") y acá es
  * donde el admin está mirando. Un toast detrás del modal se pierde.
  *
- * `pin` es `null` cuando el garzón tiene cuenta vinculada: el sistema no le
- * emite PIN, lo fija él mismo desde su perfil (`ConfiguracionMiPinForm`). El
- * modal igual se abre —hay advertencias que mostrar, como que pierde el
- * tótem compartido— pero sin nada que revelar.
+ * `pin` es siempre un PIN real: los dos llamadores (`guardar()` al crear,
+ * `confirmarRegenerar()` al regenerar) filtran antes el caso `null` —cuando
+ * el garzón tiene cuenta vinculada, ese caso se resuelve con un toast, no acá.
  */
-function revelarPin(nombre: string, pin: string | null, advertencias: string[] = []) {
+function revelarPin(nombre: string, pin: string, advertencias: string[] = []) {
   pinRevelado.value = { nombre, pin, advertencias }
   pinReveladoOpen.value = true
 }
@@ -432,14 +623,17 @@ const columns: TableColumn<Garzon>[] = [
           </UButton>
         </div>
         <div v-else class="flex items-center justify-end gap-1">
-          <!-- Regenerar PIN es `PATCH :id/pin`: mismo permiso que editar. -->
+          <!-- `PATCH :id/pin`: mismo permiso que editar. El rótulo lo decide
+               el garzón (`regenerarLabel`), no una elección libre del
+               encargado: con cuenta vinculada invalida, sin cuenta genera. -->
           <UButton
             v-if="puedeActualizar"
             icon="i-lucide-key-round"
             color="neutral"
             variant="ghost"
-            title="Regenerar PIN"
-            aria-label="Regenerar PIN"
+            :title="regenerarLabel(row.original)"
+            :aria-label="regenerarLabel(row.original)"
+            :loading="abriendoRegenerarId === row.original.id"
             @click="abrirRegenerar(row.original)"
           />
           <UButton
@@ -517,6 +711,36 @@ const columns: TableColumn<Garzon>[] = [
             />
           </UFormField>
         </UForm>
+
+        <!-- Solo con cuenta vinculada: sin ella el garzón se identifica por
+             PIN emitido por el sistema, y este bloque es sobre el PIN que
+             el GARZÓN fija desde su perfil. Sin este dato, invalidar sería
+             a ciegas. -->
+        <template v-if="garzonEnEdicion?.usuarioId">
+          <USeparator class="my-4" />
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-default">PIN</span>
+              <UBadge :color="pinFijado ? 'success' : 'warning'" variant="subtle">
+                {{ pinFijado ? 'PIN puesto' : 'Sin PIN todavía' }}
+              </UBadge>
+            </div>
+            <div>
+              <p class="mb-2 text-sm font-medium text-default">
+                Historial
+              </p>
+              <p v-if="cargandoEventosPin" class="text-sm text-muted">
+                Cargando…
+              </p>
+              <!-- Distinto de la lista vacía: `[]` por un fetch fallido NO es
+                   "todavía no hubo cambios" (ver `errorEventosPin`). -->
+              <p v-else-if="errorEventosPin" class="text-sm text-error">
+                No se pudo cargar el historial del PIN.
+              </p>
+              <GarzonesPinEventosLista v-else :eventos="eventosPin" />
+            </div>
+          </div>
+        </template>
       </template>
       <template #actions>
         <UButton color="neutral" variant="ghost" @click="() => { drawerOpen = false }">
@@ -528,15 +752,13 @@ const columns: TableColumn<Garzon>[] = [
       </template>
     </AppDrawer>
 
-    <!-- Confirmar regeneración de PIN -->
+    <!-- Confirmar regeneración/invalidación de PIN -->
     <CrudModal
       v-model:open="regenerarOpen"
-      title="Regenerar PIN"
-      :message="regenerarTarget
-        ? `Se generará un PIN nuevo para ${regenerarTarget.nombre} y se mostrará una sola vez. El PIN anterior dejará de funcionar de inmediato.`
-        : ''"
-      confirm-label="Generar nuevo PIN"
-      confirm-color="primary"
+      :title="regenerarTitle"
+      :message="regenerarMensaje"
+      :confirm-label="regenerarConfirmLabel"
+      :confirm-color="regenerarConfirmColor"
       :loading="regenerando"
       @cancel="regenerarTarget = null"
       @confirm="confirmarRegenerar"
@@ -550,12 +772,8 @@ const columns: TableColumn<Garzon>[] = [
     >
       <template #body>
         <div class="space-y-4">
-          <code v-if="pinRevelado.pin" class="block text-center text-3xl font-semibold tracking-[0.4em] tabular-nums bg-elevated rounded px-3 py-3">{{ pinRevelado.pin }}</code>
-          <p v-else class="text-sm text-muted">
-            Este garzón opera con su cuenta: fija su propio PIN desde su perfil,
-            no hay uno que mostrar acá.
-          </p>
-          <p v-if="pinRevelado.pin" class="text-sm text-warning">
+          <code class="block text-center text-3xl font-semibold tracking-[0.4em] tabular-nums bg-elevated rounded px-3 py-3">{{ pinRevelado.pin }}</code>
+          <p class="text-sm text-warning">
             <UIcon name="i-lucide-triangle-alert" class="size-4 align-text-bottom" />
             Guárdalo ahora — <strong>no se volverá a mostrar</strong>. Si se
             pierde, genera uno nuevo.

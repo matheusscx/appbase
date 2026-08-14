@@ -31,6 +31,14 @@ interface GarzonFake {
   nombre: string
   activo: boolean
   tipo: string
+  // `null` = se identifica por PIN. Con un `usuarioId`, el PIN lo fija el
+  // garzón desde su cuenta y el botón de la fila pasa de "generar" a
+  // "invalidar" (ver `esInvalidar` en `garzones.vue`).
+  usuarioId: string | null
+  // Del backend (`GarzonPublico.pinFijado`), NO derivado del historial. Con
+  // `usuarioId`, distingue el garzón que YA puso su PIN (invalidarlo destruye
+  // algo real) del que todavía no (invalidarlo no tiene ningún efecto).
+  pinFijado: boolean
   creadoEl: string
   actualizadoEl: string
   eliminadoEl: string | null
@@ -43,12 +51,22 @@ function garzon(over: Partial<GarzonFake> = {}): GarzonFake {
     nombre: 'Ana Torres',
     activo: true,
     tipo: 'garzon',
+    usuarioId: null,
+    pinFijado: true,
     creadoEl: '2026-07-01T10:00:00.000Z',
     actualizadoEl: '2026-07-01T10:00:00.000Z',
     eliminadoEl: null,
     eliminadoPorNombre: null,
     ...over,
   }
+}
+
+/** Una fila del historial de PIN, tal como la devuelve `GET .../pin-eventos`. */
+interface EventoPinFake {
+  id: string
+  tipo: string
+  usuarioNombre: string | null
+  creadoEl: string
 }
 
 function eliminado(over: Partial<GarzonFake> = {}): GarzonFake {
@@ -115,6 +133,12 @@ let restaurarRetenido: Promise<unknown> | null = null
  * — el mensaje del backend real, para que el test no lo invente.
  */
 let restaurarErrorForzado: string | null = null
+/** Historial de PIN por garzón, para `GET .../pin-eventos`. Vacío si no se fija. */
+let eventosPinBackend: Record<string, EventoPinFake[]> = {}
+/** Cada `GET .../pin-eventos` recibido: la sonda de "cero N+1" (finding 4). */
+let pinEventosRequests: string[] = []
+/** Fuerza el próximo `GET .../pin-eventos` a rechazar, para simular un fetch caído. */
+let eventosPinRechaza = false
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
@@ -130,10 +154,31 @@ mockNuxtImport('useApiFetch', () => {
       const g = garzonesBackend.find(x => x.id === id)
       if (!g) return Promise.reject(errorApi(`Garzón ${id} no encontrado`))
       if (esPin) {
-        return Promise.resolve({ ...g, pin: '424242', advertencias: advertenciasBackend })
+        // Con cuenta vinculada el backend INVALIDA en vez de emitir: no hay
+        // PIN que devolver, igual que el real (`GarzonConPin.pin: null`). Y
+        // deja el `pinHash` en el centinela, tenga o no efecto real —de ahí
+        // que `pinFijado` pase a `false` aunque ya estuviera en `false`.
+        //
+        // `habiaPin` se captura ANTES de mutar `g.pinFijado`, como el
+        // service real (`garzones.service.ts`: lo lee antes de pisar el
+        // hash): es la única fuente de verdad del RESULTADO — el front no
+        // debe (y desde esta ronda no puede) inferirlo del `pinFijado` que
+        // tenía en su propio caché.
+        const habiaPin = g.pinFijado
+        const pin = g.usuarioId ? null : '424242'
+        if (g.usuarioId) g.pinFijado = false
+        return Promise.resolve({ ...g, pin, advertencias: advertenciasBackend, habiaPin })
       }
       Object.assign(g, opts?.body ?? {})
       return Promise.resolve({ ...g, advertencias: advertenciasBackend })
+    }
+    if (method === 'GET' && url.includes('/pin-eventos')) {
+      const id = url.split('/').slice(-2)[0] ?? ''
+      pinEventosRequests.push(id)
+      if (eventosPinRechaza) {
+        return Promise.reject(errorApi('No se pudo cargar el historial'))
+      }
+      return Promise.resolve(eventosPinBackend[id] ?? [])
     }
     if (method === 'DELETE') {
       const id = url.split('/').pop()
@@ -235,6 +280,9 @@ function reset() {
   restaurarRetenido = null
   restaurarErrorForzado = null
   advertenciasBackend = []
+  eventosPinBackend = {}
+  pinEventosRequests = []
+  eventosPinRechaza = false
   toasts = []
 }
 
@@ -553,17 +601,33 @@ describe('garzones — advertencias del backend', () => {
   /**
    * Al confirmar la regeneración quedan DOS diálogos montados un instante: el
    * de confirmación cerrándose y el del PIN abriéndose. Buscar "el primero"
-   * devolvería el equivocado, así que se busca por contenido.
+   * devolvería el equivocado, así que se busca por contenido — por el
+   * TÍTULO ("PIN de Ana Torres") **y** por "Guárdalo ahora", que solo existe
+   * en el modal de revelado.
+   *
+   * Buscar solo por el título no alcanza: el modal de CONFIRMACIÓN de
+   * invalidar dice *"El PIN de Ana Torres deja de servir ahora…"*, que
+   * también contiene el substring "PIN de Ana Torres" — con ese único
+   * criterio, este helper podía agarrar el diálogo de confirmación en vez del
+   * de revelado (o peor: devolver "encontrado" para un caso que ni siquiera
+   * abre el modal de revelado, ver el hallazgo de la revisión del
+   * 2026-08-14). Antes solo pasaba por casualidad: el de confirmación
+   * alcanzaba a desmontarse en los `50ms` de espera de `regenerar()`.
    */
   function modalDelPin(): HTMLElement | undefined {
     return [...document.body.querySelectorAll('[role="dialog"]')]
-      .find(d => d.textContent?.includes('424242')) as HTMLElement | undefined
+      .find(d =>
+        d.textContent?.includes('PIN de Ana Torres')
+        && d.textContent?.includes('Guárdalo ahora'),
+      ) as HTMLElement | undefined
   }
 
   async function regenerar(wrapper: Awaited<ReturnType<typeof montar>>) {
-    await wrapper.find('[aria-label="Regenerar PIN"]').trigger('click')
+    // Ana Torres (fixture por defecto) no tiene cuenta vinculada: el botón
+    // "genera", no "invalida".
+    await wrapper.find('[aria-label="Generar PIN nuevo"]').trigger('click')
     await new Promise(r => setTimeout(r, 50))
-    await confirmarEnModal('Generar nuevo PIN')
+    await confirmarEnModal('Generar PIN nuevo')
   }
 
   /**
@@ -623,5 +687,316 @@ describe('garzones — advertencias del backend', () => {
     await editarYGuardar(await pantalla())
 
     expect(toasts.map(t => t.color)).toEqual(['success'])
+  })
+
+  // El botón manda el estado del garzón, no una elección libre del encargado:
+  // con cuenta vinculada invalida (destruye la credencial), sin cuenta genera
+  // (el sistema sigue siendo dueño del PIN).
+  it('el botón de PIN dice "Generar PIN nuevo" para un garzón sin cuenta, "Invalidar PIN" para uno con cuenta', async () => {
+    garzonesBackend = [
+      garzon(),
+      garzon({ id: 'garzon-2', nombre: 'Beto Fuentes', usuarioId: 'user-1' }),
+    ]
+
+    const wrapper = (montado = await pantalla())
+
+    expect(wrapper.find('[aria-label="Generar PIN nuevo"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Invalidar PIN"]').exists()).toBe(true)
+  })
+
+  it('el modal de confirmación anuncia que se genera un PIN nuevo, para un garzón sin cuenta', async () => {
+    const wrapper = (montado = await pantalla())
+
+    await wrapper.find('[aria-label="Generar PIN nuevo"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(dialogo()?.textContent).toContain('Se generará un PIN nuevo para Ana Torres')
+    expect(dialogo()?.textContent).not.toContain('pone el suyo desde su cuenta')
+  })
+
+  it('el modal de confirmación anuncia que el PIN se invalida sin nada que mostrar, para un garzón CON cuenta que YA puso su PIN', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: true })]
+
+    const wrapper = (montado = await pantalla())
+
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(dialogo()?.textContent).toContain('El PIN de Ana Torres deja de servir ahora')
+    expect(dialogo()?.textContent).toContain('Ana Torres pone el suyo desde su cuenta')
+  })
+
+  // El caso más común del flujo nuevo: recién vinculada la cuenta, el backend
+  // ya dejó `pinHash = PIN_INUTILIZABLE` (evento `invalidado_por_vinculo`) y
+  // el garzón todavía no fijó el suyo desde su perfil. "Invalidar" acá no
+  // destruye nada — prometerlo sería la misma mentira que el hallazgo A que
+  // esta task vino a cerrar, solo que en el caso más frecuente.
+  it('el modal de confirmación NO promete destruir nada, para un garzón CON cuenta que TODAVÍA no puso su PIN', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
+
+    const wrapper = (montado = await pantalla())
+
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    const texto = dialogo()?.textContent
+    expect(texto).toContain('Ana Torres todavía no puso su PIN')
+    expect(texto).toContain('no hay ninguno que invalidar')
+    // Las dos frases que prometían una destrucción que no va a pasar.
+    expect(texto).not.toContain('deja de servir ahora')
+    expect(texto).not.toContain('pierde')
+    // El botón de confirmar tiene SU PROPIO rótulo acá: "Invalidar PIN"
+    // prometería justo lo que el párrafo de arriba niega.
+    expect(texto).toContain('Registrar igual')
+    expect(
+      [...dialogo()!.querySelectorAll('button')].some(b => b.textContent?.trim() === 'Invalidar PIN'),
+    ).toBe(false)
+  })
+
+  // Antes, un garzón con cuenta abría igual el modal de revelado con un hueco
+  // donde iba el número ("no hay uno que mostrar acá"), que se leía como "no
+  // pasó nada". El backend SÍ destruyó la credencial (`invalidado_por_encargado`)
+  // — eso se avisa por toast, y el modal de revelado ni se abre.
+  it('invalidar el PIN de un garzón con cuenta (YA puesto) NO abre el modal de revelado, y avisa por toast', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: true })]
+
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    await confirmarEnModal('Invalidar PIN')
+
+    expect(modalDelPin()).toBeUndefined()
+    expect(toasts).toEqual([{ title: 'PIN de Ana Torres invalidado', color: 'success' }])
+  })
+
+  // Mismo botón, mismo endpoint, pero nada que destruir: el toast tiene que
+  // decir la verdad y no reciclar el "invalidado" de arriba.
+  it('"invalidar" el PIN de un garzón que TODAVÍA no lo puso avisa que no había nada, no que se invalidó algo', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
+
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    await confirmarEnModal('Registrar igual')
+
+    expect(modalDelPin()).toBeUndefined()
+    expect(toasts).toEqual([{
+      title: 'Ana Torres todavía no había puesto su PIN: no había nada que invalidar',
+      color: 'neutral',
+    }])
+  })
+
+  // Rotura encontrada en la revisión del 2026-08-14: `confirmarRegenerar` no
+  // sincronizaba `garzones.value` con la respuesta fresca, así que un segundo
+  // "Invalidar PIN" sobre la MISMA fila —sin recargar la página— seguía
+  // leyendo el `pinFijado` viejo (`true`) y repetía la promesa destructiva
+  // que ya no correspondía: el primer click YA había desfijado el PIN.
+  it('invalidar dos veces seguidas: la segunda dice la verdad, no repite la primera', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: true })]
+
+    const wrapper = (montado = await pantalla())
+
+    // Primera vez: hay PIN puesto, así que SÍ destruye algo real.
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    await confirmarEnModal('Invalidar PIN')
+    expect(toasts.at(-1)).toEqual({ title: 'PIN de Ana Torres invalidado', color: 'success' })
+
+    // Segunda vez, mismo wrapper, sin remontar ni recargar: si el front no
+    // sincronizó el `pinFijado` fresco de la primera respuesta, este modal
+    // repetiría "deja de servir ahora" sobre un PIN que ya no existe.
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const texto = dialogo()?.textContent
+    expect(texto).toContain('Ana Torres todavía no puso su PIN')
+    expect(texto).not.toContain('deja de servir ahora')
+
+    await confirmarEnModal('Registrar igual')
+    expect(toasts.at(-1)).toEqual({
+      title: 'Ana Torres todavía no había puesto su PIN: no había nada que invalidar',
+      color: 'neutral',
+    })
+  })
+
+  it('abrirRegenerar refresca el listado ANTES de armar el modal: la predicción no sale de un caché viejo', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
+
+    const wrapper = (montado = await pantalla())
+    // El garzón fija su PIN desde su perfil DESPUÉS de que esta pantalla
+    // cargó el listado, pero ANTES de que el encargado haga click: el
+    // `garzones.value` en memoria (`pinFijado: false`) ya quedó viejo.
+    garzonesBackend[0]!.pinFijado = true
+
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    // Sin el refresco de `abrirRegenerar`, el modal preguntaría con el texto
+    // viejo ("no había nada que invalidar"). Con el refresco, pregunta con
+    // el dato fresco.
+    expect(dialogo()?.textContent).toContain('El PIN de Ana Torres deja de servir ahora')
+  })
+
+  // Ronda 4 de la revisión (2026-08-14): `abrirRegenerar` refresca el
+  // listado antes de armar el modal, pero eso solo achica la ventana de la
+  // carrera, no la cierra — el encargado puede tardar en confirmar, y algo
+  // puede cambiar el estado real del garzón mientras el modal sigue abierto.
+  // Por eso el RESULTADO (el toast, después de confirmar) tiene que salir de
+  // `habiaPin` —que manda el backend en la respuesta del PATCH— y no del
+  // `pinFijado` que la pantalla tenía al abrir el modal. Las dos direcciones:
+  it('la predicción del modal envejece (el garzón fija su PIN mientras el modal está abierto): el toast dice la verdad del backend, no la del modal', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
+
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    // La predicción, refrescada al abrir, es correcta EN ESE MOMENTO.
+    expect(dialogo()?.textContent).toContain('todavía no puso su PIN')
+
+    // Mientras el modal sigue abierto, el garzón fija su PIN desde su perfil
+    // (o cualquier otro cambio ajeno a esta pestaña) — el listado en memoria
+    // de la pantalla no se entera.
+    garzonesBackend[0]!.pinFijado = true
+
+    await confirmarEnModal('Registrar igual')
+
+    // El PATCH SÍ destruyó una credencial real: el toast tiene que decirlo,
+    // aunque el modal haya preguntado con la predicción vieja.
+    expect(toasts).toEqual([{ title: 'PIN de Ana Torres invalidado', color: 'success' }])
+  })
+
+  it('la predicción del modal envejece (otra pestaña ya invalidó el PIN): el toast dice que no había nada, no repite la promesa del modal', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: true })]
+
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(dialogo()?.textContent).toContain('El PIN de Ana Torres deja de servir ahora')
+
+    // Mientras el modal sigue abierto, otra pestaña (u otro encargado) ya
+    // invalidó el PIN de este garzón.
+    garzonesBackend[0]!.pinFijado = false
+
+    await confirmarEnModal('Invalidar PIN')
+
+    // No había nada que destruir a esta altura: el toast no puede repetir la
+    // promesa que el modal hizo con una predicción ya vieja.
+    expect(toasts).toEqual([{
+      title: 'Ana Torres todavía no había puesto su PIN: no había nada que invalidar',
+      color: 'neutral',
+    }])
+  })
+
+  it('la ficha de un garzón con cuenta que ya fijó su PIN lo muestra "PIN puesto" y con su historial', async () => {
+    // El badge sale de `pinFijado` (del listado, `GarzonPublico`), no del
+    // historial: el historial de acá abajo es solo para la aserción del
+    // texto "Puso su PIN", no para derivar el badge.
+    garzonesBackend = [garzon({ id: 'garzon-2', nombre: 'Beto Fuentes', usuarioId: 'user-1', pinFijado: true })]
+    eventosPinBackend['garzon-2'] = [
+      { id: 'evt-2', tipo: 'fijado_por_garzon', usuarioNombre: 'Beto Fuentes', creadoEl: '2026-08-10T10:00:00.000Z' },
+      { id: 'evt-1', tipo: 'invalidado_por_vinculo', usuarioNombre: 'admin.paris', creadoEl: '2026-08-01T10:00:00.000Z' },
+    ]
+
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(wrapper.text()).toContain('PIN puesto')
+    expect(wrapper.text()).toContain('Puso su PIN')
+  })
+
+  it('la ficha de un garzón con cuenta que TODAVÍA no fijó su PIN lo marca "Sin PIN todavía"', async () => {
+    garzonesBackend = [garzon({ id: 'garzon-2', nombre: 'Beto Fuentes', usuarioId: 'user-1', pinFijado: false })]
+    eventosPinBackend['garzon-2'] = [
+      { id: 'evt-1', tipo: 'invalidado_por_vinculo', usuarioNombre: 'admin.paris', creadoEl: '2026-08-01T10:00:00.000Z' },
+    ]
+
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(wrapper.text()).toContain('Sin PIN todavía')
+    expect(wrapper.text()).not.toContain('PIN puesto')
+  })
+
+  // Hallazgo 1 de la revisión del 2026-08-14: `pinFijado` viene del listado
+  // (síncrono con el montaje), no del fetch de `/pin-eventos` — así que un
+  // historial que TARDA o FALLA no puede hacer que el badge mienta. Antes de
+  // este fix, `eventosPin: []` (estado inicial Y estado de error) hacía que
+  // el badge dijera "Sin PIN todavía" con la misma cara que un "no" real del
+  // backend.
+  it('el badge no miente aunque el historial no cargue: sale del listado, no del fetch de eventos', async () => {
+    garzonesBackend = [garzon({ id: 'garzon-2', nombre: 'Beto Fuentes', usuarioId: 'user-1', pinFijado: true })]
+    eventosPinRechaza = true
+
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    // El badge dice la verdad (viene del listado) aunque el historial haya
+    // fallado.
+    expect(wrapper.text()).toContain('PIN puesto')
+    expect(wrapper.text()).not.toContain('Sin PIN todavía')
+    // Y la lista NO dice "Todavía no hubo cambios de PIN" — sería mentira:
+    // no es que no hubo cambios, es que no se pudo saber.
+    expect(wrapper.text()).not.toContain('Todavía no hubo cambios de PIN')
+    expect(wrapper.text()).toContain('No se pudo cargar el historial')
+  })
+
+  it('la ficha de un garzón SIN cuenta no muestra el bloque de estado del PIN (se identifica por PIN emitido, no fijado)', async () => {
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(wrapper.text()).not.toContain('PIN puesto')
+    expect(wrapper.text()).not.toContain('Sin PIN todavía')
+  })
+
+  // Hallazgo 4: el guard `if (garzon.usuarioId)` antes de `cargarEventosPin`
+  // es lo único que sostiene "cero N+1" en la ficha. Borrarlo no pone nada
+  // rojo en los demás tests —la ficha de un garzón sin cuenta simplemente no
+  // tiene el bloque de PIN, eventos u no—, así que hace falta un test que
+  // mire la llamada de red directamente.
+  it('la ficha de un garzón SIN cuenta no pega a /pin-eventos', async () => {
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(pinEventosRequests).toEqual([])
+  })
+
+  // Revisión del 2026-08-14: `abrirRegenerar` no abre el modal si el garzón
+  // se eliminó entre el click y que el refresco volviera — correcto, pero
+  // antes lo hacía en silencio: el spinner del botón paraba y no pasaba
+  // nada más, sin decirle al encargado por qué.
+  it('el garzón se elimina mientras el refresco de abrirRegenerar está en vuelo: avisa por toast, no se queda callado', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: true })]
+
+    const wrapper = (montado = await pantalla())
+
+    // Retiene el GET que dispara `abrirRegenerar` (vía `cargar()`), para
+    // controlar a mano qué pasa MIENTRAS está en vuelo.
+    let resolverRefresco: (v: unknown[]) => void = () => {}
+    overrideSinEliminados = new Promise((resolve) => { resolverRefresco = resolve })
+
+    const clickPromise = wrapper.find('[aria-label="Invalidar PIN"]').trigger('click')
+    await new Promise(r => setTimeout(r, 10))
+
+    // El garzón se elimina (otra pestaña, otro encargado) mientras el
+    // refresco sigue pendiente.
+    garzonesBackend[0]!.eliminadoEl = '2026-08-14T00:00:00.000Z'
+    resolverRefresco(garzonesBackend.filter(g => !g.eliminadoEl).map(g => ({ ...g })))
+
+    await clickPromise
+    await new Promise(r => setTimeout(r, 20))
+
+    // El modal no se abre —correcto, no hay nada que regenerar— pero el
+    // encargado tiene que enterarse de por qué.
+    expect(dialogo()).toBeNull()
+    expect(toasts).toEqual([{
+      title: 'Ana Torres ya no está disponible: se eliminó justo antes de que confirmaras',
+      color: 'warning',
+    }])
   })
 })

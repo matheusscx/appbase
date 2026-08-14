@@ -58,6 +58,14 @@ export interface GarzonPublico {
   tipo: TipoGarzon;
   /** Cuenta vinculada (modo personal), o `null` si se identifica por PIN. */
   usuarioId: string | null;
+  /**
+   * Si existe un PIN usable hoy — el mismo booleano que ya expone `GET
+   * /mi-pin` (`miPin()`, más abajo), acá para quien administra en vez de
+   * para el dueño de la cuenta. No filtra el PIN, solo si hay uno: sin este
+   * dato, la ficha del encargado no puede saber si "invalidar" va a destruir
+   * algo o no va a tener ningún efecto.
+   */
+  pinFijado: boolean;
   creadoEl: Date;
   actualizadoEl: Date;
   eliminadoEl?: Date | null;
@@ -91,6 +99,17 @@ export interface GarzonConPin extends GarzonConAdvertencias {
   pin: string | null;
 }
 
+/**
+ * Respuesta específica de `regenerarPin`: suma si HABÍA un PIN usable antes
+ * de este PATCH. El resultado de "invalidar" no puede depender de lo que el
+ * front creía saber al abrir el modal —un dato que pudo quedar viejo mientras
+ * la pantalla estaba abierta sin recargar—, así que lo manda el backend, que
+ * lo sabe con certeza en el momento exacto en que pisa el hash.
+ */
+export interface GarzonPinRegenerado extends GarzonConPin {
+  habiaPin: boolean;
+}
+
 /** Una línea de historia, lista para mostrar. Nunca incluye el PIN. */
 export interface EventoPinPublico {
   id: string;
@@ -121,6 +140,7 @@ export class GarzonesService {
       activo: g.activo,
       tipo: g.tipo ?? TipoGarzon.GARZON,
       usuarioId: g.usuarioId ?? null,
+      pinFijado: g.pinHash !== PIN_INUTILIZABLE,
       creadoEl: g.creadoEl,
       actualizadoEl: g.actualizadoEl,
       eliminadoEl: g.eliminadoEl,
@@ -389,9 +409,13 @@ export class GarzonesService {
     tenantId: string,
     usuarioActorId: string,
     id: string,
-  ): Promise<GarzonConPin> {
+  ): Promise<GarzonPinRegenerado> {
     const garzon = await this.getOrThrow(tenantId, id);
     const tieneCuenta = garzon.usuarioId !== null;
+    // Tiene que leerse ANTES de que este método pise `garzon.pinHash` más
+    // abajo — es la única oportunidad de saberlo. Mismo predicado que
+    // `toPublico()` usa para `pinFijado`.
+    const habiaPin = garzon.pinHash !== PIN_INUTILIZABLE;
     const advertencias: string[] = [];
     if ((await this.contarSesionesAbiertas(tenantId, id)) > 0) {
       advertencias.push(
@@ -413,7 +437,7 @@ export class GarzonesService {
         : 'regenerado_por_encargado',
       usuarioId: usuarioActorId,
     });
-    return { ...this.toPublico(guardado), pin, advertencias };
+    return { ...this.toPublico(guardado), pin, advertencias, habiaPin };
   }
 
   /**

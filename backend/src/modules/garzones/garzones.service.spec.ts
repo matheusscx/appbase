@@ -600,6 +600,36 @@ describe('GarzonesService', () => {
 
       expect(res.advertencias[0]).toContain('marcar salida');
     });
+
+    // `habiaPin` es lo único que distingue, del lado de la RESPUESTA, "esto
+    // destruyó una credencial real" de "no había nada que destruir" — el front
+    // no puede confiar en lo que su propio listado en memoria creía saber
+    // (revisión del 2026-08-14, ronda 4). El resultado técnico (`pin: null`,
+    // `pinHash` en el centinela) es idéntico en los dos casos; `habiaPin` es
+    // la única diferencia observable.
+    it('CON cuenta y YA tenía un PIN puesto: habiaPin true', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', pin: '111111', usuarioId: 'cuenta-de-ana' }),
+      );
+
+      const res = await service.regenerarPin(TENANT, ACTOR, 'g1');
+
+      expect(res.habiaPin).toBe(true);
+    });
+
+    it('CON cuenta y TODAVÍA no había puesto su PIN (centinela): habiaPin false', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', usuarioId: 'cuenta-de-ana', pinHash: '!' }),
+      );
+
+      const res = await service.regenerarPin(TENANT, ACTOR, 'g1');
+
+      expect(res.habiaPin).toBe(false);
+      // El resultado técnico es el mismo que arriba — sigue sin PIN. Solo
+      // cambia lo que la respuesta dice que PASÓ.
+      expect(res.pin).toBeNull();
+      expect(garzonGuardado().pinHash).toBe('!');
+    });
   });
 
   describe('listarEventosPin', () => {
@@ -1235,6 +1265,28 @@ describe('GarzonesService', () => {
         eliminadoPorNombre: 'admin.paris',
       });
       expect(result[0]).not.toHaveProperty('pinHash');
+    });
+  });
+
+  // `pinFijado` es el mismo booleano que `miPin()` ya calcula
+  // (`pinHash !== PIN_INUTILIZABLE`), acá para la ficha del encargado. Sale
+  // de la entidad que `listar()` YA trae completa — no dispara ninguna
+  // consulta nueva ni por fila.
+  describe('listar expone pinFijado', () => {
+    it('CON PIN usable: pinFijado true', async () => {
+      repo.find.mockResolvedValue([garzon({ id: 'g1', pin: '123456' })]);
+
+      const [result] = await service.listar(TENANT);
+
+      expect(result.pinFijado).toBe(true);
+    });
+
+    it('con el centinela (garzón con cuenta que todavía no fijó el suyo): pinFijado false', async () => {
+      repo.find.mockResolvedValue([garzon({ id: 'g1', pinHash: '!' })]);
+
+      const [result] = await service.listar(TENANT);
+
+      expect(result.pinFijado).toBe(false);
     });
   });
 });
