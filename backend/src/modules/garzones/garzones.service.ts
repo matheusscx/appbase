@@ -4,11 +4,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository, type EntityManager } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, IsNull, Repository, type EntityManager } from 'typeorm';
 import { randomInt } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { Garzon } from './entities/garzon.entity';
+import {
+  GarzonPinEvento,
+  TipoEventoPin,
+} from './entities/garzon-pin-evento.entity';
 import { CreateGarzonDto } from './dto/create-garzon.dto';
 import { UpdateGarzonDto } from './dto/update-garzon.dto';
 import { TipoGarzon } from './enums/tipo-garzon.enum';
@@ -63,11 +67,13 @@ export interface GarzonConAdvertencias extends GarzonPublico {
 }
 
 /**
- * Respuesta de creación / regeneración: incluye el PIN en claro **una sola
- * vez**. No se persiste en claro ni se puede volver a leer (solo queda el hash).
+ * Respuesta de creación / regeneración. `pin` viene en claro **una sola vez**
+ * cuando el sistema lo emitió, y es `null` cuando no hay PIN que mostrar: el
+ * garzón tiene cuenta y lo fija él. No se persiste en claro ni se puede volver
+ * a leer.
  */
 export interface GarzonConPin extends GarzonConAdvertencias {
-  pin: string;
+  pin: string | null;
 }
 
 @Injectable()
@@ -77,6 +83,8 @@ export class GarzonesService {
     private readonly garzonRepo: Repository<Garzon>,
     @InjectRepository(SesionGarzon)
     private readonly sesionRepo: Repository<SesionGarzon>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   private toPublico(
@@ -132,16 +140,33 @@ export class GarzonesService {
     );
   }
 
-  async crear(tenantId: string, dto: CreateGarzonDto): Promise<GarzonConPin> {
-    const pin = await this.generarPinUnico(tenantId);
+  async crear(
+    tenantId: string,
+    usuarioActorId: string,
+    dto: CreateGarzonDto,
+  ): Promise<GarzonConPin> {
+    // Con cuenta el garzón nace SIN PIN usable: lo fija él desde su perfil y el
+    // encargado nunca ve uno. No queda bloqueado —en modo personal
+    // `resolverGarzonActuante` lo resuelve por JWT—, solo pierde el tótem hasta
+    // que fije el suyo.
+    if (dto.usuarioId) {
+      await this.assertVinculable(tenantId, dto.usuarioId);
+    }
+    const pin = dto.usuarioId ? null : await this.generarPinUnico(tenantId);
     const garzon = this.garzonRepo.create({
       tenantId,
       nombre: dto.nombre,
-      pinHash: await bcrypt.hash(pin, BCRYPT_COST),
+      pinHash: pin ? await bcrypt.hash(pin, BCRYPT_COST) : PIN_INUTILIZABLE,
       activo: dto.activo ?? true,
       tipo: dto.tipo ?? TipoGarzon.GARZON,
+      usuarioId: dto.usuarioId ?? null,
     });
-    const guardado = await this.garzonRepo.save(garzon);
+    // Sin PIN emitido no hay nada que registrar: la historia de ese garzón
+    // empieza el día que él fija el suyo.
+    const guardado = await this.guardarConEvento(
+      garzon,
+      pin ? { tipo: 'emitido_en_alta', usuarioId: usuarioActorId } : null,
+    );
     // Un garzón recién creado no puede tener sesión abierta: el array va vacío
     // para que el que consume no tenga que distinguir este endpoint de los otros.
     return { ...this.toPublico(guardado), pin, advertencias: [] };
@@ -149,6 +174,7 @@ export class GarzonesService {
 
   async actualizar(
     tenantId: string,
+    usuarioActorId: string,
     id: string,
     dto: UpdateGarzonDto,
   ): Promise<GarzonConAdvertencias> {
@@ -198,14 +224,27 @@ export class GarzonesService {
     if (dto.nombre !== undefined) garzon.nombre = dto.nombre;
     if (dto.activo !== undefined) garzon.activo = dto.activo;
     if (dto.tipo !== undefined) garzon.tipo = dto.tipo;
+    // El PIN emitido por el encargado muere en el instante en que el garzón
+    // recibe una cuenta: desde acá la identidad la prueba el JWT, y el PIN que
+    // el encargado conoce no puede seguir valiendo. Solo la transición
+    // null → cuenta; desvincular NO toca el PIN (el garzón sigue operando con
+    // el que eligió, que el encargado no conoce).
+    let eventoPin: { tipo: TipoEventoPin; usuarioId: string } | null = null;
     if (dto.usuarioId !== undefined) {
       if (dto.usuarioId !== null) {
         await this.assertVinculable(tenantId, dto.usuarioId, id);
+        if (garzon.usuarioId === null) {
+          garzon.pinHash = PIN_INUTILIZABLE;
+          eventoPin = {
+            tipo: 'invalidado_por_vinculo',
+            usuarioId: usuarioActorId,
+          };
+        }
       }
       garzon.usuarioId = dto.usuarioId;
     }
     return {
-      ...this.toPublico(await this.garzonRepo.save(garzon)),
+      ...this.toPublico(await this.guardarConEvento(garzon, eventoPin)),
       advertencias,
     };
   }
@@ -235,7 +274,7 @@ export class GarzonesService {
   private async assertVinculable(
     tenantId: string,
     usuarioId: string,
-    garzonId: string,
+    garzonId?: string,
   ): Promise<void> {
     const [fila] = await this.garzonRepo.manager.query<
       { es_totem: boolean; garzon_nombre: string | null }[]
@@ -246,11 +285,11 @@ export class GarzonesService {
          LEFT JOIN garzones g
            ON g.usuario_id = ut.usuario_id
           AND g.tenant_id = ut.tenant_id
-          AND g.garzon_id <> $3
+          AND ($3::uuid IS NULL OR g.garzon_id <> $3)
           AND g.eliminado_el IS NULL
         WHERE ut.usuario_id = $1 AND ut.tenant_id = $2
           AND ut.eliminado_el IS NULL`,
-      [usuarioId, tenantId, garzonId],
+      [usuarioId, tenantId, garzonId ?? null],
     );
     if (!fila) {
       throw new BadRequestException(
@@ -269,6 +308,40 @@ export class GarzonesService {
           `Desvinculala de ${fila.garzon_nombre} antes de asignarla acá.`,
       );
     }
+  }
+
+  /**
+   * Guarda el garzón y —si hubo cambio de PIN— su fila de historia **en la
+   * misma transacción**. Un log que puede quedar desincronizado del hecho que
+   * registra no sirve como registro.
+   *
+   * Sin evento, `save()` plano: `actualizar()` pasa por acá en **cada**
+   * llamada, evento o no, y abrir un BEGIN/COMMIT para el caso normal (sin
+   * cambio de PIN) es carga de conexión sobre una ruta caliente que no la
+   * necesita — "conexiones/deadlock" es el primer frente 🔴 del backlog del
+   * repo, no hay que sumarle peso porque sí. Sin evento no hay dos escrituras
+   * que sincronizar, así que la atomicidad no pierde nada.
+   */
+  private async guardarConEvento(
+    garzon: Garzon,
+    evento: { tipo: TipoEventoPin; usuarioId: string } | null,
+  ): Promise<Garzon> {
+    if (!evento) {
+      return this.garzonRepo.save(garzon);
+    }
+    return this.dataSource.transaction(async (m) => {
+      const guardado = await m.save(Garzon, garzon);
+      await m.save(
+        GarzonPinEvento,
+        m.create(GarzonPinEvento, {
+          tenantId: guardado.tenantId,
+          garzonId: guardado.id,
+          tipo: evento.tipo,
+          usuarioId: evento.usuarioId,
+        }),
+      );
+      return guardado;
+    });
   }
 
   /**

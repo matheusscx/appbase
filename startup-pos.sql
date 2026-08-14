@@ -1570,7 +1570,7 @@ CREATE TABLE garzon_pin_evento (
   ))
 );
 CREATE INDEX idx_garzon_pin_evento_garzon
-  ON garzon_pin_evento (garzon_id, creado_el);
+  ON garzon_pin_evento (tenant_id, garzon_id, creado_el);
 
 -- Propina separada de la venta (SII): 1 fila por cierre de mesa (incluso tip $0).
 -- Depende de garzones + ventas; se declara aquí tras garzones.

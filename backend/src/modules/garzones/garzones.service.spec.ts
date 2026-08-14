@@ -1,11 +1,16 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import type { EntityManager } from 'typeorm';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { DataSource, type EntityManager } from 'typeorm';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { GarzonesService } from './garzones.service';
 import { Garzon } from './entities/garzon.entity';
+import { GarzonPinEvento } from './entities/garzon-pin-evento.entity';
 import { TipoGarzon } from './enums/tipo-garzon.enum';
 import {
   EstadoSesionGarzon,
@@ -32,7 +37,8 @@ type Repo = {
   update: jest.Mock;
   softDelete: jest.Mock;
   createQueryBuilder: jest.Mock;
-  // `resolverGarzonActuante` consulta por SQL crudo a través del manager.
+  // `resolverGarzonActuante`/`assertVinculable` consultan por SQL crudo a
+  // través del manager del repo — eso no cambió con la Task 2.
   manager: { query: jest.Mock };
 };
 
@@ -60,6 +66,37 @@ function makeSesionRepo(): SesionRepo {
   };
 }
 
+/**
+ * `guardarConEvento` solo abre `dataSource.transaction` cuando hay un evento
+ * de PIN que registrar (sin evento usa `garzonRepo.save` plano — ver comentario
+ * en el service). `eventos` es la sonda del test: discrimina qué filas son de
+ * `GarzonPinEvento` por la **clase** que `guardarConEvento` le pasa a
+ * `m.save`/`m.create`, no por la forma del payload — `Garzon` también tiene un
+ * campo `tipo` (`TipoGarzon`), así que distinguir por esa clave habría
+ * empujado cada guardado de garzón al array de eventos.
+ */
+function makeDataSource(): {
+  dataSource: { query: jest.Mock; transaction: jest.Mock };
+  manager: { save: jest.Mock; create: jest.Mock };
+  eventos: Record<string, unknown>[];
+} {
+  const eventos: Record<string, unknown>[] = [];
+  const manager = {
+    save: jest.fn((entity: unknown, row: Record<string, unknown>) => {
+      if (entity === GarzonPinEvento) eventos.push(row);
+      return Promise.resolve(row);
+    }),
+    create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({
+      ...data,
+    })),
+  };
+  const dataSource = {
+    query: jest.fn().mockResolvedValue([]),
+    transaction: jest.fn((cb: (m: typeof manager) => unknown) => cb(manager)),
+  };
+  return { dataSource, manager, eventos };
+}
+
 /** Construye un garzón de prueba con el PIN ya hasheado. */
 function garzon(over: Partial<Garzon> & { pin?: string }): Garzon {
   const { pin, ...rest } = over;
@@ -84,15 +121,20 @@ describe('GarzonesService', () => {
   let service: GarzonesService;
   let repo: Repo;
   let sesionRepo: SesionRepo;
+  let dataSource: { query: jest.Mock; transaction: jest.Mock };
+  let manager: { save: jest.Mock; create: jest.Mock };
+  let eventos: Record<string, unknown>[];
 
   beforeEach(async () => {
     repo = makeRepo();
     sesionRepo = makeSesionRepo();
+    ({ dataSource, manager, eventos } = makeDataSource());
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GarzonesService,
         { provide: getRepositoryToken(Garzon), useValue: repo },
         { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
+        { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
     service = module.get<GarzonesService>(GarzonesService);
@@ -104,18 +146,22 @@ describe('GarzonesService', () => {
 
   describe('crear', () => {
     it('genera un PIN de 6 dígitos, lo hashea y lo devuelve una sola vez', async () => {
-      const result = await service.crear(TENANT, { nombre: 'Ana' });
+      const result = await service.crear(TENANT, USUARIO_ID, { nombre: 'Ana' });
 
       expect(result.pin).toMatch(/^\d{6}$/);
-      const saved = (repo.save.mock.calls[0] as [Garzon])[0];
+      // Alta SIN cuenta emite PIN → hay evento que registrar → pasa por la
+      // transacción de `dataSource`, no por `repo.save` plano.
+      const saved = manager.save.mock.calls[0][1] as Garzon;
       expect(saved.pinHash).not.toBe(result.pin);
-      expect(await bcrypt.compare(result.pin, saved.pinHash)).toBe(true);
+      expect(await bcrypt.compare(result.pin as string, saved.pinHash)).toBe(
+        true,
+      );
       expect(result).not.toHaveProperty('pinHash');
       expect(result.nombre).toBe('Ana');
     });
 
     it('crear persiste tipo cocina', async () => {
-      const result = await service.crear(TENANT, {
+      const result = await service.crear(TENANT, USUARIO_ID, {
         nombre: 'Ana',
         tipo: TipoGarzon.COCINA,
       });
@@ -127,7 +173,7 @@ describe('GarzonesService', () => {
     });
 
     it('crear sin tipo usa garzon por defecto', async () => {
-      await service.crear(TENANT, { nombre: 'Pedro' });
+      await service.crear(TENANT, USUARIO_ID, { nombre: 'Pedro' });
 
       expect(repo.create).toHaveBeenCalledWith(
         expect.objectContaining({ tipo: TipoGarzon.GARZON }),
@@ -141,10 +187,12 @@ describe('GarzonesService', () => {
         .mockReturnValueOnce(654321);
       repo.find.mockResolvedValue([garzon({ id: 'g1', pin: '123456' })]);
 
-      const result = await service.crear(TENANT, { nombre: 'Bruno' });
+      const result = await service.crear(TENANT, USUARIO_ID, {
+        nombre: 'Bruno',
+      });
 
       expect(result.pin).toBe('654321');
-      const saved = (repo.save.mock.calls[0] as [Garzon])[0];
+      const saved = manager.save.mock.calls[0][1] as Garzon;
       expect(await bcrypt.compare('654321', saved.pinHash)).toBe(true);
     });
   });
@@ -402,7 +450,11 @@ describe('GarzonesService', () => {
 
       expect(result.pin).toMatch(/^\d{6}$/);
       const saved = (repo.save.mock.calls[0] as [Garzon])[0];
-      expect(await bcrypt.compare(result.pin, saved.pinHash)).toBe(true);
+      // `regenerarPin` no toca el flujo de alta/vínculo: siempre devuelve un
+      // PIN, nunca `null`. El cast solo refleja eso, no relaja el chequeo.
+      expect(await bcrypt.compare(result.pin as string, saved.pinHash)).toBe(
+        true,
+      );
     });
 
     // Decisión del owner (2026-08-07): advertir, no bloquear. Rotar una
@@ -455,11 +507,13 @@ describe('GarzonesService', () => {
       const g = garzon({ id: 'g1', tipo: TipoGarzon.GARZON });
       repo.findOne.mockResolvedValue(g);
 
-      const result = await service.actualizar(TENANT, 'g1', {
+      const result = await service.actualizar(TENANT, USUARIO_ID, 'g1', {
         tipo: TipoGarzon.COCINA,
       });
 
       expect(result.tipo).toBe(TipoGarzon.COCINA);
+      // Sin `usuarioId` en el DTO no hay evento de PIN que registrar:
+      // `guardarConEvento` toma el camino corto y guarda con `repo.save` plano.
       expect((repo.save.mock.calls[0] as [Garzon])[0].tipo).toBe(
         TipoGarzon.COCINA,
       );
@@ -470,7 +524,7 @@ describe('GarzonesService', () => {
       const nombreOriginal = g.nombre;
       repo.findOne.mockResolvedValue(g);
 
-      await service.actualizar(TENANT, 'g1', { activo: false });
+      await service.actualizar(TENANT, USUARIO_ID, 'g1', { activo: false });
 
       const saved = (repo.save.mock.calls[0] as [Garzon])[0];
       expect(saved.activo).toBe(false);
@@ -486,7 +540,7 @@ describe('GarzonesService', () => {
       sesionRepo.count.mockResolvedValue(1);
 
       await expect(
-        service.actualizar(TENANT, 'g1', { activo: false }),
+        service.actualizar(TENANT, USUARIO_ID, 'g1', { activo: false }),
       ).rejects.toThrow(
         'No se puede desactivar un garzón con una sesión abierta',
       );
@@ -497,7 +551,9 @@ describe('GarzonesService', () => {
       repo.findOne.mockResolvedValue(garzon({ id: 'g1', activo: false }));
       sesionRepo.count.mockResolvedValue(1);
 
-      const result = await service.actualizar(TENANT, 'g1', { activo: true });
+      const result = await service.actualizar(TENANT, USUARIO_ID, 'g1', {
+        activo: true,
+      });
 
       expect(result.activo).toBe(true);
     });
@@ -513,7 +569,7 @@ describe('GarzonesService', () => {
       );
       sesionRepo.count.mockResolvedValue(1);
 
-      const result = await service.actualizar(TENANT, 'g1', {
+      const result = await service.actualizar(TENANT, USUARIO_ID, 'g1', {
         tipo: TipoGarzon.COCINA,
       });
 
@@ -533,7 +589,7 @@ describe('GarzonesService', () => {
         garzon({ id: 'g1', tipo: TipoGarzon.GARZON }),
       );
 
-      const result = await service.actualizar(TENANT, 'g1', {
+      const result = await service.actualizar(TENANT, USUARIO_ID, 'g1', {
         tipo: TipoGarzon.COCINA,
       });
 
@@ -550,7 +606,7 @@ describe('GarzonesService', () => {
       );
       sesionRepo.count.mockResolvedValue(1);
 
-      const result = await service.actualizar(TENANT, 'g1', {
+      const result = await service.actualizar(TENANT, USUARIO_ID, 'g1', {
         nombre: 'Ana María',
         tipo: TipoGarzon.COCINA,
       });
@@ -567,7 +623,7 @@ describe('GarzonesService', () => {
         garzon({ id: 'g1', activo: true, tipo: TipoGarzon.GARZON }),
       );
 
-      await service.actualizar(TENANT, 'g1', {
+      await service.actualizar(TENANT, USUARIO_ID, 'g1', {
         activo: false,
         tipo: TipoGarzon.COCINA,
       });
@@ -578,7 +634,9 @@ describe('GarzonesService', () => {
     it('cambiar solo el nombre no consulta sesiones', async () => {
       repo.findOne.mockResolvedValue(garzon({ id: 'g1', activo: true }));
 
-      await service.actualizar(TENANT, 'g1', { nombre: 'Ana María' });
+      await service.actualizar(TENANT, USUARIO_ID, 'g1', {
+        nombre: 'Ana María',
+      });
 
       expect(sesionRepo.count).not.toHaveBeenCalled();
     });
@@ -587,7 +645,7 @@ describe('GarzonesService', () => {
       repo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.actualizar(TENANT, 'inexistente', { nombre: 'X' }),
+        service.actualizar(TENANT, USUARIO_ID, 'inexistente', { nombre: 'X' }),
       ).rejects.toThrow(NotFoundException);
       // El título dice "en el tenant": sin afirmar el `where`, el test pasaría
       // igual con la búsqueda acotada solo por id, que es editar el garzón de
@@ -595,6 +653,180 @@ describe('GarzonesService', () => {
       expect(repo.findOne).toHaveBeenCalledWith({
         where: { id: 'inexistente', tenantId: TENANT },
       });
+    });
+  });
+
+  describe('el vínculo con una cuenta y el PIN', () => {
+    const ACTOR = 'encargado-uuid';
+
+    /**
+     * El garzón efectivamente guardado, sin importar si `guardarConEvento`
+     * tomó el `save` plano (`repo.save(garzon)`, 1 argumento — sin evento) o
+     * la transacción (`manager.save(Garzon, garzon)`, 2 argumentos — con
+     * evento). Cuál de los dos caminos corre es JUSTAMENTE lo que cambia si
+     * se rompe el guard `garzon.usuarioId === null` de `actualizar()`:
+     * indexar un solo camino a ciegas hace que el test se caiga con un
+     * `TypeError` bajo el mutante, en vez de fallar por la aserción que
+     * importa (`pinHash` sin tocar, sin evento).
+     */
+    function garzonGuardado(): Garzon {
+      const plano = repo.save.mock.calls[0]?.[0] as Garzon | undefined;
+      const enTx = manager.save.mock.calls.find(
+        ([entity]: [unknown, unknown]) => entity === Garzon,
+      )?.[1] as Garzon | undefined;
+      const g = plano ?? enTx;
+      if (!g) {
+        throw new Error(
+          'garzonGuardado(): no se guardó ningún Garzon ni por repo.save ' +
+            'ni por la transacción de dataSource — ¿el test disparó una ' +
+            'excepción antes de llegar a guardarConEvento?',
+        );
+      }
+      return g;
+    }
+
+    it('el alta CON cuenta no emite PIN y no escribe evento', async () => {
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null },
+      ]);
+
+      const res = await service.crear(TENANT, ACTOR, {
+        nombre: 'Ana',
+        usuarioId: 'cuenta-de-ana',
+      });
+
+      expect(res.pin).toBeNull();
+      // Sin evento, `guardarConEvento` NO abre transacción: guarda con
+      // `repo.save` plano. Si `manager.save` (el de `dataSource.transaction`)
+      // se llamara acá, sería un BEGIN/COMMIT de más en la ruta de alta.
+      expect(manager.save).not.toHaveBeenCalled();
+      expect(eventos).toHaveLength(0);
+      expect(garzonGuardado().pinHash).toBe('!');
+    });
+
+    it('el alta SIN cuenta emite PIN y lo registra', async () => {
+      const res = await service.crear(TENANT, ACTOR, { nombre: 'Bruno' });
+
+      expect(res.pin).toMatch(/^\d{6}$/);
+      expect(eventos).toEqual([
+        expect.objectContaining({
+          tenantId: TENANT,
+          tipo: 'emitido_en_alta',
+          usuarioId: ACTOR,
+        }),
+      ]);
+    });
+
+    it('el alta con cuenta llama assertVinculable y propaga el rechazo si esa cuenta ya está vinculada a otro garzón', async () => {
+      // Mismo 409 que `actualizar()`: sin este chequeo en el alta, el admin
+      // comería el 500 genérico de `uq_garzones_usuario_tenant` en vez del
+      // mensaje que le dice qué garzón desvincular primero.
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: 'Bruno' },
+      ]);
+
+      await expect(
+        service.crear(TENANT, ACTOR, {
+          nombre: 'Ana',
+          usuarioId: 'cuenta-ya-vinculada',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(repo.save).not.toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('el alta con cuenta consulta assertVinculable con garzonId nulo ($3): la fila todavía no existe', async () => {
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null },
+      ]);
+
+      await service.crear(TENANT, ACTOR, {
+        nombre: 'Ana',
+        usuarioId: 'cuenta-de-ana',
+      });
+
+      // `toHaveBeenCalledWith` en vez de indexar `mock.calls[0]` a ciegas: si
+      // el mutante que borra el `assertVinculable(...)` del alta deja
+      // `repo.manager.query` sin ninguna llamada, esto falla por su propio
+      // mensaje de Jest en vez de un `TypeError` al destructurar `undefined`.
+      // Sin el guard `$3::uuid IS NULL` en el SQL, mandar `null` acá haría que
+      // `g.garzon_id <> $3` sea NULL para toda fila y el LEFT JOIN nunca
+      // encontrara un garzón ya vinculado — el alta dejaría crear la colisión
+      // que `uq_garzones_usuario_tenant` resuelve después con un 500.
+      expect(repo.manager.query).toHaveBeenCalledWith(expect.any(String), [
+        'cuenta-de-ana',
+        TENANT,
+        null,
+      ]);
+    });
+
+    it('vincular una cuenta invalida el PIN y lo registra', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', pin: '111111', usuarioId: null }),
+      );
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null },
+      ]);
+
+      await service.actualizar(TENANT, ACTOR, 'g1', {
+        usuarioId: 'cuenta-de-ana',
+      });
+
+      expect(garzonGuardado().pinHash).toBe('!');
+      expect(eventos).toEqual([
+        expect.objectContaining({
+          tenantId: TENANT,
+          garzonId: 'g1',
+          tipo: 'invalidado_por_vinculo',
+          usuarioId: ACTOR,
+        }),
+      ]);
+    });
+
+    it('DESVINCULAR no toca el PIN: el garzón sigue con el que eligió', async () => {
+      const g = garzon({ id: 'g1', pin: '111111', usuarioId: 'cuenta-de-ana' });
+      const hashOriginal = g.pinHash;
+      repo.findOne.mockResolvedValue(g);
+
+      await service.actualizar(TENANT, ACTOR, 'g1', { usuarioId: null });
+
+      expect(garzonGuardado().pinHash).toBe(hashOriginal);
+      expect(eventos).toHaveLength(0);
+    });
+
+    it('renombrar a un garzón ya vinculado no re-invalida su PIN', async () => {
+      const g = garzon({ id: 'g1', pin: '111111', usuarioId: 'cuenta-de-ana' });
+      const hashOriginal = g.pinHash;
+      repo.findOne.mockResolvedValue(g);
+
+      await service.actualizar(TENANT, ACTOR, 'g1', { nombre: 'Ana María' });
+
+      expect(garzonGuardado().pinHash).toBe(hashOriginal);
+      expect(eventos).toHaveLength(0);
+    });
+
+    // El caso que la UI ejecuta en CADA edición, no un extremo teórico:
+    // `frontend/app/pages/configuracion/garzones.vue` manda `usuarioId` en
+    // todo PATCH, incluso cuando no cambió. Sin el guard
+    // `garzon.usuarioId === null` en el service, renombrar desde la pantalla
+    // real le borraría el PIN al garzón y escribiría un
+    // `invalidado_por_vinculo` falso en cada edición — el test de arriba
+    // ("renombrar...") no lo prueba porque no manda `usuarioId`, y ese guard
+    // queda sin cobertura.
+    it('re-enviar el mismo usuarioId ya vinculado (como hace cada PATCH del formulario) no re-invalida el PIN', async () => {
+      const g = garzon({ id: 'g1', pin: '111111', usuarioId: 'cuenta-de-ana' });
+      const hashOriginal = g.pinHash;
+      repo.findOne.mockResolvedValue(g);
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null },
+      ]);
+
+      await service.actualizar(TENANT, ACTOR, 'g1', {
+        usuarioId: 'cuenta-de-ana',
+      });
+
+      expect(garzonGuardado().pinHash).toBe(hashOriginal);
+      expect(eventos).toHaveLength(0);
     });
   });
 
@@ -789,11 +1021,17 @@ describe('GarzonesService.asegurarMostrador', () => {
   beforeEach(async () => {
     const repo = makeRepo();
     const sesionRepo = makeSesionRepo();
+    // `asegurarMostrador` no pasa por `guardarConEvento`: recibe su propio
+    // `manager` de transacción como parámetro. El `DataSource` mockeado acá
+    // solo satisface la inyección del constructor, no lo usa ningún test de
+    // este describe.
+    const { dataSource } = makeDataSource();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GarzonesService,
         { provide: getRepositoryToken(Garzon), useValue: repo },
         { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
+        { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
     service = module.get(GarzonesService);

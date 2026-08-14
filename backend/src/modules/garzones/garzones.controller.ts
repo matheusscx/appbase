@@ -45,8 +45,8 @@ export class GarzonesController {
   @Post()
   @RequiresPermiso('Salones', 'Crear')
   crear(@Req() req: Request, @Body() dto: CreateGarzonDto) {
-    const user = req.user as { tenantId: string };
-    return this.garzonesService.crear(user.tenantId, dto);
+    const user = req.user as JwtUser;
+    return this.garzonesService.crear(user.tenantId!, user.id, dto);
   }
 
   @Patch(':id')
@@ -56,8 +56,8 @@ export class GarzonesController {
     @Param('id') id: string,
     @Body() dto: UpdateGarzonDto,
   ) {
-    const user = req.user as { tenantId: string };
-    return this.garzonesService.actualizar(user.tenantId, id, dto);
+    const user = req.user as JwtUser;
+    return this.garzonesService.actualizar(user.tenantId!, user.id, id, dto);
   }
 
   /** Regenera el PIN del garzón y lo devuelve una sola vez. */
