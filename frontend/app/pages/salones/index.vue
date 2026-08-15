@@ -191,8 +191,20 @@ const TEXTO_INVALIDACION: Record<
  * Sin PIN usable no puede operar desde un TÓTEM COMPARTIDO — pero sí desde
  * ESTE dispositivo: en modo personal `solicitarPin` no pide PIN (bypass por
  * JWT, ver más abajo), así que este aviso no describe un bloqueo, solo el
- * límite del tótem. Los dos textos lo dicen explícito, mismo criterio que
- * `MiPinForm.vue` ("Desde el tuyo trabajás normal").
+ * límite del tótem. Los dos textos lo dicen explícito.
+ *
+ * ⚠️ Prometer "desde este dispositivo trabajás normal" es seguro ACÁ y no en
+ * `MiPinForm.vue` (revisión final, 2026-08-15). Este bloque solo se muestra
+ * con `garzonPersonal`, que sale de `GET /garzones/mi-vinculo` —ruta con
+ * `@RequiresPermiso('Salones', 'Operar')`—: quien lee esto ya probó que
+ * puede entrar en modo personal. `MiPinForm` vive en el perfil, que hereda
+ * de `pages/configuracion.vue` un `definePageMeta` sin gate de permiso
+ * (`{ middleware: 'auth', layout: 'dashboard' }`), y su
+ * `GET /garzones/mi-pin` tampoco exige permiso de módulo, así que ahí el
+ * mismo texto se lo comería el garzón SIN
+ * `Salones:Operar`, que es exactamente a quien no le sirve — por eso ese
+ * componente se queda con lo que es cierto siempre (el tótem), sin
+ * prometer el dispositivo propio.
  *
  * La **condición** es el estado (`fijado`), no una comparación de fechas
  * entre eventos. El texto sale del PRIMER evento de invalidación de la

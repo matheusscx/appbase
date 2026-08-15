@@ -4800,7 +4800,27 @@ alcance que la entrada original ya señalaba correctamente.
 - Historial completo (no solo el último cambio) en la tabla nueva `garzon_pin_evento`, cinco
   tipos de evento, escrito en la misma transacción que el cambio de `pin_hash`. Nunca guarda el
   PIN, solo el hecho de que cambió. Visible para el encargado (ficha) y el propio garzón (perfil,
-  `GET /garzones/mi-pin`).
+  `GET /garzones/mi-pin`). **La ficha lo muestra para todos los garzones, con cuenta o sin ella**
+  (decisión del owner, revisión final 2026-08-15): `emitido_en_alta` y
+  `regenerado_por_encargado` son los únicos eventos que produce un garzón sin cuenta, y su
+  perfil no existe (`miPin` resuelve por `garzonPersonalDe`, que exige `usuario_id` → 404), así
+  que la ficha es la única pantalla donde se ven — y es el caso que justifica el log entero,
+  porque con cuenta el encargado no regenera, invalida. Sin superficie nueva (el endpoint ya era
+  `Salones:Leer`, el mismo de la ficha) y sin N+1 (una llamada por apertura de ficha, nunca una
+  por fila; lo fija el test *"cero N+1: el listado no pide ningún historial…"*). El badge tiene
+  **tres estados** y se muestra siempre que **no haya PIN usable**, con cuenta o sin ella; el
+  único caso que lo esconde es *"sin cuenta y con PIN usable"*, donde *"PIN puesto"* significaría
+  *"lo puso la persona"* y eso nunca pasó. Se descartó la regla más simple —esconderlo para todo
+  garzón sin cuenta— porque se apoyaba en una premisa **falsa**: que un garzón sin cuenta siempre
+  tiene un PIN emitido por el sistema. **Desvincular lo desmiente**, y se llega desde el propio
+  formulario vaciando el selector: `actualizar()` pisa `pin_hash` solo en la transición
+  `null → uuid` (`vinculaCuenta` exige `dto.usuarioId !== null`), así que un garzón dado de alta
+  **con** cuenta y después desvinculado queda `usuario_id: null` **y** `pinFijado: false` — no
+  puede operar por ningún lado (el tótem compara contra el centinela, el modo personal necesita
+  el vínculo) ni arreglarlo solo (`fijarMiPin` le da 404 sin `usuario_id`). Ese estado lleva
+  rótulo propio, *"Sin PIN: no puede operar"* en color `error`, separado de la espera normal
+  (*"Sin PIN todavía"*, con cuenta): la salida de uno es que el encargado genere un PIN, la del
+  otro es que la persona lo ponga desde su perfil.
 - Aviso en `/salones`, modo personal, cuando el garzón no tiene PIN usable. Dos ramas con texto
   distinto según `tipo` (`TEXTO_INVALIDACION`, `index.vue:182-188`) — invalidado por el
   encargado: *"Bruno invalidó tu PIN (10-08-2026, 8:00 a. m.)"*; invalidado por vincular una
@@ -4812,8 +4832,33 @@ alcance que la entrada original ya señalaba correctamente.
 
 **Mutantes que fijan el comportamiento** (cada uno revierte al comportamiento anterior, no solo
 rompe algo): quitar la invalidación al vincular, devolver el PIN en la rama de invalidación,
-saltear la escritura del evento — cubiertos en `garzones.service.spec.ts` y el e2e de
-`garzon-modo-personal.e2e-spec.ts` / `garzones-selector.e2e-spec.ts`.
+saltear la escritura del evento. Dónde cae cada uno, **medido contra los specs** en la revisión
+final del 2026-08-15 (la redacción anterior citaba `garzones-selector.e2e-spec.ts`, que **no
+asierta nada** sobre invalidación, vínculo ni eventos —sus únicas menciones están en un
+comentario— y omitía `garzon-pin.e2e-spec.ts`, que es el spec construido para este ciclo):
+
+| Mutante | Unit (`garzones.service.spec.ts`) | E2E |
+|---|---|---|
+| Quitar la invalidación al vincular | *"vincular una cuenta invalida el PIN y lo registra"* (+ *"DESVINCULAR no toca el PIN"* como contraste) | **Ninguno.** Ver la nota de abajo |
+| Devolver el PIN en la rama de invalidación | *"CON cuenta: invalida, no devuelve PIN, y lo registra"* | `garzon-pin.e2e-spec.ts` → *"el encargado lo invalida sin ver ningún PIN, y el viejo deja de servir"* (`expect(res.body.pin).toBeNull()`) |
+| Saltear la escritura del evento | los dos tests de arriba afirman sobre el evento guardado | `garzon-pin.e2e-spec.ts` → *"la historia quedó completa, en orden y con nombre del actor"* |
+
+⚠️ **El primer mutante no tiene red en e2e, y conviene saberlo antes de confiarse — pero el
+recorrido ya existe: lo que falta es la aserción.** `caja-testigo.e2e-spec.ts:383-387` vincula
+al garzón B por `PATCH /api/garzones/:id` **después** de haberle abierto sesión con su PIN vivo
+(`:376`), y `:771-775` hace lo mismo con el garzón D. O sea que la rama `vincular` de
+`actualizar()` **sí se ejecuta** en e2e, con un PIN real muriendo en el proceso; simplemente
+ningún test comprueba después que ese PIN dejó de servir (a ese spec le interesa otra cosa: el
+testigo y `puede_operar_salon`). Cerrar el hueco es **agregar una aserción a un escenario ya
+montado**, no construir uno nuevo.
+
+Lo que sí es cierto es que ningún test **afirma** sobre esa transición. En particular
+`garzon-modo-personal.e2e-spec.ts` → *"un garzón vinculado sigue en el selector del tótem, pero
+su PIN viejo ya no abre la puerta"* prueba el **estado** y no la transición: el PIN de Ana ya
+nace muerto en el seeder (`seeder.service.ts`, `pinHash: PIN_INUTILIZABLE`), así que con la
+invalidación al vincular revertida ese test seguiría pasando. Sigue valiendo por lo que sí
+prueba —que `verificarPin` corre de verdad contra el hash muerto—, pero no es la red de este
+mutante; la red es el unit.
 
 Detalle funcional completo: [`garzones.md`](../features/garzones.md). Spec de diseño con las
 decisiones del owner y las alternativas descartadas:

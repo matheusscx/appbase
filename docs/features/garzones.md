@@ -333,9 +333,32 @@ transferencias — ver Salones).
   número que mostrar— y el resultado sale por toast. El botón de la fila **cambia de
   rótulo** según el garzón: *"Generar PIN nuevo"* sin cuenta, *"Invalidar PIN"* con cuenta.
   El alta acepta la cuenta directamente, y el aviso del formulario dice cuál de los dos
-  casos va a pasar **antes** de guardar. La ficha muestra si esa persona ya puso su PIN
-  (`pinFijado`, del listado — no derivado del historial, que puede tardar o fallar) y su
-  historia (`GarzonesPinEventosLista`). Entrada de nav bajo Configuración, gated
+  casos va a pasar **antes** de guardar. La ficha muestra el **historial de PIN de todos los
+  garzones** (`GarzonesPinEventosLista`, decisión del owner 2026-08-15) — es la única pantalla
+  donde se ven `emitido_en_alta` y `regenerado_por_encargado`, los dos únicos eventos que
+  produce un garzón **sin** cuenta, que no tiene perfil donde mirarlos; y es justo el caso que
+  justifica el log, porque *"Pedro le regeneró el PIN a Ana tres veces esta semana"* solo puede
+  pasar sin cuenta (con cuenta el encargado no regenera, invalida). Sin superficie nueva: el
+  endpoint pide `Salones:Leer`, el mismo con el que ya se lee la ficha, y la llamada cuelga de
+  **abrir la ficha**, nunca del render de la tabla (una por apertura, cero N+1). El badge de PIN
+  (`pinFijado`, del listado — no derivado del historial, que puede tardar o fallar) tiene **tres
+  estados**, porque la salida de cada uno la ejecuta alguien distinto:
+
+  | Estado | Badge | Quién lo resuelve |
+  |---|---|---|
+  | Con cuenta, PIN puesto | *"PIN puesto"* (`success`) | nada que hacer |
+  | Con cuenta, sin PIN | *"Sin PIN todavía"* (`warning`) | la persona, desde su perfil |
+  | **Sin cuenta, sin PIN** | *"Sin PIN: no puede operar"* (`error`) | **el encargado**, generándole uno |
+  | Sin cuenta, con PIN | *(sin badge)* | — |
+
+  El último caso se esconde porque ahí *"PIN puesto"* significaría *"lo puso la persona"*, que
+  es lo que un garzón sin cuenta nunca hizo. El tercero, en cambio, **no es un caso teórico**:
+  se llega **desvinculando** desde este mismo formulario. `actualizar()` pisa `pin_hash` solo en
+  la transición `null → uuid`, así que un garzón dado de alta **con** cuenta y después
+  desvinculado queda sin vínculo **y** sin PIN usable — no puede operar por ningún lado ni
+  arreglarlo solo (`PATCH /garzones/mi-pin` resuelve por `usuario_id` y le da 404). Es el estado
+  más grave que la ficha puede mostrar, y por eso es el que nunca se esconde.
+  Entrada de nav bajo Configuración, gated
   **`Salones:Leer`** —no `Crear`—: lo que la pantalla pide para abrirse es el permiso de
   lectura, y con `Crear` el link quedaba escondido para quien solo tiene `Actualizar` o
   `Eliminar` y sí puede trabajar ahí (`pages/configuracion.vue`).
@@ -402,7 +425,8 @@ correcto.
      antes de guardar, el modal del PIN no se abre y el resultado sale por toast.
 3. Misma pantalla, el botón de la llave: *"Generar PIN nuevo"* en un garzón sin cuenta
    (revela uno nuevo) y *"Invalidar PIN"* en uno con cuenta (no muestra ningún número). La
-   ficha del garzón con cuenta dice si ya puso su PIN, y muestra el historial.
+   ficha muestra el historial de PIN de **cualquier** garzón; el badge de PIN, siempre que no
+   haya PIN usable (con cuenta o sin ella) más el caso *"con cuenta y PIN puesto"*.
 4. Salones → abrir cuenta: PIN correcto abre la cuenta (apertura + responsable vigente
    inicial visibles); PIN incorrecto muestra "PIN inválido" (sin cerrar sesión). Cerrar y
    cobrar pide el PIN del garzón que cierra (auditoría; puede diferir del responsable

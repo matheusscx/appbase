@@ -572,7 +572,7 @@ describe('GarzonesService', () => {
       ]);
     });
 
-    it('en turno CON cuenta, el aviso NO dice que no va a poder operar', async () => {
+    it('en turno CON cuenta, el aviso no la da por bloqueada NI le promete el dispositivo propio', async () => {
       repo.findOne.mockResolvedValue(
         garzon({
           id: 'g1',
@@ -588,6 +588,14 @@ describe('GarzonesService', () => {
       expect(res.advertencias).toHaveLength(1);
       expect(res.advertencias[0]).toContain('tótem');
       expect(res.advertencias[0]).not.toContain('marcar salida');
+      // Revisión final 2026-08-15: el aviso tampoco puede prometer que
+      // "opera desde su cuenta / sigue trabajando normal". Es cierto SOLO si
+      // esa cuenta tiene `Salones:Operar`, y `regenerarPin` no lo consulta —
+      // este mock no lo provee justamente porque el service no lo pide.
+      // Revertir a la redacción anterior tiene que caer acá.
+      expect(res.advertencias[0]).not.toMatch(
+        /sigue trabajando|desde su cuenta|su dispositivo/,
+      );
     });
 
     it('en turno SIN cuenta, el aviso sigue siendo el de siempre', async () => {

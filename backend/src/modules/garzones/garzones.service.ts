@@ -347,11 +347,16 @@ export class GarzonesService {
     // turno ahora mismo (decisión del owner, 2026-08-14) — mismo criterio
     // que el cambio de tipo arriba: **advierte, no bloquea**. Es la misma
     // destrucción de PIN que `regenerarPin` ya advierte para su rama "con
-    // cuenta" (`:557-558` de este archivo), pero el texto NO puede ser el
-    // mismo string: la precondición es la opuesta. `regenerarPin` dispara
-    // con `garzon.usuarioId !== null` —la persona YA operaba desde su
-    // cuenta, "sigue trabajando normal" es un presente cierto—. Acá
-    // `vinculaCuenta` EXIGE `garzon.usuarioId === null` (más arriba): en el
+    // cuenta", pero el texto NO puede ser el mismo string, y por dos motivos
+    // distintos. El primero es la precondición: `regenerarPin` dispara con
+    // `garzon.usuarioId !== null` —la cuenta ya está—, y acá
+    // `vinculaCuenta` EXIGE `garzon.usuarioId === null` (más arriba). El
+    // segundo es el DATO disponible: solo este camino tiene
+    // `puedeOperarSalon` (lo dejó `assertVinculable`, que no corre en
+    // `regenerarPin`), y por eso solo este puede partirse en dos ramas y
+    // prometer el modo personal en la que corresponde. Ver el docblock de
+    // `regenerarPin`: allá el aviso se queda con lo cierto siempre (el
+    // tótem) justamente porque no tiene este dato. En el
     // caso normal, la sesión abierta que dispara este aviso solo pudo
     // abrirse tecleando el PIN —sin cuenta, `resolverGarzonActuante` exige
     // `garzonId` + PIN—, y ese PIN muere unas líneas más abajo. (Borde
@@ -371,11 +376,12 @@ export class GarzonesService {
     // no una historia sobre el pasado.) En el caso normal, en el instante
     // del aviso la persona TODAVÍA NO opera desde su cuenta: recién la
     // consigue con este mismo PATCH. El texto habla de la capacidad que se
-    // abre a partir de ahora —mismo marco que `crear()` con cuenta (arriba,
-    // `:193-196`) y el plan
-    // (`docs/superpowers/plans/2026-08-14-pin-propio-garzon.md:1370`: "Puede
-    // seguir trabajando desde su dispositivo")—, nunca de una continuidad
-    // que no existió.
+    // abre a partir de ahora —mismo marco que `crear()` con cuenta
+    // (arriba)—, nunca de una continuidad que no existió. (El plan de la
+    // feature proponía acá "puede seguir trabajando desde su dispositivo",
+    // sin condicionar en el permiso; esa redacción quedó descartada en la
+    // revisión final del 2026-08-15 y no hay que volver a ella: el plan es
+    // un documento histórico, no la fuente de verdad de este texto.)
     //
     // Si la cuenta no tiene `Salones:Operar` (arriba), no puede prometer
     // "puede seguir trabajando desde la cuenta": el modo personal queda
@@ -583,6 +589,24 @@ export class GarzonesService {
    * Con sesión abierta **advierte, no bloquea** (decisión del owner,
    * 2026-08-07): rotar una credencial es la respuesta correcta a una
    * filtración.
+   *
+   * ⚠️ El aviso de la rama "con cuenta" **no promete el dispositivo propio**
+   * (revisión final, 2026-08-15). Que la persona "siga trabajando normal"
+   * desde su cuenta es cierto **solo si esa cuenta tiene `Salones:Operar`**:
+   * sin ese permiso el `PermisosGuard` le cierra los 6 puntos del modo
+   * personal, y el aviso estaría mintiéndole al encargado. Acá —a diferencia
+   * de `actualizar()`, que ya tiene `puedeOperarSalon` en la mano porque
+   * `assertVinculable` corrió recién— ese dato costaría una consulta más
+   * sobre una ruta que ya hace dos, y no compraría nada nuevo: la
+   * advertencia de "esa cuenta todavía no tiene permiso para operar el
+   * salón" ya la emiten **los dos** caminos por los que un garzón llega a
+   * tener cuenta (`crear()` con `usuarioId` y `actualizar()` al vincular),
+   * así que el encargado ya se enteró. Lo que faltaba era que este aviso no
+   * dijera lo contrario. Por eso se queda con lo que es cierto **siempre**:
+   * lo que se pierde es el tótem compartido, y vuelve cuando el garzón fija
+   * su PIN. Mismo criterio y misma redacción base que la ficha
+   * (`configuracion/garzones.vue`, `regenerarMensaje`) y el perfil
+   * (`MiPinForm.vue`), que tampoco tienen el permiso a mano.
    */
   async regenerarPin(
     tenantId: string,
@@ -599,8 +623,13 @@ export class GarzonesService {
     if ((await this.contarSesionesAbiertas(tenantId, id)) > 0) {
       advertencias.push(
         tieneCuenta
-          ? `${garzon.nombre} está en turno, pero opera desde su cuenta: sigue trabajando ` +
-              `normal. Lo único que pierde hasta fijar un PIN nuevo es el tótem compartido.`
+          ? // "le queda cerrado" y no "pierde": esta rama también dispara
+            // sobre un garzón con cuenta que TODAVÍA no había fijado su PIN
+            // (`habiaPin === false`) y abrió el turno por JWT, en modo
+            // personal. A ese no se le quita nada — decir "pierde" daría por
+            // existente un acceso que nunca tuvo.
+            `${garzon.nombre} está en turno: el tótem compartido le queda cerrado hasta ` +
+              `que fije un PIN desde su perfil.`
           : `${garzon.nombre} está en turno: el PIN anterior deja de funcionar ya mismo, ` +
               `así que no va a poder operar ni marcar salida hasta que reciba el nuevo.`,
       );

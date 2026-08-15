@@ -8,13 +8,31 @@ const { formatFecha } = useFormatters()
 /**
  * El texto de cada tipo. Los dos de invalidación dicen cosas distintas a
  * propósito: uno es "te di una cuenta", el otro es "te corté el PIN".
+ *
+ * **Voz: siempre tercera persona, y siempre nombrando al actor** (revisión
+ * final, 2026-08-15). Este componente lo montan **dos** pantallas con
+ * lectores opuestos: la ficha (`configuracion/garzones.vue`, lee el
+ * encargado sobre otra persona) y el perfil (`MiPinForm.vue`, lee el propio
+ * garzón sobre sí mismo). Tutear lo dejaría mal en una de las dos.
+ * (`pages/salones/index.vue` **no** lo monta: solo lo cita en comentarios
+ * como precedente de redacción.) La lista es un **registro**, no un
+ * mensaje: dice quién hizo qué y cuándo, y por eso las cinco líneas tienen
+ * la misma forma. Los avisos SÍ tutean (`avisoPin` en el salón, "Todavía no
+ * tenés PIN" en el perfil) porque son otra cosa: le hablan al lector.
+ *
+ * `fijado_por_garzon` era la única en tercera persona SIN actor ("Puso su
+ * PIN"): rompía la forma y además escondía el dato —en la ficha, el
+ * encargado no podía saber de quién era ese "su" sin inferirlo—. El actor
+ * de ese evento es la cuenta del propio garzón (`garzones.service.ts` →
+ * `fijarMiPin` escribe el evento con el `usuarioId` del token), así que
+ * nombrarlo es correcto en las dos pantallas.
  */
 const TEXTO: Record<TipoEventoPin, (quien: string) => string> = {
   emitido_en_alta: quien => `${quien} emitió el PIN al dar de alta`,
   regenerado_por_encargado: quien => `${quien} generó un PIN nuevo`,
   invalidado_por_encargado: quien => `${quien} invalidó el PIN`,
   invalidado_por_vinculo: quien => `El PIN quedó sin efecto al vincular la cuenta (${quien})`,
-  fijado_por_garzon: () => 'Puso su PIN',
+  fijado_por_garzon: quien => `${quien} puso su propio PIN`,
 }
 
 /**
@@ -22,9 +40,9 @@ const TEXTO: Record<TipoEventoPin, (quien: string) => string> = {
  * de la API en runtime: si el backend suma un tipo nuevo antes de que este
  * front lo conozca, `TEXTO[e.tipo]` da `undefined` y llamarlo revienta. Como
  * el `v-for` vive DENTRO de este componente, ese throw no tira solo la fila:
- * se cae la card entera — y este componente lo montan tres pantallas
- * (perfil, ficha del garzón, salón), así que un tipo nuevo las rompería a
- * las tres a la vez.
+ * se cae la card entera — y este componente lo montan dos pantallas
+ * (`MiPinForm.vue` en el perfil y `configuracion/garzones.vue` en la
+ * ficha), así que un tipo nuevo las rompería a las dos a la vez.
  */
 function texto(e: EventoPin): string {
   const fn = TEXTO[e.tipo]

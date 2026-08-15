@@ -152,10 +152,24 @@ vínculo) salen como toast `warning` después del de éxito (el cambio se guard�
 va **dentro del modal que revela el PIN**, porque habla de ese PIN y de la urgencia de
 entregarlo; un toast detrás del modal se pierde.
 
-⚠️ Los textos de las dos ramas del PIN **no** son el mismo string, porque la precondición es
-la opuesta: al **invalidar** (garzón con cuenta) la persona ya operaba desde su cuenta y
-sigue trabajando normal, y no hay ningún número que revelar — así que ahí **no hay modal** y
-el aviso también sale por toast.
+⚠️ Los textos de las dos ramas del PIN **no** son el mismo string, porque lo que la persona
+pierde es distinto: al **regenerar** (garzón sin cuenta) el aviso dice que no va a poder
+operar ni marcar salida hasta que reciba el nuevo; al **invalidar** (garzón con cuenta) dice
+que el **tótem compartido le queda cerrado** hasta que fije un PIN desde su perfil. Ese texto
+dice "queda cerrado" y no "pierde" a propósito: la misma rama dispara sobre un garzón con
+cuenta que **todavía no había fijado** su PIN y abrió el turno por JWT, y a ése no se le quita
+nada. Y al invalidar no hay ningún número que revelar, así que ahí **no hay modal** y el aviso
+también sale por toast.
+
+⚠️ **El aviso de invalidar no promete el dispositivo propio**, aunque el de vincular sí lo
+haga en su rama con permiso (más abajo). No es una omisión: `regenerarPin()` no consulta
+`Salones:Operar` —`assertVinculable` solo corre en el camino de vincular, que es el que deja
+`puedeOperarSalon` a mano—, y sin ese permiso la persona **no** puede entrar en modo
+personal. Así que ese aviso se queda con lo único cierto en las dos ramas del permiso: el
+tótem. Que a la cuenta le falte el permiso ya lo avisan `crear()` y `actualizar()`, los dos
+caminos por los que un garzón llega a tener cuenta, así que el encargado no se queda sin
+enterarse. Mismo recorte, por el mismo motivo, en la ficha (`configuracion/garzones.vue`) y
+en el bloque "Mi PIN" del perfil (`MiPinForm.vue`).
 
 ⚠️ **Vincular tampoco tiene un solo texto, y no todo lo que avisa depende de la sesión.**
 `actualizar()` puede emitir **dos** advertencias distintas al vincular:

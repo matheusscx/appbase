@@ -102,6 +102,16 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
 
     expect(wrapper.text()).toContain('Mi PIN')
     expect(wrapper.text()).toContain('Todavía no tenés PIN')
+    // ⚠️ El cuerpo del aviso no tenía NINGUNA aserción hasta el 2026-08-15,
+    // así que la redacción que prometía "Desde el tuyo trabajás normal"
+    // podía volver a entrar sin poner nada en rojo. Y es la peor pantalla
+    // donde puede pasar: es la que SÍ alcanza el garzón sin
+    // `Salones:Operar` —el perfil no tiene gate de permiso y
+    // `GET /garzones/mi-pin` tampoco—, o sea justo a quien esa promesa le
+    // mentiría. El permiso no viaja en `MiPinEstado` (`{ fijado, eventos }`),
+    // así que el texto no puede condicionarse: solo puede no prometer.
+    expect(wrapper.text()).toContain('Sin PIN no podés operar desde un dispositivo compartido')
+    expect(wrapper.text()).not.toMatch(/trabajás normal|Desde el tuyo/)
   })
 
   it('no avisa cuando ya está fijado', async () => {
@@ -117,13 +127,16 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
     miPinRespuesta = {
       fijado: true,
       eventos: [
-        { id: 'e1', tipo: 'fijado_por_garzon', usuarioNombre: null, creadoEl: '2026-08-10T12:00:00.000Z' },
+        { id: 'e1', tipo: 'fijado_por_garzon', usuarioNombre: 'ana.torres', creadoEl: '2026-08-10T12:00:00.000Z' },
       ],
     }
 
     const wrapper = await montar()
 
-    expect(wrapper.text()).toContain('Puso su PIN')
+    // El historial es un REGISTRO y no tutea, aunque acá lo lea el propio
+    // garzón: el mismo componente lo lee el encargado en la ficha. Lo que
+    // tutea es el aviso de arriba ("Todavía no tenés PIN").
+    expect(wrapper.text()).toContain('ana.torres puso su propio PIN')
   })
 
   it('sin eventos, el historial dice que todavía no hubo cambios', async () => {

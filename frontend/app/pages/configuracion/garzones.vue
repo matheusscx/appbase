@@ -231,6 +231,28 @@ const errorEventosPin = ref(false)
  */
 const pinFijado = computed(() => garzonEnEdicion.value?.pinFijado ?? false)
 
+/**
+ * Los tres estados del badge dicen cosas distintas porque la SALIDA de cada
+ * uno es distinta, y el rótulo tiene que apuntar a quién la ejecuta:
+ *
+ * - **con cuenta + PIN puesto** → nada que hacer.
+ * - **con cuenta + sin PIN** → lo pone la persona desde su perfil. "todavía"
+ *   es correcto: se está esperando algo que sí va a poder hacer sola.
+ * - **sin cuenta + sin PIN** → la persona **no puede hacer nada**
+ *   (`fijarMiPin` resuelve por `usuario_id` y le da 404) y **no puede
+ *   operar por ningún lado**: el tótem compara su PIN contra el centinela y
+ *   el modo personal necesita el vínculo que no tiene. Solo sale de ahí si
+ *   el encargado le genera un PIN. Decirle "Sin PIN todavía" a ese caso
+ *   subestima la consecuencia y sugiere una espera que no se va a resolver
+ *   sola, así que el rótulo nombra el efecto y el color lo separa de la
+ *   espera normal.
+ */
+const badgePin = computed<{ color: 'success' | 'warning' | 'error', label: string }>(() => {
+  if (pinFijado.value) return { color: 'success', label: 'PIN puesto' }
+  if (garzonEnEdicion.value?.usuarioId) return { color: 'warning', label: 'Sin PIN todavía' }
+  return { color: 'error', label: 'Sin PIN: no puede operar' }
+})
+
 async function cargarEventosPin(id: string) {
   cargandoEventosPin.value = true
   errorEventosPin.value = false
@@ -265,12 +287,23 @@ function abrirEditar(garzon: Garzon) {
   }
   eventosPin.value = []
   errorEventosPin.value = false
-  // El historial es solo ilustrativo acá — `pinFijado` (arriba) NO depende de
-  // esta llamada. Se pide igual, y solo para garzones CON cuenta, para no
-  // pegarle a `/pin-eventos` por cada fila de la tabla (cero N+1).
-  if (garzon.usuarioId) {
-    cargarEventosPin(garzon.id)
-  }
+  // Para TODOS los garzones, con cuenta o sin ella (decisión del owner,
+  // 2026-08-15). `emitido_en_alta` y `regenerado_por_encargado` son los
+  // únicos eventos que produce un garzón SIN cuenta, y esta ficha es la
+  // única pantalla que puede mostrarlos: su perfil no existe (`miPin`
+  // resuelve por `garzonPersonalDe`, que exige `usuario_id` → 404). Y es
+  // justo el caso que justifica el log — "Pedro le regeneró el PIN a Ana
+  // tres veces esta semana" solo puede pasar SIN cuenta, porque con cuenta
+  // el encargado no regenera, invalida.
+  //
+  // Sin superficie nueva: `GET /garzones/:id/pin-eventos` pide
+  // `Salones:Leer`, el mismo permiso con el que ya se lee esta ficha.
+  //
+  // ⚠️ Cero N+1: la llamada cuelga de ABRIR LA FICHA, nunca del render de
+  // la tabla. Una por apertura, no una por fila — lo fija el test "cero
+  // N+1: el listado no pide ningún historial, y abrir una ficha pide
+  // exactamente el de ESE garzón".
+  cargarEventosPin(garzon.id)
   drawerOpen.value = true
 }
 
@@ -420,6 +453,16 @@ const regenerarConfirmLabel = computed(() => {
  * tótem compartido" es mentira. `pinFijado` (arriba, viene de
  * `GarzonPublico`, no del historial) es lo que permite distinguir los dos
  * casos "con cuenta".
+ *
+ * ⚠️ Y ninguno de los tres promete que la persona "puede seguir trabajando
+ * desde su dispositivo" (revisión final, 2026-08-15). Eso es cierto solo si
+ * su cuenta tiene `Salones:Operar` —sin ese permiso el `PermisosGuard` le
+ * cierra los 6 puntos del modo personal—, y esta pantalla no tiene ese
+ * dato: el listado (`GarzonPublico`) no lo trae. Lo que sí es cierto
+ * siempre es lo que se pierde —el tótem compartido, hasta que el garzón
+ * fije su PIN—, y eso es lo único que se afirma. Mismo recorte, por el
+ * mismo motivo, en `regenerarPin` (`garzones.service.ts`) y en
+ * `MiPinForm.vue`.
  */
 const regenerarMensaje = computed(() => {
   const g = regenerarTarget.value
@@ -428,7 +471,7 @@ const regenerarMensaje = computed(() => {
     return `Se generará un PIN nuevo para ${g.nombre} y se mostrará una sola vez. El PIN anterior dejará de funcionar de inmediato.`
   }
   if (g.pinFijado) {
-    return `El PIN de ${g.nombre} deja de servir ahora. No vas a ver ningún número: ${g.nombre} pone el suyo desde su cuenta. Puede seguir trabajando desde su dispositivo; lo único que pierde hasta entonces es el tótem compartido.`
+    return `El PIN de ${g.nombre} deja de servir ahora. No vas a ver ningún número: ${g.nombre} pone el suyo desde su cuenta. Hasta que lo haga, pierde el tótem compartido.`
   }
   return `${g.nombre} todavía no puso su PIN, así que no hay ninguno que invalidar. Queda registrado que lo pediste.`
 })
@@ -751,17 +794,37 @@ const columns: TableColumn<Garzon>[] = [
           </p>
         </UForm>
 
-        <!-- Solo con cuenta vinculada: sin ella el garzón se identifica por
-             PIN emitido por el sistema, y este bloque es sobre el PIN que
-             el GARZÓN fija desde su perfil. Sin este dato, invalidar sería
-             a ciegas. -->
-        <template v-if="garzonEnEdicion?.usuarioId">
+        <!-- `garzonEnEdicion` y no `editingId`: en el alta no hay ficha ni
+             historial que mostrar. Para TODOS los garzones desde el
+             2026-08-15 (decisión del owner) — ver `abrirEditar`. -->
+        <template v-if="garzonEnEdicion">
           <USeparator class="my-4" />
           <div class="space-y-2">
-            <div class="flex items-center gap-2">
+            <!-- Se muestra SIEMPRE que no haya PIN usable —con cuenta o sin
+                 ella— y además en el caso "con cuenta y PIN puesto".
+                 El único que se esconde es "sin cuenta y con PIN usable":
+                 ahí "PIN puesto" significaría "lo puso la PERSONA", que es
+                 justo lo que un garzón sin cuenta nunca hizo.
+
+                 ⚠️ Esconderlo para TODO garzón sin cuenta (como estaba hasta
+                 el 2026-08-15) se apoyaba en una premisa falsa: que un
+                 garzón sin cuenta siempre tiene un PIN emitido por el
+                 sistema. **Desvincular lo desmiente**, y se llega desde este
+                 mismo formulario vaciando el selector: `actualizar()` pisa
+                 `pinHash` SOLO en la transición `null → uuid`
+                 (`garzones.service.ts`, `vinculaCuenta` exige
+                 `dto.usuarioId !== null`), así que un garzón dado de alta
+                 CON cuenta y después desvinculado queda `usuarioId: null` Y
+                 `pinFijado: false`. Esa persona no puede operar por ningún
+                 lado —el tótem le compara contra el centinela y el modo
+                 personal necesita el vínculo— y no puede arreglarlo sola
+                 (`fijarMiPin` le da 404 sin `usuario_id`): depende de que el
+                 encargado le genere uno. Es el estado que MÁS hay que ver, y
+                 era el que quedaba invisible. -->
+            <div v-if="!pinFijado || garzonEnEdicion.usuarioId" class="flex items-center gap-2">
               <span class="text-sm font-medium text-default">PIN</span>
-              <UBadge :color="pinFijado ? 'success' : 'warning'" variant="subtle">
-                {{ pinFijado ? 'PIN puesto' : 'Sin PIN todavía' }}
+              <UBadge :color="badgePin.color" variant="subtle">
+                {{ badgePin.label }}
               </UBadge>
             </div>
             <div>

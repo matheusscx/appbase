@@ -71,13 +71,26 @@ onMounted(async () => {
       </div>
     </template>
 
+    <!-- ⚠️ Este aviso NO promete "desde el tuyo trabajás normal" (revisión
+         final, 2026-08-15). Es la pantalla que SÍ alcanza el garzón sin
+         `Salones:Operar`: `perfil.vue` no declara `definePageMeta` propio y
+         hereda el de la ruta padre `pages/configuracion.vue`
+         (`{ middleware: 'auth', layout: 'dashboard' }`) — o sea, ningún
+         gate de permiso —, y `GET /garzones/mi-pin` tampoco exige permiso
+         de módulo (a propósito: un garzón puede no tener ninguno). Sin ese permiso el `PermisosGuard`
+         le cierra los 6 puntos del modo personal, así que prometerle su
+         propio dispositivo sería mentirle justo a quien está bloqueado. Y
+         el permiso no está a mano acá: `MiPinEstado` es `{ fijado,
+         eventos }`. El aviso del salón (`pages/salones/index.vue`) SÍ puede
+         prometerlo, porque solo se muestra con `garzonPersonal`, que sale
+         de `GET /garzones/mi-vinculo` —ruta con `Salones:Operar`—. -->
     <UAlert
       v-if="!estado.fijado"
       color="warning"
       variant="subtle"
       icon="i-lucide-info"
       title="Todavía no tenés PIN"
-      description="Sin PIN no podés operar desde un dispositivo compartido. Desde el tuyo trabajás normal."
+      description="Sin PIN no podés operar desde un dispositivo compartido, como el tótem del local. Poné uno acá abajo."
       class="mb-4"
     />
 

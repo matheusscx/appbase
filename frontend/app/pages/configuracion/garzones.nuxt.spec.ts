@@ -767,6 +767,13 @@ describe('garzones — advertencias del backend', () => {
 
     expect(dialogo()?.textContent).toContain('El PIN de Ana Torres deja de servir ahora')
     expect(dialogo()?.textContent).toContain('Ana Torres pone el suyo desde su cuenta')
+    // La TERCERA frase, que hasta el 2026-08-15 no tenía ninguna aserción:
+    // prometía "puede seguir trabajando desde su dispositivo", que es cierto
+    // solo si esa cuenta tiene `Salones:Operar` — dato que esta pantalla no
+    // tiene (`GarzonPublico` no lo trae). Revertir a esa redacción tiene que
+    // caer acá.
+    expect(dialogo()?.textContent).toContain('Hasta que lo haga, pierde el tótem compartido')
+    expect(dialogo()?.textContent).not.toMatch(/su dispositivo|sigue trabajando/)
   })
 
   // El caso más común del flujo nuevo: recién vinculada la cuenta, el backend
@@ -934,7 +941,7 @@ describe('garzones — advertencias del backend', () => {
   it('la ficha de un garzón con cuenta que ya fijó su PIN lo muestra "PIN puesto" y con su historial', async () => {
     // El badge sale de `pinFijado` (del listado, `GarzonPublico`), no del
     // historial: el historial de acá abajo es solo para la aserción del
-    // texto "Puso su PIN", no para derivar el badge.
+    // texto del evento, no para derivar el badge.
     garzonesBackend = [garzon({ id: 'garzon-2', nombre: 'Beto Fuentes', usuarioId: 'user-1', pinFijado: true })]
     eventosPinBackend['garzon-2'] = [
       { id: 'evt-2', tipo: 'fijado_por_garzon', usuarioNombre: 'Beto Fuentes', creadoEl: '2026-08-10T10:00:00.000Z' },
@@ -946,7 +953,7 @@ describe('garzones — advertencias del backend', () => {
     await new Promise(r => setTimeout(r, 50))
 
     expect(wrapper.text()).toContain('PIN puesto')
-    expect(wrapper.text()).toContain('Puso su PIN')
+    expect(wrapper.text()).toContain('Beto Fuentes puso su propio PIN')
   })
 
   it('la ficha de un garzón con cuenta que TODAVÍA no fijó su PIN lo marca "Sin PIN todavía"', async () => {
@@ -987,26 +994,99 @@ describe('garzones — advertencias del backend', () => {
     expect(wrapper.text()).toContain('No se pudo cargar el historial')
   })
 
-  it('la ficha de un garzón SIN cuenta no muestra el bloque de estado del PIN (se identifica por PIN emitido, no fijado)', async () => {
+  // Decisión del owner (2026-08-15): el historial se muestra para TODOS los
+  // garzones, con cuenta o sin ella. La ficha es la ÚNICA pantalla que puede
+  // mostrar `emitido_en_alta` y `regenerado_por_encargado` —los únicos dos
+  // eventos que produce un garzón sin cuenta, que no tiene perfil donde
+  // verlos—, y es justo el caso que justifica el log: con cuenta el
+  // encargado no regenera, invalida.
+  it('la ficha de un garzón SIN cuenta también muestra su historial', async () => {
+    eventosPinBackend = {
+      [GARZON_ID]: [
+        { id: 'ev-2', tipo: 'regenerado_por_encargado', usuarioNombre: 'pedro.encargado', creadoEl: '2026-08-12T10:00:00.000Z' },
+        { id: 'ev-1', tipo: 'emitido_en_alta', usuarioNombre: 'pedro.encargado', creadoEl: '2026-08-01T10:00:00.000Z' },
+      ],
+    }
+
     const wrapper = (montado = await pantalla())
     await wrapper.find('[aria-label="Editar"]').trigger('click')
     await new Promise(r => setTimeout(r, 50))
 
+    // El patrón que el log existe para hacer visible: quién le tocó el PIN
+    // y cuántas veces.
+    expect(wrapper.text()).toContain('Historial')
+    expect(wrapper.text()).toContain('pedro.encargado generó un PIN nuevo')
+    expect(wrapper.text()).toContain('pedro.encargado emitió el PIN al dar de alta')
+    expect(wrapper.text()).not.toContain('Todavía no hubo cambios de PIN')
+  })
+
+  // Con PIN usable, el badge sigue escondido para el garzón sin cuenta:
+  // "PIN puesto" ahí significaría "lo puso la persona", que es lo que un
+  // garzón sin cuenta nunca hizo.
+  it('la ficha de un garzón SIN cuenta y CON PIN usable muestra el historial pero NO el badge', async () => {
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(wrapper.text()).toContain('Historial')
     expect(wrapper.text()).not.toContain('PIN puesto')
+    expect(wrapper.text()).not.toContain('Sin PIN')
+  })
+
+  // ⚠️ El estado que la premisa anterior daba por imposible, y que es el
+  // MÁS grave de los cuatro. Se llega desde este mismo formulario: alta CON
+  // cuenta (nace con el centinela) → vaciar el selector. `actualizar()`
+  // pisa `pinHash` solo en la transición `null → uuid`, así que desvincular
+  // deja `usuarioId: null` Y `pinFijado: false`. Esa persona no puede
+  // operar por ningún lado ni arreglarlo sola. Sin badge, el encargado no
+  // tiene un solo indicador que se lo diga.
+  it('la ficha de un garzón SIN cuenta y SIN PIN usable (desvinculado) SÍ muestra el badge, y dice que no puede operar', async () => {
+    garzonesBackend = [garzon({ usuarioId: null, pinFijado: false })]
+
+    const wrapper = (montado = await pantalla())
+    await wrapper.find('[aria-label="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(wrapper.text()).toContain('Sin PIN: no puede operar')
+    // Y NO el rótulo de la espera normal: a este garzón no le queda nada
+    // por hacer solo — `fijarMiPin` le da 404 sin `usuario_id`.
     expect(wrapper.text()).not.toContain('Sin PIN todavía')
   })
 
-  // Hallazgo 4: el guard `if (garzon.usuarioId)` antes de `cargarEventosPin`
-  // es lo único que sostiene "cero N+1" en la ficha. Borrarlo no pone nada
-  // rojo en los demás tests —la ficha de un garzón sin cuenta simplemente no
-  // tiene el bloque de PIN, eventos u no—, así que hace falta un test que
-  // mire la llamada de red directamente.
-  it('la ficha de un garzón SIN cuenta no pega a /pin-eventos', async () => {
+  // El contraste que fija que el rótulo depende del vínculo y no solo de
+  // `pinFijado`: mismo `pinFijado: false`, distinta salida.
+  it('CON cuenta y sin PIN el badge dice "Sin PIN todavía": esa persona sí puede resolverlo sola', async () => {
+    garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
+
     const wrapper = (montado = await pantalla())
     await wrapper.find('[aria-label="Editar"]').trigger('click')
     await new Promise(r => setTimeout(r, 50))
 
+    expect(wrapper.text()).toContain('Sin PIN todavía')
+    expect(wrapper.text()).not.toContain('no puede operar')
+  })
+
+  // Hallazgo 4, ahora sin el guard `if (garzon.usuarioId)` que lo sostenía:
+  // la propiedad que importa no era "el garzón sin cuenta no pide", era
+  // **una llamada por apertura de ficha, nunca una por fila de la tabla**.
+  // Con 3 filas en el listado, un N+1 daría 3 requests antes de abrir nada.
+  it('cero N+1: el listado no pide ningún historial, y abrir una ficha pide exactamente el de ESE garzón', async () => {
+    garzonesBackend = [
+      garzon(),
+      garzon({ id: 'garzon-2', nombre: 'Beto Fuentes', usuarioId: 'user-1' }),
+      garzon({ id: 'garzon-3', nombre: 'Caro Díaz' }),
+    ]
+
+    const wrapper = (montado = await pantalla())
+
+    // Dibujar la tabla entera no pega a `/pin-eventos` ni una vez.
     expect(pinEventosRequests).toEqual([])
+
+    await wrapper.findAll('[aria-label="Editar"]')[0]!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    // Una sola, y la del garzón que se abrió.
+    expect(pinEventosRequests).toEqual([GARZON_ID])
   })
 
   // Revisión del 2026-08-14: `abrirRegenerar` no abre el modal si el garzón

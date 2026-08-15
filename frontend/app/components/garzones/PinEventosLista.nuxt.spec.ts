@@ -1,9 +1,11 @@
 // @vitest-environment nuxt
 //
-// Este componente lo montan tres pantallas (perfil, ficha del garzón, salón):
-// un `tipo` que el backend sume y este front todavía no conozca no puede
-// tirar la card entera, porque el `v-for` vive DENTRO del componente y ese
-// throw se llevaría puesto todo lo que esté alrededor en las tres pantallas.
+// Este componente lo montan dos pantallas (`MiPinForm.vue` en el perfil y
+// `configuracion/garzones.vue` en la ficha; el salón solo lo cita en
+// comentarios, nunca lo renderiza): un `tipo` que el backend sume y este
+// front todavía no conozca no puede tirar la card entera, porque el `v-for`
+// vive DENTRO del componente y ese throw se llevaría puesto todo lo que esté
+// alrededor en las dos pantallas.
 import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import PinEventosLista from './PinEventosLista.vue'
@@ -22,7 +24,11 @@ describe('PinEventosLista', () => {
       { id: 'e2', tipo: 'regenerado_por_encargado', usuarioNombre: 'admin.paris', creadoEl: '2026-08-02T10:00:00.000Z' },
       { id: 'e3', tipo: 'invalidado_por_encargado', usuarioNombre: 'admin.paris', creadoEl: '2026-08-03T10:00:00.000Z' },
       { id: 'e4', tipo: 'invalidado_por_vinculo', usuarioNombre: 'admin.paris', creadoEl: '2026-08-04T10:00:00.000Z' },
-      { id: 'e5', tipo: 'fijado_por_garzon', usuarioNombre: null, creadoEl: '2026-08-05T10:00:00.000Z' },
+      // El actor de `fijado_por_garzon` es la cuenta del propio garzón
+      // (`garzones.service.ts` → `fijarMiPin` escribe el evento con el
+      // `usuarioId` del token), así que acá va un nombre, no `null`: el
+      // fallback de la cuenta dada de baja lo cubre el test de abajo.
+      { id: 'e5', tipo: 'fijado_por_garzon', usuarioNombre: 'ana.torres', creadoEl: '2026-08-05T10:00:00.000Z' },
     ]
 
     const wrapper = await mountSuspended(PinEventosLista, { props: { eventos } })
@@ -31,7 +37,11 @@ describe('PinEventosLista', () => {
     expect(wrapper.text()).toContain('admin.paris generó un PIN nuevo')
     expect(wrapper.text()).toContain('admin.paris invalidó el PIN')
     expect(wrapper.text()).toContain('El PIN quedó sin efecto al vincular la cuenta (admin.paris)')
-    expect(wrapper.text()).toContain('Puso su PIN')
+    // Tercera persona y con actor, igual que las otras cuatro: este
+    // componente lo leen tanto el encargado (ficha) como el propio garzón
+    // (perfil y salón), así que la lista no tutea a nadie — ver el docblock
+    // de `TEXTO`.
+    expect(wrapper.text()).toContain('ana.torres puso su propio PIN')
   })
 
   it('usuarioNombre null en un evento de encargado se lee como cuenta dada de baja', async () => {
