@@ -4863,3 +4863,41 @@ mutante; la red es el unit.
 Detalle funcional completo: [`garzones.md`](../features/garzones.md). Spec de diseño con las
 decisiones del owner y las alternativas descartadas:
 [`2026-08-14-pin-propio-garzon-design.md`](../superpowers/specs/2026-08-14-pin-propio-garzon-design.md).
+
+---
+
+## Modo personal: el garzón con su propia tablet no teclea el PIN (cerrado — archivado 2026-08-15)
+
+Entrada de la pasada `turnos` + `salones` + `garzones` (2026-08-06), **Fase 2 del plan
+`2026-08-08-elegir-garzon-antes-del-pin.md`**. Se entregó y la entrada quedó viva en
+`pendientes.md` por descuido: nadie la mudó al cerrarse. Se archiva al reordenar el backlog
+el 2026-08-15, tras verificar que sus **dos** piezas existen:
+
+| Lo que la entrada pedía | Dónde está hoy |
+|---|---|
+| Vínculo opcional `garzones.usuario_id` | `garzones/entities/garzon.entity.ts:55` |
+| `usuarios_tenants.es_totem` como marcador **explícito** | `tenants/dto/marcar-totem.dto.ts`, `tenants.service.ts:612` (`marcarTotem`) |
+| Resolución del garzón actuante | `garzones.service.ts` → `garzonPersonalDe`, con el override duro de `es_totem` |
+| Que la pantalla no pida PIN en modo personal | `useSesionesGarzon.ts:162` manda `pin: ''`; `useSalones.ts:160,375` |
+
+⚠️ **No se archiva por el texto de un plan sino por el código**: la verificación fue grep
+sobre `backend/src` y `frontend/app`, no la lectura del plan que la diseñó. La entrega del
+PIN propio del garzón (2026-08-15) se construyó **encima** de este vínculo —`garzonPersonalDe`
+es lo que decide de quién es el PIN— así que la Fase 2 estaba en producción antes de que
+nadie tachara la entrada.
+
+Texto original de la entrada, verbatim:
+
+> **Modo personal: el garzón con su propia tablet no debería teclear el PIN** (backend +
+> frontend) — **Fase 2 del plan `2026-08-08-elegir-garzon-antes-del-pin.md`, diseñada y
+> diferida el 2026-08-08.** El vínculo opcional `garzones.usuario_id` + `usuarios_tenants.
+> es_totem` como marcador **explícito** del modo (no inferido: una cuenta marcada como tótem
+> no puede volverse personal aunque alguien la vincule por error). Todo el diseño está en el
+> plan, incluidas las cuatro preguntas ya resueltas.
+> ⚠️ **DESBLOQUEADA el 2026-08-08.** Estaba frenada porque el alta de usuarios del tenant no
+> existía —`POST /tenants/members` recibía un `usuarioId` ya existente y el único camino a
+> una cuenta era el registro público—, así que habilitar un garzón personal costaba 4 pasos
+> en 3 pantallas. Ahora `POST /tenants/usuarios` lo hace en uno
+> (`docs/features/roles-permisos.md`). Lo que queda de esta entrada es el vínculo
+> `garzones.usuario_id` + `usuarios_tenants.es_totem` y la resolución del garzón actuante,
+> todo diseñado en el plan.

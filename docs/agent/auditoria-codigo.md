@@ -173,14 +173,27 @@ Por riesgo, no por tamaño. Lo de arriba primero.
 Cerrar cada pasada actualizando **las dos tablas**: la de cobertura con lo hecho, y esta
 con lo que quede pendiente.
 
-### ⏸ Programa pausado (decisión del owner, 2026-08-06)
+### ⏸ Programa pausado (2026-08-06) → ▶️ reanudado (2026-08-15)
 
-**Las pasadas 3, 4 y 5 quedan suspendidas hasta bajar el backlog.** No es que dejaran de
-importar: es la regla de este mismo método aplicada a sí misma —*"40 bugs sin plan de
-corrección son ansiedad, no información"*—. La pasada de `turnos`+`salones` sumó **27
-entradas** a `pendientes.md`, que pasó de 53 a 80 abiertas. Auditar más código antes de
-corregir lo encontrado produce inventario, no confianza.
+**Las pasadas 3, 4 y 5 estuvieron suspendidas desde el 2026-08-06 hasta bajar el backlog.**
+No es que dejaran de importar: es la regla de este mismo método aplicada a sí misma —*"40
+bugs sin plan de corrección son ansiedad, no información"*—. La pasada de `turnos`+`salones`
+sumó **27 entradas** a `pendientes.md`, que pasó de 53 a 80 abiertas. Auditar más código
+antes de corregir lo encontrado produce inventario, no confianza.
 
-Se reanuda cuando el backlog vuelva a un tamaño legible. El orden de arriba sigue siendo
-el correcto: `inventario` primero por riesgo, y **RBAC/auth/tenants es el único eje
-sensible que ninguna pasada tocó todavía**.
+**El owner las reanuda el 2026-08-15, y lo que cambió no es el número sino la forma.**
+`pendientes.md` quedó **reordenado por lo que hace falta para tomar cada entrada** en vez de
+por la pasada que la encontró. Eso es lo que devuelve la condición de reanudación: de las 60
+entradas, 13 son endurecimiento de producción (no corren hoy) y 4 son vigilancia (no son
+trabajo), así que el backlog vivo es de **43** — y **8 de ellas son mecánicas**, tomables sin
+preguntarle nada al owner. Un hallazgo nuevo ahora cae en una lista donde se ve dónde entra.
+
+⚠️ **El total bajó menos de lo que sugiere el trabajo hecho, y conviene saber por qué:** se
+archivó 1 entrada que ya estaba entregada y nadie había mudado, y se promovió a entrada 1
+hueco de test que vivía como nota suelta dentro de un bloque de contexto. Reordenar no cierra
+nada; lo que hace es que el tamaño real sea visible.
+
+⚠️ **La condición sigue siendo la misma para la próxima pausa:** si una pasada vuelve a
+sumar ~25 entradas, el programa se detiene otra vez. El orden de arriba sigue siendo el
+correcto: `inventario` primero por riesgo, y **RBAC/auth/tenants es el único eje sensible
+que ninguna pasada tocó todavía**.

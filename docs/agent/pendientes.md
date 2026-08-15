@@ -4,7 +4,7 @@ Backlog de correcciones que se **difirieron a propósito** mientras trabajamos e
 harness, para no mezclar el meta-trabajo (reglas, gates, docs) con cambios de código de
 producto. Cada entrada dice qué, dónde, por qué se difirió y cómo se cierra.
 
-> 🔴 **Antes de tomar cualquier entrada de este archivo, leé la primera sección
+> 🔴 **Antes de tomar cualquier entrada de este archivo, leé la sección
 > ([🧱 tanda propia](#-prioridad-máxima--tanda-propia-conexiones-rendimiento-y-redondeo-de-plata)).**
 > Es prioridad máxima y agrupa tres temas que solo se pueden resolver juntos y aislados.
 
@@ -13,6 +13,30 @@ en el mismo commit se muda —con el texto de su cierre— a
 [`resueltos.md`](resueltos.md). Nada de `[x]` acumulándose: una lista de trabajo con más
 entradas tachadas que vivas deja de leerse. No es un TODO genérico: solo va lo que ya
 identificamos con ubicación concreta.
+
+## Cómo está ordenado (reordenado el 2026-08-15)
+
+**Por lo que hace falta para poder tomar la entrada, no por de qué pasada salió.** El orden
+anterior agrupaba por origen —cuál auditoría la encontró—, que sirve para entender el
+contexto y **no sirve para elegir qué hacer ahora**: había que leer las 60 entradas para
+saber cuáles se podían tomar sin preguntar nada.
+
+| Sección | Qué hace falta para tomarla |
+|---|---|
+| 🔴 Tanda propia | Nada, pero van las tres juntas y con el sistema quieto |
+| 1. Mecánico | Nada: el arreglo ya está decidido y escrito en la entrada |
+| 2. Medir primero | Abrir un archivo o correr algo. No es una pregunta para el owner |
+| 3. Ya decidido, falta construir | Nada del owner: ya contestó. Es trabajo con diseño adentro |
+| 4. Necesita que el owner conteste | Una respuesta, que está al frente de cada entrada |
+| 5. Carreras de concurrencia | Un análisis de orden de locks, común a las tres |
+| 6. Proyectos que van solos | Spec propia. No entran de arrastre en otra tarea |
+| 7. Acción del owner fuera del código | Algo que no se resuelve programando |
+| Endurecimiento para producción | Nada hoy: se abre al encarar el paso a prod |
+| Vigilancia | **No es trabajo.** Evaluado y descartado; se anota para no redescubrirlo |
+| Contexto de las pasadas de auditoría | Nada: es memoria de qué se auditó y con qué resultado |
+
+El contexto de origen no se perdió: el encabezado de cada pasada —con sus números, lo que
+salió limpio y los hilos que cerró— vive al final del archivo.
 
 ---
 
@@ -53,188 +77,14 @@ Mientras tanto: si una tarea de producto **necesita** tocar algo de esta lista, 
 y se consulta — no se resuelve de paso. Un N+1 nuevo que se introduzca sí se saca en el
 momento; lo que se difiere es abrir estos tres frentes.
 
----
+### Las tres entradas, íntegras
 
-## Deuda de código (surgió durante el harness)
-
-- [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
-  puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
-  `pin-propio-garzon`**) — `garzones.service.ts` advierte, en tres sitios (`crear()` línea
-  232, `actualizar()` líneas 341 y 396), cuando la cuenta vinculada todavía no puede operar
-  el salón. El texto es idéntico en dos de los tres (`crear()` línea 232 y `actualizar()`
-  línea 341): *"...no va a poder entrar en modo personal (sin PIN, desde su propia cuenta)
-  hasta que se lo des"*. El tercero (`actualizar()` línea 396, la rama con sesión abierta) dice
-  lo mismo sin el paréntesis: *"...no va a poder entrar en modo personal hasta que se lo des,
-  pero puede seguir operando desde el tótem si fija un PIN propio nuevo"*. Pero otorgar
-  `Salones:Operar` significa editar un rol (`PATCH /roles/:id`), y esa ruta exige
-  `TenantAdminGuard` (`roles.controller.ts:49-50`). Un encargado sin rol admin —alguien con
-  `Salones:Actualizar` pero sin permisos de `Roles`, que es exactamente a quién se le muestra
-  este aviso al dar de alta o vincular un garzón— lee una instrucción que no está en su mano
-  ejecutar, en los tres sitios. El texto necesita, o bien decir "pedile al admin que se lo dé",
-  o el flujo de otorgar el permiso necesita abrirse a un rol no-admin con `Salones:Actualizar`.
-
-- [ ] **`listarEventosPin` no tiene `LIMIT`: una tabla que solo crece, leída entera cada vez**
-  (backend, **medido 2026-08-15**) — `garzones.service.ts:631-649` arma el historial completo
-  de `garzon_pin_evento` para un garzón con un solo `SELECT ... ORDER BY e.creado_el DESC`, sin
-  `LIMIT`/paginación. Hoy con pocos eventos por garzón no se nota, pero es una tabla que solo
-  crece —el diseño explícitamente decidió guardar todo, no solo el último cambio— y la alimentan
-  dos pantallas (`GET /garzones/:id/pin-eventos` en la ficha del encargado, `GET
-  /garzones/mi-pin` en el perfil del garzón). Con años de regeneraciones/invalidaciones para un
-  garzón activo, la consulta y el payload crecen sin techo.
-
-- [ ] **`miPin` hace cuatro consultas donde alcanzan tres** (backend, **medido 2026-08-15**) —
-  `GarzonesService.miPin()` (`garzones.service.ts:688-697`) llama `miGarzonOrThrow()`, que ya
-  hace dos consultas (`garzonPersonalDe` para resolver el `garzonId` + `findOneOrFail` para
-  traer la fila completa del garzón, con su `pinHash`). Después llama
-  `listarEventosPin(tenantId, garzon.id)`, que **vuelve a buscar el mismo garzón**
-  (`getOrThrow`, `garzones.service.ts:1037-1043`) antes de traer los eventos. La cuarta consulta
-  es redundante: el garzón que `getOrThrow` re-busca es el mismo que `miGarzonOrThrow` ya tiene
-  en memoria. No es el N+1 que preocupa la tanda 🔴 (es una sola llamada, no una por fila), pero
-  es una consulta de más en una ruta que golpea cada carga del perfil y de `/salones` en modo
-  personal.
-
-- [ ] **El paso 4 de la prueba manual de `garzones.md` salta el requisito de entrar a turno: el
-  selector sale vacío si se sigue al pie de la letra** (docs + frontend, **medido 2026-08-15,
-  hueco preexistente a esta feature**) — el paso 4 de
-  [`garzones.md` → Testing → Manual](../features/garzones.md#manual-frontend) dice "Salones →
-  abrir cuenta: PIN correcto abre la cuenta" sin mencionar antes "entrar a turno". Pero
-  `GarzonPinModal` pide el selector con `garzonesApi.paraSelector(props.enTurno)`, y "abrir
-  cuenta" usa el default `enTurno: true` (`GarzonPinModal.vue:19`) — o sea que solo lista
-  garzones **con sesión de turno abierta**. Si nadie entró a turno todavía (el seed no abre
-  sesiones), el selector sale vacío y el paso no se puede completar tal como está escrito. **No
-  hay mitigación:** `toastErrorOperativo` (`salones/index.vue:308-325`) solo reacciona a un
-  request que vuelve con el error "sesión de trabajo" — y con el selector vacío no hay garzón
-  que elegir, así que no se dispara ningún request y ese fallback nunca corre. El paso 4 queda
-  bloqueado sin salida hasta que alguien edite el manual (agregar "entrar a turno" antes) o
-  entre a turno por su cuenta antes de seguirlo.
-
-- [ ] **El hook de pre-commit valida enlaces de markdown pero no que una tabla siga siendo
-  tabla** (tooling, **medido 2026-08-15, pasó de verdad en esta entrega**) —
-  `.githooks/pre-commit` (Guard 5) corre `check-docs-links.mjs` sobre `.md` staged, pero no hay
-  ningún guard que valide la sintaxis de una tabla GFM. Insertar un párrafo entre dos filas de
-  una tabla markdown (falta una línea en blanco antes/después, o el párrafo no empieza con `|`)
-  hace que **todo lo que sigue** deje de renderizarse como tabla — visualmente desaparece — y ni
-  el hook ni el CI lo detectan, porque ninguno de los dos parsea markdown como markdown, solo
-  greppean texto y valida links. No hay un fix mecánico obvio (un linter de markdown-tables es
-  una dependencia nueva, a evaluar), pero vale la entrada para no repetir el mismo susto.
-
-- [ ] **El garzón que abre `/salones` ve un toast rojo de permiso que no le corresponde**
-  (frontend, **medido en el smoke del 2026-08-15**) — con la cuenta `garzon.pin@paris.cl`, la
-  carga inicial de la pantalla del salón dispara cinco 403 (`/caja/activa`, `/items` ×3,
-  `/tipos-documento`: datos del POS que el rol de garzón no ve) y al menos uno sale como
-  *"No tienes permiso para esta acción"* en rojo, arriba a la derecha. **Preexistente**, no lo
-  introdujo el PIN propio: `/garzones/mi-pin` devolvió 200 en la misma corrida. Es la misma
-  familia que el `.catch(() => null)` que ya lleva `cargarActiva`, aplicada a medias.
-
-- [ ] **¿Se puede desvincular una cuenta desde el formulario?** (frontend, **duda medida en el
-  smoke del 2026-08-15, sin resolver**) — el `USelectMenu` de "Cuenta vinculada" muestra
-  `Sin vincular (usa PIN)` como *placeholder*, pero **con una cuenta ya elegida no se vio una
-  opción para volver a ese estado**: la lista solo trae cuentas. Si no se puede, el `null`
-  explícito de `UpdateGarzonDto` solo es alcanzable por API. Importa porque el estado
-  *"desvinculado y sin PIN usable"* —que la ficha ahora señala en rojo— se produce justamente
-  por ese camino. **Verificar antes de asumir cualquiera de las dos cosas.**
-
-- [ ] **Ningún e2e asierta el efecto de invalidar al vincular** (backend, **medido 2026-08-15**)
-  — el mutante que quita `garzon.pinHash = PIN_INUTILIZABLE` de la rama `vincular` de
-  `actualizar()` **no pone nada en rojo en el e2e**. La transición sí se recorre —
-  `caja-testigo.e2e-spec.ts:383-387` vincula al garzón B por `PATCH` después de abrirle sesión
-  con su PIN vivo, y `:771` hace lo mismo con D — así que **falta la aserción, no el escenario**:
-  alcanza con un `expect` sobre ese PIN después del PATCH. En unit sí está cubierto.
-
-- [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
-  frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya
-  admite `tipo IN ('garzon','cocina','barra')`: gente que **no atiende mesas**, con PIN,
-  sesión de turno y reparto de propinas. O sea, "staff" **ya existe conceptualmente**; se
-  llama garzón por herencia del primer caso de uso. El disparador fue el testigo del cierre
-  de caja: un minimarket no tiene garzones, así que hoy no puede tener testigos.
-
-  **Costo medido:** ~2.974 menciones en **104 archivos** (columnas de BD, entidades,
-  endpoints, composables del front, tests) y toca la tabla de terminología de `CLAUDE.md`,
-  que es crítica. Lo que **no** cuesta: no hay datos productivos, así que no hay migración —
-  se cambia el esquema, se actualiza el seeder y se resetea (ver la sección *"Endurecimiento
-  para producción"* más abajo: hoy `main` no despliega y no hay nada en uso real). El costo
-  es el barrido, no el riesgo.
-
-  **Atajo que da el beneficio sin pagar el rename** (evaluado, no implementado): separar la
-  **etiqueta que ve el usuario** del nombre en el código —la pantalla dice "Personal", la
-  base sigue diciendo garzones— más un `tipo` nuevo para el personal que no es de salón. Con
-  eso un minimarket ya puede tener testigos y la limitación de la
-  [spec del testigo](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md)
-  desaparece.
-
-  ⚠️ **El día que se haga el rename completo, va solo.** Un rename es mecánico pero se
-  contamina fácil: mezclado con una feature, cualquier bug queda escondido entre 3.000 líneas
-  cambiadas y la revisión del diff deja de servir.
-
-- [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
-  (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**)
-  — 🧱 **parte de la tanda propia de arriba: no se toca suelta.**
-  se abre esta entrada justo porque la que se cerró ese día, leída de más, los tapaba: el
-  arreglo alcanzó la cuenta `precio × tasa` y **nada más**.
-  - `inventario.service.ts` → **CPP** (`valorPrevio + valorEntrante` ÷ stock). Es una
-    **división**, así que redondea de verdad, y el resultado se persiste en
-    `item_producto.costo_actual`.
-  - `items.service.ts` → `costoPropuesto` de una receta (`ROUND_HALF_UP` explícito).
-  - `propinas/utils/mayores-restos.ts` → el reparto de propina entre garzones.
-  - `mermas.service.ts` (dos sitios) → costo × cantidad.
-
-  Antes de replicar el arreglo: **el criterio no es obvio y puede no ser el mismo**. El de
-  la conversión se decidió porque el valor se persiste en `NUMERIC(18,4)`; el reparto de
-  propinas usa mayores restos justamente para que la suma de las partes dé el total, y ahí
-  cambiar el modo puede romper esa propiedad. Cada uno pide su análisis.
-
-  ➕ **En la misma familia, y más incómodo:** `subtotal`, `descuento_aplicado`,
-  `total_linea` y los totales de cabecera llegan del motor con `escala_calculo` decimales
-  (6 por default) y entran a columnas `NUMERIC(18,4)`. **Hoy ese recorte lo hace Postgres**
-  — que es exactamente el escenario que el docblock de `convertirAMonedaOficial` describe
-  como "lo que hay que evitar". Que ahí sea así y en la conversión no, es una inconsistencia
-  real; no se tocó porque queda fuera de lo que el owner pidió ("las conversiones a moneda
-  oficial") y porque cambiarlo mueve importes ya persistidos de forma.
-
-- [ ] **Una venta con un ítem en moneda extranjera no está cubierta en ningún nivel**
-  (backend/tests, medido 2026-08-11) — `ventas.service.spec.ts` tiene una sola moneda con
-  `valor_del_dia = '1'`, así que multiplicar o dividir por la tasa da lo mismo y el test no
-  distingue; el e2e tampoco lo ejercita. **Ya era ciego antes** del arreglo del redondeo (con
-  la conversión inline pasaba igual), pero ahora esa ceguera es permanente desde ventas: el
-  spec mockea `convertirAMonedaOficial`, así que un fixture en moneda extranjera ejercitaría
-  el mock y no el código. La cobertura tiene que venir de un e2e con un ítem en otra moneda.
-
-- [ ] 🚩 **El alta de una suscripción muestra un precio y cobra otro** (frontend + producto,
-  **medido** 2026-08-11 al cerrar el descarte de advertencias) — el drawer "Nueva
-  suscripción" (`tienda/suscripciones.vue`) rotula **"Precio del período"** con
-  `item.precioBase`, que es el precio **neto** del catálogo. El backend, en cambio, le
-  autoriza a la tarjeta `resultado.totales.totalFinal`, que sale del motor con impuestos,
-  descuentos y recargos aplicados.
-  **La medición, contra el stack real (tenant Paris, ítem de suscripción a $30.000):** el
-  drawer dice `30000` y a Transbank se le cobran **`35700`** — los $5.700 son el IVA al 19%
-  (`550e8400-…-440280`). El cliente confirma un número y se le cobra otro un 19% mayor, sin
-  ningún paso intermedio que se lo muestre.
-  Ojo con reproducirlo: **el seed no trae ningún ítem `tipo='suscripcion'`**, así que la
-  pantalla se ve vacía a menos que se cree uno (así se midió esto).
-  Por qué no se arregló junto con las advertencias: ahí lo que faltaba era devolver un campo;
-  esto es una **previsualización de precio antes de cobrar** —qué se muestra, si frena el
-  alta, si reusa `AdvertenciasPrecio` como ya hacen el carrito y la pasarela— y eso es
-  decisión de producto, no una corrección. Las advertencias que ahora sí llegan
-  (`POST /suscripciones` → `advertencias`) explican el monto **después** del cobro; no lo
-  reemplazan.
-
-- [ ] **`impuestos` no tiene índice único de nombre por tenant, y sus hermanas sí**
-  (backend/BD, encontrado 2026-08-11 por la revisión del cierre de las advertencias
-  repetidas) — `descuentos` y `recargos` tienen `uq_descuentos_tenant_nombre_vivo` y
-  `uq_recargos_tenant_nombre_vivo` (`startup-pos.sql:442,471`), que además cubren las filas
-  pausadas porque solo excluyen `eliminado_el IS NULL`. `impuestos` no tiene el equivalente,
-  así que un tenant puede tener dos impuestos distintos con el mismo nombre.
-  **Consecuencia medida:** la deduplicación de advertencias (2026-08-11) los colapsa en un
-  solo aviso. No se pierde nada accionable —los dos mensajes serían idénticos y el lector
-  tampoco podría distinguirlos— pero el aviso deja de contar cuántos hay, y la causa de
-  fondo es la unicidad que falta, no la deduplicación.
-  Antes de agregar el índice hay que mirar dos cosas: si hay filas del catálogo del país
-  (`tenant_id` nulo) que romperían un índice por tenant, y si la unicidad debe incluir o no
-  al IVA, que es del país y no del tenant (ADR-018).
+Estaban repartidas por el archivo con punteros cruzados entre sí. Acá están las tres, en
+el orden de la tabla de arriba.
 
 - [ ] 🚩 **Diez ventas simultáneas cuelgan la API para siempre** (backend, medido
   2026-08-11) — **el hallazgo más grave abierto hoy.**
-  🧱 Parte de la tanda propia del principio del archivo: va con rendimiento y redondeo.
+  🧱 Va con las otras dos de esta sección: rendimiento y redondeo.
   No es lentitud: las requests no vuelven nunca y el proceso queda envenenado (las
   siguientes también cuelgan, aunque el cliente corte). Se descubrió midiendo otra cosa
   —el N+1 de recetas, la entrada de más abajo— y no lo veía ningún test porque el e2e
@@ -318,158 +168,206 @@ momento; lo que se difiere es abrir estos tres frentes.
   fix necesita un test de concurrencia que dispare N operaciones simultáneas con N ≥ tamaño
   del pool — sin él, el bug vuelve sin que nadie se entere.
 
-- [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
-  criterios distintos para "esta personalización cambia el precio"** (frontend, medido
-  2026-08-11 al cerrar la entrada de `precioUnitario`) — `useVenta.ts:146` y `:197` deciden
-  si guardan y si mandan `precioUnitarioOverride` con `if (precioOverride)`. Es un
-  **string**, así que `'0'` es truthy y el cero viaja igual: el filtro no filtra lo único
-  que podría querer filtrar. Hoy no rompe nada —`calcular` acepta el 0 a propósito, ver
-  `calcular.dto.ts`— pero es la clase de chequeo que se cae sola cuando alguien endurece
-  el DTO, que es exactamente lo que casi pasa.
-  Al lado: **el POS y salones no coinciden en cuándo hay recargo.** `personalizacionVacia`
-  (`useRecetaPersonalizacion.ts:154`) es falso con solo `omitidos` —un "sin cebolla" ya
-  cuenta—, mientras que `tienePersonalizacionConRecargo` (`useSalones.ts:182`) exige
-  `extras`/`grupos`/`componentes` e ignora `omitidos`. Los dos alimentan el mismo
-  endpoint con el mismo campo. Ninguno de los dos es obviamente el correcto, y esa es la
-  entrada: decidir cuál es el criterio y dejar uno solo.
+- [~] 🧱 **N+1 al resolver personalización de recetas/combos** (la segunda de esta
+  sección) — parcialmente cerrado
+  2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
+  `resolverGruposDeItem` disparaba una query **por cada grupo de modificadores** del ítem.
+  Ese se cerró (`unnest` de pares grupo↔item_grupo en una sola query) y beneficia a los
+  **tres** llamadores —ventas, salones y combos— sin cambiar ninguna firma.
+  **Queda abierto lo reportado originalmente:** batchear *entre líneas*, es decir precargar
+  los catálogos de las recetas/combos distintos del carrito en vez de resolver cada línea
+  por su cuenta. Hoy cada línea `receta`/`combo` cuesta 3 queries fijas (ingredientes,
+  extras, grupos+opciones). Batchearlo exige pasar los catálogos precargados por parámetro
+  a `resolverPersonalizacionReceta`/`Combo` y `resolverGruposDeItem`, que tienen 3
+  llamadores incluido `salones.service.ts` — más riesgo y menos ganancia que lo ya hecho.
+  **Es decisión de owner si se encara**, con este número sobre la mesa: un carrito de 5
+  líneas de receta pasó de 5×(3+G) queries a 15 fijas; batchear entre líneas lo llevaría
+  a ~3.
+  **Decisión del owner (2026-08-11): medir antes de decidir.** El conteo de queries no es
+  tiempo: falta el número en milisegundos de un carrito cargado —el caso real es varias
+  cajas concurrentes, no una— y recién con eso se elige entre encararlo y cerrar la
+  entrada. La medición va primero **porque el arreglo toca `resolverPersonalizacion*` y
+  `resolverGruposDeItem`, con tres llamadores** (ventas, salones, combos): hoy tiene más
+  riesgo que ganancia demostrada.
 
-- [ ] **Tres filtros de rango por fecha pura quedaron dependiendo del `TimeZone` de sesión**
-  (backend, 2026-08-06) — efecto lateral medido de [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md).
-  `mermas.service.ts:268,272`, `inventario.service.ts:788,792` y
-  `pasarela/services/cobros.service.ts:593,597` (este último sobre `pasarela_ordenes`, alias `o`) filtran `creado_el >= $N` / `<= $N` con
-  valores que vienen de DTOs validados con `@IsDateString()`, **que acepta una fecha pura**
-  (`2026-08-01`) además de un timestamp completo. Con la columna sin zona, Postgres tomaba
-  los dígitos literales; con `timestamptz` interpreta esa fecha en el `TimeZone` de la
-  sesión antes de convertir. Hoy no cambia nada —`SHOW TimeZone` da `UTC`, medido— pero es
-  una dependencia que antes no existía, y el default del server no lo fija nadie
-  explícitamente (ni el compose ni la config del pool).
-  **Cierre posible:** el patrón ya resuelto está en `propina-reportes.service.ts:264-266`,
-  que castea explícito con la zona del tenant (`$2::date::timestamp AT TIME ZONE $4`). Son
-  tres servicios copiando ese molde. **No entró en ADR-019** porque cambiar la semántica de
-  un filtro de reportes es una decisión de producto (¿el "desde" es medianoche UTC o
-  medianoche del local?), no una migración de tipos.
-  ⛔ **Corrección al "cierre posible" (2026-08-11): ese molde NO es copiable tal cual, y
-  copiarlo introduce un bug peor que el que arregla.** Medido en Postgres:
-  `'2026-08-01T15:30:00Z'::date` devuelve `2026-08-01` — **el `::date` descarta la hora en
-  silencio**. El molde funciona en `propina-reportes` porque ahí el rango llega ya
-  normalizado a fechas puras (`RangoReporteNormalizado`); estos tres DTOs validan con
-  `@IsDateString()`, que **acepta las dos formas**, así que un llamador que hoy manda
-  `?desde=2026-08-01T15:30:00Z` pasaría a filtrar desde la medianoche de ese día. Un
-  filtro que se ensancha sin avisar es peor que uno con la zona ambigua.
-  Lo que el cierre necesita entonces, además del cast: decidir si estos endpoints aceptan
-  timestamp o solo fecha pura, y si aceptan las dos, normalizar en el service —expandir la
-  fecha pura a medianoche del tenant y dejar pasar el timestamp tal cual— en vez de castear
-  en el SQL. Eso ya no son "tres servicios copiando un molde".
-  (Verificado también el lado bueno del molde: `'2026-08-01'::date::timestamp AT TIME ZONE
-  'America/Santiago'` da `2026-08-01 04:00:00+00`, que es la medianoche local correcta.)
+  ✅ **Medido el 2026-08-11** contra el stack de docker-compose con la base recién
+  sembrada, ingredientes propios con stock alto (los del seed se agotan y la medición se
+  vuelve una carrera contra el stock), 30 repeticiones tras 3 de calentamiento:
 
-- [ ] **De `configCalculo` faltan `escalaCalculo` y `modoRedondeo`** (frontend, 2026-08-02)
-  — el desglose por línea ya usa `formula` para ordenarse y muestra el orden **con el modo
-  de cada familia** (`Descuento (base) → Recargo (cascada) → Impuesto`), que es lo que
-  explicaba los montos. Quedan los dos campos de redondeo, que solo importan cuando un
-  centavo no cuadra: son los que explican una diferencia de $1 entre lo que el lector calcula
-  a mano y lo que muestra la fila. Cierre posible: una línea plegable en la tarjeta de
-  Totales. **Prioridad baja** — no hay un caso reportado de descuadre.
-  ⚠️ Va con una decisión de permisos: hoy el desglose lo ve **cualquiera con `Ventas:Leer`**
-  (`ventas.controller.ts:89`), que es el mismo permiso del resto del drawer. Si la config del
-  tenant se considera información de administración, hay que separar el guard.
+  | Carrito (`POST /ventas`) | p50 | p95 |
+  |---|---|---|
+  | 1 producto simple | 10.7 ms | 12.7 ms |
+  | 5 productos simples | 12.1 ms | 15.7 ms |
+  | 1 receta | 11.2 ms | 13.0 ms |
+  | 3 recetas distintas | 15.0 ms | 16.6 ms |
+  | 5 recetas distintas | 19.2 ms | 34.7 ms |
+  | 8 recetas distintas | 23.6 ms | 37.3 ms |
 
-- [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
-  (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —
-  **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse
-  ante impuestos y documentos tributarios; ver **ADR-010**).
-  **Lo medido, sin interpretar:** la NC construye su fila de `ventas` **directo**, no por
-  `crearEnTransaccion`, y hardcodea `totalDescuentos: '0'`, `totalRecargos: '0'` y
-  `totalImpuestos: '0'`, con `totalBruto = totalFinal = params.monto`. Consecuencias
-  encadenadas: (a) cero filas en `ventas_descuentos`/`ventas_recargos`/`ventas_impuestos`,
-  así que la NC no dice qué reglas revierte —se llega por la venta que referencia—;
-  (b) `config_calculo` queda `null` en toda NC; (c) `base_ventas_sin_impuestos` se queda en
-  el default de la columna, y ese campo lo consume `liquidacion-propinas.service.ts`.
-  Los dos puntos de entrada (`crearNotaCreditoDesdeVenta`) desembocan en el mismo método.
-  Lo que la NC **sí** congela es `descripcion` y `clasificacion_tributaria` por línea en
-  `venta_detalles`, copiadas de la línea original.
-  **La pregunta para el owner, que NO me corresponde responder:** una NC sobre una venta con
-  IVA 19%, ¿tiene que declarar su propio IVA? Un DTE 61 lleva `MntNeto`/`IVA`/`MntTotal`
-  propios, y ADR-010 dice congelar el **hecho fiscal** en la transacción y diferir solo lo
-  que transmite o formatea — el corte neto/impuesto de una NC parece hecho fiscal, no
-  formato. Si lo es, hoy falta y no es solo un tema de auditoría.
-  **Contraargumento honesto a considerar:** la NC se emite **por monto** (`params.monto`,
-  con devoluciones de línea opcionales y sueltas del monto), así que "descomponer" exige
-  primero definir contra qué —¿prorrateo sobre el total original? ¿solo sobre las líneas
-  devueltas?—, y eso es regla de negocio, no implementación.
+  **Lectura: ~1,8 ms por línea de receta.** Un carrito de 5 recetas cuesta 19,2 ms contra
+  12,1 ms de 5 productos simples: **~7 ms atribuibles** a resolver recetas, que es lo que
+  batchear recuperaría. Sobre una venta que el cajero dispara una vez, 19 ms contra 12 ms
+  no se percibe.
+  ⚠️ **Dos correcciones a la entrada original, medidas:**
+  - **El N+1 no está en `/calculo-precios/calcular`** —ahí el tiempo es plano entre 1 y 8
+    recetas— sino en `POST /ventas` (`ventas.service.ts:280`). La primera pasada de
+    medición apuntó al endpoint equivocado y dio 6 ms constantes.
+  - **Las llamadas por línea corren dentro de un `Promise.all`**, o sea **en paralelo**.
+    "15 queries" no son 15 viajes en serie, que es lo que la cifra sugería.
+  **Recomendación: no encararlo.** 7 ms de ganancia contra un refactor que toca tres
+  llamadores. Se reabre si aparece un carrito mucho más grande o si el endpoint sale en
+  una traza lenta.
+  ⛔ **Lo que sí salió de esta medición y hay que mirar es otra cosa:** ver la entrada del
+  deadlock de diez ventas simultáneas, acá arriba en esta misma sección. Batchear no lo
+  arregla.
 
-- [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
-  frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
-  total `$0` el cobro se cae por los **dos** caminos, no solo por Webpay: la rama webpay
-  corta en `pagos-redirect.service.ts:86` ("El monto debe ser mayor a cero"), y el flujo
-  simulado tampoco puede porque `pasarela.vue:68` manda siempre
-  `monto: totales.totalFinal` y `PagoVentaDto.monto` lleva `@IsDecimalPositivo()`
-  (`create-venta.dto.ts:73-76`), así que `POST /ventas` lo rechaza más tarde.
-  ⚠️ **No hay asimetría con el POS** — la primera redacción de esta entrada decía que el
-  POS sí cerraba estas ventas "porque omite la línea de pago", y es falso:
-  `CobroModal.vue:99-101` exige `pagosValidos.length > 0` y el botón queda `:disabled`
-  (`:189`), así que con total `0` el POS tampoco confirma. El comentario de
-  `create-venta.dto.ts:73` ("el POS ya los omite al confirmar") habla de descartar las
-  líneas en `$0` dentro de un pago **dividido** que sí tiene alguna con monto
-  (`CobroModal.vue:95-97`), no de confirmar sin ninguna. **No hay un comportamiento del POS
-  que copiar.**
-  **Lo que la restricción realmente es:** de **UI en los dos lados**. La API sí acepta una
-  venta sin pagos —`CreateVentaDto.pagos` es `@IsOptional()` (`create-venta.dto.ts:130-134`),
-  por eso existen las ventas `pendiente`—, pero `ventas.service.ts:676` solo llama a
-  `calcularEstadoVenta` `if (saved.pagos.length > 0)`, así que una venta de `$0` sin pagos
-  quedaría **`pendiente` con saldo `$0`**, arrastrándose en los listados de deuda. O sea que
-  "crearla sin pago" tampoco es un modelo limpio: es una segunda decisión.
-  **La pregunta para el owner:** ¿una venta de total `$0` es una venta **pagada**, una venta
-  **pendiente**, o algo que se prohíbe antes de llegar al cobro? Es un caso real de
-  promociones, no un borde teórico. Relacionado con la entrada de `precioUnitario` de abajo:
-  es la misma pregunta de si el `0` es un monto válido, en otra capa.
-- [ ] **`/tienda/pasarela` es inalcanzable en el tenant principal del seed** (frontend,
-  medido 2026-08-02) — la pantalla solo existe en el fallback **simulado**: si el tenant
-  tiene Webpay Plus activa, `pagar()` toma la rama webpay y la SPA sale por redirect a
-  Transbank. El seed activa Webpay Plus **solo en `Demo Restaurante`**
-  (`seeder.service.ts:1742-1762`), que es donde entra todo el mundo; `Demo Bodega` no tiene
-  fila en `tenant_pasarela`, así que **según el seed** cae al flujo simulado y alcanzaría la
-  pantalla — derivado del código, no observado en una corrida, y sin verificar que ese tenant
-  tenga catálogo `tipo=producto` ni el módulo de tienda contratado. Consecuencia práctica: **nada
-  automático abre este archivo** —no tiene spec, y el e2e de layout no lo alcanza porque
-  la guarda de `checkoutRef` (`pasarela.vue:34`) lo hace inaccesible por `goto` pelado—,
-  así que el próximo que quiera verlo va a perder tiempo antes de descubrir que hay que
-  desactivar la pasarela o cambiar de tenant. Decidir si se cubre con e2e (sembrando el
-  `checkoutRef`) o si se documenta como pantalla de fallback y se deja sin cobertura.
-  ⚠️ **La pregunta de cobertura es la menor. Medido el 2026-08-11, mirando el código:**
-  1. **El tenant no elige nada.** `online.service.ts` → `pagar()` decide por **ausencia**:
-     `if (!tieneWebpay) return { modo: 'simulado' }`, con el comentario *"Fallback: sin
-     Webpay Plus activo, mantener la pasarela simulada actual"*. No hay configuración de
-     medios de pago online; hay una pasarela real y lo que sobra cuando falta.
-  2. **La pantalla simulada registra la venta como PAGADA sin que nadie cobre.**
-     `pasarela.vue` → `aprobar()` postea `POST /ventas` con `pagos: [...]` por el
-     `totalFinal`, y elige el método con `metodoTarjeta()`: busca uno cuyo nombre
-     contenga "crédito"/"credito" y **si no encuentra agarra `metodos[0]`**. Cualquier
-     tenant que entre sin pasarela conectada tiene una tienda online que entrega
-     mercadería y la anota cobrada. El estado `pendiente` —que el modelo ya soporta— es
-     donde debería quedar.
-  **Owner (2026-08-11): la salteó, con la función que quiere ya nombrada** — que el
-  tenant **configure** qué acepta online (tarjeta por pasarela, transferencia, pago al
-  retirar…), en vez de heredar el simulado por descarte. Eso es feature con spec propia:
-  toca configuración, tienda, registro de la venta y estado resultante. El punto 2 es un
-  defecto que existe igual, se configure o no.
-- [ ] **El país del tenant se deriva con el mismo JOIN en 12 queries** (backend, ocho
-  módulos: `impuestos`, `monedas` ×2, `metodos-pago` ×2, `ventas`, `items` ×2, `propinas`
-  ×2, `seeder`, `turnos`) — todas hacen `tenants.provincia_id → provincia.pais_id`. **Idea del owner
-  (2026-07-30):** una columna `tenants.pais_id` para buscarlo directo. **Evaluada y
-  descartada por ahora**, con dos hechos medidos: (a) `provinciaId` es **mutable**
-  (`update-my-tenant.dto.ts:21`), así que la columna copiada se desincroniza en cuanto
-  alguien cambie de provincia y olvide actualizarla — y desincroniza justo el país que
-  determina el IVA, que es el trade que la spec del IVA derivado rechaza explícitamente;
-  (b) **los once JOIN filtran `eliminado_el` de `provincia`**, o sea que el boilerplate es
-  correcto: molesta a la vista, no está produciendo bugs. Se reabre si aparece evidencia
-  de que duele (una query caliente, o un módulo nuevo que olvide el filtro); el cierre sin
-  divergencia sería una **vista `tenant_pais`**, no una columna.
-  **2026-08-07: llegó la doceava** (`sesiones-garzon.service.ts` → `zonaHoraria`, para el
-  filtro de fecha del historial). Se duplicó a conciencia —es la segunda copia de ese
-  helper, y la convención acepta duplicar dos veces— **con** el filtro `eliminado_el`, que
-  es la condición de reapertura que esta entrada anota. Si aparece una tercera copia del
-  helper de zona, ahí sí conviene la vista.
+- [ ] **Cuatro redondeos de plata más que siguen en HALF_UP fijo, sin `modo_redondeo`**
+  (backend, **medido 2026-08-11 por la revisión del cierre de la conversión de moneda**)
+  — 🧱 **la tercera de esta sección: no se toca suelta.**
+  se abre esta entrada justo porque la que se cerró ese día, leída de más, los tapaba: el
+  arreglo alcanzó la cuenta `precio × tasa` y **nada más**.
+  - `inventario.service.ts` → **CPP** (`valorPrevio + valorEntrante` ÷ stock). Es una
+    **división**, así que redondea de verdad, y el resultado se persiste en
+    `item_producto.costo_actual`.
+  - `items.service.ts` → `costoPropuesto` de una receta (`ROUND_HALF_UP` explícito).
+  - `propinas/utils/mayores-restos.ts` → el reparto de propina entre garzones.
+  - `mermas.service.ts` (dos sitios) → costo × cantidad.
+
+  Antes de replicar el arreglo: **el criterio no es obvio y puede no ser el mismo**. El de
+  la conversión se decidió porque el valor se persiste en `NUMERIC(18,4)`; el reparto de
+  propinas usa mayores restos justamente para que la suma de las partes dé el total, y ahí
+  cambiar el modo puede romper esa propiedad. Cada uno pide su análisis.
+
+  ➕ **En la misma familia, y más incómodo:** `subtotal`, `descuento_aplicado`,
+  `total_linea` y los totales de cabecera llegan del motor con `escala_calculo` decimales
+  (6 por default) y entran a columnas `NUMERIC(18,4)`. **Hoy ese recorte lo hace Postgres**
+  — que es exactamente el escenario que el docblock de `convertirAMonedaOficial` describe
+  como "lo que hay que evitar". Que ahí sea así y en la conversión no, es una inconsistencia
+  real; no se tocó porque queda fuera de lo que el owner pidió ("las conversiones a moneda
+  oficial") y porque cambiarlo mueve importes ya persistidos de forma.
+
+---
+
+## 1. Mecánico — no hay nada que preguntar ni diseñar
+
+El arreglo ya está decidido y escrito dentro de la propia entrada: **ninguna necesita una
+respuesta del owner.** Ordenadas de más barata a más cara — las dos primeras son una
+edición de texto; **las dos últimas no son teclear**, son escribir tests que hoy no existen
+(un e2e con un ítem en otra moneda, y el arnés de tres specs de página). El material para
+una tanda de una sentada empieza arriba, y **va después de la 🔴**.
+
+- [ ] **El paso 4 de la prueba manual de `garzones.md` salta el requisito de entrar a turno: el
+  selector sale vacío si se sigue al pie de la letra** (docs + frontend, **medido 2026-08-15,
+  hueco preexistente a esta feature**) — el paso 4 de
+  [`garzones.md` → Testing → Manual](../features/garzones.md#manual-frontend) dice "Salones →
+  abrir cuenta: PIN correcto abre la cuenta" sin mencionar antes "entrar a turno". Pero
+  `GarzonPinModal` pide el selector con `garzonesApi.paraSelector(props.enTurno)`, y "abrir
+  cuenta" usa el default `enTurno: true` (`GarzonPinModal.vue:19`) — o sea que solo lista
+  garzones **con sesión de turno abierta**. Si nadie entró a turno todavía (el seed no abre
+  sesiones), el selector sale vacío y el paso no se puede completar tal como está escrito. **No
+  hay mitigación:** `toastErrorOperativo` (`salones/index.vue:308-325`) solo reacciona a un
+  request que vuelve con el error "sesión de trabajo" — y con el selector vacío no hay garzón
+  que elegir, así que no se dispara ningún request y ese fallback nunca corre. El paso 4 queda
+  bloqueado sin salida hasta que alguien edite el manual (agregar "entrar a turno" antes) o
+  entre a turno por su cuenta antes de seguirlo.
+
+- [ ] **La spec del testigo promete un conteo a ciegas sin excepciones, y el producto tiene una**
+  — cola de la entrada cerrada por la task 6b (ver `resueltos.md`). El admin del tenant sigue
+  exento del ciego incluso forzando el cierre de una caja ajena (decisión explícita del owner
+  2026-08-13), pero
+  [`2026-08-11-testigo-cierre-forzado-design.md`](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md)
+  sigue diciendo *"cuenta a ciegas: sin ver lo esperado"* a secas. Es un ajuste de texto, no de
+  código: la spec tiene que decir *"salvo el admin del tenant, que nunca es el objetivo del
+  anti-fraude"*. Se abre como entrada propia porque la entrada que lo detectó se cerró y el
+  arreglo quedaba huérfano.
+
+- [ ] **Ningún e2e asierta el efecto de invalidar al vincular** (backend, **medido 2026-08-15**)
+  — el mutante que quita `garzon.pinHash = PIN_INUTILIZABLE` de la rama `vincular` de
+  `actualizar()` **no pone nada en rojo en el e2e**. La transición sí se recorre —
+  `caja-testigo.e2e-spec.ts:383-387` vincula al garzón B por `PATCH` después de abrirle sesión
+  con su PIN vivo, y `:771` hace lo mismo con D — así que **falta la aserción, no el escenario**:
+  alcanza con un `expect` sobre ese PIN después del PATCH. En unit sí está cubierto.
+
+- [ ] **`miPin` hace cuatro consultas donde alcanzan tres** (backend, **medido 2026-08-15**) —
+  `GarzonesService.miPin()` (`garzones.service.ts:688-697`) llama `miGarzonOrThrow()`, que ya
+  hace dos consultas (`garzonPersonalDe` para resolver el `garzonId` + `findOneOrFail` para
+  traer la fila completa del garzón, con su `pinHash`). Después llama
+  `listarEventosPin(tenantId, garzon.id)`, que **vuelve a buscar el mismo garzón**
+  (`getOrThrow`, `garzones.service.ts:1037-1043`) antes de traer los eventos. La cuarta consulta
+  es redundante: el garzón que `getOrThrow` re-busca es el mismo que `miGarzonOrThrow` ya tiene
+  en memoria. No es el N+1 que preocupa la tanda 🔴 (es una sola llamada, no una por fila), pero
+  es una consulta de más en una ruta que golpea cada carga del perfil y de `/salones` en modo
+  personal.
+
+- [ ] **El garzón que abre `/salones` ve un toast rojo de permiso que no le corresponde**
+  (frontend, **medido en el smoke del 2026-08-15**) — con la cuenta `garzon.pin@paris.cl`, la
+  carga inicial de la pantalla del salón dispara cinco 403 (`/caja/activa`, `/items` ×3,
+  `/tipos-documento`: datos del POS que el rol de garzón no ve) y al menos uno sale como
+  *"No tienes permiso para esta acción"* en rojo, arriba a la derecha. **Preexistente**, no lo
+  introdujo el PIN propio: `/garzones/mi-pin` devolvió 200 en la misma corrida. Es la misma
+  familia que el `.catch(() => null)` que ya lleva `cargarActiva`, aplicada a medias.
+
+- [ ] **`listarEventosPin` no tiene `LIMIT`: una tabla que solo crece, leída entera cada vez**
+  (backend, **medido 2026-08-15**) — `garzones.service.ts:631-649` arma el historial completo
+  de `garzon_pin_evento` para un garzón con un solo `SELECT ... ORDER BY e.creado_el DESC`, sin
+  `LIMIT`/paginación. Hoy con pocos eventos por garzón no se nota, pero es una tabla que solo
+  crece —el diseño explícitamente decidió guardar todo, no solo el último cambio— y la alimentan
+  dos pantallas (`GET /garzones/:id/pin-eventos` en la ficha del encargado, `GET
+  /garzones/mi-pin` en el perfil del garzón). Con años de regeneraciones/invalidaciones para un
+  garzón activo, la consulta y el payload crecen sin techo.
+
+- [ ] **`ventas/pos.vue`, `tienda/index.vue` y `tienda/suscripciones.vue` no tienen
+  `.nuxt.spec.ts`.** El filtro de pausados que vivía en esas tres pantallas se movió a la
+  query el 2026-08-09 (`activo=true`, ver [`resueltos.md`](resueltos.md)), y el endpoint sí
+  quedó cubierto por e2e; lo que **no** sostiene nada es que cada pantalla lo pida — borrar
+  `&activo=true` de una URL deja la suite en verde. En `salones/index.vue` eso ya tiene test,
+  porque ahí el spec existe. Montar las otras tres exige stores de caja, unidades e
+  impresoras: es el arnés, no el `it`.
+
+- [ ] **Una venta con un ítem en moneda extranjera no está cubierta en ningún nivel**
+  (backend/tests, medido 2026-08-11) — `ventas.service.spec.ts` tiene una sola moneda con
+  `valor_del_dia = '1'`, así que multiplicar o dividir por la tasa da lo mismo y el test no
+  distingue; el e2e tampoco lo ejercita. **Ya era ciego antes** del arreglo del redondeo (con
+  la conversión inline pasaba igual), pero ahora esa ceguera es permanente desde ventas: el
+  spec mockea `convertirAMonedaOficial`, así que un fixture en moneda extranjera ejercitaría
+  el mock y no el código. La cobertura tiene que venir de un e2e con un ítem en otra moneda.
+
+---
+
+## 2. Medir primero — no es una pregunta para el owner
+
+Lo que falta acá es abrir un archivo, correr algo o mirar la base. Cada una sale de esta
+sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido destapa una
+decisión que no es mía).
+
+- [ ] **¿Se puede desvincular una cuenta desde el formulario?** (frontend, **duda medida en el
+  smoke del 2026-08-15, sin resolver**) — el `USelectMenu` de "Cuenta vinculada" muestra
+  `Sin vincular (usa PIN)` como *placeholder*, pero **con una cuenta ya elegida no se vio una
+  opción para volver a ese estado**: la lista solo trae cuentas. Si no se puede, el `null`
+  explícito de `UpdateGarzonDto` solo es alcanzable por API. Importa porque el estado
+  *"desvinculado y sin PIN usable"* —que la ficha ahora señala en rojo— se produce justamente
+  por ese camino. **Verificar antes de asumir cualquiera de las dos cosas.**
+
+- [ ] **`impuestos` no tiene índice único de nombre por tenant, y sus hermanas sí**
+  (backend/BD, encontrado 2026-08-11 por la revisión del cierre de las advertencias
+  repetidas) — `descuentos` y `recargos` tienen `uq_descuentos_tenant_nombre_vivo` y
+  `uq_recargos_tenant_nombre_vivo` (`startup-pos.sql:442,471`), que además cubren las filas
+  pausadas porque solo excluyen `eliminado_el IS NULL`. `impuestos` no tiene el equivalente,
+  así que un tenant puede tener dos impuestos distintos con el mismo nombre.
+  **Consecuencia medida:** la deduplicación de advertencias (2026-08-11) los colapsa en un
+  solo aviso. No se pierde nada accionable —los dos mensajes serían idénticos y el lector
+  tampoco podría distinguirlos— pero el aviso deja de contar cuántos hay, y la causa de
+  fondo es la unicidad que falta, no la deduplicación.
+  Antes de agregar el índice hay que mirar dos cosas: si hay filas del catálogo del país
+  (`tenant_id` nulo) que romperían un índice por tenant, y si la unicidad debe incluir o no
+  al IVA, que es del país y no del tenant (ADR-018).
+
+- [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
+  test** (backend) — el e2e nuevo prueba que la escritura ajena no prospera y que la caja
+  queda intacta, pero no aísla cuál de las tres defensas la frena
+  (`bloquearCajaAbierta` + `findOne` acotado + chequeo de dueño). Medido: sacando la de
+  tenant, la request del otro tenant llega al `FOR UPDATE` y la corrida **se cuelga**, así
+  que no hay aserción posible sobre el resultado. Encararlo probablemente pida un timeout
+  explícito en la query o mirar el lock, no un `expect` de status.
 
 - [ ] **Un flaky del e2e de caja, y seis lecturas de `/tenants/members` que esconden su
   causa** (backend/tests, visto el 2026-08-11) — son dos cosas y la segunda es la que se
@@ -544,57 +442,14 @@ momento; lo que se difiere es abrir estos tres frentes.
   ➡️ La forma correcta, ya aplicada en `caja-testigo.e2e-spec.ts`: **acumular** los fallos de
   limpieza, cerrar la app en un `finally`, y afirmar **después**. Mismo diagnóstico, 4,4 s en
   vez de colgarse. Los `afterAll` de los otros specs siguen con la forma vieja.
+
 ---
 
-## Detector de desborde de layout (`e2e/layout/desborde.spec.ts`, 2026-07-29)
+## 3. Ya decidido, falta construir
 
-- [ ] **El detector solo ve el mecanismo min-content dentro de un contexto flex/grid**
-  (frontend, `e2e/layout/desborde.spec.ts`) — sube desde un bloque truncado hasta su ítem
-  flex/grid ancestro más cercano; fuera de ese contexto el mismo mecanismo (min-content =
-  ancho completo del texto cuando hay `white-space: nowrap`) puede desbordar igual y el
-  detector no lo ve:
-  - Celda de `<table>` con `table-layout: auto`, `inline-block`, `float`,
-    `position: absolute`, `width: fit-content` — todos dimensionan por min-content igual
-    que un ítem flex, así que un truncado adentro desborda por el mismo mecanismo y el
-    detector devuelve `[]`.
-  - `white-space: nowrap` **sin** `overflow: hidden` (p. ej. solo `whitespace-nowrap`) es
-    el caso **peor** — mismo min-content de texto completo y encima sin recorte visual —
-    pero el criterio exige `overflow-x: hidden`, así que lo descarta. No es regresión (el
-    detector anterior, por clase `.truncate`, tampoco lo veía), pero matiza la afirmación
-    del comentario del spec de que se detecta "el efecto" de `truncate`: en rigor exige
-    `nowrap` **y** `hidden` a la vez, no cualquiera de los dos solo.
-  - `overflow: clip` (Tailwind `overflow-clip`) computa `overflowX: 'clip'`, no
-    `'hidden'`, y tampoco pasa el filtro.
-  **Medido el 2026-07-30 (el spike que esta entrada pedía, resuelto):** el tema resuelto de
-  `UTable` (`.nuxt/ui/table.ts`, sin override en `app.config.ts` ni `:ui` en
-  `CrudTable.vue`) da los **tres** casos ciegos a la vez, así que el detector no ve **nada**
-  adentro de ninguna tabla del proyecto:
-  - `base` (el `<table>`) es `min-w-full overflow-clip` → **sin `table-fixed`, o sea
-    `table-layout: auto`**, y encima `overflow-clip` computa `'clip'`, no `'hidden'`.
-  - `td` es `whitespace-nowrap` **sin** `overflow: hidden` → el caso peor del criterio.
-  - No hay contexto flex/grid: el ancestro es el `<table>`.
-  **Pero el arquetipo resultó ser el lugar equivocado para buscar**, que es el hallazgo útil:
-  el slot `root` es `relative overflow-auto`, así que una tabla ancha **scrollea dentro de su
-  propio contenedor** en vez de empujar la página — exactamente lo que el desborde sería. Lo
-  que sí puede desbordar es contenido dentro de una celda que a su vez esté en un contexto
-  flex, y **eso el detector ya lo ve**. Conclusión: la cobertura perdida en `/inventario` es
-  menor de lo que esta entrada suponía; ampliar el detector a `table-layout: auto` no es la
-  prioridad, y si se retoma conviene apuntar a los otros mecanismos de la lista
-  (`inline-block`, `float`, `absolute`, `fit-content`), no a las tablas.
-
-## Papelera — restaurar eliminados (2026-07-31)
-
-Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`](../features/papelera.md).
-
-✅ **La decisión del owner "solo lo que borró una persona" quedó implementada entera el
-2026-08-01.** Los dos agujeros —el `OR` sin parentizar del listado de `impuestos` y el
-`eliminado_por` que `restaurar()` no limpiaba— están cerrados, con el e2e de la regla
-corriendo sobre los **16** recursos en vez de sobre 2. Se levanta el ⛔ que impedía
-cablear la pantalla de impuestos. Detalle y mutantes: [`resueltos.md`](resueltos.md).
-
-Y un hallazgo que la feature dejó medido y no es suyo (el otro, el del esquema partido
-entre `TIMESTAMPTZ` y `TIMESTAMP` sin zona, se cerró el 2026-08-06 — ver
-[`resueltos.md`](resueltos.md)):
+El owner ya contestó lo que había que contestar. **No son mecánicas** —tienen diseño
+adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
+empezarlas.
 
 - [ ] **La plomería de tramos en `recargos` es alcanzable y no significa nada**
   (backend) — `create()`/`update()` persisten `dto.tramos` y
@@ -648,360 +503,6 @@ entre `TIMESTAMPTZ` y `TIMESTAMP` sin zona, se cerró el 2026-08-06 — ver
   ⛔ La parte 2 **toca el motor de precios**: se vuelve a confirmar con el owner antes de
   escribir. La parte 1 no lo toca.
 
-## Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
-
-Pasada de 7 lentes según `docs/agent/auditoria-codigo.md`: 20 hallazgos crudos → 15
-confirmados tras refutación. El detalle de cada fix está en
-[`resueltos.md`](resueltos.md); acá quedan **3 entradas abiertas** (contadas, no estimadas).
-
-ℹ️ Los números de arriba **no cuadran** con la suma de entradas y no se fuerzan para que
-cuadren: `resueltos.md` acumula 18 cerradas de esta pasada contra "15 confirmados", porque
-varias se cerraron en mitades (una cerrada, una diferida como entrada nueva) y algunas
-decisiones de owner entraron después de la pasada. La lista de entradas es la fuente de
-verdad; el conteo del encabezado describe la auditoría original.
-
-- [~] 🧱 **N+1 al resolver personalización de recetas/combos** (parte de la tanda propia del
-  principio del archivo) — parcialmente cerrado
-  2026-07-27. Al abrirlo apareció un N+1 **más caro que el reportado y anidado adentro**:
-  `resolverGruposDeItem` disparaba una query **por cada grupo de modificadores** del ítem.
-  Ese se cerró (`unnest` de pares grupo↔item_grupo en una sola query) y beneficia a los
-  **tres** llamadores —ventas, salones y combos— sin cambiar ninguna firma.
-  **Queda abierto lo reportado originalmente:** batchear *entre líneas*, es decir precargar
-  los catálogos de las recetas/combos distintos del carrito en vez de resolver cada línea
-  por su cuenta. Hoy cada línea `receta`/`combo` cuesta 3 queries fijas (ingredientes,
-  extras, grupos+opciones). Batchearlo exige pasar los catálogos precargados por parámetro
-  a `resolverPersonalizacionReceta`/`Combo` y `resolverGruposDeItem`, que tienen 3
-  llamadores incluido `salones.service.ts` — más riesgo y menos ganancia que lo ya hecho.
-  **Es decisión de owner si se encara**, con este número sobre la mesa: un carrito de 5
-  líneas de receta pasó de 5×(3+G) queries a 15 fijas; batchear entre líneas lo llevaría
-  a ~3.
-  **Decisión del owner (2026-08-11): medir antes de decidir.** El conteo de queries no es
-  tiempo: falta el número en milisegundos de un carrito cargado —el caso real es varias
-  cajas concurrentes, no una— y recién con eso se elige entre encararlo y cerrar la
-  entrada. La medición va primero **porque el arreglo toca `resolverPersonalizacion*` y
-  `resolverGruposDeItem`, con tres llamadores** (ventas, salones, combos): hoy tiene más
-  riesgo que ganancia demostrada.
-
-  ✅ **Medido el 2026-08-11** contra el stack de docker-compose con la base recién
-  sembrada, ingredientes propios con stock alto (los del seed se agotan y la medición se
-  vuelve una carrera contra el stock), 30 repeticiones tras 3 de calentamiento:
-
-  | Carrito (`POST /ventas`) | p50 | p95 |
-  |---|---|---|
-  | 1 producto simple | 10.7 ms | 12.7 ms |
-  | 5 productos simples | 12.1 ms | 15.7 ms |
-  | 1 receta | 11.2 ms | 13.0 ms |
-  | 3 recetas distintas | 15.0 ms | 16.6 ms |
-  | 5 recetas distintas | 19.2 ms | 34.7 ms |
-  | 8 recetas distintas | 23.6 ms | 37.3 ms |
-
-  **Lectura: ~1,8 ms por línea de receta.** Un carrito de 5 recetas cuesta 19,2 ms contra
-  12,1 ms de 5 productos simples: **~7 ms atribuibles** a resolver recetas, que es lo que
-  batchear recuperaría. Sobre una venta que el cajero dispara una vez, 19 ms contra 12 ms
-  no se percibe.
-  ⚠️ **Dos correcciones a la entrada original, medidas:**
-  - **El N+1 no está en `/calculo-precios/calcular`** —ahí el tiempo es plano entre 1 y 8
-    recetas— sino en `POST /ventas` (`ventas.service.ts:280`). La primera pasada de
-    medición apuntó al endpoint equivocado y dio 6 ms constantes.
-  - **Las llamadas por línea corren dentro de un `Promise.all`**, o sea **en paralelo**.
-    "15 queries" no son 15 viajes en serie, que es lo que la cifra sugería.
-  **Recomendación: no encararlo.** 7 ms de ganancia contra un refactor que toca tres
-  llamadores. Se reabre si aparece un carrito mucho más grande o si el endpoint sale en
-  una traza lenta.
-  ⛔ **Lo que sí salió de esta medición y hay que mirar es otra cosa:** ver la entrada del
-  deadlock de diez ventas simultáneas, al principio de "Deuda de código". Batchear no lo
-  arregla.
-
-### Decidido por el owner tras investigación de mercado (2026-07-27)
-
-Cuatro decisiones de owner sobre reglas de negocio no documentadas; tres ya se
-implementaron ([`resueltos.md`](resueltos.md)). Método, cruce contra el código y fuentes:
-**`docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`**. Lo que queda es
-**trabajo pendiente con la forma ya definida**, no una pregunta abierta.
-
-- [ ] **Devolución por medio de pago + configuración de plazos** (backend, tema propio con
-  spec) — surgido del aporte del owner el 2026-07-27, **no es parte de los fixes de la
-  auditoría**. Hoy hay dos caminos de devolución que no se conocen entre sí: el de tarjeta
-  arranca en la pasarela (`reembolsar()` de Webpay/Oneclick, ya implementado) y termina en
-  una NC; el de efectivo arranca en la NC y sale por la caja. Nada compone las patas ni
-  impide pagar con tarjeta y recibir efectivo. Además **no hay validación de plazo en
-  ningún lado**: el límite de Transbank se descubre como rechazo en runtime. La
-  configuración de plazos que se proponga debe separar **tres relojes** —fiscal (SII, sale
-  del país), adquirente (propiedad de la integración) y política comercial (lo único
-  configurable por el tenant)—, con los dos primeros como techos y el retracto de venta a
-  distancia como piso en `online`. Construirlo plano permite que un tenant configure 12
-  meses y la empresa se coma el IVA. Análisis completo y fuentes:
-  `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md` §6.
-
-## Auditoría `caja` + `propinas` (2026-07-27) — hallazgos confirmados
-
-Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md): 25 hallazgos crudos →
-22 únicos (3 los vieron dos lentes por separado) → **20 sobreviven** tras refutación.
-**Los 20 se cerraron el 2026-07-27**; el detalle de cada fix, con sus mutantes, está en
-[`resueltos.md`](resueltos.md). Acá queda lo que esos cierres dejaron abierto: la mitad de
-la reconciliación de propinas que exige spec propia, un hallazgo que trajo la revisión
-independiente, y las ramas que ningún test toca.
-
-### Huecos de test
-
-**De la feature de pausa (2026-08-03)**, los dos que habían quedado abiertos a conciencia
-—cobrar una cuenta de salón con un ítem pausado después de cargarlo, y que una regla pausada
-no quede congelada en `ventas_descuentos`— **se cerraron el 2026-08-09**; ver
-[`resueltos.md`](resueltos.md). Lo que sigue abierto de esa feature:
-- **`ventas/pos.vue`, `tienda/index.vue` y `tienda/suscripciones.vue` no tienen
-  `.nuxt.spec.ts`.** El filtro de pausados que vivía en esas tres pantallas se movió a la
-  query el 2026-08-09 (`activo=true`, ver [`resueltos.md`](resueltos.md)), y el endpoint sí
-  quedó cubierto por e2e; lo que **no** sostiene nada es que cada pantalla lo pida — borrar
-  `&activo=true` de una URL deja la suite en verde. En `salones/index.vue` eso ya tiene test,
-  porque ahí el spec existe. Montar las otras tres exige stores de caja, unidades e
-  impresoras: es el arnés, no el `it`.
-- ℹ️ **El tope de 100 sigue vivo, y ahora es el único truncamiento que queda** (frontend).
-  Las cuatro superficies de venta piden `pageSize=100` y no paginan, con
-  `MAX_PAGE_SIZE = 100` en `common/utils/pagination.util.ts`. Mover el filtro de pausados a
-  la query sacó una causa de pérdida —el pausado ya no le roba el lugar a un vendible— pero
-  un tenant con más de 100 ítems vendibles sigue sin verlos todos en el POS. Preexistente y
-  sin caso reportado; se anota para no perderlo, porque la nota anterior vivía pegada a la
-  entrada del filtro que se cerró.
-
-**Ramas sin cobertura alguna.** La lista se triageó el 2026-08-09 y se cubrieron **cuatro
-ramas nuevas**: el spillover de propina entre pagos, el aislamiento multi-tenant **de
-lectura** de caja, la capa SQL de `propina-reportes` y `HORAS_TRABAJADAS`; más el rechazo de
-`peso <= 0`. Se escribieron además dos tests de guardas (`fechaHasta <= fechaDesde` y Σ de
-porcentajes) que **no** agregan cobertura de rama: los mataban tests unitarios preexistentes.
-Detalle, mutantes y lo que quedó sin fijar en [`resueltos.md`](resueltos.md).
-
-Lo que la tanda dejó abierto y antes no estaba anotado:
-
-- [ ] **El scoping por tenant del camino de ESCRITURA de caja no está fijado por ningún
-  test** (backend) — el e2e nuevo prueba que la escritura ajena no prospera y que la caja
-  queda intacta, pero no aísla cuál de las tres defensas la frena
-  (`bloquearCajaAbierta` + `findOne` acotado + chequeo de dueño). Medido: sacando la de
-  tenant, la request del otro tenant llega al `FOR UPDATE` y la corrida **se cuelga**, así
-  que no hay aserción posible sobre el resultado. Encararlo probablemente pida un timeout
-  explícito en la query o mirar el lock, no un `expect` de status.
-
-Lo que **no** entró, con el motivo, para no volver a evaluarlo de cero:
-
-- 🚫 **`gruposConfig.length === 0`** — se intentó y resultó **inalcanzable por la API**: el
-  PUT de distribución exige que los grupos activos sumen 100%, así que no se puede dejar al
-  tenant sin ninguno. Montarlo pediría SQL directo, o sea un test de un escenario que en
-  producción no existe. Lo que sí quedó cubierto es la puerta de entrada. La guarda del
-  servicio es defensa en profundidad, no código muerto.
-- ⏸️ **El backstop 23505 de `abrir()`** — es una carrera. Reproducirla exige montar el estado
-  por SQL; mismo criterio que arriba.
-- ⏸️ **`registrarMovimientoEnTransaccion`** — se ejercita indirectamente en cada venta que
-  mueve stock; cubrirlo aparte agrega poco.
-- ⏸️ **`advertenciasSesionesAbiertas` con `fin_el = null`**, **`aplicarCambioParticipante`**
-  (alta manual), **`actualizar` con `recalcular: false`**, los endpoints HTTP
-  **`confirmar`/`anular`** y la guarda de **moneda oficial ausente** — riesgo menor y ninguno
-  toca plata sin pasar antes por algo ya cubierto. Entran si aparece un caso real.
-
-### Decidido por el owner (2026-07-27)
-
-- [ ] **Una persona cobrando en dos grupos de la misma liquidación** (backend + frontend,
-  tema propio) — hoy el conflicto se corta con un 400 accionable que sugiere la fecha de
-  corte (cerrado el 2026-07-27, ver [`resueltos.md`](resueltos.md)); **soportarlo de
-  verdad es un cambio de modelo** que el owner difirió hasta que el caso aparezca:
-  índice `(liquidacion_id, grupo_id, garzon_id)` **más** re-keyear los ajustes, que hoy se
-  identifican solo por `garzonId` —excluir la sacaría de los dos grupos, y un monto manual
-  escribiría el mismo número en sus dos filas rompiendo la conservación de ambos—. Toca
-  DTO, service, composable, la página y la impresión por persona: **medio día a un día**,
-  con la decisión de cómo se imprime adentro.
-  Dos cosas chicas que quedaron de la salida acotada: la fecha de corte sugerida sale solo
-  de los tips, así que una sesión del primer rol que se extienda más allá del corte hace
-  reaparecer el conflicto en el segundo intento (vuelve a cortar con el mismo 400, no
-  genera datos malos, pero un corte no alcanza y hay que acotar turnos); y falta un test
-  dedicado del conflicto por el camino de `actualizarConfig` —hoy solo se ejerce por
-  `crear`, aunque ambos comparten la misma función.
-- [ ] **`buscarTipsPorFuentes` no filtra la venta anulada** (backend,
-  `propinas/liquidacion-propinas.service.ts` → `buscarTipsPorFuentes`) — es la copia hermana de
-  `buscarTipsElegibles` que usa `actualizarConfig` para recalcular pesos sobre las fuentes
-  ya fijadas de un borrador. Si la venta se anula **con el borrador abierto**, un
-  `actualizarConfig` posterior sigue usando sus datos para el peso (`VENTAS_NETAS`,
-  `CANTIDAD_CUENTAS`). Lo encontró la revisión independiente del 2026-07-27.
-  ⛔ **No es copiar la línea del hermano.** El `poolTotal` se congela al crear el borrador e
-  **incluye** esa propina: filtrar solo acá le saca el peso al garzón pero deja su plata en
-  el pool, o sea la redistribuye entre los demás. Decidir eso es la misma pregunta de
-  reconciliación del ítem de abajo (¿la plata de una venta anulada sale del pool, se
-  redistribuye, o queda como saldo?), así que va con esa spec y no antes.
-- [ ] **Saldo en contra cuando se anula una venta cuya propina YA se liquidó** (backend,
-  tema propio con spec) — decidido 2026-07-27, **no implementado**: es una entidad nueva y
-  toca el motor de reparto, así que no entra como fix de auditoría.
-  **El caso:** la propina se liquidó el lunes y se le pagó al garzón; el miércoles anulan
-  esa venta (sigue `pendiente` y sin pagos, así que `POST /ventas/:id/anular` la acepta). La
-  plata ya salió. **La forma decidida:** permitir la anulación y dejar el monto ya pagado
-  como **saldo en contra del garzón**, que se descuenta de su próxima liquidación.
-  Preguntas que la spec tiene que responder antes de escribir código: qué pasa si el garzón
-  no vuelve a liquidar nunca (¿el saldo caduca? ¿se pierde?); qué pasa si su próxima
-  liquidación es **menor** que el saldo (¿queda saldo remanente? ¿se le descuenta hasta
-  0?); si el saldo es por garzón y por tenant, o también por período/turno; si el descuento
-  se muestra en la impresión y el reporte; y cómo se audita (evento propio, como el resto de
-  la liquidación). La mitad barata —que la propina de una venta anulada no entre a
-  liquidaciones **futuras**— ya está cerrada ([`resueltos.md`](resueltos.md)).
-
-## Auditoría `items` + `calculo-precios` (2026-07-28) — hallazgos confirmados
-
-Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md): 21 hallazgos crudos
-→ **21 sobreviven, ninguno se cayó entero**. El trabajo del refutador fue el documentado:
-**6 bajaron de severidad**, 2 se reclasificaron como decisión de owner, y tres afirmaciones
-perdieron la mitad que no aguantaba (ver cada entrada). Se suma 1 hallazgo del refutador
-que ninguna lente vio.
-
-**Lo que salió limpio, que es lo que la pasada vino a producir:** soft delete **0 hallazgos
-sobre 98 queries** revisadas una por una (cruzadas contra `startup-pos.sql` para no reportar
-filtro faltante donde la tabla no tiene la columna); **multi-tenant limpio en los 63 JOIN** y
-en cada id que llega del cliente; y la suite de `items.service.spec.ts` (4.136 líneas) resultó
-inusualmente rigurosa — trae la derivación aritmética comentada, así que mata mutantes.
-
-### Alta
-
-Los tres hallazgos de severidad alta se cerraron el 2026-07-28.
-Ver [`resueltos.md`](resueltos.md).
-
-### Media
-
-- [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
-  no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
-  `GET /:id/uso` cuenta filas de `item_descuentos`, pero las reglas que se aplican por
-  `descuentosVentaIds` / `recargosVentaIds` **no tienen tabla puente** (no hay columna `nivel`
-  en `descuentos`/`recargos`), así que devuelven `items: []` y la pantalla las pausa directo,
-  sin confirmación. El texto "Deja de aplicarse en N ítems" también queda incompleto ahí.
-  Hoy es teórico —ninguna pantalla manda esos campos, medido el 2026-08-03—, pero deja de
-  serlo en cuanto exista un productor.
-  Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
-  (línea vs venta), que hoy no distingue.
-- [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
-  `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
-  dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).
-  ⚠️ **La entrada original decía que `remove()` "no es transaccional" y eso era falso**: abre
-  `this.dataSource.transaction()` y `obtenerUsoItem` corre adentro. Lo que sí es cierto es
-  otra cosa: ese `SELECT` **no toma lock**, así que entre el chequeo y el commit otra
-  transacción puede insertar una fila que referencie al ítem. Es un phantom, no falta de
-  atomicidad — y por eso el arreglo no es "envolver en transacción".
-  Consecuencia real: el ítem queda borrado blando y con una `receta_ingredientes` viva
-  apuntándolo. Como las lecturas filtran por el JOIN a `items`, el ingrediente **desaparece
-  en silencio de la receta** y su costo cambia sin que nadie lo pida.
-  Por qué no se cerró junto con las otras dos: no hay una fila única que bloquear —el guard
-  lee cuatro tablas hijas—. El arreglo es bloquear la fila de `items` referenciada, y hacerlo
-  **en `remove()` y en cada camino que crea una referencia** (asociar ingrediente, componente
-  de combo, opción de grupo, extra permitido). Eso es varios sitios de escritura y su propio
-  análisis de orden de locks: es una tarea, no un `FOR UPDATE` más.
-
-### Decidido por el owner (pendiente de respuesta)
-
-Vacía desde el 2026-08-11: las dos que tenía —el orden de los descuentos de un ítem y el
-tope del descuento contra un recargo posterior— se decidieron y se cerraron en la ronda de
-ese día (ver [`resueltos.md`](resueltos.md)).
-
-## Auditoría `turnos` + `salones` + `garzones` (2026-08-06) — hallazgos confirmados
-
-Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md): 24 hallazgos crudos
-→ **23 únicos** (dos lentes independientes cayeron por separado sobre el mismo bug de la
-línea que se cuela durante el cierre; se cuenta una vez) → **22 sobreviven**. El único que
-se cayó entero fue un deadlock en `fusionarCuentas` (ver "Refutados" abajo). El refutador
-sumó 1 hallazgo que ninguna lente vio —la comanda seguía escondiendo el ítem borrado— y
-que resultó ser la mitad que faltaba de un fix ya en curso.
-
-**Lo que salió limpio, que es lo que la pasada vino a producir:** los 4 controllers
-(incluidas las 3 clases dentro de `salones.controller.ts`) llevan
-`JwtAuthGuard + TenantGuard + PermisosGuard` con el permiso correcto por verbo; ningún DTO
-del alcance declara `tenantId`; los tres puntos donde un `:id` anidado podría ser IDOR
-—`guardarLayout`, `fusionarCuentas`, `transferirCuentaAdmin`— resuelven contra el tenant
-del token antes de usar el id; **0 violaciones de soft delete sobre ~65 queries** revisadas
-una por una; y ningún `DELETE` físico en el alcance.
-
-**Tres hallazgos se cerraron en la misma pasada** (los dos de severidad alta y el que sumó
-el refutador), y el 2026-08-06 se cerró además el **fin de turno con mesas abiertas**, la
-única decisión de owner que había quedado tomada sin construir: ver
-[`resueltos.md`](resueltos.md).
-
-### El hilo que venía abierto: cerrado con matiz
-
-La pasada de `caja`+`propinas` (2026-07-27) dejó anotado que `tipo_garzon` se congela al
-abrir la sesión mientras `garzones.tipo` es editable. **Confirmado el congelado**
-(`sesiones-garzon.service.ts:87`, y ni `cerrarPorPin` ni `cerrarAdmin` lo vuelven a tocar)
-**y confirmado que `tipo` es editable sin gate** (`garzones.service.ts` → `actualizar()`;
-la cita por número de línea se sacó porque el propio cierre las corrió). Pero el
-impacto ya está contenido río abajo: `assertGarzonEnUnSoloGrupo` bloquea la liquidación con
-un 400 accionable si una persona generó tips con dos `tipo_garzon` distintos en el período.
-**La plata está a salvo.** El aviso en el momento de editar —lo único que faltaba— se cerró
-el **2026-08-07**: el owner eligió advertir en vez de bloquear, y la advertencia nombra
-además el bloqueo de liquidación que el cambio puede programar. Ver
-[`resueltos.md`](resueltos.md) § "Ronda de decisiones del owner (2026-08-07)". **Este hilo
-queda cerrado.**
-
-### Media
-
-
-### Huecos de test (medidos, con el mutante que sobrevive)
-
-Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela; el
-de `fusionarCuentas` el 2026-08-09 con `test/salones-fusion.e2e-spec.ts` —que además fue el
-primer e2e de esa ruta—; y el del computed `cuentaConItemEliminado` el mismo día, con dos
-tests en `pages/salones/index.nuxt.spec.ts` (los tres en [`resueltos.md`](resueltos.md)).
-Quedan:
-
-### Lo que dejaron las revisiones independientes del cierre
-
-- [ ] **`addMember` devuelve roles viejos en silencio, y la asimetría con el alta es
-  deliberada** (backend, `tenants.service.ts` → `addMember`) — `removeMember` da de baja la
-  membresía pero **deja vivas** las filas de `roles_usuarios`, así que sacar a alguien para
-  revocarle el acceso y volver a sumarlo desde la tabla le devuelve sus permisos previos,
-  `Administrador` incluido. **`POST /tenants/usuarios` ya no hace esto**: ahí el admin
-  declara un conjunto de roles y lo que no viene se da de baja. En `addMember` no hay roles
-  en el body, así que no hay conjunto declarado y "restaurar lo que había" es una lectura
-  defendible — por eso se dejó como está y no se unificó. Se anota para que quien toque
-  `addMember` mañana sepa que la diferencia es una decisión y no un olvido; si algún día
-  recibe roles, tiene que dar de baja los que no vengan igual que el alta.
-
-- [ ] **Un correo de usuario soft-borrado hace explotar el alta con un 500** (backend,
-  `tenants.service.ts` → `crearUsuario`) — medido por la revisión del 2026-08-08 contra la
-  base viva: la búsqueda de `usuarioPrevio` corre con el filtro de soft delete, pero la
-  unique de `usuarios.correo` **no es parcial**, así que el `INSERT` choca y sale un
-  `500 Internal server error` en vez de un 409 o un 400 accionable. **Hoy es inalcanzable**:
-  nada en `backend/src` soft-borra un `Usuario` (`removeMember` solo da de baja la
-  membresía). Se anota y no se arregla porque el fix depende de una decisión que no está
-  tomada — si algún día se pueden dar de baja usuarios, ¿el alta los revive, los rechaza, o
-  el correo queda quemado?
-  **Decisión del owner (2026-08-11): el alta REVIVE la cuenta, avisando.** La persona
-  vuelve con su historial —sus ventas, turnos y propinas siguen siendo suyas— y el alta
-  responde que está reactivando una cuenta, no creando una.
-  ⚠️ **Revivir la cuenta no es revivir los permisos.** El alta tiene que declarar los
-  roles de nuevo, igual que hace hoy `POST /tenants/usuarios`; heredar en silencio los
-  viejos es exactamente el agujero que la entrada de `addMember` de acá arriba describe.
-  Sigue sin implementarse por lo mismo de antes: **nada soft-borra un `Usuario`**, así que
-  el escenario es inalcanzable. Lo que la decisión fija es la forma del fix el día que
-  exista la baja — y que la unique de `usuarios.correo` va a tener que ser parcial.
-
-- [ ] **Verificación de correo del auto-registro público** (backend) — lo único que
-  quedó abierto de la entrada de mail, que se cerró el 2026-08-09 (ver
-  `resueltos.md`). La invitación resuelve la verificación **del invitado**: si hizo
-  clic en el link, la dirección existe y alguien la lee. Falta el otro camino:
-  `POST /auth/register` sigue creando cuentas con un correo que nadie probó.
-
-- [ ] **Modo personal: el garzón con su propia tablet no debería teclear el PIN** (backend +
-  frontend) — **Fase 2 del plan `2026-08-08-elegir-garzon-antes-del-pin.md`, diseñada y
-  diferida el 2026-08-08.** El vínculo opcional `garzones.usuario_id` + `usuarios_tenants.
-  es_totem` como marcador **explícito** del modo (no inferido: una cuenta marcada como tótem
-  no puede volverse personal aunque alguien la vincule por error). Todo el diseño está en el
-  plan, incluidas las cuatro preguntas ya resueltas.
-  ⚠️ **DESBLOQUEADA el 2026-08-08.** Estaba frenada porque el alta de usuarios del tenant no
-  existía —`POST /tenants/members` recibía un `usuarioId` ya existente y el único camino a
-  una cuenta era el registro público—, así que habilitar un garzón personal costaba 4 pasos
-  en 3 pantallas. Ahora `POST /tenants/usuarios` lo hace en uno
-  (`docs/features/roles-permisos.md`). Lo que queda de esta entrada es el vínculo
-  `garzones.usuario_id` + `usuarios_tenants.es_totem` y la resolución del garzón actuante,
-  todo diseñado en el plan.
-
-- [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
-  el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
-  `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos
-  commitean. Ya no es catastrófico (la línea se muestra marcada, el cobro corta con un 400
-  que la nombra y la comanda la incluye), pero el estado se sigue produciendo hacia
-  adelante, no solo en datos viejos.
-
-### Decisión de owner (pendiente de implementar)
-
 - [ ] **Anular o reducir una línea ya enviada a cocina** (backend + frontend) — **decidido
   el 2026-08-06: al backlog.** Lo medido, sin interpretar: `quitarLinea` hace `softDelete`
   sin mirar `cantidadEnviada`, y `actualizarLinea` reemplaza la cantidad por un valor
@@ -1020,6 +521,7 @@ Quedan:
   (merma o cortesía), no un borrado silencioso — ese camino es lo que falta diseñar, y ahí
   sí entra la investigación de mercado. **No es simétrico con las advertencias de
   `garzones`**: allá el costo era un aviso tardío, acá es plata que sale sin rastro.
+
 - [ ] **El layout de mesas no valida solapamiento** (backend,
   `salones/dto/update-layout.dto.ts`) — dos mesas del mismo salón pueden guardarse en la
   misma posición. No corrompe datos ni bloquea nada: cada mesa sigue siendo direccionable
@@ -1042,78 +544,247 @@ Quedan:
   también en fracciones del plano— se evaluó y se descartó por costo (toca esquema, render y
   editor).
 
-### Refutados (no entran al backlog, se anotan para no redescubrirlos)
+- [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
+  ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el conteo (la
+  revelación es inmediata, vía el detalle), aunque la caja quede `en_conciliacion`. El
+  sub-proyecto C resolvió la conciliación operador→supervisor de §6, pero no
+  condicionó la revelación a que solo el supervisor la vea de inmediato — sigue diferido.
+  ✅ **Decidido por el owner (2026-08-11): la diferencia la ve solo el supervisor.**
+  ⚠️ **No alcanza con tocar el detalle del arqueo.** El ocultamiento de hoy es **parcial**:
+  el **panel de resumen del turno sigue mostrando lo esperado**, así que un cajero que abra
+  esa pantalla deshace la decisión por otra puerta. Las dos superficies se cierran juntas o
+  la decisión no existe.
+  ⚠️ Costo aceptado explícitamente: un error de conteo de buena fe ya no se corrige en el
+  momento — hay que volver a llamar a la persona.
 
-- **Fuerza bruta del PIN de garzón** — refutada por aritmética medida, no por un guard: 14
-  días de CPU saturada para agotar el espacio. Lo que sobrevive es la amplificación de
-  carga, que es otro bug y está arriba.
-- **Deadlock en `fusionarCuentas`** — refutado: un solo `SELECT … FOR UPDATE` lockea en
-  orden de plan, igual para las dos transacciones. Queda como "seguro gratis" en Baja.
-- **Colisión de PIN al restaurar de la papelera** — hallazgo propio del refutador que
-  resultó **ya documentado** como riesgo aceptado en [`resueltos.md`](resueltos.md), con
-  la misma cifra de 1 en 10⁶ y la misma razón para no arreglarlo (`restaurar()` no puede
-  comparar un bcrypt sin el valor en claro). La carrera TOCTOU de dos altas concurrentes
-  que reportó una lente es la misma puerta con otra llave, y es aún menos probable.
-- **Transferir una cuenta a otra mesa** — el brief le pidió a una lente probar esa
-  transición; no existe. `transferir*` solo reasigna el garzón responsable, y mover cuentas
-  entre mesas está explícitamente fuera de alcance en `docs/features/salones-mesas.md`.
-  La lente lo reportó como corrección del brief en vez de forzar un hallazgo.
+- [ ] **Verificación de correo del auto-registro público** (backend) — lo único que
+  quedó abierto de la entrada de mail, que se cerró el 2026-08-09 (ver
+  `resueltos.md`). La invitación resuelve la verificación **del invitado**: si hizo
+  clic en el link, la dirección existe y alguien la lee. Falta el otro camino:
+  `POST /auth/register` sigue creando cuentas con un correo que nadie probó.
+
+- [ ] **Un correo de usuario soft-borrado hace explotar el alta con un 500** (backend,
+  `tenants.service.ts` → `crearUsuario`) — medido por la revisión del 2026-08-08 contra la
+  base viva: la búsqueda de `usuarioPrevio` corre con el filtro de soft delete, pero la
+  unique de `usuarios.correo` **no es parcial**, así que el `INSERT` choca y sale un
+  `500 Internal server error` en vez de un 409 o un 400 accionable. **Hoy es inalcanzable**:
+  nada en `backend/src` soft-borra un `Usuario` (`removeMember` solo da de baja la
+  membresía). Se anota y no se arregla porque el fix depende de una decisión que no está
+  tomada — si algún día se pueden dar de baja usuarios, ¿el alta los revive, los rechaza, o
+  el correo queda quemado?
+  **Decisión del owner (2026-08-11): el alta REVIVE la cuenta, avisando.** La persona
+  vuelve con su historial —sus ventas, turnos y propinas siguen siendo suyas— y el alta
+  responde que está reactivando una cuenta, no creando una.
+  ⚠️ **Revivir la cuenta no es revivir los permisos.** El alta tiene que declarar los
+  roles de nuevo, igual que hace hoy `POST /tenants/usuarios`; heredar en silencio los
+  viejos es exactamente el agujero que la entrada de `addMember` de acá arriba describe.
+  Sigue sin implementarse por lo mismo de antes: **nada soft-borra un `Usuario`**, así que
+  el escenario es inalcanzable. Lo que la decisión fija es la forma del fix el día que
+  exista la baja — y que la unique de `usuarios.correo` va a tener que ser parcial.
 
 ---
 
-## Revisión final `borrado-ingrediente-extra` (2026-07-28)
+## 4. Necesita que el owner conteste
 
-Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` +
-`remove()`. Ninguno bloqueaba el cierre; se difieren por alcance acotado a esa oleada.
+Cada una lleva su pregunta concreta adentro. Mientras no se conteste **no se empiezan**:
+elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
+prohíbe.
 
-- [ ] **Carrera teórica entre `PATCH /items/:id` y `DELETE`** (backend,
-  `items.service.ts`) — bajo READ COMMITTED, un `DELETE` que commitea entre la
-  validación de un ingrediente en `PATCH` (edición de receta) y el `INSERT` de su
-  fila de `receta_extras_permitidos` deja una fila viva apuntando a un item ya
-  muerto. Ventana de milisegundos entre dos escrituras de admin; es la misma clase de
-  carrera que ya tienen los tres bloqueos preexistentes (ingrediente, combo, opción).
+- [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
+  puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
+  `pin-propio-garzon`**) — `garzones.service.ts` advierte, en tres sitios (`crear()` línea
+  232, `actualizar()` líneas 341 y 396), cuando la cuenta vinculada todavía no puede operar
+  el salón. El texto es idéntico en dos de los tres (`crear()` línea 232 y `actualizar()`
+  línea 341): *"...no va a poder entrar en modo personal (sin PIN, desde su propia cuenta)
+  hasta que se lo des"*. El tercero (`actualizar()` línea 396, la rama con sesión abierta) dice
+  lo mismo sin el paréntesis: *"...no va a poder entrar en modo personal hasta que se lo des,
+  pero puede seguir operando desde el tótem si fija un PIN propio nuevo"*. Pero otorgar
+  `Salones:Operar` significa editar un rol (`PATCH /roles/:id`), y esa ruta exige
+  `TenantAdminGuard` (`roles.controller.ts:49-50`). Un encargado sin rol admin —alguien con
+  `Salones:Actualizar` pero sin permisos de `Roles`, que es exactamente a quién se le muestra
+  este aviso al dar de alta o vincular un garzón— lee una instrucción que no está en su mano
+  ejecutar, en los tres sitios. El texto necesita, o bien decir "pedile al admin que se lo dé",
+  o el flujo de otorgar el permiso necesita abrirse a un rol no-admin con `Salones:Actualizar`.
 
-## Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
+- [ ] 🚩 **El alta de una suscripción muestra un precio y cobra otro** (frontend + producto,
+  **medido** 2026-08-11 al cerrar el descarte de advertencias) — el drawer "Nueva
+  suscripción" (`tienda/suscripciones.vue`) rotula **"Precio del período"** con
+  `item.precioBase`, que es el precio **neto** del catálogo. El backend, en cambio, le
+  autoriza a la tarjeta `resultado.totales.totalFinal`, que sale del motor con impuestos,
+  descuentos y recargos aplicados.
+  **La medición, contra el stack real (tenant Paris, ítem de suscripción a $30.000):** el
+  drawer dice `30000` y a Transbank se le cobran **`35700`** — los $5.700 son el IVA al 19%
+  (`550e8400-…-440280`). El cliente confirma un número y se le cobra otro un 19% mayor, sin
+  ningún paso intermedio que se lo muestre.
+  Ojo con reproducirlo: **el seed no trae ningún ítem `tipo='suscripcion'`**, así que la
+  pantalla se ve vacía a menos que se cree uno (así se midió esto).
+  Por qué no se arregló junto con las advertencias: ahí lo que faltaba era devolver un campo;
+  esto es una **previsualización de precio antes de cobrar** —qué se muestra, si frena el
+  alta, si reusa `AdvertenciasPrecio` como ya hacen el carrito y la pasarela— y eso es
+  decisión de producto, no una corrección. Las advertencias que ahora sí llegan
+  (`POST /suscripciones` → `advertencias`) explican el monto **después** del cobro; no lo
+  reemplazan.
 
-El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado
-(**"Cajas"**). Se decidió que **"Cajas" arranca solo-lectura**; los poderes de escritura del
-encargado se difieren a propósito para no acoplar el refactor de IA/permisos a un cambio de
-modelo con implicancias de auditoría. Investigación y cruce de mercado:
-[`investigaciones/2026-07-23-gestion-caja.md §6`](investigaciones/2026-07-23-gestion-caja.md).
-El refactor de IA/permisos y los sub-proyectos A (arqueo multi-medio), B (cierre ciego) y
-C (cierre en dos fases) **ya se entregaron** — ver [`resueltos.md`](resueltos.md). Lo que
-sigue son los poderes del encargado que se difirieron a propósito:
+- [ ] **Una nota de crédito no descompone su monto: registra `total_impuestos = 0`**
+  (backend, medido 2026-08-02 leyendo `ventas.service.ts:854` `crearNotaCredito`) —
+  **⛔ Toca materia fiscal: no avanzar sin decisión del owner** (`CLAUDE.md` → detenerse
+  ante impuestos y documentos tributarios; ver **ADR-010**).
+  **Lo medido, sin interpretar:** la NC construye su fila de `ventas` **directo**, no por
+  `crearEnTransaccion`, y hardcodea `totalDescuentos: '0'`, `totalRecargos: '0'` y
+  `totalImpuestos: '0'`, con `totalBruto = totalFinal = params.monto`. Consecuencias
+  encadenadas: (a) cero filas en `ventas_descuentos`/`ventas_recargos`/`ventas_impuestos`,
+  así que la NC no dice qué reglas revierte —se llega por la venta que referencia—;
+  (b) `config_calculo` queda `null` en toda NC; (c) `base_ventas_sin_impuestos` se queda en
+  el default de la columna, y ese campo lo consume `liquidacion-propinas.service.ts`.
+  Los dos puntos de entrada (`crearNotaCreditoDesdeVenta`) desembocan en el mismo método.
+  Lo que la NC **sí** congela es `descripcion` y `clasificacion_tributaria` por línea en
+  `venta_detalles`, copiadas de la línea original.
+  **La pregunta para el owner, que NO me corresponde responder:** una NC sobre una venta con
+  IVA 19%, ¿tiene que declarar su propio IVA? Un DTE 61 lleva `MntNeto`/`IVA`/`MntTotal`
+  propios, y ADR-010 dice congelar el **hecho fiscal** en la transacción y diferir solo lo
+  que transmite o formatea — el corte neto/impuesto de una NC parece hecho fiscal, no
+  formato. Si lo es, hoy falta y no es solo un tema de auditoría.
+  **Contraargumento honesto a considerar:** la NC se emite **por monto** (`params.monto`,
+  con devoluciones de línea opcionales y sueltas del monto), así que "descomponer" exige
+  primero definir contra qué —¿prorrateo sobre el total original? ¿solo sobre las líneas
+  devueltas?—, y eso es regla de negocio, no implementación.
 
-- [ ] 🇨🇱 **Validar con un abogado el ángulo legal chileno del testigo** — quedó huérfano al
-  cerrar la entrada del cierre forzado (2026-08-13): la fuente es doctrina de la DT **leída
-  por un agente**, no asesoría legal, y de ella salieron dos afirmaciones que el producto usa
-  como justificación: (a) que la responsabilidad del cajero exige acceso exclusivo **y**
-  oportunidad de estar presente en el conteo, así que contar sin él cae la imputación; (b)
-  que sin asignación de pérdida de caja pactada **no se puede descontar** un faltante del
-  sueldo (ORD. N°4229). `docs/DIFERENCIADORES.md` lo marca "sin validar por un abogado" y
-  **no se puede comunicar el ángulo legal hasta que lo esté** — esta entrada existe para que
-  esa validación tenga quién la reclame, ahora que la entrada que la contenía se archivó.
-- [ ] **La spec del testigo promete un conteo a ciegas sin excepciones, y el producto tiene una**
-  — cola de la entrada cerrada por la task 6b (ver `resueltos.md`). El admin del tenant sigue
-  exento del ciego incluso forzando el cierre de una caja ajena (decisión explícita del owner
-  2026-08-13), pero
-  [`2026-08-11-testigo-cierre-forzado-design.md`](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md)
-  sigue diciendo *"cuenta a ciegas: sin ver lo esperado"* a secas. Es un ajuste de texto, no de
-  código: la spec tiene que decir *"salvo el admin del tenant, que nunca es el objetivo del
-  anti-fraude"*. Se abre como entrada propia porque la entrada que lo detectó se cerró y el
-  arreglo quedaba huérfano.
-- [ ] **`Cajas:Actualizar` es un permiso grueso para lo que ahora habilita** — lo levantó la
-  revisión independiente de la task 6b (2026-08-13). El mismo permiso gobierna el **CRUD de
-  cajones** (`cajones.controller.ts`), **pedir la firma** y, desde la 6b, **forzar el cierre de
-  la caja de otro cajero**. O sea: a alguien a quien se le dio el permiso para renombrar un
-  cajón, se le dio también congelar el arqueo ajeno. El owner eligió a conciencia el permiso
-  existente por sobre uno nuevo (menos permisos que configurar), así que **esto no es un bug**:
-  queda anotado para cuando el catálogo de permisos se revise en conjunto, no como pendiente
-  suelto de caja.
-  ⚠️ Efecto colateral medido y sin documentar: al sacar `@RequiresPermiso` de las dos rutas de
-  escritura, el chequeo pasó a correr **después** de los pipes. Un usuario sin ningún permiso y
-  con body inválido recibía 403 y ahora recibe **400**. No filtra nada (el DTO está en Swagger),
-  pero es un cambio de contrato.
+- [ ] **Una venta online 100% descontada no tiene ningún camino a venta** (backend +
+  frontend, encontrado en el smoke del 2026-08-02) — con el carrito de la tienda en
+  total `$0` el cobro se cae por los **dos** caminos, no solo por Webpay: la rama webpay
+  corta en `pagos-redirect.service.ts:86` ("El monto debe ser mayor a cero"), y el flujo
+  simulado tampoco puede porque `pasarela.vue:68` manda siempre
+  `monto: totales.totalFinal` y `PagoVentaDto.monto` lleva `@IsDecimalPositivo()`
+  (`create-venta.dto.ts:73-76`), así que `POST /ventas` lo rechaza más tarde.
+  ⚠️ **No hay asimetría con el POS** — la primera redacción de esta entrada decía que el
+  POS sí cerraba estas ventas "porque omite la línea de pago", y es falso:
+  `CobroModal.vue:99-101` exige `pagosValidos.length > 0` y el botón queda `:disabled`
+  (`:189`), así que con total `0` el POS tampoco confirma. El comentario de
+  `create-venta.dto.ts:73` ("el POS ya los omite al confirmar") habla de descartar las
+  líneas en `$0` dentro de un pago **dividido** que sí tiene alguna con monto
+  (`CobroModal.vue:95-97`), no de confirmar sin ninguna. **No hay un comportamiento del POS
+  que copiar.**
+  **Lo que la restricción realmente es:** de **UI en los dos lados**. La API sí acepta una
+  venta sin pagos —`CreateVentaDto.pagos` es `@IsOptional()` (`create-venta.dto.ts:130-134`),
+  por eso existen las ventas `pendiente`—, pero `ventas.service.ts:676` solo llama a
+  `calcularEstadoVenta` `if (saved.pagos.length > 0)`, así que una venta de `$0` sin pagos
+  quedaría **`pendiente` con saldo `$0`**, arrastrándose en los listados de deuda. O sea que
+  "crearla sin pago" tampoco es un modelo limpio: es una segunda decisión.
+  **La pregunta para el owner:** ¿una venta de total `$0` es una venta **pagada**, una venta
+  **pendiente**, o algo que se prohíbe antes de llegar al cobro? Es un caso real de
+  promociones, no un borde teórico. Relacionado con la entrada de `precioUnitario` de abajo:
+  es la misma pregunta de si el `0` es un monto válido, en otra capa.
+
+- [ ] **`/tienda/pasarela` es inalcanzable en el tenant principal del seed** (frontend,
+  medido 2026-08-02) — la pantalla solo existe en el fallback **simulado**: si el tenant
+  tiene Webpay Plus activa, `pagar()` toma la rama webpay y la SPA sale por redirect a
+  Transbank. El seed activa Webpay Plus **solo en `Demo Restaurante`**
+  (`seeder.service.ts:1742-1762`), que es donde entra todo el mundo; `Demo Bodega` no tiene
+  fila en `tenant_pasarela`, así que **según el seed** cae al flujo simulado y alcanzaría la
+  pantalla — derivado del código, no observado en una corrida, y sin verificar que ese tenant
+  tenga catálogo `tipo=producto` ni el módulo de tienda contratado. Consecuencia práctica: **nada
+  automático abre este archivo** —no tiene spec, y el e2e de layout no lo alcanza porque
+  la guarda de `checkoutRef` (`pasarela.vue:34`) lo hace inaccesible por `goto` pelado—,
+  así que el próximo que quiera verlo va a perder tiempo antes de descubrir que hay que
+  desactivar la pasarela o cambiar de tenant. Decidir si se cubre con e2e (sembrando el
+  `checkoutRef`) o si se documenta como pantalla de fallback y se deja sin cobertura.
+  ⚠️ **La pregunta de cobertura es la menor. Medido el 2026-08-11, mirando el código:**
+  1. **El tenant no elige nada.** `online.service.ts` → `pagar()` decide por **ausencia**:
+     `if (!tieneWebpay) return { modo: 'simulado' }`, con el comentario *"Fallback: sin
+     Webpay Plus activo, mantener la pasarela simulada actual"*. No hay configuración de
+     medios de pago online; hay una pasarela real y lo que sobra cuando falta.
+  2. **La pantalla simulada registra la venta como PAGADA sin que nadie cobre.**
+     `pasarela.vue` → `aprobar()` postea `POST /ventas` con `pagos: [...]` por el
+     `totalFinal`, y elige el método con `metodoTarjeta()`: busca uno cuyo nombre
+     contenga "crédito"/"credito" y **si no encuentra agarra `metodos[0]`**. Cualquier
+     tenant que entre sin pasarela conectada tiene una tienda online que entrega
+     mercadería y la anota cobrada. El estado `pendiente` —que el modelo ya soporta— es
+     donde debería quedar.
+  **Owner (2026-08-11): la salteó, con la función que quiere ya nombrada** — que el
+  tenant **configure** qué acepta online (tarjeta por pasarela, transferencia, pago al
+  retirar…), en vez de heredar el simulado por descarte. Eso es feature con spec propia:
+  toca configuración, tienda, registro de la venta y estado resultante. El punto 2 es un
+  defecto que existe igual, se configure o no.
+
+- [ ] **El override de precio de línea se filtra con un truthy sobre un string, y hay dos
+  criterios distintos para "esta personalización cambia el precio"** (frontend, medido
+  2026-08-11 al cerrar la entrada de `precioUnitario`) — `useVenta.ts:146` y `:197` deciden
+  si guardan y si mandan `precioUnitarioOverride` con `if (precioOverride)`. Es un
+  **string**, así que `'0'` es truthy y el cero viaja igual: el filtro no filtra lo único
+  que podría querer filtrar. Hoy no rompe nada —`calcular` acepta el 0 a propósito, ver
+  `calcular.dto.ts`— pero es la clase de chequeo que se cae sola cuando alguien endurece
+  el DTO, que es exactamente lo que casi pasa.
+  Al lado: **el POS y salones no coinciden en cuándo hay recargo.** `personalizacionVacia`
+  (`useRecetaPersonalizacion.ts:154`) es falso con solo `omitidos` —un "sin cebolla" ya
+  cuenta—, mientras que `tienePersonalizacionConRecargo` (`useSalones.ts:182`) exige
+  `extras`/`grupos`/`componentes` e ignora `omitidos`. Los dos alimentan el mismo
+  endpoint con el mismo campo. Ninguno de los dos es obviamente el correcto, y esa es la
+  entrada: decidir cuál es el criterio y dejar uno solo.
+
+- [ ] **Tres filtros de rango por fecha pura quedaron dependiendo del `TimeZone` de sesión**
+  (backend, 2026-08-06) — efecto lateral medido de [ADR-019](../adr/019-timestamptz-en-toda-columna-de-fecha.md).
+  `mermas.service.ts:268,272`, `inventario.service.ts:788,792` y
+  `pasarela/services/cobros.service.ts:593,597` (este último sobre `pasarela_ordenes`, alias `o`) filtran `creado_el >= $N` / `<= $N` con
+  valores que vienen de DTOs validados con `@IsDateString()`, **que acepta una fecha pura**
+  (`2026-08-01`) además de un timestamp completo. Con la columna sin zona, Postgres tomaba
+  los dígitos literales; con `timestamptz` interpreta esa fecha en el `TimeZone` de la
+  sesión antes de convertir. Hoy no cambia nada —`SHOW TimeZone` da `UTC`, medido— pero es
+  una dependencia que antes no existía, y el default del server no lo fija nadie
+  explícitamente (ni el compose ni la config del pool).
+  **Cierre posible:** el patrón ya resuelto está en `propina-reportes.service.ts:264-266`,
+  que castea explícito con la zona del tenant (`$2::date::timestamp AT TIME ZONE $4`). Son
+  tres servicios copiando ese molde. **No entró en ADR-019** porque cambiar la semántica de
+  un filtro de reportes es una decisión de producto (¿el "desde" es medianoche UTC o
+  medianoche del local?), no una migración de tipos.
+  ⛔ **Corrección al "cierre posible" (2026-08-11): ese molde NO es copiable tal cual, y
+  copiarlo introduce un bug peor que el que arregla.** Medido en Postgres:
+  `'2026-08-01T15:30:00Z'::date` devuelve `2026-08-01` — **el `::date` descarta la hora en
+  silencio**. El molde funciona en `propina-reportes` porque ahí el rango llega ya
+  normalizado a fechas puras (`RangoReporteNormalizado`); estos tres DTOs validan con
+  `@IsDateString()`, que **acepta las dos formas**, así que un llamador que hoy manda
+  `?desde=2026-08-01T15:30:00Z` pasaría a filtrar desde la medianoche de ese día. Un
+  filtro que se ensancha sin avisar es peor que uno con la zona ambigua.
+  Lo que el cierre necesita entonces, además del cast: decidir si estos endpoints aceptan
+  timestamp o solo fecha pura, y si aceptan las dos, normalizar en el service —expandir la
+  fecha pura a medianoche del tenant y dejar pasar el timestamp tal cual— en vez de castear
+  en el SQL. Eso ya no son "tres servicios copiando un molde".
+  (Verificado también el lado bueno del molde: `'2026-08-01'::date::timestamp AT TIME ZONE
+  'America/Santiago'` da `2026-08-01 04:00:00+00`, que es la medianoche local correcta.)
+
+- [ ] **De `configCalculo` faltan `escalaCalculo` y `modoRedondeo`** (frontend, 2026-08-02)
+  — el desglose por línea ya usa `formula` para ordenarse y muestra el orden **con el modo
+  de cada familia** (`Descuento (base) → Recargo (cascada) → Impuesto`), que es lo que
+  explicaba los montos. Quedan los dos campos de redondeo, que solo importan cuando un
+  centavo no cuadra: son los que explican una diferencia de $1 entre lo que el lector calcula
+  a mano y lo que muestra la fila. Cierre posible: una línea plegable en la tarjeta de
+  Totales. **Prioridad baja** — no hay un caso reportado de descuadre.
+  ⚠️ Va con una decisión de permisos: hoy el desglose lo ve **cualquiera con `Ventas:Leer`**
+  (`ventas.controller.ts:89`), que es el mismo permiso del resto del drawer. Si la config del
+  tenant se considera información de administración, hay que separar el guard.
+
+- [ ] **El modal de pausa cuenta asociaciones por ítem, y una regla usada solo a nivel venta
+  no tiene ninguna** (frontend + backend, medido 2026-08-03 en la revisión de cierre) —
+  `GET /:id/uso` cuenta filas de `item_descuentos`, pero las reglas que se aplican por
+  `descuentosVentaIds` / `recargosVentaIds` **no tienen tabla puente** (no hay columna `nivel`
+  en `descuentos`/`recargos`), así que devuelven `items: []` y la pantalla las pausa directo,
+  sin confirmación. El texto "Deja de aplicarse en N ítems" también queda incompleto ahí.
+  Hoy es teórico —ninguna pantalla manda esos campos, medido el 2026-08-03—, pero deja de
+  serlo en cuanto exista un productor.
+  Decisión del owner pendiente: si el modelo necesita distinguir el **nivel** de una regla
+  (línea vs venta), que hoy no distingue.
+
+- [ ] **`buscarTipsPorFuentes` no filtra la venta anulada** (backend,
+  `propinas/liquidacion-propinas.service.ts` → `buscarTipsPorFuentes`) — es la copia hermana de
+  `buscarTipsElegibles` que usa `actualizarConfig` para recalcular pesos sobre las fuentes
+  ya fijadas de un borrador. Si la venta se anula **con el borrador abierto**, un
+  `actualizarConfig` posterior sigue usando sus datos para el peso (`VENTAS_NETAS`,
+  `CANTIDAD_CUENTAS`). Lo encontró la revisión independiente del 2026-07-27.
+  ⛔ **No es copiar la línea del hermano.** El `poolTotal` se congela al crear el borrador e
+  **incluye** esa propina: filtrar solo acá le saca el peso al garzón pero deja su plata en
+  el pool, o sea la redistribuye entre los demás. Decidir eso es la misma pregunta de
+  reconciliación del ítem de abajo (¿la plata de una venta anulada sale del pool, se
+  redistribuye, o queda como saldo?), así que va con esa spec y no antes.
+
 - [ ] **Aprobación de cierre por umbral de diferencia** (backend + config) — patrón Toast:
   si el over/short del cierre supera un umbral configurable, el cierre del cajero requiere
   aprobación del encargado. Agrega config de umbral por tenant + flujo de aprobación. Más
@@ -1132,18 +803,7 @@ sigue son los poderes del encargado que se difirieron a propósito:
   bancario no es binario — bajo el umbral se ajusta sin avisar; **sobre** el umbral, dos
   personas reverifican **y se le avisa al dueño de la plata**. Ese aviso al cajero no estaba
   en la decisión del umbral y encaja con que la diferencia sea un incidente, no su faltante.
-- [ ] **Ocultar el resultado post-cierre al cajero** (backend + frontend) — en el cierre
-  ciego (sub-proyecto B) el cajero **sí** ve su propia diferencia al enviar el conteo (la
-  revelación es inmediata, vía el detalle), aunque la caja quede `en_conciliacion`. El
-  sub-proyecto C resolvió la conciliación operador→supervisor de §6, pero no
-  condicionó la revelación a que solo el supervisor la vea de inmediato — sigue diferido.
-  ✅ **Decidido por el owner (2026-08-11): la diferencia la ve solo el supervisor.**
-  ⚠️ **No alcanza con tocar el detalle del arqueo.** El ocultamiento de hoy es **parcial**:
-  el **panel de resumen del turno sigue mostrando lo esperado**, así que un cajero que abra
-  esa pantalla deshace la decisión por otra puerta. Las dos superficies se cierran juntas o
-  la decisión no existe.
-  ⚠️ Costo aceptado explícitamente: un error de conteo de buena fe ya no se corrige en el
-  momento — hay que volver a llamar a la persona.
+
 - [ ] **Conteo por denominación** (§5/§8.3 de la investigación) — los motivos categorizados
   de diferencia de §5 quedaron **resueltos** por el sub-proyecto C; lo que sigue
   pendiente de §5 es exclusivamente el conteo por denominación de billetes/monedas, sin
@@ -1157,6 +817,171 @@ sigue son los poderes del encargado que se difirieron a propósito:
   nueva) o si solo asiste la suma en pantalla y se guarda el total — no es lo mismo para
   auditoría, y la decisión de arriba (revelación solo al supervisor) sugiere que el
   desglose es evidencia, no una calculadora.
+
+- [ ] **El hook de pre-commit valida enlaces de markdown pero no que una tabla siga siendo
+  tabla** (tooling, **medido 2026-08-15, pasó de verdad en esta entrega**) —
+  `.githooks/pre-commit` (Guard 5) corre `check-docs-links.mjs` sobre `.md` staged, pero no hay
+  ningún guard que valide la sintaxis de una tabla GFM. Insertar un párrafo entre dos filas de
+  una tabla markdown (falta una línea en blanco antes/después, o el párrafo no empieza con `|`)
+  hace que **todo lo que sigue** deje de renderizarse como tabla — visualmente desaparece — y ni
+  el hook ni el CI lo detectan, porque ninguno de los dos parsea markdown como markdown, solo
+  greppean texto y valida links. No hay un fix mecánico obvio (un linter de markdown-tables es
+  una dependencia nueva, a evaluar), pero vale la entrada para no repetir el mismo susto.
+
+---
+
+## 5. Carreras de concurrencia — tres del mismo molde
+
+Las tres son la misma forma, y las tres entradas ya lo dicen por su cuenta: un `SELECT` de
+validación que **no toma lock**, y otra transacción que escribe entre el chequeo y el
+commit. Van juntas porque el arreglo pide **un solo análisis de orden de locks** —qué fila
+se bloquea y en qué orden en cada camino que crea una referencia—, no tres parches.
+
+- [ ] **`remove()` valida el uso del ítem con una lectura sin lock** (backend,
+  `items.service.ts`, `remove()`) — última de las "tres carreras del mismo molde"; las otras
+  dos se cerraron el 2026-07-30 ([`resueltos.md`](resueltos.md)).
+  ⚠️ **La entrada original decía que `remove()` "no es transaccional" y eso era falso**: abre
+  `this.dataSource.transaction()` y `obtenerUsoItem` corre adentro. Lo que sí es cierto es
+  otra cosa: ese `SELECT` **no toma lock**, así que entre el chequeo y el commit otra
+  transacción puede insertar una fila que referencie al ítem. Es un phantom, no falta de
+  atomicidad — y por eso el arreglo no es "envolver en transacción".
+  Consecuencia real: el ítem queda borrado blando y con una `receta_ingredientes` viva
+  apuntándolo. Como las lecturas filtran por el JOIN a `items`, el ingrediente **desaparece
+  en silencio de la receta** y su costo cambia sin que nadie lo pida.
+  Por qué no se cerró junto con las otras dos: no hay una fila única que bloquear —el guard
+  lee cuatro tablas hijas—. El arreglo es bloquear la fila de `items` referenciada, y hacerlo
+  **en `remove()` y en cada camino que crea una referencia** (asociar ingrediente, componente
+  de combo, opción de grupo, extra permitido). Eso es varios sitios de escritura y su propio
+  análisis de orden de locks: es una tarea, no un `FOR UPDATE` más.
+
+- [ ] **La carrera entre borrar un ítem y agregarlo a una cuenta sigue viva** (backend) —
+  el bloqueo nuevo de `obtenerUsoItem` lee `cuenta_lineas` **sin lock** mientras
+  `agregarLinea` resuelve el ítem en otra transacción, así que bajo READ COMMITTED las dos
+  commitean. Ya no es catastrófico (la línea se muestra marcada, el cobro corta con un 400
+  que la nombra y la comanda la incluye), pero el estado se sigue produciendo hacia
+  adelante, no solo en datos viejos.
+
+- [ ] **Carrera teórica entre `PATCH /items/:id` y `DELETE`** (backend,
+  `items.service.ts`) — bajo READ COMMITTED, un `DELETE` que commitea entre la
+  validación de un ingrediente en `PATCH` (edición de receta) y el `INSERT` de su
+  fila de `receta_extras_permitidos` deja una fila viva apuntando a un item ya
+  muerto. Ventana de milisegundos entre dos escrituras de admin; es la misma clase de
+  carrera que ya tienen los tres bloqueos preexistentes (ingrediente, combo, opción).
+
+---
+
+## 6. Proyectos que van solos
+
+No entran de arrastre dentro de otra tarea: o son un barrido masivo, o necesitan spec
+propia antes de escribir código. Encararlas es brainstorm → spec → plan, nunca "un rato".
+
+Las cuatro últimas **no son correcciones ni deuda**: son funcionalidad que todavía no
+existe. Se listan acá, y no en la 4, porque la pregunta del owner es solo el primer paso
+—después queda la spec entera—; el contexto de dónde salió cada una es parte del enunciado
+y viaja con ella.
+
+- [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
+  frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya
+  admite `tipo IN ('garzon','cocina','barra')`: gente que **no atiende mesas**, con PIN,
+  sesión de turno y reparto de propinas. O sea, "staff" **ya existe conceptualmente**; se
+  llama garzón por herencia del primer caso de uso. El disparador fue el testigo del cierre
+  de caja: un minimarket no tiene garzones, así que hoy no puede tener testigos.
+
+  **Costo medido:** ~2.974 menciones en **104 archivos** (columnas de BD, entidades,
+  endpoints, composables del front, tests) y toca la tabla de terminología de `CLAUDE.md`,
+  que es crítica. Lo que **no** cuesta: no hay datos productivos, así que no hay migración —
+  se cambia el esquema, se actualiza el seeder y se resetea (ver la sección *"Endurecimiento
+  para producción"* más abajo: hoy `main` no despliega y no hay nada en uso real). El costo
+  es el barrido, no el riesgo.
+
+  **Atajo que da el beneficio sin pagar el rename** (evaluado, no implementado): separar la
+  **etiqueta que ve el usuario** del nombre en el código —la pantalla dice "Personal", la
+  base sigue diciendo garzones— más un `tipo` nuevo para el personal que no es de salón. Con
+  eso un minimarket ya puede tener testigos y la limitación de la
+  [spec del testigo](../superpowers/specs/2026-08-11-testigo-cierre-forzado-design.md)
+  desaparece.
+
+  ⚠️ **El día que se haga el rename completo, va solo.** Un rename es mecánico pero se
+  contamina fácil: mezclado con una feature, cualquier bug queda escondido entre 3.000 líneas
+  cambiadas y la revisión del diff deja de servir.
+
+- [ ] **Devolución por medio de pago + configuración de plazos** (backend, tema propio con
+  spec) — surgido del aporte del owner el 2026-07-27, **no es parte de los fixes de la
+  auditoría**. Hoy hay dos caminos de devolución que no se conocen entre sí: el de tarjeta
+  arranca en la pasarela (`reembolsar()` de Webpay/Oneclick, ya implementado) y termina en
+  una NC; el de efectivo arranca en la NC y sale por la caja. Nada compone las patas ni
+  impide pagar con tarjeta y recibir efectivo. Además **no hay validación de plazo en
+  ningún lado**: el límite de Transbank se descubre como rechazo en runtime. La
+  configuración de plazos que se proponga debe separar **tres relojes** —fiscal (SII, sale
+  del país), adquirente (propiedad de la integración) y política comercial (lo único
+  configurable por el tenant)—, con los dos primeros como techos y el retracto de venta a
+  distancia como piso en `online`. Construirlo plano permite que un tenant configure 12
+  meses y la empresa se coma el IVA. Análisis completo y fuentes:
+  `docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md` §6.
+
+- [ ] **Una persona cobrando en dos grupos de la misma liquidación** (backend + frontend,
+  tema propio) — hoy el conflicto se corta con un 400 accionable que sugiere la fecha de
+  corte (cerrado el 2026-07-27, ver [`resueltos.md`](resueltos.md)); **soportarlo de
+  verdad es un cambio de modelo** que el owner difirió hasta que el caso aparezca:
+  índice `(liquidacion_id, grupo_id, garzon_id)` **más** re-keyear los ajustes, que hoy se
+  identifican solo por `garzonId` —excluir la sacaría de los dos grupos, y un monto manual
+  escribiría el mismo número en sus dos filas rompiendo la conservación de ambos—. Toca
+  DTO, service, composable, la página y la impresión por persona: **medio día a un día**,
+  con la decisión de cómo se imprime adentro.
+  Dos cosas chicas que quedaron de la salida acotada: la fecha de corte sugerida sale solo
+  de los tips, así que una sesión del primer rol que se extienda más allá del corte hace
+  reaparecer el conflicto en el segundo intento (vuelve a cortar con el mismo 400, no
+  genera datos malos, pero un corte no alcanza y hay que acotar turnos); y falta un test
+  dedicado del conflicto por el camino de `actualizarConfig` —hoy solo se ejerce por
+  `crear`, aunque ambos comparten la misma función.
+
+- [ ] **Saldo en contra cuando se anula una venta cuya propina YA se liquidó** (backend,
+  tema propio con spec) — decidido 2026-07-27, **no implementado**: es una entidad nueva y
+  toca el motor de reparto, así que no entra como fix de auditoría.
+  **El caso:** la propina se liquidó el lunes y se le pagó al garzón; el miércoles anulan
+  esa venta (sigue `pendiente` y sin pagos, así que `POST /ventas/:id/anular` la acepta). La
+  plata ya salió. **La forma decidida:** permitir la anulación y dejar el monto ya pagado
+  como **saldo en contra del garzón**, que se descuenta de su próxima liquidación.
+  Preguntas que la spec tiene que responder antes de escribir código: qué pasa si el garzón
+  no vuelve a liquidar nunca (¿el saldo caduca? ¿se pierde?); qué pasa si su próxima
+  liquidación es **menor** que el saldo (¿queda saldo remanente? ¿se le descuenta hasta
+  0?); si el saldo es por garzón y por tenant, o también por período/turno; si el descuento
+  se muestra en la impresión y el reporte; y cómo se audita (evento propio, como el resto de
+  la liquidación). La mitad barata —que la propina de una venta anulada no entre a
+  liquidaciones **futuras**— ya está cerrada ([`resueltos.md`](resueltos.md)).
+
+- [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
+  (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los
+  productos por serie o lote quedan fuera del listado y agregarlos a una sesión devuelve 400.
+  No es una extensión trivial del mismo formulario:
+  - **`lote`**: es un número **por lote vivo** (una fila por lote con su vencimiento). El delta
+    y el movimiento se resuelven por lote, no por producto. Es el más cercano a lo ya hecho.
+  - **`serie`**: no es una cantidad sino una **diferencia de conjuntos** — qué identificadores
+    esperaba el sistema, cuáles se escanearon, cuáles faltan (→ salida de esas unidades) y
+    cuáles aparecieron sin estar registrados. Ese último caso **no tiene respuesta obvia**
+    (¿entrada de una unidad desconocida? ¿error a corregir aparte?) y es una decisión de
+    negocio del owner antes de diseñar.
+
+  Cerrar cuando aparezca la necesidad real: hoy el caso que motiva el recuento es food-service,
+  donde insumos e ingredientes son todos `cantidad`.
+
+---
+
+## 7. Acción del owner fuera del código
+
+No se resuelve programando. Está acá para que tenga quién la reclame.
+
+- [ ] 🇨🇱 **Validar con un abogado el ángulo legal chileno del testigo** — quedó huérfano al
+  cerrar la entrada del cierre forzado (2026-08-13): la fuente es doctrina de la DT **leída
+  por un agente**, no asesoría legal, y de ella salieron dos afirmaciones que el producto usa
+  como justificación: (a) que la responsabilidad del cajero exige acceso exclusivo **y**
+  oportunidad de estar presente en el conteo, así que contar sin él cae la imputación; (b)
+  que sin asignación de pérdida de caja pactada **no se puede descontar** un faltante del
+  sueldo (ORD. N°4229). `docs/DIFERENCIADORES.md` lo marca "sin validar por un abogado" y
+  **no se puede comunicar el ángulo legal hasta que lo esté** — esta entrada existe para que
+  esa validación tenga quién la reclame, ahora que la entrada que la contenía se archivó.
+
+---
 
 ## Endurecimiento para producción (pre-lanzamiento — hoy no hay prod)
 
@@ -1324,29 +1149,296 @@ sección se abre al encarar el paso a producción. Orden = prioridad.
   (4) Bloqueante; escape `git push --no-verify`. Es el enforcement de [[rigor-sobre-velocidad]].
   Complementa (no reemplaza) el CI, que sigue siendo la verdad con DB fresca de verdad.
 
-## Features diferidas (necesitan spec y decisión de negocio)
+---
 
-No son correcciones ni deuda: son funcionalidad que todavía no existe y que **no se puede
-empezar sin una decisión del owner**. Se listan acá para no perderlas, con la pregunta que
-hay que responder antes de diseñar. Encararlas es brainstorm → spec → plan, nunca "un rato".
+## Vigilancia — evaluado y descartado, no es trabajo
 
-Los otros tres temas de esta clase viven donde los dejó su procedencia, porque el contexto
-de dónde salieron es parte del enunciado: **saldo en contra por propina ya liquidada**,
-**una persona cobrando en dos grupos** y **devolución por medio de pago con plazos**, los
-tres en la sección de auditorías de arriba.
+**Nada de esta sección hay que hacer.** Son cosas que se miraron y se decidió no arreglar,
+hallazgos refutados, y ramas de test que se descartaron con su motivo. Viven acá para no
+volver a descubrirlas desde cero, y **no cuentan** cuando se mide el tamaño del backlog.
+La que tiene condición de reapertura la dice adentro.
 
-- [ ] **Recuento de inventario en modos `serie` y `lote`** (backend + frontend) — el recuento
-  (`docs/features/recuento-inventario.md`) cubre solo `modo_inventario='cantidad'`; los
-  productos por serie o lote quedan fuera del listado y agregarlos a una sesión devuelve 400.
-  No es una extensión trivial del mismo formulario:
-  - **`lote`**: es un número **por lote vivo** (una fila por lote con su vencimiento). El delta
-    y el movimiento se resuelven por lote, no por producto. Es el más cercano a lo ya hecho.
-  - **`serie`**: no es una cantidad sino una **diferencia de conjuntos** — qué identificadores
-    esperaba el sistema, cuáles se escanearon, cuáles faltan (→ salida de esas unidades) y
-    cuáles aparecieron sin estar registrados. Ese último caso **no tiene respuesta obvia**
-    (¿entrada de una unidad desconocida? ¿error a corregir aparte?) y es una decisión de
-    negocio del owner antes de diseñar.
+- [ ] **El país del tenant se deriva con el mismo JOIN en 12 queries** (backend, ocho
+  módulos: `impuestos`, `monedas` ×2, `metodos-pago` ×2, `ventas`, `items` ×2, `propinas`
+  ×2, `seeder`, `turnos`) — todas hacen `tenants.provincia_id → provincia.pais_id`. **Idea del owner
+  (2026-07-30):** una columna `tenants.pais_id` para buscarlo directo. **Evaluada y
+  descartada por ahora**, con dos hechos medidos: (a) `provinciaId` es **mutable**
+  (`update-my-tenant.dto.ts:21`), así que la columna copiada se desincroniza en cuanto
+  alguien cambie de provincia y olvide actualizarla — y desincroniza justo el país que
+  determina el IVA, que es el trade que la spec del IVA derivado rechaza explícitamente;
+  (b) **los once JOIN filtran `eliminado_el` de `provincia`**, o sea que el boilerplate es
+  correcto: molesta a la vista, no está produciendo bugs. Se reabre si aparece evidencia
+  de que duele (una query caliente, o un módulo nuevo que olvide el filtro); el cierre sin
+  divergencia sería una **vista `tenant_pais`**, no una columna.
+  **2026-08-07: llegó la doceava** (`sesiones-garzon.service.ts` → `zonaHoraria`, para el
+  filtro de fecha del historial). Se duplicó a conciencia —es la segunda copia de ese
+  helper, y la convención acepta duplicar dos veces— **con** el filtro `eliminado_el`, que
+  es la condición de reapertura que esta entrada anota. Si aparece una tercera copia del
+  helper de zona, ahí sí conviene la vista.
 
-  Cerrar cuando aparezca la necesidad real: hoy el caso que motiva el recuento es food-service,
-  donde insumos e ingredientes son todos `cantidad`.
+- [ ] **`addMember` devuelve roles viejos en silencio, y la asimetría con el alta es
+  deliberada** (backend, `tenants.service.ts` → `addMember`) — `removeMember` da de baja la
+  membresía pero **deja vivas** las filas de `roles_usuarios`, así que sacar a alguien para
+  revocarle el acceso y volver a sumarlo desde la tabla le devuelve sus permisos previos,
+  `Administrador` incluido. **`POST /tenants/usuarios` ya no hace esto**: ahí el admin
+  declara un conjunto de roles y lo que no viene se da de baja. En `addMember` no hay roles
+  en el body, así que no hay conjunto declarado y "restaurar lo que había" es una lectura
+  defendible — por eso se dejó como está y no se unificó. Se anota para que quien toque
+  `addMember` mañana sepa que la diferencia es una decisión y no un olvido; si algún día
+  recibe roles, tiene que dar de baja los que no vengan igual que el alta.
 
+- [ ] **`Cajas:Actualizar` es un permiso grueso para lo que ahora habilita** — lo levantó la
+  revisión independiente de la task 6b (2026-08-13). El mismo permiso gobierna el **CRUD de
+  cajones** (`cajones.controller.ts`), **pedir la firma** y, desde la 6b, **forzar el cierre de
+  la caja de otro cajero**. O sea: a alguien a quien se le dio el permiso para renombrar un
+  cajón, se le dio también congelar el arqueo ajeno. El owner eligió a conciencia el permiso
+  existente por sobre uno nuevo (menos permisos que configurar), así que **esto no es un bug**:
+  queda anotado para cuando el catálogo de permisos se revise en conjunto, no como pendiente
+  suelto de caja.
+  ⚠️ Efecto colateral medido y sin documentar: al sacar `@RequiresPermiso` de las dos rutas de
+  escritura, el chequeo pasó a correr **después** de los pipes. Un usuario sin ningún permiso y
+  con body inválido recibía 403 y ahora recibe **400**. No filtra nada (el DTO está en Swagger),
+  pero es un cambio de contrato.
+
+- ℹ️ **El tope de 100 sigue vivo, y ahora es el único truncamiento que queda** (frontend).
+  Las cuatro superficies de venta piden `pageSize=100` y no paginan, con
+  `MAX_PAGE_SIZE = 100` en `common/utils/pagination.util.ts`. Mover el filtro de pausados a
+  la query sacó una causa de pérdida —el pausado ya no le roba el lugar a un vendible— pero
+  un tenant con más de 100 ítems vendibles sigue sin verlos todos en el POS. Preexistente y
+  sin caso reportado; se anota para no perderlo, porque la nota anterior vivía pegada a la
+  entrada del filtro que se cerró.
+
+### Detector de desborde de layout (`e2e/layout/desborde.spec.ts`, 2026-07-29)
+
+- [ ] **El detector solo ve el mecanismo min-content dentro de un contexto flex/grid**
+  (frontend, `e2e/layout/desborde.spec.ts`) — sube desde un bloque truncado hasta su ítem
+  flex/grid ancestro más cercano; fuera de ese contexto el mismo mecanismo (min-content =
+  ancho completo del texto cuando hay `white-space: nowrap`) puede desbordar igual y el
+  detector no lo ve:
+  - Celda de `<table>` con `table-layout: auto`, `inline-block`, `float`,
+    `position: absolute`, `width: fit-content` — todos dimensionan por min-content igual
+    que un ítem flex, así que un truncado adentro desborda por el mismo mecanismo y el
+    detector devuelve `[]`.
+  - `white-space: nowrap` **sin** `overflow: hidden` (p. ej. solo `whitespace-nowrap`) es
+    el caso **peor** — mismo min-content de texto completo y encima sin recorte visual —
+    pero el criterio exige `overflow-x: hidden`, así que lo descarta. No es regresión (el
+    detector anterior, por clase `.truncate`, tampoco lo veía), pero matiza la afirmación
+    del comentario del spec de que se detecta "el efecto" de `truncate`: en rigor exige
+    `nowrap` **y** `hidden` a la vez, no cualquiera de los dos solo.
+  - `overflow: clip` (Tailwind `overflow-clip`) computa `overflowX: 'clip'`, no
+    `'hidden'`, y tampoco pasa el filtro.
+  **Medido el 2026-07-30 (el spike que esta entrada pedía, resuelto):** el tema resuelto de
+  `UTable` (`.nuxt/ui/table.ts`, sin override en `app.config.ts` ni `:ui` en
+  `CrudTable.vue`) da los **tres** casos ciegos a la vez, así que el detector no ve **nada**
+  adentro de ninguna tabla del proyecto:
+  - `base` (el `<table>`) es `min-w-full overflow-clip` → **sin `table-fixed`, o sea
+    `table-layout: auto`**, y encima `overflow-clip` computa `'clip'`, no `'hidden'`.
+  - `td` es `whitespace-nowrap` **sin** `overflow: hidden` → el caso peor del criterio.
+  - No hay contexto flex/grid: el ancestro es el `<table>`.
+  **Pero el arquetipo resultó ser el lugar equivocado para buscar**, que es el hallazgo útil:
+  el slot `root` es `relative overflow-auto`, así que una tabla ancha **scrollea dentro de su
+  propio contenedor** en vez de empujar la página — exactamente lo que el desborde sería. Lo
+  que sí puede desbordar es contenido dentro de una celda que a su vez esté en un contexto
+  flex, y **eso el detector ya lo ve**. Conclusión: la cobertura perdida en `/inventario` es
+  menor de lo que esta entrada suponía; ampliar el detector a `table-layout: auto` no es la
+  prioridad, y si se retoma conviene apuntar a los otros mecanismos de la lista
+  (`inline-block`, `float`, `absolute`, `fit-content`), no a las tablas.
+
+### Ramas de test que se decidió no cubrir (pasada `caja` + `propinas`)
+
+Lo que **no** entró, con el motivo, para no volver a evaluarlo de cero:
+
+- 🚫 **`gruposConfig.length === 0`** — se intentó y resultó **inalcanzable por la API**: el
+  PUT de distribución exige que los grupos activos sumen 100%, así que no se puede dejar al
+  tenant sin ninguno. Montarlo pediría SQL directo, o sea un test de un escenario que en
+  producción no existe. Lo que sí quedó cubierto es la puerta de entrada. La guarda del
+  servicio es defensa en profundidad, no código muerto.
+- ⏸️ **El backstop 23505 de `abrir()`** — es una carrera. Reproducirla exige montar el estado
+  por SQL; mismo criterio que arriba.
+- ⏸️ **`registrarMovimientoEnTransaccion`** — se ejercita indirectamente en cada venta que
+  mueve stock; cubrirlo aparte agrega poco.
+- ⏸️ **`advertenciasSesionesAbiertas` con `fin_el = null`**, **`aplicarCambioParticipante`**
+  (alta manual), **`actualizar` con `recalcular: false`**, los endpoints HTTP
+  **`confirmar`/`anular`** y la guarda de **moneda oficial ausente** — riesgo menor y ninguno
+  toca plata sin pasar antes por algo ya cubierto. Entran si aparece un caso real.
+
+### Refutados de la pasada `turnos` + `salones` + `garzones` (2026-08-06)
+
+- **Fuerza bruta del PIN de garzón** — refutada por aritmética medida, no por un guard: 14
+  días de CPU saturada para agotar el espacio. Lo que sobrevive es la amplificación de
+  carga, que es otro bug y está arriba.
+- **Deadlock en `fusionarCuentas`** — refutado: un solo `SELECT … FOR UPDATE` lockea en
+  orden de plan, igual para las dos transacciones. Queda como "seguro gratis" en Baja.
+- **Colisión de PIN al restaurar de la papelera** — hallazgo propio del refutador que
+  resultó **ya documentado** como riesgo aceptado en [`resueltos.md`](resueltos.md), con
+  la misma cifra de 1 en 10⁶ y la misma razón para no arreglarlo (`restaurar()` no puede
+  comparar un bcrypt sin el valor en claro). La carrera TOCTOU de dos altas concurrentes
+  que reportó una lente es la misma puerta con otra llave, y es aún menos probable.
+- **Transferir una cuenta a otra mesa** — el brief le pidió a una lente probar esa
+  transición; no existe. `transferir*` solo reasigna el garzón responsable, y mover cuentas
+  entre mesas está explícitamente fuera de alcance en `docs/features/salones-mesas.md`.
+  La lente lo reportó como corrección del brief en vez de forzar un hallazgo.
+
+---
+
+## Contexto de las pasadas de auditoría
+
+De qué pasada salió cada hallazgo, con sus números, lo que salió limpio y los hilos que
+cerró. **Es memoria, no trabajo.** Estaba intercalado con las entradas, y era la mitad de
+la razón por la que el archivo no se podía leer de arriba a abajo para elegir qué tomar.
+El mapa de qué se auditó y qué falta vive en
+[`auditoria-codigo.md`](auditoria-codigo.md).
+
+### Papelera — restaurar eliminados (2026-07-31)
+
+Backend completo en los 16 recursos; doc operativa [`docs/features/papelera.md`](../features/papelera.md).
+
+✅ **La decisión del owner "solo lo que borró una persona" quedó implementada entera el
+2026-08-01.** Los dos agujeros —el `OR` sin parentizar del listado de `impuestos` y el
+`eliminado_por` que `restaurar()` no limpiaba— están cerrados, con el e2e de la regla
+corriendo sobre los **16** recursos en vez de sobre 2. Se levanta el ⛔ que impedía
+cablear la pantalla de impuestos. Detalle y mutantes: [`resueltos.md`](resueltos.md).
+
+Y un hallazgo que la feature dejó medido y no es suyo (el otro, el del esquema partido
+entre `TIMESTAMPTZ` y `TIMESTAMP` sin zona, se cerró el 2026-08-06 — ver
+[`resueltos.md`](resueltos.md)): **la plomería de tramos en `recargos`**, que desde el
+reordenamiento del 2026-08-15 vive en la sección 3 (el owner ya decidió construirla).
+
+### Auditoría `ventas` + `pagos` (2026-07-27) — hallazgos confirmados
+
+Pasada de 7 lentes según `docs/agent/auditoria-codigo.md`: 20 hallazgos crudos → 15
+confirmados tras refutación. El detalle de cada fix está en
+[`resueltos.md`](resueltos.md). De esta pasada quedaban **3 entradas abiertas** (contadas,
+no estimadas) cuando el archivo se ordenaba por origen; desde el reordenamiento del
+2026-08-15 viven donde les toca por lo que hace falta para tomarlas — el N+1 de recetas en
+la 🔴, la devolución por medio de pago en la 6.
+
+ℹ️ Los números de arriba **no cuadran** con la suma de entradas y no se fuerzan para que
+cuadren: `resueltos.md` acumula 18 cerradas de esta pasada contra "15 confirmados", porque
+varias se cerraron en mitades (una cerrada, una diferida como entrada nueva) y algunas
+decisiones de owner entraron después de la pasada. La lista de entradas es la fuente de
+verdad; el conteo del encabezado describe la auditoría original.
+
+#### Decidido por el owner tras investigación de mercado (2026-07-27)
+
+Cuatro decisiones de owner sobre reglas de negocio no documentadas; tres ya se
+implementaron ([`resueltos.md`](resueltos.md)). Método, cruce contra el código y fuentes:
+**`docs/agent/investigaciones/2026-07-27-anulacion-y-notas-credito.md`**. Lo que queda es
+**trabajo pendiente con la forma ya definida**, no una pregunta abierta.
+
+### Auditoría `caja` + `propinas` (2026-07-27) — hallazgos confirmados
+
+Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md): 25 hallazgos crudos →
+22 únicos (3 los vieron dos lentes por separado) → **20 sobreviven** tras refutación.
+**Los 20 se cerraron el 2026-07-27**; el detalle de cada fix, con sus mutantes, está en
+[`resueltos.md`](resueltos.md). Lo que esos cierres dejaron abierto —la mitad de la
+reconciliación de propinas que exige spec propia, un hallazgo que trajo la revisión
+independiente— se repartió por sección el 2026-08-15; acá quedan las ramas que ningún test
+toca, que son contexto de la pasada y no trabajo tomable.
+
+#### Huecos de test
+
+**De la feature de pausa (2026-08-03)**, los dos que habían quedado abiertos a conciencia
+—cobrar una cuenta de salón con un ítem pausado después de cargarlo, y que una regla pausada
+no quede congelada en `ventas_descuentos`— **se cerraron el 2026-08-09**; ver
+[`resueltos.md`](resueltos.md). Lo que sigue abierto de esa feature está repartido desde el
+2026-08-15: los specs que faltan en tres pantallas, en la sección 1; el tope de 100, en
+Vigilancia.
+
+**Ramas sin cobertura alguna.** La lista se triageó el 2026-08-09 y se cubrieron **cuatro
+ramas nuevas**: el spillover de propina entre pagos, el aislamiento multi-tenant **de
+lectura** de caja, la capa SQL de `propina-reportes` y `HORAS_TRABAJADAS`; más el rechazo de
+`peso <= 0`. Se escribieron además dos tests de guardas (`fechaHasta <= fechaDesde` y Σ de
+porcentajes) que **no** agregan cobertura de rama: los mataban tests unitarios preexistentes.
+Detalle, mutantes y lo que quedó sin fijar en [`resueltos.md`](resueltos.md).
+
+Lo que la tanda dejó abierto y antes no estaba anotado —el scoping por tenant del camino
+de **escritura** de caja, que ningún test fija— está en la sección 2: cerrarlo empieza por
+medir, no por escribir el `expect`.
+
+### Auditoría `items` + `calculo-precios` (2026-07-28) — hallazgos confirmados
+
+Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md): 21 hallazgos crudos
+→ **21 sobreviven, ninguno se cayó entero**. El trabajo del refutador fue el documentado:
+**6 bajaron de severidad**, 2 se reclasificaron como decisión de owner, y tres afirmaciones
+perdieron la mitad que no aguantaba (ver cada entrada). Se suma 1 hallazgo del refutador
+que ninguna lente vio.
+
+**Lo que salió limpio, que es lo que la pasada vino a producir:** soft delete **0 hallazgos
+sobre 98 queries** revisadas una por una (cruzadas contra `startup-pos.sql` para no reportar
+filtro faltante donde la tabla no tiene la columna); **multi-tenant limpio en los 63 JOIN** y
+en cada id que llega del cliente; y la suite de `items.service.spec.ts` (4.136 líneas) resultó
+inusualmente rigurosa — trae la derivación aritmética comentada, así que mata mutantes.
+
+#### Alta
+
+Los tres hallazgos de severidad alta se cerraron el 2026-07-28.
+Ver [`resueltos.md`](resueltos.md).
+
+#### Decidido por el owner (pendiente de respuesta)
+
+Vacía desde el 2026-08-11: las dos que tenía —el orden de los descuentos de un ítem y el
+tope del descuento contra un recargo posterior— se decidieron y se cerraron en la ronda de
+ese día (ver [`resueltos.md`](resueltos.md)).
+
+### Auditoría `turnos` + `salones` + `garzones` (2026-08-06) — hallazgos confirmados
+
+Pasada de 8 lentes según [`auditoria-codigo.md`](auditoria-codigo.md): 24 hallazgos crudos
+→ **23 únicos** (dos lentes independientes cayeron por separado sobre el mismo bug de la
+línea que se cuela durante el cierre; se cuenta una vez) → **22 sobreviven**. El único que
+se cayó entero fue un deadlock en `fusionarCuentas` (ver "Refutados" abajo). El refutador
+sumó 1 hallazgo que ninguna lente vio —la comanda seguía escondiendo el ítem borrado— y
+que resultó ser la mitad que faltaba de un fix ya en curso.
+
+**Lo que salió limpio, que es lo que la pasada vino a producir:** los 4 controllers
+(incluidas las 3 clases dentro de `salones.controller.ts`) llevan
+`JwtAuthGuard + TenantGuard + PermisosGuard` con el permiso correcto por verbo; ningún DTO
+del alcance declara `tenantId`; los tres puntos donde un `:id` anidado podría ser IDOR
+—`guardarLayout`, `fusionarCuentas`, `transferirCuentaAdmin`— resuelven contra el tenant
+del token antes de usar el id; **0 violaciones de soft delete sobre ~65 queries** revisadas
+una por una; y ningún `DELETE` físico en el alcance.
+
+**Tres hallazgos se cerraron en la misma pasada** (los dos de severidad alta y el que sumó
+el refutador), y el 2026-08-06 se cerró además el **fin de turno con mesas abiertas**, la
+única decisión de owner que había quedado tomada sin construir: ver
+[`resueltos.md`](resueltos.md).
+
+#### El hilo que venía abierto: cerrado con matiz
+
+La pasada de `caja`+`propinas` (2026-07-27) dejó anotado que `tipo_garzon` se congela al
+abrir la sesión mientras `garzones.tipo` es editable. **Confirmado el congelado**
+(`sesiones-garzon.service.ts:87`, y ni `cerrarPorPin` ni `cerrarAdmin` lo vuelven a tocar)
+**y confirmado que `tipo` es editable sin gate** (`garzones.service.ts` → `actualizar()`;
+la cita por número de línea se sacó porque el propio cierre las corrió). Pero el
+impacto ya está contenido río abajo: `assertGarzonEnUnSoloGrupo` bloquea la liquidación con
+un 400 accionable si una persona generó tips con dos `tipo_garzon` distintos en el período.
+**La plata está a salvo.** El aviso en el momento de editar —lo único que faltaba— se cerró
+el **2026-08-07**: el owner eligió advertir en vez de bloquear, y la advertencia nombra
+además el bloqueo de liquidación que el cambio puede programar. Ver
+[`resueltos.md`](resueltos.md) § "Ronda de decisiones del owner (2026-08-07)". **Este hilo
+queda cerrado.**
+
+#### Huecos de test (medidos, con el mutante que sobrevive)
+
+Los de `actualizarLinea` y `quitarLinea` se cerraron con el fix de la línea que se cuela; el
+de `fusionarCuentas` el 2026-08-09 con `test/salones-fusion.e2e-spec.ts` —que además fue el
+primer e2e de esa ruta—; y el del computed `cuentaConItemEliminado` el mismo día, con dos
+tests en `pages/salones/index.nuxt.spec.ts` (los tres en [`resueltos.md`](resueltos.md)).
+De los huecos que esta pasada dejó medidos no queda ninguno abierto: los enumerados
+arriba se cerraron.
+
+### Revisión final `borrado-ingrediente-extra` (2026-07-28)
+
+Hallazgos de la revisión que cerró la oleada de fixes de `GET /items/:id/uso` +
+`remove()`. Ninguno bloqueaba el cierre; se difieren por alcance acotado a esa oleada.
+
+### Refactor Caja → "Mi caja" / "Cajas" (diferido del brainstorm 2026-07-23)
+
+El refactor separa la operación del cajero (**"Mi caja"**) de la supervisión del encargado
+(**"Cajas"**). Se decidió que **"Cajas" arranca solo-lectura**; los poderes de escritura del
+encargado se difieren a propósito para no acoplar el refactor de IA/permisos a un cambio de
+modelo con implicancias de auditoría. Investigación y cruce de mercado:
+[`investigaciones/2026-07-23-gestion-caja.md §6`](investigaciones/2026-07-23-gestion-caja.md).
+El refactor de IA/permisos y los sub-proyectos A (arqueo multi-medio), B (cierre ciego) y
+C (cierre en dos fases) **ya se entregaron** — ver [`resueltos.md`](resueltos.md). Lo que
+sigue son los poderes del encargado que se difirieron a propósito:
