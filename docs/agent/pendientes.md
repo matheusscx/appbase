@@ -1749,14 +1749,37 @@ y viaja con ella.
   agosto"* para algo que no sea una venta ya registrada — un reporte, una nota de crédito, la
   renovación de una suscripción.
 
-  🔎 **Investigación de mercado pedida por el owner (2026-08-15), acordada y pendiente de lanzar.**
+  ⛔ **NO es una investigación del mercado de restaurantes — es financiera en general**
+  (corrección del owner, 2026-08-15). Cómo lo hace un POS es **un insumo más, no la fuente**.
+  Representar plata, redondearla y manejar unidades indexadas son problemas **ya resueltos y
+  estandarizados** fuera de este dominio, y ahí hay que ir primero:
+  - **ISO 4217** define, junto con el código de cada moneda, su **minor unit** — cuántos decimales
+    tiene. Es la respuesta autoritativa a "¿cuántos decimales tiene esta moneda?", y hoy el
+    proyecto la tiene copiada a mano en `moneda.decimales` para tres monedas.
+  - **Las redes de pago** (ISO 8583 y las APIs de tarjetas) expresan los montos **en unidades
+    mínimas** —centavos, no pesos— y eso no es negociable: es la restricción dura del momento
+    "cobrable". Explica por qué Webpay rechaza un CLP con decimales en vez de redondearlo.
+  - **El patrón `Money`** de la literatura de diseño: monto + moneda como un tipo, el monto en
+    unidades mínimas, y el **problema de la asignación** (repartir un total en N partes sin que
+    la suma se despegue). ℹ️ El proyecto **ya resolvió ese último** con mayores restos para el
+    reparto de propinas — o sea que una pieza del enfoque financiero ya está adentro, sin nombre.
+  - **Las autoridades tributarias** de cada país tienen reglas sobre en qué momento se redondea
+    una factura y con qué criterio. Eso es norma, no preferencia, y varía por país — que es
+    exactamente lo que un sistema multi-país tiene que poder expresar.
+  - **Los ERP** (SAP, Oracle, Odoo) modelan moneda de cuenta vs moneda de transacción vs moneda
+    de presentación hace décadas. La UF entra ahí, no en "una moneda rara de Chile".
+
+  🔎 **Investigación pedida por el owner (2026-08-15), acordada y pendiente de lanzar.**
   Lo que tiene que traer: (a) **redondeo** — en qué momento exacto los POS maduros llevan un monto
   a la unidad de la moneda, si redondean por línea o solo el total, y qué hacen los países sin
   decimales (hay reglas fiscales, no es solo criterio); (b) **unidades de cuenta** — cómo modelan
   una unidad indexada (UF chilena, UVR colombiana, UI uruguaya) separada de la moneda de cobro, y
   en qué momento se congela la tasa: al cotizar, al emitir o al cobrar; (c) **tasas con fecha** —
   si guardan historial con vigencia y de dónde las toman.
-  ⚠️ Regla del cruce: insumo para adaptar, **no verdad a copiar**.
+  ⚠️ Regla del cruce: insumo para adaptar, **no verdad a copiar**. Con un matiz que este tema
+  tiene y otros no: **una norma tributaria o una restricción de una red de pago no se "adapta"** —
+  se cumple o se incumple. Lo adaptable es el diseño alrededor, no el número de decimales que
+  ISO 4217 le asigna al peso.
   ✅ **Alcance acordado (owner, 2026-08-15): se abre a varios países.** El objetivo que fijó el
   owner es que **funcione con todas las monedas y con las conversiones tipo UF y USD**, no que
   resuelva el caso chileno. Entonces la investigación tiene que cubrir, como mínimo:
