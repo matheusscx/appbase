@@ -689,6 +689,247 @@ El owner ya contestó lo que había que contestar. **No son mecánicas** —tien
 adentro, y alguna quedó a medias a propósito— pero nadie está esperando una respuesta para
 empezarlas.
 
+- [ ] 🚩 **Se puede pre-registrar el correo de un futuro empleado y heredar sus roles**
+  (backend + producto, auditoría RBAC/auth 2026-08-15) — **el hallazgo más feo de la pasada.**
+  `tenants.service.ts` → `crearUsuario` busca el correo y, si **ya existe** un `Usuario`,
+  **adopta esa cuenta tal cual**. El comentario del propio código lo dice: *"Solo el id: el
+  resto del `Usuario` —incluido el hash— no se usa"*. Si el correo **no** existe, en cambio, la
+  cuenta se crea **sin contraseña** y la persona la elige desde el link de invitación — *"así
+  nadie más que ella"*. **Esa asimetría es el agujero.**
+  **Escenario, encadenado con el registro público que no verifica correos** (ya anotado, pero
+  por otra razón): alguien registra `futuro.empleado@empresa.cl` con una contraseña suya. Cuando
+  el admin da de alta a esa persona de verdad, el sistema **adopta la cuenta del atacante** y le
+  asigna los roles que el admin eligió. No se manda ningún mail y la respuesta dice
+  `invitado: false`, así que **el admin no recibe ninguna señal**. El empleado real nunca recibe
+  invitación — la única pista, y tardía.
+  El docblock del método asume que "si el correo ya existía, la cuenta es de esa persona".
+  Ninguna de las dos entradas por separado mostraba esto: hizo falta cruzarlas.
+  **Las opciones, y la decisión es tuya:** (a) verificar el correo en el registro público —
+  cierra la raíz pero es la entrada ya anotada y más cara; (b) que el alta **nunca** adopte una
+  cuenta con contraseña ya puesta sin que la persona confirme por mail; (c) avisarle al admin
+  que está adoptando una cuenta preexistente en vez de crear una, y que decida.
+  ✅ **DECIDIDO (owner, 2026-08-15): el alta no adopta una cuenta que ya tiene contraseña
+  puesta.** Manda un mail y la persona confirma que ese correo es suyo antes de quedar asociada
+  a la empresa. Con eso el pre-registro deja de servir: quien registró el correo ajeno no puede
+  confirmar por la persona real.
+  ⚠️ **Al construirlo, dos cosas que no son obvias:** (a) el caso legítimo —alguien que ya tiene
+  cuenta en OTRA empresa y se suma a esta— pasa por el mismo mail, así que el texto tiene que
+  decir "te están sumando a X", no "confirmá tu correo"; (b) mientras la confirmación está
+  pendiente, la persona **no** es miembro todavía, así que el admin necesita ver ese estado en
+  la tabla o va a creer que el alta falló.
+
+- [ ] **El login con Google ignora si el correo está verificado y vincula por coincidencia**
+  (backend, auditoría RBAC/auth 2026-08-15) — `google.strategy.ts` no lee el campo `verified`
+  que `passport-google-oauth20` sí expone, y `auth.service.ts` → `googleLogin` vincula el
+  `googleId` a cualquier cuenta local que coincida **por correo**, sin probar que esa dirección
+  sea de quien entra.
+  Es la **misma familia** que la adopción de cuenta por correo del alta de usuarios (arriba):
+  las dos tratan "el correo coincide" como prueba de identidad. Conviene decidirlas juntas, con
+  un solo criterio para todo el sistema.
+  ✅ **DECIDIDO (owner, 2026-08-15): mismo criterio que el alta de usuarios.** "El correo
+  coincide" deja de ser prueba de identidad en todo el sistema: vincular un `googleId` a una
+  cuenta local existente exige confirmación, no solo coincidencia. Y se pasa a leer el campo
+  `verified` que la librería ya expone.
+  ℹ️ **Prioridad baja por ahora:** el owner confirmó que **el login con Google no lo usa nadie
+  todavía** (2026-08-15). Es deuda a saldar **antes de habilitarlo**, no un incendio. Si algún
+  día se habilita, esta entrada sube sola.
+
+- [ ] 🚩 **El token de Google viaja por la URL, y `switch-tenant` lo convierte en sesión
+  persistente** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes ciegas entre
+  sí lo vieron**) — `auth.controller.ts` → `googleCallback` redirige a
+  `/auth/callback?token=...` con el **access token en la query string**, a diferencia del resto
+  del sistema que usa cookie `httpOnly` para el refresh. Queda en el historial del navegador y
+  en los logs de acceso del hosting del frontend; `callback.vue` ni siquiera hace
+  `replace: true`.
+  **Lo que lo agrava, y es la mitad que una sola lente no vio:** con ese access token filtrado
+  se puede llamar `POST /auth/switch-tenant`, que solo exige `JwtAuthGuard`, y la respuesta trae
+  un `refresh_token` nuevo por `Set-Cookie` — legible por cualquier cliente HTTP, no solo por un
+  navegador. Una filtración de 15 minutos se vuelve una sesión renovable.
+  **Antes de decidir el arreglo hay que contestar algo previo: ¿el login con Google está
+  habilitado en producción?** Si no lo está, esto baja de prioridad sin dejar de ser deuda.
+  ✅ **Prioridad decidida (owner, 2026-08-15): baja, porque el login con Google no está en
+  uso.** No cambia que sea deuda —el token en la query string queda en historial y logs— pero sí
+  cuándo se paga: **antes de habilitar Google**, no ahora.
+  ⚠️ La mitad que NO baja de prioridad es la otra: que `POST /auth/switch-tenant` devuelva un
+  refresh token nuevo exigiendo solo `JwtAuthGuard`. Eso convierte **cualquier** filtración de
+  access token —venga de Google o no— en una sesión renovable, y esa ruta sí está en uso.
+  Conviene mirarla junto con las dos entradas de `refresh` de esta misma sección.
+
+- [ ] **Contratar un módulo, ¿es un borde duro o solo decide qué se ve en el menú?** (backend +
+  producto, auditoría RBAC/auth 2026-08-15) — **tres lentes ciegas entre sí cayeron sobre el
+  mismo borde**; se cuenta una vez porque se decide una vez.
+  `docs/PRODUCTO.md:127` dice: *"Cada ruta valida rol + **módulo contratado** + permiso"*. El
+  código no lo sostiene de forma consistente:
+
+  | Camino | Qué hace hoy |
+  |---|---|
+  | Short-circuit `es_fijo` de `RbacService.userHasPermiso` | **No mira `tenant_modulos`.** El admin llega a cualquier módulo |
+  | `assignUser` con un rol de otro tenant | Permisos atados a los módulos de **ese otro** tenant |
+  | `RolesService.setPermissions` | **Sí valida** que el módulo sea del tenant |
+
+  Y `TenantsService.create()` **no siembra ningún `tenant_modulos`** (verificado): un tenant
+  recién creado tiene cero módulos contratados y su admin igual le pega con 200 a cualquier ruta
+  de negocio, mientras el frontend —que usa `getMisPermisos`, sí filtrado— ni le muestra el link.
+  ⚠️ **No es un problema de aislamiento sino comercial**: nadie ve datos de otro tenant, pero el
+  admin llega a módulos que no pagó, y los módulos son lo que se vende. Conviene no confundir
+  los dos bordes.
+  El tercer camino prueba que la regla existe y que alguien la escribió a conciencia. **La
+  pregunta es cuál de las dos conductas es la correcta**, y de ahí sale si se arregla el motor o
+  se corrige la doc.
+  ✅ **DECIDIDO (owner, 2026-08-15): es un borde duro.** El admin también respeta los módulos
+  contratados. Se arregla el motor (`RbacService`), no la documentación — `PRODUCTO.md:127` ya
+  dice lo correcto.
+  ⚠️ **Antes de tocar el short-circuit, medir a quién le cambia el acceso.** `TenantsService.create()`
+  **no siembra ningún `tenant_modulos`** (medido), así que hoy un tenant nace con cero módulos
+  contratados: aplicar el borde duro de golpe puede dejar sin acceso al admin de cada tenant
+  creado por la app, incluido el demo. **El fix probablemente son dos piezas, no una:** sembrar
+  los módulos al crear el tenant, y recién después cerrar el short-circuit.
+
+- [ ] **El último admin puede dejarse afuera, y el tenant no se recupera por ninguna API**
+  (backend, auditoría RBAC/auth 2026-08-15) — `roles.service.ts` → `removeUser` desasigna a una
+  persona de un rol sin mirar si es el último `es_fijo` del tenant, y `tenants.service.ts` →
+  `removeMember` deja auto-eliminarse. `TenantAdminGuard` solo verifica que quien llama **sea**
+  admin en ese instante, nunca que la acción deje al tenant con alguno. (`RolesService.remove`
+  —borrar el rol— sí bloquea `esFijo`; desasignar a la persona, no.)
+  ⚠️ **Verificado lo que decide la severidad:** `/admin/tenants` con `SuperadminGuard` expone
+  crear, listar, ver, editar, borrar y agregar módulos — **ninguna ruta para asignar un rol ni
+  sumar un miembro**. Un tenant que se queda sin admin **solo se arregla con SQL directo**.
+  **La decisión:** ¿se bloquea la acción cuando dejaría el tenant sin admin, o se agrega una
+  ruta de recuperación del superadmin? La primera es más barata; la segunda cubre también los
+  casos que la validación no anticipe.
+  ✅ **DECIDIDO (owner, 2026-08-15): se bloquea la acción.** Ni `removeUser` ni `removeMember`
+  dejan hacer el cambio si dejaría al tenant sin ningún rol `es_fijo` asignado. Sin ruta de
+  recuperación del superadmin por ahora — la decisión fue el bloqueo, que es lo que ataja el
+  caso común.
+  ⚠️ **El bloqueo tiene una carrera adentro y hay que resolverla en el mismo trabajo:** dos
+  requests simultáneos que sacan a los dos últimos admins pueden pasar los dos chequeos y dejar
+  el tenant huérfano igual. El conteo tiene que tomar lock, o la validación no vale bajo
+  concurrencia. Va con la sección 5.
+  ℹ️ Queda anotado, sin decidir, lo que el bloqueo no cubre: **hoy un tenant sin admin solo se
+  arregla con SQL directo**, porque `/admin/tenants` no tiene ruta para asignar roles ni sumar
+  miembros (verificado). Si alguna vez pasa por otro camino, no hay salida por pantalla.
+
+- [ ] 🚩 **Dos recuentos abiertos sobre el mismo producto descuentan el faltante dos veces**
+  (backend + producto, auditoría `inventario` 2026-08-15) — **el hallazgo más caro de la pasada.**
+  `RecuentosService.create()` hace un `INSERT INTO recuento_inventario` sin mirar si el tenant ya
+  tiene una sesión en `borrador` que incluya esos ítems (verificado abriendo el método: no hay
+  guard, y el único índice único es `(recuento_id, item_id)`, o sea **dentro** de una sesión).
+  Cada línea congela su `stock_sistema` al crearse y el ajuste se aplica como **delta relativo**
+  sobre el stock vigente.
+  **Escenario:** stock de sistema 10. Dos personas abren su propia sesión y las dos cuentan 8.
+  Cada sesión guarda delta −2. Aplicadas las dos, el stock queda en **6**, no en 8. El faltante
+  real se descuenta dos veces y se genera un faltante que no existió.
+  ⚠️ **La doc anticipó este riesgo y lo descartó con un razonamiento que no cierra.**
+  [`recuento-inventario.md`](../features/recuento-inventario.md) lo lista en su tabla de riesgos
+  y lo da por mitigado: *"cada línea congela su propio `stock_sistema`; el delta se calcula contra
+  ese congelado, así que aplicar ambas en cualquier orden da el mismo resultado final"*. Es cierto
+  y es irrelevante — la independencia del orden no es corrección: da el mismo resultado
+  equivocado. **Eso es peor que un hueco no considerado**, porque el próximo que lo mire va a
+  encontrar la fila de la tabla y creer que está resuelto.
+  **La pregunta para el owner:** ¿la segunda sesión sobre un ítem ya en borrador se **bloquea**
+  (400 nombrando la sesión abierta), se **avisa** y se deja seguir, o el ajuste se recalcula
+  contra el stock del momento de aplicar en vez del congelado? Las tres son defendibles y
+  cambian el modelo. La tercera además contradice el comentario que llama al delta *"el corazón
+  del diseño"*.
+  ✅ **DECIDIDO (owner, 2026-08-15): se bloquea la segunda sesión.** Si un producto ya está en
+  un recuento en `borrador`, no se puede incluir en otro; el 400 nombra la sesión que lo tiene.
+  Dos conteos simultáneos del mismo producto no tienen sentido operativo.
+  ⚠️ **El delta congelado NO se toca** — se descartó recalcular al aplicar. El comentario que lo
+  llama *"el corazón del diseño"* sigue vigente.
+  ⚠️ **Al construirlo:** el chequeo es un `SELECT` de "¿está en otra sesión abierta?" seguido de
+  un `INSERT`, o sea check-then-act — sin índice ni lock que lo respalde, dos `create()`
+  simultáneos lo pasan los dos. Va con la sección 5.
+  ⚠️ **Y la doc se arregla en el mismo commit:** `recuento-inventario.md` da este riesgo por
+  mitigado con un razonamiento que no cierra. Esa fila cambia, o queda diciendo que no existía.
+
+- [ ] 🚩 **Cambiar la unidad de un ingrediente puede tirar abajo el listado entero del catálogo**
+  (backend, auditoría `inventario` 2026-08-15) — el guard que bloquea cambiar `unidadMedida`
+  (`items.service.ts:1391-1418`) solo mira si el ítem tiene **movimientos propios**; no mira si
+  una `receta_ingredientes` o una opción de grupo ya lo referencia con una unidad fijada. Un
+  ingrediente sin costo ni movimientos puede pasar de `kg` a `l` sin fricción.
+  **Verificado el mecanismo del daño:** `catalog.service.ts` → `convertirUnidades` hace
+  `conversiones.map(c => this.convertirConMapa(...))` **sin aislar fila por fila**, así que una
+  sola conversión imposible hace fallar el lote completo. Como `calcularDisponibilidadBatch` lo
+  usa desde `findAll` y ni el service ni el controller lo atrapan, **`GET /items` deja de
+  responder para todo el tenant** —el menú del POS incluido— hasta arreglar la fila a mano.
+  **La decisión:** ¿el guard se amplía para bloquear el cambio cuando hay referencias (y el
+  usuario tiene que desarmar la receta primero), o el batch se vuelve tolerante fila por fila
+  (devolviendo la que no se puede convertir marcada, en vez de tirar todo)? No son excluyentes,
+  y la segunda protege también contra el resto de las filas corruptas que ya puedan existir.
+  ✅ **DECIDIDO (owner, 2026-08-15): las dos mitades.** (a) El guard se amplía para bloquear el
+  cambio si alguna receta u opción de grupo ya referencia el ítem; (b) el batch de conversión
+  tolera la fila que no puede convertir —marcándola— en vez de tirar el lote entero.
+  **La segunda importa más de lo que parece:** protege también contra las filas ya rotas que
+  puedan existir hoy. Sin ella, el bloqueo evita el problema nuevo y deja el catálogo caído
+  donde ya pasó.
+
+- [ ] 🚩 **Anular una venta reingresa la mercadería al costo de hoy, no al que salió — y el
+  inventario se infla solo** (backend + contabilidad, auditoría `inventario` 2026-08-15) —
+  **lo encontraron dos lentes ciegas entre sí** (costeo CPP y devoluciones), por caminos
+  distintos; se cuenta una vez.
+  Medido en el código: `registrarMovimiento` recalcula el promedio ponderado **solo** cuando
+  `tipo='entrada' && motivo='compra'`, y los tres call sites de reversión
+  (`ventas.service.ts:862` anulación, `:1006` y `:1153` devolución) **no pasan `costoUnitario`**.
+  Con eso, `costoUnitarioCongelado` cae en la rama `: costoActualPrevio` —el CPP vigente al
+  momento del reingreso— y `costo_actual` queda intacto.
+  **La aritmética, con números concretos:** vender 1 unidad a costo $50, comprar 5 a $70 (el CPP
+  pasa a $57,1429), y anular la venta original deja el inventario valorizado en **$857,14** en
+  vez de **$850,00**. Son $7,14 que no entraron por ninguna compra, y que además contaminan cada
+  CPP posterior.
+  ℹ️ El costo real de esa salida **existe y no se lee**: el kardex lo congeló ligado a la
+  `venta_id` del movimiento original.
+  ⛔ **La pregunta es contable y no me corresponde:** ¿una devolución reingresa al costo con el
+  que la unidad salió (y entonces hay que recalcular el promedio incluyéndola), o al costo
+  vigente (y el desfase se asume)? Los dos criterios existen en el mercado. Lo que hoy hay no es
+  ninguno de los dos elegido: es la ausencia de decisión.
+  **Ningún test lo cubre:** `ventas.service.spec.ts` mockea `registrarMovimiento` entero en el
+  bloque de anulación.
+  ✅ **DECIDIDO (owner, 2026-08-15): vuelve al costo con el que salió.** La reposición pasa
+  `costoUnitario` con el costo congelado del movimiento original —que **ya está en el kardex,
+  ligado a la `venta_id`, y hoy simplemente no se lee**— y el promedio se recalcula incluyéndola.
+  ⚠️ **Toca el motor de costeo: el cambio va solo, con su propio gate.** Hoy `registrarMovimiento`
+  recalcula el promedio solo en `motivo='compra'`; habilitarlo para `anulacion`/`devolucion`
+  cambia la fórmula del CPP en un camino nuevo. Necesita el caso numérico del escenario
+  ($50 / $70 → $850) como test, no solo el mutante.
+  ⚠️ **Devolución parcial:** si de 5 unidades vuelve 1, hay que tomar el costo de ESE movimiento,
+  no un promedio de la venta. Verificar que el kardex lo permita resolver por línea antes de
+  escribir.
+
+- [ ] 🚩 **Anular una venta con recetas o combos no repone los ingredientes, y responde que sí
+  repuso** (backend, auditoría `inventario` 2026-08-15) — `cancelar` arma la lista a reponer con
+  `JOIN item_producto ip ON ip.item_id = d.item_id` (`ventas.service.ts:848`, **INNER**). Una
+  línea de receta o de combo **no tiene fila en `item_producto`** —la tienen sus ingredientes—,
+  así que la línea desaparece del `SELECT` sin error y sin aviso, y la respuesta igual dice
+  `stockRepuesto: true` (el frontend muestra *"Venta anulada y stock repuesto"*).
+  **La asimetría está medida:** el camino de la nota de crédito usa `LEFT JOIN` en la misma
+  consulta (`:1280`) y cae en la rama de `modo_inventario === null`, que responde *"no maneja
+  stock (servicio): no admite devolución a inventario"* (`:1314`) — un mensaje que para una
+  receta es falso.
+  **Escenario:** se vende una pizza, la venta se anula reponiendo stock, y el queso y la harina
+  que salieron del inventario al venderla **no vuelven nunca**. No hay ningún camino que los
+  reponga: ni la anulación, ni la NC, ni un endpoint manual de entrada.
+  **La decisión:** ¿la anulación expande la receta y repone los ingredientes (simétrico con lo
+  que hace la venta), o rechaza explícitamente las ventas con recetas/combos como ya rechaza
+  serie y lote? Lo que no puede seguir es la tercera opción actual: no reponer y decir que sí.
+  ✅ **DECIDIDO (owner, 2026-08-15), y el encuadre cambió al medirlo.** La pantalla **ya
+  pregunta**: `AnularVentaModal` tiene el checkbox *"Reponer el stock que la venta descontó"* más
+  un motivo obligatorio, el DTO lo recibe y el service ramifica. El caso "la comida ya se sirvió,
+  no repongas" **ya se puede expresar hoy** destildando.
+  El defecto real es más chico y más feo: **para un producto simple el checkbox se respeta; para
+  una receta se ignora en silencio y el sistema igual dice que repuso.** La decisión del
+  encargado no se ejecuta y nada se lo dice.
+  **Decisión 1 — si tildó reponer, se repone:** la anulación expande la receta o el combo y
+  devuelve los ingredientes que la venta descontó, simétrico con lo que hizo la venta.
+  **Decisión 2 — el default deja de ser siempre "tildado":** si la línea **ya se despachó a
+  cocina**, el plato se hizo, así que nace **destildado**; si no se envió nada, sigue tildado.
+  El aporte del owner que lo motivó: reponer comida servida mete stock que físicamente no
+  existe, y eso es peor que no reponer.
+  🔗 **Dependencia a mirar antes de estimar:** el default depende de `cantidadEnviada`, y la
+  entrada *"Anular o reducir una línea ya enviada a cocina"* tiene medido que **el frontend no
+  conoce ese campo — cero ocurrencias en `frontend/app`**. Esta decisión **no se puede construir
+  sin exponerlo al cliente**, que es lo que aquella entrada necesita también. Se hacen juntas o
+  la segunda paga el costo de la primera.
+
 - [ ] **El kardex conserva todo pero las pantallas lo esconden, y hasta el total miente**
   (backend + frontend, auditoría `inventario` 2026-08-15; **decidido por el owner el mismo
   día**) — **lo medido, que es mejor de lo que la entrada original decía por un lado y peor
@@ -873,83 +1114,6 @@ Cada una lleva su pregunta concreta adentro. Mientras no se conteste **no se emp
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
-- [ ] 🚩 **Dos recuentos abiertos sobre el mismo producto descuentan el faltante dos veces**
-  (backend + producto, auditoría `inventario` 2026-08-15) — **el hallazgo más caro de la pasada.**
-  `RecuentosService.create()` hace un `INSERT INTO recuento_inventario` sin mirar si el tenant ya
-  tiene una sesión en `borrador` que incluya esos ítems (verificado abriendo el método: no hay
-  guard, y el único índice único es `(recuento_id, item_id)`, o sea **dentro** de una sesión).
-  Cada línea congela su `stock_sistema` al crearse y el ajuste se aplica como **delta relativo**
-  sobre el stock vigente.
-  **Escenario:** stock de sistema 10. Dos personas abren su propia sesión y las dos cuentan 8.
-  Cada sesión guarda delta −2. Aplicadas las dos, el stock queda en **6**, no en 8. El faltante
-  real se descuenta dos veces y se genera un faltante que no existió.
-  ⚠️ **La doc anticipó este riesgo y lo descartó con un razonamiento que no cierra.**
-  [`recuento-inventario.md`](../features/recuento-inventario.md) lo lista en su tabla de riesgos
-  y lo da por mitigado: *"cada línea congela su propio `stock_sistema`; el delta se calcula contra
-  ese congelado, así que aplicar ambas en cualquier orden da el mismo resultado final"*. Es cierto
-  y es irrelevante — la independencia del orden no es corrección: da el mismo resultado
-  equivocado. **Eso es peor que un hueco no considerado**, porque el próximo que lo mire va a
-  encontrar la fila de la tabla y creer que está resuelto.
-  **La pregunta para el owner:** ¿la segunda sesión sobre un ítem ya en borrador se **bloquea**
-  (400 nombrando la sesión abierta), se **avisa** y se deja seguir, o el ajuste se recalcula
-  contra el stock del momento de aplicar en vez del congelado? Las tres son defendibles y
-  cambian el modelo. La tercera además contradice el comentario que llama al delta *"el corazón
-  del diseño"*.
-
-- [ ] 🚩 **Cambiar la unidad de un ingrediente puede tirar abajo el listado entero del catálogo**
-  (backend, auditoría `inventario` 2026-08-15) — el guard que bloquea cambiar `unidadMedida`
-  (`items.service.ts:1391-1418`) solo mira si el ítem tiene **movimientos propios**; no mira si
-  una `receta_ingredientes` o una opción de grupo ya lo referencia con una unidad fijada. Un
-  ingrediente sin costo ni movimientos puede pasar de `kg` a `l` sin fricción.
-  **Verificado el mecanismo del daño:** `catalog.service.ts` → `convertirUnidades` hace
-  `conversiones.map(c => this.convertirConMapa(...))` **sin aislar fila por fila**, así que una
-  sola conversión imposible hace fallar el lote completo. Como `calcularDisponibilidadBatch` lo
-  usa desde `findAll` y ni el service ni el controller lo atrapan, **`GET /items` deja de
-  responder para todo el tenant** —el menú del POS incluido— hasta arreglar la fila a mano.
-  **La decisión:** ¿el guard se amplía para bloquear el cambio cuando hay referencias (y el
-  usuario tiene que desarmar la receta primero), o el batch se vuelve tolerante fila por fila
-  (devolviendo la que no se puede convertir marcada, en vez de tirar todo)? No son excluyentes,
-  y la segunda protege también contra el resto de las filas corruptas que ya puedan existir.
-
-- [ ] 🚩 **Anular una venta reingresa la mercadería al costo de hoy, no al que salió — y el
-  inventario se infla solo** (backend + contabilidad, auditoría `inventario` 2026-08-15) —
-  **lo encontraron dos lentes ciegas entre sí** (costeo CPP y devoluciones), por caminos
-  distintos; se cuenta una vez.
-  Medido en el código: `registrarMovimiento` recalcula el promedio ponderado **solo** cuando
-  `tipo='entrada' && motivo='compra'`, y los tres call sites de reversión
-  (`ventas.service.ts:862` anulación, `:1006` y `:1153` devolución) **no pasan `costoUnitario`**.
-  Con eso, `costoUnitarioCongelado` cae en la rama `: costoActualPrevio` —el CPP vigente al
-  momento del reingreso— y `costo_actual` queda intacto.
-  **La aritmética, con números concretos:** vender 1 unidad a costo $50, comprar 5 a $70 (el CPP
-  pasa a $57,1429), y anular la venta original deja el inventario valorizado en **$857,14** en
-  vez de **$850,00**. Son $7,14 que no entraron por ninguna compra, y que además contaminan cada
-  CPP posterior.
-  ℹ️ El costo real de esa salida **existe y no se lee**: el kardex lo congeló ligado a la
-  `venta_id` del movimiento original.
-  ⛔ **La pregunta es contable y no me corresponde:** ¿una devolución reingresa al costo con el
-  que la unidad salió (y entonces hay que recalcular el promedio incluyéndola), o al costo
-  vigente (y el desfase se asume)? Los dos criterios existen en el mercado. Lo que hoy hay no es
-  ninguno de los dos elegido: es la ausencia de decisión.
-  **Ningún test lo cubre:** `ventas.service.spec.ts` mockea `registrarMovimiento` entero en el
-  bloque de anulación.
-
-- [ ] 🚩 **Anular una venta con recetas o combos no repone los ingredientes, y responde que sí
-  repuso** (backend, auditoría `inventario` 2026-08-15) — `cancelar` arma la lista a reponer con
-  `JOIN item_producto ip ON ip.item_id = d.item_id` (`ventas.service.ts:848`, **INNER**). Una
-  línea de receta o de combo **no tiene fila en `item_producto`** —la tienen sus ingredientes—,
-  así que la línea desaparece del `SELECT` sin error y sin aviso, y la respuesta igual dice
-  `stockRepuesto: true` (el frontend muestra *"Venta anulada y stock repuesto"*).
-  **La asimetría está medida:** el camino de la nota de crédito usa `LEFT JOIN` en la misma
-  consulta (`:1280`) y cae en la rama de `modo_inventario === null`, que responde *"no maneja
-  stock (servicio): no admite devolución a inventario"* (`:1314`) — un mensaje que para una
-  receta es falso.
-  **Escenario:** se vende una pizza, la venta se anula reponiendo stock, y el queso y la harina
-  que salieron del inventario al venderla **no vuelven nunca**. No hay ningún camino que los
-  reponga: ni la anulación, ni la NC, ni un endpoint manual de entrada.
-  **La decisión:** ¿la anulación expande la receta y repone los ingredientes (simétrico con lo
-  que hace la venta), o rechaza explícitamente las ventas con recetas/combos como ya rechaza
-  serie y lote? Lo que no puede seguir es la tercera opción actual: no reponer y decir que sí.
-
 - [ ] **Serie y lote están a medias, y cada camino decide por su cuenta si rechazar o aceptar y
   corromper** (backend + BD, auditoría `inventario` 2026-08-15) — tres caras del mismo hueco,
   agrupadas porque se deciden juntas:
@@ -996,75 +1160,6 @@ prohíbe.
   **La decisión:** ¿los combos entran a la misma bandeja de desfases que las recetas, o se
   documenta explícitamente que su costo es manual?
 
-- [ ] 🚩 **Se puede pre-registrar el correo de un futuro empleado y heredar sus roles**
-  (backend + producto, auditoría RBAC/auth 2026-08-15) — **el hallazgo más feo de la pasada.**
-  `tenants.service.ts` → `crearUsuario` busca el correo y, si **ya existe** un `Usuario`,
-  **adopta esa cuenta tal cual**. El comentario del propio código lo dice: *"Solo el id: el
-  resto del `Usuario` —incluido el hash— no se usa"*. Si el correo **no** existe, en cambio, la
-  cuenta se crea **sin contraseña** y la persona la elige desde el link de invitación — *"así
-  nadie más que ella"*. **Esa asimetría es el agujero.**
-  **Escenario, encadenado con el registro público que no verifica correos** (ya anotado, pero
-  por otra razón): alguien registra `futuro.empleado@empresa.cl` con una contraseña suya. Cuando
-  el admin da de alta a esa persona de verdad, el sistema **adopta la cuenta del atacante** y le
-  asigna los roles que el admin eligió. No se manda ningún mail y la respuesta dice
-  `invitado: false`, así que **el admin no recibe ninguna señal**. El empleado real nunca recibe
-  invitación — la única pista, y tardía.
-  El docblock del método asume que "si el correo ya existía, la cuenta es de esa persona".
-  Ninguna de las dos entradas por separado mostraba esto: hizo falta cruzarlas.
-  **Las opciones, y la decisión es tuya:** (a) verificar el correo en el registro público —
-  cierra la raíz pero es la entrada ya anotada y más cara; (b) que el alta **nunca** adopte una
-  cuenta con contraseña ya puesta sin que la persona confirme por mail; (c) avisarle al admin
-  que está adoptando una cuenta preexistente en vez de crear una, y que decida.
-
-- [ ] 🚩 **El token de Google viaja por la URL, y `switch-tenant` lo convierte en sesión
-  persistente** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes ciegas entre
-  sí lo vieron**) — `auth.controller.ts` → `googleCallback` redirige a
-  `/auth/callback?token=...` con el **access token en la query string**, a diferencia del resto
-  del sistema que usa cookie `httpOnly` para el refresh. Queda en el historial del navegador y
-  en los logs de acceso del hosting del frontend; `callback.vue` ni siquiera hace
-  `replace: true`.
-  **Lo que lo agrava, y es la mitad que una sola lente no vio:** con ese access token filtrado
-  se puede llamar `POST /auth/switch-tenant`, que solo exige `JwtAuthGuard`, y la respuesta trae
-  un `refresh_token` nuevo por `Set-Cookie` — legible por cualquier cliente HTTP, no solo por un
-  navegador. Una filtración de 15 minutos se vuelve una sesión renovable.
-  **Antes de decidir el arreglo hay que contestar algo previo: ¿el login con Google está
-  habilitado en producción?** Si no lo está, esto baja de prioridad sin dejar de ser deuda.
-
-- [ ] **Contratar un módulo, ¿es un borde duro o solo decide qué se ve en el menú?** (backend +
-  producto, auditoría RBAC/auth 2026-08-15) — **tres lentes ciegas entre sí cayeron sobre el
-  mismo borde**; se cuenta una vez porque se decide una vez.
-  `docs/PRODUCTO.md:127` dice: *"Cada ruta valida rol + **módulo contratado** + permiso"*. El
-  código no lo sostiene de forma consistente:
-
-  | Camino | Qué hace hoy |
-  |---|---|
-  | Short-circuit `es_fijo` de `RbacService.userHasPermiso` | **No mira `tenant_modulos`.** El admin llega a cualquier módulo |
-  | `assignUser` con un rol de otro tenant | Permisos atados a los módulos de **ese otro** tenant |
-  | `RolesService.setPermissions` | **Sí valida** que el módulo sea del tenant |
-
-  Y `TenantsService.create()` **no siembra ningún `tenant_modulos`** (verificado): un tenant
-  recién creado tiene cero módulos contratados y su admin igual le pega con 200 a cualquier ruta
-  de negocio, mientras el frontend —que usa `getMisPermisos`, sí filtrado— ni le muestra el link.
-  ⚠️ **No es un problema de aislamiento sino comercial**: nadie ve datos de otro tenant, pero el
-  admin llega a módulos que no pagó, y los módulos son lo que se vende. Conviene no confundir
-  los dos bordes.
-  El tercer camino prueba que la regla existe y que alguien la escribió a conciencia. **La
-  pregunta es cuál de las dos conductas es la correcta**, y de ahí sale si se arregla el motor o
-  se corrige la doc.
-
-- [ ] **El último admin puede dejarse afuera, y el tenant no se recupera por ninguna API**
-  (backend, auditoría RBAC/auth 2026-08-15) — `roles.service.ts` → `removeUser` desasigna a una
-  persona de un rol sin mirar si es el último `es_fijo` del tenant, y `tenants.service.ts` →
-  `removeMember` deja auto-eliminarse. `TenantAdminGuard` solo verifica que quien llama **sea**
-  admin en ese instante, nunca que la acción deje al tenant con alguno. (`RolesService.remove`
-  —borrar el rol— sí bloquea `esFijo`; desasignar a la persona, no.)
-  ⚠️ **Verificado lo que decide la severidad:** `/admin/tenants` con `SuperadminGuard` expone
-  crear, listar, ver, editar, borrar y agregar módulos — **ninguna ruta para asignar un rol ni
-  sumar un miembro**. Un tenant que se queda sin admin **solo se arregla con SQL directo**.
-  **La decisión:** ¿se bloquea la acción cuando dejaría el tenant sin admin, o se agrega una
-  ruta de recuperación del superadmin? La primera es más barata; la segunda cubre también los
-  casos que la validación no anticipe.
-
 - [ ] **`POST /auth/register` dice si un correo ya está registrado** (backend, auditoría
   RBAC/auth 2026-08-15) — responde `409 "El correo ya esta registrado"` vs `201`, así que
   cualquiera puede confirmar qué correos tienen cuenta. **Lo llamativo es la asimetría interna:**
@@ -1083,15 +1178,6 @@ prohíbe.
   descarta como un error cualquiera.
   El arreglo toca la lógica de rotación del sistema ya implementado, por eso queda acá y no en
   la sección 1.
-
-- [ ] **El login con Google ignora si el correo está verificado y vincula por coincidencia**
-  (backend, auditoría RBAC/auth 2026-08-15) — `google.strategy.ts` no lee el campo `verified`
-  que `passport-google-oauth20` sí expone, y `auth.service.ts` → `googleLogin` vincula el
-  `googleId` a cualquier cuenta local que coincida **por correo**, sin probar que esa dirección
-  sea de quien entra.
-  Es la **misma familia** que la adopción de cuenta por correo del alta de usuarios (arriba):
-  las dos tratan "el correo coincide" como prueba de identidad. Conviene decidirlas juntas, con
-  un solo criterio para todo el sistema.
 
 - [ ] **Dar de baja una membresía deja al garzón vinculado sin ninguna credencial, y en
   silencio** (backend + frontend, auditoría RBAC/auth 2026-08-15) — **lo creó la entrega del PIN
