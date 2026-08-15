@@ -1757,8 +1757,21 @@ y viaja con ella.
   en qué momento se congela la tasa: al cotizar, al emitir o al cobrar; (c) **tasas con fecha** —
   si guardan historial con vigencia y de dónde las toman.
   ⚠️ Regla del cruce: insumo para adaptar, **no verdad a copiar**.
-  ❓ **Sin acordar todavía:** si la investigación se acota a Chile o abre a México (2 decimales),
-  Paraguay (sin decimales) y Colombia (UVR).
+  ✅ **Alcance acordado (owner, 2026-08-15): se abre a varios países.** El objetivo que fijó el
+  owner es que **funcione con todas las monedas y con las conversiones tipo UF y USD**, no que
+  resuelva el caso chileno. Entonces la investigación tiene que cubrir, como mínimo:
+  - **Monedas sin decimales** (CLP, PYG, JPY) — donde el total tiene que ser entero sí o sí.
+  - **Monedas con 2** (USD, MXN, y la mayoría).
+  - **Monedas con 3** (KWD, BHD, TND). Van a propósito: son las que rompen cualquier diseño que
+    asuma "0 o 2" y hoy el sistema no tiene ninguna.
+  - **Unidades de cuenta indexadas**: UF chilena, UVR colombiana, UI uruguaya.
+  - **Operación multi-moneda de verdad**: cotizar en una moneda y cobrar en otra, que es el caso
+    que la UF y el USD tienen en común y el que el sistema ya intenta con `convertirAMonedaOficial`.
+  ⚠️ **Consecuencia de diseño que ya se puede anticipar:** con 0, 2, 3 y 4 decimales en juego, la
+  cantidad de decimales **no puede quedar hardcodeada en ningún lado** —ni en un `toFixed(4)`, ni
+  en `ESCALA_PERSISTIDA`— sin decidir antes qué pasa cuando la moneda tiene más decimales que la
+  columna. `NUMERIC(18,4)` alcanza para UF (4) y sobra para CLP (0), pero es una restricción que
+  hoy nadie eligió a conciencia: quedó.
 
 - [ ] 🔵 **Manejo de fechas y zonas horarias — tema propio, EN COLA detrás de decimales**
   (backend, medido el 2026-08-15) — **el owner lo puso explícitamente después de decimales.**
