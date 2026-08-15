@@ -118,6 +118,29 @@ momento; lo que se difiere es abrir estos tres frentes.
   greppean texto y valida links. No hay un fix mecánico obvio (un linter de markdown-tables es
   una dependencia nueva, a evaluar), pero vale la entrada para no repetir el mismo susto.
 
+- [ ] **El garzón que abre `/salones` ve un toast rojo de permiso que no le corresponde**
+  (frontend, **medido en el smoke del 2026-08-15**) — con la cuenta `garzon.pin@paris.cl`, la
+  carga inicial de la pantalla del salón dispara cinco 403 (`/caja/activa`, `/items` ×3,
+  `/tipos-documento`: datos del POS que el rol de garzón no ve) y al menos uno sale como
+  *"No tienes permiso para esta acción"* en rojo, arriba a la derecha. **Preexistente**, no lo
+  introdujo el PIN propio: `/garzones/mi-pin` devolvió 200 en la misma corrida. Es la misma
+  familia que el `.catch(() => null)` que ya lleva `cargarActiva`, aplicada a medias.
+
+- [ ] **¿Se puede desvincular una cuenta desde el formulario?** (frontend, **duda medida en el
+  smoke del 2026-08-15, sin resolver**) — el `USelectMenu` de "Cuenta vinculada" muestra
+  `Sin vincular (usa PIN)` como *placeholder*, pero **con una cuenta ya elegida no se vio una
+  opción para volver a ese estado**: la lista solo trae cuentas. Si no se puede, el `null`
+  explícito de `UpdateGarzonDto` solo es alcanzable por API. Importa porque el estado
+  *"desvinculado y sin PIN usable"* —que la ficha ahora señala en rojo— se produce justamente
+  por ese camino. **Verificar antes de asumir cualquiera de las dos cosas.**
+
+- [ ] **Ningún e2e asierta el efecto de invalidar al vincular** (backend, **medido 2026-08-15**)
+  — el mutante que quita `garzon.pinHash = PIN_INUTILIZABLE` de la rama `vincular` de
+  `actualizar()` **no pone nada en rojo en el e2e**. La transición sí se recorre —
+  `caja-testigo.e2e-spec.ts:383-387` vincula al garzón B por `PATCH` después de abrirle sesión
+  con su PIN vivo, y `:771` hace lo mismo con D — así que **falta la aserción, no el escenario**:
+  alcanza con un `expect` sobre ese PIN después del PATCH. En unit sí está cubierto.
+
 - [ ] **"Garzones" es el nombre equivocado: el modelo ya es de personal con PIN** (backend +
   frontend + BD, **idea del owner 2026-08-11, medida ese día**) — la tabla `garzones` ya
   admite `tipo IN ('garzon','cocina','barra')`: gente que **no atiende mesas**, con PIN,
