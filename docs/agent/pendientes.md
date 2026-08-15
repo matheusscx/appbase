@@ -318,6 +318,57 @@ una tanda de una sentada empieza arriba, y **va después de la 🔴**.
   llamadores de `registrarMovimiento` validan el ítem antes. Esto es el escalón de adentro, que
   existe justamente porque el `unidadId` no pasa por esa validación.
 
+- [ ] 🚩 **Cambiar la contraseña desde el perfil no cierra las sesiones vivas** (backend,
+  auditoría RBAC/auth 2026-08-15) — `me.service.ts` → `updateContrasena` valida la contraseña
+  actual, hashea la nueva, hace `repo.update` y devuelve. **No toca `refresh_tokens`.** Su
+  flujo hermano sí: `auth.service.ts:134` (`elegirContrasena`, el reset por link) hace
+  `refreshRepo.delete({ userId })` con comentario explicando por qué hace falta.
+  **Escenario:** a alguien le roban la sesión, se da cuenta, entra y cambia su contraseña
+  desde el perfil. El atacante **sigue adentro** hasta que su refresh token expire, y puede
+  renovarlo indefinidamente. Es exactamente lo que la persona creyó estar cortando.
+  Mecánica porque **el arreglo ya está escrito en el hermano**: una línea. Al hacerlo, ojo con
+  cerrar también la sesión propia de quien cambia la contraseña (o reemitirle tokens), o el
+  usuario se autodeslogea al cambiarla — decidir eso es parte del fix, no una pregunta aparte.
+
+- [ ] 🚩 **El motor de permisos y `assignUser` no atan el rol a su tenant** (backend,
+  auditoría RBAC/auth 2026-08-15; **lo vieron dos lentes ciegas entre sí**) — dos mitades que
+  van juntas o el arreglo queda a medias:
+  1. `roles.service.ts` → `assignUser` valida que el **usuario** sea miembro del tenant, pero
+     nunca que el **`rolId`** pertenezca a ese tenant. Sus hermanos del mismo archivo
+     (`update`, `remove`, `findPermissions`, `setPermissions`) sí lo hacen.
+  2. Peor y más de fondo: **las tres consultas de `rbac.service.ts` unen
+     `JOIN roles r ON r.rol_id = ru.rol_id` sin `r.tenant_id = ru.tenant_id`** (verificado
+     abriendo el archivo), y la del permiso completo tampoco ata `tenant_modulos` al tenant.
+     O sea que una fila cruzada **se evalúa de verdad**: no es una fila inerte.
+  ⚠️ **Severidad media, no alta, y el encuadre importa:** la ruta exige `TenantAdminGuard`, así
+  que el actor ya es admin de su tenant; `ru.tenant_id` es siempre el del token, así que **no
+  hay acceso a datos de otro tenant**; y hace falta conocer el UUID de un rol ajeno (trivial en
+  el seed, no adivinable en prod). Lo que se cruza es el borde de módulos contratados — ver la
+  entrada de ese tema en la sección 4.
+  **Arreglar solo `assignUser` deja el motor confiando** en cualquier fila que entre por otro
+  camino. Es el patrón de "fix a medias" que este método ya cobró una vez.
+
+- [ ] **`roles` y `rbac` no tienen un solo test unitario** (backend/tests, medido 2026-08-15)
+  — cero `*.spec.ts` en los dos módulos (verificado). **El motor de permisos del sistema no
+  tiene cobertura propia**, y eso explica por qué la entrada de acá arriba sobrevivió: no hay
+  nada que se ponga rojo. Los e2e que rozan roles
+  (`alta-usuarios-tenant`, `invitacion-y-reset`, `garzon-modo-personal`) los ejercitan de
+  costado, no como sujeto.
+  Prioridad dentro de la lista: los tests que **conceden** acceso antes que los que lo niegan
+  — un `return true` sin test es el peor de los dos.
+
+- [ ] 🚩 **Los 23 helpers de login del e2e no afirman su status, y eso fabrica el 401
+  intermitente** (backend/tests, auditoría RBAC/auth 2026-08-15) — **esto explica la forma de
+  los cuatro avistajes** de la entrada del flaky (sección 2). Medido: 23 de los 32
+  `*.e2e-spec.ts` leen `resLogin.body.access_token` / `resTenant.body.access_token` **sin
+  verificar `.status`**. Si el login o el `switch-tenant` fallan una vez, `token` queda
+  `undefined` en silencio y todo el resto del `describe` manda `Authorization: Bearer
+  undefined` — que `JwtAuthGuard` rechaza con **401 en la siguiente ruta que se pida, no en la
+  que falló**. Un solo test por corrida, siempre otra ruta, nunca reproduce: la firma exacta.
+  ⚠️ **Explica la propagación, no el disparador:** sigue sin saberse por qué el login falla esa
+  vez. Lo que cambia es que deja de ser un misterio — con el `expect` puesto, el próximo rojo
+  cae en el login y dice qué contestó. Misma higiene que ya se aplicó a `/tenants/members`.
+
 - [ ] **El paso 4 de la prueba manual de `garzones.md` salta el requisito de entrar a turno: el
   selector sale vacío si se sigue al pie de la letra** (docs + frontend, **medido 2026-08-15,
   hueco preexistente a esta feature**) — el paso 4 de
@@ -477,6 +528,17 @@ decisión que no es mía).
   corrida siguiente (misma suite, mismo `reset-db.sh`) verde, y `--verificar` confirmó una
   sola siembra. Es otro spec y otra ruta, así que **no es "el flaky de caja"**: es un
   intermitente de **autenticación**, que es la familia a la que los dos pertenecen.
+
+  ✅ **CAUSA MEJOR SOSTENIDA, medida el 2026-08-15 por la auditoría de RBAC/auth:** los helpers
+  `login()` de 23 de los 32 specs leen el `access_token` **sin afirmar el status**, así que un
+  login fallido deja el token en `undefined` y el `describe` entero manda `Bearer undefined` →
+  401 en la ruta siguiente. Ver la entrada de la sección 1. ⚠️ Explica **la forma** del síntoma,
+  no el disparador: sigue sin saberse por qué el login falla esa vez, y por eso esta entrada
+  queda abierta. Lo que cambia es que el próximo rojo va a caer donde corresponde.
+  ⛔ **Y descarta la sospecha que esta entrada anotaba**: "el pool agotado disfrazado de 401" es
+  falso. `jwt.strategy.ts` → `validate()` **no toca la base** (verificado abriendo el archivo:
+  recibe el payload firmado y mapea cuatro campos), y ningún guard tiene `try/catch` que
+  traduzca un error a 401. Un fallo de base ahí da 500, no 401.
 
   Por qué importa para el de caja: un `401` devuelve un **objeto** (`{statusCode, message}`),
   no un array — que es exactamente `resMiembros.body.find is not a function`. Los dos
@@ -837,6 +899,103 @@ prohíbe.
   así que hoy no es una limitación conocida sino un hueco silencioso.
   **La decisión:** ¿los combos entran a la misma bandeja de desfases que las recetas, o se
   documenta explícitamente que su costo es manual?
+
+- [ ] 🚩 **Se puede pre-registrar el correo de un futuro empleado y heredar sus roles**
+  (backend + producto, auditoría RBAC/auth 2026-08-15) — **el hallazgo más feo de la pasada.**
+  `tenants.service.ts` → `crearUsuario` busca el correo y, si **ya existe** un `Usuario`,
+  **adopta esa cuenta tal cual**. El comentario del propio código lo dice: *"Solo el id: el
+  resto del `Usuario` —incluido el hash— no se usa"*. Si el correo **no** existe, en cambio, la
+  cuenta se crea **sin contraseña** y la persona la elige desde el link de invitación — *"así
+  nadie más que ella"*. **Esa asimetría es el agujero.**
+  **Escenario, encadenado con el registro público que no verifica correos** (ya anotado, pero
+  por otra razón): alguien registra `futuro.empleado@empresa.cl` con una contraseña suya. Cuando
+  el admin da de alta a esa persona de verdad, el sistema **adopta la cuenta del atacante** y le
+  asigna los roles que el admin eligió. No se manda ningún mail y la respuesta dice
+  `invitado: false`, así que **el admin no recibe ninguna señal**. El empleado real nunca recibe
+  invitación — la única pista, y tardía.
+  El docblock del método asume que "si el correo ya existía, la cuenta es de esa persona".
+  Ninguna de las dos entradas por separado mostraba esto: hizo falta cruzarlas.
+  **Las opciones, y la decisión es tuya:** (a) verificar el correo en el registro público —
+  cierra la raíz pero es la entrada ya anotada y más cara; (b) que el alta **nunca** adopte una
+  cuenta con contraseña ya puesta sin que la persona confirme por mail; (c) avisarle al admin
+  que está adoptando una cuenta preexistente en vez de crear una, y que decida.
+
+- [ ] 🚩 **El token de Google viaja por la URL, y `switch-tenant` lo convierte en sesión
+  persistente** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes ciegas entre
+  sí lo vieron**) — `auth.controller.ts` → `googleCallback` redirige a
+  `/auth/callback?token=...` con el **access token en la query string**, a diferencia del resto
+  del sistema que usa cookie `httpOnly` para el refresh. Queda en el historial del navegador y
+  en los logs de acceso del hosting del frontend; `callback.vue` ni siquiera hace
+  `replace: true`.
+  **Lo que lo agrava, y es la mitad que una sola lente no vio:** con ese access token filtrado
+  se puede llamar `POST /auth/switch-tenant`, que solo exige `JwtAuthGuard`, y la respuesta trae
+  un `refresh_token` nuevo por `Set-Cookie` — legible por cualquier cliente HTTP, no solo por un
+  navegador. Una filtración de 15 minutos se vuelve una sesión renovable.
+  **Antes de decidir el arreglo hay que contestar algo previo: ¿el login con Google está
+  habilitado en producción?** Si no lo está, esto baja de prioridad sin dejar de ser deuda.
+
+- [ ] **Contratar un módulo, ¿es un borde duro o solo decide qué se ve en el menú?** (backend +
+  producto, auditoría RBAC/auth 2026-08-15) — **tres lentes ciegas entre sí cayeron sobre el
+  mismo borde**; se cuenta una vez porque se decide una vez.
+  `docs/PRODUCTO.md:127` dice: *"Cada ruta valida rol + **módulo contratado** + permiso"*. El
+  código no lo sostiene de forma consistente:
+
+  | Camino | Qué hace hoy |
+  |---|---|
+  | Short-circuit `es_fijo` de `RbacService.userHasPermiso` | **No mira `tenant_modulos`.** El admin llega a cualquier módulo |
+  | `assignUser` con un rol de otro tenant | Permisos atados a los módulos de **ese otro** tenant |
+  | `RolesService.setPermissions` | **Sí valida** que el módulo sea del tenant |
+
+  Y `TenantsService.create()` **no siembra ningún `tenant_modulos`** (verificado): un tenant
+  recién creado tiene cero módulos contratados y su admin igual le pega con 200 a cualquier ruta
+  de negocio, mientras el frontend —que usa `getMisPermisos`, sí filtrado— ni le muestra el link.
+  ⚠️ **No es un problema de aislamiento sino comercial**: nadie ve datos de otro tenant, pero el
+  admin llega a módulos que no pagó, y los módulos son lo que se vende. Conviene no confundir
+  los dos bordes.
+  El tercer camino prueba que la regla existe y que alguien la escribió a conciencia. **La
+  pregunta es cuál de las dos conductas es la correcta**, y de ahí sale si se arregla el motor o
+  se corrige la doc.
+
+- [ ] **El último admin puede dejarse afuera, y el tenant no se recupera por ninguna API**
+  (backend, auditoría RBAC/auth 2026-08-15) — `roles.service.ts` → `removeUser` desasigna a una
+  persona de un rol sin mirar si es el último `es_fijo` del tenant, y `tenants.service.ts` →
+  `removeMember` deja auto-eliminarse. `TenantAdminGuard` solo verifica que quien llama **sea**
+  admin en ese instante, nunca que la acción deje al tenant con alguno. (`RolesService.remove`
+  —borrar el rol— sí bloquea `esFijo`; desasignar a la persona, no.)
+  ⚠️ **Verificado lo que decide la severidad:** `/admin/tenants` con `SuperadminGuard` expone
+  crear, listar, ver, editar, borrar y agregar módulos — **ninguna ruta para asignar un rol ni
+  sumar un miembro**. Un tenant que se queda sin admin **solo se arregla con SQL directo**.
+  **La decisión:** ¿se bloquea la acción cuando dejaría el tenant sin admin, o se agrega una
+  ruta de recuperación del superadmin? La primera es más barata; la segunda cubre también los
+  casos que la validación no anticipe.
+
+- [ ] **`POST /auth/register` dice si un correo ya está registrado** (backend, auditoría
+  RBAC/auth 2026-08-15) — responde `409 "El correo ya esta registrado"` vs `201`, así que
+  cualquiera puede confirmar qué correos tienen cuenta. **Lo llamativo es la asimetría interna:**
+  `recuperar()` fue escrito explícitamente para NO hacer esto (responde igual exista o no), y ese
+  criterio no se replicó en `register`.
+  **La decisión es un trade real, no un bug obvio:** si el registro deja de distinguir, quien se
+  registra con un correo ya tomado no se entera y queda sin saber por qué no puede entrar. El
+  patrón habitual es responder igual y mandar un mail explicando — que exige el correo verificado
+  de la entrada de arriba.
+
+- [ ] **El refresh token rota pero no detecta reuso** (backend, auditoría RBAC/auth 2026-08-15)
+  — ⛔ **TOCA JWT: no se toca sin decisión del owner** (`CLAUDE.md`, invariante 4).
+  `auth.service.ts` → `refresh` rota el token, pero si el viejo —ya borrado— se vuelve a
+  presentar, la única respuesta es un 401 genérico: no se revoca la sesión ni queda registro. El
+  reuso de un refresh token rotado es la señal clásica de que alguien copió la sesión, y hoy se
+  descarta como un error cualquiera.
+  El arreglo toca la lógica de rotación del sistema ya implementado, por eso queda acá y no en
+  la sección 1.
+
+- [ ] **El login con Google ignora si el correo está verificado y vincula por coincidencia**
+  (backend, auditoría RBAC/auth 2026-08-15) — `google.strategy.ts` no lee el campo `verified`
+  que `passport-google-oauth20` sí expone, y `auth.service.ts` → `googleLogin` vincula el
+  `googleId` a cualquier cuenta local que coincida **por correo**, sin probar que esa dirección
+  sea de quien entra.
+  Es la **misma familia** que la adopción de cuenta por correo del alta de usuarios (arriba):
+  las dos tratan "el correo coincide" como prueba de identidad. Conviene decidirlas juntas, con
+  un solo criterio para todo el sistema.
 
 - [ ] **El aviso al vincular una cuenta dice "hasta que se lo des", pero el encargado
   puede no poder dárselo** (backend, **medido 2026-08-15 al cerrar el plan
