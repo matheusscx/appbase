@@ -37,6 +37,80 @@ describe('InventarioService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // El chokepoint acota por tenant contra el padre
+  //
+  // `item_producto` no tiene `tenant_id` (es extensión de `items` con PK
+  // compartida), así que el único acote posible es el JOIN al padre. Estos tests
+  // no prueban un bug alcanzable: los 16 llamadores de `registrarMovimiento`
+  // validan el ítem contra el tenant antes de llamar, así que hoy es **defensa en
+  // profundidad**. Lo que fijan es que siga estando el día que aparezca el
+  // llamador 17.
+  // ---------------------------------------------------------------------------
+  describe('registrarMovimiento — acote por tenant en el lock', () => {
+    function lockQuery(): [string, unknown[]] {
+      return managerMock.query.mock.calls[0] as [string, unknown[]];
+    }
+
+    it('el SELECT del lock recibe el tenant como parámetro, no solo el item', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          usuarioId: USER_ID,
+        },
+      );
+
+      // La aserción fuerte es por VALOR de los parámetros: sacar el
+      // `AND i.tenant_id = $2` deja el array en `[ITEM_ID]` y esto falla por su
+      // propia comparación, no por un match de texto sobre el SQL.
+      const [sql, params] = lockQuery();
+      expect(params).toEqual([ITEM_ID, TENANT]);
+      expect(sql).toContain('i.tenant_id = $2');
+    });
+
+    it('lockea solo `item_producto`, no la fila de `items` que usa para acotar', async () => {
+      managerMock.query
+        .mockResolvedValueOnce([{ stock: '10', modo_inventario: 'cantidad' }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
+
+      await service.registrarMovimiento(
+        managerMock as unknown as EntityManager,
+        {
+          tenantId: TENANT,
+          itemId: ITEM_ID,
+          tipo: 'entrada',
+          motivo: 'compra',
+          cantidad: '5',
+          usuarioId: USER_ID,
+        },
+      );
+
+      // `FOR UPDATE` a secas lockearía también `items`: huella de locks nueva en
+      // el camino más caliente del sistema, que es donde la auditoría del
+      // 2026-08-15 encontró deadlocks por orden de bloqueo. El `OF ip` no es
+      // estilo.
+      //
+      // Anclado al final y no `toContain`: la regresión que este test dice
+      // prevenir es volver a lockear `items`, y eso se escribe
+      // `FOR UPDATE OF ip, i` — que **contiene** `FOR UPDATE OF ip` y satisfaría
+      // un `toContain`. Un test cuyo nombre promete lo que su aserción no puede
+      // sostener es peor que no tenerlo.
+      const [sql] = lockQuery();
+      expect(sql.trimEnd()).toMatch(/FOR UPDATE OF ip$/);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Modo 'cantidad' (comportamiento original)
   // ---------------------------------------------------------------------------
   describe('registrarMovimiento — modo cantidad', () => {

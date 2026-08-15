@@ -142,6 +142,80 @@ se pasa al service. Ejemplo completo: `monedas.controller.ts`.
 > Ocultar el link en el sidebar (`can(modulo, permiso)`) es complementario, no un
 > sustituto del enforcement en el backend.
 
+### Tablas sin `tenant_id`
+
+**No todas las tablas lo llevan, y eso no es un olvido.**
+
+**El censo, con su criterio declarado.** Sin el criterio el número no significa nada: contar
+"menciona `tenant_id`" y contar "declara la columna" dan resultados distintos sobre las mismas
+102 entidades, y esa diferencia ya produjo una cifra mal publicada acá. El criterio es
+**declara la columna**, y el número es el que devuelve este comando — si algún día no coincide,
+manda el comando:
+
+```bash
+grep -rLE "name: 'tenant_id'" --include='*.entity.ts' backend/src | wc -l   # → 39
+```
+
+Sobre 102 entidades: **63 declaran `tenant_id`, 39 no**. Esas 39 se reparten en **cuatro**
+familias, y a la última la regla de abajo no le aplica:
+
+| Familia | Ejemplos (nombre real de tabla) | Por qué no lo lleva |
+|---|---|---|
+| **Catálogo del sistema** | `pais`, `provincia`, `moneda`, `permisos`, `modulos_app`, `metodos_pago`, `unidades_medida`, `tipos_documento_tributario` | Son de **todos** los tenants a propósito. Ponerles `tenant_id` sería el error |
+| **Extensión de `items` con PK compartida** | `item_producto`, `item_servicio`, `item_suscripcion`, `item_combo`, `item_receta` | La **PK es la FK**: la fila no puede existir sin su padre. El tenant vive en `items` |
+| **Hijo de una cabecera** | `venta_detalles`, `ventas_impuestos`, `movimientos_caja`, `movimiento_inventario_detalle`, `descuento_tramos` | El tenant se hereda del encabezado |
+| **Del usuario o del proceso** | `usuarios`, `refresh_tokens`, `tokens_acceso`, `cron_ejecuciones` | **No tienen tenant que heredar.** Una persona pertenece a varios tenants (la relación vive en `usuarios_tenants`) y un job del sistema no pertenece a ninguno |
+
+⚠️ **La cuarta familia existe porque la regla de abajo NO la cubre.** Si tu tabla nueva cae
+ahí —no es catálogo, no cuelga de una cabecera con tenant, y su "padre" es `usuarios` o
+nada— entonces el acote por `JOIN` no aplica y el aislamiento tiene que venir de otro lado
+(el token, el `usuario_id`). Preguntá antes de asumir que alcanza.
+
+**La regla, que es sobre las consultas y no sobre el esquema:** una tabla de las tres
+primeras familias se acota **por su padre**. Toda consulta que la alcance tiene que llegar
+por un `JOIN` desde una tabla ya filtrada por el tenant del token. El riesgo no es que falte
+la columna — es **llegar a la tabla directo por `id`**, porque ahí no hay nada que acotar.
+
+Cuando un método recibe un id y va directo a la tabla hija, el acote se hace **con un
+`JOIN` al padre en esa misma consulta**, no delegándolo en quien llama:
+
+```sql
+SELECT ip.stock, ip.modo_inventario
+  FROM item_producto ip
+  JOIN items i ON i.item_id = ip.item_id
+ WHERE ip.item_id = $1 AND i.tenant_id = $2
+ FOR UPDATE OF ip
+```
+
+⚠️ **`FOR UPDATE OF ip`, nunca `FOR UPDATE` a secas.** Sin el `OF`, Postgres lockea también
+la fila de `items` que se usó solo para acotar: huella de locks nueva en el camino más
+caliente del sistema. No es teórico — `mermas.service.ts` ya toma `FOR UPDATE OF i` sobre
+`items` antes de llamar al kardex, así que un `FOR UPDATE` a secas acá haría que la venta
+empiece a bloquear contra la merma. El orden de bloqueo entre caminos es donde el proyecto
+ya tiene deadlocks: el de fila está descrito en el comentario de `ventas.service.ts` →
+`crear()` (por eso ese método ordena por `itemId` y reintenta), y las tres entradas abiertas
+del mismo molde están en `docs/agent/pendientes.md` § "Carreras de concurrencia".
+
+⚠️ **Este molde NO trae `eliminado_el IS NULL`, y es a propósito.** La invariante del
+proyecto es que toda lectura lo filtra; acá el `JOIN` al padre existe **solo para acotar el
+tenant**, y agregarle el filtro cambiaría la conducta del kardex: anular una venta de un
+ítem borrado después dejaría de reponer stock. **Si copiás este bloque para una lectura de
+catálogo, agregale el filtro.** El día que se decida qué hace el kardex con un ítem
+borrado, esta nota se actualiza.
+
+**Dónde ponerlo:** en el **chokepoint**, no en cada llamador. `InventarioService.registrarMovimiento`
+es el ejemplo vivo — todo movimiento de stock del sistema pasa por ahí, así que un `JOIN` en
+su consulta de lock cubre a sus 16 llamadores y al que se agregue mañana. Repartir la
+defensa entre los llamadores funciona hasta que aparece el que se olvida.
+
+> **Por qué algunas tablas del mismo `item_id` SÍ lo llevan, y no es incoherencia:**
+> `item_unidad` e `item_lote` —las series y los lotes de un producto— declaran `tenant_id` y
+> el código lo verifica (`moverSerie`/`moverLote`). El criterio es de **dónde viene el id**:
+> esos `unidadIds`/`loteId` llegan del **body del cliente** y no pasan por la validación del
+> ítem, así que necesitan su propio chequeo. El `itemId`, en cambio, siempre se resolvió
+> antes contra el tenant. Un id que viene del cliente se verifica donde se usa; uno derivado
+> se acota por el padre.
+
 ---
 
 ## 5. Module

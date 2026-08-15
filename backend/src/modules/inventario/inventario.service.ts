@@ -83,14 +83,37 @@ export class InventarioService {
     costoActualPrevio: string | null;
     costoActual: string | null;
   }> {
+    // `item_producto` no tiene `tenant_id`: es una extensión de `items` con PK
+    // compartida, así que el tenant vive en el padre (ver `docs/patterns/backend.md`
+    // § "Tablas sin tenant_id"). El JOIN es la única forma de acotarlo acá — y este
+    // es el lugar donde hay que hacerlo, porque este método es el chokepoint por el
+    // que pasa TODO movimiento de stock del sistema. Antes la defensa vivía repartida
+    // en los llamadores, que hoy validan el ítem contra el tenant antes de llamar:
+    // correcto, pero sin red para el llamador que se agregue mañana.
+    //
+    // `FOR UPDATE OF ip` y no `FOR UPDATE` a secas: sin el `OF`, Postgres lockea
+    // también la fila de `items`, que es huella de locks nueva en el camino más
+    // caliente del sistema — exactamente donde la auditoría del 2026-08-15 encontró
+    // deadlocks por orden de bloqueo.
+    //
+    // No filtra `i.eliminado_el IS NULL` a propósito: eso cambiaría la semántica de
+    // las reposiciones (anular una venta de un ítem borrado después dejaría de
+    // reponer), que es otra decisión y no la que este cambio vino a tomar.
     const productoRows: {
       stock: string;
       modo_inventario: string;
       costo_actual: string | null;
     }[] = await manager.query(
-      `SELECT stock, modo_inventario, costo_actual FROM item_producto WHERE item_id = $1 FOR UPDATE`,
-      [params.itemId],
+      `SELECT ip.stock, ip.modo_inventario, ip.costo_actual
+         FROM item_producto ip
+         JOIN items i ON i.item_id = ip.item_id
+        WHERE ip.item_id = $1 AND i.tenant_id = $2
+        FOR UPDATE OF ip`,
+      [params.itemId, params.tenantId],
     );
+    // Mismo mensaje para "no existe", "no es producto" y "es de otro tenant": un id
+    // ajeno tiene que ser indistinguible de uno inexistente, o la respuesta se vuelve
+    // un oráculo que confirma qué ítems existen en otros tenants.
     if (!productoRows.length) {
       throw new BadRequestException('El item no tiene control de stock');
     }
