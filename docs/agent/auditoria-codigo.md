@@ -222,8 +222,29 @@ archivó 1 entrada que ya estaba entregada y nadie había mudado, y se promovió
 hueco de test que vivía como nota suelta dentro de un bloque de contexto. Reordenar no cierra
 nada; lo que hace es que el tamaño real sea visible.
 
-⚠️ **La condición sigue siendo la misma para la próxima pausa:** si una pasada vuelve a
-sumar ~25 entradas, el programa se detiene otra vez. **La pasada 3 sumó 16** (`pendientes.md`
+### ⏸ Pausado otra vez tras la pasada 4 (decisión del owner, 2026-08-15)
+
+**Queda una sola pasada —la 5, catálogos y configuración— y NO se lanza todavía.** No es que
+el umbral se haya cruzado: la pasada 4 sumó 22, bajo los ~25. Lo que se cruzó es otra cosa, y
+el método no la tenía escrita: **`pendientes.md` llegó a 96 entradas, de las cuales 29 esperan
+una decisión del owner** — más que cualquier otra sección del archivo.
+
+Ahí está el cuello. Un hallazgo que espera respuesta no es trabajo pendiente: es trabajo que
+**nadie puede tomar**, ni siquiera equivocándose. Auditar más código mientras ese montón crece
+produce inventario, no confianza — que es la regla de este mismo método aplicada a sí misma.
+
+➡️ **Condición de reanudación de la 5:** que la sección "Necesita que el owner conteste" baje
+a un tamaño donde se pueda leer entera de una sentada. La 5 es además la de menor riesgo
+declarado (*"CRUD admin-only con lectura abierta"*), así que es la que menos cuesta diferir.
+
+⚠️ **Lección para el umbral, que a partir de ahora se mide con dos números y no con uno:** el
+tope de ~25 entradas por pasada no alcanza. Una pasada puede quedar cómodamente abajo y aun así
+tapar el proceso, si lo que suma son **decisiones** en vez de correcciones. **Antes de lanzar
+una pasada se miran los dos:** cuántas entradas sumó la anterior, y cuántas decisiones sin
+contestar hay abiertas.
+
+⚠️ **La condición original sigue vigente:** si una pasada vuelve a sumar ~25 entradas, el
+programa se detiene igual. **La pasada 3 sumó 16** (`pendientes.md`
 pasó de 60 a 76): por debajo del umbral, así que el programa sigue. Las pasadas 4 (RBAC/auth)
 y 5 (catálogos) quedan habilitadas — pero el umbral se mide **antes** de lanzar la 5, no
 después de las dos. El orden de arriba sigue siendo el
