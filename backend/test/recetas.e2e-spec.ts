@@ -642,9 +642,20 @@ describe('Recetas — flujo completo (e2e)', () => {
   // inborrable) y `estado = 'abierta' OR TRUE` (una cuenta cerrada vuelve el
   // ítem inborrable para siempre).
   const MESA_4_ID = '550e8400-e29b-41d4-a716-446655440235';
-  const ANA_PIN = '111111';
-  // Id fijo del seed: el selector manda a quién comparar, el PIN es la prueba.
-  const ANA_ID = '550e8400-e29b-41d4-a716-446655440238';
+  // Bruno Díaz, no Ana Torres NI Carla Rojas. Ana: vinculada desde el seed,
+  // y vincular invalida el PIN (`GarzonesService.actualizar()`,
+  // `6758e7b2`) — su `111111` de dev ya no sirve. Carla: se probó primero
+  // (revisión independiente, 2026-08-14) y rompía `liquidacion-propinas.e2e-spec.ts`
+  // — ese spec la fuerza al grupo `cocina` vía tip (`:589`) en un test, y
+  // una sesión de `recetas` con `tipo_garzon='garzon'` viva en el mismo
+  // período la metía en los DOS grupos a la vez, y
+  // `assertGarzonEnUnSoloGrupo` cortaba con 400. Medido, no solo leído:
+  // `npm run test:e2e` completo con Carla acá daba 1 failed en
+  // `liquidacion-propinas`; con Bruno, 0. Bruno nunca cambia de grupo en
+  // ese archivo (siempre `tipoGarzon` default = `'garzon'`, grep
+  // verificado), así que es inocuo.
+  const BRUNO_PIN = '222222';
+  const BRUNO_ID = '550e8400-e29b-41d4-a716-446655440239';
   const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
   it('12. un ítem pedido en una cuenta abierta no se puede borrar, y vuelve a poder cuando la cuenta se cierra', async () => {
@@ -669,16 +680,16 @@ describe('Recetas — flujo completo (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/sesiones-garzon/cerrar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN });
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
     await request(app.getHttpServer())
       .post('/api/sesiones-garzon/iniciar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN, turnoId: TURNO_MANANA_ID });
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN, turnoId: TURNO_MANANA_ID });
 
     const resCuenta = await request(app.getHttpServer())
       .post(`/api/mesas/${MESA_4_ID}/cuentas`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN });
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
     expect(resCuenta.status).toBe(201);
     const cuentaId = (resCuenta.body as { id: string }).id;
 
@@ -742,6 +753,6 @@ describe('Recetas — flujo completo (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/sesiones-garzon/cerrar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ garzonId: ANA_ID, pin: ANA_PIN });
+      .send({ garzonId: BRUNO_ID, pin: BRUNO_PIN });
   });
 });

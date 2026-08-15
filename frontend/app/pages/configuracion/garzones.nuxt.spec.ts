@@ -139,9 +139,18 @@ let eventosPinBackend: Record<string, EventoPinFake[]> = {}
 let pinEventosRequests: string[] = []
 /** Fuerza el próximo `GET .../pin-eventos` a rechazar, para simular un fetch caído. */
 let eventosPinRechaza = false
+/** Cuentas del tenant que devuelve `GET /tenants/members/para-selector`. */
+let miembrosBackend: { usuarioId: string, nombre: string, apellido: string, esTotem: boolean }[] = []
+/** El body de cada `POST /garzones` recibido: la sonda del alta. */
+let postsCrear: Record<string, unknown>[] = []
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
+    // Alimenta el selector "Cuenta vinculada" del drawer. Sin esto no hay
+    // ninguna cuenta ofrecible y el alta CON cuenta no se puede ejercitar.
+    if (typeof url === 'string' && url.includes('/tenants/members/para-selector')) {
+      return Promise.resolve(miembrosBackend.map(m => ({ ...m })))
+    }
     if (typeof url !== 'string' || !url.includes('/garzones')) {
       return Promise.resolve([])
     }
@@ -207,6 +216,32 @@ mockNuxtImport('useApiFetch', () => {
       if (restaurarRetenido) return restaurarRetenido
       return Promise.resolve(undefined)
     }
+    if (method === 'POST' && url.endsWith('/garzones')) {
+      const body = opts?.body ?? {}
+      postsCrear.push({ ...body })
+      // Espeja `GarzonesService.crear`: con cuenta NO emite ningún PIN
+      // (`const pin = dto.usuarioId ? null : await this.generarPinUnico(...)`)
+      // y el garzón nace sin PIN fijado; sin cuenta genera uno y lo devuelve
+      // una sola vez. `?? null` a propósito: si la pantalla dejara de mandar
+      // `usuarioId`, este mock NO se cae — el alta pasa por el camino "sin
+      // cuenta" y lo que se pone en rojo es la aserción del test, no un
+      // TypeError que taparía el punto.
+      const usuarioId = (body.usuarioId as string | undefined) ?? null
+      const creado = garzon({
+        id: `garzon-nuevo-${garzonesBackend.length + 1}`,
+        nombre: (body.nombre as string | undefined) ?? '',
+        activo: (body.activo as boolean | undefined) ?? true,
+        tipo: (body.tipo as string | undefined) ?? 'garzon',
+        usuarioId,
+        pinFijado: false,
+      })
+      garzonesBackend.push(creado)
+      return Promise.resolve({
+        ...creado,
+        pin: usuarioId ? null : '424242',
+        advertencias: advertenciasBackend,
+      })
+    }
     const incluirEliminados = url.includes('incluirEliminados=true')
     if (incluirEliminados && overrideConEliminados) return overrideConEliminados
     if (!incluirEliminados && overrideSinEliminados) return overrideSinEliminados
@@ -221,6 +256,75 @@ async function montar() {
   const wrapper = await mountSuspended(Garzones)
   await new Promise(r => setTimeout(r, 0))
   return wrapper
+}
+
+/**
+ * Montaje para todo lo que pasa por el DRAWER (alta, edición, ficha del PIN).
+ * Dos cosas que necesita y no son obvias:
+ *
+ * 1. **`AppDrawer` stubeado.** Su root es `UDrawer` (reka-ui) y **cerrarlo**
+ *    revienta bajo happy-dom: la transición de salida de `usePresence` lee
+ *    `style.display` de un nodo ya desprendido y tira un unhandled rejection.
+ *    Los tests igual pasan, pero `vitest run` sale con exit 1. Medido aislando
+ *    UNA variable: abrir el drawer y desmontar da 0 rejections; abrir, guardar
+ *    —que hace `drawerOpen = false`— y desmontar da 2. Rompe el cierre, no el
+ *    montaje. El stub va en `global.stubs` y no en `mockComponent`: así queda
+ *    acotado a ESTE mount en vez de alcanzar a los `describe` de papelera.
+ * 2. **`attachTo: document.body`.** El botón es
+ *    `type="submit" form="garzon-form"`, y esa asociación por id la resuelve
+ *    el DOCUMENTO. Con el wrapper desprendido el submit no dispara y el test
+ *    pasaría sin haber guardado nada. Con el `UDrawer` real no se notaba
+ *    porque teletransporta al body.
+ *
+ * El stub no vuelve vacuos los tests: el `UForm` y el botón siguen siendo los
+ * de la página, y el mutante que saca el toast de éxito de `guardar()` mata
+ * los dos casos que pasan por acá.
+ */
+async function montarConDrawerStub() {
+  const wrapper = await mountSuspended(Garzones, {
+    attachTo: document.body,
+    global: {
+      stubs: {
+        AppDrawer: {
+          name: 'AppDrawer',
+          props: ['open'],
+          template: `
+            <div v-if="open" role="dialog">
+              <slot name="header" />
+              <slot name="body" />
+              <slot name="actions" />
+            </div>
+          `,
+        },
+      },
+    },
+  })
+  await new Promise(r => setTimeout(r, 0))
+  return wrapper
+}
+
+/**
+ * Al confirmar la regeneración quedan DOS diálogos montados un instante: el
+ * de confirmación cerrándose y el del PIN abriéndose. Buscar "el primero"
+ * devolvería el equivocado, así que se busca por contenido — por el
+ * TÍTULO ("PIN de Ana Torres") **y** por "Guárdalo ahora", que solo existe
+ * en el modal de revelado.
+ *
+ * Buscar solo por el título no alcanza: el modal de CONFIRMACIÓN de
+ * invalidar dice *"El PIN de Ana Torres deja de servir ahora…"*, que
+ * también contiene el substring "PIN de Ana Torres" — con ese único
+ * criterio, este helper podía agarrar el diálogo de confirmación en vez del
+ * de revelado (o peor: devolver "encontrado" para un caso que ni siquiera
+ * abre el modal de revelado, ver el hallazgo de la revisión del
+ * 2026-08-14). Antes solo pasaba por casualidad: el de confirmación
+ * alcanzaba a desmontarse en los `50ms` de espera de `regenerar()`.
+ */
+function modalDelPin(nombre = 'Ana Torres'): HTMLElement | undefined {
+  return [...document.body.querySelectorAll('[role="dialog"]')]
+    .find(d =>
+      d.textContent?.includes(`PIN de ${nombre}`)
+      && d.textContent?.includes('Guárdalo ahora'),
+    ) as HTMLElement | undefined
 }
 
 async function activarVerEliminados(wrapper: Awaited<ReturnType<typeof montar>>) {
@@ -283,6 +387,8 @@ function reset() {
   eventosPinBackend = {}
   pinEventosRequests = []
   eventosPinRechaza = false
+  miembrosBackend = []
+  postsCrear = []
   toasts = []
 }
 
@@ -554,72 +660,9 @@ describe('garzones — advertencias del backend', () => {
     montado = null
   })
 
-  /**
-   * Dos cosas que este montaje necesita y no son obvias:
-   *
-   * 1. **`AppDrawer` stubeado.** Su root es `UDrawer` (reka-ui) y **cerrarlo**
-   *    revienta bajo happy-dom: la transición de salida de `usePresence` lee
-   *    `style.display` de un nodo ya desprendido y tira un unhandled rejection.
-   *    Los tests igual pasan, pero `vitest run` sale con exit 1. Medido aislando
-   *    UNA variable: abrir el drawer y desmontar da 0 rejections; abrir, guardar
-   *    —que hace `drawerOpen = false`— y desmontar da 2. Rompe el cierre, no el
-   *    montaje. El stub va en `global.stubs` y no en `mockComponent`: así queda
-   *    acotado a ESTE mount en vez de alcanzar a los `describe` de papelera.
-   * 2. **`attachTo: document.body`.** El botón es
-   *    `type="submit" form="garzon-form"`, y esa asociación por id la resuelve
-   *    el DOCUMENTO. Con el wrapper desprendido el submit no dispara y el test
-   *    pasaría sin haber guardado nada. Con el `UDrawer` real no se notaba
-   *    porque teletransporta al body.
-   *
-   * El stub no vuelve vacuos los tests: el `UForm` y el botón siguen siendo los
-   * de la página, y el mutante que saca el toast de éxito de `guardar()` mata
-   * los dos casos que pasan por acá.
-   */
   async function pantalla() {
-    montado = await mountSuspended(Garzones, {
-      attachTo: document.body,
-      global: {
-        stubs: {
-          AppDrawer: {
-            name: 'AppDrawer',
-            props: ['open'],
-            template: `
-              <div v-if="open" role="dialog">
-                <slot name="header" />
-                <slot name="body" />
-                <slot name="actions" />
-              </div>
-            `,
-          },
-        },
-      },
-    })
-    await new Promise(r => setTimeout(r, 0))
+    montado = await montarConDrawerStub()
     return montado
-  }
-
-  /**
-   * Al confirmar la regeneración quedan DOS diálogos montados un instante: el
-   * de confirmación cerrándose y el del PIN abriéndose. Buscar "el primero"
-   * devolvería el equivocado, así que se busca por contenido — por el
-   * TÍTULO ("PIN de Ana Torres") **y** por "Guárdalo ahora", que solo existe
-   * en el modal de revelado.
-   *
-   * Buscar solo por el título no alcanza: el modal de CONFIRMACIÓN de
-   * invalidar dice *"El PIN de Ana Torres deja de servir ahora…"*, que
-   * también contiene el substring "PIN de Ana Torres" — con ese único
-   * criterio, este helper podía agarrar el diálogo de confirmación en vez del
-   * de revelado (o peor: devolver "encontrado" para un caso que ni siquiera
-   * abre el modal de revelado, ver el hallazgo de la revisión del
-   * 2026-08-14). Antes solo pasaba por casualidad: el de confirmación
-   * alcanzaba a desmontarse en los `50ms` de espera de `regenerar()`.
-   */
-  function modalDelPin(): HTMLElement | undefined {
-    return [...document.body.querySelectorAll('[role="dialog"]')]
-      .find(d =>
-        d.textContent?.includes('PIN de Ana Torres')
-        && d.textContent?.includes('Guárdalo ahora'),
-      ) as HTMLElement | undefined
   }
 
   async function regenerar(wrapper: Awaited<ReturnType<typeof montar>>) {
@@ -998,5 +1041,147 @@ describe('garzones — advertencias del backend', () => {
       title: 'Ana Torres ya no está disponible: se eliminó justo antes de que confirmaras',
       color: 'warning',
     }])
+  })
+})
+
+// El campo "Cuenta vinculada" se renderiza también al crear, pero la rama de
+// alta no mandaba `usuarioId`: el encargado elegía una cuenta, apretaba
+// "Crear" y la elección se perdía EN SILENCIO — el garzón nacía sin cuenta y
+// con un PIN que el encargado veía, que es exactamente lo que esta feature
+// existe para evitar. El backend ya soportaba el caso (`CreateGarzonDto
+// .usuarioId`, `crear()` con cuenta devuelve `pin: null`).
+describe('garzones — el alta manda la cuenta elegida', () => {
+  // Desmontaje en `afterEach` por la razón del encabezado del archivo.
+  let montado: Awaited<ReturnType<typeof montarConDrawerStub>> | null = null
+
+  beforeEach(() => {
+    // Vacío a propósito: acá el garzón lo crea el test, no el fixture. Con la
+    // lista vacía, además, `miembrosVinculables` no descarta a `user-1` por
+    // estar tomada.
+    garzonesBackend = []
+    reset()
+    esAdmin = true
+    miembrosBackend = [
+      { usuarioId: 'user-1', nombre: 'Ana', apellido: 'Torres', esTotem: false },
+    ]
+  })
+
+  afterEach(() => {
+    montado?.unmount()
+    montado = null
+  })
+
+  async function abrirAlta() {
+    const wrapper = (montado = await montarConDrawerStub())
+    const nuevo = wrapper.findAll('button').find(b => b.text().trim() === 'Nuevo garzón')
+    expect(nuevo, 'botón "Nuevo garzón"').toBeTruthy()
+    await nuevo!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    await wrapper.find('input[placeholder="Ana Torres"]').setValue('Ana Torres')
+    return wrapper
+  }
+
+  /**
+   * Elige una cuenta como lo haría el encargado. Se emite sobre el componente
+   * en vez de manejar el DOM: la lista de un `USelectMenu` cerrado vive en el
+   * portal de reka-ui y no llega al `document.body` hasta abrirlo (mismo
+   * motivo que `opcionesPorSelect` en `items.nuxt.spec.ts`). Lo que este test
+   * mira no es el combobox de la librería, es qué hace la pantalla con el
+   * valor elegido.
+   */
+  async function elegirCuenta(
+    wrapper: Awaited<ReturnType<typeof montarConDrawerStub>>,
+    usuarioId: string,
+  ) {
+    const selector = wrapper
+      .findAllComponents({ name: 'USelectMenu' })
+      .find(c => c.props('placeholder') === 'Sin vincular (usa PIN)')
+    expect(selector, 'selector "Cuenta vinculada"').toBeTruthy()
+    // Ancla: la cuenta tiene que estar OFRECIDA. Sin esto, el test elegiría
+    // un valor que el encargado no puede elegir y pasaría en verde con el
+    // selector vacío.
+    const items = (selector!.props('items') ?? []) as { value: string }[]
+    expect(items.map(o => o.value)).toContain(usuarioId)
+    selector!.vm.$emit('update:modelValue', usuarioId)
+    await new Promise(r => setTimeout(r, 0))
+  }
+
+  async function crearGarzon(wrapper: Awaited<ReturnType<typeof montarConDrawerStub>>) {
+    const boton = wrapper.findAll('button').find(b => b.text().trim() === 'Crear')
+    expect(boton, 'botón "Crear" en el drawer').toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  it('la cuenta elegida en el alta llega al backend, en vez de perderse en silencio', async () => {
+    const wrapper = await abrirAlta()
+    await elegirCuenta(wrapper, 'user-1')
+
+    await crearGarzon(wrapper)
+
+    expect(postsCrear).toHaveLength(1)
+    expect(postsCrear[0]?.usuarioId).toBe('user-1')
+    // Y el efecto, no solo el request: el garzón queda vinculado de verdad.
+    expect(garzonesBackend[0]?.usuarioId).toBe('user-1')
+  })
+
+  it('el alta con cuenta NO abre el modal de revelado (el backend no emitió PIN) y lo dice por toast', async () => {
+    const wrapper = await abrirAlta()
+    await elegirCuenta(wrapper, 'user-1')
+
+    await crearGarzon(wrapper)
+
+    // Abrir el modal con un hueco donde va el número se leería como "el PIN
+    // es <nada>", cuando lo que pasó es que no hay ninguno que entregar.
+    expect(modalDelPin()).toBeUndefined()
+    expect(toasts).toEqual([{
+      title: 'Ana Torres quedó vinculado a su cuenta: pone su propio PIN desde su perfil',
+      color: 'success',
+    }])
+  })
+
+  it('el alta SIN cuenta sigue revelando el PIN una sola vez (el caso de siempre)', async () => {
+    const wrapper = await abrirAlta()
+
+    await crearGarzon(wrapper)
+
+    expect(postsCrear[0]?.usuarioId).toBeUndefined()
+    const d = modalDelPin()
+    expect(d, 'modal del PIN revelado').toBeTruthy()
+    expect(d!.textContent).toContain('424242')
+  })
+
+  it('las advertencias del alta llegan al encargado, después del éxito', async () => {
+    // La que emite `crear()` cuando la cuenta vinculada no tiene permiso para
+    // operar el salón. Descartarla, como se hacía, dejaba al encargado sin
+    // saber que la persona que acaba de dar de alta no va a poder entrar en
+    // modo personal hasta que le den el permiso.
+    advertenciasBackend = [
+      'Esa cuenta todavía no tiene permiso para operar el salón, así que '
+      + 'Ana Torres no va a poder entrar en modo personal (sin PIN, desde su '
+      + 'propia cuenta) hasta que se lo des.',
+    ]
+
+    const wrapper = await abrirAlta()
+    await elegirCuenta(wrapper, 'user-1')
+    await crearGarzon(wrapper)
+
+    // El orden importa, igual que en la rama de edición: el alta SÍ se hizo.
+    expect(toasts.map(t => t.color)).toEqual(['success', 'warning'])
+    expect(toasts[1]?.title).toContain('no tiene permiso para operar el salón')
+  })
+
+  it('el texto del formulario dice la verdad en los dos casos: con cuenta no se emite ningún PIN', async () => {
+    const wrapper = await abrirAlta()
+
+    expect(wrapper.text()).toContain('se generará automáticamente un PIN de 6 dígitos')
+
+    await elegirCuenta(wrapper, 'user-1')
+
+    expect(wrapper.text()).toContain('No se generará ningún PIN')
+    // La promesa vieja —fija, y falsa justo para el caso que esta feature
+    // existe para cubrir— no puede quedar en pantalla con una cuenta elegida.
+    expect(wrapper.text()).not.toContain('automáticamente un PIN de 6 dígitos')
+    expect(wrapper.text()).not.toContain('para que se lo entregues')
   })
 })

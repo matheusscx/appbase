@@ -19,6 +19,10 @@ import { AppModule } from '../src/app.module';
  */
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const GARZON_ANA = '550e8400-e29b-41d4-a716-446655440238';
+// Bruno Díaz: garzón del seed SIN vincular, con PIN de dev conocido
+// (`222222`). Lo necesita el test "el tótem opera como siempre" de acá
+// abajo — Ana ya no sirve para esa mitad (ver el docblock del describe).
+const GARZON_BRUNO = '550e8400-e29b-41d4-a716-446655440239';
 
 /** Vinculada al garzón Ana Torres: opera sin PIN. */
 const PERSONAL = { email: 'ana.torres@paris.cl', pass: 'admin' };
@@ -168,12 +172,89 @@ describe('Modo personal del garzón (e2e)', () => {
     });
 
     it('y con credencial válida el tótem opera como siempre', async () => {
+      // Bruno, no Ana: hasta el 2026-08-14 este test usaba a Ana (vinculada)
+      // para probar DOS afirmaciones a la vez — "el tótem opera con
+      // credencial válida" y "un vinculado sigue siendo alcanzable por
+      // PIN". `6758e7b2` mató la segunda a propósito (vincular invalida el
+      // PIN), así que las dos afirmaciones se separaron (revisión
+      // independiente, misma fecha): esta mitad, la que SIGUE siendo
+      // cierta, se mudó a un garzón sin vincular; la otra mitad, la que
+      // DEJÓ de serlo, es el test negativo de abajo, con Ana.
+      const res = await consultarSesion(tokenTotem, {
+        garzonId: GARZON_BRUNO,
+        pin: '222222',
+      });
+
+      expect(res.status).toBe(201);
+    });
+
+    /**
+     * La otra mitad de "opera como siempre" (split 2026-08-14, revisión
+     * independiente): antes de `6758e7b2` esta MISMA credencial —el
+     * `garzonId` de Ana, vinculada, con su PIN de dev `111111`— dejaba
+     * entrar al tótem con 201. Vincular invalida el PIN
+     * (`GarzonesService.actualizar()`), así que ahora tiene que dar 400. No
+     * es una prueba sola, son DOS mitades de la misma afirmación
+     * ("vinculado, alcanzable por el tótem"), y las dos tienen que valer
+     * para que el test pruebe algo:
+     *
+     * - Que Ana SIGUE en el selector del tótem — es la decisión deliberada
+     *   que sostiene `docs/features/garzones.md` ("El garzón sin PIN
+     *   usable sigue apareciendo en el selector") y
+     *   `docs/superpowers/specs/2026-08-14-pin-propio-garzon-design.md:109`:
+     *   esconderlo filtraría quién tiene cuenta y quién no. Sin esta
+     *   mitad, un test que solo mirara el 400 de abajo no distinguiría
+     *   "invalidado por vinculación" de "el selector ya no la ofrece", que
+     *   es un bug MUY distinto y mucho peor (le esconde al encargado que
+     *   Ana existe).
+     * - Que su PIN VIEJO Y REAL (`111111`, el mismo que hasta ayer abría la
+     *   puerta) ya no sirve — no un PIN inventado. Con uno inventado el
+     *   400 llegaría igual por "PIN incorrecto" de toda la vida, y el test
+     *   pasaría en verde sin haber probado la invalidación (mismo
+     *   anti-patrón que se corrigió en `caja-testigo.e2e-spec.ts` dos
+     *   rounds atrás: un mutante que revierte `garzon.pinHash =
+     *   PIN_INUTILIZABLE` tiene que hacer caer ESTE assert).
+     */
+    it('un garzón vinculado sigue en el selector del tótem, pero su PIN viejo ya no abre la puerta', async () => {
+      const pedirSelector = (enTurno: boolean) =>
+        request(app.getHttpServer())
+          .get(`/api/garzones/para-selector?enTurno=${enTurno}`)
+          .set('Authorization', `Bearer ${tokenTotem}`);
+
+      // Las dos listas son complementarias por construcción
+      // (`garzones-selector.e2e-spec.ts` ya lo prueba); acá no importa en
+      // cuál de las dos cae Ana —depende de si algún otro spec le dejó una
+      // sesión abierta—, solo que esté en alguna. `enTurno` filtra por
+      // sesión abierta, nunca por vínculo.
+      const [fuera, dentro] = await Promise.all([
+        pedirSelector(false),
+        pedirSelector(true),
+      ]);
+      expect(fuera.status).toBe(200);
+      expect(dentro.status).toBe(200);
+      const ids = [
+        ...(fuera.body as { garzonId: string }[]),
+        ...(dentro.body as { garzonId: string }[]),
+      ].map((g) => g.garzonId);
+      expect(ids).toContain(GARZON_ANA);
+
+      // El PIN que hasta el 2026-08-14 la identificaba de verdad: no uno
+      // inventado.
       const res = await consultarSesion(tokenTotem, {
         garzonId: GARZON_ANA,
         pin: '111111',
       });
 
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(400);
+      // El motivo, no solo el número (misma vara que
+      // `caja-testigo.e2e-spec.ts`, "El motivo, no solo el número"): sin
+      // esto, un 400 por cualquier otra causa —el `ValidationPipe`, un
+      // guard, un 404 disfrazado— pasaría igual, y no probaría que
+      // `verificarPin`/`bcrypt.compare` corrió de verdad contra el
+      // `pin_hash` muerto de Ana.
+      expect((res.body as { message: string }).message).toContain(
+        'PIN inválido',
+      );
     });
   });
 

@@ -188,6 +188,21 @@ const drawerTitle = computed(() =>
   editingId.value ? 'Editar garzón' : 'Nuevo garzón',
 )
 
+/**
+ * El aviso del alta dice la verdad en los DOS casos, y depende del selector de
+ * cuenta de este mismo formulario: `crear()` emite PIN solo cuando NO viene
+ * `usuarioId` (`garzones.service.ts`: `const pin = dto.usuarioId ? null : …`).
+ * El texto fijo de antes prometía "se generará un PIN para que se lo
+ * entregues" también con cuenta elegida — justo lo contrario de lo que pasa.
+ */
+const textoPinAlta = computed(() =>
+  form.value.usuarioId
+    ? 'No se generará ningún PIN: al tener cuenta vinculada, lo fija esa persona '
+      + 'desde su perfil y vos nunca lo ves.'
+    : 'Al crear el garzón se generará automáticamente un PIN de 6 dígitos y se '
+      + 'mostrará una sola vez para que se lo entregues.',
+)
+
 // ── Estado del PIN, para la ficha (edición de un garzón con cuenta) ────────
 // Se ata al garzón que la lista YA tiene (`garzonEnEdicion`), no al valor en
 // curso del selector del formulario: si el admin cambia el vínculo sin
@@ -287,16 +302,39 @@ async function guardar() {
         nombre: form.value.nombre,
         activo: form.value.activo,
         tipo: form.value.tipo,
+        // `undefined` y no `null`: en el alta no existe "desvincular" —la fila
+        // todavía no está—, así que ausente es el único modo de decir "sin
+        // cuenta". Omitirlo del todo, como se hacía antes, DESCARTABA en
+        // silencio la cuenta que el encargado acababa de elegir en el
+        // selector de abajo.
+        usuarioId: form.value.usuarioId ?? undefined,
       })
-      const { pin, advertencias: _sinAdvertencias, ...garzon } = creado
+      const { pin, advertencias, ...garzon } = creado
       upsertLocal(garzon)
       drawerOpen.value = false
-      // El PIN se genera en el backend y se muestra una sola vez. Este
-      // formulario nunca vincula una cuenta al crear (no manda `usuarioId`),
-      // así que el backend siempre devuelve un PIN; el guard es solo defensa
-      // de tipos, no un caso real esperado.
+      // `pin: null` = se creó CON cuenta y el backend no emitió ninguno: lo
+      // fija la persona desde su perfil. Abrir el modal de revelado con un
+      // hueco donde va el número sería peor que no abrirlo — mismo criterio
+      // que `confirmarRegenerar`.
+      //
+      // Las advertencias, en el ALTA, salen siempre por toast: `crear()` solo
+      // empuja una cuando viene `usuarioId` (la de "esa cuenta no puede operar
+      // el salón"), que es exactamente el caso en que `pin` es `null`. O sea
+      // que la rama del modal recibe siempre `[]` y pasárselas es defensa, no
+      // un flujo que ocurra. Distinto de `confirmarRegenerar`, donde el
+      // garzón SIN cuenta sí recibe la advertencia de sesión abierta junto
+      // con un PIN que revelar, y por eso ahí van dentro del modal.
       if (pin !== null) {
-        revelarPin(creado.nombre, pin)
+        revelarPin(creado.nombre, pin, advertencias)
+      }
+      else {
+        toast.add({
+          title: `${creado.nombre} quedó vinculado a su cuenta: pone su propio PIN desde su perfil`,
+          color: 'success',
+        })
+        for (const advertencia of advertencias) {
+          toast.add({ title: advertencia, color: 'warning' })
+        }
       }
     }
   }
@@ -687,10 +725,6 @@ const columns: TableColumn<Garzon>[] = [
               label-key="label"
             />
           </UFormField>
-          <p v-if="!editingId" class="text-sm text-muted">
-            Al crear el garzón se generará automáticamente un PIN de 6 dígitos y
-            se mostrará una sola vez para que se lo entregues.
-          </p>
           <UFormField label="Activo">
             <USwitch v-model="form.activo" />
           </UFormField>
@@ -710,6 +744,11 @@ const columns: TableColumn<Garzon>[] = [
               class="w-full"
             />
           </UFormField>
+          <!-- DEBAJO del selector, no arriba: lo que dice depende de lo que
+               el encargado acaba de elegir ahí. -->
+          <p v-if="!editingId" class="text-sm text-muted">
+            {{ textoPinAlta }}
+          </p>
         </UForm>
 
         <!-- Solo con cuenta vinculada: sin ella el garzón se identifica por

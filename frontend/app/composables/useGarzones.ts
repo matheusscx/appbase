@@ -104,8 +104,16 @@ export function useGarzones() {
       `${apiUrl}/garzones${incluirEliminados ? '?incluirEliminados=true' : ''}`,
     )
 
-  /** Crea el garzón; el backend genera el PIN y lo devuelve una sola vez. */
-  const crear = (body: { nombre: string, activo?: boolean, tipo?: TipoGarzon }) =>
+  /**
+   * Crea el garzón. **Sin** `usuarioId` el backend genera el PIN y lo devuelve
+   * una sola vez; **con** `usuarioId` no emite ninguno (`pin: null`) y lo fija
+   * la persona desde su perfil, así el encargado nunca llega a verlo.
+   *
+   * `usuarioId` no acepta `null` como el de `actualizar`: en el alta la fila
+   * todavía no existe, así que no hay vínculo que "sacar" — ausente es el
+   * único modo de decir "sin cuenta".
+   */
+  const crear = (body: { nombre: string, activo?: boolean, tipo?: TipoGarzon, usuarioId?: string }) =>
     useApiFetch<GarzonConPin>(`${apiUrl}/garzones`, { method: 'POST', body })
 
   const actualizar = (

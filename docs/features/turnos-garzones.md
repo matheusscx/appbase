@@ -2,7 +2,7 @@
 
 **Status**: Complete  
 **Owner**: Cesar Matheus  
-**Last Updated**: 2026-08-06 (fin de turno con mesas abiertas: avisar y ofrecer transferir)
+**Last Updated**: 2026-08-14 (Ana ya no tiene PIN de dev: es el fixture del modo personal)
 
 ---
 
@@ -34,8 +34,10 @@ sesiones abiertas, forzar cierres y consultar historial.
 
 ## Decisiones de diseño
 
-- El garzón **no es usuario del sistema**: se identifica con PIN dentro de la
-  sesión JWT del tenant (igual que [garzones.md](./garzones.md)).
+- El garzón **no tiene por qué ser usuario del sistema**: se identifica con PIN dentro de la
+  sesión JWT del tenant (igual que [garzones.md](./garzones.md)). Si **sí** tiene cuenta
+  vinculada (modo personal, 2026-08-09), `resolverGarzonActuante` lo resuelve por JWT y las
+  tres rutas de sesión no piden PIN.
 - `hora_inicio` / `hora_fin` del turno son **referenciales**; no bloquean
   iniciar sesión fuera de esa ventana. La hora real trabajada sale de la sesión.
 - Máximo **una sesión abierta** por garzón y tenant.
@@ -77,14 +79,19 @@ sesiones abiertas.
 
 | Método | Ruta | Permiso (`Salones`) | Descripción |
 |---|---|---|---|
-| POST | `/sesiones-garzon/iniciar` | `Operar` | `{ garzonId, pin, turnoId }` → abre sesión |
-| POST | `/sesiones-garzon/cerrar` | `Operar` | `{ garzonId, pin }` → cierra sesión abierta |
-| POST | `/sesiones-garzon/activa` | `Operar` | `{ garzonId, pin }` → sesión abierta o `null` |
+| POST | `/sesiones-garzon/iniciar` | `Operar` | `{ garzonId?, pin?, turnoId }` → abre sesión |
+| POST | `/sesiones-garzon/cerrar` | `Operar` | `{ garzonId?, pin? }` → cierra sesión abierta |
+| POST | `/sesiones-garzon/activa` | `Operar` | `{ garzonId?, pin? }` → sesión abierta o `null` |
 | GET | `/garzones/para-selector?enTurno=` | `Operar` | Las dos listas del selector. `enTurno` **obligatorio** |
 | POST | `/garzones/verificar-pin` | `Operar` | `{ garzonId, pin }` → valida **sin ejecutar nada** |
 | GET | `/sesiones-garzon/abiertas` | `Leer` | Sesiones abiertas del tenant |
 | GET | `/sesiones-garzon` | `Leer` | Historial paginado (`garzonId`, `turnoId`, `estado`, `desde`, `hasta`) |
 | POST | `/sesiones-garzon/:id/cerrar` | `Actualizar` | Cierre admin (sin PIN); registra `cerrada_por_usuario_id` |
+
+⚠️ `garzonId`/`pin` son opcionales **en el DTO** de las tres primeras
+(`CredencialGarzonOpcionalDto`), no en el tótem: en modo personal no se mandan y
+`resolverGarzonActuante` resuelve por JWT; sin vínculo personal, esa misma función corta. El
+`ValidationPipe` no es el que decide.
 
 `desde`/`hasta` son **fechas puras** (`YYYY-MM-DD`) y se interpretan en la **zona horaria
 del tenant**, con `hasta` **inclusivo del día completo**: "Desde hoy / Hasta hoy" devuelve
@@ -135,14 +142,35 @@ garzón en este momento** (decisión del owner, 2026-08-07):
 | Eliminar | **Bloquea** (`400`) | Deja la sesión abierta con `fin_el = null` y sin nadie que pueda cerrarla |
 | Desactivar | **Bloquea** (`400`) | `verificarPin` filtra `activo: true`: el garzón no puede ni marcar salida |
 | Cambiar el `tipo` | **Advierte** | El reparto usa `sesion_garzon.tipo_garzon`, congelado al abrir: el turno en curso no se altera. Bloquear obligaría a cerrar el turno para corregir un tipo mal cargado |
-| Regenerar el PIN | **Advierte** | Rotar una credencial es la respuesta a una filtración; trabarla por un turno abierto sería la política al revés |
+| **Vincular una cuenta** (2026-08-14) | **Advierte** | Vincular mata el PIN que el encargado emitía (`usuario_id: null → uuid`). Qué le queda a la persona depende de si esa cuenta tiene `Salones:Operar`, y el aviso tiene **un texto por rama** — ver abajo |
+| Regenerar **o invalidar** el PIN | **Advierte** | Rotar una credencial es la respuesta a una filtración; trabarla por un turno abierto sería la política al revés |
 
-Las dos que advierten devuelven `advertencias: string[]` en la respuesta —siempre
+Las tres que advierten devuelven `advertencias: string[]` en la respuesta —siempre
 presente, vacío cuando no hay nada que decir, misma forma que `ventas` e
-`items`—. Dónde se muestran **no** es intercambiable: la del `tipo` sale como
-toast `warning` después del de éxito (el cambio se guardó), y la del PIN va
-**dentro del modal que revela el PIN**, porque habla de ese PIN y de la urgencia
-de entregarlo; un toast detrás del modal se pierde.
+`items`—. Dónde se muestran **no** es intercambiable: las del `PATCH` del garzón (`tipo` y
+vínculo) salen como toast `warning` después del de éxito (el cambio se guardó), y la del PIN
+va **dentro del modal que revela el PIN**, porque habla de ese PIN y de la urgencia de
+entregarlo; un toast detrás del modal se pierde.
+
+⚠️ Los textos de las dos ramas del PIN **no** son el mismo string, porque la precondición es
+la opuesta: al **invalidar** (garzón con cuenta) la persona ya operaba desde su cuenta y
+sigue trabajando normal, y no hay ningún número que revelar — así que ahí **no hay modal** y
+el aviso también sale por toast.
+
+⚠️ **Vincular tampoco tiene un solo texto, y no todo lo que avisa depende de la sesión.**
+`actualizar()` puede emitir **dos** advertencias distintas al vincular:
+
+- La de **sesión abierta** (`vinculaCuenta && sesionesAbiertas > 0`) es la que pertenece a
+  esta tabla, y ella misma se parte en dos: con `Salones:Operar` dice que la persona *"puede
+  seguir trabajando desde la cuenta recién vinculada"* y solo pierde el tótem; **sin** ese
+  permiso dice lo contrario — *"no va a poder entrar en modo personal hasta que se lo des,
+  pero puede seguir operando desde el tótem si fija un PIN propio nuevo"*.
+- La de **permiso faltante** (`vinculaCuenta && !puedeOperarSalon`) **no depende de que haya
+  sesión abierta**: habla de lo que esa cuenta va a poder hacer de acá en más. Por eso la
+  emiten las dos vinculaciones, `actualizar()` y también `crear()` cuando el alta ya trae la
+  cuenta — y por eso no alcanza con leer esta tabla. El detalle de qué se pierde exactamente
+  (el **modo personal**, no la capacidad de trabajar) está en
+  [`garzones.md`](./garzones.md).
 
 ⚠️ **"Advierte" no quiere decir "sin consecuencias".** El mensaje del `tipo` dice
 además que, si la persona genera propinas con los dos tipos dentro de un mismo
@@ -255,7 +283,14 @@ Tenant Paris — turnos (IDs fijos):
 (Prefijo completo: `550e8400-e29b-41d4-a716-446655440XXX`.)
 
 No se crean sesiones abiertas. PINs de garzones demo (ver [garzones.md](./garzones.md)):
-Ana=`111111`, Bruno=`222222`, Carla=`333333`.
+**Bruno=`222222`, Carla=`333333`** — los dos sin cuenta, o sea el caso "tótem compartido".
+
+⚠️ **Ana Torres no tiene PIN** desde el 2026-08-14. Es el fixture del **modo personal**:
+el seed la siembra vinculada a la cuenta `ana.torres`, y un garzón vinculado nace con
+`pin_hash = PIN_INUTILIZABLE` porque el PIN se lo fija él, no el encargado. Entrar y salir
+de turno como Ana se hace **entrando con su cuenta y sin teclear ningún PIN**
+(`resolverGarzonActuante` la resuelve por JWT). Tecleando cualquier PIN suyo en el tótem
+sale *"PIN inválido"*, y eso es lo correcto — no es una regresión.
 
 ---
 
@@ -319,11 +354,14 @@ iniciar/cerrar por PIN, cierre admin, y rechazo de Salones sin sesión.
 ### Manual (seed Paris)
 
 1. Config → Turnos: ver Mañana / Tarde / Noche.
-2. Salones → Entrar turno (Ana `111111`) → abrir mesa → cuenta OK.
+2. Salones → Entrar turno (Carla `333333`) → abrir mesa → cuenta OK.
+   ⚠️ **No usar a Ana con PIN**: no tiene (ver *Seed de desarrollo*). El mismo paso en
+   **modo personal** se hace entrando con la cuenta `ana.torres`, y ahí no se teclea PIN
+   en ningún momento — el selector de garzón ni aparece.
 3. Salir turno → abrir cuenta falla con mensaje de sesión.
 4. Config → Sesiones: forzar cierre si quedó abierta.
 5. Intentar desactivar turno con sesión abierta → error.
-6. Con Ana y Bruno (`222222`) en turno: Ana abre una mesa con productos y sale de
+6. Con Carla y Bruno (`222222`) en turno: Carla abre una mesa con productos y sale de
    turno → modal con la mesa → transferir con el PIN de Bruno → la cuenta ya
    figura a nombre de Bruno y se puede cobrar.
 7. Lo mismo declinando la oferta ("Ahora no"): cobrar esa mesa devuelve *"El

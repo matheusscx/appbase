@@ -86,6 +86,9 @@ interface SolicitudPublicaResponse {
   garzonVinculado: boolean;
   lineas: Record<string, unknown>[];
 }
+interface GarzonActualizadoResponse {
+  advertencias: string[];
+}
 
 describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', () => {
   let app: INestApplication<App>;
@@ -115,6 +118,13 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
   // desata dentro del test (`finally`) y nunca en `beforeAll`.
   let garzonDId: string;
   let pinD: string;
+
+  // Sesiones de A, B y D, para poder cerrarlas en `afterAll` por sesión y no
+  // por PIN — B y D quedan con el PIN muerto (ver el comentario de
+  // `beforeAll`), así que el cierre de limpieza no puede depender de él.
+  let sesionAId: string;
+  let sesionBId: string;
+  let sesionDId: string;
 
   async function login(email: string, password: string): Promise<string> {
     const resLogin = await request(app.getHttpServer())
@@ -149,12 +159,42 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
     return res.body as GarzonConPinResponse;
   }
 
-  async function abrirSesion(garzonId: string, pin: string): Promise<void> {
+  /** Devuelve el id de la sesión — hace falta para cerrarla por sesión en `afterAll`. */
+  async function abrirSesion(garzonId: string, pin: string): Promise<string> {
     const res = await request(app.getHttpServer())
       .post('/api/sesiones-garzon/iniciar')
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ turnoId, garzonId, pin });
     expect(res.status).toBe(201);
+    return (res.body as { id: string }).id;
+  }
+
+  /**
+   * Cierre forzado por el encargado (`POST /sesiones-garzon/:id/cerrar`,
+   * `Salones:Actualizar`), por SESIÓN y no por PIN. Es el único camino que
+   * le queda a `afterAll` para B y D: vincular una cuenta invalida el PIN
+   * en el momento (`garzones.service.ts` → `actualizar()`), B queda
+   * vinculado todo el spec y D queda con el PIN muerto aunque se desvincule
+   * después —desvincular NO lo restaura—, así que ninguno de los dos puede
+   * cerrar más por PIN.
+   */
+  async function cerrarSesionAdmin(
+    sesionId: string,
+  ): Promise<request.Response> {
+    return request(app.getHttpServer())
+      .post(`/api/sesiones-garzon/${sesionId}/cerrar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+  }
+
+  /** Estado de las solicitudes de testigo de una caja, vía `Cajas:Leer` — no depende de PIN ni de cuenta vinculada. */
+  async function listarTestigos(
+    cajaId: string,
+  ): Promise<{ id: string; estado: string }[]> {
+    const res = await request(app.getHttpServer())
+      .get(`/api/caja/${cajaId}/testigos`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+    return res.body as { id: string; estado: string }[];
   }
 
   /**
@@ -324,24 +364,54 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
     garzonDId = gD.id;
     pinD = gD.pin;
 
+    // A, B y D quedan con sesión abierta todo el spec — la "sesión abierta
+    // ahora" que exige `solicitar`. C nunca abre sesión: es el garzón "sin
+    // sesión" del caso 10. Las tres se abren por PIN ANTES de vincular a
+    // B: `iniciar` resuelve la credencial con `verificarPin`, que compara
+    // contra `garzones.pin_hash`, y vincular una cuenta lo pisa con
+    // `PIN_INUTILIZABLE` en el mismo instante (`garzones.service.ts` →
+    // `actualizar()`). Si B se vinculara antes, `abrirSesion(garzonBId,
+    // pinB)` fallaría con 400 acá mismo, en `beforeAll`.
+    sesionAId = await abrirSesion(garzonAId, pinA);
+    sesionBId = await abrirSesion(garzonBId, pinB);
+    sesionDId = await abrirSesion(garzonDId, pinD);
+
     // B se vincula por API (PATCH), no por SQL — es justo el camino que
-    // `assertVinculable` protege.
+    // `assertVinculable` protege. Va DESPUÉS de abrir su sesión (ver arriba):
+    // la sesión ya está creada y vive independiente de lo que le pase al PIN
+    // después.
     const vincular = await request(app.getHttpServer())
       .patch(`/api/garzones/${garzonBId}`)
       .set('Authorization', `Bearer ${tokenAdmin}`)
       .send({ usuarioId: vendedorUsuarioId });
     expect(vincular.status).toBe(200);
 
-    // A, B y D quedan con sesión abierta todo el spec — la "sesión abierta
-    // ahora" que exige `solicitar`. C nunca abre sesión: es el garzón "sin
-    // sesión" del caso 10. La de D se abre ACÁ, con D todavía sin vincular,
-    // porque `abrirSesion` va por `resolverGarzonActuante` con el token del
-    // admin: si D ya estuviera atado a esa cuenta, la credencial se
-    // ignoraría y el turno se abriría "por modo personal", que no es lo que
-    // este fixture quiere montar.
-    await abrirSesion(garzonAId, pinA);
-    await abrirSesion(garzonBId, pinB);
-    await abrirSesion(garzonDId, pinD);
+    // Cobertura e2e de `puede_operar_salon` contra Postgres real (revisión
+    // independiente: el SQL de 8 JOIN + 2 EXISTS de `assertVinculable` no
+    // estaba asertado en ningún lado — en unit el valor viene de un mock).
+    // vendedor@paris.cl (VENDEDOR, `:41-42` de este archivo) tiene rol
+    // Vendedor, SIN `Salones` — el caso real, no inventado, de una cuenta
+    // que vincula pero no puede operar el salón. B ya tiene sesión abierta
+    // (línea de arriba), así que acá tienen que salir LAS DOS advertencias:
+    // la de permiso (aplica siempre que vincula) y la de sesión abierta
+    // (bifurcada porque no tiene el permiso). Se distinguen por "sesión
+    // abierta", que solo la segunda menciona — sin eso, dos copias
+    // accidentales de la misma advertencia pasarían el `toHaveLength(2)`
+    // igual.
+    const advertenciasB = (vincular.body as GarzonActualizadoResponse)
+      .advertencias;
+    expect(advertenciasB).toHaveLength(2);
+    const [conSesionB, sinSesionB] = [
+      advertenciasB.filter((a) => a.includes('sesión abierta')),
+      advertenciasB.filter((a) => !a.includes('sesión abierta')),
+    ];
+    expect(conSesionB).toHaveLength(1);
+    expect(sinSesionB).toHaveLength(1);
+    for (const msg of advertenciasB) {
+      expect(msg).toContain('permiso');
+      expect(msg).toContain('modo personal');
+      expect(msg).toContain('tótem');
+    }
   }, 60000);
 
   /**
@@ -387,16 +457,26 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
 
       // Cerrar sesión ANTES de borrar: `eliminar()`/`turnos.eliminar()`
       // rechazan con sesión abierta (`assertSinSesionAbierta`).
-      for (const [garzonId, pin] of [
-        [garzonAId, pinA],
-        [garzonBId, pinB],
-        [garzonDId, pinD],
+      //
+      // Por SESIÓN (`cerrarSesionAdmin`, admin forzando el cierre), no por
+      // PIN: vincular una cuenta invalida el PIN del garzón en el mismo
+      // instante (`garzones.service.ts` → `actualizar()`, transición
+      // `usuarioId: null → uuid`), y acá B queda vinculado durante TODO el
+      // spec (nunca se desvincula) y D queda con el PIN muerto aunque su
+      // propio test lo desvincule después —desvincular NO restaura el PIN
+      // que la vinculación mató—. El cierre "por PIN" que usaba esta
+      // limpieza antes de este fix dejó de poder cerrar la sesión de
+      // NINGUNO de los dos: no es un bug de la limpieza, es la consecuencia
+      // esperada de que el PIN que el encargado conocía dejó de servir. El
+      // cierre por sesión no depende de esa prueba de identidad, así que
+      // sirve para los tres (A incluido, por uniformidad).
+      for (const [garzonId, sesionId] of [
+        [garzonAId, sesionAId],
+        [garzonBId, sesionBId],
+        [garzonDId, sesionDId],
       ]) {
         await limpiar(`cerrar sesión ${garzonId}`, async () => {
-          const res = await request(app.getHttpServer())
-            .post('/api/sesiones-garzon/cerrar')
-            .set('Authorization', `Bearer ${tokenAdmin}`)
-            .send({ garzonId, pin });
+          const res = await cerrarSesionAdmin(sesionId);
           // `cerrar` responde 201 (POST), no 200.
           return res.status === 201 ? 200 : res.status;
         });
@@ -573,25 +653,39 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
       );
     });
 
-    it('caso 5 — garzonId de B con el PIN de A no revela nada de B', async () => {
+    it('caso 5 — garzonId de B con el PIN de A no revela nada de B (hoy: cualquier PIN falla, B está vinculado)', async () => {
       const res = await pendientes(tokenTotem, {
         garzonId: garzonBId,
         pin: pinA,
       });
-      // El PIN se verifica CONTRA el garzón indicado (B), no contra
-      // cualquiera: el de A no matchea el hash de B, así que ni siquiera
-      // llega a resolver las pendientes de B.
+      // B está vinculado (`beforeAll`): su `pinHash` quedó en
+      // `PIN_INUTILIZABLE` ('!'), así que CUALQUIER PIN falla acá — no
+      // específicamente el de A. Este 400 ya no prueba por sí solo "el PIN
+      // se verifica contra el garzón indicado, no contra cualquiera" (esa
+      // discriminación quedó cubierta a nivel unit, con un garzón SIN
+      // vincular: `garzones.service.spec.ts` → `describe('verificarPin')`,
+      // "lanza 400 si el PIN no coincide" + "hace UNA sola consulta y no
+      // recorre a los demás garzones"); lo que este caso sigue probando en
+      // e2e es que ni siquiera un PIN ajeno "real" cuela contra un
+      // vinculado.
       expect(res.status).toBe(400);
       // El motivo, no solo el número: un 400 acá también podría venir del
       // `ValidationPipe` si mañana `CredencialGarzonOpcionalDto` se
-      // endurece, y eso dejaría de probar que el `bcrypt.compare` corrió
-      // contra B (revisión independiente, hallazgo 5).
+      // endurece, y eso dejaría de probar que el request llegó a
+      // `verificarPin`/`bcrypt.compare` (revisión independiente, hallazgo 5).
       expect((res.body as { message: string }).message).toContain(
         'PIN inválido',
       );
     });
 
-    it('caso 2 — el encargado con el PIN correcto de B (vinculado) recibe 403', async () => {
+    it('caso 2 — el encargado con el PIN que emitió para B (vinculado) recibe 403', async () => {
+      // `pinB` ya NO es "el PIN correcto de B" — B está vinculado
+      // (`beforeAll`) y su `pinHash` quedó en `PIN_INUTILIZABLE`, así que
+      // ningún PIN es correcto para B a esta altura. Se manda igual a
+      // propósito: prueba que la rama "vía cuenta" de `resolver()` ni
+      // siquiera LLEGA a mirar el PIN —`esVinculacionValida` corta antes—,
+      // así que da lo mismo si el que se manda es el que el encargado
+      // conocía, uno inventado, o ninguno.
       const res = await resolverTestigo(tokenAdmin, testigoBId, {
         firma: true,
         pin: pinB,
@@ -627,32 +721,25 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
     });
 
     it('con A firmada, el cierre sin comentario funciona y la pendiente de B se cancela', async () => {
-      // ANTES de cerrar: B sigue pendiente. Se lee por la misma vía que
-      // usaría su pantalla (tótem + garzonId/PIN de B), que es lo único
-      // observable desde afuera.
-      const antes = await pendientes(tokenTotem, {
-        garzonId: garzonBId,
-        pin: pinB,
-      });
-      expect(antes.status).toBe(201);
-      expect(
-        (antes.body as SolicitudPublicaResponse[]).map((s) => s.id),
-      ).toContain(testigoBId);
+      // ANTES de cerrar: B sigue pendiente. B está vinculado (`beforeAll`),
+      // así que su PIN ya está muerto (`actualizar()` lo invalida en el
+      // mismo PATCH que lo ata) y el tótem no tiene forma de demostrar que
+      // es B para leer `pendientes`. Se lee por la vía del ENCARGADO
+      // (`Cajas:Leer`, sin PIN ni cuenta de por medio) — el mismo dato que
+      // vería el panel de resumen del turno.
+      const antes = await listarTestigos(cajaId);
+      expect(antes.find((t) => t.id === testigoBId)?.estado).toBe('pendiente');
 
       const cerrar = await cerrarFase2(cajaId, tokenAdmin);
       expect(cerrar.status).toBe(201);
 
-      // DESPUÉS: ya no cuelga. Sin esta aserción, `cancelarPendientes`
+      // DESPUÉS: cancelada, no colgada. Sin esta aserción, `cancelarPendientes`
       // (`caja.service.ts`) se puede borrar entero y el spec sigue verde
       // (revisión independiente, hallazgo 3).
-      const despues = await pendientes(tokenTotem, {
-        garzonId: garzonBId,
-        pin: pinB,
-      });
-      expect(despues.status).toBe(201);
-      expect(
-        (despues.body as SolicitudPublicaResponse[]).map((s) => s.id),
-      ).not.toContain(testigoBId);
+      const despues = await listarTestigos(cajaId);
+      expect(despues.find((t) => t.id === testigoBId)?.estado).toBe(
+        'cancelada',
+      );
     });
   });
 
@@ -687,12 +774,54 @@ describe('CajaTestigo (e2e) — camino completo del testigo de cierre forzado', 
         .send({ usuarioId: adminUsuarioId });
       expect(vincular.status).toBe(200);
 
+      // El caso positivo de `puede_operar_salon`, contra Postgres real: el
+      // admin SÍ tiene `Salones:Operar` (rol fijo), así que la advertencia
+      // de "no puede operar el salón" no tiene que aparecer acá — solo la
+      // de sesión abierta (D ya tenía una desde `beforeAll`), y con el
+      // texto que promete la cuenta, no el que la niega.
+      const advertenciasD = (vincular.body as GarzonActualizadoResponse)
+        .advertencias;
+      expect(advertenciasD).toHaveLength(1);
+      expect(advertenciasD[0]).toContain('puede seguir trabajando');
+      expect(advertenciasD[0]).not.toContain('permiso');
+
       try {
-        // La pantalla ya lo anuncia: con vínculo válido no se pide PIN.
-        const verPendientes = await pendientes(tokenTotem, {
-          garzonId: garzonDId,
-          pin: pinD,
-        });
+        // La pantalla ya lo anuncia: con vínculo válido no se pide PIN. Y ya
+        // no PUEDE pedirlo: el PATCH de arriba mató el PIN de D en el mismo
+        // instante en que lo ató (`actualizar()`), así que el tótem no
+        // tiene forma de demostrar que es D. Se lee desde LA CUENTA
+        // vinculada (admin, sin credencial: `resolverGarzonActuante` la
+        // resuelve directo por el JWT), que es justo la vía que esta prueba
+        // existe para ejercer.
+        //
+        // ⚠️ Con este cambio, `garzonVinculado` quedó TAUTOLÓGICO acá: al
+        // resolver por `garzonPersonalDe` (personal, sin credencial),
+        // `esVinculacionValida` ya exige `usuario_id` seteado — no puede
+        // dar otra cosa que `true`. Es fiel a la vía cuenta (lo que este
+        // test existe para probar), pero YA NO discrimina el caso
+        // "vinculado pero se lee desde afuera, tótem + PIN" que sí ejercía
+        // la versión vieja de este mismo test.
+        //
+        // Esa discriminación SÍ sigue cubierta —corregido: dije lo
+        // contrario en una revisión anterior de este comentario, y era
+        // falso— pero en OTROS dos lugares, no acá:
+        // - `caso 5` de este mismo archivo (`'garzonId de B con el PIN de A
+        //   no revela nada de B'`, más arriba): tótem + `pendientes` contra
+        //   B (vinculado) con un PIN ajeno → 400. Mismo endpoint
+        //   (`pendientesDeGarzon`) que este test, mismo mecanismo.
+        // - `garzon-modo-personal.e2e-spec.ts` ('un garzón vinculado sigue
+        //   en el selector del tótem, pero su PIN viejo ya no abre la
+        //   puerta'): tótem + `/sesiones-garzon/activa` contra Ana
+        //   (vinculada) con su PIN REAL viejo (no uno ajeno inventado) →
+        //   400, más la aserción de que sigue en el selector.
+        //
+        // Lo que NINGUNO de los dos prueba es el caso exacto que ESTE test
+        // perdió: tótem + `pendientes` contra un vinculado usando el PIN
+        // QUE ESE GARZÓN tenía antes de vincularse (acá sería D con su
+        // `pinD` viejo, no un PIN ajeno) — caso 5 usa un PIN de otro
+        // garzón, no el propio viejo. Ese ángulo específico no tiene caso
+        // dedicado.
+        const verPendientes = await pendientes(tokenAdmin);
         expect(verPendientes.status).toBe(201);
         expect(
           (verPendientes.body as SolicitudPublicaResponse[]).find(

@@ -832,7 +832,7 @@ describe('GarzonesService', () => {
 
     it('el alta CON cuenta no emite PIN y no escribe evento', async () => {
       repo.manager.query.mockResolvedValue([
-        { es_totem: false, garzon_nombre: null },
+        { es_totem: false, garzon_nombre: null, puede_operar_salon: true },
       ]);
 
       const res = await service.crear(TENANT, ACTOR, {
@@ -847,6 +847,25 @@ describe('GarzonesService', () => {
       expect(manager.save).not.toHaveBeenCalled();
       expect(eventos).toHaveLength(0);
       expect(garzonGuardado().pinHash).toBe('!');
+      expect(res.advertencias).toEqual([]);
+    });
+
+    // Decisión del owner (2026-08-14): "toda vinculación" incluye el alta —
+    // produce el mismo estado final (con cuenta, sin permiso de salón) que
+    // vincular a un garzón vacío recién creado, así que advierte igual.
+    it('el alta CON cuenta sin permiso para operar el salón advierte', async () => {
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null, puede_operar_salon: false },
+      ]);
+
+      const res = await service.crear(TENANT, ACTOR, {
+        nombre: 'Ana',
+        usuarioId: 'cuenta-sin-salones',
+      });
+
+      expect(res.advertencias).toHaveLength(1);
+      expect(res.advertencias[0]).toContain('permiso');
+      expect(res.advertencias[0]).toContain('salón');
     });
 
     it('el alta SIN cuenta emite PIN y lo registra', async () => {
@@ -926,6 +945,144 @@ describe('GarzonesService', () => {
           usuarioId: ACTOR,
         }),
       ]);
+    });
+
+    // Decisión del owner (2026-08-14): vincular con sesión abierta advierte,
+    // NO bloquea — mismo criterio que `regenerarPin` ya aplicaba, pero el
+    // TEXTO no puede ser el mismo string que esa rama (revisión
+    // independiente): acá `vinculaCuenta` exige que la cuenta NO existiera
+    // antes de este PATCH, así que en el instante del aviso la persona
+    // TODAVÍA no operaba desde su cuenta — la sesión abierta que dispara
+    // esto solo pudo abrirse por PIN. El texto tiene que hablar de la
+    // capacidad que se abre a partir de ahora, no de una continuidad falsa.
+    it('vincular con sesión abierta advierte sobre la capacidad nueva, no una continuidad falsa, y no bloquea', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', nombre: 'Ana', pin: '111111', usuarioId: null }),
+      );
+      // `puede_operar_salon: true` a propósito: aísla el caso de la sesión
+      // abierta del caso de "la cuenta no puede operar el salón" (más
+      // abajo), que es OTRA advertencia con su propio test.
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null, puede_operar_salon: true },
+      ]);
+      sesionRepo.count.mockResolvedValue(1);
+
+      const result = await service.actualizar(TENANT, ACTOR, 'g1', {
+        usuarioId: 'cuenta-de-ana',
+      });
+
+      // No bloquea: guarda igual, con el PIN ya invalidado.
+      expect(garzonGuardado().pinHash).toBe('!');
+      expect(result.advertencias).toHaveLength(1);
+      expect(result.advertencias[0]).toContain('Ana');
+      expect(result.advertencias[0]).toContain('tótem');
+      // Positivo: habla de la cuenta RECIÉN vinculada y de que no queda
+      // bloqueado — capacidad nueva, no algo que ya venía haciendo.
+      expect(result.advertencias[0]).toContain('recién vinculada');
+      expect(result.advertencias[0]).toContain('no queda bloqueado');
+      // Negativo: el bug que esto reemplaza decía "sigue trabajando normal"
+      // — falso acá, porque antes de este PATCH la persona no tenía cuenta
+      // y por lo tanto no podía estar operando desde ella.
+      expect(result.advertencias[0]).not.toContain('sigue trabajando normal');
+      // No es el mensaje de "marcar salida" que usa la vía SIN cuenta de
+      // `regenerarPin`: con cuenta, la identidad pasa a probarla el JWT,
+      // así que no deja de poder operar.
+      expect(result.advertencias[0]).not.toContain('marcar salida');
+    });
+
+    it('vincular sin sesión abierta y con permiso para operar el salón no advierte nada', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', pin: '111111', usuarioId: null }),
+      );
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null, puede_operar_salon: true },
+      ]);
+
+      const result = await service.actualizar(TENANT, ACTOR, 'g1', {
+        usuarioId: 'cuenta-de-ana',
+      });
+
+      expect(result.advertencias).toEqual([]);
+    });
+
+    // Decisión del owner (2026-08-14): `assertVinculable` valida membresía,
+    // no-tótem y no-tomada, pero no valida `Salones:Operar` — el
+    // contraejemplo real está en el propio repo
+    // (`caja-testigo.e2e-spec.ts`, VENDEDOR: rol sin `Salones`). Vincular
+    // sigue permitido (dar el permiso después es un flujo legítimo), pero
+    // advierte — sin importar si hay sesión abierta: es sobre lo que la
+    // cuenta puede hacer de acá en más.
+    //
+    // Lo que de verdad pierde (revisión independiente, medido contra el
+    // código, no asumido): SOLO el modo personal (JWT, sin PIN) — el
+    // `PermisosGuard` de los 6 puntos corre sobre la cuenta que LLAMA, y en
+    // modo personal esa cuenta es la del garzón. Por el tótem sigue
+    // pudiendo operar: `fijarMiPin` (`PATCH /garzones/mi-pin`) no exige
+    // ningún permiso, y `verificarPin` no mira `usuario_id`, así que quien
+    // llama por PIN es la cuenta del tótem (que sí tiene `Salones:Operar`),
+    // no la del garzón. El texto tiene que decir las dos cosas: lo que
+    // pierde (modo personal) Y lo que NO pierde (tótem con PIN propio) —
+    // afirmar "no va a poder trabajar" a secas sería tan falso como el bug
+    // que reemplaza.
+    it('vincular una cuenta sin permiso para operar el salón advierte que pierde el modo personal, no el tótem', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', pin: '111111', usuarioId: null }),
+      );
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null, puede_operar_salon: false },
+      ]);
+
+      const result = await service.actualizar(TENANT, ACTOR, 'g1', {
+        usuarioId: 'cuenta-sin-salones',
+      });
+
+      // No bloquea: guarda igual.
+      expect(garzonGuardado().pinHash).toBe('!');
+      expect(result.advertencias).toHaveLength(1);
+      const msg = result.advertencias[0];
+      // Positivo: dice específicamente "modo personal" (lo que SÍ pierde) y
+      // que el tótem sigue disponible con un PIN propio.
+      expect(msg).toContain('modo personal');
+      expect(msg).toContain('tótem');
+      expect(msg).toContain('permiso');
+      expect(msg).toContain('salón');
+      // Negativo: nunca "no va a poder trabajar" a secas — eso afirmaría
+      // que el tótem también queda cerrado, y no es así.
+      expect(msg).not.toContain('no va a poder trabajar');
+    });
+
+    // Las dos advertencias pueden darse JUNTAS, y no pueden contradecirse:
+    // si la cuenta no puede operar el salón, la de sesión abierta no puede
+    // seguir prometiendo "puede seguir trabajando desde la cuenta recién
+    // vinculada" — pero TAMPOCO puede decir que se queda sin poder trabajar
+    // del todo, porque el tótem con un PIN propio sigue abierto (mismo
+    // hallazgo que el test de arriba). El texto lo tiene que decir bien.
+    it('vincular sin permiso Y con sesión abierta: las dos advertencias conviven sin contradecirse, y ninguna promete de más ni de menos', async () => {
+      repo.findOne.mockResolvedValue(
+        garzon({ id: 'g1', nombre: 'Ana', pin: '111111', usuarioId: null }),
+      );
+      repo.manager.query.mockResolvedValue([
+        { es_totem: false, garzon_nombre: null, puede_operar_salon: false },
+      ]);
+      sesionRepo.count.mockResolvedValue(1);
+
+      const result = await service.actualizar(TENANT, ACTOR, 'g1', {
+        usuarioId: 'cuenta-sin-salones',
+      });
+
+      expect(result.advertencias).toHaveLength(2);
+      const [permisoMsg, sesionMsg] = result.advertencias;
+      expect(permisoMsg).toContain('permiso');
+      expect(permisoMsg).toContain('modo personal');
+      // La de sesión NO puede prometer continuidad que no existe (con
+      // cuenta) si además no tiene permiso: nada de "puede seguir
+      // trabajando desde la cuenta".
+      expect(sesionMsg).not.toContain('puede seguir trabajando desde la');
+      // Pero SÍ tiene que decir que el tótem sigue abierto — negarlo sería
+      // tan falso como prometer la cuenta.
+      expect(sesionMsg).toContain('tótem');
+      expect(sesionMsg).toContain('PIN propio');
+      expect(sesionMsg).not.toContain('sin poder trabajar');
     });
 
     it('DESVINCULAR no toca el PIN: el garzón sigue con el que eligió', async () => {

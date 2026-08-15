@@ -17,11 +17,16 @@ import { AppModule } from '../src/app.module';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
 
-// PINs de dev del seed.
-const ANA = {
-  id: '550e8400-e29b-41d4-a716-446655440238',
-  nombre: 'Ana Torres',
-  pin: '111111',
+// PINs de dev del seed. Bruno, no Ana Torres: Ana está vinculada a una
+// cuenta desde el seed y vincular invalida el PIN
+// (`GarzonesService.actualizar()`, `6758e7b2`) — su `111111` de dev ya no
+// sirve para entrar por PIN. Este archivo prueba el selector y la
+// verificación de PIN en general, no la vinculación, así que un garzón sin
+// vincular sirve igual.
+const BRUNO = {
+  id: '550e8400-e29b-41d4-a716-446655440239',
+  nombre: 'Bruno Díaz',
+  pin: '222222',
 };
 const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
@@ -167,40 +172,40 @@ describe('Selector de garzones (e2e) — las dos listas y la verificación', () 
       await request(app.getHttpServer())
         .post('/api/sesiones-garzon/cerrar')
         .set('Authorization', `Bearer ${token}`)
-        .send({ garzonId: ANA.id, pin: ANA.pin });
+        .send({ garzonId: BRUNO.id, pin: BRUNO.pin });
     });
 
     it('está en la lista de "sin turno" antes y en la de "en turno" después', async () => {
       // ⚠️ Se cierra primero, ignorando el resultado. Sin esto el test se
       // auto-degradaba según el orden de las suites: `combos.e2e-spec.ts` abre
-      // la sesión de Ana y no la cierra al final, así que este spec podía
+      // la sesión de Bruno y no la cierra al final, así que este spec podía
       // encontrarla abierta y saltearse las tres afirmaciones que importan —
       // quedando verde sin haber probado nada.
       await request(app.getHttpServer())
         .post('/api/sesiones-garzon/cerrar')
         .set('Authorization', `Bearer ${token}`)
-        .send({ garzonId: ANA.id, pin: ANA.pin });
+        .send({ garzonId: BRUNO.id, pin: BRUNO.pin });
 
       const antes = await pedir(false);
       expect((antes.body as GarzonSelector[]).map((g) => g.garzonId)).toContain(
-        ANA.id,
+        BRUNO.id,
       );
 
       const res = await request(app.getHttpServer())
         .post('/api/sesiones-garzon/iniciar')
         .set('Authorization', `Bearer ${token}`)
-        .send({ garzonId: ANA.id, pin: ANA.pin, turnoId: TURNO_MANANA_ID });
+        .send({ garzonId: BRUNO.id, pin: BRUNO.pin, turnoId: TURNO_MANANA_ID });
 
       expect([200, 201]).toContain(res.status);
       sesionCreada = true;
       const dentro = await pedir(true);
       expect(
         (dentro.body as GarzonSelector[]).map((g) => g.garzonId),
-      ).toContain(ANA.id);
+      ).toContain(BRUNO.id);
       const fuera = await pedir(false);
       expect(
         (fuera.body as GarzonSelector[]).map((g) => g.garzonId),
-      ).not.toContain(ANA.id);
+      ).not.toContain(BRUNO.id);
     });
   });
 
@@ -209,19 +214,20 @@ describe('Selector de garzones (e2e) — las dos listas y la verificación', () 
       const res = await request(app.getHttpServer())
         .post('/api/garzones/verificar-pin')
         .set('Authorization', `Bearer ${token}`)
-        .send({ garzonId: ANA.id, pin: ANA.pin });
+        .send({ garzonId: BRUNO.id, pin: BRUNO.pin });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ garzonId: ANA.id, nombre: ANA.nombre });
+      expect(res.body).toEqual({ garzonId: BRUNO.id, nombre: BRUNO.nombre });
     });
 
-    // El PIN de otro garzón: con la iteración vieja esto habría dado 200 con el
-    // garzón equivocado, porque no había a quién comparar.
+    // El PIN de otro garzón (Carla, '333333'): con la iteración vieja esto
+    // habría dado 200 con el garzón equivocado, porque no había a quién
+    // comparar.
     it('rechaza el PIN de OTRO garzón', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/garzones/verificar-pin')
         .set('Authorization', `Bearer ${token}`)
-        .send({ garzonId: ANA.id, pin: '222222' });
+        .send({ garzonId: BRUNO.id, pin: '333333' });
 
       expect(res.status).toBe(400);
     });
@@ -230,7 +236,7 @@ describe('Selector de garzones (e2e) — las dos listas y la verificación', () 
       const res = await request(app.getHttpServer())
         .post('/api/garzones/verificar-pin')
         .set('Authorization', `Bearer ${token}`)
-        .send({ pin: ANA.pin });
+        .send({ pin: BRUNO.pin });
 
       expect(res.status).toBe(400);
     });

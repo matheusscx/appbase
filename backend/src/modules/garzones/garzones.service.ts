@@ -80,10 +80,11 @@ export interface GarzonPublico {
  * igual que en ventas e items: el que consume no tiene que distinguir entre
  * "sin advertencias" y "el endpoint no las manda".
  *
- * Decisión del owner (2026-08-07): estos dos casos **advierten, no bloquean**.
- * Ninguno rompe la operación en el momento —a diferencia de desactivar o
- * eliminar, que sí bloquean— pero los dos tienen una consecuencia que aparece
- * más tarde y en otra pantalla.
+ * Decisión del owner (2026-08-07, y extendida el 2026-08-14 a vincular una
+ * cuenta): estos tres casos **advierten, no bloquean**. Ninguno rompe la
+ * operación en el momento —a diferencia de desactivar o eliminar, que sí
+ * bloquean— pero los tres tienen una consecuencia que aparece más tarde y en
+ * otra pantalla.
  */
 export interface GarzonConAdvertencias extends GarzonPublico {
   advertencias: string[];
@@ -193,8 +194,20 @@ export class GarzonesService {
     // encargado nunca ve uno. No queda bloqueado —en modo personal
     // `resolverGarzonActuante` lo resuelve por JWT—, solo pierde el tótem hasta
     // que fije el suyo.
+    //
+    // La advertencia de "esa cuenta no puede operar el salón" (misma que
+    // `actualizar()`, mismo texto — decisión del owner, 2026-08-14: "toda
+    // vinculación", el alta también es una) aplica acá igual: el alta con
+    // cuenta produce el mismo estado final que vincular a un garzón vacío
+    // recién creado, así que el mismo hueco de permiso existe desde el día
+    // uno. Nunca hay sesión abierta en el alta (no puede haberla), así que
+    // solo esta advertencia — nunca la de sesión abierta de `actualizar()`.
+    let puedeOperarSalon = true;
     if (dto.usuarioId) {
-      await this.assertVinculable(tenantId, dto.usuarioId);
+      ({ puedeOperarSalon } = await this.assertVinculable(
+        tenantId,
+        dto.usuarioId,
+      ));
     }
     const pin = dto.usuarioId ? null : await this.generarPinUnico(tenantId);
     const garzon = this.garzonRepo.create({
@@ -211,9 +224,16 @@ export class GarzonesService {
       garzon,
       pin ? { tipo: 'emitido_en_alta', usuarioId: usuarioActorId } : null,
     );
-    // Un garzón recién creado no puede tener sesión abierta: el array va vacío
-    // para que el que consume no tenga que distinguir este endpoint de los otros.
-    return { ...this.toPublico(guardado), pin, advertencias: [] };
+    const advertencias: string[] = [];
+    if (dto.usuarioId && !puedeOperarSalon) {
+      advertencias.push(
+        `Esa cuenta todavía no tiene permiso para operar el salón, así que ` +
+          `${garzon.nombre} no va a poder entrar en modo personal (sin PIN, desde su ` +
+          `propia cuenta) hasta que se lo des. Mientras tanto puede seguir operando desde ` +
+          `el tótem, fijando un PIN propio.`,
+      );
+    }
+    return { ...this.toPublico(guardado), pin, advertencias };
   }
 
   async actualizar(
@@ -224,13 +244,23 @@ export class GarzonesService {
   ): Promise<GarzonConAdvertencias> {
     const garzon = await this.getOrThrow(tenantId, id);
     const tipoAnterior = garzon.tipo ?? TipoGarzon.GARZON;
-    // Desactivar corta; cambiar el tipo advierte. Los dos preguntan lo mismo, así
-    // que la consulta se hace UNA vez: un PATCH del formulario manda el objeto
-    // entero, con lo cual las dos condiciones pueden darse en el mismo request.
+    // Desactivar corta; cambiar el tipo y vincular una cuenta advierten. Las
+    // tres preguntan lo mismo, así que la consulta se hace UNA vez: un PATCH
+    // del formulario manda el objeto entero, con lo cual las tres
+    // condiciones pueden darse en el mismo request.
     const desactiva = dto.activo === false && garzon.activo;
     const cambiaTipo = dto.tipo !== undefined && dto.tipo !== tipoAnterior;
+    // La MISMA transición que más abajo invalida el PIN (null → cuenta): se
+    // calcula acá, antes de mutar `garzon.usuarioId`, para poder sumarla a
+    // esta única consulta en vez de abrir una segunda. Desvincular
+    // (`dto.usuarioId === null`) no la dispara — no toca el PIN — ni
+    // tampoco un `dto.usuarioId` que no cambia nada real.
+    const vinculaCuenta =
+      dto.usuarioId !== undefined &&
+      dto.usuarioId !== null &&
+      garzon.usuarioId === null;
     const sesionesAbiertas =
-      desactiva || cambiaTipo
+      desactiva || cambiaTipo || vinculaCuenta
         ? await this.contarSesionesAbiertas(tenantId, id)
         : 0;
 
@@ -240,6 +270,23 @@ export class GarzonesService {
     // que un admin la fuerce. Mientras tanto el turno tampoco se puede desactivar.
     if (desactiva) {
       this.assertSinSesionAbierta(sesionesAbiertas, 'desactivar');
+    }
+
+    // `assertVinculable` corre ACÁ —antes de armar `advertencias`, no donde
+    // antes (más abajo, junto con la mutación de `usuarioId`)— porque la
+    // advertencia de "no puede operar el salón" necesita `puedeOperarSalon`,
+    // que esta consulta ya trae. Pedirla dos veces sería la consulta extra
+    // que esto existe para evitar. Corre para toda vinculación (nueva o
+    // repetida) tal como corría antes: valida membresía/tótem/no-tomada
+    // igual en los dos casos, aunque `puedeOperarSalon` solo se lea cuando
+    // `vinculaCuenta` es cierto.
+    let puedeOperarSalon = false;
+    if (dto.usuarioId !== undefined && dto.usuarioId !== null) {
+      ({ puedeOperarSalon } = await this.assertVinculable(
+        tenantId,
+        dto.usuarioId,
+        id,
+      ));
     }
 
     // El cambio de `tipo` advierte en vez de bloquear (decisión del owner,
@@ -265,25 +312,111 @@ export class GarzonesService {
       );
     }
 
+    // `assertVinculable` valida membresía viva, no-tótem y no-tomada, pero
+    // NO valida `Salones:Operar` (decisión del owner, 2026-08-14): vincular
+    // hoy y dar el permiso mañana es un flujo legítimo —alguien contrata a
+    // una persona y arma sus permisos después—, así que esto tampoco
+    // bloquea.
+    //
+    // ⚠️ Lo que de verdad pierde es MÁS ANGOSTO que "no puede trabajar"
+    // (revisión independiente — medido, no asumido): `PATCH
+    // /garzones/mi-pin` (`fijarMiPin`) NO lleva `@RequiresPermiso` —
+    // cualquier miembro del tenant fija su propio PIN, con o sin `Salones`—
+    // y `resolverGarzonActuante` resuelve por PIN vía `verificarPin`, que
+    // nunca mira el `usuario_id` del garzón ni sus permisos: ese chequeo lo
+    // hace el `PermisosGuard` sobre la cuenta que LLAMA, y por PIN quien
+    // llama es la cuenta del tótem (que sí tiene `Salones:Operar`), no la
+    // del garzón. Entonces sin el permiso el garzón SIGUE pudiendo operar
+    // por el tótem —fijando su PIN propio, como cualquier garzón con
+    // cuenta— y lo único que pierde es el modo personal (sin PIN, desde su
+    // propia cuenta): eso sí lo bloquea el `PermisosGuard` en los 6 puntos,
+    // porque ahí quien llama es la cuenta del garzón. Aplica a TODA
+    // vinculación nueva —no solo con sesión abierta, a diferencia de la
+    // advertencia de acá abajo—: es sobre lo que la cuenta puede hacer de
+    // acá en más, no sobre un turno en curso.
+    if (vinculaCuenta && !puedeOperarSalon) {
+      advertencias.push(
+        `Esa cuenta todavía no tiene permiso para operar el salón, así que ` +
+          `${garzon.nombre} no va a poder entrar en modo personal (sin PIN, desde su ` +
+          `propia cuenta) hasta que se lo des. Mientras tanto puede seguir operando desde ` +
+          `el tótem, fijando un PIN propio.`,
+      );
+    }
+
+    // Vincular una cuenta destruye el PIN de alguien que puede estar en
+    // turno ahora mismo (decisión del owner, 2026-08-14) — mismo criterio
+    // que el cambio de tipo arriba: **advierte, no bloquea**. Es la misma
+    // destrucción de PIN que `regenerarPin` ya advierte para su rama "con
+    // cuenta" (`:557-558` de este archivo), pero el texto NO puede ser el
+    // mismo string: la precondición es la opuesta. `regenerarPin` dispara
+    // con `garzon.usuarioId !== null` —la persona YA operaba desde su
+    // cuenta, "sigue trabajando normal" es un presente cierto—. Acá
+    // `vinculaCuenta` EXIGE `garzon.usuarioId === null` (más arriba): en el
+    // caso normal, la sesión abierta que dispara este aviso solo pudo
+    // abrirse tecleando el PIN —sin cuenta, `resolverGarzonActuante` exige
+    // `garzonId` + PIN—, y ese PIN muere unas líneas más abajo. (Borde
+    // angosto donde no es así: vinculado (abre sesión por cuenta, sin PIN)
+    // → desvinculado (la sesión sigue abierta; el PIN sigue muerto —
+    // desvincular no lo restaura) → RE-vinculado; `vinculaCuenta` vuelve a
+    // ser cierto porque `garzon.usuarioId` volvió a `null` al desvincular,
+    // aunque la sesión abierta que cuenta `sesionesAbiertas` sea la vieja,
+    // abierta por JWT y no por PIN. ⚠️ Y el PIN en ese instante NO tiene por
+    // qué seguir muerto: si entre el desvincular y el re-vincular alguien
+    // llamó `regenerarPin` —que sobre un garzón desvinculado SÍ emite uno
+    // nuevo, `tieneCuenta` da `false`—, hay un PIN VIVO en danza. El texto
+    // no depende de esa historia: la línea de más abajo
+    // (`garzon.pinHash = PIN_INUTILIZABLE`) corre sin condicionar en si ya
+    // estaba muerto, así que "deja de servir ahora mismo" describe lo que
+    // este PATCH hace —mate un PIN vivo o pise uno que ya estaba muerto—,
+    // no una historia sobre el pasado.) En el caso normal, en el instante
+    // del aviso la persona TODAVÍA NO opera desde su cuenta: recién la
+    // consigue con este mismo PATCH. El texto habla de la capacidad que se
+    // abre a partir de ahora —mismo marco que `crear()` con cuenta (arriba,
+    // `:193-196`) y el plan
+    // (`docs/superpowers/plans/2026-08-14-pin-propio-garzon.md:1370`: "Puede
+    // seguir trabajando desde su dispositivo")—, nunca de una continuidad
+    // que no existió.
+    //
+    // Si la cuenta no tiene `Salones:Operar` (arriba), no puede prometer
+    // "puede seguir trabajando desde la cuenta": el modo personal queda
+    // cerrado hasta que le den el permiso. Pero SÍ puede seguir por el
+    // tótem, fijando un PIN propio (mismo alcance que la advertencia de
+    // arriba, medido igual: `fijarMiPin` no exige permiso y `verificarPin`
+    // no mira `usuario_id`) — las dos advertencias conviven sin
+    // contradecirse porque ninguna promete de más.
+    if (vinculaCuenta && sesionesAbiertas > 0) {
+      advertencias.push(
+        puedeOperarSalon
+          ? `${garzon.nombre} tiene una sesión abierta: el PIN con el que la abrió deja de ` +
+              `servir ahora mismo, pero no queda bloqueado — puede seguir trabajando desde la ` +
+              `cuenta recién vinculada. Lo único que pierde hasta que fije un PIN nuevo desde ` +
+              `su perfil es el tótem compartido.`
+          : `${garzon.nombre} tiene una sesión abierta: el PIN con el que la abrió deja de ` +
+              `servir ahora mismo, y la cuenta recién vinculada todavía no tiene permiso para ` +
+              `operar el salón — no va a poder entrar en modo personal hasta que se lo des, ` +
+              `pero puede seguir operando desde el tótem si fija un PIN propio nuevo.`,
+      );
+    }
+
     if (dto.nombre !== undefined) garzon.nombre = dto.nombre;
     if (dto.activo !== undefined) garzon.activo = dto.activo;
     if (dto.tipo !== undefined) garzon.tipo = dto.tipo;
     // El PIN emitido por el encargado muere en el instante en que el garzón
     // recibe una cuenta: desde acá la identidad la prueba el JWT, y el PIN que
     // el encargado conoce no puede seguir valiendo. Solo la transición
-    // null → cuenta; desvincular NO toca el PIN (el garzón sigue operando con
-    // el que eligió, que el encargado no conoce).
+    // null → cuenta (`vinculaCuenta`, calculada arriba antes de que nada
+    // mutara `garzon.usuarioId`); desvincular NO toca el PIN (el garzón
+    // sigue operando con el que eligió, que el encargado no conoce).
+    // `assertVinculable` ya corrió arriba —antes de armar `advertencias`—,
+    // así que acá solo queda aplicar sus efectos.
     let eventoPin: { tipo: TipoEventoPin; usuarioId: string } | null = null;
     if (dto.usuarioId !== undefined) {
-      if (dto.usuarioId !== null) {
-        await this.assertVinculable(tenantId, dto.usuarioId, id);
-        if (garzon.usuarioId === null) {
-          garzon.pinHash = PIN_INUTILIZABLE;
-          eventoPin = {
-            tipo: 'invalidado_por_vinculo',
-            usuarioId: usuarioActorId,
-          };
-        }
+      if (vinculaCuenta) {
+        garzon.pinHash = PIN_INUTILIZABLE;
+        eventoPin = {
+          tipo: 'invalidado_por_vinculo',
+          usuarioId: usuarioActorId,
+        };
       }
       garzon.usuarioId = dto.usuarioId;
     }
@@ -295,7 +428,11 @@ export class GarzonesService {
 
   /**
    * Las **tres** condiciones para vincular una cuenta a un garzón, en una
-   * consulta.
+   * consulta — y de paso, el dato que decide la advertencia de "esa cuenta
+   * no puede operar el salón" (`actualizar()`, más abajo): agregarlo ACÁ,
+   * a esta misma consulta, evita una segunda ida a la base solo para leer
+   * un permiso — este método ya trae la fila de `usuarios_tenants` que ese
+   * chequeo necesita.
    *
    * **Miembro vivo del tenant**: vincular una cuenta ajena no daría acceso
    * —igual necesita token de este tenant para operar— pero dejaría el vínculo
@@ -314,17 +451,58 @@ export class GarzonesService {
    * de la lista y comía un error genérico, mientras los otros dos casos
    * inválidos sí le decían qué hacer. Mismo bug que cerró `f3f65c1c` con el
    * 23505 de las opciones de modificadores.
+   *
+   * `puedeOperarSalon` (en el resultado, cuando no tira): NO es una cuarta
+   * condición que bloquee — vincular hoy y dar el permiso mañana es un flujo
+   * legítimo (decisión del owner, 2026-08-14) — es solo el dato para que
+   * quien llama decida si advierte. La subquery replica el criterio de
+   * `RbacService.userHasPermiso` (rol `es_fijo` = acceso total, si no, el
+   * JOIN completo de rol → módulo del tenant → permiso) para `Salones:Operar`
+   * puntual: duplicarla acá, en vez de inyectar `RbacService` y pagar su
+   * propia consulta aparte, es lo que permite que siga siendo UNA sola query.
    */
   private async assertVinculable(
     tenantId: string,
     usuarioId: string,
     garzonId?: string,
-  ): Promise<void> {
+  ): Promise<{ puedeOperarSalon: boolean }> {
     const [fila] = await this.garzonRepo.manager.query<
-      { es_totem: boolean; garzon_nombre: string | null }[]
+      {
+        es_totem: boolean;
+        garzon_nombre: string | null;
+        puede_operar_salon: boolean;
+      }[]
     >(
       `SELECT ut.es_totem,
-              g.nombre AS garzon_nombre
+              g.nombre AS garzon_nombre,
+              (
+                EXISTS (
+                  SELECT 1
+                    FROM roles_usuarios ru
+                    JOIN roles r ON r.rol_id = ru.rol_id
+                   WHERE ru.usuario_id = ut.usuario_id
+                     AND ru.tenant_id = ut.tenant_id
+                     AND r.es_fijo = true
+                     AND ru.eliminado_el IS NULL
+                     AND r.eliminado_el IS NULL
+                )
+                OR EXISTS (
+                  SELECT 1
+                    FROM roles_usuarios ru
+                    JOIN roles r ON r.rol_id = ru.rol_id AND r.eliminado_el IS NULL
+                    JOIN modulos_roles mr ON mr.rol_id = r.rol_id AND mr.eliminado_el IS NULL
+                    JOIN tenant_modulos tm ON tm.modulo_tenant_id = mr.modulo_tenant_id AND tm.eliminado_el IS NULL
+                    JOIN modulos_app ma ON ma.modulo_app_id = tm.modulo_app_id AND ma.eliminado_el IS NULL
+                    JOIN roles_permisos_modulos rpm ON rpm.rol_id = r.rol_id AND rpm.modulo_tenant_id = tm.modulo_tenant_id
+                    JOIN modulo_app_permisos map ON map.modulo_app_permiso_id = rpm.modulo_app_permiso_id AND map.eliminado_el IS NULL
+                    JOIN permisos p ON p.permiso_id = map.permiso_id AND p.eliminado_el IS NULL
+                   WHERE ru.usuario_id = ut.usuario_id
+                     AND ru.tenant_id = ut.tenant_id
+                     AND ma.nombre = 'Salones'
+                     AND p.nombre = 'Operar'
+                     AND ru.eliminado_el IS NULL
+                )
+              ) AS puede_operar_salon
          FROM usuarios_tenants ut
          LEFT JOIN garzones g
            ON g.usuario_id = ut.usuario_id
@@ -352,6 +530,7 @@ export class GarzonesService {
           `Desvinculala de ${fila.garzon_nombre} antes de asignarla acá.`,
       );
     }
+    return { puedeOperarSalon: fila.puede_operar_salon };
   }
 
   /**

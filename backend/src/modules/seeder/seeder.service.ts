@@ -1642,17 +1642,26 @@ export class SeederService implements OnApplicationBootstrap {
       WHERE usuario_id IS NOT NULL AND eliminado_el IS NULL
     `);
 
-    // pinHash = bcrypt(PIN, 10). PINs de dev: Ana=111111, Bruno=222222, Carla=333333.
+    // pinHash = bcrypt(PIN, 10). PINs de dev: Bruno=222222, Carla=333333. Ana
+    // NO tiene PIN de dev: está vinculada desde el seed (ver más abajo), así
+    // que su `pinHash` es `PIN_INUTILIZABLE` como cualquier garzón con cuenta.
     const garzones: Partial<Garzon>[] = [
       {
         id: '550e8400-e29b-41d4-a716-446655440238',
         tenantId: PARIS,
         nombre: 'Ana Torres',
-        pinHash: '$2b$10$9a9L1ya.PTvsPU9p1lXO5uT1W4VNkLa9SlXokegdgEkfAWFMAXAdS',
-        activo: true,
         // Modo personal: opera desde su propia tablet y no teclea PIN. Su PIN
-        // se mantiene igual —sigue apareciendo en el selector del tótem—
-        // porque un garzón vinculado puede usar cualquiera de los dos.
+        // muere en el momento en que se vincula la cuenta
+        // (`GarzonesService.actualizar()`, transición `usuario_id: null →
+        // uuid`) — desde ahí la identidad la prueba el JWT, y ella fijaría el
+        // suyo propio desde `fijarMiPin` si quisiera volver a usar el tótem.
+        // ⚠️ Antes este seed la sembraba con un PIN vivo ('111111') y un
+        // comentario que decía "puede usar cualquiera de los dos": eso dejó
+        // de ser cierto en `6758e7b2` — la API ya no puede producir ese
+        // estado — y un ambiente de dev con un estado irreproducible por API
+        // esconde bugs (decisión del owner, 2026-08-14: corregir, no dejarlo).
+        pinHash: PIN_INUTILIZABLE,
+        activo: true,
         usuarioId: '550e8400-e29b-41d4-a716-446655440341',
       },
       {
